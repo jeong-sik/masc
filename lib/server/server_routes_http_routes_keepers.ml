@@ -399,36 +399,36 @@ let add_routes ~sw ~clock router =
        | Keeper_api.Keeper_post_boot ->
            with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state agent_name req reqd ->
-               Keeper_api.handle_keeper_lifecycle_post ~sw ~clock ~tool_name:"masc_keeper_up"
-                 ~action:"boot" state agent_name req reqd
+               Keeper_api.handle_keeper_lifecycle_post ~sw ~clock
+                 ~action:Keeper_api.Lifecycle_boot state agent_name req reqd
              ) request reqd
        | Keeper_api.Keeper_post_up ->
            with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state agent_name req reqd ->
                Http.Request.read_body_async reqd (fun body_str ->
                    Keeper_api.handle_keeper_lifecycle_post ~body_str ~sw ~clock
-                     ~tool_name:"masc_keeper_up" ~action:"up"
+                     ~action:Keeper_api.Lifecycle_up
                      state agent_name req reqd
                )
              ) request reqd
        | Keeper_api.Keeper_post_shutdown ->
            with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state agent_name req reqd ->
-               Keeper_api.handle_keeper_lifecycle_post ~sw ~clock ~tool_name:"masc_keeper_down"
-                 ~action:"shutdown" state agent_name req reqd
+               Keeper_api.handle_keeper_lifecycle_post ~sw ~clock
+                 ~action:Keeper_api.Lifecycle_shutdown state agent_name req reqd
              ) request reqd
        | Keeper_api.Keeper_post_reset ->
            with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state agent_name req reqd ->
-               Keeper_api.handle_keeper_lifecycle_post ~sw ~clock ~tool_name:"masc_keeper_reset"
-                 ~action:"reset" state agent_name req reqd
+               Keeper_api.handle_keeper_lifecycle_post ~sw ~clock
+                 ~action:Keeper_api.Lifecycle_reset state agent_name req reqd
              ) request reqd
        | Keeper_api.Keeper_post_clear ->
            with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state agent_name req reqd ->
                Http.Request.read_body_async reqd (fun body_str ->
                  Keeper_api.handle_keeper_lifecycle_post ~body_str ~sw ~clock
-                   ~tool_name:"masc_keeper_clear" ~action:"clear"
+                   ~action:Keeper_api.Lifecycle_clear
                    state agent_name req reqd
                )
              ) request reqd

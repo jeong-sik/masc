@@ -41,7 +41,8 @@ let days_of_window = function
   | Fourteen_days -> 14
 
 let window_start ~now ~window =
-  (floor (now /. 86400.0) -. float_of_int (days_of_window window - 1)) *. 86400.0
+  (floor (now /. Masc_time_constants.day) -. float_of_int (days_of_window window - 1))
+  *. Masc_time_constants.day
 
 let failure_in_window ~now ~window =
   match Usage.record_observer_failure_at () with

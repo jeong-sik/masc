@@ -1,12 +1,20 @@
 (** Lifecycle POST handler (boot/up/shutdown/reset/clear) for keeper dashboard
     API. *)
 
+type lifecycle_action =
+  | Lifecycle_boot
+  | Lifecycle_up
+  | Lifecycle_shutdown
+  | Lifecycle_reset
+  | Lifecycle_clear
+
+val lifecycle_action_to_string : lifecycle_action -> string
+
 val handle_keeper_lifecycle_post :
   ?body_str:string ->
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->
-  tool_name:string ->
-  action:String.t ->
+  action:lifecycle_action ->
   Mcp_server.server_state ->
   string -> Httpun.Request.t -> Http_reqd.t -> unit
 (** Generic handler for boot / up / shutdown / reset / clear posts; the

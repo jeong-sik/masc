@@ -177,7 +177,21 @@ let lane_terminal_event_present scan lane =
       policy.terminal_events
   | None -> true
 
-let runtime_lens_swimlane_completeness scan lane =
+type swimlane_completeness =
+  | Completeness_complete
+  | Completeness_finished
+  | Completeness_mandatory_present
+  | Completeness_incomplete
+  | Completeness_not_observed
+
+let swimlane_completeness_to_string = function
+  | Completeness_complete -> "complete"
+  | Completeness_finished -> "finished"
+  | Completeness_mandatory_present -> "mandatory_present"
+  | Completeness_incomplete -> "incomplete"
+  | Completeness_not_observed -> "not_observed"
+
+let runtime_lens_swimlane_completeness_typed scan lane =
   let mandatory_present = lane_mandatory_events_present scan lane in
   let finished = lane_terminal_event_present scan lane in
   let terminal_required =
@@ -186,15 +200,22 @@ let runtime_lens_swimlane_completeness scan lane =
     | Some _ | None -> true
   in
   let complete = mandatory_present && ((not terminal_required) || finished) in
-  if complete then "complete"
-  else if finished then "finished"
-  else if mandatory_present then "mandatory_present"
-  else "incomplete"
+  if complete then Completeness_complete
+  else if finished then Completeness_finished
+  else if mandatory_present then Completeness_mandatory_present
+  else Completeness_incomplete
+
+let runtime_lens_swimlane_completeness scan lane =
+  swimlane_completeness_to_string
+    (runtime_lens_swimlane_completeness_typed scan lane)
 
 let runtime_lens_swimlane_rendered_completeness scan lane event_count =
-  if String.equal lane "tool_runtime" && event_count = 0
-  then "not_observed"
-  else runtime_lens_swimlane_completeness scan lane
+  let completeness =
+    if String.equal lane "tool_runtime" && event_count = 0
+    then Completeness_not_observed
+    else runtime_lens_swimlane_completeness_typed scan lane
+  in
+  swimlane_completeness_to_string completeness
 
 let runtime_lens_swimlane_json scan gaps ~lane ~label ~events
     ~terminal_status ~synthetic_events =

@@ -81,7 +81,7 @@ let parse_thinking_control_format ~(path : string) ~(token : string option) (raw
          (path ^ ".thinking-control-format")
          (Printf.sprintf
             "unknown thinking-control-format %S — expected one of \
-             none|thinking-object|thinking-object-adaptive|thinking-object-only|chat-template-kwargs|chat-template-token|ollama-think|reasoning-effort|reasoning-effort-default-on"
+             none|thinking-object|thinking-object-adaptive|thinking-object-only|chat-template-kwargs|chat-template-token|ollama-think|reasoning-effort|reasoning-effort-default-on|reasoning-enabled"
             other))
 ;;
 
@@ -464,23 +464,47 @@ let probability_opt_field ~(path : string) ~(key : string) (tbl : Otoml.t)
 let context_rollover_threshold_opt_field ~(path : string) (tbl : Otoml.t)
   : (float option, parse_error list) result
   =
-  bounded_number_opt_field
-    ~path
-    ~key:"context-rollover-threshold"
-    ~lower:0.0
-    ~upper:1.0
-    tbl
+  match
+    bounded_number_opt_field
+      ~path
+      ~key:"context-rollover-threshold"
+      ~lower:0.0
+      ~upper:1.0
+      tbl
+  with
+  | Ok (Some value) when value <= 0.0 ->
+    Error
+      (error
+         (path ^ ".context-rollover-threshold")
+         (Printf.sprintf
+            "context-rollover-threshold must be in (0.0, 1.0]; got %g"
+            value))
+  | Ok (Some _ as value) -> Ok value
+  | Ok None -> Ok None
+  | Error _ as err -> err
 ;;
 
 let compaction_keep_ratio_opt_field ~(path : string) (tbl : Otoml.t)
   : (float option, parse_error list) result
   =
-  bounded_number_opt_field
-    ~path
-    ~key:"compaction-keep-ratio"
-    ~lower:0.0
-    ~upper:1.0
-    tbl
+  match
+    bounded_number_opt_field
+      ~path
+      ~key:"compaction-keep-ratio"
+      ~lower:0.0
+      ~upper:1.0
+      tbl
+  with
+  | Ok (Some value) when value >= 1.0 ->
+    Error
+      (error
+         (path ^ ".compaction-keep-ratio")
+         (Printf.sprintf
+            "compaction-keep-ratio must be in [0.0, 1.0); got %g"
+            value))
+  | Ok (Some _ as value) -> Ok value
+  | Ok None -> Ok None
+  | Error _ as err -> err
 ;;
 
 let sampling_capability_errors

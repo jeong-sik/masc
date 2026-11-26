@@ -41,7 +41,7 @@ let http_not_found = 404
 (* GitHub's REST limits reset within an hour. A longer wait in a header is not
    one the limit can ask for, and a time that far ahead would stop every watch
    from being read until then and would not format as a date in the log. *)
-let longest_rate_limit_wait_sec = 3600.0
+let longest_rate_limit_wait_sec = Masc_time_constants.hour
 
 (* The status rules are the pull request reader's: the same GitHub rate-limit
    headers and the same reading of a 403. A REST answer adds one case, the 404

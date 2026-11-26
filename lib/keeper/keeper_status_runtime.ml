@@ -134,6 +134,16 @@ let json_string_opt key json = Json_util.get_string_nonempty json key
 
 let json_float_opt key json = Safe_ops.json_float_opt key json
 
+type reply_delivery_status =
+  | Reply_never
+  | Reply_awaiting
+  | Reply_delivered
+
+let reply_delivery_status_to_string = function
+  | Reply_never -> "never"
+  | Reply_awaiting -> "awaiting_reply"
+  | Reply_delivered -> "delivered"
+
 let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
   let normalize_content item =
     match json_string_opt "content" item with
@@ -166,15 +176,18 @@ let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
         | _ -> acc)
       (None, None) history_items
   in
-  match last_user, last_assistant with
-  | None, None -> (`String "never", `Null, `Null)
-  | Some (user_ts, _), Some (assistant_ts, preview) when assistant_ts >= user_ts ->
-      (`String "delivered", `Float assistant_ts, `String preview)
-  | Some _, Some (assistant_ts, preview) ->
-      (`String "delivered", `Float assistant_ts, `String preview)
-  | Some _, None -> (`String "awaiting_reply", `Null, `Null)
-  | None, Some (assistant_ts, preview) ->
-      (`String "delivered", `Float assistant_ts, `String preview)
+  let status, ts_json, preview_json =
+    match last_user, last_assistant with
+    | None, None -> (Reply_never, `Null, `Null)
+    | Some (user_ts, _), Some (assistant_ts, preview) when assistant_ts >= user_ts ->
+        (Reply_delivered, `Float assistant_ts, `String preview)
+    | Some _, Some (assistant_ts, preview) ->
+        (Reply_awaiting, `Float assistant_ts, `String preview)
+    | Some _, None -> (Reply_awaiting, `Null, `Null)
+    | None, Some (assistant_ts, preview) ->
+        (Reply_delivered, `Float assistant_ts, `String preview)
+  in
+  (`String (reply_delivery_status_to_string status), ts_json, preview_json)
 
 (* Wire vocabularies shared with the dashboard. Both are closed here so a new
    case cannot reach the wire without the compiler naming every consumer. *)

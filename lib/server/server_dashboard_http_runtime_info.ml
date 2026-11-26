@@ -1777,26 +1777,27 @@ let runtime_assignment_status_json ~default_id =
     |> add_if assignments_match_default "assignments_match_default_runtime"
     |> List.rev
   in
-  let status =
+  let status_wire, is_degraded =
     if warnings = []
-    then "ok"
+    then "ok", false
     else if single_runtime_pin || assignments_match_default
-    then "degraded"
-    else "watch"
+    then "degraded", true
+    else "watch", false
+  in
+  let blast_radius =
+    if assignment_count = 0
+    then "default_runtime_only"
+    else if single_runtime_pin
+    then "single_runtime_assignment_pin"
+    else "mixed_runtime_assignments"
   in
   `Assoc
     [ "schema", `String "masc.runtime_assignment_status.v1"
     ; "source", `String runtime_inventory_source
-    ; "status", `String status
-    ; "degraded", `Bool (String.equal status "degraded")
+    ; "status", `String status_wire
+    ; "degraded", `Bool is_degraded
     ; "operator_action_required", `Bool (warnings <> [])
-    ; "blast_radius",
-      `String
-        (if assignment_count = 0
-         then "default_runtime_only"
-         else if single_runtime_pin
-         then "single_runtime_assignment_pin"
-         else "mixed_runtime_assignments")
+    ; "blast_radius", `String blast_radius
     ; "assignment_count", `Int assignment_count
     ; "assigned_runtime_count", `Int assigned_runtime_count
     ; "default_assignment_count", `Int default_assignment_count

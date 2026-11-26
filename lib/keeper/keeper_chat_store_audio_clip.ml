@@ -52,8 +52,9 @@ let audio_clip_of_synthesized_file ~audio_file ~message_text ~device_id =
       ; expired = false
       }
 
-let valid_audio_token token =
-  Re.execp (Re.compile (Re.Pcre.re "^[A-Za-z0-9_-]+$")) token
+let valid_audio_token_re = Re.compile (Re.Pcre.re "^[A-Za-z0-9_-]+$")
+
+let valid_audio_token token = Re.execp valid_audio_token_re token
 
 let resolve_audio_expiry ~base_dir audio =
   match audio with

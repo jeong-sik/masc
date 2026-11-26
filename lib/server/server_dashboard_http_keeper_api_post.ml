@@ -1460,6 +1460,13 @@ let handle_keeper_secrets_post state req reqd body_str =
        | Yojson.Json_error e ->
          respond_error reqd (Printf.sprintf "invalid json: %s" e))
 
+type lifecycle_action = Server_dashboard_http_keeper_api_lifecycle_post.lifecycle_action =
+  | Lifecycle_boot
+  | Lifecycle_up
+  | Lifecycle_shutdown
+  | Lifecycle_reset
+  | Lifecycle_clear
+
 let handle_keeper_lifecycle_post =
   Server_dashboard_http_keeper_api_lifecycle_post.handle_keeper_lifecycle_post
 

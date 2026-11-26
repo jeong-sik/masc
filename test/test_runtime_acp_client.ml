@@ -4890,6 +4890,105 @@ let test_layer4_stream_projection_sse_framing_native_tools_and_zero_usage () =
     (List.length (observed_tool_calls () |> to_list))
 ;;
 
+let test_anonymous_native_tool_oneshot_closes_and_empty_id_mcp_does_not_steal () =
+  let events_rev = ref [] in
+  let native_completions_rev = ref [] in
+  let on_acp_event, _, _, finish, _ =
+    Keeper_acp_runtime.For_testing.project_stream_for_testing
+      ~on_native_tool_completion:(fun ~block_index ~tool_call_id completion ->
+        native_completions_rev :=
+          (block_index, tool_call_id, completion) :: !native_completions_rev)
+      ~on_event:(fun ev -> events_rev := ev :: !events_rev)
+      ~driver:Runtime_acp_client.Antigravity
+      ~mcp_server_name:(bridge_name_of Runtime_acp_client.Antigravity)
+      ~model:"gemini-4-neon-medium"
+      ~session_id:"sess-anon-native"
+      ~turn_count:1
+      ~official_turn:9
+      ~native_posture:Runtime_native_tools.Native_read
+      ~allowed_tool_names:[ "masc_probe_ping" ]
+      ()
+  in
+  let start_anon ~title ~name ~status =
+    on_acp_event
+      (Runtime_acp_client.Tool_call_started
+         { tool_call_id = ""
+         ; title
+         ; kind = Some Runtime_acp_client.Tool_read
+         ; status
+         ; raw_input = None
+         ; identity =
+             Runtime_acp_client.Native_tool
+               { name = Some name
+               ; kind = Some Runtime_acp_client.Tool_read
+               ; locations = []
+               }
+         })
+  in
+  (* Open two anonymous native blocks that remain in progress *)
+  start_anon ~title:"Read A" ~name:"read_file" ~status:Runtime_acp_client.Tool_in_progress;
+  start_anon ~title:"Read B" ~name:"read_file" ~status:Runtime_acp_client.Tool_in_progress;
+  (* Empty-id terminal MCP update and uncorrelated None update must NOT close either block *)
+  on_acp_event
+    (Runtime_acp_client.Tool_call_updated
+       { tool_call_id = ""
+       ; title = Some "mcp_ping"
+       ; kind = Some Runtime_acp_client.Tool_other
+       ; status = Some Runtime_acp_client.Tool_completed
+       ; raw_input = None
+       ; raw_output = None
+       ; identity =
+           Some
+             (Runtime_acp_client.Mcp_tool
+                { server = Runtime_acp_client.Explicit_server "masc"
+                ; tool_name = "masc_probe_ping"
+                })
+       });
+  on_acp_event
+    (Runtime_acp_client.Tool_call_updated
+       { tool_call_id = ""
+       ; title = None
+       ; kind = None
+       ; status = Some Runtime_acp_client.Tool_failed
+       ; raw_input = None
+       ; raw_output = None
+       ; identity = None
+       });
+  check int "empty-id MCP and None updates leave open anonymous native blocks untouched" 0
+    (List.length !native_completions_rev);
+  (* One-shot terminal anonymous native tool closes its exact own block immediately *)
+  start_anon ~title:"Glob C" ~name:"glob" ~status:Runtime_acp_client.Tool_completed;
+  check int "one-shot terminal anonymous native call closes immediately" 1
+    (List.length !native_completions_rev);
+  let oneshot_idx =
+    match !native_completions_rev with
+    | [ (idx, None, { Runtime_native_tools.outcome = Completion_reported; exit_code = None }) ] ->
+      idx
+    | _ -> fail "expected single Completion_reported for one-shot anonymous native tool"
+  in
+  check int "one-shot closed its own 3rd block (index 2), not an earlier open block" 2
+    oneshot_idx;
+  let has_stop_for idx =
+    List.exists
+      (function
+        | Agent_core.Types.ContentBlockStop { index } -> index = idx
+        | _ -> false)
+      !events_rev
+  in
+  check bool "SSE stream closed one-shot block 2 immediately" true (has_stop_for 2);
+  check bool "SSE stream kept earlier open block 0 open" false (has_stop_for 0);
+  check bool "SSE stream kept earlier open block 1 open" false (has_stop_for 1);
+  (* Finish closes the two remaining open anonymous blocks (indices 0 and 1) *)
+  finish ~stop_reason:Agent_core.Types.EndTurn ~usage:None;
+  check int "all three anonymous native blocks completed after turn finish" 3
+    (List.length !native_completions_rev);
+  let closed_indices =
+    !native_completions_rev |> List.rev |> List.map (fun (idx, _, _) -> idx)
+  in
+  check (list int) "one-shot closed first, then remaining open blocks oldest-first"
+    [ 2; 0; 1 ] closed_indices
+;;
+
 let test_tool_call_update_escalation_re_evaluates_effect_fence () =
   (* 1. End-to-end mock ACP server: tool_call_update kind escalation produces
         merged kind + re-classified identity on Tool_call_updated, while
@@ -5979,6 +6078,8 @@ let () =
             `Quick test_layer4_classify_prompt_error_usage_context_and_process_config_hash
         ; test_case "Layer 4 SSE framing, InputJsonSnapshot, native tool callbacks & zero-usage suppression"
             `Quick test_layer4_stream_projection_sse_framing_native_tools_and_zero_usage
+        ; test_case "anonymous one-shot native tool closes own block without empty-id MCP theft"
+            `Quick test_anonymous_native_tool_oneshot_closes_and_empty_id_mcp_does_not_steal
         ; test_case "Tool_call_updated monotonic escalation re-evaluates effect fence"
             `Quick test_tool_call_update_escalation_re_evaluates_effect_fence
         ; test_case "Implicit_mcp_kind multi-MCP server isolation & cross-driver kind=mcp fail-closed"

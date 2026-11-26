@@ -199,7 +199,7 @@ let parse_rfc3339_unix (s : string) : float option =
 ;;
 
 let tasks_24h_rollup ~now (tasks : Masc_domain.task list) =
-  let cutoff = now -. 86400.0 in
+  let cutoff = now -. Masc_time_constants.day in
   let done_24h = ref 0 in
   let done_total = ref 0 in
   let in_progress = ref 0 in
@@ -317,7 +317,7 @@ let verifications_24h_of_runs ~now (runs : Verification_run_registry.run list)
   match runs with
   | [] -> None
   | _ :: _ ->
-    let cutoff = now -. 86400.0 in
+    let cutoff = now -. Masc_time_constants.day in
     let passed = ref 0 in
     let rejected = ref 0 in
     List.iter
@@ -352,7 +352,7 @@ let board_posts_24h_in_process ~config ~now ~light : int option =
       match Board_dispatch.check_store_workspace ~base_path:config.Workspace.base_path store with
       | Error _ -> None
       | Ok () ->
-        let cutoff = now -. 86400.0 in
+        let cutoff = now -. Masc_time_constants.day in
         let posts =
           Board_dispatch.list_posts_unchecked ~sort_by:Board_dispatch.Recent ~limit:1000 ()
         in

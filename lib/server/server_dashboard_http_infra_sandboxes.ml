@@ -62,6 +62,19 @@ let shim_parity_to_json = function
     `Assoc [ "status", `String "unavailable"; "detail", `String detail ]
 ;;
 
+type guest_presence =
+  | Guest_probe_pending
+  | Guest_present
+  | Guest_absent
+  | Guest_unavailable
+
+let guest_presence_to_string = function
+  | Guest_probe_pending -> "probe_pending"
+  | Guest_present -> "present"
+  | Guest_absent -> "absent"
+  | Guest_unavailable -> "unavailable"
+;;
+
 type ssh_reachability =
   | Ssh_probe_pending
   | Ssh_reachable of { rtt_ms : float; measured_at : float }
@@ -299,13 +312,13 @@ let build_snapshot_json
   (* Apple inventory lookup *)
   let apple_presence_for ~guest_name =
     match apple_inventory with
-    | None -> "probe_pending"
-    | Some (Error _) -> "unavailable"
+    | None -> Guest_probe_pending
+    | Some (Error _) -> Guest_unavailable
     | Some (Ok inv) ->
       (match Keeper_microvm_guest_inventory.presence ~guest_name inv with
-       | Ok Keeper_microvm_guest_inventory.Present -> "present"
-       | Ok Keeper_microvm_guest_inventory.Absent -> "absent"
-       | Error _ -> "unavailable")
+       | Ok Keeper_microvm_guest_inventory.Present -> Guest_present
+       | Ok Keeper_microvm_guest_inventory.Absent -> Guest_absent
+       | Error _ -> Guest_unavailable)
   in
   (match apple_inventory with
    | Some (Error detail) -> add_unobserved "apple_container" detail
@@ -359,7 +372,9 @@ let build_snapshot_json
             if sock_kind = Fs_compat.Exact_kind Unix.S_SOCK
             then incr microvm_socket_present;
             let presence = apple_presence_for ~guest_name in
-            if String.equal presence "present" then incr microvm_running;
+            (match presence with
+             | Guest_present -> incr microvm_running
+             | Guest_probe_pending | Guest_absent | Guest_unavailable -> ());
             let work_vol_json =
               match Keeper_sandbox_microvm.work_volume_name ~keeper_name with
               | Ok vname -> `Assoc [ "name", `String vname; "status", `String "declared" ]
@@ -380,7 +395,7 @@ let build_snapshot_json
                 [ "keeper", `String keeper_name
                 ; "backend", `String backend_str
                 ; "guest_name", `String guest_name
-                ; "presence", `String presence
+                ; "presence", `String (guest_presence_to_string presence)
                 ; "agent_socket", socket_status_json ~host_socket
                 ; "shim_parity", shim_parity_json
                 ; "network_mode", `String (Sandbox_profile.network_mode_to_string net_mode)
@@ -629,7 +644,7 @@ let read_24h_tool_series ~now ~base_path =
   let masc_root = Config_dir_resolver.masc_root ~base_path in
   match
     Tool_metrics_series.sliding_window
-      ~span_s:86400.0
+      ~span_s:Masc_time_constants.day
       ~until:now
       ~width:Tool_metrics_series.Hour
       ~utc_offset_min:0

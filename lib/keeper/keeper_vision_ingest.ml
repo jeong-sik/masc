@@ -41,25 +41,122 @@ let string_of_mode = function
   | Store_only -> "store_only"
 ;;
 
-let record_eviction ?base_path ~keeper_name ~mode ~result ~reason () =
+type eviction_result =
+  | Eviction_ok
+  | Eviction_error
+
+let eviction_result_to_string = function
+  | Eviction_ok -> "ok"
+  | Eviction_error -> "error"
+;;
+
+type error_reason =
+  | Media_unavailable
+  | Image_too_large
+  | Invalid_media_type
+  | Store_failed
+  | Eager_empty
+  | Eager_truncated
+  | Eager_timeout
+  | Eager_no_runtime
+  | Eager_runtimes_held
+  | Eager_invalid_request
+  | Eager_invalid_structured_response
+  | Eager_provider_error
+  | Eager_read_failed
+
+let all_error_reasons =
+  [ Media_unavailable
+  ; Image_too_large
+  ; Invalid_media_type
+  ; Store_failed
+  ; Eager_empty
+  ; Eager_truncated
+  ; Eager_timeout
+  ; Eager_no_runtime
+  ; Eager_runtimes_held
+  ; Eager_invalid_request
+  ; Eager_invalid_structured_response
+  ; Eager_provider_error
+  ; Eager_read_failed
+  ]
+;;
+
+let error_reason_to_string = function
+  | Media_unavailable -> "media_unavailable"
+  | Image_too_large -> "image_too_large"
+  | Invalid_media_type -> "invalid_media_type"
+  | Store_failed -> "store_failed"
+  | Eager_empty -> "eager_empty"
+  | Eager_truncated -> "eager_truncated"
+  | Eager_timeout -> "eager_timeout"
+  | Eager_no_runtime -> "eager_no_runtime"
+  | Eager_runtimes_held -> "eager_runtimes_held"
+  | Eager_invalid_request -> "eager_invalid_request"
+  | Eager_invalid_structured_response -> "eager_invalid_structured_response"
+  | Eager_provider_error -> "eager_provider_error"
+  | Eager_read_failed -> "eager_read_failed"
+;;
+
+type ok_reason =
+  | Reference_passthrough
+  | Stored
+  | Eager_read
+  | Stored_unread
+  | Eager_budget_exhausted
+
+let ok_reason_to_string = function
+  | Reference_passthrough -> "reference_passthrough"
+  | Stored -> "stored"
+  | Eager_read -> "eager_read"
+  | Stored_unread -> "stored_unread"
+  | Eager_budget_exhausted -> "eager_budget_exhausted"
+;;
+
+let record_eviction ?base_path ~keeper_name ~mode ~(result : eviction_result) ~reason () =
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string VisionIngestEvictions)
-    ~labels:[ "mode", string_of_mode mode; "result", result; "reason", reason ]
+    ~labels:
+      [ "mode", string_of_mode mode
+      ; "result", eviction_result_to_string result
+      ; "reason", reason
+      ]
     ();
   (* The operator-facing error counter: per keeper, by the closed reason set.
      The pipeline counter above keeps its mode/result/reason shape; this one
      answers "whose images failed and why" in a single lookup per reason. The
      Keeper's memory health row shows it, so the workspace whose vision store
      this eviction uses is told. *)
-  if String.equal result "error"
-  then (
+  match result with
+  | Eviction_error ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string VisionIngestErrors)
       ~labels:[ "keeper", keeper_name; "reason", reason ]
       ();
     Keeper_memory_health_input.written
       ~keepers_dir:(Keeper_vision_tool.vision_keepers_dir ?base_path ())
-      ~keeper_id:keeper_name)
+      ~keeper_id:keeper_name
+  | Eviction_ok -> ()
+;;
+
+let record_ok_eviction ?base_path ~keeper_name ~mode ~reason () =
+  record_eviction
+    ?base_path
+    ~keeper_name
+    ~mode
+    ~result:Eviction_ok
+    ~reason:(ok_reason_to_string reason)
+    ()
+;;
+
+let record_error_eviction ?base_path ~keeper_name ~mode ~reason () =
+  record_eviction
+    ?base_path
+    ~keeper_name
+    ~mode
+    ~result:Eviction_error
+    ~reason:(error_reason_to_string reason)
+    ()
 ;;
 
 (* Every reason an eviction can fail with, in one list. Closed by
@@ -67,35 +164,24 @@ let record_eviction ?base_path ~keeper_name ~mode ~result ~reason () =
      above are the only producers. Health surfaces aggregate a keeper's
      errors by walking this list, so a reason added here appears there
      without a second edit. *)
-let error_reasons =
-  [ "media_unavailable"
-  ; "image_too_large"
-  ; "invalid_media_type"
-  ; "store_failed"
-  ; "eager_empty"
-  ; "eager_truncated"
-  ; "eager_timeout"
-  ; "eager_no_runtime"
-  ; "eager_runtimes_held"
-  ; "eager_invalid_request"
-  ; "eager_invalid_structured_response"
-  ; "eager_provider_error"
-  ; "eager_read_failed"
-  ]
+let error_reasons = List.map error_reason_to_string all_error_reasons
+
+let eager_read_error_reason_of_outcome = function
+  | Keeper_vision_tool.Vo_ok _ -> None
+  | Keeper_vision_tool.Vo_empty -> Some Eager_empty
+  | Keeper_vision_tool.Vo_truncated -> Some Eager_truncated
+  | Keeper_vision_tool.Vo_timeout -> Some Eager_timeout
+  | Keeper_vision_tool.Vo_no_runtime _ -> Some Eager_no_runtime
+  | Keeper_vision_tool.Vo_runtimes_held _ -> Some Eager_runtimes_held
+  | Keeper_vision_tool.Vo_invalid_request _ -> Some Eager_invalid_request
+  | Keeper_vision_tool.Vo_invalid_structured_response _ ->
+    Some Eager_invalid_structured_response
+  | Keeper_vision_tool.Vo_official_failure _
+  | Keeper_vision_tool.Vo_provider _ -> Some Eager_provider_error
 ;;
 
-let eager_read_eviction_reason_of_outcome = function
-  | Keeper_vision_tool.Vo_ok _ -> None
-  | Keeper_vision_tool.Vo_empty -> Some "eager_empty"
-  | Keeper_vision_tool.Vo_truncated -> Some "eager_truncated"
-  | Keeper_vision_tool.Vo_timeout -> Some "eager_timeout"
-  | Keeper_vision_tool.Vo_no_runtime _ -> Some "eager_no_runtime"
-  | Keeper_vision_tool.Vo_runtimes_held _ -> Some "eager_runtimes_held"
-  | Keeper_vision_tool.Vo_invalid_request _ -> Some "eager_invalid_request"
-  | Keeper_vision_tool.Vo_invalid_structured_response _ ->
-    Some "eager_invalid_structured_response"
-  | Keeper_vision_tool.Vo_official_failure _
-  | Keeper_vision_tool.Vo_provider _ -> Some "eager_provider_error"
+let eager_read_eviction_reason_of_outcome outcome =
+  Option.map error_reason_to_string (eager_read_error_reason_of_outcome outcome)
 ;;
 
 let truncate_read_text text =
@@ -164,14 +250,14 @@ let evict_block ?base_path ~media_store ~read ~mode ~keeper_name ~eager_budget (
           (#33669). Passing the block through unchanged keeps the reference
           requestable instead of replacing it with a store-failure
           placeholder the reader cannot act on. *)
-       record_eviction ?base_path ~keeper_name ~mode ~result:"ok" ~reason:"reference_passthrough" ();
+       record_ok_eviction ?base_path ~keeper_name ~mode ~reason:Reference_passthrough ();
        block
      | Agent_core.Types.Stored stored ->
        match media_store.Agent_core.History.get stored with
       | Error
           ( Agent_core.History.Store_failed _ | Missing_bytes _ | Digest_mismatch _
           | Invalid_base64 _ ) ->
-        record_eviction ?base_path ~keeper_name ~mode ~result:"error" ~reason:"media_unavailable" ();
+        record_error_eviction ?base_path ~keeper_name ~mode ~reason:Media_unavailable ();
         (match mode with
          | Store_only ->
            (* A persisted message keeps the reference: bytes the store cannot
@@ -184,13 +270,13 @@ let evict_block ?base_path ~media_store ~read ~mode ~keeper_name ~eager_budget (
       | Ok bytes ->
         (match Keeper_vision_tool.validate_image_size bytes with
          | Error _ ->
-           record_eviction ?base_path ~keeper_name ~mode ~result:"error" ~reason:"image_too_large" ();
+           record_error_eviction ?base_path ~keeper_name ~mode ~reason:Image_too_large ();
            Agent_core.Types.Text
              (image_store_failed_placeholder ~reason:"image too large")
          | Ok () ->
            (match Keeper_vision_tool.validate_media_type media_type with
             | Error _ ->
-              record_eviction ?base_path ~keeper_name ~mode ~result:"error" ~reason:"invalid_media_type" ();
+              record_error_eviction ?base_path ~keeper_name ~mode ~reason:Invalid_media_type ();
               Agent_core.Types.Text
                 (image_store_failed_placeholder ~reason:"unsupported image media type")
             | Ok media_type ->
@@ -198,13 +284,13 @@ let evict_block ?base_path ~media_store ~read ~mode ~keeper_name ~eager_budget (
                  Keeper_vision_tool.store_kept ?base_path ~keeper_name bytes
                with
                | Error _ ->
-                 record_eviction ?base_path ~keeper_name ~mode ~result:"error" ~reason:"store_failed" ();
+                 record_error_eviction ?base_path ~keeper_name ~mode ~reason:Store_failed ();
                  Agent_core.Types.Text
                    (image_store_failed_placeholder ~reason:"artifact store failed")
                | Ok handle ->
                  (match mode with
                   | Store_only ->
-                    record_eviction ?base_path ~keeper_name ~mode ~result:"ok" ~reason:"stored" ();
+                    record_ok_eviction ?base_path ~keeper_name ~mode ~reason:Stored ();
                     Agent_core.Types.Text
                       (image_unread_placeholder ~handle ~media_type ~reason:"not read")
                   | Eager when !eager_budget > 0 ->
@@ -214,25 +300,25 @@ let evict_block ?base_path ~media_store ~read ~mode ~keeper_name ~eager_budget (
                     decr eager_budget;
                     (match outcome with
                      | Some (Ok read_text) ->
-                       record_eviction ?base_path ~keeper_name ~mode ~result:"ok" ~reason:"eager_read" ();
+                       record_ok_eviction ?base_path ~keeper_name ~mode ~reason:Eager_read ();
                        Agent_core.Types.Text
                          (image_read_placeholder ~handle ~media_type ~read_text)
                      | Some (Error reason) ->
-                       record_eviction ?base_path ~keeper_name ~mode ~result:"error" ~reason ();
+                       record_eviction ?base_path ~keeper_name ~mode ~result:Eviction_error ~reason ();
                        Agent_core.Types.Text
                          (image_unread_placeholder
                             ~handle
                             ~media_type
                             ~reason:"vision read failed")
                      | None ->
-                       record_eviction ?base_path ~keeper_name ~mode ~result:"ok" ~reason:"stored_unread" ();
+                       record_ok_eviction ?base_path ~keeper_name ~mode ~reason:Stored_unread ();
                        Agent_core.Types.Text
                          (image_unread_placeholder
                             ~handle
                             ~media_type
                             ~reason:"not yet read"))
                   | Eager ->
-                    record_eviction ?base_path ~keeper_name ~mode ~result:"ok" ~reason:"eager_budget_exhausted" ();
+                    record_ok_eviction ?base_path ~keeper_name ~mode ~reason:Eager_budget_exhausted ();
                     Agent_core.Types.Text
                       (image_unread_placeholder
                          ~handle

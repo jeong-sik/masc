@@ -166,12 +166,18 @@ val handle_keeper_identity_switch_post :
 (** Handle [POST /identity-switch]: turn one attached service on or off for
     this keeper without touching the consent. Body: [{provider, enabled}]. *)
 
+type lifecycle_action = Server_dashboard_http_keeper_api_lifecycle_post.lifecycle_action =
+  | Lifecycle_boot
+  | Lifecycle_up
+  | Lifecycle_shutdown
+  | Lifecycle_reset
+  | Lifecycle_clear
+
 val handle_keeper_lifecycle_post :
   ?body_str:string ->
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->
-  tool_name:string ->
-  action:String.t ->
+  action:lifecycle_action ->
   Mcp_server.server_state ->
   string -> Httpun.Request.t -> Http_reqd.t -> unit
 (** Generic handler for boot / shutdown / reset / clear posts. Boot does not

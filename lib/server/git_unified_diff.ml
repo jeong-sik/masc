@@ -35,11 +35,17 @@ let parse_range ~sign token =
         | _ -> None)
     | _ -> None
 
-let rec find_sub s ~sub ~from =
+let find_sub s ~sub ~from =
   let n = String.length s and m = String.length sub in
-  if from + m > n then None
-  else if String.equal (String.sub s from m) sub then Some from
-  else find_sub s ~sub ~from:(from + 1)
+  let rec matches_at i k =
+    k >= m || (Char.equal s.[i + k] sub.[k] && matches_at i (k + 1))
+  in
+  let rec scan i =
+    if i + m > n then None
+    else if matches_at i 0 then Some i
+    else scan (i + 1)
+  in
+  scan from
 
 (* "@@ -a,b +c,d @@ section" *)
 let parse_hunk_header line =
@@ -49,21 +55,23 @@ let parse_hunk_header line =
   | Some close_at -> (
       let ranges = String.sub line open_len (close_at - open_len) in
       let after = close_at + String.length hunk_close in
-      let section =
-        if after >= String.length line then None
+      let line_len = String.length line in
+      (* git separates optional section context from the closing marker with one space. *)
+      let section_result =
+        if after >= line_len then Ok None
+        else if not (Char.equal line.[after] ' ') then Error ()
         else
-          (* git separates the context from the closing marker with one space. *)
-          match String.sub line (after + 1) (String.length line - after - 1) with
-          | "" -> None
-          | text -> Some text
+          match String.sub line (after + 1) (line_len - after - 1) with
+          | "" -> Ok None
+          | text -> Ok (Some text)
       in
-      match String.split_on_char ' ' ranges with
-      | [ old_range; new_range ] -> (
+      match section_result, String.split_on_char ' ' ranges with
+      | Ok section, [ old_range; new_range ] -> (
           match (parse_range ~sign:'-' old_range, parse_range ~sign:'+' new_range) with
           | Some (old_start, old_count), Some (new_start, new_count) ->
               Some { old_start; old_count; new_start; new_count; section }
           | _ -> None)
-      | _ -> None)
+      | (Error () | Ok _), _ -> None)
 
 type state =
   | Between_hunks

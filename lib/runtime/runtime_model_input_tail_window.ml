@@ -395,7 +395,7 @@ let minimum_capacity_bytes = function
    [None] means no quantized cut is small enough and the caller must fall
    back to an exact cut — correctness outranks cache reuse. *)
 let quantized_drop ?(window_atoms : int option) ~available_bytes ~atom_count suffix =
-  let quantum = Option.value window_atoms ~default:atoms_per_window in
+  let quantum = max 1 (Option.value window_atoms ~default:atoms_per_window) in
   let rec scan drop =
     if drop >= atom_count
     then None

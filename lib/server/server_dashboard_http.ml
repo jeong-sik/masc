@@ -789,8 +789,8 @@ let cached_goals_tree_payload ~(config : Workspace.config) =
 ;;
 
 (* Composite keeper JSON, goal collect_* helpers, and error taxonomy are
-   extracted to [Server_dashboard_http_composite] (godfile decomp). *)
-include Server_dashboard_http_composite
+   extracted to [Server_dashboard_http_composite_enrich] (godfile decomp). *)
+include Server_dashboard_http_composite_enrich
 
 let dashboard_goal_detail_http_json ~(config : Workspace.config) ~goal_id : Yojson.Safe.t =
   match Dashboard_goals.goal_detail_json ~config ~goal_id with

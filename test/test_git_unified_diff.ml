@@ -54,7 +54,8 @@ let test_malformed_input_is_an_error () =
   check bool "empty body line" true (is_error [ "@@ -1 +1 @@"; "" ]);
   check bool "negative count" true (is_error [ "@@ -1,-2 +1 @@"; " a" ]);
   check bool "negative start" true (is_error [ "@@ --1 +1 @@"; " a" ]);
-  check bool "signed number" true (is_error [ "@@ -+1 +1 @@"; " a" ])
+  check bool "signed number" true (is_error [ "@@ -+1 +1 @@"; " a" ]);
+  check bool "missing space before section" true (is_error [ "@@ -1 +1 @@nospace"; " a" ])
 
 let test_json_kinds () =
   let json =

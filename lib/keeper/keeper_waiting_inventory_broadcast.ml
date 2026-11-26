@@ -14,6 +14,14 @@ let source_to_string = function
   | Approval_detail -> "approval_detail"
 ;;
 
+let source_of_string_opt = function
+  | "chat_operation" -> Some Chat_operation
+  | "event_queue" -> Some Event_queue
+  | "approval_count" -> Some Approval_count
+  | "approval_detail" -> Some Approval_detail
+  | _ -> None
+;;
+
 let notify_health_change ~base_path =
   let report exn =
     Log.Keeper.warn "waiting inventory health observer failed: %s"

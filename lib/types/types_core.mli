@@ -323,6 +323,7 @@ type message_mention_delivery =
 [@@deriving yojson, show]
 
 val message_mention_delivery_to_string : message_mention_delivery -> string
+val message_mention_delivery_of_string_opt : string -> message_mention_delivery option
 
 (** The kinds of message this codebase writes. {!message.msg_type} stays the
     string on disk; read it with {!message_kind_of_string}. *)

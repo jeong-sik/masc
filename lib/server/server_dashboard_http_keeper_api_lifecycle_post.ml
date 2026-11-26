@@ -183,23 +183,39 @@ type up_workspace_error = Workspace.expected_workspace_error =
 let validate_up_workspace ~(config : Workspace.config) args =
   Workspace.validate_expected_workspace ~config args
 
-let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
+type lifecycle_action =
+  | Lifecycle_boot
+  | Lifecycle_up
+  | Lifecycle_shutdown
+  | Lifecycle_reset
+  | Lifecycle_clear
+
+let lifecycle_action_to_string = function
+  | Lifecycle_boot -> "boot"
+  | Lifecycle_up -> "up"
+  | Lifecycle_shutdown -> "shutdown"
+  | Lifecycle_reset -> "reset"
+  | Lifecycle_clear -> "clear"
+
+let lifecycle_action_tool_name = function
+  | Lifecycle_boot | Lifecycle_up -> "masc_keeper_up"
+  | Lifecycle_shutdown -> "masc_keeper_down"
+  | Lifecycle_reset -> "masc_keeper_reset"
+  | Lifecycle_clear -> "masc_keeper_clear"
+
+let lifecycle_action_suffix = function
+  | Lifecycle_boot -> keeper_suffix_boot
+  | Lifecycle_up -> keeper_suffix_up
+  | Lifecycle_shutdown -> keeper_suffix_shutdown
+  | Lifecycle_reset -> keeper_suffix_reset
+  | Lifecycle_clear -> keeper_suffix_clear
+
+let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~(action : lifecycle_action)
     state agent_name req reqd =
   let req_path = Http.Request.path req in
-  let suffix_result =
-    match action with
-    | "boot" -> Ok keeper_suffix_boot
-    | "up" -> Ok keeper_suffix_up
-    | "shutdown" -> Ok keeper_suffix_shutdown
-    | "reset" -> Ok keeper_suffix_reset
-    | "clear" -> Ok keeper_suffix_clear
-    | unknown ->
-        Error (Printf.sprintf "unknown keeper lifecycle action: %s" unknown)
-  in
-  match suffix_result with
-  | Error msg ->
-      respond_error reqd msg
-  | Ok suffix ->
+  let action_wire = lifecycle_action_to_string action in
+  let tool_name = lifecycle_action_tool_name action in
+  let suffix = lifecycle_action_suffix action in
   let name = extract_keeper_name_for_post req_path suffix in
   if String.length name = 0 then
     respond_error reqd "keeper name is required"
@@ -276,7 +292,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
     in
     let args_result =
       match action with
-      | "clear" -> (
+      | Lifecycle_clear -> (
           match body_str with
           | None ->
               Error "request body is required for clear"
@@ -291,7 +307,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               with
               | Yojson.Json_error err ->
                   Error (Printf.sprintf "invalid json: %s" err)))
-      | "up" -> (
+      | Lifecycle_up -> (
           (* The body carries the create-or-update settings (instructions,
              mention_targets, ...). Empty body still dispatches name-only so
              the contract's own validation — not this route — decides what a
@@ -309,7 +325,8 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               with
               | Yojson.Json_error err ->
                   Error (Printf.sprintf "invalid json: %s" err)))
-      | _ -> Ok (`Assoc [("name", `String name)])
+      | Lifecycle_boot | Lifecycle_shutdown | Lifecycle_reset ->
+          Ok (`Assoc [("name", `String name)])
     in
     match args_result with
     | Error msg ->
@@ -317,7 +334,11 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
     | Ok args ->
       (* Use the same captured workspace config for admission and dispatch;
          never resolve the global current workspace again between them. *)
-      match (if String.equal action "up" then validate_up_workspace ~config args else Ok args) with
+      match
+        (match action with
+         | Lifecycle_up -> validate_up_workspace ~config args
+         | Lifecycle_boot | Lifecycle_shutdown | Lifecycle_reset | Lifecycle_clear -> Ok args)
+      with
       | Error Invalid_workspace_precondition ->
         respond_error ~request:req ~ok:false reqd "invalid expected_workspace precondition"
       | Error Workspace_precondition_failed ->
@@ -335,17 +356,18 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
         in
         let log_lifecycle_result (outcome : lifecycle_outcome) =
           let level, line =
-            lifecycle_log_line ~action ~name ~actor:agent_name
+            lifecycle_log_line ~action:action_wire ~name ~actor:agent_name
               ~duration_ms:(duration_ms ()) outcome
           in
           Log.Server.emit level line
         in
         Log.Server.info "keeper lifecycle %s name=%s actor=%s started"
-          action name agent_name;
+          action_wire name agent_name;
         let boot_preflight =
-          if not (String.equal action "boot")
-          then Boot_allowed None
-          else
+          match action with
+          | Lifecycle_up | Lifecycle_shutdown | Lifecycle_reset | Lifecycle_clear ->
+            Boot_allowed None
+          | Lifecycle_boot ->
             match Keeper_registry.get ~base_path:config.base_path name with
             | Some entry when is_transitioning entry ->
               Boot_phase_transitioning entry.phase
@@ -480,7 +502,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
              (`Assoc
                 [
                   ("ok", `Bool true);
-                  ("action", `String action);
+                  ("action", `String action_wire);
                   ("name", `String name);
                   ("already_live", `Bool true);
                   ("detail", detail);
@@ -488,134 +510,122 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
              reqd
          | Some _ | None ->
            (match Keeper_tool_surface.dispatch keeper_ctx ~name:tool_name ~args with
-            | Some result
-              when Tool_result.is_success result
-                   && (String.equal action "boot" || String.equal action "clear") ->
-              let body = Tool_result.message result in
-              let post_action_result =
-                if String.equal action "boot"
-                then (
-                  (* See #37175: only the lifecycle listener acts on a partial refresh. *)
-                  ignore
-                    (refresh_keeper_execution_surfaces
-                       ~config
-                       ~name
-                       (Keeper_lifecycle_events.Custom_event
-                          { verb = Keeper_lifecycle_events.Started
-                          ; phase = Some Keeper_state_machine.Running
-                          })
-                      : surface_refresh);
-                  Ok ())
-                else (
-                  match Keeper_registry.get_phase ~base_path:config.base_path name with
-                  | Some Keeper_state_machine.Paused
-                    when not (persist_keeper_pause ()) ->
-                    Error "paused-state persist failed after clear"
-                  | Some
-                      ( Keeper_state_machine.Paused
-                      | Keeper_state_machine.Offline
-                      | Keeper_state_machine.Running
-                      | Keeper_state_machine.Failing
-                      | Keeper_state_machine.Draining
-                      | Keeper_state_machine.Stopped
-                      | Keeper_state_machine.Crashed
-                      | Keeper_state_machine.Restarting )
-                  | None ->
-                    invalidate_keeper_execution_surfaces ~config ();
-                    Ok ())
-              in
-              (match post_action_result with
-               | Error msg ->
-                 log_lifecycle_result (Persist_failed msg);
-                 respond_error
-                   ~status:`Internal_server_error
-                   ~request:req
-                   ~ok:false
-                   reqd
-                   msg
-               | Ok () ->
-                 log_lifecycle_result Succeeded;
-                 Http.Response.json_value ~compress:true ~request:req
-                   (`Assoc
-                      [
-                        ("ok", `Bool true);
-                        ("action", `String action);
-                        ("name", `String name);
-                        ("detail", tool_detail_json body);
-                      ])
-                   reqd)
             | Some result when Tool_result.is_success result ->
-              let post_action_result =
-                match action with
-                | "shutdown" ->
-                  (match shutdown_outcome_of_data (Tool_result.data result) with
-                   | Error detail -> Error detail
-                   | Ok Shutdown_target_absent -> Ok (Some Shutdown_target_absent)
-                   | Ok Shutdown_submitted ->
-                     if persist_keeper_pause ()
-                     then (
-                       (* See #37175: only the lifecycle listener acts on a partial refresh. *)
-                       ignore
-                         (refresh_keeper_execution_surfaces
-                            ~config
-                            ~name
-                            (Keeper_lifecycle_events.Phase_event
-                               Keeper_state_machine.Paused)
-                           : surface_refresh);
-                       Ok (Some Shutdown_submitted))
-                     else Error "paused-state persist failed after shutdown")
-                | _ ->
-                  invalidate_keeper_execution_surfaces ~config ();
-                  Ok None
-              in
-              (match post_action_result with
-               | Error msg ->
-                 log_lifecycle_result (Persist_failed msg);
-                 respond_error
-                   ~status:`Internal_server_error
-                   ~request:req
-                   ~ok:false
-                   reqd
-                   msg
-               | Ok outcome ->
-                 log_lifecycle_result
-                   (match outcome with
-                    | Some Shutdown_target_absent -> Already_absent
-                    | Some Shutdown_submitted | None -> Succeeded);
-                 (* Three actions reach this branch -- "up", "shutdown" and
-                    "reset" -- and only "up" has anything to report: a create
-                    names the sandbox profile and network mode the keeper
-                    actually landed on, and dropping that left the caller to
-                    guess the isolation of the keeper it had just made. The
-                    other two carry no such report, so they answer with the
-                    fields they always answered with; a [detail] key holding
-                    [`Null] would be a new field on the wire with nothing
-                    behind it. Read from [Tool_result.data] rather than
-                    re-parsing the rendered message, which is the same value
-                    one round-trip later. *)
-                 let create_detail =
-                   if String.equal action "up"
-                   then [ ("detail", Tool_result.data result) ]
-                   else []
+              (match action with
+               | Lifecycle_boot | Lifecycle_clear ->
+                 let body = Tool_result.message result in
+                 let post_action_result =
+                   match action with
+                   | Lifecycle_boot ->
+                     (* See #37175: only the lifecycle listener acts on a partial refresh. *)
+                     ignore
+                       (refresh_keeper_execution_surfaces
+                          ~config
+                          ~name
+                          (Keeper_lifecycle_events.Custom_event
+                             { verb = Keeper_lifecycle_events.Started
+                             ; phase = Some Keeper_state_machine.Running
+                             })
+                         : surface_refresh);
+                     Ok ()
+                   | Lifecycle_clear ->
+                     (match Keeper_registry.get_phase ~base_path:config.base_path name with
+                      | Some Keeper_state_machine.Paused
+                        when not (persist_keeper_pause ()) ->
+                        Error "paused-state persist failed after clear"
+                      | Some
+                          ( Keeper_state_machine.Paused
+                          | Keeper_state_machine.Offline
+                          | Keeper_state_machine.Running
+                          | Keeper_state_machine.Failing
+                          | Keeper_state_machine.Draining
+                          | Keeper_state_machine.Stopped
+                          | Keeper_state_machine.Crashed
+                          | Keeper_state_machine.Restarting )
+                      | None ->
+                        invalidate_keeper_execution_surfaces ~config ();
+                        Ok ())
+                   | Lifecycle_up | Lifecycle_shutdown | Lifecycle_reset -> Ok ()
                  in
-                 (* A shutdown of a name that has no Keeper succeeds, as the
-                    tool does, and says so: an operator who mistyped the name
-                    is told nothing was stopped. *)
-                 let absent_detail =
-                   match outcome with
-                   | Some Shutdown_target_absent -> [ ("already_absent", `Bool true) ]
-                   | Some Shutdown_submitted | None -> []
+                 (match post_action_result with
+                  | Error msg ->
+                    log_lifecycle_result (Persist_failed msg);
+                    respond_error
+                      ~status:`Internal_server_error
+                      ~request:req
+                      ~ok:false
+                      reqd
+                      msg
+                  | Ok () ->
+                    log_lifecycle_result Succeeded;
+                    Http.Response.json_value ~compress:true ~request:req
+                      (`Assoc
+                         [
+                           ("ok", `Bool true);
+                           ("action", `String action_wire);
+                           ("name", `String name);
+                           ("detail", tool_detail_json body);
+                         ])
+                      reqd)
+               | Lifecycle_up | Lifecycle_shutdown | Lifecycle_reset ->
+                 let post_action_result =
+                   match action with
+                   | Lifecycle_shutdown ->
+                     (match shutdown_outcome_of_data (Tool_result.data result) with
+                      | Error detail -> Error detail
+                      | Ok Shutdown_target_absent -> Ok (Some Shutdown_target_absent)
+                      | Ok Shutdown_submitted ->
+                        if persist_keeper_pause ()
+                        then (
+                          (* See #37175: only the lifecycle listener acts on a partial refresh. *)
+                          ignore
+                            (refresh_keeper_execution_surfaces
+                               ~config
+                               ~name
+                               (Keeper_lifecycle_events.Phase_event
+                                  Keeper_state_machine.Paused)
+                              : surface_refresh);
+                          Ok (Some Shutdown_submitted))
+                        else Error "paused-state persist failed after shutdown")
+                   | Lifecycle_up | Lifecycle_reset | Lifecycle_boot | Lifecycle_clear ->
+                     invalidate_keeper_execution_surfaces ~config ();
+                     Ok None
                  in
-                 Http.Response.json_value ~compress:true ~request:req
-                   (`Assoc
-                      ([
-                         ("ok", `Bool true);
-                         ("action", `String action);
-                         ("name", `String name);
-                       ]
-                      @ create_detail
-                      @ absent_detail))
-                   reqd)
+                 (match post_action_result with
+                  | Error msg ->
+                    log_lifecycle_result (Persist_failed msg);
+                    respond_error
+                      ~status:`Internal_server_error
+                      ~request:req
+                      ~ok:false
+                      reqd
+                      msg
+                  | Ok outcome ->
+                    log_lifecycle_result
+                      (match outcome with
+                       | Some Shutdown_target_absent -> Already_absent
+                       | Some Shutdown_submitted | None -> Succeeded);
+                    let create_detail =
+                      match action with
+                      | Lifecycle_up -> [ ("detail", Tool_result.data result) ]
+                      | Lifecycle_boot | Lifecycle_shutdown | Lifecycle_reset | Lifecycle_clear ->
+                        []
+                    in
+                    let absent_detail =
+                      match outcome with
+                      | Some Shutdown_target_absent -> [ ("already_absent", `Bool true) ]
+                      | Some Shutdown_submitted | None -> []
+                    in
+                    Http.Response.json_value ~compress:true ~request:req
+                      (`Assoc
+                         ([
+                            ("ok", `Bool true);
+                            ("action", `String action_wire);
+                            ("name", `String name);
+                          ]
+                         @ create_detail
+                         @ absent_detail))
+                      reqd))
             | Some result ->
               let body = Tool_result.message result in
               log_lifecycle_result (Rejected body);

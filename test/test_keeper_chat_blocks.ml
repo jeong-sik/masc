@@ -348,6 +348,38 @@ let test_non_http_markdown_image_becomes_text () =
     ]
     (blocks_to_json_list blocks)
 
+let test_cmarkit_image_balanced_parens_and_inline_code () =
+  let wiki_blocks =
+    B.parse_text_to_blocks
+      "before ![wiki](https://en.wikipedia.org/wiki/Foo_(bar).png) after"
+  in
+  Alcotest.(check (list yojson_testable))
+    "balanced parens in markdown image URL preserved"
+    [
+      `Assoc [ ("t", `String "p"); ("html", `String "before ") ];
+      `Assoc
+        [
+          ("t", `String "image");
+          ("src", `String "https://en.wikipedia.org/wiki/Foo_(bar).png");
+          ("cap", `String "wiki");
+        ];
+      `Assoc [ ("t", `String "p"); ("html", `String " after") ];
+    ]
+    (blocks_to_json_list wiki_blocks);
+  let inline_code_blocks =
+    B.parse_text_to_blocks "See `![alt](https://example.com/a.png)` literal"
+  in
+  Alcotest.(check (list yojson_testable))
+    "image syntax inside inline code span stays literal text"
+    [
+      `Assoc
+        [
+          ("t", `String "p");
+          ("html", `String "See `![alt](https://example.com/a.png)` literal");
+        ];
+    ]
+    (blocks_to_json_list inline_code_blocks)
+
 let test_non_http_bare_url_becomes_text () =
   let blocks = B.parse_text_to_blocks "ftp://example.com/a.png" in
   Alcotest.(check (list yojson_testable))
@@ -786,6 +818,8 @@ let () =
             test_link_without_www;
           Alcotest.test_case "non-http markdown image becomes text" `Quick
             test_non_http_markdown_image_becomes_text;
+          Alcotest.test_case "cmarkit image balanced parens and inline code" `Quick
+            test_cmarkit_image_balanced_parens_and_inline_code;
           Alcotest.test_case "non-http bare url becomes text" `Quick
             test_non_http_bare_url_becomes_text;
           Alcotest.test_case "case-insensitive standalone url" `Quick

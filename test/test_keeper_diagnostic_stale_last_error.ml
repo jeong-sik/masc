@@ -69,6 +69,54 @@ let test_stopped_keeper_is_offline () =
     (member "health_state" row = Some (`String "offline"))
 ;;
 
+let test_reply_delivery_status_tracks_user_vs_assistant_timestamps () =
+  let meta = meta_with_persisted_reason ~last_turn_ts:(now_ts -. 60.0) in
+  let awaiting =
+    Keeper_status_runtime.keeper_diagnostic_json
+      ~meta
+      ~phase:(Some Keeper_state_machine.Running)
+      ~history_items:
+        [ `Assoc
+            [ "role", `String "assistant"
+            ; "ts_unix", `Float (now_ts -. 200.0)
+            ; "content", `String "older reply"
+            ]
+        ; `Assoc
+            [ "role", `String "user"
+            ; "ts_unix", `Float (now_ts -. 30.0)
+            ; "content", `String "newer user message"
+            ]
+        ]
+      ~now_ts
+  in
+  Alcotest.(check bool)
+    "newer user message after older assistant reply is awaiting_reply"
+    true
+    (member "reply_delivery_status" awaiting = Some (`String "awaiting_reply"));
+  let delivered =
+    Keeper_status_runtime.keeper_diagnostic_json
+      ~meta
+      ~phase:(Some Keeper_state_machine.Running)
+      ~history_items:
+        [ `Assoc
+            [ "role", `String "user"
+            ; "ts_unix", `Float (now_ts -. 200.0)
+            ; "content", `String "older user message"
+            ]
+        ; `Assoc
+            [ "role", `String "assistant"
+            ; "ts_unix", `Float (now_ts -. 30.0)
+            ; "content", `String "newer reply"
+            ]
+        ]
+      ~now_ts
+  in
+  Alcotest.(check bool)
+    "assistant reply at or after user message is delivered"
+    true
+    (member "reply_delivery_status" delivered = Some (`String "delivered"))
+;;
+
 let test_startup_observation_keeps_the_exact_existing_policy_deadline () =
   let meta = match Masc_test_deps.meta_of_json_fixture (`Assoc [
       "name", `String "startup-policy"; "trace_id", `String "startup-policy-trace";
@@ -114,6 +162,10 @@ let () =
             "stopped keeper is offline"
             `Quick
             test_stopped_keeper_is_offline
+        ; Alcotest.test_case
+            "reply delivery status tracks user vs assistant timestamps"
+            `Quick
+            test_reply_delivery_status_tracks_user_vs_assistant_timestamps
         ] )
     ]
 ;;

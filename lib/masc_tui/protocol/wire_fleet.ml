@@ -244,6 +244,7 @@ type turn_preview = {
   activity : turn_preview_activity;
   text_tail : string;
   last_tool : string option;
+  last_failure : string option;
   updated_at_unix : float;
   revision : int option;
   preparation : turn_preparation option;
@@ -945,6 +946,7 @@ let decode_turn_preview json =
   in
   let* text_tail = required_string_field json "text_tail" in
   let* last_tool = optional_nonblank_string json "last_tool" in
+  let* last_failure = optional_nonblank_string json "last_failure" in
   let* updated_at_unix = required_finite_float json "updated_at_unix" in
   let* revision = optional_int_field json "revision" in
   let* () =
@@ -979,6 +981,7 @@ let decode_turn_preview json =
     ; activity
     ; text_tail
     ; last_tool
+    ; last_failure
     ; updated_at_unix
     ; revision
     ; preparation

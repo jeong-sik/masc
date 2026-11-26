@@ -57,8 +57,6 @@ let publish_policy store outcome publish =
   result
 ;;
 
-let valid_slug_pattern = Re.Pcre.re {|^[a-z0-9][a-z0-9_-]*$|} |> Re.compile
-
 let create_sub_board
       store
       ~slug
@@ -71,10 +69,7 @@ let create_sub_board
   : (sub_board, board_error) Result.t
   =
   let slug = String.lowercase_ascii (String.trim slug) in
-  if
-    String.length slug < 1
-    || String.length slug > 64
-    || not (Re.execp valid_slug_pattern slug)
+  if not (Board_sub_board_json.is_valid_sub_board_slug slug)
   then
     Error
       (Validation_error

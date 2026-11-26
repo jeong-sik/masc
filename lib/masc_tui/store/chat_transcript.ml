@@ -1080,22 +1080,6 @@ let normalize_preview_inline s =
     (String.map (function '\n' | '\r' | '\t' -> ' ' | c -> c)
        (scrub_secrets_in_text s))
 
-let extract_preview_failure_detail status_text =
-  let clean = normalize_preview_inline status_text in
-  let needle = "last failure: " in
-  let nlen = String.length needle in
-  let clen = String.length clean in
-  let rec find idx =
-    if idx + nlen > clen then None
-    else if String.equal (String.sub clean idx nlen) needle then
-      let rest =
-        String.trim (String.sub clean (idx + nlen) (clen - idx - nlen))
-      in
-      if String.equal rest "" then None else Some rest
-    else find (idx + 1)
-  in
-  find 0
-
 let active_turn_detail_summary (turn : Wire_fleet.active_turn) =
   let lane_say = turn_lane_label turn.lane in
   let act_say =
@@ -1140,7 +1124,12 @@ let active_turn_detail_summary (turn : Wire_fleet.active_turn) =
                           ~en:("Tool activity · " ^ tool)
                     | None -> Say.make ~ko:"도구 활동 중" ~en:"Tool activity")
                 | Wire_fleet.Preview_failed -> (
-                    match extract_preview_failure_detail p.status_text with
+                    let failure_detail =
+                      Option.bind p.last_failure (fun detail ->
+                          let clean = normalize_preview_inline detail in
+                          if String.equal clean "" then None else Some clean)
+                    in
+                    match failure_detail with
                     | Some detail ->
                         Say.make
                           ~ko:("시도 실패 · " ^ detail)

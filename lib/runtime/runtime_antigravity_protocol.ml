@@ -263,9 +263,7 @@ let json_body_is_structured_overflow ?http_status body =
   | None -> false
 
 let is_non_overflow_http_refusal_status = function
-  | Some (401 | 402 | 403 | 413 | 429) -> true
-  | Some status ->
-    Option.is_some (Llm_provider.Retry.server_status_class_of_code status)
+  | Some status -> Llm_provider.Retry.is_non_overflow_http_refusal_status status
   | None -> false
 
 let json_body_is_non_overflow_refusal body =

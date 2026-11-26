@@ -124,6 +124,7 @@ type turn_preview = {
   activity : turn_preview_activity;
   text_tail : string;
   last_tool : string option;
+  last_failure : string option;
   updated_at_unix : float;
   revision : int option;
   preparation : turn_preparation option;

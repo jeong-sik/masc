@@ -646,18 +646,62 @@ let resolve_or_create
         res))
 ;;
 
-let mentions_cached_content body =
-  let lower = String.lowercase_ascii body in
+let mentions_cached_content text =
+  let lower = String.lowercase_ascii text in
   Agent_core_strings.contains_substring ~haystack:lower ~needle:"cachedcontent"
   || Agent_core_strings.contains_substring ~haystack:lower ~needle:"cached_content"
   || Agent_core_strings.contains_substring ~haystack:lower ~needle:"cached content"
+;;
+
+let structured_rpc_cached_content_error body =
+  match Yojson.Safe.from_string body with
+  | `Assoc fields ->
+    let err_obj =
+      match List.assoc_opt "error" fields with
+      | Some (`Assoc inner) -> inner
+      | Some _ | None -> fields
+    in
+    let detail_mentions =
+      match List.assoc_opt "details" err_obj with
+      | Some (`List items) ->
+        List.exists
+          (function
+            | `Assoc d ->
+              (match List.assoc_opt "reason" d with
+               | Some (`String r) when mentions_cached_content r -> true
+               | Some _ | None ->
+                 (match List.assoc_opt "fieldViolations" d with
+                  | Some (`List fvs) ->
+                    List.exists
+                      (function
+                        | `Assoc fv ->
+                          (match List.assoc_opt "field" fv with
+                           | Some (`String f) -> mentions_cached_content f
+                           | Some _ | None -> false)
+                        | _ -> false)
+                      fvs
+                  | Some _ | None -> false))
+            | _ -> false)
+          items
+      | Some _ | None -> false
+    in
+    let msg_mentions =
+      match List.assoc_opt "message" err_obj with
+      | Some (`String msg) -> mentions_cached_content msg
+      | Some _ | None -> false
+    in
+    Some (detail_mentions || msg_mentions)
+  | _ -> None
+  | exception Yojson.Json_error _ -> None
 ;;
 
 let is_cached_content_error (err : Http_client.http_error) : bool =
   match err with
   | Http_client.HttpError { code = 404; _ } -> true
   | Http_client.HttpError { code = 400 | 403; body = Http_client.Received body; _ } ->
-    mentions_cached_content body
+    (match structured_rpc_cached_content_error body with
+     | Some matched -> matched
+     | None -> mentions_cached_content body)
   | Http_client.HttpError
       { code = _
       ; body = Http_client.Received _ | Http_client.Not_received_in_window

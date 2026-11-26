@@ -5107,8 +5107,9 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
               @ List.map
                   (fun (r : Wire_runtime.tool_quality_tool_row) ->
                     plain
-                      (Printf.sprintf "  %-28s %5d  %5.1f%%  %6.0fms  trunc=%d"
-                         r.name r.calls r.success_pct r.avg_ms
+                      (Printf.sprintf "  %s %5d  %5.1f%%  %6.0fms  trunc=%d"
+                         (Grapheme.pad_right ~width:28 r.name)
+                         r.calls r.success_pct r.avg_ms
                          r.output_truncated_count))
                   (H.safe_take 20 tq.by_tool)
               @ (if tq.failure_categories = [] then []
@@ -5133,7 +5134,8 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
                    :: List.map
                         (fun (rk : Wire_runtime.tool_quality_rate_row) ->
                           plain
-                            (Printf.sprintf "  @%-22s %5d  %5.1f%%" rk.name
+                            (Printf.sprintf "  @%s %5d  %5.1f%%"
+                               (Grapheme.pad_right ~width:22 rk.name)
                                rk.calls rk.success_pct))
                         (H.safe_take 10 tq.by_keeper))
             in

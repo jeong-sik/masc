@@ -44,3 +44,8 @@ val truncate_to_width : max_width:int -> ?ellipsis:string -> string -> string
 (** Truncate cleanly on a grapheme cluster boundary so the returned string fits
     within [max_width] terminal columns (appending [ellipsis], default ["…"],
     when truncated and space permits). *)
+
+val pad_right : width:int -> string -> string
+(** Fit [s] to exactly [width] terminal display columns: truncate cleanly on a
+    grapheme cluster boundary when wider than [width], or right-pad with ASCII
+    spaces when narrower. *)

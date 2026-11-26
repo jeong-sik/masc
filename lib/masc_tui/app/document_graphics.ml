@@ -38,7 +38,7 @@ type cached_preview = {
 }
 
 type t = {
-  mutable pending : (request * (unit -> unit)) option;
+  mutable pending : (unit ref * request * (unit -> unit)) option;
   mutable retry_deadline : Clock.Mono.t option;
   mutable cached : cached_preview list;
   mutable active : placement list;
@@ -90,15 +90,16 @@ let clear t ~in_tmux =
 
 let cancel_pending t =
   t.retry_deadline <- None;
-  Option.iter (fun (_, cancel) -> cancel ()) t.pending
+  Option.iter (fun (_, _, cancel) -> cancel ()) t.pending
 
 let request_preview t ~sw ~base_path ~fetch_retained ~pixels_left ~bytes_left ~on_ready request =
+  let token = ref () in
   let cancelled = Atomic.make false in
   let cancel_p, cancel_u = Eio.Promise.create () in
   let cancel () =
     if not (Atomic.exchange cancelled true) then Eio.Promise.resolve cancel_u ()
   in
-  t.pending <- Some (request, cancel);
+  t.pending <- Some (token, request, cancel);
   let raster_mermaid request =
     let max_width = Int.max 320 request.pixel_width in
     let scene =
@@ -157,19 +158,28 @@ let request_preview t ~sw ~base_path ~fetch_retained ~pixels_left ~bytes_left ~o
                 | None -> Unavailable)
   in
   Eio.Fiber.fork_daemon ~sw (fun () ->
+      let clear_own_pending () =
+        match t.pending with
+        | Some (tok, _, _) when tok == token -> t.pending <- None
+        | Some _ | None -> ()
+      in
       let done_p, done_u = Eio.Promise.create () in
       let result = ref Unavailable in
-      Eio.Fiber.both
-        (fun () ->
-          match Eio.Promise.await done_p with
-          | () -> ()
-          | exception (Eio.Cancel.Cancelled _ as ex) ->
-              cancel ();
-              raise ex)
-        (fun () ->
-          Fun.protect ~finally:(fun () -> Eio.Promise.resolve done_u ())
-            (fun () -> result := work ()));
-      t.pending <- None;
+      Fun.protect ~finally:clear_own_pending (fun () ->
+          Eio.Fiber.both
+            (fun () ->
+              match Eio.Promise.await done_p with
+              | () -> ()
+              | exception (Eio.Cancel.Cancelled _ as ex) ->
+                  cancel ();
+                  raise ex)
+            (fun () ->
+              Fun.protect ~finally:(fun () -> Eio.Promise.resolve done_u ())
+                (fun () ->
+                  result :=
+                    try work () with
+                    | Eio.Cancel.Cancelled _ as ex -> raise ex
+                    | _ -> Unavailable)));
       if not (Atomic.get cancelled) then
         t.cached <-
           { requested = request; result = !result; pixel_budget = pixels_left; byte_budget = bytes_left }
@@ -262,7 +272,7 @@ let prepare t ~sw ~now ~base_path ~endpoint ~fetch_retained ~on_ready
                | Preview_ready _ | Budget_limited | Unavailable -> visible = [])
           t.cached;
       (match t.pending with
-      | Some (request, _) when not (is_visible request) -> cancel_pending t
+      | Some (_, request, _) when not (is_visible request) -> cancel_pending t
       | Some _ -> ()
       | None ->
           let retained_fits = pixels_left > 0 && bytes_left >= 4 in

@@ -9,8 +9,9 @@ val contains_ci : needle:string -> string -> bool
     empty (matching store/screen filter semantics). *)
 
 val sanitize_single_line : string -> string
-(** Collapse control characters ([\n], [\r], [\t], ASCII < 32) and runs of
-    spaces into single ASCII spaces, then trim leading/trailing whitespace. *)
+(** Strip ANSI escape sequences (CSI/OSC/DCS/APC/PM/2-byte ESC), C0 controls,
+    and DEL ([0x7F]), collapse whitespace controls ([\n], [\r], [\t]) and runs
+    of spaces into single ASCII spaces, and trim leading/trailing whitespace. *)
 
 val short_hash : ?len:int -> string -> string
 (** Trim [s] and return at most [len] leading bytes (default [8]). *)

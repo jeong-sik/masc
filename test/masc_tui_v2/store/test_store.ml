@@ -18163,6 +18163,41 @@ let test_timeout_detail_retryable_and_update_parity () =
   let inc = List.hd m_health.incidents.entries in
   Alcotest.(check string) "health incident detail preserves phase/sec/path"
     "Response timed out (12.0s · /health)" inc.detail;
+  (* Msg.http_error_summary & http_error_detail scrub secrets and preserve UTF-8 *)
+  let synth_bearer = "Bearer " ^ "tok_" ^ "secret1234567890abcdef" in
+  let secret_err =
+    Msg.Http_error
+      {
+        status = 502;
+        body = Printf.sprintf "{\"error\":\"upstream %s %s\"}" synth_bearer (String.make 70 'a');
+        api_error = None;
+      }
+  in
+  let summary_en = Say.resolve Say.Lang_en (Msg.http_error_summary secret_err) in
+  let detail_s = Msg.http_error_detail secret_err in
+  let contains_sub ~needle ~haystack =
+    let n = String.length needle and h = String.length haystack in
+    if n = 0 then true
+    else if n > h then false
+    else
+      let rec loop i =
+        if i > h - n then false
+        else if String.equal (String.sub haystack i n) needle then true
+        else loop (i + 1)
+      in
+      loop 0
+  in
+  Alcotest.(check bool) "http_error_summary scrubs bearer secret" false
+    (contains_sub ~needle:"secret1234567890abcdef" ~haystack:summary_en);
+  Alcotest.(check bool) "http_error_detail scrubs bearer secret" false
+    (contains_sub ~needle:"secret1234567890abcdef" ~haystack:detail_s);
+  let utf8_body = String.concat "" (List.init 120 (fun _ -> "한글")) in
+  let utf8_detail =
+    Msg.http_error_detail
+      (Msg.Http_error { status = 500; body = utf8_body; api_error = None })
+  in
+  Alcotest.(check bool) "http_error_detail produces valid UTF-8 on multibyte truncation" true
+    (String.is_valid_utf_8 utf8_detail);
 
   (* Update_http.ml: Reply_action_ack uses Msg.http_error_summary for Timeout_detail
      (identical to Health.Timeout, distinct from Health.Other_io which shows label) *)

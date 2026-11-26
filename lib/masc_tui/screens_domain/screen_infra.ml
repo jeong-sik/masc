@@ -2740,7 +2740,7 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
           let msg_lines =
             Chat_transcript.wrap_plain_lines
               ~width:(Int.max 1 (content.w - 2))
-              e.message
+              (Chat_transcript.scrub_secrets_in_text e.message)
           in
           let msg_n = List.length msg_lines in
           let tree_lines =
@@ -2825,14 +2825,14 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
         if not (Rect.is_empty content) then begin
           let sum_lines =
             Chat_transcript.wrap_plain_lines ~width:(Int.max 1 (content.w - 2))
-              ev.summary
+              (Chat_transcript.scrub_secrets_in_text ev.summary)
           in
           let detail_lines =
             match ev.detail with
             | Some d when not (String.equal (String.trim d) "") ->
                 Chat_transcript.wrap_plain_lines
                   ~width:(Int.max 1 (content.w - 2))
-                  d
+                  (Chat_transcript.scrub_secrets_in_text d)
             | Some _ | None -> []
           in
           let all_rows =
@@ -3378,9 +3378,10 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   in
                   let tone = if b.current then Some Theme.Status_ok else None in
                   ( tone
-                  , Printf.sprintf "%s %-22s %-8s %s"
+                  , Printf.sprintf "%s %s %-8s %s"
                       (if b.current then "*" else " ")
-                      b.name ab
+                      (Grapheme.pad_right ~width:22 b.name)
+                      ab
                       (H.sanitize_single_line b.subject) ))
                 bs
             in
@@ -3409,9 +3410,10 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                     else None
                   in
                   ( tone
-                  , Printf.sprintf "%s %-18s [%s] %s %s"
+                  , Printf.sprintf "%s %s [%s] %s %s"
                       (if wt.main then "*" else " ")
-                      wt.name wt.state
+                      (Grapheme.pad_right ~width:18 wt.name)
+                      wt.state
                       (Option.value ~default:"-" wt.branch)
                       flags ))
                 ws
@@ -3462,9 +3464,9 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               List.map
                 (fun (c : Wire_infra.git_log_commit) ->
                   ( None
-                  , Printf.sprintf "%s  %-14s  %s"
+                  , Printf.sprintf "%s  %s  %s"
                       (H.short_hash ~len:8 c.hash)
-                      c.author
+                      (Grapheme.pad_right ~width:14 c.author)
                       (H.sanitize_single_line c.subject) ))
                 cs
             in

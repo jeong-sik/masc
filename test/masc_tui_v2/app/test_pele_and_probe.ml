@@ -220,7 +220,35 @@ let test_retained_preview_recovers () =
   check bool "settled images do not keep waking the viewport" true
     (Option.is_none (Document.next_retry_deadline doc));
   check (list string) "only the transient request was retried"
-    [ recovering; available; missing; recovering; recovering ] (List.rev !requests)
+    [ recovering; available; missing; recovering; recovering ] (List.rev !requests);
+  (* Unhandled exception in fetch_retained must not kill parent switch sw
+     and must clear pending slot cleanly so subsequent requests succeed. *)
+  let boom_path = media 'e' in
+  let ok_path = media 'f' in
+  let boom_grid = grid_with [ boom_path; ok_path ] in
+  let doc2 = Document.create () in
+  let fetch_boom _endpoint ~path ~max_body_bytes:_ =
+    if String.equal path boom_path then failwith "synthetic io_domain closed"
+    else Ok png
+  in
+  let run_one () =
+    let ready, signal = Eio.Promise.create () in
+    ignore
+      (Document.prepare doc2 ~sw ~now:(Mono.now ()) ~base_path:"" ~probe
+         ~theme:Masc_tui_core.Theme.default ~endpoint ~fetch_retained:fetch_boom
+         ~on_ready:(fun () -> Eio.Promise.resolve signal ()) boom_grid);
+    Eio.Time.with_timeout_exn env#clock 1.0 (fun () -> Eio.Promise.await ready)
+  in
+  run_one ();
+  run_one ();
+  let placements =
+    Document.prepare doc2 ~sw ~now:(Mono.now ()) ~base_path:"" ~probe
+      ~theme:Masc_tui_core.Theme.default ~endpoint ~fetch_retained:fetch_boom
+      ~on_ready:(fun () -> fail "settled images should not trigger extra fetch")
+      boom_grid
+  in
+  check int "subsequent image loads after earlier fetch exception" 1
+    (List.length placements)
 
 let test_pele_confirmed_protocol_v1 () =
   with_cache (fun cache_dir ->

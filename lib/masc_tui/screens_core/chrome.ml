@@ -1708,7 +1708,10 @@ let render_toast_pill grid ~(body_rect : Rect.t) ~(theme : Theme.t)
           | Model.Toast_warning -> (Glyph.Warning_triangle, Theme.Status_attention)
           | Model.Toast_error -> (Glyph.Live_failing, Theme.Status_critical)
         in
-        let msg = Say.resolve model.lang toast.message in
+        let msg =
+          Chat_transcript.scrub_secrets_in_text
+            (Say.resolve model.lang toast.message)
+        in
         let raw = Printf.sprintf "%s %s" (Glyph.to_utf8 glyph) msg in
         let max_w = Int.min (body_rect.w - 4) 64 in
         let text = Grapheme.truncate_to_width ~max_width:max_w raw in

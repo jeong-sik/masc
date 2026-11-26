@@ -1627,7 +1627,69 @@ let test_worker_and_voice_runner () =
   Alcotest.(check (list string)) "cancelled audio cleaned up" [ "ptt_1.wav" ] !cleaned_paths;
   Voice_runner.dispatch runner Voice_runner.Stop_ptt;
   let heard = Eio.Promise.await transcript_p in
-  Alcotest.(check string) "second session transcript" "heard:ptt_2.wav" heard
+  Alcotest.(check string) "second session transcript" "heard:ptt_2.wav" heard;
+  (* Cancel_ptt during Voice_transcribing must cancel in-flight transcribe,
+     reset phase to Voice_idle, block concurrent Start_ptt during transcribe,
+     and suppress stale Transcript_ready / Voice_error. *)
+  let transcribing_entered, mark_transcribing = Eio.Promise.create () in
+  let transcribe_gate, release_transcribe = Eio.Promise.create () in
+  let late_transcripts = ref [] in
+  let started_recordings = Atomic.make 0 in
+  let cleaned_transcribe = ref [] in
+  let backend2 : Voice_runner.backend =
+    {
+      probe =
+        (fun () ->
+          Ok
+            {
+              recorder_available = true;
+              recorder_cmd = Some "rec";
+              stt_available = true;
+            });
+      record_until_stopped =
+        (fun ~device:_ ~stop_signal ~on_level:_ ->
+          ignore (Atomic.fetch_and_add started_recordings 1 : int);
+          Eio.Promise.await stop_signal;
+          Ok "ptt_transcribe.wav");
+      transcribe =
+        (fun ~audio_path ->
+          ignore (Eio.Promise.try_resolve mark_transcribing () : bool);
+          Eio.Promise.await transcribe_gate;
+          Ok ("late:" ^ audio_path));
+      cleanup_audio =
+        (fun ~audio_path -> cleaned_transcribe := audio_path :: !cleaned_transcribe);
+    }
+  in
+  let runner2 =
+    Voice_runner.create ~sw ~backend:backend2 ~on_event:(function
+      | Voice_runner.Transcript_ready text ->
+          late_transcripts := text :: !late_transcripts
+      | Voice_runner.Phase_changed _ | Voice_runner.Level_meter _
+      | Voice_runner.Capabilities _ | Voice_runner.Voice_error _ ->
+          ())
+  in
+  Voice_runner.dispatch runner2 (Voice_runner.Start_ptt { device = None });
+  Eio.Fiber.yield ();
+  Voice_runner.dispatch runner2 Voice_runner.Stop_ptt;
+  Eio.Promise.await transcribing_entered;
+  (* Concurrent Start_ptt while Voice_transcribing must be ignored *)
+  Voice_runner.dispatch runner2 (Voice_runner.Start_ptt { device = None });
+  Eio.Fiber.yield ();
+  Alcotest.(check int) "concurrent Start_ptt ignored during transcribing" 1
+    (Atomic.get started_recordings);
+  (* Cancel_ptt during Voice_transcribing transitions to Voice_idle immediately *)
+  Voice_runner.dispatch runner2 Voice_runner.Cancel_ptt;
+  (match Voice_runner.phase runner2 with
+  | Voice_runner.Voice_idle -> ()
+  | Voice_runner.Voice_recording _ | Voice_runner.Voice_transcribing
+  | Voice_runner.Voice_failed _ ->
+      Alcotest.fail "Cancel_ptt during Voice_transcribing left non-idle phase");
+  ignore (Eio.Promise.try_resolve release_transcribe () : bool);
+  Eio.Fiber.yield ();
+  Alcotest.(check (list string)) "cancelled transcription drops stale transcript"
+    [] !late_transcripts;
+  Alcotest.(check bool) "cancelled transcription cleaned audio" true
+    (List.mem "ptt_transcribe.wav" !cleaned_transcribe)
 
 let test_live_round1_wire_payloads () =
   (* P1-1: Live /api/v1/board emits "post_kind": "direct" for Human_post *)

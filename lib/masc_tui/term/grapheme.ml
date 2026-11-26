@@ -301,3 +301,10 @@ let truncate_to_width ~max_width ?(ellipsis = "…") text =
               else stopped := true
             end);
         String.sub clean 0 !cut_offset ^ ell
+
+let pad_right ~width text =
+  if width <= 0 then ""
+  else
+    let fitted = truncate_to_width ~max_width:width text in
+    let w = display_width fitted in
+    if w >= width then fitted else fitted ^ String.make (width - w) ' '

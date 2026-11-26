@@ -268,7 +268,8 @@ let test_schemas_are_the_descriptor_schemas () =
     in
     Alcotest.(check (list string))
       "the surface is read-only"
-      [ "tool_read_file"; "tool_search_files"; "masc_web_fetch"; "masc_board_post_get"; "masc_fusion_status" ]
+      [ "tool_read_file"; "tool_search_files"; "masc_web_fetch"; "keeper_artifact_read"
+      ; "masc_board_post_get"; "masc_fusion_status" ]
       names;
     List.iter
       (fun (schema : Masc_domain.tool_schema) ->
@@ -282,12 +283,22 @@ let test_schemas_are_the_descriptor_schemas () =
              | "tool_read_file" ->
                  descriptor.Descriptor.description
                  ^ " " ^ VAT.image_delivery_note
-             | "masc_board_post_get" | "masc_fusion_status" ->
+             | "masc_board_post_get" | "masc_fusion_status" | "keeper_artifact_read" ->
                  (* These descriptors supply input validation; standalone
                     reviewer descriptions state their narrower authority. *)
                  schema.description
              | _ -> descriptor.Descriptor.description
            in
+           (match schema.name with
+            | "keeper_artifact_read" ->
+              (* The Keeper description speaks of blob markers a review never
+                 sees. The review's reader states its two sources. *)
+              Alcotest.(check bool)
+                "artifact reader description names both of its sources" true
+                (Astring.String.is_infix ~affix:"by its exact reference" schema.description
+                 && Astring.String.is_infix ~affix:"full_text_sha256" schema.description
+                 && not (Astring.String.is_infix ~affix:"masc:blob" schema.description))
+            | _ -> ());
            Alcotest.(check string)
              (schema.name ^ " description is the descriptor's")
              expected
@@ -311,6 +322,22 @@ let test_schemas_are_the_descriptor_schemas () =
               Alcotest.(check (list string)) "Board adds source continuation"
                 ("cursor" :: (descriptor.Descriptor.input_schema |> member "properties" |> keys))
                 (schema.input_schema |> member "properties" |> keys)
+            | "keeper_artifact_read" ->
+              (* The stored-page members are the Keeper reader's own. A
+                 submitted artifact's reference and the source cursor are the
+                 additions, and no member is required: a call names reference
+                 or sha256. *)
+              let open Yojson.Safe.Util in
+              Alcotest.(check (list string))
+                "artifact reader keeps the Keeper members and adds reference and cursor"
+                (List.sort String.compare
+                   ("cursor" :: "reference"
+                    :: (descriptor.Descriptor.input_schema |> member "properties" |> keys)))
+                (schema.input_schema |> member "properties" |> keys |> List.sort String.compare);
+              Alcotest.(check bool)
+                "artifact reader requires no member"
+                true
+                (schema.input_schema |> member "required" = `Null)
             | _ ->
               Alcotest.(check bool)
                 (schema.name ^ " input schema is the descriptor's")
@@ -469,7 +496,8 @@ let test_workspace_producer_gets_owned_read_surface () =
   | Ok surface ->
     Alcotest.(check (list string))
       "workspace producer surface"
-      [ "tool_read_file"; "masc_web_fetch"; "masc_board_post_get"; "masc_fusion_status" ]
+      [ "tool_read_file"; "masc_web_fetch"; "keeper_artifact_read"
+      ; "masc_board_post_get"; "masc_fusion_status" ]
       (VAT.schemas surface
        |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name));
     (match
@@ -1218,6 +1246,131 @@ let test_web_fetch_refuses_a_private_target () =
     | Error _ -> ())
 ;;
 
+(* The web fetch stores a long page and answers with a window around a marker.
+   The judge reads the stored text through the artifact reader, and only
+   through a sha256 its own surface's fetch was answered with: the blob store
+   holds every Keeper's stored results, and a verdict's reason travels back to
+   the producer. The HTTP boundary is stubbed and counted; the store, the
+   fetch cache, the reader and the gate are the production ones. *)
+let test_stored_web_page_is_read_only_through_its_own_fetch () =
+  with_surface (fun config surface ->
+    let open Yojson.Safe.Util in
+    let long_page =
+      String.concat "\n"
+        (List.init 900 (fun line -> Printf.sprintf "line %04d of the long page" line))
+    in
+    let url = "https://github.com/jeong-sik/masc/pull/28988" in
+    let http_calls = ref 0 in
+    (* The offload writes under the base path the environment names, and a
+       stored page is answered from the cache within its lifetime. *)
+    with_env "MASC_BASE_PATH" config.base_path (fun () ->
+    with_env "MASC_WEB_SEARCH_CACHE_TTL_SEC" "600" (fun () ->
+      Masc.Tool_misc_web_fetch.with_http_fetch_for_test
+        (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ fetched ->
+          incr http_calls;
+          Ok
+            { Masc.Tool_misc_web_fetch.http_status = Some 200
+            ; final_url = fetched
+            ; redirect_count = 0
+            ; content_type = Some "text/plain"
+            ; downloaded_bytes = Some (String.length long_page)
+            ; body = long_page
+            })
+        (fun () ->
+          let fetch_on surface max_chars =
+            match
+              dispatch_text surface ~name:"masc_web_fetch"
+                ~args:(`Assoc [ "url", `String url
+                              ; "extractMode", `String "text"
+                              ; "maxChars", `Int max_chars ])
+            with
+            | Error reason -> Alcotest.failf "web fetch dispatch failed: %s" reason
+            | Ok output -> Yojson.Safe.from_string output
+          in
+          let read_on surface args =
+            match dispatch_text surface ~name:"keeper_artifact_read" ~args with
+            | Error reason -> Alcotest.failf "stored page read failed: %s" reason
+            | Ok output -> Yojson.Safe.from_string output
+          in
+          let refused_on surface args label =
+            match VAT.dispatch surface ~name:"keeper_artifact_read" ~args with
+            | Tool_result.Failed _ -> ()
+            | Tool_result.Completed _ -> Alcotest.failf "%s: the read answered" label
+            | Tool_result.Deferred _ -> Alcotest.failf "%s: the read deferred" label
+          in
+          (* The same body asked for whole tells what the fetch stored: it is
+             the text the small window was cut from. *)
+          let stored_text = fetch_on surface 100000 |> member "text" |> to_string in
+          let window = fetch_on surface 3000 in
+          Alcotest.(check bool) "a long page comes back as a window" true
+            (window |> member "truncated" = `Bool true);
+          Alcotest.(check bool) "the window leaves out the middle of the page" true
+            (Astring.String.is_infix ~affix:"line 0450 of the long page" stored_text
+             && not (Astring.String.is_infix ~affix:"line 0450 of the long page"
+                       (window |> member "text" |> to_string)));
+          let sha256 = window |> member "full_text_sha256" |> to_string in
+          let page_of offset args =
+            let current = read_on surface (`Assoc (("sha256", `String sha256) :: args)) in
+            Alcotest.(check string) "every page names the stored text" sha256
+              (current |> member "sha256" |> to_string);
+            Alcotest.(check int) "a page starts where it was asked to" offset
+              (current |> member "offset" |> to_int);
+            current
+          in
+          let rec collect offset parts =
+            let current = page_of offset [ "offset", `Int offset ] in
+            let content = current |> member "content" |> to_string in
+            if current |> member "eof" = `Bool true then List.rev (content :: parts)
+            else collect (current |> member "next_offset" |> to_int) (content :: parts)
+          in
+          let pages = collect 0 [] in
+          Alcotest.(check bool) "the page is read in more than one part" true
+            (List.length pages > 1);
+          Alcotest.(check string) "the joined pages are the stored full text" stored_text
+            (String.concat "" pages);
+          (* Search reads the same stored text: the hit is a line of the page
+             the window left out. *)
+          let hits = read_on surface (`Assoc [ "sha256", `String sha256
+                                              ; "contains", `String "line 0450 of the long page" ]) in
+          Alcotest.(check bool) "a search finds the line the window left out" true
+            (Astring.String.is_infix ~affix:"line 0450 of the long page"
+               (hits |> member "content" |> to_string));
+          (* A stored text that no fetch of this review returned stays
+             unreadable even though its bytes are in the store. *)
+          let store = Tool_blob_store.create ~base_path:config.base_path in
+          let unfetched =
+            Tool_blob_store.put_durable store
+              ~bytes:"another keeper's stored result" ~mime:"text/markdown"
+          in
+          refused_on surface
+            (`Assoc [ "sha256", `String unfetched.Tool_output.sha256 ])
+            "a stored text no fetch of this review returned";
+          refused_on surface
+            (`Assoc [ "sha256", `String sha256; "reference", `String "artifact:small.txt" ])
+            "both forms in one call";
+          refused_on surface (`Assoc []) "neither form";
+          (* Another review starts with nothing admitted. Its own fetch of the
+             same page is answered from the cache, makes no HTTP request, and
+             carries the same hash: from then on the page is readable there. *)
+          let other =
+            match VAT.create ~config ~producer ~submitted_evidence:[] with
+            | Error reason -> Alcotest.failf "second surface creation failed: %s" reason
+            | Ok other -> other
+          in
+          let fetches_so_far = !http_calls in
+          refused_on other (`Assoc [ "sha256", `String sha256 ])
+            "a second review before its own fetch";
+          let cached = fetch_on other 3000 in
+          Alcotest.(check int) "the second fetch reaches no HTTP server" fetches_so_far !http_calls;
+          Alcotest.(check string) "a cached answer carries the stored hash" sha256
+            (cached |> member "full_text_sha256" |> to_string);
+          let first_page = page_of 0 [] in
+          let same_page = read_on other (`Assoc [ "sha256", `String sha256 ]) in
+          Alcotest.(check string) "the second review reads the same first page"
+            (first_page |> member "content" |> to_string)
+            (same_page |> member "content" |> to_string)))))
+;;
+
 let test_remote_surface_keeps_its_captured_destination () =
   let log_dir = temp_dir () in
   Fun.protect ~finally:(fun () -> rm_rf log_dir) (fun () ->
@@ -1644,6 +1797,8 @@ let () =
             test_web_fetch_is_offered_and_dispatches
         ; Alcotest.test_case "web fetch refuses a private target" `Quick
             test_web_fetch_refuses_a_private_target
+        ; Alcotest.test_case "a stored web page is read only through its own fetch" `Quick
+            test_stored_web_page_is_read_only_through_its_own_fetch
         ] )
     ; ( "prompt"
       , [ Alcotest.test_case "prompt states the available surface" `Quick

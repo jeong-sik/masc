@@ -380,7 +380,7 @@ let test_task_capability_is_submission_bound () = with_workspace (fun config _ro
   let names authority = (A.goal_review_lookup authority).schemas
     |> List.map (fun (schema : Types_core.tool_schema) -> schema.name) in
   Alcotest.(check (list string)) "Task-free authority retains the existing schema surface"
-    ["tool_read_file";"masc_web_fetch";"masc_board_post_get";"masc_fusion_status"] (names without_task);
+    ["tool_read_file";"masc_web_fetch";"keeper_artifact_read";"masc_board_post_get";"masc_fusion_status"] (names without_task);
   ignore (Workspace.add_task config ~title:"Exact Task observation" ~priority:1 ~description:"Original Task body");
   let backlog = get (Workspace.read_backlog_r config) in
   let task = List.find (fun (task : Masc_domain.task) -> task.title="Exact Task observation") backlog.tasks in

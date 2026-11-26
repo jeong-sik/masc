@@ -24,9 +24,8 @@ let tool_name = function
 ;;
 
 (* The Board and Fusion readers are always offered. The Task reader comes only
-   when the submission froze a Task. The artifact reader comes when the
-   aggregate evidence cap kept a complete artifact out of the review request:
-   the submitted record holds that content, and nothing else reads it there. *)
+   when the submission froze a Task. The artifact reader is listed beside the
+   web fetch it continues, so each surface names it in its own tool list. *)
 let source_tools submitted_evidence =
   let has_task_source = List.exists (function
     | Workspace_verification_store.Evidence_collaboration {reference; _} ->
@@ -35,11 +34,8 @@ let source_tools submitted_evidence =
        | Some ((Workspace_verification_store.Board_source | Workspace_verification_store.Fusion_source), _) | None -> false)
     | Evidence_note _ | Evidence_artifact _ | Evidence_invalid_reference
     | Evidence_artifact_unreadable _ | Evidence_artifact_binary _ -> false) submitted_evidence in
-  let has_withheld_artifact =
-    Workspace_verification_store.withheld_artifact_references submitted_evidence <> [] in
   [Board_source; Fusion_source]
   @ (if has_task_source then [Task_source] else [])
-  @ (if has_withheld_artifact then [Artifact_source] else [])
 
 type t =
   { ownership_root : string
@@ -48,6 +44,7 @@ type t =
   ; submitted_evidence : Workspace_verification_store.submitted_evidence_item list
   ; producer_scope : producer_scope
   ; tools : (tool * Keeper_tool_descriptor.t) list
+  ; stored_pages : string list Atomic.t
   }
 
 and producer_scope =
@@ -85,27 +82,62 @@ let exact_task_source_schema =
       "minItems", `Int 1; "maxItems", `Int 1]];
     "required", `List [`String "task_ids"]; "additionalProperties", `Bool false]
 
-(* A Keeper's keeper_artifact_read restores a stored blob by sha256. This reader
-   serves a text artifact frozen in the submission by its reference instead, so
-   the verifier declares its own input; dispatch validates against it. *)
-let exact_artifact_schema =
-  `Assoc
-    [ "type", `String "object"
-    ; ( "properties"
-      , `Assoc
-          [ ( "reference"
-            , `Assoc
-                [ "type", `String "string"
-                ; ( "description"
-                  , `String
-                      "Exact reference of one submitted text artifact, spelled \
-                       as the evidence list spells it (for example \
-                       artifact:evidence/run.log)." )
-                ] )
-          ] )
-    ; "required", `List [ `String "reference" ]
-    ; "additionalProperties", `Bool false
-    ]
+(* A Keeper's keeper_artifact_read pages and searches a stored blob by sha256.
+   This reader takes that same request for the full text a masc_web_fetch of
+   the review stored, and a reference for a text artifact frozen in the
+   submission. The stored-page properties are the Keeper reader's own, so
+   their bounds do not drift. A flat schema cannot require one of the two
+   forms; the read refuses a call that names neither or both. *)
+let submitted_artifact_property =
+  ( "reference"
+  , `Assoc
+      [ "type", `String "string"
+      ; ( "description"
+        , `String
+            "Exact reference of one submitted text artifact, spelled as the \
+             evidence list spells it (for example artifact:evidence/run.log)." )
+      ] )
+;;
+
+let stored_page_sha256_description =
+  "full_text_sha256 from the [TRUNCATED ...] marker of a masc_web_fetch result \
+   of this review. No other stored content is readable."
+;;
+
+(* The Keeper description speaks of blob markers a review never sees. *)
+let with_description description = function
+  | `Assoc members ->
+    `Assoc (("description", `String description) :: List.remove_assoc "description" members)
+  | other -> other
+;;
+
+let artifact_reader_schema (keeper : Keeper_tool_descriptor.t) =
+  let open Result.Syntax in
+  let* fields =
+    match keeper.input_schema with
+    | `Assoc fields -> Ok fields
+    | _ -> Error "keeper_artifact_read input is not an object schema"
+  in
+  let* stored_page_properties =
+    match List.assoc_opt "properties" fields with
+    | Some (`Assoc properties) -> Ok properties
+    | _ -> Error "keeper_artifact_read declares no object properties"
+  in
+  let stored_page_properties =
+    List.map
+      (fun (name, property) ->
+         name,
+         if String.equal name "sha256"
+         then with_description stored_page_sha256_description property
+         else property)
+      stored_page_properties
+  in
+  Ok
+    (`Assoc
+       [ "type", `String "object"
+       ; "properties", `Assoc (stored_page_properties @ [ submitted_artifact_property ])
+       ; "additionalProperties", `Bool false
+       ])
 ;;
 
 let source_pagination_schema = function
@@ -138,8 +170,11 @@ let descriptor_of_tool tool =
        Result.map (fun input_schema -> tool, { descriptor with input_schema })
          (source_pagination_schema exact_task_source_schema)
      | Artifact_source ->
-       Result.map (fun input_schema -> tool, { descriptor with input_schema })
-         (source_pagination_schema exact_artifact_schema)
+       (match artifact_reader_schema descriptor with
+        | Error message -> Error message
+        | Ok schema ->
+          Result.map (fun input_schema -> tool, { descriptor with input_schema })
+            (source_pagination_schema schema))
      | Read_file | Search_files | Web_fetch -> Ok (tool, descriptor))
   | [] ->
     Error
@@ -172,11 +207,15 @@ let create ~config ~producer ~submitted_evidence =
     | Ok None -> Ok Workspace_producer
     | Ok (Some producer_meta) -> Ok (Keeper_producer producer_meta)
   in
+  (* The artifact reader follows the web fetch: a long page comes back as a
+     window around a marker, and the marker's full_text_sha256 is what the
+     reader pages. *)
   let* tools =
     resolve_tools
       ((match producer_scope with
-        | Keeper_producer _ -> [Read_file; Search_files; Web_fetch]
-        | Workspace_producer -> [Read_file; Web_fetch]) @ source_tools submitted_evidence)
+        | Keeper_producer _ -> [Read_file; Search_files; Web_fetch; Artifact_source]
+        | Workspace_producer -> [Read_file; Web_fetch; Artifact_source])
+       @ source_tools submitted_evidence)
   in
   let* ownership_root =
     match producer_scope with
@@ -202,7 +241,7 @@ let create ~config ~producer ~submitted_evidence =
     | Workspace_producer -> Ok None
     | Keeper_producer meta -> Keeper_sandbox_remote_lane.capture_read_authority ~config ~meta () in
   Ok { ownership_root; read_authority; config; producer_scope; tools
-     ; submitted_evidence }
+     ; submitted_evidence; stored_pages = Atomic.make [] }
 ;;
 
 (* The Goal proof surface. A Goal names no producer: it is a shared intent
@@ -219,7 +258,8 @@ let create ~config ~producer ~submitted_evidence =
    the checkouts under them. *)
 let create_goal_proof ~(config : Workspace.config) ~submitted_evidence =
   let open Result.Syntax in
-  let* tools = resolve_tools ([Read_file; Web_fetch] @ source_tools submitted_evidence) in
+  let* tools =
+    resolve_tools ([Read_file; Web_fetch; Artifact_source] @ source_tools submitted_evidence) in
   let project_root =
     Workspace_verification_store.project_root_of_base_path config.base_path
   in
@@ -228,7 +268,7 @@ let create_goal_proof ~(config : Workspace.config) ~submitted_evidence =
       (Filename.concat project_root Playground_paths.all_playgrounds_prefix)
   in
   Ok { ownership_root; read_authority=None; config; producer_scope = Workspace_producer; tools
-     ; submitted_evidence }
+     ; submitted_evidence; stored_pages = Atomic.make [] }
 ;;
 
 (* The listing answers one question for the evaluator: where do the paths the
@@ -453,7 +493,7 @@ let schema_of_tool (tool, (descriptor : Keeper_tool_descriptor.t)) : Types_core.
        | Task_source ->
          "Read exactly one Task frozen by an explicit task:<id> reference in this verification submission. Supply task_ids with that one id. Includes the canonical Task state, completion timestamp and notes plus primary backlog revision; no live listing, recovery snapshot or other Task is read. A Done row is committed state, not complete approval history or external acceptance. Large sources return source_json_page fragments; follow next_cursor to null and concatenate the exact JSON. Read-only."
        | Artifact_source ->
-         "Read one text artifact frozen in this verification submission by its exact reference. Offered when the evidence byte cap kept a complete artifact out of the review request. It serves the content captured at submission, never the producer's current file. Large artifacts return source_json_page content fragments under the bridge byte budget; follow next_cursor to null and concatenate content to recover the exact text. Read-only."
+         "Read one text artifact frozen in this verification submission by its exact reference, or page and search the full text of a long masc_web_fetch result of this review by the full_text_sha256 its [TRUNCATED ...] marker names. A stored text is readable only when a masc_web_fetch of this review returned its sha256. The submitted artifact serves the content captured at submission, never the producer's current file. Large sources return source_json_page content fragments under the bridge byte budget; follow next_cursor to null and concatenate content to recover the exact text. Read-only."
        | Search_files | Web_fetch -> descriptor.description)
   ; input_schema = descriptor.input_schema
   }
@@ -522,6 +562,73 @@ let result_of_execution (execution : Keeper_tool_execution.t) =
    playground, which is the property [None] is protecting. *)
 type run_error = Runtime_error of string | Collaboration_error of Verification_collaboration_evidence.error
 
+(* The sha256 a masc_web_fetch result names for the full text it stored. A long
+   page comes back as a window around a marker, and a cached answer carries the
+   same hash as the fetch that stored it, so the result is where both paths
+   cross. A failed fetch names none. *)
+let stored_page_of_result (result : Tool_result.result) =
+  match Tool_result.data result with
+  | `Assoc fields ->
+    (match List.assoc_opt "full_text_sha256" fields with
+     | Some (`String sha256) -> Some sha256
+     | _ -> None)
+  | _ -> None
+;;
+
+(* Lookups of one review may run at once. The list is replaced by a compare
+   and swap, so a concurrent fetch never drops the hash another one added. *)
+let remember_stored_page stored_pages sha256 =
+  let rec loop () =
+    let current = Atomic.get stored_pages in
+    if not (List.mem sha256 current)
+       && not (Atomic.compare_and_set stored_pages current (sha256 :: current))
+    then loop ()
+  in
+  loop ()
+;;
+
+(* What one call of the artifact reader asks for. The schema lists the members
+   of both forms and cannot require either, so the call says which it is. The
+   submitted form has two members of its own; every other member belongs to
+   the stored form, whose request the Keeper reader parses. *)
+type artifact_read =
+  | Submitted_artifact
+  | Stored_page of { sha256 : string }
+
+let submitted_form_members = [ "reference"; "cursor" ]
+
+let neither_form =
+  "pass reference for a submitted text artifact, or sha256 for the full text a \
+   masc_web_fetch of this review stored"
+;;
+
+let artifact_read_of_args = function
+  | `Assoc fields ->
+    let names = List.map fst fields in
+    if List.mem "sha256" names then
+      if List.exists (fun name -> List.mem name submitted_form_members) names
+      then
+        Error
+          "pass either reference (a submitted text artifact) or sha256 (the full \
+           text a masc_web_fetch stored), not both"
+      else
+        (match List.assoc_opt "sha256" fields with
+         | Some (`String sha256) -> Ok (Stored_page { sha256 })
+         | _ -> Error "sha256 is a string")
+    else
+      (match List.assoc_opt "reference" fields with
+       | Some (`String _) when List.for_all (fun name -> List.mem name submitted_form_members) names ->
+         Ok Submitted_artifact
+       | Some (`String _) ->
+         Error
+           "a submitted artifact continues with cursor. offset, max_bytes and \
+            contains read a stored page and need its sha256"
+       | Some _ -> Error "reference is a string"
+       | None -> Error neither_form)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) ->
+    Error "the read is an object naming reference or sha256"
+;;
+
 let run t tool ~args =
   let execution_result execution =
     result_of_execution execution |> Result.map_error (fun detail -> Runtime_error detail) in
@@ -568,12 +675,38 @@ let run t tool ~args =
   | (Keeper_producer _ | Workspace_producer), Task_source ->
     collaboration_read Verification_collaboration_evidence.read_task
   | (Keeper_producer _ | Workspace_producer), Artifact_source ->
-    collaboration_read Verification_collaboration_evidence.read_artifact
+    (* HIGH-RISK-UNREVIEWED: what a review may read from the workspace's blob
+       store. Only a sha256 this surface's own masc_web_fetch answered with is
+       admitted. A sha256 quoted in submitted evidence, a prompt or a Board
+       post names no readable text here: the blob store also holds every
+       Keeper's stored tool results, and a verdict's reason travels back to
+       the producer. *)
+    (match artifact_read_of_args args with
+     | Error message ->
+       Error (Collaboration_error (Verification_collaboration_evidence.Invalid_request message))
+     | Ok Submitted_artifact ->
+       collaboration_read Verification_collaboration_evidence.read_artifact
+     | Ok (Stored_page { sha256 }) when List.mem sha256 (Atomic.get t.stored_pages) ->
+       Keeper_artifact_read.handle ~base_path:t.config.Workspace.base_path ~args
+       |> execution_result
+     | Ok (Stored_page _) ->
+       Error
+         (Collaboration_error
+            (Verification_collaboration_evidence.Access_denied
+               "this review's masc_web_fetch did not store that text. A stored \
+                page is read by the full_text_sha256 its own fetch returned; \
+                fetch the URL again to obtain one")))
   | (Keeper_producer _ | Workspace_producer), Web_fetch ->
-    Tool_misc_web_fetch.handle
-      ~tool_name:(tool_name Web_fetch)
-      ~start_time:(Tool_timing.start ())
-      args
+    let result =
+      Tool_misc_web_fetch.handle
+        ~tool_name:(tool_name Web_fetch)
+        ~start_time:(Tool_timing.start ())
+        args
+    in
+    (match stored_page_of_result result with
+     | Some sha256 -> remember_stored_page t.stored_pages sha256
+     | None -> ());
+    result
     |> Keeper_tool_execution.of_tool_result
     |> execution_result
 ;;

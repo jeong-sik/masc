@@ -407,27 +407,6 @@ let submitted_evidence_items_transport_to_yojson items =
     items
 ;;
 
-(* The references of the complete text artifacts the aggregate cap keeps out of
-   the review request. Their whole content is in the submitted record, so the
-   judge's record reader serves exactly these. It is the same choice as the
-   transport: [carried_artifact_indices] decides both, so the reader is never
-   offered for a carried item nor missing for a withheld one. *)
-let withheld_artifact_references (items : submitted_evidence_item list) =
-  let carried = carried_artifact_indices items in
-  List.filter_map
-    (fun (index, item) ->
-       match item with
-       | Evidence_artifact { reference; truncated = false; _ }
-         when not (List.mem index carried) -> Some reference
-       | Evidence_artifact _
-       | Evidence_note _
-       | Evidence_invalid_reference
-       | Evidence_artifact_unreadable _
-       | Evidence_artifact_binary _
-       | Evidence_collaboration _ -> None)
-    (List.mapi (fun index item -> index, item) items)
-;;
-
 let submitted_evidence_access_transport_to_yojson = function
   | Evidence_available { request; items } ->
     `Assoc

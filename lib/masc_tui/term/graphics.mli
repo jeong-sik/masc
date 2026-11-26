@@ -27,6 +27,10 @@ val fit_rows :
 (** Aspect-preserving rows that fit both terminal dimensions. Without measured
     pixel geometry, retains [max 1 rows] rather than inventing cell shape. *)
 
+val default_cell_pixels : int * int
+(** Fallback 1:2 monospace cell aspect ratio [(8, 16)] when terminal pixel
+    dimensions were not reported by startup probe. *)
+
 val fit_cells :
   cell_pixels:(int * int) option ->
   image_pixels:(int * int) option ->
@@ -239,6 +243,15 @@ val iterm2_place : data:string -> placement -> string
 val tmux_wrapped : string -> string
 (** Wrap terminal escape bytes in a tmux DCS passthrough envelope, doubling
     every internal [ESC] byte. *)
+
+val maybe_tmux_wrapped : in_tmux:bool -> string -> string
+(** Apply {!tmux_wrapped} when [in_tmux] is [true], else return [payload]
+    unchanged. *)
+
+val place_at_cursor : in_tmux:bool -> row:int -> col:int -> string -> string
+(** Save cursor, move to 1-based [(row, col)], emit [payload] (wrapped in tmux
+    passthrough when [in_tmux]), and restore cursor. Returns [""] when
+    [payload] is empty. *)
 
 type image_region = {
   top : int;

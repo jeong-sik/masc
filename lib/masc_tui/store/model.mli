@@ -424,6 +424,10 @@ val can_zoom_current_view : t -> bool
     screen (Keeper detail, [Keepers] with a selected keeper, [Knowledge], or a
     master-detail tab in [Work], [Runtime], or [Infra]). *)
 
+val is_zoomed_active : t -> bool
+(** Single SSOT for whether the active view is currently rendered zoomed
+    ([m.nav.zoomed && can_zoom_current_view m]). *)
+
 val detail_visible : t -> bool
 (** Single responsive SSOT for whether the active screen currently renders a
     detail/inspector surface (either split-visible at the current viewport

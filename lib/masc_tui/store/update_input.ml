@@ -8,32 +8,6 @@ let is_printable_key (ev : Keymap.Input.key_event) =
 let strip_newlines s =
   String.map (function '\n' | '\r' -> ' ' | c -> c) s
 
-let open_custom_inline_modal ~(kind : Nav.inline_action_kind) (m : Model.t)
-    (fields : Model.modal_form_field list) =
-  let modal : Model.inline_modal_state =
-    {
-      kind;
-      fields;
-      active_field = 0;
-      submitting = false;
-      submission_id = 0;
-      note_prefill_id = None;
-      error = None;
-    }
-  in
-  let modal_edit_cursor = String.length (Model.modal_active_field_value modal) in
-  let nav =
-    {
-      m.nav with
-      overlay = Some (Nav.Inline_action kind);
-      return_overlay = None;
-      filter_focused = false;
-      modal_edit_cursor;
-    }
-  in
-  let drafts = Drafts.set_focus false m.drafts in
-  ({ m with nav; drafts; inline_modal = Some modal }, [])
-
 let is_korean_char (s : string) =
   if String.length s = 0 then false
   else
@@ -266,7 +240,7 @@ let dispatch_settings_overlay_key ~now (m : Model.t)
   | Keymap.Input.Char "d" when norm.mods.ctrl && not norm.mods.alt ->
       Some (stage_remove_settings_key ~now m)
   | Keymap.Input.Char "e" when norm.mods.ctrl && not norm.mods.alt ->
-      Some (Update_actions.execute_action ~now m Keymap.Open_external)
+      Some (Update_actions.execute_action ~now m Keymap.Open_external_editor)
   | Keymap.Input.Char "o" when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m Keymap.Open_external)
   | Keymap.Input.Char "?" when is_printable_key norm ->
@@ -1039,26 +1013,6 @@ let dispatch_system_gate_key ~now (m : Model.t) gate
       | Keymap.Input.Function _ ) ) ->
       None
 
-let open_runtime_assign_modal (m : Model.t) ?(keeper_default = "")
-    ?(runtime_default = "") () =
-  open_custom_inline_modal ~kind:Nav.Runtime_assign_form m
-    [
-      {
-        key = "assign_keeper";
-        label = Say.make ~ko:"대상 키퍼" ~en:"Target keeper";
-        value = keeper_default;
-        required = false;
-        secret = false;
-      };
-      {
-        key = "assign_runtime_id";
-        label = Say.make ~ko:"런타임 / 레인 ID" ~en:"Runtime / lane ID";
-        value = runtime_default;
-        required = false;
-        secret = false;
-      };
-    ]
-
 let key_char_opt = function
   | Keymap.Input.Char s -> Some s
   | Keymap.Input.Enter
@@ -1297,8 +1251,7 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
             | Nav.Keepers -> (
                 match printable_char with
                 | Some "A"
-                  when (m.nav.pane_index >= 1
-                        || (m.nav.zoomed && Model.can_zoom_current_view m))
+                  when (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
                        && Option.is_some (Model.selected_keeper_name m)
                        && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                             Nav.Keeper_memory ->
@@ -1575,7 +1528,9 @@ let dispatch_keeper_config_key ~now (m : Model.t)
                     ~default:""
               | None -> ""
             in
-            Some (open_runtime_assign_modal m ~keeper_default:name ~runtime_default ())
+            Some
+              (Update_actions.open_runtime_assign_modal m ~keeper_default:name
+                 ~runtime_default ())
         | None -> None)
     | Keymap.Input.Char _
     | Keymap.Input.Tab

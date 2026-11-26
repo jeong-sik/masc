@@ -18,6 +18,7 @@
   masc.sse_wire
   masc.build_version
   masc.build_commit
+  masc.string_util
   terminal_size
   masc_core
   fs_compat

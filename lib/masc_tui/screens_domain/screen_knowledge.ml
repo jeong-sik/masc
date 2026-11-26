@@ -676,7 +676,7 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   in
   ignore (H.draw_pills ~grid ~rect:filter_rect ~theme pills);
   let selected_post = Knowledge_store.board_detail_post k in
-  if model.nav.zoomed then
+  if Model.is_zoomed_active model then
     draw_board_preview ~grid ~cache ~rect:body_rect ~theme ~bp ~lang ~now_unix
       ~model ~k selected_post ~focused:(Model.body_has_focus model)
   else
@@ -1571,7 +1571,7 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
   ignore
     (H.draw_pills ~grid ~rect:bar_rect ~theme ~right_hint:lint_hint_str
        mode_pills);
-  if model.nav.zoomed then begin
+  if Model.is_zoomed_active model then begin
     let main_rect, side_rect =
       Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.66
         ~top_ratio:0.68 bp body_rect
@@ -2251,7 +2251,7 @@ let render_artifacts ~(model : Model.t) ~cache ~(rect : Rect.t)
                ~en:"< / > Rev · [c] Check · [P] Share · [Y] URL · [z] Zoom"))
        pills);
   let sel_art = Knowledge_store.selected_artifact k in
-  if model.nav.zoomed then
+  if Model.is_zoomed_active model then
     draw_rich_artifact_pane ~grid ~cache ~rect:body_rect ~theme ~bp ~lang ~k
       ~scroll:k.detail_scroll_offset ~show_published_fallback:true
       ~focused:(Model.body_has_focus model) sel_art
@@ -3192,7 +3192,7 @@ let render_memory ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Knowledge_store.Mem_health_ledger | Knowledge_store.Mem_context ->
           draw_memory_subview_card ~grid ~cache ~rect ~theme ~bp ~lang ~k ~focused
   in
-  if model.nav.zoomed || diagram_open then
+  if Model.is_zoomed_active model || diagram_open then
     draw_right ~rect:body_rect ~focused:(Model.body_has_focus model)
   else
     let left_rect, right_rect =

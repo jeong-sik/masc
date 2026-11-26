@@ -139,84 +139,37 @@ let project_model_input ~base_path ~gate_replay_evidence messages =
   Keeper_gate_replay.project_model_inputs ~base_path gate_replay_evidence messages
 ;;
 
-let relative_path_has_segment_prefix prefix raw =
-  String.equal raw prefix || String.starts_with ~prefix:(prefix ^ "/") raw
-;;
+(* HIGH-RISK-UNREVIEWED: sandbox path boundary, needs human review.
+   Returns where the tool fact belongs. A call that names no file is
+   [Pathless], a keeper-timeline fact with no document; a call that names one
+   gets the resolver's attribution, minted once here.
 
-(* "scratch" is gone: no code ever created that directory, and the tool schema
-   that taught it ('repos/X' or 'scratch/X') is removed in this change. It only
-   ever mattered for a path a model invented from that sentence.
-
-   "repos" stays for now. Removing it changes how {file_path; cwd} pairs anchor
-   — the enclosing function decides whether a relative path is already
-   workspace-rooted or is relative to cwd, and it can only decide that from a
-   fixed vocabulary. That is the same layout assumption this work removes
-   elsewhere, so it needs the resolver the tools themselves use rather than a
-   shorter list. Separate change. *)
-let sandbox_rooted_relative_path raw =
-  Filename.is_relative raw
-  && List.exists
-       (fun prefix -> relative_path_has_segment_prefix prefix raw)
-       [ Playground_paths.bundle_repos_dirname; Common.masc_dirname; "playground" ]
-;;
-
-let non_empty_string_member name input =
-  match Yojson.Safe.Util.member name input with
-  | `String raw ->
-    let trimmed = String.trim raw in
-    if trimmed = "" then None else Some raw
-  | _ -> None
-;;
-
-(* #23469 (task-1733 completion): keeper file tools resolve relative paths
-   against the keeper's playground sandbox root ([keeper_playground_root]),
-   never against the server base path. The observation join mirrors that
-   contract, otherwise the emitted partition describes a file the tool never
-   touched: a sandbox-rooted [repos/<id>/…] edit used to be re-anchored at
-   the server base path and attributed through whichever repository happened
-   to be registered there, and a bare relative path with no [cwd] leaked
-   through unanchored for the resolver to join at the base path. Every
-   relative shape therefore anchors at [sandbox_root]; absolute paths pass
-   through untouched, and a pathless tool call stays a keeper-timeline fact
-   at [base_path]. *)
-let observation_file_path_from_tool_input ~sandbox_root input =
-  let under_sandbox p = Filename.concat sandbox_root p in
-  match Tool_input_path.tool_input_file_path input with
-  | None -> None
-  | Some p when Filename.is_relative p ->
-    Some
-      (if sandbox_rooted_relative_path p
-       then under_sandbox p
-       else (
-         match non_empty_string_member "cwd" input with
-         | Some cwd when Filename.is_relative cwd ->
-           under_sandbox (Filename.concat cwd p)
-         | Some cwd -> Filename.concat cwd p
-         | None -> under_sandbox p))
-  | Some p -> Some p
-;;
-
-(* Returns where the tool fact belongs. A call that names
-   no file is [Pathless], a keeper-timeline fact with no document; a call
-   that names one gets the resolver's attribution, minted once here. *)
+   The file is the one the tool opened (#52082). The tools turn the cwd a
+   Keeper names into a host directory with
+   [Keeper_tool_shared_runtime.host_path_of_keeper_visible_path], then join
+   the file path to it through the same function; a blank cwd leaves the
+   Keeper's playground root. The observation asks that function the same two
+   questions, so a relative [repos/…] path under a [cwd] lands where the tool
+   read it, and a Docker container path maps onto the same mount. *)
 let observation_attribution_for_tool_input ~config ~meta input =
-  let base_dir = Keeper_alerting_path.project_root_of_config config in
-  let sandbox_root =
-    Keeper_tool_shared_runtime.keeper_observation_sandbox_root ~config ~meta
+  let host_path ?host_cwd visible =
+    Keeper_tool_shared_runtime.host_path_of_keeper_visible_path
+      ~config
+      ~meta
+      ?host_cwd
+      visible
   in
-  match observation_file_path_from_tool_input ~sandbox_root input with
+  match Tool_input_path.tool_input_file_path input with
   | None -> Agent_observation.Pathless
   | Some visible ->
-    let host_path =
-      Keeper_tool_shared_runtime.keeper_observation_host_path_of_visible_path
-        ~config
-        ~meta
-        visible
-    in
-    Agent_observation.File
-      (Keeper_tool_filesystem_runtime.resolve_write_attribution
-         ~base_dir
-         ~file_path:host_path)
+    let host_cwd = host_path (Safe_ops.json_string ~default:"" "cwd" input) in
+    (match host_path ?host_cwd visible with
+     | None -> Agent_observation.Pathless
+     | Some file_path ->
+       Agent_observation.File
+         (Keeper_tool_filesystem_runtime.resolve_write_attribution
+            ~base_dir:(Keeper_alerting_path.project_root_of_config config)
+            ~file_path))
 ;;
 
 (* The registry projection is durable keeper JSON, which omits the

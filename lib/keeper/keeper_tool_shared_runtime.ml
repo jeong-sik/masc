@@ -63,39 +63,28 @@ let keeper_default_write_root ~(config : Workspace.config) ~(meta : keeper_meta)
   keeper_playground_root ~config ~meta
 ;;
 
-(* #23469 (task-1733): observation partitions must interpret keeper-relative
-   tool paths against the same root the file tools resolve against — the
-   keeper's playground sandbox — never the server base path. Unlike
-   [keeper_playground_root] this is a pure path computation: the observation
-   write path is fire-and-forget and must not run the
-   [ensure_sandbox_bundle] directory side effect. Anchored at the normalised
-   project root so a [.masc]-suffixed [config.base_path] cannot double up,
-   and stripped of the bundle-root trailing slash so downstream structural
-   parsers never see an empty path segment. *)
-let keeper_observation_sandbox_root
-      ~(config : Workspace.config)
-      ~(meta : keeper_meta)
-  =
-  Filename.concat
-    (Keeper_alerting_path.project_root_of_config config)
-    (Keeper_alerting_path.strip_trailing_slashes
-       (Keeper_sandbox.host_root_rel_of_meta ~meta))
-;;
-
-let keeper_observation_host_path_of_visible_path
+(* A Docker Keeper's container sees its host root mounted at
+   [Keeper_sandbox.container_root]. The host side of that mount is
+   [Keeper_sandbox.host_root_abs_of_meta], the same root the Docker command
+   rewrite and the file tools' default cwd use, so a container path maps back
+   onto it. A tree the endpoint owns has no host mount: its absolute paths keep
+   their identity and the remote lane translates them. Pure path computation;
+   nothing is created on disk. *)
+let host_path_of_container_path
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       raw_path
   =
-  if Filename.is_relative raw_path
-     || meta.sandbox_profile <> Keeper_types_profile_sandbox.Docker
-  then raw_path
-  else (
-    let strip = Keeper_alerting_path.strip_trailing_slashes in
+  match Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile with
+  | Keeper_types_profile_sandbox.Endpoint_owned -> raw_path
+  | Keeper_types_profile_sandbox.Shared_mount ->
     let normalize path = Keeper_alerting_path.normalize_path_for_check_stripped path in
     let container_root = Keeper_sandbox.container_root meta.name |> normalize in
     let raw_norm = normalize raw_path in
-    let host_root = keeper_observation_sandbox_root ~config ~meta |> strip in
+    let host_root =
+      Keeper_sandbox.host_root_abs_of_meta ~config meta
+      |> Keeper_alerting_path.strip_trailing_slashes
+    in
     if String.equal raw_norm container_root
     then host_root
     else if String.starts_with ~prefix:(container_root ^ "/") raw_norm
@@ -107,7 +96,7 @@ let keeper_observation_host_path_of_visible_path
           (String.length raw_norm - String.length container_root - 1)
       in
       Filename.concat host_root suffix)
-    else raw_path)
+    else raw_path
 ;;
 
 let safe_file_exists path =
@@ -150,15 +139,18 @@ let user_message_error (rej : Keeper_alerting_path.keeper_path_rejection) =
 
 (* HIGH-RISK-UNREVIEWED: sandbox path boundary, needs human review.
    The one place a path a Keeper names becomes a host path (#29964). Read,
-   Grep, Execute, Edit/Write and keeper_code_query all come through here, so
-   the same spelling names the same host location whichever tool receives it:
+   Grep, Execute, Edit/Write, keeper_code_query and the observation
+   attribution of a tool call all come through here, so the same spelling
+   names the same host location whichever reader receives it (#52082):
    - a Docker Keeper's container-visible absolute path maps to its host mount;
    - any other absolute path keeps its identity;
    - a relative path joins [host_cwd] when the tool resolved one, and the
      Keeper's playground root otherwise.
+   Both the mount and the playground root are
+   [Keeper_sandbox.host_root_abs_of_meta]; there is no second root.
    [None] means the caller named nothing; what that means (a required path, or
    a default cwd) is the tool's to say. The result is not yet confined: every
-   caller hands it to a [Keeper_alerting_path] resolver, which owns the
+   tool hands it to a [Keeper_alerting_path] resolver, which owns the
    allowed-root check and its typed rejections. *)
 let host_path_of_keeper_visible_path
       ~(config : Workspace.config)
@@ -170,7 +162,9 @@ let host_path_of_keeper_visible_path
   | "" -> None
   | visible_path ->
     let host_path =
-      keeper_observation_host_path_of_visible_path ~config ~meta visible_path
+      if Filename.is_relative visible_path
+      then visible_path
+      else host_path_of_container_path ~config ~meta visible_path
     in
     if Filename.is_relative host_path
     then (

@@ -101,21 +101,7 @@ let test_config_agent_projection_docker () =
   Alcotest.(check string)
     "config-backed host root rel"
     ".masc/playground/docker/alpha/"
-    (Keeper_sandbox.host_root_rel_of_config_agent ~config ~agent_name);
-  let visible =
-    Filename.concat
-      (Keeper_sandbox.container_root agent_name)
-      "repos/masc/lib/foo.ml"
-  in
-  let expected =
-    Filename.concat
-      config.Workspace.base_path
-      ".masc/playground/docker/alpha/repos/masc/lib/foo.ml"
-  in
-  Alcotest.(check string)
-    "sandbox-visible path maps to backend-scoped host path"
-    expected
-    (Keeper_sandbox.host_path_of_visible_path ~config ~agent_name visible)
+    (Keeper_sandbox.host_root_rel_of_config_agent ~config ~agent_name)
 
 (* A keeper with no TOML has no profile, and that is the answer. It used to
    become the Local backend rooted at .masc/playground/<name>/, which was

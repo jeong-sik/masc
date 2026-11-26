@@ -52,9 +52,9 @@ let make_meta ?(sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh) name 
      it there is rejected as outside the current schema. Set it on the record
      the fixture returns instead. Before this, the parameter was accepted and
      dropped: a case asking for [Docker] got a Local keeper, and
-     [keeper_observation_host_path_of_visible_path] returns early for
-     non-Docker profiles, so the container->host mapping the Docker case is
-     named for never ran. *)
+     [Keeper_tool_shared_runtime.host_path_of_keeper_visible_path] maps
+     container paths only for a shared-mount profile, so the container->host
+     mapping the Docker case is named for never ran. *)
   | Ok m -> { m with Masc.Keeper_meta_contract.sandbox_profile }
   | Error e -> Alcotest.fail e
 ;;
@@ -211,170 +211,6 @@ let test_prompt_metrics_follow_request_tool_projection () =
     (String_util.contains_substring extended "HOST_SELECTED_EVIDENCE")
 ;;
 
-(* #23469: relative tool paths anchor at the keeper's playground sandbox
-   root, mirroring the file tools' own resolution; absolute paths pass
-   through. masc#28582: a pathless call answers [None] — it names no
-   document, and standing the project root in for one is what let a
-   coordination tool's observation claim a file it never touched. *)
-let sandbox_root = "/sandbox/tester"
-
-let observed_path_opt fields =
-  Masc.Keeper_run_tools_hooks.observation_file_path_from_tool_input
-    ~sandbox_root
-    (`Assoc fields)
-;;
-
-let observed_path fields =
-  match observed_path_opt fields with
-  | Some path -> path
-  | None -> Alcotest.fail "expected the tool input to name a file"
-;;
-
-let test_explicit_cwd_scopes_relative_file_path () =
-  check
-    string
-    "cwd/file_path"
-    "/sandbox/tester/repos/masc/lib/foo.ml"
-    (observed_path
-       [ "file_path", `String "lib/foo.ml"; "cwd", `String "repos/masc" ])
-;;
-
-(* #28533 dropped "scratch" from the sandbox-rooted prefix list, in the same
-   change that removed the tool-schema sentence teaching it: no code ever
-   created that directory, so the only paths shaped like it were ones a model
-   invented from the sentence. A [scratch/…] path is therefore an ordinary
-   relative path now and anchors at the typed [cwd] like any other. "repos"
-   deliberately stays in that list. *)
-let test_scratch_path_anchors_at_cwd_like_any_relative_path () =
-  check
-    string
-    "scratch/file_path"
-    "/sandbox/tester/repos/masc/scratch/notes.md"
-    (observed_path
-       [ "file_path", `String "scratch/notes.md"; "cwd", `String "repos/masc" ])
-;;
-
-let test_sandbox_rooted_file_path_ignores_cwd () =
-  check
-    string
-    "sandbox-rooted"
-    "/sandbox/tester/repos/masc/lib/foo.ml"
-    (observed_path
-       [ "file_path", `String "repos/masc/lib/foo.ml"
-       ; "cwd", `String "repos/other"
-       ])
-;;
-
-let test_absolute_path_ignores_cwd () =
-  check
-    string
-    "absolute"
-    "/workspace/masc/lib/foo.ml"
-    (observed_path
-       [ "path", `String "/workspace/masc/lib/foo.ml"
-       ; "cwd", `String "repos/other"
-       ])
-;;
-
-let test_absolute_cwd_scopes_relative_file_path () =
-  check
-    string
-    "absolute cwd"
-    "/abs/work/lib/foo.ml"
-    (observed_path
-       [ "file_path", `String "lib/foo.ml"; "cwd", `String "/abs/work" ])
-;;
-
-let test_bare_relative_path_anchors_at_sandbox_root () =
-  check
-    string
-    "bare relative"
-    "/sandbox/tester/lib/solo.ml"
-    (observed_path [ "file_path", `String "lib/solo.ml" ])
-;;
-
-let test_blank_path_falls_back_to_file_path () =
-  check
-    string
-    "blank path fallback"
-    "/sandbox/tester/repos/masc/lib/foo.ml"
-    (observed_path
-       [ "path", `String " "
-       ; "file_path", `String "repos/masc/lib/foo.ml"
-       ])
-;;
-
-let test_path_priority_matches_ide_helper () =
-  check
-    string
-    "path wins"
-    "/sandbox/tester/repos/masc/lib/from-path.ml"
-    (observed_path
-       [ "path", `String "repos/masc/lib/from-path.ml"
-       ; "file_path", `String "repos/masc/lib/from-file-path.ml"
-       ])
-;;
-
-let test_nested_arguments_path_is_observed () =
-  check
-    string
-    "nested arguments path"
-    "/sandbox/tester/repos/masc/lib/nested.ml"
-    (observed_path
-       [ ( "arguments"
-         , `Assoc [ "path", `String "repos/masc/lib/nested.ml" ] )
-       ])
-;;
-
-let test_nested_arguments_relative_path_uses_cwd () =
-  check
-    string
-    "nested arguments cwd"
-    "/sandbox/tester/repos/masc/lib/nested.ml"
-    (observed_path
-       [ ( "arguments"
-         , `Assoc [ "file_path", `String "lib/nested.ml" ] )
-       ; "cwd", `String "repos/masc"
-       ])
-;;
-
-let test_paths_list_uses_first_string_path () =
-  check
-    string
-    "paths list"
-    "/sandbox/tester/repos/masc/lib/a.ml"
-    (observed_path
-       [ ( "paths"
-         , `List
-             [ `String "repos/masc/lib/a.ml"
-             ; `String "repos/masc/lib/b.ml"
-             ] )
-       ])
-;;
-
-let test_files_list_uses_first_object_file_path () =
-  check
-    string
-    "files object file_path"
-    "/sandbox/tester/repos/masc/lib/from-file-object.ml"
-    (observed_path
-       [ ( "files"
-         , `List
-             [ `Assoc
-                 [ "file_path"
-                 , `String "repos/masc/lib/from-file-object.ml"
-                 ]
-             ] )
-       ])
-;;
-
-let test_missing_path_falls_back_to_base_path () =
-  (* A tool call that names no file has no document to attribute. It used to
-     answer the project root, which the observation then stored as the edited
-     file. *)
-  check (option string) "pathless call names no document" None (observed_path_opt [])
-;;
-
 let rec mkdir_partition_path path =
   if not (Sys.file_exists path) then (
     mkdir_partition_path (Filename.dirname path);
@@ -402,7 +238,7 @@ let with_partition_fixture ?sandbox_profile f =
       | Some sandbox_profile -> make_meta ~sandbox_profile "tester"
       | None -> make_meta "tester"
     in
-    let root = Masc.Keeper_tool_shared_runtime.keeper_observation_sandbox_root ~config ~meta in
+    let root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
     init_partition_checkout ~origin:sample_repo.url (Filename.concat root "repos/masc");
     init_partition_checkout ~origin:"https://example.invalid/unregistered/repo.git"
       (Filename.concat root "repos/ghost");
@@ -513,6 +349,172 @@ let test_partition_bare_relative_outside_checkout_stays_unaddressed () =
            { reason = Agent_observation.Unattributed.Checkout_unavailable; _ }) ->
       ()
     | _ -> fail "expected Unaddressed Checkout_unavailable for playground-local file")
+;;
+
+(* The observation records the file the tool opened (#52082). The file tools
+   turn a Keeper's cwd into a host directory with
+   [Keeper_tool_shared_runtime.host_path_of_keeper_visible_path] and join the
+   file path to it through the same function; [tool_host_path] is that
+   two-step resolution. Each case compares the observed path with it and with
+   the literal place under the Keeper's root. The paths sit outside every
+   checkout, so the attribution is [Unaddressed] and carries the path the
+   resolver saw. *)
+let keeper_root_of ~config rel = Filename.concat config.Masc.Workspace.base_path rel
+let remote_root ~config = keeper_root_of ~config ".masc/playground/tester"
+let docker_root ~config = keeper_root_of ~config ".masc/playground/docker/tester"
+
+let tool_host_path ~config ~meta ?cwd file =
+  let resolve =
+    Masc.Keeper_tool_shared_runtime.host_path_of_keeper_visible_path ~config ~meta
+  in
+  let host_cwd = Option.bind cwd (fun cwd -> resolve cwd) in
+  match resolve ?host_cwd file with
+  | Some path -> path
+  | None -> fail "the tool resolves no file"
+;;
+
+let observed_host_path ~config ~meta fields =
+  match resolve_attribution ~config ~meta fields with
+  | Agent_observation.File (Agent_observation.Unaddressed { attempted_path; _ }) ->
+    attempted_path
+  | Agent_observation.File (Agent_observation.Addressed { address; _ }) ->
+    fail
+      ("expected a path outside every checkout, got "
+       ^ Agent_observation.Code_address.codebase address
+       ^ ":"
+       ^ Agent_observation.Code_address.path address)
+  | Agent_observation.Pathless -> fail "expected the tool input to name a file"
+;;
+
+let check_observed_as_tool ~config ~meta ~expected ?cwd ~file fields =
+  let observed = observed_host_path ~config ~meta fields in
+  check string "observation names the tool's path" (tool_host_path ~config ~meta ?cwd file)
+    observed;
+  check string "the path sits under the Keeper root" expected observed
+;;
+
+let test_observation_cwd_scopes_relative_path () =
+  with_partition_fixture (fun ~config ~meta ->
+    check_observed_as_tool ~config ~meta
+      ~expected:(Filename.concat (remote_root ~config) "notes/proj/lib/foo.ml")
+      ~cwd:"notes/proj" ~file:"lib/foo.ml"
+      [ "file_path", `String "lib/foo.ml"; "cwd", `String "notes/proj" ])
+;;
+
+(* The #52082 case. The observation used to treat a relative path starting
+   with [repos], [.masc] or [playground] as rooted at the sandbox and drop the
+   cwd, so it attributed [repos/masc/lib/foo.ml] to the registered masc
+   checkout while the tool read [repos/other/repos/masc/lib/foo.ml]. *)
+let test_observation_repos_path_joins_cwd_like_the_tool () =
+  with_partition_fixture (fun ~config ~meta ->
+    check_observed_as_tool ~config ~meta
+      ~expected:
+        (Filename.concat (remote_root ~config) "repos/other/repos/masc/lib/foo.ml")
+      ~cwd:"repos/other" ~file:"repos/masc/lib/foo.ml"
+      [ "file_path", `String "repos/masc/lib/foo.ml"; "cwd", `String "repos/other" ])
+;;
+
+let test_observation_masc_path_joins_cwd_like_the_tool () =
+  with_partition_fixture (fun ~config ~meta ->
+    check_observed_as_tool ~config ~meta
+      ~expected:(Filename.concat (remote_root ~config) "notes/.masc/plan.md")
+      ~cwd:"notes" ~file:".masc/plan.md"
+      [ "file_path", `String ".masc/plan.md"; "cwd", `String "notes" ])
+;;
+
+let test_observation_bare_relative_path_at_keeper_root () =
+  with_partition_fixture (fun ~config ~meta ->
+    check_observed_as_tool ~config ~meta
+      ~expected:(Filename.concat (remote_root ~config) "notes/solo.md")
+      ~file:"notes/solo.md"
+      [ "file_path", `String "notes/solo.md" ])
+;;
+
+let test_observation_absolute_path_keeps_identity () =
+  with_partition_fixture (fun ~config ~meta ->
+    check_observed_as_tool ~config ~meta ~expected:"/abs/elsewhere/foo.ml" ~cwd:"notes"
+      ~file:"/abs/elsewhere/foo.ml"
+      [ "path", `String "/abs/elsewhere/foo.ml"; "cwd", `String "notes" ])
+;;
+
+let test_observation_absolute_cwd_scopes_relative_path () =
+  with_partition_fixture (fun ~config ~meta ->
+    check_observed_as_tool ~config ~meta ~expected:"/abs/work/lib/foo.ml" ~cwd:"/abs/work"
+      ~file:"lib/foo.ml"
+      [ "file_path", `String "lib/foo.ml"; "cwd", `String "/abs/work" ])
+;;
+
+let test_observation_docker_container_cwd_maps_to_the_mount () =
+  with_partition_fixture
+    ~sandbox_profile:Keeper_types_profile_sandbox.Docker
+    (fun ~config ~meta ->
+       let container_cwd =
+         Filename.concat (Masc.Keeper_sandbox.container_root meta.name) "notes/proj"
+       in
+       check_observed_as_tool ~config ~meta
+         ~expected:(Filename.concat (docker_root ~config) "notes/proj/lib/foo.ml")
+         ~cwd:container_cwd ~file:"lib/foo.ml"
+         [ "file_path", `String "lib/foo.ml"; "cwd", `String container_cwd ])
+;;
+
+let test_observation_docker_container_file_maps_to_the_mount () =
+  with_partition_fixture
+    ~sandbox_profile:Keeper_types_profile_sandbox.Docker
+    (fun ~config ~meta ->
+       let container_file =
+         Filename.concat (Masc.Keeper_sandbox.container_root meta.name) "notes/todo.md"
+       in
+       check_observed_as_tool ~config ~meta
+         ~expected:(Filename.concat (docker_root ~config) "notes/todo.md")
+         ~file:container_file
+         [ "path", `String container_file ])
+;;
+
+(* Which key names the file is [Tool_input_path]'s; the observation then
+   resolves that one path like the tool. *)
+let check_observed_under_root ~expected fields =
+  with_partition_fixture (fun ~config ~meta ->
+    check string "observed path" (Filename.concat (remote_root ~config) expected)
+      (observed_host_path ~config ~meta fields))
+;;
+
+let test_blank_path_falls_back_to_file_path () =
+  check_observed_under_root ~expected:"notes/foo.md"
+    [ "path", `String " "; "file_path", `String "notes/foo.md" ]
+;;
+
+let test_path_priority_matches_ide_helper () =
+  check_observed_under_root ~expected:"notes/from-path.md"
+    [ "path", `String "notes/from-path.md"; "file_path", `String "notes/from-file-path.md" ]
+;;
+
+let test_nested_arguments_path_is_observed () =
+  check_observed_under_root ~expected:"notes/nested.md"
+    [ "arguments", `Assoc [ "path", `String "notes/nested.md" ] ]
+;;
+
+let test_nested_arguments_relative_path_uses_cwd () =
+  check_observed_under_root ~expected:"notes/proj/lib/nested.ml"
+    [ "arguments", `Assoc [ "file_path", `String "lib/nested.ml" ]
+    ; "cwd", `String "notes/proj"
+    ]
+;;
+
+let test_paths_list_uses_first_string_path () =
+  check_observed_under_root ~expected:"notes/a.md"
+    [ "paths", `List [ `String "notes/a.md"; `String "notes/b.md" ] ]
+;;
+
+let test_files_list_uses_first_object_file_path () =
+  check_observed_under_root ~expected:"notes/from-file-object.md"
+    [ "files", `List [ `Assoc [ "file_path", `String "notes/from-file-object.md" ] ] ]
+;;
+
+let test_input_without_a_path_is_pathless () =
+  with_partition_fixture (fun ~config ~meta ->
+    match resolve_attribution ~config ~meta [] with
+    | Agent_observation.Pathless -> ()
+    | Agent_observation.File _ -> fail "an input that names no file has no document")
 ;;
 
 (* --- gate history slice ------------------------------------------------- *)
@@ -2201,27 +2203,22 @@ let () =
             test_first_round_survives_a_replayed_tool_tail
         ] )
     ; ( "observation_file_path"
-      , [ test_case
-            "explicit cwd scopes relative file_path"
-            `Quick
-            test_explicit_cwd_scopes_relative_file_path
-        ; test_case
-            "scratch path anchors at cwd like any relative path"
-            `Quick
-            test_scratch_path_anchors_at_cwd_like_any_relative_path
-        ; test_case
-            "sandbox-rooted file_path ignores cwd"
-            `Quick
-            test_sandbox_rooted_file_path_ignores_cwd
-        ; test_case "absolute path ignores cwd" `Quick test_absolute_path_ignores_cwd
-        ; test_case
-            "absolute cwd scopes relative file_path"
-            `Quick
-            test_absolute_cwd_scopes_relative_file_path
-        ; test_case
-            "bare relative path anchors at sandbox root"
-            `Quick
-            test_bare_relative_path_anchors_at_sandbox_root
+      , [ test_case "cwd scopes a relative path" `Quick
+            test_observation_cwd_scopes_relative_path
+        ; test_case "a repos path joins the cwd like the tool" `Quick
+            test_observation_repos_path_joins_cwd_like_the_tool
+        ; test_case "a .masc path joins the cwd like the tool" `Quick
+            test_observation_masc_path_joins_cwd_like_the_tool
+        ; test_case "a bare relative path sits at the Keeper root" `Quick
+            test_observation_bare_relative_path_at_keeper_root
+        ; test_case "an absolute path keeps its identity" `Quick
+            test_observation_absolute_path_keeps_identity
+        ; test_case "an absolute cwd scopes a relative path" `Quick
+            test_observation_absolute_cwd_scopes_relative_path
+        ; test_case "a Docker container cwd maps to the mount" `Quick
+            test_observation_docker_container_cwd_maps_to_the_mount
+        ; test_case "a Docker container file maps to the mount" `Quick
+            test_observation_docker_container_file_maps_to_the_mount
         ; test_case "blank path falls back to file_path" `Quick
             test_blank_path_falls_back_to_file_path
         ; test_case "path priority matches IDE helper" `Quick
@@ -2234,8 +2231,8 @@ let () =
             test_paths_list_uses_first_string_path
         ; test_case "files list uses first object file_path" `Quick
             test_files_list_uses_first_object_file_path
-        ; test_case "missing path falls back to base_path" `Quick
-            test_missing_path_falls_back_to_base_path
+        ; test_case "an input without a path is pathless" `Quick
+            test_input_without_a_path_is_pathless
         ] )
     ; ( "gate_history_slice"
       , [ test_case "captures only request-local causal fields" `Quick

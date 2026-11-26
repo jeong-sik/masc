@@ -23,10 +23,22 @@
 
 type provider_error =
   [ `Rate_limited of float option * string (** retry_after seconds, message *)
+  | `Hard_quota of string * float option * string
+    (** provider, retry_after seconds, detail. Hard account/billing quota
+        exhaustion — distinct from [`Rate_limited] and never retryable. *)
   | `Auth_error of string
   | `Authorization_error of string
   | `Server_error of int * string (** status, message *)
-  | `Network_error of string
+  | `Provider_server_error of string * int * bool * string
+    (** provider, status code, transient flag, detail. Preserves the
+        provider-owned [transient] retryability verdict across roundtrips. *)
+  | `Provider_unavailable of string * string
+    (** provider, detail. Distinct from [`Network_error] and non-retryable,
+        matching {!Llm_provider.Error.is_retryable}. *)
+  | `Network_error of string option * Llm_provider.Http_client.network_error_kind * string
+    (** provider (when a provider error carried it), typed network failure
+        kind, detail. Retryability follows
+        {!Llm_provider.Http_client.network_error_kind_is_non_retryable}. *)
   | `Connect_failed of string option * Llm_provider.Http_client.network_error_kind * string
     (** The connection did not open, so the request was not sent: provider
         (when a provider error carried it), kind, detail. Converts back to the

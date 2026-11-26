@@ -653,46 +653,83 @@ let mentions_cached_content text =
   || Agent_core_strings.contains_substring ~haystack:lower ~needle:"cached content"
 ;;
 
-let structured_rpc_cached_content_error body =
-  match Yojson.Safe.from_string body with
-  | `Assoc fields ->
-    let err_obj =
-      match List.assoc_opt "error" fields with
-      | Some (`Assoc inner) -> inner
-      | Some _ | None -> fields
-    in
-    let detail_mentions =
-      match List.assoc_opt "details" err_obj with
-      | Some (`List items) ->
-        List.exists
+let inspect_rpc_fields err_obj =
+  let has_details, detail_mentions =
+    match List.assoc_opt "details" err_obj with
+    | Some (`List items) ->
+      ( true
+      , List.exists
           (function
             | `Assoc d ->
               (match List.assoc_opt "reason" d with
                | Some (`String r) when mentions_cached_content r -> true
-               | Some _ | None ->
+               | Some (`String _ | `Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+               | None ->
                  (match List.assoc_opt "fieldViolations" d with
                   | Some (`List fvs) ->
                     List.exists
                       (function
                         | `Assoc fv ->
-                          (match List.assoc_opt "field" fv with
-                           | Some (`String f) -> mentions_cached_content f
-                           | Some _ | None -> false)
-                        | _ -> false)
+                          let field_hit =
+                            match List.assoc_opt "field" fv with
+                            | Some (`String f) -> mentions_cached_content f
+                            | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+                            | None -> false
+                          in
+                          let desc_hit =
+                            match List.assoc_opt "description" fv with
+                            | Some (`String desc) -> mentions_cached_content desc
+                            | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+                            | None -> false
+                          in
+                          field_hit || desc_hit
+                        | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
+                          false)
                       fvs
-                  | Some _ | None -> false))
-            | _ -> false)
-          items
-      | Some _ | None -> false
-    in
-    let msg_mentions =
-      match List.assoc_opt "message" err_obj with
-      | Some (`String msg) -> mentions_cached_content msg
-      | Some _ | None -> false
-    in
-    Some (detail_mentions || msg_mentions)
-  | _ -> None
-  | exception Yojson.Json_error _ -> None
+                  | Some (`Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+                  | None -> false))
+            | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> false)
+          items )
+    | Some (`Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+    | None -> false, false
+  in
+  let has_msg, msg_mentions =
+    match List.assoc_opt "message" err_obj with
+    | Some (`String msg) -> true, mentions_cached_content msg
+    | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+    | None -> false, false
+  in
+  if has_details || has_msg then Some (detail_mentions || msg_mentions) else None
+;;
+
+let structured_rpc_cached_content_of_object fields =
+  match List.assoc_opt "error" fields with
+  | Some (`String err_str) -> Some (mentions_cached_content err_str)
+  | Some (`Assoc inner) -> inspect_rpc_fields inner
+  | Some (`List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) | None ->
+    inspect_rpc_fields fields
+;;
+
+let structured_rpc_cached_content_error body =
+  match Json_util.from_string_bounded body with
+  | Error _ -> None
+  | Ok (`Assoc fields) -> structured_rpc_cached_content_of_object fields
+  | Ok (`List items) ->
+    List.fold_left
+      (fun acc item ->
+         match acc with
+         | Some true -> Some true
+         | Some false | None ->
+           (match item with
+            | `Assoc fields ->
+              (match structured_rpc_cached_content_of_object fields with
+               | Some true -> Some true
+               | Some false -> Some false
+               | None -> acc)
+            | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> acc))
+      None
+      (List.take 8 items)
+  | Ok (`String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) -> None
 ;;
 
 let is_cached_content_error (err : Http_client.http_error) : bool =

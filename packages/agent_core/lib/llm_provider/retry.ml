@@ -292,27 +292,6 @@ let usable_retry_after (seconds : float) : float option =
   if Float.is_finite seconds && seconds >= 0.0 then Some seconds else None
 ;;
 
-(** Parse the provider-specific [error.retry_after] JSON body field, if
-    present and well-formed. This is provider prose, not transport
-    evidence, but it is the more precise of the two retry_after signals
-    when a provider bothers to emit it. Non-finite or negative values are
-    rejected ([None]) at this boundary (parse, don't validate). *)
-let parse_body_retry_after (body : string) : float option =
-  try
-    let json = Json_util.from_string_bounded_exn body in
-    let open Yojson.Safe.Util in
-    json |> member "error" |> member "retry_after" |> to_number |> usable_retry_after
-  with
-  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ | Yojson.Safe.Util.Undefined _ ->
-    None
-;;
-
-let resolve_retry_after ~body ~header : float option =
-  match parse_body_retry_after body with
-  | Some _ as from_body -> from_body
-  | None -> header
-;;
-
 type structured_refusal =
   | Structured_context_overflow of
       { message : string
@@ -484,11 +463,27 @@ let rec retry_after_of_json_depth ~depth (json : Yojson.Safe.t) : float option =
             (match Json_util.from_string_bounded raw with
              | Ok raw_json -> retry_after_of_json_depth ~depth:(depth + 1) raw_json
              | Error _ -> None)))
-    | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+    | `List items ->
+      List.find_map (retry_after_of_json_depth ~depth:(depth + 1)) (List.take 8 items)
+    | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
 ;;
 
 let retry_after_of_json (json : Yojson.Safe.t) : float option =
   retry_after_of_json_depth ~depth:0 json
+;;
+
+(** Merge body and header retry_after hints using the shared structured JSON
+    extractor ([retry_after], [retryAfter], Google [RetryInfo], and nested
+    [metadata.raw]), falling back to the transport [Retry-After] header. *)
+let resolve_retry_after ~body ~header : float option =
+  let from_body =
+    match Json_util.from_string_bounded body with
+    | Ok json -> retry_after_of_json json
+    | Error _ -> None
+  in
+  match from_body with
+  | Some _ -> from_body
+  | None -> header
 ;;
 
 let json_http_status_opt = function
@@ -779,6 +774,7 @@ let http_signals_indicate_account_quota (s : error_signals) =
 let is_structured_context_overflow_code code =
   let normalized = String.lowercase_ascii (String.trim code) in
   match normalized with
+  | "context_overflow"
   | "context_length_exceeded"
   | "context_window_exceeded"
   | "string_above_max_length"
@@ -795,6 +791,7 @@ let is_structured_context_overflow_code code =
 let is_structured_context_overflow_type t =
   match String.lowercase_ascii (String.trim t) with
   | "contextoverflow" (* Muse MSP TurnErrorKind [contextOverflow] *)
+  | "context_overflow"
   | "context_length_exceeded"
   | "context_window_exceeded"
   | "exceed_context_size_error"
@@ -806,6 +803,7 @@ let is_structured_context_overflow_type t =
 
 let is_structured_context_overflow_reason reason =
   match String.uppercase_ascii (String.trim reason) with
+  | "CONTEXT_OVERFLOW"
   | "CONTEXT_LENGTH_EXCEEDED"
   | "CONTEXT_WINDOW_EXCEEDED"
   | "PROMPT_TOO_LONG"
@@ -851,7 +849,7 @@ let is_structured_quota_type t =
 
 let is_structured_quota_reason reason =
   match String.uppercase_ascii (String.trim reason) with
-  | "QUOTA_EXCEEDED" | "BILLING_DISABLED" -> true
+  | "QUOTA_EXCEEDED" | "QUOTA_EXHAUSTED" | "BILLING_DISABLED" -> true
   | _ -> false
 ;;
 
@@ -1144,29 +1142,8 @@ let classify_embedded_json ?http_status ?retry_after (text : string) : signal_re
       if String.length trimmed <= max_bytes then trimmed else String.sub trimmed 0 max_bytes
     in
     let classify_json = function
-      | `Assoc _ as obj ->
-        classify_structured_json ?http_status ?retry_after ~fallback_message:bounded obj
-      | `List items ->
-        let rec walk_items remaining items =
-          if remaining <= 0
-          then None
-          else (
-            match items with
-            | [] -> None
-            | (`Assoc _ as item) :: rest ->
-              (match
-                 classify_structured_json
-                   ?http_status
-                   ?retry_after
-                   ~fallback_message:bounded
-                   item
-               with
-               | Some _ as matched -> matched
-               | None -> walk_items (remaining - 1) rest)
-            | (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) :: rest ->
-              walk_items (remaining - 1) rest)
-        in
-        walk_items 8 items
+      | (`Assoc _ | `List _) as v ->
+        classify_structured_json ?http_status ?retry_after ~fallback_message:bounded v
       | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
     in
     let try_slice slice =
@@ -1608,9 +1585,7 @@ let classify_error ~retry_after_header ~status ~body : api_error =
   | 403 ->
     (match classify_structured_refusal ~retry_after_header ~status ~body with
      | Some (Structured_account_quota { message; _ }) -> PaymentRequired { message }
-     | Some (Structured_context_overflow { message; limit }) ->
-       ContextOverflow { message; limit }
-     | None -> AuthorizationError { message })
+     | Some (Structured_context_overflow _) | None -> AuthorizationError { message })
   | 400 | 422 ->
     (match classify_structured_refusal ~retry_after_header ~status ~body with
      | Some (Structured_context_overflow { message; limit }) ->

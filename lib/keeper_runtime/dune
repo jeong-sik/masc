@@ -69,7 +69,6 @@
   masc_process
   masc.agent_core.digest
   masc.secret_patterns
-  str
   time_compat
   uri
   uuidm

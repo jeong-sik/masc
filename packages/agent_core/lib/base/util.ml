@@ -11,13 +11,7 @@ let first_some a b =
 ;;
 
 let string_contains ~needle haystack =
-  needle = ""
-  ||
-  try
-    let (_ : int) = Str.search_forward (Str.regexp_string needle) haystack 0 in
-    true
-  with
-  | Not_found -> false
+  Agent_core_strings.contains_substring ~haystack ~needle
 ;;
 
 let json_parse_error detail = Error.Serialization (JsonParseError { detail })

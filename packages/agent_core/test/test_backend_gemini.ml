@@ -1851,6 +1851,23 @@ let test_explicit_cached_content_request_omits_prefix_fields () =
   check bool "400 unrelated error is NOT cachedContent error" false
     (Gemini_context_cache.is_cached_content_error
        (mk_http_err 400 "Invalid temperature parameter"));
+  check bool "400 flat-string JSON error mentioning cachedContent is detected" true
+    (Gemini_context_cache.is_cached_content_error
+       (mk_http_err 400 {|{"error":"cachedContent expired"}|}));
+  check bool "400 flat-string unrelated JSON error is NOT cachedContent error" false
+    (Gemini_context_cache.is_cached_content_error
+       (mk_http_err 400 {|{"error":"invalid api key"}|}));
+  check bool "400 fieldViolations.description mentioning cachedContent is detected" true
+    (Gemini_context_cache.is_cached_content_error
+       (mk_http_err 400
+          {|{"error":{"message":"bad request","details":[{"fieldViolations":[{"field":"request","description":"cachedContent resource expired"}]}]}}|}));
+  check bool "400 top-level array RPC envelope mentioning cachedContent is detected" true
+    (Gemini_context_cache.is_cached_content_error
+       (mk_http_err 400
+          {|[{"error":{"code":400,"message":"CachedContent not found"}}]|}));
+  let deep_json = String.make 10000 '[' ^ String.make 10000 ']' in
+  check bool "400 deeply nested JSON does not stack overflow" false
+    (Gemini_context_cache.is_cached_content_error (mk_http_err 400 deep_json));
   (* extract_cacheable_prefix_result matches build_request_artifact image degradation
      and returns Error instead of raising on invalid tool-result projection *)
   let no_image_caps =

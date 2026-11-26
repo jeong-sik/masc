@@ -1730,7 +1730,8 @@ let test_error_domain_is_retryable () =
   Alcotest.(check bool)
     "network error retryable"
     true
-    (Error_domain.is_retryable (`Network_error "timeout"))
+    (Error_domain.is_retryable
+       (`Network_error (None, Llm_provider.Http_client.Unknown, "timeout")))
 ;;
 
 let test_error_domain_provider_errors () =

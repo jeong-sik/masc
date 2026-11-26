@@ -267,17 +267,12 @@ let is_rfc7230_tchar = function
   | _ -> false
 ;;
 
-let forbidden_cache_session_headers =
-  [ "authorization"
-  ; "x-api-key"
-  ; "x-goog-api-key"
-  ; "host"
+let forbidden_hop_by_hop_headers =
+  [ "host"
   ; "content-length"
   ; "content-type"
   ; "connection"
   ; "transfer-encoding"
-  ; "cookie"
-  ; "proxy-authorization"
   ]
 ;;
 
@@ -297,7 +292,8 @@ let cache_session_header_field ~entry_id toml =
            raw)
     else (
       let normalized = String.lowercase_ascii raw in
-      if List.mem normalized forbidden_cache_session_headers
+      if Secret_redactor.is_sensitive_header_name normalized
+         || List.mem normalized forbidden_hop_by_hop_headers
       then
         Error
           (Printf.sprintf

@@ -66,7 +66,28 @@ let rec nearest_existing_path path =
     if String.equal parent path then "/" else nearest_existing_path parent)
 ;;
 
-let split_ws line = Str.split (Str.regexp "[ \t]+") (String.trim line)
+let is_hspace = function
+  | ' ' | '\t' -> true
+  | _ -> false
+;;
+
+let split_ws line =
+  let trimmed = String.trim line in
+  let len = String.length trimmed in
+  let rec skip_ws i = if i < len && is_hspace trimmed.[i] then skip_ws (i + 1) else i in
+  let rec scan_tok i =
+    if i < len && not (is_hspace trimmed.[i]) then scan_tok (i + 1) else i
+  in
+  let rec loop i acc =
+    let start = skip_ws i in
+    if start >= len
+    then List.rev acc
+    else (
+      let stop = scan_tok start in
+      loop stop (String.sub trimmed start (stop - start) :: acc))
+  in
+  loop 0 []
+;;
 
 let parse_capacity_percent raw =
   let trimmed = String.trim raw in

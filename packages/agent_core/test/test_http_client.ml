@@ -941,7 +941,7 @@ let test_error_domain_retryable () =
   Alcotest.(check bool)
     "network retryable"
     true
-    (Error_domain.is_retryable (`Network_error "oops"));
+    (Error_domain.is_retryable (`Network_error (None, Http_client.Unknown, "oops")));
   Alcotest.(check bool)
     "mcp init retryable"
     true

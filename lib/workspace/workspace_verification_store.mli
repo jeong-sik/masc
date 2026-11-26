@@ -81,6 +81,12 @@ val truncated_snapshot_items : Yojson.Safe.t -> (string * int) list
     instead of leaving the "too large to read at once" fact discoverable only
     after a review stalls. *)
 
+val withheld_artifact_references : submitted_evidence_item list -> string list
+(** References of the complete text artifacts the judge-transport projection
+    leaves out for the aggregate evidence cap, in submission order. Their whole
+    content is in the submitted record, and the review offers its record reader
+    for exactly these. *)
+
 val evidence_read_failure_code : evidence_read_failure -> string
 (** Stable bounded code for diagnostics and metadata. *)
 val evidence_access_failure_to_string :

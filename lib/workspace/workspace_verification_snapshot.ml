@@ -305,10 +305,9 @@ let submitted_evidence_item_transport_to_yojson = function
    a routing concern and is not decided here. *)
 let evidence_transport_max_bytes = verification_evidence_max_bytes
 
-(* Withheld for the aggregate budget, not for its own size. The judge is given
-   the same three things a per-item withholding gives it — the reference, the
-   real size, and the instruction to read the file — so the shape it has to
-   understand does not grow. *)
+(* Withheld for the aggregate budget, not for its own size. Its whole content
+   is in the submitted record, so the note points the judge at the record
+   reader. The producer's current file may differ from what was captured. *)
 let submitted_evidence_item_withheld_to_yojson = function
   | Evidence_artifact { reference; content = _; bytes; truncated = _ } ->
     `Assoc
@@ -322,8 +321,10 @@ let submitted_evidence_item_withheld_to_yojson = function
             (Printf.sprintf
                "file is %d bytes; the evidence block for this request is \
                 capped at %d bytes and this item is past the cap, so its \
-                content is withheld; read ranges of the actual file with the \
-                listed verification tools"
+                content is withheld from this request; read the submitted \
+                content page by page with the artifact read tool listed in \
+                your tools. It is the content captured at submission, not \
+                the producer's current file"
                bytes
                evidence_transport_max_bytes) )
       ]
@@ -353,7 +354,7 @@ let submitted_evidence_item_withheld_to_yojson = function
    submission order.
 
    A dropped item is not silent: it carries [content_omitted] and a note
-   naming the cap and the tools that read the file directly. *)
+   naming the cap and the record reader that serves its captured content. *)
 let carried_artifact_indices items =
   let weighed =
     List.mapi (fun index item -> index, item) items
@@ -404,6 +405,27 @@ let submitted_evidence_items_transport_to_yojson items =
       | Evidence_artifact_binary _
       | Evidence_collaboration _ -> submitted_evidence_item_transport_to_yojson item)
     items
+;;
+
+(* The references of the complete text artifacts the aggregate cap keeps out of
+   the review request. Their whole content is in the submitted record, so the
+   judge's record reader serves exactly these. It is the same choice as the
+   transport: [carried_artifact_indices] decides both, so the reader is never
+   offered for a carried item nor missing for a withheld one. *)
+let withheld_artifact_references (items : submitted_evidence_item list) =
+  let carried = carried_artifact_indices items in
+  List.filter_map
+    (fun (index, item) ->
+       match item with
+       | Evidence_artifact { reference; truncated = false; _ }
+         when not (List.mem index carried) -> Some reference
+       | Evidence_artifact _
+       | Evidence_note _
+       | Evidence_invalid_reference
+       | Evidence_artifact_unreadable _
+       | Evidence_artifact_binary _
+       | Evidence_collaboration _ -> None)
+    (List.mapi (fun index item -> index, item) items)
 ;;
 
 let submitted_evidence_access_transport_to_yojson = function

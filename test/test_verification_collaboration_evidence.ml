@@ -536,6 +536,96 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config ->
   check string "live edits cannot invalidate submission paging" "source_json_page"
     (continued |> member "representation" |> to_string))
 
+let artifact reference content =
+  Store.Evidence_artifact { reference; content; bytes = String.length content; truncated = false }
+let artifact_args reference = `Assoc ["reference", `String reference]
+let offers surface name =
+  List.exists (fun (schema : Types_core.tool_schema) -> schema.name = name) (VAT.schemas surface)
+
+(* The aggregate evidence cap keeps a complete artifact out of the review
+   request. Its captured content is read back from the record under the actual
+   bridge budget. No file exists here: the record is the only source. *)
+let test_withheld_artifact_is_read_from_the_record () = with_fixture (fun config ->
+  let open Yojson.Safe.Util in
+  let cap = Workspace_verification_snapshot.verification_evidence_max_bytes in
+  let head = "OMITTED_HEAD_4b1d" and tail = "OMITTED_TAIL_7e2c" in
+  let body =
+    head ^ String.make (cap - String.length head - String.length tail) 'z' ^ tail in
+  let reference = "artifact:evidence/complete.txt" in
+  let prefix =
+    Store.Evidence_artifact
+      { reference = "artifact:oversize.txt"; content = "PREFIX_ONLY_5d3a"; bytes = cap + 1; truncated = true } in
+  let items =
+    [ artifact "artifact:small.txt" "SMALL_BODY_9a0f"
+    ; artifact reference body
+    ; prefix
+    ; Store.Evidence_note "run attached" ] in
+  check (list string) "only the complete artifact past the cap is withheld"
+    [ reference ] (Workspace_verification_snapshot.withheld_artifact_references items);
+  let surface = VAT.create ~config ~producer:"producer" ~submitted_evidence:(restored items)
+    |> require "request-bound surface" in
+  let name = "keeper_artifact_read" in
+  check bool "a withheld artifact brings the record reader" true (offers surface name);
+  let bridge args =
+    let result = call surface name args in
+    let content = match Tool_bridge.to_agent_core_typed_result ~base_path:config.Workspace.base_path result with
+      | Ok result -> result.Agent_core.Types.content
+      | Error error -> failf "bridge refused artifact page: %s" error.Agent_core.Types.message in
+    check bool "artifact page stays within bridge budget" true
+      (String.length content <= Tool_bridge.default_externalize_threshold_bytes);
+    Yojson.Safe.from_string content in
+  let first = bridge (artifact_args reference) in
+  check string "large artifact advertises lossless continuation" "source_json_page"
+    (first |> member "representation" |> to_string);
+  let digest = first |> member "source_sha256" |> to_string in
+  let cursor_args cursor = `Assoc ["reference", `String reference; "cursor", cursor] in
+  let rec collect offset page parts =
+    check int "pages are contiguous bytes" offset (page |> member "byte_offset" |> to_int);
+    check string "all pages bind one captured artifact" digest (page |> member "source_sha256" |> to_string);
+    let content = page |> member "content" |> to_string in
+    let offset = offset + String.length content in
+    match member "next_cursor" page with
+    | `Null ->
+      check int "complete byte count" offset (page |> member "total_bytes" |> to_int);
+      Yojson.Safe.from_string (String.concat "" (List.rev (content :: parts)))
+    | cursor -> collect offset (bridge (cursor_args cursor)) (content :: parts) in
+  let source = collect 0 first [] in
+  check (list string) "the source names the artifact and its captured content"
+    [ "bytes"; "content"; "reference"; "source" ] (List.sort String.compare (object_keys source));
+  check string "the record yields the whole withheld content" body (member "content" source |> to_string);
+  check int "the size is the captured size" cap (member "bytes" source |> to_int);
+  let whole = read surface name (artifact_args "artifact:small.txt") in
+  check string "an artifact inside the cap is served whole" "SMALL_BODY_9a0f"
+    (member "content" whole |> to_string);
+  (* One cursor belongs to one observation of one artifact. *)
+  denied surface name
+    (cursor_args (`Assoc ["source_sha256", `String digest; "byte_offset", `Int 10]))
+    "verification_source_unavailable";
+  denied surface name (artifact_args "artifact:oversize.txt") "verification_source_unavailable";
+  denied surface name (artifact_args "artifact:missing.txt") "verification_source_access_denied";
+  denied surface name (artifact_args "note:run attached") "verification_source_access_denied";
+  invalid_input surface name (`Assoc ["sha256", `String (String.make 64 '0')]);
+  invalid_input surface name (`Assoc ["reference", `String ""]);
+  (* The verifier declares its own input: the Keeper reader's paging arguments
+     are not this reader's. *)
+  invalid_input surface name
+    (`Assoc ["reference", `String "artifact:small.txt"; "offset", `Int 0]))
+
+(* Nothing withheld means nothing for the reader to do; the surface does not
+   grow a tool the review has no use for. *)
+let test_record_reader_is_offered_only_for_a_withheld_artifact () = with_fixture (fun config ->
+  let surface = VAT.create ~config ~producer:"producer"
+    ~submitted_evidence:(restored [ artifact "artifact:small.txt" "SMALL_BODY_9a0f" ])
+    |> require "request-bound surface" in
+  check (list string) "an artifact inside the cap is not withheld"
+    [] (Workspace_verification_snapshot.withheld_artifact_references
+          (restored [ artifact "artifact:small.txt" "SMALL_BODY_9a0f" ]));
+  check bool "a carried artifact needs no record reader" false
+    (offers surface "keeper_artifact_read");
+  match call surface "keeper_artifact_read" (artifact_args "artifact:small.txt") with
+  | Tool_result.Failed _ -> ()
+  | Tool_result.Completed _ -> fail "a reader the review does not offer answered")
+
 let () = run "Verifier submitted collaboration sources" ["submission", [
   test_case "Task and Goal submission preserve exact prior committed state" `Quick test_task_sources_preserve_committed_state;
   test_case "Task source rejects corruption, wrong identity and recovered primary" `Quick test_task_source_failure_boundaries;
@@ -545,4 +635,6 @@ let () = run "Verifier submitted collaboration sources" ["submission", [
   test_case "original Fusion producer survives pre-submission author transfer" `Quick test_original_fusion_producer_before_submit;
   test_case "Goal request owns source before completion proof" `Quick test_goal_request_freezes_sources;
   test_case "Task request owns snapshot before commit" `Quick test_task_request_persists_snapshot;
-  test_case "full Board and Fusion bytes survive actual bridge paging" `Quick test_large_sources_survive_actual_bridge]]
+  test_case "full Board and Fusion bytes survive actual bridge paging" `Quick test_large_sources_survive_actual_bridge;
+  test_case "withheld artifact is read from the record, not the file" `Quick test_withheld_artifact_is_read_from_the_record;
+  test_case "record reader is offered only for a withheld artifact" `Quick test_record_reader_is_offered_only_for_a_withheld_artifact]]

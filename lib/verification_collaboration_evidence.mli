@@ -36,3 +36,10 @@ val read_task : submitted_evidence:Workspace_verification_store.submitted_eviden
     does not have typed verifier/verification-id fields; its notes remain
     attributed Task content, not a reconstructed approval certificate. Shared
     Task records are available to both Task and Goal review authority. *)
+
+val read_artifact : submitted_evidence:Workspace_verification_store.submitted_evidence_item list -> args:Yojson.Safe.t ->
+  (Yojson.Safe.t, error) result
+(** [reference] must name one complete text artifact in this submission. The
+    read serves the content captured at submission and never the producer's
+    current file, and pages like the other sources. A truncated artifact stored
+    only a prefix and is refused: its rest is in the actual file. *)

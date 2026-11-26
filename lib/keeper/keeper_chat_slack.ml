@@ -677,10 +677,10 @@ let adapter_loop_with_transport
             final_message_blocks ~content:delivered_text
               ~event_blocks:(List.rev acc_blocks)
           in
-          (* [delivered_text] is what goes out — the accumulated text plus the
-             tool trail. Asking about [acc_text] asked about a different value:
-             a tool-only turn has no assistant text but does have a trail, and
-             settled Error while the turn layer settled Delivered (#26406). *)
+          (* [delivered_text] is what goes out: the accumulated text with the
+             tool trail appended. [append_to] adds no trail to an empty text,
+             so a tool-only turn with no assistant text reaches the no-reply
+             branch below. *)
           if String.length delivered_text > 0 || List.length blocks > 0
           then
             let result =

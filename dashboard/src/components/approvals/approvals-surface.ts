@@ -1118,7 +1118,7 @@ export function ApprovalsSurface() {
           </div>` : null}
         ${items.length > 0
           ? html`
-              <div class="ap-workspace" data-testid="approvals-workspace">
+              <div class="ap-gate-split" data-testid="approvals-workspace">
                 <div class="ap-queue" data-testid="approvals-queue">
                   ${items.map(item => html`
                     <${Fragment} key=${item.id}>

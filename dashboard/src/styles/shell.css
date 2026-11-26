@@ -1,6 +1,18 @@
 /* MASC Dashboard — Proposal A+ Shell, Collapsible 6-Trunk Rail, Slim Top Bar, Overlays & /account
  * Pure OKLCH tokens only (0 raw hex), 4px spacing scale (--sp-1..6), min-width: 0 everywhere. */
 
+:root {
+  --topbar-h: 50px;
+  --ws-pad: var(--sp-4);
+  --btn-h: 32px;
+}
+
+@media (max-width: 767px) {
+  :root {
+    --ws-pad: var(--sp-2);
+  }
+}
+
 .ap-shell {
   display: flex;
   flex-direction: column;
@@ -57,7 +69,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-3);
-  height: 50px;
+  height: var(--topbar-h);
   padding: 0 var(--sp-3);
   background: var(--bg-1);
   border-bottom: 1px solid var(--line-1);
@@ -92,7 +104,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
-  height: 32px;
+  height: var(--btn-h);
   max-width: 340px;
   padding: 0 var(--sp-2);
   border-radius: var(--radius-sm);
@@ -165,12 +177,45 @@
   gap: var(--sp-1);
   flex: 1 1 auto;
   min-width: 0;
+  padding-block: var(--sp-1);
+  margin-block: calc(var(--sp-1) * -1);
   overflow-x: auto;
   scrollbar-width: none;
 }
 
 .ap-subtabs::-webkit-scrollbar {
   display: none;
+}
+
+.ap-mobile-subtabs {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line-1);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  min-width: 0;
+  z-index: calc(var(--z-sticky) - 1);
+}
+
+.ap-mobile-subtabs::-webkit-scrollbar {
+  display: none;
+}
+
+.ap-mobile-subtabs .ap-subtab {
+  height: var(--btn-h);
+  padding: 0 var(--sp-3);
+  border-radius: var(--radius-pill);
+}
+
+.ap-mobile-subtabs .ap-subtab:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--focus);
 }
 
 .ap-subtab {
@@ -187,6 +232,10 @@
   white-space: nowrap;
   flex: none;
   transition: background var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+
+.ap-subtabs .ap-subtab:focus-visible {
+  outline-offset: -2px;
 }
 
 .ap-subtab:hover {
@@ -226,6 +275,11 @@
   background: var(--bg-2);
   overflow: hidden;
   flex: none;
+  transition: border-color var(--t-fast) var(--ease);
+}
+
+.ap-win-group:focus-within {
+  border-color: var(--focus);
 }
 
 .ap-win-btn {
@@ -239,6 +293,11 @@
   cursor: pointer;
 }
 
+.ap-win-btn:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+
 .ap-win-btn:hover {
   color: var(--fg-1);
 }
@@ -247,6 +306,11 @@
   background: var(--bg-4);
   color: var(--fg-1);
   font-weight: 600;
+}
+
+.ap-win-compact-trigger {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
 }
 
 /* Right Status Pills */
@@ -493,16 +557,35 @@
 /* ── Conditional 1-Row Fast-Path Approval Strip (0px when clear) ── */
 .ap-fast-strip {
   padding: var(--sp-2) var(--sp-3);
-  background: var(--bg-1);
+  background: var(--warn-soft);
   border-bottom: 1px solid var(--warn-border);
   min-width: 0;
 }
 
-.ap-fast-tla {
-  padding: var(--sp-2) var(--sp-3);
-  gap: var(--sp-2);
-  border-color: var(--warn-border);
-  background: var(--warn-soft);
+.ap-fast-strip--ask {
+  background: color-mix(in oklch, var(--info-soft) 50%, var(--bg-1));
+  border-bottom-color: var(--info-border);
+  border-left: 3px solid var(--brass-1);
+}
+
+.ap-fast-strip--ask .ap-fast-pill {
+  border-color: var(--brass-border);
+  color: var(--brass-1);
+}
+
+.tla.ap-fast-tla {
+  padding: 0;
+  gap: var(--sp-1);
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+
+.tla.ap-fast-tla[data-locked="true"] {
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--err-border);
+  border-radius: var(--radius-sm);
+  background: var(--err-soft);
 }
 
 .ap-fast-row {
@@ -615,7 +698,15 @@
   border-right: 1px solid var(--line-1);
   overflow-y: auto;
   min-width: 0;
-  transition: width var(--t-fast) var(--ease), flex-basis var(--t-fast) var(--ease);
+  transition: width var(--t-fast) var(--ease), flex-basis var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+
+.ap-rail:focus-within {
+  border-right-color: color-mix(in oklch, var(--focus) 55%, var(--line-2));
+}
+
+.ap-rail :focus-visible {
+  outline-offset: -2px;
 }
 
 .ap-rail[data-expanded="false"] {
@@ -808,7 +899,7 @@
 }
 
 .ap-shell[data-mobile="true"] .ap-main {
-  padding-bottom: 64px;
+  padding-bottom: calc(var(--mobile-touch-target-min, 44px) + var(--sp-5));
 }
 
 /* ── Mobile Navigation (<768px) ── */
@@ -853,9 +944,9 @@
 
 .ap-mobile-badge {
   position: absolute;
-  top: 4px;
-  right: 8px;
-  padding: 0 4px;
+  top: var(--sp-1);
+  right: var(--sp-2);
+  padding: 0 var(--sp-1);
   border-radius: var(--radius-pill);
   background: var(--warn-soft);
   border: 1px solid var(--warn-border);
@@ -868,6 +959,8 @@
   position: fixed;
   inset: 0;
   background: var(--dialog-overlay-bg);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   z-index: var(--z-overlay);
 }
 
@@ -942,6 +1035,12 @@
   gap: var(--sp-2);
   padding: var(--sp-3) var(--sp-4);
   border-bottom: 1px solid var(--line-1);
+  transition: border-color var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease);
+}
+
+.ap-cmdk-input-row:focus-within {
+  border-bottom-color: var(--focus);
+  box-shadow: inset 0 -1px 0 0 var(--focus);
 }
 
 .ap-cmdk-input {
@@ -961,6 +1060,12 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-1);
+}
+
+.ap-cmdk-dialog :focus-visible:not(.ap-cmdk-input),
+.ap-cmdk-list :focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--focus);
 }
 
 .ap-cmdk-empty {
@@ -1253,7 +1358,7 @@
   display: flex;
   flex-direction: column;
   gap: var(--sp-4);
-  padding: var(--sp-5);
+  padding: var(--ws-pad);
   max-width: 1120px;
   min-width: 0;
 }
@@ -1379,6 +1484,11 @@
   border: 1px solid var(--line-1);
   background: var(--bg-1);
   min-width: 0;
+  transition: border-color var(--t-fast) var(--ease);
+}
+
+.ap-card:focus-within {
+  border-color: color-mix(in oklch, var(--focus) 55%, var(--line-2));
 }
 
 .ap-card-head {
@@ -1449,6 +1559,13 @@
   color: var(--fg-1);
   font-size: var(--fs-13);
   min-width: 0;
+}
+
+.ap-input:focus-visible {
+  outline: none;
+  border-color: var(--input-border-focus);
+  background: var(--input-bg-focus);
+  box-shadow: var(--focus-ring);
 }
 
 .ap-acct-list {
@@ -1534,6 +1651,12 @@
   border-color: var(--brass-border);
   background: var(--brass-soft);
   color: var(--brass-1);
+}
+
+.ap-badge--muted {
+  border-color: var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-3);
 }
 
 .ap-secret-box {
@@ -1625,7 +1748,7 @@
 /* ── Lightweight Shell Toasts ── */
 .ap-toast-host {
   position: fixed;
-  top: 58px;
+  top: calc(var(--topbar-h) + var(--sp-2));
   right: var(--sp-4);
   z-index: var(--z-toast);
   display: flex;
@@ -1664,8 +1787,41 @@
   padding: var(--sp-1);
 }
 
+/* ── Browser Window Blur State (Native-App Active/Inactive Expression) ── */
+.ap-shell[data-window-focused="false"] .ap-rail-item.is-active,
+.ap-shell[data-window-focused="false"] .ap-subtab.is-active {
+  background: var(--bg-2);
+  border-color: var(--line-1);
+  color: var(--fg-2);
+}
+
+.ap-shell[data-window-focused="false"] .ap-pill--live {
+  border-color: var(--line-2);
+  background: var(--bg-2);
+  color: var(--fg-2);
+}
+
+.ap-shell[data-window-focused="false"] .ap-prov-glyph.is-live {
+  color: var(--fg-3);
+}
+
+.ap-shell[data-window-focused="false"] .ap-brand-mark {
+  opacity: 0.72;
+}
+
+.ap-shell[data-window-focused="false"] .kb-beat {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .ap-sheet-backdrop {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
 /* Responsive adjustments */
-@media (max-width: 1120px) {
+@media (max-width: 1180px) {
   .ap-topbar {
     padding: 0 var(--sp-2);
     gap: var(--sp-2);
@@ -1677,8 +1833,12 @@
     max-width: 210px;
     gap: var(--sp-1);
   }
-  .ap-switcher-role {
+  .ap-switcher-role,
+  .ap-pill-label {
     display: none;
+  }
+  .ap-win-btn {
+    padding: 0 var(--sp-1);
   }
 }
 
@@ -1688,12 +1848,9 @@
   }
   .ap-switcher-principal,
   .ap-switcher-sep,
-  .ap-pill-label,
+  .ap-prov-label,
   .ap-pill .ap-kbd {
     display: none;
-  }
-  .ap-win-btn {
-    padding: 0 var(--sp-1);
   }
   .ap-pill {
     padding: 0 var(--sp-1);
@@ -1707,10 +1864,5 @@
   }
   .ap-switcher-trigger {
     max-width: 148px;
-  }
-  .ap-workspace,
-  .ap-placeholder,
-  .ap-gate {
-    padding: var(--sp-3);
   }
 }

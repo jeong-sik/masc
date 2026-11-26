@@ -11,7 +11,7 @@
 import { html } from 'htm/preact'
 import { Component, type ComponentChildren, type VNode } from 'preact'
 import { lazy, Suspense } from 'preact/compat'
-import { useEffect, useRef } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import {
   authSession,
   bootstrapAuthSession,
@@ -337,17 +337,39 @@ function QuickPeekHost(): VNode | null {
   `
 }
 
+function readWindowFocused(): boolean {
+  if (typeof document === 'undefined') return true
+  if (document.visibilityState === 'hidden') return false
+  return typeof document.hasFocus === 'function' ? document.hasFocus() : true
+}
+
 export function App(): VNode {
   const mobile = isMobileViewport.value
   const route = currentRoute.value
   const paletteMounted = commandPaletteMounted.value
   const mainRef = useRef<HTMLElement>(null)
+  const [windowFocused, setWindowFocused] = useState<boolean>(readWindowFocused)
 
   useEffect(() => {
     if (mainRef.current) {
       mainRef.current.scrollTop = 0
     }
   }, [route.workspace, route.subroute])
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return
+    const onFocus = () => setWindowFocused(document.visibilityState !== 'hidden')
+    const onBlur = () => setWindowFocused(false)
+    const onVisibility = () => setWindowFocused(readWindowFocused())
+    window.addEventListener('focus', onFocus)
+    window.addEventListener('blur', onBlur)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('focus', onFocus)
+      window.removeEventListener('blur', onBlur)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [])
 
   // Capability-gated bootstrap: `/health` -> `AuthSession` -> `startObserverStream()`
   useEffect(() => {
@@ -438,6 +460,7 @@ export function App(): VNode {
       data-workspace=${route.workspace}
       data-mobile=${mobile ? 'true' : 'false'}
       data-authenticated=${isAuthenticated.value ? 'true' : 'false'}
+      data-window-focused=${windowFocused ? 'true' : 'false'}
     >
       <${SkipLink} />
       <${TopBar} />

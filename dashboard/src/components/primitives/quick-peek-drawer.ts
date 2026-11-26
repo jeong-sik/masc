@@ -131,7 +131,7 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
       <header class="qpeek-head">
         <div>
           <h2 class="qpeek-title">${props.title}</h2>
-          ${props.subtitle && html`<div>${props.subtitle}</div>`}
+          ${props.subtitle && html`<div class="qpeek-sub">${props.subtitle}</div>`}
         </div>
         <div class="qpeek-actions">
           ${props.headerActions}

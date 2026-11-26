@@ -160,6 +160,12 @@ val open_work_of_preview : Wire_fleet.turn_preview -> open_work option
     not see end. [None] for a server that does not report the open work, and
     for a failed attempt or a turn that is still preparing. *)
 
+val open_activity_phrase : Wire_fleet.turn_open_activity -> Say.t
+(** What one open activity is doing, in the words the status line uses. *)
+
+val open_activity_since : Wire_fleet.turn_open_activity -> float
+(** When the activity's channel or stage last changed. *)
+
 val keeper_live_state : Wire_fleet.keeper_summary -> Health.live_state
 (** Project authoritative [keeper_health] onto Channel 2 {!Health.live_state}. *)
 

@@ -1264,17 +1264,93 @@ let build_pending_tx_rows ~(theme : Theme.t) ~(model : Model.t) ~width
           ~right_meta_attrs:Attr.bold ~bg_rgb:base_bg ~full_bleed_bg:true ())
     items
 
-let format_active_turn_elapsed ~(model : Model.t) (turn : Wire_fleet.active_turn) =
+let format_elapsed_since ~(model : Model.t) since_unix =
   if
     model.freshness.last_wall_unix > 0.0
-    && model.freshness.last_wall_unix >= turn.started_at_unix
+    && model.freshness.last_wall_unix >= since_unix
   then (
-    let raw_s = model.freshness.last_wall_unix -. turn.started_at_unix in
+    let raw_s = model.freshness.last_wall_unix -. since_unix in
     let s = Int.max 0 (Int.of_float raw_s) in
     if s < 60 then Some (Printf.sprintf "%ds" s)
     else if s < 3600 then Some (Printf.sprintf "%dm %02ds" (s / 60) (s mod 60))
     else Some (Printf.sprintf "%dh %02dm" (s / 3600) (s mod 3600 / 60)))
   else None
+
+let format_active_turn_elapsed ~(model : Model.t) (turn : Wire_fleet.active_turn) =
+  format_elapsed_since ~model turn.started_at_unix
+
+let reach_label ~(model : Model.t) = function
+  | Wire_fleet.Open_tool { reach = Some Wire_fleet.Reach_network; _ } ->
+      Some (Ops_common.say model ~ko:"외부 · 네트워크" ~en:"external · network")
+  | Wire_fleet.Open_tool { reach = Some Wire_fleet.Reach_model_provider; _ } ->
+      Some (Ops_common.say model ~ko:"외부 · 모델" ~en:"external · model")
+  | Wire_fleet.Open_tool { reach = Some Wire_fleet.Reach_sandbox; _ } ->
+      Some (Ops_common.say model ~ko:"샌드박스" ~en:"sandbox")
+  | Wire_fleet.Open_tool { reach = Some Wire_fleet.Reach_masc_state | None; _ }
+  | Wire_fleet.Open_response _ ->
+      None
+
+(* RFC open-tool-carries-cohort-and-reach D4. The open work, one row each,
+   with how long it has been in its current stage. Calls agent core planned
+   to run at once sit under one header. A call that leaves MASC says so. *)
+let build_progress_rows ~(theme : Theme.t) ~(model : Model.t) ~rail_rgb
+    (turn : Wire_fleet.active_turn) =
+  let activity_row ~indent activity =
+    let glyph, fg =
+      match activity with
+      | Wire_fleet.Open_response { channel = Wire_fleet.Channel_thinking; _ } ->
+          (Glyph.Ai_spark, theme.status_ai)
+      | Wire_fleet.Open_response
+          { channel = Wire_fleet.Channel_text | Wire_fleet.Channel_none; _ } ->
+          (Glyph.Live_working, theme.status_active)
+      | Wire_fleet.Open_tool _ -> (Glyph.Tool_square, theme.status_active)
+    in
+    let phrase = Say.resolve model.lang (Fleet_store.open_activity_phrase activity) in
+    let text =
+      match reach_label ~model activity with
+      | Some label -> phrase ^ "  · " ^ label
+      | None -> phrase
+    in
+    let text_fg =
+      match activity with
+      | Wire_fleet.Open_tool { reach = Some (Wire_fleet.Reach_network | Wire_fleet.Reach_model_provider); _ } ->
+          theme.status_attention
+      | Wire_fleet.Open_tool
+          { reach = Some (Wire_fleet.Reach_masc_state | Wire_fleet.Reach_sandbox) | None; _ }
+      | Wire_fleet.Open_response _ ->
+          theme.text_secondary
+    in
+    single_span_row ~rail_rgb
+      ~prefix:(indent ^ Glyph.to_utf8 glyph ^ " ")
+      ~prefix_fg:fg ~text ~text_fg
+      ?right_meta:
+        (format_elapsed_since ~model (Fleet_store.open_activity_since activity))
+      ~right_meta_fg:theme.text_muted ~bg_rgb:theme.surface_2 ~full_bleed_bg:true ()
+  in
+  match turn.preview with
+  | Some { Wire_fleet.open_activities = Some (_ :: _ as activities); _ } ->
+      List.concat_map
+        (function
+          | Chat_transcript.Progress_single activity -> [ activity_row ~indent:"  " activity ]
+          | Chat_transcript.Progress_batch { members; _ } ->
+              let running = List.length members in
+              let header =
+                single_span_row ~rail_rgb
+                  ~prefix:("  " ^ Glyph.to_utf8 Glyph.Tree_tee ^ " ")
+                  ~prefix_fg:theme.status_active ~prefix_attrs:Attr.bold
+                  ~text:
+                    (Ops_common.say model
+                       ~ko:(Printf.sprintf "동시 실행 %d개" running)
+                       ~en:(Printf.sprintf "%d running at once" running))
+                  ~text_fg:theme.status_active ~attrs:Attr.bold
+                  ~bg_rgb:theme.surface_2 ~full_bleed_bg:true ()
+              in
+              header
+              :: List.map
+                   (activity_row ~indent:("  " ^ Glyph.to_utf8 Glyph.Tree_pipe ^ " "))
+                   members)
+        (Chat_transcript.progress_pieces activities)
+  | Some { Wire_fleet.open_activities = Some [] | None; _ } | None -> []
 
 let short_turn_ref_tag (turn : Wire_fleet.active_turn) =
   match turn.turn_ref with
@@ -1319,8 +1395,11 @@ let build_active_turn_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper ~width
             ~bg_rgb:theme.surface_2 ~full_bleed_bg:true ();
         ]
   in
+  (* The open work shows while the turn runs, whether or not the header
+     above it does: the status strip names one thing, these rows name each. *)
+  let progress_rows = build_progress_rows ~theme ~model ~rail_rgb turn in
   if not (Chat_transcript.show_active_turn_summary ~model ~keeper turn) then
-    tail_rows
+    progress_rows @ tail_rows
   else
     let summary =
       Printf.sprintf "%s · %s"
@@ -1357,7 +1436,7 @@ let build_active_turn_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper ~width
         ~right_meta_fg:rail_rgb ~right_meta_attrs:Attr.italic
         ~bg_rgb:theme.surface_2 ~full_bleed_bg:true ()
     in
-    hdr_row :: tail_rows
+    (hdr_row :: progress_rows) @ tail_rows
 
 let draw_transcript_rows grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~pad_x ~scroll rows =

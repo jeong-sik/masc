@@ -76,6 +76,18 @@ type turn_response_channel = Channel_none | Channel_thinking | Channel_text
 
 type turn_tool_stage = Tool_requested | Tool_executing
 
+(** Where agent core planned a call: its batch in the turn, how many calls
+    the batch holds, and whether they run at once. *)
+type turn_tool_cohort = { batch_index : int; batch_size : int; concurrent : bool }
+
+(** Where a call reaches: MASC's own state, the Keeper sandbox or host
+    process, the network, or a model provider. *)
+type turn_tool_reach =
+  | Reach_masc_state
+  | Reach_sandbox
+  | Reach_network
+  | Reach_model_provider
+
 (** Work the server saw start in a running turn and did not see end. An
     activity carries when it began and when its channel or stage last
     changed. *)
@@ -91,6 +103,12 @@ type turn_open_activity =
       stage : turn_tool_stage;
       started_at_unix : float;
       since_unix : float;
+      cohort : turn_tool_cohort option;
+          (** [None] from a server that does not report it, and for a call
+              no batch plan named. *)
+      reach : turn_tool_reach option;
+          (** [None] from a server that does not report it, and when the
+              server does not know. *)
     }
 
 type turn_preparation_phase =

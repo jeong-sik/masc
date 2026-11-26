@@ -159,6 +159,33 @@ export function formatReleaseSummary(
   return { countdown, localTime, isSoon, isEstimated }
 }
 
+/** The longest a tab that shows a rest goes without looking at the clock
+ *  again. A rest the server still reports past its end is read for again at
+ *  the next look. */
+export const REST_LOOK_AGAIN_MS = 30_000
+/** The server drops a rest on the first read after its end, by its own clock.
+ *  The read that follows an end waits this long, so it is not a moment early. */
+const REST_END_READ_MARGIN_MS = 1_000
+
+/** How long after `nowMs` a tab that shows these rests looks at the clock
+ *  again: when the next of them is over, or after the longest wait, whichever
+ *  comes first. Null when nothing rests. */
+export function restClockDelayMs(restEndsUnix: readonly number[], nowMs: number): number | null {
+  if (restEndsUnix.length === 0) return null
+  let delayMs = REST_LOOK_AGAIN_MS
+  for (const endUnix of restEndsUnix) {
+    const overInMs = endUnix * 1000 + REST_END_READ_MARGIN_MS - nowMs
+    if (overInMs > 0 && overInMs < delayMs) delayMs = overInMs
+  }
+  return delayMs
+}
+
+/** Whether one of these rests is over on this page's clock. The answer that
+ *  holds it was read before its end: the server has not been asked since. */
+export function someRestIsOver(restEndsUnix: readonly number[], nowMs: number): boolean {
+  return restEndsUnix.some((endUnix) => endUnix * 1000 <= nowMs)
+}
+
 const PREFIX_SEPARATORS = new Set([':', '/', '.', '-', '_'])
 
 export function stripProviderPrefix(runtimeId: string, providerId: string): string {

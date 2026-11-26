@@ -26,6 +26,8 @@ import {
   formatReleaseSummary,
   groupRestingRuntimes,
   quotaRestCauseMeta,
+  restClockDelayMs,
+  someRestIsOver,
   stripProviderPrefix,
 } from './quota-rest-groups'
 import {
@@ -2376,5 +2378,99 @@ describe('workspaces/runtime', () => {
     expect(formatResetCountdown(now - 60, now)).toBe('지남')
     expect(formatResetCountdown(now + 2 * 86_400 + 3600, now)).toBe('2d 1h')
     expect(formatResetCountdown(null, now)).toBe('없음')
+  })
+
+  it('looks at the clock again when a rest is over, and no later than the longest wait', () => {
+    const nowMs = 1_800_000_000_000
+    const nowUnix = nowMs / 1000
+    // Nothing rests: the tab sets no timer.
+    expect(restClockDelayMs([], nowMs)).toBeNull()
+    // The next end is far: the tab looks again after the longest wait.
+    expect(restClockDelayMs([nowUnix + 600, nowUnix + 86_400], nowMs)).toBe(30_000)
+    // The next end is near: a second after it, when the server no longer reports the rest.
+    expect(restClockDelayMs([nowUnix + 600, nowUnix + 12], nowMs)).toBe(13_000)
+    // A rest that is over sets no time of its own: the read for it is the next look.
+    expect(restClockDelayMs([nowUnix - 5], nowMs)).toBe(30_000)
+    expect(restClockDelayMs([nowUnix - 5, nowUnix + 3], nowMs)).toBe(4_000)
+
+    expect(someRestIsOver([nowUnix + 600], nowMs)).toBe(false)
+    expect(someRestIsOver([nowUnix + 600, nowUnix], nowMs)).toBe(true)
+    expect(someRestIsOver([], nowMs)).toBe(false)
+  })
+
+  it('counts a rest down on the open Quotas tab and reads again once it is over, with no press', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(new Date('2026-11-26T03:00:00Z'))
+      // Ten and a half minutes: the minute the tab shows does not hang on
+      // how many milliseconds the reads below take.
+      const restEndUnix = Date.now() / 1000 + 630
+      let resolvedReads = 0
+      // The answers follow the clock as the server's do: the rest is in them until its end.
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url.startsWith('/api/v1/runtime/resolved')) {
+          resolvedReads += 1
+          const resting = Date.now() / 1000 < restEndUnix
+          return jsonResponse({
+            config_path: 'runtime.toml',
+            default_route: 'default',
+            default_runtime: null,
+            runtimes: [{
+              id: 'acme.coder',
+              provider: 'acme_coding',
+              provider_id: 'acme_coding',
+              model: 'acme-coder-2',
+              effective_max_context: 200_000,
+              max_context_source: 'capability',
+              max_output_tokens: 16_384,
+              is_local: false,
+              is_default: false,
+              quota_rest: resting ? { cause: 'provider_quota_refused', reset_stated: true, until: restEndUnix } : null,
+            }],
+            lanes: [],
+            assignments: [],
+            provider_usage_windows: [],
+          })
+        }
+        if (url.startsWith('/api/v1/dashboard/provider-usage-history')) {
+          return jsonResponse({ state: 'unavailable', reason: 'no history' })
+        }
+        if (url.startsWith('/api/v1/setup/inventory')) return jsonResponse({ integrations: [] })
+        return jsonResponse({})
+      }) as typeof fetch
+
+      render(
+        html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+        container,
+      )
+      const head = () => container.querySelector('[data-testid="paused-panel-toggle"]')?.textContent ?? ''
+      const kpi = () => container.querySelector('[data-testid="kpi-paused-runtimes"]')?.textContent ?? ''
+      // An answer's body is read outside the faked clock: wait for it in real time.
+      await vi.waitFor(() => {
+        expect(head()).toContain('가장 빠른 해제 10분 후')
+      }, { timeout: 5000 })
+      expect(kpi()).toContain('1 / 1')
+      expect(resolvedReads).toBe(1)
+
+      // Five minutes on, nothing pressed: the countdown has moved and nothing was read.
+      await vi.advanceTimersByTimeAsync(5 * 60_000)
+      expect(head()).toContain('가장 빠른 해제 5분 후')
+      expect(resolvedReads).toBe(1)
+
+      // A second after the end the tab reads, and the runtime is no longer listed as paused.
+      await vi.advanceTimersByTimeAsync(5 * 60_000 + 32_000)
+      await vi.waitFor(() => {
+        expect(container.querySelector('[data-testid="paused-runtimes-panel"]')).toBeNull()
+      }, { timeout: 5000 })
+      expect(resolvedReads).toBe(2)
+      expect(kpi()).toContain('0 / 1')
+
+      // Nothing rests: the tab sets no further timer and reads no more.
+      await vi.advanceTimersByTimeAsync(10 * 60_000)
+      expect(resolvedReads).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

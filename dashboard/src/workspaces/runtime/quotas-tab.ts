@@ -52,6 +52,8 @@ import {
   formatReleaseSummary,
   groupRestingRuntimes,
   quotaRestCauseMeta,
+  restClockDelayMs,
+  someRestIsOver,
   stripProviderPrefix,
   type QuotaRestCauseFilter,
   type QuotaRestSortKey,
@@ -383,6 +385,26 @@ export function QuotasTab(props: WorkspaceViewProps) {
     if (resolvedData) setNowUnix(Date.now() / 1000)
   }, [resolvedData])
 
+  // The tab's clock ticks every 30 seconds and its countdowns follow it. A
+  // rest ends between two ticks, and at its end the server stops reporting
+  // it, while the tab reads on mount and on the button only. So while
+  // something rests the tab also looks at the clock a second after the next
+  // end, and reads again once a rest is over.
+  const restEnds = useMemo(
+    () => (resolvedData?.runtimes ?? []).flatMap((rt) => (rt.quota_rest !== null ? [rt.quota_rest.until] : [])),
+    [resolvedData],
+  )
+  const [clockLooks, setClockLooks] = useState(0)
+  useEffect(() => {
+    const delayMs = restClockDelayMs(restEnds, Date.now())
+    if (delayMs === null) return undefined
+    const timer = window.setTimeout(() => {
+      setNowUnix(Date.now() / 1000)
+      if (someRestIsOver(restEnds, Date.now())) void loadAll('manual')
+      setClockLooks((looks) => looks + 1)
+    }, delayMs)
+    return () => window.clearTimeout(timer)
+  }, [restEnds, clockLooks, providerDays, accountMode])
   const restingProviders = useMemo(
     () => restingProviderIds(resolvedData?.runtimes ?? [], nowUnix),
     [resolvedData, nowUnix],

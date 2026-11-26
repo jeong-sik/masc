@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { turnDoing } from './turn-doing'
+import { TURN_RUNNING_PHRASE, turnDoing, turnDoingBrief } from './turn-doing'
 import type { KeeperActiveTurnPreview, KeeperTurnPreparation, TurnOpenActivity } from './types'
 
 const response = (channel: 'none' | 'thinking' | 'text', since = 100): TurnOpenActivity => ({
@@ -71,5 +71,31 @@ describe('what a turn is doing, in one line', () => {
   it('does not speak from the list of an attempt that failed, or of a turn that still prepares', () => {
     expect(turnDoing(preview('failed', [tool('Execute', 'executing')]))).toEqual({ phrase: '시도 실패', sinceUnix: null, tone: 'bad' })
     expect(turnDoing(preview('preparing', [tool('Execute', 'executing')]))).toEqual({ phrase: '준비 중', sinceUnix: null, tone: 'info' })
+  })
+})
+
+describe('what a turn is doing, for a place too narrow for the sentence', () => {
+  it('is the name of one open tool and how many more calls are open, without where the call stands', () => {
+    const several = [response('thinking'), tool('Read', 'requested'), tool('Execute', 'executing'), tool('Grep', 'requested')]
+    expect(turnDoingBrief(preview('tool', several))).toEqual({ kind: 'tool', name: 'Execute', otherCalls: 2 })
+    expect(turnDoingBrief(preview('tool', [tool('Read', 'requested')]))).toEqual({ kind: 'tool', name: 'Read', otherCalls: 0 })
+  })
+
+  it('is the words of the sentence when the turn names no tool', () => {
+    expect(turnDoingBrief(preview('streaming', [response('thinking')]))).toEqual({ kind: 'words', words: '추론 중' })
+    expect(turnDoingBrief(preview('waiting', []))).toEqual({ kind: 'words', words: '응답 대기 중' })
+    expect(turnDoingBrief(preview('tool', null))).toEqual({ kind: 'words', words: '도구 실행 중' })
+  })
+
+  it('is the preparation, or the attempt that failed, before a tool the same preview still lists', () => {
+    const open = [tool('Execute', 'executing')]
+    expect(turnDoingBrief(preview('tool', open, step('active', 'wiki')))).toEqual({ kind: 'words', words: '준비 중 · 위키' })
+    expect(turnDoingBrief(preview('preparing', open, step('cancelled', 'context')))).toEqual({ kind: 'words', words: '컨텍스트 준비 취소' })
+    expect(turnDoingBrief(preview('failed', open))).toEqual({ kind: 'words', words: '시도 실패' })
+  })
+
+  it('says that a turn runs when no preview has described it yet', () => {
+    expect(turnDoingBrief(null)).toEqual({ kind: 'words', words: TURN_RUNNING_PHRASE })
+    expect(TURN_RUNNING_PHRASE).toBe('턴 실행 중')
   })
 })

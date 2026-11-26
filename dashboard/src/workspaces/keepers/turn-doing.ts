@@ -57,3 +57,28 @@ export function turnDoing(preview: KeeperActiveTurnPreview): TurnDoing {
   if (open !== null) return { phrase: openWorkLeadPhrase(open), sinceUnix: open.lead.since_unix, tone: activity.tone }
   return { phrase: activity.label, sinceUnix: null, tone: activity.tone }
 }
+
+/** A turn the turns read reports and no preview has described yet. */
+export const TURN_RUNNING_PHRASE = '턴 실행 중'
+
+/**
+ * What a turn is doing, for a place too narrow for the sentence. An open tool
+ * is its name, kept apart from how many more calls are open, so a layout can
+ * cut the name and keep the count. Where the named call stands is left to the
+ * sentence.
+ */
+export type TurnDoingBrief =
+  | { readonly kind: 'words'; readonly words: string }
+  | {
+      readonly kind: 'tool'
+      readonly name: string
+      /** How many more calls are open behind the named one. */
+      readonly otherCalls: number
+    }
+
+export function turnDoingBrief(preview: KeeperActiveTurnPreview | null): TurnDoingBrief {
+  if (preview === null) return { kind: 'words', words: TURN_RUNNING_PHRASE }
+  const open = preview.preparation === null ? listedOpenWork(preview) : null
+  if (open === null || open.lead.kind !== 'tool') return { kind: 'words', words: turnDoing(preview).phrase }
+  return { kind: 'tool', name: open.lead.name, otherCalls: open.otherCalls }
+}

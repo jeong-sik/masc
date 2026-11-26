@@ -86,19 +86,20 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
           Some
             (if can_verdict_header then
                Ops_common.say model
-                 ~ko:"[v] 탭 · [a] 승인 · [x] 반려 · [h] 재정의 · [Space] JSON · [Esc] 뒤로"
-                 ~en:"[v] Tab · [a] Approve · [x] Reject · [h] Overrule · [Space] JSON · [Esc] Back"
+                 ~ko:"[a] 승인 · [x] 반려"
+                 ~en:"[a] Approve · [x] Reject"
              else
                Ops_common.say model
-                 ~ko:"[v] 탭 · [h] 재정의 · [Space] JSON · [Esc] 뒤로"
-                 ~en:"[v] Tab · [h] Overrule · [Space] JSON · [Esc] Back");
+                 ~ko:"[v] 탭 · [Esc] 뒤로"
+                 ~en:"[v] Tab · [Esc] Back");
         focused = verif_main_focused;
       }
     in
     let inner = Card.draw ~cache grid ~rect:main_card_rect ~theme spec in
+    let notice_pad_x = Ops_common.pad_x_for ~model inner in
     let notices =
       Ops_common.draw_verification_read_notices grid
-        ~rect:{ inner with h = Int.min 3 inner.h }
+        ~rect:(Card.pad_inner ~pad_x:notice_pad_x { inner with h = Int.min 3 inner.h })
         ~theme ~lang:model.lang model.work
     in
     let inner = { inner with y = inner.y + notices; h = inner.h - notices } in
@@ -117,7 +118,8 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
           let content = Card.pad_inner ~pad_x inner in
           let y = ref inner.y in
           let bot = Rect.bottom inner in
-          if inner.h >= 8 then begin
+          let has_header_band = inner.h >= 8 in
+          if has_header_band then begin
             let right_meta =
               match v.created_at_unix with
               | Some ts ->
@@ -131,23 +133,16 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
             Card.draw_section_band ~pad_x grid
               ~rect:(Rect.make ~x:inner.x ~y:!y ~w:inner.w ~h:2)
               ~theme ~left_title:v.task_title ~right_meta ~subtitle:sub ();
-            y := !y + 2 + (if inner.h >= 14 then 1 else 0)
+            y := !y + 2
           end;
           let action_h = if bot - !y >= 6 then 1 else 0 in
           let body_bot = bot - action_h in
-          if !y < body_bot then begin
+          if (not has_header_band) && !y < body_bot then begin
             Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme ~bg
-              ~label_w:14
-              ~key:(Ops_common.say model ~ko:"대상 작업" ~en:"Task")
-              ~value:(Printf.sprintf "%s · %s" v.task_id v.task_title)
+              ~label_w:10
+              ~key:(Ops_common.say model ~ko:"작업" ~en:"Task")
+              ~value:(Printf.sprintf "%s · %s · @%s" v.task_id v.task_title v.submitted_by)
               ~val_fg:theme.accent ();
-            incr y
-          end;
-          if !y < body_bot then begin
-            Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme ~bg
-              ~label_w:14
-              ~key:(Ops_common.say model ~ko:"제출자" ~en:"Submitted By")
-              ~value:("@" ^ v.submitted_by) ();
             incr y
           end;
           (match v.review_observation with

@@ -1553,11 +1553,12 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         model.work.planning
     in
     let zoomed = model.nav.zoomed && Model.can_zoom_current_view model in
-    let sel_goal =
+    let sel_goal_idx =
       let index = model.work.selected_index in
-      if index < 0 then None else List.nth_opt goals index
+      if index < 0 || goals = [] then None
+      else Some (Int.min (List.length goals - 1) index)
     in
-    let sel_goal_idx = Option.map (fun _ -> model.work.selected_index) sel_goal in
+    let sel_goal = Option.bind sel_goal_idx (List.nth_opt goals) in
     if zoomed then
       render_goal_zoomed ~sel_goal ~model ~cache ~rect ~theme grid
     else
@@ -2486,42 +2487,75 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     let status = model.work.task_status_filter in
     let is_status f = Work_store.equal_task_status_filter status f in
     let pills =
-      [
-        ( Printf.sprintf "%s %d"
-            (Ops_common.say model ~ko:"전체" ~en:"All")
-            (List.length all_tasks)
-        , is_status Work_store.Status_all
-        , None );
-        ( Printf.sprintf "%s %d"
-            (Ops_common.say model ~ko:"진행" ~en:"Active")
-            active_n
-        , is_status Work_store.Status_active
-        , Some Theme.Status_active );
-        ( Printf.sprintf "%s %d"
-            (Ops_common.say model ~ko:"검증대기" ~en:"AwaitingVerify")
-            verify_n
-        , is_status Work_store.Status_awaiting_verification
-        , Some Theme.Status_attention );
-        ( Printf.sprintf "%s %d"
-            (Ops_common.say model ~ko:"대기" ~en:"Todo")
-            todo_n
-        , is_status Work_store.Status_todo
-        , None );
-        ( Printf.sprintf "%s %d"
-            (Ops_common.say model ~ko:"미연결" ~en:"Unlinked")
-            unlinked_n
-        , is_status Work_store.Status_unlinked
-        , Some Theme.Status_attention );
-        ( Printf.sprintf "%s %d"
-            (Ops_common.say model ~ko:"완료" ~en:"Done")
-            done_n
-        , is_status Work_store.Status_done
-        , Some Theme.Status_ok );
-      ]
+      if pill_rect.w < 105 then
+        let active_label, active_count, active_tone =
+          match status with
+          | Work_store.Status_all ->
+              ( Ops_common.say model ~ko:"전체" ~en:"All"
+              , List.length all_tasks
+              , None )
+          | Work_store.Status_active ->
+              ( Ops_common.say model ~ko:"진행" ~en:"Active"
+              , active_n
+              , Some Theme.Status_active )
+          | Work_store.Status_awaiting_verification ->
+              ( Ops_common.say model ~ko:"검증대기" ~en:"AwaitingVerify"
+              , verify_n
+              , Some Theme.Status_attention )
+          | Work_store.Status_todo ->
+              (Ops_common.say model ~ko:"대기" ~en:"Todo", todo_n, None)
+          | Work_store.Status_unlinked ->
+              ( Ops_common.say model ~ko:"미연결" ~en:"Unlinked"
+              , unlinked_n
+              , Some Theme.Status_attention )
+          | Work_store.Status_done ->
+              ( Ops_common.say model ~ko:"완료" ~en:"Done"
+              , done_n
+              , Some Theme.Status_ok )
+        in
+        [
+          ( Printf.sprintf "%s: %s (%d) [v]"
+              (Ops_common.say model ~ko:"상태" ~en:"Status")
+              active_label active_count
+          , true
+          , active_tone );
+        ]
+      else
+        [
+          ( Printf.sprintf "%s %d"
+              (Ops_common.say model ~ko:"전체" ~en:"All")
+              (List.length all_tasks)
+          , is_status Work_store.Status_all
+          , None );
+          ( Printf.sprintf "%s %d"
+              (Ops_common.say model ~ko:"진행" ~en:"Active")
+              active_n
+          , is_status Work_store.Status_active
+          , Some Theme.Status_active );
+          ( Printf.sprintf "%s %d"
+              (Ops_common.say model ~ko:"검증대기" ~en:"AwaitingVerify")
+              verify_n
+          , is_status Work_store.Status_awaiting_verification
+          , Some Theme.Status_attention );
+          ( Printf.sprintf "%s %d"
+              (Ops_common.say model ~ko:"대기" ~en:"Todo")
+              todo_n
+          , is_status Work_store.Status_todo
+          , None );
+          ( Printf.sprintf "%s %d"
+              (Ops_common.say model ~ko:"미연결" ~en:"Unlinked")
+              unlinked_n
+          , is_status Work_store.Status_unlinked
+          , Some Theme.Status_attention );
+          ( Printf.sprintf "%s %d"
+              (Ops_common.say model ~ko:"완료" ~en:"Done")
+              done_n
+          , is_status Work_store.Status_done
+          , Some Theme.Status_ok );
+        ]
     in
     let pill_adv = Ops_common.draw_pills grid ~rect:pill_rect ~theme ~bg pills in
-    if Option.is_none (verification_notice model)
-       && v_pass + v_rej + v_wait > 0 && pill_rect.w - pill_adv >= 22 then begin
+    if Option.is_none (verification_notice model) && v_pass + v_rej + v_wait > 0 then begin
       let summary =
         Printf.sprintf "%s%d  %s%d  %s%d"
           (Glyph.to_utf8 Glyph.Check_mark) v_pass
@@ -2529,12 +2563,13 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           (Glyph.to_utf8 Glyph.Action_required) v_wait
       in
       let sw = Grapheme.display_width summary in
-      ignore
-        (Ops_common.put_line ~clip:pill_rect grid
-           ~x:(Rect.right pill_rect - sw - 1)
-           ~y:pill_rect.y ~max_w:sw
-           ~style:(Typography.whisper ~bg theme)
-           summary)
+      if pill_rect.w - pill_adv >= sw + 2 then
+        ignore
+          (Ops_common.put_line ~clip:pill_rect grid
+             ~x:(Rect.right pill_rect - sw - 1)
+             ~y:pill_rect.y ~max_w:sw
+             ~style:(Typography.whisper ~bg theme)
+             summary)
     end;
     if Rect.is_empty body_rect then ()
     else
@@ -3647,7 +3682,8 @@ let render_inbox_empty ~(model : Model.t) ~cache ~(rect : Rect.t)
         in
         ignore
           (Table.draw grid ~rect:a_inner ~theme ~caps:Ops_common.default_caps
-             ~lang:model.lang ~scroll:model.work.detail_scroll_offset
+             ~lang:model.lang ~focused:(Model.body_has_focus model)
+             ~scroll:model.work.detail_scroll_offset
              ~col_gap:(Layout.table_col_gap bp) ~columns:cols rows)
     end;
     (* Right/Bottom: Active Approval & Sandbox Policy Summary *)

@@ -1452,9 +1452,17 @@ let draw_input_map_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
               (Say.make ~ko:"이 턴에 기록된 입력 블록이 없습니다"
                  ~en:"No input blocks recorded on this turn")
         else
+          let is_zoomed =
+            model.nav.zoomed && Model.can_zoom_current_view model
+          in
+          let tbl_focused =
+            if is_zoomed then Model.pane_focused model 0
+            else Model.pane_focused model 1
+          in
           ignore
             (Table.draw grid ~rect:content ~theme ~caps:Ops_common.default_caps
-               ~lang:model.lang ~scroll:st.scroll_offset ~columns:cols rows)
+               ~lang:model.lang ~focused:tbl_focused ~scroll:st.scroll_offset
+               ~columns:cols rows)
 
 let draw_response_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~(st : Keeper_context_store.keeper_state) =

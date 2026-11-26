@@ -2622,7 +2622,7 @@ let keeper_content_rect_size ~embedded ~(model : Model.t) =
         Option.is_some (Fleet_store.selected_keeper_summary model.fleet)
       in
       let after_hero_h =
-        if has_keeper && card_inner_h >= 16 then card_inner_h - 5
+        if has_keeper && card_inner_h >= 10 then card_inner_h - 1
         else card_inner_h
       in
       if model.nav.pane_index = 0 && after_hero_h >= 3 then

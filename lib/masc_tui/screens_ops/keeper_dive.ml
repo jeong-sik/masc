@@ -3426,6 +3426,106 @@ let keeper_turns_24h_opt ~(model : Model.t) ~name =
   Fleet_store.keeper_turns_24h ~now_unix:model.freshness.last_wall_unix
     ~keeper:name model.fleet
 
+let draw_compact_preview_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
+    ~(model : Model.t) ~name (k : Wire_fleet.keeper_summary) =
+  if Rect.is_empty rect then ()
+  else
+    let bg = Color.of_rgb theme.surface_2 in
+    let pad_x = Ops_common.pad_x_for ~model rect in
+    Cell_grid.fill_rect ~clip:rect grid ~rect
+      ~style:(Typography.primary ~bg theme) ();
+    let content = Card.pad_inner ~pad_x rect in
+    if not (Rect.is_empty content) then begin
+      let rt_lbl = Ops_common.human_runtime_label ~model k in
+      let ctx_display = Observed.map Fleet_store.context_display k.context in
+      let pct_s =
+        match ctx_display with
+        | Observed.Value
+            { data = Fleet_store.Context_fill { ratio; estimated }; _ } ->
+            Fleet_store.context_fill_label ~estimated ratio
+        | Observed.Value { data = Fleet_store.Context_tokens_only tokens; _ } ->
+            Format_val.format_value Format_val.Tokens (Float.of_int tokens)
+        | Observed.Value { data = Fleet_store.Context_unavailable _; _ }
+        | Observed.Loading _ | Observed.Absent | Observed.Unreported
+        | Observed.Failed _ ->
+            Glyph.to_utf8 Glyph.Missing_absent
+      in
+      let turns_label, turns_s =
+        match keeper_turns_24h_opt ~model ~name with
+        | Some n24 ->
+            ( Ops_common.say model ~ko:"24h 턴" ~en:"24h Turns"
+            , Format_val.format_value Format_val.Count (Float.of_int n24) )
+        | None ->
+            ( Ops_common.say model ~ko:"누적 턴" ~en:"Total turns"
+            , Format_val.format_observed Format_val.Count
+                (Observed.map Float.of_int k.total_turns)
+                ~lang:model.lang )
+      in
+      let cost_s =
+        Format_val.format_observed Format_val.Usd
+          (Runtime_store.keeper_cost_usd ~keeper:name model.runtime)
+          ~lang:model.lang
+      in
+      let candle_s =
+        match Ops_common.keeper_candle_milli ~model name with
+        | Some (_, dec_s) ->
+            Glyph.to_utf8 Glyph.Ai_spark ^ " "
+            ^ Ops_common.format_milli_string dec_s
+        | None ->
+            Glyph.to_utf8 Glyph.Ai_spark ^ " "
+            ^ Glyph.to_utf8 Glyph.Missing_absent
+      in
+      let sep = Typography.sep_dot in
+      let sep_w = Grapheme.display_width sep in
+      let metrics_left =
+        Printf.sprintf "Ctx %s%s%s %s%s%s" pct_s sep turns_label turns_s sep
+          cost_s
+      in
+      let metrics_w =
+        Grapheme.display_width metrics_left
+        + sep_w
+        + Grapheme.display_width candle_s
+      in
+      let rt_budget = content.w - metrics_w - sep_w in
+      let cx = ref content.x in
+      if rt_budget >= 4 && String.length rt_lbl > 0 then begin
+        let adv =
+          Ops_common.put_line ~clip:content grid ~x:!cx ~y:content.y
+            ~max_w:rt_budget ~style:(Typography.structure ~bg theme) rt_lbl
+        in
+        cx := !cx + adv;
+        let adv_sep =
+          Ops_common.put_line ~clip:content grid ~x:!cx ~y:content.y
+            ~max_w:(Int.max 0 (Rect.right content - !cx))
+            ~style:(Typography.whisper ~bg ~italic:false theme)
+            sep
+        in
+        cx := !cx + adv_sep
+      end;
+      let adv_m =
+        Ops_common.put_line ~clip:content grid ~x:!cx ~y:content.y
+          ~max_w:(Int.max 0 (Rect.right content - !cx))
+          ~style:(Typography.anchor ~bg theme)
+          metrics_left
+      in
+      cx := !cx + adv_m;
+      if !cx < Rect.right content then begin
+        let adv_sep =
+          Ops_common.put_line ~clip:content grid ~x:!cx ~y:content.y
+            ~max_w:(Int.max 0 (Rect.right content - !cx))
+            ~style:(Typography.whisper ~bg ~italic:false theme)
+            sep
+        in
+        cx := !cx + adv_sep
+      end;
+      if !cx < Rect.right content then
+        ignore
+          (Ops_common.put_line ~clip:content grid ~x:!cx ~y:content.y
+             ~max_w:(Int.max 0 (Rect.right content - !cx))
+             ~style:(Typography.ai ~bg ~bold:true theme)
+             candle_s)
+    end
+
 let draw_embedded_preview_header grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~name (k : Wire_fleet.keeper_summary) =
   let bg = Color.of_rgb theme.surface_1 in
@@ -3924,14 +4024,14 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
         if board_recovery_open then
           Some
             (Ops_common.say model
-               ~ko:"[↑↓] 항목 · [Enter/c] 복구 · [v/Esc] 닫기"
-               ~en:"[↑↓] Item · [Enter/c] Recover · [v/Esc] Close")
+               ~ko:"[Enter/c] 복구 · [Esc] 닫기"
+               ~en:"[Enter/c] Recover · [Esc] Close")
         else if Nav.equal_keeper_tab tab Nav.Keeper_config then
           if Model.is_keeper_config_active model then
             Some
               (Ops_common.say model
-                 ~ko:"[←→] 값 · [Enter] 편집 · [d] Diff · [Ctrl+S] 저장 · [ / ] 탭"
-                 ~en:"[←→] Cycle · [Enter] Edit · [d] Diff · [Ctrl+S] Save · [ / ] Tabs")
+                 ~ko:"[Enter] 편집 · [Ctrl+S] 저장"
+                 ~en:"[Enter] Edit · [Ctrl+S] Save")
           else
             Some
               (Ops_common.say model
@@ -3942,30 +4042,30 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
             (match trace_sec with
             | Keeper_context_store.Trace_metrics_logs ->
                 Ops_common.say model
-                  ~ko:"[t/{}] 섹션 · [v] 메트릭/샌드박스 · [r] 새로고침 · [z] 확대"
-                  ~en:"[t/{}] Section · [v] Metrics/Sandbox · [r] Refresh · [z] Zoom"
+                  ~ko:"[t] 섹션 · [z] 확대"
+                  ~en:"[t] Section · [z] Zoom"
             | Keeper_context_store.Trace_context ->
                 Ops_common.say model
-                  ~ko:"[t/{}] 섹션 · < / > 턴 · [v] 하위탭 · [z] 확대"
-                  ~en:"[t/{}] Section · < / > Turn · [v] View · [z] Zoom"
+                  ~ko:"[t] 섹션 · [v] 하위탭"
+                  ~en:"[t] Section · [v] View"
             | Keeper_context_store.Trace_tool_calls ->
                 Ops_common.say model
-                  ~ko:"[t/{}] 섹션 · [Enter] 전체 결과 · [z] 확대"
-                  ~en:"[t/{}] Section · [Enter] Full Result · [z] Zoom"
+                  ~ko:"[t] 섹션 · [Enter] 결과"
+                  ~en:"[t] Section · [Enter] Result"
             | Keeper_context_store.Trace_runtime ->
                 Ops_common.say model
-                  ~ko:"[t/{}] 섹션 · [↑↓] 스크롤 · [r] 새로고침 · [z] 확대"
-                  ~en:"[t/{}] Section · [↑↓] Scroll · [r] Reload · [z] Zoom")
+                  ~ko:"[t] 섹션 · [r] 새로고침"
+                  ~en:"[t] Section · [r] Reload")
         else if Nav.equal_keeper_tab tab Nav.Keeper_work_sandbox then
           Some
             (Ops_common.say model
-               ~ko:"[v] 격리 복구 · [p] 프로브 · [o] Infra 샌드박스 · [z] 확대"
-               ~en:"[v] Quarantine · [p] Probe · [o] Infra Sandboxes · [z] Zoom")
+               ~ko:"[v] 격리 복구 · [z] 확대"
+               ~en:"[v] Quarantine · [z] Zoom")
         else if Nav.equal_keeper_tab tab Nav.Keeper_identity then
           Some
             (Ops_common.say model
-               ~ko:"[l] 로그인 · [a/Enter] 전환 · [K] PAT · [y] 복사"
-               ~en:"[l] Login · [a/Enter] Switch · [K] PAT · [y] Copy")
+               ~ko:"[l] 로그인 · [a] 전환"
+               ~en:"[l] Login · [a] Switch")
         else
           Some
             (Ops_common.say model ~ko:"[Ctrl+T] 큐 · [z] 확대"
@@ -3973,42 +4073,42 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
       else if board_recovery_open then
         Some
           (Ops_common.say model
-             ~ko:"[↑↓] 항목 · [Enter/c] 복구 · [v/Esc] 닫기"
-             ~en:"[↑↓] Item · [Enter/c] Recover · [v/Esc] Close")
+             ~ko:"[Enter/c] 복구 · [Esc] 닫기"
+             ~en:"[Enter/c] Recover · [Esc] Close")
       else if Nav.equal_keeper_tab tab Nav.Keeper_config then
         Some
           (Ops_common.say model
-             ~ko:"[←→] 값 변경 · [Enter] 편집 · [d] Diff · [Ctrl+S] 저장 · [ / ] 탭 · [Esc] 목록"
-             ~en:"[←→] Cycle · [Enter] Edit · [d] Diff · [Ctrl+S] Save · [ / ] Tabs · [Esc] Fleet")
+             ~ko:"[Enter] 편집 · [Ctrl+S] 저장"
+             ~en:"[Enter] Edit · [Ctrl+S] Save")
       else if Nav.equal_keeper_tab tab Nav.Keeper_trace then
         Some
           (match trace_sec with
           | Keeper_context_store.Trace_metrics_logs ->
               Ops_common.say model
-                ~ko:"[t/{}] 섹션 · [v] 메트릭/샌드박스 · [r] 새로고침 · [ / ] 탭 · [Esc] 목록"
-                ~en:"[t/{}] Section · [v] Metrics/Sandbox · [r] Refresh · [ / ] Tabs · [Esc] Fleet"
+                ~ko:"[t] 섹션 · [v] 보기"
+                ~en:"[t] Section · [v] View"
           | Keeper_context_store.Trace_context ->
               Ops_common.say model
-                ~ko:"[t/{}] 섹션 · < / > 턴 · [v] 하위탭 · [ / ] 탭 · [Esc] 목록"
-                ~en:"[t/{}] Section · < / > Turn · [v] View · [ / ] Tabs · [Esc] Fleet"
+                ~ko:"[t] 섹션 · [v] 하위탭"
+                ~en:"[t] Section · [v] View"
           | Keeper_context_store.Trace_tool_calls ->
               Ops_common.say model
-                ~ko:"[t/{}] 섹션 · [Enter] 전체 결과 · [ / ] 탭 · [Esc] 목록"
-                ~en:"[t/{}] Section · [Enter] Full Result · [ / ] Tabs · [Esc] Fleet"
+                ~ko:"[t] 섹션 · [Enter] 결과"
+                ~en:"[t] Section · [Enter] Result"
           | Keeper_context_store.Trace_runtime ->
               Ops_common.say model
-                ~ko:"[t/{}] 섹션 · [↑↓] 스크롤 · [r] 새로고침 · [ / ] 탭 · [Esc] 목록"
-                ~en:"[t/{}] Section · [↑↓] Scroll · [r] Reload · [ / ] Tabs · [Esc] Fleet")
+                ~ko:"[t] 섹션 · [r] 새로고침"
+                ~en:"[t] Section · [r] Reload")
       else if Nav.equal_keeper_tab tab Nav.Keeper_work_sandbox then
         Some
           (Ops_common.say model
-             ~ko:"[v] 격리 복구 · [p] 프로브 · [o] Infra 샌드박스 · [ / ] 탭 · [Esc] 목록"
-             ~en:"[v] Quarantine · [p] Probe · [o] Infra Sandboxes · [ / ] Tabs · [Esc] Fleet")
+             ~ko:"[v] 격리 복구 · [Esc] 목록"
+             ~en:"[v] Quarantine · [Esc] Fleet")
       else if Nav.equal_keeper_tab tab Nav.Keeper_identity then
         Some
           (Ops_common.say model
-             ~ko:"[l] 로그인 · [L] 폴 · [a/Enter] 전환 · [U] 해제 · [K] PAT · [y] 복사"
-             ~en:"[l] Login · [L] Poll · [a/Enter] Switch · [U] Disconnect · [K] PAT · [y] Copy")
+             ~ko:"[l] 로그인 · [a] 전환"
+             ~en:"[l] Login · [a] Switch")
       else if Nav.equal_keeper_tab tab Nav.Keeper_chat && has_running_turn then
         Some
           (Ops_common.say model ~ko:"[Ctrl+T] 작업·큐 · [Esc/Ctrl+X] 턴 중단"
@@ -4025,8 +4125,8 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
              ~en:"[Ctrl+T] Work & Queue · [Ctrl+O] Tool details")
       else
         Some
-          (Ops_common.say model ~ko:"[ / ] 탭 · [y] 응답 복사 · [Esc] 목록"
-             ~en:"[ / ] Tabs · [y] Copy · [Esc] Fleet")
+          (Ops_common.say model ~ko:"[y] 응답 복사 · [Esc] 목록"
+             ~en:"[y] Copy · [Esc] Fleet")
     in
     let footer_hint =
       let stop_armed_for_here =
@@ -4126,7 +4226,18 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
     else
       let after_hero =
         match embedded, keeper_opt with
-        | true, Some k when inner.h >= 16 ->
+        | true, Some k when inner.h >= 10 ->
+            (* Split preview: default-collapse the 5-row hero into a crisp
+               1-line summary bar so transcript/trace recovers 4 vertical rows. *)
+            let hero_r, rest = Rect.split_v inner ~top_h:1 in
+            draw_compact_preview_bar grid ~rect:hero_r ~theme ~model ~name k;
+            rest
+        | false, Some k
+          when inner.h >= 22
+               && not (Nav.equal_keeper_tab tab Nav.Keeper_chat)
+               && not (Nav.equal_keeper_tab tab Nav.Keeper_memory) ->
+            (* Zoomed keeper inspection (non-Chat/non-Memory): render full
+               multi-row hero + 4-metric telemetry strip. *)
             let hero_r, rest = Rect.split_v inner ~top_h:5 in
             draw_embedded_preview_header grid ~rect:hero_r ~theme ~model ~name k;
             rest

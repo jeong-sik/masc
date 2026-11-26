@@ -1006,35 +1006,29 @@ let render_full_width_roster grid ~(rect : Rect.t) ~(theme : Theme.t)
                 acc + Ops_common.keeper_incident_count model.incidents k.name)
               0 ks
           in
-          let strip =
-            Printf.sprintf "%s %s %d  %s  %s %s %d  %s  %s %s %d  %s  %s %s %d  %s  %s %d %s"
-              (Glyph.to_utf8 Glyph.Action_required)
-              (Ops_common.say model ~ko:"즉시 조치/장애" ~en:"Action/Fault")
-              (counts.attn + counts.failing)
-              (Glyph.to_utf8 Glyph.Separator_dot)
-              (Glyph.to_utf8 Glyph.Live_working)
-              (Ops_common.say model ~ko:"작업 중" ~en:"Working")
-              counts.working
-              (Glyph.to_utf8 Glyph.Separator_dot)
-              (Glyph.to_utf8 Glyph.Live_healthy)
-              (Ops_common.say model ~ko:"정상" ~en:"Healthy")
-              counts.healthy
-              (Glyph.to_utf8 Glyph.Separator_dot)
-              (Glyph.to_utf8 Glyph.Live_idle)
-              (Ops_common.say model ~ko:"정지/대기" ~en:"Offline/Paused")
-              (counts.offline + counts.paused_idle)
-              (Glyph.to_utf8 Glyph.Separator_dot)
-              (Glyph.to_utf8 Glyph.Recovered)
-              total_trail
-              (Ops_common.say model ~ko:"과거 이력 (라이브 상태 분리)"
-                 ~en:"past trail (isolated from live)")
-          in
-          ignore
-            (Ops_common.put_line ~clip:bucket_rect grid ~x:(bucket_rect.x + 2)
-               ~y:bucket_rect.y
-               ~max_w:(Int.max 0 (bucket_rect.w - 4))
-               ~style:(Typography.structure ~bg theme)
-               strip)
+          let pad_x = Ops_common.pad_x_for ~model bucket_rect in
+          let content = Card.pad_inner ~pad_x bucket_rect in
+          if not (Rect.is_empty content) then begin
+            let adv =
+              draw_semantic_fleet_counts grid ~clip:content ~x:content.x
+                ~y:content.y ~theme ~bg counts
+            in
+            if total_trail > 0 then begin
+              let trail_s =
+                Printf.sprintf "%s%s%d"
+                  (if adv > 0 then Typography.sep_dot else "")
+                  (Glyph.to_utf8 Glyph.Recovered)
+                  total_trail
+              in
+              let tx = content.x + adv in
+              if tx < Rect.right content then
+                ignore
+                  (Ops_common.put_line ~clip:content grid ~x:tx ~y:content.y
+                     ~max_w:(Rect.right content - tx)
+                     ~style:(Typography.status ~bg theme Theme.Status_historical)
+                     trail_s)
+            end
+          end
         end;
         let rows = List.map (keeper_table_row ~model ~theme ~indent_name:false) ks in
         let selected_idx =
@@ -1176,9 +1170,12 @@ let draw_unreadable_keepers grid ~(rect : Rect.t) ~(theme : Theme.t)
                 (Glyph.to_utf8 Glyph.Live_failing)
                 u.name u.reason
           in
-          ignore
-            (Ops_common.put_line ~clip:rect grid ~x:rect.x ~y:(rect.y + i)
-               ~max_w:rect.w ~style line))
+          let pad_x = Ops_common.pad_x_for ~model rect in
+          let content = Card.pad_inner ~pad_x rect in
+          if not (Rect.is_empty content) then
+            ignore
+              (Ops_common.put_line ~clip:content grid ~x:content.x
+                 ~y:(content.y + i) ~max_w:content.w ~style line))
       rows
 
 let render_with_history_rows

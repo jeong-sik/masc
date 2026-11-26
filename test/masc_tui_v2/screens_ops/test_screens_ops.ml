@@ -1202,8 +1202,11 @@ let test_work_all_4_subtabs_and_empty_inbox () =
                   Alcotest.(check bool) "interned OSC 8 hyperlinks" true
                     (has_any_hyperlink grid);
                   Alcotest.(check bool) "shows unlinked attribution warning" true
-                    (contains_sub ~needle:"goal_id" text
-                     || contains_sub ~needle:"backlog_fenced" text)
+                    (contains_sub ~needle:"목표 미연결" text
+                     || contains_sub ~needle:"lack goal links" text
+                     || contains_sub ~needle:"미귀속 캔들" text
+                     || contains_sub ~needle:"unattributed Candles" text
+                     || contains_sub ~needle:"goal_id" text)
               | Nav.Work_tasks ->
                   Alcotest.(check bool) "shows started_at timestamp" true
                     (contains_sub ~needle:"started_at" text)
@@ -1908,7 +1911,7 @@ let test_v25_work_pipeline_adaptive_height_and_linked_card () =
         (Printf.sprintf "Goals card uses adaptive height <= 12 (bottom at y=%d)" y)
         true (y <= 12));
   Alcotest.(check bool) "bottom-left Linked Tasks & Verifications peer card rendered" true
-    (contains_sub ~needle:"연결된 작업" txt && contains_sub ~needle:"task-zf-1" txt);
+    (contains_sub ~needle:"연결 작업 · 검증" txt && contains_sub ~needle:"task-zf-1" txt);
   Alcotest.(check bool) "zero nested boxes in Work Pipeline" true
     (count_nested_box_corners grid = 0);
   (* 2. Selected 0/4 goal row in the LEFT Goals table (y >= 3, x < 64) uses Left_rail ▎ + calm selection_bg (zero filled █ blocks) *)
@@ -2150,7 +2153,7 @@ let test_v25_keepers_5_company_fleet_tree_and_preview_inspector () =
   Alcotest.(check bool) "preview shows Violet Candle balance" true
     (contains_sub ~needle:"4.250 C" txt);
   Alcotest.(check bool) "preview shows [Enter/z] Zoom footer cue" true
-    (contains_sub ~needle:"[Enter/z] Zoom" txt);
+    (contains_sub ~needle:"[Enter/z] 확대" txt);
   Alcotest.(check int) "zero nested boxes in Keepers Fleet + Preview" 0
     (count_nested_box_corners grid)
 

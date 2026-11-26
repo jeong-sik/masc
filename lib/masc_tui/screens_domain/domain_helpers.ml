@@ -23,7 +23,7 @@ let body_rect ~bp (rect : Rect.t) =
   if rect.x = 0 then Layout.inset_body bp rect else rect
 
 let pad_content ~bp ?(pad_y = 0) (inner : Rect.t) =
-  Card.pad_inner ~pad_x:(Layout.card_pad_x bp) ~pad_y inner
+  Card.pad_inner ~pad_x:(Layout.card_pad_x_for_width bp inner.w) ~pad_y inner
 
 let clamp_index len idx =
   if len <= 0 then 0
@@ -79,6 +79,10 @@ let selection_style ~(theme : Theme.t) ?(attrs = Attr.none) () =
     ~fg:(Color.of_rgb theme.selection_fg)
     ~bg:(Color.of_rgb theme.selection_bg)
     ~attrs ()
+
+let row_text_style ~(theme : Theme.t) ~selected ~focused ~bg =
+  if selected && focused then anchor_style ~theme ~bg ()
+  else text_style ~theme ~bg ()
 
 let make_badge ?glyph ?tone text : Card.badge = { glyph; text; tone }
 
@@ -191,7 +195,15 @@ let draw_pills ~grid ~(rect : Rect.t) ~(theme : Theme.t) ?bg ?right_hint pills =
     let base_bg = Color.of_rgb bg_rgb in
     let bar_style = Typography.structure ~bg:base_bg theme in
     Cell_grid.fill_rect ~clip:rect grid ~rect ~style:bar_style ();
-    let right_edge = Rect.right rect in
+    let left_pad =
+      match bg with
+      | None ->
+          if rect.w >= 44 then 2
+          else if rect.w >= 24 then 1
+          else 0
+      | Some _ -> 0
+    in
+    let right_edge = Rect.right rect - left_pad in
     let hint_reserve =
       match right_hint with
       | Some h when String.length (String.trim h) > 0 && rect.w >= 36 ->
@@ -208,12 +220,12 @@ let draw_pills ~grid ~(rect : Rect.t) ~(theme : Theme.t) ?bg ?right_hint pills =
       | Some _ | None -> 0
     in
     let pill_right = right_edge - hint_reserve in
-    let left_pad =
-      match bg with
-      | None when rect.x = 0 && rect.w >= 4 -> 1
-      | None | Some _ -> 0
+    let pill_clip =
+      Rect.make ~x:rect.x ~y:rect.y
+        ~w:(Int.max 0 (pill_right - rect.x))
+        ~h:1
     in
-    let pill_gap = if rect.w >= 96 then 2 else 1 in
+    let pill_gap = if rect.w >= 72 then 2 else 1 in
     let cx = ref (rect.x + left_pad) in
     List.iter
       (fun (p : pill) ->
@@ -242,18 +254,32 @@ let draw_pills ~grid ~(rect : Rect.t) ~(theme : Theme.t) ?bg ?right_hint pills =
             in
             let lbl_style =
               Style.make ~fg:(Color.of_rgb lbl_fg) ~bg:pill_bg
-                ~attrs:Attr.bold ()
+                ~attrs:(Attr.union Attr.bold Attr.underline) ()
             in
-            Cell_grid.put_glyph ~clip:rect grid ~x:!cx ~y:rect.y
-              ~style:rail_style Glyph.Left_rail;
-            let body_x = !cx + 1 in
-            let body_max = Int.max 0 (avail - 1) in
-            let text = " " ^ glyph_str ^ p.label ^ " " in
+            let pad_style = Typography.primary ~bg:pill_bg theme in
+            let cur = ref !cx in
+            if !cur < pill_right then begin
+              Cell_grid.put_glyph ~clip:pill_clip grid ~x:!cur ~y:rect.y
+                ~style:rail_style Glyph.Left_rail;
+              incr cur
+            end;
+            if !cur < pill_right then begin
+              Cell_grid.put_ascii ~clip:pill_clip grid ~x:!cur ~y:rect.y
+                ~style:pad_style ' ';
+              incr cur
+            end;
             let adv =
-              put_clipped ~grid ~clip:rect ~x:body_x ~y:rect.y ~max_w:body_max
-                ~style:lbl_style text
+              put_clipped ~grid ~clip:pill_clip ~x:!cur ~y:rect.y
+                ~max_w:(Int.max 0 (pill_right - !cur))
+                ~style:lbl_style (glyph_str ^ p.label)
             in
-            cx := body_x + adv + pill_gap
+            cur := !cur + adv;
+            if !cur < pill_right then begin
+              Cell_grid.put_ascii ~clip:pill_clip grid ~x:!cur ~y:rect.y
+                ~style:pad_style ' ';
+              incr cur
+            end;
+            cx := !cur + pill_gap
           end
           else begin
             let fg_rgb =
@@ -266,8 +292,8 @@ let draw_pills ~grid ~(rect : Rect.t) ~(theme : Theme.t) ?bg ?right_hint pills =
             in
             let text = glyph_str ^ p.label in
             let adv =
-              put_clipped ~grid ~clip:rect ~x:!cx ~y:rect.y ~max_w:avail ~style
-                text
+              put_clipped ~grid ~clip:pill_clip ~x:!cx ~y:rect.y ~max_w:avail
+                ~style text
             in
             cx := !cx + adv + pill_gap
           end

@@ -205,10 +205,9 @@ let draw_sandbox_inspector_body ?(scroll = 0) ~grid ~(inner : Rect.t)
       let y = ref content.y in
       let bottom = Rect.bottom content in
       let use_spacers = content.h >= 17 in
-      let body_indent = if content.w >= 26 then 2 else 0 in
-      let body_x = content.x + body_indent in
-      let body_w = Int.max 0 (content.w - body_indent) in
-      let key_w = if body_w >= 32 then 10 else 8 in
+      let body_x = content.x in
+      let body_w = content.w in
+      let key_w = if body_w >= 34 then 10 else 8 in
       let put_row ?value_style key value =
         if !y < bottom then begin
           H.put_kv ~grid ~clip:content ~x:body_x ~y:!y ~max_w:body_w
@@ -1052,9 +1051,15 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
                  in
                  let stats_txt = Printf.sprintf "%s · %s" rtt_s sess_s in
                  let stats_w = Grapheme.display_width stats_txt in
+                 let pool_name_txt =
+                   Printf.sprintf "%s %s" (Glyph.to_utf8 rg) p.pool_name
+                 in
+                 let pool_name_w = Grapheme.display_width pool_name_txt in
                  let bar_w =
-                   if i2.w >= 34 && Option.is_some sess_ratio_opt
-                      && i2.w - (stats_w + 6) >= 7
+                   if
+                     Option.is_some sess_ratio_opt
+                     && i2.w >= pool_name_w + stats_w + 7
+                     && i2.w - (stats_w + 6) >= 7
                    then 5
                    else 0
                  in
@@ -1066,7 +1071,7 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
                  ignore
                    (H.put_clipped ~grid ~clip:i2 ~x:i2.x ~y:!y ~max_w:name_w
                       ~style:(H.status_style ~theme rt_tok)
-                      (Printf.sprintf "%s %s" (Glyph.to_utf8 rg) p.pool_name));
+                      pool_name_txt);
                  let stats_x =
                    Int.max (i2.x + name_w + 1) (Rect.right i2 - right_block)
                  in
@@ -1848,8 +1853,8 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
                  ~style:(H.status_style ~theme ~bg:row_bg ~attrs:Attr.bold tone)
                  sign);
             let path_style =
-              if is_active then H.anchor_style ~theme ~bg:row_bg ()
-              else H.text_style ~theme ~bg:row_bg ()
+              H.row_text_style ~theme ~selected:is_active ~focused:ch_focused
+                ~bg:row_bg
             in
             ignore
               (H.put_clipped ~grid ~clip:row_rect ~x:(tx + 2) ~y:!y
@@ -2046,77 +2051,130 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
                            Printf.sprintf " (+%d undecodable)" entry.undecodable
                          else ""
                        in
-                       let hdr =
-                         Say.resolve lang
-                           (Say.make
-                              ~ko:(Printf.sprintf "GitHub PR (%d건)%s" n_prs undec_s)
-                              ~en:(Printf.sprintf "Open PRs (%d)%s" n_prs undec_s))
+                       let pr_tone (pr : Wire_infra.repository_pull_row) =
+                         if
+                           String.equal pr.checks "failing"
+                           || String.equal pr.mergeable "conflicting"
+                         then Theme.Status_critical
+                         else if
+                           String.equal pr.review "changes_requested"
+                           || String.equal pr.checks "running"
+                         then Theme.Status_attention
+                         else if
+                           String.equal pr.checks "passing"
+                           && String.equal pr.review "approved"
+                         then Theme.Status_ok
+                         else Theme.Status_active
                        in
-                       ignore
-                         (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x ~y:!y
-                            ~max_w:pr_clip.w
-                            ~style:(H.secondary_style ~theme ()) hdr);
-                       incr y;
-                       let avail = Int.max 0 (bot - !y - 2) in
-                       let max_pr_rows, show_more =
-                         if avail <= 0 || n_prs = 0 then (0, false)
-                         else if n_prs <= Int.min 3 avail then (n_prs, false)
-                         else if avail = 1 then (1, false)
-                         else (Int.min 3 (avail - 1), true)
-                       in
-                       List.iteri
-                         (fun idx (pr : Wire_infra.repository_pull_row) ->
-                           if idx < max_pr_rows && !y < bot then begin
-                             let tone =
-                               if
-                                 String.equal pr.checks "failing"
-                                 || String.equal pr.mergeable "conflicting"
-                               then Theme.Status_critical
-                               else if
-                                 String.equal pr.review "changes_requested"
-                                 || String.equal pr.checks "running"
-                               then Theme.Status_attention
-                               else if
-                                 String.equal pr.checks "passing"
-                                 && String.equal pr.review "approved"
-                               then Theme.Status_ok
-                               else Theme.Status_active
-                             in
-                             let draft_tag = if pr.draft then "[DRAFT] " else "" in
-                             let author_s =
-                               match pr.keeper, pr.author with
-                               | Some k, _ -> "@" ^ k
-                               | None, Some a -> "@" ^ a
-                               | None, None -> ""
-                             in
-                             let title_s = Option.value pr.title ~default:"" in
-                             let head_rev_s =
-                               if String.equal pr.head_review "not_reviewed_on_head"
-                               then " !head-rev"
-                               else ""
-                             in
-                             let row_txt =
-                               Printf.sprintf "  #%d %s[%s/%s/%s]%s %s %s"
-                                 pr.number draft_tag pr.checks pr.review
-                                 pr.mergeable head_rev_s author_s title_s
-                             in
-                             ignore
-                               (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x
-                                  ~y:!y ~max_w:pr_clip.w
-                                  ~style:(H.status_style ~theme tone) row_txt);
-                             incr y
-                           end)
-                         entry.pulls;
-                       let hidden_prs = n_prs - max_pr_rows in
-                       if show_more && hidden_prs > 0 && !y < bot then begin
+                       if not (Model.is_zoomed_active model) then begin
+                         (* Split view: default-collapse Open PRs to a crisp 1-line summary
+                            so the working-tree diff stays visible above the fold. *)
+                         let summary_line, tone_opt =
+                           match entry.pulls with
+                           | [] ->
+                               ( Say.resolve lang
+                                   (Say.make
+                                      ~ko:(Printf.sprintf "GitHub PR: 0건%s" undec_s)
+                                      ~en:(Printf.sprintf "Open PRs: 0%s" undec_s))
+                               , None )
+                           | pr :: rest ->
+                               let extra_n = List.length rest in
+                               let extra_s =
+                                 if extra_n > 0 then Printf.sprintf " (+%d)" extra_n
+                                 else ""
+                               in
+                               let draft_tag = if pr.draft then "[DRAFT] " else "" in
+                               let head_rev_s =
+                                 if String.equal pr.head_review "not_reviewed_on_head"
+                                 then " !head-rev"
+                                 else ""
+                               in
+                               let title_s =
+                                 match pr.title with
+                                 | Some t when not (String.equal (String.trim t) "") ->
+                                     " " ^ t
+                                 | Some _ | None -> ""
+                               in
+                               let prefix =
+                                 Say.resolve lang
+                                   (Say.make
+                                      ~ko:(Printf.sprintf "PR %d건%s" n_prs undec_s)
+                                      ~en:(Printf.sprintf "Open PRs: %d%s" n_prs undec_s))
+                               in
+                               ( Printf.sprintf "%s · #%d %s[%s/%s/%s]%s%s%s"
+                                   prefix pr.number draft_tag pr.checks pr.review
+                                   pr.mergeable head_rev_s extra_s title_s
+                               , Some (pr_tone pr) )
+                         in
+                         let st =
+                           match tone_opt with
+                           | Some tone -> H.status_style ~theme tone
+                           | None -> H.secondary_style ~theme ()
+                         in
                          ignore
                            (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x ~y:!y
-                              ~max_w:pr_clip.w ~style:(H.whisper_style ~theme ())
-                              (Say.resolve lang
-                                 (Say.make
-                                    ~ko:(Printf.sprintf "  … 외 PR %d건 더" hidden_prs)
-                                    ~en:(Printf.sprintf "  … +%d more PRs" hidden_prs))));
+                              ~max_w:pr_clip.w ~style:st summary_line);
                          incr y
+                       end
+                       else begin
+                         let hdr =
+                           Say.resolve lang
+                             (Say.make
+                                ~ko:(Printf.sprintf "GitHub PR (%d건)%s" n_prs undec_s)
+                                ~en:(Printf.sprintf "Open PRs (%d)%s" n_prs undec_s))
+                         in
+                         ignore
+                           (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x ~y:!y
+                              ~max_w:pr_clip.w
+                              ~style:(H.secondary_style ~theme ()) hdr);
+                         incr y;
+                         let avail = Int.max 0 (bot - !y - 2) in
+                         let max_pr_rows, show_more =
+                           if avail <= 0 || n_prs = 0 then (0, false)
+                           else if n_prs <= Int.min 3 avail then (n_prs, false)
+                           else if avail = 1 then (1, false)
+                           else (Int.min 3 (avail - 1), true)
+                         in
+                         List.iteri
+                           (fun idx (pr : Wire_infra.repository_pull_row) ->
+                             if idx < max_pr_rows && !y < bot then begin
+                               let tone = pr_tone pr in
+                               let draft_tag = if pr.draft then "[DRAFT] " else "" in
+                               let author_s =
+                                 match pr.keeper, pr.author with
+                                 | Some k, _ -> "@" ^ k
+                                 | None, Some a -> "@" ^ a
+                                 | None, None -> ""
+                               in
+                               let title_s = Option.value pr.title ~default:"" in
+                               let head_rev_s =
+                                 if String.equal pr.head_review "not_reviewed_on_head"
+                                 then " !head-rev"
+                                 else ""
+                               in
+                               let row_txt =
+                                 Printf.sprintf "  #%d %s[%s/%s/%s]%s %s %s"
+                                   pr.number draft_tag pr.checks pr.review
+                                   pr.mergeable head_rev_s author_s title_s
+                               in
+                               ignore
+                                 (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x
+                                    ~y:!y ~max_w:pr_clip.w
+                                    ~style:(H.status_style ~theme tone) row_txt);
+                               incr y
+                             end)
+                           entry.pulls;
+                         let hidden_prs = n_prs - max_pr_rows in
+                         if show_more && hidden_prs > 0 && !y < bot then begin
+                           ignore
+                             (H.put_clipped ~grid ~clip:pr_clip ~x:pr_clip.x ~y:!y
+                                ~max_w:pr_clip.w ~style:(H.whisper_style ~theme ())
+                                (Say.resolve lang
+                                   (Say.make
+                                      ~ko:(Printf.sprintf "  … 외 PR %d건 더" hidden_prs)
+                                      ~en:(Printf.sprintf "  … +%d more PRs" hidden_prs))));
+                           incr y
+                         end
                        end
                    | Some _ | None ->
                        if not (String.equal snap.reader_state "ready") then begin
@@ -2228,90 +2286,31 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
     | Infra_store.Source_all | Infra_store.Source_logs -> false
   in
   let narrow_bar = bar_rect.w < 115 in
-  let pills =
-    [
-      {
-        H.label =
-          Printf.sprintf "%s (%d)"
-            (Say.resolve lang (Say.make ~ko:"전체" ~en:"All"))
-            (events_n + logs_n);
-        active = src_is_all;
-        tone = Some Theme.Status_active;
-        glyph = Some Glyph.Live_healthy;
-      };
-      {
-        H.label =
-          Printf.sprintf "%s (%d)"
-            (Say.resolve lang
-               (if narrow_bar then Say.make ~ko:"로그" ~en:"Logs"
-                else Say.make ~ko:"서버 로그" ~en:"Server Logs"))
-            logs_n;
-        active = src_is_logs;
-        tone = Some Theme.Status_ok;
-        glyph = None;
-      };
-      {
-        H.label =
-          Printf.sprintf "%s (%d)"
-            (Say.resolve lang
-               (if narrow_bar then Say.make ~ko:"이벤트" ~en:"Events"
-                else Say.make ~ko:"MASC 이벤트" ~en:"MASC Events"))
-            events_n;
-        active = src_is_events;
-        tone = Some Theme.Status_ai;
-        glyph = None;
-      };
-    ]
-    @ (if inf.stream_gap_count > 0 then
+  let stream_gap_pills =
+    if inf.stream_gap_count > 0 then
+      [
+        {
+          H.label =
+            Printf.sprintf "Stream_gap: %d dropped" inf.stream_gap_count;
+          active = true;
+          tone = Some Theme.Status_attention;
+          glyph = Some Glyph.Warning_triangle;
+        };
+      ]
+    else []
+  in
+  let keeper_and_query_pills =
+    (match inf.log_keeper_filter with
+     | Some kp ->
          [
            {
-             H.label =
-               Printf.sprintf "Stream_gap: %d dropped" inf.stream_gap_count;
+             H.label = "@" ^ kp;
              active = true;
-             tone = Some Theme.Status_attention;
-             glyph = Some Glyph.Warning_triangle;
+             tone = Some Theme.Status_active;
+             glyph = None;
            };
          ]
-       else [])
-    @ (if src_is_events then []
-       else
-         [
-           {
-             H.label = "ERR";
-             active = level_active (Some Wire_infra.Log_error);
-             tone = Some Theme.Status_critical;
-             glyph = None;
-           };
-           {
-             H.label = "WRN";
-             active = level_active (Some Wire_infra.Log_warn);
-             tone = Some Theme.Status_attention;
-             glyph = None;
-           };
-           {
-             H.label = "INF";
-             active = level_active (Some Wire_infra.Log_info);
-             tone = Some Theme.Status_ok;
-             glyph = None;
-           };
-           {
-             H.label = "DBG";
-             active = level_active (Some Wire_infra.Log_debug);
-             tone = Some Theme.Status_historical;
-             glyph = None;
-           };
-         ])
-    @ (match inf.log_keeper_filter with
-       | Some kp ->
-           [
-             {
-               H.label = "@" ^ kp;
-               active = true;
-               tone = Some Theme.Status_active;
-               glyph = None;
-             };
-           ]
-       | None -> [])
+     | None -> [])
     @
     if String.equal (String.trim inf.filter_query) "" then []
     else
@@ -2323,6 +2322,106 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
           glyph = None;
         };
       ]
+  in
+  let pills =
+    if narrow_bar then
+      let kind_s =
+        match inf.source_filter with
+        | Infra_store.Source_all ->
+            Printf.sprintf "%s(%d)"
+              (Say.resolve lang (Say.make ~ko:"전체" ~en:"All"))
+              (events_n + logs_n)
+        | Infra_store.Source_logs ->
+            Printf.sprintf "%s(%d)"
+              (Say.resolve lang (Say.make ~ko:"로그" ~en:"Logs"))
+              logs_n
+        | Infra_store.Source_events ->
+            Printf.sprintf "%s(%d)"
+              (Say.resolve lang (Say.make ~ko:"이벤트" ~en:"Events"))
+              events_n
+      in
+      let lvl_s =
+        if src_is_events then ""
+        else
+          match inf.log_level_filter with
+          | None -> " · " ^ Say.resolve lang (Say.make ~ko:"전체" ~en:"ALL")
+          | Some Wire_infra.Log_error -> " · ERR"
+          | Some Wire_infra.Log_warn -> " · WRN"
+          | Some Wire_infra.Log_info -> " · INF"
+          | Some Wire_infra.Log_debug -> " · DBG"
+      in
+      [
+        {
+          H.label =
+            Printf.sprintf "%s: %s%s [s/Space]"
+              (Say.resolve lang (Say.make ~ko:"필터" ~en:"Filter"))
+              kind_s lvl_s;
+          active = true;
+          tone = Some Theme.Status_active;
+          glyph = Some Glyph.Live_healthy;
+        };
+      ]
+      @ stream_gap_pills @ keeper_and_query_pills
+    else
+      [
+        {
+          H.label =
+            Printf.sprintf "%s (%d)"
+              (Say.resolve lang (Say.make ~ko:"전체" ~en:"All"))
+              (events_n + logs_n);
+          active = src_is_all;
+          tone = Some Theme.Status_active;
+          glyph = Some Glyph.Live_healthy;
+        };
+        {
+          H.label =
+            Printf.sprintf "%s (%d)"
+              (Say.resolve lang (Say.make ~ko:"서버 로그" ~en:"Server Logs"))
+              logs_n;
+          active = src_is_logs;
+          tone = Some Theme.Status_ok;
+          glyph = None;
+        };
+        {
+          H.label =
+            Printf.sprintf "%s (%d)"
+              (Say.resolve lang (Say.make ~ko:"MASC 이벤트" ~en:"MASC Events"))
+              events_n;
+          active = src_is_events;
+          tone = Some Theme.Status_ai;
+          glyph = None;
+        };
+      ]
+      @ stream_gap_pills
+      @ (if src_is_events then []
+         else
+           [
+             {
+               H.label = "ERR";
+               active = level_active (Some Wire_infra.Log_error);
+               tone = Some Theme.Status_critical;
+               glyph = None;
+             };
+             {
+               H.label = "WRN";
+               active = level_active (Some Wire_infra.Log_warn);
+               tone = Some Theme.Status_attention;
+               glyph = None;
+             };
+             {
+               H.label = "INF";
+               active = level_active (Some Wire_infra.Log_info);
+               tone = Some Theme.Status_ok;
+               glyph = None;
+             };
+             {
+               H.label = "DBG";
+               active = level_active (Some Wire_infra.Log_debug);
+               tone = Some Theme.Status_historical;
+               glyph = None;
+             };
+           ])
+      @ keeper_and_query_pills
   in
   let acting_list = Update_nav.acting_keepers model in
   let pills =
@@ -2784,13 +2883,12 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
                   H.paint_selected_row_bg ~grid ~clip:act_inner ~row_rect ~theme
                     ~focused:act_focused ();
                 let st =
-                  if is_sel && act_focused then
-                    H.anchor_style ~theme ~bg:row_bg ()
-                  else H.text_style ~theme ~bg:row_bg ()
+                  H.row_text_style ~theme ~selected:is_sel ~focused:act_focused
+                    ~bg:row_bg
                 in
                 ignore
-                  (H.put_clipped ~grid ~clip:row_rect ~x:(act_inner.x + 1) ~y:!y
-                     ~max_w:(Int.max 0 (act_inner.w - 2))
+                  (H.put_clipped ~grid ~clip:row_rect ~x:(act_inner.x + 2) ~y:!y
+                     ~max_w:(Int.max 0 (act_inner.w - 3))
                      ~style:st
                      (Printf.sprintf "%s @%s"
                         (Glyph.to_utf8 Glyph.Live_working)
@@ -2931,14 +3029,16 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             in
             let dw = Grapheme.display_width diff_s in
             let st =
-              if is_sel then H.anchor_style ~theme ~bg:row_bg ()
+              if is_sel then
+                H.row_text_style ~theme ~selected:true ~focused:tree_focused
+                  ~bg:row_bg
               else if nd.has_children then
                 H.accent_style ~theme ~bg:row_bg ()
               else H.text_style ~theme ~bg:row_bg ()
             in
             ignore
-              (H.put_clipped ~grid ~clip:row_rect ~x:(left_inner.x + 1) ~y:!y
-                 ~max_w:(Int.max 0 (left_inner.w - 2 - dw - 1))
+              (H.put_clipped ~grid ~clip:row_rect ~x:(left_inner.x + 2) ~y:!y
+                 ~max_w:(Int.max 0 (left_inner.w - 3 - dw - 1))
                  ~style:st (indent ^ caret ^ nd.label));
             if dw > 0 then
               ignore
@@ -3157,13 +3257,12 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                       H.paint_selected_row_bg ~grid ~clip:vis_rect ~row_rect
                         ~theme ~focused:res_focused ();
                     let st =
-                      if is_sel && res_focused then
-                        H.anchor_style ~theme ~bg:row_bg ()
-                      else H.text_style ~theme ~bg:row_bg ()
+                      H.row_text_style ~theme ~selected:is_sel
+                        ~focused:res_focused ~bg:row_bg
                     in
                     ignore
-                      (H.put_clipped ~grid ~clip:row_rect ~x:vis_rect.x ~y:!y
-                         ~max_w:vis_rect.w ~style:st
+                      (H.put_clipped ~grid ~clip:row_rect ~x:(vis_rect.x + 2) ~y:!y
+                         ~max_w:(Int.max 0 (vis_rect.w - 2)) ~style:st
                          (Printf.sprintf "%s:%d  %s" mt.path mt.line
                             (H.sanitize_single_line mt.text)));
                     incr y

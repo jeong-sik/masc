@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isUtilizationSpent, isWindowCurrentlySpent, type QuotaUtilizationLike } from './quota-window'
+import { isWindowCurrentlySpent, type QuotaUtilizationLike } from './quota-window'
 
 const NOW = 1_700_000_500
 

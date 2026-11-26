@@ -3325,6 +3325,7 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
            keeper = "alpha-leader";
            request_id = req_a;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_text_delta
                {
@@ -3349,6 +3350,7 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
            keeper = "alpha-leader";
            request_id = req_b;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_accepted
                {
@@ -3394,6 +3396,7 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
            keeper = "alpha-leader";
            request_id = req_a;
            is_btw = false;
+           seq = None;
            chunk =
              Wire_fleet.Chunk_error
                {

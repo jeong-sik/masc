@@ -178,6 +178,7 @@ type event =
       operation_id : string;
       seq : int option;
       frame : string option;
+      chunk : Wire_fleet.chat_stream_chunk option;
       at_unix : float;
     }
   | Keeper_roster_changed of string option
@@ -421,9 +422,10 @@ let decode_typed_event type_name json =
         let* operation_id = required_nonblank_string json "operation_id" in
         let* at_unix = required_finite_float json "ts_unix" in
         let* seq = optional_int_field json "seq" in
+        let* inner_opt = optional_object_field json "ag_ui_event" in
         let* frame =
-          match optional_object_field json "ag_ui_event" with
-          | Ok (Some inner) -> (
+          match inner_opt with
+          | Some inner -> (
               match
                 ( optional_nonblank_string inner "type"
                 , optional_nonblank_string inner "name" )
@@ -432,10 +434,44 @@ let decode_typed_event type_name json =
               | Ok (Some k), Ok None -> Ok (Some k)
               | Ok None, _ -> Ok None
               | Error _ as err, _ | _, (Error _ as err) -> err)
-          | Ok None -> Ok None
-          | Error _ as err -> err
+          | None -> Ok None
         in
-        Ok (Keeper_chat_stream_frame { keeper; operation_id; seq; frame; at_unix })
+        let chunk =
+          match inner_opt with
+          | Some inner -> (
+              match Wire_fleet.decode_chat_stream_chunk inner with
+              | Error _ -> None
+              | Ok c -> (
+                  match c with
+                  | Wire_fleet.Chunk_ignored -> None
+                  | Wire_fleet.Chunk_accepted _
+                  | Wire_fleet.Chunk_run_started _
+                  | Wire_fleet.Chunk_runtime_attempt_started _
+                  | Wire_fleet.Chunk_provider_retry _
+                  | Wire_fleet.Chunk_continuation_checkpoint _
+                  | Wire_fleet.Chunk_native_tool_progress _
+                  | Wire_fleet.Chunk_tool_approval_event _
+                  | Wire_fleet.Chunk_stream_protocol_error _
+                  | Wire_fleet.Chunk_text_delta _
+                  | Wire_fleet.Chunk_thinking_delta _
+                  | Wire_fleet.Chunk_thinking_snapshot _
+                  | Wire_fleet.Chunk_model_content _
+                  | Wire_fleet.Chunk_model_response_start _
+                  | Wire_fleet.Chunk_model_response_stop _
+                  | Wire_fleet.Chunk_tool_start _
+                  | Wire_fleet.Chunk_tool_args _
+                  | Wire_fleet.Chunk_tool_block_end _
+                  | Wire_fleet.Chunk_tool_end _
+                  | Wire_fleet.Chunk_tool_quarantined _
+                  | Wire_fleet.Chunk_reply_details _
+                  | Wire_fleet.Chunk_turn_done _
+                  | Wire_fleet.Chunk_error _ ->
+                      Some c))
+          | None -> None
+        in
+        Ok
+          (Keeper_chat_stream_frame
+             { keeper; operation_id; seq; frame; chunk; at_unix })
     | "keeper_row_changed" ->
         let* keeper = required_nonblank_string json "name" in
         Ok (Keeper_roster_changed (Some keeper))

@@ -246,7 +246,10 @@ let fetches_for_keeper_context ?(include_cache_outcome = false) ~force ~name
 let chat_status_requests ~queue_view ~keeper (m : Model.t) =
   let has_stream request_id =
     match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with
-    | Some stream -> stream.active && String.equal stream.request_id request_id
+    | Some stream ->
+        (not stream.from_observer)
+        && stream.active
+        && String.equal stream.request_id request_id
     | None -> false
   in
   Drafts.pending_txs_for_keeper ~keeper m.drafts

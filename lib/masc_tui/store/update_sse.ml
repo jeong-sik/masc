@@ -948,7 +948,78 @@ let apply_observer_event (m : Model.t) = function
         else []
       in
       ({ m with fleet }, cmds)
-  | Wire_observer.Keeper_chat_stream_frame _ -> (m, [])
+  | Wire_observer.Keeper_chat_stream_frame { chunk = None; _ } -> (m, [])
+  | Wire_observer.Keeper_chat_stream_frame
+      { keeper; operation_id; seq; chunk = Some chunk; _ } -> (
+      let fleet =
+        Fleet_store.apply_observer_chat_stream_chunk ~keeper ~operation_id ~seq
+          chunk m.fleet
+      in
+      if fleet == m.fleet then (m, [])
+      else
+        let next = { m with fleet } in
+        match chunk with
+        | Wire_fleet.Chunk_turn_done _
+        | Wire_fleet.Chunk_error _
+        | Wire_fleet.Chunk_accepted
+            {
+              state =
+                ( Keeper_chat_operation.State_name.Succeeded
+                | Keeper_chat_operation.State_name.Failed
+                | Keeper_chat_operation.State_name.Cancelled );
+              _;
+            } ->
+            let fleet = Fleet_store.mark_chat_history_stale ~keeper next.fleet in
+            let viewing_chat = is_viewing_keeper_chat ~keeper next in
+            let has_pending = Drafts.has_unreconciled_tx_for ~keeper next.drafts in
+            let cmds =
+              if viewing_chat || has_pending then
+                [
+                  get_cmd next.epoch
+                    (Cmd.Get_chat_history
+                       { keeper; limit = Some 80; cursor = None });
+                ]
+              else []
+            in
+            ({ next with fleet }, cmds)
+        | Wire_fleet.Chunk_tool_end { execution_id = Some _; _ } ->
+            View_fetches.hydrate_chat_tool_results ~keeper next
+        | Wire_fleet.Chunk_tool_approval_event { refresh_approvals = true; _ } ->
+            let work =
+              {
+                next.work with
+                tool_approvals = Observed.mark_stale next.work.tool_approvals;
+              }
+            in
+            ({ next with work }, [ get_cmd next.epoch Cmd.Get_tool_approvals ])
+        | Wire_fleet.Chunk_tool_approval_event { refresh_approvals = false; _ }
+        | Wire_fleet.Chunk_tool_end { execution_id = None; _ }
+        | Wire_fleet.Chunk_accepted
+            {
+              state =
+                ( Keeper_chat_operation.State_name.Queued
+                | Keeper_chat_operation.State_name.Running );
+              _;
+            }
+        | Wire_fleet.Chunk_run_started _
+        | Wire_fleet.Chunk_runtime_attempt_started _
+        | Wire_fleet.Chunk_provider_retry _
+        | Wire_fleet.Chunk_continuation_checkpoint _
+        | Wire_fleet.Chunk_native_tool_progress _
+        | Wire_fleet.Chunk_stream_protocol_error _
+        | Wire_fleet.Chunk_text_delta _
+        | Wire_fleet.Chunk_thinking_delta _
+        | Wire_fleet.Chunk_thinking_snapshot _
+        | Wire_fleet.Chunk_model_content _
+        | Wire_fleet.Chunk_model_response_start _
+        | Wire_fleet.Chunk_model_response_stop _
+        | Wire_fleet.Chunk_tool_start _
+        | Wire_fleet.Chunk_tool_args _
+        | Wire_fleet.Chunk_tool_block_end _
+        | Wire_fleet.Chunk_tool_quarantined _
+        | Wire_fleet.Chunk_reply_details _
+        | Wire_fleet.Chunk_ignored ->
+            (next, []))
   | Wire_observer.Keeper_roster_changed _ ->
       let fleet = Fleet_store.mark_keepers_stale m.fleet in
       ({ m with fleet }, [ get_cmd m.epoch Cmd.Get_keepers_roster ])
@@ -1232,8 +1303,8 @@ let allow_stream_takeover ~keeper ~request_id (m : Model.t) =
         | Some _, None -> false
         | None, None -> not b.active)
 
-let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t)
-    =
+let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ?seq ~chunk
+    (m : Model.t) =
   if is_btw then
     let drafts =
       match chunk with
@@ -1275,8 +1346,8 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ~chunk (m : Model.t
   else
     let allow_takeover = allow_stream_takeover ~keeper ~request_id m in
     let fleet =
-      Fleet_store.apply_chat_stream_chunk ~allow_takeover ~keeper ~request_id
-        chunk m.fleet
+      Fleet_store.apply_chat_stream_chunk ~allow_takeover ?seq ~keeper
+        ~request_id chunk m.fleet
     in
     let drafts, cmds =
       match chunk with

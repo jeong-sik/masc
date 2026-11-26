@@ -3884,15 +3884,15 @@ let execute_post_stream t ~epoch req =
           let acceptance = Atomic.make None in
           let terminal_seen = Atomic.make false in
           let last_seq = Atomic.make request.since_seq in
-          let note_frame_seq (frame : Sse_wire.frame) =
-            match Option.bind frame.id int_of_string_opt with
+          let note_frame_seq frame_seq =
+            match frame_seq with
             | None -> ()
             | Some seq -> (
                 match Atomic.get last_seq with
                 | Some held when held >= seq -> ()
                 | Some _ | None -> Atomic.set last_seq (Some seq))
           in
-          let publish_chunk ?(receipt = false) chunk =
+          let publish_chunk ?(receipt = false) ~seq chunk =
             let publish =
               if receipt then Ui_bus.publish_stream_receipt else Ui_bus.publish_stream
             in
@@ -3903,6 +3903,7 @@ let execute_post_stream t ~epoch req =
                    keeper = request.keeper_name;
                    request_id = request.request_id;
                    is_btw;
+                   seq;
                    chunk;
                  })
           in
@@ -3921,14 +3922,15 @@ let execute_post_stream t ~epoch req =
             let frames = Sse_wire.feed sse_decoder raw in
             List.iter
               (fun (frame : Sse_wire.frame) ->
-                note_frame_seq frame;
+                let seq = Option.bind frame.id int_of_string_opt in
+                note_frame_seq seq;
                 match Yojson.Safe.from_string frame.data with
                 | json -> (
                     match Wire_fleet.decode_chat_stream_chunk json with
                     | Ok Wire_fleet.Chunk_ignored -> ()
                     | Ok (Wire_fleet.Chunk_accepted { state; _ } as chunk) ->
                         Atomic.set acceptance (Some state);
-                        publish_chunk chunk
+                        publish_chunk ~seq chunk
                     (* A refused re-POST also arrives as an error frame. It
                        shows as the request's failure, and the history read
                        the store sends with it clears that failure once the
@@ -3937,7 +3939,7 @@ let execute_post_stream t ~epoch req =
                         ((Wire_fleet.Chunk_turn_done _ | Wire_fleet.Chunk_error _)
                          as chunk) ->
                         Atomic.set terminal_seen true;
-                        publish_chunk ~receipt:true chunk
+                        publish_chunk ~receipt:true ~seq chunk
                     | Ok
                         (( Wire_fleet.Chunk_run_started _
                          | Wire_fleet.Chunk_runtime_attempt_started _
@@ -3958,7 +3960,7 @@ let execute_post_stream t ~epoch req =
                          | Wire_fleet.Chunk_tool_end _
                          | Wire_fleet.Chunk_tool_quarantined _
                          | Wire_fleet.Chunk_reply_details _ ) as chunk) ->
-                        publish_chunk chunk
+                        publish_chunk ~seq chunk
                     | Error reason -> publish_warning reason)
                 | exception Yojson.Json_error msg ->
                     publish_warning ("invalid JSON SSE frame: " ^ msg))

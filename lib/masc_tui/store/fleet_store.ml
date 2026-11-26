@@ -4,6 +4,7 @@ open Masc_tui_protocol
 
 module String_map = Map.Make (String)
 module String_set = Set.Make (String)
+module Int_set = Set.Make (Int)
 
 module Operation_map = Map.Make (struct
   type t = string * string
@@ -78,8 +79,23 @@ type chat_stream_buffer = {
   protocol_warning : string option;
   active : bool;
   ended : bool;
+  terminal_seen : bool;
   last_error : string option;
+  from_observer : bool;
+  seen_seqs : Int_set.t;
 }
+
+let max_seen_seqs = 4096
+
+let add_seen_seq s seen =
+  if Int_set.mem s seen then seen
+  else
+    let next = Int_set.add s seen in
+    if Int_set.cardinal next > max_seen_seqs then
+      match Int_set.min_elt_opt next with
+      | Some oldest -> Int_set.remove oldest next
+      | None -> next
+    else next
 
 let empty_model_activity = Waiting_for_content
 
@@ -1181,11 +1197,44 @@ let apply_heartbeat ~keeper ~in_turn ~at_unix t =
   in
   { t with keepers }
 
-let apply_chat_history ~observed_at ~keeper page t =
+let retire_pending_tool tool =
+  match tool.tool_state with
+  | Tool_pending | Tool_result_pending _ -> { tool with tool_state = Tool_unfinished }
+  | Tool_settled | Tool_unfinished -> tool
+
+let retire_pending_tools tools = List.map retire_pending_tool tools
+
+let has_persisted_terminal_for_op (messages : Wire_fleet.chat_message list) op_id =
+  List.exists
+    (fun row ->
+      Option.equal String.equal (Wire_fleet.terminal_operation row) (Some op_id))
+    messages
+
+let apply_chat_history ~observed_at ~keeper (page : Wire_fleet.chat_history_page)
+    t =
   let chat_histories =
     String_map.add keeper (Observed.value ~observed_at page) t.chat_histories
   in
-  { t with chat_histories }
+  let chat_streams =
+    match String_map.find_opt keeper t.chat_streams with
+    | Some b when (not b.terminal_seen) && (b.from_observer || not b.active) ->
+        let op_id = Option.value b.operation_id ~default:b.request_id in
+        if has_persisted_terminal_for_op page.messages op_id then
+          let retired =
+            {
+              b with
+              active = false;
+              ended = true;
+              terminal_seen = true;
+              interrupting = false;
+              tools = retire_pending_tools b.tools;
+            }
+          in
+          String_map.add keeper retired t.chat_streams
+        else t.chat_streams
+    | Some _ | None -> t.chat_streams
+  in
+  { t with chat_histories; chat_streams }
 
 let chat_queue_for ~keeper t =
   Option.value (String_map.find_opt keeper t.chat_queues)
@@ -1275,13 +1324,6 @@ let admit_model_bytes b owner =
   | (Wire_chat_journal.Observed_response _ | Unobserved_scope _), _ ->
       Cut_reply.admit b.text_ownership owner
 
-let retire_pending_tool tool =
-  match tool.tool_state with
-  | Tool_pending | Tool_result_pending _ -> { tool with tool_state = Tool_unfinished }
-  | Tool_settled | Tool_unfinished -> tool
-
-let retire_pending_tools tools = List.map retire_pending_tool tools
-
 let close_tool_block tool =
   match tool.tool_state with
   | Tool_pending ->
@@ -1348,10 +1390,10 @@ let rec note_tools_during_model_output ~stream_scope = function
       let next_rest = note_tools_during_model_output ~stream_scope rest in
       if next == tool && next_rest == rest then tools else next :: next_rest
 
-let fresh_stream_buffer ~request_id =
+let fresh_stream_buffer ~from_observer ~operation_id ~request_id =
   {
     request_id;
-    operation_id = None;
+    operation_id;
     turn_ref = None;
     run_started = false;
     interrupting = false;
@@ -1368,11 +1410,16 @@ let fresh_stream_buffer ~request_id =
     protocol_warning = None;
     active = true;
     ended = false;
+    terminal_seen = false;
     last_error = None;
+    from_observer;
+    seen_seqs = Int_set.empty;
   }
 
 let start_chat_stream ~keeper ~request_id t =
-  let buf = fresh_stream_buffer ~request_id in
+  let buf =
+    fresh_stream_buffer ~from_observer:false ~operation_id:None ~request_id
+  in
   {
     t with
     chat_streams = String_map.add keeper buf t.chat_streams;
@@ -1454,29 +1501,43 @@ let is_queued_acceptance = function
   | Wire_fleet.Chunk_ignored ->
       false
 
+let buffer_matches_operation ~operation_id (b : chat_stream_buffer) =
+  String.equal b.request_id operation_id
+  || Option.equal String.equal b.operation_id (Some operation_id)
+
+let stream_matches_key ~from_observer ~request_id (b : chat_stream_buffer) =
+  if from_observer then buffer_matches_operation ~operation_id:request_id b
+  else String.equal b.request_id request_id
+
 (* Activity frames annotate the matching live buffer. They cannot admit a
    request, replace another buffer, or reopen a settled stream. *)
-let update_live_stream ~keeper ~request_id ~operation_id update t =
+let update_live_stream ~from_observer ~keeper ~request_id ~operation_id update t
+    =
   match String_map.find_opt keeper t.chat_streams with
-  | Some b when b.active && String.equal b.request_id request_id
-                && Option.for_all
-                     (fun id -> Option.for_all (String.equal id) b.operation_id)
-                     operation_id ->
+  | Some b
+    when b.active
+         && Bool.equal b.from_observer from_observer
+         && stream_matches_key ~from_observer ~request_id b
+         && Option.for_all
+              (fun id -> Option.for_all (String.equal id) b.operation_id)
+              operation_id ->
       let updated = update b in
       if updated == b then t
       else
         { t with chat_streams = String_map.add keeper updated t.chat_streams }
   | Some _ | None -> t
 
-let update_model_activity ~keeper ~request_id ~operation_id update t =
-  update_live_stream ~keeper ~request_id ~operation_id
+let update_model_activity ~from_observer ~keeper ~request_id ~operation_id
+    update t =
+  update_live_stream ~from_observer ~keeper ~request_id ~operation_id
     (fun b ->
       let model_activity = update b.model_activity in
       if model_activity == b.model_activity then b else { b with model_activity })
     t
 
-let update_stream_tool ~keeper ~request_id ~operation_id ~tool_use_id update t =
-  update_live_stream ~keeper ~request_id ~operation_id
+let update_stream_tool ~from_observer ~keeper ~request_id ~operation_id
+    ~tool_use_id update t =
+  update_live_stream ~from_observer ~keeper ~request_id ~operation_id
     (fun b ->
       let tools =
         List.map
@@ -1509,12 +1570,12 @@ let protocol_warning kind = function
   | Some reason -> kind ^ ": " ^ reason
   | None -> kind
 
-let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
-    t =
+let apply_chat_stream_chunk_core ~from_observer ~allow_takeover ~keeper
+    ~request_id ~operation_id_hint chunk t =
   match chunk with
   | Wire_fleet.Chunk_ignored -> t
   | Wire_fleet.Chunk_model_content { operation_id; activity } ->
-      update_live_stream ~keeper ~request_id ~operation_id
+      update_live_stream ~from_observer ~keeper ~request_id ~operation_id
         (fun b ->
           if before_scope_only_start b activity.owner then b
           else match note_model_content b.model_activity activity with
@@ -1537,13 +1598,13 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
               then b else { b with model_activity; response_start; tools })
         t
   | Wire_fleet.Chunk_model_response_start { operation_id; content_generation; stream_scope } ->
-      update_live_stream ~keeper ~request_id ~operation_id
+      update_live_stream ~from_observer ~keeper ~request_id ~operation_id
         (fun b -> start_model_response b ~content_generation ~stream_scope) t
   | Wire_fleet.Chunk_model_response_stop { operation_id; owner } ->
-      update_model_activity ~keeper ~request_id ~operation_id
+      update_model_activity ~from_observer ~keeper ~request_id ~operation_id
         (fun current -> stop_model_response current owner) t
   | Wire_fleet.Chunk_provider_retry { operation_id; runtime_id; attempt; max_retries; retry_delay_ms; error_status } ->
-      update_live_stream ~keeper ~request_id ~operation_id
+      update_live_stream ~from_observer ~keeper ~request_id ~operation_id
         (fun buf ->
           let runtime = Option.fold ~none:"" ~some:(fun id -> id ^ " · ") runtime_id in
           let status = Option.fold ~none:"" ~some:(Printf.sprintf "HTTP %d · ") error_status in
@@ -1552,11 +1613,11 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
           { buf with active_runtime_id = merge_opt_op buf.active_runtime_id runtime_id; retry_notice }) t
   | Wire_fleet.Chunk_continuation_checkpoint { operation_id; message; request_id = checkpoint_request } ->
       if Option.for_all (String.equal request_id) checkpoint_request then
-        update_live_stream ~keeper ~request_id ~operation_id
+        update_live_stream ~from_observer ~keeper ~request_id ~operation_id
           (fun buf -> { buf with checkpoint_notice = Some message }) t
       else t
   | Wire_fleet.Chunk_native_tool_progress { operation_id; tool_use_id; tool_name; progress_label } ->
-      update_stream_tool ~keeper ~request_id ~operation_id ~tool_use_id
+      update_stream_tool ~from_observer ~keeper ~request_id ~operation_id ~tool_use_id
         (fun tool ->
           match tool.tool_state with
           | Tool_pending | Tool_result_pending _ ->
@@ -1565,7 +1626,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
           | Tool_unfinished | Tool_settled -> tool) t
   | Wire_fleet.Chunk_tool_approval_event
       { operation_id; tool_use_id; tool_name; status_label; refresh_approvals = _ } ->
-      update_live_stream ~keeper ~request_id ~operation_id
+      update_live_stream ~from_observer ~keeper ~request_id ~operation_id
         (fun b ->
           let is_open_tool tool =
             match tool.tool_state with
@@ -1619,17 +1680,17 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
           { b with tools })
         t
   | Wire_fleet.Chunk_stream_protocol_error { operation_id; kind; reason } ->
-      update_live_stream ~keeper ~request_id ~operation_id
+      update_live_stream ~from_observer ~keeper ~request_id ~operation_id
         (fun buf -> { buf with protocol_warning = Some (protocol_warning kind reason) }) t
   | Wire_fleet.Chunk_tool_quarantined { operation_id; tool_use_id; kind; reason } ->
-      update_live_stream ~keeper ~request_id ~operation_id
+      update_live_stream ~from_observer ~keeper ~request_id ~operation_id
         (fun buf ->
           let tools = List.map (fun tool ->
               if String.equal tool.tool_use_id tool_use_id then retire_pending_tool tool else tool)
             buf.tools in
           { buf with tools; protocol_warning = Some (protocol_warning kind reason) }) t
   | Wire_fleet.Chunk_tool_block_end { operation_id; tool_use_id } ->
-      update_stream_tool ~keeper ~request_id ~operation_id ~tool_use_id
+      update_stream_tool ~from_observer ~keeper ~request_id ~operation_id ~tool_use_id
         close_tool_block t
   | ( Wire_fleet.Chunk_accepted _
     | Wire_fleet.Chunk_run_started _
@@ -1644,47 +1705,64 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
     | Wire_fleet.Chunk_turn_done _
     | Wire_fleet.Chunk_error _ ) as chunk -> (
       let t =
-        match chunk with
-        | Wire_fleet.Chunk_accepted { control_token = Some tok; _ } ->
-            update_chat_control_token ~keeper ~token:tok t
-        | Wire_fleet.Chunk_accepted { control_token = None; _ }
-        | Wire_fleet.Chunk_run_started _
-        | Wire_fleet.Chunk_runtime_attempt_started _
-        | Wire_fleet.Chunk_provider_retry _
-        | Wire_fleet.Chunk_continuation_checkpoint _
-        | Wire_fleet.Chunk_native_tool_progress _
-        | Wire_fleet.Chunk_tool_approval_event _
-        | Wire_fleet.Chunk_stream_protocol_error _
-        | Wire_fleet.Chunk_text_delta _
-        | Wire_fleet.Chunk_thinking_delta _
-        | Wire_fleet.Chunk_thinking_snapshot _
-        | Wire_fleet.Chunk_model_content _
-        | Wire_fleet.Chunk_model_response_start _
-        | Wire_fleet.Chunk_model_response_stop _
-        | Wire_fleet.Chunk_tool_start _
-        | Wire_fleet.Chunk_tool_args _
-        | Wire_fleet.Chunk_tool_block_end _
-        | Wire_fleet.Chunk_tool_end _
-        | Wire_fleet.Chunk_tool_quarantined _
-        | Wire_fleet.Chunk_reply_details _
-        | Wire_fleet.Chunk_turn_done _
-        | Wire_fleet.Chunk_error _
-        | Wire_fleet.Chunk_ignored ->
-            t
+        if from_observer then t
+        else
+          match chunk with
+          | Wire_fleet.Chunk_accepted { control_token = Some tok; _ } ->
+              update_chat_control_token ~keeper ~token:tok t
+          | Wire_fleet.Chunk_accepted { control_token = None; _ }
+          | Wire_fleet.Chunk_run_started _
+          | Wire_fleet.Chunk_runtime_attempt_started _
+          | Wire_fleet.Chunk_provider_retry _
+          | Wire_fleet.Chunk_continuation_checkpoint _
+          | Wire_fleet.Chunk_native_tool_progress _
+          | Wire_fleet.Chunk_tool_approval_event _
+          | Wire_fleet.Chunk_stream_protocol_error _
+          | Wire_fleet.Chunk_text_delta _
+          | Wire_fleet.Chunk_thinking_delta _
+          | Wire_fleet.Chunk_thinking_snapshot _
+          | Wire_fleet.Chunk_model_content _
+          | Wire_fleet.Chunk_model_response_start _
+          | Wire_fleet.Chunk_model_response_stop _
+          | Wire_fleet.Chunk_tool_start _
+          | Wire_fleet.Chunk_tool_args _
+          | Wire_fleet.Chunk_tool_block_end _
+          | Wire_fleet.Chunk_tool_end _
+          | Wire_fleet.Chunk_tool_quarantined _
+          | Wire_fleet.Chunk_reply_details _
+          | Wire_fleet.Chunk_turn_done _
+          | Wire_fleet.Chunk_error _
+          | Wire_fleet.Chunk_ignored ->
+              t
       in
       let prev_opt =
         match String_map.find_opt keeper t.chat_streams with
-        | Some b when String.equal b.request_id request_id -> Some b
+        | Some b
+          when stream_matches_key ~from_observer ~request_id b
+               && Bool.equal b.from_observer from_observer ->
+            Some b
+        | Some b
+          when (not from_observer)
+               && b.from_observer
+               && String.equal b.request_id request_id ->
+            if is_queued_acceptance chunk || b.ended then None
+            else Some { b with from_observer = false }
         | Some b ->
             if
               allow_takeover
               && (not (is_queued_acceptance chunk))
               && ((not b.active) || is_explicit_execution_start chunk)
-            then Some (fresh_stream_buffer ~request_id)
+            then
+              Some
+                (fresh_stream_buffer ~from_observer
+                   ~operation_id:operation_id_hint ~request_id)
             else None
         | None ->
             if is_queued_acceptance chunk then None
-            else Some (fresh_stream_buffer ~request_id)
+            else
+              Some
+                (fresh_stream_buffer ~from_observer
+                   ~operation_id:operation_id_hint ~request_id)
       in
       match prev_opt with
       | None -> t
@@ -1713,21 +1791,25 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   | Keeper_chat_operation.State_name.Cancelled ->
                       false
                 in
-                let ended =
+                let terminal =
                   match state with
-                  | Keeper_chat_operation.State_name.Queued | Keeper_chat_operation.State_name.Running ->
-                      prev.ended
+                  | Keeper_chat_operation.State_name.Queued
+                  | Keeper_chat_operation.State_name.Running ->
+                      false
                   | Keeper_chat_operation.State_name.Succeeded
                   | Keeper_chat_operation.State_name.Failed
                   | Keeper_chat_operation.State_name.Cancelled ->
                       true
                 in
+                let ended = prev.ended || terminal in
+                let terminal_seen = prev.terminal_seen || terminal in
                 {
                   prev with
                   operation_id = Some operation_id;
                   run_started;
                   active;
                   ended;
+                  terminal_seen;
                   tools = if ended then retire_pending_tools prev.tools else prev.tools;
                 }
             | Wire_fleet.Chunk_run_started { operation_id } ->
@@ -1947,6 +2029,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   text;
                   active = false;
                   ended = true;
+                  terminal_seen = true;
                   interrupting = false;
                   tools = retire_pending_tools prev.tools;
                 }
@@ -1956,6 +2039,7 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
                   operation_id = merge_opt_op prev.operation_id operation_id;
                   active = false;
                   ended = true;
+                  terminal_seen = true;
                   interrupting = false;
                   last_error = Some message;
                   tools = retire_pending_tools prev.tools;
@@ -1987,6 +2071,148 @@ let apply_chat_stream_chunk ?(allow_takeover = false) ~keeper ~request_id chunk
             chat_streams = String_map.add keeper updated t.chat_streams;
             chat_scroll_offset;
           })
+
+let record_stream_seq ~keeper ~from_observer ~request_id ~seq t =
+  match seq with
+  | None -> t
+  | Some s -> (
+      match String_map.find_opt keeper t.chat_streams with
+      | Some b
+        when Bool.equal b.from_observer from_observer
+             && stream_matches_key ~from_observer ~request_id b ->
+          if Int_set.mem s b.seen_seqs then t
+          else
+            let updated = { b with seen_seqs = add_seen_seq s b.seen_seqs } in
+            { t with chat_streams = String_map.add keeper updated t.chat_streams }
+      | Some _ | None -> t)
+
+let apply_chat_stream_chunk ?(allow_takeover = false) ?seq ~keeper ~request_id
+    chunk t =
+  let is_dup =
+    match seq, String_map.find_opt keeper t.chat_streams with
+    | Some s, Some b
+      when String.equal b.request_id request_id && Int_set.mem s b.seen_seqs ->
+        true
+    | Some _, Some _ | Some _, None | None, (Some _ | None) -> false
+  in
+  if is_dup then t
+  else
+    let next =
+      apply_chat_stream_chunk_core ~from_observer:false ~allow_takeover ~keeper
+        ~request_id ~operation_id_hint:None chunk t
+    in
+    if next == t then next
+    else record_stream_seq ~keeper ~from_observer:false ~request_id ~seq next
+
+let is_observer_ghost_chunk = function
+  | Wire_fleet.Chunk_ignored
+  | Wire_fleet.Chunk_turn_done _
+  | Wire_fleet.Chunk_reply_details _
+  | Wire_fleet.Chunk_error _ ->
+      true
+  | Wire_fleet.Chunk_accepted
+      {
+        state =
+          ( Keeper_chat_operation.State_name.Queued
+          | Keeper_chat_operation.State_name.Succeeded
+          | Keeper_chat_operation.State_name.Failed
+          | Keeper_chat_operation.State_name.Cancelled );
+        _;
+      } ->
+      true
+  | Wire_fleet.Chunk_accepted
+      { state = Keeper_chat_operation.State_name.Running; _ }
+  | Wire_fleet.Chunk_run_started _
+  | Wire_fleet.Chunk_runtime_attempt_started _
+  | Wire_fleet.Chunk_provider_retry _
+  | Wire_fleet.Chunk_continuation_checkpoint _
+  | Wire_fleet.Chunk_native_tool_progress _
+  | Wire_fleet.Chunk_tool_approval_event _
+  | Wire_fleet.Chunk_stream_protocol_error _
+  | Wire_fleet.Chunk_text_delta _
+  | Wire_fleet.Chunk_thinking_delta _
+  | Wire_fleet.Chunk_thinking_snapshot _
+  | Wire_fleet.Chunk_model_content _
+  | Wire_fleet.Chunk_model_response_start _
+  | Wire_fleet.Chunk_model_response_stop _
+  | Wire_fleet.Chunk_tool_start _
+  | Wire_fleet.Chunk_tool_args _
+  | Wire_fleet.Chunk_tool_block_end _
+  | Wire_fleet.Chunk_tool_end _
+  | Wire_fleet.Chunk_tool_quarantined _ ->
+      false
+
+let apply_observer_chat_stream_chunk ~keeper ~operation_id ~seq chunk t =
+  match chunk with
+  | Wire_fleet.Chunk_ignored -> t
+  | Wire_fleet.Chunk_accepted _
+  | Wire_fleet.Chunk_run_started _
+  | Wire_fleet.Chunk_runtime_attempt_started _
+  | Wire_fleet.Chunk_provider_retry _
+  | Wire_fleet.Chunk_continuation_checkpoint _
+  | Wire_fleet.Chunk_native_tool_progress _
+  | Wire_fleet.Chunk_tool_approval_event _
+  | Wire_fleet.Chunk_stream_protocol_error _
+  | Wire_fleet.Chunk_text_delta _
+  | Wire_fleet.Chunk_thinking_delta _
+  | Wire_fleet.Chunk_thinking_snapshot _
+  | Wire_fleet.Chunk_model_content _
+  | Wire_fleet.Chunk_model_response_start _
+  | Wire_fleet.Chunk_model_response_stop _
+  | Wire_fleet.Chunk_tool_start _
+  | Wire_fleet.Chunk_tool_args _
+  | Wire_fleet.Chunk_tool_block_end _
+  | Wire_fleet.Chunk_tool_end _
+  | Wire_fleet.Chunk_tool_quarantined _
+  | Wire_fleet.Chunk_reply_details _
+  | Wire_fleet.Chunk_turn_done _
+  | Wire_fleet.Chunk_error _ ->
+      let apply_on base =
+        apply_chat_stream_chunk_core ~from_observer:true ~allow_takeover:true
+          ~keeper ~request_id:operation_id
+          ~operation_id_hint:(Some operation_id) chunk base
+        |> record_stream_seq ~keeper ~from_observer:true
+             ~request_id:operation_id ~seq
+      in
+      let is_seen b =
+        match seq with
+        | Some s -> Int_set.mem s b.seen_seqs
+        | None -> false
+      in
+      (match String_map.find_opt keeper t.chat_streams with
+      | Some b when (not b.from_observer) && b.active ->
+          (* Active direct POST /chat/stream owns this keeper's live buffer. *)
+          t
+      | Some b when buffer_matches_operation ~operation_id b ->
+          if b.terminal_seen || is_seen b then t
+          else if b.from_observer && b.active then apply_on t
+          else if is_queued_acceptance chunk then t
+          else
+            (* Direct stream ended on transport EOF/error or epoch detach
+               without a terminal frame (or observer buffer was detached):
+               hand off ownership to observer SSE while keeping accumulated
+               text, thinking, tools, text_ownership, and seen_seqs intact. *)
+            let resumed =
+              {
+                b with
+                operation_id = Some operation_id;
+                from_observer = true;
+                active = true;
+                ended = false;
+                last_error = None;
+              }
+            in
+            let t_resumed =
+              {
+                t with
+                chat_streams = String_map.add keeper resumed t.chat_streams;
+              }
+            in
+            apply_on t_resumed
+      | Some b when b.from_observer && b.active ->
+          if is_explicit_execution_start chunk then apply_on t else t
+      | Some _ | None ->
+          if is_observer_ghost_chunk chunk then t else apply_on t)
 
 let active_stream_for_operation ~keeper ~operation_id t =
   match String_map.find_opt keeper t.chat_streams with
@@ -2068,7 +2294,7 @@ let clear_inactive_chat_stream_error ~keeper t =
 
 let finish_chat_stream ~keeper ~request_id ~error t =
   match String_map.find_opt keeper t.chat_streams with
-  | Some b when String.equal b.request_id request_id ->
+  | Some b when (not b.from_observer) && String.equal b.request_id request_id ->
       let next =
         {
           b with

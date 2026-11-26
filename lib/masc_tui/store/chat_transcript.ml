@@ -1509,7 +1509,8 @@ let local_interrupt_target ~(model : Model.t) ~keeper
     Some (`Operation_id (Option.value operation_id ~default:request_id))
   in
   match Fleet_store.String_map.find_opt keeper model.fleet.chat_streams with
-  | Some buf when buf.active -> operation ~request_id:buf.request_id buf.operation_id
+  | Some buf when buf.active && not buf.from_observer ->
+      operation ~request_id:buf.request_id buf.operation_id
   | Some _ | None -> (
       match Drafts.active_tx_for_keeper ~keeper model.drafts with
       | Some

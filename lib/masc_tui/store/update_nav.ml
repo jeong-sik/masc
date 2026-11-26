@@ -2716,13 +2716,13 @@ type steer_resolution =
   | Steer_refused of steer_refusal
 
 let resolve_steer ~keeper (m : Model.t) =
-  (* [Stream_keeper_chat] is the only producer of [chat_streams], so an
-     active buffer is a request this TUI submitted, and the server keys that
-     request's operation by its [request_id]. The turn row's interrupt token
-     names whichever turn holds the Keeper (another Keeper's delegated
-     request, an autonomous cycle), so it is never a steer target. *)
+  (* Only direct [Stream_keeper_chat] buffers ([not s.from_observer]) are
+     guaranteed to be turns this TUI submitted, and the server keys that
+     request's operation by its [request_id]. Observer-mirrored streams and the
+     turn row's interrupt token can belong to another client or autonomous
+     cycle, so they are never steer targets. *)
   match Fleet_store.String_map.find_opt keeper m.fleet.chat_streams with
-  | Some s when s.active -> (
+  | Some s when s.active && not s.from_observer -> (
       match Fleet_store.chat_control_token_for ~keeper m.fleet with
       | Some control_token ->
           Steer_own { control_token; operation_id = s.request_id }

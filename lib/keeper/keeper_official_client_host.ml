@@ -1844,7 +1844,7 @@ let with_arrived_rows ~keeper_name ~raw_trace_run ~invocation ~tool_name
        result)
 ;;
 
-let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_approval
+let dynamic_tool_of_agent_core ?base_path ~content_transport ~accepts_image_input ~tool_approval
     ~runtime_label ~keeper_name
     ~turn_count ~context ~tools ~loading_plan
     ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector
@@ -2032,6 +2032,28 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
           (* Pre-execution refusals have no PostToolUse output. They are exact
              no-execution results, retained at the same boundary here. *)
           capture original_result;
+          (* An image a text-only model cannot read is evicted to the Vision
+             Artifact Store (third ingestion site) before the capability gate:
+             the model receives a 64-hex artifact handle and
+             [keeper_analyze_image] reads the pixels, instead of the whole
+             result failing delivery after the tool's effect has already
+             applied (masc Board p-67dd816b, masc_dos_screen on Antigravity).
+             The retained original above keeps the producer's raw receipt.
+             Without a workspace base path the gate below keeps refusing
+             fail-closed, as before. *)
+          let result =
+            if accepts_image_input then result
+            else
+              match base_path with
+              | Some base_path ->
+                { result with
+                  content_blocks =
+                    Option.map
+                      (Keeper_vision_ingest.evict_tool_result_images
+                         ~base_path ~keeper_name)
+                      result.content_blocks }
+              | None -> result
+          in
           let delivery =
             match image_capability_error ~accepts_image_input result.content_blocks with
             | Some detail -> Error detail
@@ -2300,6 +2322,7 @@ let dynamic_tools ~result_scope ?base_path ?read_arrived ~content_transport ~acc
     Ok
       (List.map
          (dynamic_tool_of_agent_core
+            ?base_path
             ~content_transport
             ~accepts_image_input
             ~tool_approval

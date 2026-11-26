@@ -15,9 +15,11 @@
 
 import { html } from 'htm/preact'
 import { UnifiedDiffView } from '../../components/common/unified-diff'
-import { useEffect, useMemo, useState } from 'preact/hooks'
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
   apiGet,
+  currentSessionEpoch,
+  isEpochCurrent,
   resourceCache,
 } from '../../core'
 import { currentRoute } from '../../routes/router'
@@ -134,6 +136,16 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
   const [casConflict, setCasConflict] = useState<string | null>(null)
   const [errorBanner, setErrorBanner] = useState<string | null>(null)
   const [busy, setBusy] = useState<'preview' | 'apply' | 'export' | null>(null)
+  const mountedRef = useRef(true)
+  const activeTargetRef = useRef(target)
+  activeTargetRef.current = target
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   const loadSchema = (reason: 'mount' | 'manual' = 'mount') => {
     void resourceCache.fetch<ConfigSchemaData>(
@@ -144,6 +156,12 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
   }
 
   useEffect(() => {
+    setStaged({})
+    setPreview(null)
+    setApplyResult(null)
+    setCasConflict(null)
+    setErrorBanner(null)
+    setBusy(null)
     loadSchema('mount')
   }, [target])
 
@@ -199,6 +217,8 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
 
   const handlePreviewDiff = async () => {
     if (!schemaData || hasInvalidNumber || stagedList.length === 0 || busy) return
+    const startEpoch = currentSessionEpoch()
+    const requestTarget = schemaData.target
     setBusy('preview')
     setPreview(null)
     setErrorBanner(null)
@@ -206,11 +226,12 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
     setApplyResult(null)
 
     const res = await postConfigPatchApi({
-      target: schemaData.target,
+      target: requestTarget,
       expectedSha256: schemaData.file_sha256,
       dryRun: true,
       changes: stagedList,
     })
+    if (!mountedRef.current || activeTargetRef.current !== requestTarget || !isEpochCurrent(startEpoch)) return
     setBusy(null)
 
     if (!res.ok) {
@@ -222,7 +243,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
       return
     }
     setPreview({
-      target: schemaData.target,
+      target: requestTarget,
       sha256: schemaData.file_sha256,
       changes: stagedList,
       result: res.value,
@@ -231,16 +252,19 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
 
   const handleApplyPatch = async () => {
     if (!preview || !dryRunResult?.changed || busy) return
+    const startEpoch = currentSessionEpoch()
+    const requestTarget = preview.target
     setBusy('apply')
     setErrorBanner(null)
     setCasConflict(null)
 
     const res = await postConfigPatchApi({
-      target: preview.target,
+      target: requestTarget,
       expectedSha256: preview.sha256,
       dryRun: false,
       changes: preview.changes,
     })
+    if (!mountedRef.current || activeTargetRef.current !== requestTarget || !isEpochCurrent(startEpoch)) return
     setBusy(null)
 
     if (!res.ok) {
@@ -266,9 +290,11 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
   }
 
   const handleExportWorldConfig = async () => {
+    const startEpoch = currentSessionEpoch()
     setBusy('export')
     setErrorBanner(null)
     const res = await apiGet<WorldConfigExportResponse>('/api/v1/world/configuration/export')
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setBusy(null)
     if (!res.ok) {
       setErrorBanner(`월드 설정 내보내기 실패: ${res.error.message}`)
@@ -392,7 +418,13 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
         `}
 
         <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-          ${isBool
+          ${stagedOp?.op === 'remove'
+            ? html`
+                <span class="mono" style=${{ fontSize: 'var(--fs-12)', color: 'var(--warn-fg)' }}>
+                  기본값 복원 예정 (remove)
+                </span>
+              `
+            : isBool
             ? html`
                 <label style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>
                   <input

@@ -25,10 +25,12 @@ import {
   pendingAsks,
   pendingGateApprovals,
   pendingGoalConfirmations,
+  pushShellToast,
   refreshPendingHitl,
   submitFastToolApproval,
   toggleQueueContextOverlay,
   uncheckedHitlStatusLabel,
+  type PendingApprovalItem,
 } from './shell-state'
 
 export function FastApprovalStrip(): VNode | null {
@@ -41,6 +43,7 @@ export function FastApprovalStrip(): VNode | null {
   const [submittingId, setSubmittingId] = useState<string | null>(null)
   const [capturedEpoch, setCapturedEpoch] = useState<number>(() => sessionEpoch.peek())
   const [capturedApprovalId, setCapturedApprovalId] = useState<string | null>(null)
+  const [capturedRevision, setCapturedRevision] = useState<string | null>(null)
 
   const headApproval = approvals[0] ?? null
   const headAsk = asks[0] ?? null
@@ -50,9 +53,36 @@ export function FastApprovalStrip(): VNode | null {
   useEffect(() => {
     if (headApproval && headApproval.approvalId !== capturedApprovalId) {
       setCapturedApprovalId(headApproval.approvalId)
+      setCapturedRevision(headApproval.revision)
       setCapturedEpoch(sessionEpoch.peek())
+    } else if (!headApproval && capturedApprovalId !== null) {
+      setCapturedApprovalId(null)
+      setCapturedRevision(null)
     }
-  }, [headApproval?.approvalId, capturedApprovalId])
+  }, [headApproval?.approvalId, headApproval?.revision, capturedApprovalId])
+
+  const lockedRevision = headApproval
+    ? (capturedApprovalId === headApproval.approvalId && capturedRevision !== null
+        ? capturedRevision
+        : headApproval.revision)
+    : null
+
+  const submitDecision = (approval: PendingApprovalItem, decision: 'approve' | 'deny') => {
+    const approvalId = approval.approvalId
+    setSubmittingId(approvalId)
+    void submitFastToolApproval(approval, decision)
+      .then((res) => {
+        if (!res.ok) {
+          pushShellToast(
+            `${decision === 'approve' ? '승인' : '거절'} 실패: ${res.message}`,
+            'error',
+          )
+        }
+      })
+      .finally(() => {
+        setSubmittingId((cur) => (cur === approvalId ? null : cur))
+      })
+  }
 
   useEffect(() => {
     if (!headApproval && !headAsk && !headGate && !headGoalConfirm) return
@@ -79,24 +109,23 @@ export function FastApprovalStrip(): VNode | null {
       if (typing && !allowedWhileTyping) return
       if (!typing && event.altKey && key !== 'y' && key !== 'n') return
 
-      // Respect TargetLockedAction epoch & workspace fence before firing keyboard action
+      // Respect TargetLockedAction epoch, revision & workspace fence before firing keyboard action
       const epochLocked = sessionEpoch.peek() !== capturedEpoch
       const wsLocked = activeWorkspaceId.peek() !== headApproval.workspaceId
-      if (epochLocked || wsLocked || submittingId === headApproval.approvalId) return
+      const revisionLocked = lockedRevision !== null && headApproval.revision !== lockedRevision
+      if (epochLocked || wsLocked || revisionLocked || submittingId === headApproval.approvalId) return
 
       if (key === 'y') {
         event.preventDefault()
-        setSubmittingId(headApproval.approvalId)
-        void submitFastToolApproval(headApproval, 'approve').finally(() => setSubmittingId(null))
+        submitDecision(headApproval, 'approve')
       } else if (key === 'n') {
         event.preventDefault()
-        setSubmittingId(headApproval.approvalId)
-        void submitFastToolApproval(headApproval, 'deny').finally(() => setSubmittingId(null))
+        submitDecision(headApproval, 'deny')
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [headApproval, headAsk, headGate, headGoalConfirm, capturedEpoch, submittingId])
+  }, [headApproval, headAsk, headGate, headGoalConfirm, capturedEpoch, lockedRevision, submittingId])
 
   const totalPending = approvals.length + asks.length + gates.length + goalConfirms.length
   const countTag = formatInboxPendingCount(totalPending, inboxUnchecked.length > 0)
@@ -152,11 +181,12 @@ export function FastApprovalStrip(): VNode | null {
             workspaceId: headApproval.workspaceId,
             keeper: headApproval.keeper,
             requestId: headApproval.approvalId,
-            revision: headApproval.revision,
+            revision: lockedRevision ?? headApproval.revision,
           }}
           currentRevision=${headApproval.revision}
           lockedEpoch=${capturedEpoch}
           onRefresh=${() => {
+            setCapturedRevision(headApproval.revision)
             setCapturedEpoch(sessionEpoch.peek())
             void refreshPendingHitl()
           }}
@@ -176,10 +206,7 @@ export function FastApprovalStrip(): VNode | null {
                   type="button"
                   class="btn-primary ap-fast-btn"
                   disabled=${lockState.locked || busy}
-                  onClick=${() => {
-                    setSubmittingId(headApproval.approvalId)
-                    void submitFastToolApproval(headApproval, 'approve').finally(() => setSubmittingId(null))
-                  }}
+                  onClick=${() => submitDecision(headApproval, 'approve')}
                 >
                   승인 <kbd class="ap-kbd">Y</kbd>
                 </button>
@@ -187,10 +214,7 @@ export function FastApprovalStrip(): VNode | null {
                   type="button"
                   class="btn-ghost ap-fast-btn ap-fast-deny"
                   disabled=${lockState.locked || busy}
-                  onClick=${() => {
-                    setSubmittingId(headApproval.approvalId)
-                    void submitFastToolApproval(headApproval, 'deny').finally(() => setSubmittingId(null))
-                  }}
+                  onClick=${() => submitDecision(headApproval, 'deny')}
                 >
                   거절 <kbd class="ap-kbd">N</kbd>
                 </button>

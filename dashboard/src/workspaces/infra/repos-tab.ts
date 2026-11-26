@@ -12,11 +12,13 @@ import { html } from 'htm/preact'
 import { UnifiedDiffView } from '../../components/common/unified-diff'
 import { pushShellToast } from '../../shell/shell-state'
 import { createTwoFilesPatch } from 'diff'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import {
   apiGet,
   apiMutate,
   apiRequest,
+  currentSessionEpoch,
+  isEpochCurrent,
   resourceCache,
 } from '../../core'
 import { MasterDetail } from '../../components/primitives'
@@ -108,6 +110,14 @@ export function ReposTab(props: WorkspaceViewProps) {
     )
   }
 
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
   useEffect(() => {
     loadRepos('mount')
   }, [])
@@ -121,21 +131,24 @@ export function ReposTab(props: WorkspaceViewProps) {
   const handleAddRepo = async (ev: Event) => {
     ev.preventDefault()
     if (!newName.trim() || !newUrl.trim()) return
+    const startEpoch = currentSessionEpoch()
+    const trimmedName = newName.trim()
     setBusy('add')
     setErrorBanner(null)
     const res = await apiMutate<unknown>('POST', '/api/v1/repositories', {
-      name: newName.trim(),
+      name: trimmedName,
       url: newUrl.trim(),
       default_branch: newBranch.trim() || 'main',
       auto_sync: true,
       sync_interval: 300,
     })
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setBusy(null)
     if (!res.ok) {
       setErrorBanner(`저장소 등록 실패: ${res.error.message}`)
       return
     }
-    pushShellToast(`저장소 '${newName.trim()}' 등록 완료.`, 'success')
+    pushShellToast(`저장소 '${trimmedName}' 등록 완료.`, 'success')
     setNewName('')
     setNewUrl('')
     setShowAddForm(false)
@@ -143,10 +156,12 @@ export function ReposTab(props: WorkspaceViewProps) {
   }
 
   const handleSyncRepo = async (repoId: string) => {
+    const startEpoch = currentSessionEpoch()
     setBusy(`sync:${repoId}`)
     setErrorBanner(null)
     const res = await apiMutate<unknown>('POST', `/api/v1/repositories/${encodeURIComponent(repoId)}/sync`, {})
-    setBusy(null)
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
+    setBusy((cur) => (cur === `sync:${repoId}` ? null : cur))
     if (!res.ok) {
       setErrorBanner(`동기화 실패: ${res.error.message}`)
       return

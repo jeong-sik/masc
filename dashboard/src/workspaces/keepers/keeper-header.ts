@@ -76,6 +76,7 @@ export function KeeperHeader(props: KeeperHeaderProps) {
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState<{ readonly tone: 'ok' | 'bad'; readonly text: string } | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [capturedDeletePhase, setCapturedDeletePhase] = useState<string | null>(null)
   const [deleteConfirmName, setDeleteConfirmName] = useState('')
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const deleteModalRef = useRef<HTMLDivElement>(null)
@@ -99,6 +100,7 @@ export function KeeperHeader(props: KeeperHeaderProps) {
 
   const closeDeleteModal = () => {
     setDeleteOpen(false)
+    setCapturedDeletePhase(null)
     setDeleteConfirmName('')
     setDeleteError(null)
   }
@@ -254,7 +256,10 @@ export function KeeperHeader(props: KeeperHeaderProps) {
       danger: true,
       separatorBefore: booted && keeper.active_turn === null,
       disabled: busyAction !== null,
-      onSelect: () => setDeleteOpen(true),
+      onSelect: () => {
+        setCapturedDeletePhase(keeper.phase)
+        setDeleteOpen(true)
+      },
     },
   ]
 
@@ -584,8 +589,10 @@ export function KeeperHeader(props: KeeperHeaderProps) {
                 workspaceId: activeWorkspaceId.value,
                 keeper: keeper.name,
                 requestId: `purge:${keeper.name}`,
-                revision: keeper.phase,
+                revision: capturedDeletePhase ?? keeper.phase,
               }}
+              currentRevision=${keeper.phase}
+              onRefresh=${() => setCapturedDeletePhase(keeper.phase)}
             >
               <input
                 ref=${deleteInputRef}

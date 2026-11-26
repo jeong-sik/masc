@@ -637,21 +637,28 @@ export function QuotasTab(props: WorkspaceViewProps) {
   }
 
   const handleRefreshLoginReceipt = async () => {
-    if (!loginReceipt) return
+    const loginId = loginReceipt?.loginId?.trim()
+    if (!loginId) return
+    const startEpoch = currentSessionEpoch()
     setActionBusy('receipt')
     const res = await apiGet<Record<string, unknown>>(
-      `/api/v1/setup/accounts/login/${encodeURIComponent(loginReceipt.loginId)}`,
+      `/api/v1/setup/accounts/login/${encodeURIComponent(loginId)}`,
     )
-    setActionBusy(null)
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
+    setActionBusy((cur) => (cur === 'receipt' ? null : cur))
     if (!res.ok) {
       setActionBanner({ kind: 'err', text: `로그인 영수증 조회 실패: ${res.error.message}` })
       return
     }
-    setLoginReceipt({
-      ...loginReceipt,
-      status: typeof res.value.status === 'string' ? res.value.status : loginReceipt.status,
-      accountRef: typeof res.value.account_ref === 'string' ? res.value.account_ref : loginReceipt.accountRef,
-      authentication: typeof res.value.authentication === 'string' ? res.value.authentication : loginReceipt.authentication,
+    const payload = res.value
+    setLoginReceipt((cur) => {
+      if (!cur || cur.loginId !== loginId) return cur
+      return {
+        ...cur,
+        status: typeof payload.status === 'string' ? payload.status : cur.status,
+        accountRef: typeof payload.account_ref === 'string' ? payload.account_ref : cur.accountRef,
+        authentication: typeof payload.authentication === 'string' ? payload.authentication : cur.authentication,
+      }
     })
   }
 

@@ -14,6 +14,7 @@
 import { html } from 'htm/preact'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { currentSessionEpoch, isEpochCurrent } from '../../core/auth'
 import { markViewSynced } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { apiGetV2, apiMutateV2 } from '../../core/transport'
@@ -84,8 +85,22 @@ export function WikiTab(props: WorkspaceViewProps) {
   const [saveFeedback, setSaveFeedback] = useState<{ kind: 'ok' | 'err'; message: string } | null>(null)
   const [casConflict, setCasConflict] = useState<CasConflictState | null>(null)
   const submitSaveRef = useRef<() => Promise<void>>(async () => {})
+  const mountedRef = useRef(true)
+  const indexSeqRef = useRef(0)
+  const searchAbortRef = useRef<AbortController | null>(null)
+  const preserveFeedbackSlugRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      searchAbortRef.current?.abort()
+    }
+  }, [])
 
   const loadIndex = useCallback(async (reason: 'mount' | 'manual' = 'mount') => {
+    const seq = ++indexSeqRef.current
+    const startEpoch = currentSessionEpoch()
     setLoading(true)
     setLoadError(null)
     const params = new URLSearchParams({ sort })
@@ -96,6 +111,7 @@ export function WikiTab(props: WorkspaceViewProps) {
       (signal) => apiGetV2<WikiIndexData>(`/api/v1/wiki?${params.toString()}`, { signal }),
       { ttlMs: 12_000, topics: ['wiki', 'wiki_updated'], reason },
     )
+    if (!mountedRef.current || indexSeqRef.current !== seq || !isEpochCurrent(startEpoch)) return
     setLoading(false)
     if (obs.kind === 'value') {
       setWikiIndex(obs.data)
@@ -136,22 +152,37 @@ export function WikiTab(props: WorkspaceViewProps) {
 
   // Live search via GET /api/v1/wiki/search?q=
   const runSearch = useCallback(async (qRaw: string) => {
+    searchAbortRef.current?.abort()
     const q = qRaw.trim()
     if (!q) {
       setSearchResult(null)
+      setSearching(false)
       return
     }
+    const ctrl = new AbortController()
+    searchAbortRef.current = ctrl
+    const startEpoch = currentSessionEpoch()
     setSearching(true)
-    const res = await apiGetV2<WikiSearchData>(`/api/v1/wiki/search?q=${encodeURIComponent(q)}&limit=30`)
+    const res = await apiGetV2<WikiSearchData>(
+      `/api/v1/wiki/search?q=${encodeURIComponent(q)}&limit=30`,
+      { signal: ctrl.signal },
+    )
+    if (!mountedRef.current || ctrl.signal.aborted || !isEpochCurrent(startEpoch)) return
     setSearching(false)
-    if (res.ok) setSearchResult(res.value)
+    if (res.ok) {
+      setLoadError(null)
+      setSearchResult(res.value)
+    } else if (res.error.kind !== 'aborted' && res.error.kind !== 'epoch_stale') {
+      setLoadError(`위키 검색 실패: ${res.error.message}`)
+    }
   }, [])
 
   const loadPage = useCallback(async (slug: string, signal?: AbortSignal) => {
+    const startEpoch = currentSessionEpoch()
     setPageLoading(true)
     setPageError(null)
     const res = await apiGetV2<WikiPageData>(`/api/v1/wiki/${encodeURIComponent(slug)}`, { signal })
-    if (signal?.aborted) return null
+    if (!mountedRef.current || signal?.aborted || !isEpochCurrent(startEpoch)) return null
     setPageLoading(false)
     if (!res.ok) {
       setPageError(res.error.message)
@@ -167,7 +198,11 @@ export function WikiTab(props: WorkspaceViewProps) {
     setEditing(false)
     setPageDetail(null)
     setCasConflict(null)
-    setSaveFeedback(null)
+    if (preserveFeedbackSlugRef.current === selectedSlug) {
+      preserveFeedbackSlugRef.current = null
+    } else {
+      setSaveFeedback(null)
+    }
     const ctrl = new AbortController()
     pageAbortRef.current = ctrl
     void loadPage(selectedSlug, ctrl.signal)
@@ -266,6 +301,7 @@ export function WikiTab(props: WorkspaceViewProps) {
       return
     }
 
+    preserveFeedbackSlugRef.current = res.value.slug
     setCasConflict(null)
     setCreatingNew(false)
     setEditing(false)

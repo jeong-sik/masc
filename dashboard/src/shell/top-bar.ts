@@ -21,6 +21,7 @@ import {
   selectWorkspace,
   sessionEpoch,
   setSingleUserToken,
+  verifyAndApplySingleUserToken,
   workspaceTargets,
   type AuthSession,
 } from '../core/auth'
@@ -127,6 +128,8 @@ function provenanceMeta(prov: ViewProvenance): {
 function AccountWorkspaceSwitcher(): VNode {
   const [open, setOpen] = useState(false)
   const [bearerDraft, setBearerDraft] = useState('')
+  const [bearerError, setBearerError] = useState<string | null>(null)
+  const [applyingBearer, setApplyingBearer] = useState(false)
   const [signingOut, setSigningOut] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -182,14 +185,35 @@ function AccountWorkspaceSwitcher(): VNode {
     }
   }
 
-  const handleApplyBearer = (event: Event) => {
+  const handleApplyBearer = async (event: Event) => {
     event.preventDefault()
+    if (applyingBearer) return
     const token = bearerDraft.trim()
-    setSingleUserToken(token || null)
-    setBearerDraft('')
-    pushShellToast(token ? 'Bearer 토큰이 적용되었습니다.' : 'Bearer 토큰이 제거되었습니다.', 'success')
-    void bootstrapAuthSession().then(() => startObserverStream())
-    setOpen(false)
+    setBearerError(null)
+    if (!token) {
+      setSingleUserToken(null)
+      setBearerDraft('')
+      pushShellToast('Bearer 토큰이 제거되었습니다.', 'info')
+      void bootstrapAuthSession().then(() => startObserverStream())
+      setOpen(false)
+      return
+    }
+    setApplyingBearer(true)
+    try {
+      const result = await verifyAndApplySingleUserToken(token)
+      if (!result.ok) {
+        setBearerError(result.error)
+        pushShellToast(result.error, 'error')
+        return
+      }
+      setBearerDraft('')
+      setBearerError(null)
+      pushShellToast('Bearer 토큰이 적용되었습니다.', 'success')
+      void startObserverStream()
+      setOpen(false)
+    } finally {
+      setApplyingBearer(false)
+    }
   }
 
   return html`
@@ -277,10 +301,19 @@ function AccountWorkspaceSwitcher(): VNode {
                     class="ap-input"
                     placeholder=${session.kind === 'single_user_local' && session.tokenPresent ? 'Token active (enter to rotate)' : 'Paste Bearer token…'}
                     value=${bearerDraft}
-                    onInput=${(e: Event) => setBearerDraft((e.currentTarget as HTMLInputElement).value)}
+                    disabled=${applyingBearer}
+                    onInput=${(e: Event) => {
+                      setBearerDraft((e.currentTarget as HTMLInputElement).value)
+                      if (bearerError) setBearerError(null)
+                    }}
                   />
-                  <button type="submit" class="btn-primary">Apply</button>
+                  <button type="submit" class="btn-primary" disabled=${applyingBearer}>
+                    ${applyingBearer ? 'Verifying…' : 'Apply'}
+                  </button>
                 </div>
+                ${bearerError && html`
+                  <div class="ap-error" role="alert">${bearerError}</div>
+                `}
                 ${session.kind === 'single_user_local' && session.tokenPresent && html`
                   <button
                     type="button"

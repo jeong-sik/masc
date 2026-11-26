@@ -155,9 +155,15 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
   const selectedOAuthTarget = useRef<OAuthTarget | null>(null)
   const oauthRead = useRef<AbortController | null>(null)
   const skillReadRef = useRef<AbortController | null>(null)
+  const mountedRef = useRef(true)
+  const selectedSkillKeyRef = useRef('')
 
-  useEffect(() => () => {
-    skillReadRef.current?.abort()
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      skillReadRef.current?.abort()
+    }
   }, [])
 
   const isCurrentOAuthTarget = (target: OAuthTarget | null) =>
@@ -451,11 +457,14 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
   // Skills editor handlers
   const skillKey = (s: SkillSummaryItem | null): string =>
     s ? `${s.identity.source_id}:${s.identity.package_id}:${s.identity.name}` : ''
+  selectedSkillKeyRef.current = skillKey(selectedSkill)
 
   const handleOpenSkill = async (skill: SkillSummaryItem) => {
     skillReadRef.current?.abort()
     const ctrl = new AbortController()
     skillReadRef.current = ctrl
+    const startEpoch = sessionEpoch.peek()
+    const targetKey = skillKey(skill)
     setSelectedSkill(skill)
     setSkillReading(true)
     setSkillSource('')
@@ -467,7 +476,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
       { reference: { identity: skill.identity, content_revision: skill.content_revision } },
       { signal: ctrl.signal },
     )
-    if (ctrl.signal.aborted) return
+    if (!mountedRef.current || ctrl.signal.aborted || sessionEpoch.peek() !== startEpoch || selectedSkillKeyRef.current !== targetKey) return
     setSkillBusy(false)
     if (!res.ok) {
       setBanner({ kind: 'err', text: `SKILL.md 읽기 실패: ${res.error.message}` })
@@ -480,6 +489,8 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
 
   const handlePreviewSkill = async () => {
     if (!selectedSkill) return
+    const startEpoch = sessionEpoch.peek()
+    const targetKey = skillKey(selectedSkill)
     setSkillBusy(true)
     const res = await apiMutate<{ readonly preview?: { readonly diagnostics?: readonly string[] } }>(
       'POST',
@@ -489,6 +500,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
         source_text: skillSource,
       },
     )
+    if (!mountedRef.current || sessionEpoch.peek() !== startEpoch || selectedSkillKeyRef.current !== targetKey) return
     setSkillBusy(false)
     if (!res.ok) {
       setSkillPreviewNote(`검증 오류: ${res.error.message}`)
@@ -500,6 +512,8 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
 
   const handleSaveSkill = async () => {
     if (!selectedSkill) return
+    const startEpoch = sessionEpoch.peek()
+    const savedKey = skillKey(selectedSkill)
     setSkillBusy(true)
     const res = await apiMutate<{ readonly status?: string }>(
       'POST',
@@ -509,6 +523,7 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
         source_text: skillSource,
       },
     )
+    if (!mountedRef.current || sessionEpoch.peek() !== startEpoch) return
     setSkillBusy(false)
     if (!res.ok) {
       setBanner({
@@ -520,12 +535,12 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
       return
     }
     setBanner({ kind: 'ok', text: `SKILL.md 저장 완료 (${res.value.status ?? 'saved'}).` })
-    const savedKey = skillKey(selectedSkill)
     const refreshed = await resourceCache.fetch<SkillsApiPayload>(
       'runtime:skills',
       (signal) => apiGet<SkillsApiPayload>('/api/v1/skills', { signal }),
       { reason: 'manual' },
     )
+    if (!mountedRef.current || sessionEpoch.peek() !== startEpoch) return
     if (refreshed.kind === 'value') {
       const updated = refreshed.data.snapshot?.skills.find((item) => skillKey(item) === savedKey)
       if (updated) {

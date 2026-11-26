@@ -110,6 +110,12 @@ export function PopoverMenu(props: PopoverMenuProps): VNode {
     const onDocumentKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || isImeComposing(event)) return
       if (event.key === 'Escape') {
+        const activeModal = typeof document !== 'undefined'
+          ? document.querySelector('[role="dialog"][aria-modal="true"]')
+          : null
+        if (activeModal && (!wrapRef.current || !activeModal.contains(wrapRef.current))) {
+          return
+        }
         event.preventDefault()
         event.stopPropagation()
         event.stopImmediatePropagation()
@@ -160,7 +166,22 @@ export function PopoverMenu(props: PopoverMenuProps): VNode {
       return
     }
     if (event.key === 'Tab') {
-      setOpen(false)
+      if (menuRole !== 'dialog') {
+        setOpen(false)
+      } else {
+        const focusable = popoverRef.current
+          ? Array.from(popoverRef.current.querySelectorAll<HTMLElement>(
+              'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+            ))
+          : []
+        const activeEl = typeof document !== 'undefined' ? document.activeElement : null
+        const idx = activeEl instanceof HTMLElement ? focusable.indexOf(activeEl) : -1
+        const leavingBackward = event.shiftKey && (idx <= 0 || focusable.length === 0)
+        const leavingForward = !event.shiftKey && (idx < 0 || idx >= focusable.length - 1)
+        if (leavingBackward || leavingForward) {
+          setOpen(false)
+        }
+      }
       return
     }
     if (

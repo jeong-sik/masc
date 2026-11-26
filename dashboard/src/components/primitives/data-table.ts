@@ -207,21 +207,24 @@ export function DataTable<T extends object>(props: DataTableProps<T>) {
                   `}
                   ${visibleRows.map(({ row }) => {
                     const isSelected = props.selectedRowId != null && row.id === props.selectedRowId
+                    const isInteractiveDescendant = (target: EventTarget | null, currentTarget: EventTarget | null): boolean =>
+                      target !== currentTarget
+                      && target instanceof HTMLElement
+                      && target.closest('button, a, input, select, textarea, [role="button"]') !== null
                     return html`
                       <tr
                         key=${row.id}
                         data-selected=${isSelected ? 'true' : undefined}
                         tabIndex=${props.onRowClick ? 0 : undefined}
-                        onClick=${props.onRowClick ? () => props.onRowClick!(row.original) : undefined}
+                        onClick=${props.onRowClick ? (event: MouseEvent) => {
+                          if (event.defaultPrevented) return
+                          if (isInteractiveDescendant(event.target, event.currentTarget)) return
+                          props.onRowClick!(row.original)
+                        } : undefined}
                         onKeyDown=${props.onRowClick ? (event: KeyboardEvent) => {
                           if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return
                           if (event.key !== 'Enter' && event.key !== ' ') return
-                          if (event.target !== event.currentTarget) {
-                            const target = event.target
-                            if (target instanceof HTMLElement && target.closest('button, a, input, select, textarea, [role="button"]')) {
-                              return
-                            }
-                          }
+                          if (isInteractiveDescendant(event.target, event.currentTarget)) return
                           event.preventDefault()
                           props.onRowClick!(row.original)
                         } : undefined}

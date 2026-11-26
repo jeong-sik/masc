@@ -514,6 +514,7 @@ export function CommandPalette(): VNode | null {
             role="combobox"
             aria-expanded="true"
             aria-controls="ap-cmdk-list"
+            aria-activedescendant=${results[selectedIdx] ? `ap-cmdk-opt-${selectedIdx}` : undefined}
             aria-autocomplete="list"
             placeholder="Search routes, Account:, Provider:, Setting:, theme, or actions…"
             value=${query}
@@ -531,6 +532,7 @@ export function CommandPalette(): VNode | null {
                 return html`
                   <button
                     key=${item.id}
+                    id=${`ap-cmdk-opt-${idx}`}
                     type="button"
                     role="option"
                     aria-selected=${selected ? 'true' : 'false'}

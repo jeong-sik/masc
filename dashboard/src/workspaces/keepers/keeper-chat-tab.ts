@@ -927,10 +927,15 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     action: typeof moveQueuedChatOperationToEndApi,
   ) => {
     if (queue?.kind !== 'ready' || queue.refreshing === true || !isEpochCurrent(queue.epoch) || activeKeeperRef.current !== keeper.name) return
-    await action(keeper.name, operationId)
-    if (mountedRef.current && activeKeeperRef.current === keeper.name && isEpochCurrent(queue.epoch)) {
-      refreshChatRef.current('queue', 'waiting')
+    const targetKeeper = keeper.name
+    const startEpoch = queue.epoch
+    const res = await action(targetKeeper, operationId)
+    if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
+    if (!res.ok) {
+      setHistoryError(`대기열 작업 실패: ${res.error.message}`)
+      return
     }
+    refreshChatRef.current('queue', 'waiting')
   }
 
   // Global shortcuts: ⌘. / Ctrl+. (Debug Companion) and Alt+T (Thinking block visibility)

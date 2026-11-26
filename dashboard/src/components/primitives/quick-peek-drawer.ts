@@ -53,7 +53,11 @@ export function QuickPeekDrawer(props: QuickPeekDrawerProps) {
   useFocusScope({
     containerRef: drawerRef,
     active: props.open && isOverlay,
-    initialFocus: () => closeBtnRef.current,
+    initialFocus: () => {
+      const activeEl = typeof document !== 'undefined' ? document.activeElement : null
+      if (activeEl && drawerRef.current?.contains(activeEl)) return null
+      return closeBtnRef.current
+    },
     restoreFocus: false,
   })
 

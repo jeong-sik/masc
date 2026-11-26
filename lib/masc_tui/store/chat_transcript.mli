@@ -89,7 +89,7 @@ val equal_live_chat_phase : live_chat_phase -> live_chat_phase -> bool
 
 val active_turn_short_activity : Wire_fleet.active_turn -> Say.t
 (** Concise live activity label for a running Owner-slot turn, derived from
-    [turn.preview] (or fallback [tool_in_flight]/[phase]). *)
+    [turn.preview], and "Running" before the turn has one. *)
 
 type keeper_work_row =
   | Work_status of (Glyph.t * Theme.status_token * Say.t)

@@ -709,10 +709,8 @@ let apply_observer_event (m : Model.t) = function
       apply_observation_changed m payload
   | Wire_observer.Dataset_changed ds -> apply_dataset_invalidation m ds
   | Wire_observer.Agent_core ev -> apply_agent_core m ev
-  | Wire_observer.Keeper_heartbeat { keeper; phase; in_turn; at_unix; _ } ->
-      let fleet =
-        Fleet_store.apply_heartbeat ~keeper ~phase ~in_turn ~at_unix m.fleet
-      in
+  | Wire_observer.Keeper_heartbeat { keeper; in_turn; at_unix; _ } ->
+      let fleet = Fleet_store.apply_heartbeat ~keeper ~in_turn ~at_unix m.fleet in
       ({ m with fleet }, [])
   | Wire_observer.Keeper_turn_complete { keeper; turn; model; at_unix; _ } ->
       let summary =

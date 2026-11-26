@@ -761,20 +761,9 @@ let preview_short_activity (p : Wire_fleet.turn_preview) =
               Say.make ~ko:"시도 실패" ~en:"Attempt failed"))
 
 let active_turn_short_activity (turn : Wire_fleet.active_turn) =
-  match turn.tool_in_flight with
-  | Some tool ->
-      Say.make ~ko:("도구 사용 중 · " ^ tool) ~en:("Using tool · " ^ tool)
-  | None -> (
-      match turn.preview with
-      | Some p -> preview_short_activity p
-      | None -> (
-          match turn.phase with
-          | Some p
-            when String.equal (String.lowercase_ascii (String.trim p)) "thinking"
-            ->
-              Say.make ~ko:"추론 중…" ~en:"Thinking…"
-          | Some p -> Say.literal p
-          | None -> Say.make ~ko:"진행 중" ~en:"Running"))
+  match turn.preview with
+  | Some p -> preview_short_activity p
+  | None -> Say.make ~ko:"진행 중" ~en:"Running"
 
 let fresh_turn_state ~(model : Model.t) ~keeper =
   match model.fleet.turns with
@@ -883,33 +872,29 @@ let observed_turn_label ~model ~live (turn : Wire_fleet.active_turn) =
   Say.concat ~sep:" · " parts
 
 let turn_running_kind_of_turn (turn : Wire_fleet.active_turn) =
-  match turn.tool_in_flight with
-  | Some _ -> Composer.Turn_kind_tool
-  | None -> (
-      match turn.preview with
-      | None -> Composer.Turn_kind_active
-      | Some p -> (
-          match p.preparation with
-          | Some
-              {
-                state =
-                  ( Wire_fleet.Prep_rejected
-                  | Wire_fleet.Prep_raised
-                  | Wire_fleet.Prep_cancelled );
-                _;
-              } ->
-              Composer.Turn_kind_attention
-          | Some { state = Wire_fleet.Prep_active | Wire_fleet.Prep_prepared; _ }
-            ->
-              Composer.Turn_kind_active
-          | None -> (
-              match p.activity with
-              | Wire_fleet.Preview_tool_observed -> Composer.Turn_kind_tool
-              | Wire_fleet.Preview_failed -> Composer.Turn_kind_attention
-              | Wire_fleet.Preview_preparing
-              | Wire_fleet.Preview_waiting
-              | Wire_fleet.Preview_streaming ->
-                  Composer.Turn_kind_active)))
+  match turn.preview with
+  | None -> Composer.Turn_kind_active
+  | Some p -> (
+      match p.preparation with
+      | Some
+          {
+            state =
+              ( Wire_fleet.Prep_rejected
+              | Wire_fleet.Prep_raised
+              | Wire_fleet.Prep_cancelled );
+            _;
+          } ->
+          Composer.Turn_kind_attention
+      | Some { state = Wire_fleet.Prep_active | Wire_fleet.Prep_prepared; _ } ->
+          Composer.Turn_kind_active
+      | None -> (
+          match p.activity with
+          | Wire_fleet.Preview_tool_observed -> Composer.Turn_kind_tool
+          | Wire_fleet.Preview_failed -> Composer.Turn_kind_attention
+          | Wire_fleet.Preview_preparing
+          | Wire_fleet.Preview_waiting
+          | Wire_fleet.Preview_streaming ->
+              Composer.Turn_kind_active))
 
 let observed_turn_badges ~model ~keeper (turn : Wire_fleet.active_turn) =
   let live = live_turn_observed ~model ~keeper turn in
@@ -957,13 +942,12 @@ let observed_turn_badges ~model ~keeper (turn : Wire_fleet.active_turn) =
                 } ->
                 Theme.Status_active
             | None -> (
-                match turn.tool_in_flight, turn.preview with
-                | None, Some { activity = Wire_fleet.Preview_waiting | Wire_fleet.Preview_preparing; _ } ->
+                match turn.preview with
+                | Some { activity = Wire_fleet.Preview_waiting | Wire_fleet.Preview_preparing; _ } ->
                     Theme.Status_ai
-                | Some _, _
-                | None, Some { activity = Wire_fleet.Preview_streaming | Wire_fleet.Preview_tool_observed
+                | Some { activity = Wire_fleet.Preview_streaming | Wire_fleet.Preview_tool_observed
                                         | Wire_fleet.Preview_failed; _ }
-                | None, None ->
+                | None ->
                     Theme.Status_active)
           in
           badges (progress_glyph model) tone label (Say.make ~ko:"작업 중" ~en:"Working")
@@ -1098,73 +1082,61 @@ let extract_preview_failure_detail status_text =
 let active_turn_detail_summary (turn : Wire_fleet.active_turn) =
   let lane_say = turn_lane_label turn.lane in
   let act_say =
-    match turn.tool_in_flight with
-    | Some tool ->
-        Say.make ~ko:("도구 실행 · " ^ tool) ~en:("Tool · " ^ tool)
-    | None -> (
-        match turn.preview with
-        | Some p -> (
-            match p.preparation with
-            | Some { phase; state = Wire_fleet.Prep_active; _ } ->
-                let ph = preparation_phase_label phase in
-                Say.make ~ko:("준비 중 · " ^ ph.ko) ~en:("Preparing · " ^ ph.en)
-            | Some { phase; state = Wire_fleet.Prep_prepared; _ } ->
-                let ph = preparation_phase_label phase in
-                Say.make ~ko:(ph.ko ^ " 준비 완료") ~en:(ph.en ^ " prepared")
-            | Some
-                {
-                  phase;
-                  state =
-                    ( Wire_fleet.Prep_rejected
-                    | Wire_fleet.Prep_raised
-                    | Wire_fleet.Prep_cancelled );
-                  _;
-                } ->
-                let ph = preparation_phase_label phase in
-                Say.make ~ko:(ph.ko ^ " 준비 중단") ~en:(ph.en ^ " prep halted")
+    match turn.preview with
+    | Some p -> (
+        match p.preparation with
+        | Some { phase; state = Wire_fleet.Prep_active; _ } ->
+            let ph = preparation_phase_label phase in
+            Say.make ~ko:("준비 중 · " ^ ph.ko) ~en:("Preparing · " ^ ph.en)
+        | Some { phase; state = Wire_fleet.Prep_prepared; _ } ->
+            let ph = preparation_phase_label phase in
+            Say.make ~ko:(ph.ko ^ " 준비 완료") ~en:(ph.en ^ " prepared")
+        | Some
+            {
+              phase;
+              state =
+                ( Wire_fleet.Prep_rejected
+                | Wire_fleet.Prep_raised
+                | Wire_fleet.Prep_cancelled );
+              _;
+            } ->
+            let ph = preparation_phase_label phase in
+            Say.make ~ko:(ph.ko ^ " 준비 중단") ~en:(ph.en ^ " prep halted")
+        | None -> (
+            match Fleet_store.open_work_of_preview p with
+            | Some work -> work.phrase
             | None -> (
-                match Fleet_store.open_work_of_preview p with
-                | Some work -> work.phrase
-                | None -> (
-                    match p.activity with
-                    | Wire_fleet.Preview_preparing ->
-                        Say.make ~ko:"턴 준비 중" ~en:"Preparing turn"
-                    | Wire_fleet.Preview_waiting ->
-                        preview_with_last_tool p
-                          (Say.make ~ko:"응답 대기 중" ~en:"Waiting for model")
-                    | Wire_fleet.Preview_streaming ->
-                        preview_with_last_tool p
-                          (Say.make ~ko:"응답 수신" ~en:"Response activity")
-                    | Wire_fleet.Preview_tool_observed -> (
+                match p.activity with
+                | Wire_fleet.Preview_preparing ->
+                    Say.make ~ko:"턴 준비 중" ~en:"Preparing turn"
+                | Wire_fleet.Preview_waiting ->
+                    preview_with_last_tool p
+                      (Say.make ~ko:"응답 대기 중" ~en:"Waiting for model")
+                | Wire_fleet.Preview_streaming ->
+                    preview_with_last_tool p
+                      (Say.make ~ko:"응답 수신" ~en:"Response activity")
+                | Wire_fleet.Preview_tool_observed -> (
+                    match p.last_tool with
+                    | Some tool ->
+                        Say.make
+                          ~ko:("도구 활동 · " ^ tool)
+                          ~en:("Tool activity · " ^ tool)
+                    | None -> Say.make ~ko:"도구 활동 중" ~en:"Tool activity")
+                | Wire_fleet.Preview_failed -> (
+                    match extract_preview_failure_detail p.status_text with
+                    | Some detail ->
+                        Say.make
+                          ~ko:("시도 실패 · " ^ detail)
+                          ~en:("Attempt failed · " ^ detail)
+                    | None -> (
                         match p.last_tool with
                         | Some tool ->
                             Say.make
-                              ~ko:("도구 활동 · " ^ tool)
-                              ~en:("Tool activity · " ^ tool)
-                        | None -> Say.make ~ko:"도구 활동 중" ~en:"Tool activity")
-                    | Wire_fleet.Preview_failed -> (
-                        match extract_preview_failure_detail p.status_text with
-                        | Some detail ->
-                            Say.make
-                              ~ko:("시도 실패 · " ^ detail)
-                              ~en:("Attempt failed · " ^ detail)
-                        | None -> (
-                            match p.last_tool with
-                            | Some tool ->
-                                Say.make
-                                  ~ko:("시도 실패 · 최근 도구: " ^ tool)
-                                  ~en:("Attempt failed · last tool: " ^ tool)
-                            | None ->
-                                Say.make ~ko:"시도 실패" ~en:"Attempt failed")))))
-        | None -> (
-            match turn.phase with
-            | Some p
-              when String.equal
-                     (String.lowercase_ascii (String.trim p))
-                     "thinking" ->
-                Say.make ~ko:"추론 중…" ~en:"Thinking…"
-            | Some p -> Say.literal p
-            | None -> Say.make ~ko:"진행 중" ~en:"Running"))
+                              ~ko:("시도 실패 · 최근 도구: " ^ tool)
+                              ~en:("Attempt failed · last tool: " ^ tool)
+                        | None ->
+                            Say.make ~ko:"시도 실패" ~en:"Attempt failed")))))
+      | None -> Say.make ~ko:"진행 중" ~en:"Running"
   in
   Say.concat ~sep:" · " [ lane_say; act_say ]
 

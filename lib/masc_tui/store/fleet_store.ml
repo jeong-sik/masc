@@ -274,6 +274,12 @@ let is_tool_call = function
   | Wire_fleet.Open_tool _ -> true
   | Wire_fleet.Open_response _ -> false
 
+let is_running = function
+  | Wire_fleet.Open_tool { stage = Wire_fleet.Tool_executing; _ } -> true
+  | Wire_fleet.Open_tool { stage = Wire_fleet.Tool_requested; _ }
+  | Wire_fleet.Open_response _ ->
+      false
+
 let open_work_of_preview (p : Wire_fleet.turn_preview) =
   let reported =
     match p.activity with
@@ -292,10 +298,21 @@ let open_work_of_preview (p : Wire_fleet.turn_preview) =
         ; since_unix = None
         }
   | Some (first :: more) -> (
-      (* A tool says more than the response that asked for it. Other open
-         calls are counted behind the one that is named. *)
+      (* A tool says more than the response that asked for it. Of the open
+         calls the one that runs is named, and the others are counted behind
+         it: a call that never ran, or a run whose end never came, sits first
+         in the list and must not hide it. *)
       match List.filter is_tool_call (first :: more) with
-      | named :: others ->
+      | [] ->
+          (* The server keeps one response open at a time. *)
+          Some
+            { kind = open_activity_kind first
+            ; phrase = open_activity_phrase first
+            ; since_unix = Some (open_activity_since first)
+            }
+      | first_tool :: _ as tools ->
+          let named = Option.value (List.find_opt is_running tools) ~default:first_tool in
+          let others = List.filter (fun activity -> not (activity == named)) tools in
           let phrase =
             match others with
             | [] -> open_activity_phrase named
@@ -311,64 +328,50 @@ let open_work_of_preview (p : Wire_fleet.turn_preview) =
             { kind = open_activity_kind named
             ; phrase
             ; since_unix = Some (open_activity_since named)
-            }
-      | [] ->
-          (* The server keeps one response open at a time. *)
-          Some
-            { kind = open_activity_kind first
-            ; phrase = open_activity_phrase first
-            ; since_unix = Some (open_activity_since first)
             })
 
 let working_detail_of_active_turn (turn_opt : Wire_fleet.active_turn option) =
   match turn_opt with
   | None -> Say.make ~ko:"턴 실행 중" ~en:"In turn"
   | Some turn -> (
-      match turn.tool_in_flight with
-      | Some tool ->
-          Say.make ~ko:("도구 실행: " ^ tool) ~en:("Tool: " ^ tool)
-      | None -> (
-          match turn.preview with
-          | Some p -> (
-              match p.preparation with
-              | Some { state = Wire_fleet.Prep_active; _ } ->
-                  Say.make ~ko:"턴 준비 중" ~en:"Preparing turn"
-              | Some { state = Wire_fleet.Prep_prepared; _ } ->
-                  Say.make ~ko:"준비 완료" ~en:"Prepared"
-              | Some
-                  {
-                    state =
-                      ( Wire_fleet.Prep_rejected
-                      | Wire_fleet.Prep_raised
-                      | Wire_fleet.Prep_cancelled );
-                    _;
-                  } ->
-                  Say.make ~ko:"준비 중단" ~en:"Preparation halted"
-              | None -> (
-                  match open_work_of_preview p with
-                  | Some work -> work.phrase
-                  | None -> (
-                      match p.activity with
-                      | Wire_fleet.Preview_tool_observed -> (
-                          match p.last_tool with
-                          | Some tool ->
-                              Say.make
-                                ~ko:("도구 활동: " ^ tool)
-                                ~en:("Tool activity: " ^ tool)
-                          | None ->
-                              Say.make ~ko:"도구 활동 중" ~en:"Tool activity")
-                      | Wire_fleet.Preview_streaming ->
-                          Say.make ~ko:"응답 생성 중…" ~en:"Streaming…"
-                      | Wire_fleet.Preview_waiting ->
-                          Say.make ~ko:"응답 대기 중" ~en:"Waiting for model"
-                      | Wire_fleet.Preview_preparing ->
-                          Say.make ~ko:"턴 준비 중" ~en:"Preparing turn"
-                      | Wire_fleet.Preview_failed ->
-                          Say.make ~ko:"시도 실패" ~en:"Attempt failed")))
+      match turn.preview with
+      | Some p -> (
+          match p.preparation with
+          | Some { state = Wire_fleet.Prep_active; _ } ->
+              Say.make ~ko:"턴 준비 중" ~en:"Preparing turn"
+          | Some { state = Wire_fleet.Prep_prepared; _ } ->
+              Say.make ~ko:"준비 완료" ~en:"Prepared"
+          | Some
+              {
+                state =
+                  ( Wire_fleet.Prep_rejected
+                  | Wire_fleet.Prep_raised
+                  | Wire_fleet.Prep_cancelled );
+                _;
+              } ->
+              Say.make ~ko:"준비 중단" ~en:"Preparation halted"
           | None -> (
-              match turn.phase with
-              | Some phase -> Say.literal phase
-              | None -> Say.make ~ko:"턴 실행 중" ~en:"In turn")))
+              match open_work_of_preview p with
+              | Some work -> work.phrase
+              | None -> (
+                  match p.activity with
+                  | Wire_fleet.Preview_tool_observed -> (
+                      match p.last_tool with
+                      | Some tool ->
+                          Say.make
+                            ~ko:("도구 활동: " ^ tool)
+                            ~en:("Tool activity: " ^ tool)
+                      | None ->
+                          Say.make ~ko:"도구 활동 중" ~en:"Tool activity")
+                  | Wire_fleet.Preview_streaming ->
+                      Say.make ~ko:"응답 생성 중…" ~en:"Streaming…"
+                  | Wire_fleet.Preview_waiting ->
+                      Say.make ~ko:"응답 대기 중" ~en:"Waiting for model"
+                  | Wire_fleet.Preview_preparing ->
+                      Say.make ~ko:"턴 준비 중" ~en:"Preparing turn"
+                  | Wire_fleet.Preview_failed ->
+                      Say.make ~ko:"시도 실패" ~en:"Attempt failed")))
+      | None -> Say.make ~ko:"턴 실행 중" ~en:"In turn")
 
 let keeper_live_state (k : Wire_fleet.keeper_summary) =
   match k.health with
@@ -1142,26 +1145,16 @@ let apply_fleet_stream_event ~observed_at ev t =
   | Wire_fleet.Fleet_degraded { degradation; _ } ->
       { t with fleet_degradation = Some degradation }
 
-let apply_heartbeat ~keeper ~phase ~in_turn ~at_unix t =
+let apply_heartbeat ~keeper ~in_turn ~at_unix t =
   let keepers =
     Observed.map
       (List.map (fun (k : Wire_fleet.keeper_summary) ->
            if not (String.equal k.name keeper) then k
            else
              let active_turn =
-               match in_turn, k.active_turn with
-               | Some false, _ -> None
-               | Some true, Some turn ->
-                   Some
-                     {
-                       turn with
-                       phase =
-                         (match phase with
-                         | Some _ as p -> p
-                         | None -> turn.phase);
-                     }
-               | Some true, None -> k.active_turn
-               | None, cur -> cur
+               match in_turn with
+               | Some false -> None
+               | Some true | None -> k.active_turn
              in
              let last_turn_at_unix =
                match k.last_turn_at_unix with

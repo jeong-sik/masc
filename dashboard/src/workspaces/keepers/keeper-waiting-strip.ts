@@ -21,7 +21,9 @@ export interface KeeperWaitingGroup {
   /** The rows' shared sentence, or null when the rows say different things. */
   readonly sharedWhat: string | null
   readonly rows: readonly KeeperWaitingRow[]
-  /** Earliest `since` among the rows, in unix seconds. */
+  /** Earliest `since` among the rows, in unix seconds. A reservation whose
+   *  time has not come has no `since` (the server sends null), so it adds no
+   *  age here, as it adds none to the summary's `oldest_age_seconds`. */
   readonly earliestSince: number | null
   readonly nextActions: readonly string[]
 }
@@ -65,6 +67,28 @@ function groupLabel(group: KeeperWaitingGroup): string {
   return firstWhat ? `${firstWhat} 외 ${group.rows.length - 1}건` : group.waitingOn
 }
 
+/** One opened-group line: the row's own sentence when the group's rows say
+ *  different things, and the row's blocking reasons (rejection, cancellation,
+ *  spent-quota return times). */
+export interface KeeperWaitingMember {
+  readonly key: string
+  readonly label: string | null
+  readonly details: readonly string[]
+}
+
+/** The lines an opened group of two or more rows lists, one per row that has
+ *  something of its own to say. Rows that share the group's sentence and carry
+ *  no reason are only counted, so 123 receipts stay one line, while two
+ *  rejections of the same kind still show both reasons. */
+export function groupMembers(group: KeeperWaitingGroup): readonly KeeperWaitingMember[] {
+  if (group.rows.length < 2) return []
+  return group.rows.flatMap((row, index) => {
+    const label = group.sharedWhat === null ? (row.what || row.waiting_on) : null
+    if (label === null && row.detail_lines.length === 0) return []
+    return [{ key: `${index}:${row.what}`, label, details: row.detail_lines }]
+  })
+}
+
 function ageLabel(since: number | null, nowUnix: number): string | null {
   if (since === null) return null
   return `${formatElapsedCompact(Math.max(0, nowUnix - since))} 전부터`
@@ -93,10 +117,17 @@ export function KeeperWaitingStrip(props: {
         `}
         <span class="kp-block-preview">${preview}${groups.length > 3 ? ` 외 ${groups.length - 3}종` : ''}</span>
       </summary>
-      <div class="kp-waiting-groups" data-testid="chat-waiting-groups">
+      <div
+        class="kp-waiting-groups"
+        data-testid="chat-waiting-groups"
+        role="region"
+        aria-label="대기 목록"
+        tabIndex=${0}
+      >
         ${groups.map((group) => {
           const age = ageLabel(group.earliestSince, nowUnix)
-          const shown = group.rows.slice(0, GROUP_MEMBER_LIMIT)
+          const members = groupMembers(group)
+          const shown = members.slice(0, GROUP_MEMBER_LIMIT)
           const single = group.rows.length === 1 ? group.rows[0]! : null
           return html`
             <div
@@ -114,10 +145,17 @@ export function KeeperWaitingStrip(props: {
               ${single && single.detail_lines.map((line, index) => html`
                 <div class="kp-block-status" key=${`detail:${index}`}>${line}</div>
               `)}
-              ${group.sharedWhat === null && group.rows.length > 1 && html`
+              ${members.length > 0 && html`
                 <ul class="kp-waiting-members">
-                  ${shown.map((row, index) => html`<li key=${`${index}:${row.what}`}>${row.what || row.waiting_on}</li>`)}
-                  ${group.rows.length > shown.length && html`<li>+ ${group.rows.length - shown.length}건 더</li>`}
+                  ${shown.map((member) => html`
+                    <li key=${member.key}>
+                      ${member.label}
+                      ${member.details.map((line, index) => html`
+                        <div class="kp-block-status" key=${`detail:${index}`}>${line}</div>
+                      `)}
+                    </li>
+                  `)}
+                  ${members.length > shown.length && html`<li>+ ${members.length - shown.length}건 더</li>`}
                 </ul>
               `}
             </div>

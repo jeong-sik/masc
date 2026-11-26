@@ -18,7 +18,7 @@ let stream ~sw ~clock ~session request reqd =
      ["content-type", "text/event-stream"; "cache-control", "private, no-store";
       "x-accel-buffering", "no"] @ public_read_cors_headers request) in
   let response =
-    Server_sse_response.respond ~clock
+    Server_sse_response.respond ~sw ~clock
       ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
       reqd (Httpun.Response.create ~headers `OK) in
   let sent frame =
@@ -30,15 +30,11 @@ let stream ~sw ~clock ~session request reqd =
     | Some (frame, pulse) ->
       if sent ("event: draft\ndata: " ^ Yojson.Safe.to_string frame ^ "\n\n")
       then (Eio.Promise.await pulse; drafts ()) in
-  let rec pings () =
-    Eio.Time.sleep clock Server_mcp_transport_http_headers.sse_ping_interval_s;
-    if sent ": ping\n\n" then pings () in
-  (* The drafts and the pings are two loops on one response. Whichever ends
-     first ends the stream: a frame that was not taken, or a session that
-     left its room. The response ends both when its client is gone, and the
-     session leaves its room once they have ended. *)
-  Server_sse_response.serve ~sw response ~release:(fun () -> Live.leave session)
-    (fun () -> Eio.Fiber.first drafts pings)
+  (* The drafts end the stream when a frame was not taken or the session
+     left its room. The response writes the keepalive between drafts, ends
+     the loop when its client is gone, and the session leaves its room once
+     the loop has ended. *)
+  Server_sse_response.serve ~sw response ~release:(fun () -> Live.leave session) drafts
 
 type presence = Position of Artifact_document_engine.selection option | Leave
 let parse_presence json =

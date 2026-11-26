@@ -271,7 +271,12 @@ let start ~owner ~base_path ~body request reqd =
           (["content-type", "text/event-stream"; "cache-control", "no-store";
             "connection", "close"; "x-accel-buffering", "no"]
             @ stream_cors_headers owner request) in
-        let response = Server_sse_response.respond ~clock:(Eio.Stdenv.clock env)
+        (* The login runs inside this handler, so a switch of its own holds
+           the response's keepalive: a sign-in waits quietly for the person,
+           and the keepalive is what tells an HTTP/1.1 response that they
+           closed the window. It ends with the login. *)
+        Eio.Switch.run @@ fun login_sw ->
+        let response = Server_sse_response.respond ~sw:login_sw ~clock:(Eio.Stdenv.clock env)
           ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
           reqd (Httpun.Response.create ~headers `OK) in
         let is_closed () = Server_sse_response.is_closed response in

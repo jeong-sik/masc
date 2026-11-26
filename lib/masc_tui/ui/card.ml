@@ -474,24 +474,62 @@ let draw_hairline ?(pad_x = 0) ?label ?(unicode = true) ?bg grid ~(rect : Rect.t
     if w <= 0 then ()
     else
       let bg = match bg with Some c -> c | None -> Color.of_rgb theme.surface_1 in
-      let line_style = Style.make ~fg:(Color.of_rgb theme.border_subtle) ~bg () in
+      let subtle_style = Style.make ~fg:(Color.of_rgb theme.border_subtle) ~bg () in
+      let labeled_line_style =
+        Style.make ~fg:(Color.of_rgb theme.border_inactive) ~bg ()
+      in
       let clip = Rect.make ~x:x0 ~y ~w ~h:1 in
-      for x = x0 to x0 + w - 1 do
-        put_border_glyph grid ~clip ~x ~y ~style:line_style ~unicode Glyph.Box_h
-      done;
+      let ellipsis = if unicode then "…" else "." in
       match label with
-      | None -> ()
+      | None ->
+          for x = x0 to x0 + w - 1 do
+            put_border_glyph grid ~clip ~x ~y ~style:subtle_style ~unicode
+              Glyph.Box_h
+          done
       | Some raw ->
           let lbl = String.trim raw in
-          if String.length lbl > 0 && w >= 6 then begin
-            let max_lbl = Int.max 1 (w - 6) in
-            let fitted = Grapheme.truncate_to_width ~max_width:max_lbl lbl in
-            let lbl_style = Typography.structure ~bg ~bold:true theme in
-            let lx = x0 + 2 in
-            Cell_grid.put_ascii ~clip grid ~x:lx ~y ~style:line_style ' ';
-            let adv = Cell_grid.put_text ~clip grid ~x:(lx + 1) ~y ~style:lbl_style fitted in
-            Cell_grid.put_ascii ~clip grid ~x:(lx + 1 + adv) ~y ~style:line_style ' '
-          end
+          if String.length lbl = 0 then
+            for x = x0 to x0 + w - 1 do
+              put_border_glyph grid ~clip ~x ~y ~style:subtle_style ~unicode
+                Glyph.Box_h
+            done
+          else if w < 6 then
+            let lbl_style = Typography.anchor ~bg theme in
+            let adv =
+              Cell_grid.put_text ~clip grid ~x:x0 ~y ~style:lbl_style
+                (Grapheme.truncate_to_width ~max_width:w ~ellipsis lbl)
+            in
+            for x = x0 + adv to x0 + w - 1 do
+              Cell_grid.put_ascii ~clip grid ~x ~y ~style:labeled_line_style ' '
+            done
+          else
+            let marker =
+              if unicode then Glyph.to_utf8 Glyph.Focus_caret else ">"
+            in
+            let marker_style = Typography.accent ~bg ~bold:true theme in
+            let lbl_style = Typography.anchor ~bg theme in
+            let m_adv =
+              Cell_grid.put_text ~clip grid ~x:x0 ~y ~style:marker_style marker
+            in
+            Cell_grid.put_ascii ~clip grid ~x:(x0 + m_adv) ~y
+              ~style:labeled_line_style ' ';
+            let max_lbl = Int.max 1 (w - m_adv - 3) in
+            let fitted =
+              Grapheme.truncate_to_width ~max_width:max_lbl ~ellipsis lbl
+            in
+            let l_adv =
+              Cell_grid.put_text ~clip grid ~x:(x0 + m_adv + 1) ~y
+                ~style:lbl_style fitted
+            in
+            let gap_x = x0 + m_adv + 1 + l_adv in
+            if gap_x < x0 + w then begin
+              Cell_grid.put_ascii ~clip grid ~x:gap_x ~y
+                ~style:labeled_line_style ' ';
+              for x = gap_x + 1 to x0 + w - 1 do
+                put_border_glyph grid ~clip ~x ~y ~style:labeled_line_style
+                  ~unicode Glyph.Box_h
+              done
+            end
 
 let draw_v_hairline ?(unicode = true) ?bg grid ~x ~y ~h ~(theme : Theme.t) =
   if h <= 0 then ()

@@ -816,11 +816,11 @@ let bindings : binding list =
       (* --- Screen Hotkeys Registered in Single SSOT --- *)
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Cycle_sort_or_speak ~key_display:"S"
-        ~hint_label:(Say.make ~ko:"정렬" ~en:"Sort")
+        ~hint_label:(Say.make ~ko:"정렬/풀설정" ~en:"Sort/Pools")
         ~help_desc:
           (Say.make
-             ~ko:"목표 정렬(단계/진행률/최신) / 보드 정렬(recent|hot|trending|updated|discussed)"
-             ~en:"Cycle Goals sort (phase/progress/recent) or Board sort (recent|hot|trending|updated|discussed)")
+             ~ko:"목표·보드 정렬 순환 / 샌드박스 탭에서 런타임 SSH 풀 설정 열기"
+             ~en:"Cycle Goals/Board sort / Open Runtime Sandbox & SSH Pools settings on Sandboxes")
         ~footer_priority:0 (bare_char 'S');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Cycle_hearth_or_overrule ~key_display:"h"
@@ -905,7 +905,7 @@ let bindings : binding list =
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Edit_or_export ~key_display:"e"
         ~hint_label:(Say.make ~ko:"편집/증거" ~en:"Edit/Evidence")
-        ~help_desc:(Say.make ~ko:"레인 후보 편집 / 위키 편집 / 산출물 내보내기 / 퓨전 보드 증거 / 키퍼 설정 / 기억 변천" ~en:"Edit lane candidates, wiki, or keeper config / export artifact / Fusion evidence / Memory Evolution")
+        ~help_desc:(Say.make ~ko:"레인·위키·키퍼·샌드박스 설정 편집 / 산출물 내보내기 / 퓨전 보드 증거 / 기억 변천" ~en:"Edit lane, wiki, keeper, or sandbox config / export artifact / Fusion evidence / Memory Evolution")
         ~footer_priority:0 (bare_char 'e');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Delete_selected ~key_display:"d"

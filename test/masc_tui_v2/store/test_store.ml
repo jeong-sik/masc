@@ -29842,5 +29842,105 @@ let () =
                     = Knowledge_store.View_evolution
                  && m_kmem_f.knowledge.memory_view_mode
                     = Knowledge_store.View_facts));
+          Alcotest.test_case
+            "Infra_sandboxes [e] opens keeper Sandbox settings and [S] opens runtime SSH pools settings"
+            `Quick
+            (fun () ->
+              let base = Model.initial ~cols:140 ~rows:36 ~lang:Say.Lang_en () in
+              let step_k m ev = Update.step ~now:t0 m (Msg.Key_event ev) in
+              let infra_with_alpha =
+                Infra_store.apply_sandboxes_fallback ~observed_at:t0 ~wall_unix:0.
+                  ~keepers:[]
+                  ~sandbox_profiles:[ ("alpha", Wire_fleet.Profile_microvm) ]
+                  ~tool_series_totals:None
+                  (Infra_store.set_tab Nav.Infra_sandboxes base.infra)
+              in
+              let m_sb =
+                {
+                  base with
+                  nav = { base.nav with workspace = Nav.Infra; pane_index = 0 };
+                  infra = infra_with_alpha;
+                  config = Config_store.set_search_query "stale-filter" base.config;
+                }
+              in
+              let m_e, cmds_e = step_k m_sb (char_key "e") in
+              Alcotest.(check bool)
+                "[e] on Infra_sandboxes opens Settings_sandbox_ssh for selected keeper, clears search_query, and fetches keeper schema"
+                true
+                (Option.equal Nav.equal_overlay m_e.nav.overlay
+                   (Some (Nav.Settings Nav.Settings_sandbox_ssh))
+                 && Nav.equal_settings_tab m_e.config.active_tab
+                      Nav.Settings_sandbox_ssh
+                 && String.equal m_e.config.search_query ""
+                 && (match m_e.config.target with
+                    | Wire_config.Target_keeper "alpha" -> true
+                    | Wire_config.Target_keeper _
+                    | Wire_config.Target_runtime
+                    | Wire_config.Target_keeper_create ->
+                        false)
+                 && List.exists
+                      (function
+                        | Cmd.Http_get
+                            {
+                              req =
+                                Cmd.Get_config_schema
+                                  (Wire_config.Target_keeper "alpha");
+                              _;
+                            } ->
+                            true
+                        | _ -> false)
+                      (Cmd.flatten cmds_e));
+              let m_s, cmds_s = step_k m_sb (char_key "S") in
+              Alcotest.(check bool)
+                "[S] on Infra_sandboxes opens Settings_sandbox_ssh for Target_runtime, clears search_query, and fetches runtime schema"
+                true
+                (Option.equal Nav.equal_overlay m_s.nav.overlay
+                   (Some (Nav.Settings Nav.Settings_sandbox_ssh))
+                 && Nav.equal_settings_tab m_s.config.active_tab
+                      Nav.Settings_sandbox_ssh
+                 && String.equal m_s.config.search_query ""
+                 && (match m_s.config.target with
+                    | Wire_config.Target_runtime -> true
+                    | Wire_config.Target_keeper _
+                    | Wire_config.Target_keeper_create ->
+                        false)
+                 && List.exists
+                      (function
+                        | Cmd.Http_get
+                            {
+                              req =
+                                Cmd.Get_config_schema Wire_config.Target_runtime;
+                              _;
+                            } ->
+                            true
+                        | _ -> false)
+                      (Cmd.flatten cmds_s));
+              let m_sb_sidebar =
+                { m_sb with nav = { m_sb.nav with sidebar_focused = true } }
+              in
+              let m_sb_side_e, _ = step_k m_sb_sidebar (char_key "e") in
+              Alcotest.(check bool)
+                "[e] while sidebar is focused does not open Settings_sandbox_ssh"
+                true
+                (Option.is_none m_sb_side_e.nav.overlay);
+              let m_sb_empty =
+                {
+                  base with
+                  nav = { base.nav with workspace = Nav.Infra; pane_index = 0 };
+                  infra = Infra_store.set_tab Nav.Infra_sandboxes base.infra;
+                }
+              in
+              let m_e_empty, _ = step_k m_sb_empty (char_key "e") in
+              Alcotest.(check bool)
+                "[e] on empty Infra_sandboxes falls back to Target_runtime Settings_sandbox_ssh"
+                true
+                (Option.equal Nav.equal_overlay m_e_empty.nav.overlay
+                   (Some (Nav.Settings Nav.Settings_sandbox_ssh))
+                 &&
+                 match m_e_empty.config.target with
+                 | Wire_config.Target_runtime -> true
+                 | Wire_config.Target_keeper _
+                 | Wire_config.Target_keeper_create ->
+                     false));
         ] );
     ]

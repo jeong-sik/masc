@@ -7213,7 +7213,8 @@ let btw_max_scroll (m : Model.t) =
         let padded_w = max 1 (inner_w - (2 * pad_x)) in
         let md_h = max 1 (inner_h - 2) in
         let theme = Theme.of_preset m.theme_preset in
-        markdown_max_scroll ~theme ~width:padded_w ~height:md_h body
+        let scrubbed = Chat_transcript.scrub_secrets_in_text body in
+        markdown_max_scroll ~theme ~width:padded_w ~height:md_h scrubbed
 
 let queue_intro_rows (m : Model.t) ~keeper =
   let overview_rows =

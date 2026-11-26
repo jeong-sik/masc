@@ -30560,6 +30560,38 @@ let () =
               Alcotest.(check (option string))
                 "awaiting tool_b receives approval settled label"
                 (Some "approval: approved") (find_label "tool_b");
+              let m_s5, _ =
+                step_chunk m_s4
+                  (Wire_fleet.Chunk_tool_approval_event
+                     {
+                       operation_id = Some "op-apr";
+                       tool_use_id = "toolu_unknown";
+                       tool_name = None;
+                       status_label = "approval: rejected";
+                       refresh_approvals = true;
+                     })
+              in
+              let tools_after =
+                match Fleet_store.String_map.find_opt "alpha" m_s5.fleet.chat_streams with
+                | Some buf -> buf.tools
+                | None -> Alcotest.fail "missing alpha chat stream after unmatched settle"
+              in
+              let find_label_after name =
+                match
+                  List.find_opt
+                    (fun (tc : Fleet_store.active_tool_call) ->
+                      String.equal tc.tool_name name)
+                    tools_after
+                with
+                | Some tc -> tc.progress_label
+                | None -> Alcotest.fail ("missing tool " ^ name)
+              in
+              Alcotest.(check (option string))
+                "unmatched tool_name=None approval event does not hijack running sibling tool_a"
+                None (find_label_after "tool_a");
+              Alcotest.(check (option string))
+                "unmatched tool_name=None approval event leaves settled tool_b unchanged"
+                (Some "approval: approved") (find_label_after "tool_b");
               let ready_dash : Wire_runtime.tools_dashboard_snapshot =
                 {
                   is_warming = false;
@@ -31442,5 +31474,86 @@ let () =
                 false (Fleet_store.Int_set.mem 1 buf_bounded.seen_seqs);
               Alcotest.(check bool) "newest seq retained when exceeding max_seen_seqs"
                 true (Fleet_store.Int_set.mem total_seqs buf_bounded.seen_seqs));
+          Alcotest.test_case
+            "R4 hygiene: error reason ANSI scrub and btw_max_scroll scrubbed height"
+            `Quick (fun () ->
+              let has_substr haystack needle =
+                let hlen = String.length haystack and nlen = String.length needle in
+                if nlen = 0 then true
+                else
+                  let rec loop i =
+                    if i + nlen > hlen then false
+                    else if String.equal (String.sub haystack i nlen) needle then true
+                    else loop (i + 1)
+                  in
+                  loop 0
+              in
+              let ansi_secret =
+                "Bear" ^ "er \x1b[31m" ^ "ansi_tok_999" ^ "\x1b[0m failed"
+              in
+              let detail_ansi =
+                Msg.http_error_detail
+                  (Msg.Http_error
+                     { status = 500; body = ansi_secret; api_error = None })
+              in
+              Alcotest.(check bool)
+                "ANSI-obfuscated Bearer token is redacted in http_error_detail"
+                false
+                (has_substr detail_ansi "ansi_tok_999");
+              let pem_lines =
+                "-----BEGIN " ^ "PRIVATE KEY-----\n"
+                ^ String.concat "\n"
+                    (List.init 25 (fun i -> Printf.sprintf "MIIE_LINE_%02d_KEYDATA" i))
+                ^ "\n-----END " ^ "PRIVATE KEY-----"
+              in
+              let detail_pem =
+                Msg.http_error_detail
+                  (Msg.Http_error
+                     { status = 500; body = "err " ^ pem_lines; api_error = None })
+              in
+              Alcotest.(check bool)
+                "multi-line PEM block is redacted in http_error_detail"
+                false
+                (has_substr detail_pem "MIIE_LINE_00_KEYDATA");
+              let m_base = Model.initial ~cols:80 ~rows:20 () in
+              let m_raw =
+                {
+                  m_base with
+                  drafts =
+                    {
+                      m_base.drafts with
+                      btw =
+                        Drafts.Btw_answered
+                          {
+                            keeper = "alpha";
+                            prompt = "check";
+                            reply = "prefix\n" ^ pem_lines ^ "\nsuffix";
+                          };
+                    };
+                }
+              in
+              let m_scrubbed =
+                {
+                  m_base with
+                  drafts =
+                    {
+                      m_base.drafts with
+                      btw =
+                        Drafts.Btw_answered
+                          {
+                            keeper = "alpha";
+                            prompt = "check";
+                            reply = "prefix\n[redacted]\nsuffix";
+                          };
+                    };
+                }
+              in
+              Alcotest.(check int)
+                "btw_max_scroll matches scrubbed reply height"
+                (Update_nav.btw_max_scroll m_scrubbed)
+                (Update_nav.btw_max_scroll m_raw);
+              Alcotest.(check int)
+                "collapsed PEM block needs zero scroll in 20-row viewport" 0
+                (Update_nav.btw_max_scroll m_raw));
         ] );
     ]

@@ -29,7 +29,6 @@ import {
 import { formatObserved } from '../../core/resource-cache'
 import { observerConnected, subscribeObserverFrames, subscribeObserverResync } from '../../core/observer'
 import { isWorkspaceRasterMime } from '../../lib/keeper-media'
-import { nowMs1sSignal, useNowMs1sTicker } from '../../lib/now-signal'
 import { randomUuid } from '../../lib/uuid'
 import { readDiscordOperator, type DiscordReplyAuthority } from './discord-reply'
 import { DiscordReplyPanel } from './discord-reply-panel'
@@ -55,7 +54,7 @@ import {
   type StreamKeeperChatCallbacks,
   type readKeeperRosterSources,
 } from './keepers-api'
-import { KeeperTurnElapsed } from './turn-elapsed'
+import { KeeperTurnElapsed, OpenWorkSince, useNowMs } from './turn-elapsed'
 import {
   dedupeHistoryToolRows,
   extractDelegateCardInfo,
@@ -105,6 +104,7 @@ import {
   openActivityTone,
   openWorkPieces,
 } from './turn-open-work'
+import { turnDoing } from './turn-doing'
 import {
   TOOL_RESULT_MAX_PAGES_PER_BURST,
   TOOL_RESULT_PAGE_BYTES,
@@ -155,8 +155,7 @@ function OpenWorkRows({ activities, live }: {
   readonly activities: readonly TurnOpenActivity[]
   readonly live: boolean
 }) {
-  useNowMs1sTicker(live)
-  const now = live ? Math.max(nowMs1sSignal.value, Date.now()) : 0
+  const now = useNowMs(live)
   const row = (activity: TurnOpenActivity, key: string) => {
     const reach = openActivityReachLabel(activity)
     const seconds = Math.max(0, (now - activity.since_unix * 1000) / 1000)
@@ -2544,6 +2543,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     ? { label: preparationHaltedLabel(turnPreparation), tone: 'bad' as const }
     : formatTurnActivityLabel(effectivePreview?.activity)
   const turnWorkContext = effectivePreview?.work_context ?? null
+  // The one line the open-work rows expand; the activity's word when the preview lists nothing.
+  const liveTurnDoing = effectivePreview ? turnDoing(effectivePreview) : null
   const liveTurnLaneLabel = activeTurn ? formatTurnLaneLabel(activeTurn.lane) : 'Keeper 턴'
   const lastObserved = effectivePreview ? formatChatTime(effectivePreview.updated_at_unix) : null
   const snapshotLive = activeTurn !== null && row?.status === 'ok' && turnRead?.kind === 'value'
@@ -3526,14 +3527,19 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               ${hasTurnObservation && html`
                 <div class="kp-turn-progress-active" data-tone=${liveTurnActivity.tone} data-live=${turnLive ? 'true' : 'false'}>
                   ${turnAnimating && html`<span class="kp-live-dot" aria-hidden="true"></span>`}
-                  <span role="status">
-                    <strong>${progressLabel}</strong>
+                  <span class="kp-turn-progress-line">
+                    <span role="status">
+                      <strong>${progressLabel}</strong>
+                      ${liveTurnDoing && (!turnLive || turnAnimating) && html`<span> · ${liveTurnDoing.phrase}</span>`}
+                    </span>
+                    ${liveTurnDoing && liveTurnDoing.sinceUnix !== null && turnAnimating && html`
+                      <span> · </span><${OpenWorkSince} sinceUnix=${liveTurnDoing.sinceUnix} />
+                    `}
                     <span> · ${liveTurnLaneLabel}</span>
-                    ${effectivePreview && (!turnLive || turnAnimating) && html`<span> · ${liveTurnActivity.label}</span>`}
+                    ${turnStartedAt !== null && turnObservedAt !== undefined && html`
+                      <span> </span><${KeeperTurnElapsed} key=${activeTurn?.owner_key ?? activeTurn?.turn_ref ?? activeTurn?.started_at_unix} startedAt=${turnStartedAt} observedAt=${turnObservedAt} live=${turnAnimating} />
+                    `}
                   </span>
-                  ${turnStartedAt !== null && turnObservedAt !== undefined && html`
-                    <${KeeperTurnElapsed} key=${activeTurn?.owner_key ?? activeTurn?.turn_ref ?? activeTurn?.started_at_unix} startedAt=${turnStartedAt} observedAt=${turnObservedAt} live=${turnAnimating} />
-                  `}
                 </div>
               `}
               ${lastWorked && workedAt && html`

@@ -9,7 +9,8 @@ const tool = (name: string, stage: 'requested' | 'executing', since = 100): Turn
   kind: 'tool', tool_use_id: null, name, stage, started_at_unix: since - 1, since_unix: since, cohort: null, reach: null,
 })
 const preview = (activity: string, open: readonly TurnOpenActivity[] | null): KeeperActiveTurnPreview => ({
-  status_text: 'runtime · ' + activity, activity, open_activities: open, text_tail: '', last_tool: null,
+  status_text: 'runtime · ' + activity, activity, open_activities: open, preparation: null, work_context: null,
+  text_tail: '', last_tool: null,
   updated_at_unix: 200, revision: 1,
 })
 

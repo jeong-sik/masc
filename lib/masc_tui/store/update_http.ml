@@ -390,20 +390,6 @@ let finish_fleet_sandboxes infra (m : Model.t) =
   in
   (next, cmds)
 
-(* The File inspector shows this Keeper workspace file. *)
-let file_peek_matches (m : Model.t) ~scope ~path =
-  match Model.active_inspector m with
-  | Some (Nav.File_inspector peek) -> (
-      match scope with
-      | Wire_infra.Ws_keeper keeper ->
-          String.equal peek.keeper keeper && String.equal peek.path path
-      | Wire_infra.Ws_project | Wire_infra.Ws_repo _ -> false)
-  | Some
-      ( Nav.Verification_inspector _ | Nav.Tool_inspector _ | Nav.Skill_inspector _
-      | Nav.Exact_run_inspector _ )
-  | None ->
-      false
-
 let apply_http_reply ~now (m : Model.t) reply =
   let failed_slot err slot =
     let reason =
@@ -6019,23 +6005,24 @@ let apply_http_reply ~now (m : Model.t) reply =
             m.infra
         else m.infra
       in
+      (* The File inspector reads Keeper workspaces only; the slot drops a
+         reply for any file other than the one it holds. *)
       let infra =
-        if file_peek_matches m ~scope ~path then
-          match scope with
-          | Wire_infra.Ws_keeper keeper ->
-              Infra_store.apply_file_peek ~observed_at:now ~keeper ~path content infra
-          | Wire_infra.Ws_project | Wire_infra.Ws_repo _ -> infra
-        else infra
+        match scope with
+        | Wire_infra.Ws_keeper keeper ->
+            Infra_store.apply_file_peek ~observed_at:now ~keeper ~path content infra
+        | Wire_infra.Ws_project | Wire_infra.Ws_repo _ -> infra
       in
       ({ m with infra }, [])
   | Msg.Reply_workspace_file { scope; path; result = Error err } ->
-      let peek = file_peek_matches m ~scope ~path in
       err_reply
         ~fail:
           (on_infra (fun (x : Infra_store.t) ->
                let x =
-                 if peek then Infra_store.fail_file_peek ~failure:(failed_slot err) x
-                 else x
+                 match scope with
+                 | Wire_infra.Ws_keeper keeper ->
+                     Infra_store.fail_file_peek ~keeper ~path ~failure:(failed_slot err) x
+                 | Wire_infra.Ws_project | Wire_infra.Ws_repo _ -> x
                in
                if Wire_infra.equal_workspace_scope scope x.code.scope
                   && Option.equal String.equal (Some path) x.code.active_file_path

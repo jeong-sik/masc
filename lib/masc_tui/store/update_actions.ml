@@ -6,7 +6,8 @@ open Masc_tui_protocol
 let file_peek_context_lines = 3
 
 (* Enter in the File inspector: the same file in Infra > Code, in the Keeper's
-   workspace, at the same line. Esc from there returns to the tool-call row. *)
+   workspace, at the same line. Esc from there returns to the File inspector,
+   and Esc again to the tool-call row. *)
 let open_file_peek_in_code (m : Model.t) (peek : Nav.file_peek) =
   let scope = Wire_infra.Ws_keeper peek.keeper in
   let infra =

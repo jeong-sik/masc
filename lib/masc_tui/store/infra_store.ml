@@ -116,6 +116,14 @@ type keeper_sandbox_read = {
   invalidated_during_read : bool;
 }
 
+(** The File inspector's read. Loading and failure belong to this file, so
+    one file's state never shows under another file's title. *)
+type file_peek_read = {
+  peek_keeper : string;
+  peek_path : string;
+  peek_content : Wire_infra.workspace_file_content Observed.t;
+}
+
 type t = {
   active_tab : Nav.infra_tab;
   sandboxes : Wire_infra.sandboxes_snapshot Observed.t;
@@ -140,9 +148,8 @@ type t = {
   acting_selected_index : int;
   runtime_trace : (string * Wire_infra.runtime_trace_snapshot) Observed.t;
   code : code_state;
-  file_peek :
-    (string * string * Wire_infra.workspace_file_content) Observed.t;
-      (** The File inspector's read: Keeper, path, content. *)
+  file_peek : file_peek_read option;
+      (** The File inspector's read. [None] until one opens. *)
   show_raw_json : bool;
   pending_sandbox_keeper : string option;
   selected_index : int;
@@ -179,7 +186,7 @@ let empty =
     acting_selected_index = 0;
     runtime_trace = Observed.absent;
     code = empty_code_state;
-    file_peek = Observed.unreported;
+    file_peek = None;
     show_raw_json = false;
     pending_sandbox_keeper = None;
     selected_index = 0;
@@ -1726,16 +1733,34 @@ let step_review_hunk ~cols ~delta t =
   | Some git_scroll_offset -> { t with code = { t.code with git_scroll_offset } }
   | None -> t
 
+let open_file_peek ~keeper ~path t =
+  {
+    t with
+    file_peek =
+      Some { peek_keeper = keeper; peek_path = path; peek_content = Observed.unreported };
+  }
+
+let file_peek_is ~keeper ~path (r : file_peek_read) =
+  String.equal r.peek_keeper keeper && String.equal r.peek_path path
+
+let file_peek_state ~keeper ~path t =
+  match t.file_peek with
+  | Some r when file_peek_is ~keeper ~path r -> r.peek_content
+  | Some _ | None -> Observed.unreported
+
 let file_peek_content ~keeper ~path t =
-  match Observed.to_option t.file_peek with
-  | Some (k, p, content) when String.equal k keeper && String.equal p path ->
-      Some content
-  | Some _ | None -> None
+  Observed.to_option (file_peek_state ~keeper ~path t)
+
+let update_file_peek ~keeper ~path f t =
+  match t.file_peek with
+  | Some r when file_peek_is ~keeper ~path r ->
+      { t with file_peek = Some { r with peek_content = f r.peek_content } }
+  | Some _ | None -> t
 
 let apply_file_peek ~observed_at ~keeper ~path content t =
-  { t with file_peek = Observed.value ~observed_at (keeper, path, content) }
+  update_file_peek ~keeper ~path (fun _ -> Observed.value ~observed_at content) t
 
-let fail_file_peek ~failure t = { t with file_peek = failure t.file_peek }
+let fail_file_peek ~keeper ~path ~failure t = update_file_peek ~keeper ~path failure t
 
 let apply_git_status ~observed_at ~scope snap t =
   if not (Wire_infra.equal_workspace_scope scope t.code.scope) then t

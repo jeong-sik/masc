@@ -17,14 +17,16 @@ let render ~(peek : Nav.file_peek) ~(model : Model.t) ~cache ~(rect : Rect.t) gr
         (H.card_spec ~focused:true ~subtitle:peek.keeper
            ~hotkey:
              (Say.resolve lang
-                (Say.make ~ko:"[↑/↓] 스크롤 · [Esc] 닫기" ~en:"[↑/↓] Scroll · [Esc] Close"))
+                (Say.make ~ko:"[↑/↓] 스크롤 · [Enter] 코드에서 열기 · [Esc] 닫기"
+                   ~en:"[↑/↓] Scroll · [Enter] Open in Code · [Esc] Close"))
            peek.path)
     in
     let content = H.pad_content ~bp inner in
     if not (Rect.is_empty content) then
       match Infra_store.file_peek_content ~keeper:peek.keeper ~path:peek.path model.infra with
       | None ->
-          H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang model.infra.file_peek
+          H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang
+            (Infra_store.file_peek_state ~keeper:peek.keeper ~path:peek.path model.infra)
       | Some file ->
           let lines = String.split_on_char '\n' file.content in
           let total = List.length lines in

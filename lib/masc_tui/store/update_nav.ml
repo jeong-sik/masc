@@ -1614,7 +1614,15 @@ let open_inspector (m : Model.t) (insp : Nav.inspector) =
   in
   let fleet = m.fleet in
   let config = Config_store.cancel_edit_field m.config in
-  let infra = { m.infra with show_raw_json = false } in
+  let infra =
+    let infra = { m.infra with show_raw_json = false } in
+    match insp with
+    | Nav.File_inspector peek ->
+        Infra_store.open_file_peek ~keeper:peek.keeper ~path:peek.path infra
+    | Nav.Verification_inspector _ | Nav.Tool_inspector _ | Nav.Skill_inspector _
+    | Nav.Exact_run_inspector _ ->
+        infra
+  in
   let knowledge =
     let base0 =
       m.knowledge |> Knowledge_store.clear_armed_vote

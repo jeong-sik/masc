@@ -4324,7 +4324,7 @@ let active_view_ssot_mode m =
                 observed_at_opt m.runtime.skills;
               ];
         }
-  | Some (Nav.Exact_run_inspector _ | Nav.File_inspector _) ->
+  | Some (Nav.Exact_run_inspector _) ->
       Synced_snapshot
         {
           observer = m.freshness.observer;
@@ -4334,6 +4334,14 @@ let active_view_ssot_mode m =
                 observed_at_opt m.runtime.exact_run_detail;
                 observed_at_opt m.runtime.exact_lane_runs;
               ];
+        }
+  | Some (Nav.File_inspector peek) ->
+      Synced_snapshot
+        {
+          observer = m.freshness.observer;
+          observed_at =
+            observed_at_opt
+              (Infra_store.file_peek_state ~keeper:peek.keeper ~path:peek.path m.infra);
         }
   | None -> (
       match m.nav.workspace with

@@ -132,15 +132,23 @@ let test_reply_fills_only_the_shown_file () =
        (fun (c : Wire_infra.workspace_file_content) -> c.revision)
        (Infra_store.file_peek_content ~keeper:"alpha" ~path:"lib/a.ml" shown.infra))
 
+let is_failed (slot : _ Observed.t) =
+  match slot with
+  | Observed.Failed _ -> true
+  | Observed.Value _ | Observed.Loading _ | Observed.Absent | Observed.Unreported -> false
+
+let not_found = Msg.Http_error { status = 404; body = ""; api_error = None }
+
+let open_peek (m : Model.t) path =
+  Update_nav.open_inspector m (Nav.File_inspector { keeper = "alpha"; path; line = 1 })
+
 let test_read_failure_is_kept_as_failed () =
   let m, _ = opened () in
   let m, _ =
     file_reply m ~path:"lib/a.ml" (Error (Msg.Transport (Health.Other_io "connection closed")))
   in
   Alcotest.(check bool) "failed" true
-    (match m.infra.file_peek with
-     | Observed.Failed _ -> true
-     | Observed.Value _ | Observed.Loading _ | Observed.Absent | Observed.Unreported -> false)
+    (is_failed (Infra_store.file_peek_state ~keeper:"alpha" ~path:"lib/a.ml" m.infra))
 
 let test_esc_returns_to_the_row () =
   let before = tool_calls_model (edit_row ^ "," ^ shell_row) in
@@ -164,6 +172,30 @@ let test_enter_opens_the_file_in_code () =
     m.infra.code.pending_jump_line;
   Alcotest.(check (list string)) "file read" [ "keeper:alpha lib/a.ml" ] (reads cmds)
 
+let test_a_failed_file_does_not_stop_the_next () =
+  let m, _ = opened () in
+  let m, _ = file_reply m ~path:"lib/a.ml" (Error not_found) in
+  let m, cmds = open_peek m "lib/b.ml" in
+  Alcotest.(check (list string)) "b is read" [ "keeper:alpha lib/b.ml" ] (reads cmds);
+  Alcotest.(check bool) "a's failure is not b's" false
+    (is_failed (Infra_store.file_peek_state ~keeper:"alpha" ~path:"lib/b.ml" m.infra))
+
+let test_a_failure_after_a_shown_file_is_a_failure () =
+  let m, _ = opened () in
+  let m, _ = file_reply m ~path:"lib/a.ml" (Ok (content "lib/a.ml")) in
+  let m, _ = open_peek m "lib/b.ml" in
+  let m, _ = file_reply m ~path:"lib/b.ml" (Error not_found) in
+  Alcotest.(check bool) "b failed" true
+    (is_failed (Infra_store.file_peek_state ~keeper:"alpha" ~path:"lib/b.ml" m.infra))
+
+let test_reopening_reads_again () =
+  let before = tool_calls_model (edit_row ^ "," ^ shell_row) in
+  let m, _ = press_o before in
+  let m, _ = file_reply m ~path:"lib/a.ml" (Ok (content "lib/a.ml")) in
+  let m, _ = Update.step ~now:t0 m (Msg.Key_event (key Keymap.Input.Escape)) in
+  let _, cmds = press_o m in
+  Alcotest.(check (list string)) "read again" [ "keeper:alpha lib/a.ml" ] (reads cmds)
+
 let () =
   Alcotest.run "file_peek"
     [
@@ -176,5 +208,10 @@ let () =
           Alcotest.test_case "read failure" `Quick test_read_failure_is_kept_as_failed;
           Alcotest.test_case "esc returns to the row" `Quick test_esc_returns_to_the_row;
           Alcotest.test_case "enter opens Code" `Quick test_enter_opens_the_file_in_code;
+          Alcotest.test_case "a failed file does not stop the next" `Quick
+            test_a_failed_file_does_not_stop_the_next;
+          Alcotest.test_case "a failure after a shown file" `Quick
+            test_a_failure_after_a_shown_file_is_a_failure;
+          Alcotest.test_case "reopening reads again" `Quick test_reopening_reads_again;
         ] );
     ]

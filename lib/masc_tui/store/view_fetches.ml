@@ -638,16 +638,8 @@ let fetches_for_inspector ~force (m : Model.t) =
       [] |> add_if detail_needed (Cmd.Get_exact_lane_run_detail { run_id })
   | Some (Nav.File_inspector peek) ->
       let needed =
-        match m.infra.file_peek with
-        | Observed.Value { data = keeper, path, _; stale = false; _ } ->
-            force
-            || not (String.equal keeper peek.keeper && String.equal path peek.path)
-        | Observed.Loading _
-        | Observed.Value { stale = true; _ }
-        | Observed.Absent
-        | Observed.Unreported
-        | Observed.Failed _ ->
-            needs_fetch ~force m.infra.file_peek
+        needs_fetch ~force
+          (Infra_store.file_peek_state ~keeper:peek.keeper ~path:peek.path m.infra)
       in
       []
       |> add_if needed

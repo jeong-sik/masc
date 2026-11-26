@@ -98,6 +98,14 @@ type keeper_sandbox_read = {
     dispatch time of the pending read. The invalidation flag carries a newer
     sandbox dataset notification across that read's settlement. *)
 
+(** The File inspector's read. Loading and failure belong to this file, so
+    one file's state never shows under another file's title. *)
+type file_peek_read = {
+  peek_keeper : string;
+  peek_path : string;
+  peek_content : Wire_infra.workspace_file_content Observed.t;
+}
+
 type t = {
   active_tab : Nav.infra_tab;
   sandboxes : Wire_infra.sandboxes_snapshot Observed.t;
@@ -123,9 +131,8 @@ type t = {
   acting_selected_index : int;
   runtime_trace : (string * Wire_infra.runtime_trace_snapshot) Observed.t;
   code : code_state;
-  file_peek :
-    (string * string * Wire_infra.workspace_file_content) Observed.t;
-      (** The File inspector's read: Keeper, path, content. *)
+  file_peek : file_peek_read option;
+      (** The File inspector's read. [None] until one opens. *)
   show_raw_json : bool;
   pending_sandbox_keeper : string option;
   selected_index : int;
@@ -363,6 +370,15 @@ val step_review_hunk : cols:int -> delta:int -> t -> t
 (** Scroll the Review diff to the next ([delta > 0]) or previous hunk header.
     Unchanged when there is none that way. *)
 
+val open_file_peek : keeper:string -> path:string -> t -> t
+(** Start a fresh read for this Keeper and path. Every open reads again, so a
+    file the Keeper changed since the last open is not shown stale. *)
+
+val file_peek_state :
+  keeper:string -> path:string -> t -> Wire_infra.workspace_file_content Observed.t
+(** The read for this Keeper and path, or [Unreported] when the slot holds
+    another file or none. *)
+
 val file_peek_content :
   keeper:string -> path:string -> t -> Wire_infra.workspace_file_content option
 (** The File inspector's content when it is for this Keeper and path. *)
@@ -376,11 +392,15 @@ val apply_file_peek :
   t
 
 val fail_file_peek :
+  keeper:string ->
+  path:string ->
   failure:
-    ((string * string * Wire_infra.workspace_file_content) Observed.t ->
-    (string * string * Wire_infra.workspace_file_content) Observed.t) ->
+    (Wire_infra.workspace_file_content Observed.t ->
+    Wire_infra.workspace_file_content Observed.t) ->
   t ->
   t
+(** [apply_file_peek] and [fail_file_peek] change the slot only when it holds
+    this Keeper and path; a late reply for another file is dropped. *)
 
 val apply_git_status :
   observed_at:Clock.Mono.t ->

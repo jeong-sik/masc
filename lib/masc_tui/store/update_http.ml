@@ -6064,12 +6064,14 @@ let apply_http_reply ~now (m : Model.t) reply =
         ~source:Health.Source_client_http ~ko:"Git 워크트리 조회"
         ~en:"Git worktrees fetch" err
   | Msg.Reply_git_status { scope; result = Ok snap } ->
-      ( {
-          m with
-          infra =
-            Infra_store.apply_git_status ~observed_at:now ~scope snap m.infra;
-        }
-      , [] )
+      let infra = Infra_store.apply_git_status ~observed_at:now ~scope snap m.infra in
+      let next = { m with infra } in
+      (* The first status in Review picks a change; its diff is the next read. *)
+      if
+        Option.equal String.equal m.infra.code.active_file_path
+          infra.code.active_file_path
+      then (next, [])
+      else (next, View_fetches.fetches_for_current_view next)
   | Msg.Reply_git_status { scope = _; result = Error err } ->
       err_reply
         ~fail:

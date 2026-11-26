@@ -2816,17 +2816,24 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.32
         ~top_ratio:0.42 bp body_rect
   in
+  let reviewing = Infra_store.code_review_active inf in
   let left_inner =
     Card.draw ~cache grid ~rect:left_rect ~theme
       (H.card_spec ~focused:(Model.pane_focused model 0)
          ~subtitle:(workspace_scope_label code.scope)
          ~hotkey:
            (Say.resolve lang
-              (Say.make ~ko:"[Enter] 열기 · [s] 범위" ~en:"[Enter] Open · [s] Scope"))
+              (if reviewing then
+                 Say.make ~ko:"[</>] 파일 · [Enter] 열기" ~en:"[</>] File · [Enter] Open"
+               else
+                 Say.make ~ko:"[Enter] 열기 · [s] 범위" ~en:"[Enter] Open · [s] Scope"))
          (Say.resolve lang
-            (Say.make ~ko:"워크스페이스 트리" ~en:"Workspace Tree")))
+            (if reviewing then Say.make ~ko:"바뀐 파일" ~en:"Changed Files"
+             else Say.make ~ko:"워크스페이스 트리" ~en:"Workspace Tree")))
   in
-  if not (Rect.is_empty left_inner) then begin
+  if reviewing && not (Rect.is_empty left_inner) then
+    Screen_code_review.draw_changes ~model ~grid ~rect:left_inner ~theme
+  else if not (Rect.is_empty left_inner) then begin
     let nodes = Infra_store.visible_code_tree_nodes inf in
     if nodes = [] then
       H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp left_inner) ~theme
@@ -2912,7 +2919,7 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Infra_store.Code_git_worktrees
     | Infra_store.Code_git_blame
     | Infra_store.Code_git_log
-    | Infra_store.Code_git_diff ->
+    | Infra_store.Code_review ->
         Some (workspace_scope_label code.scope)
   in
   let right_inner =
@@ -2921,8 +2928,12 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
          ~focused:(Model.detail_pane_focused ~detail_index:1 model)
          ~hotkey:
            (Say.resolve lang
-              (Say.make ~ko:"[→/Tab] 스크롤 · [v] Git · [p] 찾기 · [f] 검색 · [y] 복사"
-                 ~en:"[→/Tab] Scroll · [v] Git · [p] Find · [f] Search · [y] Copy"))
+              (if reviewing then
+                 Say.make ~ko:"[{/}] 덩어리 · [</>] 파일 · [Enter] 이 줄 열기 · [v] Git"
+                   ~en:"[{/}] Hunk · [</>] File · [Enter] Open line · [v] Git"
+               else
+                 Say.make ~ko:"[→/Tab] 스크롤 · [v] Git · [p] 찾기 · [f] 검색 · [y] 복사"
+                   ~en:"[→/Tab] Scroll · [v] Git · [p] Find · [f] Search · [y] Copy"))
          (Say.resolve lang (Infra_store.code_right_mode_label code.right_mode)))
   in
   let rc = H.pad_content ~bp right_inner in
@@ -3265,52 +3276,8 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         | Some _ | None ->
             H.draw_observed_placeholder ~grid ~rect:vis_rect ~theme ~lang
               code.git_log)
-    | Infra_store.Code_git_diff -> (
-        let expected_path = Infra_store.active_code_file_path inf in
-        match Observed.to_option code.git_diff with
-        | Some (sc, path, df)
-          when Wire_infra.equal_workspace_scope sc code.scope
-               && (match expected_path with
-                  | Some exp -> String.equal exp path
-                  | None -> true) ->
-            ignore
-              (H.put_clipped ~grid ~clip:hdr_rect ~x:hdr_rect.x ~y:hdr_rect.y
-                 ~max_w:hdr_rect.w ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
-                 (Printf.sprintf "Git Diff · %s (%d lines)" path
-                    (List.length df.rows)));
-            if not df.has_changes then
-              H.draw_empty_notice ~grid ~rect:vis_rect ~theme
-                (Say.resolve lang
-                   (Say.make ~ko:"변경 사항 없음" ~en:"No working tree changes"))
-            else
-              let rows =
-                List.map
-                  (function
-                    | Wire_infra.Hunk h ->
-                        ( Some Theme.Status_active
-                        , Printf.sprintf "@@ -%d,%d +%d,%d @@%s" h.old_start h.old_count
-                            h.new_start h.new_count
-                            (match h.section with Some s -> " " ^ s | None -> "") )
-                    | Wire_infra.Line ln ->
-                    let sign, tone =
-                      match ln.kind with
-                      | `Add -> ("+", Some Theme.Status_ok)
-                      | `Delete -> ("-", Some Theme.Status_critical)
-                      | `Context -> (" ", None)
-                    in
-                    let lno =
-                      match ln.new_line, ln.old_line with
-                      | Some n, _ -> Printf.sprintf "%4d " n
-                      | None, Some o -> Printf.sprintf "%4d " o
-                      | None, None -> "     "
-                    in
-                    (tone, Printf.sprintf "%s%s %s" lno sign ln.text))
-                  df.rows
-              in
-              draw_plain_scrolled ~scroll:code.git_scroll_offset rows
-        | Some _ | None ->
-            H.draw_observed_placeholder ~grid ~rect:vis_rect ~theme ~lang
-              code.git_diff)
+    | Infra_store.Code_review ->
+        Screen_code_review.draw_diff ~model ~grid ~hdr_rect ~vis_rect ~theme
   end
 
 (* --- 4. Top-Level Infra Render (ZERO Nested Cards!) --- *)

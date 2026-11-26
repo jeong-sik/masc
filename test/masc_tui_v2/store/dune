@@ -41,3 +41,13 @@
   masc_tui_screens_domain
   yojson
   alcotest))
+
+(test
+ (name test_code_review)
+ (modules test_code_review)
+ (libraries
+  masc_tui_core
+  masc_tui_keymap
+  masc_tui_protocol
+  masc_tui_store
+  alcotest))

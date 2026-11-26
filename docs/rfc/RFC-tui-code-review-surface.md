@@ -74,26 +74,21 @@ related: []
 
 ### D2. Code 탭의 「변경 검토」 화면
 
-- `Infra_store.code_right_mode` 의 `Code_git_diff` 를 `Code_review` 로 바꾼다. 상태는 「지금 고른 바뀐 파일」과 「그 파일의 diff 읽기」를 함께 가진다.
-
-  ```ocaml
-  type code_review = {
-    selected : string option;          (* git status 의 path *)
-    diff : (workspace_scope * string * git_diff_snapshot) Observed.t;
-  }
-  ```
-
+- `Infra_store.code_right_mode` 의 `Code_git_diff` 를 `Code_review` 로 바꾼다.
+- 고른 바뀐 파일은 Code 탭의 `active_file_path` 다. 새 칸을 두지 않는다. diff 는 기존 `git_diff` 칸에 그 경로로 담긴다. 그래서 기존 diff 요청·응답 경로가 그대로 쓰인다.
+- 목록에서 몇 번째인지는 `git_status` 의 바뀐 파일 목록에서 `active_file_path` 를 찾아 계산한다(`Infra_store.review_selected_index`). 저장하지 않는다.
+- Review 에서 첫 `git_status` 가 오면 첫 바뀐 파일을 고르고 그 diff 를 읽는다.
 - 화면은 둘로 나뉜다. 왼쪽은 `git status` 의 바뀐 파일, 오른쪽은 고른 파일의 diff 다. 좁은 창에서는 오른쪽만 보이고 파일 이름이 머리줄에 붙는다.
-- 키:
+- 키는 기존 keymap 의 겹쳐 쓰는 action 을 따른다. `[`/`]` 는 하위 탭, `n` 은 새로 만들기, `N` 은 이전 검색 결과, `s` 는 정렬에 이미 묶여 있다(`lib/masc_tui/keymap/keymap.ml`).
 
-  | 키 | 동작 |
-  |---|---|
-  | `n` / `N` | 다음·이전 바뀐 파일을 고르고 그 diff 를 읽는다 |
-  | `]` / `[` | 다음·이전 덩어리 머리로 스크롤한다 |
-  | `s` | 한 줄 보기 ↔ 나란히 보기 |
-  | `Enter` | 지금 줄의 새 줄 번호(삭제 줄이면 옛 줄 번호 근처 새 줄)로 파일을 Code 파일 보기에서 연다 |
+  | 키 | action | 동작 |
+  |---|---|---|
+  | `>` / `<` | `Step_context_item` | 다음·이전 바뀐 파일을 고르고 그 diff 를 읽는다 |
+  | `}` / `{` | `Step_revision` | 다음·이전 덩어리 머리로 스크롤한다 |
+  | `↑`/`↓` (왼쪽 칸) | `Move` | 바뀐 파일을 고른다 |
+  | `Enter` | Enter | 왼쪽 칸에서는 첫 덩어리, 오른쪽 칸에서는 보이는 맨 윗줄의 새 줄 번호로 파일 보기를 연다 |
 
-- 나란히 보기는 창 너비가 두 칸을 다 담을 때만 고를 수 있다. 너비 기준은 이름 있는 상수 하나로 둔다. 좁으면 `s` 는 이유를 상태 줄에 알리고 한 줄 보기를 유지한다.
+- 한 줄 보기와 나란히 보기는 키가 아니라 창 너비로 정한다. 기준은 `Code_review_layout.side_by_side_min_cols` 하나다.
 - 덩어리 이동과 파일 이동은 화면 계산이 아니라 저장한 `rows` 에서 위치를 구한다. 그래야 테스트가 상태로 확인할 수 있다.
 
 ### D3. 도구 기록은 대상 파일을 실행 때 확정해 남긴다
@@ -136,7 +131,7 @@ related: []
 - 여는 곳: 키퍼 도구 기록 행 중 D3 의 대상 파일 필드가 있는 행에서 `o`. 필드가 없는 행에서는 `o` 가 아무 요청도 내지 않고 상태 줄에 「이 도구 기록에는 대상 파일이 없어요」를 띄운다.
 - 창은 지금 화면 위에 뜬다. 뒤 화면의 상태는 바뀌지 않는다. `Esc` 로 닫으면 원래 자리로 돌아간다.
 - 파일 내용은 기존 `Cmd.Get_workspace_file` 로 읽는다. 새 서버 경로를 만들지 않는다.
-- 창 안 키: 스크롤, `]`/`[` (그 파일에 diff 가 있으면 덩어리 이동), `Enter` 로 Code 탭 파일 보기로 옮겨 가기.
+- 창 안 키: 스크롤, `Enter` 로 Code 탭 파일 보기로 옮겨 가기.
 - 읽기 실패·없는 파일·권한 없음은 `Observed.Failed` 로 그대로 보여 준다. 빈 내용으로 바꾸지 않는다.
 
 ## 4. 열린 질문
@@ -152,7 +147,7 @@ related: []
 |---|---|---|
 | 1 | 이 RFC | 운영자 승인 |
 | 2 | D1 서버 덩어리 행 + TUI 디코더 hard cut | 서버: 덩어리 둘인 diff 입력에 `hunk` 행 위치·값 테스트. TUI: 디코더 테스트(모르는 `kind` 는 실패) |
-| 3 | D2 변경 검토 화면 | `n`/`N` 이 낸 `Get_git_diff` 요청, `]`/`[` 뒤 스크롤 위치, `Enter` 가 연 파일·줄을 상태로 확인 |
+| 3 | D2 변경 검토 화면 | `>` 가 낸 `Get_git_diff` 요청, `}` 뒤 스크롤 위치, `Enter` 가 연 파일·줄을 상태로 확인 |
 | 4 | D3 도구 기록 대상 파일 | 파일 도구 실행 한 번 뒤 기록에 대상 파일 필드가 남는지 |
 | 5 | D4 떠 있는 파일 창 | `o` 가 낸 `Get_workspace_file` 요청, 필드 없는 행에서 요청 0건, `Esc` 뒤 뒤 화면 상태 그대로 |
 

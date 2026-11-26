@@ -49,7 +49,7 @@ type code_right_mode =
   | Code_git_worktrees
   | Code_git_blame
   | Code_git_log
-  | Code_git_diff
+  | Code_review
 
 type code_state = {
   scope : Wire_infra.workspace_scope;
@@ -338,6 +338,28 @@ val apply_workspace_file :
 val set_code_active_file : string option -> t -> t
 val active_code_file_path : t -> string option
 val open_file_for_current : t -> Wire_infra.workspace_file_content option
+val review_changes : t -> Wire_infra.git_status_change list
+(** Changed files of the current scope's git status, in server order. *)
+
+val review_selected_index : t -> int option
+(** Position of the active file in [review_changes]. *)
+
+val select_review_change : delta:int -> t -> t
+(** Move the review selection [delta] changes (clamped) and make that change
+    the active file. With no selection, [delta >= 0] picks the first change and
+    a negative [delta] the last. *)
+
+val review_diff_rows : cols:int -> t -> Code_review_layout.row list
+(** The selected change's diff as Review rows for a [cols]-wide viewport.
+    Empty until that change's diff has arrived. *)
+
+val code_review_active : t -> bool
+(** The Code tab shows Review. *)
+
+val step_review_hunk : cols:int -> delta:int -> t -> t
+(** Scroll the Review diff to the next ([delta > 0]) or previous hunk header.
+    Unchanged when there is none that way. *)
+
 val apply_git_status :
   observed_at:Clock.Mono.t ->
   scope:Wire_infra.workspace_scope ->

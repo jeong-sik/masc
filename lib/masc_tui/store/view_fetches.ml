@@ -1308,22 +1308,24 @@ let fetches_for_workspace ~force (m : Model.t) =
       | Nav.Infra_code ->
           let sc = m.infra.code.scope in
           let cur_file_opt = Infra_store.active_code_file_path m.infra in
+          let git_status_reqs =
+            let needed =
+              match m.infra.code.git_status with
+              | Observed.Value { data = s, _; stale = false; _ } ->
+                  force || not (Wire_infra.equal_workspace_scope s sc)
+              | Observed.Loading _
+              | Observed.Value { stale = true; _ }
+              | Observed.Absent
+              | Observed.Unreported
+              | Observed.Failed _ ->
+                  needs_fetch ~force m.infra.code.git_status
+            in
+            if not needed then [] else [ Cmd.Get_git_status { scope = sc } ]
+          in
           let mode_reqs =
             match m.infra.code.right_mode with
             | Infra_store.Code_file | Infra_store.Code_search_results -> []
-            | Infra_store.Code_git_status ->
-                let needed =
-                  match m.infra.code.git_status with
-                  | Observed.Value { data = s, _; stale = false; _ } ->
-                      force || not (Wire_infra.equal_workspace_scope s sc)
-                  | Observed.Loading _
-                  | Observed.Value { stale = true; _ }
-                  | Observed.Absent
-                  | Observed.Unreported
-                  | Observed.Failed _ ->
-                      needs_fetch ~force m.infra.code.git_status
-                in
-                if not needed then [] else [ Cmd.Get_git_status { scope = sc } ]
+            | Infra_store.Code_git_status -> git_status_reqs
             | Infra_store.Code_git_branches ->
                 let needed =
                   match m.infra.code.git_branches with
@@ -1391,10 +1393,18 @@ let fetches_for_workspace ~force (m : Model.t) =
                     in
                     if not needed then []
                     else [ Cmd.Get_git_log { scope = sc; path } ])
-            | Infra_store.Code_git_diff -> (
-                match cur_file_opt with
+            | Infra_store.Code_review -> (
+                (* The diff follows the selected change, never the tree. *)
+                let selected =
+                  Option.bind (Infra_store.review_selected_index m.infra)
+                    (fun i ->
+                      List.nth_opt (Infra_store.review_changes m.infra) i)
+                in
+                git_status_reqs
+                @
+                match selected with
                 | None -> []
-                | Some path ->
+                | Some { Wire_infra.path; _ } ->
                     let needed =
                       match m.infra.code.git_diff with
                       | Observed.Value { data = s, p, _; stale = false; _ } ->

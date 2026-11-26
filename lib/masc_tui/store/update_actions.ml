@@ -7522,6 +7522,16 @@ and execute_action ~now (m : Model.t) action =
             let next = { m with keeper_context } |> Update_nav.clamp_for_pane in
             (next, View_fetches.fetches_for_current_view next)
         | None -> (m, [])
+      else if
+        Option.is_none m.nav.overlay
+        && Option.is_none (Model.active_inspector m)
+        && Nav.equal_workspace m.nav.workspace Nav.Infra
+        && Infra_store.code_review_active m.infra
+      then
+        let infra =
+          Infra_store.step_review_hunk ~cols:m.viewport.cols ~delta m.infra
+        in
+        ({ m with infra }, [])
       else step_artifact_revision ~now ~delta m)
   | Keymap.Step_context_item dir -> (
       let delta = match dir with Keymap.Prev -> -1 | Keymap.Next -> 1 in
@@ -7609,6 +7619,10 @@ and execute_action ~now (m : Model.t) action =
                         ~delta m.runtime
                     in
                     let next = { m with runtime } in
+                    (next, View_fetches.fetches_for_current_view next)
+                | Nav.Infra when Infra_store.code_review_active m.infra ->
+                    let infra = Infra_store.select_review_change ~delta m.infra in
+                    let next = { m with infra } in
                     (next, View_fetches.fetches_for_current_view next)
                 | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers
                 | Nav.Runtime | Nav.Infra ->

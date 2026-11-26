@@ -475,29 +475,6 @@ let equal_palette (a : Palette.t) (b : Palette.t) =
   && (let c, c1, c2 = a.ai_stops and d, d1, d2 = b.ai_stops in
       Int.equal c d && Int.equal c1 d1 && Int.equal c2 d2)
 
-(* TOML override registry. Set once at startup by the app layer; [of_preset]
-   reads it on every call. [Stdlib.Mutex] because the locked section is a
-   short table lookup with no I/O, and tests call [of_preset] outside
-   [Eio_main.run] (see the OCaml checklist §4). *)
-let overrides_table : (preset, Palette.t) Hashtbl.t = Hashtbl.create 16
-let overrides_mutex = Mutex.create ()
-
-let with_overrides_locked fn =
-  Mutex.lock overrides_mutex;
-  Fun.protect ~finally:(fun () -> Mutex.unlock overrides_mutex) fn
-
-let set_palette_overrides overrides =
-  with_overrides_locked (fun () ->
-      Hashtbl.clear overrides_table;
-      List.iter
-        (fun (preset, palette) -> Hashtbl.replace overrides_table preset palette)
-        overrides)
-
-let palette_override preset =
-  with_overrides_locked (fun () -> Hashtbl.find_opt overrides_table preset)
-
-let clear_palette_overrides () = with_overrides_locked (fun () -> Hashtbl.clear overrides_table)
-
 (* Built-in palettes. The editable copies live in [config/themes/<preset>.toml]
    with the same values; this is the fallback when the file is absent. *)
 let down_tone_cool_stops = (0x69AABA, 0x7DB1DD, 0xAFD4EA)
@@ -1007,15 +984,91 @@ let preset_index = function
 
 let equal_preset a b = Int.equal (preset_index a) (preset_index b)
 
+(* The theme of every preset together with the TOML palette it was built from,
+   when there is one. [of_preset] runs on every frame, so the Oklab work in
+   [of_palette] happens when the overrides change and a call only reads the
+   result. The registry is an immutable lookup behind an [Atomic.t]:
+   [set_palette_overrides] publishes a whole new one, so a reader in any
+   domain sees the lookup from before the call or from after it, and no lock
+   is needed. *)
+type resolved = {
+  override : Palette.t option;
+  theme : t;
+}
+
+let resolve ~override preset =
+  let palette =
+    match override with
+    | Some palette -> palette
+    | None -> builtin_palette preset
+  in
+  { override; theme = of_palette preset palette }
+
+(* One [let] and one case per preset: a new preset is a compile error here
+   until it is listed. *)
+let lookup_of (resolve_preset : preset -> resolved) =
+  let midnight = resolve_preset Midnight in
+  let arcade_hi = resolve_preset Arcade_hi in
+  let paper_light = resolve_preset Paper_light in
+  let mono = resolve_preset Mono in
+  let muted = resolve_preset Muted in
+  let muted_warm = resolve_preset Muted_warm in
+  let muted_green = resolve_preset Muted_green in
+  let muted_dusk = resolve_preset Muted_dusk in
+  let muted_graphite = resolve_preset Muted_graphite in
+  let solarized_dark = resolve_preset Solarized_dark in
+  let nord = resolve_preset Nord in
+  let dracula = resolve_preset Dracula in
+  let gruvbox_dark = resolve_preset Gruvbox_dark in
+  let catppuccin_mocha = resolve_preset Catppuccin_mocha in
+  function
+  | Midnight -> midnight
+  | Arcade_hi -> arcade_hi
+  | Paper_light -> paper_light
+  | Mono -> mono
+  | Muted -> muted
+  | Muted_warm -> muted_warm
+  | Muted_green -> muted_green
+  | Muted_dusk -> muted_dusk
+  | Muted_graphite -> muted_graphite
+  | Solarized_dark -> solarized_dark
+  | Nord -> nord
+  | Dracula -> dracula
+  | Gruvbox_dark -> gruvbox_dark
+  | Catppuccin_mocha -> catppuccin_mocha
+
+let builtin_lookup = lookup_of (resolve ~override:None)
+let registry = Atomic.make builtin_lookup
+
 let of_preset preset =
-  match palette_override preset with
-  | Some palette -> of_palette preset palette
-  | None -> of_palette preset (builtin_palette preset)
+  let lookup = Atomic.get registry in
+  (lookup preset).theme
+
+let palette_override preset =
+  let lookup = Atomic.get registry in
+  (lookup preset).override
+
+let set_palette_overrides overrides =
+  (* A later entry for the same preset replaces an earlier one. *)
+  let override_of preset =
+    List.fold_left
+      (fun found (candidate, palette) ->
+        if equal_preset candidate preset then Some palette else found)
+      None overrides
+  in
+  let resolve_preset preset =
+    match override_of preset with
+    | None -> builtin_lookup preset
+    | Some palette -> resolve ~override:(Some palette) preset
+  in
+  Atomic.set registry (lookup_of resolve_preset)
+
+let clear_palette_overrides () = Atomic.set registry builtin_lookup
 
 (* Built-in Midnight, ignoring overrides. Live rendering must use [of_preset]
    so a TOML override applies; this value exists for callers that need a
    compile-time sample theme. *)
-let default = of_palette Midnight (builtin_palette Midnight)
+let default = (builtin_lookup Midnight).theme
 
 let tier_fg theme = function
   | Tier_anchor -> theme.text_bright

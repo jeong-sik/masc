@@ -118,6 +118,17 @@ let test_palette_registry () =
         theme.text_bright rebuilt.text_bright)
     Theme.all_presets
 
+let test_of_preset_returns_stored_theme () =
+  Theme.clear_palette_overrides ();
+  Fun.protect ~finally:Theme.clear_palette_overrides (fun () ->
+      Alcotest.(check bool) "built-in theme is built once" true
+        (Theme.of_preset Theme.Midnight == Theme.of_preset Theme.Midnight);
+      let builtin = Theme.builtin_palette Theme.Midnight in
+      Theme.set_palette_overrides
+        [ (Theme.Midnight, { builtin with surface_0 = 0x010203 }) ];
+      Alcotest.(check bool) "override theme is built once" true
+        (Theme.of_preset Theme.Midnight == Theme.of_preset Theme.Midnight))
+
 let test_cli_themes_dir () =
   (match Cli_args.parse ~env:empty_env ~cwd:"/tmp/cwd" [] with
   | Cli_args.Run cfg ->
@@ -189,6 +200,8 @@ let () =
           Alcotest.test_case "rgb of hex" `Quick test_rgb_of_hex;
           Alcotest.test_case "parse palette text" `Quick test_parse_palette_text;
           Alcotest.test_case "palette registry" `Quick test_palette_registry;
+          Alcotest.test_case "of_preset returns stored theme" `Quick
+            test_of_preset_returns_stored_theme;
           Alcotest.test_case "cli themes dir" `Quick test_cli_themes_dir;
           Alcotest.test_case "load overrides files" `Quick test_load_overrides_files;
         ] );

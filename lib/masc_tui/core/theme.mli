@@ -134,6 +134,11 @@ val preset_of_name : string -> preset option
 val equal_preset : preset -> preset -> bool
 
 val of_preset : preset -> t
+(** The theme of [preset]: built from its TOML override palette when one is
+    installed and from [builtin_palette] otherwise. The theme is built when
+    the overrides change, so a call returns a stored value and does no color
+    math. *)
+
 val default : t
 (** Built-in Midnight, ignoring overrides. Live rendering must use
     [of_preset] so a TOML override applies. *)
@@ -191,10 +196,11 @@ val of_palette : preset -> Palette.t -> t
 val equal_palette : Palette.t -> Palette.t -> bool
 
 val set_palette_overrides : (preset * Palette.t) list -> unit
-(** Replace the TOML override registry with [overrides]. Call once at
-    startup after loading theme files; [of_preset] then builds from the
-    override when one exists and from [builtin_palette] otherwise.
-    Must not be called while rendering. *)
+(** Replace the TOML override registry with [overrides] and build the theme
+    of each overridden preset. A later entry for the same preset replaces an
+    earlier one. Call it after loading theme files; [of_preset] returns the
+    built theme from then on. An [of_preset] call that runs at the same time
+    returns the theme from before this call or from after it. *)
 
 val palette_override : preset -> Palette.t option
 (** The override currently installed for [preset], if any. *)

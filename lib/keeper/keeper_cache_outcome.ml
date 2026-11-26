@@ -5,14 +5,14 @@ module Cost_events = Keeper_hooks_agent_core_cost_events
 open Keeper_cache_outcome_reading
 
 (* The One_hour class asks Anthropic for [ttl = "1h"]. *)
-let one_hour_s = 3600.0
+let one_hour_s = Masc_time_constants.hour
 
 (* Cost rows carry RFC 3339 timestamps without a fraction of a second. A row's
    true end lies within the second after its timestamp, so every start the
    walk derives is known to that second. *)
 let ledger_clock_resolution_s = 1.0
 
-let seconds_per_day = 86_400.0
+let seconds_per_day = Masc_time_constants.day
 let milliseconds_per_second = 1_000.0
 
 (* The earliest start the row allows: its whole-second end minus the measured

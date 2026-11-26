@@ -796,6 +796,13 @@ let message_mention_delivery_to_string = function
   | Mention_accepted -> "accepted"
   | Mention_rejected -> "rejected"
 
+let message_mention_delivery_of_string_opt = function
+  | "passive" -> Some Mention_passive
+  | "pending" -> Some Mention_pending
+  | "accepted" -> Some Mention_accepted
+  | "rejected" -> Some Mention_rejected
+  | _ -> None
+
 (* The kinds of message this codebase writes. [message.msg_type] stays the
    string on disk, so a row written by another build still decodes; read it
    with [message_kind_of_string]. *)

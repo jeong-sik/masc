@@ -167,12 +167,8 @@ let of_fields fields =
   | value when String.equal value Lane_addon_exports_broadcast.changed_event -> Some (Store Lane_addon_exports)
   | "workspace_message_delivery_changed" ->
       let* request_id = text fields "request_id" in
-      let* mention_delivery = match text fields "mention_delivery" with
-        | Some "passive" -> Some Masc_domain.Mention_passive
-        | Some "pending" -> Some Masc_domain.Mention_pending
-        | Some "accepted" -> Some Masc_domain.Mention_accepted
-        | Some "rejected" -> Some Masc_domain.Mention_rejected
-        | Some _ | None -> None in
+      let* raw_delivery = text fields "mention_delivery" in
+      let* mention_delivery = Masc_domain.message_mention_delivery_of_string_opt raw_delivery in
       Some (Workspace_messages {request_id; mention_delivery})
   | value when String.equal value Gate_connector_changed_event.event_type ->
       Option.map (fun connector -> Connector connector) (text fields "connector")
@@ -196,12 +192,7 @@ let of_fields fields =
   | value when String.equal value Keeper_event_queue_changed_event.event_type -> named ~key:"keeper" fields Event_queue
   | "keeper_waiting_inventory_changed" ->
       let* source = text fields "queue_kind" in
-      let* change = match source with
-        | "chat_operation" -> Some Keeper_waiting_inventory_broadcast.Chat_operation
-        | "event_queue" -> Some Keeper_waiting_inventory_broadcast.Event_queue
-        | "approval_count" -> Some Keeper_waiting_inventory_broadcast.Approval_count
-        | "approval_detail" -> Some Keeper_waiting_inventory_broadcast.Approval_detail
-        | _ -> None in
+      let* change = Keeper_waiting_inventory_broadcast.source_of_string_opt source in
       named ~key:"keeper_name" fields (Waiting_inventory change)
   | "keeper_chat_operation_event" ->
       let* keeper = text fields "name" in

@@ -4,6 +4,9 @@
 
 type source = Chat_operation | Event_queue | Approval_count | Approval_detail
 
+val source_to_string : source -> string
+val source_of_string_opt : string -> source option
+
 val install_health_change_observer : (base_path:string -> unit) -> unit
 (** Install the callback for a committed [Approval_count] change. Existing
     queue and Owner projections have their own health observers; approval

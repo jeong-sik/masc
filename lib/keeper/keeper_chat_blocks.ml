@@ -440,30 +440,68 @@ let push_text_fragment acc fragment =
        acc
 ;;
 
-let md_image_re = Re.Pcre.re "!\\[([^\\]]*)\\]\\(([^)]+)\\)" |> Re.compile
+let collect_inline_images fragment =
+  let doc = Cmarkit.Doc.of_string ~strict:false ~locs:true fragment in
+  let defs = Cmarkit.Doc.defs doc in
+  let len = String.length fragment in
+  let inline _folder acc = function
+    | Cmarkit.Inline.Image (link, meta) ->
+      let loc = Cmarkit.Meta.textloc meta in
+      let acc =
+        if Cmarkit.Textloc.is_none loc || Cmarkit.Textloc.is_empty loc
+        then acc
+        else (
+          let url_opt =
+            match Cmarkit.Inline.Link.reference_definition defs link with
+            | Some (Cmarkit.Link_definition.Def (ld, _)) ->
+              Option.map fst (Cmarkit.Link_definition.dest ld)
+            | Some _ | None -> None
+          in
+          match url_opt with
+          | Some url ->
+            let first = Cmarkit.Textloc.first_byte loc in
+            let stop = Int.min len (Cmarkit.Textloc.last_byte loc + 1) in
+            let alt =
+              Cmarkit.Inline.to_plain_text
+                ~break_on_soft:false
+                (Cmarkit.Inline.Link.text link)
+              |> List.map (String.concat "")
+              |> String.concat "\n"
+            in
+            (first, stop, alt, url) :: acc
+          | None -> acc)
+      in
+      Cmarkit.Folder.ret acc
+    | _ -> Cmarkit.Folder.default
+  in
+  Cmarkit.Folder.fold_doc (Cmarkit.Folder.make ~inline ()) [] doc
+  |> List.sort (fun (a, _, _, _) (b, _, _, _) -> Int.compare a b)
+;;
 
 let scan_non_code_fragment acc fragment =
   let len = String.length fragment in
-  let rec scan acc last_index =
-    match Re.exec_opt ~pos:last_index md_image_re fragment with
-    | None ->
-      push_text_fragment acc (String.sub fragment last_index (len - last_index))
-    | Some group ->
-      let start = Re.Group.start group 0 in
-      let stop = Re.Group.stop group 0 in
-      let before = String.sub fragment last_index (start - last_index) in
-      let alt = Re.Group.get group 1 in
-      let url = Re.Group.get group 2 in
-      let acc = push_text_fragment acc before in
-      if is_http_url url then
-        let cap = if String.trim alt = "" then None else Some alt in
-        let acc = Image { src = url; cap; mime_type = None } :: acc in
-        scan acc stop
-      else
-        let fallback = String.sub fragment start (stop - start) in
-        scan (push_text_fragment acc fallback) stop
+  let images = collect_inline_images fragment in
+  let acc, last_index =
+    List.fold_left
+      (fun (acc, last_index) (start, stop, alt, url) ->
+         if start < last_index || stop < start
+         then acc, last_index
+         else (
+           let before = String.sub fragment last_index (start - last_index) in
+           let acc = push_text_fragment acc before in
+           if is_http_url url
+           then (
+             let cap = if String.trim alt = "" then None else Some alt in
+             Image { src = url; cap; mime_type = None } :: acc, stop)
+           else (
+             let fallback = String.sub fragment start (stop - start) in
+             push_text_fragment acc fallback, stop)))
+      (acc, 0)
+      images
   in
-  scan acc 0
+  if last_index < len
+  then push_text_fragment acc (String.sub fragment last_index (len - last_index))
+  else acc
 ;;
 
 let collect_top_level_fenced_blocks text =

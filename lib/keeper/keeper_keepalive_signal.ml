@@ -195,10 +195,10 @@ type adaptive_idle_state =
   ; since_self_wake : idle_activity
   }
 
-let default_stagger_tick_sec = 300.0
-let adaptive_idle_30m_sec = 1800.0
-let adaptive_idle_1h_sec = 3600.0
-let adaptive_idle_2h_sec = 7200.0
+let default_stagger_tick_sec = 5.0 *. Masc_time_constants.minute
+let adaptive_idle_30m_sec = 0.5 *. Masc_time_constants.hour
+let adaptive_idle_1h_sec = Masc_time_constants.hour
+let adaptive_idle_2h_sec = 2.0 *. Masc_time_constants.hour
 
 let inbound_queue_mode_of ~turn_running ~wake_policy ~sender_kind =
   match turn_running, wake_policy, sender_kind with

@@ -1256,14 +1256,14 @@ let make_stream_projection
   in
   let record_native_tool_started ~tool_call_id ~title ~name ~raw_input =
     let observation = native_observation_of_acp ~tool_call_id ~title ~name in
-    let is_new, should_drain =
+    let opened_anonymous_idx, is_new, should_drain =
       Stdlib.Mutex.protect stream_mu (fun () ->
         if !finished
-        then false, false
+        then None, false, false
         else if tool_call_id <> ""
                 && (Hashtbl.mem native_tool_indices tool_call_id
                     || Hashtbl.mem closed_native_tool_ids tool_call_id)
-        then false, false
+        then None, false, false
         else (
           let prefix =
             ensure_message_started_locked ()
@@ -1271,9 +1271,15 @@ let make_stream_projection
             @ close_open_thought_locked ()
           in
           let idx = alloc_index_locked () in
-          if tool_call_id <> ""
-          then Hashtbl.replace native_tool_indices tool_call_id (idx, observation)
-          else anonymous_native_blocks := (idx, observation) :: !anonymous_native_blocks;
+          let anon_idx =
+            if tool_call_id <> ""
+            then (
+              Hashtbl.replace native_tool_indices tool_call_id (idx, observation);
+              None)
+            else (
+              anonymous_native_blocks := (idx, observation) :: !anonymous_native_blocks;
+              Some idx)
+          in
           let drain =
             enqueue_events_locked
               (prefix
@@ -1285,7 +1291,7 @@ let make_stream_projection
                      }
                  ])
           in
-          true, drain))
+          anon_idx, true, drain))
     in
     if is_new
     then (
@@ -1308,7 +1314,8 @@ let make_stream_projection
         ~raw_trace_run
         ~phase:`Started
         observation);
-    drain_events_if_owner should_drain
+    drain_events_if_owner should_drain;
+    opened_anonymous_idx
   in
   (* Records the end of native runs and tells the completion observers. It runs
      outside [stream_mu], like every callback. *)
@@ -1329,14 +1336,36 @@ let make_stream_projection
            on_native_tool_completion)
       runs
   in
+  let rec take_anonymous_block target_idx acc = function
+    | [] -> None, List.rev acc
+    | ((idx, _) as entry) :: rest when idx = target_idx ->
+      Some entry, List.rev_append acc rest
+    | entry :: rest -> take_anonymous_block target_idx (entry :: acc) rest
+  in
   (* Ends the one native run the client reported as finished. A call that is
      not open here, because it already ended or was never opened, ends
-     nothing. *)
-  let finish_native_tool ~tool_call_id completion =
+     nothing. For an anonymous call ([tool_call_id = ""]), only the exact block
+     opened by the same one-shot terminal native event ([?anonymous_idx]) is
+     closed so empty-id MCP or uncorrelated updates never close or guess among
+     unrelated open anonymous blocks. *)
+  let finish_native_tool ?anonymous_idx ~tool_call_id completion =
     let closed, should_drain =
       Stdlib.Mutex.protect stream_mu (fun () ->
-        if !finished || tool_call_id = ""
+        if !finished
         then None, false
+        else if tool_call_id = ""
+        then
+          (match anonymous_idx with
+           | None -> None, false
+           | Some target_idx ->
+             (match take_anonymous_block target_idx [] !anonymous_native_blocks with
+              | None, _ -> None, false
+              | Some (idx, observation), rest ->
+                anonymous_native_blocks := rest;
+                let drain =
+                  enqueue_events_locked [ Agent_core.Types.ContentBlockStop { index = idx } ]
+                in
+                Some (idx, observation), drain))
         else (
           match Hashtbl.find_opt native_tool_indices tool_call_id with
           | None -> None, false
@@ -1481,16 +1510,19 @@ let make_stream_projection
            ~allowed_tool_names
            identity
       then observe_effect_attempted ();
-      (match identity with
-       | Acp.Native_tool { name; _ } ->
-         record_native_tool_started ~tool_call_id ~title ~name ~raw_input
-       | Acp.Mcp_tool _ | Acp.Managed_mcp_schema_read _ -> ());
+      let anonymous_idx =
+        match identity with
+        | Acp.Native_tool { name; _ } ->
+          record_native_tool_started ~tool_call_id ~title ~name ~raw_input
+        | Acp.Mcp_tool _ | Acp.Managed_mcp_schema_read _ -> None
+      in
       (* A fast native tool can arrive in one piece: a single tool_call whose
          status is already terminal, with no tool_call_update behind it. Its
          end is recorded here, or it would stay open until the turn ended. *)
       (match completion_of_acp_tool_status status with
        | None -> ()
-       | Some completion -> finish_native_tool ~tool_call_id completion)
+       | Some completion ->
+         finish_native_tool ?anonymous_idx ~tool_call_id completion)
     | Acp.Tool_call_updated
         { tool_call_id; title; kind = _; status; raw_input; raw_output = _; identity } ->
       observe_activity ();
@@ -1507,22 +1539,25 @@ let make_stream_projection
          (* Uncorrelated update (missing toolCallId, unannounced call, or
             tracking-table eviction) fails closed on the same-turn retry fence. *)
          observe_effect_attempted ());
-      (match identity with
-       | Some (Acp.Native_tool { name; _ }) ->
-         let fallback_title =
-           match title, name with
-           | Some t, _ when String.trim t <> "" -> t
-           | (Some _ | None), Some n when String.trim n <> "" -> n
-           | (Some _ | None), (Some _ | None) -> "tool_call"
-         in
-         record_native_tool_started ~tool_call_id ~title:fallback_title ~name ~raw_input
-       | Some (Acp.Mcp_tool _ | Acp.Managed_mcp_schema_read _) | None -> ());
+      let anonymous_idx =
+        match identity with
+        | Some (Acp.Native_tool { name; _ }) ->
+          let fallback_title =
+            match title, name with
+            | Some t, _ when String.trim t <> "" -> t
+            | (Some _ | None), Some n when String.trim n <> "" -> n
+            | (Some _ | None), (Some _ | None) -> "tool_call"
+          in
+          record_native_tool_started ~tool_call_id ~title:fallback_title ~name ~raw_input
+        | Some (Acp.Mcp_tool _ | Acp.Managed_mcp_schema_read _) | None -> None
+      in
       (match status with
        | None -> ()
        | Some st ->
            (match completion_of_acp_tool_status st with
             | None -> ()
-            | Some completion -> finish_native_tool ~tool_call_id completion))
+            | Some completion ->
+              finish_native_tool ?anonymous_idx ~tool_call_id completion))
     | (Acp.Mode_updated _ | Acp.Config_options_updated _) as meta_ev ->
       on_session_meta_updated meta_ev
   in

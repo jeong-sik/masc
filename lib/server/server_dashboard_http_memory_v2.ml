@@ -1370,9 +1370,7 @@ let world_diff_json ~now ~config ~range =
               ; "op", `String (Legacy_op.wire_name op_kind)
               ]
             :: !revisions;
-         match op_kind with
-         | Legacy_op.Retracted _ -> retracted := entry_json :: !retracted
-         | Legacy_op.Updated _ ->
+         let push_updated () =
            let before =
              Option.value ~default:`Null (Json_util.assoc_member_opt "before" c.payload)
            in
@@ -1390,25 +1388,13 @@ let world_diff_json ~now ~config ~range =
                  ]
                  @ enrichment_fields)
               :: !updated
+         in
+         match op_kind with
+         | Legacy_op.Retracted _ -> retracted := entry_json :: !retracted
+         | Legacy_op.Updated _ -> push_updated ()
          | Legacy_op.Added _ ->
-           if Option.is_some (Json_util.assoc_member_opt "before" c.payload) then (
-             let before =
-               Option.value ~default:`Null (Json_util.assoc_member_opt "before" c.payload)
-             in
-             let after =
-               Option.value ~default:c.payload (Json_util.assoc_member_opt "after" c.payload)
-             in
-             updated
-             := `Assoc
-                  ([ "seq", `Int c.seq
-                   ; "fact_id", `String c.fact_id
-                   ; "summary", `String display_summary
-                   ; "recorded_at", `String c.recorded_at
-                   ; "before", before
-                   ; "after", after
-                   ]
-                   @ enrichment_fields)
-                :: !updated)
+           if Option.is_some (Json_util.assoc_member_opt "before" c.payload)
+           then push_updated ()
            else added := entry_json :: !added)
       selected;
     let total_claims_now =

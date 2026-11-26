@@ -71,10 +71,14 @@ let test_absent_thresholds_are_none () =
 ;;
 
 let test_ratio_out_of_range_fails_closed () =
+  parse_string_expect_error "context-rollover-threshold = 0.0 (non-positive)"
+    (model_toml ~extra_lines:"context-rollover-threshold = 0.0\n");
   parse_string_expect_error "context-rollover-threshold = 1.1 (above 1.0 ceiling)"
     (model_toml ~extra_lines:"context-rollover-threshold = 1.1\n");
   parse_string_expect_error "compaction-keep-ratio = -0.1 (below 0.0 floor)"
-    (model_toml ~extra_lines:"compaction-keep-ratio = -0.1\n")
+    (model_toml ~extra_lines:"compaction-keep-ratio = -0.1\n");
+  parse_string_expect_error "compaction-keep-ratio = 1.0 (keeps 100%, never shrinks)"
+    (model_toml ~extra_lines:"compaction-keep-ratio = 1.0\n")
 ;;
 
 let test_non_number_fails_closed () =

@@ -1,1 +1,0 @@
-include module type of Server_dashboard_http_composite_enrich

@@ -130,18 +130,21 @@ let resolve_read_file_cwd ~(config : Workspace.config) ~(meta : keeper_meta) ~cw
    path under one of the endpoint's declared roots ([allowed_paths], #38593),
    which is already the endpoint's own name. *)
 type read_file_target =
-  | Keeper_tree_file of string
+  | Keeper_tree_file of Keeper_alerting_path.confined_path
   | Declared_endpoint_file of string
 
 let read_file_target_path = function
-  | Keeper_tree_file path | Declared_endpoint_file path -> path
+  | Keeper_tree_file confined -> Keeper_alerting_path.confined_host_path confined
+  | Declared_endpoint_file path -> path
 ;;
 
 (* The host containment check guards a name in the keeper's bookkeeping tree.
    A declared endpoint path is no host name at all: the endpoint account is its
    boundary, as it is for the Execute command that may name the same path. *)
 let check_read_file_target ~config ~meta = function
-  | Keeper_tree_file target -> Keeper_sandbox_containment.check_read_target ~config ~meta ~target
+  | Keeper_tree_file confined ->
+    Keeper_sandbox_containment.check_read_target ~config ~meta
+      ~target:(Keeper_alerting_path.confined_host_path confined)
   | Declared_endpoint_file _ -> Ok ()
 ;;
 
@@ -170,10 +173,10 @@ let resolve_read_file_target
   else (
     let keeper_tree =
       let* cwd_abs = resolve_read_file_cwd ~config ~meta ~cwd in
-      resolve_keeper_read_path_in_cwd ~config ~meta ~host_cwd:cwd_abs ~raw_path
+      confine_keeper_read_path_in_cwd ~config ~meta ~host_cwd:cwd_abs ~raw_path
     in
     match keeper_tree with
-    | Ok path -> Ok (Keeper_tree_file path)
+    | Ok confined -> Ok (Keeper_tree_file confined)
     | Error refusal ->
       (* Only what the keeper's own tree refused may be a path under the
          endpoint's declared roots (#38593). Everything the tree accepts keeps
@@ -204,7 +207,10 @@ let resolve_read_file_target
    or file the caller named is a [Policy_rejection]; a backend or host I/O
    failure is a [Runtime_failure]. *)
 type read_file_attempt =
-  | Read_succeeded of Yojson.Safe.t
+  | Read_succeeded of
+      { payload : Yojson.Safe.t
+      ; returned_lines : int
+      }
   | Read_refused of
       { failure_class : Tool_result.tool_failure_class
       ; payload : string
@@ -391,7 +397,9 @@ let handle_read_file_with_preparation
             ]
         in
         Read_succeeded
-          (`Assoc
+          { returned_lines = slice.returned_lines
+          ; payload =
+          `Assoc
               ([ "ok", `Bool true
                ; "path", `String visible_target
                ; "bytes", `Int (String.length slice.window_content)
@@ -403,7 +411,8 @@ let handle_read_file_with_preparation
                @ optional_fields
                @ [ "via", `String (match prepared_read with
                     | None -> Keeper_sandbox_read_runner.backend_via ~meta
-                    | Some _ -> "owned_capability") ]))
+                    | Some _ -> "owned_capability") ])
+          }
     in
     let refused failure_class message =
       Read_refused
@@ -468,7 +477,16 @@ let handle_read_file_with_preparation
            payload_of_slice ~scan_complete:(String.length body < max_bytes) body))
     in
     (match run_read () with
-     | Read_succeeded json -> Keeper_tool_execution.success_data json
+     | Read_succeeded { payload; returned_lines } ->
+       let execution = Keeper_tool_execution.success_data payload in
+       (match read_target with
+        | Keeper_tree_file confined ->
+          Keeper_tool_execution.with_file_target
+            (Keeper_file_target.read confined ~start_line:window.start_line ~returned_lines)
+            execution
+        (* A declared endpoint root lies outside the Keeper's tree, so the
+           read names no file in the Keeper workspace. *)
+        | Declared_endpoint_file _ -> execution)
      | Read_refused { failure_class; payload } ->
        Keeper_tool_execution.failure ~class_:failure_class payload))
 ;;

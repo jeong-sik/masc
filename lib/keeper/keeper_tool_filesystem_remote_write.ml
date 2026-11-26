@@ -223,6 +223,7 @@ type remote_target =
   | Keeper_tree_target of
       { target : string
       ; remote_path : string
+      ; confined : Keeper_alerting_path.confined_path
       }
   | Declared_root_target of
       { endpoint_path : string
@@ -292,7 +293,7 @@ let handle_content_with_endpoint
                  target
              with
              | Error message -> Error (failure ~class_:Tool_result.Policy_rejection ~target message)
-             | Ok remote_path -> Ok (Keeper_tree_target { target; remote_path }))
+             | Ok remote_path -> Ok (Keeper_tree_target { target; remote_path; confined }))
       in
       (* Only what the keeper's own tree refused may be a path under the
          endpoint's declared roots (#38593), as for Read: a name the tree
@@ -319,7 +320,7 @@ let handle_content_with_endpoint
        | Ok remote_target ->
          let target, remote_path =
            match remote_target with
-           | Keeper_tree_target { target; remote_path } -> target, remote_path
+           | Keeper_tree_target { target; remote_path; _ } -> target, remote_path
            | Declared_root_target { endpoint_path; _ } -> endpoint_path, endpoint_path
          in
          let response_target =
@@ -328,6 +329,16 @@ let handle_content_with_endpoint
            | Keeper_sandbox_remote.Microvm _ | Keeper_sandbox_remote.Docker_exec _ -> target
          in
          let keeper_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
+         (* A declared endpoint root lies outside the Keeper's tree, so its
+            write names no file in the Keeper workspace. *)
+         let with_file_target evidence execution =
+           match remote_target with
+           | Keeper_tree_target { confined; _ } ->
+             Keeper_tool_execution.with_file_target
+               (Keeper_file_target.changed confined evidence)
+               execution
+           | Declared_root_target _ -> execution
+         in
          (* [extra_fields] carries the patch operation fields the Edit output
             schema advertises — the endpoint lane emits them from the same
             apply_patch application the evidence comes from, so an
@@ -369,6 +380,7 @@ let handle_content_with_endpoint
                        ]
                       @ extra_fields))
                in
+               let execution = with_file_target evidence execution in
                (match evidence with
                 | Some evidence -> Keeper_tool_execution.with_file_change_evidence evidence execution
                 | None -> execution)
@@ -458,6 +470,7 @@ let handle_content_with_endpoint
                             ; "occurrences", `Int application.occurrence_count
                             ; "replace_all", `Bool replace_all
                             ; "bytes_written", `Int 0 ])
+                       |> with_file_target None
                      | Ok application ->
                        write ~content_mode:Replace_whole ~mode_label:"patch"
                          ~body:application.updated

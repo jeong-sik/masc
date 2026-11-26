@@ -73,10 +73,14 @@ type content_publication =
        -> (unit, content_write_error) result)
 
 type file_write_attempt =
-  | Write_unchanged of Yojson.Safe.t
+  | Write_unchanged of
+      { payload : Yojson.Safe.t
+      ; file_target : Keeper_file_target.t
+      }
   | Write_succeeded of
       { payload : Yojson.Safe.t
       ; file_change_evidence : Keeper_file_change_evidence.t option
+      ; file_target : Keeper_file_target.t
       }
   | Write_authorized of Keeper_gate.authorization * file_write_attempt
   | Write_deferred of Keeper_gate_deferred_payload.t

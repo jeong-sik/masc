@@ -113,6 +113,15 @@ val resolve_keeper_read_path
   -> raw_path:string
   -> (string, Keeper_alerting_path.path_refusal) result
 
+(** {!resolve_keeper_read_path_in_cwd} that keeps the confined path, for a
+    caller that records which file of the Keeper's tree it read. *)
+val confine_keeper_read_path_in_cwd
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> host_cwd:string
+  -> raw_path:string
+  -> (Keeper_alerting_path.confined_path, Keeper_alerting_path.path_refusal) result
+
 (** {!resolve_keeper_read_path} for a path given together with a cwd.
     [host_cwd] is the host directory {!resolve_keeper_read_path} returned for
     that cwd; a relative [raw_path] reads against it and an absolute one

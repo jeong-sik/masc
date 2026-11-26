@@ -222,7 +222,7 @@ let resolve_keeper_read_path
   | Ok confined -> Ok (Keeper_alerting_path.confined_host_path confined)
 ;;
 
-let resolve_keeper_read_path_in_cwd
+let confine_keeper_read_path_in_cwd
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
       ~(host_cwd : string)
@@ -251,8 +251,13 @@ let resolve_keeper_read_path_in_cwd
       ~raw_path
       ()
   with
-  | Ok confined -> Ok (Keeper_alerting_path.confined_host_path confined)
+  | Ok confined -> Ok confined
   | Error rejection -> user_message_error (in_visible_namespace rejection)
+;;
+
+let resolve_keeper_read_path_in_cwd ~config ~meta ~host_cwd ~raw_path =
+  confine_keeper_read_path_in_cwd ~config ~meta ~host_cwd ~raw_path
+  |> Result.map Keeper_alerting_path.confined_host_path
 ;;
 
 (* Execute resolves its cwd through [host_path_of_keeper_visible_path] and, for

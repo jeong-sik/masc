@@ -281,6 +281,11 @@ let handle_file_write_content_with_outcome
         target
         mode_label
         (String.length (content ()));
+      let file_change_evidence =
+        match mode with
+        | Overwrite -> Some (Keeper_file_change_evidence.written (content ()))
+        | Append | Patch -> None
+      in
       Ok
         (Write_succeeded
            { payload =
@@ -291,10 +296,8 @@ let handle_file_write_content_with_outcome
                       ; "bytes_written", `Int (String.length (content ()))
                       ]
                       @ via_field)
-           ; file_change_evidence =
-               (match mode with
-                | Overwrite -> Some (Keeper_file_change_evidence.written (content ()))
-                | Append | Patch -> None)
+           ; file_change_evidence
+           ; file_target = Keeper_file_target.changed confined file_change_evidence
            })
     in
     match write with
@@ -687,6 +690,12 @@ let handle_file_write_content_with_outcome
                     replace_all
                     occurrence_count
                     (String.length updated);
+                  let file_change_evidence =
+                    match line_occurrences with
+                    | Some occurrences -> Keeper_file_change_evidence.edited occurrences
+                    | None ->
+                      Keeper_file_change_evidence.edited_ranges_omitted ~occurrence_count
+                  in
                   let operation_fields =
                     match operation with
                     | Keeper_tool_patch.Replace { replace_all; _ } ->
@@ -709,14 +718,9 @@ let handle_file_write_content_with_outcome
                                     ; "bytes_written", `Int (String.length updated)
                                     ]
                                   @ via_field)
-                       ; file_change_evidence =
-                           Some
-                             (match line_occurrences with
-                              | Some occurrences ->
-                                Keeper_file_change_evidence.edited occurrences
-                              | None ->
-                                Keeper_file_change_evidence.edited_ranges_omitted
-                                  ~occurrence_count)
+                       ; file_change_evidence = Some file_change_evidence
+                       ; file_target =
+                           Keeper_file_target.changed confined (Some file_change_evidence)
                        }))
                 in
                 match
@@ -749,12 +753,14 @@ let handle_file_write_content_with_outcome
                     ; class_ = Tool_result.Workflow_rejection })
                 | Ok application ->
                 if String.equal current application.updated then
-                  Ok (Write_unchanged (`Assoc
-                    ([ "ok", `Bool true; "changed", `Bool false
-                     ; "path", `String target; "mode", `String "patch"
-                     ; "occurrences", `Int application.occurrence_count
-                     ; "replace_all", `Bool replace_all
-                     ; "bytes_written", `Int 0 ] @ via_field)))
+                  Ok (Write_unchanged
+                    { payload = `Assoc
+                        ([ "ok", `Bool true; "changed", `Bool false
+                         ; "path", `String target; "mode", `String "patch"
+                         ; "occurrences", `Int application.occurrence_count
+                         ; "replace_all", `Bool replace_all
+                         ; "bytes_written", `Int 0 ] @ via_field)
+                    ; file_target = Keeper_file_target.changed confined None })
                 else
                 let* projection =
                   Keeper_alerting_path.patch_then_atomic_replace_effect

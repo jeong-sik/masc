@@ -6,8 +6,10 @@ open Keeper_tool_filesystem_runtime_append
 open Keeper_tool_filesystem_runtime_created_directory_report
 
 let rec file_write_attempt_to_execution ~config = function
-  | Write_unchanged payload -> Keeper_tool_execution.success_data payload
-  | Write_succeeded { payload; file_change_evidence } ->
+  | Write_unchanged { payload; file_target } ->
+    Keeper_tool_execution.success_data payload
+    |> Keeper_tool_execution.with_file_target file_target
+  | Write_succeeded { payload; file_change_evidence; file_target } ->
     let execution = Eio.Cancel.protect (fun () ->
       let result = Tool_result.make_ok ~tool_name:"tool_write_file"
         ~start_time:(Tool_timing.start ()) ~data:payload () in
@@ -20,6 +22,7 @@ let rec file_write_attempt_to_execution ~config = function
           ~effect_disposition:Tool_result.Proven_post_effect
           ~message:"The file change was applied, but its result manifest could not be stored. Read the recorded snapshots or current file; do not repeat the edit."
           payload) in
+    let execution = Keeper_tool_execution.with_file_target file_target execution in
     (match file_change_evidence with
      | Some evidence ->
        Keeper_tool_execution.with_file_change_evidence evidence execution

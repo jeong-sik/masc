@@ -15,6 +15,8 @@ export interface ReleaseSummary {
   readonly localTime: string | null
   readonly isSoon: boolean
   readonly isEstimated: boolean
+  /** The release time is behind the clock. Whether the rest is lifted is known at the next read. */
+  readonly hasPassed: boolean
 }
 
 export type RestingRuntime = RuntimeResolution & {
@@ -130,14 +132,14 @@ export function formatReleaseSummary(
 ): ReleaseSummary {
   const isEstimated = !resetStated
   if (!isValidUnix(untilUnix)) {
-    return { countdown: '미정', localTime: null, isSoon: false, isEstimated }
+    return { countdown: '미정', localTime: null, isSoon: false, isEstimated, hasPassed: false }
   }
   const effectiveNow = isValidUnix(nowUnix) ? nowUnix : Date.now() / 1000
   const rem = untilUnix - effectiveNow
   const localTime = formatLocalReleaseTime(untilUnix, effectiveNow)
 
   if (rem <= 0) {
-    return { countdown: '해제됨', localTime, isSoon: false, isEstimated }
+    return { countdown: '해제됨', localTime, isSoon: false, isEstimated, hasPassed: true }
   }
 
   const isSoon = rem > 0 && rem <= 1800
@@ -156,7 +158,15 @@ export function formatReleaseSummary(
     countdown = hours > 0 ? `${days}일 ${hours}시간 후` : `${days}일 후`
   }
 
-  return { countdown, localTime, isSoon, isEstimated }
+  return { countdown, localTime, isSoon, isEstimated, hasPassed: false }
+}
+
+/** The paused panel's words for its soonest release. Next to its label the
+ *  word for a passed time read "가장 빠른 해제 해제됨": one thing said twice,
+ *  and more than the tab knows before it reads again. */
+export function soonestReleaseWords(release: ReleaseSummary): string {
+  const what = release.hasPassed ? '가장 빠른 해제 시각 지남' : `가장 빠른 해제 ${release.countdown}`
+  return `${what}${release.localTime ? ` (${release.localTime})` : ''}${release.isEstimated ? ' · 예상' : ''}`
 }
 
 /** The longest a tab that shows a rest goes without looking at the clock

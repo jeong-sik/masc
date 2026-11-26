@@ -54,6 +54,7 @@ import {
   quotaRestCauseMeta,
   restClockDelayMs,
   someRestIsOver,
+  soonestReleaseWords,
   stripProviderPrefix,
   type QuotaRestCauseFilter,
   type QuotaRestSortKey,
@@ -1235,9 +1236,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
                     `
                   : html`
                       <span class="mono tnum" style=${{ fontSize: 'var(--fs-12)' }}>
-                        일시 중지 ${pausedSummary.restingCount}/${pausedSummary.totalRegistered} (${pausedSummary.groupCount}개 계정) · 가용 ${pausedSummary.availableCount}${globalSoonestRelease
-                          ? ` · 가장 빠른 해제 ${globalSoonestRelease.countdown}${globalSoonestRelease.localTime ? ` (${globalSoonestRelease.localTime})` : ''}${globalSoonestRelease.isEstimated ? ' · 예상' : ''}`
-                          : ''}
+                        일시 중지 ${pausedSummary.restingCount}/${pausedSummary.totalRegistered} (${pausedSummary.groupCount}개 계정) · 가용 ${pausedSummary.availableCount}${globalSoonestRelease ? ` · ${soonestReleaseWords(globalSoonestRelease)}` : ''}
                       </span>
                     `}
               </span>
@@ -1247,7 +1246,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
               <div style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap', flexShrink: 0 }}>
                 ${globalSoonestRelease && html`
                   <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: globalSoonestRelease.isSoon ? 'var(--ok-fg)' : 'var(--fg-2)' }}>
-                    가장 빠른 해제 ${globalSoonestRelease.countdown}${globalSoonestRelease.localTime ? ` (${globalSoonestRelease.localTime})` : ''}${globalSoonestRelease.isEstimated ? ' · 예상' : ''}
+                    ${soonestReleaseWords(globalSoonestRelease)}
                   </span>
                 `}
                 <${PopoverMenu}

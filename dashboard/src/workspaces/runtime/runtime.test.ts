@@ -28,6 +28,7 @@ import {
   quotaRestCauseMeta,
   restClockDelayMs,
   someRestIsOver,
+  soonestReleaseWords,
   stripProviderPrefix,
 } from './quota-rest-groups'
 import {
@@ -2463,7 +2464,26 @@ describe('workspaces/runtime', () => {
     // The card of the rest that is over is still among them, and says nothing of a pause.
     expect(cards.some((card) => card.textContent?.includes('Over Plan'))).toBe(true)
     expect(restLineOf('Over Plan')).toBeNull()
-    expect(container.querySelector('[data-testid="paused-runtimes-panel"]')?.textContent).toContain('해제됨')
+    // The open panel says of that rest, next to its label, that the time has passed,
+    // and says it once. The rest's own row keeps its word.
+    const panel = container.querySelector('[data-testid="paused-runtimes-panel"]')?.textContent ?? ''
+    expect(panel).toContain('가장 빠른 해제 시각 지남')
+    expect(panel).not.toContain('가장 빠른 해제 해제됨')
+    expect(panel).toContain('해제됨')
+  })
+
+  it('says a passed soonest release once, as a time that has passed', () => {
+    const now = new Date(2026, 10, 26, 10, 0, 0).getTime() / 1000
+    const ahead = formatReleaseSummary(now + 300, false, now)
+    expect(ahead.hasPassed).toBe(false)
+    expect(soonestReleaseWords(ahead)).toBe('가장 빠른 해제 5분 후 (오늘 10:05) · 예상')
+    const passed = formatReleaseSummary(now - 60, true, now)
+    expect(passed.hasPassed).toBe(true)
+    expect(soonestReleaseWords(passed)).toBe('가장 빠른 해제 시각 지남 (오늘 09:59)')
+    // No time stated: nothing has passed.
+    const unknown = formatReleaseSummary(null, true, now)
+    expect(unknown.hasPassed).toBe(false)
+    expect(soonestReleaseWords(unknown)).toBe('가장 빠른 해제 미정')
   })
 
   it('looks at the clock again when a rest is over, and no later than the longest wait', () => {

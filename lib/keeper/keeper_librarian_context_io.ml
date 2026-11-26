@@ -18,6 +18,7 @@ let execution_basis ~base_path ~keeper_name =
       | Owner_projection {stopping = true; _}) -> None
 
 let board_source_withheld = "Board queue source withheld pending authorized routing/readership"
+let undecodable_source_withheld = "Retained event source no longer decodes"
 
 let capture ~base_path ~keepers_dir ~keeper_name =
   let before = execution_basis ~base_path ~keeper_name in
@@ -49,8 +50,12 @@ let capture ~base_path ~keepers_dir ~keeper_name =
           (function
             | Readership.Board_source_unreadable ->
               withheld_reasons := board_source_withheld :: !withheld_reasons
+            (* The queue and chat stores that say what is pending were read.
+               This is one stored record the decoder rejects, so it stays
+               hidden and must not stop the commit from dropping settled
+               sources, itself included. *)
             | Readership.Event_source_undecodable ->
-              failures := "Retained event source unavailable" :: !failures)
+              withheld_reasons := undecodable_source_withheld :: !withheld_reasons)
           withheld;
         shown) snapshot
     | Error detail -> failures := ("previous context: " ^ detail) :: !failures; None in

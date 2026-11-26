@@ -603,11 +603,78 @@ let test_capture_rechecks_direct_readers_and_retained_context () = with_store @@
       check string "identity changes do not erase retained evidence" before (Fs_compat.load_file path)))
     [author; reader; outsider]
 
+(* A Board signal stored before its payload required [audience] no longer
+   decodes. It stays hidden, and it must not stop settled history from leaving
+   the snapshot. *)
+let test_undecodable_retained_record_does_not_stop_settlement () = with_store @@ fun base_path ->
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:None : string);
+  Fun.protect ~finally:(fun () -> Keeper_registry.For_testing.clear ()) @@ fun () ->
+  let keeper_name = "undecodable-record" in
+  let meta = Masc_test_deps.meta_of_json_fixture
+      (`Assoc ["name", `String keeper_name; "trace_id", `String ("trace-" ^ keeper_name)]) |> ok in
+  Keeper_meta_store.replace_snapshot config meta |> ok;
+  ignore (Keeper_registry.For_testing.register ~base_path keeper_name meta);
+  let chat_path = Keeper_chat_operation_store.path_for_keeper
+      ~keepers_runtime_dir:(Common.keepers_runtime_dir_of_base ~base_path) ~keeper_name in
+  Fs_compat.mkdir_p (Filename.dirname chat_path);
+  (match Keeper_chat_operation_store.open_or_create ~path:chat_path with
+   | Ok store -> ignore (Keeper_chat_operation_store.close store)
+   | Error error -> fail (Keeper_chat_operation_store.error_to_string error));
+  let event post_id payload : Keeper_event_queue.stimulus =
+    {post_id; urgency = Normal; arrived_at = 0.; payload} in
+  Keeper_event_queue_persistence.persist ~base_path ~keeper_name
+    (Keeper_event_queue.enqueue Keeper_event_queue.empty (event "pending" Bootstrap));
+  let pending =
+    match Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name |> ok with
+    | [selection] -> Context.source_of_event selection
+    | selections -> fail (Printf.sprintf "expected one pending event, got %d" (List.length selections)) in
+  let stored_event reference stimulus : Context.source =
+    {reference; content = Keeper_event_queue.stimulus_to_yojson stimulus} in
+  let settled = stored_event "event:settled:1" (event "settled" Bootstrap) in
+  let board_signal : Keeper_event_queue.board_stimulus =
+    {kind = Post_created; author = "author"; title = "title"; content = "body";
+     hearth = None; updated_at = Some 0.; audience = Audience_targets [keeper_name]} in
+  let unreadable =
+    let record = stored_event "event:unreadable:1" (event "unreadable" (Board_signal board_signal)) in
+    let without_audience = function
+      | "payload", `Assoc payload -> "payload", `Assoc (List.remove_assoc "audience" payload)
+      | field -> field in
+    match record.content with
+    | `Assoc fields -> {record with content = `Assoc (List.map without_audience fields)}
+    | _ -> fail "a stored event is a JSON object" in
+  check bool "the fixture record is one the decoder rejects" true
+    (match Context.stimulus_of_source unreadable with Some (Error _) -> true | Some (Ok _) | None -> false);
+  let keepers_dir = Filename.concat base_path "contexts" in
+  ignore (ok (Context.commit ~keepers_dir ~keeper_id:keeper_name ~expected_version:None
+      ~sources:[unreadable; settled; pending]
+      [pocket [unreadable.reference] "UNREADABLE" [];
+       pocket [settled.reference] "SETTLED" [];
+       pocket [pending.reference] "PENDING" []]));
+  let captured = Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name in
+  let references sources = List.map (fun (s : Context.source) -> s.reference) sources in
+  let contexts (snapshot : Context.snapshot) =
+    List.map (fun (p : Context.pocket) -> p.context) snapshot.pockets in
+  check (list string) "a stored record that does not decode is not an unread store" []
+    captured.unavailable;
+  check (list string) "only the pending event is offered" [pending.reference] (references captured.sources);
+  let previous = Option.get captured.previous in
+  check (list string) "the record that does not decode is not shown" ["SETTLED"; "PENDING"]
+    (contexts previous);
+  (* The runtime passes [observed_sources] only because [unavailable] is empty. *)
+  let committed = ok (Context.commit ~observed_sources:captured.sources ~keepers_dir
+      ~keeper_id:keeper_name ~expected_version:(Some (Context.version previous))
+      ~sources:captured.sources [pocket [pending.reference] "ORGANIZED" []]) in
+  check (list string) "settled and unreadable history leaves" [pending.reference]
+    (references committed.sources);
+  check (list string) "one context remains" ["ORGANIZED"] (contexts committed)
+
 let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run "Librarian working contexts"
   ["scenarios", [
     test_case "capture rechecks Direct readership and retained mixed contexts" `Quick test_capture_rechecks_direct_readers_and_retained_context;
+    test_case "an undecodable retained record does not stop settlement" `Quick test_undecodable_retained_record_does_not_stop_settlement;
     test_case "source reassignment preserves distinct context identities" `Quick test_source_reassignment_does_not_collide_with_merged_identity;
     test_case "split source does not collide with an untouched context" `Quick test_split_source_does_not_collide_with_untouched_context;
     test_case "exact source retraction is atomic and preserves unaffected pockets" `Quick test_exact_source_retraction_preserves_and_reconsiders;

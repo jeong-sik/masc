@@ -23,9 +23,10 @@ type input =
   ; previous : snapshot option
   ; unavailable : string list
   ; withheld : string list
-      (** Readership/policy-withheld sources (e.g. pending Board routing or
-          unauthorized Direct access). Unlike [unavailable] store read
-          failures, withheld sources never stall working-context commits or
+      (** Sources that were read but are not shown: Board policy (pending
+          routing or unauthorized Direct access), or a stored event record
+          that no longer decodes. Unlike [unavailable] store read failures,
+          withheld sources never stall working-context commits or
           empty-context checks. *)
   ; execution_basis : string option
   }

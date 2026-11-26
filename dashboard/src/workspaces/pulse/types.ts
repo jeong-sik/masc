@@ -106,19 +106,65 @@ export interface PulseKeeperCostRow {
   readonly sample_count: number
 }
 
+/**
+ * One reading of a provider usage window, as `utilization_fields`
+ * (lib/runtime/runtime_provider_usage_window.ml) writes it. A unit the
+ * server does not write is not decoded into one of these.
+ */
+export type PulseUsageUtilization =
+  | { readonly unit: 'fraction'; readonly value: number }
+  | { readonly unit: 'percent'; readonly value: number }
+  | { readonly unit: 'usd'; readonly value: number; readonly limit: number | null }
+  | { readonly unit: 'credit_balance'; readonly remaining: number }
+  | { readonly unit: 'credit_unlimited' }
+
 export interface PulseProviderUsagePoint {
   readonly scope_id: string
   readonly source: string
   readonly kind: string
-  readonly unit: string
-  readonly value: number | null
-  readonly limit: number | null
-  readonly remaining: number | null
+  readonly limit_id: string | null
+  /** Unix seconds the provider reported this reading. */
+  readonly observed_at: number
+  /** Unix seconds the window resets; `null` when the provider did not say. */
+  readonly resets_at: number | null
+  readonly utilization: PulseUsageUtilization
+}
+
+export interface PulseReportedNoWindows {
+  readonly scope_id: string
+  readonly observed_at: number
 }
 
 export type PulseProviderUsageSnapshot =
   | { readonly state: 'unavailable'; readonly reason: string }
-  | { readonly state: 'available'; readonly days: number; readonly points: readonly PulseProviderUsagePoint[] }
+  | {
+      readonly state: 'available'
+      readonly days: number
+      readonly points: readonly PulseProviderUsagePoint[]
+      /** Scope-days whose latest report stated no window at all. */
+      readonly reported_no_windows: readonly PulseReportedNoWindows[]
+      /** Points the decoder could not read (missing identity, time, or unit). */
+      readonly undecodable_points: number
+    }
+
+/** Whether a provider window refuses calls at `now`, read from its latest reading. */
+export type PulseQuotaWindowStanding =
+  | { readonly kind: 'exhausted'; readonly resetsAt: number }
+  | { readonly kind: 'spent_reset_unknown'; readonly observedAt: number }
+  | { readonly kind: 'reset_since_report'; readonly resetsAt: number }
+  | { readonly kind: 'room_left' }
+  | { readonly kind: 'no_limit' }
+
+export interface PulseQuotaSummary {
+  /** Spent windows whose reset is still ahead of now. */
+  readonly exhausted: number
+  /** The earliest reset among {@link exhausted} windows. */
+  readonly nextReturnAt: number | null
+  /** Spent windows whose provider stated no reset time. */
+  readonly spentResetUnknown: number
+  /** Fraction/percent windows with room, and unlimited credit. */
+  readonly subscription: number
+}
 
 export interface PulseApprovalItem {
   readonly approval_id: string
@@ -126,7 +172,11 @@ export interface PulseApprovalItem {
   readonly tool_call_id: string
   readonly tool: string
   readonly question: string
+  /** Why the call was held for approval; `null` when the server sent none. */
+  readonly because: string | null
   readonly asked_at: number | null
+  /** Seconds after `asked_at` the wait times out; `null` when not sent. */
+  readonly timeout_sec: number | null
 }
 
 export interface PulseAskItem {
@@ -140,15 +190,32 @@ export interface PulseAskItem {
 export interface PulseGoalSummary {
   readonly id: string
   readonly title: string
-  readonly phase: string
+  /** `null` when the server sent no phase: shown as unknown, never guessed. */
+  readonly phase: string | null
   readonly task_count: number
   readonly task_done_count: number
   readonly awaiting_verification_count: number
+  /** Pending approvals on this goal and every sub-goal below it. */
   readonly pending_approval_count: number
+  readonly sub_goal_count: number
   readonly verification_status: string | null
   readonly linked_keeper_names: readonly string[]
   readonly updated_at: string | null
 }
+
+export type PulseGoalsSnapshot =
+  | {
+      readonly state: 'ready'
+      readonly goals: readonly PulseGoalSummary[]
+      /** `summary.pending_approvals`; `null` when the summary did not carry it. */
+      readonly pending_approval_total: number | null
+    }
+  | {
+      /** The pending-approval queue could not be read, so the goal tree was not built. */
+      readonly state: 'approval_queue_unavailable'
+      readonly title: string
+      readonly detail: string
+    }
 
 export interface PulseBoardPost {
   readonly id: string
@@ -191,12 +258,11 @@ export type SpendClassification =
   | {
       readonly kind: 'reported'
       readonly usd: number
-      readonly subscriptionCount: number
-      readonly exhaustedCount: number
+      readonly quota: PulseQuotaSummary
       readonly unreportedCount: number
     }
-  | { readonly kind: 'subscription_zero'; readonly subscriptionCount: number; readonly exhaustedCount: number }
-  | { readonly kind: 'exhausted_zero'; readonly exhaustedCount: number }
+  | { readonly kind: 'subscription_zero'; readonly quota: PulseQuotaSummary }
+  | { readonly kind: 'exhausted_zero'; readonly quota: PulseQuotaSummary }
   | { readonly kind: 'unreported'; readonly reason: string }
   | { readonly kind: 'absent' }
 
@@ -220,6 +286,8 @@ export interface PulseAttentionItem {
   readonly title: string
   readonly detail: string
   readonly ageSec: number | null
+  /** Seconds until the wait times out (negative once past); `null` when unknown. */
+  readonly expiresInSec: number | null
   readonly route: string
   readonly raw: unknown
 }

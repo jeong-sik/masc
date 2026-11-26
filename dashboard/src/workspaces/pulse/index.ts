@@ -36,6 +36,7 @@ import {
   buildCompanyFleetGroups,
   buildPulseKpis,
   buildTeamHandoffPulse,
+  formatApprovalExpiry,
   formatCompactCount,
   formatMilliCandle,
   formatRelativeAge,
@@ -230,8 +231,9 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
         costs: bundle.costs,
         usage: bundle.usage,
         window: win,
+        nowSec,
       }),
-    [bundle.shell, bundle.keepers, bundle.costs, bundle.usage, win],
+    [bundle.shell, bundle.keepers, bundle.costs, bundle.usage, win, nowSec],
   )
 
   const keepersList: readonly PulseKeeperRow[] = bundle.keepers.kind === 'value' ? bundle.keepers.data : []
@@ -269,15 +271,17 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
     [bundle.board, keepersList],
   )
 
+  const goalsSnapshot = bundle.goals.kind === 'value' ? bundle.goals.data : null
   const activeGoals = useMemo<readonly PulseGoalSummary[]>(() => {
-    if (bundle.goals.kind !== 'value') return []
-    return bundle.goals.data
+    if (goalsSnapshot === null || goalsSnapshot.state !== 'ready') return []
+    return goalsSnapshot.goals
       .filter((g) => {
-        const p = g.phase.toLowerCase()
+        // A goal without a phase is not known to be finished, so it stays listed.
+        const p = g.phase?.toLowerCase() ?? null
         return p !== 'completed' && p !== 'dropped'
       })
       .slice(0, 6)
-  }, [bundle.goals])
+  }, [goalsSnapshot])
 
   const candleDigest = bundle.candle.kind === 'value' ? bundle.candle.data : null
   const showCandleBalance =
@@ -608,6 +612,11 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
                         </div>
                         <div class="pulse-attn-actions">
                           <span class="pulse-pill">${formatRelativeAge(item.ageSec)}</span>
+                          ${item.expiresInSec !== null && html`
+                            <span class="pulse-pill" data-tone=${item.expiresInSec > 0 ? 'warn' : 'bad'}>
+                              ${formatApprovalExpiry(item.expiresInSec)}
+                            </span>
+                          `}
                           <button
                             type="button"
                             class="btn-ghost"
@@ -654,14 +663,28 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
                 <h2>Active Goals</h2>
                 <span class="pulse-pill" data-tone="warn" data-stale=${bundle.goals.kind === 'value' && bundle.goals.stale ? 'true' : 'false'} aria-hidden=${bundle.goals.kind === 'value' && bundle.goals.stale ? undefined : 'true'}>지연됨</span>
               </div>
-              <button type="button" class="btn-ghost" onClick=${() => props.onNavigate('/work/goals')}>
-                Goals →
-              </button>
+              <div class="pulse-header-meta">
+                ${goalsSnapshot?.state === 'approval_queue_unavailable' && html`
+                  <span class="pulse-pill" data-tone="bad">승인 대기열 읽기 실패</span>
+                `}
+                ${goalsSnapshot?.state === 'ready' && goalsSnapshot.pending_approval_total !== null && html`
+                  <span class="pulse-pill" data-tone=${goalsSnapshot.pending_approval_total > 0 ? 'warn' : 'default'}>
+                    승인 대기 ${goalsSnapshot.pending_approval_total}
+                  </span>
+                `}
+                <button type="button" class="btn-ghost" onClick=${() => props.onNavigate('/work/goals')}>
+                  Goals →
+                </button>
+              </div>
             </div>
             ${bundle.goals.kind === 'loading'
               ? html`<div class="pulse-empty">Goal 목록 불러오는 중…</div>`
               : bundle.goals.kind === 'failed'
                 ? html`<div class="ap-error" role="alert">Goal 조회 실패: ${bundle.goals.error.message}</div>`
+                : goalsSnapshot?.state === 'approval_queue_unavailable'
+                  ? html`<div class="ap-error" role="alert">승인 대기열을 읽지 못해 Goal 목록과 승인 수를 확인할 수 없습니다: ${goalsSnapshot.title} (${goalsSnapshot.detail})</div>`
+                : goalsSnapshot === null
+                  ? html`<div class="pulse-empty">${formatObserved(bundle.goals)}</div>`
                 : activeGoals.length === 0
                   ? html`<div class="pulse-empty">활성 Goal 없음</div>`
                   : html`
@@ -675,12 +698,17 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
                         >
                           <span class="pulse-goal-title" title=${g.title}>${g.title}</span>
                           <div class="pulse-goal-badges">
-                            <span class="pulse-pill" data-tone=${goalPhaseTone(g.phase)} title=${g.phase}>
-                              ${g.phase}
+                            <span class="pulse-pill" data-tone=${g.phase === null ? 'default' : goalPhaseTone(g.phase)} title=${g.phase ?? '서버가 phase 를 보내지 않음'}>
+                              ${g.phase ?? 'phase 미확인'}
                             </span>
                             <span class="pulse-pill">
                               ${g.task_done_count}/${g.task_count}
                             </span>
+                            ${g.pending_approval_count > 0 && html`
+                              <span class="pulse-pill" data-tone="warn" title=${g.sub_goal_count > 0 ? `하위 Goal ${g.sub_goal_count}개 포함` : '이 Goal 의 승인 대기'}>
+                                승인 ${g.pending_approval_count}
+                              </span>
+                            `}
                             ${g.awaiting_verification_count > 0 && html`
                               <span class="pulse-pill" data-tone="warn">
                                 검증 ${g.awaiting_verification_count}

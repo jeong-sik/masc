@@ -13,6 +13,8 @@ import { ok, type Result } from '../../lib/result'
 import { authSession } from '../../core/auth'
 import { apiGet, apiGetV2, type ApiError } from '../../core/transport'
 import { decodeToolApprovalsWire, isOpenKeeperAskRow } from '../../api/hitl-decoders'
+import { GoalSourceUnavailableError, goalSourceUnavailable } from '../../api/dashboard-goals'
+import { decodeKeeperApprovalQueueState } from '../../lib/gate-observation-state'
 import { decodeKeeperLaneFailures, decodeKeeperPathRest } from '../../api/keeper-diagnostics'
 import { observedAbsent, resourceCache, type FetchReason, type Observed } from '../../core/resource-cache'
 import { timeWindowProviderDays, type TimeWindow } from '../../core/time-window'
@@ -22,15 +24,18 @@ import type {
   PulseBoardPost,
   PulseCandleDigest,
   PulseGoalSummary,
+  PulseGoalsSnapshot,
   PulseKeeperCostRow,
   PulseKeeperLaneFailure,
   PulseKeeperPathRest,
   PulseKeeperRow,
   PulseProviderUsagePoint,
   PulseProviderUsageSnapshot,
+  PulseReportedNoWindows,
   PulseShellGroup,
   PulseShellSnapshot,
   PulseTurnSlot,
+  PulseUsageUtilization,
   PulseWorldMemoryDigest,
 } from './types'
 
@@ -201,34 +206,87 @@ function decodeCosts(raw: unknown): PulseKeeperCostRow[] {
   return out
 }
 
-function decodeProviderUsage(raw: unknown): PulseProviderUsageSnapshot {
+function decodeUsageUtilization(pt: Record<string, unknown>): PulseUsageUtilization | null {
+  switch (pt.unit) {
+    case 'fraction': {
+      const value = asNum(pt.value)
+      return value === null ? null : { unit: 'fraction', value }
+    }
+    case 'percent': {
+      const value = asNum(pt.value)
+      return value === null ? null : { unit: 'percent', value }
+    }
+    case 'usd': {
+      const value = asNum(pt.value)
+      if (value === null) return null
+      if (pt.limit !== null && pt.limit !== undefined && asNum(pt.limit) === null) return null
+      return { unit: 'usd', value, limit: asNum(pt.limit) }
+    }
+    case 'credit_balance': {
+      const remaining = asNum(pt.remaining)
+      return remaining === null ? null : { unit: 'credit_balance', remaining }
+    }
+    case 'credit_unlimited':
+      return { unit: 'credit_unlimited' }
+    default:
+      return null
+  }
+}
+
+function decodeProviderUsagePoint(pt: unknown): PulseProviderUsagePoint | null {
+  if (!isRecord(pt)) return null
+  const scopeId = asStr(pt.scope_id)
+  const source = asStr(pt.source)
+  const kind = asStr(pt.kind)
+  const observedAt = asNum(pt.observed_at)
+  const utilization = decodeUsageUtilization(pt)
+  if (!scopeId || !source || !kind || observedAt === null || !utilization) return null
+  // `resets_at` is optional on the wire; a present non-number is a broken row,
+  // not an unknown reset.
+  if (pt.resets_at !== null && pt.resets_at !== undefined && asNum(pt.resets_at) === null) return null
+  return {
+    scope_id: scopeId,
+    source,
+    kind,
+    limit_id: asStr(pt.limit_id),
+    observed_at: observedAt,
+    resets_at: asNum(pt.resets_at),
+    utilization,
+  }
+}
+
+export function decodeProviderUsage(raw: unknown): PulseProviderUsageSnapshot {
   if (!isRecord(raw)) return { state: 'unavailable', reason: 'invalid_provider_usage' }
   if (raw.state === 'unavailable') {
     return { state: 'unavailable', reason: asStr(raw.reason) ?? 'provider usage unavailable' }
   }
+  if (!Array.isArray(raw.points)) return { state: 'unavailable', reason: 'provider usage response has no points' }
   const points: PulseProviderUsagePoint[] = []
-  if (Array.isArray(raw.points)) {
-    for (const pt of raw.points) {
-      if (!isRecord(pt)) continue
-      points.push({
-        scope_id: asStr(pt.scope_id) ?? 'unknown',
-        source: asStr(pt.source) ?? '',
-        kind: asStr(pt.kind) ?? '',
-        unit: asStr(pt.unit) ?? '',
-        value: asNum(pt.value),
-        limit: asNum(pt.limit),
-        remaining: asNum(pt.remaining),
-      })
+  let undecodable = 0
+  for (const pt of raw.points) {
+    const point = decodeProviderUsagePoint(pt)
+    if (point) points.push(point)
+    else undecodable += 1
+  }
+  const reportedNoWindows: PulseReportedNoWindows[] = []
+  if (Array.isArray(raw.reported_no_windows)) {
+    for (const row of raw.reported_no_windows) {
+      if (!isRecord(row)) continue
+      const scopeId = asStr(row.scope_id)
+      const observedAt = asNum(row.observed_at)
+      if (scopeId && observedAt !== null) reportedNoWindows.push({ scope_id: scopeId, observed_at: observedAt })
     }
   }
   return {
     state: 'available',
     days: asNum(raw.days) ?? 1,
     points,
+    reported_no_windows: reportedNoWindows,
+    undecodable_points: undecodable,
   }
 }
 
-function decodeApprovals(raw: unknown): PulseApprovalItem[] {
+export function decodeApprovals(raw: unknown): PulseApprovalItem[] {
   const out: PulseApprovalItem[] = []
   for (const item of decodeToolApprovalsWire(raw)) {
     if (!item.hasExplicitApprovalId) continue
@@ -238,7 +296,9 @@ function decodeApprovals(raw: unknown): PulseApprovalItem[] {
       tool_call_id: item.toolCallId,
       tool: item.tool,
       question: item.question,
+      because: item.because === '' ? null : item.because,
       asked_at: item.askedAt,
+      timeout_sec: item.timeoutSec,
     })
   }
   return out
@@ -269,34 +329,63 @@ function decodeAsks(raw: unknown): PulseAskItem[] {
   return out
 }
 
-function decodeGoals(raw: unknown): PulseGoalSummary[] {
-  const rec = isRecord(raw) ? raw : {}
-  const list = Array.isArray(rec.tree) ? rec.tree : Array.isArray(rec.goals) ? rec.goals : []
-  const out: PulseGoalSummary[] = []
-  for (const g of list) {
-    if (!isRecord(g)) continue
-    const id = asStr(g.id)
-    const title = asStr(g.title)
-    if (!id || !title) continue
-    const taskSummary = isRecord(g.task_summary) ? g.task_summary : null
-    const verification = isRecord(g.verification) ? g.verification : null
-    const linkedKeepers = Array.isArray(g.linked_keeper_names)
-      ? g.linked_keeper_names.filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
-      : []
-    out.push({
-      id,
-      title,
-      phase: asStr(g.phase) ?? 'Executing',
-      task_count: asNum(g.task_count) ?? asNum(taskSummary?.total) ?? 0,
-      task_done_count: asNum(g.task_done_count) ?? asNum(taskSummary?.done) ?? 0,
-      awaiting_verification_count: asNum(taskSummary?.awaiting_verification) ?? 0,
-      pending_approval_count: asNum(g.pending_approval_count) ?? 0,
-      verification_status: verification ? (asStr(verification.status) ?? asStr(verification.verdict)) : null,
-      linked_keeper_names: linkedKeepers,
-      updated_at: asStr(g.updated_at),
-    })
+function decodeGoalNode(g: unknown): PulseGoalSummary | null {
+  if (!isRecord(g)) return null
+  const id = asStr(g.id)
+  const title = asStr(g.title)
+  if (!id || !title) return null
+  const taskSummary = isRecord(g.task_summary) ? g.task_summary : null
+  const verification = isRecord(g.verification) ? g.verification : null
+  const linkedKeepers = Array.isArray(g.linked_keeper_names)
+    ? g.linked_keeper_names.filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+    : []
+  // The server counts only a goal's own approvals (`direct_pending_approvals`
+  // in dashboard_goals_types_builder.ml), so a parent row adds its sub-goals'.
+  const children = Array.isArray(g.children) ? g.children : []
+  let subtreePending = asNum(g.pending_approval_count) ?? 0
+  let subGoalCount = 0
+  for (const child of children) {
+    const decoded = decodeGoalNode(child)
+    if (!decoded) continue
+    subGoalCount += 1 + decoded.sub_goal_count
+    subtreePending += decoded.pending_approval_count
   }
-  return out
+  return {
+    id,
+    title,
+    phase: asStr(g.phase),
+    task_count: asNum(g.task_count) ?? asNum(taskSummary?.total) ?? 0,
+    task_done_count: asNum(g.task_done_count) ?? asNum(taskSummary?.done) ?? 0,
+    awaiting_verification_count: asNum(taskSummary?.awaiting_verification) ?? 0,
+    pending_approval_count: subtreePending,
+    sub_goal_count: subGoalCount,
+    verification_status: verification ? (asStr(verification.status) ?? asStr(verification.verdict)) : null,
+    linked_keeper_names: linkedKeepers,
+    updated_at: asStr(g.updated_at),
+  }
+}
+
+export function decodeGoals(raw: unknown): PulseGoalsSnapshot {
+  const unavailable = goalSourceUnavailable(raw)
+  if (unavailable) throw new GoalSourceUnavailableError(unavailable)
+  if (!isRecord(raw)) throw new Error('Goal 응답 형식이 잘못되었습니다.')
+  const queue = decodeKeeperApprovalQueueState(raw.approval_queue_state)
+  if (!queue) throw new Error('Goal 응답의 approval_queue_state 를 읽지 못했습니다.')
+  if (queue.state === 'unavailable') {
+    return { state: 'approval_queue_unavailable', title: queue.title, detail: queue.operator_detail }
+  }
+  if (!Array.isArray(raw.tree)) throw new Error('Goal 응답에서 목표 목록을 확인할 수 없습니다.')
+  const goals: PulseGoalSummary[] = []
+  for (const g of raw.tree) {
+    const decoded = decodeGoalNode(g)
+    if (decoded) goals.push(decoded)
+  }
+  const summary = isRecord(raw.summary) ? raw.summary : null
+  return {
+    state: 'ready',
+    goals,
+    pending_approval_total: summary ? asNum(summary.pending_approvals) : null,
+  }
 }
 
 function decodeBoardPosts(raw: unknown): PulseBoardPost[] {
@@ -402,7 +491,7 @@ export interface PulseLoadBundle {
   readonly usage: Observed<PulseProviderUsageSnapshot>
   readonly approvals: Observed<readonly PulseApprovalItem[]>
   readonly asks: Observed<readonly PulseAskItem[]>
-  readonly goals: Observed<readonly PulseGoalSummary[]>
+  readonly goals: Observed<PulseGoalsSnapshot>
   readonly board: Observed<readonly PulseBoardPost[]>
   readonly worldMemory: Observed<PulseWorldMemoryDigest>
   readonly candle: Observed<PulseCandleDigest>
@@ -421,7 +510,7 @@ export function readPulseBundle(win: TimeWindow): PulseLoadBundle {
     asks: isMultiAccount
       ? observedAbsent<readonly PulseAskItem[]>('multi_account_unbridged')
       : resourceCache.observe<readonly PulseAskItem[]>(PULSE_CACHE_KEYS.asks).value,
-    goals: resourceCache.observe<readonly PulseGoalSummary[]>(PULSE_CACHE_KEYS.goals).value,
+    goals: resourceCache.observe<PulseGoalsSnapshot>(PULSE_CACHE_KEYS.goals).value,
     board: resourceCache.observe<readonly PulseBoardPost[]>(PULSE_CACHE_KEYS.board).value,
     worldMemory: resourceCache.observe<PulseWorldMemoryDigest>(PULSE_CACHE_KEYS.worldMemory).value,
     candle: resourceCache.observe<PulseCandleDigest>(PULSE_CACHE_KEYS.candle).value,
@@ -470,7 +559,7 @@ export async function loadPulseBundle(
           (signal) => wrapResult(apiGet('/api/v1/keepers/asks', { signal, decode: decodeAsks })),
           { ttlMs: 10_000, topics: ['keeper_ask', 'keeper_asks_changed', 'ask'], reason },
         ),
-    resourceCache.fetch<readonly PulseGoalSummary[]>(
+    resourceCache.fetch<PulseGoalsSnapshot>(
       PULSE_CACHE_KEYS.goals,
       (signal) => wrapResult(apiGet('/api/v1/dashboard/goals', { signal, decode: decodeGoals })),
       { ttlMs: 20_000, topics: ['goal', 'goals', 'goal_projection_changed', 'verification_requests', 'task'], reason },

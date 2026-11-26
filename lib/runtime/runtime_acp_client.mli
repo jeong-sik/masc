@@ -141,6 +141,17 @@ type usage_channel =
           observer children to their own journals, which {!prompt} reads
           ({!Runtime_muse_session_log}). *)
 
+type window_used_accounting =
+  | Newest_request_count
+      (** [usage_update.used] is the newest model request's input plus its
+          output, as the provider counted them (Antigravity, Kimi Code,
+          Mistral Vibe; checked against each host's request log on
+          2026-11-26). *)
+  | Host_prompt_estimate
+      (** [usage_update.used] is the host's own estimate of the next prompt
+          (Muse writes it as [estimated_prompt_tokens] beside the counted
+          request in its session journal). *)
+
 type mcp_identifier_syntax =
   | Mcp_call_wrapper
       (** Structured [call_mcp_tool] wrapper carrying [ServerName]/[ToolName]
@@ -188,6 +199,7 @@ type driver_profile =
   ; input_accounting : input_accounting
   ; output_accounting : output_accounting
   ; usage_channel : usage_channel
+  ; window_used_accounting : window_used_accounting
   ; supports_skills_dir_flag : bool
   ; mode_for_native_none : string
   ; mode_for_native_read : string
@@ -322,6 +334,7 @@ type usage =
   ; total_tokens : int
   ; context_used : int option
   ; context_size : int option
+  ; last_request_input_tokens : int option
   }
 
 val empty_usage : usage

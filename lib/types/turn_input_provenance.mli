@@ -12,11 +12,11 @@ type t =
           one. No request was dispatched at this size and no response
           exists for it. *)
   | Agent_held_context
-      (** An ACP agent counted the context its session holds after the turn
-          ([usage_update.used]). The agent counts it from its own requests,
-          so it is a count, not an estimate, but it is the context the next
-          request starts from rather than one request already dispatched:
-          its output is not part of any response. *)
+      (** An ACP host reported the context its session holds after the turn
+          ([usage_update.used]) as its newest request's input plus output, as
+          the provider counted them. A count, not an estimate, but no request
+          was dispatched at exactly this size: it includes that request's
+          output. *)
 [@@deriving enumerate]
 
 val to_string : t -> string

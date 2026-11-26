@@ -26,6 +26,7 @@ val default_caps : Presenter.capabilities
 val is_wide_split : Rect.t -> bool
 val layout_bp : model:Model.t -> rect:Rect.t -> Layout.breakpoint
 val body_rect : bp:Layout.breakpoint -> Rect.t -> Rect.t
+val pad_x : bp:Layout.breakpoint -> Rect.t -> int
 val pad_content : bp:Layout.breakpoint -> ?pad_y:int -> Rect.t -> Rect.t
 val clamp_index : int -> int -> int
 val safe_take : int -> 'a list -> 'a list
@@ -106,6 +107,24 @@ val put_right :
   style:Style.t ->
   string ->
   int
+
+val put_left_right :
+  grid:Cell_grid.t ->
+  clip:Rect.t ->
+  x:int ->
+  right_x:int ->
+  y:int ->
+  ?gap:int ->
+  ?min_left:int ->
+  left_style:Style.t ->
+  right_style:Style.t ->
+  left:string ->
+  right:string ->
+  unit ->
+  unit
+(** Draw a left-aligned primary label and right-aligned metadata on the same row
+    without ever letting the right label overwrite the left label on narrow
+    widths. Truncates or omits the right metadata when space is tight. *)
 
 val put_link :
   grid:Cell_grid.t ->

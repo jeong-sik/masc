@@ -1681,7 +1681,7 @@ let draw_credit_balances ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
       (* Fill spare bottom space cleanly with Selected Account Quota Windows *)
       let det_y = inner.y + total_rows + 1 in
       let det_bot = Rect.bottom inner in
-      let pad_x = Layout.card_pad_x bp in
+      let pad_x = H.pad_x ~bp inner in
       match rows_arr.(sel_idx) with
       | Row_account { acct; tier = (`Credit | `Sub); _ } ->
           let alias = Runtime_store.account_display_name ~lang rt acct in
@@ -1752,13 +1752,21 @@ let draw_credit_balances ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                        if is_window_exhausted w then Theme.Status_critical
                        else Theme.Status_ok
                      in
+                     let eta_w = Int.min 16 (Grapheme.display_width eta_s) in
+                     let show_eta =
+                       (not (String.equal eta_s ""))
+                       && content_w >= 10 + 6 + 2 + eta_w
+                     in
+                     let kv_max_w =
+                       if show_eta then content_w - eta_w - 2 else content_w
+                     in
                      H.put_kv ~grid ~clip:inner ~x:content_x ~y:!dy
-                       ~max_w:content_w ~theme ~key_w:10 ~key:wlbl
+                       ~max_w:kv_max_w ~theme ~key_w:10 ~key:wlbl
                        ~value_style:(H.status_style ~theme tone) util_s;
-                     if not (String.equal eta_s "") then
+                     if show_eta then
                        ignore
                          (H.put_right ~grid ~clip:inner ~right_x ~y:!dy
-                            ~max_w:16 ~style:(H.whisper_style ~theme ()) eta_s);
+                            ~max_w:eta_w ~style:(H.whisper_style ~theme ()) eta_s);
                      incr dy
                    end)
                  ws
@@ -3149,23 +3157,16 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
                 let meta =
                   Printf.sprintf "%d slots%s" (List.length lane.runtime_ids) decl
                 in
-                let meta_w = Grapheme.display_width meta in
-                let left_max =
-                  Int.max 8 (right_edge - (cascade_inner.x + 2) - meta_w - 2)
-                in
                 let lane_style =
                   if is_sel then
                     H.row_text_style ~theme ~selected:true ~focused:lane_focused
                       ~bg:row_bg
                   else H.accent_style ~theme ~bg:row_bg ~attrs:Attr.bold ()
                 in
-                ignore
-                  (H.put_clipped ~grid ~clip:r_rect ~x:(cascade_inner.x + 2)
-                     ~y:py ~max_w:left_max ~style:lane_style hdr);
-                ignore
-                  (H.put_right ~grid ~clip:r_rect ~right_x:right_edge ~y:py
-                     ~max_w:meta_w ~style:(H.whisper_style ~theme ~bg:row_bg ())
-                     meta)
+                H.put_left_right ~grid ~clip:r_rect ~x:(cascade_inner.x + 2)
+                  ~right_x:right_edge ~y:py ~min_left:8 ~left_style:lane_style
+                  ~right_style:(H.whisper_style ~theme ~bg:row_bg ())
+                  ~left:hdr ~right:meta ()
             | `Slot (si, _slot_n, rid, parent_sel) ->
                 let is_primary = si = 0 in
                 let row_bg =
@@ -3289,28 +3290,22 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
                   if String.equal rtt_txt "" then status_txt
                   else Printf.sprintf "%s  %s" status_txt rtt_txt
                 in
-                let rc_w = Grapheme.display_width right_cluster in
                 let lbl_x = x0 + 6 in
-                let lbl_w = Int.max 6 (right_edge - lbl_x - rc_w - 2) in
                 let lbl_style =
                   if is_primary then H.anchor_style ~theme ~bg:row_bg ()
                   else H.text_style ~theme ~bg:row_bg ()
                 in
-                ignore
-                  (H.put_clipped ~grid ~clip:r_rect ~x:lbl_x ~y:py ~max_w:lbl_w
-                     ~style:lbl_style human_lbl);
-                ignore
-                  (H.put_right ~grid ~clip:r_rect ~right_x:right_edge ~y:py
-                     ~max_w:rc_w
-                     ~style:
-                       (H.status_style ~theme ~bg:row_bg
-                          ~attrs:(if is_primary then Attr.bold else Attr.none)
-                          status_tone)
-                     right_cluster)
+                H.put_left_right ~grid ~clip:r_rect ~x:lbl_x
+                  ~right_x:right_edge ~y:py ~min_left:6 ~left_style:lbl_style
+                  ~right_style:
+                    (H.status_style ~theme ~bg:row_bg
+                       ~attrs:(if is_primary then Attr.bold else Attr.none)
+                       status_tone)
+                  ~left:human_lbl ~right:right_cluster ()
           end
         done;
         if reserve_ext > 0 && !y < bottom then begin
-          let pad_x = Layout.card_pad_x bp in
+          let pad_x = H.pad_x ~bp cascade_inner in
           H.draw_divider ~grid ~rect:cascade_inner ~y:!y ~theme ~pad_x
             ~label:
               (Say.resolve lang
@@ -3460,7 +3455,7 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
         let primary_lbl =
           Wire_runtime.human_runtime_slot_label ~runtimes primary_rid
         in
-        let pad_x = Layout.card_pad_x bp in
+        let pad_x = H.pad_x ~bp insp_inner in
         let band_h = if insp_inner.h >= 6 then 2 else 1 in
         Card.draw_section_band ~pad_x grid
           ~rect:(Rect.make ~x:insp_inner.x ~y:insp_inner.y ~w:insp_inner.w ~h:band_h)
@@ -3587,18 +3582,13 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
                       | None -> (Glyph.Live_idle, Theme.Status_historical, "—"))
                 in
                 let right_s = Printf.sprintf "%s · %s" transport_s st_val in
-                let rw = Grapheme.display_width right_s in
                 let sx = if body_area.w >= 28 then body_area.x + 2 else body_area.x in
-                let sw = Rect.right body_area - sx in
-                let lw = Int.max 8 (sw - rw - 2) in
-                ignore
-                  (H.put_clipped ~grid ~clip:body_area ~x:sx ~y:!y
-                     ~max_w:lw ~style:(H.text_style ~theme ())
-                     (Printf.sprintf "%d %s %s" (idx + 1) (Glyph.to_utf8 st_g) lbl));
-                ignore
-                  (H.put_right ~grid ~clip:body_area ~right_x:(Rect.right body_area)
-                     ~y:!y ~max_w:rw ~style:(H.status_style ~theme st_tone)
-                     right_s);
+                H.put_left_right ~grid ~clip:body_area ~x:sx
+                  ~right_x:(Rect.right body_area) ~y:!y ~min_left:8
+                  ~left_style:(H.text_style ~theme ())
+                  ~right_style:(H.status_style ~theme st_tone)
+                  ~left:(Printf.sprintf "%d %s %s" (idx + 1) (Glyph.to_utf8 st_g) lbl)
+                  ~right:right_s ();
                 incr y
               end)
             (Store_scroll.drop slot_skip lane.runtime_ids)
@@ -3726,15 +3716,11 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
                    (Wire_runtime.lane_run_status_label r.status)
                    cnt_s sum
                in
-               let aw = Grapheme.display_width age in
-               ignore
-                 (H.put_clipped ~grid ~clip:runs_content ~x:runs_content.x ~y:!y
-                    ~max_w:(Int.max 6 (runs_content.w - aw - 2))
-                    ~style:(H.status_style ~theme tone) left_s);
-               ignore
-                 (H.put_right ~grid ~clip:runs_content
-                    ~right_x:(Rect.right runs_content) ~y:!y ~max_w:aw
-                    ~style:(H.whisper_style ~theme ()) age);
+               H.put_left_right ~grid ~clip:runs_content ~x:runs_content.x
+                 ~right_x:(Rect.right runs_content) ~y:!y ~min_left:6
+                 ~left_style:(H.status_style ~theme tone)
+                 ~right_style:(H.whisper_style ~theme ()) ~left:left_s
+                 ~right:age ();
                incr y
              end)
            (H.safe_take max_exact (dedup_runs runs))
@@ -3785,19 +3771,14 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
               let topo = Wire_runtime.fusion_topology_to_string f.topology in
               let dec = match f.decision with Some d -> " · " ^ d | None -> "" in
               let age = fusion_elapsed ~now_unix ~stale f in
-              let aw = Grapheme.display_width age in
               let left_s =
                 Printf.sprintf "%s %s [%s/%s] %s%s" (Glyph.to_utf8 g) f.keeper
                   f.preset topo st_lbl dec
               in
-              ignore
-                (H.put_clipped ~grid ~clip:runs_content ~x:runs_content.x ~y:!y
-                   ~max_w:(Int.max 6 (runs_content.w - aw - 2))
-                   ~style:(H.status_style ~theme tone) left_s);
-              ignore
-                (H.put_right ~grid ~clip:runs_content
-                   ~right_x:(Rect.right runs_content) ~y:!y ~max_w:aw
-                   ~style:(H.whisper_style ~theme ()) age);
+              H.put_left_right ~grid ~clip:runs_content ~x:runs_content.x
+                ~right_x:(Rect.right runs_content) ~y:!y ~min_left:6
+                ~left_style:(H.status_style ~theme tone)
+                ~right_style:(H.whisper_style ~theme ()) ~left:left_s ~right:age ();
               incr y
             end)
           runs
@@ -3914,12 +3895,9 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
        ~right_hint:
          (Say.resolve lang
             (if zoomed_fusion then
-               Say.make ~ko:"[Enter/e] 보드 증거 · [f] 실행"
-                 ~en:"[Enter/e] Evidence · [f] Launch"
+               Say.make ~ko:"[f] 실행" ~en:"[f] Launch"
              else
-               Say.make
-                 ~ko:"[Enter/z] 확대 · [e] 보드 증거 · [f] 실행 · [Tab] 스크롤"
-                 ~en:"[Enter/z] Zoom · [e] Evidence · [f] Launch · [Tab] Scroll"))
+               Say.make ~ko:"[Tab] 전환" ~en:"[Tab] Switch"))
        pills);
   let left_rect, right_rect =
     if zoomed_fusion then
@@ -3931,7 +3909,7 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   let left_inner =
     Card.draw ~cache grid ~rect:left_rect ~theme
       (H.card_spec ~focused:(Model.pane_focused model 0)
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"[Enter/z] 확대 · [f] 실행" ~en:"[Enter/z] Zoom · [f] Launch"))
+         ~hotkey:(Say.resolve lang (Say.make ~ko:"[f] 실행" ~en:"[f] Launch"))
          (Say.resolve lang (Say.make ~ko:"Fusion 팬아웃 목록" ~en:"Fusion Panel Runs")))
   in
   if not (Rect.is_empty left_inner) then begin
@@ -4743,7 +4721,7 @@ let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   let left_inner =
     Card.draw ~cache grid ~rect:left_rect ~theme
       (H.card_spec ~focused:(Model.pane_focused model 0) ~subtitle:k_sub
-         ~hotkey:(Say.resolve lang (Say.make ~ko:"< / > 키퍼 전환" ~en:"< / > Keeper"))
+         ~hotkey:(Say.resolve lang (Say.make ~ko:"[↑↓] 스크롤" ~en:"[↑↓] Scroll"))
          (Say.resolve lang
             (Say.make ~ko:"키퍼 유효 도구 표면" ~en:"Effective Keeper Surface")))
   in
@@ -4847,18 +4825,14 @@ let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                  (Int.max 0 rt.scroll_offset)
              in
              let tx = if lc.w >= 28 then lc.x + 2 else lc.x in
-             let tw = Rect.right lc - tx in
              List.iter
                (fun (et : Wire_runtime.effective_keeper_tool_entry) ->
                  if !y < bot then begin
-                   let ow = Grapheme.display_width et.origin in
-                   ignore
-                     (H.put_clipped ~grid ~clip:lc ~x:tx ~y:!y
-                        ~max_w:(Int.max 8 (tw - ow - 2))
-                        ~style:(H.text_style ~theme ()) et.name);
-                   ignore
-                     (H.put_right ~grid ~clip:lc ~right_x:(Rect.right lc) ~y:!y
-                        ~max_w:ow ~style:(H.whisper_style ~theme ()) et.origin);
+                   H.put_left_right ~grid ~clip:lc ~x:tx
+                     ~right_x:(Rect.right lc) ~y:!y ~min_left:8
+                     ~left_style:(H.text_style ~theme ())
+                     ~right_style:(H.whisper_style ~theme ()) ~left:et.name
+                     ~right:et.origin ();
                    incr y
                  end)
                (Store_scroll.drop skip tools))
@@ -4870,8 +4844,8 @@ let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
          ~hotkey:
            (Say.resolve lang
               (Say.make
-                 ~ko:"[Enter] 열람 · [n] 생성 · [e] 편집 · [x] 삭제 · [R] 갱신"
-                 ~en:"[Enter] Read · [n] New · [e] Edit · [x] Del · [R] Refresh"))
+                 ~ko:"[Enter] 열람 · [n/e/x] 편집 · [R] 갱신"
+                 ~en:"[Enter] Read · [n/e/x] Edit · [R] Refresh"))
          (Say.resolve lang
             (Say.make ~ko:"스킬 프로파일 · 그림자 · 거절"
                ~en:"Skills Profiles, Shadows & Rejections")))
@@ -5041,12 +5015,27 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
       };
     ]
   in
+  let tools_right_hint =
+    match rt.tools_subview with
+    | Runtime_store.Tools_usage_calls ->
+        Say.make ~ko:"[v] 하위뷰 · [w] 기간 · /exec"
+          ~en:"[v] View · [w] Window · /exec"
+    | Runtime_store.Tools_catalog_tree ->
+        Say.make ~ko:"[v] 하위뷰 · [Enter] 열람 · /exec"
+          ~en:"[v] View · [Enter] Inspect · /exec"
+    | Runtime_store.Tools_keeper_skills ->
+        Say.make ~ko:"[v] 하위뷰 · < / > 키퍼 · /exec"
+          ~en:"[v] View · < / > Keeper · /exec"
+    | Runtime_store.Tools_quality_gate ->
+        Say.make ~ko:"[v] 하위뷰 · < / > 키퍼 · [r] 새로고침"
+          ~en:"[v] View · < / > Keeper · [r] Refresh"
+    | Runtime_store.Tools_prompts_presets ->
+        Say.make ~ko:"[v] 하위뷰 · < / > 섹션 · [r] 새로고침"
+          ~en:"[v] View · < / > Section · [r] Refresh"
+  in
   ignore
     (H.draw_pills ~grid ~rect:bar_rect ~theme
-       ~right_hint:
-         (Say.resolve lang
-            (Say.make ~ko:"[v] 하위뷰 · [w] 기간 · < / > 키퍼 · /exec"
-               ~en:"[v] View · [w] Window · < / > Keeper · /exec"))
+       ~right_hint:(Say.resolve lang tools_right_hint)
        pills);
   match rt.tools_subview with
   | Runtime_store.Tools_usage_calls -> (
@@ -5084,8 +5073,7 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
           (H.card_spec ~focused:(Model.pane_focused model 0)
              ~hotkey:
                (Say.resolve lang
-                  (Say.make ~ko:"[j/k] 스크롤 · [r] 새로고침"
-                     ~en:"[j/k] Scroll · [r] Refresh"))
+                  (Say.make ~ko:"[j/k] 스크롤" ~en:"[j/k] Scroll"))
              (Say.resolve lang
                 (Say.make ~ko:"도구 호출 품질 (Tool Quality)"
                    ~en:"Tool Call Quality")))
@@ -5201,8 +5189,7 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
              ~focused:(Model.detail_pane_focused ~detail_index:1 model)
              ~hotkey:
                (Say.resolve lang
-                  (Say.make ~ko:"< / > 키퍼 · [j/k] 스크롤"
-                     ~en:"< / > Keeper · [j/k] Scroll"))
+                  (Say.make ~ko:"[j/k] 스크롤" ~en:"[j/k] Scroll"))
              (Say.resolve lang
                 (Say.make ~ko:"게이트 거부 · 키퍼 대기 인벤토리"
                    ~en:"Gate Rejections · Keeper Waiting")))
@@ -5414,20 +5401,17 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
         match rt.pp_section with
         | Runtime_store.Sec_prompts ->
             Say.resolve lang
-              (Say.make ~ko:"< / > 섹션 · [e] 오버라이드 · [x] 해제"
-                 ~en:"< / > Section · [e] Override · [x] Clear")
+              (Say.make ~ko:"[e] 오버라이드 · [x] 해제"
+                 ~en:"[e] Override · [x] Clear")
         | Runtime_store.Sec_presets ->
             Say.resolve lang
-              (Say.make ~ko:"< / > 섹션 · [n] 생성 · [a] 복원 · [x] 삭제"
-                 ~en:"< / > Section · [n] New · [a] Restore · [x] Del")
+              (Say.make ~ko:"[n] 생성 · [a] 복원 · [x] 삭제"
+                 ~en:"[n] New · [a] Restore · [x] Del")
         | Runtime_store.Sec_params ->
             Say.resolve lang
-              (Say.make ~ko:"< / > 섹션 · [e] 설정 · [x] 기본값"
-                 ~en:"< / > Section · [e] Set · [x] Clear")
+              (Say.make ~ko:"[e] 설정 · [x] 기본값" ~en:"[e] Set · [x] Clear")
         | Runtime_store.Sec_async_requests ->
-            Say.resolve lang
-              (Say.make ~ko:"< / > 섹션 · [r] 새로고침"
-                 ~en:"< / > Section · [r] Refresh")
+            Say.resolve lang (Say.make ~ko:"[j/k] 선택" ~en:"[j/k] Select")
       in
       let left_inner =
         Card.draw ~cache grid ~rect:left_rect ~theme
@@ -5936,8 +5920,8 @@ let render_connectors ~(model : Model.t) ~cache ~(rect : Rect.t)
          ~hotkey:
            (Say.resolve lang
               (Say.make
-                 ~ko:"[n] 바인드 ([←→] 이름) · [U] 언바인드 · [e] 설정 · [r] 새로고침"
-                 ~en:"[n] Bind ([←→] names) · [U] Unbind · [e] Settings · [r] Refresh"))
+                 ~ko:"[n] 바인드 · [U] 해제 · [e] 설정"
+                 ~en:"[n] Bind · [U] Unbind · [e] Config"))
          (Say.resolve lang
             (Say.make ~ko:"채널 게이트 커넥터" ~en:"Channel Gate Connectors")))
   in
@@ -6881,8 +6865,9 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
               (Say.resolve lang (Say.make ~ko:"스냅샷 · [r]" ~en:"SNAPSHOT · [r]")))
          ~hotkey:
            (Say.resolve lang
-              (Say.make ~ko:"[→/Tab] 포커스 · [t] 탭 · [c] 조작 · [O] 씬 · [W] 캡처 · [o] 열기"
-                 ~en:"[→/Tab] Focus · [t] Tabs · [c] Act · [O] Scene · [W] Shot · [o] Open"))
+              (Say.make
+                 ~ko:"[Space] 전환 · [c] 조작 · [O] 씬 · [W] 캡처 · [o] 열기"
+                 ~en:"[Space] Switch · [c] Act · [O] Scene · [W] Shot · [o] Open"))
          (Say.resolve lang
             (Say.make ~ko:"브라우저 레인 클라이언트 · 탭"
                ~en:"Browser Clients & Open Tabs")))
@@ -7052,7 +7037,7 @@ let render_addons_browser ~(model : Model.t) ~cache ~(rect : Rect.t)
     end;
     (* Bottom: Per-Tab Listing for selected client *)
     if tabs_h >= 2 then begin
-      let pad_x = Layout.card_pad_x bp in
+      let pad_x = H.pad_x ~bp tabs_rect in
       let sel_cl_label =
         match Runtime_store.selected_browser_client rt with
         | Some cl ->
@@ -7435,8 +7420,8 @@ let render_inspector
                ~hotkey:
                  (Say.resolve lang
                     (Say.make
-                       ~ko:"[e] 편집 · [p] 미리보기 검증 · [x] 삭제 · [n] 생성 · [R] 갱신 · [Esc] 뒤로"
-                       ~en:"[e] Edit · [p] Preview · [x] Delete · [n] New · [R] Refresh · [Esc] Back"))
+                       ~ko:"[e] 편집 · [p] 검증 · [n/x] 생성·삭제 · [R] 갱신"
+                       ~en:"[e] Edit · [p] Preview · [n/x] New/Del · [R] Refresh"))
                (Say.resolve lang
                   (Say.make ~ko:"런타임 > 스킬 인스펙터 & 편집기"
                      ~en:"Runtime > Skill Inspector & Editor")))

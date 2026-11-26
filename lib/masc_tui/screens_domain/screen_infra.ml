@@ -140,7 +140,7 @@ let draw_sandbox_inspector_body ?(scroll = 0) ~grid ~(inner : Rect.t)
   else
     let keeper = entry_keeper_name entry in
     let company = keeper_company_of ~model keeper in
-    let pad_x = Layout.card_pad_x bp in
+    let pad_x = H.pad_x ~bp inner in
     let bg = Color.of_rgb theme.surface_1 in
     (* Section 1: Elevated Identity Header Band (surface_2, full-bleed on inner) *)
     let right_status, sub_line =
@@ -1858,7 +1858,6 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
             let r_meta =
               String.trim (Printf.sprintf "%s %s" stats_s kp_s)
             in
-            let rw = Grapheme.display_width r_meta in
             ignore
               (H.put_clipped ~grid ~clip:row_rect ~x:tx ~y:!y ~max_w:2
                  ~style:(H.status_style ~theme ~bg:row_bg ~attrs:Attr.bold tone)
@@ -1867,15 +1866,10 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
               H.row_text_style ~theme ~selected:is_active ~focused:ch_focused
                 ~bg:row_bg
             in
-            ignore
-              (H.put_clipped ~grid ~clip:row_rect ~x:(tx + 2) ~y:!y
-                 ~max_w:(Int.max 6 (right_edge - (tx + 2) - rw - 2))
-                 ~style:path_style fc.path);
-            if rw > 0 then
-              ignore
-                (H.put_right ~grid ~clip:row_rect ~right_x:right_edge ~y:!y
-                   ~max_w:rw ~style:(H.whisper_style ~theme ~bg:row_bg ())
-                   r_meta);
+            H.put_left_right ~grid ~clip:row_rect ~x:(tx + 2)
+              ~right_x:right_edge ~y:!y ~min_left:6 ~left_style:path_style
+              ~right_style:(H.whisper_style ~theme ~bg:row_bg ()) ~left:fc.path
+              ~right:r_meta ();
             incr y
           end)
         (Store_scroll.drop start_ch changes)
@@ -1904,7 +1898,7 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   if not (Rect.is_empty diff_inner) then begin
     let y = ref diff_inner.y and bot = Rect.bottom diff_inner in
-    let pad_x = Layout.card_pad_x bp in
+    let pad_x = H.pad_x ~bp diff_inner in
     (match sel_repo with
      | Some r when !y < bot ->
          let g, _tone, st = repo_status_display ~lang r.status in
@@ -2712,7 +2706,7 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
              (Say.make ~ko:"로그·이벤트 항목을 선택하면 상세 속성이 표시됩니다"
                 ~en:"Select a log or event entry to inspect structured fields"))
     | Some (Infra_store.Entry_log e) ->
-        let pad_x = Layout.card_pad_x bp in
+        let pad_x = H.pad_x ~bp det_inner in
         let lvl_txt, lvl_tone = log_level_badge e.level in
         let local_ts =
           H.format_local_datetime ~tz_offset_sec:model.tz_offset_sec e.ts
@@ -2794,7 +2788,7 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
           end
         end
     | Some (Infra_store.Entry_event ev) ->
-        let pad_x = Layout.card_pad_x bp in
+        let pad_x = H.pad_x ~bp det_inner in
         let kind_lbl = activity_kind_label ev.kind in
         let kind_tone =
           match ev.kind with
@@ -3129,14 +3123,14 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
          ~hotkey:
            (Say.resolve lang
               (if reviewing then
-                 Say.make ~ko:"[{/}] 덩어리 · [</>] 파일 · [Enter] 이 줄 열기 · [v] Git"
-                   ~en:"[{/}] Hunk · [</>] File · [Enter] Open line · [v] Git"
+                 Say.make ~ko:"[{/}] 덩어리 · [Enter] 이 줄 열기 · [v] Git"
+                   ~en:"[{/}] Hunk · [Enter] Open line · [v] Git"
                else if Model.is_zoomed_active model then
-                 Say.make ~ko:"[↑↓] 스크롤 · [v] Git · [p] 찾기 · [f] 검색 · [y] 복사"
-                   ~en:"[↑↓] Scroll · [v] Git · [p] Find · [f] Search · [y] Copy"
+                 Say.make ~ko:"[↑↓] 스크롤 · [y] 복사 · [z/Esc] 확대 해제"
+                   ~en:"[↑↓] Scroll · [y] Copy · [z/Esc] Unzoom"
                else
-                 Say.make ~ko:"[→/Tab] 스크롤 · [v] Git · [p] 찾기 · [f] 검색 · [y] 복사"
-                   ~en:"[→/Tab] Scroll · [v] Git · [p] Find · [f] Search · [y] Copy"))
+                 Say.make ~ko:"[Tab] 스크롤 · [z] 확대"
+                   ~en:"[Tab] Scroll · [z] Zoom"))
          (Say.resolve lang (Infra_store.code_right_mode_label code.right_mode)))
   in
   let rc = H.pad_content ~bp right_inner in

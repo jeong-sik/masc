@@ -39,6 +39,38 @@ let put_right ~grid ~clip ~right_x ~y ~max_w ~style s =
     let x = Int.max clip.Rect.x (right_x - w) in
     Cell_grid.put_text ~clip grid ~x ~y ~style clipped
 
+let put_left_right ~grid ~clip ~x ~right_x ~y ?(gap = 2) ?(min_left = 6)
+    ~left_style ~right_style ~left ~right () =
+  let gap = Int.max 0 gap in
+  let min_left = Int.max 0 min_left in
+  let avail = Int.max 0 (right_x - x) in
+  if avail <= 0 || Rect.is_empty clip then ()
+  else
+    let right_clean = sanitize_single_line right in
+    let rw = Grapheme.display_width right_clean in
+    if rw <= 0 then
+      ignore (put_clipped ~grid ~clip ~x ~y ~max_w:avail ~style:left_style left)
+    else if avail >= min_left + gap + rw then begin
+      let left_w = avail - rw - gap in
+      ignore
+        (put_clipped ~grid ~clip ~x ~y ~max_w:left_w ~style:left_style left);
+      ignore
+        (put_right ~grid ~clip ~right_x ~y ~max_w:rw ~style:right_style
+           right_clean)
+    end
+    else if avail >= min_left + gap + 3 then begin
+      let left_w = Int.max min_left ((avail - gap) / 2) in
+      let rw_fit = Int.max 0 (avail - left_w - gap) in
+      ignore
+        (put_clipped ~grid ~clip ~x ~y ~max_w:left_w ~style:left_style left);
+      if rw_fit > 0 then
+        ignore
+          (put_right ~grid ~clip ~right_x ~y ~max_w:rw_fit ~style:right_style
+             right_clean)
+    end
+    else
+      ignore (put_clipped ~grid ~clip ~x ~y ~max_w:avail ~style:left_style left)
+
 let paint_selected_row ~grid ~clip ~(row_rect : Rect.t) ~(theme : Theme.t)
     ?tone () =
   let bg = Color.of_rgb theme.selection_bg in
@@ -649,17 +681,13 @@ let render_evolution_view ~grid ~(rect : Rect.t) ~(theme : Theme.t)
                             | None -> ev.identity))
                   in
                   if row_h >= 2 then begin
-                    ignore
-                      (put_clipped ~grid ~clip:rect ~x:tx ~y:!y
-                         ~max_w:(Int.max 6 (tw - mw - 2))
-                         ~style:
-                           (Typography.status ~bg:row_bg ~bold:true theme tone)
-                         left_head);
-                    ignore
-                      (put_right ~grid ~clip:rect ~right_x:(Rect.right rect)
-                         ~y:!y ~max_w:mw
-                         ~style:(Typography.whisper ~bg:row_bg ~italic:false theme)
-                         meta_right);
+                    put_left_right ~grid ~clip:rect ~x:tx
+                      ~right_x:(Rect.right rect) ~y:!y ~min_left:6
+                      ~left_style:
+                        (Typography.status ~bg:row_bg ~bold:true theme tone)
+                      ~right_style:
+                        (Typography.whisper ~bg:row_bg ~italic:false theme)
+                      ~left:left_head ~right:meta_right ();
                     incr y;
                     let preview_txt =
                       match ev.reason with
@@ -678,25 +706,31 @@ let render_evolution_view ~grid ~(rect : Rect.t) ~(theme : Theme.t)
                     incr y
                   end
                   else begin
+                    let show_right = mw > 0 && tw >= 6 + mw + 2 in
+                    let left_budget =
+                      if show_right then tw - mw - 2 else tw
+                    in
                     let head_adv =
                       put_clipped ~grid ~clip:rect ~x:tx ~y:!y
-                        ~max_w:(Int.max 6 (tw - mw - 2))
+                        ~max_w:left_budget
                         ~style:
                           (Typography.status ~bg:row_bg ~bold:true theme tone)
                         (left_head ^ "  ")
                     in
-                    let rem_w = tw - head_adv - mw - 2 in
+                    let rem_w = left_budget - head_adv in
                     if rem_w > 4 then
                       ignore
                         (put_clipped ~grid ~clip:rect ~x:(tx + head_adv) ~y:!y
                            ~max_w:rem_w
                            ~style:(Typography.primary ~bg:row_bg theme)
                            primary_preview);
-                    ignore
-                      (put_right ~grid ~clip:rect ~right_x:(Rect.right rect)
-                         ~y:!y ~max_w:mw
-                         ~style:(Typography.whisper ~bg:row_bg ~italic:false theme)
-                         meta_right);
+                    if show_right then
+                      ignore
+                        (put_right ~grid ~clip:rect ~right_x:(Rect.right rect)
+                           ~y:!y ~max_w:mw
+                           ~style:
+                             (Typography.whisper ~bg:row_bg ~italic:false theme)
+                           meta_right);
                     incr y
                   end
                 end)
@@ -869,17 +903,13 @@ let render_facts_view ~grid ~(rect : Rect.t) ~(theme : Theme.t)
                   let tw = Int.max 0 (rect.w - 2) in
                   let mw = Grapheme.display_width right_meta in
                   if row_h >= 2 then begin
-                    ignore
-                      (put_clipped ~grid ~clip:rect ~x:tx ~y:!y
-                         ~max_w:(Int.max 6 (tw - mw - 2))
-                         ~style:
-                           (Typography.status ~bg:row_bg ~bold:true theme tone)
-                         left_meta);
-                    ignore
-                      (put_right ~grid ~clip:rect ~right_x:(Rect.right rect)
-                         ~y:!y ~max_w:mw
-                         ~style:(Typography.whisper ~bg:row_bg ~italic:false theme)
-                         right_meta);
+                    put_left_right ~grid ~clip:rect ~x:tx
+                      ~right_x:(Rect.right rect) ~y:!y ~min_left:6
+                      ~left_style:
+                        (Typography.status ~bg:row_bg ~bold:true theme tone)
+                      ~right_style:
+                        (Typography.whisper ~bg:row_bg ~italic:false theme)
+                      ~left:left_meta ~right:right_meta ();
                     incr y;
                     ignore
                       (put_clipped ~grid ~clip:rect ~x:tx ~y:!y ~max_w:tw
@@ -891,25 +921,31 @@ let render_facts_view ~grid ~(rect : Rect.t) ~(theme : Theme.t)
                     incr y
                   end
                   else begin
+                    let show_right = mw > 0 && tw >= 6 + mw + 2 in
+                    let left_budget =
+                      if show_right then tw - mw - 2 else tw
+                    in
                     let adv =
                       put_clipped ~grid ~clip:rect ~x:tx ~y:!y
-                        ~max_w:(Int.max 6 (tw - mw - 2))
+                        ~max_w:left_budget
                         ~style:
                           (Typography.status ~bg:row_bg ~bold:true theme tone)
                         (left_meta ^ "  ")
                     in
-                    let rem_w = tw - adv - mw - 2 in
+                    let rem_w = left_budget - adv in
                     if rem_w > 4 then
                       ignore
                         (put_clipped ~grid ~clip:rect ~x:(tx + adv) ~y:!y
                            ~max_w:rem_w
                            ~style:(Typography.primary ~bg:row_bg theme)
                            claim_txt);
-                    ignore
-                      (put_right ~grid ~clip:rect ~right_x:(Rect.right rect)
-                         ~y:!y ~max_w:mw
-                         ~style:(Typography.whisper ~bg:row_bg ~italic:false theme)
-                         right_meta);
+                    if show_right then
+                      ignore
+                        (put_right ~grid ~clip:rect ~right_x:(Rect.right rect)
+                           ~y:!y ~max_w:mw
+                           ~style:
+                             (Typography.whisper ~bg:row_bg ~italic:false theme)
+                           right_meta);
                     incr y
                   end
                 end)
@@ -1209,32 +1245,34 @@ let draw_diff_rows ~grid ~content ~y ~bottom ~(theme : Theme.t) ~bg ~scroll
             let hw = Grapheme.display_width heat_lbl in
             let aw = Grapheme.display_width age in
             let st = { style with bg = row_bg } in
-            ignore
-              (put_clipped ~grid ~clip:content ~x:tx ~y:!y
-                 ~max_w:(Int.max 6 (tw - hw - aw - 4))
-                 ~style:st left_txt);
-            ignore
-              (put_right ~grid ~clip:content
-                 ~right_x:(Rect.right content - aw - 2) ~y:!y ~max_w:hw
-                 ~style:(Typography.status ~bg:row_bg theme heat_tone)
-                 heat_lbl);
-            ignore
-              (put_right ~grid ~clip:content ~right_x:(Rect.right content)
-                 ~y:!y ~max_w:aw ~style:(Typography.whisper ~bg:row_bg theme)
-                 age)
+            if tw >= 6 + hw + aw + 4 then begin
+              ignore
+                (put_clipped ~grid ~clip:content ~x:tx ~y:!y
+                   ~max_w:(tw - hw - aw - 4) ~style:st left_txt);
+              ignore
+                (put_right ~grid ~clip:content
+                   ~right_x:(Rect.right content - aw - 2) ~y:!y ~max_w:hw
+                   ~style:(Typography.status ~bg:row_bg theme heat_tone)
+                   heat_lbl);
+              ignore
+                (put_right ~grid ~clip:content ~right_x:(Rect.right content)
+                   ~y:!y ~max_w:aw ~style:(Typography.whisper ~bg:row_bg theme)
+                   age)
+            end
+            else
+              put_left_right ~grid ~clip:content ~x:tx
+                ~right_x:(Rect.right content) ~y:!y ~min_left:6 ~left_style:st
+                ~right_style:(Typography.whisper ~bg:row_bg theme)
+                ~left:left_txt ~right:age ()
         | Diff_header_right { rail; style; left_txt; right_txt; right_style; _ }
           ->
             Card.draw_left_rail ~bg:row_bg ~tone:rail grid ~x:content.x ~y:!y
               ~h:1 ~theme;
-            let rw = Grapheme.display_width right_txt in
-            ignore
-              (put_clipped ~grid ~clip:content ~x:tx ~y:!y
-                 ~max_w:(Int.max 6 (tw - rw - 2))
-                 ~style:{ style with bg = row_bg } left_txt);
-            ignore
-              (put_right ~grid ~clip:content ~right_x:(Rect.right content)
-                 ~y:!y ~max_w:rw
-                 ~style:{ right_style with bg = row_bg } right_txt)
+            put_left_right ~grid ~clip:content ~x:tx
+              ~right_x:(Rect.right content) ~y:!y ~min_left:6
+              ~left_style:{ style with bg = row_bg }
+              ~right_style:{ right_style with bg = row_bg } ~left:left_txt
+              ~right:right_txt ()
         | Diff_plain { rail; style; text; _ } ->
             Card.draw_left_rail ~bg:row_bg ~tone:rail grid ~x:content.x ~y:!y
               ~h:1 ~theme;

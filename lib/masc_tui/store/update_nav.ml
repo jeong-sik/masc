@@ -7750,10 +7750,7 @@ let harness_verdict_detail_lines ~width (m : Model.t) : styled_line list =
       push ~tone:(if hash_valid then Line_ok else Line_warn)
         (Printf.sprintf "notes_hash (%s): %s"
            (if hash_valid then "valid 64-hex" else "invalid/missing")
-           (if String.equal v.notes_hash "" then "-" else v.notes_hash));
-      push
-        "Actions: [y] Approve overrule · [n] Reject overrule · [H] Copy \
-         notes_hash");
+           (if String.equal v.notes_hash "" then "-" else v.notes_hash)));
   (match sample with
   | Some hh ->
       let c = hh.calibration in
@@ -8261,10 +8258,7 @@ let keeper_identity_lines ~width ~name (m : Model.t) : styled_line list =
   let push_all ?(tone = Line_plain) xs =
     List.iter (fun s -> push ~tone s) xs
   in
-  push ~tone:Line_section
-    ("── Keeper Identity: " ^ name
-   ^ " ([l] Login · [L] Poll · [r] Refresh · [a/Enter] Toggle · [U] Disconnect \
-      · [K] GitHub PAT · [y] Copy) ──");
+  push ~tone:Line_section ("── Keeper Identity: " ^ name ^ " ──");
   if ks.oauth_auth_denied then
     push ~tone:Line_warn
       "  [CanAdmin required] OAuth identity endpoints returned 401/403";

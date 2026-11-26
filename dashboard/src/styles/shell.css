@@ -205,6 +205,18 @@
   opacity: 0.72;
 }
 
+.ap-subtab-badge {
+  padding: 0 var(--sp-1);
+  border-radius: var(--radius-pill);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn-border);
+  color: var(--warn-fg);
+  font-family: var(--font-mono);
+  font-size: var(--fs-10);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
 /* Global Time-Window Pill */
 .ap-win-group {
   display: inline-flex;

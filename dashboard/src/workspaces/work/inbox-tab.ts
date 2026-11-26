@@ -374,18 +374,38 @@ function isCurrent(observation: Observed<unknown>, problem?: string | null): boo
   return observation.kind === 'value' && !observation.stale && problem == null
 }
 
-function renderSourceNotice(label: string, observation: Observed<unknown>, problem?: string | null) {
-  if (observation.kind === 'loading') {
-    return html`<div class="wk-notice wk-notice--info wk-inset" role="status"><${InlineSpinner} /> ${label} 불러오는 중…</div>`
-  }
+function renderSourceAlert(label: string, observation: Observed<unknown>, problem?: string | null) {
+  if (observation.kind === 'loading') return null
   const reason = observation.kind === 'failed' ? observation.error.message
     : observation.kind === 'absent' || observation.kind === 'unreported' ? observation.reason : problem
   if (reason || observation.kind !== 'value') {
     return html`<div class="wk-notice wk-notice--err wk-inset" role="alert">${label} 조회 불가${reason ? ` · ${reason}` : ''}</div>`
   }
-  return observation.stale
-    ? html`<div class="wk-notice wk-notice--warn wk-inset" role="status">${label} · 마지막 조회 결과</div>`
-    : null
+  return null
+}
+
+function renderSourceSyncPill(sources: readonly { label: string; observation: Observed<unknown>; problem?: string | null }[]) {
+  const loadingLabels: string[] = []
+  const staleLabels: string[] = []
+  for (const s of sources) {
+    if (s.observation.kind === 'loading') {
+      loadingLabels.push(s.label)
+    } else if (s.observation.kind === 'value' && s.observation.stale && s.problem == null) {
+      staleLabels.push(s.label)
+    }
+  }
+  const parts: string[] = []
+  if (loadingLabels.length > 0) parts.push(`${loadingLabels.join(', ')} 불러오는 중…`)
+  if (staleLabels.length > 0) parts.push(`${staleLabels.join(', ')} · 마지막 조회 결과`)
+  if (parts.length === 0) return null
+  const text = parts.join(' · ')
+  const tone = staleLabels.length > 0 ? 'warn' : 'info'
+  return html`
+    <span class=${`wk-status-pill wk-status-pill--${tone}`} role="status" title=${text}>
+      ${loadingLabels.length > 0 && html`<${InlineSpinner} />`}
+      <span class="wk-status-pill-text">${text}</span>
+    </span>
+  `
 }
 
 export function InboxTab(props: WorkspaceViewProps) {
@@ -800,6 +820,15 @@ export function InboxTab(props: WorkspaceViewProps) {
     { id: 'goal_confirmation', label: 'Goal Confirm', count: goals.length, ready: current.goal_confirmation },
     ...(!multiAccount ? [{ id: 'audit' as const, label: '24h Decisions', count: audit.length, ready: current.audit && !gate?.auditPartial }] : []),
   ]
+  const decisionPill = busy
+    ? html`<span class="wk-status-pill wk-status-pill--info" role="status" title="결정 응답을 기다리는 중…"><${InlineSpinner} /><span class="wk-status-pill-text">결정 응답을 기다리는 중…</span></span>`
+    : feedback?.kind === 'ok'
+      ? html`<span class="wk-status-pill wk-status-pill--ok" role="status" title=${feedback.message}><span class="wk-status-pill-text">${feedback.message}</span></span>`
+      : null
+  const decisionErrorNotice = !busy && feedback?.kind === 'err'
+    ? html`<div class="wk-notice wk-notice--err" role="alert">${feedback.message}</div>`
+    : null
+
   const chipsBar = html`
     <div class="wk-toolbar">
       <div class="wk-chips" role="group" aria-label="인박스 필터">
@@ -809,23 +838,32 @@ export function InboxTab(props: WorkspaceViewProps) {
           </button>
         `)}
       </div>
-      <button type="button" class="btn-ghost" onClick=${() => void refreshVisibleSources()}>새로고침</button>
+      <div class="wk-toolbar-end">
+        ${decisionPill}
+        <button type="button" class="btn-ghost" onClick=${() => void refreshVisibleSources()}>새로고침</button>
+      </div>
     </div>
   `
 
   const multiAccountNotice = multiAccount
     ? html`<div class="wk-notice wk-notice--info" role="note">멀티 계정 모드의 Inbox에는 Goal 완료 확인이 표시됩니다.</div>`
     : null
-  const decisionNotice = busy
-    ? html`<div class="wk-notice wk-notice--info wk-inset" role="status"><${InlineSpinner} /> 결정 응답을 기다리는 중…</div>`
-    : feedback && html`<div class=${`wk-notice wk-notice--${feedback.kind} wk-inset`} role="status">${feedback.message}</div>`
 
   if (filter === 'audit') {
+    const auditSyncPill = renderSourceSyncPill([
+      { label: 'Channel Gate 결정 이력', observation: gateObs, problem: gate?.auditError },
+    ])
     return html`
       <div class="wk-scroll-body">
         ${chipsBar}
-        ${decisionNotice}
-        ${renderSourceNotice('Channel Gate 결정 이력', gateObs, gate?.auditError)}
+        ${decisionErrorNotice}
+        <div class="wk-pane-head">
+          <h2 class="wk-pane-title">24h Decisions <span class="wk-chip-count">(${current.audit && !gate?.auditPartial ? audit.length : '—'})</span></h2>
+          <div class="wk-pane-status-slot" data-testid="inbox-audit-sync-slot">
+            ${auditSyncPill}
+          </div>
+        </div>
+        ${renderSourceAlert('Channel Gate 결정 이력', gateObs, gate?.auditError)}
         ${gate?.auditPartial && html`
           <div class="wk-notice wk-notice--warn wk-inset" role="note">조회 범위 제한으로 최근 24시간의 결정 이력이 일부만 표시됩니다.</div>
         `}
@@ -843,14 +881,24 @@ export function InboxTab(props: WorkspaceViewProps) {
   }
 
   const shownSources = filter === 'all' ? availableSources : [filter]
+  const queueSyncPill = renderSourceSyncPill(
+    shownSources.map((source) => ({
+      label: inboxReads[source].label,
+      observation: observations[source],
+      problem: source === 'channel_gate' ? gate?.queueError : null,
+    })),
+  )
   const masterPane = html`
     <div class="wk-pane-col">
       <div class="wk-pane-head">
         <h2 class="wk-pane-title">Unified HITL Queue
-          ${filterCurrent && html`<span class="wk-chip-count">(${filteredEntries.length})</span>`}
+          <span class="wk-chip-count">(${filterCurrent ? filteredEntries.length : '—'})</span>
         </h2>
+        <div class="wk-pane-status-slot" data-testid="inbox-queue-sync-slot">
+          ${queueSyncPill}
+        </div>
       </div>
-      ${shownSources.map((source) => renderSourceNotice(inboxReads[source].label,
+      ${shownSources.map((source) => renderSourceAlert(inboxReads[source].label,
         observations[source], source === 'channel_gate' ? gate?.queueError : null))}
       <${VirtualList}
         items=${filteredEntries}
@@ -908,6 +956,7 @@ export function InboxTab(props: WorkspaceViewProps) {
   const detailPane = selectedEntry
     ? html`
         <div class="wk-detail-pad">
+          ${decisionErrorNotice}
           ${selectedEntry.kind === 'tool_approval' && html`
             <div class="wk-section-head">
               <div class="wk-min-w-0">
@@ -1170,7 +1219,6 @@ export function InboxTab(props: WorkspaceViewProps) {
     <div class="wk-inbox-shell">
       ${chipsBar}
       ${multiAccountNotice}
-      ${decisionNotice}
       <div class="wk-pane-grow">
         <${MasterDetail}
           master=${masterPane}
@@ -1179,7 +1227,7 @@ export function InboxTab(props: WorkspaceViewProps) {
           selectionKey=${selectedKey}
           masterLabel="HITL 대기열"
           detailLabel="HITL 승인 상세"
-          emptyDetail=${html`<div class="wk-detail-pad"><span class="dtable-absent">승인할 항목을 선택하세요. 모든 결정은 TargetLockedAction으로 보호됩니다.</span></div>`}
+          emptyDetail=${html`<div class="wk-detail-pad">${decisionErrorNotice}<span class="dtable-absent">승인할 항목을 선택하세요. 모든 결정은 TargetLockedAction으로 보호됩니다.</span></div>`}
         />
       </div>
     </div>

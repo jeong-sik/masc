@@ -938,4 +938,59 @@ describe('Proposal A+ Shell components', () => {
       expect(container.textContent).not.toContain('Alpha late patrol')
     })
   })
+
+  it('mirrors inboxPendingCount on the Work Inbox sub-tab badge and clarifies the Work rail badge tooltip', async () => {
+    viewportWidth.value = 1440
+    navigate('/work/goals')
+    pendingGoalConfirmations.value = parseAwaitingGoalsPayload(
+      {
+        goals: [
+          { id: 'g-1', title: 'Goal A', phase: 'awaiting_confirmation', updated_at: '2026-11-26T00:00:00Z' },
+          { id: 'g-2', title: 'Goal B', phase: 'awaiting_confirmation', updated_at: '2026-11-26T00:00:00Z' },
+        ],
+      },
+      'default',
+    )
+    expect(inboxPendingCount.value).toBe(2)
+
+    await act(async () => {
+      render(h('div', {}, h(NavRail, {}), h(TopBar, {})), container)
+    })
+
+    const inboxSubtabLink = container.querySelector('[data-subtab="inbox"]')
+    const inboxSubtabBadge = container.querySelector('[data-testid="subtab-inbox-badge"]')
+    expect(inboxSubtabBadge?.textContent?.trim()).toBe('2')
+    expect(inboxSubtabBadge?.closest('[data-subtab="inbox"]')).toBe(inboxSubtabLink)
+    expect(inboxSubtabLink?.getAttribute('aria-label')).toBe('Inbox (2건 대기)')
+
+    const workRailBadge = container.querySelector('[data-nav-id="work"] .ap-rail-badge')
+    expect(workRailBadge?.textContent?.trim()).toBe('2')
+    expect(workRailBadge?.getAttribute('aria-label')).toBe('Inbox 2건 대기 중')
+    expect(workRailBadge?.getAttribute('title')).toBe('Inbox 2건 대기 중')
+
+    // Authenticated with unchecked sources preserves count alongside '?' instead of hiding '2'.
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: AUTH_METHODS,
+      workspaceId: 'default',
+    }
+    await act(async () => {
+      render(h('div', {}, h(NavRail, {}), h(TopBar, {})), container)
+    })
+    expect(container.querySelector('[data-testid="subtab-inbox-badge"]')?.textContent?.trim()).toBe('2?')
+
+    pendingGoalConfirmations.value = []
+    await act(async () => {
+      render(h('div', {}, h(NavRail, {}), h(TopBar, {})), container)
+    })
+    expect(container.querySelector('[data-testid="subtab-inbox-badge"]')?.textContent?.trim()).toBe('?')
+
+    resetAuthStateForTests()
+    await act(async () => {
+      render(h('div', {}, h(NavRail, {}), h(TopBar, {})), container)
+    })
+    expect(container.querySelector('[data-testid="subtab-inbox-badge"]')).toBeNull()
+  })
 })

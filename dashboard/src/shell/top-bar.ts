@@ -497,24 +497,40 @@ export function TopBar(): VNode {
 
       ${!mobile && subtabs.length > 0 && html`
         <nav class="ap-subtabs" aria-label=${`${navDef.label} 하위 탭`}>
-          ${subtabs.map((tab) => html`
-            <a
-              key=${tab.id}
-              href=${`#${tab.path}`}
-              class=${`ap-subtab${tab.active ? ' is-active' : ''}${tab.locked ? ' is-locked' : ''}`}
-              aria-current=${tab.active ? 'page' : undefined}
-              data-subtab=${tab.id}
-              data-rbac-locked=${tab.locked ? 'true' : undefined}
-              onClick=${(event: MouseEvent) => {
-                if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-                event.preventDefault()
-                navigate(tab.path)
-              }}
-            >
-              <span>${tab.label}</span>
-              ${tab.locked && html`<${ShellIcon} name="lock" size=${11} />`}
-            </a>
-          `)}
+          ${subtabs.map((tab) => {
+            const subtabBadge = route.workspace === 'work' && tab.id === 'inbox'
+              ? (pending > 0
+                  ? (pendingUnchecked ? `${pending}?` : String(pending))
+                  : (pendingUnchecked ? '?' : null))
+              : null
+            return html`
+              <a
+                key=${tab.id}
+                href=${`#${tab.path}`}
+                class=${`ap-subtab${tab.active ? ' is-active' : ''}${tab.locked ? ' is-locked' : ''}`}
+                aria-current=${tab.active ? 'page' : undefined}
+                aria-label=${subtabBadge !== null ? `${tab.label} (${pendingLabel})` : undefined}
+                data-subtab=${tab.id}
+                data-rbac-locked=${tab.locked ? 'true' : undefined}
+                onClick=${(event: MouseEvent) => {
+                  if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+                  event.preventDefault()
+                  navigate(tab.path)
+                }}
+              >
+                <span>${tab.label}</span>
+                ${subtabBadge !== null && html`
+                  <span
+                    class="ap-subtab-badge tnum"
+                    data-testid="subtab-inbox-badge"
+                    aria-hidden="true"
+                    title=${pendingLabel}
+                  >${subtabBadge}</span>
+                `}
+                ${tab.locked && html`<${ShellIcon} name="lock" size=${11} />`}
+              </a>
+            `
+          })}
         </nav>
       `}
 

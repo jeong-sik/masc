@@ -37,11 +37,14 @@ function renderNavItem(
 ): VNode {
   const isActive = activeWorkspace === item.id
   const badge = item.id === 'work' && pendingCount > 0 ? pendingCount : 0
-  const tooltip = locked
+  const baseTooltip = locked
     ? `${item.label} (관리자 전용)`
     : item.shortcut
       ? `${item.label} [${item.shortcut}]`
       : item.label
+  const tooltip = !locked && badge > 0
+    ? `${baseTooltip} · Inbox ${badge}건 대기 중`
+    : baseTooltip
 
   return html`
     <a
@@ -71,7 +74,11 @@ function renderNavItem(
         </span>
       `}
       ${!locked && badge > 0 && html`
-        <span class="ap-rail-badge tnum" aria-label=${`${badge}건 대기 중`}>${badge}</span>
+        <span
+          class="ap-rail-badge tnum"
+          aria-label=${`Inbox ${badge}건 대기 중`}
+          title=${`Inbox ${badge}건 대기 중`}
+        >${badge}</span>
       `}
       ${expanded && !locked && badge === 0 && item.shortcut && html`
         <kbd class="ap-rail-kbd">${item.shortcut}</kbd>

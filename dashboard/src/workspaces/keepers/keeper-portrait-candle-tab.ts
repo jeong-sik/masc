@@ -50,6 +50,7 @@ export function KeeperPortraitCandleTab(props: KeeperPortraitCandleTabProps) {
   const { keeper } = props
   const [ledger, setLedger] = useState<KeeperCandleLedgerData | null>(null)
   const [items, setItems] = useState<KeeperItemsData | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [previewItemId, setPreviewItemId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const mountedRef = useRef(true)
@@ -80,13 +81,24 @@ export function KeeperPortraitCandleTab(props: KeeperPortraitCandleTabProps) {
       return
     }
     setLoading(false)
-    if (ledRes.ok) setLedger(ledRes.value)
-    if (itRes.ok) setItems(itRes.value)
+    const errors: string[] = []
+    if (ledRes.ok) {
+      setLedger(ledRes.value)
+    } else if (ledRes.error.kind !== 'aborted' && ledRes.error.kind !== 'epoch_stale') {
+      errors.push(`원장 조회 실패: ${ledRes.error.message}`)
+    }
+    if (itRes.ok) {
+      setItems(itRes.value)
+    } else if (itRes.error.kind !== 'aborted' && itRes.error.kind !== 'epoch_stale') {
+      errors.push(`아이템 조회 실패: ${itRes.error.message}`)
+    }
+    setLoadError(errors.length > 0 ? errors.join(' · ') : null)
   }, [keeper.name])
 
   useEffect(() => {
     setLedger(null)
     setItems(null)
+    setLoadError(null)
     setPreviewItemId(null)
     void loadAll()
     return () => {
@@ -234,10 +246,13 @@ export function KeeperPortraitCandleTab(props: KeeperPortraitCandleTabProps) {
         <section class="kp-card" aria-label="Candle 상점 및 원장 정책">
           <div class="kp-card-head">
             <h3>Candle Economy & Catalog</h3>
-            <span class="kp-pill" data-tone=${ledger?.policy_configuration === 'enabled' ? 'brass' : 'default'}>
-              ${ledger?.policy_configuration ?? items?.status ?? 'off'}
+            <span class="kp-pill" data-tone=${loadError ? 'bad' : ledger?.policy_configuration === 'enabled' ? 'brass' : 'default'}>
+              ${loadError ? '조회 실패' : ledger?.policy_configuration ?? items?.status ?? 'off'}
             </span>
           </div>
+          ${loadError && html`
+            <div class="ap-error" role="alert">${loadError}</div>
+          `}
 
           <div class="kp-grid-2">
             <div class="kp-kv-box">

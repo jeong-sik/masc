@@ -21,6 +21,8 @@ import {
 } from './auth'
 import { apiMutate, type ApiError } from './transport'
 import type { Result } from '../lib/result'
+import { readSse } from '../lib/sse-reader'
+import { isRecord } from '../lib/type-guards'
 
 export interface SetupLoginReceipt {
   readonly loginId: string
@@ -89,10 +91,6 @@ export function extractDeviceCode(rawText: string): string | null {
     return bare[1].toUpperCase()
   }
   return null
-}
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
 function asNonEmptyStr(v: unknown): string | null {
@@ -186,19 +184,8 @@ export async function streamSetupAccountLogin(params: {
     }
   }
 
-  const handleFrame = (rawFrame: string) => {
+  const handleEvent = (eventName: string, rawData: string) => {
     if (!isEpochCurrent(startEpoch) || controller.signal.aborted) return
-    let eventName = 'message'
-    const dataLines: string[] = []
-    for (const line of rawFrame.split(/\r?\n/)) {
-      if (line.startsWith('event:')) {
-        eventName = line.slice(6).trim()
-      } else if (line.startsWith('data:')) {
-        dataLines.push(line.slice(5).trimStart())
-      }
-    }
-    if (dataLines.length === 0) return
-    const rawData = dataLines.join('\n')
     let parsed: unknown = null
     try {
       parsed = JSON.parse(rawData)
@@ -299,7 +286,12 @@ export async function streamSetupAccountLogin(params: {
       let msg = `HTTP ${res.status}`
       try {
         const text = await res.text()
-        const json: unknown = JSON.parse(text)
+        let json: unknown = null
+        try {
+          json = JSON.parse(text)
+        } catch {
+          json = null
+        }
         if (isRecord(json)) {
           msg = asNonEmptyStr(json.error) ?? asNonEmptyStr(json.message) ?? msg
         } else if (text.trim()) {
@@ -332,25 +324,13 @@ export async function streamSetupAccountLogin(params: {
       return { terminal: true, completed: false, loginId: currentLoginId, error: msg }
     }
 
-    const reader = res.body.getReader()
-    const decoder = new TextDecoder()
-    let buf = ''
-    try {
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += decoder.decode(value, { stream: true })
-        const parts = buf.split(/\r?\n\r?\n/)
-        buf = parts.pop() ?? ''
-        for (const frame of parts) {
-          if (frame.trim()) handleFrame(frame)
-        }
-      }
-      buf += decoder.decode()
-      if (buf.trim()) handleFrame(buf)
-    } finally {
-      reader.releaseLock()
-    }
+    await readSse(
+      res.body,
+      (eventName, rawData) => {
+        handleEvent(eventName, rawData)
+      },
+      { signal: controller.signal },
+    )
 
     if (!terminal && !controller.signal.aborted && isEpochCurrent(startEpoch)) {
       const msg = '로그인 스트림이 완료 확인 없이 종료되었습니다. 영수증 상태를 새로고침하거나 다시 시도하세요.'

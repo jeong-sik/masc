@@ -1,5 +1,6 @@
 import type { ComponentChildren } from 'preact'
 import { isWindowCurrentlySpent } from '../../lib/quota-window'
+import { readSse } from '../../lib/sse-reader'
 import type { Result } from '../../lib/result'
 import {
   OBSERVER_SSE_INSTANCE_HEADER,
@@ -12,7 +13,6 @@ import {
   observedAbsent,
   observedUnreported,
   observedValue,
-  parseSseBlock,
   resolveWorkspaceUrl,
   type ApiError,
   type Observed,
@@ -865,26 +865,20 @@ export function openViewSseStream(
         return
       }
       onStatus?.('open')
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      try {
-        while (!signal.aborted && isEpochCurrent(startEpoch)) {
-          const { value, done } = await reader.read()
-          if (done) break
-          if (signal.aborted || !isEpochCurrent(startEpoch)) break
-          buffer += decoder.decode(value, { stream: true })
-          const blocks = buffer.split(/\r?\n\r?\n/)
-          buffer = blocks.pop() ?? ''
-          for (const block of blocks) {
-            if (signal.aborted || !isEpochCurrent(startEpoch)) return
-            const frame = parseSseBlock(block)
-            if (frame) onFrame(frame)
+      await readSse(
+        res.body,
+        (event, rawData) => {
+          if (signal.aborted || !isEpochCurrent(startEpoch)) return
+          let data: unknown = rawData
+          try {
+            data = JSON.parse(rawData)
+          } catch {
+            // keep raw text for non-JSON frames
           }
-        }
-      } finally {
-        reader.releaseLock()
-      }
+          onFrame({ id: null, event, data, raw: rawData })
+        },
+        { signal },
+      )
       if (!signal.aborted && isEpochCurrent(startEpoch)) onStatus?.('closed')
     } catch (err) {
       if (!signal.aborted && isEpochCurrent(startEpoch)) {

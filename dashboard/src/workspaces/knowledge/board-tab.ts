@@ -14,7 +14,7 @@
 import { html } from 'htm/preact'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { authSession } from '../../core/auth'
+import { authSession, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
 import {
   extractObserverTopics,
   markViewSynced,
@@ -247,6 +247,13 @@ export function BoardTab(props: WorkspaceViewProps) {
   const detailSeqRef = useRef(0)
   const detailRefreshingRef = useRef(false)
   const detailRef = useRef<BoardDetailData | null>(null)
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
   detailRef.current = detail
   const boardSeqRef = useRef(0)
   const selectedPostIdRef = useRef<string | null>(selectedPostId)
@@ -758,6 +765,7 @@ export function BoardTab(props: WorkspaceViewProps) {
       setFeedback({ kind: 'err', message: '제목과 본문을 모두 입력하세요.' })
       return
     }
+    const startEpoch = currentSessionEpoch()
     setBusy(true)
     setFeedback(null)
     const body: Record<string, unknown> = {
@@ -767,6 +775,7 @@ export function BoardTab(props: WorkspaceViewProps) {
     }
     if (newHearth.trim()) body.hearth = newHearth.trim()
     const res = await apiMutate<unknown>('POST', '/api/v1/tools/masc_board_post', body)
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setBusy(false)
     if (!res.ok) {
       setFeedback({ kind: 'err', message: `게시글 작성 실패: ${res.error.message}` })
@@ -784,6 +793,7 @@ export function BoardTab(props: WorkspaceViewProps) {
     e.preventDefault()
     const view = replyViewRef.current
     if (!activePost || view?.postId !== activePost.id || !replyText.trim()) return
+    const startEpoch = currentSessionEpoch()
     setBusy(true)
     setFeedback(null)
     const body: Record<string, unknown> = {
@@ -793,6 +803,7 @@ export function BoardTab(props: WorkspaceViewProps) {
     }
     if (replyParentId) body.parent_id = replyParentId
     const res = await apiMutate<unknown>('POST', '/api/v1/tools/masc_board_comment', body)
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setBusy(false)
     if (view !== replyViewRef.current || selectedPostIdRef.current !== activePost.id) return
     if (!res.ok) {
@@ -808,12 +819,14 @@ export function BoardTab(props: WorkspaceViewProps) {
   }
 
   const handleVotePost = async (postId: string, direction: 'up' | 'down') => {
+    const startEpoch = currentSessionEpoch()
     setBusy(true)
     const res = await apiMutate<unknown>('POST', '/api/v1/tools/masc_board_vote', {
       post_id: postId,
       direction,
       voter: 'operator',
     })
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setBusy(false)
     if (!res.ok) {
       setFeedback({ kind: 'err', message: `투표 실패: ${res.error.message}` })
@@ -821,45 +834,58 @@ export function BoardTab(props: WorkspaceViewProps) {
     }
     resourceCache.invalidateTopic('board')
     await loadBoard('manual')
-    if (selectedPostId === postId) await refreshActiveDetail(postId)
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
+    if (selectedPostIdRef.current === postId) await refreshActiveDetail(postId)
   }
 
   const handleVoteComment = async (commentId: string, direction: 'up' | 'down') => {
+    const startEpoch = currentSessionEpoch()
+    const targetPostId = selectedPostIdRef.current
     setBusy(true)
     const res = await apiMutate<unknown>('POST', '/api/v1/tools/masc_board_comment_vote', {
       comment_id: commentId,
       direction,
       voter: 'operator',
     })
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setBusy(false)
     if (!res.ok) {
       setFeedback({ kind: 'err', message: `댓글 투표 실패: ${res.error.message}` })
       return
     }
-    if (selectedPostId) await refreshActiveDetail(selectedPostId)
+    if (targetPostId && selectedPostIdRef.current === targetPostId) {
+      await refreshActiveDetail(targetPostId)
+    }
   }
 
   const handleToggleReaction = async (targetType: 'post' | 'comment', targetId: string, emoji: string) => {
+    const startEpoch = currentSessionEpoch()
+    const targetPostId = selectedPostIdRef.current
     setBusy(true)
     const res = await apiMutate<unknown>('POST', '/api/v1/board/reactions', {
       target_type: targetType,
       target_id: targetId,
       emoji,
     })
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setBusy(false)
     if (!res.ok) {
       setFeedback({ kind: 'err', message: `반응 변경 실패: ${res.error.message}` })
       return
     }
-    if (selectedPostId) await refreshActiveDetail(selectedPostId)
+    if (targetPostId && selectedPostIdRef.current === targetPostId) {
+      await refreshActiveDetail(targetPostId)
+    }
   }
 
   const handlePinPost = async (post: BoardPostItem) => {
+    const startEpoch = currentSessionEpoch()
     setBusy(true)
     const res = await apiMutate<unknown>('POST', '/api/v1/dashboard/board/pin', {
       post_id: post.id,
       pinned: !post.pinned,
     })
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setBusy(false)
     if (!res.ok) {
       setFeedback({ kind: 'err', message: `고정 변경 실패: ${res.error.message}` })
@@ -868,19 +894,22 @@ export function BoardTab(props: WorkspaceViewProps) {
     setFeedback({ kind: 'ok', message: post.pinned ? '고정이 해제되었습니다.' : '게시글이 고정되었습니다.' })
     resourceCache.invalidateTopic('board')
     await loadBoard('manual')
-    await refreshActiveDetail(post.id)
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
+    if (selectedPostIdRef.current === post.id) await refreshActiveDetail(post.id)
   }
 
   const handleDeletePost = async (postId: string) => {
+    const startEpoch = currentSessionEpoch()
     setBusy(true)
     const res = await apiMutate<unknown>('POST', '/api/v1/dashboard/board/delete', { post_id: postId })
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setBusy(false)
     if (!res.ok) {
       setFeedback({ kind: 'err', message: `게시글 삭제 실패: ${res.error.message}` })
       return
     }
     setFeedback({ kind: 'ok', message: `게시글 ${postId} 삭제 완료` })
-    setSelectedPostId(null)
+    setSelectedPostId((cur) => (cur === postId ? null : cur))
     resourceCache.invalidateTopic('board')
     await loadBoard('manual')
   }

@@ -161,11 +161,13 @@ export function AddonsTab(props: WorkspaceViewProps) {
   }
 
   const handleAttach = async (manifestPath: string) => {
+    const startEpoch = currentSessionEpoch()
     const res = await apiMutate<unknown>('POST', '/api/v1/lane-addons/attach', {
       manifest_path: manifestPath,
       run_id: attachRunId.trim() || 'default',
       binding: {},
     })
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     if (!res.ok) {
       setBanner({ kind: 'err', text: `애드온 Attach 실패: ${res.error.message}` })
       return
@@ -177,7 +179,9 @@ export function AddonsTab(props: WorkspaceViewProps) {
   }
 
   const handleDetach = async (instanceId: string) => {
+    const startEpoch = currentSessionEpoch()
     const res = await apiMutate<unknown>('POST', '/api/v1/lane-addons/detach', { instance_id: instanceId })
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     if (!res.ok) {
       setBanner({ kind: 'err', text: `Detach 실패: ${res.error.message}` })
       return
@@ -187,7 +191,9 @@ export function AddonsTab(props: WorkspaceViewProps) {
   }
 
   const handleObserve = async (instanceId: string) => {
+    const startEpoch = currentSessionEpoch()
     const res = await apiMutate<unknown>('POST', '/api/v1/lane-addons/observe', { instance_id: instanceId })
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     if (!res.ok) {
       setBanner({ kind: 'err', text: `관측 트리거 실패: ${res.error.message}` })
       return
@@ -205,6 +211,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
       setBanner({ kind: 'err', text: `액션 JSON 오류: ${err instanceof Error ? err.message : String(err)}` })
       return
     }
+    const startEpoch = currentSessionEpoch()
     const requestId = `req-${Date.now()}`
     const res = await apiMutate<unknown>('POST', '/api/v1/lane-addons/actions', {
       instance_id: inst.instance_id,
@@ -212,6 +219,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
       request_id: requestId,
       action: parsedAction,
     })
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     if (!res.ok) {
       setBanner({ kind: 'err', text: `액션 호출 실패: ${res.error.message}` })
       return
@@ -248,11 +256,13 @@ export function AddonsTab(props: WorkspaceViewProps) {
       setBanner({ kind: 'err', text: '응답할 질문 항목이 없습니다.' })
       return
     }
+    const startEpoch = currentSessionEpoch()
     const res = await apiMutate<unknown>('POST', '/api/v1/lane-addons/ask-answer', {
       declaration_id: ask.declaration_id,
       ask_id: ask.ask_id,
       answers: submissions,
     })
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     if (!res.ok) {
       setBanner({ kind: 'err', text: `애드온 질문 응답 실패: ${res.error.message}` })
       return
@@ -262,6 +272,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
   }
 
   const handleReadOpenTabs = async (client: BrowserClientRow) => {
+    const startEpoch = currentSessionEpoch()
     setReadingClient(client.clientId)
     const res = await apiMutate<{
       readonly ok?: boolean
@@ -271,7 +282,8 @@ export function AddonsTab(props: WorkspaceViewProps) {
       lane: 'live',
       clientId: client.clientId,
     })
-    setReadingClient(null)
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
+    setReadingClient((cur) => (cur === client.clientId ? null : cur))
     if (!res.ok) {
       setBanner({ kind: 'err', text: `탭 읽기 실패 (${client.clientId}): ${res.error.message}` })
       return

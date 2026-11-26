@@ -25,6 +25,7 @@ import { apiGet, apiMutate, type ApiError } from './transport'
 import { extractDeviceCode, extractOAuthUrl, stripAnsi } from './setup-login-stream'
 import type { Result } from '../lib/result'
 import { readSse } from '../lib/sse-reader'
+import { isRecord } from '../lib/type-guards'
 
 export type OAuthAttemptKind =
   | 'awaiting_consent'
@@ -69,10 +70,6 @@ const TERMINAL_ATTEMPT_KINDS = new Set<OAuthAttemptKind>([
   'superseded',
   'unavailable',
 ])
-
-function isRecord(v: unknown): v is Record<string, unknown> {
-  return typeof v === 'object' && v !== null && !Array.isArray(v)
-}
 
 function parseSafeHttpUrl(raw: unknown): string | null {
   if (typeof raw !== 'string' || !raw.trim()) return null
@@ -154,9 +151,12 @@ export function startKeeperOAuthPopupFlow(params: {
     params.onUpdate(state)
   }
 
+  let pollAbort: AbortController | null = null
   const cleanup = () => {
     if (disposed) return
     disposed = true
+    pollAbort?.abort()
+    pollAbort = null
     if (pollTimer !== null) {
       clearInterval(pollTimer)
       pollTimer = null
@@ -256,39 +256,82 @@ export function startKeeperOAuthPopupFlow(params: {
         : `${params.providerLabel} 인증 링크가 준비되었습니다 (팝업이 차단된 경우 아래 버튼을 클릭하세요).`,
     })
 
-    if (!attemptId || disposed) return
+    if (!attemptId) {
+      cleanup()
+      return
+    }
+    if (disposed) return
+
+    const MAX_CONSECUTIVE_POLL_ERRORS = 5
+    const MAX_POLL_DURATION_MS = 10 * 60 * 1000
+    const startedAt = Date.now()
+    let pollInFlight = false
+    let consecutiveErrors = 0
 
     const pollOnce = async () => {
-      if (disposed || !isEpochCurrent(startEpoch)) return
-      const qs = new URLSearchParams({
-        keeper: params.keeper,
-        provider: params.provider,
-        attempt_id: attemptId,
-      })
-      const statusRes = await apiGet<unknown>(`/api/v1/keepers/oauth/attempt-status?${qs.toString()}`)
-      if (disposed || !isEpochCurrent(startEpoch) || !statusRes.ok) return
-      const parsed = decodeOAuthAttemptStatus(statusRes.value)
-      if (parsed.kind === 'callback_admitted') {
-        emit({ phase: 'completing', message: `${params.providerLabel} 콜백 확인 중 — 도구 목록을 동기화하고 있습니다…` })
-        return
-      }
-      if (!isTerminalOAuthAttemptKind(parsed.kind)) return
-
-      if (parsed.kind === 'completed') {
-        const suffix = parsed.discoveryFailed
-          ? ' (자격 증명은 저장되었으나 도구 검색이 실패했습니다)'
-          : typeof parsed.toolCount === 'number'
-            ? ` (도구 ${parsed.toolCount}개 발견)`
-            : ''
-        settle(true, {
-          phase: 'completed',
-          message: `${params.providerLabel} 연결 완료${suffix}.`,
-        })
-      } else {
+      if (disposed || pollInFlight || !isEpochCurrent(startEpoch)) return
+      if (Date.now() - startedAt > MAX_POLL_DURATION_MS) {
         settle(false, {
           phase: 'failed',
-          message: `${params.providerLabel} OAuth 실패 (${parsed.kind}).`,
+          message: `${params.providerLabel} OAuth 인증 시간이 초과되었습니다. 다시 시도하세요.`,
         })
+        return
+      }
+      pollInFlight = true
+      const ctrl = new AbortController()
+      pollAbort = ctrl
+      try {
+        const qs = new URLSearchParams({
+          keeper: params.keeper,
+          provider: params.provider,
+          attempt_id: attemptId,
+        })
+        const statusRes = await apiGet<unknown>(
+          `/api/v1/keepers/oauth/attempt-status?${qs.toString()}`,
+          { signal: ctrl.signal },
+        )
+        if (disposed || ctrl.signal.aborted || !isEpochCurrent(startEpoch)) return
+        if (!statusRes.ok) {
+          if (statusRes.error.kind === 'aborted' || statusRes.error.kind === 'epoch_stale') return
+          consecutiveErrors += 1
+          const terminalHttp = statusRes.error.kind === 'unauthorized'
+            || statusRes.error.kind === 'forbidden'
+            || statusRes.error.status === 404
+          if (terminalHttp || consecutiveErrors >= MAX_CONSECUTIVE_POLL_ERRORS) {
+            settle(false, {
+              phase: 'failed',
+              message: `${params.providerLabel} OAuth 상태 확인 실패: ${statusRes.error.message}`,
+            })
+          }
+          return
+        }
+        consecutiveErrors = 0
+        const parsed = decodeOAuthAttemptStatus(statusRes.value)
+        if (parsed.kind === 'callback_admitted') {
+          emit({ phase: 'completing', message: `${params.providerLabel} 콜백 확인 중 — 도구 목록을 동기화하고 있습니다…` })
+          return
+        }
+        if (!isTerminalOAuthAttemptKind(parsed.kind)) return
+
+        if (parsed.kind === 'completed') {
+          const suffix = parsed.discoveryFailed
+            ? ' (자격 증명은 저장되었으나 도구 검색이 실패했습니다)'
+            : typeof parsed.toolCount === 'number'
+              ? ` (도구 ${parsed.toolCount}개 발견)`
+              : ''
+          settle(true, {
+            phase: 'completed',
+            message: `${params.providerLabel} 연결 완료${suffix}.`,
+          })
+        } else {
+          settle(false, {
+            phase: 'failed',
+            message: `${params.providerLabel} OAuth 실패 (${parsed.kind}).`,
+          })
+        }
+      } finally {
+        if (pollAbort === ctrl) pollAbort = null
+        pollInFlight = false
       }
     }
 

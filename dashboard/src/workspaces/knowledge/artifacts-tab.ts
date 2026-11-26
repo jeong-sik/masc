@@ -10,6 +10,7 @@ import { html } from 'htm/preact'
 import { copyToClipboard } from '../../components/common/copyable-code'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { currentSessionEpoch, isEpochCurrent } from '../../core/auth'
 import { markViewSnapshot } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { apiGet } from '../../core/transport'
@@ -48,8 +49,27 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
   const [docError, setDocError] = useState<string | null>(null)
   const [copyNotice, setCopyNotice] = useState<string | null>(null)
   const docAbortRef = useRef<AbortController | null>(null)
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      docAbortRef.current?.abort()
+      if (copyTimerRef.current !== null) {
+        clearTimeout(copyTimerRef.current)
+        copyTimerRef.current = null
+      }
+    }
+  }, [])
+
+  useEffect(() => {
+    setSelectedRevision(null)
+  }, [props.entityId])
 
   const loadList = useCallback(async (reason: 'mount' | 'manual' = 'mount') => {
+    const startEpoch = currentSessionEpoch()
     setLoading(true)
     setLoadError(null)
     const obs = await resourceCache.fetch<ArtifactListBundle>(
@@ -79,6 +99,7 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
       },
       { ttlMs: 15_000, topics: ['artifacts'], reason },
     )
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setLoading(false)
     if (obs.kind === 'value') {
       setBundle(obs.data)
@@ -167,8 +188,13 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
 
   const copyText = async (text: string, label: string) => {
     const copied = await copyToClipboard(text)
+    if (!mountedRef.current) return
     setCopyNotice(copied ? `${label} 복사됨` : '클립보드 복사를 지원하지 않는 환경입니다.')
-    setTimeout(() => setCopyNotice(null), 2000)
+    if (copyTimerRef.current !== null) clearTimeout(copyTimerRef.current)
+    copyTimerRef.current = setTimeout(() => {
+      copyTimerRef.current = null
+      if (mountedRef.current) setCopyNotice(null)
+    }, 2000)
   }
 
   const downloadArtifact = (current: ArtifactDocumentData) => {

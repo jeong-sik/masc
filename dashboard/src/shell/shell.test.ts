@@ -53,6 +53,7 @@ import {
   recordIncident,
   refreshPendingHitl,
   resetShellStateForTests,
+  shellToasts,
   toggleRail,
   unreadIncidentCount,
   viewportWidth,
@@ -1217,5 +1218,107 @@ describe('Proposal A+ Shell components', () => {
     )
     expect(accountButtons).toHaveLength(1)
     expect(accountButtons[0]?.textContent?.trim()).toBe('Open Sign-In Gate →')
+  })
+
+  it('CommandPalette exposes aria-activedescendant tracking the selected option id across ArrowDown', async () => {
+    commandPaletteOpen.value = true
+    await act(async () => {
+      render(h(CommandPalette, {}), container)
+    })
+    const input = container.querySelector('.ap-cmdk-input') as HTMLInputElement
+    const dialog = container.querySelector('.ap-cmdk-dialog') as HTMLElement
+    expect(input.getAttribute('aria-activedescendant')).toBe('ap-cmdk-opt-0')
+    expect(container.querySelector('#ap-cmdk-opt-0')?.getAttribute('aria-selected')).toBe('true')
+
+    await act(async () => {
+      fireEvent.keyDown(dialog, { key: 'ArrowDown' })
+    })
+    expect(input.getAttribute('aria-activedescendant')).toBe('ap-cmdk-opt-1')
+    expect(container.querySelector('#ap-cmdk-opt-1')?.getAttribute('aria-selected')).toBe('true')
+  })
+
+  it('FastApprovalStrip locks on CAS revision drift for the same approvalId and surfaces an error toast on failed approval', async () => {
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: AUTH_METHODS,
+      workspaceId: 'default',
+    }
+    const fetchEmpty: typeof fetch = async (input) => hitlJson(EMPTY_HITL[new URL(String(input), location.href).pathname] ?? {})
+    await refreshPendingHitl(fetchEmpty)
+
+    const baseApproval = {
+      approvalId: 'apr-cas-1',
+      keeper: 'sangsu',
+      toolCallId: 'tc-cas-1',
+      tool: 'git_push',
+      args: '{}',
+      question: 'Allow?',
+      because: 'guard',
+      askedAt: 1700000000,
+      workspaceId: 'default',
+      revision: 'rev-1',
+    }
+    pendingApprovals.value = [baseApproval]
+
+    await act(async () => {
+      render(h(FastApprovalStrip, {}), container)
+    })
+    expect(container.querySelector('.tla')?.getAttribute('data-locked')).toBe('false')
+
+    // Failed decision surfaces error toast
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: 'stale approval' }), { status: 409, headers: { 'content-type': 'application/json' } }),
+    )
+    const approveBtn = container.querySelector('.btn-primary') as HTMLButtonElement
+    await act(async () => {
+      fireEvent.click(approveBtn)
+      await new Promise((r) => setTimeout(r, 20))
+    })
+    expect(shellToasts.value.some((t) => t.tone === 'error' && t.message.includes('승인 실패'))).toBe(true)
+
+    // Revision drift on the same approvalId immediately locks TargetLockedAction
+    await act(async () => {
+      pendingApprovals.value = [{ ...baseApproval, revision: 'rev-2' }]
+    })
+    expect(container.querySelector('.tla')?.getAttribute('data-locked')).toBe('true')
+    expect((container.querySelector('.btn-primary') as HTMLButtonElement).disabled).toBe(true)
+  })
+
+  it('TopBar verifies single-user Bearer tokens before closing popover or showing success toast', async () => {
+    authSession.value = {
+      kind: 'single_user_auth_required',
+      mode: 'single_user',
+      authMethods: AUTH_METHODS,
+      reason: 'auth required',
+    }
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ error: 'invalid token' }), { status: 401, headers: { 'content-type': 'application/json' } }),
+    )
+
+    await act(async () => {
+      render(h(TopBar, {}), container)
+    })
+    const trigger = container.querySelector('[data-testid="account-workspace-switcher"]') as HTMLButtonElement
+    await act(async () => {
+      fireEvent.click(trigger)
+    })
+
+    const tokenInput = container.querySelector('#ap-quick-bearer') as HTMLInputElement
+    const form = container.querySelector('.ap-switcher-bearer') as HTMLFormElement
+    await act(async () => {
+      fireEvent.input(tokenInput, { target: { value: 'bad-token-value' } })
+    })
+    await act(async () => {
+      fireEvent.submit(form)
+      await new Promise((r) => setTimeout(r, 20))
+    })
+
+    // Popover stays open, inline alert is shown, and no success toast is emitted
+    expect(container.querySelector('.ap-switcher-menu')).not.toBeNull()
+    expect(container.querySelector('.ap-switcher-bearer [role="alert"]')).not.toBeNull()
+    expect(shellToasts.value.some((t) => t.tone === 'success')).toBe(false)
+    expect(shellToasts.value.some((t) => t.tone === 'error')).toBe(true)
   })
 })

@@ -77,6 +77,38 @@ describe('components/primitives', () => {
     expect(secondCells[2]!.textContent).toBe('미보고')
   })
 
+  it('DataTable ignores row click when clicking an interactive descendant inside a clickable row', () => {
+    interface Row {
+      readonly id: string
+      readonly name: string
+    }
+    const onRowClick = vi.fn()
+    const onBtnClick = vi.fn()
+    const rows: Row[] = [{ id: 'r1', name: 'sangsu' }]
+    const columns: DataTableColumn<Row>[] = [
+      { id: 'name', header: '키퍼', accessor: (r) => r.name },
+      {
+        id: 'act',
+        header: '작업',
+        cell: () => html`<button type="button" data-testid="nested-btn" onClick=${onBtnClick}>실행</button>`,
+      },
+    ]
+
+    render(
+      html`<${DataTable} data=${rows} columns=${columns} getRowId=${(r: Row) => r.id} onRowClick=${onRowClick} />`,
+      container,
+    )
+
+    const nestedBtn = container.querySelector('[data-testid="nested-btn"]') as HTMLButtonElement
+    nestedBtn.click()
+    expect(onBtnClick).toHaveBeenCalledTimes(1)
+    expect(onRowClick).not.toHaveBeenCalled()
+
+    const firstCell = container.querySelector('tbody tr td') as HTMLTableCellElement
+    firstCell.click()
+    expect(onRowClick).toHaveBeenCalledTimes(1)
+  })
+
   it('TargetLockedAction displays 4 identity fields and auto-locks on revision drift OR sessionEpoch change', () => {
     const target = {
       workspaceId: 'default',

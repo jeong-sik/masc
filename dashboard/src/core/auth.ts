@@ -364,13 +364,21 @@ async function readMultiAccountSession(
   fetchImpl: typeof fetch,
   authMethods: AuthMethods,
   previousAccountId: string | null,
+  timeoutMs: number = DEFAULT_BOOTSTRAP_TIMEOUT_MS,
+  isCurrent: () => boolean = () => true,
 ): Promise<AuthSession> {
   // 1. Live OCaml Server_login_http route: GET /auth/session -> { user_id, expires_at_ms, csrf_token }
-  const res = await fetchImpl('/auth/session', {
-    method: 'GET',
-    credentials: 'same-origin',
-    headers: { Accept: 'application/json' },
-  })
+  const res = await fetchWithBootstrapTimeout(
+    fetchImpl,
+    '/auth/session',
+    {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    },
+    timeoutMs,
+  )
+  if (!isCurrent()) return authSession.peek()
   if (res.status === 401 || res.status === 403) {
     activeCsrfToken = null
     writeAccountMarker(null)
@@ -389,6 +397,7 @@ async function readMultiAccountSession(
     return { kind: 'unavailable', reason: `GET /auth/session failed (${res.status})` }
   }
   const sessionBody = (await res.json().catch(() => null)) as AuthSessionWirePayload | null
+  if (!isCurrent()) return authSession.peek()
   const userId = nonEmptyString(sessionBody?.user_id)
   const csrfToken = nonEmptyString(sessionBody?.csrf_token)
   if (sessionBody === null || userId === null || csrfToken === null) {
@@ -409,11 +418,17 @@ async function readMultiAccountSession(
   }
 
   // 2. Live OCaml Auth_preview route: GET /api/v1/auth/whoami -> { principal: { kind: "human", id }, role, binding }
-  const whoRes = await fetchImpl('/api/v1/auth/whoami', {
-    method: 'GET',
-    credentials: 'same-origin',
-    headers: { Accept: 'application/json' },
-  })
+  const whoRes = await fetchWithBootstrapTimeout(
+    fetchImpl,
+    '/api/v1/auth/whoami',
+    {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    },
+    timeoutMs,
+  )
+  if (!isCurrent()) return authSession.peek()
   if (whoRes.status === 401 || whoRes.status === 403) {
     activeCsrfToken = null
     writeAccountMarker(null)
@@ -433,6 +448,7 @@ async function readMultiAccountSession(
     return { kind: 'unavailable', reason: `GET /api/v1/auth/whoami failed (${whoRes.status})` }
   }
   const whoBody = (await whoRes.json().catch(() => null)) as AuthWhoamiWirePayload | null
+  if (!isCurrent()) return authSession.peek()
   if (whoBody === null) {
     activeCsrfToken = null
     return { kind: 'unavailable', reason: 'GET /api/v1/auth/whoami returned malformed payload' }
@@ -455,6 +471,7 @@ async function readMultiAccountSession(
     }
   }
 
+  if (!isCurrent()) return authSession.peek()
   activeCsrfToken = csrfToken
   const prevWorkspaceId = activeWorkspaceId.peek()
   const serverWorkspaceId = nonEmptyString(whoBody.workspace_id) ?? nonEmptyString(sessionBody.workspace_id)
@@ -655,7 +672,19 @@ export async function bootstrapAuthSession(
 
     if (mode === 'multi_account') {
       persistBearer(null)
-      const next = await readMultiAccountSession(fetchImpl, authMethods, prevAccountId)
+      const prevWs = activeWorkspaceId.peek()
+      const next = await readMultiAccountSession(
+        fetchImpl,
+        authMethods,
+        prevAccountId,
+        timeoutMs,
+        ownsCredential,
+      )
+      // readMultiAccountSession itself may bump sessionEpoch when the server
+      // workspace differs from prevWs; only bail when an external epoch or
+      // credential change preempted this bootstrap.
+      const workspaceBumpedBySelf = activeWorkspaceId.peek() !== prevWs && currentStoredTokenRevision() === bearerRevision
+      if (!ownsCredential() && !workspaceBumpedBySelf) return authSession.peek()
       if (next.kind === 'account_changed') bumpSessionEpoch()
       authSession.value = next
       return next
@@ -772,8 +801,18 @@ export async function refreshMultiAccountCsrf(
 ): Promise<string | null> {
   const cur = authSession.peek()
   if (cur.kind !== 'multi_account_signed_in') return null
-  const next = await readMultiAccountSession(fetchImpl, cur.authMethods, cur.accountId).catch(() => null)
+  const startEpoch = currentSessionEpoch()
+  const prevWs = activeWorkspaceId.peek()
+  const next = await readMultiAccountSession(
+    fetchImpl,
+    cur.authMethods,
+    cur.accountId,
+    DEFAULT_BOOTSTRAP_TIMEOUT_MS,
+    () => isEpochCurrent(startEpoch),
+  ).catch(() => null)
   if (next === null) return null
+  const workspaceBumpedBySelf = activeWorkspaceId.peek() !== prevWs
+  if (!isEpochCurrent(startEpoch) && !workspaceBumpedBySelf) return null
   if (next.kind === 'account_changed') {
     bumpSessionEpoch()
     authSession.value = next
@@ -820,7 +859,17 @@ export function installAuthLifecycleGuards(
     if (document.visibilityState !== 'visible') return
     const cur = authSession.peek()
     if (cur.kind !== 'multi_account_signed_in') return
-    void readMultiAccountSession(fetchImpl, cur.authMethods, cur.accountId).then((next) => {
+    const startEpoch = currentSessionEpoch()
+    const prevWs = activeWorkspaceId.peek()
+    void readMultiAccountSession(
+      fetchImpl,
+      cur.authMethods,
+      cur.accountId,
+      DEFAULT_BOOTSTRAP_TIMEOUT_MS,
+      () => isEpochCurrent(startEpoch),
+    ).then((next) => {
+      const workspaceBumpedBySelf = activeWorkspaceId.peek() !== prevWs
+      if (!isEpochCurrent(startEpoch) && !workspaceBumpedBySelf) return
       if (next.kind === 'account_changed' || next.kind === 'multi_account_signed_out') {
         activeCsrfToken = null
         bumpSessionEpoch()

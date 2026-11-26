@@ -762,7 +762,13 @@ export function InboxTab(props: WorkspaceViewProps) {
   }
 
   const auditColumns = useMemo<readonly DataTableColumn<GateResolvedAuditRow>[]>(() => [
-    { id: 'resolvedAt', header: '시각', accessor: (r) => formatRelativeTime(r.resolvedAt), sortable: true },
+    {
+      id: 'resolvedAt',
+      header: '시각',
+      accessor: (r) => formatRelativeTime(r.resolvedAt),
+      sortValue: (r) => r.resolvedAt,
+      sortable: true,
+    },
     { id: 'keeper', header: 'Keeper', cell: (r) => html`<${KeeperBadge} id=${r.keeper} size="sm" />` },
     { id: 'tool', header: 'Tool', accessor: (r) => r.toolName },
     {

@@ -285,4 +285,78 @@ describe('PopoverMenu primitive', () => {
     expect(sub).not.toBeNull()
     expect(sub?.textContent).toBe('Read-Only Snapshot')
   })
+
+  it('ignores document Escape while an external aria-modal dialog is open above the popover', async () => {
+    const onModalEscape = vi.fn()
+    await act(async () => {
+      render(
+        html`
+          <div>
+            <${PopoverMenu}
+              defaultOpen=${true}
+              triggerLabel="Tools"
+              triggerTestId="bg-trigger"
+              popoverTestId="bg-menu"
+              ariaLabel="배경 메뉴"
+              items=${[{ id: 'a', label: 'A', onSelect: vi.fn() }]}
+            />
+            <div role="dialog" aria-modal="true" data-testid="top-modal" onKeyDown=${(e: KeyboardEvent) => {
+              if (e.key === 'Escape') onModalEscape()
+            }}>
+              <button type="button" data-testid="modal-btn">Modal</button>
+            </div>
+          </div>
+        `,
+        container,
+      )
+    })
+
+    const modalBtn = container.querySelector('[data-testid="modal-btn"]') as HTMLButtonElement
+    await act(async () => {
+      fireEvent.keyDown(modalBtn, { key: 'Escape' })
+    })
+    expect(onModalEscape).toHaveBeenCalledTimes(1)
+    expect(container.querySelector('[data-testid="bg-menu"]')).not.toBeNull()
+  })
+
+  it('allows Tab traversal between controls inside role="dialog" popovers and closes only when tabbing out', async () => {
+    await act(async () => {
+      render(
+        html`
+          <${PopoverMenu}
+            defaultOpen=${true}
+            role="dialog"
+            triggerLabel="Auth"
+            triggerTestId="dlg-trigger"
+            popoverTestId="dlg-popover"
+            ariaLabel="인증 폼"
+          >
+            ${() => html`
+              <input type="text" data-testid="dlg-first" />
+              <button type="button" data-testid="dlg-last">저장</button>
+            `}
+          <//>
+        `,
+        container,
+      )
+    })
+
+    const popover = container.querySelector('[data-testid="dlg-popover"]') as HTMLElement
+    const first = container.querySelector('[data-testid="dlg-first"]') as HTMLInputElement
+    const last = container.querySelector('[data-testid="dlg-last"]') as HTMLButtonElement
+
+    // Tabbing from the first control stays open so focus can advance to the second control
+    first.focus()
+    await act(async () => {
+      fireEvent.keyDown(popover, { key: 'Tab' })
+    })
+    expect(container.querySelector('[data-testid="dlg-popover"]')).not.toBeNull()
+
+    // Tabbing forward past the last focusable closes the dialog popover
+    last.focus()
+    await act(async () => {
+      fireEvent.keyDown(popover, { key: 'Tab' })
+    })
+    expect(container.querySelector('[data-testid="dlg-popover"]')).toBeNull()
+  })
 })

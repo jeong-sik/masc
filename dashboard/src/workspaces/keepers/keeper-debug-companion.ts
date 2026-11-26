@@ -330,15 +330,19 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
     const startEpoch = currentSessionEpoch()
     const res = await fetchKeeperRawTracePageApi(targetKeeper, file, 30)
     if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
-    if (res.ok) {
-      setRawTracePage(res.value)
-      props.onInspect({
-        title: `Raw Trace · ${file}`,
-        subtitle: targetKeeper,
-        kind: 'raw_trace',
-        data: res.value,
-      })
+    if (!res.ok) {
+      if (res.error.kind !== 'aborted' && res.error.kind !== 'epoch_stale') {
+        setContextStatus(`Raw Trace 읽기 실패 (${file}): ${res.error.message}`)
+      }
+      return
     }
+    setRawTracePage(res.value)
+    props.onInspect({
+      title: `Raw Trace · ${file}`,
+      subtitle: targetKeeper,
+      kind: 'raw_trace',
+      data: res.value,
+    })
   }
 
   const handleClearHistory = async () => {

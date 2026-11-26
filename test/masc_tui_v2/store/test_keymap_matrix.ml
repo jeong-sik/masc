@@ -2705,7 +2705,7 @@ let test_journeys_tab_multipane_dives_safety () =
          | _ -> false)
        ir_cmds);
 
-  (* J18: Keepers Focus Mode [c] switches in-place (dive_stack=[]), Config [e] opens Settings *)
+  (* J18: Keepers Focus Mode [c] switches in-place (inspector=None), Config [e] opens Settings *)
   record_case ();
   let m_dk =
     {
@@ -2962,7 +2962,7 @@ let test_journeys_tab_multipane_dives_safety () =
   Alcotest.(check int) "R1 pane 1 Down does NOT move hidden verif_selected_index"
     0 m_wp_n1_dn.work.verif_selected_index;
   let m_wp_n1_ent, _ = step m_wp_n1 (mk_key Keymap.Input.Enter) in
-  Alcotest.(check bool) "R1 pane 1 Enter zooms Goal Detail (never Verification_dive)"
+  Alcotest.(check bool) "R1 pane 1 Enter zooms Goal Detail (never Verification_inspector)"
     true
     (Option.is_none (Model.active_inspector m_wp_n1_ent)
      && m_wp_n1_ent.nav.zoomed
@@ -6341,7 +6341,7 @@ let test_wave2_100pct_menu_reachability_matrix () =
         true has_b)
     [ (80, 24); (90, 28) ];
 
-  (* 5b. armed_vote cleared on switch_workspace and push_dive *)
+  (* 5b. armed_vote cleared on switch_workspace and Board [Enter] zoom *)
   let m_armed, _ = step m_board (char_key "+") in
   Alcotest.(check bool) "first '+' arms board vote" true
     (Option.is_some m_armed.knowledge.armed_vote);
@@ -6349,7 +6349,7 @@ let test_wave2_100pct_menu_reachability_matrix () =
   Alcotest.(check bool) "switch_workspace clears armed_vote" true
     (Option.is_none m_sw.knowledge.armed_vote);
   let m_dive_clr, _ = step m_armed (mk_key Keymap.Input.Enter) in
-  Alcotest.(check bool) "push_dive clears armed_vote" true
+  Alcotest.(check bool) "Board [Enter] zoom clears armed_vote" true
     (Option.is_none m_dive_clr.knowledge.armed_vote);
 
   (* 5c. Artifact checks keyed by (id, revision) *)
@@ -6439,8 +6439,8 @@ let test_wave2_100pct_menu_reachability_matrix () =
       Alcotest.(check bool) label true
         (Option.is_none m_o.nav.overlay && Option.is_some m_o.toast))
     [
-      ("Verification_dive [h] warns instead of opening empty modal", m_vdive_check, char_key "h");
-      ("Verification_dive [X] warns instead of opening empty modal", m_vdive_check, char_key ~shift:true "X");
+      ("Verification_inspector [h] warns instead of opening empty modal", m_vdive_check, char_key "h");
+      ("Verification_inspector [X] warns instead of opening empty modal", m_vdive_check, char_key ~shift:true "X");
       ("Zoomed Work > Tasks [h] warns instead of opening empty modal", m_tdive_check, char_key "h");
       ("Zoomed Work > Tasks [X] warns instead of opening empty modal", m_tdive_check, char_key ~shift:true "X");
     ];
@@ -6783,7 +6783,7 @@ let test_wave3_surfaces_scroll_bounds_guards_and_secrets () =
     m_fzoom_end.runtime.detail_scroll_offset
     m_fzoom_extra.runtime.detail_scroll_offset;
 
-  (* 2. Surface 2: Work_harness valid vs invalid notes_hash pre-seeding & Verification_dive 4 tabs *)
+  (* 2. Surface 2: Work_harness valid vs invalid notes_hash pre-seeding & Verification_inspector 4 tabs *)
   let hh_snap : Wire_work.harness_health =
     {
       generated_at = 1795254000.0;
@@ -6921,7 +6921,7 @@ let test_wave3_surfaces_scroll_bounds_guards_and_secrets () =
      && Option.is_none (Work_store.selected_harness_verdict moved.work)
      && Option.is_none moved.inline_modal);
 
-  (* Verification_dive [v] cycles all 4 tabs + CanAdmin 403 notice *)
+  (* Verification_inspector [v] cycles all 4 tabs + CanAdmin 403 notice *)
   let m_vdive =
     {
       base with
@@ -6937,7 +6937,7 @@ let test_wave3_surfaces_scroll_bounds_guards_and_secrets () =
     }
   in
   let vd_txt = grid_all_text (render_full ~model:m_vdive) in
-  Alcotest.(check bool) "Verification_dive shows explicit CanAdmin notice on 403" true
+  Alcotest.(check bool) "Verification_inspector shows explicit CanAdmin notice on 403" true
     (let needle = "CanAdmin" in
      let n = String.length needle and h = String.length vd_txt in
      let rec f i =
@@ -6949,7 +6949,7 @@ let test_wave3_surfaces_scroll_bounds_guards_and_secrets () =
   let m_vd_sum, _ = step m_vdive (char_key "v") in
   let m_vd_sp, _ = step m_vd_sum (char_key "v") in
   let m_vd_tlc, _ = step m_vd_sp (char_key "v") in
-  Alcotest.(check bool) "Verification_dive [v] cycles Evidence->Summary->Specs->TLC"
+  Alcotest.(check bool) "Verification_inspector [v] cycles Evidence->Summary->Specs->TLC"
     true
     (Work_store.equal_verification_dive_tab m_vd_sum.work.verification_dive_tab
        Work_store.Verif_tab_summary
@@ -7454,7 +7454,7 @@ let test_wave3_surfaces_scroll_bounds_guards_and_secrets () =
         };
     }
   in
-  Alcotest.(check bool) "Verification_dive non-retryable fail skips force=false refetch"
+  Alcotest.(check bool) "Verification_inspector non-retryable fail skips force=false refetch"
     false
     (has_cmd
        (function
@@ -8561,7 +8561,7 @@ let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
         | _ -> false))
     [ ("unfocused", base); ("sidebar", m_sb) ];
 
-  (* 2b. Split & zoomed <- -> round-trip preserves workspace/dive_stack/zoomed and emits 0 refetches *)
+  (* 2b. Split & zoomed <- -> round-trip preserves workspace/inspector/zoomed and emits 0 refetches *)
   let m_dive_kp =
     {
       base with
@@ -8609,14 +8609,14 @@ let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
   in
   let m_dg_l, _ = step m_dive_verif (mk_key Keymap.Input.Left) in
   let m_dg_rt, cmds_dg_rt = step m_dg_l (mk_key Keymap.Input.Right) in
-  Alcotest.(check bool) "Dive_work Verification_dive Left -> Right preserves dive_stack"
+  Alcotest.(check bool) "Verification_inspector Left -> Right preserves inspector"
     true
     ((not (Model.sidebar_has_focus m_dg_rt))
      &&
      match Model.active_inspector m_dg_rt with
      | Some (Nav.Verification_inspector "ver-1") -> true
      | _ -> false);
-  Alcotest.(check int) "Dive_work Verification_dive Left -> Right emits 0 refetches" 0
+  Alcotest.(check int) "Verification_inspector Left -> Right emits 0 refetches" 0
     (List.length (Cmd.flatten cmds_dg_rt));
 
   let m_zoomed =

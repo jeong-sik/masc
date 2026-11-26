@@ -1002,7 +1002,7 @@ let bindings : binding list =
       bind ~scope:Screen_context ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Search_prev_match ~key_display:"N"
         ~hint_label:(Say.make ~ko:"이전 일치" ~en:"Prev match")
-        ~help_desc:(Say.make ~ko:"[산출물 상세] 이전 검색 결과로 이동" ~en:"[Artifact Dive] Jump to previous search match")
+        ~help_desc:(Say.make ~ko:"[산출물 상세] 이전 검색 결과로 이동" ~en:"[Artifact Detail] Jump to previous search match")
         ~footer_priority:0 (bare_char 'N');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Toggle_memory_chart ~key_display:"M"

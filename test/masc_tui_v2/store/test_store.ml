@@ -1351,7 +1351,7 @@ let test_keymap_and_slash_commands () =
   let m_dive, _ =
     Update.step ~now:t0 m_k4 (Msg.Key_event (key Keymap.Input.Enter))
   in
-  Alcotest.(check bool) "Enter on Keepers enters Focus Mode (zoomed=true, dive_stack=[])" true
+  Alcotest.(check bool) "Enter on Keepers enters Focus Mode (zoomed=true, inspector=None)" true
     (m_dive.nav.zoomed && Option.is_none (Model.active_inspector m_dive));
   let m_popped, _ =
     Update.step ~now:t0 m_dive (Msg.Key_event (key Keymap.Input.Escape))
@@ -3582,7 +3582,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
          | _ -> false)
        cmds_wp_vapp);
   let m_wp_vdive, _ = step m_work_vp (key Keymap.Input.Enter) in
-  Alcotest.(check bool) "Work_pipeline pane 1 Enter dives into Verification_dive"
+  Alcotest.(check bool) "Work_pipeline pane 1 Enter opens Verification_inspector"
     true
     (match Model.active_inspector m_wp_vdive with
     | Some (Nav.Verification_inspector "ver-100") -> true
@@ -3595,7 +3595,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     (Option.equal Nav.equal_overlay m_sched_modal.nav.overlay
        (Some (Nav.Inline_action Nav.Schedule_form)));
 
-  (* Verification_dive: [a] approve, [x] -> Verification_reject modal -> submit, [Space] JSON *)
+  (* Verification_inspector: [a] approve, [x] -> Verification_reject modal -> submit, [Space] JSON *)
   let m_vdive =
     {
       m_work with
@@ -3603,7 +3603,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
     }
   in
   let _, cmds_vapp = step m_vdive (char_key "a") in
-  Alcotest.(check bool) "Verification_dive [a] emits Verdict_approve" true
+  Alcotest.(check bool) "Verification_inspector [a] emits Verdict_approve" true
     (has_cmd
        (function
          | Cmd.Http_post
@@ -3621,7 +3621,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
          | _ -> false)
        cmds_vapp);
   let m_vrej, _ = step m_vdive (char_key "x") in
-  Alcotest.(check bool) "Verification_dive [x] opens Verification_reject modal" true
+  Alcotest.(check bool) "Verification_inspector [x] opens Verification_reject modal" true
     (Option.equal Nav.equal_overlay m_vrej.nav.overlay
        (Some (Nav.Inline_action (Nav.Verification_reject "ver-100"))));
   let m_vrej_typed, _ = step m_vrej (char_key "b") in
@@ -3652,7 +3652,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
   in
   let m_hov_no_hh, _ = step m_vdive (char_key "h") in
   Alcotest.(check bool)
-    "Verification_dive [h] warns instead of opening empty modal when no harness verdict"
+    "Verification_inspector [h] warns instead of opening empty modal when no harness verdict"
     true
     (Option.is_none m_hov_no_hh.nav.overlay && Option.is_some m_hov_no_hh.toast);
   let hh_snap_for_task : Wire_work.harness_health =
@@ -3703,7 +3703,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
   in
   let m_hov, _ = step m_vdive_hh (char_key "h") in
   Alcotest.(check bool)
-    "Verification_dive [h] auto-seeds linked 64-hex notes_hash and focuses reason"
+    "Verification_inspector [h] auto-seeds linked 64-hex notes_hash and focuses reason"
     true
     (Option.equal Nav.equal_overlay m_hov.nav.overlay
        (Some (Nav.Inline_action (Nav.Harness_overrule valid_hash64)))
@@ -8216,7 +8216,7 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
     (Some "ev-2")
     (Option.map (fun (e : Wire_knowledge.memory_activity_event) -> e.identity)
        (Knowledge_store.selected_activity_event m_ev2.knowledge));
-  (* Enter opens full reading without pushing dive_stack; Esc closes reading *)
+  (* Enter opens full reading without opening an inspector; Esc closes reading *)
   let m_read, _ =
     Update.step ~now:t0 m_ev2
       (Msg.Key_event { Keymap.Input.key = Keymap.Input.Enter; mods = Keymap.Input.no_mods })
@@ -8340,7 +8340,7 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
   Alcotest.(check bool) "journal append refetches health" true
     (has_path "/api/v1/dashboard/keeper-memory-health" sse_paths);
 
-  (* 5. Keepers Focus Mode Keeper_memory: Enter opens reading without pushing dive_stack; Esc closes reading first *)
+  (* 5. Keepers Focus Mode Keeper_memory: Enter opens reading without opening an inspector; Esc closes reading first *)
   let m_dive =
     {
       m_loaded with
@@ -11035,7 +11035,7 @@ let test_unified_navigation_sidebar_focus_ring_and_mouse () =
     m_sb.nav.sidebar_focused;
   Alcotest.(check bool) "Body yields focus when sidebar focused" false
     (Model.body_has_focus m_sb);
-  (* 2. Down in sidebar moves cursor non-destructively (keeps workspace & dive_stack intact) *)
+  (* 2. Down in sidebar moves cursor non-destructively (keeps workspace & inspector intact) *)
   let m_goals_cur, cmds_cur = press_key m_sb Keymap.Input.Down in
   Alcotest.(check bool)
     "Arrow browsing in sidebar keeps current Pulse workspace until Enter" true
@@ -11184,7 +11184,7 @@ let test_unified_navigation_sidebar_focus_ring_and_mouse () =
             }))
   in
   (* UX-27: Wheel over unfocused sidebar only scrolls sidebar_scroll without
-     stealing focus, switching workspace, wiping dive_stack, or popping modals. *)
+     stealing focus, switching workspace, wiping inspector, or popping modals. *)
   Alcotest.(check bool) "Wheel over unfocused sidebar keeps focus in body" false
     (Model.sidebar_has_focus m_wheel_settings);
   Alcotest.(check bool) "Wheel over sidebar stays on Infra workspace" true
@@ -12419,7 +12419,7 @@ let test_single_slot_dive_error_target_guards () =
   Alcotest.(check bool)
     "Runtime_fusion run-B records matching run-B Error on fusion_detail" true
     (is_failed m_f_match.runtime.fusion_detail);
-  (* (b) Verification_dive B ignores delayed 401/403/500 Error for A without
+  (* (b) Verification_inspector B ignores delayed 401/403/500 Error for A without
      poisoning verification_evidence or verification_evidence_auth_denied,
      still routes Workspace_mismatch, and applies matching B errors. *)
   let m_verif_b =
@@ -12447,17 +12447,17 @@ let test_single_slot_dive_error_target_guards () =
              })
       in
       Alcotest.(check bool)
-        (Printf.sprintf "Verification_dive B ignores stale verif-A %s (slot intact)"
+        (Printf.sprintf "Verification_inspector B ignores stale verif-A %s (slot intact)"
            label)
         false
         (is_failed m_stale.work.verification_evidence);
       Alcotest.(check bool)
         (Printf.sprintf
-           "Verification_dive B ignores stale verif-A %s (auth_denied stays false)"
+           "Verification_inspector B ignores stale verif-A %s (auth_denied stays false)"
            label)
         false m_stale.work.verification_evidence_auth_denied;
       Alcotest.(check int)
-        (Printf.sprintf "Verification_dive B ignores stale verif-A %s (0 cmds)"
+        (Printf.sprintf "Verification_inspector B ignores stale verif-A %s (0 cmds)"
            label)
         0
         (List.length (Cmd.flatten cmds_stale)))
@@ -12478,7 +12478,7 @@ let test_single_slot_dive_error_target_guards () =
          })
   in
   Alcotest.(check bool)
-    "Verification_dive B still handles Workspace_mismatch even for verif-A" true
+    "Verification_inspector B still handles Workspace_mismatch even for verif-A" true
     (not (Epoch.equal m_v_ws.epoch m_verif_b.epoch));
   let m_v_denied, _ =
     Update.step ~now:t1 m_verif_b
@@ -12494,10 +12494,10 @@ let test_single_slot_dive_error_target_guards () =
          })
   in
   Alcotest.(check bool)
-    "Verification_dive B matching 403 sets verification_evidence_auth_denied"
+    "Verification_inspector B matching 403 sets verification_evidence_auth_denied"
     true m_v_denied.work.verification_evidence_auth_denied;
   Alcotest.(check bool)
-    "Verification_dive B matching 403 marks verification_evidence Failed" true
+    "Verification_inspector B matching 403 marks verification_evidence Failed" true
     (is_failed m_v_denied.work.verification_evidence);
   let m_v_500, _ =
     Update.step ~now:t1 m_verif_b
@@ -12513,10 +12513,10 @@ let test_single_slot_dive_error_target_guards () =
          })
   in
   Alcotest.(check bool)
-    "Verification_dive B matching 500 marks verification_evidence Failed" true
+    "Verification_inspector B matching 500 marks verification_evidence Failed" true
     (is_failed m_v_500.work.verification_evidence);
   Alcotest.(check bool)
-    "Verification_dive B matching 500 leaves auth_denied false" false
+    "Verification_inspector B matching 500 leaves auth_denied false" false
     m_v_500.work.verification_evidence_auth_denied;
   (* (c) Keepers > Trace (Trace_runtime) B ignores delayed Error for A, accepts B. *)
   let m_trace_b =
@@ -14303,7 +14303,7 @@ let test_ux_batch4_knowledge_runtime_infra () =
   let m_pushed, _ =
     Update_nav.open_inspector m_raw (Nav.Verification_inspector "ver-1")
   in
-  Alcotest.(check bool) "UX-32 push_dive resets show_raw_json to false" false
+  Alcotest.(check bool) "UX-32 open_inspector resets show_raw_json to false" false
     m_pushed.infra.show_raw_json;
 
   (* UX-33: Runtime [y] copies tab-appropriate entity, [o] guards focus, browser tabs preserve selected id *)
@@ -15766,13 +15766,13 @@ let test_ux_sweep_12_fixes () =
   Alcotest.(check int) "Item 7: Zoomed Goal pane 1 Down selects 2nd verifier run" 1
     m_gd_vdown.work.goal_dive_verif_index;
   let m_gd_vd, _ = step m_gd_vdown (mk_key Keymap.Input.Enter) in
-  Alcotest.(check bool) "Item 7: Zoomed Goal pane 1 Enter pushes Verification_dive ver-2"
+  Alcotest.(check bool) "Item 7: Zoomed Goal pane 1 Enter opens Verification_inspector ver-2"
     true
     (match Model.active_inspector m_gd_vd with
      | Some (Nav.Verification_inspector "ver-2") -> true
      | _ -> false);
   let m_gd_back, _ = step m_gd_vd (mk_key Keymap.Input.Escape) in
-  Alcotest.(check bool) "Item 4+7: Esc from nested Verification_dive restores zoomed Goal pane 1"
+  Alcotest.(check bool) "Item 4+7: Esc from Verification_inspector restores zoomed Goal pane 1"
     true (m_gd_back.nav.zoomed && m_gd_back.nav.pane_index = 1);
 
   (* === 8. Harness_overrule auto-seed + missing-hash block + Schedule_form prefill === *)
@@ -16204,7 +16204,7 @@ let test_ux_sweep_12_fixes () =
   Alcotest.(check int) "Item 10: Tab focuses Zoomed Task pane 1 (Verification)" 1
     m_td1_p1.nav.pane_index;
   let m_td1_enter, _ = step m_td1_p1 (mk_key Keymap.Input.Enter) in
-  Alcotest.(check bool) "Item 10: Enter on Zoomed Task pane 1 pushes Verification_dive"
+  Alcotest.(check bool) "Item 10: Enter on Zoomed Task pane 1 opens Verification_inspector"
     true
     (match Model.active_inspector m_td1_enter with
      | Some (Nav.Verification_inspector "ver-1") -> true
@@ -16394,7 +16394,7 @@ let test_ux_sweep_12_fixes () =
   let m_dive_arm1, _ = step_at ~now:t0 m_dive_arm0 (char_k ~ctrl:true "q") in
   let m_dive_esc, _ = step_at ~now:t0 m_dive_arm1 (mk_key Keymap.Input.Escape) in
   Alcotest.(check bool)
-    "Finding #4: Esc disarms Ctrl+Q and clears arm toast without popping Verification_dive"
+    "Finding #4: Esc disarms Ctrl+Q and clears arm toast without closing Verification_inspector"
     true
     (Option.is_none m_dive_esc.quit_armed_at
      && Option.is_none m_dive_esc.toast
@@ -16536,7 +16536,7 @@ let test_ux_sweep_12_fixes () =
   let t_expired = Clock.Mono.of_ns 15_000_000_000L in
   let m_dive_exp_esc, _ = step_at ~now:t_expired m_dive_arm1 (mk_key Keymap.Input.Escape) in
   Alcotest.(check bool)
-    "Round-2 #496: expired quit_armed_at (>2.5s) does NOT swallow Esc (pops Verification_dive)"
+    "Round-2 #496: expired quit_armed_at (>2.5s) does NOT swallow Esc (closes Verification_inspector)"
     true
     (Option.is_none m_dive_exp_esc.quit_armed_at
      && Option.is_none (Model.active_inspector m_dive_exp_esc));
@@ -20704,7 +20704,7 @@ let test_layer1_input_esc_focus_traps () =
     Update.step ~now:t0 m_art_n (Msg.Key_event (char_key ~alt:true "n"))
   in
   Alcotest.(check bool)
-    "#13a: [Alt+N] in Artifact_dive with active search still routes to Fast_deny_top"
+    "#13a: [Alt+N] in Artifacts detail with active search still routes to Fast_deny_top"
     true (has_tool_deny_post cmds_art_alt_n);
   let m_art_empty_search =
     {
@@ -20716,7 +20716,7 @@ let test_layer1_input_esc_focus_traps () =
     Update.step ~now:t0 m_art_empty_search (Msg.Key_event (char_key "N"))
   in
   Alcotest.(check bool)
-    "#13a: [N] in Artifact_dive with empty search falls through to Fast_deny_top"
+    "#13a: [N] in Artifacts detail with empty search falls through to Fast_deny_top"
     true (has_tool_deny_post cmds_art_empty_n);
 
   (* #13b & #19b & #19c: Settings edit/dirty Global guards, narrow resize Pane_inspector, Micro Settings / *)
@@ -21159,7 +21159,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
        .call_detail_scroll_offset
     > 0);
 
-  (* #12: Non-destructive sidebar browsing preserves active dive_stack until Enter *)
+  (* #12: Non-destructive sidebar browsing preserves active inspector until Enter *)
   let m_in_dive =
     let base = Model.initial ~cols:140 ~rows:36 () in
     {
@@ -21174,12 +21174,12 @@ let test_layer2_pane_scroll_nav_wayfinding () =
   in
   let m_sb_open, _ = step_k m_in_dive (char_key "b") in
   let m_sb_dn, cmds_sb_dn = step_k m_sb_open (key Keymap.Input.Down) in
-  Alcotest.(check bool) "#12: Sidebar Down preserves active dive_stack" true
+  Alcotest.(check bool) "#12: Sidebar Down preserves active inspector" true
     (Option.is_some (Model.active_inspector m_sb_dn));
   Alcotest.(check int) "#12: Sidebar Down emits 0 premature fetches" 0
     (List.length cmds_sb_dn);
   let m_sb_esc, _ = step_k m_sb_dn (key Keymap.Input.Escape) in
-  Alcotest.(check bool) "#12: Esc from sidebar returns to untouched Verification_dive"
+  Alcotest.(check bool) "#12: Esc from sidebar returns to untouched Verification_inspector"
     true
     (match Model.active_inspector m_sb_esc with
     | Some (Nav.Verification_inspector "ver-keep") -> true
@@ -21517,7 +21517,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
     "#18d: Tools_keeper_skills pane 0 clamp_for_pane keeps scroll_offset=3" 3
     m_tks_clamped.runtime.scroll_offset;
 
-  (* #20b & #20c: Verification_dive tab resets on push_dive; has_active_memory_reading is scoped *)
+  (* #20b & #20c: Verification_inspector tab resets on open_inspector; has_active_memory_reading is scoped *)
   let m_vtab =
     let base = Model.initial () in
     {
@@ -21530,7 +21530,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
     Update_nav.open_inspector m_vtab (Nav.Verification_inspector "v-1")
   in
   Alcotest.(check bool)
-    "#20b: push_dive Verification_dive resets tab to Verif_tab_evidence" true
+    "#20b: open_inspector Verification_inspector resets tab to Verif_tab_evidence" true
     (Work_store.equal_verification_dive_tab m_vdive.work.verification_dive_tab
        Work_store.Verif_tab_evidence);
   let fake_reading =
@@ -23845,7 +23845,7 @@ let test_uncached_knowledge_jumps () =
     {
       id;
       title = "Title " ^ id;
-      body = "body " ^ id;
+      body = "body " ^ id ^ " https://example.com/" ^ id;
       author = "alpha-1";
       hearth = Some "ops";
       post_kind = Some Wire_knowledge.Human_post;
@@ -24045,6 +24045,72 @@ let test_uncached_knowledge_jumps () =
   let back, _ = press scrolled Keymap.Input.Up in
   Alcotest.(check int) "and Up scrolls it back"
     comments_view.knowledge.thread_comment_scroll back.knowledge.thread_comment_scroll;
+  (* Copy [y], open URL [o], vote refetch, empty-feed Enter zoom, and delete cleanup all target the uncached post. *)
+  let _, copy_post_cmds = Update.step ~now:t0 shown (Msg.Key_event (char_key "y")) in
+  Alcotest.(check bool) "[y] copies the uncached post body" true
+    (List.exists
+       (function Cmd.Copy_clipboard s -> String.equal s far.body | _ -> false)
+       (Cmd.flatten copy_post_cmds));
+  let _, copy_comment_cmds =
+    Update.step ~now:t0 comments_view (Msg.Key_event (char_key "y"))
+  in
+  Alcotest.(check bool) "[y] in comments view copies the uncached post's selected comment" true
+    (List.exists
+       (function
+         | Cmd.Copy_clipboard s -> String.equal s long_comment.body
+         | _ -> false)
+       (Cmd.flatten copy_comment_cmds));
+  let _, open_url_cmds = Update.step ~now:t0 shown (Msg.Key_event (char_key "o")) in
+  Alcotest.(check bool) "[o] opens the first URL from the uncached post body" true
+    (List.exists
+       (function
+         | Cmd.Open_external_url u ->
+             String.equal u ("https://example.com/" ^ far.id)
+         | _ -> false)
+       (Cmd.flatten open_url_cmds));
+  let _, voted_cmds =
+    Update.step ~now:t0 shown
+      (Msg.Http_reply
+         {
+           epoch = shown.epoch;
+           reply = Msg.Reply_board_vote { post_id = "post-far"; result = Ok () };
+         })
+  in
+  Alcotest.(check (list string)) "Reply_board_vote refetches the uncached target thread"
+    [ "post-far" ] (thread_gets voted_cmds);
+  let on_loading_list =
+    { jumped_absent with nav = { jumped_absent.nav with pane_index = 0 } }
+  in
+  let no_zoom_loading, _ =
+    Update.step ~now:t0 on_loading_list (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "Enter does not zoom an uncached target while still Loading" false
+    no_zoom_loading.nav.zoomed;
+  let on_absent_list =
+    { shown_absent with nav = { shown_absent.nav with pane_index = 0 } }
+  in
+  let zoomed_absent, _ =
+    Update.step ~now:t0 on_absent_list (Msg.Key_event (key Keymap.Input.Enter))
+  in
+  Alcotest.(check bool) "Enter zooms an uncached target once loaded even before the feed loads" true
+    zoomed_absent.nav.zoomed;
+  let deleted_absent, _ =
+    Update.step ~now:t0 zoomed_absent
+      (Msg.Http_reply
+         {
+           epoch = zoomed_absent.epoch;
+           reply = Msg.Reply_board_delete { post_id = "post-far"; result = Ok () };
+         })
+  in
+  Alcotest.(check bool) "Reply_board_delete unzooms and clears the deleted uncached target" true
+    ((not deleted_absent.nav.zoomed)
+     && Option.is_none deleted_absent.knowledge.active_thread_target
+     && Option.is_none deleted_absent.knowledge.board_thread_meta
+     &&
+     match deleted_absent.knowledge.active_thread with
+     | Observed.Absent -> true
+     | Observed.Loading _ | Observed.Value _ | Observed.Unreported | Observed.Failed _ ->
+         false);
   (* Wiki: the jump lands before the index. *)
   let summary slug : Wire_knowledge.wiki_page_summary =
     {
@@ -24117,7 +24183,28 @@ let test_uncached_knowledge_jumps () =
          | _ -> None)
        (Cmd.flatten index_cmds));
   Alcotest.(check (option string)) "the pending slug is spent" None
-    indexed.knowledge.pending_wiki_jump_slug
+    indexed.knowledge.pending_wiki_jump_slug;
+  let m_fresh_wiki =
+    let base = on_board Observed.absent in
+    {
+      base with
+      knowledge =
+        { base.knowledge with wiki_index = Observed.value ~observed_at:t0 index };
+    }
+  in
+  let wiki_stale_jump, wiki_stale_cmds =
+    Update_nav.jump_to_knowledge_wiki m_fresh_wiki "delta"
+  in
+  Alcotest.(check (option string))
+    "fresh wiki index missing jumped slug keeps pending slug"
+    (Some "delta") wiki_stale_jump.knowledge.pending_wiki_jump_slug;
+  Alcotest.(check bool)
+    "fresh wiki index missing jumped slug triggers Get_wiki_index" true
+    (List.exists
+       (function
+         | Cmd.Http_get { req = Cmd.Get_wiki_index _; _ } -> true
+         | _ -> false)
+       (Cmd.flatten wiki_stale_cmds))
 
 let () =
   Alcotest.run "masc_tui_store"
@@ -26819,7 +26906,7 @@ let () =
               Alcotest.(check int) "moving to a different tree row resets selected_field_index to 0"
                 0 m_diff_sec.config.selected_field_index;
               (* 5. Unified < / > (Step_context_item) steps Published Artifact revisions
-                    on Knowledge > Artifacts AND Artifact_dive (with { / } alias preserved) *)
+                    on Knowledge > Artifacts split and zoomed detail (with { / } alias preserved) *)
               let art_entry : Wire_knowledge.artifact_entry =
                 {
                   id = "art-rev-1";
@@ -29140,10 +29227,10 @@ let () =
                   knowledge = k0;
                 }
               in
-              (* 1. Board pane 0 [Enter] zooms in with zero dive_stack *)
+              (* 1. Board pane 0 [Enter] zooms in with no inspector *)
               let m_bz, _ = step_k m_board (key Keymap.Input.Enter) in
               Alcotest.(check bool)
-                "Board [Enter] zooms without pushing dive_stack" true
+                "Board [Enter] zooms without opening an inspector" true
                 (m_bz.nav.zoomed && Option.is_none (Model.active_inspector m_bz));
               (* 2. [v] enters Thread_comments; Tab stays in unified focus ring (never hijacked!) *)
               let m_bc, _ = step_k m_bz (char_key "v") in
@@ -29523,6 +29610,185 @@ let () =
                       (function
                         | Cmd.Http_get { req = Cmd.Get_skills; _ } -> true
                         | _ -> false)
-                      cmds_del));
+                      cmds_del);
+              (* 4. Skill delete with an unrelated overlay open preserves overlay, avoids clobbering Settings config, and deduplicates Get_skills *)
+              let m_insp2_ov =
+                {
+                  m_insp2 with
+                  nav = { m_insp2.nav with overlay = Some Nav.Palette };
+                }
+              in
+              let m_del_ov, cmds_del_ov =
+                Update.step ~now:t0 m_insp2_ov
+                  (Msg.Http_reply
+                     {
+                       epoch = m_insp2_ov.epoch;
+                       reply =
+                         Msg.Reply_skill_editor_outcome
+                           {
+                             action = `Delete;
+                             reference = "ocaml-coding";
+                             result = Ok outcome;
+                           };
+                     })
+              in
+              let flat_del_ov = Cmd.flatten cmds_del_ov in
+              let get_skills_count cmds =
+                List.length
+                  (List.filter
+                     (function
+                       | Cmd.Http_get { req = Cmd.Get_skills; _ } -> true
+                       | _ -> false)
+                     cmds)
+              in
+              Alcotest.(check bool)
+                "Skill delete with Palette overlay closes inspector, preserves overlay, and emits Get_skills plus underlying fetches"
+                true
+                (Option.is_none m_del_ov.nav.inspector
+                 && Option.equal Nav.equal_overlay m_del_ov.nav.overlay
+                      (Some Nav.Palette)
+                 && get_skills_count flat_del_ov = 1
+                 && List.length flat_del_ov > 1);
+              (* 4b. Dedup branch: underlying Runtime_tools_usage / Tools_keeper_skills already requests Get_skills *)
+              let m_rt_skills =
+                {
+                  base with
+                  nav = { base.nav with workspace = Nav.Runtime; pane_index = 0 };
+                  runtime =
+                    {
+                      (Runtime_store.set_tab Nav.Runtime_tools_usage base.runtime)
+                      with
+                      tools_subview = Runtime_store.Tools_keeper_skills;
+                    };
+                }
+              in
+              let m_rt_insp, _ =
+                Update_nav.open_inspector m_rt_skills
+                  (Nav.Skill_inspector "ocaml-coding")
+              in
+              let m_rt_insp_ov =
+                {
+                  m_rt_insp with
+                  nav = { m_rt_insp.nav with overlay = Some Nav.Palette };
+                }
+              in
+              let m_rt_del, cmds_rt_del =
+                Update.step ~now:t0 m_rt_insp_ov
+                  (Msg.Http_reply
+                     {
+                       epoch = m_rt_insp_ov.epoch;
+                       reply =
+                         Msg.Reply_skill_editor_outcome
+                           {
+                             action = `Delete;
+                             reference = "ocaml-coding";
+                             result = Ok outcome;
+                           };
+                     })
+              in
+              Alcotest.(check bool)
+                "Skill delete over Runtime Skills tab deduplicates Get_skills to exactly 1"
+                true
+                (Option.is_none m_rt_del.nav.inspector
+                 && get_skills_count (Cmd.flatten cmds_rt_del) = 1);
+              (* 4c. Settings overlay over Keepers > Config: closing Skill_inspector must not clobber Settings target/schema *)
+              let m_k_roster, _ =
+                Update.step ~now:t0 base
+                  (Msg.Http_reply
+                     {
+                       epoch = base.epoch;
+                       reply =
+                         Msg.Reply_keepers_roster
+                           (Ok (roster_of [ sample_keeper "alpha" ]));
+                     })
+              in
+              let m_k_cfg =
+                {
+                  m_k_roster with
+                  nav = { m_k_roster.nav with workspace = Nav.Keepers; pane_index = 1 };
+                  fleet =
+                    { m_k_roster.fleet with keeper_dive_tab = Nav.Keeper_config };
+                }
+              in
+              let m_k_insp, _ =
+                Update_nav.open_inspector m_k_cfg
+                  (Nav.Skill_inspector "ocaml-coding")
+              in
+              let m_k_settings =
+                {
+                  m_k_insp with
+                  nav =
+                    {
+                      m_k_insp.nav with
+                      overlay = Some (Nav.Settings Nav.Settings_providers_models);
+                    };
+                  config =
+                    {
+                      (Config_store.set_target Wire_config.Target_runtime
+                         m_k_insp.config)
+                      with
+                      schema = Observed.absent;
+                    };
+                }
+              in
+              let m_k_del, _ =
+                Update.step ~now:t0 m_k_settings
+                  (Msg.Http_reply
+                     {
+                       epoch = m_k_settings.epoch;
+                       reply =
+                         Msg.Reply_skill_editor_outcome
+                           {
+                             action = `Delete;
+                             reference = "ocaml-coding";
+                             result = Ok outcome;
+                           };
+                     })
+              in
+              Alcotest.(check bool)
+                "Skill delete with Settings overlay over Keepers Config keeps Settings overlay and Target_runtime untouched"
+                true
+                (Option.is_none m_k_del.nav.inspector
+                 && Option.equal Nav.equal_overlay m_k_del.nav.overlay
+                      (Some (Nav.Settings Nav.Settings_providers_models))
+                 && (match m_k_del.config.target with
+                    | Wire_config.Target_runtime -> true
+                    | Wire_config.Target_keeper _
+                    | Wire_config.Target_keeper_create ->
+                        false)
+                 && not (Observed.is_loading m_k_del.config.schema));
+              (* 5. Knowledge Memory view mode switches do not reset keeper_detail_scroll_offset *)
+              let m_kmem =
+                {
+                  base with
+                  nav =
+                    {
+                      base.nav with
+                      workspace = Nav.Knowledge;
+                      keeper_detail_scroll_offset = 17;
+                    };
+                  knowledge =
+                    {
+                      (Knowledge_store.set_tab Nav.Knowledge_memory base.knowledge)
+                      with
+                      memory_subview = Knowledge_store.Mem_diff_flow;
+                    };
+                }
+              in
+              let m_kmem_t, _ = step_k m_kmem (char_key "t") in
+              let m_kmem_e, _ = step_k m_kmem_t (char_key "e") in
+              let m_kmem_f, _ = step_k m_kmem_e (char_key "f") in
+              Alcotest.(check bool)
+                "Knowledge Memory [t]/[e]/[f] view switches transition modes and preserve keeper_detail_scroll_offset"
+                true
+                (m_kmem_t.nav.keeper_detail_scroll_offset = 17
+                 && m_kmem_e.nav.keeper_detail_scroll_offset = 17
+                 && m_kmem_f.nav.keeper_detail_scroll_offset = 17
+                 && m_kmem_t.knowledge.memory_view_mode
+                    = Knowledge_store.View_facts
+                 && m_kmem_e.knowledge.memory_view_mode
+                    = Knowledge_store.View_evolution
+                 && m_kmem_f.knowledge.memory_view_mode
+                    = Knowledge_store.View_facts));
         ] );
     ]

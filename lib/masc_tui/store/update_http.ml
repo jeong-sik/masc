@@ -1705,12 +1705,9 @@ let apply_http_reply ~now (m : Model.t) reply =
           Option.is_none (Model.active_inspector next)
           && Nav.equal_workspace next.nav.workspace Nav.Knowledge
           && Nav.equal_knowledge_tab next.knowledge.active_tab Nav.Knowledge_board
-          &&
-          match Knowledge_store.selected_post next.knowledge with
-          | Some p -> String.equal p.id post_id
-          | None ->
-              Option.equal String.equal next.knowledge.active_thread_target
-                (Some post_id)
+          && Option.equal String.equal
+               (Knowledge_store.board_detail_post_id next.knowledge)
+               (Some post_id)
         in
         if viewing_voted_post then
           [
@@ -1813,10 +1810,9 @@ let apply_http_reply ~now (m : Model.t) reply =
         Option.is_none (Model.active_inspector m)
         && Nav.equal_workspace m.nav.workspace Nav.Knowledge
         && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_board
-        &&
-        match Knowledge_store.selected_post m.knowledge with
-        | Some p -> String.equal p.id post_id
-        | None -> false
+        && Option.equal String.equal
+             (Knowledge_store.board_detail_post_id m.knowledge)
+             (Some post_id)
       in
       let nav =
         let nav0 =
@@ -1847,10 +1843,22 @@ let apply_http_reply ~now (m : Model.t) reply =
               nav0
       in
       let knowledge =
-        if viewing_deleted_post then
-          m.knowledge |> Knowledge_store.reset_thread_view
-          |> Knowledge_store.clear_armed_vote
-        else m.knowledge
+        let k0 =
+          if viewing_deleted_post then
+            m.knowledge |> Knowledge_store.reset_thread_view
+            |> Knowledge_store.clear_armed_vote
+          else m.knowledge
+        in
+        if
+          Option.equal String.equal k0.active_thread_target (Some post_id)
+        then
+          {
+            k0 with
+            active_thread = Observed.absent;
+            active_thread_target = None;
+            board_thread_meta = None;
+          }
+        else k0
       in
       let inline_modal = if close_modal then None else m.inline_modal in
       let next =
@@ -7298,8 +7306,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         |> Model.with_toast ~now ~level toast
       in
       if close_inspector then
-        if Option.is_none m_base.nav.overlay then
-          let m_closed, close_cmds = Update_nav.close_inspector m_base in
+        let ensure_get_skills close_cmds =
           let skills_path = Cmd.get_request_path Cmd.Get_skills in
           let has_get_skills =
             List.exists
@@ -7329,33 +7336,15 @@ let apply_http_reply ~now (m : Model.t) reply =
                     false)
               (Cmd.flatten close_cmds)
           in
-          let cmds =
-            if has_get_skills then close_cmds
-            else
-              Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_skills }
-              :: close_cmds
-          in
-          (m_closed, cmds)
-        else
-          (* An unrelated overlay (e.g. Palette, Settings, Ask_answer, or a
-             different inline modal) is currently open on top of the deleted
-             skill inspector: close only the underlying inspector without
-             clobbering the active overlay or its modal/ask draft. *)
-          let m_unwrapped, _ =
-            Update_nav.close_inspector
-              { m_base with nav = { m_base.nav with overlay = None } }
-          in
-          let m_closed =
-            {
-              m_unwrapped with
-              nav = { m_unwrapped.nav with overlay = m_base.nav.overlay };
-              inline_modal = m_base.inline_modal;
-              ask_modal =
-                (if Option.is_some m_base.ask_modal then m_base.ask_modal
-                 else m_unwrapped.ask_modal);
-            }
-          in
-          (m_closed, [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_skills } ])
+          if has_get_skills then close_cmds
+          else
+            Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_skills } :: close_cmds
+        in
+        let m_closed, close_cmds =
+          Update_nav.close_inspector
+            ~preserve_overlay:(Option.is_some m_base.nav.overlay) m_base
+        in
+        (m_closed, ensure_get_skills close_cmds)
       else (m_base, [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_skills } ])
   | Msg.Reply_skill_editor_outcome { action; reference; result = Error err } ->
       let clean_err =

@@ -2253,12 +2253,19 @@ let render_task_zoomed ~sel_task ~(model : Model.t) ~cache ~(rect : Rect.t)
             || ((not has_two_panes) && Option.is_some v_opt && Model.pane_focused model 0)
           in
           let rest_h = Int.max 0 (body_bot - !y) in
+          let empty_v_notice_h =
+            match v_opt with
+            | Some _ -> 0
+            | None ->
+                Work_store.verification_notice_rows
+                  ~max_rows:(Int.min 2 rest_h) model.work
+          in
           let desc_h =
             if rest_h <= 0 then 0
             else
               match tk.description, v_opt with
               | Some _, Some _ -> Int.min rest_h (Int.max 1 (rest_h / 2))
-              | Some _, None -> rest_h
+              | Some _, None -> Int.max 0 (rest_h - empty_v_notice_h)
               | None, _ -> 0
           in
           (match tk.description with
@@ -2353,6 +2360,11 @@ let render_task_zoomed ~sel_task ~(model : Model.t) ~cache ~(rect : Rect.t)
               if not (Rect.is_empty diff_r) then
                 ignore
                   (Diff.draw grid ~rect:diff_r ~theme ~scroll:v_scroll diff_rows)
+          | None when !y < body_bot ->
+              ignore
+                (Ops_common.draw_verification_read_notices grid
+                   ~rect:{ content with y = !y; h = Int.min 2 (body_bot - !y) }
+                   ~theme ~lang:model.lang model.work)
           | Some _ | None -> ());
           if action_h = 1 then
             let keys =
@@ -2749,26 +2761,33 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                     String.equal v.task_id tk.id)
                   (Work_store.verifications_list model.work)
               in
-              (match matching_v with
-              | Some v when !y < bot ->
+              (match (matching_v, verification_notice model) with
+              | Some v, notice_opt when !y < bot ->
                   let ev_str =
                     if v.submitted_evidence = [] then
                       Ops_common.say model ~ko:"증거 없음" ~en:"no evidence"
                     else String.concat ", " v.submitted_evidence
                   in
                   let value, color =
-                    match verification_notice model with
-                    | None -> ev_str, theme.status_active
+                    match notice_opt with
+                    | None -> (ev_str, theme.status_active)
                     | Some notice ->
-                        Say.resolve model.lang notice ^ Typography.sep_dot ^ ev_str,
-                        theme.status_attention
+                        ( Say.resolve model.lang notice ^ Typography.sep_dot ^ ev_str
+                        , theme.status_attention )
                   in
                   Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme
                     ~bg:card_bg ~label_w:12
                     ~key:(Ops_common.say model ~ko:"검증 증거" ~en:"Evidence")
                     ~value ~val_fg:color ();
                   incr y
-              | Some _ | None -> ());
+              | None, Some notice when !y < bot ->
+                  Ops_common.draw_kv_row grid ~rect:content ~y:!y ~theme
+                    ~bg:card_bg ~label_w:12
+                    ~key:(Ops_common.say model ~ko:"검증 증거" ~en:"Evidence")
+                    ~value:(Say.resolve model.lang notice)
+                    ~val_fg:theme.status_attention ();
+                  incr y
+              | Some _, _ | None, Some _ | None, None -> ());
               (match tk.description with
               | Some desc when !y < bot ->
                   if bot - !y >= 3 then begin

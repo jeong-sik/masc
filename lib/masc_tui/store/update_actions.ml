@@ -1168,6 +1168,11 @@ let open_goal_upsert_modal (m : Model.t) ?(goal : Wire_work.goal option) () =
   in
   ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal }, [])
 
+let reset_knowledge_zoom_transient (k : Knowledge_store.t) =
+  k |> Knowledge_store.reset_thread_view |> Knowledge_store.clear_armed_vote
+  |> Knowledge_store.clear_pending_wiki_edit
+  |> Knowledge_store.set_artifact_search ""
+
 let selected_board_post_for_crud (m : Model.t) : Wire_knowledge.board_post option =
   match Model.active_inspector m with
   | Some _ -> None
@@ -5095,12 +5100,7 @@ and execute_action ~now (m : Model.t) action =
                       else if m.nav.zoomed && Model.can_zoom_current_view m then
                         let knowledge =
                           if Nav.equal_workspace m.nav.workspace Nav.Knowledge
-                          then
-                            m.knowledge
-                            |> Knowledge_store.reset_thread_view
-                            |> Knowledge_store.clear_armed_vote
-                            |> Knowledge_store.clear_pending_wiki_edit
-                            |> Knowledge_store.set_artifact_search ""
+                          then reset_knowledge_zoom_transient m.knowledge
                           else m.knowledge
                         in
                         let m0 =
@@ -6211,7 +6211,7 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Knowledge -> (
                     match m.knowledge.active_tab with
                     | Nav.Knowledge_board -> (
-                        match Knowledge_store.selected_post m.knowledge with
+                        match Knowledge_store.board_detail_post m.knowledge with
                         | None -> None
                         | Some p ->
                             if
@@ -6607,7 +6607,7 @@ and execute_action ~now (m : Model.t) action =
                   | Nav.Knowledge_board ->
                       let url_opt =
                         Option.bind
-                          (Knowledge_store.selected_post m.knowledge)
+                          (Knowledge_store.board_detail_post m.knowledge)
                           (fun (p : Wire_knowledge.board_post) ->
                             extract_first_http_url p.body)
                       in
@@ -6783,11 +6783,7 @@ and execute_action ~now (m : Model.t) action =
           else
             let knowledge =
               if Nav.equal_workspace m.nav.workspace Nav.Knowledge then
-                m.knowledge
-                |> Knowledge_store.reset_thread_view
-                |> Knowledge_store.clear_armed_vote
-                |> Knowledge_store.clear_pending_wiki_edit
-                |> Knowledge_store.set_artifact_search ""
+                reset_knowledge_zoom_transient m.knowledge
               else m.knowledge
             in
             let m0 =
@@ -6861,13 +6857,12 @@ and execute_action ~now (m : Model.t) action =
             let knowledge =
               Knowledge_store.cycle_memory_view_mode m.knowledge
             in
-            let next =
-              {
-                m with
-                nav = { m.nav with keeper_detail_scroll_offset = 0 };
-                knowledge;
-              }
+            let nav =
+              if Nav.equal_workspace m.nav.workspace Nav.Keepers then
+                { m.nav with keeper_detail_scroll_offset = 0 }
+              else m.nav
             in
+            let next = { m with nav; knowledge } in
             (next, View_fetches.fetches_for_current_view next)
           else (m, []))
   | Keymap.Toggle_memory_sort ->
@@ -7645,9 +7640,12 @@ and execute_action ~now (m : Model.t) action =
             Knowledge_store.set_memory_view_mode Knowledge_store.View_facts
               m.knowledge
           in
-          let next =
-            { m with nav = { m.nav with keeper_detail_scroll_offset = 0 }; knowledge }
+          let nav =
+            if Nav.equal_workspace m.nav.workspace Nav.Keepers then
+              { m.nav with keeper_detail_scroll_offset = 0 }
+            else m.nav
           in
+          let next = { m with nav; knowledge } in
           (next, View_fetches.fetches_for_current_view next)
         else if Option.is_some (Model.active_inspector m) then (m, [])
         else
@@ -8259,9 +8257,12 @@ and execute_action ~now (m : Model.t) action =
                     Knowledge_store.set_memory_view_mode
                       Knowledge_store.View_evolution m.knowledge
                   in
-                  let next =
-                    { m with nav = { m.nav with keeper_detail_scroll_offset = 0 }; knowledge }
+                  let nav =
+                    if Nav.equal_workspace m.nav.workspace Nav.Keepers then
+                      { m.nav with keeper_detail_scroll_offset = 0 }
+                    else m.nav
                   in
+                  let next = { m with nav; knowledge } in
                   (next, View_fetches.fetches_for_current_view next)
                 else if
                   Nav.equal_workspace m.nav.workspace Nav.Runtime

@@ -175,11 +175,11 @@ type t = {
   wiki_lint : Wire_knowledge.wiki_lint_report Observed.t;
   wiki_edit_base : wiki_edit_base option;
   pending_wiki_edit_slug : string option;
+      (** Wiki slug whose edit modal should open automatically once its fresh
+          page detail arrives (Issue #54490). *)
   pending_wiki_jump_slug : string option;
       (** A wiki jump whose slug the loaded index did not list yet. The next
           {!apply_wiki_index} selects it; moving the selection forgets it. *)
-      (** Wiki slug whose edit modal should open automatically once its fresh
-          page detail arrives (Issue #54490). *)
   artifacts : Wire_knowledge.artifact_entry list Observed.t;
   artifact_list_generation : int;
   active_artifact_detail : Wire_knowledge.published_artifact_detail Observed.t;

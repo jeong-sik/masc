@@ -2081,9 +2081,9 @@ check
   (list (pair string (list string)))
   "Board exact-output lanes and opaque slot order"
   [ ( "board_attention_exact"
-    , [ "glm-coding.glm-5-3"; "ollama_cloud.ollama-cloud-deepseek-v4-1-flash" ] )
+    , [ "glm-coding.glm-5-4"; "ollama_cloud.ollama-cloud-deepseek-v4-1-flash" ] )
   ; ( "hitl_auto_judge"
-    , [ "glm-coding.glm-5-3"; "ollama_cloud.ollama-cloud-deepseek-v4-1-flash" ] )
+    , [ "glm-coding.glm-5-4"; "ollama_cloud.ollama-cloud-deepseek-v4-1-flash" ] )
   ]
   (List.filter
      (fun (lane_id, _) ->
@@ -2095,7 +2095,7 @@ check
 check
   (option (list string))
   "verifier_exact slot order is frozen"
-  (Some [ "glm-coding.glm-5-3"; "ollama_cloud.ollama-cloud-deepseek-v4-1-flash" ])
+  (Some [ "glm-coding.glm-5-4"; "ollama_cloud.ollama-cloud-deepseek-v4-1-flash" ])
   (match
      List.find_opt
        (fun (lane_id, _) -> String.equal lane_id "verifier_exact")
@@ -2319,19 +2319,18 @@ let test_repo_runtime_toml_vendor_ssot_alignment () =
          check (option string) (runtime_id ^ " sets keep-alive = 30m") (Some "30m")
            runtime.binding.keep_alive)
     [ "ollama.gemma4-26b-a4b-qat"; "ollama.gemma4-e2b-it-qat" ];
-  (match find_runtime runtimes "glm-coding.glm-5-3" with
-   | None -> fail "missing glm-coding.glm-5-3 in seed"
+  (match find_runtime runtimes "glm-coding.glm-5-4" with
+   | None -> fail "missing glm-coding.glm-5-4 in seed"
    | Some runtime ->
-     check bool "glm-5-3 drops contradictory seed capabilities override" true
-       (Option.is_none runtime.model.capabilities);
      match
        Llm_provider.Provider_config.capabilities_for_config_model
          (agent_core_provider_config runtime)
      with
      | Some caps ->
-       check (option int) "glm-5-3 resolves catalog max_output_tokens = 131072"
-         (Some 131072) caps.max_output_tokens
-     | None -> fail "expected glm-5-3 resolved capabilities");
+       check (option int) "glm-5-4 resolves catalog max_output_tokens = 131072"
+         (Some 131072) caps.max_output_tokens;
+       check bool "glm-5-4 reads images" true caps.supports_image_input
+     | None -> fail "expected glm-5-4 resolved capabilities");
   List.iter
     (fun (model_id, expected_ctx) ->
        match

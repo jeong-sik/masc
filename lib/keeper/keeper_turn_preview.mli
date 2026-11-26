@@ -149,9 +149,11 @@ val note_tool_started :
 val note_tool_finished :
   writer:writer option -> now:float -> tool_use_id:string option -> tool_name:string -> unit
 (** The after-tool hook ran, with a result or with a failure. The oldest open
-    call that fits ends, and when nothing else is open the next response opens
-    with no content yet, counted from here: the result goes back to the model.
-    A call that was not open only becomes the last observed tool. *)
+    call that fits ends. In an official client's attempt, when nothing else is
+    open the next response opens with no content yet, counted from here: the
+    result goes back to the model and the client announces no request. The
+    agent loop opens it at its own request instead. A call that was not open
+    only becomes the last observed tool. *)
 
 val note_turn_over : writer:writer option -> now:float -> unit
 (** The turn's run is over, at the tool boundary where the agent loop yields
@@ -196,9 +198,13 @@ val original_turn_ref : writer -> Ids.Turn_ref.t option
 (** Identity explicitly supplied at writer creation, never inferred from its
     last activity or found by Keeper name. [None] before an owner establishes it. *)
 
-val note_attempt : writer:writer option -> now:float -> runtime_id:string -> unit
-(** A new attempt of the running turn: text, tools and every open activity of
-    the earlier attempt end here, and the attempt is not failed. *)
+val note_attempt :
+  writer:writer option -> now:float -> runtime_id:string ->
+  checkpoint_owner:Runtime_execution.checkpoint_owner -> unit
+(** A new attempt of the running turn, run by [checkpoint_owner]'s loop: text,
+    tools and every open activity of the earlier attempt end here, and the
+    attempt is not failed. The loop decides what a tool block's stop means and
+    whether a tool's return opens the next response. *)
 
 val note_failure : writer:writer option -> now:float -> runtime_id:string -> string -> unit
 (** Store a bounded failure preview after applying the writer's secret snapshot.
@@ -211,7 +217,10 @@ val note_stream : writer:writer option -> now:float -> Agent_core.Types.sse_even
     requested, and the message stop ends the response. A native tool block
     ({!Runtime_native_tools.stream_content_type}) is the official client
     running its own tool: its start opens the run as executing and ends the
-    open response, and its stop ends the run. *)
+    open response, and its stop ends the run. In an official client's attempt
+    a MASC tool block wraps the host's whole call, so its stop ends that call.
+    In the agent loop's attempt the block is only the model's call, and its
+    stop changes nothing but the last observed tool. *)
 val status_text : t -> string
 
 val to_json : ?include_preparation_timeline:bool -> t -> Yojson.Safe.t

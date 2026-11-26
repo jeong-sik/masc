@@ -227,15 +227,21 @@ let tool_running ~now ~tool_use_id ~tool_name work =
   else drop (function Response_open _ -> true | Tool_open _ -> false) moved
 
 (* The result goes back to the model, so the next response is what the turn
-   waits on from here. It opens only when a call really ended here ([work] is
-   not [before]) and nothing else is left: a call still running is what the
-   turn waits on, and a response that opened while the call ran is the one to
-   keep. *)
-let response_after_return ~now before work =
+   waits on from here. Only an official client's turn needs this: it announces
+   a model message's boundaries once per turn, so nothing else says when the
+   next one began. The agent loop announces its next request itself, and that
+   request's clock starts there. The response opens only when a call really
+   ended here ([work] is not [before]) and nothing else is left: a call still
+   running is what the turn waits on, and a response that opened while the
+   call ran is the one to keep. *)
+let response_after_return ~now ~loop before work =
   if work != before then
-    match work with
-    | [] -> [ Response_open (open_response ~channel:No_content ~now) ]
-    | Tool_open _ :: _ | Response_open _ :: _ -> work
+    match loop with
+    | Some Runtime_execution.Official_client -> (
+        match work with
+        | [] -> [ Response_open (open_response ~channel:No_content ~now) ]
+        | Tool_open _ :: _ | Response_open _ :: _ -> work)
+    | Some Runtime_execution.Masc_agent_core | None -> work
   else work
 
 (* A native block is the official client's own run: it opens as running with
@@ -247,7 +253,28 @@ let native_started ~now ~tool_use_id ~tool_name work =
   let work = drop (function Response_open _ -> true | Tool_open _ -> false) work in
   (work @ [ Tool_open run ], run)
 
-let ended_run run work = drop (function Tool_open tool -> tool = run | Response_open _ -> false) work
+(* Ends one run, the one the block table kept. Two runs that look the same
+   (one name, no id, one clock) are still two runs: each block ends its own. *)
+let ended_run run work =
+  remove_first (function Tool_open tool -> tool = run | Response_open _ -> false) work
+
+(* Ends the MASC call a tool block named, however far it got: in an official
+   client's attempt the block is the host's whole call. *)
+let call_ended_with_block ~tool_use_id ~tool_name work =
+  remove_first
+    (function
+      | Tool_open call -> same_tool ~tool_use_id ~tool_name call
+      | Response_open _ -> false)
+    work
+
+(* A MASC tool block stopped in an official client's attempt. When the call
+   was still open, the hooks did not end it: a gate settled it without a run.
+   The message that called it is over as well, so the response under the call
+   ends too and the next one is counted from here. *)
+let block_stopped ~tool_use_id ~tool_name before =
+  let ended = call_ended_with_block ~tool_use_id ~tool_name before in
+  if ended == before then ended
+  else drop (function Response_open _ -> true | Tool_open _ -> false) ended
 
 (* What one provider event changes in the open work. A native block's start
    and stop are settled in [note_stream], which knows the block table. *)
@@ -305,12 +332,14 @@ type text_intake =
 module Tool_indexes = Map.Make (Int)
 
 (* What the stream said about a tool block it opened. A model's call of a MASC
-   tool is a "tool_use" block: it ends when the model finishes the call and
-   says nothing about the run. A native block is the official client running
-   its own tool: it ends when that run ends, and no tool hook comes for it.
-   [run] is that run's open activity, for a native block. *)
+   tool is a "tool_use" block: in the agent loop it ends when the model
+   finishes the call and says nothing about the run. A native block is the
+   official client running its own tool: it ends when that run ends, and no
+   tool hook comes for it. [run] is that run's open activity, for a native
+   block. [tool_use_id] names a MASC call at its stop when the stream gave one. *)
 type tool_block =
   { tool_name : string
+  ; tool_use_id : string option
   ; native_run : bool
   ; run : open_tool option
   }
@@ -328,6 +357,11 @@ type entry =
   ; owner : Keeper_interrupt_token.t option
   ; original_turn_ref : Ids.Turn_ref.t option
   ; shown_as : shown_as
+  ; loop : Runtime_execution.checkpoint_owner option
+    (** Which loop runs the attempt, [None] until its first one. An official
+        client's tool block wraps the host's whole call, and it announces a
+        model message's boundaries once per turn. The agent loop's tool block
+        is only the model's call, and it announces every request. *)
   }
 type writer = entry ref
 
@@ -515,7 +549,7 @@ let reset ~base_path ~keeper_name ~execution_scope ~turn_ref ~now ~redaction =
       let preview = empty ~execution_scope ~revision:(next_revision ()) now in
       let writer = ref { preview; text_intake; released_bytes = 0;
         tools = Tool_indexes.empty; preparations = []; next_preparation_scope_id = 0;
-        owner; original_turn_ref = turn_ref; shown_as } in
+        owner; original_turn_ref = turn_ref; shown_as; loop = None } in
       Hashtbl.replace table keeper_name writer;
       writer, shown_after_write writer)
   in
@@ -524,7 +558,7 @@ let reset ~base_path ~keeper_name ~execution_scope ~turn_ref ~now ~redaction =
 
 let original_turn_ref writer = with_lock (fun () -> (!writer).original_turn_ref)
 
-let note_attempt ~writer ~now ~runtime_id =
+let note_attempt ~writer ~now ~runtime_id ~checkpoint_owner =
   change_entry ~writer ~now (fun { preview; text_intake; owner; original_turn_ref; next_preparation_scope_id; shown_as; _ } ->
     Some
       { preview =
@@ -541,6 +575,7 @@ let note_attempt ~writer ~now ~runtime_id =
       ; original_turn_ref
       ; next_preparation_scope_id
       ; shown_as
+      ; loop = Some checkpoint_owner
       ; released_bytes = 0
       ; text_intake =
           redacting text_intake.redaction
@@ -594,11 +629,17 @@ let note_tool_started ~writer ~now ~tool_use_id ~tool_name =
 
 (* The after-tool hook, for a result and for a failure alike. *)
 let note_tool_finished ~writer ~now ~tool_use_id ~tool_name =
-  update ~writer ~now (fun old ->
-    let before = old.open_activities in
-    { old with last_tool = Some tool_name
-    ; open_activities =
-        response_after_return ~now before (tool_ended ~tool_use_id ~tool_name before) })
+  change_entry ~writer ~now (fun ({ preview; _ } as entry) ->
+    let before = preview.open_activities in
+    Some
+      { entry with preparations = []
+      ; preview =
+          { preview with
+              last_tool = Some tool_name
+            ; open_activities =
+                response_after_return ~now ~loop:entry.loop before
+                  (tool_ended ~tool_use_id ~tool_name before)
+            ; preparation = None } })
 
 (* The run of this turn is over at a tool boundary: the loop yields there and
    no later model response or turn text comes to close what the last tool
@@ -673,7 +714,9 @@ let note_stream ~writer ~now event =
           | Some _ | None ->
               let open_activities, run =
                 native_started ~now ~tool_use_id:tool_id ~tool_name preview.open_activities in
-              ( Tool_indexes.add index { tool_name; native_run = true; run = Some run } entry.tools
+              ( Tool_indexes.add index
+                  { tool_name; tool_use_id = tool_id; native_run = true; run = Some run }
+                  entry.tools
               , Some tool_name
               , open_activities ))
       | ContentBlockStop { index } when is_native_block index ->
@@ -686,21 +729,38 @@ let note_stream ~writer ~now event =
           in
           ( Tool_indexes.remove index entry.tools
           , Some block.tool_name
-          , response_after_return ~now preview.open_activities ended )
-      | Agent_core.Types.ContentBlockStart { index; tool_name = Some tool_name; _ } ->
+          , response_after_return ~now ~loop:entry.loop preview.open_activities ended )
+      | Agent_core.Types.ContentBlockStart { index; tool_id; tool_name = Some tool_name; _ } ->
           (* The model started calling a MASC tool. *)
-          ( Tool_indexes.add index { tool_name; native_run = false; run = None } entry.tools
+          ( Tool_indexes.add index
+              { tool_name; tool_use_id = tool_id; native_run = false; run = None }
+              entry.tools
           , Some tool_name
           , open_of_event ~now preview event )
       | ContentBlockStop { index } ->
           (* The call the model finished making is the latest one the turn
-             made, so it is the last observed tool. *)
-          let stopped =
+             made, so it is the last observed tool. In an official client's
+             attempt the block is the host's whole call, so the call ended
+             here. In the agent loop the block is only the model's call: the
+             gates before the run may still be holding it. *)
+          let stopped, ended =
             match Tool_indexes.find_opt index entry.tools with
-            | Some block -> Some block.tool_name
-            | None -> preview.last_tool
+            | Some block ->
+                let ended =
+                  match entry.loop with
+                  | Some Runtime_execution.Official_client ->
+                      block_stopped
+                        ~tool_use_id:block.tool_use_id
+                        ~tool_name:block.tool_name
+                        preview.open_activities
+                  | Some Runtime_execution.Masc_agent_core | None -> preview.open_activities
+                in
+                Some block.tool_name, ended
+            | None -> preview.last_tool, preview.open_activities
           in
-          Tool_indexes.remove index entry.tools, stopped, open_of_event ~now preview event
+          ( Tool_indexes.remove index entry.tools
+          , stopped
+          , response_after_return ~now ~loop:entry.loop preview.open_activities ended )
       | Agent_core.Types.ContentBlockStart _
       | Agent_core.Types.MessageStop | Agent_core.Types.InlineContentReplay _ | Agent_core.Types.ResponsesOutputItems _ | Agent_core.Types.Ping
       | Agent_core.Types.Connected | Agent_core.Types.MessageStart _

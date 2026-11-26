@@ -1723,7 +1723,8 @@ let run_turn
                            last_dispatched_checkpoint_owner :=
                              Some attempt.Keeper_turn_driver.checkpoint_owner;
                            Keeper_turn_preview.note_attempt ~writer:preview
-                             ~now:(Time_compat.now ()) ~runtime_id:attempt.runtime_id;
+                             ~now:(Time_compat.now ()) ~runtime_id:attempt.runtime_id
+                             ~checkpoint_owner:attempt.Keeper_turn_driver.checkpoint_owner;
                            (* Reset every attempt-local request observation
                               together. Turn-local windows and response facts
                               retain their last actual observation. *)
@@ -1944,8 +1945,15 @@ let run_turn
                  degrades to [None] (turn runs untraced, typed record
                  emitted) — sink trouble never fails the turn pre-dispatch. *)
          (match
-                 call_run_named ~raw_trace ~initial_messages:history_messages ()
-               with
+              let run =
+                call_run_named ~raw_trace ~initial_messages:history_messages () in
+              (* The run of this turn has returned, so nothing it began is
+                 still open. A stream block whose end never came, such as a
+                 native run with no result frame, would otherwise stay open
+                 through the turn's tail. *)
+              Keeper_turn_preview.note_turn_over ~writer:preview ~now:(Time_compat.now ());
+              run
+          with
                | Error e ->
                  (match
                     Keeper_official_client_host.persist_pre_tool_rejects
@@ -2139,11 +2147,6 @@ let run_turn
                                    ())
                              )))
                in
-       (* The run of this turn has returned, so nothing it began is still
-          open. A stream block whose end never came, such as a native run
-          with no result frame, would otherwise stay open through the turn's
-          tail. *)
-       Keeper_turn_preview.note_turn_over ~writer:preview ~now:(Time_compat.now ());
        (* An official-client turn that fails never reaches [finalize], yet its
           input is already a fragment and its tools may already have acted.
           Persist its tool observations and client-turn ledger line here. *)

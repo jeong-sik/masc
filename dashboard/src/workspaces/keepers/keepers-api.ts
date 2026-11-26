@@ -43,6 +43,26 @@ import {
   type Observed,
 } from '../../core/resource-cache'
 import { isKeeperEquipment, type KeeperEquipment } from '../../lib/keeper-portrait'
+import { recordedToolOutcome } from '../../lib/recorded-tool-outcome'
+
+/**
+ * Maps a recorded keeper tool-call row to a UI status pill tone using the
+ * shared `recordedToolOutcome` SSOT (`disposition` first, falling back to
+ * `wire_outcome` when `disposition` is absent).
+ */
+export function recordedToolOutcomeTone(
+  entry: { readonly disposition?: string; readonly wire_outcome?: string },
+  hydratedError = false,
+): 'ok' | 'warn' | 'bad' {
+  if (hydratedError) return 'bad'
+  const normalized: Record<string, unknown> = {}
+  if (entry.disposition !== undefined) normalized.disposition = entry.disposition
+  if (entry.wire_outcome !== undefined) normalized.wire_outcome = entry.wire_outcome
+  const outcome = recordedToolOutcome(normalized)
+  if (outcome === 'failed' || outcome === 'malformed') return 'bad'
+  if (outcome === 'deferred' || outcome === 'unsettled') return 'warn'
+  return 'ok'
+}
 import {
   decodeQueuedChatOperationPage,
   queuedChatOperationsPath,
@@ -1655,11 +1675,17 @@ export async function enqueueKeeperChat(params: {
       }
     }
 
+    let abortedBeforeClose = false
+    let abortReasonBeforeClose: unknown = undefined
     try {
       while (result === null) {
         const { done, value } = await reader.read()
         if (done) break
-        if (!isEpochCurrent(startEpoch) || controller.signal.aborted) break
+        if (!isEpochCurrent(startEpoch) || controller.signal.aborted) {
+          abortedBeforeClose = controller.signal.aborted
+          abortReasonBeforeClose = controller.signal.reason
+          break
+        }
         buf += decoder.decode(value, { stream: true })
         const parts = buf.split(/\r?\n\r?\n/)
         buf = parts.pop() ?? ''
@@ -1683,7 +1709,15 @@ export async function enqueueKeeperChat(params: {
     if (!isEpochCurrent(startEpoch)) {
       return { accepted: false, state: null, controlToken: null, error: 'session_epoch_changed' }
     }
-    return { accepted: true, state: 'Queued', controlToken: null, error: null }
+    if (abortedBeforeClose) {
+      return {
+        accepted: false,
+        state: null,
+        controlToken: null,
+        error: abortReasonBeforeClose === 'session_epoch_changed' ? 'session_epoch_changed' : 'aborted',
+      }
+    }
+    return { accepted: false, state: null, controlToken: null, error: 'acceptance_unconfirmed' }
   } catch (e) {
     if (controller.signal.aborted) {
       const reason = controller.signal.reason
@@ -1708,6 +1742,7 @@ export async function enqueueKeeperChat(params: {
 
 export interface ChatStreamFrameDispatcher {
   readonly dispatch: (parsed: Record<string, unknown>) => { readonly terminal: boolean }
+  readonly finalizeOnEof: () => boolean
   readonly isTerminal: () => boolean
 }
 
@@ -1723,6 +1758,7 @@ export function createChatStreamFrameDispatcher(params: {
   readonly callbacks: StreamKeeperChatCallbacks
 }): ChatStreamFrameDispatcher {
   let terminal = false
+  let acceptedTerminalState: 'Succeeded' | 'Failed' | 'Cancelled' | null = null
   let mediaOwnership = FRESH_OWNERSHIP
   const completedMedia = new Map<string, RetainedChatImage>()
 
@@ -1742,7 +1778,7 @@ export function createChatStreamFrameDispatcher(params: {
     if (type === 'RUN_STARTED') {
       params.callbacks.onRunStarted?.()
     } else if (type === 'TEXT_MESSAGE_CONTENT' && typeof parsed.delta === 'string') {
-      admitMediaOwner(decodeTextOwner(parsed))
+      if (!admitMediaOwner(decodeTextOwner(parsed))) return { terminal }
       params.callbacks.onTextDelta?.(parsed.delta)
     } else if (type === 'TOOL_CALL_START') {
       params.callbacks.onToolStart?.(
@@ -1794,10 +1830,10 @@ export function createChatStreamFrameDispatcher(params: {
           params.callbacks.onModelActivity?.(ch)
         }
       } else if (name === 'KEEPER_THINKING_DELTA' && val && typeof val.delta === 'string') {
-        admitMediaOwner(decodeTextOwner(val))
+        if (!admitMediaOwner(decodeTextOwner(val))) return { terminal }
         params.callbacks.onThinkingDelta?.(val.delta, extractThinkingBlockKey(val))
       } else if (name === 'KEEPER_THINKING_SNAPSHOT' && val && typeof val.snapshot === 'string') {
-        admitMediaOwner(decodeTextOwner(val))
+        if (!admitMediaOwner(decodeTextOwner(val))) return { terminal }
         params.callbacks.onThinkingSnapshot?.(val.snapshot, extractThinkingBlockKey(val))
       } else if (name === 'KEEPER_TOOL_CALL_ADMITTED' && val) {
         const admittedName = asStr(val.toolCallName)
@@ -1889,9 +1925,13 @@ export function createChatStreamFrameDispatcher(params: {
           controlToken: inter ? asStr(inter.chat_control_token) : null,
           interruptProblem: inter ? interruptProblemOf(inter) : null,
         })
+        // Do not mark terminal here: the server streams replay frames (text,
+        // tools, reply details, RUN_FINISHED/RUN_ERROR) AFTER ACCEPTED when
+        // reattaching to an already-settled operation. Remember the terminal
+        // acceptance state and synthesize settlement on EOF only if no wire
+        // terminal frame arrives.
         if (state === 'Succeeded' || state === 'Failed' || state === 'Cancelled') {
-          terminal = true
-          params.callbacks.onFinished?.()
+          acceptedTerminalState = state
         }
       } else if (name === 'KEEPER_REPLY_DETAILS' && val && typeof val.reply === 'string') {
         params.callbacks.onReplyDetails?.(val.reply, asStr(val.turn_ref))
@@ -1900,8 +1940,23 @@ export function createChatStreamFrameDispatcher(params: {
     return { terminal }
   }
 
+  const finalizeOnEof = (): boolean => {
+    if (terminal) return true
+    if (acceptedTerminalState === null) return false
+    terminal = true
+    if (acceptedTerminalState === 'Succeeded') {
+      params.callbacks.onFinished?.()
+    } else {
+      params.callbacks.onError?.(
+        acceptedTerminalState === 'Cancelled' ? '작업이 취소되었습니다.' : '작업이 실패했습니다.',
+      )
+    }
+    return true
+  }
+
   return {
     dispatch,
+    finalizeOnEof,
     isTerminal: () => terminal,
   }
 }
@@ -1909,7 +1964,9 @@ export function createChatStreamFrameDispatcher(params: {
 /**
  * Mode-aware, epoch-fenced, 2+1 SSE slot-managed AG-UI chat client
  * (`POST /api/v1/keepers/chat/stream`). Acquires Layer 3 `acquireViewStream`
- * so at most one view/chat SSE stream is live at any time.
+ * for main chat turns so at most one persistent view/chat SSE stream is live,
+ * while ephemeral `/btw` side-queries run on their own abort controller so
+ * they never preempt an active main chat turn.
  */
 export async function streamKeeperChat(params: {
   readonly keeper: string
@@ -1930,15 +1987,14 @@ export async function streamKeeperChat(params: {
   const streamKey = `keeper-chat:${params.keeper}:${params.mode.kind}:${params.operationId}`
   const headers = buildChatStreamHeaders()
 
-  let runPromise: Promise<{ readonly terminal: boolean; readonly error: string | null }> | null = null
-
-  const handle = acquireViewStream(streamKey, (slotSignal) => {
-    // Guard against visibilitychange re-POSTing a mutation; if hidden aborted
-    // the stream, caller recovers from /chat/events journal instead.
-    if (runPromise !== null) return
+  const executeStream = (slotSignal?: AbortSignal): {
+    readonly promise: Promise<{ readonly terminal: boolean; readonly error: string | null }>
+    readonly abort: () => void
+  } => {
     const controller = new AbortController()
-    const abortMerged = () => controller.abort(slotSignal.aborted ? slotSignal.reason : params.signal?.reason)
-    slotSignal.addEventListener('abort', abortMerged, { once: true })
+    const abortMerged = () =>
+      controller.abort(slotSignal?.aborted ? slotSignal.reason : params.signal?.reason)
+    slotSignal?.addEventListener('abort', abortMerged, { once: true })
     params.signal?.addEventListener('abort', abortMerged, { once: true })
     const unsubEpoch = sessionEpoch.subscribe((ep) => {
       if (ep !== startEpoch && !controller.signal.aborted) {
@@ -1946,7 +2002,7 @@ export async function streamKeeperChat(params: {
       }
     })
 
-    runPromise = (async () => {
+    const promise = (async () => {
       try {
         const res = await fetchImpl(resolveWorkspaceUrl('/api/v1/keepers/chat/stream'), {
           method: 'POST',
@@ -2019,20 +2075,42 @@ export async function streamKeeperChat(params: {
           reader.releaseLock()
         }
 
+        if (isEpochCurrent(startEpoch) && !controller.signal.aborted) {
+          dispatcher.finalizeOnEof()
+        }
+
         return { terminal: dispatcher.isTerminal(), error: null }
       } catch (cause) {
         const msg = cause instanceof Error ? cause.message : String(cause)
         return { terminal: false, error: msg }
       } finally {
         unsubEpoch()
-        slotSignal.removeEventListener('abort', abortMerged)
+        slotSignal?.removeEventListener('abort', abortMerged)
         params.signal?.removeEventListener('abort', abortMerged)
       }
     })()
 
-    return () => {
-      if (!controller.signal.aborted) controller.abort('view_stream_released')
+    return {
+      promise,
+      abort: () => {
+        if (!controller.signal.aborted) controller.abort('view_stream_released')
+      },
     }
+  }
+
+  if (params.mode.kind === 'btw') {
+    return executeStream().promise
+  }
+
+  let runPromise: Promise<{ readonly terminal: boolean; readonly error: string | null }> | null = null
+
+  const handle = acquireViewStream(streamKey, (slotSignal) => {
+    // Guard against visibilitychange re-POSTing a mutation; if hidden aborted
+    // the stream, caller recovers from /chat/events journal instead.
+    if (runPromise !== null) return
+    const run = executeStream(slotSignal)
+    runPromise = run.promise
+    return run.abort
   })
 
   try {

@@ -873,6 +873,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       updater: (cur: ChatTranscriptEntry) => ChatTranscriptEntry,
     ) => void
     readonly onBatchBound?: (memberId: string, executionId: string) => void
+    readonly onServerAccepted?: () => void
   }): StreamKeeperChatCallbacks => {
     const { assistantId, userId, updateAssistant, updateExistingAssistant } = opts
     let acceptedByServer = opts.initialAcceptedByServer
@@ -882,6 +883,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       cur === 'Failed' || cur === 'Delivered' ? cur : 'Streaming'
     const markUserDelivered = () => {
       acceptedByServer = true
+      opts.onServerAccepted?.()
       updateEntryById(userId, (m) =>
         m.deliveryState === 'Delivered' ? m : { ...m, deliveryState: 'Delivered' },
       )
@@ -891,6 +893,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       onBatchBound: opts.onBatchBound,
       onAccepted: (info) => {
         acceptedByServer = true
+        opts.onServerAccepted?.()
         if (info.controlToken) setControlToken(info.controlToken)
         const accepted = acceptedReplyState(info.state)
         const interruptProblem = info.interruptProblem
@@ -1136,7 +1139,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         liveTools = upsertStreamToolCall(
           liveTools,
           { toolCallId, streamKey },
-          (cur) => ({ ...cur, result: content, status: 'completed' }),
+          (cur) => ({ ...cur, result: content, status: cur.status === 'error' ? 'error' : 'completed' }),
           () => ({
             id: toolCallId || undefined,
             streamKey,
@@ -1905,15 +1908,28 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         },
       },
     })
-    if (!outcome.terminal && !outcome.error && isStillActive()) {
-      const rec = await recoverCutReplyFromJournal(targetKeeper, operationId)
-      if (rec.ok && isStillActive()) {
-        setBtw((cur) => ({
-          ...cur,
-          status: rec.value.error ? 'error' : 'done',
-          reply: rec.value.text || cur.reply,
-          error: rec.value.error,
-        }))
+    if (!outcome.terminal && isStillActive()) {
+      if (outcome.error) {
+        if (outcome.error !== 'aborted' && outcome.error !== 'session_epoch_changed') {
+          setBtw((cur) => (cur.status === 'error' ? cur : { ...cur, status: 'error', error: outcome.error }))
+        }
+      } else {
+        const rec = await recoverCutReplyFromJournal(targetKeeper, operationId)
+        if (!isStillActive()) return
+        if (rec.ok) {
+          setBtw((cur) => ({
+            ...cur,
+            status: rec.value.error ? 'error' : 'done',
+            reply: rec.value.text || cur.reply,
+            error: rec.value.error,
+          }))
+        } else if (rec.error.kind !== 'aborted' && rec.error.kind !== 'epoch_stale') {
+          setBtw((cur) => ({
+            ...cur,
+            status: 'error',
+            error: rec.error.message,
+          }))
+        }
       }
     }
   }
@@ -2034,6 +2050,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     queueMicrotask(() => composerRef.current?.focus())
 
     let abortController: AbortController | null = null
+    let acceptedByServer = false
     let outcome: { readonly terminal: boolean; readonly error: string | null } = {
       terminal: false,
       error: null,
@@ -2072,6 +2089,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           assistantId,
           userId,
           initialAcceptedByServer: false,
+          onServerAccepted: () => { acceptedByServer = true },
           updateAssistant: (updater) => updateAssistantEntry(assistantId, updater),
           updateExistingAssistant: (updater) => updateAssistantEntry(assistantId, updater),
           onBatchBound: (memberId, executionId) => {
@@ -2104,15 +2122,26 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       return
     }
 
-    // Mid-stream cut without RUN_FINISHED -> Confirming_delivery & journal recovery
+    // Mid-stream cut without RUN_FINISHED -> distinguish pre-acceptance transport
+    // failure (never reached server) from post-acceptance cut (recover via journal).
     if (!outcome.terminal && !abortController?.signal.aborted) {
-      updateEntryById(userId, (m) => (m.deliveryState === 'Sending' ? { ...m, deliveryState: 'Delivered' } : m))
-      updateAssistantEntry(assistantId, (m) => ({
-        ...m,
-        cutStream: true,
-        deliveryState: 'Confirming_delivery',
-      }))
-      await handleRecoverCut(assistantId, operationId)
+      if (!acceptedByServer && outcome.error) {
+        const errText = outcome.error
+        updateEntryById(userId, (m) => ({ ...m, deliveryState: 'Failed', errorDetail: errText }))
+        updateAssistantEntry(assistantId, (m) => ({
+          ...m,
+          deliveryState: 'Failed',
+          errorDetail: errText,
+        }))
+      } else {
+        updateEntryById(userId, (m) => (m.deliveryState === 'Sending' ? { ...m, deliveryState: 'Delivered' } : m))
+        updateAssistantEntry(assistantId, (m) => ({
+          ...m,
+          cutStream: true,
+          deliveryState: 'Confirming_delivery',
+        }))
+        await handleRecoverCut(assistantId, operationId)
+      }
     }
 
     if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) {
@@ -3049,12 +3078,15 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                           </div>
                         `}
 
-                        ${(blocks.bodyText || msg.deliveryState === 'Streaming') && html`
+                        ${(blocks.bodyText || msg.deliveryState === 'Streaming' || msg.deliveryState === 'Pending_processing') && html`
                           ${blocks.bodyText
                             ? html`<${MarkdownContent} class="kp-msg-body" text=${blocks.bodyText} streaming=${msg.deliveryState === 'Streaming'} />`
-                            : openWork !== null && openWork.length > 0
-                              ? html`<${OpenWorkRows} activities=${openWork} live=${turnAnimating} />`
-                              : html`<div class="kp-msg-body">응답 생성 중…</div>`}
+                            : (!showLiveTurnCard && openWork !== null && openWork.length > 0)
+                              ? null
+                              : html`<div class="kp-msg-body">${msg.deliveryState === 'Pending_processing' ? '요청 처리 준비 중…' : '응답 생성 중…'}</div>`}
+                          ${!showLiveTurnCard && (msg.deliveryState === 'Streaming' || msg.deliveryState === 'Pending_processing') && openWork !== null && openWork.length > 0 && html`
+                            <${OpenWorkRows} activities=${openWork} live=${turnAnimating} />
+                          `}
                         `}
                         ${msg.retainedImages?.map((image, index) => html`
                           <${WorkspaceChatImage} key=${`${index}:${image.path}`}

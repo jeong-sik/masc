@@ -14,9 +14,11 @@ import { navigate, resetRouterForTests } from '../../routes/router'
 import {
   buildChatStreamRequestBody,
   buildPortraitPreviewUrl,
+  createChatStreamFrameDispatcher,
   decodeChatJournalPage,
   decodeKeeperMemoryFacts,
   decodeKeeperRoster,
+  enqueueKeeperChat,
   fetchKeeperChatHistoryPageApi,
   fetchKeeperTurnRecordsApi,
   filterAndSortRoster,
@@ -28,6 +30,7 @@ import {
   observeRosterContextPct,
   parseOrdinaryMemoryBranch,
   parseSourceBoundMemoryBranch,
+  recordedToolOutcomeTone,
   reconstructJournalReply,
   streamKeeperChat,
   transcribeVoiceAudio,
@@ -2835,5 +2838,158 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       try { observer.close() } catch { /* already closed on epoch abort */ }
       await obsPromise
     }
+  })
+
+  it('drains replayed frames after terminal ACCEPTED, drops stale-attempt deltas, rejects truncated enqueue, avoids /btw slot preemption, and classifies tool outcomes', async () => {
+    const enc = new TextEncoder()
+    const sse = (frames: unknown[]) =>
+      new Response(
+        new ReadableStream({
+          start(c) {
+            for (const f of frames) c.enqueue(enc.encode(`data: ${JSON.stringify(f)}\n\n`))
+            c.close()
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      )
+
+    // 1. Terminal ACCEPTED(Succeeded) must still drain replayed text/reply/RUN_FINISHED frames
+    const deltas: string[] = []
+    let finishedCount = 0
+    const replayOutcome = await streamKeeperChat({
+      keeper: 'alpha',
+      message: 'hi',
+      operationId: 'op-replay-ok',
+      mode: { kind: 'queue' },
+      fetchImpl: vi.fn(async () =>
+        sse([
+          { type: 'CUSTOM', name: 'KEEPER_CHAT_OPERATION_ACCEPTED', value: { operation_id: 'op-replay-ok', state: 'Succeeded' } },
+          { type: 'TEXT_MESSAGE_CONTENT', delta: 'replayed reply' },
+          { type: 'RUN_FINISHED' },
+        ]),
+      ),
+      callbacks: {
+        onTextDelta: (d) => deltas.push(d),
+        onFinished: () => { finishedCount += 1 },
+      },
+    })
+    expect(replayOutcome).toEqual({ terminal: true, error: null })
+    expect(deltas).toEqual(['replayed reply'])
+    expect(finishedCount).toBe(1)
+
+    // 2. Terminal ACCEPTED(Failed) with EOF (no RUN_ERROR) invokes onError rather than onFinished
+    const errors: string[] = []
+    let failedFinished = 0
+    const failedOutcome = await streamKeeperChat({
+      keeper: 'alpha',
+      message: 'hi',
+      operationId: 'op-replay-fail',
+      mode: { kind: 'btw' },
+      fetchImpl: vi.fn(async () =>
+        sse([
+          { type: 'CUSTOM', name: 'KEEPER_CHAT_OPERATION_ACCEPTED', value: { operation_id: 'op-replay-fail', state: 'Failed' } },
+        ]),
+      ),
+      callbacks: {
+        onError: (m) => errors.push(m),
+        onFinished: () => { failedFinished += 1 },
+      },
+    })
+    expect(failedOutcome.terminal).toBe(true)
+    expect(errors.length).toBe(1)
+    expect(failedFinished).toBe(0)
+
+    // 3. Dispatcher rejects stale-attempt text/thinking deltas after attempt reset
+    const seenText: string[] = []
+    const seenThinking: string[] = []
+    const dispatcher = createChatStreamFrameDispatcher({
+      operationId: 'op-attempt',
+      startEpoch: currentSessionEpoch(),
+      callbacks: {
+        onTextDelta: (d) => seenText.push(d),
+        onThinkingDelta: (d) => seenThinking.push(d),
+      },
+    })
+    dispatcher.dispatch({
+      type: 'TEXT_MESSAGE_CONTENT',
+      delta: 'attempt1',
+      response: { content_generation: 0, stream_scope: 1 },
+    })
+    dispatcher.dispatch({ type: 'CUSTOM', name: 'KEEPER_RUNTIME_ATTEMPT_STARTED', value: { attempt: 2 } })
+    // Late frames from retired generation 0 must be dropped
+    dispatcher.dispatch({
+      type: 'TEXT_MESSAGE_CONTENT',
+      delta: 'stale-text',
+      response: { content_generation: 0, stream_scope: 1 },
+    })
+    dispatcher.dispatch({
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { delta: 'stale-think', response: { content_generation: 0, stream_scope: 1 } },
+    })
+    // New attempt generation 1 succeeds
+    dispatcher.dispatch({
+      type: 'TEXT_MESSAGE_CONTENT',
+      delta: 'attempt2',
+      response: { content_generation: 1, stream_scope: 0 },
+    })
+    expect(seenText).toEqual(['attempt1', 'attempt2'])
+    expect(seenThinking).toEqual([])
+
+    // 4. Truncated enqueue stream without ACCEPTED must return accepted: false
+    const trunc = await enqueueKeeperChat({
+      keeper: 'alpha',
+      message: 'queued',
+      operationId: 'op-trunc',
+      mode: { kind: 'queue' },
+      fetchImpl: vi.fn(async () => sse([])),
+    })
+    expect(trunc.accepted).toBe(false)
+    expect(trunc.error).toBe('acceptance_unconfirmed')
+
+    // 5. /btw must NOT preempt an active main chat stream
+    let releaseMain!: () => void
+    let mainAborted = false
+    const mainPromise = streamKeeperChat({
+      keeper: 'alpha',
+      message: 'main',
+      operationId: 'op-main-live',
+      mode: { kind: 'queue' },
+      fetchImpl: vi.fn(async (_input, init) => {
+        init?.signal?.addEventListener('abort', () => { mainAborted = true })
+        return new Response(
+          new ReadableStream({
+            start(c) {
+              c.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'TEXT_MESSAGE_CONTENT', delta: 'live' })}\n\n`))
+              releaseMain = () => {
+                c.enqueue(enc.encode(`data: ${JSON.stringify({ type: 'RUN_FINISHED' })}\n\n`))
+                c.close()
+              }
+            },
+          }),
+          { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+        )
+      }),
+      callbacks: {},
+    })
+    await waitFor(() => expect(getActiveViewStreamKey()).toContain('op-main-live'))
+    const btwRes = await streamKeeperChat({
+      keeper: 'alpha',
+      message: 'side question',
+      operationId: 'op-btw-live',
+      mode: { kind: 'btw' },
+      fetchImpl: vi.fn(async () => sse([{ type: 'TEXT_MESSAGE_CONTENT', delta: 'side' }, { type: 'RUN_FINISHED' }])),
+      callbacks: {},
+    })
+    expect(btwRes.terminal).toBe(true)
+    expect(mainAborted).toBe(false)
+    releaseMain()
+    await mainPromise
+
+    // 6. Tool outcome tone classification matches recordedToolOutcome SSOT
+    expect(recordedToolOutcomeTone({ wire_outcome: 'error' })).toBe('bad')
+    expect(recordedToolOutcomeTone({ wire_outcome: 'unknown' })).toBe('warn')
+    expect(recordedToolOutcomeTone({ disposition: 'deferred', wire_outcome: 'ok' })).toBe('warn')
+    expect(recordedToolOutcomeTone({ disposition: 'completed', wire_outcome: 'ok' })).toBe('ok')
   })
 })

@@ -38,6 +38,7 @@ import {
   fetchKeeperToolCallsApi,
   fetchKeeperTurnRecordsApi,
   postKeeperMemoryAct,
+  recordedToolOutcomeTone,
   resetKeeperAction,
 } from './keepers-api'
 import type {
@@ -328,11 +329,12 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
   const handleOpenRawTrace = async (file: string) => {
     const targetKeeper = keeperName
     const startEpoch = currentSessionEpoch()
+    setTraceError(null)
     const res = await fetchKeeperRawTracePageApi(targetKeeper, file, 30)
     if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
     if (!res.ok) {
       if (res.error.kind !== 'aborted' && res.error.kind !== 'epoch_stale') {
-        setContextStatus(`Raw Trace 읽기 실패 (${file}): ${res.error.message}`)
+        setTraceError(`Raw Trace 읽기 실패 (${file}): ${res.error.message}`)
       }
       return
     }
@@ -526,11 +528,11 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
                   >
                     <div class="kp-card-head">
                       <span class="kp-roster-name">${tc.tool}</span>
-                      <span class="kp-pill" data-tone=${tc.disposition === 'failed' ? 'bad' : 'ok'}>
+                      <span class="kp-pill" data-tone=${recordedToolOutcomeTone(tc)}>
                         ${Math.round(tc.duration_ms)}ms
                       </span>
                     </div>
-                    <span class="kp-roster-sub">${tc.wire_outcome}</span>
+                    <span class="kp-roster-sub">${tc.disposition ?? tc.wire_outcome}</span>
                   </button>
                 `)}
           </div>

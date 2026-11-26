@@ -257,6 +257,9 @@ describe('Chat Blocks & History Decoding — Empty Tool Toggle & Blocks Wire Par
     expect(scoped).toHaveLength(2)
     expect(scoped[0]!.name).toBe('Read')
     expect(scoped[1]!.name).toBe('Grep')
+
+    // Without streamKey (approval events), reverse-scan prefers in-flight Round 2 over completed Round 1
+    expect(findToolCallIndex(scoped, { toolCallId: 'call_0' })).toBe(1)
   })
 
   it('formats native tool progress and completion payloads cleanly', () => {

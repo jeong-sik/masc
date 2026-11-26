@@ -19,6 +19,7 @@ import { extractObserverTopics, markViewSynced, observerConnected, subscribeObse
 import { formatObserved, resourceCache, type FetchReason, type Observed } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
 import { KeeperBadge } from '../../components/keeper-badge'
+import { TimeAgo } from '../../components/common/time-ago'
 import { InlineSpinner } from '../../components/common/inline-spinner'
 import { formatDuration } from '../../lib/format-time'
 import { MasterDetail, TargetLockedAction, VirtualList } from '../../components/primitives'
@@ -79,10 +80,25 @@ const goalTopics: readonly string[] = ['goal', 'goals', 'goal_updated', 'plannin
 const verificationTopics: readonly string[] = ['verification', 'verification_requests', 'backlog', 'task', 'tasks']
 const emptyRows: readonly never[] = []
 
-function goalActivityText(activity: GoalActivity): string {
+/** The activity time as an instant, when the server sent a readable one.
+ *  Then the age keeps counting while the page stays open; otherwise only the
+ *  server's age at payload time is known. */
+function goalActivityInstant(activity: GoalActivity): string | null {
+  if (activity.kind !== 'observed' || activity.lastActivityAt === null) return null
+  return Number.isNaN(Date.parse(activity.lastActivityAt)) ? null : activity.lastActivityAt
+}
+
+function GoalActivityAge({ activity }: { activity: Extract<GoalActivity, { kind: 'observed' }> }) {
+  const instant = goalActivityInstant(activity)
+  return instant === null
+    ? html`${formatDuration(activity.stagnationSeconds)} 전`
+    : html`<${TimeAgo} timestamp=${instant} />`
+}
+
+function goalActivityText(activity: GoalActivity) {
   switch (activity.kind) {
     case 'observed':
-      return `${formatDuration(activity.stagnationSeconds)} 전 · ${goalActivitySourceLabel(activity.source)}`
+      return html`<${GoalActivityAge} activity=${activity} /> · ${goalActivitySourceLabel(activity.source)}`
     case 'unavailable':
       return '기록된 활동 없음'
     case 'unknown':
@@ -872,7 +888,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
                       <span class="wk-badge wk-badge--warn tnum">승인 대기 ${g.pendingApprovalCount}</span>
                     `}
                     ${g.activity.kind === 'observed' && html`
-                      <span class="tnum" title=${g.activity.lastActivityAt ?? ''}>마지막 활동 ${formatDuration(g.activity.stagnationSeconds)} 전</span>
+                      <span class="tnum">마지막 활동 <${GoalActivityAge} activity=${g.activity} /></span>
                     `}
                     ${g.criterionVerdict.kind === 'viable' && html`<span class="wk-badge wk-badge--ok">기준 적합</span>`}
                     ${g.criterionVerdict.kind === 'needs_revision' && html`<span class="wk-badge wk-badge--err">기준 수정 필요</span>`}

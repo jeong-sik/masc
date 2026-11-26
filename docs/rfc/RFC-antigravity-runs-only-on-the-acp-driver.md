@@ -111,13 +111,13 @@ ACP 만의 크기 계산을 따로 두지 않는다. Agent Core 레인이 이미
   - 측정(2026-11-26, Kimi Code 2.7.2, 운영자 한도 400,000):
     - father 세션은 턴이 끝날 때 625,669 와 447,181 이었다. `.masc/config/keepers/code-reviewer-father.compaction.db` 의 `compaction_epochs.trigger_json`(epoch 5·6)에 남아 있다.
     - uncle 세션에서 가장 큰 요청 입력은 432,196 이었다. Kimi Code 세션의 `wire.jsonl` 에 있는 `step.end` usage 로 셌다.
-  - 호스트 넷 중 셋은 프로세스마다 압축 시점을 받는다(2026-11-26 확인).
+  - 호스트 넷 중 둘은 프로세스마다 모든 모델의 압축 시점을 받는다(2026-11-26 확인).
 
     | 호스트 | 받는 길 | 값의 뜻 | 확인한 방법 |
     |---|---|---|---|
     | Muse Code 1.4.25 | `-c context_compaction.provider_context_limit_tokens=<토큰>` | 실효 한도. 압축은 이 한도의 `soft_threshold`(기본 0.75)와 `hard_threshold`(기본 0.9)에서 한다. 두 비율도 `-c` 로 받는다 | `muse exec --provider echo` 에 넣어 봤다(모델 호출 없음). 키를 받고(exit 0), 모르는 키와 hard 이상인 soft 는 거부한다(exit 2) |
-    | Mistral Vibe 3.1.0 | 환경 변수 `VIBE_AUTO_COMPACT_THRESHOLD=<토큰>` | 자기 값이 없는 모델이 자동 압축하는 토큰 수 | vibe 의 environment 층에 넣어 실행했다(`320000` 을 읽음). 이 층은 사용자 config 보다 위다(`core/config/default_orchestrator.py`). 사용자 config 의 모델에는 자기 값이 없다 |
-    | Antigravity 1.5.16 | 환경 변수 `AGY_CLI_AUTO_COMPACT_OVERRIDE=<토큰, K·M 약식, %>` | 대화를 압축하는 시점 | 바이너리 안의 안내 문구로만 확인했다. 실제 압축은 보지 못했다 |
+    | Antigravity 1.5.18 | 환경 변수 `AGY_CLI_AUTO_COMPACT_OVERRIDE=<토큰, K·M 약식, %>` | 대화를 압축하는 시점. 바이너리 changelog 는 모든 eligible model 에 적용된다고 적는다 | 바이너리 안의 문구로만 확인했다. 실제 압축은 보지 못했다 |
+    | Mistral Vibe 3.1.0 | 모든 모델에는 없다 | `VIBE_AUTO_COMPACT_THRESHOLD` 는 자기 값이 없는 모델만 채운다 | vibe 자신의 설정 loader 로 실제 값을 읽었다. 모델 catalog 가 mistral-large-4-0-3 에 자기 값 400,000 을 준다. 변수를 380000 으로 주면 이 모델은 400000 그대로이고, 자기 값이 없는 mistral-medium-3.5 만 380000 이 된다. 모델별 값(`VIBE_MODELS__<모델>__AUTO_COMPACT_THRESHOLD`)은 environment 층이 읽지 못한다며 버린다 |
     | Kimi Code 2.7.2 | 없다 | — | `KIMI_MODEL_MAX_CONTEXT_SIZE` 는 `KIMI_MODEL_NAME` 이 있을 때만 읽고, 그러면 로그인한 OAuth provider 대신 환경 변수 provider 를 쓴다. 설정 폴더를 `KIMI_CODE_HOME` 으로 바꾸면 로그인도 그 폴더에서 다시 해야 한다. 압축 시점은 설정 파일의 창으로 정한다. 창이 1,048,576 이면 약 891K 에서 압축한다 |
 
   - Codex 는 ACP driver 가 아니지만 `-c model_context_window=<tokens>` 를 받는다(`runtime_codex_app_server.ml` 의 `client_argv`).
@@ -127,8 +127,8 @@ ACP 만의 크기 계산을 따로 두지 않는다. Agent Core 레인이 이미
   - 결정(운영자, 2026-11-26): 모델 키 `agent-compaction-threshold`(열린 구간 (0, 1))를 둔다. 세션을 띄울 때 `agent-compaction-threshold × max-context` 를 호스트에 넘긴다(#54915).
     - 턴 끝 롤오버(`context-rollover-threshold`)와 따로 정한다. 예: 롤오버 0.80, 호스트 압축 0.95.
     - 키가 없으면 호스트 기본값 그대로다.
-    - driver profile 의 `compaction_point` 가 호스트마다 받는 길을 가진다. Mistral Vibe 와 Antigravity 는 토큰 수(내림)를 받는다. Muse Code 는 `provider_context_limit_tokens` 에 한도, `soft_threshold` 에 비율, `hard_threshold` 에 1.0 을 받는다. soft 는 hard(설정하지 않으면 0.9)보다 반드시 작아야 해서 hard 를 같이 넘긴다.
-    - Kimi Code 는 받는 길이 없다. 이 키를 적으면 그 binding 을 load 에서 이유와 함께 뺀다.
+    - driver profile 의 `compaction_point` 가 호스트마다 받는 길을 가진다. Antigravity 는 토큰 수(내림)를 받는다. Muse Code 는 `provider_context_limit_tokens` 에 한도, `soft_threshold` 에 비율, `hard_threshold` 에 1.0 을 받는다. soft 는 hard(설정하지 않으면 0.9)보다 반드시 작아야 해서 hard 를 같이 넘긴다.
+    - Kimi Code 와 Mistral Vibe 는 모든 모델에 받는 길이 없다. 이 키를 적으면 그 binding 을 load 에서 이유와 함께 뺀다. 넘겨도 말없이 무시될 수 있기 때문이다.
   - 턴 도중 압축 감지(#54911): ACP client 가 prompt 결과에 `context_compacted` 를 돌려준다.
     - Muse Code 는 journal 의 `context_compaction_installed` 기록으로 판단한다.
     - 다른 호스트는 prompt 도중 `usage_update.used` 가 바로 앞 값보다 작아진 것으로 판단한다. 첫 값은 세션의 마지막 값과 비교한다.

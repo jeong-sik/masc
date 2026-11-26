@@ -37,10 +37,13 @@ function preparationDoing(preparation: KeeperTurnPreparation): TurnDoing {
   }
 }
 
-// A failed attempt's list is of the attempt that failed, and a turn that
-// still prepares has opened nothing yet: neither says what happens now. The
-// TUI leaves the same two out (`fleet_store.ml` `open_work_of_preview`).
+// The open work the line speaks from. A preparation step in effect comes
+// before the list. A failed attempt's list is of the attempt that failed, and
+// a turn that still prepares has opened nothing yet: neither says what
+// happens now. The TUI leaves the same two out (`fleet_store.ml`
+// `open_work_of_preview`).
 function listedOpenWork(preview: KeeperActiveTurnPreview): OpenWorkLead | null {
+  if (preview.preparation !== null) return null
   switch (preview.activity) {
     case 'failed':
     case 'preparing':
@@ -56,6 +59,16 @@ export function turnDoing(preview: KeeperActiveTurnPreview): TurnDoing {
   const open = listedOpenWork(preview)
   if (open !== null) return { phrase: openWorkLeadPhrase(open), sinceUnix: open.lead.since_unix, tone: activity.tone }
   return { phrase: activity.label, sinceUnix: null, tone: activity.tone }
+}
+
+/**
+ * The one line, for a place that lists the open work in rows below it: `null`
+ * while the line speaks from that list, which the rows say themselves. What
+ * no row names stays: a preparation step, a failed attempt, an activity with
+ * nothing open.
+ */
+export function turnDoingBesideRows(preview: KeeperActiveTurnPreview): TurnDoing | null {
+  return listedOpenWork(preview) === null ? turnDoing(preview) : null
 }
 
 /** A turn the turns read reports and no preview has described yet. */
@@ -78,7 +91,7 @@ export type TurnDoingBrief =
 
 export function turnDoingBrief(preview: KeeperActiveTurnPreview | null): TurnDoingBrief {
   if (preview === null) return { kind: 'words', words: TURN_RUNNING_PHRASE }
-  const open = preview.preparation === null ? listedOpenWork(preview) : null
+  const open = listedOpenWork(preview)
   if (open === null || open.lead.kind !== 'tool') return { kind: 'words', words: turnDoing(preview).phrase }
   return { kind: 'tool', name: open.lead.name, otherCalls: open.otherCalls }
 }

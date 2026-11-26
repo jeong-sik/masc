@@ -102,7 +102,7 @@ import {
   openActivityTone,
   openWorkPieces,
 } from './turn-open-work'
-import { turnDoing } from './turn-doing'
+import { turnDoing, turnDoingBesideRows } from './turn-doing'
 import {
   TOOL_RESULT_MAX_PAGES_PER_BURST,
   TOOL_RESULT_PAGE_BYTES,
@@ -2569,6 +2569,22 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     : openWork === null
       ? `${isLiveToolInFlight ? '실행 중' : '최근 도구'} · ${liveToolName}`
       : hasOpenToolCall(openWork, liveToolName) ? null : `최근 도구 · ${liveToolName}`
+  // Once the list of open work is read, the card says the turn in the
+  // dashboard's words: a line for what no row names, the rows, and why an
+  // attempt failed. The server's sentence says the same in English; it is
+  // drawn only for a preview whose list was not sent or could not be read.
+  const attemptFailed = effectivePreview?.activity === 'failed'
+  const lastFailure = openWork !== null ? effectivePreview?.last_failure ?? null : null
+  // The failure of the attempt in view is the line itself, in the tone of a
+  // turn that stopped short. One that a later attempt has left behind is said
+  // as such, below what that attempt has open, and is not colored: it is not
+  // what happens now.
+  const failureLine = lastFailure === null
+    ? null
+    : attemptFailed ? `${liveTurnActivity.label} · ${lastFailure}` : `앞선 시도 실패 · ${lastFailure}`
+  const cardDoing = effectivePreview && openWork !== null && !(attemptFailed && failureLine !== null)
+    ? turnDoingBesideRows(effectivePreview)
+    : null
   const workedAt = lastWorked ? new Date(lastWorked.atUnix * 1000) : null
 
   const renderToolPreSection = (
@@ -3353,7 +3369,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               <section class="kp-live-turn-card" data-testid="chat-live-turn-card">
                 <div class="kp-msg-head">
                   <div class="kp-pill-row">
-                    <span class="kp-pill" data-tone="brass">${liveTurnLaneLabel}</span>
+                    <span class="kp-pill" data-tone="brass" title=${effectivePreview?.status_text || undefined}>${liveTurnLaneLabel}</span>
                     ${activeTurn?.turn_ref && html`<span class="kp-pill">${activeTurn.turn_ref}</span>`}
                   </div>
                   <div class="kp-pill-row">
@@ -3366,11 +3382,17 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                       <span class="kp-pill" data-tone="info">${lastToolPill}</span>
                     </div>
                   `}
-                  ${effectivePreview?.status_text && html`
+                  ${openWork === null && effectivePreview?.status_text && html`
                     <div class="kp-live-turn-status">${effectivePreview.status_text}</div>
+                  `}
+                  ${cardDoing && html`
+                    <div class="kp-live-turn-status" data-testid="chat-turn-doing" data-tone=${cardDoing.tone}>${cardDoing.phrase}</div>
                   `}
                   ${openWork !== null && openWork.length > 0 && html`
                     <${OpenWorkRows} activities=${openWork} live=${turnAnimating} />
+                  `}
+                  ${failureLine && html`
+                    <div class="kp-live-turn-status" data-testid="chat-turn-failure" data-tone=${attemptFailed ? 'bad' : undefined}>${failureLine}</div>
                   `}
                   ${turnWorkContext && (turnWorkContext.start_reasons.length > 0 || turnWorkContext.task_id) && html`
                     <div class="kp-live-turn-status" data-testid="chat-turn-work-context">

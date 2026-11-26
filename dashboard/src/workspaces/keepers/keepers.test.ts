@@ -1096,6 +1096,78 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     await stream
   })
 
+  it("says the turn on its card in the dashboard's words once the open work is listed", async () => {
+    const keeper = makeRosterKeeper()
+    let observer!: ReadableStreamDefaultController<Uint8Array>
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/mcp?sse_kind=observer') {
+        return new Response(new ReadableStream({ start: (controller) => { observer = controller } }),
+          { headers: { 'Content-Type': 'text/event-stream' } })
+      }
+      return Response.json({ operations: [], messages: [], rows: [], keepers: [] })
+    }))
+    const stream = startObserverStream({ autoReconnect: false })
+    await waitFor(() => expect(observerConnected.value).toBe(true))
+    const read = observedValue(new Map(), Date.now() - 1000)
+    const view = render(html`<${KeeperChatTab} keeper=${keeper} onInspect=${vi.fn()} onMutated=${vi.fn()} turnSnapshot=${read} />`)
+    const now = Date.now() / 1000
+    let revision = 0
+    const send = (preview: object) => observer.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({
+      type: 'keeper_turn_preview_changed', name: keeper.name,
+      observation: { owner_key: 'A', preview: { revision: ++revision, updated_at_unix: now, last_tool: null, ...preview } },
+    })}\n\n`))
+    const call = (name: string) => ({
+      kind: 'tool', tool_use_id: name, name, stage: 'executing', started_at_unix: now - 3, since_unix: now - 2, cohort: null, reach: null,
+    })
+    const card = () => view.container.querySelector('[data-testid="chat-live-turn-card"]')
+    const texts = (selector: string) => [...(card()?.querySelectorAll(selector) ?? [])].map((line) => line.textContent?.trim())
+    // The card's lines, top to bottom: `rows` stands for the list of open work.
+    const lines = () => [...(card()?.querySelectorAll('.kp-live-turn-status, .kp-open-work') ?? [])]
+      .map((line) => line.matches('.kp-open-work') ? 'rows' : line.textContent?.trim())
+    const tone = (testId: string) => card()?.querySelector(`[data-testid="${testId}"]`)?.getAttribute('data-tone') ?? null
+    const laneTitle = () => card()?.querySelector('.kp-pill[data-tone="brass"]')?.getAttribute('title') ?? null
+
+    // The rows say what runs: the server's sentence is not drawn beside them, and stays behind the lane's name.
+    send({ status_text: 'rt-1 · tool running: Execute', activity: 'tool', open_activities: [call('Execute')] })
+    await waitFor(() => expect(texts('.kp-open-work-phrase')).toEqual(['Execute · 실행 중']))
+    expect(lines()).toEqual(['rows'])
+    expect(laneTitle()).toBe('rt-1 · tool running: Execute')
+
+    // Nothing is open: one line says what the turn waits for.
+    send({ status_text: 'rt-1 · waiting for model', activity: 'waiting', open_activities: [] })
+    await waitFor(() => expect(lines()).toEqual(['응답 대기 중']))
+    expect(tone('chat-turn-doing')).toBe('warn')
+
+    // A preparation step is said above the call the list still holds.
+    send({
+      status_text: 'rt-1 · preparing', activity: 'preparing', open_activities: [call('Execute')],
+      preparation: { phase: 'context', turn_ref: null, started_at_unix: now - 4, state: 'active', finished_at_unix: null, elapsed_ns: null },
+    })
+    await waitFor(() => expect(lines()).toEqual(['준비 중 · 컨텍스트', 'rows']))
+
+    // The attempt failed: one line says so and why, in the tone of a turn that stopped short.
+    send({ status_text: 'rt-1 · attempt failed · last failure: 429 from provider', activity: 'failed', open_activities: [], last_failure: '429 from provider' })
+    await waitFor(() => expect(lines()).toEqual(['시도 실패 · 429 from provider']))
+    expect(tone('chat-turn-failure')).toBe('bad')
+
+    // A failed attempt whose reason the server did not send still says that it failed.
+    send({ status_text: 'rt-1 · attempt failed', activity: 'failed', open_activities: [] })
+    await waitFor(() => expect(lines()).toEqual(['시도 실패']))
+    expect(tone('chat-turn-doing')).toBe('bad')
+
+    // The next attempt runs: its rows, then the failure it left behind, which is not what happens now.
+    send({ status_text: 'rt-2 · tool running: Execute · last failure: 429 from provider', activity: 'tool', open_activities: [call('Execute')], last_failure: '429 from provider' })
+    await waitFor(() => expect(lines()).toEqual(['rows', '앞선 시도 실패 · 429 from provider']))
+    expect(tone('chat-turn-failure')).toBeNull()
+
+    // A server from before the list: its sentence is all the card can say.
+    send({ status_text: 'rt-2 · tool running: Execute · last failure: 429 from provider', activity: 'tool', last_failure: '429 from provider' })
+    await waitFor(() => expect(lines()).toEqual(['rt-2 · tool running: Execute · last failure: 429 from provider']))
+
+    observer.close()
+    await stream
+  })
+
   it('says which preparation step a turn is in, and that a step which did not finish stopped', async () => {
     const keeper = makeRosterKeeper()
     let observer!: ReadableStreamDefaultController<Uint8Array>

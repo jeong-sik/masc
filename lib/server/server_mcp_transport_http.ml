@@ -731,7 +731,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     respond_mcp_error ~code:Mcp_error_code.Internal_error
                                       ~deps ~request_authority request reqd ~session_id
                                       ~protocol_version
-                                      "Internal server error"))))))))
+                                      "Internal server error")))))))
 
 let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
     request reqd =

@@ -30,6 +30,13 @@ let advance_line ~start_line text =
   String.iter (fun char -> if Char.equal char '\n' then incr line) text;
   !line
 
+let line_range ~start_line ~end_line =
+  if start_line < 1
+  then Error "start_line must be at least 1"
+  else if end_line < start_line
+  then Error "end_line must not precede start_line"
+  else Ok { start_line; end_line }
+
 let range_for_text ~start_line text =
   match line_count text with
   | 0 -> None
@@ -113,11 +120,7 @@ let line_range_of_yojson = function
     let open Result.Syntax in
     let* start_line = required_int fields "start_line" in
     let* end_line = required_int fields "end_line" in
-    if start_line < 1
-    then Error "start_line must be at least 1"
-    else if end_line < start_line
-    then Error "end_line must not precede start_line"
-    else Ok { start_line; end_line }
+    line_range ~start_line ~end_line
   | value ->
     Error
       (Printf.sprintf "line range must be an object, got %s"

@@ -684,7 +684,7 @@ candidates = ["safe.model"]
           default_route: 'default',
           default_runtime: null,
           runtimes: [{
-            id: 'codex.gpt-5', provider: 'codex_subscription', model: 'gpt-5-codex',
+            id: 'codex.gpt-5', provider: 'codex_subscription', provider_id: 'codex_subscription', model: 'gpt-5-codex',
             effective_max_context: 200_000, max_context_source: 'capability', max_output_tokens: null,
             is_local: false, is_default: false, quota_rest: null,
           }],

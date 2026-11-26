@@ -12,6 +12,7 @@ module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_registry = Masc.Keeper_registry
 module Keeper_sandbox = Masc.Keeper_sandbox
 module Keeper_alerting_path = Masc.Keeper_alerting_path
+module Keeper_tool_read_window = Masc.Keeper_tool_read_window
 module Keeper_tool_shared_runtime = Masc.Keeper_tool_shared_runtime
 module Keeper_tool_descriptor = Masc.Keeper_tool_descriptor
 module Keeper_file_change_evidence = Masc.Keeper_file_change_evidence

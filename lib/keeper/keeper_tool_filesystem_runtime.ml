@@ -922,9 +922,23 @@ module For_testing = struct
 
   let slice_read_window ~start_line ~max_lines ~first_line ~max_bytes ~scan_complete
       content =
+    (* [read_line_window] is private to [of_args], so the test window goes
+       through the same parse as a tool call's arguments. *)
+    let window =
+      match
+        Keeper_tool_read_window.of_args
+          (`Assoc
+             (("offset", `Int start_line)
+              :: (match max_lines with
+                  | Some limit -> [ "limit", `Int limit ]
+                  | None -> [])))
+      with
+      | Ok window -> window
+      | Error _ -> invalid_arg "For_testing.slice_read_window: coordinates start at 1"
+    in
     match
       slice_read_window
-        ~window:({ start_line; max_lines } : read_line_window)
+        ~window
         ~first_line
         ~max_bytes
         ~scan_complete

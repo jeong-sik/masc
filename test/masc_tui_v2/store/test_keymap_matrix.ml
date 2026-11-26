@@ -7599,7 +7599,7 @@ let test_wave3_surfaces_scroll_bounds_guards_and_secrets () =
     |> Infra_store.apply_git_log ~observed_at:t0 ~scope:Wire_infra.Ws_project
          ~path:"lib/demo.ml" []
     |> Infra_store.apply_git_diff ~observed_at:t0 ~scope:Wire_infra.Ws_project
-         ~path:"lib/demo.ml" { has_changes = false; lines = [] }
+         ~path:"lib/demo.ml" { has_changes = false; rows = [] }
     |> Infra_store.apply_activity_events_backfill act_items
   in
   let inf_stale = Infra_store.mark_stale_all inf_code_full in

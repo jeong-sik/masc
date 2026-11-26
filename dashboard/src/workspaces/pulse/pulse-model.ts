@@ -14,6 +14,8 @@ import {
   type Observed,
 } from '../../core/resource-cache'
 import type { TimeWindow } from '../../core/time-window'
+import { formatRelativeUntilSec } from '../../lib/format-time'
+import { formatQuotaSpentNote, summarizeQuotaWindows } from './pulse-quota'
 import type {
   PulseApprovalItem,
   PulseAskItem,
@@ -152,9 +154,9 @@ export function isKeeperFailing(keeper: PulseKeeperRow): boolean {
 
 /**
  * Classifies 24h/window spend honestly into:
- * - reported USD (with subscription / exhausted / unreported sub-counts)
+ * - reported USD (with the quota summary and unreported sample count)
  * - `$0 Sub` (subscription-covered lanes where cost_usd is null/0)
- * - `$0 Exhausted` (provider quota exhausted)
+ * - `$0 Exhausted` (a provider window is spent and its reset is still ahead)
  * - `? Unreported` (telemetry absent/unreported)
  * - `absent` (no spend samples in window)
  */
@@ -162,27 +164,9 @@ export function classifySpendStatus(
   costs: Observed<readonly PulseKeeperCostRow[]>,
   usage: Observed<PulseProviderUsageSnapshot>,
   shellCostUsd: number | null,
+  nowSec: number,
 ): SpendClassification {
-  let exhaustedCount = 0
-  let subscriptionCount = 0
-
-  if (usage.kind === 'value' && usage.data.state === 'available') {
-    for (const pt of usage.data.points) {
-      if (pt.unit === 'fraction' && pt.value !== null && pt.value >= 0.999) {
-        exhaustedCount += 1
-      } else if (pt.unit === 'percent' && pt.value !== null && pt.value >= 99.9) {
-        exhaustedCount += 1
-      } else if (pt.unit === 'credit_balance' && pt.remaining !== null && pt.remaining <= 0) {
-        exhaustedCount += 1
-      } else if (
-        pt.unit === 'credit_unlimited'
-        || (pt.unit === 'fraction' && pt.value !== null && pt.value < 0.999)
-        || (pt.unit === 'percent' && pt.value !== null && pt.value < 99.9)
-      ) {
-        subscriptionCount += 1
-      }
-    }
-  }
+  const quota = summarizeQuotaWindows(usage, nowSec)
 
   if (costs.kind === 'value') {
     const rows = costs.data
@@ -199,30 +183,18 @@ export function classifySpendStatus(
     }
 
     if (reportedSamples > 0 && totalUsd > 0) {
-      return {
-        kind: 'reported',
-        usd: totalUsd,
-        subscriptionCount,
-        exhaustedCount,
-        unreportedCount: unreportedSamples,
-      }
+      return { kind: 'reported', usd: totalUsd, quota, unreportedCount: unreportedSamples }
     }
-    if (exhaustedCount > 0 && totalUsd === 0) {
-      return { kind: 'exhausted_zero', exhaustedCount }
+    if (quota.exhausted > 0 && totalUsd === 0) {
+      return { kind: 'exhausted_zero', quota }
     }
-    if ((subscriptionCount > 0 || unreportedSamples > 0) && totalUsd === 0) {
-      return subscriptionCount > 0
-        ? { kind: 'subscription_zero', subscriptionCount, exhaustedCount }
+    if ((quota.subscription > 0 || unreportedSamples > 0) && totalUsd === 0) {
+      return quota.subscription > 0
+        ? { kind: 'subscription_zero', quota }
         : { kind: 'unreported', reason: `${unreportedSamples}건 비용 미보고 (구독/로컬 레인)` }
     }
     if (reportedSamples > 0) {
-      return {
-        kind: 'reported',
-        usd: 0,
-        subscriptionCount,
-        exhaustedCount,
-        unreportedCount: unreportedSamples,
-      }
+      return { kind: 'reported', usd: 0, quota, unreportedCount: unreportedSamples }
     }
     if (rows.length === 0 && shellCostUsd === null) {
       return { kind: 'absent' }
@@ -230,19 +202,13 @@ export function classifySpendStatus(
   }
 
   if (shellCostUsd !== null && Number.isFinite(shellCostUsd)) {
-    if (shellCostUsd === 0 && exhaustedCount > 0) {
-      return { kind: 'exhausted_zero', exhaustedCount }
+    if (shellCostUsd === 0 && quota.exhausted > 0) {
+      return { kind: 'exhausted_zero', quota }
     }
-    if (shellCostUsd === 0 && subscriptionCount > 0) {
-      return { kind: 'subscription_zero', subscriptionCount, exhaustedCount }
+    if (shellCostUsd === 0 && quota.subscription > 0) {
+      return { kind: 'subscription_zero', quota }
     }
-    return {
-      kind: 'reported',
-      usd: shellCostUsd,
-      subscriptionCount,
-      exhaustedCount,
-      unreportedCount: 0,
-    }
+    return { kind: 'reported', usd: shellCostUsd, quota, unreportedCount: 0 }
   }
 
   if (usage.kind === 'value' && usage.data.state === 'unavailable') {
@@ -262,8 +228,9 @@ export function buildPulseKpis(params: {
   readonly costs: Observed<readonly PulseKeeperCostRow[]>
   readonly usage: Observed<PulseProviderUsageSnapshot>
   readonly window: TimeWindow
+  readonly nowSec: number
 }): readonly PulseKpiCard[] {
-  const { shell, keepers, costs, usage, window: win } = params
+  const { shell, keepers, costs, usage, window: win, nowSec } = params
 
   // 1. Active Keepers
   let activeKpi: PulseKpiCard
@@ -439,7 +406,7 @@ export function buildPulseKpis(params: {
 
   // 4. Spend / 24h ($0 Sub / $0 Exhausted / ? Unreported aware; keeper-costs caps at 1440m)
   const shellCost = shell.kind === 'value' ? shell.data.scorecard.cost_24h_usd : null
-  const cls = classifySpendStatus(costs, usage, shellCost)
+  const cls = classifySpendStatus(costs, usage, shellCost, nowSec)
   const scopeNote = win === '24h' ? '' : ` (비용 24h · 쿼터 ${win === '7d' ? '7d' : '14d'})`
   let spendKpi: PulseKpiCard
   if ((cls.kind === 'absent' || cls.kind === 'unreported')
@@ -465,45 +432,53 @@ export function buildPulseKpis(params: {
     }
   } else {
     switch (cls.kind) {
-      case 'reported':
+      case 'reported': {
+        const spentNote = formatQuotaSpentNote(cls.quota, nowSec)
         spendKpi = {
           id: 'spend_24h',
           label: 'Spend / 24h',
           value: observedValue(formatCompactUsd(cls.usd)),
-          exactTooltip: `24h 정확한 비용 $${cls.usd.toFixed(4)} · 구독 레인 ${cls.subscriptionCount} · 미보고 ${cls.unreportedCount} · 한도소진 ${cls.exhaustedCount}${scopeNote}`,
-          secondary: cls.exhaustedCount > 0
-            ? `한도 소진 ${cls.exhaustedCount}${scopeNote}`
-            : cls.subscriptionCount > 0
-              ? `구독 ${cls.subscriptionCount} 병행${scopeNote}`
+          exactTooltip: `24h 정확한 비용 $${cls.usd.toFixed(4)} · 구독 레인 ${cls.quota.subscription} · 미보고 ${cls.unreportedCount}${spentNote ? ` · ${spentNote}` : ''}${scopeNote}`,
+          secondary: spentNote
+            ? `${spentNote}${scopeNote}`
+            : cls.quota.subscription > 0
+              ? `구독 ${cls.quota.subscription} 병행${scopeNote}`
               : cls.unreportedCount > 0
                 ? `? 미보고 ${cls.unreportedCount} 포함${scopeNote}`
                 : `API 과금 측정${scopeNote}`,
-          tone: cls.exhaustedCount > 0 ? 'warn' : 'default',
+          tone: spentNote ? 'warn' : 'default',
           route: '/runtime/quotas',
         }
         break
-      case 'subscription_zero':
+      }
+      case 'subscription_zero': {
+        const spentNote = formatQuotaSpentNote(cls.quota, nowSec)
         spendKpi = {
           id: 'spend_24h',
           label: 'Spend / 24h',
           value: observedValue('$0 Sub'),
-          exactTooltip: `구독 플랜 레인 ${cls.subscriptionCount}개 활성 (24h API 직접 과금 $0.00)${scopeNote}`,
-          secondary: `구독 플랜 ${cls.subscriptionCount}개 활성${scopeNote}`,
-          tone: 'ok',
+          exactTooltip: `구독 플랜 레인 ${cls.quota.subscription}개 활성 (24h API 직접 과금 $0.00)${spentNote ? ` · ${spentNote}` : ''}${scopeNote}`,
+          secondary: spentNote
+            ? `구독 ${cls.quota.subscription} · ${spentNote}${scopeNote}`
+            : `구독 플랜 ${cls.quota.subscription}개 활성${scopeNote}`,
+          tone: spentNote ? 'warn' : 'ok',
           route: '/runtime/quotas',
         }
         break
-      case 'exhausted_zero':
+      }
+      case 'exhausted_zero': {
+        const spentNote = formatQuotaSpentNote(cls.quota, nowSec)
         spendKpi = {
           id: 'spend_24h',
           label: 'Spend / 24h',
           value: observedValue('$0 Exhausted'),
-          exactTooltip: `쿼터 소진 레인 ${cls.exhaustedCount}개 감지${scopeNote}`,
-          secondary: `쿼터 소진 ${cls.exhaustedCount}건${scopeNote}`,
+          exactTooltip: `${spentNote}${scopeNote}`,
+          secondary: `${spentNote}${scopeNote}`,
           tone: 'bad',
           route: '/runtime/quotas',
         }
         break
+      }
       case 'unreported':
         spendKpi = {
           id: 'spend_24h',
@@ -542,14 +517,18 @@ export function buildAttentionQueue(params: {
   const items: PulseAttentionItem[] = []
 
   for (const app of approvals) {
+    const question = app.question || `call ${app.tool_call_id}`
     items.push({
       id: `approval:${app.approval_id}`,
       kind: 'approval',
       severity: 'critical',
       keeper: app.keeper,
       title: `도구 승인 요청 · ${app.tool || 'tool'}`,
-      detail: app.question || `call ${app.tool_call_id}`,
+      detail: app.because ? `${question} · 보류 이유: ${app.because}` : question,
       ageSec: app.asked_at !== null ? Math.max(0, Math.round(nowSec - app.asked_at)) : null,
+      expiresInSec: app.asked_at !== null && app.timeout_sec !== null
+        ? Math.round(app.asked_at + app.timeout_sec - nowSec)
+        : null,
       route: '/work/inbox',
       raw: app,
     })
@@ -564,6 +543,7 @@ export function buildAttentionQueue(params: {
       title: `Keeper 질문 (${ask.question_count})`,
       detail: ask.summary,
       ageSec: ask.created_at !== null ? Math.max(0, Math.round(nowSec - ask.created_at)) : null,
+      expiresInSec: null,
       route: '/work/inbox',
       raw: ask,
     })
@@ -596,6 +576,7 @@ export function buildAttentionQueue(params: {
         title: `${k.name} · ${k.directory_issue ? '설정 오류' : k.health}`,
         detail,
         ageSec,
+        expiresInSec: null,
         route: `/keepers/${encodeURIComponent(k.name)}/chat`,
         raw: k,
       })
@@ -610,6 +591,7 @@ export function buildAttentionQueue(params: {
         title: `${k.name} · 경로 휴식`,
         detail,
         ageSec: null,
+        expiresInSec: null,
         route: `/keepers/${encodeURIComponent(k.name)}/chat`,
         raw: k,
       })
@@ -800,6 +782,11 @@ export function buildTeamHandoffPulse(
   }
 
   return results
+}
+
+/** When a held tool call times out: "3분 후 만료", or "만료 시각 지남" once past. */
+export function formatApprovalExpiry(expiresInSec: number): string {
+  return expiresInSec > 0 ? `${formatRelativeUntilSec(expiresInSec)} 만료` : '만료 시각 지남'
 }
 
 export function formatRelativeAge(ageSec: number | null): string {

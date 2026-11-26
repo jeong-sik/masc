@@ -50,6 +50,8 @@ function makeKeeper(overrides: Partial<PulseKeeperRow> = {}): PulseKeeperRow {
   }
 }
 
+const USAGE_NOW = 1_700_000_000
+
 describe('Pulse Workspace — Model & Formatters', () => {
   it('formats compact counts with exact tooltips and preserves zero vs absent', () => {
     expect(formatCompactCount(63_200_000)).toEqual({ short: '63.2M', exact: '63,200,000' })
@@ -71,9 +73,12 @@ describe('Pulse Workspace — Model & Formatters', () => {
       observedValue({
         state: 'available',
         days: 1,
-        points: [{ scope_id: 'claude', source: 'sub', kind: 'subscription', unit: 'credit_unlimited', value: null, limit: null, remaining: null }],
+        reported_no_windows: [],
+        undecodable_points: 0,
+        points: [{ scope_id: 'claude', source: 'sub', kind: 'subscription', limit_id: null, observed_at: USAGE_NOW - 60, resets_at: null, utilization: { unit: 'credit_unlimited' } }],
       }),
       0,
+      USAGE_NOW,
     )
     expect(subZero.kind).toBe('subscription_zero')
 
@@ -84,16 +89,19 @@ describe('Pulse Workspace — Model & Formatters', () => {
       observedValue({
         state: 'available',
         days: 1,
+        reported_no_windows: [],
+        undecodable_points: 0,
         points: [
-          { scope_id: 'claude', source: 'quota', kind: '5h', unit: 'fraction', value: 0.35, limit: 1, remaining: 0.65 },
-          { scope_id: 'codex', source: 'quota', kind: 'weekly', unit: 'percent', value: 42, limit: 100, remaining: 58 },
+          { scope_id: 'claude', source: 'quota', kind: '5h', limit_id: null, observed_at: USAGE_NOW - 60, resets_at: USAGE_NOW + 3600, utilization: { unit: 'fraction', value: 0.35 } },
+          { scope_id: 'codex', source: 'quota', kind: 'weekly', limit_id: null, observed_at: USAGE_NOW - 60, resets_at: USAGE_NOW + 86400, utilization: { unit: 'percent', value: 42 } },
         ],
       }),
       0,
+      USAGE_NOW,
     )
     expect(realWindowSub.kind).toBe('subscription_zero')
     if (realWindowSub.kind === 'subscription_zero') {
-      expect(realWindowSub.subscriptionCount).toBe(2)
+      expect(realWindowSub.quota.subscription).toBe(2)
     }
 
     const exhaustedZero = classifySpendStatus(
@@ -103,9 +111,12 @@ describe('Pulse Workspace — Model & Formatters', () => {
       observedValue({
         state: 'available',
         days: 1,
-        points: [{ scope_id: 'codex', source: 'quota', kind: 'rate', unit: 'fraction', value: 1.0, limit: 1, remaining: 0 }],
+        reported_no_windows: [],
+        undecodable_points: 0,
+        points: [{ scope_id: 'codex', source: 'quota', kind: 'rate', limit_id: null, observed_at: USAGE_NOW - 60, resets_at: USAGE_NOW + 1800, utilization: { unit: 'fraction', value: 1.0 } }],
       }),
       0,
+      USAGE_NOW,
     )
     expect(exhaustedZero.kind).toBe('exhausted_zero')
 
@@ -113,6 +124,7 @@ describe('Pulse Workspace — Model & Formatters', () => {
       observedAbsent(),
       observedValue({ state: 'unavailable', reason: 'ledger store offline' }),
       null,
+      USAGE_NOW,
     )
     expect(unreported.kind).toBe('unreported')
 
@@ -122,6 +134,7 @@ describe('Pulse Workspace — Model & Formatters', () => {
       ]),
       observedAbsent(),
       null,
+      USAGE_NOW,
     )
     expect(reported.kind).toBe('reported')
     if (reported.kind === 'reported') {
@@ -155,9 +168,12 @@ describe('Pulse Workspace — Model & Formatters', () => {
       usage: observedValue({
         state: 'available',
         days: 1,
-        points: [{ scope_id: 'claude', source: 'sub', kind: 'subscription', unit: 'credit_unlimited', value: null, limit: null, remaining: null }],
+        reported_no_windows: [],
+        undecodable_points: 0,
+        points: [{ scope_id: 'claude', source: 'sub', kind: 'subscription', limit_id: null, observed_at: USAGE_NOW - 60, resets_at: null, utilization: { unit: 'credit_unlimited' } }],
       }),
       window: '24h',
+      nowSec: USAGE_NOW,
     })
 
     expect(kpis).toHaveLength(4)
@@ -170,7 +186,7 @@ describe('Pulse Workspace — Model & Formatters', () => {
   it('sorts attention queue by severity and maps routes accurately', () => {
     const now = 1_700_000_000
     const queue = buildAttentionQueue({
-      approvals: [{ approval_id: 'a1', keeper: 'code-reviewer-sister', tool_call_id: 'tc1', tool: 'bash', question: 'Run test?', asked_at: now - 30 }],
+      approvals: [{ approval_id: 'a1', keeper: 'code-reviewer-sister', tool_call_id: 'tc1', tool: 'bash', question: 'Run test?', because: null, asked_at: now - 30, timeout_sec: null }],
       asks: [{ ask_id: 'ask1', keeper: 'e-masc-the-leader', summary: 'Choose release tag', created_at: now - 120, question_count: 1 }],
       keepers: [makeKeeper({ name: 'broken-keeper', health: 'failing', runtime_blocker_summary: 'provider 429' })],
       nowSec: now,
@@ -234,6 +250,7 @@ describe('Pulse Workspace — Model & Formatters', () => {
       costs: observedAbsent(),
       usage: observedAbsent(),
       window: '30d',
+      nowSec: USAGE_NOW,
     })
     expect(kpis[2]!.label).toBe('Turns / 24h')
     expect(kpis[3]!.label).toBe('Spend / 24h')
@@ -395,14 +412,14 @@ describe('PulseWorkspace DOM Integration', () => {
       }
       if (url.includes('/api/v1/dashboard/provider-usage-history')) {
         await waitForUsage
-        return json({ days: 1, points: [{ scope_id: 'claude', source: 'sub', kind: 'subscription', unit: 'credit_unlimited' }] })
+        return json({ days: 1, reported_no_windows: [], points: [{ scope_id: 'claude', source: 'sub', kind: 'subscription', observed_at: Date.now() / 1000 - 60, resets_at: null, unit: 'credit_unlimited' }] })
       }
       if (url.includes('/api/v1/keepers/tool-approvals')) {
         return json({ pending: [{ approval_id: 'ap-1', keeper: 'code-reviewer-sister', tool_call_id: 'tc-1', tool: 'git_push', question: 'Allow push?', asked_at: Date.now() / 1000 - 15 }] })
       }
       if (url.includes('/api/v1/keepers/asks')) return json({ asks: [] })
       if (url.includes('/api/v1/dashboard/goals')) {
-        return json({ tree: [{ id: 'g-1', title: 'Ship Proposal A+', phase: 'Verifying', task_count: 5, task_done_count: 4, task_summary: { awaiting_verification: 1 } }] })
+        return json({ approval_queue_state: { state: 'ready' }, tree: [{ id: 'g-1', title: 'Ship Proposal A+', phase: 'Verifying', task_count: 5, task_done_count: 4, task_summary: { awaiting_verification: 1 } }], summary: { pending_approvals: 0 } })
       }
       if (url.includes('/api/v1/dashboard/board')) {
         return json({ posts: [{ id: 'b1', title: 'Review handoff', body: 'Over to @e-masc-the-leader', author: 'code-reviewer-sister', comment_count: 2 }] })

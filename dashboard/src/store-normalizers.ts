@@ -72,7 +72,7 @@ export function normalizeAgent(raw: unknown): Agent | null {
   }
 }
 
-type StoredHandoff =
+export type StoredHandoff =
   | { kind: 'absent' }
   | { kind: 'readable'; context: NonNullable<Task['handoff_context']> }
   | { kind: 'unreadable' }
@@ -87,7 +87,7 @@ function isOptionalWireString(value: unknown): boolean {
 // so a value that breaks the handoff wire contract is a stored-but-unreadable
 // note, not a note with empty fields. The checks follow the server decoder:
 // an absent key takes its default, a present key must have its declared type.
-function parseStoredHandoff(value: unknown): StoredHandoff {
+export function parseStoredHandoff(value: unknown): StoredHandoff {
   if (value === undefined || value === null) return { kind: 'absent' }
   if (!isRecord(value)) return { kind: 'unreadable' }
   const summary = value.summary

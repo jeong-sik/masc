@@ -13,7 +13,7 @@ import type {
     BoardCurationSnapshot, BoardKarmaLedger, BoardKarmaLedgerEvent, BoardKarmaTotal,
     KeeperApprovalQueueItem, KeeperExactAttemptState,
     KeeperExactAttemptStatus, KeeperExactAttemptQuarantineCause,
-    KeeperSummaryAttemptDisposition,
+    KeeperSummaryAttemptDisposition, ApprovalQueuePhase,
   GateJudgment, HitlContextSummary, HitlSummaryStatus,
   SubBoard, SubBoardAccess,
 } from '../types'
@@ -243,7 +243,7 @@ export function normalizeKeeperExactAttempt(raw: unknown): KeeperExactAttemptSta
   }
 }
 
-function normalizeKeeperSummaryAttemptDisposition(
+export function normalizeKeeperSummaryAttemptDisposition(
   raw: unknown,
 ): KeeperSummaryAttemptDisposition | null {
   if (!isRecord(raw) || typeof raw.code !== 'string') return null
@@ -285,6 +285,12 @@ function normalizeKeeperSummaryAttemptDisposition(
     default:
       return null
   }
+}
+
+export function decodeApprovalQueuePhase(raw: unknown): ApprovalQueuePhase | null {
+  return raw === 'queued' || raw === 'judging' || raw === 'human_required' || raw === 'blocked'
+    ? raw
+    : null
 }
 
 export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQueueItem | null {
@@ -332,13 +338,7 @@ export function normalizeKeeperApprovalQueueItem(raw: unknown): KeeperApprovalQu
     || typeof sequence !== 'number'
     || sequence <= 0
   ) return null
-  const phase = (() => {
-    const p = raw.phase
-    if (p === 'queued' || p === 'judging' || p === 'human_required' || p === 'blocked') {
-      return p
-    }
-    return null
-  })()
+  const phase = decodeApprovalQueuePhase(raw.phase)
   if (!phase) return null
   const summaryStatus = normalizeHitlSummaryStatus(raw.summary_status)
   const exactAttempt = normalizeKeeperExactAttempt(raw.exact_attempt)

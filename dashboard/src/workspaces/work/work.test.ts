@@ -245,11 +245,11 @@ describe('workspaces/work', () => {
 
   it('Tasks filter counts reconcile Active = Claimed + InProgress and enforce goalless set_task_goal rule', () => {
     const tasks: TaskItem[] = [
-      { id: 't1', title: 'Claimed task', description: null, priority: 1, status: 'Claimed', assignee: 'k1', goalId: null, verificationId: null, createdAt: null, updatedAt: null, cancelledBy: null, cancelReason: null },
-      { id: 't2', title: 'InProgress task', description: null, priority: 1, status: 'InProgress', assignee: 'k2', goalId: 'g1', verificationId: null, createdAt: null, updatedAt: null, cancelledBy: null, cancelReason: null },
-      { id: 't3', title: 'Awaiting task', description: null, priority: 2, status: 'AwaitingVerification', assignee: 'k1', goalId: 'g1', verificationId: 'v1', createdAt: null, updatedAt: null, cancelledBy: null, cancelReason: null },
-      { id: 't4', title: 'Todo unlinked', description: null, priority: 2, status: 'Todo', assignee: null, goalId: null, verificationId: null, createdAt: null, updatedAt: null, cancelledBy: null, cancelReason: null },
-      { id: 't5', title: 'Done task', description: null, priority: 3, status: 'Done', assignee: 'k1', goalId: null, verificationId: null, createdAt: null, updatedAt: null, cancelledBy: null, cancelReason: null },
+      { id: 't1', title: 'Claimed task', description: null, priority: 1, status: 'Claimed', assignee: 'k1', goalId: null, verificationId: null, createdAt: null, updatedAt: null, cancelledBy: null, cancelReason: null, handoff: { kind: 'absent' } },
+      { id: 't2', title: 'InProgress task', description: null, priority: 1, status: 'InProgress', assignee: 'k2', goalId: 'g1', verificationId: null, createdAt: null, updatedAt: null, cancelledBy: null, cancelReason: null, handoff: { kind: 'absent' } },
+      { id: 't3', title: 'Awaiting task', description: null, priority: 2, status: 'AwaitingVerification', assignee: 'k1', goalId: 'g1', verificationId: 'v1', createdAt: null, updatedAt: null, cancelledBy: null, cancelReason: null, handoff: { kind: 'absent' } },
+      { id: 't4', title: 'Todo unlinked', description: null, priority: 2, status: 'Todo', assignee: null, goalId: null, verificationId: null, createdAt: null, updatedAt: null, cancelledBy: null, cancelReason: null, handoff: { kind: 'absent' } },
+      { id: 't5', title: 'Done task', description: null, priority: 3, status: 'Done', assignee: 'k1', goalId: null, verificationId: null, createdAt: null, updatedAt: null, cancelledBy: null, cancelReason: null, handoff: { kind: 'absent' } },
     ]
 
     const counts = computeTaskFilterCounts(tasks)

@@ -25,6 +25,11 @@ import {
 import { resourceCache, type FetchReason, type Observed } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
 import { decodeToolApprovalsWire, isOpenKeeperAskRow } from '../../api/hitl-decoders'
+import { decodeApprovalQueuePhase, normalizeKeeperSummaryAttemptDisposition } from '../../api/board'
+import { decodeGateJudgeLane, normalizeGateDecisionSource } from '../../api/dashboard-gate'
+import { approvalPhaseView, decisionSourceLabel, judgeLaneText } from '../../lib/gate-approval-labels'
+import { formatDuration } from '../../lib/format-time'
+import type { ApprovalQueuePhase, GateJudgeLane } from '../../types/gate'
 import { KeeperBadge } from '../../components/keeper-badge'
 import {
   DataTable,
@@ -52,6 +57,7 @@ import {
   type GoalItem,
   type InboxEntry,
   type KeeperAskItem,
+  toolApprovalTimeout,
   type ToolApprovalWait,
   type WorkspaceViewProps,
 } from './types'
@@ -77,7 +83,7 @@ type GoalEvidenceRead = {
   | { readonly kind: 'failed'; readonly reason: string }
 )
 
-function decodeToolApprovals(raw: unknown): ToolApprovalWait[] {
+export function decodeToolApprovals(raw: unknown): ToolApprovalWait[] {
   if (!isRecord(raw) || !Array.isArray(raw.pending)) {
     throw new Error('도구 승인 응답에서 대기 목록을 확인할 수 없습니다.')
   }
@@ -92,7 +98,7 @@ function decodeToolApprovals(raw: unknown): ToolApprovalWait[] {
       argsPreview: row.args || '{}',
       question: row.question,
       because: row.because || null,
-      askedAt: row.askedAt ?? 0,
+      askedAt: row.askedAt,
       timeoutSec: row.timeoutSec,
       revision: row.revision,
     })
@@ -165,12 +171,14 @@ function readGateUnavailableReason(stateObj: unknown): string | null {
   )
 }
 
-function decodeGatePayload(raw: unknown): {
+export function decodeGatePayload(raw: unknown): {
   pending: GatePendingItem[]
   resolved: GateResolvedAuditRow[]
   queueError: string | null
   auditError: string | null
   auditPartial: boolean
+  /** Null when the payload has no readable `hitl.judge_lane`. */
+  judgeLane: GateJudgeLane | null
 } {
   if (!isRecord(raw)) throw new Error('Channel Gate 응답 형식이 잘못되었습니다.')
   const queueError = readGateUnavailableReason(raw.approval_queue_state)
@@ -193,7 +201,8 @@ function decodeGatePayload(raw: unknown): {
         toolName,
         inputPreview: asNonEmptyString(row.input_preview) ?? (row.input ? JSON.stringify(row.input) : null),
         waitingSec: asFiniteNumber(row.waiting_s),
-        phase: asString(row.phase, 'human_required'),
+        phase: decodeApprovalQueuePhase(row.phase),
+        disposition: normalizeKeeperSummaryAttemptDisposition(row.summary_attempt_disposition),
         sequence: asSafeInt(row.sequence) ?? 1,
         taskId: asNonEmptyString(row.task_id),
         goalId: asNonEmptyString(row.goal_id),
@@ -219,7 +228,7 @@ function decodeGatePayload(raw: unknown): {
         keeper,
         toolName: asString(row.tool_name, ''),
         decision: asString(row.decision_kind ?? row.decision, ''),
-        decisionSource: asString(row.decision_source, 'human_operator'),
+        decisionSource: normalizeGateDecisionSource(row.decision_source),
         reason: asNonEmptyString(row.decision_reason),
         actor: asNonEmptyString(row.actor),
         resolvedAt: date !== null && Number.isFinite(date.getTime())
@@ -230,7 +239,9 @@ function decodeGatePayload(raw: unknown): {
   }
   const page = isRecord(raw.recent_resolved_page) ? raw.recent_resolved_page : null
   const auditPartial = page?.truncated === true || page?.scan_exhausted === true
-  return { pending, resolved, queueError, auditError, auditPartial }
+  const lane = isRecord(raw.hitl) ? decodeGateJudgeLane(raw.hitl.judge_lane) : null
+  const judgeLane = lane?.ok ? lane.lane : null
+  return { pending, resolved, queueError, auditError, auditPartial, judgeLane }
 }
 
 function decodeAwaitingGoals(raw: unknown): GoalItem[] {
@@ -275,6 +286,27 @@ const inboxReads = {
     topics: ['goal', 'goals', 'planning', 'goal_projection_changed', 'pending_confirms_changed'],
     decode: decodeAwaitingGoals,
   },
+}
+
+export function gatePhaseLabel(phase: ApprovalQueuePhase | null): string {
+  return phase === null ? '● 단계 확인 불가' : approvalPhaseView(phase).label
+}
+
+export function gateDispositionText(disposition: GatePendingItem['disposition']): string {
+  if (disposition === null) return '확인 불가'
+  return 'operator_detail' in disposition ? `${disposition.code} · ${disposition.operator_detail}` : disposition.code
+}
+
+export function toolApprovalTimeoutText(wait: Pick<ToolApprovalWait, 'askedAt' | 'timeoutSec'>, nowMs: number): string {
+  const timeout = toolApprovalTimeout(wait, nowMs)
+  switch (timeout.kind) {
+    case 'unknown':
+      return '대기 한도 확인 불가'
+    case 'pending':
+      return `${formatDuration(timeout.remainingSec)} 뒤 시간 초과 (대기 한도 ${formatDuration(timeout.timeoutSec)})`
+    case 'expired':
+      return `${formatDuration(timeout.overdueSec)} 전에 대기 한도 지남 (대기 한도 ${formatDuration(timeout.timeoutSec)})`
+  }
 }
 
 const keyPrefixBySource: Readonly<Record<InboxSource, string>> = {
@@ -459,7 +491,7 @@ export function InboxTab(props: WorkspaceViewProps) {
   const entries = useMemo<readonly InboxEntry[]>(() => {
     const list: InboxEntry[] = []
     for (const item of approvals) {
-      list.push({ kind: 'tool_approval', key: `tool:${item.approvalId}`, sortTs: item.askedAt, item })
+      list.push({ kind: 'tool_approval', key: `tool:${item.approvalId}`, sortTs: item.askedAt ?? 0, item })
     }
     for (const item of asks) {
       list.push({ kind: 'keeper_ask', key: `ask:${item.askId}`, sortTs: item.askedAt, item })
@@ -710,7 +742,7 @@ export function InboxTab(props: WorkspaceViewProps) {
         </span>
       `,
     },
-    { id: 'source', header: '출처', accessor: (r) => r.decisionSource },
+    { id: 'source', header: '출처', accessor: (r) => decisionSourceLabel(r.decisionSource) },
     { id: 'actor', header: '처리자', accessor: (r) => r.actor },
     { id: 'reason', header: '사유', accessor: (r) => r.reason },
   ], [])
@@ -805,7 +837,7 @@ export function InboxTab(props: WorkspaceViewProps) {
             : entry.kind === 'keeper_ask'
               ? entry.item.questions[0]?.header ?? entry.item.askId
               : entry.kind === 'channel_gate'
-                ? `${entry.item.toolName} (${entry.item.phase})`
+                ? `${entry.item.toolName} · ${gatePhaseLabel(entry.item.phase)}`
                 : entry.goal.title
           const keeper = entry.kind === 'tool_approval'
             ? entry.item.keeper
@@ -854,6 +886,12 @@ export function InboxTab(props: WorkspaceViewProps) {
                 <${MarkdownContent} text=${selectedEntry.item.because} />
               </div>
             `}
+            <div class="wk-kv-grid">
+              <div class="wk-kv">
+                <span class="wk-kv-k">응답 기한</span>
+                <span class="wk-kv-v tnum">${toolApprovalTimeoutText(selectedEntry.item, Date.now())}</span>
+              </div>
+            </div>
             <pre class="wk-code-preview">${selectedEntry.item.argsPreview}</pre>
             <${TargetLockedAction}
               target=${{
@@ -980,10 +1018,24 @@ export function InboxTab(props: WorkspaceViewProps) {
           ${selectedEntry.kind === 'channel_gate' && html`
             <div class="wk-section-head">
               <div class="wk-min-w-0">
-                <span class="wk-badge wk-badge--warn">Channel Gate · ${selectedEntry.item.phase}</span>
+                <span class="wk-badge wk-badge--warn">Channel Gate · ${gatePhaseLabel(selectedEntry.item.phase)}</span>
                 <h2 class="wk-heading">${selectedEntry.item.toolName}</h2>
               </div>
               <${KeeperBadge} id=${selectedEntry.item.keeper} portrait=${true} />
+            </div>
+            <div class="wk-kv-grid">
+              <div class="wk-kv">
+                <span class="wk-kv-k">상태</span>
+                <span class="wk-kv-v">${selectedEntry.item.phase === null ? '서버 응답에서 단계를 읽을 수 없음' : approvalPhaseView(selectedEntry.item.phase).detail}</span>
+              </div>
+              <div class="wk-kv">
+                <span class="wk-kv-k">Auto Judge</span>
+                <span class="wk-kv-v mono">${gateDispositionText(selectedEntry.item.disposition)}</span>
+              </div>
+              <div class="wk-kv">
+                <span class="wk-kv-k">판정 lane</span>
+                <span class="wk-kv-v mono">${gate?.judgeLane ? judgeLaneText(gate.judgeLane) : '판정 lane 확인 불가'}</span>
+              </div>
             </div>
             ${selectedEntry.item.summaryText && html`<${MarkdownContent} class="wk-notice" text=${selectedEntry.item.summaryText} />`}
             ${selectedEntry.item.keyQuestions.length > 0 && html`

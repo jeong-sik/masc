@@ -167,10 +167,15 @@ function normalizeGateMode(label: string, raw: unknown): GateModeStatus {
   return gateSnapshotProtocolDrift(`${label} is not a current closed variant`)
 }
 
-function normalizeGateJudgeLane(raw: unknown): GateJudgeLane {
-  if (!isRecord(raw)) return gateSnapshotProtocolDrift('hitl.judge_lane is not an object')
+export type GateJudgeLaneDecode =
+  | { ok: true; lane: GateJudgeLane }
+  | { ok: false; detail: string }
+
+/** Decode `hitl.judge_lane` without throwing; `detail` names the broken part. */
+export function decodeGateJudgeLane(raw: unknown): GateJudgeLaneDecode {
+  if (!isRecord(raw)) return { ok: false, detail: 'hitl.judge_lane is not an object' }
   const laneId = asString(raw.lane_id, '').trim()
-  if (!laneId) return gateSnapshotProtocolDrift('hitl.judge_lane.lane_id is invalid')
+  if (!laneId) return { ok: false, detail: 'hitl.judge_lane.lane_id is invalid' }
   if (
     raw.status === 'available'
     && Array.isArray(raw.slots)
@@ -180,15 +185,20 @@ function normalizeGateJudgeLane(raw: unknown): GateJudgeLane {
       (slot): slot is string => typeof slot === 'string' && slot.trim() !== '',
     )
     if (slots.length === 0 || slots.length !== raw.slots.length) {
-      return gateSnapshotProtocolDrift('hitl.judge_lane.slots is invalid')
+      return { ok: false, detail: 'hitl.judge_lane.slots is invalid' }
     }
-    return { status: 'available', lane_id: laneId, slots }
+    return { ok: true, lane: { status: 'available', lane_id: laneId, slots } }
   }
   if (raw.status === 'unavailable' && hasExactKeys(raw, ['status', 'lane_id', 'reason'])) {
     const reason = asString(raw.reason, '').trim()
-    if (reason) return { status: 'unavailable', lane_id: laneId, reason }
+    if (reason) return { ok: true, lane: { status: 'unavailable', lane_id: laneId, reason } }
   }
-  return gateSnapshotProtocolDrift('hitl.judge_lane is not a current closed variant')
+  return { ok: false, detail: 'hitl.judge_lane is not a current closed variant' }
+}
+
+function normalizeGateJudgeLane(raw: unknown): GateJudgeLane {
+  const decoded = decodeGateJudgeLane(raw)
+  return decoded.ok ? decoded.lane : gateSnapshotProtocolDrift(decoded.detail)
 }
 
 function normalizeHitlStatus(raw: unknown): DashboardGateResponse['hitl'] {
@@ -208,7 +218,7 @@ function normalizeHitlStatus(raw: unknown): DashboardGateResponse['hitl'] {
   }
 }
 
-function normalizeGateDecisionSource(raw: unknown): GateDecisionSource | null {
+export function normalizeGateDecisionSource(raw: unknown): GateDecisionSource | null {
   return raw === 'always_allowed' || raw === 'auto_judge' || raw === 'human_operator'
     ? raw
     : null

@@ -15,6 +15,8 @@
 
 import type { ComponentChildren } from 'preact'
 import { decodeGoalProof } from '../../api/goal-proof'
+import { parseStoredHandoff, type StoredHandoff } from '../../store-normalizers'
+import type { ApprovalQueuePhase, GateDecisionSource, KeeperSummaryAttemptDisposition } from '../../types/gate'
 import { formatMilliCandleObserved } from '../../api/keeper-diagnostics'
 import type { GoalProof } from '../../types/core'
 import { ok, err, type Result } from '../../lib/result'
@@ -353,8 +355,61 @@ export interface GoalItem {
   readonly verification: GoalProof | null
   readonly linkedTaskCount: Observed<number>
   readonly linkedTasks: readonly GoalLinkedTaskRef[]
+  /** Open Gate approvals linked to this goal. Null when the payload has no
+   *  count (the planning fallback does not send one). */
+  readonly pendingApprovalCount: number | null
+  readonly activity: GoalActivity
   readonly createdAt: string | null
   readonly updatedAt: string | null
+}
+
+/** Where the goal tree found the goal's newest activity
+ *  (`Dashboard_goals_types_builder`: task, approval, runtime, goal_metadata,
+ *  or several at the same instant). */
+export type GoalActivitySource = 'task' | 'approval' | 'runtime' | 'goal_metadata' | 'multiple'
+
+export type GoalActivity =
+  /** `stagnationSeconds` is how long ago that activity was, measured by the
+   *  server when it built the payload. */
+  | { readonly kind: 'observed'; readonly source: GoalActivitySource; readonly lastActivityAt: string | null; readonly stagnationSeconds: number }
+  /** The server looked and found no timestamped activity. */
+  | { readonly kind: 'unavailable' }
+  /** The payload carries no readable activity fields. */
+  | { readonly kind: 'unknown' }
+
+function parseGoalActivitySource(raw: unknown): GoalActivitySource | null {
+  switch (raw) {
+    case 'task':
+    case 'approval':
+    case 'runtime':
+    case 'goal_metadata':
+    case 'multiple':
+      return raw
+    default:
+      return null
+  }
+}
+
+export function decodeGoalActivity(raw: Record<string, unknown>): GoalActivity {
+  if (raw.activity_observation === 'unavailable') {
+    return raw.stagnation_seconds === null || raw.stagnation_seconds === undefined
+      ? { kind: 'unavailable' }
+      : { kind: 'unknown' }
+  }
+  const source = parseGoalActivitySource(raw.activity_observation)
+  const stagnationSeconds = asSafeInt(raw.stagnation_seconds)
+  if (source === null || stagnationSeconds === null || stagnationSeconds < 0) return { kind: 'unknown' }
+  return { kind: 'observed', source, lastActivityAt: asNonEmptyString(raw.last_activity_at), stagnationSeconds }
+}
+
+export function goalActivitySourceLabel(source: GoalActivitySource): string {
+  switch (source) {
+    case 'task': return '태스크'
+    case 'approval': return '승인'
+    case 'runtime': return 'Keeper 실행'
+    case 'goal_metadata': return 'Goal 수정'
+    case 'multiple': return '여러 곳'
+  }
 }
 
 function parseResumablePhase(raw: unknown): GoalResumablePhase | null {
@@ -564,6 +619,11 @@ export function goalPhaseTone(phase: GoalPhase): 'ok' | 'info' | 'warn' | 'err' 
   }
 }
 
+function decodeNonNegativeCount(raw: unknown): number | null {
+  const count = asSafeInt(raw)
+  return count !== null && count >= 0 ? count : null
+}
+
 export function decodeGoalItem(raw: unknown): Result<GoalItem, string> {
   if (!isRecord(raw)) return err('Goal 항목이 JSON 객체가 아닙니다.')
   const phaseRes = decodeGoalPhaseStrict(raw)
@@ -620,6 +680,8 @@ export function decodeGoalItem(raw: unknown): Result<GoalItem, string> {
     verification: raw.verification === undefined ? null : decodeGoalProof(raw.verification, id),
     linkedTaskCount,
     linkedTasks,
+    pendingApprovalCount: decodeNonNegativeCount(raw.pending_approval_count),
+    activity: decodeGoalActivity(raw),
     createdAt: asNonEmptyString(raw.created_at),
     updatedAt: asNonEmptyString(raw.updated_at),
   })
@@ -768,6 +830,8 @@ export interface TaskItem {
   readonly updatedAt: string | null
   readonly cancelledBy: string | null
   readonly cancelReason: string | null
+  /** The note the last assignee left when it released the task. */
+  readonly handoff: StoredHandoff
 }
 
 export function parseTaskStatus(raw: unknown): TaskStatus | null {
@@ -821,6 +885,7 @@ export function decodeTaskItem(raw: unknown): TaskItem | null {
     updatedAt: asNonEmptyString(raw.updated_at),
     cancelledBy,
     cancelReason,
+    handoff: parseStoredHandoff(raw.handoff_context),
   }
 }
 
@@ -942,9 +1007,28 @@ export interface ToolApprovalWait {
   readonly argsPreview: string
   readonly question: string
   readonly because: string | null
-  readonly askedAt: number
+  /** Unix seconds; null when the row carries no readable time. */
+  readonly askedAt: number | null
   readonly timeoutSec: number | null
   readonly revision: string
+}
+
+export type ToolApprovalTimeout =
+  | { readonly kind: 'unknown' }
+  | { readonly kind: 'pending'; readonly timeoutSec: number; readonly remainingSec: number }
+  | { readonly kind: 'expired'; readonly timeoutSec: number; readonly overdueSec: number }
+
+/** When the held call stops waiting. The registry times a wait out
+ *  `timeout_sec` after it registers it, and `asked_at` is that moment. */
+export function toolApprovalTimeout(
+  wait: Pick<ToolApprovalWait, 'askedAt' | 'timeoutSec'>,
+  nowMs: number,
+): ToolApprovalTimeout {
+  if (wait.askedAt === null || wait.timeoutSec === null || wait.timeoutSec < 0) return { kind: 'unknown' }
+  const leftSec = wait.askedAt + wait.timeoutSec - nowMs / 1000
+  return leftSec > 0
+    ? { kind: 'pending', timeoutSec: wait.timeoutSec, remainingSec: leftSec }
+    : { kind: 'expired', timeoutSec: wait.timeoutSec, overdueSec: -leftSec }
 }
 
 export interface AskChoiceItem {
@@ -978,7 +1062,9 @@ export interface GatePendingItem {
   readonly toolName: string
   readonly inputPreview: string | null
   readonly waitingSec: number | null
-  readonly phase: string
+  /** Null when the row's phase is missing or not a current variant. */
+  readonly phase: ApprovalQueuePhase | null
+  readonly disposition: KeeperSummaryAttemptDisposition | null
   readonly sequence: number
   readonly taskId: string | null
   readonly goalId: string | null
@@ -992,7 +1078,8 @@ export interface GateResolvedAuditRow {
   readonly keeper: string
   readonly toolName: string
   readonly decision: string
-  readonly decisionSource: string
+  /** Null when the row does not say who decided. */
+  readonly decisionSource: GateDecisionSource | null
   readonly reason: string | null
   readonly actor: string | null
   readonly resolvedAt: string

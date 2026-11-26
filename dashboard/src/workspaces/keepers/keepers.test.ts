@@ -2566,4 +2566,274 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     }
     chatView.unmount()
   })
+
+  it('streams observer keeper_chat_operation_event live (text, thinking, tools), deduplicates seq/local streams, and reconciles cleanly', async () => {
+    const keeper = makeRosterKeeper()
+    const encoder = new TextEncoder()
+    let observer!: ReadableStreamDefaultController<Uint8Array>
+    let directStreamCtrl: ReadableStreamDefaultController<Uint8Array> | undefined
+    let directOpId = ''
+    let chatStreamPosts = 0
+    let historyReads = 0
+    const messages: object[] = [{ id: 'hist-0', role: 'assistant', content: 'Earlier reply', ts: 1 }]
+    const frame = (event: object) => encoder.encode(`data: ${JSON.stringify(event)}\n\n`)
+    const opEvent = (name: string, operationId: string, agUiEvent: object, seq?: number) => frame({
+      type: 'keeper_chat_operation_event',
+      name,
+      operation_id: operationId,
+      ...(seq !== undefined ? { seq } : {}),
+      ag_ui_event: agUiEvent,
+      ts_unix: 1_700_000_700,
+    })
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/mcp?sse_kind=observer') {
+        return new Response(new ReadableStream({ start: (c) => { observer = c } }), {
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      }
+      if (url.includes('/chat/history/page')) {
+        historyReads += 1
+        return Response.json({ messages, has_more: false, next_cursor: null })
+      }
+      if (url.includes('/chat/operations')) {
+        return Response.json(queuedOperations())
+      }
+      if (url.includes('/api/v1/keepers/chat/stream')) {
+        chatStreamPosts += 1
+        directOpId = JSON.parse(String(init?.body)).request_id
+        return new Response(new ReadableStream({ start: (c) => { directStreamCtrl = c } }), {
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      }
+      return Response.json({ rows: [] })
+    }))
+
+    const obsPromise = startObserverStream({ autoReconnect: false })
+    await waitFor(() => expect(observerConnected.value).toBe(true))
+    const view = render(html`<${KeeperChatTab} keeper=${keeper} onInspect=${vi.fn()} onMutated=${vi.fn()} />`)
+    await waitFor(() => expect(view.queryByText('Earlier reply')).toBeTruthy())
+
+    try {
+      // 1. Lone RUN_FINISHED for unknown operation refreshes history without spawning an empty ghost bubble
+      const beforeLoneFinishReads = historyReads
+      observer.enqueue(opEvent(keeper.name, 'op-lone-finish', { type: 'RUN_FINISHED' }, 9))
+      await waitFor(() => expect(historyReads).toBeGreaterThan(beforeLoneFinishReads))
+      expect(view.container.querySelectorAll('article.kp-msg[data-role="assistant"]')).toHaveLength(1)
+
+      // 2. External turn (no POST /chat/stream!) streams thinking, tools, and chunked text live
+      observer.enqueue(frame({
+        type: 'keeper_turn_preview_changed',
+        name: keeper.name,
+        observation: {
+          owner_key: 'ext-owner',
+          preview: { status_text: 'External running', activity: 'streaming', text_tail: 'partial', updated_at_unix: 10, revision: 1 },
+        },
+      }))
+      observer.enqueue(opEvent(keeper.name, 'op-ext-1', { type: 'RUN_STARTED' }, 0))
+      observer.enqueue(opEvent(keeper.name, 'op-ext-1', {
+        type: 'CUSTOM',
+        name: 'KEEPER_THINKING_DELTA',
+        value: { index: 0, delta: 'Checking repository state' },
+      }, 1))
+      observer.enqueue(opEvent(keeper.name, 'op-ext-1', {
+        type: 'TOOL_CALL_START',
+        toolCallName: 'Read',
+        toolCallId: 'tc-obs-1',
+        toolStreamScope: 0,
+        toolCallBlockIndex: 0,
+      }, 2))
+      observer.enqueue(opEvent(keeper.name, 'op-ext-1', {
+        type: 'TOOL_CALL_ARGS',
+        toolCallId: 'tc-obs-1',
+        toolStreamScope: 0,
+        toolCallBlockIndex: 0,
+        snapshot: '{"path":"README.md"}',
+      }, 3))
+      observer.enqueue(opEvent(keeper.name, 'op-ext-1', {
+        type: 'TOOL_CALL_END',
+        toolCallId: 'tc-obs-1',
+        toolStreamScope: 0,
+        toolCallBlockIndex: 0,
+      }, 4))
+      observer.enqueue(opEvent(keeper.name, 'op-ext-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'Hello ' }, 5))
+      // Duplicate seq=5 must NOT double-append
+      observer.enqueue(opEvent(keeper.name, 'op-ext-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'Hello ' }, 5))
+      observer.enqueue(opEvent(keeper.name, 'op-ext-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'from TUI!' }, 6))
+      observer.enqueue(opEvent(keeper.name, 'op-ext-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'from TUI!' }, 6))
+
+      await waitFor(() => {
+        expect(view.container.textContent).toContain('Checking repository state')
+        expect(view.container.textContent).toContain('Read')
+        expect(view.container.textContent).toContain('Hello from TUI!')
+      })
+      expect(chatStreamPosts).toBe(0)
+      // Live turn card hides while the observer assistant bubble is actively streaming
+      expect(view.queryByTestId('chat-live-turn-card')).toBeNull()
+      // Exact dedup: text appears once, not doubled
+      const liveBodies = Array.from(
+        view.container.querySelectorAll('article.kp-msg[data-role="assistant"] .kp-msg-body'),
+        (el) => el.textContent?.trim(),
+      )
+      expect(liveBodies).toEqual(['Earlier reply', 'Hello from TUI!'])
+
+      // 3. RUN_FINISHED + history refresh reconciles cleanly into ONE persisted assistant entry
+      messages.push({
+        id: 'persisted-ext-1',
+        role: 'assistant',
+        content: 'Hello from TUI!',
+        ts: 11,
+        delivery_key: { kind: 'operation', operation_id: 'op-ext-1' },
+        transcript_slot: { kind: 'terminal_result' },
+      })
+      observer.enqueue(opEvent(keeper.name, 'op-ext-1', { type: 'RUN_FINISHED' }, 7))
+      await waitFor(() => {
+        expect(view.queryAllByText('Hello from TUI!')).toHaveLength(1)
+        const badges = Array.from(view.container.querySelectorAll('.kp-msg .kp-pill'), (p) => p.textContent?.trim())
+        expect(badges).not.toContain('Streaming')
+      })
+      // Late/replayed frame after terminal/persisted settlement must NOT duplicate or resurrect
+      observer.enqueue(opEvent(keeper.name, 'op-ext-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'Late ghost' }, 8))
+      await new Promise((r) => setTimeout(r, 20))
+      expect(view.queryByText(/Late ghost/)).toBeNull()
+      expect(view.queryAllByText('Hello from TUI!')).toHaveLength(1)
+
+      // 4. Direct POST /chat/stream + simultaneous observer frames (own opId, batch executionId, follower op) must NOT double-append
+      const input = view.getByLabelText('Keeper 채팅 입력') as HTMLTextAreaElement
+      fireEvent.input(input, { target: { value: 'Direct browser message' } })
+      fireEvent.keyDown(input, { key: 'Enter' })
+      await waitFor(() => expect(directStreamCtrl).toBeDefined())
+      const batchExecId = 'op-shared-batch-exec'
+      directStreamCtrl!.enqueue(frame({
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_BATCH_BOUND',
+        value: { operation_id: directOpId, execution_id: batchExecId },
+      }))
+      directStreamCtrl!.enqueue(frame({ type: 'TEXT_MESSAGE_CONTENT', delta: 'Direct reply once' }))
+
+      // Simultaneous observer broadcasts for directOpId, batchExecId, and coalesced follower op
+      observer.enqueue(opEvent(keeper.name, directOpId, { type: 'TEXT_MESSAGE_CONTENT', delta: 'Direct reply once' }, 1))
+      observer.enqueue(opEvent(keeper.name, batchExecId, { type: 'TEXT_MESSAGE_CONTENT', delta: 'Direct reply once' }, 1))
+      observer.enqueue(opEvent(keeper.name, 'op-coalesced-follower', {
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_BATCH_BOUND',
+        value: { operation_id: 'op-coalesced-follower', execution_id: batchExecId },
+      }, 0))
+      observer.enqueue(opEvent(keeper.name, 'op-coalesced-follower', {
+        type: 'TEXT_MESSAGE_CONTENT',
+        delta: 'Direct reply once',
+      }, 1))
+
+      await waitFor(() => expect(view.queryByText('Direct reply once')).toBeTruthy())
+      expect(view.queryAllByText('Direct reply once')).toHaveLength(1)
+
+      messages.push(
+        {
+          id: 'persisted-direct-user',
+          role: 'user',
+          content: 'Direct browser message',
+          ts: 12,
+          delivery_key: { kind: 'operation', operation_id: directOpId },
+          transcript_slot: { kind: 'accepted_user' },
+        },
+        {
+          id: 'persisted-direct-asst',
+          role: 'assistant',
+          content: 'Direct reply once',
+          ts: 13,
+          delivery_key: { kind: 'operation', operation_id: batchExecId },
+          transcript_slot: { kind: 'terminal_result' },
+        },
+      )
+      directStreamCtrl!.enqueue(frame({ type: 'RUN_FINISHED' }))
+      directStreamCtrl!.close()
+      await waitFor(() => expect(getActiveViewStreamKey()).toBeNull())
+      // Even a late buffered observer frame for directOpId after direct stream closed must NOT duplicate
+      observer.enqueue(opEvent(keeper.name, directOpId, { type: 'TEXT_MESSAGE_CONTENT', delta: 'Buffered duplicate' }, 2))
+      await new Promise((r) => setTimeout(r, 20))
+      expect(view.queryByText(/Buffered duplicate/)).toBeNull()
+      expect(view.queryAllByText('Direct reply once')).toHaveLength(1)
+
+      // 5. RUN_ERROR on an active observer stream marks the entry Failed with errorDetail and refreshes history
+      const beforeErrReads = historyReads
+      observer.enqueue(opEvent(keeper.name, 'op-ext-err', { type: 'RUN_STARTED' }, 0))
+      observer.enqueue(opEvent(keeper.name, 'op-ext-err', { type: 'TEXT_MESSAGE_CONTENT', delta: 'Partial before failure' }, 1))
+      await waitFor(() => expect(view.queryByText('Partial before failure')).toBeTruthy())
+      observer.enqueue(opEvent(keeper.name, 'op-ext-err', { type: 'RUN_ERROR', message: 'Provider overloaded' }, 2))
+      await waitFor(() => {
+        expect(view.queryByText('Provider overloaded')).toBeTruthy()
+        expect(historyReads).toBeGreaterThan(beforeErrReads)
+      })
+    } finally {
+      view.unmount()
+      observer.close()
+      await obsPromise
+    }
+  })
+
+  it('isolates observer chat streams across keeper switches and sessionEpoch changes', async () => {
+    const keeperA = makeRosterKeeper({ name: 'keeper-alpha' })
+    const keeperB = makeRosterKeeper({ name: 'keeper-beta' })
+    const encoder = new TextEncoder()
+    let observer!: ReadableStreamDefaultController<Uint8Array>
+    const frame = (event: object) => encoder.encode(`data: ${JSON.stringify(event)}\n\n`)
+    const opEvent = (name: string, operationId: string, agUiEvent: object, seq: number) => frame({
+      type: 'keeper_chat_operation_event',
+      name,
+      operation_id: operationId,
+      seq,
+      ag_ui_event: agUiEvent,
+      ts_unix: 1_700_000_800,
+    })
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/mcp?sse_kind=observer') {
+        return new Response(new ReadableStream({ start: (c) => { observer = c } }), {
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      }
+      if (url.includes('/chat/history/page')) {
+        return Response.json({ messages: [], has_more: false, next_cursor: null })
+      }
+      if (url.includes('/chat/operations')) {
+        return Response.json(queuedOperations())
+      }
+      return Response.json({ rows: [] })
+    }))
+
+    let obsPromise = startObserverStream({ autoReconnect: false })
+    await waitFor(() => expect(observerConnected.value).toBe(true))
+    const onInspect = vi.fn()
+    const onMutated = vi.fn()
+    const view = render(html`<${KeeperChatTab} keeper=${keeperA} onInspect=${onInspect} onMutated=${onMutated} />`)
+
+    try {
+      // Stream on keeper-alpha
+      observer.enqueue(opEvent('keeper-alpha', 'op-alpha-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'Alpha live text' }, 1))
+      await waitFor(() => expect(view.queryByText('Alpha live text')).toBeTruthy())
+
+      // Switch to keeper-beta -> alpha stream must clear and further alpha events must NOT bleed into beta
+      view.rerender(html`<${KeeperChatTab} keeper=${keeperB} onInspect=${onInspect} onMutated=${onMutated} />`)
+      await waitFor(() => expect(view.queryByText('Alpha live text')).toBeNull())
+      observer.enqueue(opEvent('keeper-alpha', 'op-alpha-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'Alpha bleed' }, 2))
+      observer.enqueue(opEvent('keeper-beta', 'op-beta-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'Beta epoch 1' }, 1))
+      await waitFor(() => expect(view.queryByText('Beta epoch 1')).toBeTruthy())
+      expect(view.queryByText(/Alpha bleed/)).toBeNull()
+
+      // Bump sessionEpoch -> clears observer streams & seenSeqs so the next epoch starts cleanly
+      act(() => { bumpSessionEpoch() })
+      await obsPromise
+      await waitFor(() => expect(view.queryByText('Beta epoch 1')).toBeNull())
+      obsPromise = startObserverStream({ autoReconnect: false })
+      await waitFor(() => expect(observerConnected.value).toBe(true))
+      observer.enqueue(opEvent('keeper-beta', 'op-beta-1', { type: 'TEXT_MESSAGE_CONTENT', delta: 'Beta epoch 2' }, 1))
+      await waitFor(() => expect(view.queryByText('Beta epoch 2')).toBeTruthy())
+    } finally {
+      view.unmount()
+      try { observer.close() } catch { /* already closed on epoch abort */ }
+      await obsPromise
+    }
+  })
 })

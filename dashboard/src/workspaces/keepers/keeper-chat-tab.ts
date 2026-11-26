@@ -27,6 +27,7 @@ import { readDiscordOperator, type DiscordReplyAuthority } from './discord-reply
 import { DiscordReplyPanel } from './discord-reply-panel'
 import {
   cancelQueuedChatOperation,
+  createChatStreamFrameDispatcher,
   enqueueKeeperChat,
   fetchKeeperChatHistoryPageApi,
   fetchKeeperControlToken,
@@ -41,7 +42,9 @@ import {
   runQueuedChatOperationNext,
   streamKeeperChat,
   transcribeVoiceAudio,
+  type ChatStreamFrameDispatcher,
   type KeeperObserverChatSignal,
+  type StreamKeeperChatCallbacks,
   type readKeeperRosterSources,
 } from './keepers-api'
 import {
@@ -53,6 +56,7 @@ import {
   formatTurnLaneLabel,
   formatWaitingSourceLabel,
   groupTranscriptEntries,
+  hasSettledOperation,
   internalModeLabel,
   loadChatBlockPrefs,
   mergeLatestHistoryPage,
@@ -269,6 +273,93 @@ function deliveryBadgeTone(state: ChatDeliveryState | undefined): 'ok' | 'warn' 
 
 const MAX_TOOL_RESULT_CACHE = 50
 const MAX_AUTO_HYDRATE_TOOL_RESULTS = 8
+const MAX_OBSERVER_SEEN_SEQS = 4096
+const MAX_OBSERVER_STREAMS = 100
+const MAX_LOCAL_OWNED_OPS = 200
+
+interface ObserverOperationStream {
+  readonly operationId: string
+  executionId: string
+  readonly assistantId: string
+  dispatcher: ChatStreamFrameDispatcher | null
+  readonly seenSeqs: Set<number>
+  evictedSeqWatermark: number
+  entryCreated: boolean
+  terminal: boolean
+  shadowed: boolean
+}
+
+function isRecordLike(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function nonBlankStr(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+}
+
+function recordObserverSeq(stream: ObserverOperationStream, seq: number): boolean {
+  if (seq <= stream.evictedSeqWatermark || stream.seenSeqs.has(seq)) return false
+  stream.seenSeqs.add(seq)
+  while (stream.seenSeqs.size > MAX_OBSERVER_SEEN_SEQS) {
+    const oldest = stream.seenSeqs.values().next().value
+    if (oldest === undefined) break
+    stream.seenSeqs.delete(oldest)
+    if (oldest > stream.evictedSeqWatermark) stream.evictedSeqWatermark = oldest
+  }
+  return true
+}
+
+function addBoundedOpId(set: Set<string>, id: string, maxSize: number): void {
+  if (set.has(id)) {
+    set.delete(id)
+  }
+  set.add(id)
+  while (set.size > maxSize) {
+    const oldest = set.values().next().value
+    if (oldest === undefined) break
+    set.delete(oldest)
+  }
+}
+
+function setBoundedObserverStream(
+  map: Map<string, ObserverOperationStream>,
+  operationId: string,
+  stream: ObserverOperationStream,
+): void {
+  map.set(operationId, stream)
+  while (map.size > MAX_OBSERVER_STREAMS) {
+    let evictKey: string | undefined
+    for (const [key, candidate] of map) {
+      if (key !== operationId && (candidate.terminal || candidate.shadowed)) {
+        evictKey = key
+        break
+      }
+    }
+    if (evictKey === undefined) {
+      for (const key of map.keys()) {
+        if (key !== operationId) {
+          evictKey = key
+          break
+        }
+      }
+    }
+    if (evictKey === undefined) break
+    map.delete(evictKey)
+  }
+}
+
+function isOperationSettledInEntries(
+  entries: readonly ChatTranscriptEntry[],
+  operationId: string,
+): boolean {
+  if (hasSettledOperation(entries, operationId)) return true
+  return entries.some(
+    (entry) =>
+      entry.role === 'assistant'
+      && (entry.operationId === operationId || entry.replyOperationId === operationId)
+      && (entry.deliveryState === 'Delivered' || entry.deliveryState === 'Cut_recovered'),
+  )
+}
 
 function joinThinkingMap(map: Map<string, string>): string | undefined {
   const ordered = Array.from(map.values()).filter((v) => v.length > 0)
@@ -297,6 +388,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     keeperName: keeper.name,
     entries: [],
   }))
+  const messagesStateRef = useRef<KeeperMessagesState>(messagesState)
+  messagesStateRef.current = messagesState
   const isSwitchingKeeper = messagesState.keeperName !== keeper.name
   const scopedMessages = isSwitchingKeeper ? [] : messagesState.entries
   const [nextCursor, setNextCursor] = useState<string | null>(null)
@@ -401,6 +494,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const followUpSubmittingRef = useRef(false)
   const streamRunIdRef = useRef(0)
   const sendingOperationRef = useRef<{ operationId: string; executionId: string } | null>(null)
+  const observerStreamsRef = useRef<Map<string, ObserverOperationStream>>(new Map())
+  const localOwnedOpIdsRef = useRef<Set<string>>(new Set())
   const refreshChatRef = useRef<(...reads: ChatRead[]) => void>(() => {})
   const retryQueueRef = useRef<() => void>(() => {})
   const stickToBottomRef = useRef(true)
@@ -718,11 +813,516 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     setControlToken(keeper.chat_control_token)
   }, [keeper.chat_control_token])
 
+  const updateEntryById = useCallback((
+    entryId: string,
+    updater: (cur: ChatTranscriptEntry) => ChatTranscriptEntry,
+  ) => {
+    const ownerKeeper = keeper.name
+    setMessagesState((prev) => {
+      if (prev.keeperName !== ownerKeeper) return prev
+      if (!prev.entries.some((m) => m.id === entryId)) return prev
+      return {
+        keeperName: prev.keeperName,
+        entries: prev.entries.map((m) => (m.id === entryId ? updater(m) : m)),
+      }
+    })
+  }, [keeper.name])
+
+  const updateAssistantEntry = updateEntryById
+
+  const recordLocalOwnedOp = useCallback((id: string) => {
+    addBoundedOpId(localOwnedOpIdsRef.current, id, MAX_LOCAL_OWNED_OPS)
+  }, [])
+
+  const shadowObserverStreamsForExecution = useCallback((
+    executionId: string,
+    exceptOperationId?: string,
+  ) => {
+    const ownerKeeper = keeper.name
+    const removedAssistantIds: string[] = []
+    for (const stream of observerStreamsRef.current.values()) {
+      if (stream.operationId === exceptOperationId || stream.shadowed) continue
+      if (stream.operationId === executionId || stream.executionId === executionId) {
+        stream.shadowed = true
+        stream.terminal = true
+        if (stream.entryCreated) removedAssistantIds.push(stream.assistantId)
+      }
+    }
+    if (removedAssistantIds.length > 0) {
+      const removedSet = new Set(removedAssistantIds)
+      setMessagesState((prev) => {
+        if (prev.keeperName !== ownerKeeper) return prev
+        if (!prev.entries.some((m) => removedSet.has(m.id))) return prev
+        return {
+          keeperName: prev.keeperName,
+          entries: prev.entries.filter((m) => !removedSet.has(m.id)),
+        }
+      })
+    }
+  }, [keeper.name])
+
+  const createAssistantStreamCallbacks = useCallback((opts: {
+    readonly assistantId: string
+    readonly userId: string
+    readonly initialAcceptedByServer: boolean
+    readonly updateAssistant: (
+      updater: (cur: ChatTranscriptEntry) => ChatTranscriptEntry,
+      initialDelivery?: ChatDeliveryState,
+    ) => void
+    readonly updateExistingAssistant: (
+      updater: (cur: ChatTranscriptEntry) => ChatTranscriptEntry,
+    ) => void
+    readonly onBatchBound?: (memberId: string, executionId: string) => void
+  }): StreamKeeperChatCallbacks => {
+    const { assistantId, userId, updateAssistant, updateExistingAssistant } = opts
+    let acceptedByServer = opts.initialAcceptedByServer
+    const thinkingByBlock = new Map<string, string>()
+    let liveTools: readonly ChatToolBlock[] = []
+    const promoteStreaming = (cur: ChatDeliveryState | undefined): ChatDeliveryState =>
+      cur === 'Failed' || cur === 'Delivered' ? cur : 'Streaming'
+    const markUserDelivered = () => {
+      acceptedByServer = true
+      updateEntryById(userId, (m) =>
+        m.deliveryState === 'Delivered' ? m : { ...m, deliveryState: 'Delivered' },
+      )
+    }
+
+    return {
+      onBatchBound: opts.onBatchBound,
+      onAccepted: (info) => {
+        acceptedByServer = true
+        if (info.controlToken) setControlToken(info.controlToken)
+        const accepted = acceptedReplyState(info.state)
+        const interruptProblem = info.interruptProblem
+        updateEntryById(userId, (m) => ({
+          ...m,
+          deliveryState: info.state === 'Queued' ? 'Queued' : 'Delivered',
+        }))
+        updateExistingAssistant((m) => ({
+          ...m,
+          deliveryState: accepted.delivery,
+          errorDetail: accepted.detail ?? m.errorDetail,
+          streamNotices: interruptProblem === null
+            ? m.streamNotices
+            : appendStreamNotice(m.streamNotices, { kind: 'interrupt', text: interruptProblem }),
+        }))
+      },
+      onRunStarted: () => {
+        markUserDelivered()
+        updateAssistant((m) => ({ ...m, deliveryState: 'Pending_processing' }), 'Pending_processing')
+      },
+      onAttemptStarted: (attempt) => {
+        markUserDelivered()
+        thinkingByBlock.clear()
+        liveTools = []
+        updateAssistant((m) => ({
+          ...m,
+          content: '',
+          thinking: undefined,
+          toolCalls: undefined,
+          providerRetry: undefined,
+          runtimeAttempt: attempt ?? m.runtimeAttempt,
+          deliveryState: 'Streaming',
+        }), 'Streaming')
+      },
+      onProviderRetry: (retry) => {
+        const projected = chatProviderRetry(retry)
+        updateAssistant((m) => (m.content === ''
+          ? { ...m, providerRetry: projected, deliveryState: promoteStreaming(m.deliveryState) }
+          : m), 'Streaming')
+      },
+      onStreamProtocolError: ({ message, quarantinedStreamKey }) => {
+        if (quarantinedStreamKey !== undefined) {
+          liveTools = liveTools.map((tc) => (tc.streamKey === quarantinedStreamKey
+            ? { ...tc, status: 'error' }
+            : tc))
+        }
+        const snapshotTools = liveTools
+        updateAssistant((m) => ({
+          ...m,
+          toolCalls: quarantinedStreamKey === undefined ? m.toolCalls : snapshotTools,
+          streamNotices: appendStreamNotice(m.streamNotices, { kind: 'protocol_error', text: message }),
+        }), 'Streaming')
+      },
+      onContinuationCheckpoint: (message) => {
+        updateAssistant((m) => ({
+          ...m,
+          streamNotices: appendStreamNotice(m.streamNotices, {
+            kind: 'checkpoint',
+            text: message ?? '턴이 체크포인트에서 멈췄고 이어서 진행해요.',
+          }),
+        }), 'Streaming')
+      },
+      onModelActivity: () => {
+        markUserDelivered()
+        updateAssistant((m) => ({
+          ...m,
+          deliveryState: promoteStreaming(m.deliveryState),
+        }), 'Streaming')
+      },
+      onTextDelta: (delta) => {
+        markUserDelivered()
+        updateAssistant((m) => ({
+          ...m,
+          content: m.content + delta,
+          providerRetry: undefined,
+          deliveryState: 'Streaming',
+        }), 'Streaming')
+      },
+      onThinkingDelta: (delta, blockKey = '0:0:0') => {
+        markUserDelivered()
+        thinkingByBlock.set(blockKey, (thinkingByBlock.get(blockKey) ?? '') + delta)
+        const combined = joinThinkingMap(thinkingByBlock)
+        updateAssistant((m) => ({
+          ...m,
+          thinking: combined,
+          deliveryState: promoteStreaming(m.deliveryState),
+        }), 'Streaming')
+      },
+      onRetainedImages: (retainedImages) => {
+        if (retainedImages.length > 0) markUserDelivered()
+        updateAssistant((m) => ({
+          ...m,
+          retainedImages,
+          deliveryState: retainedImages.length > 0 ? promoteStreaming(m.deliveryState) : m.deliveryState,
+        }), 'Streaming')
+      },
+      onThinkingSnapshot: (snapshot, blockKey = '0:0:0') => {
+        markUserDelivered()
+        thinkingByBlock.set(blockKey, snapshot)
+        const combined = joinThinkingMap(thinkingByBlock)
+        updateAssistant((m) => ({
+          ...m,
+          thinking: combined,
+          deliveryState: promoteStreaming(m.deliveryState),
+        }), 'Streaming')
+      },
+      onToolStart: (toolName, toolCallId, streamKey) => {
+        liveTools = upsertStreamToolCall(
+          liveTools,
+          { toolCallId, streamKey },
+          (cur) => ({
+            ...cur,
+            id: toolCallId ?? cur.id,
+            streamKey: cur.streamKey ?? streamKey,
+            name: toolName || cur.name,
+            status: 'running',
+          }),
+          () => ({
+            id: toolCallId,
+            streamKey,
+            name: toolName,
+            status: 'running',
+          }),
+        )
+        const snapshotTools = liveTools
+        updateAssistant((m) => ({
+          ...m,
+          deliveryState: promoteStreaming(m.deliveryState),
+          toolCalls: snapshotTools,
+        }), 'Streaming')
+      },
+      onToolAdmitted: (toolName, toolCallId, streamKey) => {
+        const prevIdx = findToolCallIndex(liveTools, { toolCallId, streamKey })
+        const prevStreamKey = prevIdx >= 0 ? liveTools[prevIdx]!.streamKey : undefined
+        liveTools = upsertStreamToolCall(
+          liveTools,
+          { toolCallId, streamKey },
+          (cur) => ({
+            ...cur,
+            id: toolCallId ?? cur.id,
+            streamKey: cur.streamKey ?? streamKey,
+            name: toolName,
+          }),
+        )
+        if (prevIdx >= 0 && !prevStreamKey && streamKey) {
+          const oldKey = `${assistantId}:tool:${prevIdx}`
+          const newKey = `${assistantId}:tool:${streamKey}`
+          const prevOpen = expandedCardKeysRef.current[oldKey]
+          if (prevOpen !== undefined) {
+            setCardExpanded(newKey, prevOpen)
+          }
+        }
+        const snapshotTools = liveTools
+        updateAssistant((m) => ({
+          ...m,
+          toolCalls: snapshotTools,
+        }), 'Streaming')
+      },
+      onToolArgsDelta: (toolCallId, delta, streamKey) => {
+        liveTools = upsertStreamToolCall(
+          liveTools,
+          { toolCallId, streamKey },
+          (cur) => ({ ...cur, args: (cur.args ?? '') + delta }),
+        )
+        const snapshotTools = liveTools
+        updateAssistant((m) => ({
+          ...m,
+          deliveryState: promoteStreaming(m.deliveryState),
+          toolCalls: snapshotTools,
+        }), 'Streaming')
+      },
+      onToolArgsSnapshot: (toolCallId, snapshot, streamKey) => {
+        liveTools = upsertStreamToolCall(
+          liveTools,
+          { toolCallId, streamKey },
+          (cur) => ({ ...cur, args: snapshot }),
+        )
+        const snapshotTools = liveTools
+        updateAssistant((m) => ({
+          ...m,
+          deliveryState: promoteStreaming(m.deliveryState),
+          toolCalls: snapshotTools,
+        }), 'Streaming')
+      },
+      onToolEnd: (toolCallId, streamKey) => {
+        liveTools = upsertStreamToolCall(
+          liveTools,
+          { toolCallId, streamKey },
+          (cur) => ({
+            ...cur,
+            status: cur.status === 'running' ? 'awaiting_result' : cur.status,
+          }),
+        )
+        const snapshotTools = liveTools
+        updateAssistant((m) => ({
+          ...m,
+          toolCalls: snapshotTools,
+        }), 'Streaming')
+      },
+      onToolResultReady: ({ executionId, toolCallId, streamKey, isError }) => {
+        const readyStatus = isError === true
+          ? 'error'
+          : isError === false
+            ? 'completed'
+            : 'result_ready'
+        liveTools = upsertStreamToolCall(
+          liveTools,
+          { toolCallId, streamKey },
+          (cur) => ({
+            ...cur,
+            executionId,
+            status: cur.status === 'error' ? 'error' : readyStatus,
+          }),
+          () => ({
+            id: toolCallId,
+            streamKey,
+            executionId,
+            name: 'tool',
+            status: readyStatus,
+          }),
+        )
+        const matchedIdx = findToolCallIndex(liveTools, { toolCallId, streamKey })
+        const slotIdx = matchedIdx >= 0 ? matchedIdx : Math.max(0, liveTools.length - 1)
+        const matchedBlock = liveTools[slotIdx]
+        const cardKey = `${assistantId}:tool:${matchedBlock?.streamKey ?? slotIdx}`
+        const explicitOpen = expandedCardKeysRef.current[cardKey]
+        const isCardOpen = explicitOpen !== undefined
+          ? explicitOpen
+          : blockPrefsRef.current.tools === 'full'
+        if (explicitOpen !== undefined) {
+          setCardExpanded(cardKey, explicitOpen, executionId)
+        }
+        const snapshotTools = liveTools
+        updateAssistant((m) => ({
+          ...m,
+          toolCalls: snapshotTools,
+        }), 'Streaming')
+        if (blockPrefsRef.current.tools !== 'hidden' && isCardOpen && !matchedBlock?.result) {
+          void requestToolResult(executionId)
+        }
+      },
+      onToolResult: (toolCallId, content, streamKey) => {
+        liveTools = upsertStreamToolCall(
+          liveTools,
+          { toolCallId, streamKey },
+          (cur) => ({ ...cur, result: content, status: 'completed' }),
+          () => ({
+            id: toolCallId || undefined,
+            streamKey,
+            name: 'tool',
+            result: content,
+            status: 'completed',
+          }),
+        )
+        const snapshotTools = liveTools
+        updateAssistant((m) => ({
+          ...m,
+          toolCalls: snapshotTools,
+        }), 'Streaming')
+      },
+      onNativeToolProgress: ({ toolName, toolCallId, streamKey, progressLabel }) => {
+        liveTools = upsertStreamToolCall(
+          liveTools,
+          { toolCallId, streamKey },
+          (cur) => ({
+            ...cur,
+            name: toolName ?? cur.name,
+            progressLabel,
+          }),
+          () => ({
+            id: toolCallId,
+            streamKey,
+            name: toolName ?? 'native_tool',
+            status: 'running',
+            progressLabel,
+          }),
+        )
+        const snapshotTools = liveTools
+        updateAssistant((m) => ({
+          ...m,
+          deliveryState: promoteStreaming(m.deliveryState),
+          toolCalls: snapshotTools,
+        }), 'Streaming')
+      },
+      onNativeToolEnd: ({ toolName, toolCallId, streamKey, status, summary }) => {
+        liveTools = upsertStreamToolCall(
+          liveTools,
+          { toolCallId, streamKey },
+          (cur) => ({
+            ...cur,
+            name: toolName ?? cur.name,
+            status,
+            progressLabel: summary ?? cur.progressLabel,
+          }),
+          () => ({
+            id: toolCallId,
+            streamKey,
+            name: toolName ?? 'native_tool',
+            status,
+            progressLabel: summary,
+          }),
+        )
+        const snapshotTools = liveTools
+        updateAssistant((m) => ({
+          ...m,
+          toolCalls: snapshotTools,
+        }), 'Streaming')
+      },
+      onToolApprovalRequested: ({ toolCallId, toolName, args, question, because }) => {
+        const label = question ?? because ?? '운영자 승인 대기 중'
+        const trimmedId = toolCallId.trim()
+        const matchRef = trimmedId
+          ? { toolCallId: trimmedId }
+          : { streamKey: `approval:${randomUuid()}` }
+        liveTools = upsertStreamToolCall(
+          liveTools,
+          matchRef,
+          (cur) => ({
+            ...cur,
+            name: toolName || cur.name,
+            args: args ?? cur.args,
+            status: 'awaiting_approval',
+            progressLabel: label,
+          }),
+          () => ({
+            id: trimmedId || undefined,
+            streamKey: matchRef.streamKey,
+            name: toolName,
+            args,
+            status: 'awaiting_approval',
+            progressLabel: label,
+          }),
+        )
+        const snapshotTools = liveTools
+        updateAssistant((m) => ({
+          ...m,
+          deliveryState: promoteStreaming(m.deliveryState),
+          toolCalls: snapshotTools,
+        }), 'Streaming')
+      },
+      onToolApprovalSettled: ({ toolCallId, toolName, outcome: approvalOutcome }) => {
+        const normalizedOutcome = approvalOutcome.trim().toLowerCase()
+        const approved =
+          normalizedOutcome === 'approve' || normalizedOutcome === 'remembered_approve'
+        const trimmedId = toolCallId.trim()
+        if (trimmedId) {
+          liveTools = upsertStreamToolCall(
+            liveTools,
+            { toolCallId: trimmedId },
+            (cur) => ({
+              ...cur,
+              status: approved ? 'running' : 'error',
+              progressLabel: approvalOutcome,
+            }),
+          )
+        } else {
+          const list = [...liveTools]
+          let targetIdx = -1
+          for (let i = list.length - 1; i >= 0; i -= 1) {
+            const cur = list[i]!
+            if (cur.status !== 'awaiting_approval') continue
+            if (!toolName || cur.name === toolName) {
+              targetIdx = i
+              break
+            }
+            if (targetIdx < 0) targetIdx = i
+          }
+          if (targetIdx >= 0) {
+            list[targetIdx] = {
+              ...list[targetIdx]!,
+              status: approved ? 'running' : 'error',
+              progressLabel: approvalOutcome,
+            }
+            liveTools = list
+          }
+        }
+        const snapshotTools = liveTools
+        updateAssistant((m) => ({
+          ...m,
+          toolCalls: snapshotTools.length > 0 ? snapshotTools : m.toolCalls,
+        }), 'Streaming')
+      },
+      onReplyDetails: (reply, turnRef) => {
+        markUserDelivered()
+        updateAssistant((m) => ({
+          ...m,
+          content: reply || m.content,
+          turnRef: turnRef ?? m.turnRef,
+        }), 'Streaming')
+      },
+      onError: (msg) => {
+        const settleOnError = (tc: ChatToolBlock): ChatToolBlock =>
+          tc.status === 'running' || tc.status === 'awaiting_result' || tc.status === 'awaiting_approval'
+            ? { ...tc, status: 'error' }
+            : tc
+        liveTools = liveTools.map(settleOnError)
+        const snapshotTools = liveTools.length > 0 ? liveTools : undefined
+        updateEntryById(userId, (m) => ({
+          ...m,
+          deliveryState: acceptedByServer ? 'Delivered' : 'Failed',
+        }))
+        updateAssistant((m) => ({
+          ...m,
+          deliveryState: 'Failed',
+          errorDetail: msg,
+          toolCalls: snapshotTools ?? m.toolCalls?.map(settleOnError),
+        }), 'Failed')
+      },
+      onFinished: () => {
+        markUserDelivered()
+        const settleOnFinish = (tc: ChatToolBlock): ChatToolBlock =>
+          tc.status === 'running' || tc.status === 'awaiting_result' || tc.status === 'awaiting_approval'
+            ? { ...tc, status: tc.executionId || tc.result !== undefined ? 'completed' : 'interrupted' }
+            : tc
+        liveTools = liveTools.map(settleOnFinish)
+        const snapshotTools = liveTools.length > 0 ? liveTools : undefined
+        updateExistingAssistant((m) => ({
+          ...m,
+          deliveryState: m.deliveryState === 'Failed' ? 'Failed' : 'Delivered',
+          toolCalls: snapshotTools ?? m.toolCalls?.map(settleOnFinish),
+        }))
+      },
+    }
+  }, [updateEntryById, setCardExpanded, requestToolResult])
+
   useEffect(() => {
     let stopped = false
     let drainScheduled = false
     const pending = new Set<ChatRead>()
     const running = new Map<ChatRead, AbortController>()
+    observerStreamsRef.current.clear()
+    localOwnedOpIdsRef.current.clear()
 
     const abortReads = () => {
       for (const controller of running.values()) controller.abort()
@@ -850,6 +1450,221 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       running.delete('queue')
       refresh('queue')
     }
+    const isOwnedLocally = (id: string): boolean => {
+      if (localOwnedOpIdsRef.current.has(id)) return true
+      const active = sendingOperationRef.current
+      return sendingRef.current && active !== null
+        && (active.operationId === id || active.executionId === id)
+    }
+
+    const hasOtherStreamForExecution = (executionId: string, exceptOpId: string): boolean => {
+      for (const candidate of observerStreamsRef.current.values()) {
+        if (candidate.operationId === exceptOpId || candidate.shadowed) continue
+        if (candidate.operationId === executionId || candidate.executionId === executionId) {
+          return true
+        }
+      }
+      return false
+    }
+
+    const handleObserverOperationEvent = (
+      event: Extract<KeeperObserverChatSignal, { readonly kind: 'chat_operation_event' }>,
+    ) => {
+      if (stopped || activeKeeperRef.current !== keeper.name) return
+      const { operationId, seq, agUiEvent } = event
+      if (isOwnedLocally(operationId)) return
+
+      const streams = observerStreamsRef.current
+      let stream = streams.get(operationId)
+      if (stream) {
+        if (stream.shadowed || stream.terminal) return
+        if (seq !== null && !recordObserverSeq(stream, seq)) return
+      } else {
+        const currentEntries =
+          messagesStateRef.current.keeperName === keeper.name
+            ? messagesStateRef.current.entries
+            : []
+        if (isOperationSettledInEntries(currentEntries, operationId)) return
+
+        const agType = nonBlankStr(agUiEvent.type)
+        const agCustomName = agType === 'CUSTOM' ? nonBlankStr(agUiEvent.name) : null
+        const agCustomVal = agType === 'CUSTOM' && isRecordLike(agUiEvent.value) ? agUiEvent.value : null
+        const isLoneTerminalFinish =
+          agType === 'RUN_FINISHED'
+          || (agCustomName === 'KEEPER_CHAT_OPERATION_ACCEPTED'
+            && agCustomVal !== null
+            && (agCustomVal.state === 'Succeeded'
+              || agCustomVal.state === 'Failed'
+              || agCustomVal.state === 'Cancelled'))
+
+        if (isLoneTerminalFinish) {
+          const settledMarker: ObserverOperationStream = {
+            operationId,
+            executionId: operationId,
+            assistantId: `obs-asst-${operationId}`,
+            dispatcher: null,
+            seenSeqs: new Set<number>(),
+            evictedSeqWatermark: -1,
+            entryCreated: false,
+            terminal: true,
+            shadowed: false,
+          }
+          if (seq !== null) recordObserverSeq(settledMarker, seq)
+          setBoundedObserverStream(streams, operationId, settledMarker)
+          refresh('history', 'queue', 'waiting')
+          return
+        }
+
+        if (agCustomName === 'KEEPER_CHAT_BATCH_BOUND' && agCustomVal) {
+          const boundExecId = nonBlankStr(agCustomVal.execution_id)
+          if (
+            boundExecId
+            && (isOwnedLocally(boundExecId)
+              || hasOtherStreamForExecution(boundExecId, operationId)
+              || isOperationSettledInEntries(currentEntries, boundExecId))
+          ) {
+            const shadowedMarker: ObserverOperationStream = {
+              operationId,
+              executionId: boundExecId,
+              assistantId: `obs-asst-${operationId}`,
+              dispatcher: null,
+              seenSeqs: new Set<number>(),
+              evictedSeqWatermark: -1,
+              entryCreated: false,
+              terminal: true,
+              shadowed: true,
+            }
+            if (seq !== null) recordObserverSeq(shadowedMarker, seq)
+            setBoundedObserverStream(streams, operationId, shadowedMarker)
+            return
+          }
+        }
+
+        const targetKeeper = keeper.name
+        const streamEpoch = currentSessionEpoch()
+        const assistantId = `obs-asst-${operationId}`
+        const userId = `user-${operationId}`
+
+        const nextStream: ObserverOperationStream = {
+          operationId,
+          executionId: operationId,
+          assistantId,
+          dispatcher: null,
+          seenSeqs: new Set<number>(),
+          evictedSeqWatermark: -1,
+          entryCreated: false,
+          terminal: false,
+          shadowed: false,
+        }
+
+        const updateObserverAssistant = (
+          updater: (cur: ChatTranscriptEntry) => ChatTranscriptEntry,
+          initialDelivery: ChatDeliveryState = 'Streaming',
+        ) => {
+          if (stopped || nextStream.shadowed || !isEpochCurrent(streamEpoch)) return
+          setMessagesState((prev) => {
+            if (prev.keeperName !== targetKeeper) return prev
+            const exists = prev.entries.some((m) => m.id === assistantId)
+            if (exists) {
+              return {
+                keeperName: prev.keeperName,
+                entries: prev.entries.map((m) => (m.id === assistantId ? updater(m) : m)),
+              }
+            }
+            if (nextStream.entryCreated) return prev
+            if (
+              isOperationSettledInEntries(prev.entries, operationId)
+              || (nextStream.executionId !== operationId
+                && isOperationSettledInEntries(prev.entries, nextStream.executionId))
+            ) {
+              nextStream.terminal = true
+              return prev
+            }
+            nextStream.entryCreated = true
+            const baseEntry: ChatTranscriptEntry = {
+              id: assistantId,
+              role: 'assistant',
+              content: '',
+              ts: Date.now() / 1000,
+              operationId,
+              replyOperationId:
+                nextStream.executionId !== operationId ? nextStream.executionId : undefined,
+              deliveryState: initialDelivery,
+            }
+            return {
+              keeperName: prev.keeperName,
+              entries: [...prev.entries, updater(baseEntry)],
+            }
+          })
+        }
+
+        const updateExistingObserverAssistant = (
+          updater: (cur: ChatTranscriptEntry) => ChatTranscriptEntry,
+        ) => {
+          if (stopped || nextStream.shadowed || !isEpochCurrent(streamEpoch)) return
+          updateEntryById(assistantId, updater)
+        }
+
+        const dispatcher = createChatStreamFrameDispatcher({
+          operationId,
+          startEpoch: streamEpoch,
+          callbacks: createAssistantStreamCallbacks({
+            assistantId,
+            userId,
+            initialAcceptedByServer: true,
+            updateAssistant: updateObserverAssistant,
+            updateExistingAssistant: updateExistingObserverAssistant,
+            onBatchBound: (memberId, executionId) => {
+              if (memberId !== operationId || nextStream.shadowed) return
+              if (
+                isOwnedLocally(executionId)
+                || hasOtherStreamForExecution(executionId, operationId)
+                || isOperationSettledInEntries(
+                  messagesStateRef.current.keeperName === targetKeeper
+                    ? messagesStateRef.current.entries
+                    : [],
+                  executionId,
+                )
+              ) {
+                nextStream.shadowed = true
+                nextStream.terminal = true
+                if (nextStream.entryCreated) {
+                  setMessagesState((prev) => {
+                    if (prev.keeperName !== targetKeeper) return prev
+                    if (!prev.entries.some((m) => m.id === assistantId)) return prev
+                    return {
+                      keeperName: prev.keeperName,
+                      entries: prev.entries.filter((m) => m.id !== assistantId),
+                    }
+                  })
+                }
+                return
+              }
+              nextStream.executionId = executionId
+              if (nextStream.entryCreated) {
+                updateEntryById(assistantId, (entry) => ({
+                  ...entry,
+                  replyOperationId: executionId,
+                }))
+              }
+            },
+          }),
+        })
+
+        nextStream.dispatcher = dispatcher
+        stream = nextStream
+        if (seq !== null) recordObserverSeq(stream, seq)
+        setBoundedObserverStream(streams, operationId, stream)
+      }
+
+      if (!stream.dispatcher || stream.shadowed || stream.terminal) return
+      const outcome = stream.dispatcher.dispatch(agUiEvent)
+      if (outcome.terminal && !stream.shadowed) {
+        stream.terminal = true
+        refresh('history', 'queue', 'waiting')
+      }
+    }
+
     const unsubscribeFrames = subscribeObserverFrames((frame) => {
       const event = parseKeeperLiveObserverEvent(frame.event, frame.data, keeper.name)
       switch (event?.kind) {
@@ -876,6 +1691,9 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           refresh('waiting')
           if (event.queueChanged) refresh('queue')
           break
+        case 'chat_operation_event':
+          handleObserverOperationEvent(event)
+          break
         case undefined:
           break
       }
@@ -890,6 +1708,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     const unsubscribeEpoch = sessionEpoch.subscribe((nextEpoch) => {
       if (nextEpoch === epoch) return
       epoch = nextEpoch
+      observerStreamsRef.current.clear()
+      localOwnedOpIdsRef.current.clear()
       setMessagesState({ keeperName: keeper.name, entries: [] })
       setQueueRead(null)
       setHasMore(false)
@@ -915,6 +1735,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       unsubscribeResync()
       unsubscribeConnection()
       unsubscribeEpoch()
+      observerStreamsRef.current.clear()
+      localOwnedOpIdsRef.current.clear()
       refreshChatRef.current = () => {}
       retryQueueRef.current = () => {}
       streamRunIdRef.current += 1
@@ -924,7 +1746,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       streamAbortRef.current?.abort()
       btwAbortRef.current?.abort()
     }
-  }, [keeper.name, invalidateEarlierReads, invalidateTurn])
+  }, [keeper.name, invalidateEarlierReads, invalidateTurn, updateEntryById, createAssistantStreamCallbacks])
 
   const updateQueueOperation = async (
     operationId: string,
@@ -1012,22 +1834,6 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     setNextCursor(res.value.nextCursor)
   }
 
-  const updateEntryById = (
-    entryId: string,
-    updater: (cur: ChatTranscriptEntry) => ChatTranscriptEntry,
-  ) => {
-    const ownerKeeper = keeper.name
-    setMessagesState((prev) => {
-      if (prev.keeperName !== ownerKeeper) return prev
-      return {
-        keeperName: prev.keeperName,
-        entries: prev.entries.map((m) => (m.id === entryId ? updater(m) : m)),
-      }
-    })
-  }
-
-  const updateAssistantEntry = updateEntryById
-
   const handleRecoverCut = async (assistantId: string, operationId: string) => {
     const targetKeeper = keeper.name
     const startEpoch = currentSessionEpoch()
@@ -1073,6 +1879,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     setBtwOpen(true)
     setBtw({ status: 'streaming', prompt: trimmed, reply: '', error: null })
     const operationId = `btw-${randomUuid()}`
+    recordLocalOwnedOp(operationId)
     const outcome = await streamKeeperChat({
       keeper: targetKeeper,
       message: trimmed,
@@ -1208,9 +2015,10 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       deliveryState: 'Sending',
     }
 
-    let acceptedByServer = false
     sendingRef.current = true
     sendingOperationRef.current = { operationId, executionId: operationId }
+    recordLocalOwnedOp(operationId)
+    shadowObserverStreamsForExecution(operationId)
     forceScrollBottomRef.current = true
     setMessagesState((prev) => ({
       keeperName: targetKeeper,
@@ -1253,17 +2061,6 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       abortController = new AbortController()
       streamAbortRef.current = abortController
 
-      const thinkingByBlock = new Map<string, string>()
-      let liveTools: readonly ChatToolBlock[] = []
-      const promoteStreaming = (cur: ChatDeliveryState | undefined): ChatDeliveryState =>
-        cur === 'Failed' || cur === 'Delivered' ? cur : 'Streaming'
-      const markUserDelivered = () => {
-        acceptedByServer = true
-        updateEntryById(userId, (m) =>
-          m.deliveryState === 'Delivered' ? m : { ...m, deliveryState: 'Delivered' },
-        )
-      }
-
       outcome = await streamKeeperChat({
         keeper: targetKeeper,
         message: trimmed,
@@ -1271,438 +2068,20 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         mode: submitMode,
         attachments: currentAttachments,
         signal: abortController.signal,
-        callbacks: {
+        callbacks: createAssistantStreamCallbacks({
+          assistantId,
+          userId,
+          initialAcceptedByServer: false,
+          updateAssistant: (updater) => updateAssistantEntry(assistantId, updater),
+          updateExistingAssistant: (updater) => updateAssistantEntry(assistantId, updater),
           onBatchBound: (memberId, executionId) => {
             if (memberId !== operationId) return
             sendingOperationRef.current = { operationId, executionId }
+            recordLocalOwnedOp(executionId)
+            shadowObserverStreamsForExecution(executionId)
             updateAssistantEntry(assistantId, (entry) => ({ ...entry, replyOperationId: executionId }))
           },
-          onAccepted: (info) => {
-            acceptedByServer = true
-            if (info.controlToken) setControlToken(info.controlToken)
-            const accepted = acceptedReplyState(info.state)
-            const interruptProblem = info.interruptProblem
-            updateEntryById(userId, (m) => ({
-              ...m,
-              deliveryState: info.state === 'Queued' ? 'Queued' : 'Delivered',
-            }))
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              deliveryState: accepted.delivery,
-              errorDetail: accepted.detail ?? m.errorDetail,
-              streamNotices: interruptProblem === null
-                ? m.streamNotices
-                : appendStreamNotice(m.streamNotices, { kind: 'interrupt', text: interruptProblem }),
-            }))
-          },
-          onRunStarted: () => {
-            markUserDelivered()
-            updateAssistantEntry(assistantId, (m) => ({ ...m, deliveryState: 'Pending_processing' }))
-          },
-          onAttemptStarted: (attempt) => {
-            markUserDelivered()
-            thinkingByBlock.clear()
-            liveTools = []
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              content: '',
-              thinking: undefined,
-              toolCalls: undefined,
-              providerRetry: undefined,
-              runtimeAttempt: attempt ?? m.runtimeAttempt,
-              deliveryState: 'Streaming',
-            }))
-          },
-          onProviderRetry: (retry) => {
-            const projected = chatProviderRetry(retry)
-            updateAssistantEntry(assistantId, (m) => (m.content === ''
-              ? { ...m, providerRetry: projected, deliveryState: promoteStreaming(m.deliveryState) }
-              : m))
-          },
-          onStreamProtocolError: ({ message, quarantinedStreamKey }) => {
-            if (quarantinedStreamKey !== undefined) {
-              liveTools = liveTools.map((tc) => (tc.streamKey === quarantinedStreamKey
-                ? { ...tc, status: 'error' }
-                : tc))
-            }
-            const snapshotTools = liveTools
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              toolCalls: quarantinedStreamKey === undefined ? m.toolCalls : snapshotTools,
-              streamNotices: appendStreamNotice(m.streamNotices, { kind: 'protocol_error', text: message }),
-            }))
-          },
-          onContinuationCheckpoint: (message) => {
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              streamNotices: appendStreamNotice(m.streamNotices, {
-                kind: 'checkpoint',
-                text: message ?? '턴이 체크포인트에서 멈췄고 이어서 진행해요.',
-              }),
-            }))
-          },
-          onModelActivity: () => {
-            markUserDelivered()
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              deliveryState: promoteStreaming(m.deliveryState),
-            }))
-          },
-          onTextDelta: (delta) => {
-            markUserDelivered()
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              content: m.content + delta,
-              providerRetry: undefined,
-              deliveryState: 'Streaming',
-            }))
-          },
-          onThinkingDelta: (delta, blockKey = '0:0:0') => {
-            markUserDelivered()
-            thinkingByBlock.set(blockKey, (thinkingByBlock.get(blockKey) ?? '') + delta)
-            const combined = joinThinkingMap(thinkingByBlock)
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              thinking: combined,
-              deliveryState: promoteStreaming(m.deliveryState),
-            }))
-          },
-          onRetainedImages: (retainedImages) => {
-            if (retainedImages.length > 0) markUserDelivered()
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              retainedImages,
-              deliveryState: retainedImages.length > 0 ? promoteStreaming(m.deliveryState) : m.deliveryState,
-            }))
-          },
-          onThinkingSnapshot: (snapshot, blockKey = '0:0:0') => {
-            markUserDelivered()
-            thinkingByBlock.set(blockKey, snapshot)
-            const combined = joinThinkingMap(thinkingByBlock)
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              thinking: combined,
-              deliveryState: promoteStreaming(m.deliveryState),
-            }))
-          },
-          onToolStart: (toolName, toolCallId, streamKey) => {
-            liveTools = upsertStreamToolCall(
-              liveTools,
-              { toolCallId, streamKey },
-              (cur) => ({
-                ...cur,
-                id: toolCallId ?? cur.id,
-                streamKey: cur.streamKey ?? streamKey,
-                name: toolName || cur.name,
-                status: 'running',
-              }),
-              () => ({
-                id: toolCallId,
-                streamKey,
-                name: toolName,
-                status: 'running',
-              }),
-            )
-            const snapshotTools = liveTools
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              deliveryState: promoteStreaming(m.deliveryState),
-              toolCalls: snapshotTools,
-            }))
-          },
-          onToolAdmitted: (toolName, toolCallId, streamKey) => {
-            const prevIdx = findToolCallIndex(liveTools, { toolCallId, streamKey })
-            const prevStreamKey = prevIdx >= 0 ? liveTools[prevIdx]!.streamKey : undefined
-            liveTools = upsertStreamToolCall(
-              liveTools,
-              { toolCallId, streamKey },
-              (cur) => ({
-                ...cur,
-                id: toolCallId ?? cur.id,
-                streamKey: cur.streamKey ?? streamKey,
-                name: toolName,
-              }),
-            )
-            if (prevIdx >= 0 && !prevStreamKey && streamKey) {
-              const oldKey = `${assistantId}:tool:${prevIdx}`
-              const newKey = `${assistantId}:tool:${streamKey}`
-              const prevOpen = expandedCardKeysRef.current[oldKey]
-              if (prevOpen !== undefined) {
-                setCardExpanded(newKey, prevOpen)
-              }
-            }
-            const snapshotTools = liveTools
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              toolCalls: snapshotTools,
-            }))
-          },
-          onToolArgsDelta: (toolCallId, delta, streamKey) => {
-            liveTools = upsertStreamToolCall(
-              liveTools,
-              { toolCallId, streamKey },
-              (cur) => ({ ...cur, args: (cur.args ?? '') + delta }),
-            )
-            const snapshotTools = liveTools
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              deliveryState: promoteStreaming(m.deliveryState),
-              toolCalls: snapshotTools,
-            }))
-          },
-          onToolArgsSnapshot: (toolCallId, snapshot, streamKey) => {
-            liveTools = upsertStreamToolCall(
-              liveTools,
-              { toolCallId, streamKey },
-              (cur) => ({ ...cur, args: snapshot }),
-            )
-            const snapshotTools = liveTools
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              deliveryState: promoteStreaming(m.deliveryState),
-              toolCalls: snapshotTools,
-            }))
-          },
-          onToolEnd: (toolCallId, streamKey) => {
-            liveTools = upsertStreamToolCall(
-              liveTools,
-              { toolCallId, streamKey },
-              (cur) => ({
-                ...cur,
-                status: cur.status === 'running' ? 'awaiting_result' : cur.status,
-              }),
-            )
-            const snapshotTools = liveTools
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              toolCalls: snapshotTools,
-            }))
-          },
-          onToolResultReady: ({ executionId, toolCallId, streamKey, isError }) => {
-            const readyStatus = isError === true
-              ? 'error'
-              : isError === false
-                ? 'completed'
-                : 'result_ready'
-            liveTools = upsertStreamToolCall(
-              liveTools,
-              { toolCallId, streamKey },
-              (cur) => ({
-                ...cur,
-                executionId,
-                status: cur.status === 'error' ? 'error' : readyStatus,
-              }),
-              () => ({
-                id: toolCallId,
-                streamKey,
-                executionId,
-                name: 'tool',
-                status: readyStatus,
-              }),
-            )
-            const matchedIdx = findToolCallIndex(liveTools, { toolCallId, streamKey })
-            const slotIdx = matchedIdx >= 0 ? matchedIdx : Math.max(0, liveTools.length - 1)
-            const matchedBlock = liveTools[slotIdx]
-            const cardKey = `${assistantId}:tool:${matchedBlock?.streamKey ?? slotIdx}`
-            const explicitOpen = expandedCardKeysRef.current[cardKey]
-            const isCardOpen = explicitOpen !== undefined
-              ? explicitOpen
-              : blockPrefsRef.current.tools === 'full'
-            if (explicitOpen !== undefined) {
-              setCardExpanded(cardKey, explicitOpen, executionId)
-            }
-            const snapshotTools = liveTools
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              toolCalls: snapshotTools,
-            }))
-            if (blockPrefsRef.current.tools !== 'hidden' && isCardOpen && !matchedBlock?.result) {
-              void requestToolResult(executionId)
-            }
-          },
-          onToolResult: (toolCallId, content, streamKey) => {
-            liveTools = upsertStreamToolCall(
-              liveTools,
-              { toolCallId, streamKey },
-              (cur) => ({ ...cur, result: content, status: 'completed' }),
-              () => ({
-                id: toolCallId || undefined,
-                streamKey,
-                name: 'tool',
-                result: content,
-                status: 'completed',
-              }),
-            )
-            const snapshotTools = liveTools
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              toolCalls: snapshotTools,
-            }))
-          },
-          onNativeToolProgress: ({ toolName, toolCallId, streamKey, progressLabel }) => {
-            liveTools = upsertStreamToolCall(
-              liveTools,
-              { toolCallId, streamKey },
-              (cur) => ({
-                ...cur,
-                name: toolName ?? cur.name,
-                progressLabel,
-              }),
-              () => ({
-                id: toolCallId,
-                streamKey,
-                name: toolName ?? 'native_tool',
-                status: 'running',
-                progressLabel,
-              }),
-            )
-            const snapshotTools = liveTools
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              deliveryState: promoteStreaming(m.deliveryState),
-              toolCalls: snapshotTools,
-            }))
-          },
-          onNativeToolEnd: ({ toolName, toolCallId, streamKey, status, summary }) => {
-            liveTools = upsertStreamToolCall(
-              liveTools,
-              { toolCallId, streamKey },
-              (cur) => ({
-                ...cur,
-                name: toolName ?? cur.name,
-                status,
-                progressLabel: summary ?? cur.progressLabel,
-              }),
-              () => ({
-                id: toolCallId,
-                streamKey,
-                name: toolName ?? 'native_tool',
-                status,
-                progressLabel: summary,
-              }),
-            )
-            const snapshotTools = liveTools
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              toolCalls: snapshotTools,
-            }))
-          },
-          onToolApprovalRequested: ({ toolCallId, toolName, args, question, because }) => {
-            const label = question ?? because ?? '운영자 승인 대기 중'
-            const trimmedId = toolCallId.trim()
-            const matchRef = trimmedId
-              ? { toolCallId: trimmedId }
-              : { streamKey: `approval:${randomUuid()}` }
-            liveTools = upsertStreamToolCall(
-              liveTools,
-              matchRef,
-              (cur) => ({
-                ...cur,
-                name: toolName || cur.name,
-                args: args ?? cur.args,
-                status: 'awaiting_approval',
-                progressLabel: label,
-              }),
-              () => ({
-                id: trimmedId || undefined,
-                streamKey: matchRef.streamKey,
-                name: toolName,
-                args,
-                status: 'awaiting_approval',
-                progressLabel: label,
-              }),
-            )
-            const snapshotTools = liveTools
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              deliveryState: promoteStreaming(m.deliveryState),
-              toolCalls: snapshotTools,
-            }))
-          },
-          onToolApprovalSettled: ({ toolCallId, toolName, outcome: approvalOutcome }) => {
-            const normalizedOutcome = approvalOutcome.trim().toLowerCase()
-            const approved =
-              normalizedOutcome === 'approve' || normalizedOutcome === 'remembered_approve'
-            const trimmedId = toolCallId.trim()
-            if (trimmedId) {
-              liveTools = upsertStreamToolCall(
-                liveTools,
-                { toolCallId: trimmedId },
-                (cur) => ({
-                  ...cur,
-                  status: approved ? 'running' : 'error',
-                  progressLabel: approvalOutcome,
-                }),
-              )
-            } else {
-              const list = [...liveTools]
-              let targetIdx = -1
-              for (let i = list.length - 1; i >= 0; i -= 1) {
-                const cur = list[i]!
-                if (cur.status !== 'awaiting_approval') continue
-                if (!toolName || cur.name === toolName) {
-                  targetIdx = i
-                  break
-                }
-                if (targetIdx < 0) targetIdx = i
-              }
-              if (targetIdx >= 0) {
-                list[targetIdx] = {
-                  ...list[targetIdx]!,
-                  status: approved ? 'running' : 'error',
-                  progressLabel: approvalOutcome,
-                }
-                liveTools = list
-              }
-            }
-            const snapshotTools = liveTools
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              toolCalls: snapshotTools.length > 0 ? snapshotTools : m.toolCalls,
-            }))
-          },
-          onReplyDetails: (reply, turnRef) => {
-            acceptedByServer = true
-            updateEntryById(userId, (m) => (m.deliveryState === 'Delivered' ? m : { ...m, deliveryState: 'Delivered' }))
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              content: reply || m.content,
-              turnRef: turnRef ?? m.turnRef,
-            }))
-          },
-          onError: (msg) => {
-            const settleOnError = (tc: ChatToolBlock): ChatToolBlock =>
-              tc.status === 'running' || tc.status === 'awaiting_result' || tc.status === 'awaiting_approval'
-                ? { ...tc, status: 'error' }
-                : tc
-            liveTools = liveTools.map(settleOnError)
-            const snapshotTools = liveTools.length > 0 ? liveTools : undefined
-            updateEntryById(userId, (m) => ({
-              ...m,
-              deliveryState: acceptedByServer ? 'Delivered' : 'Failed',
-            }))
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              deliveryState: 'Failed',
-              errorDetail: msg,
-              toolCalls: snapshotTools ?? m.toolCalls?.map(settleOnError),
-            }))
-          },
-          onFinished: () => {
-            markUserDelivered()
-            const settleOnFinish = (tc: ChatToolBlock): ChatToolBlock =>
-              tc.status === 'running' || tc.status === 'awaiting_result' || tc.status === 'awaiting_approval'
-                ? { ...tc, status: tc.executionId || tc.result !== undefined ? 'completed' : 'interrupted' }
-                : tc
-            liveTools = liveTools.map(settleOnFinish)
-            const snapshotTools = liveTools.length > 0 ? liveTools : undefined
-            updateAssistantEntry(assistantId, (m) => ({
-              ...m,
-              deliveryState: m.deliveryState === 'Failed' ? 'Failed' : 'Delivered',
-              toolCalls: snapshotTools ?? m.toolCalls?.map(settleOnFinish),
-            }))
-          },
-        },
+        }),
       })
     } finally {
       if (streamRunIdRef.current === runId) {
@@ -1911,7 +2290,9 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const hasTurnObservation = activeTurn !== null || effectivePreview !== null
   const browserRequestQueued = sending && scopedMessages.some((entry) => entry.role === 'assistant'
     && entry.operationId === sendingOperationRef.current?.operationId && entry.deliveryState === 'Queued')
-  const showLiveTurnCard = (!sending || browserRequestQueued) && hasTurnObservation
+  const hasActiveObserverStream = scopedMessages.some((entry) => entry.role === 'assistant'
+    && entry.id.startsWith('obs-asst-') && entry.deliveryState === 'Streaming')
+  const showLiveTurnCard = (!sending || browserRequestQueued) && !hasActiveObserverStream && hasTurnObservation
   const turnPreparation = effectivePreview?.preparation ?? null
   const liveTurnActivity = turnPreparation !== null && preparationHalted(turnPreparation)
     ? { label: preparationHaltedLabel(turnPreparation), tone: 'bad' as const }

@@ -846,6 +846,12 @@ export type KeeperObserverChatSignal =
   | { readonly kind: 'turn_succeeded'; readonly elapsedMs: number; readonly atUnix: number }
   | { readonly kind: 'chat_appended' }
   | { readonly kind: 'waiting_changed'; readonly queueChanged: boolean }
+  | {
+      readonly kind: 'chat_operation_event'
+      readonly operationId: string
+      readonly seq: number | null
+      readonly agUiEvent: Record<string, unknown>
+    }
 
 /**
  * Pure extractor for shared Observer SSE frames scoped to a single Keeper's
@@ -877,6 +883,21 @@ export function parseKeeperLiveObserverEvent(
   }
   if (eventType === 'keeper_chat_appended') {
     return { kind: 'chat_appended' }
+  }
+  if (eventType === 'keeper_chat_operation_event' && payload) {
+    const operationId = asStr(payload.operation_id)
+    const agUiEvent = isRecord(payload.ag_ui_event) ? payload.ag_ui_event : null
+    if (!operationId || !agUiEvent || !asStr(agUiEvent.type)) return null
+    const rawSeq = payload.seq
+    if (
+      rawSeq !== undefined
+      && rawSeq !== null
+      && (typeof rawSeq !== 'number' || !Number.isSafeInteger(rawSeq) || rawSeq < 0)
+    ) {
+      return null
+    }
+    const seq = typeof rawSeq === 'number' ? rawSeq : null
+    return { kind: 'chat_operation_event', operationId, seq, agUiEvent }
   }
   if (eventType === 'keeper_turn_succeeded' && payload) {
     const elapsedMs = asNum(payload.elapsed_ms)
@@ -1685,6 +1706,206 @@ export async function enqueueKeeperChat(params: {
   }
 }
 
+export interface ChatStreamFrameDispatcher {
+  readonly dispatch: (parsed: Record<string, unknown>) => { readonly terminal: boolean }
+  readonly isTerminal: () => boolean
+}
+
+/**
+ * Single shared AG-UI frame dispatcher used by both direct
+ * `POST /api/v1/keepers/chat/stream` responses and observer-broadcast
+ * `keeper_chat_operation_event` frames. Maintains monotonic response ownership
+ * for retained media and tracks terminal lifecycle transitions.
+ */
+export function createChatStreamFrameDispatcher(params: {
+  readonly operationId: string
+  readonly startEpoch: number
+  readonly callbacks: StreamKeeperChatCallbacks
+}): ChatStreamFrameDispatcher {
+  let terminal = false
+  let mediaOwnership = FRESH_OWNERSHIP
+  const completedMedia = new Map<string, RetainedChatImage>()
+
+  const admitMediaOwner = (owner: ChatJournalTextOwner) => {
+    if (owner.kind === 'observed_response'
+      && (!Number.isSafeInteger(owner.contentGeneration) || (owner.contentGeneration ?? -1) < 0
+        || !Number.isSafeInteger(owner.streamScope) || (owner.streamScope ?? -1) < 0)) return false
+    const admitted = admitOwner(mediaOwnership, owner)
+    if (!admitted.accept) return false
+    mediaOwnership = admitted.ownership
+    return true
+  }
+
+  const dispatch = (parsed: Record<string, unknown>): { readonly terminal: boolean } => {
+    if (terminal) return { terminal: true }
+    const type = asStr(parsed.type)
+    if (type === 'RUN_STARTED') {
+      params.callbacks.onRunStarted?.()
+    } else if (type === 'TEXT_MESSAGE_CONTENT' && typeof parsed.delta === 'string') {
+      admitMediaOwner(decodeTextOwner(parsed))
+      params.callbacks.onTextDelta?.(parsed.delta)
+    } else if (type === 'TOOL_CALL_START') {
+      params.callbacks.onToolStart?.(
+        asStr(parsed.toolCallName) ?? 'tool',
+        asStr(parsed.toolCallId) ?? undefined,
+        extractToolOccurrenceKey(parsed),
+      )
+    } else if (type === 'TOOL_CALL_ARGS') {
+      const tcId = asStr(parsed.toolCallId) ?? ''
+      const occKey = extractToolOccurrenceKey(parsed)
+      if (typeof parsed.snapshot === 'string') {
+        params.callbacks.onToolArgsSnapshot?.(tcId, parsed.snapshot, occKey)
+      } else if (typeof parsed.delta === 'string') {
+        params.callbacks.onToolArgsDelta?.(tcId, parsed.delta, occKey)
+      }
+    } else if (type === 'TOOL_CALL_END') {
+      params.callbacks.onToolEnd?.(
+        asStr(parsed.toolCallId) ?? undefined,
+        extractToolOccurrenceKey(parsed),
+      )
+    } else if (type === 'TOOL_CALL_RESULT') {
+      const rawContent = typeof parsed.content === 'string'
+        ? parsed.content
+        : parsed.result !== undefined
+          ? JSON.stringify(parsed.result, null, 2)
+          : ''
+      params.callbacks.onToolResult?.(
+        asStr(parsed.toolCallId) ?? '',
+        rawContent,
+        extractToolOccurrenceKey(parsed),
+      )
+    } else if (type === 'RUN_FINISHED') {
+      terminal = true
+      params.callbacks.onFinished?.()
+    } else if (type === 'RUN_ERROR') {
+      terminal = true
+      params.callbacks.onError?.(asStr(parsed.message) ?? 'Turn error')
+    } else if (type === 'CUSTOM') {
+      const name = asStr(parsed.name)
+      const val = isRecord(parsed.value) ? parsed.value : null
+      if (name !== null && CONTRACT_NOTICE_EVENTS.has(name)) {
+        if (name === 'KEEPER_RUNTIME_ATTEMPT_STARTED') mediaOwnership = retireAttempt(mediaOwnership)
+        dispatchContractNotice(name, parsed, params.callbacks)
+      } else if (name === 'KEEPER_STREAM_MESSAGE_START' && val) {
+        admitMediaOwner(decodeTextOwner({ ...val, response: val }))
+      } else if (name === 'KEEPER_MODEL_CONTENT_ACTIVITY' && val) {
+        const ch = asStr(val.channel)
+        if (ch === 'thinking' || ch === 'text') {
+          params.callbacks.onModelActivity?.(ch)
+        }
+      } else if (name === 'KEEPER_THINKING_DELTA' && val && typeof val.delta === 'string') {
+        admitMediaOwner(decodeTextOwner(val))
+        params.callbacks.onThinkingDelta?.(val.delta, extractThinkingBlockKey(val))
+      } else if (name === 'KEEPER_THINKING_SNAPSHOT' && val && typeof val.snapshot === 'string') {
+        admitMediaOwner(decodeTextOwner(val))
+        params.callbacks.onThinkingSnapshot?.(val.snapshot, extractThinkingBlockKey(val))
+      } else if (name === 'KEEPER_TOOL_CALL_ADMITTED' && val) {
+        const admittedName = asStr(val.toolCallName)
+        if (admittedName) {
+          params.callbacks.onToolAdmitted?.(
+            admittedName,
+            asStr(val.toolCallId) ?? undefined,
+            extractToolOccurrenceKey(val),
+          )
+        }
+      } else if (name === 'KEEPER_TOOL_RESULT_READY' && val) {
+        const executionId = asStr(val.executionId) ?? asStr(val.execution_id)
+        if (executionId) {
+          params.callbacks.onToolResultReady?.({
+            executionId,
+            toolCallId: asStr(val.toolCallId) ?? undefined,
+            streamKey: extractToolOccurrenceKey(val),
+            isError: typeof val.isError === 'boolean' ? val.isError : undefined,
+          })
+        }
+      } else if (name === 'KEEPER_NATIVE_TOOL_START' && val) {
+        params.callbacks.onToolStart?.(
+          asStr(val.toolCallName) ?? 'native_tool',
+          prefixNativeToolCallId(asStr(val.toolCallId)),
+          prefixNativeStreamKey(extractToolOccurrenceKey(val)),
+        )
+      } else if (name === 'KEEPER_NATIVE_TOOL_PROGRESS' && val && isRecord(val.progress)) {
+        const progressLabel = formatNativeProgressLabel(val.progress)
+        if (progressLabel) {
+          params.callbacks.onNativeToolProgress?.({
+            toolName: asStr(val.toolCallName) ?? undefined,
+            toolCallId: prefixNativeToolCallId(asStr(val.toolCallId)),
+            streamKey: prefixNativeStreamKey(extractToolOccurrenceKey(val)),
+            progressLabel,
+          })
+        }
+      } else if (name === 'KEEPER_NATIVE_TOOL_END' && val) {
+        const completion = isRecord(val.completion) ? formatNativeCompletionSummary(val.completion) : { status: 'completed' as const }
+        params.callbacks.onNativeToolEnd?.({
+          toolName: asStr(val.toolCallName) ?? undefined,
+          toolCallId: prefixNativeToolCallId(asStr(val.toolCallId)),
+          streamKey: prefixNativeStreamKey(extractToolOccurrenceKey(val)),
+          status: completion.status,
+          summary: completion.summary,
+        })
+      } else if (name === 'KEEPER_TOOL_APPROVAL_REQUESTED' && val) {
+        const tcId = asStr(val.tool_call_id) ?? ''
+        params.callbacks.onToolApprovalRequested?.({
+          toolCallId: tcId,
+          toolName: asStr(val.tool_call_name) ?? 'tool',
+          args: typeof val.args === 'string' && val.args.trim() ? val.args : undefined,
+          question: asStr(val.question) ?? undefined,
+          because: asStr(val.because) ?? undefined,
+        })
+      } else if (name === 'KEEPER_TOOL_APPROVAL_SETTLED' && val) {
+        const tcId = asStr(val.tool_call_id) ?? ''
+        const outcome = asStr(val.outcome) ?? ''
+        if (outcome) {
+          params.callbacks.onToolApprovalSettled?.({
+            toolCallId: tcId,
+            toolName: asStr(val.tool_call_name) ?? undefined,
+            outcome,
+          })
+        }
+      } else if (name === 'KEEPER_CHAT_BATCH_BOUND' && val) {
+        const operationId = asStr(val.operation_id)
+        const executionId = asStr(val.execution_id)
+        if (operationId && executionId) params.callbacks.onBatchBound?.(operationId, executionId)
+      } else if (name === 'KEEPER_MEDIA_DELTA' && val
+        && isWorkspaceMediaPath(val.media_ref) && isWorkspaceRasterMime(val.media_type)
+        && val.source_type === 'base64') {
+        const index = asNum(val.index)
+        const owner = decodeTextOwner(val)
+        if (index !== null && Number.isSafeInteger(index) && index >= 0
+          && owner.kind === 'observed_response' && admitMediaOwner(owner)) {
+          const key = `${owner.contentGeneration}:${owner.streamScope}:${index}`
+          if (!completedMedia.has(key)) {
+            completedMedia.set(key, { path: val.media_ref, workspaceEpoch: params.startEpoch })
+            params.callbacks.onRetainedImages?.([...completedMedia.values()])
+          }
+        }
+      } else if (name === 'KEEPER_CHAT_OPERATION_ACCEPTED' && val) {
+        const state = asStr(val.state) ?? 'Queued'
+        const inter = isRecord(val.interactive) ? val.interactive : null
+        params.callbacks.onAccepted?.({
+          operationId: asStr(val.operation_id) ?? params.operationId,
+          state,
+          queuedCount: asNum(val.queued_count) ?? 0,
+          controlToken: inter ? asStr(inter.chat_control_token) : null,
+          interruptProblem: inter ? interruptProblemOf(inter) : null,
+        })
+        if (state === 'Succeeded' || state === 'Failed' || state === 'Cancelled') {
+          terminal = true
+          params.callbacks.onFinished?.()
+        }
+      } else if (name === 'KEEPER_REPLY_DETAILS' && val && typeof val.reply === 'string') {
+        params.callbacks.onReplyDetails?.(val.reply, asStr(val.turn_ref))
+      }
+    }
+    return { terminal }
+  }
+
+  return {
+    dispatch,
+    isTerminal: () => terminal,
+  }
+}
+
 /**
  * Mode-aware, epoch-fenced, 2+1 SSE slot-managed AG-UI chat client
  * (`POST /api/v1/keepers/chat/stream`). Acquires Layer 3 `acquireViewStream`
@@ -1751,19 +1972,11 @@ export async function streamKeeperChat(params: {
         const reader = res.body.getReader()
         const decoder = new TextDecoder()
         let buf = ''
-        let terminal = false
-        let mediaOwnership = FRESH_OWNERSHIP
-        const completedMedia = new Map<string, RetainedChatImage>()
-
-        const admitMediaOwner = (owner: ChatJournalTextOwner) => {
-          if (owner.kind === 'observed_response'
-            && (!Number.isSafeInteger(owner.contentGeneration) || (owner.contentGeneration ?? -1) < 0
-              || !Number.isSafeInteger(owner.streamScope) || (owner.streamScope ?? -1) < 0)) return false
-          const admitted = admitOwner(mediaOwnership, owner)
-          if (!admitted.accept) return false
-          mediaOwnership = admitted.ownership
-          return true
-        }
+        const dispatcher = createChatStreamFrameDispatcher({
+          operationId: params.operationId,
+          startEpoch,
+          callbacks: params.callbacks,
+        })
 
         const handleFrame = (rawFrame: string) => {
           if (!isEpochCurrent(startEpoch) || controller.signal.aborted) return
@@ -1779,165 +1992,7 @@ export async function streamKeeperChat(params: {
             return
           }
           if (!isRecord(parsed)) return
-          const type = asStr(parsed.type)
-          if (type === 'RUN_STARTED') {
-            params.callbacks.onRunStarted?.()
-          } else if (type === 'TEXT_MESSAGE_CONTENT' && typeof parsed.delta === 'string') {
-            admitMediaOwner(decodeTextOwner(parsed))
-            params.callbacks.onTextDelta?.(parsed.delta)
-          } else if (type === 'TOOL_CALL_START') {
-            params.callbacks.onToolStart?.(
-              asStr(parsed.toolCallName) ?? 'tool',
-              asStr(parsed.toolCallId) ?? undefined,
-              extractToolOccurrenceKey(parsed),
-            )
-          } else if (type === 'TOOL_CALL_ARGS') {
-            const tcId = asStr(parsed.toolCallId) ?? ''
-            const occKey = extractToolOccurrenceKey(parsed)
-            if (typeof parsed.snapshot === 'string') {
-              params.callbacks.onToolArgsSnapshot?.(tcId, parsed.snapshot, occKey)
-            } else if (typeof parsed.delta === 'string') {
-              params.callbacks.onToolArgsDelta?.(tcId, parsed.delta, occKey)
-            }
-          } else if (type === 'TOOL_CALL_END') {
-            params.callbacks.onToolEnd?.(
-              asStr(parsed.toolCallId) ?? undefined,
-              extractToolOccurrenceKey(parsed),
-            )
-          } else if (type === 'TOOL_CALL_RESULT') {
-            const rawContent = typeof parsed.content === 'string'
-              ? parsed.content
-              : parsed.result !== undefined
-                ? JSON.stringify(parsed.result, null, 2)
-                : ''
-            params.callbacks.onToolResult?.(
-              asStr(parsed.toolCallId) ?? '',
-              rawContent,
-              extractToolOccurrenceKey(parsed),
-            )
-          } else if (type === 'RUN_FINISHED') {
-            terminal = true
-            params.callbacks.onFinished?.()
-          } else if (type === 'RUN_ERROR') {
-            terminal = true
-            params.callbacks.onError?.(asStr(parsed.message) ?? 'Turn error')
-          } else if (type === 'CUSTOM') {
-            const name = asStr(parsed.name)
-            const val = isRecord(parsed.value) ? parsed.value : null
-            if (name !== null && CONTRACT_NOTICE_EVENTS.has(name)) {
-              if (name === 'KEEPER_RUNTIME_ATTEMPT_STARTED') mediaOwnership = retireAttempt(mediaOwnership)
-              dispatchContractNotice(name, parsed, params.callbacks)
-            } else if (name === 'KEEPER_STREAM_MESSAGE_START' && val) {
-              admitMediaOwner(decodeTextOwner({ ...val, response: val }))
-            } else if (name === 'KEEPER_MODEL_CONTENT_ACTIVITY' && val) {
-              const ch = asStr(val.channel)
-              if (ch === 'thinking' || ch === 'text') {
-                params.callbacks.onModelActivity?.(ch)
-              }
-            } else if (name === 'KEEPER_THINKING_DELTA' && val && typeof val.delta === 'string') {
-              admitMediaOwner(decodeTextOwner(val))
-              params.callbacks.onThinkingDelta?.(val.delta, extractThinkingBlockKey(val))
-            } else if (name === 'KEEPER_THINKING_SNAPSHOT' && val && typeof val.snapshot === 'string') {
-              admitMediaOwner(decodeTextOwner(val))
-              params.callbacks.onThinkingSnapshot?.(val.snapshot, extractThinkingBlockKey(val))
-            } else if (name === 'KEEPER_TOOL_CALL_ADMITTED' && val) {
-              const admittedName = asStr(val.toolCallName)
-              if (admittedName) {
-                params.callbacks.onToolAdmitted?.(
-                  admittedName,
-                  asStr(val.toolCallId) ?? undefined,
-                  extractToolOccurrenceKey(val),
-                )
-              }
-            } else if (name === 'KEEPER_TOOL_RESULT_READY' && val) {
-              const executionId = asStr(val.executionId) ?? asStr(val.execution_id)
-              if (executionId) {
-                params.callbacks.onToolResultReady?.({
-                  executionId,
-                  toolCallId: asStr(val.toolCallId) ?? undefined,
-                  streamKey: extractToolOccurrenceKey(val),
-                  isError: typeof val.isError === 'boolean' ? val.isError : undefined,
-                })
-              }
-            } else if (name === 'KEEPER_NATIVE_TOOL_START' && val) {
-              params.callbacks.onToolStart?.(
-                asStr(val.toolCallName) ?? 'native_tool',
-                prefixNativeToolCallId(asStr(val.toolCallId)),
-                prefixNativeStreamKey(extractToolOccurrenceKey(val)),
-              )
-            } else if (name === 'KEEPER_NATIVE_TOOL_PROGRESS' && val && isRecord(val.progress)) {
-              const progressLabel = formatNativeProgressLabel(val.progress)
-              if (progressLabel) {
-                params.callbacks.onNativeToolProgress?.({
-                  toolName: asStr(val.toolCallName) ?? undefined,
-                  toolCallId: prefixNativeToolCallId(asStr(val.toolCallId)),
-                  streamKey: prefixNativeStreamKey(extractToolOccurrenceKey(val)),
-                  progressLabel,
-                })
-              }
-            } else if (name === 'KEEPER_NATIVE_TOOL_END' && val) {
-              const completion = isRecord(val.completion) ? formatNativeCompletionSummary(val.completion) : { status: 'completed' as const }
-              params.callbacks.onNativeToolEnd?.({
-                toolName: asStr(val.toolCallName) ?? undefined,
-                toolCallId: prefixNativeToolCallId(asStr(val.toolCallId)),
-                streamKey: prefixNativeStreamKey(extractToolOccurrenceKey(val)),
-                status: completion.status,
-                summary: completion.summary,
-              })
-            } else if (name === 'KEEPER_TOOL_APPROVAL_REQUESTED' && val) {
-              const tcId = asStr(val.tool_call_id) ?? ''
-              params.callbacks.onToolApprovalRequested?.({
-                toolCallId: tcId,
-                toolName: asStr(val.tool_call_name) ?? 'tool',
-                args: typeof val.args === 'string' && val.args.trim() ? val.args : undefined,
-                question: asStr(val.question) ?? undefined,
-                because: asStr(val.because) ?? undefined,
-              })
-            } else if (name === 'KEEPER_TOOL_APPROVAL_SETTLED' && val) {
-              const tcId = asStr(val.tool_call_id) ?? ''
-              const outcome = asStr(val.outcome) ?? ''
-              if (outcome) {
-                params.callbacks.onToolApprovalSettled?.({
-                  toolCallId: tcId,
-                  toolName: asStr(val.tool_call_name) ?? undefined,
-                  outcome,
-                })
-              }
-            } else if (name === 'KEEPER_CHAT_BATCH_BOUND' && val) {
-              const operationId = asStr(val.operation_id)
-              const executionId = asStr(val.execution_id)
-              if (operationId && executionId) params.callbacks.onBatchBound?.(operationId, executionId)
-            } else if (name === 'KEEPER_MEDIA_DELTA' && val
-              && isWorkspaceMediaPath(val.media_ref) && isWorkspaceRasterMime(val.media_type)
-              && val.source_type === 'base64') {
-              const index = asNum(val.index)
-              const owner = decodeTextOwner(val)
-              if (index !== null && Number.isSafeInteger(index) && index >= 0
-                && owner.kind === 'observed_response' && admitMediaOwner(owner)) {
-                const key = `${owner.contentGeneration}:${owner.streamScope}:${index}`
-                if (!completedMedia.has(key)) {
-                  completedMedia.set(key, { path: val.media_ref, workspaceEpoch: startEpoch })
-                  params.callbacks.onRetainedImages?.([...completedMedia.values()])
-                }
-              }
-            } else if (name === 'KEEPER_CHAT_OPERATION_ACCEPTED' && val) {
-              const state = asStr(val.state) ?? 'Queued'
-              const inter = isRecord(val.interactive) ? val.interactive : null
-              params.callbacks.onAccepted?.({
-                operationId: asStr(val.operation_id) ?? params.operationId,
-                state,
-                queuedCount: asNum(val.queued_count) ?? 0,
-                controlToken: inter ? asStr(inter.chat_control_token) : null,
-                interruptProblem: inter ? interruptProblemOf(inter) : null,
-              })
-              if (state === 'Succeeded' || state === 'Failed' || state === 'Cancelled') {
-                terminal = true
-                params.callbacks.onFinished?.()
-              }
-            } else if (name === 'KEEPER_REPLY_DETAILS' && val && typeof val.reply === 'string') {
-              params.callbacks.onReplyDetails?.(val.reply, asStr(val.turn_ref))
-            }
-          }
+          dispatcher.dispatch(parsed)
         }
 
         try {
@@ -1950,11 +2005,11 @@ export async function streamKeeperChat(params: {
             buf = parts.pop() ?? ''
             for (const frame of parts) {
               handleFrame(frame)
-              if (terminal) break
+              if (dispatcher.isTerminal()) break
             }
-            if (terminal) break
+            if (dispatcher.isTerminal()) break
           }
-          if (!terminal && buf.trim() && isEpochCurrent(startEpoch) && !controller.signal.aborted) {
+          if (!dispatcher.isTerminal() && buf.trim() && isEpochCurrent(startEpoch) && !controller.signal.aborted) {
             handleFrame(buf)
           }
         } finally {
@@ -1964,7 +2019,7 @@ export async function streamKeeperChat(params: {
           reader.releaseLock()
         }
 
-        return { terminal, error: null }
+        return { terminal: dispatcher.isTerminal(), error: null }
       } catch (cause) {
         const msg = cause instanceof Error ? cause.message : String(cause)
         return { terminal: false, error: msg }

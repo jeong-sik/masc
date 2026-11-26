@@ -23,6 +23,7 @@ import {
   upsertStreamToolCall,
 } from './chat-blocks'
 import {
+  createChatStreamFrameDispatcher,
   decodeHistoryRow,
   fetchKeeperChatHistoryPageApi,
   fetchKeeperToolResultApi,
@@ -887,6 +888,174 @@ describe('Chat Hierarchy Grouping, Delegate Cards, Live Autonomous Turn & Waitin
       parseKeeperLiveObserverEvent('keeper_waiting_inventory_changed',
         { keeper_name: 'code-reviewer-sister', queue_kind: 'chat_operation' }, 'code-reviewer-sister'),
     ).toEqual({ kind: 'waiting_changed', queueChanged: true })
+  })
+
+  it('decodes keeper_chat_operation_event strictly and rejects malformed envelopes or wrong keepers', () => {
+    const agUiEvent = { type: 'TEXT_MESSAGE_CONTENT', delta: 'hello' }
+    expect(
+      parseKeeperLiveObserverEvent(
+        'message',
+        {
+          type: 'keeper_chat_operation_event',
+          name: 'code-reviewer-sister',
+          operation_id: 'op-tui-1',
+          seq: 0,
+          ag_ui_event: agUiEvent,
+          ts_unix: 1_700_000_600,
+        },
+        'code-reviewer-sister',
+      ),
+    ).toEqual({
+      kind: 'chat_operation_event',
+      operationId: 'op-tui-1',
+      seq: 0,
+      agUiEvent,
+    })
+
+    // Missing optional `seq` decodes to null; JSON-RPC `params` envelope is supported
+    expect(
+      parseKeeperLiveObserverEvent(
+        'message',
+        {
+          params: {
+            type: 'keeper_chat_operation_event',
+            name: 'code-reviewer-sister',
+            operation_id: 'op-tui-2',
+            ag_ui_event: { type: 'RUN_STARTED' },
+          },
+        },
+        'code-reviewer-sister',
+      ),
+    ).toEqual({
+      kind: 'chat_operation_event',
+      operationId: 'op-tui-2',
+      seq: null,
+      agUiEvent: { type: 'RUN_STARTED' },
+    })
+
+    // Reject wrong keeper, missing operation_id, missing/invalid ag_ui_event, invalid seq
+    expect(
+      parseKeeperLiveObserverEvent(
+        'message',
+        { type: 'keeper_chat_operation_event', name: 'other-keeper', operation_id: 'op-1', seq: 1, ag_ui_event: agUiEvent },
+        'code-reviewer-sister',
+      ),
+    ).toBeNull()
+    expect(
+      parseKeeperLiveObserverEvent(
+        'message',
+        { type: 'keeper_chat_operation_event', name: 'code-reviewer-sister', operation_id: '   ', seq: 1, ag_ui_event: agUiEvent },
+        'code-reviewer-sister',
+      ),
+    ).toBeNull()
+    expect(
+      parseKeeperLiveObserverEvent(
+        'message',
+        { type: 'keeper_chat_operation_event', name: 'code-reviewer-sister', operation_id: 'op-1', seq: 1, ag_ui_event: {} },
+        'code-reviewer-sister',
+      ),
+    ).toBeNull()
+    expect(
+      parseKeeperLiveObserverEvent(
+        'message',
+        { type: 'keeper_chat_operation_event', name: 'code-reviewer-sister', operation_id: 'op-1', seq: 1, ag_ui_event: 'bad' },
+        'code-reviewer-sister',
+      ),
+    ).toBeNull()
+    expect(
+      parseKeeperLiveObserverEvent(
+        'message',
+        { type: 'keeper_chat_operation_event', name: 'code-reviewer-sister', operation_id: 'op-1', seq: -1, ag_ui_event: agUiEvent },
+        'code-reviewer-sister',
+      ),
+    ).toBeNull()
+    expect(
+      parseKeeperLiveObserverEvent(
+        'message',
+        { type: 'keeper_chat_operation_event', name: 'code-reviewer-sister', operation_id: 'op-1', seq: 1.5, ag_ui_event: agUiEvent },
+        'code-reviewer-sister',
+      ),
+    ).toBeNull()
+    expect(
+      parseKeeperLiveObserverEvent(
+        'message',
+        { type: 'keeper_chat_operation_event', name: 'code-reviewer-sister', operation_id: 'op-1', seq: '2', ag_ui_event: agUiEvent },
+        'code-reviewer-sister',
+      ),
+    ).toBeNull()
+  })
+
+  it('dispatches AG-UI events through createChatStreamFrameDispatcher and stops after terminal frame', () => {
+    const seen: string[] = []
+    const dispatcher = createChatStreamFrameDispatcher({
+      operationId: 'op-shared-1',
+      startEpoch: 1,
+      callbacks: {
+        onRunStarted: () => seen.push('started'),
+        onThinkingDelta: (delta) => seen.push(`think:${delta}`),
+        onToolStart: (name, id) => seen.push(`tool-start:${name}:${id ?? ''}`),
+        onToolEnd: (id) => seen.push(`tool-end:${id ?? ''}`),
+        onTextDelta: (delta) => seen.push(`text:${delta}`),
+        onFinished: () => seen.push('finished'),
+      },
+    })
+
+    expect(dispatcher.dispatch({ type: 'RUN_STARTED' })).toEqual({ terminal: false })
+    expect(dispatcher.dispatch({ type: 'CUSTOM', name: 'KEEPER_THINKING_DELTA', value: { index: 0, delta: 'plan' } })).toEqual({ terminal: false })
+    expect(dispatcher.dispatch({ type: 'TOOL_CALL_START', toolCallName: 'Read', toolCallId: 'tc-1' })).toEqual({ terminal: false })
+    expect(dispatcher.dispatch({ type: 'TOOL_CALL_END', toolCallId: 'tc-1' })).toEqual({ terminal: false })
+    expect(dispatcher.dispatch({ type: 'TEXT_MESSAGE_CONTENT', delta: 'answer' })).toEqual({ terminal: false })
+    expect(dispatcher.dispatch({ type: 'RUN_FINISHED' })).toEqual({ terminal: true })
+    expect(dispatcher.isTerminal()).toBe(true)
+    // Post-terminal frames must be ignored
+    expect(dispatcher.dispatch({ type: 'TEXT_MESSAGE_CONTENT', delta: 'late' })).toEqual({ terminal: true })
+
+    expect(seen).toEqual(['started', 'think:plan', 'tool-start:Read:tc-1', 'tool-end:tc-1', 'text:answer', 'finished'])
+  })
+
+  it('retains active observer-streaming bubbles across mid-turn history refreshes and reconciles cleanly on persisted receipt', () => {
+    const persistedBefore = decodeHistoryRow({ id: 'm1', role: 'user', content: 'from tui', ts: 100 })!
+    const observerLive = {
+      id: 'obs-asst-op-tui-9',
+      role: 'assistant' as const,
+      operationId: 'op-tui-9',
+      replyOperationId: 'op-batch-exec',
+      content: 'Streaming half...',
+      ts: 101,
+      deliveryState: 'Streaming' as const,
+    }
+    const observerPending = {
+      id: 'obs-asst-op-tui-10',
+      role: 'assistant' as const,
+      operationId: 'op-tui-10',
+      content: '',
+      ts: 102,
+      deliveryState: 'Pending_processing' as const,
+    }
+
+    // Mid-turn refresh (only accepted_user arrived) keeps both observer entries intact
+    const acceptedUser = decodeHistoryRow({
+      id: 'u-tui-9',
+      role: 'user',
+      content: 'follow up',
+      ts: 101,
+      delivery_key: { kind: 'operation', operation_id: 'op-tui-9' },
+      transcript_slot: { kind: 'accepted_user' },
+    })!
+    const midTurn = mergeLatestHistoryPage([persistedBefore, observerLive, observerPending], [persistedBefore, acceptedUser])
+    expect(midTurn.map((m) => m.id)).toEqual(['m1', 'u-tui-9', 'obs-asst-op-tui-9', 'obs-asst-op-tui-10'])
+
+    // Authoritative persisted terminal_result matching replyOperationId replaces observerLive cleanly (zero duplicates)
+    const persistedReply = decodeHistoryRow({
+      id: 'a-tui-9',
+      role: 'assistant',
+      content: 'Streaming half... done!',
+      ts: 103,
+      delivery_key: { kind: 'operation', operation_id: 'op-batch-exec' },
+      transcript_slot: { kind: 'terminal_result' },
+    })!
+    const settled = mergeLatestHistoryPage(midTurn, [persistedBefore, acceptedUser, persistedReply])
+    expect(settled.map((m) => m.id)).toEqual(['m1', 'u-tui-9', 'a-tui-9', 'obs-asst-op-tui-10'])
   })
 
   it('renders grouped tool activity, accessible delegate jump outside summary, live autonomous preview card, and waiting inventory strip', async () => {

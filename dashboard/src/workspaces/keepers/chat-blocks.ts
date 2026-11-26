@@ -854,6 +854,19 @@ function operationReceiptId(
 }
 
 /**
+ * Returns true when the transcript already contains a persisted server receipt
+ * (`terminal_result` or `settled_failure`) for `operationId`.
+ */
+export function hasSettledOperation(
+  entries: readonly ChatTranscriptEntry[],
+  operationId: string,
+): boolean {
+  return entries.some(
+    (entry) => operationReceiptId(entry, 'terminal_result', 'settled_failure') === operationId,
+  )
+}
+
+/**
  * Merges a refreshed latest history head page into the existing transcript
  * without relying on wall-clock `ts` comparisons (which scramble same-second
  * rows) and while preserving earlier paginated rows and active optimistic turns.

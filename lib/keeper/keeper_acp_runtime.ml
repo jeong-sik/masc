@@ -2271,7 +2271,18 @@ let run_without_lifecycle
       sent_start := Some { source_messages; digest_at; sends_from };
       Option.iter (fun observe -> observe front ~transmitted_bytes ~sends_from) on_carried_front
     in
-    let* ranged =
+    let source_project = Host.project_source model_input_projection in
+    let finish ranged =
+      try source_project ranged with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
+      | exn ->
+        Llm_provider.Reserved_exn.reraise_if_reserved exn;
+        Error
+          (internal_error
+             (runtime_label ^ " model input projection raised: " ^ Printexc.to_string exn))
+    in
+    let* projected =
       Host.start_range_projection
         ~input_source
         ?argument_projection:
@@ -2288,18 +2299,8 @@ let run_without_lifecycle
         ~turn_start
         ~keeper_name
         ~runtime_id
+        ~finish
         hydrated
-    in
-    let source_project = Host.project_source model_input_projection in
-    let* projected =
-      try source_project ranged with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn when Keeper_operator_interrupt.is_operator_interrupt exn -> raise exn
-      | exn ->
-        Llm_provider.Reserved_exn.reraise_if_reserved exn;
-        Error
-          (internal_error
-             (runtime_label ^ " model input projection raised: " ^ Printexc.to_string exn))
     in
     Ok (projected @ Option.to_list outbox_message)
   in

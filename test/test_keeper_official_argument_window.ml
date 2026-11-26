@@ -73,7 +73,8 @@ let project ?argument_projection ?(capacity_bytes=max_int) ?carried_front_seed
     ~capacity_bytes ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
     ?carried_front_seed ~librarian_front
     ?on_carried_front ?on_model_input_window_observation
-    ~turn_start ~keeper_name:"official-arguments" ~runtime_id:"official.sample" messages
+    ~turn_start ~keeper_name:"official-arguments" ~runtime_id:"official.sample"
+    ~finish:Result.ok messages
   |> Result.map_error Agent_core.Error.to_string |> require
 let inputs messages = List.concat_map (fun (message : T.message) ->
   List.filter_map (function
@@ -281,7 +282,8 @@ let test_finished_turn_results_leave_as_markers_from_the_floor () = with_base @@
       ?argument_projection ~measure_message_bytes:measure
       ~capacity_bytes:max_int ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
       ~librarian_front:progress
-      ~turn_start ~keeper_name:"official-results" ~runtime_id:"official.sample" history
+      ~turn_start ~keeper_name:"official-results" ~runtime_id:"official.sample"
+      ~finish:Result.ok history
     |> Result.map_error Agent_core.Error.to_string |> require in
   let sent = project_with None in
   check bool "a finished result at the floor leaves as a marker" true
@@ -352,7 +354,7 @@ let test_completion_review_preserves_the_full_evidence_without_history_reads () 
         ~on_model_input_window_observation:(fun _ -> incr windows)
         ~on_carried_front:(fun _ ~transmitted_bytes:_ ~sends_from:_ -> incr carried_fronts)
         ~turn_start:boundary ~keeper_name:"completion-evidence-fixture"
-        ~runtime_id:"official.sample" evidence
+        ~runtime_id:"official.sample" ~finish:Result.ok evidence
       |> Result.map_error Agent_core.Error.to_string |> require
     in
     check bool "all evidence, attachment and paired tool messages remain exact" true

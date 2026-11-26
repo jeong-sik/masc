@@ -703,6 +703,52 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     expect(chat.getByText('Pending request 7')).toBeTruthy()
   })
 
+  it('does not flash an empty queue strip open during background observer queue refreshes', async () => {
+    let observerCtrl: ReadableStreamDefaultController<Uint8Array> | undefined
+    const encoder = new TextEncoder()
+    let queueCalls = 0
+    let resolveSecondQueue!: (r: Response) => void
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/mcp?sse_kind=observer') {
+        return new Response(new ReadableStream({ start(c) { observerCtrl = c } }), {
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      }
+      if (url.includes('/chat/operations')) {
+        queueCalls += 1
+        if (queueCalls === 1) return Response.json(queuedOperations())
+        return new Promise<Response>((resolve) => { resolveSecondQueue = resolve })
+      }
+      return Response.json({ messages: [], has_more: false, next_cursor: null, rows: [] })
+    }))
+
+    // Connect observer BEFORE mounting KeeperChatTab so queueCalls=2 is triggered strictly by the SSE frame.
+    const stream = startObserverStream({ autoReconnect: false, fetchImpl: globalThis.fetch })
+    try {
+      await waitFor(() => expect(observerConnected.value).toBe(true))
+      const chat = render(html`<${KeeperChatTab} keeper=${makeRosterKeeper()} onInspect=${vi.fn()} onMutated=${vi.fn()} />`)
+      await waitFor(() => expect(queueCalls).toBe(1))
+      await waitFor(() => expect(chat.container.querySelector('.kp-queue-strip')).toBeNull())
+
+      observerCtrl!.enqueue(encoder.encode(
+        `data: ${JSON.stringify({
+          type: 'keeper_waiting_inventory_changed',
+          keeper_name: 'code-reviewer-sister',
+          queue_kind: 'chat_operation',
+        })}\n\n`,
+      ))
+      await waitFor(() => expect(queueCalls).toBe(2))
+      // Queue strip stays closed (0px) while refreshing an empty queue in the background.
+      expect(chat.container.querySelector('.kp-queue-strip')).toBeNull()
+      resolveSecondQueue(Response.json(queuedOperations()))
+      await waitFor(() => expect(chat.container.querySelector('.kp-queue-strip')).toBeNull())
+    } finally {
+      observerCtrl?.close()
+      await stream
+    }
+  })
+
   it('follows an external chat through queue, live preview, and stored replies across observer reconnect', async () => {
     const keeper = makeRosterKeeper()
     const encoder = new TextEncoder()

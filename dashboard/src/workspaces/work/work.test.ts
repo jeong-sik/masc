@@ -1382,4 +1382,116 @@ describe('workspaces/work', () => {
     await flushUi()
     expect(syncSlot()?.textContent?.trim()).toBe('')
   })
+
+  it('retains Goal Confirmation evidence across stale/loading revalidation and clears it on authoritative rejection', async () => {
+    let goalCalls = 0
+    let confirmCalls = 0
+    let resolveSecondGoals!: (r: Response) => void
+    let resolveSecondConfirm!: (r: Response) => void
+    const goalPayload = {
+      tree: [{
+        id: 'g-await-1',
+        title: 'Stable confirmation goal',
+        phase: 'Awaiting_confirmation',
+        priority: 1,
+        measure: { kind: 'done_when', condition: 'All invariants green' },
+        procedure: 'Check evidence without layout collapse',
+        criterion_revision: 'crev-501',
+        criterion_review: { state: 'viable', reason: 'Testable' },
+        linked_task_count: 0,
+        tasks: [],
+      }],
+    }
+    const confirmationPayload = {
+      inspection_operator_id: 'op-1',
+      goal: { id: 'g-await-1', phase: 'Awaiting_confirmation' },
+      verification: {
+        goal_id: 'g-await-1',
+        completion: {
+          state: 'proof_proven',
+          verdict: {
+            outcome: 'proven',
+            reason: null,
+            request_id: 'vr-501',
+            verification_run_id: 'vrun-501',
+            criterion: { revision: 'crev-501' },
+            authority: { kind: 'system_llm_agent', actor: 'verifier-exact' },
+            evidence: 'Persistent confirmation evidence body',
+            recorded_at: '2026-11-26T06:00:00Z',
+          },
+        },
+      },
+    }
+    globalThis.fetch = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/dashboard/goals')) {
+        goalCalls += 1
+        if (goalCalls === 1) return Promise.resolve(jsonResponse(goalPayload))
+        return new Promise<Response>((resolve) => { resolveSecondGoals = resolve })
+      }
+      if (url.startsWith('/health?full=1')) {
+        return Promise.resolve(jsonResponse({
+          build: { runtime_instance_id: 'inst-501' },
+          paths: { effective_base_path: '/ws/masc', effective_masc_root: '/ws/masc/.masc' },
+        }))
+      }
+      if (url.startsWith('/api/v1/goals/confirmation')) {
+        confirmCalls += 1
+        if (confirmCalls === 1) return Promise.resolve(jsonResponse(confirmationPayload))
+        return new Promise<Response>((resolve) => { resolveSecondConfirm = resolve })
+      }
+      if (url.startsWith('/api/v1/verification/requests')) {
+        return Promise.resolve(jsonResponse({ requests: [] }))
+      }
+      return Promise.resolve(jsonResponse({}))
+    })
+
+    render(html`<${WorkWorkspace} subroute="goals" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi()
+
+    expect(container.textContent).toContain('Persistent confirmation evidence body')
+    const confirmBtn = () => [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((b) => b.textContent?.includes('최종 완료 확정'))
+    expect(confirmBtn()?.disabled).toBe(false)
+
+    // 1. Trigger manual revalidation -> goal list becomes stale while refetching.
+    const refreshBtn = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((b) => b.textContent?.trim() === '새로고침')!
+    refreshBtn.click()
+    await flushUi()
+
+    // Evidence stays mounted without collapsing, Confirm disables, and status stays in header slot.
+    expect(container.textContent).toContain('Persistent confirmation evidence body')
+    expect(confirmBtn()?.disabled).toBe(true)
+    expect(container.textContent).toContain('마지막 조회 증거')
+    expect(container.querySelectorAll('.wk-pane-col > .wk-notice--warn')).toHaveLength(0)
+    expect(container.querySelector('.wk-pane-head .wk-status-pill--warn')?.textContent).toContain('마지막 조회')
+
+    // 2. Goal list resolves -> confirmation starts reloading while evidence stays mounted.
+    resolveSecondGoals(jsonResponse(goalPayload))
+    await flushUi()
+    expect(container.textContent).toContain('Persistent confirmation evidence body')
+    expect(container.textContent).toContain('증거 확인 중')
+    expect(confirmBtn()?.disabled).toBe(true)
+
+    // 3. Authoritative proof_refuted clears prior proof_proven evidence immediately (fail closed).
+    resolveSecondConfirm(jsonResponse({
+      ...confirmationPayload,
+      verification: {
+        goal_id: 'g-await-1',
+        completion: {
+          state: 'proof_refuted',
+          verdict: {
+            ...confirmationPayload.verification.completion.verdict,
+            outcome: 'refuted',
+            reason: 'Verification failed on rerun',
+          },
+        },
+      },
+    }))
+    await flushUi()
+    expect(container.textContent).not.toContain('Persistent confirmation evidence body')
+    expect(confirmBtn()).toBeUndefined()
+    expect(container.querySelector('[role="alert"]')).not.toBeNull()
+  })
 })

@@ -202,7 +202,8 @@ type QueueRead = {
   readonly epoch: number
   readonly operations: readonly QueuedChatOperation[]
 } & (
-  | { readonly kind: 'loading' | 'ready' }
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'ready'; readonly refreshing?: boolean }
   | { readonly kind: 'error'; readonly message: string }
 )
 
@@ -729,14 +730,18 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       for (const read of reads) pending.add(read)
       if (reads.includes('queue')) {
         const epoch = currentSessionEpoch()
-        setQueueRead((previous) => ({
-          keeperName: keeper.name,
-          epoch,
-          kind: 'loading',
-          operations: previous?.keeperName === keeper.name && previous.epoch === epoch
-            ? previous.operations
-            : [],
-        }))
+        setQueueRead((previous) => {
+          const sameScope = previous?.keeperName === keeper.name && previous.epoch === epoch
+          if (sameScope && previous.kind === 'ready') {
+            return { ...previous, refreshing: true }
+          }
+          return {
+            keeperName: keeper.name,
+            epoch,
+            kind: 'loading',
+            operations: sameScope ? previous.operations : [],
+          }
+        })
       }
       if (drainScheduled) return
       drainScheduled = true
@@ -797,18 +802,23 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             setQueueRead({
               keeperName: keeper.name,
               epoch,
-              kind: anotherReadPending ? 'loading' : 'ready',
+              kind: 'ready',
+              refreshing: anotherReadPending,
               operations: result.value,
             })
           } else {
             const { kind, message } = result.error
             const clear = kind === 'unauthorized' || kind === 'forbidden' || kind === 'epoch_stale'
             setQueueRead((previous) => {
-              const operations = !clear && previous?.keeperName === keeper.name && previous.epoch === epoch
-                ? previous.operations
-                : []
+              const sameScope = !clear && previous?.keeperName === keeper.name && previous.epoch === epoch
+              const operations = sameScope ? previous.operations : []
               const scope = { keeperName: keeper.name, epoch, operations }
-              return anotherReadPending ? { ...scope, kind: 'loading' } : { ...scope, kind: 'error', message }
+              if (anotherReadPending) {
+                return sameScope && previous.kind === 'ready'
+                  ? { ...scope, kind: 'ready', refreshing: true }
+                  : { ...scope, kind: 'loading' }
+              }
+              return { ...scope, kind: 'error', message }
             })
           }
           return
@@ -912,7 +922,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     operationId: string,
     action: typeof moveQueuedChatOperationToEndApi,
   ) => {
-    if (queue?.kind !== 'ready' || !isEpochCurrent(queue.epoch) || activeKeeperRef.current !== keeper.name) return
+    if (queue?.kind !== 'ready' || queue.refreshing === true || !isEpochCurrent(queue.epoch) || activeKeeperRef.current !== keeper.name) return
     await action(keeper.name, operationId)
     if (mountedRef.current && activeKeeperRef.current === keeper.name && isEpochCurrent(queue.epoch)) {
       refreshChatRef.current('queue', 'waiting')
@@ -2733,10 +2743,12 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           `
         })()}
 
-        ${(queuedOps.length > 0 || queue?.kind !== 'ready') && html`
+        ${(queuedOps.length > 0 || !queue || queue.kind !== 'ready') && html`
           <div class="kp-queue-strip" aria-label="대기 중인 큐 작업">
             <div class="kp-queue-row">
-              <span class="kp-kv-k">${queuedOps.length ? `대기열 (${queuedOps.length})` : '대기열'}</span>
+              <span class="kp-kv-k">
+                ${queuedOps.length ? `대기열 (${queuedOps.length})` : '대기열'}${queue?.kind === 'ready' && queue.refreshing ? ' · 갱신 중…' : ''}
+              </span>
               <button type="button" class="btn-ghost" aria-label="대기열 새로고침"
                 onClick=${() => retryQueueRef.current()}>새로고침</button>
             </div>
@@ -2747,25 +2759,28 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               </div>
             `}
             <div class="kp-queue-rows">
-              ${queuedOps.map((op) => html`
-                <div key=${op.operationId} class="kp-queue-row">
-                  <span class="kp-roster-name">${op.message || op.operationId}</span>
-                  <div class="kp-pill-row">
-                    <button type="button" class="btn-ghost" disabled=${queue?.kind !== 'ready'}
-                      onClick=${() => void updateQueueOperation(op.operationId, runQueuedChatOperationNext)}>
-                      지금 실행
-                    </button>
-                    <button type="button" class="btn-ghost" disabled=${queue?.kind !== 'ready'}
-                      onClick=${() => void updateQueueOperation(op.operationId, moveQueuedChatOperationToEndApi)}>
-                      뒤로
-                    </button>
-                    <button type="button" class="kp-btn-danger" disabled=${queue?.kind !== 'ready'}
-                      onClick=${() => void updateQueueOperation(op.operationId, cancelQueuedChatOperation)}>
-                      취소
-                    </button>
+              ${queuedOps.map((op) => {
+                const queueBusy = queue?.kind !== 'ready' || queue.refreshing === true
+                return html`
+                  <div key=${op.operationId} class="kp-queue-row">
+                    <span class="kp-roster-name">${op.message || op.operationId}</span>
+                    <div class="kp-pill-row">
+                      <button type="button" class="btn-ghost" disabled=${queueBusy}
+                        onClick=${() => void updateQueueOperation(op.operationId, runQueuedChatOperationNext)}>
+                        지금 실행
+                      </button>
+                      <button type="button" class="btn-ghost" disabled=${queueBusy}
+                        onClick=${() => void updateQueueOperation(op.operationId, moveQueuedChatOperationToEndApi)}>
+                        뒤로
+                      </button>
+                      <button type="button" class="kp-btn-danger" disabled=${queueBusy}
+                        onClick=${() => void updateQueueOperation(op.operationId, cancelQueuedChatOperation)}>
+                        취소
+                      </button>
+                    </div>
                   </div>
-                </div>
-              `)}
+                `
+              })}
             </div>
           </div>
         `}

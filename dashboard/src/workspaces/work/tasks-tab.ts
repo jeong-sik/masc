@@ -1228,10 +1228,25 @@ export function TasksTab(props: WorkspaceViewProps) {
 
               ${isSingleUser && html`
                 <section class="wk-section" aria-label="태스크 검증 판정">
-                  <h3 class="wk-section-title">Verification Verdicts${visibleVerificationRead?.kind === 'ready' && verificationCoverageNotices.length === 0 && taskVerifications.length > 0 ? ` (${taskVerifications.length})` : ''}</h3>
-                  ${(!visibleVerificationRead || visibleVerificationRead.kind === 'loading') && html`
-                    <div class="wk-notice" role="status">검증 이력을 불러오는 중${visibleVerificationReport ? ' · 마지막 조회 표시' : ''}</div>
-                  `}
+                  <div class="wk-section-head">
+                    <h3 class="wk-section-title">
+                      Verification Verdicts <span class="wk-chip-count">(${visibleVerificationRead?.kind === 'ready' && verificationCoverageNotices.length === 0 ? taskVerifications.length : '—'})</span>
+                    </h3>
+                    <div class="wk-pane-status-slot">
+                      ${(!visibleVerificationRead || visibleVerificationRead.kind === 'loading') && html`
+                        <span
+                          class="wk-status-pill wk-status-pill--info"
+                          role="status"
+                          title=${visibleVerificationReport ? '검증 이력 갱신 중 · 마지막 조회 표시' : '검증 이력을 불러오는 중…'}
+                        >
+                          <${InlineSpinner} size="xs" />
+                          <span class="wk-status-pill-text">
+                            ${visibleVerificationReport ? '갱신 중 · 마지막 조회' : '검증 이력 불러오는 중…'}
+                          </span>
+                        </span>
+                      `}
+                    </div>
+                  </div>
                   ${visibleVerificationRead?.kind === 'failed' && html`
                     <div class="wk-notice wk-notice--err" role="alert">검증 이력 조회 실패 · ${visibleVerificationRead.message}${visibleVerificationReport ? ' · 마지막 조회 표시' : ''}</div>
                   `}

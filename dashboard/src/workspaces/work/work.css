@@ -339,6 +339,7 @@
   align-items: center;
   justify-content: flex-end;
   gap: var(--sp-1);
+  min-height: 22px;
   min-width: 0;
   flex: 1 1 0%;
   overflow: hidden;

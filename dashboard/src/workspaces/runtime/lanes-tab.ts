@@ -1599,23 +1599,47 @@ export function LanesTab(props: WorkspaceViewProps) {
             </form>
           `}
 
-          ${fusionObs.kind === 'loading' && html`
-            <p role="status" class="inline-flex items-center gap-2"><${InlineSpinner} size="xs" />Fusion 실행 이력 불러오는 중…</p>
-          `}
-          ${fusionStale && html`
-            <p role="status" class="ap-error sev-warn">Fusion 실행 이력을 새로고침하고 있습니다. 목록은 마지막 관측입니다.</p>
-          `}
-          ${fusionData && !fusionLive && !fusionStale && html`
-            <p role="status" class="ap-muted">실시간 연결을 기다리는 중입니다. 목록은 마지막 관측입니다.</p>
-          `}
+          <div class="v2-sync-toolbar">
+            <button
+              type="button"
+              class="btn-ghost"
+              disabled=${fusionObs.kind === 'loading'}
+              onClick=${() => void loadFusion('manual')}
+            >
+              Fusion 이력 새로고침
+            </button>
+            <div class="v2-sync-slot">
+              ${fusionObs.kind === 'loading' && html`
+                <span class="v2-sync-pill v2-sync-pill--info" role="status" title="Fusion 실행 이력 불러오는 중…">
+                  <${InlineSpinner} size="xs" />
+                  <span class="v2-sync-pill-text">Fusion 실행 이력 불러오는 중…</span>
+                </span>
+              `}
+              ${fusionStale && html`
+                <span
+                  class="v2-sync-pill v2-sync-pill--warn"
+                  role="status"
+                  title="Fusion 실행 이력을 새로고침하고 있습니다. 목록은 마지막 관측입니다."
+                >
+                  <span class="v2-sync-pill-text">새로고침 중 · 마지막 관측</span>
+                </span>
+              `}
+              ${fusionData && !fusionLive && !fusionStale && html`
+                <span
+                  class="v2-sync-pill"
+                  role="status"
+                  title="실시간 연결을 기다리는 중입니다. 목록은 마지막 관측입니다."
+                >
+                  <span class="v2-sync-pill-text">실시간 연결 대기 · 마지막 관측</span>
+                </span>
+              `}
+            </div>
+          </div>
           ${fusionObs.kind === 'failed' && html`
             <div class="ap-error" role="alert">Fusion 실행 이력 조회 실패. ${fusionObs.error.message}</div>
           `}
           ${(fusionObs.kind === 'absent' || fusionObs.kind === 'unreported') && html`
             <p role="status">서버에서 Fusion 실행 이력을 확인할 수 없습니다.</p>
-          `}
-          ${fusionObs.kind !== 'loading' && html`
-            <button type="button" class="btn-ghost self-start" onClick=${() => void loadFusion('manual')}>Fusion 이력 새로고침</button>
           `}
           ${fusionData && html`<${DataTable}
             data=${fusionData.runs}

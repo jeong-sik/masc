@@ -73,6 +73,11 @@ import {
 } from './chat-blocks'
 import { previewForObservedTurn, retainTurnPreview, type ReceivedTurnPreview } from './chat-turn-progress'
 import {
+  preparationHalted,
+  preparationHaltedLabel,
+  startReasonLabel,
+} from './turn-context'
+import {
   acceptedReplyState,
   appendStreamNotice,
   chatProviderRetry,
@@ -1843,7 +1848,11 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const browserRequestQueued = sending && scopedMessages.some((entry) => entry.role === 'assistant'
     && entry.operationId === sendingOperationRef.current?.operationId && entry.deliveryState === 'Queued')
   const showLiveTurnCard = (!sending || browserRequestQueued) && hasTurnObservation
-  const liveTurnActivity = formatTurnActivityLabel(effectivePreview?.activity)
+  const turnPreparation = effectivePreview?.preparation ?? null
+  const liveTurnActivity = turnPreparation !== null && preparationHalted(turnPreparation)
+    ? { label: preparationHaltedLabel(turnPreparation), tone: 'bad' as const }
+    : formatTurnActivityLabel(effectivePreview?.activity)
+  const turnWorkContext = effectivePreview?.work_context ?? null
   const liveTurnLaneLabel = activeTurn ? formatTurnLaneLabel(activeTurn.lane) : 'Keeper 턴'
   const lastObserved = effectivePreview ? formatChatTime(effectivePreview.updated_at_unix) : null
   const snapshotLive = activeTurn !== null && row?.status === 'ok' && turnRead?.kind === 'value'
@@ -2653,6 +2662,14 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                   ${openWork !== null && openWork.length > 0 && html`
                     <${OpenWorkRows} activities=${openWork} live=${turnAnimating} />
                   `}
+                  ${turnWorkContext && (turnWorkContext.start_reasons.length > 0 || turnWorkContext.task_id) && html`
+                    <div class="kp-live-turn-status" data-testid="chat-turn-work-context">
+                      ${turnWorkContext.start_reasons.length > 0
+                        && `시작 계기: ${turnWorkContext.start_reasons.map(startReasonLabel).join(' · ')}`}
+                      ${turnWorkContext.start_reasons.length > 0 && turnWorkContext.task_id && ' · '}
+                      ${turnWorkContext.task_id && `시작 시 Task: ${turnWorkContext.task_id}`}
+                    </div>
+                  `}
                   ${effectivePreview?.text_tail && html`
                     <div class="kp-live-turn-tail">… ${effectivePreview.text_tail}</div>
                   `}
@@ -2702,6 +2719,9 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                       <span class="kp-roster-name">${row.waiting_on}</span>
                     </div>
                     ${row.what && html`<div class="kp-waiting-what">${row.what}</div>`}
+                    ${row.detail_lines.map((line, lineIndex) => html`
+                      <div class="kp-block-status" key=${`detail:${lineIndex}`}>${line}</div>
+                    `)}
                     ${row.next_action && html`<div class="kp-block-status">다음 동작: ${row.next_action}</div>`}
                   </div>
                 `)}

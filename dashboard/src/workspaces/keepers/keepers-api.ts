@@ -58,6 +58,13 @@ import {
   formatNativeProgressLabel,
 } from './chat-blocks'
 import { decodeOpenActivities } from './turn-open-work'
+import {
+  decodeTurnPreparation,
+  decodeTurnWorkContext,
+  decodeWaitingSummary,
+  decodeWaitingUnavailable,
+  waitingRowDetailLines,
+} from './turn-context'
 import { KeeperChatStreamEventSchema } from '../../schemas/sse'
 import type { KeeperProviderRetry } from '../../lib/keeper-chat-stream-contract'
 import type {
@@ -104,6 +111,7 @@ import type {
   KeeperTurnBreakdown,
   KeeperTurnRecordsData,
   KeeperWaitingSummary,
+  KeeperWaitingUnavailable,
   MemoryActPayload,
   OrdinaryMemoryBranch,
   PortraitSlot,
@@ -235,47 +243,7 @@ interface TurnListItem {
   readonly status: 'ok' | 'unavailable'
   readonly chat_control_token: string | null
   readonly active: KeeperRosterItem['active_turn']
-  readonly waiting: KeeperWaitingSummary | null
-}
-
-function formatUnixOrIso(v: unknown): string | null {
-  const s = asStr(v)
-  if (s) return s
-  const n = asNum(v)
-  if (n === null) return null
-  const ms = n < 1_000_000_000_000 ? n * 1000 : n
-  const d = new Date(ms)
-  return Number.isNaN(d.getTime()) ? null : d.toISOString()
-}
-
-function decodeWaitingSummary(raw: unknown): KeeperWaitingSummary | null {
-  const rows = Array.isArray(raw)
-    ? raw
-    : isRecord(raw) && Array.isArray(raw.waiting_heads)
-      ? raw.waiting_heads
-      : isRecord(raw) && Array.isArray(raw.items)
-        ? raw.items
-        : isRecord(raw) && Array.isArray(raw.entries)
-          ? raw.entries
-          : null
-  const topCount = isRecord(raw) ? (asNum(raw.waiting_count) ?? asNum(raw.count) ?? asNum(raw.total)) : null
-  const topDueAt = isRecord(raw) ? formatUnixOrIso(raw.due_at) : null
-  if (rows && rows.length > 0) {
-    const first = isRecord(rows[0]) ? rows[0] : null
-    const primaryReason = first
-      ? (asStr(first.waiting_on) ?? asStr(first.what) ?? asStr(first.source) ?? asStr(first.reason))
-      : null
-    const dueAt = (first ? (formatUnixOrIso(first.due_at) ?? asStr(first.next_action)) : null) ?? topDueAt
-    return { count: topCount !== null && topCount > 0 ? topCount : rows.length, primary_reason: primaryReason, due_at: dueAt }
-  }
-  if (isRecord(raw) && topCount !== null && topCount > 0) {
-    return {
-      count: topCount,
-      primary_reason: asStr(raw.waiting_on) ?? asStr(raw.what) ?? asStr(raw.reason),
-      due_at: topDueAt,
-    }
-  }
-  return null
+  readonly waiting: KeeperWaitingSummary | KeeperWaitingUnavailable | null
 }
 
 function decodePathRest(raw: unknown): KeeperPathRest | null {
@@ -300,6 +268,8 @@ function decodeTurnPreview(raw: unknown): KeeperActiveTurnPreview | null {
     status_text: statusText,
     activity,
     open_activities: decodeOpenActivities(raw.open_activities),
+    preparation: decodeTurnPreparation(raw.preparation),
+    work_context: decodeTurnWorkContext(raw.work_context),
     text_tail: textTail,
     last_tool: lastTool,
     updated_at_unix: updatedAt,
@@ -314,6 +284,7 @@ function decodeTurnsList(raw: unknown): Map<string, TurnListItem> {
     : Array.isArray(raw)
       ? raw
       : []
+  const waitingUnavailable = isRecord(raw) ? decodeWaitingUnavailable(raw.waiting_errors) : null
   for (const row of list) {
     if (!isRecord(row)) continue
     const name = asStr(row.keeper_name) ?? asStr(row.name)
@@ -332,7 +303,7 @@ function decodeTurnsList(raw: unknown): Map<string, TurnListItem> {
           preview: decodedPreview,
         }
       : null
-    const waiting = decodeWaitingSummary(row.waiting ?? row.waiting_inventory)
+    const waiting = waitingUnavailable ?? decodeWaitingSummary(row.waiting)
     map.set(name, {
       keeper_name: name, status,
       chat_control_token: status === 'ok' ? asStr(row.chat_control_token) : null,
@@ -870,6 +841,7 @@ export function fetchKeeperWaitingInventoryApi(
             since: asNum(item.since),
             due_at: asNum(item.due_at),
             next_action: typeof item.next_action === 'string' ? item.next_action : '',
+            detail_lines: waitingRowDetailLines(item.detail),
           })
         }
         return {

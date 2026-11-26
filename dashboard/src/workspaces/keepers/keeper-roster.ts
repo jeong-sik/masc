@@ -3,6 +3,7 @@
  */
 
 import { html } from 'htm/preact'
+import { isWaitingUnavailable } from './turn-context'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { formatObserved, type Observed } from '../../core/resource-cache'
@@ -33,6 +34,13 @@ export interface KeeperRosterProps {
   readonly selectedKeeper: string | null
   readonly onSelectKeeper: (name: string) => void
   readonly onCreatedKeeper: (name: string) => void
+}
+
+function waitingSubLine(k: KeeperRosterItem): string {
+  if (isWaitingUnavailable(k.waiting_summary)) return `대기 목록 읽기 실패 · ${k.runtime_id}`
+  return k.waiting_summary && k.waiting_summary.count > 0
+    ? `대기 ${k.waiting_summary.count} · ${k.runtime_id}`
+    : k.runtime_id
 }
 
 function healthDotTone(k: KeeperRosterItem): 'ok' | 'warn' | 'bad' | 'brass' | 'idle' {
@@ -142,9 +150,7 @@ export function KeeperRoster(props: KeeperRosterProps) {
                     ? `⚠ ${k.runtime_blocker_summary ?? k.last_failure?.cause ?? k.directory_issue ?? k.health}`
                     : resting
                       ? `⏸ 휴식 · ${k.runtime_path_rest?.runtime_id ?? k.runtime_id}`
-                      : k.waiting_summary && k.waiting_summary.count > 0
-                        ? `대기 ${k.waiting_summary.count} · ${k.runtime_id}`
-                        : k.runtime_id
+                      : waitingSubLine(k)
                   const actionableDisposition =
                     k.operator_disposition && k.operator_disposition !== 'pass'
                       ? k.operator_disposition

@@ -29,6 +29,7 @@ import {
   type KeeperEntityTab,
 } from '../../routes/router'
 import type { KeeperRosterItem, KeeperToolApprovalModesData } from './types'
+import { isWaitingUnavailable } from './turn-context'
 
 export interface KeeperHeaderProps {
   readonly keeper: KeeperRosterItem
@@ -37,6 +38,12 @@ export interface KeeperHeaderProps {
   readonly onSelectTab: (tab: KeeperEntityTab) => void
   readonly onLifecycleMutated: () => void
   readonly onDeleted: () => void
+}
+
+/** A server due time as local time; the ISO text when it does not parse. */
+function formatDueAt(iso: string): string {
+  const date = new Date(iso)
+  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
 }
 
 const PURGE_ARTIFACTS: readonly string[] = [
@@ -134,6 +141,9 @@ export function KeeperHeader(props: KeeperHeaderProps) {
   const isPaused = keeper.paused || keeper.phase.trim().toLowerCase() === 'paused'
   const resting = isKeeperPathResting(keeper)
   const turnPreview = keeper.active_turn?.preview
+  const waitingUnavailable = isWaitingUnavailable(keeper.waiting_summary) ? keeper.waiting_summary : null
+  const waitingSummary = keeper.waiting_summary && !isWaitingUnavailable(keeper.waiting_summary)
+    ? keeper.waiting_summary : null
   const statusMentionsTool = (statusText: string, toolName: string): boolean => {
     const escaped = toolName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     return new RegExp(`(^|[^A-Za-z0-9_-])${escaped}($|[^A-Za-z0-9_-])`).test(statusText)
@@ -162,7 +172,8 @@ export function KeeperHeader(props: KeeperHeaderProps) {
     || actionableDisposition
     || approvalModeRestoreError
     || laneFailures.length > 0
-    || (keeper.waiting_summary && keeper.waiting_summary.count > 0)
+    || waitingUnavailable
+    || (waitingSummary && waitingSummary.count > 0)
     || (turnBreakdown && (turnBreakdown.failed > 0 || turnBreakdown.rested > 0)),
   )
 
@@ -246,13 +257,18 @@ export function KeeperHeader(props: KeeperHeaderProps) {
                   ● Turn (${keeper.active_turn.lane}${turnDetail ? ` · ${turnDetail}` : ''})
                 </span>
               `}
-              ${keeper.waiting_summary && keeper.waiting_summary.count > 0 && html`
+              ${waitingSummary && waitingSummary.count > 0 && html`
                 <span
                   class="kp-pill"
                   data-tone="warn"
-                  title=${keeper.waiting_summary.primary_reason ?? undefined}
+                  title=${waitingSummary.primary_reason ?? undefined}
                 >
-                  대기 ${keeper.waiting_summary.count}${keeper.waiting_summary.primary_reason ? ` · ${keeper.waiting_summary.primary_reason}` : ''}
+                  대기 ${waitingSummary.count}${waitingSummary.primary_reason ? ` · ${waitingSummary.primary_reason}` : ''}
+                </span>
+              `}
+              ${waitingUnavailable && html`
+                <span class="kp-pill" data-tone="bad" title=${waitingUnavailable.reason ?? undefined}>
+                  대기 목록 읽기 실패
                 </span>
               `}
               ${props.turnStatus === 'loading' && html`<span class="kp-pill">턴 상태 조회 중…</span>`}
@@ -354,11 +370,23 @@ export function KeeperHeader(props: KeeperHeaderProps) {
               ${keeper.next_action && (failing || resting || keeper.next_action !== 'direct_message') ? `${keeper.last_failure || actionableDisposition ? ' · ' : ''}다음 단계: ${keeper.next_action}` : ''}
             </div>
           `}
-          ${keeper.waiting_summary && keeper.waiting_summary.count > 0 && html`
+          ${waitingSummary && waitingSummary.count > 0 && html`
             <div class="kp-diag-row">
-              <strong>대기 항목</strong>: ${keeper.waiting_summary.count}건
-              ${keeper.waiting_summary.primary_reason ? ` · ${keeper.waiting_summary.primary_reason}` : ''}
-              ${keeper.waiting_summary.due_at ? ` (예정 ${keeper.waiting_summary.due_at})` : ''}
+              <strong>대기 항목</strong>: ${waitingSummary.count}건
+              ${waitingSummary.due_at ? ` (가장 이른 예정 ${formatDueAt(waitingSummary.due_at)})` : ''}
+              ${waitingSummary.heads.map((head) => html`
+                <div class="kp-diag-lane-meta" key=${`${head.source}:${head.next_action}`}>
+                  <span>${head.what}</span>
+                  <span>다음: ${head.next_action}</span>
+                  ${head.due_at ? html`<span>예정 ${formatDueAt(head.due_at)}</span>` : null}
+                </div>
+              `)}
+            </div>
+          `}
+          ${waitingUnavailable && html`
+            <div class="kp-diag-row">
+              <strong>대기 항목</strong>: 대기 목록을 읽지 못했어요. 대기가 없다는 뜻이 아니에요.
+              ${waitingUnavailable.reason ? ` · ${waitingUnavailable.reason}` : ''}
             </div>
           `}
           ${laneFailures.length > 0 && html`

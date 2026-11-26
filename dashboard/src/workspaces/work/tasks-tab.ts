@@ -29,6 +29,7 @@ import { currentRoute } from '../../routes/router'
 import { resourceCache, type FetchReason, type Observed } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
 import { InlineSpinner } from '../../components/common/inline-spinner'
+import { decodeVerificationCoverage, type VerificationCoverage } from '../../lib/verification-coverage'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { MasterDetail, VirtualList } from '../../components/primitives'
 import {
@@ -152,16 +153,30 @@ function sourceNotice(label: string, observation: Observed<unknown>, retained = 
   }
 }
 
-function decodeTaskVerifications(raw: unknown): VerificationRequestItem[] {
-  if (!isRecord(raw) || !Array.isArray(raw.requests)) return []
-  const items: VerificationRequestItem[] = []
+interface TaskVerificationReport {
+  readonly rows: readonly VerificationRequestItem[]
+  readonly coverage: VerificationCoverage
+  readonly malformedRows: number
+}
+
+type TaskVerificationRead = TaskReadOwner & (
+  | { readonly kind: 'loading'; readonly report: TaskVerificationReport | null }
+  | { readonly kind: 'ready'; readonly report: TaskVerificationReport }
+  | { readonly kind: 'failed'; readonly report: TaskVerificationReport | null; readonly message: string }
+)
+
+function decodeTaskVerifications(raw: unknown, expectedTaskId: string): TaskVerificationReport {
+  if (!isRecord(raw) || !Array.isArray(raw.requests)) {
+    throw new Error('응답에 검증 이력이 없습니다')
+  }
+  const rows: VerificationRequestItem[] = []
   for (const r of raw.requests) {
     if (!isRecord(r)) continue
     const requestId = asNonEmptyString(r.request_id)
     const taskId = asNonEmptyString(r.task_id)
-    if (!requestId || !taskId) continue
+    if (!requestId || taskId !== expectedTaskId) continue
     const obs = isRecord(r.review_observation) ? r.review_observation : null
-    items.push({
+    rows.push({
       requestId,
       taskId,
       taskTitle: asString(r.task_title, taskId),
@@ -173,7 +188,7 @@ function decodeTaskVerifications(raw: unknown): VerificationRequestItem[] {
       reviewDetail: obs ? asNonEmptyString(obs.detail) : null,
     })
   }
-  return items
+  return { rows, coverage: decodeVerificationCoverage(raw), malformedRows: raw.requests.length - rows.length }
 }
 
 function reviewStateTone(state: string | null): 'ok' | 'err' | 'warn' | 'info' | 'idle' {
@@ -323,9 +338,7 @@ export function TasksTab(props: WorkspaceViewProps) {
   }, [epoch])
 
   // Per-task verification history (surfaces verdicts even for unlinked/goalless tasks)
-  const [taskVerifications, setTaskVerifications] = useState<readonly VerificationRequestItem[]>([])
-  const [taskVerifError, setTaskVerifError] = useState<string | null>(null)
-  const [verificationOwner, setVerificationOwner] = useState<TaskReadOwner | null>(null)
+  const [taskVerificationRead, setTaskVerificationRead] = useState<TaskVerificationRead | null>(null)
   const [verifRefreshTick, setVerifRefreshTick] = useState(0)
 
   // Cursor-paginated Task History Timeline (`#36`) with AbortController race guard
@@ -494,8 +507,23 @@ export function TasksTab(props: WorkspaceViewProps) {
   const isSchedulesView = chip === 'schedules'
   const selectedTaskKey = selectedTask?.id ?? null
   const historyCurrent = historyOwner?.epoch === epoch && historyOwner.taskId === selectedTaskKey
-  const verificationCurrent = isSingleUser
-    && verificationOwner?.epoch === epoch && verificationOwner.taskId === selectedTaskKey
+  const visibleVerificationRead = taskVerificationRead?.taskId === selectedTaskKey
+    && taskVerificationRead.epoch === epoch ? taskVerificationRead : null
+  const visibleVerificationReport = visibleVerificationRead?.report ?? null
+  const taskVerifications = visibleVerificationReport?.rows ?? []
+  const verificationCoverageNotices: string[] = []
+  if (visibleVerificationReport) {
+    const { coverage, malformedRows } = visibleVerificationReport
+    if (coverage.unreadableTotal !== null && coverage.unreadableTotal > 0) {
+      verificationCoverageNotices.push(`전체 검증 저장소에서 ${coverage.unreadableTotal}건 읽기 불가`)
+    }
+    if (malformedRows > 0) verificationCoverageNotices.push(`응답에서 ${malformedRows}건 표시 불가`)
+    if (coverage.truncated) {
+      verificationCoverageNotices.push(coverage.total === null
+        ? '검증 이력 일부만 표시'
+        : `검증 이력 ${coverage.total}건 중 ${taskVerifications.length}건 표시`)
+    }
+  }
 
   useEffect(() => {
     setCancelReason('')
@@ -509,28 +537,24 @@ export function TasksTab(props: WorkspaceViewProps) {
   }, [isSchedulesView, selectedTaskKey, loadHistoryPage])
 
   useEffect(() => {
-    setTaskVerifications([])
-    setTaskVerifError(null)
-  }, [selectedTaskKey, isSchedulesView, isSingleUser, epoch])
-
-  useEffect(() => {
     if (isSchedulesView || !selectedTaskKey || !isSingleUser) return undefined
     const controller = new AbortController()
-    void apiGet<unknown>(
+    const scope = { taskId: selectedTaskKey, epoch }
+    const lastReport = (read: TaskVerificationRead | null) =>
+      read?.taskId === scope.taskId && read.epoch === scope.epoch ? read.report : null
+    setTaskVerificationRead((read) => ({ ...scope, kind: 'loading', report: lastReport(read) }))
+    void apiGet<TaskVerificationReport>(
       `/api/v1/verification/requests?view=all&task_id=${encodeURIComponent(selectedTaskKey)}&limit=10`,
-      { signal: controller.signal },
+      { signal: controller.signal, decode: (raw) => decodeTaskVerifications(raw, selectedTaskKey) },
     ).then((res) => {
       if (controller.signal.aborted || !isEpochCurrent(epoch)) return
-      setVerificationOwner({ epoch, taskId: selectedTaskKey })
       if (res.ok) {
-        setTaskVerifError(null)
-        setTaskVerifications(decodeTaskVerifications(res.value))
+        setTaskVerificationRead({ ...scope, kind: 'ready', report: res.value })
       } else if (
-        res.error.kind !== 'not_found'
-        && res.error.kind !== 'aborted'
+        res.error.kind !== 'aborted'
         && res.error.kind !== 'epoch_stale'
       ) {
-        setTaskVerifError(res.error.message)
+        setTaskVerificationRead((read) => ({ ...scope, kind: 'failed', report: lastReport(read), message: res.error.message }))
       }
     })
     return () => {
@@ -1138,10 +1162,20 @@ export function TasksTab(props: WorkspaceViewProps) {
                 `}
               </section>
 
-              ${verificationCurrent && (taskVerifications.length > 0 || taskVerifError) && html`
+              ${isSingleUser && html`
                 <section class="wk-section" aria-label="태스크 검증 판정">
-                  <h3 class="wk-section-title">Verification Verdicts (${taskVerifications.length})</h3>
-                  ${taskVerifError && html`<div class="wk-notice wk-notice--err" role="alert">검증 이력 조회 실패: ${taskVerifError}</div>`}
+                  <h3 class="wk-section-title">Verification Verdicts${visibleVerificationRead?.kind === 'ready' && verificationCoverageNotices.length === 0 && taskVerifications.length > 0 ? ` (${taskVerifications.length})` : ''}</h3>
+                  ${(!visibleVerificationRead || visibleVerificationRead.kind === 'loading') && html`
+                    <div class="wk-notice" role="status">검증 이력을 불러오는 중${visibleVerificationReport ? ' · 마지막 조회 표시' : ''}</div>
+                  `}
+                  ${visibleVerificationRead?.kind === 'failed' && html`
+                    <div class="wk-notice wk-notice--err" role="alert">검증 이력 조회 실패 · ${visibleVerificationRead.message}${visibleVerificationReport ? ' · 마지막 조회 표시' : ''}</div>
+                  `}
+                  ${verificationCoverageNotices.length > 0 && html`
+                    <div class="wk-notice" role="status">${verificationCoverageNotices.join(' · ')}</div>
+                  `}
+                  ${visibleVerificationRead?.kind === 'ready' && verificationCoverageNotices.length === 0
+                    && taskVerifications.length === 0 && html`<p class="wk-muted-sm">표시할 검증 이력이 없습니다.</p>`}
                   <div class="wk-stack-1">
                     ${taskVerifications.map((vr) => html`
                       <div key=${vr.requestId} class="wk-kv">

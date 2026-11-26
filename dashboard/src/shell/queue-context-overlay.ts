@@ -355,7 +355,11 @@ export function QueueContextOverlayBody(): VNode {
                   </button>
                 </header>
                 ${sourceStatus.verification.kind === 'failed' && html`
-                  <p class="ap-error" role="alert">검증 대기열 조회 실패: ${sourceStatus.verification.message}</p>
+                  <p class="ap-error" role="alert">검증 대기열 조회 실패 · ${sourceStatus.verification.message}</p>
+                  ${verifications.length > 0 && html`<p class="ap-muted">마지막으로 읽은 검증 대기열을 표시합니다.</p>`}
+                `}
+                ${(sourceStatus.verification.kind === 'partial' || sourceStatus.verification.kind === 'recovered') && html`
+                  <p class="ap-muted" role="status">${sourceStatus.verification.message}</p>
                 `}
                 ${sourceStatus.verification.kind === 'unbridged' && html`
                   <p class="ap-muted" role="note">멀티 계정 세션에서는 검증 대기열을 조회할 수 없어 미확인 상태입니다.</p>
@@ -373,7 +377,7 @@ export function QueueContextOverlayBody(): VNode {
                     `)}
                   </ul>
                   ${verifications.length > MAX_QPEEK_PREVIEW && html`
-                    <p class="ap-muted">상위 ${MAX_QPEEK_PREVIEW}건 표시 (전체 ${verifications.length}건)</p>
+                    <p class="ap-muted">조회한 ${verifications.length}건 중 ${MAX_QPEEK_PREVIEW}건 표시</p>
                   `}
                 `}
               </section>

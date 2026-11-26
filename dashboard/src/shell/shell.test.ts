@@ -711,7 +711,7 @@ describe('Proposal A+ Shell components', () => {
     vi.unstubAllGlobals()
   })
 
-  it('marks verification HITL source as partially failed on positive unreadable_total or awaiting_unresolved_total while retaining readable items', async () => {
+  it('shows verification queue coverage, recovery, and failure with the applicable rows', async () => {
     authSession.value = {
       kind: 'single_user_local',
       mode: 'single_user',
@@ -746,8 +746,8 @@ describe('Proposal A+ Shell components', () => {
     await refreshPendingHitl(verifFetch as unknown as typeof fetch)
     expect(pendingVerifications.value).toHaveLength(0)
     expect(effectiveHitlSourceStatus.value.verification).toMatchObject({
-      kind: 'failed',
-      message: expect.stringContaining('unreadable verification records: 2'),
+      kind: 'partial',
+      message: expect.stringContaining('읽기 불가 2건'),
     })
     expect(historicalIncidents.value.some((i) => i.source === 'verification' && i.detail?.includes('2'))).toBe(true)
 
@@ -757,9 +757,9 @@ describe('Proposal A+ Shell components', () => {
     await act(async () => {
       await new Promise((r) => setTimeout(r, 20))
     })
-    expect(container.textContent).toContain('검증 조회 실패')
-    expect(container.textContent).toContain('Awaiting Verifications (조회 실패)')
-    expect(container.textContent).toContain('unreadable verification records: 2')
+    expect(container.textContent).toContain('검증 일부만 확인')
+    expect(container.textContent).toContain('Awaiting Verifications (일부만 확인)')
+    expect(container.textContent).toContain('읽기 불가 2건')
 
     // 2. Readable awaiting item + awaiting_unresolved_total > 0 -> keep readable item while flagging partial failure
     verifPayload = {
@@ -773,12 +773,42 @@ describe('Proposal A+ Shell components', () => {
     })
     expect(pendingVerifications.value.map((v) => v.requestId)).toEqual(['vr-live'])
     expect(effectiveHitlSourceStatus.value.verification).toMatchObject({
-      kind: 'failed',
-      message: expect.stringContaining('unresolved awaiting verification ids: 1'),
+      kind: 'partial',
+      message: expect.stringContaining('대기 기록 누락 1건'),
     })
-    expect(container.textContent).toContain('Awaiting Verifications (1 · 조회 실패)')
+    expect(container.textContent).toContain('Awaiting Verifications (1 · 일부만 확인)')
     expect(container.textContent).toContain('Review patch')
-    expect(container.textContent).toContain('unresolved awaiting verification ids: 1')
+    expect(container.textContent).toContain('대기 기록 누락 1건')
+
+    verifPayload = { requests: [], backlog_error: 'backlog locked', unreadable_total: 4 }
+    await act(async () => {
+      await refreshPendingHitl(verifFetch as unknown as typeof fetch)
+    })
+    expect(effectiveHitlSourceStatus.value.verification).toMatchObject({ kind: 'failed' })
+    expect(container.textContent).toContain('backlog locked')
+    expect(container.textContent).toContain('읽기 불가 4건')
+    expect(container.textContent).toContain('마지막으로 읽은 검증 대기열을 표시합니다')
+    expect(container.textContent).toContain('Review patch')
+
+    verifPayload = { requests: [], backlog_recovery: 'last durable snapshot', unreadable_total: 0 }
+    await act(async () => {
+      await refreshPendingHitl(verifFetch as unknown as typeof fetch)
+    })
+    expect(effectiveHitlSourceStatus.value.verification).toMatchObject({ kind: 'recovered' })
+    expect(container.textContent).toContain('Awaiting Verifications (복구본 · 읽기 전용)')
+    expect(container.textContent).toContain('last durable snapshot')
+    expect(container.textContent).not.toContain('Review patch')
+
+    verifPayload = {
+      requests: Array.from({ length: 11 }, (_, i) => ({ request_id: `vr-${i}`, task_id: `task-${i}` })),
+      total: 21,
+      truncated: true,
+    }
+    await act(async () => {
+      await refreshPendingHitl(verifFetch as unknown as typeof fetch)
+    })
+    expect(container.textContent).toContain('일부 항목만 표시')
+    expect(container.textContent).toContain('조회한 11건 중 10건 표시')
 
     // 3. Zero unreadable & zero unresolved -> clears back to ok
     verifPayload = {

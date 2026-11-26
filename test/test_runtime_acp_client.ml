@@ -214,21 +214,24 @@ let test_stop_reason_mapping () =
 ;;
 
 let test_compaction_detection () =
-  check bool "any strict drop in append-only context detects compaction" true
-    (Keeper_acp_runtime.For_testing.compaction_detected
-       ~prev_used:(Some 10000) ~cur_used:(Some 9500));
-  check bool "large context drop detects compaction" true
-    (Keeper_acp_runtime.For_testing.compaction_detected
-       ~prev_used:(Some 60000) ~cur_used:(Some 15000));
-  check bool "equal context is not compaction" false
-    (Keeper_acp_runtime.For_testing.compaction_detected
-       ~prev_used:(Some 15000) ~cur_used:(Some 15000));
-  check bool "monotonic context growth is not compaction" false
-    (Keeper_acp_runtime.For_testing.compaction_detected
-       ~prev_used:(Some 15000) ~cur_used:(Some 22000));
-  check bool "missing baseline is not compaction" false
-    (Keeper_acp_runtime.For_testing.compaction_detected
-       ~prev_used:None ~cur_used:(Some 15000))
+  let fell = Runtime_acp_client.For_testing.occupancy_fell in
+  check bool "a count below the session's last count is compaction" true
+    (fell ~prior_context_used:(Some 10000) [ 9500 ]);
+  check bool "an equal count is not compaction" false
+    (fell ~prior_context_used:(Some 15000) [ 15000 ]);
+  check bool "growth is not compaction" false
+    (fell ~prior_context_used:(Some 15000) [ 18000; 22000 ]);
+  check bool "no count before the prompt and growth is not compaction" false
+    (fell ~prior_context_used:None [ 15000; 16000 ]);
+  check bool "a prompt with no count is not compaction" false
+    (fell ~prior_context_used:(Some 15000) []);
+  check bool "a drop inside the prompt is compaction though the prompt ends higher" true
+    (fell ~prior_context_used:(Some 300000) [ 320000; 380000; 40000; 330000 ]);
+  check bool "a first count below the last one is compaction though the prompt ends higher"
+    true
+    (fell ~prior_context_used:(Some 300000) [ 40000; 330000 ]);
+  check bool "a drop inside a prompt with no count before it is compaction" true
+    (fell ~prior_context_used:None [ 200000; 30000 ])
 ;;
 
 let test_toml_materialization_all_three_drivers () =

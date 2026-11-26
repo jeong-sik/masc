@@ -116,8 +116,6 @@ module For_testing : sig
     :  Runtime_acp_client.stop_reason
     -> Agent_core.Types.stop_reason
 
-  val compaction_detected : prev_used:int option -> cur_used:int option -> bool
-
   val effective_context_limit_tokens
     :  context_size:int option
     -> input_limit:Llm_provider.Input_budget.t

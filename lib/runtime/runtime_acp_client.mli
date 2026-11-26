@@ -542,6 +542,14 @@ type prompt_result =
   ; thought : string
   ; usage : usage
   ; usage_source : usage_source
+  ; context_compacted : bool
+    (** The host shrank the session during the prompt, so the session no
+        longer holds what was sent before as it was sent. A Muse prompt says
+        so in its journal: a [context_compaction_installed] record of its
+        runs, or a last request that left less than [prior_context_used].
+        Over ACP, a counted [usage_update.used] lower than the one before it,
+        the first compared with [prior_context_used]. [false] when the
+        prompt's counts could not be read. *)
   ; tool_calls_observed : int
   ; wall_duration_s : float
   }
@@ -748,6 +756,7 @@ val prompt
   -> ?timeout_s:float option
   -> ?permission_policy:permission_policy
   -> ?on_event:(stream_event -> unit)
+  -> ?prior_context_used:int
   -> unit
   -> (prompt_result, error) result
 (** Execute one [session/prompt] turn on an existing ACP session, streaming
@@ -756,7 +765,9 @@ val prompt
     [timeout_s] bounds inactivity (time with no session-matched ACP frames and
     no in-flight {!with_external_activity} work) rather than cutting off
     actively progressing multi-tool turns. Cancelling the calling fiber or
-    hitting the idle deadline sends [session/cancel]. *)
+    hitting the idle deadline sends [session/cancel]. [prior_context_used] is
+    the session's last counted occupancy before this prompt; it decides
+    [context_compacted] for the prompt's first count. *)
 
 val cancel : t -> session_id:string -> unit
 (** Send a best-effort [session/cancel] notification for [session_id]. *)
@@ -767,6 +778,8 @@ val close : t -> unit
 (** {1 Pure helpers exposed for testing} *)
 
 module For_testing : sig
+  val occupancy_fell : prior_context_used:int option -> int list -> bool
+
   val build_environment
     :  base_env:string array
     -> driver:driver

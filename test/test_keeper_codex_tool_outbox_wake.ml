@@ -135,6 +135,33 @@ let test_failed_turn_can_be_notified_again () =
     pulse config;
     check int "receipt ACK ends automatic recovery" 0 (List.length (pending config)))
 
+(* Turn entry reads the outbox once for all its rows. A reader shared across
+   rows keeps the receipts it read; a new reader sees the acknowledgement. *)
+let test_turn_entry_reads_the_outbox_once () =
+  with_workspace (fun config _ _ ->
+    retain config (receipt "turn-1");
+    notify config;
+    let selection = only_selection config in
+    let reconcile reader =
+      get (Keeper_heartbeat_stimulus_intake.reconcile_spent_selection_with
+             ~tool_result_outbox:reader ~config ~keeper_name selection) in
+    let shared = Keeper_heartbeat_stimulus_intake.tool_result_outbox_reader ~config ~keeper_name in
+    (match reconcile shared with
+     | Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
+     | Tool_result_hint_retired | Spent_grant_replay_acknowledged | Absent_grant_retired _ ->
+       fail "a pending receipt keeps its row");
+    get (Keeper_client_tool_outbox.acknowledge (snapshot config));
+    (match reconcile shared with
+     | Keeper_heartbeat_stimulus_intake.Selection_actionable -> ()
+     | Tool_result_hint_retired | Spent_grant_replay_acknowledged | Absent_grant_retired _ ->
+       fail "the shared reader keeps the outbox it read first");
+    check int "the shared reader retired nothing" 1 (List.length (pending config));
+    (match reconcile (Keeper_heartbeat_stimulus_intake.tool_result_outbox_reader ~config ~keeper_name) with
+     | Keeper_heartbeat_stimulus_intake.Tool_result_hint_retired -> ()
+     | Selection_actionable | Spent_grant_replay_acknowledged | Absent_grant_retired _ ->
+       fail "a new reader sees the acknowledged receipt and retires the row");
+    check int "the row is retired" 0 (List.length (pending config)))
+
 let test_paused_owner_keeps_its_result () =
   with_workspace (fun config meta _ ->
     let paused = {meta with Keeper_meta_contract.paused=true} in
@@ -443,6 +470,7 @@ let () =
         test_receipt_carrier_has_independent_held_identity;
       test_case "restart discovery is durable and deduplicated" `Quick test_restart_discovers_and_deduplicates;
       test_case "provider failure retries result delivery until exact ACK" `Quick test_failed_turn_can_be_notified_again;
+      test_case "turn entry reads the outbox once for all rows" `Quick test_turn_entry_reads_the_outbox_once;
       test_case "paused owner is preserved" `Quick test_paused_owner_keeps_its_result;
       test_case "unreadable result remains pending until owner repair" `Quick test_unreadable_result_is_not_consumed;
       test_case "a shutdown hold waits and the first pass after its release notifies" `Quick

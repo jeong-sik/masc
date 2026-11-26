@@ -400,7 +400,10 @@ let resolve_composer_popup (m : Model.t) : composer_popup =
              spell an unlisted command that the whole draft does. *)
           let specs =
             if Slash.names_unlisted_command left_trimmed then []
-            else Slash.filter ~query ~lang:m.lang
+            else
+              Slash.filter ~query ~lang:m.lang
+              |> List.filter (fun (s : Slash.spec) ->
+                     Rbac_policy.can_run_slash_command_id m.auth_session s.id)
           in
           let items =
             List.map
@@ -1359,7 +1362,15 @@ let refresh_queue_on_entry (m : Model.t) =
     | None -> m
   else m
 
+let rbac_denied_nav (m : Model.t) reason =
+  ( Model.with_toast ~now:m.freshness.last_mono ~level:Model.Toast_warning
+      (Rbac.deny_reason_say reason) m
+  , [] )
+
 let open_overlay (m : Model.t) overlay =
+  match Rbac_policy.decide_overlay m.auth_session overlay with
+  | Rbac.Denied reason -> rbac_denied_nav m reason
+  | Rbac.Allowed ->
   let help_scroll_offset =
     match overlay with
     | Nav.Help -> 0
@@ -1502,6 +1513,9 @@ let open_overlay (m : Model.t) overlay =
   (next, View_fetches.fetches_for_current_view next)
 
 let open_global_settings ?search_query (m : Model.t) =
+  match Rbac_policy.decide_overlay m.auth_session (Nav.Settings Nav.Settings_general_ui) with
+  | Rbac.Denied reason -> rbac_denied_nav m reason
+  | Rbac.Allowed ->
   let config =
     m.config
     |> Config_store.set_target Wire_config.Target_runtime
@@ -1521,6 +1535,9 @@ let select_settings_tab (m : Model.t) tab =
   (next, View_fetches.fetches_for_current_view next)
 
 let open_inspector (m : Model.t) (insp : Nav.inspector) =
+  match Rbac_policy.decide_inspector m.auth_session insp with
+  | Rbac.Denied reason -> rbac_denied_nav m reason
+  | Rbac.Allowed ->
   let return_overlay =
     match m.nav.overlay with
     | Some ((Nav.Incidents | Nav.Queue_context _ | Nav.Ask_answer) as ov) ->
@@ -1790,6 +1807,9 @@ let discord_reply_fields attempt (modal : Model.inline_modal_state) =
         List.map (fun (f : Model.modal_form_field) -> { f with value }) modal.fields
 
 let open_inline_modal (m : Model.t) kind =
+  match Rbac_policy.decide_inline_action m.auth_session kind with
+  | Rbac.Denied reason -> rbac_denied_nav m reason
+  | Rbac.Allowed ->
   let modal = Model.inline_modal_for kind in
   let modal =
     match kind with
@@ -1877,6 +1897,9 @@ let open_inline_modal (m : Model.t) kind =
 
 let open_ask_modal ?preselect_choice_1based (m : Model.t)
     (ask : Wire_work.ask_row) =
+  match Rbac_policy.decide_overlay m.auth_session Nav.Ask_answer with
+  | Rbac.Denied reason -> rbac_denied_nav m reason
+  | Rbac.Allowed ->
   let modal = Model.ask_modal_for ?preselect_choice_1based ask in
   let nav =
     {
@@ -2240,7 +2263,11 @@ let set_active_filter_query q (m : Model.t) =
 
 let palette_filtered_commands (m : Model.t) =
   let q = String.trim m.palette.query in
-  let all = Keymap.palette_commands ~lang:m.lang in
+  let all =
+    Keymap.palette_commands ~lang:m.lang
+    |> List.filter (fun (c : Keymap.palette_command) ->
+           Rbac_policy.can_run_keymap_action m.auth_session c.action)
+  in
   if String.equal q "" then all
   else
     List.filter
@@ -2290,6 +2317,8 @@ let palette_entries_with_overflow (m : Model.t) :
     shown
   in
   let keeper_lifecycle_entries =
+    if not (Rbac.can_single_user_token_admin m.auth_session) then []
+    else
     match Model.target_keeper_for_lifecycle m with
     | None -> []
     | Some name ->
@@ -2368,6 +2397,8 @@ let palette_entries_with_overflow (m : Model.t) :
   in
   let ws_entries =
     Nav.all_menu_items
+    |> List.filter (fun (it : Nav.menu_item) ->
+           Rbac_policy.can_access_menu_target m.auth_session it.target)
     |> List.filter_map (fun (it : Nav.menu_item) ->
            let lbl = Say.resolve lang it.label in
            let sec_lbl = Say.resolve lang (Nav.menu_section_label it.section) in
@@ -2429,6 +2460,8 @@ let palette_entries_with_overflow (m : Model.t) :
     |> cap_section Pal_sec_workspaces (if String.equal q "" then 6 else 12)
   in
   let keeper_entries =
+    if not (Rbac.is_allowed m.auth_session Rbac.Single_user_read) then []
+    else
     Fleet_store.filtered_keepers { m.fleet with filter_query = "" }
     |> List.filter_map (fun (k : Wire_fleet.keeper_summary) ->
            match fuzzy_opt (k.name ^ " " ^ k.company) with
@@ -2447,6 +2480,8 @@ let palette_entries_with_overflow (m : Model.t) :
     |> cap_section Pal_sec_keepers (if String.equal q "" then 3 else 6)
   in
   let company_entries =
+    if not (Rbac.is_allowed m.auth_session Rbac.Single_user_read) then []
+    else
     Fleet_store.company_groups m.fleet
     |> List.filter_map (fun (g : Wire_fleet.company_group) ->
            match fuzzy_opt g.company with
@@ -2464,6 +2499,8 @@ let palette_entries_with_overflow (m : Model.t) :
     |> cap_section Pal_sec_companies (if String.equal q "" then 2 else 5)
   in
   let goal_entries =
+    if not (Rbac.is_allowed m.auth_session Rbac.Workspace_read) then []
+    else
     Work_store.goals m.work
     |> List.filter_map (fun (g : Wire_work.goal) ->
            match fuzzy_opt (g.id ^ " " ^ g.title) with
@@ -2480,6 +2517,8 @@ let palette_entries_with_overflow (m : Model.t) :
                  })
   in
   let task_entries =
+    if not (Rbac.is_allowed m.auth_session Rbac.Workspace_read) then []
+    else
     Work_store.tasks m.work
     |> List.filter_map (fun (t : Wire_work.task) ->
            match fuzzy_opt (t.id ^ " " ^ t.title) with
@@ -2501,6 +2540,8 @@ let palette_entries_with_overflow (m : Model.t) :
       (goal_entries @ task_entries)
   in
   let board_entries =
+    if not (Rbac.is_allowed m.auth_session Rbac.Single_user_read) then []
+    else
     Knowledge_store.filtered_posts { m.knowledge with filter_query = "" }
     |> List.filter_map (fun (p : Wire_knowledge.board_post) ->
            match fuzzy_opt (p.title ^ " " ^ p.author) with
@@ -2517,6 +2558,8 @@ let palette_entries_with_overflow (m : Model.t) :
                  })
   in
   let wiki_entries =
+    if not (Rbac.is_allowed m.auth_session Rbac.Workspace_read) then []
+    else
     match Observed.to_option m.knowledge.wiki_index with
     | None -> []
     | Some wi ->
@@ -2541,6 +2584,8 @@ let palette_entries_with_overflow (m : Model.t) :
       (board_entries @ wiki_entries)
   in
   let sandbox_entries =
+    if not (Rbac.can_admin m.auth_session) then []
+    else
     let items =
       match Observed.to_option m.infra.sandboxes with
       | None -> []
@@ -2584,6 +2629,8 @@ let palette_entries_with_overflow (m : Model.t) :
     cap_section Pal_sec_sandboxes (if String.equal q "" then 2 else 4) items
   in
   let settings_entries =
+    if not (Rbac.can_admin m.auth_session) then []
+    else
     let items =
       match Observed.to_option m.config.schema with
       | None -> []
@@ -2613,6 +2660,8 @@ let palette_entries_with_overflow (m : Model.t) :
   in
   let slash_entries =
     Slash.filter ~query:q ~lang
+    |> List.filter (fun (s : Slash.spec) ->
+           Rbac_policy.can_run_slash_command_id m.auth_session s.id)
     |> List.map (fun (s : Slash.spec) ->
            {
              section = Pal_sec_slash;
@@ -2813,6 +2862,10 @@ let active_attention_query (m : Model.t) =
 
 let submit_ask_choice ~now (ask : Wire_work.ask_row) ~choice_1based (m : Model.t)
     =
+  match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+  | Rbac.Denied reason ->
+      (Model.with_toast ~now ~level:Model.Toast_warning (Rbac.deny_reason_say reason) m, [])
+  | Rbac.Allowed ->
   match ask.questions with
   | [] ->
       ( Model.with_toast ~now ~level:Model.Toast_warning
@@ -3014,6 +3067,10 @@ let actionable_approval_item (m : Model.t) =
   else Model.fast_approval_strip_item m
 
 let fast_approve_top ~now (m : Model.t) =
+  match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+  | Rbac.Denied reason ->
+      (Model.with_toast ~now ~level:Model.Toast_warning (Rbac.deny_reason_say reason) m, [])
+  | Rbac.Allowed ->
   match actionable_approval_item m with
   | None -> (m, [])
   | Some entry -> (
@@ -3069,6 +3126,10 @@ let fast_approve_top ~now (m : Model.t) =
           , cmds ))
 
 let fast_deny_top ~now (m : Model.t) =
+  match Rbac.decide m.auth_session Rbac.Single_user_token_admin_only with
+  | Rbac.Denied reason ->
+      (Model.with_toast ~now ~level:Model.Toast_warning (Rbac.deny_reason_say reason) m, [])
+  | Rbac.Allowed ->
   match actionable_approval_item m with
   | None -> (m, [])
   | Some entry -> (
@@ -3189,14 +3250,18 @@ let teleport_blocked ~now (m : Model.t) =
 
 let toggle_voice ~now (m : Model.t) =
   match m.drafts.voice with
-  | Drafts.Voice_off | Drafts.Voice_error _ ->
-      let device =
-        match Observed.to_option m.config.preferences with
-        | Some p -> p.audio_input_device
-        | None -> None
-      in
-      let drafts = Drafts.voice_start_recording ~now m.drafts in
-      ({ m with drafts }, [ Cmd.Voice_cmd (Cmd.Start_ptt { device }) ])
+  | Drafts.Voice_off | Drafts.Voice_error _ -> (
+      match Rbac.decide m.auth_session Rbac.Single_user_write with
+      | Rbac.Denied reason ->
+          (Model.with_toast ~now ~level:Model.Toast_warning (Rbac.deny_reason_say reason) m, [])
+      | Rbac.Allowed ->
+          let device =
+            match Observed.to_option m.config.preferences with
+            | Some p -> p.audio_input_device
+            | None -> None
+          in
+          let drafts = Drafts.voice_start_recording ~now m.drafts in
+          ({ m with drafts }, [ Cmd.Voice_cmd (Cmd.Start_ptt { device }) ]))
   | Drafts.Voice_recording _ ->
       let drafts = Drafts.voice_set_transcribing m.drafts in
       ({ m with drafts }, [ Cmd.Voice_cmd Cmd.Stop_ptt ])
@@ -4796,6 +4861,13 @@ let submit_inline_modal ~now (m : Model.t) =
   | None -> (m, [])
   | Some modal when modal.submitting || Option.is_some modal.note_prefill_id -> (m, [])
   | Some modal -> (
+      match Rbac_policy.decide_inline_action m.auth_session modal.kind with
+      | Rbac.Denied reason ->
+          let nav = { m.nav with overlay = None; return_overlay = None } in
+          ( Model.with_toast ~now ~level:Model.Toast_warning
+              (Rbac.deny_reason_say reason) { m with nav; inline_modal = None }
+          , [] )
+      | Rbac.Allowed ->
       let missing_required =
         List.find_opt
           (fun (f : Model.modal_form_field) ->
@@ -11500,6 +11572,10 @@ let reject_verification_request ~now (m : Model.t)
   | Ok () -> open_inline_modal m (Nav.Verification_reject v.request_id)
 
 let request_goal_complete_guarded ~now (m : Model.t) (g : Wire_work.goal) =
+  match Rbac.decide m.auth_session Rbac.Single_user_write with
+  | Rbac.Denied reason ->
+      (Model.with_toast ~now ~level:Model.Toast_warning (Rbac.deny_reason_say reason) m, [])
+  | Rbac.Allowed ->
   match g.phase with
   | Wire_work.Executing -> (
       match expected_workspace_of m with

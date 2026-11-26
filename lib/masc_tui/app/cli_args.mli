@@ -32,6 +32,7 @@ type config = {
   theme_explicit : bool;
   lang_explicit : bool;
   auto_start : bool;
+  token : string option;
 }
 
 type info_action =

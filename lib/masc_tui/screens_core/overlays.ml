@@ -2014,11 +2014,17 @@ let format_build_summary (model : Model.t) =
       Some (Printf.sprintf "TUI %s%sServer %s%s" tui_lbl sep srv mark)
 
 let render_settings grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
-    ~(model : Model.t) ~active_tab:_ =
+    ~(model : Model.t) ~active_tab =
   (* Full overlay rect so underlying workspace chrome never bleeds at col 0 / right wall *)
   let modal_r = rect in
   if Rect.is_empty modal_r then ()
   else
+    match Rbac_policy.decide_overlay model.auth_session (Nav.Settings active_tab) with
+    | Rbac.Denied reason ->
+        Render_util.draw_locked_panel grid ~cache ~rect:modal_r ~theme ~model
+          ~title:(Say.make ~ko:"설정 · Configuration" ~en:"Settings · Configuration")
+          ~reason
+    | Rbac.Allowed ->
     let lang = model.lang in
     let dirty_n = Config_store.dirty_count model.config in
     let tui_lbl = Model.tui_build_label model in
@@ -4976,6 +4982,15 @@ let render_help_overlay grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       let scroll = model.nav.help_scroll_offset in
       let groups =
         Keymap.compact_help_entries ~scope_chain:Keymap.all_scopes ~lang
+        |> List.filter_map (fun (g : Keymap.help_group) ->
+               let entries =
+                 List.filter
+                   (fun (e : Keymap.help_entry) ->
+                     Rbac_policy.can_run_keymap_action model.auth_session
+                       e.action)
+                   g.entries
+               in
+               if entries = [] then None else Some { g with entries })
       in
       let is_left_cat = function
         | Keymap.Cat_navigation | Keymap.Cat_actions -> true
@@ -5184,7 +5199,10 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         end
     | Nav.Auth_gate ->
         let title =
-          Say.resolve lang (Say.make ~ko:"인증 필요" ~en:"Authentication Required")
+          Say.resolve lang (Rbac.auth_gate_title model.auth_session)
+        in
+        let badge_text =
+          Say.resolve lang (Rbac.session_badge ~compact:true model.auth_session)
         in
         let inner =
           Card.draw ~cache grid ~rect:modal_r ~theme
@@ -5193,32 +5211,43 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               badge =
                 Some
                   {
-                    glyph = Some Glyph.Action_required;
-                    text = "AUTH";
+                    glyph = Some Glyph.Locked;
+                    text = badge_text;
                     tone = Some Theme.Status_attention;
                   };
               focused = true;
               elevated = true;
             }
         in
+        let mode_str =
+          match Rbac.account_mode_of_session model.auth_session with
+          | Some Rbac.Single_user ->
+              Say.resolve lang (Say.make ~ko:"단일 사용자" ~en:"single-user")
+          | Some Rbac.Multi_account ->
+              Say.resolve lang (Say.make ~ko:"다중 계정" ~en:"multi-account")
+          | None ->
+              Say.resolve lang (Say.make ~ko:"확인 중" ~en:"probing")
+        in
         let scope_info =
           match model.server_identity.health with
           | Some { scope = Wire_common.Public_health; version; _ } ->
-              Printf.sprintf "Server %s (public health scope)" version
+              Printf.sprintf "Server %s (%s)" version mode_str
           | Some { scope = Wire_common.Full_health ws; version; _ } ->
-              Printf.sprintf "Server %s · %s" version ws.base_path
+              Printf.sprintf "Server %s (%s) · %s" version mode_str ws.base_path
           | None ->
-              Say.resolve lang
-                (Say.make ~ko:"서버 인증 자격 증명이 필요합니다."
-                   ~en:"Server requires valid operator credentials.")
+              Printf.sprintf "Mode: %s" mode_str
+        in
+        let detail_line =
+          Say.resolve lang (Rbac.auth_gate_detail model.auth_session)
+        in
+        let remediation_line =
+          Say.resolve lang (Rbac.auth_gate_remediation model.auth_session)
         in
         draw_lines inner ~rail_tone:(Some Theme.Status_attention)
           [
             (anchor_st, scope_info);
-            ( whisper_st,
-              Say.resolve lang
-                (Say.make ~ko:"브라우저 OAuth 또는 PAT 설정 후 재시도하세요."
-                   ~en:"Complete OAuth login or configure PAT, then retry.") );
+            (crit_st, Glyph.to_utf8 Glyph.Locked ^ " " ^ detail_line);
+            (whisper_st, remediation_line);
             (whisper_st, "");
             ( acc_st,
               Say.resolve lang

@@ -16,6 +16,7 @@ type config = {
   theme_explicit : bool;
   lang_explicit : bool;
   auto_start : bool;
+  token : string option;
 }
 
 type info_action =
@@ -60,6 +61,7 @@ let help_text =
       "  --themes-dir <path>           Directory of <preset>.toml palette files";
       "                                (default: <base-path>/.masc/config/themes)";
       "  --lang <ko|en>                UI language (default: ko)";
+      "  --token <token>               Bearer token or PAT (overrides MASC_TOKEN and admin.token)";
       "  --no-auto-start               Do not auto-start a local masc server when offline";
       "  --version                     Print build version (and short commit SHA) and exit";
       "  --build-commit                Print embedded Git commit SHA and exit";
@@ -201,6 +203,7 @@ type draft = {
   themes_dir : string option;
   lang : Say.lang option;
   auto_start : bool;
+  token : string option;
 }
 
 let empty_draft =
@@ -215,6 +218,7 @@ let empty_draft =
     themes_dir = None;
     lang = None;
     auto_start = true;
+    token = None;
   }
 
 let take_value flag inline_opt rest =
@@ -339,6 +343,14 @@ let parse ?(version = Build_version.current)
                       (`Err
                         (Printf.sprintf "invalid --lang %S: expected ko or en"
                            raw))))
+        | "--token" -> (
+            match take_value flag inline_opt rest with
+            | Error msg -> Error (`Err msg)
+            | Ok (raw, tail) ->
+                let trimmed = String.trim raw in
+                if String.equal trimmed "" || has_whitespace_or_ctl trimmed then
+                  Error (`Err "--token must be a nonblank token without spaces or control characters")
+                else loop { acc with token = Some trimmed } tail)
         | "--reasoning" ->
             Error
               (`Err
@@ -418,6 +430,7 @@ let parse ?(version = Build_version.current)
               theme_explicit = Option.is_some d.theme;
               lang_explicit = Option.is_some d.lang;
               auto_start = d.auto_start;
+              token = d.token;
             })
 
 type tty_check =

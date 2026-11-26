@@ -12,6 +12,13 @@ let render ~(peek : Nav.file_peek) ~(model : Model.t) ~cache ~(rect : Rect.t) gr
     let lang = model.lang in
     let bp = H.layout_bp ~model ~rect in
     let body = H.body_rect ~bp rect in
+    match
+      Rbac_policy.decide_inspector model.auth_session (Nav.File_inspector peek)
+    with
+    | Rbac.Denied reason ->
+        Masc_tui_screens_core.Render_util.draw_locked_panel grid ~cache
+          ~rect:body ~theme ~model ~title:(Say.literal peek.path) ~reason
+    | Rbac.Allowed ->
     let focused = Model.pane_focused model 0 in
     let inner =
       Card.draw ~cache grid ~rect:body ~theme

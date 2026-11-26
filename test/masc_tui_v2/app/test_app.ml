@@ -667,6 +667,33 @@ let test_cmd_executor_auth_and_headers () =
       Alcotest.(check (option string)) "MASC_TOKEN overrides file"
         (Some "env-override-tok")
         (Cmd_executor.load_bearer_token ~getenv:env_override ~base_path:tmp ());
+      (match
+         Cli_args.parse ~env:empty_env [ "--token"; "masc_pat_abc123" ]
+       with
+      | Cli_args.Run cfg ->
+          Alcotest.(check (option string)) "--token parsed into config"
+            (Some "masc_pat_abc123") cfg.token;
+          let ep_tok = Cmd_executor.endpoint_of_cli cfg in
+          let hdrs_tok = Http_client.build_headers ep_tok in
+          Alcotest.(check (option string)) "--token injects Bearer header"
+            (Some "Bearer masc_pat_abc123")
+            (List.assoc_opt "Authorization" hdrs_tok)
+      | Cli_args.Info _ ->
+          Alcotest.fail "expected Run for --token"
+      | Cli_args.Parse_error msg ->
+          Alcotest.fail ("unexpected --token error: " ^ msg));
+      (match
+         Cli_args.parse ~env:empty_env [ "--token"; "bad token with space" ]
+       with
+      | Cli_args.Parse_error _ -> ()
+      | Cli_args.Run _ | Cli_args.Info _ ->
+          Alcotest.fail "expected --token with whitespace to be rejected");
+      (match
+         Cli_args.parse ~env:empty_env [ "--token"; "   " ]
+       with
+      | Cli_args.Parse_error _ -> ()
+      | Cli_args.Run _ | Cli_args.Info _ ->
+          Alcotest.fail "expected blank --token to be rejected");
 
       let cli : Cli_args.config =
         {
@@ -681,6 +708,7 @@ let test_cmd_executor_auth_and_headers () =
           theme_explicit = false;
           lang_explicit = false;
           auto_start = false;
+          token = None;
         }
       in
       let ep =
@@ -786,6 +814,7 @@ let test_cmd_executor_dispatch_and_cancellation () =
       theme_explicit = false;
       lang_explicit = false;
       auto_start = false;
+      token = None;
     }
   in
   (* Run executor inside a nested switch to verify clean cancellation teardown. *)
@@ -1028,7 +1057,7 @@ let test_remote_editor_escape_hatch_blocked () =
             (contains_substring ~needle:"/api/v1/config/patch" detail);
           Alcotest.(check bool) "toast label mentions /api/v1/config/patch" true
             (contains_substring ~needle:"/api/v1/config/patch" en_label);
-          let m0 = Model.initial ~lang:Say.Lang_en () in
+          let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~lang:Say.Lang_en () in
           let m1, _ = Update.step ~now:Clock.Mono.zero m0 msg in
           match m1.toast with
           | Some toast ->
@@ -1041,7 +1070,7 @@ let test_remote_editor_escape_hatch_blocked () =
 
   (* 3. Settings Target_keeper_create + Open_external refuses cleanly with a
      toast instead of falling back to Edit_runtime_toml. *)
-  let m0 = Model.initial ~lang:Say.Lang_en () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~lang:Say.Lang_en () in
   let m_settings =
     {
       m0 with
@@ -1155,7 +1184,7 @@ let test_artifact_list_respects_invalidation_during_read () =
         Some (row.revision, stale)
     | _ -> None
   in
-  let initial = Model.initial () in
+  let initial = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let initial = { initial with
     knowledge = Knowledge_store.set_tab Nav.Knowledge_artifacts initial.knowledge } in
   let visible, cmd = switch initial Nav.Knowledge in
@@ -1261,7 +1290,7 @@ let test_planning_retains_completed_tasks_across_refresh () =
     else Alcotest.failf "unexpected read %s" path
   in
   with_loopback_executor ~respond @@ fun clock bus exec ->
-  let model = ref (Model.initial ()) in
+  let model = ref (Model.initial ~auth_session:Rbac.single_user_local_admin ()) in
   let terminal_reads = ref 0 in
   let get () =
     Cmd_executor.execute exec (Cmd.Http_get { epoch = Epoch.initial; req = Cmd.Get_planning })
@@ -1342,7 +1371,7 @@ let settle_sandbox_after_late_reply ~req ~current_response (model : Model.t) =
     { model with epoch = current } (Ui_bus.drain bus)
 
 let test_keeper_sandbox_current_epoch_survives_late_reply () =
-  let keeper = "alpha" and model = Model.initial () in
+  let keeper = "alpha" and model = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let pending = { model with infra = Infra_store.request_keeper_sandbox ~now:Clock.Mono.zero ~keeper model.infra } in
   let body = `Assoc ["keeper", `String keeper;
                      "sandbox", `Assoc ["keeper", `String keeper; "backend", `String "ssh";
@@ -1355,7 +1384,7 @@ let test_keeper_sandbox_current_epoch_survives_late_reply () =
          String.equal detail.keeper keeper) (Observed.to_option read.observation))
 
 let test_fleet_sandbox_current_denial_survives_late_reply () =
-  let model = Model.initial () in
+  let model = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let now = Clock.Mono.zero in
   let infra = Infra_store.apply_sandboxes_fallback ~observed_at:now ~wall_unix:0.
       ~keepers:[] ~sandbox_profiles:["previous", Masc_tui_protocol.Wire_fleet.Profile_docker]
@@ -1553,7 +1582,7 @@ let test_queue_drawer_walks_all_http_pages () =
       | Some body -> 200, body
       | None -> Alcotest.failf "unexpected queue path %s" path in
   with_loopback_executor ~respond @@ fun clock bus exec ->
-  let model = ref (Model.initial ()) in
+  let model = ref (Model.initial ~auth_session:Rbac.single_user_local_admin ()) in
   let dispatch keeper action =
     let m = { !model with drafts = Drafts.set_active_keeper keeper !model.drafts } in
     let next, cmds = Update.execute_action ~now:(Clock.Mono.now ()) m action in
@@ -1684,7 +1713,7 @@ let test_bus_key_hash_and_stream_frames () =
         when Epoch.equal epoch current -> Some msg
       | _ -> None) (Ui_bus.drain bus)
   in
-  let model = { (Model.initial ()) with epoch = current } in
+  let model = { (Model.initial ~auth_session:Rbac.single_user_local_admin ()) with epoch = current } in
   let receive = Update.step ~now:Clock.Mono.zero model in
   (match receipt with
   | None -> Alcotest.fail "a new status and a stream burst erased the workspace mismatch"
@@ -1962,7 +1991,7 @@ let test_setup_login_stream_error_and_single_delivery () =
 
 let test_setup_login_interruption_closes_owned_input () =
   let now = Clock.Mono.zero in
-  let initial = Model.initial () in
+  let initial = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let model = ref { initial with
       nav = { initial.nav with workspace = Nav.Runtime; sidebar_focused = false };
       runtime = Runtime_store.set_tab Nav.Runtime_quotas_credits initial.runtime } in
@@ -2153,7 +2182,7 @@ let test_app_ctrl_c_and_voice_tick_gate () =
     dl_100;
 
   (* Keeper stop & quit arm expiry deadlines wake promptly even if toast replaced *)
-  let m_unarmed = Model.initial () in
+  let m_unarmed = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   Alcotest.(check (option int64)) "unarmed model has no arm deadline" None
     (App.armed_expiry_deadline_ns m_unarmed);
   let arm_at = Clock.Mono.of_ns t0 in
@@ -2387,10 +2416,10 @@ let test_p2_voice_runner_ffmpeg_and_mouse_capture () =
       mods = Masc_tui_term.Input_decoder.no_mods;
     }
   in
-  let m_norm = Masc_tui_store.Model.initial ~cols:140 ~rows:40 () in
+  let m_norm = Masc_tui_store.Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
   Alcotest.(check bool) "[m] toggles mouse on normal unfocused view" true
     (App.should_toggle_mouse_capture m_norm bare_m);
-  let m_tiny = Masc_tui_store.Model.initial ~cols:30 ~rows:10 () in
+  let m_tiny = Masc_tui_store.Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:30 ~rows:10 () in
   Alcotest.(check bool) "[m] blocked on too-small viewport" false
     (App.should_toggle_mouse_capture m_tiny bare_m);
   let m_ov =
@@ -2480,7 +2509,7 @@ let test_p2_voice_runner_ffmpeg_and_mouse_capture () =
     (App.should_toggle_mouse_capture m_filter bare_eu);
 
   (* Layer 1 #9: Micro, sidebar focus, Knowledge>Memory, and Korean jamo in Keeper_chat *)
-  let m_micro = Masc_tui_store.Model.initial ~cols:60 ~rows:20 () in
+  let m_micro = Masc_tui_store.Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:60 ~rows:20 () in
   Alcotest.(check bool) "[m] blocked on Micro viewport" false
     (App.should_toggle_mouse_capture m_micro bare_m);
   let m_sidebar =
@@ -2551,7 +2580,7 @@ let test_harness_followup_preserves_undrained_sample () =
       (503, `Assoc [ "error", `String "retry later" ]))
   in
   with_loopback_executor ~respond @@ fun clock bus exec ->
-  let initial = Model.initial () in
+  let initial = Model.initial ~auth_session:Rbac.single_user_local_admin () in
   let get () =
     Cmd_executor.execute exec
       (Cmd.Http_get { epoch = initial.epoch; req = Cmd.Get_harness_health })
@@ -2750,6 +2779,7 @@ let test_feature_wave1_osc52_and_artifact_export_safety () =
           theme_explicit = false;
           lang_explicit = false;
           auto_start = false;
+          token = None;
         }
       in
       let fake_voice : Voice_runner.backend =
@@ -2857,7 +2887,7 @@ let test_feature_wave1_osc52_and_artifact_export_safety () =
 let test_github_login_stream_exception_emits_done () =
   let keeper = "alpha" in
   let m_running =
-    let base = Model.initial () in
+    let base = Model.initial ~auth_session:Rbac.single_user_local_admin () in
     {
       base with
       keeper_context =
@@ -3064,7 +3094,7 @@ let test_bounded_clipboard_url_opener_and_async_wiki_editor () =
 
   (* 3. P1-6: App.can_launch_pending_wiki_editor predicate *)
   let m_wiki =
-    let m0 = Model.initial ~cols:120 ~rows:40 () in
+    let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:120 ~rows:40 () in
     {
       m0 with
       nav = { m0.nav with workspace = Nav.Knowledge };
@@ -3096,8 +3126,8 @@ let test_bounded_clipboard_url_opener_and_async_wiki_editor () =
   Alcotest.(check bool) "blocked in Micro breakpoint" false
     (App.can_launch_pending_wiki_editor
        {
-         (Model.initial ~cols:100 ~rows:20 ()) with
-         nav = { (Model.initial ~cols:100 ~rows:20 ()).nav with workspace = Nav.Knowledge };
+         (Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:100 ~rows:20 ()) with
+         nav = { (Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:100 ~rows:20 ()).nav with workspace = Nav.Knowledge };
          knowledge = { Knowledge_store.empty with active_tab = Nav.Knowledge_wiki };
        });
 
@@ -3185,6 +3215,7 @@ let test_bounded_clipboard_url_opener_and_async_wiki_editor () =
              theme_explicit = false;
              lang_explicit = false;
              auto_start = false;
+             token = None;
            }
          in
          let pause_count = ref 0 in

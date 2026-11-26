@@ -139,6 +139,8 @@ type server_health = {
   binary_commit : string option;
   uptime_display : string option;
   uptime_sec : float option;
+  account_mode : Rbac.account_mode;
+  auth_methods : Rbac.auth_methods;
   scope : health_scope;
   gc : server_gc_stats option;
   active_keepers : int option;
@@ -146,10 +148,23 @@ type server_health = {
 
 val health_path : string
 val decode_server_health : Yojson.Safe.t -> (server_health, string) result
-(** Decode [GET /health] in both public unauthenticated form ([Public_health])
-    and authenticated full form ([Full_health] with [paths.effective_base_path]
-    and [paths.effective_masc_root]). Never fabricates missing workspace paths
-    or instance IDs. Rejects multi-account payloads carrying [account_mode]. *)
+(** Decode [GET /health] in single-user public/full form and multi-account
+    form ([account_mode = "Multi_account"]). Never fabricates missing workspace
+    paths or instance IDs. Rejects unknown or malformed [account_mode] and
+    [auth_methods] payloads. *)
+
+(** {1 Multi-Account Identity Probe ([GET /api/v1/auth/whoami])} *)
+
+type auth_whoami = {
+  principal : Rbac.principal;
+  role : Rbac.role;
+  binding : Rbac.credential_binding;
+}
+
+val auth_whoami_path : string
+val decode_auth_whoami : Yojson.Safe.t -> (auth_whoami, string) result
+(** Strictly decode [GET /api/v1/auth/whoami]. Rejects missing fields, unknown
+    roles, unknown principal kinds, and unknown credential binding kinds. *)
 
 (** {1 Structured API Error Envelope} *)
 

@@ -1334,7 +1334,7 @@ let is_subscription_saturated (acct : Wire_runtime.account_usage) =
       false
 
 let draw_credit_balances ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
-    ~lang ~now_unix ~(rt : Runtime_store.t)
+    ~lang ~now_unix ~(auth_session : Rbac.auth_session) ~(rt : Runtime_store.t)
     (part : Runtime_store.partitioned_accounts)
     (obs : Wire_runtime.provider_usage_windows Observed.t) ~focused =
   let buckets = compute_quota_health_buckets part in
@@ -1373,18 +1373,21 @@ let draw_credit_balances ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                  ~ko:(Printf.sprintf "%d 활성" reported_n)
                  ~en:(Printf.sprintf "%d active" reported_n))))
   in
+  let credit_hotkey =
+    match Runtime_store.active_setup_login_id rt with
+    | Some _ when Rbac.is_allowed auth_session Rbac.Own_provider_manage ->
+        Say.make ~ko:"[u] 미보고 · [e] 로그인 입력"
+          ~en:"[u] Unreported · [e] Login Input"
+    | Some _ | None ->
+        if Rbac.can_admin auth_session then
+          Say.make ~ko:"[u] 미보고 · [e] 설정"
+            ~en:"[u] Unreported · [e] Settings"
+        else Say.make ~ko:"[u] 미보고" ~en:"[u] Unreported"
+  in
   let inner =
     Card.draw ~cache grid ~rect ~theme
       (H.card_spec ?badge ~focused
-         ~hotkey:
-           (Say.resolve lang
-              (match Runtime_store.active_setup_login_id rt with
-              | Some _ ->
-                  Say.make ~ko:"[u] 미보고 · [e] 로그인 입력"
-                    ~en:"[u] Unreported · [e] Login Input"
-              | None ->
-                  Say.make ~ko:"[u] 미보고 · [e] 설정"
-                    ~en:"[u] Unreported · [e] Settings"))
+         ~hotkey:(Say.resolve lang credit_hotkey)
          ~footer_hint:
            (Say.resolve lang
               (Say.make ~ko:"$0 구독 ≠ $0 소진 ≠ ? 미보고"
@@ -1877,7 +1880,8 @@ let render_quotas_credits ~(model : Model.t) ~cache ~(rect : Rect.t)
     draw_cooldown_health_summary ~grid ~cache ~rect:health_rect ~theme ~bp ~lang
       ~now_unix ~tz_offset_sec:model.tz_offset_sec ~rt part;
   draw_credit_balances ~grid ~cache ~rect:right_rect ~theme ~bp ~lang ~now_unix
-    ~rt part rt.usage_windows ~focused:(Model.pane_focused model 1)
+    ~auth_session:model.auth_session ~rt part rt.usage_windows
+    ~focused:(Model.pane_focused model 1)
 
 (* --- 2. Sub-Tab 2: Efficiency & Spend (4-KPI Strip + Real btop Braille Charts) --- *)
 
@@ -4838,14 +4842,19 @@ let render_tools_keeper_skills ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                (Store_scroll.drop skip tools))
     )
   end;
+  let skill_hotkey =
+    if Rbac.is_allowed model.auth_session Rbac.Single_user_token_admin_only then
+      Some
+        (Say.resolve lang
+           (Say.make
+              ~ko:"[Enter] 열람 · [n/e/x] 편집 · [R] 갱신"
+              ~en:"[Enter] Read · [n/e/x] Edit · [R] Refresh"))
+    else None
+  in
   let right_inner =
     Card.draw ~cache grid ~rect:right_rect ~theme
       (H.card_spec ~focused:(Model.detail_pane_focused ~detail_index:1 model)
-         ~hotkey:
-           (Say.resolve lang
-              (Say.make
-                 ~ko:"[Enter] 열람 · [n/e/x] 편집 · [R] 갱신"
-                 ~en:"[Enter] Read · [n/e/x] Edit · [R] Refresh"))
+         ?hotkey:skill_hotkey
          (Say.resolve lang
             (Say.make ~ko:"스킬 프로파일 · 그림자 · 거절"
                ~en:"Skills Profiles, Shadows & Rejections")))
@@ -7229,21 +7238,28 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     let theme = Theme.of_preset model.theme_preset in
     let bp = H.layout_bp ~model ~rect in
     let body = H.body_rect ~bp rect in
-    match model.runtime.active_tab with
-    | Nav.Runtime_quotas_credits ->
-        render_quotas_credits ~model ~cache ~rect:body ~theme ~bp grid
-    | Nav.Runtime_efficiency_spend ->
-        render_efficiency_spend ~model ~cache ~rect:body ~theme ~bp grid
-    | Nav.Runtime_failover_lanes ->
-        render_failover_lanes ~model ~cache ~rect:body ~theme ~bp grid
-    | Nav.Runtime_fusion ->
-        render_fusion ~model ~cache ~rect:body ~theme ~bp grid
-    | Nav.Runtime_tools_usage ->
-        render_tools_usage ~model ~cache ~rect:body ~theme ~bp grid
-    | Nav.Runtime_connectors ->
-        render_connectors ~model ~cache ~rect:body ~theme ~bp grid
-    | Nav.Runtime_addons_browser ->
-        render_addons_browser ~model ~cache ~rect:body ~theme ~bp grid
+    match Rbac_policy.decide_runtime_tab model.auth_session model.runtime.active_tab with
+    | Rbac.Denied reason ->
+        Masc_tui_screens_core.Render_util.draw_locked_panel grid ~cache
+          ~rect:body ~theme ~model
+          ~title:(Nav.runtime_tab_label model.runtime.active_tab)
+          ~reason
+    | Rbac.Allowed -> (
+        match model.runtime.active_tab with
+        | Nav.Runtime_quotas_credits ->
+            render_quotas_credits ~model ~cache ~rect:body ~theme ~bp grid
+        | Nav.Runtime_efficiency_spend ->
+            render_efficiency_spend ~model ~cache ~rect:body ~theme ~bp grid
+        | Nav.Runtime_failover_lanes ->
+            render_failover_lanes ~model ~cache ~rect:body ~theme ~bp grid
+        | Nav.Runtime_fusion ->
+            render_fusion ~model ~cache ~rect:body ~theme ~bp grid
+        | Nav.Runtime_tools_usage ->
+            render_tools_usage ~model ~cache ~rect:body ~theme ~bp grid
+        | Nav.Runtime_connectors ->
+            render_connectors ~model ~cache ~rect:body ~theme ~bp grid
+        | Nav.Runtime_addons_browser ->
+            render_addons_browser ~model ~cache ~rect:body ~theme ~bp grid)
 
 let render_inspector
     ~(target : [ `Tool of string | `Skill of string | `Exact_run of string ])
@@ -7255,6 +7271,23 @@ let render_inspector
     let body = H.body_rect ~bp rect in
     let lang = model.lang in
     let rt = model.runtime in
+    let insp, locked_title =
+      match target with
+      | `Tool name ->
+          ( Nav.Tool_inspector name
+          , Say.make ~ko:"도구 상세" ~en:"Tool Detail" )
+      | `Skill ref_s ->
+          ( Nav.Skill_inspector ref_s
+          , Say.make ~ko:"스킬 인스펙터" ~en:"Skill Inspector" )
+      | `Exact_run run_id ->
+          ( Nav.Exact_run_inspector run_id
+          , Say.make ~ko:"Exact 레인 실행 상세" ~en:"Exact Lane Run Detail" )
+    in
+    match Rbac_policy.decide_inspector model.auth_session insp with
+    | Rbac.Denied reason ->
+        Masc_tui_screens_core.Render_util.draw_locked_panel grid ~cache
+          ~rect:body ~theme ~model ~title:locked_title ~reason
+    | Rbac.Allowed ->
     match target with
     | `Tool tool_name ->
         let entry_opt =
@@ -7282,13 +7315,21 @@ let render_inspector
                    (Printf.sprintf "%s / %s" e.domain e.family))
           | None -> None
         in
+        let tool_detail_hotkey =
+          if Rbac.is_allowed model.auth_session Rbac.Single_user_token_admin_only
+          then
+            Say.make
+              ~ko:"[e] MCP 실행 · [Tab] 시계열 · [w] 기간(24h/7d/14d) · [Esc] 뒤로"
+              ~en:"[e] Execute MCP · [Tab] Series · [w] Window(24h/7d/14d) · [Esc] Back"
+          else
+            Say.make
+              ~ko:"[Tab] 시계열 · [w] 기간(24h/7d/14d) · [Esc] 뒤로"
+              ~en:"[Tab] Series · [w] Window(24h/7d/14d) · [Esc] Back"
+        in
         let meta_inner =
           Card.draw ~cache grid ~rect:meta_rect ~theme
             (H.card_spec ?badge ~focused:(Model.pane_focused model 0)
-               ~hotkey:
-                 (Say.resolve lang
-                    (Say.make ~ko:"[e] MCP 실행 · [Tab] 시계열 · [w] 기간(24h/7d/14d) · [Esc] 뒤로"
-                       ~en:"[e] Execute MCP · [Tab] Series · [w] Window(24h/7d/14d) · [Esc] Back"))
+               ~hotkey:(Say.resolve lang tool_detail_hotkey)
                (Printf.sprintf "%s > %s"
                   (Say.resolve lang (Say.make ~ko:"도구 상세" ~en:"Tool Detail"))
                   tool_name))

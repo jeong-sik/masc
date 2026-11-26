@@ -3,6 +3,7 @@ open Masc_tui_protocol
 
 type get_request =
   | Get_health
+  | Get_auth_whoami
   | Get_dashboard_shell
   | Get_keepers_roster
   | Get_keeper_turns
@@ -659,6 +660,7 @@ type t =
 
 let get_request_path = function
   | Get_health -> Wire_common.health_path
+  | Get_auth_whoami -> Wire_common.auth_whoami_path
   | Get_dashboard_shell -> Wire_fleet.dashboard_shell_path
   | Get_keepers_roster -> Wire_fleet.dashboard_keepers_path
   | Get_keeper_turns -> Wire_fleet.keepers_turns_path

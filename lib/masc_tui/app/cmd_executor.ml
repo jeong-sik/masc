@@ -73,7 +73,10 @@ let endpoint_of_cli ?bearer_token (cli : Cli_args.config) =
   let token =
     match bearer_token with
     | Some tok_opt -> tok_opt
-    | None -> load_bearer_token ~base_path:cli.base_path ()
+    | None -> (
+        match cli.token with
+        | Some _ as cli_tok -> cli_tok
+        | None -> load_bearer_token ~base_path:cli.base_path ())
   in
   Http_client.make_endpoint ~scheme:cli.scheme ~host:cli.host ~port:cli.port
     ?bearer_token:token ()
@@ -105,6 +108,7 @@ let chat_stream_header_timeout_sec = 45.0
 let timeout_sec_for_get : Cmd.get_request -> float = function
   (* Standard tier: lightweight state reads and single-entity lookups *)
   | Cmd.Get_health
+  | Cmd.Get_auth_whoami
   | Cmd.Get_keeper_turns
   | Cmd.Get_chat_queue _
   | Cmd.Get_chat_status _
@@ -698,6 +702,7 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
   let clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t) in
   let explicit_bearer_override =
     (match bearer_token with Some _ -> true | None -> false)
+    || Option.is_some cli.Cli_args.token
     || Option.is_some (Option.bind (Sys.getenv_opt "MASC_TOKEN") nonblank_trimmed)
   in
   let initial_ep = endpoint_of_cli ?bearer_token cli in
@@ -1030,6 +1035,7 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
       in
       Some base, snapshot_key
   | Cmd.Get_health
+  | Cmd.Get_auth_whoami
   | Cmd.Get_dashboard_shell
   | Cmd.Get_keepers_roster
   | Cmd.Get_keeper_turns
@@ -1206,11 +1212,30 @@ let rec execute_get t ~epoch req =
                   let msg =
         match req with
         | Cmd.Get_health ->
+            if not t.explicit_bearer_override then begin
+              let fresh_tok =
+                Eio_unix.run_in_systhread (fun () ->
+                    load_bearer_token ~base_path:t.cli.base_path ())
+              in
+              let cur = Atomic.get t.endpoint in
+              if not (Option.equal String.equal cur.bearer_token fresh_tok) then begin
+                let next_ep = { cur with bearer_token = fresh_tok } in
+                Atomic.set t.endpoint next_ep;
+                Sse_hub.update_endpoint t.sse_hub next_ep
+              end
+            end;
             let result =
               fetch_and_decode_get t ~path
                 ~decode:Wire_common.decode_server_health
             in
             Msg.Server_health_result { epoch; result }
+        | Cmd.Get_auth_whoami ->
+            let reply =
+              Msg.Reply_auth_whoami
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_common.decode_auth_whoami)
+            in
+            Msg.Http_reply { epoch; reply }
         | Cmd.Get_dashboard_shell ->
             let reply =
               Msg.Reply_dashboard_shell

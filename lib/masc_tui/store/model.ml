@@ -234,6 +234,8 @@ type t = {
   nav : nav_state;
   freshness : freshness_state;
   server_identity : server_identity;
+  auth_session : Rbac.auth_session;
+  last_auth_recheck_mono : Clock.Mono.t option;
   attention : Attention.t;
   incidents : Incidents.t;
   drafts : Drafts.t;
@@ -523,7 +525,8 @@ let is_too_small_viewport { cols; rows } = cols < 40 || rows < 12
 let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
     ?(theme_preset = Theme.Midnight) ?(cli_lang_override = false)
     ?(cli_theme_override = false) ?(tz_offset_sec = 0) ?(wall_unix = 0.0)
-    ?(tui_version = "") ?(tui_commit = None) () =
+    ?(tui_version = "") ?(tui_commit = None)
+    ?(auth_session = Rbac.Probing_health) () =
   let viewport = { cols = max 0 cols; rows = max 0 rows } in
   let breakpoint = classify_viewport viewport in
   let last_wall_unix =
@@ -586,6 +589,8 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
         last_mismatch_epoch = None;
         autostart_attempted = false;
       };
+    auth_session;
+    last_auth_recheck_mono = None;
     attention = Attention.empty;
     incidents = Incidents.empty;
     drafts = Drafts.empty;
@@ -757,7 +762,11 @@ let uses_keeper_split ~width m =
   && width >= 104 && not (is_zoomed_active m)
 
 let fast_approval_strip_item m =
-  if is_too_small_viewport m.viewport || equal_breakpoint m.breakpoint Micro then
+  if
+    is_too_small_viewport m.viewport
+    || equal_breakpoint m.breakpoint Micro
+    || not (Rbac.is_allowed m.auth_session Rbac.Single_user_token_admin_only)
+  then
     None
   else
     match m.nav.overlay with

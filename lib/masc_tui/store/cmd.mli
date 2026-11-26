@@ -9,6 +9,7 @@ open Masc_tui_protocol
 
 type get_request =
   | Get_health
+  | Get_auth_whoami
   | Get_dashboard_shell
   | Get_keepers_roster
   | Get_keeper_turns

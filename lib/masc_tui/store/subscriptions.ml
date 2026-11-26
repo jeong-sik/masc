@@ -15,6 +15,14 @@ let is_persistent = function
   | Stream_observer | Stream_fleet -> true
   | Stream_model_metrics | Stream_tool_metrics_series | Stream_logs _ -> false
 
+let route_access_of_stream_id = function
+  | Stream_observer
+  | Stream_fleet
+  | Stream_model_metrics
+  | Stream_tool_metrics_series ->
+      Rbac.Single_user_read
+  | Stream_logs _ -> Rbac.Single_user_admin_only
+
 let equal_stream_id a b =
   match a, b with
   | Stream_observer, Stream_observer
@@ -84,6 +92,8 @@ let is_blocked_by_gate (m : Model.t) =
   in
   m.freshness.server_offline
   || mismatch_blocked
+  || Rbac.requires_auth_gate m.auth_session
+  || (not (Rbac.is_authenticated m.auth_session))
   ||
   match m.nav.overlay with
   | Some (Nav.System_gate (Nav.Auth_gate | Nav.Server_offline)) -> true
@@ -126,6 +136,11 @@ let plan (m : Model.t) =
   if is_blocked_by_gate m then []
   else
     let persistent = [ Stream_observer; Stream_fleet ] in
-    match view_scoped_stream m with
-    | None -> persistent
-    | Some s -> persistent @ [ s ]
+    let raw =
+      match view_scoped_stream m with
+      | None -> persistent
+      | Some s -> persistent @ [ s ]
+    in
+    List.filter
+      (fun s -> Rbac.is_allowed m.auth_session (route_access_of_stream_id s))
+      raw

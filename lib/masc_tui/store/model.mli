@@ -264,6 +264,8 @@ type t = {
   nav : nav_state;
   freshness : freshness_state;
   server_identity : server_identity;
+  auth_session : Rbac.auth_session;
+  last_auth_recheck_mono : Clock.Mono.t option;
   attention : Attention.t;
   incidents : Incidents.t;
   drafts : Drafts.t;
@@ -470,6 +472,7 @@ val initial :
   ?wall_unix:float ->
   ?tui_version:string ->
   ?tui_commit:string option ->
+  ?auth_session:Rbac.auth_session ->
   unit ->
   t
 

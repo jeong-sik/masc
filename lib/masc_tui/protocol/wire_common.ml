@@ -361,12 +361,35 @@ type server_health = {
   binary_commit : string option;
   uptime_display : string option;
   uptime_sec : float option;
+  account_mode : Rbac.account_mode;
+  auth_methods : Rbac.auth_methods;
   scope : health_scope;
   gc : server_gc_stats option;
   active_keepers : int option;
 }
 
 let health_path = "/health"
+
+let decode_auth_methods json =
+  match assoc_member_opt "auth_methods" json with
+  | None | Some `Null -> Ok Rbac.default_auth_methods
+  | Some (`Assoc _ as obj) ->
+      let* google = optional_bool_field obj "google" in
+      let* github = optional_bool_field obj "github" in
+      let* dev_token = optional_bool_field obj "dev_token" in
+      Ok
+        {
+          Rbac.google = Option.value ~default:false google;
+          github = Option.value ~default:false github;
+          dev_token = Option.value ~default:false dev_token;
+        }
+  | Some bad -> field_type_error "auth_methods" "an object or null" bad
+
+let decode_account_mode json =
+  match assoc_member_opt "account_mode" json with
+  | None | Some `Null -> Ok Rbac.Single_user
+  | Some (`String raw) -> Rbac.account_mode_of_string raw
+  | Some bad -> field_type_error "account_mode" "a string or null" bad
 
 let first_nonblank_str objs keys =
   let rec loop_objs = function
@@ -390,13 +413,8 @@ let decode_server_health json =
     | `Assoc _ -> Ok ()
     | bad -> field_type_error "/health" "an object" bad
   in
-  let* () =
-    match assoc_member_opt "account_mode" json with
-    | None | Some `Null -> Ok ()
-    | Some _ ->
-        Error
-          "/health carries account_mode, which no workspace MASC server carries"
-  in
+  let* account_mode = decode_account_mode json in
+  let* auth_methods = decode_auth_methods json in
   let* build = optional_object_field json "build" in
   let* paths = optional_object_field json "paths" in
   let* startup = optional_object_field json "startup" in
@@ -552,9 +570,52 @@ let decode_server_health json =
       binary_commit;
       uptime_display;
       uptime_sec;
+      account_mode;
+      auth_methods;
       scope;
       gc;
       active_keepers;
+    }
+
+type auth_whoami = {
+  principal : Rbac.principal;
+  role : Rbac.role;
+  binding : Rbac.credential_binding;
+}
+
+let auth_whoami_path = "/api/v1/auth/whoami"
+
+let decode_auth_whoami json =
+  let* () =
+    match json with
+    | `Assoc _ -> Ok ()
+    | bad -> field_type_error "/api/v1/auth/whoami" "an object" bad
+  in
+  let* principal_obj =
+    match assoc_member_opt "principal" json with
+    | Some (`Assoc _ as obj) -> Ok obj
+    | Some bad -> field_type_error "principal" "an object" bad
+    | None -> missing_field "principal"
+  in
+  let* principal_kind_raw = required_nonblank_string principal_obj "kind" in
+  let* principal_kind = Rbac.principal_kind_of_string principal_kind_raw in
+  let* principal_id = required_nonblank_string principal_obj "id" in
+  let* role_raw = required_nonblank_string json "role" in
+  let* role = Rbac.role_of_string role_raw in
+  let* binding_obj =
+    match assoc_member_opt "binding" json with
+    | Some (`Assoc _ as obj) -> Ok obj
+    | Some bad -> field_type_error "binding" "an object" bad
+    | None -> missing_field "binding"
+  in
+  let* binding_kind_raw = required_nonblank_string binding_obj "kind" in
+  let* binding_kind = Rbac.binding_kind_of_string binding_kind_raw in
+  let* binding_id = required_nonblank_string binding_obj "id" in
+  Ok
+    {
+      principal = { Rbac.kind = principal_kind; id = principal_id };
+      role;
+      binding = { Rbac.kind = binding_kind; id = binding_id };
     }
 
 type api_error_code =

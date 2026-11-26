@@ -732,7 +732,7 @@ let sample_keeper_schema ~name : Wire_config.config_schema =
   }
 
 let make_populated_model ~cols ~rows ~lang =
-  let m0 = Model.initial ~cols ~rows ~lang () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols ~rows ~lang () in
   let fleet =
     m0.fleet
     |> Fleet_store.apply_keepers ~observed_at:now_mono sample_keepers
@@ -884,6 +884,7 @@ let make_populated_model ~cols ~rows ~lang =
             cost_24h_usd = Observed.value ~observed_at:now_mono 108.78;
           };
         groups = [];
+        auth = None;
       }
       fleet
   in
@@ -2074,7 +2075,7 @@ let test_v25_keepers_5_company_fleet_tree_and_preview_inspector () =
       mk_keeper ~group:"Creative & R&D" ~name:"music-sensei" ~health:Wire_fleet.Keeper_idle;
     ]
   in
-  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_ko () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang:Say.Lang_ko () in
   let fleet =
     m0.fleet
     |> Fleet_store.apply_keepers ~observed_at:now_mono five_co_keepers
@@ -2621,7 +2622,7 @@ let test_p2_standard_viewport_keepers_split_and_kpi_visibility () =
     [ (104, 32); (112, 32) ]
 
 let test_degenerate_empty_and_tiny_rects () =
-  let m_empty = Model.initial ~cols:80 ~rows:24 () in
+  let m_empty = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:80 ~rows:24 () in
   let m_pop_ko = make_populated_model ~cols:90 ~rows:28 ~lang:Say.Lang_ko in
   let m_pop_json =
     {
@@ -2840,7 +2841,7 @@ let test_nav_keepers_display_order_monotonic_screen_rows () =
       mk_k "org-beta" "beta-1";
     ]
   in
-  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
   let fleet0 = Fleet_store.apply_keepers ~observed_at:now_mono scrambled m0.fleet in
   let rail = Glyph.to_utf8 Glyph.Left_rail in
   let find_rail_y (grid : Cell_grid.t) =
@@ -2980,7 +2981,7 @@ let test_p1_chat_transcript_render_parity () =
           ~content:"BOTTOM_MARKER_FINAL persisted reply." (now_unix -. 10.0);
       ]
   in
-  let m0 = Model.initial ~cols ~rows ~lang:Say.Lang_en () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols ~rows ~lang:Say.Lang_en () in
   let fleet =
     m0.fleet
     |> Fleet_store.apply_keepers ~observed_at:now_mono [ mk_k "alpha-1" ]
@@ -3165,7 +3166,7 @@ let test_chat_peer_rows_name_their_author () =
           ~content:"OPERATOR_LAST_MARKER" (now_unix -. 10.0);
       ]
   in
-  let m0 = Model.initial ~cols ~rows ~lang:Say.Lang_en () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols ~rows ~lang:Say.Lang_en () in
   let fleet =
     m0.fleet
     |> Fleet_store.apply_keepers ~observed_at:now_mono [ mk_k "alpha-1" ]
@@ -3271,7 +3272,7 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
     in
     scan 0
   in
-  let m0 = Model.initial ~cols ~rows ~lang:Say.Lang_ko () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols ~rows ~lang:Say.Lang_ko () in
   let hist_msg : Wire_fleet.chat_message =
     {
       id = "hist-1";
@@ -4010,7 +4011,7 @@ let apply_history keeper messages fleet =
 (* A fleet whose named keepers each store [n] Markdown messages. A reply
    carries a visible block of its thinking. *)
 let make_history_model ~n keepers =
-  let m = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_ko () in
+  let m = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang:Say.Lang_ko () in
   let message i =
     history_msg ~id:(Printf.sprintf "h-%d" i)
       ~role:(if i mod 2 = 0 then Wire_fleet.Role_user else Wire_fleet.Role_assistant)
@@ -4174,7 +4175,7 @@ let test_chat_history_rows_keep_one_slot_per_keeper () =
 let test_chat_history_rows_tool_result_refs_cache_and_invalidation () =
   let keeper = "e-masc-the-leader" in
   let eid = "ex-layout-ref-1" in
-  let m0 = Model.initial ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ~lang:Say.Lang_en () in
   let tool_msg : Wire_fleet.chat_message =
     {
       (history_msg ~id:"h-tool-ref" ~role:Wire_fleet.Role_tool

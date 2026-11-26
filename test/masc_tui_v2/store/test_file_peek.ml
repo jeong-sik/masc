@@ -56,7 +56,7 @@ let edit_row =
 let shell_row = {|{"ts":1.0,"tool":"masc_shell","input":{"cmd":"ls"},"output":""}|}
 
 let tool_calls_model entries_json =
-  let base = Model.initial ~cols:140 ~rows:40 () in
+  let base = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
   let fleet =
     base.fleet
     |> Fleet_store.apply_roster ~observed_at:t0 { keepers = [ keeper ]; unreadable = [] }
@@ -243,7 +243,11 @@ let test_a_workspace_change_forgets_the_body () =
   Alcotest.(check bool) "inspector still open" true (Option.is_some (peek_of m));
   Alcotest.(check bool) "old body forgotten" true
     (Option.is_none (Infra_store.file_peek_content ~keeper:"alpha" ~path:"lib/a.ml" m.infra));
-  Alcotest.(check (list string)) "read again" [ "keeper:alpha lib/a.ml" ] (planned m)
+  Alcotest.(check (list string)) "suppressed while re-probing workspace auth" []
+    (planned m);
+  let m_authed = { m with auth_session = Rbac.single_user_local_admin } in
+  Alcotest.(check (list string)) "read again after new workspace auth"
+    [ "keeper:alpha lib/a.ml" ] (planned m_authed)
 
 let () =
   Alcotest.run "file_peek"

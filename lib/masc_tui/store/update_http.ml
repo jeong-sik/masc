@@ -58,6 +58,8 @@ let handle_workspace_mismatch ~now ~expected ~observed ~message (m : Model.t) =
         {
           m with
           epoch = next_epoch;
+          auth_session = Rbac.Probing_health;
+          last_auth_recheck_mono = None;
           nav = clear_modal_nav m.nav;
           ask_modal = None;
           inline_modal = None;
@@ -85,6 +87,8 @@ let handle_workspace_mismatch ~now ~expected ~observed ~message (m : Model.t) =
         {
           m with
           epoch = next_epoch;
+          auth_session = Rbac.Probing_health;
+          last_auth_recheck_mono = None;
           nav = clear_modal_nav m.nav;
           ask_modal = None;
           inline_modal = None;
@@ -118,6 +122,307 @@ let close_setup_login_input ~login_id (m : Model.t) =
       { m with nav; inline_modal = None }
   | Some _ | None -> m
 
+let auth_recheck_cooldown_s = 5.0
+
+let purge_disallowed_state ~(session : Rbac.auth_session) (m : Model.t) :
+    Model.t =
+  let overlay =
+    match m.nav.overlay with
+    | Some ov when not (Rbac_policy.can_access_overlay session ov) -> None
+    | Some _ | None -> m.nav.overlay
+  in
+  let return_overlay =
+    match m.nav.return_overlay with
+    | Some ov when not (Rbac_policy.can_access_overlay session ov) -> None
+    | Some _ | None -> m.nav.return_overlay
+  in
+  let inspector, inspector_return =
+    match m.nav.inspector with
+    | Some insp -> (
+        match Rbac_policy.decide_inspector session insp with
+        | Rbac.Allowed -> (m.nav.inspector, m.nav.inspector_return)
+        | Rbac.Denied _ -> (None, None))
+    | None -> (None, m.nav.inspector_return)
+  in
+  let nav =
+    {
+      m.nav with
+      overlay;
+      return_overlay;
+      inspector;
+      inspector_return;
+      filter_focused =
+        if Option.is_some overlay then false else m.nav.filter_focused;
+    }
+  in
+  let inline_modal =
+    match m.inline_modal with
+    | Some modal
+      when not (Rbac_policy.can_access_inline_action session modal.kind) ->
+        None
+    | Some _ | None -> m.inline_modal
+  in
+  let ask_modal =
+    if Rbac_policy.can_access_overlay session Nav.Ask_answer then m.ask_modal
+    else None
+  in
+  let config =
+    if Rbac.can_admin session then m.config
+    else
+      {
+        Config_store.empty with
+        active_tab = m.config.active_tab;
+        preferences = m.config.preferences;
+        live_theme_fallback = m.config.live_theme_fallback;
+        live_lang_fallback = m.config.live_lang_fallback;
+      }
+  in
+  let infra =
+    if not (Rbac.can_admin session) then
+      { Infra_store.empty with active_tab = m.infra.active_tab }
+    else if not (Rbac.can_single_user_token_admin session) then
+      {
+        m.infra with
+        repositories = Observed.unreported;
+        repository_pulls = Observed.unreported;
+        repository_details = Infra_store.String_map.empty;
+        repo_activity = None;
+        code = Infra_store.empty.code;
+        file_peek = None;
+      }
+    else m.infra
+  in
+  let runtime =
+    let r0 =
+      if Rbac.can_admin session then m.runtime
+      else
+        {
+          m.runtime with
+          exact_lane_runs = Observed.unreported;
+          standalone_lanes = Observed.unreported;
+          exact_run_detail = Observed.unreported;
+        }
+    in
+    let r1 =
+      if Rbac.can_single_user_token_admin session then r0
+      else
+        {
+          r0 with
+          runtime_config_raw = Observed.unreported;
+          setup_inventory = Observed.unreported;
+          runtime_metrics = Observed.unreported;
+          lanes_inventory = Observed.unreported;
+          fusion_config = Observed.unreported;
+          skill_editor_sources = Observed.unreported;
+          skill_editor_tools = Observed.unreported;
+          skill_editor_loaded = Observed.unreported;
+          skill_editor_preview = Observed.unreported;
+          async_requests = Observed.unreported;
+          presets_listing = Observed.unreported;
+          preset_detail = Observed.unreported;
+          runtime_params = Observed.unreported;
+          addon_declaration_doc = Observed.unreported;
+          addon_slice = Observed.unreported;
+          runtime_raw_preview = Observed.unreported;
+        }
+    in
+    if Rbac.is_allowed session Rbac.Own_provider_manage then r1
+    else
+      {
+        r1 with
+        setup_login_receipt = None;
+        setup_login_auth_url = None;
+        setup_login_device_code = None;
+        setup_login_input_ready = false;
+        setup_login_output_lines = [];
+      }
+  in
+  let keeper_context =
+    if Rbac.can_single_user_token_admin session then m.keeper_context
+    else
+      let scrub_ks (ks : Keeper_context_store.keeper_state) =
+        {
+          ks with
+          provider_input = Observed.unreported;
+          part_content = Observed.unreported;
+          call_evidence = Observed.unreported;
+          checkpoints = Observed.unreported;
+          last_purge_preview = None;
+          tool_calls = Observed.unreported;
+          tool_result = Observed.unreported;
+          tool_results = Keeper_context_store.String_map.empty;
+          tool_result_cache_order = [];
+          tool_result_inflight = Keeper_context_store.String_set.empty;
+          github_identity = Observed.unreported;
+          oauth_pending_login = None;
+          oauth_attempt_status = None;
+        }
+      in
+      {
+        m.keeper_context with
+        by_keeper =
+          Keeper_context_store.String_map.map scrub_ks
+            m.keeper_context.by_keeper;
+      }
+  in
+  let knowledge =
+    let k0 =
+      if Rbac.can_admin session then m.knowledge
+      else
+        { (Knowledge_store.clear_pending_wiki_edit m.knowledge) with
+          wiki_edit_base = None;
+        }
+    in
+    if Rbac.can_single_user_token_admin session then k0
+    else
+      {
+        k0 with
+        workspace_memory_ledger = Observed.unreported;
+        workspace_memory_context = Observed.unreported;
+        keeper_memory_facts = Knowledge_store.String_map.empty;
+        keeper_memory_journal = Observed.unreported;
+      }
+  in
+  let next =
+    {
+      m with
+      nav;
+      inline_modal;
+      ask_modal;
+      config;
+      infra;
+      runtime;
+      keeper_context;
+      knowledge;
+    }
+  in
+  if Rbac.can_single_user_token_admin session then next
+  else Model.disarm_keeper_stop next
+
+let clear_auth_gate_overlay = function
+  | Some (Nav.System_gate Nav.Auth_gate) -> None
+  | Some
+      ( Nav.System_gate
+          (Nav.Micro_viewport | Nav.Server_offline | Nav.Media_viewer)
+      | Nav.Palette
+      | Nav.Settings _
+      | Nav.Incidents
+      | Nav.Queue_context _
+      | Nav.Inline_action _
+      | Nav.Ask_answer
+      | Nav.Help ) as ov ->
+      ov
+  | None -> None
+
+let apply_auth_session_transition ~now ~(next_session : Rbac.auth_session)
+    (m : Model.t) =
+  let prev = m.auth_session in
+  let was_auth = Rbac.is_authenticated prev in
+  let now_auth = Rbac.is_authenticated next_session in
+  let demoted = Rbac.is_privilege_demotion ~prev ~next:next_session in
+  let changed = Rbac.session_identity_changed ~prev ~next:next_session in
+  if Rbac.requires_auth_gate next_session then
+    let next_epoch = if was_auth then Epoch.next m.epoch else m.epoch in
+    let base =
+      {
+        m with
+        epoch = next_epoch;
+        auth_session = next_session;
+        last_auth_recheck_mono = Some now;
+      }
+      |> purge_disallowed_state ~session:next_session
+    in
+    let nav =
+      {
+        base.nav with
+        overlay = Some (Nav.System_gate Nav.Auth_gate);
+        return_overlay = None;
+        filter_focused = false;
+        sidebar_focused = false;
+      }
+    in
+    let next =
+      { base with nav; inline_modal = None; ask_modal = None }
+      |> Model.with_toast ~now ~level:Model.Toast_warning
+           (Rbac.auth_gate_detail next_session)
+    in
+    (next, [ Cmd.Sync_streams { epoch = next.epoch; streams = [] } ])
+  else if demoted || changed then
+    let next_epoch = Epoch.next m.epoch in
+    let base =
+      {
+        m with
+        epoch = next_epoch;
+        auth_session = next_session;
+        last_auth_recheck_mono = Some now;
+      }
+      |> purge_disallowed_state ~session:next_session
+    in
+    let overlay = clear_auth_gate_overlay base.nav.overlay in
+    let next0 = { base with nav = { base.nav with overlay } } in
+    let next =
+      if demoted then
+        Model.with_toast ~now ~level:Model.Toast_warning
+          (Say.make
+             ~ko:"권한이 변경되었습니다 — 제한된 화면과 편집 상태가 초기화되었습니다"
+             ~en:"Permissions changed — restricted views and edits were cleared")
+          next0
+      else next0
+    in
+    let sync_cmd =
+      Cmd.Sync_streams { epoch = next.epoch; streams = Subscriptions.plan next }
+    in
+    let refresh_cmds =
+      if now_auth then View_fetches.fetches_for_current_view ~force:true next
+      else []
+    in
+    (next, sync_cmd :: refresh_cmds)
+  else if (not was_auth) && now_auth then
+    let overlay = clear_auth_gate_overlay m.nav.overlay in
+    let next =
+      {
+        m with
+        auth_session = next_session;
+        last_auth_recheck_mono = Some now;
+        nav = { m.nav with overlay };
+      }
+      |> purge_disallowed_state ~session:next_session
+    in
+    let sync_cmd =
+      Cmd.Sync_streams { epoch = next.epoch; streams = Subscriptions.plan next }
+    in
+    let detached =
+      next.drafts.pending_txs
+      |> List.filter_map (fun (tx : Drafts.pending_message) ->
+             if tx.state = Drafts.Confirming_delivery then Some tx.keeper
+             else None)
+      |> List.sort_uniq String.compare
+      |> List.concat_map (fun keeper ->
+             View_fetches.chat_status_fetches ~keeper next)
+    in
+    let boot_cmds = View_fetches.bootstrap_fetches next @ detached in
+    (next, sync_cmd :: boot_cmds)
+  else ({ m with auth_session = next_session }, [])
+
+let maybe_recheck_auth ~now (m : Model.t) =
+  if not (Rbac.is_authenticated m.auth_session) then (m, [])
+  else
+    let cooldown_ok =
+      match m.last_auth_recheck_mono with
+      | None -> true
+      | Some last ->
+          let elapsed = Clock.Mono.seconds_since now ~since:last in
+          elapsed < 0.0 || elapsed >= auth_recheck_cooldown_s
+    in
+    if not cooldown_ok then (m, [])
+    else
+      let req =
+        if Rbac.is_multi_account m.auth_session then Cmd.Get_auth_whoami
+        else Cmd.Get_dashboard_shell
+      in
+      ( { m with last_auth_recheck_mono = Some now }
+      , [ Cmd.Http_get { epoch = m.epoch; req } ] )
+
 let record_http_incident ~now ~source ~context err (m : Model.t) =
   match err with
   | Msg.Workspace_mismatch
@@ -134,7 +439,22 @@ let record_http_incident ~now ~source ~context err (m : Model.t) =
           ~summary ~detail ~status:Health.Resolved m.incidents
       in
       (* Channel 3 isolation: ONLY append to incidents, NEVER touch live health. *)
-      ({ m with incidents }, [])
+      let m1 = { m with incidents } in
+      (match err with
+      | Msg.Http_error { status = 401; _ }
+        when Rbac.is_multi_account m1.auth_session
+             && Rbac.is_authenticated m1.auth_session ->
+          let auth_methods = Rbac.auth_methods_of_session m1.auth_session in
+          apply_auth_session_transition ~now
+            ~next_session:
+              (Rbac.Multi_account_signed_out
+                 { auth_methods; reason = Rbac.Signed_out (Some detail) })
+            m1
+      | Msg.Http_error { status = (401 | 403); _ } ->
+          maybe_recheck_auth ~now m1
+      | Msg.Http_error _ | Msg.Transport _ | Msg.Decode_error _
+      | Msg.Workspace_mismatch _ ->
+          (m1, []))
 
 (* A decision POST that failed leaves its attention item actionable again,
    records an incident, and toasts the failure. *)
@@ -456,6 +776,63 @@ let apply_http_reply ~now (m : Model.t) reply =
                | other -> other, m.nav
              in
              ({ m with discord_replies; inline_modal; nav }, []))
+  | Msg.Reply_auth_whoami (Ok whoami) ->
+      let auth_methods = Rbac.auth_methods_of_session m.auth_session in
+      let next_session =
+        Rbac.Multi_account_signed_in
+          {
+            principal = whoami.principal;
+            role = whoami.role;
+            binding = whoami.binding;
+            auth_methods;
+          }
+      in
+      apply_auth_session_transition ~now ~next_session m
+  | Msg.Reply_auth_whoami (Error (Msg.Workspace_mismatch _ as err)) ->
+      record_http_incident ~now ~source:Health.Source_client_http
+        ~context:(Say.make ~ko:"계정 신원 확인" ~en:"Account identity check")
+        err m
+  | Msg.Reply_auth_whoami
+      (Error
+         ((Msg.Transport _ | Msg.Http_error _ | Msg.Decode_error _) as err)) ->
+      let auth_methods = Rbac.auth_methods_of_session m.auth_session in
+      let detail = Msg.http_error_detail err in
+      let next_session =
+        match err with
+        | Msg.Http_error { status = 401; _ } ->
+            Rbac.Multi_account_signed_out
+              { auth_methods; reason = Rbac.Signed_out (Some detail) }
+        | Msg.Http_error { status = 403; _ } ->
+            Rbac.Multi_account_signed_out
+              { auth_methods; reason = Rbac.Forbidden_credential detail }
+        | Msg.Http_error _ | Msg.Decode_error _ | Msg.Transport _
+        | Msg.Workspace_mismatch _ ->
+            Rbac.Auth_unavailable
+              { mode = Some Rbac.Multi_account; reason = detail }
+      in
+      let m1, inc_cmds =
+        match err with
+        | Msg.Http_error { status = (401 | 403); _ } -> (m, [])
+        | Msg.Http_error _ | Msg.Decode_error _ | Msg.Transport _
+        | Msg.Workspace_mismatch _ ->
+            let summary =
+              Say.concat ~sep:": "
+                [
+                  Say.make ~ko:"계정 신원 확인" ~en:"Account identity check";
+                  Msg.http_error_summary err;
+                ]
+            in
+            let incidents, _ =
+              Incidents.push ~occurred_at_unix:m.freshness.last_wall_unix
+                ~source:Health.Source_client_http ~summary ~detail
+                ~status:Health.Resolved m.incidents
+            in
+            ({ m with incidents }, [])
+      in
+      let next, trans_cmds =
+        apply_auth_session_transition ~now ~next_session m1
+      in
+      (next, inc_cmds @ trans_cmds)
   | Msg.Reply_dashboard_shell (Ok shell) ->
       let freshness, fleet0 =
         match shell.generated_at_unix with
@@ -464,7 +841,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             , Fleet_store.set_wall_unix ts m.fleet )
         | Some _ | None -> (m.freshness, m.fleet)
       in
-      let next =
+      let m1 =
         {
           m with
           freshness;
@@ -472,14 +849,76 @@ let apply_http_reply ~now (m : Model.t) reply =
         }
         |> Model.sync_effective_scorecard ~now
       in
-      (next, [])
+      if Rbac.is_single_user m1.auth_session then
+        let auth_methods = Rbac.auth_methods_of_session m1.auth_session in
+        match shell.auth with
+        | Some a ->
+            let next_session =
+              Rbac.session_of_single_user_shell_auth ~auth_methods
+                ~enabled:a.enabled ~require_token:a.require_token
+                ~token_present:a.token_present ~token_valid:a.token_valid
+                ~effective_agent:a.effective_agent
+                ~effective_role:a.effective_role
+                ~effective_admin:a.effective_admin
+                ~can_keeper_msg:a.can_keeper_msg
+                ~auth_error_code:a.auth_error_code
+                ~auth_error_detail:a.auth_error_detail
+            in
+            apply_auth_session_transition ~now ~next_session m1
+        | None -> (
+            match m1.auth_session with
+            | Rbac.Probing_single_user _ ->
+                let next_session =
+                  Rbac.Auth_unavailable
+                    {
+                      mode = Some Rbac.Single_user;
+                      reason = "dashboard shell omitted auth summary";
+                    }
+                in
+                apply_auth_session_transition ~now ~next_session m1
+            | Rbac.Single_user_local _
+            | Rbac.Single_user_auth_required _
+            | Rbac.Auth_unavailable _
+            | Rbac.Probing_health
+            | Rbac.Probing_multi_account _
+            | Rbac.Multi_account_signed_out _
+            | Rbac.Multi_account_signed_in _ ->
+                (m1, []))
+      else (m1, [])
   | Msg.Reply_dashboard_shell (Error err) ->
-      err_reply
-        ~fail:
-          (on_fleet (fun (x : Fleet_store.t) ->
-               { x with shell = failed_slot err x.shell }))
-        ~source:Health.Source_client_http ~ko:"대시보드 셸 조회"
-        ~en:"Dashboard shell fetch" err
+      let m_failed, inc_cmds =
+        err_reply
+          ~fail:
+            (on_fleet (fun (x : Fleet_store.t) ->
+                 { x with shell = failed_slot err x.shell }))
+          ~source:Health.Source_client_http ~ko:"대시보드 셸 조회"
+          ~en:"Dashboard shell fetch" err
+      in
+      if Rbac.is_single_user m_failed.auth_session then
+        let auth_methods = Rbac.auth_methods_of_session m_failed.auth_session in
+        let detail = Msg.http_error_detail err in
+        match err with
+        | Msg.Http_error { status = 401; _ } ->
+            let next_session =
+              Rbac.Single_user_auth_required
+                { auth_methods; reason = Rbac.Token_invalid detail }
+            in
+            apply_auth_session_transition ~now ~next_session m_failed
+        | Msg.Http_error { status = 403; _ } ->
+            let next_session =
+              Rbac.Single_user_auth_required
+                { auth_methods; reason = Rbac.Forbidden_credential detail }
+            in
+            apply_auth_session_transition ~now ~next_session m_failed
+        | Msg.Decode_error msg ->
+            let next_session =
+              Rbac.Auth_unavailable
+                { mode = Some Rbac.Single_user; reason = msg }
+            in
+            apply_auth_session_transition ~now ~next_session m_failed
+        | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _ ->
+            (m_failed, inc_cmds)
+      else (m_failed, inc_cmds)
   | Msg.Reply_keepers_roster (Ok roster) ->
       let fleet = Fleet_store.apply_roster ~observed_at:now roster m.fleet in
       let runtime =

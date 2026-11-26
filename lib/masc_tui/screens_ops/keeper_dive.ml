@@ -3987,6 +3987,11 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
   if Rect.is_empty rect then ()
   else
     let theme = Ops_common.theme_of_model model in
+    match Rbac_policy.decide_keeper_tab model.auth_session tab with
+    | Rbac.Denied reason ->
+        Masc_tui_screens_core.Render_util.draw_locked_panel grid ~cache ~rect
+          ~theme ~model ~title:(Nav.keeper_tab_label tab) ~reason
+    | Rbac.Allowed ->
     let turn_state = Chat_transcript.fresh_turn_state ~model ~keeper:name in
     let keeper_opt =
       Fleet_store.find_keeper ~name model.fleet

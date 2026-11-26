@@ -181,9 +181,10 @@ let apply_server_health ~now (m : Model.t)
       let freshness = { m.freshness with server_offline = false } in
       let overlay =
         match m.nav.overlay with
-        | Some (Nav.System_gate (Nav.Server_offline | Nav.Auth_gate)) -> None
+        | Some (Nav.System_gate Nav.Server_offline) -> None
         | Some
-            ( Nav.System_gate (Nav.Micro_viewport | Nav.Media_viewer)
+            ( Nav.System_gate
+                (Nav.Auth_gate | Nav.Micro_viewport | Nav.Media_viewer)
             | Nav.Palette
             | Nav.Settings _
             | Nav.Incidents
@@ -194,22 +195,33 @@ let apply_server_health ~now (m : Model.t)
         | None ->
             m.nav.overlay
       in
+      let auth_session, auth_probe_req =
+        match health.account_mode with
+        | Rbac.Single_user ->
+            ( Rbac.Probing_single_user { auth_methods = health.auth_methods }
+            , Cmd.Get_dashboard_shell )
+        | Rbac.Multi_account ->
+            ( Rbac.Probing_multi_account { auth_methods = health.auth_methods }
+            , Cmd.Get_auth_whoami )
+      in
       let next =
-        { m with server_identity; freshness; nav = { m.nav with overlay } }
+        {
+          m with
+          server_identity;
+          freshness;
+          auth_session;
+          last_auth_recheck_mono = None;
+          nav = { m.nav with overlay };
+        }
       in
       let guard_cmd =
         Cmd.Update_workspace_guard { instance_id; workspace_sha256 }
       in
       let sync_cmd =
-        Cmd.Sync_streams { epoch = next.epoch; streams = Subscriptions.plan next }
+        Cmd.Sync_streams { epoch = next.epoch; streams = [] }
       in
-      let detached = next.drafts.pending_txs
-          |> List.filter_map (fun (tx : Drafts.pending_message) ->
-               if tx.state = Drafts.Confirming_delivery then Some tx.keeper else None)
-          |> List.sort_uniq String.compare
-          |> List.concat_map (fun keeper -> View_fetches.chat_status_fetches ~keeper next) in
-      let boot_cmds = View_fetches.bootstrap_fetches next @ detached in
-      (next, (guard_cmd :: sync_cmd :: boot_cmds))
+      let probe_cmd = Cmd.Http_get { epoch = next.epoch; req = auth_probe_req } in
+      (next, [ guard_cmd; sync_cmd; probe_cmd ])
   | Error (Msg.Workspace_mismatch { expected_instance; observed_instance; message; _ }) ->
       Update_http.handle_workspace_mismatch ~now ~expected:expected_instance
         ~observed:observed_instance ~message m
@@ -297,7 +309,7 @@ let apply_voice_event ~now (m : Model.t) = function
 
 let step_raw ~now (m : Model.t) = function
   | Msg.Boot ->
-      ( m
+      ( { m with auth_session = Rbac.Probing_health; last_auth_recheck_mono = None }
       , [
           Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_health };
           Cmd.Voice_cmd Cmd.Probe_capabilities;
@@ -352,8 +364,14 @@ let step_raw ~now (m : Model.t) = function
         if wall_advanced then Model.sync_effective_scorecard ~now m' else m'
       in
       let due_oauth =
-        Keeper_context_store.pending_oauth_polls ~now ~wall_unix
-          next0.keeper_context
+        if
+          Rbac_policy.can_fetch_get next0.auth_session
+            (Cmd.Get_oauth_attempt_status
+               { keeper = ""; provider = ""; attempt_id = "" })
+        then
+          Keeper_context_store.pending_oauth_polls ~now ~wall_unix
+            next0.keeper_context
+        else []
       in
       (match due_oauth with
       | [] -> (next0, [])
@@ -387,6 +405,8 @@ let step_raw ~now (m : Model.t) = function
         {
           m with
           epoch = next_epoch;
+          auth_session = Rbac.Probing_health;
+          last_auth_recheck_mono = None;
           infra = Infra_store.forget_log_cursor m.infra;
         }
       in
@@ -809,9 +829,10 @@ let step ~now m msg =
     cmds
     |> reconcile_streams ~before:m ~after:next
     |> reconcile_memory_diagram ~before:m ~after:next
+    |> Rbac_policy.filter_cmds next.auth_session
   in
-  let next = reserve_board_view_read ~now next cmds in
-  let next = reserve_sandbox_view_reads ~now next cmds in
-  let next = reserve_work_reads ~now next cmds in
+  let next = reserve_board_view_read ~now next final_cmds in
+  let next = reserve_sandbox_view_reads ~now next final_cmds in
+  let next = reserve_work_reads ~now next final_cmds in
   let next = reserve_workspace_file_read ~now next final_cmds in
   (reserve_file_peek_read ~now next final_cmds, final_cmds)

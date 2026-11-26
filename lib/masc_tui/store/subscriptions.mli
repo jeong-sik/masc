@@ -21,6 +21,7 @@ val max_streams : int
 (** [3] ([max_persistent_streams + max_view_scoped_streams]). *)
 
 val is_persistent : stream_id -> bool
+val route_access_of_stream_id : stream_id -> Masc_tui_core.Rbac.route_access
 val equal_stream_id : stream_id -> stream_id -> bool
 val equal_stream_kind : stream_id -> stream_id -> bool
 (** Logical stream identity ignoring incremental [Stream_logs.since_seq] drift

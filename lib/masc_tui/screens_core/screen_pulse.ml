@@ -1118,12 +1118,15 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | None -> e.title)
           in
           let action_hint =
-            match e.kind with
-            | Health.Held_tool_approval _ -> "[Y/N]"
-            | Health.Pending_ask _ ->
-                Say.resolve lang (Say.make ~ko:"[Y] 답변" ~en:"[Y] Answer")
-            | Health.Goal_confirmation _ ->
-                Say.resolve lang (Say.make ~ko:"[Enter] 확인" ~en:"[Enter] Confirm")
+            if not (Rbac.is_allowed model.auth_session Rbac.Single_user_token_admin_only)
+            then ""
+            else
+              match e.kind with
+              | Health.Held_tool_approval _ -> "[Y/N]"
+              | Health.Pending_ask _ ->
+                  Say.resolve lang (Say.make ~ko:"[Y] 답변" ~en:"[Y] Answer")
+              | Health.Goal_confirmation _ ->
+                  Say.resolve lang (Say.make ~ko:"[Enter] 확인" ~en:"[Enter] Confirm")
           in
           let ah_w = Grapheme.display_width action_hint in
           let right_edge = Rect.right inner - pad_x in
@@ -2515,6 +2518,11 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
   if Rect.is_empty rect then ()
   else
     let theme = Theme.of_preset model.theme_preset in
+    match Rbac_policy.decide_workspace model.auth_session Nav.Pulse with
+    | Rbac.Denied reason ->
+        Render_util.draw_locked_panel grid ~cache ~rect ~theme ~model
+          ~title:(Nav.workspace_label Nav.Pulse) ~reason
+    | Rbac.Allowed ->
     let bp =
       Layout.classify_viewport ~cols:(Cell_grid.cols grid)
         ~rows:(Cell_grid.rows grid)

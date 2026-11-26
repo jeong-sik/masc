@@ -773,6 +773,8 @@ let test_keeper_owned_schedule_waiting_rows_are_lane_scoped () =
     1.0;
   check int "one keeper row" 1 (json_int_member "row_count" json);
   check int "one global row" 1 (json_int_member "global_row_count" json);
+  check bool "a reservation whose time has not come has no waiting age" true
+    (U.member "oldest_age_seconds" json = `Null);
   (match find_keeper json keeper_name with
    | None -> fail "keeper row missing"
    | Some keeper ->
@@ -806,6 +808,36 @@ let test_keeper_owned_schedule_waiting_rows_are_lane_scoped () =
     check string "global schedule id" "sched-global"
       U.(row |> member "detail" |> member "schedule_id" |> to_string)
   | rows -> failf "expected one global schedule row, got %d" (List.length rows)
+;;
+
+let test_due_schedule_waits_from_its_due_time () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "due-keeper" in
+  ensure_keeper config keeper_name;
+  ignore
+    (create_schedule_exn
+       config
+       ~schedule_id:"sched-due"
+       ~scheduled_by:(automated keeper_name)
+      : Schedule_domain.schedule_request);
+  (match Schedule_store.load_for_mutation config with
+   | Error _ -> fail "schedule store load failed"
+   | Ok state ->
+     let schedules = List.map (Schedule_domain.mark_due ~now:201.0) state.schedules in
+     (match Schedule_store.write_state config { state with schedules } with
+      | Ok _ -> ()
+      | Error _ -> fail "schedule store write failed"));
+  let json = Server_keeper_waiting_inventory.dashboard_json config in
+  (* Requested at 100, due at 200: the Keeper has waited since 200. *)
+  match U.(json |> member "rows" |> to_list) with
+  | [ row ] ->
+    check string "due schedule row" "schedule_waiting" (json_string_member "source" row);
+    check (float 0.0) "a due reservation waits from its due time" 200.0
+      U.(row |> member "since" |> to_number);
+    check bool "a due reservation has a waiting age" true
+      (U.member "oldest_age_seconds" json <> `Null)
+  | rows -> failf "expected one due schedule row, got %d" (List.length rows)
 ;;
 
 let test_live_turn_keeper_is_busy_without_waiting_rows () =
@@ -1669,6 +1701,8 @@ let () =
             test_unreadable_shutdown_keeps_fence_and_read_error
         ; test_case "keeper-owned schedule rows are lane scoped" `Quick
             test_keeper_owned_schedule_waiting_rows_are_lane_scoped
+        ; test_case "a due schedule waits from its due time" `Quick
+            test_due_schedule_waits_from_its_due_time
         ; test_case "keeper_wake schedule what prefers human summary" `Quick
             test_keeper_wake_schedule_what_prefers_human_summary
         ; test_case "scoped schedules preserve participants" `Quick test_scoped_schedules_keep_participant_identity

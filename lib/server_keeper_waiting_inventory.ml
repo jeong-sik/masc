@@ -980,7 +980,13 @@ let schedule_rows ?keeper_name ~keeper_names state =
         (match request.status with
          | Scheduled | Due | Running -> Schedule_runner
          | Succeeded | Failed | Cancelled | Expired -> Schedule_store)
-    ; since = Some request.requested_at
+    ; since =
+        (* A reservation waits from its due time. Before that it is listed
+           since it was requested; a recurring one keeps its first request
+           time across occurrences, which is weeks old. *)
+        (match request.status with
+         | Scheduled -> Some request.requested_at
+         | Due | Running | Succeeded | Failed | Cancelled | Expired -> Some request.due_at)
     ; due_at = Some request.due_at
     ; next_action = schedule_next_action request
     ; detail =
@@ -1670,8 +1676,13 @@ let dashboard_json_of_snapshot snapshot =
      array. The nested arrays stay for the per-keeper view; this is the same
      rows, not a second summary. *)
   let all_rows = all_keeper_rows @ global_rows in
+  (* The oldest wait is the oldest row something waits on. A reservation whose
+     time has not come is listed only: its [since] is when it was requested,
+     and a recurring reservation requested weeks ago would otherwise read as a
+     wait of weeks. *)
   let oldest_since =
     all_rows
+    |> List.filter holds_state
     |> List.filter_map (fun row -> row.since)
     |> List.fold_left
          (fun acc ts -> match acc with None -> Some ts | Some cur -> Some (min cur ts))

@@ -362,7 +362,7 @@ let test_external_subscriber_count_linearized_under_domain_contention () =
    so a connection is built without an [Obj.magic] stub. *)
 let test_stalled_after_s = 600.0
 
-let make_test_response ~clock =
+let make_test_response ~sw ~clock =
   let reqd_ref = ref None in
   let conn = Httpun.Server_connection.create (fun reqd -> reqd_ref := Some reqd) in
   let request = "GET /events HTTP/1.1\r\nHost: localhost\r\n\r\n" in
@@ -370,11 +370,11 @@ let make_test_response ~clock =
   let bs = Bigstringaf.of_string request ~off:0 ~len in
   ignore (Httpun.Server_connection.read conn bs ~off:0 ~len);
   let reqd = Option.get !reqd_ref in
-  Server_sse_response.respond ~clock ~stalled_after_s:test_stalled_after_s (Masc.Http_reqd.of_httpun reqd)
+  Server_sse_response.respond ~sw ~clock ~stalled_after_s:test_stalled_after_s (Masc.Http_reqd.of_httpun reqd)
     (Httpun.Response.create `OK)
 
-let make_test_sse_conn ~clock ?(session_id = "test") () =
-  Conn.make_sse_conn ~session_id ~client_id:0 ~response:(make_test_response ~clock) ()
+let make_test_sse_conn ~sw ~clock ?(session_id = "test") () =
+  Conn.make_sse_conn ~session_id ~client_id:0 ~response:(make_test_response ~sw ~clock) ()
 
 (* [close_sse_conn] resolves a one-shot stop
    promise.  Two close paths can race across domains once serving moves off the
@@ -397,7 +397,10 @@ let test_close_sse_conn_claim_race_at_most_one_winner () =
     let trials = 50_000 in
     (* A single real response is sufficient: the claim path never touches it,
        but using a real value removes the [Obj.magic] stub. *)
-    let response = Eio_main.run (fun env -> make_test_response ~clock:(Eio.Stdenv.clock env)) in
+    let response =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw -> make_test_response ~sw ~clock:(Eio.Stdenv.clock env)))
+    in
     let infos =
       Array.init trials (fun _ ->
         Conn.make_sse_conn ~session_id:"close-race" ~client_id:0 ~response ())
@@ -435,7 +438,8 @@ let test_close_sse_conn_claim_race_at_most_one_winner () =
 let test_close_sse_conn_idempotent () =
   let info =
     Eio_main.run (fun env ->
-      let info = make_test_sse_conn ~clock:(Eio.Stdenv.clock env) ~session_id:"close-idempotent" () in
+      Eio.Switch.run @@ fun sw ->
+      let info = make_test_sse_conn ~sw ~clock:(Eio.Stdenv.clock env) ~session_id:"close-idempotent" () in
       Conn.close_sse_conn info;
       Conn.close_sse_conn info;
       info)

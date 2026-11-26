@@ -219,7 +219,7 @@ let auth_config_failure =
 let chunked_ok =
   Httpun.Response.create ~headers:(Httpun.Headers.of_list [ "transfer-encoding", "chunked" ]) `OK
 
-let failing_routes ~sw:_ ~clock =
+let failing_routes ~sw ~clock =
   Masc.Http_server_eio.Router.create ()
   |> Server_route.get Server_route.Always_public "/early" (fun _request _reqd ->
     failwith early_failure)
@@ -254,7 +254,7 @@ let failing_routes ~sw:_ ~clock =
      instead of ending it as complete. *)
   |> Server_route.get Server_route.Always_public "/sse-failed" (fun _request reqd ->
     let response =
-      Server_sse_response.respond ~clock
+      Server_sse_response.respond ~sw ~clock
         ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
         ~flush_headers_immediately:true reqd chunked_ok
     in

@@ -394,13 +394,14 @@ let minimum_capacity_bytes = function
    alternative: a per-turn sliding cut changes the prefix on every request).
    [None] means no quantized cut is small enough and the caller must fall
    back to an exact cut — correctness outranks cache reuse. *)
-let quantized_drop ~available_bytes ~atom_count suffix =
+let quantized_drop ?(window_atoms : int option) ~available_bytes ~atom_count suffix =
+  let quantum = Option.value window_atoms ~default:atoms_per_window in
   let rec scan drop =
     if drop >= atom_count
     then None
     else if suffix.(drop) <= available_bytes
     then Some drop
-    else scan (drop + atoms_per_window)
+    else scan (drop + quantum)
   in
   scan 0
 ;;
@@ -460,6 +461,7 @@ let assemble ~allow_empty_history ~atom_count ~drop ~messages labelled =
 
 let project_with_drop
     ?(allow_empty_history = false)
+    ?window_atoms
     ~measure_message_bytes
     ~capacity_bytes
     ~reserved_bytes
@@ -496,7 +498,7 @@ let project_with_drop
     let per_atom, suffix =
       atom_suffix_bytes ~measure_message_bytes ~atom_count labelled
     in
-    match quantized_drop ~available_bytes ~atom_count suffix with
+    match quantized_drop ?window_atoms ~available_bytes ~atom_count suffix with
     | Some drop ->
       Ok
         { messages =
@@ -520,12 +522,13 @@ let project_with_drop
           })
 ;;
 
-let project ?(allow_empty_history = false) ~measure_message_bytes ~capacity_bytes
+let project ?(allow_empty_history = false) ?window_atoms ~measure_message_bytes ~capacity_bytes
     ~reserved_bytes messages =
   Result.map
     (fun projection -> projection.messages)
     (project_with_drop
        ~allow_empty_history
+       ?window_atoms
        ~measure_message_bytes
        ~capacity_bytes
        ~reserved_bytes

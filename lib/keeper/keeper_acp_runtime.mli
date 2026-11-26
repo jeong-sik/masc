@@ -129,6 +129,7 @@ module For_testing : sig
     :  context_used:int option
     -> context_size:int option
     -> input_limit:Llm_provider.Input_budget.t
+    -> threshold:float option
     -> (int * int) option
 
   val first_atom_of_sends_from : Agent_core.Types.message list -> sends_from:int -> int
@@ -148,6 +149,7 @@ module For_testing : sig
     -> string
 
   val rollover_threshold : float
+  val default_keep_ratio : float
 
   val record_rollover_marker
     :  base_path:string
@@ -166,7 +168,8 @@ module For_testing : sig
   val clear_rollover_marker : base_path:string -> keeper_id:string -> unit
 
   val split_older_for_rollover
-    :  Agent_core.Types.message list
+    :  ?keep_ratio:float
+    -> Agent_core.Types.message list
     -> Agent_core.Types.message list
 
   val prefer_handoff_for_start

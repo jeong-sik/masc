@@ -3338,6 +3338,7 @@
 (include stanzas/test_keeper_native_repetition_recovery.inc)
 
 (include stanzas/test_runtime_model_temperature_toml.inc)
+(include stanzas/test_runtime_context_threshold_toml.inc)
 
 (include stanzas/test_keeper_response_feedback.inc)
 

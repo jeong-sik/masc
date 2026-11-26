@@ -457,6 +457,32 @@ let probability_opt_field ~(path : string) ~(key : string) (tbl : Otoml.t)
     tbl
 ;;
 
+(* Per-model context-growth thresholds (masc#54868). These used to be code
+   constants ([rollover 0.80], [tail quantum 60 atoms], [keep newest quarter]);
+   the operator now declares them per model. Absent keeps the consumer
+   fallback (the same values), so an older file loads unchanged. *)
+let context_rollover_threshold_opt_field ~(path : string) (tbl : Otoml.t)
+  : (float option, parse_error list) result
+  =
+  bounded_number_opt_field
+    ~path
+    ~key:"context-rollover-threshold"
+    ~lower:0.0
+    ~upper:1.0
+    tbl
+;;
+
+let compaction_keep_ratio_opt_field ~(path : string) (tbl : Otoml.t)
+  : (float option, parse_error list) result
+  =
+  bounded_number_opt_field
+    ~path
+    ~key:"compaction-keep-ratio"
+    ~lower:0.0
+    ~upper:1.0
+    tbl
+;;
+
 let sampling_capability_errors
       ~(path : string)
       ~(capabilities : Runtime_schema.model_capabilities option)
@@ -559,6 +585,9 @@ let model_keys =
   ; "include-base"
   ; "reasoning-uncontrolled"
   ; "turn-timeout-s"
+  ; "context-rollover-threshold"
+  ; "tail-window-atoms"
+  ; "compaction-keep-ratio"
   ; Runtime_schema.explicit_context_cache_ttl_s_key
   ]
 ;;
@@ -650,6 +679,9 @@ let parse_model (id : string) (tbl : Otoml.t)
         ~default:false
     in
     let turn_timeout_result = turn_timeout_opt_field ~path tbl in
+    let context_rollover_result = context_rollover_threshold_opt_field ~path tbl in
+    let tail_window_result = positive_int_opt_field ~path ~key:"tail-window-atoms" tbl in
+    let keep_ratio_result = compaction_keep_ratio_opt_field ~path tbl in
     let explicit_context_cache_ttl_s_result =
       positive_int_opt_field
         ~path
@@ -700,6 +732,9 @@ let parse_model (id : string) (tbl : Otoml.t)
       | (Some _ | None), Some _ | None, None -> Ok ()
     in
     let* turn_timeout_s = turn_timeout_result in
+    let* context_rollover_threshold = context_rollover_result in
+    let* tail_window_atoms = tail_window_result in
+    let* compaction_keep_ratio = keep_ratio_result in
     let* explicit_context_cache_ttl_s = explicit_context_cache_ttl_s_result in
     match sampling_capability_errors ~path ~capabilities ~top_k ~min_p with
     | _ :: _ as errors -> Error errors
@@ -718,6 +753,9 @@ let parse_model (id : string) (tbl : Otoml.t)
         ; min_p
         ; reasoning_effort
         ; reasoning_uncontrolled
+        ; context_rollover_threshold
+        ; tail_window_atoms
+        ; compaction_keep_ratio
         ; turn_timeout_s
         ; explicit_context_cache_ttl_s
         ; capabilities

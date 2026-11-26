@@ -47,12 +47,13 @@ type rollover =
   ; limit_tokens : int
   }
 
-let rollover_of_usage ~context_used ~context_size ~input_limit =
+let rollover_of_usage ~context_used ~context_size ~input_limit ~threshold =
+  let threshold = Option.value threshold ~default:rollover_threshold in
   let limit_tokens = effective_context_limit_tokens ~context_size ~input_limit in
   match context_used with
   | Some used_tokens
     when used_tokens > 0
-         && Float.of_int used_tokens /. Float.of_int limit_tokens >= rollover_threshold ->
+         && Float.of_int used_tokens /. Float.of_int limit_tokens >= threshold ->
     Some { used_tokens; limit_tokens }
   | Some _ | None -> None
 ;;
@@ -1633,7 +1634,9 @@ let make_stream_projection
 
 (* ── Proactive compaction & shrink-retry helpers ─────────────────────────── *)
 
-let split_older_for_rollover (messages : Agent_core.Types.message list) =
+let default_keep_ratio = 0.25
+
+let split_older_for_rollover ?keep_ratio (messages : Agent_core.Types.message list) =
   (* Ignore synthetic preambles and slice strictly on [Runtime_model_input_tail_window]
      [Atom] boundaries so pinned entries (System, compaction anchors, working state,
      outside context) are never counted/evicted and [Assistant(tool_use)] +
@@ -1644,11 +1647,12 @@ let split_older_for_rollover (messages : Agent_core.Types.message list) =
          not (Runtime_model_input_tail_window.is_synthetic_preamble m))
       messages
   in
+  let ratio = Option.value keep_ratio ~default:default_keep_ratio in
   let labelled, atom_count = Runtime_model_input_tail_window.annotate without_preamble in
   if atom_count <= 2
   then []
   else (
-    let keep_recent = max 2 (atom_count / 4) in
+    let keep_recent = max 2 (int_of_float (Float.of_int atom_count *. ratio)) in
     let evict_atoms = max 1 (atom_count - keep_recent) in
     List.filter_map
       (fun (m, label) ->
@@ -1661,6 +1665,7 @@ let split_older_for_rollover (messages : Agent_core.Types.message list) =
 
 let compact_for_rollover
       ?blob_store
+      ?keep_ratio
       ~keepers_dir
       ~keeper_id
       ~(rollover : rollover)
@@ -1672,7 +1677,7 @@ let compact_for_rollover
     | Ok handoff when handoff.messages <> [] -> handoff.messages
     | Ok _ | Error _ -> fallback_messages
   in
-  let evicted_messages = split_older_for_rollover source_messages in
+  let evicted_messages = split_older_for_rollover ?keep_ratio source_messages in
   if evicted_messages = []
   then ()
   else (
@@ -1693,7 +1698,7 @@ let compact_for_rollover
     | Error err ->
       Log.Keeper.warn
         ~keeper_name:keeper_id
-        "proactive 80%% ACP context rollover compaction skipped: %s"
+        "proactive ACP context rollover compaction skipped: %s"
         (Keeper_compaction.store_error_to_string err))
 ;;
 
@@ -2887,6 +2892,7 @@ let run_without_lifecycle
         let compacted = compaction_detected ~prev_used ~cur_used in
         let rollover =
           rollover_of_usage
+            ~threshold:(Runtime.context_rollover_threshold_of_runtime_id runtime_id)
             ~context_used:cur_used
             ~context_size:prompt_res.usage.context_size
             ~input_limit
@@ -3358,6 +3364,7 @@ let run_without_lifecycle
          | Some rollover ->
           compact_for_rollover
             ~blob_store
+            ?keep_ratio:(Runtime.compaction_keep_ratio_of_runtime_id runtime_id)
             ~keepers_dir
             ~keeper_id:keeper_name
             ~rollover
@@ -3366,7 +3373,7 @@ let run_without_lifecycle
           record_rollover_marker ~base_path ~keeper_id:keeper_name ~runtime_id ~session_id;
           Log.Keeper.info
             ~keeper_name
-            "ACP context occupancy reached >=80%% (%d/%d tokens); compacted anchor and armed fresh session rollover"
+            "ACP context occupancy reached the rollover threshold (%d/%d tokens); compacted anchor and armed fresh session rollover"
             rollover.used_tokens
             rollover.limit_tokens
          | None ->
@@ -3471,6 +3478,7 @@ let overflow_trigger ~input_limit ~previous_capacity ~refused_sent_bytes ~capaci
 
 let compact_once_for_overflow_with
       ?blob_store
+      ?keep_ratio
       ~already_compacted
       ~keepers_dir
       ~keeper_id
@@ -3483,7 +3491,7 @@ let compact_once_for_overflow_with
   =
   if not !already_compacted
   then (
-    let evicted_messages = split_older_for_rollover initial_messages in
+    let evicted_messages = split_older_for_rollover ?keep_ratio initial_messages in
     if evicted_messages <> []
     then (
       let trigger =
@@ -3632,6 +3640,7 @@ let run
               force_fresh_retry := true;
               compact_once_for_overflow_with
                 ~blob_store
+                ?keep_ratio:(Runtime.compaction_keep_ratio_of_runtime_id runtime_id)
                 ~already_compacted:compacted_for_overflow
                 ~keepers_dir
                 ~keeper_id:keeper_name
@@ -3720,16 +3729,17 @@ module For_testing = struct
   let stop_reason_of_acp_stop_reason = stop_reason_of_acp_stop_reason
   let compaction_detected = compaction_detected
   let effective_context_limit_tokens = effective_context_limit_tokens
-  let rollover_of_usage ~context_used ~context_size ~input_limit =
+  let rollover_of_usage ~context_used ~context_size ~input_limit ~threshold =
     Option.map
       (fun { used_tokens; limit_tokens } -> used_tokens, limit_tokens)
-      (rollover_of_usage ~context_used ~context_size ~input_limit)
+      (rollover_of_usage ~context_used ~context_size ~input_limit ~threshold)
   ;;
 
   let first_atom_of_sends_from = first_atom_of_sends_from
   let should_fence_tool_call_started = should_fence_tool_call_started
   let process_config_sha256 = process_config_sha256
   let rollover_threshold = rollover_threshold
+  let default_keep_ratio = default_keep_ratio
   let record_rollover_marker = record_rollover_marker
   let rollover_marker_matches = rollover_marker_matches
   let clear_rollover_marker = clear_rollover_marker

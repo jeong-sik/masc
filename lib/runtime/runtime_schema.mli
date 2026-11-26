@@ -366,6 +366,9 @@ type model_spec =
             and only this says the silence was meant. Default [false]. *)
   ; reasoning_effort : Llm_provider.Reasoning_effort.t option
        [@equal fun a b -> a = b]
+  ; context_rollover_threshold : float option
+  ; tail_window_atoms : int option
+  ; compaction_keep_ratio : float option
   ; turn_timeout_s : float option
   ; explicit_context_cache_ttl_s : int option
     (** [models.<id>.explicit-context-cache-ttl-s] — positive TTL in seconds for

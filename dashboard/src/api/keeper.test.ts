@@ -891,7 +891,6 @@ describe('keeper runtime trace', () => {
       turn_id: 7,
       manifest_path: '/tmp/runtime-manifest.jsonl',
       manifest_path_present: true,
-      manifest_total_rows: 10,
       manifest_returned_rows: 8,
       receipt_returned_rows: 1,
       manifest_scan_diagnostics: {
@@ -983,7 +982,6 @@ describe('keeper runtime trace', () => {
       turn_id: 9,
       manifest_path: '/tmp/runtime-manifest.jsonl',
       manifest_path_present: true,
-      manifest_total_rows: 4,
       manifest_returned_rows: 4,
       receipt_returned_rows: 0,
       turn_identity: {},
@@ -1091,7 +1089,6 @@ describe('keeper runtime trace', () => {
         turn_id: 7,
         manifest_path: '/tmp/runtime-manifest.jsonl',
         manifest_path_present: true,
-        manifest_total_rows: 2,
         manifest_returned_rows: 2,
         receipt_returned_rows: 1,
 	        turn_identity: {

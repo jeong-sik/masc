@@ -89,7 +89,6 @@ function runtimeTrace(overrides: Partial<KeeperRuntimeTraceResponse> = {}): Keep
     turn_id: 7,
     manifest_path: '/tmp/manifest.jsonl',
     manifest_path_present: true,
-    manifest_total_rows: 6,
     manifest_returned_rows: 6,
     receipt_returned_rows: 1,
     turn_identity: { requested_keeper_turn_id: 7 },

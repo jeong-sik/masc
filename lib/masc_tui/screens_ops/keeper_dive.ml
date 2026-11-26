@@ -1968,43 +1968,40 @@ let render_memory_tab grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t
         List.iter
           (fun (ln : Update_nav.styled_line) ->
             if !y < bot then begin
-              let is_sel =
-                match ln.tone with
-                | Update_nav.Line_selected -> true
-                | Update_nav.Line_plain
-                | Update_nav.Line_section
-                | Update_nav.Line_ok
-                | Update_nav.Line_warn
-                | Update_nav.Line_error
-                | Update_nav.Line_accent ->
-                    false
+              let put st =
+                ignore
+                  (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
+                     ~max_w:content.w ~style:st ln.text)
               in
-              let row_rect =
-                Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1
-              in
-              let row_bg =
-                if is_sel then Color.of_rgb theme.selection_bg else bg
-              in
-              if is_sel then
-                Cell_grid.fill_rect ~clip:content grid ~rect:row_rect
-                  ~style:(Style.make ~fg:(Color.of_rgb theme.text_primary) ~bg:row_bg ())
-                  ();
-              let st =
-                match ln.tone with
-                | Update_nav.Line_selected -> Typography.anchor ~bg:row_bg theme
-                | Update_nav.Line_section | Update_nav.Line_accent ->
-                    Typography.status ~bg ~bold:true theme Theme.Status_active
-                | Update_nav.Line_error ->
-                    Typography.status ~bg theme Theme.Status_critical
-                | Update_nav.Line_warn ->
-                    Typography.status ~bg theme Theme.Status_attention
-                | Update_nav.Line_ok ->
-                    Typography.status ~bg theme Theme.Status_ok
-                | Update_nav.Line_plain -> Typography.structure ~bg theme
-              in
-              ignore
-                (Ops_common.put_line ~clip:content grid ~x:content.x ~y:!y
-                   ~max_w:content.w ~style:st ln.text);
+              (match ln.tone with
+              | Update_nav.Line_section ->
+                  let lbl =
+                    Option.value (Card.legacy_rule_label ln.text)
+                      ~default:ln.text
+                  in
+                  Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:content
+                    ~y:!y ~theme
+              | Update_nav.Line_selected ->
+                  let row_rect =
+                    Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1
+                  in
+                  let sel_bg = Color.of_rgb theme.selection_bg in
+                  Cell_grid.fill_rect ~clip:content grid ~rect:row_rect
+                    ~style:
+                      (Style.make ~fg:(Color.of_rgb theme.text_primary)
+                         ~bg:sel_bg ())
+                    ();
+                  put (Typography.anchor ~bg:sel_bg theme)
+              | Update_nav.Line_accent ->
+                  put
+                    (Typography.status ~bg ~bold:true theme Theme.Status_active)
+              | Update_nav.Line_error ->
+                  put (Typography.status ~bg theme Theme.Status_critical)
+              | Update_nav.Line_warn ->
+                  put (Typography.status ~bg theme Theme.Status_attention)
+              | Update_nav.Line_ok ->
+                  put (Typography.status ~bg theme Theme.Status_ok)
+              | Update_nav.Line_plain -> put (Typography.structure ~bg theme));
               incr y
             end)
           (Store_scroll.drop skip lines)

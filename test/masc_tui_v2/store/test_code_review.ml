@@ -239,7 +239,26 @@ let test_effective_diff_pane_width_and_side_by_side_gate () =
   Alcotest.(check bool) "189-col split with sidebar stays unified"
     false (L.side_by_side ~cols:w_189_docked);
   Alcotest.(check bool) "189-col split without sidebar fits side-by-side"
-    true (L.side_by_side ~cols:w_189_undocked)
+    true (L.side_by_side ~cols:w_189_undocked);
+  (* Short wide terminal (130x25) classifies as Compact and stacks vertically
+     with outer_margin=0 and pad_x=1, so the full 126-col diff pane fits
+     side-by-side — matching Screen_infra.render_code. *)
+  let w_130x25 =
+    L.effective_diff_pane_width ~viewport_rows:25 ~viewport_cols:130
+      ~sidebar_docked:false ()
+  in
+  Alcotest.(check int) "130x25 compact stacked diff pane width is 126"
+    126 w_130x25;
+  Alcotest.(check bool) "130x25 compact stacked diff pane fits side-by-side"
+    true (L.side_by_side ~cols:w_130x25);
+  (* Same 130 cols at 30 rows is Standard (horizontal 0.32/0.68 split), so the
+     right diff pane stays narrower than side_by_side_min_cols. *)
+  let w_130x30 =
+    L.effective_diff_pane_width ~viewport_rows:30 ~viewport_cols:130
+      ~sidebar_docked:false ()
+  in
+  Alcotest.(check bool) "130x30 standard split diff pane stays unified"
+    false (L.side_by_side ~cols:w_130x30)
 
 let () =
   Alcotest.run "code_review"

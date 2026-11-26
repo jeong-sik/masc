@@ -4075,26 +4075,38 @@ let render_fusion ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         in
         let max_s = Int.max 0 (List.length lines - Int.max 1 c.h) in
         let scroll = Int.min max_s (Int.max 0 rt.detail_scroll_offset) in
+        let bg = Color.of_rgb theme.surface_1 in
         List.iteri
           (fun i (ln : Update_nav.styled_line) ->
             let py = c.y + i in
             if py < Rect.bottom c then
-              let st =
-                match ln.tone with
-                | Update_nav.Line_warn ->
-                    H.status_style ~theme ~attrs:Attr.bold Theme.Status_attention
-                | Update_nav.Line_section | Update_nav.Line_accent ->
-                    H.accent_style ~theme ~attrs:Attr.bold ()
-                | Update_nav.Line_error ->
-                    H.status_style ~theme ~attrs:Attr.bold Theme.Status_critical
-                | Update_nav.Line_ok ->
-                    H.status_style ~theme ~attrs:Attr.bold Theme.Status_ok
-                | Update_nav.Line_plain | Update_nav.Line_selected ->
-                    H.text_style ~theme ()
+              let put st =
+                ignore
+                  (H.put_clipped ~grid ~clip:c ~x:c.x ~y:py ~max_w:c.w ~style:st
+                     ln.text)
               in
-              ignore
-                (H.put_clipped ~grid ~clip:c ~x:c.x ~y:py ~max_w:c.w ~style:st
-                   ln.text))
+              match ln.tone with
+              | Update_nav.Line_section ->
+                  let lbl =
+                    Option.value (Card.legacy_rule_label ln.text)
+                      ~default:ln.text
+                  in
+                  Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect:c ~y:py
+                    ~theme
+              | Update_nav.Line_warn ->
+                  put
+                    (H.status_style ~theme ~attrs:Attr.bold
+                       Theme.Status_attention)
+              | Update_nav.Line_accent ->
+                  put (H.accent_style ~theme ~attrs:Attr.bold ())
+              | Update_nav.Line_error ->
+                  put
+                    (H.status_style ~theme ~attrs:Attr.bold
+                       Theme.Status_critical)
+              | Update_nav.Line_ok ->
+                  put (H.status_style ~theme ~attrs:Attr.bold Theme.Status_ok)
+              | Update_nav.Line_plain | Update_nav.Line_selected ->
+                  put (H.text_style ~theme ()))
           (Store_scroll.drop scroll lines |> H.safe_take c.h)
   end
 

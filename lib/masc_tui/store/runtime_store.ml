@@ -2432,9 +2432,15 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
                   match Observed.to_option t.tool_quality with
                   | Some tq ->
                       let vis = max 1 (Option.value viewport_rows ~default:10) in
-                      max 0
-                        (List.length tq.by_tool
-                         + List.length tq.failure_categories + 8 - vis)
+                      let total_lines =
+                        4 + Int.min 20 (List.length tq.by_tool)
+                        + (if tq.failure_categories = [] then 0
+                           else
+                             2 + Int.min 12 (List.length tq.failure_categories))
+                        + (if tq.by_keeper = [] then 0
+                           else 2 + Int.min 10 (List.length tq.by_keeper))
+                      in
+                      max 0 (total_lines - vis)
                   | None -> 0)
             in
             let scroll_offset =

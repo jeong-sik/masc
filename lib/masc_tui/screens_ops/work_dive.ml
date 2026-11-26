@@ -196,23 +196,31 @@ let render_verification_dive ~req_id ~(model : Model.t) ~cache ~(rect : Rect.t)
                 (fun i (ln : Update_nav.styled_line) ->
                   let py = rect.y + i in
                   if py < Rect.bottom rect then
-                    let st =
-                      match ln.tone with
-                      | Update_nav.Line_warn ->
-                          Typography.status ~bg ~bold:true theme
-                            Theme.Status_attention
-                      | Update_nav.Line_error ->
-                          Typography.status ~bg theme Theme.Status_critical
-                      | Update_nav.Line_ok ->
-                          Typography.status ~bg theme Theme.Status_ok
-                      | Update_nav.Line_accent | Update_nav.Line_section ->
-                          Typography.accent ~bg ~bold:true theme
-                      | Update_nav.Line_plain | Update_nav.Line_selected ->
-                          Typography.primary ~bg theme
+                    let put st =
+                      ignore
+                        (Ops_common.put_line ~clip:rect grid ~x:rect.x ~y:py
+                           ~max_w:rect.w ~style:st ln.text)
                     in
-                    ignore
-                      (Ops_common.put_line ~clip:rect grid ~x:rect.x ~y:py
-                         ~max_w:rect.w ~style:st ln.text))
+                    match ln.tone with
+                    | Update_nav.Line_section ->
+                        let lbl =
+                          Option.value (Card.legacy_rule_label ln.text)
+                            ~default:ln.text
+                        in
+                        Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid ~rect
+                          ~y:py ~theme
+                    | Update_nav.Line_warn ->
+                        put
+                          (Typography.status ~bg ~bold:true theme
+                             Theme.Status_attention)
+                    | Update_nav.Line_error ->
+                        put (Typography.status ~bg theme Theme.Status_critical)
+                    | Update_nav.Line_ok ->
+                        put (Typography.status ~bg theme Theme.Status_ok)
+                    | Update_nav.Line_accent ->
+                        put (Typography.accent ~bg ~bold:true theme)
+                    | Update_nav.Line_plain | Update_nav.Line_selected ->
+                        put (Typography.primary ~bg theme))
                 (Store_scroll.drop scroll lines |> List.take rect.h)
           in
           let tab_lines =

@@ -2744,10 +2744,20 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
         if not (Rect.is_empty content) then begin
           let y = ref content.y and bot = Rect.bottom content in
           let msg_lines =
-            H.wrap_lines ~max_width:(Int.max 1 (content.w - 2)) e.message
+            Chat_transcript.wrap_plain_lines
+              ~width:(Int.max 1 (content.w - 2))
+              e.message
           in
           let msg_n = List.length msg_lines in
-          let eff_scroll = Int.max 0 inf.detail_scroll_offset in
+          let tree_lines =
+            Json_tree.flatten ~max_depth:5 ~redact_secrets:true e.details
+          in
+          let max_scroll =
+            Int.max 0 (msg_n + 2 + List.length tree_lines - Int.max 1 content.h)
+          in
+          let eff_scroll =
+            Int.min max_scroll (Int.max 0 inf.detail_scroll_offset)
+          in
           let msg_skip = Int.min msg_n eff_scroll in
           let vis_msg = Store_scroll.drop msg_skip msg_lines in
           let vis_msg_n = Int.min (List.length vis_msg) (Int.max 0 (bot - !y)) in
@@ -2778,12 +2788,9 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
               Rect.make ~x:content.x ~y:!y ~w:content.w ~h:tree_h
             in
             let tree_scroll = Int.max 0 (eff_scroll - (msg_n + 2)) in
-            let lines =
-              Json_tree.flatten ~max_depth:5 ~redact_secrets:true e.details
-            in
             ignore
               (Json_tree.draw grid ~rect:tree_rect ~theme
-                 ~scroll:tree_scroll lines)
+                 ~scroll:tree_scroll tree_lines)
           end
         end
     | Some (Infra_store.Entry_event ev) ->

@@ -20,10 +20,17 @@ val side_by_side_min_cols : int
     and new side by side. *)
 
 val effective_diff_pane_width :
-  ?zoomed:bool -> viewport_cols:int -> sidebar_docked:bool -> unit -> int
+  ?zoomed:bool ->
+  ?viewport_rows:int ->
+  viewport_cols:int ->
+  sidebar_docked:bool ->
+  unit ->
+  int
 (** Pure geometry SSOT computing the inner width of the right-hand diff pane in
-    [Infra > Code > Review] from terminal width, docked-sidebar visibility, and
-    zoom state, matching [Chrome.compute_layout] and [Screen_infra.render_code]. *)
+    [Infra > Code > Review] from terminal dimensions, docked-sidebar visibility,
+    and zoom state, matching [Chrome.compute_layout] and
+    [Screen_infra.render_code]. [viewport_rows] defaults to [40] when omitted so
+    width-only tests preserve wide-breakpoint behavior. *)
 
 val side_by_side : cols:int -> bool
 (** [true] iff the effective diff-pane width [cols] is at least

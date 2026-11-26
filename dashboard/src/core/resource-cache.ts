@@ -183,9 +183,12 @@ export class ResourceCache {
     const startEpoch = currentSessionEpoch()
 
     // Coalesce concurrent callers into the single in-flight request ONLY when
-    // no invalidation occurred after that in-flight request started.
+    // no invalidation occurred after that in-flight request started. A manual
+    // read never joins it: the operator asked to read now, and a request that
+    // does not answer would otherwise hold every later press with it.
     if (
-      entry.inFlight !== null
+      reason !== 'manual'
+      && entry.inFlight !== null
       && entry.epoch === startEpoch
       && entry.inFlightGen === entry.invalidationGen
     ) {
@@ -204,9 +207,10 @@ export class ResourceCache {
       return Promise.resolve(cur)
     }
 
-    // Supersede any stale in-flight request started under an older invalidation generation.
+    // Supersede the in-flight request: it started under an older invalidation
+    // generation, or a manual read replaces it.
     if (entry.abortController !== null) {
-      entry.abortController.abort('superseded_by_invalidation')
+      entry.abortController.abort(reason === 'manual' ? 'superseded_by_manual_read' : 'superseded_by_invalidation')
     }
     const controller = new AbortController()
     const fetchGen = entry.invalidationGen

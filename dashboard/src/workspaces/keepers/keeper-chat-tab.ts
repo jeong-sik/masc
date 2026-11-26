@@ -267,7 +267,15 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     })
     return () => { live = false }
   }, [discordEpoch, hasBearer, hasDiscordReplySource])
-  const [attachments, setAttachments] = useState<readonly ChatAttachmentDraft[]>([])
+  const [attachments, setAttachmentsState] = useState<readonly ChatAttachmentDraft[]>([])
+  const attachmentsRef = useRef<readonly ChatAttachmentDraft[]>([])
+  const setAttachments = useCallback((next: readonly ChatAttachmentDraft[] | ((cur: readonly ChatAttachmentDraft[]) => readonly ChatAttachmentDraft[])) => {
+    setAttachmentsState((cur) => {
+      const resolved = typeof next === 'function' ? next(cur) : next
+      attachmentsRef.current = resolved
+      return resolved
+    })
+  }, [])
   const [sending, setSending] = useState(false)
   const [followUpSubmitting, setFollowUpSubmitting] = useState(false)
   const [voiceBusy, setVoiceBusy] = useState(false)
@@ -1009,7 +1017,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const submitMessage = async (intent: 'queue' | 'steer') => {
     if (followUpSubmittingRef.current) return
     const trimmed = draftRef.current.trim()
-    if (!trimmed && attachments.length === 0) return
+    if (!trimmed && attachmentsRef.current.length === 0) return
 
     // `/btw <question>` shortcut inside main composer (bare `/btw` opens the side-query box)
     if (/^\/btw(?:\s|$)/.test(trimmed)) {
@@ -1038,7 +1046,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       operationId,
       deliveryState: 'Sending',
     }
-    const currentAttachments = [...attachments]
+    const currentAttachments = [...attachmentsRef.current]
 
     // While a turn is already streaming on the Layer 3 view-stream slot:
     // - Queue submits via a short-lived acceptance request so the active stream is NOT aborted.
@@ -1053,6 +1061,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         entries: prev.keeperName === targetKeeper ? [...prev.entries, userEntry] : [userEntry],
       }))
       draftRef.current = ''
+      attachmentsRef.current = []
       setDraft('')
       setAttachments([])
       queueMicrotask(() => composerRef.current?.focus())
@@ -1111,6 +1120,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         : [userEntry, assistantEntry],
     }))
     draftRef.current = ''
+    attachmentsRef.current = []
     setDraft('')
     setAttachments([])
     setSending(true)

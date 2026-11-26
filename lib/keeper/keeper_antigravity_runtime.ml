@@ -98,7 +98,7 @@ let runtime_error_to_core_error = function
                   "CLI file usage unobservable under fd pressure at the %d-file ceiling; retry after pressure passes (#43259)"
                   ceiling)
          })
-  | Runtime_antigravity.Timeout seconds ->
+  | Runtime_antigravity.Timeout { seconds; _ } ->
     Agent_core.Error.Api
       (Agent_core.Retry.Timeout
          { message = Printf.sprintf "Antigravity turn timed out after %.3fs" seconds

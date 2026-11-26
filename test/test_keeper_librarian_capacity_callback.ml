@@ -154,7 +154,7 @@ let test_native_context_receipt_flags () =
   let runtime_id = Fixture.cli_primary_runtime in
   let codex tool_effect_attempted = Fusion_official_client.Codex_failure
     (Runtime_codex_app_server.Context_window_exceeded
-      {message="original Codex context refusal";tool_effect_attempted}) in
+      {message="original Codex context refusal";tool_effect_attempted;response_emitted=false}) in
   let claude tool_effect_attempted response_emitted = Fusion_official_client.Claude_failure
     (Runtime_claude_code.Context_window_exceeded
       {message="original Claude context refusal";tool_effect_attempted;response_emitted}) in

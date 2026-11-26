@@ -3131,7 +3131,10 @@ let test_acp_failure_advances_timeout_standing_and_exception_handling () =
   assert (can_advance (F.Acp_failure (Acp.Spawn_refused (Process_eio.Executable_not_found "kimi"))));
   assert (can_advance (F.Acp_failure (Acp.Invalid_config "image_input_unsupported")));
   assert (can_advance (F.Acp_failure (Acp.Protocol_error { stage = "prompt"; detail = "eof" })));
-  assert (can_advance (F.Acp_failure (Acp.Timeout { stage = "prompt"; timeout_s = 30.0 })));
+  assert
+    (can_advance
+       (F.Acp_failure
+          (Acp.Timeout (Runtime_timeout_payload.of_acp ~stage:"prompt" ~timeout_s:30.0))));
   assert (can_advance (F.Acp_failure (Acp.Process_exited { detail = "exited 1"; stderr_tail = "" })));
   assert (can_advance (F.Acp_failure Acp.Client_closed));
   let acp ?(code = -32000) ?data message =

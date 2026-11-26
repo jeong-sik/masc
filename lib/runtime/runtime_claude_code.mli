@@ -535,7 +535,7 @@ type error =
           not something the client sent. The string is the exception. That
           catch-all re-raises [Out_of_memory], [Stack_overflow] and
           [Sys.Break] instead. *)
-  | Timeout of float
+  | Timeout of Runtime_timeout_payload.t
 
 val error_to_string : error -> string
 

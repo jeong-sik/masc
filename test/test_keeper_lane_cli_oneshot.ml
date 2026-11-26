@@ -1254,6 +1254,7 @@ let test_input_size_guard_and_refusal_classification () =
             (Runtime_codex_app_server.Context_window_exceeded
                { message = "context window exceeded"
                ; tool_effect_attempted = false
+               ; response_emitted = false
                })
       }
   in

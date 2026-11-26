@@ -1022,7 +1022,7 @@ let test_a_cli_that_answers_without_reading_the_prompt_does_not_hold_the_turn ()
         ~on_context_submission:(fun _ -> incr receipts)
         path
     with
-    | Error (Runtime_antigravity.Timeout seconds) ->
+    | Error (Runtime_antigravity.Timeout { seconds; _ }) ->
       check string "the child wrote the exact init and terminal frames to stdout"
         (String.concat "\n" frames ^ "\n")
         (In_channel.with_open_bin journal In_channel.input_all);
@@ -2055,7 +2055,7 @@ let test_stream_idle_timeout_is_typed () =
     [ init (); result () ]
     (fun path ->
        match run_fixture ~timeout_s:0.05 path with
-       | Error (Runtime_antigravity.Timeout seconds) ->
+       | Error (Runtime_antigravity.Timeout { seconds; _ }) ->
          check (float 0.001) "exact idle timeout" 0.05 seconds
        | Error error -> fail (Runtime_antigravity.error_to_string error)
        | Ok _ -> fail "silent Antigravity stream ignored its idle timeout")
@@ -2072,7 +2072,7 @@ let test_no_deadline_keeps_init_bounded () =
            ~no_turn_deadline:true
            path
        with
-       | Error (Runtime_antigravity.Timeout seconds) ->
+       | Error (Runtime_antigravity.Timeout { seconds; _ }) ->
          check (float 0.001) "admission timeout" 0.05 seconds
        | Error error -> fail (Runtime_antigravity.error_to_string error)
        | Ok _ -> fail "an unbounded turn disabled the Antigravity init bound")
@@ -2203,7 +2203,7 @@ let test_idle_window_rearms_when_the_tool_step_ends () =
                   | _ -> ())
                 path
             with
-            | Error (Runtime_antigravity.Timeout seconds) ->
+            | Error (Runtime_antigravity.Timeout { seconds; _ }) ->
               let outcome = if final_state = "DONE" then Runtime_native_tools.Completion_reported
                 else Runtime_native_tools.Error_reported in
               check bool (final_state ^ ": matching terminal tool update observed") true

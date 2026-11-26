@@ -1979,8 +1979,8 @@ let test_content_free_context_submission () =
   with_fixture ~terminal_line_delay_s:2.0
     [init_result;account_chatgpt;thread_result;turn_result;turn_completed] (fun path ->
     match run_fixture ~timeout_s:1.0 ~on_context_submission:observer_timeout path with
-    | Error (Client.Timeout {turn_accepted=true; _}) -> ()
-    | Error (Client.Timeout {turn_accepted=false; _}) ->
+    | Error (Client.Timeout {turn_accepted=Some true; _}) -> ()
+    | Error (Client.Timeout {turn_accepted=(Some false | None); _}) ->
       fail "observer timeout dropped the turn/start dispatch fence"
     | Error error -> fail (Client.error_to_string error)
     | Ok _ -> fail "silent app-server after observer timeout ignored its idle timeout");
@@ -3520,11 +3520,11 @@ let test_stream_idle_timeout_is_typed () =
        match run_fixture ~timeout_s:1.0 path with
        | Error
            (Runtime_codex_app_server.Timeout
-              { seconds; turn_accepted = true }) ->
+              { seconds; turn_accepted = Some true; _ }) ->
          check (float 0.001) "exact idle timeout" 1.0 seconds
        | Error
            (Runtime_codex_app_server.Timeout
-              { turn_accepted = false; _ }) ->
+              { turn_accepted = (Some false | None); _ }) ->
          fail "a sent turn/start request was classified as pre-dispatch"
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "silent app-server stream ignored its idle timeout")
@@ -3539,11 +3539,11 @@ let test_stream_idle_timeout_after_turn_acceptance_is_typed () =
        match run_fixture ~timeout_s:1.0 path with
        | Error
            (Runtime_codex_app_server.Timeout
-              { seconds; turn_accepted = true }) ->
+              { seconds; turn_accepted = Some true; _ }) ->
          check (float 0.001) "exact idle timeout" 1.0 seconds
        | Error
            (Runtime_codex_app_server.Timeout
-              { turn_accepted = false; _ }) ->
+              { turn_accepted = (Some false | None); _ }) ->
          fail "turn/start acceptance was lost before the idle timeout"
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "accepted turn ignored its idle timeout")
@@ -3688,7 +3688,7 @@ let test_idle_window_rearms_when_the_tool_item_completes () =
            ~admission_timeout_s:tool_item_admission_s
            path
        with
-       | Error (Runtime_codex_app_server.Timeout { seconds; turn_accepted = true }) ->
+       | Error (Runtime_codex_app_server.Timeout { seconds; turn_accepted = Some true; _ }) ->
          check (float 0.001) "the idle window is armed again" tool_item_idle_window_s seconds
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "silence after the item completed did not end the turn")
@@ -3746,7 +3746,7 @@ let test_the_model_speaking_arms_the_window_while_an_item_stays_open () =
            ~admission_timeout_s:tool_item_admission_s
            path
        with
-       | Error (Runtime_codex_app_server.Timeout { seconds; turn_accepted = true }) ->
+       | Error (Runtime_codex_app_server.Timeout { seconds; turn_accepted = Some true; _ }) ->
          check (float 0.001) "the model turn's window is armed" tool_item_idle_window_s seconds
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "an open background item switched the model turn's window off")
@@ -3798,7 +3798,7 @@ let test_worker_encoding_wait_is_bounded () =
                     config ~prompt:"fixture" ~images:[] in
                 (match outcome with
                  | Error (Runtime_codex_app_server.Timeout
-                            { seconds; turn_accepted = false }) ->
+                            { seconds; turn_accepted = (Some false | None); _ }) ->
                    check (float 0.001) (name ^ ": admission bound")
                      admission_timeout_s seconds
                  | Error error -> fail (Runtime_codex_app_server.error_to_string error)
@@ -3853,7 +3853,7 @@ let test_no_deadline_keeps_handshake_bounded () =
        with
        | Error
            (Runtime_codex_app_server.Timeout
-              { seconds; turn_accepted = false }) ->
+              { seconds; turn_accepted = (Some false | None); _ }) ->
          check (float 0.001) "admission timeout" 0.3 seconds
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "an unbounded turn disabled the app-server handshake bound")
@@ -3921,9 +3921,9 @@ let test_no_deadline_keeps_admission_bounded () =
           ~images:[])
     in
     match outcome with
-    | Error (Runtime_codex_app_server.Timeout { seconds; turn_accepted = false }) ->
+    | Error (Runtime_codex_app_server.Timeout { seconds; turn_accepted = (Some false | None); _ }) ->
       check (float 0.001) "admission timeout" 0.3 seconds
-    | Error (Runtime_codex_app_server.Timeout { turn_accepted = true; _ }) ->
+    | Error (Runtime_codex_app_server.Timeout { turn_accepted = Some true; _ }) ->
       fail "pre-dispatch admission timeout was marked turn-accepted"
     | Error error -> fail (Runtime_codex_app_server.error_to_string error)
     | Ok _ -> fail "no-deadline turn removed the admission timeout")
@@ -3971,11 +3971,11 @@ let test_no_deadline_keeps_turn_started_callback_bounded () =
        with
        | Error
            (Runtime_codex_app_server.Timeout
-              { seconds; turn_accepted = true }) ->
+              { seconds; turn_accepted = Some true; _ }) ->
          check (float 0.001) "host callback timeout" 0.3 seconds
        | Error
            (Runtime_codex_app_server.Timeout
-              { turn_accepted = false; _ }) ->
+              { turn_accepted = (Some false | None); _ }) ->
          fail "accepted turn callback timeout lost dispatch ambiguity"
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "no-deadline turn made the host state callback unbounded")
@@ -4017,13 +4017,13 @@ let test_no_deadline_keeps_post_accept_writes_bounded () =
        with
        | Error
            (Runtime_codex_app_server.Timeout
-              { seconds; turn_accepted = true }) ->
+              { seconds; turn_accepted = Some true; _ }) ->
          check (float 0.001) "post-accept write timeout" 0.3 seconds;
          check int "partial write is not complete delivery" 0 !response_writes;
          check int "the unwritten result has a durable owner" 1 (List.length !retained)
        | Error
            (Runtime_codex_app_server.Timeout
-              { turn_accepted = false; _ }) ->
+              { turn_accepted = (Some false | None); _ }) ->
          fail "post-accept write timeout lost dispatch ambiguity"
        | Error error -> fail (Runtime_codex_app_server.error_to_string error)
        | Ok _ -> fail "no-deadline turn made a post-accept tool write unbounded")

@@ -1273,7 +1273,7 @@ assert not pathlib.Path("native-effect.txt").exists()|}, "read\n"
       | `Process_exit ->
         None, "raise SystemExit(17)\n", Some (Runtime_antigravity.Process_exited "exit code 17")
       | `Idle_timeout ->
-        Some 1.0, "import threading\nthreading.Event().wait()\n", Some (Runtime_antigravity.Timeout 1.0)
+        Some 1.0, "import threading\nthreading.Event().wait()\n", Some (Runtime_antigravity.Timeout (Runtime_timeout_payload.of_seconds 1.0))
       | `Fd_abort count ->
         None, "import threading\nthreading.Event().wait()\n",
         Some (Runtime_antigravity.Child_fd_ceiling_exceeded

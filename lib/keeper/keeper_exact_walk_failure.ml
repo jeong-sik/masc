@@ -282,7 +282,10 @@ type cli_observation = { runtime_id : string; cause : cli_cause } [@@deriving yo
 let native_cause (cause : Fusion_official_client.failure) =
   match cause with
   | Codex_failure
-      (Runtime_codex_app_server.Context_window_exceeded { message; tool_effect_attempted }) ->
+      (Runtime_codex_app_server.Context_window_exceeded { message; tool_effect_attempted; _ }) ->
+    (* The [response_emitted] axis stays on the adapter error for parity
+       but is not projected here, as the Codex fence reads only the
+       tool-effect axis. *)
     Codex_context_refused {message;tool_effect_attempted}
   | Claude_failure
       (Runtime_claude_code.Context_window_exceeded

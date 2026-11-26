@@ -2405,7 +2405,7 @@ for line in sys.stdin:
 (* Behavioral F1 proof: a non-default [admission_timeout_s] must reach the
    [session/new] RPC deadline. The mock answers [initialize] immediately (so
    [start] succeeds) but delays [session/new] past the configured 0.5s budget;
-   the client must fail with [Timeout { timeout_s = 0.5 }] — the configured
+   the client must fail with [Timeout { seconds = 0.5; _ }] — the configured
    value, not the module default. Without the SSOT fix the client would hang
    until the hardcoded 30s literal (this test would never finish). *)
 let test_nondefault_admission_timeout_reaches_session_new () =
@@ -2461,10 +2461,10 @@ for line in sys.stdin:
           | Error err -> failf "mock ACP start failed: %s" (Runtime_acp_client.error_to_string err)
         in
         (match Runtime_acp_client.new_session client ~cwd:tmp () with
-         | Error (Runtime_acp_client.Timeout { stage; timeout_s }) ->
+         | Error (Runtime_acp_client.Timeout { seconds; stage = Some stage; _ }) ->
            check string "timeout stage is session/new" "session/new" stage;
            check bool "timeout_s is the configured non-default value" true
-             (Float.abs (timeout_s -. 0.5) < 0.0001)
+             (Float.abs (seconds -. 0.5) < 0.0001)
          | Ok _ -> fail "session/new must time out after 0.5s"
          | Error err ->
            failf "expected Timeout, got %s" (Runtime_acp_client.error_to_string err));
@@ -3142,7 +3142,7 @@ for line in sys.stdin:
              ~permission_policy:policy
              ()
          with
-         | Error (Runtime_acp_client.Timeout { stage = "session/prompt"; _ }) -> ()
+         | Error (Runtime_acp_client.Timeout { stage = Some "session/prompt"; _ }) -> ()
          | Ok _ -> fail "silent hang unexpectedly succeeded"
          | Error err ->
            failf "expected Timeout for silent hang, got %s"
@@ -3482,7 +3482,8 @@ let test_acp_rpc_error_classification_pool_preservation_and_scopes () =
     (Keeper_acp_runtime.For_testing.should_evict_persistent_child_on_error auth_err);
   check bool "timeout evicts persistent ACP child" true
     (Keeper_acp_runtime.For_testing.should_evict_persistent_child_on_error
-       (Runtime_acp_client.Timeout { stage = "session/prompt"; timeout_s = 120.0 }));
+       (Runtime_acp_client.Timeout
+          (Runtime_timeout_payload.of_acp ~stage:"session/prompt" ~timeout_s:120.0)));
   (* Fusion official client standing classification for ACP & Antigravity *)
   let check_standing label obs pred =
     check bool label true (pred obs)

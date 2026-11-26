@@ -385,6 +385,10 @@ type error =
   | Context_window_exceeded of
       { message : string
       ; tool_effect_attempted : bool
+      ; response_emitted : bool
+        (** Derived from observed streamed/final text at the producer; the
+            keeper fence intentionally reads only [tool_effect_attempted]
+            (see the Codex runtime). *)
       }
   | Turn_failed of
       { detail : string
@@ -404,15 +408,13 @@ type error =
       (** [turn_accepted] is false when the client died before [turn/start] was
           accepted, which means no turn was submitted and another candidate may
           still be tried. *)
-  | Timeout of
-      { seconds : float
-      ; turn_accepted : bool
-        (** [true] when [turn/start] was accepted before the protocol went
-            silent: the upstream turn may still be executing (and committing
-            effects) server-side, so the outcome is ambiguous and must not
-            trigger lane rotation. [false] means nothing was started upstream
-            and retrying elsewhere is safe. *)
-      }
+  | Timeout of Runtime_timeout_payload.t
+      (** Shared payload; Codex producers set [turn_accepted = Some] so the
+          keeper fence branch stays exact: [Some true] when [turn/start] was
+          accepted before the protocol went silent (the upstream turn may
+          still be executing server-side, so the outcome is ambiguous and
+          must not trigger lane rotation), [Some false] when nothing was
+          started upstream and retrying elsewhere is safe. *)
 
 val prompt_char_count : string -> (int, string) result
 (** Count Unicode scalar values in the exact submitted prompt, matching Codex's

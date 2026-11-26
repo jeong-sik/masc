@@ -598,17 +598,22 @@ let test_client_timeouts_project_to_timeout () =
     Fusion_types.equal_panel_failure (project failure) Fusion_types.Timeout
   in
   check bool "Claude turn timeout" true
-    (is_timeout (Masc.Fusion_official_client.Claude_failure (Runtime_claude_code.Timeout 3.0)));
+    (is_timeout
+       (Masc.Fusion_official_client.Claude_failure
+          (Runtime_claude_code.Timeout (Runtime_timeout_payload.of_seconds 3.0))));
   check bool "Claude admission timeout" true
     (is_timeout
-       (Masc.Fusion_official_client.Claude_admission_failure (Runtime_claude_code.Timeout 3.0)));
+       (Masc.Fusion_official_client.Claude_admission_failure
+          (Runtime_claude_code.Timeout (Runtime_timeout_payload.of_seconds 3.0))));
   check bool "Codex timeout" true
     (is_timeout
        (Masc.Fusion_official_client.Codex_failure
-          (Runtime_codex_app_server.Timeout { seconds = 3.0; turn_accepted = false })));
+          (Runtime_codex_app_server.Timeout
+             (Runtime_timeout_payload.of_codex ~seconds:3.0 ~turn_accepted:false))));
   check bool "Antigravity timeout" true
     (is_timeout
-       (Masc.Fusion_official_client.Antigravity_failure (Runtime_antigravity.Timeout 3.0)));
+       (Masc.Fusion_official_client.Antigravity_failure
+          (Runtime_antigravity.Timeout (Runtime_timeout_payload.of_seconds 3.0))));
   let turn_failed =
     Masc.Fusion_official_client.Claude_failure (Runtime_claude_code.Turn_failed "boom")
   in
@@ -632,7 +637,8 @@ let test_client_timeouts_project_to_timeout () =
     [ Runtime_antigravity.Canceled; Interrupted; Invalid; Waiting; Running ];
   let detail =
     Masc.Fusion_official_client.failure_detail ~runtime_id:official_client_runtime
-      (Masc.Fusion_official_client.Claude_failure (Runtime_claude_code.Timeout 3.0))
+      (Masc.Fusion_official_client.Claude_failure
+         (Runtime_claude_code.Timeout (Runtime_timeout_payload.of_seconds 3.0)))
   in
   check bool "the detail line names the runtime" true
     (String.starts_with ~prefix:(official_client_runtime ^ ": ") detail);

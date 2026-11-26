@@ -1203,7 +1203,7 @@ let render_with_history_rows
       && not open_memory_diagram_for_selected
     in
     if
-      (model.nav.zoomed || open_memory_diagram_for_selected)
+      (Model.is_zoomed_active model || open_memory_diagram_for_selected)
       && Option.is_some selected_keeper_name_opt
     then
       match selected_keeper_name_opt with

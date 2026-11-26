@@ -611,7 +611,7 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
       && Option.is_none (Model.active_inspector model)
       && Nav.equal_workspace model.nav.workspace Nav.Keepers
       && Option.is_some (Model.selected_keeper_name model)
-      && (model.nav.pane_index >= 1 || model.nav.zoomed)
+      && (model.nav.pane_index >= 1 || Model.is_zoomed_active model)
     in
     let keeper_focus_hint =
       keeper_focus_context
@@ -642,7 +642,7 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
           else Say.resolve lang (Say.make ~ko:"[Esc] 뒤로" ~en:"[Esc] Back")
         in
         (txt, whisper_style)
-      else if model.nav.zoomed && Model.can_zoom_current_view model then
+      else if Model.is_zoomed_active model then
         let txt =
           if compact then "[z/Esc]"
           else if Model.is_keeper_config_active model then
@@ -889,7 +889,7 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
                 selected, show the selected keeper's inner preview tabs instead
                 of Fleet modes. *)
              match
-               if model.nav.pane_index >= 1 || model.nav.zoomed then
+               if model.nav.pane_index >= 1 || Model.is_zoomed_active model then
                  Model.selected_keeper_name model
                else None
              with
@@ -1429,8 +1429,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               Nav.equal_workspace model.nav.workspace Nav.Pulse
               || Model.is_in_keeper_chat model
               || (Nav.equal_workspace model.nav.workspace Nav.Keepers
-                  && model.nav.zoomed
-                  && Model.can_zoom_current_view model)
+                  && Model.is_zoomed_active model)
         in
         let tab_relabel_opt =
           match model.nav.overlay with
@@ -1485,7 +1484,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           || model.nav.filter_focused
           || Model.sidebar_has_focus model
           || Model.sidebar_drawer_open model
-          || (model.nav.zoomed && Model.can_zoom_current_view model)
+          || Model.is_zoomed_active model
           || (Model.is_board_detail_active model
               &&
               match model.knowledge.thread_view with
@@ -1536,7 +1535,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               && Nav.equal_keeper_tab model.fleet.keeper_dive_tab
                    Nav.Keeper_work_sandbox
               && (model.nav.pane_index >= 1
-                 || (model.nav.zoomed && Model.can_zoom_current_view model))
+                 || Model.is_zoomed_active model)
               &&
               match Model.selected_keeper_name model with
               | Some name ->
@@ -2152,7 +2151,7 @@ let render_frame ~(model : Model.t) ~cache ~render_body ~render_overlay grid =
             && Option.is_none (Model.active_inspector model)
             && Nav.equal_workspace model.nav.workspace Nav.Keepers
             && Nav.equal_keeper_tab model.fleet.keeper_dive_tab Nav.Keeper_chat
-            && (model.nav.zoomed
+            && (Model.is_zoomed_active model
                 || Model.uses_keeper_split ~width:layout.body.w model)
             && Option.equal String.equal (Model.selected_keeper_name model)
                  (Some comp_st.target_keeper)

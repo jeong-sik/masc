@@ -1073,8 +1073,10 @@ let can_zoom_current_view m =
                 true)
         | Nav.Pulse -> false)
 
+let is_zoomed_active m = m.nav.zoomed && can_zoom_current_view m
+
 let work_pipeline_has_linked_card m =
-  (not (m.nav.zoomed && can_zoom_current_view m))
+  (not (is_zoomed_active m))
   && inner_body_width m >= 96 && inner_body_height m >= 15
 
 let work_pipeline_verifs_visible m =
@@ -1087,14 +1089,14 @@ let is_work_goal_zoomed m =
   && Option.is_none (active_inspector m)
   && Nav.equal_workspace m.nav.workspace Nav.Work
   && Nav.equal_work_tab m.work.active_tab Nav.Work_pipeline
-  && m.nav.zoomed && can_zoom_current_view m
+  && is_zoomed_active m
 
 let is_work_task_zoomed m =
   Option.is_none m.nav.overlay
   && Option.is_none (active_inspector m)
   && Nav.equal_workspace m.nav.workspace Nav.Work
   && Nav.equal_work_tab m.work.active_tab Nav.Work_tasks
-  && m.nav.zoomed && can_zoom_current_view m
+  && is_zoomed_active m
 
 let has_preserved_ask_return (nav : nav_state) =
   let has_ask_in_inspector_return = function

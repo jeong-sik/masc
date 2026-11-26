@@ -1339,7 +1339,7 @@ let format_footer_line hints =
   String.concat footer_separator
     (List.map (fun (h : footer_hint) -> h.key_display ^ " " ^ h.label) hints)
 
-let contextual_memory_help_entries ~lang =
+let contextual_help_entries ~lang =
   [
     {
       keys = [ "." ];
@@ -1360,6 +1360,46 @@ let contextual_memory_help_entries ~lang =
              ~en:"Memory diagram open: cycle Auto (Pele) / Mermaid / Tree");
       slash_twin = None;
       action = Cycle_memory_view;
+    };
+    {
+      keys = [ "D" ];
+      desc =
+        Say.resolve lang
+          (Say.make
+             ~ko:"[기억 Diff 뷰] 비교 리비전 범위 고정/해제"
+             ~en:"[Memory Diff view] Pin / unpin diff revision range");
+      slash_twin = None;
+      action = Toggle_memory_scope;
+    };
+    {
+      keys = [ "M" ];
+      desc =
+        Say.resolve lang
+          (Say.make
+             ~ko:"[산출물 탭] 산출물 미디어 뷰어 열기"
+             ~en:"[Artifacts] Open artifact media viewer");
+      slash_twin = None;
+      action = Toggle_memory_chart;
+    };
+    {
+      keys = [ "n" ];
+      desc =
+        Say.resolve lang
+          (Say.make
+             ~ko:"[대기열 서랍 Ctrl+T] 선택한 대기 요청 지금/다음에 실행"
+             ~en:"[Queue Drawer Ctrl+T] Run waiting request next / now");
+      slash_twin = None;
+      action = Context_primary_action;
+    };
+    {
+      keys = [ "m" ];
+      desc =
+        Say.resolve lang
+          (Say.make
+             ~ko:"[전역] 터미널 마우스 캡처 켜기/끄기 (드래그 선택 전환)"
+             ~en:"[Global] Toggle terminal mouse capture (text selection mode)");
+      slash_twin = None;
+      action = Cycle_view_mode;
     };
   ]
 
@@ -1413,7 +1453,7 @@ let help_entries ~scope_chain ~lang =
       in
       let entries =
         if include_contextual_memory && equal_help_category category Cat_actions
-        then entries @ contextual_memory_help_entries ~lang
+        then entries @ contextual_help_entries ~lang
         else entries
       in
       match entries with
@@ -1558,7 +1598,7 @@ let render_markdown_reference ?(lang = Say.Lang_en) () =
   List.iter
     (fun (e : help_entry) ->
       let key_s = String.concat "/" e.keys in
-      Printf.bprintf buf "| Memory Explorer (Contextual) | Monitor-first bare | `%s` | — | %s |\n"
+      Printf.bprintf buf "| Contextual | Monitor-first bare | `%s` | — | %s |\n"
         key_s e.desc)
-    (contextual_memory_help_entries ~lang);
+    (contextual_help_entries ~lang);
   Buffer.contents buf

@@ -8560,13 +8560,14 @@ let knowledge_detail_max_scroll (m : Model.t) =
     | [ _; b ] -> b
     | _ -> br
   in
+  let zoomed = Model.is_zoomed_active m in
   match k.active_tab with
   | Nav.Knowledge_board -> (
       match Knowledge_store.board_detail_post k with
       | None -> 0
       | Some p ->
           let right_rect =
-            if m.nav.zoomed then body_after_bar
+            if zoomed then body_after_bar
             else
               snd
                 (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
@@ -8639,7 +8640,7 @@ let knowledge_detail_max_scroll (m : Model.t) =
               let eff_h = if has_indicator then rem - 1 else rem in
               max 0 (total_lines - max 1 eff_h))
   | Nav.Knowledge_wiki ->
-      if m.nav.zoomed then
+      if zoomed then
         let main_rect, _ =
           Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
             ~left_ratio:0.66 ~top_ratio:0.68 bp body_after_bar
@@ -8659,7 +8660,7 @@ let knowledge_detail_max_scroll (m : Model.t) =
       | None -> 0
       | Some a ->
           let right_rect =
-            if m.nav.zoomed then body_after_bar
+            if zoomed then body_after_bar
             else
               snd
                 (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
@@ -8717,7 +8718,7 @@ let knowledge_detail_max_scroll (m : Model.t) =
             match detail_opt with
             | Some d when d.revisions <> [] -> 1 + List.length d.revisions
             | Some _ | None ->
-                if not m.nav.zoomed then 0
+                if not zoomed then 0
                 else (
                   match Observed.to_option k.artifacts with
                   | Some items when List.length items > 1 ->
@@ -8732,7 +8733,7 @@ let knowledge_detail_max_scroll (m : Model.t) =
           max 0 (total_rows - doc_h))
   | Nav.Knowledge_memory -> (
       let right_rect =
-        if m.nav.zoomed then body_after_bar
+        if zoomed then body_after_bar
         else
           snd
             (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
@@ -8754,7 +8755,7 @@ let work_detail_max_scroll (m : Model.t) =
   let bp = ui_bp m in
   let br = ui_body_rect m in
   let theme = Theme.of_preset m.theme_preset in
-  let zoomed = m.nav.zoomed && Model.can_zoom_current_view m in
+  let zoomed = Model.is_zoomed_active m in
   match m.work.active_tab with
   | Nav.Work_pipeline -> (
       match Work_store.selected_goal m.work with

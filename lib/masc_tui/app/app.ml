@@ -155,12 +155,9 @@ type memory_graphic_step = {
   next_state : memory_graphic_state option;
 }
 
-let wrap_tmux ~in_tmux payload =
-  if in_tmux then Graphics.tmux_wrapped payload else payload
-
 let teardown_memory_graphic_bytes ~in_tmux = function
   | Some { protocol = Graphics.Kitty_protocol; _ } ->
-      wrap_tmux ~in_tmux
+      Graphics.maybe_tmux_wrapped ~in_tmux
         (Graphics.delete_image
            ~image_id:(Graphics.image_id Graphics.Memory_diagram))
   | Some { protocol = Graphics.ITerm2_protocol | Graphics.Unsupported_protocol; _ }
@@ -261,23 +258,19 @@ let plan_memory_graphic_place ~active ~probe ~term_program ~in_tmux ~model
               Graphics.fit_cells ~cell_pixels:probe.cell_pixels
                 ~image_pixels:pixel_size ~columns:next.rect.w ~rows:next.rect.h
             in
-            wrap_tmux ~in_tmux
-              (Graphics.replace_png
-                 ~image_id:(Graphics.image_id Graphics.Memory_diagram)
-                 ~placement_id:1 ~data:png ~rows ~cols ~crop:None)
+            Graphics.replace_png
+              ~image_id:(Graphics.image_id Graphics.Memory_diagram)
+              ~placement_id:1 ~data:png ~rows ~cols ~crop:None
         | Graphics.ITerm2_protocol ->
-            wrap_tmux ~in_tmux
-              (Graphics.iterm2_place ~data:png
-                 { Graphics.columns = next.rect.w; rows = next.rect.h })
+            Graphics.iterm2_place ~data:png
+              { Graphics.columns = next.rect.w; rows = next.rect.h }
         | Graphics.Unsupported_protocol -> ""
       in
-      if String.equal payload "" then ("", None)
-      else
-        let bytes =
-          Printf.sprintf "\x1b7\x1b[%d;%dH%s\x1b8" (next.rect.y + 1)
-            (next.rect.x + 1) payload
-        in
-        (bytes, Some next)
+      let bytes =
+        Graphics.place_at_cursor ~in_tmux ~row:(next.rect.y + 1)
+          ~col:(next.rect.x + 1) payload
+      in
+      if String.equal bytes "" then ("", None) else (bytes, Some next)
 
 let step_memory_graphic ~active ~probe ~term_program ~in_tmux ~model
     ~full_repaint =
@@ -613,7 +606,7 @@ let visible_harness_or_keeper_progress_interval (m : Model.t) =
         | None ->
             if Nav.equal_workspace m.nav.workspace Nav.Keepers
                && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
-               && (m.nav.zoomed || Model.uses_keeper_split ~width:m.viewport.cols m)
+               && (Model.is_zoomed_active m || Model.uses_keeper_split ~width:m.viewport.cols m)
             then Model.selected_keeper_name m
             else None
         | Some _ -> None

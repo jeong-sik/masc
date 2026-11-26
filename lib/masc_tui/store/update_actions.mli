@@ -30,3 +30,10 @@ val step_artifact_search :
 
 val open_goal_confirmation_proof_modal :
   Model.t -> goal_id:string -> criterion_revision:string -> Model.t * Cmd.t list
+
+val open_runtime_assign_modal :
+  Model.t ->
+  ?keeper_default:string ->
+  ?runtime_default:string ->
+  unit ->
+  Model.t * Cmd.t list

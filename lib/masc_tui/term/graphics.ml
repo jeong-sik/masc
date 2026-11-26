@@ -16,6 +16,8 @@ let fit_rows ~cell_pixels ~image_pixels ~columns ~rows =
       max 1 (int_of_float (min (float_of_int (max 1 rows)) allowed))
   | Some _, Some _ | Some _, None | None, Some _ | None, None -> max 1 rows
 
+let default_cell_pixels = (8, 16)
+
 let fit_cells ~cell_pixels ~image_pixels ~columns ~rows =
   let max_cols = max 1 columns in
   let max_rows = max 1 rows in
@@ -24,7 +26,7 @@ let fit_cells ~cell_pixels ~image_pixels ~columns ~rows =
       let cw, ch =
         match cell_pixels with
         | Some (w, h) when w > 0 && h > 0 -> (w, h)
-        | Some _ | None -> (8, 16)
+        | Some _ | None -> default_cell_pixels
       in
       let box_w_px = float_of_int max_cols *. float_of_int cw in
       let box_h_px = float_of_int max_rows *. float_of_int ch in
@@ -419,6 +421,15 @@ let tmux_wrapped payload =
       String.concat "\x1b\x1b" (String.split_on_char '\x1b' payload)
     in
     "\x1bPtmux;" ^ escaped ^ "\x1b\\"
+
+let maybe_tmux_wrapped ~in_tmux payload =
+  if in_tmux then tmux_wrapped payload else payload
+
+let place_at_cursor ~in_tmux ~row ~col payload =
+  if String.length payload = 0 then ""
+  else
+    Printf.sprintf "\x1b7\x1b[%d;%dH%s\x1b8" row col
+      (maybe_tmux_wrapped ~in_tmux payload)
 
 type image_region = {
   top : int;

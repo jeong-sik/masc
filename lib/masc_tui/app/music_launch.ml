@@ -117,11 +117,6 @@ let close_quietly fd =
   | () -> ()
   | exception Unix.Unix_error _ -> ()
 
-let rec utf8_prefix text length =
-  let prefix = String.sub text 0 length in
-  if length = 0 || String.is_valid_utf_8 prefix then prefix
-  else utf8_prefix text (length - 1)
-
 (* The last non-blank line, with control bytes blanked so a stray escape
    sequence cannot move the terminal's cursor, cut at a scalar boundary. *)
 let last_line text =
@@ -132,9 +127,11 @@ let last_line text =
   match List.rev (List.filter non_blank (String.split_on_char '\n' text)) with
   | [] -> None
   | line :: _ ->
-      let cleaned = String.map blank_control (String.trim line) in
+      let cleaned =
+        String_util.sanitize_utf8 (String.map blank_control (String.trim line))
+      in
       let shown =
-        utf8_prefix cleaned (Int.min stderr_detail_limit (String.length cleaned))
+        String_util.utf8_prefix ~max_bytes:stderr_detail_limit cleaned
       in
       Some
         (if String.length shown < String.length cleaned then shown ^ "…"

@@ -75,12 +75,11 @@ let same_placement a b =
   a.image_id = b.image_id && same_request a.request b.request && Rect.equal a.rect b.rect
   && Pair.equal Int.equal Int.equal a.kitty_cells b.kitty_cells
 
-let wrap ~in_tmux payload =
-  if in_tmux then Graphics.tmux_wrapped payload else payload
-
 let delete_placements ~in_tmux placements =
   List.map
-    (fun p -> wrap ~in_tmux (Graphics.delete_image ~image_id:p.image_id))
+    (fun p ->
+      Graphics.maybe_tmux_wrapped ~in_tmux
+        (Graphics.delete_image ~image_id:p.image_id))
     placements
   |> String.concat ""
 
@@ -207,7 +206,9 @@ let prepare t ~sw ~now ~base_path ~endpoint ~fetch_retained ~on_ready
       cancel_pending t;
       []
   | Some Probe.Graphics_supported ->
-      let cell_width, cell_height = Option.value probe.cell_pixels ~default:(8, 16) in
+      let cell_width, cell_height =
+        Option.value probe.cell_pixels ~default:Graphics.default_cell_pixels
+      in
       let colors =
         let palette = Option.value probe.palette ~default:(Palette.of_theme theme) in
         Pele.colors_of_palette palette
@@ -314,6 +315,9 @@ let after_present t ~in_tmux ~full_repaint desired =
              Graphics.replace_png ~image_id:next.image_id ~placement_id:1 ~data:next.raster.png
                ~rows ~cols ~crop:None
            in
-           Some (Printf.sprintf "\x1b7\x1b[%d;%dH%s\x1b8"
-                   (next.rect.y + 1) (next.rect.x + 1) (wrap ~in_tmux payload)))
+           let placed =
+             Graphics.place_at_cursor ~in_tmux ~row:(next.rect.y + 1)
+               ~col:(next.rect.x + 1) payload
+           in
+           if String.equal placed "" then None else Some placed)
   |> String.concat ""

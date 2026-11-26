@@ -68,35 +68,12 @@ let unconfirmed_error detail =
 let scene ~format ~max_width ~font_size ~now_ms ~colors source =
   { format; source; max_width; font_size; now_ms; colors }
 
-let is_regular_executable path =
-  try
-    let st = Unix.stat path in
-    match st.Unix.st_kind with
-    | Unix.S_REG ->
-        Unix.access path [ Unix.X_OK ];
-        true
-    | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
-    | Unix.S_SOCK ->
-        false
-  with Unix.Unix_error _ -> false
-
 let resolve_executable ?(getenv = Sys.getenv_opt)
     ?(executable_name = Sys.executable_name) executable =
   if String.equal (String.trim executable) "" || String.contains executable '/'
   then executable
   else
-    let from_path =
-      match getenv "PATH" with
-      | None -> None
-      | Some path_env ->
-          String.split_on_char ':' path_env
-          |> List.find_map (fun dir ->
-                 if String.equal dir "" then None
-                 else
-                   let candidate = Filename.concat dir executable in
-                   if is_regular_executable candidate then Some candidate
-                   else None)
-    in
+    let from_path = Executable_path.absolute_on_path ~getenv executable in
     match from_path with
     | Some found -> found
     | None -> (
@@ -109,7 +86,9 @@ let resolve_executable ?(getenv = Sys.getenv_opt)
             let candidate =
               Filename.concat (Filename.dirname executable_name) executable
             in
-            if is_regular_executable candidate then Some candidate else None
+            if Executable_path.regular_file_is_executable candidate then
+              Some candidate
+            else None
         in
         match sibling with
         | Some found -> found
@@ -121,7 +100,8 @@ let resolve_executable ?(getenv = Sys.getenv_opt)
                     (Filename.concat (Filename.concat home ".local") "bin")
                     executable
                 in
-                if is_regular_executable candidate then candidate
+                if Executable_path.regular_file_is_executable candidate then
+                  candidate
                 else executable
             | Some _ | None -> executable))
 

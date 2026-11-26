@@ -2989,6 +2989,12 @@ let render_queue_context_drawer grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             Some
               (Say.resolve lang
                  (match active_tab with
+                  | Nav.Drawer_queue
+                    when Option.is_some (Update_nav.queue_run_next_target model)
+                    ->
+                      Say.make
+                        ~ko:"[n] 지금 실행 · [↑↓] 스크롤 · [ / ]·Tab 탭 · [Esc] 닫기"
+                        ~en:"[n] Run next · [↑↓] Scroll · [ / ]·Tab Tabs · [Esc] Close"
                   | Nav.Drawer_queue | Nav.Drawer_context | Nav.Drawer_schedules ->
                       Say.make ~ko:"[↑↓] 스크롤 · [ / ]·Tab 탭 · [Esc] 닫기"
                         ~en:"[↑↓] Scroll · [ / ]·Tab Tabs · [Esc] Close"));

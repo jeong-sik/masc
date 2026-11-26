@@ -1278,22 +1278,19 @@ let keeper_is_offline = function
   | Keeper_healthy | Keeper_working | Keeper_idle | Keeper_degraded
   | Keeper_recovering | Keeper_failing | Keeper_paused | Keeper_booting -> false
 
-let selected_keeper_for_lifecycle (m : Model.t) :
-    Wire_fleet.keeper_summary option =
-  match Model.active_inspector m with
-  | Some _ -> None
-  | None ->
-      if Nav.equal_workspace m.nav.workspace Nav.Keepers then
-        Fleet_store.selected_keeper_summary m.fleet
-      else None
-
 let selected_keeper_name_for_lifecycle (m : Model.t) : string option =
   match Model.active_inspector m with
   | Some _ -> None
   | None ->
       if Nav.equal_workspace m.nav.workspace Nav.Keepers then
-        Model.selected_keeper_name m
+        Model.target_keeper_for_lifecycle m
       else None
+
+let selected_keeper_for_lifecycle (m : Model.t) :
+    Wire_fleet.keeper_summary option =
+  match selected_keeper_name_for_lifecycle m with
+  | None -> None
+  | Some _ -> Fleet_store.selected_keeper_summary m.fleet
 
 let open_keeper_lifecycle_modal (m : Model.t) ~keeper ~default_action =
   let kind = Nav.Keeper_lifecycle_form { keeper } in
@@ -7961,7 +7958,7 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Keepers -> (
                 match
                   ( selected_keeper_for_lifecycle m
-                  , Model.selected_keeper_name m )
+                  , selected_keeper_name_for_lifecycle m )
                 with
                 | Some k, _ when k.paused ->
                     dispatch_keeper_resume ~now ~name:k.name m
@@ -8148,7 +8145,7 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Keepers -> (
                 match
                   ( selected_keeper_for_lifecycle m
-                  , Model.selected_keeper_name m )
+                  , selected_keeper_name_for_lifecycle m )
                 with
                 | Some k, _ ->
                     let default_action =
@@ -8888,29 +8885,33 @@ and execute_action ~now (m : Model.t) action =
             { m with knowledge }
         , [] )
   | Keymap.Open_external_editor -> (
-      let wiki_slug =
-        match Model.active_inspector m with
-        | Some _ -> None
-        | None ->
-            if
-              Nav.equal_workspace m.nav.workspace Nav.Knowledge
-              && Nav.equal_knowledge_tab m.knowledge.active_tab
-                   Nav.Knowledge_wiki
-            then
-              Option.map
-                (fun (p : Wire_knowledge.wiki_page_summary) -> p.slug)
-                (Knowledge_store.selected_wiki_page m.knowledge)
-            else None
-      in
-      match wiki_slug with
-      | Some slug ->
-          ( Model.with_toast ~now ~level:Model.Toast_info
-              (Say.make
-                 ~ko:("외부 편집기로 위키 열기: " ^ slug)
-                 ~en:("Opening wiki page in $EDITOR: " ^ slug))
-              m
-          , [ Cmd.Open_editor_escape_hatch (Cmd.Edit_wiki_page slug) ] )
-      | None -> (m, []))
+      match m.nav.overlay with
+      | Some (Nav.Settings _) -> execute_action ~now m Keymap.Open_external
+      | Some _ -> (m, [])
+      | None -> (
+          let wiki_slug =
+            match Model.active_inspector m with
+            | Some _ -> None
+            | None ->
+                if
+                  Nav.equal_workspace m.nav.workspace Nav.Knowledge
+                  && Nav.equal_knowledge_tab m.knowledge.active_tab
+                       Nav.Knowledge_wiki
+                then
+                  Option.map
+                    (fun (p : Wire_knowledge.wiki_page_summary) -> p.slug)
+                    (Knowledge_store.selected_wiki_page m.knowledge)
+                else None
+          in
+          match wiki_slug with
+          | Some slug ->
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:("외부 편집기로 위키 열기: " ^ slug)
+                     ~en:("Opening wiki page in $EDITOR: " ^ slug))
+                  m
+              , [ Cmd.Open_editor_escape_hatch (Cmd.Edit_wiki_page slug) ] )
+          | None -> (m, [])))
   | Keymap.Interrupt_turn -> (
       let keeper_opt =
         if

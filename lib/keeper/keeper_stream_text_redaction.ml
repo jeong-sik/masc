@@ -167,7 +167,11 @@ let feed t ~index channel text =
     match List.find_opt (owns_channel ~index channel) t.held with
     | Some held -> held
     | None ->
-      let stream = Keeper_secret_redaction.create_stream_state t.redaction in
+      let stream =
+        Keeper_secret_redaction.create_stream_state
+          ~mode:Keeper_secret_redaction.Token_incremental
+          t.redaction
+      in
       let held = {index; channel; stream; next_byte=0; consumed=0; awaiting=Queue.create ()} in
       t.held <- t.held @ [ held ];
       held

@@ -736,10 +736,10 @@ let released_text entry events =
         {entry with released_bytes; preview={preview with text_tail; text_position}}, true)
     (entry, false) events
 
-(* Deltas pass through the turn's stream redactor, which releases a line once
-   it is complete, so a secret split between two deltas is replaced before any
-   part of it reaches the tail. The same event says what opened, moved or
-   ended in the turn's work. *)
+(* Deltas pass through the turn's incremental stream redactor, which releases
+   prefix-safe text immediately while holding potential secret prefixes across
+   delta boundaries so no part of a split secret reaches the tail. The same
+   event says what opened, moved or ended in the turn's work. *)
 let note_stream ~writer ~now event =
   change_entry ~writer ~now (fun ({ preview; text_intake; _ } as entry) ->
     let released_entry, text_changed =

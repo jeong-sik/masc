@@ -9,13 +9,16 @@
     instead, and forwards the provider's events with those deltas replaced by
     their redacted output.
 
-    Each [(block index, channel)] owns its redactor. A newline releases a
-    complete record; an unfinished line remains bounded by
+    Each [(block index, channel)] owns its redactor in
+    {!Keeper_secret_redaction.Token_incremental} mode. Safe prefixes that
+    cannot start or extend an exact secret, structural pattern, or incomplete
+    UTF-8 codepoint release immediately on every delta; potential secret
+    prefixes and incomplete UTF-8 tails stay held until resolved, bounded by
     {!Keeper_secret_redaction}. Another block's start, delta, snapshot or stop
     cannot finalize it. A block stop releases only that block's channels. The
     message's stop reason, stop or failure and explicit {!flush} release all
     channels. Authored Text/Thinking chunks keep their original arrival order
-    across channels. A later completed line waits for an earlier unresolved
+    across channels. A later completed chunk waits behind an earlier unresolved
     chunk; copied bytes keep their source position, and a mask spanning chunks
     belongs to the chunk containing its first source byte.
 

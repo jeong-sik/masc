@@ -442,7 +442,19 @@ let decode_connector_attachments ~continuation_channel ~external_message_id json
       else loop (id :: seen) (Discord_image { attachment_id = id } :: acc) rest
     in
     loop [] [] values
-  | _ -> Error "Connector attachments require a matching Discord original message"
+  (* The guard above is a runtime check, so Discord with another reply target,
+     original ID or attachment shape falls through to the first alternative.
+     Every other connector is named so a new one must decide here whether it
+     can carry attachments; a wildcard would reject it without a compile error. *)
+  | ( Keeper_continuation_channel.Discord _
+    | Keeper_continuation_channel.Dashboard _
+    | Keeper_continuation_channel.Slack _
+    | Keeper_continuation_channel.Telegram _
+    | Keeper_continuation_channel.Imessage _
+    | Keeper_continuation_channel.Gate _
+    | Keeper_continuation_channel.Keeper _
+    | Keeper_continuation_channel.Unrouted _ ), _, _ ->
+    Error "Connector attachments require a matching Discord original message"
 ;;
 
 let source_of_json json =

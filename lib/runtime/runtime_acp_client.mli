@@ -136,9 +136,9 @@ type usage_channel =
       (** The host reports a prompt's token counts in the [session/prompt]
           result or in [usage_update] frames. [usage_update.used], ACP's
           "tokens currently in context", is the newest model request's input
-          plus output as the provider counted them: checked against each
-          host's own request log on 2026-11-26 for Antigravity 1.5.16, Kimi
-          Code 2.7.2 and Mistral Vibe 3.1.0. *)
+          plus output as the provider counted them: checked on 2026-11-26
+          against the request logs of Antigravity 1.5.16 and Kimi Code 2.7.2
+          and the installed source of Mistral Vibe 3.1.0. *)
   | Usage_in_muse_session_journal
       (** The host reports no counts over ACP. It writes the counts of every
           model request and approval review to its session journal, and those

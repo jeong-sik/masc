@@ -176,6 +176,11 @@ module For_testing : sig
     -> force_fresh_retry:bool
     -> bool
 
+  val start_unless_stopped
+    :  stop:unit Eio.Promise.t
+    -> (unit -> (Runtime_acp_client.t, Runtime_acp_client.error) result)
+    -> (Runtime_acp_client.t, Runtime_acp_client.error) result
+
   val hydrate_start_messages
     :  ?appended_nudges:Agent_core.Types.message list
     -> keepers_dir:string

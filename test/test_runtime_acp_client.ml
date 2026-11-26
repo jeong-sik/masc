@@ -2587,6 +2587,73 @@ for line in sys.stdin:
         Runtime_acp_client.close client)))
 ;;
 
+(* A Keeper stop must end a start whose agent never answers [initialize]:
+   with no admission deadline, nothing else ends that wait. The mock writes its
+   pid and then reads stdin without answering. Once it is up, the stop is
+   resolved; the start returns [Client_closed] and the agent process is gone. *)
+let test_stop_ends_a_silent_initialize () =
+  let tmp = Filename.temp_dir "acp-silent-init-" "" in
+  let mock_script = Filename.concat tmp "mock_acp.py" in
+  let pid_file = Filename.concat tmp "agent.pid" in
+  let script_body =
+    {|#!/usr/bin/env python3
+import os, sys
+
+with open(sys.argv[1], "w") as f:
+    f.write(str(os.getpid()))
+
+for line in sys.stdin:
+    pass
+|}
+  in
+  Out_channel.with_open_text mock_script (fun oc -> output_string oc script_body);
+  Fun.protect ~finally:(fun () -> rm_rf tmp) (fun () ->
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      let proc_mgr =
+        Runtime_acp_client.foreground_process_mgr ~clock ~grace_seconds:1.0 ()
+      in
+      let cfg =
+        { (Runtime_acp_client.default_config ~driver:Antigravity ~cwd:tmp) with
+          cli_path = "python3"
+        ; args = [ mock_script; pid_file ]
+        }
+      in
+      Eio.Switch.run (fun sw ->
+        let stop, resolve_stop = Eio.Promise.create () in
+        let rec await_pid_file tries =
+          if Sys.file_exists pid_file && In_channel.with_open_text pid_file In_channel.input_all <> ""
+          then ()
+          else if tries = 0
+          then failf "the mock agent never wrote %s" pid_file
+          else (
+            Eio.Time.sleep clock 0.05;
+            await_pid_file (tries - 1))
+        in
+        let result =
+          Eio.Fiber.pair
+            (fun () ->
+              Keeper_acp_runtime.For_testing.start_unless_stopped ~stop (fun () ->
+                Runtime_acp_client.start ~sw ~proc_mgr ~clock ~config:cfg ()))
+            (fun () ->
+              await_pid_file 200;
+              Eio.Promise.resolve resolve_stop ())
+          |> fst
+        in
+        (match result with
+         | Error Runtime_acp_client.Client_closed -> ()
+         | Error err ->
+           failf "a stopped start must end as Client_closed, got %s"
+             (Runtime_acp_client.error_to_string err)
+         | Ok _ -> fail "a start whose agent never answered initialize returned a client");
+        let pid =
+          int_of_string (String.trim (In_channel.with_open_text pid_file In_channel.input_all))
+        in
+        match Unix.kill pid 0 with
+        | () -> failf "the silent agent (pid %d) is still running after the stop" pid
+        | exception Unix.Unix_error (Unix.ESRCH, _, _) -> ())))
+;;
+
 let test_acp_overflow_shrink_handoff_and_vibe_operator_login () =
   (* 1. Shrink retry with force_fresh_retry=true (previous_settlement=None) loads
         compacted handoff anchor and compacts at most ONCE across shrink retries. *)
@@ -6318,6 +6385,8 @@ let () =
             test_mock_acp_child_pgid_reap_session_perm_and_pid_tagged_dir
         ; test_case "a slow session/new is not failed" `Quick
             test_slow_session_new_is_not_failed
+        ; test_case "a stop ends a start whose agent never answers initialize" `Quick
+            test_stop_ends_a_silent_initialize
         ] )
     ; ( "rollover_and_vibe310"
       , [ test_case "80% hysteresis rollover, durable marker & ContextOverflow classification" `Quick

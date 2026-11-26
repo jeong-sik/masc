@@ -820,6 +820,21 @@ let discover_skills_dirs ~base_path (config : Runtime_execution.acp_client) =
   |> List.sort_uniq String.compare
 ;;
 
+(* [Acp.start] waits for the agent's [initialize] answer with no deadline, so
+   a stop request must be able to end that wait. Racing the start against
+   [stop] cancels it when the stop comes first, and [Acp.start] closes the
+   half-started client and reaps its process when it is cancelled. When both
+   finish together the started client wins; the caller sees the stop through
+   its own flag and closes that client. *)
+let start_unless_stopped ~(stop : unit Eio.Promise.t) start =
+  Eio.Fiber.first
+    ~combine:(fun _stopped started -> started)
+    (fun () ->
+      Eio.Promise.await stop;
+      Error Acp.Client_closed)
+    start
+;;
+
 let spawn_persistent_entry
       ~root_sw
       ~env
@@ -883,15 +898,16 @@ let spawn_persistent_entry
                }
              in
              match
-               Acp.start
-                 ~sw:keeper_sw
-                 ~proc_mgr
-                 ~clock
-                 ~fs:(Eio.Stdenv.fs env)
-                 ~config:acp_config
-                 ~mcp_server
-                 ~native_posture
-                 ()
+               start_unless_stopped ~stop:shutdown_promise (fun () ->
+                 Acp.start
+                   ~sw:keeper_sw
+                   ~proc_mgr
+                   ~clock
+                   ~fs:(Eio.Stdenv.fs env)
+                   ~config:acp_config
+                   ~mcp_server
+                   ~native_posture
+                   ())
              with
              | Error err -> Eio.Promise.resolve resolve_ready (Error err)
              | Ok client ->
@@ -3851,6 +3867,7 @@ module For_testing = struct
   let clear_rollover_marker = clear_rollover_marker
   let split_older_for_rollover = split_older_for_rollover
   let prefer_handoff_for_start = prefer_handoff_for_start
+  let start_unless_stopped = start_unless_stopped
   let hydrate_start_messages = hydrate_start_messages
   let compact_once_for_overflow = compact_once_for_overflow
   let overflow_trigger = overflow_trigger

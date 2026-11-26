@@ -24,26 +24,6 @@ let with_workspace f =
 (* A fixed clock leaves issuance's live bearers far from the expired fixture. *)
 let read path = In_channel.with_open_bin path In_channel.input_all
 
-let poll_interval_s = 0.02
-
-(* Poll instead of blocking in [Unix.waitpid []]. A blocking wait here was one
-   of the two unbounded waits in this suite: when the forked child never
-   exited, nothing in the test could end it and only the harness deadline
-   stopped the run (#8056: 5400 s, the parent and child still alive together at
-   66 minutes, while #8045 ran this same case 21/21 in 0.73 s). A stuck child
-   now fails this one case with a named reason and the rest keeps running.
-   On timeout [finally] still kills the child and tries to reap it. *)
-let reap_within child ~seconds =
-  let started = Unix.gettimeofday () in
-  let rec loop () =
-    match Unix.waitpid [ Unix.WNOHANG ] child with
-    | 0, _ ->
-      if Unix.gettimeofday () -. started >= seconds then None
-      else (Unix.sleepf poll_interval_s; loop ())
-    | _reaped_pid, status -> Some status
-  in
-  loop ()
-
 let now = 1_735_689_600.
 let expired = "2000-01-01T00:00:00Z"
 
@@ -177,70 +157,61 @@ let test_read_failure_aborts_before_any_delete () =
     (Sys.file_exists (Auth.credential_file base_path "aaa"))
 
 (* A real FIFO with no writer made the old prune block in open while holding
-   the credential transaction. Guard each prune/publisher call in a child;
+   the credential transaction. The case runs in its own process
+   ([Masc_test_deps.Fresh_process]) and guards each prune/publisher call;
    durable fixture setup and cleanup are outside those hang watchdogs. *)
+let fifo_refusal_releases_publishers () =
+  let guarded label f =
+    let previous = Sys.signal Sys.sigalrm
+        (Sys.Signal_handle (fun _ ->
+           prerr_endline ("FIFO scenario blocked during " ^ label);
+           Unix._exit 3)) in
+    ignore (Unix.alarm 10 : int);
+    Fun.protect
+      ~finally:(fun () ->
+        ignore (Unix.alarm 0 : int);
+        Sys.set_signal Sys.sigalrm previous)
+      f
+  in
+  with_workspace (fun base_path ->
+    let _expired_token = make_expired base_path "aaa" in
+    let canary = Auth.credential_file base_path "aaa" in
+    let before = In_channel.with_open_bin canary In_channel.input_all in
+    let fifo = Auth.credential_file base_path "zzz" in
+    Unix.mkfifo fifo 0o600;
+    List.iter (fun (label, mode) ->
+      match guarded label (fun () -> prune ~mode base_path) with
+      | Error _ -> ()
+      | Ok _ -> fail "a FIFO credential must refuse the entire plan")
+      ["preview", Prune.Preview; "retire", Prune.Retire];
+    check bool "the FIFO is retained" true ((Unix.lstat fifo).st_kind = Unix.S_FIFO);
+    check string "no earlier candidate was deleted" before
+      (In_channel.with_open_bin canary In_channel.input_all);
+    Unix.unlink fifo;
+    let token, _ = guarded "following publisher" (fun () ->
+      mint base_path "publisher" Masc_domain.Admin) in
+    check_live base_path token;
+    (match auth_ok (guarded "regular retirement" (fun () -> prune base_path)) with
+     | [{Prune.agent_name="aaa"; reason=Prune.Expired; outcome=Prune.Retired}] -> ()
+     | _ -> fail "regular credential reads must still permit retirement"))
+
+type fifo_case = Fifo_refusal
+
+let fifo_cases = {
+  Masc_test_deps.Fresh_process.all = [ Fifo_refusal ];
+  name = (function Fifo_refusal -> "fifo-refusal");
+  run = (function Fifo_refusal -> fifo_refusal_releases_publishers ());
+}
+
+(* The case's calls are bounded by 10 s alarms; the parent's bound also covers
+   setup, and ends a case whose alarm handler never ran (#8056: the parent and
+   child still alive together at 66 minutes, while #8045 ran this same case
+   21/21 in 0.73 s). *)
+let fifo_parent_bound_s = 60.
+
 let test_fifo_refusal_releases_publishers () =
-  let base_path = Filename.temp_dir "token-prune-fifo-" "" in
-  match Unix.fork () with
-  | 0 ->
-      let guarded label f =
-        let previous = Sys.signal Sys.sigalrm
-            (Sys.Signal_handle (fun _ ->
-               prerr_endline ("FIFO scenario blocked during " ^ label);
-               Unix._exit 3)) in
-        ignore (Unix.alarm 10 : int);
-        Fun.protect
-          ~finally:(fun () ->
-            ignore (Unix.alarm 0 : int);
-            Sys.set_signal Sys.sigalrm previous)
-          f
-      in
-      (try
-         with_workspace_at base_path (fun base_path ->
-           let _expired_token = make_expired base_path "aaa" in
-           let canary = Auth.credential_file base_path "aaa" in
-           let before = In_channel.with_open_bin canary In_channel.input_all in
-           let fifo = Auth.credential_file base_path "zzz" in
-           Unix.mkfifo fifo 0o600;
-           List.iter (fun (label, mode) ->
-             match guarded label (fun () -> prune ~mode base_path) with
-             | Error _ -> ()
-             | Ok _ -> fail "a FIFO credential must refuse the entire plan")
-             ["preview", Prune.Preview; "retire", Prune.Retire];
-           check bool "the FIFO is retained" true ((Unix.lstat fifo).st_kind = Unix.S_FIFO);
-           check string "no earlier candidate was deleted" before
-             (In_channel.with_open_bin canary In_channel.input_all);
-           Unix.unlink fifo;
-           let token, _ = guarded "following publisher" (fun () ->
-             mint base_path "publisher" Masc_domain.Admin) in
-           check_live base_path token;
-           (match auth_ok (guarded "regular retirement" (fun () -> prune base_path)) with
-            | [{Prune.agent_name="aaa"; reason=Prune.Expired; outcome=Prune.Retired}] -> ()
-            | _ -> fail "regular credential reads must still permit retirement"));
-         Unix._exit 0
-       with
-       | Eio.Cancel.Cancelled _ as cancellation -> raise cancellation
-       | error ->
-           prerr_endline (Printexc.to_string error);
-           Unix._exit 2)
-  | child ->
-      let reaped = ref false in
-      Fun.protect
-        ~finally:(fun () ->
-          if not !reaped then (
-            (try Unix.kill child Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
-            ignore (reap_within child ~seconds:5.));
-          Fs_compat.remove_tree base_path)
-        (fun () ->
-          match reap_within child ~seconds:60. with
-          | None ->
-              fail "the FIFO prune child did not finish within 60 s; it is stuck"
-          | Some status ->
-              reaped := true;
-              match status with
-              | Unix.WEXITED 0 -> ()
-              | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-                  fail "isolated FIFO prune scenario failed")
+  Masc_test_deps.Fresh_process.check fifo_cases Fifo_refusal ~within_s:fifo_parent_bound_s
+    ~contract:"isolated FIFO prune scenario failed"
 
 let test_regular_symlink_refuses_plan () =
   with_workspace @@ fun base_path ->
@@ -494,6 +465,7 @@ let test_failed_admission_preserves_every_file () =
   check bool "failed admission runs no deletion" true (Sys.file_exists (Auth.credential_file base_path "player"))
 
 let () =
+  Masc_test_deps.Fresh_process.run_requested_case fifo_cases;
   run "auth_token_prune_transaction"
     [ "prune",
       [ test_case "alias raw cleanup failure retains retry authority" `Quick test_alias_raw_cleanup_failure_retains_retry_authority

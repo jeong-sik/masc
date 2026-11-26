@@ -297,86 +297,62 @@ let test_unstable_bearers_refuse_without_effects () =
     check bool "reuse refusal neither normalizes pair nor bootstraps config/internal token"
       true (snapshot () = before)) [ " leading"; "trailing\t"; "with\nLF" ]
 
+(* Runs inside its own process ([Masc_test_deps.Fresh_process]), never in a
+   [Unix.fork] copy of this Eio test process. The case proves actual Auth
+   calls refuse a FIFO with no writer; an older blocking open fails finitely. *)
+let fifo_authority_refuses_without_blocking () =
+  (* Only the three calls that meet the FIFO are bounded. Workspace setup,
+     seeding and the follow-up Ensure do real fsyncs; on a loaded runner
+     they once ate the whole 5 s budget and the case died by SIGALRM
+     without any FIFO open having blocked (#43463 narrowed the alarm to one
+     attempt but still covered that setup). The handler names the call that
+     was running so a genuine blocking open is distinguishable from a slow
+     runner in the log. *)
+  let current = ref "setup" in
+  Sys.set_signal Sys.sigalrm (Sys.Signal_handle (fun _ ->
+    prerr_endline ("FIFO refusal exceeded 5 s inside: " ^ !current); exit 3));
+  let bounded label f =
+    current := label;
+    let _previous_alarm_seconds = Unix.alarm 5 in
+    let result = f () in
+    let _disarmed_alarm_seconds = Unix.alarm 0 in
+    current := "setup";
+    result in
+  List.iter (fun raw_fifo -> with_workspace @@ fun base_path ->
+    let _old = seed_keeper base_path in
+    let named = Auth.credential_file base_path "keeper" in
+    let raw_path = Auth.raw_token_file base_path "keeper" in
+    let occupied = if raw_fifo then raw_path else named in
+    let other = if raw_fifo then named else raw_path in
+    let before = read other, read (Auth.auth_config_file base_path) in
+    Unix.unlink occupied;
+    Unix.mkfifo occupied 0o600;
+    bounded "Ensure" (fun () -> rejected (ensure base_path));
+    bounded "set_admin" (fun () -> rejected (set_admin base_path));
+    bounded "login" (fun () -> rejected (login base_path));
+    check bool "FIFO refusal preserves pair counterpart and config" true
+      ((read other, read (Auth.auth_config_file base_path)) = before);
+    check bool "occupied FIFO is preserved" true ((Unix.lstat occupied).Unix.st_kind = Unix.S_FIFO);
+    Unix.unlink occupied;
+    let _issued_pair = auth_ok (ensure base_path) in
+    check_pair base_path "keeper") [ false; true ]
+
+type fifo_case = Fifo_authority
+
+let fifo_cases = {
+  Masc_test_deps.Fresh_process.all = [ Fifo_authority ];
+  name = (function Fifo_authority -> "fifo-authority");
+  run = (function Fifo_authority -> fifo_authority_refuses_without_blocking ());
+}
+
+(* The case's calls are bounded by 5 s alarms; the parent's bound also covers
+   setup, and ends a case whose alarm handler never ran (#52859: both
+   processes still alive at 65 minutes). *)
+let fifo_parent_bound_s = 60.
+
 let test_fifo_authority_refuses_without_blocking () =
-  (* Fork outside an Eio environment. The bounded child proves actual Auth
-     calls refuse a FIFO with no writer; an older blocking open fails finitely. *)
-  match Unix.fork () with
-  | 0 ->
-      (* Only the three calls that meet the FIFO are bounded. Workspace setup,
-         seeding and the follow-up Ensure do real fsyncs; on a loaded runner
-         they once ate the whole 5 s budget and the child died by SIGALRM
-         without any FIFO open having blocked (#43463 narrowed the alarm to one
-         attempt but still covered that setup). The handler names the call that
-         was running so a genuine blocking open is distinguishable from a slow
-         runner in the log. *)
-      let current = ref "setup" in
-      Sys.set_signal Sys.sigalrm (Sys.Signal_handle (fun _ ->
-        prerr_endline ("FIFO refusal exceeded 5 s inside: " ^ !current); exit 3));
-      let bounded label f =
-        current := label;
-        let _previous_alarm_seconds = Unix.alarm 5 in
-        let result = f () in
-        let _disarmed_alarm_seconds = Unix.alarm 0 in
-        current := "setup";
-        result in
-      (try
-         List.iter (fun raw_fifo -> with_workspace @@ fun base_path ->
-           let _old = seed_keeper base_path in
-           let named = Auth.credential_file base_path "keeper" in
-           let raw_path = Auth.raw_token_file base_path "keeper" in
-           let occupied = if raw_fifo then raw_path else named in
-           let other = if raw_fifo then named else raw_path in
-           let before = read other, read (Auth.auth_config_file base_path) in
-           Unix.unlink occupied;
-           Unix.mkfifo occupied 0o600;
-           bounded "Ensure" (fun () -> rejected (ensure base_path));
-           bounded "set_admin" (fun () -> rejected (set_admin base_path));
-           bounded "login" (fun () -> rejected (login base_path));
-           check bool "FIFO refusal preserves pair counterpart and config" true
-             ((read other, read (Auth.auth_config_file base_path)) = before);
-           check bool "occupied FIFO is preserved" true ((Unix.lstat occupied).Unix.st_kind = Unix.S_FIFO);
-           Unix.unlink occupied;
-           let _issued_pair = auth_ok (ensure base_path) in
-           check_pair base_path "keeper") [ false; true ];
-         exit 0
-       with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn -> prerr_endline (Printexc.to_string exn); exit 2)
-  | pid ->
-      let reaped = ref false in
-      (* A blocking [Unix.waitpid [] pid] made this test the one unbounded wait
-         in the whole suite: when the child never exited, nothing in the test
-         could end it and only dune's 90-minute deadline stopped the run
-         (#52859, run 44105462595: 5406 s, exit 124, the two processes here
-         still alive at 65 minutes). Poll instead, so a stuck child fails this
-         one case with a named reason and the rest of the suite keeps running.
-         The reap in [finally] polls for the same reason: a blocking wait there
-         would move the hang rather than remove it, and [reaped] is set before
-         the kill so [finally] never waits for a child it has already given up
-         on. *)
-      let poll_interval_s = 0.02 in
-      let reap_within ~seconds =
-        let started = Unix.gettimeofday () in
-        let rec loop () =
-          match Unix.waitpid [ Unix.WNOHANG ] pid with
-          | 0, _ ->
-              if Unix.gettimeofday () -. started >= seconds then None
-              else (Unix.sleepf poll_interval_s; loop ())
-          | _reaped_pid, status ->
-              reaped := true;
-              Some status
-        in
-        loop () in
-      Fun.protect ~finally:(fun () -> if not !reaped then (
-        reaped := true;
-        (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
-        ignore (reap_within ~seconds:5.))) (fun () ->
-          match reap_within ~seconds:60. with
-          | None ->
-              fail "the FIFO child did not finish within 60 s; it is stuck"
-          | Some (Unix.WEXITED 0) -> ()
-          | Some (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) ->
-              fail "FIFO authority must refuse without waiting for a writer")
+  Masc_test_deps.Fresh_process.check fifo_cases Fifo_authority ~within_s:fifo_parent_bound_s
+    ~contract:"FIFO authority must refuse without waiting for a writer"
 
 let test_regular_symlink_authority_remains_readable () = with_workspace @@ fun base_path ->
   let _old = seed_keeper base_path in
@@ -504,7 +480,9 @@ let test_formatted_admin_reaches_http_without_rotation () =
       ((auth_ok (Auth.verify_token base_path ~agent_name ~token)).role = D.Admin))
     [ "\n"; "\r\n" ]
 
-let () = run "auth_file_backed_transaction" [ "publication", [
+let () =
+  Masc_test_deps.Fresh_process.run_requested_case fifo_cases;
+  run "auth_file_backed_transaction" [ "publication", [
   test_case "formatted Admin reaches HTTP without rotation" `Quick test_formatted_admin_reaches_http_without_rotation;
   test_case "keeper reuse repairs a bearer shared with an unselected owner" `Quick test_keeper_reuse_repairs_unselected_collision;
   test_case "prune then ensure recreates a recoverable pair" `Quick test_prune_then_ensure;

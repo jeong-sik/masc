@@ -1,5 +1,6 @@
 (* Public file clients and admitted publishers must refuse a FIFO without a
-   writer. Forked fixture deadlines make a blocking regression fail finitely. *)
+   writer. Each FIFO case runs in a new process with its own alarm, so a
+   blocking regression fails finitely. *)
 open Alcotest
 module D = Masc_domain
 
@@ -22,29 +23,15 @@ let with_workspace f =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path)
     (fun () -> run_workspace base_path f)
 
+let fifo_alarm_seconds = 5
+
+(* Runs inside a FIFO case's own process. The alarm bounds only this fixture,
+   not Auth admission or product I/O. There is no FIFO writer and no
+   sleep-based release; SIGALRM's default action ends a blocked open. *)
 let with_fifo_workspace f =
-  let base_path = Filename.temp_dir "auth-fifo-reader-" "" in
-  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
-    (* The deadline belongs only to the fixture child, not Auth admission or
-       product I/O. There is no FIFO writer and no sleep-based release. *)
-    match Unix.fork () with
-    | 0 ->
-      Sys.set_signal Sys.sigalrm Sys.Signal_default;
-      let _previous_alarm_seconds = Unix.alarm 5 in
-      (try run_workspace base_path f; exit 0 with
-       | Eio.Cancel.Cancelled _ as exn -> raise exn
-       | exn -> prerr_endline (Printexc.to_string exn); exit 2)
-    | pid ->
-      let reaped = ref false in
-      Fun.protect ~finally:(fun () -> if not !reaped then (
-        (try Unix.kill pid Sys.sigkill with Unix.Unix_error (Unix.ESRCH, _, _) -> ());
-        let _reaped_child = Masc_test_deps.waitpid_nointr pid in ())) (fun () ->
-          let _, status = Masc_test_deps.waitpid_nointr pid in
-          reaped := true;
-          match status with
-          | Unix.WEXITED 0 -> ()
-          | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
-            fail "Auth file reads must refuse a FIFO without waiting for a writer"))
+  Sys.set_signal Sys.sigalrm Sys.Signal_default;
+  let _previous_alarm_seconds = Unix.alarm fifo_alarm_seconds in
+  Fun.protect ~finally:(fun () -> ignore (Unix.alarm 0 : int)) (fun () -> with_workspace f)
 
 let check_readers base_path expected =
   check (option string) "public Auth file client" expected
@@ -379,17 +366,54 @@ let test_oauth_fifo_verification () =
     check string "repaired OAuth store lock remains usable" bootstrap.agent_name recovered.agent_name)
     [ true; false ]
 
-let () = run "Auth regular file read authority" [
+type fifo_case =
+  | Public_reader
+  | Replacement_at_open
+  | Config_publishers
+  | Canonical_verification_and_index
+  | Hot_metadata
+  | Oauth_verification
+
+let fifo_cases = {
+  Masc_test_deps.Fresh_process.all =
+    [ Public_reader; Replacement_at_open; Config_publishers;
+      Canonical_verification_and_index; Hot_metadata; Oauth_verification ];
+  name = (function
+    | Public_reader -> "public-reader"
+    | Replacement_at_open -> "replacement-at-open"
+    | Config_publishers -> "config-publishers"
+    | Canonical_verification_and_index -> "canonical-verification-and-index"
+    | Hot_metadata -> "hot-metadata"
+    | Oauth_verification -> "oauth-verification");
+  run = (function
+    | Public_reader -> test_public_reader_fifo ()
+    | Replacement_at_open -> test_replacement_at_open_refuses_without_blocking ()
+    | Config_publishers -> test_config_fifo_publishers ()
+    | Canonical_verification_and_index -> test_canonical_fifo_verification_and_index ()
+    | Hot_metadata -> test_hot_metadata_fifo ()
+    | Oauth_verification -> test_oauth_fifo_verification ());
+}
+
+(* A case runs at most two FIFO fixtures, each bounded by its own alarm. *)
+let fifo_parent_bound_s = 60.
+
+let in_fresh_process case () =
+  Masc_test_deps.Fresh_process.check fifo_cases case ~within_s:fifo_parent_bound_s
+    ~contract:"Auth file reads must refuse a FIFO without waiting for a writer"
+
+let () =
+  Masc_test_deps.Fresh_process.run_requested_case fifo_cases;
+  run "Auth regular file read authority" [
   "file clients", [
     test_case "regular, symlink, dangling, directory and blank raw tokens" `Quick test_public_reader_file_states;
-    test_case "public readers refuse a FIFO without a writer" `Quick test_public_reader_fifo;
-    test_case "replacement before and after open cannot block or admit retired bytes" `Quick test_replacement_at_open_refuses_without_blocking;
+    test_case "public readers refuse a FIFO without a writer" `Quick (in_fresh_process Public_reader);
+    test_case "replacement before and after open cannot block or admit retired bytes" `Quick (in_fresh_process Replacement_at_open);
     test_case "directory refusal retains its typed error and closes its raw descriptor" `Quick test_directory_refusal_closes_raw_descriptor;
     test_case "strict config presence and secure missing defaults" `Quick test_config_file_states;
-    test_case "config FIFO refuses actual publishers and repaired admission works" `Quick test_config_fifo_publishers;
+    test_case "config FIFO refuses actual publishers and repaired admission works" `Quick (in_fresh_process Config_publishers);
     test_case "expected read errors do not swallow cancellation" `Quick test_cancellation_propagates;
-    test_case "named/UUID FIFO verification, alias and cold index recover" `Quick test_canonical_fifo_verification_and_index;
-    test_case "startup Admin and hot internal/secret FIFO paths recover" `Quick test_hot_metadata_fifo;
-    test_case "OAuth access/family FIFO verification recovers" `Quick test_oauth_fifo_verification;
+    test_case "named/UUID FIFO verification, alias and cold index recover" `Quick (in_fresh_process Canonical_verification_and_index);
+    test_case "startup Admin and hot internal/secret FIFO paths recover" `Quick (in_fresh_process Hot_metadata);
+    test_case "OAuth access/family FIFO verification recovers" `Quick (in_fresh_process Oauth_verification);
   ]
 ]

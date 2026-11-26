@@ -195,8 +195,9 @@ let add_routes ~sw ~clock router =
          Server_routes_http_keeper_asks.handle_keeper_asks_list ~sw ~clock state request reqd)
 
   (* Answers a Keeper's question. The operator may be at any surface; the
-     log settles concurrent submissions on first write. *)
-  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_ask" }) "/api/v1/keepers/ask-answer" (fun state actor request reqd ->
+     log settles concurrent submissions on first write. Carries its own Admin
+     catalog auth key so a Worker token cannot forge an operator answer. *)
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "keeper_ask_answer_route" }) "/api/v1/keepers/ask-answer" (fun state actor request reqd ->
          Server_routes_http_keeper_asks.handle_keeper_ask_answer ~actor state request reqd)
 
   (* Lists the tool calls keepers are holding, so a wait whose owning stream

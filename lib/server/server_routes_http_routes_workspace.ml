@@ -2217,8 +2217,8 @@ let add_routes router =
   |> Server_route.get Server_route.Public_read "/api/v1/workspace/children"
        handle_workspace_children_get
   |> Server_route.get Server_route.Public_read "/api/v1/workspace/file" handle_workspace_file_get
-  |> Server_route.post (Server_route.Permission Masc_domain.CanAdmin) "/api/v1/workspace/file"
-       handle_workspace_file_post
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/workspace/file"
+       (fun state _actor request reqd -> handle_workspace_file_post state request reqd)
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanBroadcast) "/api/v1/lsp/question"
        handle_lsp_question_get
   |> Server_route.get Server_route.Public_read "/api/v1/git/blame" handle_git_blame_get

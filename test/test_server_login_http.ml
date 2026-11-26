@@ -2848,6 +2848,28 @@ let dashboard_bridge_rbac_and_sse_matrix () =
         ~admin_sees:true
         ~worker_sees:true
         (`Assoc [ "type", `String "tui_v2_dataset_changed"; "dataset", `String "wiki" ]);
+      check_sse
+        "approval:pending is Admin-only"
+        ~admin_sees:true
+        ~worker_sees:false
+        (`Assoc
+           [ "type", `String "approval:pending"
+           ; "keeper_name", `String "member-owned-keeper"
+           ; "input", `Assoc [ "secret", `String "hidden" ]
+           ]);
+      check_sse
+        "keeper_tool_call is owner-only"
+        ~admin_sees:false
+        ~worker_sees:true
+        (`Assoc
+           [ "type", `String "keeper_tool_call"
+           ; "keeper_name", `String "member-owned-keeper"
+           ]);
+      check_sse
+        "unknown SSE event fails closed"
+        ~admin_sees:false
+        ~worker_sees:false
+        (`Assoc [ "type", `String "future_unclassified_event" ]);
       (* P1 board SSE privacy: raw notifications/board payloads (especially post_kind = Direct
          with title + 200-byte content preview, and comments/votes lacking audience metadata)
          must NEVER pass verbatim; project_observer_event redacts them to opaque board_changed. *)

@@ -123,14 +123,19 @@ let capture_of_json = function
    observation gap, not a reason to fail dispatch. Cancellation is never
    absorbed. *)
 let write ~config ~keeper ~trace_id ~absolute_turn ~blocks ~assembled ~system_prompt =
+  let redact = Observability_redact.redact_text in
   let capture =
     { captured_at = Time_compat.now ()
     ; trace_id
     ; absolute_turn
-    ; blocks = List.map (fun (id, text) -> { id; text }) blocks
-    ; assembled
-    ; system_prompt = Option.map (fun (issued : Keeper_context_assembly.system_prompt) -> issued.text) system_prompt
-    ; system_prompt_partition = Option.map Keeper_context_assembly.system_prompt_receipt_to_json system_prompt
+    ; blocks = List.map (fun (id, text) -> { id; text = redact text }) blocks
+    ; assembled = Option.map redact assembled
+    ; system_prompt =
+        Option.map
+          (fun (issued : Keeper_context_assembly.system_prompt) -> redact issued.text)
+          system_prompt
+    ; system_prompt_partition =
+        Option.map Keeper_context_assembly.system_prompt_receipt_to_json system_prompt
     }
   in
   let path = path_for config keeper in

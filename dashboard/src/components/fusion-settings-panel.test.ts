@@ -65,6 +65,7 @@ function runtime(id: string): RuntimeResolvedResponse['runtimes'][number] {
   return {
     id,
     provider: 'p',
+    provider_id: 'p',
     model: 'm',
     effective_max_context: 1,
     max_context_source: 'capability',

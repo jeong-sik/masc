@@ -360,7 +360,7 @@ describe('workspaces/runtime', () => {
         })
       }
       if (url.startsWith('/api/v1/dashboard/exact-lane-runs')) {
-        return jsonResponse({ generated_at: '2026-11-24T00:00:00Z', count: 1, total: 1, has_more: false, runs: [{ run_id: 'r1', run_kind: 'exact_output', lane: 'verifier_exact', subject_id: null, actor: 'sangsu', started_at: 1_700_000_000, status: 'succeeded' }] })
+        return jsonResponse({ generated_at: '2026-11-24T00:00:00Z', count: 1, total: 1, has_more: false, runs: [{ run_id: 'r1', run_kind: 'task_verification', lane: 'verifier_exact', subject_id: 'task-1', actor: 'sangsu', started_at: 1_700_000_000, status: 'approved', elapsed_s: 2, selected_slot: null }] })
       }
       if (url.startsWith('/api/v1/dashboard/keeper-costs')) {
         return jsonResponse({
@@ -482,8 +482,13 @@ describe('workspaces/runtime', () => {
             actor: 'sangsu',
             started_at: 1_700_000_000,
             status: 'succeeded',
+            completion_origin: 'producer',
+            usage: null,
+            elapsed_s: 1.42,
             selected_slot: 'slot-a',
+            input: { kind: 'exact', payload: null },
             output: { verdict: 'ok' },
+            skill_evidence: { state: 'no_keeper_skills' },
             payload_availability: { input: { state: 'available' }, output: { state: 'available' } },
           },
         })
@@ -491,8 +496,8 @@ describe('workspaces/runtime', () => {
       if (url.startsWith('/api/v1/dashboard/exact-lane-runs')) {
         return jsonResponse({
           generated_at: '2026-11-24T00:00:00Z',
-          count: 1,
-          total: 1,
+          count: 2,
+          total: 2,
           has_more: false,
           runs: [{
             run_id: 'run-exact-1',
@@ -502,7 +507,19 @@ describe('workspaces/runtime', () => {
             actor: 'sangsu',
             started_at: 1_700_000_000,
             status: 'succeeded',
+            completion_origin: 'producer',
+            usage: null,
             elapsed_s: 1.42,
+            selected_slot: 'slot-a',
+          }, {
+            // The unfiltered listing also returns Verifier reviews.
+            run_id: 'run-goal-1',
+            run_kind: 'goal_verification',
+            lane: 'verifier_exact',
+            subject_id: 'goal-1',
+            actor: 'sangsu',
+            started_at: 1_699_999_000,
+            status: 'running',
           }],
         })
       }
@@ -536,6 +553,7 @@ describe('workspaces/runtime', () => {
       expect(exactRow).toBeDefined()
       return exactRow!
     })
+    expect(container.textContent).toContain('goal_verification')
     rowEl.click()
     await vi.waitFor(() => expect(inspected.length).toBeGreaterThanOrEqual(1))
     expect(inspected[inspected.length - 1]!.kind).toBe('exact_lane_run')
@@ -1001,6 +1019,7 @@ describe('workspaces/runtime', () => {
     ): RuntimeResolution => ({
       id,
       provider,
+      provider_id: provider,
       model,
       effective_max_context: 200_000,
       max_context_source: 'capability',
@@ -1094,6 +1113,7 @@ describe('workspaces/runtime', () => {
     ): RuntimeResolution => ({
       id,
       provider,
+      provider_id: provider,
       model,
       effective_max_context: 200_000,
       max_context_source: 'capability',

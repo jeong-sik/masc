@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fetchExactLaneRuns, parseExactLaneRunResponse, parseExactLaneRunsResponse } from './dashboard-exact-lane-runs'
+import {
+  fetchExactLaneRuns,
+  laneRunsQuery,
+  parseExactLaneRunResponse,
+  parseExactLaneRunsResponse,
+  parseLaneRunResponse,
+  parseLaneRunsResponse,
+} from './dashboard-exact-lane-runs'
 import { clearStoredToken, setStoredToken } from './core'
 
 afterEach(() => {
@@ -470,5 +477,104 @@ describe('exact observation origin, timing and provider usage', () => {
       { input_tokens: 1, output_tokens: 2, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, extra: true }]) {
       expect(() => parseExactLaneRunResponse(detailFixture({ usage }))).toThrow()
     }
+  })
+})
+
+// Rows as server_standalone_lane_projection.ml writes them for the listing
+// without a run_kind filter.
+const exactRow = {
+  run_kind: 'exact_output', run_id: 'exact-1', lane: 'librarian_exact', subject_id: null, actor: 'keeper-a',
+  started_at: 30, status: 'succeeded', completion_origin: 'producer', usage: null, elapsed_s: 0.5, selected_slot: 'slot-a',
+}
+const taskRow = {
+  run_id: 'verify-1', run_kind: 'task_verification', lane: 'verifier_exact', subject_id: 'task-7',
+  actor: 'keeper-b', started_at: 20, status: 'rejected', elapsed_s: 3.25, selected_slot: null,
+}
+const goalRow = {
+  run_id: 'goal-run-1', run_kind: 'goal_verification', lane: 'verifier_exact', subject_id: 'goal-3',
+  actor: 'keeper-c', started_at: 10, status: 'running',
+}
+
+function page(runs: readonly unknown[]) {
+  return { generated_at: '2026-11-26T00:00:00Z', count: runs.length, total: runs.length, has_more: false, runs }
+}
+
+describe('parseLaneRunsResponse', () => {
+  it('decodes exact, Task verification and Goal verification rows on one page', () => {
+    const parsed = parseLaneRunsResponse(page([exactRow, taskRow, goalRow]))
+    expect(parsed.runs.map(run => run.runKind)).toEqual(['exact_output', 'task_verification', 'goal_verification'])
+    const [, task, goal] = parsed.runs
+    expect(task).toEqual({
+      runId: 'verify-1', runKind: 'task_verification', lane: 'verifier_exact', subjectId: 'task-7',
+      actor: 'keeper-b', startedAt: 20, status: 'rejected', elapsedSeconds: 3.25, selectedSlot: null,
+    })
+    expect(goal).toEqual({
+      runId: 'goal-run-1', runKind: 'goal_verification', lane: 'verifier_exact', subjectId: 'goal-3',
+      actor: 'keeper-c', startedAt: 10, status: 'running', elapsedSeconds: undefined, selectedSlot: undefined,
+    })
+  })
+
+  it('refuses an unknown run kind, a status of the other registry, and a verifier row on another lane', () => {
+    expect(() => parseLaneRunsResponse(page([{ ...taskRow, run_kind: 'fusion' }]))).toThrow('run_kind has unknown value')
+    expect(() => parseLaneRunsResponse(page([{ ...taskRow, status: 'committed' }]))).toThrow('status has unknown value')
+    expect(() => parseLaneRunsResponse(page([{ ...goalRow, status: 'approved' }]))).toThrow('status has unknown value')
+    expect(() => parseLaneRunsResponse(page([{ ...taskRow, lane: 'librarian_exact' }]))).toThrow('verifier_exact')
+  })
+
+  it('requires completion fields exactly when a verifier review has finished', () => {
+    const { elapsed_s: _elapsed, ...withoutElapsed } = taskRow
+    expect(() => parseLaneRunsResponse(page([withoutElapsed]))).toThrow('missing=[elapsed_s]')
+    expect(() => parseLaneRunsResponse(page([{ ...goalRow, elapsed_s: 1, selected_slot: null }]))).toThrow('unknown=[elapsed_s,selected_slot]')
+    expect(() => parseLaneRunsResponse(page([{ ...taskRow, usage: null }]))).toThrow('unknown=[usage]')
+  })
+
+  it('keeps the exact_output page narrow: a verifier row there is refused', () => {
+    expect(parseExactLaneRunsResponse(page([exactRow])).runs[0]!.runKind).toBe('exact_output')
+    expect(() => parseExactLaneRunsResponse(page([exactRow, taskRow]))).toThrow('must be exact_output on an exact_output page')
+  })
+})
+
+describe('parseLaneRunResponse', () => {
+  it('opens a completed Task review with its registry record as output', () => {
+    const output = { verification_id: 'verify-1', status: 'rejected', reason: 'missing proof' }
+    const run = parseLaneRunResponse({
+      generated_at: '2026-11-26T00:00:00Z',
+      run: {
+        ...taskRow,
+        input: { kind: 'exact', payload: { kind: 'task_verification', task_id: 'task-7', producer: 'p', authority_kind: 'k', authority_actor: 'keeper-b' } },
+        output,
+        skill_evidence: { state: 'no_keeper_skills' },
+        payload_availability: { input: { state: 'available' }, output: { state: 'available' } },
+      },
+    })
+    expect(run.runKind).toBe('task_verification')
+    expect(run.output).toEqual(output)
+    expect(run.payloadAvailability.output).toEqual({ state: 'available' })
+    expect(() => parseExactLaneRunResponse({ generated_at: 'x', run: { ...taskRow, input: { kind: 'exact', payload: null }, output,
+      skill_evidence: { state: 'no_keeper_skills' }, payload_availability: { input: { state: 'available' }, output: { state: 'available' } } } }))
+      .toThrow('root.run.run_kind must be exact_output')
+  })
+
+  it('opens a running Goal review with no output and null output availability', () => {
+    const run = parseLaneRunResponse({
+      generated_at: '2026-11-26T00:00:00Z',
+      run: {
+        ...goalRow,
+        input: { kind: 'exact', payload: { kind: 'goal_verification', goal_id: 'goal-3' } },
+        skill_evidence: { state: 'no_keeper_skills' },
+        payload_availability: { input: { state: 'available' }, output: null },
+      },
+    })
+    expect(run.runKind).toBe('goal_verification')
+    expect(run.output).toBeUndefined()
+    expect(run.payloadAvailability.output).toBeNull()
+  })
+})
+
+describe('laneRunsQuery', () => {
+  it('omits run_kind for the unfiltered listing and keeps the cursor pair together', () => {
+    expect(laneRunsQuery({ limit: 50 })).toBe('limit=50')
+    expect(laneRunsQuery({ runKind: 'goal_verification', limit: 50, before: { startedAt: 12.5, runId: 'r-1' } }))
+      .toBe('run_kind=goal_verification&limit=50&before_started_at=12.5&before_run_id=r-1')
   })
 })

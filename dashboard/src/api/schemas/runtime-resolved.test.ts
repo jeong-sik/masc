@@ -7,6 +7,7 @@ import {
 const validRuntime = {
   id: 'rt-a',
   provider: 'Provider A',
+  provider_id: 'provider_a',
   model: 'model-a',
   effective_max_context: 128_000,
   max_context_source: 'capability',
@@ -71,6 +72,16 @@ describe('runtime-resolved schema', () => {
   it('rejects a runtime row without the quota rest field', () => {
     const { quota_rest: _rest, ...withoutRest } = validRuntime
     expect(() => parseRuntimeResolvedResponse(responseWith(withoutRest)))
+      .toThrow(RuntimeResolvedSchemaDriftError)
+  })
+
+  it('keeps the provider id apart from its display name and requires it', () => {
+    expect(parseRuntimeResolvedResponse(responseWith(validRuntime)).runtimes[0]).toMatchObject({
+      provider: 'Provider A',
+      provider_id: 'provider_a',
+    })
+    const { provider_id: _id, ...withoutId } = validRuntime
+    expect(() => parseRuntimeResolvedResponse(responseWith(withoutId)))
       .toThrow(RuntimeResolvedSchemaDriftError)
   })
 

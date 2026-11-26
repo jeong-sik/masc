@@ -70,7 +70,10 @@ const RuntimeFailedAttemptSchema = object({
 
 const RuntimeResolutionSchema = object({
   id: string(),
+  // Display name. Joins against usage scopes use provider_id, the
+  // [providers.<id>] key (server_dashboard_runtime_resolved_json.ml).
   provider: string(),
+  provider_id: string(),
   model: string(),
   effective_max_context: number(),
   max_context_source: MaxContextSourceSchema,

@@ -274,6 +274,9 @@ let fanout_model =
   ; turn_timeout_s = None
   ; explicit_context_cache_ttl_s = None
   ; capabilities = None
+  ; context_rollover_threshold = None
+  ; tail_window_atoms = None
+  ; compaction_keep_ratio = None
   }
 
 let fanout_binding ~provider_id ~is_default =

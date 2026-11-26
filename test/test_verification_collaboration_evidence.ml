@@ -547,7 +547,7 @@ let offers surface name =
    bridge budget. No file exists here: the record is the only source. *)
 let test_withheld_artifact_is_read_from_the_record () = with_fixture (fun config ->
   let open Yojson.Safe.Util in
-  let cap = Workspace_verification_snapshot.verification_evidence_max_bytes in
+  let cap = Store.verification_evidence_max_bytes in
   let head = "OMITTED_HEAD_4b1d" and tail = "OMITTED_TAIL_7e2c" in
   let body =
     head ^ String.make (cap - String.length head - String.length tail) 'z' ^ tail in
@@ -561,7 +561,7 @@ let test_withheld_artifact_is_read_from_the_record () = with_fixture (fun config
     ; prefix
     ; Store.Evidence_note "run attached" ] in
   check (list string) "only the complete artifact past the cap is withheld"
-    [ reference ] (Workspace_verification_snapshot.withheld_artifact_references items);
+    [ reference ] (Store.withheld_artifact_references items);
   let surface = VAT.create ~config ~producer:"producer" ~submitted_evidence:(restored items)
     |> require "request-bound surface" in
   let name = "keeper_artifact_read" in
@@ -590,8 +590,11 @@ let test_withheld_artifact_is_read_from_the_record () = with_fixture (fun config
       Yojson.Safe.from_string (String.concat "" (List.rev (content :: parts)))
     | cursor -> collect offset (bridge (cursor_args cursor)) (content :: parts) in
   let source = collect 0 first [] in
+  let source_fields = match source with
+    | `Assoc fields -> fields | _ -> fail "the artifact source is not an object" in
   check (list string) "the source names the artifact and its captured content"
-    [ "bytes"; "content"; "reference"; "source" ] (List.sort String.compare (object_keys source));
+    [ "bytes"; "content"; "reference"; "source" ]
+    (List.sort String.compare (List.map fst source_fields));
   check string "the record yields the whole withheld content" body (member "content" source |> to_string);
   check int "the size is the captured size" cap (member "bytes" source |> to_int);
   let whole = read surface name (artifact_args "artifact:small.txt") in
@@ -618,7 +621,7 @@ let test_record_reader_is_offered_only_for_a_withheld_artifact () = with_fixture
     ~submitted_evidence:(restored [ artifact "artifact:small.txt" "SMALL_BODY_9a0f" ])
     |> require "request-bound surface" in
   check (list string) "an artifact inside the cap is not withheld"
-    [] (Workspace_verification_snapshot.withheld_artifact_references
+    [] (Store.withheld_artifact_references
           (restored [ artifact "artifact:small.txt" "SMALL_BODY_9a0f" ]));
   check bool "a carried artifact needs no record reader" false
     (offers surface "keeper_artifact_read");

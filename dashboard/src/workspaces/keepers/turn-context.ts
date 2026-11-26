@@ -64,21 +64,6 @@ export function decodeTurnWorkContext(raw: unknown): KeeperTurnWorkContext | nul
   return { task_id: nonBlank(raw.task_id), start_reasons: reasons }
 }
 
-/** A preparation that ended other than `prepared`: the turn cannot go on
- *  from it, so it is not "working". */
-export function preparationHalted(preparation: KeeperTurnPreparation | null): boolean {
-  if (preparation === null) return false
-  switch (preparation.state) {
-    case 'rejected':
-    case 'raised':
-    case 'cancelled':
-      return true
-    case 'active':
-    case 'prepared':
-      return false
-  }
-}
-
 const PREPARATION_PHASE_LABEL: Readonly<Record<string, string>> = {
   task: 'Task',
   world: '월드',

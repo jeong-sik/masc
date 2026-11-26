@@ -6,7 +6,6 @@ import {
   decodeWaitingSummary,
   decodeWaitingUnavailable,
   isWaitingUnavailable,
-  preparationHalted,
   preparationHaltedLabel,
   preparationPhaseLabel,
   startReasonLabel,
@@ -19,13 +18,10 @@ const head = (extra: Record<string, unknown> = {}) => ({
 })
 
 describe('keeper turn context', () => {
-  it('reads a halted preparation as not working', () => {
+  it('reads how a preparation ended, and words one that halted', () => {
     const rejected = decodeTurnPreparation({ phase: 'context', state: 'rejected', turn_ref: null })
     expect(rejected).toEqual({ phase: 'context', state: 'rejected', started_at_unix: null })
-    expect(preparationHalted(rejected)).toBe(true)
     expect(preparationHaltedLabel({ phase: 'context', state: 'rejected', started_at_unix: null })).toBe('컨텍스트 준비 거절')
-    expect(preparationHalted(decodeTurnPreparation({ phase: 'tools', state: 'active' }))).toBe(false)
-    expect(preparationHalted(decodeTurnPreparation({ phase: 'tools', state: 'prepared' }))).toBe(false)
     expect(decodeTurnPreparation({ phase: 'tools', state: 'exploded' })).toBeNull()
   })
 

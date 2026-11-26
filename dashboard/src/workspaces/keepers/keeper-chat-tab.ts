@@ -84,11 +84,7 @@ import {
   type ChatBlockPrefs,
 } from './chat-blocks'
 import { previewForObservedTurn, retainTurnPreview, type ReceivedTurnPreview } from './chat-turn-progress'
-import {
-  preparationHalted,
-  preparationHaltedLabel,
-  startReasonLabel,
-} from './turn-context'
+import { startReasonLabel } from './turn-context'
 import {
   acceptedReplyState,
   appendStreamNotice,
@@ -2538,21 +2534,19 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const hasActiveObserverStream = scopedMessages.some((entry) => entry.role === 'assistant'
     && entry.id.startsWith('obs-asst-') && entry.deliveryState === 'Streaming')
   const showLiveTurnCard = (!sending || browserRequestQueued) && !hasActiveObserverStream && hasTurnObservation
-  const turnPreparation = effectivePreview?.preparation ?? null
-  const liveTurnActivity = turnPreparation !== null && preparationHalted(turnPreparation)
-    ? { label: preparationHaltedLabel(turnPreparation), tone: 'bad' as const }
-    : formatTurnActivityLabel(effectivePreview?.activity)
+  const liveTurnActivity = formatTurnActivityLabel(effectivePreview?.activity)
   const turnWorkContext = effectivePreview?.work_context ?? null
-  // The one line the open-work rows expand; the activity's word when the preview lists nothing.
+  // The one line the open-work rows expand: a preparation step, the open work, or the activity's word.
   const liveTurnDoing = effectivePreview ? turnDoing(effectivePreview) : null
+  const liveTurnTone = liveTurnDoing?.tone ?? liveTurnActivity.tone
   const liveTurnLaneLabel = activeTurn ? formatTurnLaneLabel(activeTurn.lane) : 'Keeper 턴'
   const lastObserved = effectivePreview ? formatChatTime(effectivePreview.updated_at_unix) : null
   const snapshotLive = activeTurn !== null && row?.status === 'ok' && turnRead?.kind === 'value'
     && !turnRead.stale && turnRead !== invalidatedSnapshot
   const turnLive = observerConnected.value && (snapshotLive || matchedPreview?.live === true)
-  const turnAnimating = turnLive && liveTurnActivity.tone !== 'bad'
+  const turnAnimating = turnLive && liveTurnTone !== 'bad'
   const progressLabel = turnLive
-    ? (turnAnimating ? 'Working' : liveTurnActivity.label)
+    ? (turnAnimating ? 'Working' : liveTurnDoing?.phrase ?? liveTurnActivity.label)
     : '마지막 확인'
   const snapshotAt = snapshot?.updatedAt
   const turnObservedAt = snapshotAt === undefined
@@ -3525,7 +3519,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           ${(hasTurnObservation || lastWorked) && html`
             <div class="kp-turn-progress">
               ${hasTurnObservation && html`
-                <div class="kp-turn-progress-active" data-tone=${liveTurnActivity.tone} data-live=${turnLive ? 'true' : 'false'}>
+                <div class="kp-turn-progress-active" data-tone=${liveTurnTone} data-live=${turnLive ? 'true' : 'false'}>
                   ${turnAnimating && html`<span class="kp-live-dot" aria-hidden="true"></span>`}
                   <span class="kp-turn-progress-line">
                     <span role="status">

@@ -238,6 +238,18 @@ type toast = {
   expires_at : Clock.Mono.t;
 }
 
+(** 0-based terminal cell coordinate for mouse text selection. *)
+type cell_pos = { x : int; y : int }
+
+type mouse_selection_state =
+  | No_selection
+  | Dragging of { anchor : cell_pos; cursor : cell_pos }
+  | Settled of { anchor : cell_pos; cursor : cell_pos; copied : bool }
+(** App-internal drag-select state. [Dragging] tracks the live drag;
+    [Settled] keeps the highlight after release until the next key,
+    wheel, resize, or new press clears it. The settled text copy is
+    performed by the app shell once (see [copied]). *)
+
 type t = {
   epoch : Epoch.t;
   viewport : viewport;
@@ -272,7 +284,18 @@ type t = {
   keeper_resume_op_ids : (string * string * int) list;
   keeper_lifecycle_seq : int;
   modal_submission_seq : int;
+  mouse_selection : mouse_selection_state;
 }
+
+val equal_cell_pos : cell_pos -> cell_pos -> bool
+val equal_mouse_selection_state : mouse_selection_state -> mouse_selection_state -> bool
+val clear_mouse_selection : t -> t
+val begin_mouse_selection : x:int -> y:int -> t -> t
+val extend_mouse_selection : x:int -> y:int -> t -> t
+val settle_mouse_selection : t -> t
+val mark_mouse_selection_copied : t -> t
+val mouse_selection_rect : t -> Rect.t option
+val mouse_selection_is_pending_copy : t -> bool
 
 val quit_arm_window_s : float
 (** Seconds during which a second [Ctrl+Q] confirms and exits the TUI. *)

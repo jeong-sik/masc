@@ -54,6 +54,10 @@ val back_grid : t -> Cell_grid.t
 (** Preallocated back framebuffer owned by [t]. Clear and draw into it, then
     call {!present_back} for an O(1) zero-reallocation front/back swap. *)
 
+val front_grid : t -> Cell_grid.t
+(** The last presented framebuffer owned by [t] (read-only; used to extract
+    settled mouse-selection text). *)
+
 val resize : t -> cols:int -> rows:int -> unit
 val invalidate : t -> unit
 (** Force a full repaint on the next present (e.g. after [Terminal_out.take_lost]

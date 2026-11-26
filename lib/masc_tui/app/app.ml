@@ -432,7 +432,7 @@ let is_ctrl_c (ev : Input_decoder.key_event) =
 let default_mouse_capture = false
 
 let mouse_capture_seq enabled =
-  if enabled then "\x1b[?1000h\x1b[?1006h"
+  if enabled then "\x1b[?1000h\x1b[?1002h\x1b[?1006h"
   else "\x1b[?1000l\x1b[?1002l\x1b[?1006l"
 
 let is_mouse_toggle_key (kev : Input_decoder.key_event) =
@@ -1248,8 +1248,8 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
             let notice =
               if next_enabled then
                 Say.make
-                  ~ko:"마우스 휠 모드 켜짐 ([m]으로 드래그 선택 복귀)"
-                  ~en:"Mouse wheel mode ON (press [m] for native drag-select)"
+                  ~ko:"마우스 모드 켜짐 (드래그해 선택하면 복사, [m]으로 네이티브 선택 복귀)"
+                  ~en:"Mouse mode ON (drag to select and copy, [m] for native drag-select)"
               else
                 Say.make
                   ~ko:"네이티브 드래그 선택 모드 (마우스 캡처 꺼짐)"
@@ -1607,6 +1607,22 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                         ~write:Terminal_out.write
                     in
                     if diff_stats.bytes_emitted > 0 then Terminal_out.flush ();
+                    (* Settled drag-select text is copied once via the async
+                       clipboard path; the executor publishes the outcome
+                       toast. The highlight stays until the next key/wheel. *)
+                    if Model.mouse_selection_is_pending_copy !model then begin
+                      (match Model.mouse_selection_rect !model with
+                      | Some rect ->
+                          let text =
+                            Selection.extract_text (Presenter.front_grid presenter)
+                              ~rect
+                          in
+                          if not (String.equal text "") then
+                            Cmd_executor.execute executor
+                              (Cmd.Copy_clipboard text)
+                      | None -> ());
+                      model := Model.mark_mouse_selection_copied !model
+                    end;
                     presented_run_next :=
                       Option.map (fun target -> frame_model.epoch, target)
                         (Update_nav.queue_run_next_target frame_model);

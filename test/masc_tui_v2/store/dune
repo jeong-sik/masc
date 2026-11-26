@@ -17,6 +17,16 @@
   alcotest))
 
 (test
+ (name test_drag_select)
+ (modules test_drag_select)
+ (libraries
+  masc_tui_core
+  masc_tui_keymap
+  masc_tui_store
+  masc_tui_term
+  alcotest))
+
+(test
  (name test_keymap_matrix)
  (modules test_keymap_matrix)
  (libraries

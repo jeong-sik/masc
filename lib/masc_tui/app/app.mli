@@ -137,8 +137,10 @@ val default_mouse_capture : bool
 
 val mouse_capture_seq : bool -> string
 (** Exact escape sequence emitted when toggling/restoring mouse tracking:
-    enables button/wheel SGR reporting ([\x1b[?1000h\x1b[?1006h], never
-    [?1002h] drag hijack) when [true], and disables all mouse modes when [false]. *)
+    enables button/wheel/drag SGR reporting
+    ([\x1b[?1000h\x1b[?1002h\x1b[?1006h]) when [true] (app-internal
+    drag-select + copy), and disables all mouse modes when [false]
+    (native terminal drag-select). *)
 
 val should_toggle_mouse_capture : Model.t -> Input_decoder.key_event -> bool
 (** [true] iff [ev] is unmodified bare [m] (or its Korean 2-bulsik IME

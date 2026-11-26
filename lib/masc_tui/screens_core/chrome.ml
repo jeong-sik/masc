@@ -2196,6 +2196,12 @@ let render_frame ~(model : Model.t) ~cache ~render_body ~render_overlay grid =
     else ();
     render_footer grid ~rect:layout.footer ~theme ~model
       ~breakpoint:layout.breakpoint ~composer_folded:layout.composer_folded;
+    (match Model.mouse_selection_rect model with
+    | Some rect ->
+        Selection.paint grid ~rect
+          ~fg:(Color.of_rgb theme.selection_fg)
+          ~bg:(Color.of_rgb theme.selection_bg)
+    | None -> ());
     match model.nav.overlay with
     | None ->
         render_toast_pill grid ~body_rect:layout.body ~theme ~model;

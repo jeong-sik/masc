@@ -106,6 +106,7 @@ let set_capabilities t caps =
   t.force_full <- true
 
 let back_grid t = t.back
+let front_grid t = t.front
 
 let resize t ~cols ~rows =
   let cols = Int.max 0 cols in

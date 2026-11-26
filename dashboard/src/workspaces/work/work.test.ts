@@ -2133,5 +2133,108 @@ describe('workspaces/work', () => {
       expect(container.querySelector('input[aria-label="Goal Candle 조회 ID"]')).toBeNull()
       expect(container.textContent).not.toContain('보류 확인')
     }
+
+    // 4. InboxTab loopback auth_enabled=false: Tool_actor CanAdmin (tool_approval, keeper_ask) enabled, Token_permission CanAdmin (channel_gate, goal_confirmation) locked
+    seenUrls.length = 0
+    let postedApproval = false
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      seenUrls.push(url)
+      if (url.startsWith('/api/v1/keepers/tool-approvals')) {
+        return jsonResponse({
+          pending: [{
+            approval_id: 'apr-local-1',
+            keeper: 'sangsu',
+            tool_call_id: 'tc-local-1',
+            tool: 'bash',
+            args: { cmd: 'pwd' },
+            question: 'Run pwd?',
+            because: 'policy',
+            asked_at: 1_700_000_000,
+            revision: '1',
+          }],
+        })
+      }
+      if (url.startsWith('/api/v1/keepers/tool-approval') && init?.method === 'POST') {
+        postedApproval = true
+        return jsonResponse({ settled: true })
+      }
+      if (url.startsWith('/api/v1/keepers/asks')) {
+        return jsonResponse({
+          asks: [{
+            ask_id: 'ask-local-1',
+            keeper: 'sangsu',
+            asked_at: 1_700_000_000,
+            revision: '1',
+            questions: [{ question_id: 'q1', header: 'Confirm', prompt: 'Proceed?', mode: 'single', choices: [] }],
+          }],
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/gate')) {
+        return jsonResponse({
+          approval_queue_state: { state: 'ready' },
+          approval_queue: [{
+            id: 'gate-local-1',
+            keeper_name: 'sangsu',
+            tool_name: 'deploy',
+            phase: 'awaiting_operator',
+            sequence: 1,
+          }],
+          recent_resolved_state: { state: 'ready' },
+          recent_resolved: [],
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/planning')) {
+        return jsonResponse({
+          tasks: [],
+          goals: [{ id: 'goal-local-1', title: 'Local Goal', phase: 'Awaiting_confirmation', priority: 1 }],
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(null, container)
+    resourceCache.clearAll()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: false,
+      role: 'admin',
+      canTokenAdmin: false,
+      canTokenRead: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    render(html`<${WorkWorkspace} subroute="inbox" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(10)
+    expect(container.querySelector('[data-testid="inbox-token-admin-partial"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="inbox-admin-locked"]')).toBeNull()
+    expect(seenUrls.some((u) => u.includes('/api/v1/goals/confirmation'))).toBe(false)
+
+    // Tool approval is enabled under loopback auth_enabled=false
+    const approveBtn = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((b) => b.textContent?.includes('승인 (Approve)'))!
+    expect(approveBtn.disabled).toBe(false)
+    approveBtn.click()
+    await flushUi(5)
+    expect(postedApproval).toBe(true)
+
+    // Keeper Ask is enabled under loopback auth_enabled=false
+    const askRow = [...container.querySelectorAll<HTMLButtonElement>('.wk-row-btn')]
+      .find((b) => b.textContent?.includes('Confirm'))!
+    askRow.click()
+    await flushUi(3)
+    const submitAskBtn = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((b) => b.textContent?.includes('답변 제출 (Submit Answer)'))!
+    expect(submitAskBtn.disabled).toBe(false)
+
+    // Channel gate remains disabled under loopback auth_enabled=false
+    const gateRow = [...container.querySelectorAll<HTMLButtonElement>('.wk-row-btn')]
+      .find((b) => b.textContent?.includes('deploy'))!
+    gateRow.click()
+    await flushUi(3)
+    const gateApproveBtn = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((b) => b.textContent?.includes('승인 (Approve)'))!
+    expect(gateApproveBtn.disabled).toBe(true)
   })
 })

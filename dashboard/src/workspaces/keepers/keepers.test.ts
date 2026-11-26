@@ -34,6 +34,7 @@ import {
   parseSourceBoundMemoryBranch,
   recordedToolOutcomeTone,
   reconstructJournalReply,
+  recoverCutReplyFromJournal,
   runQueuedChatOperationNext,
   streamKeeperChat,
   transcribeVoiceAudio,
@@ -3421,5 +3422,150 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       authMethods: { google: false, github: false, dev_token: false },
       workspaceId: 'default',
     })).toBe(false)
+  })
+
+  it('gates chat /tool-result, /chat/events recovery, and voice transcribe on token-admin while allowing Interrupt Turn for SU Worker & loopback auth_enabled=false', async () => {
+    const seenUrls: string[] = []
+    const json = (data: unknown) =>
+      new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      seenUrls.push(url)
+      if (url.includes('/chat/history/page')) {
+        return json({
+          has_more: false,
+          next_cursor: null,
+          messages: [
+            {
+              id: 'asst-tool-1',
+              role: 'assistant',
+              content: '',
+              ts: 1_700_000_010,
+              tool_calls: [{ id: 'tc-1', execution_id: 'exec-rbac-1', name: 'bash', args: '{"cmd":"ls"}' }],
+            },
+          ],
+        })
+      }
+      if (url.includes('/chat/operations')) return json(queuedOperations())
+      if (url.includes('/api/v1/keepers/chat/stream')) {
+        // Cut stream without RUN_FINISHED -> must NOT hit /chat/events for SU Worker
+        const sse = `data: ${JSON.stringify({ type: 'TEXT_MESSAGE_CONTENT', delta: 'Partial before cut' })}\n\n`
+        return new Response(sse, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      }
+      if (url.includes('/api/v1/keepers/turn/interrupt')) {
+        return json({ ok: true, interrupted: true })
+      }
+      if (url.includes('/api/v1/keepers/tool-approval-mode')) {
+        return json({ default: 'auto', overrides: [], restore_error: null })
+      }
+      return json({ ok: true })
+    }))
+
+    // 1. Direct recoverCutReplyFromJournal fails closed for SU Worker and SU auth_enabled=false
+    for (const nonTokenAdmin of [
+      {
+        kind: 'single_user_local' as const,
+        mode: 'single_user' as const,
+        tokenPresent: true,
+        role: 'worker' as const,
+        canTokenAdmin: false,
+        canTokenRead: true,
+        authMethods: { google: false, github: false, dev_token: false },
+        workspaceId: 'default',
+      },
+      {
+        kind: 'single_user_local' as const,
+        mode: 'single_user' as const,
+        tokenPresent: false,
+        role: 'admin' as const,
+        canTokenAdmin: false,
+        canTokenRead: false,
+        authMethods: { google: false, github: false, dev_token: false },
+        workspaceId: 'default',
+      },
+    ]) {
+      authSession.value = nonTokenAdmin
+      const rec = await recoverCutReplyFromJournal('code-reviewer-sister', 'op-cut-1')
+      expect(rec.ok).toBe(false)
+    }
+    expect(seenUrls.some((u) => u.includes('/chat/events'))).toBe(false)
+
+    // 2. KeeperChatTab under SU Worker: expanding tool card & cut stream fire 0x /tool-result or /chat/events
+    seenUrls.length = 0
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'worker',
+      canTokenAdmin: false,
+      canTokenRead: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    const chat = render(
+      html`<${KeeperChatTab} keeper=${makeRosterKeeper()} onInspect=${vi.fn()} onMutated=${vi.fn()} />`,
+    )
+    await waitFor(() => {
+      expect(chat.container.querySelector('[data-testid="chat-tool-result-admin-locked"]')).not.toBeNull()
+    })
+    expect(chat.queryByRole('button', { name: '실행 결과 불러오기' })).toBeNull()
+
+    // Trigger cut stream under SU Worker -> 0x /chat/events & no 저널 복구 button
+    const composer = chat.getByLabelText('Keeper 채팅 입력') as HTMLTextAreaElement
+    fireEvent.input(composer, { target: { value: 'Trigger cut stream' } })
+    fireEvent.keyDown(composer, { key: 'Enter' })
+    await waitFor(() => expect(chat.container.textContent).toContain('Partial before cut'))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(seenUrls.some((u) => u.includes('/tool-result'))).toBe(false)
+    expect(seenUrls.some((u) => u.includes('/chat/events'))).toBe(false)
+    expect(chat.queryByRole('button', { name: '저널 복구' })).toBeNull()
+    chat.unmount()
+
+    // 3. KeeperHeader: Interrupt Turn (CanBroadcast) IS available for SU Worker & SU auth_enabled=false while Pause/Delete stay locked
+    seenUrls.length = 0
+    const activeTurnKeeper = makeRosterKeeper({
+      keepalive_running: true,
+      status: 'running',
+      phase: 'running',
+      paused: false,
+      active_turn: { lane: 'chat_operation', started_at_unix: 1_700_000_000 },
+    })
+    const workerHdr = render(
+      html`<${KeeperHeader} keeper=${activeTurnKeeper} activeTab="chat" onSelectTab=${vi.fn()} onLifecycleMutated=${vi.fn()} onDeleted=${vi.fn()} />`,
+    )
+    expect(workerHdr.queryByRole('button', { name: 'Pause' })).toBeNull()
+    expect(workerHdr.queryByRole('button', { name: 'Delete' })).toBeNull()
+    const interruptBtn = workerHdr.getByRole('button', { name: 'Interrupt Turn' })
+    fireEvent.click(interruptBtn)
+    await waitFor(() => {
+      expect(seenUrls.some((u) => u.includes('/api/v1/keepers/turn/interrupt'))).toBe(true)
+    })
+    workerHdr.unmount()
+
+    // Idle booted keeper under SU Worker exposes Interrupt Turn in overflow menu without Delete
+    const idleHdr = render(
+      html`<${KeeperHeader} keeper=${makeRosterKeeper()} activeTab="chat" onSelectTab=${vi.fn()} onLifecycleMutated=${vi.fn()} onDeleted=${vi.fn()} />`,
+    )
+    fireEvent.click(idleHdr.getByTestId('keeper-actions-menu'))
+    expect(idleHdr.getByTestId('keeper-actions-popover').textContent).toContain('Interrupt Turn')
+    expect(idleHdr.getByTestId('keeper-actions-popover').textContent).not.toContain('Delete')
+    idleHdr.unmount()
+
+    // SU Player cannot see Interrupt Turn
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'player',
+      canTokenAdmin: false,
+      canTokenRead: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    const playerHdr = render(
+      html`<${KeeperHeader} keeper=${activeTurnKeeper} activeTab="chat" onSelectTab=${vi.fn()} onLifecycleMutated=${vi.fn()} onDeleted=${vi.fn()} />`,
+    )
+    expect(playerHdr.queryByRole('button', { name: 'Interrupt Turn' })).toBeNull()
+    playerHdr.unmount()
   })
 })

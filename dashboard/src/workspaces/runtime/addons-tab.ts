@@ -16,9 +16,11 @@ import {
   apiMutate,
   apiRequest,
   authSession,
+  canAccessAdmin,
   currentSessionEpoch,
   extractObserverTopics,
   isEpochCurrent,
+  isSingleUserMember,
   markViewSynced,
   resourceCache,
   sessionEpoch,
@@ -33,7 +35,6 @@ import {
   expectOptionalRecordArrayField,
   expectWireRecord,
 } from '../../lib/wire-decode'
-import { isAdminLockedForSession } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
 import type {
   BrowserClientRow,
@@ -131,10 +132,9 @@ type BrowserLaneState =
 export function AddonsTab(props: WorkspaceViewProps) {
   const session = authSession.value
   const epoch = sessionEpoch.value
-  const isSingleUser = session.kind === 'single_user_local'
-  const adminLocked = isAdminLockedForSession('admin', session)
-  const canUseLocalAddons = isSingleUser && session.role !== 'player'
-  const canAnswerAddonAsk = isSingleUser && !adminLocked
+  const canUseLocalAddons = isSingleUserMember(session)
+  // POST /api/v1/lane-addons/ask-answer uses Tool_actor CanAdmin (succeeds on loopback auth_enabled=false).
+  const canAnswerAddonAsk = canUseLocalAddons && canAccessAdmin(session)
 
   const addonsObs = resourceCache.observe<LaneAddonsPayload>('runtime:lane-addons').value
   const asksObs = resourceCache.observe<LaneAddonAsksResponse>('runtime:lane-addons-asks').value
@@ -155,14 +155,11 @@ export function AddonsTab(props: WorkspaceViewProps) {
   const catalogAbortRef = useRef<AbortController | null>(null)
   const previewAbortRef = useRef<AbortController | null>(null)
 
-  const hasLocalAddonAccess = (): boolean => {
-    const cur = authSession.peek()
-    return cur.kind === 'single_user_local' && cur.role !== 'player'
-  }
+  const hasLocalAddonAccess = (): boolean => isSingleUserMember(authSession.peek())
 
   const hasAdminAddonAccess = (): boolean => {
     const cur = authSession.peek()
-    return cur.kind === 'single_user_local' && !isAdminLockedForSession('admin', cur)
+    return isSingleUserMember(cur) && canAccessAdmin(cur)
   }
 
   const loadAddons = (reason: 'mount' | 'sse' | 'manual' = 'mount') => {
@@ -800,7 +797,7 @@ export function AddonsTab(props: WorkspaceViewProps) {
       ${!canUseLocalAddons
         ? html`
             <div class="wka-card" data-testid="addons-mode-notice" role="status" style=${{ fontSize: 'var(--fs-13)', color: 'var(--fg-2)' }}>
-              ${isSingleUser
+              ${session.kind === 'single_user_local'
                 ? 'Lane-Addons 및 Browser Lane 제어는 워크스페이스 접근 권한이 있는 세션에서만 사용할 수 있습니다.'
                 : 'Lane-Addons 및 Browser Lane(/api/v1/lane-addons, /api/v1/dashboard/browser-lane)은 single_user 모드 전용입니다.'}
             </div>

@@ -2250,5 +2250,16 @@ describe('workspaces/runtime', () => {
     expect(seenUrls.some((u) => u.includes('/api/v1/dashboard/cache-stats'))).toBe(true)
     expect(seenUrls.some((u) => u.includes('/api/v1/keeper-efficiency'))).toBe(false)
     expect(seenUrls.some((u) => u.includes('/api/v1/dashboard/exact-lane-runs'))).toBe(false)
+
+    // 4. AddonsTab under loopback auth_enabled=false allows Tool_actor CanAdmin ask-answer
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${RuntimeWorkspace} subroute="addons" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(25)
+    expect(container.querySelector('[data-testid="addon-ask-admin-locked"]')).toBeNull()
+    const localSubmitBtns = [...container.querySelectorAll('button')].filter((b) =>
+      b.textContent?.includes('질문 응답 제출'),
+    )
+    expect(localSubmitBtns.length).toBeGreaterThan(0)
   })
 })

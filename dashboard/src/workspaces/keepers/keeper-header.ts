@@ -6,7 +6,14 @@ import { html } from 'htm/preact'
 import { contextSeverityTone } from '../../api/keeper-diagnostics'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { useFocusScope } from '../../../design-system/headless-preact/use-focus-scope'
-import { activeWorkspaceId, authSession, currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
+import {
+  activeWorkspaceId,
+  authSession,
+  currentSessionEpoch,
+  isEpochCurrent,
+  isSingleUserMember,
+  sessionEpoch,
+} from '../../core/auth'
 import { extractObserverTopics, subscribeObserverFrames, subscribeObserverReconnect } from '../../core/observer'
 import { formatObserved, resourceCache, type Observed } from '../../core/resource-cache'
 import { useAuthenticatedPortrait } from '../../lib/portrait-cache'
@@ -134,7 +141,9 @@ export function KeeperHeader(props: KeeperHeaderProps) {
   }, [deleteOpen])
 
   const session = authSession.value
-  const isSingleUser = session.kind === 'single_user_local'
+  const isSingleUser = isSingleUserMember(session)
+  // POST /api/v1/keepers/turn/interrupt uses Tool_actor CanBroadcast (Worker & loopback auth_enabled=false allowed).
+  const canInterruptTurn = isSingleUser
   const canAdminLifecycle = isSingleUser && !isAdminLockedForSession('admin', session)
   const epoch = sessionEpoch.value
   const approvalModesObs = resourceCache.observe<KeeperToolApprovalModesData>('keepers:tool-approval-modes').value
@@ -244,35 +253,42 @@ export function KeeperHeader(props: KeeperHeaderProps) {
       ? '상태 · ⚠ ▾'
       : '상태 ▾'
   const overflowActionItems: PopoverMenuItem[] = [
-    ...(booted && keeper.active_turn === null
+    ...(canInterruptTurn && booted && keeper.active_turn === null
       ? [{
           id: 'interrupt',
           label: 'Interrupt Turn',
           description: '유휴 상태에서도 턴 중단 신호 전송',
           disabled: busyAction !== null,
-          onSelect: () => void runLifecycle('Interrupt Turn', () => interruptKeeperTurnAction(keeper.name)),
+          onSelect: () => void runLifecycle('Interrupt Turn', () => interruptKeeperTurnAction(keeper.name), 'member'),
         }]
       : []),
-    {
-      id: 'delete',
-      label: 'Delete',
-      description: 'Keeper 및 모든 아티팩트 영구 삭제',
-      danger: true,
-      separatorBefore: booted && keeper.active_turn === null,
-      disabled: busyAction !== null,
-      onSelect: () => {
-        setCapturedDeletePhase(keeper.phase)
-        setDeleteOpen(true)
-      },
-    },
+    ...(canAdminLifecycle
+      ? [{
+          id: 'delete',
+          label: 'Delete',
+          description: 'Keeper 및 모든 아티팩트 영구 삭제',
+          danger: true,
+          separatorBefore: canInterruptTurn && booted && keeper.active_turn === null,
+          disabled: busyAction !== null,
+          onSelect: () => {
+            setCapturedDeletePhase(keeper.phase)
+            setDeleteOpen(true)
+          },
+        }]
+      : []),
   ]
 
   const runLifecycle = async (
     label: string,
     fn: () => Promise<{ ok: boolean; error?: { message: string } }>,
+    tier: 'member' | 'admin' = 'admin',
   ) => {
     const cur = authSession.peek()
-    if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) return
+    if (tier === 'member') {
+      if (!isSingleUserMember(cur)) return
+    } else if (cur.kind !== 'single_user_local' || isAdminLockedForSession('admin', cur)) {
+      return
+    }
     const targetKeeper = keeper.name
     const startEpoch = currentSessionEpoch()
     setBusyAction(label)
@@ -444,7 +460,7 @@ export function KeeperHeader(props: KeeperHeaderProps) {
                     type="button"
                     class="btn-ghost"
                     disabled=${busyAction !== null}
-                    onClick=${() => void runLifecycle('Interrupt Turn', () => interruptKeeperTurnAction(keeper.name))}
+                    onClick=${() => void runLifecycle('Interrupt Turn', () => interruptKeeperTurnAction(keeper.name), 'member')}
                   >
                     Interrupt Turn
                   </button>
@@ -460,7 +476,32 @@ export function KeeperHeader(props: KeeperHeaderProps) {
                 />
               </div>
             `
-          : html`<span class="kp-pill" data-testid="keeper-lifecycle-admin-locked">수명주기 제어: 관리자 전용</span>`}
+          : html`
+              <div class="kp-lifecycle-bar" role="group" aria-label="Keeper 수명주기 제어">
+                ${canInterruptTurn && keeper.active_turn !== null && html`
+                  <button
+                    type="button"
+                    class="btn-ghost"
+                    disabled=${busyAction !== null}
+                    onClick=${() => void runLifecycle('Interrupt Turn', () => interruptKeeperTurnAction(keeper.name), 'member')}
+                  >
+                    Interrupt Turn
+                  </button>
+                `}
+                ${canInterruptTurn && overflowActionItems.length > 0 && html`
+                  <${PopoverMenu}
+                    align="right"
+                    triggerLabel="⋯"
+                    triggerClassName="btn-ghost"
+                    triggerTestId="keeper-actions-menu"
+                    popoverTestId="keeper-actions-popover"
+                    ariaLabel="Keeper 추가 작업"
+                    items=${overflowActionItems}
+                  />
+                `}
+                <span class="kp-pill" data-testid="keeper-lifecycle-admin-locked">수명주기 제어: 관리자 전용</span>
+              </div>
+            `}
       </div>
 
       ${hasDiagnostics && html`

@@ -19,12 +19,17 @@ import { WorkspaceChatImage } from '../../components/chat/workspace-image'
 import { PopoverMenu } from '../../components/primitives/popover-menu'
 import { lazy, Suspense } from 'preact/compat'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks'
-import { authSession, currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
+import {
+  authSession,
+  canUseSingleUserTokenAdmin,
+  currentSessionEpoch,
+  isEpochCurrent,
+  sessionEpoch,
+} from '../../core/auth'
 import { formatObserved } from '../../core/resource-cache'
 import { observerConnected, subscribeObserverFrames, subscribeObserverResync } from '../../core/observer'
 import { isWorkspaceRasterMime } from '../../lib/keeper-media'
 import { randomUuid } from '../../lib/uuid'
-import { isAdminLockedForSession } from '../../routes/router'
 import { readDiscordOperator, type DiscordReplyAuthority } from './discord-reply'
 import { DiscordReplyPanel } from './discord-reply-panel'
 import {
@@ -416,10 +421,10 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const discordReplyTrigger = useRef<HTMLButtonElement | null>(null)
   const discordSession = authSession.value
   const discordEpoch = sessionEpoch.value
-  const canAdminLocalChat = discordSession.kind === 'single_user_local' && !isAdminLockedForSession('admin', discordSession)
+  const canAdminLocalChat = canUseSingleUserTokenAdmin(discordSession)
   const [discordAuthority, setDiscordAuthority] = useState<(DiscordReplyAuthority & { epoch: number }) | null>(null)
   const hasDiscordReplySource = scopedMessages.some(msg => msg.discordReplyOrigin)
-  const hasBearer = canAdminLocalChat && discordSession.tokenPresent
+  const hasBearer = discordSession.kind === 'single_user_local' && canAdminLocalChat && discordSession.tokenPresent
   const discordOperator = hasBearer && discordAuthority?.epoch === discordEpoch ? discordAuthority : null
   useEffect(() => {
     if (!hasBearer || !hasDiscordReplySource) return
@@ -728,7 +733,16 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     })
   }, [abortAllToolFetches, invalidateEarlierReads, resetToolResultCache, resetExpandUiState])
 
+  useEffect(() => {
+    if (!canAdminLocalChat) {
+      abortAllToolFetches()
+      requestedExecIdsRef.current.clear()
+      resetToolResultCache()
+    }
+  }, [canAdminLocalChat, abortAllToolFetches, resetToolResultCache])
+
   const requestToolResult = useCallback(async (executionId: string, force = false) => {
+    if (!canUseSingleUserTokenAdmin(authSession.peek())) return
     const trimmed = executionId.trim()
     if (!trimmed) return
     if (!force && (requestedExecIdsRef.current.has(trimmed) || toolFetchControllersRef.current.has(trimmed))) {
@@ -750,6 +764,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         !mountedRef.current
         || activeKeeperRef.current !== targetKeeper
         || !isEpochCurrent(startEpoch)
+        || !canUseSingleUserTokenAdmin(authSession.peek())
         || toolFetchControllersRef.current.get(trimmed) !== ctrl
         || ctrl.signal.aborted
       ) {
@@ -777,6 +792,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   }, [keeper.name, updateToolResultCache])
 
   const loadMoreToolResult = useCallback(async (executionId: string, maxPages: number) => {
+    if (!canUseSingleUserTokenAdmin(authSession.peek())) return
     const trimmed = executionId.trim()
     if (!trimmed) return
     if (toolFetchControllersRef.current.has(trimmed)) return
@@ -790,6 +806,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       mountedRef.current
       && activeKeeperRef.current === targetKeeper
       && isEpochCurrent(startEpoch)
+      && canUseSingleUserTokenAdmin(authSession.peek())
       && toolFetchControllersRef.current.get(trimmed) === ctrl
       && !ctrl.signal.aborted
     try {
@@ -1133,7 +1150,12 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           ...m,
           toolCalls: snapshotTools,
         }), 'Streaming')
-        if (blockPrefsRef.current.tools !== 'hidden' && isCardOpen && !matchedBlock?.result) {
+        if (
+          canUseSingleUserTokenAdmin(authSession.peek())
+          && blockPrefsRef.current.tools !== 'hidden'
+          && isCardOpen
+          && !matchedBlock?.result
+        ) {
           void requestToolResult(executionId)
         }
       },
@@ -1848,6 +1870,16 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       readonly streamError?: string | null
     },
   ) => {
+    if (!opts?.unconfirmedAcceptance && !canUseSingleUserTokenAdmin(authSession.peek())) {
+      updateAssistantEntry(assistantId, (m) => ({
+        ...m,
+        cutStream: false,
+        deliveryState: m.content ? 'Delivered' : 'Failed',
+        errorDetail: m.content ? undefined : '스트림이 중단되었습니다. 대화 이력을 새로고침했습니다.',
+      }))
+      refreshChatRef.current('history', 'queue', 'waiting')
+      return
+    }
     const targetKeeper = keeper.name
     const startEpoch = currentSessionEpoch()
     const stillActive = () =>
@@ -2011,6 +2043,12 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         if (outcome.error !== 'aborted' && outcome.error !== 'session_epoch_changed') {
           setBtw((cur) => (cur.status === 'error' ? cur : { ...cur, status: 'error', error: outcome.error }))
         }
+      } else if (!canUseSingleUserTokenAdmin(authSession.peek())) {
+        setBtw((cur) => ({
+          ...cur,
+          status: cur.reply ? 'done' : 'error',
+          error: cur.reply ? null : '스트림이 중단되었습니다. 다시 시도하세요.',
+        }))
       } else {
         const rec = await recoverCutReplyFromJournal(targetKeeper, operationId)
         if (!isStillActive()) return
@@ -2371,6 +2409,10 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
 
   const handleVoiceFile = async (e: Event) => {
     const input = e.currentTarget as HTMLInputElement
+    if (!canUseSingleUserTokenAdmin(authSession.peek())) {
+      input.value = ''
+      return
+    }
     const file = input.files?.[0]
     if (!file) return
     setVoiceBusy(true)
@@ -2463,14 +2505,14 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const autoHydrateKey = autoHydrateTargets.join('\0')
 
   useEffect(() => {
-    if (!autoHydrateKey) return
+    if (!canAdminLocalChat || !autoHydrateKey) return
     const targets = autoHydrateKey.split('\0').filter(Boolean)
     for (const eid of targets) {
       if (!toolResultCacheRef.current[eid] && !requestedExecIdsRef.current.has(eid)) {
         void requestToolResult(eid)
       }
     }
-  }, [autoHydrateKey, keeper.name, blockPrefs.tools, requestToolResult])
+  }, [canAdminLocalChat, autoHydrateKey, keeper.name, blockPrefs.tools, requestToolResult])
 
   const matchedPreview = previewForObservedTurn(turnPreviews, activeTurn, snapshot?.updatedAt, snapshot?.retiredOwners)
   const effectivePreview = matchedPreview?.preview ?? activeTurn?.preview ?? null
@@ -2525,7 +2567,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       ? toolResultMarkdownPreview(text) : null
     const raw = html`<pre class=${isExpandedPre ? 'kp-block-pre kp-block-pre--expanded' : 'kp-block-pre'}>${text}</pre>`
     const showPager = Boolean(
-      executionId
+      canAdminLocalChat
+      && executionId
       && cachedRes?.status === 'loaded'
       && !cachedRes.eof
       && !cachedRes.isBinary,
@@ -2598,7 +2641,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           </div>
         </div>
       `}
-      ${executionId && cachedRes?.status === 'loaded' && cachedRes.loadMoreError && html`
+      ${canAdminLocalChat && executionId && cachedRes?.status === 'loaded' && cachedRes.loadMoreError && html`
         <div class="kp-tool-result-error" role="alert" data-testid="tool-result-load-more-error">
           <span>${cachedRes.loadMoreError}</span>
           <div class="kp-block-subactions">
@@ -2652,7 +2695,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     ${!displayResult && cachedRes?.status === 'pending' && html`
       <div class="kp-block-status">
         도구 실행 중 — 결과 준비 대기 중…
-        ${tb.executionId && html`
+        ${canAdminLocalChat && tb.executionId && html`
           ${' '}
           <button
             type="button"
@@ -2670,7 +2713,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     ${!displayResult && cachedRes?.status === 'error' && html`
       <div class="kp-block-status">
         결과 조회 실패 (${cachedRes.detail ?? 'error'})
-        ${tb.executionId && html`
+        ${canAdminLocalChat && tb.executionId && html`
           ${' '}
           <button
             type="button"
@@ -2682,17 +2725,23 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         `}
       </div>
     `}
-    ${!displayResult && !cachedRes && tb.executionId && html`
-      <div class="kp-block-status">
-        <button
-          type="button"
-          class="btn-ghost kp-toggle-btn"
-          onClick=${() => void requestToolResult(tb.executionId!, true)}
-        >
-          실행 결과 불러오기
-        </button>
-      </div>
-    `}
+    ${!displayResult && !cachedRes && tb.executionId && (canAdminLocalChat
+      ? html`
+          <div class="kp-block-status">
+            <button
+              type="button"
+              class="btn-ghost kp-toggle-btn"
+              onClick=${() => void requestToolResult(tb.executionId!, true)}
+            >
+              실행 결과 불러오기
+            </button>
+          </div>
+        `
+      : html`
+          <div class="kp-block-status" data-testid="chat-tool-result-admin-locked" role="status">
+            도구 실행 상세 결과 조회는 토큰 인증 관리자 전용입니다.
+          </div>
+        `)}
     ${!hasInlineSummary && !displayArgs && !displayResult && !cachedRes && !tb.executionId && html`
       <div class="kp-block-status">
         ${tb.progressLabel
@@ -2737,6 +2786,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       setCardExpanded(cardKey, el.open, tb.executionId)
       if (
         el.open
+        && canUseSingleUserTokenAdmin(authSession.peek())
         && tb.executionId
         && !displayResult
         && (!cachedRes || cachedRes.status === 'pending' || cachedRes.status === 'error')
@@ -3140,7 +3190,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                                 Discord 답장
                               </button>
                             `}
-                            ${msg.cutStream && msg.operationId && html`
+                            ${canAdminLocalChat && msg.cutStream && msg.operationId && html`
                               <button
                                 type="button"
                                 class="btn-ghost"

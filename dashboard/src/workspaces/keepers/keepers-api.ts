@@ -21,6 +21,7 @@ import { err, ok, type Result } from '../../lib/result'
 import { decodeTurnRecordsResponse, type TurnRecordsResponse } from '../../api/dashboard-turn-records'
 import {
   authSession,
+  canUseSingleUserTokenAdmin,
   currentSessionEpoch,
   getActiveCsrfToken,
   getSingleUserToken,
@@ -1311,6 +1312,18 @@ export async function recoverCutReplyFromJournal(
   keeper: string,
   operationId: string,
 ): Promise<Result<ReturnType<typeof reconstructJournalReply> & { readonly eventCount: number }, ApiError>> {
+  const curSession = authSession.peek()
+  if (!canUseSingleUserTokenAdmin(curSession)) {
+    return err({
+      kind: 'forbidden',
+      status: null,
+      code: curSession.kind !== 'single_user_local' ? 'single_user_only' : 'admin_only',
+      message: curSession.kind !== 'single_user_local'
+        ? '대화 저널 복구는 싱글유저 모드 전용입니다.'
+        : '대화 저널 복구(/chat/events)는 토큰 인증 관리자 전용입니다.',
+      retryable: false,
+    })
+  }
   const allEvents: ChatJournalEvent[] = []
   let cursor: ChatJournalCursor | null = null
   let pages = 0

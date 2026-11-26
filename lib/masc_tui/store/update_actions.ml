@@ -6087,10 +6087,10 @@ and execute_action ~now (m : Model.t) action =
             match m.drafts.btw with
             | Drafts.Btw_answered { reply; _ }
               when not (String.equal (String.trim reply) "") ->
-                Some reply
+                Some (Chat_transcript.scrub_secrets_in_text reply)
             | Drafts.Btw_streaming { buffer; _ }
               when not (String.equal (String.trim buffer) "") ->
-                Some buffer
+                Some (Chat_transcript.scrub_secrets_in_text buffer)
             | Drafts.Btw_answered _
             | Drafts.Btw_streaming _
             | Drafts.Btw_idle

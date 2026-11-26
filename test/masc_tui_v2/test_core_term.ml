@@ -737,6 +737,16 @@ let test_text_util () =
   Alcotest.(check string) "sanitize_single_line collapses controls and spaces"
     "hello world"
     (Text_util.sanitize_single_line "  hello\n\t\r  \x07world  ");
+  Alcotest.(check string) "sanitize_single_line strips ANSI CSI/OSC and DEL"
+    "red link ok"
+    (Text_util.sanitize_single_line
+       "\x1b[31mred\x1b[0m \x1b]8;;https://example.com\x07link\x1b]8;;\x1b\\ ok\x7f");
+  Alcotest.(check int) "Grapheme.pad_right aligns wide CJK to exact cell width"
+    10
+    (Grapheme.display_width (Grapheme.pad_right ~width:10 "가나다"));
+  Alcotest.(check int) "Grapheme.pad_right truncates wide CJK cleanly"
+    5
+    (Grapheme.display_width (Grapheme.pad_right ~width:5 "가나다라마"));
   Alcotest.(check string) "short_hash trims and truncates" "abcdef12"
     (Text_util.short_hash "  abcdef1234567890  ");
   Alcotest.(check string) "short_hash custom len" "abc"

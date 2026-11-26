@@ -7485,7 +7485,8 @@ let fusion_detail_lines ~width (m : Model.t) ~run_id : styled_line list =
                 "running (last observed)")
         | Wire_runtime.Fusion_completed -> "completed"
         | Wire_runtime.Fusion_failed { code; error } ->
-            Printf.sprintf "failed (%s: %s)" code error
+            Printf.sprintf "failed (%s: %s)" code
+              (Chat_transcript.scrub_secrets_in_text error)
       in
       push
         (Printf.sprintf "Run: %s · Keeper: %s · Preset: %s · Topology: %s"
@@ -7503,8 +7504,12 @@ let fusion_detail_lines ~width (m : Model.t) ~run_id : styled_line list =
                   ("Duration: "
                    ^ Format_val.format_duration_s (finished -. r.started_at_unix)))
             r.finished_at_unix);
-      Option.iter (fun dec -> push ("Decision: " ^ dec)) r.decision;
-      Option.iter (fun sum -> push_wrapped "Summary: " sum) r.summary);
+      Option.iter
+        (fun dec -> push ("Decision: " ^ Chat_transcript.scrub_secrets_in_text dec))
+        r.decision;
+      Option.iter
+        (fun sum -> push_wrapped "Summary: " (Chat_transcript.scrub_secrets_in_text sum))
+        r.summary);
   let evidence_post_opt, reloaded_board_post =
     let detail_post_opt =
       match detail_opt with
@@ -7540,7 +7545,9 @@ let fusion_detail_lines ~width (m : Model.t) ~run_id : styled_line list =
       push
         (Printf.sprintf "Board Evidence: %s (%s)%s" ev.post_id ev.title
            (if reloaded_board_post then " [board]" else ""));
-      Option.iter (fun q -> push_wrapped "Question: " q) ev.question;
+      Option.iter
+        (fun q -> push_wrapped "Question: " (Chat_transcript.scrub_secrets_in_text q))
+        ev.question;
       if ev.panel <> [] then (
         push ~tone:Line_section
           (Printf.sprintf "── Panel (%d) ──" (List.length ev.panel));
@@ -7559,12 +7566,15 @@ let fusion_detail_lines ~width (m : Model.t) ~run_id : styled_line list =
             push ~tone (Printf.sprintf "  [%s] %s%s" st pe.model toks);
             (match pe.answer with
             | Some a when not (String.equal (String.trim a) "") ->
-                push_wrapped "    " a
+                push_wrapped "    " (Chat_transcript.scrub_secrets_in_text a)
             | Some _ | None -> ());
             match pe.reason_code, pe.reason_detail with
-            | Some c, Some d -> push_wrapped ("    err(" ^ c ^ "): ") d
+            | Some c, Some d ->
+                push_wrapped ("    err(" ^ c ^ "): ")
+                  (Chat_transcript.scrub_secrets_in_text d)
             | Some c, None -> push ("    err: " ^ c)
-            | None, Some d -> push_wrapped "    err: " d
+            | None, Some d ->
+                push_wrapped "    err: " (Chat_transcript.scrub_secrets_in_text d)
             | None, None -> ())
           ev.panel);
       if ev.seat_routes <> [] then (
@@ -7585,7 +7595,7 @@ let fusion_detail_lines ~width (m : Model.t) ~run_id : styled_line list =
                 push_wrapped
                   (Printf.sprintf "    fallback fail %s [%s]: " att.runtime
                      att.code)
-                  att.detail)
+                  (Chat_transcript.scrub_secrets_in_text att.detail))
               sr.failed_attempts)
           ev.seat_routes);
       push ~tone:Line_section "── Judge Synthesis ──";
@@ -7595,10 +7605,14 @@ let fusion_detail_lines ~width (m : Model.t) ~run_id : styled_line list =
       | Some st, None -> push ("  status=" ^ st)
       | None, Some dec -> push ("  decision=" ^ dec)
       | None, None -> ());
-      Option.iter (fun f -> push_wrapped "  failure: " f) ev.judge_failure;
-      Option.iter (fun s -> push_wrapped "  synthesis: " s) ev.judge_synthesis;
       Option.iter
-        (fun a -> push_wrapped "  resolved: " a)
+        (fun f -> push_wrapped "  failure: " (Chat_transcript.scrub_secrets_in_text f))
+        ev.judge_failure;
+      Option.iter
+        (fun s -> push_wrapped "  synthesis: " (Chat_transcript.scrub_secrets_in_text s))
+        ev.judge_synthesis;
+      Option.iter
+        (fun a -> push_wrapped "  resolved: " (Chat_transcript.scrub_secrets_in_text a))
         ev.judge_resolved_answer;
       if ev.judges <> [] then
         List.iter
@@ -7614,8 +7628,12 @@ let fusion_detail_lines ~width (m : Model.t) ~run_id : styled_line list =
             push
               (Printf.sprintf "  judge[%s] %s: %s (%di/%do%s%s)" j.role
                  j.identity j.status j.input_tokens j.output_tokens el to_s);
-            Option.iter (fun s -> push_wrapped "    " s) j.synthesis;
-            Option.iter (fun e -> push_wrapped "    err: " e) j.error)
+            Option.iter
+              (fun s -> push_wrapped "    " (Chat_transcript.scrub_secrets_in_text s))
+              j.synthesis;
+            Option.iter
+              (fun e -> push_wrapped "    err: " (Chat_transcript.scrub_secrets_in_text e))
+              j.error)
           ev.judges;
       (match ev.tool_trace with
       | Some tr ->
@@ -7624,8 +7642,12 @@ let fusion_detail_lines ~width (m : Model.t) ~run_id : styled_line list =
                tr.status tr.events_count tr.dropped_events);
           if tr.observed_actors <> [] then
             push ("  actors: " ^ String.concat ", " tr.observed_actors);
-          List.iter (fun g -> push ("  gap: " ^ g)) tr.gaps;
-          List.iter (fun p -> push ("  · " ^ p)) tr.events_preview
+          List.iter
+            (fun g -> push ("  gap: " ^ Chat_transcript.scrub_secrets_in_text g))
+            tr.gaps;
+          List.iter
+            (fun p -> push ("  · " ^ Chat_transcript.scrub_secrets_in_text p))
+            tr.events_preview
       | None -> ());
       if
         ev.panel = []
@@ -7633,7 +7655,8 @@ let fusion_detail_lines ~width (m : Model.t) ~run_id : styled_line list =
         && not (String.equal (String.trim ev.body) "")
       then (
         push ~tone:Line_section "── Board Body ──";
-        List.iter (fun ln -> push ln) (wrap_lines ~width:w ev.body))
+        List.iter (fun ln -> push ln)
+          (wrap_lines ~width:w (Chat_transcript.scrub_secrets_in_text ev.body)))
   | Some { evidence = Wire_runtime.Evidence_pending; _ }, None ->
       push "Evidence: Board publication pending"
   | Some { evidence = Wire_runtime.Evidence_absent; _ }, None -> (
@@ -7660,6 +7683,7 @@ let harness_verdict_detail_lines ~width (m : Model.t) : styled_line list =
   let say ~ko ~en = Say.resolve m.lang (Say.make ~ko ~en) in
   (match m.work.harness_read with
   | Observed.Failed { reason; _ } ->
+      let reason = Chat_transcript.scrub_secrets_in_text reason in
       push_all
         (wrap_lines ~width:w
            (say ~ko:("조회 실패 · [r] 다시 읽기 · " ^ reason)
@@ -7703,7 +7727,9 @@ let harness_verdict_detail_lines ~width (m : Model.t) : styled_line list =
            v.evaluator_runtime);
       (match v.fallback_reason with
       | Some r ->
-          push_all (wrap_lines ~width:w ("Fallback reason: " ^ r))
+          push_all
+            (wrap_lines ~width:w
+               ("Fallback reason: " ^ Chat_transcript.scrub_secrets_in_text r))
       | None -> push "Fallback reason: none");
       let hash_valid = Wire_work.is_valid_notes_hash v.notes_hash in
       push ~tone:(if hash_valid then Line_ok else Line_warn)
@@ -7735,9 +7761,13 @@ let harness_verdict_detail_lines ~width (m : Model.t) : styled_line list =
       | None -> ());
       if c.recent_fallback_reasons <> [] then (
         push "Recent fallback reasons:";
-        List.iter (fun r -> push ("  · " ^ r)) c.recent_fallback_reasons);
+        List.iter
+          (fun r -> push ("  · " ^ Chat_transcript.scrub_secrets_in_text r))
+          c.recent_fallback_reasons);
       if not (String.equal (String.trim hh.scope_note) "") then
-        push_all (wrap_lines ~width:w ("Scope: " ^ hh.scope_note))
+        push_all
+          (wrap_lines ~width:w
+             ("Scope: " ^ Chat_transcript.scrub_secrets_in_text hh.scope_note))
   | None -> ());
   List.rev !lines
 
@@ -7761,7 +7791,9 @@ let addon_catalog_preview_lines ~width (p : Wire_runtime.addon_package_preview)
   Option.iter (fun d -> push ("Directory: " ^ d)) p.directory;
   if p.command <> [] then
     List.iter (fun s -> push s)
-      (wrap_lines ~width:w ("Command: " ^ String.concat " " p.command));
+      (wrap_lines ~width:w
+         ("Command: "
+          ^ Chat_transcript.scrub_secrets_in_text (String.concat " " p.command)));
   push ~tone:Line_accent
     (Printf.sprintf "Exported tools (%d):" (List.length p.exported_tools));
   List.iter (fun t -> push ("  · " ^ t)) p.exported_tools;
@@ -8131,7 +8163,8 @@ let keeper_logs_lines ~width ~name (ks : Keeper_context_store.keeper_state) :
         ("── Keeper Metrics: " ^ name ^ " ([v] Sandbox Logs) ──");
       (match ks.metrics with
       | Observed.Failed { reason; _ } ->
-          push ~tone:Line_error ("  [error] " ^ reason)
+          push ~tone:Line_error
+            ("  [error] " ^ Chat_transcript.scrub_secrets_in_text reason)
       | Observed.Loading _ | Observed.Unreported | Observed.Absent ->
           push "  (loading /api/v1/keepers/:name/metrics...)"
       | Observed.Value { data = snap; _ } ->
@@ -8147,7 +8180,10 @@ let keeper_logs_lines ~width ~name (ks : Keeper_context_store.keeper_state) :
             push ~tone:Line_section "── Top Tools ──";
             List.iter
               (fun (tool, cnt) ->
-                push (Printf.sprintf "  %-30s %d calls" tool cnt))
+                push
+                  (Printf.sprintf "  %s %d calls"
+                     (Masc_tui_term.Grapheme.pad_right ~width:30 tool)
+                     cnt))
               snap.top_tools);
           push ~tone:Line_section
             (Printf.sprintf "── Recent Points (%d) ──" (List.length snap.series));
@@ -8169,7 +8205,8 @@ let keeper_logs_lines ~width ~name (ks : Keeper_context_store.keeper_state) :
         ("── Remote Sandbox Logs: " ^ name ^ " ([v] Metrics) ──");
       (match ks.sandbox_logs with
       | Observed.Failed { reason; _ } ->
-          push ~tone:Line_error ("  [error] " ^ reason)
+          push ~tone:Line_error
+            ("  [error] " ^ Chat_transcript.scrub_secrets_in_text reason)
       | Observed.Loading _ | Observed.Unreported | Observed.Absent ->
           push "  (loading /api/v1/gate/keeper-sandbox-logs...)"
       | Observed.Value { data = sl; _ } ->
@@ -8177,7 +8214,10 @@ let keeper_logs_lines ~width ~name (ks : Keeper_context_store.keeper_state) :
             (Printf.sprintf "  State: %s · Backend: %s · Tail: %d" sl.state
                (Option.value ~default:"-" sl.backend)
                sl.tail);
-          Option.iter (fun r -> push ("  Reason: " ^ r)) sl.reason;
+          Option.iter
+            (fun r ->
+              push ("  Reason: " ^ Chat_transcript.scrub_secrets_in_text r))
+            sl.reason;
           if sl.instances = [] then push "  (no sandbox instances reported)"
           else
             List.iter
@@ -8192,18 +8232,26 @@ let keeper_logs_lines ~width ~name (ks : Keeper_context_store.keeper_state) :
                   (Printf.sprintf "── Instance %s (%s · %s) ──"
                      inst.instance_name inst.instance_id run_s);
                 Option.iter
-                  (fun e -> push ~tone:Line_error ("  error: " ^ e))
+                  (fun e ->
+                    push ~tone:Line_error
+                      ("  error: " ^ Chat_transcript.scrub_secrets_in_text e))
                   inst.error;
-                if not (String.equal (String.trim inst.stdout) "") then (
+                let stdout_clean =
+                  Chat_transcript.scrub_secrets_in_text inst.stdout
+                in
+                if not (String.equal (String.trim stdout_clean) "") then (
                   push ~tone:Line_ok "  [stdout]";
                   List.iter
                     (fun ln -> push_all (wrap_lines ~width:w ("  " ^ ln)))
-                    (String.split_on_char '\n' inst.stdout));
-                if not (String.equal (String.trim inst.stderr) "") then (
+                    (String.split_on_char '\n' stdout_clean));
+                let stderr_clean =
+                  Chat_transcript.scrub_secrets_in_text inst.stderr
+                in
+                if not (String.equal (String.trim stderr_clean) "") then (
                   push ~tone:Line_warn "  [stderr]";
                   List.iter
                     (fun ln -> push_all (wrap_lines ~width:w ("  " ^ ln)))
-                    (String.split_on_char '\n' inst.stderr)))
+                    (String.split_on_char '\n' stderr_clean)))
               sl.instances);
       List.rev !lines
 

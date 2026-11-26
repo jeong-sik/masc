@@ -2399,8 +2399,8 @@ let draw_incident_related_logs ~tz_offset_sec ~scroll ~grid ~(rect : Rect.t)
             if msg_w > 0 then
               let raw_msg =
                 Printf.sprintf "%s: %s" e.module_name
-                  (String.map (fun c -> if Char.code c < 32 then ' ' else c)
-                     e.message)
+                  (Text_util.sanitize_single_line
+                     (Chat_transcript.scrub_secrets_in_text e.message))
               in
               ignore
                 (Cell_grid.put_text ~clip:row_r grid ~x:msg_x ~y:!y
@@ -4393,7 +4393,8 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                     (Cell_grid.put_text ~clip:sr grid ~x:padded.x ~y:sy
                        ~style:crit_st
                        (Grapheme.truncate_to_width ~max_width:padded.w
-                          (Glyph.to_utf8 Glyph.Live_failing ^ " " ^ err)))
+                          (Glyph.to_utf8 Glyph.Live_failing ^ " "
+                           ^ Chat_transcript.scrub_secrets_in_text err)))
               | Some _ | None -> ())
           | Drafts.Btw_sending { keeper; prompt; _ } ->
               draw_btw_header ~style:acc_st ~max_s:0 ("Q: " ^ prompt);
@@ -4424,7 +4425,8 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 in
                 ignore
                   (Markdown.draw grid ~rect:md_r ~theme ~scroll
-                     ~osc8:caps.osc8_hyperlinks buffer)
+                     ~osc8:caps.osc8_hyperlinks
+                     (Chat_transcript.scrub_secrets_in_text buffer))
               end
           | Drafts.Btw_answered { keeper; prompt; reply } ->
               let max_s = Update_nav.btw_max_scroll model in
@@ -4441,7 +4443,8 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 in
                 ignore
                   (Markdown.draw grid ~rect:md_r ~theme ~scroll
-                     ~osc8:caps.osc8_hyperlinks reply)
+                     ~osc8:caps.osc8_hyperlinks
+                     (Chat_transcript.scrub_secrets_in_text reply))
               end
           | Drafts.Btw_failed { keeper; prompt; reason } ->
               draw_btw_header ~style:acc_st ~max_s:0 ("Q: " ^ prompt);
@@ -4451,7 +4454,8 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                      ~y:(padded.y + 1) ~style:crit_st
                      (Grapheme.truncate_to_width ~max_width:padded.w
                         (Printf.sprintf "%s @%s: %s"
-                           (Glyph.to_utf8 Glyph.Live_failing) keeper reason))))
+                           (Glyph.to_utf8 Glyph.Live_failing) keeper
+                           (Chat_transcript.scrub_secrets_in_text reason)))))
       | Nav.Gate_reject _
       | Nav.Verification_reject _
       | Nav.Harness_overrule _
@@ -5671,7 +5675,9 @@ let render_ask_answer_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               match modal.error with
               | Some err ->
                   draw_banner ~tone:Theme.Status_critical
-                    (Printf.sprintf "✕ %s" (Say.resolve lang err))
+                    (Printf.sprintf "✕ %s"
+                       (Chat_transcript.scrub_secrets_in_text
+                          (Say.resolve lang err)))
               | None -> ()));
           (* 2. Question Progress Chips Row *)
           if q_count > 0 && !y < bot then begin

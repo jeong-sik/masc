@@ -316,6 +316,7 @@ let http_and_local_backend ~io ~clock ~endpoint =
 type recording_session = {
   id : int;
   stop_u : unit Eio.Promise.u;
+  cancel_u : unit Eio.Promise.u;
   cancelled : bool Atomic.t;
 }
 
@@ -341,22 +342,29 @@ let create ~sw ~backend ~on_event =
     session = None;
   }
 
-let set_phase_if_current t ~session_id next =
+let set_phase_if_active t ~session_id ~cancelled next =
   let updated =
     Stdlib.Mutex.protect t.mu (fun () ->
-        if t.next_session_id = session_id then begin
+        if t.next_session_id = session_id && not (Atomic.get cancelled) then begin
           t.current_phase <- next;
           true
         end
         else false)
   in
-  if updated then t.on_event (Phase_changed next)
+  if updated then t.on_event (Phase_changed next);
+  updated
 
 let set_phase t next =
   Stdlib.Mutex.protect t.mu (fun () -> t.current_phase <- next);
   t.on_event (Phase_changed next)
 
 let phase t = Stdlib.Mutex.protect t.mu (fun () -> t.current_phase)
+
+let clear_session_if_id t session_id =
+  Stdlib.Mutex.protect t.mu (fun () ->
+      match t.session with
+      | Some s when s.id = session_id -> t.session <- None
+      | Some _ | None -> ())
 
 let stop_active_session t ~cancel =
   let sess_opt =
@@ -368,7 +376,10 @@ let stop_active_session t ~cancel =
   match sess_opt with
   | None -> false
   | Some sess ->
-      if cancel then Atomic.set sess.cancelled true;
+      if cancel then begin
+        Atomic.set sess.cancelled true;
+        ignore (Eio.Promise.try_resolve sess.cancel_u () : bool)
+      end;
       ignore (Eio.Promise.try_resolve sess.stop_u () : bool);
       true
 
@@ -388,6 +399,7 @@ let dispatch t = function
   | Start_ptt { device } ->
       Eio.Switch.check t.sw;
       let stop_signal, stop_u = Eio.Promise.create () in
+      let cancel_signal, cancel_u = Eio.Promise.create () in
       let cancelled = Atomic.make false in
       let started_ns = Clock.Mono.now () in
       let session_id_opt =
@@ -397,7 +409,7 @@ let dispatch t = function
             | None ->
                 let id = t.next_session_id + 1 in
                 t.next_session_id <- id;
-                t.session <- Some { id; stop_u; cancelled };
+                t.session <- Some { id; stop_u; cancel_u; cancelled };
                 t.current_phase <- Voice_recording { started_ns; level_db = None };
                 Some id)
       in
@@ -407,69 +419,85 @@ let dispatch t = function
           t.on_event
             (Phase_changed (Voice_recording { started_ns; level_db = None }));
           Eio.Fiber.fork ~sw:t.sw (fun () ->
-              let on_level db =
-                let active =
-                  Stdlib.Mutex.protect t.mu (fun () ->
-                      match (t.session, t.current_phase) with
-                      | Some s, Voice_recording r
-                        when s.id = session_id && not (Atomic.get cancelled) ->
-                          t.current_phase <-
-                            Voice_recording { r with level_db = Some db };
-                          true
-                      | (Some _ | None),
-                        ( Voice_idle | Voice_recording _ | Voice_transcribing
-                        | Voice_failed _ ) ->
-                          false)
-                in
-                if active then t.on_event (Level_meter db)
-              in
-              let rec_res =
-                match
-                  t.backend.record_until_stopped ~device ~stop_signal ~on_level
-                with
-                | r -> r
-                | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
-                | exception ex -> Error (Printexc.to_string ex)
-              in
-              Stdlib.Mutex.protect t.mu (fun () ->
-                  match t.session with
-                  | Some s when s.id = session_id -> t.session <- None
-                  | Some _ | None -> ());
-              if Atomic.get cancelled then begin
-                (match rec_res with
-                | Ok audio_path -> t.backend.cleanup_audio ~audio_path
-                | Error _ -> ());
-                set_phase_if_current t ~session_id Voice_idle
-              end
-              else
-                match rec_res with
-                | Error msg ->
-                    set_phase_if_current t ~session_id (Voice_failed msg);
-                    t.on_event (Voice_error msg)
-                | Ok audio_path -> (
-                    set_phase_if_current t ~session_id Voice_transcribing;
-                    let tr_res =
-                      match t.backend.transcribe ~audio_path with
-                      | r -> r
-                      | exception (Eio.Cancel.Cancelled _ as ex) ->
-                          t.backend.cleanup_audio ~audio_path;
-                          raise ex
-                      | exception ex ->
-                          t.backend.cleanup_audio ~audio_path;
-                          Error (Printexc.to_string ex)
+              Fun.protect
+                ~finally:(fun () -> clear_session_if_id t session_id)
+                (fun () ->
+                  let on_level db =
+                    let active =
+                      Stdlib.Mutex.protect t.mu (fun () ->
+                          match (t.session, t.current_phase) with
+                          | Some s, Voice_recording r
+                            when s.id = session_id && not (Atomic.get cancelled) ->
+                              t.current_phase <-
+                                Voice_recording { r with level_db = Some db };
+                              true
+                          | (Some _ | None),
+                            ( Voice_idle | Voice_recording _ | Voice_transcribing
+                            | Voice_failed _ ) ->
+                              false)
                     in
-                    if Atomic.get cancelled then
-                      set_phase_if_current t ~session_id Voice_idle
-                    else
-                      match tr_res with
-                      | Ok text ->
-                          set_phase_if_current t ~session_id Voice_idle;
-                          t.on_event (Transcript_ready text)
-                      | Error msg ->
-                          set_phase_if_current t ~session_id (Voice_failed msg);
-                          t.on_event (Voice_error msg))))
+                    if active then t.on_event (Level_meter db)
+                  in
+                  let rec_res =
+                    match
+                      t.backend.record_until_stopped ~device ~stop_signal ~on_level
+                    with
+                    | r -> r
+                    | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
+                    | exception ex -> Error (Printexc.to_string ex)
+                  in
+                  if Atomic.get cancelled then begin
+                    match rec_res with
+                    | Ok audio_path -> t.backend.cleanup_audio ~audio_path
+                    | Error _ -> ()
+                  end
+                  else
+                    match rec_res with
+                    | Error msg ->
+                        if
+                          set_phase_if_active t ~session_id ~cancelled
+                            (Voice_failed msg)
+                        then t.on_event (Voice_error msg)
+                    | Ok audio_path -> (
+                        if
+                          set_phase_if_active t ~session_id ~cancelled
+                            Voice_transcribing
+                        then begin
+                          let tr_res =
+                            Eio.Fiber.first
+                              (fun () ->
+                                Eio.Promise.await cancel_signal;
+                                t.backend.cleanup_audio ~audio_path;
+                                Error "cancelled")
+                              (fun () ->
+                                match t.backend.transcribe ~audio_path with
+                                | r -> r
+                                | exception (Eio.Cancel.Cancelled _ as ex) ->
+                                    t.backend.cleanup_audio ~audio_path;
+                                    raise ex
+                                | exception ex ->
+                                    t.backend.cleanup_audio ~audio_path;
+                                    Error (Printexc.to_string ex))
+                          in
+                          if Atomic.get cancelled then ()
+                          else
+                            match tr_res with
+                            | Ok text ->
+                                if
+                                  set_phase_if_active t ~session_id ~cancelled
+                                    Voice_idle
+                                then t.on_event (Transcript_ready text)
+                            | Error msg ->
+                                if
+                                  set_phase_if_active t ~session_id ~cancelled
+                                    (Voice_failed msg)
+                                then t.on_event (Voice_error msg)
+                        end
+                        else t.backend.cleanup_audio ~audio_path))))
   | Stop_ptt -> ignore (stop_active_session t ~cancel:false : bool)
   | Cancel_ptt ->
       if stop_active_session t ~cancel:true then set_phase t Voice_idle
 
-let stop t = ignore (stop_active_session t ~cancel:true : bool)
+let stop t =
+  if stop_active_session t ~cancel:true then
+    Stdlib.Mutex.protect t.mu (fun () -> t.current_phase <- Voice_idle)

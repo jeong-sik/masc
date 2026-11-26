@@ -9092,8 +9092,7 @@ let apply_http_reply ~now (m : Model.t) reply =
         Chat_transcript.scrub_secrets_in_text (Yojson.Safe.to_string json)
       in
       let preview =
-        if String.length raw_s > 120 then String.sub raw_s 0 120 ^ "…"
-        else raw_s
+        Masc_tui_term.Grapheme.truncate_to_width ~max_width:120 raw_s
       in
       let receipt : Wire_runtime.addon_action_receipt =
         {

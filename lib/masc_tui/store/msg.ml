@@ -77,9 +77,8 @@ let extract_http_error_reason ~body ~(api_error : Wire_common.api_error option)
     : string option =
   let sanitize s =
     let s =
-      String.map
-        (fun c -> if Char.equal c '\n' || Char.equal c '\r' || Char.equal c '\t' then ' ' else c)
-        (String.trim s)
+      Chat_transcript.scrub_secrets_in_text s
+      |> Text_util.sanitize_single_line
     in
     if String.equal s "" then None
     else if Masc_tui_term.Grapheme.display_width s > 140 then
@@ -142,25 +141,27 @@ let http_error_summary = function
       Say.make ~ko:"응답 디코드 오류" ~en:"Response decode error"
 
 let http_error_detail = function
-  | Transport te -> transport_error_detail te
+  | Transport te -> Chat_transcript.scrub_secrets_in_text (transport_error_detail te)
   | Workspace_mismatch { expected_instance; observed_instance; message; _ } ->
       let exp = match expected_instance with Some s -> s | None -> "?" in
       let obs = match observed_instance with Some s -> s | None -> "?" in
       Printf.sprintf "workspace_mismatch (expected=%s observed=%s): %s" exp obs
-        message
+        (Chat_transcript.scrub_secrets_in_text message)
   | Http_error { status; body; api_error } -> (
       match api_error with
       | Some err ->
           Printf.sprintf "HTTP %d [%s]: %s" status
             (Wire_common.api_error_code_to_string err.code)
-            err.message
+            (Chat_transcript.scrub_secrets_in_text err.message)
       | None ->
+          let scrubbed = Chat_transcript.scrub_secrets_in_text body in
           let snippet =
-            if String.length body > 200 then String.sub body 0 200 ^ "..."
-            else body
+            Masc_tui_term.Grapheme.truncate_to_width ~max_width:200
+              ~ellipsis:"..." scrubbed
           in
           Printf.sprintf "HTTP %d: %s" status snippet)
-  | Decode_error detail -> "decode error: " ^ detail
+  | Decode_error detail ->
+      "decode error: " ^ Chat_transcript.scrub_secrets_in_text detail
 
 let http_error_retryable = function
   | Transport _ -> true

@@ -9559,6 +9559,215 @@ let test_batch_f2_live_contextual_hotkeys_preserved () =
     (Option.equal Nav.equal_overlay m_lanes_r.nav.overlay
        (Some (Nav.Inline_action (Nav.Lane_rename_form { lane = "lane-primary" }))))
 
+let test_r2_pr6_styled_lines_zoom_and_dispatch () =
+  let is_tone expected (ln : Update_nav.styled_line) =
+    match (expected, ln.tone) with
+    | Update_nav.Line_plain, Update_nav.Line_plain
+    | Update_nav.Line_selected, Update_nav.Line_selected
+    | Update_nav.Line_section, Update_nav.Line_section
+    | Update_nav.Line_ok, Update_nav.Line_ok
+    | Update_nav.Line_warn, Update_nav.Line_warn
+    | Update_nav.Line_error, Update_nav.Line_error
+    | Update_nav.Line_accent, Update_nav.Line_accent ->
+        true
+    | ( Update_nav.Line_plain
+      , ( Update_nav.Line_selected | Update_nav.Line_section
+        | Update_nav.Line_ok | Update_nav.Line_warn | Update_nav.Line_error
+        | Update_nav.Line_accent ) )
+    | ( Update_nav.Line_selected
+      , ( Update_nav.Line_plain | Update_nav.Line_section
+        | Update_nav.Line_ok | Update_nav.Line_warn | Update_nav.Line_error
+        | Update_nav.Line_accent ) )
+    | ( Update_nav.Line_section
+      , ( Update_nav.Line_plain | Update_nav.Line_selected
+        | Update_nav.Line_ok | Update_nav.Line_warn | Update_nav.Line_error
+        | Update_nav.Line_accent ) )
+    | ( Update_nav.Line_ok
+      , ( Update_nav.Line_plain | Update_nav.Line_selected
+        | Update_nav.Line_section | Update_nav.Line_warn
+        | Update_nav.Line_error | Update_nav.Line_accent ) )
+    | ( Update_nav.Line_warn
+      , ( Update_nav.Line_plain | Update_nav.Line_selected
+        | Update_nav.Line_section | Update_nav.Line_ok | Update_nav.Line_error
+        | Update_nav.Line_accent ) )
+    | ( Update_nav.Line_error
+      , ( Update_nav.Line_plain | Update_nav.Line_selected
+        | Update_nav.Line_section | Update_nav.Line_ok | Update_nav.Line_warn
+        | Update_nav.Line_accent ) )
+    | ( Update_nav.Line_accent
+      , ( Update_nav.Line_plain | Update_nav.Line_selected
+        | Update_nav.Line_section | Update_nav.Line_ok | Update_nav.Line_warn
+        | Update_nav.Line_error ) ) ->
+        false
+  in
+  (* 1. keeper_logs_lines emits typed tones and prevents untrusted "──" spoofing *)
+  let kc_logs =
+    Keeper_context_store.empty
+    |> Keeper_context_store.toggle_logs_subview ~keeper:"alpha"
+    |> Keeper_context_store.apply_sandbox_logs ~observed_at:t0 ~keeper:"alpha"
+         {
+           Wire_keeper_context.keeper = "alpha";
+           backend = Some "ssh";
+           state = "ok";
+           reason = None;
+           tail = 50;
+           instances =
+             [
+               {
+                 instance_id = "inst-1";
+                 instance_name = "sb-1";
+                 running = Some true;
+                 stdout = "── spoofed header\nplain line";
+                 stderr = "── spoofed err";
+                 error = Some "sandbox failed";
+               };
+             ];
+         }
+  in
+  let ks_logs = Keeper_context_store.get_keeper ~keeper:"alpha" kc_logs in
+  let log_lines = Update_nav.keeper_logs_lines ~width:60 ~name:"alpha" ks_logs in
+  Alcotest.(check bool) "keeper_logs_lines tags [stdout] as Line_ok" true
+    (List.exists
+       (fun (ln : Update_nav.styled_line) ->
+         String.equal ln.text "  [stdout]" && is_tone Update_nav.Line_ok ln)
+       log_lines);
+  Alcotest.(check bool) "keeper_logs_lines tags [stderr] as Line_warn" true
+    (List.exists
+       (fun (ln : Update_nav.styled_line) ->
+         String.equal ln.text "  [stderr]" && is_tone Update_nav.Line_warn ln)
+       log_lines);
+  Alcotest.(check bool) "keeper_logs_lines tags error as Line_error" true
+    (List.exists
+       (fun (ln : Update_nav.styled_line) ->
+         String.equal ln.text "  error: sandbox failed"
+         && is_tone Update_nav.Line_error ln)
+       log_lines);
+  Alcotest.(check bool) "untrusted stdout starting with ── stays Line_plain" true
+    (List.exists
+       (fun (ln : Update_nav.styled_line) ->
+         String.equal ln.text "  ── spoofed header"
+         && is_tone Update_nav.Line_plain ln)
+       log_lines);
+  (* 2. keeper_identity_lines keeps wrapped '>' output lines Line_plain *)
+  let m0 = populated_model ~with_attention:true () in
+  let kc_id =
+    m0.keeper_context
+    |> Keeper_context_store.start_github_login ~keeper:"alpha"
+    |> Keeper_context_store.append_github_login_output ~keeper:"alpha"
+         ~line:"prefix_words_wrap_here >spoofed_selection"
+  in
+  let m_id = { m0 with keeper_context = kc_id } in
+  let id_lines = Update_nav.keeper_identity_lines ~width:24 ~name:"alpha" m_id in
+  let selected_lines =
+    List.filter (is_tone Update_nav.Line_selected) id_lines
+  in
+  Alcotest.(check int) "exactly 1 selected identity row" 1
+    (List.length selected_lines);
+  Alcotest.(check bool) "wrapped > output line is not Line_selected" false
+    (List.exists
+       (fun (ln : Update_nav.styled_line) ->
+         String.starts_with ~prefix:">spoofed" ln.text
+         && is_tone Update_nav.Line_selected ln)
+       id_lines);
+  (* 3. uses_keeper_split stays true when zoomed=true but can_zoom_current_view=false *)
+  let m_empty_zoomed =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Keepers; zoomed = true; overlay = None; inspector = None };
+      fleet = { m0.fleet with keepers = Observed.value ~observed_at:t0 []; selected_keeper = None };
+    }
+  in
+  Alcotest.(check bool) "can_zoom_current_view false on empty keepers" false
+    (Model.can_zoom_current_view m_empty_zoomed);
+  Alcotest.(check bool) "uses_keeper_split true when stale zoomed=true on empty keepers"
+    true
+    (Model.uses_keeper_split ~width:120 m_empty_zoomed);
+  (* 4. Keeper_config idle J falls through to Teleport_blocked; Delete_selected triggers dry-run *)
+  let m_cfg =
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Keepers;
+          pane_index = 1;
+          zoomed = false;
+          overlay = None;
+          inspector = None;
+        };
+      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_config m0.fleet;
+    }
+  in
+  let m_cfg_j, _ = step m_cfg (char_key ~shift:true "J") in
+  Alcotest.(check bool) "Keeper_config idle J teleports instead of being shadowed"
+    true
+    (not (Nav.equal_workspace m_cfg_j.nav.workspace Nav.Keepers)
+     || not
+          (Nav.equal_keeper_tab m_cfg_j.fleet.keeper_dive_tab Nav.Keeper_config));
+  let m_cfg_del, _ =
+    Update_actions.execute_action ~now:t0 m_cfg Keymap.Delete_selected
+  in
+  Alcotest.(check bool) "Delete_selected on Keeper_config runs dry-run handler"
+    true
+    (Option.is_some m_cfg_del.toast);
+  (* 5. Open_external on Keeper_trace pane 0 (roster focus) does not open File_inspector *)
+  let m_trace_p0 =
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Keepers;
+          pane_index = 0;
+          zoomed = false;
+          overlay = None;
+          inspector = None;
+        };
+      fleet = Fleet_store.set_keeper_dive_tab Nav.Keeper_trace m0.fleet;
+    }
+  in
+  let m_trace_open, _ =
+    Update_actions.execute_action ~now:t0 m_trace_p0 Keymap.Open_external
+  in
+  Alcotest.(check bool) "Open_external on Keeper_trace pane 0 stays out of File_inspector"
+    true
+    (Option.is_none (Model.active_inspector m_trace_open));
+  (* 6. Pop_back zoom exit via Update_nav.unzoom_view clears transient json/vote state & restores pane *)
+  let m_zoomed_pop =
+    {
+      m0 with
+      nav =
+        {
+          m0.nav with
+          workspace = Nav.Keepers;
+          zoomed = true;
+          pre_zoom_pane_index = Some 1;
+          pane_index = 0;
+          json_scroll_offset = 12;
+          overlay = None;
+          inspector = None;
+        };
+      infra = { m0.infra with show_raw_json = true };
+      knowledge =
+        {
+          m0.knowledge with
+          armed_vote = Some (Knowledge_store.Vote_post "post-1", `Up);
+        };
+    }
+  in
+  let m_unzoomed, _ =
+    Update_actions.execute_action ~now:t0 m_zoomed_pop Keymap.Pop_back_or_close
+  in
+  Alcotest.(check bool) "Pop_back unzooms zoomed view" false m_unzoomed.nav.zoomed;
+  Alcotest.(check int) "Pop_back zoom exit resets json_scroll_offset" 0
+    m_unzoomed.nav.json_scroll_offset;
+  Alcotest.(check bool) "Pop_back zoom exit resets show_raw_json" false
+    m_unzoomed.infra.show_raw_json;
+  Alcotest.(check bool) "Pop_back zoom exit clears armed_vote" true
+    (Option.is_none m_unzoomed.knowledge.armed_vote);
+  Alcotest.(check int) "Pop_back zoom exit restores pre_zoom_pane_index" 1
+    m_unzoomed.nav.pane_index
+
 let () =
   Alcotest.run "masc_tui_keymap_matrix"
     [
@@ -9633,5 +9842,8 @@ let () =
           Alcotest.test_case
             "Live contextual hotkeys preserved after dead-code cleanup ([A], Ctrl+E, [C], [R])"
             `Quick test_batch_f2_live_contextual_hotkeys_preserved;
+          Alcotest.test_case
+            "R2-PR6: typed styled_line anti-spoof, is_zoomed_active, Keeper_config J/d & Keeper_trace pane guard"
+            `Quick test_r2_pr6_styled_lines_zoom_and_dispatch;
         ] );
     ]

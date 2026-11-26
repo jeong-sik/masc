@@ -1552,7 +1552,7 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       work_read_notice model ~label:(Ops_common.say model ~ko:"작업" ~en:"Tasks")
         model.work.planning
     in
-    let zoomed = model.nav.zoomed && Model.can_zoom_current_view model in
+    let zoomed = Model.is_zoomed_active model in
     let sel_goal_idx =
       let index = model.work.selected_index in
       if index < 0 || goals = [] then None
@@ -2424,7 +2424,7 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
   else
     let theme = Ops_common.theme_of_model model in
     let bp = Ops_common.layout_bp model in
-    let zoomed = model.nav.zoomed && Model.can_zoom_current_view model in
+    let zoomed = Model.is_zoomed_active model in
     let filtered_tasks = Work_store.filtered_tasks model.work in
     let n_tasks = List.length filtered_tasks in
     let task_sel_opt =
@@ -3002,7 +3002,7 @@ let render_schedules ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       else None
     in
     let sched_rect, detail_rect =
-      if model.nav.zoomed && Model.can_zoom_current_view model then
+      if Model.is_zoomed_active model then
         (Rect.empty, rect)
       else if rect.w >= 96 then
         match
@@ -3869,7 +3869,7 @@ let render_inbox_rules ~(model : Model.t) ~cache ~(rect : Rect.t)
     | None -> None
   in
   let left_rect, right_rect =
-    if model.nav.zoomed && Model.can_zoom_current_view model then
+    if Model.is_zoomed_active model then
       (Rect.empty, rect)
     else if rect.w >= 96 then
       match Layout.split_h_bp bp rect [ Layout.Ratio 0.56; Layout.Flex 1 ] with
@@ -4195,8 +4195,9 @@ let render_inbox_history ~(model : Model.t) ~cache ~(rect : Rect.t)
                 Option.value r.decision_kind ~default:r.decision
               in
               let tone =
-                if String.equal kind_s "approve" then Theme.Status_ok
-                else Theme.Status_critical
+                match Wire_work.classify_gate_decision r with
+                | Wire_work.Gate_approved -> Theme.Status_ok
+                | Wire_work.Gate_rejected_or_other _ -> Theme.Status_critical
               in
               let src_s =
                 match (r.decision_source, r.actor) with
@@ -4308,7 +4309,7 @@ let render_inbox ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       let selected_attn = Option.bind sel_attn (List.nth_opt filtered_attn) in
       let left_rect, right_rect =
         if Option.is_none selected_attn then (rect, Rect.empty)
-        else if model.nav.zoomed && Model.can_zoom_current_view model then
+        else if Model.is_zoomed_active model then
           (Rect.empty, rect)
         else if rect.w >= 96 then
           match
@@ -5830,7 +5831,7 @@ let render_harness ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     let theme = Ops_common.theme_of_model model in
     let bp = Ops_common.layout_bp model in
     let left_rect, right_rect =
-      if model.nav.zoomed && Model.can_zoom_current_view model then
+      if Model.is_zoomed_active model then
         (Rect.empty, rect)
       else
         Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.48

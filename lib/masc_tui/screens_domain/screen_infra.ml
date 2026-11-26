@@ -504,7 +504,7 @@ let draw_sandbox_inspector_body ?(scroll = 0) ~grid ~(inner : Rect.t)
                      ~en:"No sandbox errors or events in last 24h")));
           if rem_rows >= 2 then
             let empty_hint =
-              if model.nav.zoomed && Model.can_zoom_current_view model then
+              if Model.is_zoomed_active model then
                 Say.make ~ko:"[e] 키퍼 설정 · [S] SSH 풀 · [p] 프로브"
                   ~en:"[e] Keeper Cfg · [S] SSH Pools · [p] Probe"
               else
@@ -754,7 +754,7 @@ let draw_sandbox_inspector ?(scroll = 0) ~grid ~cache ~(rect : Rect.t)
             else "[Space] Json_tree"))
     else None
   in
-  let zoomed = model.nav.zoomed && Model.can_zoom_current_view model in
+  let zoomed = Model.is_zoomed_active model in
   let hotkey =
     if zoomed then
       Say.resolve lang
@@ -840,7 +840,7 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp grid =
   let lang = model.lang in
   let inf = model.infra in
-  let zoomed = model.nav.zoomed && Model.can_zoom_current_view model in
+  let zoomed = Model.is_zoomed_active model in
   let top_h = if H.is_wide_split rect then 6 else 4 in
   let top_rect, body_rect =
     if zoomed then (Rect.empty, rect)
@@ -1689,7 +1689,7 @@ let render_repos_changes ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp grid =
   let lang = model.lang in
   let inf = model.infra in
-  let zoomed = model.nav.zoomed && Model.can_zoom_current_view model in
+  let zoomed = Model.is_zoomed_active model in
   let left_rect, right_rect =
     if zoomed then (Rect.empty, rect)
     else
@@ -2488,7 +2488,7 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
   in
   ignore (H.draw_pills ~grid ~rect:bar_rect ~theme ?right_hint:bar_right_hint pills);
   let left_rect, right_rect, acting_rect_opt =
-    if model.nav.zoomed && Model.can_zoom_current_view model then
+    if Model.is_zoomed_active model then
       (Rect.empty, body_rect, None)
     else if inf.acting_rail_open && body_rect.w >= 104 then
       match
@@ -3001,7 +3001,7 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                ~en:"[p] Find · [f] Search · [v] Git · [y] Copy"))
        pills);
   let left_rect, right_rect =
-    if model.nav.zoomed && Model.can_zoom_current_view model then
+    if Model.is_zoomed_active model then
       (Rect.empty, body_rect)
     else
       Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.32

@@ -2061,40 +2061,45 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
               ~h:(Int.max 0 (bot - !y))
           in
           if not (Rect.is_empty doc_r) then begin
-            let rev_lines =
+            let rev_lines : (Update_nav.line_tone * string) list =
               match detail_opt with
               | Some d when d.revisions <> [] ->
-                  ("── "
-                  ^ Say.resolve lang
-                      (Say.make ~ko:"리비전 이력 (< / >)"
-                         ~en:"Revision History (< / >)"))
+                  ( Update_nav.Line_section
+                  , "── "
+                    ^ Say.resolve lang
+                        (Say.make ~ko:"리비전 이력 (< / >)"
+                           ~en:"Revision History (< / >)") )
                   :: List.map
                        (fun (r : Wire_knowledge.artifact_revision_summary) ->
                          let cur =
                            if Int.equal r.revision a.revision then "● "
                            else "  "
                          in
-                         Printf.sprintf "%sr%d · %s · %s · %s" cur r.revision
-                           r.title r.author (H.short_hash ~len:8 r.sha256))
+                         ( Update_nav.Line_plain
+                         , Printf.sprintf "%sr%d · %s · %s · %s" cur r.revision
+                             r.title r.author (H.short_hash ~len:8 r.sha256) ))
                        d.revisions
               | Some _ | None ->
                   if not show_published_fallback then []
                   else (
                     match Observed.to_option k.artifacts with
                     | Some items when List.length items > 1 ->
-                        ("── "
-                        ^ Say.resolve lang
-                            (Say.make ~ko:"발행 아티팩트 목록"
-                               ~en:"Published Artifacts"))
+                        ( Update_nav.Line_section
+                        , "── "
+                          ^ Say.resolve lang
+                              (Say.make ~ko:"발행 아티팩트 목록"
+                                 ~en:"Published Artifacts") )
                         :: List.map
                              (fun (it : Wire_knowledge.artifact_entry) ->
                                let cur =
                                  if String.equal it.id a.id then "● " else "  "
                                in
-                               Printf.sprintf "%sr%d · %s · %s" cur it.revision
-                                 (if String.trim it.title <> "" then it.title
-                                  else it.id)
-                                 (H.short_hash ~len:8 it.body.sha256))
+                               ( Update_nav.Line_plain
+                               , Printf.sprintf "%sr%d · %s · %s" cur
+                                   it.revision
+                                   (if String.trim it.title <> "" then it.title
+                                    else it.id)
+                                   (H.short_hash ~len:8 it.body.sha256) ))
                              items
                     | Some _ | None -> [])
             in
@@ -2105,17 +2110,31 @@ let draw_rich_artifact_pane ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                 let dy = ref (doc_r.y + Int.max 0 start_in_doc) in
                 let bg = Color.of_rgb theme.surface_1 in
                 List.iter
-                  (fun ln ->
+                  (fun (tone, ln) ->
                     if !dy < Rect.bottom doc_r then begin
-                      (match Card.legacy_rule_label ln with
-                      | Some lbl ->
-                          Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid
-                            ~rect:doc_r ~y:!dy ~theme
-                      | None ->
-                          ignore
-                            (H.put_clipped ~grid ~clip:doc_r ~x:doc_r.x ~y:!dy
-                               ~max_w:doc_r.w ~style:(H.secondary_style ~theme ())
-                               ln));
+                      (match tone with
+                       | Update_nav.Line_section ->
+                           let lbl =
+                             Option.value (Card.legacy_rule_label ln)
+                               ~default:(String.trim ln)
+                           in
+                           Card.draw_hairline ~pad_x:0 ~bg ~label:lbl grid
+                             ~rect:doc_r ~y:!dy ~theme
+                       | Update_nav.Line_accent ->
+                           ignore
+                             (H.put_clipped ~grid ~clip:doc_r ~x:doc_r.x ~y:!dy
+                                ~max_w:doc_r.w ~style:(H.accent_style ~theme ())
+                                ln)
+                       | Update_nav.Line_plain
+                       | Update_nav.Line_selected
+                       | Update_nav.Line_ok
+                       | Update_nav.Line_warn
+                       | Update_nav.Line_error ->
+                           ignore
+                             (H.put_clipped ~grid ~clip:doc_r ~x:doc_r.x ~y:!dy
+                                ~max_w:doc_r.w
+                                ~style:(H.secondary_style ~theme ())
+                                ln));
                       incr dy
                     end)
                   (Store_scroll.drop rev_skip rev_lines)

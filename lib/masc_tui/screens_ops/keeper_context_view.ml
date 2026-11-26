@@ -1231,7 +1231,7 @@ let draw_exact_input_subtab grid ~(rect : Rect.t) ~(theme : Theme.t)
                       st.selected_part_idx))
           in
           let is_zoomed =
-            model.nav.zoomed && Model.can_zoom_current_view model
+            Model.is_zoomed_active model
           in
           let left_focused =
             if is_zoomed then Model.pane_focused model 0
@@ -1988,7 +1988,7 @@ let draw_tool_calls_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
               (Int.min (List.length page.entries - 1) st.selected_call_idx)
           in
           let is_zoomed =
-            model.nav.zoomed && Model.can_zoom_current_view model
+            Model.is_zoomed_active model
           in
           let left_focused =
             if is_zoomed then Model.pane_focused model 0

@@ -653,6 +653,69 @@ let target_keeper m =
   | Some k when not (String.equal (String.trim k) "") -> Some (String.trim k)
   | Some _ | None -> selected_keeper_name m
 
+let can_zoom_current_view m =
+  if
+    is_too_small_viewport m.viewport
+    || equal_breakpoint m.breakpoint Micro
+    || Option.is_some m.nav.overlay
+  then false
+  else
+    match active_inspector m with
+    | Some _ -> false
+    | None -> (
+        match m.nav.workspace with
+        | Nav.Keepers -> Option.is_some (selected_keeper_name m)
+        | Nav.Knowledge -> (
+            match m.knowledge.active_tab with
+            | Nav.Knowledge_board
+            | Nav.Knowledge_wiki
+            | Nav.Knowledge_artifacts
+            | Nav.Knowledge_memory ->
+                true)
+        | Nav.Work -> (
+            match m.work.active_tab with
+            | Nav.Work_pipeline
+            | Nav.Work_tasks
+            | Nav.Work_schedules
+            | Nav.Work_harness ->
+                true
+            | Nav.Work_inbox -> (
+                match m.work.inbox_subview with
+                | Work_store.Inbox_rules -> true
+                | Work_store.Inbox_history -> false
+                | Work_store.Inbox_queue ->
+                    Option.is_some
+                      (Attention.current_filtered_item ~query:m.work.filter_query
+                         m.attention))
+            | Nav.Work_candle_scorecard -> false)
+        | Nav.Runtime -> (
+            match m.runtime.active_tab with
+            | Nav.Runtime_failover_lanes | Nav.Runtime_fusion -> true
+            | Nav.Runtime_tools_usage -> (
+                match m.runtime.tools_subview with
+                | Runtime_store.Tools_keeper_skills
+                | Runtime_store.Tools_quality_gate
+                | Runtime_store.Tools_prompts_presets ->
+                    true
+                | Runtime_store.Tools_usage_calls
+                | Runtime_store.Tools_catalog_tree ->
+                    false)
+            | Nav.Runtime_addons_browser -> m.runtime.addon_catalog_mode
+            | Nav.Runtime_quotas_credits
+            | Nav.Runtime_efficiency_spend
+            | Nav.Runtime_connectors ->
+                false)
+        | Nav.Infra -> (
+            match m.infra.active_tab with
+            | Nav.Infra_sandboxes
+            | Nav.Infra_repos_changes
+            | Nav.Infra_activity_logs
+            | Nav.Infra_code ->
+                true)
+        | Nav.Pulse -> false)
+
+let is_zoomed_active m = m.nav.zoomed && can_zoom_current_view m
+
 let target_keeper_for_lifecycle m =
   match active_inspector m with
   | Some _ -> target_keeper m
@@ -664,7 +727,7 @@ let target_keeper_for_lifecycle m =
             when Nav.equal_keepers_fleet_mode m.fleet.fleet_mode
                    Nav.Fleet_companies
                  && m.nav.pane_index = 0
-                 && not m.nav.zoomed ->
+                 && not (is_zoomed_active m) ->
               None
           | Some _ | None -> selected_keeper_name m)
       | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Runtime | Nav.Infra ->
@@ -687,11 +750,11 @@ let is_in_keeper_chat m =
   && Nav.equal_workspace m.nav.workspace Nav.Keepers
   && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
   && Option.is_some (selected_keeper_name m)
-  && (m.nav.pane_index >= 1 || m.nav.zoomed)
+  && (m.nav.pane_index >= 1 || is_zoomed_active m)
 
 let uses_keeper_split ~width m =
   (equal_breakpoint m.breakpoint Wide || equal_breakpoint m.breakpoint Standard)
-  && width >= 104 && not m.nav.zoomed
+  && width >= 104 && not (is_zoomed_active m)
 
 let fast_approval_strip_item m =
   if is_too_small_viewport m.viewport || equal_breakpoint m.breakpoint Micro then
@@ -764,7 +827,7 @@ let composer_mode m =
         else Collapsed_bar
 
 let keeper_dive_focused m =
-  m.nav.zoomed
+  is_zoomed_active m
   && Option.is_none (active_inspector m)
   && Nav.equal_workspace m.nav.workspace Nav.Keepers
   && Option.is_some (selected_keeper_name m)
@@ -1024,69 +1087,6 @@ let body_rect m =
       ~h:body_h
   else Rect.make ~x:margin ~y:top_h ~w:full_w ~h:body_h
 
-let can_zoom_current_view m =
-  if
-    is_too_small_viewport m.viewport
-    || equal_breakpoint m.breakpoint Micro
-    || Option.is_some m.nav.overlay
-  then false
-  else
-    match active_inspector m with
-    | Some _ -> false
-    | None -> (
-        match m.nav.workspace with
-        | Nav.Keepers -> Option.is_some (selected_keeper_name m)
-        | Nav.Knowledge -> (
-            match m.knowledge.active_tab with
-            | Nav.Knowledge_board
-            | Nav.Knowledge_wiki
-            | Nav.Knowledge_artifacts
-            | Nav.Knowledge_memory ->
-                true)
-        | Nav.Work -> (
-            match m.work.active_tab with
-            | Nav.Work_pipeline
-            | Nav.Work_tasks
-            | Nav.Work_schedules
-            | Nav.Work_harness ->
-                true
-            | Nav.Work_inbox -> (
-                match m.work.inbox_subview with
-                | Work_store.Inbox_rules -> true
-                | Work_store.Inbox_history -> false
-                | Work_store.Inbox_queue ->
-                    Option.is_some
-                      (Attention.current_filtered_item ~query:m.work.filter_query
-                         m.attention))
-            | Nav.Work_candle_scorecard -> false)
-        | Nav.Runtime -> (
-            match m.runtime.active_tab with
-            | Nav.Runtime_failover_lanes | Nav.Runtime_fusion -> true
-            | Nav.Runtime_tools_usage -> (
-                match m.runtime.tools_subview with
-                | Runtime_store.Tools_keeper_skills
-                | Runtime_store.Tools_quality_gate
-                | Runtime_store.Tools_prompts_presets ->
-                    true
-                | Runtime_store.Tools_usage_calls
-                | Runtime_store.Tools_catalog_tree ->
-                    false)
-            | Nav.Runtime_addons_browser -> m.runtime.addon_catalog_mode
-            | Nav.Runtime_quotas_credits
-            | Nav.Runtime_efficiency_spend
-            | Nav.Runtime_connectors ->
-                false)
-        | Nav.Infra -> (
-            match m.infra.active_tab with
-            | Nav.Infra_sandboxes
-            | Nav.Infra_repos_changes
-            | Nav.Infra_activity_logs
-            | Nav.Infra_code ->
-                true)
-        | Nav.Pulse -> false)
-
-let is_zoomed_active m = m.nav.zoomed && can_zoom_current_view m
-
 let work_pipeline_has_linked_card m =
   (not (is_zoomed_active m))
   && inner_body_width m >= 96 && inner_body_height m >= 15
@@ -1127,8 +1127,7 @@ let detail_visible m =
     false
   else if Option.is_some (active_inspector m) then true
   else if
-    m.nav.zoomed
-    && can_zoom_current_view { m with nav = { m.nav with overlay = None } }
+    is_zoomed_active { m with nav = { m.nav with overlay = None } }
   then true
   else
     match m.nav.workspace with
@@ -1284,7 +1283,7 @@ let focusable_pane_count m =
         | Some (Nav.Tool_inspector _) -> 2
         | Some (Nav.Skill_inspector _ | Nav.Exact_run_inspector _ | Nav.File_inspector _) -> 1
         | None ->
-            if m.nav.zoomed && can_zoom_current_view m then
+            if is_zoomed_active m then
               match m.nav.workspace with
               | Nav.Keepers when keeper_preview_has_inner_split m -> 2
               | Nav.Work -> (
@@ -1466,7 +1465,7 @@ let pane_rects m =
     | Some (Nav.Skill_inspector _ | Nav.Exact_run_inspector _ | Nav.File_inspector _) ->
         [ br ]
     | None -> (
-        if m.nav.zoomed && can_zoom_current_view m then
+        if is_zoomed_active m then
           if
             Nav.equal_workspace m.nav.workspace Nav.Keepers
             && keeper_preview_has_inner_split m
@@ -1711,7 +1710,7 @@ let body_has_focus m =
 let pane_focused m idx = body_has_focus m && Int.equal m.nav.pane_index idx
 
 let detail_pane_focused ~detail_index m =
-  if m.nav.zoomed && can_zoom_current_view m then body_has_focus m
+  if is_zoomed_active m then body_has_focus m
   else pane_focused m detail_index
 
 let active_focus_label m =
@@ -1796,7 +1795,7 @@ let active_focus_label m =
                 | Pulse_goals -> pane_prefix ~ko:"목표" ~en:"Goals"
                 | Pulse_world -> pane_prefix ~ko:"월드 펄스" ~en:"World")
             | Nav.Work -> (
-                let zoomed = m.nav.zoomed && can_zoom_current_view m in
+                let zoomed = is_zoomed_active m in
                 match m.work.active_tab with
                 | Nav.Work_pipeline -> (
                     if zoomed then
@@ -1861,7 +1860,7 @@ let active_focus_label m =
                       pane_prefix ~ko:"하네스 상세" ~en:"Run Detail"
                     else pane_prefix ~ko:"하네스 실행" ~en:"Harness")
             | Nav.Knowledge -> (
-                let zoomed = m.nav.zoomed && can_zoom_current_view m in
+                let zoomed = is_zoomed_active m in
                 match m.knowledge.active_tab with
                 | Nav.Knowledge_board ->
                     if zoomed then Say.make ~ko:"확대 · 타래 보기" ~en:"ZOOM · Thread"
@@ -1903,7 +1902,7 @@ let active_focus_label m =
                           .trace_section
                   | None -> None
                 in
-                if m.nav.zoomed && can_zoom_current_view m then
+                if is_zoomed_active m then
                   if board_recovery_active then
                     Say.make ~ko:"확대 · 격리 복구" ~en:"ZOOM · Quarantine"
                   else if keeper_preview_has_inner_split m then
@@ -1979,7 +1978,7 @@ let active_focus_label m =
                   else pane_prefix ~ko:"키퍼 프리뷰" ~en:"Preview"
                 else pane_prefix ~ko:"키퍼 목록" ~en:"Fleet"
             | Nav.Runtime -> (
-                let zoomed = m.nav.zoomed && can_zoom_current_view m in
+                let zoomed = is_zoomed_active m in
                 match m.runtime.active_tab with
                 | Nav.Runtime_quotas_credits ->
                     if m.nav.pane_index = 1 then
@@ -2017,7 +2016,7 @@ let active_focus_label m =
                       pane_prefix ~ko:"브라우저·탭" ~en:"Browser"
                     else pane_prefix ~ko:"애드온 레인" ~en:"Addons")
             | Nav.Infra -> (
-                let zoomed = m.nav.zoomed && can_zoom_current_view m in
+                let zoomed = is_zoomed_active m in
                 match m.infra.active_tab with
                 | Nav.Infra_sandboxes ->
                     if zoomed then Say.make ~ko:"확대 · 샌드박스 상세" ~en:"ZOOM · Inspector"
@@ -2061,14 +2060,14 @@ let is_board_detail_active m =
   && Option.is_none (active_inspector m)
   && Nav.equal_workspace m.nav.workspace Nav.Knowledge
   && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_board
-  && (m.nav.pane_index >= 1 || (m.nav.zoomed && can_zoom_current_view m))
+  && (m.nav.pane_index >= 1 || (is_zoomed_active m))
 
 let is_artifact_doc_search_active m =
   Option.is_none m.nav.overlay
   && Option.is_none (active_inspector m)
   && Nav.equal_workspace m.nav.workspace Nav.Knowledge
   && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_artifacts
-  && (m.nav.pane_index >= 1 || (m.nav.zoomed && can_zoom_current_view m))
+  && (m.nav.pane_index >= 1 || (is_zoomed_active m))
 
 let is_keeper_config_active m =
   Option.is_none m.nav.overlay
@@ -2078,7 +2077,7 @@ let is_keeper_config_active m =
   | None ->
       Nav.equal_workspace m.nav.workspace Nav.Keepers
       && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_config
-      && (m.nav.pane_index = 1 || (m.nav.zoomed && can_zoom_current_view m))
+      && (m.nav.pane_index = 1 || (is_zoomed_active m))
 
 let is_text_capture_active m =
   if m.nav.filter_focused || Drafts.is_focused m.drafts then true
@@ -2114,7 +2113,7 @@ let is_memory_explorer_surface m =
       (Nav.equal_workspace m.nav.workspace Nav.Knowledge
       && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_memory)
       || (Nav.equal_workspace m.nav.workspace Nav.Keepers
-         && (m.nav.pane_index >= 1 || m.nav.zoomed)
+         && (m.nav.pane_index >= 1 || is_zoomed_active m)
          && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory)
 
 let is_memory_diff_pin_surface m =
@@ -4368,7 +4367,7 @@ let active_view_ssot_mode m =
             }
       | Nav.Keepers -> (
           match
-            if m.nav.pane_index >= 1 || m.nav.zoomed then selected_keeper_name m
+            if m.nav.pane_index >= 1 || is_zoomed_active m then selected_keeper_name m
             else None
           with
           | Some name -> (

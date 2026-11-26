@@ -1389,8 +1389,18 @@ let test_all_7_overlays () =
           in
           let g_help, _ = render_full ~model:m_help ~cols ~rows in
           assert_clean_grid ~label:"overlay_help" g_help;
-          assert_contains ~label:"overlay_help" ~needle:"Ctrl+K"
-            (grid_all_text g_help);
+          let help_txt = grid_all_text g_help in
+          assert_contains ~label:"overlay_help" ~needle:"Ctrl+K" help_txt;
+          if cols >= 120 then begin
+            assert_contains ~label:"overlay_help_ctrl_alt_ws"
+              ~needle:"Ctrl/Alt+1..6" help_txt;
+            assert_contains ~label:"overlay_help_f1_f6" ~needle:"F1..F6"
+              help_txt;
+            assert_contains ~label:"overlay_help_pgup_dn" ~needle:"PgUp/Dn"
+              help_txt;
+            assert_contains ~label:"overlay_help_home_end"
+              ~needle:"g/G/Home/End" help_txt
+          end;
 
           (* 7. System / Auth / Media Gate Overlays *)
           let gates =

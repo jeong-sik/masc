@@ -679,7 +679,7 @@ let keeper_turns_changed ?keeper ?(preview_only = false) (m : Model.t) =
     | None -> (
         match m.nav.workspace with
         | Nav.Keepers ->
-            if m.nav.zoomed then
+            if Model.is_zoomed_active m then
               Option.fold ~none:true
                 ~some:(fun k ->
                   Option.equal String.equal (Model.selected_keeper_name m)

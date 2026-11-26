@@ -201,7 +201,7 @@ let apply_model_selection ~now ~runtime_id (m : Model.t) =
     | None ->
         if
           Nav.equal_workspace m0.nav.workspace Nav.Keepers
-          && (m0.nav.pane_index >= 1 || m0.nav.zoomed)
+          && (m0.nav.pane_index >= 1 || Model.is_zoomed_active m0)
         then Model.selected_keeper_name m0
         else None
   in
@@ -542,6 +542,16 @@ let dry_run_settings_config ~now (m : Model.t) =
       ( Model.with_toast ~now ~level:Model.Toast_info (Say.literal reason) m
       , [] )
 
+let dry_run_keeper_config ~now (m : Model.t) =
+  if Config_store.dirty_count m.config > 0 then dry_run_settings_config ~now m
+  else
+    ( Model.with_toast ~now ~level:Model.Toast_info
+        (Say.make
+           ~ko:"변경된 필드가 없습니다 ([←→] 값 변경 · [Enter] 편집)"
+           ~en:"No staged changes ([←→] cycle · [Enter] edit)")
+        m
+    , [] )
+
 let step_artifact_revision ~now ~delta (m : Model.t) =
   match Knowledge_store.artifact_revision_step ~delta m.knowledge with
   | Some (id, rev) ->
@@ -822,7 +832,7 @@ let resolve_memory_act_keeper (m : Model.t) =
   let keeper_tab_active =
     Option.is_none (Model.active_inspector m)
     && Nav.equal_workspace m.nav.workspace Nav.Keepers
-    && (m.nav.pane_index >= 1 || m.nav.zoomed)
+    && (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
     && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
   in
   match if keeper_tab_active then Model.selected_keeper_name m else None with
@@ -1197,11 +1207,6 @@ let open_goal_upsert_modal (m : Model.t) ?(goal : Wire_work.goal option) () =
   in
   ({ m with nav; drafts; config; inline_modal = Some modal; ask_modal }, [])
 
-let reset_knowledge_zoom_transient (k : Knowledge_store.t) =
-  k |> Knowledge_store.reset_thread_view |> Knowledge_store.clear_armed_vote
-  |> Knowledge_store.clear_pending_wiki_edit
-  |> Knowledge_store.set_artifact_search ""
-
 let selected_board_post_for_crud (m : Model.t) : Wire_knowledge.board_post option =
   match Model.active_inspector m with
   | Some _ -> None
@@ -1516,7 +1521,7 @@ let active_keeper_for_tab target_tab (m : Model.t) =
     | None ->
         if
           Nav.equal_workspace m.nav.workspace Nav.Keepers
-          && (m.nav.pane_index >= 1 || m.nav.zoomed)
+          && (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
           && Nav.equal_keeper_tab m.fleet.keeper_dive_tab target_tab
         then Model.selected_keeper_name m
         else None
@@ -1687,7 +1692,7 @@ let active_keeper_for_context (m : Model.t) =
           if
             Nav.equal_workspace m.nav.workspace Nav.Keepers
             && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_trace
-            && (m.nav.pane_index >= 1 || m.nav.zoomed)
+            && (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
           then
             match Model.selected_keeper_name m with
             | Some name ->
@@ -1736,7 +1741,7 @@ let artifact_search_match_lines (m : Model.t) (a : Wire_knowledge.artifact_entry
           | _ -> br
         in
         let right_rect =
-          if m.nav.zoomed then body_after_bar
+          if Model.is_zoomed_active m then body_after_bar
           else
             snd
               (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
@@ -4433,7 +4438,7 @@ and execute_action ~now (m : Model.t) action =
                   | Nav.Pulse -> focus_composer_for_slash m
                   | Nav.Keepers
                     when Model.is_in_keeper_chat m
-                         || (m.nav.zoomed && Model.can_zoom_current_view m) ->
+                         || (Model.is_zoomed_active m) ->
                       focus_composer_for_slash m
                   | Nav.Work
                   | Nav.Knowledge
@@ -5130,34 +5135,8 @@ and execute_action ~now (m : Model.t) action =
                           }
                         in
                         (next, View_fetches.fetches_for_current_view next)
-                      else if m.nav.zoomed && Model.can_zoom_current_view m then
-                        let knowledge =
-                          if Nav.equal_workspace m.nav.workspace Nav.Knowledge
-                          then reset_knowledge_zoom_transient m.knowledge
-                          else m.knowledge
-                        in
-                        let m0 =
-                          {
-                            m with
-                            knowledge;
-                            nav =
-                              {
-                                m.nav with
-                                zoomed = false;
-                                pre_zoom_pane_index = None;
-                              };
-                          }
-                        in
-                        let max_pane =
-                          max 0 (Model.focusable_pane_count m0 - 1)
-                        in
-                        let restored =
-                          match m.nav.pre_zoom_pane_index with
-                          | Some p -> max 0 (min max_pane p)
-                          | None -> max 0 (min max_pane m0.nav.pane_index)
-                        in
-                        ( { m0 with nav = { m0.nav with pane_index = restored } }
-                        , [] )
+                      else if Model.is_zoomed_active m then
+                        (Update_nav.unzoom_view m, [])
                       else if
                         Knowledge_store.is_memory_diff_pinned m.knowledge
                         && Nav.equal_workspace m.nav.workspace Nav.Knowledge
@@ -5479,12 +5458,12 @@ and execute_action ~now (m : Model.t) action =
               match m.nav.workspace with
               | Nav.Keepers ->
                   if
-                    (m.nav.pane_index >= 1 || m.nav.zoomed)
+                    (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
                     && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                          Nav.Keeper_chat
                   then apply_toggle_turn_details ~now m
                   else if
-                    (m.nav.pane_index >= 1 || m.nav.zoomed)
+                    (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
                     && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                          Nav.Keeper_trace
                   then
@@ -5504,7 +5483,7 @@ and execute_action ~now (m : Model.t) action =
                         else (m, [])
                     | None -> (m, [])
                   else if
-                    (m.nav.pane_index >= 1 || m.nav.zoomed)
+                    (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
                     && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                          Nav.Keeper_memory
                   then
@@ -5520,7 +5499,7 @@ and execute_action ~now (m : Model.t) action =
                       | None -> (m, [])
                     else (m, [])
                   else if
-                    (m.nav.pane_index >= 1 || m.nav.zoomed)
+                    (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
                     && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                          Nav.Keeper_identity
                   then
@@ -5674,7 +5653,7 @@ and execute_action ~now (m : Model.t) action =
               | Nav.Infra -> (
                   match m.infra.active_tab with
                   | Nav.Infra_activity_logs
-                    when not (m.nav.zoomed && Model.can_zoom_current_view m) ->
+                    when not (Model.is_zoomed_active m) ->
                       ( {
                           m with
                           infra = Infra_store.cycle_log_level_filter m.infra;
@@ -5683,7 +5662,7 @@ and execute_action ~now (m : Model.t) action =
                   | Nav.Infra_activity_logs -> (m, [])
                   | Nav.Infra_code
                     when m.nav.pane_index = 0
-                         && not (m.nav.zoomed && Model.can_zoom_current_view m)
+                         && not (Model.is_zoomed_active m)
                     -> (
                       match Infra_store.selected_code_tree_node m.infra with
                       | Some node when node.has_children ->
@@ -6385,10 +6364,9 @@ and execute_action ~now (m : Model.t) action =
                         | Some row -> Some row.keeper
                         | None -> None)
                     | Nav.Work_harness ->
-                        Option.map
-                          (fun (v : Wire_work.harness_verdict_row) ->
-                            v.notes_hash)
-                          (Work_store.selected_harness_verdict m.work))
+                        (* Bare 'y' on Work_harness is intercepted for approve-overrule above;
+                           use [H] (Copy_hash) to copy notes_hash. *)
+                        None)
                 | Nav.Runtime -> (
                     match m.runtime.active_tab with
                     | Nav.Runtime_addons_browser ->
@@ -6698,7 +6676,7 @@ and execute_action ~now (m : Model.t) action =
                       in
                       open_url_or_notice url_opt
                   | Nav.Keeper_work_sandbox, Some name
-                    when (m.nav.pane_index >= 1 || m.nav.zoomed)
+                    when (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
                          && not
                               (Board_recovery.shown ~keeper:name
                                  m.knowledge.board_recovery) ->
@@ -6710,15 +6688,17 @@ and execute_action ~now (m : Model.t) action =
                       Update_nav.jump_to_workspace ~pane_index:1 ~return_from:m
                         { m with infra } Nav.Infra
                   | Nav.Keeper_work_sandbox, Some name
-                    when (m.nav.pane_index >= 1 || m.nav.zoomed)
+                    when (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
                          && Board_recovery.shown ~keeper:name
                               m.knowledge.board_recovery ->
                       (m, [])
                   | Nav.Keeper_trace, Some name
-                    when Keeper_context_store.equal_trace_section
-                           (Keeper_context_store.get_keeper ~keeper:name
-                              m.keeper_context)
-                             .trace_section Keeper_context_store.Trace_tool_calls -> (
+                    when (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
+                         && Keeper_context_store.equal_trace_section
+                              (Keeper_context_store.get_keeper ~keeper:name
+                                 m.keeper_context)
+                                .trace_section
+                              Keeper_context_store.Trace_tool_calls -> (
                       let ks =
                         Keeper_context_store.get_keeper ~keeper:name m.keeper_context
                       in
@@ -6797,99 +6777,12 @@ and execute_action ~now (m : Model.t) action =
   | Keymap.Toggle_zoom ->
       if Model.sidebar_has_focus m then (m, [])
       else if not (Model.can_zoom_current_view m) then
-        if m.nav.zoomed then
-          let m0 =
-            {
-              m with
-              nav = { m.nav with zoomed = false; pre_zoom_pane_index = None };
-            }
-          in
-          let max_pane = max 0 (Model.focusable_pane_count m0 - 1) in
-          let restored =
-            match m.nav.pre_zoom_pane_index with
-            | Some p -> max 0 (min max_pane p)
-            | None -> max 0 (min max_pane m0.nav.pane_index)
-          in
-          ({ m0 with nav = { m0.nav with pane_index = restored } }, [])
-        else (m, [])
+        if m.nav.zoomed then (Update_nav.unzoom_view m, []) else (m, [])
       else
-        let zoomed = not m.nav.zoomed in
-        let next =
-          if zoomed then
-            let z_pane =
-              if
-                Nav.equal_workspace m.nav.workspace Nav.Keepers
-                && Model.keeper_preview_has_inner_split m
-                && m.nav.pane_index >= 2
-              then 1
-              else 0
-            in
-            let drafts =
-              if Nav.equal_workspace m.nav.workspace Nav.Keepers then
-                match Model.selected_keeper_name m with
-                | Some name -> Drafts.set_active_keeper name m.drafts
-                | None -> m.drafts
-              else m.drafts
-            in
-            let work =
-              if Nav.equal_workspace m.nav.workspace Nav.Work then
-                match m.work.active_tab with
-                | Nav.Work_pipeline -> Work_store.reset_goal_dive_state m.work
-                | Nav.Work_tasks -> Work_store.reset_task_dive_scroll m.work
-                | Nav.Work_schedules
-                | Nav.Work_inbox
-                | Nav.Work_candle_scorecard
-                | Nav.Work_harness ->
-                    m.work
-              else m.work
-            in
-            {
-              m with
-              drafts;
-              work;
-              knowledge = Knowledge_store.clear_armed_vote m.knowledge;
-              nav =
-                {
-                  m.nav with
-                  zoomed = true;
-                  pre_zoom_pane_index = Some m.nav.pane_index;
-                  pane_index = z_pane;
-                  json_scroll_offset = 0;
-                };
-            }
-          else
-            let knowledge =
-              if Nav.equal_workspace m.nav.workspace Nav.Knowledge then
-                reset_knowledge_zoom_transient m.knowledge
-              else m.knowledge
-            in
-            let m0 =
-              {
-                m with
-                knowledge;
-                nav =
-                  {
-                    m.nav with
-                    zoomed = false;
-                    pre_zoom_pane_index = None;
-                    json_scroll_offset = 0;
-                  };
-                infra = { m.infra with show_raw_json = false };
-              }
-            in
-            let max_pane = max 0 (Model.focusable_pane_count m0 - 1) in
-            let restored =
-              match m.nav.pre_zoom_pane_index with
-              | Some p -> max 0 (min max_pane p)
-              | None -> max 0 (min max_pane m0.nav.pane_index)
-            in
-            { m0 with nav = { m0.nav with pane_index = restored } }
-        in
+        let next, _, cmds = Update_nav.toggle_zoom_view m in
         if Option.is_some (Memory_diagram.active_diagram next) then
           Update_nav.refresh_open_memory_diagram ~now next
-        else if zoomed then
-          (next, View_fetches.fetches_for_current_view next)
-        else (next, [])
+        else (next, cmds)
   | Keymap.Cycle_memory_view ->
       let trace_keeper_opt =
         if
@@ -6897,7 +6790,7 @@ and execute_action ~now (m : Model.t) action =
           && (not (Model.sidebar_has_focus m))
           && Option.is_none (Model.active_inspector m)
           && Nav.equal_workspace m.nav.workspace Nav.Keepers
-          && (m.nav.pane_index >= 1 || m.nav.zoomed)
+          && (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
           && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_trace
         then Model.selected_keeper_name m
         else None
@@ -7133,7 +7026,7 @@ and execute_action ~now (m : Model.t) action =
                 let next = { m with knowledge } in
                 (next, View_fetches.fetches_for_current_view next)
             | Nav.Keepers
-              when (m.nav.pane_index >= 1 || m.nav.zoomed)
+              when (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
                    && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                         Nav.Keeper_memory ->
                 let knowledge =
@@ -7249,7 +7142,7 @@ and execute_action ~now (m : Model.t) action =
                         let next = { m with knowledge } in
                         (next, View_fetches.fetches_for_current_view next)
                     | Nav.Keepers
-                      when (m.nav.pane_index >= 1 || m.nav.zoomed)
+                      when (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
                            && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                                 Nav.Keeper_memory ->
                         let knowledge =
@@ -7260,7 +7153,7 @@ and execute_action ~now (m : Model.t) action =
                         let next = { m with nav; knowledge } in
                         (next, View_fetches.fetches_for_current_view next)
                     | Nav.Keepers
-                      when (m.nav.pane_index >= 1 || m.nav.zoomed)
+                      when (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
                            && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                                 Nav.Keeper_trace -> (
                         match Model.selected_keeper_name m with
@@ -7445,7 +7338,7 @@ and execute_action ~now (m : Model.t) action =
                         let cmds =
                           if
                             already_chat
-                            && (m.nav.pane_index >= 1 || m.nav.zoomed)
+                            && (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
                           then []
                           else View_fetches.fetches_for_current_view next
                         in
@@ -7605,7 +7498,7 @@ and execute_action ~now (m : Model.t) action =
         && (not (Model.sidebar_has_focus m))
         && Option.is_none (Model.active_inspector m)
         && Nav.equal_workspace m.nav.workspace Nav.Keepers
-        && (m.nav.pane_index >= 1 || m.nav.zoomed)
+        && (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
         && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_trace
       then
         match Model.selected_keeper_name m with
@@ -7724,7 +7617,7 @@ and execute_action ~now (m : Model.t) action =
                && Knowledge_store.equal_memory_subview
                     m.knowledge.memory_subview Knowledge_store.Mem_diff_flow)
               || (Nav.equal_workspace m.nav.workspace Nav.Keepers
-                  && (m.nav.pane_index >= 1 || m.nav.zoomed)
+                  && (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
                   && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                        Nav.Keeper_memory)
         in
@@ -7970,7 +7863,7 @@ and execute_action ~now (m : Model.t) action =
                       ] )
                 | None -> open_memory_act_modal m ~keeper_default:"")
             | Nav.Keepers
-              when (m.nav.pane_index >= 1 || m.nav.zoomed)
+              when (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
                    && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                         Nav.Keeper_memory -> (
                 match Model.selected_keeper_name m with
@@ -7994,7 +7887,7 @@ and execute_action ~now (m : Model.t) action =
                       ] )
                 | None -> (m, []))
             | Nav.Keepers
-              when (m.nav.pane_index >= 1 || m.nav.zoomed)
+              when (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
                    && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                         Nav.Keeper_config -> (
                 match Model.selected_keeper_name m with
@@ -8160,7 +8053,7 @@ and execute_action ~now (m : Model.t) action =
                      Nav.Runtime_addons_browser
                    && (not m.runtime.addon_catalog_mode)
                    && m.nav.pane_index = 0
-                   && not (m.nav.zoomed && Model.can_zoom_current_view m) -> (
+                   && not (Model.is_zoomed_active m) -> (
                 match Runtime_store.selected_addon_instance m.runtime with
                 | Some inst ->
                     execute_slash ~now m
@@ -8320,7 +8213,7 @@ and execute_action ~now (m : Model.t) action =
                   | None -> (m, [])
                 else if
                   Nav.equal_workspace m.nav.workspace Nav.Keepers
-                  && (m.nav.pane_index >= 1 || m.nav.zoomed)
+                  && (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
                   && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                        Nav.Keeper_work_sandbox
                 then (
@@ -8363,7 +8256,7 @@ and execute_action ~now (m : Model.t) action =
                    && Knowledge_store.equal_memory_subview
                         m.knowledge.memory_subview Knowledge_store.Mem_diff_flow)
                   || (Nav.equal_workspace m.nav.workspace Nav.Keepers
-                      && (m.nav.pane_index >= 1 || m.nav.zoomed)
+                      && (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
                       && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                            Nav.Keeper_memory)
                 then
@@ -8383,7 +8276,7 @@ and execute_action ~now (m : Model.t) action =
                   && Nav.equal_runtime_tab m.runtime.active_tab Nav.Runtime_addons_browser
                   && m.runtime.addon_catalog_mode
                   && m.nav.pane_index = 0
-                  && not (m.nav.zoomed && Model.can_zoom_current_view m)
+                  && not (Model.is_zoomed_active m)
                 then
                   Update_nav.open_inline_modal m
                     (Nav.Addon_decl_form
@@ -8944,7 +8837,7 @@ and execute_action ~now (m : Model.t) action =
                   | Some k -> Some (`Keeper k, k)
                   | None -> Some (`All, "all"))
               | Nav.Keepers
-                when (m.nav.pane_index >= 1 || m.nav.zoomed)
+                when (m.nav.pane_index >= 1 || Model.is_zoomed_active m)
                      && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                           Nav.Keeper_work_sandbox -> (
                   match Model.selected_keeper_name m with
@@ -9033,7 +8926,7 @@ and execute_action ~now (m : Model.t) action =
                   m.knowledge.memory_subview Knowledge_store.Mem_diff_flow)
             || (Nav.equal_workspace m.nav.workspace Nav.Keepers
                 && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory
-                && (m.nav.pane_index >= 1 || m.nav.zoomed))
+                && (m.nav.pane_index >= 1 || Model.is_zoomed_active m))
       in
       if not in_memory_chart then (m, [])
       else
@@ -9163,7 +9056,8 @@ and execute_action ~now (m : Model.t) action =
                   in
                   let next = { m with nav; knowledge } in
                   (next, View_fetches.fetches_for_current_view next)
-                else if Model.is_keeper_config_active m then (m, [])
+                else if Model.is_keeper_config_active m then
+                  dry_run_keeper_config ~now m
                 else
                   match selected_keeper_name_for_lifecycle m with
                   | Some keeper ->

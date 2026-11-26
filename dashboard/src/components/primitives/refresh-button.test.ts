@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { REFRESH_BUSY_LABEL, REFRESH_MIN_BUSY_MS, RefreshButton } from './index'
+import { REFRESH_AGAIN_HINT, REFRESH_BUSY_LABEL, REFRESH_MIN_BUSY_MS, RefreshButton } from './index'
 
 interface PendingRead {
   readonly promise: Promise<void>
@@ -70,7 +70,9 @@ describe('components/primitives RefreshButton', () => {
     expect(started).toBe(1)
     expect(shownLabel()).toBe(REFRESH_BUSY_LABEL)
     expect(button().getAttribute('aria-busy')).toBe('true')
-    expect(button().getAttribute('aria-disabled')).toBe('true')
+    expect(button().getAttribute('title')).toBe(REFRESH_AGAIN_HINT)
+    expect(button().hasAttribute('aria-disabled')).toBe(false)
+    expect(button().disabled).toBe(false)
 
     // The read outlasts the minimum time: the label follows the read.
     await pass(REFRESH_MIN_BUSY_MS * 3)
@@ -80,7 +82,7 @@ describe('components/primitives RefreshButton', () => {
     await pass(0)
     expect(shownLabel()).toBe('새로고침')
     expect(button().getAttribute('aria-busy')).toBe('false')
-    expect(button().getAttribute('aria-disabled')).toBe('false')
+    expect(button().title).toBe('')
   })
 
   it('keeps the in-flight label for the minimum time when the read ends at once', async () => {
@@ -92,15 +94,13 @@ describe('components/primitives RefreshButton', () => {
     await pass(REFRESH_MIN_BUSY_MS - 1)
     expect(shownLabel()).toBe(REFRESH_BUSY_LABEL)
     expect(button().getAttribute('aria-busy')).toBe('true')
-    // The read is over: the label is held, a press is not refused.
-    expect(button().getAttribute('aria-disabled')).toBe('false')
 
     await pass(1)
     expect(shownLabel()).toBe('새로고침')
     expect(button().getAttribute('aria-busy')).toBe('false')
   })
 
-  it('takes no second press while a read is out, however long, and takes one when it has ended', async () => {
+  it('starts the read again on a press while a read is out, and follows the later read', async () => {
     const reads = [pendingRead(), pendingRead()]
     let started = 0
     await mount(() => {
@@ -110,26 +110,48 @@ describe('components/primitives RefreshButton', () => {
       return read.promise
     })
 
-    // Two presses before any render: the second must not start a read.
-    await act(() => {
-      button().click()
-      button().click()
-    })
-    expect(started).toBe(1)
-
     await press()
     expect(started).toBe(1)
 
-    // The minimum time of the label is long over. The read is not.
+    // The first read does not answer. The minimum time of the label is long over.
     await pass(REFRESH_MIN_BUSY_MS * 3)
-    await press()
-    expect(started).toBe(1)
-    expect(button().getAttribute('aria-disabled')).toBe('true')
-
-    reads[0]?.end()
-    await pass(0)
+    expect(shownLabel()).toBe(REFRESH_BUSY_LABEL)
     await press()
     expect(started).toBe(2)
+    expect(shownLabel()).toBe(REFRESH_BUSY_LABEL)
+
+    // The later read ends well after its press: the label comes down with it,
+    // whether or not the read it replaced ever ends.
+    await pass(REFRESH_MIN_BUSY_MS * 2)
+    reads[1]?.end()
+    await pass(0)
+    expect(shownLabel()).toBe('새로고침')
+    expect(button().getAttribute('aria-busy')).toBe('false')
+  })
+
+  it('keeps the label up when the read a later press replaced ends first', async () => {
+    const reads = [pendingRead(), pendingRead()]
+    let started = 0
+    await mount(() => {
+      const read = reads[started]
+      started += 1
+      if (read === undefined) throw new Error('more reads started than the test prepared')
+      return read.promise
+    })
+
+    await press()
+    await pass(REFRESH_MIN_BUSY_MS * 2)
+    await press()
+
+    // The replaced read ends (a cache read ends when it is aborted).
+    reads[0]?.end()
+    await pass(REFRESH_MIN_BUSY_MS * 2)
+    expect(shownLabel()).toBe(REFRESH_BUSY_LABEL)
+    expect(button().getAttribute('aria-busy')).toBe('true')
+
+    reads[1]?.end()
+    await pass(0)
+    expect(shownLabel()).toBe('새로고침')
   })
 
   it('takes a press after the read has ended while the label is still up, and holds the label for it', async () => {
@@ -174,7 +196,6 @@ describe('components/primitives RefreshButton', () => {
     // 400 ms after the first press, 300 after the second: its read is out.
     await pass(REFRESH_MIN_BUSY_MS - 100)
     expect(shownLabel()).toBe(REFRESH_BUSY_LABEL)
-    expect(button().getAttribute('aria-disabled')).toBe('true')
 
     // The second press is 1000 ms old when its read ends: nothing holds the label.
     await pass(700)
@@ -182,7 +203,6 @@ describe('components/primitives RefreshButton', () => {
     later.end()
     await pass(0)
     expect(shownLabel()).toBe('새로고침')
-    expect(button().getAttribute('aria-disabled')).toBe('false')
   })
 
   it('hands both labels to CSS so the button is as wide as the wider one', async () => {

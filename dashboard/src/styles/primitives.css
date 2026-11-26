@@ -583,10 +583,6 @@
 .refresh-btn[aria-busy="true"] {
   cursor: progress;
 }
-.refresh-btn[aria-disabled="true"]:hover {
-  border-color: var(--line-1);
-  background: var(--bg-2);
-}
 
 .img-out {
   margin: var(--sp-2) 0;

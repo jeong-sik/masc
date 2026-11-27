@@ -890,22 +890,49 @@ export type KeeperObserverChatSignal =
  * Chat view. Handles both flat event records and JSON-RPC `params` envelopes,
  * matching the live OCaml broadcast shapes (`server_turn_preview_broadcast.ml`).
  */
+// A shared Observer frame carries its event flat or in a JSON-RPC `params` envelope.
+function observerEventPayload(data: unknown): Record<string, unknown> | null {
+  return isRecord(data) ? (isRecord(data.params) ? data.params : data) : null
+}
+
+function observerEventKeeper(payload: Record<string, unknown>): string | null {
+  return asStr(payload.keeper_name) ?? asStr(payload.keeper) ?? asStr(payload.name) ?? asStr(payload.agent_name)
+}
+
+export interface KeeperTurnPreviewEvent {
+  readonly keeperName: string
+  readonly ownerKey: string
+  readonly preview: KeeperActiveTurnPreview
+}
+
+/**
+ * A turn preview from a shared Observer frame, with the Keeper and the turn
+ * it belongs to. For a caller that follows every Keeper;
+ * `parseKeeperLiveObserverEvent` is the one for a single Keeper's Chat view.
+ */
+export function parseKeeperTurnPreviewEvent(eventName: string, data: unknown): KeeperTurnPreviewEvent | null {
+  const payload = observerEventPayload(data)
+  const keeperName = payload ? observerEventKeeper(payload) : null
+  if (keeperName === null) return null
+  const signal = parseKeeperLiveObserverEvent(eventName, data, keeperName)
+  // A preview that names no turn cannot be laid over one.
+  return signal?.kind === 'turn_preview' && signal.ownerKey !== null
+    ? { keeperName, ownerKey: signal.ownerKey, preview: signal.preview }
+    : null
+}
+
 export function parseKeeperLiveObserverEvent(
   eventName: string,
   data: unknown,
   keeperName: string,
 ): KeeperObserverChatSignal | null {
-  const payload = isRecord(data)
-    ? (isRecord(data.params) ? data.params : data)
-    : null
+  const payload = observerEventPayload(data)
   const eventType =
     (payload ? (asStr(payload.type) ?? asStr(payload.event_type) ?? asStr(payload.event)) : null)
     ?? (eventName !== 'message' ? eventName : null)
   if (!eventType) return null
 
-  const rowKeeper = payload
-    ? (asStr(payload.keeper_name) ?? asStr(payload.keeper) ?? asStr(payload.name) ?? asStr(payload.agent_name))
-    : null
+  const rowKeeper = payload ? observerEventKeeper(payload) : null
 
   // A refresh can only be caused by an event addressed to this Keeper.
   if (rowKeeper !== keeperName) return null

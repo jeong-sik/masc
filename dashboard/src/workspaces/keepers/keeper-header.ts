@@ -39,6 +39,8 @@ import {
   type KeeperEntityTab,
 } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
+import { formatTurnLaneLabel } from './chat-blocks'
+import { turnDoing } from './turn-doing'
 import type { KeeperRosterItem, KeeperToolApprovalModesData } from './types'
 import { isWaitingUnavailable } from './turn-context'
 
@@ -180,24 +182,12 @@ export function KeeperHeader(props: KeeperHeaderProps) {
   const booted = isKeeperBooted(keeper)
   const isPaused = keeper.paused || keeper.phase.trim().toLowerCase() === 'paused'
   const resting = isKeeperPathResting(keeper)
-  const turnPreview = keeper.active_turn?.preview
+  // The turn in the Chat progress line's words. The server's own sentence stays behind the pill.
+  const turnPreview = keeper.active_turn?.preview ?? null
+  const turnIsDoing = turnPreview ? turnDoing(turnPreview) : null
   const waitingUnavailable = isWaitingUnavailable(keeper.waiting_summary) ? keeper.waiting_summary : null
   const waitingSummary = keeper.waiting_summary && !isWaitingUnavailable(keeper.waiting_summary)
     ? keeper.waiting_summary : null
-  const statusMentionsTool = (statusText: string, toolName: string): boolean => {
-    const escaped = toolName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    return new RegExp(`(^|[^A-Za-z0-9_-])${escaped}($|[^A-Za-z0-9_-])`).test(statusText)
-  }
-  const turnDetail =
-    (turnPreview
-      ? [
-          turnPreview.status_text || null,
-          turnPreview.last_tool && !statusMentionsTool(turnPreview.status_text, turnPreview.last_tool) ? turnPreview.last_tool : null,
-          turnPreview.text_tail && turnPreview.text_tail !== turnPreview.status_text ? turnPreview.text_tail : null,
-        ]
-          .filter((p): p is string => Boolean(p))
-          .join(' · ') || null
-      : null)
   const laneFailures = keeper.runtime_lane_failures ?? []
   const turnBreakdown = keeper.turns_24h_breakdown
   const actionableDisposition =
@@ -368,8 +358,8 @@ export function KeeperHeader(props: KeeperHeaderProps) {
                 Ctx ${ctxText}
               </span>
               ${keeper.active_turn && html`
-                <span class="kp-pill" data-tone="brass" title=${turnDetail ?? undefined}>
-                  ● Turn (${keeper.active_turn.lane}${turnDetail ? ` · ${turnDetail}` : ''})
+                <span class="kp-pill" data-turn-pill data-tone="brass" title=${turnPreview?.status_text || undefined}>
+                  ● ${formatTurnLaneLabel(keeper.active_turn.lane)}${turnIsDoing ? ` · ${turnIsDoing.phrase}` : ''}
                 </span>
               `}
               ${waitingSummary && waitingSummary.count > 0 && html`

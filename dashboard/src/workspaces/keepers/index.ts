@@ -12,6 +12,7 @@
 
 import { html } from 'htm/preact'
 import { Suspense } from 'preact/compat'
+import { computed, useSignal, type ReadonlySignal } from '@preact/signals'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { authSession, currentSessionEpoch, isSingleUserMember, sessionEpoch } from '../../core/auth'
 import { extractObserverTopics, markViewSynced, observerConnected, subscribeObserverFrames, subscribeObserverReconnect, subscribeObserverResync } from '../../core/observer'
@@ -19,9 +20,20 @@ import { createPreloadableLazy } from '../../lib/lazy-component'
 import { parseKeeperEntityTab, type KeeperEntityTab } from '../../routes/router'
 import { registerSubroutePreloader } from '../registry'
 import type { WorkspaceViewProps } from '../types'
-import { KEEPER_ROSTER_OBSERVER_TOPICS, loadKeeperRoster, readKeeperRosterSources } from './keepers-api'
+import {
+  KEEPER_ROSTER_OBSERVER_TOPICS,
+  loadKeeperRoster,
+  parseKeeperTurnPreviewEvent,
+  readKeeperRosterSources,
+} from './keepers-api'
+import {
+  NO_FLEET_TURN_PREVIEWS,
+  retainFleetTurnPreview,
+  withObservedTurn,
+  type FleetTurnPreviews,
+} from './fleet-turn-previews'
 import { KeeperRoster } from './keeper-roster'
-import { KeeperHeader } from './keeper-header'
+import { KeeperHeader, type KeeperHeaderProps } from './keeper-header'
 import { KeeperChatTab } from './keeper-chat-tab'
 import { PersonalKeepersWorkspace } from './personal-keepers-workspace'
 import type { KeeperRosterItem } from './types'
@@ -63,6 +75,18 @@ registerSubroutePreloader('keepers', (tab) => {
   void preloadKeeperEntityTab(tab).catch(() => {})
 })
 
+interface ObservedTurns {
+  readonly turnPreviews: ReadonlySignal<FleetTurnPreviews>
+}
+
+// The header with its Keeper's turn as the stream last described it. It is a
+// component of its own and follows its own Keeper's previews, so a preview
+// redraws the header of the Keeper it is about and nothing else.
+function ObservedKeeperHeader({ turnPreviews, keeper, ...rest }: KeeperHeaderProps & ObservedTurns) {
+  const name = keeper.name
+  const received = useMemo(() => computed(() => turnPreviews.value.get(name)), [turnPreviews, name])
+  return html`<${KeeperHeader} ...${rest} keeper=${withObservedTurn(keeper, received.value)} />`
+}
 export function KeepersWorkspace(props: WorkspaceViewProps) {
   const session = authSession.value
   const isSingleUser = isSingleUserMember(session)
@@ -160,6 +184,26 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
       if (timer) clearTimeout(timer)
     }
   }, [isSingleUser, refreshRoster])
+
+  // The turns snapshot is read again only when a turn begins or ends. What a
+  // turn does in between arrives here. A preview is kept across a gap in the
+  // stream: it is laid over a turn only when it carries that turn's own owner
+  // key and a revision past the snapshot's, and the server keys each turn anew.
+  const fleetTurnPreviews = useSignal<FleetTurnPreviews>(NO_FLEET_TURN_PREVIEWS)
+  useEffect(() => {
+    // A preview belongs to the session that received it.
+    fleetTurnPreviews.value = NO_FLEET_TURN_PREVIEWS
+    return subscribeObserverFrames((frame) => {
+      const event = parseKeeperTurnPreviewEvent(frame.event, frame.data)
+      if (!event) return
+      fleetTurnPreviews.value = retainFleetTurnPreview(fleetTurnPreviews.peek(), event.keeperName, {
+        ownerKey: event.ownerKey,
+        preview: event.preview,
+        receivedAt: Date.now(),
+        live: true,
+      })
+    })
+  }, [epoch, fleetTurnPreviews])
 
   const rosterItems: readonly KeeperRosterItem[] = roster.kind === 'value' ? roster.data : []
 
@@ -260,8 +304,9 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
               </div>
             `
           : html`
-              <${KeeperHeader}
+              <${ObservedKeeperHeader}
                 key=${`hdr:${epoch}:${activeKeeper.name}`}
+                turnPreviews=${fleetTurnPreviews}
                 keeper=${activeKeeper}
                 turnStatus=${turns.kind}
                 activeTab=${activeTab}

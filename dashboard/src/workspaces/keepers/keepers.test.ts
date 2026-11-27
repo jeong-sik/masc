@@ -1497,7 +1497,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     expect(onNavigate).toHaveBeenCalledWith('/keepers/code-reviewer-sister/memory')
 
     releaseTurns()
-    await waitFor(() => expect(ws.queryByText('● Turn (chat_operation)')).toBeTruthy())
+    await waitFor(() => expect(ws.queryByText('● 대화 턴')).toBeTruthy())
   })
 
   it('does not send a pending Steer after leaving the Keeper chat', async () => {
@@ -2081,6 +2081,50 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     fireEvent.keyDown(btwInput, { key: 'Enter', isComposing: false })
     await waitFor(() => expect(streamCalls).toHaveLength(2))
     expect(streamCalls[1]!.turn_instructions).toContain('/btw')
+  })
+
+  it('says in the header which turn is open and what it is doing, in the words the Chat tab uses', () => {
+    const header = (active_turn: KeeperRosterItem['active_turn']) => {
+      const view = render(
+        html`<${KeeperHeader} keeper=${makeRosterKeeper({ active_turn })} activeTab="memory" onSelectTab=${vi.fn()} onLifecycleMutated=${vi.fn()} onDeleted=${vi.fn()} />`,
+      )
+      const pill = view.container.querySelector('[data-turn-pill]')
+      const seen = pill
+        ? { says: pill.textContent?.trim(), tone: pill.getAttribute('data-tone'), title: pill.getAttribute('title') }
+        : null
+      view.unmount()
+      return seen
+    }
+    const turn = (lane: string, preview: Partial<NonNullable<NonNullable<KeeperRosterItem['active_turn']>['preview']>> | null) => ({
+      lane, started_at_unix: 10,
+      preview: preview && {
+        status_text: 'rt-1 · said by the server', activity: 'tool', preparation: null, work_context: null, open_activities: null,
+        text_tail: 'the tail of the reply',
+        last_tool: 'Grep', updated_at_unix: 20, revision: 1, ...preview,
+      },
+    })
+    const tool = (name: string, stage: 'executing' | 'requested') => ({
+      kind: 'tool' as const, tool_use_id: null, name, stage, started_at_unix: 11, since_unix: 12, cohort: null, reach: null,
+    })
+
+    expect(header(null)).toBeNull()
+    // The open work, with the server's sentence behind it and none of the reply's text.
+    expect(header(turn('autonomous', { open_activities: [tool('Read', 'requested'), tool('Execute', 'executing')] }))).toEqual({
+      says: '● 자율 턴 · Execute 외 1건 · 실행 중', tone: 'brass', title: 'rt-1 · said by the server',
+    })
+    // A server that sends no list: the activity's word, and no guess from the last tool.
+    expect(header(turn('chat_operation', {}))?.says).toBe('● 대화 턴 · 도구 실행 중')
+    expect(header(turn('schedule', { activity: 'preparing' }))?.says).toBe('● 예약 턴 · 준비 중')
+    // The pill is the color of an open turn whatever the turn is doing: the words say the rest.
+    expect(header(turn('autonomous', { activity: 'failed', open_activities: [] }))).toMatchObject({ says: '● 자율 턴 · 시도 실패', tone: 'brass' })
+    expect(header(turn('autonomous', {
+      activity: 'preparing', open_activities: [], preparation: { state: 'active', phase: 'workspace_memory', started_at_unix: 15 },
+    }))).toMatchObject({ says: '● 자율 턴 · 준비 중 · 작업공간 메모리', tone: 'brass' })
+    expect(header(turn('autonomous', {
+      activity: 'preparing', open_activities: [], preparation: { state: 'cancelled', phase: 'context', started_at_unix: 15 },
+    }))).toMatchObject({ says: '● 자율 턴 · 컨텍스트 준비 취소', tone: 'brass' })
+    // A turn with no preview yet says only that it is open.
+    expect(header(turn('autonomous', null))).toEqual({ says: '● 자율 턴', tone: 'brass', title: null })
   })
 
   it('hides Boot on already-booted or paused Keepers and shows Boot only when offline/unbooted/stopped', () => {

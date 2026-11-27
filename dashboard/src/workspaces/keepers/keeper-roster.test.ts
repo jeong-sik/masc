@@ -80,7 +80,8 @@ describe('a roster row', () => {
 
   it('puts the name beside the context pill and the state beside the small label', () => {
     const seen = rows([keeper('a-idle'), keeper('b-turn', { active_turn: turn([tool('Execute', 'executing')]) })])
-    const twoLines = [['kp-roster-name', 'kp-pill'], ['kp-roster-sub', 'kp-roster-sub']]
+    // The state stands in its own box, where a turn's elapsed time goes before it.
+    const twoLines = [['kp-roster-name', 'kp-pill'], ['kp-roster-state', 'kp-roster-sub']]
     expect(seen.get('a-idle')?.lines).toEqual(twoLines)
     expect(seen.get('b-turn')?.lines).toEqual(twoLines)
   })

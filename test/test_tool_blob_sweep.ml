@@ -415,10 +415,12 @@ let test_lane_addon_records_keep_embedded_tool_blobs_live () =
 let test_request_records_keep_stored_text_bodies_live () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
+      let masc_dir = Common.masc_dir_from_base_path ~base_path in
       let records =
-        Filename.concat
-          (Common.masc_dir_from_base_path ~base_path)
-          Workspace_verification_store.verifications_dirname in
+        Filename.concat masc_dir Workspace_verification_store.verifications_dirname in
+      (* Binary evidence bodies live in their own directory and reference no
+         blob; the scope has to say so for both directories. *)
+      Fs_compat.mkdir_p (Filename.concat masc_dir Workspace_verification_store.evidence_body_directory);
       let kept = put store "a long report kept by its request record" in
       let orphan = put store "a long report whose request record is gone" in
       List.iter (fun reference -> set_mtime store reference (long_ago ())) [ kept; orphan ];

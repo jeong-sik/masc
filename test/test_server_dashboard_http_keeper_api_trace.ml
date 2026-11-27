@@ -517,7 +517,17 @@ let rows_before_save =
     ]
 ;;
 
-let finished_turn_scan ~runtime_id events =
+let turn_rows ~runtime_id events =
+  List.map (fun event -> manifest_row ~event) events
+  @ [ { (manifest_row ~event:Keeper_runtime_manifest.Turn_finished) with
+        Keeper_runtime_manifest.runtime_id = Some runtime_id
+      }
+    ]
+;;
+
+(* One scan over the rows of several turns in order, as a trace window holds
+   them. *)
+let finished_turns_scan turns =
   List.fold_left
     Runtime_lens_scan.update_runtime_manifest_scan
     (Runtime_lens_scan.make_runtime_manifest_scan
@@ -525,12 +535,10 @@ let finished_turn_scan ~runtime_id events =
        ~limit:64
        ~scan_line_limit:64
        ~scan_scope:"test")
-    (List.map (fun event -> manifest_row ~event) events
-     @ [ { (manifest_row ~event:Keeper_runtime_manifest.Turn_finished) with
-           Keeper_runtime_manifest.runtime_id = Some runtime_id
-         }
-       ])
+    (List.concat_map (fun (runtime_id, events) -> turn_rows ~runtime_id events) turns)
 ;;
+
+let finished_turn_scan ~runtime_id events = finished_turns_scan [ runtime_id, events ]
 
 let terminal_incomplete_detail ~checkpoint_owner scan =
   Server_dashboard_http_keeper_runtime_lens_gaps.runtime_lens_gaps
@@ -645,19 +653,22 @@ let checkpoint_owner_testable =
     ( = )
 ;;
 
-let test_turn_owner_is_read_from_the_finished_row () =
-  let catalog runtime_id =
-    if String.equal runtime_id agent_core_runtime_id
-    then Some Runtime_execution.Masc_agent_core
-    else if String.equal runtime_id official_client_runtime_id
-    then Some Runtime_execution.Official_client
-    else None
-  in
-  let owner scan =
-    Runtime_lens_swimlane.turn_checkpoint_owner
-      ~checkpoint_owner_of_runtime_id:catalog
-      scan
-  in
+let checkpoint_owner_of_test_runtime runtime_id =
+  if String.equal runtime_id agent_core_runtime_id
+  then Some Runtime_execution.Masc_agent_core
+  else if String.equal runtime_id official_client_runtime_id
+  then Some Runtime_execution.Official_client
+  else None
+;;
+
+let finished_turns_owner scan =
+  Runtime_lens_swimlane.finished_turns_checkpoint_owner
+    ~checkpoint_owner_of_runtime_id:checkpoint_owner_of_test_runtime
+    scan
+;;
+
+let test_finished_turns_owner_is_read_from_their_rows () =
+  let owner = finished_turns_owner in
   check
     (option checkpoint_owner_testable)
     "official-client turn"
@@ -680,7 +691,63 @@ let test_turn_owner_is_read_from_the_finished_row () =
     (owner
        (finished_turn_scan
           ~runtime_id:"sonnet-medium-then-glm-then-api"
-          rows_before_save))
+          rows_before_save));
+  check
+    (option checkpoint_owner_testable)
+    "two official-client turns share their owner"
+    (Some Runtime_execution.Official_client)
+    (owner
+       (finished_turns_scan
+          [ official_client_runtime_id, rows_before_save
+          ; official_client_runtime_id, rows_before_save
+          ]));
+  List.iter
+    (fun (label, turns) ->
+       check (option checkpoint_owner_testable) label None (owner (finished_turns_scan turns)))
+    [ ( "an agent core turn then an official-client turn have no one owner"
+      , [ agent_core_runtime_id, rows_before_save
+        ; official_client_runtime_id, rows_before_save
+        ] )
+    ; ( "an official-client turn then an agent core turn have no one owner"
+      , [ official_client_runtime_id, rows_before_save
+        ; agent_core_runtime_id, rows_before_save
+        ] )
+    ; ( "an official-client turn and a turn the catalog cannot name have no one owner"
+      , [ official_client_runtime_id, rows_before_save
+        ; "sonnet-medium-then-glm-then-api", rows_before_save
+        ] )
+    ]
+;;
+
+(* Review of #55033: a trace window's event counts add up every turn in it,
+   so the owner of the turn that finished last must not excuse a save another
+   turn owed. An AGENT_CORE turn that did not save, next to an
+   official-client turn, still warns, whichever of the two finished last. *)
+let test_a_window_of_both_owners_keeps_checkpoint_saved_owed () =
+  let agent_core_without_save = agent_core_runtime_id, rows_before_save in
+  let official_client = official_client_runtime_id, rows_before_save in
+  List.iter
+    (fun (order, turns) ->
+       let scan = finished_turns_scan turns in
+       let checkpoint_owner = finished_turns_owner scan in
+       check
+         (option (option string))
+         (order ^ ": the missing save is reported on both lanes")
+         missing_save_on_both_lanes
+         (terminal_incomplete_detail ~checkpoint_owner scan);
+       check string (order ^ ": agent core lane") "incomplete"
+         (lane_verdict ~checkpoint_owner scan "agent_core_agent"))
+    [ "agent core turn first", [ agent_core_without_save; official_client ]
+    ; "official-client turn first", [ official_client; agent_core_without_save ]
+    ];
+  let official_client_turns = finished_turns_scan [ official_client; official_client ] in
+  check
+    (option (option string))
+    "a window of official-client turns owes no save"
+    None
+    (terminal_incomplete_detail
+       ~checkpoint_owner:(finished_turns_owner official_client_turns)
+       official_client_turns)
 ;;
 
 let make_checkpoint_inventory_meta ~name ~trace_id =
@@ -2004,9 +2071,13 @@ let () =
             `Quick
             test_agent_core_turn_with_checkpoint_saved_is_complete
         ; test_case
-            "the turn owner is read from the finished row"
+            "the finished turns' owner is read from their rows"
             `Quick
-            test_turn_owner_is_read_from_the_finished_row
+            test_finished_turns_owner_is_read_from_their_rows
+        ; test_case
+            "a window of both owners keeps checkpoint_saved owed"
+            `Quick
+            test_a_window_of_both_owners_keeps_checkpoint_saved_owed
         ] )
     ; ( "history_projection_context_diagnostics"
       , [ test_case "projection preserves injected context" `Quick

@@ -200,13 +200,29 @@ let owed_events ~checkpoint_owner events =
    still running, a row with no runtime id, and an id the catalog does not
    hold leave the owner unknown. An errored turn writes its routed id there,
    which can be a lane name; lane names are not catalog ids. *)
-let turn_checkpoint_owner ~checkpoint_owner_of_runtime_id scan =
-  match scan.terminal_row with
-  | None -> None
-  | Some row ->
-    (match row.Keeper_runtime_manifest.runtime_id with
-     | None -> None
-     | Some runtime_id -> checkpoint_owner_of_runtime_id runtime_id)
+(* A scan over a trace window can hold several finished turns, and its event
+   counts add them up. A turn's owner excuses an event only when every
+   finished turn has that owner. A window of turns that ran on runtimes of
+   different owners, or on one the lookup does not know, has no owner, so
+   every event stays owed. *)
+let finished_turns_checkpoint_owner ~checkpoint_owner_of_runtime_id scan =
+  let owner_of runtime_id = Option.bind runtime_id checkpoint_owner_of_runtime_id in
+  let agree owner other =
+    match owner, other with
+    | Some Runtime_execution.Masc_agent_core, Some Runtime_execution.Masc_agent_core
+    | Some Runtime_execution.Official_client, Some Runtime_execution.Official_client ->
+      owner
+    | Some Runtime_execution.Masc_agent_core, Some Runtime_execution.Official_client
+    | Some Runtime_execution.Official_client, Some Runtime_execution.Masc_agent_core
+    | Some Runtime_execution.Masc_agent_core, None
+    | Some Runtime_execution.Official_client, None
+    | None, Some Runtime_execution.Masc_agent_core
+    | None, Some Runtime_execution.Official_client
+    | None, None -> None
+  in
+  match List.map owner_of scan.terminal_runtime_ids with
+  | [] -> None
+  | first :: rest -> List.fold_left agree first rest
 
 type swimlane_completeness =
   | Completeness_complete

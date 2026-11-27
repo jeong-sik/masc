@@ -53,13 +53,15 @@ val owed_events :
   Keeper_runtime_manifest.event_kind list ->
   Keeper_runtime_manifest.event_kind list
 
-(** [turn_checkpoint_owner ~checkpoint_owner_of_runtime_id scan] names who
-    held the resumable state of the turn [scan] finished. It reads the
-    runtime id on the turn_finished row and asks
+(** [finished_turns_checkpoint_owner ~checkpoint_owner_of_runtime_id scan]
+    names who held the resumable state of the turns [scan] saw finish. It
+    reads the runtime id on each turn_finished row and asks
     [checkpoint_owner_of_runtime_id] for that runtime's owner. [None] when the
-    scan has no turn_finished row, the row has no runtime id, or the lookup
-    does not know the id. *)
-val turn_checkpoint_owner :
+    scan has no turn_finished row, a row has no runtime id, the lookup does
+    not know an id, or the finished turns have different owners: the scan's
+    event counts add up all of its turns, so no single turn's owner may
+    excuse an event for the others. *)
+val finished_turns_checkpoint_owner :
   checkpoint_owner_of_runtime_id:
     (string -> Runtime_execution.checkpoint_owner option) ->
   Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan ->

@@ -8,7 +8,11 @@ let terminal_event_present_for_turn = Scan_summary.terminal_event_present_for_tu
 
 (* The owner of the runtime's resumable state, from its execution kind in the
    running catalog. The turn driver reads the same
-   [Runtime_execution.checkpoint_owner] to decide whether to save. *)
+   [Runtime_execution.checkpoint_owner] to decide whether to save. The
+   catalog is the one running now, not the one at the turn: a runtime id
+   whose execution kind changed since gives its new owner to old turns, and
+   an id no longer in the catalog has no owner, which keeps every event
+   owed. *)
 let checkpoint_owner_of_runtime_id runtime_id =
   Option.map
     (fun (runtime : Runtime_instance.t) ->
@@ -37,18 +41,19 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
       ~config
       ~keeper_name
   in
-  (* Each verdict reads the owner of the turn its own scan finished: the gaps
-     read the trace window, the swimlanes the selected turn. *)
+  (* Each verdict reads the owner its own scan's finished turns share: the
+     gaps read the trace window, the swimlanes the selected turn. A window
+     whose turns have different owners has none. *)
   let gaps =
     Server_dashboard_http_keeper_runtime_lens_gaps.runtime_lens_gaps
       ~terminal_event_present
       ~config_drift
       ~checkpoint_owner:
-        (turn_checkpoint_owner ~checkpoint_owner_of_runtime_id scan)
+        (finished_turns_checkpoint_owner ~checkpoint_owner_of_runtime_id scan)
       scan
   in
   let checkpoint_owner =
-    turn_checkpoint_owner ~checkpoint_owner_of_runtime_id swimlane_scan
+    finished_turns_checkpoint_owner ~checkpoint_owner_of_runtime_id swimlane_scan
   in
   let has_provider_lane =
     runtime_manifest_scan_event_count scan

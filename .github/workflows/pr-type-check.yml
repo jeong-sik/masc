@@ -29,10 +29,26 @@ name: PR type-check (dune build @check)
 # listing failed) is what blocks the merge that a skipped `type-check`
 # alone would still allow. Requiring only `type-check` would reopen the
 # unchecked merge this PR exists to close.
+#
+# 2026-11-27: the `dashboard` job (operator request in the #55067 session).
+# `type-check` skips a pull request that changes only `dashboard/`, so such a
+# pull request had no automated check. When the pull request changes a file
+# under `dashboard/`, this job runs the dashboard type-check and the tests
+# that import a changed file (`vitest related`), not the whole suite: the
+# 733 test files run serially and the constitution asks per-PR checks to stay
+# short. A native stack is checked at its top, like `type-check`. The job is
+# not required yet; requiring it, and making auto-merge wait for it, is the
+# second stage the 2026-11-10 decision describes for `type-check`.
 on:
   # workflow_dispatch lets a maintainer re-check a branch on demand, and is the
   # only way to time this job without opening a throwaway source change.
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      dashboard_since:
+        description: Commit to diff dashboard/ from for the dashboard job; empty skips that job
+        required: false
+        default: ''
+        type: string
   pull_request: {}
 
 permissions:
@@ -52,6 +68,7 @@ jobs:
       contents: read
     outputs:
       src: ${{ steps.filter.outputs.src }}
+      dashboard_since: ${{ steps.filter.outputs.dashboard_since }}
     steps:
       # No checkout and no REST call. The file list is the difference between
       # the pull request's merge commit and its first parent (the base branch,
@@ -77,6 +94,7 @@ jobs:
           EVENT_ACTION: ${{ github.event.action }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           STACK_JSON: ${{ toJSON(github.event.pull_request.stack) }}
+          DISPATCH_DASHBOARD_SINCE: ${{ inputs.dashboard_since }}
         shell: bash
         run: |
           set -euo pipefail
@@ -86,6 +104,15 @@ jobs:
           if [ -z "${PR_NUMBER:-}" ]; then
             echo "workflow_dispatch — no PR to filter, running the check"
             echo "src=true" >> "$GITHUB_OUTPUT"
+            case "${DISPATCH_DASHBOARD_SINCE:-}" in
+              "") ;;
+              *)
+                if ! printf '%s' "$DISPATCH_DASHBOARD_SINCE" | grep -Eqx '[0-9a-f]{40}'; then
+                  echo "dashboard_since must be a full commit sha: $DISPATCH_DASHBOARD_SINCE" >&2
+                  exit 1
+                fi ;;
+            esac
+            echo "dashboard_since=${DISPATCH_DASHBOARD_SINCE:-}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # Fail closed: a fetch, a diff or the decision script that fails
@@ -104,14 +131,30 @@ jobs:
           # The decision script is read from the merge commit, as this
           # workflow file is; the filtered fetch made origin a promisor
           # remote, so git fetches this one file's contents here.
-          decide="$RUNNER_TEMP/pr_source_changes.py"
+          decider="$RUNNER_TEMP/pr-source-changes"
+          mkdir -p "$decider/tests"
+          decide="$decider/pr_source_changes.py"
           git -C "$work" show "$GITHUB_SHA:scripts/ci/pr_source_changes.py" > "$decide"
+          # Its answers decide which checks run, so its own tests run first:
+          # a wrong answer would skip a check and still read green.
+          git -C "$work" show "$GITHUB_SHA:scripts/ci/tests/test_pr_source_changes.py" \
+            > "$decider/tests/test_pr_source_changes.py"
+          env -u GIT_CONFIG_COUNT -u GIT_CONFIG_KEY_0 -u GIT_CONFIG_VALUE_0 \
+            python3 -I -m unittest discover -s "$decider/tests" -p test_pr_source_changes.py
           src="$(python3 -I "$decide" --git-dir "$work" --remote origin --merge "$GITHUB_SHA")"
           case "$src" in
             true|false) ;;
             *) echo "unexpected answer from the decision script: $src" >&2; exit 1 ;;
           esac
           echo "src=$src" >> "$GITHUB_OUTPUT"
+          since="$(python3 -I "$decide" --git-dir "$work" --remote origin --merge "$GITHUB_SHA" --answer dashboard-since)"
+          if [ "$since" = none ]; then
+            since=""
+          elif ! printf '%s' "$since" | grep -Eqx '[0-9a-f]{40}'; then
+            echo "unexpected dashboard answer from the decision script: $since" >&2
+            exit 1
+          fi
+          echo "dashboard_since=$since" >> "$GITHUB_OUTPUT"
 
       # The second thing this required job answers: are the changelog
       # fragments this pull request adds or edits well formed? It is asked
@@ -269,3 +312,59 @@ jobs:
 
       - name: Type-check the tree (dune build @check)
         run: opam exec -- dune build --root . @check
+
+  dashboard:
+    needs: [changes]
+    if: needs.changes.outputs.dashboard_since != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      SINCE: ${{ needs.changes.outputs.dashboard_since }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # A plain two-commit diff needs only these two commits. `vitest
+      # --changed` diffs from their merge base instead, which a shallow
+      # checkout cannot find for the top of a stack.
+      - name: Fetch the commit the dashboard changes are measured from
+        run: git fetch -q --depth=1 origin "$SINCE"
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+
+      - name: Install dashboard dependencies
+        working-directory: dashboard
+        run: |
+          set -euo pipefail
+          corepack enable && corepack prepare pnpm@10.31.0 --activate
+          pnpm install --frozen-lockfile
+
+      - name: Type-check the dashboard
+        working-directory: dashboard
+        run: pnpm typecheck
+
+      # A changed test file runs itself. A changed package.json or vitest
+      # config runs every test (vitest's forceRerunTriggers). A deleted file
+      # names nothing to run, so only added, copied, modified and renamed
+      # files are passed.
+      - name: Run the tests a changed dashboard file reaches
+        working-directory: dashboard
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Read into a file first: a failed diff inside <(...) would leave an
+          # empty list and pass, and set -e stops on it here instead.
+          list="$RUNNER_TEMP/dashboard-changed"
+          git diff -z --name-only --relative --diff-filter=ACMR "$SINCE" HEAD -- . > "$list"
+          mapfile -d '' -t changed < "$list"
+          printf 'changed under dashboard/ since %s: %d files\n' "${SINCE:0:12}" "${#changed[@]}"
+          if [ "${#changed[@]}" -eq 0 ]; then
+            echo "only deletions under dashboard/; the type-check above covers them"
+            exit 0
+          fi
+          pnpm exec vitest related --run --config vitest.config.ts \
+            --no-file-parallelism --maxWorkers=1 --passWithNoTests "${changed[@]}"

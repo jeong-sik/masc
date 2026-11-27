@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 # pyright: strict
-"""Decide whether a pull request needs `dune build @check`.
+"""Decide which checks a pull request needs.
 
 The `changes` job of .github/workflows/pr-type-check.yml runs this against a
-blobless fetch of the pull request's merge commit. It prints `true` or `false`
-on stdout and the reason on stderr. Any git failure exits non-zero, so the job
-goes red instead of skipping the type-check.
+blobless fetch of the pull request's merge commit, once per answer:
 
-A native stack is type-checked once, at its top pull request:
+  --answer type-check       `true` or `false`: does it need `dune build @check`
+  --answer dashboard-since  the commit its `dashboard/` changes are measured
+                            from, or `none` when it changes no dashboard file
+
+The answer goes to stdout and the reason to stderr. Any git failure exits
+non-zero, so the job goes red instead of skipping a check.
+
+A native stack is checked once, at its top pull request:
 
   no stack in the payload   the files this pull request changes decide
   position < size           false; the top pull request checks the stack
@@ -37,6 +42,8 @@ _SHA = re.compile(r"[0-9a-f]{40}")
 # missed those and skipped the check (#51595), so the list is of what is
 # known not to be read.
 NOT_BUILD_INPUTS = ("changelog.d/", "dashboard/", "docs/")
+# The dashboard check type-checks and tests what sits under this directory.
+DASHBOARD = "dashboard/"
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +84,10 @@ def is_source(path: str) -> bool:
 
 def needs_type_check(paths: Iterable[str]) -> bool:
     return any(is_source(path) for path in paths)
+
+
+def needs_dashboard_check(paths: Iterable[str]) -> bool:
+    return any(path.startswith(DASHBOARD) for path in paths)
 
 
 def _field(value: object, name: str) -> object:
@@ -136,21 +147,47 @@ def fetch_commit(git_dir: str, remote: str, sha: str) -> None:
     _git(git_dir, "fetch", "-q", "--depth=1", "--filter=blob:none", remote, sha)
 
 
-def decide(git_dir: str, remote: str, merge: str, chosen: Plan) -> tuple[bool, str]:
+@dataclass(frozen=True, slots=True)
+class Scope:
+    """What this pull request's checks answer for: the files that differ
+    between `since` and the merge commit. A lower stack layer answers for
+    nothing, so its `since` is None."""
+
+    since: str | None
+    paths: tuple[str, ...]
+    reason: str
+
+
+def first_parent(git_dir: str, merge: str) -> str:
+    sha = _git(git_dir, "rev-parse", "--verify", f"{merge}^1^{{commit}}").strip()
+    if _SHA.fullmatch(sha) is None:
+        raise ValueError(f"{merge}^1 did not resolve to a commit sha: {sha!r}")
+    return sha
+
+
+def scope(git_dir: str, remote: str, merge: str, chosen: Plan) -> Scope:
     match chosen:
         case Alone(reason):
-            paths = changed_paths(git_dir, f"{merge}^1", merge)
-            return needs_type_check(paths), f"{reason}; {len(paths)} files in this pull request"
+            since = first_parent(git_dir, merge)
+            paths = changed_paths(git_dir, since, merge)
+            return Scope(since, paths, f"{reason}; {len(paths)} files in this pull request")
         case Lower(stack):
-            return False, f"stack #{stack}: the top pull request checks every layer"
+            return Scope(None, (), f"stack #{stack}: the top pull request checks every layer")
         case Top(stack, base_sha):
             fetch_commit(git_dir, remote, base_sha)
             paths = changed_paths(git_dir, base_sha, merge)
-            return needs_type_check(paths), (
-                f"top of stack #{stack}; {len(paths)} files since {base_sha[:12]}"
+            return Scope(
+                base_sha, paths, f"top of stack #{stack}; {len(paths)} files since {base_sha[:12]}"
             )
         case _:
             assert_never(chosen)
+
+
+def dashboard_since(found: Scope) -> str | None:
+    """The commit the dashboard check diffs from, when there is one to run."""
+    if found.since is not None and needs_dashboard_check(found.paths):
+        return found.since
+    return None
 
 
 def main() -> int:
@@ -158,15 +195,25 @@ def main() -> int:
     parser.add_argument("--git-dir", required=True, help="repository holding the merge commit")
     parser.add_argument("--remote", required=True, help="remote to fetch the stack base from")
     parser.add_argument("--merge", required=True, help="the pull request's merge commit")
+    parser.add_argument(
+        "--answer", choices=("type-check", "dashboard-since"), default="type-check"
+    )
     args = parser.parse_args()
     git_dir: str = args.git_dir
     remote: str = args.remote
     merge: str = args.merge
+    answer: str = args.answer
     if _SHA.fullmatch(merge) is None:
         parser.error("--merge must be a full commit sha")
-    src, reason = decide(git_dir, remote, merge, plan(os.environ.get("STACK_JSON", "")))
-    print(f"src={'true' if src else 'false'}: {reason}", file=sys.stderr)
-    print("true" if src else "false")
+    found = scope(git_dir, remote, merge, plan(os.environ.get("STACK_JSON", "")))
+    if answer == "type-check":
+        src = needs_type_check(found.paths)
+        print(f"src={'true' if src else 'false'}: {found.reason}", file=sys.stderr)
+        print("true" if src else "false")
+    else:
+        since = dashboard_since(found)
+        print(f"dashboard_since={since or 'none'}: {found.reason}", file=sys.stderr)
+        print(since or "none")
     return 0
 
 

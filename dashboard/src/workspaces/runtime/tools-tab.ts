@@ -38,7 +38,7 @@ import {
   type ActiveKeeperOAuthFlow,
   type KeeperOAuthFlowHandle,
 } from '../../core'
-import { DataTable, UPlotChart, type DataTableColumn, type UPlotSeriesSpec } from '../../components/primitives'
+import { DataTable, RefreshButton, UPlotChart, type DataTableColumn, type UPlotSeriesSpec } from '../../components/primitives'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { isAdminLockedForSession } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
@@ -1064,17 +1064,13 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
           <div class="wka-card" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
             <div class="wka-h">
               <h3>스킬 목록 (${skillsList.length})</h3>
-              <button
-                type="button"
-                class="btn-ghost"
-                onClick=${() => void resourceCache.fetch<SkillsApiPayload>(
+              <${RefreshButton}
+                onRefresh=${() => resourceCache.fetch<SkillsApiPayload>(
                   'runtime:skills',
                   (signal) => apiGet<SkillsApiPayload>('/api/v1/skills', { signal }),
                   { reason: 'manual' },
                 )}
-              >
-                새로고침
-              </button>
+              />
             </div>
             ${skillsObs.kind === 'failed'
               ? html`<div class="ap-error" role="alert">스킬 목록 조회 실패: ${skillsObs.error.message}</div>`

@@ -43,7 +43,7 @@ import {
   type Observed,
   type TimeWindow,
 } from '../../core'
-import { DataTable, UPlotChart, type DataTableColumn, type UPlotSeriesSpec } from '../../components/primitives'
+import { DataTable, RefreshButton, UPlotChart, type DataTableColumn, type UPlotSeriesSpec } from '../../components/primitives'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { isAdminLockedForSession } from '../../routes/router'
 import {
@@ -294,7 +294,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
 
   const loadSnapshots = (reason: 'mount' | 'sse' | 'manual' = 'mount') => {
     const curSession = authSession.peek()
-    if (!canAccessMemberWorkspace(curSession)) return
+    if (!canAccessMemberWorkspace(curSession)) return Promise.resolve()
     const singleLocal = isSingleUserMember(curSession)
 
     const startEpoch = epoch
@@ -360,7 +360,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
         )
       }
     }
-    void Promise.all(jobs).then(() => {
+    return Promise.all(jobs).then(() => {
       if (isEpochCurrent(startEpoch)) markViewSynced()
     })
   }
@@ -369,7 +369,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
   useEffect(() => {
     setLiveMetrics(null)
     setStreamError(null)
-    loadSnapshots('mount')
+    void loadSnapshots('mount')
   }, [win, epoch, session.kind, isSingleUser, adminLocked, canTokenRead])
 
   // Strict 2+1 SSE invariant (#26 SRE #3):
@@ -433,12 +433,12 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
       if (extractObserverTopics(frame).some((topic) => watchedTopics.has(topic))) {
         if (debounceTimerRef.current !== null) clearTimeout(debounceTimerRef.current)
         debounceTimerRef.current = setTimeout(() => {
-          loadSnapshots('sse')
+          void loadSnapshots('sse')
         }, 600)
       }
     })
     const recover = () => {
-      if (isEpochCurrent(epoch)) loadSnapshots('sse')
+      if (isEpochCurrent(epoch)) void loadSnapshots('sse')
     }
     const unsubReconnect = subscribeObserverReconnect(recover)
     const unsubResync = subscribeObserverResync(recover)
@@ -706,7 +706,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
           </p>
         </div>
         <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
-          <button type="button" class="btn-ghost" onClick=${() => loadSnapshots('manual')}>새로고침</button>
+          <${RefreshButton} onRefresh=${() => loadSnapshots('manual')} />
         </div>
       </header>
 

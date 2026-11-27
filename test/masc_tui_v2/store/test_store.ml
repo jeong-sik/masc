@@ -4212,6 +4212,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
       sha256 = "sha-w3";
       body_markdown = "# Guide\nBody text";
       outgoing_links = [];
+      embeds = [];
       backlinks = [];
       lint_findings = [];
     }
@@ -9534,6 +9535,7 @@ let test_wiki_index_reply_requests_selected_page () =
       sha256 = "sha-w3";
       body_markdown = "# Guide\nBody text";
       outgoing_links = [];
+      embeds = [];
       backlinks = [];
       lint_findings = [];
     }
@@ -13554,6 +13556,7 @@ let test_ux_batch2_modals_settings_overlays () =
       sha256 = "sha256-ko";
       body_markdown = "본문";
       outgoing_links = [];
+      embeds = [];
       backlinks = [];
       lint_findings = [];
     }
@@ -14283,6 +14286,7 @@ let test_ux_batch4_knowledge_runtime_infra () =
       body_markdown = "# Heading\nLine 2\nLine 3";
       backlinks = [];
       outgoing_links = [];
+      embeds = [];
       lint_findings = [];
     }
   in
@@ -24620,6 +24624,7 @@ let test_wiki_body_link_follow_and_back () =
       sha256 = "sha-" ^ slug;
       body_markdown = body;
       outgoing_links;
+      embeds = [];
       backlinks = [];
       lint_findings = [];
     }

@@ -420,6 +420,7 @@ let make_rich_model ~lang ~cols ~rows =
             line = 5;
           };
         ];
+      embeds = [];
       backlinks = [ "wiki-home"; "ops-checklist" ];
       lint_findings =
         [
@@ -4796,6 +4797,7 @@ let test_wiki_card_scroll_matches_the_drawn_card () =
             line = 1;
           };
         ];
+      embeds = [];
       backlinks = [ "page-b" ];
       lint_findings = [];
     }

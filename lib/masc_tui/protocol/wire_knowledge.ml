@@ -852,6 +852,24 @@ type wiki_outgoing_link = {
   line : int;
 }
 
+type wiki_embed_target =
+  | Embed_media of { sha256 : string; exists : bool }
+  | Embed_wiki of { slug : string; exists : bool }
+  | Embed_artifact of { id : string; exists : bool option }
+  | Embed_invalid
+  | Embed_unsupported
+
+type wiki_embed_syntax =
+  | Embed_obsidian
+  | Embed_markdown_media
+
+type wiki_embed = {
+  target : wiki_embed_target;
+  label : string option;
+  syntax : wiki_embed_syntax;
+  raw : string;
+}
+
 type wiki_lint_kind =
   | Broken_link
   | Unsupported_link
@@ -949,6 +967,7 @@ type wiki_page_detail = {
   sha256 : string;
   body_markdown : string;
   outgoing_links : wiki_outgoing_link list;
+  embeds : wiki_embed list;
   backlinks : string list;
   lint_findings : wiki_lint_finding list;
 }
@@ -1257,6 +1276,39 @@ let decode_wiki_outgoing_link json =
   let* line = required_nonnegative_int_field json "line" in
   Ok ({ text; target; raw; line } : wiki_outgoing_link)
 
+(* The [kind] and [syntax] spellings are the server's [embed_to_json] in
+   server_dashboard_http_wiki.ml. *)
+let decode_wiki_embed json =
+  let* kind = required_string_field json "kind" in
+  let* target =
+    match kind with
+    | "media" ->
+        let* sha256 = required_nonblank_string json "target" in
+        let* exists = required_bool_field json "exists" in
+        Ok (Embed_media { sha256; exists })
+    | "wiki" ->
+        let* slug = required_nonblank_string json "target" in
+        let* exists = required_bool_field json "exists" in
+        Ok (Embed_wiki { slug; exists })
+    | "artifact" ->
+        let* id = required_nonblank_string json "target" in
+        let* exists = required_nullable_bool_field json "exists" in
+        Ok (Embed_artifact { id; exists })
+    | "invalid" -> Ok Embed_invalid
+    | "unsupported" -> Ok Embed_unsupported
+    | other -> Error (Printf.sprintf "unknown wiki embed kind %S" other)
+  in
+  let* label = required_nullable_string_field json "label" in
+  let* syntax =
+    let* syntax = required_string_field json "syntax" in
+    match syntax with
+    | "obsidian" -> Ok Embed_obsidian
+    | "markdown_media" -> Ok Embed_markdown_media
+    | other -> Error (Printf.sprintf "unknown wiki embed syntax %S" other)
+  in
+  let* raw = required_nonblank_string json "raw" in
+  Ok ({ target; label; syntax; raw } : wiki_embed)
+
 let decode_wiki_page_detail json =
   let* _, body = unwrap_v2_or_raw json in
   let* page = required_nonblank_string body "page" in
@@ -1270,6 +1322,8 @@ let decode_wiki_page_detail json =
   let* outgoing_links =
     decode_list "outgoing_links" decode_wiki_outgoing_link link_items
   in
+  let* embed_items = required_list_field body "embeds" in
+  let* embeds = decode_list "embeds" decode_wiki_embed embed_items in
   let* backlinks = required_string_list body "backlinks" in
   let* finding_items = required_list_field body "lint_findings" in
   let* lint_findings =
@@ -1284,6 +1338,7 @@ let decode_wiki_page_detail json =
       sha256;
       body_markdown;
       outgoing_links;
+      embeds;
       backlinks;
       lint_findings;
     }

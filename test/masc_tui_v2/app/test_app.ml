@@ -3756,7 +3756,7 @@ let test_bounded_clipboard_url_opener_and_async_wiki_editor () =
       Unix.unsetenv "VISUAL";
       let wiki_json slug =
         Printf.sprintf
-          {|{"page":"%s","slug":"%s","file":"%s.md","frontmatter":{"title":"T","summary":"","source":"direct_experience","author":"op","created":"2026-01-01","updated":"2026-01-01","revision":1,"tags":[]},"sha256":"abc123","body_markdown":"hello","outgoing_links":[],"backlinks":[],"lint_findings":[]}|}
+          {|{"page":"%s","slug":"%s","file":"%s.md","frontmatter":{"title":"T","summary":"","source":"direct_experience","author":"op","created":"2026-01-01","updated":"2026-01-01","revision":1,"tags":[]},"sha256":"abc123","body_markdown":"hello","outgoing_links":[],"embeds":[],"backlinks":[],"lint_findings":[]}|}
           slug slug slug
       in
       let http_200 body =

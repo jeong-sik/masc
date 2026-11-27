@@ -226,6 +226,26 @@ type wiki_outgoing_link = {
   line : int;
 }
 
+type wiki_embed_target =
+  | Embed_media of { sha256 : string; exists : bool }
+  | Embed_wiki of { slug : string; exists : bool }
+  | Embed_artifact of { id : string; exists : bool option }
+      (** [exists] is [None] when the server could not read the artifact
+          store. *)
+  | Embed_invalid  (** A known scheme with a target that does not parse. *)
+  | Embed_unsupported  (** A scheme the wiki does not know. *)
+
+type wiki_embed_syntax =
+  | Embed_obsidian  (** [![[scheme:target|label]]] *)
+  | Embed_markdown_media  (** [![label](/api/v1/media/<sha256>)] *)
+
+type wiki_embed = {
+  target : wiki_embed_target;
+  label : string option;
+  syntax : wiki_embed_syntax;
+  raw : string;  (** The source text, found outside code. *)
+}
+
 type wiki_lint_kind =
   | Broken_link
   | Unsupported_link
@@ -323,6 +343,7 @@ type wiki_page_detail = {
   sha256 : string;
   body_markdown : string;
   outgoing_links : wiki_outgoing_link list;
+  embeds : wiki_embed list;
   backlinks : string list;
   lint_findings : wiki_lint_finding list;
 }

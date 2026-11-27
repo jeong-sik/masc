@@ -251,6 +251,7 @@ let mk_wiki_detail ~slug ~title : Wire_knowledge.wiki_page_detail =
          8\nLine 9\nLine 10";
     backlinks = [ "runbook" ];
     outgoing_links = [];
+    embeds = [];
     lint_findings = [];
   }
 

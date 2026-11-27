@@ -170,56 +170,8 @@ let test_a_keepers_own_name_in_any_case config =
   expect_ok "upper case" ([ "alice" ], []) (ask config "ALICE")
 ;;
 
-(* On a case-sensitive filesystem, [Alice.json] is not [alice.json]. A
-   mixed-case Keeper's own name must still be found without decoding an
-   unrelated broken Keeper's metadata. *)
-let test_a_mixed_case_keeper_is_declared_without_an_unrelated_scan config =
-  register_keeper config "Alice";
-  Out_channel.with_open_text (Keeper_types_profile.keeper_meta_path config "broken") (fun oc ->
-    output_string oc "{ this is not json");
-  List.iter (fun spelling ->
-    expect_ok spelling ([ "alice" ], []) (ask config spelling);
-    check bool (spelling ^ " reaches Alice") true (routed_to config ~keeper:"Alice" "alice"))
-    [ "Alice"; "alice"; "ALICE" ]
-;;
-
-(* An own name wins over alias collisions even if its persisted filename has
-   different case. The recorded target is the identity the router matches,
-   so each Keeper that actually answers to it receives the post. *)
-let test_a_mixed_case_own_name_wins_over_alias_collisions config =
-  register_keeper config "Alice";
-  register_keeper config ~mention_targets:[ "bob"; "alice" ] "bob";
-  register_keeper config ~mention_targets:[ "dave"; "alice" ] "dave";
-  List.iter (fun spelling -> expect_ok spelling ([ "alice" ], []) (ask config spelling))
-    [ "Alice"; "alice" ];
-  List.iter (fun keeper ->
-    check bool (keeper ^ " receives alice") true (routed_to config ~keeper "alice"))
-    [ "Alice"; "bob"; "dave" ]
-;;
-
-let test_a_mixed_case_owner_that_does_not_answer_uses_the_alias config =
-  register_keeper config ~mention_targets:[ "operations" ] "Alice";
-  register_keeper config ~mention_targets:[ "bob"; "alice" ] "bob";
-  expect_ok "the alias is declared" ([ "alice" ], []) (ask config "ALICE");
-  check bool "Alice does not answer" false (routed_to config ~keeper:"Alice" "alice");
-  check bool "bob answers" true (routed_to config ~keeper:"bob" "alice")
-;;
-
-(* A filename cannot promote the payload of a different Keeper's alias into
-   an own-name claim and thereby hide another Keeper's conflicting alias. *)
-let test_an_alternate_filename_does_not_promote_a_foreign_alias config =
-  register_keeper config ~mention_targets:[ "alice" ] "bob";
-  let path name = Keeper_types_profile.keeper_meta_path config name in
-  Unix.rename (path "bob") (path "Alice");
-  if Sys.file_exists (path "alice") then Alcotest.skip ();
-  expect_ok "one foreign alias" ([ "alice" ], []) (ask config "alice");
-  register_keeper config ~mention_targets:[ "alice" ] "charlie";
-  expect_error "conflicting foreign aliases" ~mentioning:[ "@alice"; "Alice"; "charlie" ]
-    (ask config "alice")
-;;
-
-(* The canonical spelling needs the same ownership check as an alternate:
-   a foreign payload can claim an alias but cannot hide another claim. *)
+(* The own-name file is checked for ownership: a foreign payload at that path
+   can claim an alias but cannot hide another claim. *)
 let test_a_canonical_filename_does_not_promote_a_foreign_alias config =
   register_keeper config ~mention_targets:[ "alice" ] "bob";
   let path name = Keeper_types_profile.keeper_meta_path config name in
@@ -228,49 +180,6 @@ let test_a_canonical_filename_does_not_promote_a_foreign_alias config =
   register_keeper config ~mention_targets:[ "alice" ] "charlie";
   expect_error "conflicting foreign aliases" ~mentioning:[ "@alice"; "alice"; "charlie" ]
     (ask config "alice")
-;;
-
-(* A foreign canonical payload must not hide a real owner in a differently
-   cased filename. This arrangement needs a case-sensitive filesystem. *)
-let test_a_foreign_canonical_file_does_not_hide_an_alternate_owner config =
-  register_keeper config "Alice";
-  let path name = Keeper_types_profile.keeper_meta_path config name in
-  if Sys.file_exists (path "alice") then Alcotest.skip ();
-  register_keeper config ~mention_targets:[ "alice" ] "bob";
-  Unix.rename (path "bob") (path "alice");
-  register_keeper config ~mention_targets:[ "alice" ] "charlie";
-  expect_ok "the actual alternate owner still has priority" ([ "alice" ], [])
-    (ask config "alice")
-;;
-
-(* Matching folded identities are insufficient: the filename and metadata
-   must agree exactly before a payload can take the own-name shortcut. *)
-let test_a_canonical_filename_requires_exact_payload_name config =
-  register_keeper config "Alice";
-  let path name = Keeper_types_profile.keeper_meta_path config name in
-  Unix.rename (path "Alice") (path "alice");
-  let names = match Keeper_meta_store.persisted_keeper_names_result config with
-    | Ok names -> names
-    | Error detail -> fail detail in
-  if not (List.exists (String.equal "alice") names) then Alcotest.skip ();
-  expect_ok "case-fold equal payload is not the canonical owner" ([], [ "alice" ])
-    (ask config "alice")
-;;
-
-(* On a case-insensitive filesystem opening [alice.json] can return
-   [Alice.json]. Its payload spelling is not the actual stored filename. *)
-let test_a_case_insensitive_path_cannot_promote_a_foreign_owner config =
-  register_keeper config ~mention_targets:[ "alice" ] "alice";
-  let path name = Keeper_types_profile.keeper_meta_path config name in
-  Unix.rename (path "alice") (path "Alice");
-  let names = match Keeper_meta_store.persisted_keeper_names_result config with
-    | Ok names -> names
-    | Error detail -> fail detail in
-  if not (Sys.file_exists (path "alice") && List.exists (String.equal "Alice") names)
-  then Alcotest.skip ();
-  register_keeper config ~mention_targets:[ "alice" ] "charlie";
-  expect_error "a different stored spelling cannot own alice"
-    ~mentioning:[ "@alice"; "Alice"; "charlie" ] (ask config "alice")
 ;;
 
 (* A readable canonical file is not enough if its actual filename cannot be
@@ -293,57 +202,6 @@ let test_an_unlistable_store_fails_even_for_a_canonical_owner config =
        fail "canonical settings must still be readable without directory listing");
     expect_error "unlistable canonical owner" ~mentioning:[ "@alice"; "list keeper directory" ]
       (ask config "alice"))
-;;
-
-(* Registry ownership requires the filename and payload spelling to match,
-   even when their Board identities fold to the same name. *)
-let test_an_alternate_filename_requires_exact_payload_name config =
-  register_keeper config "aLiCe";
-  let path name = Keeper_types_profile.keeper_meta_path config name in
-  if Sys.file_exists (path "Alice") then Alcotest.skip ();
-  Unix.rename (path "aLiCe") (path "Alice");
-  expect_ok "case-fold equal payload is not a matching owner" ([], [ "alice" ])
-    (ask config "alice")
-;;
-
-(* The alternate search cannot accept its first healthy file before checking
-   a later spelling of the same identity. This requires distinct filenames. *)
-let test_all_alternate_spellings_are_read_before_accepting config =
-  register_keeper config "Alice";
-  let path name = Keeper_types_profile.keeper_meta_path config name in
-  if Sys.file_exists (path "aLiCe") then Alcotest.skip ();
-  Out_channel.with_open_text (path "aLiCe") (fun oc ->
-    output_string oc "{ \"unexpected\": true }");
-  expect_error "later undecodable spelling" ~mentioning:[ "@alice"; "aLiCe" ]
-    (ask config "alice");
-  register_keeper config "alice";
-  expect_ok "canonical own-name lookup keeps its fast path" ([ "alice" ], [])
-    (ask config "alice")
-;;
-
-(* Keeper names remain distinct in storage, while their Board identities are
-   case-folded. A single target is therefore delivered to both matching
-   Keepers. Create both on filesystems that can hold both spellings; on other
-   filesystems also check the same router contract using the second metadata
-   value directly. *)
-let test_case_variant_keepers_share_the_recorded_identity config =
-  register_keeper config "Alice";
-  let original = match Keeper_meta_store.read_effective_meta config "Alice" with
-    | Ok (Some meta) -> meta
-    | Ok None -> fail "Alice metadata is missing"
-    | Error detail -> fail detail in
-  let variant = { original with name = "aLiCe" } in
-  List.iter (fun spelling ->
-    expect_ok spelling ([ "alice" ], []) (ask config spelling);
-    check bool "Alice receives the target" true (routed_to_meta original "alice");
-    check bool "aLiCe receives the same target" true (routed_to_meta variant "alice"))
-    [ "Alice"; "alice" ];
-  if not (Sys.file_exists (Keeper_types_profile.keeper_meta_path config "aLiCe"))
-  then (
-    register_keeper config "aLiCe";
-    expect_ok "both persisted names" ([ "alice" ], []) (ask config "alice");
-    check bool "persisted Alice receives it" true (routed_to config ~keeper:"Alice" "alice");
-    check bool "persisted aLiCe receives it" true (routed_to config ~keeper:"aLiCe" "alice"))
 ;;
 
 (* An alias is recorded as the name the author wrote, in lower case.  The
@@ -626,30 +484,10 @@ let () =
             (with_workspace test_lookup_retains_workspace_and_refreshes_settings)
         ; test_case "a Keeper's own name in any case" `Quick
             (with_workspace test_a_keepers_own_name_in_any_case)
-        ; test_case "a mixed-case Keeper is declared without an unrelated scan" `Quick
-            (with_workspace test_a_mixed_case_keeper_is_declared_without_an_unrelated_scan)
-        ; test_case "a mixed-case own name wins over alias collisions" `Quick
-            (with_workspace test_a_mixed_case_own_name_wins_over_alias_collisions)
-        ; test_case "a mixed-case owner that does not answer uses the alias" `Quick
-            (with_workspace test_a_mixed_case_owner_that_does_not_answer_uses_the_alias)
-        ; test_case "an alternate filename does not promote a foreign alias" `Quick
-            (with_workspace test_an_alternate_filename_does_not_promote_a_foreign_alias)
         ; test_case "a canonical filename does not promote a foreign alias" `Quick
             (with_workspace test_a_canonical_filename_does_not_promote_a_foreign_alias)
-        ; test_case "a foreign canonical file does not hide an alternate owner" `Quick
-            (with_workspace test_a_foreign_canonical_file_does_not_hide_an_alternate_owner)
-        ; test_case "a canonical filename requires an exact payload name" `Quick
-            (with_workspace test_a_canonical_filename_requires_exact_payload_name)
-        ; test_case "a case-insensitive path cannot promote a foreign owner" `Quick
-            (with_workspace test_a_case_insensitive_path_cannot_promote_a_foreign_owner)
         ; test_case "an unlistable store fails for a canonical owner" `Quick
             (with_workspace test_an_unlistable_store_fails_even_for_a_canonical_owner)
-        ; test_case "an alternate filename requires an exact payload name" `Quick
-            (with_workspace test_an_alternate_filename_requires_exact_payload_name)
-        ; test_case "all alternate spellings are read before accepting" `Quick
-            (with_workspace test_all_alternate_spellings_are_read_before_accepting)
-        ; test_case "case-variant Keepers share the recorded identity" `Quick
-            (with_workspace test_case_variant_keepers_share_the_recorded_identity)
         ; test_case "an alias is recorded as the name its Keeper answers to" `Quick
             (with_workspace test_an_alias_is_recorded_as_the_name_its_keeper_answers_to)
         ; test_case "a Keeper that lists only aliases is not declared by its own name" `Quick

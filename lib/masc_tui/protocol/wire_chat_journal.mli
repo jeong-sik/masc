@@ -52,6 +52,24 @@ type event =
   | Run_started
   | Runtime_attempt_started  (** [agent_core_runtime_attempt_started] *)
   | Text_delta of { text : string; owner : text_owner }
+  | Attachment_emitted of Wire_attachment.t  (** [attachment_emitted] *)
+  | Media_delta of {
+      mime_type : string option;
+      url : string option;
+      attachment_id : string option;
+    }  (** [agent_core_media_delta] *)
+  | Image_block of {
+      url : string option;
+      mime_type : string option;
+      attachment_id : string option;
+      caption : string option;
+    }  (** [image_block] *)
+  | Audio_block of {
+      url : string option;
+      mime_type : string option;
+      attachment_id : string option;
+      caption : string option;
+    }  (** [audio_block] *)
   | Run_finished
   | Event_error
   | Other  (** Every other event type the server journals. *)

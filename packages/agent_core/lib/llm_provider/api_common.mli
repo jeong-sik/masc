@@ -6,6 +6,10 @@
 val api_version : string
 val max_response_body : int
 
+(** Maximum HTTP response body size (64 MiB) for image-generation endpoints and
+    in-turn image-output responses that carry multi-image base64 JSON payloads. *)
+val max_image_response_body : int
+
 (** Allocate an opaque, process-unique tool-use identity.
 
     Use this only when the provider does not supply an identity.  The result is
@@ -128,7 +132,7 @@ val degrade_document_messages
     declare [supports_image_input]. Names the media type so the omission is
     legible to the model and, through it, the user — the degrade is not
     silent. *)
-val image_omitted_placeholder : media_type:string -> Types.content_block
+val image_omitted_placeholder : media_type:string -> 'source Types.content_block_with
 
 (** [degrade_image_messages ~supports_image_input messages] rewrites every
     [Image] — including images nested in ToolResult [content_blocks], where
@@ -142,8 +146,8 @@ val image_omitted_placeholder : media_type:string -> Types.content_block
     retroactively, and the omission is named in the conversation. *)
 val degrade_image_messages
   :  supports_image_input:bool
-  -> Types.message list
-  -> Types.message list * int
+  -> 'source Types.message_with list
+  -> 'source Types.message_with list * int
 
 (** The visible text block an audio block is replaced with when the model does
     not declare [supports_audio_input]. Names the media type so the omission is
@@ -215,6 +219,49 @@ val merge_tool_result_followup_user_messages_with_source_indices
 val merge_tool_result_followup_user_messages : Types.message list -> Types.message list
 val message_to_json : Types.message -> Yojson.Safe.t
 val kimi_message_to_json : Types.message -> Yojson.Safe.t
+
+(** {2 Image media-type helpers} *)
+
+(** Map a known image format token or MIME string (["png"], ["jpeg"], ["jpg"],
+    ["webp"], ["gif"], or their ["image/*"] forms) to its canonical MIME type.
+    Returns [None] for unknown or non-raster formats (no catch-all fallback). *)
+val image_mime_of_format_opt : string -> string option
+
+(** Inspect leading magic bytes of decoded binary data for PNG, JPEG, WebP, or
+    GIF. Returns [None] when the bytes do not match a supported raster header. *)
+val sniff_image_mime_of_bytes : string -> string option
+
+(** Decode only the leading header bytes of a base64 payload and run
+    {!sniff_image_mime_of_bytes}. Returns [None] on invalid base64 or
+    unrecognized headers without copying the full image. *)
+val sniff_image_mime_of_base64 : string -> string option
+
+(** Resolve the canonical MIME type for a provider-generated image payload.
+    When [format_hint] is supplied and non-blank, it must match a supported
+    format or be confirmed by {!sniff_image_mime_of_base64}; unrecognized
+    explicit formats fail closed with [Error]. When [format_hint] is omitted,
+    magic bytes are sniffed first before defaulting to ["image/png"]. *)
+val resolve_image_output_media_type
+  :  ?format_hint:string
+  -> ?base64_data:string
+  -> unit
+  -> (string, string) result
+
+(** Non-empty RFC media-type sentinel (["application/octet-stream"]) used when
+    a wire carrier requires a non-blank [media_type] string (such as
+    {!Types.Image}) but the provider omitted an explicit MIME declaration. *)
+val unknown_media_type : string
+
+(** Return [Some trimmed] when [media_type] is non-blank and not
+    {!unknown_media_type}, otherwise [None]. Lets downstream stores treat
+    unknown media types as undeclared so magic-byte sniffing decides without
+    false mismatch errors. *)
+val declared_media_type_opt : string -> string option
+
+(** Infer an image MIME type from an explicit file extension on an HTTP(S) URL
+    path (ignoring query strings and fragments). Returns [None] when the URL
+    has no recognized image extension instead of guessing ["image/png"]. *)
+val infer_image_mime_of_url_opt : string -> string option
 
 (** {2 TLS} *)
 

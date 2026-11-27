@@ -451,3 +451,84 @@ let post_json ~io ~clock ?timeout_sec ep ~path ~body ~decode =
   with
   | Error _ as err -> err
   | Ok resp_body -> decode_body ~decode resp_body
+
+let max_attachment_upload_bytes = 32 * 1024 * 1024
+
+let upload_attachment ~io ~clock ?(timeout_sec = 30.0) ?filename ?content_type
+    ~bytes ep =
+  let len = String.length bytes in
+  if len = 0 then
+    Error (Decode_error "cannot upload an empty attachment")
+  else if len > max_attachment_upload_bytes then
+    Error
+      (Decode_error
+         (Printf.sprintf "attachment exceeds %d MiB limit (%d bytes)"
+            (max_attachment_upload_bytes / (1024 * 1024))
+            len))
+  else
+    let mime_opt =
+      match content_type with
+      | Some ct when not (String.equal (String.trim ct) "") ->
+          Some (String.trim ct)
+      | Some _ | None -> Wire_attachment.sniff_mime ?filename bytes
+    in
+    match mime_opt with
+    | None ->
+        Error
+          (Decode_error
+             "unsupported or unrecognized attachment type (expected PNG/JPEG/WebP/GIF/PDF/audio)")
+    | Some mime ->
+        let extra_headers =
+          match filename with
+          | Some f ->
+              let encoded = Wire_attachment.encode_filename_header f in
+              if String.equal encoded "" then []
+              else [ ("X-Filename", encoded) ]
+          | None -> []
+        in
+        (match
+           send_raw ~io ~clock ~timeout_sec ~extra_headers ~content_type:mime
+             ~method_:`POST ~body:bytes ep
+             ~path:Wire_attachment.attachments_upload_path
+         with
+         | Error _ as err -> err
+         | Ok resp_body ->
+             decode_body ~decode:Wire_attachment.decode_upload_response resp_body)
+
+let read_local_file_bounded ~max_bytes path =
+  match Unix.stat path with
+  | exception Unix.Unix_error (code, _, _) ->
+      Error (Printf.sprintf "%s: %s" path (Unix.error_message code))
+  | st when st.Unix.st_kind <> Unix.S_REG ->
+      Error (Printf.sprintf "%s is not a regular file" path)
+  | st when st.Unix.st_size <= 0 ->
+      Error (Printf.sprintf "%s is empty" path)
+  | st when st.Unix.st_size > max_bytes ->
+      Error
+        (Printf.sprintf "%s exceeds %d MiB limit (%d bytes)" path
+           (max_bytes / (1024 * 1024))
+           st.Unix.st_size)
+  | st -> (
+      match open_in_bin path with
+      | exception Sys_error detail -> Error detail
+      | ch ->
+          Fun.protect
+            ~finally:(fun () -> close_in_noerr ch)
+            (fun () ->
+              match really_input_string ch st.Unix.st_size with
+              | bytes -> Ok bytes
+              | exception End_of_file -> Error (path ^ ": truncated read")
+              | exception Sys_error detail -> Error detail))
+
+let upload_attachment_file ~io ~clock ?(timeout_sec = 30.0) ~path ep =
+  match read_local_file_bounded ~max_bytes:max_attachment_upload_bytes path with
+  | Error msg -> Error (Decode_error msg)
+  | Ok bytes ->
+      upload_attachment ~io ~clock ~timeout_sec
+        ~filename:(Filename.basename path) ~bytes ep
+
+let get_attachment_bytes ~io ~clock ?(timeout_sec = 20.0)
+    ?(max_body_bytes = max_attachment_upload_bytes) ep ~path =
+  get_raw ~io ~clock ~timeout_sec ~max_body_bytes
+    ~extra_headers:[ ("Accept", "image/png, image/*;q=0.9, */*;q=0.5") ]
+    ep ~path

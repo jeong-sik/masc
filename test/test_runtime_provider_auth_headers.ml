@@ -1057,7 +1057,7 @@ let test_runtime_adapter_file_credentials () =
       ; models = [ qwen_model ]
       ; bindings = [ runpod_binding ]
       ; default_runtime_id = Some "runpod_mtp.qwen"
-      ; keeper_assignments = []; media_failover = []; lane_decls = []
+      ; keeper_assignments = []; media = Runtime_schema.empty_media_overrides; lane_decls = []
       ; exact_output_lane_decls = []; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; media_readers = []; typesafeai = Runtime_schema.default_typesafeai
       ; egress_allowlists = []; lsp_servers = []
       }
@@ -1106,7 +1106,7 @@ let test_runtime_adapter_keeps_auth_out_of_headers () =
     ; bindings = [ runpod_binding ]
     ; default_runtime_id = Some "runpod_mtp.qwen"
     ; keeper_assignments = []
-    ; media_failover = []
+    ; media = Runtime_schema.empty_media_overrides
     ; lane_decls = []
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; media_readers = []; typesafeai = Runtime_schema.default_typesafeai
@@ -1141,7 +1141,7 @@ let test_runtime_adapter_filters_toml_auth_headers () =
     ; bindings = [ runpod_binding ]
     ; default_runtime_id = Some "runpod_mtp.qwen"
     ; keeper_assignments = []
-    ; media_failover = []
+    ; media = Runtime_schema.empty_media_overrides
     ; lane_decls = []
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; media_readers = []; typesafeai = Runtime_schema.default_typesafeai
@@ -1177,7 +1177,7 @@ let provider_cfg () =
     ; bindings = [ runpod_binding ]
     ; default_runtime_id = Some "runpod_mtp.qwen"
     ; keeper_assignments = []
-    ; media_failover = []
+    ; media = Runtime_schema.empty_media_overrides
     ; lane_decls = []
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; media_readers = []; typesafeai = Runtime_schema.default_typesafeai
@@ -1377,7 +1377,7 @@ thinking_control_format = "ollama_think"
          ; bindings = [ runpod_binding ]
          ; default_runtime_id = Some "runpod_mtp.qwen"
          ; keeper_assignments = []
-         ; media_failover = []
+         ; media = Runtime_schema.empty_media_overrides
          ; lane_decls = []
          ; exact_output_lane_decls = []
          ; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; media_readers = []; typesafeai = Runtime_schema.default_typesafeai
@@ -1420,7 +1420,7 @@ let glm_vision_binding_config ~runtime_caps =
   let cfg =
     { Runtime_schema.providers = [ provider ]; models = [ model ]
     ; bindings = [ binding ]; default_runtime_id = Some "glm-coding.glm-4.6v"
-    ; keeper_assignments = []; media_failover = []; lane_decls = []
+    ; keeper_assignments = []; media = Runtime_schema.empty_media_overrides; lane_decls = []
     ; exact_output_lane_decls = []; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; media_readers = []; typesafeai = Runtime_schema.default_typesafeai
     ; egress_allowlists = []; lsp_servers = [] }
   in
@@ -1468,7 +1468,7 @@ let uncatalogued_effort_binding ~runtime_caps =
   let cfg =
     { Runtime_schema.providers = [ provider ]; models = [ model ]
     ; bindings = [ binding ]; default_runtime_id = Some "opencode_go.opencode-go-deepseek-flash"
-    ; keeper_assignments = []; media_failover = []; lane_decls = []
+    ; keeper_assignments = []; media = Runtime_schema.empty_media_overrides; lane_decls = []
     ; exact_output_lane_decls = []; exec_ssh_endpoints = []
     ; browser = Browser_configuration.none; machines = Machine_configuration.default; media_readers = []
     ; typesafeai = Runtime_schema.default_typesafeai
@@ -1627,7 +1627,7 @@ let runtime_or_fail ?(provider = runpod_provider) () =
     ; bindings = [ runpod_binding ]
     ; default_runtime_id = Some "runpod_mtp.qwen"
     ; keeper_assignments = []
-    ; media_failover = []
+    ; media = Runtime_schema.empty_media_overrides
     ; lane_decls = []
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; media_readers = []; typesafeai = Runtime_schema.default_typesafeai
@@ -1848,7 +1848,7 @@ let test_runtime_of_binding_preserves_failure_reason () =
     ; bindings = [ runpod_binding ]
     ; default_runtime_id = Some "runpod_mtp.qwen"
     ; keeper_assignments = []
-    ; media_failover = []
+    ; media = Runtime_schema.empty_media_overrides
     ; lane_decls = []
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; media_readers = []; typesafeai = Runtime_schema.default_typesafeai
@@ -2084,7 +2084,7 @@ let test_dashboard_runtime_probe_groups_models_by_provider () =
     ; bindings = [ runpod_binding; second_binding ]
     ; default_runtime_id = Some "runpod_mtp.qwen"
     ; keeper_assignments = []
-    ; media_failover = []
+    ; media = Runtime_schema.empty_media_overrides
     ; lane_decls = []
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; media_readers = []; typesafeai = Runtime_schema.default_typesafeai

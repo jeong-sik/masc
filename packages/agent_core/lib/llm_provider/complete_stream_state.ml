@@ -1407,9 +1407,9 @@ let group_content state indexed_content =
         let* covered,items=collect covered [] indices in
         let content_count=List.length items in
         let replay_rev=match kind,items with
-          | Types.Response_replay.Message _, _ | (Reasoning|Function_call),(_::_) ->
+          | Types.Response_replay.Message _, _ | (Reasoning | Function_call | Image_generation),(_::_) ->
             {Types.Response_replay.kind;content_count}::replay_rev
-          | (Reasoning|Function_call),[] -> replay_rev in
+          | (Reasoning | Function_call | Image_generation),[] -> replay_rev in
         loop covered (List.rev_append items content_rev) replay_rev rest
     in
     (* Coverage includes indices of dropped empty/partial blocks; compare only

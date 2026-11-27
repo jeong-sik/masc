@@ -20,7 +20,7 @@ val validate_runtime_references :
   Runtime_instance.t list -> Runtime_lane.t list -> runtime_reference list ->
   (unit, Runtime_config_error.load_failure) result
 val assignment_references : (string * string) list -> runtime_reference list
-val media_failover_references : string list -> runtime_reference list
+val media_override_references : Runtime_schema.media_overrides -> runtime_reference list
 val validate_lanes :
   dropped_bindings:(string * Runtime_config_error.drop_reason) list ->
   Runtime_instance.t list -> Runtime_schema.lane_decl list ->

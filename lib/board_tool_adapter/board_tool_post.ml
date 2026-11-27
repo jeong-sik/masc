@@ -58,6 +58,56 @@ type post_creation_progress =
   | Creation_committed of Board.post_creation
   | Creation_failed of Board.Post_publication_failure.t
 
+let parse_and_promote_attachment_ids ~base_path args : (string list, string) result =
+  let open Result.Syntax in
+  let fields =
+    match args with
+    | `Assoc fields -> fields
+    | _ -> []
+  in
+  match List.assoc_opt "attachment_ids" fields with
+  | None | Some `Null -> Ok []
+  | Some (`List items) ->
+    let store = Attachment_store.create ~base_path in
+    let rec loop seen acc = function
+      | [] -> Ok (List.rev acc)
+      | `String raw :: rest ->
+        let id = String.trim raw in
+        let* _sha =
+          Attachment_store.parse_id id
+          |> Result.map_error (fun detail ->
+               Printf.sprintf "invalid attachment_id %S: %s" id detail)
+        in
+        if List.exists (String.equal id) seen
+        then loop seen acc rest
+        else
+          let* () =
+            match Attachment_store.get_meta store ~id with
+            | Ok (Some _) ->
+              (match Attachment_store.promote_to_durable store ~id with
+               | Ok (Some _) -> Ok ()
+               | Ok None -> Error (Printf.sprintf "attachment_id %S not found" id)
+               | Error err ->
+                 Error
+                   (Printf.sprintf
+                      "failed to promote attachment_id %S: %s"
+                      id
+                      (Attachment_store.get_error_to_string err)))
+            | Ok None -> Error (Printf.sprintf "attachment_id %S not found in attachment store" id)
+            | Error err ->
+              Error
+                (Printf.sprintf
+                   "failed to verify attachment_id %S: %s"
+                   id
+                   (Attachment_store.get_error_to_string err))
+          in
+          loop (id :: seen) (id :: acc) rest
+      | _ :: _ -> Error "attachment_ids must be an array of canonical att_<64hex> strings"
+    in
+    loop [] [] items
+  | Some _ -> Error "attachment_ids must be an array of canonical att_<64hex> strings"
+;;
+
 let handle_post_create ~tool_name ~start_time args : Tool_result.result =
   let progress = ref Before_creation in
   try
@@ -127,6 +177,19 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
         with
         | Error error -> attachment_error ~tool_name ~start_time error
         | Ok attachments ->
+        match
+          parse_and_promote_attachment_ids
+            ~base_path:(Env_config_core.base_path ())
+            args
+        with
+        | Error detail ->
+          Tool_result.make_err
+            ~tool_name
+            ~class_:Tool_result.Workflow_rejection
+            ~effect_disposition:Tool_result.Proven_pre_effect
+            ~start_time
+            detail
+        | Ok attachment_ids ->
         let meta_json =
           match sources with
           | Some entries ->
@@ -148,6 +211,7 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
              ~ttl_hours
              ?hearth
              ?thread_id
+             ~attachment_ids
              ()
          with
          | Ok (creation : Board.post_creation) ->
@@ -617,12 +681,26 @@ let handle_comment_add ~reader ~tool_name ~start_time args : Tool_result.result 
         "author is required"
     | Some author ->
       (match
+         parse_and_promote_attachment_ids
+           ~base_path:(Env_config_core.base_path ())
+           args
+       with
+       | Error detail ->
+         Tool_result.make_err
+           ~tool_name
+           ~class_:Tool_result.Workflow_rejection
+           ~effect_disposition:Tool_result.Proven_pre_effect
+           ~start_time
+           detail
+       | Ok attachment_ids ->
+       match
          Board_dispatch.add_comment_with_unresolved ~reader
            ~post_id
            ~author
            ~content
            ?parent_id
            ~ttl_hours
+           ~attachment_ids
            ()
        with
        | Ok (comment, unresolved) ->

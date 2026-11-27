@@ -1,8 +1,12 @@
-(** Prepares visible Markdown diagrams and PNG images.
-    The cells containing the diagram remain the text fallback until its raster
-    fits the current frame's PNG payload budget. Visible raster requests use
-    the pixel budget, and ready placements use the aggregate base64 payload
-    bytes of their PNGs. *)
+(** Prepares visible Markdown diagrams and inline raster images across Kitty,
+    iTerm2, and pure-OCaml Unicode half-block fallback terminals.
+
+    - Kitty: PNG transmission ([f=100]); requests [?format=png] for non-PNG
+      [/api/v1/attachments/<id>] images.
+    - iTerm2: inline OSC 1337 placement natively supporting PNG/JPEG/WebP/GIF.
+    - Standard / tmux / non-graphics terminals: requests [?format=png&max_px=160]
+      and paints 24-bit truecolor Unicode half-block (['▀']) previews directly
+      onto {!Masc_tui_term.Cell_grid.t}. *)
 
 type t
 type placement
@@ -20,13 +24,28 @@ val prepare :
   fetch_retained:(Masc_tui_net.Http_client.endpoint -> path:string -> max_body_bytes:int ->
     (string, Masc_tui_net.Http_client.limited_body_error) result) ->
   on_ready:(unit -> unit) ->
+  ?term_program:string option ->
+  ?in_tmux:bool ->
   probe:Masc_tui_term.Probe.observation ->
   theme:Masc_tui_core.Theme.t ->
   Masc_tui_term.Cell_grid.t ->
   placement list
 
-val mask_fallback : Masc_tui_term.Cell_grid.t -> style:Masc_tui_term.Style.t -> placement -> unit
+val mask_fallback :
+  ?bg_rgb:int ->
+  Masc_tui_term.Cell_grid.t ->
+  style:Masc_tui_term.Style.t ->
+  placement ->
+  unit
+
+type before_present_effect = {
+  escape_bytes : string;
+  invalidate_screen : bool;
+      (** [true] when any iTerm2 inline placement was removed or moved, so the
+          caller must invalidate the presenter to clear stale OSC 1337 cells. *)
+}
+
 val cancel_pending : t -> unit
 val clear : t -> in_tmux:bool -> string
-val before_present : t -> in_tmux:bool -> placement list -> string
+val before_present : t -> in_tmux:bool -> placement list -> before_present_effect
 val after_present : t -> in_tmux:bool -> full_repaint:bool -> placement list -> string

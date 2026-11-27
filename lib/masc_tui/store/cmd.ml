@@ -327,6 +327,7 @@ type post_request =
       title : string;
       body : string;
       hearth : string option;
+      attachment_ids : string list;
     }
   | Post_board_comment of {
       post_id : string;
@@ -642,6 +643,10 @@ type terminal_program =
   | Score_view of { sources : string list; index : int }
       (* alphaTex sources, newest first; [index] counts from 1 *)
 
+type attachment_upload_target =
+  | Upload_for_keeper of string
+  | Upload_for_board
+
 type t =
   | Batch of t list
   | Http_get of { epoch : Epoch.t; req : get_request }
@@ -685,6 +690,27 @@ type t =
       filename_stem : string;
       ext : string;
       content_opt : string option;
+      open_after : bool;
+    }
+  | Upload_attachment_file of {
+      epoch : Epoch.t;
+      target : attachment_upload_target;
+      path : string;
+    }
+  | Paste_clipboard_image of {
+      epoch : Epoch.t;
+      target : attachment_upload_target;
+    }
+  | Fetch_inspector_image of {
+      epoch : Epoch.t;
+      url : string;
+      format_png : bool;
+    }
+  | Export_attachment of {
+      epoch : Epoch.t;
+      url : string;
+      filename_stem : string;
+      ext : string;
       open_after : bool;
     }
   | Open_dos_screen of { epoch : Epoch.t }
@@ -1211,15 +1237,8 @@ let post_request_body = function
         | `Operation_id op -> ("request_id", `String op)
       in
       `Assoc [ ("name", `String keeper); target_field ]
-  | Post_board_create { title; body; hearth } ->
-      let base = [ ("title", `String title); ("body", `String body) ] in
-      let fields =
-        match hearth with
-        | Some h when not (String.equal (String.trim h) "") ->
-            base @ [ ("hearth", `String (String.trim h)) ]
-        | Some _ | None -> base
-      in
-      `Assoc fields
+  | Post_board_create { title; body; hearth; attachment_ids } ->
+      Wire_knowledge.encode_board_create ~title ~body ?hearth ~attachment_ids ()
   | Post_board_comment { post_id; content; parent_id } ->
       Wire_knowledge.encode_board_comment ~post_id ~content ?parent_id ()
   | Post_board_vote { post_id; direction } ->
@@ -1485,6 +1504,10 @@ let rec flatten_one acc = function
     | Cancel_memory_diagram
     | Fetch_artifact_and_copy _
     | Export_artifact _
+    | Upload_attachment_file _
+    | Paste_clipboard_image _
+    | Fetch_inspector_image _
+    | Export_attachment _
     | Open_dos_screen _
     | Open_external_url _
     | Open_editor_escape_hatch _

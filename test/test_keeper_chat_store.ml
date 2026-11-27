@@ -515,18 +515,19 @@ let test_attachment_blob_failure_does_not_commit_chat () =
     Unix.mkdir base_dir 0o700;
     let masc_root = Common.masc_dir_from_base_path ~base_path:base_dir in
     Unix.mkdir masc_root 0o700;
-    let blocker = open_out (Filename.concat masc_root "tool_blobs") in
+    let blocker = open_out (Filename.concat masc_root "attachments") in
     close_out blocker;
     let request_id =
       match Keeper_chat_delivery_identity.Request_id.of_string "blocked-image-request" with
       | Ok id -> id
       | Error detail -> Alcotest.fail detail
     in
+    let png_b64 = Base64.encode_string "\x89PNG\r\n\x1a\nblocked-png" in
     let result = K.append_user_message_once ~base_dir ~keeper_name:"blocked-image"
         ~delivery_key:(Keeper_chat_delivery_identity.Operation request_id)
         ~content:"look"
         ~attachments:[{K.id="blocked-att"; att_type="image"; name="image.png";
-          size=3; mime_type="image/png"; data="UE5H"; width=None; height=None}] () in
+          size=19; mime_type="image/png"; data=png_b64; width=None; height=None}] () in
     Alcotest.(check bool) "unretained attachment cannot be committed" true (Result.is_error result);
     Alcotest.(check int) "no chat row points at missing bytes" 0
       (List.length (K.load ~base_dir ~keeper_name:"blocked-image")))
@@ -564,23 +565,19 @@ let test_attachment_dimensions_survive_the_reference_swap () =
              (Some 2) att.K.width;
            Alcotest.(check (option int)) "height measured at the swap"
              (Some 1) att.K.height;
-           (match Tool_output.decode_from_agent_core att.K.data with
-            | Tool_output.Decoded reference ->
-                Alcotest.(check (result (option string) string))
-                  "retained payload round trips through the blob store"
-                  (Ok (Some (Base64.encode_string png)))
-                  (Tool_blob_store.fetch (Tool_blob_store.create ~base_path:base_dir)
-                     ~sha256:reference.sha256
-                   |> Result.map_error Tool_blob_store.fetch_error_to_string);
-                Alcotest.(check string) "no inline image in marker preview"
-                  "attachment payload" reference.preview;
-                (match Tool_blob_maintenance.run ~scope:Server_tool_blob_scope.scope ~base_path:base_dir ~mode:Tool_blob_maintenance.Observe_only with
-                 | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error)
-                 | Ok report ->
-                     Alcotest.(check int) "chat attachment is a live blob consumer" 1 report.live_references;
-                     Alcotest.(check int) "sent payload is not a deletion candidate" 0 report.candidates_recorded)
-            | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
-                Alcotest.fail "image has no valid durable payload reference");
+           (match Attachment_store.parse_id att.K.id with
+            | Ok sha256 ->
+                Alcotest.(check string) "attachment data is canonical URL"
+                  (Attachment_store.url_of_id att.K.id) att.K.data;
+                let store = Attachment_store.create ~base_path:base_dir in
+                (match Attachment_store.get_bytes_by_sha256 store ~sha256 with
+                 | Ok (Some stored) ->
+                     Alcotest.(check string) "retained payload round trips through Attachment_store"
+                       png stored
+                 | Ok None -> Alcotest.fail "stored attachment missing"
+                 | Error err -> Alcotest.fail (Attachment_store.get_error_to_string err))
+            | Error detail ->
+                Alcotest.failf "image has no canonical Attachment_store id: %s" detail);
            (* The dashboard row exposes the same size without re-measuring:
               the reference cannot be decoded again. *)
            (match K.to_json_array [ user ] with
@@ -611,6 +608,83 @@ let test_attachment_dimensions_survive_the_reference_swap () =
              (List.length (Option.value other ~default:[])))
       | other ->
         Alcotest.failf "expected a user row, got %d rows" (List.length other))
+
+let test_text_attachments_and_invalid_base64_preserved_in_tool_blob_store () =
+  let base_dir = temp_base_path "keeper-chat-store-text-att" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-text-att" in
+      let secret = "sk-ant-api03-TESTSECRETVALUE12345678901234567890" in
+      let txt_body = "plain note with " ^ secret in
+      let md_body = "# Design\n- keep markdown attachments durable\n" in
+      let json_body = Printf.sprintf {|{"ok":true,"token":%S}|} secret in
+      let malformed_b64 = "!!!not-valid-base64!!!" in
+      K.append_turn ~base_dir ~keeper_name
+        ~user_content:"review these files"
+        ~user_attachments:
+          [ { K.id = "att-txt"; att_type = "file"; name = "notes.txt"
+            ; size = String.length txt_body; mime_type = "text/plain"
+            ; data = Base64.encode_string txt_body
+            ; width = None; height = None }
+          ; { K.id = "att-md"; att_type = "file"; name = "README.md"
+            ; size = String.length md_body; mime_type = "text/markdown"
+            ; data = md_body
+            ; width = None; height = None }
+          ; { K.id = "att-json"; att_type = "file"; name = "payload.json"
+            ; size = String.length json_body; mime_type = "application/json"
+            ; data = Base64.encode_string json_body
+            ; width = None; height = None }
+          ; { K.id = "att-bad-b64"; att_type = "file"; name = "corrupt.txt"
+            ; size = String.length malformed_b64; mime_type = "text/plain"
+            ; data = malformed_b64
+            ; width = None; height = None }
+          ]
+        ~tool_calls:[]
+        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+        ~assistant_content:"reviewed"
+        ();
+      let blob_store = Tool_blob_store.create ~base_path:base_dir in
+      let decode_blob att =
+        Alcotest.(check bool)
+          ("attachment " ^ att.K.name ^ " data is never silently emptied")
+          true (att.K.data <> "");
+        match Tool_output.decode_from_agent_core att.K.data with
+        | Tool_output.Decoded { sha256; _ } ->
+          (match Tool_blob_store.fetch blob_store ~sha256 with
+           | Ok (Some content) -> content
+           | Ok None ->
+             Alcotest.failf "missing Tool_blob_store payload for %s (sha256=%s)"
+               att.K.name sha256
+           | Error err ->
+             Alcotest.failf "Tool_blob_store fetch failed for %s: %s"
+               att.K.name (Tool_blob_store.fetch_error_to_string err))
+        | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+          Alcotest.failf "expected Tool_output.Decoded reference for %s, got %S"
+            att.K.name att.K.data
+      in
+      match K.load ~base_dir ~keeper_name with
+      | user :: _ ->
+        (match (user : K.chat_message).attachments with
+         | Some [ att_txt; att_md; att_json; att_bad ] ->
+           let stored_txt = decode_blob att_txt in
+           check_contains ~name:"notes.txt content preserved" ~needle:"plain note with" stored_txt;
+           Alcotest.(check bool) "notes.txt secret redacted" false
+             (String_util.contains_substring stored_txt secret);
+           let stored_md = decode_blob att_md in
+           Alcotest.(check string) "README.md raw text preserved" md_body stored_md;
+           let stored_json = decode_blob att_json in
+           check_contains ~name:"payload.json content preserved" ~needle:{|"ok":true|} stored_json;
+           Alcotest.(check bool) "payload.json secret redacted" false
+             (String_util.contains_substring stored_json secret);
+           let stored_bad = decode_blob att_bad in
+           Alcotest.(check string) "invalid base64 preserved rather than dropped"
+             malformed_b64 stored_bad
+         | other ->
+           Alcotest.failf "expected 4 attachments, got %d"
+             (List.length (Option.value other ~default:[])))
+      | other ->
+        Alcotest.failf "expected user row, got %d rows" (List.length other))
 
 let test_tool_only_continuations_do_not_fabricate_assistant_rows () =
   let base_dir = temp_base_path "keeper-chat-tool-only" in
@@ -4324,6 +4398,8 @@ let () =
             `Quick test_attachment_blob_failure_does_not_commit_chat;
           Alcotest.test_case "attachment dimensions survive the reference swap"
             `Quick test_attachment_dimensions_survive_the_reference_swap;
+          Alcotest.test_case "text attachments and invalid base64 survive in Tool_blob_store"
+            `Quick test_text_attachments_and_invalid_base64_preserved_in_tool_blob_store;
           Alcotest.test_case "provider and canonical ids stay separate" `Quick
             test_tool_identities_persist_and_project_separately;
           Alcotest.test_case "tool-only continuations omit assistant rows" `Quick

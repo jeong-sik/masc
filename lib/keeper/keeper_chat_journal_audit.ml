@@ -263,7 +263,8 @@ let assistant_text_mismatch ~entries ~reply_details rows =
              | Keeper_chat_events.Native_tool_progress (_, _)
              | Keeper_chat_events.Tool_approval_requested _ | Keeper_chat_events.Tool_approval_settled _
              | Keeper_chat_events.Tool_transcript_committed _ | Keeper_chat_events.Link_block _
-             | Keeper_chat_events.Image_block _ | Keeper_chat_events.Status_block _
+             | Keeper_chat_events.Attachment_emitted _ | Keeper_chat_events.Image_block _
+             | Keeper_chat_events.Status_block _
              | Keeper_chat_events.Audio_block _ | Keeper_chat_events.Tool_context_block _ -> None)
           entries
       else []
@@ -318,7 +319,8 @@ let tool_rows_mismatch entries rows =
          | Keeper_chat_events.Native_tool_progress (_, _)
          | Keeper_chat_events.Tool_approval_requested _ | Keeper_chat_events.Tool_approval_settled _
          | Keeper_chat_events.Tool_transcript_committed _ | Keeper_chat_events.Link_block _
-         | Keeper_chat_events.Image_block _ | Keeper_chat_events.Status_block _
+         | Keeper_chat_events.Attachment_emitted _ | Keeper_chat_events.Image_block _
+         | Keeper_chat_events.Status_block _
          | Keeper_chat_events.Audio_block _ | Keeper_chat_events.Tool_context_block _ -> None)
       entries
     |> sorted_execution_ids

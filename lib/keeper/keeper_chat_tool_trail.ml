@@ -119,7 +119,8 @@ let on_event t (event : Keeper_chat_events.keeper_chat_event) =
   | Keeper_chat_events.Native_tool_progress (_, _) | Keeper_chat_events.Tool_approval_requested _
   | Keeper_chat_events.Tool_approval_settled _ | Keeper_chat_events.Tool_result_ready _
   | Keeper_chat_events.Tool_transcript_committed _ | Keeper_chat_events.Link_block _
-  | Keeper_chat_events.Image_block _ | Keeper_chat_events.Status_block _
+  | Keeper_chat_events.Attachment_emitted _ | Keeper_chat_events.Image_block _
+  | Keeper_chat_events.Status_block _
   | Keeper_chat_events.Audio_block _ | Keeper_chat_events.Tool_context_block _ ->
     (* Every other chat event belongs to the reply the adapter is already
        delivering; this collector only holds the trail beside it. *)

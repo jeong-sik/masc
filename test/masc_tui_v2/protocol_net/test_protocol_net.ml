@@ -2609,9 +2609,9 @@ let test_v25_data_pipeline_decoders () =
   (* 4. Human provider alias resolution *)
   let runtimes : Wire_runtime.runtime_option list =
     [
-      { id = "alice.opus"; provider_id = "claude_code_a1b2c3d4"; provider = "claude_code_a1b2c3d4"; model = Some "claude-opus-4-6"; declared_reasoning_effort = None; transport = Some "cli"; is_default = true };
-      { id = "bob.sonnet"; provider_id = "claude_code_b2c3d4e5"; provider = "claude_code_b2c3d4e5"; model = Some "claude-sonnet-4-6"; declared_reasoning_effort = None; transport = Some "cli"; is_default = false };
-      { id = "carol.sonnet"; provider_id = "claude_code_c3d4e5f6"; provider = "claude_code_c3d4e5f6"; model = Some "claude-sonnet-4-6"; declared_reasoning_effort = None; transport = Some "cli"; is_default = false };
+      { id = "alice.opus"; provider_id = "claude_code_a1b2c3d4"; provider = "claude_code_a1b2c3d4"; model = Some "claude-opus-4-6"; declared_reasoning_effort = None; transport = Some "cli"; is_default = true; supports_image_input = None; supports_image_output = None };
+      { id = "bob.sonnet"; provider_id = "claude_code_b2c3d4e5"; provider = "claude_code_b2c3d4e5"; model = Some "claude-sonnet-4-6"; declared_reasoning_effort = None; transport = Some "cli"; is_default = false; supports_image_input = None; supports_image_output = None };
+      { id = "carol.sonnet"; provider_id = "claude_code_c3d4e5f6"; provider = "claude_code_c3d4e5f6"; model = Some "claude-sonnet-4-6"; declared_reasoning_effort = None; transport = Some "cli"; is_default = false; supports_image_input = None; supports_image_output = None };
     ]
   in
   let mk_acct ?(display_name = "") scope_id pids : Wire_runtime.account_usage =
@@ -2876,6 +2876,8 @@ let test_v25_data_pipeline_decoders () =
         declared_reasoning_effort = None;
         transport = Some "cli";
         is_default = false;
+        supports_image_input = None;
+        supports_image_output = None;
       };
     ]
   in
@@ -7186,9 +7188,9 @@ let test_wave4_layer4_wire_codecs () =
   Alcotest.(check bool) "named route preserves ordered candidates and CAS" true
     (member "runtime_ids" (set "fast") = `List [`String "r1"; `String "r2"]
      && member "expected_source_revision" (set "fast") = `String valid_sha);
-  Alcotest.(check bool) "media failover keeps its list contract" true
+  Alcotest.(check bool) "media_failover is no longer a special lane and routes as normal named lane" true
     (member "runtime_ids" (set "media_failover") = `List [`String "r1"; `String "r2"]
-     && member "expected_source_revision" (set "media_failover") = `Null);
+     && member "expected_source_revision" (set "media_failover") = `String valid_sha);
   (* 1. Runtime routing CRUD & CAS revision guard *)
   let j_set_ok =
     Wire_runtime.encode_runtime_routing_action

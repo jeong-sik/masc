@@ -3,10 +3,9 @@
 //
 // The backend serves the ALREADY-RESOLVED runtime config (runtime.toml SSOT,
 // populated by Runtime.init_default) — see
-// lib/server/server_dashboard_runtime_defaults_json.ml. The frontend consumes
-// this structured projection instead of re-parsing the raw TOML exposed by
-// /api/v1/runtime/config/raw. Unresolved config surfaces null/[] (no fabricated
-// defaults), so every cursor-like field is nullable rather than defaulted.
+// lib/server/server_dashboard_runtime_defaults_json.ml. Unresolved config
+// surfaces null/[] (no fabricated defaults), so every cursor-like field is
+// nullable rather than defaulted.
 
 import {
   array,
@@ -21,16 +20,31 @@ import {
 } from 'valibot'
 import { parseOrThrow, SchemaDriftError } from './drift-error'
 
+const RuntimeMediaCapabilitiesSchema = object({
+  supports_image_input: optional(boolean()),
+  supports_image_output: optional(boolean()),
+  vision_input: optional(boolean()),
+  image_output: optional(boolean()),
+})
+
 const RuntimeEntrySchema = object({
   id: string(),
   provider: string(),
   model: string(),
   max_context: number(),
   is_default: boolean(),
+  capabilities: optional(nullable(RuntimeMediaCapabilitiesSchema)),
+  supports_image_input: optional(boolean()),
+  supports_image_output: optional(boolean()),
+})
+
+const RuntimeMediaOverridesSchema = object({
+  vision_reader: optional(nullable(string())),
+  image_generator: optional(nullable(string())),
 })
 
 const ModelRoutingSchema = object({
-  media_failover: array(string()),
+  media: optional(nullable(RuntimeMediaOverridesSchema)),
 })
 
 const RuntimeDefaultsResponseSchema = object({
@@ -43,9 +57,11 @@ const RuntimeDefaultsResponseSchema = object({
   default_max_context: nullable(number()),
   runtimes: array(RuntimeEntrySchema),
   model_routing: ModelRoutingSchema,
+  media: optional(nullable(RuntimeMediaOverridesSchema)),
 })
 
 export type RuntimeEntry = InferOutput<typeof RuntimeEntrySchema>
+export type RuntimeMediaOverrides = InferOutput<typeof RuntimeMediaOverridesSchema>
 export type ModelRouting = InferOutput<typeof ModelRoutingSchema>
 export type RuntimeDefaultsResponse = InferOutput<typeof RuntimeDefaultsResponseSchema>
 

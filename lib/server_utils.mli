@@ -162,6 +162,7 @@ val board_reactions_lookup :
 (** {1 Dashboard helpers} *)
 
 val board_comment_dashboard_json :
+  ?base_path:string ->
   ?current_vote:Board.vote_direction option ->
   ?reactions:Board.reaction_summary list ->
   Board.comment ->
@@ -170,6 +171,7 @@ val board_comment_dashboard_json :
     [author_identity] field appended for dashboard inspection. *)
 
 val board_post_dashboard_json :
+  ?base_path:string ->
   ?current_vote:Board.vote_direction option ->
   ?reactions:Board.reaction_summary list ->
   author_karma:int ->

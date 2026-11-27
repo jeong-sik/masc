@@ -150,6 +150,7 @@ let nonempty_trimmed_option = function
 ;;
 
 let direct_message
+      ?base_path
       ~media_store
       ~keeper_name
       ~prompt
@@ -168,8 +169,11 @@ let direct_message
     | Some (`Assoc _ as context) -> Ok (Some context)
     | Some _ -> invalid_wire_value ~field:"surface_context" ~expected:"object"
   in
+  let user_blocks =
+    Keeper_multimodal_input.normalize_user_blocks ~attachments user_blocks
+  in
   let* user_agent_core_blocks =
-    Keeper_multimodal_input.to_agent_core_blocks ~media_store ~attachments user_blocks
+    Keeper_multimodal_input.to_agent_core_blocks ?base_path ~media_store ~attachments user_blocks
     |> Result.map
          (function
            | [] -> None

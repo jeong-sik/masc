@@ -3,6 +3,7 @@ import type { DiscordReplyOrigin } from './discord-reply'
  * Keepers Workspace wire types (#36).
  */
 
+import type { AttachmentRef } from '../../api/attachments'
 import type { EQUIPMENT_IDS, KeeperEquipment } from '../../lib/keeper-portrait'
 import type { KeeperChatDeliveryProvenance } from '../../keeper-delivery-provenance'
 import type { TelemetryFreshnessMetadata } from '../../api/dashboard-shared'
@@ -249,15 +250,6 @@ export type ChatDeliveryState =
   | 'Cut_recovered'
   | 'Failed'
 
-export interface ChatAttachmentDraft {
-  readonly id: string
-  readonly type: 'image' | 'file'
-  readonly name: string
-  readonly size: number
-  readonly mimeType: string
-  readonly data: string
-}
-
 export interface ChatToolBlock {
   readonly id?: string
   readonly streamKey?: string
@@ -268,6 +260,7 @@ export interface ChatToolBlock {
   readonly status?: string
   readonly progressLabel?: string
   readonly duration?: string
+  readonly attachments?: readonly AttachmentRef[]
 }
 
 export type KeeperToolResultResponse =
@@ -315,6 +308,7 @@ export interface ChatTranscriptEntry {
   readonly role: 'user' | 'assistant' | 'system' | 'tool' | 'request_failure'
   readonly speakerLabel?: string
   readonly content: string
+  readonly attachments?: readonly AttachmentRef[]
   readonly retainedImages?: readonly RetainedChatImage[]
   readonly thinking?: string
   readonly ts: number

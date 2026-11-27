@@ -311,10 +311,6 @@ allow = ["spoof.example"]
 default = """
 deepseek.chat
 """
-media_failover = [
-  "deepseek.chat",
-  "glm.flash"
-]
 
 [runtime.assignments]
 "alder" = """
@@ -325,16 +321,12 @@ deepseek.chat
   let rewritten_runtime =
     Runtime_config_text.update_runtime_scalar_text multiline_runtime
       ~key:"default" ~runtime_id:(Some "glm.flash")
-    |> Runtime_config_text.update_runtime_string_array_text
-         ~key:"media_failover" ~values:[ "glm.flash" ]
     |> Runtime_config_text.update_runtime_assignment_text
          ~keeper_name:"alder" ~runtime_id:"glm.flash"
   in
   let parsed_rewritten = parse rewritten_runtime in
   check (option string) "multiline default scalar replaced cleanly"
     (Some "glm.flash") parsed_rewritten.Runtime_schema.default_runtime_id;
-  check (list string) "multiline media_failover array replaced cleanly"
-    [ "glm.flash" ] parsed_rewritten.Runtime_schema.media_failover;
   let cleared_runtime =
     Runtime_config_text.update_runtime_scalar_text multiline_runtime
       ~key:"default" ~runtime_id:None

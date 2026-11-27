@@ -66,10 +66,10 @@ let add_routes ~sw ~clock router =
            in
            match
              Result.bind admitted_body
-               (parse_keeper_chat_stream_request
-                  ~media_store:
-                    (Tool_blob_media_store.of_base_path
-                       ~base_path:(Mcp_server.workspace_config state).Workspace.base_path))
+               (let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
+                parse_keeper_chat_stream_request
+                  ~base_path
+                  ~media_store:(Tool_blob_media_store.of_base_path ~base_path))
            with
            | Ok payload ->
                handle_keeper_chat_stream

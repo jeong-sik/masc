@@ -65,6 +65,8 @@ type state = {
   voice : voice_state;
   popup : popup;
   draft_count_other_keepers : int;
+  attachments : string list;
+  uploading_count : int;
 }
 
 val equal_pending_tx : pending_tx -> pending_tx -> bool

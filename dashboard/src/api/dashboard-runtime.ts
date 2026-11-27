@@ -91,6 +91,7 @@ export interface DashboardRuntimeDeclaredModelCapabilities {
   supports_parallel_tool_calls?: boolean
   thinking_control_format?: string | null
   supports_image_input?: boolean
+  supports_image_output?: boolean
   supports_document_input?: boolean
   supports_audio_input?: boolean
   supports_video_input?: boolean
@@ -168,6 +169,7 @@ export interface DashboardRuntimeEffectiveCapabilities {
   supports_structured_output?: boolean
   supports_multimodal_inputs?: boolean
   supports_image_input?: boolean
+  supports_image_output?: boolean
   supports_document_input?: boolean
   supports_audio_input?: boolean
   supports_video_input?: boolean
@@ -220,6 +222,7 @@ export interface DashboardRuntimeProviderSnapshot {
   supports_parallel_tool_calls?: boolean
   supports_multimodal_inputs?: boolean
   supports_image_input?: boolean
+  supports_image_output?: boolean
   supports_document_input?: boolean
   supports_audio_input?: boolean
   supports_video_input?: boolean
@@ -550,6 +553,7 @@ function decodeRuntimeDeclaredModelCapabilities(
     supports_parallel_tool_calls: asBoolean(raw.supports_parallel_tool_calls),
     thinking_control_format: asNullableString(raw.thinking_control_format),
     supports_image_input: asBoolean(raw.supports_image_input),
+    supports_image_output: asBoolean(raw.supports_image_output),
     supports_document_input: asBoolean(raw.supports_document_input),
     supports_audio_input: asBoolean(raw.supports_audio_input),
     supports_video_input: asBoolean(raw.supports_video_input),
@@ -651,6 +655,7 @@ function decodeRuntimeEffectiveCapabilities(raw: unknown): DashboardRuntimeEffec
     supports_structured_output: asBoolean(raw.supports_structured_output),
     supports_multimodal_inputs: asBoolean(raw.supports_multimodal_inputs),
     supports_image_input: asBoolean(raw.supports_image_input),
+    supports_image_output: asBoolean(raw.supports_image_output),
     supports_document_input: asBoolean(raw.supports_document_input),
     supports_audio_input: asBoolean(raw.supports_audio_input),
     supports_video_input: asBoolean(raw.supports_video_input),
@@ -705,6 +710,7 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     supports_parallel_tool_calls: asBoolean(raw.supports_parallel_tool_calls),
     supports_multimodal_inputs: asBoolean(raw.supports_multimodal_inputs),
     supports_image_input: asBoolean(raw.supports_image_input),
+    supports_image_output: asBoolean(raw.supports_image_output),
     supports_document_input: asBoolean(raw.supports_document_input),
     supports_audio_input: asBoolean(raw.supports_audio_input),
     supports_video_input: asBoolean(raw.supports_video_input),
@@ -2446,18 +2452,6 @@ export async function patchRuntimeRouting(
   return post<unknown>('/api/v1/runtime/config/routing', {
     lane,
     runtime_id: routeId,
-  }).then(raw => receiveRuntimeTomlCommit(raw, options))
-}
-
-export async function patchRuntimeMediaFailover(
-  runtimeIds: readonly string[],
-  options: RuntimeTomlRequestOptions = {},
-): Promise<CommittedRuntimeTomlConfig> {
-  await ensureDevToken()
-  options.beforeDispatch?.()
-  return post<unknown>('/api/v1/runtime/config/routing', {
-    lane: 'media_failover',
-    runtime_ids: [...runtimeIds],
   }).then(raw => receiveRuntimeTomlCommit(raw, options))
 }
 

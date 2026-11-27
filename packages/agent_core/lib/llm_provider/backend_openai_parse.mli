@@ -14,6 +14,19 @@ val text_of_openai_content_block : Yojson.Safe.t -> string option
     thinking[].text. Empty string when the shape carries none. *)
 val chunk_list_thinking_of_openai_content : Yojson.Safe.t -> string
 
+(** Decode a single OpenAI/OpenRouter image output item (e.g.
+    [{"type":"image_url","image_url":{"url":"data:image/png;base64,..."}}] or
+    [{"image_url":"https://..."}]) into [(media_type, source)]. Data URIs decode
+    to {!Types.Base64}; HTTP(S) URLs decode to {!Types.Url}. Shared by sync and
+    streaming parsers. *)
+val image_source_of_openai_image_item
+  :  Yojson.Safe.t
+  -> (string * Types.media_source) option
+
+(** Extract image blocks from an OpenRouter/OpenAI-compatible [images] array or
+    [content] part list. *)
+val image_sources_of_openai_json : Yojson.Safe.t -> (string * Types.media_source) list
+
 (** Parse a partial streaming usage update without filling absent counters. *)
 val delta_usage_of_openai_json : Yojson.Safe.t -> Types.delta_usage option
 

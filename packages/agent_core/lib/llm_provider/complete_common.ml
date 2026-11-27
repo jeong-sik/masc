@@ -781,10 +781,11 @@ let serialize_http_request_parts
                     Backend_anthropic.required_output_token_error_message config rejection
                 }))
       | Provider_http_codec.Ollama_chat ->
-        let artifact = Backend_ollama.build_request_artifact
-            ~stream ~config ~messages ~tools () in
-        Ok (Backend_ollama.request_payload artifact,
-            Backend_ollama.request_output_token_receipt artifact)
+        (match Backend_ollama.build_request_artifact_result ~stream ~config ~messages ~tools () with
+         | Ok artifact ->
+           Ok (Backend_ollama.request_payload artifact,
+               Backend_ollama.request_output_token_receipt artifact)
+         | Error reason -> Error (Http_client.AcceptRejected { reason }))
       | Provider_http_codec.Openai_responses ->
         let artifact = Backend_openai_responses.build_request_artifact
             ~stream ~config ~messages ~tools () in

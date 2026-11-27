@@ -2,6 +2,7 @@
     projection for a reconnecting SSE client. *)
 
 val replay :
+  ?base_path:string ->
   redact_text:(string -> string) ->
   since_seq:Keeper_chat_event_log.replay_position ->
   Keeper_chat_event_log.journaled_event list ->

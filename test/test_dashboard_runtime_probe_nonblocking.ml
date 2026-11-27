@@ -315,7 +315,7 @@ let fanout_runtimes () =
     ; bindings = [ binding_a; binding_b ]
     ; default_runtime_id = None
     ; keeper_assignments = []
-    ; media_failover = []
+    ; media = Runtime_schema.empty_media_overrides
     ; lane_decls = []
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []; browser = Browser_configuration.none; machines = Machine_configuration.default; media_readers = []; typesafeai = Runtime_schema.default_typesafeai

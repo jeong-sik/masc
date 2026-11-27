@@ -245,6 +245,7 @@ let make_rich_model ~lang ~cols ~rows =
       chain_depth = Some 22;
       is_signal = true;
       pinned = false;
+      attachments = [];
     }
   in
   let p2 : Wire_knowledge.board_post =
@@ -275,6 +276,7 @@ let make_rich_model ~lang ~cols ~rows =
       chain_depth = None;
       is_signal = true;
       pinned = false;
+      attachments = [];
     }
   in
   let p_noise : Wire_knowledge.board_post =
@@ -295,6 +297,7 @@ let make_rich_model ~lang ~cols ~rows =
       chain_depth = None;
       is_signal = false;
       pinned = false;
+      attachments = [];
     }
   in
   let comments : Wire_knowledge.board_comment list =
@@ -307,6 +310,7 @@ let make_rich_model ~lang ~cols ~rows =
         body = "#54340 on-head review posted cleanly.";
         created_at_unix = now_unix -. 540.0;
         score = 2;
+        attachments = [];
       };
     ]
   in
@@ -896,6 +900,8 @@ let make_rich_model ~lang ~cols ~rows =
             declared_reasoning_effort = None;
             transport = Some "http";
             is_default = true;
+            supports_image_input = None;
+            supports_image_output = None;
           };
           {
             id = "glm-5-3";
@@ -905,6 +911,8 @@ let make_rich_model ~lang ~cols ~rows =
             declared_reasoning_effort = None;
             transport = Some "http";
             is_default = false;
+            supports_image_input = None;
+            supports_image_output = None;
           };
         ];
       usage_windows =
@@ -920,6 +928,7 @@ let make_rich_model ~lang ~cols ~rows =
                 acct_unreported;
               ];
           };
+      media = None;
     }
   in
   let probe : Wire_runtime.runtime_probe_snapshot =
@@ -2115,6 +2124,7 @@ let test_p1_p2_verifier_regressions () =
           lanes = many_lanes;
           runtimes = [];
           usage_windows = None;
+          media = None;
         }
   in
   let rt_scroll =
@@ -2526,6 +2536,8 @@ let test_v25_runtime_quotas_aliases_and_collapsed_unreported () =
             declared_reasoning_effort = None;
             transport = Some "cli";
             is_default = true;
+            supports_image_input = None;
+            supports_image_output = None;
           };
         ];
       usage_windows =
@@ -2542,6 +2554,7 @@ let test_v25_runtime_quotas_aliases_and_collapsed_unreported () =
                 acct_exh;
               ];
           };
+      media = None;
     }
   in
   let rt =
@@ -3268,10 +3281,10 @@ let test_p1_9_p1_10_quotas_max_window_buckets_and_human_cooldowns () =
   in
   let runtimes : Wire_runtime.runtime_option list =
     [
-      { id = "slot-ollama"; provider_id = "ollama_cloud"; provider = "ollama_cloud"; model = Some "qwen3"; declared_reasoning_effort = None; transport = Some "http"; is_default = false };
-      { id = "slot-5d"; provider_id = "claude_code_sat"; provider = "claude_code_sat"; model = Some "sonnet"; declared_reasoning_effort = None; transport = Some "cli"; is_default = true };
-      { id = "slot-43h"; provider_id = "cd_43h"; provider = "cd_43h"; model = Some "glm"; declared_reasoning_effort = None; transport = Some "http"; is_default = false };
-      { id = "slot-12m"; provider_id = "cd_12m"; provider = "cd_12m"; model = Some "kimi"; declared_reasoning_effort = None; transport = Some "http"; is_default = false };
+      { id = "slot-ollama"; provider_id = "ollama_cloud"; provider = "ollama_cloud"; model = Some "qwen3"; declared_reasoning_effort = None; transport = Some "http"; is_default = false; supports_image_input = None; supports_image_output = None };
+      { id = "slot-5d"; provider_id = "claude_code_sat"; provider = "claude_code_sat"; model = Some "sonnet"; declared_reasoning_effort = None; transport = Some "cli"; is_default = true; supports_image_input = None; supports_image_output = None };
+      { id = "slot-43h"; provider_id = "cd_43h"; provider = "cd_43h"; model = Some "glm"; declared_reasoning_effort = None; transport = Some "http"; is_default = false; supports_image_input = None; supports_image_output = None };
+      { id = "slot-12m"; provider_id = "cd_12m"; provider = "cd_12m"; model = Some "kimi"; declared_reasoning_effort = None; transport = Some "http"; is_default = false; supports_image_input = None; supports_image_output = None };
     ]
   in
   let resolved : Wire_runtime.runtime_resolved_snapshot =
@@ -3289,6 +3302,7 @@ let test_p1_9_p1_10_quotas_max_window_buckets_and_human_cooldowns () =
         ];
       runtimes;
       usage_windows = Some { since_unix = now_unix -. 3600.0; accounts };
+      media = None;
     }
   in
   let probe : Wire_runtime.runtime_probe_snapshot =
@@ -4215,6 +4229,7 @@ let test_wave2_tools_artifacts_board_renders () =
       body = "Top level comment";
       created_at_unix = 1795252000.0;
       score = 2;
+      attachments = [];
     }
   in
   let c2 : Wire_knowledge.board_comment =
@@ -4226,6 +4241,7 @@ let test_wave2_tools_artifacts_board_renders () =
       body = "Nested reply comment";
       created_at_unix = 1795252010.0;
       score = 1;
+      attachments = [];
     }
   in
   let k_armed =
@@ -4382,6 +4398,7 @@ let test_layer3_repos_prs_git_drift_and_board_multiline_visibility () =
       body = "LineOneToken\n\n- LineTwoToken\n- LineThreeToken";
       created_at_unix = 1795252000.0;
       score = 4;
+      attachments = [];
     }
   in
   let fm : Wire_knowledge.board_feed_meta =
@@ -4462,6 +4479,8 @@ let test_runtime_quotas_grouped_paused_runtimes_parity () =
       declared_reasoning_effort = None;
       transport = Some "cli";
       is_default = false;
+      supports_image_input = None;
+      supports_image_output = None;
     }
   in
   let mk_standing ~cause ~until ~reset_stated : Wire_runtime.runtime_standing =
@@ -4493,6 +4512,7 @@ let test_runtime_quotas_grouped_paused_runtimes_parity () =
           mk_rt ~id:"gemini:pro" ~provider:"gemini" ~model:"gemini-pro";
         ];
       usage_windows = Some { since_unix = now_unix -. 3600.0; accounts = [] };
+      media = None;
     }
   in
   let standings =
@@ -4655,6 +4675,8 @@ let test_pr2_rail_focus_and_runtime_p3_invariants () =
       declared_reasoning_effort = None;
       transport = Some "cli";
       is_default = false;
+      supports_image_input = None;
+      supports_image_output = None;
     }
   in
   let resolved : Wire_runtime.runtime_resolved_snapshot =
@@ -4670,6 +4692,7 @@ let test_pr2_rail_focus_and_runtime_p3_invariants () =
           mk_rt ~id:"gemini:pro" ~provider:"gemini" ~model:"gemini-pro";
         ];
       usage_windows = Some { since_unix = now_unix -. 3600.0; accounts = [] };
+      media = None;
     }
   in
   let standings : (string * Wire_runtime.runtime_standing) list =

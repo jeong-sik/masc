@@ -30,4 +30,5 @@
   masc_core
   ; The sweep's period is Masc_time_constants.day.
   masc.config
+  masc.attachment_store
   masc.keeper_chat_operations))

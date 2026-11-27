@@ -62,8 +62,8 @@ vi.mock('./common/toast', async original => ({
   showToast: showToastMock,
 }))
 
-vi.mock('./board/board-surface', () => ({
-  BoardSurface: () => html`<div data-testid="board-surface">Board</div>`,
+vi.mock('../workspaces/knowledge/board-tab', () => ({
+  BoardTab: () => html`<div data-testid="board-surface">Board</div>`,
 }))
 
 vi.mock('./board/sub-board-surface', () => ({

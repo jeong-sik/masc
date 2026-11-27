@@ -690,6 +690,26 @@ function validateKeeperCustomPayload(
     KEEPER_THINKING_DELTA: ['index', 'delta', 'response'],
     KEEPER_THINKING_SNAPSHOT: ['index', 'snapshot', 'response'],
     KEEPER_THINKING_SIGNATURE_DELTA: ['index', 'signature_bytes'],
+    KEEPER_ATTACHMENT: [
+      'attachment_id',
+      'id',
+      'sha256',
+      'url',
+      'mime_type',
+      'kind',
+      'bytes',
+      'width',
+      'height',
+      'filename',
+      'origin',
+      'created_at_unix',
+      'retention',
+      'caption',
+      'block_index',
+      'tool_call_id',
+      'role',
+      'response',
+    ],
     KEEPER_MEDIA_DELTA: ['index', 'media_type', 'source_type', 'media_ref', 'response'],
     KEEPER_STREAM_PROTOCOL_ERROR: [
       'kind',
@@ -918,6 +938,31 @@ function validateKeeperCustomPayload(
     case 'KEEPER_THINKING_SIGNATURE_DELTA': {
       const index = requiredInteger(value, 'index')
       return index.success ? requiredInteger(value, 'signature_bytes') : index
+    }
+    case 'KEEPER_ATTACHMENT': {
+      if (value.response !== undefined) {
+        const owner = validateResponseOwner(value.response)
+        if (!owner.success) return owner
+      }
+      for (const field of ['attachment_id', 'url', 'mime_type']) {
+        const valid = requiredString(value, field)
+        if (!valid.success) return valid
+      }
+      if (
+        value.created_at_unix !== undefined
+        && (typeof value.created_at_unix !== 'number'
+          || !Number.isFinite(value.created_at_unix)
+          || value.created_at_unix < 0)
+      ) {
+        return fail('ag_ui_event.value.created_at_unix', 'Expected non-negative finite created_at_unix')
+      }
+      if (value.retention !== undefined) {
+        const validRetention = requiredString(value, 'retention')
+        if (!validRetention.success) return validRetention
+      }
+      return value.kind === 'image' || value.kind === 'audio' || value.kind === 'document'
+        ? ok(true)
+        : fail('ag_ui_event.value.kind', 'Expected typed attachment kind')
     }
     case 'KEEPER_MEDIA_DELTA': {
       const owner = validateResponseOwner(value.response)

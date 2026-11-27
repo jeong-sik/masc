@@ -20,6 +20,7 @@ let openai_chunk
       ?delta_reasoning
       ?delta_reasoning_details
       ?(delta_tool_calls = [])
+      ?(delta_images = [])
       ?finish_reason
       ?chunk_usage
       ()
@@ -32,6 +33,7 @@ let openai_chunk
   ; delta_reasoning_details
   ; delta_refusal = false
   ; delta_tool_calls
+  ; delta_images
   ; finish_reason
   ; chunk_usage
   ; chunk_timings = None

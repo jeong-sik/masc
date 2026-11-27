@@ -896,6 +896,8 @@ let test_cmd_executor_dispatch_and_cancellation () =
                  | Msg.Github_login_done _
                  | Msg.Setup_login_output _
                  | Msg.Setup_login_input_ready _
+  | Msg.Attachment_uploaded _
+  | Msg.Inspector_image_fetched _
                  | Msg.Stream_gap _ ->
                      ())
              | Ui_bus.Snapshot _ | Ui_bus.Stream_gap _ -> ())
@@ -1633,6 +1635,8 @@ let test_remote_editor_escape_hatch_blocked () =
                 | Msg.Github_login_done _
                 | Msg.Setup_login_output _
                 | Msg.Setup_login_input_ready _
+  | Msg.Attachment_uploaded _
+  | Msg.Inspector_image_fetched _
                 | Msg.Voice_event _
                 | Msg.Stream_gap _ ->
                     None)
@@ -2383,6 +2387,8 @@ let test_bus_key_hash_and_stream_frames () =
             | Msg.Github_login_done _
             | Msg.Setup_login_output _
             | Msg.Setup_login_input_ready _
+  | Msg.Attachment_uploaded _
+  | Msg.Inspector_image_fetched _
             | Msg.Voice_event _
             | Msg.Stream_gap _ ) ) ->
             None)
@@ -2498,6 +2504,8 @@ let test_bus_key_hash_and_stream_frames () =
   | Msg.Github_login_done _
   | Msg.Setup_login_output _
   | Msg.Setup_login_input_ready _
+  | Msg.Attachment_uploaded _
+  | Msg.Inspector_image_fetched _
   | Msg.Voice_event _
   | Msg.Stream_gap _ ->
       Alcotest.fail "expected Sse_models_metrics_snapshot");

@@ -164,6 +164,149 @@ let teardown_memory_graphic_bytes ~in_tmux = function
   | None ->
       ""
 
+type inspector_graphic_state = {
+  url : string;
+  rect : Rect.t;
+  view : Graphics.viewport_window;
+  protocol : Graphics.graphics_protocol;
+}
+
+let equal_viewport_window (a : Graphics.viewport_window)
+    (b : Graphics.viewport_window) =
+  Int.equal a.x b.x
+  && Int.equal a.y b.y
+  && Int.equal a.width b.width
+  && Int.equal a.height b.height
+  && Int.equal a.columns b.columns
+  && Int.equal a.rows b.rows
+
+let equal_inspector_graphic_state a b =
+  String.equal a.url b.url
+  && Rect.equal a.rect b.rect
+  && equal_viewport_window a.view b.view
+  && Graphics.equal_graphics_protocol a.protocol b.protocol
+
+let teardown_inspector_graphic_bytes ~in_tmux = function
+  | Some { protocol = Graphics.Kitty_protocol; _ } ->
+      Graphics.maybe_tmux_wrapped ~in_tmux
+        (Graphics.delete_image
+           ~image_id:(Graphics.image_id Graphics.Image_inspection))
+  | Some { protocol = Graphics.ITerm2_protocol | Graphics.Unsupported_protocol; _ }
+  | None ->
+      ""
+
+let desired_inspector_graphic ~(probe : Probe.observation) ~term_program
+    ~in_tmux ~(model : Model.t) =
+  let eff_term_program = if in_tmux then None else term_program in
+  let protocol =
+    Graphics.protocol_of_probe ~graphics:probe.graphics
+      ~term_program:eff_term_program
+  in
+  match protocol with
+  | Graphics.Unsupported_protocol -> None
+  | Graphics.Kitty_protocol | Graphics.ITerm2_protocol -> (
+      match model.image_inspector, Model.image_inspector_viewport_rect ~model with
+      | Some st, Some rect when rect.w >= 4 && rect.h >= 2 -> (
+          (* On iTerm2, OSC 1337 does not support source-pixel cropping, so
+             only use native iTerm2 at 100% zoom and let Halfblock draw zoomed crops. *)
+          if
+            Graphics.equal_graphics_protocol protocol Graphics.ITerm2_protocol
+            && st.zoom > 1.001
+          then None
+          else
+            match Observed.to_option st.fetched with
+            | Some { Model.url; png_bytes; dims = dims_opt; _ }
+              when String.length png_bytes > 0 ->
+                let img_px =
+                  match dims_opt with
+                  | Some (w, h) when w > 0 && h > 0 -> Some (w, h)
+                  | _ -> Png_decode.image_dimensions png_bytes
+                in
+                (match img_px with
+                | None -> None
+                | Some (iw, ih) ->
+                    let fit_cols, fit_rows =
+                      Graphics.fit_cells ~cell_pixels:probe.cell_pixels
+                        ~image_pixels:(Some (iw, ih)) ~columns:rect.w
+                        ~rows:rect.h
+                    in
+                    let view =
+                      Model.inspector_viewport_window ~img_px:(iw, ih)
+                        ~zoom:st.zoom ~pan_x:st.pan_x ~pan_y:st.pan_y
+                        ~cols:fit_cols ~rows:fit_rows
+                    in
+                    Some ({ url; rect; view; protocol }, png_bytes))
+            | Some _ | None -> None)
+      | _ -> None)
+
+let plan_inspector_graphic_clear ~active ~probe ~term_program ~in_tmux ~model =
+  let desired = desired_inspector_graphic ~probe ~term_program ~in_tmux ~model in
+  match active, desired with
+  | None, _ -> ("", false, None)
+  | Some prev, Some (next, _) when equal_inspector_graphic_state prev next ->
+      ("", false, active)
+  | Some prev, Some (next, _)
+    when Graphics.equal_graphics_protocol prev.protocol Graphics.Kitty_protocol
+         && Graphics.equal_graphics_protocol next.protocol Graphics.Kitty_protocol
+         && String.equal prev.url next.url ->
+      (* Same Kitty image URL retained in terminal: keep pixels alive for
+         zero-retransmit [Graphics.put_viewport] on zoom/pan! *)
+      ("", false, active)
+  | Some prev, (None | Some _) ->
+      let bytes = teardown_inspector_graphic_bytes ~in_tmux (Some prev) in
+      (bytes, true, None)
+
+let plan_inspector_graphic_place ~active ~probe ~term_program ~in_tmux ~model
+    ~full_repaint =
+  let desired = desired_inspector_graphic ~probe ~term_program ~in_tmux ~model in
+  match active, desired with
+  | _, None -> ("", None)
+  | Some prev, Some (next, _)
+    when equal_inspector_graphic_state prev next && not full_repaint ->
+      ("", active)
+  | Some prev, Some (next, png_bytes)
+    when Graphics.equal_graphics_protocol prev.protocol Graphics.Kitty_protocol
+         && Graphics.equal_graphics_protocol next.protocol Graphics.Kitty_protocol
+         && String.equal prev.url next.url && not full_repaint ->
+      let payload =
+        Graphics.put_viewport
+          ~image_id:(Graphics.image_id Graphics.Image_inspection)
+          ~placement_id:1 next.view
+      in
+      let bytes =
+        Graphics.place_at_cursor ~in_tmux ~row:(next.rect.y + 1)
+          ~col:(next.rect.x + 1) payload
+      in
+      if String.equal bytes "" then
+        let fallback =
+          Graphics.place_viewport
+            ~image_id:(Graphics.image_id Graphics.Image_inspection)
+            ~placement_id:1 ~data:png_bytes next.view
+        in
+        let fb_bytes =
+          Graphics.place_at_cursor ~in_tmux ~row:(next.rect.y + 1)
+            ~col:(next.rect.x + 1) fallback
+        in
+        if String.equal fb_bytes "" then ("", None) else (fb_bytes, Some next)
+      else (bytes, Some next)
+  | (None | Some _), Some (next, png_bytes) ->
+      let payload =
+        match next.protocol with
+        | Graphics.Kitty_protocol ->
+            Graphics.place_viewport
+              ~image_id:(Graphics.image_id Graphics.Image_inspection)
+              ~placement_id:1 ~data:png_bytes next.view
+        | Graphics.ITerm2_protocol ->
+            Graphics.iterm2_place ~data:png_bytes
+              { Graphics.columns = next.view.columns; rows = next.view.rows }
+        | Graphics.Unsupported_protocol -> ""
+      in
+      let bytes =
+        Graphics.place_at_cursor ~in_tmux ~row:(next.rect.y + 1)
+          ~col:(next.rect.x + 1) payload
+      in
+      if String.equal bytes "" then ("", None) else (bytes, Some next)
+
 let composer_popup_open (model : Model.t) =
   match Update_nav.resolve_composer_popup model with
   | Update_nav.Composer_popup_none -> false
@@ -383,7 +526,8 @@ let msg_pace = function
   | Msg.Key_event _ | Msg.Paste_text _ | Msg.Mouse_event _
   | Msg.Terminal_focus _ | Msg.Resize _
   | Msg.Chat_stream_chunk _ | Msg.Chat_stream_done _
-  | Msg.Memory_diagram_rendered _ ->
+  | Msg.Memory_diagram_rendered _
+  | Msg.Attachment_uploaded _ | Msg.Inspector_image_fetched _ ->
       Frame_scheduler.Pace_interactive
   | Msg.Boot | Msg.Tick _ | Msg.Server_health_result _
   | Msg.Server_start_result _ | Msg.Http_reply _ | Msg.Sse_event _
@@ -1054,6 +1198,20 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
           end
         in
         Eio.Switch.on_release sw clear_active_memory_graphic;
+        let active_inspector_graphic : inspector_graphic_state option ref =
+          ref None
+        in
+        let clear_active_inspector_graphic () =
+          let bytes =
+            teardown_inspector_graphic_bytes ~in_tmux !active_inspector_graphic
+          in
+          active_inspector_graphic := None;
+          if not (String.equal bytes "") then begin
+            Terminal_out.write bytes;
+            Terminal_out.flush ()
+          end
+        in
+        Eio.Switch.on_release sw clear_active_inspector_graphic;
         let document_graphics = Document_graphics.create () in
         let clear_document_graphic () =
           Document_graphics.cancel_pending document_graphics;
@@ -1176,6 +1334,7 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                pause_terminal =
                  (fun () ->
                    clear_active_memory_graphic ();
+                   clear_active_inspector_graphic ();
                    clear_document_graphic ();
                    (match !input_handle with
                    | Some h ->
@@ -1217,7 +1376,8 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                ()
            in
            let executor =
-             Cmd_executor.create ~sw:work_sw ~io ~worker ~clock ~cli ~bus ~editor_handoff
+             Cmd_executor.create ~sw:work_sw ~io ~worker ~clock ~cli ~bus
+               ~in_tmux ~term_program ~editor_handoff
                ~on_editor_ready:(fun () -> Wake_bell.ring bell Wake_bell.Ui_bus)
                ~on_quit ~on_restart ()
            in
@@ -1268,7 +1428,9 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
             | Msg.Github_login_chunk _
             | Msg.Github_login_done _
             | Msg.Setup_login_output _
-            | Msg.Setup_login_input_ready _ ->
+            | Msg.Setup_login_input_ready _
+            | Msg.Attachment_uploaded _
+            | Msg.Inspector_image_fetched _ ->
                 false
           in
           if toggle_mouse then begin
@@ -1612,22 +1774,48 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                         ~fetch_retained:(fun endpoint ~path ~max_body_bytes ->
                           Http_client.get_raw_limited ~io ~clock ~max_body_bytes endpoint ~path)
                         ~on_ready:(fun () -> Wake_bell.ring bell Wake_bell.Ui_bus)
+                        ~term_program ~in_tmux
                         ~probe:probe_obs ~theme grid
                     in
                     List.iter
-                      (Document_graphics.mask_fallback grid
+                      (Document_graphics.mask_fallback ~bg_rgb:theme.surface_0 grid
                          ~style:(Typography.primary ~bg:(Color.of_rgb theme.surface_0) theme))
                       desired_document;
-                    let document_pre =
+                    let {
+                          Document_graphics.escape_bytes = document_pre;
+                          invalidate_screen = document_invalidate;
+                        } =
                       Document_graphics.before_present document_graphics
                         ~in_tmux desired_document
                     in
+                    let desired_inspector =
+                      desired_inspector_graphic ~probe:probe_obs ~term_program
+                        ~in_tmux ~model:!model
+                    in
+                    (match desired_inspector with
+                    | Some (insp_st, _) ->
+                        Cell_grid.fill_rect grid ~rect:insp_st.rect
+                          ~style:
+                            (Typography.primary
+                               ~bg:(Color.of_rgb theme.surface_2) theme)
+                          ()
+                    | None -> ());
                     let pre_bytes, invalidate_for_graphic, remaining_graphic =
                       plan_memory_graphic_clear ~active:!active_memory_graphic
                         ~probe:probe_obs ~term_program ~in_tmux ~model:!model
                     in
                     active_memory_graphic := remaining_graphic;
-                    let pre_bytes = pre_bytes ^ document_pre in
+                    let insp_pre, insp_invalidate, remaining_insp =
+                      plan_inspector_graphic_clear
+                        ~active:!active_inspector_graphic ~probe:probe_obs
+                        ~term_program ~in_tmux ~model:!model
+                    in
+                    active_inspector_graphic := remaining_insp;
+                    let invalidate_for_graphic =
+                      invalidate_for_graphic || insp_invalidate
+                      || document_invalidate
+                    in
+                    let pre_bytes = pre_bytes ^ insp_pre ^ document_pre in
                     if not (String.equal pre_bytes "") then begin
                       Terminal_out.write pre_bytes;
                       Terminal_out.flush ()
@@ -1664,12 +1852,20 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                           (diff_stats.full_repaint || invalidate_for_graphic)
                     in
                     active_memory_graphic := next_graphic;
+                    let insp_post, next_insp =
+                      plan_inspector_graphic_place
+                        ~active:!active_inspector_graphic ~probe:probe_obs
+                        ~term_program ~in_tmux ~model:!model
+                        ~full_repaint:
+                          (diff_stats.full_repaint || invalidate_for_graphic)
+                    in
+                    active_inspector_graphic := next_insp;
                     let document_post =
                       Document_graphics.after_present document_graphics ~in_tmux
                         ~full_repaint:(diff_stats.full_repaint || invalidate_for_graphic)
                         desired_document
                     in
-                    let post_bytes = post_bytes ^ document_post in
+                    let post_bytes = post_bytes ^ insp_post ^ document_post in
                     if not (String.equal post_bytes "") then begin
                       Terminal_out.write post_bytes;
                       Terminal_out.flush ()

@@ -297,23 +297,6 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
   | Ok (Runtime_route_runtime_id (Runtime_default, None)) ->
     Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd
       "default runtime_id required"
-  | Ok (Runtime_route_runtime_id (Runtime_media_failover, _)) ->
-    Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd
-      "media_failover runtime_ids required"
-  | Ok (Runtime_route_runtime_ids (Runtime_media_failover, runtime_ids)) ->
-    (match Runtime.set_runtime_media_failover ~runtime_ids () with
-     | Error msg ->
-       audit_runtime_config_write state agent_name
-         ~operation:
-           (Runtime_config_routing_list (Runtime_media_failover, runtime_ids))
-         ~text:body_str
-         ~outcome:(Audit_log.Failure msg) ();
-       Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
-     | Ok receipt ->
-       respond_runtime_config_commit state agent_name
-         ~operation:
-           (Runtime_config_routing_list (Runtime_media_failover, runtime_ids))
-         ~receipt req reqd)
   | Ok (Runtime_route_runtime_id (Runtime_named_lane lane_id, _)) ->
     Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd
       (Printf.sprintf "%s runtime_ids required" lane_id)
@@ -338,9 +321,6 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
   | Ok (Runtime_route_named_lane_set_if_revision (lane_id, runtime_ids, revision)) ->
     respond_lane_write (Runtime_config_routing_list (Runtime_named_lane lane_id, runtime_ids))
       (Runtime.set_runtime_lane_candidates ~lane_id ~runtime_ids ~expected_source_revision:revision ())
-  | Ok (Runtime_route_media_failover_set_if_revision (runtime_ids, revision)) ->
-    respond_lane_write (Runtime_config_routing_list (Runtime_media_failover, runtime_ids))
-      (Runtime.set_runtime_media_failover_if_revision ~runtime_ids ~expected_source_revision:revision ())
   | Ok (Runtime_route_runtime_id (Runtime_exact_lane _, _)) ->
     Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd
       "exact-output lane runtime_ids required"
@@ -627,8 +607,6 @@ module For_testing = struct
         Ok (lane_string lane, "runtime_ids", runtime_ids)
     | Ok (Runtime_route_named_lane_set_if_revision (lane_id, runtime_ids, _)) ->
         Ok (lane_id, "runtime_ids_if_revision", runtime_ids)
-    | Ok (Runtime_route_media_failover_set_if_revision (runtime_ids, _)) ->
-        Ok ("media_failover", "runtime_ids_if_revision", runtime_ids)
     | Ok (Runtime_route_lane_created (lane_id, runtime_ids)) ->
         Ok (lane_id, "create", runtime_ids)
     | Ok (Runtime_route_lane_removed (lane_id, _)) -> Ok (lane_id, "remove", [])

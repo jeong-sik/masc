@@ -15,6 +15,7 @@ val approval_lifecycle_fields : approval_lifecycle option -> (string * Yojson.Sa
     of a page's bytes (#42200). The transcript route keeps it -- the
     dashboard reads it there. *)
 val message_to_json :
+  ?base_dir:string ->
   ?omit_stream_contract:bool ->
   trace_lookup_available:bool -> trace_block:chat_block option ->
   chat_message -> Yojson.Safe.t

@@ -589,6 +589,12 @@ let parse_capability_overrides ~base cap_json =
     let* raw = member_string "modality_priority" cap_json in
     parse_modality_priority raw
   in
+  let* image_output =
+    enum
+      "image_output"
+      Capability_vocab.image_output_contract_values
+      Capability_vocab.image_output_contract_of_string
+  in
   let* accepted_reasoning_efforts_raw =
     member_string_list "accepted_reasoning_efforts" cap_json
   in
@@ -724,6 +730,10 @@ let parse_capability_overrides ~base cap_json =
     |> fun caps ->
     (match modality_priority with
      | Some modality_priority -> { caps with Capability_profile.modality_priority }
+     | None -> caps)
+    |> fun caps ->
+    (match image_output with
+     | Some image_output -> { caps with Capability_profile.image_output }
      | None -> caps)
     |> fun caps ->
     override supports_native_streaming caps (fun caps value ->

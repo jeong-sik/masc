@@ -72,6 +72,28 @@ type responses_truncation =
 val responses_truncation_to_string : responses_truncation -> string
 val responses_truncation_of_string : string -> responses_truncation option
 
+(** Typed per-request options for in-turn image generation (Gemini
+    [generationConfig.imageConfig], OpenAI Responses [image_generation] tool,
+    OpenRouter Chat [modalities] + [image_config]). *)
+type image_generation_options =
+  { aspect_ratio : string option
+  ; size : string option
+  ; quality : string option
+  ; count : int option
+  }
+[@@deriving show, eq]
+
+val default_image_generation_options : image_generation_options
+
+(** List the option names inside [opts] (e.g. ["aspect_ratio"], ["size"],
+    ["quality"], ["count"]) that have no wire representation under [contract]
+    and would otherwise be ignored. Pure and exhaustive on
+    {!Capabilities.image_output_contract}. *)
+val unsupported_image_generation_options
+  :  contract:Capabilities.image_output_contract
+  -> image_generation_options
+  -> string list
+
 type t =
   { kind : provider_kind
   ; provider_id : string option
@@ -126,6 +148,11 @@ type t =
   ; tool_choice : Types.tool_choice option
   ; disable_parallel_tool_use : bool
   ; response_format : Types.response_format
+  ; output_media : image_generation_options option
+    (** Opt-in in-turn image generation options. [None] leaves text/tool turns
+        unchanged (unless a model's declared {!Capabilities.image_output_contract}
+        is {!Capabilities.In_turn_gemini_modalities}, which always emits
+        [responseModalities]). *)
   ; cache_system_prompt : bool
   ; system_prompt_cache_prefix : string option
     (** Caller-issued stable System prefix. With Anthropic caching enabled,
@@ -317,6 +344,7 @@ val make
   -> ?tool_choice:Types.tool_choice
   -> ?disable_parallel_tool_use:bool
   -> ?response_format:Types.response_format
+  -> ?output_media:image_generation_options
   -> ?cache_system_prompt:bool
   -> ?system_prompt_cache_prefix:string
   -> ?cache_extended_ttl:bool
@@ -478,6 +506,10 @@ val pricing_source : t -> Pricing.source
 type capability_source = Model_capability | Provider_default_capability
 
 val resolve_request_capabilities : t -> Capabilities.capabilities * capability_source
+
+(** Derive the closed bidirectional {!Capabilities.media_capabilities} view
+    directly from {!resolve_request_capabilities} and [config]'s wire/path. *)
+val media_capabilities : t -> Capabilities.media_capabilities
 (** One capability resolution for request admission, observation and runtime
     projection. Explicit declarations and frozen model policies answer first.
     Missing model facts use the typed wire's existing request defaults. An

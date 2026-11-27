@@ -37,6 +37,7 @@ type openai_chunk =
   ; delta_reasoning : string option
   ; delta_reasoning_details : openai_reasoning_details_delta option
   ; delta_tool_calls : openai_tool_call_delta list
+  ; delta_images : (string * media_source) list
   ; finish_reason : string option
   ; chunk_usage : delta_usage option
   ; chunk_timings : inference_timings option
@@ -372,6 +373,7 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                       ; delta_reasoning = None
                       ; delta_reasoning_details = None
                       ; delta_tool_calls = []
+                      ; delta_images = []
                       ; finish_reason = None
                       ; chunk_usage
                       ; chunk_timings
@@ -497,6 +499,12 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                        openai_parse_failed ~raw:data_str "malformed_openai_sse_payload:refusal_not_string"
                      | Ok _, Error reason -> openai_parse_failed ~raw:data_str reason
                      | Ok delta_refusal, Ok delta_tool_calls ->
+                       let delta_images =
+                         Backend_openai_parse.image_sources_of_openai_json
+                           (delta |> member "images")
+                         @ Backend_openai_parse.image_sources_of_openai_json
+                             (delta |> member "content")
+                       in
                        let finish_reason =
                          choice |> member "finish_reason" |> to_string_option
                        in
@@ -508,6 +516,7 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                          ; delta_reasoning
                          ; delta_reasoning_details
                          ; delta_tool_calls
+                         ; delta_images
                          ; finish_reason
                          ; chunk_usage
                          ; chunk_timings

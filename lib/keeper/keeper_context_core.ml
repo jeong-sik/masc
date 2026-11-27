@@ -37,37 +37,19 @@ let context_of_agent_core_checkpoint (cp : Agent_core.Checkpoint.t) : working_co
   sync_agent_core_context { checkpoint }
 
 let checkpoint_for_persistence
-    ~base_path
+    ~base_path:_
     ~(runtime_id : string)
     ~(keeper_name : string)
     ~(session : session_context)
     ~(agent_name : string)
     ~(ctx : working_context)
   : (Agent_core.Checkpoint.t, Keeper_transcript_unit.structural_error) result =
+  let _ = runtime_id, keeper_name in
   let checkpoint_context = Agent_core.Context.copy ~eio:true (agent_core_context_of_context ctx) in
   let checkpoint_messages = messages_of_context ctx in
-  (* RFC vision-delegation §2.3 site 2 (checkpoint write boundary). For a
-     keeper whose runtime cannot take an image, evict any inline image to a
-     handle-only placeholder BEFORE it is persisted, so a reloaded checkpoint
-     can never re-materialise inline base64. A Url/File_id reference block is
-     not inline base64 (#33682): it persists as-is, and the RFC-0265 degrade
-     floor strips it from the dispatch view of a text-only runtime while the
-     persisted original stays requestable. Store-only here — checkpoint
-     writes must not block the turn fiber on a vision provider call (eager
-     extraction is site 1's job). Also the migration path for images persisted
-     by pre-existing checkpoints. A runtime that takes the image itself keeps
-     it. [runtime_id]/[keeper_name] are required so every checkpoint write path
-     is compiler-forced to name the runtime it persists for (N-of-M closure). *)
-  let checkpoint_messages =
-    List.map
-      (Keeper_vision_ingest.evict_message
-         ~base_path
-         ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
-         ~mode:Keeper_vision_ingest.Store_only
-         ~delegate:(Keeper_vision_ingest.delegates_media ~runtime_id)
-         ~keeper_name)
-      checkpoint_messages
-  in
+  (* Canonical checkpoint history retains media blocks intact; dispatch-time
+     projection in [Keeper_turn_driver] projects media only when the concrete
+     dispatched candidate has [No_vision_input]. *)
   match Keeper_transcript_unit.validate checkpoint_messages with
   | Error _ as error -> error
   | Ok () ->

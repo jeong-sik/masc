@@ -108,7 +108,7 @@ let materialize_single_runtime
     ; bindings = [ binding ]
     ; default_runtime_id = Some id
     ; keeper_assignments = []
-    ; media_failover = []
+    ; media = Runtime_schema.empty_media_overrides
     ; lane_decls = []
     ; exact_output_lane_decls = []
     }

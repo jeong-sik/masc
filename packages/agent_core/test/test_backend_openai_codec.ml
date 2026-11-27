@@ -1032,18 +1032,23 @@ let test_non_base64_media_source_fails_closed () =
      since #53575). The fail-closed contract remains for backends and media
      kinds with no native reference carrier: ollama rejects a URL image, and
      the Responses surface rejects non-base64 audio ([File_id]/[Url]). *)
-  expect_invalid_arg "ollama image url" (fun () ->
-    ollama_messages
-      ~supports_image_input:true
-      [ msg
-          User
-          [ Image
-              { media_type = "image/png"
-              ; source = Types.Url "https://example.invalid/image.png"
-              }
-          ]
-      ]
-    |> ignore);
+  let caps = Capabilities.default_capabilities in
+  Alcotest.(check bool)
+    "ollama image url fails closed as typed Error"
+    true
+    (Result.is_error
+       (Serialize.ollama_messages_of_history
+          ~modality_priority:caps.modality_priority
+          ~supports_image_input:true
+          ~supports_document_input:caps.supports_document_input
+          [ msg
+              User
+              [ Image
+                  { media_type = "image/png"
+                  ; source = Types.Url "https://example.invalid/image.png"
+                  }
+              ]
+          ]));
   let media_capable_config =
     Provider_config.make
       ~kind:Provider_config.OpenAI_compat
@@ -1241,16 +1246,21 @@ let test_ollama_native_multimodal_variants () =
   check_int "image-only images count" 1 (List.length images);
   check_string "image-only payload" "png1" (List.nth images 0 |> to_string);
   (* Audio is not supported by Ollama native /api/chat and must fail closed
-     instead of being silently dropped. *)
-  expect_invalid_arg "ollama audio input" (fun () ->
-    ollama_messages
-      ~supports_image_input:false
-      [ msg
-          User
-          [ Audio { media_type = "audio/wav"; source = Types.Base64 "wav1" }
-          ]
-      ]
-    |> ignore);
+     as a typed Error instead of being silently dropped. *)
+  let caps = Capabilities.default_capabilities in
+  Alcotest.(check bool)
+    "ollama audio input fails closed as typed Error"
+    true
+    (Result.is_error
+       (Serialize.ollama_messages_of_history
+          ~modality_priority:caps.modality_priority
+          ~supports_image_input:false
+          ~supports_document_input:caps.supports_document_input
+          [ msg
+              User
+              [ Audio { media_type = "audio/wav"; source = Types.Base64 "wav1" }
+              ]
+          ]));
   (* Mixed text + image preserves text in content and the payload in images. *)
   let mixed =
     ollama_messages
@@ -4462,10 +4472,14 @@ let test_ollama_tool_media_occurrence_ownership () =
     (nested_wire = Api_common.content_block_to_json (result "nested" [Text "nested text"]));
   let invalid_image = image_block ~media_type:"image/png"
       ~source:(Url "https://example.test/image.png") in
-  expect_invalid_arg "native tool URL image" (fun () ->
-    ollama_messages ~supports_image_input:true
-      [msg User [Text "Inspect"]; use "Read"; msg Tool [result "reused" [invalid_image]]]);
   let caps = Capabilities.default_capabilities in
+  check_bool "native tool URL image returns typed Error" true
+    (Result.is_error
+       (Serialize.ollama_messages_of_history
+          ~modality_priority:caps.modality_priority
+          ~supports_image_input:true
+          ~supports_document_input:false
+          [msg User [Text "Inspect"]; use "Read"; msg Tool [result "reused" [invalid_image]]]));
   check_bool "orphaned tool media is still rejected" true
     (Result.is_error (Serialize.ollama_messages_of_history
       ~modality_priority:caps.modality_priority ~supports_image_input:true

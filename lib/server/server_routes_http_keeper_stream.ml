@@ -173,6 +173,7 @@ type user_input_block = Keeper_multimodal_input.user_input_block =
   | User_image of user_image_source
   | User_document of user_media_block
   | User_audio of user_media_block
+  | User_attachment of user_media_block
 
 type admission_intent = Queue_only | Interactive of {
   control_token : string; target : Keeper_owner_registry.interactive_target option }
@@ -382,7 +383,7 @@ let keeper_stream_success = function
   | Tool_result.Completed () | Tool_result.Deferred () -> true
   | Tool_result.Failed _ -> false
 
-let parse_keeper_chat_stream_request ~media_store body_str =
+let parse_keeper_chat_stream_request ?base_path ~media_store body_str =
   try
     let open Result.Syntax in
     let json = Yojson.Safe.from_string body_str in
@@ -508,9 +509,17 @@ let parse_keeper_chat_stream_request ~media_store body_str =
     in
     let* attachments = Keeper_multimodal_input.parse_attachments json in
     let* user_blocks = Keeper_multimodal_input.parse_user_blocks json in
-    let* () =
-      Keeper_multimodal_input.validate_attachment_references ~attachments
-        user_blocks
+    let user_blocks =
+      Keeper_multimodal_input.normalize_user_blocks ~attachments user_blocks
+    in
+    let* attachments =
+      match base_path with
+      | Some bp ->
+        Keeper_multimodal_input.hydrate_attachments
+          ~base_path:bp
+          ~attachments
+          user_blocks
+      | None -> Ok attachments
     in
     let message =
       if String.equal (String.trim raw_message) ""
@@ -543,6 +552,7 @@ let parse_keeper_chat_stream_request ~media_store body_str =
       in
       let* direct_message =
         Keeper_invocation_contract.direct_message
+          ?base_path
           ~media_store
           ~keeper_name:name
           ~prompt:invocation_prompt
@@ -679,35 +689,53 @@ let connector_input ~base_path ~clock ~keeper_name ~operation_id
              else Error "Accepted Discord image row differs from the original message"
            | _ -> Error "Accepted Discord image row is missing or ambiguous"
          in
-         let store = Tool_blob_store.create ~base_path in
+         let blob_store = Tool_blob_store.create ~base_path in
+         let att_store = Attachment_store.create ~base_path in
+         let admitted_count = List.length source.connector_attachments in
          let rec rehydrate acc = function
            | [] -> Ok (List.rev acc)
            | (image : Keeper_chat_store.attachment) :: rest ->
-             let* () =
-               if List.exists (fun (Keeper_chat_operation_payload.Discord_image { attachment_id }) ->
-                    String.equal attachment_id image.id) source.connector_attachments
-               then Ok () else Error "Accepted Discord image was not admitted on the original operation"
-             in
-             let* reference =
-               match Tool_output.decode_from_agent_core image.data with
-               | Tool_output.Decoded reference -> Ok reference
-               | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
-                 Error "Accepted Discord image has no retained payload reference"
-             in
-             let* bytes =
-               Tool_blob_store.fetch_bounded store ~sha256:reference.sha256 ~max_bytes:reference.bytes
-               |> Result.map_error Tool_blob_store.fetch_error_to_string
-             in
-             (match bytes with
-              | Some data -> rehydrate ({ image with data } :: acc) rest
-              | None -> Error "Accepted Discord image payload is missing")
+             if Result.is_ok (Attachment_store.parse_id (String.trim image.id)) then (
+               if List.length acc >= admitted_count
+               then Error "Accepted Discord image count exceeds original operation"
+               else
+                 match Attachment_store.get_bytes att_store ~id:(String.trim image.id) with
+                 | Ok (Some raw_bytes) ->
+                   rehydrate ({ image with data = Base64.encode_string raw_bytes } :: acc) rest
+                 | Ok None -> Error "Accepted Discord image payload is missing"
+                 | Error err -> Error (Attachment_store.get_error_to_string err)
+             ) else (
+               let* () =
+                 if List.exists (fun (Keeper_chat_operation_payload.Discord_image { attachment_id }) ->
+                      String.equal attachment_id image.id) source.connector_attachments
+                 then Ok () else Error "Accepted Discord image was not admitted on the original operation"
+               in
+               let* reference =
+                 match Tool_output.decode_from_agent_core image.data with
+                 | Tool_output.Decoded reference -> Ok reference
+                 | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+                   Error "Accepted Discord image has no retained payload reference"
+               in
+               let* bytes =
+                 Tool_blob_store.fetch_bounded blob_store ~sha256:reference.sha256 ~max_bytes:reference.bytes
+                 |> Result.map_error Tool_blob_store.fetch_error_to_string
+               in
+               match bytes with
+               | Some data -> rehydrate ({ image with data } :: acc) rest
+               | None -> Error "Accepted Discord image payload is missing")
          in
          let* images = rehydrate [] (Option.value row.attachments ~default:[]) in
          Ok (with_images ~message:row.content images, true)))
 ;;
 
-let operation_payload_of_json ?connector_source ~media_store ~keeper_name ~operation_id ~source ~input () =
+let operation_payload_of_json ?base_path ?connector_source ~media_store ~keeper_name ~operation_id ~source ~input () =
   let open Result.Syntax in
+  let resolved_base_path =
+    match base_path, connector_source with
+    | Some bp, _ -> Some bp
+    | None, Some (bp, _) -> Some bp
+    | None, None -> None
+  in
   let invalid result = Result.map_error (fun detail -> Operation_input_invalid detail) result in
   let* source = invalid (Keeper_chat_operation_payload.source_of_json source) in
   let* input = invalid (Keeper_chat_operation_payload.input_of_json input) in
@@ -757,6 +785,7 @@ let operation_payload_of_json ?connector_source ~media_store ~keeper_name ~opera
   in
   let* direct_message =
     Keeper_invocation_contract.direct_message
+      ?base_path:resolved_base_path
       ~media_store
       ~keeper_name
       ~prompt:invocation_prompt
@@ -1396,6 +1425,79 @@ let publish_stream_events ~redact_text ~base_dir ~publish bridge_state scoped_ev
        translated.bridge_state)
     bridge_state scoped_events
 
+let canonical_user_attachment_ids (payload : keeper_chat_stream_request) =
+  let seen = Hashtbl.create 4 in
+  let out = ref [] in
+  let add id =
+    let trimmed = String.trim id in
+    if Result.is_ok (Attachment_store.parse_id trimmed) && not (Hashtbl.mem seen trimmed) then (
+      Hashtbl.add seen trimmed ();
+      out := trimmed :: !out)
+  in
+  List.iter
+    (fun (att : Keeper_chat_store.attachment) ->
+       add att.id;
+       List.iter add (Attachment_store.extract_att_ids att.data))
+    payload.attachments;
+  List.iter
+    (function
+      | Keeper_multimodal_input.User_image (Keeper_multimodal_input.Url_ref { value; _ }) ->
+        List.iter add (Attachment_store.extract_att_ids value)
+      | Keeper_multimodal_input.User_text _
+      | Keeper_multimodal_input.User_image
+          (Keeper_multimodal_input.Attached _ | Keeper_multimodal_input.File_id_ref _)
+      | Keeper_multimodal_input.User_document _
+      | Keeper_multimodal_input.User_audio _
+      | Keeper_multimodal_input.User_attachment _ -> ())
+    payload.user_blocks;
+  List.rev !out
+
+let tool_result_attachment_ids ~base_path ~dated_store_root ~keeper_name ~execution_id =
+  let store =
+    Dated_jsonl.open_store
+      (Dated_jsonl.Store.at dated_store_root Dated_jsonl.Store.Root.Tool_calls)
+  in
+  match
+    Keeper_tool_call_index.by_execution_ids
+      ~store
+      ~keeper_name
+      ~execution_ids:[ Ids.Execution_id.to_string execution_id ]
+  with
+  | Error _ -> []
+  | Ok rows ->
+    let att_store = Attachment_store.create ~base_path in
+    let seen = Hashtbl.create 4 in
+    let out = ref [] in
+    List.iter
+      (fun row ->
+         let output_ids =
+           match Yojson.Safe.Util.member "output" row with
+           | `String s -> Attachment_store.extract_att_ids s
+           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> []
+         in
+         let typed_ids =
+           match Yojson.Safe.Util.member "typed_result" row with
+           | `Null -> []
+           | (`Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) as json ->
+             Attachment_store.extract_att_ids (Yojson.Safe.to_string json)
+         in
+         List.iter
+           (fun attachment_id ->
+              if not (Hashtbl.mem seen attachment_id) then (
+                Hashtbl.add seen attachment_id ();
+                match Attachment_store.get_meta att_store ~id:attachment_id with
+                | Ok (Some meta) ->
+                  (match meta.origin with
+                   | Attachment_store.User_upload -> ()
+                   | Attachment_store.Tool_capture
+                   | Attachment_store.Model_generated
+                   | Attachment_store.Connector_inbound ->
+                     out := attachment_id :: !out)
+                | Ok None | Error _ -> ()))
+           (output_ids @ typed_ids))
+      rows;
+    List.rev !out
+
 (* [user_row_origin] and [submission] are required labelled arguments. Every
    caller presents the typed transcript provenance and execution ownership
    selected at its persistence boundary; this function never infers either
@@ -1423,6 +1525,16 @@ let process_single_turn_with_outcome_ref ~on_turn_ref ~batch_binding ~user_row_o
     (Run_started { run_id; thread_id }) in
   Option.iter (fun (operation_id, execution_id) ->
     Keeper_chat_events.publish events (Batch_bound {operation_id; execution_id})) batch_binding;
+  List.iter
+    (fun attachment_id ->
+       Keeper_chat_events.publish events
+         (Attachment_emitted
+            { attachment_id
+            ; role = Keeper_chat_events.Attachment_user
+            ; tool_call_id = None
+            ; caption = None
+            }))
+    (canonical_user_attachment_ids payload);
   Keeper_chat_events.publish events
     (Text_message_start { message_id; role = Assistant });
   let completed_stream_lifecycle =
@@ -1666,6 +1778,23 @@ let process_single_turn_with_outcome_ref ~on_turn_ref ~batch_binding ~user_row_o
     in
     ()
   in
+  let publish_tool_result_attachments ~tool_call_id ~execution_id =
+    let dated_store_root =
+      Workspace.dated_store_root (Mcp_server.workspace_config state)
+    in
+    List.iter
+      (fun attachment_id ->
+         push_worker_event
+           (Stream_chat_event
+              (Keeper_chat_events.Attachment_emitted
+                 { attachment_id
+                 ; role = Keeper_chat_events.Attachment_tool
+                 ; tool_call_id
+                 ; caption = None
+                 })))
+      (tool_result_attachment_ids ~base_path ~dated_store_root
+         ~keeper_name:payload.name ~execution_id)
+  in
   let on_tool_stream_observation observation =
     let result =
       match observation with
@@ -1719,8 +1848,12 @@ let process_single_turn_with_outcome_ref ~on_turn_ref ~batch_binding ~user_row_o
                  ~block_index ~tool_call_id ~execution_id with
          | Error _ as error -> error
          | Ok occurrence ->
+           let tool_call_id_opt =
+             if String.trim tool_call_id = "" then None else Some tool_call_id
+           in
            push_worker_event (Stream_chat_event (Keeper_chat_events.Tool_result_ready
              { occurrence; tool_call_id = Some tool_call_id; execution_id; is_error = None }));
+           publish_tool_result_attachments ~tool_call_id:tool_call_id_opt ~execution_id;
            Ok ())
       | Keeper_hooks_agent_core.Turn_closed_without_sources { turn } ->
         Keeper_stream_tool_accum.close_turn_without_sources worker_tool_accum ~turn
@@ -1754,7 +1887,8 @@ let process_single_turn_with_outcome_ref ~on_turn_ref ~batch_binding ~user_row_o
       push_worker_event
         (Stream_chat_event
            (Keeper_chat_events.Tool_result_ready
-              { occurrence; tool_call_id; execution_id; is_error }))
+              { occurrence; tool_call_id; execution_id; is_error }));
+      publish_tool_result_attachments ~tool_call_id ~execution_id
     | Error detail ->
       (* The runtime-aware wrapper invokes this callback only for the exact
          Agent Core candidate attempt whose pre-execution sidecar can satisfy
@@ -2521,6 +2655,7 @@ let process_single_turn_with_outcome_ref ~on_turn_ref ~batch_binding ~user_row_o
           | Keeper_chat_events.Tool_approval_requested _
           | Keeper_chat_events.Tool_approval_settled _
           | Keeper_chat_events.Tool_transcript_committed _ | Keeper_chat_events.Link_block _
+          | Keeper_chat_events.Attachment_emitted _
           | Keeper_chat_events.Image_block _ | Keeper_chat_events.Status_block _
           | Keeper_chat_events.Audio_block _ | Keeper_chat_events.Tool_context_block _ -> bridge_state
         in
@@ -2718,6 +2853,7 @@ let persist_batch_user_rows ~base_dir ~keeper_name members =
       let* input = match operation.input with Some input -> Ok input
         | None -> Error "active batch member has no original input" in
       let* decoded = operation_payload_of_json
+        ~base_path:base_dir
         ~media_store:(Tool_blob_media_store.of_base_path ~base_path:base_dir)
         ~keeper_name ~operation_id:operation.operation_id
         ~source:operation.source ~input ()
@@ -2759,7 +2895,7 @@ let project_and_emit_operation_member ~base_path ~keeper_name ~redact_text ~seq 
   in
   let projection, projected =
     Server_keeper_chat_agui_projection.project
-      ~timestamp:ts ~redact_text projection member_event
+      ~base_path ~timestamp:ts ~redact_text projection member_event
   in
   Option.iter (fun event ->
     let operation_id = Keeper_chat_operation.Operation_id.to_string member_id in
@@ -2874,6 +3010,7 @@ let create_operation_event_bus ~base_path ~keeper_name ~continuation_channel
            | Keeper_chat_events.Tool_result_ready _
            | Keeper_chat_events.Tool_transcript_committed _
            | Keeper_chat_events.Link_block _
+           | Keeper_chat_events.Attachment_emitted _
            | Keeper_chat_events.Image_block _
            | Keeper_chat_events.Status_block _
            | Keeper_chat_events.Audio_block _
@@ -3427,6 +3564,7 @@ let journal_replay_frames ~base_path ~keeper_name ~operation_id ~since_seq =
     (match
        let redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
        Server_keeper_chat_replay.replay
+         ~base_path
          ~redact_text:(Keeper_secret_redaction.redact_text redaction)
          ~since_seq
          entries
@@ -3825,4 +3963,6 @@ module For_testing = struct
   let on_operation_execution_settled = on_operation_execution_settled
   let register_operation_live_sink = register_operation_live_sink
   let publish_stream_events = publish_stream_events
+  let canonical_user_attachment_ids = canonical_user_attachment_ids
+  let tool_result_attachment_ids = tool_result_attachment_ids
 end

@@ -20,6 +20,16 @@ type previous =
       }
   | Compared_with_previous of previous_comparison
 
+type attachment_sweep_report =
+  { total_blobs : int
+  ; live_blobs : int
+  ; unreferenced_blobs : int
+  ; deleted : int
+  ; retained_within_grace : int
+  ; delete_failures : int
+  ; blocked_by_unclassified : bool
+  }
+
 type report =
   { scan_started_at : float
   ; scan_seconds : float
@@ -36,6 +46,7 @@ type report =
   ; malformed_warnings : Tool_blob_maintenance.malformed_reference_warning list
   ; previous : previous
   ; touches : Tool_blob_store.touch_counts
+  ; attachment_sweep : (attachment_sweep_report, string) result option
   }
 
 type error =
@@ -92,11 +103,25 @@ let report_to_string report =
         previous.now_live.read_only
         previous.now_live.untouched
   in
+  let attachment_suffix =
+    match report.attachment_sweep with
+    | None -> ""
+    | Some (Ok att) ->
+      Printf.sprintf
+        " attachments_total=%d attachments_deleted=%d attachments_retained_grace=%d \
+         attachments_delete_failures=%d attachments_blocked_unclassified=%b"
+        att.total_blobs
+        att.deleted
+        att.retained_within_grace
+        att.delete_failures
+        att.blocked_by_unclassified
+    | Some (Error detail) -> Printf.sprintf " attachments_sweep_error=%S" detail
+  in
   Printf.sprintf
     "scan_seconds=%.1f live_digests=%d blobs=%d candidates=%d deletable=%d \
      deletable_bytes=%d deleted=%d deleted_bytes=%d delete_failures=%d \
      unstatable=%d unclassified=%d malformed_warnings=%d %s touched_current=%d \
-     touched_previous=%d touched_current_evicted=%b touched_previous_evicted=%b"
+     touched_previous=%d touched_current_evicted=%b touched_previous_evicted=%b%s"
     report.scan_seconds
     report.live_digests
     report.blobs
@@ -114,6 +139,7 @@ let report_to_string report =
     report.touches.previous_addresses
     report.touches.current_evicted
     report.touches.previous_evicted
+    attachment_suffix
 ;;
 
 let maintenance_dir ~base_path =
@@ -721,7 +747,176 @@ let scan_internal ~reclaim_mode ~min_age_seconds ~base_path ~scope =
     ; malformed_warnings
     ; previous = comparison
     ; touches = touch_counts
+    ; attachment_sweep = None
     }
+;;
+
+(* [observe] and [reclaim] are defined below [sweep_attachments] so [reclaim]
+   also runs the fail-closed attachment sweep when no unclassified entries exist. *)
+
+(* {1 Attachment reachability} *)
+
+type attachment_reachability =
+  { live_sha256s : String_set.t
+  ; total_blobs : int
+  ; unreferenced_sha256s : String_set.t
+  ; scanned_files : int
+  }
+
+let is_skippable_scan_name name =
+  String.equal name Tool_blob_maintenance.finder_metadata_name
+  || Fs_compat.is_unpublished_write_name name
+  || Fs_compat.is_lock_name name
+;;
+
+let scan_file_for_attachments ~base_path path (live, scanned) =
+  match Fs_compat.load_owned_regular_file ~ownership_root:base_path path with
+  | Ok (Some payload) ->
+    let found = Attachment_store.referenced_sha256_of_json_text payload in
+    Ok (String_set.union live found, scanned + 1)
+  | Ok None -> Ok (live, scanned)
+  | Error err ->
+    Error
+      (Printf.sprintf
+         "attachment reachability read failed on %s: %s"
+         path
+         (Fs_compat.owned_regular_file_read_error_to_string err))
+;;
+
+let rec walk_for_attachments ~base_path path acc =
+  let open Result.Syntax in
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok acc
+  | exception Unix.Unix_error (code, fn, arg) ->
+    Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+  | { Unix.st_kind = Unix.S_REG; _ } -> scan_file_for_attachments ~base_path path acc
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    let* entries =
+      try Ok (Sys.readdir path |> Array.to_list) with
+      | Sys_error msg -> Error (Printf.sprintf "readdir(%s): %s" path msg)
+      | Unix.Unix_error (code, fn, arg) ->
+        Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+    in
+    List.fold_left
+      (fun acc_res name ->
+         let* acc = acc_res in
+         if is_skippable_scan_name name
+         then Ok acc
+         else walk_for_attachments ~base_path (Filename.concat path name) acc)
+      (Ok acc)
+      entries
+  | { Unix.st_kind =
+        Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
+    ; _
+    } ->
+    Ok acc
+;;
+
+let scan_attachment_reachability ~base_path ~scope =
+  let open Result.Syntax in
+  let store = Attachment_store.create ~base_path in
+  let* blobs = Attachment_store.list_all_blobs store in
+  let consumer_roots = Tool_blob_maintenance.consumer_paths scope ~base_path in
+  let config_keepers_dir = scope.Tool_blob_maintenance.config_keepers_dir ~base_path in
+  let all_roots = config_keepers_dir :: consumer_roots in
+  let* live_from_files, scanned_files =
+    List.fold_left
+      (fun acc_res root ->
+         let* acc = acc_res in
+         walk_for_attachments ~base_path root acc)
+      (Ok (String_set.empty, 0))
+      all_roots
+  in
+  let* ephemeral_pins = Attachment_store.list_all_ephemeral_pins store in
+  let live_sha256s = String_set.union live_from_files ephemeral_pins in
+  let unreferenced_sha256s =
+    List.fold_left
+      (fun acc sha ->
+         if String_set.mem sha live_sha256s then acc else String_set.add sha acc)
+      String_set.empty
+      blobs
+  in
+  Ok
+    { live_sha256s
+    ; total_blobs = List.length blobs
+    ; unreferenced_sha256s
+    ; scanned_files
+    }
+;;
+
+let sweep_attachments
+      ?(min_age_seconds = Masc_time_constants.day)
+      ?(now = Unix.gettimeofday ())
+      ~base_path
+      ~scope
+      ()
+  =
+  let open Result.Syntax in
+  let store = Attachment_store.create ~base_path in
+  let* blobs = Attachment_store.list_all_blobs store in
+  if blobs = []
+  then
+    Ok
+      { total_blobs = 0
+      ; live_blobs = 0
+      ; unreferenced_blobs = 0
+      ; deleted = 0
+      ; retained_within_grace = 0
+      ; delete_failures = 0
+      ; blocked_by_unclassified = false
+      }
+  else (
+    let* unclassified =
+      Tool_blob_maintenance.unclassified_entries ~base_path scope
+      |> Result.map_error Tool_blob_maintenance.error_to_string
+    in
+    let* reach = scan_attachment_reachability ~base_path ~scope in
+    let unreferenced_count = String_set.cardinal reach.unreferenced_sha256s in
+    let live_count = reach.total_blobs - unreferenced_count in
+    if unclassified <> []
+    then
+      Ok
+        { total_blobs = reach.total_blobs
+        ; live_blobs = live_count
+        ; unreferenced_blobs = unreferenced_count
+        ; deleted = 0
+        ; retained_within_grace = 0
+        ; delete_failures = 0
+        ; blocked_by_unclassified = true
+        }
+    else (
+      let min_age = Float.max 0.0 min_age_seconds in
+      let age_cutoff = now -. min_age in
+      let* fresh_ephemeral_pins = Attachment_store.list_all_ephemeral_pins store in
+      let deleted, retained_within_grace, delete_failures =
+        String_set.fold
+          (fun sha256 (del, ret, fail) ->
+             if String_set.mem sha256 fresh_ephemeral_pins
+             then del, ret + 1, fail
+             else (
+               match Attachment_store.blob_last_modified_at store ~sha256 with
+               | Ok None -> del, ret, fail
+               | Ok (Some modified_at) ->
+                 if min_age <= 0.0 || modified_at <= age_cutoff
+                 then (
+                   match Attachment_store.delete_unreferenced store ~sha256 with
+                   | Ok true -> del + 1, ret, fail
+                   | Ok false -> del, ret, fail
+                   | Error _ -> del, ret, fail + 1)
+                 else del, ret + 1, fail
+               | Error _ -> del, ret, fail + 1))
+          reach.unreferenced_sha256s
+          (0, 0, 0)
+      in
+      Ok
+        { total_blobs = reach.total_blobs
+        ; live_blobs = live_count
+        ; unreferenced_blobs = unreferenced_count
+        ; deleted
+        ; retained_within_grace
+        ; delete_failures
+        ; blocked_by_unclassified = false
+        }))
 ;;
 
 let observe ~base_path ~scope =
@@ -729,9 +924,34 @@ let observe ~base_path ~scope =
 ;;
 
 let reclaim ?(min_age_seconds = Masc_time_constants.day) ~base_path ~scope () =
-  scan_internal
-    ~reclaim_mode:true
-    ~min_age_seconds:(Float.max 0.0 min_age_seconds)
-    ~base_path
-    ~scope
+  let min_age = Float.max 0.0 min_age_seconds in
+  match scan_internal ~reclaim_mode:true ~min_age_seconds:min_age ~base_path ~scope with
+  | Error _ as err -> err
+  | Ok report ->
+    if report.unclassified <> []
+    then Ok report
+    else (
+      let att_res =
+        sweep_attachments
+          ~min_age_seconds:min_age
+          ~now:report.scan_started_at
+          ~base_path
+          ~scope
+          ()
+      in
+      (match att_res with
+       | Error detail ->
+         Printf.eprintf
+           "tool blob sweep: attachment sweep failed fail-closed (0 attachments deleted): %s\n%!"
+           detail
+       | Ok att when att.blocked_by_unclassified ->
+         Printf.eprintf
+           "tool blob sweep: attachment sweep blocked by unclassified entries (0 attachments deleted)\n%!"
+       | Ok att when att.delete_failures > 0 ->
+         Printf.eprintf
+           "tool blob sweep: attachment sweep reported %d delete failure(s) (deleted=%d)\n%!"
+           att.delete_failures
+           att.deleted
+       | Ok _ -> ());
+      Ok { report with attachment_sweep = Some att_res })
 ;;

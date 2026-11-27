@@ -338,6 +338,7 @@ type post_request =
       title : string;
       body : string;
       hearth : string option;
+      attachment_ids : string list;
     }
   | Post_board_comment of {
       post_id : string;
@@ -657,6 +658,10 @@ type terminal_program =
   | Score_view of { sources : string list; index : int }
       (* alphaTex sources, newest first; [index] counts from 1 *)
 
+type attachment_upload_target =
+  | Upload_for_keeper of string
+  | Upload_for_board
+
 type t =
   | Batch of t list
   | Http_get of { epoch : Epoch.t; req : get_request }
@@ -700,6 +705,27 @@ type t =
       filename_stem : string;
       ext : string;
       content_opt : string option;
+      open_after : bool;
+    }
+  | Upload_attachment_file of {
+      epoch : Epoch.t;
+      target : attachment_upload_target;
+      path : string;
+    }
+  | Paste_clipboard_image of {
+      epoch : Epoch.t;
+      target : attachment_upload_target;
+    }
+  | Fetch_inspector_image of {
+      epoch : Epoch.t;
+      url : string;
+      format_png : bool;
+    }
+  | Export_attachment of {
+      epoch : Epoch.t;
+      url : string;
+      filename_stem : string;
+      ext : string;
       open_after : bool;
     }
   | Open_dos_screen of { epoch : Epoch.t }

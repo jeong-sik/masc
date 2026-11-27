@@ -460,7 +460,6 @@ let no_image_runtime_toml =
   {|
 [runtime]
 default = "p0.text"
-media_failover = ["p0.text"]
 
 [providers.p0]
 protocol = "openai-compatible-http"
@@ -516,11 +515,11 @@ let with_temp_runtime_toml content f =
       f ())
 
 (* The browser fixture attaches its workers under its own runtime.toml, a
-   codex-only config with no media_failover, and restores the caller's
-   runtime state when it returns. A test that reads pixels through the vision
-   reader inside that body re-establishes its vision runtime first: under the
-   fixture's config the vision candidate set is empty, so the reader answers
-   no image-capable runtime instead of calling the provider. *)
+   codex-only config with no vision-capable HTTP fallback, and restores the
+   caller's runtime state when it returns. A test that reads pixels through
+   the vision reader inside that body re-establishes its vision runtime first:
+   under the fixture's config the vision candidate set is empty, so the reader
+   answers no image-capable runtime instead of calling the provider. *)
 let reinit_vision_runtime_from_stack () =
   match !runtime_config_stack with
   | path :: _ -> init_runtime_or_fail path
@@ -530,7 +529,6 @@ let vision_failover_runtime_toml =
   {|
 [runtime]
 default = "p1.vision-a"
-media_failover = ["p1.vision-a", "p2.vision-b"]
 
 [providers.p1]
 protocol = "ollama-http"
@@ -566,7 +564,6 @@ let single_vision_runtime_toml =
   {|
 [runtime]
 default = "p3.vision-c"
-media_failover = ["p3.vision-c"]
 
 [providers.p3]
 protocol = "ollama-http"
@@ -598,7 +595,6 @@ let uncapped_vision_fallback_runtime_toml =
   {|
 [runtime]
 default = "p0.text"
-media_failover = ["p0.text", "p4.vision-a"]
 
 [providers.p0]
 protocol = "openai-compatible-http"
@@ -676,7 +672,6 @@ let image_capable_vision_runtime_toml =
   {|
 [runtime]
 default = "local.vision"
-media_failover = ["local.vision"]
 
 [providers.local]
 protocol = "openai-compatible-http"
@@ -1701,7 +1696,7 @@ let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
            "call keeper_analyze_image to read it");
       let handle = artifact_handle_of_placeholder placeholder in
       (match
-         Store.load
+         Vt.load_artifact
            ~dir:(Vt.vision_store_dir ~keeper_name ())
            (Store.of_string handle)
        with
@@ -1743,7 +1738,7 @@ let test_fallback_projection_preserves_artifacts_and_caches_each_mode () =
     let assert_stored = function
       | Agent_core.Types.Text placeholder ->
         let handle = artifact_handle_of_placeholder placeholder |> Store.of_string in
-        (match Store.load ~dir:(Vt.vision_store_dir ~keeper_name ()) handle with
+        (match Vt.load_artifact ~dir:(Vt.vision_store_dir ~keeper_name ()) handle with
          | Ok stored -> assert (stored = bytes)
          | Error error -> failwith (Store.load_error_to_string error))
       | _ -> failwith "fallback image must carry its durable artifact"
@@ -1824,7 +1819,7 @@ let test_fallback_semantic_read_is_cached_after_completion () =
        assert (repeated = Agent_core.Types.Text reading);
        assert (String_util.contains_substring reading "deployment failed, code 413");
        let handle = artifact_handle_of_placeholder reading |> Store.of_string in
-       (match Store.load ~dir:(Vt.vision_store_dir ~keeper_name ()) handle with
+       (match Vt.load_artifact ~dir:(Vt.vision_store_dir ~keeper_name ()) handle with
         | Ok original -> assert (original = bytes)
         | Error detail -> failwith (Store.load_error_to_string detail))
      | _ -> failwith "semantic fallback lost its reading or artifact");
@@ -2273,7 +2268,6 @@ let vision_output_limit_runtime_toml =
   {|
 [runtime]
 default = "p1.vision-a"
-media_failover = ["p1.vision-a", "p1.vision-a", "p2.vision-b"]
 [providers.p1]
 protocol = "openai-compatible-http"
 endpoint = "https://p1.example/v1"
@@ -2587,17 +2581,18 @@ let test_browser_screenshot_reaches_vision_reader () =
            | Tool_result.Completed _|Deferred _|Failed _ -> failwith "a screenshot without a Keeper did not return its image block");
           let handle = assoc_string "artifact" data in
           let root_dir = Vt.vision_store_dir ~base_path ~keeper_name:meta.name () in
-          let frames_dir = Vt.frames_dir ~base_path ~keeper_name:meta.name () in
           (* The test executable points MASC_BASE_PATH at the last workspace
              it opened, which after the attach is the served one, so the
              ambient store is named by its base, not read from the env. *)
           let ambient_dir = Vt.vision_store_dir ~base_path:ambient_base ~keeper_name:meta.name () in
           assert (root_dir <> ambient_dir);
-          let frame_path = Filename.concat frames_dir handle in
-          let kept_path = Filename.concat root_dir handle in
-          assert (Sys.file_exists frame_path);
-          assert (not (Sys.file_exists kept_path));
-          assert (not (Sys.file_exists (Filename.concat (Store.frames_dir ~dir:ambient_dir) handle)));
+          let att_store = Attachment_store.create ~base_path in
+          let ambient_att_store = Attachment_store.create ~base_path:ambient_base in
+          (match Attachment_store.get_meta_by_sha256 att_store ~sha256:handle with
+           | Ok (Some m) ->
+             assert (String.equal (Attachment_store.retention_to_wire_string m.retention) "ephemeral")
+           | _ -> failwith "browser screenshot must be stored as ephemeral in workspace Attachment_store");
+          assert (Attachment_store.get_meta_by_sha256 ambient_att_store ~sha256:handle = Ok None);
           let wrong_config = Masc.Workspace.default_config ambient_base in
           let wrong = Masc.Keeper_image_read.handle ~config:wrong_config ~meta
             ~args:(`Assoc ["artifact",`String handle]) () in
@@ -2617,8 +2612,11 @@ let test_browser_screenshot_reaches_vision_reader () =
             ~meta ~args:(artifact_args handle) () |> json_of_output in
           assert (!seen_image);
           assert (assoc_string "text" reader = "stored browser pixels reached vision");
-          assert (Sys.file_exists kept_path);
-          assert (not (Sys.file_exists (Filename.concat ambient_dir handle)));
+          (match Attachment_store.get_meta_by_sha256 att_store ~sha256:handle with
+           | Ok (Some m) ->
+             assert (String.equal (Attachment_store.retention_to_wire_string m.retention) "durable")
+           | _ -> failwith "vision reader must promote browser screenshot to durable");
+          assert (Attachment_store.get_meta_by_sha256 ambient_att_store ~sha256:handle = Ok None);
           let native = Masc.Keeper_image_read.handle ~config ~meta
             ~args:(`Assoc ["artifact",`String handle]) () in
           assert (native.disposition = Tool_result.Completed ());
@@ -2645,18 +2643,10 @@ let test_browser_screenshot_reaches_vision_reader () =
                ~persistence_error_to_string:Fun.id error));
           let checkpoint = match Context.load_context_from_checkpoint ~trace_id:checkpoint_trace ~base_dir:checkpoint_base with
             | _,Some ctx -> ctx | _,None -> failwith "scoped image checkpoint disappeared" in
-          let checkpoint_handle = match Context.messages_of_context checkpoint with
-            | [{content=[Agent_core.Types.Text placeholder];_}] -> artifact_handle_of_placeholder placeholder
-            | _ -> failwith "checkpoint did not evict inline pixels" in
-          assert (Store.load ~dir:(Vt.vision_store_dir ~base_path ~keeper_name:checkpoint_keeper ())
-            (Store.of_string checkpoint_handle) = Ok image_bytes);
-          assert (not (Sys.file_exists (Filename.concat
-            (Vt.vision_store_dir ~keeper_name:checkpoint_keeper ()) checkpoint_handle)));
-          Unix.utimes frame_path 10.0 10.0;
-          ignore (Result.get_ok (Store.store ~auto_prune:false ~dir:frames_dir "newer frame"));
-          ignore (Result.get_ok (Store.prune ~max_entries:1 ~dir:frames_dir ()));
-          assert (not (Sys.file_exists frame_path));
-          assert (Store.load ~dir:root_dir (Store.of_string handle) = Ok image_bytes);
+          (match Context.messages_of_context checkpoint with
+           | [{content=[Agent_core.Types.Image _];_}] -> ()
+           | _ -> failwith "checkpoint must preserve canonical Image block without destructive eviction");
+          assert (Vt.load_artifact ~dir:root_dir (Store.of_string handle) = Ok image_bytes);
           (* Each read below goes to the named client once. *)
           live_calls := [];
           List.iter (fun mode ->
@@ -2722,8 +2712,8 @@ let test_native_browser_screenshot_artifact_scope () =
           assert (Yojson.Safe.Util.member "height" data = `Int 1);
           assert (not (String_util.contains_substring result.raw_output encoded));
           let handle = assoc_string "artifact" data in
-          let frames_dir = Vt.frames_dir ~base_path ~keeper_name:meta.name () in
-          assert (Store.load ~dir:frames_dir (Store.of_string handle) = Ok (Base64.decode_exn encoded));
+          let root_dir = Vt.vision_store_dir ~base_path ~keeper_name:meta.name () in
+          assert (Vt.load_artifact ~dir:root_dir (Store.of_string handle) = Ok (Base64.decode_exn encoded));
           let native = Masc.Keeper_image_read.handle ~config ~meta
             ~args:(`Assoc ["artifact",`String handle]) () in
           assert (native.disposition = Tool_result.Completed ());
@@ -2733,15 +2723,23 @@ let test_native_browser_screenshot_artifact_scope () =
            | _ -> failwith "native capture artifact did not reach the image reader"))
           [`Assoc [];`Assoc ["fullPage",`Bool true;"scale",`String "css";"raw",`Bool true]];
         let options = Browser_lane.Capture.to_json !expected in
-        let frames_dir = Vt.frames_dir ~base_path ~keeper_name:meta.name () in
-        let stored = Sys.readdir frames_dir |> Array.to_list |> List.sort String.compare in
+        let list_meta_files () =
+          let meta_root = List.fold_left Filename.concat base_path [ ".masc"; "attachments"; "meta" ] in
+          if not (Sys.file_exists meta_root) then []
+          else
+            Sys.readdir meta_root |> Array.to_list |> List.concat_map (fun shard ->
+              let d = Filename.concat meta_root shard in
+              Sys.readdir d |> Array.to_list |> List.map (fun f -> shard ^ "/" ^ f))
+            |> List.sort String.compare
+        in
+        let stored = list_meta_files () in
         echo := Some (`Assoc []);
         assert ((capture options).disposition <> Tool_result.Completed ());
         echo := None;
         extra := ["viewport",`Assoc ["documentId",`String "forged-pointer-frame";
           "width",`Float 800.;"height",`Float 600.;"scrollX",`Float 0.;"scrollY",`Float 0.]];
         assert ((capture options).disposition <> Tool_result.Completed ());
-        assert ((Sys.readdir frames_dir |> Array.to_list |> List.sort String.compare) = stored)))))
+        assert (list_meta_files () = stored)))))
 
 let test_browser_screenshot_preserves_space () =
   with_temp_base (fun base_path ->
@@ -2949,7 +2947,7 @@ let test_generated_sandbox_image_reaches_vision () =
         let output = json_of_output result.raw_output in
         let handle = assoc_string "artifact" output in
         assert (assoc_string "text" output = "generated image read");
-        assert (Store.load ~dir:(Vt.vision_store_dir ~keeper_name:meta.name ()) (Store.of_string handle) = Ok bytes);
+        assert (Vt.load_artifact ~dir:(Vt.vision_store_dir ~keeper_name:meta.name ()) (Store.of_string handle) = Ok bytes);
         let again = invoke (`Assoc ["artifact", `String handle; "query", `String "read generated image"]) in
         assert (again.disposition = Tool_result.Completed ());
         assert (!calls = 2);
@@ -3000,10 +2998,13 @@ let test_native_image_read_artifact_and_authority () =
     assert (Yojson.Safe.Util.member "visual_input" output = `Bool true);
     assert (Yojson.Safe.Util.member "width" output = `Int 1);
     assert (Yojson.Safe.Util.member "height" output = `Int 1);
-    (* Successful reads pin rotating frames in the stable owned image store. *)
-    Unix.unlink (Filename.concat (Vt.frames_dir ~keeper_name:meta.name ()) handle);
-    assert (Store.load ~dir:(Vt.vision_store_dir ~keeper_name:meta.name ())
-      (Store.of_string handle) = Ok bytes);
+    (* Successful reads promote ephemeral frames to Durable in Attachment_store. *)
+    let att_store = Attachment_store.create ~base_path in
+    (match Attachment_store.get_meta_by_sha256 att_store ~sha256:handle with
+     | Ok (Some m) ->
+       assert (String.equal (Attachment_store.retention_to_wire_string m.retention) "durable")
+     | _ -> failwith "native read must promote frame to Durable in Attachment_store");
+    assert (Attachment_store.get_bytes_by_sha256 att_store ~sha256:handle = Ok (Some bytes));
     assert ((invoke meta args).content_blocks = result.content_blocks);
     let expect_error meta args code =
       let rejected = invoke meta args in
@@ -3014,7 +3015,13 @@ let test_native_image_read_artifact_and_authority () =
         | None -> failwith "native read failure did not retain its typed data" in
       assert (assoc_string "error" data = code)
     in
-    expect_error (make_meta "other-image-owner") args "artifact_not_found";
+    let private_frame_bytes = bytes ^ "private-ephemeral" in
+    let private_handle =
+      Result.get_ok (Vt.store_frame ~keeper_name:meta.name private_frame_bytes)
+      |> Store.to_string
+    in
+    expect_error (make_meta "other-image-owner")
+      (`Assoc ["artifact", `String private_handle]) "artifact_not_found";
     expect_error meta (`Assoc ["artifact", `String "bad-reference"]) "invalid_artifact";
     expect_error meta (`Assoc []) "invalid_args";
     expect_error meta (`Assoc ["artifact", `String handle; "path", `String "image.png"]) "invalid_args";
@@ -3035,7 +3042,12 @@ let test_native_image_read_artifact_and_authority () =
      | Some [Llm_provider.Types.Text _; Llm_provider.Types.Image {media_type="image/webp";source=Base64 data}] ->
        assert (Base64.decode_exn data = webp)
      | _ -> failwith "supported WebP bytes must remain readable");
-    write_file (Filename.concat (Vt.vision_store_dir ~keeper_name:meta.name ()) handle) "tampered pixels";
+    let shard = String.sub handle 0 2 in
+    let blob_path =
+      List.fold_left Filename.concat base_path [ ".masc"; "attachments"; "blobs"; shard; handle ]
+    in
+    (try Unix.chmod blob_path 0o600 with _ -> ());
+    write_file blob_path "tampered pixels";
     expect_error meta args "artifact_load_failed")
 
 let test_native_image_admission () =

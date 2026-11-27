@@ -439,7 +439,9 @@ let route_access_of_slash_command_id : Slash.command_id -> Rbac.route_access =
   | Slash.Cmd_context
   | Slash.Cmd_addon ->
       Rbac.Single_user_read
-  | Slash.Cmd_btw -> Rbac.Single_user_write
+  | Slash.Cmd_btw | Slash.Cmd_attach | Slash.Cmd_detach | Slash.Cmd_paste_image
+    ->
+      Rbac.Single_user_write
   | Slash.Cmd_infra -> Rbac.Su_read_ma_admin
   | Slash.Cmd_config -> Rbac.Bridged_token_admin
   | Slash.Cmd_prompt -> Rbac.Single_user_role_admin
@@ -484,6 +486,9 @@ let route_access_of_slash_parsed : Slash.parsed -> Rbac.route_access = function
   | Slash.Incidents -> route_access_of_slash_command_id Slash.Cmd_incidents
   | Slash.Jump -> route_access_of_slash_command_id Slash.Cmd_jump
   | Slash.Voice -> route_access_of_slash_command_id Slash.Cmd_voice
+  | Slash.Attach _ -> route_access_of_slash_command_id Slash.Cmd_attach
+  | Slash.Detach _ -> route_access_of_slash_command_id Slash.Cmd_detach
+  | Slash.Paste_image -> route_access_of_slash_command_id Slash.Cmd_paste_image
   | Slash.Btw _ -> route_access_of_slash_command_id Slash.Cmd_btw
   | Slash.Discord_reply ->
       route_access_of_slash_command_id Slash.Cmd_discord_reply
@@ -1352,7 +1357,11 @@ let decide_menu_target session target =
   Rbac.decide session (route_access_of_menu_target target)
 let decide_slash_command_id session id =
   match id with
-  | Slash.Cmd_btw -> can_chat_with_keeper session
+  | Slash.Cmd_btw
+  | Slash.Cmd_attach
+  | Slash.Cmd_detach
+  | Slash.Cmd_paste_image ->
+      can_chat_with_keeper session
   | Slash.Cmd_pulse
   | Slash.Cmd_work
   | Slash.Cmd_knowledge
@@ -1393,7 +1402,11 @@ let decide_slash_command_id session id =
       Rbac.decide session (route_access_of_slash_command_id id)
 let decide_slash_parsed session parsed =
   match parsed with
-  | Slash.Btw _ -> can_chat_with_keeper session
+  | Slash.Btw _
+  | Slash.Attach _
+  | Slash.Detach _
+  | Slash.Paste_image ->
+      can_chat_with_keeper session
   | Slash.Pulse
   | Slash.Work
   | Slash.Knowledge
@@ -1461,8 +1474,14 @@ let rec is_cmd_allowed session = function
   | Cmd.Http_post_stream { req; _ } -> can_stream_post session req
   | Cmd.Open_editor_escape_hatch target ->
       allowed_of (decide_editor_target session target)
-  | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ ->
+  | Cmd.Fetch_artifact_and_copy _
+  | Cmd.Export_artifact _
+  | Cmd.Fetch_inspector_image _
+  | Cmd.Export_attachment _ ->
       Rbac.is_allowed session Rbac.Single_user_read
+  | Cmd.Upload_attachment_file _
+  | Cmd.Paste_clipboard_image _ ->
+      Rbac.is_allowed session Rbac.Single_user_write
   | Cmd.Open_dos_screen _ -> Rbac.is_allowed session Rbac.Machine_play
   | Cmd.Voice_cmd (Cmd.Start_ptt _) ->
       Rbac.is_allowed session Rbac.Single_user_token_admin_only
@@ -1500,6 +1519,10 @@ let rec filter_cmd session = function
     | Cmd.Open_editor_escape_hatch _
     | Cmd.Fetch_artifact_and_copy _
     | Cmd.Export_artifact _
+    | Cmd.Upload_attachment_file _
+    | Cmd.Paste_clipboard_image _
+    | Cmd.Fetch_inspector_image _
+    | Cmd.Export_attachment _
     | Cmd.Open_dos_screen _
     | Cmd.Voice_cmd _
     | Cmd.Set_bearer_token _

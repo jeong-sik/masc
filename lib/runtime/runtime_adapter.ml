@@ -459,6 +459,32 @@ let agent_core_thinking_control_format = function
   | Runtime_schema.Reasoning_enabled -> Llm_provider.Capabilities.Reasoning_enabled
 ;;
 
+let resolved_image_output_override
+      ~(wire : Llm_provider.Provider_kind.t)
+      ~(base : Llm_provider.Capabilities.capabilities)
+      (override : bool option)
+  : Llm_provider.Capabilities.image_output_contract
+  =
+  match override with
+  | None -> base.image_output
+  | Some false -> Llm_provider.Capabilities.No_image_output
+  | Some true ->
+    if Llm_provider.Capabilities.supports_image_output base
+    then base.image_output
+    else (
+      match wire with
+      | Llm_provider.Provider_kind.Gemini ->
+        Llm_provider.Capabilities.In_turn_gemini_modalities
+      | Llm_provider.Provider_kind.OpenAI_compat ->
+        Llm_provider.Capabilities.In_turn_openai_chat_modalities
+      | Llm_provider.Provider_kind.Glm ->
+        Llm_provider.Capabilities.Endpoint_images_api Llm_provider.Capabilities.Zai_images_v4
+      | Llm_provider.Provider_kind.Anthropic
+      | Llm_provider.Provider_kind.Kimi
+      | Llm_provider.Provider_kind.Ollama ->
+        Llm_provider.Capabilities.No_image_output)
+;;
+
 (* Every value a runtime capability block states, laid over [base]. [None]
    means the block stated nothing, so [base] decides — what a
    [false]-defaulted bool could not deliver (#37435). [tools-support] and
@@ -466,17 +492,16 @@ let agent_core_thinking_control_format = function
    one with [false] and [true], so they always carry a value and override
    [base] whether the model table writes them or not. *)
 let stated_capabilities_over
+      ~(wire : Llm_provider.Provider_kind.t)
       ~(base : Llm_provider.Capabilities.capabilities)
       (spec : Runtime_schema.model_spec)
       (caps : Runtime_schema.model_capabilities)
   : Llm_provider.Capabilities.capabilities
   =
   let stated field ~default = Option.value field ~default in
-  (* Media input stays fail-closed: MASC's model spec is the SSOT for
-     it ([Runtime_agent.apply_runtime_model_input_capabilities]), so an
-     unwritten media flag is [false], never the base's value. Absence
-     is the answer here, not a stand-in for a value that went missing:
-     the operator did not grant the modality. *)
+  (* Media input stays fail-closed for uncatalogued (rowless) models: the
+     generic provider preset knows nothing about an arbitrary custom model, so
+     an unwritten media flag stays [false] unless explicitly stated. *)
   (* DET-OK: the default is the contract. *)
   let media field = Option.value field ~default:false in
   { base with
@@ -503,6 +528,7 @@ let stated_capabilities_over
   ; supports_document_input = media caps.supports_document_input
   ; supports_audio_input = media caps.supports_audio_input
   ; supports_video_input = media caps.supports_video_input
+  ; image_output = resolved_image_output_override ~wire ~base caps.supports_image_output
   ; supports_native_streaming = spec.streaming
   ; supports_system_prompt = stated caps.supports_system_prompt ~default:base.supports_system_prompt
   ; supports_assistant_prefill = stated caps.supports_assistant_prefill ~default:base.supports_assistant_prefill
@@ -519,10 +545,12 @@ let stated_capabilities_over
     pair, project the complete typed runtime declaration into the
     Provider_config override that AGENT_CORE exposes for concrete endpoint
     contracts. Catalogued models preserve the row except for explicit output
-    ceilings, thinking transport declarations and document admission. Document
-    admission also reaches the serializer, rather than being a second decision
-    made only by the Keeper. With no declaration and no catalog answer the
-    normal startup gate still rejects the binding. *)
+    ceilings, thinking transport declarations, image-output overrides, and
+    document admission. Document admission also reaches the serializer, rather
+    than being a second decision made only by the Keeper. Vision input
+    overrides live on {!Runtime_instance.effective_media_capabilities}. With no
+    declaration and no catalog answer the normal startup gate still rejects the
+    binding. *)
 let declared_capabilities_override_of_model_spec
       ~(wire : Llm_provider.Provider_kind.t)
       ~(catalog_answer : Llm_provider.Capabilities.catalog_answer)
@@ -533,44 +561,53 @@ let declared_capabilities_override_of_model_spec
     (match spec.capabilities with
      | None -> None
      | Some runtime_caps ->
-       (match
-          runtime_caps.declared_thinking_control_format,
-          runtime_caps.reasoning_streaming_format,
-          runtime_caps.max_output_tokens,
-          runtime_caps.accepted_reasoning_efforts,
-          runtime_caps.supports_image_input,
-          runtime_caps.supports_multimodal_inputs
-        with
-        | None, None, None, None, None, None -> None
-        | thinking_control_format, reasoning_streaming_format, max_output_tokens,
-          accepted_reasoning_efforts, supports_image_input, supports_multimodal_inputs ->
-          Some
-            { catalog_caps with
-              max_output_tokens =
-                (match max_output_tokens with
-                 | Some _ -> max_output_tokens
-                 | None -> catalog_caps.max_output_tokens)
-            ; thinking_control_format =
-                (match thinking_control_format with
-                 | Some format -> agent_core_thinking_control_format format
-                 | None -> catalog_caps.thinking_control_format)
-            ; accepted_reasoning_efforts =
-                (match accepted_reasoning_efforts with
-                 | Some _ -> accepted_reasoning_efforts
-                 | None -> catalog_caps.accepted_reasoning_efforts)
-            ; reasoning_streaming_format =
-                Option.value
-                  reasoning_streaming_format
-                  ~default:catalog_caps.reasoning_streaming_format
-            ; supports_image_input =
-                Option.value
-                  supports_image_input
-                  ~default:catalog_caps.supports_image_input
-            ; supports_multimodal_inputs =
-                Option.value
-                  supports_multimodal_inputs
-                  ~default:catalog_caps.supports_multimodal_inputs
-            }))
+       let eff_image_input =
+         Option.value runtime_caps.supports_image_input ~default:catalog_caps.supports_image_input
+       in
+       let eff_multimodal_inputs =
+         Option.value
+           runtime_caps.supports_multimodal_inputs
+           ~default:catalog_caps.supports_multimodal_inputs
+       in
+       let eff_image_output =
+         resolved_image_output_override
+           ~wire
+           ~base:catalog_caps
+           runtime_caps.supports_image_output
+       in
+       let has_override =
+         Option.is_some runtime_caps.declared_thinking_control_format
+         || Option.is_some runtime_caps.reasoning_streaming_format
+         || Option.is_some runtime_caps.max_output_tokens
+         || Option.is_some runtime_caps.accepted_reasoning_efforts
+         || not (Bool.equal eff_image_input catalog_caps.supports_image_input)
+         || not (Bool.equal eff_multimodal_inputs catalog_caps.supports_multimodal_inputs)
+         || not (Llm_provider.Capabilities.equal_image_output_contract eff_image_output catalog_caps.image_output)
+       in
+       if not has_override then None
+       else
+         Some
+           { catalog_caps with
+             max_output_tokens =
+               (match runtime_caps.max_output_tokens with
+                | Some _ as declared -> declared
+                | None -> catalog_caps.max_output_tokens)
+           ; thinking_control_format =
+               (match runtime_caps.declared_thinking_control_format with
+                | Some format -> agent_core_thinking_control_format format
+                | None -> catalog_caps.thinking_control_format)
+           ; accepted_reasoning_efforts =
+               (match runtime_caps.accepted_reasoning_efforts with
+                | Some _ as declared -> declared
+                | None -> catalog_caps.accepted_reasoning_efforts)
+           ; reasoning_streaming_format =
+               Option.value
+                 runtime_caps.reasoning_streaming_format
+                 ~default:catalog_caps.reasoning_streaming_format
+           ; supports_image_input = eff_image_input
+           ; supports_multimodal_inputs = eff_multimodal_inputs
+           ; image_output = eff_image_output
+           })
   | Llm_provider.Capabilities.Provider_preset preset ->
     (* The preset speaks for every model of its provider and knows nothing of
        this one, so it is only the base: the block's window, output ceiling
@@ -580,7 +617,7 @@ let declared_capabilities_override_of_model_spec
        even when the model table does not write them. *)
     Option.map
       (fun (caps : Runtime_schema.model_capabilities) ->
-         { (stated_capabilities_over ~base:preset spec caps) with
+         { (stated_capabilities_over ~wire ~base:preset spec caps) with
            max_context_tokens =
              (match spec.max_context with
               | Some _ as declared -> declared
@@ -603,7 +640,7 @@ let declared_capabilities_override_of_model_spec
             no runtime block states (tool content shape, output budget field,
             reasoning replay). Fields the block does state override it. *)
          let base = Llm_provider.Capabilities.capabilities_of_kind wire in
-         { (stated_capabilities_over ~base spec caps) with
+         { (stated_capabilities_over ~wire ~base spec caps) with
            max_context_tokens = spec.max_context
          ; max_output_tokens = caps.max_output_tokens
          ; thinking_control_format =
@@ -621,7 +658,7 @@ let declared_capabilities_override_of_model_spec
     | Llm_provider.Provider_kind.OpenAI_compat
     | Llm_provider.Provider_kind.Gemini
     | Llm_provider.Provider_kind.Glm ->
-      (* DET-OK: absent media declarations withhold the modality. *)
+      (* DET-OK: absent document declarations withhold the modality. *)
       Option.bind spec.capabilities (fun caps -> caps.Runtime_schema.supports_document_input)
       |> Option.value ~default:false
   in

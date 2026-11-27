@@ -78,6 +78,7 @@ let producer_authorizes descriptor =
   | Descriptor.Tool_masc_local_runtime_dispatch
   | Descriptor.Tool_analyze_image
   | Descriptor.Tool_read_image
+  | Descriptor.Tool_generate_image
   | Descriptor.Tool_lane_addon _ -> false
 ;;
 

@@ -148,6 +148,68 @@ let responses_truncation_of_string raw =
   | _ -> None
 ;;
 
+type image_generation_options =
+  { aspect_ratio : string option
+  ; size : string option
+  ; quality : string option
+  ; count : int option
+  }
+[@@deriving show, eq]
+
+let default_image_generation_options =
+  { aspect_ratio = None
+  ; size = None
+  ; quality = None
+  ; count = None
+  }
+;;
+
+let unsupported_image_generation_options
+      ~(contract : Capabilities.image_output_contract)
+      (opts : image_generation_options)
+  =
+  let has_str = function
+    | Some s -> not (Api_common.string_is_blank s)
+    | None -> false
+  in
+  let has_multi_count =
+    match opts.count with
+    | Some n when n > 1 -> true
+    | Some _ | None -> false
+  in
+  let add cond name acc = if cond then name :: acc else acc in
+  let unsupported_rev =
+    match contract with
+    | Capabilities.In_turn_gemini_modalities ->
+      [] |> add (has_str opts.quality) "quality"
+    | Capabilities.In_turn_openai_responses_tool ->
+      []
+      |> add (has_str opts.aspect_ratio) "aspect_ratio"
+      |> add has_multi_count "count"
+    | Capabilities.In_turn_openai_chat_modalities ->
+      []
+      |> add (has_str opts.quality) "quality"
+      |> add has_multi_count "count"
+    | Capabilities.Endpoint_images_api Capabilities.Openai_images_v1 ->
+      [] |> add (has_str opts.aspect_ratio) "aspect_ratio"
+    | Capabilities.Endpoint_images_api Capabilities.Zai_images_v4 ->
+      []
+      |> add (has_str opts.aspect_ratio) "aspect_ratio"
+      |> add has_multi_count "count"
+    | Capabilities.Endpoint_images_api Capabilities.Gemini_imagen_predict ->
+      [] |> add (has_str opts.quality) "quality"
+    | Capabilities.In_turn_codex_item
+    | Capabilities.In_turn_acp_chunk
+    | Capabilities.No_image_output ->
+      []
+      |> add (has_str opts.aspect_ratio) "aspect_ratio"
+      |> add (has_str opts.size) "size"
+      |> add (has_str opts.quality) "quality"
+      |> add has_multi_count "count"
+  in
+  List.rev unsupported_rev
+;;
+
 type t =
   { kind : provider_kind
   ; provider_id : string option
@@ -185,6 +247,7 @@ type t =
   ; tool_choice : Types.tool_choice option
   ; disable_parallel_tool_use : bool
   ; response_format : Types.response_format
+  ; output_media : image_generation_options option
   ; cache_system_prompt : bool
   ; system_prompt_cache_prefix : string option
   ; cache_extended_ttl : bool
@@ -237,6 +300,7 @@ let make
       ?tool_choice
       ?(disable_parallel_tool_use = false)
       ?(response_format = Types.Off)
+      ?output_media
       ?(cache_system_prompt = false)
       ?system_prompt_cache_prefix
       ?(cache_extended_ttl = false)
@@ -306,6 +370,7 @@ let make
   ; tool_choice
   ; disable_parallel_tool_use
   ; response_format
+  ; output_media
   ; cache_system_prompt
   ; system_prompt_cache_prefix
   ; cache_extended_ttl
@@ -990,6 +1055,14 @@ let validate_request_path (config : t) =
         "OpenAI Responses API request_path requires provider kind OpenAI_compat; other \
          provider kinds use their own wire formats.")
   else Ok ()
+;;
+
+let media_capabilities (config : t) : Capabilities.media_capabilities =
+  let caps, _source = resolve_request_capabilities config in
+  Capabilities.media_capabilities_of_capabilities
+    ~wire:config.kind
+    ~responses_api:(request_path_targets_responses_api config.request_path)
+    caps
 ;;
 
 (* Structured-output tier admission (agent-core boundary / masc#25550 audit finding P4).

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
-  patchRuntimeLane, patchRuntimeMediaFailover, patchRuntimeRouting,
+  patchRuntimeLane, patchRuntimeRouting,
   type RuntimeTomlRequestOptions,
 } from './dashboard-runtime'
 import { ensureDevToken } from './dev-token'
@@ -23,8 +23,6 @@ receipt.commit.source_revision = revision
 const requests = [
   { name: 'default routing', invoke: (options?: RuntimeTomlRequestOptions) => patchRuntimeRouting('default', 'fixture.primary', options),
     body: { lane: 'default', runtime_id: 'fixture.primary' } },
-  { name: 'media failover', invoke: (options?: RuntimeTomlRequestOptions) => patchRuntimeMediaFailover(['fixture.primary', 'fixture.backup'], options),
-    body: { lane: 'media_failover', runtime_ids: ['fixture.primary', 'fixture.backup'] } },
   { name: 'candidate lane', invoke: (options?: RuntimeTomlRequestOptions) => patchRuntimeLane('fixture.lane', {
     action: 'set', runtimeIds: ['fixture.primary'], expectedSourceRevision: revision,
   }, options), body: { lane: 'fixture.lane', action: 'set', runtime_ids: ['fixture.primary'], expected_source_revision: revision } },

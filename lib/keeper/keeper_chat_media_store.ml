@@ -6,11 +6,14 @@
     generalizes the voice-clip token/serve pattern
     ([/api/v1/voice/audio/<token>]) to an arbitrary [media_type].
 
-    Files live under [<masc_dir>/media/] as [<token>.<ext>], where [token] is a
-    deterministic SHA-256 hex locator derived from the media type and raw payload.
-    Served by [GET /api/v1/media/<token>] behind normal read auth. Retention is
-    enforced opportunistically on persist via [KeeperGeneratedMedia] age and
-    directory-size caps; the voice-clip TTL sweep only owns [<masc_dir>/audio]. *)
+    Generated media is stored durably in {!Attachment_store} under
+    [<masc_dir>/attachments/] and surfaced via canonical
+    [/api/v1/attachments/att_<sha256>] URLs (with read compatibility on
+    [/api/v1/media/<token>]). Non-allowlisted model-generated formats (e.g.
+    FLAC, AAC, PCM, video) are preserved via {!Attachment_store.put_opaque} as
+    downloadable evidence rather than dropped. Unreferenced blobs are reclaimed
+    by {!Tool_blob_sweep.sweep_attachments} (wired into {!Tool_blob_sweep.reclaim});
+    the voice-clip TTL sweep only owns [<masc_dir>/audio]. *)
 
 let media_subdir = "media"
 
@@ -55,6 +58,9 @@ let known_media =
   ; { media_type = "audio/ogg"; ext = "ogg"; content_type = "audio/ogg"; category = Audio }
   ; { media_type = "audio/midi"; ext = "mid"; content_type = "audio/midi"; category = Midi }
   ; { media_type = "audio/x-midi"; ext = "mid"; content_type = "audio/midi"; category = Midi }
+  ; { media_type = "audio/mp4"; ext = "m4a"; content_type = "audio/mp4"; category = Audio }
+  ; { media_type = "audio/m4a"; ext = "m4a"; content_type = "audio/mp4"; category = Audio }
+  ; { media_type = "audio/webm"; ext = "webm"; content_type = "audio/webm"; category = Audio }
   ; { media_type = "application/pdf"; ext = "pdf"; content_type = "application/pdf"; category = Document }
   ]
 
@@ -104,15 +110,6 @@ let content_type_of_ext ext =
 let media_dir ~base_dir =
   Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) media_subdir
 
-(* Token = lowercase SHA-256 hex (64 chars). This is only an authenticated locator,
-   not a bearer capability: the media route is read-auth gated. Include the
-   normalized media type in the digest material so identical bytes mislabeled as
-   different media types cannot create multiple files for one token. *)
-let token_of_payload ~media_type data =
-  Agent_core_sha256.(digest_string (normalize media_type ^ "\000" ^ data) |> to_hex)
-
-let media_url token = Masc_network_defaults.media_path token
-
 let token_re = Re.compile (Re.Pcre.re "^[a-f0-9]{64}$")
 
 let valid_token token =
@@ -131,65 +128,6 @@ let validate_raw_size data =
   if size_bytes > max_bytes
   then Error (size_bytes, max_bytes)
   else Ok ()
-
-let cleanup_old_files_in_dir dir =
-  if Fs_compat.is_directory dir
-  then
-    try
-      let cutoff =
-        Time_compat.now ()
-        -. Env_config_keeper.KeeperGeneratedMedia.retention_seconds ()
-      in
-      let entries =
-        Sys.readdir dir
-        |> Array.to_list
-        |> List.filter_map (fun entry ->
-          let path = Filename.concat dir entry in
-          try
-            let stat = Unix.stat path in
-            if stat.st_kind = Unix.S_REG
-            then Some (path, stat.st_mtime, stat.st_size)
-            else None
-          with
-          | Unix.Unix_error _ | Sys_error _ -> None)
-      in
-      let by_age =
-        List.sort (fun (_, left_mtime, _) (_, right_mtime, _) ->
-          Float.compare left_mtime right_mtime)
-          entries
-      in
-      let remove path =
-        try Sys.remove path with
-        | Unix.Unix_error _ | Sys_error _ -> ()
-      in
-      let remaining =
-        List.filter
-          (fun (path, mtime, _size) ->
-            if mtime < cutoff
-            then (
-              remove path;
-              false)
-            else true)
-          by_age
-      in
-      let dir_max_bytes = Env_config_keeper.KeeperGeneratedMedia.dir_max_bytes () in
-      let total_size =
-        List.fold_left (fun acc (_, _, size) -> acc + size) 0 remaining
-      in
-      if total_size > dir_max_bytes
-      then
-        ignore
-          (List.fold_left
-             (fun acc (path, _mtime, size) ->
-               if acc <= dir_max_bytes
-               then acc
-               else (
-                 remove path;
-                 acc - size))
-             total_size
-             remaining)
-    with
-    | Sys_error _ | Unix.Unix_error _ -> ()
 
 let regular_file_exists path =
   try (Unix.stat path).st_kind = Unix.S_REG with
@@ -217,6 +155,48 @@ let content_type_of_path path =
   in
   content_type_of_ext (String.lowercase_ascii ext)
 
+let put_attachment_meta ~base_dir ~media_type ~data =
+  let store = Attachment_store.create ~base_path:base_dir in
+  let declared_mime =
+    let m = normalize media_type in
+    if String.equal m "" then None else Some m
+  in
+  let put_with ?declared () =
+    Attachment_store.put
+      ~max_bytes:(max_raw_bytes ())
+      ?declared_mime:declared
+      ~origin:Attachment_store.Model_generated
+      ~created_by:"keeper"
+      ~retention:Attachment_store.Durable
+      store
+      ~bytes:data
+  in
+  match put_with ?declared:declared_mime () with
+  | Ok meta -> Ok meta
+  | Error (Attachment_store.Mime_mismatch _) ->
+    (* If the provider mislabeled a supported image/audio/document (e.g. JPEG
+       bytes labeled image/png), trust magic-byte sniffing instead of dropping
+       the generated media. *)
+    put_with ()
+  | Error (Attachment_store.Unsupported_or_unknown_format _) ->
+    (* Preserve non-allowlisted model-generated media (e.g. FLAC, AAC, PCM,
+       video) opaquely so generated evidence is never dropped; HTTP serves
+       opaque binaries strictly with [Content-Disposition: attachment]. *)
+    Attachment_store.put_opaque
+      ~max_bytes:(max_raw_bytes ())
+      ?declared_mime
+      ~origin:Attachment_store.Model_generated
+      ~created_by:"keeper"
+      ~retention:Attachment_store.Durable
+      store
+      ~bytes:data
+  | Error
+      (( Attachment_store.Empty_payload
+       | Attachment_store.Payload_too_large _
+       | Attachment_store.Forbidden_mime _
+       | Attachment_store.Invalid_keeper_name _
+       | Attachment_store.Store_io_failed _ ) as err) -> Error err
+
 let persist_result ~base_dir ~media_type ~data =
   match validate_raw_size data with
   | Error (size_bytes, max_bytes) ->
@@ -225,24 +205,9 @@ let persist_result ~base_dir ~media_type ~data =
            size_bytes
            max_bytes)
   | Ok () ->
-      let token = token_of_payload ~media_type data in
-      let ext = ext_of_media_type media_type in
-      let dir = media_dir ~base_dir in
-      let path = Filename.concat dir (token ^ "." ^ ext) in
-      let url = media_url token in
-      try
-        Fs_compat.mkdir_p dir;
-        cleanup_old_files_in_dir dir;
-        if regular_file_exists path then Ok (token, url)
-        else
-            (match Fs_compat.save_file_atomic path data with
-             | Ok () -> Ok (token, url)
-             | Error msg -> Error msg)
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-          Error
-            (Printf.sprintf "persist generated media: %s" (Printexc.to_string exn))
+      (match put_attachment_meta ~base_dir ~media_type ~data with
+       | Ok meta -> Ok (meta.sha256, Attachment_store.url_of_id meta.id)
+       | Error err -> Error (Attachment_store.put_error_to_string err))
 
 let persist_error_to_string = function
   | Unsupported_source_type source_type ->
@@ -265,7 +230,7 @@ let raw_data_of_source = function
   | (Llm_provider.Types.Url _ | Llm_provider.Types.File_id _) as source ->
       Error (Unsupported_source_type (Llm_provider.Types.media_source_kind_of_source source))
 
-let persist_media_source_result ~base_dir ~media_type ~source =
+let persist_media_source_meta ~base_dir ~media_type ~source =
   match raw_data_of_source source with
   | Error err -> Error err
   | Ok raw ->
@@ -273,6 +238,21 @@ let persist_media_source_result ~base_dir ~media_type ~source =
        | Error (size_bytes, max_bytes) ->
            Error (Media_too_large { size_bytes; max_bytes })
        | Ok () -> (
-           match persist_result ~base_dir ~media_type ~data:raw with
-           | Ok persisted -> Ok persisted
-           | Error msg -> Error (Write_failed msg)))
+           match put_attachment_meta ~base_dir ~media_type ~data:raw with
+           | Ok meta -> Ok meta
+           | Error (Attachment_store.Payload_too_large { actual; maximum }) ->
+               Error (Media_too_large { size_bytes = actual; max_bytes = maximum })
+           | Error
+               (( Attachment_store.Empty_payload
+                | Attachment_store.Unsupported_or_unknown_format _
+                | Attachment_store.Forbidden_mime _
+                | Attachment_store.Mime_mismatch _
+                | Attachment_store.Invalid_keeper_name _
+                | Attachment_store.Store_io_failed _ ) as err) ->
+               Error (Write_failed (Attachment_store.put_error_to_string err))))
+
+let persist_media_source_result ~base_dir ~media_type ~source =
+  Result.map
+    (fun (meta : Attachment_store.meta) ->
+       meta.sha256, Attachment_store.url_of_id meta.id)
+    (persist_media_source_meta ~base_dir ~media_type ~source)

@@ -73,6 +73,7 @@ import {
   maxUtilizationPct,
   partitionQuotaScopes,
   quotaRestOfScope,
+  resolveRuntimeMediaCapabilities,
   restingProviderIds,
   windowKindLabel,
   type MultiAccountIntegration,
@@ -895,6 +896,15 @@ export function QuotasTab(props: WorkspaceViewProps) {
     const accounts = scope.providers
       .map((p) => accountLine(accountEmails.get(p.id)))
       .filter((line): line is string => line !== null)
+    const scopeProviderIds = new Set(scope.providers.map((p) => p.id))
+    let scopeVision = false
+    let scopeImageGen = false
+    for (const rt of resolvedData?.runtimes ?? []) {
+      if (!scopeProviderIds.has(rt.provider_id)) continue
+      const caps = resolveRuntimeMediaCapabilities(rt)
+      if (caps.visionInput) scopeVision = true
+      if (caps.imageOutput) scopeImageGen = true
+    }
     const badgeStyle = costBadgeStyle(cls.kind)
     // A card of a resting scope says so, in the words the paused panel uses
     // for the cause. It is why the card is in Tier 1 whatever its usage says.
@@ -913,7 +923,11 @@ export function QuotasTab(props: WorkspaceViewProps) {
       >
         <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
           <div style=${{ minWidth: 0 }}>
-            <div style=${{ fontWeight: 600, fontSize: 'var(--fs-13)', color: 'var(--fg-1)' }}>${name}</div>
+            <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)', flexWrap: 'wrap', fontWeight: 600, fontSize: 'var(--fs-13)', color: 'var(--fg-1)' }}>
+              <span>${name}</span>
+              ${scopeVision && html`<span class="mono rt-cap-chip" data-testid=${`scope-${pid}-cap-vision`}>Vision</span>`}
+              ${scopeImageGen && html`<span class="mono rt-cap-chip rt-cap-chip--gen" data-testid=${`scope-${pid}-cap-image-gen`}>Image Gen</span>`}
+            </div>
             <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${scope.scope}</div>
             ${accounts.map((line) => html`<div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>${line}</div>`)}
             ${restMeta !== null && html`

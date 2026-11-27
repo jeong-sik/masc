@@ -74,6 +74,12 @@ import {
 import { randomUuid } from '../../lib/uuid'
 import { decodeTelemetryFreshnessMetadata } from '../../api/dashboard-shared'
 import { asSafeInt } from '../work/types'
+import {
+  decodeAttachmentRef,
+  dedupeAttachments,
+  toAttachmentWirePayload,
+  type AttachmentRef,
+} from '../../api/attachments'
 import { isWorkspaceMediaPath, isWorkspaceRasterMime } from '../../lib/keeper-media'
 import { decodeKeeperChatDeliveryProvenance } from '../../keeper-delivery-provenance'
 import {
@@ -95,7 +101,6 @@ import type { KeeperProviderRetry } from '../../lib/keeper-chat-stream-contract'
 import type {
   CandleBalanceRow,
   CandleLedgerEventRow,
-  ChatAttachmentDraft,
   ChatEntryKind,
   ChatHistoryPage,
   ChatJournalCursor,
@@ -611,17 +616,29 @@ function mapTraceToolStatus(raw: string | null): string | undefined {
   return raw
 }
 
+function decodeAttachmentArray(raw: unknown): readonly AttachmentRef[] {
+  if (!Array.isArray(raw)) return []
+  const out: AttachmentRef[] = []
+  for (const item of raw) {
+    const decoded = decodeAttachmentRef(item)
+    if (decoded) out.push(decoded)
+  }
+  return out
+}
+
 function decodeHistoryBlocks(rawBlocks: unknown): {
   readonly thinking: readonly string[]
   readonly redactedThinking: boolean
   readonly toolCalls: readonly ChatToolBlock[]
+  readonly attachments: readonly AttachmentRef[]
 } {
   if (!Array.isArray(rawBlocks)) {
-    return { thinking: [], redactedThinking: false, toolCalls: [] }
+    return { thinking: [], redactedThinking: false, toolCalls: [], attachments: [] }
   }
   const thinking: string[] = []
   let redactedThinking = false
   const toolCalls: ChatToolBlock[] = []
+  const attachments: AttachmentRef[] = []
 
   for (const block of rawBlocks) {
     if (!isRecord(block)) continue
@@ -632,6 +649,9 @@ function decodeHistoryBlocks(rawBlocks: unknown): {
       } else if (typeof block.content === 'string' && block.content.trim()) {
         thinking.push(block.content.trim())
       }
+    } else if (t === 'attachment' || t === 'image') {
+      const att = decodeAttachmentRef(block)
+      if (att) attachments.push(att)
     } else if (t === 'trace' && Array.isArray(block.trace)) {
       for (const step of block.trace) {
         if (!isRecord(step)) continue
@@ -649,6 +669,8 @@ function decodeHistoryBlocks(rawBlocks: unknown): {
           if (combined) thinking.push(combined)
         } else if (kind === 'tool') {
           const name = asStr(step.name) ?? 'tool'
+          const stepAtts = decodeAttachmentArray(step.attachments)
+          if (stepAtts.length > 0) attachments.push(...stepAtts)
           toolCalls.push({
             id: asStr(step.tool_call_id) ?? undefined,
             executionId: asStr(step.execution_id) ?? undefined,
@@ -657,12 +679,13 @@ function decodeHistoryBlocks(rawBlocks: unknown): {
             result: stringifyPayloadField(step.result),
             status: mapTraceToolStatus(asStr(step.status)),
             duration: asStr(step.dur) ?? undefined,
+            ...(stepAtts.length > 0 ? { attachments: stepAtts } : {}),
           })
         }
       }
     }
   }
-  return { thinking, redactedThinking, toolCalls }
+  return { thinking, redactedThinking, toolCalls, attachments }
 }
 
 function decodeToolBlocks(raw: Record<string, unknown>): readonly ChatToolBlock[] | undefined {
@@ -735,6 +758,8 @@ export function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
   ) : []
   const ts = asNum(raw.ts) ?? Date.now() / 1000
   const decodedBlocks = decodeHistoryBlocks(raw.blocks)
+  const directAttachments = decodeAttachmentArray(raw.attachments)
+  const mergedAttachments = dedupeAttachments([...directAttachments, ...decodedBlocks.attachments])
   const rawThinking = asStr(raw.thinking) ?? asStr(raw.reasoning) ?? asStr(raw.reasoning_content) ?? undefined
   const thinkingParts: string[] = []
   if (rawThinking) thinkingParts.push(rawThinking)
@@ -815,6 +840,7 @@ export function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
     role,
     speakerLabel,
     content,
+    attachments: mergedAttachments.length > 0 ? mergedAttachments : undefined,
     retainedImages: retainedImages.length > 0 ? retainedImages : undefined,
     thinking,
     ts,
@@ -1416,7 +1442,7 @@ export function buildChatStreamRequestBody(params: {
   readonly message: string
   readonly operationId: string
   readonly mode: ChatSubmitMode
-  readonly attachments?: readonly ChatAttachmentDraft[]
+  readonly attachments?: readonly AttachmentRef[]
 }): Record<string, unknown> {
   const body: Record<string, unknown> = {
     request_id: params.operationId,
@@ -1434,16 +1460,24 @@ export function buildChatStreamRequestBody(params: {
     body.turn_instructions = 'Answer concisely as an ephemeral /btw side-query.'
   }
   if (params.attachments && params.attachments.length > 0) {
-    body.attachments = params.attachments.map((att) => ({
-      id: att.id,
-      type: att.type,
-      name: att.name,
-      size: att.size,
-      mime_type: att.mimeType,
-      data: att.data,
-    }))
+    const userBlocks: Record<string, unknown>[] = []
+    if (params.message.trim().length > 0) {
+      userBlocks.push({ type: 'text', text: params.message })
+    }
+    for (const ref of params.attachments) {
+      userBlocks.push({ type: 'attachment', attachment_id: ref.attachment_id || ref.id })
+    }
+    body.user_blocks = userBlocks
+    body.attachments = params.attachments.map(toAttachmentWirePayload)
   }
   return body
+}
+
+export interface StreamAttachmentEvent {
+  readonly attachment: AttachmentRef
+  readonly role?: 'user' | 'assistant' | 'tool'
+  readonly toolCallId?: string
+  readonly blockIndex?: number
 }
 
 export interface StreamKeeperChatCallbacks {
@@ -1473,6 +1507,7 @@ export interface StreamKeeperChatCallbacks {
   readonly onContinuationCheckpoint?: (message: string | null) => void
   readonly onModelActivity?: (channel: 'thinking' | 'text') => void
   readonly onTextDelta?: (delta: string) => void
+  readonly onAttachment?: (event: StreamAttachmentEvent) => void
   readonly onRetainedImages?: (images: readonly RetainedChatImage[]) => void
   readonly onThinkingDelta?: (delta: string, blockKey?: string) => void
   readonly onThinkingSnapshot?: (snapshot: string, blockKey?: string) => void
@@ -1659,7 +1694,7 @@ export async function enqueueKeeperChat(params: {
   readonly message: string
   readonly operationId: string
   readonly mode: ChatSubmitMode
-  readonly attachments?: readonly ChatAttachmentDraft[]
+  readonly attachments?: readonly AttachmentRef[]
   readonly signal?: AbortSignal
   readonly fetchImpl?: typeof fetch
 }): Promise<{
@@ -1844,6 +1879,7 @@ export function createChatStreamFrameDispatcher(params: {
   let seenReplyDetails = false
   let mediaOwnership = FRESH_OWNERSHIP
   const completedMedia = new Map<string, RetainedChatImage>()
+  const emittedAttachments = new Set<string>()
 
   const admitMediaOwner = (owner: ChatJournalTextOwner) => {
     if (owner.kind === 'observed_response'
@@ -1985,6 +2021,27 @@ export function createChatStreamFrameDispatcher(params: {
         const operationId = asStr(val.operation_id)
         const executionId = asStr(val.execution_id)
         if (operationId && executionId) params.callbacks.onBatchBound?.(operationId, executionId)
+      } else if (name === 'KEEPER_ATTACHMENT' && val) {
+        const attachment = decodeAttachmentRef(val)
+        if (attachment) {
+          const hasResponseOwner = isRecord(val.response)
+          const ownerAdmitted = !hasResponseOwner || admitMediaOwner(decodeTextOwner(val))
+          if (ownerAdmitted) {
+            const roleRaw = asStr(val.role)
+            const role: 'user' | 'assistant' | 'tool' | undefined =
+              roleRaw === 'user' || roleRaw === 'assistant' || roleRaw === 'tool' ? roleRaw : undefined
+            const toolCallId = asStr(val.tool_call_id) ?? asStr(val.toolCallId) ?? undefined
+            const blockIndexRaw = asNum(val.block_index)
+            const blockIndex = blockIndexRaw !== null && Number.isSafeInteger(blockIndexRaw) && blockIndexRaw >= 0
+              ? blockIndexRaw
+              : undefined
+            const dedupeKey = `${role ?? 'assistant'}:${toolCallId ?? ''}:${attachment.attachment_id || attachment.url}`
+            if (!emittedAttachments.has(dedupeKey)) {
+              emittedAttachments.add(dedupeKey)
+              params.callbacks.onAttachment?.({ attachment, role, toolCallId, blockIndex })
+            }
+          }
+        }
       } else if (name === 'KEEPER_MEDIA_DELTA' && val
         && isWorkspaceMediaPath(val.media_ref) && isWorkspaceRasterMime(val.media_type)
         && val.source_type === 'base64') {
@@ -2064,7 +2121,7 @@ export async function streamKeeperChat(params: {
   readonly message: string
   readonly operationId: string
   readonly mode: ChatSubmitMode
-  readonly attachments?: readonly ChatAttachmentDraft[]
+  readonly attachments?: readonly AttachmentRef[]
   readonly signal?: AbortSignal
   readonly fetchImpl?: typeof fetch
   readonly callbacks: StreamKeeperChatCallbacks

@@ -10,7 +10,75 @@
 open Keeper_tools_agent_core
 open Result.Syntax
 
-type model_input_requirement = No_model_image | Model_image
+type runtime_media_gate =
+  | Always_admitted
+  | Requires_vision_input
+  | Fallback_vision_only
+  | Requires_image_generator
+
+let runtime_media_gate_of_descriptor (descriptor : Keeper_tool_descriptor.t) =
+  match descriptor.runtime_handler with
+  | Keeper_tool_descriptor.Tool_read_image -> Requires_vision_input
+  | Keeper_tool_descriptor.Tool_analyze_image -> Fallback_vision_only
+  | Keeper_tool_descriptor.Tool_generate_image -> Requires_image_generator
+  | Keeper_tool_descriptor.Tool_lane_addon _
+  | Keeper_tool_descriptor.Tool_execute
+  | Keeper_tool_descriptor.Tool_search_files
+  | Keeper_tool_descriptor.Tool_read_file
+  | Keeper_tool_descriptor.Tool_edit_file
+  | Keeper_tool_descriptor.Tool_write_file
+  | Keeper_tool_descriptor.Tool_lane_status
+  | Keeper_tool_descriptor.Tool_tools_list
+  | Keeper_tool_descriptor.Tool_capability_search
+  | Keeper_tool_descriptor.Tool_context_status
+  | Keeper_tool_descriptor.Tool_peer_artifact
+  | Keeper_tool_descriptor.Tool_artifact_read
+  | Keeper_tool_descriptor.Tool_skill_validate
+  | Keeper_tool_descriptor.Tool_artifact_draft
+  | Keeper_tool_descriptor.Tool_artifact_publish
+  | Keeper_tool_descriptor.Tool_skill_publish
+  | Keeper_tool_descriptor.Tool_workspace_memory_read
+  | Keeper_tool_descriptor.Tool_memory_search
+  | Keeper_tool_descriptor.Tool_memory_select
+  | Keeper_tool_descriptor.Tool_memory_retract
+  | Keeper_tool_descriptor.Tool_memory_write
+  | Keeper_tool_descriptor.Tool_constitution_write
+  | Keeper_tool_descriptor.Tool_constitution_read
+  | Keeper_tool_descriptor.Tool_constitution_remove
+  | Keeper_tool_descriptor.Tool_wiki_search
+  | Keeper_tool_descriptor.Tool_wiki_read
+  | Keeper_tool_descriptor.Tool_surface_read
+  | Keeper_tool_descriptor.Tool_surface_post
+  | Keeper_tool_descriptor.Tool_ide_annotate
+  | Keeper_tool_descriptor.Tool_voice_dispatch
+  | Keeper_tool_descriptor.Tool_task_dispatch
+  | Keeper_tool_descriptor.Tool_board_dispatch
+  | Keeper_tool_descriptor.Tool_masc_task_dispatch
+  | Keeper_tool_descriptor.Tool_masc_plan_dispatch
+  | Keeper_tool_descriptor.Tool_masc_run_dispatch
+  | Keeper_tool_descriptor.Tool_masc_agent_dispatch
+  | Keeper_tool_descriptor.Tool_masc_workspace_dispatch
+  | Keeper_tool_descriptor.Tool_masc_misc_dispatch
+  | Keeper_tool_descriptor.Tool_web_search
+  | Keeper_tool_descriptor.Tool_web_fetch
+  | Keeper_tool_descriptor.Tool_browser_tabs
+  | Keeper_tool_descriptor.Tool_browser_read
+  | Keeper_tool_descriptor.Tool_browser_session
+  | Keeper_tool_descriptor.Tool_browser_goto
+  | Keeper_tool_descriptor.Tool_browser_act
+  | Keeper_tool_descriptor.Tool_browser_interact
+  | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
+  | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
+  | Keeper_tool_descriptor.Tool_keeper_job_dispatch
+  | Keeper_tool_descriptor.Tool_receipt_wait
+  | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
+  | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
+  | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
+  | Keeper_tool_descriptor.Tool_masc_fusion_status
+  | Keeper_tool_descriptor.Tool_masc_fusion_decision
+  | Keeper_tool_descriptor.Tool_masc_file_dispatch
+  | Keeper_tool_descriptor.Tool_masc_wiki_dispatch
+  | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch -> Always_admitted
 
 let terminal_externalization_failure
       state
@@ -157,7 +225,8 @@ let receipt_wait_on_completed
   | Keeper_tool_descriptor.Tool_masc_wiki_dispatch
   | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch
   | Keeper_tool_descriptor.Tool_analyze_image
-  | Keeper_tool_descriptor.Tool_read_image -> None
+  | Keeper_tool_descriptor.Tool_read_image
+  | Keeper_tool_descriptor.Tool_generate_image -> None
 ;;
 
 let make_tool_bundle_for_descriptors_with_policy
@@ -633,22 +702,22 @@ let make_tool_bundle_for_descriptors_with_policy
                 the descriptor is in hand, rather than looked up again by the
                 model name, which answered Always_loaded for every such tool. *)
              , Keeper_tool_descriptor.declared_loading descriptor
-             , (if descriptor_admitted Image_input_unavailable descriptor
-                then No_model_image else Model_image) )))
+             , runtime_media_gate_of_descriptor descriptor )))
       validated_descriptors
   in
   let descriptor_tools_with_loading =
     List.map (fun (tool, loading, _) -> tool, loading) descriptor_tool_rows
   in
-  (* Keep the actual canonical callable identities beside their typed owner.
-     No public name or description is used to classify a pixel-reading tool. *)
-  let image_tools =
+  (* Keep the actual canonical callable identities beside their typed media gate.
+     No public name or description is used to classify vision or image-generation tools. *)
+  let gated_tools gate =
     List.filter_map
-      (function
-        | tool, _, Model_image -> Some tool
-        | _, _, No_model_image -> None)
+      (fun (tool, _, row_gate) -> if row_gate = gate then Some tool else None)
       descriptor_tool_rows
   in
+  let vision_read_tools = gated_tools Requires_vision_input in
+  let fallback_vision_tools = gated_tools Fallback_vision_only in
+  let image_generator_tools = gated_tools Requires_image_generator in
   let descriptor_tools = List.map fst descriptor_tools_with_loading in
   let* composition_tools_with_loading, task_required_tool_names =
     if not masc_tools_enabled
@@ -936,6 +1005,9 @@ let make_tool_bundle_for_descriptors_with_policy
       if accepts_image_input
       then Image_input_admitted else Image_input_unavailable
     in
+    let image_generation_admitted =
+      Runtime_agent.image_generator_candidates ~active_runtime:runtime () <> []
+    in
     (* These closures belong to this materialized candidate. A later attempt
        can build another view while an earlier call keeps its original image
        admission and text ceiling. The deferred loader uses these same tools;
@@ -945,9 +1017,13 @@ let make_tool_bundle_for_descriptors_with_policy
       (gate_wrapped ~accepts_image_input:accepts_identity_image_input
          ~inline_ceiling_bytes:(fun () -> inline_ceiling))
       identity_offered in
-    let admitted tool = match image_admission with
-      | Image_input_admitted -> true
-      | Image_input_unavailable -> not (List.exists (fun image -> image == tool) image_tools) in
+    let mem_phys tool list = List.exists (fun candidate -> candidate == tool) list in
+    let admitted tool =
+      if mem_phys tool vision_read_tools then accepts_image_input
+      else if mem_phys tool fallback_vision_tools then not accepts_image_input
+      else if mem_phys tool image_generator_tools then image_generation_admitted
+      else true
+    in
     let deferred = List.filter admitted deferred_builtin_tools in
     let tools = List.filter admitted (descriptor_tools @ composition_tools @ identity_tools) in
     let held_schemas = List.map (fun (tool : Agent_core.Tool.t) -> tool.schema) tools in
@@ -970,6 +1046,7 @@ let make_tool_bundle_for_descriptors_with_policy
         (deferred @ identity_tools))
       ~result_bounds:(List.filter (fun (name, _) -> List.mem name names) result_bounds)
       ~listing:(placement deferred listing)
+    |> with_image_generation_admitted image_generation_admitted
   in
   Ok { tools
   ; agent_core_tools = agent_core_view ~admitted:(fun _ -> true) ~deferred:deferred_builtin_tools identity_listing

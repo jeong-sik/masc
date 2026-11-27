@@ -78,6 +78,7 @@ type chat_stream_buffer = {
   model_activity : model_activity;
   response_start : response_start option;  (** Evidence from message-start frames in this run. *)
   tools : active_tool_call list;
+  attachments : Wire_fleet.retained_image list;
   active_runtime_id : string option;
   attempt_index : int option;
   retry_notice : string option;

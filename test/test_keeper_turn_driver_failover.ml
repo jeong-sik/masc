@@ -374,7 +374,9 @@ let runtime_toml_media_lane_with_global_outside =
   {|
 [runtime]
 default = "primary.text_model"
-media_failover = [ "outsidevision.vision_model" ]
+
+[runtime.media]
+vision_reader = "outsidevision.vision_model"
 
 [runtime.lanes.resilient]
 candidates = [ "primary.text_model", "lanevision.vision_model" ]
@@ -426,7 +428,9 @@ let runtime_toml_media_lane_with_two_vision_candidates =
   {|
 [runtime]
 default = "primary.text_model"
-media_failover = [ "outsidevision.vision_model" ]
+
+[runtime.media]
+vision_reader = "outsidevision.vision_model"
 
 [runtime.lanes.resilient]
 candidates = [ "primary.text_model", "lanevision.vision_model", "backupvision.vision_model" ]
@@ -2278,9 +2282,9 @@ let test_h5_selected_goal_image_shares_one_captured_reading () =
     with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
       let runtime = Option.get (Runtime.get_runtime_by_id "primary.text_model") in
       let goal_image = Agent_core.Types.Image { media_type="image/png";
-        source=stored_source ~media_type:"image/png" "current goal image fixture bytes" } in
+        source=stored_source ~media_type:"image/png" "\x89PNG\r\n\x1a\ncurrent goal image fixture bytes" } in
       let other_image = Agent_core.Types.Image { media_type="image/png";
-        source=stored_source ~media_type:"image/png" "another retained image" } in
+        source=stored_source ~media_type:"image/png" "\x89PNG\r\n\x1a\nanother retained image" } in
       let history = message ~role:Agent_core.Types.User [goal_image; other_image] in
       let goal = message ~role:Agent_core.Types.User [goal_image] in
       let calls = ref 0 in

@@ -37,6 +37,24 @@ type event =
   | Run_started
   | Runtime_attempt_started
   | Text_delta of { text : string; owner : text_owner }
+  | Attachment_emitted of Wire_attachment.t
+  | Media_delta of {
+      mime_type : string option;
+      url : string option;
+      attachment_id : string option;
+    }
+  | Image_block of {
+      url : string option;
+      mime_type : string option;
+      attachment_id : string option;
+      caption : string option;
+    }
+  | Audio_block of {
+      url : string option;
+      mime_type : string option;
+      attachment_id : string option;
+      caption : string option;
+    }
   | Run_finished
   | Event_error
   | Other
@@ -112,9 +130,15 @@ let decode_text_owner fields =
   decode_text_owner_fields ~owner_field:"response" ~scope_field:"stream_scope"
     fields
 
-(* Every tag Keeper_chat_event_log.keeper_chat_event_to_json writes. The
-   connectors' reply fold reads five of them (Keeper_chat_discord,
-   Keeper_chat_slack); the rest leave the reply text as it is. *)
+let first_nonblank body keys =
+  List.find_map
+    (fun k ->
+      match optional_nonblank_string body k with
+      | Ok (Some _ as v) -> v
+      | Ok None | Error _ -> None)
+    keys
+
+(* Every tag Keeper_chat_event_log.keeper_chat_event_to_json writes. *)
 let decode_event ~fields body =
   let* tag = required_string_field body "type" in
   match tag with
@@ -124,6 +148,31 @@ let decode_event ~fields body =
       let* text = required_string_field body "delta" in
       let* owner = decode_text_owner fields in
       Ok (Text_delta { text; owner })
+  | "attachment_emitted" -> (
+      let target =
+        match optional_object_field body "attachment" with
+        | Ok (Some obj) -> obj
+        | Ok None | Error _ -> body
+      in
+      let* att = Wire_attachment.decode_attachment_ref target in
+      Ok (Attachment_emitted att))
+  | "agent_core_media_delta" ->
+      let mime_type = first_nonblank body [ "mime_type"; "mimeType"; "media_type" ] in
+      let url = first_nonblank body [ "url"; "src" ] in
+      let attachment_id = first_nonblank body [ "attachment_id"; "id" ] in
+      Ok (Media_delta { mime_type; url; attachment_id })
+  | "image_block" ->
+      let url = first_nonblank body [ "url"; "src" ] in
+      let mime_type = first_nonblank body [ "mime_type"; "mimeType" ] in
+      let attachment_id = first_nonblank body [ "attachment_id"; "id" ] in
+      let caption = first_nonblank body [ "caption"; "cap"; "alt"; "filename" ] in
+      Ok (Image_block { url; mime_type; attachment_id; caption })
+  | "audio_block" ->
+      let url = first_nonblank body [ "url"; "src" ] in
+      let mime_type = first_nonblank body [ "mime_type"; "mimeType" ] in
+      let attachment_id = first_nonblank body [ "attachment_id"; "id" ] in
+      let caption = first_nonblank body [ "caption"; "cap"; "alt"; "filename" ] in
+      Ok (Audio_block { url; mime_type; attachment_id; caption })
   | "run_finished" -> Ok Run_finished
   | "event_error" -> Ok Event_error
   | "batch_bound"
@@ -144,7 +193,6 @@ let decode_event ~fields body =
   | "agent_core_thinking_snapshot"
   | "agent_core_thinking_delta"
   | "agent_core_thinking_signature_delta"
-  | "agent_core_media_delta"
   | "agent_core_stream_protocol_error"
   | "tool_call_start"
   | "tool_call_admitted"
@@ -159,9 +207,7 @@ let decode_event ~fields body =
   | "tool_result_ready"
   | "tool_transcript_committed"
   | "link_block"
-  | "image_block"
   | "status_block"
-  | "audio_block"
   | "tool_context_block" ->
       Ok Other
   | unknown -> Error (Printf.sprintf "unknown journal event type %S" unknown)

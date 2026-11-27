@@ -13,6 +13,7 @@ val initial : t
     project to the fixed public message/code; the actual run identity joins
     operator diagnostics. *)
 val project :
+  ?base_path:string ->
   timestamp:float ->
   redact_text:(string -> string) ->
   t ->

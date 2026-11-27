@@ -607,6 +607,7 @@ val post_sync
   :  ?cache:cache
   -> ?clock:_ Eio.Time.clock
   -> ?timeout_s:float
+  -> ?max_response_bytes:int
   -> sw:Eio.Switch.t
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> url:string
@@ -674,6 +675,7 @@ val dispatch_sync_request
   -> ?clock:_ Eio.Time.clock
   -> ?connect_timeout_s:float
   -> ?body_timeout_s:float
+  -> ?max_response_bytes:int
   -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> validated_sync_request
   -> unit

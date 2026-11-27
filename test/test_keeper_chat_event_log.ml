@@ -158,6 +158,24 @@ let all_events : E.keeper_chat_event list =
       ; description = Some "desc"
       ; image = None
       }
+  ; E.Attachment_emitted
+      { attachment_id = "att_" ^ String.make 64 'a'
+      ; role = E.Attachment_user
+      ; tool_call_id = None
+      ; caption = None
+      }
+  ; E.Attachment_emitted
+      { attachment_id = "att_" ^ String.make 64 'b'
+      ; role = E.Attachment_tool
+      ; tool_call_id = Some "tc-img-1"
+      ; caption = Some "generated"
+      }
+  ; E.Attachment_emitted
+      { attachment_id = "att_" ^ String.make 64 'c'
+      ; role = E.Attachment_assistant
+      ; tool_call_id = None
+      ; caption = None
+      }
   ; E.Image_block { url = "https://example.com/i.png"; caption = Some "cap" }
   ; E.Image_block { url = "https://example.com/j.png"; caption = None }
   ; E.Status_block { kind = Blocks.Continuation_checkpoint }
@@ -1243,6 +1261,24 @@ let golden_events : E.keeper_chat_event list =
       ; title = "Example"
       ; description = Some "desc"
       ; image = Some "https://example.com/i.png"
+      }
+  ; E.Attachment_emitted
+      { attachment_id = "att_" ^ String.make 64 'a'
+      ; role = E.Attachment_user
+      ; tool_call_id = None
+      ; caption = None
+      }
+  ; E.Attachment_emitted
+      { attachment_id = "att_" ^ String.make 64 'b'
+      ; role = E.Attachment_tool
+      ; tool_call_id = Some "tc-img-1"
+      ; caption = Some "generated"
+      }
+  ; E.Attachment_emitted
+      { attachment_id = "att_" ^ String.make 64 'c'
+      ; role = E.Attachment_assistant
+      ; tool_call_id = None
+      ; caption = None
       }
   ; E.Image_block { url = "https://example.com/i.png"; caption = Some "cap" }
   ; E.Status_block { kind = Blocks.Awaiting_gate_approval }

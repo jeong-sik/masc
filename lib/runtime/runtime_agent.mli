@@ -289,22 +289,69 @@ val requires_text_media_projection :
     whose remaining natively supported modalities contain at most one non-text
     kind preserves native delivery for that kind. *)
 
-val media_candidates_of :
+val vision_reader_candidates_of :
   runtimes:Runtime_instance.t list ->
-  media_failover:string list ->
+  media:Runtime_schema.media_overrides ->
+  ?exclude_id:string ->
+  unit ->
   Runtime_instance.t list
-(** The vision runtimes, pure over their inputs: [media_failover] resolved
-    against [runtimes] in declared order (ids that resolve to nothing are
-    skipped). Ids are unique; the first occurrence wins. No capability or
-    execution filter: callers admit by [caps_admit_required_modalities] over
-    [input_capabilities_of_runtime]. An empty [media_failover] has no
-    candidates. *)
+(** Ordered fallback vision-reader runtimes for callers whose active runtime
+    cannot read images natively: [media.vision_reader] first (when capable),
+    followed by auto-discovered healthy [Native_vision_input] runtimes
+    (preferring HTTP [Agent_core] bindings over official clients, and healthy
+    runtimes over quota-spent/credential-refused/rate-limited ones). *)
 
-val media_candidates : unit -> Runtime_instance.t list
-(** [media_candidates_of] over the loaded runtime state
-    ([Runtime.runtimes_and_media_failover]). The vision tool and the image
-    readings made for a runtime that cannot take the image read this set. A
-    keeper turn does not: its image reroute stays inside its lane. *)
+val vision_reader_candidates :
+  ?exclude_id:string -> unit -> Runtime_instance.t list
+(** {!vision_reader_candidates_of} over the loaded runtime state
+    ({!Runtime.runtimes_and_media}). *)
+
+type image_generator_target =
+  | Runtime_in_turn of
+      { runtime : Runtime_instance.t
+      ; contract : Llm_provider.Capabilities.image_output_contract
+      }
+  | Runtime_images_endpoint of
+      { runtime : Runtime_instance.t
+      ; dialect : Llm_provider.Capabilities.images_api_dialect
+      }
+  | Derived_sibling_images_endpoint of
+      { source_runtime : Runtime_instance.t
+      ; model_id : string
+      ; provider_id : string
+      ; request_path : string
+      ; dialect : Llm_provider.Capabilities.images_api_dialect
+      ; label : string
+      }
+  | Derived_sibling_in_turn of
+      { source_runtime : Runtime_instance.t
+      ; model_id : string
+      ; provider_id : string
+      ; contract : Llm_provider.Capabilities.image_output_contract
+      ; label : string
+      }
+
+val image_generator_target_label : image_generator_target -> string
+
+val image_generator_candidates_of :
+  runtimes:Runtime_instance.t list ->
+  media:Runtime_schema.media_overrides ->
+  ?active_runtime:Runtime_instance.t ->
+  ?requested_runtime_id:string ->
+  unit ->
+  image_generator_target list
+(** Ordered image-generation targets: explicit [requested_runtime_id] when
+    supplied, otherwise [active_runtime] (if directly image-capable) ->
+    [media.image_generator] -> other configured image-capable runtimes ->
+    auto-derived sibling image endpoints from already-configured OpenAI,
+    Gemini, Z.AI, and OpenRouter HTTP provider credentials. *)
+
+val image_generator_candidates :
+  ?active_runtime:Runtime_instance.t ->
+  ?requested_runtime_id:string ->
+  unit ->
+  image_generator_target list
+(** {!image_generator_candidates_of} over the loaded runtime state. *)
 
 val media_walk :
   candidates:Runtime_instance.t list ->
@@ -335,8 +382,13 @@ val decide_modality_reroute_for_runtime_candidates :
     checkpoint counts. *)
 
 val runtime_accepts_image_input : runtime:Runtime_instance.t -> bool
-(** Image admission from the selected materialized runtime, without rereading
-    a mutable registry. Includes model and execution transport capabilities. *)
+(** Image admission from the selected materialized runtime's unified
+    {!Runtime_instance.effective_media_capabilities}, without rereading a
+    mutable registry. *)
+
+val runtime_supports_image_output : runtime:Runtime_instance.t -> bool
+(** Whether the selected materialized runtime natively produces images
+    ([image_output <> No_image_output]). *)
 
 val strip_unsupported_modality_blocks :
   Llm_provider.Capabilities.capabilities ->

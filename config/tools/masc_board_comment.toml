@@ -49,6 +49,15 @@ name = "ttl_hours"
 type = "integer"
 description = "Time-to-live in hours"
 
+[[params]]
+name = "attachment_ids"
+type = "array"
+description = "Optional list of canonical attachment IDs (att_<64hex>) from the unified attachment store. Each attachment is validated and promoted to durable retention."
+
+[params.items]
+type = "string"
+pattern = "^att_[0-9a-f]{64}$"
+
 [keeper_projection]
 description = """
 Add a comment to one existing board post by exact post_id. Use to respond to \
@@ -81,3 +90,12 @@ Optional comment ID to reply under (from \
 masc_board_post_get or a prior masc_board_comment), \
 threading this comment beneath another Keeper's instead \
 of flat on the post."""
+
+[[keeper_projection.params]]
+name = "attachment_ids"
+type = "array"
+description = "Optional list of canonical attachment IDs (att_<64hex>) from the unified attachment store."
+
+[keeper_projection.params.items]
+type = "string"
+pattern = "^att_[0-9a-f]{64}$"

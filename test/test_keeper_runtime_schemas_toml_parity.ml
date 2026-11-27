@@ -40,6 +40,7 @@ let expected =
   ; "masc_file_list"
   ; "keeper_analyze_image"
   ; "keeper_image_read"
+  ; "keeper_generate_image"
   ]
 ;;
 

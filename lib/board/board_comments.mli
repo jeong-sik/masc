@@ -29,6 +29,7 @@ val add_comment :
   content:string ->
   ?parent_id:string ->
   ?ttl_hours:int ->
+  ?attachment_ids:string list ->
   unit ->
   (comment, board_error) result
 
@@ -41,6 +42,7 @@ val add_comment_with_audience :
   content:string ->
   ?parent_id:string ->
   ?ttl_hours:int ->
+  ?attachment_ids:string list ->
   unit ->
   (comment_creation, board_error) result
 

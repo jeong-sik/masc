@@ -55,7 +55,7 @@ let unavailable attachment_ids failure =
   { images = []; failures = List.map (fun id -> id, failure) attachment_ids }
 ;;
 
-let resolve ~max_bytes ~is_bound ~fetch_original ~fetch_bytes
+let resolve_impl ~persist_bytes ~max_bytes ~is_bound ~fetch_original ~fetch_bytes
       ~channel_id ~message_id ~author_id ~attachment_ids =
   let open Result.Syntax in
   let original =
@@ -112,9 +112,14 @@ let resolve ~max_bytes ~is_bound ~fetch_original ~fetch_bytes
         | None -> None, None
         | Some (width, height) -> Some width, Some height
       in
-      Ok ({ Keeper_chat_store.id; att_type = "image"; name; size; mime_type;
-            data = Base64.encode_exn bytes; width; height }
-          : Keeper_chat_store.attachment)
+      match persist_bytes with
+      | Some persist ->
+        persist ~id ~name ~mime_type ~bytes ~width ~height
+        |> Result.map_error (fun _ -> Download_failed)
+      | None ->
+        Ok ({ Keeper_chat_store.id; att_type = "image"; name; size; mime_type;
+              data = Base64.encode_exn bytes; width; height }
+            : Keeper_chat_store.attachment)
     in
     let rec collect budget images failures = function
       | [] ->
@@ -176,7 +181,33 @@ let load ~base_path ~clock ~keeper_name (source : Keeper_chat_operation_payload.
             | Ok (Some binding) -> String.equal binding.keeper_name keeper_name
             | Ok None | Error _ -> false
        in
-       resolve ~max_bytes:(Keeper_vision_tool.max_image_bytes ())
+       let persist_bytes ~id:_ ~name ~mime_type ~bytes ~width ~height =
+         let store = Attachment_store.create ~base_path in
+         match
+           Attachment_store.put
+             ~declared_mime:mime_type
+             ~filename:name
+             ~origin:Attachment_store.Connector_inbound
+             ~created_by:author_id
+             ~retention:Attachment_store.Durable
+             store
+             ~bytes
+         with
+         | Ok meta ->
+           Ok
+             ({ Keeper_chat_store.id = meta.id
+              ; att_type = Attachment_store.media_kind_to_string meta.kind
+              ; name = Option.value meta.filename ~default:name
+              ; size = meta.bytes
+              ; mime_type = meta.mime_type
+              ; data = Attachment_store.url_of_id meta.id
+              ; width = (match meta.width with Some _ as w -> w | None -> width)
+              ; height = (match meta.height with Some _ as h -> h | None -> height)
+              }
+              : Keeper_chat_store.attachment)
+         | Error err -> Error (Attachment_store.put_error_to_string err)
+       in
+       resolve_impl ~persist_bytes:(Some persist_bytes) ~max_bytes:(Keeper_vision_tool.max_image_bytes ())
          ~is_bound ~fetch_original ~fetch_bytes ~channel_id ~message_id ~author_id ~attachment_ids)
   (* Only a Discord continuation that names its original message can be read
      back. Every other connector is named so a new one must decide here
@@ -193,5 +224,8 @@ let load ~base_path ~clock ~keeper_name (source : Keeper_chat_operation_payload.
 ;;
 
 module For_testing = struct
-  let resolve = resolve
+  let resolve ~max_bytes ~is_bound ~fetch_original ~fetch_bytes
+      ~channel_id ~message_id ~author_id ~attachment_ids =
+    resolve_impl ~persist_bytes:None ~max_bytes ~is_bound ~fetch_original ~fetch_bytes
+      ~channel_id ~message_id ~author_id ~attachment_ids
 end

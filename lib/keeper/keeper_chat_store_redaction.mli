@@ -22,6 +22,7 @@ val redact_attachment :
   attachment -> attachment
 
 val persisted_attachment :
+  ?redaction:Keeper_secret_redaction.t ->
   base_dir:string ->
   attachment -> attachment
 

@@ -109,6 +109,25 @@ let runtime_resolution_json ~now ~scope_label (rt : Runtime_instance.t) : Yojson
       ~candidate:rt.candidate_backpressure
   in
   let rate_limited, rate_limit_resets_at = runtime_rate_limit ~now observed in
+  let media_caps = Runtime_instance.effective_media_capabilities rt in
+  let supports_image_input =
+    Llm_provider.Capabilities.supports_image_input_of_media media_caps
+  in
+  let supports_image_output =
+    Llm_provider.Capabilities.supports_image_output_of_media media_caps
+  in
+  let capabilities_json =
+    `Assoc
+      [ "supports_image_input", `Bool supports_image_input
+      ; "supports_image_output", `Bool supports_image_output
+      ; "vision_input", `Bool supports_image_input
+      ; "image_output", `Bool supports_image_output
+      ; ( "image_output_contract"
+        , `String
+            (Llm_provider.Capabilities.image_output_contract_to_string
+               media_caps.image_output) )
+      ]
+  in
   `Assoc
     [ "id", `String rt.id
     ; "provider", `String rt.provider.display_name
@@ -117,10 +136,17 @@ let runtime_resolution_json ~now ~scope_label (rt : Runtime_instance.t) : Yojson
          key. *)
     ; "provider_id", `String rt.provider.id
     ; "model", `String rt.model.api_name
-    ; "supports_image_input", `Bool (Runtime_agent.runtime_accepts_image_input ~runtime:rt)
+    ; "supports_image_input", `Bool supports_image_input
+    ; "supports_image_output", `Bool supports_image_output
+    ; "vision_input", `Bool supports_image_input
+    ; "image_output", `Bool supports_image_output
+    ; "capabilities", capabilities_json
     ; ( "declared_image_input"
       , Json_util.bool_opt_to_json
           (Option.bind rt.model.capabilities (fun caps -> caps.Runtime_schema.supports_image_input)) )
+    ; ( "declared_image_output"
+      , Json_util.bool_opt_to_json
+          (Option.bind rt.model.capabilities (fun caps -> caps.Runtime_schema.supports_image_output)) )
     ; "exact_slot_group", string_opt_json exact_slot_group
       (* An exact HTTP slot on this runtime would be refused on save: its
          provider declares no exact-body-timeout-s (rule 3, #38779). The
@@ -406,13 +432,11 @@ let build_at ~now ~generated_at_iso ~(config : Workspace.config) : Yojson.Safe.t
         | Some rt -> runtime_resolution_json ~now ~scope_label rt
         | None -> `Null )
     ; "runtimes", `List (List.map (runtime_resolution_json ~now ~scope_label) runtimes)
-      (* [\[runtime\].media_failover] is a route, not a lane: no keeper turn
-         dispatches to it, and it has no table of its own. Keep both the active
-         fleet and the file's declaration so an operator can distinguish a
-         rejected entry without losing its position when rewriting the route. *)
-    ; "media_failover", Json_util.json_string_list snapshot.rs_media_failover
-    ; ( "media_failover_declared"
-      , Json_util.json_string_list snapshot.rs_declared_media_failover )
+    ; ( "media"
+      , `Assoc
+          [ "vision_reader", string_opt_json snapshot.rs_media.vision_reader
+          ; "image_generator", string_opt_json snapshot.rs_media.image_generator
+          ] )
     ; "lanes", `List (List.map lane_json (dispatchable_lanes ~keeper_names snapshot))
     ; "assignments", `List (List.map (assignment_json snapshot) keeper_names)
     ; "provider_usage_windows_since", `Float Usage.recording_since

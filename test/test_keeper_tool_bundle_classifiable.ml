@@ -629,9 +629,12 @@ let test_per_candidate_image_projection () =
       in
       check_denied denied;
       check bool "declared image input keeps the official schema" true (has_image allowed.tools);
+      check bool "delegated vision fallback is hidden on vision-capable runtimes" false
+        (List.exists (fun (tool : Agent_core.Tool.t) -> tool.schema.name = "keeper_analyze_image")
+           allowed.tools);
       check bool "unrelated handlers are shared across views" true
-        (tool_named allowed.tools "keeper_analyze_image"
-         == tool_named denied.tools "keeper_analyze_image");
+        (tool_named allowed.tools "keeper_context_status"
+         == tool_named denied.tools "keeper_context_status");
       let run_view ~accepted (view : Keeper_tools_agent_core.model_tool_surface) =
         let requests = ref 0 and read_dispatches = ref 0 in
         let response content stop_reason : Agent_core.Types.api_response =

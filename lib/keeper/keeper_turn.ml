@@ -580,17 +580,7 @@ let run_keeper_invocation_turn_admitted_inner
         | Keeper_agent_run.Runtime_continuation _ -> None) in
       let user_blocks =
         if Option.is_some official_checkpoint_resume then None
-        else if Option.is_some native_resume || Option.is_some direct_resume then user_blocks else
-        Option.map
-          (Keeper_vision_ingest.evict_blocks
-             ~base_path:ctx.config.base_path
-             ~media_store:(Tool_blob_media_store.of_base_path ~base_path:ctx.config.base_path)
-             ~mode:Keeper_vision_ingest.Eager
-             ~delegate:
-               (Keeper_vision_ingest.delegates_media
-                  ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta meta))
-             ~keeper_name:meta.name)
-          user_blocks
+        else user_blocks
       in
       let turn_task_id = Printf.sprintf "keeper_turn_%s_%d"
         name (int_of_float (Time_compat.now () *. 1000.0)) in

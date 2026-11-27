@@ -19,6 +19,7 @@ type custom_event_name =
   | Thinking_snapshot
   | Thinking_signature_delta
   | Media_delta
+  | Attachment
   | Stream_protocol_error
   | Batch_bound
   | Continuation_checkpoint
@@ -64,6 +65,7 @@ let custom_event_name_to_string = function
   | Thinking_snapshot -> "KEEPER_THINKING_SNAPSHOT"
   | Thinking_signature_delta -> "KEEPER_THINKING_SIGNATURE_DELTA"
   | Media_delta -> "KEEPER_MEDIA_DELTA"
+  | Attachment -> "KEEPER_ATTACHMENT"
   | Stream_protocol_error -> "KEEPER_STREAM_PROTOCOL_ERROR"
   | Batch_bound -> "KEEPER_CHAT_BATCH_BOUND"
   | Continuation_checkpoint -> "KEEPER_CONTINUATION_CHECKPOINT"
@@ -112,7 +114,86 @@ let native_tool_to_json ?progress ?completion (tool : Keeper_chat_events.native_
      @ json_opt "completion" (Option.map Runtime_native_tools.completion_to_json completion)
      @ json_opt "progress" (Option.map Runtime_native_tools.progress_to_json progress))
 
-let project ~timestamp ~redact_text state event =
+let attachment_id_of_url url =
+  let trimmed = String.trim url in
+  let prefix = Attachment_store.url_prefix in
+  let plen = String.length prefix in
+  if String.starts_with ~prefix trimmed
+  then
+    let rest = String.sub trimmed plen (String.length trimmed - plen) in
+    let raw_id =
+      match String.index_opt rest '?' with
+      | Some idx -> String.sub rest 0 idx
+      | None -> rest
+    in
+    match Attachment_store.parse_id raw_id with
+    | Ok _ -> Some raw_id
+    | Error _ -> None
+  else None
+
+let kind_of_mime mime =
+  let m = String.lowercase_ascii (String.trim mime) in
+  if String.starts_with ~prefix:"image/" m then "image"
+  else if String.starts_with ~prefix:"audio/" m then "audio"
+  else "document"
+
+let attachment_event_json
+    ?base_path
+    ?(origin = "model_generated")
+    ?(role = "assistant")
+    ?mime_type
+    ?block_index
+    ?tool_call_id
+    ?response
+    ?caption
+    ~url
+    ()
+  =
+  let meta_opt =
+    match base_path, attachment_id_of_url url with
+    | Some bp, Some att_id ->
+      (match Attachment_store.get_meta (Attachment_store.create ~base_path:bp) ~id:att_id with
+       | Ok (Some meta) -> Some meta
+       | Ok None | Error _ -> None)
+    | _ -> None
+  in
+  let base_fields =
+    match meta_opt with
+    | Some meta ->
+      (match Attachment_store.meta_to_wire_json meta with
+       | `Assoc fields -> fields
+       | _ -> [])
+    | None ->
+      let att_id =
+        match attachment_id_of_url url with
+        | Some id -> id
+        | None -> url
+      in
+      let mime = Option.value mime_type ~default:"image/png" in
+      [ "attachment_id", `String att_id
+      ; "id", `String att_id
+      ; "url", `String url
+      ; "mime_type", `String mime
+      ; "kind", `String (kind_of_mime mime)
+      ; "bytes", `Int 0
+      ; "width", `Null
+      ; "height", `Null
+      ; "filename", `Null
+      ; "origin", `String origin
+      ; "retention", `String "durable"
+      ]
+  in
+  let extra =
+    [ "role", `String role
+    ; "tool_call_id", (match tool_call_id with Some id -> `String id | None -> `Null)
+    ]
+    @ json_opt "block_index" (Option.map (fun i -> `Int i) block_index)
+    @ json_opt "response" (Option.map Keeper_chat_events.response_identity_to_json response)
+    @ json_opt "caption" (Option.map (fun c -> `String c) caption)
+  in
+  `Assoc (base_fields @ extra)
+
+let project ?base_path ~timestamp ~redact_text state event =
   let open Keeper_chat_events in
   match public_content ~redact_text event with
   | Run_started { run_id; thread_id } ->
@@ -227,7 +308,22 @@ let project ~timestamp ~redact_text state event =
                         ; "signature_bytes", `Int signature_bytes
                         ]))
   | Agent_core_media_delta media ->
-      state, Some (custom ~timestamp state Media_delta (generated_media_to_json media))
+      (match attachment_id_of_url media.media_ref with
+       | Some _ ->
+         let value =
+           attachment_event_json
+             ?base_path
+             ~origin:"model_generated"
+             ~role:"assistant"
+             ~mime_type:media.media_type
+             ~block_index:media.index
+             ~response:media.response
+             ~url:media.media_ref
+             ()
+         in
+         state, Some (custom ~timestamp state Attachment value)
+       | None ->
+         state, Some (custom ~timestamp state Media_delta (generated_media_to_json media)))
   | Agent_core_stream_protocol_error error ->
       state, Some (custom ~timestamp state Stream_protocol_error
                      (stream_protocol_error_to_json error))
@@ -335,8 +431,37 @@ let project ~timestamp ~redact_text state event =
         (`Assoc [ "deliveryKey", Keeper_chat_delivery_identity.delivery_key_to_yojson delivery_key
                 ; "executionId", `String (Ids.Execution_id.to_string execution_id)
                 ; "ordinal", `Int ordinal ])))
+  | Attachment_emitted { attachment_id; role; tool_call_id; caption } ->
+      let origin =
+        match role with
+        | Attachment_user -> "user_upload"
+        | Attachment_tool -> "tool_capture"
+        | Attachment_assistant -> "model_generated"
+      in
+      let value =
+        attachment_event_json
+          ?base_path
+          ~origin
+          ~role:(attachment_role_to_string role)
+          ?tool_call_id
+          ?caption
+          ~url:(Attachment_store.url_of_id attachment_id)
+          ()
+      in
+      state, Some (custom ~timestamp state Attachment value)
+  | Image_block { url; caption } ->
+      let value =
+        attachment_event_json
+          ?base_path
+          ~origin:"model_generated"
+          ~role:"assistant"
+          ~mime_type:"image/png"
+          ?caption
+          ~url
+          ()
+      in
+      state, Some (custom ~timestamp state Attachment value)
   | Link_block _
-  | Image_block _
   | Status_block _
   | Audio_block _
   | Tool_context_block _ -> state, None

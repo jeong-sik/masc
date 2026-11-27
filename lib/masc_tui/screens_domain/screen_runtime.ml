@@ -3019,7 +3019,29 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
           ]
       | None -> []
     in
-    standalone_pill @ inv_pill @ verif_pill @ preview_pill
+    let media_pill =
+      match Observed.to_option rt.runtime_resolved with
+      | Some { media = Some m; _ }
+        when Option.is_some m.vision_reader || Option.is_some m.image_generator
+        ->
+          let parts =
+            List.filter_map Fun.id
+              [
+                Option.map (fun v -> "Vision:" ^ v) m.vision_reader;
+                Option.map (fun g -> "ImgGen:" ^ g) m.image_generator;
+              ]
+          in
+          [
+            {
+              H.label = String.concat " · " parts;
+              active = false;
+              tone = Some Theme.Status_active;
+              glyph = None;
+            };
+          ]
+      | Some _ | None -> []
+    in
+    standalone_pill @ inv_pill @ verif_pill @ preview_pill @ media_pill
   in
   let narrow_header = header_rect.w < 120 in
   let probe_age_pills =
@@ -3226,13 +3248,32 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
                 if is_primary && parent_sel then
                   Cell_grid.fill_rect ~clip:cascade_inner grid ~rect:r_rect
                     ~style:(H.text_style ~theme ~bg:row_bg ()) ();
+                let rt_opt = Hashtbl.find_opt runtimes_tbl rid in
                 let prov_id =
-                  match Hashtbl.find_opt runtimes_tbl rid with
+                  match rt_opt with
                   | Some r -> Some r.provider_id
                   | None -> None
                 in
+                let cap_badges =
+                  match rt_opt with
+                  | Some r ->
+                      let tags =
+                        List.filter_map Fun.id
+                          [
+                            (if Option.equal Bool.equal r.supports_image_input (Some true)
+                             then Some "[Vision]"
+                             else None);
+                            (if Option.equal Bool.equal r.supports_image_output (Some true)
+                             then Some "[Image Gen]"
+                             else None);
+                          ]
+                      in
+                      if tags = [] then "" else " " ^ String.concat " " tags
+                  | None -> ""
+                in
                 let human_lbl =
                   Wire_runtime.human_runtime_slot_label ~runtimes rid
+                  ^ cap_badges
                 in
                 let quota_st =
                   match prov_id with

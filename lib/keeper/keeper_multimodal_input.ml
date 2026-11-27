@@ -29,6 +29,7 @@ type user_input_block =
   | User_image of user_image_source
   | User_document of user_media_block
   | User_audio of user_media_block
+  | User_attachment of user_media_block
 
 let attachment_to_yojson (att : Keeper_chat_store.attachment) =
   `Assoc
@@ -76,39 +77,106 @@ let optional_string ~field key fields =
   | Some _ -> Error (Printf.sprintf "%s.%s must be a string" field key)
 ;;
 
+let optional_string_or_null ~field key fields =
+  match List.assoc_opt key fields with
+  | None | Some `Null -> Ok ""
+  | Some (`String value) -> Ok value
+  | Some _ -> Error (Printf.sprintf "%s.%s must be a string" field key)
+;;
+
+let optional_nonneg_int ~field key fields =
+  match List.assoc_opt key fields with
+  | None | Some `Null -> Ok None
+  | Some (`Int n) when n >= 0 -> Ok (Some n)
+  | Some (`Int _) -> Error (field ^ "." ^ key ^ " must be non-negative")
+  | Some _ -> Error (field ^ "." ^ key ^ " must be an integer")
+;;
+
 let parse_attachment ~index json =
   let field = Printf.sprintf "attachments[%d]" index in
   let* fields =
     exact_object_fields
       ~field
-      ~allowed:[ "id"; "type"; "name"; "size"; "mime_type"; "data" ]
+      ~allowed:
+        [ "id"
+        ; "attachment_id"
+        ; "type"
+        ; "kind"
+        ; "name"
+        ; "filename"
+        ; "size"
+        ; "bytes"
+        ; "mime_type"
+        ; "data"
+        ; "url"
+        ; "width"
+        ; "height"
+        ; "sha256"
+        ; "origin"
+        ; "created_at_unix"
+        ; "retention"
+        ]
       json
   in
-  let* id = required_string ~field "id" fields in
-  let* att_type = optional_string ~field "type" fields in
-  let* name = optional_string ~field "name" fields in
-  let* mime_type = optional_string ~field "mime_type" fields in
-  let* data = required_string ~field "data" fields in
-  let* size =
-    match List.assoc_opt "size" fields with
-    | None -> Ok 0
-    | Some (`Int size) when size >= 0 -> Ok size
-    | Some (`Int _) -> Error (field ^ ".size must be non-negative")
-    | Some _ -> Error (field ^ ".size must be an integer")
+  let* id_raw = optional_string_or_null ~field "id" fields in
+  let* att_id_raw = optional_string_or_null ~field "attachment_id" fields in
+  let id =
+    match String.trim id_raw, String.trim att_id_raw with
+    | "", "" -> ""
+    | v, "" -> v
+    | "", v -> v
+    | v, _ -> v
   in
-  let id = String.trim id in
+  let* att_type_raw = optional_string_or_null ~field "type" fields in
+  let* kind_raw = optional_string_or_null ~field "kind" fields in
+  let att_type =
+    match String.trim att_type_raw, String.trim kind_raw with
+    | "", v -> v
+    | v, _ -> v
+  in
+  let* name_raw = optional_string_or_null ~field "name" fields in
+  let* filename_raw = optional_string_or_null ~field "filename" fields in
+  let name =
+    match String.trim name_raw, String.trim filename_raw with
+    | "", v -> v
+    | v, _ -> v
+  in
+  let* mime_type = optional_string_or_null ~field "mime_type" fields in
+  let* data_raw = optional_string_or_null ~field "data" fields in
+  let* url_raw = optional_string_or_null ~field "url" fields in
+  let* size_opt = optional_nonneg_int ~field "size" fields in
+  let* bytes_opt = optional_nonneg_int ~field "bytes" fields in
+  let* width = optional_nonneg_int ~field "width" fields in
+  let* height = optional_nonneg_int ~field "height" fields in
+  let size =
+    match size_opt, bytes_opt with
+    | Some n, _ -> n
+    | None, Some n -> n
+    | None, None -> 0
+  in
+  let is_canonical_att_id = Result.is_ok (Attachment_store.parse_id id) in
+  let data =
+    if not (String.equal data_raw "")
+    then data_raw
+    else if is_canonical_att_id
+    then
+      if not (String.equal (String.trim url_raw) "")
+      then String.trim url_raw
+      else Attachment_store.url_of_id id
+    else ""
+  in
   if String.equal id "" then Error (field ^ ".id must be non-empty")
   else if String.equal data "" then Error (field ^ ".data must be non-empty")
   else
     Ok
       { Keeper_chat_store.id
-      ; att_type = String.trim att_type
-      ; name = String.trim name
+      ; att_type
+      ; name
       ; size
       ; mime_type = String.trim mime_type
       ; data
-      ; width = None
-      ; height = None
+      ; width
+      ; height
       }
 
 (* Two attachments sharing an id both parse, but a user_blocks reference
@@ -178,35 +246,63 @@ let user_block_to_yojson = function
   | User_image (File_id_ref ref) -> user_image_reference_to_yojson ~key:"file_id" ref
   | User_document media -> user_media_block_to_yojson "document" media
   | User_audio media -> user_media_block_to_yojson "audio" media
+  | User_attachment media -> user_media_block_to_yojson "attachment" media
 
 let user_blocks_to_yojson blocks =
   `List (List.map user_block_to_yojson blocks)
 
+let media_block_allowed_fields =
+  [ "type"
+  ; "attachment_id"
+  ; "id"
+  ; "name"
+  ; "filename"
+  ; "mime_type"
+  ; "size"
+  ; "bytes"
+  ; "kind"
+  ; "url"
+  ; "width"
+  ; "height"
+  ; "sha256"
+  ; "origin"
+  ; "created_at_unix"
+  ; "retention"
+  ]
+
 let parse_user_media_block ~(kind : string) fields =
   let field = "user_blocks " ^ kind ^ " block" in
-  let* attachment_id = required_string ~field "attachment_id" fields in
-  let* name = optional_string ~field "name" fields in
-  let* mime_type = optional_string ~field "mime_type" fields in
-  let size =
-    match List.assoc_opt "size" fields with
-    | None -> Ok None
-    | Some (`Int size) when size >= 0 -> Ok (Some size)
-    | Some (`Int _) -> Error (field ^ ".size must be non-negative")
-    | Some _ -> Error (field ^ ".size must be an integer")
+  let* att_id_raw = optional_string_or_null ~field "attachment_id" fields in
+  let* id_raw = optional_string_or_null ~field "id" fields in
+  let attachment_id =
+    match String.trim att_id_raw, String.trim id_raw with
+    | "", v -> v
+    | v, _ -> v
   in
-  let attachment_id = String.trim attachment_id in
+  let* name_raw = optional_string_or_null ~field "name" fields in
+  let* filename_raw = optional_string_or_null ~field "filename" fields in
+  let name =
+    match String.trim name_raw, String.trim filename_raw with
+    | "", v -> v
+    | v, _ -> v
+  in
+  let* mime_type = optional_string_or_null ~field "mime_type" fields in
+  let* size_opt = optional_nonneg_int ~field "size" fields in
+  let* bytes_opt = optional_nonneg_int ~field "bytes" fields in
+  let size =
+    match size_opt, bytes_opt with
+    | Some _ as s, _ -> s
+    | None, s -> s
+  in
   if attachment_id = "" then
     Error (Printf.sprintf "user_blocks %s block requires attachment_id" kind)
   else
-    match size with
-    | Error err -> Error err
-    | Ok size ->
-      Ok
-        { attachment_id
-        ; name = String.trim name
-        ; mime_type = String.trim mime_type
-        ; size
-        }
+    Ok
+      { attachment_id
+      ; name
+      ; mime_type = String.trim mime_type
+      ; size
+      }
 
 (* Shared body for the media block kinds. The constructor is chosen at the
    single point where the kind string is matched, so no arm can be
@@ -215,7 +311,7 @@ let parse_media_input_block json ~kind make =
   let* fields =
     exact_object_fields
       ~field:("user_blocks " ^ kind ^ " block")
-      ~allowed:[ "type"; "attachment_id"; "name"; "mime_type"; "size" ]
+      ~allowed:media_block_allowed_fields
       json
   in
   let* media = parse_user_media_block ~kind fields in
@@ -246,11 +342,25 @@ let parse_user_image_block json =
   let* base_fields =
     exact_object_fields
       ~field:"user_blocks image block"
-      ~allowed:[ "type"; "attachment_id"; "name"; "mime_type"; "size"; "url"; "file_id" ]
+      ~allowed:("file_id" :: media_block_allowed_fields)
       json
   in
   let has key = List.mem_assoc key base_fields in
-  let present = List.filter (fun key -> has key) [ "attachment_id"; "url"; "file_id" ] in
+  let has_attachment_id = has "attachment_id" || has "id" in
+  let has_external_url =
+    match List.assoc_opt "url" base_fields with
+    | None -> false
+    | Some (`String u)
+      when has_attachment_id
+           && String.starts_with ~prefix:Attachment_store.url_prefix (String.trim u) ->
+      false
+    | Some _ -> true
+  in
+  let present =
+    (if has_attachment_id then [ "attachment_id" ] else [])
+    @ (if has_external_url then [ "url" ] else [])
+    @ (if has "file_id" then [ "file_id" ] else [])
+  in
   match present with
   | [ "attachment_id" ] ->
     parse_media_input_block json ~kind:"image" (fun media -> User_image (Attached media))
@@ -298,8 +408,7 @@ let parse_user_input_block json =
   let* base_fields =
     exact_object_fields
       ~field:"user_blocks entry"
-      ~allowed:
-        [ "type"; "text"; "attachment_id"; "name"; "mime_type"; "size"; "url"; "file_id" ]
+      ~allowed:("text" :: "file_id" :: media_block_allowed_fields)
       json
   in
   let* block_type = required_string ~field:"user_blocks entry" "type" base_fields in
@@ -316,11 +425,13 @@ let parse_user_input_block json =
   | "document" ->
     parse_media_input_block json ~kind:"document" (fun media -> User_document media)
   | "audio" -> parse_media_input_block json ~kind:"audio" (fun media -> User_audio media)
+  | "attachment" ->
+    parse_media_input_block json ~kind:"attachment" (fun media -> User_attachment media)
   | "" -> Error "user_blocks block requires type"
   | other ->
     Error
       (Printf.sprintf
-         "unsupported user_blocks type %S: expected text, image, document, or audio"
+         "unsupported user_blocks type %S: expected text, image, document, audio, or attachment"
          other)
 
 let parse_user_blocks json =
@@ -371,7 +482,7 @@ let fallback_message ~attachments blocks =
     |> List.filter_map (function
       | User_text text ->
           if String.trim text = "" then None else Some text
-      | User_image _ | User_document _ | User_audio _ -> None)
+      | User_image _ | User_document _ | User_audio _ | User_attachment _ -> None)
     |> String.concat "\n\n"
   in
   if text <> "" then
@@ -391,29 +502,62 @@ let fallback_message ~attachments blocks =
         | User_image (File_id_ref { value; _ }) ->
             Some (Printf.sprintf "[image: file_id %s]" value)
         | User_document media -> Some (user_media_label "document" media)
-        | User_audio media -> Some (user_media_label "audio" media))
+        | User_audio media -> Some (user_media_label "audio" media)
+        | User_attachment media -> Some (user_media_label "attachment" media))
       |> String.concat "\n"
       |> String.trim
     in
     if from_blocks <> "" then from_blocks else fallback_message_of_attachments attachments
+
+let referenced_attachment_ids blocks =
+  List.filter_map
+    (function
+      | User_text _ -> None
+      | User_image (Attached media) -> Some media.attachment_id
+      (* A reference carrier names no attachment: it resolves at the
+         provider, not through the byte store, so it neither references
+         nor orphans one. *)
+      | User_image (Url_ref _) | User_image (File_id_ref _) -> None
+      | User_document media | User_audio media | User_attachment media ->
+        Some media.attachment_id)
+    blocks
+
+let user_block_of_attachment (att : Keeper_chat_store.attachment) =
+  let media : user_media_block =
+    { attachment_id = att.id
+    ; name = att.name
+    ; mime_type = att.mime_type
+    ; size = if att.size > 0 then Some att.size else None
+    }
+  in
+  let att_type = String.lowercase_ascii (String.trim att.att_type) in
+  let mime = String.lowercase_ascii (String.trim att.mime_type) in
+  if String.equal att_type "image" || String.starts_with ~prefix:"image/" mime
+  then User_image (Attached media)
+  else if String.equal att_type "audio" || String.starts_with ~prefix:"audio/" mime
+  then User_audio media
+  else if String.equal att_type "document" || String.equal att_type "file" || mime <> ""
+  then User_document media
+  else User_attachment media
+
+let normalize_user_blocks ~attachments blocks =
+  let referenced = referenced_attachment_ids blocks in
+  let missing_blocks =
+    List.filter_map
+      (fun (att : Keeper_chat_store.attachment) ->
+         if List.exists (String.equal att.id) referenced
+         then None
+         else Some (user_block_of_attachment att))
+      attachments
+  in
+  blocks @ missing_blocks
 
 (* Attachments are a byte store: only user_blocks media blocks referencing an
    attachment_id are materialized into AGENT_CORE content blocks. An
    attachment nothing references would be silently dropped, so the request is
    rejected instead of succeeding without the media. *)
 let validate_attachment_references ~attachments blocks =
-  let referenced =
-    List.filter_map
-      (function
-        | User_text _ -> None
-        | User_image (Attached media) -> Some media.attachment_id
-        (* A reference carrier names no attachment: it resolves at the
-           provider, not through the byte store, so it neither references
-           nor orphans one. *)
-        | User_image (Url_ref _) | User_image (File_id_ref _) -> None
-        | User_document media | User_audio media -> Some media.attachment_id)
-      blocks
-  in
+  let referenced = referenced_attachment_ids blocks in
   let orphan_ids =
     List.filter_map
       (fun (att : Keeper_chat_store.attachment) ->
@@ -520,24 +664,152 @@ let normalize_media_payload ~kind ~attachment_id ~declared_media_type data =
     in
     Ok (media_type, data)
 
-let resolve_media_payload ~attachments kind media =
+let attachment_of_store_meta ?(fallback_name = "") (meta : Attachment_store.meta)
+  : Keeper_chat_store.attachment
+  =
+  let name =
+    match meta.filename with
+    | Some f when String.trim f <> "" -> f
+    | Some _ | None ->
+      if String.trim fallback_name <> "" then fallback_name else meta.id
+  in
+  { Keeper_chat_store.id = meta.id
+  ; att_type = Attachment_store.media_kind_to_string meta.kind
+  ; name
+  ; size = meta.bytes
+  ; mime_type = meta.mime_type
+  ; data = Attachment_store.url_of_id meta.id
+  ; width = meta.width
+  ; height = meta.height
+  }
+
+let load_from_attachment_store ?base_path ~kind (media : user_media_block)
+  : (Keeper_chat_store.attachment * Attachment_store.media_kind * string * string, string) result
+  =
+  match Attachment_store.parse_id (String.trim media.attachment_id) with
+  | Error _ ->
+    Error
+      (Printf.sprintf
+         "missing attachment payload for %s user block %S"
+         kind media.attachment_id)
+  | Ok _ ->
+    (match base_path with
+     | None ->
+       Error
+         (Printf.sprintf
+            "attachment store unavailable to resolve %s user block %S"
+            kind media.attachment_id)
+     | Some bp ->
+       let store = Attachment_store.create ~base_path:bp in
+       let* meta =
+         match Attachment_store.get_meta store ~id:media.attachment_id with
+         | Ok (Some meta) ->
+           ignore (Attachment_store.promote_to_durable store ~id:meta.id);
+           Ok meta
+         | Ok None ->
+           Error
+             (Printf.sprintf
+                "attachment %S not found in attachment store"
+                media.attachment_id)
+         | Error err ->
+           Error
+             (Printf.sprintf
+                "failed to read attachment %S metadata: %s"
+                media.attachment_id
+                (Attachment_store.get_error_to_string err))
+       in
+       let* bytes =
+         match Attachment_store.get_bytes_by_sha256 store ~sha256:meta.sha256 with
+         | Ok (Some raw) -> Ok raw
+         | Ok None ->
+           Error
+             (Printf.sprintf
+                "attachment %S bytes missing from attachment store"
+                media.attachment_id)
+         | Error err ->
+           Error
+             (Printf.sprintf
+                "failed to read attachment %S bytes: %s"
+                media.attachment_id
+                (Attachment_store.get_error_to_string err))
+       in
+       let att = attachment_of_store_meta ~fallback_name:media.name meta in
+       Ok (att, meta.kind, meta.mime_type, Base64.encode_string bytes))
+
+let is_attachment_url_ref data =
+  String.starts_with ~prefix:Attachment_store.url_prefix (String.trim data)
+
+let resolve_media_payload ?base_path ~attachments kind media =
   match find_attachment ~attachments media.attachment_id with
-  | None ->
-      Error
-        (Printf.sprintf
-           "missing attachment payload for %s user block %S"
-           kind media.attachment_id)
-  | Some att ->
+  | Some att when not (String.equal (String.trim att.data) "") && not (is_attachment_url_ref att.data) ->
       let declared = declared_media_type media att in
       Result.map
         (fun (media_type, data) -> att, media_type, data)
         (normalize_media_payload ~kind ~attachment_id:media.attachment_id
            ~declared_media_type:declared att.data)
+  | Some _ | None ->
+      Result.map
+        (fun (att, _kind, media_type, b64) -> att, media_type, b64)
+        (load_from_attachment_store ?base_path ~kind media)
 
-let media_block_to_agent_core ~attachments kind make_block media =
+let media_block_to_agent_core ?base_path ~attachments kind make_block media =
   Result.map
     (fun (_att, media_type, data) -> make_block ~media_type ~data ())
-    (resolve_media_payload ~attachments kind media)
+    (resolve_media_payload ?base_path ~attachments kind media)
+
+let hydrate_attachments ~base_path ~attachments blocks =
+  let store = Attachment_store.create ~base_path in
+  let resolve_canonical id ~fallback_name =
+    match Attachment_store.parse_id (String.trim id) with
+    | Error _ -> Ok None
+    | Ok _ ->
+      (match Attachment_store.get_meta store ~id:(String.trim id) with
+       | Ok (Some meta) ->
+         ignore (Attachment_store.promote_to_durable store ~id:meta.id);
+         Ok (Some (attachment_of_store_meta ~fallback_name meta))
+       | Ok None ->
+         Error (Printf.sprintf "attachment %S not found in attachment store" id)
+       | Error err ->
+         Error
+           (Printf.sprintf
+              "failed to read attachment %S: %s"
+              id
+              (Attachment_store.get_error_to_string err)))
+  in
+  let rec hydrate_existing acc = function
+    | [] -> Ok (List.rev acc)
+    | (att : Keeper_chat_store.attachment) :: rest ->
+      if String.equal (String.trim att.data) "" || is_attachment_url_ref att.data
+      then
+        let* resolved = resolve_canonical att.id ~fallback_name:att.name in
+        (match resolved with
+         | Some full -> hydrate_existing (full :: acc) rest
+         | None -> hydrate_existing (att :: acc) rest)
+      else hydrate_existing (att :: acc) rest
+  in
+  let* existing = hydrate_existing [] attachments in
+  let block_refs =
+    List.filter_map
+      (function
+        | User_text _ | User_image (Url_ref _) | User_image (File_id_ref _) -> None
+        | User_image (Attached media)
+        | User_document media
+        | User_audio media
+        | User_attachment media -> Some media)
+      blocks
+  in
+  let rec add_missing acc = function
+    | [] -> Ok acc
+    | (media : user_media_block) :: rest ->
+      if List.exists (fun (att : Keeper_chat_store.attachment) -> String.equal att.id media.attachment_id) acc
+      then add_missing acc rest
+      else
+        let* resolved = resolve_canonical media.attachment_id ~fallback_name:media.name in
+        (match resolved with
+         | Some full -> add_missing (acc @ [ full ]) rest
+         | None -> add_missing acc rest)
+  in
+  add_missing existing block_refs
 
 type document_projection =
   | Project_as_text
@@ -600,8 +872,8 @@ let text_block_of_document
                 metadata
                 text))
 
-let document_block_to_agent_core ~attachments media =
-  match resolve_media_payload ~attachments "document" media with
+let document_block_to_agent_core ?base_path ~attachments media =
+  match resolve_media_payload ?base_path ~attachments "document" media with
   | Error _ as error -> error
   | Ok (att, media_type, data) ->
       (match document_projection_of_media_type media_type with
@@ -615,6 +887,42 @@ let document_block_to_agent_core ~attachments media =
            Ok
              (Llm_provider.Types.document_block ~media_type
                 ~source:(Llm_provider.Types.Base64 data)))
+
+let attachment_block_to_agent_core ?base_path ~attachments (media : user_media_block) =
+  match find_attachment ~attachments media.attachment_id with
+  | Some att when not (String.equal (String.trim att.data) "") && not (is_attachment_url_ref att.data) ->
+    (match user_block_of_attachment att with
+     | User_image (Attached m) ->
+       media_block_to_agent_core ?base_path ~attachments "image"
+         (fun ~media_type ~data () ->
+            Llm_provider.Types.image_block ~media_type
+              ~source:(Llm_provider.Types.Base64 data))
+         m
+     | User_audio m ->
+       media_block_to_agent_core ?base_path ~attachments "audio"
+         (fun ~media_type ~data () ->
+            Llm_provider.Types.audio_block ~media_type
+              ~source:(Llm_provider.Types.Base64 data))
+         m
+     | User_document m | User_attachment m ->
+       document_block_to_agent_core ?base_path ~attachments m
+     | User_text _ | User_image (Url_ref _) | User_image (File_id_ref _) ->
+       document_block_to_agent_core ?base_path ~attachments media)
+  | Some _ | None ->
+    let* att, kind, media_type, data =
+      load_from_attachment_store ?base_path ~kind:"attachment" media
+    in
+    (match kind with
+     | Attachment_store.Image ->
+       Ok (Llm_provider.Types.image_block ~media_type ~source:(Llm_provider.Types.Base64 data))
+     | Attachment_store.Audio ->
+       Ok (Llm_provider.Types.audio_block ~media_type ~source:(Llm_provider.Types.Base64 data))
+     | Attachment_store.Document ->
+       (match document_projection_of_media_type media_type with
+        | Project_as_text ->
+          text_block_of_document ~att ~attachment_id:media.attachment_id ~media_type data
+        | Preserve_document ->
+          Ok (Llm_provider.Types.document_block ~media_type ~source:(Llm_provider.Types.Base64 data))))
 
 (* A reference image crosses as the native carrier form: the source's [Url] or
    [File_id] constructor holds the URL or file id verbatim and tells the
@@ -642,7 +950,7 @@ let input_error_to_string = function
 (* The blocks are checked and built in provider form first; their media then
    enter history in one step, so a payload that does not decode is the
    sender's error and a store that cannot keep the bytes is the store's. *)
-let to_agent_core_blocks ~media_store ~attachments blocks =
+let to_agent_core_blocks ?base_path ~media_store ~attachments blocks =
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
     | User_text text :: rest ->
@@ -652,7 +960,7 @@ let to_agent_core_blocks ~media_store ~attachments blocks =
         loop acc rest
     | User_image (Attached media) :: rest -> (
         match
-          media_block_to_agent_core ~attachments "image"
+          media_block_to_agent_core ?base_path ~attachments "image"
             (fun ~media_type ~data () ->
                Llm_provider.Types.image_block ~media_type
                  ~source:(Llm_provider.Types.Base64 data))
@@ -675,17 +983,21 @@ let to_agent_core_blocks ~media_store ~attachments blocks =
            :: acc)
           rest
     | User_document media :: rest -> (
-        match document_block_to_agent_core ~attachments media with
+        match document_block_to_agent_core ?base_path ~attachments media with
         | Ok block -> loop (block :: acc) rest
         | Error err -> Error err)
     | User_audio media :: rest -> (
         match
-          media_block_to_agent_core ~attachments "audio"
+          media_block_to_agent_core ?base_path ~attachments "audio"
             (fun ~media_type ~data () ->
                Llm_provider.Types.audio_block ~media_type
                  ~source:(Llm_provider.Types.Base64 data))
             media
         with
+        | Ok block -> loop (block :: acc) rest
+        | Error err -> Error err)
+    | User_attachment media :: rest -> (
+        match attachment_block_to_agent_core ?base_path ~attachments media with
         | Ok block -> loop (block :: acc) rest
         | Error err -> Error err)
   in

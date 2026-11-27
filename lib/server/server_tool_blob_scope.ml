@@ -91,9 +91,12 @@ let workspace =
     ; tree Artifact_project_source_store.dirname
     ; tree Artifact_project_build_store.dirname
     ; file (Board.persisted_filename Board.Posts)
+    ; file (Board.persisted_filename Board.Comments)
     ; lane_addons
     ; excluded M.Blob_store Tool_blob_store.dirname
     ; excluded M.Sweep_record Tool_blob_maintenance.dirname
+    ; excluded M.Other_media_store Attachment_store.dirname
+    ; excluded M.Other_media_store Attachment_store.legacy_media_dirname
     ; excluded M.Truncated_copies (Common.keeper_runtime_store_dirname Common.Keeper_trajectories)
     ; excluded M.Operator_config Config_dir_resolver.config_dirname
     ; excluded M.Repository_mirror Config_dir_resolver.repos_dirname

@@ -158,6 +158,90 @@ let chunk_list_thinking_of_openai_content (content : Yojson.Safe.t) : string =
   | `String _ | `Assoc _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> ""
 ;;
 
+let parse_base64_data_uri raw =
+  let s = String.trim raw in
+  let prefix = "data:" in
+  if not (String.starts_with ~prefix s)
+  then None
+  else (
+    match String.index_opt s ',' with
+    | None -> None
+    | Some comma ->
+      let header = String.sub s 5 (comma - 5) in
+      let payload = String.sub s (comma + 1) (String.length s - comma - 1) |> String.trim in
+      if payload = ""
+      then None
+      else (
+        let parts =
+          String.split_on_char ';' header |> List.map (fun p -> String.lowercase_ascii (String.trim p))
+        in
+        match parts with
+        | media_type :: params
+          when String.contains media_type '/'
+               && not (Api_common.string_is_blank media_type)
+               && List.mem "base64" params -> Some (media_type, payload)
+        | _ -> None))
+;;
+
+let image_source_of_url_string raw =
+  let trimmed = String.trim raw in
+  if trimmed = ""
+  then None
+  else (
+    match parse_base64_data_uri trimmed with
+    | Some (media_type, b64) -> Some (media_type, Base64 b64)
+    | None ->
+      if String.starts_with ~prefix:"http://" trimmed
+         || String.starts_with ~prefix:"https://" trimmed
+      then (
+        let media_type =
+          Option.value
+            (Api_common.infer_image_mime_of_url_opt trimmed)
+            ~default:Api_common.unknown_media_type
+        in
+        Some (media_type, Url trimmed))
+      else None)
+;;
+
+let image_source_of_openai_image_item = function
+  | `Assoc fields ->
+    let url_opt =
+      match List.assoc_opt "image_url" fields with
+      | Some (`String s) -> Some s
+      | Some (`Assoc img_fields) ->
+        (match List.assoc_opt "url" img_fields with
+         | Some (`String s) -> Some s
+         | _ -> None)
+      | Some (`List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) | None ->
+        (match List.assoc_opt "type" fields, List.assoc_opt "url" fields with
+         | Some (`String ("image_url" | "image")), Some (`String s) -> Some s
+         | _ -> None)
+    in
+    (match url_opt with
+     | Some raw -> image_source_of_url_string raw
+     | None ->
+       (match List.assoc_opt "b64_json" fields with
+        | Some (`String b64) when not (Api_common.string_is_blank b64) ->
+          let trimmed_b64 = String.trim b64 in
+          let media_type =
+            match List.assoc_opt "mime_type" fields with
+            | Some (`String m) when not (Api_common.string_is_blank m) -> String.trim m
+            | _ ->
+              Option.value
+                (Api_common.sniff_image_mime_of_base64 trimmed_b64)
+                ~default:Api_common.unknown_media_type
+          in
+          Some (media_type, Base64 trimmed_b64)
+        | _ -> None))
+  | `String raw -> image_source_of_url_string raw
+  | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+;;
+
+let image_sources_of_openai_json = function
+  | `List items -> List.filter_map image_source_of_openai_image_item items
+  | `Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> []
+;;
+
 let parse_tool_call_string_field ~tool_index ~field json =
   let open Yojson.Safe.Util in
   match json |> member field |> to_string_option with
@@ -556,7 +640,13 @@ let parse_openai_response_result_json_raw
       | Capabilities.No_content_inline_reasoning | Capabilities.Content_chunks ->
         if Api_common.string_is_blank text_content then [] else [ Text text_content ]
     in
-    let content = thinking_blocks @ inline_content_blocks @ tool_blocks in
+    let image_blocks =
+      let from_images = image_sources_of_openai_json (msg |> member "images") in
+      let from_content = image_sources_of_openai_json (msg |> member "content") in
+      (from_images @ from_content)
+      |> List.map (fun (media_type, source) -> Image { media_type; source })
+    in
+    let content = thinking_blocks @ inline_content_blocks @ image_blocks @ tool_blocks in
     let* inline_content_replay =
       match content_inline_reasoning, msg |> member "content" with
       | Capabilities.Think_tags_with_chat_replay, `String raw_content ->

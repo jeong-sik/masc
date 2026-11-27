@@ -1661,3 +1661,79 @@ describe('admitted tool identity', () => {
       value: { ...event.value, executionId: 'not-a-result' } }).success).toBe(false)
   })
 })
+
+describe('KEEPER_ATTACHMENT wire contract (Attachment_store.meta_to_wire_json parity)', () => {
+  const sha = 'a'.repeat(64)
+  const fullMetaPayload = {
+    id: `att_${sha}`,
+    attachment_id: `att_${sha}`,
+    sha256: sha,
+    url: `/api/v1/attachments/att_${sha}`,
+    mime_type: 'image/png',
+    kind: 'image' as const,
+    bytes: 4096,
+    width: 1280,
+    height: 720,
+    filename: 'diagram.png',
+    origin: 'model_generated',
+    created_at_unix: 1777100000.5,
+    retention: 'durable',
+    role: 'assistant' as const,
+    tool_call_id: null,
+    block_index: 0,
+    caption: 'Architecture diagram',
+    response: { content_generation: 1, stream_scope: 0 },
+  }
+  const fallbackPayload = {
+    attachment_id: `att_${sha}`,
+    id: `att_${sha}`,
+    url: `/api/v1/attachments/att_${sha}`,
+    mime_type: 'image/png',
+    kind: 'image' as const,
+    bytes: 0,
+    width: null,
+    height: null,
+    filename: null,
+    origin: 'model_generated',
+    retention: 'durable',
+    role: 'assistant' as const,
+    tool_call_id: null,
+  }
+  const streamEvent = (value: Record<string, unknown>) => ({
+    type: 'CUSTOM',
+    threadId: 'keeper-consumer:sangsu',
+    runId: 'run-1',
+    timestamp: 1712000000,
+    name: 'KEEPER_ATTACHMENT',
+    value,
+  })
+  const sseEnvelope = (value: Record<string, unknown>) => ({
+    type: 'keeper_chat_operation_event',
+    name: 'sangsu',
+    operation_id: 'kmsg-1',
+    ag_ui_event: streamEvent(value),
+  })
+
+  it('accepts full server meta_to_wire_json payload including created_at_unix and retention', () => {
+    expect(KeeperChatStreamEventSchema.safeParse(streamEvent(fullMetaPayload)).success).toBe(true)
+    const sseResult = SSEMessageSchema.safeParse(sseEnvelope(fullMetaPayload))
+    expect(sseResult.success).toBe(true)
+    if (sseResult.success) {
+      expect(sseResult.data.ag_ui_event).toMatchObject({ name: 'KEEPER_ATTACHMENT', value: fullMetaPayload })
+    }
+  })
+
+  it('accepts fallback attachment_event_json payload with retention and nullable metadata', () => {
+    expect(KeeperChatStreamEventSchema.safeParse(streamEvent(fallbackPayload)).success).toBe(true)
+    expect(SSEMessageSchema.safeParse(sseEnvelope(fallbackPayload)).success).toBe(true)
+  })
+
+  it('rejects unknown fields, malformed created_at_unix, malformed retention, and invalid kind', () => {
+    expect(KeeperChatStreamEventSchema.safeParse(streamEvent({ ...fullMetaPayload, unexpected_field: true })).success).toBe(false)
+    expect(KeeperChatStreamEventSchema.safeParse(streamEvent({ ...fullMetaPayload, created_at_unix: -1 })).success).toBe(false)
+    expect(KeeperChatStreamEventSchema.safeParse(streamEvent({ ...fullMetaPayload, created_at_unix: 'now' })).success).toBe(false)
+    expect(KeeperChatStreamEventSchema.safeParse(streamEvent({ ...fullMetaPayload, retention: '' })).success).toBe(false)
+    expect(KeeperChatStreamEventSchema.safeParse(streamEvent({ ...fullMetaPayload, retention: 123 })).success).toBe(false)
+    expect(KeeperChatStreamEventSchema.safeParse(streamEvent({ ...fullMetaPayload, kind: 'video' })).success).toBe(false)
+  })
+})

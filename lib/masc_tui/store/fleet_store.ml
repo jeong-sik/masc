@@ -76,6 +76,7 @@ type chat_stream_buffer = {
   model_activity : model_activity;
   response_start : response_start option;
   tools : active_tool_call list;
+  attachments : Wire_fleet.retained_image list;
   active_runtime_id : string option;
   attempt_index : int option;
   retry_notice : string option;
@@ -1464,6 +1465,7 @@ let fresh_stream_buffer ~from_observer ~operation_id ~request_id =
     model_activity = empty_model_activity;
     response_start = None;
     tools = [];
+    attachments = [];
     active_runtime_id = None;
     attempt_index = None;
     retry_notice = None;
@@ -1524,6 +1526,8 @@ let is_explicit_execution_start = function
   | Wire_fleet.Chunk_tool_quarantined _
   | Wire_fleet.Chunk_batch_bound _
   | Wire_fleet.Chunk_external_effect_completed _
+  | Wire_fleet.Chunk_attachment _
+  | Wire_fleet.Chunk_media_delta _
   | Wire_fleet.Chunk_reply_details _
   | Wire_fleet.Chunk_turn_done _
   | Wire_fleet.Chunk_error _
@@ -1561,6 +1565,8 @@ let is_queued_acceptance = function
   | Wire_fleet.Chunk_tool_quarantined _
   | Wire_fleet.Chunk_batch_bound _
   | Wire_fleet.Chunk_external_effect_completed _
+  | Wire_fleet.Chunk_attachment _
+  | Wire_fleet.Chunk_media_delta _
   | Wire_fleet.Chunk_reply_details _
   | Wire_fleet.Chunk_turn_done _
   | Wire_fleet.Chunk_error _
@@ -1767,6 +1773,58 @@ let apply_chat_stream_chunk_core ~from_observer ~allow_takeover ~keeper
       update_live_stream ~from_observer ~keeper ~request_id ~operation_id
         (fun b -> { b with tool_only_settled = true })
         t
+  | Wire_fleet.Chunk_attachment { operation_id; attachment; _ } ->
+      let img = Wire_fleet.retained_image_of_attachment attachment in
+      let append_unique (b : chat_stream_buffer) =
+        let exists =
+          List.exists
+            (fun (x : Wire_fleet.retained_image) ->
+              String.equal x.media_path img.media_path
+              || (Option.is_some x.attachment_id
+                 && Option.equal String.equal x.attachment_id img.attachment_id))
+            b.attachments
+        in
+        if exists then b else { b with attachments = b.attachments @ [ img ] }
+      in
+      update_live_stream ~from_observer ~keeper ~request_id ~operation_id
+        append_unique t
+  | Wire_fleet.Chunk_media_delta { operation_id; mime_type; url; attachment_id; _ } ->
+      let path_opt =
+        match url, attachment_id with
+        | Some u, _ when not (String.equal (String.trim u) "") -> Some (String.trim u)
+        | _, Some id when not (String.equal (String.trim id) "") ->
+            Some (Wire_attachment.attachment_path id)
+        | _ -> None
+      in
+      (match path_opt with
+      | None -> t
+      | Some media_path ->
+          let img : Wire_fleet.retained_image =
+            {
+              media_path;
+              caption = None;
+              mime_type = Some mime_type;
+              attachment_id;
+              width = None;
+              height = None;
+              bytes = None;
+              filename = None;
+              kind = Wire_attachment.kind_of_mime mime_type;
+            }
+          in
+          let append_unique (b : chat_stream_buffer) =
+            let exists =
+              List.exists
+                (fun (x : Wire_fleet.retained_image) ->
+                  String.equal x.media_path img.media_path
+                  || (Option.is_some x.attachment_id
+                     && Option.equal String.equal x.attachment_id img.attachment_id))
+                b.attachments
+            in
+            if exists then b else { b with attachments = b.attachments @ [ img ] }
+          in
+          update_live_stream ~from_observer ~keeper ~request_id ~operation_id
+            append_unique t)
   | ( Wire_fleet.Chunk_accepted _
     | Wire_fleet.Chunk_run_started _
     | Wire_fleet.Chunk_runtime_attempt_started _
@@ -1806,6 +1864,8 @@ let apply_chat_stream_chunk_core ~from_observer ~allow_takeover ~keeper
           | Wire_fleet.Chunk_tool_quarantined _
           | Wire_fleet.Chunk_batch_bound _
           | Wire_fleet.Chunk_external_effect_completed _
+          | Wire_fleet.Chunk_attachment _
+          | Wire_fleet.Chunk_media_delta _
           | Wire_fleet.Chunk_reply_details _
           | Wire_fleet.Chunk_turn_done _
           | Wire_fleet.Chunk_error _
@@ -2149,6 +2209,8 @@ let apply_chat_stream_chunk_core ~from_observer ~allow_takeover ~keeper
             | Wire_fleet.Chunk_tool_block_end _
             | Wire_fleet.Chunk_batch_bound _
             | Wire_fleet.Chunk_external_effect_completed _
+            | Wire_fleet.Chunk_attachment _
+            | Wire_fleet.Chunk_media_delta _
             | Wire_fleet.Chunk_ignored -> prev
           in
           let chat_scroll_offset =
@@ -2236,7 +2298,9 @@ let is_observer_ghost_chunk = function
   | Wire_fleet.Chunk_tool_args _
   | Wire_fleet.Chunk_tool_block_end _
   | Wire_fleet.Chunk_tool_end _
-  | Wire_fleet.Chunk_tool_quarantined _ ->
+  | Wire_fleet.Chunk_tool_quarantined _
+  | Wire_fleet.Chunk_attachment _
+  | Wire_fleet.Chunk_media_delta _ ->
       false
 
 let apply_observer_chat_stream_chunk ~keeper ~operation_id ~seq chunk t =
@@ -2263,6 +2327,8 @@ let apply_observer_chat_stream_chunk ~keeper ~operation_id ~seq chunk t =
   | Wire_fleet.Chunk_tool_quarantined _
   | Wire_fleet.Chunk_batch_bound _
   | Wire_fleet.Chunk_external_effect_completed _
+  | Wire_fleet.Chunk_attachment _
+  | Wire_fleet.Chunk_media_delta _
   | Wire_fleet.Chunk_reply_details _
   | Wire_fleet.Chunk_turn_done _
   | Wire_fleet.Chunk_error _ ->
@@ -2362,6 +2428,8 @@ let apply_observer_chat_stream_chunk ~keeper ~operation_id ~seq chunk t =
           | Wire_fleet.Chunk_tool_end _
           | Wire_fleet.Chunk_tool_quarantined _
           | Wire_fleet.Chunk_external_effect_completed _
+          | Wire_fleet.Chunk_attachment _
+          | Wire_fleet.Chunk_media_delta _
           | Wire_fleet.Chunk_reply_details _
           | Wire_fleet.Chunk_turn_done _
           | Wire_fleet.Chunk_error _

@@ -68,6 +68,18 @@ function resolveSectionCategoryId(
   return partial?.id ?? null
 }
 
+function derivedCapabilityBadge(fullKey: string, currentValue: unknown): { readonly label: string; readonly gen?: boolean } | null {
+  if (currentValue !== true) return null
+  const normalized = fullKey.trim().toLowerCase()
+  if (normalized.endsWith('supports_image_input') || normalized.endsWith('vision_input')) {
+    return { label: 'Vision' }
+  }
+  if (normalized.endsWith('supports_image_output') || normalized.endsWith('image_output')) {
+    return { label: 'Image Gen', gen: true }
+  }
+  return null
+}
+
 function serializeValue(val: unknown): string {
   if (val === null || val === undefined) return ''
   if (Array.isArray(val)) return val.join(', ')
@@ -404,6 +416,7 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
             <div>
               ${activeCategory.fields.map((field) => {
                 const currentText = drafts[field.full_key] ?? serializeValue(field.current_value)
+                const capBadge = !field.writable ? derivedCapabilityBadge(field.full_key, field.current_value) : null
                 return html`
                   <div key=${field.full_key} class="kp-field-row">
                     <div>
@@ -417,7 +430,9 @@ export function KeeperConfigTab(props: KeeperConfigTabProps) {
                       <div class="kp-roster-sub">${field.description ? field.provenance : `${field.type} · ${field.provenance}`}</div>
                     </div>
                     ${!field.writable
-                      ? html`<span class="kp-pill">읽기 전용 (${serializeValue(field.current_value) || '없음'})</span>`
+                      ? capBadge
+                        ? html`<span class=${`mono rt-cap-chip${capBadge.gen ? ' rt-cap-chip--gen' : ''}`}>${capBadge.label}</span>`
+                        : html`<span class="kp-pill">읽기 전용 (${serializeValue(field.current_value) || '없음'})</span>`
                       : field.type === 'bool' || field.type === 'boolean'
                         ? html`
                             <select

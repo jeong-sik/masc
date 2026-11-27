@@ -12,6 +12,15 @@
  */
 
 import { html } from 'htm/preact'
+import {
+  AttachmentComposer,
+  AttachmentGallery,
+  hasFailedAttachments,
+  hasUploadingAttachments,
+  readyAttachmentsOf,
+  revokeComposerPreviews,
+  type ComposerAttachmentItem,
+} from '../../components/attachments'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { authSession, canUseSingleUserTokenRead, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
@@ -300,9 +309,19 @@ export function BoardTab(props: WorkspaceViewProps) {
   const [newTitle, setNewTitle] = useState('')
   const [newBody, setNewBody] = useState('')
   const [newHearth, setNewHearth] = useState('')
+  const [postAttachments, setPostAttachments] = useState<readonly ComposerAttachmentItem[]>([])
   const [replyText, setReplyText] = useState('')
   const [replyParentId, setReplyParentId] = useState<string | null>(null)
+  const [replyAttachments, setReplyAttachments] = useState<readonly ComposerAttachmentItem[]>([])
   const [busy, setBusy] = useState(false)
+  const postAttachmentsRef = useRef(postAttachments)
+  postAttachmentsRef.current = postAttachments
+  const replyAttachmentsRef = useRef(replyAttachments)
+  replyAttachmentsRef.current = replyAttachments
+  useEffect(() => () => {
+    revokeComposerPreviews(postAttachmentsRef.current)
+    revokeComposerPreviews(replyAttachmentsRef.current)
+  }, [])
   const [feedback, setFeedback] = useState<{ kind: 'err'; message: string } | null>(null)
   const replyTextareaRef = useRef<HTMLTextAreaElement>(null)
   const commentsEndRef = useRef<HTMLDivElement>(null)
@@ -741,6 +760,8 @@ export function BoardTab(props: WorkspaceViewProps) {
     setCommentWindowStart(0)
     setReplyParentId(null)
     setReplyText('')
+    revokeComposerPreviews(replyAttachmentsRef.current)
+    setReplyAttachments([])
     if (!selectedPostId) {
       setDetail(null)
       setDetailLoading(false)
@@ -792,11 +813,33 @@ export function BoardTab(props: WorkspaceViewProps) {
     await loadPostDetail(postId, ctrl.signal, { preserveOnError: true, resetWindow: false })
   }
 
+  const handleToggleCreatePost = () => {
+    if (showCreate) {
+      const uploading = postAttachmentsRef.current.filter((item) => item.status === 'uploading')
+      if (uploading.length > 0) {
+        revokeComposerPreviews(uploading)
+        setPostAttachments((prev) => prev.filter((item) => item.status !== 'uploading'))
+      }
+      setShowCreate(false)
+    } else {
+      setShowCreate(true)
+    }
+  }
+
   const handleCreatePost = async (e: Event) => {
     e.preventDefault()
     if (authSession.peek().kind !== 'single_user_local') return
+    if (hasUploadingAttachments(postAttachmentsRef.current)) {
+      setFeedback({ kind: 'err', message: '첨부 파일 업로드가 완료된 뒤 게시하세요.' })
+      return
+    }
+    if (hasFailedAttachments(postAttachmentsRef.current)) {
+      setFeedback({ kind: 'err', message: '업로드에 실패한 첨부 파일을 재시도하거나 제거한 뒤 게시하세요.' })
+      return
+    }
+    const readyAtts = readyAttachmentsOf(postAttachmentsRef.current)
     if (!newTitle.trim() || !newBody.trim()) {
-      setFeedback({ kind: 'err', message: '제목과 본문을 모두 입력하세요.' })
+      setFeedback({ kind: 'err', message: '제목과 본문을 입력하세요.' })
       return
     }
     const startEpoch = currentSessionEpoch()
@@ -808,6 +851,9 @@ export function BoardTab(props: WorkspaceViewProps) {
       author: 'operator',
     }
     if (newHearth.trim()) body.hearth = newHearth.trim()
+    if (readyAtts.length > 0) {
+      body.attachment_ids = readyAtts.map((a) => a.attachment_id || a.id)
+    }
     const res = await apiMutate<unknown>('POST', '/api/v1/tools/masc_board_post', body)
     if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setBusy(false)
@@ -817,6 +863,8 @@ export function BoardTab(props: WorkspaceViewProps) {
     }
     setNewTitle('')
     setNewBody('')
+    revokeComposerPreviews(postAttachmentsRef.current)
+    setPostAttachments([])
     setShowCreate(false)
     setFeedback(null)
     pushShellToast('게시글을 작성했습니다.', 'success')
@@ -828,7 +876,20 @@ export function BoardTab(props: WorkspaceViewProps) {
     e.preventDefault()
     if (authSession.peek().kind !== 'single_user_local') return
     const view = replyViewRef.current
-    if (!activePost || view?.postId !== activePost.id || !replyText.trim()) return
+    if (hasUploadingAttachments(replyAttachmentsRef.current)) {
+      setFeedback({ kind: 'err', message: '첨부 파일 업로드가 완료된 뒤 등록하세요.' })
+      return
+    }
+    if (hasFailedAttachments(replyAttachmentsRef.current)) {
+      setFeedback({ kind: 'err', message: '업로드에 실패한 첨부 파일을 재시도하거나 제거한 뒤 등록하세요.' })
+      return
+    }
+    if (!activePost || view?.postId !== activePost.id) return
+    if (!replyText.trim()) {
+      setFeedback({ kind: 'err', message: '댓글 본문을 입력하세요.' })
+      return
+    }
+    const readyAtts = readyAttachmentsOf(replyAttachmentsRef.current)
     const startEpoch = currentSessionEpoch()
     setBusy(true)
     setFeedback(null)
@@ -838,6 +899,9 @@ export function BoardTab(props: WorkspaceViewProps) {
       content: replyText.trim(),
     }
     if (replyParentId) body.parent_id = replyParentId
+    if (readyAtts.length > 0) {
+      body.attachment_ids = readyAtts.map((a) => a.attachment_id || a.id)
+    }
     const res = await apiMutate<unknown>('POST', '/api/v1/tools/masc_board_comment', body)
     if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setBusy(false)
@@ -848,6 +912,8 @@ export function BoardTab(props: WorkspaceViewProps) {
     }
     setReplyText('')
     setReplyParentId(null)
+    revokeComposerPreviews(replyAttachmentsRef.current)
+    setReplyAttachments([])
     setFeedback(null)
     pushShellToast('댓글이 등록되었습니다.', 'success')
     view.commentId = postedCommentId(res.value, activePost.id)
@@ -1007,6 +1073,7 @@ export function BoardTab(props: WorkspaceViewProps) {
           <${KeeperBadge} id=${p.author} size="sm" />
           <span class="tnum">▲ ${p.votes}</span>
           <span class="tnum">💬 ${p.commentCount}</span>
+          ${p.attachments.length > 0 && html`<span class="tnum" aria-label=${`첨부 ${p.attachments.length}개`}>📎 ${p.attachments.length}</span>`}
           <span>${formatRelativeTime(p.updatedAt || p.createdAt, renderNowBucketMs)}</span>
           ${renderAudienceBadges(p.audience, true)}
           ${entry.predecessors.length > 0 && html`
@@ -1023,7 +1090,7 @@ export function BoardTab(props: WorkspaceViewProps) {
         <h2 class="kn-pane-title">Board <span class="kn-chip-count">(${foldedFeed.length})</span></h2>
         <div class="kn-actions">
           ${!isMultiAccount && html`
-            <button type="button" class="btn-primary" onClick=${() => setShowCreate((v) => !v)}>
+            <button type="button" class="btn-primary" onClick=${handleToggleCreatePost}>
               ${showCreate ? '닫기' : '+ 새 글'}
             </button>
           `}
@@ -1134,23 +1201,47 @@ export function BoardTab(props: WorkspaceViewProps) {
             value=${newHearth}
             onInput=${(e: Event) => setNewHearth((e.target as HTMLInputElement).value)}
           />
-          <textarea
-            class="kn-textarea"
-            required
-            placeholder="Markdown 본문… (⌘↵ 게시)"
-            value=${newBody}
-            onInput=${(e: Event) => setNewBody((e.target as HTMLTextAreaElement).value)}
-            onKeyDown=${(e: KeyboardEvent) => {
-              if (e.isComposing || e.keyCode === 229) return
-              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !busy) {
-                e.preventDefault()
-                void handleCreatePost(e)
-              }
-            }}
-          />
+          <${AttachmentComposer}
+            items=${postAttachments}
+            onChange=${setPostAttachments}
+            disabled=${busy}
+            triggerLabel="이미지 · 파일 첨부"
+            onError=${(message: string) => setFeedback({ kind: 'err', message })}
+          >
+            <textarea
+              class="kn-textarea"
+              required
+              placeholder="Markdown 본문 (필수 · 이미지 붙여넣기/드롭 지원 · ⌘↵ 게시)"
+              value=${newBody}
+              onInput=${(e: Event) => setNewBody((e.target as HTMLTextAreaElement).value)}
+              onKeyDown=${(e: KeyboardEvent) => {
+                if (e.isComposing || e.keyCode === 229) return
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !busy) {
+                  e.preventDefault()
+                  void handleCreatePost(e)
+                }
+              }}
+            />
+          <//>
           <div class="kn-actions">
-            <button type="submit" class="btn-primary" disabled=${busy}>게시</button>
-            <button type="button" class="btn-ghost" onClick=${() => setShowCreate(false)}>취소</button>
+            <button
+              type="submit"
+              class="btn-primary"
+              disabled=${busy || !newTitle.trim() || !newBody.trim() || hasUploadingAttachments(postAttachments) || hasFailedAttachments(postAttachments)}
+            >
+              게시
+            </button>
+            <button
+              type="button"
+              class="btn-ghost"
+              onClick=${() => {
+                revokeComposerPreviews(postAttachmentsRef.current)
+                setPostAttachments([])
+                setShowCreate(false)
+              }}
+            >
+              취소
+            </button>
           </div>
         </form>
       `}
@@ -1199,6 +1290,7 @@ export function BoardTab(props: WorkspaceViewProps) {
     newTitle,
     newHearth,
     newBody,
+    postAttachments,
     busy,
     loadError,
     bundle.signalScanTruncated,
@@ -1309,7 +1401,12 @@ export function BoardTab(props: WorkspaceViewProps) {
             </section>
           `}
 
-          <article><${MarkdownContent} text=${activePost.body} document /></article>
+          <article>
+            <${MarkdownContent} text=${activePost.body} document />
+            ${activePost.attachments.length > 0 && html`
+              <${AttachmentGallery} attachments=${activePost.attachments} workspaceEpoch=${currentSessionEpoch()} />
+            `}
+          </article>
 
           <${ReactionBar}
             reactions=${activePost.reactions}
@@ -1367,6 +1464,9 @@ export function BoardTab(props: WorkspaceViewProps) {
                     </div>
                   </div>
                   <${MarkdownContent} class="kn-body-md" text=${c.content} document />
+                  ${c.attachments.length > 0 && html`
+                    <${AttachmentGallery} attachments=${c.attachments} workspaceEpoch=${currentSessionEpoch()} compact=${true} />
+                  `}
                   <${ReactionBar}
                     reactions=${c.reactions}
                     supportedEmojis=${activePost.supportedReactionEmojis}
@@ -1412,22 +1512,35 @@ export function BoardTab(props: WorkspaceViewProps) {
                     </button>
                   </div>
                 `}
-                <textarea
-                  ref=${replyTextareaRef}
-                  class="kn-textarea kn-textarea--reply"
-                  placeholder="댓글을 작성하세요 (Markdown 지원 · ⌘↵ 등록)…"
-                  value=${replyText}
-                  onInput=${(e: Event) => setReplyText((e.target as HTMLTextAreaElement).value)}
-                  onKeyDown=${(e: KeyboardEvent) => {
-                    if (e.isComposing || e.keyCode === 229) return
-                    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !busy && replyText.trim()) {
-                      e.preventDefault()
-                      void handleReply(e)
-                    }
-                  }}
-                />
+                <${AttachmentComposer}
+                  items=${replyAttachments}
+                  onChange=${setReplyAttachments}
+                  disabled=${busy}
+                  triggerLabel="댓글 파일 첨부"
+                  onError=${(message: string) => setFeedback({ kind: 'err', message })}
+                >
+                  <textarea
+                    ref=${replyTextareaRef}
+                    class="kn-textarea kn-textarea--reply"
+                    required
+                    placeholder="댓글 내용을 입력하세요 (필수 · Markdown · 이미지 붙여넣기/드롭 · ⌘↵ 등록)…"
+                    value=${replyText}
+                    onInput=${(e: Event) => setReplyText((e.target as HTMLTextAreaElement).value)}
+                    onKeyDown=${(e: KeyboardEvent) => {
+                      if (e.isComposing || e.keyCode === 229) return
+                      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !busy && replyText.trim()) {
+                        e.preventDefault()
+                        void handleReply(e)
+                      }
+                    }}
+                  />
+                <//>
                 <div class="kn-actions">
-                  <button type="submit" class="btn-primary" disabled=${busy || !replyText.trim()}>
+                  <button
+                    type="submit"
+                    class="btn-primary"
+                    disabled=${busy || !replyText.trim() || hasUploadingAttachments(replyAttachments) || hasFailedAttachments(replyAttachments)}
+                  >
                     댓글 등록
                   </button>
                 </div>

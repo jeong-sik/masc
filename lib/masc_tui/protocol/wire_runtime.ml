@@ -1268,6 +1268,13 @@ type runtime_option = {
   declared_reasoning_effort : string option;
   transport : string option;
   is_default : bool;
+  supports_image_input : bool option;
+  supports_image_output : bool option;
+}
+
+type runtime_media_overrides = {
+  vision_reader : string option;
+  image_generator : string option;
 }
 
 type runtime_resolved_snapshot = {
@@ -1277,6 +1284,7 @@ type runtime_resolved_snapshot = {
   lanes : failover_lane list;
   runtimes : runtime_option list;
   usage_windows : provider_usage_windows option;
+  media : runtime_media_overrides option;
 }
 
 let decode_failover_lane json =
@@ -1289,6 +1297,57 @@ let decode_failover_lane json =
     | _ :: _ -> Ok ()
   in
   Ok { id; declared; runtime_ids }
+
+let first_opt_bool json keys =
+  List.find_map
+    (fun k ->
+      match optional_bool_field json k with
+      | Ok (Some _ as v) -> v
+      | Ok None | Error _ -> None)
+    keys
+
+let decode_media_capabilities json =
+  let caps_opt =
+    match optional_object_field json "capabilities" with
+    | Ok v -> v
+    | Error _ -> None
+  in
+  let lookup keys =
+    match Option.bind caps_opt (fun c -> first_opt_bool c keys) with
+    | Some _ as v -> v
+    | None -> first_opt_bool json keys
+  in
+  let supports_image_input =
+    lookup [ "supports_image_input"; "vision_input" ]
+  in
+  let supports_image_output =
+    lookup [ "supports_image_output"; "image_output" ]
+  in
+  (supports_image_input, supports_image_output)
+
+let decode_media_overrides body =
+  let obj_opt =
+    match optional_object_field body "media" with
+    | Ok (Some _ as m) -> m
+    | Ok None | Error _ -> (
+        match optional_object_field body "model_routing" with
+        | Ok (Some mr) -> (
+            match optional_object_field mr "media" with
+            | Ok v -> v
+            | Error _ -> None)
+        | Ok None | Error _ -> None)
+  in
+  match obj_opt with
+  | None -> None
+  | Some obj ->
+      let opt_str k =
+        match optional_nonblank_string obj k with Ok v -> v | Error _ -> None
+      in
+      let vision_reader = opt_str "vision_reader" in
+      let image_generator = opt_str "image_generator" in
+      if Option.is_some vision_reader || Option.is_some image_generator then
+        Some { vision_reader; image_generator }
+      else None
 
 let decode_runtime_option ~default_route json =
   let* id = required_nonblank_string json "id" in
@@ -1303,6 +1362,9 @@ let decode_runtime_option ~default_route json =
   let is_default =
     match default_route with Some d -> String.equal d id | None -> false
   in
+  let supports_image_input, supports_image_output =
+    decode_media_capabilities json
+  in
   Ok
     {
       id;
@@ -1312,6 +1374,8 @@ let decode_runtime_option ~default_route json =
       declared_reasoning_effort;
       transport;
       is_default;
+      supports_image_input;
+      supports_image_output;
     }
 
 let decode_runtime_resolved json =
@@ -1341,7 +1405,8 @@ let decode_runtime_resolved json =
       Ok (Some u)
     else Ok None
   in
-  Ok { generated_at_iso; config_path; default_route; lanes; runtimes; usage_windows }
+  let media = decode_media_overrides body in
+  Ok { generated_at_iso; config_path; default_route; lanes; runtimes; usage_windows; media }
 
 type runtime_standing = {
   quota_rest_cause : string option;
@@ -6337,7 +6402,6 @@ type runtime_routing_action =
       runtime_ids : string list;
       expected_source_revision : string option;
     }
-  | Route_set_media_failover of { runtime_ids : string list }
   | Route_exact_append of { lane_id : string; runtime_id : string }
   | Route_exact_drop of { lane_id : string; runtime_id : string }
   | Route_exact_move of {
@@ -6353,7 +6417,6 @@ type runtime_routing_action =
 
 type routing_lane_kind =
   | Route_default
-  | Route_media_failover
   | Route_exact of string
   | Route_named of string
 
@@ -6361,7 +6424,6 @@ let classify_routing_lane lane =
   let trimmed = String.trim lane in
   match trimmed with
   | "default" -> Route_default
-  | "media_failover" -> Route_media_failover
   | name when String.starts_with ~prefix:"exact/" name ->
       Route_exact (String.sub name 6 (String.length name - 6))
   | name -> Route_named name
@@ -6369,16 +6431,15 @@ let classify_routing_lane lane =
 let is_named_routing_lane lane =
   match classify_routing_lane lane with
   | Route_named name -> not (String.equal name "")
-  | Route_default | Route_media_failover | Route_exact _ -> false
+  | Route_default | Route_exact _ -> false
 
 let set_routing_action ~lane ~runtime_ids ~expected_source_revision =
   match classify_routing_lane lane, runtime_ids with
   | Route_default, [ runtime_id ] when not (String.equal (String.trim runtime_id) "") ->
       Ok (Route_set_default { runtime_id = String.trim runtime_id })
   | Route_default, _ -> Error "The default route requires exactly one runtime ID"
-  | (Route_media_failover | Route_exact _ | Route_named _), [] ->
+  | (Route_exact _ | Route_named _), [] ->
       Error "At least one runtime ID is required"
-  | Route_media_failover, _ -> Ok (Route_set_media_failover { runtime_ids })
   | (Route_named _ | Route_exact _), _ ->
       Ok (Route_set_named { lane; runtime_ids; expected_source_revision })
 
@@ -6413,14 +6474,6 @@ let encode_runtime_routing_action = function
            , `List (List.map (fun s -> `String (String.trim s)) runtime_ids) );
          ]
         @ rev_field)
-  | Route_set_media_failover { runtime_ids } ->
-      `Assoc
-        [
-          ("lane", `String "media_failover");
-          ("action", `String "set");
-          ( "runtime_ids"
-          , `List (List.map (fun s -> `String (String.trim s)) runtime_ids) );
-        ]
   | Route_exact_append { lane_id; runtime_id } ->
       `Assoc
         [

@@ -503,6 +503,132 @@ export function deleteLaneFromToml(
   return ok(nextLines.length > 0 ? `${nextLines.join('\n')}\n` : '')
 }
 
+export interface ParsedRuntimeMediaOverrides {
+  readonly visionReader: string | null
+  readonly imageGenerator: string | null
+}
+
+function findExactTableSpan(
+  lines: readonly string[],
+  tableHeader: string,
+): { readonly startLine: number; readonly endLine: number } | null {
+  for (let i = 0; i < lines.length; i += 1) {
+    const stripped = stripTomlComment(lines[i]!).trim()
+    if (stripped !== `[${tableHeader}]`) continue
+    let end = i + 1
+    let openArrayDepth = 0
+    while (end < lines.length) {
+      const curLine = lines[end]!
+      if (openArrayDepth === 0 && isAnyTableHeader(curLine)) break
+      openArrayDepth = Math.max(0, openArrayDepth + scanLineBracketDelta(curLine))
+      end += 1
+    }
+    return { startLine: i, endLine: end }
+  }
+  return null
+}
+
+function extractStringKey(bodyLines: readonly string[], keyName: string): string | null {
+  const keyRe = new RegExp(`^\\s*${keyName}\\s*=\\s*(.+)$`)
+  for (const line of bodyLines) {
+    const cleaned = stripTomlComment(line).trim()
+    const match = keyRe.exec(cleaned)
+    if (!match) continue
+    const rawVal = match[1]!.trim()
+    if (rawVal.startsWith('"') && rawVal.endsWith('"') && rawVal.length >= 2) {
+      const val = unquoteBasicString(rawVal.slice(1, -1)).trim()
+      return val || null
+    }
+    if (rawVal.startsWith("'") && rawVal.endsWith("'") && rawVal.length >= 2) {
+      const val = rawVal.slice(1, -1).trim()
+      return val || null
+    }
+    return rawVal || null
+  }
+  return null
+}
+
+/**
+ * Parses optional `[runtime.media]` overrides (`vision_reader`, `image_generator`)
+ * from `runtime.toml`. Absent values return `null` (meaning native runtime capabilities
+ * are used automatically with zero override).
+ */
+export function parseRuntimeMediaOverridesFromToml(sourceText: string): ParsedRuntimeMediaOverrides {
+  const lines = sourceText.split(/\r?\n/)
+  const span = findExactTableSpan(lines, 'runtime.media')
+  if (!span) return { visionReader: null, imageGenerator: null }
+  const body = lines.slice(span.startLine + 1, span.endLine)
+  return {
+    visionReader: extractStringKey(body, 'vision_reader'),
+    imageGenerator: extractStringKey(body, 'image_generator'),
+  }
+}
+
+/**
+ * Surgically updates `[runtime.media]` (`vision_reader`, `image_generator`) inside
+ * `runtime.toml`. Removes empty keys and removes the table entirely when no keys remain.
+ */
+export function upsertRuntimeMediaOverridesInToml(
+  sourceText: string,
+  spec: ParsedRuntimeMediaOverrides,
+): Result<string, string> {
+  const visionReader = spec.visionReader?.trim() || null
+  const imageGenerator = spec.imageGenerator?.trim() || null
+  const hasTrailingNewline = sourceText.endsWith('\n')
+  const lines = sourceText.split(/\r?\n/)
+  if (hasTrailingNewline && lines[lines.length - 1] === '') {
+    lines.pop()
+  }
+
+  const existing = findExactTableSpan(lines, 'runtime.media')
+  let nextLines: string[]
+
+  if (existing) {
+    let body = lines.slice(existing.startLine + 1, existing.endLine)
+    body = replaceOrInsertScalarKey(
+      body,
+      'vision_reader',
+      visionReader ? `vision_reader = ${JSON.stringify(visionReader)}` : null,
+    )
+    body = replaceOrInsertScalarKey(
+      body,
+      'image_generator',
+      imageGenerator ? `image_generator = ${JSON.stringify(imageGenerator)}` : null,
+    )
+    const hasContent = body.some((line) => stripTomlComment(line).trim() !== '')
+    if (!hasContent) {
+      let cutStart = existing.startLine
+      if (
+        cutStart > 0
+        && lines[cutStart - 1]!.trim() === ''
+        && (existing.endLine >= lines.length || lines[existing.endLine]!.trim() === '')
+      ) {
+        cutStart -= 1
+      }
+      nextLines = [...lines.slice(0, cutStart), ...lines.slice(existing.endLine)]
+    } else {
+      nextLines = [
+        ...lines.slice(0, existing.startLine + 1),
+        ...body,
+        ...lines.slice(existing.endLine),
+      ]
+    }
+  } else {
+    if (!visionReader && !imageGenerator) {
+      return ok(sourceText)
+    }
+    const newBlock: string[] = ['[runtime.media]']
+    if (visionReader) newBlock.push(`vision_reader = ${JSON.stringify(visionReader)}`)
+    if (imageGenerator) newBlock.push(`image_generator = ${JSON.stringify(imageGenerator)}`)
+    const prefix = lines.length > 0 && lines[lines.length - 1]!.trim() !== ''
+      ? [...lines, '']
+      : [...lines]
+    nextLines = [...prefix, ...newBlock]
+  }
+
+  return ok(nextLines.length > 0 ? `${nextLines.join('\n')}\n` : '')
+}
+
 export function buildLaneUnifiedDiff(
   beforeText: string,
   afterText: string,

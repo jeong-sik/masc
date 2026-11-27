@@ -77,6 +77,9 @@ type entry =
         visual_first, plus the aliases in
         {!Capability_vocab.modality_priority_values}); unknown values fail
         closed in {!of_json}. Applied in [Capabilities.apply_catalog_entry]. *)
+  ; image_output : Capability_vocab.image_output_contract option
+    (** Closed image generation output contract parsed fail-closed against
+        {!Capability_vocab.image_output_contract_values}. *)
   ; supports_native_streaming : bool option
   ; supports_system_prompt : bool option
   ; supports_assistant_prefill : bool option

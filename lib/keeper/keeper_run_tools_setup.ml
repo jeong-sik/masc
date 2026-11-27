@@ -810,7 +810,9 @@ let prepare_agent_setup
   let project_for_runtime ~runtime ~carried =
     let view = project_bundle_for_runtime ~runtime ~carried in
     let descriptors = List.filter
-        (Keeper_tools_agent_core.descriptor_admitted view.image_admission)
+        (Keeper_tools_agent_core.descriptor_admitted
+           ~image_generation_admitted:view.image_generation_admitted
+           view.image_admission)
         turn_model_visible_descriptors in
     let base_names = base_model_tool_names ~skill_catalog
         ~model_visible_descriptors:descriptors () in

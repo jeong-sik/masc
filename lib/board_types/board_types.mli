@@ -202,6 +202,9 @@ type post = {
       field existed, and for every open post since). A row stored without
       this key decodes to [None]; the key is only ever written when the
       post is actually closed. *)
+  attachment_ids : string list;
+  (** Canonical [att_<64hex>] identifiers persisted in {!Attachment_store}.
+      Empty when absent on read. *)
 }
 
 (** Replaced in [comments], never changed in place, as [post] is. *)
@@ -217,6 +220,9 @@ type comment = {
   expires_at : float;
   votes_up : int;
   votes_down : int;
+  attachment_ids : string list;
+  (** Canonical [att_<64hex>] identifiers persisted in {!Attachment_store}.
+      Empty when absent on read. *)
 }
 
 type source_completeness =

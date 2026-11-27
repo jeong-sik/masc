@@ -1193,6 +1193,20 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
       (markdown_rows ~theme ~width ~prefix:"  " ~cont_prefix:"  " ~prefix_fg:fg
          ~bg_rgb:base_bg buf.text)
   end;
+  (* 3b. Live Streamed Images / Attachments (KEEPER_ATTACHMENT & KEEPER_MEDIA_DELTA) *)
+  if sp.show_attachments then begin
+    let height =
+      Chat_transcript.retained_image_height ~model ~keeper:keeper_name ~width
+    in
+    let media_rows =
+      Chat_transcript.retained_image_rows ~theme ~lang:model.lang ~width ~height
+        buf.attachments
+      |> List.map (fun (line : Markdown.rendered_line) ->
+             make_row ~prefix:"  " ~prefix_fg:theme.text_muted ~bg_rgb:base_bg
+               ?image_part:line.image_part line.spans)
+    in
+    push_all media_rows
+  end;
   (* 4. Explicit Stream Error (Coral left rail, non-italic Bold) *)
   (match sp.show_error with
   | Some err ->
@@ -1207,10 +1221,13 @@ let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
   | None -> ());
   List.rev !rows
 
-let build_pending_tx_rows ~(theme : Theme.t) ~(model : Model.t) ~width
+let build_pending_tx_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper ~width
     (items : Chat_transcript.pending_tx_projection list) =
   let base_bg = theme.surface_2 in
-  List.map
+  let retained_height =
+    Chat_transcript.retained_image_height ~model ~keeper ~width
+  in
+  List.concat_map
     (fun (item : Chat_transcript.pending_tx_projection) ->
       let tx = item.tx in
       if item.notice_only then
@@ -1220,14 +1237,16 @@ let build_pending_tx_rows ~(theme : Theme.t) ~(model : Model.t) ~width
               Ops_common.say model ~ko:("전송 실패: " ^ reason) ~en:("Send failed: " ^ reason), theme.status_critical
           | Queued | Sending | Pending_processing | Confirming_delivery | Interrupting | Delivered ->
               "", theme.text_muted in
-        single_span_row ~rail_rgb:tone
-          ~prefix:(if tx.state = Drafts.No_operation_record then "· " else Glyph.to_utf8 Glyph.Live_failing ^ " ")
-          ~prefix_fg:tone ~prefix_attrs:Attr.bold
-          ~text:(Grapheme.truncate_to_width ~max_width:(Int.max 12 (width - 22)) notice)
-          ~text_fg:tone ~attrs:Attr.bold
-          ~right_meta:(Ops_common.say model ~ko:"[X] 닫기" ~en:"[X] dismiss")
-          ~right_meta_fg:theme.text_muted ~right_meta_attrs:Attr.italic
-          ~bg_rgb:theme.surface_1 ()
+        [
+          single_span_row ~rail_rgb:tone
+            ~prefix:(if tx.state = Drafts.No_operation_record then "· " else Glyph.to_utf8 Glyph.Live_failing ^ " ")
+            ~prefix_fg:tone ~prefix_attrs:Attr.bold
+            ~text:(Grapheme.truncate_to_width ~max_width:(Int.max 12 (width - 22)) notice)
+            ~text_fg:tone ~attrs:Attr.bold
+            ~right_meta:(Ops_common.say model ~ko:"[X] 닫기" ~en:"[X] dismiss")
+            ~right_meta_fg:theme.text_muted ~right_meta_attrs:Attr.italic
+            ~bg_rgb:theme.surface_1 ();
+        ]
       else
         let state_str =
           if tx.state = Drafts.No_operation_record then Say.resolve model.lang (Drafts.absence_notice tx)
@@ -1253,10 +1272,15 @@ let build_pending_tx_rows ~(theme : Theme.t) ~(model : Model.t) ~width
           | Drafts.Mode_follow_up ->
               Some (Ops_common.say model ~ko:"후속" ~en:"Queue")
         in
+        let raw_body =
+          if String.equal (String.trim tx.body) "" && tx.attachments <> [] then
+            String.concat " " (List.map Wire_attachment.format_chip tx.attachments)
+          else tx.body
+        in
         let body_preview =
           Grapheme.truncate_to_width
             ~max_width:(Int.max 12 (width - 30))
-            (String.map (function '\n' | '\r' -> ' ' | c -> c) tx.body)
+            (String.map (function '\n' | '\r' -> ' ' | c -> c) raw_body)
         in
         let detail =
           match tx.state with
@@ -1286,11 +1310,27 @@ let build_pending_tx_rows ~(theme : Theme.t) ~(model : Model.t) ~width
               | Some mt -> Printf.sprintf "%s · %s" state_str mt
               | None -> state_str)
         in
-        single_span_row ~rail_rgb:state_fg
-          ~prefix:(Glyph.to_utf8 Glyph.Prompt_caret ^ " ")
-          ~prefix_fg:state_fg ~prefix_attrs:Attr.bold ~text:detail
-          ~text_fg:theme.text_primary ~right_meta:pill ~right_meta_fg:state_fg
-          ~right_meta_attrs:Attr.bold ~bg_rgb:base_bg ~full_bleed_bg:true ())
+        let header =
+          single_span_row ~rail_rgb:state_fg
+            ~prefix:(Glyph.to_utf8 Glyph.Prompt_caret ^ " ")
+            ~prefix_fg:state_fg ~prefix_attrs:Attr.bold ~text:detail
+            ~text_fg:theme.text_primary ~right_meta:pill ~right_meta_fg:state_fg
+            ~right_meta_attrs:Attr.bold ~bg_rgb:base_bg ~full_bleed_bg:true ()
+        in
+        let att_rows =
+          if tx.attachments = [] then []
+          else
+            let imgs =
+              List.map Wire_fleet.retained_image_of_attachment tx.attachments
+            in
+            Chat_transcript.retained_image_rows ~theme ~lang:model.lang ~width
+              ~height:retained_height imgs
+            |> List.map (fun (line : Markdown.rendered_line) ->
+                   make_row ~rail_rgb:state_fg ~prefix:"  "
+                     ~prefix_fg:theme.text_muted ~bg_rgb:base_bg
+                     ?image_part:line.image_part line.spans)
+        in
+        header :: att_rows)
     items
 
 let format_elapsed_since ~(model : Model.t) since_unix =
@@ -1860,7 +1900,8 @@ let render_chat_tab ?history_rows grid ~(rect : Rect.t) ~(theme : Theme.t)
                   build_active_turn_rows ~theme ~model ~keeper:name
                     ~width:prose_w turn
               | Chat_transcript.Section_pending items ->
-                  build_pending_tx_rows ~theme ~model ~width:prose_w items
+                  build_pending_tx_rows ~theme ~model ~keeper:name ~width:prose_w
+                    items
               | Chat_transcript.Section_stream sp ->
                   build_stream_rows ~theme ~model ~keeper_name:name
                     ~width:prose_w sp
@@ -4093,6 +4134,41 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
             Some (Ops_common.say model ~ko:"도구: 전체 펼침" ~en:"Tools: full")
       else None
     in
+    let media_caps_pill =
+      if Nav.equal_keeper_tab tab Nav.Keeper_chat then
+        let runtimes = Runtime_store.runtime_options model.runtime in
+        let matched_rt =
+          match keeper_opt with
+          | None -> None
+          | Some k ->
+              let rid = String.trim k.runtime_id in
+              let mid =
+                Option.map String.trim k.model_id |> Option.value ~default:""
+              in
+              List.find_opt
+                (fun (r : Wire_runtime.runtime_option) ->
+                  ((not (String.equal rid "")) && String.equal r.id rid)
+                  || ((not (String.equal mid ""))
+                      && Option.equal String.equal r.model (Some mid)))
+                runtimes
+        in
+        match matched_rt with
+        | Some r ->
+            let tags =
+              List.filter_map Fun.id
+                [
+                  (if Option.equal Bool.equal r.supports_image_input (Some true)
+                   then Some "[Vision]"
+                   else None);
+                  (if Option.equal Bool.equal r.supports_image_output (Some true)
+                   then Some "[Image Gen]"
+                   else None);
+                ]
+            in
+            if tags = [] then None else Some (String.concat " " tags)
+        | None -> None
+      else None
+    in
     let company_sub =
       let base =
         match keeper_opt with
@@ -4101,11 +4177,10 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
             if String.length trimmed > 0 then Some trimmed else None
         | None -> None
       in
-      match (tools_mode_pill, base) with
-      | Some pill, Some c -> Some (pill ^ " · " ^ c)
-      | Some pill, None -> Some pill
-      | None, Some c -> Some c
-      | None, None -> None
+      let parts = List.filter_map Fun.id [ media_caps_pill; tools_mode_pill; base ] in
+      match parts with
+      | [] -> None
+      | xs -> Some (String.concat " · " xs)
     in
     let title =
       if embedded then

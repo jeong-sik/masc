@@ -44,7 +44,6 @@ import {
   probeOfficialClientLogin,
   patchRuntimeAssignment,
   patchRuntimeLane,
-  patchRuntimeMediaFailover,
   patchRuntimeExactSlot,
   patchRuntimeRouting,
   patchKeeperConfig,
@@ -4540,37 +4539,6 @@ describe('runtime.toml raw config API', () => {
     expect(result.source_text).toBe(sourceText)
   })
 
-  it('posts ordered media failover routing patches', async () => {
-    const sourceText = '[runtime]\nmedia_failover = ["rt-a", "rt-b"]\n'
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(committedPayload({
-        ok: true,
-        path: '/tmp/.masc/config/runtime.toml',
-        file_name: 'runtime.toml',
-        source_text: sourceText,
-        reloaded: true,
-        provider_protocols: providerProtocols,
-        reserved_provider_ids: [...runtimeReservedProviderIdsFixture],
-      })), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    )
-    vi.stubGlobal('fetch', fetchMock)
-
-    const result = await patchRuntimeMediaFailover(['rt-a', 'rt-b'])
-
-    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
-    expect(url).toBe('/api/v1/runtime/config/routing')
-    expect(init.method).toBe('POST')
-    expect(JSON.parse(init.body as string)).toEqual({
-      lane: 'media_failover',
-      runtime_ids: ['rt-a', 'rt-b'],
-    })
-    expect(result.source_text).toBe(sourceText)
-  })
-
   it('posts runtime lane set/create/rename/remove bodies to the routing writer', async () => {
     const sourceText = '[runtime.lanes.coding]\ncandidates = ["rt-b", "rt-a"]\n'
     const fetchMock = vi.fn().mockImplementation(async () =>
@@ -5608,7 +5576,7 @@ describe('fetchRuntimeDefaults', () => {
         { id: 'openai.gpt-4o', provider: 'OpenAI', model: 'gpt-4o', max_context: 128000, is_default: true },
       ],
       model_routing: {
-        media_failover: [],
+        media: { vision_reader: null, image_generator: null },
       },
     }
     const fetchMock = vi.fn().mockResolvedValue(

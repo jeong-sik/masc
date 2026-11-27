@@ -7,7 +7,7 @@ import {
 
 function validModelRouting(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    media_failover: ['openai.gpt-4o'],
+    media: { vision_reader: null, image_generator: null },
     ...overrides,
   }
 }
@@ -22,7 +22,14 @@ function validResponse(overrides: Record<string, unknown> = {}): Record<string, 
     default_model: 'gpt-4o',
     default_max_context: 128000,
     runtimes: [
-      { id: 'openai.gpt-4o', provider: 'OpenAI', model: 'gpt-4o', max_context: 128000, is_default: true },
+      {
+        id: 'openai.gpt-4o',
+        provider: 'OpenAI',
+        model: 'gpt-4o',
+        max_context: 128000,
+        is_default: true,
+        capabilities: { supports_image_input: true, supports_image_output: true },
+      },
       { id: 'anthropic.sonnet', provider: 'Anthropic', model: 'claude-sonnet-4', max_context: 200000, is_default: false },
     ],
     model_routing: validModelRouting(),
@@ -31,12 +38,13 @@ function validResponse(overrides: Record<string, unknown> = {}): Record<string, 
 }
 
 describe('parseRuntimeDefaultsResponse', () => {
-  it('parses a fully resolved response', () => {
+  it('parses a fully resolved response with derived capabilities and optional media overrides', () => {
     const out = parseRuntimeDefaultsResponse(validResponse())
     expect(out.default_runtime_id).toBe('openai.gpt-4o')
     expect(out.default_model).toBe('gpt-4o')
     expect(out.runtimes).toHaveLength(2)
     expect(out.runtimes[0]!.is_default).toBe(true)
+    expect(out.runtimes[0]!.capabilities).toEqual({ supports_image_input: true, supports_image_output: true })
   })
 
   it('accepts an unresolved (null/empty) config without fabricating defaults', () => {
@@ -47,9 +55,7 @@ describe('parseRuntimeDefaultsResponse', () => {
         default_model: null,
         default_max_context: null,
         runtimes: [],
-        model_routing: {
-          media_failover: [],
-        },
+        model_routing: {},
       }),
     )
     expect(out.default_runtime_id).toBeNull()

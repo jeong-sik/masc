@@ -132,6 +132,23 @@ export interface RuntimeFailedAttempt {
   readonly recorded_by: string
 }
 
+export interface RuntimeCapabilities {
+  readonly supports_image_input?: boolean
+  readonly supports_image_output?: boolean
+  readonly vision_input?: boolean
+  readonly image_output?: boolean
+}
+
+export interface RuntimeMediaOverrides {
+  readonly vision_reader?: string | null
+  readonly image_generator?: string | null
+}
+
+export interface RuntimeMediaCapabilities {
+  readonly visionInput: boolean
+  readonly imageOutput: boolean
+}
+
 export interface RuntimeResolution {
   readonly id: string
   /** Provider display name: prose for people, not a key. */
@@ -145,6 +162,11 @@ export interface RuntimeResolution {
   readonly is_local: boolean
   readonly is_default: boolean
   readonly quota_rest: RuntimeQuotaRest | null
+  readonly capabilities?: RuntimeCapabilities | null
+  readonly supports_image_input?: boolean
+  readonly supports_image_output?: boolean
+  readonly vision_input?: boolean
+  readonly image_output?: boolean
   // Liveness facts the server keeps apart from quota_rest. Absent means the
   // payload did not say; it is not read as healthy.
   readonly credential_refused_at?: number | null
@@ -154,6 +176,41 @@ export interface RuntimeResolution {
 }
 
 export type RuntimeLaneOrder = 'fixed' | 'spread_by_keeper'
+
+export function resolveRuntimeMediaCapabilities(
+  rt: Pick<
+    RuntimeResolution,
+    'capabilities' | 'supports_image_input' | 'supports_image_output' | 'vision_input' | 'image_output'
+  > | null | undefined,
+): RuntimeMediaCapabilities {
+  if (!rt) return { visionInput: false, imageOutput: false }
+  const visionInput =
+    rt.capabilities?.supports_image_input === true
+    || rt.capabilities?.vision_input === true
+    || rt.supports_image_input === true
+    || rt.vision_input === true
+  const imageOutput =
+    rt.capabilities?.supports_image_output === true
+    || rt.capabilities?.image_output === true
+    || rt.supports_image_output === true
+    || rt.image_output === true
+  return { visionInput, imageOutput }
+}
+
+export function resolveLaneMediaCapabilities(
+  candidateIds: readonly string[],
+  runtimeById: ReadonlyMap<string, RuntimeResolution>,
+): RuntimeMediaCapabilities {
+  let visionInput = false
+  let imageOutput = false
+  for (const id of candidateIds) {
+    const caps = resolveRuntimeMediaCapabilities(runtimeById.get(id))
+    if (caps.visionInput) visionInput = true
+    if (caps.imageOutput) imageOutput = true
+    if (visionInput && imageOutput) break
+  }
+  return { visionInput, imageOutput }
+}
 
 export interface RuntimeLaneSnapshot {
   readonly id: string
@@ -188,6 +245,7 @@ export interface RuntimeResolvedPayload {
   readonly runtimes: readonly RuntimeResolution[]
   readonly lanes: readonly RuntimeLaneSnapshot[]
   readonly assignments: readonly RuntimeAssignment[]
+  readonly media?: RuntimeMediaOverrides | null
   readonly provider_usage_windows_since?: number
   readonly provider_usage_windows?: readonly ProviderUsageScope[]
 }

@@ -1404,7 +1404,8 @@ let human_leaf_label_en ~table ~key : string =
   | _, "temperature" -> "Temperature"
   | _, ("reasoning-effort" | "reasoning_effort") -> "Reasoning Effort"
   | "runtime", "default" -> "Default Runtime"
-  | "runtime", "media_failover" -> "Media Failover"
+  | "runtime.media", "vision_reader" -> "Vision Reader Override"
+  | "runtime.media", "image_generator" -> "Image Generator Override"
   | _, ("candidates" | "order" | "members") -> "Failover Order"
   | _, "host" -> "Host"
   | _, "port" -> "Port"
@@ -1619,29 +1620,56 @@ let runtime_schema_json ~now ~base_path =
          ; "description", `String "Default runtime or failover lane for unassigned Keepers"
          ]
          @ entity_meta_fields ~table:"runtime" ~key:"default"));
-    let media_failover_val = List.assoc_opt "runtime.media_failover" doc in
+    let vision_reader_val = List.assoc_opt "runtime.media.vision_reader" doc in
     push
       Cat_routing_failover
       (`Assoc
-        ([ "table", `String "runtime"
-         ; "key", `String "media_failover"
-         ; "full_key", `String "runtime.media_failover"
-         ; "type", `String "string_list"
+        ([ "table", `String "runtime.media"
+         ; "key", `String "vision_reader"
+         ; "full_key", `String "runtime.media.vision_reader"
+         ; "type", `String "string"
          ; ( "current_value"
-           , match media_failover_val with
+           , match vision_reader_val with
              | Some v -> toml_value_to_json ~secret:false v
-             | None -> `List [] )
-         ; "default_value", `List []
+             | None -> `Null )
+         ; "default_value", `Null
          ; ( "provenance"
            , `String
                (provenance_to_string
-                  (if Option.is_some media_failover_val then Prov_project else Prov_default)) )
+                  (if Option.is_some vision_reader_val then Prov_project else Prov_default)) )
          ; "reload_scope", `String (reload_scope_to_string Hot_reload)
          ; "secret", `Bool false
          ; "writable", `Bool true
-         ; "description", `String "Ordered vision/media failover runtime IDs"
+         ; ( "description"
+           , `String
+               "Optional vision-reader runtime override when the active runtime cannot inspect images natively" )
          ]
-         @ entity_meta_fields ~table:"runtime" ~key:"media_failover"));
+         @ entity_meta_fields ~table:"runtime.media" ~key:"vision_reader"));
+    let image_generator_val = List.assoc_opt "runtime.media.image_generator" doc in
+    push
+      Cat_routing_failover
+      (`Assoc
+        ([ "table", `String "runtime.media"
+         ; "key", `String "image_generator"
+         ; "full_key", `String "runtime.media.image_generator"
+         ; "type", `String "string"
+         ; ( "current_value"
+           , match image_generator_val with
+             | Some v -> toml_value_to_json ~secret:false v
+             | None -> `Null )
+         ; "default_value", `Null
+         ; ( "provenance"
+           , `String
+               (provenance_to_string
+                  (if Option.is_some image_generator_val then Prov_project else Prov_default)) )
+         ; "reload_scope", `String (reload_scope_to_string Hot_reload)
+         ; "secret", `Bool false
+         ; "writable", `Bool true
+         ; ( "description"
+           , `String
+               "Optional image-generator runtime override when the active runtime does not generate images natively" )
+         ]
+         @ entity_meta_fields ~table:"runtime.media" ~key:"image_generator"));
     (* 2. Project every Keeper_runtime_setting_registry row exhaustively across categories *)
     List.iter
       (fun (row : Registry.setting) ->
@@ -1738,7 +1766,8 @@ let runtime_schema_json ~now ~base_path =
     (* 3. Project any additional top-level/provider secret or custom keys in doc with redaction *)
     let known_keys = Hashtbl.create 128 in
     Hashtbl.replace known_keys "runtime.default" ();
-    Hashtbl.replace known_keys "runtime.media_failover" ();
+    Hashtbl.replace known_keys "runtime.media.vision_reader" ();
+    Hashtbl.replace known_keys "runtime.media.image_generator" ();
     List.iter
       (fun row ->
          Option.iter (fun k -> Hashtbl.replace known_keys k ()) (Registry.toml_key_opt row))

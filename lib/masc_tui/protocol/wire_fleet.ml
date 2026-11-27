@@ -2351,13 +2351,7 @@ type submit_mode =
       operation_id : string;
     }
 
-type chat_attachment = {
-  attachment_id : string;
-  name : string;
-  mime_type : string;
-  size : int;
-  data_base64 : string;
-}
+type chat_attachment = Wire_attachment.t
 
 type chat_submit_request = {
   request_id : string;
@@ -2381,7 +2375,31 @@ type retained_image = {
   media_path : string;
   caption : string option;
   mime_type : string option;
+  attachment_id : string option;
+  width : int option;
+  height : int option;
+  bytes : int option;
+  filename : string option;
+  kind : Wire_attachment.kind;
 }
+
+let retained_image_of_attachment ?caption (a : Wire_attachment.t) =
+  let caption =
+    match caption with
+    | Some c when not (String.equal (String.trim c) "") -> Some c
+    | Some _ | None -> a.filename
+  in
+  {
+    media_path = a.url;
+    caption;
+    mime_type = Some a.mime_type;
+    attachment_id = Some a.attachment_id;
+    width = a.width;
+    height = a.height;
+    bytes = if a.bytes > 0 then Some a.bytes else None;
+    filename = a.filename;
+    kind = a.kind;
+  }
 
 type trace_tool_status =
   | Trace_tool_pending
@@ -2565,6 +2583,20 @@ type chat_stream_chunk =
       execution_id : string;
     }
   | Chunk_external_effect_completed of { operation_id : string option }
+  | Chunk_attachment of {
+      operation_id : string option;
+      attachment : Wire_attachment.t;
+      block_index : int option;
+      tool_call_id : string option;
+      role : string option;
+    }
+  | Chunk_media_delta of {
+      operation_id : string option;
+      mime_type : string;
+      url : string option;
+      attachment_id : string option;
+      block_index : int option;
+    }
   | Chunk_reply_details of {
       operation_id : string option;
       reply : string;
@@ -2621,20 +2653,14 @@ let encode_chat_submit_request req =
     match req.attachments with
     | [] -> []
     | items ->
+        let text_blocks =
+          if String.equal (String.trim req.message) "" then []
+          else [ `Assoc [ ("type", `String "text"); ("text", `String req.message) ] ]
+        in
+        let att_blocks = List.map Wire_attachment.encode_user_block items in
         [
-          ( "attachments"
-          , `List
-              (List.map
-                 (fun (a : chat_attachment) ->
-                   `Assoc
-                     [
-                       ("attachment_id", `String a.attachment_id);
-                       ("name", `String a.name);
-                       ("mime_type", `String a.mime_type);
-                       ("size", `Int a.size);
-                       ("data", `String a.data_base64);
-                     ])
-                 items) );
+          ("user_blocks", `List (text_blocks @ att_blocks));
+          ("attachments", `List (List.map Wire_attachment.encode_attachment_ref items));
         ]
   in
   `Assoc
@@ -2791,33 +2817,122 @@ let extract_history_thinking (json : Yojson.Safe.t) : history_thinking option =
           else Some (Thinking_visible joined))
   | _ -> None
 
+let is_valid_media_or_attachment_path path =
+  if Wire_attachment.is_attachment_path path then
+    let start = String.length Wire_attachment.attachment_path_prefix in
+    String.length path > start
+  else if String.starts_with ~prefix:media_path_prefix path then
+    let start = String.length media_path_prefix in
+    let token = String.sub path start (String.length path - start) in
+    Wire_runtime.is_lowercase_sha256_hex token
+    || String.starts_with ~prefix:"att_" token
+  else false
+
 let decode_retained_images json =
-  let prefix = media_path_prefix in
-  match member "blocks" json with
-  | `List blocks ->
-      List.filter_map
-        (fun block ->
-          match member "t" block, member "src" block with
-          | `String "image", `String media_path
-            when String.starts_with ~prefix media_path ->
-              let start = String.length prefix in
-              let token = String.sub media_path start (String.length media_path - start) in
-              if Wire_runtime.is_lowercase_sha256_hex token then
-                let caption =
-                  match member "cap" block with
-                  | `String cap when not (String.equal (String.trim cap) "") -> Some cap
-                  | _ -> None
-                in
-                let mime_type =
-                  match member "mimeType" block with
-                  | `String m when not (String.equal (String.trim m) "") -> Some (String.trim m)
-                  | _ -> None
-                in
-                Some { media_path; caption; mime_type }
-              else None
-          | _ -> None)
-        blocks
-  | _ -> []
+  let seen = Hashtbl.create 8 in
+  let rev_acc = ref [] in
+  let add (img : retained_image) =
+    let key =
+      match img.attachment_id with
+      | Some id when not (String.equal id "") -> "id:" ^ id
+      | Some _ | None -> "url:" ^ img.media_path
+    in
+    if not (Hashtbl.mem seen key) then begin
+      Hashtbl.replace seen key ();
+      rev_acc := img :: !rev_acc
+    end
+  in
+  (* 1. Top-level canonical attachments[] (user, tool, assistant rows). *)
+  (match member "attachments" json with
+   | `List items ->
+       List.iter
+         (fun item ->
+           match Wire_attachment.decode_attachment_ref item with
+           | Ok att when is_valid_media_or_attachment_path att.url ->
+               add (retained_image_of_attachment att)
+           | Ok _ | Error _ -> ())
+         items
+   | _ -> ());
+  (* 2. Structured blocks[] (t = "attachment" or t = "image"). *)
+  (match member "blocks" json with
+   | `List blocks ->
+       List.iter
+         (fun block ->
+           match member "t" block with
+           | `String "attachment" -> (
+               match Wire_attachment.decode_attachment_ref block with
+               | Ok att when is_valid_media_or_attachment_path att.url ->
+                   let caption =
+                     match member "cap" block with
+                     | `String cap when not (String.equal (String.trim cap) "") ->
+                         Some cap
+                     | _ -> None
+                   in
+                   add (retained_image_of_attachment ?caption att)
+               | Ok _ | Error _ -> ())
+           | `String "image" -> (
+               let path_opt =
+                 match member "src" block, member "url" block with
+                 | `String s, _ when is_valid_media_or_attachment_path s -> Some s
+                 | _, `String u when is_valid_media_or_attachment_path u -> Some u
+                 | _ -> (
+                     match member "attachment_id" block with
+                     | `String id when not (String.equal (String.trim id) "") ->
+                         Some (Wire_attachment.attachment_path id)
+                     | _ -> None)
+               in
+               match path_opt with
+               | None -> ()
+               | Some media_path ->
+                   let caption =
+                     match member "cap" block, member "caption" block with
+                     | `String cap, _ when not (String.equal (String.trim cap) "") ->
+                         Some cap
+                     | _, `String cap when not (String.equal (String.trim cap) "") ->
+                         Some cap
+                     | _ -> None
+                   in
+                   let mime_type =
+                     match member "mimeType" block, member "mime_type" block with
+                     | `String m, _ when not (String.equal (String.trim m) "") ->
+                         Some (String.trim m)
+                     | _, `String m when not (String.equal (String.trim m) "") ->
+                         Some (String.trim m)
+                     | _ -> None
+                   in
+                   let attachment_id =
+                     match member "attachment_id" block, member "id" block with
+                     | `String id, _ when not (String.equal (String.trim id) "") ->
+                         Some (String.trim id)
+                     | _, `String id when not (String.equal (String.trim id) "") ->
+                         Some (String.trim id)
+                     | _ -> None
+                   in
+                   let opt_int k =
+                     match member k block with `Int n when n > 0 -> Some n | _ -> None
+                   in
+                   let filename =
+                     match member "filename" block with
+                     | `String f when not (String.equal (String.trim f) "") ->
+                         Some (String.trim f)
+                     | _ -> None
+                   in
+                   add
+                     {
+                       media_path;
+                       caption;
+                       mime_type;
+                       attachment_id;
+                       width = opt_int "width";
+                       height = opt_int "height";
+                       bytes = opt_int "bytes";
+                       filename;
+                       kind = Wire_attachment.Kind_image;
+                     })
+           | _ -> ())
+         blocks
+   | _ -> ());
+  List.rev !rev_acc
 
 let trace_tool_status_of_string raw =
   match String.lowercase_ascii (String.trim raw) with
@@ -3300,6 +3415,52 @@ let decode_model_content_activity value =
   in
   Ok { owner = { content_generation; stream_scope }; block_index; channel; content_state }
 
+let decode_keeper_attachment_payload ~outer_op_id value =
+  let* attachment = Wire_attachment.decode_attachment_ref value in
+  let* block_index = optional_int_field value "block_index" in
+  let* tool_call_id =
+    match optional_nonblank_string value "tool_call_id" with
+    | Ok (Some _ as v) -> Ok v
+    | Ok None -> optional_nonblank_string value "toolCallId"
+    | Error _ as err -> err
+  in
+  let* role = optional_nonblank_string value "role" in
+  Ok
+    (Chunk_attachment
+       {
+         operation_id = outer_op_id;
+         attachment;
+         block_index;
+         tool_call_id;
+         role;
+       })
+
+let decode_keeper_media_delta_payload ~outer_op_id value =
+  let* mime_opt =
+    match optional_nonblank_string value "mime_type" with
+    | Ok (Some _ as m) -> Ok m
+    | Ok None -> optional_nonblank_string value "mimeType"
+    | Error _ as err -> err
+  in
+  let mime_type = Option.value mime_opt ~default:"application/octet-stream" in
+  let* url = optional_nonblank_string value "url" in
+  let* attachment_id =
+    match optional_nonblank_string value "attachment_id" with
+    | Ok (Some _ as id) -> Ok id
+    | Ok None -> optional_nonblank_string value "id"
+    | Error _ as err -> err
+  in
+  let* block_index = optional_int_field value "block_index" in
+  Ok
+    (Chunk_media_delta
+       {
+         operation_id = outer_op_id;
+         mime_type;
+         url;
+         attachment_id;
+         block_index;
+       })
+
 let decode_custom_chat_chunk json =
   let* name = required_nonblank_string json "name" in
   let* outer_op_id = chunk_operation_id json in
@@ -3658,21 +3819,45 @@ let decode_custom_chat_chunk json =
           | Some _, None | None, Some _ | None, None -> Ok Chunk_ignored))
   | "KEEPER_EXTERNAL_EFFECT_COMPLETED" ->
       Ok (Chunk_external_effect_completed { operation_id = outer_op_id })
+  | "KEEPER_ATTACHMENT" ->
+      let* value = required_object_field json "value" in
+      decode_keeper_attachment_payload ~outer_op_id value
+  | "KEEPER_MEDIA_DELTA" ->
+      let* value = required_object_field json "value" in
+      decode_keeper_media_delta_payload ~outer_op_id value
   | "KEEPER_CONNECTED"
   | "KEEPER_STREAM_MESSAGE_DELTA"
   | "KEEPER_STREAM_PING"
   | "KEEPER_CONTENT_BLOCK_START"
   | "KEEPER_CONTENT_BLOCK_STOP"
   | "KEEPER_THINKING_SIGNATURE_DELTA"
-  | "KEEPER_MEDIA_DELTA"
   | "KEEPER_TOOL_TRANSCRIPT_COMMITTED" ->
       Ok Chunk_ignored
   | other -> Error (Printf.sprintf "unknown CUSTOM chat stream event %S" other)
 
 let decode_chat_stream_chunk json =
   let* kind = required_nonblank_string json "type" in
+  let outer_op_id =
+    match optional_nonblank_string json "operation_id" with
+    | Ok (Some _ as v) -> v
+    | Ok None | Error _ -> None
+  in
   match kind with
   | "CUSTOM" -> decode_custom_chat_chunk json
+  | "KEEPER_ATTACHMENT" ->
+      let value =
+        match optional_object_field json "value" with
+        | Ok (Some obj) -> obj
+        | Ok None | Error _ -> json
+      in
+      decode_keeper_attachment_payload ~outer_op_id value
+  | "KEEPER_MEDIA_DELTA" ->
+      let value =
+        match optional_object_field json "value" with
+        | Ok (Some obj) -> obj
+        | Ok None | Error _ -> json
+      in
+      decode_keeper_media_delta_payload ~outer_op_id value
   | "accepted" ->
       let* operation_id = required_nonblank_string json "operation_id" in
       let* queued_count = required_nonnegative_int_field json "queued_count" in

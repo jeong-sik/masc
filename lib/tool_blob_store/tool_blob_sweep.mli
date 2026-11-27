@@ -54,6 +54,16 @@ type previous =
           next scan. *)
   | Compared_with_previous of previous_comparison
 
+type attachment_sweep_report =
+  { total_blobs : int
+  ; live_blobs : int
+  ; unreferenced_blobs : int
+  ; deleted : int
+  ; retained_within_grace : int
+  ; delete_failures : int
+  ; blocked_by_unclassified : bool
+  }
+
 type report =
   { scan_started_at : float
   ; scan_seconds : float
@@ -77,6 +87,9 @@ type report =
           keeps [deletable] at 0 and prevents deletion fail-closed. *)
   ; previous : previous
   ; touches : Tool_blob_store.touch_counts
+  ; attachment_sweep : (attachment_sweep_report, string) result option
+      (** Outcome of {!sweep_attachments} during {!reclaim} when [unclassified]
+          is empty; [None] on {!observe} or when blocked by unclassified entries. *)
   }
 
 type error =
@@ -140,3 +153,44 @@ val reclaim :
       least [min_age_seconds] (default 24h) older than this scan's opening
       (re-checked immediately before unlinking).
     Blocking, with no Eio effects: run it off the main domain. *)
+
+(** {1 Attachment reachability} *)
+
+type attachment_reachability =
+  { live_sha256s : Set_util.StringSet.t
+  ; total_blobs : int
+  ; unreferenced_sha256s : Set_util.StringSet.t
+  ; scanned_files : int
+  }
+
+val scan_attachment_reachability :
+  base_path:string ->
+  scope:Tool_blob_maintenance.scope ->
+  (attachment_reachability, string) result
+(** Read-only fail-closed reachability scan for {!Attachment_store}: walks every
+    in-scope durable store named by [scope] (including [keeper_chat/*.jsonl],
+    [board_posts.jsonl], [board_comments.jsonl], [keepers/], etc.), config
+    keeper files, and active ephemeral pins under
+    [<base>/.masc/attachments/ephemeral/] for canonical [att_<64hex>]
+    references, then computes live and unreferenced digests against
+    [<base>/.masc/attachments/blobs/]. Fails closed with [Error _] on any
+    unreadable directory, consumer file, ephemeral pin dir, or blob shard.
+    Deletes nothing. *)
+
+val sweep_attachments :
+  ?min_age_seconds:float ->
+  ?now:float ->
+  base_path:string ->
+  scope:Tool_blob_maintenance.scope ->
+  unit ->
+  (attachment_sweep_report, string) result
+(** Reclaim verified unreferenced {!Attachment_store} blobs older than
+    [min_age_seconds] (default 24 hours). Also invoked from {!reclaim} when no
+    unclassified entries exist.
+    Fail-closed guarantees:
+    - Aborts with [Error _] (deleting nothing) if any consumer file/directory,
+      [ephemeral/] directory, or [blobs/] shard cannot be read.
+    - Refuses to delete ([blocked_by_unclassified = true], [deleted = 0]) when
+      {!Tool_blob_maintenance.unclassified_entries} is non-empty.
+    - Retains blobs whose latest blob/sidecar mtime is within [min_age_seconds]
+      of [now] and re-verifies ephemeral pins immediately before unlinking. *)

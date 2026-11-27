@@ -63,7 +63,12 @@ function BuildInfoRow({ label, children }: { label: string; children: unknown })
 const LazyOverview = lazy(async () => ({ default: (await import('./overview/overview')).Overview }))
 const LazyStatus = lazy(async () => ({ default: (await import('./status')).Status }))
 const LazyKeeperDetailPage = lazy(async () => ({ default: (await import('./keeper-detail-page')).KeeperDetailPage }))
-const LazyBoardSurface = lazy(async () => ({ default: (await import('./board/board-surface')).BoardSurface }))
+const LazyBoardSurface = lazy(async () => {
+  const { BoardTab } = await import('../workspaces/knowledge/board-tab')
+  return {
+    default: () => html`<${BoardTab} subroute=${undefined} onNavigate=${() => {}} onInspect=${() => {}} />`,
+  }
+})
 const LazyScheduleSurface = lazy(async () => ({ default: (await import('./schedule/schedule-surface')).ScheduleSurface }))
 const LazyWork = lazy(async () => ({ default: (await import('./work')).Work }))
 const LazyConnectors = lazy(async () => ({ default: (await import('./connector-status')).ConnectorStatusPanel }))

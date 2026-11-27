@@ -61,6 +61,7 @@ type document_image =
   | Mermaid of string
   | Embedded_png of Graphics.embedded_png
   | Retained_png of string
+  | Retained_image of { path : string; mime_type : string option }
 
 type document_image_rows = {
   source : document_image;

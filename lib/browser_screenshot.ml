@@ -5,7 +5,7 @@ let persist ?native_options ~base_path ~keeper_name json =
         | Some (`String value) -> Ok value | _ -> Error ("screenshot missing " ^ key))
     | _ -> Error "screenshot must be an object" in
   let* encoded = string "data" in
-  let* url = string "url" in
+  let* page_url = string "url" in
   let* title = string "title" in
   let* tab_id = match json with
     | `Assoc fields -> (match List.assoc_opt "tabId" fields with
@@ -55,7 +55,13 @@ let persist ?native_options ~base_path ~keeper_name json =
         | Some (width,height) when width > 0 && height > 0 -> Ok (width,height)
         | _ -> Error "invalid screenshot dimensions" in
       let* handle = Keeper_vision_tool.store_frame ~base_path ~keeper_name bytes in
-      Ok (`Assoc (connection_fields @ observation_fields @ capture_fields @ ["artifact", `String (Multimodal.Vision_artifact_store.to_string handle);
-        "media_type", `String mime; "tabId", `Int tab_id; "url", `String url;
+      let sha256 = Multimodal.Vision_artifact_store.to_string handle in
+      let attachment_id = Attachment_store.id_prefix ^ sha256 in
+      let attachment_url = Attachment_store.url_of_id attachment_id in
+      Ok (`Assoc (connection_fields @ observation_fields @ capture_fields @ [
+        "attachment_id", `String attachment_id;
+        "attachment_url", `String attachment_url;
+        "artifact", `String sha256;
+        "media_type", `String mime; "tabId", `Int tab_id; "url", `String page_url;
         "title", `String title; "width", `Int width; "height", `Int height;
         "bytes", `Int (String.length bytes)]))

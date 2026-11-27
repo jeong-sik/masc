@@ -8,7 +8,7 @@
 
     - [runtime.lanes.<id>] candidates and [runtime.exact_output_lanes.<id>]
       slots and cli slots;
-    - [runtime].media_failover;
+    - [runtime.media] ([vision_reader] / [image_generator]);
     - [runtime.assignments]: a keeper assigned one of its runtimes loses the
       assignment and routes to the default.
 
@@ -34,7 +34,10 @@ type change =
       { lane : string
       ; runtime : string
       }  (** From [slots] or [cli_slots]. *)
-  | Vision_runtime of string  (** Left [runtime].media_failover. *)
+  | Media_override of
+      { key : string
+      ; runtime : string
+      }  (** Cleared from [runtime.media]. *)
   | Assignment of
       { keeper : string
       ; runtime : string

@@ -49,7 +49,7 @@ let project_history ?(tools_present = false) config messages =
     messages
 ;;
 
-let build_request_artifact
+let build_request_artifact_result
       ?(stream = false)
       ~(config : Provider_config.t)
       ~(messages : message list)
@@ -57,10 +57,10 @@ let build_request_artifact
       ()
   =
   let think_requested = Option.value config.enable_thinking ~default:false in
-  (match Provider_config.validate_reasoning_effort_request config with
-   | Ok () -> ()
-   | Error reason ->
-     invalid_arg (Printf.sprintf "Backend_ollama.reasoning_effort: %s" reason));
+  let* () =
+    Provider_config.validate_reasoning_effort_request config
+    |> Result.map_error (Printf.sprintf "Backend_ollama.reasoning_effort: %s")
+  in
   let caps =
     match Provider_config.capabilities_for_config_model config with
     | Some c -> c
@@ -88,35 +88,34 @@ let build_request_artifact
       ~config
       ~caps
   in
-  let control_lowering =
-    match Message_origin_lowering.policy_for_provider_config config with
-    | Ok policy -> policy
-    | Error error -> invalid_arg ("Backend_ollama.build_request: " ^ Message_origin_lowering.error_to_string error)
+  let* control_lowering =
+    Message_origin_lowering.policy_for_provider_config config
+    |> Result.map_error (fun error ->
+         "Backend_ollama.build_request: " ^ Message_origin_lowering.error_to_string error)
   in
-  let projected_messages =
-    match project_history ~tools_present:(tools <> []) config messages with
-    | Error error ->
-      invalid_arg
-        ("Backend_ollama.build_request: "
+  let* projection =
+    project_history ~tools_present:(tools <> []) config messages
+    |> Result.map_error (fun error ->
+         "Backend_ollama.build_request: "
          ^ Reasoning_history_projection.error_to_string error)
-    | Ok projection ->
-      Reasoning_history_projection.observe ~component:"backend_ollama" ~stream projection;
-      projection.messages
   in
-  let provider_messages =
-    match
-      Backend_openai_serialize.ollama_messages_of_history
-        ~control_lowering
-        ~modality_priority:caps.modality_priority
-        ~supports_image_input:caps.supports_image_input
-        ~supports_document_input:caps.supports_document_input
-        projected_messages
-    with
-    | Error error -> invalid_arg ("Backend_ollama.build_request: " ^ error)
-    | Ok messages ->
-      (match Message_origin_lowering.prepend_system_prompt control_lowering ~system_prompt messages with
-       | Ok messages -> messages
-       | Error error -> invalid_arg ("Backend_ollama.build_request: " ^ Message_origin_lowering.error_to_string error))
+  Reasoning_history_projection.observe ~component:"backend_ollama" ~stream projection;
+  let* raw_provider_messages =
+    Backend_openai_serialize.ollama_messages_of_history
+      ~control_lowering
+      ~modality_priority:caps.modality_priority
+      ~supports_image_input:caps.supports_image_input
+      ~supports_document_input:caps.supports_document_input
+      projection.messages
+    |> Result.map_error (fun error -> "Backend_ollama.build_request: " ^ error)
+  in
+  let* provider_messages =
+    Message_origin_lowering.prepend_system_prompt
+      control_lowering
+      ~system_prompt
+      raw_provider_messages
+    |> Result.map_error (fun error ->
+         "Backend_ollama.build_request: " ^ Message_origin_lowering.error_to_string error)
   in
   let body = [ "model", `String config.model_id; "messages", `List provider_messages ] in
   (* Emit native thinking control only when the caller supplied it. Some
@@ -128,23 +127,23 @@ let build_request_artifact
      Per official Ollama thinking docs (https://docs.ollama.com/capabilities/thinking),
      [/api/chat] [think] accepts a boolean OR an effort level string
      (["low"] | ["medium"] | ["high"]) for models such as gpt-oss. *)
-  let body =
+  let* body =
     if chat_template_token_thinking
-    then body
+    then Ok body
     else (
       match config.enable_thinking, config.reasoning_effort with
-      | Some false, _ -> ("think", `Bool false) :: body
+      | Some false, _ -> Ok (("think", `Bool false) :: body)
       | (Some true | None), Some ((Reasoning_effort.Low | Medium | High) as effort) ->
-        ("think", `String (Reasoning_effort.to_string effort)) :: body
-      | (Some true | None), Some Reasoning_effort.None_ -> ("think", `Bool false) :: body
+        Ok (("think", `String (Reasoning_effort.to_string effort)) :: body)
+      | (Some true | None), Some Reasoning_effort.None_ -> Ok (("think", `Bool false) :: body)
       | (Some true | None), Some ((Minimal | XHigh | Max | Ultra) as other) ->
-        invalid_arg
+        Error
           (Printf.sprintf
              "Backend_ollama.build_request: unsupported Ollama think effort %S \
               (expected low|medium|high|none)"
              (Reasoning_effort.to_string other))
-      | Some true, None -> ("think", `Bool true) :: body
-      | None, None -> body)
+      | Some true, None -> Ok (("think", `Bool true) :: body)
+      | None, None -> Ok body)
   in
   (* Ollama defaults to stream=true, so always send explicit value *)
   let body = ("stream", `Bool stream) :: body in
@@ -242,27 +241,42 @@ let build_request_artifact
   (match config.repeat_last_n with
    | Some n -> options := ("repeat_last_n", `Int n) :: !options
    | None -> ());
-  (match caps.supports_seed, config.seed with
-   | true, Some seed -> options := ("seed", `Int seed) :: !options
-   | false, Some _ ->
-     invalid_arg
-       (Printf.sprintf
-          "Backend_ollama.build_request: model %S does not support seed"
-          config.model_id)
-   | true, None | false, None -> ());
+  let* () =
+    match caps.supports_seed, config.seed with
+    | true, Some seed ->
+      options := ("seed", `Int seed) :: !options;
+      Ok ()
+    | false, Some _ ->
+      Error
+        (Printf.sprintf
+           "Backend_ollama.build_request: model %S does not support seed"
+           config.model_id)
+    | true, None | false, None -> Ok ()
+  in
   (* num_ctx: per-request KV cache allocation in tokens. Honored by Ollama
      only. [None] omits the field so Ollama uses its own default. Invalid
      explicit values fail at the request boundary instead of disappearing. *)
-  (match config.num_ctx with
-   | Some n when n > 0 -> options := ("num_ctx", `Int n) :: !options
-   | Some n ->
-     invalid_arg
-       (Printf.sprintf "Backend_ollama.build_request: num_ctx must be positive, got %d" n)
-   | None -> ());
+  let* () =
+    match config.num_ctx with
+    | Some n when n > 0 ->
+      options := ("num_ctx", `Int n) :: !options;
+      Ok ()
+    | Some n ->
+      Error
+        (Printf.sprintf "Backend_ollama.build_request: num_ctx must be positive, got %d" n)
+    | None -> Ok ()
+  in
   let body = ("options", `Assoc !options) :: body in
-  Request_artifact_internal.create
-    ~payload:(Yojson.Safe.to_string (`Assoc body))
-    ~output_token_receipt
+  Ok
+    (Request_artifact_internal.create
+       ~payload:(Yojson.Safe.to_string (`Assoc body))
+       ~output_token_receipt)
+;;
+
+let build_request_artifact ?stream ~config ~messages ?tools () =
+  match build_request_artifact_result ?stream ~config ~messages ?tools () with
+  | Ok artifact -> artifact
+  | Error reason -> invalid_arg reason
 ;;
 
 let build_request ?stream ~config ~messages ?tools () =

@@ -24,6 +24,7 @@ type priority =
         [Text] blocks. Other block kinds (tool calls, thinking) keep
         their relative position. Stable: within each group input order
         is preserved. Recommended for Gemma 4 family models. *)
+[@@deriving show, eq]
 
 (** [reorder priority blocks] applies [priority] to [blocks].
 

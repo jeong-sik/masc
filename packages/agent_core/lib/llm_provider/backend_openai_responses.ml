@@ -354,7 +354,7 @@ let tool_result_items blocks =
 let without_trailing_reasoning groups =
   let rec drop = function
     | (Response_replay.Reasoning, _) :: rest -> drop rest
-    | ((Response_replay.Message _ | Response_replay.Function_call), _) :: _ as kept ->
+    | ((Response_replay.Message _ | Response_replay.Function_call | Response_replay.Image_generation), _) :: _ as kept ->
       kept
     | [] -> []
   in
@@ -378,7 +378,7 @@ let input_items_of_native_groups content replay =
              invalid_arg "responses_replay:message_content_kind") blocks in
          [`Assoc (Response_replay.phase_fields phase @
            ["type", `String "message"; "role", `String "assistant"; "content", `List parts])]
-       | Response_replay.Reasoning | Response_replay.Function_call ->
+       | Response_replay.Reasoning | Response_replay.Function_call | Response_replay.Image_generation ->
          List.filter_map assistant_output_item_of_block blocks)
     groups
 ;;
@@ -582,51 +582,6 @@ let add_sampling_field = Backend_openai_request.add_sampling_field
    request before building it gets the same answer the wire will give;
    the diagnostic [observe] stays at the call site, which keeps this a
    function of its arguments. *)
-let image_omitted_note ~media_type =
-  match Api_common.image_omitted_placeholder ~media_type with
-  | Text note -> note
-  | Thinking _ | ReasoningDetails _ | RedactedThinking _
-  | ToolUse _ | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ ->
-    Printf.sprintf
-      "[image omitted: this model does not accept image input (media_type %s)]"
-      media_type
-;;
-
-let degrade_image_messages_with
-      ~supports_image_input
-      (messages : 'source Types.message_with list)
-  =
-  if supports_image_input
-  then messages
-  else
-    let rec rewrite (block : 'source Types.content_block_with) =
-      match block with
-      | Image { media_type; _ } ->
-        let note = image_omitted_note ~media_type in
-        Text note, [ note ]
-      | ToolResult ({ content_blocks = Some blocks; _ } as result) ->
-        let blocks, notes = List.split (List.map rewrite blocks) in
-        let notes = List.concat notes in
-        (match notes with
-         | [] -> block, []
-         | _ :: _ ->
-           let summary = String.concat "\n" notes in
-           let content =
-             if result.content = "" then summary else result.content ^ "\n" ^ summary
-           in
-           ToolResult { result with content; content_blocks = Some blocks }, notes)
-      | ToolResult { content_blocks = None; _ }
-      | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-      | ToolUse _ | ToolReference _ | Document _ | Audio _ -> block, []
-    in
-    List.map
-      (fun (message : 'source Types.message_with) ->
-         { message with
-           content = List.map (fun block -> fst (rewrite block)) message.content
-         })
-      messages
-;;
-
 let project_history ?(tools_present = false) config messages =
   let caps = Input_budget.capabilities_of_config config in
   let messages, _documents_degraded =
@@ -635,8 +590,8 @@ let project_history ?(tools_present = false) config messages =
       ~supports_document_input:caps.supports_document_input
       messages
   in
-  let messages =
-    degrade_image_messages_with
+  let messages, _images_degraded =
+    Api_common.degrade_image_messages
       ~supports_image_input:caps.supports_image_input
       messages
   in
@@ -810,10 +765,44 @@ let build_request_artifact
       | Some _, None | None, _ -> body)
     else body
   in
+  let image_gen_tools =
+    match config.output_media, caps.Capabilities.image_output with
+    | Some opts, Capabilities.In_turn_openai_responses_tool ->
+      List.iter
+        (fun field ->
+           Backend_openai_request.warn_capability_drop
+             ~model_id:config.model_id
+             ~field:("output_media." ^ field))
+        (Provider_config.unsupported_image_generation_options
+           ~contract:Capabilities.In_turn_openai_responses_tool
+           opts);
+      let fields = [ "type", `String "image_generation" ] in
+      let fields =
+        match opts.size with
+        | Some sz when not (Api_common.string_is_blank sz) ->
+          fields @ [ "size", `String (String.trim sz) ]
+        | Some _ | None -> fields
+      in
+      let fields =
+        match opts.quality with
+        | Some q when not (Api_common.string_is_blank q) ->
+          fields @ [ "quality", `String (String.trim q) ]
+        | Some _ | None -> fields
+      in
+      [ `Assoc fields ]
+    | ( Some _
+      , ( Capabilities.No_image_output
+        | Capabilities.In_turn_gemini_modalities
+        | Capabilities.In_turn_openai_chat_modalities
+        | Capabilities.In_turn_codex_item
+        | Capabilities.In_turn_acp_chunk
+        | Capabilities.Endpoint_images_api _ ) )
+    | None, _ -> []
+  in
   let body =
-    match tools with
+    match List.map responses_tool_json tools @ image_gen_tools with
     | [] -> body
-    | ts -> ("tools", `List (List.map responses_tool_json ts)) :: body
+    | ts -> ("tools", `List ts) :: body
   in
   let body =
     let tools_present = tools <> [] in
@@ -925,6 +914,18 @@ let projection_of_function_call item =
          { tool_use_id = call_id; tool_name = name; arguments; arguments_problem })
 ;;
 
+let projection_of_image_generation_call item =
+  match opt_bind (Json_util.assoc_member_opt "result" item) json_string_opt with
+  | Some data when not (Api_common.string_is_blank data) ->
+    let format_hint =
+      opt_bind (Json_util.assoc_member_opt "output_format" item) json_string_opt
+    in
+    (match Api_common.resolve_image_output_media_type ?format_hint ~base64_data:data () with
+     | Ok media_type -> Ok (Output_blocks [ Image { media_type; source = Base64 data } ])
+     | Error reason -> Error ("malformed_responses_image_generation_call:" ^ reason))
+  | Some _ | None -> Ok (Output_blocks [])
+;;
+
 let content_blocks_of_output_item ~drop_function_call item =
   match opt_bind (Json_util.assoc_member_opt "type" item) json_string_opt with
   | Some "message" -> Ok (Output_blocks (content_blocks_of_output_message item))
@@ -932,6 +933,7 @@ let content_blocks_of_output_item ~drop_function_call item =
     Result.map (fun blocks -> Output_blocks blocks) (content_blocks_of_reasoning_item item)
   | Some "function_call" when drop_function_call -> Ok (Output_blocks [])
   | Some "function_call" -> projection_of_function_call item
+  | Some "image_generation_call" -> projection_of_image_generation_call item
   | Some _ ->
     (* Responses output items are an extensible set. Hosted-tool items such as
        web-search calls are valid non-content for this parser; preserve later
@@ -985,11 +987,12 @@ let content_and_replay_of_output ~drop_function_call output =
             (Response_replay.phase_of_fields fields)
         | Some "reasoning" -> Ok (Some Response_replay.Reasoning)
         | Some "function_call" -> Ok (Some Response_replay.Function_call)
+        | Some "image_generation_call" -> Ok (Some Response_replay.Image_generation)
         | Some _ | None -> Ok None in
       let groups_rev = match kind, blocks with
         | Some (Response_replay.Message _ as kind), _
         | Some kind, (_ :: _) -> {Response_replay.kind; content_count=List.length blocks} :: groups_rev
-        | Some (Reasoning | Function_call), [] | None, _ -> groups_rev in
+        | Some (Reasoning | Function_call | Image_generation), [] | None, _ -> groups_rev in
       loop (blocks :: content_rev) groups_rev unreadable_rev tool_calls rest
   in
   loop [] [] [] 0 output

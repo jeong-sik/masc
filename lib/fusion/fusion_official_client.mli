@@ -174,7 +174,17 @@ type image_input = Runtime_official_client_tool.image_input =
   { media_type : string
   ; base64_data : string
   }
-type response = { text : string; model : string; usage : Fusion_types.usage }
+type media_output =
+  { mime_type : string
+  ; data_bytes : string
+  }
+
+type response =
+  { text : string
+  ; model : string
+  ; usage : Fusion_types.usage
+  ; media_outputs : media_output list
+  }
 type failure =
   | Missing_reply
       (** The provider turn completed without an assistant message required by this consumer. *)

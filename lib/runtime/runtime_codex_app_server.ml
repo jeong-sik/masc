@@ -179,11 +179,19 @@ let fold_turn_usage seen frame =
     Thread_count { last; thread_total }
 ;;
 
+type media_output =
+  { item_id : string
+  ; mime_type : string
+  ; data_bytes : string
+  ; revised_prompt : string option
+  }
+
 type turn_result =
   { thread_id : string
   ; turn_id : string
   ; model : string
   ; text : string
+  ; media_outputs : media_output list
   ; dynamic_tool_calls : int
   ; subscription : subscription
   ; user_agent : string option
@@ -261,6 +269,7 @@ type stream_event =
       }
   | Text_completed of { item_id : string option; source : text_completion_source }
   | Thinking_completed of { item_id : string; part : reasoning_part }
+  | Media_output of media_output
   | Dynamic_tool_started of
       { call_id : string
       ; tool_name : string
@@ -1191,6 +1200,7 @@ type item_kind =
   | Command_execution
   | File_change
   | Mcp_tool_call
+  | Image_generation_item
   | Sleep
   | Model_item
   | Reasoning_item
@@ -1204,6 +1214,7 @@ let item_kind_of_item ~stage item =
   | Some (`String "commandExecution") -> Ok Command_execution
   | Some (`String "fileChange") -> Ok File_change
   | Some (`String "mcpToolCall") -> Ok Mcp_tool_call
+  | Some (`String "imageGeneration") -> Ok Image_generation_item
   | Some (`String "sleep") -> Ok Sleep
   | Some (`String "contextCompaction") -> Ok Compaction_item
   | Some (`String ("userMessage" | "agentMessage" | "plan")) -> Ok Model_item
@@ -1213,6 +1224,136 @@ let item_kind_of_item ~stage item =
   | Some _ -> protocol_error stage "item type must be a string"
   | None -> protocol_error stage "item is missing type"
 ;;
+
+let sniff_codex_image_mime bytes =
+  let len = String.length bytes in
+  if len >= 8
+     && bytes.[0] = '\x89'
+     && bytes.[1] = 'P'
+     && bytes.[2] = 'N'
+     && bytes.[3] = 'G'
+     && bytes.[4] = '\r'
+     && bytes.[5] = '\n'
+     && bytes.[6] = '\x1a'
+     && bytes.[7] = '\n'
+  then Some "image/png"
+  else if len >= 3 && bytes.[0] = '\xff' && bytes.[1] = '\xd8' && bytes.[2] = '\xff'
+  then Some "image/jpeg"
+  else if len >= 12
+          && String.sub bytes 0 4 = "RIFF"
+          && String.sub bytes 8 4 = "WEBP"
+  then Some "image/webp"
+  else if len >= 6
+          && (String.sub bytes 0 6 = "GIF87a" || String.sub bytes 0 6 = "GIF89a")
+  then Some "image/gif"
+  else None
+;;
+
+let decode_codex_image_payload ?declared_mime raw =
+  let trimmed = String.trim raw in
+  if trimmed = "" then None
+  else
+    let mime_from_uri, b64 =
+      if String.starts_with ~prefix:"data:" trimmed then
+        match String.index_opt trimmed ',' with
+        | None -> None, trimmed
+        | Some comma ->
+          let header = String.sub trimmed 5 (comma - 5) in
+          let mime_part =
+            match String.index_opt header ';' with
+            | Some semi -> String.trim (String.sub header 0 semi)
+            | None -> String.trim header
+          in
+          let payload =
+            String.sub trimmed (comma + 1) (String.length trimmed - comma - 1)
+          in
+          let mime_opt = if mime_part = "" then None else Some mime_part in
+          mime_opt, payload
+      else None, trimmed
+    in
+    let compact =
+      let buf = Buffer.create (String.length b64) in
+      String.iter
+        (fun c ->
+           match c with
+           | ' ' | '\t' | '\n' | '\r' -> ()
+           | _ -> Buffer.add_char buf c)
+        b64;
+      Buffer.contents buf
+    in
+    match Base64.decode ~pad:false compact with
+    | Error (`Msg msg) ->
+      Log.Runtime_agent.warn
+        "codex app-server: ignoring imageGeneration item with invalid base64 payload: %s"
+        msg;
+      None
+    | Ok data_bytes when String.length data_bytes = 0 -> None
+    | Ok data_bytes ->
+      let mime_type =
+        match sniff_codex_image_mime data_bytes with
+        | Some sniffed -> sniffed
+        | None ->
+          (match mime_from_uri, declared_mime with
+           | Some m, _ when String.trim m <> "" -> String.trim m
+           | _, Some m when String.trim m <> "" -> String.trim m
+           | _ -> "image/png")
+      in
+      Some (mime_type, data_bytes)
+;;
+
+let decode_image_generation_item ?(fallback_idx = 0) (item : Yojson.Safe.t) : media_output option =
+  match item with
+  | `Assoc fields ->
+    (match List.assoc_opt "type" fields with
+     | Some (`String "imageGeneration") ->
+       let item_id =
+         match List.assoc_opt "id" fields with
+         | Some (`String s) when String.trim s <> "" -> String.trim s
+         | _ -> Printf.sprintf "image_generation_%d" fallback_idx
+       in
+       let declared_mime =
+         match
+           List.find_map
+             (fun k ->
+                match List.assoc_opt k fields with
+                | Some (`String s) when String.trim s <> "" -> Some (String.trim s)
+                | _ -> None)
+             [ "mimeType"; "mime_type"; "mediaType"; "media_type" ]
+         with
+         | Some m -> Some m
+         | None ->
+           (match List.assoc_opt "outputFormat" fields with
+            | Some (`String ("png" | "PNG")) -> Some "image/png"
+            | Some (`String ("jpeg" | "jpg" | "JPEG" | "JPG")) -> Some "image/jpeg"
+            | Some (`String ("webp" | "WEBP")) -> Some "image/webp"
+            | _ -> None)
+       in
+       let revised_prompt =
+         List.find_map
+           (fun k ->
+              match List.assoc_opt k fields with
+              | Some (`String s) when String.trim s <> "" -> Some (String.trim s)
+              | _ -> None)
+           [ "revisedPrompt"; "revised_prompt" ]
+       in
+       let raw_payload =
+         List.find_map
+           (fun k ->
+              match List.assoc_opt k fields with
+              | Some (`String s) when String.trim s <> "" -> Some s
+              | _ -> None)
+           [ "result"; "data"; "imageBase64"; "image_base64"; "b64_json" ]
+       in
+       Option.bind raw_payload (fun raw ->
+         Option.map
+           (fun (mime_type, data_bytes) ->
+              { item_id; mime_type; data_bytes; revised_prompt })
+           (decode_codex_image_payload ?declared_mime raw))
+     | _ -> None)
+  | _ -> None
+;;
+
+let decode_image_generation_item_for_tests item = decode_image_generation_item item
 
 (* An item the app-server executes outside the model stream: it opens with
    [item/started], may write nothing while it runs, and closes with
@@ -1253,6 +1394,7 @@ let tool_item_of_item ~stage item =
         ; tool_name = Some (server ^ "/" ^ tool)
         ; origin = Runtime_native_tools.Mcp_wrapper
         })
+  | Image_generation_item -> tool_item ~observation:(built_in "imageGeneration")
   | Sleep -> tool_item ~observation:(fun _ -> None)
   | Model_item | Reasoning_item | Compaction_item | Dynamic_tool_item -> Ok None
   | Unclassified_item kind -> tool_item ~observation:(built_in kind)
@@ -1272,7 +1414,8 @@ let native_completion_of_item ~stage ~kind item =
   let* outcome = match kind with
     (* [tool_item_of_item] projects an unclassified item as a native tool, so
        the status the provider reports for it is read like a modelled one. *)
-    | Command_execution | File_change | Mcp_tool_call | Unclassified_item _ ->
+    | Command_execution | File_change | Mcp_tool_call | Image_generation_item
+    | Unclassified_item _ ->
         (match List.assoc_opt "status" fields with
          | None | Some `Null -> Ok Runtime_native_tools.End_observed
          | Some (`String "completed") -> Ok Runtime_native_tools.Completion_reported
@@ -1290,7 +1433,7 @@ let native_completion_of_item ~stage ~kind item =
     | Command_execution, Some (`Int code) -> Ok (Some code)
     | Command_execution, (None | Some `Null) -> Ok None
     | Command_execution, Some _ -> protocol_error stage "command exitCode must be an integer or null"
-    | (File_change | Mcp_tool_call | Sleep | Model_item | Reasoning_item
+    | (File_change | Mcp_tool_call | Image_generation_item | Sleep | Model_item | Reasoning_item
       | Compaction_item | Dynamic_tool_item | Unclassified_item _), _ -> Ok None
   in
   Ok ({outcome; exit_code} : Runtime_native_tools.completion)
@@ -1487,7 +1630,18 @@ type streamed_texts =
          that streamed before a later completion and never completed itself
          is not read as the reply. *)
   ; mutable assistant_message_completed : bool
+  ; seen_media_item_ids : (string, unit) Hashtbl.t
+  ; mutable next_synth_media_idx : int
+  ; mutable media_outputs_rev : media_output list
   }
+
+let record_media_output ~on_stream_event streamed_texts (media : media_output) =
+  if not (Hashtbl.mem streamed_texts.seen_media_item_ids media.item_id) then begin
+    Hashtbl.add streamed_texts.seen_media_item_ids media.item_id ();
+    streamed_texts.media_outputs_rev <- media :: streamed_texts.media_outputs_rev;
+    emit_stream_event on_stream_event (Media_output media)
+  end
+;;
 
 (* What an unfinished message offers as the reply: its streamed text, unless
    [item/started] declared it commentary. It never completed, so it is a
@@ -1512,6 +1666,7 @@ let response_emitted_of ~seen_final streamed_texts =
    | Some text when String.trim text <> "" -> true
    | Some _ | None -> false)
   || streamed_texts.assistant_message_completed
+  || streamed_texts.media_outputs_rev <> []
   || (Hashtbl.to_seq_values streamed_texts.buffers
       |> Seq.exists (fun buffer -> String.trim (Buffer.contents buffer) <> ""))
 ;;
@@ -1533,7 +1688,7 @@ let response_emitted_of ~seen_final streamed_texts =
    acceptance decides it. A turn with none of them carried no assistant
    message. *)
 let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback ~streamed_texts
-    ~tool_calls_observed ~tool_effect_attempted params =
+    ~on_stream_event ~tool_calls_observed ~tool_effect_attempted params =
   let stage = "turn/completed" in
   let* fields = assoc_at stage params in
   let* terminal_thread_id = required_string stage "threadId" fields in
@@ -1558,6 +1713,27 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback ~streamed_tex
       | "inProgress" -> protocol_error stage "terminal notification carried inProgress status"
       | "completed" ->
         let* items = required_member stage "items" turn_fields in
+        (match items with
+         | `List item_list ->
+           let synth_idx = ref 0 in
+           List.iter
+             (fun item ->
+                let has_explicit_id =
+                  match item with
+                  | `Assoc fields ->
+                    (match List.assoc_opt "id" fields with
+                     | Some (`String s) when String.trim s <> "" -> true
+                     | _ -> false)
+                  | _ -> false
+                in
+                let fallback_idx = !synth_idx in
+                match decode_image_generation_item ~fallback_idx item with
+                | Some media ->
+                  if not has_explicit_id then incr synth_idx;
+                  record_media_output ~on_stream_event streamed_texts media
+                | None -> ())
+             item_list
+         | _ -> ());
         let* terminal_final, terminal_fallback, terminal_message_completed,
              terminal_completion_unnotified =
           messages_of_items ~stage ~notified:streamed_texts.completed_texts items in
@@ -1592,7 +1768,8 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback ~streamed_tex
         (match text with
          | Some text -> Ok text
          | None when tool_calls_observed || streamed_texts.assistant_message_completed
-                     || terminal_message_completed || streamed_visible_text () -> Ok ""
+                     || terminal_message_completed || streamed_visible_text ()
+                     || streamed_texts.media_outputs_rev <> [] -> Ok ""
          | None -> protocol_error stage "completed turn has no assistant message")
       | other -> protocol_error stage (Printf.sprintf "unknown turn status %S" other)
 ;;
@@ -2283,6 +2460,23 @@ let rec await_turn_terminal io ~terminal_tools_closed ~tools ~tool_call_count ~t
     let* () = match kind with
      | Compaction_item -> emit_stream_event on_stream_event Compaction_observed; Ok ()
      | Reasoning_item -> complete_reasoning_item ~stage ~on_stream_event streamed_texts item
+     | Image_generation_item ->
+       let has_explicit_id =
+         match item with
+         | `Assoc fields ->
+           (match List.assoc_opt "id" fields with
+            | Some (`String s) when String.trim s <> "" -> true
+            | _ -> false)
+         | _ -> false
+       in
+       let fallback_idx = streamed_texts.next_synth_media_idx in
+       (match decode_image_generation_item ~fallback_idx item with
+        | Some media ->
+          if not has_explicit_id
+          then streamed_texts.next_synth_media_idx <- fallback_idx + 1;
+          record_media_output ~on_stream_event streamed_texts media
+        | None -> ());
+       Ok ()
      | Command_execution | File_change | Mcp_tool_call | Sleep | Model_item
      | Dynamic_tool_item | Unclassified_item _ -> Ok () in
     let* tool_item = tool_item_of_item ~stage item in
@@ -2423,6 +2617,7 @@ let rec await_turn_terminal io ~terminal_tools_closed ~tools ~tool_call_count ~t
         ~seen_final
         ~seen_fallback
         ~streamed_texts
+        ~on_stream_event
         ~tool_calls_observed:(!tool_call_count > 0)
         ~tool_effect_attempted:!tool_effect_attempted
         params
@@ -2761,6 +2956,22 @@ let run_protocol io (config : config) ~on_undelivered_tool_result ~on_tool_respo
   let tool_effect_attempted = ref false in
   let model_context_window = ref None in
   let terminal_tools_closed = ref false in
+  let streamed_texts =
+    { buffers = Hashtbl.create 8
+    ; reasoning_buffers = Hashtbl.create 8
+    ; completed_texts = Hashtbl.create 8
+    ; completed_reasoning = Hashtbl.create 8
+    ; completed_reasoning_items = Hashtbl.create 8
+    ; native_items = Hashtbl.create 8
+    ; declared_phases = Hashtbl.create 8
+    ; current_item = None
+    ; unfinished_messages = []
+    ; assistant_message_completed = false
+    ; seen_media_item_ids = Hashtbl.create 4
+    ; next_synth_media_idx = 0
+    ; media_outputs_rev = []
+    }
+  in
   let* text, turn_usage =
     with_turn_dispatch io ~terminal_tools_closed
       ~tools:dynamic_tools ~tool_call_count ~tool_effect_attempted ~on_stream_event
@@ -2776,19 +2987,17 @@ let run_protocol io (config : config) ~on_undelivered_tool_result ~on_tool_respo
       ~seen_fallback:None
       ~seen_usage:None
       ~open_tool_call_ids:[]
-      ~streamed_texts:{buffers=Hashtbl.create 8; reasoning_buffers=Hashtbl.create 8;
-        completed_texts=Hashtbl.create 8; completed_reasoning=Hashtbl.create 8;
-        completed_reasoning_items=Hashtbl.create 8;
-        native_items=Hashtbl.create 8; declared_phases=Hashtbl.create 8;
-        current_item=None; unfinished_messages=[]; assistant_message_completed=false}
+      ~streamed_texts
       ~on_stream_event)
   in
+  let media_outputs = List.rev streamed_texts.media_outputs_rev in
   emit_stream_event on_stream_event (Turn_finished { text });
   Ok
     { thread_id
     ; turn_id
     ; model
     ; text
+    ; media_outputs
     ; dynamic_tool_calls = !tool_call_count
     ; subscription
     ; user_agent

@@ -3,7 +3,7 @@ module Store = Multimodal.Vision_artifact_store
 
 type complete_fn = Keeper_provider_subcall.complete_fn
 
-(* The media_failover vision runtimes are entirely /v1 "none" thinking-control
+(* Delegated vision runtimes can include /v1 "none" thinking-control
    lanes — reasoning-capable models with no wire field to disable thinking.
    Requesting enable_thinking=false there is fail-closed by the agent_core
    guard (Disable_not_encodable), which broke all image analysis (2026-08).
@@ -61,11 +61,11 @@ type vision_backend =
   | Official_client
 
 let vision_runtime_candidates ~now =
-  (* Only [runtime.media_failover] qualifies. Capability admission uses the
-     same predicate as the Keeper media reroute. A runtime whose provider
-     stated a time not to call it before is held, not walked
-     (RFC-exact-lane-waits-for-a-stated-reset). *)
-  Runtime_agent.media_candidates ()
+  (* Derive vision-reader candidates from [Runtime_agent.vision_reader_candidates]:
+     optional [runtime.media].vision_reader override first, then auto-discovered
+     healthy [Native_vision_input] runtimes. A runtime whose provider stated a
+     time not to call it before is held, not walked. *)
+  Runtime_agent.vision_reader_candidates ()
   |> List.filter_map (fun (rt : Runtime_instance.t) ->
        let caps = Runtime_agent.input_capabilities_of_runtime rt in
        if not (Runtime_agent.caps_admit_required_modalities caps [ "image" ])
@@ -126,18 +126,100 @@ let run_artifact_job ~label f =
       Eio_guard.check_if_ready ();
       Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
 
+let base_path_of_vision_store_dir dir =
+  (* Walk up from [<base>/.masc/config/keepers/<keeper>.vision] or
+     [<base>/.masc/keepers/<keeper>.vision] to find the [.masc] parent.
+     When a test passes an isolated temp dir without [.masc], return [None]
+     so legacy [Vision_artifact_store] reads still work seamlessly. *)
+  let rec find_masc_parent depth cur =
+    if depth <= 0 then None
+    else
+      let parent = Filename.dirname cur in
+      if String.equal parent cur then None
+      else if String.equal (Filename.basename cur) ".masc" then Some parent
+      else find_masc_parent (depth - 1) parent
+  in
+  find_masc_parent 6 dir
+
+let attachment_store_of ?base_path () =
+  let bp =
+    match base_path with
+    | Some bp when String.trim bp <> "" -> bp
+    | Some _ | None ->
+      (match base_path_of_vision_store_dir (Config_dir_resolver.keepers_dir ()) with
+       | Some root -> root
+       | None -> Env_config_core.base_path ())
+  in
+  Attachment_store.create ~base_path:bp
+
 let store_frame ?base_path ~keeper_name bytes =
-  let dir = frames_dir ?base_path ~keeper_name () in
-  run_artifact_job ~label:"vision-artifact-store" (fun () ->
-    Store.store ~auto_prune:true ~dir bytes)
+  let store = attachment_store_of ?base_path () in
+  run_artifact_job ~label:"vision-attachment-store" (fun () ->
+    match
+      Attachment_store.put
+        ~origin:Attachment_store.Tool_capture
+        ~created_by:keeper_name
+        ~retention:(Attachment_store.Ephemeral { keeper = keeper_name })
+        store
+        ~bytes
+    with
+    | Ok meta -> Ok (Store.of_string meta.sha256)
+    | Error err -> Error (Attachment_store.put_error_to_string err))
 
 let store_kept ?base_path ~keeper_name bytes =
-  let dir = vision_store_dir ?base_path ~keeper_name () in
-  run_artifact_job ~label:"vision-artifact-store" (fun () ->
-    Store.store ~auto_prune:false ~dir bytes)
+  let store = attachment_store_of ?base_path () in
+  run_artifact_job ~label:"vision-attachment-store" (fun () ->
+    match
+      Attachment_store.put
+        ~origin:Attachment_store.Tool_capture
+        ~created_by:keeper_name
+        ~retention:Attachment_store.Durable
+        store
+        ~bytes
+    with
+    | Ok meta -> Ok (Store.of_string meta.sha256)
+    | Error err -> Error (Attachment_store.put_error_to_string err))
+
+let keeper_name_of_vision_store_dir dir =
+  let base = Filename.basename dir in
+  if String.ends_with ~suffix:vision_store_suffix base
+     && String.length base > String.length vision_store_suffix
+  then
+    Some
+      (String.sub base 0 (String.length base - String.length vision_store_suffix))
+  else None
 
 let load_artifact ~dir handle =
-  run_artifact_job ~label:"vision-artifact-load" (fun () -> Store.load ~dir handle)
+  let raw = String.trim (Store.to_string handle) in
+  run_artifact_job ~label:"vision-artifact-load" (fun () ->
+    match Attachment_store.parse_id_or_sha256 raw with
+    | Error _ -> Error (Store.Malformed_handle raw)
+    | Ok sha256 ->
+      let from_attachment_store =
+        match base_path_of_vision_store_dir dir with
+        | None -> Ok None
+        | Some base_path ->
+          let store = Attachment_store.create ~base_path in
+          (match keeper_name_of_vision_store_dir dir with
+           | None -> Attachment_store.get_bytes_by_sha256 store ~sha256
+           | Some caller ->
+             (match Attachment_store.can_keeper_read store ~keeper:caller ~id_or_sha256:sha256 with
+              | Ok true -> Attachment_store.get_bytes_by_sha256 store ~sha256
+              | Ok false -> Ok None
+              | Error err -> Error err))
+      in
+      (match from_attachment_store with
+       | Ok (Some bytes) -> Ok bytes
+       | Error (Attachment_store.Integrity_mismatch { id; _ }) ->
+         Error (Store.Hash_mismatch id)
+       | Error (Attachment_store.Invalid_id id) ->
+         Error (Store.Malformed_handle id)
+       | Error (Attachment_store.Corrupt_metadata { detail; _ })
+       | Error (Attachment_store.Read_failed detail) ->
+         Error (Store.Read_failed detail)
+       | Ok None ->
+         (* Read-only fallback for legacy pre-cutover [<keeper>.vision/] files. *)
+         Store.load ~dir (Store.of_string sha256)))
 
 let record_vision_analyze_result ~result ~reason =
   Otel_metric_store.inc_counter
@@ -434,15 +516,27 @@ type vision_outcome =
   | Vo_empty
   | Vo_truncated
 
-let ok_data (reading : vision_reading) =
+let ok_data ?handle (reading : vision_reading) =
   record_vision_analyze_result ~result:"ok" ~reason:"ok";
-  (`Assoc
-       [ "ok", `Bool true
-       ; "text", `String reading.text
-       ; "runtime_id", `String reading.runtime_id
-       ; "requested_model", `String reading.requested_model
-       ; "response_model", `String reading.response_model
-       ])
+  let attachment_fields =
+    match handle with
+    | None -> []
+    | Some h ->
+      let sha256 = Store.to_string h in
+      let attachment_id = Attachment_store.id_prefix ^ sha256 in
+      [ "attachment_id", `String attachment_id
+      ; "url", `String (Attachment_store.url_of_id attachment_id)
+      ; "artifact", `String sha256
+      ]
+  in
+  `Assoc
+    ([ "ok", `Bool true
+     ; "text", `String reading.text
+     ; "runtime_id", `String reading.runtime_id
+     ; "requested_model", `String reading.requested_model
+     ; "response_model", `String reading.response_model
+     ]
+     @ attachment_fields)
 
 let vision_text_of_json = function
   | `Assoc fields ->
@@ -1056,8 +1150,8 @@ let failed ~failure_class ?(effect_disposition = Tool_result.Proven_pre_effect) 
     (err_json ~failure_class ?detail code)
 ;;
 
-let execution_of_vision_outcome = function
-  | Vo_ok text -> Keeper_tool_execution.success_data (ok_data text)
+let execution_of_vision_outcome ?handle = function
+  | Vo_ok text -> Keeper_tool_execution.success_data (ok_data ?handle text)
   | Vo_invalid_request detail ->
     failed ~failure_class:Tool_result.Policy_rejection ~detail "invalid_request"
   | Vo_no_runtime detail ->
@@ -1139,13 +1233,18 @@ let handle_with_outcome
     ~(meta : Keeper_meta_contract.keeper_meta)
     ~args
     () =
-  match string_member "artifact" args, string_member "query" args, runtime_id_of_args args with
+  let artifact_arg =
+    match string_member "attachment_id" args with
+    | Some _ as id -> id
+    | None -> string_member "artifact" args
+  in
+  match artifact_arg, string_member "query" args, runtime_id_of_args args with
   | _, _, Error detail ->
       failed ~failure_class:Tool_result.Policy_rejection ~detail "invalid_args"
   | None, _, _ | _, None, _ ->
     failed
       ~failure_class:Tool_result.Policy_rejection
-      ~detail:"requires string fields: artifact, query"
+      ~detail:"requires string fields: artifact (or attachment_id), query"
       "invalid_args"
   | Some handle_str, Some query, Ok runtime_id ->
     (match sw, net, clock with
@@ -1203,7 +1302,7 @@ let handle_with_outcome
                       Keep the verified bytes before reporting a successful
                       analysis, even if rotation removed the frame meanwhile. *)
                    (match store_kept ?base_path ~keeper_name:meta.name bytes with
-                    | Ok _ -> execution_of_vision_outcome outcome
+                    | Ok handle -> execution_of_vision_outcome ~handle outcome
                     | Error detail ->
                       failed
                         ~failure_class:Tool_result.Runtime_failure

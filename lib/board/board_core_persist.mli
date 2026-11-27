@@ -244,6 +244,7 @@ val create_post :
   ?hearth:string ->
   ?thread_id:string ->
   ?origin:post_origin ->
+  ?attachment_ids:string list ->
   unit ->
   (post, Post_publication_failure.t) result
 
@@ -289,6 +290,7 @@ val create_post_with_audience :
   ?hearth:string ->
   ?thread_id:string ->
   ?origin:post_origin ->
+  ?attachment_ids:string list ->
   unit ->
   (post_creation, Post_publication_failure.t) result
 (** Validate and freeze the post audience before mutating or persisting the

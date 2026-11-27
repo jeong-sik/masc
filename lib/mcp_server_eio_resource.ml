@@ -76,6 +76,7 @@ type resource_target =
   | World_memory_log
   | Keeper_memory of string
   | Keeper_memory_health of string
+  | Attachment of string
   | Unknown of string
 
 let world_memory_claims_uri = "masc://world-memory/claims"
@@ -122,6 +123,8 @@ let parse_resource_target resource_id =
        Keeper_memory (Uri.pct_decode raw_keeper)
      | [ "keepers"; raw_keeper; "memory"; "health" ] when raw_keeper <> "" ->
        Keeper_memory_health (Uri.pct_decode raw_keeper)
+     | [ "attachments"; raw_id ] when raw_id <> "" ->
+       Attachment (Uri.pct_decode raw_id)
      | _ -> Unknown resource_id)
 ;;
 
@@ -1435,13 +1438,17 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
                , Printf.sprintf "Failed to read wiki resource: %s" detail )
         in
 
+        let as_text_outcome =
+          Result.map (Option.map (fun (mime, text) -> `Text (mime, text)))
+        in
         let resource_outcome =
           match parse_resource_target resource_id with
           | Tool_help_index ->
               Ok
                 (Some
-                  ( "text/markdown"
-                  , Tool_help_registry.index_markdown (public_tool_help_schemas ()) ))
+                  (`Text
+                    ( "text/markdown"
+                    , Tool_help_registry.index_markdown (public_tool_help_schemas ()) )))
           | Tool_help tool_name ->
               let text_opt =
                 match
@@ -1450,9 +1457,9 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
                 | Some entry -> Some (Tool_help_registry.entry_markdown entry)
                 | None -> None
               in
-              Ok (Option.map (fun text -> ("text/markdown", text)) text_opt)
+              Ok (Option.map (fun text -> `Text ("text/markdown", text)) text_opt)
           | Status_markdown ->
-              Ok (Some ("text/markdown", run_blocking_resource_io (fun () -> Workspace.status config)))
+              Ok (Some (`Text ("text/markdown", run_blocking_resource_io (fun () -> Workspace.status config))))
           | Status_json ->
               let state_observation, backlog_json =
                 run_blocking_resource_io (fun () ->
@@ -1471,20 +1478,20 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
                 ("backlog", backlog_json);
                 ("connected_agents", `List connected_agents);
               ] in
-              Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+              Ok (Some (`Text ("application/json", Yojson.Safe.pretty_to_string json)))
           | Tasks_markdown ->
-              Ok (Some ("text/markdown", run_blocking_resource_io (fun () -> Workspace.list_tasks config)))
+              Ok (Some (`Text ("text/markdown", run_blocking_resource_io (fun () -> Workspace.list_tasks config))))
           | Tasks_json ->
               let backlog_json =
                 run_blocking_resource_io (fun () ->
                   Masc_domain.backlog_to_yojson (Workspace.read_backlog config))
               in
-              Ok (Some ("application/json", Yojson.Safe.pretty_to_string backlog_json))
+              Ok (Some (`Text ("application/json", Yojson.Safe.pretty_to_string backlog_json)))
           | Who_markdown ->
-              Ok (Some ("text/markdown", Session.status_string registry))
+              Ok (Some (`Text ("text/markdown", Session.status_string registry)))
           | Who_json ->
               let statuses = Session.get_agent_statuses registry in
-              Ok (Some ("application/json", Yojson.Safe.pretty_to_string (`List statuses)))
+              Ok (Some (`Text ("application/json", Yojson.Safe.pretty_to_string (`List statuses))))
           | Messages_markdown ->
               let since_seq = max 0 (Mcp_server.int_query_param uri "since_seq" ~default:0) in
               let limit =
@@ -1492,7 +1499,7 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
                   (Mcp_server.int_query_param uri "limit" ~default:10)
               in
               run_blocking_resource_result (fun () ->
-                Ok (Some ("text/markdown", Workspace.get_messages config ~since_seq ~limit)))
+                Ok (Some (`Text ("text/markdown", Workspace.get_messages config ~since_seq ~limit))))
           | Messages_json ->
               let since_seq = max 0 (Mcp_server.int_query_param uri "since_seq" ~default:0) in
               let limit =
@@ -1500,14 +1507,14 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
                   (Mcp_server.int_query_param uri "limit" ~default:10)
               in
               let json = read_messages_json ~since_seq ~limit in
-              Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+              Ok (Some (`Text ("application/json", Yojson.Safe.pretty_to_string json)))
           | Events_markdown ->
               let limit =
                 clamp_resource_limit ~max_limit:max_events_resource_limit
                   (Mcp_server.int_query_param uri "limit" ~default:50)
               in
               (match read_events_markdown ~limit with
-               | Ok text -> Ok (Some ("text/markdown", text))
+               | Ok text -> Ok (Some (`Text ("text/markdown", text)))
                | Error _ as err -> err)
           | Events_json ->
               let limit =
@@ -1515,12 +1522,12 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
                   (Mcp_server.int_query_param uri "limit" ~default:50)
               in
               (match read_events_json ~limit with
-               | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+               | Ok json -> Ok (Some (`Text ("application/json", Yojson.Safe.pretty_to_string json)))
                | Error _ as err -> err)
-          | Wiki_index_markdown -> read_wiki_resource ~is_json:false ~topic:""
-          | Wiki_index_json -> read_wiki_resource ~is_json:true ~topic:""
-          | Wiki_page_markdown topic -> read_wiki_resource ~is_json:false ~topic
-          | Wiki_page_json topic -> read_wiki_resource ~is_json:true ~topic
+          | Wiki_index_markdown -> as_text_outcome (read_wiki_resource ~is_json:false ~topic:"")
+          | Wiki_index_json -> as_text_outcome (read_wiki_resource ~is_json:true ~topic:"")
+          | Wiki_page_markdown topic -> as_text_outcome (read_wiki_resource ~is_json:false ~topic)
+          | Wiki_page_json topic -> as_text_outcome (read_wiki_resource ~is_json:true ~topic)
           | World_memory_claims ->
               (match
                  authorize_world_memory_caller ~require_admin:false
@@ -1530,7 +1537,7 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
                | Ok () ->
                  if World_memory_store.exists ~base_path:config.base_path then
                    (match read_world_memory_mvcc_claims_json ~caller ~base_path:config.base_path with
-                    | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+                    | Ok json -> Ok (Some (`Text ("application/json", Yojson.Safe.pretty_to_string json)))
                     | Error err -> Error err)
                  else
                    let briefing_template =
@@ -1541,7 +1548,7 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
                         read_world_memory_claims_json ~caller ~briefing_template
                           ~base_path:config.base_path ())
                     with
-                    | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+                    | Ok json -> Ok (Some (`Text ("application/json", Yojson.Safe.pretty_to_string json)))
                     | Error err -> Error err))
           | World_memory_digest ->
               (match
@@ -1551,7 +1558,7 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
                | Error err -> Error err
                | Ok () ->
                  (match read_world_memory_digest_json ~base_path:config.base_path with
-                  | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+                  | Ok json -> Ok (Some (`Text ("application/json", Yojson.Safe.pretty_to_string json)))
                   | Error err -> Error err))
           | World_memory_index ->
               (match
@@ -1561,7 +1568,7 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
                | Error err -> Error err
                | Ok () ->
                  (match read_world_memory_index_json ~base_path:config.base_path with
-                  | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+                  | Ok json -> Ok (Some (`Text ("application/json", Yojson.Safe.pretty_to_string json)))
                   | Error err -> Error err))
           | World_memory_fact fact_id ->
               (match
@@ -1573,7 +1580,7 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
                  (match read_world_memory_fact_json ~caller ~base_path:config.base_path ~fact_id with
                   | Ok None -> Ok None
                   | Ok (Some json) ->
-                    Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+                    Ok (Some (`Text ("application/json", Yojson.Safe.pretty_to_string json)))
                   | Error err -> Error err))
           | World_memory_log ->
               (match
@@ -1589,27 +1596,74 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
                  in
                  if World_memory_store.exists ~base_path:config.base_path then
                    (match read_world_memory_mvcc_log_json ~since_seq ~limit ~base_path:config.base_path with
-                    | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+                    | Ok json -> Ok (Some (`Text ("application/json", Yojson.Safe.pretty_to_string json)))
                     | Error err -> Error err)
                  else
                    (match
                       run_blocking_resource_result (fun () ->
                         read_world_memory_log_json ~since_seq ~limit ~base_path:config.base_path)
                     with
-                    | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+                    | Ok json -> Ok (Some (`Text ("application/json", Yojson.Safe.pretty_to_string json)))
                     | Error err -> Error err))
           | Keeper_memory keeper ->
               (match read_keeper_memory_json ~config ~caller ~keeper with
                | Ok None -> Ok None
                | Ok (Some json) ->
-                 Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+                 Ok (Some (`Text ("application/json", Yojson.Safe.pretty_to_string json)))
                | Error err -> Error err)
           | Keeper_memory_health keeper ->
               (match read_keeper_memory_health_json ~base_path:config.base_path ~caller ~keeper with
                | Ok None -> Ok None
                | Ok (Some json) ->
-                 Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+                 Ok (Some (`Text ("application/json", Yojson.Safe.pretty_to_string json)))
                | Error err -> Error err)
+          | Attachment raw_id ->
+              (match Attachment_store.parse_id raw_id with
+               | Error msg -> Error (Mcp_error_code.Invalid_params, msg)
+               | Ok sha256 ->
+                 run_blocking_resource_result (fun () ->
+                   let store = Attachment_store.create ~base_path:config.base_path in
+                   match Attachment_store.get_meta_by_sha256 store ~sha256 with
+                   | Error err ->
+                     Error
+                       ( Mcp_error_code.Internal_error
+                       , Attachment_store.get_error_to_string err )
+                   | Ok None -> Ok None
+                   | Ok (Some meta) ->
+                     let allowed =
+                       match meta.retention with
+                       | Attachment_store.Durable -> Ok ()
+                       | Attachment_store.Ephemeral _ ->
+                         (match caller with
+                          | Operator_admin -> Ok ()
+                          | Anonymous_reader ->
+                            Error
+                              ( Mcp_error_code.Auth_error
+                              , "Ephemeral attachment resource requires authentication" )
+                          | Authenticated_reader { agent_name; _ } ->
+                            if Attachment_store.has_ephemeral_pin store ~keeper:agent_name ~sha256
+                            then Ok ()
+                            else
+                              Error
+                                ( Mcp_error_code.Insufficient_scope
+                                , "Ephemeral attachment resource requires admin permission or matching keeper pin" ))
+                     in
+                     (match allowed with
+                      | Error _ as err -> err
+                      | Ok () ->
+                        (match Attachment_store.get_bytes_by_sha256 store ~sha256 with
+                         | Error err ->
+                           Error
+                             ( Mcp_error_code.Internal_error
+                             , Attachment_store.get_error_to_string err )
+                         | Ok None -> Ok None
+                         | Ok (Some bytes) ->
+                           let mime_type =
+                             if Attachment_store.is_opaque_binary meta
+                             then "application/octet-stream"
+                             else meta.mime_type
+                           in
+                           Ok (Some (`Blob (mime_type, Base64.encode_string bytes)))))))
           | Unknown _ -> Ok None
         in
 
@@ -1624,12 +1678,24 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
               ~data:(`Assoc [ ("uri", `String uri_str) ])
               Mcp_error_code.Invalid_params
               "Resource not found"
-        | Ok (Some (mime_type, text)) ->
+        | Ok (Some (`Text (mime_type, text))) ->
             let contents = `List [
               `Assoc [
                 ("uri", `String uri_str);
                 ("mimeType", `String mime_type);
                 ("text", `String text);
+              ]
+            ] in
+            make_response ~id
+              (`Assoc
+                ([ ("contents", contents) ]
+                @ Mcp_server.(cache_hint_fields live_state_cache_hint)))
+        | Ok (Some (`Blob (mime_type, blob_base64))) ->
+            let contents = `List [
+              `Assoc [
+                ("uri", `String uri_str);
+                ("mimeType", `String mime_type);
+                ("blob", `String blob_base64);
               ]
             ] in
             make_response ~id

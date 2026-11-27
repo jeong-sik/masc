@@ -27,7 +27,23 @@ type t =
         media-input capability inheritance never depends on mutable global
         catalog state and never leaks provider-wide presets onto uncatalogued
         models. *)
+  ; media_capabilities : Llm_provider.Capabilities.media_capabilities
+    (** Bidirectional media capabilities snapshot computed at materialization
+        for both HTTP [Agent_core] and official-client bindings (catalog row ->
+        client/transport contract -> live ACP probe if already observed ->
+        explicit [\[models.<id>.capabilities\]] tri-state overrides). Prefer
+        {!effective_media_capabilities} at dispatch time so ACP runtimes
+        reflect any live [initialize] probe observed after materialization. *)
   }
+
+val effective_media_capabilities : t -> Llm_provider.Capabilities.media_capabilities
+(** Effective bidirectional media capabilities for [rt], recomputed from [rt]'s
+    frozen catalog/model/execution state plus the latest process-wide ACP
+    [initialize] [promptCapabilities.image] observation. A live ACP probe can
+    only downgrade to [No_vision_input] ([Some false]) or fill uncatalogued
+    models ([catalog_row = None]); it never overrides a catalogued model's
+    [supports_image_input = false] or an explicit TOML
+    [supports-image-input = false]. *)
 
 type dispatch_credential_error =
   | Required_env_credential_missing of

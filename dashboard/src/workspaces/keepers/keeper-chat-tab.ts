@@ -15,11 +15,24 @@ import { html } from 'htm/preact'
 import { ErrorBoundary } from '../../components/common/error-boundary'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { KeeperWaitingStrip } from './keeper-waiting-strip'
-import { WorkspaceChatImage } from '../../components/chat/workspace-image'
+import {
+  AttachmentComposer,
+  AttachmentGallery,
+  hasFailedAttachments,
+  hasUploadingAttachments,
+  readyAttachmentsOf,
+  revokeComposerPreviews,
+  type ComposerAttachmentItem,
+} from '../../components/attachments'
 import { PopoverMenu } from '../../components/primitives/popover-menu'
 import { lazy, Suspense } from 'preact/compat'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { contextSeverityTone } from '../../api/keeper-diagnostics'
+import {
+  decodeAttachmentRef,
+  dedupeAttachments,
+  type AttachmentRef,
+} from '../../api/attachments'
 import {
   authSession,
   canUseSingleUserTokenAdmin,
@@ -29,7 +42,6 @@ import {
 } from '../../core/auth'
 import { formatObserved } from '../../core/resource-cache'
 import { observerConnected, subscribeObserverFrames, subscribeObserverResync } from '../../core/observer'
-import { isWorkspaceRasterMime } from '../../lib/keeper-media'
 import { randomUuid } from '../../lib/uuid'
 import { readDiscordOperator, type DiscordReplyAuthority } from './discord-reply'
 import { DiscordReplyPanel } from './discord-reply-panel'
@@ -117,7 +129,6 @@ import {
 } from './tool-result-state'
 import type {
   BtwQueryState,
-  ChatAttachmentDraft,
   ChatDeliveryState,
   ChatToolBlock,
   ChatTranscriptEntry,
@@ -345,6 +356,16 @@ function isOperationSettledInEntries(
   )
 }
 
+function entryDisplayAttachments(msg: ChatTranscriptEntry): readonly AttachmentRef[] {
+  const fromCanonical = msg.attachments ?? []
+  const fromLegacy = (msg.retainedImages ?? [])
+    .map((img) => decodeAttachmentRef({ t: 'image', src: img.path, cap: img.caption }))
+    .filter((ref): ref is AttachmentRef => ref !== null)
+  if (fromCanonical.length === 0) return fromLegacy
+  if (fromLegacy.length === 0) return fromCanonical
+  return dedupeAttachments([...fromCanonical, ...fromLegacy])
+}
+
 function joinThinkingMap(map: Map<string, string>): string | undefined {
   const ordered = Array.from(map.values()).filter((v) => v.length > 0)
   return ordered.length > 0 ? ordered.join('\n\n') : undefined
@@ -414,15 +435,24 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     })
     return () => { live = false }
   }, [discordEpoch, hasBearer, hasDiscordReplySource])
-  const [attachments, setAttachmentsState] = useState<readonly ChatAttachmentDraft[]>([])
-  const attachmentsRef = useRef<readonly ChatAttachmentDraft[]>([])
-  const setAttachments = useCallback((next: readonly ChatAttachmentDraft[] | ((cur: readonly ChatAttachmentDraft[]) => readonly ChatAttachmentDraft[])) => {
-    setAttachmentsState((cur) => {
-      const resolved = typeof next === 'function' ? next(cur) : next
-      attachmentsRef.current = resolved
-      return resolved
-    })
+  const [composerAttachments, setComposerAttachmentsState] = useState<readonly ComposerAttachmentItem[]>([])
+  const composerAttachmentsRef = useRef<readonly ComposerAttachmentItem[]>([])
+  const setComposerAttachments = useCallback(
+    (next: readonly ComposerAttachmentItem[] | ((cur: readonly ComposerAttachmentItem[]) => readonly ComposerAttachmentItem[])) => {
+      setComposerAttachmentsState((cur) => {
+        const resolved = typeof next === 'function' ? next(cur) : next
+        composerAttachmentsRef.current = resolved
+        return resolved
+      })
+    },
+    [],
+  )
+  const clearComposerAttachments = useCallback(() => {
+    revokeComposerPreviews(composerAttachmentsRef.current)
+    composerAttachmentsRef.current = []
+    setComposerAttachmentsState([])
   }, [])
+  useEffect(() => () => revokeComposerPreviews(composerAttachmentsRef.current), [])
   const [sending, setSending] = useState(false)
   const [followUpSubmitting, setFollowUpSubmitting] = useState(false)
   const [voiceBusy, setVoiceBusy] = useState(false)
@@ -471,7 +501,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const chatListRef = useRef<HTMLDivElement>(null)
   const chatFeedRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const openAttachmentPickerRef = useRef<(() => void) | null>(null)
   const voiceInputRef = useRef<HTMLInputElement>(null)
   const streamAbortRef = useRef<AbortController | null>(null)
   const btwAbortRef = useRef<AbortController | null>(null)
@@ -920,6 +950,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           content: '',
           thinking: undefined,
           toolCalls: undefined,
+          attachments: undefined,
+          retainedImages: undefined,
           providerRetry: undefined,
           runtimeAttempt: attempt ?? m.runtimeAttempt,
           deliveryState: 'Streaming',
@@ -976,6 +1008,33 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         updateAssistant((m) => ({
           ...m,
           thinking: combined,
+          deliveryState: promoteStreaming(m.deliveryState),
+        }), 'Streaming')
+      },
+      onAttachment: (event) => {
+        markUserDelivered()
+        if (event.role === 'user') {
+          updateEntryById(userId, (m) => ({
+            ...m,
+            attachments: dedupeAttachments([...(m.attachments ?? []), event.attachment]),
+          }))
+          return
+        }
+        if (event.toolCallId) {
+          liveTools = upsertStreamToolCall(
+            liveTools,
+            { toolCallId: event.toolCallId },
+            (cur) => ({
+              ...cur,
+              attachments: dedupeAttachments([...(cur.attachments ?? []), event.attachment]),
+            }),
+          )
+        }
+        const snapshotTools = liveTools
+        updateAssistant((m) => ({
+          ...m,
+          attachments: dedupeAttachments([...(m.attachments ?? []), event.attachment]),
+          toolCalls: event.toolCallId && snapshotTools.length > 0 ? snapshotTools : m.toolCalls,
           deliveryState: promoteStreaming(m.deliveryState),
         }), 'Streaming')
       },
@@ -2072,8 +2131,17 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
 
   const submitMessage = async (intent: 'queue' | 'steer') => {
     if (followUpSubmittingRef.current) return
+    if (hasUploadingAttachments(composerAttachmentsRef.current)) {
+      setHistoryError('첨부 파일 업로드가 완료된 뒤 전송하세요.')
+      return
+    }
+    if (hasFailedAttachments(composerAttachmentsRef.current)) {
+      setHistoryError('업로드에 실패한 첨부 파일을 재시도하거나 제거한 뒤 전송하세요.')
+      return
+    }
     const trimmed = draftRef.current.trim()
-    if (!trimmed && attachmentsRef.current.length === 0) return
+    const readyAttachments = readyAttachmentsOf(composerAttachmentsRef.current)
+    if (!trimmed && readyAttachments.length === 0) return
 
     // `/btw <question>` shortcut inside main composer (bare `/btw` opens the side-query box)
     if (/^\/btw(?:\s|$)/.test(trimmed)) {
@@ -2098,11 +2166,12 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       role: 'user',
       speakerLabel: 'Operator',
       content: trimmed,
+      attachments: readyAttachments.length > 0 ? readyAttachments : undefined,
       ts: nowSec,
       operationId,
       deliveryState: 'Sending',
     }
-    const currentAttachments = [...attachmentsRef.current]
+    const currentAttachments = [...readyAttachments]
 
     // While a turn is already streaming on the Layer 3 view-stream slot:
     // - Queue submits via a short-lived acceptance request so the active stream is NOT aborted.
@@ -2117,9 +2186,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         entries: prev.keeperName === targetKeeper ? [...prev.entries, userEntry] : [userEntry],
       }))
       draftRef.current = ''
-      attachmentsRef.current = []
       setDraft('')
-      setAttachments([])
+      clearComposerAttachments()
       queueMicrotask(() => composerRef.current?.focus())
       try {
         const res = await enqueueKeeperChat({
@@ -2234,9 +2302,8 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         : [userEntry, assistantEntry],
     }))
     draftRef.current = ''
-    attachmentsRef.current = []
     setDraft('')
-    setAttachments([])
+    clearComposerAttachments()
     setSending(true)
     queueMicrotask(() => composerRef.current?.focus())
 
@@ -2361,50 +2428,6 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     } else {
       void submitMessage('queue')
     }
-  }
-
-  const handleAttachmentSelect = async (e: Event) => {
-    const input = e.currentTarget as HTMLInputElement
-    const files = input.files
-    if (!files || files.length === 0) return
-    const targetKeeper = keeper.name
-    const startEpoch = currentSessionEpoch()
-    const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024
-    const next: ChatAttachmentDraft[] = []
-    const rejected: string[] = []
-    for (const file of Array.from(files)) {
-      if (file.size > MAX_ATTACHMENT_BYTES) {
-        rejected.push(`${file.name} (${Math.ceil(file.size / (1024 * 1024))}MB > 10MB)`)
-        continue
-      }
-      const buf = await file.arrayBuffer()
-      if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) {
-        input.value = ''
-        return
-      }
-      const bytes = new Uint8Array(buf)
-      const chunks: string[] = []
-      const CHUNK_SIZE = 0x8000
-      for (let offset = 0; offset < bytes.length; offset += CHUNK_SIZE) {
-        chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + CHUNK_SIZE)))
-      }
-      const base64 = typeof btoa === 'function' ? btoa(chunks.join('')) : ''
-      next.push({
-        id: randomUuid(),
-        type: isWorkspaceRasterMime(file.type) ? 'image' : 'file',
-        name: file.name,
-        size: file.size,
-        mimeType: file.type || 'application/octet-stream',
-        data: base64,
-      })
-    }
-    if (rejected.length > 0) {
-      setHistoryError(`첨부 크기 제한(10MB)을 초과한 파일은 제외되었습니다: ${rejected.join(', ')}`)
-    }
-    if (next.length > 0) {
-      setAttachments((prev) => [...prev, ...next])
-    }
-    input.value = ''
   }
 
   const handleVoiceFile = async (e: Event) => {
@@ -2981,6 +3004,13 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             cachedRes,
             executionId: tb.executionId,
           })}
+          ${tb.attachments && tb.attachments.length > 0 && html`
+            <${AttachmentGallery}
+              attachments=${tb.attachments}
+              workspaceEpoch=${currentSessionEpoch()}
+              compact=${true}
+            />
+          `}
           ${renderToolResultStatus(
             tb,
             cachedRes,
@@ -2999,7 +3029,10 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const liveSig = showLiveTurnCard
     ? `live:${effectivePreview?.revision ?? 0}:${effectivePreview?.text_tail.length ?? 0}:${liveToolName ?? ''}`
     : ''
-  const mediaSig = lastVisible?.retainedImages?.map(image => image.path).join(',') ?? ''
+  const mediaSig = [
+    ...(lastVisible?.retainedImages?.map((image) => image.path) ?? []),
+    ...(lastVisible?.attachments?.map((att) => att.attachment_id || att.url) ?? []),
+  ].join(',')
   const tailSig = lastVisible
     ? `${visibleEntries.length}:${lastVisible.id}:${lastVisible.content.length}:${lastVisible.thinking?.length ?? 0}:${lastVisible.toolCalls?.length ?? 0}:${lastVisible.deliveryState ?? ''}:${lastVisible.errorDetail ?? ''}:${mediaSig}:${liveSig}`
     : `${visibleEntries.length}:empty:${liveSig}`
@@ -3335,10 +3368,17 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
                             <${OpenWorkRows} activities=${openWork} live=${turnAnimating} />
                           `}
                         `}
-                        ${msg.retainedImages?.map((image, index) => html`
-                          <${WorkspaceChatImage} key=${`${index}:${image.path}`}
-                            path=${image.path} caption=${image.caption} workspaceEpoch=${image.workspaceEpoch} />
-                        `)}
+                        ${(() => {
+                          const displayAttachments = entryDisplayAttachments(msg)
+                          if (displayAttachments.length === 0) return null
+                          const attEpoch = msg.retainedImages?.[0]?.workspaceEpoch ?? currentSessionEpoch()
+                          return html`
+                            <${AttachmentGallery}
+                              attachments=${displayAttachments}
+                              workspaceEpoch=${attEpoch}
+                            />
+                          `
+                        })()}
                         ${msg.providerRetry && html`
                           <div class="kp-stream-notice" data-kind="retry" role="status">
                             ${providerRetryLabel(msg.providerRetry)}
@@ -3528,25 +3568,14 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
         `}
 
         <!-- Hermes-style Composer Footer -->
-        <div class="kp-composer">
-          ${attachments.length > 0 && html`
-            <div class="kp-pill-row">
-              ${attachments.map((att) => html`
-                <span key=${att.id} class="kp-pill">
-                  📎 ${att.name} (${Math.max(1, Math.round(att.size / 1024))}KB)
-                  <button
-                    type="button"
-                    class="btn-ghost"
-                    aria-label="첨부 제거"
-                    onClick=${() => setAttachments((prev) => prev.filter((x) => x.id !== att.id))}
-                  >
-                    ×
-                  </button>
-                </span>
-              `)}
-            </div>
-          `}
-
+        <${AttachmentComposer}
+          className="kp-composer"
+          items=${composerAttachments}
+          onChange=${setComposerAttachments}
+          showTrigger=${false}
+          pickerRef=${openAttachmentPickerRef}
+          onError=${(message: string) => setHistoryError(message)}
+        >
           ${(hasTurnObservation || lastWorked) && html`
             <div class="kp-turn-progress">
               ${hasTurnObservation && html`
@@ -3581,20 +3610,13 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             ref=${composerRef}
             class="kp-textarea"
             rows=${3}
-            placeholder=${`${keeper.name}에게 메시지 전송 (Enter: Queue · ⌘↵: Steer · /btw <질문>)`}
+            placeholder=${`${keeper.name}에게 메시지 전송 (Enter: Queue · ⌘↵: Steer · 이미지 붙여넣기/드롭 · /btw <질문>)`}
             aria-label="Keeper 채팅 입력"
             value=${draft}
             onInput=${(e: Event) => setDraft((e.currentTarget as HTMLTextAreaElement).value)}
             onKeyDown=${handleComposerKeyDown}
           />
 
-          <input
-            ref=${fileInputRef}
-            type="file"
-            multiple
-            class="kp-hidden-input"
-            onChange=${(e: Event) => void handleAttachmentSelect(e)}
-          />
           <input
             ref=${voiceInputRef}
             type="file"
@@ -3625,7 +3647,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               <button
                 type="button"
                 class="btn-ghost"
-                onClick=${() => fileInputRef.current?.click()}
+                onClick=${() => openAttachmentPickerRef.current?.()}
               >
                 첨부
               </button>
@@ -3645,7 +3667,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               <button
                 type="button"
                 class="btn-ghost"
-                disabled=${followUpSubmitting}
+                disabled=${followUpSubmitting || hasUploadingAttachments(composerAttachments) || hasFailedAttachments(composerAttachments)}
                 onClick=${() => void submitMessage('queue')}
               >
                 Queue ↵
@@ -3653,14 +3675,14 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               <button
                 type="button"
                 class="btn-primary"
-                disabled=${followUpSubmitting}
+                disabled=${followUpSubmitting || hasUploadingAttachments(composerAttachments) || hasFailedAttachments(composerAttachments)}
                 onClick=${() => void submitMessage('steer')}
               >
                 Steer ⌘↵
               </button>
             </div>
           </div>
-        </div>
+        <//>
       </div>
 
       ${companionOpen && html`

@@ -1681,10 +1681,29 @@ let body_reached_its_end ~response ~transport_eof_seen body =
 
 (* The whole body of [response]. A body the peer's close cut short is the
    peer's close, not an answer: what arrived of it is not returned. *)
-let read_response_body ~response ~transport_eof_seen resp_body =
+let resolve_max_response_bytes ~operation = function
+  | None -> Ok Api_common.max_response_body
+  | Some limit when limit > 0 -> Ok limit
+  | Some limit ->
+    Error
+      (AcceptRejected
+         { reason =
+             Printf.sprintf
+               "%s: max_response_bytes must be positive, got %d"
+               operation
+               limit
+         })
+;;
+
+let read_response_body
+      ?(max_response_bytes = Api_common.max_response_body)
+      ~response
+      ~transport_eof_seen
+      resp_body
+  =
   match
     let safe_body = safe_cohttp_response_flow resp_body in
-    Eio.Buf_read.(of_flow ~max_size:Api_common.max_response_body safe_body |> take_all)
+    Eio.Buf_read.(of_flow ~max_size:max_response_bytes safe_body |> take_all)
   with
   | body when body_reached_its_end ~response ~transport_eof_seen body -> Ok body
   | body ->
@@ -1700,11 +1719,11 @@ let read_response_body ~response ~transport_eof_seen resp_body =
   | exception Eio.Buf_read.Buffer_limit_exceeded ->
     Error
       (ProviderFailure
-         { kind = Response_body_too_large { limit_bytes = Api_common.max_response_body }
+         { kind = Response_body_too_large { limit_bytes = max_response_bytes }
          ; message =
              Printf.sprintf
                "provider response exceeded %d bytes; connection closed without draining"
-               Api_common.max_response_body
+               max_response_bytes
          })
 ;;
 
@@ -1773,8 +1792,11 @@ let delete_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers () =
           , Reuse_verdict.decide ~request_headers:hdr ~response:resp ~body:`Drained ))))
 ;;
 
-let post_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers ~body () =
+let post_sync ?cache ?clock ?timeout_s ?max_response_bytes ~sw ~net ~url ~headers ~body () =
   Http_request_observer.with_call ~mode:Synchronous ~body @@ fun observation ->
+  let* max_response_bytes =
+    resolve_max_response_bytes ~operation:"post_sync" max_response_bytes
+  in
   let* deadline =
     resolve_explicit_deadline
       ~operation:"post_sync"
@@ -1807,7 +1829,7 @@ let post_sync ?cache ?clock ?timeout_s ~sw ~net ~url ~headers ~body () =
         Http_request_observer.response_headers_received observation ~status:code;
         let resp_headers = Cohttp.Response.headers resp in
         let* body_str =
-          read_response_body ~response:resp ~transport_eof_seen resp_body
+          read_response_body ~max_response_bytes ~response:resp ~transport_eof_seen resp_body
         in
         Http_client_diagnostics.profile_opaque_client_error
           ~url
@@ -1871,6 +1893,7 @@ let post_sync_once_after_validation
       ?cache
       ~connect_deadline
       ~body_deadline
+      ?(max_response_bytes = Api_common.max_response_body)
       ~net
       ~(request : validated_sync_request)
       ()
@@ -2026,7 +2049,7 @@ let post_sync_once_after_validation
       try
         match body_deadline, total_started_at with
         | Unbounded, None ->
-          (match read_response_body ~response ~transport_eof_seen response_body with
+          (match read_response_body ~max_response_bytes ~response ~transport_eof_seen response_body with
            | Ok body -> `Body body
            | Error error -> `Failed error)
         | Bounded (clock, timeout_s), Some (_, started_at) ->
@@ -2037,7 +2060,7 @@ let post_sync_once_after_validation
           else (
             match
               Under_deadline.run clock remaining (fun () ->
-                read_response_body ~response ~transport_eof_seen response_body)
+                read_response_body ~max_response_bytes ~response ~transport_eof_seen response_body)
             with
             | Ok (Ok body) -> `Body body
             | Ok (Error error) -> `Failed error
@@ -2093,36 +2116,41 @@ let dispatch_sync_request
       ?clock
       ?connect_timeout_s
       ?body_timeout_s
+      ?max_response_bytes
       ~net
       request
       ()
   =
   let before_dispatch error = Error (Before_dispatch_error error) in
-  match
-    resolve_explicit_deadline
-      ~operation:"post_sync_once"
-      ~parameter:"connect_timeout_s"
-      ~clock
-      ~timeout_s:connect_timeout_s
-  with
+  match resolve_max_response_bytes ~operation:"dispatch_sync_request" max_response_bytes with
   | Error error -> before_dispatch error
-  | Ok connect_deadline ->
+  | Ok max_response_bytes ->
     (match
        resolve_explicit_deadline
          ~operation:"post_sync_once"
-         ~parameter:"body_timeout_s"
+         ~parameter:"connect_timeout_s"
          ~clock
-         ~timeout_s:body_timeout_s
+         ~timeout_s:connect_timeout_s
      with
      | Error error -> before_dispatch error
-     | Ok body_deadline ->
-       post_sync_once_after_validation
-         ?cache
-         ~connect_deadline
-         ~body_deadline
-         ~net
-         ~request
-         ())
+     | Ok connect_deadline ->
+       (match
+          resolve_explicit_deadline
+            ~operation:"post_sync_once"
+            ~parameter:"body_timeout_s"
+            ~clock
+            ~timeout_s:body_timeout_s
+        with
+        | Error error -> before_dispatch error
+        | Ok body_deadline ->
+          post_sync_once_after_validation
+            ?cache
+            ~connect_deadline
+            ~body_deadline
+            ~max_response_bytes
+            ~net
+            ~request
+            ()))
 ;;
 
 let post_sync_once_with_evidence

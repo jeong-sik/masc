@@ -151,6 +151,7 @@ type runtime_handler =
   | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image
   | Tool_read_image
+  | Tool_generate_image
 
 type policy =
   { readonly_of_input : readonly_of_input
@@ -285,6 +286,7 @@ let runtime_handler_to_string = function
   | Tool_masc_local_runtime_dispatch -> "tool_masc_local_runtime_dispatch"
   | Tool_analyze_image -> "tool_analyze_image"
   | Tool_read_image -> "tool_read_image"
+  | Tool_generate_image -> "tool_generate_image"
 ;;
 
 let lane_addon_export = function
@@ -347,7 +349,8 @@ let lane_addon_export = function
   | Tool_masc_wiki_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_analyze_image
-  | Tool_read_image -> None
+  | Tool_read_image
+  | Tool_generate_image -> None
 ;;
 
 (* RFC open-tool-carries-cohort-and-reach D2/D3. Each arm names the function
@@ -396,8 +399,8 @@ let reach_of_handler : runtime_handler -> Keeper_tool_reach.t option = function
   (* Upload, delete and list go to the provider's Files API
      (Llm_provider.Provider_files): storage, not a model call. *)
   | Tool_masc_file_dispatch -> Some Keeper_tool_reach.Network
-  (* A fusion panel and a vision model. *)
-  | Tool_masc_fusion_dispatch | Tool_analyze_image -> Some Keeper_tool_reach.Model_provider
+  (* A fusion panel, vision model, and image generator. *)
+  | Tool_masc_fusion_dispatch | Tool_analyze_image | Tool_generate_image -> Some Keeper_tool_reach.Model_provider
   (* The target is in the input: a surface is the local chat store, or
      Discord, Slack or a webhook. *)
   | Tool_surface_read | Tool_surface_post -> None
@@ -662,7 +665,7 @@ let descriptor
       | Tool_masc_file_dispatch
       | Tool_masc_wiki_dispatch
       | Tool_masc_local_runtime_dispatch
-      | Tool_analyze_image | Tool_read_image ) -> Ordinary ordinary_execution_mode
+      | Tool_analyze_image | Tool_read_image | Tool_generate_image ) -> Ordinary ordinary_execution_mode
   in
   (* Fail-closed admission rule for parallel tool use: a descriptor may opt
      into [Concurrent] batches only when its policy carries a static
@@ -2928,6 +2931,22 @@ let internal_descriptors : t list =
       ~ordinary_execution_mode:Concurrent
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_analyze_image
+      ()
+    (* ── image generation ──────────────────────────────────────── *)
+  ; in_process_descriptor_with_schema_source
+      ~capability_identity:Internal_name_identity
+      ~keeper_model_projection:Internal_name
+      ~input_schema_source:Canonical_registry
+      ~id:"keeper.vision.generate_image"
+      ~name:Keeper_runtime_schemas_toml.keeper_generate_image.name
+      ~description:Keeper_runtime_schemas_toml.keeper_generate_image.description
+      ~input_schema:Keeper_runtime_schemas_toml.keeper_generate_image.input_schema
+      (* Serial + write policy: invokes external paid image-generation APIs and
+         persists durable attachments into [Attachment_store], so retries must
+         be fenced ([Effect_possible]). *)
+      ~ordinary_execution_mode:Serial
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_generate_image
       ()
     (* ── voice cluster (3 tools) ──────────────────────────────── *)
   ; voice_descriptor

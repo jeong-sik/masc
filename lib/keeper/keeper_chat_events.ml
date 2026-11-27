@@ -14,6 +14,22 @@ type text_response = Ag_ui.text_response =
 
 type role = User | Assistant
 
+type attachment_role =
+  | Attachment_user
+  | Attachment_tool
+  | Attachment_assistant
+
+let attachment_role_to_string = function
+  | Attachment_user -> "user"
+  | Attachment_tool -> "tool"
+  | Attachment_assistant -> "assistant"
+
+let attachment_role_of_string = function
+  | "user" -> Some Attachment_user
+  | "tool" -> Some Attachment_tool
+  | "assistant" -> Some Attachment_assistant
+  | _ -> None
+
 type stream_protocol_error_kind =
   | Tool_start_duplicate_index
   | Tool_start_missing_identity
@@ -197,6 +213,12 @@ type keeper_chat_event =
       ; description : string option
       ; image : string option
       }
+  | Attachment_emitted of
+      { attachment_id : string
+      ; role : attachment_role
+      ; tool_call_id : string option
+      ; caption : string option
+      }
   | Image_block of { url : string; caption : string option }
   | Status_block of Keeper_chat_blocks.status_block
   | Audio_block of
@@ -275,6 +297,8 @@ let map_content ~public_errors ~redact_text = function
         question=redact_text event.question; because=redact_text event.because}
   | Link_block event -> Link_block {url=redact_text event.url; title=redact_text event.title;
       description=Option.map redact_text event.description; image=Option.map redact_text event.image}
+  | Attachment_emitted event ->
+      Attachment_emitted { event with caption = Option.map redact_text event.caption }
   | Image_block event ->
       Image_block {url=redact_text event.url; caption=Option.map redact_text event.caption}
   | Audio_block event -> Audio_block {event with message_text=redact_text event.message_text}

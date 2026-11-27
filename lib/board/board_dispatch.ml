@@ -550,7 +550,7 @@ let resolve_post_dispatch_context () =
          (Board.Post_publication_failure.Raised exn))
 
 let create_post_with_unresolved ~author ~content ?title ?body ~post_kind ?meta_json
-    ?visibility ?ttl_hours ?hearth ?thread_id ?origin () =
+    ?visibility ?ttl_hours ?hearth ?thread_id ?origin ?attachment_ids () =
   match resolve_post_dispatch_context () with
   | Error _ as error -> error
   | Ok (store, lookup) ->
@@ -570,6 +570,7 @@ let create_post_with_unresolved ~author ~content ?title ?body ~post_kind ?meta_j
            ?hearth
            ?thread_id
            ?origin
+           ?attachment_ids
            ()
        with
        | Ok creation -> notify_post_creation creation
@@ -586,9 +587,9 @@ let create_post_with_unresolved ~author ~content ?title ?body ~post_kind ?meta_j
             (Board.Post_publication_failure.Raised exn)))
 
 let create_post ~author ~content ?title ?body ~post_kind ?meta_json
-    ?visibility ?ttl_hours ?hearth ?thread_id ?origin () =
+    ?visibility ?ttl_hours ?hearth ?thread_id ?origin ?attachment_ids () =
   create_post_with_unresolved ~author ~content ?title ?body ~post_kind ?meta_json
-    ?visibility ?ttl_hours ?hearth ?thread_id ?origin ()
+    ?visibility ?ttl_hours ?hearth ?thread_id ?origin ?attachment_ids ()
   |> Result.map (fun (creation : Board.post_creation) -> creation.post)
 
 let create_post_once_by_fusion_run_id ~fusion_run_id ~author ~content ~post_kind
@@ -863,11 +864,11 @@ let log_signal_skip ~op ~read ~id detail =
   Log.BoardLog.warn "board %s skipped: %s failed for %s: %s" op read id detail
 
 let add_comment_with_unresolved ~reader ~post_id ~author ~content ?parent_id
-    ?(ttl_hours = Board.Limits.default_ttl_hours) () =
+    ?(ttl_hours = Board.Limits.default_ttl_hours) ?attachment_ids () =
   let store = reobserved_backend () in
       (match
          Board.add_comment_with_audience store ~reader ~lookup:(recipient_lookup ())
-           ~post_id ~author ~content ?parent_id ~ttl_hours ()
+           ~post_id ~author ~content ?parent_id ~ttl_hours ?attachment_ids ()
        with
       | Ok creation ->
           let comment = creation.comment in
@@ -897,8 +898,8 @@ let add_comment_with_unresolved ~reader ~post_id ~author ~content ?parent_id
           Ok (comment, creation.unresolved)
       | Error _ as err -> err)
 
-let add_comment ~reader ~post_id ~author ~content ?parent_id ?ttl_hours () =
-  add_comment_with_unresolved ~reader ~post_id ~author ~content ?parent_id ?ttl_hours ()
+let add_comment ~reader ~post_id ~author ~content ?parent_id ?ttl_hours ?attachment_ids () =
+  add_comment_with_unresolved ~reader ~post_id ~author ~content ?parent_id ?ttl_hours ?attachment_ids ()
   |> Result.map fst
 
 let current_vote_for_post ~reader ~voter ~post_id =

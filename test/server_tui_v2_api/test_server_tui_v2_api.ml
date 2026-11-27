@@ -1865,6 +1865,7 @@ let make_board_post ~id ~title ~post_kind ?meta_json ?successor_id () : Board.po
     ; thread_id = None
     ; origin = None
     ; closed
+    ; attachment_ids = []
     }
 ;;
 

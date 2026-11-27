@@ -11,6 +11,7 @@
  */
 
 import { Marked } from 'marked'
+import { dedupeAttachments, type AttachmentRef } from '../../api/attachments'
 import type { KeeperChatTranscriptSlot } from '../../keeper-delivery-provenance'
 import { parseToolBlobMarker } from '../../lib/tool-blob-marker'
 import type { ChatToolBlock, ChatTranscriptEntry } from './types'
@@ -441,7 +442,7 @@ export function shouldRenderChatEntry(
   blocks: ParsedChatBlocks,
   prefs: ChatBlockPrefs,
 ): boolean {
-  if (msg.errorDetail || msg.retainedImages?.length || msg.deliveryState === 'Streaming') return true
+  if (msg.errorDetail || msg.attachments?.length || msg.retainedImages?.length || msg.deliveryState === 'Streaming') return true
   if (blocks.isInternalOnly && prefs.internal === 'hidden') return false
   if (blocks.isToolOnly && prefs.tools === 'hidden') return false
   const hasVisibleBody = blocks.bodyText.length > 0
@@ -469,16 +470,26 @@ export function dedupeHistoryToolRows(
   entries: readonly ChatTranscriptEntry[],
 ): readonly ChatTranscriptEntry[] {
   const toolRowByExecId = new Map<string, ChatToolBlock>()
+  const toolAttachmentsByExecId = new Map<string, readonly AttachmentRef[]>()
   for (const entry of entries) {
     if (entry.role !== 'tool') continue
     const parsed = parseChatMessageBlocks(entry)
     for (const tb of parsed.toolBlocks) {
       const eid = tb.executionId?.trim() || entry.executionId?.trim()
       if (!eid) continue
+      const rowAtts = dedupeAttachments([...(tb.attachments ?? []), ...(entry.attachments ?? [])])
+      if (rowAtts.length > 0) {
+        toolAttachmentsByExecId.set(eid, dedupeAttachments([...(toolAttachmentsByExecId.get(eid) ?? []), ...rowAtts]))
+      }
       const existing = toolRowByExecId.get(eid)
       if (!existing) {
-        toolRowByExecId.set(eid, { ...tb, executionId: eid })
+        toolRowByExecId.set(eid, {
+          ...tb,
+          executionId: eid,
+          ...(rowAtts.length > 0 ? { attachments: rowAtts } : {}),
+        })
       } else {
+        const mergedAtts = dedupeAttachments([...(existing.attachments ?? []), ...rowAtts])
         toolRowByExecId.set(eid, {
           ...existing,
           name: existing.name !== 'tool' ? existing.name : tb.name,
@@ -486,6 +497,7 @@ export function dedupeHistoryToolRows(
           result: existing.result ?? tb.result,
           status: existing.status ?? tb.status,
           duration: existing.duration ?? tb.duration,
+          ...(mergedAtts.length > 0 ? { attachments: mergedAtts } : {}),
         })
       }
     }
@@ -497,21 +509,27 @@ export function dedupeHistoryToolRows(
       return entry
     }
     let changed = false
+    const liftedAttachments: AttachmentRef[] = []
     const nextToolCalls = entry.toolCalls.map((tc) => {
       const eid = tc.executionId?.trim()
       if (!eid) return tc
       coveredExecIds.add(eid)
       const sibling = toolRowByExecId.get(eid)
-      if (!sibling) return tc
-      const nextName = tc.name !== 'tool' ? tc.name : sibling.name
-      const nextArgs = tc.args ?? sibling.args
-      const nextResult = tc.result ?? sibling.result
-      const nextStatus = tc.status ?? sibling.status
+      const siblingAtts = toolAttachmentsByExecId.get(eid) ?? []
+      if (siblingAtts.length > 0) liftedAttachments.push(...siblingAtts)
+      if (!sibling && siblingAtts.length === 0) return tc
+      const nextName = tc.name !== 'tool' ? tc.name : (sibling?.name ?? tc.name)
+      const nextArgs = tc.args ?? sibling?.args
+      const nextResult = tc.result ?? sibling?.result
+      const nextStatus = tc.status ?? sibling?.status
+      const mergedTcAtts = dedupeAttachments([...(tc.attachments ?? []), ...siblingAtts])
+      const nextAttachments = mergedTcAtts.length > 0 ? mergedTcAtts : undefined
       if (
         nextName !== tc.name
         || nextArgs !== tc.args
         || nextResult !== tc.result
         || nextStatus !== tc.status
+        || (nextAttachments?.length ?? 0) !== (tc.attachments?.length ?? 0)
       ) {
         changed = true
         return {
@@ -520,11 +538,20 @@ export function dedupeHistoryToolRows(
           args: nextArgs,
           result: nextResult,
           status: nextStatus,
+          ...(nextAttachments ? { attachments: nextAttachments } : {}),
         }
       }
       return tc
     })
-    return changed ? { ...entry, toolCalls: nextToolCalls } : entry
+    if (!changed && liftedAttachments.length === 0) return entry
+    const mergedEntryAtts = liftedAttachments.length > 0
+      ? dedupeAttachments([...(entry.attachments ?? []), ...liftedAttachments])
+      : entry.attachments
+    return {
+      ...entry,
+      toolCalls: nextToolCalls,
+      ...(mergedEntryAtts && mergedEntryAtts.length > 0 ? { attachments: mergedEntryAtts } : {}),
+    }
   })
 
   const seenStandaloneToolExecIds = new Set<string>()
@@ -888,7 +915,7 @@ export function groupTranscriptEntries(
   }
 
   for (const entry of entries) {
-    if (entry.blocks.isToolOnly && !entry.msg.errorDetail && !entry.msg.retainedImages?.length) {
+    if (entry.blocks.isToolOnly && !entry.msg.errorDetail && !entry.msg.retainedImages?.length && !entry.msg.attachments?.length) {
       run.push(entry)
     } else {
       flushRun()

@@ -86,13 +86,11 @@ access = "read-write"
 # same ollama_cloud wire (no new credential): GLM-5.3-Flash is the newest flash
 # coding model (Z.AI 2026-08-14, /api/show 2026-08-29), 1M context, tools+vision.
 default = "ollama_cloud.ollama-cloud-glm-5-3-flash"
-# Vision runtimes. When no runtime in a keeper's lane can take an
-# image, the eager read and analyze_image read it with these, in order. They
-# never take the keeper's turn. gemma4-31b (Gemma 4,
-# strong OCR/vision) is a cloud runtime fast enough to be usable; a local 27B
-# measured 5+ min per read under load, so it is deliberately not here.
-# gemma4-31b declares image input and an explicit image payload limit below.
-media_failover = ["ollama_cloud.ollama-cloud-gemma4-31b"]
+# Vision reading and image generation capabilities are derived automatically from
+# each configured runtime's provider/model contract (plus live ACP initialize
+# probes). Optional overrides live in [runtime.media] (vision_reader,
+# image_generator) when an operator wants to pin a specific fallback reader or
+# generator.
 # Anti-rationalization/completion-authority work uses a typed verdict tool call.
 # Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
 # this explicit smart lane. The judgement call resolves the verifier_exact

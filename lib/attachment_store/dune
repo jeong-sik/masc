@@ -1,0 +1,23 @@
+; Content-addressed durable attachment store for MASC media.
+;
+; Stores verified raw binary blobs (never base64, never regex-redacted),
+; immutable JSON metadata sidecars, per-keeper ephemeral frame pins, and
+; cached image derivatives under <masc_dir>/attachments/.
+
+(include_subdirs no)
+
+(library
+ (name masc_attachment_store)
+ (public_name masc.attachment_store)
+ (wrapped false)
+ (modules attachment_store)
+ (flags
+  (:standard -w +4 -w +33 -w +37))
+ (libraries
+  masc.agent_core.digest
+  masc_compression
+  masc_core
+  masc_process
+  fs_compat
+  unix
+  yojson))

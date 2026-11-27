@@ -24,6 +24,7 @@ let comment ~id ~author ~content : Board.comment =
   ; expires_at = 0.
   ; votes_up = 1
   ; votes_down = 0
+  ; attachment_ids = []
   }
 ;;
 
@@ -48,6 +49,7 @@ let post ~id ~author : Board.post =
   ; thread_id = None
   ; origin = None
   ; closed = None
+  ; attachment_ids = []
   }
 ;;
 

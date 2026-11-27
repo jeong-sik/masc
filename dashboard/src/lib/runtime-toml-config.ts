@@ -683,7 +683,6 @@ export function cascadeDeleteProvider(
       throw new Error(`Cannot delete provider ${providerId}: exact-output lane ${id} would have no slots`)
     }
   }
-  pruneArray(['runtime'], 'media_failover')
   const canDeleteBindingNamespace = !reservedProviderIds.includes(providerId)
   const sectionsToDelete = document.sections.filter(section =>
     (section.path[0] === 'providers' && section.path[1] === providerId)
@@ -724,7 +723,16 @@ export function cascadeDeleteProvider(
       next = deleteRuntimeTomlKey(next, 'runtime.assignments', key)
     }
   }
-  
+
+  // Clean up optional [runtime.media] overrides pointing to the deleted provider
+  const mediaOverrides = tableValues(nextDocument, ['runtime', 'media'])
+  for (const key of ['vision_reader', 'image_generator'] as const) {
+    const value = mediaOverrides[key]
+    if (typeof value === 'string' && routesToDeleted(value)) {
+      next = deleteRuntimeTomlKey(next, 'runtime.media', key)
+    }
+  }
+
   return next
 }
 

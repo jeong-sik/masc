@@ -1373,6 +1373,7 @@ let sample_own_post : Masc.Board.post =
   ; thread_id = None
   ; origin = None
   ; closed = None
+  ; attachment_ids = []
   }
 
 let test_own_recent_board_posts_render_in_world_state () =

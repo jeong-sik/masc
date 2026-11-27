@@ -256,6 +256,7 @@ type post = {
   thread_id: string option;  (* Linked Conversation thread *)
   origin: post_origin option; (* Originating turn / channel provenance *)
   closed: post_close_state option; (* None = open; absent key on read = open *)
+  attachment_ids: string list; (* Canonical att_<64hex> ids; absent key on read = [] *)
 }
 
 type comment = {
@@ -269,6 +270,7 @@ type comment = {
   expires_at: float;   (* MANDATORY *)
   votes_up: int;
   votes_down: int;
+  attachment_ids: string list; (* Canonical att_<64hex> ids; absent key on read = [] *)
 }
 
 type source_completeness =

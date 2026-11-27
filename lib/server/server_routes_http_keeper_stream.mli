@@ -74,6 +74,7 @@ type user_input_block = Keeper_multimodal_input.user_input_block =
   | User_image of user_image_source
   | User_document of user_media_block
   | User_audio of user_media_block
+  | User_attachment of user_media_block
 (** Semantic user-input blocks accepted from the dashboard.  This is a
     MASC request-boundary type, intentionally distinct from dashboard
     rich-render [ChatBlock] values and from AGENT_CORE provider blocks. *)
@@ -135,6 +136,7 @@ val split_keeper_reply_chunks : string -> string list
 (** {1 Parsing} *)
 
 val parse_keeper_chat_stream_request :
+  ?base_path:string ->
   media_store:Agent_core.History.media_store ->
   string -> (keeper_chat_stream_request, string) result
 (** Parses the HTTP body string into a
@@ -306,6 +308,7 @@ module For_testing : sig
     outcome:queued_turn_outcome option -> delivery:(unit, string) result ->
     Keeper_owner.operation_execution
   val parse_request :
+    ?base_path:string ->
     media_store:Agent_core.History.media_store ->
     string -> (keeper_chat_stream_request, string) result
 
@@ -484,4 +487,12 @@ module For_testing : sig
   (** What a chat request does with the events its
       {!Keeper_stream_text_redaction.Scoped} redactor released: translate each
       under its stream scope and publish the chat events in order. *)
+
+  val canonical_user_attachment_ids : keeper_chat_stream_request -> string list
+  val tool_result_attachment_ids :
+    base_path:string ->
+    dated_store_root:Dated_jsonl.Store.root ->
+    keeper_name:string ->
+    execution_id:Ids.Execution_id.t ->
+    string list
 end

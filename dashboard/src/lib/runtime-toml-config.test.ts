@@ -180,32 +180,29 @@ p = { sol = { enabled = false, "max-concurrent" = 2 } }
     expect(parseRuntimeTomlEnvironment(edited, runtimeReservedProviderIdsFixture).defaultRuntimeId).toBe('codex.sol')
   })
 
-  it.each(['tables', 'dotted', 'inline'])('removes deleted generated runtimes from lane, exact-output, and media routes declared as %s', shape => {
+  it.each(['tables', 'dotted', 'inline'])('removes deleted generated runtimes from lane and exact-output routes declared as %s', shape => {
     const arrays = {
-      media_failover: ['codex.sol', 'codex_second.sol'],
       lanes: { coding: { candidates: ['codex.sol', 'codex_second.sol'] } },
       exact_output_lanes: { verify: { slots: ['codex.astra', 'codex_second.astra'], cli_slots: ['codex.sol'] } },
     }
     let source: string
     if (shape === 'inline') {
       source = sharedModelSetSource.replace('[runtime]\ndefault = "codex.sol"',
-        'runtime = { default = "codex.sol", media_failover = ["codex.sol", "codex_second.sol"], lanes = { coding = { candidates = ["codex.sol", "codex_second.sol"] } }, exact_output_lanes = { verify = { slots = ["codex.astra", "codex_second.astra"], cli_slots = ["codex.sol"] } } }')
+        'runtime = { default = "codex.sol", lanes = { coding = { candidates = ["codex.sol", "codex_second.sol"] } }, exact_output_lanes = { verify = { slots = ["codex.astra", "codex_second.astra"], cli_slots = ["codex.sol"] } } }')
     } else if (shape === 'dotted') {
       source = sharedModelSetSource.replace('default = "codex.sol"', `default = "codex.sol"
-media_failover = ${JSON.stringify(arrays.media_failover)}
 lanes.coding.candidates = ${JSON.stringify(arrays.lanes.coding.candidates)}
 exact_output_lanes.verify.slots = ${JSON.stringify(arrays.exact_output_lanes.verify.slots)}
 exact_output_lanes.verify.cli_slots = ${JSON.stringify(arrays.exact_output_lanes.verify.cli_slots)}`)
     } else {
-      source = setRuntimeTomlStringArrayKey(sharedModelSetSource, 'runtime', 'media_failover', arrays.media_failover)
-      source += `\n[runtime.lanes.coding]\ncandidates = ${JSON.stringify(arrays.lanes.coding.candidates)}
+      source = `${sharedModelSetSource}\n[runtime.lanes.coding]\ncandidates = ${JSON.stringify(arrays.lanes.coding.candidates)}
 [runtime.exact_output_lanes.verify]
 slots = ${JSON.stringify(arrays.exact_output_lanes.verify.slots)}
 cli_slots = ${JSON.stringify(arrays.exact_output_lanes.verify.cli_slots)}\n`
     }
     const edited = cascadeDeleteProvider(source, 'codex', runtimeReservedProviderIdsFixture)
     expect(getStaticTOMLValue(parseTOML(edited))).toMatchObject({ runtime: {
-      default: 'codex_second.sol', media_failover: ['codex_second.sol'],
+      default: 'codex_second.sol',
       lanes: { coding: { candidates: ['codex_second.sol'] } },
       exact_output_lanes: { verify: { slots: ['codex_second.astra'], cli_slots: [] } },
     } })
@@ -220,10 +217,12 @@ cli_slots = ${JSON.stringify(arrays.exact_output_lanes.verify.cli_slots)}\n`
       .toThrow(reason)
   })
 
-  it('allows clearing the last optional media runtime on provider deletion', () => {
-    const source = setRuntimeTomlStringArrayKey(sharedModelSetSource, 'runtime', 'media_failover', ['codex.sol'])
+  it('clears optional [runtime.media] overrides pointing to a deleted provider', () => {
+    const source = `${sharedModelSetSource}\n[runtime.media]\nvision_reader = "codex.sol"\nimage_generator = "codex_second.sol"\n`
     const edited = cascadeDeleteProvider(source, 'codex', runtimeReservedProviderIdsFixture)
-    expect(getStaticTOMLValue(parseTOML(edited))).toMatchObject({ runtime: { media_failover: [] } })
+    const parsed = getStaticTOMLValue(parseTOML(edited)) as { runtime?: { media?: Record<string, unknown> } }
+    expect(parsed.runtime?.media?.vision_reader).toBeUndefined()
+    expect(parsed.runtime?.media?.image_generator).toBe('codex_second.sol')
   })
 
   it('edits a quoted provider table in place', () => {

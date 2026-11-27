@@ -287,7 +287,7 @@ let has_get_health cmds =
       | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
-      | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
+      | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Upload_attachment_file _ | Cmd.Paste_clipboard_image _ | Cmd.Fetch_inspector_image _ | Cmd.Export_attachment _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
       | Cmd.Start_local_server
       | Cmd.Restart_tui
@@ -307,7 +307,7 @@ let has_sync_streams cmds =
       | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
-      | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
+      | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Upload_attachment_file _ | Cmd.Paste_clipboard_image _ | Cmd.Fetch_inspector_image _ | Cmd.Export_attachment _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
       | Cmd.Start_local_server
       | Cmd.Restart_tui
@@ -328,7 +328,7 @@ let has_quit cmds =
       | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
-      | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
+      | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Upload_attachment_file _ | Cmd.Paste_clipboard_image _ | Cmd.Fetch_inspector_image _ | Cmd.Export_attachment _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
       | Cmd.Start_local_server
       | Cmd.Restart_tui ->
@@ -525,7 +525,7 @@ let test_three_channel_separation () =
         | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Upload_attachment_file _ | Cmd.Paste_clipboard_image _ | Cmd.Fetch_inspector_image _ | Cmd.Export_attachment _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -558,7 +558,7 @@ let test_three_channel_separation () =
         | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Upload_attachment_file _ | Cmd.Paste_clipboard_image _ | Cmd.Fetch_inspector_image _ | Cmd.Export_attachment _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -759,7 +759,7 @@ let test_compact_composer_and_drafts () =
   Alcotest.(check string) "draft survived Pulse -> Work -> Keepers" "hi"
     (Drafts.draft_for ~keeper:"alpha" m7.drafts).text;
   (* Clear draft -> folds again on Keepers fleet list *)
-  let m8 = { m7 with drafts = Drafts.clear_current_draft m7.drafts } in
+  let m8 = { m7 with drafts = Drafts.clear_current_draft_all m7.drafts } in
   Alcotest.(check bool) "cleared draft folds on Keepers roster" true
     (Model.equal_composer_mode (Model.composer_mode m8) Model.Auto_folded_pill);
   (* Active voice keeps composer visible *)
@@ -1138,7 +1138,7 @@ let test_workspace_mismatch_recovery () =
         | Cmd.Sync_streams _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Upload_attachment_file _ | Cmd.Paste_clipboard_image _ | Cmd.Fetch_inspector_image _ | Cmd.Export_attachment _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -1581,7 +1581,7 @@ let test_verifier_regressions () =
         | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Upload_attachment_file _ | Cmd.Paste_clipboard_image _ | Cmd.Fetch_inspector_image _ | Cmd.Export_attachment _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -1821,7 +1821,7 @@ let test_verifier_regressions () =
   Alcotest.(check string) "Post_board_create path"
     "/api/v1/tools/masc_board_post"
     (Cmd.post_request_path
-       (Cmd.Post_board_create { title = "t"; body = "b"; hearth = None }));
+       (Cmd.Post_board_create { title = "t"; body = "b"; hearth = None; attachment_ids = [] }));
   Alcotest.(check string) "Post_task_cancel path"
     "/api/v1/dashboard/tasks/cancel"
     (Cmd.post_request_path
@@ -1864,7 +1864,7 @@ let test_verifier_regressions () =
     | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _
     | Cmd.Voice_cmd _
     | Cmd.Copy_clipboard _
-    | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
+    | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Upload_attachment_file _ | Cmd.Paste_clipboard_image _ | Cmd.Fetch_inspector_image _ | Cmd.Export_attachment _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
     | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
     | Cmd.Start_local_server
     | Cmd.Restart_tui
@@ -2045,7 +2045,7 @@ let test_verifier_regressions () =
     | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _
     | Cmd.Voice_cmd _
     | Cmd.Copy_clipboard _
-    | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
+    | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Upload_attachment_file _ | Cmd.Paste_clipboard_image _ | Cmd.Fetch_inspector_image _ | Cmd.Export_attachment _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
     | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
     | Cmd.Start_local_server
     | Cmd.Restart_tui
@@ -2142,7 +2142,7 @@ let test_verifier_regressions () =
         | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Upload_attachment_file _ | Cmd.Paste_clipboard_image _ | Cmd.Fetch_inspector_image _ | Cmd.Export_attachment _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -2278,7 +2278,7 @@ let test_round1_settings_and_overlay_transitions () =
         | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Upload_attachment_file _ | Cmd.Paste_clipboard_image _ | Cmd.Fetch_inspector_image _ | Cmd.Export_attachment _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -2382,7 +2382,7 @@ let test_round2_store_regressions () =
         | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Upload_attachment_file _ | Cmd.Paste_clipboard_image _ | Cmd.Fetch_inspector_image _ | Cmd.Export_attachment _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -2689,7 +2689,7 @@ let test_v25_data_pipeline_and_settings_2pane () =
         | Cmd.Batch _ | Cmd.Http_post _ | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
         | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
-        | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
+        | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Upload_attachment_file _ | Cmd.Paste_clipboard_image _ | Cmd.Fetch_inspector_image _ | Cmd.Export_attachment _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _ | Cmd.Start_local_server
         | Cmd.Restart_tui | Cmd.Quit _ ->
             false)
@@ -3122,7 +3122,7 @@ let test_v25_data_pipeline_and_settings_2pane () =
         | Cmd.Batch _ | Cmd.Http_post _ | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
         | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
-        | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
+        | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Upload_attachment_file _ | Cmd.Paste_clipboard_image _ | Cmd.Fetch_inspector_image _ | Cmd.Export_attachment _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _ | Cmd.Start_local_server
         | Cmd.Restart_tui | Cmd.Quit _ ->
             false)
@@ -3840,7 +3840,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
         | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _
         | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _
-        | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
+        | Cmd.Export_artifact _ | Cmd.Upload_attachment_file _ | Cmd.Paste_clipboard_image _ | Cmd.Fetch_inspector_image _ | Cmd.Export_attachment _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _ | Cmd.Start_local_server
         | Cmd.Restart_tui | Cmd.Quit _ ->
             None)
@@ -4683,6 +4683,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
            lanes = [ { id = "lane-default"; declared = true; runtime_ids = [ "sonnet-4" ] } ];
            runtimes = [];
            usage_windows = None;
+           media = None;
          }
   in
   let m_rt_quotas_with_lane =
@@ -5295,6 +5296,7 @@ let test_nav_fix4_knowledge_board_chains_and_wiki_clusters () =
       chain_depth = None;
       is_signal = true;
       pinned = false;
+      attachments = [];
     }
   in
   let posts =
@@ -5965,6 +5967,7 @@ let test_nav_fix7_symmetric_viewport_scrolling_all_stores () =
       chain_depth = None;
       is_signal = true;
       pinned = false;
+      attachments = [];
     }
   in
   let k0 =
@@ -6687,7 +6690,7 @@ let test_p1_work_inbox_ask_approval_sync () =
         | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Upload_attachment_file _ | Cmd.Paste_clipboard_image _ | Cmd.Fetch_inspector_image _ | Cmd.Export_attachment _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -6740,7 +6743,7 @@ let test_p1_work_inbox_ask_approval_sync () =
         | Cmd.Sync_streams _
         | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
-        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
+        | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Upload_attachment_file _ | Cmd.Paste_clipboard_image _ | Cmd.Fetch_inspector_image _ | Cmd.Export_attachment _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
@@ -7039,6 +7042,7 @@ let test_p2_grouped_top_header_row0_restoration () =
       chain_depth = depth;
       is_signal = true;
       pinned = false;
+      attachments = [];
     }
   in
   let board_posts =
@@ -8155,6 +8159,8 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
         | Cmd.Copy_clipboard _
         | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram
         | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _
+        | Cmd.Upload_attachment_file _ | Cmd.Paste_clipboard_image _
+        | Cmd.Fetch_inspector_image _ | Cmd.Export_attachment _
         | Cmd.Open_dos_screen _
         | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
@@ -9137,7 +9143,7 @@ let test_failure_is_asked_again_for_a_new_question () =
         | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _
         | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _
-        | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
+        | Cmd.Export_artifact _ | Cmd.Upload_attachment_file _ | Cmd.Paste_clipboard_image _ | Cmd.Fetch_inspector_image _ | Cmd.Export_attachment _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _ | Cmd.Start_local_server
         | Cmd.Restart_tui | Cmd.Quit _ ->
             false)
@@ -9778,6 +9784,10 @@ let sent_get req cmds =
       | Cmd.Cancel_memory_diagram
       | Cmd.Fetch_artifact_and_copy _
       | Cmd.Export_artifact _
+      | Cmd.Upload_attachment_file _
+      | Cmd.Paste_clipboard_image _
+      | Cmd.Fetch_inspector_image _
+      | Cmd.Export_attachment _
       | Cmd.Open_dos_screen _
       | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
@@ -14634,6 +14644,7 @@ let test_ux_batch4_knowledge_runtime_infra () =
       chain_depth = Some 1;
       is_signal = true;
       pinned = false;
+      attachments = [];
     }
   in
   let k_solo =
@@ -16417,6 +16428,7 @@ let test_ux_sweep_12_fixes () =
       updated_at_unix = None;
       is_signal = true;
       pinned = false;
+      attachments = [];
       succession_chain_root_id = None;
       chain_depth = None;
     }
@@ -16433,6 +16445,7 @@ let test_ux_sweep_12_fixes () =
           body = Printf.sprintf "Comment #%d discussing details." i;
           score = 1;
           created_at_unix = 1100.0 +. Float.of_int i;
+          attachments = [];
         })
   in
   let m_board =
@@ -17490,6 +17503,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
         last_error = None;
         from_observer = false;
         seen_seqs = Fleet_store.Int_set.empty;
+        attachments = [];
       }
     in
     {
@@ -17751,6 +17765,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
       last_error = None;
       from_observer = false;
       seen_seqs = Fleet_store.Int_set.empty;
+      attachments = [];
     }
   in
   let m0_with_prior =
@@ -18696,6 +18711,8 @@ let test_runtime_lane_crud_requests_and_cas () =
             declared_reasoning_effort = None;
             transport = None;
             is_default = true;
+            supports_image_input = None;
+            supports_image_output = None;
           };
           {
             id = "rt-b";
@@ -18705,9 +18722,12 @@ let test_runtime_lane_crud_requests_and_cas () =
             declared_reasoning_effort = None;
             transport = None;
             is_default = false;
+            supports_image_input = None;
+            supports_image_output = None;
           };
         ];
       usage_windows = None;
+      media = None;
     }
   in
   let m_lanes1, _ =
@@ -19409,6 +19429,7 @@ let test_work_and_board_crud_requests_and_guards () =
       chain_depth = None;
       is_signal = true;
       pinned = false;
+      attachments = [];
     }
   in
   let m_board0 =
@@ -24164,6 +24185,7 @@ let test_uncached_knowledge_jumps () =
       chain_depth = None;
       is_signal = true;
       pinned = false;
+      attachments = [];
     }
   in
   let listed = post "post-listed" in
@@ -24333,6 +24355,7 @@ let test_uncached_knowledge_jumps () =
       body = String.concat "\n\n" (List.init 50 (Printf.sprintf "Paragraph %d"));
       score = 1;
       created_at_unix = 110.0;
+      attachments = [];
     }
   in
   let with_comments = thread_reply jumped "post-far" (Ok (far, [ long_comment ])) in
@@ -24747,6 +24770,8 @@ let rec sent_get_paths (cmd : Cmd.t) =
   | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _ | Cmd.Copy_clipboard _
   | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram
   | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _
+  | Cmd.Upload_attachment_file _ | Cmd.Paste_clipboard_image _
+  | Cmd.Fetch_inspector_image _ | Cmd.Export_attachment _
   | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
   | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
   | Cmd.Start_local_server | Cmd.Restart_tui | Cmd.Quit _ ->
@@ -26644,6 +26669,7 @@ let () =
                              ];
                            runtimes = [];
                            usage_windows = None;
+                           media = None;
                          }
                     |> Runtime_store.apply_exact_lane_runs ~observed_at:t0
                          [
@@ -26775,7 +26801,7 @@ let () =
                       let next, cmds = slash command model in
                       Alcotest.(check bool) command true (Option.is_none next.inline_modal && posts cmds = []))
                     ["/lane remove " ^ id; "/lane rename " ^ id ^ " other"; "/lane rename fast " ^ id])
-                ["default"; "media_failover"; "exact/verifier_exact"];
+                ["default"; "exact/verifier_exact"];
               let m_n, _ = press "n" m1 in
               Alcotest.(check bool) "[n] on Failover_lanes opens Runtime_lane_create" true
                 (match m_n.inline_modal with
@@ -27995,6 +28021,7 @@ let () =
                          ];
                        runtimes = [];
                        usage_windows = None;
+                       media = None;
                      }
               in
               let m_lanes =
@@ -29844,6 +29871,7 @@ let () =
                   created_at_unix = 1_795_254_000.0;
                   updated_at_unix = None;
                   pinned = false;
+      attachments = [];
                   author_karma = Observed.absent;
                   is_signal = true;
                   post_kind = Some Wire_knowledge.Human_post;
@@ -29861,6 +29889,7 @@ let () =
                   body = "First comment body";
                   created_at_unix = 1_795_254_100.0;
                   score = 2;
+                  attachments = [];
                 }
               in
               let c2 : Wire_knowledge.board_comment =
@@ -29872,6 +29901,7 @@ let () =
                   body = "Second comment body";
                   created_at_unix = 1_795_254_200.0;
                   score = 1;
+                  attachments = [];
                 }
               in
               let art : Wire_knowledge.artifact_entry =

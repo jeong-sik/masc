@@ -1042,8 +1042,7 @@ let open_runtime_lane_edit_modal ~now (m : Model.t)
   let exact_output, bare_id =
     match Wire_runtime.classify_routing_lane lane.id with
     | Wire_runtime.Route_exact bare -> (true, bare)
-    | Wire_runtime.Route_default | Wire_runtime.Route_media_failover
-    | Wire_runtime.Route_named _ ->
+    | Wire_runtime.Route_default | Wire_runtime.Route_named _ ->
         (false, lane.id)
   in
   let opened_revision = runtime_config_revision_opt m in
@@ -2085,6 +2084,9 @@ let rec execute_slash ~now (m : Model.t) cmd =
     | Slash.Incidents
     | Slash.Jump
     | Slash.Voice
+    | Slash.Attach _
+    | Slash.Detach _
+    | Slash.Paste_image
     | Slash.Btw _
     | Slash.Discord_reply
     | Slash.Wake _
@@ -2163,6 +2165,112 @@ let rec execute_slash ~now (m : Model.t) cmd =
       Update_nav.open_overlay { m with incidents } Nav.Incidents
   | Slash.Jump -> Update_nav.teleport_blocked ~now m
   | Slash.Voice -> Update_nav.toggle_voice ~now m
+  | Slash.Attach raw_path -> (
+      let target_path =
+        match Wire_attachment.normalize_pasted_path raw_path with
+        | Some p -> p
+        | None -> String.trim raw_path
+      in
+      if String.equal target_path "" then
+        ( Model.with_toast ~now ~level:Model.Toast_warning
+            (Say.make ~ko:"첨부할 파일 경로를 입력하세요"
+               ~en:"Specify a local file path to attach")
+            m
+        , [] )
+      else
+        let keeper =
+          Option.value (Update_nav.resolve_target_keeper m)
+            ~default:(Drafts.target_keeper_key m.drafts)
+        in
+        let drafts =
+          m.drafts
+          |> Drafts.set_active_keeper keeper
+          |> Drafts.inc_uploading ~keeper
+        in
+        let fname = Filename.basename target_path in
+        ( Model.with_toast ~now ~level:Model.Toast_info
+            (Say.make
+               ~ko:(Printf.sprintf "첨부 업로드 중: %s…" fname)
+               ~en:(Printf.sprintf "Uploading attachment: %s…" fname))
+            { m with drafts }
+        , [
+            Cmd.Upload_attachment_file
+              {
+                epoch = m.epoch;
+                target = Cmd.Upload_for_keeper keeper;
+                path = target_path;
+              };
+          ] ))
+  | Slash.Detach which -> (
+      match which with
+      | `Last -> (
+          let drafts, removed = Drafts.remove_last_attachment m.drafts in
+          match removed with
+          | Some att ->
+              let chip = Wire_attachment.format_chip att in
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:("첨부 제거됨: " ^ chip)
+                     ~en:("Removed attachment: " ^ chip))
+                  { m with drafts }
+              , [] )
+          | None ->
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make ~ko:"제거할 첨부가 없습니다"
+                     ~en:"No draft attachments to remove")
+                  m
+              , [] ))
+      | `Index idx -> (
+          let drafts, removed = Drafts.remove_attachment_at idx m.drafts in
+          match removed with
+          | Some att ->
+              let chip = Wire_attachment.format_chip att in
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:("첨부 제거됨: " ^ chip)
+                     ~en:("Removed attachment: " ^ chip))
+                  { m with drafts }
+              , [] )
+          | None ->
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make
+                     ~ko:(Printf.sprintf "%d번 첨부가 없습니다" idx)
+                     ~en:(Printf.sprintf "No draft attachment #%d" idx))
+                  m
+              , [] ))
+      | `All ->
+          let drafts, count = Drafts.clear_attachments m.drafts in
+          if count = 0 then
+            ( Model.with_toast ~now ~level:Model.Toast_warning
+                (Say.make ~ko:"제거할 첨부가 없습니다"
+                   ~en:"No draft attachments to remove")
+                m
+            , [] )
+          else
+            ( Model.with_toast ~now ~level:Model.Toast_info
+                (Say.make
+                   ~ko:(Printf.sprintf "첨부 %d개 모두 제거됨" count)
+                   ~en:(Printf.sprintf "Cleared %d draft attachment(s)" count))
+                { m with drafts }
+            , [] ))
+  | Slash.Paste_image ->
+      let keeper =
+        Option.value (Update_nav.resolve_target_keeper m)
+          ~default:(Drafts.target_keeper_key m.drafts)
+      in
+      let drafts =
+        m.drafts
+        |> Drafts.set_active_keeper keeper
+        |> Drafts.inc_uploading ~keeper
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_info
+          (Say.make ~ko:"클립보드 이미지 읽는 중…"
+             ~en:"Reading clipboard image…")
+          { m with drafts }
+      , [
+          Cmd.Paste_clipboard_image
+            { epoch = m.epoch; target = Cmd.Upload_for_keeper keeper };
+        ] )
   | Slash.Btw prompt -> Update_nav.start_btw_query ~now ~prompt m
   | Slash.Wake arg -> (
       match resolve_slash_lifecycle_keeper m arg with
@@ -2961,6 +3069,10 @@ let rec execute_slash ~now (m : Model.t) cmd =
                 | Cmd.Cancel_memory_diagram
                 | Cmd.Fetch_artifact_and_copy _
                 | Cmd.Export_artifact _
+                | Cmd.Upload_attachment_file _
+                | Cmd.Paste_clipboard_image _
+                | Cmd.Fetch_inspector_image _
+                | Cmd.Export_attachment _
                 | Cmd.Open_dos_screen _
                 | Cmd.Open_external_url _
                 | Cmd.Open_editor_escape_hatch _
@@ -3673,10 +3785,12 @@ let rec execute_slash ~now (m : Model.t) cmd =
   | Slash.Tools None -> apply_slash_tools ~now None m
   | Slash.Tools (Some mode) -> apply_slash_tools ~now (Some mode) m
   | Slash.Clear ->
+      let cur_draft = Drafts.current_draft m.drafts in
       let draft_was_empty =
-        String.equal (String.trim (Drafts.current_draft m.drafts).text) ""
+        String.equal (String.trim cur_draft.text) ""
+        && cur_draft.attachments = []
       in
-      let drafts = Drafts.clear_current_draft m.drafts in
+      let drafts = Drafts.clear_current_draft_all m.drafts in
       let fleet = Fleet_store.reset_chat_scroll m.fleet in
       let base = { m with drafts; fleet } in
       let (cleared, cmds), msg =
@@ -3799,7 +3913,7 @@ and submit_slash_text ~now (m : Model.t) trimmed =
         {
           m with
           drafts =
-            m.drafts |> Drafts.clear_current_draft |> Drafts.set_focus false;
+            m.drafts |> Drafts.clear_current_draft_text |> Drafts.set_focus false;
         }
       in
       execute_slash ~now m_cleared parsed
@@ -3865,6 +3979,9 @@ and submit_composer ~now ~mode (m : Model.t) =
             | Slash.Cmd_incidents
             | Slash.Cmd_jump
             | Slash.Cmd_voice
+            | Slash.Cmd_attach
+            | Slash.Cmd_detach
+            | Slash.Cmd_paste_image
             | Slash.Cmd_btw
             | Slash.Cmd_discord_reply
             | Slash.Cmd_queue
@@ -3908,14 +4025,18 @@ and submit_composer ~now ~mode (m : Model.t) =
       | Some cand -> (Update_nav.apply_popup_completion cand m, [])
       | None -> (m, []))
   | Update_nav.Composer_popup_none -> (
-      if String.equal trimmed "" then (m, [])
-      else if Char.equal trimmed.[0] '/' then submit_slash_text ~now m trimmed
+      if
+        String.equal trimmed "" && draft.attachments = []
+        && draft.uploading_count <= 0
+      then (m, [])
+      else if (not (String.equal trimmed "")) && Char.equal trimmed.[0] '/' then
+        submit_slash_text ~now m trimmed
       else (
         match Rbac_policy.can_chat_with_keeper m.auth_session with
         | Rbac.Denied reason -> rbac_denied_toast ~now reason m
         | Rbac.Allowed ->
         let leading_mention_opt =
-          if Char.equal trimmed.[0] '@' then
+          if (not (String.equal trimmed "")) && Char.equal trimmed.[0] '@' then
             let len = String.length trimmed in
             let sp_idx =
               let rec scan i =
@@ -3944,7 +4065,7 @@ and submit_composer ~now ~mode (m : Model.t) =
         | Some (mentioned_keeper, "") ->
             let drafts =
               m.drafts
-              |> Drafts.clear_current_draft
+              |> Drafts.clear_current_draft_text
               |> Drafts.set_active_keeper mentioned_keeper
             in
             ( Model.with_toast ~now ~level:Model.Toast_info
@@ -3953,51 +4074,75 @@ and submit_composer ~now ~mode (m : Model.t) =
                    ~en:("Target keeper switched to @" ^ mentioned_keeper))
                 { m with drafts }
             , [] )
+        | (Some _ | None) when draft.uploading_count > 0 ->
+            ( Model.with_toast ~now ~level:Model.Toast_warning
+                (Say.make
+                   ~ko:"첨부 파일 업로드가 완료될 때까지 기다려주세요…"
+                   ~en:"Waiting for attachment upload to finish...")
+                m
+            , [] )
         | Some (mentioned_keeper, rest) -> (
-            (* [@keeper msg] sends [rest] through the mentioned Keeper's
-               composer slot. That slot may already hold an unsent draft the
-               operator typed earlier; the submission consumes the slot, so
-               the earlier draft is put back once [rest] has left. The earlier
-               draft is read after the current slot is cleared, so mentioning
-               the Keeper whose composer holds the text does not bring the
-               sent text back. *)
-            let drafts_cleared = Drafts.clear_current_draft m.drafts in
+            (* [@keeper msg] sends [rest] along with the current composer's
+               draft attachments through the mentioned Keeper's slot. The target
+               slot may already hold an unsent draft (text and/or attachments)
+               typed earlier; temporarily swap in [rest] + sender's attachments,
+               and restore the target Keeper's prior draft untouched once [rest]
+               is consumed. *)
+            let src_key = Drafts.target_keeper_key m.drafts in
+            let src_attachments = draft.attachments in
+            let drafts_cleared = Drafts.clear_current_draft_all m.drafts in
             let prior =
               Drafts.draft_for ~keeper:mentioned_keeper drafts_cleared
             in
             let drafts_switched =
               drafts_cleared
               |> Drafts.set_active_keeper mentioned_keeper
-              |> Drafts.set_current_text rest
+              |> Drafts.set_keeper_draft_slot ~keeper:mentioned_keeper
+                   ~text:rest ~cursor:(String.length rest)
+                   ~attachments:src_attachments ~uploading_count:0
             in
             let sent, cmds =
               submit_composer ~now ~mode { m with drafts = drafts_switched }
             in
-            let consumed =
-              String.equal
-                (Drafts.draft_for ~keeper:mentioned_keeper sent.drafts).text ""
+            let sent_target =
+              Drafts.draft_for ~keeper:mentioned_keeper sent.drafts
             in
-            match (String.equal prior.text "", consumed) with
-            | true, (true | false) | false, false -> (sent, cmds)
-            | false, true ->
-                let restore_into_current drafts =
-                  Drafts.set_current_text_and_cursor ~text:prior.text
-                    ~cursor:prior.cursor drafts
-                in
+            let consumed =
+              String.equal sent_target.text ""
+              && sent_target.attachments = []
+            in
+            let has_prior =
+              (not (String.equal prior.text ""))
+              || prior.attachments <> []
+              || prior.uploading_count > 0
+            in
+            if consumed then
+              if not has_prior then (sent, cmds)
+              else
                 let drafts =
-                  match sent.drafts.Drafts.active_keeper with
-                  | Some target when not (String.equal target mentioned_keeper)
-                    ->
-                      (* A nested [@a @b msg] moved the target on to [b]: the
-                         earlier draft goes back into [a]'s own slot and [b]
-                         stays the target. *)
-                      sent.drafts
-                      |> Drafts.set_active_keeper mentioned_keeper
-                      |> restore_into_current
-                      |> Drafts.set_active_keeper target
-                  | Some _ | None -> restore_into_current sent.drafts
+                  Drafts.set_keeper_draft_slot ~keeper:mentioned_keeper
+                    ~text:prior.text ~cursor:prior.cursor
+                    ~attachments:prior.attachments
+                    ~uploading_count:prior.uploading_count sent.drafts
                 in
-                ({ sent with drafts }, cmds))
+                ({ sent with drafts }, cmds)
+            else
+              let restored =
+                sent.drafts
+                |> Drafts.set_keeper_draft_slot ~keeper:mentioned_keeper
+                     ~text:prior.text ~cursor:prior.cursor
+                     ~attachments:prior.attachments
+                     ~uploading_count:prior.uploading_count
+                |> Drafts.set_keeper_draft_slot ~keeper:src_key ~text:draft.text
+                     ~cursor:draft.cursor ~attachments:src_attachments
+                     ~uploading_count:draft.uploading_count
+              in
+              let drafts =
+                match m.drafts.Drafts.active_keeper with
+                | Some k -> Drafts.set_active_keeper k restored
+                | None -> { restored with Drafts.active_keeper = None }
+              in
+              ({ sent with drafts }, cmds))
         | None ->
         match Update_nav.resolve_target_keeper m with
         | None ->
@@ -4010,6 +4155,14 @@ and submit_composer ~now ~mode (m : Model.t) =
                 opened
             , cmds )
         | Some keeper -> (
+            if (Drafts.draft_for ~keeper m.drafts).uploading_count > 0 then
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make
+                     ~ko:"첨부 파일 업로드가 완료될 때까지 기다려주세요…"
+                     ~en:"Waiting for attachment upload to finish...")
+                  m
+              , [] )
+            else
             let keeper_is_busy =
               Option.is_some (Fleet_store.active_turn_for ~keeper m.fleet)
               || Fleet_store.has_active_chat_stream ~keeper m.fleet
@@ -4511,6 +4664,7 @@ and execute_action ~now (m : Model.t) action =
                 m0 with
                 nav;
                 inline_modal = None;
+                image_inspector = None;
                 ask_modal =
                   (if Model.has_preserved_ask_return nav then m0.ask_modal
                    else None);
@@ -4965,6 +5119,8 @@ and execute_action ~now (m : Model.t) action =
           let drafts =
             match kind with
             | Nav.Btw_query -> Drafts.clear_btw m.drafts
+            | Nav.Board_new_post ->
+                Drafts.clear_board_attachments m.drafts
             | Nav.Gate_reject _
             | Nav.Verification_reject _
             | Nav.Harness_overrule _
@@ -4973,7 +5129,6 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Schedule_form
             | Nav.Connector_form
             | Nav.Repo_add_form
-            | Nav.Board_new_post
             | Nav.Board_goal_proposal
             | Nav.Goal_confirmation_proof
             | Nav.Memory_act_form
@@ -5112,6 +5267,7 @@ and execute_action ~now (m : Model.t) action =
                 };
               config = Config_store.cancel_edit_field m.config;
               inline_modal = None;
+              image_inspector = None;
               ask_modal =
                 (if Model.has_preserved_ask_return m.nav then m.ask_modal
                  else None);
@@ -5151,9 +5307,10 @@ and execute_action ~now (m : Model.t) action =
             | Update_nav.Composer_popup_slash _
               when String.equal (String.trim (Drafts.current_draft m.drafts).text) "/" ->
                 (* Single Esc escapes a bare '/' slash-command peek cleanly:
-                   clears the lone '/' and returns focus to workspace nav. *)
+                   clears the lone '/' while preserving any draft attachments
+                   and returns focus to workspace nav. *)
                 let drafts =
-                  m.drafts |> Drafts.clear_current_draft |> Drafts.set_focus false
+                  m.drafts |> Drafts.clear_current_draft_text |> Drafts.set_focus false
                 in
                 ({ m with drafts }, [])
             | Update_nav.Composer_popup_slash _
@@ -5975,6 +6132,10 @@ and execute_action ~now (m : Model.t) action =
                   | Cmd.Cancel_memory_diagram
                   | Cmd.Fetch_artifact_and_copy _
                   | Cmd.Export_artifact _
+                  | Cmd.Upload_attachment_file _
+                  | Cmd.Paste_clipboard_image _
+                  | Cmd.Fetch_inspector_image _
+                  | Cmd.Export_attachment _
                   | Cmd.Open_dos_screen _
                   | Cmd.Open_external_url _
                   | Cmd.Open_editor_escape_hatch _
@@ -6270,9 +6431,12 @@ and execute_action ~now (m : Model.t) action =
       let artifact_target_opt =
         match m.nav.overlay with
         | Some (Nav.System_gate Nav.Media_viewer) -> (
-            match Model.focused_artifact m with
-            | Some a -> `Artifact a
-            | None -> `Other)
+            match m.image_inspector with
+            | Some _ -> `Other
+            | None -> (
+                match Model.focused_artifact m with
+                | Some a -> `Artifact a
+                | None -> `Other))
         | Some
             ( Nav.Palette
             | Nav.Settings _
@@ -6803,9 +6967,39 @@ and execute_action ~now (m : Model.t) action =
                   m
               , [] ))
       | Some (Nav.System_gate Nav.Media_viewer) -> (
-          match Model.focused_artifact m with
-          | Some art -> export_and_open_artifact art
-          | None -> (m, []))
+          match m.image_inspector with
+          | Some st -> (
+              match Model.current_inspected_image st with
+              | Some img ->
+                  let raw_name =
+                    Option.value img.filename
+                      ~default:
+                        (Option.value img.attachment_id ~default:"masc-image")
+                  in
+                  let filename_stem = Filename.remove_extension raw_name in
+                  let ext =
+                    Wire_attachment.extension_of_mime
+                      (Option.value img.mime_type ~default:"image/png")
+                  in
+                  ( Model.with_toast ~now ~level:Model.Toast_info
+                      (Say.make ~ko:"이미지 외부 프로그램으로 여는 중…"
+                         ~en:"Opening image externally…")
+                      m
+                  , [
+                      Cmd.Export_attachment
+                        {
+                          epoch = m.epoch;
+                          url = img.media_path;
+                          filename_stem;
+                          ext;
+                          open_after = true;
+                        };
+                    ] )
+              | None -> (m, []))
+          | None -> (
+              match Model.focused_artifact m with
+              | Some art -> export_and_open_artifact art
+              | None -> (m, [])))
       | Some
           ( Nav.Palette
           | Nav.Incidents

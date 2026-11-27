@@ -232,7 +232,6 @@ export {
   RuntimeTomlSaveRejected,
   previewRuntimeTomlConfig,
   patchRuntimeAssignment,
-  patchRuntimeMediaFailover,
   patchRuntimeExactSlot,
   patchRuntimeRouting,
   patchRuntimeLane,

@@ -185,3 +185,41 @@ val post_json :
   body:Yojson.Safe.t ->
   decode:(Yojson.Safe.t -> ('a, string) result) ->
   ('a, http_error) result
+
+(** {1 Binary Attachment Upload & Fetch ([/api/v1/attachments])} *)
+
+val max_attachment_upload_bytes : int
+(** Client pre-flight size cap matching the server's 32 MiB limit. *)
+
+val upload_attachment :
+  io:Io_domain.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  ?filename:string ->
+  ?content_type:string ->
+  bytes:string ->
+  endpoint ->
+  (Wire_attachment.t, http_error) result
+(** Upload raw binary bytes to [POST /api/v1/attachments], detecting MIME from
+    magic bytes / filename when [content_type] is omitted and attaching
+    sanitized [X-Filename]. *)
+
+val upload_attachment_file :
+  io:Io_domain.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  path:string ->
+  endpoint ->
+  (Wire_attachment.t, http_error) result
+(** Validate a readable local file within {!max_attachment_upload_bytes}, read
+    its bytes, sniff MIME type, and upload via {!upload_attachment}. *)
+
+val get_attachment_bytes :
+  io:Io_domain.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
+  ?timeout_sec:float ->
+  ?max_body_bytes:int ->
+  endpoint ->
+  path:string ->
+  (string, http_error) result
+(** Fetch raw binary bytes from an authenticated attachment or media URL path. *)

@@ -1,11 +1,12 @@
 module Projection = Server_keeper_chat_agui_projection
 
-let replay ~redact_text ~since_seq entries =
+let replay ?base_path ~redact_text ~since_seq entries =
   let _, rev_events =
     List.fold_left
       (fun (projection, acc) (entry : Keeper_chat_event_log.journaled_event) ->
          let projection, projected =
            Projection.project
+             ?base_path
              ~timestamp:entry.ts
              ~redact_text
              projection

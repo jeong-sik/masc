@@ -24,6 +24,7 @@ let comment ~id ~author ~content ~parent_id : Board.comment =
   ; expires_at = 0.
   ; votes_up = 0
   ; votes_down = 0
+  ; attachment_ids = []
   }
 ;;
 

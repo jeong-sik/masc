@@ -16,39 +16,178 @@ let redaction_for ~base_dir ~keeper_name =
     ~base_path:base_dir
     ~keeper_name
 
-let redact_attachment redaction att =
-  { att with data = Keeper_secret_redaction.redact_text redaction att.data }
+let redact_attachment redaction (att : attachment) =
+  (* Never run text secret-redaction regexes over binary/base64 payloads or
+     canonical attachment IDs/URLs. Redact only the human-supplied filename. *)
+  { att with name = Keeper_secret_redaction.redact_text redaction att.name }
 
-let persisted_attachment ~base_dir (att : attachment) =
-  (* Measure dimensions before replacing inline data with a durable reference.
-     History pages then carry metadata without fetching image payloads. Gate connectors send
-     [data:<mime>;base64,<payload>] URIs and the TUI sends bare base64;
-     both decode here, and a payload that decodes to nothing parseable just
-     leaves the size unset. *)
-  let decoded_dimensions data =
-    let data = String.trim data in
+let att_id_of_url url =
+  let trimmed = String.trim url in
+  let prefix = Attachment_store.url_prefix in
+  let plen = String.length prefix in
+  if String.starts_with ~prefix trimmed
+  then
+    let rest = String.sub trimmed plen (String.length trimmed - plen) in
+    let raw_id =
+      match String.index_opt rest '?' with
+      | Some idx -> String.sub rest 0 idx
+      | None -> rest
+    in
+    match Attachment_store.parse_id raw_id with
+    | Ok _ -> Some raw_id
+    | Error _ -> None
+  else None
+
+let attachment_of_meta ~(fallback_name : string) (meta : Attachment_store.meta) : attachment =
+  let name =
+    match meta.filename with
+    | Some f when String.trim f <> "" -> f
+    | Some _ | None ->
+      if String.trim fallback_name <> "" then fallback_name else meta.id
+  in
+  { id = meta.id
+  ; att_type = Attachment_store.media_kind_to_string meta.kind
+  ; name
+  ; size = meta.bytes
+  ; mime_type = meta.mime_type
+  ; data = Attachment_store.url_of_id meta.id
+  ; width = meta.width
+  ; height = meta.height
+  }
+
+let persist_as_tool_blob ~base_dir ?redaction ~mime ~raw_payload ~width ~height (att : attachment) =
+  let trimmed = String.trim raw_payload in
+  if String.equal trimmed "" then { att with data = ""; width; height }
+  else
+    match Tool_output.decode_from_agent_core raw_payload with
+    | Tool_output.Decoded _ -> { att with width; height }
+    | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+      let redacted =
+        match redaction with
+        | Some r -> Keeper_secret_redaction.redact_text r raw_payload
+        | None -> raw_payload
+      in
+      let reference =
+        Tool_blob_store.put_durable
+          (Tool_blob_store.create ~base_path:base_dir)
+          ~bytes:redacted
+          ~mime
+        |> fun reference -> Tool_output.with_preview reference "attachment payload"
+      in
+      let data = Tool_output.encode_for_agent_core (Tool_output.Stored reference) in
+      { att with
+        size = if att.size > 0 then att.size else String.length redacted
+      ; data
+      ; width
+      ; height
+      }
+
+let persisted_attachment ?redaction ~base_dir (att : attachment) =
+  (* Persist supported binary payloads in [Attachment_store] (never base64 in
+     [Tool_blob_store]) and replace [att.data] with the canonical attachment
+     URL [/api/v1/attachments/att_<64hex>]. Textual / unsupported attachments
+     (e.g. .txt/.md/.csv/.json) and non-base64 payloads are redacted and stored
+     durably in [Tool_blob_store] so zero text originals are lost. *)
+  let store = Attachment_store.create ~base_path:base_dir in
+  let existing_id =
+    match Attachment_store.parse_id (String.trim att.id) with
+    | Ok _ -> Some (String.trim att.id)
+    | Error _ -> att_id_of_url att.data
+  in
+  match existing_id with
+  | Some att_id ->
+    (match Attachment_store.get_meta store ~id:att_id with
+     | Ok (Some meta) ->
+       ignore (Attachment_store.promote_to_durable store ~id:meta.id);
+       attachment_of_meta ~fallback_name:att.name meta
+     | Ok None | Error _ ->
+       { att with
+         id = att_id
+       ; data = Attachment_store.url_of_id att_id
+       })
+  | None ->
+    let trimmed = String.trim att.data in
     let payload =
-      match String.index_opt data ',' with
-      | Some comma when String_util.starts_with_ci ~prefix:"data:" data ->
-          String.sub data (comma + 1) (String.length data - comma - 1)
-      | _ -> data
+      match String.index_opt trimmed ',' with
+      | Some comma when String_util.starts_with_ci ~prefix:"data:" trimmed ->
+        String.sub trimmed (comma + 1) (String.length trimmed - comma - 1)
+      | _ -> trimmed
+    in
+    let fallback_mime =
+      let m = String.trim att.mime_type in
+      if String.equal m "" then "text/plain" else m
     in
     match Base64.decode payload with
-    | Error _ -> None
-    | Ok bytes -> Keeper_image_dimensions.image_dimensions bytes
-  in
-  let width, height =
-    match decoded_dimensions att.data with
-    | Some (width, height) -> (Some width, Some height)
-    | None -> (att.width, att.height)
-  in
-  let reference =
-    Tool_blob_store.put_durable (Tool_blob_store.create ~base_path:base_dir)
-      ~bytes:att.data ~mime:"text/plain"
-    |> fun reference -> Tool_output.with_preview reference "attachment payload"
-  in
-  let data = Tool_output.encode_for_agent_core (Tool_output.Stored reference) in
-  { att with data; width; height }
+    | Error _ ->
+      persist_as_tool_blob
+        ~base_dir
+        ?redaction
+        ~mime:fallback_mime
+        ~raw_payload:att.data
+        ~width:att.width
+        ~height:att.height
+        att
+    | Ok bytes ->
+      let declared_mime =
+        let m = String.trim att.mime_type in
+        if String.equal m "" then None else Some m
+      in
+      let filename =
+        let n = String.trim att.name in
+        if String.equal n "" then None else Some n
+      in
+      let stored =
+        match
+          Attachment_store.put
+            ?declared_mime
+            ?filename
+            ~origin:Attachment_store.User_upload
+            ~created_by:"user"
+            ~retention:Attachment_store.Durable
+            store
+            ~bytes
+        with
+        | Ok meta -> Ok meta
+        | Error (Attachment_store.Mime_mismatch _) ->
+          Attachment_store.put
+            ?filename
+            ~origin:Attachment_store.User_upload
+            ~created_by:"user"
+            ~retention:Attachment_store.Durable
+            store
+            ~bytes
+        | Error
+            (( Attachment_store.Empty_payload
+             | Attachment_store.Payload_too_large _
+             | Attachment_store.Unsupported_or_unknown_format _
+             | Attachment_store.Forbidden_mime _
+             | Attachment_store.Invalid_keeper_name _
+             | Attachment_store.Store_io_failed _ ) as err) -> Error err
+      in
+      (match stored with
+       | Ok meta -> attachment_of_meta ~fallback_name:att.name meta
+       | Error (Attachment_store.Store_io_failed msg) ->
+         failwith ("attachment store write failed: " ^ msg)
+       | Error
+           ( Attachment_store.Empty_payload
+           | Attachment_store.Payload_too_large _
+           | Attachment_store.Unsupported_or_unknown_format _
+           | Attachment_store.Forbidden_mime _
+           | Attachment_store.Mime_mismatch _
+           | Attachment_store.Invalid_keeper_name _ ) ->
+         let width, height =
+           match Keeper_image_dimensions.image_dimensions bytes with
+           | Some (w, h) -> Some w, Some h
+           | None -> att.width, att.height
+         in
+         persist_as_tool_blob
+           ~base_dir
+           ?redaction
+           ~mime:fallback_mime
+           ~raw_payload:bytes
+           ~width
+           ~height
+           att)
 
 let redact_tool_call redaction tc =
   { tc with args = Keeper_secret_redaction.redact_text redaction tc.args }

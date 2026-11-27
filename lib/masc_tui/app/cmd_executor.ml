@@ -531,6 +531,8 @@ type t = {
   skill_read_in_flight : string option Atomic.t;
   sse_hub : Sse_hub.t;
   voice_runner : Voice_runner.t;
+  in_tmux : bool;
+  term_program : string option;
   editor_handoff : editor_handoff;
   pending_editor : (unit -> unit) option Atomic.t;
   wiki_editor_gen : int Atomic.t;
@@ -708,9 +710,39 @@ let publish_hub_event ~worker ~bus ~epoch ev =
   in
   publish_hub_messages bus msgs
 
+let inspector_halfblock_max_px = 1280
+
+let inspector_fetch_path ~(probe : Probe.observation) ~term_program ~in_tmux
+    ~format_png url =
+  if not (Wire_attachment.is_attachment_path url) then url
+  else
+    let eff_tp = if in_tmux then None else term_program in
+    match
+      Graphics.protocol_of_probe ~graphics:probe.graphics ~term_program:eff_tp
+    with
+    | Graphics.Unsupported_protocol ->
+        Wire_attachment.attachment_render_path ~format:"png"
+          ~max_px:inspector_halfblock_max_px url
+    | Graphics.Kitty_protocol | Graphics.ITerm2_protocol ->
+        if format_png then
+          Wire_attachment.attachment_render_path ~format:"png" url
+        else url
+
+let detect_in_tmux () =
+  match Sys.getenv_opt "TMUX" with
+  | Some s -> not (String.equal (String.trim s) "")
+  | None -> false
+
 let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
+    ?in_tmux ?term_program
     ?(editor_handoff = noop_editor_handoff) ?(on_editor_ready = fun () -> ())
     ~on_quit ~on_restart () =
+  let in_tmux = match in_tmux with Some b -> b | None -> detect_in_tmux () in
+  let term_program =
+    match term_program with
+    | Some tp -> tp
+    | None -> Graphics.effective_term_program ~getenv:Sys.getenv_opt
+  in
   Eio.Switch.check sw;
   let clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t) in
   let explicit_bearer_override =
@@ -780,6 +812,8 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
     skill_read_in_flight;
     sse_hub;
     voice_runner;
+    in_tmux;
+    term_program;
     editor_handoff;
     pending_editor;
     wiki_editor_gen;
@@ -4234,7 +4268,9 @@ let execute_post_stream t ~epoch req =
                          | Wire_fleet.Chunk_tool_quarantined _
                          | Wire_fleet.Chunk_batch_bound _
                          | Wire_fleet.Chunk_external_effect_completed _
-                         | Wire_fleet.Chunk_reply_details _ ) as chunk) ->
+                         | Wire_fleet.Chunk_reply_details _
+                         | Wire_fleet.Chunk_attachment _
+                         | Wire_fleet.Chunk_media_delta _ ) as chunk) ->
                         publish_chunk ~seq chunk
                     | Error reason -> publish_warning reason)
                 | exception Yojson.Json_error msg ->
@@ -5371,6 +5407,194 @@ let rec execute t = function
                                label =
                                  Say.make ~ko:"아티팩트 내보내기"
                                    ~en:"Export artifact";
+                               ack_scope = Msg.Ack_toast_only;
+                               for_modal = None;
+                               result =
+                                 Error (Msg.Transport (Health.Other_io detail));
+                             };
+                       })))
+  | Cmd.Upload_attachment_file { epoch; target; path } ->
+      fork_safe t (fun () ->
+          let ep = current_endpoint t in
+          let fname = Some (Filename.basename path) in
+          let res =
+            match
+              Http_client.upload_attachment_file ~io:t.io ~clock:t.clock ~path ep
+            with
+            | Ok att -> Ok att
+            | Error err -> Error (Http_client.http_error_to_string err)
+          in
+          Ui_bus.publish_stream_receipt t.bus
+            (Msg.Attachment_uploaded { epoch; target; filename = fname; result = res }))
+  | Cmd.Paste_clipboard_image { epoch; target } ->
+      fork_safe t (fun () ->
+          let res =
+            match
+              run_cancellable_systhread ~closed:t.closed (fun ~cancelled ->
+                  Clipboard.read_image ~cancelled ())
+            with
+            | None -> Error "clipboard read cancelled"
+            | Some (Error err) -> Error (Clipboard.error_to_string err)
+            | Some (Ok bytes) -> (
+                let ep = current_endpoint t in
+                match
+                  Http_client.upload_attachment ~io:t.io ~clock:t.clock
+                    ~filename:"clipboard.png" ~bytes ep
+                with
+                | Ok att -> Ok att
+                | Error err -> Error (Http_client.http_error_to_string err))
+          in
+          Ui_bus.publish_stream_receipt t.bus
+            (Msg.Attachment_uploaded
+               { epoch; target; filename = Some "clipboard.png"; result = res }))
+  | Cmd.Fetch_inspector_image { epoch; url; format_png } ->
+      fork_safe t (fun () ->
+          let ep = current_endpoint t in
+          let probe = Probe.current_observation () in
+          let fetch_path =
+            inspector_fetch_path ~probe ~term_program:t.term_program
+              ~in_tmux:t.in_tmux ~format_png url
+          in
+          let res =
+            match
+              Http_client.get_attachment_bytes ~io:t.io ~clock:t.clock ep
+                ~path:fetch_path
+            with
+            | Error err -> Error (Http_client.http_error_to_string err)
+            | Ok bytes ->
+                let dims = Png_decode.image_dimensions bytes in
+                let decoded = Some (Png_decode.decode_rgba bytes) in
+                Ok (bytes, dims, decoded)
+          in
+          Ui_bus.publish_stream_receipt t.bus
+            (Msg.Inspector_image_fetched { epoch; url; result = res }))
+  | Cmd.Export_attachment { epoch; url; filename_stem; ext; open_after } ->
+      fork_safe t (fun () ->
+          let ep = current_endpoint t in
+          let fetch_path =
+            if Wire_attachment.is_attachment_path url then
+              Wire_attachment.attachment_render_path ~download:true url
+            else url
+          in
+          match
+            Http_client.get_attachment_bytes ~io:t.io ~clock:t.clock ep
+              ~path:fetch_path
+          with
+          | Error err ->
+              Ui_bus.publish_stream_receipt t.bus
+                (Msg.Http_reply
+                   {
+                     epoch;
+                     reply =
+                       Msg.Reply_action_ack
+                         {
+                           label =
+                             Say.make ~ko:"첨부 파일 내보내기"
+                               ~en:"Export attachment";
+                           ack_scope = Msg.Ack_toast_only;
+                           for_modal = None;
+                           result = Error (msg_error_of_http err);
+                         };
+                   })
+          | Ok bytes -> (
+              let primary_dir =
+                resolve_artifact_export_dir ~base_path:t.cli.base_path ()
+              in
+              let fallback_dir =
+                Filename.concat
+                  (Filename.concat t.cli.base_path Common.masc_dirname)
+                  "exports"
+              in
+              let id_hint = Filename.basename url in
+              let fname =
+                build_artifact_export_filename ~filename_stem ~id:id_hint ~ext
+              in
+              let try_write_in dir =
+                try
+                  Fs_compat.mkdir_p dir;
+                  let full_path = Filename.concat dir fname in
+                  Eio_unix.run_in_systhread (fun () ->
+                      try
+                        match Fs_compat.save_file_atomic full_path bytes with
+                        | Ok () -> Ok full_path
+                        | Error detail -> Error detail
+                      with
+                      | Sys_error detail -> Error detail
+                      | Unix.Unix_error (code, fn, arg) ->
+                          Error
+                            (Printf.sprintf "%s(%s): %s" fn arg
+                               (Unix.error_message code)))
+                with
+                | Sys_error detail -> Error detail
+                | Unix.Unix_error (code, fn, arg) ->
+                    Error
+                      (Printf.sprintf "%s(%s): %s" fn arg
+                         (Unix.error_message code))
+              in
+              let write_res =
+                match try_write_in primary_dir with
+                | Ok _ as ok -> ok
+                | Error _ when not (String.equal primary_dir fallback_dir) ->
+                    try_write_in fallback_dir
+                | Error _ as err -> err
+              in
+              let save_res =
+                match write_res with
+                | Error detail -> Error detail
+                | Ok full_path ->
+                    if open_after then
+                      match
+                        run_cancellable_systhread ~closed:t.closed
+                          (fun ~cancelled ->
+                            open_local_export_file ~cancelled full_path)
+                      with
+                      | Some (Ok ()) -> Ok full_path
+                      | Some (Error open_err) ->
+                          Error
+                            (Printf.sprintf "saved %s (open failed: %s)"
+                               full_path open_err)
+                      | None ->
+                          Error
+                            (Printf.sprintf "saved %s (open cancelled)"
+                               full_path)
+                    else Ok full_path
+              in
+              match save_res with
+              | Ok saved_path ->
+                  let label =
+                    if open_after then
+                      Say.make
+                        ~ko:(Printf.sprintf "외부 앱으로 열기: %s" saved_path)
+                        ~en:(Printf.sprintf "Opened externally: %s" saved_path)
+                    else
+                      Say.make
+                        ~ko:(Printf.sprintf "이미지 저장됨: %s" saved_path)
+                        ~en:(Printf.sprintf "Saved image: %s" saved_path)
+                  in
+                  Ui_bus.publish_stream_receipt t.bus
+                    (Msg.Http_reply
+                       {
+                         epoch;
+                         reply =
+                           Msg.Reply_action_ack
+                             {
+                               label;
+                               ack_scope = Msg.Ack_toast_only;
+                               for_modal = None;
+                               result = Ok ();
+                             };
+                       })
+              | Error detail ->
+                  Ui_bus.publish_stream_receipt t.bus
+                    (Msg.Http_reply
+                       {
+                         epoch;
+                         reply =
+                           Msg.Reply_action_ack
+                             {
+                               label =
+                                 Say.make ~ko:"첨부 파일 내보내기"
+                                   ~en:"Export attachment";
                                ack_scope = Msg.Ack_toast_only;
                                for_modal = None;
                                result =

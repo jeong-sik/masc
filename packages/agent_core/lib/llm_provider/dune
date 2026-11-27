@@ -46,6 +46,7 @@
   exact_output_plan)
  (libraries
   agent_core_strings
+  base64
   yojson
   otoml
   ppx_deriving_yojson.runtime

@@ -310,7 +310,6 @@ let test_gemini_token_cut_is_truncation () = check_token_limit (gemini_response 
 let vision_config = {|
 [runtime]
 default = "p1.vision-a"
-media_failover = ["p1.vision-a", "p2.vision-b"]
 [providers.p1]
 protocol = "openai-compatible-http"
 endpoint = "https://p1.invalid/v1"

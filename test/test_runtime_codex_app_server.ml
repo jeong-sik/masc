@@ -3298,7 +3298,7 @@ let test_usage_frames_report_the_thread_count_before_a_usage_limit_ends_the_turn
     | Runtime_codex_app_server.Usage_reported
         { frame = Runtime_codex_app_server.Context_window_filled _; _ } ->
       fail "a counted frame was read as a fill"
-    | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _ | Dynamic_tool_finished _ | Tool_delivery_closed _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Media_output _ | Dynamic_tool_started _ | Dynamic_tool_finished _ | Tool_delivery_closed _
     | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Elicitation_cancelled _
     | Usage_windows_reported _ | Compaction_observed | Turn_finished _ -> ()
   in
@@ -4173,7 +4173,7 @@ let test_rate_limit_updates_are_reported_without_changing_the_turn () =
   let reports = ref [] in
   let on_stream_event = function
     | Runtime_codex_app_server.Usage_windows_reported report -> reports := report :: !reports
-    | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _ | Dynamic_tool_finished _ | Tool_delivery_closed _
+    | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Media_output _ | Dynamic_tool_started _ | Dynamic_tool_finished _ | Tool_delivery_closed _
     | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Elicitation_cancelled _
     | Usage_reported _ | Compaction_observed | Turn_finished _ -> ()
   in

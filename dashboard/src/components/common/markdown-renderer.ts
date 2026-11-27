@@ -5,7 +5,10 @@ import type { JSX } from 'preact'
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'preact/hooks'
 import { enhanceRichCode } from './rich-code-preview'
 import { Marked, Renderer, type Tokens } from 'marked'
+import { fetchAttachmentBlob } from '../../api/attachments'
+import { sessionEpoch } from '../../core/auth'
 import { sanitizeHtml } from '../../lib/dompurify'
+import { isWorkspaceAttachmentPath, isWorkspaceMediaPath } from '../../lib/keeper-media'
 import { memoizeLru } from '../../lib/lru-cache'
 import { parseUrl } from '../../lib/parse-url'
 
@@ -171,12 +174,63 @@ function followDocumentFragment(event: JSX.TargetedMouseEvent<HTMLDivElement>) {
   target?.scrollIntoView({ block: 'start' })
 }
 
-function linkUnloadedImages(container: HTMLElement) {
+/**
+ * Hydrates same-origin `/api/v1/attachments/*` (and legacy `/api/v1/media/*`)
+ * `<img>` elements via authenticated fetch so Bearer-token sessions render
+ * inline Markdown attachments cleanly instead of failing with HTTP 401.
+ * External images retain the existing `linkUnloadedImages` fallback.
+ */
+function enhanceMarkdownImages(container: HTMLElement) {
   const cleanups: Array<() => void> = []
+  const controller = new AbortController()
+  cleanups.push(() => controller.abort())
+
   for (const image of container.querySelectorAll('img[src]')) {
-    if (!(image instanceof HTMLImageElement) || image.closest('a')) continue
-    const url = parseUrl(image.src, container.ownerDocument.baseURI)
+    if (!(image instanceof HTMLImageElement)) continue
+    const rawAttr = image.getAttribute('src')?.trim() ?? ''
+    if (!rawAttr) continue
+    const url = parseUrl(rawAttr, container.ownerDocument.baseURI)
     if (!url || (url.protocol !== 'https:' && url.protocol !== 'http:')) continue
+
+    const isSameOriginWorkspaceAttachment =
+      url.origin === window.location.origin
+      && isWorkspaceMediaPath(url.pathname)
+
+    if (isSameOriginWorkspaceAttachment) {
+      const originalSrc = rawAttr
+      const maxPx = isWorkspaceAttachmentPath(url.pathname) && !url.searchParams.has('max_px')
+        ? 640
+        : null
+      void fetchAttachmentBlob(`${url.pathname}${url.search}`, {
+        maxPx,
+        requireRasterImage: true,
+        signal: controller.signal,
+      }).then((res) => {
+        if (controller.signal.aborted) return
+        if (!res.ok) {
+          if (image.closest('a')) return
+          const fallback = container.ownerDocument.createElement('span')
+          fallback.className = 'att-md-fallback'
+          fallback.textContent = image.alt ? `${image.alt} · 이미지를 불러올 수 없습니다` : '이미지를 불러올 수 없습니다'
+          image.replaceWith(fallback)
+          cleanups.push(() => {
+            if (fallback.parentNode) fallback.replaceWith(image)
+          })
+          return
+        }
+        const blobUrl = URL.createObjectURL(res.value.blob)
+        image.src = blobUrl
+        cleanups.push(() => {
+          try {
+            URL.revokeObjectURL(blobUrl)
+          } catch { /* ignore */ }
+          image.setAttribute('src', originalSrc)
+        })
+      })
+      continue
+    }
+
+    if (image.closest('a')) continue
     const showOriginal = () => {
       const link = container.ownerDocument.createElement('a')
       link.href = url.href
@@ -237,6 +291,7 @@ export function MarkdownContent({
   linkRewrites?: ReadonlyMap<string, LinkRewrite>
 }) {
   const root = useRef<HTMLDivElement>(null)
+  const epoch = sessionEpoch.value
   const htmlStr = useMemo(
     () => (document ? renderMarkdownDocument : renderMarkdown)(text),
     [document, text],
@@ -244,13 +299,13 @@ export function MarkdownContent({
   useEffect(() => {
     const element = root.current
     if (!element) return undefined
-    const restoreImages = htmlStr.includes('<img ') ? linkUnloadedImages(element) : undefined
+    const restoreImages = htmlStr.includes('<img ') ? enhanceMarkdownImages(element) : undefined
     const restoreFences = !streaming && htmlStr.includes('language-') ? enhanceRichCode(element) : undefined
     return () => {
       restoreImages?.()
       restoreFences?.()
     }
-  }, [htmlStr, streaming])
+  }, [htmlStr, streaming, epoch])
   // Apart from the enhancers, so a new rewrite map does not rebuild diagrams;
   // before paint, so no click reaches a link that is not rewritten yet.
   useLayoutEffect(() => {

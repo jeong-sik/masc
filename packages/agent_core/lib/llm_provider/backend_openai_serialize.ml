@@ -872,82 +872,81 @@ let dialect_messages_of_history
     Returns [None] when the message carries no representable user content (e.g.
     an orphaned-tool-result message), so callers do not emit an empty
     [content:""] placeholder on the wire. *)
-let ollama_native_user_message ~modality_priority content : Yojson.Safe.t option =
+let ollama_unsupported_media_error ~block source =
+  Printf.sprintf
+    "ollama_native does not support %s media source kind %s"
+    block
+    (Types.media_source_wire_tag source)
+;;
+
+let ollama_native_user_message ~modality_priority content
+  : (Yojson.Safe.t option, string) result
+  =
   let ordered_content = Modality.reorder modality_priority content in
-  let text_parts, images =
-    List.fold_left
-      (fun (texts, images) block ->
-         match block with
-         | Text s -> Utf8_sanitize.sanitize s :: texts, images
-         | Image { source = Base64 data; _ } ->
-           (* Ollama native /api/chat accepts base64 image payloads in the
-              images field. *)
-           texts, data :: images
-         | Image { source = (Url _ | File_id _) as source; _ } ->
-           Api_common.unsupported_media_source
-             ~backend:"ollama_native"
-             ~block:"image"
-             source
-         | Document { media_type; _ } ->
-           (* agent-core boundary — a document is never appended to [images]
-              "so vision models can attempt to process them as pages": the
-              server has no way to tell the two apart, so that would be a
-              silent modality change. [ollama_messages_of_history] rejects
-              documents at admission because the native wire declares
-              [Document_unrepresentable]; reaching this arm means a caller
-              bypassed admission. *)
-           invalid_arg
-             (Printf.sprintf
-                "Backend_openai_serialize.ollama_native_user_message: document block \
-                 (media_type %S) reached serialization; %s"
-                media_type
-                (Api_common.document_admission_error_to_string
-                   (Api_common.Document_wire_has_no_representation
-                      { wire_form = Api_common.Document_unrepresentable; media_type })))
-         | Audio { source; _ } ->
-           Api_common.unsupported_media_source
-             ~backend:"ollama_native"
-             ~block:"audio"
-             source
-         | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | ToolResult _
-           -> texts, images)
-      ([], [])
-      ordered_content
+  let rec loop texts images = function
+    | [] ->
+      let text_content =
+        match List.rev texts with
+        | [] -> ""
+        | parts -> String.concat "\n" parts
+      in
+      (match List.rev images with
+       | [] when text_content = "" -> Ok None
+       | [] -> Ok (Some (`Assoc [ "role", `String "user"; "content", `String text_content ]))
+       | imgs ->
+         Ok
+           (Some
+              (`Assoc
+                  [ "role", `String "user"
+                  ; "content", `String text_content
+                  ; "images", `List (List.map (fun img -> `String img) imgs)
+                  ])))
+    | Text s :: rest -> loop (Utf8_sanitize.sanitize s :: texts) images rest
+    | Image { source = Base64 data; _ } :: rest ->
+      (* Ollama native /api/chat accepts base64 image payloads in the
+         images field. *)
+      loop texts (data :: images) rest
+    | Image { source = (Url _ | File_id _) as source; _ } :: _ ->
+      Error (ollama_unsupported_media_error ~block:"image" source)
+    | Document { media_type; _ } :: _ ->
+      (* agent-core boundary — a document is never appended to [images]
+         "so vision models can attempt to process them as pages": the
+         server has no way to tell the two apart, so that would be a
+         silent modality change. *)
+      Error
+        (Printf.sprintf
+           "Backend_openai_serialize.ollama_native_user_message: document block \
+            (media_type %S) reached serialization; %s"
+           media_type
+           (Api_common.document_admission_error_to_string
+              (Api_common.Document_wire_has_no_representation
+                 { wire_form = Api_common.Document_unrepresentable; media_type })))
+    | Audio { source; _ } :: _ ->
+      Error (ollama_unsupported_media_error ~block:"audio" source)
+    | (Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+      | ToolReference _ | ToolResult _) :: rest -> loop texts images rest
   in
-  let text_content =
-    match List.rev text_parts with
-    | [] -> ""
-    | parts -> String.concat "\n" parts
-  in
-  match List.rev images with
-  | [] when text_content = "" -> None
-  | [] -> Some (`Assoc [ "role", `String "user"; "content", `String text_content ])
-  | imgs ->
-    Some
-      (`Assoc
-          [ "role", `String "user"
-          ; "content", `String text_content
-          ; "images", `List (List.map (fun img -> `String img) imgs)
-          ])
+  loop [] [] ordered_content
 ;;
 
 (* Native Message.images is role-independent. Keep media with its owning tool
    occurrence instead of manufacturing a new user query. Retain all non-image
    structured blocks, including nested result structure, in scalar content. *)
-let rec ollama_tool_images blocks =
+let rec ollama_tool_images blocks : (Types.content_block list * string list, string) result =
   let rec split retained images = function
-    | [] -> List.rev retained, List.rev images
+    | [] -> Ok (List.rev retained, List.rev images)
     | Image { source = Base64 data; _ } :: rest ->
       split retained (data :: images) rest
     | Image { source = (Url _ | File_id _) as source; _ } :: _ ->
-      Api_common.unsupported_media_source
-        ~backend:"ollama_native" ~block:"image" source
+      Error (ollama_unsupported_media_error ~block:"image" source)
     | ToolResult ({ content_blocks = Some nested; _ } as result) :: rest ->
-      let nested, nested_images = ollama_tool_images nested in
-      split
-        (ToolResult { result with content_blocks = Some nested } :: retained)
-        (List.rev_append nested_images images)
-        rest
+      (match ollama_tool_images nested with
+       | Error _ as err -> err
+       | Ok (nested, nested_images) ->
+         split
+           (ToolResult { result with content_blocks = Some nested } :: retained)
+           (List.rev_append nested_images images)
+           rest)
     | ((Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
        | ToolReference _ | ToolResult { content_blocks = None; _ } | Document _ | Audio _) as block)
       :: rest -> split (block :: retained) images rest
@@ -959,29 +958,35 @@ let ollama_tool_messages_of_blocks blocks =
   let rec loop messages = function
     | [] -> Ok (List.rev messages)
     | (ToolResult { content; content_blocks; _ }, Some tool_name) :: rest ->
-      let content_blocks, images =
+      let content_blocks_result =
         match content_blocks with
-        | None -> None, []
+        | None -> Ok (None, [])
         | Some blocks ->
-          let blocks, images = ollama_tool_images blocks in
-          (match blocks, images with
-           | [], _ :: _ -> None
-           | [], [] | _ :: _, _ -> Some blocks), images
+          Result.map
+            (fun (blocks, images) ->
+               ( (match blocks, images with
+                  | [], _ :: _ -> None
+                  | [], [] | _ :: _, _ -> Some blocks)
+               , images ))
+            (ollama_tool_images blocks)
       in
-      let content = tool_result_content_string ~content ~content_blocks in
-      let fields =
-        [ "role", `String "tool"
-        ; "tool_name", `String tool_name
-        ; "content", `String content
-        ]
-      in
-      let message =
-        match images with
-        | _ :: _ ->
-          `Assoc (fields @ [ "images", `List (List.map (fun data -> `String data) images) ])
-        | [] -> `Assoc fields
-      in
-      loop (message :: messages) rest
+      (match content_blocks_result with
+       | Error _ as err -> err
+       | Ok (content_blocks, images) ->
+         let content = tool_result_content_string ~content ~content_blocks in
+         let fields =
+           [ "role", `String "tool"
+           ; "tool_name", `String tool_name
+           ; "content", `String content
+           ]
+         in
+         let message =
+           match images with
+           | _ :: _ ->
+             `Assoc (fields @ [ "images", `List (List.map (fun data -> `String data) images) ])
+           | [] -> `Assoc fields
+         in
+         loop (message :: messages) rest)
     | (ToolResult { tool_use_id; _ }, None) :: _ ->
       Error
         (Printf.sprintf
@@ -1103,34 +1108,40 @@ let ollama_messages_of_history
             with
             | Error _ as error -> error
             | Ok tool_messages ->
-              let wire_messages =
+              let wire_messages_result =
                 match msg.role with
                 | User ->
                   (* Native /api/chat: content is scalar; images are separate. *)
                   (match ollama_native_user_message ~modality_priority msg.content with
-                   | None -> tool_messages
-                   | Some user_message -> tool_messages @ [ user_message ])
+                   | Error _ as err -> err
+                   | Ok None -> Ok tool_messages
+                   | Ok (Some user_message) -> Ok (tool_messages @ [ user_message ]))
                 | Assistant ->
                   let thinking = assistant_reasoning_content_of_blocks msg.content in
-                  messages_of_message_with
-                    ~tool_calls_fn:tool_calls_to_ollama_json
-                    ~tool_messages_fn:(fun _ -> tool_messages)
-                    ~modality_priority
-                    msg
-                  |> List.map (function
-                    | `Assoc fields when not (Api_common.string_is_blank thinking) ->
-                      `Assoc (("thinking", `String thinking) :: fields)
-                    | message -> message)
+                  Ok
+                    (messages_of_message_with
+                       ~tool_calls_fn:tool_calls_to_ollama_json
+                       ~tool_messages_fn:(fun _ -> tool_messages)
+                       ~modality_priority
+                       msg
+                     |> List.map (function
+                       | `Assoc fields when not (Api_common.string_is_blank thinking) ->
+                         `Assoc (("thinking", `String thinking) :: fields)
+                       | message -> message))
                 | System | Tool ->
-                  messages_of_message_with
-                    ~tool_calls_fn:tool_calls_to_ollama_json
-                    ~tool_messages_fn:(fun _ -> tool_messages)
-                    ~modality_priority
-                    msg
+                  Ok
+                    (messages_of_message_with
+                       ~tool_calls_fn:tool_calls_to_ollama_json
+                       ~tool_messages_fn:(fun _ -> tool_messages)
+                       ~modality_priority
+                       msg)
               in
-              (match Message_origin_lowering.encode_user_boundary control_lowering ~message:msg wire_messages with
-               | Error error -> Error (Message_origin_lowering.error_to_string error)
-               | Ok wire_messages -> render (wire_messages :: rendered) rest))
+              (match wire_messages_result with
+               | Error _ as err -> err
+               | Ok wire_messages ->
+                 (match Message_origin_lowering.encode_user_boundary control_lowering ~message:msg wire_messages with
+                  | Error error -> Error (Message_origin_lowering.error_to_string error)
+                  | Ok wire_messages -> render (wire_messages :: rendered) rest)))
        in
        render [] (Tool_result_projection.messages projection))
 ;;

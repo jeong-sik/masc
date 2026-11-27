@@ -52,9 +52,10 @@ val max_wire_bytes : unit -> int
     for [token], or [None] if the token is malformed, absent, or reaped. *)
 val file_path_of_token : base_dir:string -> token:string -> string option
 
-(** [persist_result ~base_dir ~media_type ~data] writes raw [data] under a
-    deterministic token and returns [(token, url)] where [url] is
-    [/api/v1/media/<token>]. The write is idempotent and atomic. *)
+(** [persist_result ~base_dir ~media_type ~data] writes raw [data] into
+    {!Attachment_store} (origin [Model_generated], retention [Durable]) and
+    returns [(sha256, url)] where [url] is [/api/v1/attachments/att_<sha256>].
+    The write is idempotent and atomic. *)
 val persist_result :
   base_dir:string -> media_type:string -> data:string -> (string * string, string) result
 
@@ -63,9 +64,18 @@ val persist_result :
     filesystem errors may carry internal paths. *)
 val persist_error_to_string : persist_error -> string
 
+(** [persist_media_source_meta] decodes the AGENT_CORE media source carrier and
+    persists raw bytes durably into {!Attachment_store}, returning the verified
+    {!Attachment_store.meta}. *)
+val persist_media_source_meta :
+  base_dir:string ->
+  media_type:string ->
+  source:Llm_provider.Types.media_source ->
+  (Attachment_store.meta, persist_error) result
+
 (** [persist_media_source_result] decodes the AGENT_CORE media source carrier first.
-    [Base64] is decoded to raw bytes before persisting; [Url] and [File_id] are
-    rejected until this store has an explicit fetch/resolve implementation. *)
+    [Base64] is decoded to raw bytes and persisted to {!Attachment_store};
+    returns [(sha256, "/api/v1/attachments/att_<sha256>")]. *)
 val persist_media_source_result :
   base_dir:string ->
   media_type:string ->

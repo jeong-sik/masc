@@ -1247,6 +1247,126 @@ let dispatch_system_gate_key ~now (m : Model.t) gate
   | (Nav.Server_offline | Nav.Auth_gate), Keymap.Input.Char "r"
     when is_printable_key norm ->
       Some (Update_actions.execute_action ~now m Keymap.Refresh)
+  | Nav.Media_viewer, _ when Option.is_some m.image_inspector -> (
+      match m.image_inspector with
+      | None -> None
+      | Some st ->
+          let fetch_current (m' : Model.t) (st' : Model.image_inspector_state) =
+            match Model.current_inspected_image st' with
+            | Some img ->
+                ( { m' with image_inspector = Some st' }
+                , [
+                    Cmd.Fetch_inspector_image
+                      { epoch = m'.epoch; url = img.media_path; format_png = true };
+                  ] )
+            | None -> ({ m' with image_inspector = Some st' }, [])
+          in
+          let update_st st' = Some ({ m with image_inspector = Some st' }, []) in
+          match norm.key with
+          | Keymap.Input.Char ("+" | "=") when is_printable_key norm ->
+              update_st (Model.inspector_zoom_by ~factor:1.5 st)
+          | Keymap.Input.Char ("-" | "_") when is_printable_key norm ->
+              update_st (Model.inspector_zoom_by ~factor:(1.0 /. 1.5) st)
+          | Keymap.Input.Char "0" when is_printable_key norm ->
+              update_st (Model.inspector_reset_view st)
+          | Keymap.Input.Left when (not norm.mods.ctrl) && not norm.mods.alt ->
+              update_st (Model.inspector_pan_by ~dx:(-0.2) ~dy:0.0 st)
+          | Keymap.Input.Right when (not norm.mods.ctrl) && not norm.mods.alt ->
+              update_st (Model.inspector_pan_by ~dx:0.2 ~dy:0.0 st)
+          | Keymap.Input.Up when (not norm.mods.ctrl) && not norm.mods.alt ->
+              update_st (Model.inspector_pan_by ~dx:0.0 ~dy:(-0.2) st)
+          | Keymap.Input.Down when (not norm.mods.ctrl) && not norm.mods.alt ->
+              update_st (Model.inspector_pan_by ~dx:0.0 ~dy:0.2 st)
+          | Keymap.Input.Char "h" when is_printable_key norm ->
+              update_st (Model.inspector_pan_by ~dx:(-0.2) ~dy:0.0 st)
+          | Keymap.Input.Char "l" when is_printable_key norm ->
+              update_st (Model.inspector_pan_by ~dx:0.2 ~dy:0.0 st)
+          | Keymap.Input.Char "k" when is_printable_key norm ->
+              update_st (Model.inspector_pan_by ~dx:0.0 ~dy:(-0.2) st)
+          | Keymap.Input.Char "j" when is_printable_key norm ->
+              update_st (Model.inspector_pan_by ~dx:0.0 ~dy:0.2 st)
+          | Keymap.Input.Char ("[" | "<") when is_printable_key norm ->
+              let st' = Model.inspector_select_delta ~now ~delta:(-1) st in
+              if st'.index = st.index then Some (m, [])
+              else Some (fetch_current m st')
+          | Keymap.Input.Char ("]" | ">") when is_printable_key norm ->
+              let st' = Model.inspector_select_delta ~now ~delta:1 st in
+              if st'.index = st.index then Some (m, [])
+              else Some (fetch_current m st')
+          | Keymap.Input.Char "r" when is_printable_key norm ->
+              let st' = { st with fetched = Observed.loading ~since_ns:now } in
+              Some (fetch_current m st')
+          | Keymap.Input.Char "y" when is_printable_key norm -> (
+              match Model.current_inspected_image st with
+              | Some img ->
+                  let payload =
+                    Option.value img.attachment_id ~default:img.media_path
+                  in
+                  Some
+                    ( Model.with_toast ~now ~level:Model.Toast_info
+                        (Say.make ~ko:("복사됨: " ^ payload)
+                           ~en:("Copied: " ^ payload))
+                        m
+                    , [ Cmd.Copy_clipboard payload ] )
+              | None -> Some (m, []))
+          | Keymap.Input.Char "e" when is_printable_key norm -> (
+              match Model.current_inspected_image st with
+              | Some img ->
+                  let raw_name =
+                    Option.value img.filename
+                      ~default:
+                        (Option.value img.attachment_id ~default:"masc-image")
+                  in
+                  let filename_stem = Filename.remove_extension raw_name in
+                  let ext =
+                    Wire_attachment.extension_of_mime
+                      (Option.value img.mime_type ~default:"image/png")
+                  in
+                  Some
+                    ( Model.with_toast ~now ~level:Model.Toast_info
+                        (Say.make ~ko:"이미지 파일 저장 중…"
+                           ~en:"Saving image file…")
+                        m
+                    , [
+                        Cmd.Export_attachment
+                          {
+                            epoch = m.epoch;
+                            url = img.media_path;
+                            filename_stem;
+                            ext;
+                            open_after = false;
+                          };
+                      ] )
+              | None -> Some (m, []))
+          | Keymap.Input.Char "o" when is_printable_key norm ->
+              Some (Update_actions.execute_action ~now m Keymap.Open_external)
+          | Keymap.Input.Char "q" when is_printable_key norm ->
+              Some
+                ( {
+                    m with
+                    nav = { m.nav with overlay = None; return_overlay = None };
+                    image_inspector = None;
+                  }
+                , [] )
+          | Keymap.Input.Char "?" when is_printable_key norm ->
+              Some (Update_actions.execute_action ~now m Keymap.Open_help)
+          | Keymap.Input.Char _
+          | Keymap.Input.Enter
+          | Keymap.Input.Tab
+          | Keymap.Input.Backspace
+          | Keymap.Input.Escape
+          | Keymap.Input.Delete
+          | Keymap.Input.Insert
+          | Keymap.Input.Home
+          | Keymap.Input.End
+          | Keymap.Input.Up
+          | Keymap.Input.Down
+          | Keymap.Input.Left
+          | Keymap.Input.Right
+          | Keymap.Input.Page_up
+          | Keymap.Input.Page_down
+          | Keymap.Input.Function _ ->
+              None)
   | Nav.Media_viewer, Keymap.Input.Up
     when (not norm.mods.ctrl) && not norm.mods.alt ->
       Some (Update_nav.apply_move m Keymap.Up)
@@ -2943,6 +3063,21 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                             };
                         }
                       , [] )
+                  | Keymap.Input.Char "v"
+                    when editable && norm.mods.ctrl && (not norm.mods.alt)
+                         && Nav.equal_inline_action_kind modal.kind
+                              Nav.Board_new_post ->
+                      let drafts =
+                        Drafts.inc_board_uploading m.drafts
+                      in
+                      ( Model.with_toast ~now ~level:Model.Toast_info
+                          (Say.make ~ko:"클립보드 이미지 첨부 중…"
+                             ~en:"Attaching clipboard image…")
+                          { m with drafts }
+                      , [
+                          Cmd.Paste_clipboard_image
+                            { epoch = m.epoch; target = Cmd.Upload_for_board };
+                        ] )
                   | Keymap.Input.Char "u" when editable && norm.mods.ctrl && not norm.mods.alt ->
                       apply_modal_edit
                         (Update_nav.kill_to_start ~text:cur_val ~cursor:cur_pos)
@@ -3409,8 +3544,120 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                       Nav.Knowledge_artifacts
                                  && Option.is_some (Model.focused_artifact m) ->
                               Some
-                                (Update_nav.open_overlay m
+                                (Update_nav.open_overlay
+                                   (Model.close_image_inspector m)
                                    (Nav.System_gate Nav.Media_viewer))
+                          | None, Keymap.Input.Char "M"
+                            when is_printable_key replayed
+                                 && Nav.equal_workspace m.nav.workspace
+                                      Nav.Keepers
+                                 && Nav.equal_keeper_tab
+                                      m.fleet.keeper_dive_tab Nav.Keeper_chat -> (
+                              let imgs =
+                                match Update_nav.resolve_target_keeper m with
+                                | Some keeper ->
+                                    Chat_transcript.collect_chat_images ~model:m
+                                      ~keeper
+                                | None -> []
+                              in
+                              match imgs with
+                              | [] ->
+                                  Some
+                                    ( Model.with_toast ~now
+                                        ~level:Model.Toast_info
+                                        (Say.make
+                                           ~ko:"이 대화에 검사할 이미지가 없습니다"
+                                           ~en:"No images in this conversation to inspect")
+                                        m
+                                    , [] )
+                              | _ ->
+                                  let m1 =
+                                    Model.open_image_inspector ~now ~images:imgs m
+                                  in
+                                  let m2, nav_cmds =
+                                    Update_nav.open_overlay m1
+                                      (Nav.System_gate Nav.Media_viewer)
+                                  in
+                                  let fetch_cmds =
+                                    match
+                                      Option.bind m2.image_inspector
+                                        Model.current_inspected_image
+                                    with
+                                    | Some img ->
+                                        [
+                                          Cmd.Fetch_inspector_image
+                                            {
+                                              epoch = m2.epoch;
+                                              url = img.media_path;
+                                              format_png = true;
+                                            };
+                                        ]
+                                    | None -> []
+                                  in
+                                  Some (m2, nav_cmds @ fetch_cmds))
+                          | None, Keymap.Input.Char "M"
+                            when is_printable_key replayed
+                                 && Nav.equal_workspace m.nav.workspace
+                                      Nav.Knowledge
+                                 && Nav.equal_knowledge_tab
+                                      m.knowledge.active_tab
+                                      Nav.Knowledge_board -> (
+                              let board_imgs =
+                                match Knowledge_store.selected_post m.knowledge with
+                                | None -> []
+                                | Some p ->
+                                    let comment_atts =
+                                      match Observed.to_option m.knowledge.active_thread with
+                                      | Some (tp, cs) when String.equal tp.id p.id ->
+                                          List.concat_map
+                                            (fun (c : Wire_knowledge.board_comment) ->
+                                              c.attachments)
+                                            cs
+                                      | Some _ | None -> []
+                                    in
+                                    (p.attachments @ comment_atts)
+                                    |> List.filter (fun (a : Wire_attachment.t) ->
+                                           Wire_attachment.is_raster_image_mime
+                                             a.mime_type)
+                                    |> List.map
+                                         Wire_fleet.retained_image_of_attachment
+                              in
+                              match board_imgs with
+                              | [] ->
+                                  Some
+                                    ( Model.with_toast ~now
+                                        ~level:Model.Toast_info
+                                        (Say.make
+                                           ~ko:"이 게시글에 검사할 이미지가 없습니다"
+                                           ~en:"No images on this board post to inspect")
+                                        m
+                                    , [] )
+                              | _ ->
+                                  let m1 =
+                                    Model.open_image_inspector ~now
+                                      ~images:board_imgs m
+                                  in
+                                  let m2, nav_cmds =
+                                    Update_nav.open_overlay m1
+                                      (Nav.System_gate Nav.Media_viewer)
+                                  in
+                                  let fetch_cmds =
+                                    match
+                                      Option.bind m2.image_inspector
+                                        Model.current_inspected_image
+                                    with
+                                    | Some img ->
+                                        [
+                                          Cmd.Fetch_inspector_image
+                                            {
+                                              epoch = m2.epoch;
+                                              url = img.media_path;
+                                              format_png = true;
+                                            };
+                                        ]
+                                    | None -> []
+                                  in
+                                  Some (m2, nav_cmds @ fetch_cmds))
                           | (Some _ | None), Keymap.Input.Char "D"
                             when is_printable_key replayed
                                  && Model.is_memory_diff_pin_surface m ->
@@ -3684,6 +3931,27 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                                   drafts = Drafts.kill_line_start m.drafts;
                                 }
                               , [] )
+                          | Keymap.Input.Char "v"
+                            when norm.mods.ctrl && not norm.mods.alt ->
+                              let keeper =
+                                Option.value (Update_nav.resolve_target_keeper m)
+                                  ~default:(Drafts.target_keeper_key m.drafts)
+                              in
+                              let drafts =
+                                m.drafts |> Drafts.set_active_keeper keeper
+                                |> Drafts.inc_uploading ~keeper
+                              in
+                              ( Model.with_toast ~now ~level:Model.Toast_info
+                                  (Say.make ~ko:"클립보드 이미지 읽는 중…"
+                                     ~en:"Reading clipboard image…")
+                                  { m with drafts }
+                              , [
+                                  Cmd.Paste_clipboard_image
+                                    {
+                                      epoch = m.epoch;
+                                      target = Cmd.Upload_for_keeper keeper;
+                                    };
+                                ] )
                           | Keymap.Input.Backspace when norm.mods.alt ->
                               ({ m with drafts = Drafts.kill_word m.drafts }, [])
                           | Keymap.Input.Backspace ->
@@ -3777,7 +4045,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                               (m, [])
                         else dispatch_contextual_hotkey ~now m norm))
 
-let apply_paste ~now:_ (m : Model.t) text =
+let apply_paste ~now (m : Model.t) text =
   if
     String.equal text ""
     || Model.is_too_small_viewport m.viewport
@@ -3880,24 +4148,47 @@ let apply_paste ~now:_ (m : Model.t) text =
             in
             if not editable then (m, [])
             else
-              let cur_val = Model.modal_active_field_value modal in
-              let cur_pos =
-                Int.max 0 (Int.min (String.length cur_val) m.nav.modal_edit_cursor)
+              let paste_into_field () =
+                let cur_val = Model.modal_active_field_value modal in
+                let cur_pos =
+                  Int.max 0
+                    (Int.min (String.length cur_val) m.nav.modal_edit_cursor)
+                in
+                let next_val, next_cur =
+                  Update_nav.insert_at_cursor ~text:cur_val ~cursor:cur_pos
+                    ~insert:text
+                in
+                ( {
+                    m with
+                    inline_modal =
+                      Some
+                        (Model.modal_update_active_field
+                           (fun _ -> next_val)
+                           modal);
+                    nav = { m.nav with modal_edit_cursor = next_cur };
+                  }
+                , [] )
               in
-              let next_val, next_cur =
-                Update_nav.insert_at_cursor ~text:cur_val ~cursor:cur_pos
-                  ~insert:text
-              in
-              ( {
-                  m with
-                  inline_modal =
-                    Some
-                      (Model.modal_update_active_field
-                         (fun _ -> next_val)
-                         modal);
-                  nav = { m.nav with modal_edit_cursor = next_cur };
-                }
-              , [] ))
+              if Nav.equal_inline_action_kind modal.kind Nav.Board_new_post then
+                match Wire_attachment.resolve_local_media_file text with
+                | Some path ->
+                    let drafts = Drafts.inc_board_uploading m.drafts in
+                    let fname = Filename.basename path in
+                    ( Model.with_toast ~now ~level:Model.Toast_info
+                        (Say.make
+                           ~ko:(Printf.sprintf "첨부 업로드 중: %s…" fname)
+                           ~en:(Printf.sprintf "Uploading attachment: %s…" fname))
+                        { m with drafts }
+                    , [
+                        Cmd.Upload_attachment_file
+                          {
+                            epoch = m.epoch;
+                            target = Cmd.Upload_for_board;
+                            path;
+                          };
+                      ] )
+                | None -> paste_into_field ()
+              else paste_into_field ())
     | Some (Nav.Settings _) when Config_store.is_editing_field m.config ->
         ( {
             m with
@@ -3941,10 +4232,37 @@ let apply_paste ~now:_ (m : Model.t) text =
             }
           , [] )
         else
-          let drafts =
-            m.drafts |> Drafts.set_focus true |> Drafts.insert_text text
-          in
-          ({ m with drafts }, [])
+          match Wire_attachment.resolve_local_media_file text with
+          | Some path ->
+              let keeper =
+                Option.value (Update_nav.resolve_target_keeper m)
+                  ~default:(Drafts.target_keeper_key m.drafts)
+              in
+              let drafts =
+                m.drafts
+                |> Drafts.set_active_keeper keeper
+                |> Drafts.set_focus true
+                |> Drafts.inc_uploading ~keeper
+              in
+              let fname = Filename.basename path in
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:(Printf.sprintf "첨부 업로드 중: %s…" fname)
+                     ~en:(Printf.sprintf "Uploading attachment: %s…" fname))
+                  { m with drafts }
+              , [
+                  Cmd.Upload_attachment_file
+                    {
+                      epoch = m.epoch;
+                      target = Cmd.Upload_for_keeper keeper;
+                      path;
+                    };
+                ] )
+          | None ->
+              let drafts =
+                m.drafts |> Drafts.set_focus true |> Drafts.insert_text text
+              in
+              ({ m with drafts }, [])
 
 let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
   let m =

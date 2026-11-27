@@ -380,6 +380,18 @@ type agent_capabilities =
   ; antigravity_tier : string option
   }
 
+val record_observed_image_prompt : driver:driver -> cli_path:string -> bool -> unit
+(** Record the live [agentCapabilities.promptCapabilities.image] value observed
+    from an ACP [initialize] handshake for [(driver, cli_path)]. Consulted by
+    {!Runtime_instance.effective_media_capabilities}. *)
+
+val observed_image_prompt : driver:driver -> cli_path:string -> bool option
+(** Last live [promptCapabilities.image] observed for [(driver, cli_path)],
+    or [None] before any handshake has completed for that binary. *)
+
+val clear_observed_capabilities_for_tests : unit -> unit
+(** Clear process-wide observed ACP capability probe cache (for unit tests). *)
+
 type config_option =
   { id : string
   ; name : string
@@ -496,6 +508,13 @@ type tool_call_status =
   | Tool_failed
   | Tool_other_status of string
 
+type media_output =
+  { mime_type : string
+  ; data_bytes : string
+  ; message_id : string option
+  ; tool_call_id : string option
+  }
+
 type stream_event =
   | Text_delta of
       { text : string
@@ -503,6 +522,8 @@ type stream_event =
         (** The [messageId] the host put on the chunk. Chunks of one assistant
             message share it; [None] when the host sends no id. *)
       }
+  | Media_output of media_output
+      (** Decoded [type = "image"] content chunk emitted in [agent_message_chunk]. *)
   | Thought_delta of string
   | Tool_call_started of
       { tool_call_id : string
@@ -520,6 +541,7 @@ type stream_event =
       ; raw_input : Yojson.Safe.t option
       ; raw_output : Yojson.Safe.t option
       ; identity : tool_call_identity option
+      ; media_outputs : media_output list
       }
       (** Incremental [tool_call_update] notification: [title], [status], and
           [raw_output] reflect the update frame's own delta fields, whereas
@@ -638,6 +660,9 @@ type prompt_result =
         narration in an earlier message, so a caller that reads an answer takes
         this field. Equal to [text] when no chunk carries an id. *)
   ; thought : string
+  ; media_outputs : media_output list
+    (** Decoded image chunks emitted during the prompt (from [agent_message_chunk]
+        and [tool_call_update]), in observation order. *)
   ; usage : usage
   ; usage_source : usage_source
   ; context_compaction : context_compaction
@@ -651,6 +676,7 @@ type agent_activity =
   | Request_sent of string
       (** MASC sent this request (method name) and has heard nothing since. *)
   | Agent_message
+  | Agent_media_output
   | Agent_thought
   | Agent_tool_call_started of
       { title : string
@@ -1023,6 +1049,7 @@ module For_testing : sig
     -> option:config_option
     -> string option
 
+  val parse_capabilities : Yojson.Safe.t -> agent_capabilities
   val parse_session_update : driver:driver -> Yojson.Safe.t -> stream_event option
   val parse_prompt_usage : Yojson.Safe.t -> usage
   val parse_stop_reason : string -> stop_reason

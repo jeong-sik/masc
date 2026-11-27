@@ -9,7 +9,10 @@ let fixture =
   {|# operator note kept verbatim
 [runtime]
 default = "codex_subscription.gpt-5.6"
-media_failover = ["codex_acct1.gpt-5.6", "codex_subscription.gpt-5.6"]
+
+[runtime.media]
+vision_reader = "codex_acct1.gpt-5.6"
+image_generator = "codex_subscription.gpt-5.6"
 
 [runtime.lanes.coding]
 candidates = ["codex_acct1.gpt-5.6", "codex_subscription.gpt-5.6"]
@@ -119,7 +122,7 @@ let show_change = function
   | R.Table path -> "table " ^ path
   | R.Lane_candidate { lane; runtime } -> Printf.sprintf "lane %s: %s" lane runtime
   | R.Exact_lane_slot { lane; runtime } -> Printf.sprintf "exact lane %s: %s" lane runtime
-  | R.Vision_runtime runtime -> "vision " ^ runtime
+  | R.Media_override { key; runtime } -> Printf.sprintf "media %s: %s" key runtime
   | R.Assignment { keeper; runtime } -> Printf.sprintf "keeper %s: %s" keeper runtime
 
 let removed ?(text = fixture) id =
@@ -150,7 +153,7 @@ let test_the_account_and_what_routes_to_it_go () =
     ; "table codex_acct1.\"gpt-5.6\""
     ; "lane coding: codex_acct1.gpt-5.6"
     ; "exact lane verifier_exact: codex_acct1.gpt-5.6"
-    ; "vision codex_acct1.gpt-5.6"
+    ; "media vision_reader: codex_acct1.gpt-5.6"
     ; "keeper tester: codex_acct1.gpt-5.6"
     ]
     (List.map show_change changes);
@@ -169,8 +172,10 @@ let test_the_account_and_what_routes_to_it_go () =
        [ "codex_subscription.gpt-5.6" ] verifier.slot_ids;
      Alcotest.(check (list string)) "and loses the cli slot" [] verifier.cli_slot_ids
    | lanes -> Alcotest.failf "%d exact lanes" (List.length lanes));
-  Alcotest.(check (list string)) "the vision list keeps the other runtime"
-    [ "codex_subscription.gpt-5.6" ] config.media_failover;
+  Alcotest.(check (option string)) "the vision_reader override was cleared"
+    None config.media.vision_reader;
+  Alcotest.(check (option string)) "the other media override stays"
+    (Some "codex_subscription.gpt-5.6") config.media.image_generator;
   Alcotest.(check (list (pair string string))) "the other assignments stay"
     [ "other", "codex_subscription.gpt-5.6"; "by_lane", "coding" ]
     config.keeper_assignments;

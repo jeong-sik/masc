@@ -91,7 +91,7 @@ max_output_tokens = 2048
 
 ### 4. 시간 정하기
 
-`masc_schedule_lane_act_create` 로 Lane action Schedule 을 만든다.
+`masc_schedule_lane_act_create` 로 Lane action Schedule 을 만든다. 운영자 자격으로 만들려면 같은 JSON 을 `POST /api/v1/tools/masc_schedule_lane_act_create` 로 보낸다.
 
 ```json
 {"installation_id": "operator-quiz",

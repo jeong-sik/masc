@@ -2508,7 +2508,11 @@ let test_declared_bounds_match_the_handler () =
     (fun action ->
        check (option int) "due_in_sec minimum" (Some Tool_schedule.min_due_in_sec)
          (bound (property action "due_in_sec") "minimum"))
-    [ Tool_schemas_schedule.Create_request; Tool_schemas_schedule.Update_request ]
+    [ Tool_schemas_schedule.Create_request
+    ; Tool_schemas_schedule.Update_request
+    ; Tool_schemas_schedule.Create_lane_act_request
+    ; Tool_schemas_schedule.Update_lane_act_request
+    ]
 ;;
 
 

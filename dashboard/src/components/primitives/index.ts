@@ -1,4 +1,4 @@
-// Wave 2 Engine Primitives barrel — VirtualList, UPlotChart, DataTable, MasterDetail, QuickPeekDrawer, TargetLockedAction, CommandSearch, PopoverMenu, RefreshButton.
+// Wave 2 Engine Primitives barrel — VirtualList, UPlotChart, DataTable, MasterDetail, QuickPeekDrawer, TargetLockedAction, CommandSearch, PopoverMenu, RefreshButton, SplitHandle, StructuredPayloadView.
 
 export * from './virtual-list'
 export * from './uplot-chart'
@@ -10,3 +10,5 @@ export * from './command-search'
 export * from './popover-menu'
 export * from './chat-preview-modal'
 export * from './refresh-button'
+export * from './split-handle'
+export * from './structured-payload'

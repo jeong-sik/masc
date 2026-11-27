@@ -114,6 +114,41 @@
   min-width: 0;
 }
 
+/* Extreme-size & long-data overflow guards */
+.markdown-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.dtable-scroll {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.dtable[data-sized="true"] td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@container dtable (max-width: 767px) {
+  .dtable[data-sized="true"] td {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+  }
+}
+
+.kp-pill,
+.kb-chip,
+.sigil-chip {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;

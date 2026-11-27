@@ -124,6 +124,8 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
   const [levelFilter, setLevelFilter] = useState<LevelFilter>('ALL')
   const [query, setQuery] = useState('')
   const [selectedEntry, setSelectedEntry] = useState<TimelineEntry | null>(null)
+  const [wrapLines, setWrapLines] = useState(false)
+  const [expandedRowIds, setExpandedRowIds] = useState<ReadonlySet<string>>(() => new Set())
   const [streamStatus, setStreamStatus] = useState<'connecting' | 'live' | 'error'>('connecting')
   const [streamAttempt, setStreamAttempt] = useState(0)
   const [snapshot, setSnapshot] = useState<SnapshotState>({ kind: 'loading' })
@@ -496,6 +498,16 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
 
           <button
             type="button"
+            class="btn-ghost"
+            data-testid="logs-wrap-toggle"
+            aria-pressed=${wrapLines ? 'true' : 'false'}
+            onClick=${() => setWrapLines((v) => !v)}
+          >
+            줄바꿈
+          </button>
+
+          <button
+            type="button"
             class="btn-ghost tnum"
             data-testid="logs-pause-toggle"
             aria-pressed=${pausedByUser ? 'true' : 'false'}
@@ -554,12 +566,25 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
               </div>`}
             renderItem=${(item: TimelineEntry) => {
               const isSel = selectedEntry?.id === item.id
+              const isExpanded = wrapLines || expandedRowIds.has(item.id)
+              const moduleLabel = item.module || item.keeper || 'system'
+              const isLongMsg = item.message.length > 80 || item.message.includes('\n')
               return html`
                 <div
-                  class="v2-logs-row v2-logs-line mono"
+                  class=${`v2-logs-row v2-logs-line mono ${isExpanded ? 'v2-logs-row--wrap' : ''}`.trim()}
                   role="button"
                   tabIndex=${0}
-                  onClick=${() => openInspector(item)}
+                  onClick=${() => {
+                    if (isLongMsg) {
+                      setExpandedRowIds((prev) => {
+                        const next = new Set(prev)
+                        if (next.has(item.id)) next.delete(item.id)
+                        else next.add(item.id)
+                        return next
+                      })
+                    }
+                    openInspector(item)
+                  }}
                   onKeyDown=${(e: KeyboardEvent) => {
                     if (e.isComposing || e.keyCode === 229) return
                     if (e.key === 'Enter' || e.key === ' ') {
@@ -570,18 +595,25 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
                   style=${{
                     cursor: 'pointer',
                     background: isSel ? 'var(--bg-4)' : undefined,
-                    height: '34px',
+                    height: isExpanded ? 'auto' : '34px',
                     minWidth: '520px',
-                    overflow: 'hidden',
+                    overflow: isExpanded ? 'visible' : 'hidden',
                   }}
                 >
                   <span class="tnum" style=${{ color: 'var(--fg-3)' }}>${item.tsDisplay}</span>
                   <span style=${{ color: item.kind === 'EVT' ? 'var(--brass-1)' : 'var(--fg-2)' }}>${item.kind}</span>
                   <span style=${{ color: levelColor(item.level), fontWeight: 600 }}>${item.level}</span>
-                  <span style=${{ color: 'var(--fg-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    ${item.module || item.keeper || 'system'}
+                  <span
+                    title=${moduleLabel}
+                    style=${{ color: 'var(--fg-2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  >
+                    ${moduleLabel}
                   </span>
-                  <span style=${{ color: 'var(--fg-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span
+                    title=${item.message}
+                    class=${isExpanded ? 'v2-logs-msg-wrap' : ''}
+                    style=${{ color: 'var(--fg-1)', overflow: isExpanded ? 'visible' : 'hidden', textOverflow: isExpanded ? 'clip' : 'ellipsis', whiteSpace: isExpanded ? 'pre-wrap' : 'nowrap' }}
+                  >
                     ${item.message}
                   </span>
                 </div>

@@ -341,6 +341,64 @@ let int_query_param uri key ~default =
   | None -> default
   | Some s -> Safe_ops.int_of_string_with_default ~default s
 
+let event_tail_chunk_bytes = 65536
+
+let read_exact_at fd ~offset ~len =
+  let buf = Bytes.create len in
+  ignore (Unix.lseek fd offset Unix.SEEK_SET);
+  let rec loop off left =
+    if left <= 0
+    then off
+    else
+      match Unix.read fd buf off left with
+      | 0 -> off
+      | n -> loop (off + n) (left - n)
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop off left
+  in
+  let got = loop 0 len in
+  Bytes.sub_string buf 0 got
+
+(* Read up to [!remaining] non-empty trailing lines from [path] by scanning
+   fixed-size chunks backward from EOF so large day files are never loaded
+   whole into memory. Pushes newest-first into [collected]. *)
+let collect_tail_lines ~collected ~remaining path =
+  match Unix.openfile path [ Unix.O_RDONLY ] 0 with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
+  | fd ->
+    Fun.protect
+      ~finally:(fun () ->
+        try Unix.close fd with Unix.Unix_error _ -> ())
+      (fun () ->
+        let size = (Unix.fstat fd).Unix.st_size in
+        let pos = ref size in
+        let carry = ref "" in
+        while !pos > 0 && !remaining > 0 do
+          let read_start = max 0 (!pos - event_tail_chunk_bytes) in
+          let read_len = !pos - read_start in
+          let chunk = read_exact_at fd ~offset:read_start ~len:read_len in
+          let combined = chunk ^ !carry in
+          let complete_lines =
+            match String.split_on_char '\n' combined with
+            | [] ->
+              carry := "";
+              []
+            | head :: tail when read_start > 0 ->
+              carry := head;
+              tail
+            | all ->
+              carry := "";
+              all
+          in
+          List.iter
+            (fun line ->
+               if !remaining > 0 && line <> ""
+               then (
+                 collected := line :: !collected;
+                 decr remaining))
+            (List.rev complete_lines);
+          pos := read_start
+        done)
+
 (** Read recent event log lines from .masc/events *)
 let read_event_lines config ~limit =
   if limit <= 0 then []
@@ -355,27 +413,6 @@ let read_event_lines config ~limit =
       in
       let collected = ref [] in
       let remaining = ref limit in
-      let read_lines path =
-        let content = Fs_compat.load_file path in
-        String.split_on_char '\n' content
-        |> List.filter (fun s -> s <> "")
-      in
-      let add_lines path =
-        if !remaining <= 0 then ()
-        else
-          let lines = read_lines path in
-          let rec take rev_lines =
-            match rev_lines with
-            | [] -> ()
-            | line :: rest ->
-                if !remaining > 0 then begin
-                  collected := line :: !collected;
-                  decr remaining;
-                  take rest
-                end
-          in
-          take (List.rev lines)
-      in
       List.iter (fun month ->
         if !remaining > 0 then
           let month_path = Filename.concat events_dir month in
@@ -390,8 +427,10 @@ let read_event_lines config ~limit =
               if !remaining > 0 then
                 let path = Filename.concat month_path file in
                 match Unix.stat path with
-                | st when st.st_kind = Unix.S_REG -> add_lines path
-                | _ | exception Unix.Unix_error _ -> ()
+                | st when st.st_kind = Unix.S_REG ->
+                  collect_tail_lines ~collected ~remaining path
+                | _ -> ()
+                | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
             ) files
       ) month_dirs;
       List.rev !collected

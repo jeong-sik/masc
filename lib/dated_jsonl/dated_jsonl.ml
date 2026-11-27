@@ -1801,19 +1801,54 @@ let count_non_empty_lines_cached path =
           Fs_compat.fold_appended_lines ~path ~from ~init:0
             ~f:(fun acc _line -> acc + 1)
         in
+        let after_stat = stat_file_identity path in
+        let identity_changed =
+          match after_stat with
+          | Some (dev', ino', _) -> dev' <> dev || ino' <> ino
+          | None -> true
+        in
+        let count, final_boundary, scanned_bytes, final_stat =
+          if from > 0 && identity_changed then (
+            (* File was replaced or removed between stat and incremental read:
+               recount from byte 0 rather than adding [base] to a slice of a
+               different inode. *)
+            Otel_metric_store_core.inc_counter
+              Otel_builtin_metric_names.metric_telemetry_cache_rescans
+              ~labels:[ ("store", store_label) ]
+              ();
+            let count', boundary' =
+              Fs_compat.fold_appended_lines ~path ~from:0 ~init:0
+                ~f:(fun acc _line -> acc + 1)
+            in
+            count', boundary', boundary', stat_file_identity path)
+          else if from > 0 && boundary < from then (
+            (* File shrank between stat and read: [fold_appended_lines] reset
+               to byte 0 and returned the post-truncation total in [delta]. *)
+            Otel_metric_store_core.inc_counter
+              Otel_builtin_metric_names.metric_telemetry_cache_rescans
+              ~labels:[ ("store", store_label) ]
+              ();
+            delta, boundary, boundary, after_stat)
+          else
+            base + delta, boundary, max 0 (boundary - from), after_stat
+        in
         Otel_metric_store_core.inc_counter
           Otel_builtin_metric_names.metric_telemetry_scanned_bytes
           ~labels:[ ("store", store_label) ]
-          ~delta:(Float.of_int (max 0 (boundary - from)))
+          ~delta:(Float.of_int scanned_bytes)
           ();
-        let count = base + delta in
-        Stdlib.Mutex.protect file_count_cache_mu (fun () ->
-          Hashtbl.replace file_count_cache path
-            { fc_dev = dev
-            ; fc_ino = ino
-            ; fc_boundary = boundary
-            ; fc_count = count
-            });
+        (match final_stat with
+         | Some (dev', ino', _) ->
+           Stdlib.Mutex.protect file_count_cache_mu (fun () ->
+             Hashtbl.replace file_count_cache path
+               { fc_dev = dev'
+               ; fc_ino = ino'
+               ; fc_boundary = final_boundary
+               ; fc_count = count
+               })
+         | None ->
+           Stdlib.Mutex.protect file_count_cache_mu (fun () ->
+             Hashtbl.remove file_count_cache path));
         count
     end
 
@@ -2069,11 +2104,13 @@ let range_day_file_paths t ~since ~until =
   | None, _ | _, None -> []
   | Some (since_month, since_day), Some (until_month, until_day) ->
     list_month_dirs t.base_dir
+    |> List.rev
     |> List.filter (fun m ->
       String.compare m since_month >= 0 && String.compare m until_month <= 0)
     |> List.concat_map (fun m ->
       let month_path = Filename.concat t.base_dir m in
       list_day_files month_path
+      |> List.rev
       |> List.filter (fun d ->
         let day_num = day_number_of_day_file_name d in
         let dominated =

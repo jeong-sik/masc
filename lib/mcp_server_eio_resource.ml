@@ -1238,48 +1238,57 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
               `List (List.rev !msgs))
         in
 
+        let read_events_lines_result ~limit =
+          try Ok (Mcp_server.read_event_lines config ~limit) with
+          | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+          | Unix.Unix_error (err, op, _) ->
+            Error
+              ( Mcp_error_code.Internal_error
+              , Printf.sprintf "Failed to read events resource (%s: %s)" op (Unix.error_message err) )
+          | Sys_error detail ->
+            Error
+              ( Mcp_error_code.Internal_error
+              , Printf.sprintf "Failed to read events resource: %s" detail )
+        in
+
         let read_events_json ~limit =
           run_blocking_resource_io (fun () ->
-            if limit <= 0 then `List []
+            if limit <= 0 then Ok (`List [])
             else
-              let lines =
-                try Mcp_server.read_event_lines config ~limit with
-                | Sys_error _ | Unix.Unix_error _ -> []
-              in
-              let events =
-                List.filter_map
-                  (fun line ->
-                     match Yojson.Safe.from_string line with
-                     | json -> Some json
-                     | exception Yojson.Json_error msg ->
-                       let preview =
-                         String_util.utf8_safe ~max_bytes:53 ~suffix:"..." line
-                         |> String_util.to_string
-                       in
-                       Log.legacy_traceln
-                         ~level:Log.Warn
-                         ~module_name:"MCP"
-                         (Printf.sprintf
-                            "[WARN] Failed to parse event JSON: %s (line: %s)"
-                            msg
-                            preview);
-                       None)
-                  lines
-              in
-              `List events)
+              match read_events_lines_result ~limit with
+              | Error _ as err -> err
+              | Ok lines ->
+                let events =
+                  List.filter_map
+                    (fun line ->
+                       match Yojson.Safe.from_string line with
+                       | json -> Some json
+                       | exception Yojson.Json_error msg ->
+                         let preview =
+                           String_util.utf8_safe ~max_bytes:53 ~suffix:"..." line
+                           |> String_util.to_string
+                         in
+                         Log.legacy_traceln
+                           ~level:Log.Warn
+                           ~module_name:"MCP"
+                           (Printf.sprintf
+                              "[WARN] Failed to parse event JSON: %s (line: %s)"
+                              msg
+                              preview);
+                         None)
+                    lines
+                in
+                Ok (`List events))
         in
 
         let read_events_markdown ~limit =
           run_blocking_resource_io (fun () ->
-            if limit <= 0 then "(no events)"
+            if limit <= 0 then Ok "(no events)"
             else
-              let lines =
-                try Mcp_server.read_event_lines config ~limit with
-                | Sys_error _ | Unix.Unix_error _ -> []
-              in
-              if lines = []
-              then "(no events)"
-              else String.concat "\n" (List.map (fun line -> "- " ^ line) lines))
+              match read_events_lines_result ~limit with
+              | Error _ as err -> err
+              | Ok [] -> Ok "(no events)"
+              | Ok lines -> Ok (String.concat "\n" (List.map (fun line -> "- " ^ line) lines)))
         in
 
         let read_wiki_resource ~is_json ~topic =
@@ -1404,18 +1413,26 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
                      entry for it. The path is the constant file name, never
                      the client's topic. Reject symlinks via lstat + O_NOFOLLOW. *)
                   let log_path = Filename.concat wiki_dir Wiki_journal.log_file in
-                  (match regular_file_size_nofollow log_path with
-                   | None -> ("text/markdown", None)
-                    | Some size ->
-                      (match read_log_tail ~path:log_path ~size with
-                       | text -> ("text/markdown", Some text)
-                       | exception (Sys_error _ | Unix.Unix_error _) -> ("text/markdown", None)))
+                  (match Unix.lstat log_path with
+                   | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
+                     ("text/markdown", None)
+                   | st when st.Unix.st_kind = Unix.S_REG && st.Unix.st_size >= 0 ->
+                     ("text/markdown", Some (read_log_tail ~path:log_path ~size:st.Unix.st_size))
+                   | _ -> ("text/markdown", None))
                  | None -> ("text/markdown", None)
                end
                end)
            with
            | read -> Ok (match read with _, None -> None | mime_type, Some text -> Some (mime_type, text))
-           | exception (Sys_error _ | Unix.Unix_error _) -> Ok None
+           | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> Ok None
+           | exception Unix.Unix_error (err, op, _) ->
+             Error
+               ( Mcp_error_code.Internal_error
+               , Printf.sprintf "Failed to read wiki resource (%s: %s)" op (Unix.error_message err) )
+           | exception Sys_error detail ->
+             Error
+               ( Mcp_error_code.Internal_error
+               , Printf.sprintf "Failed to read wiki resource: %s" detail )
         in
 
         let resource_outcome =
@@ -1489,14 +1506,17 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
                 clamp_resource_limit ~max_limit:max_events_resource_limit
                   (Mcp_server.int_query_param uri "limit" ~default:50)
               in
-              Ok (Some ("text/markdown", read_events_markdown ~limit))
+              (match read_events_markdown ~limit with
+               | Ok text -> Ok (Some ("text/markdown", text))
+               | Error _ as err -> err)
           | Events_json ->
               let limit =
                 clamp_resource_limit ~max_limit:max_events_resource_limit
                   (Mcp_server.int_query_param uri "limit" ~default:50)
               in
-              let json = read_events_json ~limit in
-              Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+              (match read_events_json ~limit with
+               | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+               | Error _ as err -> err)
           | Wiki_index_markdown -> read_wiki_resource ~is_json:false ~topic:""
           | Wiki_index_json -> read_wiki_resource ~is_json:true ~topic:""
           | Wiki_page_markdown topic -> read_wiki_resource ~is_json:false ~topic

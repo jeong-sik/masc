@@ -718,23 +718,27 @@ let load_from_attachment_store ?base_path ~kind (media : user_media_block)
                 media.attachment_id
                 (Attachment_store.get_error_to_string err))
        in
-       let* bytes =
-         match Attachment_store.get_bytes_by_sha256 store ~sha256:meta.sha256 with
-         | Ok (Some raw) -> Ok raw
-         | Ok None ->
-           Error
-             (Printf.sprintf
-                "attachment %S bytes missing from attachment store"
-                media.attachment_id)
-         | Error err ->
-           Error
-             (Printf.sprintf
-                "failed to read attachment %S bytes: %s"
-                media.attachment_id
-                (Attachment_store.get_error_to_string err))
-       in
        let att = attachment_of_store_meta ~fallback_name:media.name meta in
-       Ok (att, meta.kind, meta.mime_type, Base64.encode_string bytes))
+       (* Never load or base64-inline raw 50MB video binaries into LLM provider prompts. *)
+       match meta.kind with
+       | Attachment_store.Video -> Ok (att, Attachment_store.Video, meta.mime_type, "")
+       | Attachment_store.Image | Attachment_store.Audio | Attachment_store.Document ->
+         let* bytes =
+           match Attachment_store.get_bytes_by_sha256 store ~sha256:meta.sha256 with
+           | Ok (Some raw) -> Ok raw
+           | Ok None ->
+             Error
+               (Printf.sprintf
+                  "attachment %S bytes missing from attachment store"
+                  media.attachment_id)
+           | Error err ->
+             Error
+               (Printf.sprintf
+                  "failed to read attachment %S bytes: %s"
+                  media.attachment_id
+                  (Attachment_store.get_error_to_string err))
+         in
+         Ok (att, meta.kind, meta.mime_type, Base64.encode_string bytes))
 
 let is_attachment_url_ref data =
   String.starts_with ~prefix:Attachment_store.url_prefix (String.trim data)
@@ -748,9 +752,17 @@ let resolve_media_payload ?base_path ~attachments kind media =
         (normalize_media_payload ~kind ~attachment_id:media.attachment_id
            ~declared_media_type:declared att.data)
   | Some _ | None ->
-      Result.map
-        (fun (att, _kind, media_type, b64) -> att, media_type, b64)
-        (load_from_attachment_store ?base_path ~kind media)
+      let* att, att_kind, media_type, b64 =
+        load_from_attachment_store ?base_path ~kind media
+      in
+      (match att_kind with
+       | Attachment_store.Video ->
+         Error
+           (Printf.sprintf
+              "video attachment %S cannot be base64-inlined as %s payload; attach it as a generic attachment reference instead"
+              media.attachment_id kind)
+       | Attachment_store.Image | Attachment_store.Audio | Attachment_store.Document ->
+         Ok (att, media_type, b64))
 
 let media_block_to_agent_core ?base_path ~attachments kind make_block media =
   Result.map
@@ -917,6 +929,19 @@ let attachment_block_to_agent_core ?base_path ~attachments (media : user_media_b
        Ok (Llm_provider.Types.image_block ~media_type ~source:(Llm_provider.Types.Base64 data))
      | Attachment_store.Audio ->
        Ok (Llm_provider.Types.audio_block ~media_type ~source:(Llm_provider.Types.Base64 data))
+     | Attachment_store.Video ->
+       let label =
+         if String.trim att.name <> "" then att.name else media.attachment_id
+       in
+       Ok
+         (Llm_provider.Types.text_block
+            (Printf.sprintf
+               "[Video attachment: %s (%s, id=%s, url=%s). Stored for playback; raw video binary is not inlined into the model prompt (poster frame available at %s?poster=1).]"
+               label
+               media_type
+               media.attachment_id
+               att.data
+               att.data))
      | Attachment_store.Document ->
        (match document_projection_of_media_type media_type with
         | Project_as_text ->

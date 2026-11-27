@@ -171,6 +171,44 @@ type thinking_block = {
   redacted : bool;
 }
 
+type chart_kind =
+  | Chart_line
+  | Chart_bar
+  | Chart_area
+  | Chart_pie
+
+let chart_kind_to_string = function
+  | Chart_line -> "line"
+  | Chart_bar -> "bar"
+  | Chart_area -> "area"
+  | Chart_pie -> "pie"
+;;
+
+let chart_kind_of_string raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "line" -> Some Chart_line
+  | "bar" -> Some Chart_bar
+  | "area" -> Some Chart_area
+  | "pie" -> Some Chart_pie
+  | _ -> None
+;;
+
+type chart_series = {
+  label : string;
+  color : string option;
+  values : float list;
+}
+
+type chart_block = {
+  chart_type : chart_kind option;
+  title : string;
+  series : chart_series list;
+  labels : string list option;
+  x_label : string option;
+  y_label : string option;
+  y_max : float option;
+}
+
 type chat_block =
   | Text of text_block
   | Heading of text_block
@@ -179,6 +217,7 @@ type chat_block =
   | Table of table_block
   | Code of code_block
   | Mermaid of mermaid_block
+  | Chart of chart_block
   | Svg of svg_block
   | Voice of voice_block
   | Attach of attach_block
@@ -542,6 +581,152 @@ let collect_top_level_fenced_blocks text =
   List.rev (walk [] (Cmarkit.Doc.block doc))
 ;;
 
+let is_pele_diagram_fence = function
+  | "mermaid"
+  | "pele"
+  | "xychart"
+  | "xychart-beta"
+  | "pie"
+  | "quadrant"
+  | "quadrantchart"
+  | "radar"
+  | "radar-beta"
+  | "sankey"
+  | "sankey-beta"
+  | "treemap"
+  | "treemap-beta"
+  | "gantt"
+  | "timeline"
+  | "kanban"
+  | "mindmap"
+  | "venn"
+  | "venn-beta"
+  | "wardley"
+  | "ishikawa"
+  | "c4"
+  | "architecture"
+  | "flowchart"
+  | "sequence"
+  | "class"
+  | "er"
+  | "state"
+  | "gitgraph"
+  | "journey"
+  | "packet"
+  | "requirement"
+  | "block"
+  | "swimlane"
+  | "agentflow"
+  | "eventmodeling"
+  | "cynefin"
+  | "treeview"
+  | "railroad"
+  | "usecase" -> true
+  | _ -> false
+;;
+
+let finite_float_list_of_yojson = function
+  | `List items ->
+    list_all_map
+      (function
+        | `Float value when Float.is_finite value -> Some value
+        | `Int value -> Some (float_of_int value)
+        | _ -> None)
+      items
+  | _ -> None
+;;
+
+let chart_series_of_yojson = function
+  | `Assoc fields ->
+    let label_opt =
+      match List.assoc_opt "label" fields with
+      | Some (`String s) -> Some s
+      | _ -> None
+    in
+    let color =
+      match List.assoc_opt "color" fields with
+      | Some (`String s) when String.trim s <> "" -> Some s
+      | _ -> None
+    in
+    Option.bind label_opt (fun label ->
+      Option.bind (List.assoc_opt "values" fields) (fun values_json ->
+        Option.bind (finite_float_list_of_yojson values_json) (fun values ->
+          if values = [] then None else Some { label; color; values })))
+  | _ -> None
+;;
+
+let chart_block_of_fields fields =
+  let get_str key =
+    match List.assoc_opt key fields with
+    | Some (`String s) -> Some s
+    | _ -> None
+  in
+  let get_first_str keys = List.find_map get_str keys in
+  let get_finite_float keys =
+    List.find_map
+      (fun key ->
+         match List.assoc_opt key fields with
+         | Some (`Float f) when Float.is_finite f -> Some f
+         | Some (`Int i) -> Some (float_of_int i)
+         | _ -> None)
+      keys
+  in
+  let chart_type_res =
+    match get_first_str [ "chart_type"; "type"; "kind" ] with
+    | None -> Ok None
+    | Some raw ->
+      (match chart_kind_of_string raw with
+       | Some k -> Ok (Some k)
+       | None -> Error ())
+  in
+  match chart_type_res with
+  | Error () -> None
+  | Ok chart_type ->
+    Option.bind (get_str "title") (fun title ->
+      Option.bind (List.assoc_opt "series" fields) (fun series_json ->
+        match series_json with
+        | `List items ->
+          Option.bind (list_all_map chart_series_of_yojson items) (fun series ->
+            if series = []
+            then None
+            else (
+              let labels =
+                match List.assoc_opt "labels" fields with
+                | None -> Ok None
+                | Some json ->
+                  (match string_list_of_yojson json with
+                   | Some xs -> Ok (Some xs)
+                   | None -> Error ())
+              in
+              match labels with
+              | Error () -> None
+              | Ok labels ->
+                Some
+                  { chart_type
+                  ; title
+                  ; series
+                  ; labels
+                  ; x_label = get_first_str [ "xLabel"; "x_label" ]
+                  ; y_label = get_first_str [ "yLabel"; "y_label" ]
+                  ; y_max = get_finite_float [ "yMax"; "y_max" ]
+                  }))
+        | _ -> None))
+;;
+
+let parse_chart_fence_json source =
+  match Yojson.Safe.from_string source with
+  | `Assoc fields -> chart_block_of_fields fields
+  | _ -> None
+  | exception Yojson.Json_error _ -> None
+;;
+
+let chart_series_to_yojson { label; color; values } =
+  `Assoc
+    ([ ("label", `String label) ]
+     @ Json_util.string_field_if_present "color" color
+     @ [ ("values", `List (List.map (fun v -> `Float v) values)) ])
+;;
+
 let parse_text_to_blocks text : chat_block list =
   let len = String.length text in
   let fences = collect_top_level_fenced_blocks text in
@@ -555,7 +740,13 @@ let parse_text_to_blocks text : chat_block list =
            let acc = scan_non_code_fragment acc before in
            let block =
              match lang with
-             | Some ("mermaid" | "pele") -> Mermaid { source; caption = None }
+             | Some "chart" ->
+               (match parse_chart_fence_json source with
+                | Some chart -> Chart chart
+                | None ->
+                  Code { cap = lang; html = escape_html source; source = Some source })
+             | Some tag when is_pele_diagram_fence tag ->
+               Mermaid { source; caption = None }
              | Some _ | None ->
                Code { cap = lang; html = escape_html source; source = Some source }
            in
@@ -611,6 +802,23 @@ let block_to_yojson = function
     `Assoc
       ([ ("t", `String "mermaid"); ("source", `String source) ]
        @ Json_util.string_field_if_present "caption" caption)
+  | Chart { chart_type; title; series; labels; x_label; y_label; y_max } ->
+    `Assoc
+      ([ ("t", `String "chart")
+       ; ("title", `String title)
+       ; ("series", `List (List.map chart_series_to_yojson series))
+       ]
+       @ (match chart_type with
+          | None -> []
+          | Some kind ->
+            let s = chart_kind_to_string kind in
+            [ ("type", `String s); ("chart_type", `String s) ])
+       @ (match labels with
+          | None -> []
+          | Some xs -> [ ("labels", `List (List.map (fun s -> `String s) xs)) ])
+       @ Json_util.string_field_if_present "xLabel" x_label
+       @ Json_util.string_field_if_present "yLabel" y_label
+       @ opt_float_field "yMax" y_max)
   | Svg { svg; cap } ->
     `Assoc ([ ("t", `String "svg"); ("svg", `String svg) ] @ Json_util.string_field_if_present "cap" cap)
   | Voice { secs; wave; via; size; transcript; src } ->
@@ -812,6 +1020,8 @@ let block_of_yojson json : chat_block option =
      | Some "mermaid" ->
        Option.bind (get_string "source") (fun source ->
          Some (Mermaid { source; caption = get_string "caption" }))
+     | Some "chart" ->
+       Option.map (fun chart -> Chart chart) (chart_block_of_fields fields)
      | Some "svg" ->
        Option.bind (get_string "svg") (fun svg ->
          Some (Svg { svg; cap = get_string "cap" }))

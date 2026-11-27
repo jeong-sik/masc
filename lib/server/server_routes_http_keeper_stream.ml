@@ -699,9 +699,16 @@ let connector_input ~base_path ~clock ~keeper_name ~operation_id
                if List.length acc >= admitted_count
                then Error "Accepted Discord image count exceeds original operation"
                else
-                 match Attachment_store.get_bytes att_store ~id:(String.trim image.id) with
-                 | Ok (Some raw_bytes) ->
-                   rehydrate ({ image with data = Base64.encode_string raw_bytes } :: acc) rest
+                 match Attachment_store.get_meta att_store ~id:(String.trim image.id) with
+                 | Ok (Some { kind = Attachment_store.Video; id; _ }) ->
+                   (* Never base64-inline raw video binaries into LLM prompts; keep the URL ref. *)
+                   rehydrate ({ image with data = Attachment_store.url_of_id id } :: acc) rest
+                 | Ok (Some { kind = Attachment_store.Image | Attachment_store.Audio | Attachment_store.Document; _ }) ->
+                   (match Attachment_store.get_bytes att_store ~id:(String.trim image.id) with
+                    | Ok (Some raw_bytes) ->
+                      rehydrate ({ image with data = Base64.encode_string raw_bytes } :: acc) rest
+                    | Ok None -> Error "Accepted Discord image payload is missing"
+                    | Error err -> Error (Attachment_store.get_error_to_string err))
                  | Ok None -> Error "Accepted Discord image payload is missing"
                  | Error err -> Error (Attachment_store.get_error_to_string err)
              ) else (

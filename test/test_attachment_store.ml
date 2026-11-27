@@ -95,6 +95,7 @@ let minimal_m4a = "\x00\x00\x00\x18ftypM4A \x00\x00\x00\x00M4A isom"
 let minimal_mp4_isom_audio = "\x00\x00\x00\x14ftypisom\x00\x00\x02\x00isom\x00\x00\x00\x18hdlr\x00\x00\x00\x00\x00\x00\x00\x00soun"
 let minimal_m4v_video = "\x00\x00\x00\x18ftypM4V \x00\x00\x00\x00M4V isom"
 let minimal_mp4_isom_with_vide = "\x00\x00\x00\x14ftypisom\x00\x00\x02\x00isom\x00\x00\x00\x18hdlr\x00\x00\x00\x00\x00\x00\x00\x00vide"
+let minimal_qt_mov = "\x00\x00\x00\x14ftypqt  \x00\x00\x00\x00qt  "
 let minimal_audio_webm = "\x1a\x45\xdf\xa3\x9f\x42\x86\x81\x01\x42\x82\x84webm\x83\x81\x02A_OPUS"
 let minimal_video_webm_vp9 = "\x1a\x45\xdf\xa3\x9f\x42\x86\x81\x01\x42\x82\x84webmV_VP9"
 let minimal_video_webm_track = "\x1a\x45\xdf\xa3\x9f\x42\x86\x81\x01\x42\x82\x84webm\x83\x81\x01"
@@ -159,24 +160,28 @@ let test_magic_sniffing_and_dimensions () =
     (Some "audio/mp4")
     (Option.map A.mime_to_string (A.sniff_mime minimal_mp4_isom_audio));
   Alcotest.(check (option string))
-    "reject M4V video"
-    None
+    "sniff M4V as video/mp4"
+    (Some "video/mp4")
     (Option.map A.mime_to_string (A.sniff_mime minimal_m4v_video));
   Alcotest.(check (option string))
-    "reject isom MP4 containing vide hdlr track"
-    None
+    "sniff isom MP4 containing vide hdlr track as video/mp4"
+    (Some "video/mp4")
     (Option.map A.mime_to_string (A.sniff_mime minimal_mp4_isom_with_vide));
+  Alcotest.(check (option string))
+    "sniff QuickTime qt as video/quicktime"
+    (Some "video/quicktime")
+    (Option.map A.mime_to_string (A.sniff_mime minimal_qt_mov));
   Alcotest.(check (option string))
     "sniff audio/webm"
     (Some "audio/webm")
     (Option.map A.mime_to_string (A.sniff_mime minimal_audio_webm));
   Alcotest.(check (option string))
-    "reject video/webm V_VP9"
-    None
+    "sniff video/webm V_VP9"
+    (Some "video/webm")
     (Option.map A.mime_to_string (A.sniff_mime minimal_video_webm_vp9));
   Alcotest.(check (option string))
-    "reject video/webm TrackType video"
-    None
+    "sniff video/webm TrackType video"
+    (Some "video/webm")
     (Option.map A.mime_to_string (A.sniff_mime minimal_video_webm_track));
   Alcotest.(check (option string))
     "reject unknown bytes"
@@ -850,6 +855,146 @@ let test_derivatives () =
     | Error err -> Alcotest.fail (A.derivative_error_to_string err))
 ;;
 
+let generate_tiny_mp4_opt () =
+  let out = Filename.temp_file "masc_test_vid_" ".mp4" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove out with Sys_error _ -> ())
+    (fun () ->
+       match
+         Process_eio.run_argv_with_status_split_or_refusal
+           ~timeout_sec:10.0
+           [ "ffmpeg"
+           ; "-nostdin"
+           ; "-hide_banner"
+           ; "-loglevel"
+           ; "error"
+           ; "-y"
+           ; "-f"
+           ; "lavfi"
+           ; "-i"
+           ; "color=c=blue:s=320x240:d=0.2:r=5"
+           ; "-pix_fmt"
+           ; "yuv420p"
+           ; "-movflags"
+           ; "+faststart"
+           ; out
+           ]
+       with
+       | Ok (Unix.WEXITED 0, _, _) when Sys.file_exists out ->
+         let ic = open_in_bin out in
+         let bytes =
+           Fun.protect
+             ~finally:(fun () -> close_in_noerr ic)
+             (fun () -> really_input_string ic (in_channel_length ic))
+         in
+         if String.length bytes > 0 then Some bytes else None
+       | _ -> None)
+;;
+
+let test_video_aliases_limits_and_poster () =
+  Eio_main.run @@ fun env ->
+  Process_eio.init
+    ~cwd_default:env#cwd
+    ~proc_mgr:env#process_mgr
+    ~clock:env#clock;
+  with_temp_base_path (fun base_path ->
+    let store = A.create ~base_path in
+    let put ?declared_mime bytes =
+      A.put
+        ?declared_mime
+        ~origin:A.User_upload
+        ~created_by:"u"
+        ~retention:A.Durable
+        store
+        ~bytes
+    in
+    (* Declared MIME aliases normalize cleanly *)
+    let m_midi1 = put ~declared_mime:"audio/x-midi" minimal_midi |> Result.get_ok in
+    Alcotest.(check string) "audio/x-midi -> audio/midi" "audio/midi" m_midi1.mime_type;
+    let m_midi2 = put ~declared_mime:"audio/mid" minimal_midi |> Result.get_ok in
+    Alcotest.(check string) "audio/mid -> audio/midi" "audio/midi" m_midi2.mime_type;
+    let m_wav1 = put ~declared_mime:"audio/x-wav" minimal_wav |> Result.get_ok in
+    Alcotest.(check string) "audio/x-wav -> audio/wav" "audio/wav" m_wav1.mime_type;
+    let m_wav2 = put ~declared_mime:"audio/wave" minimal_wav |> Result.get_ok in
+    Alcotest.(check string) "audio/wave -> audio/wav" "audio/wav" m_wav2.mime_type;
+    let m_m4v = put ~declared_mime:"video/x-m4v" minimal_m4v_video |> Result.get_ok in
+    Alcotest.(check string) "video/x-m4v -> video/mp4" "video/mp4" m_m4v.mime_type;
+    Alcotest.(check string) "video kind wire string" "video" (A.media_kind_to_string m_m4v.kind);
+    (* Default video limit is 50 MiB vs 20 MiB non-video *)
+    Alcotest.(check int) "default_max_bytes 20MiB" (20 * 1024 * 1024) A.default_max_bytes;
+    Alcotest.(check int) "default_max_video_bytes 50MiB" (50 * 1024 * 1024) A.default_max_video_bytes;
+    (* Separate env size caps: video allowed above MASC_ATTACHMENT_MAX_BYTES up to MASC_ATTACHMENT_MAX_VIDEO_BYTES *)
+    let prev_max = Sys.getenv_opt "MASC_ATTACHMENT_MAX_BYTES" in
+    let prev_vid = Sys.getenv_opt "MASC_ATTACHMENT_MAX_VIDEO_BYTES" in
+    let restore_env k = function
+      | Some v -> Unix.putenv k v
+      | None -> Unix.putenv k ""
+    in
+    Unix.putenv "MASC_ATTACHMENT_MAX_BYTES" "64";
+    Unix.putenv "MASC_ATTACHMENT_MAX_VIDEO_BYTES" "256";
+    Fun.protect
+      ~finally:(fun () ->
+        restore_env "MASC_ATTACHMENT_MAX_BYTES" prev_max;
+        restore_env "MASC_ATTACHMENT_MAX_VIDEO_BYTES" prev_vid)
+      (fun () ->
+         let big_png = make_png ~width:16 ~height:16 ~seed:5 in
+         Alcotest.(check bool) "big_png > 64 bytes" true (String.length big_png > 64);
+         (match put ~declared_mime:"image/png" big_png with
+          | Error (A.Payload_too_large { maximum = 64; _ }) -> ()
+          | Ok _ | Error _ -> Alcotest.fail "expected non-video rejected at 64 bytes");
+         let vid_128 = minimal_m4v_video ^ String.make 100 '\x00' in
+         (match put ~declared_mime:"video/mp4" vid_128 with
+          | Ok m -> Alcotest.(check string) "128B video accepted under 256B video cap" "video/mp4" m.mime_type
+          | Error err -> Alcotest.fail ("expected video accepted under video cap: " ^ A.put_error_to_string err));
+         let vid_300 = minimal_m4v_video ^ String.make 280 '\x00' in
+         (match put ~declared_mime:"video/mp4" vid_300 with
+          | Error (A.Payload_too_large { maximum = 256; _ }) -> ()
+          | Ok _ | Error _ -> Alcotest.fail "expected 300B video rejected at 256B video cap"));
+    (* Corrupt video poster fails cleanly with Transform_failed *)
+    (match A.get_video_poster ~max_px:160 store ~meta:m_m4v ~raw_bytes:minimal_m4v_video with
+     | Error (A.Transform_failed _) -> ()
+     | Ok _ | Error _ -> Alcotest.fail "expected Transform_failed on truncated MP4");
+    (* Non-video rejected with Not_an_image *)
+    (match A.get_video_poster store ~meta:m_midi1 ~raw_bytes:minimal_midi with
+     | Error (A.Not_an_image "audio/midi") -> ()
+     | Ok _ | Error _ -> Alcotest.fail "expected Not_an_image on MIDI");
+    (* Real ffmpeg MP4 poster extraction when ffmpeg is installed *)
+    match generate_tiny_mp4_opt () with
+    | None -> ()
+    | Some mp4_bytes ->
+      let mp4_meta = put ~declared_mime:"video/mp4" mp4_bytes |> Result.get_ok in
+      Alcotest.(check string) "real mp4 kind" "video" (A.media_kind_to_string mp4_meta.kind);
+      (match A.get_video_poster ~max_px:160 store ~meta:mp4_meta ~raw_bytes:mp4_bytes with
+       | Error err -> Alcotest.fail ("get_video_poster failed: " ^ A.derivative_error_to_string err)
+       | Ok (mime, poster_png) ->
+         Alcotest.(check string) "poster mime" "image/png" mime;
+         Alcotest.(check bool) "poster sniffs as PNG" true (A.sniff_mime poster_png = Some A.Image_png);
+         (match A.detect_image_dimensions poster_png with
+          | Some (w, h) -> Alcotest.(check bool) "poster <= 160px" true (max w h <= 160 && min w h > 0)
+          | None -> Alcotest.fail "poster PNG dimensions unreadable");
+         let cache_path =
+           Filename.concat
+             (Filename.concat
+                (Filename.concat (A.root_dir store) "thumbs")
+                (String.sub mp4_meta.sha256 0 2))
+             (mp4_meta.sha256 ^ "_poster_160.png")
+         in
+         Alcotest.(check bool) "poster cached at _poster_160.png" true (Sys.file_exists cache_path));
+      (* get_image_derivative ~target_format:Force_png on Video delegates to get_video_poster *)
+      (match
+         A.get_image_derivative
+           ~max_px:160
+           ~target_format:A.Force_png
+           store
+           ~meta:mp4_meta
+           ~raw_bytes:mp4_bytes
+       with
+       | Ok (mime, png2) ->
+         Alcotest.(check string) "derivative video->png mime" "image/png" mime;
+         Alcotest.(check bool) "derivative video->png sniffs PNG" true (A.sniff_mime png2 = Some A.Image_png)
+       | Error err -> Alcotest.fail ("video Force_png failed: " ^ A.derivative_error_to_string err)))
+;;
+
 let () =
   Alcotest.run
     "attachment_store"
@@ -861,6 +1006,7 @@ let () =
         ; Alcotest.test_case "put_opaque binary preservation and fail-closed pin scan" `Quick test_put_opaque_and_fail_closed_pins
         ; Alcotest.test_case "extract_att_ids boundary scanning" `Quick test_extract_att_ids
         ; Alcotest.test_case "image derivatives and non-image refusal" `Quick test_derivatives
+        ; Alcotest.test_case "video MIME aliases, 50MiB limit, and ffmpeg poster frame" `Quick test_video_aliases_limits_and_poster
         ] )
     ]
 ;;

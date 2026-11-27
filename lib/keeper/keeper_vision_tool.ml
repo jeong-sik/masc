@@ -200,11 +200,24 @@ let load_artifact ~dir handle =
         | None -> Ok None
         | Some base_path ->
           let store = Attachment_store.create ~base_path in
+          let read_non_video () =
+            match Attachment_store.get_meta_by_sha256 store ~sha256 with
+            | Ok (Some { kind = Attachment_store.Video; id; _ }) ->
+              Error
+                (Attachment_store.Read_failed
+                   (Printf.sprintf
+                      "video attachment %s cannot be analyzed directly as a still image; inspect its poster frame (?poster=1) instead"
+                      id))
+            | Ok (Some { kind = Attachment_store.Image | Attachment_store.Audio | Attachment_store.Document; _ }) ->
+              Attachment_store.get_bytes_by_sha256 store ~sha256
+            | Ok None -> Ok None
+            | Error err -> Error err
+          in
           (match keeper_name_of_vision_store_dir dir with
-           | None -> Attachment_store.get_bytes_by_sha256 store ~sha256
+           | None -> read_non_video ()
            | Some caller ->
              (match Attachment_store.can_keeper_read store ~keeper:caller ~id_or_sha256:sha256 with
-              | Ok true -> Attachment_store.get_bytes_by_sha256 store ~sha256
+              | Ok true -> read_non_video ()
               | Ok false -> Ok None
               | Error err -> Error err))
       in

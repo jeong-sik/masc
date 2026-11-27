@@ -785,6 +785,123 @@ let test_malformed_think_flag_rejects_whole_trace_block () =
    | None -> Alcotest.fail "unrelated blocks must survive");
   witness
 
+let test_chart_fence_parse_and_roundtrip () =
+  let md =
+    String.concat "\n"
+      [ "```chart"
+      ; {|{"type":"bar","title":"Latency (ms)","labels":["p50","p95","p99"],"xLabel":"Percentile","yLabel":"ms","yMax":500,"series":[{"label":"API","color":"#4f8ef7","values":[42,180,340.5]},{"label":"DB","values":[12,55,110]}]}|}
+      ; "```"
+      ]
+  in
+  let blocks = B.parse_text_to_blocks md in
+  (match blocks with
+   | [ B.Chart
+         { chart_type = Some B.Chart_bar
+         ; title = "Latency (ms)"
+         ; labels = Some [ "p50"; "p95"; "p99" ]
+         ; x_label = Some "Percentile"
+         ; y_label = Some "ms"
+         ; y_max = Some 500.
+         ; series =
+             [ { label = "API"; color = Some "#4f8ef7"; values = [ 42.; 180.; 340.5 ] }
+             ; { label = "DB"; color = None; values = [ 12.; 55.; 110. ] }
+             ]
+         }
+     ] -> ()
+   | _ -> Alcotest.fail "expected valid chart fence to parse as Chart block");
+  let wire = B.blocks_to_yojson blocks in
+  (match wire with
+   | `List [ `Assoc fields ] ->
+     Alcotest.(check (option yojson_testable))
+       "wire t" (Some (`String "chart")) (List.assoc_opt "t" fields);
+     Alcotest.(check (option yojson_testable))
+       "wire type" (Some (`String "bar")) (List.assoc_opt "type" fields);
+     Alcotest.(check (option yojson_testable))
+       "wire chart_type" (Some (`String "bar")) (List.assoc_opt "chart_type" fields);
+     Alcotest.(check (option yojson_testable))
+       "wire xLabel" (Some (`String "Percentile")) (List.assoc_opt "xLabel" fields)
+   | _ -> Alcotest.fail "unexpected chart wire JSON");
+  match B.blocks_of_yojson wire with
+  | Some roundtripped ->
+    Alcotest.(check (list yojson_testable))
+      "chart roundtrip"
+      (blocks_to_json_list blocks)
+      (blocks_to_json_list roundtripped)
+  | None -> Alcotest.fail "blocks_of_yojson rejected encoded Chart block"
+
+let test_chart_fence_invalid_falls_back_to_code () =
+  let cases =
+    [ "```chart\n{not valid json\n```"
+    ; "```chart\n{\"title\":\"Empty\",\"series\":[]}\n```"
+    ; "```chart\n{\"type\":\"waterfall\",\"title\":\"Bad\",\"series\":[{\"label\":\"a\",\"values\":[1]}]}\n```"
+    ; "```chart\n{\"title\":\"NaN\",\"series\":[{\"label\":\"a\",\"values\":[\"oops\"]}]}\n```"
+    ]
+  in
+  List.iter
+    (fun md ->
+       match B.parse_text_to_blocks md with
+       | [ B.Code { cap = Some "chart"; _ } ] -> ()
+       | _ -> Alcotest.fail ("expected fallback Code block for invalid chart fence: " ^ md))
+    cases
+
+let test_pele_diagram_fences_and_alphatex_code () =
+  let diagram_tags =
+    [ "xychart-beta"; "pie"; "radar-beta"; "sankey-beta"; "treemap-beta"
+    ; "quadrantChart"; "gantt"; "timeline"; "venn-beta"; "pele"
+    ]
+  in
+  List.iter
+    (fun tag ->
+       let md = Printf.sprintf "```%s\ntitle Demo\n```" tag in
+       match B.parse_text_to_blocks md with
+       | [ B.Mermaid { source = "title Demo"; _ } ] -> ()
+       | _ -> Alcotest.fail ("expected Mermaid block for Pele diagram fence: " ^ tag))
+    diagram_tags;
+  List.iter
+    (fun tag ->
+       let md = Printf.sprintf "```%s\n\\title \"Etude\"\n. 0.6 2.6\n```" tag in
+       match B.parse_text_to_blocks md with
+       | [ B.Code { cap = Some c; _ } ] when String.lowercase_ascii c = tag -> ()
+       | _ -> Alcotest.fail ("expected Code block with intact cap for music fence: " ^ tag))
+    [ "alphatex"; "atex" ]
+
+let test_attach_preserves_video_and_audio_kinds () =
+  let original =
+    [ B.Attach
+        { name = "demo.webm"
+        ; dims = None
+        ; src = Some "/api/v1/attachments/att_vid"
+        ; svg = None
+        ; ph = None
+        ; via = Some "upload"
+        ; size = Some "1.2 MB"
+        ; data = None
+        ; mime_type = Some "video/webm"
+        ; size_bytes = Some 1200000
+        ; kind = Some "video"
+        }
+    ; B.Attach
+        { name = "song.mid"
+        ; dims = None
+        ; src = Some "/api/v1/attachments/att_mid"
+        ; svg = None
+        ; ph = None
+        ; via = Some "upload"
+        ; size = Some "4 KB"
+        ; data = None
+        ; mime_type = Some "audio/midi"
+        ; size_bytes = Some 4096
+        ; kind = Some "audio"
+        }
+    ]
+  in
+  match B.blocks_of_yojson (B.blocks_to_yojson original) with
+  | Some
+      [ B.Attach { kind = Some "video"; mime_type = Some "video/webm"; _ }
+      ; B.Attach { kind = Some "audio"; mime_type = Some "audio/midi"; _ }
+      ] -> ()
+  | _ -> Alcotest.fail "Attach video/audio kind and mime_type did not round-trip"
+
 let () =
   Alcotest.run "keeper_chat_blocks"
     [
@@ -810,6 +927,14 @@ let () =
             test_mermaid_fence_becomes_mermaid_block;
           Alcotest.test_case "commonmark tilde, 4-backtick, info options, and pele tags" `Quick
             test_commonmark_fences_and_diagram_tags;
+          Alcotest.test_case "chart fence parses and roundtrips" `Quick
+            test_chart_fence_parse_and_roundtrip;
+          Alcotest.test_case "invalid chart fence falls back to code block" `Quick
+            test_chart_fence_invalid_falls_back_to_code;
+          Alcotest.test_case "pele diagram fences become mermaid while alphatex stays code" `Quick
+            test_pele_diagram_fences_and_alphatex_code;
+          Alcotest.test_case "attach preserves video and audio kinds with mime_type" `Quick
+            test_attach_preserves_video_and_audio_kinds;
           Alcotest.test_case "multiple images and text lines" `Quick
             test_multiple_images_and_text_lines;
           Alcotest.test_case "empty lines ignored" `Quick

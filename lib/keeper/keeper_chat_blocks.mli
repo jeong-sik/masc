@@ -204,6 +204,31 @@ type thinking_block = {
   redacted : bool;
 }
 
+type chart_kind =
+  | Chart_line
+  | Chart_bar
+  | Chart_area
+  | Chart_pie
+
+val chart_kind_to_string : chart_kind -> string
+val chart_kind_of_string : string -> chart_kind option
+
+type chart_series = {
+  label : string;
+  color : string option;
+  values : float list;
+}
+
+type chart_block = {
+  chart_type : chart_kind option;
+  title : string;
+  series : chart_series list;
+  labels : string list option;
+  x_label : string option;
+  y_label : string option;
+  y_max : float option;
+}
+
 type chat_block =
   | Text of text_block
   | Heading of text_block
@@ -212,6 +237,7 @@ type chat_block =
   | Table of table_block
   | Code of code_block
   | Mermaid of mermaid_block
+  | Chart of chart_block
   | Svg of svg_block
   | Voice of voice_block
   | Attach of attach_block

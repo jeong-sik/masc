@@ -662,6 +662,50 @@ let test_concurrent_writer_is_waited_out_not_fenced () =
       end)
 ;;
 
+(* The Librarian, receipt waits, the tool outbox and the approval queue read
+   this file through their own connections while the Owner writes it, all in
+   one process. With the macOS system SQLite a READONLY inspection that holds
+   the shared lock made the Owner's BEGIN IMMEDIATE fail with
+   SQLITE_IOERR_LOCK (3850, errno EBADF), and the Owner fenced its chat
+   (#36195). Inspections run in a second domain while the Owner admits;
+   every admission must commit. Upstream SQLite never had the fault, so on
+   Linux this passes with or without the fix. *)
+let test_inspections_beside_the_owner_never_fence_its_writes () =
+  with_store "inspections-beside-owner" @@ fun path store ->
+  let stop = Atomic.make false in
+  let inspector =
+    Domain.spawn (fun () ->
+      let rec inspect count =
+        if Atomic.get stop
+        then count
+        else (
+          (* Only the Owner's admissions are under test here. *)
+          match Store.inspect_pending_inputs ~path with
+          | Ok _ | Error _ -> inspect (count + 1))
+      in
+      inspect 0)
+  in
+  let admissions =
+    Fun.protect
+      ~finally:(fun () -> Atomic.set stop true)
+      (fun () ->
+        List.init 200 (fun index ->
+          Store.submit
+            store
+            ~now:(float_of_int index)
+            ~operation_id:(id (Printf.sprintf "kmsg-beside-inspection-%d" index))
+            ~source:(source "operator")
+            ~input:(input "hello")))
+  in
+  let inspections = Domain.join inspector in
+  check bool "inspections ran beside the admissions" true (inspections > 0);
+  List.iteri
+    (fun index -> function
+      | Ok _ -> ()
+      | Error error -> failf "admission %d: %s" index (Store.error_to_string error))
+    admissions
+;;
+
 let () =
   run
     "keeper-chat-operation-store"
@@ -695,5 +739,7 @@ let () =
             test_statement_finalize_survives_gc_pressure
         ; test_case "concurrent writer is waited out, not fenced" `Quick
             test_concurrent_writer_is_waited_out_not_fenced
+        ; test_case "inspections beside the Owner never fence its writes" `Quick
+            test_inspections_beside_the_owner_never_fence_its_writes
         ] )
     ]

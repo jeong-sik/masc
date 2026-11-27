@@ -61,10 +61,14 @@ let transaction db f =
   let committed = ref false in
   Fun.protect ~finally:(fun () -> if not !committed then ignore (Sqlite3.exec db "ROLLBACK"))
     (fun () -> let* value = f () in let* () = exec db "COMMIT" in committed := true; Ok value)
+(* A read opens the file read-write with query_only, never READONLY: a write
+   runs in this same process, and with the macOS system SQLite a READONLY
+   connection holding the shared lock makes that write's lock fail as
+   SQLITE_IOERR_LOCK (#36195, see Keeper_chat_operation_store.inspect_file). *)
 let with_db ?(create=false) ~write ~path f =
   try
     let db = if create then Sqlite3.db_open path
-      else Sqlite3.db_open ~mode:(if write then `NO_CREATE else `READONLY) path in
+      else Sqlite3.db_open ~mode:`NO_CREATE path in
     Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
       if write then begin
         let* () = exec db "PRAGMA journal_mode=DELETE" in
@@ -79,7 +83,9 @@ let with_db ?(create=false) ~write ~path f =
             let* () = exec db binding_immutable in exec db no_delete
             else validate_schema db in
           f db)
-      end else let* () = validate_schema db in f db)
+      end else
+        let* () = exec db "PRAGMA query_only=1" in
+        let* () = validate_schema db in f db)
   with
   | Sqlite3.Error message | Sqlite3.SqliteError message | Sqlite3.DataTypeError message
   | Sqlite3.InternalError message | Sys_error message -> Error (Store_unavailable message)

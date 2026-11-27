@@ -204,6 +204,13 @@ export function LanesTab(props: WorkspaceViewProps) {
   const sourceRead = useRef<AbortController | null>(null)
   const previewRequest = useRef<AbortController | null>(null)
   const inspectRequest = useRef<AbortController | null>(null)
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
   const epoch = sessionEpoch.value
   const routeModeQuery = currentRoute.value.query.mode?.toLowerCase()
 
@@ -784,28 +791,34 @@ export function LanesTab(props: WorkspaceViewProps) {
   const handleSaveDefaultRoute = async (ev: Event) => {
     ev.preventDefault()
     if (!hasLocalConfigAdmin() || !defaultRouteInput.trim()) return
+    const startEpoch = currentSessionEpoch()
+    const targetRoute = defaultRouteInput.trim()
     setBusy('routing')
     setBanner(null)
     const res = await apiMutate<unknown>('POST', '/api/v1/runtime/config/routing', {
       lane: 'default',
-      runtime_id: defaultRouteInput.trim(),
+      runtime_id: targetRoute,
     })
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setBusy(null)
     if (!res.ok) {
       setBanner({ kind: 'err', text: `기본 라우트 변경 실패: ${res.error.message}` })
       return
     }
     setBanner(null)
-    pushShellToast(`기본 라우트가 ${defaultRouteInput.trim()} 로 갱신되었습니다.`, 'success')
+    pushShellToast(`기본 라우트가 ${targetRoute} 로 갱신되었습니다.`, 'success')
     loadFailover(false, 'manual')
   }
 
   const handleSaveAssignment = async (ev: Event) => {
     ev.preventDefault()
     if (!hasLocalConfigAdmin() || !assignKeeper.trim()) return
+    const startEpoch = currentSessionEpoch()
+    const targetKeeper = assignKeeper.trim()
+    const targetRuntime = assignRuntime.trim()
     setBusy('assignment')
     setBanner(null)
-    const prev = resolvedData?.assignments?.find((a) => a.keeper === assignKeeper.trim())
+    const prev = resolvedData?.assignments?.find((a) => a.keeper === targetKeeper)
     const prevRuntimeId = prev && prev.assignment_source === 'explicit' ? prev.resolved.id : null
     const expected_assignment_revision = sourceRevision
       ? {
@@ -818,17 +831,18 @@ export function LanesTab(props: WorkspaceViewProps) {
       : { state: 'runtime_config_missing' }
 
     const res = await apiMutate<unknown>('POST', '/api/v1/runtime/config/assignment', {
-      keeper_name: assignKeeper.trim(),
-      runtime_id: assignRuntime.trim() ? assignRuntime.trim() : null,
+      keeper_name: targetKeeper,
+      runtime_id: targetRuntime ? targetRuntime : null,
       expected_assignment_revision,
     })
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setBusy(null)
     if (!res.ok) {
       setBanner({ kind: 'err', text: `Keeper 할당 실패: ${res.error.message}` })
       return
     }
     setBanner(null)
-    pushShellToast(`${assignKeeper.trim()} 런타임 할당이 반영되었습니다.`, 'success')
+    pushShellToast(`${targetKeeper} 런타임 할당이 반영되었습니다.`, 'success')
     loadFailover(false, 'manual')
   }
 
@@ -930,26 +944,30 @@ export function LanesTab(props: WorkspaceViewProps) {
     const curSession = authSession.peek()
     if (curSession.kind !== 'single_user_local' || curSession.role === 'player') return
     if (!fusionKeeper.trim() || !fusionPrompt.trim()) return
+    const startEpoch = currentSessionEpoch()
+    const targetKeeper = fusionKeeper.trim()
+    const targetTopology = fusionTopology
     setBusy('fusion')
     setBanner(null)
     const body = {
       prompt: fusionPrompt.trim(),
-      topology: fusionTopology,
+      topology: targetTopology,
       web_tools: fusionWebTools,
       ...(fusionPreset.trim() ? { preset: fusionPreset.trim() } : {}),
     }
     const res = await apiMutate<unknown>(
       'POST',
-      `/api/v1/keepers/${encodeURIComponent(fusionKeeper.trim())}/fusion`,
+      `/api/v1/keepers/${encodeURIComponent(targetKeeper)}/fusion`,
       body,
     )
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setBusy(null)
     if (!res.ok) {
       setBanner({ kind: 'err', text: `Fusion 실행 실패: ${res.error.message}` })
       return
     }
     setBanner(null)
-    pushShellToast(`${fusionKeeper.trim()} Fusion (${fusionTopology}) 실행을 요청했습니다.`, 'success')
+    pushShellToast(`${targetKeeper} Fusion (${targetTopology}) 실행을 요청했습니다.`, 'success')
     setFusionModalOpen(false)
     setFusionPrompt('')
     loadFusion('manual')
@@ -1044,26 +1062,49 @@ export function LanesTab(props: WorkspaceViewProps) {
 
       ${mode === 'failover' && html`
         <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)', minWidth: 0 }}>
+          ${(resolvedObs.kind === 'failed' || (isSingleUser && probeObs.kind === 'failed')) && html`
+            <div class="ap-error" role="alert">
+              ${resolvedObs.kind === 'failed' ? `런타임 레인 조회 실패: ${resolvedObs.error.message}` : ''}
+              ${resolvedObs.kind === 'failed' && isSingleUser && probeObs.kind === 'failed' ? ' · ' : ''}
+              ${isSingleUser && probeObs.kind === 'failed' ? `런타임 프로브 조회 실패: ${probeObs.error.message}` : ''}
+            </div>
+          `}
           <section class="ov-kpis" aria-label="레인 프로브 요약">
             <div class="ov-kpi">
               <div class="ov-kpi-k">기본 라우트</div>
-              <div class="ov-kpi-v" style=${{ fontSize: 'var(--fs-14)' }}>${resolvedData?.default_route ?? '없음'}</div>
+              <div class="ov-kpi-v" style=${{ fontSize: 'var(--fs-14)' }}>
+                ${resolvedObs.kind === 'value'
+                  ? (resolvedData?.default_route ?? '없음')
+                  : formatObserved(resolvedObs)}
+              </div>
             </div>
             <div class="ov-kpi">
               <div class="ov-kpi-k">활성 레인 프로브 (실패)</div>
-              <div class=${`ov-kpi-v ${activeFailed > 0 ? 'bad' : 'ok'}`}>
-                ${probePartition.active.length} (${activeFailed})
+              <div class=${`ov-kpi-v ${probeObs.kind === 'failed' || resolvedObs.kind === 'failed' ? 'bad' : probeObs.kind === 'value' ? (activeFailed > 0 ? 'bad' : 'ok') : ''}`}>
+                ${probeObs.kind === 'value'
+                  ? `${probePartition.active.length} (${activeFailed})`
+                  : isSingleUser
+                    ? formatObserved(probeObs)
+                    : '—'}
               </div>
             </div>
             <div class="ov-kpi">
               <div class="ov-kpi-k">외부 레인 프로브 (격리)</div>
-              <div class=${`ov-kpi-v ${outsideFailed > 0 ? 'warn' : ''}`}>
-                ${probePartition.outside.length} (${outsideFailed})
+              <div class=${`ov-kpi-v ${probeObs.kind === 'failed' ? 'bad' : probeObs.kind === 'value' && outsideFailed > 0 ? 'warn' : ''}`}>
+                ${probeObs.kind === 'value'
+                  ? `${probePartition.outside.length} (${outsideFailed})`
+                  : isSingleUser
+                    ? formatObserved(probeObs)
+                    : '—'}
               </div>
             </div>
             <div class="ov-kpi">
               <div class="ov-kpi-k">선언된 페일오버 레인</div>
-              <div class="ov-kpi-v">${resolvedData?.lanes?.length ?? 0}</div>
+              <div class=${`ov-kpi-v ${resolvedObs.kind === 'failed' ? 'bad' : ''}`}>
+                ${resolvedObs.kind === 'value'
+                  ? (resolvedData?.lanes?.length ?? 0)
+                  : formatObserved(resolvedObs)}
+              </div>
             </div>
           </section>
 

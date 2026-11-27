@@ -11,7 +11,8 @@
 
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
+import { currentSessionEpoch, isEpochCurrent } from '../../core/auth'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   REVOKE_ADMIN_CAUSES,
@@ -38,28 +39,44 @@ export function MembersTab(): VNode {
   const [revokeTargetId, setRevokeTargetId] = useState<string | null>(null)
   const [revokeCause, setRevokeCause] = useState<RevokeAdminCause | ''>('')
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
+  const [loadedOnce, setLoadedOnce] = useState(false)
+  const mountedRef = useRef(true)
+  const loadAbortRef = useRef<AbortController | null>(null)
 
-  const reload = async () => {
+  const reload = useCallback(async () => {
+    loadAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    loadAbortRef.current = ctrl
+    const startEpoch = currentSessionEpoch()
     setLoading(true)
     setError(null)
-    const res = await listMembers()
+    const res = await listMembers(undefined, ctrl.signal)
+    if (!mountedRef.current || ctrl.signal.aborted || !isEpochCurrent(startEpoch)) return
     if (res.ok) {
       setMembers(res.value)
+      setLoadedOnce(true)
     } else if (res.error.kind !== 'epoch_stale' && res.error.kind !== 'aborted') {
       setError(res.error.message)
     }
     setLoading(false)
-  }
-
-  useEffect(() => {
-    void reload()
   }, [])
 
+  useEffect(() => {
+    mountedRef.current = true
+    void reload()
+    return () => {
+      mountedRef.current = false
+      loadAbortRef.current?.abort()
+    }
+  }, [reload])
+
   const runAction = async (userId: string, label: string, fn: () => Promise<{ readonly ok: boolean; readonly error?: { readonly message: string } }>) => {
+    const startEpoch = currentSessionEpoch()
     setBusyUserId(userId)
     setError(null)
     try {
       const res = await fn()
+      if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
       if (!res.ok) {
         setError(res.error?.message ?? `${label} failed`)
         return
@@ -70,7 +87,7 @@ export function MembersTab(): VNode {
       setDeleteTargetId(null)
       await reload()
     } finally {
-      setBusyUserId(null)
+      if (mountedRef.current) setBusyUserId(null)
     }
   }
 
@@ -91,7 +108,7 @@ export function MembersTab(): VNode {
       ${loading
         ? html`<p class="ap-muted">구성원 목록을 불러오는 중…</p>`
         : members.length === 0
-          ? html`<p class="ap-muted">등록된 구성원이 없습니다.</p>`
+          ? (error || !loadedOnce ? null : html`<p class="ap-muted">등록된 구성원이 없습니다.</p>`)
           : html`
               <ul class="ap-acct-list">
                 ${members.map((member) => {

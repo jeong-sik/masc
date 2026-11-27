@@ -6,8 +6,9 @@
 
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import { copyToClipboard } from '../../components/common/copyable-code'
+import { currentSessionEpoch, isEpochCurrent } from '../../core/auth'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   issuePat,
@@ -44,36 +45,50 @@ export function PatsTab(): VNode {
   const [issuing, setIssuing] = useState(false)
   const [issued, setIssued] = useState<IssuedPat | null>(null)
   const [revokingId, setRevokingId] = useState<string | null>(null)
+  const [loadedOnce, setLoadedOnce] = useState(false)
+  const mountedRef = useRef(true)
+  const loadAbortRef = useRef<AbortController | null>(null)
 
-  const reload = async () => {
+  const reload = useCallback(async () => {
+    loadAbortRef.current?.abort()
+    const ctrl = new AbortController()
+    loadAbortRef.current = ctrl
+    const startEpoch = currentSessionEpoch()
     setLoading(true)
     setError(null)
-    const res = await listPats()
+    const res = await listPats(undefined, ctrl.signal)
+    if (!mountedRef.current || ctrl.signal.aborted || !isEpochCurrent(startEpoch)) return
     if (res.ok) {
       setPats(res.value)
+      setLoadedOnce(true)
     } else if (res.error.kind !== 'epoch_stale' && res.error.kind !== 'aborted') {
       setError(res.error.message)
     }
     setLoading(false)
-  }
+  }, [])
 
   useEffect(() => {
+    mountedRef.current = true
     void reload()
     const onPageHide = () => setIssued(null)
     window.addEventListener('pagehide', onPageHide)
     return () => {
+      mountedRef.current = false
+      loadAbortRef.current?.abort()
       window.removeEventListener('pagehide', onPageHide)
       setIssued(null)
     }
-  }, [])
+  }, [reload])
 
   const handleIssue = async (event: Event) => {
     event.preventDefault()
     if (issuing) return
+    const startEpoch = currentSessionEpoch()
     setIssuing(true)
     setError(null)
     try {
       const res = await issuePat(preset, computeExpiresAtMs(expiry))
+      if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
       if (!res.ok) {
         setError(res.error.message)
         return
@@ -82,14 +97,16 @@ export function PatsTab(): VNode {
       pushShellToast('새 Personal Access Token이 발급되었습니다.', 'success')
       await reload()
     } finally {
-      setIssuing(false)
+      if (mountedRef.current) setIssuing(false)
     }
   }
 
   const handleRevoke = async (id: string) => {
+    const startEpoch = currentSessionEpoch()
     setRevokingId(id)
     try {
       const res = await revokePat(id)
+      if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
       if (!res.ok) {
         setError(res.error.message)
         return
@@ -97,7 +114,7 @@ export function PatsTab(): VNode {
       pushShellToast(`토큰 폐기 완료 (${id})`, 'info')
       await reload()
     } finally {
-      setRevokingId(null)
+      if (mountedRef.current) setRevokingId(null)
     }
   }
 
@@ -183,7 +200,7 @@ export function PatsTab(): VNode {
         ${loading
           ? html`<p class="ap-muted">토큰 목록을 불러오는 중…</p>`
           : pats.length === 0
-            ? html`<p class="ap-muted">발급된 Personal Access Token이 없습니다.</p>`
+            ? (error || !loadedOnce ? null : html`<p class="ap-muted">발급된 Personal Access Token이 없습니다.</p>`)
             : html`
                 <ul class="ap-acct-list">
                   ${pats.map((pat) => html`

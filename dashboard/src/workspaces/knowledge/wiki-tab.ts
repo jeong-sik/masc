@@ -205,6 +205,8 @@ export function WikiTab(props: WorkspaceViewProps) {
   const [saveFeedback, setSaveFeedback] = useState<{ kind: 'err'; message: string } | null>(null)
   const [casConflict, setCasConflict] = useState<CasConflictState | null>(null)
   const submitSaveRef = useRef<() => Promise<void>>(async () => {})
+  const savingRef = useRef(false)
+  const saveAbortRef = useRef<AbortController | null>(null)
   const mountedRef = useRef(true)
   const indexSeqRef = useRef(0)
   const searchAbortRef = useRef<AbortController | null>(null)
@@ -215,6 +217,7 @@ export function WikiTab(props: WorkspaceViewProps) {
     return () => {
       mountedRef.current = false
       searchAbortRef.current?.abort()
+      saveAbortRef.current?.abort()
     }
   }, [])
 
@@ -382,12 +385,17 @@ export function WikiTab(props: WorkspaceViewProps) {
   }
 
   const submitSave = async (overrideCas?: { sha256: string; revision: number }) => {
-    if (adminLocked) return
+    if (adminLocked || savingRef.current) return
     const targetSlug = editSlug.trim()
     if (!targetSlug || !editTitle.trim()) {
       setSaveFeedback({ kind: 'err', message: 'Slug와 페이지 제목을 모두 입력하세요.' })
       return
     }
+    const startEpoch = currentSessionEpoch()
+    saveAbortRef.current?.abort()
+    const saveCtrl = new AbortController()
+    saveAbortRef.current = saveCtrl
+    savingRef.current = true
     setSaving(true)
     setSaveFeedback(null)
     const tags = editTags
@@ -409,55 +417,66 @@ export function WikiTab(props: WorkspaceViewProps) {
       if (useRev !== null) body.expected_revision = useRev
     }
 
-    const res = await apiMutateV2<WikiPutRespData>(
-      'PUT',
-      `/api/v1/wiki/${encodeURIComponent(targetSlug)}`,
-      body,
-    )
-    setSaving(false)
+    try {
+      const res = await apiMutateV2<WikiPutRespData>(
+        'PUT',
+        `/api/v1/wiki/${encodeURIComponent(targetSlug)}`,
+        body,
+        { signal: saveCtrl.signal },
+      )
+      if (!mountedRef.current || !isEpochCurrent(startEpoch) || saveCtrl.signal.aborted) return
 
-    if (!res.ok) {
-      if (res.error.kind === 'conflict_cas' || res.error.status === 409 || res.error.code === 'conflict_cas') {
-        // Explicit 409 conflict_cas reload-and-diff recovery
-        const latestRes = await apiGetV2<WikiPageData>(`/api/v1/wiki/${encodeURIComponent(targetSlug)}`, {
-          decode: decodeWikiPageData,
-        })
-        if (latestRes.ok) {
-          setCasConflict({
-            serverPage: latestRes.value,
-            localBody: editBody,
-            localTitle: editTitle,
-            localSummary: editSummary,
-            message: res.error.message || '409 conflict_cas: 다른 작성자가 페이지를 먼저 수정했습니다.',
+      if (!res.ok) {
+        if (res.error.kind === 'conflict_cas' || res.error.status === 409 || res.error.code === 'conflict_cas') {
+          // Explicit 409 conflict_cas reload-and-diff recovery
+          const latestRes = await apiGetV2<WikiPageData>(`/api/v1/wiki/${encodeURIComponent(targetSlug)}`, {
+            signal: saveCtrl.signal,
+            decode: decodeWikiPageData,
           })
-        } else {
-          setSaveFeedback({
-            kind: 'err',
-            message: `409 CAS 충돌이 발생했으나 최신 페이지를 다시 읽지 못했습니다: ${latestRes.error.message}`,
-          })
+          if (!mountedRef.current || !isEpochCurrent(startEpoch) || saveCtrl.signal.aborted) return
+          if (latestRes.ok) {
+            setCasConflict({
+              serverPage: latestRes.value,
+              localBody: editBody,
+              localTitle: editTitle,
+              localSummary: editSummary,
+              message: res.error.message || '409 conflict_cas: 다른 작성자가 페이지를 먼저 수정했습니다.',
+            })
+          } else {
+            setSaveFeedback({
+              kind: 'err',
+              message: `409 CAS 충돌이 발생했으나 최신 페이지를 다시 읽지 못했습니다: ${latestRes.error.message}`,
+            })
+          }
+          return
         }
+        setSaveFeedback({ kind: 'err', message: `저장 실패: ${res.error.message}` })
         return
       }
-      setSaveFeedback({ kind: 'err', message: `저장 실패: ${res.error.message}` })
-      return
-    }
 
-    preserveFeedbackSlugRef.current = res.value.slug
-    setCasConflict(null)
-    setCreatingNew(false)
-    setEditing(false)
-    setSelectedSlug(res.value.slug)
-    setSaveFeedback(null)
-    pushShellToast(
-      `${res.value.slug} (rev ${res.value.revision}) ${res.value.action === 'created' ? '생성' : '저장'} 완료`,
-      'success',
-    )
-    resourceCache.invalidateTopic('wiki')
-    await loadIndex('manual')
-    pageAbortRef.current?.abort()
-    const ctrl = new AbortController()
-    pageAbortRef.current = ctrl
-    await loadPage(res.value.slug, ctrl.signal)
+      preserveFeedbackSlugRef.current = res.value.slug
+      setCasConflict(null)
+      setCreatingNew(false)
+      setEditing(false)
+      setSelectedSlug(res.value.slug)
+      setSaveFeedback(null)
+      pushShellToast(
+        `${res.value.slug} (rev ${res.value.revision}) ${res.value.action === 'created' ? '생성' : '저장'} 완료`,
+        'success',
+      )
+      resourceCache.invalidateTopic('wiki')
+      await loadIndex('manual')
+      if (!mountedRef.current || !isEpochCurrent(startEpoch) || saveCtrl.signal.aborted) return
+      pageAbortRef.current?.abort()
+      const ctrl = new AbortController()
+      pageAbortRef.current = ctrl
+      await loadPage(res.value.slug, ctrl.signal)
+    } finally {
+      if (saveAbortRef.current === saveCtrl) {
+        savingRef.current = false
+        if (mountedRef.current) setSaving(false)
+      }
+    }
   }
 
   submitSaveRef.current = () => submitSave()
@@ -487,10 +506,10 @@ export function WikiTab(props: WorkspaceViewProps) {
       <div class="kn-pane-head">
         <div class="kn-chips" role="tablist" aria-label="Wiki 보기">
           <button type="button" role="tab" class="kn-chip" aria-selected=${leftView === 'pages'} onClick=${() => setLeftView('pages')}>
-            Pages <span class="kn-chip-count">${wikiIndex?.pages_total ?? 0}</span>
+            Pages <span class="kn-chip-count">${wikiIndex ? wikiIndex.pages_total : (loading ? '…' : '—')}</span>
           </button>
           <button type="button" role="tab" class="kn-chip" aria-selected=${leftView === 'lint'} onClick=${() => setLeftView('lint')}>
-            Lint <span class="kn-chip-count">${wikiIndex?.lint?.total_findings ?? 0}</span>
+            Lint <span class="kn-chip-count">${wikiIndex?.lint ? wikiIndex.lint.total_findings : (loading ? '…' : '—')}</span>
           </button>
           <button type="button" role="tab" class="kn-chip" aria-selected=${leftView === 'log'} onClick=${() => setLeftView('log')}>
             Log

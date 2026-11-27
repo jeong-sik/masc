@@ -8,14 +8,16 @@
  */
 
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
   apiGetV2,
   apiMutate,
   authSession,
   canAccessTokenAdmin,
   canReadSuOrMaAdmin,
+  currentSessionEpoch,
   formatObserved,
+  isEpochCurrent,
   observedUnreported,
   observedValue,
   resourceCache,
@@ -301,6 +303,13 @@ export function SandboxesTab(props: WorkspaceViewProps) {
   const [shimParityPref, setShimParityPref] = useState<boolean | null>(null)
   const [volumeGcOpen, setVolumeGcOpen] = useState(false)
   const [hostStorageOpen, setHostStorageOpen] = useState(false)
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
   const openKeeperSandboxConfig = useCallback((keeper: string) => {
     const normalized = normalizeKeeperName(keeper)
     if (!normalized) return
@@ -325,9 +334,11 @@ export function SandboxesTab(props: WorkspaceViewProps) {
 
   const handleTriggerProbe = async () => {
     if (!canAccessTokenAdmin(authSession.peek())) return
+    const startEpoch = currentSessionEpoch()
     setProbing(true)
     setErrorBanner(null)
     const res = await apiMutate<unknown>('POST', '/api/v1/infra/sandboxes/probe', {})
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     setProbing(false)
     if (!res.ok) {
       setErrorBanner(`샌드박스 프로브 실행 실패: ${res.error.message}`)
@@ -659,15 +670,21 @@ export function SandboxesTab(props: WorkspaceViewProps) {
         </div>
       `}
 
-      ${obs.kind === 'loading' && html`<div class="wka-card dtable-absent">샌드박스 인벤토리 불러오는 중…</div>`}
-
-      ${obs.kind === 'failed' && html`
-        <div class="ap-error" role="alert">
-          ${obs.error.kind === 'forbidden'
-            ? '관리자(Admin) 권한이 필요한 플리트 샌드박스 뷰입니다 (HTTP 403).'
-            : `샌드박스 조회 실패: ${obs.error.message}`}
-        </div>
-      `}
+      ${!canReadSandboxes
+        ? html`<div class="wka-card dtable-absent" data-testid="sandboxes-admin-locked" role="status">관리자(Admin) 권한이 필요한 플리트 샌드박스 뷰입니다.</div>`
+        : obs.kind === 'loading'
+          ? html`<div class="wka-card dtable-absent">샌드박스 인벤토리 불러오는 중…</div>`
+          : obs.kind === 'failed'
+            ? html`
+                <div class="ap-error" role="alert">
+                  ${obs.error.kind === 'forbidden'
+                    ? '관리자(Admin) 권한이 필요한 플리트 샌드박스 뷰입니다 (HTTP 403).'
+                    : `샌드박스 조회 실패: ${obs.error.message}`}
+                </div>
+              `
+            : (obs.kind === 'absent' || obs.kind === 'unreported')
+              ? html`<div class="wka-card dtable-absent" data-testid="sandboxes-empty-status" role="status">${formatObserved(obs)}</div>`
+              : null}
 
       ${data && html`
         <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-4)', minWidth: 0 }}>

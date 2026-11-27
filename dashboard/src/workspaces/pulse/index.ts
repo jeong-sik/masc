@@ -13,7 +13,7 @@
 import { html } from 'htm/preact'
 import { goalPhaseSemanticTone, parseCanonicalGoalPhase } from '../../lib/goal-phase-tone'
 import { contextSeverityTone } from '../../api/keeper-diagnostics'
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
   formatObserved,
   resourceCache,
@@ -190,6 +190,14 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
   const [observedAtSec, setObservedAtSec] = useState<number>(() => Math.floor(Date.now() / 1000))
   const [refreshing, setRefreshing] = useState(false)
   const [openSparklines, setOpenSparklines] = useState<ReadonlySet<string>>(() => new Set())
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   const refresh = useCallback(async (reason: 'mount' | 'route' | 'sse' | 'manual') => {
     const startEpoch = currentSessionEpoch()
@@ -197,11 +205,11 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
     if (reason === 'manual') setRefreshing(true)
     try {
       await loadPulseBundle(refreshWindow, reason)
-      if (currentSessionEpoch() !== startEpoch || timeWindow.peek() !== refreshWindow) return
+      if (!mountedRef.current || currentSessionEpoch() !== startEpoch || timeWindow.peek() !== refreshWindow) return
       setObservedAtSec(Math.floor(Date.now() / 1000))
       markViewSynced()
     } finally {
-      if (reason === 'manual') setRefreshing(false)
+      if (reason === 'manual' && mountedRef.current) setRefreshing(false)
     }
   }, [])
 
@@ -416,9 +424,13 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
               ? html`<div class="pulse-empty">플릿 상태 불러오는 중…</div>`
               : bundle.keepers.kind === 'failed'
                 ? html`<div class="ap-error" role="alert">플릿 조회 실패: ${bundle.keepers.error.message}</div>`
-                : fleetGroups.length === 0
-                  ? html`<div class="pulse-empty">등록된 Keeper 없음</div>`
-                  : html`
+                : bundle.keepers.kind === 'absent' && bundle.keepers.reason === 'multi_account_unbridged'
+                  ? html`<div class="pulse-empty" data-testid="pulse-fleet-multi-account-unbridged" role="status">멀티 계정 모드에서는 로컬 Keeper 플릿을 조회하지 않습니다.</div>`
+                  : bundle.keepers.kind === 'absent' || bundle.keepers.kind === 'unreported'
+                    ? html`<div class="pulse-empty">${formatObserved(bundle.keepers)}</div>`
+                    : fleetGroups.length === 0
+                      ? html`<div class="pulse-empty">등록된 Keeper 없음</div>`
+                      : html`
                       <div class="pulse-fleet-groups">
                         ${fleetGroups.map((group) => {
                           const turnFmt = formatCompactCount(group.turnsInWindow)
@@ -771,9 +783,11 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
                     Memory →
                   </button>
                 </div>
-                ${worldMemory === null
-                  ? html`<div class="pulse-empty">${formatObserved(bundle.worldMemory)}</div>`
-                  : html`
+                ${bundle.worldMemory.kind === 'failed'
+                  ? html`<div class="ap-error" role="alert">World Memory 조회 실패: ${bundle.worldMemory.error.message}</div>`
+                  : worldMemory === null
+                    ? html`<div class="pulse-empty">${formatObserved(bundle.worldMemory)}</div>`
+                    : html`
                       <div class="pulse-kv-grid">
                         <div class="pulse-kv">
                           <span class="pulse-kv-k">Claims</span>
@@ -836,11 +850,13 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
               `
             }
 
-            const candleEmptyStatus = candleDigest === null
-              ? formatObserved(bundle.candle)
-              : candleDigest.policy_configuration === 'enabled'
-                ? '발행된 Candle 원장 기록 없음'
-                : `Candle 정책 비활성 (${candleDigest.policy_configuration}${candleDigest.disabled_reason ? `: ${candleDigest.disabled_reason}` : ''})`
+            const candleEmptyStatus = bundle.candle.kind === 'failed'
+              ? `조회 실패: ${bundle.candle.error.message}`
+              : candleDigest === null
+                ? formatObserved(bundle.candle)
+                : candleDigest.policy_configuration === 'enabled'
+                  ? '발행된 Candle 원장 기록 없음'
+                  : `Candle 정책 비활성 (${candleDigest.policy_configuration}${candleDigest.disabled_reason ? `: ${candleDigest.disabled_reason}` : ''})`
 
             return html`
               ${worldMemoryCard}
@@ -855,7 +871,9 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
                 </summary>
                 <div class="ap-disclosure-body">
                   <div class="pulse-card-head">
-                    <span class="pulse-empty">${candleEmptyStatus}</span>
+                    ${bundle.candle.kind === 'failed'
+                      ? html`<div class="ap-error" role="alert">Candle 조회 실패: ${bundle.candle.error.message}</div>`
+                      : html`<span class="pulse-empty">${candleEmptyStatus}</span>`}
                     <button type="button" class="btn-ghost" onClick=${() => props.onNavigate('/work/candle')}>
                       Candle →
                     </button>

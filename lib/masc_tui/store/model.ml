@@ -428,6 +428,7 @@ let image_inspector_viewport_rect ~(model : t) =
         | Nav.Inline_action _
         | Nav.Ask_answer
         | Nav.Help
+        | Nav.Account
         | Nav.System_gate
             (Nav.Auth_gate | Nav.Server_offline | Nav.Micro_viewport) )
     | None )

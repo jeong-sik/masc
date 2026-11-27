@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "vitest"
-import { sectionItemsForTab } from "../config/navigation"
+import { defaultParamsForTab, sectionItemsForTab } from "../config/navigation"
 import { isHiddenDiagnostic, isMonitorLane, normalizeStatusSection, sectionLabel, type StatusSection } from "./status"
 
 describe("sectionLabel", () => {
@@ -29,8 +29,9 @@ describe("normalizeStatusSection", () => {
   })
 
   it("falls back to the monitoring default section", () => {
-    expect(normalizeStatusSection("memory-subsystems")).toBe("agents")
-    expect(normalizeStatusSection("unknown")).toBe("agents")
-    expect(normalizeStatusSection(undefined)).toBe("agents")
+    const fallback = defaultParamsForTab("monitoring").section
+    expect(normalizeStatusSection("memory-subsystems")).toBe(fallback)
+    expect(normalizeStatusSection("unknown")).toBe(fallback)
+    expect(normalizeStatusSection(undefined)).toBe(fallback)
   })
 })

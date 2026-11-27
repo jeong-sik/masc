@@ -535,10 +535,10 @@ export function KeeperHeader(props: KeeperHeaderProps) {
               <div class="kp-diag-row">
                 <strong>대기 항목</strong>: ${waitingSummary.count}건
                 ${waitingSummary.due_at ? ` (가장 이른 예정 ${formatDueAt(waitingSummary.due_at)})` : ''}
-                ${waitingSummary.heads.map((head) => html`
+                ${waitingSummary.heads.map((head, place) => html`
                   <div
                     class="kp-diag-lane-meta"
-                    key=${`${head.source}:${head.next_action}`}
+                    key=${place}
                     title=${head.next_action ? `서버 다음 단계: ${head.next_action}` : undefined}
                   >
                     <span>${head.what}</span>

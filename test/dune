@@ -3335,6 +3335,7 @@
 (include stanzas/test_verifier_review_execution.inc)
 (include stanzas/test_keeper_native_result_retention.inc)
 (include stanzas/test_keeper_native_context_resume.inc)
+(include stanzas/test_keeper_native_uncollected_restart.inc)
 (include stanzas/test_keeper_native_reconcile_after_dispatch.inc)
 (include stanzas/test_keeper_native_receipt_during_stop.inc)
 (include stanzas/test_keeper_native_checkpoint_release.inc)

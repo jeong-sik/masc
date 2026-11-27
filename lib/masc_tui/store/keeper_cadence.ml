@@ -68,6 +68,16 @@ let keeper_schedules ~name schedules =
       || Option.equal String.equal sc.payload_target (Some name))
     schedules
 
+let by_next_due schedules =
+  List.stable_sort
+    (fun (a : Wire_work.schedule_row) (b : Wire_work.schedule_row) ->
+      match a.next_due_at_unix, b.next_due_at_unix with
+      | Some x, Some y -> Float.compare x y
+      | Some _, None -> -1
+      | None, Some _ -> 1
+      | None, None -> 0)
+    schedules
+
 let next_due ~now_unix ~more_pages schedules =
   match schedules with
   | [] -> if more_pages then Past_page_read else No_schedule

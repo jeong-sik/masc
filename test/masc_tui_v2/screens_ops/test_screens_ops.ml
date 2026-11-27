@@ -3590,6 +3590,89 @@ let test_keeper_cadence_next_due () =
   Alcotest.(check bool) "gamma may lie past the page read" true
     (due ~more_pages:true "gamma" = Keeper_cadence.Past_page_read)
 
+(* A keeper's schedule list reads in time order: the earliest next wake first,
+   a late one included, and a row that names no next wake last. *)
+let test_keeper_cadence_by_next_due () =
+  let no_next =
+    {|{"schedule_instance_id":"si-none","schedule_id":"none","status":"running","source":"operator",
+       "due_at":1795400100.0,"next_due_at":null,"recurrence_kind":"once","recurrence_summary":"once",
+       "payload_kind":"keeper_wake","payload_support":"supported","payload_target":"alpha",
+       "payload_keeper_name":"alpha","payload_summary":"poll"}|}
+  in
+  let rows =
+    cadence_schedules
+      (String.concat ","
+         [
+           cadence_row ~id:"later" ~keeper:"alpha" ~next_due:"1795400900.0";
+           no_next;
+           cadence_row ~id:"soon" ~keeper:"alpha" ~next_due:"1795400300.0";
+           cadence_row ~id:"late" ~keeper:"alpha" ~next_due:"1795399000.0";
+         ])
+  in
+  Alcotest.(check (list string)) "earliest next wake first, no next wake last"
+    [ "late"; "soon"; "later"; "none" ]
+    (List.map
+       (fun (sc : Wire_work.schedule_row) -> sc.schedule_id)
+       (Keeper_cadence.by_next_due rows))
+
+(* The Schedules block of the Work & Sandbox tab draws the keeper's rows by
+   next wake, each led by its wall-clock time; another day carries its date. *)
+let test_keeper_dive_schedules_by_next_wake_with_times () =
+  let now_unix = 1_795_400_000.0 in
+  let keeper = "e-masc-the-leader" in
+  let late = now_unix -. 600.0
+  and today = now_unix +. 3_600.0
+  and tomorrow = now_unix +. 172_800.0 in
+  let due at = Printf.sprintf "%.1f" at in
+  let rows =
+    cadence_schedules
+      (String.concat ","
+         [
+           cadence_row ~id:"tomorrow" ~keeper ~next_due:(due tomorrow);
+           cadence_row ~id:"today" ~keeper ~next_due:(due today);
+           cadence_row ~id:"late" ~keeper ~next_due:(due late);
+           (* A wake being dispatched names no next wake. *)
+           Printf.sprintf
+             {|{"schedule_instance_id":"si-run","schedule_id":"run","status":"running","source":"operator",
+                "due_at":%s,"next_due_at":null,"recurrence_kind":"interval","recurrence_summary":"every 15m",
+                "payload_kind":"keeper_wake","payload_support":"supported","payload_target":"%s",
+                "payload_keeper_name":"%s","payload_summary":"poll"}|}
+             (due late) keeper keeper;
+         ])
+  in
+  let base = make_populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en in
+  let m =
+    {
+      base with
+      tz_offset_sec = 0;
+      freshness = { base.freshness with last_wall_unix = now_unix };
+      work = Work_store.apply_schedules ~observed_at:now_mono (rows, None) base.work;
+    }
+  in
+  let text =
+    grid_all_text
+      (render_to_grid ~cols:140 ~rows:40
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_work_sandbox ~model:m))
+  in
+  (* A row starts with its time and then the relative time in parentheses. *)
+  let lead at = Memory_lineage.format_instant ~tz_offset_sec:0 ~now:now_unix at ^ " (" in
+  let position at =
+    let needle = lead at in
+    let n = String.length needle and h = String.length text in
+    let rec find i =
+      if i + n > h then Alcotest.failf "no schedule row is led by %S" needle
+      else if String.equal (String.sub text i n) needle then i
+      else find (i + 1)
+    in
+    find 0
+  in
+  Alcotest.(check bool) "late first, then today, then tomorrow" true
+    (position late < position today && position today < position tomorrow);
+  Alcotest.(check bool) "another day's row carries its date" true
+    (String.contains (lead tomorrow) '-' && not (String.contains (lead today) '-'));
+  Alcotest.(check bool) "a wake being dispatched reads as running" true
+    (contains_sub ~needle:"running now · every 15m" text)
+
 let test_wave2_keeper_context_tool_calls_and_schedules () =
   let m0 = make_populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en in
   let tr_json =
@@ -5096,6 +5179,10 @@ let () =
             test_keeper_cadence_window_counts_causes;
           Alcotest.test_case "cadence next due is the keeper's earliest" `Quick
             test_keeper_cadence_next_due;
+          Alcotest.test_case "keeper schedules read earliest next wake first" `Quick
+            test_keeper_cadence_by_next_due;
+          Alcotest.test_case "keeper dive draws schedules by next wake with their times" `Quick
+            test_keeper_dive_schedules_by_next_wake_with_times;
           Alcotest.test_case "all 3 roster modes at 140x40 & 90x28 (KO/EN)"
             `Quick test_keepers_all_modes_viewports_langs;
           Alcotest.test_case "strict live SSOT vs historical 12h trail" `Quick

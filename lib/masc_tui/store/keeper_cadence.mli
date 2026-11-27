@@ -38,6 +38,10 @@ type next_due =
 val keeper_schedules : name:string -> Wire_work.schedule_row list -> Wire_work.schedule_row list
 (** The schedules that wake [name]: its keeper or its target is [name]. *)
 
+val by_next_due : Wire_work.schedule_row list -> Wire_work.schedule_row list
+(** Earliest next wake first. Rows that name no next wake go last, in the
+    order read. *)
+
 val next_due : now_unix:float -> more_pages:bool -> Wire_work.schedule_row list -> next_due
 (** The earliest due time among one keeper's schedules read. With
     [more_pages], an earlier one may lie on a page not read. *)

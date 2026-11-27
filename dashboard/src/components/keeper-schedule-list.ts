@@ -36,9 +36,11 @@ function instantMs(iso: string | null | undefined, epochSeconds: number | null |
     : null
 }
 
-/** When the schedule runs next, or null when it will not run again. Only the
- *  next wake counts: an ended one-shot keeps its due time, and drawn as the
- *  next run it would read as still to come. */
+/** When the schedule runs next, or null when the server names none: the
+ *  schedule will not run again, or a wake of it is being dispatched (the
+ *  server sends no next wake for a running schedule, recurring ones
+ *  included). Only the next wake counts: an ended one-shot keeps its due
+ *  time, and drawn as the next run it would read as still to come. */
 export function nextWakeMs(request: DashboardScheduledAutomationRequest): number | null {
   return instantMs(request.next_due_at_iso, request.next_due_at)
 }
@@ -51,8 +53,8 @@ export function lastWakeMs(request: DashboardScheduledAutomationRequest): number
     ?? instantMs(wake.started_at_iso, wake.started_at)
 }
 
-/** Earliest next run first; schedules that will not run again go last, in
- *  the order the server sent them. */
+/** Earliest next run first; schedules with no next run go last, in the
+ *  order the server sent them. */
 export function byNextWake(
   requests: readonly DashboardScheduledAutomationRequest[],
 ): DashboardScheduledAutomationRequest[] {
@@ -65,13 +67,15 @@ export function byNextWake(
   })
 }
 
-/** "11. 28. 오전 09:00 (16시간 후)", or "… (3분 전)" for a next run already due. */
-export function nextWakeText(atMs: number | null, nowMs: number): string {
-  if (atMs === null) return '다음 실행 없음'
+/** "11. 28. 오전 09:00 (16시간 후)", or "… (3분 전)" for a next run already due.
+ *  Whole seconds, as formatTimeUntil and formatTimeAgo count them. */
+export function nextWakeText(request: DashboardScheduledAutomationRequest, nowMs: number): string {
+  const atMs = nextWakeMs(request)
+  if (atMs === null) return request.status === 'running' ? '실행 중' : '다음 실행 없음'
   const when = formatTimestampKo(atMs / MS_PER_SECOND)
   const relative = atMs >= nowMs
-    ? formatRelativeUntilSec((atMs - nowMs) / MS_PER_SECOND)
-    : formatRelativeSec((nowMs - atMs) / MS_PER_SECOND)
+    ? formatRelativeUntilSec(Math.floor((atMs - nowMs) / MS_PER_SECOND))
+    : formatRelativeSec(Math.floor((nowMs - atMs) / MS_PER_SECOND))
   return `${when} (${relative})`
 }
 
@@ -91,7 +95,8 @@ function ScheduleRow({ request, nowMs }: { request: DashboardScheduledAutomation
         <span
           class=${`font-mono ${overdue ? 'text-[var(--color-status-warn)]' : 'text-[var(--color-fg-primary)]'}`}
           data-testid="keeper-schedule-next"
-        >${nextWakeText(next, nowMs)}</span>
+          data-overdue=${overdue ? 'true' : 'false'}
+        >${nextWakeText(request, nowMs)}</span>
         <span class="min-w-0 truncate text-[var(--color-fg-primary)]">${summaryText(request)}</span>
         <span class="flex flex-wrap items-center gap-1.5">
           <span class="font-mono text-[var(--color-fg-muted)]">↻ ${recurrenceLabel(request)}</span>

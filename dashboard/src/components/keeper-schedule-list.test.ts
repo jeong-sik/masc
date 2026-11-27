@@ -61,15 +61,25 @@ describe('byNextWake', () => {
 
 describe('nextWakeText', () => {
   it('says when there is no next run', () => {
-    expect(nextWakeText(null, NOW_MS)).toBe('다음 실행 없음')
+    expect(nextWakeText(req('ended', { status: 'succeeded', next_due_at: null }), NOW_MS)).toBe('다음 실행 없음')
+  })
+
+  // The server names no next wake while a wake is being dispatched,
+  // recurring schedules included.
+  it('says a schedule whose wake is being dispatched is running', () => {
+    expect(nextWakeText(req('daily', { status: 'running', next_due_at: null }), NOW_MS)).toBe('실행 중')
   })
 
   it('carries the time until a next run that is still to come', () => {
-    expect(nextWakeText(NOW_MS + 2 * HOUR_MS, NOW_MS)).toMatch(/ \(2시간 후\)$/)
+    expect(nextWakeText(req('a', at(NOW_MS + 2 * HOUR_MS)), NOW_MS)).toMatch(/ \(2시간 후\)$/)
   })
 
   it('carries the time since a next run that is already due', () => {
-    expect(nextWakeText(NOW_MS - 3 * HOUR_MS, NOW_MS)).toMatch(/ \(3시간 전\)$/)
+    expect(nextWakeText(req('a', at(NOW_MS - 3 * HOUR_MS)), NOW_MS)).toMatch(/ \(3시간 전\)$/)
+  })
+
+  it('counts whole seconds within the last minute', () => {
+    expect(nextWakeText(req('a', at(NOW_MS + 12_345.6)), NOW_MS)).toMatch(/ \(12초 후\)$/)
   })
 })
 
@@ -172,6 +182,26 @@ describe('KeeperScheduleList', () => {
     await flushUi()
 
     expect(fetchSchedules).toHaveBeenCalledTimes(2)
+  })
+
+  it('marks a next run that is already due and says when the page was cut', async () => {
+    const answer = page([
+      req('due', at(NOW_MS - HOUR_MS)),
+      req('soon', at(NOW_MS + 2 * HOUR_MS)),
+    ])
+    if (answer.state !== 'available') throw new Error('fixture page is available')
+    await draw({ ...answer, page: { ...answer.page, truncated: true } }, 'alpha')
+    // Whether a run is due is read against the shared clock, which reads the
+    // test's clock from its next tick on.
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000) })
+
+    const overdue = Array.from(
+      container.querySelectorAll('[data-testid="keeper-schedule-next"]'),
+      next => next.getAttribute('data-overdue'),
+    )
+    expect(rowIds()).toEqual(['due', 'soon'])
+    expect(overdue).toEqual(['true', 'false'])
+    expect(container.textContent).toContain('앞 2개만 읽었어요.')
   })
 
   it('says the Keeper has no schedule apart from a page it could not read', async () => {

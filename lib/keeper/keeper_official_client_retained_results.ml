@@ -1,10 +1,21 @@
 module Outbox = Keeper_client_tool_outbox
 module Session_store = Keeper_official_client_session_store
+module Reprojection = Keeper_memory_delivery_reprojection
 
-let load ~superseded run =
-  match superseded with
-  | Session_store.Not_superseding_input_rejection -> Outbox.run_carrier_load run
-  | Session_store.Superseding_effect_fenced
-  | Session_store.Superseding_bootstrap_floor_exceeded ->
-    Outbox.run_carrier_load_by_address run
+let load ~keeper_name ~superseded run =
+  match Outbox.run_carrier_load run with
+  | Error _ as error -> error
+  | Ok ((_, carrier) as loaded) ->
+    (match superseded with
+     | Session_store.Supersedes_no_size_refusal -> ()
+     | Session_store.Supersedes_size_refusal ->
+       (match Outbox.switch_to_address carrier with
+        | Ok (Reprojection.Reprojected | Reprojection.Unchanged) -> ()
+        | Error detail ->
+          Log.Keeper.warn
+            ~keeper_name
+            "retained results stay inline in the run after a size refusal: the blob of \
+             their address form was not written: %s"
+            detail));
+    Ok loaded
 ;;

@@ -402,6 +402,23 @@ val superseded_input_rejection :
   runtime_id:string ->
   superseded_input_rejection
 
+type superseded_size_refusal =
+  | Supersedes_no_size_refusal
+  | Supersedes_size_refusal
+(** Whether a fresh {!plan_claim} on [(client_kind, runtime_id)] takes the
+    place of a same-identity session whose last turn the vendor refused for
+    its size: an [Input_rejected] recovery of either reason, or
+    [Vendor_session_full]. Every other recovery, and every phase that is not
+    a recovery, is [Supersedes_no_size_refusal]. A record of another client
+    kind or runtime id is [Supersedes_no_size_refusal] too, as for
+    {!superseded_input_rejection}. *)
+
+val superseded_size_refusal :
+  expected:t option ->
+  client_kind:client_kind ->
+  runtime_id:string ->
+  superseded_size_refusal
+
 val plan_claim :
   expected:t option ->
   client_kind:client_kind ->

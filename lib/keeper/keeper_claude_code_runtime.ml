@@ -1224,7 +1224,13 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
        otherwise once the capacity-refusal hook switched it. *)
     let* tool_outbox, retained_carrier =
       Keeper_official_client_retained_results.load
-        ~superseded:superseded_rejection retained_results
+        ~keeper_name
+        ~superseded:
+          (Session_store.superseded_size_refusal
+             ~expected:stored_session
+             ~client_kind:Claude_code
+             ~runtime_id)
+        retained_results
       |> Result.map_error internal_error in
     let prepared = {prepared with Host.messages = prepared.messages
       @ Option.to_list (Keeper_client_tool_outbox.carrier_message retained_carrier)} in

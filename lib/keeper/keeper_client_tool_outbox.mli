@@ -325,6 +325,14 @@ val carrier_reprojection :
     maintenance may delete it after the run; the next run that switches writes
     it again at the same address. *)
 
+val switch_to_address :
+  carrier -> (Keeper_memory_delivery_reprojection.reduction, string) result
+(** The carrier step of {!carrier_reprojection} alone, for a caller that
+    switches before the run's first request: [Reprojected] when it switched,
+    [Unchanged] when the carrier holds no receipt, its [By_address] text is
+    not strictly shorter, or it is already [By_address]. A failed blob write
+    returns [Error] and the form stays [Inline]. *)
+
 type run_carrier
 (** The retained results of one run. A runtime makes it once per run, before
     the run's first attempt. *)
@@ -348,18 +356,6 @@ val run_carrier_load : run_carrier -> (snapshot * carrier, string) result
     exactly the snapshot it carried. A failed load is returned and not kept.
     Cancellation during preparation publishes no cached carrier and performs
     no ACK. A run's attempts call it one after another. *)
-
-val run_carrier_load_by_address : run_carrier -> (snapshot * carrier, string) result
-(** {!run_carrier_load}, then the switch the capacity-refusal hook makes
-    ({!carrier_reprojection}), before the run sends a request instead of after
-    a refusal. The carrier stays [Inline] when it holds no receipt or its
-    [By_address] text is not strictly shorter. A failed blob write returns
-    [Error]; the loaded carrier stays [Inline], and {!run_carrier_load} still
-    returns it. A carrier that is already [By_address] is returned as it is.
-
-    For a run that starts in place of a session whose turn was refused for
-    its size: a run that starts [Inline] would send that session's receipts
-    again in full. *)
 
 val run_carrier_reprojection :
   run_carrier ->

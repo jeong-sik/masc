@@ -1545,6 +1545,58 @@ let write_file path content =
     (fun () -> output_string output content)
 ;;
 
+(* A fresh claim replaces every recorded recovery of its own identity. Those
+   the vendor refused for size are the ones whose next run starts its retained
+   results by address (RFC retained-results-carrier-shrinks-to-an-address
+   5.5). *)
+let test_superseded_size_refusal_reads_the_recorded_failure () =
+  with_workspace "masc-official-client-store-size-refusal-" (fun base_path ->
+    let runtime_id = "claude_code.claude-sonnet-5" in
+    let recorded keeper_name failure =
+      let claimed =
+        claim_new ~base_path ~keeper_name ~client_kind:Claude_code ~runtime_id
+          ~owner_epoch ~at:1.0
+      in
+      require_recovery ~base_path ~keeper_name ~expected:claimed ~failure
+        ~detail:"fixture refusal" ~required_at:2.0
+      |> Result.get_ok
+    in
+    let reads_size_refusal expected =
+      superseded_size_refusal ~expected ~client_kind:Claude_code ~runtime_id
+      = Supersedes_size_refusal
+    in
+    List.iteri
+      (fun index failure ->
+        check bool (recovery_failure_to_string failure ^ " is a size refusal") true
+          (reads_size_refusal
+             (Some (recorded (Printf.sprintf "size-refusal-%d" index) failure))))
+      [ Input_rejected Effect_fenced
+      ; Input_rejected Bootstrap_floor_exceeded
+      ; Vendor_session_full No_activity_observed
+      ; Vendor_session_full Activity_observed
+      ];
+    List.iteri
+      (fun index failure ->
+        check bool (recovery_failure_to_string failure ^ " is no size refusal") false
+          (reads_size_refusal
+             (Some (recorded (Printf.sprintf "other-refusal-%d" index) failure))))
+      [ Protocol_failed; Provider_rejected ];
+    check bool "no record is no size refusal" false (reads_size_refusal None);
+    let open_claim =
+      claim_new ~base_path ~keeper_name:"size-refusal-open-claim" ~client_kind:Claude_code
+        ~runtime_id ~owner_epoch ~at:1.0
+    in
+    check bool "an open claim is no size refusal" false (reads_size_refusal (Some open_claim));
+    let fenced = recorded "size-refusal-other-identity" (Input_rejected Effect_fenced) in
+    check bool "another runtime's size refusal is not this run's" true
+      (superseded_size_refusal ~expected:(Some fenced) ~client_kind:Claude_code
+         ~runtime_id:"claude_code.claude-opus-5"
+       = Supersedes_no_size_refusal);
+    check bool "another client's size refusal is not this run's" true
+      (superseded_size_refusal ~expected:(Some fenced) ~client_kind:Codex ~runtime_id
+       = Supersedes_no_size_refusal))
+;;
+
 let test_input_rejection_codec_keeps_exact_wire_domain () =
   with_workspace "masc-official-client-rejection-codec-" (fun base_path ->
     let keeper_name = "rejection-codec" in
@@ -2679,6 +2731,8 @@ let () =
             test_other_claim_refusals_remain_configuration_errors
         ; test_case "input rejection codec preserves exact wire domain" `Quick
             test_input_rejection_codec_keeps_exact_wire_domain
+        ; test_case "a superseded size refusal is read from the recorded failure" `Quick
+            test_superseded_size_refusal_reads_the_recorded_failure
         ; test_case "cooperative continuation preserves its thread after steering" `Quick
             test_cooperative_resume_preserves_thread_after_newer_steering
         ; test_case "operator interruption preserves an older cooperative turn" `Quick

@@ -1663,6 +1663,37 @@ let superseded_input_rejection ~expected ~client_kind ~runtime_id =
         Not_superseding_input_rejection)
 ;;
 
+type superseded_size_refusal =
+  | Supersedes_no_size_refusal
+  | Supersedes_size_refusal
+
+let superseded_size_refusal ~expected ~client_kind ~runtime_id =
+  match expected with
+  | None -> Supersedes_no_size_refusal
+  | Some binding ->
+    if binding.client_kind <> client_kind
+       || not (String.equal binding.runtime_id runtime_id)
+    then Supersedes_no_size_refusal
+    else (
+      match binding.phase with
+      | Recovery_required
+          { failure =
+              ( Input_rejected (Effect_fenced | Bootstrap_floor_exceeded)
+              | Vendor_session_full (No_activity_observed | Activity_observed) )
+          ; _
+          } -> Supersedes_size_refusal
+      | Recovery_required
+          { failure =
+              ( Pre_dispatch_failed | Spawn_resources_busy | Spawn_refused_same_input
+              | Spawn_failed_cause_unknown | Owner_stopped_turn | Retryable_turn_failed
+              | Transport_interrupted | Protocol_failed | Provider_rejected
+              | Host_hook_failed | State_persistence_failed | Process_restarted )
+          ; _
+          }
+      | Ready | Start _ | Active _ | Turn_inflight _ | Settled _ ->
+        Supersedes_no_size_refusal)
+;;
+
 let plan_claim ~expected ~client_kind ~runtime_id =
   let* () =
     non_empty "runtime_id" runtime_id

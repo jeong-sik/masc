@@ -7462,12 +7462,11 @@ let test_resume_overflow_restart_is_a_fresh_start_by_address () =
       (List.length (Keeper_client_tool_outbox.receipt_ids (R.pending base_path))))
 ;;
 
-(* The Start that takes the place of a session refused for its size after an
-   effect. That run could not send again, so no hook switched its carrier and
-   only the session record tells the next run of the refusal: its first
-   request carries the address form (RFC
-   retained-results-carrier-shrinks-to-an-address 11.7). *)
-let test_a_start_superseding_a_fenced_size_refusal_carries_the_address_form () =
+(* The Start that takes the place of a session refused for its size. That run
+   could not send again, so no hook switched its carrier and only the session
+   record tells the next run of the refusal: its first request carries the
+   address form (RFC retained-results-carrier-shrinks-to-an-address 5.5). *)
+let superseding_start_carries_the_address_form ~failure ~detail =
   let module R = Retained_overflow in
   let module Store = Keeper_official_client_session_store in
   let base_path = temp_workspace () in
@@ -7478,15 +7477,14 @@ let test_a_start_superseding_a_fenced_size_refusal_carries_the_address_form () =
       let claimed =
         R.get
           (Store.claim ~base_path ~keeper_name:R.keeper_name ~expected:None
-             ~client_kind:Claude_code ~owner_epoch:(Store.process_epoch ())
+             ~client_kind:Store.Claude_code ~owner_epoch:(Store.process_epoch ())
              ~runtime_id:"claude.claude"
-             ~tool_surface_sha256:Agent_core_sha256.(to_hex (digest_string "fenced-surface"))
+             ~tool_surface_sha256:Agent_core_sha256.(to_hex (digest_string "refused-surface"))
              ~updated_at:now)
       in
       match
         Store.require_recovery ~base_path ~keeper_name:R.keeper_name ~expected:claimed
-          ~failure:(Store.Input_rejected Store.Effect_fenced)
-          ~detail:"the turn overflowed after a tool effect" ~required_at:now
+          ~failure ~detail ~required_at:now
       with
       | Ok _ -> ()
       | Error detail -> fail detail);
@@ -7508,6 +7506,21 @@ let test_a_start_superseding_a_fenced_size_refusal_carries_the_address_form () =
     check (option string) "the blob holds the inline text" (Some inline) (R.held base_path sha256);
     check int "the completed Start acknowledges every loaded receipt" 0
       (List.length (Keeper_client_tool_outbox.receipt_ids (R.pending base_path))))
+;;
+
+let test_a_start_superseding_a_fenced_size_refusal_carries_the_address_form () =
+  superseding_start_carries_the_address_form
+    ~failure:Keeper_official_client_session_store.(Input_rejected Effect_fenced)
+    ~detail:"the turn overflowed after a tool effect"
+;;
+
+(* A Gate continuation's resume refused as a context overflow is recorded
+   [Vendor_session_full], and the receipts in its resume prompt can be what
+   overflowed. *)
+let test_a_start_superseding_a_full_gate_session_carries_the_address_form () =
+  superseding_start_carries_the_address_form
+    ~failure:Keeper_official_client_session_store.(Vendor_session_full Activity_observed)
+    ~detail:"the Gate continuation's resume overflowed"
 ;;
 
 (* A run that offers keeper_artifact_read names it in the address form. *)
@@ -8069,6 +8082,8 @@ let () =
            test_resume_overflow_restart_is_a_fresh_start_by_address;
          test_case "a Start superseding a fenced size refusal carries the address form" `Quick
            test_a_start_superseding_a_fenced_size_refusal_carries_the_address_form;
+         test_case "a Start superseding a full Gate session carries the address form" `Quick
+           test_a_start_superseding_a_full_gate_session_carries_the_address_form;
          test_case "the address form names the offered reader" `Quick
            test_address_form_names_the_offered_reader])
     ; ( "native action", [ test_case "partial content boundary identity" `Quick test_partial_content_boundaries_keep_message_and_channel_identity

@@ -2866,7 +2866,39 @@ let test_original_result_survives_a_vendor_session_change () =
             run ();
             check bool "a replacement session receives exact original result" true
               (String_util.contains_substring (prompt ()) "ORIGINAL_RESULT_FOR_REPLACEMENT");
-            check int "completed replacement ACKs its loaded snapshot" 0 (count ()))))))
+            check int "completed replacement ACKs its loaded snapshot" 0 (count ());
+            (* A Start that takes the place of a session refused for its size
+               carries the address form in its first request (RFC
+               retained-results-carrier-shrinks-to-an-address 5.5). *)
+            let module Session = Keeper_official_client_session_store in
+            Session.clear_then ~base_path ~keeper_name (fun () -> ()) |> get;
+            let now = Time_compat.now () in
+            let claimed =
+              Session.claim ~base_path ~keeper_name ~expected:None
+                ~client_kind:Session.Antigravity ~owner_epoch:(Session.process_epoch ())
+                ~runtime_id:"antigravity.gemini"
+                ~tool_surface_sha256:Agent_core_sha256.(to_hex (digest_string "fenced-surface"))
+                ~updated_at:now
+              |> get in
+            let (_ : Session.t) =
+              Session.require_recovery ~base_path ~keeper_name ~expected:claimed
+                ~failure:(Session.Input_rejected Session.Effect_fenced)
+                ~detail:"the turn overflowed after a tool effect" ~required_at:now
+              |> get in
+            let refused_label = "RESULT_OF_THE_REFUSED_SESSION" in
+            retain "original-3" (refused_label ^ String.make 4096 'r');
+            let inline =
+              String.concat "\n\n"
+                (Keeper_client_tool_outbox.developer_context
+                   (Keeper_client_tool_outbox.load ~base_path ~keeper_name
+                      ~viewer:Keeper_client_tool_outbox.Every_receipt |> get)) in
+            let sha256 = Agent_core_sha256.(to_hex (digest_string inline)) in
+            run ();
+            check bool "the superseding Start carries no receipt inline" false
+              (String_util.contains_substring (prompt ()) refused_label);
+            check bool "the superseding Start names the blob of the inline text" true
+              (String_util.contains_substring (prompt ()) sha256);
+            check int "the completed superseding Start ACKs its loaded snapshot" 0 (count ()))))))
 ;;
 
 let with_session_resume_fixture f =

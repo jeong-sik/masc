@@ -1358,7 +1358,13 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
        it. *)
     let* tool_outbox, retained_carrier =
       Keeper_official_client_retained_results.load
-        ~superseded:superseded_rejection retained_results
+        ~keeper_name
+        ~superseded:
+          (Keeper_official_client_session_store.superseded_size_refusal
+             ~expected:stored_session
+             ~client_kind:Codex
+             ~runtime_id)
+        retained_results
       |> Result.map_error internal_error in
     (* Resume configuration seeds native compaction but does not update the
        current model request. The runtime ACKs the System plan's Developer

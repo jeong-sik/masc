@@ -7166,6 +7166,77 @@ let test_create_waits_for_lifecycle_admission_before_installing_owner () =
          (Owner_registry.For_testing.installed_owner_count ~base_path))
 ;;
 
+(* Evidence for #46120 on main, not for merge. The same scenario as
+   [test_waiting_autonomous_turn_takes_the_slot_after_one_chat_turn] on the
+   fix branch, written against main's interface: the heartbeat offers an
+   autonomous turn and, on a busy slot, offers again on its next cycle. *)
+let test_evidence_waiting_autonomous_turn_after_one_chat_turn () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let order = ref [] in
+  let started = Eio.Stream.create 4 and release = Eio.Stream.create 4 in
+  let execute ~sw:_ ~keeper_name:_ ~claim =
+    let operation = Option.get (owner_ok (claim ())) in
+    let id = Chat_operation.Operation_id.to_string operation.Chat_operation.operation_id in
+    order := ("chat:" ^ id) :: !order;
+    Eio.Stream.add started id;
+    Eio.Stream.take release;
+    Owner.Operation_succeeded { outcome_ref = "turn:" ^ id }
+  in
+  let owner =
+    owner_ok
+      (start_owner_with_executor
+         ~sw
+         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+         ~operation_executor:(Some execute)
+         ~keeper_name:"slot-starvation-evidence"
+         ~initial_meta:(Some (make_meta "slot-starvation-evidence"))
+         ())
+  in
+  let submit id =
+    ignore
+      (owner_ok
+         (Owner.submit_operation owner ~operation_id:(operation_id id)
+            ~source:operation_source ~input:(operation_input id)))
+  in
+  submit "kmsg-first";
+  check string "the first message takes the free slot" "kmsg-first" (next_started ~clock started);
+  let attempted = ref false in
+  let autonomous = Eio.Stream.create 1 in
+  Eio.Fiber.fork ~sw (fun () ->
+    let rec offer () =
+      match Owner.run_autonomous_if_idle owner (fun () -> order := "autonomous" :: !order) with
+      | Ok (`Busy _) ->
+        attempted := true;
+        Eio.Time.sleep clock slot_release_poll_s;
+        offer ()
+      | result -> Eio.Stream.add autonomous result
+    in
+    offer ());
+  let rec await_attempt () =
+    if not !attempted then (Eio.Time.sleep clock slot_release_poll_s; await_attempt ())
+  in
+  (try Eio.Time.with_timeout_exn clock fixture_start_deadline_s await_attempt with
+   | Eio.Time.Timeout -> fail "the autonomous offer never met the busy slot");
+  submit "kmsg-second";
+  Eio.Stream.add release ();
+  (match
+     Eio.Time.with_timeout_exn clock fixture_start_deadline_s (fun () ->
+       Eio.Stream.take autonomous)
+   with
+   | Ok (`Ran ()) -> ()
+   | Ok (`Busy _) | Ok `Interrupted | Error _ -> fail "the autonomous turn did not run"
+   | exception Eio.Time.Timeout ->
+     fail
+       (Printf.sprintf
+          "the waiting autonomous turn did not start after one chat turn; order so far: [%s]"
+          (String.concat "; " (List.rev !order))));
+  check (list string) "the lines alternate"
+    [ "chat:kmsg-first"; "autonomous"; "chat:kmsg-second" ]
+    (List.rev !order)
+;;
+
 (* A waiting user message must keep its place when the keepalive observes
    the same busy chat repeatedly. The live failure recorded four such
    observations, then gave the released slot to fresh Board work. The
@@ -8056,6 +8127,10 @@ let () =
             "pending chat survives repeated autonomous observations"
             `Quick
             test_pending_chat_survives_repeated_autonomous_observations
+        ; test_case
+            "evidence: waiting autonomous turn after one chat turn"
+            `Quick
+            test_evidence_waiting_autonomous_turn_after_one_chat_turn
         ; test_case
             "turn slot release signals availability"
             `Quick

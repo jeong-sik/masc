@@ -3966,6 +3966,19 @@ let inline_action_title ~lang (kind : Nav.inline_action_kind) =
            ~en:
              (Printf.sprintf "Verify Provider Account · %s (%s)" integration_id
                 provider_account_id))
+  | Nav.Ma_keeper_create_form ->
+      Say.resolve lang
+        (Say.make ~ko:"개인 키퍼 생성" ~en:"Create Personal Keeper")
+  | Nav.Ma_keeper_assign_form { keeper_id } ->
+      Say.resolve lang
+        (Say.make
+           ~ko:("런타임 배정 · " ^ keeper_id)
+           ~en:("Assign Runtime · " ^ keeper_id))
+  | Nav.Ma_keeper_turn_form { keeper_id } ->
+      Say.resolve lang
+        (Say.make
+           ~ko:("메시지 전송 · " ^ keeper_id)
+           ~en:("Send Turn · " ^ keeper_id))
   | Nav.Btw_query ->
       Say.resolve lang (Say.make ~ko:"임시 질문 (/btw)" ~en:"Side-Query (/btw)")
   | Nav.Gate_reject id ->
@@ -4238,6 +4251,9 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Nav.Ma_provider_key_replace_form _
     | Nav.Ma_provider_key_remove_confirm _
     | Nav.Ma_provider_verify_form _
+    | Nav.Ma_keeper_create_form
+    | Nav.Ma_keeper_assign_form _
+    | Nav.Ma_keeper_turn_form _
     | Nav.Board_comment _
     | Nav.Github_token_form _
     | Nav.Code_search_form
@@ -4336,6 +4352,9 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Ma_provider_key_replace_form _
       | Nav.Ma_provider_key_remove_confirm _
       | Nav.Ma_provider_verify_form _
+      | Nav.Ma_keeper_create_form
+      | Nav.Ma_keeper_assign_form _
+      | Nav.Ma_keeper_turn_form _
       | Nav.Board_comment _
       | Nav.Github_token_form _
       | Nav.Code_finder_form
@@ -4528,6 +4547,9 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Ma_provider_key_replace_form _
       | Nav.Ma_provider_key_remove_confirm _
       | Nav.Ma_provider_verify_form _
+      | Nav.Ma_keeper_create_form
+      | Nav.Ma_keeper_assign_form _
+      | Nav.Ma_keeper_turn_form _
       | Nav.Board_comment _
       | Nav.Github_token_form _
       | Nav.Code_finder_form
@@ -4577,6 +4599,7 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Task_create_form
                 | Nav.Task_link_goal _
                 | Nav.Addon_invoke_action _
+                | Nav.Ma_keeper_assign_form _
             | Nav.Fusion_launch_form ->
                 if inner.h - status_rows >= 6 then 1 else 0
             | Nav.Board_goal_proposal
@@ -4627,7 +4650,9 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Ma_provider_key_add_form
                 | Nav.Ma_provider_key_replace_form _
                 | Nav.Ma_provider_key_remove_confirm _
-                | Nav.Ma_provider_verify_form _ ->
+                | Nav.Ma_provider_verify_form _
+                | Nav.Ma_keeper_create_form
+                | Nav.Ma_keeper_turn_form _ ->
                 0
           in
           let form_r =
@@ -4770,6 +4795,29 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   (Cell_grid.put_text ~clip:er grid ~x:er.x ~y:er.y
                      ~style:whisper_st
                      (Grapheme.truncate_to_width ~max_width:er.w hint))
+            | Nav.Ma_keeper_assign_form _ ->
+                let rts = Account_store.all_runtimes model.account in
+                let hint =
+                  match rts with
+                  | [] ->
+                      Say.resolve lang
+                        (Say.make
+                           ~ko:"보유 런타임 없음 ([@] 계정에서 프로바이더 연결 또는 직접 입력)"
+                           ~en:"No owned runtimes loaded (press [@] Account or enter runtime_id)")
+                  | xs ->
+                      let sample =
+                        xs
+                        |> List.filteri (fun i _ -> i < 5)
+                        |> List.map (fun (r : Wire_account.provider_runtime) ->
+                               r.runtime_id)
+                        |> String.concat ", "
+                      in
+                      "[←→] Runtimes: " ^ sample
+                in
+                ignore
+                  (Cell_grid.put_text ~clip:er grid ~x:er.x ~y:er.y
+                     ~style:whisper_st
+                     (Grapheme.truncate_to_width ~max_width:er.w hint))
             | Nav.Board_goal_proposal
             | Nav.Goal_confirmation_proof
             | Nav.Memory_act_form
@@ -4818,7 +4866,9 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Ma_provider_key_add_form
                 | Nav.Ma_provider_key_replace_form _
                 | Nav.Ma_provider_key_remove_confirm _
-                | Nav.Ma_provider_verify_form _ ->
+                | Nav.Ma_provider_verify_form _
+                | Nav.Ma_keeper_create_form
+                | Nav.Ma_keeper_turn_form _ ->
                 ()
           end;
           if status_rows = 1 then begin
@@ -5325,14 +5375,27 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                        ~ko:"[Enter] 토큰 적용 및 재시도  ·  [Ctrl+U] 지우기  ·  [Esc] 취소"
                        ~en:"[Enter] Apply token & retry  ·  [Ctrl+U] Wipe  ·  [Esc] Cancel") );
               ]
+          else if model.account.clear_token_armed then
+            [
+              (attn_st,
+                Say.resolve lang
+                  (Say.make
+                     ~ko:"토큰 해제 확인: 한 번 더 [c]를 누르면 토큰 해제 · [Esc] 취소"
+                     ~en:"Press [c] again to clear token, [Esc] to cancel"));
+              ( acc_st,
+                Say.resolve lang
+                  (Say.make
+                     ~ko:"[c] 해제 확정  ·  [Esc] 취소  ·  [Ctrl+Q] 종료"
+                     ~en:"[c] Confirm Clear  ·  [Esc] Cancel  ·  [Ctrl+Q] Quit") );
+            ]
           else
             [
               (whisper_st, "");
               ( acc_st,
                 Say.resolve lang
                   (Say.make
-                     ~ko:"[t] 토큰/PAT 입력  ·  [c] 토큰 해제  ·  [r] 재확인  ·  [Ctrl+Q] 종료"
-                     ~en:"[t] Enter/Rotate Token  ·  [c] Clear Token  ·  [r] Retry  ·  [Ctrl+Q] Quit") );
+                     ~ko:"[t] 토큰/PAT 입력  ·  [c] 토큰 해제  ·  [f] 파일/환경  ·  [r] 재확인  ·  [Ctrl+Q] 종료"
+                     ~en:"[t] Enter/Rotate Token  ·  [c] Clear Token  ·  [f] File/Env  ·  [r] Retry  ·  [Ctrl+Q] Quit") );
             ]
         in
         draw_lines inner ~rail_tone:(Some Theme.Status_attention)

@@ -16,6 +16,7 @@ let has_explicit_sync_streams cmds =
       | Cmd.Http_delete _
       | Cmd.Http_post_stream _
       | Cmd.Set_bearer_token _
+      | Cmd.Reset_bearer_token_to_default
       | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
@@ -143,7 +144,15 @@ let apply_resize ~now (m : Model.t) ~cols ~rows =
         nav = { next2.nav with overlay; pane_index; filter_focused };
       }
     in
-    if micro_locked then Model.disarm_keeper_stop next else next
+    if micro_locked then
+      let next = Model.disarm_keeper_stop next in
+      {
+        next with
+        account = Account_store.disarm_clear_token next.account;
+        personal_keepers =
+          Personal_keepers_store.disarm_delete next.personal_keepers;
+      }
+    else next
   in
   (* Preserve active user overlays/modals across resize while defensively
      clearing any explicit [Micro_viewport] gate once enlarged >= 80x24. *)
@@ -699,6 +708,9 @@ let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
       keeper_context =
         Keeper_context_store.clear_epoch_logins after.keeper_context;
       keeper_resume_op_ids = [];
+      account = Account_store.disarm_clear_token after.account;
+      personal_keepers =
+        Personal_keepers_store.disarm_delete after.personal_keepers;
       (* A first [U] asked about a target of the epoch that just ended. *)
       unbind_armed = None;
     }
@@ -868,6 +880,45 @@ let step ~now m msg =
                    (Some armed_name)) ->
         Model.disarm_keeper_stop next0
     | Some _ | None -> next0
+  in
+  let next0 =
+    if next0.account.clear_token_armed then
+      let on_clear_surface =
+        (not next0.account.token_editor.active)
+        && (Option.equal Nav.equal_overlay next0.nav.overlay (Some Nav.Account)
+           || Option.equal Nav.equal_overlay next0.nav.overlay
+                (Some (Nav.System_gate Nav.Auth_gate)))
+      in
+      if on_clear_surface then next0
+      else
+        { next0 with account = Account_store.disarm_clear_token next0.account }
+    else next0
+  in
+  let next0 =
+    match next0.personal_keepers.delete_armed_conv_id with
+    | Some armed_cid ->
+        let on_pk_surface =
+          Option.is_none next0.nav.overlay
+          && Option.is_none (Model.active_inspector next0)
+          && (not (Model.sidebar_has_focus next0))
+          && (not (Drafts.is_focused next0.drafts))
+          && (not next0.nav.filter_focused)
+          && Nav.equal_workspace next0.nav.workspace Nav.Keepers
+          && Rbac.is_multi_account next0.auth_session
+          && Rbac.is_allowed next0.auth_session Rbac.Multi_account_own_keeper
+          && Option.equal String.equal
+               (Personal_keepers_store.delete_target_conversation_id
+                  next0.personal_keepers)
+               (Some armed_cid)
+        in
+        if on_pk_surface then next0
+        else
+          {
+            next0 with
+            personal_keepers =
+              Personal_keepers_store.disarm_delete next0.personal_keepers;
+          }
+    | None -> next0
   in
   let next1 =
     if next0 == m || Option.is_none next0.freshness.view_stream then next0

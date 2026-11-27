@@ -1275,6 +1275,9 @@ let render_with_history_rows
         Masc_tui_screens_core.Render_util.draw_locked_panel grid ~cache ~rect
           ~theme ~model ~title:(Nav.workspace_label Nav.Keepers) ~reason
     | Rbac.Allowed ->
+    if Rbac.is_multi_account model.auth_session then
+      Screen_personal_keepers.render ~model ~cache ~rect grid
+    else
     let bp = Ops_common.layout_bp model in
     let selected_keeper_name_opt = Model.selected_keeper_name model in
     let open_memory_diagram_for_selected =

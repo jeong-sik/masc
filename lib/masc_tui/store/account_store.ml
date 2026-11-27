@@ -25,6 +25,7 @@ let empty_token_editor = { active = false; draft = ""; error = None }
 type t = {
   token_source : token_source;
   token_editor : token_editor;
+  clear_token_armed : bool;
   provider_accounts : Wire_account.provider_accounts_snapshot Observed.t;
   integrations : Wire_account.person_integrations_snapshot Observed.t;
   own_provider_forbidden : string option;
@@ -37,6 +38,7 @@ let empty =
   {
     token_source = Token_startup_default;
     token_editor = empty_token_editor;
+    clear_token_armed = false;
     provider_accounts = Observed.unreported;
     integrations = Observed.unreported;
     own_provider_forbidden = None;
@@ -93,9 +95,14 @@ let masked_draft_display (ed : token_editor) =
     Buffer.contents buf
 
 let open_token_editor t =
-  { t with token_editor = { active = true; draft = ""; error = None } }
+  {
+    t with
+    token_editor = { active = true; draft = ""; error = None };
+    clear_token_armed = false;
+  }
 
-let close_token_editor t = { t with token_editor = empty_token_editor }
+let close_token_editor t =
+  { t with token_editor = empty_token_editor; clear_token_armed = false }
 
 let wipe_token_draft t =
   { t with token_editor = { t.token_editor with draft = ""; error = None } }
@@ -129,6 +136,7 @@ let mark_token_runtime_set t =
     t with
     token_source = Token_runtime_set;
     token_editor = empty_token_editor;
+    clear_token_armed = false;
   }
 
 let mark_token_runtime_cleared t =
@@ -136,7 +144,19 @@ let mark_token_runtime_cleared t =
     t with
     token_source = Token_runtime_cleared;
     token_editor = empty_token_editor;
+    clear_token_armed = false;
   }
+
+let mark_token_startup_default t =
+  {
+    t with
+    token_source = Token_startup_default;
+    token_editor = empty_token_editor;
+    clear_token_armed = false;
+  }
+
+let arm_clear_token t = { t with clear_token_armed = true }
+let disarm_clear_token t = { t with clear_token_armed = false }
 
 let clamp_idx count idx =
   if count <= 0 then 0 else Int.max 0 (Int.min (count - 1) idx)
@@ -209,6 +229,11 @@ let runtimes_for_account ~provider_account_id t =
         (fun (rt : Wire_account.provider_runtime) ->
           String.equal rt.provider_account_id provider_account_id)
         snap.runtimes
+
+let all_runtimes t =
+  match Observed.to_option t.provider_accounts with
+  | None -> []
+  | Some snap -> snap.runtimes
 
 let integration_by_id ~integration_id t =
   List.find_opt

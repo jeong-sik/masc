@@ -6,6 +6,11 @@ type get_request =
   | Get_auth_whoami
   | Get_auth_provider_accounts
   | Get_auth_integrations
+  | Get_auth_keepers
+  | Get_auth_keeper_conversation of {
+      keeper_id : string;
+      conversation_id : string option;
+    }
   | Get_dashboard_shell
   | Get_keepers_roster
   | Get_keeper_turns
@@ -301,6 +306,16 @@ type post_request =
       input : Wire_runtime.setup_login_input;
     }
   | Post_setup_login_cancel of { login_id : string }
+  | Post_auth_keeper_create of { keeper_id : string }
+  | Post_auth_keeper_assign of {
+      keeper_id : string;
+      runtime_id : string;
+    }
+  | Post_auth_keeper_conversation_start of { keeper_id : string }
+  | Post_auth_keeper_turn of {
+      keeper_id : string;
+      message : string;
+    }
   | Post_sandbox_probe of [ `All | `Keeper of string | `Ssh_pool of string ]
   | Post_config_patch of Wire_config.patch_request
   | Post_tui_preference of Wire_config.tui_preference_change
@@ -598,6 +613,10 @@ type delete_request =
       confirmed : bool;
     }
   | Delete_ma_setup_account_key of { provider_account_id : string }
+  | Delete_auth_keeper_conversation of {
+      keeper_id : string;
+      conversation_id : string;
+    }
 
 type stream_post_request =
   | Stream_keeper_chat of {
@@ -632,6 +651,7 @@ type t =
   | Http_post_stream of { epoch : Epoch.t; req : stream_post_request }
   | Sync_streams of { epoch : Epoch.t; streams : Subscriptions.stream_id list }
   | Set_bearer_token of string option
+  | Reset_bearer_token_to_default
   | Update_workspace_guard of {
       instance_id : string option;
       workspace_sha256 : string option;
@@ -680,6 +700,9 @@ let get_request_path = function
   | Get_auth_whoami -> Wire_common.auth_whoami_path
   | Get_auth_provider_accounts -> Wire_account.auth_provider_accounts_path
   | Get_auth_integrations -> Wire_account.auth_integrations_path
+  | Get_auth_keepers -> Wire_personal_keepers.keepers_path
+  | Get_auth_keeper_conversation { keeper_id; conversation_id } ->
+      Wire_personal_keepers.conversation_read_path ~keeper_id ?conversation_id ()
   | Get_dashboard_shell -> Wire_fleet.dashboard_shell_path
   | Get_keepers_roster -> Wire_fleet.dashboard_keepers_path
   | Get_keeper_turns -> Wire_fleet.keepers_turns_path
@@ -912,6 +935,11 @@ let post_request_path = function
       Wire_runtime.setup_accounts_login_input_path ~login_id
   | Post_setup_login_cancel { login_id } ->
       Wire_account.setup_accounts_login_cancel_path ~login_id
+  | Post_auth_keeper_create _ -> Wire_personal_keepers.keepers_path
+  | Post_auth_keeper_assign _ -> Wire_personal_keepers.assign_path
+  | Post_auth_keeper_conversation_start _ ->
+      Wire_personal_keepers.conversation_path
+  | Post_auth_keeper_turn _ -> Wire_personal_keepers.turn_path
   | Post_sandbox_probe _ -> Wire_infra.infra_sandboxes_probe_path
   | Post_config_patch _ -> Wire_config.config_patch_path
   | Post_tui_preference _ -> Wire_config.tui_preferences_path
@@ -1060,6 +1088,10 @@ let mcp_tool_name_of_post_request = function
   | Post_setup_login_start _
   | Post_setup_login_input _
   | Post_setup_login_cancel _
+  | Post_auth_keeper_create _
+  | Post_auth_keeper_assign _
+  | Post_auth_keeper_conversation_start _
+  | Post_auth_keeper_turn _
   | Post_sandbox_probe _
   | Post_config_patch _
   | Post_tui_preference _
@@ -1160,6 +1192,14 @@ let post_request_body = function
   | Post_setup_login_input { login_id = _; input } ->
       Wire_runtime.encode_setup_login_input input
   | Post_setup_login_cancel _ -> Wire_account.encode_login_cancel ()
+  | Post_auth_keeper_create { keeper_id } ->
+      Wire_personal_keepers.encode_make_keeper ~keeper_id
+  | Post_auth_keeper_assign { keeper_id; runtime_id } ->
+      Wire_personal_keepers.encode_assign_keeper ~keeper_id ~runtime_id
+  | Post_auth_keeper_conversation_start { keeper_id } ->
+      Wire_personal_keepers.encode_start_conversation ~keeper_id
+  | Post_auth_keeper_turn { keeper_id; message } ->
+      Wire_personal_keepers.encode_turn ~keeper_id ~message
   | Post_sandbox_probe target -> Wire_infra.encode_sandbox_probe_request target
   | Post_config_patch req -> Wire_config.encode_patch_request req
   | Post_tui_preference change ->
@@ -1420,11 +1460,13 @@ let delete_request_path = function
   | Delete_skill_editor _ -> Wire_runtime.skill_editor_delete_path
   | Delete_ma_setup_account_key { provider_account_id } ->
       Wire_account.setup_accounts_key_entry_path ~provider_account_id
+  | Delete_auth_keeper_conversation { conversation_id; _ } ->
+      Wire_personal_keepers.conversation_delete_path ~conversation_id
 
 let delete_request_body = function
   | Delete_skill_editor { reference_json; confirmed; _ } ->
       Wire_runtime.encode_skill_delete_body ~reference_json ~confirmed
-  | Delete_ma_setup_account_key _ -> `Null
+  | Delete_ma_setup_account_key _ | Delete_auth_keeper_conversation _ -> `Null
 
 let rec flatten_one acc = function
   | Batch xs -> List.fold_left flatten_one acc xs
@@ -1435,6 +1477,7 @@ let rec flatten_one acc = function
     | Http_post_stream _
     | Sync_streams _
     | Set_bearer_token _
+    | Reset_bearer_token_to_default
     | Update_workspace_guard _
     | Voice_cmd _
     | Copy_clipboard _

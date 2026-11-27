@@ -937,21 +937,75 @@ let dispatch_account_overlay_key ~now (m : Model.t)
     Some (dispatch_token_editor_key ~now m norm)
   else
     let norm = Keymap.replay_ime_event norm in
-    let require_ma_own_provider f =
-      match Rbac.decide m.auth_session Rbac.Multi_account_own_provider with
-      | Rbac.Allowed -> f ()
-      | Rbac.Denied reason ->
-          ( Model.with_toast ~now ~level:Model.Toast_warning
-              (Rbac.deny_reason_say reason) m
-          , [] )
+    let is_clear_key =
+      is_printable_key norm
+      && Keymap.Input.equal_key norm.key (Keymap.Input.Char "c")
     in
-    match norm.key with
-    | Keymap.Input.Char "t" when is_printable_key norm ->
-        Some ({ m with account = Account_store.open_token_editor m.account }, [])
-    | Keymap.Input.Char "c" when is_printable_key norm ->
-        Some (Update_http.apply_runtime_token_swap ~now ~token:None m)
-    | Keymap.Input.Char "r" when is_printable_key norm ->
-        Some (Update_actions.execute_action ~now m Keymap.Refresh)
+    if
+      m.account.clear_token_armed
+      && Keymap.Input.equal_key norm.key Keymap.Input.Escape
+      && (not norm.mods.ctrl) && not norm.mods.alt
+    then
+      Some
+        ( Model.with_toast ~now ~level:Model.Toast_info
+            (Say.make ~ko:"토큰 해제 취소됨" ~en:"Token clear cancelled")
+            { m with account = Account_store.disarm_clear_token m.account }
+        , [] )
+    else
+      let was_armed = m.account.clear_token_armed in
+      let m =
+        if is_clear_key then m
+        else { m with account = Account_store.disarm_clear_token m.account }
+      in
+      let require_ma_own_provider f =
+        match Rbac.decide m.auth_session Rbac.Multi_account_own_provider with
+        | Rbac.Allowed -> f ()
+        | Rbac.Denied reason ->
+            ( Model.with_toast ~now ~level:Model.Toast_warning
+                (Rbac.deny_reason_say reason) m
+            , [] )
+      in
+      match norm.key with
+      | Keymap.Input.Char "t" when is_printable_key norm ->
+          Some
+            ({ m with account = Account_store.open_token_editor m.account }, [])
+      | Keymap.Input.Char "c" when is_printable_key norm ->
+          if was_armed then
+            Some
+              (Update_http.apply_runtime_token_swap ~now ~token:None
+                 {
+                   m with
+                   account = Account_store.disarm_clear_token m.account;
+                 })
+          else
+            Some
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make
+                     ~ko:"한 번 더 [c]를 누르면 토큰을 해제합니다 (Esc 취소)"
+                     ~en:"Press [c] again to clear token (Esc to cancel)")
+                  { m with account = Account_store.arm_clear_token m.account }
+              , [] )
+      | Keymap.Input.Char "f" when is_printable_key norm ->
+          Some (Update_http.revert_runtime_token_to_default ~now m)
+      | Keymap.Input.Char "p" when is_printable_key norm -> (
+          match Rbac.decide m.auth_session Rbac.Multi_account_own_keeper with
+          | Rbac.Allowed ->
+              let m_closed =
+                {
+                  m with
+                  nav = { m.nav with overlay = None; return_overlay = None };
+                }
+              in
+              Some
+                (Update_actions.execute_action ~now m_closed
+                   (Keymap.Switch_workspace Nav.Keepers))
+          | Rbac.Denied reason ->
+              Some
+                ( Model.with_toast ~now ~level:Model.Toast_warning
+                    (Rbac.deny_reason_say reason) m
+                , [] ))
+      | Keymap.Input.Char "r" when is_printable_key norm ->
+          Some (Update_actions.execute_action ~now m Keymap.Refresh)
     | Keymap.Input.Char "j" when is_printable_key norm ->
         Some
           ( { m with account = Account_store.move_selection ~delta:1 m.account }
@@ -1127,11 +1181,49 @@ let dispatch_system_gate_key ~now (m : Model.t) gate
       Some (dispatch_token_editor_key ~now m raw_norm)
   | Nav.Auth_gate | Nav.Server_offline | Nav.Media_viewer | Nav.Micro_viewport ->
   let norm = Keymap.replay_ime_event raw_norm in
+  let is_auth_gate =
+    match gate with
+    | Nav.Auth_gate -> true
+    | Nav.Server_offline | Nav.Media_viewer | Nav.Micro_viewport -> false
+  in
+  let is_clear_key =
+    is_auth_gate && is_printable_key norm
+    && Keymap.Input.equal_key norm.key (Keymap.Input.Char "c")
+  in
+  if
+    is_auth_gate && m.account.clear_token_armed
+    && Keymap.Input.equal_key norm.key Keymap.Input.Escape
+    && (not norm.mods.ctrl) && not norm.mods.alt
+  then
+    Some
+      ( Model.with_toast ~now ~level:Model.Toast_info
+          (Say.make ~ko:"토큰 해제 취소됨" ~en:"Token clear cancelled")
+          { m with account = Account_store.disarm_clear_token m.account }
+      , [] )
+  else
+  let was_armed = is_auth_gate && m.account.clear_token_armed in
+  let m =
+    if is_clear_key || not is_auth_gate then m
+    else { m with account = Account_store.disarm_clear_token m.account }
+  in
   match gate, norm.key with
   | Nav.Auth_gate, Keymap.Input.Char "t" when is_printable_key norm ->
       Some ({ m with account = Account_store.open_token_editor m.account }, [])
   | Nav.Auth_gate, Keymap.Input.Char "c" when is_printable_key norm ->
-      Some (Update_http.apply_runtime_token_swap ~now ~token:None m)
+      if was_armed then
+        Some
+          (Update_http.apply_runtime_token_swap ~now ~token:None
+             { m with account = Account_store.disarm_clear_token m.account })
+      else
+        Some
+          ( Model.with_toast ~now ~level:Model.Toast_warning
+              (Say.make
+                 ~ko:"한 번 더 [c]를 누르면 토큰을 해제합니다 (Esc 취소)"
+                 ~en:"Press [c] again to clear token (Esc to cancel)")
+              { m with account = Account_store.arm_clear_token m.account }
+          , [] )
+  | Nav.Auth_gate, Keymap.Input.Char "f" when is_printable_key norm ->
+      Some (Update_http.revert_runtime_token_to_default ~now m)
   | Nav.Server_offline, Keymap.Input.Char "s" when is_printable_key norm -> (
       match m.server_identity.mismatch_state with
       | Model.Mismatch_halted ->
@@ -1608,6 +1700,316 @@ let dispatch_contextual_hotkey ~now (m : Model.t)
                 | Some _ | None -> (m, []))
             | Nav.Infra | Nav.Pulse -> (m, [])))
 
+let dispatch_ma_personal_keepers_key ~now (m : Model.t)
+    (raw_norm : Keymap.Input.key_event) =
+  if
+    Option.is_some m.nav.overlay
+    || Option.is_some (Model.active_inspector m)
+    || Model.sidebar_has_focus m
+    || m.nav.filter_focused
+    || Drafts.is_focused m.drafts
+    || not (Nav.equal_workspace m.nav.workspace Nav.Keepers)
+    || not (Rbac.is_multi_account m.auth_session)
+    || not (Rbac.is_allowed m.auth_session Rbac.Multi_account_own_keeper)
+  then None
+  else
+    let norm = Keymap.replay_ime_event raw_norm in
+    let is_delete_key =
+      is_printable_key norm
+      && Keymap.Input.equal_key norm.key (Keymap.Input.Char "d")
+    in
+    if
+      Option.is_some m.personal_keepers.delete_armed_conv_id
+      && Keymap.Input.equal_key norm.key Keymap.Input.Escape
+      && (not norm.mods.ctrl) && not norm.mods.alt
+    then
+      Some
+        ( Model.with_toast ~now ~level:Model.Toast_info
+            (Say.make ~ko:"대화 삭제 취소됨" ~en:"Conversation delete cancelled")
+            {
+              m with
+              personal_keepers =
+                Personal_keepers_store.disarm_delete m.personal_keepers;
+            }
+        , [] )
+    else
+      let armed_conv_id = m.personal_keepers.delete_armed_conv_id in
+      let m =
+        if is_delete_key then m
+        else
+          {
+            m with
+            personal_keepers =
+              Personal_keepers_store.disarm_delete m.personal_keepers;
+          }
+      in
+      let pk_max_scroll (m : Model.t) =
+        let pane_w, pane_h =
+          match Model.pane_rects m with
+          | _ :: r :: _ -> (r.Rect.w, r.Rect.h)
+          | [ r ] -> (r.Rect.w, r.Rect.h)
+          | [] -> (m.viewport.cols, m.viewport.rows)
+        in
+        Personal_keepers_store.max_transcript_scroll ~pane_w ~pane_h
+          m.personal_keepers
+      in
+      let move_or_scroll delta =
+        if m.nav.pane_index = 1 then
+          let max_scroll = pk_max_scroll m in
+          Some
+            ( {
+                m with
+                personal_keepers =
+                  Personal_keepers_store.scroll_transcript ~max_scroll ~delta
+                    m.personal_keepers;
+              }
+            , [] )
+        else
+          let prev_id =
+            Personal_keepers_store.selected_keeper_id m.personal_keepers
+          in
+          let pk =
+            Personal_keepers_store.move_keeper_selection ~delta
+              m.personal_keepers
+          in
+          let next = { m with personal_keepers = pk } in
+          let next_id = Personal_keepers_store.selected_keeper_id pk in
+          let cmds =
+            if Option.equal String.equal prev_id next_id then []
+            else View_fetches.fetches_for_current_view next
+          in
+          Some (next, cmds)
+      in
+      let cycle_conv delta =
+        match Personal_keepers_store.selected_keeper_id m.personal_keepers with
+        | None -> Some (m, [])
+        | Some keeper_id ->
+            let pk, fetch_target =
+              Personal_keepers_store.select_conversation_by_delta ~delta
+                m.personal_keepers
+            in
+            let next = { m with personal_keepers = pk } in
+            let cmds =
+              if
+                Option.is_some pk.own_keeper_forbidden
+                || Option.is_some pk.conversation_forbidden
+              then []
+              else
+                match fetch_target with
+                | Personal_keepers_store.Fetch_none -> []
+                | Personal_keepers_store.Fetch_current ->
+                    [
+                      Cmd.Http_get
+                        {
+                          epoch = next.epoch;
+                          req =
+                            Cmd.Get_auth_keeper_conversation
+                              { keeper_id; conversation_id = None };
+                        };
+                    ]
+                | Personal_keepers_store.Fetch_conversation cid ->
+                    [
+                      Cmd.Http_get
+                        {
+                          epoch = next.epoch;
+                          req =
+                            Cmd.Get_auth_keeper_conversation
+                              { keeper_id; conversation_id = Some cid };
+                        };
+                    ]
+            in
+            Some (next, cmds)
+      in
+      match norm.key with
+      | Keymap.Input.Char "j" when is_printable_key norm -> move_or_scroll 1
+      | Keymap.Input.Char "k" when is_printable_key norm -> move_or_scroll (-1)
+      | Keymap.Input.Down when (not norm.mods.ctrl) && not norm.mods.alt ->
+          move_or_scroll 1
+      | Keymap.Input.Up when (not norm.mods.ctrl) && not norm.mods.alt ->
+          move_or_scroll (-1)
+      | Keymap.Input.Page_down when (not norm.mods.ctrl) && not norm.mods.alt ->
+          let max_scroll = pk_max_scroll m in
+          Some
+            ( {
+                m with
+                personal_keepers =
+                  Personal_keepers_store.scroll_transcript ~max_scroll ~delta:8
+                    m.personal_keepers;
+              }
+            , [] )
+      | Keymap.Input.Page_up when (not norm.mods.ctrl) && not norm.mods.alt ->
+          let max_scroll = pk_max_scroll m in
+          Some
+            ( {
+                m with
+                personal_keepers =
+                  Personal_keepers_store.scroll_transcript ~max_scroll
+                    ~delta:(-8) m.personal_keepers;
+              }
+            , [] )
+      | Keymap.Input.Char "n" when is_printable_key norm ->
+          Some (Update_nav.open_inline_modal m Nav.Ma_keeper_create_form)
+      | Keymap.Input.Char "a" when is_printable_key norm -> (
+          match Personal_keepers_store.selected_keeper_id m.personal_keepers with
+          | Some keeper_id ->
+              Some
+                (Update_nav.open_inline_modal m
+                   (Nav.Ma_keeper_assign_form { keeper_id }))
+          | None ->
+              Some
+                ( Model.with_toast ~now ~level:Model.Toast_warning
+                    (Say.make
+                       ~ko:"개인 키퍼를 먼저 생성하거나 선택하세요 ([n])"
+                       ~en:"Create or select a personal keeper first ([n])")
+                    m
+                , [] ))
+      | Keymap.Input.Char "N" when is_printable_key norm -> (
+          match Personal_keepers_store.selected_keeper m.personal_keepers with
+          | Some { keeper_id; runtime_id = Some _ } ->
+              Some
+                ( Model.with_toast ~now ~level:Model.Toast_info
+                    (Say.make
+                       ~ko:("새 대화 시작 중: " ^ keeper_id)
+                       ~en:("Starting new conversation: " ^ keeper_id))
+                    m
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req =
+                          Cmd.Post_auth_keeper_conversation_start { keeper_id };
+                      };
+                  ] )
+          | Some { keeper_id; runtime_id = None } ->
+              Some
+                ( Model.with_toast ~now ~level:Model.Toast_warning
+                    (Say.make
+                       ~ko:
+                         (Printf.sprintf
+                            "%s에 배정된 런타임이 없습니다 ([a] 배정)"
+                            keeper_id)
+                       ~en:
+                         (Printf.sprintf
+                            "No runtime assigned to %s (press [a] to assign)"
+                            keeper_id))
+                    m
+                , [] )
+          | None ->
+              Some
+                ( Model.with_toast ~now ~level:Model.Toast_warning
+                    (Say.make ~ko:"선택된 개인 키퍼가 없습니다"
+                       ~en:"No personal keeper selected")
+                    m
+                , [] ))
+      | Keymap.Input.Char ("s" | "i") when is_printable_key norm -> (
+          match Personal_keepers_store.selected_keeper m.personal_keepers with
+          | Some { keeper_id; runtime_id = Some _ } ->
+              Some
+                (Update_nav.open_inline_modal m
+                   (Nav.Ma_keeper_turn_form { keeper_id }))
+          | Some { keeper_id; runtime_id = None } ->
+              Some
+                ( Model.with_toast ~now ~level:Model.Toast_warning
+                    (Say.make
+                       ~ko:
+                         (Printf.sprintf
+                            "%s에 배정된 런타임이 없습니다 ([a] 배정)"
+                            keeper_id)
+                       ~en:
+                         (Printf.sprintf
+                            "No runtime assigned to %s (press [a] to assign)"
+                            keeper_id))
+                    m
+                , [] )
+          | None ->
+              Some
+                ( Model.with_toast ~now ~level:Model.Toast_warning
+                    (Say.make ~ko:"선택된 개인 키퍼가 없습니다"
+                       ~en:"No personal keeper selected")
+                    m
+                , [] ))
+      | Keymap.Input.Char "d" when is_printable_key norm -> (
+          match
+            ( Personal_keepers_store.selected_keeper_id m.personal_keepers
+            , Personal_keepers_store.delete_target_conversation_id
+                m.personal_keepers )
+          with
+          | Some keeper_id, Some cid ->
+              if Option.equal String.equal armed_conv_id (Some cid) then
+                let personal_keepers =
+                  Personal_keepers_store.disarm_delete m.personal_keepers
+                in
+                Some
+                  ( Model.with_toast ~now ~level:Model.Toast_info
+                      (Say.make
+                         ~ko:("대화 삭제 중: " ^ cid)
+                         ~en:("Deleting conversation: " ^ cid))
+                      { m with personal_keepers }
+                  , [
+                      Cmd.Http_delete
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Delete_auth_keeper_conversation
+                              { keeper_id; conversation_id = cid };
+                        };
+                    ] )
+              else
+                let personal_keepers =
+                  Personal_keepers_store.arm_delete ~conversation_id:cid
+                    m.personal_keepers
+                in
+                Some
+                  ( Model.with_toast ~now ~level:Model.Toast_warning
+                      (Say.make
+                         ~ko:
+                           (Printf.sprintf
+                              "한 번 더 [d]를 누르면 대화 %s를 삭제합니다 (Esc 취소)"
+                              cid)
+                         ~en:
+                           (Printf.sprintf
+                              "Press [d] again to delete conversation %s (Esc to cancel)"
+                              cid))
+                      { m with personal_keepers }
+                  , [] )
+          | (Some _ | None), None | None, Some _ ->
+              Some
+                ( Model.with_toast ~now ~level:Model.Toast_warning
+                    (Say.make ~ko:"삭제할 대화가 없습니다"
+                       ~en:"No conversation to delete")
+                    m
+                , [] ))
+      | Keymap.Input.Char "[" when is_printable_key norm -> cycle_conv (-1)
+      | Keymap.Input.Char "]" when is_printable_key norm -> cycle_conv 1
+      | Keymap.Input.Char "r" when is_printable_key norm ->
+          let next =
+            {
+              m with
+              personal_keepers =
+                Personal_keepers_store.clear_forbidden m.personal_keepers;
+              account = { m.account with own_provider_forbidden = None };
+            }
+            |> Model.mark_all_domains_stale
+          in
+          Some (next, View_fetches.fetches_for_current_view ~force:true next)
+      | Keymap.Input.Char _
+      | Keymap.Input.Enter
+      | Keymap.Input.Tab
+      | Keymap.Input.Backspace
+      | Keymap.Input.Escape
+      | Keymap.Input.Delete
+      | Keymap.Input.Insert
+      | Keymap.Input.Up
+      | Keymap.Input.Down
+      | Keymap.Input.Page_up
+      | Keymap.Input.Page_down
+      | Keymap.Input.Left
+      | Keymap.Input.Right
+      | Keymap.Input.Home
+      | Keymap.Input.End
+      | Keymap.Input.Function _ ->
+          None
+
 let dispatch_keeper_config_key ~now (m : Model.t)
     (norm : Keymap.Input.key_event) =
   if not (Rbac.can_admin m.auth_session) then None
@@ -1837,6 +2239,38 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
         elapsed >= 0.0 && elapsed < Model.keeper_stop_arm_window_s
     | None -> false
   in
+  let replayed_norm = Keymap.replay_ime_event norm in
+  let on_clear_token_surface =
+    (not m.account.token_editor.active)
+    && (Option.equal Nav.equal_overlay m.nav.overlay (Some Nav.Account)
+       || Option.equal Nav.equal_overlay m.nav.overlay
+            (Some (Nav.System_gate Nav.Auth_gate)))
+  in
+  let is_clear_token_confirm_key =
+    on_clear_token_surface && is_printable_key replayed_norm
+    && Keymap.Input.equal_key replayed_norm.key (Keymap.Input.Char "c")
+  in
+  let clear_token_arm_active =
+    on_clear_token_surface && m.account.clear_token_armed
+  in
+  let on_pk_delete_surface =
+    Option.is_none m.nav.overlay
+    && Option.is_none (Model.active_inspector m)
+    && (not (Model.sidebar_has_focus m))
+    && (not (Drafts.is_focused m.drafts))
+    && (not m.nav.filter_focused)
+    && Nav.equal_workspace m.nav.workspace Nav.Keepers
+    && Rbac.is_multi_account m.auth_session
+    && Rbac.is_allowed m.auth_session Rbac.Multi_account_own_keeper
+  in
+  let is_pk_delete_confirm_key =
+    on_pk_delete_surface && is_printable_key replayed_norm
+    && Keymap.Input.equal_key replayed_norm.key (Keymap.Input.Char "d")
+  in
+  let pk_delete_arm_active =
+    on_pk_delete_surface
+    && Option.is_some m.personal_keepers.delete_armed_conv_id
+  in
   let m =
     if Option.is_some m.quit_armed_at && not is_quit_key then
       Model.disarm_quit m
@@ -1845,6 +2279,23 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
   let m =
     if Option.is_some m.keeper_stop_armed && not is_keeper_stop_key then
       Model.disarm_keeper_stop m
+    else m
+  in
+  let m =
+    if m.account.clear_token_armed && not is_clear_token_confirm_key then
+      { m with account = Account_store.disarm_clear_token m.account }
+    else m
+  in
+  let m =
+    if
+      Option.is_some m.personal_keepers.delete_armed_conv_id
+      && not is_pk_delete_confirm_key
+    then
+      {
+        m with
+        personal_keepers =
+          Personal_keepers_store.disarm_delete m.personal_keepers;
+      }
     else m
   in
   let is_plain_escape =
@@ -1870,13 +2321,29 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
     | Keymap.Input.Function _ ->
         false
   in
-  (* Plain Esc consumes only an active arm (quit or keeper stop) without popping
-     an active dive/modal. Every other non-confirm key disarms above AND
-     continues normal dispatch so the user's first keypress is never lost. *)
+  (* Plain Esc consumes only an active arm (quit, keeper stop, token clear,
+     or personal conversation delete) without popping an active dive/overlay.
+     Every other non-confirm key disarms above AND continues normal dispatch
+     so the user's first keypress is never lost. *)
   if
     (quit_arm_active && (not is_quit_key) && is_plain_escape)
     || (keeper_stop_arm_active && (not is_keeper_stop_key) && is_plain_escape)
   then (m, [])
+  else if
+    clear_token_arm_active && (not is_clear_token_confirm_key)
+    && is_plain_escape
+  then
+    ( Model.with_toast ~now ~level:Model.Toast_info
+        (Say.make ~ko:"토큰 해제 취소됨" ~en:"Token clear cancelled")
+        m
+    , [] )
+  else if
+    pk_delete_arm_active && (not is_pk_delete_confirm_key) && is_plain_escape
+  then
+    ( Model.with_toast ~now ~level:Model.Toast_info
+        (Say.make ~ko:"대화 삭제 취소됨" ~en:"Conversation delete cancelled")
+        m
+    , [] )
   else
   (* Top-precedence Micro_viewport gate per tui-chat-design/SKILL.md: never
      mutate hidden drafts or underlying overlays. On <40x12 only Quit_app is
@@ -2084,6 +2551,9 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Ma_provider_key_replace_form _
                         | Nav.Ma_provider_key_remove_confirm _
                         | Nav.Ma_provider_verify_form _
+                        | Nav.Ma_keeper_create_form
+                        | Nav.Ma_keeper_assign_form _
+                        | Nav.Ma_keeper_turn_form _
                         | Nav.Board_comment _
                         | Nav.Github_token_form _
                         | Nav.Code_finder_form
@@ -2308,13 +2778,30 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                             in
                             Some ({ m with inline_modal = Some next_modal }, [])
                         | None -> None)
+                    | ( Nav.Ma_keeper_assign_form _
+                      , Some { key = "ma_runtime_id"; value; _ } ) -> (
+                        let runtimes =
+                          Account_store.all_runtimes m.account
+                          |> List.map (fun (r : Wire_account.provider_runtime) ->
+                                 r.runtime_id)
+                        in
+                        match cycle_in runtimes (String.trim value) with
+                        | Some next_rt ->
+                            let next_modal =
+                              Model.modal_update_active_field
+                                (fun _ -> next_rt)
+                                modal
+                            in
+                            Some ({ m with inline_modal = Some next_modal }, [])
+                        | None -> None)
                     | ( ( Nav.Connector_form
                         | Nav.Fusion_launch_form
                         | Nav.Runtime_lane_create
                         | Nav.Task_transition_form _
                         | Nav.Goal_upsert_form _
                         | Nav.Keeper_lifecycle_form _
-                        | Nav.Addon_invoke_action _ )
+                        | Nav.Addon_invoke_action _
+                        | Nav.Ma_keeper_assign_form _ )
                       , (Some _ | None) )
                     | ( ( Nav.Btw_query
                         | Nav.Gate_reject _
@@ -2337,6 +2824,8 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Ma_provider_key_replace_form _
                         | Nav.Ma_provider_key_remove_confirm _
                         | Nav.Ma_provider_verify_form _
+                        | Nav.Ma_keeper_create_form
+                        | Nav.Ma_keeper_turn_form _
                         | Nav.Board_comment _
                         | Nav.Github_token_form _
                         | Nav.Code_finder_form
@@ -2804,6 +3293,15 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                       Model.is_keeper_config_active m
                       && not (Drafts.is_focused m.drafts)
                     then dispatch_keeper_config_key ~now m norm
+                    else if
+                      Option.is_none (Model.active_inspector m)
+                      && (not (Drafts.is_focused m.drafts))
+                      && (not m.nav.filter_focused)
+                      && Nav.equal_workspace m.nav.workspace Nav.Keepers
+                      && Rbac.is_multi_account m.auth_session
+                      && Rbac.is_allowed m.auth_session
+                           Rbac.Multi_account_own_keeper
+                    then dispatch_ma_personal_keepers_key ~now m norm
                     else if not (Drafts.is_focused m.drafts) then
                       (* Pillar 3: typing Korean while unfocused inside
                          Keepers > Chat (split focus or Focus Mode) auto-focuses
@@ -3340,6 +3838,9 @@ let apply_paste ~now:_ (m : Model.t) text =
                   | Nav.Ma_provider_key_replace_form _
                   | Nav.Ma_provider_key_remove_confirm _
                   | Nav.Ma_provider_verify_form _
+                  | Nav.Ma_keeper_create_form
+                  | Nav.Ma_keeper_assign_form _
+                  | Nav.Ma_keeper_turn_form _
                   | Nav.Board_comment _
                   | Nav.Github_token_form _
                   | Nav.Code_finder_form
@@ -3446,6 +3947,20 @@ let apply_paste ~now:_ (m : Model.t) text =
           ({ m with drafts }, [])
 
 let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
+  let m =
+    let m =
+      if m.account.clear_token_armed then
+        { m with account = Account_store.disarm_clear_token m.account }
+      else m
+    in
+    if Option.is_some m.personal_keepers.delete_armed_conv_id then
+      {
+        m with
+        personal_keepers =
+          Personal_keepers_store.disarm_delete m.personal_keepers;
+      }
+    else m
+  in
   if
     Model.is_too_small_viewport m.viewport
     || (Model.equal_breakpoint m.breakpoint Model.Micro

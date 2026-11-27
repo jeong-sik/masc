@@ -265,6 +265,10 @@ val set_bearer_token : t -> string option -> unit
     endpoint and {!Sse_hub}, pinning [explicit_bearer_override] so subsequent
     [/health] polls never reload [.masc/auth/admin.token] over the runtime
     selection. *)
+val reset_bearer_token_to_default : t -> unit
+(** Clear [explicit_bearer_override], reload the default file/env token
+    ([$MASC_TOKEN] / [.masc/auth/admin.token]), update [t]'s endpoint and
+    {!Sse_hub}, and drop stale in-flight GET dedup entries. *)
 val update_workspace_guard :
   t -> instance_id:string option -> workspace_sha256:string option -> unit
 

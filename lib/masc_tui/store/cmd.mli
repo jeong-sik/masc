@@ -12,6 +12,11 @@ type get_request =
   | Get_auth_whoami
   | Get_auth_provider_accounts
   | Get_auth_integrations
+  | Get_auth_keepers
+  | Get_auth_keeper_conversation of {
+      keeper_id : string;
+      conversation_id : string option;
+    }
   | Get_dashboard_shell
   | Get_keepers_roster
   | Get_keeper_turns
@@ -312,6 +317,16 @@ type post_request =
       input : Wire_runtime.setup_login_input;
     }
   | Post_setup_login_cancel of { login_id : string }
+  | Post_auth_keeper_create of { keeper_id : string }
+  | Post_auth_keeper_assign of {
+      keeper_id : string;
+      runtime_id : string;
+    }
+  | Post_auth_keeper_conversation_start of { keeper_id : string }
+  | Post_auth_keeper_turn of {
+      keeper_id : string;
+      message : string;
+    }
   | Post_sandbox_probe of [ `All | `Keeper of string | `Ssh_pool of string ]
   | Post_config_patch of Wire_config.patch_request
   | Post_tui_preference of Wire_config.tui_preference_change
@@ -613,6 +628,10 @@ type delete_request =
       confirmed : bool;
     }
   | Delete_ma_setup_account_key of { provider_account_id : string }
+  | Delete_auth_keeper_conversation of {
+      keeper_id : string;
+      conversation_id : string;
+    }
 
 type stream_post_request =
   | Stream_keeper_chat of {
@@ -647,6 +666,7 @@ type t =
   | Http_post_stream of { epoch : Epoch.t; req : stream_post_request }
   | Sync_streams of { epoch : Epoch.t; streams : Subscriptions.stream_id list }
   | Set_bearer_token of string option
+  | Reset_bearer_token_to_default
   | Update_workspace_guard of {
       instance_id : string option;
       workspace_sha256 : string option;

@@ -112,6 +112,8 @@ let timeout_sec_for_get : Cmd.get_request -> float = function
   | Cmd.Get_auth_whoami
   | Cmd.Get_auth_provider_accounts
   | Cmd.Get_auth_integrations
+  | Cmd.Get_auth_keepers
+  | Cmd.Get_auth_keeper_conversation _
   | Cmd.Get_keeper_turns
   | Cmd.Get_chat_queue _
   | Cmd.Get_chat_status _
@@ -249,6 +251,7 @@ let timeout_sec_for_get : Cmd.get_request -> float = function
 let timeout_sec_for_post : Cmd.post_request -> float = function
   (* Standard tier: quick mutations *)
   | Cmd.Post_setup_account_verify _ -> provider_verify_timeout_sec
+  | Cmd.Post_auth_keeper_turn _ -> Wire_personal_keepers.turn_timeout_sec
   | Cmd.Post_ask_answer _
   | Cmd.Post_tool_approval _
   | Cmd.Post_gate_resolution _
@@ -270,6 +273,9 @@ let timeout_sec_for_post : Cmd.post_request -> float = function
   | Cmd.Post_ma_setup_account_key _
   | Cmd.Post_setup_login_input _
   | Cmd.Post_setup_login_cancel _
+  | Cmd.Post_auth_keeper_create _
+  | Cmd.Post_auth_keeper_assign _
+  | Cmd.Post_auth_keeper_conversation_start _
   | Cmd.Post_tui_preference _
   | Cmd.Post_keeper_turn_interrupt _
   | Cmd.Post_keeper_lifecycle
@@ -815,6 +821,18 @@ let refresh_discovered_bearer_token t =
             Sse_hub.update_endpoint t.sse_hub next_ep
           end)
 
+let reset_bearer_token_to_default t =
+  let fresh_tok = load_bearer_token ~base_path:t.cli.base_path () in
+  Stdlib.Mutex.protect t.endpoint_mu (fun () ->
+      Atomic.set t.explicit_bearer_override false;
+      let cur = Atomic.get t.endpoint in
+      let next_ep = { cur with bearer_token = fresh_tok } in
+      Atomic.set t.endpoint next_ep;
+      Sse_hub.update_endpoint t.sse_hub next_ep);
+  Stdlib.Mutex.lock t.in_flight_gets_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock t.in_flight_gets_mu)
+    (fun () -> Hashtbl.clear t.in_flight_gets)
 let has_pending_editor t = Option.is_some (Atomic.get t.pending_editor)
 
 let run_pending_editor ?(can_launch = fun () -> true) t =
@@ -1094,6 +1112,8 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
   | Cmd.Get_auth_whoami
   | Cmd.Get_auth_provider_accounts
   | Cmd.Get_auth_integrations
+  | Cmd.Get_auth_keepers
+  | Cmd.Get_auth_keeper_conversation _
   | Cmd.Get_dashboard_shell
   | Cmd.Get_keepers_roster
   | Cmd.Get_keeper_turns
@@ -1297,6 +1317,28 @@ let rec execute_get t ~epoch req =
               Msg.Reply_auth_integrations
                 (fetch_and_decode_get t ~path
                    ~decode:Wire_account.decode_person_integrations_snapshot)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_auth_keepers ->
+            let reply =
+              Msg.Reply_auth_keepers
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_personal_keepers.decode_keepers_list)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_auth_keeper_conversation { keeper_id; conversation_id } ->
+            let reply =
+              Msg.Reply_auth_keeper_conversation
+                {
+                  keeper_id;
+                  conversation_id;
+                  result =
+                    fetch_and_decode_get t ~path
+                      ~decode:
+                        (Wire_personal_keepers.decode_conversation
+                           ~expected_keeper_id:keeper_id
+                           ?requested_conversation_id:conversation_id);
+                }
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_dashboard_shell ->
@@ -2994,6 +3036,41 @@ let execute_post t ~epoch req =
         | Cmd.Post_setup_login_cancel { login_id } ->
             let result = post_ack t ~path ~body in
             Some (Msg.Reply_setup_login_cancel { login_id; result })
+        | Cmd.Post_auth_keeper_create { keeper_id } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:
+                  (Wire_personal_keepers.decode_made_keeper
+                     ~expected_keeper_id:keeper_id)
+            in
+            Some (Msg.Reply_auth_keeper_create { keeper_id; result })
+        | Cmd.Post_auth_keeper_assign { keeper_id; runtime_id } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:
+                  (Wire_personal_keepers.decode_assigned_keeper
+                     ~expected_keeper_id:keeper_id
+                     ~expected_runtime_id:runtime_id)
+            in
+            Some
+              (Msg.Reply_auth_keeper_assign { keeper_id; runtime_id; result })
+        | Cmd.Post_auth_keeper_conversation_start { keeper_id } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:
+                  (Wire_personal_keepers.decode_started_conversation
+                     ~expected_keeper_id:keeper_id)
+            in
+            Some
+              (Msg.Reply_auth_keeper_conversation_start { keeper_id; result })
+        | Cmd.Post_auth_keeper_turn { keeper_id; message } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:
+                  (Wire_personal_keepers.decode_turn_answer
+                     ~expected_keeper_id:keeper_id)
+            in
+            Some (Msg.Reply_auth_keeper_turn { keeper_id; message; result })
         | Cmd.Post_setup_login_start _ ->
             let ep = Atomic.get t.endpoint in
             let body_str = Yojson.Safe.to_string body in
@@ -3923,6 +4000,37 @@ let execute_delete t ~epoch req =
                  reply =
                    Msg.Reply_ma_setup_account_key_remove
                      { provider_account_id; result };
+               })
+      | Cmd.Delete_auth_keeper_conversation { keeper_id; conversation_id } ->
+          let ep = Atomic.get t.endpoint in
+          let result =
+            match
+              match
+                Http_client.delete_raw ~io:t.io ~clock:t.clock
+                  ~timeout_sec:Wire_personal_keepers.delete_timeout_sec ep ~path
+              with
+              | Error err -> Error (msg_error_of_http err)
+              | Ok raw ->
+                  decode_raw_json t
+                    ~decode:
+                      (Wire_personal_keepers.decode_deleted_conversation
+                         ~expected_conversation_id:conversation_id)
+                    raw
+            with
+            | r -> r
+            | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
+            | exception Io_domain.Closed ->
+                Error (Msg.Transport (Health.Other_io "IO domain closed"))
+            | exception ex ->
+                Error (Msg.Transport (Health.Other_io (Printexc.to_string ex)))
+          in
+          Ui_bus.publish_stream_receipt t.bus
+            (Msg.Http_reply
+               {
+                 epoch;
+                 reply =
+                   Msg.Reply_auth_keeper_conversation_delete
+                     { keeper_id; conversation_id; result };
                }))
 
 (* A chat operation keeps running when its stream drops: the server journals
@@ -5054,6 +5162,7 @@ let rec execute t = function
                      };
                }))
   | Cmd.Set_bearer_token tok -> set_bearer_token t tok
+  | Cmd.Reset_bearer_token_to_default -> reset_bearer_token_to_default t
   | Cmd.Update_workspace_guard { instance_id; workspace_sha256 } ->
       update_workspace_guard t ~instance_id ~workspace_sha256
   | Cmd.Voice_cmd vc -> Voice_runner.dispatch t.voice_runner (voice_cmd_of_store vc)

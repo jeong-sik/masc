@@ -258,6 +258,7 @@ type t = {
   infra : Infra_store.t;
   config : Config_store.t;
   account : Account_store.t;
+  personal_keepers : Personal_keepers_store.t;
   palette : palette_state;
   inline_modal : inline_modal_state option;
   discord_replies : Discord_reply_store.t;
@@ -635,6 +636,7 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
     infra = Infra_store.empty;
     config = Config_store.empty;
     account = Account_store.empty;
+    personal_keepers = Personal_keepers_store.empty;
     palette = { mode = Palette_commands; query = ""; selected = 0 };
     inline_modal = None;
     discord_replies = Discord_reply_store.empty;
@@ -704,7 +706,9 @@ let can_zoom_current_view m =
     | Some _ -> false
     | None -> (
         match m.nav.workspace with
-        | Nav.Keepers -> Option.is_some (selected_keeper_name m)
+        | Nav.Keepers ->
+            (not (Rbac.is_multi_account m.auth_session))
+            && Option.is_some (selected_keeper_name m)
         | Nav.Knowledge -> (
             match m.knowledge.active_tab with
             | Nav.Knowledge_board
@@ -786,7 +790,8 @@ let active_pulse_pane m =
   | None -> Pulse_companies
 
 let is_in_keeper_chat m =
-  Option.is_none (active_inspector m)
+  (not (Rbac.is_multi_account m.auth_session))
+  && Option.is_none (active_inspector m)
   && Nav.equal_workspace m.nav.workspace Nav.Keepers
   && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
   && Option.is_some (selected_keeper_name m)
@@ -1408,26 +1413,29 @@ let focusable_pane_count m =
               | Nav.Work_harness -> 2)
           | Nav.Knowledge -> 2
           | Nav.Keepers ->
-              let empty_filter =
-                String.equal (String.trim m.fleet.filter_query) ""
-              in
-              let has_roster_or_loading =
-                (if empty_filter then
-                   match Observed.to_option m.fleet.keepers with
-                   | Some (_ :: _) -> true
-                   | Some [] | None -> not (Observed.is_value m.fleet.keepers)
-                 else
-                   Fleet_store.filtered_keepers m.fleet <> []
-                   || Fleet_store.companies_nav_rows m.fleet <> [])
-                || Option.is_some (selected_keeper_name m)
-              in
-              if
-                (equal_breakpoint m.breakpoint Wide
-                 || equal_breakpoint m.breakpoint Standard)
-                && inner_body_width m >= 104
-                && has_roster_or_loading
-              then if keeper_preview_has_inner_split m then 3 else 2
-              else 1
+              if Rbac.is_multi_account m.auth_session then
+                if inner_body_width m >= 88 then 2 else 1
+              else
+                let empty_filter =
+                  String.equal (String.trim m.fleet.filter_query) ""
+                in
+                let has_roster_or_loading =
+                  (if empty_filter then
+                     match Observed.to_option m.fleet.keepers with
+                     | Some (_ :: _) -> true
+                     | Some [] | None -> not (Observed.is_value m.fleet.keepers)
+                   else
+                     Fleet_store.filtered_keepers m.fleet <> []
+                     || Fleet_store.companies_nav_rows m.fleet <> [])
+                  || Option.is_some (selected_keeper_name m)
+                in
+                if
+                  (equal_breakpoint m.breakpoint Wide
+                   || equal_breakpoint m.breakpoint Standard)
+                  && inner_body_width m >= 104
+                  && has_roster_or_loading
+                then if keeper_preview_has_inner_split m then 3 else 2
+                else 1
           | Nav.Runtime -> (
               match m.runtime.active_tab with
               | Nav.Runtime_efficiency_spend -> 1
@@ -1653,20 +1661,24 @@ let pane_rects m =
             let a, b = split2 ~left_ratio:0.46 ~top_ratio:0.48 br in
             [ a; b ]
         | Nav.Keepers ->
-            let left_w =
-              if equal_breakpoint m.breakpoint Wide then min 48 (max 34 (br.w * 34 / 100))
-              else min 42 (max 32 (br.w * 38 / 100))
-            in
-            let lw = min br.w left_w in
-            let l = Rect.make ~x:br.x ~y:br.y ~w:lw ~h:br.h in
-            let r =
-              Rect.make ~x:(br.x + lw + gap_h) ~y:br.y
-                ~w:(max 0 (br.w - lw - gap_h)) ~h:br.h
-            in
-            if n = 3 then
-              let rl, rr = split_keeper_inner m.fleet.keeper_dive_tab r in
-              [ l; rl; rr ]
-            else [ l; r ]
+            if Rbac.is_multi_account m.auth_session then
+              let l, r = split_h_ratio ~gap:gap_h br 0.36 in
+              [ l; r ]
+            else
+              let left_w =
+                if equal_breakpoint m.breakpoint Wide then min 48 (max 34 (br.w * 34 / 100))
+                else min 42 (max 32 (br.w * 38 / 100))
+              in
+              let lw = min br.w left_w in
+              let l = Rect.make ~x:br.x ~y:br.y ~w:lw ~h:br.h in
+              let r =
+                Rect.make ~x:(br.x + lw + gap_h) ~y:br.y
+                  ~w:(max 0 (br.w - lw - gap_h)) ~h:br.h
+              in
+              if n = 3 then
+                let rl, rr = split_keeper_inner m.fleet.keeper_dive_tab r in
+                [ l; rl; rr ]
+              else [ l; r ]
         | Nav.Runtime ->
             let a, b = split2 ~left_ratio:0.48 ~top_ratio:0.48 br in
             [ a; b ]
@@ -1952,6 +1964,11 @@ let active_focus_label m =
                       pane_prefix ~ko:"기억 탐색" ~en:"Explorer"
                     else pane_prefix ~ko:"기억 범위" ~en:"Memory Scope")
             | Nav.Keepers ->
+                if Rbac.is_multi_account m.auth_session then
+                  if m.nav.pane_index = 1 then
+                    pane_prefix ~ko:"개인 대화" ~en:"Conversation"
+                  else pane_prefix ~ko:"개인 키퍼" ~en:"Personal Keepers"
+                else
                 let board_recovery_active =
                   Nav.equal_keeper_tab m.fleet.keeper_dive_tab
                     Nav.Keeper_work_sandbox
@@ -2146,7 +2163,8 @@ let is_artifact_doc_search_active m =
   && (m.nav.pane_index >= 1 || (is_zoomed_active m))
 
 let is_keeper_config_active m =
-  Option.is_none m.nav.overlay
+  (not (Rbac.is_multi_account m.auth_session))
+  && Option.is_none m.nav.overlay
   &&
   match active_inspector m with
   | Some _ -> false
@@ -2177,7 +2195,8 @@ let is_text_capture_active m =
     | None -> is_keeper_config_active m && Config_store.is_editing_field m.config
 
 let is_keeper_lifecycle_surface m =
-  Option.is_none m.nav.overlay
+  (not (Rbac.is_multi_account m.auth_session))
+  && Option.is_none m.nav.overlay
   && (not (is_too_small_viewport m.viewport))
   && (not (equal_breakpoint m.breakpoint Micro))
   && (not (is_text_capture_active m))
@@ -2195,7 +2214,8 @@ let is_memory_explorer_surface m =
   | None ->
       (Nav.equal_workspace m.nav.workspace Nav.Knowledge
       && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_memory)
-      || (Nav.equal_workspace m.nav.workspace Nav.Keepers
+      || ((not (Rbac.is_multi_account m.auth_session))
+         && Nav.equal_workspace m.nav.workspace Nav.Keepers
          && (m.nav.pane_index >= 1 || is_zoomed_active m)
          && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_memory)
 
@@ -2490,6 +2510,36 @@ let inline_modal_for kind =
           {
             key = "ma_verify_model";
             label = Say.make ~ko:"검증할 모델" ~en:"Model to verify";
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Ma_keeper_create_form ->
+        [
+          {
+            key = "ma_keeper_id";
+            label = Say.make ~ko:"개인 키퍼 ID" ~en:"Personal keeper ID";
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Ma_keeper_assign_form _ ->
+        [
+          {
+            key = "ma_runtime_id";
+            label = Say.make ~ko:"본인 런타임 ID" ~en:"Owned runtime ID";
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Ma_keeper_turn_form _ ->
+        [
+          {
+            key = "ma_turn_message";
+            label = Say.make ~ko:"메시지 (최대 4096바이트)" ~en:"Message (max 4096 bytes)";
             value = "";
             required = true;
             secret = false;
@@ -3150,6 +3200,9 @@ let inline_modal_for kind =
     | Nav.Ma_provider_key_replace_form _
     | Nav.Ma_provider_key_remove_confirm _
     | Nav.Ma_provider_verify_form _
+    | Nav.Ma_keeper_create_form
+    | Nav.Ma_keeper_assign_form _
+    | Nav.Ma_keeper_turn_form _
     | Nav.Board_comment _
     | Nav.Github_token_form _
     | Nav.Code_finder_form
@@ -3218,6 +3271,7 @@ let modal_field_multiline (field : modal_form_field) =
   | "description" | "source_text" | "value" | "args_json" | "addon_binding_json"
   | "goal_measure_spec"
   | "discord_content"
+  | "ma_turn_message"
   | "addon_action_payload" -> true
   | _ -> false
 
@@ -3366,6 +3420,21 @@ let modal_field_help ~key =
         (Say.make
            ~ko:"연동이 허용하는 모델 이름 (서버 검증 최대 120초 소요)"
            ~en:"Allowed model name for this integration (verification may take up to 120s)")
+  | "ma_keeper_id" ->
+      Some
+        (Say.make
+           ~ko:"소문자 영문·숫자·'.'·'_'·'-' 조합 (1~128자, 대문자·'.'/'..' 및 예약어 불가)"
+           ~en:"Lowercase letters, digits, '.', '_', '-' ([a-z0-9._-], 1..128 chars, no uppercase or reserved)")
+  | "ma_runtime_id" ->
+      Some
+        (Say.make
+           ~ko:"본인 프로바이더 계정의 runtime_id 입력 또는 [←→]로 순환 선택"
+           ~en:"Owned runtime_id from your provider accounts ([←→] to cycle)")
+  | "ma_turn_message" ->
+      Some
+        (Say.make
+           ~ko:"개인 키퍼로 보낼 메시지 (UTF-8 최대 4096바이트 · 응답 최대 120초)"
+           ~en:"Message to personal keeper (UTF-8 max 4096 bytes · up to 120s)")
   | "setup_key_integration" ->
       Some
         (Say.make
@@ -4124,6 +4193,7 @@ let mark_all_domains_stale m =
     infra = Infra_store.mark_stale_all m.infra;
     config = Config_store.mark_stale_all m.config;
     account = Account_store.mark_stale m.account;
+    personal_keepers = Personal_keepers_store.mark_stale m.personal_keepers;
   }
 
 let sandboxes_from_roster ~now m =

@@ -1177,7 +1177,329 @@ let test_health_anon_fallback_and_explicit_token_override () =
             (Cmd_executor.current_endpoint exec).bearer_token;
           Alcotest.(check (list (option string)))
             "cleared token sends single anonymous /health request" [ None ]
+            (List.rev !seen_auth_headers);
+          (* Third (#55063 P3-1): Reset_bearer_token_to_default clears override & reloads disk admin.token *)
+          seen_auth_headers := [];
+          Cmd_executor.execute exec Cmd.Reset_bearer_token_to_default;
+          Alcotest.(check (option string))
+            "Reset_bearer_token_to_default reloads disk admin.token"
+            (Some "disk-admin-token-99")
+            (Cmd_executor.current_endpoint exec).bearer_token;
+          Cmd_executor.execute exec
+            (Cmd.Http_get
+               { epoch = Epoch.next (Epoch.next Epoch.initial); req = Cmd.Get_health });
+          let res3 = await_health () in
+          Alcotest.(check bool) "reverted Get_health settles via anon fallback after sending disk token"
+            true (Result.is_ok res3);
+          Alcotest.(check (list (option string)))
+            "server saw Bearer disk-admin-token-99 after Reset_bearer_token_to_default"
+            [ Some "Bearer disk-admin-token-99"; None ]
             (List.rev !seen_auth_headers)))
+
+let test_ma_personal_keepers_loopback_http () =
+  (* Loopback HTTP roundtrip for all 7 /api/v1/auth/keepers routes via Cmd_executor *)
+  let module Wpk = Masc_tui_protocol.Wire_personal_keepers in
+  Alcotest.(check bool) "Post_auth_keeper_turn timeout budget > 120s" true
+    (Cmd_executor.timeout_sec_for_post
+       (Cmd.Post_auth_keeper_turn { keeper_id = "alpha"; message = "hi" })
+     > 120.0);
+  let tmp = make_temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf tmp)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      Eio.Time.with_timeout_exn env#clock 5. @@ fun () ->
+      Eio.Switch.run @@ fun sw ->
+      let seen_assign_body = ref None in
+      let seen_requests = ref [] in
+      let listener =
+        Eio.Net.listen ~sw ~backlog:8 env#net
+          (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+      in
+      let port =
+        match Eio.Net.listening_addr listener with
+        | `Tcp (_, p) -> p
+        | `Unix _ -> Alcotest.fail "expected TCP listener"
+      in
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          let rec accept () =
+            Eio.Net.accept_fork ~sw listener
+              ~on_error:(function End_of_file -> () | exn -> raise exn)
+              (fun flow _ ->
+                let reader = Eio.Buf_read.of_flow flow ~max_size:16384 in
+                let req_line = Eio.Buf_read.line reader in
+                let headers =
+                  Eio.Buf_read.lines reader
+                  |> Seq.take_while (fun s -> s <> "")
+                  |> List.of_seq
+                in
+                let content_len =
+                  List.find_map
+                    (fun h ->
+                      match String.index_opt h ':' with
+                      | None -> None
+                      | Some idx ->
+                          let k =
+                            String.lowercase_ascii
+                              (String.trim (String.sub h 0 idx))
+                          in
+                          if String.equal k "content-length" then
+                            int_of_string_opt
+                              (String.trim
+                                 (String.sub h (idx + 1)
+                                    (String.length h - idx - 1)))
+                          else None)
+                    headers
+                  |> Option.value ~default:0
+                in
+                let req_body =
+                  if content_len > 0 then Eio.Buf_read.take content_len reader
+                  else ""
+                in
+                let parts = String.split_on_char ' ' req_line in
+                let meth, target =
+                  match parts with
+                  | m :: t :: _ -> (m, t)
+                  | _ -> ("", "")
+                in
+                seen_requests := (meth, target) :: !seen_requests;
+                let status, reason, raw =
+                  match (meth, target) with
+                  | "GET", "/api/v1/auth/keepers" ->
+                      ( 200
+                      , "OK"
+                      , {|{"keepers":[{"keeper_id":"alpha","runtime_id":"rt-1"}]}|} )
+                  | "POST", "/api/v1/auth/keepers" ->
+                      (200, "OK", {|{"keeper_id":"alpha","record":"made"}|})
+                  | "POST", "/api/v1/auth/keepers/assign" ->
+                      seen_assign_body := Some req_body;
+                      ( 200
+                      , "OK"
+                      , {|{"keeper_id":"alpha","runtime_id":"rt-1","record":"assigned"}|}
+                      )
+                  | "GET", "/api/v1/auth/keepers/conversation?keeper_id=alpha" ->
+                      ( 200
+                      , "OK"
+                      , {|{"keeper_id":"alpha","current_conversation_id":"conv-1","conversations":[{"conversation_id":"conv-1","provider_account_id":"pa-1","started_at_ms":100}],"conversation_id":"conv-1","turns":[]}|}
+                      )
+                  | "POST", "/api/v1/auth/keepers/conversation" ->
+                      ( 200
+                      , "OK"
+                      , {|{"keeper_id":"alpha","conversation_id":"conv-2"}|} )
+                  | "POST", "/api/v1/auth/keepers/turn" ->
+                      ( 200
+                      , "OK"
+                      , {|{"keeper_id":"alpha","runtime_id":"rt-1","model":"claude-sonnet-4-6","text":"pong","conversation_id":"conv-2","continued":false}|}
+                      )
+                  | "DELETE", "/api/v1/auth/keepers/conversation/conv-1" ->
+                      ( 200
+                      , "OK"
+                      , {|{"conversation_id":"conv-1","vendor_copy":"may_remain"}|}
+                      )
+                  | "DELETE", "/api/v1/auth/keepers/conversation/conv-fail" ->
+                      ( 503
+                      , "Service Unavailable"
+                      , {|{"error":"could not delete","code":"conversation_not_deleted"}|}
+                      )
+                  | _ ->
+                      ( 404
+                      , "Not Found"
+                      , Printf.sprintf {|{"error":"unexpected %s %s"}|} meth target )
+                in
+                Eio.Flow.copy_string
+                  (Printf.sprintf
+                     "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s"
+                     status reason (String.length raw) raw)
+                  flow);
+            accept ()
+          in
+          accept ());
+      let cli =
+        match
+          Cli_args.parse ~env:empty_env ~cwd:tmp
+            [
+              "--port";
+              string_of_int port;
+              "--base-path";
+              tmp;
+              "--no-auto-start";
+            ]
+        with
+        | Cli_args.Run cli -> cli
+        | Cli_args.Info _ | Cli_args.Parse_error _ ->
+            Alcotest.fail "expected valid Cli_args.Run"
+      in
+      let io = Io_domain.start ~sw ~env in
+      let worker = Worker_pool.create ~sw env#domain_mgr in
+      let bus = Cmd_executor.create_bus () in
+      let exec =
+        Cmd_executor.create ~sw ~io ~worker ~clock:env#clock ~cli ~bus
+          ~bearer_token:(Some "pat-worker-1") ~on_quit:ignore ~on_restart:ignore
+          ()
+      in
+      let await_reply () =
+        let rec loop () =
+          match
+            Ui_bus.drain bus
+            |> List.find_map (function
+                 | Ui_bus.Snapshot (_, Msg.Http_reply { reply; _ })
+                 | Ui_bus.Stream_event (Msg.Http_reply { reply; _ }) ->
+                     Some reply
+                 | _ -> None)
+          with
+          | Some r -> r
+          | None ->
+              Eio.Time.sleep env#clock 0.002;
+              loop ()
+        in
+        loop ()
+      in
+      Fun.protect
+        ~finally:(fun () -> Cmd_executor.shutdown exec)
+        (fun () ->
+          let ep = Epoch.initial in
+          Cmd_executor.execute exec
+            (Cmd.Http_get { epoch = ep; req = Cmd.Get_auth_keepers });
+          Alcotest.(check bool) "GET /api/v1/auth/keepers ok" true
+            (match await_reply () with
+            | Msg.Reply_auth_keepers (Ok [ { keeper_id = "alpha"; runtime_id = Some "rt-1" } ]) ->
+                true
+            | _ -> false);
+          Cmd_executor.execute exec
+            (Cmd.Http_post
+               { epoch = ep; req = Cmd.Post_auth_keeper_create { keeper_id = "alpha" } });
+          Alcotest.(check bool) "POST /api/v1/auth/keepers ok" true
+            (match await_reply () with
+            | Msg.Reply_auth_keeper_create { result = Ok { keeper_id = "alpha"; record = Wpk.Record_made }; _ } ->
+                true
+            | _ -> false);
+          Cmd_executor.execute exec
+            (Cmd.Http_post
+               {
+                 epoch = ep;
+                 req =
+                   Cmd.Post_auth_keeper_assign
+                     { keeper_id = "alpha"; runtime_id = "rt-1" };
+               });
+          Alcotest.(check bool) "POST /api/v1/auth/keepers/assign ok" true
+            (match await_reply () with
+            | Msg.Reply_auth_keeper_assign { result = Ok { runtime_id = "rt-1"; _ }; _ } ->
+                true
+            | _ -> false);
+          Alcotest.(check (option string))
+            "assign raw wire JSON has exact key order keeper_id then runtime_id"
+            (Some {|{"keeper_id":"alpha","runtime_id":"rt-1"}|})
+            !seen_assign_body;
+          Cmd_executor.execute exec
+            (Cmd.Http_get
+               {
+                 epoch = ep;
+                 req =
+                   Cmd.Get_auth_keeper_conversation
+                     { keeper_id = "alpha"; conversation_id = None };
+               });
+          Alcotest.(check bool) "GET /api/v1/auth/keepers/conversation ok" true
+            (match await_reply () with
+            | Msg.Reply_auth_keeper_conversation
+                { result = Ok { current_conversation_id = Some "conv-1"; _ }; _ } ->
+                true
+            | _ -> false);
+          Cmd_executor.execute exec
+            (Cmd.Http_post
+               {
+                 epoch = ep;
+                 req =
+                   Cmd.Post_auth_keeper_conversation_start { keeper_id = "alpha" };
+               });
+          Alcotest.(check bool) "POST /api/v1/auth/keepers/conversation ok" true
+            (match await_reply () with
+            | Msg.Reply_auth_keeper_conversation_start
+                { result = Ok { conversation_id = "conv-2"; _ }; _ } ->
+                true
+            | _ -> false);
+          Cmd_executor.execute exec
+            (Cmd.Http_post
+               {
+                 epoch = ep;
+                 req =
+                   Cmd.Post_auth_keeper_turn
+                     { keeper_id = "alpha"; message = "ping" };
+               });
+          Alcotest.(check bool) "POST /api/v1/auth/keepers/turn ok" true
+            (match await_reply () with
+            | Msg.Reply_auth_keeper_turn
+                {
+                  result =
+                    Ok
+                      {
+                        text = "pong";
+                        recording =
+                          Wpk.Turn_recorded
+                            { conversation_id = "conv-2"; continued = false };
+                        _;
+                      };
+                  _;
+                } ->
+                true
+            | _ -> false);
+          Cmd_executor.execute exec
+            (Cmd.Http_delete
+               {
+                 epoch = ep;
+                 req =
+                   Cmd.Delete_auth_keeper_conversation
+                     { keeper_id = "alpha"; conversation_id = "conv-1" };
+               });
+          Alcotest.(check bool) "DELETE /conversation/conv-1 decodes vendor_copy=may_remain"
+            true
+            (match await_reply () with
+            | Msg.Reply_auth_keeper_conversation_delete
+                {
+                  result =
+                    Ok
+                      {
+                        conversation_id = "conv-1";
+                        vendor_copy = Wpk.Vendor_copy_may_remain;
+                      };
+                  _;
+                } ->
+                true
+            | _ -> false);
+          Cmd_executor.execute exec
+            (Cmd.Http_delete
+               {
+                 epoch = ep;
+                 req =
+                   Cmd.Delete_auth_keeper_conversation
+                     { keeper_id = "alpha"; conversation_id = "conv-fail" };
+               });
+          Alcotest.(check bool) "delete_timeout_sec exceeds server 60s vendor timeout"
+            true (Wpk.delete_timeout_sec > 60.0);
+          Alcotest.(check bool) "turn_timeout_sec exceeds server 120s turn timeout"
+            true (Wpk.turn_timeout_sec > 120.0);
+          Alcotest.(check bool) "DELETE /conversation/conv-fail surfaces 503 conversation_not_deleted"
+            true
+            (match await_reply () with
+            | Msg.Reply_auth_keeper_conversation_delete
+                {
+                  result =
+                    Error
+                      (Msg.Http_error
+                         {
+                           status = 503;
+                           api_error =
+                             Some
+                               {
+                                 Masc_tui_protocol.Wire_common.code =
+                                   Masc_tui_protocol.Wire_common.Other_code "conversation_not_deleted";
+                                 _;
+                               };
+                           _;
+                         });
+                  _;
+                } ->
+                true
+            | _ -> false)))
 
 let test_remote_editor_escape_hatch_blocked () =
   (* 1. Pure loopback host check. *)
@@ -4025,6 +4347,9 @@ let () =
           Alcotest.test_case
             "GET /health 401/403 anonymous fallback & explicit bearer token override"
             `Quick test_health_anon_fallback_and_explicit_token_override;
+          Alcotest.test_case
+            "MA personal keepers 7-endpoint loopback HTTP roundtrip & strict assign key order"
+            `Quick test_ma_personal_keepers_loopback_http;
           Alcotest.test_case
             "remote --url blocks local TOML $EDITOR & Target_keeper_create refuses fallback"
             `Quick test_remote_editor_escape_hatch_blocked;

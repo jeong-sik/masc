@@ -67,6 +67,36 @@ type http_reply =
       login_id : string;
       result : (unit, http_error) result;
     }
+  | Reply_auth_keepers of
+      (Wire_personal_keepers.personal_keeper list, http_error) result
+  | Reply_auth_keeper_create of {
+      keeper_id : string;
+      result : (Wire_personal_keepers.made_keeper, http_error) result;
+    }
+  | Reply_auth_keeper_assign of {
+      keeper_id : string;
+      runtime_id : string;
+      result : (Wire_personal_keepers.assigned_keeper, http_error) result;
+    }
+  | Reply_auth_keeper_conversation of {
+      keeper_id : string;
+      conversation_id : string option;
+      result : (Wire_personal_keepers.conversation_snapshot, http_error) result;
+    }
+  | Reply_auth_keeper_conversation_start of {
+      keeper_id : string;
+      result : (Wire_personal_keepers.started_conversation, http_error) result;
+    }
+  | Reply_auth_keeper_turn of {
+      keeper_id : string;
+      message : string;
+      result : (Wire_personal_keepers.turn_answer, http_error) result;
+    }
+  | Reply_auth_keeper_conversation_delete of {
+      keeper_id : string;
+      conversation_id : string;
+      result : (Wire_personal_keepers.deleted_conversation, http_error) result;
+    }
   | Reply_dashboard_shell of (Wire_fleet.dashboard_shell, http_error) result
   | Reply_keepers_roster of (Wire_fleet.keepers_roster, http_error) result
   | Reply_keepers_roster_extras of Wire_fleet.keeper_roster_extras

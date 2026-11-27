@@ -183,6 +183,9 @@ type inline_action_kind =
       provider_account_id : string;
       integration_id : string;
     }
+  | Ma_keeper_create_form
+  | Ma_keeper_assign_form of { keeper_id : string }
+  | Ma_keeper_turn_form of { keeper_id : string }
 
 type system_gate_kind =
   | Micro_viewport
@@ -622,6 +625,9 @@ let inline_action_tag = function
   | Ma_provider_key_replace_form _ -> 56
   | Ma_provider_key_remove_confirm _ -> 57
   | Ma_provider_verify_form _ -> 58
+  | Ma_keeper_create_form -> 59
+  | Ma_keeper_assign_form _ -> 60
+  | Ma_keeper_turn_form _ -> 61
 let equal_inline_action_kind a b =
   if not (Int.equal (inline_action_tag a) (inline_action_tag b)) then false
   else
@@ -641,6 +647,7 @@ let equal_inline_action_kind a b =
     | Setup_login_start_form, Setup_login_start_form
     | Ma_provider_login_form, Ma_provider_login_form
     | Ma_provider_key_add_form, Ma_provider_key_add_form
+    | Ma_keeper_create_form, Ma_keeper_create_form
     | Code_finder_form, Code_finder_form
     | Code_search_form, Code_search_form
     | Skill_create_form, Skill_create_form
@@ -733,6 +740,10 @@ let equal_inline_action_kind a b =
     | Ma_provider_verify_form x, Ma_provider_verify_form y ->
         String.equal x.provider_account_id y.provider_account_id
         && String.equal x.integration_id y.integration_id
+    | Ma_keeper_assign_form x, Ma_keeper_assign_form y ->
+        String.equal x.keeper_id y.keeper_id
+    | Ma_keeper_turn_form x, Ma_keeper_turn_form y ->
+        String.equal x.keeper_id y.keeper_id
     | ( Btw_query
       | Gate_reject _
       | Verification_reject _
@@ -756,6 +767,9 @@ let equal_inline_action_kind a b =
       | Ma_provider_key_replace_form _
       | Ma_provider_key_remove_confirm _
       | Ma_provider_verify_form _
+      | Ma_keeper_create_form
+      | Ma_keeper_assign_form _
+      | Ma_keeper_turn_form _
       | Board_comment _
       | Github_token_form _
       | Code_finder_form

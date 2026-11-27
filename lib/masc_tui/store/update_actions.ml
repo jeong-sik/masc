@@ -2967,6 +2967,7 @@ let rec execute_slash ~now (m : Model.t) cmd =
                 | Cmd.Open_terminal_program _
                 | Cmd.Start_local_server
                 | Cmd.Set_bearer_token _
+                | Cmd.Reset_bearer_token_to_default
                 | Cmd.Restart_tui
                 | Cmd.Quit _ ->
                     false)
@@ -4381,6 +4382,9 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Ma_provider_key_replace_form _
                     | Nav.Ma_provider_key_remove_confirm _
                     | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
                     | Nav.Board_comment _
                     | Nav.Github_token_form _
                     | Nav.Code_finder_form
@@ -4631,6 +4635,9 @@ and execute_action ~now (m : Model.t) action =
                | Nav.Ma_provider_key_replace_form _
                | Nav.Ma_provider_key_remove_confirm _
                | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
                | Nav.Board_comment _
                | Nav.Github_token_form _
                | Nav.Code_finder_form
@@ -4890,7 +4897,12 @@ and execute_action ~now (m : Model.t) action =
           close_overlay_and_resync m
       | Some Nav.Account ->
           if m.account.token_editor.active then
-            ( { m with account = Account_store.close_token_editor m.account }
+            ( {
+                m with
+                account =
+                  Account_store.close_token_editor m.account
+                  |> Account_store.disarm_clear_token;
+              }
             , [] )
           else
             ( {
@@ -4902,7 +4914,9 @@ and execute_action ~now (m : Model.t) action =
                     return_overlay = None;
                     filter_focused = false;
                   };
-                account = Account_store.close_token_editor m.account;
+                account =
+                  Account_store.close_token_editor m.account
+                  |> Account_store.disarm_clear_token;
                 inline_modal = None;
               }
             , [] )
@@ -4973,6 +4987,9 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -5964,6 +5981,7 @@ and execute_action ~now (m : Model.t) action =
                   | Cmd.Open_terminal_program _
                   | Cmd.Start_local_server
                   | Cmd.Set_bearer_token _
+                  | Cmd.Reset_bearer_token_to_default
                   | Cmd.Restart_tui
                   | Cmd.Quit _ ->
                       false)
@@ -6142,7 +6160,22 @@ and execute_action ~now (m : Model.t) action =
       else (match board_recovery_keeper m with
       | Some keeper -> View_fetches.read_board_quarantines ~keeper ~now m
       | None ->
-        let next = Model.mark_all_domains_stale m in
+        let next =
+          let m0 =
+            if
+              Rbac.is_multi_account m.auth_session
+              && Nav.equal_workspace m.nav.workspace Nav.Keepers
+            then
+              {
+                m with
+                personal_keepers =
+                  Personal_keepers_store.clear_forbidden m.personal_keepers;
+                account = { m.account with own_provider_forbidden = None };
+              }
+            else m
+          in
+          Model.mark_all_domains_stale m0
+        in
         let view_cmds = View_fetches.fetches_for_current_view ~force:true next in
         let probe_cmd =
           match next.nav.workspace, next.runtime.active_tab with
@@ -6331,6 +6364,9 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Ma_provider_key_replace_form _
                 | Nav.Ma_provider_key_remove_confirm _
                 | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form

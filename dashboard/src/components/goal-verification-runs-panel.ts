@@ -140,10 +140,12 @@ export function GoalVerificationRunsPanel() {
         ${data?.generatedAt ? html`<span>updated · ${relativeTime(data.generatedAt)}</span>` : null}
       </div>
       ${current.error
-        ? html`<${ErrorState}>Goal 판정 실행을 불러오지 못했습니다: ${current.error}<//>`
-        : rows.length === 0
-          ? html`<${EmptyState}>기록된 Goal 판정 실행이 없습니다.<//>`
-          : html`
+        ? html`<${ErrorState} message=${`Goal 판정 실행을 불러오지 못했습니다: ${current.error}`} />`
+        : !current.loading && data !== null && rows.length === 0
+          ? html`<${EmptyState} message="기록된 Goal 판정 실행이 없습니다." />`
+          : rows.length === 0
+            ? null
+            : html`
               <div class="overflow-x-auto">
                 <table class="w-full text-xs">
                   <thead><tr>

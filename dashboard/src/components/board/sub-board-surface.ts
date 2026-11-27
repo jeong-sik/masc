@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { Hash, Pencil, Plus, RefreshCw, Trash2, Users } from 'lucide-preact'
 import { createSubBoard, deleteSubBoard, fetchSubBoards, updateSubBoard } from '../../api/board'
 import type { SubBoardDeletionResult } from '../../api/board'
@@ -140,38 +140,58 @@ export function SubBoardSurface() {
   const [editMembers, setEditMembers] = useState('')
   const [editSubmitting, setEditSubmitting] = useState(false)
 
-  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deletingIds, setDeletingIds] = useState<ReadonlySet<string>>(() => new Set())
   const [pendingDeletions, setPendingDeletions] = useState<Map<string, PendingDeletion>>(() => new Map())
+  const mountedRef = useRef(true)
+  const loadGenRef = useRef(0)
+  const submittingRef = useRef(false)
+  const editSubmittingRef = useRef(false)
+  const editingBoardIdRef = useRef<string | null>(null)
+  const deletingIdsRef = useRef<Set<string>>(new Set())
+  editingBoardIdRef.current = editingBoard?.id ?? null
 
   const effectiveSlug = useMemo(() => slug.trim() || slugFromName(name), [name, slug])
   const memberList = useMemo(() => parseMembers(members), [members])
 
   const load = useCallback(async () => {
+    const gen = ++loadGenRef.current
     setLoading(true)
     setError(null)
     try {
-      setBoards(await fetchSubBoards())
+      const next = await fetchSubBoards()
+      if (!mountedRef.current || loadGenRef.current !== gen) return
+      setBoards(next)
     } catch (err) {
+      if (!mountedRef.current || loadGenRef.current !== gen) return
       const message = err instanceof Error ? err.message : 'Failed to load sub-boards'
       setError(message)
     } finally {
-      setLoading(false)
+      if (mountedRef.current && loadGenRef.current === gen) {
+        setLoading(false)
+      }
     }
   }, [])
 
   useEffect(() => {
+    mountedRef.current = true
     void load()
+    return () => {
+      mountedRef.current = false
+      loadGenRef.current += 1
+    }
   }, [load])
 
   const canSubmit = effectiveSlug !== '' && name.trim() !== '' && !submitting
 
   const submit = async (event: Event) => {
     event.preventDefault()
-    if (!canSubmit) return
+    if (!canSubmit || submittingRef.current) return
+    submittingRef.current = true
     setSubmitting(true)
     setError(null)
     try {
       await createSubBoard(effectiveSlug, name.trim(), description.trim(), access, memberList)
+      if (!mountedRef.current) return
       setName('')
       setSlug('')
       setDescription('')
@@ -180,11 +200,13 @@ export function SubBoardSurface() {
       showToast('Sub-board created', 'success')
       await load()
     } catch (err) {
+      if (!mountedRef.current) return
       const message = err instanceof Error ? err.message : 'Failed to create sub-board'
       setError(message)
       showToast(`Sub-board create failed: ${message}`, 'error')
     } finally {
-      setSubmitting(false)
+      submittingRef.current = false
+      if (mountedRef.current) setSubmitting(false)
     }
   }
 
@@ -206,7 +228,9 @@ export function SubBoardSurface() {
 
   const submitEdit = async (event: Event) => {
     event.preventDefault()
-    if (!editingBoard) return
+    if (!editingBoard || editSubmittingRef.current) return
+    const targetId = editingBoard.id
+    editSubmittingRef.current = true
     setEditSubmitting(true)
     setError(null)
     try {
@@ -216,30 +240,37 @@ export function SubBoardSurface() {
         access: editAccess,
         members: parseMembers(editMembers),
       }
-      await updateSubBoard(editingBoard.id, updates)
+      await updateSubBoard(targetId, updates)
+      if (!mountedRef.current) return
       showToast('Sub-board updated', 'success')
-      cancelEdit()
+      if (editingBoardIdRef.current === targetId) {
+        cancelEdit()
+      }
       await load()
     } catch (err) {
+      if (!mountedRef.current) return
       const message = err instanceof Error ? err.message : 'Failed to update sub-board'
       setError(message)
       showToast(`Sub-board update failed: ${message}`, 'error')
     } finally {
-      setEditSubmitting(false)
+      editSubmittingRef.current = false
+      if (mountedRef.current) setEditSubmitting(false)
     }
   }
 
   const handleDelete = async (board: SubBoard) => {
-    if (pendingDeletions.has(board.id)) return
+    if (pendingDeletions.has(board.id) || deletingIdsRef.current.has(board.id)) return
     const confirmed = await requestConfirm({
       title: 'Delete Sub-board',
       message: `Delete "/${board.slug}"? Existing posts will leave this sub-board and remain on the Board.`,
       tone: 'danger',
     })
-    if (!confirmed) return
-    setDeletingId(board.id)
+    if (!confirmed || !mountedRef.current || deletingIdsRef.current.has(board.id)) return
+    deletingIdsRef.current.add(board.id)
+    setDeletingIds(new Set(deletingIdsRef.current))
     try {
       const result = await deleteSubBoard(board.id)
+      if (!mountedRef.current) return
       switch (result.persistence) {
         case 'durable':
           showToast('Sub-board deleted', 'success')
@@ -259,10 +290,13 @@ export function SubBoardSurface() {
       }
       await load()
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to delete sub-board'
-      showToast(`Sub-board delete failed: ${message}`, 'error')
+      if (mountedRef.current) {
+        const message = err instanceof Error ? err.message : 'Failed to delete sub-board'
+        showToast(`Sub-board delete failed: ${message}`, 'error')
+      }
     } finally {
-      setDeletingId(null)
+      deletingIdsRef.current.delete(board.id)
+      if (mountedRef.current) setDeletingIds(new Set(deletingIdsRef.current))
     }
   }
 
@@ -442,24 +476,26 @@ export function SubBoardSurface() {
 
       ${loading
         ? html`<${LoadingState}>Loading sub-boards...<//>`
-        : boards.length === 0
+        : !error && boards.length === 0
           ? html`
             <div class="v2-workspace-panel rounded-[var(--r-1)] border border-dashed border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4">
               <${EmptyState} message="No sub-boards yet. Create one above when a board category needs owner, member, or access policy. Plain board categories stay as hearth tags until a Sub-board is explicitly created." compact />
             </div>
           `
-          : html`
-            <div class="grid gap-3" data-testid="sub-board-list">
-              ${boards.map(board => html`<${SubBoardRow}
-                key=${board.id}
-                board=${board}
-                onEdit=${startEdit}
-                onDelete=${handleDelete}
-                deleting=${deletingId === board.id}
-                deletionPending=${pendingDeletions.has(board.id)}
-              />`)}
-            </div>
-          `}
+          : boards.length === 0
+            ? null
+            : html`
+              <div class="grid gap-3" data-testid="sub-board-list">
+                ${boards.map(board => html`<${SubBoardRow}
+                  key=${board.id}
+                  board=${board}
+                  onEdit=${startEdit}
+                  onDelete=${handleDelete}
+                  deleting=${deletingIds.has(board.id)}
+                  deletionPending=${pendingDeletions.has(board.id)}
+                />`)}
+              </div>
+            `}
     </section>
   `
 }

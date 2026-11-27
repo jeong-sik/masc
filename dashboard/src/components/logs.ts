@@ -2,7 +2,7 @@ import { subscribeDashboardLogsStream } from '../dashboard-logs-stream'
 import type { LogsStreamError } from '../api/dashboard-logs-stream'
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
-import { signal } from '@preact/signals'
+import { effect, signal, untracked } from '@preact/signals'
 import { useEffect, useMemo } from 'preact/hooks'
 import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-preact'
 import { Option, ok } from '../lib/result'
@@ -831,47 +831,49 @@ function renderLogProvenance(data: LogData | undefined) {
 
 export function LogViewer() {
   useEffect(() => {
-    let disposeObservation: (() => void) | null = null
+    const disposeEffect = effect(() => {
+      // Read every filter signal once so all 6 reactive inputs share a single
+      // subscription instead of triggering 7 synchronous restarts on mount.
+      void levelFilter.value
+      void appliedModuleFilter.value
+      void logLimit.value
+      void hideFsmTransitions.value
+      void kindFilter.value
+      const live = autoRefresh.value
+      const request = baseLogsRequest()
 
-    const restart = () => {
-      disposeObservation?.()
-      disposeObservation = null
-      logResource.reset()
-      nativeLogError.value = null
-      if (!autoRefresh.value) { void loadLogs('reset'); return }
-      disposeObservation = subscribeDashboardLogsStream(baseLogsRequest(), {
-        onReset: () => { liveLogRevision += 1; nativeLogError.value = null; logResource.reset() },
-        onError: error => { nativeLogError.value = error },
-        onFrame: frame => {
-          const state = logResource.state.peek()
-          const previous = Option.getOrUndefined(remotePrevious(state))
-          if (frame.reset) liveLogRevision += 1
-          const next = frame.reset || previous === undefined
-            ? resetLogData(frame.data) : mergeDeltaLogData(previous, frame.data)
-          nativeLogError.value = null
-          logResource.state.value = state._tag === 'Loading'
-            ? remoteLoading(Option.some(next)) : remoteSuccess(next)
-        },
+      let disposeObservation: (() => void) | null = null
+      untracked(() => {
+        logResource.reset()
+        nativeLogError.value = null
+        if (!live) {
+          void loadLogs('reset')
+          return
+        }
+        disposeObservation = subscribeDashboardLogsStream(request, {
+          onReset: () => { liveLogRevision += 1; nativeLogError.value = null; logResource.reset() },
+          onError: error => { nativeLogError.value = error },
+          onFrame: frame => {
+            const state = logResource.state.peek()
+            const previous = Option.getOrUndefined(remotePrevious(state))
+            if (frame.reset) liveLogRevision += 1
+            const next = frame.reset || previous === undefined
+              ? resetLogData(frame.data) : mergeDeltaLogData(previous, frame.data)
+            nativeLogError.value = null
+            logResource.state.value = state._tag === 'Loading'
+              ? remoteLoading(Option.some(next)) : remoteSuccess(next)
+          },
+        })
       })
-    }
 
-    restart()
-
-    const unsubscribeLevel = levelFilter.subscribe(restart)
-    const unsubscribeModule = appliedModuleFilter.subscribe(restart)
-    const unsubscribeLimit = logLimit.subscribe(restart)
-    const unsubscribeHideFsm = hideFsmTransitions.subscribe(restart)
-    const unsubscribeKind = kindFilter.subscribe(restart)
-    const unsubscribeAutoRefresh = autoRefresh.subscribe(restart)
+      return () => {
+        disposeObservation?.()
+        disposeObservation = null
+      }
+    })
 
     return () => {
-      disposeObservation?.()
-      unsubscribeLevel()
-      unsubscribeModule()
-      unsubscribeLimit()
-      unsubscribeHideFsm()
-      unsubscribeKind()
-      unsubscribeAutoRefresh()
+      disposeEffect()
       logResource.cancel()
     }
   }, [])

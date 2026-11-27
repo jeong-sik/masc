@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { unixSecondsToDate } from '../lib/format-time'
 import { ActionButton } from './common/button'
 import { requestConfirm } from './common/confirm-dialog'
@@ -177,24 +177,55 @@ export function KeeperCheckpointPanel({
   const [historyQuery, setHistoryQuery] = useState('')
   const [purgePreview, setPurgePreview] = useState<KeeperCheckpointPurgeResponse | null>(null)
   const [purgePending, setPurgePending] = useState<'preview' | 'apply' | null>(null)
+  const mountedRef = useRef(true)
+  const activeKeeperRef = useRef(keeperName)
+  const loadGenRef = useRef(0)
+  const mutationGenRef = useRef(0)
+  const deletingRef = useRef(false)
+  const purgePendingRef = useRef<'preview' | 'apply' | null>(null)
+  activeKeeperRef.current = keeperName
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      loadGenRef.current += 1
+      mutationGenRef.current += 1
+    }
+  }, [])
 
   const loadInventory = () => {
+    const targetKeeper = keeperName
+    const gen = ++loadGenRef.current
     void (async () => {
       setLoading(true)
       setError(null)
       try {
-        const next = await fetchKeeperCheckpoints(keeperName)
+        const next = await fetchKeeperCheckpoints(targetKeeper)
+        if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || loadGenRef.current !== gen) return
         setInventory(next)
         setSelectedIds(prev =>
           prev.filter(id => next.history.some(item => item.snapshot_id === id)),
         )
       } catch (err) {
+        if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || loadGenRef.current !== gen) return
         setError(err instanceof Error ? err.message : 'checkpoint inventory load failed')
       } finally {
-        setLoading(false)
+        if (mountedRef.current && activeKeeperRef.current === targetKeeper && loadGenRef.current === gen) {
+          setLoading(false)
+        }
       }
     })()
   }
+
+  useEffect(() => {
+    mutationGenRef.current += 1
+    deletingRef.current = false
+    purgePendingRef.current = null
+    setDeleting(false)
+    setPurgePending(null)
+    setHistoryQuery('')
+  }, [keeperName])
 
   useEffect(() => {
     setInventory(null)
@@ -212,21 +243,29 @@ export function KeeperCheckpointPanel({
   }
 
   const deleteSelected = () => {
+    if (deletingRef.current) return
+    const targetKeeper = keeperName
+    const ids = [...selectedIds]
+    const gen = ++mutationGenRef.current
+    const isCurrent = () =>
+      mountedRef.current && activeKeeperRef.current === targetKeeper && mutationGenRef.current === gen
     void (async () => {
-      if (selectedIds.length === 0) {
+      if (ids.length === 0) {
         showToast('삭제할 snapshot을 먼저 고르세요', 'warning')
         return
       }
       const confirmed = await requestConfirm({
         title: 'Agent Core snapshot 삭제',
-        message: `${selectedIds.length}개 snapshot history를 삭제합니다.\n현재 active checkpoint는 건드리지 않습니다.`,
+        message: `${ids.length}개 snapshot history를 삭제합니다.\n현재 active checkpoint는 건드리지 않습니다.`,
         tone: 'danger',
         confirmText: '삭제',
       })
-      if (!confirmed) return
+      if (!confirmed || !isCurrent() || deletingRef.current) return
+      deletingRef.current = true
       setDeleting(true)
       try {
-        const result = await deleteKeeperHistorySnapshots(keeperName, selectedIds)
+        const result = await deleteKeeperHistorySnapshots(targetKeeper, ids)
+        if (!isCurrent()) return
         setInventory(result.inventory)
         setSelectedIds([])
         const outcomes = [
@@ -244,42 +283,65 @@ export function KeeperCheckpointPanel({
         const tone = result.failed_snapshot_ids.length > 0 ? 'error' : 'success'
         showToast(`${result.deleted_snapshot_ids.length}개 snapshot 삭제${outcomeSuffix}`, tone)
       } catch (err) {
-        showToast(err instanceof Error ? err.message : 'snapshot 삭제 실패', 'error')
+        if (isCurrent()) {
+          showToast(err instanceof Error ? err.message : 'snapshot 삭제 실패', 'error')
+        }
       } finally {
-        setDeleting(false)
+        if (isCurrent()) {
+          deletingRef.current = false
+          setDeleting(false)
+        }
       }
     })()
   }
 
   const previewPurge = () => {
+    if (purgePendingRef.current !== null) return
+    const targetKeeper = keeperName
+    const gen = ++mutationGenRef.current
+    const isCurrent = () =>
+      mountedRef.current && activeKeeperRef.current === targetKeeper && mutationGenRef.current === gen
     void (async () => {
+      purgePendingRef.current = 'preview'
       setPurgePending('preview')
       try {
-        const result = await previewKeeperCheckpointPurge(keeperName)
+        const result = await previewKeeperCheckpointPurge(targetKeeper)
+        if (!isCurrent()) return
         setPurgePreview(result)
         setInventory(result.inventory)
       } catch (err) {
-        showToast(err instanceof Error ? err.message : 'checkpoint purge 미리보기 실패', 'error')
+        if (isCurrent()) {
+          showToast(err instanceof Error ? err.message : 'checkpoint purge 미리보기 실패', 'error')
+        }
       } finally {
-        setPurgePending(null)
+        if (isCurrent()) {
+          purgePendingRef.current = null
+          setPurgePending(null)
+        }
       }
     })()
   }
 
   const applyPurge = () => {
+    if (purgePendingRef.current !== null || !purgePreview) return
+    const targetKeeper = keeperName
+    const report = purgePreview.report
+    const gen = ++mutationGenRef.current
+    const isCurrent = () =>
+      mountedRef.current && activeKeeperRef.current === targetKeeper && mutationGenRef.current === gen
     void (async () => {
-      if (!purgePreview) return
-      const report = purgePreview.report
       const confirmed = await requestConfirm({
         title: '현재 checkpoint 청소',
-        message: `${keeperName}의 현재 checkpoint를 ${formatBytes(report.bytes_before)} → ${formatBytes(report.bytes_after)}로 정리합니다.\n원본은 byte-exact backup으로 먼저 저장됩니다.`,
+        message: `${targetKeeper}의 현재 checkpoint를 ${formatBytes(report.bytes_before)} → ${formatBytes(report.bytes_after)}로 정리합니다.\n원본은 byte-exact backup으로 먼저 저장됩니다.`,
         tone: 'danger',
         confirmText: '백업 후 청소',
       })
-      if (!confirmed) return
+      if (!confirmed || !isCurrent() || purgePendingRef.current !== null) return
+      purgePendingRef.current = 'apply'
       setPurgePending('apply')
       try {
-        const result = await applyKeeperCheckpointPurge(keeperName)
+        const result = await applyKeeperCheckpointPurge(targetKeeper)
+        if (!isCurrent()) return
         setPurgePreview(result)
         setInventory(result.inventory)
         if (result.applied) {
@@ -291,9 +353,14 @@ export function KeeperCheckpointPanel({
           showToast('checkpoint는 이미 정리된 상태입니다', 'success')
         }
       } catch (err) {
-        showToast(err instanceof Error ? err.message : 'checkpoint purge 적용 실패', 'error')
+        if (isCurrent()) {
+          showToast(err instanceof Error ? err.message : 'checkpoint purge 적용 실패', 'error')
+        }
       } finally {
-        setPurgePending(null)
+        if (isCurrent()) {
+          purgePendingRef.current = null
+          setPurgePending(null)
+        }
       }
     })()
   }

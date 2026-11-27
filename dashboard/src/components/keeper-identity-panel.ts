@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import {
   fetchAttachedProviders,
   isAttachable,
@@ -45,6 +45,33 @@ export function KeeperIdentityPanel({ keeperName }: KeeperIdentityPanelProps) {
   const [ownSecret, setOwnSecret] = useState('')
   const [ownScopes, setOwnScopes] = useState('')
   const [ownSaved, setOwnSaved] = useState<string | null>(null)
+  const mountedRef = useRef(true)
+  const activeKeeperRef = useRef(keeperName)
+  const actionGenRef = useRef(0)
+  const busyRef = useRef<string | null>(null)
+  activeKeeperRef.current = keeperName
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      actionGenRef.current += 1
+    }
+  }, [])
+
+  useEffect(() => {
+    actionGenRef.current += 1
+    busyRef.current = null
+    setBusy(null)
+    setStarted(null)
+    setActionError(null)
+    setExpanded(null)
+    setOwnApp(null)
+    setOwnId('')
+    setOwnSecret('')
+    setOwnScopes('')
+    setOwnSaved(null)
+  }, [keeperName])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -62,33 +89,55 @@ export function KeeperIdentityPanel({ keeperName }: KeeperIdentityPanelProps) {
   }, [keeperName, reloadKey])
 
   const connect = async (providerId: string) => {
+    if (busyRef.current !== null) return
+    const targetKeeper = keeperName
+    const gen = ++actionGenRef.current
+    const isCurrent = () =>
+      mountedRef.current && activeKeeperRef.current === targetKeeper && actionGenRef.current === gen
+    busyRef.current = providerId
     setBusy(providerId)
     setActionError(null)
     setStarted(null)
     try {
-      const answer = await startIdentityLogin(keeperName, providerId)
+      const answer = await startIdentityLogin(targetKeeper, providerId)
+      if (!isCurrent()) return
       setStarted(answer)
       // A pop-up blocker is the common case, so the link stays on the page
       // below rather than this being the only way through.
       window.open(answer.authorize_url, '_blank', 'noreferrer')
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error))
+      if (isCurrent()) {
+        setActionError(error instanceof Error ? error.message : String(error))
+      }
     } finally {
-      setBusy(null)
+      if (isCurrent()) {
+        busyRef.current = null
+        setBusy(null)
+      }
     }
   }
 
   const saveOwnApp = async (providerId: string) => {
+    if (busyRef.current !== null) return
+    const targetKeeper = keeperName
+    const gen = ++actionGenRef.current
+    const isCurrent = () =>
+      mountedRef.current && activeKeeperRef.current === targetKeeper && actionGenRef.current === gen
+    const idValue = ownId
+    const secretValue = ownSecret
+    const scopesValue = ownScopes
+    busyRef.current = providerId
     setBusy(providerId)
     setActionError(null)
     setOwnSaved(null)
     try {
       const answer = await setIdentityClient(
         providerId,
-        ownId,
-        ownSecret,
-        ownScopes,
+        idValue,
+        secretValue,
+        scopesValue,
       )
+      if (!isCurrent()) return
       // Cleared on the way out. A secret left in a field is a secret in the
       // page for as long as the tab is open.
       setOwnId('')
@@ -104,39 +153,68 @@ export function KeeperIdentityPanel({ keeperName }: KeeperIdentityPanelProps) {
         `${answer.provider_label} 앱을 저장했어요 (${secretPart}, ${scopePart})`,
       )
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error))
+      if (isCurrent()) {
+        setActionError(error instanceof Error ? error.message : String(error))
+      }
     } finally {
-      setBusy(null)
+      if (isCurrent()) {
+        busyRef.current = null
+        setBusy(null)
+      }
     }
   }
 
   const toggle = async (providerId: string, enabled: boolean) => {
+    if (busyRef.current !== null) return
+    const targetKeeper = keeperName
+    const gen = ++actionGenRef.current
+    const isCurrent = () =>
+      mountedRef.current && activeKeeperRef.current === targetKeeper && actionGenRef.current === gen
+    busyRef.current = providerId
     setBusy(providerId)
     setActionError(null)
     try {
-      await setIdentitySwitch(keeperName, providerId, enabled)
+      await setIdentitySwitch(targetKeeper, providerId, enabled)
+      if (!isCurrent()) return
       // Re-read rather than patch what is on screen: the switch the server
       // just wrote is the answer.
       setReloadKey(key => key + 1)
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error))
+      if (isCurrent()) {
+        setActionError(error instanceof Error ? error.message : String(error))
+      }
     } finally {
-      setBusy(null)
+      if (isCurrent()) {
+        busyRef.current = null
+        setBusy(null)
+      }
     }
   }
 
   const refresh = async (providerId: string) => {
+    if (busyRef.current !== null) return
+    const targetKeeper = keeperName
+    const gen = ++actionGenRef.current
+    const isCurrent = () =>
+      mountedRef.current && activeKeeperRef.current === targetKeeper && actionGenRef.current === gen
+    busyRef.current = providerId
     setBusy(providerId)
     setActionError(null)
     try {
-      await refreshIdentityTools(keeperName, providerId)
+      await refreshIdentityTools(targetKeeper, providerId)
+      if (!isCurrent()) return
       // Re-read rather than patch what is on screen: the catalog the server
       // just wrote is the answer.
       setReloadKey(key => key + 1)
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : String(error))
+      if (isCurrent()) {
+        setActionError(error instanceof Error ? error.message : String(error))
+      }
     } finally {
-      setBusy(null)
+      if (isCurrent()) {
+        busyRef.current = null
+        setBusy(null)
+      }
     }
   }
 

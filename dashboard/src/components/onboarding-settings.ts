@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { fetchSetupStatus, fetchSetupInventory, saveSetupCredential, type Status, type Inventory } from '../api/onboarding'
 
 import { RuntimeSetupPicker } from './runtime-setup-picker'
@@ -18,16 +18,34 @@ export function OnboardingSettings() {
   const [pickerBusy, setPickerBusy] = useState(false)
   const resumeState = modelSetupResumeState.value
   const controlsBusy = busy || pickerBusy || resumeState.kind === 'resuming'
+  const mountedRef = useRef(true)
+  const refreshGenRef = useRef(0)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      refreshGenRef.current += 1
+    }
+  }, [])
   async function refresh() {
+    const gen = ++refreshGenRef.current
     try {
       const current = await fetchSetupStatus()
       if (current.schema !== 'masc.onboarding_status.v1') throw new Error('invalid status')
+      if (!mountedRef.current || refreshGenRef.current !== gen) return
       setStatus(current)
-    } catch { setNotice('소유자로 로그인한 뒤 준비 상태를 다시 확인하세요.') }
+    } catch {
+      if (mountedRef.current && refreshGenRef.current === gen) {
+        setNotice('소유자로 로그인한 뒤 준비 상태를 다시 확인하세요.')
+      }
+    }
     try {
       const available = await fetchSetupInventory()
+      if (!mountedRef.current || refreshGenRef.current !== gen) return
       setInventory(available)
-    } catch { setInventory(null) }
+    } catch {
+      if (mountedRef.current && refreshGenRef.current === gen) setInventory(null)
+    }
   }
   useEffect(() => { void refresh() }, [])
   useEffect(() => {
@@ -41,10 +59,21 @@ export function OnboardingSettings() {
     setSecret('')
     try {
       await saveSetupCredential(provider, entered, inventory.source_revision)
-      await resumeSavedModelSetup()
-      setNotice('API 키를 비공개 파일에 저장했습니다. 모델 응답과 도구 검증은 아직 필요합니다.')
-    } catch { setNotice('API 키를 적용하지 못했습니다. 연결 설정과 비공개 저장소 권한을 확인하세요.') }
-    finally { setBusy(false) }
+      const resumed = await resumeSavedModelSetup()
+      if (!mountedRef.current) return
+      if (resumed.kind === 'failed') {
+        setNotice('API 키를 비공개 파일에 저장했지만 런타임 활성화에 실패했습니다. 설정과 권한을 확인한 뒤 다시 시도하세요.')
+      } else {
+        setNotice('API 키를 비공개 파일에 저장했습니다. 모델 응답과 도구 검증은 아직 필요합니다.')
+      }
+    } catch {
+      if (mountedRef.current) {
+        setNotice('API 키를 적용하지 못했습니다. 연결 설정과 비공개 저장소 권한을 확인하세요.')
+      }
+    }
+    finally {
+      if (mountedRef.current) setBusy(false)
+    }
   }
   const providers = [...new Map((inventory?.runtimes ?? []).filter(row => typeof row.endpoint === 'string' && row.endpoint.length > 0).map(row => [row.provider_id, row])).values()]
   return html`<section class="set-card" aria-label="첫 대화 준비">

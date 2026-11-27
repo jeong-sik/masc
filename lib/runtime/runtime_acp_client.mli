@@ -786,6 +786,20 @@ val mcp_server_isolation : t -> mcp_server_isolation
 val capabilities : t -> agent_capabilities
 val init_latency_ms : t -> int
 val is_alive : t -> bool
+
+(** The newest [usage_update] of an ACP session: [used] ("tokens currently
+    in context") and [size]. *)
+type session_context =
+  { held_tokens : int
+  ; window_tokens : int option
+  }
+
+(** What [session_id] held at its newest [usage_update], from any frame this
+    client read, during a prompt or after it. Kimi Code answers
+    [session/prompt] first and sends the turn's [usage_update] after it, so a
+    prompt's {!usage} can miss the count this still has. [None] until the
+    session sends a positive [used], and after {!close_session}. *)
+val latest_session_context : t -> session_id:string -> session_context option
 val stderr_tail : t -> string
 (** Recent child stderr output, UTF-8-safe bounded and redacted with
     {!Secret_patterns.redact_text} plus any configured MCP server header

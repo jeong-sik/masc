@@ -50,6 +50,22 @@ let rollover_of_usage ~context_used ~context_size ~input_limit ~threshold =
   | Some _ | None -> None
 ;;
 
+(* Kimi Code answers [session/prompt] before it sends the turn's
+   [usage_update], so a turn can settle without a count and arm no rollover.
+   Before the next turn resumes that session, its newest count decides what
+   the settlement would have. A Gate continuation stays on its settled
+   session. *)
+let rollover_before_resume ~is_gate_continuation ~threshold ~input_limit latest =
+  match latest with
+  | Some { Runtime_acp_client.held_tokens; window_tokens } when not is_gate_continuation ->
+    rollover_of_usage
+      ~threshold
+      ~context_used:(Some held_tokens)
+      ~context_size:window_tokens
+      ~input_limit
+  | Some _ | None -> None
+;;
+
 let rollover_dir_for_base_path ~base_path =
   Filename.concat
     (Filename.concat
@@ -3013,12 +3029,13 @@ let run_without_lifecycle
     }
   in
   let fallback_start_messages_ref = ref prepared.messages in
-  let build_fallback_start_prompt ~use_meta_append () =
+  let build_fallback_start_prompt ~prefer_handoff ~use_meta_append () =
     (* Resume fallback must run the same canonical hydration + bounded Start
        range projection as a fresh Start, using plain [goal_text] without
-       prepending a redundant resume handoff onto the full history. *)
+       prepending a redundant resume handoff onto the full history. A
+       rollover start prefers the handoff list, as a planned one does. *)
     let* projected_msgs =
-      project_start_messages ~prefer_handoff:false raw_prepared_messages
+      project_start_messages ~prefer_handoff raw_prepared_messages
     in
     fallback_start_messages_ref := projected_msgs;
     let fallback_prepared = { prepared with Host.messages = projected_msgs } in
@@ -3124,21 +3141,61 @@ let run_without_lifecycle
           match claim_plan.previous_settlement, entry.session_id, entry.session_info with
           | Some { session_id; _ }, Some open_sid, Some open_info
             when String.equal session_id open_sid ->
-            let* updated_info =
-              Acp.reconfigure_session
-                entry.client
-                open_info
-                ~mode:effective_mode
-                ~model:config.model
-                ?effort:effective_effort
-                ()
-              |> Result.map_error (fun err ->
-                if should_evict_on_session_setup_error err then evict_or_close ();
-                recovery_failure := recovery_failure_of_acp_error err;
-                acp_error_to_core_error err)
-            in
-            entry.session_info <- Some updated_info;
-            Ok (updated_info, true, active_resume_prompt, prepared.messages)
+            let latest = Acp.latest_session_context entry.client ~session_id in
+            (match
+               rollover_before_resume
+                 ~is_gate_continuation
+                 ~threshold:(Runtime.context_rollover_threshold_of_runtime_id runtime_id)
+                 ~input_limit
+                 latest
+             with
+             | Some rollover ->
+               compact_for_rollover
+                 ?keep_ratio:(Runtime.compaction_keep_ratio_of_runtime_id runtime_id)
+                 ~keepers_dir
+                 ~keeper_id:keeper_name
+                 ~rollover
+                 ~initial_messages
+                 ();
+               Log.Keeper.info
+                 ~keeper_name
+                 "ACP session %s reached the rollover threshold after its last turn \
+                  settled (%d/%d tokens); compacted anchor and starting a fresh session"
+                 session_id
+                 rollover.used_tokens
+                 rollover.limit_tokens;
+               let* start_prompt, start_sys, start_msgs =
+                 build_fallback_start_prompt ~prefer_handoff:true ~use_meta_append ()
+               in
+               open_fresh_session
+                 ~prompt_text:start_prompt
+                 ~system_prompt_append:start_sys
+                 ~msgs:start_msgs
+             | None ->
+               (* The newest count is the size this turn starts from, the one
+                  a compaction during the turn falls below. A session kept
+                  across a Gate pause whose stopped prompt left no count keeps
+                  [Count_lost] so a stale pre-stop count cannot mask compaction. *)
+               (match entry.context_baseline, latest with
+                | Count_lost, (Some _ | None) -> ()
+                | (No_count | Counted _), Some { Acp.held_tokens; _ } ->
+                  entry.context_baseline <- Counted held_tokens
+                | (No_count | Counted _), None -> ());
+               let* updated_info =
+                 Acp.reconfigure_session
+                   entry.client
+                   open_info
+                   ~mode:effective_mode
+                   ~model:config.model
+                   ?effort:effective_effort
+                   ()
+                 |> Result.map_error (fun err ->
+                   if should_evict_on_session_setup_error err then evict_or_close ();
+                   recovery_failure := recovery_failure_of_acp_error err;
+                   acp_error_to_core_error err)
+               in
+               entry.session_info <- Some updated_info;
+               Ok (updated_info, true, active_resume_prompt, prepared.messages))
           | Some { session_id; _ }, _, _ ->
             (match entry.session_id with
              | Some old_sid when not (String.equal old_sid session_id) ->
@@ -3225,7 +3282,7 @@ let run_without_lifecycle
                       Keeper_official_client_session_refusal.Gate_continuation_unresumable))
                else (
                  let* fallback_prompt, fallback_sys, fallback_msgs =
-                   build_fallback_start_prompt ~use_meta_append ()
+                   build_fallback_start_prompt ~prefer_handoff:false ~use_meta_append ()
                  in
                  open_fresh_session
                    ~prompt_text:fallback_prompt
@@ -3249,7 +3306,7 @@ let run_without_lifecycle
                  (* Child restarted or prior session gone: open a clean session with
                     bounded hydrated start prompt + system prompt so zero context is lost. *)
                  let* fallback_prompt, fallback_sys, fallback_msgs =
-                   build_fallback_start_prompt ~use_meta_append ()
+                   build_fallback_start_prompt ~prefer_handoff:false ~use_meta_append ()
                  in
                  open_fresh_session
                    ~prompt_text:fallback_prompt
@@ -4362,6 +4419,12 @@ module For_testing = struct
   let should_fence_tool_call_started = should_fence_tool_call_started
   let process_config_sha256 = process_config_sha256
   let rollover_threshold = rollover_threshold
+
+  let rollover_before_resume ~is_gate_continuation ~threshold ~input_limit latest =
+    Option.map
+      (fun { used_tokens; limit_tokens } -> used_tokens, limit_tokens)
+      (rollover_before_resume ~is_gate_continuation ~threshold ~input_limit latest)
+  ;;
   let default_keep_ratio = default_keep_ratio
   let record_rollover_marker = record_rollover_marker
   let rollover_marker_matches = rollover_marker_matches

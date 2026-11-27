@@ -45,8 +45,7 @@ let of_handler (handler : Keeper_tool_descriptor.runtime_handler) =
   (* A code query starts a language server, but the pool owns it
      and the turn ends it either way, so a failed call leaves the
      caller holding nothing. It answers with the readers. *)
-  | ( Keeper_tool_descriptor.Tool_keeper_composition_result_dispatch
-    | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
+  | ( Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
     (* A refused wait recorded nothing, so the model reads the refusal. *)
     | Keeper_tool_descriptor.Tool_receipt_wait
     | Keeper_tool_descriptor.Tool_search_files

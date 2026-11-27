@@ -30,13 +30,12 @@ let status_to_string = function
   | Lost _ -> "lost"
   | Cancelled _ -> "cancelled"
   | Persistence_failed _ -> "persistence_failed"
-  | Waiting_for_dependencies _ -> "waiting_for_dependencies"
   | Done { ok = true; _ } -> "done"
   | Done { ok = false; _ } -> "error"
 ;;
 
 let is_terminal_status = function
-  | Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_dependencies _ -> true
+  | Done _ | Lost _ | Cancelled _ | Persistence_failed _ -> true
   | Queued | Running | Cancelling _ -> false
 ;;
 
@@ -250,10 +249,6 @@ let entry_record_to_json (e : entry) : Yojson.Safe.t =
   in
   let fields =
     match e.status with
-    | Waiting_for_dependencies {dependencies;body;data} ->
-      fields @ [ "dependencies", `List (List.map Keeper_composition_dependency.to_json dependencies)
-        ; "body", `String body ]
-      @ (match data with Some value -> ["data",value] | None -> [])
     | Done { ok; body; data } ->
       fields
       @ [ "ok", `Bool ok; "body", `String body ]
@@ -456,14 +451,6 @@ let decode_status ~tag json =
     let* reason = required_string "reason" json in
     let* completed_at = required_completed_at json in
     Ok (Persistence_failed { attempted_status; reason }, completed_at)
-  | "waiting_for_dependencies" ->
-    let* dependencies = match Json_util.assoc_member_opt "dependencies" json with
-      | Some json -> Keeper_composition_dependency.list_of_json json
-      | None -> Error "waiting record requires original dependencies" in
-    let* body = required_string "body" json in
-    let data = Json_util.assoc_member_opt "data" json in
-    let* completed_at = required_completed_at json in
-    Ok (Waiting_for_dependencies {dependencies;body;data},completed_at)
   | "done" -> terminal ~expected_ok:true
   | "error" -> terminal ~expected_ok:false
   | other -> Error (Printf.sprintf "unknown status %S in record" other)
@@ -534,7 +521,6 @@ let entry_of_record_json ~base_path ~request_id:expected_request_id json :
     | Cancelled _ -> [ "completed_at"; "reason"; "cancelled_by" ]
     | Persistence_failed _ -> [ "completed_at"; "attempted_status"; "reason" ]
     | Done _ -> [ "completed_at"; "ok"; "body"; "data" ]
-    | Waiting_for_dependencies _ -> ["completed_at";"dependencies";"body";"data"]
   in
   let* () = validate_record_fields ~status_fields json in
   Ok
@@ -570,10 +556,6 @@ let entry_to_fields ~now (e : entry) : (string * Yojson.Safe.t) list =
   in
   let fields =
     match e.status with
-    | Waiting_for_dependencies {dependencies;body;data} ->
-      fields @ ["worker_released",`Bool true;
-        "dependencies",`List (List.map Keeper_composition_dependency.to_json dependencies);
-        "result",Option.value ~default:(`String body) data]
     | Done { ok; body; data } ->
       fields
       @ [ "ok", `Bool ok

@@ -7323,7 +7323,6 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
       let approval_id = match deferred.deferred_kind with
         | Some (Masc.Keeper_tool_execution.External_effect_deferred {approval_id=Some id}) -> id
         | None | Some Masc.Keeper_tool_execution.Generic_deferred
-        | Some (Masc.Keeper_tool_execution.Composition_result_wait _)
         | Some (Masc.Keeper_tool_execution.Owned_job_result_wait _)
         | Some (Masc.Keeper_tool_execution.External_effect_deferred {approval_id=None}) -> fail "producer lost typed Gate identity" in
       let native_settlement = ref None in

@@ -128,10 +128,9 @@ let make_keeper_tool_handler_with_authority
           Option.iter
             (fun deferred -> deferred ~approval_id)
             on_external_effect_deferred
-        | Some (Keeper_tool_execution.Composition_result_wait _)
         | Some (Keeper_tool_execution.Owned_job_result_wait _) ->
           (* This read owns no completion wake. Let a direct caller continue
-             other work; the composition executor parks this dependent branch. *)
+             other work. *)
           ()
         | None | Some Keeper_tool_execution.Generic_deferred ->
           Option.iter (fun deferred -> deferred ()) on_deferred)

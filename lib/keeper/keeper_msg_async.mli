@@ -32,11 +32,6 @@ type request_status = Keeper_msg_async_types.request_status =
       { attempted_status : persistence_target
       ; reason : string
       }
-  | Waiting_for_dependencies of
-      { dependencies : Keeper_composition_dependency.t list
-      ; body : string
-      ; data : Yojson.Safe.t option
-      }
   | Done of
       { ok : bool
       ; body : string
@@ -322,8 +317,8 @@ val server_background_switch : unit -> (Eio.Switch.t, submit_error) result
     making it a resumable [Lost] request.
     A worker that returns after cancellation signalling failed also settles
     that exact intent as [Cancelled] (meaning the committed cancellation intent
-    wins over Done or Waiting, not that worker side effects did not run;
-    completed node outputs remain in the execution journal). Failure to persist the settlement remains explicit.
+    wins over Done, not that worker side effects did not run). Failure to
+    persist the settlement remains explicit.
 
     [on_worker_aborted], when supplied, is invoked exactly once whenever [f]
     is cut off by cancellation before it completes on its own —
@@ -374,13 +369,7 @@ type worker_outcome
 val worker_finished : Keeper_types_profile.tool_result -> worker_outcome
 val worker_interrupted : reason:string -> worker_outcome
 (** Settle this physical worker as canonical Lost without claiming logical
-    completion or inventing a result dependency. Continuation still requires
-    the owning producer's original journal and replay proof. *)
-val worker_waiting_for_dependencies :
-  dependencies:Keeper_composition_dependency.t list ->
-  Keeper_types_profile.tool_result -> (worker_outcome, string) result
-(** Requires a typed Deferred result and at least one original result dependency.
-    Repeated identities are represented once. No body/JSON classification. *)
+    completion. *)
 
 val submit_worker_with_request_id
   :  ?request_context:(string * Yojson.Safe.t) list
@@ -394,10 +383,7 @@ val submit_worker_with_request_id
   -> keeper_name:string
   -> unit
   -> (submit_outcome, submit_error) result
-(** The worker scope releases before its canonical outcome is published.
-    Waiting is a terminal worker attempt in the terminal partition, while the
-    prepared composition run remains resumable through its original journal.
-    It is not composition failure or permission to replay a job launch. *)
+(** The worker scope releases before its canonical outcome is published. *)
 
 val submit_with_request_id
   :  ?request_context:(string * Yojson.Safe.t) list

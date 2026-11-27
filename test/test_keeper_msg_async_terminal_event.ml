@@ -316,7 +316,7 @@ let test_settlement_cancellation_preserves_completed_request_and_retires_switch 
          check string "completed result survives notification cancellation"
            "original-completed" body
        | (Keeper_msg_async.Queued | Running | Cancelling _ | Lost _ | Cancelled _
-         | Persistence_failed _ | Waiting_for_dependencies _) as status ->
+         | Persistence_failed _) as status ->
          failf "canonical result changed to %s"
            (Keeper_msg_async.status_to_string status));
       (match !settled with

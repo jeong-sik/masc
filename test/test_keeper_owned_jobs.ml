@@ -839,32 +839,6 @@ let test_malformed_source_cannot_publish_binding () = with_fixture @@ fun _env _
   (match Invocation.lookup ~base_path:fixture.base_path ~keeper_name:keeper (original_invocation fixture) with
    | Ok None -> () | Ok (Some _) | Error _ -> fail "malformed source published a binding")
 
-let _await_composition env fixture accepted =
-  let module Async = Masc.Keeper_msg_async in
-  let request_id = accepted |> member "request_id" |> to_string in
-  (* A test deadlock guard, not a runtime completion or polling deadline. *)
-  Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 15. (fun () ->
-    let rec read_terminal () =
-      match Async.load_canonical_durable_terminal ~base_path:fixture.base_path
-          ~caller:keeper request_id with
-      | Ok proof ->
-          let entry = Async.durable_terminal_entry proof in
-          (match entry.status with
-           | Async.Done {ok;data=Some data;_} -> ok, data, entry
-           | Async.Waiting_for_dependencies {data=Some data;_} -> false, data, entry
-           | Async.Cancelled _ -> false, Async.entry_to_json entry, entry
-           | Queued | Running | Cancelling _ | Lost _
-           | Persistence_failed _ | Done {data=None;_}
-           | Waiting_for_dependencies {data=None;_} ->
-             failf "composition did not settle a result: %s"
-               (Async.entry_to_json entry |> Yojson.Safe.to_string))
-      | Error (Async.Canonical_terminal_absent | Canonical_terminal_runtime_active _) ->
-          Eio.Fiber.yield (); read_terminal ()
-      | Error error -> fail (Async.canonical_terminal_error_to_string error)
-    in read_terminal ())
-
-
-
 let test_job_result_rejects_unavailable_authority () = with_fixture @@ fun _env _initialize fixture ->
   set_source fixture ~task_id:"task-A" ~turn:41;
   let id = with_bundle fixture (fun bundle -> start fixture bundle ["fixture-program"]) |> job_id in

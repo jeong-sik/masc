@@ -149,7 +149,7 @@ let persist_failure_locked ~ops key transition_lock (attempted_entry : entry) re
           { attempted_status = (match attempted_entry.status with
               | Persistence_failed {attempted_status;_} -> attempted_status
               | Queued | Running | Cancelling _ | Lost _ | Cancelled _
-              | Waiting_for_dependencies _ | Done _ -> State_transition (status_to_string attempted_entry.status))
+              | Done _ -> State_transition (status_to_string attempted_entry.status))
           ; reason }
     ; completed_at = Some (Time_compat.now ())
     }
@@ -234,7 +234,6 @@ let set_status ~ops ?(preserve_terminal = false) key status =
                | Lost _
                | Cancelled _
                | Persistence_failed _
-               | Waiting_for_dependencies _
                | Done _ )
            ; _
            } as entry) ->
@@ -245,17 +244,17 @@ let set_status ~ops ?(preserve_terminal = false) key status =
         let status = match entry.status with
           | Cancelling {reason;cancelled_by} ->
             (match status with
-             | Lost _ | Cancelled _ | Waiting_for_dependencies _ | Done _ -> Cancelled {reason;cancelled_by}
+             | Lost _ | Cancelled _ | Done _ -> Cancelled {reason;cancelled_by}
              | Queued | Running | Cancelling _ | Persistence_failed _ -> status)
           | Queued | Running | Lost _ | Cancelled _ | Persistence_failed _
-          | Waiting_for_dependencies _ | Done _ ->
+          | Done _ ->
             (match status with
              | Lost {reason} -> status_after_worker_absence ~reason entry.status
              | Queued | Running | Cancelling _ | Cancelled _ | Persistence_failed _
-             | Waiting_for_dependencies _ | Done _ -> status) in
+             | Done _ -> status) in
         let completed_at =
           match status with
-          | Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_dependencies _ ->
+          | Done _ | Lost _ | Cancelled _ | Persistence_failed _ ->
             (* NDT-OK: completed_at is observational wall-clock metadata for
                terminal request records; state transitions are status-derived. *)
             Some (Time_compat.now ())

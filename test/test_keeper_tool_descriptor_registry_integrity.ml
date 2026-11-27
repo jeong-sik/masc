@@ -1606,9 +1606,6 @@ let test_concurrent_execution_opt_ins_are_exact () =
     ; "keeper_capability_search"
     (* LSP turn-pool server table is Eio.Mutex-guarded. *)
     ; "keeper_code_query"
-    (* Reads the stored async request; the only write is a content-addressed
-       blob put of the selected result, idempotent by hash. *)
-    ; "keeper_composition_result"
     ; "keeper_constitution_read"
     (* Revalidate write-during-read is source-store file-lock serialized;
        appends ride the per-path mutex. *)

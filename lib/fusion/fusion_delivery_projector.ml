@@ -74,7 +74,6 @@ let failure_of_status : Keeper_msg_async.request_status -> Fusion_sink.delivery_
     Some (Fusion_sink.Persistence_failed
       { attempted_status=Keeper_msg_async.persistence_target_to_string attempted_status; reason })
   | Keeper_msg_async.Done { ok = true; _ }
-  | Keeper_msg_async.Waiting_for_dependencies _
   | Keeper_msg_async.Queued
   | Keeper_msg_async.Running
   | Keeper_msg_async.Cancelling _ -> None
@@ -140,8 +139,7 @@ let project_entry ~registry ~base_path (entry : Keeper_msg_async.entry) =
       | Keeper_msg_async.Cancelling _
       | Keeper_msg_async.Lost _
       | Keeper_msg_async.Cancelled _
-      | Keeper_msg_async.Persistence_failed _
-      | Keeper_msg_async.Waiting_for_dependencies _) as status ->
+      | Keeper_msg_async.Persistence_failed _) as status ->
       (match failure_of_status status with
        | Some failure ->
          Fusion_sink.emit_failure ~registry ~base_dir:base_path

@@ -37,8 +37,7 @@ let request_may_have_worker (entry : Keeper_msg_async.entry) =
   match entry.status with
   | Keeper_msg_async.Queued
   | Keeper_msg_async.Running
-  | Keeper_msg_async.Cancelling _
-  | Keeper_msg_async.Waiting_for_dependencies _ -> true
+  | Keeper_msg_async.Cancelling _ -> true
   | Keeper_msg_async.Lost _
   | Keeper_msg_async.Cancelled _
   | Keeper_msg_async.Persistence_failed _

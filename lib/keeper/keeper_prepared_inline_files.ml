@@ -176,7 +176,6 @@ module Ready = struct
     }
 
   type binding =
-    | Pure_arguments
     | Ordinary of Keeper_tool_descriptor.ordinary_execution_mode
     | Unprepared_file of Keeper_tool_descriptor.ordinary_execution_mode
     | Prepared_file of
@@ -194,10 +193,9 @@ module Ready = struct
       | [] -> List.rev orders
       | (node : Plan.node) :: rest ->
         match Node_map.find_opt node.id members with
-        | None | Some (_, None)
-        | Some (_, Some {target = (Plan.Child_arguments _ | Plan.Child_submission _ | Plan.Child_result _); _}) ->
+        | None | Some (_, None) ->
           collect earlier orders rest
-        | Some (_, Some {target = Plan.Descriptor_target descriptor; _}) ->
+        | Some (_, Some {target = descriptor; _}) ->
           if not (is_file descriptor) then collect ((node.id,descriptor) :: earlier) orders rest
           else
             let predecessors = List.filter_map (fun (id,prior) -> match before_prepare prior descriptor with
@@ -218,8 +216,7 @@ module Ready = struct
         | (node : Plan.node) :: rest ->
           let contract = Plan.contract plan node.id in
           let supported, mutation = match contract with
-            | Some {target = Plan.Child_arguments _; _} -> true, false
-            | Some {target = Plan.Descriptor_target descriptor; _} ->
+            | Some {target = descriptor; _} ->
               let supported = if is_file descriptor then supported_file descriptor
                 else match descriptor.execution with
                   | Keeper_tool_descriptor.Ordinary (Serial | Concurrent) -> true
@@ -227,7 +224,7 @@ module Ready = struct
               supported,
               (descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file
                || descriptor.runtime_handler = Keeper_tool_descriptor.Tool_write_file)
-            | Some {target = (Plan.Child_submission _ | Plan.Child_result _); _} | None -> false, false in
+            | None -> false, false in
           if not supported then None
           else collect (Node_map.add node.id (node,contract) members) (has_mutation || mutation) rest in
       (match collect Node_map.empty false (Plan.nodes plan) with
@@ -253,8 +250,7 @@ module Ready = struct
       | Some (member, contract) when member == node -> contract
       | Some _ | None -> invalid_arg "ready Inline file node is outside its original plan" in
     match contract with
-    | Some {target = Plan.Child_arguments _; _} -> Pure_arguments
-    | Some {target = Plan.Descriptor_target descriptor; _} ->
+    | Some {target = descriptor; _} ->
       (match descriptor.execution with
        | Keeper_tool_descriptor.Terminal -> invalid_arg "ready file plan contains a terminal leaf"
        | Keeper_tool_descriptor.Ordinary mode ->
@@ -263,30 +259,28 @@ module Ready = struct
              ~tool_name:node.tool_name descriptor ~input with
            | Some operation -> Prepared_file {operation; scopes = operation_scopes operation}
            | None -> Unprepared_file mode)
-    | Some {target = (Plan.Child_submission _ | Plan.Child_result _); _} | None ->
-      invalid_arg "ready Inline file lost its original producer"
+    | None -> invalid_arg "ready Inline file lost its original producer"
   ;;
 
   let operation = function
     | Prepared_file {operation; scopes = _} -> Some operation
-    | Pure_arguments | Ordinary _ | Unprepared_file _ -> None
+    | Ordinary _ | Unprepared_file _ -> None
 
   let exclusive = function
     | Unprepared_file _ | Ordinary Keeper_tool_descriptor.Serial -> true
-    | Pure_arguments | Ordinary Keeper_tool_descriptor.Concurrent
+    | Ordinary Keeper_tool_descriptor.Concurrent
     | Prepared_file {operation = (Read _ | Edit _ | Write _); scopes = _} -> false
 
   let originally_serial = function
     | Ordinary Keeper_tool_descriptor.Serial | Unprepared_file Keeper_tool_descriptor.Serial
     | Prepared_file {operation = (Edit _ | Write _); scopes = _} -> true
-    | Pure_arguments | Ordinary Keeper_tool_descriptor.Concurrent
+    | Ordinary Keeper_tool_descriptor.Concurrent
     | Unprepared_file Keeper_tool_descriptor.Concurrent
     | Prepared_file {operation = Read _; scopes = _} -> false
 
   let ordering left right =
     let open Keeper_tool_descriptor in
     match left, right with
-    | Pure_arguments, _ | _, Pure_arguments -> No_order
     | Prepared_file {operation = (Read _ | Edit _ | Write _); scopes = left_scopes},
       Prepared_file {operation = (Read _ | Edit _ | Write _); scopes = right_scopes} ->
       if List.exists (fun scope ->

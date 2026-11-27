@@ -1,10 +1,8 @@
 (** The worker outcome, the canonical queued error and the process-local
     tables of [Keeper_msg_async].
 
-    [worker_outcome] is what a background worker reports: it finished, it was
-    interrupted, or it waits for original dependencies.
-    [worker_waiting_for_dependencies] builds the waiting case and returns an
-    error unless the result is deferred and names a dependency.
+    [worker_outcome] is what a background worker reports: it finished or it
+    was interrupted.
     [durable_queued_proof] holds a queued entry read from its durable record,
     and [canonical_queued_error] says why no such record can be used;
     [canonical_queued_error_to_string] renders it. The functions taken over
@@ -20,17 +18,10 @@ open Keeper_msg_async_types
 type worker_outcome =
   | Worker_finished of tool_result
   | Worker_interrupted of {reason : string}
-  | Worker_waiting of
-      { dependencies : Keeper_composition_dependency.t list
-      ; result : tool_result }
 
 val worker_finished : tool_result -> worker_outcome
 
 val worker_interrupted : reason:string -> worker_outcome
-
-val worker_waiting_for_dependencies :
-  dependencies:Keeper_composition_dependency.t list ->
-  tool_result -> (worker_outcome, string) result
 
 type durable_queued_proof = { queued_entry : entry }
 

@@ -4,21 +4,9 @@ open Keeper_msg_async_types
 type worker_outcome =
   | Worker_finished of tool_result
   | Worker_interrupted of {reason : string}
-  | Worker_waiting of
-      { dependencies : Keeper_composition_dependency.t list
-      ; result : tool_result }
 
 let worker_finished result = Worker_finished result
 let worker_interrupted ~reason = Worker_interrupted {reason}
-
-let worker_waiting_for_dependencies ~dependencies result =
-  let dependencies = Keeper_composition_dependency.normalize dependencies in
-  match result, dependencies with
-  | Tool_result.Deferred _, _ :: _ -> Ok (Worker_waiting {dependencies;result})
-  | Tool_result.Deferred _, [] -> Error "result waiting requires an original dependency"
-  | (Tool_result.Completed _ | Tool_result.Failed _), _ ->
-      Error "result waiting requires a typed deferred result"
-;;
 
 type durable_queued_proof = { queued_entry : entry }
 

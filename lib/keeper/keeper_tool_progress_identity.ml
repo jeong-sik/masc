@@ -146,7 +146,6 @@ let memory_identity ~tool_name ~input ~evidence =
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_browser_interact)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_masc_schedule_dispatch)
-  | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_keeper_composition_result_dispatch)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_keeper_code_query_dispatch)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_receipt_wait)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_keeper_job_dispatch)

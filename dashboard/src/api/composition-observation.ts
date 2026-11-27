@@ -1,5 +1,4 @@
 import { get, type GetOptions } from './core'
-import { decodeExactSkillReference } from './dashboard-skills'
 import { isRecord } from '../components/common/normalize'
 import { isUuid, uuidVersion } from '../lib/uuid'
 
@@ -30,10 +29,6 @@ function digest(value: unknown): string {
 function enumeration<const T extends readonly string[]>(value: unknown, values: T): T[number] {
   if (typeof value !== 'string' || !values.includes(value)) throw new Error('Unknown observation state')
   return value as T[number]
-}
-function array(value: unknown): unknown[] {
-  if (!Array.isArray(value)) throw new Error('Expected observation list')
-  return value
 }
 function boolean(value: unknown): boolean {
   if (typeof value !== 'boolean') throw new Error('Expected result boolean')
@@ -108,21 +103,6 @@ export function asyncRequestSourceKey(value: Extract<AsyncRequestStatus, { statu
   return canonicalJson([request.submitted_by, request.request_id, request.keeper_name, request.request_context])
 }
 
-function validateDependency(value: unknown): void {
-  const dependency = fields(value, ['kind'], ['job_id', 'binding'])
-  if (dependency.kind === 'owned_job') {
-    fields(value, ['kind', 'job_id']); runId(dependency.job_id)
-  } else if (dependency.kind === 'composition_result') {
-    fields(value, ['kind', 'binding'])
-    const binding = fields(dependency.binding, ['request_id', 'composition_run_id', 'skill_reference',
-      'composition_tool', 'parent_tool_use_id', 'source_turn'], ['source_task_id'])
-    identity(binding.request_id); runId(binding.composition_run_id)
-    decodeExactSkillReference(binding.skill_reference)
-    identity(binding.composition_tool); identity(binding.parent_tool_use_id); integer(binding.source_turn)
-    if (Object.hasOwn(binding, 'source_task_id')) identity(binding.source_task_id)
-  } else throw new Error('Unknown result dependency kind')
-}
-
 function decodeLogicalOwner(value: unknown): { request_id: string; generation: number } {
   const owner = fields(value, ['request_id', 'generation'])
   const generation = integer(owner.generation)
@@ -165,7 +145,7 @@ function validateContinuation(request: Record<string, unknown>): void {
 }
 
 function validatePhysicalRequest(request: Record<string, unknown>): void {
-  const phase = enumeration(request.status, ['queued', 'running', 'waiting_for_dependencies', 'done', 'error', 'lost', 'cancelled', 'cancelling', 'persistence_failed'])
+  const phase = enumeration(request.status, ['queued', 'running', 'done', 'error', 'lost', 'cancelled', 'cancelling', 'persistence_failed'])
   finiteTime(request.submitted_at)
   if (!(request.request_context === null || isRecord(request.request_context))) throw new Error('Invalid original request context')
   if (Object.hasOwn(request, 'completed_at')) finiteTime(request.completed_at)
@@ -175,18 +155,8 @@ function validatePhysicalRequest(request: Record<string, unknown>): void {
   const hasOutcome = Object.hasOwn(request, 'ok'), hasResult = Object.hasOwn(request, 'result')
   if (phase === 'queued' || phase === 'running') {
     if (hasOutcome || hasResult) throw new Error('Active physical phase carries a completed result')
-  } else if (phase === 'waiting_for_dependencies') {
-    if (hasOutcome || !hasResult) throw new Error('Dependency wait outcome or retained result is invalid')
   } else if (!hasResult || !hasOutcome || request.ok !== (phase === 'done')) {
     throw new Error('Physical phase, outcome and retained result disagree')
-  }
-  if (phase === 'waiting_for_dependencies') {
-    const dependencies = array(request.dependencies)
-    if (request.worker_released !== true || dependencies.length === 0) throw new Error('Invalid physical dependency wait')
-    dependencies.forEach(validateDependency)
-    if (new Set(dependencies.map(canonicalJson)).size !== dependencies.length) throw new Error('Dependency wait repeats a dependency')
-  } else if (Object.hasOwn(request, 'dependencies') || Object.hasOwn(request, 'worker_released')) {
-    throw new Error('Dependency wait fields outside their physical phase')
   }
   if (phase === 'cancelling' || phase === 'lost' || phase === 'cancelled' || phase === 'persistence_failed') {
     if (!isRecord(request.result)) throw new Error('Physical failure lacks its original reason')
@@ -216,7 +186,7 @@ export async function fetchAsyncRequestStatus(identity: AsyncRequestIdentity, op
       try {
         fields(raw, ['schema', 'status', 'request'])
         fields(request, ['request_id', 'keeper_name', 'submitted_by', 'request_context', 'status', 'submitted_at', 'continuation'],
-          ['elapsed_sec', 'completed_at', 'ok', 'result', 'dependencies', 'worker_released'])
+          ['elapsed_sec', 'completed_at', 'ok', 'result'])
         validatePhysicalRequest(request)
         return { status: 'observed', request }
       } catch (error) {

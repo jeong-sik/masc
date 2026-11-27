@@ -66,7 +66,6 @@ let producer_authorizes descriptor =
   | Descriptor.Tool_browser_interact
   | Descriptor.Tool_masc_agent_timeline_dispatch
   | Descriptor.Tool_masc_schedule_dispatch
-  | Descriptor.Tool_keeper_composition_result_dispatch
   | Descriptor.Tool_keeper_code_query_dispatch
   | Descriptor.Tool_receipt_wait
   | Descriptor.Tool_keeper_job_dispatch

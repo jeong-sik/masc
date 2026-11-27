@@ -176,6 +176,7 @@ type fixture_step =
 
 let fixture_script ?system_marker ?prompt_marker ?argv_marker ?(remove_after_auth = false) ?(forbid_mcp = false)
     ?(exit_before_turn_admitted = false) ?(block_user_write = false)
+    ?(before_initialize_response = [])
     ?(auth_body = auth_subscription) ?(auth_exit = 0) ?auth_stderr ?auth_first_body
     lines =
   let path = Filename.temp_file "masc-keeper-claude-code-" ".sh" in
@@ -224,6 +225,17 @@ let fixture_script ?system_marker ?prompt_marker ?argv_marker ?(remove_after_aut
   output_string output
     "emit() { printf '%s\\n' \"$1\" | sed \"s/__SESSION__/$session/g\"; }\n";
   output_string output "IFS= read -r initialize\n";
+  List.iter
+    (function
+      | Emit line -> output_string output ("emit " ^ shell_quote line ^ "\n")
+      | Emit_with_input _ ->
+        invalid_arg "Emit_with_input is unavailable before user_message"
+      | Emit_and_read line ->
+        output_string output ("emit " ^ shell_quote line ^ "\n");
+        output_string output "IFS= read -r ignored_response\n"
+      | Close_transport -> output_string output "exit 0\n"
+      | Pause seconds -> output_string output (Printf.sprintf "sleep %.17g\n" seconds))
+    before_initialize_response;
   if exit_before_turn_admitted
   then (
     output_string output "printf 'client died before turn admission\\n' >&2\n";
@@ -263,10 +275,10 @@ let fixture_script ?system_marker ?prompt_marker ?argv_marker ?(remove_after_aut
   path
 ;;
 
-let with_fixture ?system_marker ?prompt_marker ?argv_marker ?remove_after_auth ?forbid_mcp ?exit_before_turn_admitted ?block_user_write ?auth_body ?auth_exit
+let with_fixture ?system_marker ?prompt_marker ?argv_marker ?remove_after_auth ?forbid_mcp ?exit_before_turn_admitted ?block_user_write ?before_initialize_response ?auth_body ?auth_exit
     ?auth_stderr ?auth_first_body lines f =
   let path =
-    fixture_script ?system_marker ?prompt_marker ?argv_marker ?remove_after_auth ?forbid_mcp ?exit_before_turn_admitted ?block_user_write ?auth_body ?auth_exit
+    fixture_script ?system_marker ?prompt_marker ?argv_marker ?remove_after_auth ?forbid_mcp ?exit_before_turn_admitted ?block_user_write ?before_initialize_response ?auth_body ?auth_exit
       ?auth_stderr ?auth_first_body lines
   in
   Fun.protect
@@ -282,6 +294,7 @@ let with_fixture_sequence
     ?second_system_marker
     ?first_prompt_marker
     ?second_prompt_marker
+    ?second_before_initialize_response
     ?third_system_marker
     ?third_argv_marker
     ?(later_lines = [])
@@ -289,7 +302,13 @@ let with_fixture_sequence
     second_lines
     f =
   let first_path = fixture_script ?system_marker:first_system_marker ?prompt_marker:first_prompt_marker first_lines in
-  let second_path = fixture_script ?system_marker:second_system_marker ?prompt_marker:second_prompt_marker second_lines in
+  let second_path =
+    fixture_script
+      ?system_marker:second_system_marker
+      ?prompt_marker:second_prompt_marker
+      ?before_initialize_response:second_before_initialize_response
+      second_lines
+  in
   (* The third invocation is the first of [later_lines]. *)
   let later_paths = match later_lines with
     | [] -> []
@@ -3126,6 +3145,93 @@ let test_auth_cause_with_another_http_status_is_not_auth_failed () =
              { rotate = Keeper_runtime_failure_route.Provider_reported_failure })))
 ;;
 
+(* Measured on Claude Code 2.1.332 (2026-11-27, #54540): a resumed launch that
+   hits org_config_required_unavailable before initialize emits a fresh random
+   session_id. It must route as retryable ProviderUnavailable and preserve the
+   settled session via Pre_dispatch_failed so the next turn resumes cleanly. *)
+let test_resume_org_config_unavailable_preserves_session_and_routes_retryable () =
+  let base_path = temp_workspace () in
+  let startup_unavail =
+    {|{"type":"result","subtype":"error_during_execution","duration_ms":0,"duration_api_ms":0,"is_error":true,"num_turns":0,"stop_reason":null,"session_id":"fresh-startup-uuid","total_cost_usd":0,"usage":{},"modelUsage":{},"permission_denials":[],"uuid":"startup-org-unavail-1","errors":["Claude Code couldn't load your organization's settings, which it requires before a session can start."],"startup_failure_reason":"org_config_required_unavailable","result_index":0}|}
+  in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture_sequence
+      ~second_before_initialize_response:[ Emit startup_unavail; Close_transport ]
+      ~later_lines:[ [ Emit (assistant ~turn_id:"turn-3" "RESUMED_AFTER_OUTAGE"); Emit (result ~turn_id:"turn-3" "RESUMED_AFTER_OUTAGE") ] ]
+      [ Emit (assistant ~turn_id:"turn-1" "INITIAL_TURN"); Emit (result ~turn_id:"turn-1" "INITIAL_TURN") ]
+      []
+      (fun cli_path ->
+         let initial_session_id =
+           match run_keeper_turn ~base_path ~cli_path ~goal:"RESUME_ORG_CONFIG_GOAL" () with
+           | Ok result -> result.Runtime_agent.session_id
+           | Error error -> fail (Agent_core.Error.to_string error)
+         in
+         (match run_keeper_turn ~base_path ~cli_path ~goal:"RESUME_ORG_CONFIG_GOAL" () with
+          | Ok _ -> fail "pre-initialize org_config_required_unavailable completed the turn"
+          | Error (Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable { detail; _ }) as error) ->
+            check bool "startup_failure_reason preserved" true
+              (Astring.String.is_infix ~affix:"startup_failure=org_config_required_unavailable" detail);
+            check bool "errors sentence preserved" true
+              (Astring.String.is_infix ~affix:"couldn't load your organization's settings" detail);
+            let route =
+              Keeper_runtime_failure_route.route_of_error
+                ~boundary:Keeper_runtime_failure_route.Agent_core_execution
+                error
+            in
+            check bool "routes as retryable server unavailability" true
+              (route
+               = Keeper_runtime_failure_route.Retry_after_observed
+                   { retry_class = Keeper_runtime_failure_route.Server_error
+                   ; retry_after = None
+                   });
+            let state = load_state base_path in
+            (match state.phase with
+             | Settled { session_id; turn_id } ->
+               check string "settled session_id preserved" initial_session_id session_id;
+               check string "settled turn_id preserved" "turn-1" turn_id
+             | _ -> fail "pre-initialize org_config_required_unavailable discarded the settled session");
+            (match state.last_transient_release with
+             | Some { failure = Pre_dispatch_failed; _ } -> ()
+             | _ -> fail "expected Pre_dispatch_failed transient release")
+          | Error error -> fail ("expected ProviderUnavailable, got: " ^ Agent_core.Error.to_string error));
+         match run_keeper_turn ~base_path ~cli_path ~goal:"RESUME_ORG_CONFIG_GOAL" () with
+         | Ok resumed ->
+           check string "next turn resumed the preserved session" initial_session_id resumed.Runtime_agent.session_id
+         | Error error -> fail (Agent_core.Error.to_string error)))
+;;
+
+let test_resume_org_config_refused_routes_as_auth_failed () =
+  let base_path = temp_workspace () in
+  let startup_refused =
+    {|{"type":"result","subtype":"error_during_execution","duration_ms":0,"duration_api_ms":0,"is_error":true,"num_turns":0,"stop_reason":null,"session_id":"fresh-startup-uuid","total_cost_usd":0,"usage":{},"modelUsage":{},"permission_denials":[],"uuid":"startup-org-refused-1","errors":["Anthropic refused organization settings for this sign-in."],"startup_failure_reason":"org_config_refused","result_index":0}|}
+  in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    with_fixture_sequence
+      ~second_before_initialize_response:[ Emit startup_refused; Close_transport ]
+      [ Emit (assistant ~turn_id:"turn-1" "INITIAL_TURN"); Emit (result ~turn_id:"turn-1" "INITIAL_TURN") ]
+      []
+      (fun cli_path ->
+         (match run_keeper_turn ~base_path ~cli_path ~goal:"RESUME_ORG_REFUSED_GOAL" () with
+          | Ok _ -> ()
+          | Error error -> fail (Agent_core.Error.to_string error));
+         match run_keeper_turn ~base_path ~cli_path ~goal:"RESUME_ORG_REFUSED_GOAL" () with
+         | Ok _ -> fail "pre-initialize org_config_refused completed the turn"
+         | Error (Agent_core.Error.Provider (Llm_provider.Error.AuthError { detail; _ }) as error) ->
+           check bool "org_config_refused detail preserved" true
+             (Astring.String.is_infix ~affix:"startup_failure=org_config_refused" detail);
+           let route =
+             Keeper_runtime_failure_route.route_of_error
+               ~boundary:Keeper_runtime_failure_route.Agent_core_execution
+               error
+           in
+           check bool "routes as auth failed" true
+             (route = Keeper_runtime_failure_route.Rotate_now { rotate = Keeper_runtime_failure_route.Auth_failed });
+           (match (load_state base_path).phase with
+            | Recovery_required { failure = Provider_rejected; _ } -> ()
+            | _ -> fail "org_config_refused should enter Provider_rejected recovery")
+         | Error error -> fail ("expected AuthError, got: " ^ Agent_core.Error.to_string error)))
+;;
+
 let test_access_refusal_after_native_tool_remains_fenced () =
   let base_path = temp_workspace () in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
@@ -5685,6 +5791,28 @@ let test_context_overflow_maps_to_input_rejected_recovery () =
   check bool "other provider rejections stay generic"
     (map (Runtime_claude_code.Subscription_required "auth required")
     = Keeper_official_client_session_store.Provider_rejected)
+    true;
+  let org_unavailable ?api_error_status ?api_error_cause () =
+    Runtime_claude_code.Turn_failed_with_observation
+      { detail = "org settings unavailable"
+      ; api_error_status
+      ; api_error_cause
+      ; startup_failure_reason = Some Runtime_claude_code.Org_config_required_unavailable
+      ; tool_effect_attempted = false
+      ; response_emitted = false
+      }
+  in
+  check bool "clean pre-init org_config_required_unavailable is Pre_dispatch_failed"
+    (map (org_unavailable ())
+    = Keeper_official_client_session_store.Pre_dispatch_failed)
+    true;
+  check bool "org_config_required_unavailable with HTTP status stays Provider_rejected"
+    (map (org_unavailable ~api_error_status:401 ())
+    = Keeper_official_client_session_store.Provider_rejected)
+    true;
+  check bool "org_config_required_unavailable with Authentication_failed stays Provider_rejected"
+    (map (org_unavailable ~api_error_cause:Runtime_claude_code.Authentication_failed ())
+    = Keeper_official_client_session_store.Provider_rejected)
     true
 ;;
 
@@ -7877,6 +8005,10 @@ let () =
             test_login_past_its_time_limit_routes_as_auth_failed
         ; test_case "an auth cause with another HTTP status is not auth failed" `Quick
             test_auth_cause_with_another_http_status_is_not_auth_failed
+        ; test_case "resumed org_config_required_unavailable preserves settled session" `Quick
+            test_resume_org_config_unavailable_preserves_session_and_routes_retryable
+        ; test_case "resumed org_config_refused routes as auth failed" `Quick
+            test_resume_org_config_refused_routes_as_auth_failed
         ; test_case "access refusal after native tool remains fenced" `Quick
             test_access_refusal_after_native_tool_remains_fenced
         ; test_case "quota after tool effect remains fenced" `Quick

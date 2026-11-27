@@ -473,6 +473,23 @@ type api_error_cause =
           with a login past its time limit. *)
   | Other_api_error_cause  (** Any other value the client sent. *)
 
+(** The reason Claude Code names in [startup_failure_reason] on an
+    [error_during_execution] result frame emitted before the session starts.
+    Measured on Claude Code 2.1.332 (2026-11-27): on [--resume], startup gates
+    run before the CLI adopts the resumed session ID, so that frame carries the
+    process's freshly minted UUID rather than the requested resume ID. *)
+type startup_failure_reason =
+  | Org_config_required_unavailable
+      (** Organization policy limits or managed settings could not be loaded
+          (network, proxy, or Anthropic error); retrying may succeed. *)
+  | Org_config_refused
+      (** Anthropic refused organization policy limits or managed settings for
+          this sign-in (expired or revoked session, or org denies Claude Code);
+          re-authentication or an admin change is needed. *)
+  | Other_startup_failure of string
+      (** Any other [startup_failure_reason] emitted by the CLI
+          (for example [config_file_invalid]). *)
+
 type error =
   | Invalid_config of string
   | Spawn_refused of Process_eio.spawn_refusal
@@ -504,6 +521,9 @@ type error =
         (** The cause named by the root response's API diagnostic envelope
             that ended the turn; [None] when no such envelope ended it or the
             envelope named none. *)
+      ; startup_failure_reason : startup_failure_reason option
+        (** The typed [startup_failure_reason] on a pre-initialize startup
+            failure result frame, when present. *)
       ; tool_effect_attempted : bool
       ; response_emitted : bool
       }

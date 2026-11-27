@@ -529,28 +529,60 @@ let claude_error_to_core_error ?account = function
       { api_error_status = Some 403; detail; _ } ->
     Agent_core.Error.Provider
       (Llm_provider.Error.AuthorizationError { provider = "claude_code"; detail })
-  (* A turn refused for a login past its time limit ends with no HTTP status;
-     the diagnostic envelope's typed cause is what says the account must sign
-     in. The cause decides only then: a result that carries any status keeps
-     that status's own reading, so a 400 or a 5xx after an earlier
-     authentication diagnostic stays a provider failure. *)
+  (* A turn refused for a login past its time limit, or an organization-config
+     sign-in refusal before the session starts, ends with no HTTP status; the
+     typed cause is what says the account must sign in. The cause decides only
+     then: a result that carries any status keeps that status's own reading,
+     so a 400 or a 5xx after an earlier authentication diagnostic stays a
+     provider failure. *)
   | Runtime_claude_code.Turn_failed_with_observation
       { api_error_status = None
       ; api_error_cause = Some Runtime_claude_code.Authentication_failed
       ; detail
       ; _
+      }
+  | Runtime_claude_code.Turn_failed_with_observation
+      { api_error_status = None
+      ; api_error_cause = Some Runtime_claude_code.Other_api_error_cause | None
+      ; startup_failure_reason = Some Runtime_claude_code.Org_config_refused
+      ; detail
+      ; _
       } ->
     Agent_core.Error.Provider
       (Llm_provider.Error.AuthError { provider = "claude_code"; detail })
+  (* Organization policy limits or managed settings could not be fetched
+     before the session opened (network, proxy, or Anthropic error). This is a
+     transient upstream unavailability: route as [ProviderUnavailable]
+     ([Retry_after_observed]), which rotates to backup candidates and retries
+     if exhausted. *)
+  | Runtime_claude_code.Turn_failed_with_observation
+      { api_error_status = None
+      ; api_error_cause = Some Runtime_claude_code.Other_api_error_cause | None
+      ; startup_failure_reason = Some Runtime_claude_code.Org_config_required_unavailable
+      ; detail
+      ; _
+      } ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderUnavailable { provider = "claude_code"; detail })
   | Runtime_claude_code.Turn_failed detail
   | Runtime_claude_code.Turn_failed_with_observation
       { api_error_status = Some _
-      ; api_error_cause = Some Runtime_claude_code.Authentication_failed
+      ; api_error_cause =
+          Some (Runtime_claude_code.Authentication_failed | Runtime_claude_code.Other_api_error_cause)
+          | None
+      ; startup_failure_reason =
+          Some
+            ( Runtime_claude_code.Org_config_required_unavailable
+            | Runtime_claude_code.Org_config_refused
+            | Runtime_claude_code.Other_startup_failure _ )
+          | None
       ; detail
       ; _
       }
   | Runtime_claude_code.Turn_failed_with_observation
-      { api_error_cause = Some Runtime_claude_code.Other_api_error_cause | None
+      { api_error_status = None
+      ; api_error_cause = Some Runtime_claude_code.Other_api_error_cause | None
+      ; startup_failure_reason = Some (Runtime_claude_code.Other_startup_failure _) | None
       ; detail
       ; _
       } ->
@@ -669,9 +701,58 @@ let recovery_failure_of_client_error = function
      Protocol_failed carries -- Ambiguous: what the client did is unknown --
      and the record's detail names the exception. *)
   | Runtime_claude_code.Unhandled_exception _ -> Session_store.Protocol_failed
+  (* Pre-initialize org-config unavailability failed before the CLI opened or
+     touched the resumed session and before any input was sent: releasing as
+     [Pre_dispatch_failed] restores the previous settled session instead of
+     discarding it for a fresh cold start. Match the same HTTP-status and
+     diagnostic-cause preconditions as [claude_error_to_core_error] so an
+     anomalous frame with an HTTP status or [Authentication_failed] cause
+     cannot diverge between route classification and session recovery. *)
+  | Runtime_claude_code.Turn_failed_with_observation
+      { api_error_status = None
+      ; api_error_cause = Some Runtime_claude_code.Other_api_error_cause | None
+      ; startup_failure_reason = Some Runtime_claude_code.Org_config_required_unavailable
+      ; tool_effect_attempted = false
+      ; response_emitted = false
+      ; _
+      } ->
+    Session_store.Pre_dispatch_failed
   | Runtime_claude_code.Subscription_required _
   | Runtime_claude_code.Turn_failed _
-  | Runtime_claude_code.Turn_failed_with_observation _
+  | Runtime_claude_code.Turn_failed_with_observation
+      { startup_failure_reason =
+          Some
+            ( Runtime_claude_code.Org_config_refused
+            | Runtime_claude_code.Other_startup_failure _ )
+          | None
+      ; _
+      }
+  | Runtime_claude_code.Turn_failed_with_observation
+      { api_error_status = Some _
+      ; startup_failure_reason = Some Runtime_claude_code.Org_config_required_unavailable
+      ; _
+      }
+  | Runtime_claude_code.Turn_failed_with_observation
+      { api_error_status = None
+      ; api_error_cause = Some Runtime_claude_code.Authentication_failed
+      ; startup_failure_reason = Some Runtime_claude_code.Org_config_required_unavailable
+      ; _
+      }
+  | Runtime_claude_code.Turn_failed_with_observation
+      { api_error_status = None
+      ; api_error_cause = Some Runtime_claude_code.Other_api_error_cause | None
+      ; startup_failure_reason = Some Runtime_claude_code.Org_config_required_unavailable
+      ; tool_effect_attempted = true
+      ; _
+      }
+  | Runtime_claude_code.Turn_failed_with_observation
+      { api_error_status = None
+      ; api_error_cause = Some Runtime_claude_code.Other_api_error_cause | None
+      ; startup_failure_reason = Some Runtime_claude_code.Org_config_required_unavailable
+      ; tool_effect_attempted = false
+      ; response_emitted = true
+      ; _
+      }
   | Runtime_claude_code.Quota_blocked _ ->
     Session_store.Provider_rejected
   | Runtime_claude_code.Context_window_exceeded
@@ -1824,12 +1905,49 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
             | Runtime_claude_code.Unhandled_exception _
             | Runtime_claude_code.Timeout _ -> ());
            if not !state_persistence_failed
-           then
-             recovery_failure :=
+           then (
+             let mapped =
                recovery_failure_of_attempt
                  ~session_mode
                  ~gate_continuation:(Option.is_some official_client_continuation)
-                 error;
+                 error
+             in
+             (* [Pre_dispatch_failed] is only valid while the durable claim is
+                still in [Start] (before [on_session_ready] promoted it to
+                [Active] or [Turn_inflight]). Downgrade any later phase to
+                [Provider_rejected] so an already-admitted session never
+                auto-releases as transient. *)
+             recovery_failure :=
+               match mapped, (!session_state).Session_store.phase with
+               | Session_store.Pre_dispatch_failed, Session_store.Start _ ->
+                 Session_store.Pre_dispatch_failed
+               | ( Session_store.Pre_dispatch_failed
+                 , ( Session_store.Ready
+                   | Session_store.Active _
+                   | Session_store.Turn_inflight _
+                   | Session_store.Recovery_required _
+                   | Session_store.Settled _ ) ) ->
+                 Session_store.Provider_rejected
+               | ( ( Session_store.Spawn_resources_busy
+                   | Session_store.Spawn_refused_same_input
+                   | Session_store.Spawn_failed_cause_unknown
+                   | Session_store.Owner_stopped_turn
+                   | Session_store.Retryable_turn_failed
+                   | Session_store.Transport_interrupted
+                   | Session_store.Protocol_failed
+                   | Session_store.Provider_rejected
+                   | Session_store.Input_rejected _
+                   | Session_store.Host_hook_failed
+                   | Session_store.State_persistence_failed
+                   | Session_store.Process_restarted
+                   | Session_store.Vendor_session_full _ )
+                 , ( Session_store.Ready
+                   | Session_store.Start _
+                   | Session_store.Active _
+                   | Session_store.Turn_inflight _
+                   | Session_store.Recovery_required _
+                   | Session_store.Settled _ ) ) ->
+                 mapped);
            Error (claude_error_to_core_error ~account error)
          | Ok turn ->
            natural_completion := true;

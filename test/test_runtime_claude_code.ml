@@ -1466,13 +1466,26 @@ let startup_result_of_another_session =
   {|{"type":"result","subtype":"success","is_error":true,"session_id":"another-session","uuid":"startup-other-1","result":"Invalid API key · Please run /login","api_error_status":401}|}
 ;;
 
-let run_with_startup_frame frame =
+(* Measured on Claude Code 2.1.332 (2026-11-27, #54540): a pre-initialize
+   startup refusal on [--resume] runs before the CLI adopts the resumed session
+   ID, so [session_id] is a freshly minted UUID and the message sits in
+   [errors] with no [result] field. *)
+let startup_org_config_unavailable_result =
+  {|{"type":"result","subtype":"error_during_execution","duration_ms":0,"duration_api_ms":0,"is_error":true,"num_turns":0,"stop_reason":null,"session_id":"fresh-startup-uuid","total_cost_usd":0,"usage":{},"modelUsage":{},"permission_denials":[],"uuid":"startup-org-unavail-1","errors":["Claude Code couldn't load your organization's settings, which it requires before a session can start."],"startup_failure_reason":"org_config_required_unavailable","result_index":0}|}
+;;
+
+let startup_org_config_refused_result =
+  {|{"type":"result","subtype":"error_during_execution","duration_ms":0,"duration_api_ms":0,"is_error":true,"num_turns":0,"stop_reason":null,"session_id":"fresh-startup-uuid","total_cost_usd":0,"usage":{},"modelUsage":{},"permission_denials":[],"uuid":"startup-org-refused-1","errors":["Anthropic refused organization settings for this sign-in."],"startup_failure_reason":"org_config_refused","result_index":0}|}
+;;
+
+let run_with_startup_frame ?session_mode frame =
   let prompt_sent = ref false in
   let outcome =
     with_fixture
       ~before_initialize_response:[ Emit frame ]
       [ Emit assistant; Emit result ]
-      (fun path -> run_fixture ~on_prompt_sent:(fun () -> prompt_sent := true) path)
+      (fun path ->
+         run_fixture ?session_mode ~on_prompt_sent:(fun () -> prompt_sent := true) path)
   in
   check bool "no turn input was sent" false !prompt_sent;
   outcome
@@ -1484,6 +1497,7 @@ let test_a_startup_failure_result_keeps_its_typed_reason () =
        (Runtime_claude_code.Turn_failed_with_observation
          { api_error_status = Some 401
          ; api_error_cause = None
+         ; startup_failure_reason = None
          ; tool_effect_attempted = false
          ; response_emitted = false
          ; detail
@@ -1497,6 +1511,7 @@ let test_a_startup_failure_result_keeps_its_typed_reason () =
       (Runtime_claude_code.Turn_failed_with_observation
         { api_error_status = None
         ; api_error_cause = None
+        ; startup_failure_reason = None
         ; tool_effect_attempted = false
         ; response_emitted = false
         ; detail
@@ -1507,15 +1522,209 @@ let test_a_startup_failure_result_keeps_its_typed_reason () =
   | Ok _ -> fail "a start-up failure was reported as completion"
 ;;
 
+let test_resume_startup_failure_preserves_reason_and_errors () =
+  let resume = Runtime_claude_code.Resume { session_id = "resumed-session-1" } in
+  (match run_with_startup_frame ~session_mode:resume startup_org_config_unavailable_result with
+   | Error
+       (Runtime_claude_code.Turn_failed_with_observation
+          { api_error_status = None
+          ; api_error_cause = None
+          ; startup_failure_reason = Some Runtime_claude_code.Org_config_required_unavailable
+          ; tool_effect_attempted = false
+          ; response_emitted = false
+          ; detail
+          }) ->
+     check bool "startup_failure field recorded" true
+       (Astring.String.is_infix
+          ~affix:"startup_failure=org_config_required_unavailable"
+          detail);
+     check bool "errors sentence preserved when result field is absent" true
+       (Astring.String.is_infix
+          ~affix:"couldn't load your organization's settings"
+          detail)
+   | Error error -> fail (Runtime_claude_code.error_to_string error)
+   | Ok _ -> fail "a resumed start-up failure was reported as completion");
+  (match run_with_startup_frame ~session_mode:resume startup_org_config_refused_result with
+   | Error
+       (Runtime_claude_code.Turn_failed_with_observation
+          { api_error_status = None
+          ; api_error_cause = None
+          ; startup_failure_reason = Some Runtime_claude_code.Org_config_refused
+          ; tool_effect_attempted = false
+          ; response_emitted = false
+          ; detail
+          }) ->
+     check bool "org_config_refused reason recorded" true
+       (Astring.String.is_infix ~affix:"startup_failure=org_config_refused" detail);
+     check bool "refusal message preserved" true
+       (Astring.String.is_infix ~affix:"refused organization settings" detail)
+   | Error error -> fail (Runtime_claude_code.error_to_string error)
+   | Ok _ -> fail "a resumed org_config_refused was reported as completion");
+  (* Unknown startup_failure_reason values stay typed via [Other_startup_failure]. *)
+  let startup_other_reason =
+    {|{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"fresh-startup-uuid","uuid":"startup-cfg-1","errors":["Invalid settings.json"],"startup_failure_reason":"config_file_invalid"}|}
+  in
+  (match run_with_startup_frame ~session_mode:resume startup_other_reason with
+   | Error
+       (Runtime_claude_code.Turn_failed_with_observation
+          { api_error_status = None
+          ; api_error_cause = None
+          ; startup_failure_reason =
+              Some (Runtime_claude_code.Other_startup_failure "config_file_invalid")
+          ; tool_effect_attempted = false
+          ; response_emitted = false
+          ; detail
+          }) ->
+     check bool "other startup_failure recorded" true
+       (Astring.String.is_infix ~affix:"startup_failure=config_file_invalid" detail);
+     check bool "other startup_failure message preserved" true
+       (Astring.String.is_infix ~affix:"Invalid settings.json" detail)
+   | Error error -> fail (Runtime_claude_code.error_to_string error)
+   | Ok _ -> fail "a resumed Other_startup_failure was reported as completion");
+  (* Pre-initialize startup refusals stay [Turn_failed_with_observation] even if
+     a frame also carries [api_error_status = 429] or [terminal_reason = "prompt_too_long"],
+     so a foreign-session startup refusal never triggers quota cooldowns or
+     context-overflow shrink retries. *)
+  let startup_with_429 =
+    {|{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"fresh-startup-uuid","uuid":"startup-429-1","api_error_status":429,"errors":["Org settings unavailable"],"startup_failure_reason":"org_config_required_unavailable"}|}
+  in
+  (match run_with_startup_frame ~session_mode:resume startup_with_429 with
+   | Error
+       (Runtime_claude_code.Turn_failed_with_observation
+          { api_error_status = Some 429
+          ; startup_failure_reason = Some Runtime_claude_code.Org_config_required_unavailable
+          ; _
+          }) -> ()
+   | Error error -> fail ("expected Turn_failed_with_observation, got: " ^ Runtime_claude_code.error_to_string error)
+   | Ok _ -> fail "pre-initialize startup refusal with 429 completed");
+  let startup_with_overflow =
+    {|{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"fresh-startup-uuid","uuid":"startup-ovf-1","terminal_reason":"prompt_too_long","errors":["Org settings unavailable"],"startup_failure_reason":"org_config_required_unavailable"}|}
+  in
+  (match run_with_startup_frame ~session_mode:resume startup_with_overflow with
+   | Error
+       (Runtime_claude_code.Turn_failed_with_observation
+          { api_error_status = None
+          ; startup_failure_reason = Some Runtime_claude_code.Org_config_required_unavailable
+          ; _
+          }) -> ()
+   | Error error -> fail ("expected Turn_failed_with_observation, got: " ^ Runtime_claude_code.error_to_string error)
+   | Ok _ -> fail "pre-initialize startup refusal with prompt_too_long completed");
+  (* A regular error_during_execution frame with [errors] and no [result] also
+     keeps its error sentence instead of dropping it, and post-initialize
+     frames never expose [startup_failure_reason]. *)
+  let turn_errors_only =
+    {|{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"__SESSION__","uuid":"turn-err-1","errors":["first error","second error"],"startup_failure_reason":"org_config_required_unavailable"}|}
+  in
+  with_fixture [ Emit turn_errors_only ] (fun path ->
+    match run_fixture path with
+    | Error
+        (Runtime_claude_code.Turn_failed_with_observation
+           { startup_failure_reason = None; detail; _ }) ->
+      check bool "errors array joined into detail" true
+        (Astring.String.is_infix ~affix:"first error; second error" detail);
+      check bool "post-initialize startup_failure_reason omitted from detail" false
+        (Astring.String.is_infix ~affix:"startup_failure=" detail)
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "errors-only failure completed")
+;;
+
 let test_a_startup_result_outside_the_protocol_fails_closed () =
+  let resume = Runtime_claude_code.Resume { session_id = "resumed-session-1" } in
   expect_protocol_error
     ~stage:"initialize"
     ~detail:(Printf.sprintf "unexpected message type %S before control response" "result")
     (run_with_startup_frame result);
+  (match run_with_startup_frame startup_result_of_another_session with
+   | Error (Runtime_claude_code.Protocol_error { stage; detail }) ->
+     check string "protocol error stage" "result message" stage;
+     check bool "mismatch names received and expected" true
+       (Astring.String.is_prefix
+          ~affix:{|session_id does not match the active Claude session (received="another-session" expected="|}
+          detail)
+   | Error error -> fail (Runtime_claude_code.error_to_string error)
+   | Ok _ -> fail "foreign start-up result was accepted");
+  (* Without [startup_failure_reason], a foreign [session_id] still fails closed
+     on [Resume] too, and names both session IDs. *)
   expect_protocol_error
     ~stage:"result message"
-    ~detail:"session_id does not match the active Claude session"
-    (run_with_startup_frame startup_result_of_another_session)
+    ~detail:
+      {|session_id does not match the active Claude session (received="another-session" expected="resumed-session-1")|}
+    (run_with_startup_frame ~session_mode:resume startup_result_of_another_session);
+  (* Under [Start], [--session-id] is on argv, so a foreign [session_id] fails
+     closed even when [startup_failure_reason] is present. *)
+  (match run_with_startup_frame ~session_mode:Start startup_org_config_unavailable_result with
+   | Error (Runtime_claude_code.Protocol_error { stage; detail }) ->
+     check string "start mismatch stage" "result message" stage;
+     check bool "start mismatch names received uuid" true
+       (Astring.String.is_prefix
+          ~affix:{|session_id does not match the active Claude session (received="fresh-startup-uuid" expected="|}
+          detail)
+   | Error error -> fail (Runtime_claude_code.error_to_string error)
+   | Ok _ -> fail "Start launch accepted foreign startup_failure_reason session_id");
+  (* A non-error frame on [Resume] never bypasses the session check, even if it
+     stamps [startup_failure_reason]. *)
+  let non_error_startup_result =
+    {|{"type":"result","subtype":"success","is_error":false,"session_id":"fresh-startup-uuid","uuid":"startup-ok-1","result":"spoofed","startup_failure_reason":"org_config_required_unavailable"}|}
+  in
+  expect_protocol_error
+    ~stage:"result message"
+    ~detail:
+      {|session_id does not match the active Claude session (received="fresh-startup-uuid" expected="resumed-session-1")|}
+    (run_with_startup_frame ~session_mode:resume non_error_startup_result);
+  (* An error frame with a subtype other than [error_during_execution] or a
+     whitespace-only [startup_failure_reason] also fails closed on [Resume]. *)
+  let wrong_subtype_startup_result =
+    {|{"type":"result","subtype":"success","is_error":true,"session_id":"fresh-startup-uuid","uuid":"startup-sub-1","result":"spoofed","startup_failure_reason":"org_config_required_unavailable"}|}
+  in
+  expect_protocol_error
+    ~stage:"result message"
+    ~detail:
+      {|session_id does not match the active Claude session (received="fresh-startup-uuid" expected="resumed-session-1")|}
+    (run_with_startup_frame ~session_mode:resume wrong_subtype_startup_result);
+  let blank_reason_startup_result =
+    {|{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"fresh-startup-uuid","uuid":"startup-blank-1","errors":["blank"],"startup_failure_reason":"   "}|}
+  in
+  expect_protocol_error
+    ~stage:"result message"
+    ~detail:
+      {|session_id does not match the active Claude session (received="fresh-startup-uuid" expected="resumed-session-1")|}
+    (run_with_startup_frame ~session_mode:resume blank_reason_startup_result);
+  (* After initialize completes, a foreign [session_id] fails closed even on
+     [Resume] with [startup_failure_reason]. *)
+  with_fixture [ Emit startup_org_config_unavailable_result ] (fun path ->
+    expect_protocol_error
+      ~stage:"result message"
+      ~detail:
+        {|session_id does not match the active Claude session (received="fresh-startup-uuid" expected="resumed-session-1")|}
+      (run_fixture ~session_mode:resume path));
+  (* Malformed [errors] and [startup_failure_reason] types fail closed in both
+     pre-initialize and post-initialize phases. *)
+  let bad_errors_frame =
+    {|{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"__SESSION__","uuid":"bad-err-1","errors":"not-a-list"}|}
+  in
+  expect_protocol_error
+    ~stage:"result message"
+    ~detail:{|field "errors" must be a list of strings|}
+    (run_with_startup_frame bad_errors_frame);
+  let bad_errors_element_frame =
+    {|{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"__SESSION__","uuid":"bad-err-elem-1","errors":["ok",123]}|}
+  in
+  expect_protocol_error
+    ~stage:"result message"
+    ~detail:{|field "errors" must be a list of strings|}
+    (run_with_startup_frame bad_errors_element_frame);
+  let bad_reason_frame =
+    {|{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"__SESSION__","uuid":"bad-reason-1","startup_failure_reason":123}|}
+  in
+  expect_protocol_error
+    ~stage:"result message"
+    ~detail:{|field "startup_failure_reason" must be a string or null|}
+    (run_with_startup_frame bad_reason_frame);
+  with_fixture [ Emit bad_reason_frame ] (fun path ->
+    expect_protocol_error
+      ~stage:"result message"
+      ~detail:{|field "startup_failure_reason" must be a string or null|}
+      (run_fixture path))
 ;;
 
 let test_quota_is_structurally_classified () =
@@ -2182,6 +2391,7 @@ let test_api_diagnostic_preserves_terminal_error_detail () =
     | Error
         (Runtime_claude_code.Turn_failed_with_observation
            { detail; api_error_status = Some 400; api_error_cause = None
+           ; startup_failure_reason = None
            ; tool_effect_attempted = false; response_emitted = false }) ->
       check
         string
@@ -5240,6 +5450,8 @@ let () =
             test_a_known_frame_out_of_phase_is_named_by_its_own_tag
         ; test_case "a start-up failure result keeps its typed reason" `Quick
             test_a_startup_failure_result_keeps_its_typed_reason
+        ; test_case "a resumed start-up failure preserves reason and errors" `Quick
+            test_resume_startup_failure_preserves_reason_and_errors
         ; test_case "a start-up result outside the protocol fails closed" `Quick
             test_a_startup_result_outside_the_protocol_fails_closed
         ; test_case

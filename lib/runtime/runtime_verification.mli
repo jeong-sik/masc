@@ -39,8 +39,8 @@ type failure =
       (** The provider refused the credential (HTTP 401) or account access
           (HTTP 403). The status alone does not identify why access was refused.
           Also a Claude Code turn that ended with no HTTP status after the
-          client named [authentication_failed], as a login past its time
-          limit does. *)
+          client named [authentication_failed] (as a login past its time limit
+          does) or [org_config_refused] before the session opened. *)
   | Key_refused of string
       (** The provider refused the API key of the account: HTTP 401 on a
           Claude Code account that runs on a key of a file

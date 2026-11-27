@@ -97,7 +97,13 @@ let parse_state_line line =
 let read_state_file path =
   try
     let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
-    let ic = Unix.in_channel_of_descr fd in
+    let ic =
+      try Unix.in_channel_of_descr fd with
+      | exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        (try Unix.close fd with Unix.Unix_error _ -> ());
+        Printexc.raise_with_backtrace exn bt
+    in
     Ok
       (Fun.protect
          ~finally:(fun () -> close_in_noerr ic)
@@ -183,6 +189,8 @@ let start ~sw ~clock ~base_path =
       loop ()
     in
     try loop () with
-    | Eio.Cancel.Cancelled _ ->
-      Log.Server.info "host_fd_pressure_poller: cancelled, exiting cleanly")
+    | Eio.Cancel.Cancelled _ as exn ->
+      Eio.Cancel.protect (fun () ->
+        Log.Server.info "host_fd_pressure_poller: cancelled, exiting cleanly");
+      raise exn)
 ;;

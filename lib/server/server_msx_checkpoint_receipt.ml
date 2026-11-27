@@ -23,9 +23,12 @@ let no_delete =
   "CREATE TRIGGER receipt_retained BEFORE DELETE ON receipts BEGIN SELECT RAISE(ABORT,'checkpoint identity receipts are retained'); END"
 let sql_error db = Store_unavailable (Sqlite3.errmsg db)
 let exec db sql = if Sqlite3.Rc.is_success (Sqlite3.exec db sql) then Ok () else Error (sql_error db)
+let ignore_sqlite_cleanup (type a) (f : unit -> a) : unit =
+  try ignore (f () : a) with
+  | Sqlite3.Error _ | Sqlite3.SqliteError _ | Sqlite3.InternalError _ -> ()
 let statement db sql values f =
   let stmt = Sqlite3.prepare db sql in
-  Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt)) (fun () ->
+  Fun.protect ~finally:(fun () -> ignore_sqlite_cleanup (fun () -> Sqlite3.finalize stmt)) (fun () ->
     let rec bind n = function
       | [] -> f stmt
       | value::rest ->
@@ -59,7 +62,8 @@ let validate_schema db =
 let transaction db f =
   let* () = exec db "BEGIN IMMEDIATE" in
   let committed = ref false in
-  Fun.protect ~finally:(fun () -> if not !committed then ignore (Sqlite3.exec db "ROLLBACK"))
+  Fun.protect ~finally:(fun () ->
+    if not !committed then ignore_sqlite_cleanup (fun () -> Sqlite3.exec db "ROLLBACK"))
     (fun () -> let* value = f () in let* () = exec db "COMMIT" in committed := true; Ok value)
 (* A read opens the file read-write with query_only, never READONLY: a write
    runs in this same process, and with the macOS system SQLite a READONLY
@@ -69,7 +73,7 @@ let with_db ?(create=false) ~write ~path f =
   try
     let db = if create then Sqlite3.db_open path
       else Sqlite3.db_open ~mode:`NO_CREATE path in
-    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close db)) (fun () ->
+    Fun.protect ~finally:(fun () -> ignore_sqlite_cleanup (fun () -> Sqlite3.db_close db)) (fun () ->
       if write then begin
         let* () = exec db "PRAGMA journal_mode=DELETE" in
         let* () = exec db "PRAGMA synchronous=EXTRA" in

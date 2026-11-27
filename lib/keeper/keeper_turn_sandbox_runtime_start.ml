@@ -98,26 +98,23 @@ let start_container ?timeout_sec (t : t) =
           | Error err ->
             sandbox_failed ("docker_container_start_failed: secret_projection: " ^ err)
           | Ok secret_projection ->
-           (match
-              Keeper_github_identity.docker_args_persistent
-                ~config:t.config
-                ~keeper_name:t.meta.name
-                ~container_masc_dir:
-                  (Keeper_sandbox_runtime_setup.container_masc_dir
-                     ~container_root:t.container_root)
-            with
-            | Error err ->
-              Eio_guard.protect
-                ~finally:secret_projection.cleanup
-                (fun () ->
-                   Error
-                     (Identity_unavailable
-                        ("docker_container_start_failed: github_identity_invalid: "
-                         ^ err)))
-            | Ok github_identity_args ->
-            Eio_guard.protect
-              ~finally:secret_projection.cleanup
-              (fun () ->
+           Eio_guard.protect
+             ~finally:secret_projection.cleanup
+             (fun () ->
+               (match
+                  Keeper_github_identity.docker_args_persistent
+                    ~config:t.config
+                    ~keeper_name:t.meta.name
+                    ~container_masc_dir:
+                      (Keeper_sandbox_runtime_setup.container_masc_dir
+                         ~container_root:t.container_root)
+                with
+                | Error err ->
+                  Error
+                    (Identity_unavailable
+                       ("docker_container_start_failed: github_identity_invalid: "
+                        ^ err))
+                | Ok github_identity_args ->
               (* No [--rm]: the container outlives the turn, and auto-remove
                  on stop would destroy state a later turn expects to adopt.
                  Removal is the keeper's teardown, not the daemon's. *)

@@ -508,8 +508,15 @@ let authorize_grpc_request ~base_path (req : H2.Request.t)
   if String.starts_with ~prefix:("/" ^ health_service_name ^ "/") req.target
   then Ok { Server_grpc_listener.auth_token = None; internal_keeper = false }
   else
-    let auth_cfg = Auth.load_auth_config base_path in
-    match extract_bearer_from_h2_headers req.headers with
+    let raw_auth_cfg = Auth.load_auth_config base_path in
+    match
+      Server_auth.ensure_strict_http_token_auth
+        ~endpoint:"gRPC workspace RPCs"
+        raw_auth_cfg
+    with
+    | Error msg -> Error ("Unauthorized: " ^ msg)
+    | Ok auth_cfg ->
+      match extract_bearer_from_h2_headers req.headers with
     | Error msg -> Error msg
     | Ok None ->
       if not auth_cfg.Masc_domain.enabled

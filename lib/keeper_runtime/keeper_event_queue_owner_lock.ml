@@ -65,5 +65,13 @@ let resolve ~base_path ~keeper_name =
 let base_path owner = fst owner.owner_key
 let keeper_name owner = snd owner.owner_key
 
-let with_durable_lock owner f = Cross_context_mutex.with_durable_lock owner.lock f
+let with_durable_lock owner f =
+  match Cross_context_mutex.with_durable_lock owner.lock f with
+  | value ->
+    let _ = Sys.opaque_identity owner.owner_key in
+    value
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    let _ = Sys.opaque_identity owner.owner_key in
+    Printexc.raise_with_backtrace exn backtrace
 ;;

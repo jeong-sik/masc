@@ -78,8 +78,50 @@ let split_http_body_and_status body =
   let response = split_http_body_and_response body in
   (response.body, response.http_status)
 
-let header_args headers =
-  List.concat_map (fun (name, value) -> [ "-H"; name ^ ": " ^ value ]) headers
+let sanitize_curl_header_part s =
+  let buf = Buffer.create (String.length s) in
+  String.iter
+    (function
+      | '\r' | '\n' | '\000' -> ()
+      | c -> Buffer.add_char buf c)
+    s;
+  Buffer.contents buf
+
+let quote_curl_config_value s =
+  let buf = Buffer.create (String.length s + 8) in
+  Buffer.add_char buf '"';
+  String.iter
+    (function
+      | '\\' -> Buffer.add_string buf "\\\\"
+      | '"' -> Buffer.add_string buf "\\\""
+      | '\n' -> Buffer.add_string buf "\\n"
+      | '\r' -> Buffer.add_string buf "\\r"
+      | '\t' -> Buffer.add_string buf "\\t"
+      | '\x0b' -> Buffer.add_string buf "\\v"
+      | '\000' -> ()
+      | c -> Buffer.add_char buf c)
+    s;
+  Buffer.add_char buf '"';
+  Buffer.contents buf
+
+let curl_header_config_lines headers =
+  List.map
+    (fun (name, value) ->
+       let line = sanitize_curl_header_part name ^ ": " ^ sanitize_curl_header_part value in
+       "header = " ^ quote_curl_config_value line)
+    headers
+
+let curl_get_config ~headers =
+  match headers with
+  | [] -> None
+  | _ :: _ -> Some (String.concat "\n" (curl_header_config_lines headers) ^ "\n")
+
+let curl_post_json_config ~headers ~body_json =
+  let lines =
+    curl_header_config_lines (("Content-Type", "application/json") :: headers)
+    @ [ "data-raw = " ^ quote_curl_config_value body_json ]
+  in
+  String.concat "\n" lines ^ "\n"
 
 let max_response_args = function
   | None -> []
@@ -130,38 +172,45 @@ let curl_get_argv ?(timeout_sec = default_timeout_sec) ?(headers = [])
     else []
   in
   let compression_args = if compressed then [ "--compressed" ] else [] in
+  let config_args = match headers with [] -> [] | _ :: _ -> [ "-K"; "-" ] in
   (* [-q] must be the first argument: it stops curl from reading the server
      user's ~/.curlrc, which could add a proxy or a netrc credential source
-     to a request the model composed. *)
+     to a request the model composed. [-g] disables URL globbing on []/{},
+     [--] ends option parsing before [url], and [-K -] passes request headers
+     over stdin so Authorization/API keys stay out of argv. *)
   [
     "curl";
     "-q";
     "-sS";
+    "-g";
     "--http1.1";
     "--max-time";
     Int.to_string timeout_sec;
   ]
   @ compression_args
   @ redirect_args
-  @ header_args headers
+  @ config_args
   @ max_response_args max_response_bytes
   @ resolve_args pinned_resolution
-  @ [ "-w"; curl_write_out; url ]
+  @ [ "-w"; curl_write_out; "--"; url ]
 
-let curl_post_json_argv ~timeout_sec ?(headers = []) ~url ~body_json () =
+let curl_post_json_argv ~timeout_sec ~url () =
   let timeout_sec = max 1 timeout_sec in
   [
     "curl";
     "-q";
     "-sS";
+    "-g";
     "--http1.1";
     "--max-time";
     Int.to_string timeout_sec;
-    "-H";
-    "Content-Type: application/json";
+    "-K";
+    "-";
+    "-w";
+    "\n%{http_code}";
+    "--";
+    url;
   ]
-  @ header_args headers
-  @ [ "-d"; body_json; "-w"; "\n%{http_code}"; url ]
 
 (* [-i] puts the response's header block in front of its body, which the
    write-out form above cannot give: an MCP server returns the id of a new
@@ -170,26 +219,32 @@ let curl_post_json_argv ~timeout_sec ?(headers = []) ~url ~body_json () =
    would print the proxy's [200 Connection established] block in front of the
    real one under [-i]; [--suppress-connect-headers] is the option curl(1)
    gives for exactly that pairing. *)
-let curl_post_json_response_argv_with_timeout ~timeout_sec ~headers ~url ~body_json =
+let curl_post_json_response_argv_with_timeout ~timeout_sec ~url =
   [
     "curl";
     "-q";
     "-sS";
+    "-g";
     "--http1.1";
     "--max-time";
     Printf.sprintf "%.17g" timeout_sec;
-    "-H";
-    "Content-Type: application/json";
+    "-K";
+    "-";
+    "-i";
+    "--suppress-connect-headers";
+    "--";
+    url;
   ]
-  @ header_args headers
-  @ [ "-i"; "--suppress-connect-headers"; "-d"; body_json; url ]
 
 let curl_post_json_response_argv ~timeout_sec ?(headers = []) ~url ~body_json () =
+  let _ = headers, body_json in
   curl_post_json_response_argv_with_timeout
-    ~timeout_sec:(float_of_int (max 1 timeout_sec)) ~headers ~url ~body_json
+    ~timeout_sec:(float_of_int (max 1 timeout_sec)) ~url
 
 let curl_get_argv_for_test = curl_get_argv
+let curl_get_config_for_test = curl_get_config
 let curl_post_json_response_argv_for_test = curl_post_json_response_argv
+let curl_post_json_config_for_test = curl_post_json_config
 
 type transport_failure =
   | Curl_exited of int
@@ -252,9 +307,16 @@ let http_get_text_response_with_headers ?(timeout_sec = default_timeout_sec)
   in
   let status, body =
     Fd_accountant.observe ~kind:Sandbox_exec (fun () ->
-      Process_eio.run_argv_with_status
-        ~timeout_sec:(Stdlib.Float.of_int timeout_sec)
-        argv)
+      match curl_get_config ~headers with
+      | None ->
+        Process_eio.run_argv_with_status
+          ~timeout_sec:(Stdlib.Float.of_int timeout_sec)
+          argv
+      | Some stdin_content ->
+        Process_eio.run_argv_with_stdin_and_status
+          ~timeout_sec:(Stdlib.Float.of_int timeout_sec)
+          ~stdin_content
+          argv)
   in
   match transport_failure_of_status status with
   | None -> Ok (split_http_body_and_response body)
@@ -283,11 +345,13 @@ let http_get_json_with_status ?(timeout_sec = default_timeout_sec) url =
 let http_post_json_text_with_status_with_headers ~timeout_sec ?(headers = []) ~url
     ~body_json () =
   let timeout_sec = max 1 timeout_sec in
-  let argv = curl_post_json_argv ~timeout_sec ~headers ~url ~body_json () in
+  let argv = curl_post_json_argv ~timeout_sec ~url () in
+  let stdin_content = curl_post_json_config ~headers ~body_json in
   let status, body =
     Fd_accountant.observe ~kind:Sandbox_exec (fun () ->
-      Process_eio.run_argv_with_status
+      Process_eio.run_argv_with_stdin_and_status
         ~timeout_sec:(Stdlib.Float.of_int timeout_sec)
+        ~stdin_content
         argv)
   in
   match transport_failure_of_status status with
@@ -391,15 +455,17 @@ let http_post_json_response_with_headers ~timeout_sec ?deadline ?(headers = []) 
   else
   let argv =
     curl_post_json_response_argv_with_timeout
-      ~timeout_sec:request_timeout ~headers ~url ~body_json
+      ~timeout_sec:request_timeout ~url
   in
+  let stdin_content = curl_post_json_config ~headers ~body_json in
   let runner_timeout = remaining () in
   if runner_timeout <= 0. then Error "HTTP request deadline expired"
   else
   let status, body =
     Fd_accountant.observe ~kind:Sandbox_exec (fun () ->
-      Process_eio.run_argv_with_status
+      Process_eio.run_argv_with_stdin_and_status
         ~timeout_sec:runner_timeout
+        ~stdin_content
         argv)
   in
   match transport_failure_of_status status with

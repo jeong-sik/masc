@@ -17,6 +17,7 @@ type run_record = {
 }
 
 type error =
+  | Invalid_task_id of { task_id : string; detail : string }
   | Missing_run of { task_id : string; path : string }
   | Invalid_run of { task_id : string; path : string }
   | Storage_failure of string

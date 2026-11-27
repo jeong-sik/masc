@@ -138,7 +138,9 @@ val curl_get_argv_for_test :
   string ->
   string list
 
-(** Pure curl argv builder exposed for focused regression tests. *)
+val curl_get_config_for_test : headers:(string * string) list -> string option
+
+(** Pure curl argv and stdin config builders exposed for focused regression tests. *)
 
 val http_get_text_with_status :
   ?timeout_sec:int ->
@@ -222,4 +224,9 @@ val curl_post_json_response_argv_for_test :
   body_json:string ->
   unit ->
   string list
+
+val curl_post_json_config_for_test :
+  headers:(string * string) list ->
+  body_json:string ->
+  string
 

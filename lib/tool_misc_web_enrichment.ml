@@ -169,7 +169,7 @@ type hit_content =
 
 let fetched_page_source = "fetched page"
 
-let fetch_page_content_for_search_hit ~content_max_chars ~content_timeout url =
+let fetch_page_content_for_search_hit ?base_path ~content_max_chars ~content_timeout url =
   let fetch_args =
     `Assoc
       [ "url", `String url
@@ -181,6 +181,7 @@ let fetch_page_content_for_search_hit ~content_max_chars ~content_timeout url =
   let start_time = Tool_timing.start () in
   let fetch_result =
     Tool_misc_web_fetch.handle
+      ?base_path
       ~tool_name:"masc_web_fetch"
       ~start_time
       fetch_args
@@ -247,10 +248,10 @@ let engine_text_fields ~content_max_chars ~source ~fetch_error text =
   ; "page_content_error", `String ("page fetch failed: " ^ fetch_error)
   ]
 
-let enrich_web_search_hit ~content_max_chars ~content_timeout
+let enrich_web_search_hit ?base_path ~content_max_chars ~content_timeout
     (hit : Tool_misc_web_search.normalized_hit) =
   match
-    fetch_page_content_for_search_hit ~content_max_chars ~content_timeout hit.url
+    fetch_page_content_for_search_hit ?base_path ~content_max_chars ~content_timeout hit.url
   with
   | Ok fields -> fields, Page_fetched
   | Error message ->
@@ -270,7 +271,7 @@ let content_counts contents =
        | Unavailable -> (fetched, engine_text, unavailable + 1))
     (0, 0, 0) contents
 
-let enrich_web_search_payload ~content_max_chars ~content_timeout hits data =
+let enrich_web_search_payload ?base_path ~content_max_chars ~content_timeout hits data =
   match data with
   | `Assoc fields ->
       (match List.assoc_opt "result" fields with
@@ -279,7 +280,7 @@ let enrich_web_search_payload ~content_max_chars ~content_timeout hits data =
              List.map
                (fun hit ->
                   let content_fields, content =
-                    enrich_web_search_hit ~content_max_chars ~content_timeout hit
+                    enrich_web_search_hit ?base_path ~content_max_chars ~content_timeout hit
                   in
                   hit, content_fields, content)
                hits
@@ -316,7 +317,7 @@ let enrich_web_search_payload ~content_max_chars ~content_timeout hits data =
        | _ -> data)
   | _ -> data
 
-let handle ~tool_name ~start_time args =
+let handle ?base_path ~tool_name ~start_time args =
   if not (get_bool args "includeContent" false) then
     Tool_misc_web_search.handle ~tool_name ~start_time args
   else
@@ -329,4 +330,4 @@ let handle ~tool_name ~start_time args =
       |> clamp_int ~min:1 ~max:60
     in
     Tool_misc_web_search.handle_with_rows ~tool_name ~start_time args
-      ~on_rows:(enrich_web_search_payload ~content_max_chars ~content_timeout)
+      ~on_rows:(enrich_web_search_payload ?base_path ~content_max_chars ~content_timeout)

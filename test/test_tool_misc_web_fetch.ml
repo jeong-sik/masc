@@ -563,6 +563,60 @@ let test_upstream_http_failure status guidance =
       check string "explicit subsequent success" "available"
         Yojson.Safe.Util.(second |> member "text" |> to_string))
 
+let test_handle_trims_url_and_isolates_workspace_base_path () =
+  let tmp_a =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-web-fetch-ws-a-%d" (Unix.getpid ()))
+  in
+  let tmp_b =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-web-fetch-ws-b-%d" (Unix.getpid ()))
+  in
+  Unix.mkdir tmp_a 0o755;
+  Unix.mkdir tmp_b 0o755;
+  let body = String.concat "\n" (List.init 200 (fun i -> Printf.sprintf "line-%03d-payload-text" i)) in
+  let calls = ref 0 in
+  Masc.Tool_misc_web_fetch.with_http_fetch_for_test
+    (fun ~timeout_sec:_ ~headers:_ ~max_response_bytes:_ url ->
+      incr calls;
+      check string "url trimmed before fetch" "https://example.com/multi-ws" url;
+      Ok
+        { Masc.Tool_misc_web_fetch.http_status = Some 200
+        ; final_url = url
+        ; redirect_count = 0
+        ; content_type = Some "text/plain"
+        ; downloaded_bytes = Some (String.length body)
+        ; body
+        })
+    (fun () ->
+      let call ~base_path =
+        Masc.Tool_misc_web_fetch.handle ~base_path ~tool_name:"masc_web_fetch"
+          ~start_time:(Tool_timing.start ())
+          (`Assoc
+             [ ("url", `String "  https://example.com/multi-ws  ")
+             ; ("extractMode", `String "text")
+             ; ("maxChars", `Int 500)
+             ])
+      in
+      let open Yojson.Safe.Util in
+      let json_a = success_json (call ~base_path:tmp_a) in
+      let json_b = success_json (call ~base_path:tmp_b) in
+      check int "distinct base_paths do not share cached offload" 2 !calls;
+      check string "trimmed url echoed" "https://example.com/multi-ws"
+        (json_a |> member "url" |> to_string);
+      let sha_a = json_a |> member "full_text_sha256" |> to_string in
+      let sha_b = json_b |> member "full_text_sha256" |> to_string in
+      check string "content hash matches across workspaces" sha_a sha_b;
+      let check_blob_in label base sha =
+        let store = Tool_blob_store.create ~base_path:base in
+        match Tool_blob_store.fetch store ~sha256:sha with
+        | Ok (Some bytes) -> check string label body bytes
+        | Ok None -> Alcotest.fail (label ^ ": blob absent")
+        | Error err -> Alcotest.fail (Tool_blob_store.fetch_error_to_string err)
+      in
+      check_blob_in "blob stored in workspace A" tmp_a sha_a;
+      check_blob_in "blob stored in workspace B" tmp_b sha_b)
+
 let () =
   (* One runtime owns every request and the pooled extraction switch for the
      whole test execution, including explicit retries after upstream failures. *)
@@ -581,6 +635,8 @@ let () =
             test_invalid_redirect_is_workflow_rejection;
           test_case "truncation offloads full text" `Quick
             test_truncation_offloads_full_text;
+          test_case "url trim and workspace base_path isolation" `Quick
+            test_handle_trims_url_and_isolates_workspace_base_path;
           test_case "truncation preserves utf8 boundaries" `Quick
             test_truncation_preserves_utf8_boundaries;
           test_case "truncation outline maps headings" `Quick

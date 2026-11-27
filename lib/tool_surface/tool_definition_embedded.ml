@@ -28,11 +28,12 @@ let path_params name =
   match Stdlib.Mutex.protect path_params_lock (fun () -> Hashtbl.find_opt path_params_table name) with
   | Some declared -> declared
   | None ->
-    let declared =
-      match find name with
-      | Ok loaded -> loaded.Tool_definition_toml.path_params
-      | Error _ -> []
-    in
-    Stdlib.Mutex.protect path_params_lock (fun () -> Hashtbl.replace path_params_table name declared);
-    declared
+    (* Only memoize definitions that exist in the embedded tree so arbitrary
+       unknown or hallucinated tool names cannot grow the table without bound. *)
+    match find name with
+    | Ok loaded ->
+      let declared = loaded.Tool_definition_toml.path_params in
+      Stdlib.Mutex.protect path_params_lock (fun () -> Hashtbl.replace path_params_table name declared);
+      declared
+    | Error _ -> []
 ;;

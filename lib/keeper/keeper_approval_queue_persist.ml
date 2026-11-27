@@ -148,6 +148,7 @@ let compact_unlocked ~write_snapshot ~base_path ~pending_map ~delivery_map =
   match write_snapshot ~generation with
   | Error _ as error -> error
   | Ok outcome ->
+    record_snapshot_generation ~base_path generation;
     let path = pending_log_path ~base_path in
     let emptied =
       Eio_guard.run_in_systhread ~label:"approval-queue-read" (fun () ->

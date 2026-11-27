@@ -405,6 +405,11 @@ let close_db_in_pool db =
    domain pool when the caller is an Eio fiber, like [rank_many_with]; the jobs
    run one after another, so the database is never used by two at once and
    [Sqlite3.db_close] never runs on the caller's Eio scheduler domain. *)
+type memory_db_handoff =
+  | Handoff_pending
+  | Handoff_ready of Sqlite3.db
+  | Handoff_cancelled
+
 let with_excluding_owners ~texts ~max_results f =
   let claims = Array.of_list (List.map snd texts) in
   let opened = ref None in
@@ -413,16 +418,30 @@ let with_excluding_owners ~texts ~max_results f =
     match !opened with
     | Some db -> Ok db
     | None ->
-      let* db =
-        Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-          match Sqlite3.db_open ":memory:" with
-          | exception Sqlite3.Error detail -> Error (Index_unavailable detail)
-          | db ->
-            (match create_table db texts with
-             | Ok () -> Ok db
-             | Error error -> close_table db; Error error
-             | exception Sqlite3.Error detail -> close_table db; Error (Index_unavailable detail)))
+      let handoff = Atomic.make Handoff_pending in
+      let build_result =
+        try
+          Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+            match Sqlite3.db_open ":memory:" with
+            | exception Sqlite3.Error detail -> Error (Index_unavailable detail)
+            | db ->
+              (match create_table db texts with
+               | Ok () ->
+                 if Atomic.compare_and_set handoff Handoff_pending (Handoff_ready db)
+                 then Ok db
+                 else (
+                   close_table db;
+                   Error (Index_unavailable "memory index build cancelled"))
+               | Error error -> close_table db; Error error
+               | exception Sqlite3.Error detail -> close_table db; Error (Index_unavailable detail)))
+        with exn ->
+          let bt = Printexc.get_raw_backtrace () in
+          (match Atomic.exchange handoff Handoff_cancelled with
+           | Handoff_ready db -> close_db_in_pool db
+           | Handoff_pending | Handoff_cancelled -> ());
+          Printexc.raise_with_backtrace exn bt
       in
+      let* db = build_result in
       opened := Some db;
       stats := { !stats with index_builds = !stats.index_builds + 1;
                              indexed_rows = !stats.indexed_rows + Array.length claims };
@@ -556,8 +575,25 @@ let read_stored_meta db =
     else Error (sqlite_error db "read fts_meta"))
 ;;
 
-let sync_facts_on_db db ?revision (facts : Keeper_memory_os_types.fact list) =
-  let expected_sha = facts_content_sha256 facts in
+let with_transaction db ~begin_op ~begin_sql f =
+  let* () = exec_ok db begin_op begin_sql in
+  match f () with
+  | Ok value ->
+    (match exec_ok db "commit" "COMMIT;" with
+     | Ok () -> Ok value
+     | Error err ->
+       ignore (Sqlite3.exec db "ROLLBACK;" : Sqlite3.Rc.t);
+       Error err)
+  | Error err ->
+    ignore (Sqlite3.exec db "ROLLBACK;" : Sqlite3.Rc.t);
+    Error err
+  | exception exn ->
+    let bt = Printexc.get_raw_backtrace () in
+    ignore (Sqlite3.exec db "ROLLBACK;" : Sqlite3.Rc.t);
+    Printexc.raise_with_backtrace exn bt
+;;
+
+let sync_facts_in_transaction db ?revision ~expected_sha (facts : Keeper_memory_os_types.fact list) =
   let* stored = read_stored_meta db in
   match stored with
   | Some (_, sha) when String.equal sha expected_sha -> Ok (List.length facts)
@@ -568,55 +604,52 @@ let sync_facts_on_db db ?revision (facts : Keeper_memory_os_types.fact list) =
       | None, Some (existing_rev, _) -> existing_rev
       | None, None -> 0
     in
-    let* () = exec_ok db "begin immediate" "BEGIN IMMEDIATE;" in
-    let body () =
-      let* () = exec_ok db "clear fts" "DELETE FROM keeper_memory_fts;" in
-      let* count =
-        with_statement db
-          "INSERT INTO keeper_memory_fts(ordinal, memory_id, category, claim) VALUES (?1, ?2, ?3, ?4)"
-          (fun stmt ->
-             let rec loop idx = function
-               | [] -> Ok idx
-               | (fact : Keeper_memory_os_types.fact) :: rest ->
-                 let* () =
-                   check db "bind ordinal"
-                     (Sqlite3.bind stmt 1 (Sqlite3.Data.INT (Int64.of_int idx)))
-                 in
-                 let* () =
-                   check db "bind memory_id"
-                     (Sqlite3.bind stmt 2 (Sqlite3.Data.TEXT (Keeper_memory_os_types.memory_id fact)))
-                 in
-                 let* () =
-                   check db "bind category"
-                     (Sqlite3.bind stmt 3
-                        (Sqlite3.Data.TEXT (Keeper_memory_os_types.category_to_string fact.category)))
-                 in
-                 let* () = check db "bind claim" (Sqlite3.bind stmt 4 (Sqlite3.Data.TEXT fact.claim)) in
-                 let* () = step_done db "insert fts row" stmt in
-                 let* () = check db "reset fts insert" (Sqlite3.reset stmt) in
-                 loop (idx + 1) rest
-             in
-             loop 0 facts)
-      in
-      let* () =
-        with_statement db
-          "INSERT INTO fts_meta(id, revision, content_sha256) VALUES (1, ?1, ?2) \
-           ON CONFLICT(id) DO UPDATE SET revision = excluded.revision, content_sha256 = excluded.content_sha256"
-          (fun stmt ->
-             let* () =
-               check db "bind rev" (Sqlite3.bind stmt 1 (Sqlite3.Data.INT (Int64.of_int stored_revision)))
-             in
-             let* () = check db "bind sha" (Sqlite3.bind stmt 2 (Sqlite3.Data.TEXT expected_sha)) in
-             step_done db "upsert fts_meta" stmt)
-      in
-      let* () = exec_ok db "commit" "COMMIT;" in
-      Ok count
+    let* () = exec_ok db "clear fts" "DELETE FROM keeper_memory_fts;" in
+    let* count =
+      with_statement db
+        "INSERT INTO keeper_memory_fts(ordinal, memory_id, category, claim) VALUES (?1, ?2, ?3, ?4)"
+        (fun stmt ->
+           let rec loop idx = function
+             | [] -> Ok idx
+             | (fact : Keeper_memory_os_types.fact) :: rest ->
+               let* () =
+                 check db "bind ordinal"
+                   (Sqlite3.bind stmt 1 (Sqlite3.Data.INT (Int64.of_int idx)))
+               in
+               let* () =
+                 check db "bind memory_id"
+                   (Sqlite3.bind stmt 2 (Sqlite3.Data.TEXT (Keeper_memory_os_types.memory_id fact)))
+               in
+               let* () =
+                 check db "bind category"
+                   (Sqlite3.bind stmt 3
+                      (Sqlite3.Data.TEXT (Keeper_memory_os_types.category_to_string fact.category)))
+               in
+               let* () = check db "bind claim" (Sqlite3.bind stmt 4 (Sqlite3.Data.TEXT fact.claim)) in
+               let* () = step_done db "insert fts row" stmt in
+               let* () = check db "reset fts insert" (Sqlite3.reset stmt) in
+               loop (idx + 1) rest
+           in
+           loop 0 facts)
     in
-    (match body () with
-     | Ok count -> Ok count
-     | Error err ->
-       ignore (Sqlite3.exec db "ROLLBACK;" : Sqlite3.Rc.t);
-       Error err)
+    let* () =
+      with_statement db
+        "INSERT INTO fts_meta(id, revision, content_sha256) VALUES (1, ?1, ?2) \
+         ON CONFLICT(id) DO UPDATE SET revision = excluded.revision, content_sha256 = excluded.content_sha256"
+        (fun stmt ->
+           let* () =
+             check db "bind rev" (Sqlite3.bind stmt 1 (Sqlite3.Data.INT (Int64.of_int stored_revision)))
+           in
+           let* () = check db "bind sha" (Sqlite3.bind stmt 2 (Sqlite3.Data.TEXT expected_sha)) in
+           step_done db "upsert fts_meta" stmt)
+    in
+    Ok count
+;;
+
+let sync_facts_on_db db ?revision (facts : Keeper_memory_os_types.fact list) =
+  let expected_sha = facts_content_sha256 facts in
+  with_transaction db ~begin_op:"begin immediate" ~begin_sql:"BEGIN IMMEDIATE;" (fun () ->
+    sync_facts_in_transaction db ?revision ~expected_sha facts)
 ;;
 
 let open_persistent_db ~keepers_dir ~keeper_id f =
@@ -783,22 +816,25 @@ let rank_persistent_for_facts ~keepers_dir ~keeper_id ~query (facts : Keeper_mem
   | Some _, _ :: _ ->
     let expected_sha = facts_content_sha256 facts in
     Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-      (* Fast path: pure read-only MVCC query when the persistent FTS5 index
-         already matches [expected_sha] (zero write locks, zero rebuilds). *)
+      (* Fast path: pure read-only MVCC query inside a single DEFERRED read
+         transaction so [fts_meta] and [keeper_memory_fts] read one consistent
+         snapshot (zero write locks, zero rebuilds). *)
       let ro_attempt =
         open_persistent_db_ro ~keepers_dir ~keeper_id (fun db ->
-          let* stored = read_stored_meta db in
-          match stored with
-          | Some (_, sha) when String.equal sha expected_sha ->
-            let* rows = query_persistent_db db ~query ~limit:(List.length facts) in
-            Ok (Some (List.map (fun (ordinal, hit) -> ordinal, hit.score) rows))
-          | Some _ | None -> Ok None)
+          with_transaction db ~begin_op:"begin deferred" ~begin_sql:"BEGIN DEFERRED;" (fun () ->
+            let* stored = read_stored_meta db in
+            match stored with
+            | Some (_, sha) when String.equal sha expected_sha ->
+              let* rows = query_persistent_db db ~query ~limit:(List.length facts) in
+              Ok (Some (List.map (fun (ordinal, hit) -> ordinal, hit.score) rows))
+            | Some _ | None -> Ok None))
       in
       match ro_attempt with
       | Ok (Some (Some hits)) -> Ok hits
       | Ok (Some None) | Ok None | Error _ ->
         open_persistent_db ~keepers_dir ~keeper_id (fun db ->
-          let* (_ : int) = sync_facts_on_db db facts in
-          let* rows = query_persistent_db db ~query ~limit:(List.length facts) in
-          Ok (List.map (fun (ordinal, hit) -> ordinal, hit.score) rows)))
+          with_transaction db ~begin_op:"begin immediate" ~begin_sql:"BEGIN IMMEDIATE;" (fun () ->
+            let* (_ : int) = sync_facts_in_transaction db ~expected_sha facts in
+            let* rows = query_persistent_db db ~query ~limit:(List.length facts) in
+            Ok (List.map (fun (ordinal, hit) -> ordinal, hit.score) rows))))
 ;;

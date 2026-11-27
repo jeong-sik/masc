@@ -107,12 +107,17 @@ let acquire ~base_path ~keeper_name ~purpose =
     }
   in
   with_key_lock ~base_path ~keeper_name (fun () ->
-    let current = Atomic.get reservations in
-    match StringMap.find_opt key current with
-    | Some owner -> Error (Already_reserved owner)
-    | None ->
-      Atomic.set reservations (StringMap.add key snapshot current);
-      Ok { key; base_path; keeper_name; snapshot })
+    let rec try_add () =
+      let current = Atomic.get reservations in
+      match StringMap.find_opt key current with
+      | Some owner -> Error (Already_reserved owner)
+      | None ->
+        let next = StringMap.add key snapshot current in
+        if Atomic.compare_and_set reservations current next
+        then Ok { key; base_path; keeper_name; snapshot }
+        else try_add ()
+    in
+    try_add ())
 ;;
 
 let token_owns_current (token : token) current =
@@ -136,13 +141,18 @@ let owner_id token = token.snapshot.owner_id
 
 let release token =
   with_key_lock ~base_path:token.base_path ~keeper_name:token.keeper_name (fun () ->
-    let current = Atomic.get reservations in
-    match StringMap.find_opt token.key current with
-    | None -> Release_missing
-    | Some owner when not (token_owns_current token owner) -> Release_not_owner owner
-    | Some _ ->
-      Atomic.set reservations (StringMap.remove token.key current);
-      Released)
+    let rec try_remove () =
+      let current = Atomic.get reservations in
+      match StringMap.find_opt token.key current with
+      | None -> Release_missing
+      | Some owner when not (token_owns_current token owner) -> Release_not_owner owner
+      | Some _ ->
+        let next = StringMap.remove token.key current in
+        if Atomic.compare_and_set reservations current next
+        then Released
+        else try_remove ()
+    in
+    try_remove ())
 ;;
 
 let current ~base_path ~keeper_name =

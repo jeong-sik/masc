@@ -39,7 +39,8 @@ let create ?default_network_override
   }
 
 let with_lock (t : t) f =
-  Eio.Mutex.use_rw ~protect:true t.mutex f
+  Eio.Mutex.lock t.mutex;
+  Fun.protect ~finally:(fun () -> Eio.Mutex.unlock t.mutex) f
 
 let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
 
@@ -134,10 +135,26 @@ let resolve_opt t_opt ~cwd =
   | Some t -> resolve t ~cwd
 
 let cleanup (t : t) =
-  if Hashtbl.length t.cache = 0 then ()
-  else
-    with_lock t (fun () ->
-      Hashtbl.iter
-        (fun _ r -> Keeper_turn_sandbox_runtime.cleanup r)
-        t.cache;
-      Hashtbl.reset t.cache)
+  let runtimes =
+    Eio.Cancel.protect (fun () ->
+      with_lock t (fun () ->
+        let acc = Hashtbl.fold (fun _ r acc -> r :: acc) t.cache [] in
+        Hashtbl.reset t.cache;
+        acc))
+  in
+  let first_err = ref None in
+  List.iter
+    (fun r ->
+      try Keeper_turn_sandbox_runtime.cleanup r with
+      | Eio.Cancel.Cancelled _ as exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        (match !first_err with
+         | Some (Eio.Cancel.Cancelled _, _) -> ()
+         | Some _ | None -> first_err := Some (exn, bt))
+      | exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        if Option.is_none !first_err then first_err := Some (exn, bt))
+    runtimes;
+  match !first_err with
+  | None -> ()
+  | Some (exn, bt) -> Printexc.raise_with_backtrace exn bt

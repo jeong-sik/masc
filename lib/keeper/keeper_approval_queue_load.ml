@@ -229,7 +229,9 @@ let load_snapshot_unlocked ~base_path : (loaded_snapshot, storage_error) result 
                  classification_changed
                  partial_tail;
                Ok (loaded (durable_state_for ~base_path)))
-           | Retain -> Ok (loaded (Some durable)))
+           | Retain ->
+             record_snapshot_generation ~base_path loaded_generation;
+             Ok (loaded (Some durable)))
          | Error reason ->
            report_pending_read_drop
              ~reason:Read_drop_reason.Invalid_payload

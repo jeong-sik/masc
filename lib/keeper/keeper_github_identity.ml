@@ -1206,10 +1206,19 @@ let observe ~config ~keeper_name ~hostname =
          let effective_host_env = github_probe_env base_env in
          let probe_with_ephemeral_config env =
            let probe_dir = Filename.temp_dir "masc-gh-observe-" "" in
-           Unix.chmod probe_dir 0o700;
+           let cleanup () =
+             let release () =
+               try Fs_compat.remove_tree probe_dir with
+               | Sys_error _ | Unix.Unix_error _ -> ()
+             in
+             match Fs_compat.execution_context () with
+             | Fs_compat.Non_eio -> release ()
+             | Fs_compat.Eio_fiber -> Eio.Cancel.protect release
+           in
            Fun.protect
-             ~finally:(fun () -> Fs_compat.remove_tree probe_dir)
+             ~finally:cleanup
              (fun () ->
+                Unix.chmod probe_dir 0o700;
                 auth_result_of_command
                   ~redact
                   ~env:(overlay_config_env ~config_dir:probe_dir env)

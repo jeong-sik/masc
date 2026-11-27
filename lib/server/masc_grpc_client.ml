@@ -31,39 +31,20 @@ let create_from_env ~sw ~env =
 (** {1 Unary RPCs} *)
 
 let heartbeat_stream t ~sw ~env =
-  let request_stream = Grpc_eio.Stream.create 16 in
-  (* Map typed pings to raw bytes *)
   let raw_requests = Grpc_eio.Stream.create 16 in
-  Eio.Fiber.fork ~sw (fun () ->
-    let close_request_stream () = Grpc_eio.Stream.close request_stream in
-    let close_raw_requests () = Grpc_eio.Stream.close raw_requests in
-    let rec loop () =
-      match Grpc_eio.Stream.take request_stream with
-      | bytes ->
-        Grpc_eio.Stream.add raw_requests bytes;
-        loop ()
-      | exception End_of_file ->
-        close_raw_requests ()
-    in
-    try loop ()
-    with
-    | Eio.Cancel.Cancelled _ as e ->
-      (* Close both sides so senders and downstream receivers unblock. *)
-      close_request_stream ();
-      close_raw_requests ();
-      raise e
-    | exn ->
-      Log.Transport.error
-        "gRPC heartbeat request-mapper crashed: %s"
-        (Printexc.to_string exn);
-      close_request_stream ();
-      close_raw_requests ());
   let raw_responses =
-    Grpc_eio.Client.call_bidi ~sw ~env t.client
-      ~service ~method_:"Heartbeat" ~requests:raw_requests
+    match
+      Grpc_eio.Client.call_bidi ~sw ~env t.client
+        ~service ~method_:"Heartbeat" ~requests:raw_requests
+    with
+    | stream -> stream
+    | exception exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      Grpc_eio.Stream.close raw_requests;
+      Printexc.raise_with_backtrace exn bt
   in
   let send (ping : T.HeartbeatPing.t) =
-    Grpc_eio.Stream.add request_stream (T.HeartbeatPing.to_bytes ping)
+    Grpc_eio.Stream.add raw_requests (T.HeartbeatPing.to_bytes ping)
   in
   let recv () =
     match Grpc_eio.Stream.take raw_responses with
@@ -77,6 +58,6 @@ let heartbeat_stream t ~sw ~env =
         (Grpc_core.Status.to_string status))
   in
   let close_stream () =
-    Grpc_eio.Stream.close request_stream
+    Grpc_eio.Stream.close raw_requests
   in
   (send, recv, close_stream)

@@ -337,30 +337,33 @@ let execute_downscale ~plans ~max_dim ~media_type ~bytes =
       "masc_scale_in_"
       (file_extension_of_media_type media_type)
   in
-  let out_file = Filename.temp_file "masc_scale_out_" ".tmp" in
   Fun.protect
     ~finally:(fun () ->
       close_out_noerr in_oc;
       (* Sys.remove performs no Eio operation, so Eio.Cancel.Cancelled cannot
-         originate inside these two catches. The catch stays wide because this
-         is Fun.protect's finally: an exception escaping here is re-raised as
+         originate inside this catch. The catch stays wide because this is
+         Fun.protect's finally: an exception escaping here is re-raised as
          Fun.Finally_raised and masks whatever the protected body raised. *)
-      (try Sys.remove in_file with _ -> ()) (* cancel-guard-ok: Sys.remove is not an Eio operation. @observe-allowed: a scratch file for one downscale, removed after the result has been read out *);
-      (try Sys.remove out_file with _ -> ()) (* cancel-guard-ok: Sys.remove is not an Eio operation. @observe-allowed: a scratch file for one downscale, removed after the result has been read out *))
+      (try Sys.remove in_file with _ -> ()) (* cancel-guard-ok: Sys.remove is not an Eio operation. @observe-allowed: a scratch file for one downscale, removed after the result has been read out *))
     (fun () ->
-      output_string in_oc bytes;
-      close_out_noerr in_oc;
-      (* [attempted] is newest-first while the chain runs; both exits put it
-         back in the order the scalers ran. *)
-      let rec try_plans attempted = function
-        | [] -> Error (Scalers_exhausted (List.rev attempted))
-        | plan :: rest ->
-          (match attempt_plan ~max_dim ~out_file plan with
-           | Ok (out_media_type, scaled_bytes, dims, scaler) ->
-             Ok (out_media_type, scaled_bytes, dims, scaler, List.rev attempted)
-           | Error failure -> try_plans ({ attempted = plan; failure } :: attempted) rest)
-      in
-      try_plans [] (plans ~max_dim ~in_file ~out_file media_type))
+      let out_file = Filename.temp_file "masc_scale_out_" ".tmp" in
+      Fun.protect
+        ~finally:(fun () ->
+          (try Sys.remove out_file with _ -> ()) (* cancel-guard-ok: Sys.remove is not an Eio operation. @observe-allowed: a scratch file for one downscale, removed after the result has been read out *))
+        (fun () ->
+          output_string in_oc bytes;
+          close_out_noerr in_oc;
+          (* [attempted] is newest-first while the chain runs; both exits put it
+             back in the order the scalers ran. *)
+          let rec try_plans attempted = function
+            | [] -> Error (Scalers_exhausted (List.rev attempted))
+            | plan :: rest ->
+              (match attempt_plan ~max_dim ~out_file plan with
+               | Ok (out_media_type, scaled_bytes, dims, scaler) ->
+                 Ok (out_media_type, scaled_bytes, dims, scaler, List.rev attempted)
+               | Error failure -> try_plans ({ attempted = plan; failure } :: attempted) rest)
+          in
+          try_plans [] (plans ~max_dim ~in_file ~out_file media_type)))
 ;;
 
 let record_downscale ~result ~reason =

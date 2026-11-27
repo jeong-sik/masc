@@ -549,102 +549,99 @@ let run_docker_shell_command_with_status_internal
                         | Error err ->
                           sandbox_error ("docker_shell_failed: secret_projection: " ^ err)
                         | Ok secret_projection ->
-                          (match
-                             Keeper_github_identity.docker_args_for_tool
-                               ~config
-                               ~keeper_name:meta.name
-                               ~container_masc_dir:
-                                 (Keeper_sandbox_runtime_setup.container_masc_dir
-                                    ~container_root)
-                           with
-                           | Error err ->
-                             Eio_guard.protect
-                               ~finally:(fun () -> secret_projection.cleanup ())
-                               (fun () ->
-                                  sandbox_error
-                                    ("docker_shell_failed: github_identity_invalid: "
-                                     ^ err))
-                           | Ok github_identity ->
-                             let argv =
-                            docker_run_argv
-                              ~config
-                              ~meta
-                              ~container_name
-                              ~container_root
-                              ~container_cwd
-                              ~host_root
-                              ~network_label
-                              ~network_args
-                              ~uid
-                              ~gid
-                              ~seccomp_args
-                              ~identity_mounts
-                              ~secret_args:
-                                (secret_projection.docker_args
-                                 @ github_identity.args)
-                              ~image
-                              ~ttl_sec:(docker_oneshot_ttl_sec ~timeout_sec)
-                             in
-                             (try
-                             let run_once () =
-                               Keeper_turn_sandbox_runtime.run_argv_with_stdin_and_status_split
-                                 ~timeout_sec
-                                 ~stdin_content:cmd
-                                 argv
-                             in
-                             Eio_guard.protect
-                               ~finally:(fun () ->
-                                 Fun.protect
-                                   ~finally:(fun () -> secret_projection.cleanup ())
-                                   github_identity.cleanup)
-                               (fun () ->
-                                  let status, stdout, stderr =
-                                    Eio_guard.protect
-                                      ~finally:(fun () ->
-                                        cleanup_oneshot_container ~container_name)
-                                      (fun () -> run_once ())
-                                  in
-                                  let output =
-                                    match stdout, stderr with
-                                    | "", err -> err
-                                    | out, "" -> out
-                                    | out, err -> out ^ "\n" ^ err
-                                  in
-                                  let ok = process_status_is_success status in
-                                  if not ok
-                                  then
-                                    Keeper_sandbox_exec_failure.record_docker_failure
-                                      ~config
-                                      ~meta
-                                      ~image
-                                      ~container_kind:"oneshot"
-                                      ~network_label
-                                      ~status
-                                      ~output
-                                  else
-                                    Keeper_registry.clear_error
-                                      ~base_path:config.base_path
-                                      meta.name;
-                                  Ok
-                                    { status
-                                    ; output
-                                    ; image
-                                    ; network_label
-                                    ; cwd
-                                    })
-                           with
-                           | Eio.Cancel.Cancelled _ as exn -> raise exn
-                           | Failure err -> sandbox_error err
-                           | Sys_error err ->
-                             sandbox_error
-                               (Printf.sprintf "docker_shell_failed: sys_error: %s" err)
-                           | Unix.Unix_error (code, fn, arg) ->
-                             sandbox_error
-                               (Printf.sprintf
-                                  "docker_shell_failed: unix_error: %s: %s(%s)"
-                                  (Unix.error_message code)
-                                  fn
-                                  arg))))))))
+                          Eio_guard.protect
+                            ~finally:(fun () -> secret_projection.cleanup ())
+                            (fun () ->
+                              (match
+                                 Keeper_github_identity.docker_args_for_tool
+                                   ~config
+                                   ~keeper_name:meta.name
+                                   ~container_masc_dir:
+                                     (Keeper_sandbox_runtime_setup.container_masc_dir
+                                        ~container_root)
+                               with
+                               | Error err ->
+                                 sandbox_error
+                                   ("docker_shell_failed: github_identity_invalid: "
+                                    ^ err)
+                               | Ok github_identity ->
+                                 Eio_guard.protect
+                                   ~finally:github_identity.cleanup
+                                   (fun () ->
+                                     let argv =
+                                       docker_run_argv
+                                         ~config
+                                         ~meta
+                                         ~container_name
+                                         ~container_root
+                                         ~container_cwd
+                                         ~host_root
+                                         ~network_label
+                                         ~network_args
+                                         ~uid
+                                         ~gid
+                                         ~seccomp_args
+                                         ~identity_mounts
+                                         ~secret_args:
+                                           (secret_projection.docker_args
+                                            @ github_identity.args)
+                                         ~image
+                                         ~ttl_sec:(docker_oneshot_ttl_sec ~timeout_sec)
+                                     in
+                                     (try
+                                        let run_once () =
+                                          Keeper_turn_sandbox_runtime.run_argv_with_stdin_and_status_split
+                                            ~timeout_sec
+                                            ~stdin_content:cmd
+                                            argv
+                                        in
+                                        let status, stdout, stderr =
+                                          Eio_guard.protect
+                                            ~finally:(fun () ->
+                                              cleanup_oneshot_container ~container_name)
+                                            (fun () -> run_once ())
+                                        in
+                                        let output =
+                                          match stdout, stderr with
+                                          | "", err -> err
+                                          | out, "" -> out
+                                          | out, err -> out ^ "\n" ^ err
+                                        in
+                                        let ok = process_status_is_success status in
+                                        if not ok
+                                        then
+                                          Keeper_sandbox_exec_failure.record_docker_failure
+                                            ~config
+                                            ~meta
+                                            ~image
+                                            ~container_kind:"oneshot"
+                                            ~network_label
+                                            ~status
+                                            ~output
+                                        else
+                                          Keeper_registry.clear_error
+                                            ~base_path:config.base_path
+                                            meta.name;
+                                        Ok
+                                          { status
+                                          ; output
+                                          ; image
+                                          ; network_label
+                                          ; cwd
+                                          }
+                                      with
+                                      | Eio.Cancel.Cancelled _ as exn -> raise exn
+                                      | Failure err -> sandbox_error err
+                                      | Sys_error err ->
+                                        sandbox_error
+                                          (Printf.sprintf "docker_shell_failed: sys_error: %s" err)
+                                      | Unix.Unix_error (code, fn, arg) ->
+                                        sandbox_error
+                                          (Printf.sprintf
+                                             "docker_shell_failed: unix_error: %s: %s(%s)"
+                                             (Unix.error_message code)
+                                             fn
+                                             arg))))))))))
 ;;
 
 let run_docker_shell_command_with_status =

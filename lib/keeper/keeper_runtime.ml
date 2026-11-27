@@ -785,7 +785,11 @@ let load_or_materialize_boot_meta (ctx : _ context) name
 (** Start the supervisor sweep Pulse loop.
     Runs alongside server-owned autoboot, scanning for zombie fibers and
     restarting them with exponential backoff. *)
-let supervisor_sweeps : (string, Pulse.t) Hashtbl.t =
+type supervisor_sweep_slot =
+  | Starting of Pulse.t
+  | Running of Pulse.t
+
+let supervisor_sweeps : (string, supervisor_sweep_slot) Hashtbl.t =
   Hashtbl.create 4
 let supervisor_sweeps_mu = Eio.Mutex.create ()
 
@@ -795,13 +799,14 @@ let with_sweeps_rw f = Eio_guard.with_mutex supervisor_sweeps_mu f
 let supervisor_sweep_running base_path =
   with_sweeps_ro (fun () ->
     match Hashtbl.find_opt supervisor_sweeps base_path with
-    | Some pulse -> Pulse.is_alive pulse
+    | Some (Starting _) -> true
+    | Some (Running pulse) -> Pulse.is_alive pulse
     | None -> false)
 
 let stop_supervisor_sweep base_path =
   with_sweeps_rw (fun () ->
     match Hashtbl.find_opt supervisor_sweeps base_path with
-    | Some pulse ->
+    | Some (Starting pulse | Running pulse) ->
       Pulse.shutdown pulse;
       Hashtbl.remove supervisor_sweeps base_path
     | None -> ())
@@ -918,28 +923,64 @@ let start_supervisor_sweep ctx =
                  quiet = (0, 0) }
       ~consumers:[consumer]
     in
-    with_sweeps_rw (fun () ->
-      Hashtbl.replace supervisor_sweeps base_path p);
-    (* The sweep is owned by the context that constructed it. Detached
-       lifecycle workers use [Keeper_process_switch]; this context-bound
-       producer must not silently substitute one switch authority for the
-       other. *)
-    Pulse.run ~sw:ctx.sw p;
-    (* #10125: counter increments once per actual Pulse start.
-       After a server restart, if this stays at 0 the supervisor
-       never came up — operators alert on absence of advancement. *)
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string SupervisorSweepStarts)
-      ~labels:[ ("base_path", base_path) ]
-      ();
-    (* Initialize the liveness gauge to "now" so dashboards do not
-       start at unixtime=0 (which would look infinitely stale).  The
-       on_beat will overwrite this on every subsequent sweep. *)
-    Otel_metric_store.set_gauge
-      Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
-      ~labels:[ ("base_path", base_path) ]
-      (Unix.gettimeofday ());
-    Log.Keeper.info "keeper supervisor sweep started (interval %.0fs)" sweep_sec
+    let protect_cancel f =
+      match Eio_guard.execution_context () with
+      | Eio_guard.Eio_fiber -> Eio.Cancel.protect f
+      | Eio_guard.Non_eio -> f ()
+    in
+    let claimed =
+      with_sweeps_rw (fun () ->
+        match Hashtbl.find_opt supervisor_sweeps base_path with
+        | Some (Starting _) -> false
+        | Some (Running existing) when Pulse.is_alive existing -> false
+        | Some (Running _) | None ->
+          Hashtbl.replace supervisor_sweeps base_path (Starting p);
+          true)
+    in
+    if claimed then begin
+      (* The sweep is owned by the context that constructed it. Detached
+         lifecycle workers use [Keeper_process_switch]; this context-bound
+         producer must not silently substitute one switch authority for the
+         other. *)
+      (match Pulse.run ~sw:ctx.sw p with
+       | () -> ()
+       | exception exn ->
+         let bt = Printexc.get_raw_backtrace () in
+         protect_cancel (fun () ->
+           with_sweeps_rw (fun () ->
+             match Hashtbl.find_opt supervisor_sweeps base_path with
+             | Some (Starting cur) when cur == p ->
+               Hashtbl.remove supervisor_sweeps base_path
+             | Some (Starting _) | Some (Running _) | None -> ());
+           Pulse.shutdown p);
+         Printexc.raise_with_backtrace exn bt);
+      let still_owned =
+        with_sweeps_rw (fun () ->
+          match Hashtbl.find_opt supervisor_sweeps base_path with
+          | Some (Starting cur) when cur == p ->
+            Hashtbl.replace supervisor_sweeps base_path (Running p);
+            true
+          | Some (Starting _) | Some (Running _) | None -> false)
+      in
+      if not still_owned then Pulse.shutdown p
+      else begin
+        (* #10125: counter increments once per actual Pulse start.
+           After a server restart, if this stays at 0 the supervisor
+           never came up — operators alert on absence of advancement. *)
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string SupervisorSweepStarts)
+          ~labels:[ ("base_path", base_path) ]
+          ();
+        (* Initialize the liveness gauge to "now" so dashboards do not
+           start at unixtime=0 (which would look infinitely stale).  The
+           on_beat will overwrite this on every subsequent sweep. *)
+        Otel_metric_store.set_gauge
+          Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
+          ~labels:[ ("base_path", base_path) ]
+          (Unix.gettimeofday ());
+        Log.Keeper.info "keeper supervisor sweep started (interval %.0fs)" sweep_sec
+      end
+    end
   end
 
 let stop_keepalive ?base_path name =

@@ -1314,27 +1314,51 @@ type base_path_wait_refusal =
    [prepare_base_path_lock] has already validated. *)
 let open_waiter_file prepared =
   let waiter_path = prepared.path ^ ".waiter" in
-  match
-    Unix.openfile waiter_path [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_CLOEXEC ] 0o600
-  with
-  | exception Unix.Unix_error (error, _, _) ->
-    Error
-      (Lease_io_failed
-         { operation = "open_waiter_file"
-         ; path = waiter_path
-         ; reason = Unix.error_message error
-         })
-  | fd ->
-    let stat = Unix.fstat fd in
-    if stat.st_kind <> Unix.S_REG
-    then (
-      Unix.close fd;
-      Error (Lease_file_non_regular { path = waiter_path; kind = stat.st_kind }))
-    else if stat.st_nlink > 1
-    then (
-      Unix.close fd;
-      Error (Lease_file_multiply_linked { path = waiter_path; links = stat.st_nlink }))
-    else Ok (waiter_path, fd)
+  match observe_lease_path waiter_path with
+  | Error rejection -> Error rejection
+  | Ok (Lease_path_other kind) ->
+    Error (Lease_file_non_regular { path = waiter_path; kind })
+  | Ok (Lease_path_missing | Lease_path_regular _) ->
+    (match
+       Unix.openfile waiter_path [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_CLOEXEC ] 0o600
+     with
+     | exception Unix.Unix_error (error, _, _) ->
+       Error
+         (Lease_io_failed
+            { operation = "open_waiter_file"
+            ; path = waiter_path
+            ; reason = Unix.error_message error
+            })
+     | fd ->
+       let close_fd () = try Unix.close fd with Unix.Unix_error _ -> () in
+       (match Unix.fstat fd with
+        | exception Unix.Unix_error (error, _, _) ->
+          close_fd ();
+          Error
+            (Lease_io_failed
+               { operation = "fstat_waiter_file"
+               ; path = waiter_path
+               ; reason = Unix.error_message error
+               })
+        | stat ->
+          if stat.st_kind <> Unix.S_REG
+          then (
+            close_fd ();
+            Error (Lease_file_non_regular { path = waiter_path; kind = stat.st_kind }))
+          else if stat.st_nlink > 1
+          then (
+            close_fd ();
+            Error (Lease_file_multiply_linked { path = waiter_path; links = stat.st_nlink }))
+          else if stat.st_uid <> prepared.owner_uid
+          then (
+            close_fd ();
+            Error
+              (Lease_file_wrong_owner
+                 { path = waiter_path
+                 ; expected_uid = prepared.owner_uid
+                 ; observed_uid = stat.st_uid
+                 }))
+          else Ok (waiter_path, fd)))
 ;;
 
 (* A waiter that won the slot, committed the lease, and exec'd (as [masc
@@ -1414,12 +1438,21 @@ let acquire_base_path_lock_after_owner_exits ~run_dir ~on_wait base_path =
          ~finally:(fun () -> try Unix.close waiter_fd with Unix.Unix_error _ -> ())
          (fun () ->
            match Unix.lockf waiter_fd Unix.F_TLOCK 0 with
-           | exception Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) ->
+           | exception Unix.Unix_error (error, _, _)
+             when error = Unix.EACCES || error = Unix.EAGAIN ->
              Error
                (Another_replacement_waits
                   { waiter = base_path_owner_of_recorded (parsed_pid_fd waiter_fd)
                   ; waiter_path
                   })
+           | exception Unix.Unix_error (error, _, _) ->
+             Ok
+               (Base_path_rejected
+                  (Lease_io_failed
+                     { operation = "lock_waiter_file"
+                     ; path = waiter_path
+                     ; reason = Unix.error_message error
+                     }))
            | () ->
              (match
                 Unix.ftruncate waiter_fd 0;

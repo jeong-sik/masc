@@ -1,0 +1,294 @@
+/* Infra > Repos: the lists inside a repository's detail — uncommitted files,
+   pull requests, and Keeper file writes. Tokens and shared words are in infra.css. */
+
+/* ── Uncommitted files: kind once, then one counted line per directory ── */
+.rp-files {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  max-height: 320px;
+  padding: var(--sp-3);
+  overflow-y: auto;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--bg-0);
+}
+
+.rp-files-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.rp-files-group h4 {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: var(--fs-11);
+  font-weight: 600;
+}
+
+.rp-dir summary {
+  color: var(--fg-1);
+  font-size: var(--fs-12);
+  cursor: pointer;
+}
+
+/* Rows fill left to right, so reading order survives the scroll. */
+.rp-dir ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 0 var(--sp-4);
+  margin: var(--sp-1) 0 var(--sp-2);
+  padding: 0 0 0 var(--sp-4);
+  list-style: none;
+}
+
+.rp-dir li {
+  overflow-wrap: anywhere;
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  line-height: 1.6;
+}
+
+/* ── Pull request table cells ── */
+.rp-pr-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+.rp-draft {
+  margin-right: var(--sp-1);
+  color: var(--fg-3);
+  font-size: var(--fs-11);
+}
+
+/* Up to 80 rows the pull request table grows with the page, and its header
+   sticks under the repository head instead of inside a scroll box. The wrap
+   no longer clips, so the corner cells carry the radius themselves. */
+.rp-pulls-flow.dtable-wrap {
+  overflow: visible;
+}
+
+.rp-pulls-flow .dtable-scroll {
+  overflow: visible;
+  max-height: none;
+}
+
+.rp-pulls-flow .dtable th {
+  top: var(--rp-head-h, 0px);
+}
+
+.rp-pulls-flow .dtable th:first-child { border-top-left-radius: var(--radius-md); }
+.rp-pulls-flow .dtable th:last-child { border-top-right-radius: var(--radius-md); }
+.rp-pulls-flow .dtable tbody tr:last-child td { border-bottom: none; }
+.rp-pulls-flow .dtable tbody tr:last-child td:first-child { border-bottom-left-radius: var(--radius-md); }
+.rp-pulls-flow .dtable tbody tr:last-child td:last-child { border-bottom-right-radius: var(--radius-md); }
+
+/* Narrow container: the primitive turns each row into six labelled lines.
+   A pull request reads better as three on a three-column grid: number and
+   author, the title, then the three states. The states keep their columns on
+   every card, and a review note wraps under its own state instead of pushing
+   the merge state to another line. Columns are addressed by position. */
+@container dtable (max-width: 767px) {
+  .rp-pulls .dtable tbody tr {
+    display: grid;
+    grid-template-columns: 5rem minmax(0, 1fr) 5rem;
+    align-items: baseline;
+    gap: var(--sp-1) var(--sp-3);
+  }
+
+  .rp-pulls .dtable td {
+    width: auto;
+    min-width: 0;
+    justify-content: flex-start;
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .rp-pulls .dtable td:nth-child(1) { grid-area: 1 / 1; }
+  .rp-pulls .dtable td:nth-child(3) { grid-area: 1 / 2 / auto / span 2; justify-content: flex-end; }
+  .rp-pulls .dtable td:nth-child(2) { grid-area: 2 / 1 / auto / span 3; white-space: normal; }
+  .rp-pulls .dtable td:nth-child(4) { grid-area: 3 / 1; }
+  .rp-pulls .dtable td:nth-child(5) { grid-area: 3 / 2; flex-wrap: wrap; }
+  .rp-pulls .dtable td:nth-child(6) { grid-area: 3 / 3; }
+  .rp-pulls .dtable td:nth-child(5) .rp-fact-sub { flex-basis: 100%; }
+
+  .rp-pulls .dtable td:nth-child(-n + 3)::before {
+    content: none;
+  }
+
+  .rp-repos .dtable tbody tr[data-selected="true"] {
+    box-shadow: inset 2px 0 0 var(--brass-1);
+  }
+
+  .rp-repos .dtable tbody tr[data-selected="true"] td:first-child {
+    box-shadow: none;
+  }
+}
+
+/* ── Keeper file writes: one line per file, opened to its writes ── */
+.rp-filelist {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line-1);
+  list-style: none;
+}
+
+.rp-file {
+  min-width: 0;
+  border-bottom: 1px solid var(--line-1);
+}
+
+.rp-file-h {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-1) var(--sp-3);
+  min-width: 0;
+  padding: var(--sp-2) 0;
+}
+
+.rp-file-toggle {
+  display: flex;
+  flex: 1 1 280px;
+  align-items: baseline;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+  font-size: var(--fs-12);
+  text-align: left;
+  cursor: pointer;
+}
+
+.rp-file-toggle:hover .rp-file-name {
+  text-decoration: underline;
+}
+
+.rp-file-caret {
+  flex: none;
+  width: var(--sp-4);
+  color: var(--fg-3);
+}
+
+/* A long path gives up its directory first; the file name is cut last. */
+.rp-file-dir {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-3);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rp-file-name {
+  flex: 0 0 auto;
+  max-width: 100%;
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The count and the time keep their width, so they line up down the list. */
+.rp-file-meta {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.rp-file-count {
+  min-width: 5.5em;
+  color: var(--fg-2);
+  font-size: var(--fs-12);
+  font-variant-numeric: tabular-nums slashed-zero;
+  text-align: right;
+}
+
+.rp-file-when {
+  min-width: 5.5em;
+  text-align: right;
+}
+
+.rp-writes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0 0 var(--sp-3) var(--sp-4);
+  list-style: none;
+}
+
+.rp-write {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.rp-write-h {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-2);
+  min-width: 0;
+}
+
+/* Wrapped under its path, the meta line starts where the path starts and may
+   wrap again; the time keeps the right edge. */
+@container rp-body (max-width: 519px) {
+  .rp-file-meta {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    margin-left: var(--sp-4);
+  }
+
+  .rp-file-count {
+    min-width: 0;
+  }
+
+  .rp-file-when {
+    min-width: 0;
+    margin-left: auto;
+  }
+}
+
+.rp-more {
+  align-self: flex-start;
+}
+
+/* A grid, so every line is as wide as the longest one and the added/removed
+   tint does not stop at the visible edge when the block scrolls sideways. */
+.rp-diff {
+  display: grid;
+  margin: 0;
+  padding: var(--sp-2);
+  overflow-x: auto;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-sm);
+  background: var(--bg-0);
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  line-height: 1.45;
+}
+
+.rp-diff span {
+  display: block;
+  color: var(--fg-2);
+}
+
+.rp-diff span[data-line="add"] { background: var(--ok-soft); color: var(--ok-fg); }
+.rp-diff span[data-line="del"] { background: var(--err-soft); color: var(--err-fg); }
+.rp-diff span[data-line="hunk"] { color: var(--info-fg); }
+.rp-diff span[data-line="cut"] { margin-top: var(--sp-1); color: var(--fg-3); }

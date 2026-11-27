@@ -1,0 +1,482 @@
+/* Infra > Repos. Spacing comes from --sp-*; nothing here sets a raw pixel gap. */
+
+/* ── Words: plain for the expected state, green text for a good one, and a
+   chip only for a state someone has to act on ── */
+.rp-plain {
+  color: var(--fg-2);
+  font-size: var(--fs-12);
+}
+
+.rp-nowrap {
+  white-space: nowrap;
+}
+
+.rp-toned { color: var(--fg-1); }
+.rp-toned[data-tone="ok"] { color: var(--ok-fg); }
+.rp-toned[data-tone="warn"] { color: var(--warn-fg); }
+.rp-toned[data-tone="bad"] { color: var(--err-fg); }
+.rp-toned[data-tone="info"] { color: var(--info-fg); }
+
+.rp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-0) var(--sp-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-pill);
+  background: var(--bg-2);
+  color: var(--fg-2);
+  font-family: inherit;
+  font-size: var(--fs-11);
+  font-variant-numeric: tabular-nums slashed-zero;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.rp-chip[data-tone="ok"] { border-color: var(--ok-border); background: var(--ok-soft); color: var(--ok-fg); }
+.rp-chip[data-tone="warn"] { border-color: var(--warn-border); background: var(--warn-soft); color: var(--warn-fg); }
+.rp-chip[data-tone="bad"] { border-color: var(--err-border); background: var(--err-soft); color: var(--err-fg); }
+.rp-chip[data-tone="info"] { border-color: var(--info-border); background: var(--info-soft); color: var(--info-fg); }
+
+/* A chip that filters keeps the status shape and adds a pressed outline. */
+.rp-chip-btn {
+  cursor: pointer;
+}
+
+.rp-chip-btn:hover,
+.rp-chip-btn[aria-pressed="true"] {
+  border-color: currentColor;
+}
+
+.rp-chip-btn[aria-pressed="true"] {
+  font-weight: 600;
+}
+
+.rp-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.rp-count {
+  color: var(--fg-1);
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-weight: 600;
+}
+
+.rp-link {
+  color: var(--info-fg);
+  text-decoration: none;
+}
+
+.rp-link:hover {
+  text-decoration: underline;
+}
+
+.rp-textbtn {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--info-fg);
+  font: inherit;
+  font-size: var(--fs-11);
+  cursor: pointer;
+}
+
+.rp-textbtn:hover {
+  text-decoration: underline;
+}
+
+/* ── Page head actions ── */
+.rp-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* ── Repository table ── */
+.rp-repos .dtable tbody tr {
+  cursor: pointer;
+}
+
+.rp-repos .dtable tbody tr[data-selected="true"] td:first-child {
+  box-shadow: inset 2px 0 0 var(--brass-1);
+}
+
+.rp-repo-btn {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg-1);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rp-repo-btn:hover {
+  text-decoration: underline;
+}
+
+/* Column widths are fixed, so a filter, a failed cell or a long title does
+   not move the columns. The last repository column and the pull request title
+   take what is left. */
+@container dtable (min-width: 768px) {
+  .rp-repos .dtable,
+  .rp-pulls .dtable {
+    table-layout: fixed;
+  }
+
+  .rp-repos .dtable th:nth-child(1) { width: 26%; }
+  .rp-repos .dtable th:nth-child(2) { width: 22%; }
+  .rp-repos .dtable th:nth-child(3) { width: 16%; }
+
+  /* Each state column is as wide as its longest word ("도는 중", "변경 요청"
+     with its note, "미확인"), so the title keeps the rest. */
+  .rp-pulls .dtable th:nth-child(1) { width: 5rem; }
+  .rp-pulls .dtable th:nth-child(3) { width: 9.5rem; }
+  .rp-pulls .dtable th:nth-child(4) { width: 5rem; }
+  .rp-pulls .dtable th:nth-child(5) { width: 8.5rem; }
+  .rp-pulls .dtable th:nth-child(6) { width: 4.5rem; }
+
+  .rp-pulls .dtable td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+/* ── Detail card ──
+   No overflow clipping here: the head sticks to the top of the scrolling main
+   area, and a clipped ancestor would pin it to the card instead. */
+.rp-detail {
+  min-width: 0;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--bg-1);
+}
+
+.rp-head {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2) var(--sp-3);
+  min-width: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border-bottom: 1px solid var(--line-1);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: var(--bg-2);
+}
+
+/* Narrow enough a basis that the sync button stays beside the name on a phone. */
+.rp-head-main {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.rp-head-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.rp-head-title h2 {
+  margin: 0;
+  color: var(--fg-1);
+  font-size: var(--fs-16);
+  font-weight: 600;
+}
+
+/* The button is as wide as its longer label from the start: that label lies
+   unseen in the cell of the shown one. So the width holds when the label
+   changes to "가져오는 중…", whatever the padding and the font are. */
+.rp-head .btn-primary {
+  display: inline-grid;
+  place-items: center;
+}
+
+.rp-head .btn-primary > span,
+.rp-head .btn-primary::after {
+  grid-area: 1 / 1;
+}
+
+.rp-head .btn-primary::after {
+  content: attr(data-wide-label);
+  visibility: hidden;
+}
+
+/* One line is always reserved, so the head does not grow when the slug
+   arrives. What the line has no room for is cut where a mark can say so, or
+   left out whole:
+   - the address is cut last, and only on a line shorter than it is;
+   - the clone path shows when a piece of it worth reading fits beside the
+     whole address. When none does it wraps to a second line, which the box
+     clips: nothing of the path shows, the dot before it included. */
+.rp-head-sub {
+  /* What the focus ring of the address reaches past it: 2px away, 2px wide
+     (base.css). The padding keeps the ring inside the clip, and the margins
+     put the text back where it was. */
+  --rp-ring-room: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  /* The row gap is more than the padding, so the wrapped line starts past
+     the clip. */
+  gap: 1em var(--sp-1);
+  box-sizing: content-box;
+  height: 1.5em;
+  margin: calc(var(--sp-0) - var(--rp-ring-room)) calc(-1 * var(--rp-ring-room)) calc(-1 * var(--rp-ring-room));
+  padding: var(--rp-ring-room);
+  /* `clip` and not `hidden`: a hidden box can still be scrolled to the
+     wrapped line, as a search in the page does. */
+  overflow: clip;
+  line-height: 1.5;
+  color: var(--fg-3);
+  font-size: var(--fs-11);
+  white-space: nowrap;
+}
+
+.rp-head-sub > .rp-link {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 6em is the dot and about eight letters of the name. A path that needs less
+   is as long as it needs: the line break counts with `max-width` too. */
+.rp-head-sub > .rp-path {
+  display: flex;
+  flex: 1 1 6em;
+  min-width: 0;
+  max-width: max-content;
+}
+
+.rp-path-sep {
+  flex: none;
+  margin-right: var(--sp-1);
+}
+
+/* A path too long for its room gives up its directories first, then its last
+   directory name, the part that tells one clone from another. The factor
+   leaves the name alone until the directories are gone: its share of what is
+   missing stays below 1/64 px, the smallest length a browser lays out. */
+.rp-path-dir {
+  flex: 0 1000000 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rp-path-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rp-body {
+  container-type: inline-size;
+  container-name: rp-body;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+  padding: var(--sp-4);
+}
+
+/* ── Sections ── */
+.rp-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.rp-section-h {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-1) var(--sp-3);
+  min-width: 0;
+}
+
+.rp-section-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.rp-section-h h3 {
+  margin: 0;
+  color: var(--fg-1);
+  font-size: var(--fs-13);
+  font-weight: 600;
+}
+
+.rp-section-note {
+  margin: 0;
+  color: var(--fg-3);
+  font-size: var(--fs-11);
+}
+
+.rp-empty {
+  padding: var(--sp-3);
+  border: 1px dashed var(--line-1);
+  border-radius: var(--radius-md);
+  color: var(--fg-3);
+  font-size: var(--fs-12);
+}
+
+.rp-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  font-size: var(--fs-12);
+  line-height: 1.5;
+}
+
+.rp-notice[data-tone="warn"] { border-color: var(--warn-border); background: var(--warn-soft); }
+.rp-notice[data-tone="bad"] { border-color: var(--err-border); background: var(--err-soft); }
+
+/* ── Summary row: four facts on one line, divided by hairlines, no boxes ──
+   Four, two, then one column, so a row never ends with a lone cell. */
+.rp-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-3) 0;
+  margin: 0;
+}
+
+.rp-fact {
+  min-width: 0;
+  padding: 0 var(--sp-4);
+  border-left: 1px solid var(--line-1);
+}
+
+.rp-fact:first-child {
+  padding-left: 0;
+  border-left: none;
+}
+
+.rp-fact dt {
+  color: var(--fg-3);
+  font-size: var(--fs-11);
+}
+
+.rp-fact dd {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-0);
+  margin: var(--sp-1) 0 0;
+  min-width: 0;
+}
+
+.rp-fact-v {
+  overflow-wrap: anywhere;
+  font-size: var(--fs-16);
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-weight: 600;
+  line-height: 1.3;
+  transition: opacity 120ms linear;
+}
+
+/* Values stay readable while they are read again; a quick answer never dims. */
+.rp-facts[data-rereading="true"] .rp-fact-v {
+  opacity: 0.55;
+  transition-delay: 200ms;
+}
+
+/* The second line is reserved in every cell, so the row keeps its height
+   between "확인 중…" and the answer. */
+.rp-fact-sub {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-0) var(--sp-2);
+  min-height: 1.5em;
+  overflow-wrap: anywhere;
+  color: var(--fg-3);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+}
+
+@container rp-body (max-width: 719px) {
+  .rp-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .rp-fact:nth-child(odd) {
+    padding-left: 0;
+    border-left: none;
+  }
+}
+
+@container rp-body (max-width: 279px) {
+  .rp-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rp-fact {
+    padding-left: 0;
+    border-left: none;
+  }
+}
+
+/* ── Add-repository form: fields on one line, stacked when narrow ── */
+.rp-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr) auto;
+  gap: var(--sp-2) var(--sp-3);
+  align-items: end;
+  padding: var(--sp-3);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--bg-1);
+}
+
+.rp-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+  color: var(--fg-3);
+  font-size: var(--fs-11);
+}
+
+.rp-field input {
+  min-width: 0;
+  padding: var(--sp-2);
+  border: 1px solid var(--input-border);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  color: var(--input-fg);
+  font: inherit;
+  font-size: var(--fs-12);
+}
+
+.rp-form-wide {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 767px) {
+  .rp-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

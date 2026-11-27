@@ -329,16 +329,23 @@ let plan_replace_exact_slot ~content config ~lane ~slot ~replacement =
   (* Transport/schema refusal precedes table addressability and duplicate
      checks, including when the named original slot is absent. *)
   match current, exact_slot_list_of_new_slot config replacement with
-  | Some current, Some next when current = next ->
+  | (Some (Catalog_slots | Cli_slots) | None), None ->
+    Error (Slot_has_no_schema_channel { lane_id = Standalone_lane.to_id lane; slot = replacement })
+  | Some Catalog_slots, Some Catalog_slots
+  | Some Cli_slots, Some Cli_slots ->
     with_declared_exact_slots ~content config ~lane ~slot
       (fun ~lane_id:_ ~slots ~other ~position ->
          if List.mem replacement (slots @ other)
          then Error (Replacement_already_declared replacement)
          else Ok (List.mapi (fun index declared ->
            if index = position then replacement else declared) slots))
-  | (Some (Catalog_slots | Cli_slots) | None), None ->
-    Error (Slot_has_no_schema_channel { lane_id = Standalone_lane.to_id lane; slot = replacement })
-  | (Some (Catalog_slots | Cli_slots) | None), Some (Catalog_slots | Cli_slots) ->
+  | None, Some (Catalog_slots | Cli_slots) ->
+    (* Preserve table-addressability / [Slot_absent] errors instead of
+       misreporting an absent original slot as [Replacement_changes_group]. *)
+    with_declared_exact_slots ~content config ~lane ~slot
+      (fun ~lane_id:_ ~slots ~other:_ ~position:_ -> Ok slots)
+  | Some Catalog_slots, Some Cli_slots
+  | Some Cli_slots, Some Catalog_slots ->
     Error Replacement_changes_group
 
 let plan ~content config = function

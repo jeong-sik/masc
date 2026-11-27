@@ -44,9 +44,14 @@ module Source_map = Map.Make (struct
 type t =
   { windows : recorded Window_map.t
   ; snapshots : float Source_map.t
+  ; retracted_at : float Source_map.t
   }
 
-let empty = { windows = Window_map.empty; snapshots = Source_map.empty }
+let empty =
+  { windows = Window_map.empty
+  ; snapshots = Source_map.empty
+  ; retracted_at = Source_map.empty
+  }
 
 let report_shape = function
   | Openrouter_key_read | Openrouter_credits_read | Zai_quota_limit_read | Kimi_coding_usages_read
@@ -97,12 +102,18 @@ let apply_report ~observed_at (report : report) observations =
                          retractions))
                observations.windows
            in
-           let snapshots =
+           let retracted_at =
              if retractions = []
-             then observations.snapshots
-             else Source_map.add report.source observed_at observations.snapshots
+             then observations.retracted_at
+             else (
+               let next_at =
+                 match Source_map.find_opt report.source observations.retracted_at with
+                 | Some prev when Float.compare prev observed_at >= 0 -> prev
+                 | Some _ | None -> observed_at
+               in
+               Source_map.add report.source next_at observations.retracted_at)
            in
-           { windows; snapshots }
+           { observations with windows; retracted_at }
          | Complete_snapshot ->
            let windows =
              Window_map.filter
@@ -116,7 +127,8 @@ let apply_report ~observed_at (report : report) observations =
                             reported_windows)))
                observations.windows
            in
-           { windows
+           { observations with
+             windows
            ; snapshots = Source_map.add report.source observed_at observations.snapshots
            }
        in
@@ -152,14 +164,14 @@ let state observations =
   match recorded_windows observations with
   | first :: rest -> Reported (first, rest)
   | [] ->
+    let take_latest source observed_at latest =
+      match latest with
+      | Some (_, at) when at >= observed_at -> latest
+      | Some _ | None -> Some (source, observed_at)
+    in
     let latest =
-      Source_map.fold
-        (fun source observed_at latest ->
-          match latest with
-          | Some (_, at) when at >= observed_at -> latest
-          | Some _ | None -> Some (source, observed_at))
-        observations.snapshots
-        None
+      Source_map.fold take_latest observations.snapshots None
+      |> Source_map.fold take_latest observations.retracted_at
     in
     (match latest with
      | None -> Not_reported_since_start

@@ -87,19 +87,52 @@ let login_saved_with ~read_keychain home =
 let login_saved home =
   Eio_guard.run_in_systhread ~label:"antigravity-login-observation" (fun () ->
     login_saved_with ~read_keychain:Apple_keychain.read home)
+let stage_private_text_file path content =
+  try
+    let dir = Filename.dirname path in
+    Fs_compat.mkdir_p dir;
+    let staged, oc = Fs_compat.open_atomic_temp_file ~temp_dir:dir () in
+    try
+      let fd = Unix.descr_of_out_channel oc in
+      Unix.fchmod fd 0o600;
+      output_string oc content;
+      flush oc;
+      Unix.fsync fd;
+      close_out oc;
+      Ok staged
+    with
+    | Sys_error _ | Unix.Unix_error _ ->
+      close_out_noerr oc;
+      (try Unix.unlink staged with Unix.Unix_error _ -> ());
+      Error Private_home_unavailable
+  with
+  | Sys_error _ | Unix.Unix_error _ -> Error Private_home_unavailable
 let import_with ~read_keychain ~clear_keychain ~source_home home =
   let* contents = read_signed_in ~while_running:false ~read_keychain ~source_home in
-  (* Capture the selected account first, including capture_login where source and
-     destination are identical. Clear only the managed destination's exact item;
-     otherwise keyring-first CLI reads would ignore the newly copied fallback. *)
-  let destination_keychain = keychain_path (home_dir home) in
-  let* destination_exists = keychain_present destination_keychain in
-  let* () = if not destination_exists then Ok () else
-    clear_keychain ~path:destination_keychain |> Result.map_error (fun () -> Keychain_unavailable) in
-  try Auth.save_private_text_file (Runtime_antigravity_home.oauth_path home) contents; Ok ()
-  with Sys_error _ | Unix.Unix_error _ -> Error Private_home_unavailable
+  (* Capture the selected account and stage the replacement file before
+     clearing the managed destination keychain so a write failure cannot
+     destroy the live keychain item, while a keychain clear failure still
+     leaves the existing destination fallback file untouched. *)
+  let oauth_path = Runtime_antigravity_home.oauth_path home in
+  let* staged = stage_private_text_file oauth_path contents in
+  let published = ref false in
+  Fun.protect
+    ~finally:(fun () ->
+      if not !published then (try Unix.unlink staged with Unix.Unix_error _ -> ()))
+    (fun () ->
+      let destination_keychain = keychain_path (home_dir home) in
+      let* destination_exists = keychain_present destination_keychain in
+      let* () = if not destination_exists then Ok () else
+        clear_keychain ~path:destination_keychain |> Result.map_error (fun () -> Keychain_unavailable) in
+      try
+        Unix.rename staged oauth_path;
+        published := true;
+        ignore (Fs_compat.sync_file_and_parent_strict oauth_path : (unit, string) result);
+        Ok ()
+      with Sys_error _ | Unix.Unix_error _ -> Error Private_home_unavailable)
 let import_signed_in ~source_home home =
-  import_with ~read_keychain:Apple_keychain.read ~clear_keychain:Apple_keychain.clear ~source_home home
+  Eio_guard.run_in_systhread ~label:"antigravity-login-import" (fun () ->
+    import_with ~read_keychain:Apple_keychain.read ~clear_keychain:Apple_keychain.clear ~source_home home)
 module For_testing = struct
   let login_saved_with = login_saved_with
   let import_with = import_with

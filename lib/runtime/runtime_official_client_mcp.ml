@@ -335,6 +335,17 @@ let dispatch_message
     | "notifications/initialized", None ->
       let expected = Atomic.get session.state in
       let* () =
+        match expected.phase with
+        | Awaiting_initialized -> Ok ()
+        | Awaiting_initialize | Ready ->
+          error
+            "MCP notifications/initialized"
+            (Printf.sprintf
+               "MCP session phase is %s; expected %s"
+               (phase_to_string expected.phase)
+               (phase_to_string Awaiting_initialized))
+      in
+      let* () =
         transition_state
           session
           ~stage:"MCP notifications/initialized"

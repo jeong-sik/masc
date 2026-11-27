@@ -309,6 +309,12 @@ let read_index_entries ~base_path =
   | entries -> Ok entries
   | exception Sys_error detail -> Error detail
 
+let extract_wiki_media_refs body =
+  List.sort_uniq
+    String.compare
+    (Wiki_link.media_refs_of_embeds (Wiki_link.extract_embeds body)
+     @ Published_artifact.extract_media_refs Published_artifact.Markdown body)
+
 (* Fail-closed media reference collector for workspace media GC. Unlike
    [list_pages] (which skips symlinks or oversized files for interactive UI),
    any unreadable, symlinked, or oversized page returns [Error] so a media
@@ -346,9 +352,7 @@ let referenced_media_tokens ~base_path =
                | Ok _ -> page_body raw
                | Error _ -> raw
              in
-             let refs =
-               Wiki_link.media_refs_of_embeds (Wiki_link.extract_embeds body_for_embeds)
-             in
+             let refs = extract_wiki_media_refs body_for_embeds in
              Ok (refs @ tokens))
         (Ok [])
         page_files
@@ -492,7 +496,7 @@ let with_wiki_lock ~tool_name ~start_time ctx f : Tool_result.result =
    reported as one: the caller learns that the page changed and which file did
    not follow. *)
 let media_refs_of_body ~base_path body =
-  let media_refs = Wiki_link.media_refs_of_embeds (Wiki_link.extract_embeds body) in
+  let media_refs = extract_wiki_media_refs body in
   let missing_media_refs =
     List.filter
       (fun token ->

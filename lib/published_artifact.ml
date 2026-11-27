@@ -137,10 +137,77 @@ let extract_obsidian_media_refs line acc =
   in
   scan 0 acc
 
+let ascii_lower_equal_at ~lower_needle text pos =
+  let nlen = String.length lower_needle in
+  if pos + nlen > String.length text then false
+  else
+    let rec loop i =
+      if i = nlen then true
+      else if Char.equal (Char.lowercase_ascii text.[pos + i]) lower_needle.[i]
+      then loop (i + 1)
+      else false
+    in
+    loop 0
+
+let is_html_space = function
+  | ' ' | '\t' | '\n' | '\r' | '\012' -> true
+  | _ -> false
+
+let is_tag_name_boundary c = is_html_space c || Char.equal c '>' || Char.equal c '/'
+
+let find_closing_tag ~lower_close text from =
+  let len = String.length text in
+  let clen = String.length lower_close in
+  let rec scan pos =
+    if pos >= len then len
+    else if Char.equal text.[pos] '<' && ascii_lower_equal_at ~lower_needle:lower_close text pos then
+      let after = ref (pos + clen) in
+      while !after < len && is_html_space text.[!after] do
+        incr after
+      done;
+      if !after < len && Char.equal text.[!after] '>' then !after + 1
+      else scan (pos + 1)
+    else scan (pos + 1)
+  in
+  scan from
+
+let blank_html_inert_blocks html =
+  let len = String.length html in
+  let bytes = Bytes.of_string html in
+  let script_open = "<script" in
+  let style_open = "<style" in
+  let script_len = String.length script_open in
+  let style_len = String.length style_open in
+  let match_open pos =
+    if ascii_lower_equal_at ~lower_needle:script_open html pos
+       && pos + script_len < len && is_tag_name_boundary html.[pos + script_len]
+    then Some (pos + script_len, "</script")
+    else if ascii_lower_equal_at ~lower_needle:style_open html pos
+            && pos + style_len < len && is_tag_name_boundary html.[pos + style_len]
+    then Some (pos + style_len, "</style")
+    else None
+  in
+  let rec scan pos =
+    if pos < len then
+      if Char.equal html.[pos] '<' then
+        match match_open pos with
+        | None -> scan (pos + 1)
+        | Some (after_name, lower_close) ->
+          (match String.index_from_opt html after_name '>' with
+           | None -> Bytes.fill bytes pos (len - pos) ' '
+           | Some open_end ->
+             let block_end = find_closing_tag ~lower_close html (open_end + 1) in
+             Bytes.fill bytes pos (block_end - pos) ' ';
+             scan block_end)
+      else scan (pos + 1)
+  in
+  scan 0;
+  Bytes.to_string bytes
+
 let extract_media_refs format content =
   let raw =
     match format with
-    | Html -> extract_url_media_refs content []
+    | Html -> extract_url_media_refs (blank_html_inert_blocks content) []
     | Markdown ->
       let strip_cr line =
         let length = String.length line in

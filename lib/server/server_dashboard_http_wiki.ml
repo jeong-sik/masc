@@ -324,25 +324,33 @@ let link_to_json ~graph (link : Wiki_link.link) =
 ;;
 
 let embed_to_json ~graph ~media_exists ~artifact_exists (embed : Wiki_link.embed) =
-  let target_kind, target_name, exists =
+  let target_kind, target_name, exists, extra =
     match embed.target with
-    | Wiki_link.Media_embed sha256 -> "media", sha256, Some (media_exists sha256)
-    | Wiki_link.Wiki_embed slug -> "wiki", slug, Some (Wiki_graph.file_exists graph slug)
-    | Wiki_link.Artifact_embed id -> "artifact", id, Some (artifact_exists id)
+    | Wiki_link.Media_embed sha256 -> "media", sha256, Some (media_exists sha256), []
+    | Wiki_link.Wiki_embed slug -> "wiki", slug, Some (Wiki_graph.file_exists graph slug), []
+    | Wiki_link.Artifact_embed id -> "artifact", id, Some (artifact_exists id), []
     | Wiki_link.Invalid_embed { kind; raw } ->
-      "invalid:" ^ Wiki_link.embed_kind_to_string kind, raw, Some false
+      "invalid", raw, Some false, [ "embed_kind", `String (Wiki_link.embed_kind_to_string kind) ]
     | Wiki_link.Unsupported_embed { scheme; raw } ->
-      "unsupported:" ^ scheme, raw, None
+      "unsupported", raw, None, [ "scheme", `String scheme ]
   in
   `Assoc
-    [ "kind", `String target_kind
-    ; "target", `String target_name
-    ; "label", Json_util.string_opt_to_json embed.label
-    ; "syntax", `String (Wiki_link.embed_syntax_to_string embed.syntax)
-    ; "raw", `String embed.raw
-    ; "line", `Int embed.line
-    ; "exists", Json_util.bool_opt_to_json exists
-    ]
+    ([ "kind", `String target_kind
+     ; "target", `String target_name
+     ; "label", Json_util.string_opt_to_json embed.label
+     ; "syntax", `String (Wiki_link.embed_syntax_to_string embed.syntax)
+     ; "raw", `String embed.raw
+     ; "line", `Int embed.line
+     ; "exists", Json_util.bool_opt_to_json exists
+     ]
+     @ extra)
+;;
+
+let wiki_media_refs ~embeds body =
+  List.sort_uniq
+    String.compare
+    (Wiki_link.media_refs_of_embeds embeds
+     @ Published_artifact.extract_media_refs Published_artifact.Markdown body)
 ;;
 
 let backlinks_for ~pages target_slug =
@@ -895,7 +903,7 @@ let get_page_json ?now ~base_path ~slug () =
                     String.equal (Wiki_lint.subject f) valid_slug)
              in
              let backlinks = backlinks_for ~pages valid_slug in
-             let media_refs = Wiki_link.media_refs_of_embeds p.embeds in
+             let media_refs = wiki_media_refs ~embeds:p.embeds p.body in
              let data =
                `Assoc
                  [ "page", `String valid_slug
@@ -1203,7 +1211,9 @@ let put_page_json ?(now = Time_compat.now ()) ~config ~actor ~slug ~body_str () 
                                     ]
                                   ();
                                 let media_refs =
-                                  Wiki_link.media_refs_of_embeds (Wiki_link.extract_embeds body)
+                                  wiki_media_refs
+                                    ~embeds:(Wiki_link.extract_embeds body)
+                                    body
                                 in
                                 let missing_media_refs =
                                   List.filter
@@ -1334,7 +1344,9 @@ let put_page_json ?(now = Time_compat.now ()) ~config ~actor ~slug ~body_str () 
                               ~extra:[ "slug", `String valid_slug; "revision", `Int 1 ]
                               ();
                             let media_refs =
-                              Wiki_link.media_refs_of_embeds (Wiki_link.extract_embeds body)
+                              wiki_media_refs
+                                ~embeds:(Wiki_link.extract_embeds body)
+                                body
                             in
                             let missing_media_refs =
                               List.filter

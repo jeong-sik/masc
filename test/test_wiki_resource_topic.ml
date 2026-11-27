@@ -696,11 +696,12 @@ let test_referenced_media_tokens_and_embed_tool_feedback () =
          | Error msg -> fail msg
        in
        let missing_sha = String.make 64 'f' in
+       let raw_html_sha = String.make 64 '5' in
        let ctx : Lib.Tool_wiki.context = { base_path = dir; agent_name = "alice" } in
        let body =
          Printf.sprintf
-           "![Live](%s)\n![[media:%s|Absent]]\n## Sources\n- repo:jeong-sik/masc:lib/tool_wiki.ml\n"
-           live_url missing_sha
+           "![Live](%s)\n![[media:%s|Absent]]\n<img src=\"/api/v1/media/%s\" />\n## Sources\n- repo:jeong-sik/masc:lib/tool_wiki.ml\n"
+           live_url missing_sha raw_html_sha
        in
        let created =
          match
@@ -722,9 +723,11 @@ let test_referenced_media_tokens_and_embed_tool_feedback () =
          (String_util.contains_substring (Tool_result.message created) missing_sha);
        check bool "create attaches media_refs metadata" true
          (Option.is_some (Tool_result.metadata created));
-       let expected = List.sort String.compare [ live_sha; missing_sha ] in
+       let expected = List.sort String.compare [ live_sha; missing_sha; raw_html_sha ] in
        (match Lib.Tool_wiki.referenced_media_tokens ~base_path:dir with
-        | Ok tokens -> check (list string) "GC collector finds all wiki media refs" expected tokens
+        | Ok tokens ->
+          check (list string) "GC collector finds Markdown, Obsidian, and raw HTML wiki media refs"
+            expected tokens
         | Error msg -> fail ("referenced_media_tokens failed: " ^ msg));
        let lint_res =
          match Lib.Tool_wiki.dispatch ctx ~name:"masc_wiki_lint" ~args:(`Assoc []) with

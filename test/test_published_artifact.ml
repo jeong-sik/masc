@@ -874,12 +874,14 @@ let test_extract_media_refs_markdown_and_html () =
     [ sha1; sha2 ] (A.extract_media_refs A.Markdown md);
   let html =
     Printf.sprintf
-      "<!doctype html><html><body><img src=\"/api/v1/media/%s\"><img src='/api/v1/media/%s'>\
+      "<!doctype html><html><head><style>.bg{background:url('/api/v1/media/%s')}</style>\
+       <SCRIPT type=\"text/javascript\">const fake = \"/api/v1/media/%s\";</SCRIPT></head>\
+       <body><img src=\"/api/v1/media/%s\"><img src='/api/v1/media/%s'>\
        <img src=/api/v1/media/%s><img src=\"https://other.example/api/v1/media/%s\">\
        <img src=\"/api/v1/media/%s0\"></body></html>"
-      sha2 sha1 sha2 sha3 sha3
+      sha3 sha3 sha2 sha1 sha2 sha3 sha3
   in
-  Alcotest.(check (list string)) "html media refs sorted and deduped"
+  Alcotest.(check (list string)) "html media refs skip script/style and stay sorted/deduped"
     [ sha1; sha2 ] (A.extract_media_refs A.Html html)
 
 let test_referenced_media_tokens_and_http_projection () = with_base (fun base_path ->
@@ -933,6 +935,7 @@ let test_wiki_http_embeds_media_refs_and_lint () = with_base (fun base_path ->
     | Ok pair -> pair
     | Error msg -> Alcotest.fail msg in
   let missing_token = String.make 64 'd' in
+  let raw_html_token = String.make 64 '7' in
   let artifact, _ = publish ~base_path (request "# Embedded Artifact") in
   let missing_artifact = "artifact-" ^ String.make 32 '9' in
   let put ~slug ~title ~body =
@@ -949,31 +952,45 @@ let test_wiki_http_embeds_media_refs_and_lint () = with_base (fun base_path ->
     String.concat "\n"
       [ Printf.sprintf "![Live](%s)" live_url
       ; Printf.sprintf "![[media:%s|Missing Media]]" missing_token
+      ; Printf.sprintf "<img src=\"/api/v1/media/%s\" alt=\"Raw HTML\" />" raw_html_token
       ; "![[wiki:target-note|Target]]"
       ; Printf.sprintf "![[artifact:%s|Live Artifact]]" artifact.id
       ; Printf.sprintf "![[artifact:%s|Missing Artifact]]" missing_artifact
+      ; "![[media:bad-hex]]"
+      ; "![[custom:foo]]"
       ; "## Sources"
       ; "- repo:jeong-sik/masc:lib/wiki_link.ml"
       ] in
   let put_json = put ~slug:"host-note" ~title:"Host Note" ~body:host_body in
   let put_data = json_member "data" put_json in
-  let expected_media = List.sort String.compare [ live_token; missing_token ] in
-  check_json "wiki PUT exposes media_refs"
+  let expected_media = List.sort String.compare [ live_token; missing_token; raw_html_token ] in
+  let expected_missing = List.sort String.compare [ missing_token; raw_html_token ] in
+  check_json "wiki PUT exposes media_refs including raw HTML img"
     (`List (List.map (fun s -> `String s) expected_media))
     (json_member "media_refs" put_data);
-  check_json "wiki PUT reports missing_media_refs"
-    (`List [ `String missing_token ])
+  check_json "wiki PUT reports missing_media_refs including raw HTML img"
+    (`List (List.map (fun s -> `String s) expected_missing))
     (json_member "missing_media_refs" put_data);
   let get_data =
     match Server_dashboard_http_wiki.get_page_json ~base_path ~slug:"host-note" () with
     | Ok json -> json_member "data" json
     | Error (_, err) -> Alcotest.fail ("wiki GET failed: " ^ Yojson.Safe.to_string err) in
-  check_json "wiki GET exposes sorted media_refs"
+  check_json "wiki GET exposes sorted media_refs including raw HTML img"
     (`List (List.map (fun s -> `String s) expected_media))
     (json_member "media_refs" get_data);
   let embeds = match json_member "embeds" get_data with
     | `List items -> items | _ -> Alcotest.fail "embeds must be a JSON list" in
-  Alcotest.(check int) "five structured embeds" 5 (List.length embeds);
+  Alcotest.(check int) "seven structured embeds" 7 (List.length embeds);
+  let embed_kinds = List.map (fun e -> json_member "kind" e |> json_string) embeds in
+  Alcotest.(check (list string)) "embeds[].kind uses strict 5-value enum"
+    [ "media"; "media"; "wiki"; "artifact"; "artifact"; "invalid"; "unsupported" ]
+    embed_kinds;
+  let invalid_embed = List.nth embeds 5 in
+  check_json "invalid embed carries embed_kind" (`String "media")
+    (json_member "embed_kind" invalid_embed);
+  let unsupported_embed = List.nth embeds 6 in
+  check_json "unsupported embed carries scheme" (`String "custom")
+    (json_member "scheme" unsupported_embed);
   let target_data =
     match Server_dashboard_http_wiki.get_page_json ~base_path ~slug:"target-note" () with
     | Ok json -> json_member "data" json
@@ -984,7 +1001,9 @@ let test_wiki_http_embeds_media_refs_and_lint () = with_base (fun base_path ->
     | `List items -> items | _ -> Alcotest.fail "lint_findings must be a JSON list" in
   let kinds = List.map (fun f -> json_member "kind" f |> json_string) findings in
   Alcotest.(check bool) "broken_media_embed reported" true (List.mem "broken_media_embed" kinds);
-  Alcotest.(check bool) "broken_artifact_embed reported" true (List.mem "broken_artifact_embed" kinds))
+  Alcotest.(check bool) "broken_artifact_embed reported" true (List.mem "broken_artifact_embed" kinds);
+  Alcotest.(check bool) "invalid_embed reported" true (List.mem "invalid_embed" kinds);
+  Alcotest.(check bool) "unsupported_embed reported" true (List.mem "unsupported_embed" kinds))
 
 let () = Eio_main.run (fun _ ->
   Alcotest.run "published reports"

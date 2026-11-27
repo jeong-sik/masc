@@ -26,6 +26,7 @@ import { apiGet, apiGetV2, apiMutate } from '../../core/transport'
 import { InlineSpinner } from '../../components/common/inline-spinner'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
+import { RefreshButton } from '../../components/primitives/refresh-button'
 import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives/uplot-chart'
 import { pushShellToast } from '../../shell/shell-state'
 import {
@@ -415,7 +416,7 @@ export function MemoryTab(_props: WorkspaceViewProps) {
           `}
         </div>
         <div class="kn-actions">
-          <button type="button" class="btn-ghost" onClick=${() => void refresh()}>새로고침</button>
+          <${RefreshButton} onRefresh=${refresh} />
         </div>
       </div>
 

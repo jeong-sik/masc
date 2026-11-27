@@ -25,6 +25,7 @@ import { InlineSpinner } from '../../components/common/inline-spinner'
 import { formatDuration } from '../../lib/format-time'
 import { MasterDetail } from '../../components/primitives/master-detail'
 import { PopoverMenu } from '../../components/primitives/popover-menu'
+import { RefreshButton } from '../../components/primitives/refresh-button'
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
 import { VirtualList } from '../../components/primitives/virtual-list'
 import { pushShellToast } from '../../shell/shell-state'
@@ -305,14 +306,15 @@ export function GoalsTab(props: WorkspaceViewProps) {
   // Verification verdict state
   const [verdictReasonByReq, setVerdictReasonByReq] = useState<Record<string, string>>({})
 
-  const loadData = useCallback((reason: FetchReason) => {
-    if (!isEpochCurrent(epoch)) return
-    void refreshGoalList(reason)
-    if (!multiAccount) void refreshVerificationList(reason)
+  // Both reads start together. The promise ends when both have ended: the
+  // refresh button waits on it.
+  const loadData = useCallback((reason: FetchReason): Promise<unknown> => {
+    if (!isEpochCurrent(epoch)) return Promise.resolve()
+    return Promise.all([refreshGoalList(reason), multiAccount ? null : refreshVerificationList(reason)])
   }, [epoch, multiAccount])
 
   useEffect(() => {
-    loadData('mount')
+    void loadData('mount')
   }, [loadData])
 
   useEffect(() => {
@@ -557,7 +559,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
     setProcedure('')
     setShowCreate(false)
     resourceCache.invalidateTopic('goals')
-    loadData('manual')
+    void loadData('manual')
   }
 
   const handleTransition = async (goal: GoalItem, action: GoalAction) => {
@@ -593,7 +595,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
     setActionFeedback(null)
     pushShellToast(`${goal.id} → ${action} 전이 적용됨`, 'success')
     resourceCache.invalidateTopic('goals')
-    loadData('manual')
+    void loadData('manual')
   }
 
   const handleConfirmCompletion = async () => {
@@ -624,7 +626,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
     setActionFeedback(null)
     pushShellToast(`목표 ${confirmation.goalId} 최종 완료 확정됨`, 'success')
     resourceCache.invalidateTopic('goals')
-    loadData('manual')
+    void loadData('manual')
   }
 
   const copyText = async (label: string, text: string) => {
@@ -670,7 +672,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
     setActionFeedback(null)
     pushShellToast(`검증 ${req.requestId} (${req.taskId}) ${verdict === 'approve' ? '승인' : '반려'} 완료`, 'success')
     resourceCache.invalidateTopic('verification')
-    loadData('manual')
+    void loadData('manual')
   }
 
   // Strictly scope verifications to the selected goal's linked tasks (zero cross-goal fallback!)
@@ -724,9 +726,7 @@ export function GoalsTab(props: WorkspaceViewProps) {
               ${showCreate ? '닫기' : '+ 새 목표'}
             </button>
           `}
-          <button type="button" class="btn-ghost" onClick=${() => void loadData('manual')}>
-            새로고침
-          </button>
+          <${RefreshButton} onRefresh=${() => loadData('manual')} />
         </div>
       </div>
 

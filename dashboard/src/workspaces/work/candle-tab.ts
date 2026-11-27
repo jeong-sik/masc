@@ -27,6 +27,7 @@ import { apiGet, apiGetV2, apiMutate } from '../../core/transport'
 import { err, ok } from '../../lib/result'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
+import { RefreshButton } from '../../components/primitives/refresh-button'
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
 import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives/uplot-chart'
 import { pushShellToast } from '../../shell/shell-state'
@@ -285,7 +286,7 @@ export function CandleTab(props: WorkspaceViewProps) {
             Goal 완료 보상 화폐 · 초상화 장신구 전용 (constitution.xml)
           </span>
         </div>
-        <button type="button" class="btn-ghost" onClick=${() => void loadLedger('manual')}>새로고침</button>
+        <${RefreshButton} onRefresh=${() => loadLedger('manual')} />
       </div>
 
       ${loadError && html`<div class="wk-notice wk-notice--err" role="alert">${loadError}</div>`}

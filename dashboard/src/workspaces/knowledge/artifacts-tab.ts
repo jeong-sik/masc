@@ -18,6 +18,7 @@ import { ok } from '../../lib/result'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { MasterDetail } from '../../components/primitives/master-detail'
 import { PopoverMenu } from '../../components/primitives/popover-menu'
+import { RefreshButton } from '../../components/primitives/refresh-button'
 import { VirtualList } from '../../components/primitives/virtual-list'
 import { pushShellToast } from '../../shell/shell-state'
 import {
@@ -222,7 +223,7 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
     <div class="kn-pane-col">
       <div class="kn-pane-head">
         <h2 class="kn-pane-title">Artifacts <span class="kn-chip-count">(${filtered.length})</span></h2>
-        <button type="button" class="btn-ghost" onClick=${() => void loadList('manual')}>새로고침</button>
+        <${RefreshButton} onRefresh=${() => loadList('manual')} />
       </div>
 
       <div class="kn-filter-bar">

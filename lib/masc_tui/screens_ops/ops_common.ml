@@ -566,7 +566,10 @@ let human_runtime_label ~(model : Model.t) (k : Wire_fleet.keeper_summary) =
     | Some _ | None -> k.runtime_id
   in
   let resolved = Wire_runtime.human_runtime_slot_label ~runtimes raw in
-  if String.equal (String.trim resolved) "" then raw else resolved
+  let label = if String.equal (String.trim resolved) "" then raw else resolved in
+  match Runtime_store.runtime_account_email model.runtime k.runtime_id with
+  | Some email -> label ^ " · " ^ email
+  | None -> label
 
 let keeper_candle_milli ~(model : Model.t) name =
   let from_ledger =

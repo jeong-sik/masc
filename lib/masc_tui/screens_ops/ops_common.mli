@@ -170,7 +170,9 @@ val keeper_sandbox_label :
 val human_runtime_label :
   model:Model.t -> Wire_fleet.keeper_summary -> string
 (** Resolve a clean human runtime/model label via
-    {!Wire_runtime.human_runtime_slot_label}, stripping raw provider hashes. *)
+    {!Wire_runtime.human_runtime_slot_label}, stripping raw provider hashes,
+    followed by the account email {!Runtime_store.runtime_account_email}
+    finds for the keeper's [runtime_id]. Without one, the label alone. *)
 
 val keeper_candle_milli :
   model:Model.t -> string -> (int * string) option

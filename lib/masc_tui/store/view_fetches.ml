@@ -1035,7 +1035,13 @@ let fetches_for_workspace ~force (m : Model.t) =
         (* The list's next-due column reads the active schedules. *)
         |> add_if
              (needs_fetch ~force m.work.schedules)
-             (Cmd.Get_schedules { cursor = None }))
+             (Cmd.Get_schedules { cursor = None })
+        (* The runtime label names the account its provider runs on. The
+           setup inventory holds it; it is the Runtime screen's own read,
+           shared through the store. *)
+        |> add_if
+             (needs_fetch ~force m.runtime.setup_inventory)
+             Cmd.Get_setup_inventory)
         @ embedded_dive_reqs
   | Nav.Runtime -> (
       match m.runtime.active_tab with

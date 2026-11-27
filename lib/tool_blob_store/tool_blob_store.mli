@@ -49,6 +49,13 @@ val make_preview : string -> string
 (** Exact sanitized 4 KiB head+tail preview used by blob addressing. Pure;
     callers may use it to measure a marker before storing its original bytes. *)
 
+val make_head_preview : max_bytes:int -> string -> string
+(** The sanitized first [max_bytes] bytes of a body, never longer than
+    [max_bytes]. Pure. For a writer whose marker stands where its reader
+    already received the body, so the preview only says which body it was;
+    such a writer names its own bound. {!put} and {!address} keep
+    {!make_preview}. *)
+
 val put : t -> bytes:string -> mime:string -> Tool_output.t
 (** Store [bytes] under its sha256 digest. {!address} then {!put_addressed},
     which is what a caller storing one body wants; the halves are separate for

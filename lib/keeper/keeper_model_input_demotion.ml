@@ -473,11 +473,21 @@ let with_reference kind (block : Agent_core.Types.content_block) reference =
      | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
 ;;
 
-(* Addressing and planning use the same preview, MIME and byte count. Fixed
+(* The marker of a demoted body stands where the model already received that
+   body whole, in the turn that produced it. Its preview says which result
+   this was; the address is what reads it again. The blob store's own
+   preview is for a body its reader has never seen: it holds up to 4 KiB of
+   head and tail, so a marker carrying it is no smaller than a body under
+   that bound and nothing of that size would be demoted (#55296). *)
+let demoted_preview_max_bytes = 200
+
+(* Planning and materializing build the marker's reference here, from the
+   same body, so both halves agree on its preview, MIME and byte count. Fixed
    width hex digits give the planned reference the real address's wire size. *)
 let planned_reference ~kind ~sha256 ~bytes =
   Tool_output.make_artifact_ref ~sha256 ~bytes:(String.length bytes)
-    ~preview:(Tool_blob_store.make_preview bytes) ~mime:(payload_mime kind)
+    ~preview:(Tool_blob_store.make_head_preview ~max_bytes:demoted_preview_max_bytes bytes)
+    ~mime:(payload_mime kind)
   |> Result.to_option
 ;;
 
@@ -799,7 +809,19 @@ let materialize ~store ~addresses ~pending messages =
                            current
                          | Some address ->
                            (match Tool_blob_store.put_addressed address with
-                            | Tool_output.Stored reference -> written entry current reference
+                            | Tool_output.Stored stored ->
+                              (* The store answers with its own preview. The
+                                 marker carries the one the plan measured. *)
+                              (match
+                                 planned_reference
+                                   ~kind:entry.kind
+                                   ~sha256:stored.sha256
+                                   ~bytes:entry.bytes
+                               with
+                               | Some reference -> written entry current reference
+                               | None ->
+                                 incr reverted;
+                                 current)
                             | exception Sys_error _ ->
                               incr reverted;
                               current))

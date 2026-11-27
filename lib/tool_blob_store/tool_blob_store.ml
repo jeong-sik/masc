@@ -275,6 +275,13 @@ let make_preview bytes =
     let tail = String.sub bytes (total_bytes - half) half in
     make_head_tail_preview ~total_bytes ~head ~tail
 
+(* The first [max_bytes] bytes of a body, sanitized as [make_preview] does. A
+   sequence the cut splits becomes one ASCII byte, so the result is never
+   longer than the cut. *)
+let make_head_preview ~max_bytes bytes =
+  let length = min (String.length bytes) (max 0 max_bytes) in
+  sanitize_utf8_slice (String.sub bytes 0 length)
+
 let dirname = "tool_blobs"
 
 let create ~base_path =

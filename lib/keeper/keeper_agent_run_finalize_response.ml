@@ -331,7 +331,9 @@ let finalize
     | Runtime_execution.Masc_agent_core, None -> missing_agent_core_checkpoint ()
     | Runtime_execution.Official_client, Some _ ->
       unexpected_agent_core_checkpoint ()
-    | Runtime_execution.Official_client, None -> Ok None
+    | Runtime_execution.Official_client, None ->
+      Keeper_turn_log_turn.note_client_completion turn_log;
+      Ok None
   in
   let* saved_checkpoint = saved_checkpoint_result in
     (* Commit canonically into per-Keeper SQLite WAL for cross-runtime failover

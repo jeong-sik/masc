@@ -1638,6 +1638,10 @@ let run_turn
                   outcome;
                 match save_result with
                 | Ok (Keeper_checkpoint_store.Saved { checkpoint = stored; _ }) ->
+                  (* This save leaves the turn's messages open
+                     ([Turn_continues]). The turn's end closes them when the
+                     turn does not reach its closing save. *)
+                  Keeper_turn_log_turn.note_open_save turn_log;
                   Keeper_checkpoint_cadence.record_persisted
                     checkpoint_cadence
                     ~stage

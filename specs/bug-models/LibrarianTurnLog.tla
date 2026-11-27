@@ -392,18 +392,24 @@ Save ==
     /\ UNCHANGED << lv, turn, turnLine, gv, av, rvars, bad, up, pend, badPurge, droppedUnread, wit,
                     budget >>
 
-\* A close outside the exit path while the process runs: a save that landed late.
+\* A close outside the exit path while the process runs. With a new message it
+\* is a save that landed late. Without one it is the end of a turn an official
+\* client completed: the turn's Closed is written first, naming no message, and
+\* what an Agent Core attempt of the turn saved is closed after it.
 LateSave ==
     /\ up
     /\ turn = "none"
     /\ budget.late > 0
     /\ Free
-    /\ CloseBundle(TRUE)
+    /\ \E nm \in BOOLEAN : CloseBundle(nm)
     /\ budget' = [budget EXCEPT !.late = @ - 1]
     /\ UNCHANGED << lv, tv, gv, av, rvars, bad, up, pend, badPurge, droppedUnread, wit >>
 
-\* The turn ends and its Closed is appended. With no closing save before it
-\* (the save failed) the open messages stay open.
+\* The turn ends and its Closed is appended. A turn that ended without its
+\* closing save closes what it saved in its middle first: that is Save with no
+\* new message. With no closing save before it (the save failed, the turn saved
+\* nothing itself, or an official client completed it) the open messages stay
+\* open.
 ExitOk ==
     /\ up
     /\ turn = "line"

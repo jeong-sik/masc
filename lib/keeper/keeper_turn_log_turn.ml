@@ -1,20 +1,40 @@
 module Turn_log = Keeper_turn_log
 module Writer = Keeper_turn_log_writer
 module Recorder = Keeper_turn_log_recorder
+module Closing = Keeper_turn_log_closing
 
 type closing_save =
   | Saved
   | Stale
   | Failed
 
+(* What the turn has saved to its history so far. *)
+type saves =
+  | Nothing_saved
+  | Left_open  (** A save in the middle of the turn, and no closing save since. *)
+  | Left_open_before_client
+  (** The same, in a turn an official client then completed. *)
+  | Closing_save of closing_save
+
 type t =
   { place : Recorder.place
   ; turn_ref : Ids.Turn_ref.t
   ; admitted : Writer.admitted
-  ; closing_save : closing_save option Atomic.t
+  ; saves : saves Atomic.t
   }
 
-let note_closing_save turn outcome = Atomic.set turn.closing_save (Some outcome)
+let note_closing_save turn outcome = Atomic.set turn.saves (Closing_save outcome)
+
+(* Only the first save in the middle of a turn changes anything, and none
+   does after the turn's closing save. *)
+let note_open_save turn =
+  ignore (Atomic.compare_and_set turn.saves Nothing_saved Left_open : bool)
+;;
+
+(* Nothing changes for a turn whose Agent Core attempts saved nothing. *)
+let note_client_completion turn =
+  ignore (Atomic.compare_and_set turn.saves Left_open Left_open_before_client : bool)
+;;
 
 type exit =
   | Returned_ok
@@ -179,22 +199,62 @@ let admit ~place ~turn_ref ~runtime ~task ~stimuli =
       not_written ~place ~turn_ref Admission (Printexc.to_string exn);
       Writer.Not_recorded
   in
-  { place; turn_ref; admitted; closing_save = Atomic.make None }
+  { place; turn_ref; admitted; saves = Atomic.make Nothing_saved }
 ;;
 
-(* Protected: a cancelled fiber cannot do file I/O, and the turn's end is
-   written all the same. No exception leaves, a cancellation included: under
-   the protection one can only come from inside the write, and the fiber's
-   own cancellation is raised again by whatever the caller does next. *)
-let finish turn exit =
-  Eio.Cancel.protect
-  @@ fun () ->
+let exit_label = function
+  | Returned_ok -> "returned_ok"
+  | Returned_error -> "returned_error"
+  | Raised -> "raised"
+  | Cancelled -> "cancelled"
+;;
+
+(* The closing save of a turn that made none (RFC
+   librarian-call-only-proposes §5.2, "the turn ends"). Only a completed turn
+   reaches the save that closes its messages. A turn that saved in its middle
+   and then failed, raised or was cancelled left those messages open: no line
+   named them, the next turn's baseline lay before them, and each failed turn
+   added its own to the range the next one had to send (#55349).
+
+   A save that fails leaves the messages open for the next save that closes.
+   It is logged and counted, and [Failed] is what the turn's line is labelled
+   by when the save came before the line. *)
+let close_what_the_turn_left_open turn exit =
+  let not_closed detail =
+    Log.Keeper.error
+      ~keeper_name:turn.place.keeper_name
+      "turn log end turn=%d exit=%s: the messages the turn's saves left open were not closed: %s"
+      (Ids.Turn_ref.absolute_turn turn.turn_ref)
+      (exit_label exit)
+      detail;
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string TurnLogOpenCloseFailures)
+      ~labels:[ "keeper", turn.place.keeper_name ]
+      ();
+    Some Failed
+  in
+  match Closing.close_open turn.place with
+  (* Another writer closed or replaced them under the turn. *)
+  | Closing.Nothing_open -> None
+  | Closing.Closed_open { messages } ->
+    Log.Keeper.info
+      ~keeper_name:turn.place.keeper_name
+      "turn log end turn=%d exit=%s: closed the %d message(s) the turn's saves left open"
+      (Ids.Turn_ref.absolute_turn turn.turn_ref)
+      (exit_label exit)
+      messages;
+    Some Saved
+  | Closing.Not_closed error -> not_closed (Closing.not_closed_to_string error)
+  | exception exn -> not_closed (Printexc.to_string exn)
+;;
+
+let write_end turn exit closing_save =
   match turn.admitted with
   (* Its admission is not in the log, so neither is its end. What it closed
      is named by the next unit. *)
   | Writer.Not_recorded -> ()
   | Recorded { opened = (_ : int) } as admitted ->
-    let ending = ending exit (Atomic.get turn.closing_save) in
+    let ending = ending exit closing_save in
     let not_written = not_written ~place:turn.place ~turn_ref:turn.turn_ref End in
     (match record turn.place (Writer.Finish { admitted; ending }) with
      | Ok (Recorder.Appended _) -> ()
@@ -204,6 +264,32 @@ let finish turn exit =
      | Ok Recorder.Nothing_to_append -> not_written "the turn is not the open one in the log"
      | Error error -> not_written (Recorder.not_recorded_to_string error)
      | exception exn -> not_written (Printexc.to_string exn))
+;;
+
+(* Protected: a cancelled fiber cannot do file I/O, and the turn's end is
+   written all the same. No exception leaves, a cancellation included: under
+   the protection one can only come from inside the save or the write, and
+   the fiber's own cancellation is raised again by whatever the caller does
+   next.
+
+   Where the save stands decides which unit names the messages. A turn that
+   ended on Agent Core closes them before its line, so the line names them
+   as the turn's own. A turn an official client completed closes them after
+   its line: the line names no message, so the turn's unit is read from the
+   client's files ({!Librarian_unread}), and the next unit names them among
+   what was closed before its turn, read from every record. A turn that
+   saved nothing leaves the head as it found it: what is open there was put
+   before a turn that has yet to close it. *)
+let finish turn exit =
+  Eio.Cancel.protect
+  @@ fun () ->
+  match Atomic.get turn.saves with
+  | Nothing_saved -> write_end turn exit None
+  | Closing_save outcome -> write_end turn exit (Some outcome)
+  | Left_open -> write_end turn exit (close_what_the_turn_left_open turn exit)
+  | Left_open_before_client ->
+    write_end turn exit None;
+    ignore (close_what_the_turn_left_open turn exit : closing_save option)
 ;;
 
 let exit_of_exception = function

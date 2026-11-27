@@ -426,11 +426,15 @@ let test_keeper_projects_mcp_tool_and_settles () =
         ; metadata = []
         }
       in
+      (* Seventy messages, the whole range a trace with no completed turn
+         carries. Each is 2 KiB so the framed prompt (about 160 KB) stays under
+         [Runtime_acp_client.antigravity_message_max_bytes]: a larger one is
+         refused before the CLI starts (#41906). *)
       let large_history =
         List.init 70 (fun index ->
           let marker = Printf.sprintf "history-%02d" index in
           { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = User
-          ; content = [ Text (marker ^ ":" ^ String.make 4096 'x') ]
+          ; content = [ Text (marker ^ ":" ^ String.make 2048 'x') ]
           ; name = None
           ; tool_call_id = None
           ; metadata = []

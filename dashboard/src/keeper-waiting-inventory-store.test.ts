@@ -44,7 +44,11 @@ describe('keeper waiting inventory store', () => {
     try {
       expect(mocks.fetchKeeperWaitingInventory).not.toHaveBeenCalled()
       mocks.observer?.ready('process.epoch')
-      expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledExactlyOnceWith('exampleorg', 'process.epoch')
+      expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledExactlyOnceWith(
+        'exampleorg',
+        'process.epoch',
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      )
       expect(intervalSpy).not.toHaveBeenCalled()
       mocks.observer?.change({ scope: 'keeper', keeperName: 'other' })
       mocks.observer?.change({ scope: 'keeper', keeperName: 'exampleorg' })
@@ -89,6 +93,29 @@ describe('keeper waiting inventory store', () => {
     } finally {
       stopAlpha()
       stopBeta()
+    }
+  })
+
+  it('aborts stale in-flight reads on reconnect and immediately fetches for the new observer generation', async () => {
+    let firstSignal: AbortSignal | undefined
+    mocks.fetchKeeperWaitingInventory
+      .mockImplementationOnce((_name: string, _instance: string, opts?: { signal?: AbortSignal }) => {
+        firstSignal = opts?.signal
+        return new Promise(() => {})
+      })
+      .mockResolvedValueOnce({ keepers: [] })
+    const stop = subscribeKeeperWaitingInventory('stalled-reconnect')
+    try {
+      mocks.observer?.ready('process.epoch-1')
+      expect(firstSignal?.aborted).toBe(false)
+      mocks.observer?.unavailable('disconnected')
+      expect(firstSignal?.aborted).toBe(true)
+      mocks.observer?.ready('process.epoch-2')
+      await vi.waitFor(() => expect(mocks.fetchKeeperWaitingInventory).toHaveBeenCalledTimes(2))
+      await vi.waitFor(() => expect(keeperWaitingInventoryState('stalled-reconnect').ready).toBe(true))
+      expect(keeperWaitingInventoryState('stalled-reconnect').observerCurrent).toBe(true)
+    } finally {
+      stop()
     }
   })
 

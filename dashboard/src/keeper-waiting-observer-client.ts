@@ -35,8 +35,10 @@ export function startKeeperWaitingObserver(callbacks: ObserverCallbacks): { stop
       generation++
       active = null
       invalidateActive = null
-      callbacks.unavailable(cause instanceof ObserverAccessError ? 'access_refused'
-        : cause instanceof ObserverScopeError ? 'scope_changed' : 'disconnected')
+      const reason = cause instanceof ObserverAccessError ? 'access_refused'
+        : cause instanceof ObserverScopeError ? 'scope_changed' : 'disconnected'
+      callbacks.unavailable(reason)
+      if (stopped || reason === 'access_refused') return
       if (readyAt !== null && performance.now() - readyAt >= TRANSPORT_RETRY_MAX_MS) {
         retryDelay = TRANSPORT_RETRY_BASE_MS
       }

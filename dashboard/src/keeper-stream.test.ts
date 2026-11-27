@@ -1508,6 +1508,40 @@ describe('Keeper operation stream projection', () => {
     )
   })
 
+  it('handles terminal and non-regressing KEEPER_CHAT_OPERATION_ACCEPTED states without resetting streaming/delivered entries', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT',
+      delta: 'partial',
+    })).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+      value: { operation_id: 'kmsg-op-stream', state: 'Running', queued_count: 0 },
+    })).toBeNull()
+    let entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.delivery).toBe('streaming')
+    expect(entry?.streamState).toBe('streaming')
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+      value: { operation_id: 'kmsg-op-stream', state: 'Succeeded', queued_count: 0 },
+    })).toBeNull()
+    entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.delivery).toBe('delivered')
+    expect(entry?.streamState).toBeNull()
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+      value: { operation_id: 'kmsg-op-stream', state: 'Queued', queued_count: 1 },
+    })).toBeNull()
+    entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.delivery).toBe('delivered')
+    expect(entry?.streamState).toBeNull()
+  })
+
   it('overlays partial delta usage onto the start snapshot instead of replacing it', () => {
     assistantEntry()
     applyKeeperStreamEvent('sangsu', 'reply-1', {

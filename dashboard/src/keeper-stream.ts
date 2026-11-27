@@ -67,9 +67,45 @@ interface PendingThinkingState {
   agentCoreBlockIndex?: number
   flushHandle: ScheduledFlushHandle | null
   authoritative: boolean
+  publicationOwner: ThinkingPublicationOwner | null
 }
 
 const pendingThinkingDeltas = new Map<string, PendingThinkingState>()
+const replayedPersistedToolOccurrences = new Map<string, Set<string>>()
+
+function markReplayedPersistedToolOccurrence(
+  keeperName: string,
+  assistantEntryId: string,
+  toolOccurrenceId: string,
+): void {
+  const key = streamEntryKey(keeperName, assistantEntryId)
+  let occurrences = replayedPersistedToolOccurrences.get(key)
+  if (!occurrences) {
+    occurrences = new Set<string>()
+    replayedPersistedToolOccurrences.set(key, occurrences)
+  }
+  occurrences.add(toolOccurrenceId)
+}
+
+function isReplayedPersistedToolOccurrence(
+  keeperName: string,
+  assistantEntryId: string,
+  toolOccurrenceId: string,
+): boolean {
+  return replayedPersistedToolOccurrences.get(streamEntryKey(keeperName, assistantEntryId))?.has(toolOccurrenceId) ?? false
+}
+
+function hasPersistedToolOccurrenceForOperation(
+  keeperName: string,
+  operationId: string,
+  toolCallId: string | undefined,
+): boolean {
+  if (!toolCallId) return false
+  return (keeperThreads.value[keeperName] ?? []).some(entry => entry.role === 'tool'
+    && entry.toolCallId === toolCallId
+    && entry.deliveryProvenance?.delivery_key.kind === 'operation'
+    && entry.deliveryProvenance.delivery_key.operation_id === operationId)
+}
 
 /** The reasons a KEEPER_TOOL_RESULT_READY frame is refused, named so callers
  * and tests compare a value instead of a fragment of a sentence. */
@@ -173,7 +209,9 @@ function textStreamMessageId(value: unknown): string | null {
 }
 
 function clearTextMessageStreamState(keeperName: string, assistantEntryId: string): void {
-  textMessageStreamStates.delete(streamEntryKey(keeperName, assistantEntryId))
+  const key = streamEntryKey(keeperName, assistantEntryId)
+  textMessageStreamStates.delete(key)
+  replayedPersistedToolOccurrences.delete(key)
 }
 
 function resetUnfinishedRuntimeAttempt(
@@ -274,6 +312,13 @@ function flushPendingThinkingDeltas(
     pending.flushHandle = null
   }
   const before = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantEntryId)
+  if (
+    pending.publicationOwner !== null
+    && !ownsThinkingPublication(pending.publicationOwner, before, currentStoredTokenRevision())
+  ) {
+    pendingThinkingDeltas.delete(key)
+    return
+  }
   const preserveActivity = (): void => {
     if (!pending.authoritative && before) updateThreadEntry(keeperName, assistantEntryId, entry => ({
       ...entry, streamState: before.streamState, delivery: before.delivery,
@@ -337,6 +382,7 @@ function enqueueThinkingDelta(
       agentCoreBlockIndex: meta.agentCoreBlockIndex,
       flushHandle: null,
       authoritative: meta.authoritative ?? true,
+      publicationOwner: entry ? captureThinkingPublicationOwner(entry, currentStoredTokenRevision()) : null,
     }
     pendingThinkingDeltas.set(key, pending)
   } else {
@@ -365,6 +411,7 @@ export function _resetKeeperStreamBuffersForTests(): void {
   pendingThinkingDeltas.clear()
   pendingAgentCoreTextBlockIndexes.clear()
   textMessageStreamStates.clear()
+  replayedPersistedToolOccurrences.clear()
 }
 
 export interface KeeperThreadAbortResult {
@@ -536,6 +583,7 @@ export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult 
       })
     }
     clearPendingAgentCoreTextBlockIndex(keeperName, entryId)
+    clearTextMessageStreamState(keeperName, entryId)
   }
   if (operationId) clearActiveStream(keeperName, operationId)
   if (activeStreamEntryId(keeperName) === null) {
@@ -1039,12 +1087,10 @@ export function applyKeeperStreamEvent(
         // the generated occurrence id above cannot see the durable row and
         // would insert a second streaming occurrence next to it. Correlate
         // on the operation's durable tool-call provenance first.
-        const persistedOccurrence = (keeperThreads.value[keeperName] ?? [])
-          .find(entry => entry.role === 'tool'
-            && entry.toolCallId === toolCallId
-            && entry.deliveryProvenance?.delivery_key.kind === 'operation'
-            && entry.deliveryProvenance.delivery_key.operation_id === source.operationId)
-        if (persistedOccurrence) return null
+        if (hasPersistedToolOccurrenceForOperation(keeperName, source.operationId, toolCallId)) {
+          markReplayedPersistedToolOccurrence(keeperName, assistantEntryId, toolOccurrenceId)
+          return null
+        }
       }
       if (!(source.kind === 'operation' && source.observationOnly)) {
         promoteAssistantTextToProgress(keeperName, assistantEntryId, {
@@ -1096,6 +1142,16 @@ export function applyKeeperStreamEvent(
       const toolEntry = (keeperThreads.value[keeperName] ?? [])
         .find(entry => entry.id === toolOccurrenceId)
       if (!toolEntry) {
+        if (
+          source.kind === 'operation'
+          && source.observationOnly
+          && (
+            isReplayedPersistedToolOccurrence(keeperName, assistantEntryId, toolOccurrenceId)
+            || hasPersistedToolOccurrenceForOperation(keeperName, source.operationId, toolCallId)
+          )
+        ) {
+          return null
+        }
         recordStreamProtocolError(
           keeperName,
           assistantEntryId,
@@ -1153,6 +1209,16 @@ export function applyKeeperStreamEvent(
       const toolEntry = (keeperThreads.value[keeperName] ?? [])
         .find(entry => entry.id === toolOccurrenceId)
       if (!toolEntry) {
+        if (
+          source.kind === 'operation'
+          && source.observationOnly
+          && (
+            isReplayedPersistedToolOccurrence(keeperName, assistantEntryId, toolOccurrenceId)
+            || hasPersistedToolOccurrenceForOperation(keeperName, source.operationId, toolCallId)
+          )
+        ) {
+          return null
+        }
         recordStreamProtocolError(
           keeperName,
           assistantEntryId,
@@ -1249,7 +1315,23 @@ export function applyKeeperStreamEvent(
         }
         const entries = keeperThreads.value[keeperName] ?? []
         const tool = entries.find(entry => entry.id === occurrenceId)
-        if (!tool) return 'Admission names no streamed server occurrence'
+        if (!tool) {
+          if (
+            source.kind === 'operation'
+            && source.observationOnly
+            && (
+              isReplayedPersistedToolOccurrence(keeperName, assistantEntryId, occurrenceId)
+              || hasPersistedToolOccurrenceForOperation(
+                keeperName,
+                source.operationId,
+                nonBlankToolCallId(value.toolCallId) ?? undefined,
+              )
+            )
+          ) {
+            return null
+          }
+          return 'Admission names no streamed server occurrence'
+        }
         if ((tool.toolProviderName ?? tool.label) !== value.providerToolName
           || value.toolCallId && tool.toolCallId && value.toolCallId !== tool.toolCallId
           || value.providerMessageId && tool.toolProviderMessageId && value.providerMessageId !== tool.toolProviderMessageId
@@ -1287,7 +1369,19 @@ export function applyKeeperStreamEvent(
         }
         const toolEntry = (keeperThreads.value[keeperName] ?? [])
           .find(entry => entry.id === toolOccurrenceId)
-        if (!toolEntry) return 'KEEPER_TOOL_RESULT_READY names no streamed server occurrence'
+        if (!toolEntry) {
+          if (
+            source.kind === 'operation'
+            && source.observationOnly
+            && (
+              isReplayedPersistedToolOccurrence(keeperName, assistantEntryId, toolOccurrenceId)
+              || hasPersistedToolOccurrenceForOperation(keeperName, source.operationId, toolCallId)
+            )
+          ) {
+            return null
+          }
+          return 'KEEPER_TOOL_RESULT_READY names no streamed server occurrence'
+        }
         const executionOwner = (keeperThreads.value[keeperName] ?? []).find(entry => (
           entry.role === 'tool'
           && entry.id !== toolEntry.id
@@ -1385,21 +1479,47 @@ export function applyKeeperStreamEvent(
       if (event.name === 'KEEPER_CHAT_OPERATION_ACCEPTED') {
         const operationId = event.value.operation_id.trim()
         if (!operationId) return 'Keeper operation acceptance is missing operation_id.'
-        const queued = event.value.state === 'Queued'
-        updateThreadEntry(keeperName, assistantEntryId, entry => ({
-          ...entry,
-          deliveryProvenance: operationDeliveryProvenance(
+        const opState = event.value.state
+        const isTerminalState = opState === 'Succeeded' || opState === 'Failed' || opState === 'Cancelled'
+        if (isTerminalState) {
+          flushPendingThinkingDeltas(keeperName, assistantEntryId)
+          clearTextMessageStreamState(keeperName, assistantEntryId)
+        }
+        updateThreadEntry(keeperName, assistantEntryId, entry => {
+          const deliveryProvenance = entry.deliveryProvenance ?? operationDeliveryProvenance(
             operationId,
             'terminal_result',
-          ),
-          delivery: queued ? 'queued' : 'sending',
-          streamState: queued ? null : 'opening',
-          streamContract: keeperStreamContract(
+          )
+          const streamContract = keeperStreamContract(
             'sse_event',
-            'backend_stream_event',
+            isTerminalState ? 'backend_terminal_event' : 'backend_stream_event',
             { eventName: 'KEEPER_CHAT_OPERATION_ACCEPTED', requestId: operationId },
-          ),
-        }))
+          )
+          if (opState === 'Succeeded') {
+            if (!isInFlightDelivery(entry.delivery)) return { ...entry, deliveryProvenance }
+            return { ...entry, deliveryProvenance, delivery: 'delivered', streamState: null, streamContract }
+          }
+          if (opState === 'Failed') {
+            if (!isInFlightDelivery(entry.delivery)) return { ...entry, deliveryProvenance }
+            return { ...entry, deliveryProvenance, delivery: 'error', streamState: null, streamContract }
+          }
+          if (opState === 'Cancelled') {
+            if (!isInFlightDelivery(entry.delivery)) return { ...entry, deliveryProvenance }
+            return { ...entry, deliveryProvenance, delivery: 'cancelled', streamState: null, streamContract }
+          }
+          if (opState === 'Queued') {
+            const canQueue = entry.delivery === 'queued'
+              || (entry.delivery === 'sending' && (entry.streamState === null || entry.streamState === 'opening'))
+            if (!canQueue) return { ...entry, deliveryProvenance }
+            return { ...entry, deliveryProvenance, delivery: 'queued', streamState: null, streamContract }
+          }
+          // opState === 'Running': only advance queued/unstarted sending rows to opening;
+          // never regress active streaming or already-terminal entries.
+          const canOpen = entry.delivery === 'queued'
+            || (entry.delivery === 'sending' && (entry.streamState === null || entry.streamState === 'opening'))
+          if (!canOpen) return { ...entry, deliveryProvenance }
+          return { ...entry, deliveryProvenance, delivery: 'sending', streamState: 'opening', streamContract }
+        })
         return null
       }
       if (event.name === 'KEEPER_CONNECTED') {
@@ -1620,6 +1740,7 @@ export function applyKeeperStreamEvent(
       if (event.name === 'KEEPER_CONTINUATION_CHECKPOINT') {
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
         if (!admitStreamEvent(keeperName, assistantEntryId, event).accepted) return null
+        clearTextMessageStreamState(keeperName, assistantEntryId)
         const rawText = isRecord(event.value)
           ? asString(event.value.message, '')
           : ''
@@ -1654,6 +1775,7 @@ export function applyKeeperStreamEvent(
           event.value.target,
         )
         flushPendingThinkingDeltas(keeperName, assistantEntryId)
+        clearTextMessageStreamState(keeperName, assistantEntryId)
         updateThreadEntry(keeperName, assistantEntryId, entry => ({
           ...entry,
           details: {

@@ -372,15 +372,28 @@ let executionPublicationHeld = 0
 let executionPublicationWanted = 0
 let executionPublicationReading = false
 
+function resetExecutionPublicationState(): void {
+  executionPublicationEpoch = null
+  executionPublicationHeld = 0
+  executionPublicationWanted = 0
+}
+
 function readAnnouncedExecutionPublication(): void {
   if (executionPublicationReading) return
   executionPublicationReading = true
   void (async () => {
     try {
       while (executionPublicationWanted > executionPublicationHeld) {
+        const readEpoch = executionPublicationEpoch
         const target = executionPublicationWanted
         const body = await fetchDashboardExecutionPublication()
-        hydrateExecutionSnapshot(body)
+        const applied = hydrateExecutionSnapshot(body)
+        if (executionPublicationEpoch !== readEpoch) {
+          continue
+        }
+        if (!applied) {
+          break
+        }
         executionPublicationHeld = Math.max(executionPublicationHeld, target)
       }
     } catch (err) {
@@ -516,6 +529,7 @@ function handleReconnect(notify = true): void {
   // Failed reads retain their own recovery debt. Initializing projections
   // await canonical completion rather than scheduling another status read.
   invalidateDashboardCache()
+  resetExecutionPublicationState()
   resetExecutionSnapshotGeneration()
   void refreshExecution({ force: true })
   pauseQueuedAgentCoreRuntimeIngress()

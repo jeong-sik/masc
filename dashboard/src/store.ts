@@ -366,10 +366,15 @@ export const boardListReadFailed = signal<boolean>(false)
 
 export function removeBoardPost(postId: string | undefined): void {
   if (!postId) return
-  const filtered = boardPosts.value.filter(p => p.id !== postId)
-  if (filtered.length !== boardPosts.value.length) {
+  const previous = boardPosts.value
+  const filtered = previous.filter(p => p.id !== postId)
+  const removedCount = previous.length - filtered.length
+  if (removedCount > 0) {
     boardPosts.value = filtered
     boardOffset.value = filtered.length
+    if (boardTotal.value !== null) {
+      boardTotal.value = Math.max(0, boardTotal.value - removedCount)
+    }
   }
 }
 
@@ -1968,7 +1973,10 @@ export async function refreshGoals(): Promise<void> {
 // operator's current Board filters. A Board route set to "hide system" would
 // otherwise make Fusion claim no board-sink posts while live fusion evidence is
 // present in the unfiltered board feed.
+let fusionBoardRequestSeq = 0
+
 export async function refreshFusionBoard(): Promise<void> {
+  const seq = ++fusionBoardRequestSeq
   fusionBoardLoading.value = true
   fusionBoardError.value = null
   try {
@@ -1977,16 +1985,20 @@ export async function refreshFusionBoard(): Promise<void> {
       limit: 500,
       offset: 0,
     }))
+    if (seq !== fusionBoardRequestSeq) return
     fusionBoardPosts.value = reconcileBoardPosts(fusionBoardPosts.value, data.posts ?? [])
     // A run the window did not carry can be asked for again: it may have
     // written its post since, and a run that has one now is not the run that
     // had none when it was last asked.
     forgetFusionEvidenceRequests()
   } catch (err) {
+    if (seq !== fusionBoardRequestSeq) return
     console.warn('[Fusion] board fetch error:', err)
     fusionBoardError.value = errorMessageOr(err, 'Fusion board-sink load failed')
   } finally {
-    fusionBoardLoading.value = false
+    if (seq === fusionBoardRequestSeq) {
+      fusionBoardLoading.value = false
+    }
   }
 }
 
@@ -2053,21 +2065,28 @@ export function forgetFusionEvidenceRequests(): void {
 // event. The endpoint is the SSOT for run status; the dashboard never
 // reconstructs registry state from the event payload, so a dropped/duplicated
 // event self-heals on the next fetch.
+let fusionRunsRequestSeq = 0
+
 export async function refreshFusionRuns(): Promise<void> {
+  const seq = ++fusionRunsRequestSeq
   fusionRunsLoading.value = true
   fusionRunsError.value = null
   try {
     const { fetchFusionRuns } = await import('./api/dashboard-fusion')
     const data = await fetchFusionRuns()
+    if (seq !== fusionRunsRequestSeq) return
     batch(() => {
       fusionRuns.value = data.runs
       fusionRunObservation.value = { replay: data.replay, historicalEvidence: data.historicalEvidence }
     })
   } catch (err) {
+    if (seq !== fusionRunsRequestSeq) return
     console.warn('[Fusion] runs fetch error:', err)
     fusionRunsError.value = errorMessageOr(err, 'Fusion run registry load failed')
   } finally {
-    fusionRunsLoading.value = false
+    if (seq === fusionRunsRequestSeq) {
+      fusionRunsLoading.value = false
+    }
   }
 }
 

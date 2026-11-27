@@ -45,21 +45,28 @@ export async function fetchKeeperAsks(
   return parsed.value
 }
 
-/**
- * Shared SSOT for the server's `ask-answer` HTTP 500 partial-delivery contract:
- * when the durable store recorded the answer (`recorded === true`) and only
- * immediate wakeup awaits outbox recovery (`state !== 'recording_unconfirmed'`),
- * callers must treat the answer as recorded rather than leaving the draft open.
- */
-export function isAskAnswerRecordedOn500(
+/** The Keeper's shutdown held its intake, so the server recorded nothing and
+    the question stays open. The operator answers again once the Keeper is
+    back; the draft is kept for that. */
+export class AskAnswerKeeperShuttingDown extends Error {
+  readonly askId: string
+  constructor(askId: string, detail: string) {
+    super(detail)
+    this.name = 'AskAnswerKeeperShuttingDown'
+    this.askId = askId
+  }
+}
+
+/** The server's `ask-answer` refusal while a shutdown holds the Keeper's
+    intake: HTTP 503 with `state: "keeper_shutting_down"`. */
+export function isAskAnswerRefusedForShutdown(
   status: number | null | undefined,
   body: unknown,
-): body is Record<string, unknown> {
-  if (status !== 500 || typeof body !== 'object' || body === null || Array.isArray(body)) {
+): boolean {
+  if (status !== 503 || typeof body !== 'object' || body === null || Array.isArray(body)) {
     return false
   }
-  const payload = body as Record<string, unknown>
-  return payload['recorded'] === true && payload['state'] !== 'recording_unconfirmed'
+  return (body as Record<string, unknown>)['state'] === 'keeper_shutting_down'
 }
 
 export async function answerKeeperAsk(body: AnswerRequestBody): Promise<AnswerAccepted> {
@@ -78,14 +85,8 @@ export async function answerKeeperAsk(body: AnswerRequestBody): Promise<AnswerAc
     if (error instanceof ApiRequestError && error.status === 409) {
       throw new AskAnswerConflict(body.ask_id, error.detail ?? 'already answered')
     }
-    if (error instanceof ApiRequestError && isAskAnswerRecordedOn500(error.status, error.responseData)) {
-      const payload = error.responseData
-      return {
-        askId: typeof payload['ask_id'] === 'string' ? payload['ask_id'] : body.ask_id,
-        answerCount: typeof payload['answer_count'] === 'number' ? payload['answer_count'] : 0,
-        openRemaining: typeof payload['open_remaining'] === 'number' ? payload['open_remaining'] : 0,
-        delivered: false,
-      }
+    if (error instanceof ApiRequestError && isAskAnswerRefusedForShutdown(error.status, error.responseData)) {
+      throw new AskAnswerKeeperShuttingDown(body.ask_id, error.detail ?? 'keeper is shutting down')
     }
     throw error
   }

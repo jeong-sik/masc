@@ -13,7 +13,7 @@ vi.mock('./core', async importOriginal => {
 })
 
 import { ApiRequestError } from './core'
-import { answerKeeperAsk, AskAnswerConflict } from './keeper-asks'
+import { answerKeeperAsk, AskAnswerConflict, AskAnswerKeeperShuttingDown } from './keeper-asks'
 import type { AnswerRequestBody } from '../lib/keeper-ask-draft'
 
 const requestBody: AnswerRequestBody = { name: 'keeper-a', ask_id: 'a1', answers: [] }
@@ -24,28 +24,31 @@ describe('answerKeeperAsk', () => {
     get.mockReset()
   })
 
-  it('treats HTTP 500 with recorded === true as accepted with delivered === false', async () => {
+  it('maps HTTP 503 keeper_shutting_down to AskAnswerKeeperShuttingDown', async () => {
     post.mockRejectedValue(
       new ApiRequestError({
         method: 'POST',
         path: '/api/v1/keepers/ask-answer',
-        status: 500,
+        status: 503,
         responseData: {
-          recorded: true,
-          delivered: false,
+          state: 'keeper_shutting_down',
+          recorded: false,
           ask_id: 'a1',
-          answer_count: 2,
-          open_remaining: 0,
         },
       }),
     )
-    const result = await answerKeeperAsk(requestBody)
-    expect(result).toEqual({
-      askId: 'a1',
-      answerCount: 2,
-      openRemaining: 0,
-      delivered: false,
+    await expect(answerKeeperAsk(requestBody)).rejects.toBeInstanceOf(AskAnswerKeeperShuttingDown)
+  })
+
+  it('rethrows HTTP 503 without the shutdown state', async () => {
+    const err = new ApiRequestError({
+      method: 'POST',
+      path: '/api/v1/keepers/ask-answer',
+      status: 503,
+      responseData: { error: 'booting' },
     })
+    post.mockRejectedValue(err)
+    await expect(answerKeeperAsk(requestBody)).rejects.toBe(err)
   })
 
   it('rethrows HTTP 500 when state is recording_unconfirmed', async () => {

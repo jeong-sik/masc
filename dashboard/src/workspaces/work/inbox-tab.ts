@@ -34,7 +34,7 @@ import {
 import { resourceCache, type FetchReason, type Observed } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
 import { refreshPendingHitl } from '../../shell/shell-state'
-import { isAskAnswerRecordedOn500 } from '../../api/keeper-asks'
+import { isAskAnswerRefusedForShutdown } from '../../api/keeper-asks'
 import {
   decodeGateQueueStrict,
   decodeKeeperAsksWire,
@@ -773,15 +773,12 @@ export function InboxTab(props: WorkspaceViewProps) {
     if (!isEpochCurrent(epoch)) return
     setBusy(false)
     if (!res.ok) {
-      if (isAskAnswerRecordedOn500(res.error.status, res.error.body)) {
-        clearAskDraft(ask.askId)
+      if (isAskAnswerRefusedForShutdown(res.error.status, res.error.body)) {
+        // Nothing was recorded and the question is still open: keep the draft.
         setFeedback({
-          kind: 'ok',
-          message: `${ask.keeper} 질문(${ask.askId}) 답변이 기록되었습니다. Keeper 깨움 전달은 자동 복구 대기 중입니다.`,
+          kind: 'err',
+          message: `${ask.keeper} 가 종료 중이라 답변을 기록하지 않았습니다. Keeper 가 다시 켜진 뒤 보내 주세요.`,
         })
-        resourceCache.invalidateTopic('ask')
-        await loadInbox('manual', ['keeper_ask'])
-        void refreshPendingHitl()
         return
       }
       if (res.error.kind === 'conflict_cas' || res.error.status === 409) {
@@ -796,13 +793,7 @@ export function InboxTab(props: WorkspaceViewProps) {
       return
     }
     clearAskDraft(ask.askId)
-    const deliveredFalse = isRecord(res.value) && res.value.delivered === false
-    setFeedback({
-      kind: 'ok',
-      message: deliveredFalse
-        ? `${ask.keeper} 질문(${ask.askId}) 답변이 기록되었습니다. Keeper 깨움 전달은 자동 복구 대기 중입니다.`
-        : `${ask.keeper} 질문(${ask.askId})에 답변을 전달했습니다.`,
-    })
+    setFeedback({ kind: 'ok', message: `${ask.keeper} 질문(${ask.askId})에 답변을 전달했습니다.` })
     resourceCache.invalidateTopic('ask')
     await loadInbox('manual', ['keeper_ask'])
     void refreshPendingHitl()

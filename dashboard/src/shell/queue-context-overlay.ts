@@ -10,7 +10,7 @@ import { InlineSpinner } from '../components/common/inline-spinner'
 import { MarkdownContent } from '../components/common/markdown-renderer'
 import type { VNode } from 'preact'
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
-import { isAuthenticated, isEpochCurrent, sessionEpoch } from '../core/auth'
+import { authSession, canAccessMemberWorkspace, isEpochCurrent, sessionEpoch } from '../core/auth'
 import { extractObserverTopics, subscribeObserverFrames } from '../core/observer'
 import { formatObserved, resourceCache } from '../core/resource-cache'
 import { apiGet } from '../core/transport'
@@ -161,7 +161,8 @@ function decodeQuickPeekSchedules(raw: unknown): QuickPeekSchedulesResult {
 }
 
 export function QueueContextOverlayBody(): VNode {
-  const authed = isAuthenticated.value
+  const session = authSession.value
+  const canAccess = canAccessMemberWorkspace(session)
   const epoch = sessionEpoch.value
   const approvals = pendingApprovals.value
   const asks = pendingAsks.value
@@ -253,7 +254,7 @@ export function QueueContextOverlayBody(): VNode {
   loadSchedulesRef.current = loadSchedules
 
   useEffect(() => {
-    if (!authed) {
+    if (!canAccess) {
       scheduleAbortRef.current?.abort()
       scheduleAbortRef.current = null
       setScheduleState({ epoch, sample: null, loading: false, error: null })
@@ -273,10 +274,10 @@ export function QueueContextOverlayBody(): VNode {
       scheduleAbortRef.current?.abort()
       scheduleAbortRef.current = null
     }
-  }, [authed, epoch, loadSchedules])
+  }, [canAccess, epoch, loadSchedules])
 
   useEffect(() => {
-    if (!authed) return
+    if (!canAccess) return
     const unsub = subscribeObserverFrames((frame) => {
       const topics = extractObserverTopics(frame)
       if (!topics.some((t) => SCHEDULE_TOPICS.includes(t))) return
@@ -285,7 +286,7 @@ export function QueueContextOverlayBody(): VNode {
     return () => {
       unsub()
     }
-  }, [authed, epoch])
+  }, [canAccess, epoch])
 
   const formatMetric = (value: number | null | undefined): string => {
     if (observed.kind !== 'value') return formatObserved(observed)
@@ -298,8 +299,10 @@ export function QueueContextOverlayBody(): VNode {
         Read-Only Queue & Context Quick-Peek — mutations live in Unified Inbox & Keepers.
       </div>
 
-      ${!authed
-        ? html`<p class="ap-muted">인증 후 활성 큐와 컨텍스트 요약을 표시합니다.</p>`
+      ${!canAccess
+        ? html`<p class="ap-muted">${session.kind === 'single_user_local' && session.role === 'player'
+            ? '플레이어 세션에서는 작업 공간 큐와 컨텍스트 요약을 조회할 수 없습니다.'
+            : '인증 후 활성 큐와 컨텍스트 요약을 표시합니다.'}</p>`
         : html`
             <div class="ap-mini-kpis">
               <div class="ap-mini-kpi">

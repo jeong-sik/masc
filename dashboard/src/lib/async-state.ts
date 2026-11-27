@@ -167,8 +167,16 @@ export function createManagedAsyncResource<T>(initialData: T | null = null): Man
         promise = fn(requestController.signal, previous)
       } catch (error) {
         if (gen !== generation || requestController.signal.aborted) return Promise.resolve(undefined)
-        readFailure = error
         controller = null
+        if (isAbortError(error)) {
+          state.value = {
+            data: previous,
+            loading: false,
+            error: null,
+          }
+          return Promise.resolve(undefined)
+        }
+        readFailure = error
         state.value = {
           data: previous,
           loading: false,
@@ -188,7 +196,15 @@ export function createManagedAsyncResource<T>(initialData: T | null = null): Man
           return data
         })
         .catch((error) => {
-          if (gen !== generation || requestController.signal.aborted || isAbortError(error)) return undefined
+          if (gen !== generation || requestController.signal.aborted) return undefined
+          if (isAbortError(error)) {
+            state.value = {
+              data: previous,
+              loading: false,
+              error: null,
+            }
+            return undefined
+          }
           readFailure = error
           state.value = {
             data: previous,

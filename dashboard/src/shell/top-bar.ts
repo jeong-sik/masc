@@ -17,7 +17,7 @@ import {
   activeWorkspaceId,
   authSession,
   bootstrapAuthSession,
-  isAuthenticated,
+  canAccessMemberWorkspace,
   selectWorkspace,
   sessionEpoch,
   setSingleUserToken,
@@ -515,7 +515,7 @@ export function TopBar(): VNode {
   const navDef = WORKSPACE_NAV_BY_ID[route.workspace]
   const mobile = isMobileViewport.value
   const pending = inboxPendingCount.value
-  const pendingUnchecked = isAuthenticated.value && inboxUncheckedSources.value.length > 0
+  const pendingUnchecked = canAccessMemberWorkspace(session) && inboxUncheckedSources.value.length > 0
   const pendingLabel = pendingUnchecked ? formatInboxPendingCount(pending, true) : `${pending}건 대기`
   const formattedBadge = formatInboxBadge(pending, pendingUnchecked)
   const pendingBadge = formattedBadge ?? '0'

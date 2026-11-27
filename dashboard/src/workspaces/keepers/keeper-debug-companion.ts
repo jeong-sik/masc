@@ -657,63 +657,76 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
 
         ${tab === 'context' && html`
           ${contextError && html`<div class="ap-error" role="alert">${contextError}</div>`}
-          <${UPlotChart}
-            id=${`kp-ctx-${keeperName}`}
-            title="60-Turn Context Fill %"
-            subtitle=${html`
-              <span class="kp-pill" data-tone="brass">
-                Compaction epochs: ${compactionEpochs !== null ? compactionEpochs : '없음'}
-              </span>
-            `}
-            data=${ctxChart.data}
-            series=${CONTEXT_SERIES}
-            height=${140}
-            syncCrosshair=${false}
-            emptyLabel="턴 컨텍스트 데이터 없음"
-          />
+          ${!canTokenReadDebug
+            ? html`
+                <div class="kp-card">
+                  <div class="kp-card-head">
+                    <h3>60-Turn Context Fill & Prompt Cache</h3>
+                  </div>
+                  <div class="kp-empty" data-testid="companion-context-token-locked" role="status">
+                    컨텍스트 채움 추이와 프롬프트 캐시 조회는 토큰 인증 싱글유저 세션 전용입니다.
+                  </div>
+                </div>
+              `
+            : html`
+                <${UPlotChart}
+                  id=${`kp-ctx-${keeperName}`}
+                  title="60-Turn Context Fill %"
+                  subtitle=${html`
+                    <span class="kp-pill" data-tone="brass">
+                      Compaction epochs: ${compactionEpochs !== null ? compactionEpochs : '없음'}
+                    </span>
+                  `}
+                  data=${ctxChart.data}
+                  series=${CONTEXT_SERIES}
+                  height=${140}
+                  syncCrosshair=${false}
+                  emptyLabel="턴 컨텍스트 데이터 없음"
+                />
 
-          ${ctxChart.compactionTurns.length > 0 && html`
-            <div class="kp-pill-row">
-              <span class="kp-pill" data-tone="info">
-                Compaction 감지 턴: ${ctxChart.compactionTurns.map((t) => `#${t}`).join(', ')}
-              </span>
-            </div>
-          `}
+                ${ctxChart.compactionTurns.length > 0 && html`
+                  <div class="kp-pill-row">
+                    <span class="kp-pill" data-tone="info">
+                      Compaction 감지 턴: ${ctxChart.compactionTurns.map((t) => `#${t}`).join(', ')}
+                    </span>
+                  </div>
+                `}
 
-          <!-- 4-segment Prompt Cache SVG stacked bar (zero inline style) -->
-          <div class="kp-card">
-            <div class="kp-card-head">
-              <h3>Prompt Cache (4-Segment)</h3>
-              <span class="kp-pill" data-tone="ok">
-                Hit ${cacheSegs.cacheHitPct !== null ? `${cacheSegs.cacheHitPct}%` : '없음'}
-              </span>
-            </div>
-            <svg class="kp-svg-bar" viewBox="0 0 100 12" preserveAspectRatio="none" aria-label="프롬프트 캐시 4구간 막대">
-              <rect x="0" y="0" width="100" height="12" class="kp-seg-bg" />
-              <rect x="0" y="0" width=${segReadW} height="12" class="kp-seg-cache-read" />
-              <rect x=${segReadW} y="0" width=${segCreateW} height="12" class="kp-seg-cache-create" />
-              <rect x=${segReadW + segCreateW} y="0" width=${segUncachedW} height="12" class="kp-seg-uncached" />
-              <rect x=${segReadW + segCreateW + segUncachedW} y="0" width=${segOutputW} height="12" class="kp-seg-output" />
-            </svg>
-            <div class="kp-grid-2">
-              <div class="kp-kv-box">
-                <span class="kp-kv-k">Cache Read</span>
-                <span class="kp-kv-v">${cacheSegs.cacheRead.toLocaleString('en-US')}</span>
-              </div>
-              <div class="kp-kv-box">
-                <span class="kp-kv-k">Cache Write</span>
-                <span class="kp-kv-v">${cacheSegs.cacheCreate.toLocaleString('en-US')}</span>
-              </div>
-              <div class="kp-kv-box">
-                <span class="kp-kv-k">Uncached In</span>
-                <span class="kp-kv-v">${cacheSegs.uncachedInput.toLocaleString('en-US')}</span>
-              </div>
-              <div class="kp-kv-box">
-                <span class="kp-kv-k">Output</span>
-                <span class="kp-kv-v">${cacheSegs.output.toLocaleString('en-US')}</span>
-              </div>
-            </div>
-          </div>
+                <!-- 4-segment Prompt Cache SVG stacked bar (zero inline style) -->
+                <div class="kp-card">
+                  <div class="kp-card-head">
+                    <h3>Prompt Cache (4-Segment)</h3>
+                    <span class="kp-pill" data-tone="ok">
+                      Hit ${cacheSegs.cacheHitPct !== null ? `${cacheSegs.cacheHitPct}%` : '없음'}
+                    </span>
+                  </div>
+                  <svg class="kp-svg-bar" viewBox="0 0 100 12" preserveAspectRatio="none" aria-label="프롬프트 캐시 4구간 막대">
+                    <rect x="0" y="0" width="100" height="12" class="kp-seg-bg" />
+                    <rect x="0" y="0" width=${segReadW} height="12" class="kp-seg-cache-read" />
+                    <rect x=${segReadW} y="0" width=${segCreateW} height="12" class="kp-seg-cache-create" />
+                    <rect x=${segReadW + segCreateW} y="0" width=${segUncachedW} height="12" class="kp-seg-uncached" />
+                    <rect x=${segReadW + segCreateW + segUncachedW} y="0" width=${segOutputW} height="12" class="kp-seg-output" />
+                  </svg>
+                  <div class="kp-grid-2">
+                    <div class="kp-kv-box">
+                      <span class="kp-kv-k">Cache Read</span>
+                      <span class="kp-kv-v">${cacheSegs.cacheRead.toLocaleString('en-US')}</span>
+                    </div>
+                    <div class="kp-kv-box">
+                      <span class="kp-kv-k">Cache Write</span>
+                      <span class="kp-kv-v">${cacheSegs.cacheCreate.toLocaleString('en-US')}</span>
+                    </div>
+                    <div class="kp-kv-box">
+                      <span class="kp-kv-k">Uncached In</span>
+                      <span class="kp-kv-v">${cacheSegs.uncachedInput.toLocaleString('en-US')}</span>
+                    </div>
+                    <div class="kp-kv-box">
+                      <span class="kp-kv-k">Output</span>
+                      <span class="kp-kv-v">${cacheSegs.output.toLocaleString('en-US')}</span>
+                    </div>
+                  </div>
+                </div>
+              `}
 
           <div class="kp-card">
             <div class="kp-card-head">

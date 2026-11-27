@@ -240,4 +240,17 @@ describe('<TimeAgo/> title attribute (integration)', () => {
     expect(title).toBe(toHumanTooltip(timestamp))
     expect(title).not.toBe(toIsoDatetime(timestamp))
   })
+
+  it('handles invalid and non-finite timestamps without throwing RangeError', () => {
+    expect(toIsoDatetime('not-a-date')).toBe('')
+    expect(toIsoDatetime(Number.NaN)).toBe('')
+    expect(toIsoDatetime(Number.POSITIVE_INFINITY)).toBe('')
+    expect(pickDisplayText('not-a-date', 'both')).toBe('—')
+    expect(toAccessibleLabel('not-a-date')).toBe('—')
+    render(html`<${TimeAgo} timestamp=${'not-a-date'} />`, container)
+    const el = container.querySelector('time')
+    expect(el).toBeTruthy()
+    expect(el!.textContent).toBe('—')
+    expect(el!.getAttribute('datetime')).toBeNull()
+  })
 })

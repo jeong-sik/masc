@@ -39,6 +39,7 @@ import {
   type TaskItem,
   type WorkspacePreconditionSnapshot,
 } from './index'
+import { readWorkspacePrecondition } from './types'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -2236,5 +2237,48 @@ describe('workspaces/work', () => {
     const gateApproveBtn = [...container.querySelectorAll<HTMLButtonElement>('button')]
       .find((b) => b.textContent?.includes('승인 (Approve)'))!
     expect(gateApproveBtn.disabled).toBe(true)
+  })
+
+  it('readWorkspacePrecondition isolates caller AbortSignal from the shared resourceCache flight', async () => {
+    resourceCache.clearAll()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'admin',
+      canTokenAdmin: true,
+      canTokenRead: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    let resolveHealth!: (res: Response) => void
+    let receivedSignal: AbortSignal | undefined
+    globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      receivedSignal = init?.signal ?? undefined
+      return new Promise<Response>((resolve) => { resolveHealth = resolve })
+    }) as typeof fetch
+
+    const caller1 = new AbortController()
+    const p1 = readWorkspacePrecondition(caller1.signal)
+    const p2 = readWorkspacePrecondition()
+    await flushUi(2)
+
+    caller1.abort()
+    const r1 = await p1
+    expect(r1.ok).toBe(false)
+    if (!r1.ok) expect(r1.error.kind).toBe('aborted')
+    // Caller 1 abort must NOT abort the shared cache flight
+    expect(receivedSignal?.aborted).toBe(false)
+
+    resolveHealth(jsonResponse({
+      paths: { effective_base_path: '/ws/a', effective_masc_root: '/ws/a/.masc' },
+    }))
+    const r2 = await p2
+    expect(r2.ok).toBe(true)
+    if (r2.ok) {
+      expect(r2.value.base_path).toBe('/ws/a')
+      expect(r2.value.masc_root).toBe('/ws/a/.masc')
+    }
+    expect(resourceCache.observe('work:workspace-precondition').value.kind).toBe('value')
   })
 })

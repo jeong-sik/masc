@@ -2329,5 +2329,28 @@ describe('workspaces/knowledge', () => {
     await flushUi(10)
     expect(container.querySelector('[data-testid="artifacts-admin-locked"]')).not.toBeNull()
     expect(seenUrls.some((u) => u === '/api/v1/published-artifacts')).toBe(false)
+
+    // 4. Single-user loopback (canTokenRead=false) disables board reactions and sends 0x POST /api/v1/board/reactions
+    seenUrls.length = 0
+    render(null, container)
+    resourceCache.clearAll()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: false,
+      role: 'admin',
+      canTokenAdmin: false,
+      canTokenRead: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    render(html`<${KnowledgeWorkspace} subroute="board" entityId="post-rbac-1" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(10)
+    const reactBtns = [...container.querySelectorAll<HTMLButtonElement>('button.kn-react-pill')]
+    expect(reactBtns.length).toBeGreaterThan(0)
+    expect(reactBtns.every((b) => b.disabled)).toBe(true)
+    reactBtns[0]?.click()
+    await flushUi(4)
+    expect(seenUrls.some((u) => u.includes('/api/v1/board/reactions'))).toBe(false)
   })
 })

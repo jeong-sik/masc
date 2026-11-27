@@ -1541,4 +1541,66 @@ describe('Proposal A+ Shell components', () => {
       vi.useRealTimers()
     }
   })
+
+  it('gates player sessions in Quick-Peek, TopBar, and CommandPalette and recomputes palette on single-user capability updates', async () => {
+    const requestedUrls: string[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      requestedUrls.push(String(input))
+      return new Response(JSON.stringify({}), { status: 200, headers: { 'content-type': 'application/json' } })
+    }))
+    try {
+      authSession.value = {
+        kind: 'single_user_local',
+        mode: 'single_user',
+        tokenPresent: true,
+        role: 'player',
+        canTokenAdmin: false,
+        canTokenRead: false,
+        authMethods: AUTH_METHODS,
+        workspaceId: 'default',
+      }
+      hitlSourceStatus.value = {
+        ...hitlSourceStatus.value,
+        approvals: { kind: 'failed', message: 'stale' },
+      }
+
+      await act(async () => {
+        render(h('div', {}, h(TopBar, {}), h(QueueContextOverlayBody, {})), container)
+      })
+      await new Promise((r) => setTimeout(r, 20))
+      expect(requestedUrls.some((u) => u.includes('/api/v1/dashboard/shell'))).toBe(false)
+      expect(requestedUrls.some((u) => u.includes('/api/v1/dashboard/scheduled-automation'))).toBe(false)
+      expect(container.querySelector('[data-testid="inbox-pill"]')?.textContent).not.toContain('?')
+      expect(buildPaletteCommands(authSession.value).some((c) => c.id === 'action:queue-context')).toBe(false)
+
+      // CommandPalette useMemo must recompute when single_user_local role/capabilities change in place
+      commandPaletteOpen.value = true
+      await act(async () => {
+        render(h(CommandPalette, {}), container)
+      })
+      const input = container.querySelector<HTMLInputElement>('input')!
+      await act(async () => {
+        fireEvent.input(input, { target: { value: 'queue' } })
+      })
+      expect(container.textContent).not.toContain('Toggle Queue & Context Quick-Peek')
+
+      authSession.value = {
+        kind: 'single_user_local',
+        mode: 'single_user',
+        tokenPresent: true,
+        role: 'admin',
+        canTokenAdmin: true,
+        canTokenRead: true,
+        authMethods: AUTH_METHODS,
+        workspaceId: 'default',
+      }
+      await act(async () => {
+        render(h(CommandPalette, {}), container)
+      })
+      expect(container.textContent).toContain('Toggle Queue & Context Quick-Peek')
+    } finally {
+      commandPaletteOpen.value = false
+      vi.unstubAllGlobals()
+    }
+  })
 })

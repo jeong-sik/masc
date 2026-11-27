@@ -165,7 +165,7 @@ export function WikiEmbedPicker({
 
   return html`
     <${PopoverMenu}
-      align="left"
+      align="right"
       role="dialog"
       open=${open}
       onOpenChange=${(next: boolean) => {
@@ -241,12 +241,12 @@ export function WikiEmbedPicker({
                       </button>
                     </div>
                   `)}
-                  ${hiddenPagesCount > 0 && html`
-                    <div class="kn-embed-picker-overflow" data-testid="wiki-embed-picker-overflow">
-                      +${hiddenPagesCount}건 더 있음 — 검색어로 좁혀주세요
-                    </div>
-                  `}
                 </div>
+                ${hiddenPagesCount > 0 && html`
+                  <div class="kn-embed-picker-overflow" data-testid="wiki-embed-picker-overflow">
+                    +${hiddenPagesCount}건 더 있음 — 검색어로 좁혀주세요
+                  </div>
+                `}
               `
           : !isSingleUser
             ? html`
@@ -284,12 +284,12 @@ export function WikiEmbedPicker({
                               </button>
                             </div>
                           `)}
-                          ${hiddenArtifactsCount > 0 && html`
-                            <div class="kn-embed-picker-overflow" data-testid="wiki-embed-picker-overflow">
-                              +${hiddenArtifactsCount}건 더 있음 — 검색어로 좁혀주세요
-                            </div>
-                          `}
                         </div>
+                        ${hiddenArtifactsCount > 0 && html`
+                          <div class="kn-embed-picker-overflow" data-testid="wiki-embed-picker-overflow">
+                            +${hiddenArtifactsCount}건 더 있음 — 검색어로 좁혀주세요
+                          </div>
+                        `}
                       `}
       `}
     <//>

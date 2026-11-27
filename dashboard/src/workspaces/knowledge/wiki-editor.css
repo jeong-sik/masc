@@ -168,9 +168,9 @@
 }
 
 .kn-embed-picker-overflow {
-  padding: 6px 8px;
-  font-size: 11px;
-  color: var(--color-fg-muted);
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-11);
+  color: var(--fg-3);
   text-align: center;
-  border-top: 1px dashed var(--color-border-subtle);
+  border-top: 1px dashed var(--line-1);
 }

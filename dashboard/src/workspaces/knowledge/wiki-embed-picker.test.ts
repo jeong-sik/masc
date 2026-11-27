@@ -283,5 +283,6 @@ describe('WikiEmbedPicker', () => {
     expect(container.querySelectorAll('[role="listitem"]').length).toBe(40)
     const overflow = container.querySelector('[data-testid="wiki-embed-picker-overflow"]')
     expect(overflow?.textContent).toContain('+5건 더 있음')
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

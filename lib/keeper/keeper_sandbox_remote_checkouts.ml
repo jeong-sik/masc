@@ -3,22 +3,43 @@ open Keeper_meta_contract
 let target_ref_stale_after_s = 900
 
 (* How long the endpoint probe may run: the shim's limit on the payload
-   (python start, the walk, and every git call in every checkout found) and
+   (python start, the walk, and the git reads of every checkout reported) and
    the wait for the endpoint around it. [Repo_git.inspection_timeout_sec]
    budgets git subprocesses on this host, which is different work.
-   Measured 2026-11-27 (#35039), the same probe and argv run uncapped on live
-   endpoints, 5 runs per Keeper:
-     microvm (apple_container): n=20 over 4 Keepers, p90 18.9 s, max 20.3 s
-     remote_ssh:                n=20 over 4 Keepers, p90 39.4 s, max 55.4 s
-   The slow runs are Keepers at the 32-checkout cap, slowest on a cold cache.
-   40 s is the remote_ssh p90 rounded up. The runner's own wall limit adds the
-   connect (10 s on every endpoint configured today) and 4 s grace: 54 s,
-   inside the dashboard's 60 s request timeout (DEFAULT_MCP_TIMEOUT_MS) that
-   waits on this probe. Other steps of that request (guest admission, the
-   absence check after a failure, live status) are not counted in the 54 s.
-   The cold remote_ssh tail (52-55 s) does not fit under that timeout at any
-   budget; only a cheaper probe can bring it in. *)
+   Measured 2026-11-27 (#35039) on live endpoints, 5 runs per Keeper over 4
+   Keepers per backend, uncapped, payload seconds:
+                  one checkout at a time    four at a time (this probe)
+     microvm      p90 19.0, max 20.5        p90  9.0, max 16.2
+     remote_ssh   p90 54.8, max 57.0        p90 13.5, max 29.0
+   The slow runs are Keepers at the 32-checkout cap on a cold cache. 40 s
+   keeps the slowest run of this probe with room. The runner's own wall limit
+   adds the connect (10 s on every endpoint configured today) and 4 s grace:
+   54 s. A microvm request first admits the guest, up to
+   [guest_state_timeout_sec] (5 s): 59 s, inside the dashboard's 60 s request
+   timeout (DEFAULT_MCP_TIMEOUT_MS) that waits on this probe. The absence
+   check runs only after a failed probe. *)
 let probe_budget_sec = 40.0
+
+(* How long one checkout's git reads may take together. The longest checkout
+   in the runs above took 11.8 s (remote_ssh, cold cache, four at a time);
+   20 s is that with room. It is below [probe_budget_sec], so a checkout whose
+   git does not answer loses its own git fields, read as unread after 20 s,
+   while the other workers finish the rest. *)
+let checkout_inspection_sec = 20.0
+
+(* Every microvm guest and the remote_ssh container configured on 2026-11-27
+   has 4 CPUs ([container list]), and [git status], the bulk of the work,
+   is bound by CPU and disk. *)
+let inspection_workers = 4
+
+(* Guest admission before the probe and the absence check after a failed one
+   each ask the container runtime about one guest ([container inspect], then
+   its inventory when inspect does not answer). Neither walks the workspace or
+   runs git, so they keep a short budget instead of the probe's.
+   [container inspect] on the four running Apple guests, 2026-11-27: n=20,
+   median 0.09 s, max 0.20 s. 5 s is what these reads had before the probe got
+   its own budget. *)
+let guest_state_timeout_sec = 5.0
 
 type remote_origin =
   | Origin_url of string
@@ -47,6 +68,7 @@ let probe_script =
   {|\
 import os, sys, json, subprocess, time, stat
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 
 # The arguments are built by the OCaml side; a malformed one is its
 # defect and ends the probe with a traceback the caller reports.
@@ -57,7 +79,8 @@ target_ref_stale_after_s = int(sys.argv[4])
 mode = sys.argv[5]
 if mode not in ('inspect', 'layout'):
     raise ValueError('unknown probe mode')
-git_timeout_sec = float(sys.argv[6])
+checkout_inspection_sec = float(sys.argv[6])
+inspection_workers = int(sys.argv[7])
 
 def canon_url(u):
     if not u: return ''
@@ -78,15 +101,25 @@ for repo in catalog:
     if u: catalog_by_url[u] = repo
 
 def inspect_git(path):
-    def git(*args):
-        try:
-            r = subprocess.run(['git', '-C', path] + list(args), capture_output=True, text=True,
-                               timeout=git_timeout_sec)
-            return r.stdout.strip() if r.returncode == 0 else None
-        except (subprocess.TimeoutExpired, OSError):
-            # No git on the endpoint, or one call past its budget: that
-            # field is unavailable, the rest of the row still reports.
+    # Every git call in this checkout shares one deadline. A call past it
+    # is a field that was not read; the other checkouts keep their own.
+    deadline = time.monotonic() + checkout_inspection_sec
+
+    def run(args):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
             return None
+        try:
+            return subprocess.run(['git', '-C', path] + list(args), capture_output=True, text=True,
+                                  timeout=remaining)
+        except (subprocess.TimeoutExpired, OSError):
+            # No git on the endpoint, or the call ran past the deadline:
+            # that field is unavailable, the rest of the row still reports.
+            return None
+
+    def git(*args):
+        r = run(args)
+        return r.stdout.strip() if r is not None and r.returncode == 0 else None
 
     # git remote get-url exits 2 only for "no such remote", and it needs a
     # repository, so an unusable one (dubious ownership, a broken .git) dies
@@ -95,16 +128,13 @@ def inspect_git(path):
     # not happen.
     origin = None
     origin_state = 'unavailable'
-    try:
-        r = subprocess.run(['git', '-C', path, 'remote', 'get-url', 'origin'],
-                           capture_output=True, text=True, timeout=git_timeout_sec)
+    r = run(['remote', 'get-url', 'origin'])
+    if r is not None:
         if r.returncode == 0 and r.stdout.strip():
             origin = r.stdout.strip()
             origin_state = 'present'
         elif r.returncode == 2:
             origin_state = 'missing'
-    except (subprocess.TimeoutExpired, OSError):
-        pass
     branch = git('symbolic-ref', '--short', '-q', 'HEAD') or git('rev-parse', '--abbrev-ref', 'HEAD')
     head = git('rev-parse', 'HEAD')
     status = git('--no-optional-locks', 'status', '--porcelain=v1', '--untracked-files=normal')
@@ -178,6 +208,7 @@ def inspect_git(path):
 
 root = '.'
 checkouts = []
+paths = {}
 queue = deque([''])
 scanned = 0
 limit = None
@@ -194,13 +225,12 @@ def git_link_at(path):
     return None
 
 def record_checkout(path, rel, git_link):
-    info = inspect_git(path) if mode == 'inspect' else {}
     checkouts.append({
         'relative_path': rel or '.',
         'name': os.path.basename(os.path.abspath(path)),
-        'git_link': git_link,
-        **info
+        'git_link': git_link
     })
+    paths[rel or '.'] = path
 
 root_git_link = git_link_at(root)
 if root_git_link:
@@ -245,6 +275,16 @@ elif unreadable is not None:
 
 checkouts.sort(key=lambda c: c['relative_path'])
 checkouts = checkouts[:checkout_budget]
+
+# Git runs after the walk, only in the checkouts that are reported (the one
+# found past the budget is never inspected), and in a few checkouts at a
+# time. Each checkout's reads depend on nothing outside it, so the rows are
+# the ones a one-at-a-time pass would print, in the same order.
+if mode == 'inspect' and checkouts:
+    with ThreadPoolExecutor(max_workers=inspection_workers) as pool:
+        inspections = pool.map(inspect_git, [paths[c['relative_path']] for c in checkouts])
+        for row, info in zip(checkouts, inspections):
+            row.update(info)
 
 result = {
     'checkouts': checkouts,
@@ -491,8 +531,24 @@ let catalog_to_json_arg catalog =
   in
   Yojson.Safe.to_string (`List json_repos)
 
+type budgets =
+  { guest_state_sec : float
+  ; payload_sec : float
+  ; checkout_sec : float
+  ; workers : int
+  }
+
+let budgets ~timeout_sec =
+  { guest_state_sec = guest_state_timeout_sec
+  ; payload_sec = timeout_sec
+  ; checkout_sec = checkout_inspection_sec
+  ; workers = inspection_workers
+  }
+;;
+
 module For_testing = struct
   let probe_script = probe_script
+  let budgets = budgets
 end
 
 type probe_mode = Inspect | Layout
@@ -500,6 +556,7 @@ type probe_mode = Inspect | Layout
 let run_probe ?read_authority ~timeout_sec ~(config : Workspace.config)
     ~(meta : keeper_meta) ~catalog ~mode ~parse ()
   =
+  let budgets = budgets ~timeout_sec in
   let root =
     match (match read_authority with None -> Keeper_sandbox_remote_lane.workspace_root ~config ~meta
       | Some authority -> Ok (Keeper_sandbox_remote_lane.read_authority_workspace_root authority)) with
@@ -515,7 +572,7 @@ let run_probe ?read_authority ~timeout_sec ~(config : Workspace.config)
   else
     let execute endpoint =
       let root = Keeper_sandbox_remote.workspace_root endpoint in
-      let runner = Keeper_sandbox_remote.runner ~timeout_sec endpoint in
+      let runner = Keeper_sandbox_remote.runner ~timeout_sec:budgets.payload_sec endpoint in
       let catalog_arg = catalog_to_json_arg catalog in
       (* The probe takes both budgets from here so the endpoint walk and the
          host walk in [Keeper_playground_checkouts] stop at the same numbers. *)
@@ -528,10 +585,8 @@ let run_probe ?read_authority ~timeout_sec ~(config : Workspace.config)
         ; string_of_int Keeper_playground_checkouts.max_scanned_entries
         ; string_of_int target_ref_stale_after_s
         ; (match mode with Inspect -> "inspect" | Layout -> "layout")
-          (* Each git call in the probe gets the same budget as the whole
-             payload, so no call is promised more time than the shim gives
-             the probe. *)
-        ; Printf.sprintf "%g" timeout_sec
+        ; Printf.sprintf "%g" budgets.checkout_sec
+        ; string_of_int budgets.workers
         ]
       in
       (* Matched rather than collapsed with [status_tuple]: that helper turns
@@ -553,12 +608,21 @@ let run_probe ?read_authority ~timeout_sec ~(config : Workspace.config)
       Ok (root, outcome)
     in
     let dispatched = match read_authority with
-      | None -> Result.bind (Keeper_sandbox_remote_lane.attached_guest_endpoint ~timeout_sec ~config ~meta ()) execute
+      | None ->
+        Result.bind
+          (Keeper_sandbox_remote_lane.attached_guest_endpoint
+             ~timeout_sec:budgets.guest_state_sec ~config ~meta ())
+          execute
       | Some authority ->
-        Keeper_sandbox_remote_lane.with_read_authority_endpoint ~timeout_sec authority ~config ~meta execute in
+        Keeper_sandbox_remote_lane.with_read_authority_endpoint
+          ~timeout_sec:budgets.guest_state_sec authority ~config ~meta execute in
+    let guest_absence () =
+      Keeper_turn_sandbox_runtime.microvm_guest_absence_reason
+        ~timeout_sec:budgets.guest_state_sec ~config ~meta ()
+    in
     match dispatched with
     | Error err ->
-      (match Keeper_turn_sandbox_runtime.microvm_guest_absence_reason ~timeout_sec ~config ~meta () with
+      (match guest_absence () with
        | Some _ -> Error (Keeper_playground_checkouts.Root_missing { root })
        | None ->
          Error (Keeper_playground_checkouts.Root_unreadable { root; detail = err }))
@@ -567,7 +631,7 @@ let run_probe ?read_authority ~timeout_sec ~(config : Workspace.config)
       | Masc_exec.Sandbox_target.Transport_failed { reason; _ } -> (
         (* A guest that has gone away is absence, the same answer the exit
            arms give it, and the booted flag has to be dropped either way. *)
-        match Keeper_turn_sandbox_runtime.microvm_guest_absence_reason ~timeout_sec ~config ~meta () with
+        match guest_absence () with
         | Some _ ->
           Error (Keeper_playground_checkouts.Root_missing { root })
         | None ->
@@ -580,7 +644,7 @@ let run_probe ?read_authority ~timeout_sec ~(config : Workspace.config)
          | Error err ->
            Error (Keeper_playground_checkouts.Root_unreadable { root; detail = err }))
       | Unix.WEXITED code ->
-        (match Keeper_turn_sandbox_runtime.microvm_guest_absence_reason ~timeout_sec ~config ~meta () with
+        (match guest_absence () with
          | Some _ ->
            Error (Keeper_playground_checkouts.Root_missing { root })
          | None ->
@@ -589,7 +653,7 @@ let run_probe ?read_authority ~timeout_sec ~(config : Workspace.config)
            in
            Error (Keeper_playground_checkouts.Root_unreadable { root; detail }))
       | Unix.WSIGNALED signal ->
-        (match Keeper_turn_sandbox_runtime.microvm_guest_absence_reason ~timeout_sec ~config ~meta () with
+        (match guest_absence () with
          | Some _ ->
            Error (Keeper_playground_checkouts.Root_missing { root })
          | None ->

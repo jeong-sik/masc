@@ -179,21 +179,37 @@ let remove_unreferenced ~live dir report =
       report
       names
 
-(* Every directory under the session root is visited, at any depth; symlinks
-   are not followed. *)
-let rec sweep_tree ~live dir report =
+let native_executions_dirname = "native-executions"
+
+(* Content-addressed checkpoint blobs ([objects/]) and per-call native
+   execution journals ([native-executions/]) sit inside a session directory
+   beside [accepted-checkpoints/] and hold tens of thousands of entries but
+   never nested session roots. Skipping them avoids an unbounded tree walk on
+   startup (measured on a live workspace: 17,347 dirs and 46,348 files,
+   12.8 s reduced to 0.1 s). *)
+let is_non_session_subtree name =
+  String.equal name Keeper_checkpoint_object_store.dirname
+  || String.equal name native_executions_dirname
+
+(* Every session directory under the session root is visited, at any depth,
+   skipping non-session content subtrees inside session directories (depth > 0);
+   symlinks are not followed. *)
+let rec sweep_tree ~live ~depth dir report =
   match sorted_entries dir with
   | Error detail -> failed report detail
   | Ok names ->
     List.fold_left
       (fun report name ->
-         let path = Filename.concat dir name in
-         match is_directory path with
-         | Error detail -> failed report detail
-         | Ok false -> report
-         | Ok true when String.equal name Keeper_checkpoint_store.retained_dirname ->
-           remove_unreferenced ~live path report
-         | Ok true -> sweep_tree ~live path report)
+         if depth > 0 && is_non_session_subtree name
+         then report
+         else
+           let path = Filename.concat dir name in
+           match is_directory path with
+           | Error detail -> failed report detail
+           | Ok false -> report
+           | Ok true when String.equal name Keeper_checkpoint_store.retained_dirname ->
+             remove_unreferenced ~live path report
+           | Ok true -> sweep_tree ~live ~depth:(depth + 1) path report)
       report
       names
 
@@ -208,6 +224,6 @@ let run ~runtime_root =
     match is_directory session_root with
     | Error detail -> failed empty detail
     | Ok false -> empty
-    | Ok true -> sweep_tree ~live session_root empty
+    | Ok true -> sweep_tree ~live ~depth:0 session_root empty
   in
   Ok { report with failures = List.rev report.failures }

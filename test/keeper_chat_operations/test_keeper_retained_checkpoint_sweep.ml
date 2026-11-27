@@ -398,11 +398,33 @@ let test_response_intent_keeps_source_and_candidate_after_restart () = with_root
   check bool "current original input retained" true (Sys.file_exists (file original));
   List.iter (fun reference -> check bool "cancelled response evidence swept" false (Sys.file_exists (file reference))) [source;candidate])
 
+(* Non-session content subtrees ([objects/] and [native-executions/]) hold tens
+   of thousands of blob and journal files beside [accepted-checkpoints/] and
+   must not be descended by the retained sweep. *)
+let test_skips_objects_and_native_executions_subtrees () = with_root (fun root ->
+  let orphan = checkpoint "orphan-retained" in
+  let real_retained = retained root ~session:["sweep-trace"] orphan in
+  let objects_decoy =
+    retained root ~session:["sweep-trace"; Masc.Keeper_checkpoint_object_store.dirname; "ab"] orphan
+  in
+  let native_decoy =
+    retained root ~session:["sweep-trace"; "native-executions"; "call-1"] orphan
+  in
+  List.iter (fun path -> write path "{}") [real_retained; objects_decoy; native_decoy];
+  let report = sweep root in
+  check int "only the session retained file is removed" 1 report.removed;
+  check (list string) "no failures" [] report.failures;
+  check bool "session retained orphan removed" false (Sys.file_exists real_retained);
+  check bool "objects subtree not descended" true (Sys.file_exists objects_decoy);
+  check bool "native-executions subtree not descended" true (Sys.file_exists native_decoy))
+
 let () =
   run "keeper_retained_checkpoint_sweep"
     [ ( "sweep"
       , [ test_case "response intent retains original source and candidate across restart" `Quick
             test_response_intent_keeps_source_and_candidate_after_restart;
+          test_case "skips objects and native-executions content subtrees" `Quick
+            test_skips_objects_and_native_executions_subtrees;
           test_case "prior input uncertainty preserves every retained artifact" `Quick
             test_prior_input_history_keeps_unnamed_retained_evidence;
           test_case "input checkpoint owner survives restart sweep" `Quick

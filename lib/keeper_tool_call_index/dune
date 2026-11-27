@@ -5,6 +5,8 @@
  (public_name masc.keeper_tool_call_index)
  (wrapped false)
  (modules keeper_tool_call_index)
+ ; Sqlite3 here has no READONLY open (Masc_sqlite3, #36195).
+ (flags (:standard -open Masc_sqlite3))
  (libraries
   dated_jsonl
    masc.agent_core.digest
@@ -14,7 +16,7 @@
   masc_core
   masc_process
   masc.agent_observation
-  sqlite3
+  masc.sqlite_file
   threads
   unix
   uuidm

@@ -17,7 +17,8 @@
   server_dashboard_http_schedule_actions
   server_dashboard_http_keeper_event_queue_operator_execute
   server_schedule_runner_policy)
- (flags :standard -open Masc -w +33)
+ ; Sqlite3 here has no READONLY open (Masc_sqlite3, #36195).
+ (flags :standard -open Masc -open Masc_sqlite3 -w +33)
  (libraries
   masc.lockfree_atomic
   masc.artifact_document_engine
@@ -104,7 +105,6 @@
   ws-direct-core
   ws-direct-gluten
   bigstringaf
-  sqlite3
   masc.sqlite_file
   unix
   threads

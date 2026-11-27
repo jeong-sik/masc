@@ -486,6 +486,31 @@ export const WIKI_SOURCES: readonly WikiSource[] = [
   'observation',
 ] as const
 
+/** Every link kind the server writes in `outgoing_links[].kind`
+ * (`link_to_json` in lib/server/server_dashboard_http_wiki.ml). */
+export const WIKI_LINK_KINDS = [
+  'page',
+  'own_file',
+  'external',
+  'invalid_name',
+  'unsupported:anchor',
+  'unsupported:scheme',
+  'unsupported:path',
+  'unsupported:not_markdown',
+  'unsupported:wikilink',
+] as const
+
+export type WikiLinkKind = (typeof WIKI_LINK_KINDS)[number]
+
+export interface WikiOutgoingLink {
+  readonly text: string
+  readonly kind: WikiLinkKind
+  readonly target: string
+  readonly raw: string
+  readonly line: number
+  readonly exists: boolean | null
+}
+
 export interface WikiLintFinding {
   readonly kind: string
   readonly subject: string
@@ -557,14 +582,7 @@ export interface WikiPageData {
   }
   readonly sha256: string
   readonly body_markdown: string
-  readonly outgoing_links: readonly {
-    readonly text: string
-    readonly kind: string
-    readonly target: string
-    readonly raw: string
-    readonly line: number
-    readonly exists: boolean | null
-  }[]
+  readonly outgoing_links: readonly WikiOutgoingLink[]
   readonly backlinks: readonly string[]
   readonly lint_findings: readonly WikiLintFinding[]
 }

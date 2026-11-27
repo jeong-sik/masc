@@ -2,7 +2,7 @@
 
 import { html } from 'htm/preact'
 import type { JSX } from 'preact'
-import { useEffect, useMemo, useRef } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'preact/hooks'
 import { enhanceRichCode } from './rich-code-preview'
 import { Marked, Renderer, type Tokens } from 'marked'
 import { sanitizeHtml } from '../../lib/dompurify'
@@ -197,12 +197,45 @@ function linkUnloadedImages(container: HTMLElement) {
   return () => cleanups.forEach(cleanup => cleanup())
 }
 
+/** Where a document link goes instead of its written target. */
+export type LinkRewrite = { readonly href: string; readonly title?: string }
+
+const REWRITTEN_ATTRS = ['href', 'target', 'rel', 'title'] as const
+
+function rewriteLinks(container: HTMLElement, rewrites: ReadonlyMap<string, LinkRewrite>) {
+  const restores: Array<() => void> = []
+  for (const anchor of container.querySelectorAll('a[href]')) {
+    const rewrite = rewrites.get(anchor.getAttribute('href') ?? '')
+    if (!rewrite) continue
+    const saved = REWRITTEN_ATTRS.map(name => [name, anchor.getAttribute(name)] as const)
+    anchor.setAttribute('href', rewrite.href)
+    anchor.removeAttribute('target')
+    anchor.removeAttribute('rel')
+    if (rewrite.title) anchor.setAttribute('title', rewrite.title)
+    restores.push(() => {
+      for (const [name, value] of saved) {
+        if (value === null) anchor.removeAttribute(name)
+        else anchor.setAttribute(name, value)
+      }
+    })
+  }
+  return () => restores.forEach(restore => restore())
+}
+
 export function MarkdownContent({
   text,
   class: className,
   document = false,
   streaming = false,
-}: { text: string; class?: string; document?: boolean; streaming?: boolean }) {
+  linkRewrites,
+}: {
+  text: string
+  class?: string
+  document?: boolean
+  streaming?: boolean
+  /** Links whose written target is a key open the value instead, in this tab. */
+  linkRewrites?: ReadonlyMap<string, LinkRewrite>
+}) {
   const root = useRef<HTMLDivElement>(null)
   const htmlStr = useMemo(
     () => (document ? renderMarkdownDocument : renderMarkdown)(text),
@@ -218,6 +251,13 @@ export function MarkdownContent({
       restoreFences?.()
     }
   }, [htmlStr, streaming])
+  // Apart from the enhancers, so a new rewrite map does not rebuild diagrams;
+  // before paint, so no click reaches a link that is not rewritten yet.
+  useLayoutEffect(() => {
+    const element = root.current
+    if (!element || !linkRewrites || !htmlStr.includes('<a')) return undefined
+    return rewriteLinks(element, linkRewrites)
+  }, [htmlStr, linkRewrites])
 
   const classes = ['markdown-content', className].filter(Boolean).join(' ')
   return html`

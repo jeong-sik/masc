@@ -12,7 +12,7 @@
  */
 
 import { html } from 'htm/preact'
-import { MarkdownContent } from '../../components/common/markdown-renderer'
+import { MarkdownContent, type LinkRewrite } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { authSession, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
 import { markViewSynced } from '../../core/observer'
@@ -24,6 +24,7 @@ import { PopoverMenu } from '../../components/primitives/popover-menu'
 import { VirtualList } from '../../components/primitives/virtual-list'
 import { computeMarkdownLineDiff } from './wiki-diff'
 import {
+  describeWireType,
   expectOptionalArrayField,
   expectOptionalRecordArrayField,
   expectOptionalRecordField,
@@ -33,9 +34,10 @@ import {
   expectRequiredStringField,
   expectWireRecord,
 } from '../../lib/wire-decode'
-import { isAdminLockedForSession } from '../../routes/router'
+import { isAdminLockedForSession, navigate, resolveRoute } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
 import {
+  WIKI_LINK_KINDS,
   WIKI_SOURCES,
   formatRelativeTime,
   type WikiDuplicateCandidate,
@@ -43,7 +45,9 @@ import {
   type WikiLintData,
   type WikiLintFinding,
   type WikiLogData,
+  type WikiLinkKind,
   type WikiLogEntry,
+  type WikiOutgoingLink,
   type WikiPageData,
   type WikiPageSummary,
   type WikiPutRespData,
@@ -127,6 +131,27 @@ function decodeWikiSearchData(raw: unknown): WikiSearchData {
   }
 }
 
+function isWikiLinkKind(value: string): value is WikiLinkKind {
+  return (WIKI_LINK_KINDS as readonly string[]).includes(value)
+}
+
+function decodeWikiOutgoingLink(rec: Record<string, unknown>, ctx: string): WikiOutgoingLink {
+  const kind = expectRequiredStringField(rec, 'kind', ctx)
+  if (!isWikiLinkKind(kind)) throw new Error(`${ctx}: "kind" 필드의 링크 종류 "${kind}" 를 모릅니다.`)
+  const exists = rec.exists
+  if (exists !== null && typeof exists !== 'boolean') {
+    throw new Error(`${ctx}: "exists" 필드는 boolean 이나 null 이어야 합니다 (${describeWireType(exists)} 수신).`)
+  }
+  return {
+    text: expectRequiredStringField(rec, 'text', ctx),
+    kind,
+    target: expectRequiredStringField(rec, 'target', ctx),
+    raw: expectRequiredStringField(rec, 'raw', ctx),
+    line: expectRequiredNumberField(rec, 'line', ctx),
+    exists,
+  }
+}
+
 function decodeWikiPageData(raw: unknown): WikiPageData {
   const ctx = 'GET /api/v1/wiki/:slug'
   const rec = expectWireRecord(raw, ctx)
@@ -138,7 +163,8 @@ function decodeWikiPageData(raw: unknown): WikiPageData {
   const revision = expectRequiredNumberField(fmRec, 'revision', `${ctx} frontmatter`)
   const tags = expectOptionalStringArrayField(fmRec, 'tags', `${ctx} frontmatter`)
   const backlinks = expectOptionalStringArrayField(rec, 'backlinks', ctx)
-  const outgoing_links = expectOptionalRecordArrayField<WikiPageData['outgoing_links'][number]>(rec, 'outgoing_links', ctx)
+  const outgoing_links = expectOptionalRecordArrayField<Record<string, unknown>>(rec, 'outgoing_links', ctx)
+    .map((link, i) => decodeWikiOutgoingLink(link, `${ctx} outgoing_links[${i}]`))
   const lint_findings = expectOptionalRecordArrayField<WikiLintFinding>(rec, 'lint_findings', ctx)
   return {
     ...(rec as unknown as WikiPageData),
@@ -768,6 +794,36 @@ export function WikiTab(props: WorkspaceViewProps) {
     </div>
   `
 
+  // Body links the server resolved to an existing page point at that page's
+  // route: the server's `raw` is the target as written, which is also the
+  // rendered href because page names are [a-z0-9-] plus `.md`. The title
+  // shows the target page's summary on hover.
+  const bodyPageLinks = useMemo(() => {
+    const summaries = new Map((wikiIndex?.pages ?? []).map((page) => [page.slug, page.summary]))
+    const rewrites = new Map<string, LinkRewrite>()
+    const slugByHref = new Map<string, string>()
+    for (const link of pageDetail?.outgoing_links ?? []) {
+      if (link.kind !== 'page' || link.exists !== true) continue
+      const href = `#${resolveRoute(`/knowledge/wiki/${encodeURIComponent(link.target)}`).path}`
+      rewrites.set(link.raw, { href, title: summaries.get(link.target) || undefined })
+      slugByHref.set(href, link.target)
+    }
+    return { rewrites, slugByHref }
+  }, [pageDetail, wikiIndex])
+  // Picking a page from the list does not change the route, so the history
+  // entry being left may name no page or another page. A plain click first
+  // makes that entry name the page on screen, then pushes the linked page, so
+  // Back returns to the page the link was followed from.
+  const openBodyPageLink = (event: MouseEvent) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    const anchor = event.target instanceof Element ? event.target.closest('a[href]') : null
+    const slug = anchor ? bodyPageLinks.slugByHref.get(anchor.getAttribute('href') ?? '') : undefined
+    if (!slug) return
+    event.preventDefault()
+    if (selectedSlug) navigate(`/knowledge/wiki/${encodeURIComponent(selectedSlug)}`, { replace: true })
+    navigate(`/knowledge/wiki/${encodeURIComponent(slug)}`)
+    setSelectedSlug(slug)
+  }
   // A selected page with nothing read of it and no error is one being read:
   // from the first render, before the effect that reads it has run.
   const pageLoading = selectedSlug !== null && !creatingNew && pageDetail === null && pageError === null
@@ -980,8 +1036,8 @@ export function WikiTab(props: WorkspaceViewProps) {
               </div>
             `}
 
-            <article class="kn-md-panel">
-              <${MarkdownContent} text=${pageDetail.body_markdown} document />
+            <article class="kn-md-panel" onClick=${openBodyPageLink}>
+              <${MarkdownContent} text=${pageDetail.body_markdown} document linkRewrites=${bodyPageLinks.rewrites} />
             </article>
 
             <details class="ap-disclosure" data-testid="wiki-links-disclosure">

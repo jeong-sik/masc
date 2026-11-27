@@ -1432,7 +1432,7 @@ describe('workspaces/knowledge', () => {
             },
             body_markdown: '# Hello Wiki',
             backlinks: ['overview'],
-            outgoing_links: [{ kind: 'page', target: 'architecture', text: 'Architecture', exists: true }],
+            outgoing_links: [{ kind: 'page', target: 'architecture', text: 'Architecture', raw: 'architecture.md', line: 3, exists: true }],
             lint_findings: [],
           },
         })

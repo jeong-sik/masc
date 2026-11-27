@@ -100,6 +100,16 @@ function decodeBrowserClientsPayload(raw: unknown): BrowserClientsPayload {
 function decodeBrowserTabsResponse(raw: unknown): readonly BrowserTabRow[] {
   const ctx = 'POST /api/v1/dashboard/browser-lane/read'
   const rec = expectWireRecord(raw, ctx)
+  if (rec.ok === false || rec.status === 'deferred') {
+    const detail = typeof rec.error === 'string' && rec.error.trim().length > 0
+      ? rec.error.trim()
+      : typeof rec.message === 'string' && rec.message.trim().length > 0
+        ? rec.message.trim()
+        : typeof rec.status === 'string' && rec.status.trim().length > 0
+          ? `요청 보류됨 (${rec.status.trim()})`
+          : '브라우저 탭 읽기가 완료되지 않았습니다.'
+    throw new Error(detail)
+  }
   if ('data' in rec && rec.data !== undefined) {
     const dataRec = expectWireRecord(rec.data, `${ctx} data`)
     return expectOptionalRecordArrayField<BrowserTabRow>(dataRec, 'tabs', ctx)

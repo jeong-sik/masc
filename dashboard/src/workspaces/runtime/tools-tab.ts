@@ -20,6 +20,7 @@ import {
   apiGet,
   authSession,
   apiMutate,
+  currentSessionEpoch,
   disconnectKeeperOAuth,
   extractObserverTopics,
   isEpochCurrent,
@@ -817,17 +818,20 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
   const handleConnectorBind = async (ev: Event) => {
     ev.preventDefault()
     if (!hasBroadcastToolsAccess() || !bindTarget || !bindTarget.channelId.trim() || !bindTarget.keeperName.trim()) return
+    const startEpoch = currentSessionEpoch()
+    const target = bindTarget
     const res = await apiMutate<unknown>(
       'POST',
-      `/api/v1/gate/connector/bind?name=${encodeURIComponent(bindTarget.connectorId)}`,
-      { channel_id: bindTarget.channelId.trim(), keeper_name: bindTarget.keeperName.trim() },
+      `/api/v1/gate/connector/bind?name=${encodeURIComponent(target.connectorId)}`,
+      { channel_id: target.channelId.trim(), keeper_name: target.keeperName.trim() },
     )
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     if (!res.ok) {
       setBanner({ kind: 'err', text: `커넥터 바인딩 실패: ${res.error.message}` })
       return
     }
     setBanner(null)
-    pushShellToast(`${bindTarget.connectorId} 바인딩 완료.`, 'success')
+    pushShellToast(`${target.connectorId} 바인딩 완료.`, 'success')
     setBindTarget(null)
     void resourceCache.fetch<{ readonly connectors?: readonly GateConnectorRow[] }>(
       'runtime:gate-connectors',
@@ -838,11 +842,13 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
 
   const handleConnectorUnbind = async (connectorId: string, channelId: string) => {
     if (!hasBroadcastToolsAccess()) return
+    const startEpoch = currentSessionEpoch()
     const res = await apiMutate<unknown>(
       'POST',
       `/api/v1/gate/connector/unbind?name=${encodeURIComponent(connectorId)}`,
       { channel_id: channelId },
     )
+    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
     if (!res.ok) {
       setBanner({ kind: 'err', text: `바인딩 해제 실패: ${res.error.message}` })
       return
@@ -1026,6 +1032,9 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
             onInput=${(e: Event) => setSearch((e.target as HTMLInputElement).value)}
             style=${{ maxWidth: '320px', padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)' }}
           />
+          ${toolsObs.kind === 'failed' && html`
+            <div class="ap-error" role="alert">도구 카탈로그 조회 실패: ${toolsObs.error.message}</div>
+          `}
           <${DataTable}
             data=${toolRows}
             columns=${toolColumns}
@@ -1033,11 +1042,13 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
             virtualizeThreshold=${30}
             maxHeight=${400}
             caption="도구 카탈로그"
-            emptyLabel=${toolsObs.kind === 'loading'
-              ? '도구 불러오는 중…'
-              : decodedCatalog.isWarming
-                ? '도구 카탈로그 준비 중…'
-                : '등록된 도구가 없습니다.'}
+            emptyLabel=${toolsObs.kind === 'failed'
+              ? `도구 카탈로그 조회 실패: ${toolsObs.error.message}`
+              : toolsObs.kind === 'loading'
+                ? '도구 불러오는 중…'
+                : decodedCatalog.isWarming
+                  ? '도구 카탈로그 준비 중…'
+                  : '등록된 도구가 없습니다.'}
           />
         </div>
       `}
@@ -1065,9 +1076,11 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
                 새로고침
               </button>
             </div>
-            ${skillsList.length === 0
-              ? html`<div class="dtable-absent">발행된 스킬이 없습니다.</div>`
-              : skillsList.map((s) => html`
+            ${skillsObs.kind === 'failed'
+              ? html`<div class="ap-error" role="alert">스킬 목록 조회 실패: ${skillsObs.error.message}</div>`
+              : skillsList.length === 0
+                ? html`<div class="dtable-absent">${skillsObs.kind === 'loading' ? '스킬 불러오는 중…' : '발행된 스킬이 없습니다.'}</div>`
+                : skillsList.map((s) => html`
                   <button
                     key=${`${s.identity.source_id}:${s.identity.package_id}:${s.identity.name}`}
                     type="button"
@@ -1154,9 +1167,11 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
             </form>
           `}
 
-          ${connectorsList.length === 0
-            ? html`<div class="wka-card dtable-absent">등록된 Gate 커넥터가 없습니다.</div>`
-            : html`
+          ${connectorsObs.kind === 'failed'
+            ? html`<div class="ap-error" role="alert">Gate 커넥터 조회 실패: ${connectorsObs.error.message}</div>`
+            : connectorsList.length === 0
+              ? html`<div class="wka-card dtable-absent">${connectorsObs.kind === 'loading' ? '커넥터 불러오는 중…' : '등록된 Gate 커넥터가 없습니다.'}</div>`
+              : html`
                 <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 'var(--sp-3)' }}>
                   ${connectorsList.map((c) => html`
                     <article key=${c.connector_id} class="wka-card" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
@@ -1401,15 +1416,24 @@ export function ToolsTab({ onInspect }: WorkspaceViewProps) {
       `}
 
       ${section === 'clients' && isSingleUser && html`
-        <${DataTable}
-          data=${clientsList}
-          columns=${clientColumns}
-          getRowId=${(r: McpClientRow, i: number) => `${r.name}-${i}`}
-          virtualizeThreshold=${30}
-          maxHeight=${400}
-          caption="MCP 클라이언트 목록"
-          emptyLabel=${clientsObs.kind === 'loading' ? '불러오는 중…' : '연결된 MCP 클라이언트가 없습니다.'}
-        />
+        <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', minWidth: 0 }}>
+          ${clientsObs.kind === 'failed' && html`
+            <div class="ap-error" role="alert">MCP 클라이언트 조회 실패: ${clientsObs.error.message}</div>
+          `}
+          <${DataTable}
+            data=${clientsList}
+            columns=${clientColumns}
+            getRowId=${(r: McpClientRow, i: number) => `${r.name}-${i}`}
+            virtualizeThreshold=${30}
+            maxHeight=${400}
+            caption="MCP 클라이언트 목록"
+            emptyLabel=${clientsObs.kind === 'failed'
+              ? `MCP 클라이언트 조회 실패: ${clientsObs.error.message}`
+              : clientsObs.kind === 'loading'
+                ? '불러오는 중…'
+                : '연결된 MCP 클라이언트가 없습니다.'}
+          />
+        </div>
       `}
     </div>
   `

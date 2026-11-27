@@ -392,4 +392,43 @@ describe('Unified /account wire parsers & workspace surface', () => {
     expect(activeWorkspaceId.value).toBe('prod-lab')
     expect(sessionEpoch.value).toBeGreaterThan(beforeEpoch)
   })
+
+  it('suppresses false empty copy on PAT read failure and aborts in-flight PAT reads on unmount', async () => {
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'acc-pat-err',
+      email: 'admin@example.com',
+      displayName: 'Admin',
+      role: 'admin',
+      csrfToken: 'csrf-pat',
+      authMethods: { google: true, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      new Response(JSON.stringify({ error: 'pat store offline' }), {
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+      }),
+    ))
+    await act(async () => {
+      render(h(AccountWorkspace, { subroute: 'pats', onNavigate: vi.fn(), onInspect: vi.fn() }), container)
+    })
+    await waitFor(() => expect(container.querySelector('[role="alert"]')?.textContent).toContain('pat store offline'))
+    expect(container.textContent).not.toContain('발급된 Personal Access Token이 없습니다.')
+
+    let capturedSignal: AbortSignal | undefined
+    vi.stubGlobal('fetch', vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      capturedSignal = init?.signal ?? undefined
+      return new Promise<Response>(() => {})
+    }))
+    await act(async () => { render(null, container) })
+    await act(async () => {
+      render(h(AccountWorkspace, { subroute: 'pats', onNavigate: vi.fn(), onInspect: vi.fn() }), container)
+    })
+    await waitFor(() => expect(capturedSignal).toBeDefined())
+    expect(capturedSignal?.aborted).toBe(false)
+    await act(async () => { render(null, container) })
+    expect(capturedSignal?.aborted).toBe(true)
+  })
 })

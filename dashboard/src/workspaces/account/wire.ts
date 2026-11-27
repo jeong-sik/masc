@@ -51,8 +51,8 @@ export function decodeWhoami(raw: unknown): WhoamiInfo {
   return { id, role }
 }
 
-export function fetchWhoami(fetchImpl?: typeof fetch): Promise<Result<WhoamiInfo, ApiError>> {
-  return apiGet<WhoamiInfo>('/api/v1/auth/whoami', { fetchImpl, decode: decodeWhoami })
+export function fetchWhoami(fetchImpl?: typeof fetch, signal?: AbortSignal): Promise<Result<WhoamiInfo, ApiError>> {
+  return apiGet<WhoamiInfo>('/api/v1/auth/whoami', { fetchImpl, signal, decode: decodeWhoami })
 }
 
 export function postLogout(fetchImpl?: typeof fetch): Promise<Result<null, ApiError>> {
@@ -154,8 +154,8 @@ export function decodeIssuedPat(raw: unknown): IssuedPat {
   return { id, token }
 }
 
-export function listPats(fetchImpl?: typeof fetch): Promise<Result<readonly PatRecord[], ApiError>> {
-  return apiGet<readonly PatRecord[]>('/api/v1/auth/pats', { fetchImpl, decode: decodePatsList })
+export function listPats(fetchImpl?: typeof fetch, signal?: AbortSignal): Promise<Result<readonly PatRecord[], ApiError>> {
+  return apiGet<readonly PatRecord[]>('/api/v1/auth/pats', { fetchImpl, signal, decode: decodePatsList })
 }
 
 export function issuePat(
@@ -283,8 +283,8 @@ export function decodeMembersList(raw: unknown): readonly MemberRecord[] {
   return out
 }
 
-export function listMembers(fetchImpl?: typeof fetch): Promise<Result<readonly MemberRecord[], ApiError>> {
-  return apiGet<readonly MemberRecord[]>('/api/v1/auth/members', { fetchImpl, decode: decodeMembersList })
+export function listMembers(fetchImpl?: typeof fetch, signal?: AbortSignal): Promise<Result<readonly MemberRecord[], ApiError>> {
+  return apiGet<readonly MemberRecord[]>('/api/v1/auth/members', { fetchImpl, signal, decode: decodeMembersList })
 }
 
 export function disableMember(
@@ -403,8 +403,8 @@ export function decodeIssuedInvite(raw: unknown): IssuedInvite {
   return { id, role, expiresAtMs, link }
 }
 
-export function listInvites(fetchImpl?: typeof fetch): Promise<Result<readonly InviteRecord[], ApiError>> {
-  return apiGet<readonly InviteRecord[]>('/api/v1/auth/invites', { fetchImpl, decode: decodeInvitesList })
+export function listInvites(fetchImpl?: typeof fetch, signal?: AbortSignal): Promise<Result<readonly InviteRecord[], ApiError>> {
+  return apiGet<readonly InviteRecord[]>('/api/v1/auth/invites', { fetchImpl, signal, decode: decodeInvitesList })
 }
 
 export function issueInvite(role: InviteRole, fetchImpl?: typeof fetch): Promise<Result<IssuedInvite, ApiError>> {
@@ -483,8 +483,8 @@ export function decodeRegisteredAllowlist(raw: unknown): RegisteredAllowlist {
   return { id, previouslyDeleted: raw.previously_deleted }
 }
 
-export function listAllowlist(fetchImpl?: typeof fetch): Promise<Result<readonly AllowlistEntry[], ApiError>> {
-  return apiGet<readonly AllowlistEntry[]>('/api/v1/auth/allowlist', { fetchImpl, decode: decodeAllowlist })
+export function listAllowlist(fetchImpl?: typeof fetch, signal?: AbortSignal): Promise<Result<readonly AllowlistEntry[], ApiError>> {
+  return apiGet<readonly AllowlistEntry[]>('/api/v1/auth/allowlist', { fetchImpl, signal, decode: decodeAllowlist })
 }
 
 export function registerAllowlist(

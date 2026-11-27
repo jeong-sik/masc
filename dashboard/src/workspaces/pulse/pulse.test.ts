@@ -595,4 +595,37 @@ describe('PulseWorkspace DOM Integration', () => {
       expect(attn?.querySelector('[data-attention-unchecked="true"]')).not.toBeNull()
     })
   })
+
+  it('distinguishes multi_account_unbridged fleet from empty keepers and surfaces World Memory / Candle errors with alert role', async () => {
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'acc-pulse-err',
+      email: 'ops@example.com',
+      displayName: 'Ops',
+      role: 'admin',
+      csrfToken: 'csrf-pulse',
+      authMethods: { google: true, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/v1/memory/summary') || url.includes('/api/v1/candle/ledger')) {
+        return new Response(JSON.stringify({ error: 'backend timeout' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }))
+
+    const view = render(html`<${PulseWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`)
+    await waitFor(() => {
+      expect(view.queryByTestId('pulse-fleet-multi-account-unbridged')).not.toBeNull()
+      const alerts = [...view.container.querySelectorAll('[role="alert"]')].map((el) => el.textContent ?? '')
+      expect(alerts.some((t) => t.includes('World Memory 조회 실패'))).toBe(true)
+      expect(alerts.some((t) => t.includes('Candle 조회 실패'))).toBe(true)
+    })
+    expect(view.container.textContent).not.toContain('등록된 Keeper 없음')
+  })
 })

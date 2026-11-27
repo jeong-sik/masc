@@ -2262,4 +2262,102 @@ describe('workspaces/runtime', () => {
     )
     expect(localSubmitBtns.length).toBeGreaterThan(0)
   })
+
+  it('surfaces explicit failures in Tools/Quotas, hides remove on login accounts, and rejects deferred browser tab reads', async () => {
+    // 1. Multi-account QuotasTab hides 제거 on kind=login and keeps 제거 on kind=key
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'acc-r5',
+      email: 'ops@example.com',
+      displayName: 'Ops',
+      role: 'admin',
+      csrfToken: 'csrf-r5',
+      authMethods: { google: true, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/v1/runtime/resolved')) {
+        return jsonResponse({ error: 'runtime backend offline' }, 500)
+      }
+      if (url.includes('/api/v1/auth/provider-accounts')) {
+        return jsonResponse({
+          provider_accounts: [
+            { provider_account_id: 'pa-login', integration_id: 'openai', kind: 'login', status: 'active' },
+            { provider_account_id: 'pa-key', integration_id: 'anthropic', kind: 'key', key: 'sk-***', status: 'active' },
+          ],
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await vi.waitFor(() => {
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain('할당량 요약 조회 실패')
+    })
+    container.querySelector<HTMLButtonElement>('[data-testid="provider-inventory-toggle"]')?.click()
+    await flushUi(5)
+    const removeBtns = [...container.querySelectorAll<HTMLButtonElement>('button')].filter((b) => b.textContent?.trim() === '제거')
+    expect(removeBtns).toHaveLength(1)
+
+    // 2. ToolsTab renders explicit error alert when /api/v1/dashboard/tools fails (500)
+    render(null, container)
+    resourceCache.clearAll()
+    bumpSessionEpoch()
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'admin',
+      canTokenAdmin: true,
+      canTokenRead: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/v1/dashboard/tools')) {
+        return jsonResponse({ error: 'catalog unavailable' }, 500)
+      }
+      if (url.includes('/api/v1/dashboard/browser-lane/clients')) {
+        return jsonResponse({
+          ok: true,
+          data: {
+            clients: [{ clientId: 'chrome-1', browser: 'Chrome', version: '130', transport: 'extension' }],
+            inventoryIssues: [],
+            inventoryComplete: true,
+          },
+        })
+      }
+      if (url.includes('/api/v1/dashboard/browser-lane/read')) {
+        return jsonResponse({ ok: false, status: 'deferred', message: 'browser busy' }, 202)
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(html`<${RuntimeWorkspace} subroute="tools" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await vi.waitFor(() => {
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain('도구 카탈로그 조회 실패')
+    })
+
+    // 3. AddonsTab rejects HTTP 202 { ok: false, status: 'deferred' } on browser-lane/read instead of claiming 0 open tabs
+    render(null, container)
+    resourceCache.clearAll()
+    const onInspect = vi.fn()
+    render(html`<${RuntimeWorkspace} subroute="addons" onNavigate=${vi.fn()} onInspect=${onInspect} />`, container)
+    await vi.waitFor(() => {
+      const btn = [...container.querySelectorAll<HTMLButtonElement>('button')]
+        .find((b) => b.textContent?.includes('Open Tabs 읽기'))
+      expect(btn).toBeDefined()
+    })
+    const readTabsBtn = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((b) => b.textContent?.includes('Open Tabs 읽기'))
+    readTabsBtn!.click()
+    await vi.waitFor(() => {
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain('탭 읽기 실패')
+    })
+    expect(onInspect).not.toHaveBeenCalled()
+    expect(container.textContent).not.toContain('열린 탭 없음')
+  })
 })

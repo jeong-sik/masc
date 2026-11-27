@@ -166,10 +166,23 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
     }
   }, [])
 
+  const snapshotAbortRef = useRef<AbortController | null>(null)
+  const mountedRef = useRef(true)
   useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      snapshotAbortRef.current?.abort()
+    }
+  }, [])
+
+  const loadSnapshot = useCallback((resetOnLoad = false) => {
     if (!canReadLogs) return
+    snapshotAbortRef.current?.abort()
     const controller = new AbortController()
+    snapshotAbortRef.current = controller
     const { signal } = controller
+    setSnapshot({ kind: 'loading' })
     void apiGet('/api/v1/dashboard/logs?limit=200', {
       signal,
       decode: (raw) => {
@@ -179,14 +192,23 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
         return parseLogEntriesFromPayload(raw).entries
       },
     }).then((res) => {
-      if (signal.aborted || !isEpochCurrent(epoch) || streamObserved.current) return
+      if (!mountedRef.current || signal.aborted || !isEpochCurrent(epoch)) return
+      if (!resetOnLoad && streamObserved.current) return
       if (res.ok) {
         setSnapshot({ kind: 'ready', observedAt: Date.now() })
-        enqueueLiveEntries(res.value, false)
+        enqueueLiveEntries(res.value, resetOnLoad)
       } else {
         setSnapshot({ kind: 'failed', message: res.error.message })
       }
     })
+  }, [epoch, canReadLogs, enqueueLiveEntries])
+
+  useEffect(() => {
+    if (!canReadLogs) {
+      snapshotAbortRef.current?.abort()
+      return
+    }
+    loadSnapshot(false)
 
     // Interleave Observer SSE EVT entries chronologically
     const unsubObserver = subscribeObserverFrames((frame) => {
@@ -217,10 +239,10 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
     })
 
     return () => {
-      controller.abort()
+      snapshotAbortRef.current?.abort()
       unsubObserver()
     }
-  }, [epoch, canReadLogs, enqueueLiveEntries])
+  }, [epoch, canReadLogs, loadSnapshot, enqueueLiveEntries])
 
   // Single view-scoped SSE via ViewStreamSlot (auto-pauses on document.hidden!)
   // Waits for observer x-masc-sse-instance-id so zero premature HTTP 400s fire.
@@ -451,6 +473,16 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
           <button
             type="button"
             class="btn-ghost"
+            data-testid="logs-refresh-btn"
+            disabled=${!canReadLogs}
+            onClick=${() => loadSnapshot(true)}
+          >
+            새로고침
+          </button>
+
+          <button
+            type="button"
+            class="btn-ghost"
             onClick=${() => {
               pendingLiveRef.current = { entries: [], resetLogs: false }
               setBufferedCount(0)
@@ -478,8 +510,12 @@ function LogsTimeline({ epoch, ...props }: WorkspaceViewProps & { epoch: number 
             ariaLabel="통합 로그 및 이벤트 타임라인"
             getItemKey=${(item: TimelineEntry) => item.id}
             empty=${snapshotError ? null : html`
-              <div style=${{ padding: 'var(--sp-4)' }} class="dtable-absent">
-                ${snapshot.kind === 'loading' ? '로그 불러오는 중…' : '표시할 로그 또는 이벤트가 없습니다.'}
+              <div style=${{ padding: 'var(--sp-4)' }} class="dtable-absent" data-testid=${!canReadLogs ? 'logs-admin-locked' : undefined}>
+                ${!canReadLogs
+                  ? '관리자(Admin) 권한이 필요한 활동·로그 뷰입니다.'
+                  : snapshot.kind === 'loading'
+                    ? '로그 불러오는 중…'
+                    : '표시할 로그 또는 이벤트가 없습니다.'}
               </div>`}
             renderItem=${(item: TimelineEntry) => {
               const isSel = selectedEntry?.id === item.id

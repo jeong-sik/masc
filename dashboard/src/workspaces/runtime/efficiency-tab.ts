@@ -28,6 +28,8 @@ import {
   isSingleUserMember,
   markViewSynced,
   observedAbsent,
+  observedFailed,
+  observedLoading,
   observedUnreported,
   observedValue,
   observerSseInstanceId,
@@ -418,8 +420,18 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     }
     const cacheHitObs: Observed<number> = totalIn > 0
       ? observedValue(Math.min(100, (totalCacheRead / totalIn) * 100))
-      : observedUnreported()
-    const spendObs: Observed<number> = totalCost !== null ? observedValue(totalCost) : observedUnreported()
+      : !effectiveModels && modelsObs.kind === 'failed'
+        ? observedFailed(modelsObs.error)
+        : !effectiveModels && modelsObs.kind === 'loading'
+          ? observedLoading()
+          : observedUnreported()
+    const spendObs: Observed<number> = totalCost !== null
+      ? observedValue(totalCost)
+      : !effectiveModels && modelsObs.kind === 'failed'
+        ? observedFailed(modelsObs.error)
+        : !effectiveModels && modelsObs.kind === 'loading'
+          ? observedLoading()
+          : observedUnreported()
 
     const exactRuns = !adminLocked && exactObs.kind === 'value' ? (exactObs.data.runs ?? []) : []
     const readings = exactRuns.map(laneRunPassReading)
@@ -427,18 +439,26 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     const passedExact = terminalExact.filter((reading) => reading === 'passed')
     const exactPassObs: Observed<number> = terminalExact.length > 0
       ? observedValue((passedExact.length / terminalExact.length) * 100)
-      : observedAbsent()
+      : !adminLocked && exactObs.kind === 'failed'
+        ? observedFailed(exactObs.error)
+        : !adminLocked && exactObs.kind === 'loading'
+          ? observedLoading()
+          : observedAbsent()
 
     const toolTotal = toolSeriesObs.kind === 'value' ? toolSeriesObs.data.total : null
     const settledTools = toolTotal ? Math.max(0, toolTotal.call_count - (toolTotal.deferred_count ?? 0)) : 0
     const toolErrObs: Observed<number> = toolTotal && settledTools > 0
       ? observedValue((toolTotal.failure_count / settledTools) * 100)
-      : toolTotal
-        ? observedUnreported()
-        : observedAbsent()
+      : toolSeriesObs.kind === 'failed'
+        ? observedFailed(toolSeriesObs.error)
+        : toolSeriesObs.kind === 'loading'
+          ? observedLoading()
+          : toolTotal
+            ? observedUnreported()
+            : observedAbsent()
 
     return { cacheHitObs, spendObs, exactPassObs, toolErrObs }
-  }, [effectiveModels, exactObs, toolSeriesObs, adminLocked])
+  }, [effectiveModels, modelsObs, exactObs, toolSeriesObs, adminLocked])
 
   const joinedKeepers = useMemo<readonly JoinedKeeperSpendRow[]>(() => {
     const map = new Map<string, JoinedKeeperSpendRow>()
@@ -638,7 +658,9 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
           series=${CACHE_SERIES}
           height=${190}
           syncCrosshair=${true}
-          emptyLabel="캐시 적중률 버킷 없음"
+          emptyLabel=${snapshotError ? `모델 지표 조회 실패: ${snapshotError}`
+            : modelsObs.kind === 'loading' ? '모델 지표 불러오는 중…'
+            : '캐시 적중률 버킷 없음'}
         />
 
         <!-- Panel 2: Token Velocity vs Spend -->
@@ -672,9 +694,13 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
           series=${COOLDOWN_SERIES}
           height=${190}
           syncCrosshair=${true}
-          emptyLabel=${historyObs.kind === 'value' && historyObs.data.state === 'unavailable'
-            ? `사용량 이력 불가: ${historyObs.data.reason}`
-            : '일시 중지 이력 없음'}
+          emptyLabel=${historyObs.kind === 'failed'
+            ? `사용량 이력 조회 실패: ${historyObs.error.message}`
+            : historyObs.kind === 'loading'
+              ? '사용량 이력 불러오는 중…'
+              : historyObs.kind === 'value' && historyObs.data.state === 'unavailable'
+                ? `사용량 이력 불가: ${historyObs.data.reason}`
+                : '일시 중지 이력 없음'}
         />
 
         <!-- Panel 4: Tool Error Rate & Call Volume -->

@@ -22,6 +22,7 @@ import {
   cancelSetupLogin,
   currentSessionEpoch,
   extractObserverTopics,
+  formatObserved,
   isEpochCurrent,
   markViewSynced,
   resourceCache,
@@ -1107,20 +1108,34 @@ export function QuotasTab(props: WorkspaceViewProps) {
         </div>
       `}
 
+      ${resolvedObs.kind === 'failed' && html`
+        <div class="ap-error" role="alert">할당량 요약 조회 실패: ${resolvedObs.error.message}</div>
+      `}
+
       <section class="ov-kpis" aria-label="할당량 요약">
         <div class="ov-kpi">
           <div class="ov-kpi-k">Tier 1 소진 / 크레딧 / 429</div>
-          <div class=${`ov-kpi-v ${partitioned.tier1ExhaustedOrCredits.length > 0 ? 'bad' : 'ok'}`}>
-            ${partitioned.tier1ExhaustedOrCredits.length}
+          <div class=${`ov-kpi-v ${resolvedObs.kind === 'failed' ? 'bad' : resolvedObs.kind === 'value' ? (partitioned.tier1ExhaustedOrCredits.length > 0 ? 'bad' : 'ok') : ''}`}>
+            ${resolvedObs.kind === 'value'
+              ? partitioned.tier1ExhaustedOrCredits.length
+              : formatObserved(resolvedObs)}
           </div>
         </div>
         <div class="ov-kpi">
           <div class="ov-kpi-k">Tier 2 활성 구독 ($0 Sub)</div>
-          <div class="ov-kpi-v ok">${partitioned.tier2ActiveSubscriptions.length}</div>
+          <div class=${`ov-kpi-v ${resolvedObs.kind === 'failed' ? 'bad' : resolvedObs.kind === 'value' ? 'ok' : ''}`}>
+            ${resolvedObs.kind === 'value'
+              ? partitioned.tier2ActiveSubscriptions.length
+              : formatObserved(resolvedObs)}
+          </div>
         </div>
         <div class="ov-kpi">
           <div class="ov-kpi-k">Tier 3 미보고 (? Unreported)</div>
-          <div class="ov-kpi-v">${partitioned.tier3Unreported.length}</div>
+          <div class=${`ov-kpi-v ${resolvedObs.kind === 'failed' ? 'bad' : ''}`}>
+            ${resolvedObs.kind === 'value'
+              ? partitioned.tier3Unreported.length
+              : formatObserved(resolvedObs)}
+          </div>
         </div>
         <div class="ov-kpi" data-testid="kpi-paused-runtimes">
           <div class="ov-kpi-k">
@@ -1128,12 +1143,14 @@ export function QuotasTab(props: WorkspaceViewProps) {
               ? '일시 중지 런타임 · 차단'
               : '일시 중지 런타임'}
           </div>
-          <div class=${`ov-kpi-v ${pausedKpiTone}`}>
-            ${pausedSummary.totalRegistered > 0
-              ? `${pausedSummary.blockedCount} / ${pausedSummary.totalRegistered}`
-              : String(pausedSummary.blockedCount)}
+          <div class=${`ov-kpi-v ${resolvedObs.kind === 'failed' ? 'bad' : resolvedObs.kind === 'value' ? pausedKpiTone : ''}`}>
+            ${resolvedObs.kind !== 'value'
+              ? formatObserved(resolvedObs)
+              : pausedSummary.totalRegistered > 0
+                ? `${pausedSummary.blockedCount} / ${pausedSummary.totalRegistered}`
+                : String(pausedSummary.blockedCount)}
           </div>
-          ${pausedSummary.totalRegistered > 0 && html`
+          ${resolvedObs.kind === 'value' && pausedSummary.totalRegistered > 0 && html`
             <div class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)', marginTop: 'var(--sp-0)' }}>
               전체 ${pausedSummary.totalRegistered} · 가용 ${pausedSummary.availableCount}${pausedSummary.credentialRefusedCount > 0
                 ? ` · 인증 거부 ${pausedSummary.credentialRefusedCount}`
@@ -1746,7 +1763,9 @@ export function QuotasTab(props: WorkspaceViewProps) {
                             <div style=${{ display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap' }}>
                               <button type="button" class="btn-ghost" onClick=${() => void handleVerifyAccount(pid, acc.provider_account_id ?? acc.account_ref)}>검증</button>
                               <button type="button" class="btn-ghost" onClick=${() => void handleStartOAuthLogin(pid)}>Re-auth</button>
-                              <button type="button" class="btn-ghost" onClick=${() => void handleRemoveKey(ref)} style=${{ color: 'var(--err-fg)' }}>제거</button>
+                              ${acc.kind !== 'login' && html`
+                                <button type="button" class="btn-ghost" onClick=${() => void handleRemoveKey(ref)} style=${{ color: 'var(--err-fg)' }}>제거</button>
+                              `}
                             </div>
                           </div>
                         `

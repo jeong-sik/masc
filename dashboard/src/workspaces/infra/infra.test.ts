@@ -1065,12 +1065,50 @@ describe('workspaces/infra', () => {
     render(html`<${InfraWorkspace} subroute="logs" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
     await flushUi(25)
     expect(container.querySelector('[data-testid="logs-stream-status"]')?.textContent).toContain('ADMIN ONLY')
+    expect(container.querySelector('[data-testid="logs-admin-locked"]')).not.toBeNull()
+    expect(container.textContent).not.toContain('로그 불러오는 중…')
     expect(seenUrls).toEqual([])
 
     render(null, container)
     resourceCache.clearAll()
     render(html`<${InfraWorkspace} subroute="sandboxes" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
     await flushUi(25)
+    expect(container.querySelector('[data-testid="sandboxes-admin-locked"]')).not.toBeNull()
     expect(seenUrls).toEqual([])
+
+    // Multi-account Admin can manually refresh LogsTab after clearing buffer
+    authSession.value = {
+      kind: 'multi_account_signed_in',
+      mode: 'multi_account',
+      accountId: 'admin-infra',
+      email: 'admin@example.com',
+      displayName: 'Admin',
+      role: 'admin',
+      csrfToken: 'csrf-admin',
+      authMethods: { google: true, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    let logFetchCount = 0
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/v1/dashboard/logs')) {
+        logFetchCount += 1
+        return jsonResponse({
+          entries: [{ seq: logFetchCount, ts: '2026-11-27T01:00:00Z', level: 'INFO', module: 'http', message: `log-${logFetchCount}` }],
+        })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+    render(null, container)
+    resourceCache.clearAll()
+    render(html`<${InfraWorkspace} subroute="logs" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi(25)
+    expect(logFetchCount).toBe(1)
+    const refreshBtn = container.querySelector<HTMLButtonElement>('[data-testid="logs-refresh-btn"]')
+    expect(refreshBtn).not.toBeNull()
+    expect(refreshBtn!.disabled).toBe(false)
+    refreshBtn!.click()
+    await flushUi(25)
+    expect(logFetchCount).toBe(2)
   })
 })

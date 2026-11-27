@@ -982,10 +982,10 @@ let test_removed_convenience_input_does_not_synthesize_payload () =
         ])
   in
   check bool "removed convenience input rejected" false (Tool_result.is_success result);
-  check bool "neutral payload contract names the missing field" true
+  check bool "the refusal names the missing field" true
     (String_util.contains_substring
        (Tool_result.message result)
-       "keeper_name and message");
+       "keeper_name is required");
   check int "removed convenience input is not persisted" 0
     (List.length (Schedule_store.read_state config).schedules)
 ;;

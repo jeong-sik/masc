@@ -111,10 +111,11 @@ related: []
 
 - 위 encoder 들의 손 yojson 은 지운다.
 - `Ag_ui.event` 는 생성된 sum type 으로 바꾼다. 쓰는 곳은 `lib/` 아래 10개 파일, 65군데다. 종류마다 필요한 필드가 타입으로 강제되어, `delta` 없는 `TEXT_MESSAGE_CONTENT` 는 만들 수 없게 된다.
-- wire 는 바뀌지 않는다. 옮기는 층은 옛 encoder 를 남겨 두고, 같은 값에서 옛 encoder 와 새 encoder 가 같은 JSON 을 내는지 테스트로 비교한다. 옛 encoder 를 지우는 층에서 그 비교 테스트도 같이 지운다.
+- wire 는 바뀌지 않는다. 표현을 바꾸기 전에 지금 encoder 가 내는 JSON 을 fixture 로 먼저 남긴다. 표현을 바꾸는 층은 그 fixture 가 그대로인지로 옛 encoder 와 새 encoder 를 비교한다.
+  - 옛 encoder 를 남겨 두고 나란히 비교하지 않는다. 그러려면 새 frame 을 옛 record 로 바꾸는 이전용 코드가 생기고, 다음 층에서 바로 지워야 한다.
   - 비교 단위는 JSON 값이다. 객체 key 순서는 보지 않고, 수는 수로 비교한다. 빠진 option 은 key 가 없는 것으로 본다. 바이트는 지금처럼 transport 의 정규 JSON encoder(`Sse_wire.format_event_yojson`)가 쓴다.
-  - 비교할 값은 표본이 아니라 만드는 곳 목록에서 뽑는다. 옮기는 층은 먼저 `Ag_ui` 이벤트를 만드는 곳 65군데를 모두 적는다. 그리고 곳마다 나오는 이벤트 종류와 option 조합을 비교 테스트에 넣는다. 그 목록은 PR 본문에 둔다.
-- 그 뒤에 남는 시험은 protocol 경계 하나다. 서버 encoder 가 낸 fixture(`apps/fixtures/keeper_chat/`)를 각 언어의 생성 decoder 가 읽는지 본다.
+  - 비교할 값은 표본이 아니라 만드는 곳 목록에서 뽑는다. 먼저 이벤트를 만드는 곳을 모두 frame 종류별 생성 함수로 옮긴다. 그러면 이벤트는 frame 종류마다 하나인 생성 함수로만 만들어진다. fixture 는 생성 함수마다 만드는 곳에서 나오는 option 조합을 모두 넣는다. 만드는 곳이 새로 생겨도 생성 함수를 거치므로 새 모양이 나오지 않는다. 만드는 곳 목록은 PR 본문에 둔다.
+- 같은 fixture(`apps/fixtures/keeper_chat/`)를 각 언어의 생성 decoder 가 읽는지도 본다. 표현을 바꾼 뒤에는 이 protocol 경계 시험만 남는다.
 
 Dashboard·TUI 를 생성 타입으로 옮기는 일은 이 RFC 밖이다(§3).
 
@@ -226,10 +227,11 @@ Dashboard·TUI 를 생성 타입으로 옮기는 일은 이 RFC 밖이다(§3).
 
 1. **응답 정의와 생성기**
    - 층 1-a: ATD 파일과 atdgen rule. 서버 encoder 는 아직 그대로 둔다.
-   - 층 1-b: 서버 encoder 를 생성 타입으로 옮긴다. 옛 encoder 와 새 encoder 의 JSON 이 같은지 비교하는 테스트를 같이 둔다.
-   - 층 1-c: 옛 encoder 와 그 비교 테스트를 지운다. 서버 encoder 로 fixture(`apps/fixtures/keeper_chat/*.json`, `*.sse`)를 만든다.
-   - 층 1-d: `tools/atd-native-gen/`, 생성물, `@check` 어긋남 rule 을 넣는다.
-   - 확인: 대상별 `dune build --root .`, 옛·새 encoder 비교 테스트, 생성기 거절 테스트(모르는 annotation), Swift·Kotlin 생성물의 fixture decode(로컬 `swift test`·`./gradlew test`), 기존 Dashboard·TUI 테스트 통과.
+   - 층 1-b: frame 종류마다 타입 있는 생성 함수를 두고, 이벤트를 만드는 곳을 모두 옮긴다. `make_event` 는 공개 interface 에서 뺀다. 표현과 encoder 는 그대로 둔다.
+   - 층 1-c: 지금 encoder 로 fixture(`apps/fixtures/keeper_chat/*.json`, `*.sse`)를 만들고, 서버 출력이 fixture 와 같은 JSON 값인지 보는 테스트를 둔다.
+   - 층 1-d: 서버 표현을 생성 타입으로 바꾸고 손으로 쓴 encoder 를 지운다. 1-c 의 fixture 는 그대로여야 한다.
+   - 층 1-e: `tools/atd-native-gen/`, 생성물, `@check` 어긋남 rule 을 넣는다.
+   - 확인: 대상별 `dune build --root .`, fixture 비교 테스트, 생성기 거절 테스트(모르는 annotation), Swift·Kotlin 생성물의 fixture decode(로컬 `swift test`·`./gradlew test`), 기존 Dashboard·TUI 테스트 통과.
 2. **Apple 앱 v1**
    - 확인: `xcodebuild test`(iOS 26.5 시뮬레이터, macOS), fixture decode, D4 측정.
    - 실서버 확인: 로컬 서버에 Worker token 으로 붙어 보내기, 스트리밍, 끊긴 뒤 이어 받기, 이미지.

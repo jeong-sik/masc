@@ -493,10 +493,8 @@ let format_local_datetime ~tz_offset_sec ts =
 
 let wrap_lines ~max_width text =
   let width = Int.max 1 max_width in
-  let clean = sanitize_single_line text in
-  if String.equal clean "" then []
+  if String.equal (sanitize_single_line text) "" then []
   else
-    let words = String.split_on_char ' ' clean in
     let flush_cur acc cur =
       let s = Buffer.contents cur in
       Buffer.clear cur;
@@ -521,39 +519,46 @@ let wrap_lines ~max_width text =
       if Buffer.length buf > 0 then out := Buffer.contents buf :: !out;
       !out
     in
-    let cur = Buffer.create width in
-    let cur_w = ref 0 in
-    let acc =
-      List.fold_left
-        (fun acc word ->
-          let ww = Grapheme.display_width word in
-          if !cur_w = 0 then begin
-            if ww <= width then begin
-              Buffer.add_string cur word;
-              cur_w := ww;
-              acc
-            end
-            else push_long_word acc word
-          end
-          else if !cur_w + 1 + ww <= width then begin
-            Buffer.add_char cur ' ';
-            Buffer.add_string cur word;
-            cur_w := !cur_w + 1 + ww;
-            acc
-          end
-          else begin
-            let acc = flush_cur acc cur in
-            cur_w := 0;
-            if ww <= width then begin
-              Buffer.add_string cur word;
-              cur_w := ww;
-              acc
-            end
-            else push_long_word acc word
-          end)
-        [] words
+    let wrap_paragraph raw_line =
+      let clean = sanitize_single_line raw_line in
+      if String.equal clean "" then [ "" ]
+      else
+        let words = String.split_on_char ' ' clean in
+        let cur = Buffer.create width in
+        let cur_w = ref 0 in
+        let acc =
+          List.fold_left
+            (fun acc word ->
+              let ww = Grapheme.display_width word in
+              if !cur_w = 0 then begin
+                if ww <= width then begin
+                  Buffer.add_string cur word;
+                  cur_w := ww;
+                  acc
+                end
+                else push_long_word acc word
+              end
+              else if !cur_w + 1 + ww <= width then begin
+                Buffer.add_char cur ' ';
+                Buffer.add_string cur word;
+                cur_w := !cur_w + 1 + ww;
+                acc
+              end
+              else begin
+                let acc = flush_cur acc cur in
+                cur_w := 0;
+                if ww <= width then begin
+                  Buffer.add_string cur word;
+                  cur_w := ww;
+                  acc
+                end
+                else push_long_word acc word
+              end)
+            [] words
+        in
+        List.rev (flush_cur acc cur)
     in
-    List.rev (flush_cur acc cur)
+    String.split_on_char '\n' text |> List.concat_map wrap_paragraph
 
 let short_hash = Text_util.short_hash
 

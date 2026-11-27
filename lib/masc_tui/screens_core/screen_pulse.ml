@@ -690,26 +690,69 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
                   ~left_style:anchor_st ~right_text:(Option.value ~default:"" infra_mix)
                   ~right_style:act_st;
               if body_h >= 3 then begin
-                if Array.length fleet_samples > 0 then begin
-                  let adv =
-                    Cell_grid.put_text ~clip:r2 grid ~x:r2.x ~y:r2.y
-                      ~style:whisper_st
-                      (Grapheme.truncate_to_width ~max_width:(r2.w / 2) turns_str)
-                  in
-                  let sx = r2.x + adv + 2 in
-                  let sw = Int.min 12 (Rect.right r2 - sx) in
-                  if sw >= 4 then
-                    ignore
-                      (Chart.draw_sparkline_run ~clip:r2 grid
-                         ~x:(Rect.right r2 - sw) ~y:r2.y ~width:sw ~theme ~bg
-                         ~unicode:caps.unicode_blocks
-                         ~gradient:Chart.Gradient.Cool_flow fleet_samples)
-                end
-                else
-                  let right_txt = Option.value ~default:"" (heap_summary model) in
-                  put_left_right grid ~clip:r2 ~y:r2.y ~left_text:turns_str
-                    ~left_style:whisper_st ~right_text:right_txt
-                    ~right_style:whisper_st
+                let disk_alert =
+                  match
+                    Option.bind (Observed.to_option model.infra.sandboxes)
+                      Wire_infra.host_storage_of_snapshot
+                  with
+                  | Some hs when Wire_infra.host_storage_is_alert hs ->
+                      let tone =
+                        if Wire_infra.host_storage_is_critical hs then
+                          Theme.Status_critical
+                        else Theme.Status_attention
+                      in
+                      let lbl =
+                        if hs.enospc_observations > 0 then
+                          match hs.capacity_percent with
+                          | Some pct ->
+                              Printf.sprintf "%s Disk %.0f%% · ENOSPC×%d"
+                                (Glyph.to_utf8 Glyph.Warning_triangle)
+                                pct hs.enospc_observations
+                          | None ->
+                              Printf.sprintf "%s ENOSPC×%d"
+                                (Glyph.to_utf8 Glyph.Warning_triangle)
+                                hs.enospc_observations
+                        else
+                          match hs.capacity_percent with
+                          | Some pct ->
+                              Printf.sprintf "%s Disk %.0f%%"
+                                (Glyph.to_utf8 Glyph.Warning_triangle)
+                                pct
+                          | None ->
+                              Printf.sprintf "%s %s"
+                                (Glyph.to_utf8 Glyph.Warning_triangle)
+                                (Say.resolve lang
+                                   (Say.make ~ko:"디스크 주의" ~en:"Disk alert"))
+                      in
+                      Some (lbl, Typography.status ~bg ~bold:true theme tone)
+                  | Some _ | None -> None
+                in
+                match disk_alert with
+                | Some (disk_lbl, disk_st) ->
+                    put_left_right grid ~clip:r2 ~y:r2.y ~left_text:turns_str
+                      ~left_style:whisper_st ~right_text:disk_lbl
+                      ~right_style:disk_st
+                | None ->
+                    if Array.length fleet_samples > 0 then begin
+                      let adv =
+                        Cell_grid.put_text ~clip:r2 grid ~x:r2.x ~y:r2.y
+                          ~style:whisper_st
+                          (Grapheme.truncate_to_width ~max_width:(r2.w / 2) turns_str)
+                      in
+                      let sx = r2.x + adv + 2 in
+                      let sw = Int.min 12 (Rect.right r2 - sx) in
+                      if sw >= 4 then
+                        ignore
+                          (Chart.draw_sparkline_run ~clip:r2 grid
+                             ~x:(Rect.right r2 - sw) ~y:r2.y ~width:sw ~theme ~bg
+                             ~unicode:caps.unicode_blocks
+                             ~gradient:Chart.Gradient.Cool_flow fleet_samples)
+                    end
+                    else
+                      let right_txt = Option.value ~default:"" (heap_summary model) in
+                      put_left_right grid ~clip:r2 ~y:r2.y ~left_text:turns_str
+                        ~left_style:whisper_st ~right_text:right_txt
+                        ~right_style:whisper_st
               end
           | 1 ->
               (* KPI 2: 24h Cache & Spend with explicit provenance *)
@@ -2769,7 +2812,11 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       match bp with
       | Layout.Wide | Layout.Standard -> (
           let cols_r =
-            Layout.split_h ~gap:gap_x main_r [ Layout.Ratio 0.46; Layout.Flex 1 ]
+            Layout.split_h ~gap:gap_x main_r
+              [
+                Layout.Ratio (Model.effective_split_ratio ~base:0.46 model);
+                Layout.Flex 1;
+              ]
           in
           match cols_r with
           | [ left_col; right_col ] ->

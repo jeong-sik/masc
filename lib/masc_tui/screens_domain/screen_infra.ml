@@ -836,6 +836,86 @@ let draw_sandbox_inspector ?(scroll = 0) ~grid ~cache ~(rect : Rect.t)
           draw_sandbox_inspector_body ~scroll ~grid ~inner ~theme ~bp ~lang ~model
             entry
 
+let format_storage_gib (bytes : int64) =
+  let gib = Int64.to_float bytes /. 1073741824.0 in
+  if not (Float.is_finite gib) then Glyph.to_utf8 Glyph.Missing_unreported
+  else if gib >= 1024.0 then Printf.sprintf "%.1f TiB" (gib /. 1024.0)
+  else Printf.sprintf "%.1f GiB" gib
+
+let render_disk_bar ~width pct =
+  let w = Int.max 0 width in
+  if w = 0 then ""
+  else
+    let clamped =
+      if not (Float.is_finite pct) then 0.0
+      else Float.max 0.0 (Float.min 100.0 pct)
+    in
+    let filled =
+      Int.max 0
+        (Int.min w
+           (int_of_float (Float.round (clamped /. 100.0 *. float_of_int w))))
+    in
+    let empty = w - filled in
+    let buf = Buffer.create (w * 3) in
+    for _ = 1 to filled do
+      Buffer.add_string buf "█"
+    done;
+    for _ = 1 to empty do
+      Buffer.add_string buf "░"
+    done;
+    Buffer.contents buf
+
+let disk_gauge_summary ~lang ~bar_w (hs : Wire_infra.host_storage_summary) =
+  let tone =
+    if Wire_infra.host_storage_is_critical hs then Some Theme.Status_critical
+    else if Wire_infra.host_storage_is_alert hs then Some Theme.Status_attention
+    else Some Theme.Status_ok
+  in
+  let text =
+    match hs.probe_error with
+    | Some err ->
+        Printf.sprintf "%s %s: %s"
+          (Glyph.to_utf8 Glyph.Warning_triangle)
+          (Say.resolve lang (Say.make ~ko:"디스크 오류" ~en:"Disk err"))
+          err
+    | None ->
+        let bar_prefix =
+          match hs.capacity_percent with
+          | Some pct when bar_w >= 4 -> render_disk_bar ~width:bar_w pct ^ " "
+          | Some _ | None -> ""
+        in
+        let bytes_part =
+          match (hs.available_bytes, hs.total_bytes) with
+          | Some avail, Some total ->
+              Printf.sprintf "%s / %s"
+                (format_storage_gib avail)
+                (format_storage_gib total)
+          | Some avail, None ->
+              Printf.sprintf "%s %s"
+                (format_storage_gib avail)
+                (Say.resolve lang (Say.make ~ko:"여유" ~en:"free"))
+          | None, Some total -> format_storage_gib total
+          | None, None ->
+              Say.resolve lang (Say.make ~ko:"디스크" ~en:"Disk")
+        in
+        let pct_part =
+          match hs.capacity_percent with
+          | Some pct ->
+              Printf.sprintf " (%.0f%% %s)" pct
+                (Say.resolve lang (Say.make ~ko:"사용" ~en:"used"))
+          | None -> ""
+        in
+        let enospc_part =
+          if hs.enospc_observations > 0 then
+            Printf.sprintf " · %s ENOSPC ×%d"
+              (Glyph.to_utf8 Glyph.Warning_triangle)
+              hs.enospc_observations
+          else ""
+        in
+        bar_prefix ^ bytes_part ^ pct_part ^ enospc_part
+  in
+  (text, tone)
+
 let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
     ~(theme : Theme.t) ~bp grid =
   let lang = model.lang in
@@ -1133,42 +1213,75 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
          in
          if not (Rect.is_empty i3) then begin
            let y = ref i3.y and bot = Rect.bottom i3 in
+           let hs_opt = Wire_infra.host_storage_of_snapshot snap in
            if !y < bot then begin
-             let storage_s =
-               match snap.host_storage with
-               | Some j ->
-                   let kvs = H.json_kv_summary j in
-                   if kvs = [] then Glyph.to_utf8 Glyph.Missing_absent
-                   else
-                     kvs |> H.safe_take 2
-                     |> List.map (fun (k, v) -> k ^ ": " ^ v)
-                     |> String.concat " · "
-               | None ->
-                   Say.resolve lang
-                     (Say.make ~ko:"스토리지: 미보고" ~en:"Storage: Unreported")
+             let storage_s, storage_style =
+               match hs_opt with
+               | Some hs ->
+                   let bar_w =
+                     if i3.w >= 42 then 8 else if i3.w >= 32 then 6 else 0
+                   in
+                   let txt, tone_opt = disk_gauge_summary ~lang ~bar_w hs in
+                   let st =
+                     match tone_opt with
+                     | Some t -> H.status_style ~theme t
+                     | None -> H.text_style ~theme ()
+                   in
+                   (txt, st)
+               | None -> (
+                   match snap.host_storage with
+                   | Some j ->
+                       let kvs = H.json_kv_summary j in
+                       let txt =
+                         if kvs = [] then Glyph.to_utf8 Glyph.Missing_absent
+                         else
+                           kvs |> H.safe_take 2
+                           |> List.map (fun (k, v) -> k ^ ": " ^ v)
+                           |> String.concat " · "
+                       in
+                       (txt, H.text_style ~theme ())
+                   | None ->
+                       ( Say.resolve lang
+                           (Say.make ~ko:"스토리지: 미보고" ~en:"Storage: Unreported"),
+                         H.text_style ~theme () ))
              in
              ignore
                (H.put_clipped ~grid ~clip:i3 ~x:i3.x ~y:!y ~max_w:i3.w
-                  ~style:(H.text_style ~theme ()) storage_s);
+                  ~style:storage_style storage_s);
              incr y
            end;
            if !y < bot then begin
-             let gc_s =
-               match snap.volume_gc_report with
-               | Some j ->
-                   let kvs = H.json_kv_summary j in
-                   if kvs = [] then "GC: ok"
-                   else
-                     "GC "
-                     ^ (kvs |> H.safe_take 2
-                       |> List.map (fun (k, v) -> k ^ "=" ^ v)
-                       |> String.concat " ")
-               | None ->
-                   Printf.sprintf "Docker: %d keepers" snap.docker_keepers_count
+             let row2_s, row2_style =
+               match hs_opt with
+               | Some hs when hs.enospc_observations > 0 ->
+                   let mount_s =
+                     match hs.mounted_on with
+                     | Some m -> " · " ^ m
+                     | None -> ""
+                   in
+                   ( Printf.sprintf "%s ENOSPC ×%d%s"
+                       (Glyph.to_utf8 Glyph.Warning_triangle)
+                       hs.enospc_observations mount_s,
+                     H.status_style ~theme Theme.Status_critical )
+               | Some _ | None ->
+                   let gc_s =
+                     match snap.volume_gc_report with
+                     | Some j ->
+                         let kvs = H.json_kv_summary j in
+                         if kvs = [] then "GC: ok"
+                         else
+                           "GC "
+                           ^ (kvs |> H.safe_take 2
+                             |> List.map (fun (k, v) -> k ^ "=" ^ v)
+                             |> String.concat " ")
+                     | None ->
+                         Printf.sprintf "Docker: %d keepers" snap.docker_keepers_count
+                   in
+                   (gc_s, H.secondary_style ~theme ())
              in
              ignore
                (H.put_clipped ~grid ~clip:i3 ~x:i3.x ~y:!y ~max_w:i3.w
-                  ~style:(H.secondary_style ~theme ()) gc_s);
+                  ~style:row2_style row2_s);
              incr y
            end;
            if !y < bot then begin
@@ -1251,10 +1364,36 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
                if pool_tokens = [] then Glyph.to_utf8 Glyph.Missing_absent
                else String.concat " · " pool_tokens
              in
+             let hs_opt = Wire_infra.host_storage_of_snapshot snap in
+             let inline_disk_suffix =
+               if !y + 1 < bot then ""
+               else
+                 match hs_opt with
+                 | None -> ""
+                 | Some hs ->
+                     let bar_w = if ci.w >= 76 then 6 else 0 in
+                     let txt, _ = disk_gauge_summary ~lang ~bar_w hs in
+                     " · Disk " ^ txt
+             in
              ignore
                (H.put_clipped ~grid ~clip:ci ~x:ci.x ~y:!y ~max_w:ci.w
                   ~style:(H.secondary_style ~theme ())
-                  (prefix ^ pools_s ^ suffix))
+                  (prefix ^ pools_s ^ suffix ^ inline_disk_suffix));
+             incr y;
+             if !y < bot then
+               match hs_opt with
+               | None -> ()
+               | Some hs ->
+                   let bar_w = if ci.w >= 44 then 8 else 6 in
+                   let txt, tone_opt = disk_gauge_summary ~lang ~bar_w hs in
+                   let style =
+                     match tone_opt with
+                     | Some t -> H.status_style ~theme t
+                     | None -> H.text_style ~theme ()
+                   in
+                   ignore
+                     (H.put_clipped ~grid ~clip:ci ~x:ci.x ~y:!y ~max_w:ci.w
+                        ~style ("Disk " ^ txt))
            end
          end
        end
@@ -1290,7 +1429,8 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
     if zoomed then (Rect.empty, body_rect)
     else if H.is_wide_split body_rect then
       match
-        Layout.split_h_bp bp body_rect [ Layout.Ratio 0.60; Layout.Flex 1 ]
+        Layout.split_h_bp bp body_rect
+          [ Layout.Ratio (Model.effective_split_ratio ~base:0.60 model); Layout.Flex 1 ]
       with
       | [ l; r ] -> (l, r)
       | _ -> (body_rect, Rect.empty)

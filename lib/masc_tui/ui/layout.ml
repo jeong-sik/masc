@@ -40,6 +40,16 @@ let classify_viewport ~cols ~rows =
 
 let is_too_small_blocker ~cols ~rows = cols < 40 || rows < 12
 
+let min_chat_bare_width ~frame_margin ~body_indent ~speaker_width =
+  Int.max 0 frame_margin + Int.max 0 body_indent + Int.max 0 speaker_width + 20
+
+let safe_chat_prose_width ~content_w ~frame_margin ~body_indent ~speaker_width =
+  let overhead =
+    Int.max 0 frame_margin + Int.max 0 body_indent + Int.max 0 speaker_width
+  in
+  let avail = content_w - overhead in
+  if avail >= 20 then avail else Int.max 1 (Int.min content_w 20)
+
 let chrome_rows bp ~composer_expanded ~approval_strip =
   let strip = if approval_strip then 1 else 0 in
   match bp with

@@ -146,6 +146,174 @@ type unobserved_reason = {
   reason : string;
 }
 
+type host_storage_status =
+  | Storage_ok
+  | Storage_warning
+  | Storage_degraded
+  | Storage_critical
+  | Storage_error of string
+  | Storage_unknown of string
+
+type host_storage_summary = {
+  status : host_storage_status option;
+  mounted_on : string option;
+  available_bytes : int64 option;
+  total_bytes : int64 option;
+  used_bytes : int64 option;
+  capacity_percent : float option;
+  enospc_observations : int;
+  probe_error : string option;
+}
+
+let host_storage_status_of_string raw =
+  let s = String.lowercase_ascii (String.trim raw) in
+  if String.equal s "" then None
+  else
+    match s with
+    | "ok" | "healthy" | "normal" -> Some Storage_ok
+    | "warning" | "warn" | "low" -> Some Storage_warning
+    | "degraded" -> Some Storage_degraded
+    | "critical" | "exhausted" | "full" -> Some Storage_critical
+    | "error" | "failed" | "probe_error" -> Some (Storage_error s)
+    | other -> Some (Storage_unknown other)
+
+let json_assoc_opt key = function
+  | `Assoc kvs -> List.assoc_opt key kvs
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+
+let json_nonblank_string_opt key json =
+  match json_assoc_opt key json with
+  | Some (`String s) ->
+      let t = String.trim s in
+      if String.equal t "" then None else Some t
+  | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null)
+  | None ->
+      None
+
+let json_nonneg_int64_opt key json =
+  match json_assoc_opt key json with
+  | Some (`Int n) when n >= 0 -> Some (Int64.of_int n)
+  | Some (`Intlit s) -> (
+      match Int64.of_string_opt s with
+      | Some v when Int64.compare v 0L >= 0 -> Some v
+      | Some _ | None -> None)
+  | Some (`Float f) when Float.is_finite f && f >= 0.0 -> Some (Int64.of_float f)
+  | Some (`Int _ | `Float _ | `Assoc _ | `Bool _ | `List _ | `Null | `String _)
+  | None ->
+      None
+
+let json_finite_float_opt key json =
+  match json_assoc_opt key json with
+  | Some (`Float f) when Float.is_finite f -> Some f
+  | Some (`Int n) -> Some (float_of_int n)
+  | Some (`Intlit s) -> (
+      match float_of_string_opt s with
+      | Some f when Float.is_finite f -> Some f
+      | Some _ | None -> None)
+  | Some (`Float _ | `Assoc _ | `Bool _ | `List _ | `Null | `String _) | None ->
+      None
+
+let json_nonneg_int_opt key json =
+  match json_assoc_opt key json with
+  | Some (`Int n) when n >= 0 -> Some n
+  | Some (`Intlit s) -> (
+      match int_of_string_opt s with
+      | Some v when v >= 0 -> Some v
+      | Some _ | None -> None)
+  | Some (`Int _ | `Assoc _ | `Bool _ | `Float _ | `List _ | `Null | `String _)
+  | None ->
+      None
+
+let parse_host_storage json =
+  match json with
+  | `Assoc _ ->
+      let status =
+        Option.bind (json_nonblank_string_opt "status" json)
+          host_storage_status_of_string
+      in
+      let enospc_opt =
+        json_nonneg_int_opt "storage_space_exhaustion_observations_total" json
+      in
+      let fs_opt =
+        match json_assoc_opt "filesystem" json with
+        | Some (`Assoc _ as fs) -> Some fs
+        | Some (`Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _)
+        | None ->
+            None
+      in
+      if Option.is_none status && Option.is_none enospc_opt && Option.is_none fs_opt
+      then None
+      else
+        let mounted_on, available_bytes, total_bytes, used_bytes, cap_opt, probe_error =
+          match fs_opt with
+          | None -> (None, None, None, None, None, None)
+          | Some fs ->
+              ( json_nonblank_string_opt "mounted_on" fs,
+                json_nonneg_int64_opt "available_bytes" fs,
+                json_nonneg_int64_opt "total_bytes" fs,
+                json_nonneg_int64_opt "used_bytes" fs,
+                json_finite_float_opt "capacity_percent" fs,
+                json_nonblank_string_opt "error" fs )
+        in
+        let capacity_percent =
+          match cap_opt with
+          | Some pct -> Some (Float.max 0.0 (Float.min 100.0 pct))
+          | None -> (
+              match (used_bytes, available_bytes, total_bytes) with
+              | Some u, _, Some t when Int64.compare t 0L > 0 ->
+                  Some
+                    (Float.max 0.0
+                       (Float.min 100.0
+                          (Int64.to_float u /. Int64.to_float t *. 100.0)))
+              | None, Some a, Some t when Int64.compare t 0L > 0 ->
+                  let u = Int64.max 0L (Int64.sub t a) in
+                  Some
+                    (Float.max 0.0
+                       (Float.min 100.0
+                          (Int64.to_float u /. Int64.to_float t *. 100.0)))
+              | (Some _ | None), (Some _ | None), (Some _ | None) -> None)
+        in
+        let enospc_observations =
+          match enospc_opt with Some n -> n | None -> 0
+        in
+        Some
+          {
+            status;
+            mounted_on;
+            available_bytes;
+            total_bytes;
+            used_bytes;
+            capacity_percent;
+            enospc_observations;
+            probe_error;
+          }
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+
+let host_storage_is_critical (hs : host_storage_summary) =
+  hs.enospc_observations > 0
+  || (match hs.capacity_percent with
+     | Some pct -> Float.is_finite pct && pct >= 95.0
+     | None -> false)
+  ||
+  match hs.status with
+  | Some (Storage_critical | Storage_error _) -> true
+  | Some (Storage_ok | Storage_warning | Storage_degraded | Storage_unknown _)
+  | None ->
+      false
+
+let host_storage_is_alert (hs : host_storage_summary) =
+  host_storage_is_critical hs
+  || Option.is_some hs.probe_error
+  || (match hs.capacity_percent with
+     | Some pct -> Float.is_finite pct && pct >= 85.0
+     | None -> false)
+  ||
+  match hs.status with
+  | Some (Storage_warning | Storage_degraded | Storage_critical | Storage_error _)
+    ->
+      true
+  | Some (Storage_ok | Storage_unknown _) | None -> false
+
 type sandboxes_snapshot = {
   probe_state : probe_freshness;
   microvm_declared : int;
@@ -167,6 +335,9 @@ type sandboxes_snapshot = {
   host_storage : Yojson.Safe.t option;
   unobserved_reasons : unobserved_reason list;
 }
+
+let host_storage_of_snapshot (snap : sandboxes_snapshot) =
+  Option.bind snap.host_storage parse_host_storage
 
 type keeper_sandbox_detail =
   | Sandbox_microvm of microvm_guest

@@ -75,6 +75,9 @@ type nav_state = {
   sidebar_focused : bool;
   sidebar_cursor : int;
   sidebar_scroll : int;
+  collapsed_sidebar_sections : Nav.menu_section list;
+  sidebar_width_delta : int;
+  split_ratio_delta : float;
   inspector_scroll_offset : int;
   keeper_detail_scroll_offset : int;
   json_scroll_offset : int;
@@ -401,6 +404,21 @@ val keeper_dive_focused : t -> bool
 val sidebar_width : int
 val sidebar_gap : int
 val sidebar_docked_min_cols : int
+val sidebar_width_delta_min : int
+val sidebar_width_delta_max : int
+val split_ratio_delta_min : float
+val split_ratio_delta_max : float
+val clamp_sidebar_width_delta : int -> int
+val clamp_split_ratio_delta : float -> float
+val effective_sidebar_width : t -> int
+val effective_split_ratio :
+  base:float -> ?min_ratio:float -> ?max_ratio:float -> t -> float
+val adjust_sidebar_width : delta:int -> t -> t
+val adjust_split_ratio : delta:float -> t -> t
+val reset_pane_sizes : t -> t
+val is_sidebar_section_collapsed : Nav.menu_section -> t -> bool
+val toggle_sidebar_section : Nav.menu_section -> t -> t
+val toggle_active_sidebar_section : t -> t
 val sidebar_docked : t -> bool
 val sidebar_drawer_open : t -> bool
 val sidebar_visible : t -> bool
@@ -418,11 +436,21 @@ type sidebar_row =
     }
 
 val sidebar_visual_rows : sidebar_row list
+val sidebar_visual_rows_for : collapsed:Nav.menu_section list -> sidebar_row list
 val sidebar_cursor_visual_row : cursor:int -> int
+val sidebar_cursor_visual_row_for : rows:sidebar_row list -> cursor:int -> int
 val sidebar_viewport_start : inner_h:int -> scroll:int -> cursor:int -> int
+val sidebar_viewport_start_for :
+  rows:sidebar_row list -> inner_h:int -> scroll:int -> cursor:int -> int
 val sidebar_has_below_overflow : inner_h:int -> start:int -> bool
+val sidebar_has_below_overflow_for :
+  rows:sidebar_row list -> inner_h:int -> start:int -> bool
 val sidebar_visible_data_rows : inner_h:int -> start:int -> int
+val sidebar_visible_data_rows_for :
+  rows:sidebar_row list -> inner_h:int -> start:int -> int
 val sidebar_hidden_below_sections : inner_h:int -> start:int -> Nav.menu_section list
+val sidebar_hidden_below_sections_for :
+  rows:sidebar_row list -> inner_h:int -> start:int -> Nav.menu_section list
 val active_menu_target : t -> Nav.menu_target
 val sync_sidebar_cursor : t -> t
 val body_top_y : t -> int

@@ -74,9 +74,12 @@ let draw_sandbox_detail_notice grid ~(rect : Rect.t) ~theme ~lang
     List.iteri
       (fun i (label, tone) ->
         if i < height then
+          let fitted =
+            Grapheme.truncate_to_width ~max_width:rect.w (Say.resolve lang label)
+          in
           ignore
             (Cell_grid.put_text ~clip:rect grid ~x:rect.x ~y:(rect.y + i)
-               ~style:(Typography.status ~bg theme tone) (Say.resolve lang label)))
+               ~style:(Typography.status ~bg theme tone) fitted))
       rows;
     height
 

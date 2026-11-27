@@ -36,11 +36,32 @@ type recorder_kind =
   | Recorder_sox
   | Recorder_ffmpeg
 
+type audio_platform =
+  | Audio_macos
+  | Audio_linux_pulse
+  | Audio_linux_alsa
+
+val detect_audio_platform : unit -> audio_platform
+(** Detect the host recording audio backend: macOS ([Audio_macos]) or Linux
+    PulseAudio/PipeWire ([Audio_linux_pulse]) with ALSA fallback
+    ([Audio_linux_alsa]). *)
+
 val resolve_recorder_from :
   find:(string -> string option) -> (recorder_kind * string) option
 (** Resolve the first supported local audio recorder in order
     [rec -> sox -> ffmpeg]. Shared by both [probe] and [record_until_stopped]
     so capability probing and recording never diverge. *)
+
+val build_record_argv_for_platform :
+  platform:audio_platform ->
+  kind:recorder_kind ->
+  bin_path:string ->
+  device:string option ->
+  out_path:string ->
+  string array
+(** Build deterministic 16 kHz mono WAV recording argv for [rec], [sox], or
+    [ffmpeg] targeting [platform] (macOS [coreaudio]/[avfoundation], Linux
+    [pulseaudio]/[pulse], or Linux [alsa]). *)
 
 val build_record_argv :
   kind:recorder_kind ->
@@ -50,6 +71,10 @@ val build_record_argv :
   string array
 (** Build deterministic 16 kHz mono WAV recording argv for [rec], [sox], or
     [ffmpeg] (macOS [avfoundation] input [:default] or explicit device). *)
+
+val rms_level_of_pcm16_le : bytes -> offset:int -> len:int -> float
+(** Compute normalized [[0.0 .. 1.0]] perceptual RMS microphone level from
+    signed 16-bit little-endian PCM audio bytes. *)
 
 val decode_voice_config :
   recorder_cmd:string option -> Yojson.Safe.t -> (capabilities, string) result

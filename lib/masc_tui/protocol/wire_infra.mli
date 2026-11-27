@@ -160,6 +160,41 @@ type unobserved_reason = {
   reason : string;
 }
 
+type host_storage_status =
+  | Storage_ok
+  | Storage_warning
+  | Storage_degraded
+  | Storage_critical
+  | Storage_error of string
+  | Storage_unknown of string
+
+type host_storage_summary = {
+  status : host_storage_status option;
+  mounted_on : string option;
+  available_bytes : int64 option;
+  total_bytes : int64 option;
+  used_bytes : int64 option;
+  capacity_percent : float option;
+  enospc_observations : int;
+  probe_error : string option;
+}
+
+val host_storage_status_of_string : string -> host_storage_status option
+(** Strict parser for host storage status strings; blank strings return [None]. *)
+
+val parse_host_storage : Yojson.Safe.t -> host_storage_summary option
+(** Parse typed host filesystem and ENOSPC exhaustion telemetry from a
+    [host_storage] JSON object, or [None] when the payload is absent/untyped. *)
+
+val host_storage_is_alert : host_storage_summary -> bool
+(** [true] when disk status is warning/degraded/critical/error,
+    [capacity_percent >= 85.0], [enospc_observations > 0], or a probe error
+    was reported. *)
+
+val host_storage_is_critical : host_storage_summary -> bool
+(** [true] when [enospc_observations > 0], [capacity_percent >= 95.0], or
+    status is critical/error. *)
+
 type sandboxes_snapshot = {
   probe_state : probe_freshness;
   microvm_declared : int;
@@ -181,6 +216,9 @@ type sandboxes_snapshot = {
   host_storage : Yojson.Safe.t option;
   unobserved_reasons : unobserved_reason list;
 }
+
+val host_storage_of_snapshot : sandboxes_snapshot -> host_storage_summary option
+(** Extract typed {!host_storage_summary} from [snap.host_storage]. *)
 
 type keeper_sandbox_detail =
   | Sandbox_microvm of microvm_guest

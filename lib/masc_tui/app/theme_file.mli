@@ -26,3 +26,23 @@ val load_overrides :
 
 val themes_dir_of_cli : base_path:string -> string option -> string
 (** [Option.value ~default:(default_dir ~base_path) themes_dir]. *)
+
+type custom_theme_file = {
+  name : string;
+  path : string;
+}
+
+val discover_custom_themes :
+  base_path:string -> themes_dir:string option -> custom_theme_file list
+(** Discover extra user-supplied [*.toml] theme override files in the effective
+    themes directory whose stem is not one of the built-in {!Theme.all_presets}.
+    Sorted deterministically by [name]. Missing or unreadable directories yield
+    [[]]. *)
+
+val load_custom_palette :
+  ?base_preset:Masc_tui_core.Theme.preset ->
+  path:string ->
+  (Masc_tui_core.Theme.Palette.t, string) result
+(** Parse a custom theme [.toml] file merged onto [base_preset] (default
+    {!Masc_tui_core.Theme.Midnight}) without widening the closed
+    {!Masc_tui_core.Theme.preset} variant. *)

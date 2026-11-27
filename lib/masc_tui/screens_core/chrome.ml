@@ -131,11 +131,8 @@ let compute_layout ~(model : Model.t) ~cols ~rows =
       Layout.inset_body breakpoint (Rect.make ~x:0 ~y:top_h ~w:cols ~h:body_h)
     in
     let sidebar, sidebar_is_drawer, body =
-      if
-        Model.sidebar_docked sized_model
-        && full_body.w >= Model.sidebar_width + 20
-      then
-        let sw = Model.sidebar_width in
+      let sw = Model.effective_sidebar_width sized_model in
+      if Model.sidebar_docked sized_model && full_body.w >= sw + 20 then
         let gap = Model.sidebar_gap in
         let sb_rect =
           Rect.make ~x:full_body.x ~y:full_body.y ~w:sw ~h:full_body.h
@@ -147,7 +144,7 @@ let compute_layout ~(model : Model.t) ~cols ~rows =
         in
         (Some sb_rect, false, b_rect)
       else if Model.sidebar_drawer_open sized_model && full_body.w >= 20 then
-        let dw = Int.min (Model.sidebar_width + 2) (Int.max 18 (cols - 4)) in
+        let dw = Int.min (sw + 2) (Int.max 18 (cols - 4)) in
         let dx = Layout.outer_margin breakpoint in
         let sb_rect = Rect.make ~x:dx ~y:top_h ~w:dw ~h:body_h in
         (Some sb_rect, true, full_body)
@@ -415,6 +412,41 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
              ])
       else None
     in
+    let disk_item =
+      match
+        Option.bind (Observed.to_option model.infra.sandboxes)
+          Wire_infra.host_storage_of_snapshot
+      with
+      | Some hs when Wire_infra.host_storage_is_alert hs ->
+          let tone =
+            if Wire_infra.host_storage_is_critical hs then Theme.Status_critical
+            else Theme.Status_attention
+          in
+          let label =
+            if hs.enospc_observations > 0 then
+              match hs.capacity_percent with
+              | Some pct when not compact ->
+                  Printf.sprintf "%s DISK %.0f%%·ENOSPC"
+                    (Glyph.to_utf8 Glyph.Warning_triangle)
+                    pct
+              | Some _ | None ->
+                  Printf.sprintf "%s ENOSPC"
+                    (Glyph.to_utf8 Glyph.Warning_triangle)
+            else
+              match hs.capacity_percent with
+              | Some pct ->
+                  Printf.sprintf "%s DISK %.0f%%"
+                    (Glyph.to_utf8 Glyph.Warning_triangle)
+                    pct
+              | None ->
+                  Printf.sprintf "%s DISK"
+                    (Glyph.to_utf8 Glyph.Warning_triangle)
+          in
+          Some
+            (make_rail_item ~priority:1
+               [ (label, Typography.status ~bg ~bold:true theme tone) ])
+      | Some _ | None -> None
+    in
     let inc_count = Incidents.active_count model.incidents in
     let inc_badge =
       if inc_count > 0 then
@@ -492,9 +524,10 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     in
     let raw_items =
       (if Model.keeper_dive_focused model then
-         [ attn_item; Some fresh_item; auth_item; help_badge ]
+         [ disk_item; attn_item; Some fresh_item; auth_item; help_badge ]
        else
          [
+           disk_item;
            attn_item;
            Some fresh_item;
            auth_item;
@@ -2156,6 +2189,8 @@ let sidebar_keeper_counts (m : Model.t) =
 
 type cached_sidebar_row =
   | Cached_section of {
+      sec : Nav.menu_section;
+      item_count : int;
       ko_upper : string;
       en_upper : string;
       sc_opt : string option;
@@ -2167,7 +2202,13 @@ type cached_sidebar_row =
       sc_w : int;
     }
 
-let cached_sidebar_rows_arr =
+let section_item_count sec =
+  List.fold_left
+    (fun acc (it : Nav.menu_item) ->
+      if Nav.equal_menu_section it.section sec then acc + 1 else acc)
+    0 Nav.all_menu_items
+
+let cached_sidebar_rows_of_list visual_rows =
   Array.of_list
     (List.map
        (function
@@ -2181,6 +2222,8 @@ let cached_sidebar_rows_arr =
              in
              Cached_section
                {
+                 sec;
+                 item_count = section_item_count sec;
                  ko_upper = String.uppercase_ascii (Say.resolve Say.Lang_ko lbl);
                  en_upper = String.uppercase_ascii (Say.resolve Say.Lang_en lbl);
                  sc_opt;
@@ -2193,7 +2236,10 @@ let cached_sidebar_rows_arr =
                | Some s -> Grapheme.display_width s
              in
              Cached_item { index; item; sc_w })
-       Model.sidebar_visual_rows)
+       visual_rows)
+
+let cached_sidebar_rows_arr =
+  cached_sidebar_rows_of_list Model.sidebar_visual_rows
 
 let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~elevated =
@@ -2225,14 +2271,25 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         if logical_focused then model.nav.sidebar_cursor
         else Nav.menu_item_index active_target
       in
-      let rows = cached_sidebar_rows_arr in
+      let cursor_section =
+        Option.map (fun (it : Nav.menu_item) -> it.section)
+          (Nav.menu_item_of_index model.nav.sidebar_cursor)
+      in
+      let vis_rows_list, rows =
+        match model.nav.collapsed_sidebar_sections with
+        | [] -> (Model.sidebar_visual_rows, cached_sidebar_rows_arr)
+        | collapsed ->
+            let vr = Model.sidebar_visual_rows_for ~collapsed in
+            (vr, cached_sidebar_rows_of_list vr)
+      in
       let total = Array.length rows in
       let start =
-        Model.sidebar_viewport_start ~inner_h:inner.h
+        Model.sidebar_viewport_start_for ~rows:vis_rows_list ~inner_h:inner.h
           ~scroll:model.nav.sidebar_scroll ~cursor:effective_cursor
       in
       let data_rows =
-        Model.sidebar_visible_data_rows ~inner_h:inner.h ~start
+        Model.sidebar_visible_data_rows_for ~rows:vis_rows_list ~inner_h:inner.h
+          ~start
       in
       let attn_n = Attention.count model.attention in
       let inc_n = Incidents.active_count model.incidents in
@@ -2247,9 +2304,45 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           let py = inner.y + i in
           let row_r = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
           match Array.unsafe_get rows row_idx with
-          | Cached_section { ko_upper; en_upper; sc_opt; sc_w } ->
-              let sec_lbl =
+          | Cached_section { sec; item_count; ko_upper; en_upper; sc_opt; sc_w } ->
+              let is_collapsed = Model.is_sidebar_section_collapsed sec model in
+              let is_collapsed_cursor =
+                is_collapsed
+                && Option.equal Nav.equal_menu_section cursor_section (Some sec)
+              in
+              let sec_bg =
+                if is_collapsed_cursor && focused then
+                  Color.of_rgb theme.selection_bg
+                else if is_collapsed_cursor && logical_focused then
+                  Color.of_rgb theme.surface_2
+                else bg
+              in
+              if is_collapsed_cursor && logical_focused then begin
+                Cell_grid.fill_rect ~clip:inner grid ~rect:row_r
+                  ~style:(Typography.primary ~bg:sec_bg theme) ();
+                if focused then
+                  Card.draw_left_rail ~bg:sec_bg ~color:theme.border_focused grid
+                    ~x:inner.x ~y:py ~h:1 ~theme
+              end;
+              let chevron =
+                Glyph.to_utf8
+                  (if is_collapsed then Glyph.Expand_closed
+                   else Glyph.Expand_open)
+              in
+              let base_lbl =
                 match lang with Say.Lang_ko -> ko_upper | Say.Lang_en -> en_upper
+              in
+              let sec_lbl =
+                if is_collapsed then
+                  Printf.sprintf "%s %s (%d)" chevron base_lbl item_count
+                else chevron ^ " " ^ base_lbl
+              in
+              let draw_sec_st =
+                if is_collapsed_cursor && focused then
+                  Typography.anchor ~bg:sec_bg theme
+                else if is_collapsed then
+                  Typography.structure ~bg:sec_bg theme
+                else sec_st
               in
               let right_edge = Rect.right inner - 1 in
               let sc_reserve = if sc_w > 0 then sc_w + 1 else 0 in
@@ -2258,7 +2351,7 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               in
               ignore
                 (Cell_grid.put_text ~clip:row_r grid ~x:(inner.x + 1) ~y:py
-                   ~style:sec_st
+                   ~style:draw_sec_st
                    (Grapheme.truncate_to_width ~max_width:max_sec_w sec_lbl));
               (match sc_opt with
                | None -> ()
@@ -2267,7 +2360,8 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                    if sx > inner.x + 2 then
                      ignore
                        (Cell_grid.put_text ~clip:row_r grid ~x:sx ~y:py
-                          ~style:sec_st s))
+                          ~style:(Typography.whisper ~bg:sec_bg ~italic:false theme)
+                          s))
           | Cached_item { index; item; sc_w } ->
               let is_cursor = focused && Int.equal index model.nav.sidebar_cursor in
               let is_blurred_cursor =
@@ -2391,7 +2485,7 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
              ~x:(Rect.right inner - 1) ~y:inner.y
              ~style:(Typography.whisper ~bg ~italic:false theme)
              "▲");
-      if Model.sidebar_has_below_overflow ~inner_h:inner.h ~start then begin
+      if Model.sidebar_has_below_overflow_for ~rows:vis_rows_list ~inner_h:inner.h ~start then begin
         let hidden_n =
           let count = ref 0 in
           for idx = start + data_rows to total - 1 do
@@ -2402,7 +2496,7 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           Int.max 1 !count
         in
         let hidden_secs =
-          Model.sidebar_hidden_below_sections ~inner_h:inner.h ~start
+          Model.sidebar_hidden_below_sections_for ~rows:vis_rows_list ~inner_h:inner.h ~start
           |> List.map (fun sec -> Say.resolve lang (Nav.menu_section_label sec))
         in
         let sec_hint =

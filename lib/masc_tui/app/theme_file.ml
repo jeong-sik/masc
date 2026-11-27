@@ -112,3 +112,42 @@ let load_overrides ~base_path ~themes_dir =
     Theme.all_presets;
   Theme.set_palette_overrides (List.rev !overrides);
   List.rev !warnings
+
+type custom_theme_file = {
+  name : string;
+  path : string;
+}
+
+let is_builtin_preset_name stem =
+  List.exists
+    (fun preset -> String.equal (Theme.preset_name preset) stem)
+    Theme.all_presets
+
+let discover_custom_themes ~base_path ~themes_dir =
+  let dir = themes_dir_of_cli ~base_path themes_dir in
+  let entries =
+    match Sys.is_directory dir with
+    | true -> (
+        match Sys.readdir dir with
+        | arr -> Array.to_list arr
+        | exception Sys_error _ -> [])
+    | false -> []
+    | exception Sys_error _ -> []
+  in
+  entries
+  |> List.filter_map (fun fname ->
+         if not (Filename.check_suffix fname ".toml") then None
+         else
+           let stem = Filename.chop_suffix fname ".toml" in
+           if String.equal (String.trim stem) "" || is_builtin_preset_name stem
+           then None
+           else
+             let path = Filename.concat dir fname in
+             match Sys.is_directory path with
+             | false -> Some { name = stem; path }
+             | true -> None
+             | exception Sys_error _ -> None)
+  |> List.sort (fun a b -> String.compare a.name b.name)
+
+let load_custom_palette ?(base_preset = Theme.Midnight) ~path =
+  load_palette ~preset:base_preset path

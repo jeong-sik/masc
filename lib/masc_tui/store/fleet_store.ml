@@ -25,6 +25,12 @@ type thinking_display =
   | Thinking_full
   | Thinking_hidden
 
+type group_axis =
+  | Group_by_company
+  | Group_by_status
+  | Group_by_sandbox
+  | Group_by_runtime
+
 type tool_call_state =
   | Tool_pending
   | Tool_result_pending of { model_output_after_close : bool }
@@ -158,6 +164,7 @@ type t = {
   fleet_reading : Wire_fleet.fleet_stream_reading Observed.t;
   fleet_degradation : Wire_fleet.fleet_degradation option;
   fleet_mode : Nav.keepers_fleet_mode;
+  group_axis : group_axis;
   selected_index : int;
   scroll_offset : int;
   pulse_scroll_offset : int;
@@ -202,6 +209,7 @@ let empty =
     fleet_reading = Observed.unreported;
     fleet_degradation = None;
     fleet_mode = Nav.Fleet_companies;
+    group_axis = Group_by_company;
     selected_index = 0;
     scroll_offset = 0;
     pulse_scroll_offset = 0;
@@ -251,6 +259,31 @@ let equal_thinking_display a b =
   | Thinking_full, (Thinking_folded | Thinking_hidden)
   | Thinking_hidden, (Thinking_folded | Thinking_full) ->
       false
+
+let equal_group_axis a b =
+  match (a, b) with
+  | Group_by_company, Group_by_company
+  | Group_by_status, Group_by_status
+  | Group_by_sandbox, Group_by_sandbox
+  | Group_by_runtime, Group_by_runtime ->
+      true
+  | Group_by_company, (Group_by_status | Group_by_sandbox | Group_by_runtime)
+  | Group_by_status, (Group_by_company | Group_by_sandbox | Group_by_runtime)
+  | Group_by_sandbox, (Group_by_company | Group_by_status | Group_by_runtime)
+  | Group_by_runtime, (Group_by_company | Group_by_status | Group_by_sandbox) ->
+      false
+
+let group_axis_label = function
+  | Group_by_company -> Say.make ~ko:"조직" ~en:"Company"
+  | Group_by_status -> Say.make ~ko:"상태" ~en:"Status"
+  | Group_by_sandbox -> Say.make ~ko:"샌드박스" ~en:"Sandbox"
+  | Group_by_runtime -> Say.make ~ko:"런타임" ~en:"Runtime"
+
+let next_group_axis = function
+  | Group_by_company -> Group_by_status
+  | Group_by_status -> Group_by_sandbox
+  | Group_by_sandbox -> Group_by_runtime
+  | Group_by_runtime -> Group_by_company
 
 (* RFC turn-activity-is-open-work D5. What the server saw start and did not
    see end names the turn. A server that does not report it leaves the field
@@ -583,8 +616,212 @@ type companies_nav_row =
   | Nav_company_collapsed of string
   | Nav_keeper of Wire_fleet.keeper_summary
 
+let group_key_of_keeper t (k : Wire_fleet.keeper_summary) =
+  match t.group_axis with
+  | Group_by_company -> k.company
+  | Group_by_status -> (
+      match k.health with
+      | Wire_fleet.Keeper_failing -> "Failing"
+      | Wire_fleet.Keeper_degraded -> "Degraded"
+      | Wire_fleet.Keeper_working -> "Working"
+      | Wire_fleet.Keeper_healthy -> "Healthy"
+      | Wire_fleet.Keeper_recovering -> "Recovering"
+      | Wire_fleet.Keeper_booting -> "Booting"
+      | Wire_fleet.Keeper_idle -> "Idle"
+      | Wire_fleet.Keeper_paused -> "Paused"
+      | Wire_fleet.Keeper_offline -> "Offline")
+  | Group_by_sandbox -> (
+      match String_map.find_opt k.name t.sandbox_profiles with
+      | Some Wire_fleet.Profile_microvm -> "microVM"
+      | Some Wire_fleet.Profile_remote_ssh -> "Remote SSH"
+      | Some Wire_fleet.Profile_docker -> "Docker"
+      | Some (Wire_fleet.Profile_other s) ->
+          let trimmed = String.trim s in
+          if String.equal trimmed "" then "Other" else trimmed
+      | None -> "Local / Unreported")
+  | Group_by_runtime ->
+      let rt = String.trim k.runtime_id in
+      if String.equal rt "" then "(unassigned)" else rt
+
+let status_group_rank = function
+  | "Failing" -> 0
+  | "Degraded" -> 1
+  | "Working" -> 2
+  | "Healthy" -> 3
+  | "Recovering" -> 4
+  | "Booting" -> 5
+  | "Idle" -> 6
+  | "Paused" -> 7
+  | "Offline" -> 8
+  | _ -> 9
+
+let sandbox_group_rank = function
+  | "microVM" -> 0
+  | "Remote SSH" -> 1
+  | "Docker" -> 2
+  | "Local / Unreported" -> 4
+  | _ -> 3
+
+let company_groups_with_costs ?attention ?now_unix ~keeper_costs_24h t =
+  let sandbox_profiles = String_map.bindings t.sandbox_profiles in
+  let turn_pulses = String_map.bindings t.turn_pulses in
+  let now_unix =
+    match now_unix with
+    | Some _ as n -> n
+    | None -> if Float.is_finite t.wall_unix && t.wall_unix > 0.0 then Some t.wall_unix else None
+  in
+  Wire_fleet.group_by_company ?attention ~sandbox_profiles ~keeper_costs_24h
+    ?now_unix ~turn_pulses
+    (filter_matched_keepers t)
+
+let company_groups ?attention ?now_unix t =
+  company_groups_with_costs ?attention ?now_unix ~keeper_costs_24h:[] t
+
+let grouped_keepers ?attention ?now_unix ?(keeper_costs_24h = []) t =
+  match t.group_axis with
+  | Group_by_company ->
+      company_groups_with_costs ?attention ?now_unix ~keeper_costs_24h t
+  | Group_by_status | Group_by_sandbox | Group_by_runtime ->
+      let matched = filter_matched_keepers t in
+      let now_opt =
+        match now_unix with
+        | Some _ as n -> n
+        | None ->
+            if Float.is_finite t.wall_unix && t.wall_unix > 0.0 then
+              Some t.wall_unix
+            else None
+      in
+      let attn_by_keeper =
+        match attention with
+        | None -> String_map.empty
+        | Some items ->
+            List.fold_left
+              (fun acc (it : Wire_fleet.attention_item) ->
+                match it.keeper with
+                | None -> acc
+                | Some kn ->
+                    let prev =
+                      Option.value ~default:0 (String_map.find_opt kn acc)
+                    in
+                    String_map.add kn (prev + 1) acc)
+              String_map.empty items
+      in
+      let cost_by_keeper =
+        List.fold_left
+          (fun acc (kn, usd) -> String_map.add kn usd acc)
+          String_map.empty keeper_costs_24h
+      in
+      let buckets =
+        List.fold_left
+          (fun acc (k : Wire_fleet.keeper_summary) ->
+            let key = group_key_of_keeper t k in
+            let prev = Option.value ~default:[] (String_map.find_opt key acc) in
+            String_map.add key (k :: prev) acc)
+          String_map.empty matched
+      in
+      let groups =
+        String_map.fold
+          (fun bucket_key rev_ks acc ->
+            let ks =
+              List.sort
+                (fun (a : Wire_fleet.keeper_summary) (b : Wire_fleet.keeper_summary) ->
+                  String.compare a.name b.name)
+                rev_ks
+            in
+            let running_count = ref 0 in
+            let working_count = ref 0 in
+            let failing_count = ref 0 in
+            let paused_count = ref 0 in
+            let attention_count = ref 0 in
+            let microvm_count = ref 0 in
+            let ssh_count = ref 0 in
+            let docker_count = ref 0 in
+            let turns_24h = ref 0 in
+            let cost_24h_usd = ref 0.0 in
+            let spark_slots = Array.make Wire_fleet.pulse_window_slots_24h 0.0 in
+            let has_spark = ref false in
+            List.iter
+              (fun (k : Wire_fleet.keeper_summary) ->
+                if k.keepalive_running && not k.paused then incr running_count;
+                (match k.health with
+                 | Wire_fleet.Keeper_working -> incr working_count
+                 | Wire_fleet.Keeper_failing -> incr failing_count
+                 | Wire_fleet.Keeper_paused -> incr paused_count
+                 | Wire_fleet.Keeper_healthy | Wire_fleet.Keeper_idle
+                 | Wire_fleet.Keeper_degraded | Wire_fleet.Keeper_recovering
+                 | Wire_fleet.Keeper_booting | Wire_fleet.Keeper_offline -> ());
+                attention_count :=
+                  !attention_count
+                  + Option.value ~default:0 (String_map.find_opt k.name attn_by_keeper);
+                (match String_map.find_opt k.name t.sandbox_profiles with
+                 | Some Wire_fleet.Profile_microvm -> incr microvm_count
+                 | Some Wire_fleet.Profile_remote_ssh -> incr ssh_count
+                 | Some Wire_fleet.Profile_docker -> incr docker_count
+                 | Some (Wire_fleet.Profile_other _) | None -> ());
+                (match String_map.find_opt k.name cost_by_keeper with
+                 | Some c when Float.is_finite c ->
+                     cost_24h_usd := !cost_24h_usd +. c
+                 | Some _ | None -> ());
+                match (now_opt, String_map.find_opt k.name t.turn_pulses) with
+                | Some now_u, Some pulse ->
+                    turns_24h :=
+                      !turns_24h
+                      + Wire_fleet.turns_24h_of_pulse ~now_unix:now_u pulse;
+                    let sp =
+                      Wire_fleet.sparkline_24h_of_pulse ~now_unix:now_u pulse
+                    in
+                    List.iteri
+                      (fun i v ->
+                        if i < Array.length spark_slots then begin
+                          spark_slots.(i) <- spark_slots.(i) +. v;
+                          has_spark := true
+                        end)
+                      sp
+                | (Some _ | None), (Some _ | None) -> ())
+              ks;
+            let grp : Wire_fleet.company_group =
+              {
+                company = bucket_key;
+                keepers = ks;
+                running_count = !running_count;
+                working_count = !working_count;
+                failing_count = !failing_count;
+                paused_count = !paused_count;
+                attention_count = !attention_count;
+                microvm_count = !microvm_count;
+                ssh_count = !ssh_count;
+                docker_count = !docker_count;
+                turns_24h = !turns_24h;
+                cost_24h_usd = !cost_24h_usd;
+                sparkline_24h =
+                  if !has_spark then Array.to_list spark_slots else [];
+              }
+            in
+            grp :: acc)
+          buckets []
+      in
+      List.sort
+        (fun (a : Wire_fleet.company_group) (b : Wire_fleet.company_group) ->
+          match t.group_axis with
+          | Group_by_status ->
+              let c =
+                Int.compare (status_group_rank a.company)
+                  (status_group_rank b.company)
+              in
+              if c <> 0 then c else String.compare a.company b.company
+          | Group_by_sandbox ->
+              let c =
+                Int.compare (sandbox_group_rank a.company)
+                  (sandbox_group_rank b.company)
+              in
+              if c <> 0 then c else String.compare a.company b.company
+          | Group_by_runtime | Group_by_company ->
+              let c = Int.compare (List.length b.keepers) (List.length a.keepers) in
+              if c <> 0 then c else String.compare a.company b.company)
+        groups
+
 let companies_nav_rows t =
-  let groups = Wire_fleet.group_by_company (filter_matched_keepers t) in
+  let groups = grouped_keepers t in
   List.concat_map
     (fun (g : Wire_fleet.company_group) ->
       if String_set.mem g.company t.collapsed_companies then
@@ -596,7 +833,7 @@ let filtered_keepers t =
   let matched = filter_matched_keepers t in
   match t.fleet_mode with
   | Nav.Fleet_companies ->
-      let groups = Wire_fleet.group_by_company matched in
+      let groups = grouped_keepers t in
       let uncollapsed =
         List.concat_map
           (fun (g : Wire_fleet.company_group) ->
@@ -625,21 +862,6 @@ let filtered_keepers t =
           let c = Int.compare (turns b.name) (turns a.name) in
           if c <> 0 then c else String.compare a.name b.name)
         matched
-
-let company_groups_with_costs ?attention ?now_unix ~keeper_costs_24h t =
-  let sandbox_profiles = String_map.bindings t.sandbox_profiles in
-  let turn_pulses = String_map.bindings t.turn_pulses in
-  let now_unix =
-    match now_unix with
-    | Some _ as n -> n
-    | None -> if Float.is_finite t.wall_unix && t.wall_unix > 0.0 then Some t.wall_unix else None
-  in
-  Wire_fleet.group_by_company ?attention ~sandbox_profiles ~keeper_costs_24h
-    ?now_unix ~turn_pulses
-    (filter_matched_keepers t)
-
-let company_groups ?attention ?now_unix t =
-  company_groups_with_costs ?attention ?now_unix ~keeper_costs_24h:[] t
 
 let company_count t = Wire_fleet.count_companies (filter_matched_keepers t)
 
@@ -808,7 +1030,7 @@ let visual_row_for_selection t ~selected_index ~selected_keeper =
   | Nav.Fleet_attention | Nav.Fleet_pulse_wall ->
       (selected_index, selected_index)
   | Nav.Fleet_companies -> (
-      let groups = Wire_fleet.group_by_company (filter_matched_keepers t) in
+      let groups = grouped_keepers t in
       match selected_keeper with
       | None -> (selected_index, selected_index)
       | Some want ->
@@ -2574,7 +2796,7 @@ let toggle_turn_details t =
     }
 
 let visual_row_for_collapsed_company t company =
-  let groups = Wire_fleet.group_by_company (filter_matched_keepers t) in
+  let groups = grouped_keepers t in
   let rec walk row = function
     | [] -> (0, 0)
     | (g : Wire_fleet.company_group) :: rest ->
@@ -2601,7 +2823,7 @@ let toggle_company_collapsed company t =
       match t.selected_keeper with
       | None -> true
       | Some sn ->
-          let groups = Wire_fleet.group_by_company (filter_matched_keepers t) in
+          let groups = grouped_keepers t in
           List.exists
             (fun (g : Wire_fleet.company_group) ->
               String.equal g.company company
@@ -2635,7 +2857,7 @@ let toggle_company_collapsed company t =
     (* Expanding clears collapsed-header focus and selects the first keeper in
        this company so the newly revealed members are immediately focused. *)
     let first_keeper_opt =
-      let groups = Wire_fleet.group_by_company (filter_matched_keepers next) in
+      let groups = grouped_keepers next in
       List.find_map
         (fun (g : Wire_fleet.company_group) ->
           if String.equal g.company company then
@@ -2655,6 +2877,54 @@ let toggle_company_collapsed company t =
     in
     sync_selection_after_change ~prev_index ~reset_scroll:false
       ~clear_if_empty:false next1
+
+let set_group_axis axis t =
+  if equal_group_axis t.group_axis axis then t
+  else
+    let next =
+      {
+        t with
+        group_axis = axis;
+        collapsed_companies = String_set.empty;
+        selected_collapsed_company = None;
+        scroll_offset = 0;
+      }
+    in
+    sync_selection_after_change ~prev_index:0 ~reset_scroll:true
+      ~clear_if_empty:false next
+
+let cycle_group_axis t = set_group_axis (next_group_axis t.group_axis) t
+
+let collapse_all_groups t =
+  let groups = grouped_keepers t in
+  let collapsed_companies =
+    List.fold_left
+      (fun acc (g : Wire_fleet.company_group) -> String_set.add g.company acc)
+      String_set.empty groups
+  in
+  let first_group =
+    match groups with
+    | (g : Wire_fleet.company_group) :: _ -> Some g.company
+    | [] -> None
+  in
+  {
+    t with
+    collapsed_companies;
+    selected_collapsed_company = first_group;
+    scroll_offset = 0;
+  }
+
+let expand_all_groups t =
+  let prev_index = resolve_current_index t (filtered_keepers t) in
+  let next =
+    {
+      t with
+      collapsed_companies = String_set.empty;
+      selected_collapsed_company = None;
+    }
+  in
+  sync_selection_after_change ~prev_index ~reset_scroll:false
+    ~clear_if_empty:false next
 
 let select_keeper name t =
   let changed = not (Option.equal String.equal t.selected_keeper (Some name)) in

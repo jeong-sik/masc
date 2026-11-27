@@ -35,6 +35,18 @@ val is_too_small_blocker : cols:int -> rows:int -> bool
 (** [true] only when [< 40] cols or [< 12] rows; {!Micro} remains a usable
     non-corrupting minimal cockpit above this threshold. *)
 
+val min_chat_bare_width :
+  frame_margin:int -> body_indent:int -> speaker_width:int -> int
+(** Minimum readable chat width derived from the bare row's actual frame
+    margin, body indent, speaker glyph width, and a 20-cell prose floor
+    (per [tui-chat-design/SKILL.md]). *)
+
+val safe_chat_prose_width :
+  content_w:int -> frame_margin:int -> body_indent:int -> speaker_width:int -> int
+(** Available prose column width inside [content_w] after deducting bare-row
+    chrome, floored at [20] cells when space permits (or [max 1 content_w] on
+    extreme narrow slices). *)
+
 val chrome_rows :
   breakpoint -> composer_expanded:bool -> approval_strip:bool -> int
 (** Exact top+bottom chrome height budget for [breakpoint]. At {!Compact}, an

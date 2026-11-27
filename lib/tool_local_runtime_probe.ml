@@ -97,7 +97,93 @@ let normalize_ollama_server_url raw =
 
 let ipv4_link_local_prefix = Ipaddr.V4.Prefix.of_string_exn "169.254.0.0/16"
 let ipv6_link_local_prefix = Ipaddr.V6.Prefix.of_string_exn "fe80::/10"
+let ipv6_nat64_well_known = Ipaddr.V6.Prefix.of_string_exn "64:ff9b::/96"
 let ipv6_aws_imds = Ipaddr.V6.of_string_exn "fd00:ec2::254"
+
+let is_disallowed_ollama_v4 v4 =
+  Ipaddr.V4.Prefix.(mem v4 relative)
+  || Ipaddr.V4.Prefix.mem v4 ipv4_link_local_prefix
+
+let nat64_embedded_v4 v6 =
+  Ipaddr.V4.of_octets_exn ~off:12 (Ipaddr.V6.to_octets v6)
+
+let is_disallowed_ollama_ip = function
+  | Ipaddr.V4 v4 -> is_disallowed_ollama_v4 v4
+  | Ipaddr.V6 v6 ->
+      Ipaddr.V6.compare v6 Ipaddr.V6.unspecified = 0
+      || Ipaddr.V6.Prefix.mem v6 ipv6_link_local_prefix
+      || Ipaddr.V6.compare v6 ipv6_aws_imds = 0
+      || (Ipaddr.V6.Prefix.mem v6 ipv6_nat64_well_known
+          && is_disallowed_ollama_v4 (nat64_embedded_v4 v6))
+      || (match Ipaddr.v4_of_v6 v6 with
+          | Some v4 -> is_disallowed_ollama_v4 v4
+          | None -> false)
+
+let is_ascii_digit = function '0' .. '9' -> true | _ -> false
+let is_ascii_hex = function '0' .. '9' | 'a' .. 'f' -> true | _ -> false
+let is_ascii_alpha = function 'a' .. 'z' -> true | _ -> false
+
+let is_valid_dns_label label =
+  let len = String.length label in
+  len > 0
+  && not (Char.equal label.[0] '-')
+  && not (Char.equal label.[len - 1] '-')
+  && String.for_all
+       (fun ch -> is_ascii_alpha ch || is_ascii_digit ch || Char.equal ch '-')
+       label
+
+(* Matches any label that inet_aton / curl can parse as a decimal, octal, or
+   0x-hex IPv4 component (e.g. 2852039166, 0xa9fea9fe, 0251, 43518). *)
+let is_numeric_ipv4_label label =
+  let len = String.length label in
+  if len = 0 then false
+  else if len >= 2 && Char.equal label.[0] '0' && Char.equal label.[1] 'x' then
+    let rec all_hex i =
+      if i >= len then true
+      else is_ascii_hex label.[i] && all_hex (i + 1)
+    in
+    all_hex 2
+  else
+    String.for_all is_ascii_digit label
+
+(* Reject non-canonical numeric/hex/octal/shorthand IPv4 spellings, malformed
+   or zone-scoped IPv6 literals, empty labels, and invalid DNS characters.
+   Non-IP DNS hostnames must consist of valid labels and contain at least one
+   non-numeric (alphabetic) label. *)
+let is_non_canonical_or_invalid_hostname ~bracketed bare =
+  if bracketed || String.contains bare ':' || String.contains bare '%' then true
+  else
+    let labels = String.split_on_char '.' bare in
+    match labels with
+    | [] -> true
+    | _ ->
+        List.exists (fun label -> not (is_valid_dns_label label)) labels
+        || List.for_all is_numeric_ipv4_label labels
+
+let strip_ipv6_brackets s =
+  if String.length s >= 2
+     && Char.equal s.[0] '['
+     && Char.equal s.[String.length s - 1] ']'
+  then (true, String.sub s 1 (String.length s - 2))
+  else (false, s)
+
+let authority_has_percent url =
+  match String.index_opt url ':' with
+  | None -> false
+  | Some idx ->
+      let start = idx + 3 in
+      if start >= String.length url then false
+      else
+        let stop =
+          match String.index_from_opt url start '/' with
+          | Some slash -> slash
+          | None -> String.length url
+        in
+        let rec scan i =
+          if i >= stop then false
+          else Char.equal url.[i] '%' || scan (i + 1)
+        in
+        scan start
 
 let is_disallowed_ollama_host host =
   let lower = String.lowercase_ascii (String.trim host) in
@@ -110,27 +196,10 @@ let is_disallowed_ollama_host host =
      || String.equal dotless "metadata.goog"
   then true
   else
-    let bare =
-      if String.length dotless >= 2
-         && Char.equal dotless.[0] '['
-         && Char.equal dotless.[String.length dotless - 1] ']'
-      then String.sub dotless 1 (String.length dotless - 2)
-      else dotless
-    in
+    let bracketed, bare = strip_ipv6_brackets dotless in
     match Ipaddr.of_string bare with
-    | Error _ -> false
-    | Ok (Ipaddr.V4 v4) ->
-        Ipaddr.V4.compare v4 Ipaddr.V4.any = 0
-        || Ipaddr.V4.Prefix.mem v4 ipv4_link_local_prefix
-    | Ok (Ipaddr.V6 v6) ->
-        Ipaddr.V6.compare v6 Ipaddr.V6.unspecified = 0
-        || Ipaddr.V6.Prefix.mem v6 ipv6_link_local_prefix
-        || Ipaddr.V6.compare v6 ipv6_aws_imds = 0
-        || (match Ipaddr.v4_of_v6 v6 with
-            | Some v4 ->
-                Ipaddr.V4.compare v4 Ipaddr.V4.any = 0
-                || Ipaddr.V4.Prefix.mem v4 ipv4_link_local_prefix
-            | None -> false)
+    | Error _ -> is_non_canonical_or_invalid_hostname ~bracketed bare
+    | Ok ip -> is_disallowed_ollama_ip ip
 
 let validate_ollama_server_url raw =
   let normalized = normalize_ollama_server_url raw in
@@ -138,6 +207,8 @@ let validate_ollama_server_url raw =
     Error "server_url must not be empty"
   else if String.exists (fun ch -> let code = Char.code ch in code <= 0x20 || code = 0x7f) normalized then
     Error "server_url must not contain spaces or control characters"
+  else if authority_has_percent normalized then
+    Error "server_url host must not contain percent-encoding"
   else
     let uri = Uri.of_string normalized in
     match Uri.scheme uri with
@@ -147,7 +218,7 @@ let validate_ollama_server_url raw =
          | Some host when String.equal (String.trim host) "" ->
              Error "server_url must include a host"
          | Some host when is_disallowed_ollama_host host ->
-             Error "server_url host is not allowed (link-local, metadata, or unspecified address)"
+             Error "server_url host is not allowed (link-local, metadata, unspecified, or non-canonical numeric address)"
          | Some _ ->
              if Option.is_some (Uri.userinfo uri) then
                Error "server_url must not include userinfo"
@@ -164,6 +235,100 @@ let validate_ollama_server_url raw =
                 | Some _ | None -> Ok normalized))
     | Some _ | None ->
         Error "server_url must use http or https scheme"
+
+let resolve_ollama_host_addrs ~host ~port =
+  let service = Int.to_string port in
+  match Eio_context.get_net_opt () with
+  | Some net ->
+      (try
+         let addrs =
+           Eio_context.run_on_owner_domain (fun () ->
+             Eio.Net.getaddrinfo_stream ~service net host)
+         in
+         let ips =
+           List.filter_map
+             (function
+               | `Tcp (ip, _) -> Some (Outbound_address.ipaddr_of_eio ip)
+               | `Unix _ -> None)
+             addrs
+         in
+         Ok ips
+       with
+       | Eio.Cancel.Cancelled _ as exn -> raise exn
+       | exn ->
+           Error
+             (Printf.sprintf "could not resolve host %s: %s" host
+                (Printexc.to_string exn)))
+  | None ->
+      Eio_guard.run_in_systhread ~label:"ollama-probe-dns" (fun () ->
+        try
+          let infos =
+            Unix.getaddrinfo host service [ Unix.AI_SOCKTYPE Unix.SOCK_STREAM ]
+          in
+          let ips =
+            List.filter_map
+              (fun (info : Unix.addr_info) ->
+                match info.Unix.ai_addr with
+                | Unix.ADDR_INET (inet, _) ->
+                    Ipaddr.of_string (Unix.string_of_inet_addr inet)
+                    |> Result.to_option
+                | Unix.ADDR_UNIX _ -> None)
+              infos
+          in
+          Ok ips
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+            Error
+              (Printf.sprintf "could not resolve host %s: %s" host
+                 (Printexc.to_string exn)))
+
+let pin_ollama_resolution ~resolve server_url =
+  let uri = Uri.of_string server_url in
+  match Uri.host uri with
+  | None -> Error "server_url must include a host"
+  | Some host ->
+      let trimmed = String.trim host in
+      if String.equal trimmed "" then Error "server_url must include a host"
+      else
+        let _bracketed, bare = strip_ipv6_brackets trimmed in
+        let bare_dotless =
+          if String.ends_with ~suffix:"." bare then
+            String.sub bare 0 (String.length bare - 1)
+          else bare
+        in
+        match Ipaddr.of_string bare_dotless with
+        | Ok ip ->
+            if is_disallowed_ollama_ip ip then
+              Error
+                "server_url host is not allowed (link-local, metadata, or unspecified address)"
+            else
+              (* An IP literal names its own address; curl makes no DNS lookup. *)
+              Ok None
+        | Error _ ->
+            let port = Outbound_address.port_of_uri uri in
+            (match resolve ~host:trimmed ~port with
+             | Error _ as err -> err
+             | Ok [] -> Error (Printf.sprintf "could not resolve host %s" trimmed)
+             | Ok (first_address :: other_addresses as ips) ->
+                 if List.exists is_disallowed_ollama_ip ips then
+                   Error
+                     "server_url resolved to a disallowed address (link-local, metadata, or unspecified address)"
+                 else
+                   Ok
+                     (Some
+                        { host = trimmed
+                        ; port
+                        ; first_address
+                        ; other_addresses
+                        }))
+
+let resolve_ollama_pinned_resolution server_url =
+  pin_ollama_resolution ~resolve:resolve_ollama_host_addrs server_url
+
+module For_testing = struct
+  let pin_ollama_resolution = pin_ollama_resolution
+end
 
 let ollama_ps_url server_url =
   normalize_ollama_server_url server_url
@@ -465,9 +630,9 @@ let default_probe_prompt () =
       line;
     ]
 
-let fetch_ollama_ps ?(timeout_sec = 8) ~server_url () =
+let fetch_ollama_ps ?(timeout_sec = 8) ?pinned_resolution ~server_url () =
   let url = ollama_ps_url server_url in
-  match http_get_json_with_status ~timeout_sec url with
+  match http_get_json_with_status ~timeout_sec ?pinned_resolution url with
   | Ok (http_status, json) ->
       if not (Option.equal Int.equal http_status (Some 200)) then
         (http_status, [], Some (ollama_http_error "ps" http_status))
@@ -547,15 +712,17 @@ let request_body_json ~think_enabled ~keep_alive ~model_id ~prompt ~max_tokens =
   in
   `Assoc fields |> Yojson.Safe.to_string
 
-let run_single_probe ~think_enabled ~keep_alive ~server_url ~model_id ~prompt
-    ~max_tokens ~timeout_sec ~run_index =
+let run_single_probe ~pinned_resolution ~think_enabled ~keep_alive ~server_url
+    ~model_id ~prompt ~max_tokens ~timeout_sec ~run_index =
   let url = ollama_generate_url server_url in
   let started = Time_compat.now () in
   match
-    http_post_json_text_with_status ~timeout_sec ~url
+    http_post_json_text_with_status_with_headers ~timeout_sec ?pinned_resolution
+      ~url
       ~body_json:
         (request_body_json ~think_enabled ~keep_alive ~model_id ~prompt
            ~max_tokens)
+      ()
   with
   | Error err ->
       failed_probe_run ~run_index ~http_status:None
@@ -603,8 +770,16 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
   let timeout_sec = accept validate_timeout_sec timeout_sec in
   let ps_timeout_sec = accept validate_ps_timeout_sec ps_timeout_sec in
   let think_enabled = effective_think_enabled think_mode in
+  let pinned_resolution, resolution_error =
+    match resolve_ollama_pinned_resolution server_url with
+    | Ok pinned -> (pinned, None)
+    | Error err -> (None, Some err)
+  in
   let before_status, loaded_before, before_error =
-    fetch_ollama_ps ~timeout_sec:ps_timeout_sec ~server_url ()
+    match resolution_error with
+    | Some err -> (None, [], Some err)
+    | None ->
+        fetch_ollama_ps ~timeout_sec:ps_timeout_sec ?pinned_resolution ~server_url ()
   in
   let effective_model = select_effective_model ~requested_model:model loaded_before in
   let effective_model_loaded_before =
@@ -634,7 +809,7 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
         let completed_runs =
           List.init probe_runs (fun idx -> idx + 1)
           |> List.map (fun run_index ->
-                 run_single_probe ~think_enabled ~keep_alive ~server_url
+                 run_single_probe ~pinned_resolution ~think_enabled ~keep_alive ~server_url
                    ~model_id ~prompt ~max_tokens ~timeout_sec ~run_index)
         in
         let run_errors =
@@ -656,7 +831,10 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
     | Run_generate_probe -> false
   in
   let after_status, loaded_after, after_error =
-    fetch_ollama_ps ~timeout_sec:ps_timeout_sec ~server_url ()
+    match resolution_error with
+    | Some _ -> (None, [], None)
+    | None ->
+        fetch_ollama_ps ~timeout_sec:ps_timeout_sec ?pinned_resolution ~server_url ()
   in
   let runs_json = List.map ollama_probe_run_to_yojson runs in
   let kv_cache_assessment = kv_cache_assessment_json runs_json in

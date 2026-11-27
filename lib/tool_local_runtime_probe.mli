@@ -94,9 +94,21 @@ val normalize_ollama_server_url : string -> string
 
 val validate_ollama_server_url : string -> (string, string) result
 (** Validate and normalize an Ollama [server_url] argument: requires [http] or
-    [https], a non-empty host that is not a link-local/metadata/unspecified
-    address, a valid port if given, and no userinfo, query, fragment, control
-    characters, or [..] path segments. *)
+    [https], a non-empty host that is neither a link-local/metadata/unspecified
+    address nor a non-canonical numeric/hex/octal/shorthand IPv4 spelling, a
+    valid port if given, and no userinfo, percent-encoded authority, query,
+    fragment, control characters, or [..] path segments. *)
+
+module For_testing : sig
+  val pin_ollama_resolution :
+    resolve:(host:string -> port:int -> (Ipaddr.t list, string) result) ->
+    string ->
+    (Tool_local_runtime_http.pinned_resolution option, string) result
+  (** Resolve and validate an Ollama [server_url] against the same IP blocklist
+      used by {!validate_ollama_server_url}, returning [Ok None] for allowed IP
+      literals and [Ok (Some pinned)] for hostnames whose resolved addresses
+      are all allowed. *)
+end
 
 val ollama_ps_url : string -> string
 (** [ollama_ps_url server_url] is

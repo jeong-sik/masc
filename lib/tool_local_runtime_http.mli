@@ -107,6 +107,7 @@ val http_get_text_with_status_with_headers :
   ?max_redirects:int ->
   ?compressed:bool ->
   ?max_response_bytes:int ->
+  ?pinned_resolution:pinned_resolution ->
   string ->
   ((int option * string), string) Result.t
 (** [http_get_text_with_status_with_headers ?timeout_sec ?headers url]
@@ -145,6 +146,7 @@ val curl_get_config_for_test : headers:(string * string) list -> string option
 val http_get_text_with_status :
   ?timeout_sec:int ->
   ?max_response_bytes:int ->
+  ?pinned_resolution:pinned_resolution ->
   string ->
   ((int option * string), string) Result.t
 (** [http_get_text_with_status] is
@@ -153,9 +155,10 @@ val http_get_text_with_status :
 
 val http_get_json_with_status :
   ?timeout_sec:int ->
+  ?pinned_resolution:pinned_resolution ->
   string ->
   ((int option * Yojson.Safe.t), string) Result.t
-(** [http_get_json_with_status ?timeout_sec url] composes
+(** [http_get_json_with_status ?timeout_sec ?pinned_resolution url] composes
     {!http_get_text_with_status} + [Yojson.Safe.from_string].  Returns
     [Error "invalid json from <url>: <msg>"] on parse failure. *)
 
@@ -164,6 +167,7 @@ val http_get_json_with_status :
 val http_post_json_text_with_status_with_headers :
   timeout_sec:int ->
   ?headers:(string * string) list ->
+  ?pinned_resolution:pinned_resolution ->
   url:string ->
   body_json:string ->
   unit ->
@@ -216,6 +220,13 @@ val http_post_json_response_with_headers :
     only at [timeout_sec]. An optional [deadline] further bounds both curl and
     its host runner by the remaining fractional seconds. An expired deadline
     returns an error without starting curl. *)
+
+val curl_post_json_argv_for_test :
+  timeout_sec:int ->
+  ?pinned_resolution:pinned_resolution ->
+  url:string ->
+  unit ->
+  string list
 
 val curl_post_json_response_argv_for_test :
   timeout_sec:int ->

@@ -1283,6 +1283,19 @@ let handle_operator_mutation ~run ~sw ~clock ~login ~engine_state req reqd =
              reqd)))
 ;;
 
+let handle_media_get ~login ~engine_state req reqd =
+  with_engine ~login ~engine_state ~tier:Workspace_read req reqd (fun state (_ : authorized) ->
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    Server_routes_http_routes_media.handle_get ~cors:[] ~base_path req reqd)
+;;
+
+let handle_media_upload ~login ~engine_state req reqd =
+  with_engine ~login ~engine_state ~tier:Admin_only req reqd (fun state auth ->
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    let actor = actor_of_principal auth.caller.Auth_gate.principal in
+    Server_routes_http_routes_media.handle_upload ~cors:[] ~base_path ~actor req reqd)
+;;
+
 let handle_schedule_prune ~login ~engine_state req reqd =
   with_engine ~login ~engine_state ~tier:Admin_only req reqd (fun state auth ->
     Server_login_http.with_body reqd (fun (_ : string) ->
@@ -1417,6 +1430,10 @@ let add_routes ~sw ~clock ~login ~base_path ~engine_state router =
        dashboard_access
        sandbox_keeper_prefix
        (handle_sandbox_keeper ~sw ~clock ~login ~engine_state)
+  |> Server_route.prefix_get
+       dashboard_access
+       Masc_network_defaults.media_path_prefix
+       (handle_media_get ~login ~engine_state)
   (* Admin-only routes (Admin session; CSRF enforced on POST/PUT) *)
   |> Server_route.get dashboard_access "/api/v1/dashboard/logs" (handle_logs ~login ~engine_state)
   |> Server_route.get
@@ -1481,4 +1498,8 @@ let add_routes ~sw ~clock ~login ~base_path ~engine_state router =
        dashboard_access
        "/api/v1/dashboard/schedule/prune"
        (handle_schedule_prune ~login ~engine_state)
+  |> Server_route.post
+       dashboard_access
+       Masc_network_defaults.media_upload_path
+       (handle_media_upload ~login ~engine_state)
 ;;

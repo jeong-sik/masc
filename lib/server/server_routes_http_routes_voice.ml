@@ -41,9 +41,6 @@ let is_valid_token (s : string) : bool =
          (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))
        s
 
-let generated_media_serve_max_bytes () =
-  Env_config.KeeperGeneratedMedia.max_bytes ()
-
 (* The clip a token names, under the same audio dir
    [Voice_bridge_transport.make_audio_file] writes to. Reuses
    [Voice_bridge_core.find_clip] so this route and the synthesis side cannot
@@ -69,43 +66,6 @@ let serve_clip ~token request reqd =
     let body = Fs_compat.load_file path in
     Http.Response.bytes ~content_type:(Voice_bridge_core.clip_content_type format)
       ~headers:(public_read_cors_headers request) body reqd)
-
-
-(* Serve a model-generated media file by deterministic store token.
-   Unlike voice clips, this token is a content-derived locator, not a bearer
-   capability, so the route is [CanReadState]-gated below. The file is resolved
-   under the SAME workspace base_path the bridge persisted it with, so the write
-   and read paths agree; content-type is derived from the stored extension. A
-   missing token is a soft 404 (text-only render remains the dashboard fallback);
-   an oversized stored file returns 413 before it is loaded into memory. *)
-let serve_media ~base_path ~token request reqd =
-  match Keeper_chat_media_store.file_path_of_token ~base_dir:base_path ~token with
-  | None ->
-    respond_json_value_with_cors ~status:`Not_found request reqd
-      (`Assoc [ ("error", `String "not found"); ("token", `String token) ])
-  | Some path ->
-    let max_bytes = generated_media_serve_max_bytes () in
-    match Fs_compat.file_size path with
-    | None ->
-        respond_json_value_with_cors ~status:`Not_found request reqd
-          (`Assoc [ ("error", `String "not found"); ("token", `String token) ])
-    | Some size when size > max_bytes ->
-        respond_json_value_with_cors ~status:`Payload_too_large request reqd
-          (`Assoc
-             [ ("error", `String "media too large")
-             ; ("token", `String token)
-             ; ("max_bytes", `Int max_bytes)
-             ; ("size_bytes", `Int size)
-             ])
-    | Some _ -> (
-        match Fs_compat.load_file_opt path with
-        | None ->
-            respond_json_value_with_cors ~status:`Not_found request reqd
-              (`Assoc [ ("error", `String "not found"); ("token", `String token) ])
-        | Some body ->
-            Http.Response.bytes
-              ~content_type:(Keeper_chat_media_store.content_type_of_path path)
-              ~headers:(public_read_cors_headers request) body reqd)
 
 
 (* Owner-route JSON respond helper. Unlike [respond_public_read_json_value],
@@ -251,22 +211,6 @@ let add_routes router =
                     ; ("reason", `String "expected 32-char hex (128-bit)")
                     ])
            | Some token -> serve_clip ~token request reqd)
-  (* model-generated media (image/audio/document) fetched by an
-     authenticated content locator. Content hashes are not capabilities. *)
-  |> Server_route.prefix_get (Server_route.Permission Masc_domain.CanReadState) Masc_network_defaults.media_path_prefix (fun state request reqd ->
-           let base_path = (Mcp_server.workspace_config state).base_path in
-           let path = Http.Request.path request in
-           match extract_path_param ~prefix:Masc_network_defaults.media_path_prefix path with
-           | None ->
-               respond_json_value_with_cors ~status:`Bad_request request reqd
-                 (`Assoc [ ("error", `String "token path parameter required") ])
-           | Some raw when not (Keeper_chat_media_store.valid_token raw) ->
-               respond_json_value_with_cors ~status:`Bad_request request reqd
-                 (`Assoc
-                    [ ("error", `String "invalid token")
-                    ; ("reason", `String "expected 64-char lowercase hex (SHA-256)")
-                    ])
-           | Some token -> serve_media ~base_path ~token request reqd)
   (* browser-captured speech -> text. Admin/owner-only
      ([CanAdmin]) — each call spends an ElevenLabs STT credit, so unlike
      the GET audio route this carries no public capability. *)

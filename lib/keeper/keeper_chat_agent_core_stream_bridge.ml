@@ -538,7 +538,10 @@ let reject_non_input_tool_delta ~stream_scope ~index ~delta_kind bridge_state =
 let media_persist_error_kind = function
   | Keeper_chat_media_store.Unsupported_source_type _ ->
       Keeper_chat_events.Media_source_unsupported
-  | Keeper_chat_media_store.Invalid_base64 _ ->
+  | Keeper_chat_media_store.Invalid_base64 _
+  | Keeper_chat_media_store.Svg_not_allowed
+  | Keeper_chat_media_store.Unsupported_media_type _
+  | Keeper_chat_media_store.Mime_mismatch _ ->
       Keeper_chat_events.Media_decode_failed
   | Keeper_chat_media_store.Media_too_large _ ->
       Keeper_chat_events.Media_payload_too_large
@@ -552,7 +555,13 @@ let media_payload_too_large_reason ~size_bytes ~max_bytes =
 
 let media_persist_protocol_reason = function
   | Keeper_chat_media_store.Write_failed _ -> "failed to persist generated media"
-  | (Keeper_chat_media_store.Unsupported_source_type _ | Keeper_chat_media_store.Invalid_base64 _ | Keeper_chat_media_store.Media_too_large _) as err -> Keeper_chat_media_store.persist_error_to_string err
+  | ( Keeper_chat_media_store.Unsupported_source_type _
+    | Keeper_chat_media_store.Invalid_base64 _
+    | Keeper_chat_media_store.Media_too_large _
+    | Keeper_chat_media_store.Svg_not_allowed
+    | Keeper_chat_media_store.Unsupported_media_type _
+    | Keeper_chat_media_store.Mime_mismatch _ ) as err ->
+      Keeper_chat_media_store.persist_error_to_string err
 
 (* [chunks] already holds [chunk]; [chunk] counts toward the wire cap. *)
 let add_media_chunk ~max_bytes ~media_type ~chunks ~encoded_bytes chunk =

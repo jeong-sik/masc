@@ -226,6 +226,8 @@ let voice_audio_path_prefix = "/api/v1/voice/audio/"
 (* The server-relative path a client fetches for the clip named by [token]. *)
 let voice_audio_path token = voice_audio_path_prefix ^ token
 
+let media_upload_path = "/api/v1/media"
+
 let media_path_prefix = "/api/v1/media/"
 
 let media_path token = media_path_prefix ^ token

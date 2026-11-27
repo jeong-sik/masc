@@ -16,15 +16,16 @@ let with_env key value f =
       Unix.putenv key value;
       f ())
 
-let expected_token ~media_type data =
-  Agent_core_sha256.(
-    digest_string (String.lowercase_ascii (String.trim media_type) ^ "\000" ^ data)
-    |> to_hex)
+let png_payload suffix = "\x89PNG\r\n\x1a\n" ^ suffix
+let mp3_payload suffix = "ID3" ^ suffix
+
+let expected_token ~media_type:_ data =
+  Agent_core_sha256.(digest_string data |> to_hex)
 
 let test_image_media_persisted_as_block () =
   let open Agent_core.Types in
   let accum = A.create () in
-  let raw_media = "raw image bytes" in
+  let raw_media = png_payload "raw image bytes" in
   let encoded_media = Base64.encode_string raw_media in
   (* One base64 media block, then its stop. *)
   List.iter
@@ -62,7 +63,7 @@ let test_audio_media_as_voice_block () =
             MediaDelta
               {
                 media_type = "audio/mpeg";
-                source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "audio bytes");
+                source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string (mp3_payload "audio bytes"));
               };
         };
       ContentBlockStop { index = 0 };
@@ -86,7 +87,7 @@ let test_runtime_attempt_discards_unfinished_media () =
              }
        });
   A.start_runtime_attempt accum;
-  let fresh = "fresh" in
+  let fresh = png_payload "fresh" in
   A.on_event accum
     (ContentBlockDelta
        { index = 0
@@ -135,7 +136,7 @@ let test_open_media_finalized_on_message_stop () =
      blocks use their protocol indexes as the terminal-order tie-breaker. *)
   let open Agent_core.Types in
   let accum = A.create () in
-  let raw_media = "z" in
+  let raw_media = png_payload "z" in
   List.iter
     (A.on_event accum)
     [ ContentBlockDelta
@@ -143,7 +144,7 @@ let test_open_media_finalized_on_message_stop () =
           delta =
             MediaDelta
               { media_type = "audio/mpeg";
-                source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "audio")
+                source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string (mp3_payload "audio"))
               }
         }
     ; ContentBlockDelta
@@ -169,13 +170,15 @@ let test_open_media_finalized_on_message_stop () =
 let test_stop_reason_finalizes_media_until_next_exact_scope () =
   let open Agent_core.Types in
   let accum = A.create () in
+  let first_raw = png_payload "first" in
+  let second_raw = png_payload "second" in
   A.on_event ~stream_scope:0 accum
     (ContentBlockDelta
        { index = 0
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "first")
+             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string first_raw)
              }
        });
   A.on_event ~stream_scope:0 accum
@@ -186,7 +189,7 @@ let test_stop_reason_finalizes_media_until_next_exact_scope () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "late")
+             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string (png_payload "late"))
              }
        });
   A.on_event ~stream_scope:1 accum
@@ -195,7 +198,7 @@ let test_stop_reason_finalizes_media_until_next_exact_scope () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "second")
+             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string second_raw)
              }
        });
   A.on_event ~stream_scope:1 accum (ContentBlockStop { index = 0 });
@@ -203,10 +206,10 @@ let test_stop_reason_finalizes_media_until_next_exact_scope () =
   match A.to_chat_blocks ~base_dir accum with
   | [ Blocks.Image { src = first; _ }; Blocks.Image { src = second; _ } ] ->
     check string "terminal media excludes late bytes"
-      ("/api/v1/media/" ^ expected_token ~media_type:"image/png" "first")
+      ("/api/v1/media/" ^ expected_token ~media_type:"image/png" first_raw)
       first;
     check string "new exact scope may reuse the index"
-      ("/api/v1/media/" ^ expected_token ~media_type:"image/png" "second")
+      ("/api/v1/media/" ^ expected_token ~media_type:"image/png" second_raw)
       second
   | _ -> fail "expected one finalized image per exact stream scope"
 ;;
@@ -243,7 +246,7 @@ let test_tool_block_media_not_persisted () =
 let test_metadata_drift_preserves_first_media_block () =
   let open Agent_core.Types in
   let accum = A.create () in
-  let raw_media = "first media" in
+  let raw_media = png_payload "first media" in
   List.iter
     (A.on_event accum)
     [
@@ -293,7 +296,7 @@ let media_chunk_deltas ~index ~media_type chunks =
 let test_many_media_chunks_join_in_order () =
   let open Agent_core.Types in
   let accum = A.create () in
-  let raw_media = String.init 768 (fun i -> Char.chr (i * 7 mod 256)) in
+  let raw_media = png_payload (String.init 760 (fun i -> Char.chr (i * 7 mod 256))) in
   let chunks = equal_chunks ~width:4 (Base64.encode_string raw_media) in
   check int "the payload arrives in many chunks" 256 (List.length chunks);
   List.iter (A.on_event accum)
@@ -333,7 +336,7 @@ let test_last_media_chunk_over_the_cap_drops_the_block () =
 let test_carrier_change_keeps_first_media_block () =
   let open Agent_core.Types in
   let accum = A.create () in
-  let raw_media = "first carrier" in
+  let raw_media = png_payload "first carrier" in
   List.iter (A.on_event accum)
     (media_chunk_deltas ~index:0 ~media_type:"image/png"
        [ Agent_core.Llm_provider.Types.Base64 (Base64.encode_string raw_media); Agent_core.Llm_provider.Types.Url "https://example.invalid/drift.png" ]
@@ -421,7 +424,7 @@ let test_media_persist_failure_surfaces_as_placeholder () =
   | _ -> fail "expected one placeholder for a generated-media persist failure"
 
 let test_dropped_and_persisted_media_keep_stream_order () =
-  with_env "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" "4" (fun () ->
+  with_env "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" "16" (fun () ->
     let open Agent_core.Types in
     let accum = A.create () in
     let oversized =
@@ -443,7 +446,7 @@ let test_dropped_and_persisted_media_keep_stream_order () =
             delta =
               MediaDelta
                 { media_type = "image/png";
-                  source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "x")
+                  source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string (png_payload "x"))
                 }
           }
       ; ContentBlockStop { index = 1 }
@@ -515,9 +518,9 @@ let test_failed_request_reloads_completed_media_across_attempts () =
           ; String.sub encoded split (String.length encoded - split)
           ]
       in
-      let raw_a = "\000completed-A\255" in
-      let raw_b = "\000unfinished-B\255" in
-      let raw_c = "\000completed-C\255" in
+      let raw_a = png_payload "\000completed-A\255" in
+      let raw_b = png_payload "\000unfinished-B\255" in
+      let raw_c = png_payload "\000completed-C\255" in
       let prelude =
         MessageStart { id = "reused-provider-message"; model = "media-fixture"; usage = None }
       in

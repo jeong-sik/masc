@@ -2514,6 +2514,66 @@ let dashboard_bridge_rbac_and_sse_matrix () =
            ~path:"/api/v1/config/patch"
            ~headers:(changing ~csrf:admin_csrf ()))
           .status;
+      (* Workspace media routes: GET is Workspace_read, POST is Admin_only + CSRF. *)
+      let sample_media_path = Masc_network_defaults.media_path (String.make 64 'a') in
+      Alcotest.(check int)
+        "anonymous GET /api/v1/media/<sha256> is 401"
+        401
+        (send (fresh_browser ()) router ~meth:"GET" ~path:sample_media_path).status;
+      Alcotest.(check int)
+        "Worker GET /api/v1/media/<sha256> passes auth (503 engine_starting)"
+        503
+        (send a_member router ~meth:"GET" ~path:sample_media_path).status;
+      Alcotest.(check int)
+        "Read-state PAT GET /api/v1/media/<sha256> passes auth (503 engine_starting)"
+        503
+        (send (fresh_browser ()) router ~meth:"GET" ~path:sample_media_path ~headers:pat_headers)
+          .status;
+      Alcotest.(check int)
+        "anonymous POST /api/v1/media is 401"
+        401
+        (send (fresh_browser ()) router ~meth:"POST" ~path:Masc_network_defaults.media_upload_path)
+          .status;
+      Alcotest.(check int)
+        "Worker POST /api/v1/media is 403"
+        403
+        (send
+           a_member
+           router
+           ~meth:"POST"
+           ~path:Masc_network_defaults.media_upload_path
+           ~headers:(changing ~csrf:member_csrf ()))
+          .status;
+      Alcotest.(check int)
+        "PAT POST /api/v1/media is 403"
+        403
+        (send
+           (fresh_browser ())
+           router
+           ~meth:"POST"
+           ~path:Masc_network_defaults.media_upload_path
+           ~headers:pat_headers)
+          .status;
+      Alcotest.(check int)
+        "Admin POST /api/v1/media without CSRF is 403"
+        403
+        (send
+           admin
+           router
+           ~meth:"POST"
+           ~path:Masc_network_defaults.media_upload_path
+           ~headers:(changing ()))
+          .status;
+      Alcotest.(check int)
+        "Admin POST /api/v1/media with CSRF passes RBAC (503 engine_starting)"
+        503
+        (send
+           admin
+           router
+           ~meth:"POST"
+           ~path:Masc_network_defaults.media_upload_path
+           ~headers:(changing ~csrf:admin_csrf ()))
+          .status;
       (* Browser_observer_sse (GET /api/v1/auth/events):
          Anonymous -> 401; Query token even with valid cookie -> 401 with Several_credentials
          error (the cookie and the query token are two credentials);
@@ -3147,7 +3207,105 @@ let dashboard_bridge_live_engine_regressions () =
            ~meth:"GET"
            ~path:Server_account_dashboard_bridge.observer_events_path
            ~headers:[ "Last-Event-ID", "not-an-int" ])
-          .status))
+          .status;
+      (* Multi-account workspace media: Admin uploads PNG with CSRF, Worker & Read-PAT fetch with
+         immutable + security headers and ETag/304 revalidation, and error responses return JSON. *)
+      let (_ : string) =
+        registration_of (register t admin ~csrf:admin_csrf {|{"provider":"github","user_id":502}|})
+      in
+      let member_browser = fresh_browser () in
+      Alcotest.(check int) "Worker joins live media test" 200
+        (sign_in t member_browser ~user_id:502).status;
+      let png_10x20 =
+        "\x89PNG\r\n\x1a\n"
+        ^ "\x00\x00\x00\x0dIHDR"
+        ^ "\x00\x00\x00\x0a\x00\x00\x00\x14"
+        ^ "\x08\x02\x00\x00\x00\x00\x00\x00\x00"
+      in
+      let uploaded =
+        send
+          admin
+          router
+          ~meth:"POST"
+          ~path:Masc_network_defaults.media_upload_path
+          ~headers:(("Content-Type", "image/png") :: changing ~csrf:admin_csrf ())
+          ~body:png_10x20
+      in
+      Alcotest.(check int) ("multi-account POST /api/v1/media: " ^ uploaded.body) 201 uploaded.status;
+      Alcotest.(check (option string)) "upload response has no-store" (Some "no-store")
+        (List.assoc_opt "cache-control" uploaded.headers);
+      let sha =
+        match member "sha256" uploaded with
+        | Some (`String s) -> s
+        | _ -> Alcotest.failf "missing sha256 in %S" uploaded.body
+      in
+      let media_url = Masc_network_defaults.media_path sha in
+      let fetched = send member_browser router ~meth:"GET" ~path:media_url in
+      Alcotest.(check int) "Worker GET /api/v1/media/<sha256> returns 200" 200 fetched.status;
+      Alcotest.(check string) "Worker receives exact PNG bytes" png_10x20 fetched.body;
+      Alcotest.(check (option string)) "multi-account media ETag" (Some ("\"" ^ sha ^ "\""))
+        (List.assoc_opt "etag" fetched.headers);
+      Alcotest.(check (option string)) "multi-account media Cache-Control"
+        (Some Server_routes_http_routes_media.immutable_cache_control)
+        (List.assoc_opt "cache-control" fetched.headers);
+      Alcotest.(check (option string)) "multi-account media nosniff" (Some "nosniff")
+        (List.assoc_opt "x-content-type-options" fetched.headers);
+      Alcotest.(check (option string)) "multi-account media CSP"
+        (Some Server_routes_http_routes_media.media_csp)
+        (List.assoc_opt "content-security-policy" fetched.headers);
+      Alcotest.(check (option string)) "multi-account media Vary"
+        (Some "Authorization, Cookie")
+        (List.assoc_opt "vary" fetched.headers);
+      let revalidated =
+        send
+          (fresh_browser ())
+          router
+          ~meth:"GET"
+          ~path:media_url
+          ~headers:
+            [ "Authorization", "Bearer " ^ read_pat
+            ; "If-None-Match", "\"" ^ sha ^ "\""
+            ]
+      in
+      Alcotest.(check int) "PAT If-None-Match returns 304" 304 revalidated.status;
+      Alcotest.(check string) "304 has empty body" "" revalidated.body;
+      let svg_rejected =
+        send
+          admin
+          router
+          ~meth:"POST"
+          ~path:Masc_network_defaults.media_upload_path
+          ~headers:(("Content-Type", "image/svg+xml") :: changing ~csrf:admin_csrf ())
+          ~body:"<svg/>"
+      in
+      Alcotest.(check int) "multi-account SVG upload rejected with 415" 415 svg_rejected.status;
+      Alcotest.(check bool) "multi-account SVG error returns JSON code svg_not_allowed" true
+        (Option.equal Yojson.Safe.equal (Some (`String "svg_not_allowed")) (member "code" svg_rejected));
+      let previous_max_bytes = Sys.getenv_opt "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" in
+      Fun.protect
+        ~finally:(fun () ->
+          match previous_max_bytes with
+          | Some v -> Unix.putenv "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" v
+          | None -> Unix.putenv "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" "")
+        (fun () ->
+           Unix.putenv "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" "16";
+           let oversized =
+             send
+               admin
+               router
+               ~meth:"POST"
+               ~path:Masc_network_defaults.media_upload_path
+               ~headers:(("Content-Type", "image/png") :: changing ~csrf:admin_csrf ())
+               ~body:png_10x20
+           in
+           Alcotest.(check int) "multi-account oversize upload returns 413" 413 oversized.status;
+           Alcotest.(check (option string)) "multi-account 413 is no-store" (Some "no-store")
+             (List.assoc_opt "cache-control" oversized.headers);
+           Alcotest.(check bool) "multi-account 413 returns JSON code media_too_large" true
+             (Option.equal
+                Yojson.Safe.equal
+                (Some (`String "media_too_large"))
+                (member "code" oversized)))))
 ;;
 
 let preview_return_to_and_http_diagnostic () =

@@ -326,11 +326,11 @@ let test_generated_audio_workspace_receipt () =
       (fun () ->
         let state = Masc.Mcp_server.For_testing.create_state ~base_path in
         Server_auth.For_testing.restore_server_state (Some state);
-        let payload = "RIFF\000\255audio\128bytes" in
+        let payload = "RIFF\024\000\000\000WAVEfmt \016\000\000\000" in
         let path = match Masc.Keeper_chat_media_store.persist_result
           ~base_dir:base_path ~media_type:"audio/wav" ~data:payload with
           | Ok (_, path) -> path | Error detail -> Alcotest.fail detail in
-        let router = Server_routes_http_routes_voice.add_routes (Http.Router.create ()) in
+        let router = Server_routes_http_routes_media.add_routes (Http.Router.create ()) in
         let encode = Uri.pct_encode ~component:`Query_value in
         let base = Unix.realpath base_path in
         let root = Unix.realpath (Masc.Workspace.masc_dir (Masc.Mcp_server.workspace_config state)) in
@@ -367,14 +367,14 @@ let test_generated_media_cors_and_read_authority () =
       (fun () ->
         let state = Masc.Mcp_server.For_testing.create_state ~base_path in
         Server_auth.For_testing.restore_server_state (Some state);
-        let payload = "RIFF\000\255media\128bytes" in
+        let payload = "RIFF\024\000\000\000WAVEfmt \016\000\000\000" in
         let path =
           match Masc.Keeper_chat_media_store.persist_result
             ~base_dir:base_path ~media_type:"audio/wav" ~data:payload with
           | Ok (_, path) -> path
           | Error detail -> Alcotest.fail detail
         in
-        let router = Server_routes_http_routes_voice.add_routes (Http.Router.create ()) in
+        let router = Server_routes_http_routes_media.add_routes (Http.Router.create ()) in
         List.iter (fun (origin, expected_origin) ->
           let response = dispatch router (http_request ~path ~token ?origin ()) in
           Alcotest.(check int) "authenticated reader receives media" 200
@@ -386,8 +386,15 @@ let test_generated_media_cors_and_read_authority () =
           Alcotest.(check (option string)) "credentials follow Origin admission"
             (Option.map (fun _ -> "true") expected_origin)
             (Httpun.Headers.get headers "access-control-allow-credentials");
-          Alcotest.(check (option string)) "responses vary by Origin" (Some "Origin")
+          Alcotest.(check (option string)) "responses vary by Origin, Authorization, Cookie"
+            (Some "Origin, Authorization, Cookie")
             (Httpun.Headers.get headers "vary");
+          Alcotest.(check (option string)) "nosniff is set on served media"
+            (Some "nosniff")
+            (Httpun.Headers.get headers "x-content-type-options");
+          Alcotest.(check (option string)) "immutable private cache-control is set"
+            (Some Server_routes_http_routes_media.immutable_cache_control)
+            (Httpun.Headers.get headers "cache-control");
           Alcotest.(check (option string)) "the media MIME type is preserved"
             (Some "audio/wav") (Httpun.Headers.get headers "content-type");
           Alcotest.(check (option string)) "the media length is preserved"

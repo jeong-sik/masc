@@ -6997,8 +6997,30 @@ let test_wave4_layer3_wire_codecs () =
               "record_errors": []
             }|}))
   in
-  Alcotest.(check int) "async active" 1 async_snap.active;
+  (match async_snap.state with
+  | Wire_runtime.Async_ready c ->
+      Alcotest.(check int) "async active" 1 c.active
+  | Wire_runtime.Async_unavailable _ ->
+      Alcotest.fail "expected Async_ready for status=ready");
   Alcotest.(check int) "async rows" 1 (List.length async_snap.requests);
+  let async_unavail =
+    expect_ok "decode_async_requests unavailable"
+      (Wire_runtime.decode_async_requests
+         (parse_json
+            {|{
+              "schema": "masc.async-request-observation/v1",
+              "status": "unavailable",
+              "error": { "kind": "store_error", "reason": "disk full" },
+              "requests": []
+            }|}))
+  in
+  (match async_unavail.state with
+  | Wire_runtime.Async_unavailable { status; error_detail } ->
+      Alcotest.(check string) "unavailable status" "unavailable" status;
+      Alcotest.(check (option string)) "unavailable detail"
+        (Some "store_error: disk full") error_detail
+  | Wire_runtime.Async_ready _ ->
+      Alcotest.fail "unavailable broker must not fabricate Async_ready zeros");
   (* 4. Prompts *)
   let prompts =
     expect_ok "decode_prompts_catalog"

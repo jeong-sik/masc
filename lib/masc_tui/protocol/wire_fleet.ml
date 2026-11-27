@@ -2427,6 +2427,7 @@ type chat_stream_chunk =
   | Chunk_tool_start of {
       operation_id : string option;
       tool_use_id : string;
+      provider_tool_call_id : string option;
       stream_scope : int option;
       tool_name : string;
       args_preview : string option;
@@ -3110,21 +3111,25 @@ let scoped_tool_use_id scope block = Printf.sprintf "scope-%d-block-%d" scope bl
 
 let resolve_tool_reference json =
   let* provider_id = optional_nonblank_string json "toolCallId" in
+  let* direct_id = optional_nonblank_string json "tool_use_id" in
+  let provider_tool_call_id =
+    match provider_id with Some _ as x -> x | None -> direct_id
+  in
   let* scope = optional_int_field json "toolStreamScope" in
   let* block = optional_int_field json "toolCallBlockIndex" in
   match scope, block with
-  | Some s, Some b -> Ok (scoped_tool_use_id s b, Some s)
-  | (None, _ | _, None) ->
-      let* direct_id = optional_nonblank_string json "tool_use_id" in
+  | Some s, Some b -> Ok (scoped_tool_use_id s b, Some s, provider_tool_call_id)
+  | (None, _ | _, None) -> (
       match provider_id, direct_id, scope, block with
-      | Some id, _, _, _ | None, Some id, _, _ -> Ok (id, None)
-      | None, None, Some s, _ -> Ok (Printf.sprintf "scope-%d" s, None)
-      | None, None, None, Some b -> Ok (Printf.sprintf "block-%d" b, None)
+      | Some id, _, _, _ | None, Some id, _, _ -> Ok (id, None, Some id)
+      | None, None, Some s, _ -> Ok (Printf.sprintf "scope-%d" s, None, None)
+      | None, None, None, Some b -> Ok (Printf.sprintf "block-%d" b, None, None)
       | None, None, None, None ->
           Error
-            "missing tool call identifier (toolCallId, tool_use_id, or toolStreamScope/toolCallBlockIndex)"
+            "missing tool call identifier (toolCallId, tool_use_id, or toolStreamScope/toolCallBlockIndex)")
 
-let resolve_tool_use_id json = Result.map fst (resolve_tool_reference json)
+let resolve_tool_use_id json =
+  Result.map (fun (id, _, _) -> id) (resolve_tool_reference json)
 
 let native_tool_id_prefix = "native:"
 
@@ -3292,7 +3297,9 @@ let decode_custom_chat_chunk json =
            })
   | "KEEPER_NATIVE_TOOL_START" ->
       let* value = required_object_field json "value" in
-      let* raw_tool_use_id, stream_scope = resolve_tool_reference value in
+      let* raw_tool_use_id, stream_scope, provider_tool_call_id =
+        resolve_tool_reference value
+      in
       let tool_use_id = namespace_native_tool_id raw_tool_use_id in
       let* name_opt = optional_nonblank_string value "toolCallName" in
       let tool_name = Option.value name_opt ~default:"native_tool" in
@@ -3301,6 +3308,7 @@ let decode_custom_chat_chunk json =
            {
              operation_id = outer_op_id;
              tool_use_id;
+             provider_tool_call_id;
              stream_scope;
              tool_name;
              args_preview = None;
@@ -3605,7 +3613,9 @@ let decode_chat_stream_chunk json =
       Ok (Chunk_thinking_delta { operation_id; delta; owner })
   | "tool_start" | "TOOL_CALL_START" ->
       let* operation_id = chunk_operation_id json in
-      let* tool_use_id, stream_scope = resolve_tool_reference json in
+      let* tool_use_id, stream_scope, provider_tool_call_id =
+        resolve_tool_reference json
+      in
       let* name_camel = optional_nonblank_string json "toolCallName" in
       let* tool_name =
         match name_camel with
@@ -3614,7 +3624,15 @@ let decode_chat_stream_chunk json =
       in
       let* args_preview = optional_string_field json "args_preview" in
       Ok
-        (Chunk_tool_start { operation_id; tool_use_id; stream_scope; tool_name; args_preview })
+        (Chunk_tool_start
+           {
+             operation_id;
+             tool_use_id;
+             provider_tool_call_id;
+             stream_scope;
+             tool_name;
+             args_preview;
+           })
   | "TOOL_CALL_ARGS" ->
       let* operation_id = chunk_operation_id json in
       let* tool_use_id = resolve_tool_use_id json in

@@ -3,6 +3,7 @@ open Masc_tui_keymap
 open Masc_tui_protocol
 
 module String_map = Map.Make (String)
+module String_set = Set.Make (String)
 
 type fusion_draft = {
   keeper : string option;
@@ -140,7 +141,7 @@ type t = {
   gate_tool_events_absent : bool;
   keeper_waiting_inventory :
     (string * Wire_runtime.keeper_waiting_inventory) Observed.t;
-  keeper_waiting_inventory_absent : bool;
+  keeper_waiting_inventory_absent_keepers : String_set.t;
   mcp_tools_list : Wire_runtime.mcp_tool_schema_entry list Observed.t;
   mcp_call_result : Wire_runtime.mcp_tool_call_result Observed.t;
   mcp_call_form : (int * Nav.inline_action_kind) option;
@@ -350,7 +351,7 @@ let empty =
     gate_tool_events = Observed.unreported;
     gate_tool_events_absent = false;
     keeper_waiting_inventory = Observed.absent;
-    keeper_waiting_inventory_absent = false;
+    keeper_waiting_inventory_absent_keepers = String_set.empty;
     mcp_tools_list = Observed.unreported;
     mcp_call_result = Observed.absent;
     mcp_call_form = None;
@@ -515,7 +516,6 @@ let step_tools_surface_keeper ~keeper_names ~delta t =
         tools_dashboard = Observed.mark_stale t.tools_dashboard;
         keeper_waiting_inventory =
           Observed.mark_stale t.keeper_waiting_inventory;
-        keeper_waiting_inventory_absent = false;
         scroll_offset = 0;
         detail_scroll_offset = 0;
       }
@@ -731,12 +731,25 @@ let apply_fusion_runs ~observed_at runs t =
 let apply_tool_series ~observed_at series t =
   { t with tool_series = Observed.value ~observed_at series }
 
-let apply_tool_series_summary ~observed_at
+let apply_tool_series_summary ?(update_24h = true) ~observed_at
     (summary : Wire_runtime.tool_series_summary) t =
   {
     t with
     tool_series_summary = Observed.value ~observed_at summary;
+    tool_series =
+      if update_24h then Observed.value ~observed_at summary.series
+      else t.tool_series;
+  }
+
+let apply_live_tool_series_summary ~observed_at
+    (summary : Wire_runtime.tool_series_summary) t =
+  let _, current_hours = tools_window_params t.tools_window in
+  {
+    t with
     tool_series = Observed.value ~observed_at summary.series;
+    tool_series_summary =
+      if Int.equal current_hours 24 then Observed.value ~observed_at summary
+      else t.tool_series_summary;
   }
 
 let apply_tool_detail_series ~observed_at ~tool summary t =
@@ -2657,7 +2670,7 @@ let mark_stale_all t =
     gate_tool_events = Observed.mark_stale t.gate_tool_events;
     gate_tool_events_absent = false;
     keeper_waiting_inventory = Observed.mark_stale t.keeper_waiting_inventory;
-    keeper_waiting_inventory_absent = false;
+    keeper_waiting_inventory_absent_keepers = String_set.empty;
     mcp_tools_list = Observed.mark_stale t.mcp_tools_list;
     skills = Observed.mark_stale t.skills;
     skill_editor_sources = Observed.mark_stale t.skill_editor_sources;
@@ -2841,7 +2854,25 @@ let apply_keeper_waiting_inventory ~observed_at ~keeper inv t =
   {
     t with
     keeper_waiting_inventory = Observed.value ~observed_at (keeper, inv);
-    keeper_waiting_inventory_absent = false;
+    keeper_waiting_inventory_absent_keepers =
+      String_set.remove keeper t.keeper_waiting_inventory_absent_keepers;
+  }
+
+let is_keeper_waiting_inventory_absent ~keeper t =
+  String_set.mem keeper t.keeper_waiting_inventory_absent_keepers
+
+let mark_keeper_waiting_inventory_absent ~keeper t =
+  {
+    t with
+    keeper_waiting_inventory_absent_keepers =
+      String_set.add keeper t.keeper_waiting_inventory_absent_keepers;
+  }
+
+let clear_keeper_waiting_inventory_absent ~keeper t =
+  {
+    t with
+    keeper_waiting_inventory_absent_keepers =
+      String_set.remove keeper t.keeper_waiting_inventory_absent_keepers;
   }
 
 let keeper_waiting_inventory_for ~keeper t =

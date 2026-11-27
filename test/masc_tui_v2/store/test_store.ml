@@ -2798,9 +2798,29 @@ let test_v25_data_pipeline_and_settings_2pane () =
       "unobserved" (List.hd snapshot.ssh_unbound_keepers).binding_state
   in
   check_fallback_activity rebuilt 0;
+  let ts_summary : Wire_runtime.tool_series_summary =
+    {
+      tool_filter = None;
+      total_calls = 120;
+      total_failures = 0;
+      total_deferred = 0;
+      p50_ms = None;
+      p95_ms = None;
+      failure_classes =
+        {
+          dependency_unavailable = 0;
+          policy_rejection = 0;
+          runtime_failure = 0;
+          workflow_rejection = 0;
+          operator_cancelled = 0;
+          unclassified = 0;
+        };
+      series = ts;
+    }
+  in
   let series_seen, _ =
     Update.step ~now:t2 rebuilt
-      (Msg.Sse_event { epoch = rebuilt.epoch; event = Msg.Sse_tool_series ts })
+      (Msg.Sse_event { epoch = rebuilt.epoch; event = Msg.Sse_tool_series ts_summary })
   in
   check_fallback_activity series_seen 120;
   (match Observed.to_option m6.work.candle_ledger with
@@ -7547,6 +7567,7 @@ let test_agui_chat_stream_lifecycle_15_bugs () =
                {
                  operation_id = None;
                  tool_use_id = "scope-1-block-0";
+                 provider_tool_call_id = None;
                  stream_scope = Some 1;
                  tool_name = "masc_status";
                  args_preview = None;
@@ -11936,6 +11957,7 @@ let test_live_chat_runtime_attempt_and_text_ownership () =
             {
               operation_id = Some req;
               tool_use_id = "tu-1";
+              provider_tool_call_id = None;
               stream_scope = None;
               tool_name = "read_file";
               args_preview = Some "a.ml";
@@ -17614,12 +17636,14 @@ let test_active_turn_preview_visibility_and_queued_followup () =
         [
           {
             tool_use_id = "tu-1";
+            provider_tool_call_id = None;
             stream_scope = None;
             tool_name = "Read";
             execution_id = None;
             args_preview = Some "README.md";
             progress_label = None;
             tool_state = Tool_settled;
+            suspended_state = None;
             ok = Some true;
             output_preview = None;
           };
@@ -30514,13 +30538,15 @@ let () =
                       async_requests =
                         Observed.value ~observed_at:t0
                           {
-                            Wire_runtime.status = "ok";
-                            active = 0;
-                            runtime_owned = 0;
-                            ownership_unknown = 0;
-                            record_errors_count = 0;
+                            Wire_runtime.state =
+                              Wire_runtime.Async_ready
+                                {
+                                  active = 0;
+                                  runtime_owned = 0;
+                                  ownership_unknown = 0;
+                                  record_errors_count = 0;
+                                };
                             requests = [];
-                            error_detail = None;
                           };
                     };
                 }
@@ -30567,6 +30593,7 @@ let () =
                      {
                        operation_id = Some "op-apr";
                        tool_use_id = "scope-1-block-0";
+                       provider_tool_call_id = Some "toolu_a";
                        stream_scope = Some 1;
                        tool_name = "tool_a";
                        args_preview = None;
@@ -30578,6 +30605,7 @@ let () =
                      {
                        operation_id = Some "op-apr";
                        tool_use_id = "scope-1-block-1";
+                       provider_tool_call_id = Some "toolu_b";
                        stream_scope = Some 1;
                        tool_name = "tool_b";
                        args_preview = None;
@@ -30805,6 +30833,7 @@ let () =
                         {
                           operation_id = None;
                           tool_use_id = "tu-obs-1";
+                          provider_tool_call_id = None;
                           stream_scope = Some 0;
                           tool_name = "masc_status";
                           args_preview = None;
@@ -31215,6 +31244,7 @@ let () =
                      {
                        operation_id = Some op_eof;
                        tool_use_id = "tu-handoff-1";
+                       provider_tool_call_id = None;
                        stream_scope = Some 0;
                        tool_name = "masc_status";
                        args_preview = None;
@@ -31641,6 +31671,7 @@ let () =
                         {
                           operation_id = Some "op-ext-effect";
                           tool_use_id = "tu-ext-1";
+                          provider_tool_call_id = None;
                           stream_scope = Some 1;
                           tool_name = "masc_surface_post";
                           args_preview = None;
@@ -31805,5 +31836,253 @@ let () =
               Alcotest.(check int)
                 "collapsed PEM block needs zero scroll in 20-row viewport" 0
                 (Update_nav.btw_max_scroll m_raw));
+          Alcotest.test_case
+            "Round 5 PR5: parallel tool approvals, handoff reopen, 7d KPI isolation, per-keeper waiting 404, approval modes SSE"
+            `Quick
+            (fun () ->
+              let t0 = Clock.Mono.of_ns 100_000_000_000L in
+              let t1 = Clock.Mono.of_ns 101_000_000_000L in
+              let m0 =
+                Model.initial ~auth_session:Rbac.single_user_local_admin
+                  ~cols:120 ~rows:30 ()
+              in
+              (* 1. Parallel same-tool-name calls disambiguated via provider_tool_call_id *)
+              let keeper = "alpha" in
+              let step_chunk m chunk =
+                Update.step ~now:t0 m
+                  (Msg.Chat_stream_chunk
+                     {
+                       epoch = m.epoch;
+                       keeper;
+                       request_id = "req-par";
+                       is_btw = false;
+                       seq = None;
+                       chunk;
+                     })
+              in
+              let m1, _ =
+                step_chunk m0
+                  (Wire_fleet.Chunk_tool_start
+                     {
+                       operation_id = Some "op-par";
+                       tool_use_id = "scope-1-block-0";
+                       provider_tool_call_id = Some "call_first";
+                       stream_scope = Some 1;
+                       tool_name = "bash";
+                       args_preview = Some "ls";
+                     })
+              in
+              let m2, _ =
+                step_chunk m1
+                  (Wire_fleet.Chunk_tool_start
+                     {
+                       operation_id = Some "op-par";
+                       tool_use_id = "scope-1-block-1";
+                       provider_tool_call_id = Some "call_second";
+                       stream_scope = Some 1;
+                       tool_name = "bash";
+                       args_preview = Some "rm";
+                     })
+              in
+              let m3, _ =
+                step_chunk m2
+                  (Wire_fleet.Chunk_tool_approval_event
+                     {
+                       operation_id = Some "op-par";
+                       tool_use_id = "call_second";
+                       tool_name = Some "bash";
+                       status_label = "awaiting approval";
+                       refresh_approvals = true;
+                     })
+              in
+              let par_tools =
+                (Fleet_store.String_map.find keeper m3.fleet.chat_streams).tools
+              in
+              let label_of id =
+                (List.find
+                   (fun (c : Fleet_store.active_tool_call) ->
+                     String.equal c.tool_use_id id)
+                   par_tools)
+                  .progress_label
+              in
+              Alcotest.(check (option string))
+                "first parallel call stays untouched" None
+                (label_of "scope-1-block-0");
+              Alcotest.(check (option string))
+                "second parallel call matches via provider_tool_call_id"
+                (Some "awaiting approval")
+                (label_of "scope-1-block-1");
+              (* 2. Direct-to-Observer handoff reopens transport-suspended tool but not quarantined tool *)
+              let m_q, _ =
+                step_chunk m2
+                  (Wire_fleet.Chunk_tool_quarantined
+                     {
+                       operation_id = Some "op-par";
+                       tool_use_id = "scope-1-block-0";
+                       kind = "invalid_args";
+                       reason = Some "bad json";
+                     })
+              in
+              let m_eof, _ =
+                Update.step ~now:t0 m_q
+                  (Msg.Chat_stream_done
+                     {
+                       epoch = m_q.epoch;
+                       keeper;
+                       request_id = "req-par";
+                       is_btw = false;
+                       result = Error (Msg.Transport Health.Stream_eof);
+                     })
+              in
+              let m_resumed, _ =
+                Update.step ~now:t1 m_eof
+                  (Msg.Sse_event
+                     {
+                       epoch = m_eof.epoch;
+                       event =
+                         Msg.Sse_observer_delivery
+                           {
+                             cursor = None;
+                             decoded =
+                               Wire_observer.Event
+                                 (Wire_observer.Keeper_chat_stream_frame
+                                    {
+                                      keeper;
+                                      operation_id = "op-par";
+                                      seq = Some 99;
+                                      chunk =
+                                        Wire_fleet.Chunk_tool_end
+                                          {
+                                            operation_id = Some "op-par";
+                                            tool_use_id = "scope-1-block-1";
+                                            tool_name = Some "bash";
+                                            execution_id = None;
+                                            ok = Some true;
+                                            output_preview = Some "done";
+                                          };
+                                    });
+                           };
+                     })
+              in
+              let resumed_tools =
+                (Fleet_store.String_map.find keeper m_resumed.fleet.chat_streams)
+                  .tools
+              in
+              let state_of id =
+                (List.find
+                   (fun (c : Fleet_store.active_tool_call) ->
+                     String.equal c.tool_use_id id)
+                   resumed_tools)
+                  .tool_state
+              in
+              Alcotest.(check bool)
+                "quarantined tool stays Tool_unfinished after observer handoff"
+                true
+                (state_of "scope-1-block-0" = Fleet_store.Tool_unfinished);
+              Alcotest.(check bool)
+                "transport-suspended tool reopens and settles on observer handoff"
+                true
+                (state_of "scope-1-block-1" = Fleet_store.Tool_settled);
+              (* 3. 7d tool series summary does not overwrite 24h baseline; live SSE updates 24h summary *)
+              let mk_summary calls : Wire_runtime.tool_series_summary =
+                {
+                  tool_filter = None;
+                  total_calls = calls;
+                  total_failures = 0;
+                  total_deferred = 0;
+                  p50_ms = None;
+                  p95_ms = None;
+                  failure_classes =
+                    {
+                      dependency_unavailable = 0;
+                      policy_rejection = 0;
+                      runtime_failure = 0;
+                      workflow_rejection = 0;
+                      operator_cancelled = 0;
+                      unclassified = 0;
+                    };
+                  series =
+                    {
+                      generated_at_unix = 1_795_254_000.0;
+                      bucket_width = `Hour;
+                      utc_offset_min = 0;
+                      buckets =
+                        [
+                          {
+                            start_unix = 1_795_250_400.0;
+                            activity =
+                              Wire_runtime.Series_active
+                                { calls; failures = 0; deferred = 0; p95_ms = 5.0 };
+                          };
+                        ];
+                    };
+                }
+              in
+              let s24 = mk_summary 10 in
+              let s7d = mk_summary 500 in
+              let s24_live = mk_summary 15 in
+              let rt_24 =
+                Runtime_store.apply_tool_series_summary ~update_24h:true
+                  ~observed_at:t0 s24 m0.runtime
+              in
+              let rt_7d =
+                Runtime_store.apply_tool_series_summary ~update_24h:false
+                  ~observed_at:t1 s7d rt_24
+              in
+              Alcotest.(check (option int))
+                "7d summary keeps 24h tool_series baseline intact" (Some 10)
+                (Option.map (fun (c, _, _) -> c)
+                   (Runtime_store.tool_series_totals rt_7d));
+              let rt_live =
+                Runtime_store.apply_live_tool_series_summary ~observed_at:t1
+                  s24_live rt_24
+              in
+              Alcotest.(check (option int))
+                "live 24h SSE updates tool_series_summary on 24h window"
+                (Some 15)
+                (Option.map
+                   (fun (s : Wire_runtime.tool_series_summary) -> s.total_calls)
+                   (Observed.to_option rt_live.tool_series_summary));
+              (* 4. Tool_approval_mode_changed dispatches Get_tool_approval_modes *)
+              let m_modes, cmds_modes =
+                Update.step ~now:t1 m0
+                  (Msg.Sse_event
+                     {
+                       epoch = m0.epoch;
+                       event =
+                         Msg.Sse_observer_delivery
+                           {
+                             cursor = None;
+                             decoded =
+                               Wire_observer.Event
+                                 (Wire_observer.Approval_changed
+                                    (Wire_observer.Tool_approval_mode_changed
+                                       { keeper = "alpha" }));
+                           };
+                     })
+              in
+              Alcotest.(check bool)
+                "Tool_approval_mode_changed marks tool_approval_modes stale"
+                true
+                (not m_modes.work.tool_approval_modes_absent);
+              Alcotest.(check bool)
+                "Tool_approval_mode_changed refetches Get_tool_approval_modes"
+                true
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_tool_approval_modes; _ } -> true
+                     | _ -> false)
+                   (Cmd.flatten cmds_modes));
+              (* 5. Per-keeper waiting inventory 404 does not poison other keepers *)
+              let rt_404 =
+                Runtime_store.mark_keeper_waiting_inventory_absent ~keeper:"gone"
+                  m0.runtime
+              in
+              Alcotest.(check bool) "404 keeper marked absent" true
+                (Runtime_store.is_keeper_waiting_inventory_absent ~keeper:"gone"
+                   rt_404);
+              Alcotest.(check bool) "other keeper not marked absent" false
+                (Runtime_store.is_keeper_waiting_inventory_absent ~keeper:"alpha"
+                   rt_404));
         ] );
     ]

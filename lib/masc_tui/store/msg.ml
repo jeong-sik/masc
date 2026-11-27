@@ -826,7 +826,7 @@ type sse_event =
   | Sse_fleet of Wire_fleet.fleet_stream_event
   | Sse_log_frame of Wire_infra.system_log_frame
   | Sse_models_metrics_snapshot of Wire_runtime.models_metrics_snapshot
-  | Sse_tool_series of Wire_runtime.tool_series
+  | Sse_tool_series of Wire_runtime.tool_series_summary
 
 type voice_event =
   | Voice_started

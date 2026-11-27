@@ -915,6 +915,7 @@ type chat_stream_chunk =
   | Chunk_tool_start of {
       operation_id : string option;
       tool_use_id : string;
+      provider_tool_call_id : string option;
       stream_scope : int option;
       tool_name : string;
       args_preview : string option;

@@ -33,12 +33,14 @@ type tool_call_state =
 
 type active_tool_call = {
   tool_use_id : string;
+  provider_tool_call_id : string option;
   stream_scope : int option;
   tool_name : string;
   execution_id : string option;
   args_preview : string option;
   progress_label : string option;
   tool_state : tool_call_state;
+  suspended_state : tool_call_state option;
   ok : bool option;
   output_preview : string option;
 }
@@ -1208,10 +1210,30 @@ let apply_heartbeat ~keeper ~in_turn ~at_unix t =
 
 let retire_pending_tool tool =
   match tool.tool_state with
-  | Tool_pending | Tool_result_pending _ -> { tool with tool_state = Tool_unfinished }
-  | Tool_settled | Tool_unfinished -> tool
+  | Tool_pending | Tool_result_pending _ ->
+      { tool with tool_state = Tool_unfinished; suspended_state = None }
+  | Tool_settled | Tool_unfinished -> { tool with suspended_state = None }
 
 let retire_pending_tools tools = List.map retire_pending_tool tools
+
+let suspend_pending_tool tool =
+  match tool.tool_state with
+  | (Tool_pending | Tool_result_pending _) as prev ->
+      { tool with tool_state = Tool_unfinished; suspended_state = Some prev }
+  | Tool_settled | Tool_unfinished -> tool
+
+let suspend_pending_tools tools = List.map suspend_pending_tool tools
+
+let reopen_suspended_tools tools =
+  List.map
+    (fun tool ->
+      match tool.tool_state, tool.suspended_state with
+      | Tool_unfinished, Some prev ->
+          { tool with tool_state = prev; suspended_state = None }
+      | (Tool_pending | Tool_result_pending _ | Tool_settled), (Some _ | None)
+      | Tool_unfinished, None ->
+          tool)
+    tools
 
 let has_persisted_op_match f (messages : Wire_fleet.chat_message list) op_ids =
   List.exists
@@ -1656,15 +1678,17 @@ let apply_chat_stream_chunk_core ~from_observer ~allow_takeover ~keeper
             | Tool_pending | Tool_result_pending _ -> true
             | Tool_unfinished | Tool_settled -> false
           in
-          let has_exact =
-            List.exists (fun tool -> String.equal tool.tool_use_id tool_use_id) b.tools
+          let matches_exact (tool : active_tool_call) =
+            String.equal tool.tool_use_id tool_use_id
+            || Option.equal String.equal tool.provider_tool_call_id (Some tool_use_id)
           in
+          let has_exact = List.exists matches_exact b.tools in
           let matched_fallback = ref false in
           let tools =
             List.map
               (fun tool ->
                 let hit =
-                  if has_exact then String.equal tool.tool_use_id tool_use_id
+                  if has_exact then matches_exact tool
                   else
                     (not !matched_fallback)
                     && is_open_tool tool
@@ -1905,15 +1929,24 @@ let apply_chat_stream_chunk_core ~from_observer ~allow_takeover ~keeper
               when Option.exists (fun current -> scope < current) (latest_response_scope prev) ->
                 prev
             | Wire_fleet.Chunk_tool_start
-                { operation_id; tool_use_id; stream_scope; tool_name; args_preview } ->
+                {
+                  operation_id;
+                  tool_use_id;
+                  provider_tool_call_id;
+                  stream_scope;
+                  tool_name;
+                  args_preview;
+                } ->
                 let entry =
                   {
                     tool_use_id;
+                    provider_tool_call_id;
                     stream_scope;
                     tool_name;
                     execution_id = None;
                     args_preview;
                     tool_state = Tool_pending;
+                    suspended_state = None;
                     progress_label = None;
                     ok = None;
                     output_preview = None;
@@ -2009,11 +2042,13 @@ let apply_chat_stream_chunk_core ~from_observer ~allow_takeover ~keeper
                     @ [
                         {
                           tool_use_id;
+                          provider_tool_call_id = None;
                           stream_scope = None;
                           tool_name = Option.value tool_name ~default:"tool";
                           execution_id;
                           args_preview = None;
                           tool_state = Tool_settled;
+                          suspended_state = None;
                           progress_label = None;
                           ok;
                           output_preview;
@@ -2261,6 +2296,7 @@ let apply_observer_chat_stream_chunk ~keeper ~operation_id ~seq chunk t =
                 active = true;
                 ended = false;
                 last_error = None;
+                tools = reopen_suspended_tools b.tools;
               }
             in
             let t_resumed =
@@ -2402,7 +2438,7 @@ let finish_chat_stream ~keeper ~request_id ~error t =
           active = false;
           ended = true;
           interrupting = false;
-          tools = retire_pending_tools b.tools;
+          tools = suspend_pending_tools b.tools;
           last_error =
             (match error with Some _ as e -> e | None -> b.last_error);
         }
@@ -2427,7 +2463,7 @@ let detach_chat_streams t =
         (fun (b : chat_stream_buffer) ->
           if b.active then
             { b with active = false; ended = true; interrupting = false;
-                     tools = retire_pending_tools b.tools }
+                     tools = suspend_pending_tools b.tools }
           else b)
         t.chat_streams;
   }

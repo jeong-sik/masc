@@ -655,11 +655,11 @@ let decode_hub_event_msgs ~epoch ~observed_at ev =
               skipped_stream_frame ~epoch
                 ("tool series stream: invalid JSON frame: " ^ msg)
           | json -> (
-              match Wire_runtime.decode_tool_series json with
-              | Ok series ->
+              match Wire_runtime.decode_tool_series_summary json with
+              | Ok summary ->
                   [
                     ( Hub_event
-                    , Msg.Sse_event { epoch; event = Msg.Sse_tool_series series } );
+                    , Msg.Sse_event { epoch; event = Msg.Sse_tool_series summary } );
                   ]
               | Error reason ->
                   (* A failed read arrives as {"error": detail}, and the server

@@ -379,7 +379,20 @@ let apply_dataset_invalidation (m : Model.t) ds =
             let surface_keeper =
               Runtime_store.selected_tools_surface_keeper ~keeper_names runtime
             in
-            [ get_cmd e (Cmd.Get_tools_catalog { keeper = surface_keeper }) ]
+            let bucket, since_hours =
+              Runtime_store.tools_window_params runtime.tools_window
+            in
+            let series_cmds =
+              if not (Int.equal since_hours 24) then
+                [
+                  get_cmd e
+                    (Cmd.Get_tool_series_filtered
+                       { bucket; since_hours; tool = None });
+                ]
+              else []
+            in
+            get_cmd e (Cmd.Get_tools_catalog { keeper = surface_keeper })
+            :: series_cmds
         | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Keepers | Nav.Infra -> []
       in
       ({ m with runtime }, cmds)
@@ -828,14 +841,16 @@ let apply_observer_event (m : Model.t) = function
             true
       in
       let runtime =
+        let cleared =
+          Runtime_store.clear_keeper_waiting_inventory_absent ~keeper m.runtime
+        in
         if slot_matches then
           {
-            m.runtime with
+            cleared with
             keeper_waiting_inventory =
-              Observed.mark_stale m.runtime.keeper_waiting_inventory;
-            keeper_waiting_inventory_absent = false;
+              Observed.mark_stale cleared.keeper_waiting_inventory;
           }
-        else m.runtime
+        else cleared
       in
       let next =
         { m with fleet = Fleet_store.set_chat_queue ~keeper queue m.fleet; runtime }
@@ -888,14 +903,16 @@ let apply_observer_event (m : Model.t) = function
             true
       in
       let runtime =
+        let cleared =
+          Runtime_store.clear_keeper_waiting_inventory_absent ~keeper m.runtime
+        in
         if slot_matches then
           {
-            m.runtime with
+            cleared with
             keeper_waiting_inventory =
-              Observed.mark_stale m.runtime.keeper_waiting_inventory;
-            keeper_waiting_inventory_absent = false;
+              Observed.mark_stale cleared.keeper_waiting_inventory;
           }
-        else m.runtime
+        else cleared
       in
       let next = { m with runtime } in
       let viewing_keeper =
@@ -1093,9 +1110,18 @@ let apply_observer_event (m : Model.t) = function
       | Wire_observer.Approval_rules_changed
       | Wire_observer.Gate_mode_changed ->
           (m, [ get_cmd m.epoch Cmd.Get_gate_pending ])
-      | Wire_observer.Tool_approval_waits_changed _
-      | Wire_observer.Tool_approval_mode_changed _ ->
+      | Wire_observer.Tool_approval_waits_changed _ ->
           (m, [ get_cmd m.epoch Cmd.Get_tool_approvals ])
+      | Wire_observer.Tool_approval_mode_changed _ ->
+          let work =
+            {
+              m.work with
+              tool_approval_modes =
+                Observed.mark_stale m.work.tool_approval_modes;
+              tool_approval_modes_absent = false;
+            }
+          in
+          ({ m with work }, [ get_cmd m.epoch Cmd.Get_tool_approval_modes ])
       | Wire_observer.Keeper_asks_changed _ ->
           ( m
           , [
@@ -1230,9 +1256,10 @@ let apply_sse_event ~now (m : Model.t) = function
         }
         |> Model.sync_effective_scorecard ~now
       , [] )
-  | Msg.Sse_tool_series series ->
+  | Msg.Sse_tool_series summary ->
       let runtime =
-        Runtime_store.apply_tool_series ~observed_at:now series m.runtime
+        Runtime_store.apply_live_tool_series_summary ~observed_at:now summary
+          m.runtime
       in
       let m = { m with runtime } in
       let infra =

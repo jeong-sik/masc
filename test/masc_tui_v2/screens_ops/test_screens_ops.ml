@@ -827,6 +827,7 @@ let make_populated_model ~cols ~rows ~lang =
             {
               operation_id = Some "op-1";
               tool_use_id = "tu-1";
+              provider_tool_call_id = None;
               stream_scope = None;
               tool_name = "gh_pr_view";
               args_preview = Some "#54340";
@@ -2383,6 +2384,7 @@ let test_p1_keeper_dive_tool_card_secret_redaction () =
             {
               operation_id = Some "op-sec";
               tool_use_id = "tu-sec-stream";
+              provider_tool_call_id = None;
               stream_scope = None;
               tool_name = "bash_exec";
               args_preview = Some truncated_json_args;
@@ -4329,6 +4331,7 @@ let test_tool_expand_live_trace_pagination_and_row_count_parity () =
             {
               operation_id = Some "op-ready-1";
               tool_use_id = "scope-1-block-0";
+              provider_tool_call_id = None;
               stream_scope = Some 1;
               tool_name = "bash";
               args_preview = Some {|{"cmd":"ls -la"}|};

@@ -9745,8 +9745,13 @@ let runtime_detail_max_scroll (m : Model.t) =
             | Runtime_store.Sec_async_requests ->
                 let summary_n =
                   match Observed.to_option m.runtime.async_requests with
-                  | Some snap ->
-                      1 + if Option.is_some snap.error_detail then 1 else 0
+                  | Some { state = Wire_runtime.Async_ready _; _ } -> 1
+                  | Some
+                      {
+                        state = Wire_runtime.Async_unavailable { error_detail; _ };
+                        _;
+                      } ->
+                      1 + if Option.is_some error_detail then 1 else 0
                   | None -> 0
                 in
                 let sel_n =

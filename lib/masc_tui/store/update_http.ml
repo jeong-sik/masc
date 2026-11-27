@@ -228,7 +228,15 @@ let purge_disallowed_state ~(session : Rbac.auth_session) (m : Model.t) :
         }
     in
     let r1 =
-      if Rbac.can_single_user_token_admin session then r0
+      if Rbac.can_single_user_token_admin session then
+        {
+          r0 with
+          async_requests_auth_denied = false;
+          skill_editor_sources_auth_denied = false;
+          skill_editor_tools_auth_denied = false;
+          fusion_config_auth_denied = false;
+          lanes_inventory_auth_denied = false;
+        }
       else
         {
           r0 with
@@ -242,17 +250,20 @@ let purge_disallowed_state ~(session : Rbac.auth_session) (m : Model.t) :
           skill_editor_loaded = Observed.unreported;
           skill_editor_preview = Observed.unreported;
           async_requests = Observed.unreported;
+          async_requests_auth_denied = false;
           addon_last_action_receipt = Observed.unreported;
           browser_last_receipt = Observed.unreported;
           runtime_raw_preview = Observed.unreported;
         }
     in
     let r2 =
-      if Rbac.is_allowed session Rbac.Single_user_read then r1
+      if Rbac.is_allowed session Rbac.Single_user_read then
+        { r1 with presets_auth_denied = false }
       else
         {
           r1 with
           presets_listing = Observed.unreported;
+          presets_auth_denied = false;
           preset_detail = Observed.unreported;
           runtime_params = Observed.unreported;
           addon_declaration_doc = Observed.unreported;
@@ -4744,8 +4755,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             else m.runtime
         | None ->
             if Int.equal since_hours expected_hours then
-              Runtime_store.apply_tool_series_summary ~observed_at:now summary
-                m.runtime
+              Runtime_store.apply_tool_series_summary
+                ~update_24h:(Int.equal since_hours 24)
+                ~observed_at:now summary m.runtime
             else m.runtime
       in
       let next = { m with runtime } |> refresh_404_fallbacks ~now in
@@ -7396,35 +7408,79 @@ let apply_http_reply ~now (m : Model.t) reply =
             ~source:Health.Source_client_http ~ko:"도구 품질 통계 조회"
             ~en:"Tool quality fetch" err)
   | Msg.Reply_keeper_waiting_inventory { keeper; result = Ok inv } ->
+      let expected_keeper =
+        match m.nav.workspace with
+        | Nav.Keepers -> (
+            match Model.target_keeper m with
+            | Some _ as k -> k
+            | None -> Model.selected_keeper_name m)
+        | Nav.Runtime
+          when Nav.equal_runtime_tab m.runtime.active_tab Nav.Runtime_tools_usage
+               && Runtime_store.equal_tools_subview m.runtime.tools_subview
+                    Runtime_store.Tools_quality_gate ->
+            let keeper_names =
+              match Observed.to_option m.fleet.keepers with
+              | Some ks ->
+                  List.map (fun (k : Wire_fleet.keeper_summary) -> k.name) ks
+              | None -> []
+            in
+            Runtime_store.selected_tools_surface_keeper ~keeper_names m.runtime
+        | Nav.Runtime | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Infra -> None
+      in
       let runtime =
-        Runtime_store.apply_keeper_waiting_inventory ~observed_at:now ~keeper
-          inv m.runtime
+        if Option.equal String.equal expected_keeper (Some keeper) then
+          Runtime_store.apply_keeper_waiting_inventory ~observed_at:now ~keeper
+            inv m.runtime
+        else Runtime_store.clear_keeper_waiting_inventory_absent ~keeper m.runtime
       in
       ({ m with runtime }, [])
   | Msg.Reply_keeper_waiting_inventory { keeper; result = Error err } -> (
+      let expected_keeper =
+        match m.nav.workspace with
+        | Nav.Keepers -> (
+            match Model.target_keeper m with
+            | Some _ as k -> k
+            | None -> Model.selected_keeper_name m)
+        | Nav.Runtime
+          when Nav.equal_runtime_tab m.runtime.active_tab Nav.Runtime_tools_usage
+               && Runtime_store.equal_tools_subview m.runtime.tools_subview
+                    Runtime_store.Tools_quality_gate ->
+            let keeper_names =
+              match Observed.to_option m.fleet.keepers with
+              | Some ks ->
+                  List.map (fun (k : Wire_fleet.keeper_summary) -> k.name) ks
+              | None -> []
+            in
+            Runtime_store.selected_tools_surface_keeper ~keeper_names m.runtime
+        | Nav.Runtime | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Infra -> None
+      in
+      let is_expected = Option.equal String.equal expected_keeper (Some keeper) in
       match err with
       | Msg.Http_error { status = 404; _ } ->
           ( on_runtime
               (fun (x : Runtime_store.t) ->
-                {
-                  x with
-                  keeper_waiting_inventory = Observed.absent;
-                  keeper_waiting_inventory_absent = true;
-                })
+                let x =
+                  Runtime_store.mark_keeper_waiting_inventory_absent ~keeper x
+                in
+                if is_expected then
+                  { x with keeper_waiting_inventory = Observed.absent }
+                else x)
               m
           , [] )
       | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _
       | Msg.Decode_error _ ->
-          err_reply
-            ~fail:
-              (on_runtime (fun (x : Runtime_store.t) ->
-                   {
-                     x with
-                     keeper_waiting_inventory =
-                       failed_slot err x.keeper_waiting_inventory;
-                   }))
-            ~source:(Health.Source_keeper keeper) ~ko:"키퍼 대기 인벤토리 조회"
-            ~en:"Keeper waiting inventory fetch" err)
+          if not is_expected then (m, [])
+          else
+            err_reply
+              ~fail:
+                (on_runtime (fun (x : Runtime_store.t) ->
+                     {
+                       x with
+                       keeper_waiting_inventory =
+                         failed_slot err x.keeper_waiting_inventory;
+                     }))
+              ~source:(Health.Source_keeper keeper) ~ko:"키퍼 대기 인벤토리 조회"
+              ~en:"Keeper waiting inventory fetch" err)
   | Msg.Reply_mcp_tools_list (Ok tools) ->
       let runtime =
         Runtime_store.apply_mcp_tools_list ~observed_at:now tools m.runtime

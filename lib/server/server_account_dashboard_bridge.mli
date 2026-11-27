@@ -20,12 +20,14 @@
       never reads another principal's [Direct] posts. Keeper-scoped memory
       diffs enforce strict Keeper ownership ({!can_read_keeper_memory}), and
       Keeper-scoped sandbox reads require Admin or Keeper ownership
-      ({!can_read_keeper_sandbox}).
+      ({!can_read_keeper_sandbox}). Also serves content-addressed workspace
+      media ([GET /api/v1/media/<sha256>]).
     - {!Admin_only}: judged as [Route_access.Permission Masc_domain.CanAdmin]
       via {!Auth_gate.decide}. Permits only active [Admin] browser sessions
       (with Same-Origin and CSRF enforcement on unsafe methods); [Worker]
       principals, PATs, and service credentials are refused with 403. Covers
-      config schema/patch, wiki writes, fleet sandbox inventory
+      config schema/patch, wiki writes, workspace media uploads
+      ([POST /api/v1/media]), fleet sandbox inventory
       ([GET /api/v1/infra/sandboxes]) and sandbox probes, standalone/exact lane
       runs, ring logs, operator snapshot/digest/action/confirm, and schedule
       pruning.

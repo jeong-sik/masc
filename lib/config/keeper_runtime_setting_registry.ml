@@ -667,26 +667,6 @@ let all =
       ~category:Media
       "Maximum bytes a Keeper may hand to a peer as one exported artifact"
   ; setting
-      ~range:(int_range ~min:1 ~max:5368709120 ())
-      ~effective:(Reader (fun () -> display_int (Env_config_keeper.KeeperGeneratedMedia.dir_max_bytes ())))
-      ~env_name:"MASC_KEEPER_GENERATED_MEDIA_DIR_MAX_BYTES"
-      ~exposure:Env_only
-      ~value_kind:Integer
-      ~default:"524288000"
-      ~consumers:[ "Keeper generated-media cleanup" ]
-      ~category:Media
-      "Maximum retained generated-media directory bytes"
-  ; setting
-      ~range:(float_range ~min:1.0 ~max:2592000.0 ())
-      ~effective:(Reader (fun () -> display_float (Env_config_keeper.KeeperGeneratedMedia.retention_seconds ())))
-      ~env_name:"MASC_KEEPER_GENERATED_MEDIA_RETENTION_SEC"
-      ~exposure:Env_only
-      ~value_kind:Float
-      ~default:"86400.0"
-      ~consumers:[ "Keeper generated-media cleanup" ]
-      ~category:Media
-      "Maximum generated-media artifact age in seconds"
-  ; setting
       ~range:(int_range ~min:1 ~max:0x7fffffff ())
       ~effective:(Reader (fun () -> display_int (H2_response_limits.max_concurrent_streams ())))
       ~env_name:"MASC_H2_MAX_CONCURRENT_STREAMS"

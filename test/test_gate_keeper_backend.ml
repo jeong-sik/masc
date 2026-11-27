@@ -2624,7 +2624,7 @@ let test_keeper_stream_bridge_terminal_text_state_is_message_scoped () =
 
 let test_keeper_stream_bridge_preserves_typed_media_source () =
   let open Agent_core.Types in
-  let raw_media = "raw image bytes" in
+  let raw_media = "\x89PNG\r\n\x1a\nraw image bytes" in
   let encoded_media = Base64.encode_string raw_media in
   (* Media chunks are accumulated and surfaced as a single
      [Agent_core_media_delta] carrying the persisted media URL at the block stop, not a
@@ -2653,7 +2653,7 @@ let test_keeper_stream_bridge_preserves_typed_media_source () =
   in
   let expected_ref =
     "/api/v1/media/"
-    ^ Agent_core_sha256.(digest_string ("image/png\000" ^ raw_media) |> to_hex)
+    ^ Agent_core_sha256.(digest_string raw_media |> to_hex)
   in
   match events with
   | [
@@ -2857,11 +2857,11 @@ let bridge_media_refs events =
 
 let persisted_png_ref raw =
   "/api/v1/media/"
-  ^ Agent_core_sha256.(digest_string ("image/png\000" ^ raw) |> to_hex)
+  ^ Agent_core_sha256.(digest_string raw |> to_hex)
 
 let test_keeper_stream_bridge_joins_many_media_chunks_in_order () =
   let open Agent_core.Types in
-  let raw_media = String.init 768 (fun i -> Char.chr (i * 7 mod 256)) in
+  let raw_media = "\x89PNG\r\n\x1a\n" ^ String.init 760 (fun i -> Char.chr (i * 7 mod 256)) in
   let encoded = Base64.encode_string raw_media in
   let chunks = List.init (String.length encoded / 4) (fun i -> Llm_provider.Types.Base64 (String.sub encoded (i * 4) 4)) in
   let events =
@@ -2903,7 +2903,7 @@ let test_keeper_stream_bridge_rejects_last_media_chunk_over_the_cap () =
 
 let test_keeper_stream_bridge_rejects_media_carrier_change () =
   let open Agent_core.Types in
-  let raw_media = "first carrier" in
+  let raw_media = "\x89PNG\r\n\x1a\nfirst carrier" in
   let events =
     translate_agent_core_stream_events
       (bridge_media_deltas ~index:0
@@ -2960,7 +2960,7 @@ let test_keeper_stream_bridge_masks_media_write_failure_reason () =
                 delta =
                   MediaDelta
                     { media_type = "image/png";
-                      source = Base64 (Base64.encode_string "image") } };
+                      source = Base64 (Base64.encode_string "\x89PNG\r\n\x1a\nimage") } };
             ContentBlockStop { index = 0 } ]
       in
       match events with

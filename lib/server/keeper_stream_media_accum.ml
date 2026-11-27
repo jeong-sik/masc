@@ -123,6 +123,24 @@ let persist_failure_placeholder ~media_type ~encoded_bytes = function
         ~media_type
         ~size:(Some (Printf.sprintf "%d decoded bytes observed" size_bytes))
         ~size_bytes:(Some size_bytes)
+  | Keeper_chat_media_store.Svg_not_allowed ->
+      unavailable_attachment
+        ~name:"generated media unavailable: SVG media is not allowed"
+        ~media_type
+        ~size:(Some (Printf.sprintf "%d wire-carrier bytes observed" encoded_bytes))
+        ~size_bytes:(Some encoded_bytes)
+  | Keeper_chat_media_store.Unsupported_media_type _ ->
+      unavailable_attachment
+        ~name:"generated media unavailable: unsupported media type or unrecognized payload"
+        ~media_type
+        ~size:(Some (Printf.sprintf "%d wire-carrier bytes observed" encoded_bytes))
+        ~size_bytes:(Some encoded_bytes)
+  | Keeper_chat_media_store.Mime_mismatch _ ->
+      unavailable_attachment
+        ~name:"generated media unavailable: media type did not match payload magic bytes"
+        ~media_type
+        ~size:(Some (Printf.sprintf "%d wire-carrier bytes observed" encoded_bytes))
+        ~size_bytes:(Some encoded_bytes)
   | Keeper_chat_media_store.Write_failed _ ->
       unavailable_attachment
         ~name:"generated media unavailable: storage write failed"
@@ -137,9 +155,9 @@ let persisted_block ~media_type media_ref =
         via = None; size = None; data = None; mime_type = Some media_type;
         size_bytes = None; kind = None } in
   match Keeper_chat_media_store.category_of_media_type media_type with
-  | Keeper_chat_media_store.Image ->
+  | Some Keeper_chat_media_store.Image ->
       Keeper_chat_blocks.Image { src = media_ref; cap = None; mime_type = Some media_type }
-  | Keeper_chat_media_store.Audio ->
+  | Some Keeper_chat_media_store.Audio ->
       Keeper_chat_blocks.Voice
         { secs = None;
           wave = None;
@@ -148,8 +166,8 @@ let persisted_block ~media_type media_ref =
           transcript = None;
           src = Some media_ref
         }
-  | Keeper_chat_media_store.Midi -> attachment "generated.mid"
-  | Keeper_chat_media_store.Document | Keeper_chat_media_store.Other ->
+  | Some Keeper_chat_media_store.Midi -> attachment "generated.mid"
+  | Some Keeper_chat_media_store.Document | None ->
       attachment generic_media_label
 
 let completed_to_chat_block ~base_dir = function

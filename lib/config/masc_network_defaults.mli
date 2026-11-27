@@ -144,9 +144,13 @@ val voice_audio_path : string -> string
     {!voice_audio_path_prefix} followed by [token]. Callers that hand out an
     absolute URL prepend their own base. *)
 
+val media_upload_path : string
+(** ["/api/v1/media"] — the authenticated raw-binary upload route for
+    workspace media. *)
+
 val media_path_prefix : string
 (** ["/api/v1/media/"] — the prefix of the authenticated route serving
-    model-generated retained media by SHA-256 content token. *)
+    content-addressed workspace media by SHA-256 hex digest. *)
 
 val media_path : string -> string
 (** [media_path token] is {!media_path_prefix} followed by [token]. *)

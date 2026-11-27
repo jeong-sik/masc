@@ -1,278 +1,732 @@
-(** Keeper_chat_media_store — content-addressed store for model-generated media.
+(** Keeper_chat_media_store — content-addressed workspace media store.
 
-    model-generated media (image / audio / document) streamed by AGENT_CORE as
-    [MediaDelta { media_type; source }] is persisted here and surfaced in keeper chat
-    by URL token, instead of being reduced to a byte count at the bridge. This
-    generalizes the voice-clip token/serve pattern
-    ([/api/v1/voice/audio/<token>]) to an arbitrary [media_type].
+    Files live under [<masc_dir>/media/] as [<sha256>.<ext>], where [<sha256>]
+    is the lowercase hex SHA-256 of the raw payload bytes and [<ext>] is derived
+    from the magic-byte-verified closed {!media_mime} variant. Served by
+    [GET /api/v1/media/<sha256>] behind read auth and uploaded via
+    [POST /api/v1/media] behind write auth.
 
-    Files live under [<masc_dir>/media/] as [<token>.<ext>], where [token] is a
-    deterministic SHA-256 hex locator derived from the media type and raw payload.
-    Served by [GET /api/v1/media/<token>] behind normal read auth. Retention is
-    enforced opportunistically on persist via [KeeperGeneratedMedia] age and
-    directory-size caps; the voice-clip TTL sweep only owns [<masc_dir>/audio]. *)
+    Writes never perform wall-clock or size-cap deletion: workspace media
+    under [<masc_dir>/media/] is currently append-only (content-deduplicated by
+    raw SHA-256) with no automatic disk reclamation until a follow-up two-pass
+    reference-aware media GC sweeper lands. *)
 
 let media_subdir = "media"
 
-type persist_error =
-  | Unsupported_source_type of Agent_core.Types.media_source_kind
-  | Invalid_base64 of string
-  | Media_too_large of { size_bytes : int; max_bytes : int }
-  | Write_failed of string
+type raster_mime =
+  | Image_png
+  | Image_jpeg
+  | Image_gif
+  | Image_webp
 
-(* Broad category of a media type, driving the keeper-chat block type used when the
-   generated media is persisted for reload. Unknown types are
-   [Other] and are stored/served opaquely rather than dropped. *)
+type media_mime =
+  | Raster of raster_mime
+  | Audio_mpeg
+  | Audio_wav
+  | Audio_ogg
+  | Audio_midi
+  | Application_pdf
+
 type media_category =
   | Image
   | Audio
   | Midi
   | Document
-  | Other
 
-(* Single source of truth for the media types the store names, serves, and
-   classifies: [ext] is the on-disk extension, [content_type] the canonical IANA
-   type served for that ext, and [category] the reload block type. Deriving
-   [ext_of_media_type] / [content_type_of_ext] / [category_of_media_type] from one
-   table avoids three parallel media-type match arms drifting apart. *)
-type known_media = {
-  media_type : string;
-  ext : string;
-  content_type : string;
-  category : media_category;
-}
+type dimensions =
+  { width : int
+  ; height : int
+  }
 
-let known_media =
-  [ { media_type = "image/png"; ext = "png"; content_type = "image/png"; category = Image }
-  ; { media_type = "image/jpeg"; ext = "jpg"; content_type = "image/jpeg"; category = Image }
-  ; { media_type = "image/jpg"; ext = "jpg"; content_type = "image/jpeg"; category = Image }
-  ; { media_type = "image/gif"; ext = "gif"; content_type = "image/gif"; category = Image }
-  ; { media_type = "image/webp"; ext = "webp"; content_type = "image/webp"; category = Image }
-  ; { media_type = "audio/mpeg"; ext = "mp3"; content_type = "audio/mpeg"; category = Audio }
-  ; { media_type = "audio/mp3"; ext = "mp3"; content_type = "audio/mpeg"; category = Audio }
-  ; { media_type = "audio/wav"; ext = "wav"; content_type = "audio/wav"; category = Audio }
-  ; { media_type = "audio/x-wav"; ext = "wav"; content_type = "audio/wav"; category = Audio }
-  ; { media_type = "audio/ogg"; ext = "ogg"; content_type = "audio/ogg"; category = Audio }
-  ; { media_type = "audio/midi"; ext = "mid"; content_type = "audio/midi"; category = Midi }
-  ; { media_type = "audio/x-midi"; ext = "mid"; content_type = "audio/midi"; category = Midi }
-  ; { media_type = "application/pdf"; ext = "pdf"; content_type = "application/pdf"; category = Document }
-  ]
+type stored_media =
+  { sha256 : string
+  ; path : string
+  ; mime : raster_mime
+  ; bytes : int
+  ; dimensions : dimensions option
+  }
 
-module String_set = Set.Make (String)
+type upload_error =
+  | Upload_empty
+  | Upload_too_large of
+      { size_bytes : int
+      ; max_bytes : int
+      }
+  | Upload_svg_not_allowed
+  | Upload_unsupported_media_type of
+      { declared : string option
+      ; sniffed : raster_mime option
+      }
+  | Upload_mime_mismatch of
+      { declared : raster_mime
+      ; sniffed : raster_mime
+      }
+  | Upload_write_failed of string
 
-let known_storage_exts =
-  let dedup_preserving_first entries =
-    entries
-    |> List.fold_left
-         (fun (seen, acc) entry ->
-            if String_set.mem entry seen then seen, acc
-            else String_set.add entry seen, entry :: acc)
-         (String_set.empty, [])
-    |> snd
-    |> List.rev
+type persist_error =
+  | Unsupported_source_type of Agent_core.Types.media_source_kind
+  | Invalid_base64 of string
+  | Media_too_large of
+      { size_bytes : int
+      ; max_bytes : int
+      }
+  | Svg_not_allowed
+  | Unsupported_media_type of
+      { declared : string
+      ; sniffed : media_mime option
+      }
+  | Mime_mismatch of
+      { declared : media_mime
+      ; sniffed : media_mime
+      }
+  | Write_failed of string
+
+let all_raster_mimes =
+  [ Image_png; Image_jpeg; Image_gif; Image_webp ]
+;;
+
+let all_media_mimes =
+  List.map (fun r -> Raster r) all_raster_mimes
+  @ [ Audio_mpeg; Audio_wav; Audio_ogg; Audio_midi; Application_pdf ]
+;;
+
+let raster_mime_to_string = function
+  | Image_png -> "image/png"
+  | Image_jpeg -> "image/jpeg"
+  | Image_gif -> "image/gif"
+  | Image_webp -> "image/webp"
+;;
+
+let media_mime_to_string = function
+  | Raster r -> raster_mime_to_string r
+  | Audio_mpeg -> "audio/mpeg"
+  | Audio_wav -> "audio/wav"
+  | Audio_ogg -> "audio/ogg"
+  | Audio_midi -> "audio/midi"
+  | Application_pdf -> "application/pdf"
+;;
+
+let ext_of_raster_mime = function
+  | Image_png -> "png"
+  | Image_jpeg -> "jpg"
+  | Image_gif -> "gif"
+  | Image_webp -> "webp"
+;;
+
+let ext_of_media_mime = function
+  | Raster r -> ext_of_raster_mime r
+  | Audio_mpeg -> "mp3"
+  | Audio_wav -> "wav"
+  | Audio_ogg -> "ogg"
+  | Audio_midi -> "mid"
+  | Application_pdf -> "pdf"
+;;
+
+let category_of_media_mime = function
+  | Raster _ -> Image
+  | Audio_mpeg | Audio_wav | Audio_ogg -> Audio
+  | Audio_midi -> Midi
+  | Application_pdf -> Document
+;;
+
+let mime_essence raw =
+  let base =
+    match String.index_opt raw ';' with
+    | Some idx -> String.sub raw 0 idx
+    | None -> raw
   in
-  let exts =
-    known_media |> List.map (fun media -> media.ext) |> dedup_preserving_first
-  in
-  if List.exists (String.equal "bin") exts then exts else exts @ [ "bin" ]
+  String.lowercase_ascii (String.trim base)
+;;
 
-let normalize s = String.lowercase_ascii (String.trim s)
+let is_svg_content_type raw =
+  String.equal (mime_essence raw) "image/svg+xml"
+;;
 
-(* [media_type] (an IANA type from the AGENT_CORE media block) -> file extension. Unknown
-   types fall back to [bin]; the content-type served is re-derived from the ext so
-   the two stay consistent. *)
-let ext_of_media_type media_type =
-  let m = normalize media_type in
-  match List.find_opt (fun k -> String.equal k.media_type m) known_media with
-  | Some k -> k.ext
-  | None -> "bin"
+let raster_mime_of_string raw =
+  match mime_essence raw with
+  | "image/png" -> Some Image_png
+  | "image/jpeg" | "image/jpg" -> Some Image_jpeg
+  | "image/gif" -> Some Image_gif
+  | "image/webp" -> Some Image_webp
+  | _ -> None
+;;
 
-let category_of_media_type media_type =
-  let m = normalize media_type in
-  match List.find_opt (fun k -> String.equal k.media_type m) known_media with
-  | Some k -> k.category
-  | None -> Other
+let media_mime_of_string raw =
+  match raster_mime_of_string raw with
+  | Some raster -> Some (Raster raster)
+  | None ->
+    (match mime_essence raw with
+     | "audio/mpeg" | "audio/mp3" -> Some Audio_mpeg
+     | "audio/wav" | "audio/x-wav" | "audio/wave" -> Some Audio_wav
+     | "audio/ogg" | "application/ogg" -> Some Audio_ogg
+     | "audio/midi" | "audio/x-midi" | "audio/mid" -> Some Audio_midi
+     | "application/pdf" -> Some Application_pdf
+     | _ -> None)
+;;
 
-(* [ext] -> canonical content-type. The first table entry for an ext wins, so
-   ["jpg"] canonicalizes to ["image/jpeg"] and ["mp3"] to ["audio/mpeg"]. *)
-let content_type_of_ext ext =
-  let e = normalize ext in
-  match List.find_opt (fun k -> String.equal k.ext e) known_media with
-  | Some k -> k.content_type
-  | None -> "application/octet-stream"
+let media_mime_of_ext ext =
+  match String.lowercase_ascii (String.trim ext) with
+  | "png" -> Some (Raster Image_png)
+  | "jpg" -> Some (Raster Image_jpeg)
+  | "gif" -> Some (Raster Image_gif)
+  | "webp" -> Some (Raster Image_webp)
+  | "mp3" -> Some Audio_mpeg
+  | "wav" -> Some Audio_wav
+  | "ogg" -> Some Audio_ogg
+  | "mid" -> Some Audio_midi
+  | "pdf" -> Some Application_pdf
+  | _ -> None
+;;
 
-let media_dir ~base_dir =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) media_subdir
-
-(* Token = lowercase SHA-256 hex (64 chars). This is only an authenticated locator,
-   not a bearer capability: the media route is read-auth gated. Include the
-   normalized media type in the digest material so identical bytes mislabeled as
-   different media types cannot create multiple files for one token. *)
-let token_of_payload ~media_type data =
-  Agent_core_sha256.(digest_string (normalize media_type ^ "\000" ^ data) |> to_hex)
-
-let media_url token = Masc_network_defaults.media_path token
-
-let token_re = Re.compile (Re.Pcre.re "^[a-f0-9]{64}$")
-
-let valid_token token =
-  Re.execp token_re token
-
-let max_raw_bytes () =
-  Env_config_keeper.KeeperGeneratedMedia.max_bytes ()
-
-let max_wire_bytes () =
-  let raw_cap = max_raw_bytes () in
-  ((raw_cap + 2) / 3 * 4) + 4096
-
-let validate_raw_size data =
-  let size_bytes = String.length data in
-  let max_bytes = max_raw_bytes () in
-  if size_bytes > max_bytes
-  then Error (size_bytes, max_bytes)
-  else Ok ()
-
-let cleanup_old_files_in_dir dir =
-  if Fs_compat.is_directory dir
-  then
-    try
-      let cutoff =
-        Time_compat.now ()
-        -. Env_config_keeper.KeeperGeneratedMedia.retention_seconds ()
-      in
-      let entries =
-        Sys.readdir dir
-        |> Array.to_list
-        |> List.filter_map (fun entry ->
-          let path = Filename.concat dir entry in
-          try
-            let stat = Unix.stat path in
-            if stat.st_kind = Unix.S_REG
-            then Some (path, stat.st_mtime, stat.st_size)
-            else None
-          with
-          | Unix.Unix_error _ | Sys_error _ -> None)
-      in
-      let by_age =
-        List.sort (fun (_, left_mtime, _) (_, right_mtime, _) ->
-          Float.compare left_mtime right_mtime)
-          entries
-      in
-      let remove path =
-        try Sys.remove path with
-        | Unix.Unix_error _ | Sys_error _ -> ()
-      in
-      let remaining =
-        List.filter
-          (fun (path, mtime, _size) ->
-            if mtime < cutoff
-            then (
-              remove path;
-              false)
-            else true)
-          by_age
-      in
-      let dir_max_bytes = Env_config_keeper.KeeperGeneratedMedia.dir_max_bytes () in
-      let total_size =
-        List.fold_left (fun acc (_, _, size) -> acc + size) 0 remaining
-      in
-      if total_size > dir_max_bytes
-      then
-        ignore
-          (List.fold_left
-             (fun acc (path, _mtime, size) ->
-               if acc <= dir_max_bytes
-               then acc
-               else (
-                 remove path;
-                 acc - size))
-             total_size
-             remaining)
-    with
-    | Sys_error _ | Unix.Unix_error _ -> ()
-
-let regular_file_exists path =
-  try (Unix.stat path).st_kind = Unix.S_REG with
-  | Sys_error _ | Unix.Unix_error _ -> false
-
-(* Resolve a token to its on-disk path by probing the extensions this module can
-   write. [bin] is last, so known content types win over the opaque fallback. *)
-let file_path_of_token ~base_dir ~token =
-  if not (valid_token token)
-  then None
-  else
-    let dir = media_dir ~base_dir in
-    List.find_map
-      (fun ext ->
-        let path = Filename.concat dir (token ^ "." ^ ext) in
-        if regular_file_exists path then Some path else None)
-      known_storage_exts
-
-let content_type_of_path path =
+let media_mime_of_path path =
   let ext = Filename.extension path in
   let ext =
     if String.length ext > 0 && Char.equal ext.[0] '.'
     then String.sub ext 1 (String.length ext - 1)
     else ext
   in
-  content_type_of_ext (String.lowercase_ascii ext)
+  media_mime_of_ext ext
+;;
 
-let persist_result ~base_dir ~media_type ~data =
-  match validate_raw_size data with
-  | Error (size_bytes, max_bytes) ->
-      Error
-        (Printf.sprintf "generated media too large: size_bytes=%d max_bytes=%d"
-           size_bytes
-           max_bytes)
-  | Ok () ->
-      let token = token_of_payload ~media_type data in
-      let ext = ext_of_media_type media_type in
-      let dir = media_dir ~base_dir in
-      let path = Filename.concat dir (token ^ "." ^ ext) in
-      let url = media_url token in
-      try
-        Fs_compat.mkdir_p dir;
-        cleanup_old_files_in_dir dir;
-        if regular_file_exists path then Ok (token, url)
+let category_of_media_type media_type =
+  Option.map category_of_media_mime (media_mime_of_string media_type)
+;;
+
+(* ---- Magic-byte sniffing & XML/SVG rejection ---- *)
+
+let has_prefix_at ~offset ~prefix s =
+  let plen = String.length prefix in
+  let slen = String.length s in
+  if offset < 0 || offset + plen > slen
+  then false
+  else
+    let rec loop i =
+      if i = plen
+      then true
+      else if Char.equal s.[offset + i] prefix.[i]
+      then loop (i + 1)
+      else false
+    in
+    loop 0
+;;
+
+let has_ascii_ci_prefix_at ~offset ~prefix s =
+  let plen = String.length prefix in
+  let slen = String.length s in
+  if offset < 0 || offset + plen > slen
+  then false
+  else
+    let rec loop i =
+      if i = plen
+      then true
+      else if Char.equal (Char.lowercase_ascii s.[offset + i]) prefix.[i]
+      then loop (i + 1)
+      else false
+    in
+    loop 0
+;;
+
+let is_ascii_ws = function
+  | ' ' | '\t' | '\r' | '\n' | '\x0c' -> true
+  | _ -> false
+;;
+
+let svg_inspection_window_bytes = 512
+
+let looks_like_svg_or_xml data =
+  let limit = min (String.length data) svg_inspection_window_bytes in
+  let start =
+    if limit >= 3 && has_prefix_at ~offset:0 ~prefix:"\xef\xbb\xbf" data
+    then 3
+    else 0
+  in
+  let rec skip_ws i =
+    if i < limit && is_ascii_ws data.[i] then skip_ws (i + 1) else i
+  in
+  let rec find_comment_end i =
+    if i + 2 >= limit
+    then None
+    else if
+      Char.equal data.[i] '-'
+      && Char.equal data.[i + 1] '-'
+      && Char.equal data.[i + 2] '>'
+    then Some (i + 3)
+    else find_comment_end (i + 1)
+  in
+  let rec inspect i =
+    let i = skip_ws i in
+    if i >= limit
+    then false
+    else if has_ascii_ci_prefix_at ~offset:i ~prefix:"<?xml" data
+    then true
+    else if has_ascii_ci_prefix_at ~offset:i ~prefix:"<svg" data
+    then
+      let next = i + 4 in
+      next >= limit
+      || is_ascii_ws data.[next]
+      || Char.equal data.[next] '>'
+      || Char.equal data.[next] '/'
+    else if has_ascii_ci_prefix_at ~offset:i ~prefix:"<!doctype" data
+    then
+      let rec has_svg_token j =
+        if j + 3 > limit
+        then false
+        else if Char.equal data.[j] '>'
+        then false
+        else if has_ascii_ci_prefix_at ~offset:j ~prefix:"svg" data
+        then true
+        else has_svg_token (j + 1)
+      in
+      has_svg_token (i + 9)
+    else if has_prefix_at ~offset:i ~prefix:"<!--" data
+    then
+      (match find_comment_end (i + 4) with
+       | Some after -> inspect after
+       | None -> false)
+    else false
+  in
+  inspect start
+;;
+
+let png_magic = "\x89PNG\r\n\x1a\n"
+
+let sniff_raster_mime data =
+  let len = String.length data in
+  if len >= 8 && has_prefix_at ~offset:0 ~prefix:png_magic data
+  then Some Image_png
+  else if
+    len >= 3
+    && Char.code data.[0] = 0xFF
+    && Char.code data.[1] = 0xD8
+    && Char.code data.[2] = 0xFF
+  then Some Image_jpeg
+  else if
+    len >= 6
+    && (has_prefix_at ~offset:0 ~prefix:"GIF87a" data
+        || has_prefix_at ~offset:0 ~prefix:"GIF89a" data)
+  then Some Image_gif
+  else if
+    len >= 12
+    && has_prefix_at ~offset:0 ~prefix:"RIFF" data
+    && has_prefix_at ~offset:8 ~prefix:"WEBP" data
+  then Some Image_webp
+  else None
+;;
+
+let is_mp3_frame_header data =
+  let len = String.length data in
+  if len < 3
+  then false
+  else
+    let b0 = Char.code data.[0] in
+    let b1 = Char.code data.[1] in
+    let b2 = Char.code data.[2] in
+    let sync = b0 = 0xFF && b1 land 0xE0 = 0xE0 in
+    let version = (b1 lsr 3) land 0x03 in
+    let layer = (b1 lsr 1) land 0x03 in
+    let bitrate_idx = (b2 lsr 4) land 0x0F in
+    let sample_rate_idx = (b2 lsr 2) land 0x03 in
+    sync && version <> 0x01 && layer <> 0x00 && bitrate_idx <> 0x0F && sample_rate_idx <> 0x03
+;;
+
+let sniff_media_mime data =
+  match sniff_raster_mime data with
+  | Some raster -> Some (Raster raster)
+  | None ->
+    let len = String.length data in
+    if
+      len >= 12
+      && has_prefix_at ~offset:0 ~prefix:"RIFF" data
+      && has_prefix_at ~offset:8 ~prefix:"WAVE" data
+    then Some Audio_wav
+    else if len >= 4 && has_prefix_at ~offset:0 ~prefix:"OggS" data
+    then Some Audio_ogg
+    else if len >= 4 && has_prefix_at ~offset:0 ~prefix:"MThd" data
+    then Some Audio_midi
+    else if len >= 5 && has_prefix_at ~offset:0 ~prefix:"%PDF-" data
+    then Some Application_pdf
+    else if (len >= 3 && has_prefix_at ~offset:0 ~prefix:"ID3" data) || is_mp3_frame_header data
+    then Some Audio_mpeg
+    else None
+;;
+
+(* ---- Pure OCaml raster dimension header parsers ---- *)
+
+let max_raster_dimension = 16_777_216
+let max_jpeg_segments = 4096
+
+let positive_dimensions ~width ~height =
+  if
+    width > 0
+    && height > 0
+    && width <= max_raster_dimension
+    && height <= max_raster_dimension
+  then Some { width; height }
+  else None
+;;
+
+let read_be_u16 s off =
+  (Char.code s.[off] lsl 8) lor Char.code s.[off + 1]
+;;
+
+let read_le_u16 s off =
+  Char.code s.[off] lor (Char.code s.[off + 1] lsl 8)
+;;
+
+let read_le_u24 s off =
+  Char.code s.[off]
+  lor (Char.code s.[off + 1] lsl 8)
+  lor (Char.code s.[off + 2] lsl 16)
+;;
+
+let read_be_u31_opt s off =
+  let b0 = Char.code s.[off] in
+  if b0 >= 128
+  then None
+  else
+    Some
+      ((b0 lsl 24)
+       lor (Char.code s.[off + 1] lsl 16)
+       lor (Char.code s.[off + 2] lsl 8)
+       lor Char.code s.[off + 3])
+;;
+
+let parse_png_dimensions data =
+  if
+    String.length data < 24
+    || not (has_prefix_at ~offset:0 ~prefix:png_magic data)
+    || not (has_prefix_at ~offset:12 ~prefix:"IHDR" data)
+  then None
+  else
+    match read_be_u31_opt data 8, read_be_u31_opt data 16, read_be_u31_opt data 20 with
+    | Some 13, Some width, Some height -> positive_dimensions ~width ~height
+    | _ -> None
+;;
+
+let parse_gif_dimensions data =
+  if
+    String.length data < 10
+    || not
+         (has_prefix_at ~offset:0 ~prefix:"GIF87a" data
+          || has_prefix_at ~offset:0 ~prefix:"GIF89a" data)
+  then None
+  else
+    let width = read_le_u16 data 6 in
+    let height = read_le_u16 data 8 in
+    positive_dimensions ~width ~height
+;;
+
+let is_jpeg_sof_marker = function
+  | 0xC0 | 0xC1 | 0xC2 | 0xC3 | 0xC5 | 0xC6 | 0xC7
+  | 0xC9 | 0xCA | 0xCB | 0xCD | 0xCE | 0xCF -> true
+  | _ -> false
+;;
+
+let parse_jpeg_dimensions data =
+  let len = String.length data in
+  if len < 4 || Char.code data.[0] <> 0xFF || Char.code data.[1] <> 0xD8
+  then None
+  else
+    let rec skip_ff i =
+      if i < len && Char.code data.[i] = 0xFF then skip_ff (i + 1) else i
+    in
+    let rec loop steps pos =
+      if steps >= max_jpeg_segments || pos + 1 >= len || Char.code data.[pos] <> 0xFF
+      then None
+      else
+        let marker_pos = skip_ff (pos + 1) in
+        if marker_pos >= len
+        then None
         else
-            (match Fs_compat.save_file_atomic path data with
-             | Ok () -> Ok (token, url)
-             | Error msg -> Error msg)
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-          Error
-            (Printf.sprintf "persist generated media: %s" (Printexc.to_string exn))
+          let marker = Char.code data.[marker_pos] in
+          let body_pos = marker_pos + 1 in
+          match marker with
+          | 0x00 | 0xD9 | 0xDA -> None
+          | 0x01 | 0xD0 | 0xD1 | 0xD2 | 0xD3 | 0xD4 | 0xD5 | 0xD6 | 0xD7 | 0xD8 ->
+            loop (steps + 1) body_pos
+          | _ ->
+            if body_pos + 2 > len
+            then None
+            else
+              let seg_len = read_be_u16 data body_pos in
+              if seg_len < 2 || body_pos + seg_len > len
+              then None
+              else if is_jpeg_sof_marker marker
+              then
+                if seg_len < 8 || body_pos + 8 > len
+                then None
+                else
+                  let height = read_be_u16 data (body_pos + 3) in
+                  let width = read_be_u16 data (body_pos + 5) in
+                  positive_dimensions ~width ~height
+              else loop (steps + 1) (body_pos + seg_len)
+    in
+    loop 0 2
+;;
+
+let parse_webp_dimensions data =
+  let len = String.length data in
+  if
+    len < 20
+    || not (has_prefix_at ~offset:0 ~prefix:"RIFF" data)
+    || not (has_prefix_at ~offset:8 ~prefix:"WEBP" data)
+  then None
+  else if has_prefix_at ~offset:12 ~prefix:"VP8 " data
+  then
+    if
+      len < 30
+      || Char.code data.[20] land 0x01 <> 0
+      || Char.code data.[23] <> 0x9D
+      || Char.code data.[24] <> 0x01
+      || Char.code data.[25] <> 0x2A
+    then None
+    else
+      let width = read_le_u16 data 26 land 0x3FFF in
+      let height = read_le_u16 data 28 land 0x3FFF in
+      positive_dimensions ~width ~height
+  else if has_prefix_at ~offset:12 ~prefix:"VP8L" data
+  then
+    if len < 25 || Char.code data.[20] <> 0x2F
+    then None
+    else
+      let b0 = Char.code data.[21] in
+      let b1 = Char.code data.[22] in
+      let b2 = Char.code data.[23] in
+      let b3 = Char.code data.[24] in
+      let width = 1 + (b0 lor ((b1 land 0x3F) lsl 8)) in
+      let height = 1 + ((b1 lsr 6) lor (b2 lsl 2) lor ((b3 land 0x0F) lsl 10)) in
+      positive_dimensions ~width ~height
+  else if has_prefix_at ~offset:12 ~prefix:"VP8X" data
+  then
+    if len < 30
+    then None
+    else
+      let width = 1 + read_le_u24 data 24 in
+      let height = 1 + read_le_u24 data 27 in
+      positive_dimensions ~width ~height
+  else None
+;;
+
+let parse_raster_dimensions mime data =
+  match mime with
+  | Image_png -> parse_png_dimensions data
+  | Image_jpeg -> parse_jpeg_dimensions data
+  | Image_gif -> parse_gif_dimensions data
+  | Image_webp -> parse_webp_dimensions data
+;;
+
+(* ---- Content addressing & durable atomic storage ---- *)
+
+let media_dir ~base_dir =
+  Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) media_subdir
+;;
+
+let sha256_of_bytes data =
+  Agent_core_sha256.(digest_string data |> to_hex)
+;;
+
+let media_url token = Masc_network_defaults.media_path token
+
+let token_re = Re.compile (Re.Pcre.re "^[a-f0-9]{64}$")
+
+let valid_token token = Re.execp token_re token
+
+let max_raw_bytes () = Env_config_keeper.KeeperGeneratedMedia.max_bytes ()
+
+let max_wire_bytes () =
+  let raw_cap = max_raw_bytes () in
+  ((raw_cap + 2) / 3 * 4) + 4096
+;;
+
+let validate_raw_size data =
+  let size_bytes = String.length data in
+  let max_bytes = max_raw_bytes () in
+  if size_bytes > max_bytes then Error (size_bytes, max_bytes) else Ok ()
+;;
+
+let regular_file_exists path =
+  try (Unix.lstat path).st_kind = Unix.S_REG with
+  | Sys_error _ | Unix.Unix_error _ -> false
+;;
+
+let resolve_token ~base_dir ~token =
+  if not (valid_token token)
+  then None
+  else
+    let dir = media_dir ~base_dir in
+    List.find_map
+      (fun mime ->
+         let path = Filename.concat dir (token ^ "." ^ ext_of_media_mime mime) in
+         if regular_file_exists path then Some (path, mime) else None)
+      all_media_mimes
+;;
+
+let file_path_of_token ~base_dir ~token =
+  Option.map fst (resolve_token ~base_dir ~token)
+;;
+
+let write_verified_media ~base_dir ~mime ~data =
+  let sha256 = sha256_of_bytes data in
+  let ext = ext_of_media_mime mime in
+  let dir = media_dir ~base_dir in
+  let file_path = Filename.concat dir (sha256 ^ "." ^ ext) in
+  let url = media_url sha256 in
+  try
+    Fs_compat.mkdir_p dir;
+    if regular_file_exists file_path
+    then Ok (sha256, url)
+    else
+      (match Fs_compat.save_file_atomic file_path data with
+       | Ok () -> Ok (sha256, url)
+       | Error msg -> Error msg)
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printf.sprintf "persist workspace media: %s" (Printexc.to_string exn))
+;;
+
+let persist_raster_upload ~base_dir ~content_type ~data =
+  let size_bytes = String.length data in
+  if size_bytes = 0
+  then Error Upload_empty
+  else
+    match validate_raw_size data with
+    | Error (size_bytes, max_bytes) ->
+      Error (Upload_too_large { size_bytes; max_bytes })
+    | Ok () ->
+      if Option.exists is_svg_content_type content_type || looks_like_svg_or_xml data
+      then Error Upload_svg_not_allowed
+      else (
+        let sniffed = sniff_raster_mime data in
+        match content_type with
+        | None -> Error (Upload_unsupported_media_type { declared = None; sniffed })
+        | Some raw_ct ->
+          (match raster_mime_of_string raw_ct with
+           | None ->
+             Error
+               (Upload_unsupported_media_type
+                  { declared = Some (mime_essence raw_ct); sniffed })
+           | Some declared ->
+             (match sniffed with
+              | None ->
+                Error
+                  (Upload_unsupported_media_type
+                     { declared = Some (raster_mime_to_string declared)
+                     ; sniffed = None
+                     })
+              | Some actual when actual <> declared ->
+                Error (Upload_mime_mismatch { declared; sniffed = actual })
+              | Some actual ->
+                (match write_verified_media ~base_dir ~mime:(Raster actual) ~data with
+                 | Error msg -> Error (Upload_write_failed msg)
+                 | Ok (sha256, path) ->
+                   Ok
+                     { sha256
+                     ; path
+                     ; mime = actual
+                     ; bytes = size_bytes
+                     ; dimensions = parse_raster_dimensions actual data
+                     }))))
+;;
+
+let upload_error_to_string = function
+  | Upload_empty -> "empty upload"
+  | Upload_too_large { size_bytes; max_bytes } ->
+    Printf.sprintf "media too large: size_bytes=%d max_bytes=%d" size_bytes max_bytes
+  | Upload_svg_not_allowed ->
+    "SVG uploads are not allowed; use raster images (PNG, JPEG, GIF, WebP)"
+  | Upload_unsupported_media_type { declared; sniffed } ->
+    Printf.sprintf
+      "unsupported media type (declared=%s, detected=%s)"
+      (Option.value declared ~default:"none")
+      (match sniffed with
+       | Some m -> raster_mime_to_string m
+       | None -> "unknown")
+  | Upload_mime_mismatch { declared; sniffed } ->
+    Printf.sprintf
+      "declared Content-Type %s does not match payload magic bytes %s"
+      (raster_mime_to_string declared)
+      (raster_mime_to_string sniffed)
+  | Upload_write_failed msg -> "failed to persist workspace media: " ^ msg
+;;
+
+let verify_media_payload ~media_type ~data =
+  if is_svg_content_type media_type || looks_like_svg_or_xml data
+  then Error Svg_not_allowed
+  else
+    let sniffed = sniff_media_mime data in
+    match media_mime_of_string media_type with
+    | None ->
+      Error (Unsupported_media_type { declared = mime_essence media_type; sniffed })
+    | Some declared ->
+      (match sniffed with
+       | None ->
+         Error
+           (Unsupported_media_type
+              { declared = media_mime_to_string declared; sniffed = None })
+       | Some actual when actual <> declared ->
+         Error (Mime_mismatch { declared; sniffed = actual })
+       | Some actual -> Ok actual)
+;;
 
 let persist_error_to_string = function
   | Unsupported_source_type source_type ->
-      Printf.sprintf "unsupported media source_type: %s"
-        (Llm_provider.Types.media_source_kind_to_string source_type)
-  | Invalid_base64 msg ->
-      "invalid base64 media payload: " ^ msg
+    Printf.sprintf
+      "unsupported media source_type: %s"
+      (Llm_provider.Types.media_source_kind_to_string source_type)
+  | Invalid_base64 msg -> "invalid base64 media payload: " ^ msg
   | Media_too_large { size_bytes; max_bytes } ->
-      Printf.sprintf "generated media too large: size_bytes=%d max_bytes=%d"
-        size_bytes
-        max_bytes
-  | Write_failed msg ->
-      "failed to persist generated media: " ^ msg
+    Printf.sprintf
+      "generated media too large: size_bytes=%d max_bytes=%d"
+      size_bytes
+      max_bytes
+  | Svg_not_allowed -> "SVG media is not allowed in workspace media store"
+  | Unsupported_media_type { declared; sniffed } ->
+    Printf.sprintf
+      "unsupported media type: declared=%s detected=%s"
+      declared
+      (match sniffed with
+       | Some m -> media_mime_to_string m
+       | None -> "unknown")
+  | Mime_mismatch { declared; sniffed } ->
+    Printf.sprintf
+      "media type mismatch: declared=%s detected=%s"
+      (media_mime_to_string declared)
+      (media_mime_to_string sniffed)
+  | Write_failed msg -> "failed to persist generated media: " ^ msg
+;;
+
+let persist_typed ~base_dir ~media_type ~data =
+  match validate_raw_size data with
+  | Error (size_bytes, max_bytes) ->
+    Error (Media_too_large { size_bytes; max_bytes })
+  | Ok () ->
+    (match verify_media_payload ~media_type ~data with
+     | Error err -> Error err
+     | Ok mime ->
+       (match write_verified_media ~base_dir ~mime ~data with
+        | Ok persisted -> Ok persisted
+        | Error msg -> Error (Write_failed msg)))
+;;
+
+let persist_result ~base_dir ~media_type ~data =
+  match persist_typed ~base_dir ~media_type ~data with
+  | Ok persisted -> Ok persisted
+  | Error err -> Error (persist_error_to_string err)
+;;
 
 let raw_data_of_source = function
-  | Llm_provider.Types.Base64 data -> (
-      match Base64.decode data with
-      | Ok raw -> Ok raw
-      | Error (`Msg msg) -> Error (Invalid_base64 msg))
+  | Llm_provider.Types.Base64 data ->
+    (match Base64.decode data with
+     | Ok raw -> Ok raw
+     | Error (`Msg msg) -> Error (Invalid_base64 msg))
   | (Llm_provider.Types.Url _ | Llm_provider.Types.File_id _) as source ->
-      Error (Unsupported_source_type (Llm_provider.Types.media_source_kind_of_source source))
+    Error
+      (Unsupported_source_type
+         (Llm_provider.Types.media_source_kind_of_source source))
+;;
 
 let persist_media_source_result ~base_dir ~media_type ~source =
   match raw_data_of_source source with
   | Error err -> Error err
-  | Ok raw ->
-      (match validate_raw_size raw with
-       | Error (size_bytes, max_bytes) ->
-           Error (Media_too_large { size_bytes; max_bytes })
-       | Ok () -> (
-           match persist_result ~base_dir ~media_type ~data:raw with
-           | Ok persisted -> Ok persisted
-           | Error msg -> Error (Write_failed msg)))
+  | Ok raw -> persist_typed ~base_dir ~media_type ~data:raw
+;;

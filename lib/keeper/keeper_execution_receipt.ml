@@ -252,8 +252,9 @@ let operator_disposition (receipt : t)
         | Keeper_official_client_session_refusal.Continuation_on_other_runtime ->
           (* A fact of this candidate alone (its client cannot carry the
              reference, or it is not the continuation's runtime): the lane walks
-             on to the next candidate, and this receipt is reached only when none
-             was left. *)
+             on to the next candidate, and this receipt is reached only when the
+             walk had none left to call (none left, or every one left inside a
+             wait its provider stated). *)
           Disp_fail_open_next_runtime, Reason_official_client_session_refused)
      | Keeper_terminal_reason.Provider_attempt_effect_fenced ->
        (* Same-turn replay stays forbidden, and the runtime lifecycle selects a

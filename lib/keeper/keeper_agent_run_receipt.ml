@@ -41,8 +41,10 @@ let provider_reached_of_observation = function
     [Provider_default] (keeper_turn_driver.ml, [lane_candidate_ids]), and that
     walk leads with [Keeper_turn_driver.resumed_head]. [run_turn] passes no
     [output_contract], so the contract is always [Provider_default] here: the
-    [Tool_verdict] slot calls [run_named] directly. The walk therefore starts
-    on the lane's own head, whatever [~runtime_id] this turn was routed to.
+    [Tool_verdict] slot calls [run_named] directly. The walk therefore covers
+    the lane's own candidates, whatever [~runtime_id] this turn was routed to.
+    It calls the lane's head first unless that head is inside a wait its
+    provider stated (RFC-provider-path-rest 6.1, K1).
 
     So the fact left to establish is whether the walk got that far, which is
     what [provider_reached] carries.

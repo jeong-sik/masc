@@ -7492,6 +7492,43 @@ let test_a_walk_ends_on_the_last_candidate_it_can_call () =
     | Ok () -> Alcotest.fail "no candidate answered")
 ;;
 
+(* The turn's outcome follows the candidate the walk called. Before, the walk
+   went on to the sibling inside its stated reset, heard the dated refusal
+   again, and the turn ended as a rest that waited on the rate-limited
+   candidate: 157 of the 157 rested cycles in the 2026-11-21..27 log. The walk
+   now ends on the rate limit, and a rate limit is a failure, not a rest
+   (RFC-provider-path-rest 6.1, K5). *)
+let test_a_walk_that_ends_on_a_rate_limit_is_a_failure_though_a_sibling_waits () =
+  with_quota_lane_rests_reset (fun () ->
+    note_shared_reset_ahead ();
+    let attempts, result =
+      recorded_walk
+        (function
+          | "other.test_model" ->
+            Error
+              (Agent_core.Error.Api
+                 (Agent_core.Retry.RateLimited { retry_after = None; message = "rate limited" }))
+          | id -> unexpected_candidate id)
+        [ "other.test_model"; "shared_a.test_model"; "shared_b.test_model" ]
+    in
+    Alcotest.(check (list string)) "the candidates inside the stated reset are not called"
+      [ "other.test_model" ] attempts;
+    match result with
+    | Error (Agent_core.Error.Api (Agent_core.Retry.RateLimited _) as error) ->
+      let route =
+        Keeper_runtime_failure_route.route_of_error
+          ~boundary:Keeper_runtime_failure_route.Agent_core_execution
+          error
+      in
+      Alcotest.(check bool) "the turn that ends on the rate limit does not rest" true
+        (Option.is_none
+           (Driver.provider_rest_of_failure
+              ~now:(Unix.gettimeofday ()) ~route ~assignment_id:"quota_lane" None))
+    | Error error ->
+      Alcotest.failf "the walk ended on another error: %s" (Agent_core.Error.to_string error)
+    | Ok () -> Alcotest.fail "no candidate answered")
+;;
+
 let test_an_overflow_outranks_the_failure_a_shortened_walk_ends_on () =
   with_quota_lane_rests_reset (fun () ->
     let attempts, result =
@@ -9479,6 +9516,8 @@ let () =
             `Quick test_a_walk_leaves_a_candidate_uncalled_inside_its_stated_retry_after;
           Alcotest.test_case "a walk ends on the last candidate it can call" `Quick
             test_a_walk_ends_on_the_last_candidate_it_can_call;
+          Alcotest.test_case "a walk that ends on a rate limit is a failure though a sibling waits"
+            `Quick test_a_walk_that_ends_on_a_rate_limit_is_a_failure_though_a_sibling_waits;
           Alcotest.test_case "an overflow outranks the failure a shortened walk ends on" `Quick
             test_an_overflow_outranks_the_failure_a_shortened_walk_ends_on;
           Alcotest.test_case "a walk that cannot retry still hands its suffix to waiting candidates"

@@ -158,9 +158,10 @@ let settle_accepted_official_client_results ~pending_result_receipts result =
 ;;
 
 (* The order [resumed_runtime_lane] fixed for the walk that resumes a hint,
-   read before pre-dispatch shaping so the request is shaped for the runtime
-   the walk dispatches first. A hint a walk recorded, or one restored from
-   disk, is [Not_resumed]. *)
+   read before pre-dispatch shaping so the request is shaped for the head of
+   that order. The walk calls that head first unless it is inside a wait its
+   provider stated (K1). A hint a walk recorded, or one restored from disk, is
+   [Not_resumed]. *)
 type resumed_order =
   | Not_resumed
   | Resumed of

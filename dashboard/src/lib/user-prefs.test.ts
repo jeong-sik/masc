@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { applyContrast, applyTheme } from './theme'
+import { applyContrast, applyTheme, CONTRAST_STORAGE_KEY } from './theme'
+import { activeContrast, activeTheme, toggleThemeMode } from '../shell/shell-state'
 import {
   DEFAULT_USER_PREFS,
   USER_PREFS_STORAGE_KEY,
@@ -178,6 +179,55 @@ describe('user-prefs store, schema clamping & DOM sync', () => {
     expect(userPrefs.value.desktopNotify.runFailed).toBe(true)
     expect(localStorage.getItem(USER_PREFS_STORAGE_KEY)).not.toBeNull()
     applyUserPrefsToDocument()
+  })
+
+  it('preserves legacy theme and high-contrast storage on first load without masc:user-prefs:v1 and syncs shell-state', () => {
+    localStorage.clear()
+    localStorage.setItem('masc-theme', 'light')
+    localStorage.setItem(CONTRAST_STORAGE_KEY, 'high')
+    document.documentElement.removeAttribute('data-theme')
+    document.documentElement.removeAttribute('data-contrast')
+    activeTheme.value = 'dark'
+    activeContrast.value = null
+
+    const dispose = initUserPrefs()
+    try {
+      expect(document.documentElement.dataset.theme).toBe('light')
+      expect(document.documentElement.dataset.contrast).toBe('high')
+      expect(localStorage.getItem('masc-theme')).toBe('light')
+      expect(localStorage.getItem(CONTRAST_STORAGE_KEY)).toBe('high')
+      expect(userPrefs.value.theme).toBe('light')
+      expect(userPrefs.value.contrast).toBe('high')
+      expect(activeTheme.value).toBe('light')
+      expect(activeContrast.value).toBe('high')
+
+      // First toggle click flips immediately without a no-op turn
+      expect(toggleThemeMode()).toBe('dark')
+      expect(document.documentElement.dataset.theme).toBeUndefined()
+      expect(activeTheme.value).toBe('dark')
+    } finally {
+      dispose()
+    }
+  })
+
+  it('honors ?theme=light and ?contrast=high URL parameters over stored defaults and syncs activeTheme', () => {
+    localStorage.setItem(
+      USER_PREFS_STORAGE_KEY,
+      JSON.stringify({ ...DEFAULT_USER_PREFS, theme: 'dark', contrast: 'normal' }),
+    )
+    const prevUrl = window.location.href
+    window.history.replaceState(null, '', '/?theme=light&contrast=high')
+    const dispose = initUserPrefs()
+    try {
+      expect(document.documentElement.dataset.theme).toBe('light')
+      expect(document.documentElement.dataset.themePreset).toBe('light')
+      expect(document.documentElement.dataset.contrast).toBe('high')
+      expect(activeTheme.value).toBe('light')
+      expect(activeContrast.value).toBe('high')
+    } finally {
+      dispose()
+      window.history.replaceState(null, '', prevUrl)
+    }
   })
 })
 

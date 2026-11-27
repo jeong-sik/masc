@@ -19,6 +19,10 @@ import {
   onThemeApplied,
   persistContrast,
   persistTheme,
+  readContrastSearchParam,
+  readLegacyStoredContrast,
+  readLegacyStoredTheme,
+  readThemeSearchParam,
   resolveBaseThemeForPreset,
   type ConcreteThemePresetId,
   type ContrastId,
@@ -326,19 +330,67 @@ export function resolveEffectiveBaseTheme(preset: ThemePreset): ThemeId {
 
 let applyingFromUserPrefs = false
 
-export function applyUserPrefsToDocument(prefs: UserPrefs = userPrefs.peek()): void {
+function readStoredUserPrefsRaw(): string | null {
+  try {
+    return typeof localStorage !== 'undefined' ? localStorage.getItem(USER_PREFS_STORAGE_KEY) : null
+  } catch {
+    return null
+  }
+}
+
+function resolveInitialUserPrefs(): {
+  readonly prefs: UserPrefs
+  readonly hasStoredPrefs: boolean
+} {
+  const urlTheme = readThemeSearchParam()
+  const urlContrast = readContrastSearchParam()
+  const raw = readStoredUserPrefsRaw()
+
+  if (raw !== null) {
+    let parsed: UserPrefs = DEFAULT_USER_PREFS
+    try {
+      parsed = sanitizeUserPrefs(JSON.parse(raw))
+    } catch {
+      parsed = DEFAULT_USER_PREFS
+    }
+    const overridden =
+      urlTheme !== null || urlContrast !== null
+        ? sanitizeUserPrefs({
+            ...parsed,
+            theme: urlTheme ?? parsed.theme,
+            contrast: urlContrast ?? parsed.contrast,
+          })
+        : parsed
+    return { prefs: overridden, hasStoredPrefs: true }
+  }
+
+  const legacyTheme = readLegacyStoredTheme()
+  const legacyContrast = readLegacyStoredContrast()
+  const seeded = sanitizeUserPrefs({
+    ...DEFAULT_USER_PREFS,
+    theme: urlTheme ?? legacyTheme ?? DEFAULT_USER_PREFS.theme,
+    contrast: urlContrast ?? legacyContrast ?? DEFAULT_USER_PREFS.contrast,
+  })
+  return { prefs: seeded, hasStoredPrefs: false }
+}
+
+export function applyUserPrefsToDocument(
+  prefs: UserPrefs = userPrefs.peek(),
+  opts?: { readonly persistLegacy?: boolean },
+): void {
   if (typeof document === 'undefined') return
   const root = document.documentElement
   const concreteTheme = resolveConcreteTheme(prefs.theme)
   const baseTheme = resolveBaseThemeForPreset(concreteTheme)
   const contrastId: ContrastId | null = prefs.contrast === 'auto' ? null : prefs.contrast
+  const persistLegacy = opts?.persistLegacy ?? true
 
   applyingFromUserPrefs = true
   try {
     applyTheme(baseTheme)
-    persistTheme(baseTheme)
+    if (persistLegacy) persistTheme(baseTheme)
     applyContrast(contrastId)
-    persistContrast(contrastId)
+    if (persistLegacy) persistContrast(contrastId)
 
     root.dataset.themePreset = concreteTheme
     root.dataset.accent = prefs.accent
@@ -447,10 +499,22 @@ export function stepUiScale(delta: number): number {
 }
 
 export function initUserPrefs(): () => void {
-  applyUserPrefsToDocument(userPrefs.peek())
+  const { prefs: initial, hasStoredPrefs } = resolveInitialUserPrefs()
+  const cur = userPrefs.peek()
+  if (
+    cur.theme !== initial.theme
+    || cur.contrast !== initial.contrast
+    || (hasStoredPrefs && JSON.stringify(cur) !== JSON.stringify(initial))
+  ) {
+    userPrefs.value = initial
+  }
 
+  let initialEffectRun = true
   const disposeEffect = effect(() => {
-    applyUserPrefsToDocument(userPrefs.value)
+    const next = userPrefs.value
+    const persistLegacy = !initialEffectRun || hasStoredPrefs
+    initialEffectRun = false
+    applyUserPrefsToDocument(next, { persistLegacy })
   })
 
   const disposeThemeSync = onThemeApplied((theme) => {

@@ -96,21 +96,44 @@ export function persistContrast(contrast: ContrastId | null): void {
   } catch { /* storage unavailable */ }
 }
 
-export function resolveInitialTheme(): ThemeId {
-  if (typeof window === 'undefined') return 'dark'
+export function readThemeSearchParam(): ThemeId | null {
+  if (typeof window === 'undefined') return null
   const fromUrl = new URLSearchParams(window.location.search).get(THEME_SEARCH_PARAM)
-  if (fromUrl !== null) {
-    const normalized = normalizeTheme(fromUrl)
-    persistTheme(normalized)
-    return normalized
-  }
+  return fromUrl !== null ? normalizeTheme(fromUrl) : null
+}
+
+export function readContrastSearchParam(): ContrastId | null {
+  if (typeof window === 'undefined') return null
+  const fromUrl = new URLSearchParams(window.location.search).get(CONTRAST_SEARCH_PARAM)
+  return fromUrl !== null ? normalizeContrast(fromUrl) : null
+}
+
+export function readLegacyStoredTheme(): ThemeId | null {
   try {
     for (const key of THEME_STORAGE_KEYS) {
       const stored = localStorage.getItem(key)
       if (stored) return normalizeTheme(stored)
     }
   } catch { /* storage unavailable */ }
-  return 'dark'
+  return null
+}
+
+export function readLegacyStoredContrast(): ContrastId | null {
+  try {
+    return normalizeContrast(localStorage.getItem(CONTRAST_STORAGE_KEY))
+  } catch {
+    return null
+  }
+}
+
+export function resolveInitialTheme(): ThemeId {
+  if (typeof window === 'undefined') return 'dark'
+  const fromUrl = readThemeSearchParam()
+  if (fromUrl !== null) {
+    persistTheme(fromUrl)
+    return fromUrl
+  }
+  return readLegacyStoredTheme() ?? 'dark'
 }
 
 export function resolveInitialContrast(): ContrastId | null {
@@ -121,9 +144,5 @@ export function resolveInitialContrast(): ContrastId | null {
     persistContrast(normalized)
     return normalized
   }
-  try {
-    return normalizeContrast(localStorage.getItem(CONTRAST_STORAGE_KEY))
-  } catch {
-    return null
-  }
+  return readLegacyStoredContrast()
 }

@@ -167,5 +167,21 @@ try {
   unknownPatch.sources[0].events = [wire(0, [0x90, 60, 90]), wire(0.05, [0xc0, 2]), wire(0.4, [0x80, 60, 40])]
   await refused(unknownPatch)
   cases++
+
+  // A copy re-sends the region's entry Program Change, selected with no bank.
+  // The new plug-in of the first copy still has its initial bank, so it renders
+  // as written, including a bank select already in the entry prefix. A repeat
+  // follows a copy that sent the bank select, so it is refused instead of
+  // selecting the program under bank 5. With the bank select at the entry, the
+  // repeat's model drops it from its touched fields; the refusal still holds.
+  for (const bankAt of [0.05, 0.1]) {
+    const laterBank = structuredClone(patched)
+    laterBank.sources[0].events = [wire(0, [0xc0, 1]), wire(bankAt, [0xb0, 0, 5]), wire(0.1, [0x90, 60, 90]), wire(0.3, [0x80, 60, 40])]
+    const once = await prepare(laterBank)
+    assert.deepEqual(once.rows[0].map(event => event.bytes), [[0xc0, 1], [0xb0, 0, 5], [0x90, 60, 90], [0x80, 60, 40]])
+    laterBank.regions[0].repeatCount = 2
+    await refused(laterBank)
+  }
+  cases++
   console.log(JSON.stringify({ passed: cases, failed: 0, scope: 'actual native VST region projection; no plug-in or device opened' }))
 } finally { await rm(root, { recursive: true, force: true }) }

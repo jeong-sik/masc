@@ -368,25 +368,67 @@ for (target, replay): (Double, [[UInt8]]) in [(0.3, [[0xc0,2],[0xc0,1],[0x90,60,
     precondition(owner.state == .playing && reviewExit == nil && reviewWire.map(\.1) == [[0x80,60,0]] + replay, "unexpected seek replay: \(reviewWire.map(\.1))")
 }
 // A note attacked before its channel's first Program Change, or under a bank
-// register the source later set, has the device's unknown initial patch.
-// Nothing may be replayed before that error.
-let unknownPatches: [[[UInt8]]] = [
-    [[0x90,60,100],[0xc0,1]],
-    [[0xc0,1],[0x90,60,100],[0xb0,0,5],[0xc0,2]],
-    [[0xc0,1],[0x90,60,100],[0xb0,32,3],[0xc0,2]],
-    [[0xc0,1],[0x90,60,100],[0xb0,66,127],[0x80,60,42],[0xb0,0,5],[0xc0,2]]
+// register the source later set, has the device's unknown initial patch. So
+// does the current Program Change when a bank register was unset at it and
+// playback has sent that register since: re-sending the Program Change would
+// select it under the later bank. C0 01, 90 3C 64, B0 00 05 once resumed as
+// bank 5 / program 1 instead of program 1 of the device's initial bank. Each
+// refusal names its kind, and nothing may be replayed before it, with or
+// without a held note.
+let unknownPatches: [(source: [[UInt8]], refusal: UnknownPatch)] = [
+    ([[0x90,60,100],[0xc0,1]], .heldBeforeFirstProgram),
+    ([[0xc0,1],[0x90,60,100],[0xb0,0,5],[0xc0,2]], .heldInitialBank(.msb)),
+    ([[0xc0,1],[0x90,60,100],[0xb0,32,3],[0xc0,2]], .heldInitialBank(.lsb)),
+    ([[0xc0,1],[0x90,60,100],[0xb0,66,127],[0x80,60,42],[0xb0,0,5],[0xc0,2]], .heldInitialBank(.msb)),
+    ([[0xc0,1],[0x90,60,100],[0xb0,0,5]], .currentInitialBank(.msb)),
+    ([[0xc0,1],[0x90,60,100],[0xb0,32,5]], .currentInitialBank(.lsb)),
+    ([[0xb0,0,4],[0xc0,1],[0x90,60,100],[0xb0,32,5]], .currentInitialBank(.lsb)),
+    ([[0xc0,1],[0x90,60,100],[0x80,60,42],[0xb0,0,5]], .currentInitialBank(.msb))
 ]
-for messages in unknownPatches {
+for (messages, expected) in unknownPatches {
+    var model = SourceChase()
+    for bytes in messages { model.observe(bytes, port: 0) }
+    do { _ = try model.bootstrap(replacing: model); preconditionFailure("unknown patch guessed for \(messages)") }
+    catch let refusal as UnknownPatch { precondition(refusal == expected, "refusal \(refusal) for \(messages)") }
     reset(0); reviewWire = []
     let owner = try wire([["seconds":0,"port":0,"bytes":messages.flatMap { $0 }]])
     owner.tick(); reviewClock = 300_000_000
     owner.receive("{\"kind\":\"pause\"}"); precondition(owner.state == .paused)
     reviewWire = []; owner.receive("{\"kind\":\"resume\"}")
-    precondition(owner.state == .stopped && reviewExit == 1 && reviewWire.isEmpty)
+    precondition(owner.state == .stopped && reviewExit == 1 && reviewWire.isEmpty, "unexpected replay: \(reviewWire.map(\.1))")
 }
+// A bank register unset at the current Program Change resumes as before when
+// playback has not set it since: the device still holds its initial value. A
+// bank known at the Program Change replays ahead of it, then the later bank.
+let unchangedBanks: [(source: [[UInt8]], replay: [[UInt8]])] = [
+    ([[0xc0,1],[0x90,60,100]], [[0xc0,1],[0x90,60,100]]),
+    ([[0xb0,32,3],[0xc0,1],[0x90,60,100],[0xb0,32,5]], [[0xb0,32,3],[0xc0,1],[0xb0,32,5],[0x90,60,100]]),
+    ([[0xb0,0,4],[0xc0,1],[0x90,60,100],[0xb0,0,5]], [[0xb0,0,4],[0xc0,1],[0xb0,0,5],[0x90,60,100]])
+]
+for (messages, replay) in unchangedBanks {
+    reset(0); reviewWire = []
+    let owner = try wire([["seconds":0,"port":0,"bytes":messages.flatMap { $0 }]])
+    owner.tick(); reviewClock = 300_000_000
+    owner.receive("{\"kind\":\"pause\"}"); precondition(owner.state == .paused)
+    reviewWire = []; owner.receive("{\"kind\":\"resume\"}")
+    precondition(owner.state == .playing && reviewExit == nil && reviewWire.map(\.1) == replay, "unexpected bank replay: \(reviewWire.map(\.1))")
+}
+// The second condition is what playback sent, not what the source holds at the
+// target. Seeking past a later bank select that playback has not reached yet
+// re-sends the Program Change to a device that still has its initial bank.
+// Once playback has sent that bank select, the same seek refuses.
+let laterBank: [[String: Any]] = [["seconds":0,"port":0,"bytes":[0xc0,1,0x90,60,100]], ["seconds":0.5,"port":0,"bytes":[0xb0,0,5]]]
+for (played, replay): (UInt64, [[UInt8]]?) in [(200_000_000, [[0xc0,1],[0xb0,0,5],[0x90,60,100]]), (600_000_000, nil)] {
+    reset(played); reviewWire = []
+    let owner = try wire(laterBank); owner.tick()
+    reviewWire = []; owner.receive("{\"kind\":\"seek\",\"seconds\":0.8}")
+    if let replay { precondition(owner.state == .playing && reviewExit == nil && reviewWire.map(\.1) == [[0x80,60,0]] + replay, "unexpected seek replay: \(reviewWire.map(\.1))") }
+    else { precondition(owner.state == .stopped && reviewExit == 1 && reviewWire.map(\.1) == [[0x80,60,0]], "unexpected seek refusal: \(reviewWire.map(\.1))") }
+}
+// Model-level reconstructions that keep succeeding. C0 01, 90 3C 64, B0 00 05
+// is no longer here: it refuses above, as the current program's unknown bank.
 for messages: [[UInt8]] in [
     [[0xc0,1],[0x90,60,100],[0xc0,2],[0xc0,1]],
-    [[0xc0,1],[0x90,60,100],[0xb0,0,5]],
     [[0xc0,1],[0x90,60,100],[0xc1,2]],
     [[0xc0,1],[0x90,60,100],[0xc0,2],[0x80,60,42]],
     [[0xc0,1],[0xb0,64,127],[0x90,60,100],[0x80,60,42],[0xc0,2],[0xb0,64,0]]
@@ -401,7 +443,7 @@ sameProgram.tick(); reviewClock = 300_000_000
 sameProgram.receive("{\"kind\":\"pause\"}"); reviewWire = []
 sameProgram.receive("{\"kind\":\"resume\"}")
 precondition(sameProgram.state == .playing && reviewWire.map(\.1) == [[0xc0,1],[0x90,60,100]])
-print("SOURCE_PROGRAM_RECONSTRUCTION_PASS: held and pedal-held notes replay under their attack patch on resume and seek, then the current patch and pending bank return; unknown initial patches refuse before replay; bank latches and released notes retained")
+print("SOURCE_PROGRAM_RECONSTRUCTION_PASS: held and pedal-held notes replay under their attack patch on resume and seek, then the current patch and pending bank return; unknown initial patches of held notes and of the current program refuse before replay by kind; an initial bank playback never changed still resumes; bank latches and released notes retained")
 var parameter = SourceChase()
 for bytes: [UInt8] in [[0xb0,101,0],[0xb0,100,0],[0xb0,6,12],[0xb0,38,0],[0xb0,96,0],[0xb0,97,0]] { parameter.observe(bytes, port: 0) }
 let parameters = try parameter.bootstrap(replacing: parameter)

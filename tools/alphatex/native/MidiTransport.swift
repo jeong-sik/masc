@@ -267,9 +267,42 @@ struct ChaseField: Hashable {
     let channel: UInt8
     let kind: Kind
 }
+// The two bank registers a Program Change applies, by controller number.
+enum BankRegister: UInt8, CaseIterable, Equatable, CustomStringConvertible {
+    case msb = 0, lsb = 32
+    var description: String {
+        switch self { case .msb: "bank MSB"; case .lsb: "bank LSB" }
+    }
+}
+// A patch that reconstruction cannot select again, because it used the
+// device's initial program or the initial value of a bank register. The sender
+// never knows those values. Each is raised before any message is sent.
+enum UnknownPatch: Error, Equatable, CustomStringConvertible {
+    // A held note was attacked before its channel's first Program Change.
+    case heldBeforeFirstProgram
+    // A held note's patch was selected while this register held its initial
+    // value, and the source has set the register since.
+    case heldInitialBank(BankRegister)
+    // The current Program Change was selected while this register held its
+    // initial value, and playback has since sent the register to the device.
+    case currentInitialBank(BankRegister)
+    var description: String {
+        switch self {
+        case .heldBeforeFirstProgram:
+            return "source state reconstruction cannot restore a held note attacked before its channel's first program change"
+        case .heldInitialBank(let register):
+            return "source state reconstruction cannot restore a held note's patch selected under an unknown initial \(register)"
+        case .currentInitialBank(let register):
+            return "source state reconstruction cannot restore the current program selected under an unknown initial \(register) that playback has since changed"
+        }
+    }
+}
 struct ChaseProgram: Equatable {
     let bankMSB: UInt8?, bankLSB: UInt8?
     let number: UInt8
+    func bank(_ register: BankRegister) -> UInt8? {
+        switch register { case .msb: bankMSB; case .lsb: bankLSB }
+    }
 }
 struct ChaseNote {
     let pitch: UInt8
@@ -295,22 +328,20 @@ struct ChaseChannel {
     mutating func prune() {
         notes.removeAll { !$0.held && sustain < 64 && !(sostenuto >= 64 && $0.captured) }
     }
+    func bank(_ register: BankRegister) -> UInt8? {
+        switch register { case .msb: bankMSB; case .lsb: bankLSB }
+    }
     // Bank selects and the Program Change that make `patch` current again. A
     // bank register the source had not set when `patch` was selected held the
     // device's unknown initial value, reproducible only while the source has
     // not set that register since. A note attacked before the channel's first
     // Program Change has the device's unknown initial program.
     func selecting(_ patch: ChaseProgram?, channel: UInt8) throws -> [[UInt8]] {
-        guard let patch else {
-            throw MidiFailure("source state reconstruction cannot restore a held note attacked before its channel's first program change")
-        }
+        guard let patch else { throw UnknownPatch.heldBeforeFirstProgram }
         var messages: [[UInt8]] = []
-        let banks: [(controller: UInt8, value: UInt8?, register: UInt8?)] = [(0, patch.bankMSB, bankMSB), (32, patch.bankLSB, bankLSB)]
-        for bank in banks {
-            if let value = bank.value { messages.append([0xb0 | channel, bank.controller, value]) }
-            else if bank.register != nil {
-                throw MidiFailure("source state reconstruction cannot restore a held note's patch selected under an unknown initial bank")
-            }
+        for register in BankRegister.allCases {
+            if let value = patch.bank(register) { messages.append([0xb0 | channel, register.rawValue, value]) }
+            else if bank(register) != nil { throw UnknownPatch.heldInitialBank(register) }
         }
         messages.append([0xc0 | channel, patch.number])
         return messages
@@ -451,6 +482,18 @@ struct SourceChase {
         }
         guard previous.touched.isSubset(of: known) else {
             throw MidiFailure("source seek cannot restore an initial channel value absent from the source prefix")
+        }
+        // A bank register unset at the current Program Change held the device's
+        // initial value, which the sender does not know. The replay re-sends that
+        // Program Change with no bank select for the register before it, so the
+        // device applies what the register holds now: still the initial value
+        // when `previous` never set it, a bank from earlier playback when it did.
+        // Refuse the second case instead of guessing the initial value.
+        for key in channels.keys.sorted() {
+            guard let program = channels[key]!.program, let device = previous.channels[key] else { continue }
+            for register in BankRegister.allCases where program.bank(register) == nil && device.bank(register) != nil {
+                throw UnknownPatch.currentInitialBank(register)
+            }
         }
         var result = channels.flatMap { key, state in state.replay.entries.map { (order: $0.order, port: key >> 8, bytes: $0.message) } }
             .sorted { $0.order < $1.order }.map { ($0.port, $0.bytes) }

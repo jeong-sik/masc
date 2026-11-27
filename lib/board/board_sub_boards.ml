@@ -105,7 +105,7 @@ let update_sub_board
       store
       ~sub_board_id
       ?name
-      ?description
+      ?(description = Keep_description)
       ?members
       ?access
       ()
@@ -137,12 +137,13 @@ let update_sub_board
            | Ok members ->
              let updated =
                { sb with
-                 (* DET-OK: omitted text fields preserve existing typed values. *)
+                 (* DET-OK: an omitted name preserves the existing value. *)
                  name = Option.value ~default:sb.name (Option.map String.trim name)
                ; description =
-                   Option.value
-                     ~default:sb.description
-                     (Option.map String.trim description)
+                   (match description with
+                    | Keep_description -> sb.description
+                    | Clear_description -> ""
+                    | Set_description text -> String.trim text)
                ; members
                (* DET-OK: omitted access keeps the existing typed policy. *)
                ; access = Option.value ~default:sb.access access

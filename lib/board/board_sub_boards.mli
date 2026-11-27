@@ -41,12 +41,13 @@ val update_sub_board :
   store ->
   sub_board_id:string ->
   ?name:string ->
-  ?description:string ->
+  ?description:sub_board_description_edit ->
   ?members:string list ->
   ?access:sub_board_access ->
   unit ->
   (sub_board, board_error) result
-(** Capture the candidate policy and its snapshot without changing memory.
+(** An omitted [description] is [Keep_description].
+    Capture the candidate policy and its snapshot without changing memory.
     Retain persistence while saving outside the state lock, then publish the
     policy under a fresh state lock only after the save succeeds. *)
 

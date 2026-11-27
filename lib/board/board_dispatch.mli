@@ -599,7 +599,7 @@ val update_sub_board :
   reader:Board_access.reader ->
   sub_board_id:string ->
   ?name:string ->
-  ?description:string ->
+  ?description:Board.sub_board_description_edit ->
   ?members:string list ->
   ?access:Board.sub_board_access ->
   unit ->

@@ -322,6 +322,10 @@ owner를 항상 포함한다.
 | PUT | `/api/v1/board/sub-boards/<id_or_slug>` | SubBoard 수정 (name?, description?, access?, members?) |
 | DELETE | `/api/v1/board/sub-boards/<id_or_slug>` | SubBoard 삭제 (소속 게시물의 hearth는 orphan 정책으로 클리어됨) |
 
+PUT과 `masc_board_sub_board_update`는 `description`을 같은 규칙으로 읽는다.
+값이 없거나 `null`이면 설명을 그대로 둔다. 빈 문자열(공백만 있는 문자열 포함)을 보내면 설명을 지운다.
+문자열이 아니면 `Validation_error`로 거절한다(HTTP 400).
+
 POST·PUT·DELETE는 `Server_route.Tool_actor`로 인증한다. `tool_name`은 각각
 `masc_board_sub_board_create`, `masc_board_sub_board_update`,
 `masc_board_sub_board_delete`다.

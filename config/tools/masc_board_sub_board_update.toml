@@ -20,7 +20,9 @@ description = "New display name"
 [[params]]
 name = "description"
 type = "string"
-description = "New description"
+description = """
+New description. An empty or whitespace-only string clears the description; \
+omit the field to keep the current one."""
 
 [[params]]
 name = "access"

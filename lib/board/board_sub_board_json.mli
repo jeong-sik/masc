@@ -19,6 +19,15 @@ val sub_board_access_field_of_yojson
 val sub_board_members_field_of_yojson
   :  Yojson.Safe.t
   -> (string list option, board_error) result
+
+(** Reads the ["description"] field of an update argument object. A missing or
+    [null] field is [Keep_description]; a string that is empty after trimming
+    is [Clear_description]; any other string is [Set_description]. A non-string
+    value is a [Validation_error]. *)
+val sub_board_description_field_of_yojson
+  :  Yojson.Safe.t
+  -> (sub_board_description_edit, board_error) result
+
 val is_valid_sub_board_slug : string -> bool
 (** [true] when [slug] is 1..64 characters matching [^[a-z0-9][a-z0-9_-]*$]. *)
 

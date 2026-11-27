@@ -561,6 +561,9 @@ val sub_board_access_field_of_yojson
 val sub_board_members_field_of_yojson
   :  Yojson.Safe.t
   -> (string list option, board_error) Result.t
+val sub_board_description_field_of_yojson
+  :  Yojson.Safe.t
+  -> (sub_board_description_edit, board_error) Result.t
 val sub_board_to_yojson : sub_board -> Yojson.Safe.t
 val sub_board_of_yojson : Yojson.Safe.t -> sub_board option
 
@@ -601,12 +604,13 @@ val delete_sub_board : store -> authorization:sub_board_deletion_authorization -
 
 (** Updates an existing sub-board by ID or slug.
     Only provided fields are changed; owner and slug are immutable.
+    An omitted [description] is [Keep_description].
     Persist an exact-source-checked candidate before publishing policy memory. *)
 val update_sub_board
   :  store
   -> sub_board_id:string
   -> ?name:string
-  -> ?description:string
+  -> ?description:sub_board_description_edit
   -> ?members:string list
   -> ?access:sub_board_access
   -> unit

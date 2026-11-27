@@ -1424,6 +1424,157 @@ let test_is_directory_kinds () =
   end
 ;;
 
+let expect_private_rows label path =
+  match Fs_compat.read_private_jsonl_rows_locked_result path with
+  | Fs_compat.Private_file_succeeded
+      (Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset }) ->
+    (rows, rows_end, end_offset)
+  | Fs_compat.Private_file_succeeded Fs_compat.Private_jsonl_rows.Rows_missing ->
+    fail (label ^ ": unexpected Rows_missing")
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure _ ->
+    fail (label ^ ": unexpected cleanup failure")
+  | Fs_compat.Private_file_failed err ->
+    fail (label ^ ": " ^ Fs_compat.Private_jsonl_rows.error_to_string err)
+  | Fs_compat.Private_file_failed_with_cleanup_failure { error; _ } ->
+    fail (label ^ ": " ^ Fs_compat.Private_jsonl_rows.error_to_string error)
+;;
+
+let test_read_fd_chunks_empty_exact_and_multi_chunk () =
+  with_tmp_dir @@ fun base ->
+  (* 1. Empty file (remaining = 0) *)
+  let empty_path = Filename.concat base "empty.jsonl" in
+  Fs_compat.save_file empty_path "";
+  let rows, rows_end, end_offset = expect_private_rows "empty" empty_path in
+  check string "empty rows" "" rows;
+  check int "empty rows_end" 0 rows_end;
+  check int "empty end_offset" 0 end_offset;
+  (* 2. Exact small file with and without trailing newline *)
+  let small_path = Filename.concat base "small.jsonl" in
+  let small_body = "{\"a\":1}\n{\"b\":2}\n" in
+  Fs_compat.save_file small_path small_body;
+  let rows, rows_end, end_offset = expect_private_rows "small" small_path in
+  check string "small rows exact" small_body rows;
+  check int "small rows_end" (String.length small_body) rows_end;
+  check int "small end_offset" (String.length small_body) end_offset;
+  let torn_path = Filename.concat base "torn.jsonl" in
+  let torn_prefix = "{\"a\":1}\n" in
+  let torn_tail = "{\"partial\":true" in
+  Fs_compat.save_file torn_path (torn_prefix ^ torn_tail);
+  let rows, rows_end, end_offset = expect_private_rows "torn" torn_path in
+  check string "torn rows keeps complete prefix" torn_prefix rows;
+  check int "torn rows_end" (String.length torn_prefix) rows_end;
+  check int "torn end_offset" (String.length torn_prefix + String.length torn_tail)
+    end_offset;
+  (* 3. Exact 64 KiB boundary *)
+  let boundary_path = Filename.concat base "exact_64k.jsonl" in
+  let boundary_body = String.make 65535 'k' ^ "\n" in
+  Fs_compat.save_file boundary_path boundary_body;
+  let rows, _, _ = expect_private_rows "exact 64k" boundary_path in
+  check int "64k len" 65536 (String.length rows);
+  check string "64k exact" boundary_body rows;
+  (* 4. Multi-chunk (>64 KiB, ~200 KiB across >3 read chunks) *)
+  let multi_path = Filename.concat base "multi_200k.jsonl" in
+  let buf = Buffer.create 210_000 in
+  for i = 0 to 3199 do
+    Buffer.add_string buf (Printf.sprintf "{\"idx\":%04d,\"pad\":\"%s\"}\n" i (String.make 40 'x'))
+  done;
+  let multi_body = Buffer.contents buf in
+  check bool "multi-chunk > 192 KiB" true (String.length multi_body > 196_608);
+  Fs_compat.save_file multi_path multi_body;
+  let rows, rows_end, end_offset = expect_private_rows "multi-chunk" multi_path in
+  check int "multi rows_end" (String.length multi_body) rows_end;
+  check int "multi end_offset" (String.length multi_body) end_offset;
+  check bool "multi bytes exact" true (String.equal multi_body rows)
+;;
+
+let test_read_fd_chunks_growing_and_shrinking_file () =
+  with_tmp_dir @@ fun base ->
+  (* Growing file: concurrent un-locked appends while [read_fd_chunks] runs
+     across a multi-chunk file, forcing spillover past initial [st_size]. *)
+  let grow_path = Filename.concat base "growing.jsonl" in
+  let line = String.make 63 'g' ^ "\n" in
+  let initial =
+    let b = Buffer.create (64 * 4096) in
+    for _ = 1 to 4096 do
+      Buffer.add_string b line
+    done;
+    Buffer.contents b
+  in
+  Fs_compat.save_file grow_path initial;
+  let grow_stop = Atomic.make false in
+  let writer =
+    Domain.spawn (fun () ->
+      let wfd = Unix.openfile grow_path [ Unix.O_WRONLY; Unix.O_APPEND ] 0o600 in
+      Fun.protect ~finally:(fun () -> Unix.close wfd) (fun () ->
+        let chunk = Bytes.of_string (String.concat "" (List.init 64 (fun _ -> line))) in
+        let rec loop n =
+          if n > 0 && not (Atomic.get grow_stop) then begin
+            ignore (Unix.write wfd chunk 0 (Bytes.length chunk) : int);
+            loop (n - 1)
+          end
+        in
+        loop 300))
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set grow_stop true;
+      Domain.join writer)
+    (fun () ->
+      for _ = 1 to 30 do
+        let rows, rows_end, end_offset = expect_private_rows "growing" grow_path in
+        check bool "growing read >= initial" true (end_offset >= String.length initial);
+        check bool "growing rows_end <= end_offset" true (rows_end <= end_offset);
+        check int "growing rows length matches rows_end" rows_end (String.length rows)
+      done);
+  let final_body = Fs_compat.load_file grow_path in
+  let rows, _, end_offset = expect_private_rows "growing final" grow_path in
+  check int "final growing size exact" (String.length final_body) end_offset;
+  check bool "final growing content exact" true (String.equal final_body rows);
+
+  (* Shrinking file: concurrent un-locked truncate from 1 MiB down to 4 KiB
+     while [read_fd_chunks] runs; every read must return an exact prefix of
+     the 1 MiB source with zero uninitialized trailing bytes. *)
+  let shrink_path = Filename.concat base "shrinking.jsonl" in
+  let sline = String.make 63 's' ^ "\n" in
+  let full_1mb =
+    let b = Buffer.create (64 * 16384) in
+    for _ = 1 to 16384 do
+      Buffer.add_string b sline
+    done;
+    Buffer.contents b
+  in
+  let full_1mb_bytes = Bytes.of_string full_1mb in
+  Fs_compat.save_file shrink_path full_1mb;
+  let shrink_stop = Atomic.make false in
+  let shrinker =
+    Domain.spawn (fun () ->
+      let len = Bytes.length full_1mb_bytes in
+      while not (Atomic.get shrink_stop) do
+        Unix.truncate shrink_path 4096;
+        Domain.cpu_relax ();
+        let wfd = Unix.openfile shrink_path [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
+        Fun.protect ~finally:(fun () -> Unix.close wfd) (fun () ->
+          let rec write_all ofs =
+            if ofs < len then
+              let n = Unix.write wfd full_1mb_bytes ofs (Int.min (len - ofs) 65536) in
+              write_all (ofs + n)
+          in
+          write_all 0)
+      done)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set shrink_stop true;
+      Domain.join shrinker)
+    (fun () ->
+      for _ = 1 to 30 do
+        let rows, rows_end, end_offset = expect_private_rows "shrinking" shrink_path in
+        check bool "shrinking end_offset <= 1 MiB" true (end_offset <= String.length full_1mb);
+        check bool "shrinking rows exact prefix of 1 MiB" true
+          (String.equal rows (String.sub full_1mb 0 rows_end))
+      done)
+;;
+
 let () =
   Eio_main.run
   @@ fun env ->
@@ -1431,7 +1582,13 @@ let () =
   Eio_guard.enable ();
   run
     "fs_compat"
-    [ ( "optional read fallback"
+    [ ( "read_fd_chunks"
+      , [ test_case "empty, exact-size, and multi-chunk >64 KiB" `Quick
+            test_read_fd_chunks_empty_exact_and_multi_chunk
+        ; test_case "growing and shrinking file under private locked reads" `Quick
+            test_read_fd_chunks_growing_and_shrinking_file
+        ] )
+    ; ( "optional read fallback"
       , List.map (fun (name, test) ->
           test_case name `Quick (with_optional_read_fs None test)) optional_read_cases )
     ; ( "optional read Eio"

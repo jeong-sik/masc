@@ -330,6 +330,142 @@ let test_a_written_value_for_a_missing_file_is_not_kept () =
   check int "once" 1 !runs
 ;;
 
+let test_hot_hits_across_many_files_reuse_kept_values () =
+  let dir = Filename.temp_dir "file_version_cache_many" "" in
+  let count = 128 in
+  let paths =
+    Array.init count (fun i -> Filename.concat dir (Printf.sprintf "doc-%03d" i))
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      Array.iter (fun p -> try Sys.remove p with Sys_error _ -> ()) paths;
+      try Sys.rmdir dir with Sys_error _ -> ())
+    (fun () ->
+      Array.iteri (fun i p -> write p (Printf.sprintf "payload-%03d" i)) paths;
+      let cache = File_version_cache.create () in
+      let runs = ref 0 in
+      let decode_path p () =
+        incr runs;
+        Ok (read p)
+      in
+      let first = Array.map (fun p -> load cache p ~decode:(decode_path p)) paths in
+      check int "cold fill decodes each file once" count !runs;
+      for _ = 1 to 10 do
+        Array.iteri
+          (fun i p ->
+            let got = load cache p ~decode:(decode_path p) in
+            check bool "hot hit returns physically identical value" true (got == first.(i)))
+          paths
+      done;
+      check int "hot hits perform zero additional decodes" count !runs;
+      replace paths.(42) "payload-042-updated";
+      check string "replaced file decodes new content" "payload-042-updated"
+        (load cache paths.(42) ~decode:(decode_path paths.(42)));
+      check int "only the replaced file re-decoded" (count + 1) !runs;
+      check bool "neighboring file still hits fast path" true
+        (load cache paths.(41) ~decode:(decode_path paths.(41)) == first.(41)))
+;;
+
+(* Concurrent readers hitting the fast path while a single serialized writer
+   replaces the file and calls [keep_written] must never displace the writer's
+   published entry. *)
+let test_concurrent_hot_hits_and_keep_written_never_displace () =
+  with_file
+  @@ fun path ->
+  write path "gen-000";
+  let cache = File_version_cache.create () in
+  let initial = load cache path ~decode:(fun () -> Ok (read path)) in
+  check string "seeded" "gen-000" initial;
+  let stop = Atomic.make false in
+  let reader_error = Atomic.make None in
+  let spawn_reader () =
+    Domain.spawn (fun () ->
+      while not (Atomic.get stop) do
+        match File_version_cache.load cache path ~decode:(fun () -> Ok (read path)) with
+        | Ok v ->
+          if not (String.starts_with ~prefix:"gen-" v) then
+            Atomic.set reader_error (Some ("unexpected value: " ^ v))
+        | Error () -> Atomic.set reader_error (Some "unexpected error")
+      done)
+  in
+  let r1 = spawn_reader () in
+  let r2 = spawn_reader () in
+  let final_payload = ref "gen-000" in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set stop true;
+      Domain.join r1;
+      Domain.join r2)
+    (fun () ->
+      for i = 1 to 200 do
+        let payload = Printf.sprintf "gen-%03d" i in
+        replace path payload;
+        File_version_cache.keep_written cache path payload;
+        final_payload := payload
+      done);
+  (match Atomic.get reader_error with
+   | None -> ()
+   | Some msg -> fail msg);
+  let decode, runs = counting_decode path in
+  let after = load cache path ~decode in
+  check string "final written value observed" !final_payload after;
+  check bool "fast path serves the exact published string" true (after == !final_payload);
+  check int "final keep_written was never displaced" 0 !runs
+;;
+
+(* Concurrent readers hitting the fast path while a writer overwrites in place
+   with a pinned mtime and calls [forget] must observe the latest value after
+   the writer finishes. *)
+let test_concurrent_hot_hits_and_in_place_forget_see_latest () =
+  with_file
+  @@ fun path ->
+  write path "v-000";
+  pin_mtime path pinned_mtime;
+  let cache = File_version_cache.create () in
+  ignore (load cache path ~decode:(fun () -> Ok (read path)) : string);
+  let stop = Atomic.make false in
+  let overwrite_in_place payload =
+    Out_channel.with_open_gen [ Open_wronly; Open_binary ] 0o600 path (fun ch ->
+      seek_out ch 0;
+      output_string ch payload)
+  in
+  let spawn_reader () =
+    Domain.spawn (fun () ->
+      while not (Atomic.get stop) do
+        ignore
+          (File_version_cache.load cache path ~decode:(fun () ->
+             let s = read path in
+             if String.length s = 5 then Ok s else Error ())
+           : (string, unit) result)
+      done)
+  in
+  let r1 = spawn_reader () in
+  let r2 = spawn_reader () in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set stop true;
+      Domain.join r1;
+      Domain.join r2)
+    (fun () ->
+      for i = 1 to 100 do
+        let payload = Printf.sprintf "v-%03d" i in
+        overwrite_in_place payload;
+        pin_mtime path pinned_mtime;
+        File_version_cache.forget cache path
+      done);
+  let decode, runs = counting_decode path in
+  check string "post-forget read observes final in-place write" "v-100"
+    (load cache path ~decode);
+  let runs_after_first = !runs in
+  check bool "at most one decode if a concurrent reader already refreshed v-100" true
+    (runs_after_first <= 1);
+  check string "subsequent read hits fast path" "v-100" (load cache path ~decode);
+  check int "cached without extra decode" runs_after_first !runs;
+  File_version_cache.forget cache path;
+  check string "explicit forget forces fresh decode" "v-100" (load cache path ~decode);
+  check int "decoded once after explicit forget" (runs_after_first + 1) !runs
+;;
+
 let () =
   run
     "file version cache"
@@ -356,6 +492,12 @@ let () =
         ; test_case "an error is not kept" `Quick test_an_error_is_not_kept
         ; test_case "a missing file is decoded every time" `Quick
             test_a_missing_file_is_decoded_every_time
+        ; test_case "hot hits across many files reuse kept values" `Quick
+            test_hot_hits_across_many_files_reuse_kept_values
+        ; test_case "concurrent hot hits and keep_written never displace" `Quick
+            test_concurrent_hot_hits_and_keep_written_never_displace
+        ; test_case "concurrent hot hits and in-place forget see latest" `Quick
+            test_concurrent_hot_hits_and_in_place_forget_see_latest
         ] )
     ; ( "keep_written"
       , [ test_case "a written value is read without decoding" `Quick

@@ -446,22 +446,58 @@ let with_cached_writer_for_testing path f =
   Fd_cache.with_writer (canonical_append_mutex_path path) (fun target ->
     f (Fd_append_whole.descriptor target))
 
-(* The rest of [fd], from its current position to its end. The buffer starts
-   at the length the file reports and one chunk serves every read, so a file
-   that does not change while it is read is copied once into the buffer and
-   once out of it. A file that grows meanwhile is still read to its end: the
-   buffer grows with it. *)
-let read_fd_chunks fd =
-  let position = Unix.lseek fd 0 Unix.SEEK_CUR in
-  let buffer = Buffer.create (Int.max 1 ((Unix.fstat fd).Unix.st_size - position)) in
+let rec read_fd_with_eintr fd buf ofs len =
+  match Unix.read fd buf ofs len with
+  | count -> count
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_fd_with_eintr fd buf ofs len
+;;
+
+let read_fd_chunks_drain fd ~buffer =
   let chunk = Bytes.create 65536 in
-  let rec read () =
-    match Unix.read fd chunk 0 (Bytes.length chunk) with
+  let rec drain () =
+    match read_fd_with_eintr fd chunk 0 (Bytes.length chunk) with
     | 0 -> Buffer.contents buffer
     | count ->
       Buffer.add_subbytes buffer chunk 0 count;
-      read ()
-    | exception Unix.Unix_error (Unix.EINTR, _, _) -> read ()
+      drain ()
   in
-  read ()
+  drain ()
+;;
+
+(* The rest of [fd], from its current position to its end. When [fstat]
+   reports positive remaining bytes, read directly into one exact-sized buffer
+   and probe EOF with a tiny minor-heap scratch buffer: unchanged files return
+   [Bytes.unsafe_to_string buf] with a single allocation and zero second copy.
+   Files that shrink return [Bytes.sub_string buf 0 ofs]; files that grow
+   beyond [remaining] (or have [remaining <= 0]) spill cleanly into a
+   growable [Buffer] until EOF. *)
+let read_fd_chunks fd =
+  let position = Unix.lseek fd 0 Unix.SEEK_CUR in
+  let remaining = (Unix.fstat fd).Unix.st_size - position in
+  let probe = Bytes.create 64 in
+  if remaining <= 0 then
+    match read_fd_with_eintr fd probe 0 (Bytes.length probe) with
+    | 0 -> ""
+    | count ->
+      let buffer = Buffer.create (Int.max 65536 count) in
+      Buffer.add_subbytes buffer probe 0 count;
+      read_fd_chunks_drain fd ~buffer
+  else
+    let buf = Bytes.create remaining in
+    let rec fill ofs =
+      if ofs = remaining then
+        match read_fd_with_eintr fd probe 0 (Bytes.length probe) with
+        | 0 -> Bytes.unsafe_to_string buf
+        | count ->
+          let buffer = Buffer.create (remaining + count + 65536) in
+          Buffer.add_bytes buffer buf;
+          Buffer.add_subbytes buffer probe 0 count;
+          read_fd_chunks_drain fd ~buffer
+      else
+        let to_read = Int.min (remaining - ofs) 1_048_576 in
+        match read_fd_with_eintr fd buf ofs to_read with
+        | 0 -> Bytes.sub_string buf 0 ofs
+        | count -> fill (ofs + count)
+    in
+    fill 0
 ;;

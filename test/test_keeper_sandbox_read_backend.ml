@@ -847,7 +847,7 @@ remote_endpoint = "fixture"
        asked for, one line per call. A test can then count the reads of one
        file. *)
     let reads_log = Filename.concat base "ssh-reads.log" in
-    let script = "#!/bin/sh\nlen=$(dd bs=1 count=8 2>/dev/null | od -An -tu1 | awk 'NR==1 {print $5*16777216 + $6*65536 + $7*256 + $8; exit}')\nframe=$(dd bs=1 count=$len 2>/dev/null)\ncommand=$(printf '%s' \"$frame\" | sed -E 's/^.*\"argv\":\\[\"[^\"]*\",\"[^\"]*\",\"([^\"]*)\".*$/\\1/' | base64 -d 2>/dev/null)\ncase \"$command\" in *'exec cat'*) echo whole;; *'head -c'*) echo prefix;; *) echo other;; esac >> "
+    let script = "#!/bin/sh\nlen=$(dd bs=1 count=8 2>/dev/null | od -An -tu1 | awk 'NR==1 {print $5*16777216 + $6*65536 + $7*256 + $8; exit}')\nframe=$(dd bs=1 count=$len 2>/dev/null)\ncommand=$(printf '%s' \"$frame\" | sed -E 's/^.*\"argv\":\\[\"[^\"]*\",\"[^\"]*\",\"([^\"]*)\".*$/\\1/' | base64 -d 2>/dev/null)\ncase \"$command\" in *'exec cat'*) echo whole;; *'head -c'*) echo prefix;; *) echo \"other:$(printf '%s' \"$command\" | head -c 80)\";; esac >> "
         ^ Filename.quote reads_log ^ "\ncat >/dev/null 2>/dev/null &\ncat "
         ^ Filename.quote endpoint_file ^ "\nprintf '%s' "
         ^ Filename.quote trailer ^ " >&2\nexit 0\n" in
@@ -868,22 +868,32 @@ remote_endpoint = "fixture"
     let body = item |> member "body" |> to_string in
     Alcotest.(check string) "endpoint image body survives snapshot" png
       (read_file (Filename.concat (Workspace.masc_dir config) body));
-    (* The file reads the reader sent since [since]. A request that reads no
-       file is left out. One read of the endpoint costs the same number of
-       requests whatever it reads, so a binary file that was read whole and
-       then again would cost more requests than the text file. *)
-    let reads_since since =
-      let lines =
-        if Sys.file_exists reads_log
-        then String.split_on_char '\n' (read_file reads_log)
-        else []
-      in
+    (* The requests the reader sent since [since], one line each: [whole],
+       [prefix], or [other] with the start of a command that is neither. A
+       request that reads no file is left out. One read of the endpoint costs
+       the same number of requests whatever it reads, so a binary file that was
+       read whole and then again would cost more requests than the text file. *)
+    let request_lines () =
+      if Sys.file_exists reads_log
+      then String.split_on_char '\n' (read_file reads_log)
+      else []
+    in
+    (* The lines logged after [before], which is the log as it stood. *)
+    let reads_since before =
       List.filteri
-        (fun index line -> index >= since && line <> "" && line <> "other")
-        lines
+        (fun index line ->
+           index >= List.length before && line <> ""
+           && not (String.starts_with ~prefix:"other" line))
+        (request_lines ())
+    in
+    let expect_reads name kind reads =
+      if reads = [] || not (List.for_all (fun read -> read = kind) reads)
+      then
+        Alcotest.fail
+          (Printf.sprintf "%s: the file reads were [%s]" name (String.concat "; " reads))
     in
     write_file endpoint_file (png ^ String.make Store.verification_evidence_max_bytes 'x');
-    let since = List.length (reads_since 0) in
+    let before = request_lines () in
     (match reader ~worker:meta.name ~relative:"render.PNG" with
      | Ok (Store.Binary_payload { data; bytes; _ }) ->
        Alcotest.(check int) "oversize endpoint image retained complete"
@@ -891,12 +901,9 @@ remote_endpoint = "fixture"
        Alcotest.(check string) "retained bytes are the whole file"
          (png ^ String.make Store.verification_evidence_max_bytes 'x') data
      | _ -> Alcotest.fail "oversize endpoint image must be retained complete");
-    let binary_reads = reads_since since in
-    Alcotest.(check bool)
-      "a binary-format path is read by the whole-file command, and by nothing else"
-      true
-      (binary_reads <> [] && List.for_all (fun read -> read = "whole") binary_reads);
-    let since = List.length (reads_since 0) in
+    let binary_reads = reads_since before in
+    expect_reads "a binary-format path" "whole" binary_reads;
+    let before = request_lines () in
     write_file endpoint_file (String.make (Store.verification_evidence_max_bytes + 1) 'x');
     (match reader ~worker:meta.name ~relative:"summary.txt" with
      | Ok (Store.Text_payload { content = text; bytes }) ->
@@ -904,11 +911,8 @@ remote_endpoint = "fixture"
          (Store.verification_evidence_max_bytes + 1) bytes;
        Alcotest.(check int) "and nothing is cut" (String.length text) bytes
      | _ -> Alcotest.fail "a text over the inline cap must be read whole");
-    let text_reads = reads_since since in
-    Alcotest.(check bool)
-      "any other path is read by the bounded command, and by nothing else"
-      true
-      (text_reads <> [] && List.for_all (fun read -> read = "prefix") text_reads);
+    let text_reads = reads_since before in
+    expect_reads "any other path" "prefix" text_reads;
     Alcotest.(check int) "a binary-format path costs one read, as a text file does"
       (List.length text_reads) (List.length binary_reads)
 

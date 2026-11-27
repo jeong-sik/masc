@@ -1484,6 +1484,27 @@ let enqueue_stimulus_if_absent_result
       |> Result.map (fun state -> state, Enqueued))
 ;;
 
+let enqueue_once_transform ~already_delivered stimulus state =
+  let sources = Keeper_event_queue.to_list (State.pending state)
+      @ List.concat_map (fun (entry : outbox_entry) -> entry.stimuli)
+          (State.transition_outbox state) in
+  let conflicts candidate =
+    String.equal candidate.Keeper_event_queue.post_id stimulus.Keeper_event_queue.post_id
+    && not (Keeper_event_queue.stimulus_identity_equal candidate stimulus) in
+  if List.exists conflicts sources then
+    Error (Printf.sprintf "conflicting durable stimulus already exists for post_id=%s"
+             stimulus.post_id)
+  else if state_accounts_for_stimulus state stimulus then
+    Ok (state, Already_present)
+  else match already_delivered () with
+    | Error _ as error -> error
+    | Ok true -> Ok (state, Already_present)
+    | Ok false ->
+      let pending = Keeper_event_queue.enqueue (State.pending state) stimulus in
+      State.with_pending_at ~admitted_at:(Unix.gettimeofday ()) pending state
+      |> Result.map (fun state -> state, Enqueued)
+;;
+
 let enqueue_stimulus_once_with
       ?confirm_snapshot
       ~already_delivered
@@ -1493,25 +1514,44 @@ let enqueue_stimulus_once_with
       stimulus
   =
   commit_transform ?confirm_snapshot ~strict_snapshot_durability:true
-    ~base_path ~keeper_name ~after_commit (fun state ->
-      let sources = Keeper_event_queue.to_list (State.pending state)
-          @ List.concat_map (fun (entry : outbox_entry) -> entry.stimuli)
-              (State.transition_outbox state) in
-      let conflicts candidate =
-        String.equal candidate.Keeper_event_queue.post_id stimulus.Keeper_event_queue.post_id
-        && not (Keeper_event_queue.stimulus_identity_equal candidate stimulus) in
-      if List.exists conflicts sources then
-        Error (Printf.sprintf "conflicting durable stimulus already exists for post_id=%s"
-                 stimulus.post_id)
-      else if state_accounts_for_stimulus state stimulus then
-        Ok (state, Already_present)
-      else match already_delivered () with
-        | Error _ as error -> error
-        | Ok true -> Ok (state, Already_present)
-        | Ok false ->
-          let pending = Keeper_event_queue.enqueue (State.pending state) stimulus in
-          State.with_pending_at ~admitted_at:(Unix.gettimeofday ()) pending state
-          |> Result.map (fun state -> state, Enqueued))
+    ~base_path ~keeper_name ~after_commit
+    (enqueue_once_transform ~already_delivered stimulus)
+;;
+
+(* The caller's work after [admit] runs inside the same owner lock as the
+   admission, so no other queue transaction for this Keeper (an ACK included)
+   lands between the durable pointer and what the caller writes next. The
+   pointer carries no evidence check: the caller's own record, written under
+   this lock, is what makes the pointer meaningful. *)
+let with_stimulus_admission ?(after_commit = fun _ -> ()) ~base_path ~keeper_name f =
+  match resolve_owner ~base_path ~keeper_name with
+  | Error _ as error -> error
+  | Ok owner ->
+    (try
+       Owner_lock.with_durable_lock owner (fun () ->
+         let lock_held = ref true in
+         let admit stimulus =
+           if !lock_held
+           then
+             commit_transform_unlocked ~strict_snapshot_durability:true owner ~after_commit
+               (enqueue_once_transform ~already_delivered:(fun () -> Ok false) stimulus)
+           else
+             Error
+               (Printf.sprintf
+                  "stimulus admission called after its owner lock was released keeper=%s post_id=%s"
+                  (keeper_name_of_owner owner)
+                  stimulus.Keeper_event_queue.post_id)
+         in
+         Fun.protect ~finally:(fun () -> lock_held := false) (fun () -> Ok (f admit)))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "event queue admission raised keeper=%s path=%s: %s"
+            (keeper_name_of_owner owner)
+            (snapshot_path_of_owner owner)
+            (Printexc.to_string exn)))
 ;;
 
 let enqueue_stimulus_once_result
@@ -1594,6 +1634,20 @@ let ack_pending_with ~before_write
 ;;
 
 let ack_pending_result = ack_pending_with ~before_write:(fun () -> ())
+;;
+
+type 'kept guarded_ack =
+  | Ack_committed
+  | Ack_withheld of 'kept
+
+let ack_pending_unless_result ?(after_commit = fun _ -> ()) ~base_path ~keeper_name ~selection
+      ~withhold () =
+  commit_transform ~base_path ~keeper_name ~after_commit (fun state ->
+    match withhold () with
+    | Error _ as error -> error
+    | Ok (Some kept) -> Ok (state, Ack_withheld kept)
+    | Ok None ->
+      State.ack_pending ~selection state |> Result.map (fun state -> state, Ack_committed))
 ;;
 
 let commit_transition_unlocked_with

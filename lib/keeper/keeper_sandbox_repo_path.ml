@@ -102,12 +102,13 @@ let location_json
 (* An ssh endpoint or a microVM guest runs the command in the Keeper's root
    there, so the location names that root: the model reuses a name the
    process can reach. The host bookkeeping cwd stays internal. *)
-let endpoint_location_json ~unresolved ~remote_workspace_root ~config ~meta ~args ~cwd =
+let endpoint_location_json ~lane ~unresolved ~remote_workspace_root ~config ~meta ~args ~cwd =
   let location = match remote_workspace_root with
     | None -> Error unresolved
     | Some playground ->
-      Keeper_remote_path.host_to_remote ~base_path:config.Workspace.base_path
+      Keeper_remote_path.host_to_remote ~lane ~base_path:config.Workspace.base_path
         ~remote_workspace_root:playground ~keeper:meta.Keeper_meta_contract.name cwd
+      |> Result.map_error Keeper_remote_path.jail_refusal_to_string
       |> Result.map (fun cwd -> location_json
         ~normalize:Keeper_remote_path.normalize_remote ~playground ~args ~cwd)
   in
@@ -120,10 +121,12 @@ let endpoint_location_json ~unresolved ~remote_workspace_root ~config ~meta ~arg
 let execution_location_json ~remote_workspace_root ~config ~meta ~args ~cwd =
   match meta.Keeper_meta_contract.sandbox_profile with
   | Keeper_types_profile_sandbox.Remote_ssh ->
-    endpoint_location_json ~unresolved:"remote_ssh_namespace_unresolved"
+    endpoint_location_json ~lane:Keeper_remote_path.Ssh_endpoint
+      ~unresolved:"remote_ssh_namespace_unresolved"
       ~remote_workspace_root ~config ~meta ~args ~cwd
   | Micro_vm ->
-    endpoint_location_json ~unresolved:"microvm_namespace_unresolved"
+    endpoint_location_json ~lane:Keeper_remote_path.Microvm_guest
+      ~unresolved:"microvm_namespace_unresolved"
       ~remote_workspace_root ~config ~meta ~args ~cwd
   | Docker ->
     let host_location = location_json ~normalize:normalize_path

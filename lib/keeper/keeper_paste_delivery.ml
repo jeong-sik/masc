@@ -119,11 +119,14 @@ let describe_status = function
    computes directly. *)
 let verify_readback ~endpoint ~config ~meta ~file_name ~expected_bytes =
   match
-    Keeper_remote_path.host_to_remote
-      ~base_path:config.Workspace.base_path
-      ~remote_workspace_root:(Keeper_sandbox_remote.workspace_root endpoint)
-      ~keeper:meta.Keeper_meta_contract.name
-      file_name
+    Result.bind (Keeper_sandbox_remote_lane.path_lane meta) (fun lane ->
+      Keeper_remote_path.host_to_remote
+        ~lane
+        ~base_path:config.Workspace.base_path
+        ~remote_workspace_root:(Keeper_sandbox_remote.workspace_root endpoint)
+        ~keeper:meta.Keeper_meta_contract.name
+        file_name
+      |> Result.map_error Keeper_remote_path.jail_refusal_to_string)
   with
   | Error message -> Error message
   | Ok remote_path ->

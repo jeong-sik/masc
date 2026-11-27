@@ -14,6 +14,10 @@ let binary_fixture () =
   let capture_limit = Common.max_process_capture_head_bytes + Common.max_process_capture_tail_bytes in
   "RIFF" ^ String.concat "" (List.init (capture_limit / String.length chunk + 1) (fun _ -> chunk))
 
+(* A guest command that prints paths under the Keeper's guest root. *)
+let guest_paths_stdout = "/masc-work/keeper-a/src\n"
+let guest_paths_stderr = "error: /masc-work/keeper-a/src/main.ml:3\n"
+
 let write_all fd content =
   let bytes = Bytes.unsafe_of_string content in
   let rec loop offset =
@@ -173,6 +177,10 @@ let stub_main () =
     write_all Unix.stderr ("\x1e{\"not\":\"a frame\"}\x1eguest-err" ^ trailer ~exit:3 ());
     exit 0
   | "die" -> exit 1
+  | "guest-paths" ->
+    write_all Unix.stdout guest_paths_stdout;
+    write_all Unix.stderr (guest_paths_stderr ^ trailer ~exit:0 ());
+    exit 0
   | "binary" ->
     write_all Unix.stdout (binary_fixture ());
     write_all Unix.stderr (trailer ~exit:0 ());
@@ -469,6 +477,32 @@ let test_binary_stdout_is_complete_and_not_rewritten () =
   check string "exact binary SHA" Agent_core_sha256.(digest_string expected |> to_hex)
     Agent_core_sha256.(digest_string stdout |> to_hex);
   check string "remote path bytes unchanged" expected stdout
+
+(* The Keeper reads its own namespace in its output, as in its cwd: a guest
+   path a command prints is one its next command can use. Captured and
+   streamed text both carry the guest's bytes. *)
+let test_text_output_keeps_guest_paths () =
+  with_eio @@ fun () ->
+  let base_path = temp_dir () in
+  let cli, _ = make_stub ~dir:base_path ~mode:"guest-paths" in
+  let runner = Keeper_sandbox_remote.runner ~timeout_sec:10. (make_state ~base_path ~cli) in
+  let streamed_stdout = Buffer.create 64 in
+  let streamed_stderr = Buffer.create 64 in
+  let status, stdout, stderr =
+    Masc_exec.Sandbox_target.status_tuple
+      (runner
+         ~on_stdout_chunk:(Some (Buffer.add_string streamed_stdout))
+         ~on_stderr_chunk:(Some (Buffer.add_string streamed_stderr))
+         ~stdin_content:(Some "in") ~argv:[ "/bin/pwd" ] ~env:[| "LANG=C" |] ~cwd:None)
+  in
+  check status_testable "exit" (Unix.WEXITED 0) status;
+  check string "captured stdout keeps the guest path" guest_paths_stdout stdout;
+  check string "streamed stdout keeps the guest path" guest_paths_stdout
+    (Buffer.contents streamed_stdout);
+  check string "captured stderr keeps the guest path" guest_paths_stderr stderr;
+  check string "streamed stderr keeps the guest path" guest_paths_stderr
+    (Buffer.contents streamed_stderr)
+;;
 
 let test_frame_exit_and_injected_env () =
   with_eio @@ fun () ->
@@ -1934,6 +1968,8 @@ let () =
           ; test_case "the outdated-shim warning names the microVM repair" `Quick
               test_the_outdated_shim_warning_names_the_microvm_repair
           ; test_case "binary transport retains complete raw bytes" `Quick test_binary_stdout_is_complete_and_not_rewritten
+          ; test_case "text output keeps guest paths" `Quick
+              test_text_output_keeps_guest_paths
           ; test_case "frame, exit and injected env" `Quick
               test_frame_exit_and_injected_env
           ; test_case "default cwd is the request root" `Quick

@@ -37,8 +37,9 @@ let confined_path_of_host_impl ~read_authority ~(config : Workspace.config) ~(me
        | Some authority -> Keeper_sandbox_remote_lane.with_read_authority_endpoint authority ~config ~meta
            (fun endpoint -> Ok (Keeper_sandbox_remote.workspace_root endpoint)))
     in
+    let* lane = Keeper_sandbox_remote_lane.path_lane meta in
     (match
-       Keeper_remote_path.host_to_remote ~base_path:config.base_path
+       Keeper_remote_path.host_to_remote ~lane ~base_path:config.base_path
          ~remote_workspace_root ~keeper:meta.name host_path
      with
      | Ok path ->
@@ -55,7 +56,7 @@ let confined_path_of_host_impl ~read_authority ~(config : Workspace.config) ~(me
        in
        (match declared with
         | Some { Exec_policy_paths.root; path } -> Ok { path; root }
-        | None -> Error refusal))
+        | None -> Error (Keeper_remote_path.jail_refusal_to_string refusal)))
   | Shared_mount ->
     let host_root = host_playground_root ~config ~meta in
     let host_norm =
@@ -230,13 +231,15 @@ let run_endpoint_command_with_status
   let open Result.Syntax in
   let host_root = host_playground_root ~config ~meta in
   let* endpoint = acquire_endpoint ~cwd:host_root in
+  let* lane = Keeper_sandbox_remote_lane.path_lane meta in
   let* cwd =
-    Keeper_remote_path.host_to_remote ~base_path:config.base_path
+    Keeper_remote_path.host_to_remote ~lane ~base_path:config.base_path
       ~remote_workspace_root:(Keeper_sandbox_remote.workspace_root endpoint)
       ~keeper:meta.name
       host_root
+    |> Result.map_error Keeper_remote_path.jail_refusal_to_string
   in
-  let stdout_mode = match max_bytes with None -> Keeper_sandbox_remote.Binary_bytes | Some _ -> Keeper_sandbox_remote.Text_paths in
+  let stdout_mode = match max_bytes with None -> Keeper_sandbox_remote.Binary_bytes | Some _ -> Keeper_sandbox_remote.Text_capture in
   let runner = Keeper_sandbox_remote.runner ~stdout_mode ~timeout_sec endpoint in
   let outcome =
     runner ~on_stdout_chunk:None ~on_stderr_chunk:None ~stdin_content:None

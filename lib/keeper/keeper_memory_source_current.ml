@@ -439,9 +439,9 @@ let read_endpoint_source ~config ~meta ~resolved =
   match Keeper_sandbox_read_backend.confined_path_of_host ~config ~meta ~host_path:resolved with
   | Error detail -> Error (Source_io_failed detail)
   | Ok confined ->
-    (* Raw bytes: the text capture rewrites the endpoint root to the host
-       path, which would hash text the file does not hold and could grow a
-       file past the limit. The command bounds its own output with head -c. *)
+    (* Raw bytes: the text capture keeps only a bounded head and tail, which
+       would hash text the file does not hold. The command bounds its own
+       output with head -c. *)
     Keeper_sandbox_read_backend.run_command_with_capture
       ~ok_exit_codes:(0 :: Keeper_sandbox_read_backend.confined_open_exits)
       ~config

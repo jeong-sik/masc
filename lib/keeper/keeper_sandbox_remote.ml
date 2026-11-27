@@ -562,16 +562,21 @@ let remote_cwd t cwd =
      Keeper_remote_path.normalize_remote). *)
   let normalized = Keeper_remote_path.normalize_remote cwd in
   let endpoint_root = Keeper_remote_path.normalize_remote t.remote_root in
-  if (match t.transport with Docker_exec _ -> true | Openssh _ | Microvm _ -> false)
-  then
+  let keeper_cwd lane =
+    if String.equal normalized endpoint_root
+    then Ok endpoint_root
+    else
+      Keeper_remote_path.host_to_remote ~lane ~base_path:t.base_path
+        ~remote_workspace_root:(workspace_root t) ~keeper:t.keeper_name cwd
+      |> Result.map_error Keeper_remote_path.jail_refusal_to_string
+  in
+  match t.transport with
+  | Docker_exec _ ->
     if Filename.is_relative cwd
     then Error "docker_observe_cwd_requires_guest_absolute_path"
     else Ok normalized
-  else if String.equal normalized endpoint_root
-  then Ok endpoint_root
-  else
-    Keeper_remote_path.host_to_remote ~base_path:t.base_path
-      ~remote_workspace_root:(workspace_root t) ~keeper:t.keeper_name cwd
+  | Openssh _ -> keeper_cwd Keeper_remote_path.Ssh_endpoint
+  | Microvm _ -> keeper_cwd Keeper_remote_path.Microvm_guest
 ;;
 
 (* A transport that failed on its own, before or instead of the shim. OpenSSH
@@ -1448,7 +1453,7 @@ module Stdio_request = struct
     { dispatch; execution }
 end
 
-type stdout_mode = Text_paths | Binary_bytes
+type stdout_mode = Text_capture | Binary_bytes
 
 (* How one request came back. [Wire_status] is the transport process's own
    status; a spent budget reads as [Process_eio.timed_out_status]. The other
@@ -1469,7 +1474,7 @@ type wire =
       ; raw_stderr : string
       }
 
-let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effect)
+let runner_for_root ?(stdout_mode = Text_capture) ?(mode = Exec_ssh_protocol.Effect)
       ?on_receipt ~request_root ~timeout_sec t =
   (* A real remote exit/signal is [Ran]; a transport that failed before or
      instead of producing one is [Transport_failed]. Every arm below that
@@ -1561,26 +1566,18 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
            Eio.Semaphore.acquire t.shared.semaphore;
            Eio.Switch.on_release sw (fun () ->
              Eio.Semaphore.release t.shared.semaphore);
-           let path_stream emit =
-             match t.transport with
-             | Docker_exec _ | Openssh _ -> emit, (fun () -> ())
-             | Microvm _ ->
-               let stream = Keeper_remote_path.stream ~base_path:t.base_path
-                 ~remote_workspace_root:(workspace_root t) ~keeper:t.keeper_name
-                 ~emit in
-               Keeper_remote_path.rewrite_stream_chunk stream,
-               (fun () -> Keeper_remote_path.finish_stream stream)
-           in
+           (* Every transport hands back the bytes the endpoint wrote: a
+              Keeper reads its own namespace in its output, as it does in its
+              cwd. *)
            let binary_capture_failure = ref None in
-           let binary_output = match stdout_mode with Binary_bytes -> Some (Buffer.create 4096) | Text_paths -> None in
-           let stdout_path_stream = match binary_output with
-             | None -> Option.map path_stream on_stdout_chunk
-             | Some buffer -> Some ((fun chunk ->
+           let binary_output = match stdout_mode with Binary_bytes -> Some (Buffer.create 4096) | Text_capture -> None in
+           let stdout_emit = match binary_output with
+             | None -> on_stdout_chunk
+             | Some buffer -> Some (fun chunk ->
                  (match !binary_capture_failure with
                   | Some _ -> ()
                   | None -> (try Buffer.add_string buffer chunk with (Out_of_memory | Invalid_argument _) as exn -> binary_capture_failure := Some exn));
-                 Option.iter (fun emit -> emit chunk) on_stdout_chunk), (fun () -> ())) in
-           let stderr_path_stream = Option.map path_stream on_stderr_chunk in
+                 Option.iter (fun emit -> emit chunk) on_stdout_chunk) in
            let payload_stderr_capture = Exec_buffer.create
                ~head_cap:Common.max_process_capture_head_bytes
                ~tail_cap:Common.max_process_capture_tail_bytes in
@@ -1600,17 +1597,10 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
              (* Preserve the finite collector's callback-error policy, but
                 only after receipt retention and the payload preview advance
                 through every byte already received in this chunk. *)
-             Option.iter (fun (emit, _) -> List.iter emit payload) stderr_path_stream
+             Option.iter (fun emit -> List.iter emit payload) on_stderr_chunk
            in
            let receive_stderr bytes =
              deliver_stderr_payload (fun () -> stream_stderr_chunk stderr_stream bytes)
-           in
-           let rewrite text =
-             match t.transport with
-             | Docker_exec _ | Openssh _ -> text
-             | Microvm _ ->
-               Keeper_remote_path.rewrite_output ~base_path:t.base_path
-                 ~remote_workspace_root:(workspace_root t) ~keeper:t.keeper_name text
            in
            let budget = local_wall_budget t timeout_sec in
            observation :=
@@ -1624,8 +1614,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                  Process_eio.run_argv_with_stdin_held_open_and_status_split
                    ~timeout_sec:budget
                    ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
-                   ?on_stdout_chunk:
-                     (Option.map fst stdout_path_stream)
+                   ?on_stdout_chunk:stdout_emit
                    ~on_stderr_chunk:receive_stderr
                    ~stdin_content:frame
                    request
@@ -1634,7 +1623,7 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
              | Guest_agent { host_socket; expected } ->
                (match
                   run_agent_socket t
-                    ?on_stdout_chunk:(Option.map fst stdout_path_stream)
+                    ?on_stdout_chunk:stdout_emit
                     ~on_stderr_chunk:receive_stderr
                     ~budget_sec:budget ~host_socket ~expected
                     (Keeper_guest_socket.Run { frame })
@@ -1659,7 +1648,6 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                   { at = Unix.gettimeofday (); failure = Transport_failed; detail = error });
              transport_failed ~failure:Transport_failed error
            | Wire_answered { ended; stdout; raw_stderr = wire_preview } ->
-           Option.iter (fun (_, finish) -> finish ()) stdout_path_stream;
            deliver_stderr_payload (fun () -> settle_stderr_head stderr_stream);
            (* Process/guest captures are previews, not a control-frame owner.
               Keep the complete unresolved suffix for receipt settlement and
@@ -1700,7 +1688,6 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
            match split_final_trailer control_tail with
            | Error detail ->
              deliver_stderr_payload (fun () -> flush_stderr_payload stderr_stream control_tail);
-             Option.iter (fun (_, finish) -> finish ()) stderr_path_stream;
              let failure, error =
                if local_timed_out
                then Local_timeout, local_timeout_error t budget
@@ -1712,13 +1699,12 @@ let runner_for_root ?(stdout_mode = Text_paths) ?(mode = Exec_ssh_protocol.Effec
                     | Wire_status _ | Wire_exit_chunk _ | Wire_timed_out -> detail)
              in
              settle (failed failure error)
-               (transport_failed ~failure ~stdout:(rewrite stdout)
-                  ~prefix_stderr:(rewrite diagnostic_stderr) error)
+               (transport_failed ~failure ~stdout
+                  ~prefix_stderr:diagnostic_stderr error)
            | Ok (streamed_payload, trailer_bytes) ->
              deliver_stderr_payload (fun () -> flush_stderr_payload stderr_stream streamed_payload);
-             Option.iter (fun (_, finish) -> finish ()) stderr_path_stream;
-             let stdout = match binary_output with Some buffer -> Buffer.contents buffer | None -> rewrite stdout in
-             let payload_stderr = rewrite (Exec_buffer.render payload_stderr_capture) in
+             let stdout = match binary_output with Some buffer -> Buffer.contents buffer | None -> stdout in
+             let payload_stderr = Exec_buffer.render payload_stderr_capture in
              let broken detail =
                let error = transport_error t detail in
                settle (failed Transport_failed error)

@@ -285,15 +285,23 @@ let handle_content_with_endpoint
                     target
                     (Keeper_alerting_path.confined_root confined)))
           else
-            (match
-               Keeper_remote_path.host_to_remote
-                 ~base_path:config.base_path
-                 ~remote_workspace_root:(Keeper_sandbox_remote.workspace_root endpoint)
-                 ~keeper:meta.name
-                 target
-             with
-             | Error message -> Error (failure ~class_:Tool_result.Policy_rejection ~target message)
-             | Ok remote_path -> Ok (Keeper_tree_target { target; remote_path; confined }))
+            (match Keeper_sandbox_remote_lane.path_lane meta with
+             | Error message ->
+               Error (failure ~class_:Tool_result.Dependency_unavailable ~target message)
+             | Ok lane ->
+               (match
+                  Keeper_remote_path.host_to_remote
+                    ~lane
+                    ~base_path:config.base_path
+                    ~remote_workspace_root:(Keeper_sandbox_remote.workspace_root endpoint)
+                    ~keeper:meta.name
+                    target
+                with
+                | Error refusal ->
+                  Error
+                    (failure ~class_:Tool_result.Policy_rejection ~target
+                       (Keeper_remote_path.jail_refusal_to_string refusal))
+                | Ok remote_path -> Ok (Keeper_tree_target { target; remote_path; confined })))
       in
       (* Only what the keeper's own tree refused may be a path under the
          endpoint's declared roots (#38593), as for Read: a name the tree

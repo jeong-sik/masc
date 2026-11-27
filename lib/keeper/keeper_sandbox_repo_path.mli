@@ -27,5 +27,7 @@ val execution_location_json :
     endpoint owns use the namespace the command runs in: the SSH endpoint's
     or the microVM guest's Keeper root. [remote_workspace_root] comes from
     the actual dispatch target; [None] on SSH or microVM means unresolved and
-    yields null paths rather than invented host coordinates. Relative argv
+    yields null paths rather than invented host coordinates. A cwd outside
+    the Keeper's tree also yields null paths, and [reason] names the lane's
+    refusal ({!Keeper_remote_path.jail_refusal_to_string}). Relative argv
     paths resolve against the effective cwd. *)

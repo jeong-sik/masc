@@ -115,6 +115,12 @@ val workspace_root :
 (** The resolved workspace used for path translation:
     [<endpoint_root>/<sanitized keeper name>]. *)
 
+val path_lane :
+  Keeper_meta_contract.keeper_meta ->
+  (Keeper_remote_path.lane, string) result
+(** The lane whose words a refused Keeper path is named in. A Docker keeper
+    has no remote lane and gets the same refusal as {!endpoint_root}. *)
+
 val declared_path_of_endpoint : Exec_ssh_endpoint.t -> string -> string option
 (** [Some p] when [path] is absolute and under one of [endpoint]'s declared
     roots ([allowed_paths], {!Exec_policy_paths.extra_root_path}); [p] is the

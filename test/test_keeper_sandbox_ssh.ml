@@ -620,10 +620,10 @@ let test_validation_refusals_keep_the_captured_endpoint_namespace () =
         (member "code" rejected |> to_string);
       check bool "an unsafe cwd is not invented" true
         (member "cwd" (member "execution_location" rejected) = `Null);
-      let reason = match Keeper_remote_path.host_to_remote
+      let reason = match Keeper_remote_path.host_to_remote ~lane:Keeper_remote_path.Ssh_endpoint
         ~base_path ~remote_workspace_root:root ~keeper:meta.name outside with
         | Ok _ -> fail "the out-of-jail fixture unexpectedly projected"
-        | Error reason -> reason in
+        | Error refusal -> Keeper_remote_path.jail_refusal_to_string refusal in
       check string "the namespace is resolved even when its cwd is refused" reason
         (member "execution_location" rejected |> member "reason" |> to_string);
       save (Filename.concat keepers "keeper-a.toml")

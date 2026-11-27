@@ -472,6 +472,23 @@ let muse_observer_flags =
 
 let muse_contributor_flags mode = [ "--contributor-mode"; mode ]
 
+(* [start] lists the installed Muse plugins with [<cli> plugins list --json]
+   before it spawns the host. A stand-in host written in Python runs behind
+   this shim, which answers that listing with no plugin. *)
+let muse_python_shim ~dir =
+  let shim = Filename.concat dir "muse-shim" in
+  Out_channel.with_open_text shim (fun oc -> output_string oc
+    {|#!/bin/sh
+if [ "$1" = plugins ]; then
+  printf '{"plugins":[]}\n'
+  exit 0
+fi
+exec python3 "$@"
+|});
+  Unix.chmod shim 0o755;
+  shim
+;;
+
 let acp_execution_of_driver driver =
   let config : Runtime_execution.acp_client =
     { driver
@@ -562,7 +579,7 @@ let test_muse_argv_and_environment () =
   in
   let argv ?native_posture ?mcp_server cfg =
     Runtime_acp_client.For_testing.build_argv ?native_posture ?mcp_server cfg
-      ~temp_gemini_dir:None
+      ~temp_gemini_dir:None ~muse_plugin_capabilities:[]
   in
   let toolset names = [ "-c"; "run.toolset=" ^ names ] in
   let trusted =
@@ -640,16 +657,22 @@ let test_muse_argv_and_environment () =
   check (option string) "PATH is kept" (Some "/usr/bin") (find_env "PATH" env)
 ;;
 
-(* [start] hands its posture and its MCP server to [build_argv]: dropping
-   either would spawn the host with a different tool list than the posture
-   allows, and the argv test above calls [build_argv] directly. A stand-in
-   host writes the arguments it was started with. *)
-let test_muse_start_spawns_the_host_with_the_posture_toolset () =
-  let cwd = Filename.temp_dir "muse-toolset-" "" in
-  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree cwd) (fun () ->
-    let script = Filename.concat cwd "host.py" and argv_file = Filename.concat cwd "argv" in
-    Out_channel.with_open_text script (fun oc -> output_string oc
-      {|import json, sys
+(* A stand-in [muse]: [plugins list] names one installed plugin and
+   [plugins inspect] one hook of it, as muse 1.4.25 prints them; started as
+   the host it writes the arguments after its first one to that file. *)
+let muse_stand_in_host ~dir =
+  let script = Filename.concat dir "muse" in
+  Out_channel.with_open_text script (fun oc -> output_string oc
+    {|#!/usr/bin/env python3
+import json, sys
+if sys.argv[1] == "plugins":
+    if sys.argv[2] == "list":
+        print(json.dumps({"plugins": [{"record": {"id": "addon", "enabled": True}}]}))
+    else:
+        capability = {"candidate": {"kind": "hook", "stable_id": "plugin:addon:hook:guard"},
+                      "status": "enabled"}
+        print(json.dumps({"record": {"id": sys.argv[3]}, "runtime_capabilities": [capability]}))
+    sys.exit(0)
 with open(sys.argv[1], "w") as out:
     json.dump(sys.argv[2:], out)
 for line in sys.stdin:
@@ -658,13 +681,29 @@ for line in sys.stdin:
         result = {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}}
         print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)
 |});
+  Unix.chmod script 0o755;
+  script
+;;
+
+let muse_stand_in_plugin_flags =
+  [ "-c"; "runtime_capabilities.plugin:addon:hook:guard.enabled=false" ]
+;;
+
+(* [start] hands its posture, its MCP server and the installed plugins'
+   capabilities to [build_argv]: dropping any of them would spawn the host
+   with a different tool list than the posture allows or with an operator
+   hook on, and the argv test above calls [build_argv] directly. *)
+let test_muse_start_spawns_the_host_with_the_posture_toolset () =
+  let cwd = Filename.temp_dir "muse-toolset-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree cwd) (fun () ->
+    let script = muse_stand_in_host ~dir:cwd and argv_file = Filename.concat cwd "argv" in
     Eio_main.run @@ fun env ->
     let clock = Eio.Stdenv.clock env in
     let proc_mgr = Runtime_acp_client.foreground_process_mgr ~clock () in
     let host_args ?(tool_names = [ "masc_status" ]) posture =
       Eio.Switch.run @@ fun sw ->
       let config = { (Runtime_acp_client.default_config ~driver:Muse_code ~cwd) with
-                     cli_path = "python3"; args = [script; argv_file] } in
+                     cli_path = script; args = [argv_file] } in
       let mcp_server =
         { Runtime_acp_client.name = "masc"
         ; url = "http://127.0.0.1:9/mcp"
@@ -681,7 +720,9 @@ for line in sys.stdin:
         |> List.map Yojson.Safe.Util.to_string
     in
     let required =
-      ("--trust-workspace" :: muse_observer_flags) @ muse_contributor_flags "off"
+      ("--trust-workspace" :: muse_observer_flags)
+      @ muse_stand_in_plugin_flags
+      @ muse_contributor_flags "off"
     in
     check (list string) "none"
       (required @ [ "-c"; {|run.toolset=["mcp__masc__*"]|} ])
@@ -741,6 +782,159 @@ for line in sys.stdin:
     check (option string) "read" (Some {|["masc_*","todo","read_file"]|})
       (host_allowlist Runtime_native_tools.Native_read);
     check (option string) "full" None (host_allowlist Runtime_native_tools.Native_full))
+;;
+
+(* A plugin list the host cannot read leaves the operator's plugins unknown,
+   so the host is not started at all. *)
+let test_muse_start_refuses_when_the_plugin_list_fails () =
+  let cwd = Filename.temp_dir "muse-plugin-list-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree cwd) (fun () ->
+    let script = Filename.concat cwd "muse" and started = Filename.concat cwd "started" in
+    Out_channel.with_open_text script (fun oc -> output_string oc
+      {|#!/usr/bin/env python3
+import sys
+if sys.argv[1] == "plugins":
+    print("plugin store is locked", file=sys.stderr)
+    sys.exit(3)
+open(sys.argv[1], "w").close()
+|});
+    Unix.chmod script 0o755;
+    Eio_main.run @@ fun env ->
+    let clock = Eio.Stdenv.clock env in
+    let proc_mgr = Runtime_acp_client.foreground_process_mgr ~clock () in
+    (Eio.Switch.run @@ fun sw ->
+     let config = { (Runtime_acp_client.default_config ~driver:Muse_code ~cwd) with
+                    cli_path = script; args = [started] } in
+     match Runtime_acp_client.start ~sw ~proc_mgr ~clock ~fs:(Eio.Stdenv.fs env) ~config
+             ~native_posture:Runtime_native_tools.Native_none () with
+     | Ok client ->
+       Runtime_acp_client.close client;
+       fail "the host started without its plugin list"
+     | Error (Runtime_acp_client.Invalid_config _) -> ()
+     | Error err -> fail (Runtime_acp_client.error_to_string err));
+    check bool "the host never ran" false (Sys.file_exists started))
+;;
+
+let test_muse_plugin_output_is_read_or_refused () =
+  let ids = Runtime_muse_plugins.plugin_ids_of_list in
+  let ids_or_reason = result (list string) string in
+  check ids_or_reason "two plugins, one of them disabled" (Ok [ "a"; "b" ])
+    (ids {|{"plugins":[{"record":{"id":"a"}},{"record":{"id":"b","enabled":false}}]}|});
+  check ids_or_reason "no plugin" (Ok []) (ids {|{"plugins":[]}|});
+  check bool "an entry without an id is refused" true
+    (Result.is_error (ids {|{"plugins":[{"record":{}}]}|}));
+  check bool "output without the list is refused" true
+    (Result.is_error (ids {|{"error":{"code":"unknown-plugin"}}|}));
+  check bool "text that is not JSON is refused" true
+    (Result.is_error (ids "plugin store is locked"));
+  let caps = Runtime_muse_plugins.capability_ids_of_inspect in
+  check ids_or_reason "hook, reminder and MCP server"
+    (Ok [ "plugin:a:hook:h"; "plugin:a:reminder:r"; "plugin:a:mcp_server:m" ])
+    (caps
+       {|{"runtime_capabilities":[
+           {"candidate":{"kind":"hook","stable_id":"plugin:a:hook:h"}},
+           {"candidate":{"kind":"reminder","stable_id":"plugin:a:reminder:r"}},
+           {"candidate":{"kind":"mcp_server","stable_id":"plugin:a:mcp_server:m"}}]}|});
+  check ids_or_reason "a plugin of skills only" (Ok []) (caps {|{"runtime_capabilities":[]}|});
+  check bool "an entry without a stable id is refused" true
+    (Result.is_error (caps {|{"runtime_capabilities":[{"candidate":{"kind":"hook"}}]}|}))
+;;
+
+(* The host refuses a [-c] key given twice, so an installed capability that is
+   also a bundled observer, or is listed twice, is switched off once. *)
+let test_muse_argv_switches_each_capability_off_once () =
+  let cfg = Runtime_acp_client.default_config ~driver:Runtime_acp_client.Muse_code ~cwd:"/tmp" in
+  check (list string) "the observers, then each installed capability once"
+    ([ "muse"; "acp"; "--trust-workspace" ]
+     @ muse_observer_flags
+     @ [ "-c"; "runtime_capabilities.plugin:addon:hook:guard.enabled=false" ]
+     @ muse_contributor_flags "off")
+    (Runtime_acp_client.For_testing.build_argv
+       ~native_posture:Runtime_native_tools.Native_full cfg ~temp_gemini_dir:None
+       ~muse_plugin_capabilities:
+         [ "plugin:addon:hook:guard"
+         ; "plugin:tbh-reminders:reminder:memory"
+         ; "plugin:addon:hook:guard"
+         ])
+;;
+
+(* The profile is what Kimi Code 2.7.3 read in experiment K1 of
+   RFC-acp-hosts-offer-only-what-the-keeper-may-use: [tools] is the allowlist
+   and [override] replaces the default profile. *)
+let test_kimi_masc_only_profile () =
+  check string "the bridge's tools only"
+    "---\n\
+     name: agent\n\
+     description: MASC Keeper host with the MASC tools only\n\
+     override: true\n\
+     tools: [\"mcp__masc__*\"]\n\
+     ---\n\
+     ${base_prompt}\n"
+    (Runtime_kimi_agent_profile.masc_only ~mcp_server_name:(Some "masc"));
+  check bool "no server, no tool" true
+    (String.split_on_char '\n' (Runtime_kimi_agent_profile.masc_only ~mcp_server_name:None)
+     |> List.mem "tools: []")
+;;
+
+(* A Kimi host at none gets the MASC-only profile in its empty folder before
+   it starts; at read its folder is the Keeper's own, so it gets none. A
+   profile already in the folder means MASC did not make the folder, so the
+   host is not started. *)
+let test_kimi_none_start_writes_the_masc_only_profile () =
+  let dir = Filename.temp_dir "kimi-profile-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree dir) (fun () ->
+    let script = Filename.concat dir "host.py" in
+    Out_channel.with_open_text script (fun oc -> output_string oc
+      {|import json, sys
+for line in sys.stdin:
+    request = json.loads(line)
+    if "id" in request:
+        result = {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}}
+        print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)
+|});
+    let profile_in cwd = Filename.concat cwd Runtime_kimi_agent_profile.file_relative_path in
+    let fresh name =
+      let cwd = Filename.concat dir name in
+      Unix.mkdir cwd 0o700;
+      cwd
+    in
+    Eio_main.run @@ fun env ->
+    let clock = Eio.Stdenv.clock env in
+    let proc_mgr = Runtime_acp_client.foreground_process_mgr ~clock () in
+    let start ~cwd posture =
+      Eio.Switch.run @@ fun sw ->
+      let config = { (Runtime_acp_client.default_config ~driver:Kimi_code ~cwd) with
+                     cli_path = "python3"; args = [script] } in
+      let mcp_server =
+        { Runtime_acp_client.name = "masc"
+        ; url = "http://127.0.0.1:9/mcp"
+        ; headers = []
+        ; tool_names = [ "masc_status" ]
+        }
+      in
+      match Runtime_acp_client.start ~sw ~proc_mgr ~clock ~fs:(Eio.Stdenv.fs env) ~config
+              ~mcp_server ~native_posture:posture () with
+      | Ok client ->
+        Runtime_acp_client.close client;
+        Ok ()
+      | Error err -> Error err
+    in
+    let none_cwd = fresh "none" in
+    (match start ~cwd:none_cwd Runtime_native_tools.Native_none with
+     | Ok () -> ()
+     | Error err -> fail (Runtime_acp_client.error_to_string err));
+    check string "none: the profile allows the bridge's tools only"
+      (Runtime_kimi_agent_profile.masc_only ~mcp_server_name:(Some "masc"))
+      (In_channel.with_open_text (profile_in none_cwd) In_channel.input_all);
+    let read_cwd = fresh "read" in
+    (match start ~cwd:read_cwd Runtime_native_tools.Native_read with
+     | Ok () -> ()
+     | Error err -> fail (Runtime_acp_client.error_to_string err));
+    check bool "read: no profile is written" false (Sys.file_exists (profile_in read_cwd));
+    match start ~cwd:none_cwd Runtime_native_tools.Native_none with
+    | Ok () -> fail "the host started in a folder that already held a profile"
+    | Error (Runtime_acp_client.Invalid_config _) -> ()
+    | Error err -> fail (Runtime_acp_client.error_to_string err))
 ;;
 
 (* base_path is the operator's checkout, so an ACP host at read or full runs
@@ -840,6 +1034,7 @@ let test_mcp_http_server_of_bridge_reads_every_field_from_the_bridge () =
   let toolset mcp_server =
     Runtime_acp_client.For_testing.build_argv
       ~native_posture:Runtime_native_tools.Native_none ~mcp_server cfg ~temp_gemini_dir:None
+      ~muse_plugin_capabilities:[]
     |> List.filter (String.starts_with ~prefix:"run.toolset=") in
   check (list string) "a bridge that lists tools reaches the Muse argv as the glob"
     [ Printf.sprintf {|run.toolset=["mcp__%s__*"]|} server.Runtime_acp_client.name ]
@@ -1129,7 +1324,7 @@ for line in sys.stdin:
     let clock = Eio.Stdenv.clock env in
     let proc_mgr = Runtime_acp_client.foreground_process_mgr ~clock () in
     let config = { (Runtime_acp_client.default_config ~driver:Muse_code ~cwd) with
-                   cli_path = "python3"; args = [script; trace] } in
+                   cli_path = muse_python_shim ~dir:cwd; args = [script; trace] } in
     let unwrap = function
       | Ok value -> value
       | Error err -> fail (Runtime_acp_client.error_to_string err) in
@@ -1385,7 +1580,7 @@ let test_build_argv_and_strict_permission_posture () =
     }
   in
   let kimi_argv =
-    Runtime_acp_client.For_testing.build_argv kimi_cfg ~temp_gemini_dir:None
+    Runtime_acp_client.For_testing.build_argv kimi_cfg ~temp_gemini_dir:None ~muse_plugin_capabilities:[]
   in
   check (list string) "kimi places --skills-dir before acp subcommand"
     [ "kimi"; "--skills-dir"; tmp_skills; "acp" ]
@@ -1396,7 +1591,7 @@ let test_build_argv_and_strict_permission_posture () =
     }
   in
   let agy_argv =
-    Runtime_acp_client.For_testing.build_argv agy_cfg ~temp_gemini_dir:(Some "/tmp/g")
+    Runtime_acp_client.For_testing.build_argv agy_cfg ~temp_gemini_dir:(Some "/tmp/g") ~muse_plugin_capabilities:[]
   in
   check (list string) "agy places --gemini-dir and skip flag after acp"
     [ "agy"; "acp"; "--gemini-dir"; "/tmp/g"; "--dangerously-skip-permissions" ]
@@ -4510,13 +4705,13 @@ let test_layer3_policy_mode_redaction_and_oauth_security () =
       Runtime_acp_client.For_testing.build_argv
         ~native_posture:Runtime_native_tools.Native_none
         kimi_cfg
-        ~temp_gemini_dir:None
+        ~temp_gemini_dir:None ~muse_plugin_capabilities:[]
     in
     let argv_read =
       Runtime_acp_client.For_testing.build_argv
         ~native_posture:Runtime_native_tools.Native_read
         kimi_cfg
-        ~temp_gemini_dir:None
+        ~temp_gemini_dir:None ~muse_plugin_capabilities:[]
     in
     check bool "Kimi suppresses --skills-dir under Native_none" false
       (List.mem "--skills-dir" argv_none);
@@ -4533,19 +4728,19 @@ let test_layer3_policy_mode_redaction_and_oauth_security () =
          (Runtime_acp_client.For_testing.build_argv
             ~native_posture:Runtime_native_tools.Native_none
             agy_skip_cfg
-            ~temp_gemini_dir:None));
+            ~temp_gemini_dir:None ~muse_plugin_capabilities:[]));
     check bool "Antigravity clamps skip-permissions under Native_read" false
       (List.mem "--dangerously-skip-permissions"
          (Runtime_acp_client.For_testing.build_argv
             ~native_posture:Runtime_native_tools.Native_read
             agy_skip_cfg
-            ~temp_gemini_dir:None));
+            ~temp_gemini_dir:None ~muse_plugin_capabilities:[]));
     check bool "Antigravity allows skip-permissions under Native_full" true
       (List.mem "--dangerously-skip-permissions"
          (Runtime_acp_client.For_testing.build_argv
             ~native_posture:Runtime_native_tools.Native_full
             agy_skip_cfg
-            ~temp_gemini_dir:None));
+            ~temp_gemini_dir:None ~muse_plugin_capabilities:[]));
     (* 4. UTF-8 safe suffix never splits multi-byte codepoints *)
     let korean = "AB한글CD" in
     check string "UTF-8 safe suffix advances past continuation bytes (max=4)" "CD"
@@ -6442,7 +6637,7 @@ let run_muse_prompt ~writes_journal ~sends_occupancy =
         in
         let cfg =
           { (Runtime_acp_client.default_config ~driver:Muse_code ~cwd:tmp) with
-            cli_path = "python3"
+            cli_path = muse_python_shim ~dir:tmp
           ; args = [ mock_script ]
           }
         in
@@ -6567,6 +6762,15 @@ let () =
             test_muse_start_spawns_the_host_with_the_posture_toolset
         ; test_case "vibe start spawns the host with the posture allowlist" `Quick
             test_vibe_start_spawns_the_host_with_the_posture_allowlist
+        ; test_case "muse start refuses when the plugin list fails" `Quick
+            test_muse_start_refuses_when_the_plugin_list_fails
+        ; test_case "muse plugin output is read or refused" `Quick
+            test_muse_plugin_output_is_read_or_refused
+        ; test_case "muse argv switches each capability off once" `Quick
+            test_muse_argv_switches_each_capability_off_once
+        ; test_case "kimi masc-only profile" `Quick test_kimi_masc_only_profile
+        ; test_case "kimi none start writes the masc-only profile" `Quick
+            test_kimi_none_start_writes_the_masc_only_profile
         ; test_case "acp read and full run in the Keeper's private folder" `Quick
             test_acp_read_and_full_run_in_the_keepers_private_folder
         ; test_case "acp read without a Keeper file stops at the sandbox field" `Quick

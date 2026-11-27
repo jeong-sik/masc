@@ -3314,12 +3314,23 @@ let muse_observer_capability_ids =
    [read] the toolset below leaves its tools out, under [full] the host
    offers them. A repeated [-c] key makes the host refuse to run ("one
    setting, one occurrence"), so an operator [args] must not repeat the
-   observer keys below. *)
-let muse_required_args =
+   observer keys below.
+   [installed] are the runtime capabilities of the plugins the operator
+   installed ({!Runtime_muse_plugins}). They are switched off the same way,
+   after the bundled observers, each id once. *)
+let muse_required_args ~installed =
+  let seen = Hashtbl.create 16 in
+  let first_time id =
+    if Hashtbl.mem seen id
+    then false
+    else (
+      Hashtbl.add seen id ();
+      true)
+  in
   "--trust-workspace"
   :: List.concat_map
        (fun id -> [ "-c"; Printf.sprintf "runtime_capabilities.%s.enabled=false" id ])
-       muse_observer_capability_ids
+       (List.filter first_time (muse_observer_capability_ids @ installed))
 ;;
 
 (* muse acp 1.4.25 reads [contributor_mode_enabled] from the operator's
@@ -3401,7 +3412,13 @@ let muse_toolset_args ?mcp_server posture =
   | Some Runtime_native_tools.Native_none | None -> restricted []
 ;;
 
-let build_argv ?native_posture ?mcp_server (config : config) ~temp_gemini_dir =
+let build_argv
+      ?native_posture
+      ?mcp_server
+      (config : config)
+      ~temp_gemini_dir
+      ~muse_plugin_capabilities
+  =
   let profile = profile_of_driver config.driver in
   let base_args = if config.args <> [] then config.args else profile.default_args in
   match config.driver with
@@ -3441,7 +3458,7 @@ let build_argv ?native_posture ?mcp_server (config : config) ~temp_gemini_dir =
   | Mistral_vibe -> config.cli_path :: base_args
   | Muse_code ->
     (config.cli_path :: base_args)
-    @ muse_required_args
+    @ muse_required_args ~installed:muse_plugin_capabilities
     @ muse_contributor_args config.contributor_mode
     @ compaction_point_args profile config.agent_compaction
     @ muse_toolset_args ?mcp_server native_posture
@@ -3520,13 +3537,6 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
         (install_client_of_driver config.driver)
         ~command:config.cli_path
     in
-    let argv =
-      build_argv
-        ?native_posture
-        ?mcp_server
-        { config with cli_path = resolved_cli_path }
-        ~temp_gemini_dir
-    in
     let* cwd_path =
       let resolved =
         match fs with
@@ -3545,6 +3555,43 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
              "Native_none ACP isolation requires ~fs or an initialized Eio filesystem to bind child cwd")
       | None, (Some (Runtime_native_tools.Native_read | Runtime_native_tools.Native_full) | None)
       | Some _, (Some _ | None) -> Ok resolved
+    in
+    (* The host loads only what the Keeper may use: a Muse host every
+       installed plugin's runtime capabilities off, a Kimi [none] host the
+       MASC tools alone. Either preparation failing refuses the start, since
+       starting anyway would load what it leaves out. *)
+    let* muse_plugin_capabilities =
+      match config.driver with
+      | Muse_code ->
+        Runtime_muse_plugins.installed_capability_ids
+          ~proc_mgr
+          ~clock
+          ?cwd:cwd_path
+          ~env
+          ~cli_path:resolved_cli_path
+          ()
+        |> Result.map_error (fun err ->
+          cleanup_gemini_dir ();
+          Invalid_config (Runtime_muse_plugins.error_to_string err))
+      | Antigravity | Kimi_code | Mistral_vibe -> Ok []
+    in
+    let* () =
+      match config.driver, native_posture with
+      | Kimi_code, Some Runtime_native_tools.Native_none ->
+        Runtime_kimi_agent_profile.write_masc_only ~cwd:config.cwd ~mcp_server_name
+        |> Result.map_error (fun detail ->
+          cleanup_gemini_dir ();
+          Invalid_config detail)
+      | Kimi_code, (Some (Runtime_native_tools.Native_read | Runtime_native_tools.Native_full) | None)
+      | (Antigravity | Mistral_vibe | Muse_code), (Some _ | None) -> Ok ()
+    in
+    let argv =
+      build_argv
+        ?native_posture
+        ?mcp_server
+        { config with cli_path = resolved_cli_path }
+        ~temp_gemini_dir
+        ~muse_plugin_capabilities
     in
     let started_at = Time_compat.now () in
     let close_promise, resolve_close = Eio.Promise.create () in

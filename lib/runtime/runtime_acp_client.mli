@@ -904,6 +904,7 @@ module For_testing : sig
     -> ?mcp_server:mcp_http_server
     -> config
     -> temp_gemini_dir:string option
+    -> muse_plugin_capabilities:string list
     -> string list
   val utf8_safe_suffix : max_bytes:int -> string -> string
   val redact_stderr_text : ?extra_secrets:string list -> string -> string

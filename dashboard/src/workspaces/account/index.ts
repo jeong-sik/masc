@@ -15,6 +15,7 @@ import type { VNode } from 'preact'
 import {
   authSession,
   bootstrapAuthSession,
+  sessionEpoch,
   type AuthSession,
 } from '../../core/auth'
 import { startObserverStream } from '../../core/observer'
@@ -116,6 +117,7 @@ function MultiAccountSignInGate({
 
 export function AccountWorkspace(props: WorkspaceViewProps): VNode {
   const session = authSession.value
+  const epoch = sessionEpoch.value
   const mobile = isMobileViewport.value
   const activeTab = props.subroute || 'profile'
 
@@ -219,14 +221,14 @@ export function AccountWorkspace(props: WorkspaceViewProps): VNode {
                 </section>
               `
             : activeTab === 'pats'
-              ? html`<${PatsTab} />`
+              ? html`<${PatsTab} key=${epoch} />`
               : activeTab === 'members'
-                ? html`<${MembersTab} />`
+                ? html`<${MembersTab} key=${epoch} />`
                 : activeTab === 'invites'
-                  ? html`<${InvitesTab} />`
+                  ? html`<${InvitesTab} key=${epoch} />`
                   : activeTab === 'allowlist'
-                    ? html`<${AllowlistTab} />`
-                    : html`<${ProfileSessionsTab} session=${session} />`}
+                    ? html`<${AllowlistTab} key=${epoch} />`
+                    : html`<${ProfileSessionsTab} key=${epoch} session=${session} />`}
         `
       })()}
     </div>

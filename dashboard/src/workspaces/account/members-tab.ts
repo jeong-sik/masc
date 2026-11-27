@@ -12,7 +12,7 @@
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
-import { currentSessionEpoch, isEpochCurrent } from '../../core/auth'
+import { currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   REVOKE_ADMIN_CAUSES,
@@ -32,10 +32,11 @@ const CAUSE_LABELS: Readonly<Record<RevokeAdminCause, string>> = Object.freeze({
 })
 
 export function MembersTab(): VNode {
+  const epoch = sessionEpoch.value
   const [members, setMembers] = useState<readonly MemberRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [busyUserId, setBusyUserId] = useState<string | null>(null)
+  const [busyUserIds, setBusyUserIds] = useState<ReadonlySet<string>>(() => new Set())
   const [revokeTargetId, setRevokeTargetId] = useState<string | null>(null)
   const [revokeCause, setRevokeCause] = useState<RevokeAdminCause | ''>('')
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
@@ -63,16 +64,27 @@ export function MembersTab(): VNode {
 
   useEffect(() => {
     mountedRef.current = true
+    setMembers([])
+    setLoadedOnce(false)
+    setError(null)
+    setBusyUserIds(new Set())
+    setRevokeTargetId(null)
+    setRevokeCause('')
+    setDeleteTargetId(null)
     void reload()
     return () => {
       mountedRef.current = false
       loadAbortRef.current?.abort()
     }
-  }, [reload])
+  }, [reload, epoch])
 
   const runAction = async (userId: string, label: string, fn: () => Promise<{ readonly ok: boolean; readonly error?: { readonly message: string } }>) => {
     const startEpoch = currentSessionEpoch()
-    setBusyUserId(userId)
+    setBusyUserIds((prev) => {
+      const next = new Set(prev)
+      next.add(userId)
+      return next
+    })
     setError(null)
     try {
       const res = await fn()
@@ -87,7 +99,14 @@ export function MembersTab(): VNode {
       setDeleteTargetId(null)
       await reload()
     } finally {
-      if (mountedRef.current) setBusyUserId(null)
+      if (mountedRef.current) {
+        setBusyUserIds((prev) => {
+          if (!prev.has(userId)) return prev
+          const next = new Set(prev)
+          next.delete(userId)
+          return next
+        })
+      }
     }
   }
 
@@ -112,7 +131,7 @@ export function MembersTab(): VNode {
           : html`
               <ul class="ap-acct-list">
                 ${members.map((member) => {
-                  const busy = busyUserId === member.userId
+                  const busy = busyUserIds.has(member.userId)
                   const revoking = revokeTargetId === member.userId
                   const deleting = deleteTargetId === member.userId
                   return html`

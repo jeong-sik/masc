@@ -208,8 +208,26 @@ type user_info_ok = {
   display_name : string option;
 }
 
+let is_form_unreserved = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '.' | '_' | '~' -> true
+  | _ -> false
+
+(* Percent-encode every byte outside RFC 3986 unreserved characters so
+   application/x-www-form-urlencoded bodies never turn base64 '+', '/', or '='
+   in Slack pagination cursors into spaces or parameter delimiters. *)
+let form_pct_encode text =
+  let buf = Buffer.create (String.length text) in
+  String.iter
+    (fun c ->
+      if is_form_unreserved c then Buffer.add_char buf c
+      else Buffer.add_string buf (Printf.sprintf "%%%02X" (Char.code c)))
+    text;
+  Buffer.contents buf
+
 let form_encode params =
-  Uri.encoded_of_query (List.map (fun (k, v) -> (k, [ v ])) params)
+  params
+  |> List.map (fun (k, v) -> form_pct_encode k ^ "=" ^ form_pct_encode v)
+  |> String.concat "&"
 
 let build_users_info_request ~token ~user_id =
   let url = "https://slack.com/api/users.info" in

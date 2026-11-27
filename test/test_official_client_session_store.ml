@@ -1580,7 +1580,18 @@ let test_superseded_size_refusal_reads_the_recorded_failure () =
         check bool (recovery_failure_to_string failure ^ " is no size refusal") false
           (reads_size_refusal
              (Some (recorded (Printf.sprintf "other-refusal-%d" index) failure))))
-      [ Protocol_failed; Provider_rejected ];
+      (* Every other failure a recovery can record. The four transient ones
+         ([Pre_dispatch_failed], [Spawn_resources_busy], [Owner_stopped_turn],
+         [Retryable_turn_failed]) are released, never recorded. *)
+      [ Spawn_refused_same_input
+      ; Spawn_failed_cause_unknown
+      ; Transport_interrupted
+      ; Protocol_failed
+      ; Provider_rejected
+      ; Host_hook_failed
+      ; State_persistence_failed
+      ; Process_restarted
+      ];
     check bool "no record is no size refusal" false (reads_size_refusal None);
     let open_claim =
       claim_new ~base_path ~keeper_name:"size-refusal-open-claim" ~client_kind:Claude_code

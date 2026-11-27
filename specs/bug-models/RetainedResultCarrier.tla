@@ -205,9 +205,11 @@ SpecClean == Init /\ [][Next]_vars /\ WF_vars(Next)
 NoLockWhileFloorFits == (phase = "locked") => ~FloorFits
 
 (* Receipts leave the outbox only when the provider took the request: the
-   fix never drops results to make room. *)
+   fix never drops results to make room. A size refusal after an effect also
+   leaves [sending] for [idle]; it closes the session and takes no receipt. *)
 ReceiptsLeaveOnlyOnAccept ==
-  [][(receipts' < receipts) => (phase = "sending" /\ phase' = "idle")]_vars
+  [][(receipts' < receipts)
+       => (phase = "sending" /\ phase' = "idle" /\ ~closed')]_vars
 
 (* The carrier hook comes before any halving: a run shrinks history only
    once switching has nothing left to shorten. *)

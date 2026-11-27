@@ -37,7 +37,7 @@ run(runtime 호출 하나. 한 후보에게 보내는 provider 시도 전부)은
 - 고정부(system prompt, 도구, 목표)와 `By_address` 묶음이 창에 들어가면, 효과 전에 온 크기 거절로 그 Keeper가 floor에서 잠기지 않는다(`Bootstrap_floor_exceeded`). receipt 개수와 상관없다.
 - 넘친 턴은 같은 턴 안에서 사람 손 없이 다시 보내진다. 그 턴의 `Completed`가 receipt를 지운다.
 - 모델은 호출 몇 개가 이미 결과를 돌려줬는지 안다. reader가 있으면 그 결과도 읽는다. 「끝난 효과를 반복하지 말라」는 안내는 두 꼴 모두에 있다.
-- 효과 뒤에 턴 안에서 넘치는 경우(`Effect_fenced`)는 지금처럼 운영자 몫이다(§9).
+- 효과 뒤에 턴 안에서 넘치는 경우(`Effect_fenced`)는 다음 턴이 fresh 세션으로 대신한다. 그 run은 묶음을 첫 요청 전에 바꾼다(§5.5).
 
 ## 2. 일어난 일
 
@@ -206,7 +206,7 @@ blob은 하나다. 바이트는 `Inline` 글 그대로다.
 - Gate continuation Resume은 같은 run에서 다시 보내지 않는다. 그래서 hook이 불리지 않는다.
   - Claude Code: `keeper_claude_code_runtime.ml:1531-1539`
   - Codex: `keeper_codex_runtime.ml:2106-2114`
-- 묶음 때문에 넘치면 `Vendor_session_full`로 기록된다(`keeper_claude_code_runtime.ml:534-552`, `keeper_codex_runtime.ml:846-861`).
+- 묶음 때문에 넘치면 `Vendor_session_full`로 기록된다(두 runtime의 `recovery_failure_of_attempt`).
   - 실제로는 vendor 세션이 아니라 묶음이 넘친 것이다.
   - 다음 일반 턴이 fresh 세션을 열고, 그 run은 첫 요청 전에 꼴을 바꾼다(§5.5).
 - 같은 세션에서 다시 보내려면 실측이 먼저다. CLI가 거절된 resume prompt를 세션 기록에 남기지 않는지 봐야 한다. 이 RFC는 그 일을 하지 않는다.
@@ -227,9 +227,9 @@ official client 세 runtime(Claude Code, Codex, Antigravity)은 세션 기록이
   - 그 밖의 run: 지금처럼 `Inline`으로 시작한다.
 - 바꾸는 조건은 hook과 같다. receipt가 없거나 `By_address` 글이 엄격히 짧지 않으면 `Inline`으로 남는다.
   - hook도 이 규칙도 묶음이 넘침의 원인이었는지는 따지지 않는다. 거절은 어느 부분이 컸는지 말하지 않는다.
-- blob 쓰기가 실패하면 경고를 남기고 `Inline`으로 보낸다. hook과 다른 점이다.
+- 꼴 바꾸기가 실패하면 경고를 남기고 `Inline`으로 보낸다. hook과 다른 점이다. 실패는 셋이다: receipt의 도구 이름을 못 읽음, 참조를 못 만듦, blob을 못 씀.
   - 여기서 `Error`로 끝내면 claim 전이라 세션 기록이 그대로 남는다. 다음 run도 같은 자리에서 끝난다. blob 저장소가 고장 난 동안 그 runtime의 모든 턴이 요청을 보내기 전에 실패한다.
-  - `Inline`으로 보내면 이 규칙이 생기기 전과 같은 요청이다. provider가 그 요청을 효과 전에 크기로 거절하면 hook이 같은 쓰기를 하고 그 `Error`를 돌려준다(§9).
+  - `Inline`으로 보내면 이 규칙이 생기기 전과 같은 요청이다. provider가 그 요청을 효과 전에 크기로 거절하면 hook이 같은 걸음을 하고 다시 실패한다. run은 provider의 크기 거절로 끝난다(`context_overflow_shrink_sequence`가 hook의 `Error`를 그 거절로 되돌린다, §9). 걸음이 실패한 까닭은 run을 시작할 때의 경고 줄에만 남는다.
 - 새 durable 상태는 없다. 읽는 것은 session store가 이미 쓰는 recovery 기록이다.
 - 왜 필요한가
   - 효과나 응답 뒤에 온 크기 거절은 같은 run에서 다시 보내지 않는다. Gate continuation의 resume도 다시 보내지 않는다(§5.4). hook이 불리지 않으니 꼴이 바뀔 기회가 없다.
@@ -240,12 +240,13 @@ official client 세 runtime(Claude Code, Codex, Antigravity)은 세션 기록이
   - 700 KB 이상 Start 가운데 다음 cycle 결과와 짝지은 것은 35건이다. 30건이 `context_window_exceeded`로 실패했다. 200~400 KB 9건은 모두 끝났다.
   - Keeper 하나는 11-27 10:31~13:05 UTC에 Start 11번을 997 KB에서 1,465 KB로 늘려 가며 보냈다.
   - 세션 파일의 첫 요청 2,864건에서 system prompt 합은 216.9 MB이고, 그 가운데 `Inline` 묶음이 52.9 MB(24.4%)다.
+  - `Vendor_session_full`은 재지 않았다. 11-25~27 system log에 그 기록이 한 번도 없다. 이 갈래는 잰 값 없이 넣었다. 근거는 Resume이 주입한 receipt가 그 넘침의 원인일 수 있다는 §5.4다.
 - 남는 것
   - 첫 번째 넘침은 막지 않는다. 크기 거절 기록이 없는 run은 `Inline`으로 시작한다.
   - 세션 기록의 client 종류와 runtime id가 이 run과 같을 때만 대신하는 run으로 본다. lane이 다른 runtime으로 넘어가면 그 run은 `Inline`으로 시작한다.
   - 700 KB 이상 Start 47건 가운데 나머지 9건이 이 둘에 든다.
   - 대신하는 run이 `Completed` 없이 끝나면 receipt가 남는다. 그 run의 claim이 크기 거절 기록을 이미 바꿨으니, 다음 run은 기록에서 크기 거절을 읽지 못하고 `Inline`으로 시작한다. Resume이면 resume prompt에 `Inline` 묶음이 실린다(§5.3).
-  - reader가 없는 run은 `By_address`에서 호출 수와 도구별 개수만 본다(§6.2). 묶음이 넘침의 원인이 아니었어도 그렇다. `Completed`면 receipt를 지운다(§6.1).
+  - reader가 없는 run은 `By_address`에서 호출 수와 도구별 개수만 본다(§6.2). 묶음이 넘침의 원인이 아니었어도 그렇다. `Completed`면 receipt를 지운다(§6.1). `Vendor_session_full` 뒤의 run도 같다. 이 규칙 전에는 그 run이 결과를 `Inline`으로 받았다.
   - ACP runtime에는 묶음 꼴이 없다. `Keeper_client_tool_outbox.load`로 receipt를 싣고 hook도 받지 않는다. ACP도 `Input_rejected`를 기록하지만(`keeper_acp_runtime.ml`) 이 규칙이 닿지 않는다.
   - Start가 system prompt에 싣는 것 가운데 턴마다 바뀌는 것(묶음, Librarian working state, memory recall)을 Resume처럼 prompt 앞에 두는 일은 이 RFC 범위 밖이다.
 
@@ -314,8 +315,8 @@ hook은 typed 크기 거절에만 불린다. 거절 문장을 읽어 크기 거�
   - 꼴을 run 사이에 기억하면 이 거절이 사라진다. 그러려면 새 durable 상태가 필요하다. 그 상태가 없어도 durable truth는 손상되지 않으니 두지 않는다(§11의 7).
 - 효과 뒤의 넘침은 막지 않는다.
   - `Inline` 묶음이 첫 요청에는 들어가도, 턴 안에서 도구 결과가 쌓이면 다음 요청이 넘칠 수 있다.
-  - 효과나 응답이 나온 뒤라 같은 run에서 다시 보내지 않는다(`keeper_claude_code_runtime.ml:1537-1550`, `keeper_codex_runtime.ml:2114-2116`). hook도 불리지 않는다.
-  - `Input_rejected Effect_fenced`로 기록된다(`keeper_claude_code_runtime.ml:527-530`, `keeper_codex_runtime.ml:838-841`). 다음 턴이 그 세션을 대신해 fresh 세션을 연다(`Session_store.plan_claim`).
+  - 효과나 응답이 나온 뒤라 같은 run에서 다시 보내지 않는다(두 runtime이 `context_overflow_shrink_sequence`에 넘기는 `same_run_retry_authorized`). hook도 불리지 않는다.
+  - `Input_rejected Effect_fenced`로 기록된다(두 runtime의 `recovery_failure_of_client_error`). 다음 턴이 그 세션을 대신해 fresh 세션을 연다(`Session_store.plan_claim`).
   - 이 RFC 전에도 있던 경로다. 다만 `Inline` 묶음이 그 턴의 여유를 줄인다.
   - 대신하는 run은 첫 요청 전에 꼴을 바꾼다(§5.5). 그 전에는 `Inline`으로 시작해서 같은 넘침을 되풀이했다.
 - Resume이 `Inline`으로 넘치면 vendor 세션을 버린다(§5.3). receipt가 남아 있는 동안 Resume 턴마다 되풀이될 수 있다.
@@ -350,14 +351,14 @@ hook은 typed 크기 거절에만 불린다. 거절 문장을 읽어 크기 거�
   - 불변식 `NoLockWhileFloorFits`: 가장 작은 요청(history 0, 짧은 꼴)이 창을 넘을 때만 잠긴다.
   - 불변식 `SwitchBeforeShrink`: 꼴을 바꿀 수 있는 동안에는 history를 줄이지 않는다.
   - 성질 `RunEnds`: 모든 run이 끝난다. 받아들여지거나 floor에서 잠긴다.
-  - 성질 `ReceiptsLeaveOnlyOnAccept`: receipt는 provider가 받은 요청 뒤에만 준다. 결과를 버려서 자리를 만들지 않는다는 뜻이다.
-  - 성질 `SupersedingRunStartsShort`: 크기 거절로 닫힌 세션을 대신하는 run은 `By_address`가 엄격히 짧은 동안 `Inline`으로 시작하지 않는다.
+  - 성질 `ReceiptsLeaveOnlyOnAccept`: receipt는 provider가 받은 요청 뒤에만 준다. 결과를 버려서 자리를 만들지 않는다는 뜻이다. 효과 뒤 크기 거절도 run을 끝내지만 receipt를 줄이지 않는다.
+  - 성질 `SupersedingRunStartsShort`: 크기 거절로 닫힌 세션을 대신하는 run은 `By_address`가 엄격히 짧은 동안 `Inline`으로 시작하지 않는다. 이 성질은 `StartRun`의 시작 규칙 하나를 고정한다. 여러 걸음에서 나오는 결과가 아니라서, 이 성질을 시험하는 것은 buggy cfg 하나다.
 - 버그는 넷이다. 각각 `Next \/ 버그 동작`이다.
   - `RefuseIgnoringCarrier`: 크기 거절이 history만 줄인다. 이 RFC 전의 동작이다.
   - `ShrinkBeforeSwitch`: 꼴을 바꿀 수 있는데 history부터 줄인다. §11의 2(floor에서만 바꾸기)다.
   - `SwitchBack`: hook이 꼴을 `Inline`으로 되돌린다.
   - `StartInlineAfterClose`: 대신하는 run도 `Inline`으로 시작한다. §5.5 전의 동작이다.
-- 모델에 없는 것: typed가 아닌 거절(§7), Gate continuation의 resume 거절(§5.4), blob 쓰기 실패다.
+- 모델에 없는 것: typed가 아닌 거절(§7), Gate continuation의 resume 거절(§5.4), floor 거절 다음의 run(모델의 `locked`는 끝 상태다), 꼴 바꾸기 실패다.
 
 TLC 2026.04.09(rev 389440f, 로컬, `-workers 1`, 2026-11-28) 결과는 이렇다. cfg 다섯이 모두 `TurnBytes = 30`을 쓴다.
 

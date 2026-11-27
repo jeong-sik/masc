@@ -330,8 +330,10 @@ val switch_to_address :
 (** The carrier step of {!carrier_reprojection} alone, for a caller that
     switches before the run's first request: [Reprojected] when it switched,
     [Unchanged] when the carrier holds no receipt, its [By_address] text is
-    not strictly shorter, or it is already [By_address]. A failed blob write
-    returns [Error] and the form stays [Inline]. *)
+    not strictly shorter, or it is already [By_address]. Any failure of the
+    step returns [Error] and the form stays [Inline]: a receipt whose tool
+    name cannot be read, a reference that cannot be made, a blob that cannot
+    be written. *)
 
 type run_carrier
 (** The retained results of one run. A runtime makes it once per run, before

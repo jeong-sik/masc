@@ -1725,7 +1725,9 @@ let test_codex_resume_overflow_restarts_with_the_address_form () =
 (* A Start that takes the place of a session refused for its size carries the
    address form in its first request: the fixture refuses the inline form, so
    one thread and one injection show the switch came before any refusal (RFC
-   retained-results-carrier-shrinks-to-an-address 5.5). *)
+   retained-results-carrier-shrinks-to-an-address 5.5). The record is the one
+   a Gate continuation's refused resume leaves ([recovery_failure_of_attempt]),
+   which the retained receipts that resume injected can cause. *)
 let test_a_codex_start_superseding_a_size_refusal_carries_the_address_form () =
   with_fixture ~overflow_over_injected_bytes:carrier_window_bytes @@ fun ~run ~capture ~reports:_ ->
   let module Store = Keeper_official_client_session_store in
@@ -1739,8 +1741,8 @@ let test_a_codex_start_superseding_a_size_refusal_carries_the_address_form () =
     |> require in
   let (_ : Store.t) =
     Store.require_recovery ~base_path ~keeper_name ~expected:claimed
-      ~failure:(Store.Input_rejected Store.Effect_fenced)
-      ~detail:"the turn overflowed after a tool effect" ~required_at:now
+      ~failure:(Store.Vendor_session_full Store.Activity_observed)
+      ~detail:"the continuation's resume overflowed after a tool effect" ~required_at:now
     |> require in
   retain_overflow_receipts ~base_path ~keeper_name;
   let inline = inline_carrier ~base_path ~keeper_name in

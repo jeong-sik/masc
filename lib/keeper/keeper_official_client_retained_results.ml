@@ -14,8 +14,8 @@ let load ~keeper_name ~superseded run =
         | Error detail ->
           Log.Keeper.warn
             ~keeper_name
-            "retained results stay inline in the run after a size refusal: the blob of \
-             their address form was not written: %s"
+            "retained results stay inline in the run after a size refusal: they could \
+             not switch to the address form: %s"
             detail));
     Ok loaded
 ;;

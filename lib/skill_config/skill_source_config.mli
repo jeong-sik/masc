@@ -13,7 +13,7 @@ type access =
 
 type resource_read_max_bytes = private int
 (** Bound for one deferred Skill resource read. Always
-    {!Common.max_tool_result_wire_bytes}: it is derived, not configured. *)
+    {!skill_file_max_bytes}: it is fixed, not configured. *)
 
 type source = private
   { id : source_id
@@ -114,6 +114,14 @@ type resolved_source =
   ; resolution : resolution
   }
 
+val skill_file_max_bytes : int
+(** The largest Skill file MASC accepts or reads: a [SKILL.md] source that an
+    editor, publish or validate accepts, and a bundled resource file that
+    [keeper_skill] or the play route returns. A configured [[skills]] table
+    carries it as the resource read bound. It is not the inline tool-result
+    boundary: [keeper_skill] returns a body or resource over that boundary as
+    a structured handle with a preview. *)
+
 type notice = Ignored_resource_read_max_bytes of Keeper_toml_loader.toml_value
 (** [[skills] resource-read-max-bytes] is present. The parsed value is carried
     into the boot notice. The key is ignored for one version and refused after
@@ -159,5 +167,6 @@ val notice_message : config_path:string -> notice list -> string
 
 module For_testing : sig
   val with_resource_read_max_bytes : int -> t -> t
-  (** A smaller bound than the derived one, to exercise the oversize path. *)
+  (** A smaller bound than {!skill_file_max_bytes}, to exercise the oversize
+      path without writing a file over the cap. *)
 end

@@ -53,6 +53,9 @@ val make_instruction_skill_tool
   -> instruction_skills:instruction_skill list
   -> unit
   -> (Agent_core.Tool.t, Tool_bridge.schema_error) result
-(** Executable [keeper_skill] tool. Concurrent, read-only, full body returned
-    inline up to the provider wire boundary and projected to a structured blob
-    handle above it, lightweight telemetry only. *)
+(** Executable [keeper_skill] tool. Concurrent, read-only, lightweight
+    telemetry only. A body, or a resource up to its location's
+    [resource_read_max_bytes] ({!Skill_source_config.skill_file_max_bytes}),
+    is returned inline up to the provider wire boundary and projected to a
+    structured blob handle with a preview above it. A resource over the read
+    bound is refused with its observed size and the bound. *)

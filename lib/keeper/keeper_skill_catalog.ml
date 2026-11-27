@@ -90,7 +90,7 @@ type authored_source_error =
   | Invalid_document of error
 
 let validate_authored_source ~descriptors ~directory source_text =
-  let max_bytes = 1_048_576 in
+  let max_bytes = Skill_source_config.skill_file_max_bytes in
   let bytes = String.length source_text in
   if bytes > max_bytes
   then Error (Source_too_large { bytes; max_bytes })

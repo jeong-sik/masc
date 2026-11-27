@@ -179,10 +179,12 @@ let anchor_rejection_to_string = function
 
 type notice = Ignored_resource_read_max_bytes of Keeper_toml_loader.toml_value
 
-(* The only Skill resource read bound. A resource is returned as one inline
-   tool result, so any other bound either refuses files the wire could carry
-   or reads files the wire then refuses. *)
-let derived_resource_read_max_bytes = Common.max_tool_result_wire_bytes
+(* One cap for every Skill file: the SKILL.md source an editor, publish or
+   validate accepts, and the bundled resource a reader returns. The inline
+   tool-result boundary is not a read bound: keeper_skill hands a body or
+   resource over it to the tool projection, which stores it and returns a
+   structured handle with a preview (#54389, #39054). *)
+let skill_file_max_bytes = 1_048_576
 
 let ignored_value_to_string = function
   | Keeper_toml_loader.Toml_int value -> string_of_int value
@@ -196,10 +198,10 @@ let notice_to_string = function
   | Ignored_resource_read_max_bytes value ->
     Printf.sprintf
       "[skills] resource-read-max-bytes = %s is ignored: the Skill resource \
-       read bound is the inline tool-result boundary (%d bytes). Delete the \
-       line; the next version refuses it (#39284)"
+       read bound is the Skill file cap (%d bytes). Delete the line; the next \
+       version refuses it (#39284)"
       (ignored_value_to_string value)
-      derived_resource_read_max_bytes
+      skill_file_max_bytes
 ;;
 
 let diagnostic_to_string = function
@@ -398,12 +400,12 @@ let parse_entry ~index = function
 let resource_read_max_bytes_key = top_level_namespace ^ ".resource-read-max-bytes"
 let sources_key = top_level_namespace ^ ".sources"
 
-(* Deprecated for one version (task-1779 B): the bound is derived, so a key
+(* Deprecated for one version (task-1779 B): the bound is fixed, so a key
    left in an installed runtime.toml is ignored with a notice instead of
    refused. Refusing it at once would empty every Keeper's catalog the way
    #39040 did. #39284 refuses it in the next version. *)
 let resource_read_max_bytes ~configured doc =
-  let bound = if configured then Some derived_resource_read_max_bytes else None in
+  let bound = if configured then Some skill_file_max_bytes else None in
   match List.assoc_opt resource_read_max_bytes_key doc with
   | None -> bound, []
   | Some value -> bound, [ Ignored_resource_read_max_bytes value ]

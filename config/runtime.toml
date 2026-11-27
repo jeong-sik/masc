@@ -49,10 +49,11 @@ https_port = 8938
 # tls_key_file = "/path/to/server.key"
 
 [skills]
-# The Skill resource read bound is not configured here: it is the shared
-# inline tool-result boundary (Common.max_tool_result_wire_bytes). An older
-# runtime.toml that still sets resource-read-max-bytes logs a WARN and the
-# key is ignored; the next version refuses it (#39284).
+# The Skill resource read bound is not configured here: it is the Skill file
+# cap (1 MiB, Skill_source_config.skill_file_max_bytes). keeper_skill returns
+# a resource over the inline tool-result boundary as an artifact handle with
+# a preview. An older runtime.toml that still sets resource-read-max-bytes
+# logs a WARN and the key is ignored; the next version refuses it (#39284).
 
 # Skill sources are searched in this declared order. The runtime has no hidden
 # source roots; existing workspaces must add the sources they want explicitly.

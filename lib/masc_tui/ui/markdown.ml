@@ -22,6 +22,15 @@ type rendered_line = {
 (* [wrap_styled_spans] never wraps narrower than this many cells. *)
 let min_wrap_width = 4
 
+type embed_image = { label : string; path : string; rows : int; fallback : string }
+
+type embed_shown =
+  | Embed_link of { label : string; uri : string }
+  | Embed_image of embed_image
+  | Embed_note of string
+
+type embed = { raw : string; shown : embed_shown }
+
 let wrap_styled_spans ~width ~prefix ~continuation spans =
   let width = Int.max min_wrap_width width in
   let lines = ref [] in
@@ -294,7 +303,7 @@ let inline_image_def defs inline =
       | _ -> None)
   | _ -> None
 
-let inline_rows ~(theme : Theme.t) ~defs ~osc8 ~(base : Style.t) inline =
+let inline_rows ~(theme : Theme.t) ~defs ~osc8 ~embeds ~(base : Style.t) inline =
   let rows = ref [] and spans = ref [] in
   let emit style hyperlink text =
     if not (String.equal text "") then
@@ -312,22 +321,41 @@ let inline_rows ~(theme : Theme.t) ~defs ~osc8 ~(base : Style.t) inline =
     Style.make ~fg:(Color.of_rgb theme.text_bright)
       ~bg:(Color.of_rgb theme.surface_2) ~attrs:style.attrs ()
   in
+  let note_style (style : Style.t) = Typography.whisper ~bg:style.bg theme in
+  let embed_at text index =
+    if Char.equal text.[index] '!' then
+      List.find_opt (fun (embed : embed) -> starts_at_exact text index embed.raw) embeds
+    else None
+  in
   let render_text style link text =
     let length = String.length text in
     let rec scan start index =
       if index >= length then emit style link (String.sub text start (index - start))
-      else if
-        Option.is_none link
-        && (match text.[index] with 'h' | 'f' -> bare_url text index | _ -> false)
-      then begin
-        let stop = bare_url_end text index in
-        let uri = String.sub text index (stop - index) in
-        if safe_target uri then begin
-          emit style link (String.sub text start (index - start));
-          emit (link_style style) (Some uri) uri;
-          scan stop stop
-        end else scan start stop
-      end else scan start (index + 1)
+      else
+        match embed_at text index with
+        | Some embed ->
+            emit style link (String.sub text start (index - start));
+            (match embed.shown with
+            | Embed_link { label; uri } -> emit (link_style style) (Some uri) label
+            | Embed_image { label; _ } | Embed_note label ->
+                emit (note_style style) link label);
+            let stop = index + String.length embed.raw in
+            scan stop stop
+        | None ->
+            if
+              Option.is_none link
+              && (match text.[index] with 'h' | 'f' -> bare_url text index | _ -> false)
+            then begin
+              let stop = bare_url_end text index in
+              let uri = String.sub text index (stop - index) in
+              if safe_target uri then begin
+                emit style link (String.sub text start (index - start));
+                emit (link_style style) (Some uri) uri;
+                scan stop stop
+              end
+              else scan start stop
+            end
+            else scan start (index + 1)
     in
     scan 0 0
   in
@@ -651,7 +679,7 @@ let headings raw =
   in
   Folder.fold_doc (Folder.make ~block ()) [] doc |> List.rev
 
-let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw =
+let render_document ~(theme : Theme.t) ~width ~osc8 ~embeds ~(base_style : Style.t) raw =
   let bg = base_style.bg in
   let muted_style = Typography.whisper ~bg ~italic:false theme in
   let hairline_style = Style.make ~fg:(Color.of_rgb theme.border_subtle) ~bg () in
@@ -682,7 +710,7 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
   in
   let draw_rows layout rows = List.iter (fun row -> push_lines (wrap layout row)) rows in
   let draw_inlines layout inline =
-    inline_rows ~theme ~defs ~osc8 ~base:layout.base inline |> draw_rows layout
+    inline_rows ~theme ~defs ~osc8 ~embeds ~base:layout.base inline |> draw_rows layout
   in
   let attach_image ~source ~left_inset ~start =
     let count = !row_count - start in
@@ -710,6 +738,36 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
     in
     draw_rows layout ([ geometry ] :: List.init (height - 1) (fun _ -> []));
     attach_image ~source:(Embedded_png image) ~left_inset ~start
+  in
+  (* A paragraph that holds only an image embed: its label, then rows the
+     retained PNG covers once it loads. Until then, or when it is not a PNG,
+     the first of them shows [fallback]. *)
+  let paragraph_image inline =
+    let image_path node =
+      match Inline.Link.reference_definition defs node with
+      | Some (Cmarkit.Link_definition.Def (definition, _)) ->
+          Option.map fst (Cmarkit.Link_definition.dest definition)
+      | _ -> None
+    in
+    List.find_map
+      (fun (embed : embed) ->
+        match (embed.shown, inline) with
+        | Embed_image image, Inline.Text (text, _)
+          when image.rows > 0 && String.equal (String.trim text) embed.raw ->
+            Some image
+        | Embed_image image, Inline.Image (node, _)
+          when image.rows > 0 && Option.equal String.equal (image_path node) (Some image.path) ->
+            Some image
+        | (Embed_image _ | Embed_link _ | Embed_note _), _ -> None)
+      embeds
+  in
+  let draw_retained_image layout (image : embed_image) =
+    let whisper = Typography.whisper ~bg theme in
+    draw_rows layout [ [ span whisper image.label ] ];
+    let start = !row_count in
+    draw_rows layout ([ span whisper image.fallback ] :: List.init (image.rows - 1) (fun _ -> []));
+    attach_image ~source:(Retained_png image.path)
+      ~left_inset:(spans_width (continuation layout)) ~start
   in
   let draw_rule layout requested_width =
     let prefix = prefix layout in
@@ -887,7 +945,7 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
                 let cells = List.filteri (fun i _ -> i < columns) cells in
                 `Cells
                   ( style,
-                    List.map (inline_rows ~theme ~defs ~osc8 ~base:style) cells
+                    List.map (inline_rows ~theme ~defs ~osc8 ~embeds ~base:style) cells
                     @ List.init (columns - List.length cells) (fun _ -> []) ))
           rows
       in
@@ -972,10 +1030,13 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
     | Block.Paragraph (p, meta) -> (
         match table_without_outer_pipes ~defs raw meta with
         | Some table -> render layout table
-        | None ->
+        | None -> (
             let inline = Block.Paragraph.inline p in
-            draw_inlines layout inline;
-            Option.iter (draw_embedded_image layout) (inline_image_def defs inline))
+            match paragraph_image inline with
+            | Some image -> draw_retained_image layout image
+            | None ->
+                draw_inlines layout inline;
+                Option.iter (draw_embedded_image layout) (inline_image_def defs inline)))
     | Block.Block_quote (quote, _) ->
         let rail = span quote_rail_style (Glyph.to_utf8 Glyph.Left_rail ^ " ") in
         let quoted = inset layout ~first:rail ~rest:rail in
@@ -1054,6 +1115,7 @@ module Md_cache_key = struct
     base_style : Style.t;
     width : int;
     osc8 : bool;
+    embeds : embed list;
     raw : string;
   }
 
@@ -1062,12 +1124,14 @@ module Md_cache_key = struct
     && Bool.equal a.osc8 b.osc8
     && (a.theme == b.theme || a.theme = b.theme)
     && Style.equal a.base_style b.base_style
+    && a.embeds = b.embeds
     && (a.raw == b.raw || String.equal a.raw b.raw)
 
   let hash k =
     let h = Hashtbl.hash k.raw in
     let h = (h * 31) lxor k.width in
     let h = (h * 31) lxor (if k.osc8 then 1 else 0) in
+    let h = (h * 31) lxor Hashtbl.hash k.embeds in
     let h = (h * 31) lxor (Hashtbl.hash k.theme.preset) in
     let h = (h * 31) lxor k.theme.surface_0 lxor k.theme.text_primary in
     (h * 31) lxor (Hashtbl.hash k.base_style)
@@ -1084,27 +1148,27 @@ let max_md_render_cache_entries = 256
 let max_md_render_cache_entry_bytes = 524_288
 let max_md_render_cache_total_bytes = 4 * 1024 * 1024
 
-let render_lines_uncached ~(theme : Theme.t) ~width ?(osc8 = true) ?base_style raw =
+let render_lines_uncached ~(theme : Theme.t) ~width ?(osc8 = true) ?(embeds = []) ?base_style raw =
   let width = Int.max 8 width in
   let base_style = Option.value base_style ~default:(Typography.primary theme) in
-  if safe_link_depth raw then render_document ~theme ~width ~osc8 ~base_style raw
+  if safe_link_depth raw then render_document ~theme ~width ~osc8 ~embeds ~base_style raw
   else render_literal ~width ~base_style raw
 
-let render_lines ~(theme : Theme.t) ~width ?(osc8 = true) ?base_style raw =
+let render_lines ~(theme : Theme.t) ~width ?(osc8 = true) ?(embeds = []) ?base_style raw =
   let width = Int.max 8 width in
   let base_style = Option.value base_style ~default:(Typography.primary theme) in
   let raw_bytes = String.length raw in
   if raw_bytes > max_md_render_cache_entry_bytes then
-    render_lines_uncached ~theme ~width ~osc8 ~base_style raw
+    render_lines_uncached ~theme ~width ~osc8 ~embeds ~base_style raw
   else
-    let key = { Md_cache_key.theme; base_style; width; osc8; raw } in
+    let key = { Md_cache_key.theme; base_style; width; osc8; embeds; raw } in
     match
       Stdlib.Mutex.protect md_render_cache_mu (fun () ->
           Md_cache_tbl.find_opt md_render_cache key)
     with
     | Some hit -> hit
     | None ->
-        let rendered = render_lines_uncached ~theme ~width ~osc8 ~base_style raw in
+        let rendered = render_lines_uncached ~theme ~width ~osc8 ~embeds ~base_style raw in
         Stdlib.Mutex.protect md_render_cache_mu (fun () ->
             if
               Md_cache_tbl.length md_render_cache >= max_md_render_cache_entries
@@ -1169,10 +1233,10 @@ let reverse_link uri (line : rendered_line) =
   }
 
 let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ?(osc8 = true) ?(scroll = 0)
-    ?selected_link raw =
+    ?selected_link ?embeds raw =
   if Rect.is_empty rect then 0
   else
-    let lines = render_lines ~theme ~width:rect.w ~osc8 raw in
+    let lines = render_lines ~theme ~width:rect.w ~osc8 ?embeds raw in
     let lines =
       match selected_link with
       | Some uri -> List.map (reverse_link uri) lines

@@ -20,10 +20,34 @@ type rendered_line = {
   image_part : Cell_grid.document_image_part option;
 }
 
+type embed_image = {
+  label : string;
+  path : string;  (** Server path of the retained PNG. *)
+  rows : int;  (** Rows the image takes below [label]; [0] shows [label] only. *)
+  fallback : string;  (** Shown in those rows until the PNG is drawn. *)
+}
+
+type embed_shown =
+  | Embed_link of { label : string; uri : string }
+      (** Drawn as a link to [uri], so it is picked and followed like one. *)
+  | Embed_image of embed_image
+      (** A paragraph that holds only this embed shows [label] and then the
+          image rows. Inside other text it shows [label] muted. *)
+  | Embed_note of string  (** Shown muted; it goes nowhere. *)
+
+type embed = {
+  raw : string;
+      (** Source text the server found outside code. Each place it occurs in a
+          text run is drawn as [shown]. A Markdown image whose destination is
+          an [Embed_image]'s [path] counts too. *)
+  shown : embed_shown;
+}
+
 val render_lines :
   theme:Theme.t ->
   width:int ->
   ?osc8:bool ->
+  ?embeds:embed list ->
   ?base_style:Style.t ->
   string ->
   rendered_line list
@@ -76,6 +100,7 @@ val draw :
   ?osc8:bool ->
   ?scroll:int ->
   ?selected_link:string ->
+  ?embeds:embed list ->
   string ->
   int
 (** Render Markdown directly onto [Cell_grid.t], interning OSC 8 hyperlinks in

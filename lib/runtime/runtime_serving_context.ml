@@ -125,7 +125,10 @@ let observe ~sw ~net connection ~model ~load =
     | Ok (response : Llm_provider.Http_client.raw_sync_response)
         when response.status >= 200 && response.status < 300 -> Ok response.body
     | Ok response -> Error (Discovery.Http_error response.status) in
-  let get ~url = Llm_provider.Http_client.get_sync ~sw ~net ~url ~headers () |> result in
-  let post ~url ~body = Llm_provider.Http_client.post_sync ~sw ~net ~url
+  let clock = Eio_context.get_clock_opt () in
+  let get_timeout_s = Option.map (fun _ -> 15.0) clock in
+  let post_timeout_s = Option.map (fun _ -> if load then 60.0 else 15.0) clock in
+  let get ~url = Llm_provider.Http_client.get_sync ?clock ?timeout_s:get_timeout_s ~sw ~net ~url ~headers () |> result in
+  let post ~url ~body = Llm_provider.Http_client.post_sync ?clock ?timeout_s:post_timeout_s ~sw ~net ~url
     ~headers:(("Content-Type", "application/json") :: headers) ~body () |> result in
   observe_with ~get ~post connection ~model ~load |> Result.map to_json

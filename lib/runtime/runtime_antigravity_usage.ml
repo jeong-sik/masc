@@ -162,6 +162,7 @@ let read_in ~host ~cli_path ~oauth_source runtime_root =
 (* The root holds a copy of the account's OAuth file, so a removal that
    fails is said out loud. *)
 let remove_root runtime_root =
+  Runtime_antigravity_home.forget_prepared_below ~runtime_root;
   try Fs_compat.remove_tree runtime_root with
   | (Sys_error _ | Unix.Unix_error _) as exn ->
     Log.Runtime_agent.warn

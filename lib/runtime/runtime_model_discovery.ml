@@ -169,7 +169,9 @@ let discover_with ~get connection =
     | Openai -> "/models"
     | Anthropic | Kimi -> if String.ends_with ~suffix:"/v1" path then "/models" else "/v1/models" in
   let base = Uri.with_path base (path ^ suffix) in
-  let rec pages seen cursor all =
+  let max_pages = 50 in
+  let rec pages page_count seen cursor all =
+    if page_count >= max_pages then Error Invalid_response else
     let url = match cursor with None -> base | Some id -> Uri.add_query_param' base ("after_id", id) in
     let* body = get ~url:(Uri.to_string url) in
     let* models, next = parse_page connection.protocol body in
@@ -177,8 +179,8 @@ let discover_with ~get connection =
     match next with
     | None -> Ok (List.rev all |> List.map (with_catalog_image_input connection))
     | Some cursor when List.mem cursor seen -> Error Repeated_page
-    | Some cursor -> pages (cursor :: seen) (Some cursor) all in
-  pages [] None []
+    | Some cursor -> pages (page_count + 1) (cursor :: seen) (Some cursor) all in
+  pages 0 [] None []
 let to_json models =
   let optional convert = function None -> `Null | Some value -> convert value in
   `Assoc ["source", `String "account_or_server_model_list";
@@ -207,7 +209,10 @@ let discover ~sw ~net connection =
   let headers = match connection.protocol with
     | Anthropic | Kimi -> ("anthropic-version", Llm_provider.Api_common.api_version) :: headers
     | Openai | Ollama -> headers in
-  let get ~url = match Llm_provider.Http_client.get_sync ~sw ~net ~url ~headers () with
+  let probe_timeout_s = 15.0 in
+  let clock = Eio_context.get_clock_opt () in
+  let timeout_s = Option.map (fun _ -> probe_timeout_s) clock in
+  let get ~url = match Llm_provider.Http_client.get_sync ?clock ?timeout_s ~sw ~net ~url ~headers () with
     | Error _ -> Error Request_failed
     | Ok response when response.status >= 200 && response.status < 300 -> Ok response.body
     | Ok response -> Error (Http_error response.status) in

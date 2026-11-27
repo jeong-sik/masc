@@ -71,6 +71,7 @@
 # Node.js 22 and pnpm. A failed Pele install is a warning, not a failed install.
 #
 # Usage: scripts/install-local-build.sh [--prefix DIR]
+#                                       [--from REF]
 #                                       [--skip-build] [--build-dir DIR] [--base-path DIR]
 #                                       [--refresh-guest-shim]
 #                                       [--no-browser-addon]
@@ -78,6 +79,14 @@
 #   --prefix        where masc, masc-tui, the browser Add-on programs, SSH
 #                   bootstrap and deployment preflight pair go (default
 #                   ~/.local/bin)
+#   --from          build and install the commit REF names from the deploy
+#                   worktree <main checkout>/.worktrees/deploy instead of this
+#                   checkout, e.g. `git fetch origin main &&
+#                   scripts/install-local-build.sh --from origin/main`. The
+#                   worktree is detached and only --from moves it, so the
+#                   server and the guest exec shim are built from one source
+#                   while other sessions pull or edit this checkout. Not with
+#                   --skip-build or --build-dir, which install another build
 #   --skip-build    install what --build-dir already holds
 #   --build-dir     directory holding main_eio.exe, masc_tui.exe,
 #                   masc_native_addon_launcher.exe, masc_browser_addon_worker.exe,
@@ -113,6 +122,8 @@ guest_shim=false
 browser_addon=true
 browser_addon_programs=(masc_native_addon_launcher masc_browser_addon_worker)
 print_build_targets=false
+from_ref=""
+build_dir_given=false
 base_path=""
 workspace_root=""
 workspace_kind=""
@@ -140,7 +151,8 @@ esac
 while [ $# -gt 0 ]; do
   case "$1" in
     --prefix) prefix=${2:?--prefix needs a directory}; shift 2 ;;
-    --build-dir) build_dir=${2:?--build-dir needs a directory}; shift 2 ;;
+    --build-dir) build_dir=${2:?--build-dir needs a directory}; build_dir_given=true; shift 2 ;;
+    --from) from_ref=${2:?--from needs a git ref}; shift 2 ;;
     --refresh-guest-shim) guest_shim=true; shift ;;
     --no-browser-addon) browser_addon=false; shift ;;
     --skip-build) skip_build=true; shift ;;
@@ -166,11 +178,32 @@ if [ "$print_build_targets" = true ]; then
   exit 0
 fi
 
+# --from installs from the deploy worktree, so it takes that checkout's lock:
+# the same one the deploy worktree's own copy of this script and its
+# dune-local.sh take, inherited below through MASC_DUNE_LOCK_HELD. The
+# worktree is created or moved only while that lock is held, so two --from
+# installs cannot move it under each other's build.
+lock_repo=$repo
+deploy=""
+if [ -n "$from_ref" ]; then
+  if [ "$skip_build" = true ] || [ "$build_dir_given" = true ]; then
+    echo "install-local-build: --from builds the commit it names; --skip-build and --build-dir install another build; nothing installed" >&2
+    exit 2
+  fi
+  if ! main_checkout=$(git -C "$repo" worktree list --porcelain | sed -n '1s/^worktree //p') ||
+     [ -z "$main_checkout" ] || ! main_checkout=$(cd "$main_checkout" && pwd -P); then
+    echo "install-local-build: --from needs a git checkout, and $repo names no main worktree; nothing installed" >&2
+    exit 2
+  fi
+  deploy="$main_checkout/.worktrees/deploy"
+  lock_repo=$deploy
+fi
+
 # Use the same lock as dune-local.sh for the complete installation transaction.
 # Releasing it after build permits a concurrent wrapper clean to remove our input
 # while preflight, binary copies or browser refresh are still using it.
 if [ "${MASC_DUNE_LOCK_HELD:-0}" != 1 ] && [ "${MASC_DUNE_DRY_RUN:-0}" != 1 ]; then
-  repo_lock_key=$(printf '%s' "$repo" | cksum | awk '{print $1}')
+  repo_lock_key=$(printf '%s' "$lock_repo" | cksum | awk '{print $1}')
   install_lock="${DUNE_LOCAL_LOCK:-${TMPDIR:-/tmp}/masc-dune-${UID:-$(id -u)}-${repo_lock_key}.lock}"
   # ${install_args[@]+...} guard: bash 3.2 (macOS /bin/bash) treats
   # "${empty_array[@]}" as unbound under set -u, and an argument-less
@@ -183,6 +216,43 @@ if [ "${MASC_DUNE_LOCK_HELD:-0}" != 1 ] && [ "${MASC_DUNE_DRY_RUN:-0}" != 1 ]; t
     echo "install-local-build: a shared build lock requires lockf or flock" >&2
     exit 1
   fi
+fi
+
+# The lock is held. Put the deploy worktree on the commit and hand the install
+# to the copy of this script that commit carries; it builds, checks and
+# installs from there and never sees --from. A deploy worktree with changes is
+# not a copy of any commit, so it is refused rather than overwritten.
+if [ -n "$from_ref" ]; then
+  if ! commit=$(git -C "$repo" rev-parse --verify --quiet "$from_ref^{commit}"); then
+    echo "install-local-build: --from $from_ref names no commit in $repo; nothing installed" >&2
+    exit 2
+  fi
+  common_dir=$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)
+  if [ -e "$deploy" ] || [ -L "$deploy" ]; then
+    if [ "$(git -C "$deploy" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)" != "$common_dir" ] ||
+       [ "$(git -C "$deploy" rev-parse --show-toplevel 2>/dev/null || true)" != "$deploy" ]; then
+      echo "install-local-build: $deploy is not a worktree of $main_checkout; nothing installed" >&2
+      exit 2
+    fi
+    if [ -n "$(git -C "$deploy" status --porcelain)" ]; then
+      echo "install-local-build: $deploy has changes, so it is no copy of a commit; nothing installed. git -C $deploy status shows them" >&2
+      exit 2
+    fi
+    git -C "$deploy" checkout --quiet --detach "$commit"
+  else
+    mkdir -p "$main_checkout/.worktrees"
+    git -C "$repo" worktree add --quiet --detach "$deploy" "$commit"
+  fi
+  forward=()
+  set -- ${install_args[@]+"${install_args[@]}"}
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --from) shift 2 ;;
+      *) forward+=("$1"); shift ;;
+    esac
+  done
+  echo "install-local-build: installing $commit from $deploy"
+  exec bash "$deploy/scripts/install-local-build.sh" ${forward[@]+"${forward[@]}"}
 fi
 
 if [ "$skip_build" = false ]; then

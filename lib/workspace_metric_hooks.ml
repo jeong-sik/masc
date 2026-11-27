@@ -246,6 +246,8 @@ let record_anti_rationalization_outcome ~outcome ~runtime =
     ()
 ;;
 
+let cache_desync_hook_installed = Atomic.make false
+
 let install () =
   Atomic.set Workspace_hooks.keeper_registered_fn (fun ~base_path ~agent_name ->
     Option.is_some
@@ -376,13 +378,15 @@ let install () =
                  Ok owner.session_root)
             | None ->
               let root =
-                Filename.temp_file
+                Filename.temp_dir ~perms:0o700
                   (Printf.sprintf "masc-completion-review-%d-" (Unix.getpid ()))
                   ""
               in
-              Unix.unlink root;
-              Unix.mkdir root 0o700;
-              Eio.Switch.on_release review_sw (fun () -> Fs_compat.remove_tree root);
+              (try Eio.Switch.on_release review_sw (fun () -> Fs_compat.remove_tree root)
+               with exn ->
+                 let bt = Printexc.get_raw_backtrace () in
+                 Fs_compat.remove_tree root;
+                 Printexc.raise_with_backtrace exn bt);
               Ok root in
           match review_root with
           | Error _ as error -> error
@@ -553,14 +557,16 @@ let install () =
            ~verification_id
            ~reason);
 
-  (* Wrapper for cache desync cleared *)
-  let original_cache_desync = Atomic.get Workspace_hooks.cache_desync_cleared_fn in
-  Atomic.set Workspace_hooks.cache_desync_cleared_fn (fun config ~module_name ~task_id ~status ->
-    original_cache_desync config ~module_name ~task_id ~status;
-    Otel_metric_store.inc_counter
-      Otel_metric_store.metric_cache_desync_cleared
-      ~labels:[ "module", module_name; "status", status ]
-      ());
+  (* Wrapper for cache desync cleared — idempotent across repeated [install ()] calls. *)
+  if Atomic.compare_and_set cache_desync_hook_installed false true then begin
+    let original_cache_desync = Atomic.get Workspace_hooks.cache_desync_cleared_fn in
+    Atomic.set Workspace_hooks.cache_desync_cleared_fn (fun config ~module_name ~task_id ~status ->
+      original_cache_desync config ~module_name ~task_id ~status;
+      Otel_metric_store.inc_counter
+        Otel_metric_store.metric_cache_desync_cleared
+        ~labels:[ "module", module_name; "status", status ]
+        ())
+  end;
 
   ()
 ;;

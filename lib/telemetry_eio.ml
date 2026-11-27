@@ -201,6 +201,7 @@ let read_all_events ?fs:_ config : event_record list =
    Cache TTL matches the dashboard refresh interval. *)
 
 type tool_usage_cache_entry = {
+  telemetry_path : string;
   cached_summary : tool_usage_summary;
   cached_at : float;
 }
@@ -208,14 +209,20 @@ type tool_usage_cache_entry = {
 let tool_usage_cache : tool_usage_cache_entry option Atomic.t = Atomic.make None
 let tool_usage_cache_ttl = 30.0  (* seconds *)
 
+let clone_tool_usage_summary (summary : tool_usage_summary) =
+  { summary with stats_by_tool = Hashtbl.copy summary.stats_by_tool }
+
 let summarize_tool_usage ?fs config : tool_usage_summary =
   let now = Time_compat.now () in
+  let store = get_telemetry_store config in
+  let telemetry_path = Dated_jsonl.base_dir store in
   match Atomic.get tool_usage_cache with
-  | Some entry when now -. entry.cached_at < tool_usage_cache_ttl ->
-      entry.cached_summary
+  | Some entry
+    when String.equal entry.telemetry_path telemetry_path
+         && now >= entry.cached_at
+         && now -. entry.cached_at < tool_usage_cache_ttl ->
+      clone_tool_usage_summary entry.cached_summary
   | _ ->
-      let store = get_telemetry_store config in
-      let telemetry_path = Dated_jsonl.base_dir store in
       let telemetry_available = Sys.file_exists telemetry_path in
       let stats_by_tool = Hashtbl.create 32 in
       let total_calls = ref 0 in
@@ -235,8 +242,9 @@ let summarize_tool_usage ?fs config : tool_usage_summary =
         total_calls = !total_calls;
         stats_by_tool;
       } in
-      Atomic.set tool_usage_cache (Some { cached_summary = summary; cached_at = now });
-      summary
+      Atomic.set tool_usage_cache
+        (Some { telemetry_path; cached_summary = summary; cached_at = now });
+      clone_tool_usage_summary summary
 
 (** Agent activity summary from telemetry, filtered by time window. *)
 type agent_activity = {

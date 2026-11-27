@@ -65,29 +65,67 @@ let create_agent_of_config () =
 let with_lock limiter f =
   Eio.Mutex.use_rw ~protect:true limiter.mutex (fun () -> f ())
 
+let max_buckets = 10_000
+let stale_eviction_age_s = 60.0
+
+let evict_if_full ~now buckets =
+  if StringMap.cardinal buckets < max_buckets then buckets
+  else
+    let pruned =
+      StringMap.filter
+        (fun _ bucket -> now -. bucket.last_update <= stale_eviction_age_s)
+        buckets
+    in
+    if StringMap.cardinal pruned < max_buckets then pruned
+    else
+      let oldest =
+        StringMap.fold
+          (fun k b acc ->
+            match acc with
+            | None -> Some (k, b.last_update)
+            | Some (_, ts) when b.last_update < ts -> Some (k, b.last_update)
+            | Some _ -> acc)
+          pruned None
+      in
+      match oldest with
+      | None -> pruned
+      | Some (oldest_key, _) -> StringMap.remove oldest_key pruned
+
+let refilled_tokens limiter bucket ~now =
+  let elapsed = Float.max 0.0 (now -. bucket.last_update) in
+  let new_tokens = Float.max 0.0 (bucket.tokens +. (elapsed *. limiter.rate)) in
+  Float.min (float_of_int limiter.burst) new_tokens
+
 let check limiter ~key =
   with_lock limiter (fun () ->
     let now = Time_compat.now () in
     (* The map already rebinds on every write, so the bucket is stored once
        with its post-refill state instead of being inserted and then mutated. *)
-    let bucket = match StringMap.find_opt key !(limiter.buckets) with
+    let existing = StringMap.find_opt key !(limiter.buckets) in
+    let bucket = match existing with
       | Some b -> b
       | None -> { tokens = float_of_int limiter.burst; last_update = now }
     in
-    let elapsed = now -. bucket.last_update in
-    let new_tokens = bucket.tokens +. (elapsed *. limiter.rate) in
-    let refilled = min (float_of_int limiter.burst) new_tokens in
+    let refilled = refilled_tokens limiter bucket ~now in
     let granted = refilled >= 1.0 in
-    let tokens = if granted then refilled -. 1.0 else refilled in
+    let tokens = Float.max 0.0 (if granted then refilled -. 1.0 else refilled) in
+    let base_map =
+      match existing with
+      | Some _ -> !(limiter.buckets)
+      | None -> evict_if_full ~now !(limiter.buckets)
+    in
     limiter.buckets :=
-      StringMap.add key { tokens; last_update = now } !(limiter.buckets);
+      StringMap.add key { tokens; last_update = now } base_map;
     granted
   )
 
 let remaining limiter ~key =
   with_lock limiter (fun () ->
+    let now = Time_compat.now () in
     match StringMap.find_opt key !(limiter.buckets) with
-    | Some b -> int_of_float b.tokens
+    | Some b ->
+        let current = int_of_float (refilled_tokens limiter b ~now) in
+        max 0 (min limiter.burst current)
     | None -> limiter.burst
   )
 

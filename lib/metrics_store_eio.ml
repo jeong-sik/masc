@@ -312,8 +312,10 @@ let generate_id () =
 
 type write_entry = { config: config; agent_id: string; file: string; line: string }
 
-let write_queue : write_entry Eio.Stream.t = Eio.Stream.create 256
+let max_write_queue = 256
+let write_queue : write_entry Eio.Stream.t = Eio.Stream.create max_int
 
+let queue_mutex = Stdlib.Mutex.create ()
 let queue_active = Atomic.make false
 
 (** Bind the exact store/agent identity, then admit a queue entry or append.
@@ -328,9 +330,14 @@ let record config (metric : task_metric) =
       let* () = prepare_identity config metric.agent_id in
       let file = current_month_file config metric.agent_id in
       let line = Yojson.Safe.to_string (task_metric_to_yojson metric) ^ "\n" in
-      if Atomic.get queue_active then (
-        Eio.Stream.add write_queue {config;agent_id=metric.agent_id;file;line};
-        Ok Enqueued)
+      let enqueued =
+        Stdlib.Mutex.protect queue_mutex (fun () ->
+          if Atomic.get queue_active && Eio.Stream.length write_queue < max_write_queue then (
+            Eio.Stream.add write_queue {config;agent_id=metric.agent_id;file;line};
+            true)
+          else false)
+      in
+      if enqueued then Ok Enqueued
       else
         let* () = append_bound config ~agent_id:metric.agent_id file line in
         Ok Written)
@@ -343,35 +350,59 @@ let flush_pending () =
     match Eio.Stream.take_nonblocking write_queue with
     | None -> batch
     | Some entry ->
-        let config, agent_id, buffer =
+        let config, agent_id, entries_rev =
           match File_batch_map.find_opt entry.file batch with
           | Some existing -> existing
-          | None -> entry.config, entry.agent_id, Buffer.create 256
+          | None -> entry.config, entry.agent_id, []
         in
-        Buffer.add_string buffer entry.line;
-        drain (File_batch_map.add entry.file (config, agent_id, buffer) batch)
+        drain (File_batch_map.add entry.file (config, agent_id, entry :: entries_rev) batch)
   in
-  let batch = drain File_batch_map.empty in
-  File_batch_map.iter (fun file (config, agent_id, buffer) ->
-    match expected_io file (fun () -> append_bound config ~agent_id file (Buffer.contents buffer)) with
-    | Ok () -> ()
-    | Error error -> Log.Metrics.error "flush_pending: %s" (record_error_to_string error)
-    | exception (Eio.Cancel.Cancelled _ as error) -> raise error
-    | exception error ->
-        Log.Metrics.error "flush_pending: %s: %s" file (Printexc.to_string error)
-  ) batch
+  let requeue_remaining batches =
+    List.iter
+      (fun (_file, (_config, _agent_id, entries_rev)) ->
+        List.iter (Eio.Stream.add write_queue) (List.rev entries_rev))
+      batches
+  in
+  let rec write_batches = function
+    | [] -> ()
+    | (file, (config, agent_id, entries_rev)) :: rest as remaining ->
+        let payload =
+          List.rev_map (fun e -> e.line) entries_rev |> String.concat ""
+        in
+        (match expected_io file (fun () -> append_bound config ~agent_id file payload) with
+         | Ok () -> write_batches rest
+         | Error error ->
+             Log.Metrics.error "flush_pending: %s" (record_error_to_string error);
+             write_batches rest
+         | exception (Eio.Cancel.Cancelled _ as error) ->
+             let bt = Printexc.get_raw_backtrace () in
+             requeue_remaining remaining;
+             Printexc.raise_with_backtrace error bt
+         | exception error ->
+             Log.Metrics.error "flush_pending: %s: %s" file (Printexc.to_string error);
+             write_batches rest)
+  in
+  write_batches (File_batch_map.bindings (drain File_batch_map.empty))
 
 (** Start the background flush fiber. Call once inside Eio_main.run.
     Drains the write queue every 500ms or when the stream has entries. *)
 let start_flush_fiber ~clock =
   let flush_interval_s = 0.5 in
-  Atomic.set queue_active true;
-  let rec loop () =
-    Eio.Time.sleep clock flush_interval_s;
-    flush_pending ();
-    loop ()
-  in
-  loop ()
+  Stdlib.Mutex.protect queue_mutex (fun () -> Atomic.set queue_active true);
+  Fun.protect
+    ~finally:(fun () ->
+      Stdlib.Mutex.protect queue_mutex (fun () -> Atomic.set queue_active false);
+      Eio.Cancel.protect (fun () ->
+        try flush_pending ()
+        with exn ->
+          Log.Metrics.error "flush_pending on shutdown: %s" (Printexc.to_string exn)))
+    (fun () ->
+      let rec loop () =
+        Eio.Time.sleep clock flush_interval_s;
+        flush_pending ();
+        loop ()
+      in
+      loop ())
 
 (** Create a new task metric (helper) - pure *)
 let create_metric ~agent_id ~task_id ?(collaborators=[]) ?handoff_from () =

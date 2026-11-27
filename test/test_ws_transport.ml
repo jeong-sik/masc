@@ -727,6 +727,168 @@ let test_session_ends_with_the_scope_of_its_connection () =
       (Ws.send_to_session_result id "{}" = Ws.Session_gone))
 ;;
 
+let resource_subscription_json ~meth ~id ~uri =
+  Yojson.Safe.to_string
+    (`Assoc
+      [ "jsonrpc", `String "2.0"
+      ; "id", `Int id
+      ; "method", `String meth
+      ; "params", `Assoc [ "uri", `String uri ]
+      ])
+;;
+
+let jsonrpc_has_result = function
+  | `Assoc fields -> List.mem_assoc "result" fields
+  | _ -> false
+;;
+
+let test_ws_close_clears_resource_subscriptions () =
+  Eio_main.run (fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let base = Masc_test_deps.setup_test_workspace () in
+    let sid_ref = ref None in
+    Fun.protect
+      ~finally:(fun () ->
+        Option.iter Masc.Mcp_server_eio_protocol.clear_resource_subscriptions_for_session !sid_ref;
+        Masc_test_deps.cleanup_test_workspace base)
+      (fun () ->
+        let state = Masc.Mcp_server_eio.For_testing.create_state ~base_path:base () in
+        let id =
+          Eio.Switch.run (fun scope ->
+            let _endpoint, id = attach_session ~scope in
+            sid_ref := Some id;
+            let reply =
+              Masc.Mcp_server_eio.handle_request
+                ~sender:Masc.Mcp_server_eio.Unadmitted
+                ~clock:(Eio.Stdenv.clock env)
+                ~sw:scope
+                ~mcp_session_id:id
+                state
+                (resource_subscription_json ~meth:"resources/subscribe" ~id:1 ~uri:"masc://status")
+            in
+            Alcotest.(check bool) "ws subscribe succeeded" true (jsonrpc_has_result reply);
+            Alcotest.(check bool)
+              "subscription recorded while ws session lives"
+              true
+              (Masc.Mcp_server_eio_protocol.For_testing.resource_is_subscribed
+                 ~session_id:id ~uri:"masc://status");
+            id)
+        in
+        Alcotest.(check bool)
+          "ws connection teardown clears resource subscriptions"
+          false
+          (Masc.Mcp_server_eio_protocol.For_testing.resource_is_subscribed
+             ~session_id:id ~uri:"masc://status")))
+;;
+
+let test_http_reap_clears_resource_subscriptions () =
+  let module Http_session = Server_mcp_transport_http_session in
+  Eio_main.run (fun env ->
+    Eio.Switch.run @@ fun sw ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let base = Masc_test_deps.setup_test_workspace () in
+    let sid = "http-reap-clears-resource-sub" in
+    Fun.protect
+      ~finally:(fun () ->
+        Http_session.forget_mcp_session sid;
+        Masc.Mcp_server_eio_protocol.clear_resource_subscriptions_for_session sid;
+        Masc_test_deps.cleanup_test_workspace base)
+      (fun () ->
+        let snapshot_path = Http_session.sessions_file_path ~base_path:base () in
+        Fs_compat.mkdir_p (Filename.dirname snapshot_path);
+        let snapshot =
+          Yojson.Safe.to_string
+            (`Assoc
+              [ "sessions",
+                `Assoc
+                  [ sid,
+                    `Assoc
+                      [ "protocol_version", `String Http_session.mcp_protocol_version_default
+                      ; "profile", `String "operator_remote"
+                      ; "last_active_sse", `Float 1.0
+                      ]
+                  ]
+              ])
+        in
+        Out_channel.with_open_bin snapshot_path (fun oc -> output_string oc snapshot);
+        Http_session.load_sessions_from_file ~base_path:base ();
+        Alcotest.(check bool) "expired session restored before reap" true
+          (Http_session.is_known_session sid);
+        let state = Masc.Mcp_server_eio.For_testing.create_state ~base_path:base () in
+        let reply =
+          Masc.Mcp_server_eio.handle_request
+            ~sender:Masc.Mcp_server_eio.Unadmitted
+            ~clock:(Eio.Stdenv.clock env)
+            ~sw
+            ~mcp_session_id:sid
+            state
+            (resource_subscription_json ~meth:"resources/subscribe" ~id:2 ~uri:"masc://status")
+        in
+        Alcotest.(check bool) "http subscribe succeeded" true (jsonrpc_has_result reply);
+        Alcotest.(check bool)
+          "subscription recorded before reap"
+          true
+          (Masc.Mcp_server_eio_protocol.For_testing.resource_is_subscribed
+             ~session_id:sid ~uri:"masc://status");
+        let reaped =
+          Http_session.reap_stale_sessions
+            ~base_path:base
+            ~is_active_session:(fun _ -> false)
+        in
+        Alcotest.(check bool) "reap removed at least the expired session" true (reaped >= 1);
+        Alcotest.(check bool) "reaped session no longer known" false
+          (Http_session.is_known_session sid);
+        Alcotest.(check bool)
+          "reaping stale HTTP session clears resource subscriptions"
+          false
+          (Masc.Mcp_server_eio_protocol.For_testing.resource_is_subscribed
+             ~session_id:sid ~uri:"masc://status")))
+;;
+
+let test_trimmed_uri_unsubscribe_clears_subscription () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run @@ fun sw ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let base = Masc_test_deps.setup_test_workspace () in
+    let sid = "trimmed-uri-unsub-session" in
+    Fun.protect
+      ~finally:(fun () ->
+        Masc.Mcp_server_eio_protocol.clear_resource_subscriptions_for_session sid;
+        Masc_test_deps.cleanup_test_workspace base)
+      (fun () ->
+        let state = Masc.Mcp_server_eio.For_testing.create_state ~base_path:base () in
+        let sub_reply =
+          Masc.Mcp_server_eio.handle_request
+            ~sender:Masc.Mcp_server_eio.Unadmitted
+            ~clock:(Eio.Stdenv.clock env)
+            ~sw
+            ~mcp_session_id:sid
+            state
+            (resource_subscription_json ~meth:"resources/subscribe" ~id:3 ~uri:"  masc://status  ")
+        in
+        Alcotest.(check bool) "padded subscribe succeeded" true (jsonrpc_has_result sub_reply);
+        Alcotest.(check bool)
+          "padded subscribe stored canonical trimmed URI"
+          true
+          (Masc.Mcp_server_eio_protocol.For_testing.resource_is_subscribed
+             ~session_id:sid ~uri:"masc://status");
+        let unsub_reply =
+          Masc.Mcp_server_eio.handle_request
+            ~sender:Masc.Mcp_server_eio.Unadmitted
+            ~clock:(Eio.Stdenv.clock env)
+            ~sw
+            ~mcp_session_id:sid
+            state
+            (resource_subscription_json ~meth:"resources/unsubscribe" ~id:4 ~uri:"  masc://status  ")
+        in
+        Alcotest.(check bool) "padded unsubscribe succeeded" true (jsonrpc_has_result unsub_reply);
+        Alcotest.(check bool)
+          "padded unsubscribe clears trimmed URI entry"
+          false
+          (Masc.Mcp_server_eio_protocol.For_testing.resource_is_subscribed
+             ~session_id:sid ~uri:"masc://status")))
+;;
+
 (* The writer fiber cannot start under a scope that has finished: Eio refuses
    the fork. The session must not stay registered then, because nothing
    would take its frames and every broadcast would queue one more. *)
@@ -1367,6 +1529,12 @@ let () =
         test_frames_from_another_domain_are_written_on_the_connection_domain;
       Alcotest.test_case "a session ends with the scope of its connection" `Quick
         test_session_ends_with_the_scope_of_its_connection;
+      Alcotest.test_case "ws connection teardown clears resource subscriptions" `Quick
+        test_ws_close_clears_resource_subscriptions;
+      Alcotest.test_case "http stale session reap clears resource subscriptions" `Quick
+        test_http_reap_clears_resource_subscriptions;
+      Alcotest.test_case "trimmed URI unsubscribe clears subscription" `Quick
+        test_trimmed_uri_unsubscribe_clears_subscription;
       Alcotest.test_case "a scope that cannot start the writer leaves no session" `Quick
         test_scope_that_cannot_start_the_writer_leaves_no_session;
     ]);

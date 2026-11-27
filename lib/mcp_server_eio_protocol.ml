@@ -201,6 +201,7 @@ let try_subscribe_resource_for_session ~session_id ~uri =
 ;;
 
 let unsubscribe_resource_for_session ~session_id ~uri =
+  let uri = String.trim uri in
   with_resource_subscription_lock (fun () ->
     match Hashtbl.find_opt resource_subscriptions session_id with
     | Some uris ->

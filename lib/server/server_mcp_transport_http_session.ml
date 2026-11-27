@@ -148,6 +148,7 @@ let remember_mcp_profile ?otel_transport_context session_id profile =
 let forget_mcp_session session_id =
   record_mcp_server_session_duration session_id;
   Client_registry_eio.unregister_mcp_session session_id;
+  Mcp_server_eio_protocol.clear_resource_subscriptions_for_session session_id;
   Atomic_util.update session_registry (fun state ->
     { versions=SMap.remove session_id state.versions
     ; profiles=SMap.remove session_id state.profiles

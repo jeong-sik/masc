@@ -689,7 +689,8 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ?fs ~cwd ~cwd_path ~timeout_s ~ac
          | Ok _host ->
            Eio.Switch.run (fun acp_sw ->
              let map_err = function
-               | Runtime_acp_client.Spawn_refused _ as err ->
+               | (Runtime_acp_client.Spawn_refused _ | Runtime_acp_client.Preparation_failed _) as
+                 err ->
                  Error (Unavailable (Client_not_started (Runtime_acp_client.error_to_string err)))
                | Runtime_acp_client.Invalid_config _ as err ->
                  Error (Unavailable (Invalid_configuration (Runtime_acp_client.error_to_string err)))

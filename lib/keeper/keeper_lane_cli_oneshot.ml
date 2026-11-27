@@ -140,6 +140,7 @@ let acp_error_is_binding_rest : Runtime_acp_client.error -> bool = function
     signal_refusal_is_binding_rest refusal
   | Runtime_acp_client.Invalid_config _
   | Runtime_acp_client.Spawn_refused _
+  | Runtime_acp_client.Preparation_failed _
   | Runtime_acp_client.Protocol_error _
   | Runtime_acp_client.Timeout _
   | Runtime_acp_client.Process_exited _
@@ -245,6 +246,7 @@ let refused_for_input_size = function
           Fusion_official_client.Acp_failure
             ( Runtime_acp_client.Invalid_config _
             | Runtime_acp_client.Spawn_refused _
+            | Runtime_acp_client.Preparation_failed _
             | Runtime_acp_client.Protocol_error _
             | Runtime_acp_client.Rpc_error
                 { refusal =

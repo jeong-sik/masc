@@ -314,9 +314,12 @@ module For_testing : sig
           -> unit)
        * (unit -> Yojson.Safe.t)
 
+  (** The digest also carries a profile masc writes for the host: a Kimi Code
+      [Native_none] host's {!Runtime_kimi_agent_profile.surface_revision}. *)
   val reconcile_prepared_tools
     :  ?account_home:string
     -> ?continuation:Keeper_semantic_execution.official_client_checkpoint
+    -> driver:Runtime_acp_client.driver
     -> native_posture:Runtime_native_tools.posture
     -> claim_plan:Keeper_official_client_session_store.claim_plan
     -> Keeper_official_client_host.prepared_turn

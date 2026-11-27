@@ -643,6 +643,13 @@ val activity_trace_to_string : activity_trace -> string
 type error =
   | Invalid_config of string
   | Spawn_refused of Process_eio.spawn_refusal
+  | Preparation_failed of
+      { argv : string list  (** The command masc ran before the spawn. *)
+      ; detail : string
+      }
+      (** A command masc runs to prepare the host ran and failed, or printed
+          output masc cannot read. The host was not started and nothing
+          reached the vendor. *)
   | Protocol_error of
       { stage : string
       ; detail : string
@@ -758,7 +765,17 @@ val start
     [Native_none]. [muse acp] is started with [-c run.toolset] naming the
     tools [native_posture] allows and, when [mcp_server] lists any tool, the
     tools of that server; the host runs some native tools without a
-    permission request, so refusing requests could not keep them off. *)
+    permission request, so refusing requests could not keep them off.
+
+    Before the spawn, a Muse host's installed plugins are listed
+    ({!Runtime_muse_plugins.installed_capability_ids}) and each of their
+    runtime capabilities is switched off with a [-c] setting. A listing
+    command that could not start returns [Spawn_refused]; one that failed or
+    printed unreadable output returns [Preparation_failed] with the command.
+    A Kimi host at [Native_none] first gets
+    {!Runtime_kimi_agent_profile.masc_only} written into [config.cwd], which
+    must be an empty folder; a failed write returns [Invalid_config]. No
+    host is spawned after any of these errors. *)
 
 val driver : t -> driver
 val mcp_server_isolation : t -> mcp_server_isolation
@@ -904,6 +921,7 @@ module For_testing : sig
     -> ?mcp_server:mcp_http_server
     -> config
     -> temp_gemini_dir:string option
+    -> muse_plugin_capabilities:string list
     -> string list
   val utf8_safe_suffix : max_bytes:int -> string -> string
   val redact_stderr_text : ?extra_secrets:string list -> string -> string

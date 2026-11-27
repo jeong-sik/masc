@@ -59,7 +59,7 @@ function categoryTone(cat: TlaSpecEntry['category']): 'ok' | 'warn' | 'neutral' 
   }
 }
 
-function cfgCoverage(entry: TlaSpecEntry): { label: string; tone: 'ok' | 'warn' | 'err' } {
+function cfgCoverage(entry: TlaSpecEntry): { label: string; tone: 'ok' | 'warn' | 'bad' } {
   if (entry.has_clean_cfg && entry.has_buggy_cfg) {
     return { label: 'clean + buggy', tone: 'ok' }
   }
@@ -69,7 +69,7 @@ function cfgCoverage(entry: TlaSpecEntry): { label: string; tone: 'ok' | 'warn' 
   if (entry.has_buggy_cfg) {
     return { label: 'buggy only', tone: 'warn' }
   }
-  return { label: 'no cfg', tone: 'err' }
+  return { label: 'no cfg', tone: 'bad' }
 }
 
 function shortMtime(iso: string): string {
@@ -190,11 +190,13 @@ export function VerificationSpecsPanel() {
         <div class="mb-2 text-xs text-[var(--color-fg-muted)]">
           <span class="font-mono">${dirLabel}</span>
         </div>
-        ${filtered.length === 0
-          ? html`<${EmptyState} message=${categoryFilter.value === 'all' && !searchQuery.value
-              ? 'TLA+ 스펙을 찾지 못했습니다 (MASC_SPECS_DIR 확인)'
-              : '조건에 맞는 스펙 없음'} />`
-          : html`<${SpecsTable} entries=${filtered} />`}
+        ${filtered.length > 0
+          ? html`<${SpecsTable} entries=${filtered} />`
+          : data !== null && !current.error && !current.loading
+            ? html`<${EmptyState} message=${categoryFilter.value === 'all' && !searchQuery.value
+                ? 'TLA+ 스펙을 찾지 못했습니다 (MASC_SPECS_DIR 확인)'
+                : '조건에 맞는 스펙 없음'} />`
+            : null}
       <//>
 
       <${TlcResultsPanel} />

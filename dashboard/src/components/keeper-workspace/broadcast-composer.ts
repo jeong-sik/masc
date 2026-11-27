@@ -7,7 +7,7 @@ import { isDismissEscape } from '../../lib/keyboard'
 // 전송은 기존 board composer 와 같은 sendBroadcast + receipt 처리 경로를 쓴다.
 
 import { html } from 'htm/preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import type { Keeper } from '../../types'
 import { broadcastReceiptMessage, currentDashboardActor, sendBroadcast } from '../../api'
@@ -24,6 +24,15 @@ export function BroadcastComposer({
 }): VNode {
   const [msg, setMsg] = useState('')
   const [sending, setSending] = useState(false)
+  const sendingRef = useRef(false)
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -41,7 +50,8 @@ export function BroadcastComposer({
   const canSend = msg.trim().length > 0 && recipients.length > 0 && !sending
 
   const send = () => {
-    if (!canSend) return
+    if (!canSend || sendingRef.current) return
+    sendingRef.current = true
     setSending(true)
     void (async () => {
       try {
@@ -53,11 +63,12 @@ export function BroadcastComposer({
           return
         }
         showToast(`${recipients.length} keeper에게 브로드캐스트`, 'success')
-        onClose()
+        if (mountedRef.current) onClose()
       } catch (err) {
         showToast(`브로드캐스트 실패: ${errorToString(err)}`, 'error', 8000)
       } finally {
-        setSending(false)
+        sendingRef.current = false
+        if (mountedRef.current) setSending(false)
       }
     })()
   }

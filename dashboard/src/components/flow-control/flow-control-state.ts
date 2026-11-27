@@ -12,6 +12,7 @@ export const maintenanceLoading = signal(false)
 // ── Maintenance ─────────────────────────────────
 
 export async function runGarbageCollection(): Promise<void> {
+  if (maintenanceLoading.value) return
   const access = dashboardAuthAccess(shellAuthSummary.value, 'admin')
   if (!access.allowed) {
     showToast(access.reason ?? 'Missing permission to run GC.', 'error', 6000)

@@ -50,7 +50,10 @@ interface LifecycleRow {
 
 const transitionRows = signal<TransitionRow[]>([])
 const lifecycleRows = signal<LifecycleRow[]>([])
+const transitionErrors = signal(0)
+const lifecycleErrors = signal(0)
 const timelineLoading = signal(false)
+let reactivityRequestGen = 0
 
 function flattenTransitions(keeper: string, transitions: KeeperTransition[]): TransitionRow[] {
   return transitions.map(t => ({
@@ -72,19 +75,25 @@ function flattenLifecycle(keeper: string, events: KeeperLifecycleEvent[]): Lifec
 }
 
 async function refreshReactivityTimelines(): Promise<void> {
+  const gen = ++reactivityRequestGen
   const names = keepers.value.map(k => k.name)
   timelineLoading.value = true
   try {
     if (names.length === 0) {
       transitionRows.value = []
       lifecycleRows.value = []
+      transitionErrors.value = 0
+      lifecycleErrors.value = 0
       return
     }
+    let transErrs = 0
+    let lifeErrs = 0
     const [transitions, lifecycles] = await Promise.all([
       Promise.all(names.map(name =>
         fetchKeeperTransitions(name, 30)
           .then(r => flattenTransitions(name, r.transitions))
           .catch((err: unknown) => {
+            transErrs += 1
             console.warn('[tool-monitor-reactivity] fetchKeeperTransitions failed', { name, err })
             return [] as TransitionRow[]
           }),
@@ -93,15 +102,21 @@ async function refreshReactivityTimelines(): Promise<void> {
         fetchKeeperLifecycle(name, 30)
           .then(r => flattenLifecycle(name, r.events))
           .catch((err: unknown) => {
+            lifeErrs += 1
             console.warn('[tool-monitor-reactivity] fetchKeeperLifecycle failed', { name, err })
             return [] as LifecycleRow[]
           }),
       )),
     ])
+    if (gen !== reactivityRequestGen) return
     transitionRows.value = transitions.flat().sort((a, b) => b.atMs - a.atMs).slice(0, 40)
     lifecycleRows.value = lifecycles.flat().sort((a, b) => b.atMs - a.atMs).slice(0, 40)
+    transitionErrors.value = transErrs
+    lifecycleErrors.value = lifeErrs
   } finally {
-    timelineLoading.value = false
+    if (gen === reactivityRequestGen) {
+      timelineLoading.value = false
+    }
   }
 }
 
@@ -146,7 +161,11 @@ function HealthGrid() {
 function LifecycleTimeline() {
   const rows = transitionRows.value
   if (rows.length === 0) {
-    return html`<div class="dim">${timelineLoading.value ? '불러오는 중…' : '기록된 상태 전환 없음'}</div>`
+    if (timelineLoading.value) return html`<div class="dim">불러오는 중…</div>`
+    if (transitionErrors.value > 0) {
+      return html`<div class="dim" role="alert">상태 전환 데이터를 불러오지 못했습니다</div>`
+    }
+    return html`<div class="dim">기록된 상태 전환 없음</div>`
   }
   return html`
     <div class="tm-time">
@@ -165,7 +184,11 @@ function LifecycleTimeline() {
 function LifecycleEvents() {
   const rows = lifecycleRows.value
   if (rows.length === 0) {
-    return html`<div class="dim">${timelineLoading.value ? '불러오는 중…' : '기록된 생명주기 이벤트 없음'}</div>`
+    if (timelineLoading.value) return html`<div class="dim">불러오는 중…</div>`
+    if (lifecycleErrors.value > 0) {
+      return html`<div class="dim" role="alert">생명주기 이벤트를 불러오지 못했습니다</div>`
+    }
+    return html`<div class="dim">기록된 생명주기 이벤트 없음</div>`
   }
   return html`
     <div class="tm-time">
@@ -205,11 +228,18 @@ function PausedKeepers() {
 
 export function ToolMonitorReactivityBoard() {
   const view = useSignal<ReactivityView>('health')
+  const keeperNamesKey = keepers.value.map(k => k.name).join('\0')
+
+  useEffect(() => {
+    void refreshShell({ force: true })
+  }, [])
 
   useEffect(() => {
     void refreshReactivityTimelines()
-    void refreshShell({ force: true })
-  }, [])
+    return () => {
+      reactivityRequestGen += 1
+    }
+  }, [keeperNamesKey])
 
   return html`
     <div class="tm-board" data-testid="tool-monitor-reactivity">

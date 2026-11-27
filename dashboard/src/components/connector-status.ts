@@ -409,6 +409,7 @@ export async function bindConnector(connectorId: string, keeperName: string, cha
   const keeper = keeperName.trim()
   const channel = channelId.trim()
   if (!keeper || !channel) return false
+  if (getConnectorUiState(connectorId).actionLoading) return false
 
   patchConnectorUiState(connectorId, { actionLoading: true })
   try {
@@ -434,6 +435,7 @@ export async function bindConnector(connectorId: string, keeperName: string, cha
 async function unbindConnector(connectorId: string, channelId: string) {
   const channel = channelId.trim()
   if (!channel) return
+  if (getConnectorUiState(connectorId).actionLoading) return
 
   patchConnectorUiState(connectorId, { actionLoading: true })
   try {

@@ -11,7 +11,7 @@
 import { html } from 'htm/preact'
 import { isEditableTarget } from '../lib/keyboard'
 import type { VNode } from 'preact'
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import {
   activeWorkspaceId,
   authSession,
@@ -51,6 +51,7 @@ export function FastApprovalStrip(): VNode | null {
   const inboxUnchecked = inboxUncheckedSources.value
   const mobile = isMobileViewport.value
   const [submittingId, setSubmittingId] = useState<string | null>(null)
+  const submittingRef = useRef<string | null>(null)
   const [capturedEpoch, setCapturedEpoch] = useState<number>(() => sessionEpoch.peek())
   const [capturedApprovalId, setCapturedApprovalId] = useState<string | null>(null)
   const [capturedRevision, setCapturedRevision] = useState<string | null>(null)
@@ -84,6 +85,8 @@ export function FastApprovalStrip(): VNode | null {
       return
     }
     const approvalId = approval.approvalId
+    if (submittingRef.current === approvalId) return
+    submittingRef.current = approvalId
     setSubmittingId(approvalId)
     void submitFastToolApproval(approval, decision)
       .then((res) => {
@@ -95,6 +98,9 @@ export function FastApprovalStrip(): VNode | null {
         }
       })
       .finally(() => {
+        if (submittingRef.current === approvalId) {
+          submittingRef.current = null
+        }
         setSubmittingId((cur) => (cur === approvalId ? null : cur))
       })
   }
@@ -130,7 +136,13 @@ export function FastApprovalStrip(): VNode | null {
       const epochLocked = sessionEpoch.peek() !== capturedEpoch
       const wsLocked = activeWorkspaceId.peek() !== headApproval.workspaceId
       const revisionLocked = lockedRevision !== null && headApproval.revision !== lockedRevision
-      if (epochLocked || wsLocked || revisionLocked || submittingId === headApproval.approvalId) return
+      if (
+        epochLocked
+        || wsLocked
+        || revisionLocked
+        || submittingId === headApproval.approvalId
+        || submittingRef.current === headApproval.approvalId
+      ) return
 
       if (key === 'y') {
         event.preventDefault()

@@ -220,8 +220,8 @@ let antigravity (error : Runtime_antigravity.error) : 'rejection Outcome.unanswe
 let acp (error : Runtime_acp_client.error) : 'rejection Outcome.unanswered =
   match error with
   | Invalid_config _ | Spawn_refused _ -> Silent Unavailable
-  | Protocol_error _ | Rpc_error _ | Timeout _ | Process_exited _ | Client_closed ->
-    Silent Lost
+  | Protocol_error _ | Rpc_error _ | Host_turn_failed _ | Timeout _ | Process_exited _
+  | Client_closed -> Silent Lost
 
 let client (bodies : 'rejection bodies) (failure : Fusion_official_client.failure)
   : 'rejection Outcome.unanswered

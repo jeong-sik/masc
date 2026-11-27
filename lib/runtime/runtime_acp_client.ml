@@ -960,6 +960,11 @@ type error =
       ; stderr_tail : string
       ; last_activity : activity_trace option
       }
+  | Host_turn_failed of
+      { code : string
+      ; message : string
+      ; refusal : Llm_provider.Retry.signal_refusal option
+      }
   | Client_closed
 
 let rec redact_string_value ~depth (raw : string) : string =
@@ -1027,6 +1032,8 @@ let error_to_string = function
   | Timeout { seconds; _ } -> Printf.sprintf "ACP timeout after %.1fs" seconds
   | Process_exited { detail; stderr_tail; last_activity } ->
     process_exited_to_string ~detail ~stderr_tail ~last_activity
+  | Host_turn_failed { code; message; refusal = _ } ->
+    Printf.sprintf "ACP host recorded the prompt as failed (%s): %s" code message
   | Client_closed -> "ACP client is closed"
 ;;
 
@@ -3159,7 +3166,7 @@ let rpc_call_with_wait
        | Process_exited { detail; stderr_tail; last_activity = _ } ->
          ended_without_answer ~detail ~stderr_tail
        | Invalid_config _ | Spawn_refused _ | Protocol_error _ | Rpc_error _ | Timeout _
-       | Client_closed -> Error err)
+       | Host_turn_failed _ | Client_closed -> Error err)
     | Ok () ->
       let remove_pending () =
         with_state_lock t (fun () -> Hashtbl.remove t.pending id)
@@ -4569,9 +4576,45 @@ let prompt
         Eio.Cancel.protect (fun () -> cancel t ~session_id);
         raise exn)
   in
-  match result with
-  | Error err -> Error err
-  | Ok (stop_reason, acp_usage) ->
+  (* A host that keeps its own record of the session wrote down how the
+     prompt ended. Read it once, after the answer. *)
+  let host_record =
+    match result, compaction_mark with
+    | Error _, _ | Ok _, None -> None
+    | Ok _, Some (counted_to, marked) ->
+      (match Result.bind marked Runtime_kimi_session_log.read_prompt with
+       | Ok (record, next) ->
+         (* A failed prompt keeps its mark, like one answered with an error:
+            the next prompt counts its compactions again. Every prompt writes
+            its own [turn.ended], so the next read ends on that one. *)
+         (match record.Runtime_kimi_session_log.turn_end with
+          | Some (Runtime_kimi_session_log.Turn_failed _) -> ()
+          | Some (Runtime_kimi_session_log.Turn_completed | Runtime_kimi_session_log.Turn_cancelled)
+          | None -> Hashtbl.replace counted_to session_id next);
+         Some (Ok record)
+       | Error err ->
+         (* A record that could not be read is marked afresh at the next prompt. *)
+         Hashtbl.remove counted_to session_id;
+         Some (Error err))
+  in
+  match result, host_record with
+  | Error err, _ -> Error err
+  | ( Ok _
+    , Some
+        (Ok
+           { Runtime_kimi_session_log.turn_end =
+               Some (Runtime_kimi_session_log.Turn_failed { code; message; status })
+           ; _
+           }) ) ->
+    (* The answer said [end_turn]; the record says the prompt failed. *)
+    let refusal =
+      Llm_provider.Retry.classify_structured_json
+        ?http_status:status
+        ~fallback_message:message
+        (`Assoc [ "code", `String code; "message", `String message ])
+    in
+    Error (Host_turn_failed { code; message; refusal })
+  | Ok (stop_reason, acp_usage), host_record ->
     (* Without its journal a Muse prompt has no count of the session: the
        [used] its frames carried is the host's estimate. *)
     let without_journal = { acp_usage with context_used = None } in
@@ -4603,20 +4646,16 @@ let prompt
     (* Kimi Code counts the session once, after the response, so a compaction
        the prompt then grew past shows only in the host's session record. *)
     let context_compaction =
-      match compaction_mark with
+      match host_record with
       | None -> usage_compaction
-      | Some (counted_to, marked) ->
-        (* A record that could not be read is marked afresh at the next prompt. *)
-        let recorded =
-          match Result.bind marked Runtime_kimi_session_log.compactions with
-          | Ok (count, next) ->
-            Hashtbl.replace counted_to session_id next;
-            if count = 0 then Not_compacted else Compacted
-          | Error err ->
-            Hashtbl.remove counted_to session_id;
-            Compaction_unknown (Kimi_session_record_unreadable err)
-        in
-        either_compaction usage_compaction recorded
+      | Some (Ok { Runtime_kimi_session_log.compactions; _ }) ->
+        either_compaction
+          usage_compaction
+          (if compactions = 0 then Not_compacted else Compacted)
+      | Some (Error err) ->
+        either_compaction
+          usage_compaction
+          (Compaction_unknown (Kimi_session_record_unreadable err))
     in
     Ok
       { session_id

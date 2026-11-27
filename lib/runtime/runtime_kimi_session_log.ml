@@ -140,6 +140,22 @@ let string_field key = function
   | _ -> None
 ;;
 
+let int_field key = function
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some (`Int n) -> Some n
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
+let object_field key = function
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some (`Assoc _ as value) -> Some value
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
 let check_protocol path =
   let unsupported found =
     Error (Unsupported_protocol { path; found; supported = supported_protocol_version })
@@ -228,9 +244,44 @@ let complete_lines ~start ~offset slice =
   | Some _ | None -> []
 ;;
 
+type turn_end =
+  | Turn_completed
+  | Turn_cancelled
+  | Turn_failed of
+      { code : string
+      ; message : string
+      ; status : int option
+      }
+
 type record =
   | Context_compacted
+  | Turn_ended of turn_end
   | Other_event
+
+(* [turn.ended] reasons seen in 290 records of 144 sessions written in the
+   three days to 2026-11-27: [completed] 269, [cancelled] 9, [failed] 12. Every
+   [failed] record carried [error.code] and [error.message]; a provider refusal
+   also carries [error.details.statusCode] (429 for the weekly usage limit). *)
+let decode_turn_end ~byte_offset json =
+  let malformed detail = Error (Malformed_record { byte_offset; detail }) in
+  match string_field "reason" json with
+  | Some "completed" -> Ok Turn_completed
+  | Some "cancelled" -> Ok Turn_cancelled
+  | Some "failed" ->
+    let error = object_field "error" json in
+    (match
+       Option.bind error (string_field "code"), Option.bind error (string_field "message")
+     with
+     | Some code, Some message ->
+       let status =
+         Option.bind (Option.bind error (object_field "details")) (int_field "statusCode")
+       in
+       Ok (Turn_failed { code; message; status })
+     | (Some _ | None), _ ->
+       malformed "turn.ended failed without string error.code and error.message")
+  | Some reason -> malformed (Printf.sprintf "turn.ended has unknown reason %S" reason)
+  | None -> malformed "turn.ended has no string \"reason\" field"
+;;
 
 let decode_record ~byte_offset line =
   match Yojson.Safe.from_string line with
@@ -238,6 +289,9 @@ let decode_record ~byte_offset line =
   | json ->
     (match string_field "type" json with
      | Some "context.apply_compaction" -> Ok Context_compacted
+     | Some "turn.ended" ->
+       let* turn_end = decode_turn_end ~byte_offset json in
+       Ok (Turn_ended turn_end)
      | Some _ -> Ok Other_event
      | None -> Error (Malformed_record { byte_offset; detail = "no string \"type\" field" }))
 ;;
@@ -250,21 +304,27 @@ let next_mark m ~start slice =
   | None -> m
 ;;
 
-let compactions m =
+type prompt_record =
+  { compactions : int
+  ; turn_end : turn_end option
+  }
+
+let read_prompt m =
   let* start, slice = read_slice m in
-  let* count =
+  let* record =
     List.fold_left
-      (fun count (byte_offset, line) ->
-         let* count = count in
+      (fun acc (byte_offset, line) ->
+         let* acc = acc in
          if line = ""
-         then Ok count
+         then Ok acc
          else (
            let* record = decode_record ~byte_offset line in
            match record with
-           | Context_compacted -> Ok (count + 1)
-           | Other_event -> Ok count))
-      (Ok 0)
+           | Context_compacted -> Ok { acc with compactions = acc.compactions + 1 }
+           | Turn_ended turn_end -> Ok { acc with turn_end = Some turn_end }
+           | Other_event -> Ok acc))
+      (Ok { compactions = 0; turn_end = None })
       (complete_lines ~start ~offset:m.offset slice)
   in
-  Ok (count, next_mark m ~start slice)
+  Ok (record, next_mark m ~start slice)
 ;;

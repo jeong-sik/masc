@@ -663,6 +663,17 @@ type error =
               how long before the end. [detail] starts with the request's
               method name. [None] for a failure outside a request. *)
       }
+  | Host_turn_failed of
+      { code : string  (** The host's own error code. *)
+      ; message : string
+      ; refusal : Llm_provider.Retry.signal_refusal option
+          (** The same reading of [message] an [Rpc_error] gets. *)
+      }
+      (** [session/prompt] answered with a stop reason, and the host's own
+          session record says the prompt failed. [kimi acp] answers a prompt
+          it could not run, such as one refused for the account's usage
+          limit, with [end_turn] and no message; the cause is only in its
+          record. *)
   | Client_closed
 
 val error_to_string : error -> string

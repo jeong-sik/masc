@@ -168,6 +168,35 @@ let runtime_label_of_driver driver =
   "ACP(" ^ Acp.driver_to_string driver ^ ")"
 ;;
 
+(* One table for a provider refusal, whether the host answered the request with
+   a JSON-RPC error or recorded the failure in its own session record. *)
+let core_error_of_refusal ~detail ~overflow_message ~unclassified = function
+  | Some (Llm_provider.Retry.Signal_context_overflow { limit; _ }) ->
+    Agent_core.Error.Api
+      (Agent_core.Retry.ContextOverflow { message = overflow_message; limit })
+  | Some (Llm_provider.Retry.Signal_request_body_too_large _) ->
+    Agent_core.Error.Api
+      (Agent_core.Retry.InvalidRequest
+         { message = detail
+         ; reason = Agent_core.Retry.Request_body_refused_by_provider { status = 413 }
+         })
+  | Some (Llm_provider.Retry.Signal_hard_quota { retry_after; _ }) ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.HardQuota { provider = "acp"; retry_after; detail })
+  | Some (Llm_provider.Retry.Signal_rate_limited { retry_after; _ }) ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.RateLimit { provider = "acp"; retry_after; detail })
+  | Some (Llm_provider.Retry.Signal_auth_error _) ->
+    Agent_core.Error.Provider (Llm_provider.Error.AuthError { provider = "acp"; detail })
+  | Some (Llm_provider.Retry.Signal_authorization_error _) ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.AuthorizationError { provider = "acp"; detail })
+  | Some (Llm_provider.Retry.Signal_provider_unavailable _) ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderUnavailable { provider = "acp"; detail })
+  | None -> unclassified
+;;
+
 let acp_error_to_core_error = function
   | Acp.Invalid_config detail -> config_error ~field:"acp" detail
   | Acp.Spawn_refused refusal ->
@@ -183,42 +212,25 @@ let acp_error_to_core_error = function
          { detail = Printf.sprintf "ACP protocol error (%s): %s" stage detail })
   | Acp.Rpc_error { method_name; code; message; refusal; _ } as rpc_err ->
     let detail = Acp.error_to_string rpc_err in
-    (match refusal with
-     | Some (Llm_provider.Retry.Signal_context_overflow { limit; _ }) ->
-       Agent_core.Error.Api
-         (Agent_core.Retry.ContextOverflow
-            { message =
-                Printf.sprintf "ACP RPC %s context overflow (%d): %s" method_name code message
-            ; limit
-            })
-     | Some (Llm_provider.Retry.Signal_request_body_too_large _) ->
-       Agent_core.Error.Api
-         (Agent_core.Retry.InvalidRequest
-            { message = detail
-            ; reason = Agent_core.Retry.Request_body_refused_by_provider { status = 413 }
-            })
-     | Some (Llm_provider.Retry.Signal_hard_quota { retry_after; _ }) ->
-       Agent_core.Error.Provider
-         (Llm_provider.Error.HardQuota { provider = "acp"; retry_after; detail })
-     | Some (Llm_provider.Retry.Signal_rate_limited { retry_after; _ }) ->
-       Agent_core.Error.Provider
-         (Llm_provider.Error.RateLimit { provider = "acp"; retry_after; detail })
-     | Some (Llm_provider.Retry.Signal_auth_error _) ->
-       Agent_core.Error.Provider
-         (Llm_provider.Error.AuthError { provider = "acp"; detail })
-     | Some (Llm_provider.Retry.Signal_authorization_error _) ->
-       Agent_core.Error.Provider
-         (Llm_provider.Error.AuthorizationError { provider = "acp"; detail })
-     | Some (Llm_provider.Retry.Signal_provider_unavailable _) ->
-       Agent_core.Error.Provider
-         (Llm_provider.Error.ProviderUnavailable { provider = "acp"; detail })
-     | None ->
-       Agent_core.Error.Provider
-         (Llm_provider.Error.ProviderReportedError
-            { provider = "acp"
-            ; error_type = Some (Printf.sprintf "rpc_%d" code)
-            ; detail
-            }))
+    core_error_of_refusal
+      ~detail
+      ~overflow_message:
+        (Printf.sprintf "ACP RPC %s context overflow (%d): %s" method_name code message)
+      ~unclassified:
+        (Agent_core.Error.Provider
+           (Llm_provider.Error.ProviderReportedError
+              { provider = "acp"; error_type = Some (Printf.sprintf "rpc_%d" code); detail }))
+      refusal
+  | Acp.Host_turn_failed { code; refusal; _ } as failed ->
+    let detail = Acp.error_to_string failed in
+    core_error_of_refusal
+      ~detail
+      ~overflow_message:detail
+      ~unclassified:
+        (Agent_core.Error.Provider
+           (Llm_provider.Error.ProviderReportedError
+              { provider = "acp"; error_type = Some code; detail }))
+      refusal
   | Acp.Timeout { seconds; stage = Some stage; _ } ->
     Agent_core.Error.Api
       (Agent_core.Retry.Timeout
@@ -248,7 +260,7 @@ let acp_error_to_core_error = function
    storms. Transport, timeout, protocol, and non-quota RPC failures still evict
    the entry to keep session state clean. *)
 let should_evict_persistent_child_on_error = function
-  | Acp.Rpc_error { refusal; _ } ->
+  | Acp.Rpc_error { refusal; _ } | Acp.Host_turn_failed { refusal; _ } ->
     (match refusal with
      | Some (Llm_provider.Retry.Signal_hard_quota _ | Llm_provider.Retry.Signal_rate_limited _) -> false
      | Some (Llm_provider.Retry.Signal_context_overflow _)
@@ -269,8 +281,22 @@ let recovery_failure_of_acp_error = function
   | Acp.Invalid_config _ -> Session_store.Pre_dispatch_failed
   | Acp.Spawn_refused refusal -> Session_store.recovery_failure_of_spawn_refusal refusal
   | Acp.Protocol_error _ -> Session_store.Protocol_failed
-  | Acp.Rpc_error { refusal = Some (Llm_provider.Retry.Signal_context_overflow _); _ } ->
+  | Acp.Rpc_error { refusal = Some (Llm_provider.Retry.Signal_context_overflow _); _ }
+  | Acp.Host_turn_failed
+      { refusal = Some (Llm_provider.Retry.Signal_context_overflow _); _ } ->
     Session_store.Input_rejected Session_store.Bootstrap_floor_exceeded
+  | Acp.Host_turn_failed
+      { refusal =
+          ( None
+          | Some
+              ( Llm_provider.Retry.Signal_request_body_too_large _
+              | Llm_provider.Retry.Signal_hard_quota _
+              | Llm_provider.Retry.Signal_rate_limited _
+              | Llm_provider.Retry.Signal_auth_error _
+              | Llm_provider.Retry.Signal_authorization_error _
+              | Llm_provider.Retry.Signal_provider_unavailable _ ) )
+      ; _
+      }
   | Acp.Rpc_error
       { refusal =
           ( None
@@ -345,6 +371,7 @@ let classify_prompt_error ~is_gate_continuation ~activity_observed = function
                 | Llm_provider.Retry.Signal_provider_unavailable _ ) )
         ; _
         }
+    | Acp.Host_turn_failed _
     | Acp.Timeout _
     | Acp.Process_exited _
     | Acp.Client_closed ) as err ->
@@ -353,7 +380,8 @@ let classify_prompt_error ~is_gate_continuation ~activity_observed = function
 
 let should_evict_on_session_setup_error = function
   | Acp.Timeout _ | Acp.Protocol_error _ | Acp.Process_exited _ | Acp.Client_closed -> true
-  | Acp.Invalid_config _ | Acp.Spawn_refused _ | Acp.Rpc_error _ -> false
+  | Acp.Invalid_config _ | Acp.Spawn_refused _ | Acp.Rpc_error _ | Acp.Host_turn_failed _ ->
+    false
 ;;
 
 let api_usage_of_acp_usage ~driver (u : Acp.usage) : Agent_core.Types.api_usage =
@@ -2999,6 +3027,7 @@ let run_without_lifecycle
                      | Acp.Spawn_refused _
                      | Acp.Protocol_error _
                      | Acp.Rpc_error _
+                     | Acp.Host_turn_failed _
                      | Acp.Timeout _
                      | Acp.Process_exited _
                      | Acp.Client_closed ) as err) ->
@@ -3207,7 +3236,8 @@ let run_without_lifecycle
                     ()
                 in
                 (match res with
-                 | Ok _ | Error (Acp.Rpc_error _) -> cancel_settled := true
+                 | Ok _ | Error (Acp.Rpc_error _ | Acp.Host_turn_failed _) ->
+                   cancel_settled := true
                  | Error
                      ( Acp.Invalid_config _
                      | Acp.Spawn_refused _
@@ -3373,6 +3403,7 @@ let run_without_lifecycle
                      | Llm_provider.Retry.Signal_provider_unavailable _ ) )
              ; _
              }
+         | Acp.Host_turn_failed _
          | Acp.Timeout _
          | Acp.Process_exited _
          | Acp.Client_closed -> ());

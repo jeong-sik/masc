@@ -218,5 +218,6 @@ let cli_failure = function
          ( Runtime_acp_client.Timeout _
          | Runtime_acp_client.Protocol_error _
          | Runtime_acp_client.Rpc_error _
+         | Runtime_acp_client.Host_turn_failed _
          | Runtime_acp_client.Process_exited _
          | Runtime_acp_client.Client_closed ) -> Transient)

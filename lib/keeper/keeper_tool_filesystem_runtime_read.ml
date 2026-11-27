@@ -352,11 +352,15 @@ let handle_read_file_with_preparation
       (error_json refusal.message)
   | Ok (window, read_target) ->
     let target = read_file_target_path read_target in
+    (* An endpoint lane names the file the way the Keeper's own commands
+       reach it: the SSH endpoint's path or the microVM guest's. *)
     let visible_target = match read_authority, meta.sandbox_profile with
-      | Some authority, Remote_ssh ->
+      | Some authority, (Remote_ssh | Micro_vm) ->
         Keeper_sandbox_read_backend.container_path_of_host_with_authority
           ~read_authority:authority ~config ~meta ~host_path:target
-      | Some _, (Docker | Micro_vm) | None, _ -> Ok target in
+      | None, Micro_vm ->
+        Keeper_sandbox_read_backend.container_path_of_host ~config ~meta ~host_path:target
+      | Some _, Docker | None, (Docker | Remote_ssh) -> Ok target in
     (match visible_target with
      | Error detail -> Keeper_tool_execution.failure
          ~class_:Tool_result.Dependency_unavailable (error_json detail)

@@ -7,7 +7,8 @@ val resolve :
   (string, string) result
 (** Uses the admitted profile snapshot's endpoint name. SSH roots come from
     that named endpoint; unknown or absent declarations return a named error.
-    Docker uses its mounted root; microVM retains its bookkeeping namespace. *)
+    Docker uses its mounted root; microVM uses its guest root
+    ([/masc-work/<keeper>]), where its commands run. *)
 
 val project_input :
   remote_workspace_root:string ->

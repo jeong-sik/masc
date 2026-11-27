@@ -793,6 +793,23 @@ let test_execution_location_names_the_guest_root () =
     (Yojson.Safe.Util.member "cwd" unresolved = `Null);
   Alcotest.(check string) "an unresolved guest root says so"
     "microvm_namespace_unresolved" (text "reason" unresolved);
+  let refused = location ~remote_workspace_root:(Some guest_root) "/masc-work/vm-other" in
+  Alcotest.(check bool) "a refused cwd names no path" true
+    (Yojson.Safe.Util.member "cwd" refused = `Null);
+  Alcotest.(check string) "a refused cwd names the guest lane and the guest root"
+    "microvm_remote_path_jail_violation: /masc-work/vm-other is outside the \
+     Keeper's guest root /masc-work/vm-guest-root"
+    (text "reason" refused);
+  (* The prompt's workspace and the status default cwd come from here. *)
+  Alcotest.(check (result string string)) "the prompt workspace is the guest root"
+    (Ok guest_root)
+    (Masc.Keeper_workspace_namespace.resolve ~config ~meta
+       ~profile_defaults:Masc.Keeper_types_profile_defaults.empty_keeper_profile_defaults);
+  (* Read and Grep name a file the way the guest's commands reach it. *)
+  Alcotest.(check (result string string)) "a file the Keeper reads is named in the guest"
+    (Ok "/masc-work/vm-guest-root/repos/masc/README.md")
+    (Masc.Keeper_sandbox_read_backend.container_path_of_host ~config ~meta
+       ~host_path:(Filename.concat host_root "repos/masc/README.md"));
   (* The keeper reuses the cwd it was shown. The host reads it back as the
      bundle path, which the remote lane maps into the guest. *)
   let normalize = Masc.Keeper_alerting_path.normalize_path_for_check_stripped in
@@ -824,6 +841,38 @@ let test_execution_location_names_the_guest_root () =
     (Result.is_error
        (Masc.Keeper_tool_shared_runtime.resolve_keeper_read_path ~config ~meta
           ~raw_path:"/masc-work/vm-other/notes.txt"))
+;;
+
+(* An Execute refused for its cwd is answered in the guest's words: the
+   result names the microVM lane and the guest root, and no host path. *)
+let test_refused_execute_cwd_names_the_guest_lane () =
+  let base = temp_dir "microvm_refused_cwd_" in
+  let config = Masc.Workspace.default_config base in
+  let keeper = "vm-refused-cwd" in
+  let meta = microvm_meta ~name:keeper in
+  let raw =
+    Masc.Keeper_tool_execute_runtime.handle_tool_execute
+      ~result_projection:Tool_output.default_model_projection
+      ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+      ~turn_sandbox_factory:None ~config ~meta
+      ~args:
+        (`Assoc
+          [ "argv", `List [ `String "pwd" ]; "cwd", `String "/masc-work/vm-other" ])
+      ()
+  in
+  Alcotest.(check bool) "the refusal names no host path" false
+    (Astring.String.is_infix ~affix:base raw);
+  let json = Yojson.Safe.from_string raw in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "the cwd refusal is the caller's" "cwd_outside_sandbox"
+    (member "code" json |> to_string);
+  let location = member "execution_location" json in
+  Alcotest.(check bool) "the refused cwd is not shown as a location" true
+    (member "cwd" location = `Null);
+  Alcotest.(check string) "the reason names the guest lane and the guest root"
+    "microvm_remote_path_jail_violation: /masc-work/vm-other is outside the \
+     Keeper's guest root /masc-work/vm-refused-cwd"
+    (member "reason" location |> to_string)
 ;;
 
 let test_turn_start_argv_shape () =
@@ -6633,6 +6682,8 @@ let () =
             test_docker_shaped_exec_refuses_a_microvm_keeper
         ; Alcotest.test_case "execution location names the guest root" `Quick
             test_execution_location_names_the_guest_root
+        ; Alcotest.test_case "a refused Execute cwd names the guest lane" `Quick
+            test_refused_execute_cwd_names_the_guest_lane
         ; Alcotest.test_case "turn start argv shape" `Quick
             test_turn_start_argv_shape
         ; Alcotest.test_case "inspect state parser" `Quick

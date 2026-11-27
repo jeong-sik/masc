@@ -4,7 +4,7 @@ let resolve ~(config : Workspace.config)
   match meta.sandbox_profile with
   | Keeper_types_profile_sandbox.Docker ->
     Ok (Keeper_sandbox.container_root meta.name)
-  | Micro_vm -> Ok (Keeper_sandbox.host_root_abs_of_meta ~config meta)
+  | Micro_vm -> Ok (Keeper_sandbox_microvm.keeper_work_root ~keeper_name:meta.name)
   | Remote_ssh ->
     let open Result.Syntax in
     let* name =

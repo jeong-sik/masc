@@ -331,10 +331,12 @@ let handle_content_with_endpoint
            | Keeper_tree_target { target; remote_path; _ } -> target, remote_path
            | Declared_root_target { endpoint_path; _ } -> endpoint_path, endpoint_path
          in
+         (* The Keeper on an endpoint lane is told the name its own
+            commands use for the file. *)
          let response_target =
            match Keeper_sandbox_remote.transport endpoint with
-           | Keeper_sandbox_remote.Openssh _ -> remote_path
-           | Keeper_sandbox_remote.Microvm _ | Keeper_sandbox_remote.Docker_exec _ -> target
+           | Keeper_sandbox_remote.Openssh _ | Keeper_sandbox_remote.Microvm _ -> remote_path
+           | Keeper_sandbox_remote.Docker_exec _ -> target
          in
          let keeper_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
          (* A declared endpoint root lies outside the Keeper's tree, so its

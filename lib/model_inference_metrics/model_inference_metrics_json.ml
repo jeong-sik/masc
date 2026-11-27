@@ -250,17 +250,6 @@ let render_keeper_prompt_feedback (agg : aggregate) =
    matrix, the latency histogram, and the global p50/p95 are
    derived from that single pass. *)
 
-(* Unlike a sum of observed readings, an exported complete total cannot fill
-   an unreported sample with zero. Each field has independent coverage. *)
-let complete_sum add field = function
-  | [] -> None
-  | first :: rest ->
-    List.fold_left
-      (fun total sample ->
-         Option.bind total (fun total -> Option.map (add total) (field sample)))
-      (field first) rest
-;;
-
 let compute_cost_latency_json ~base_path ~window_minutes =
   let open Result.Syntax in
   let since_unix = Time_compat.now () -. (Float.of_int window_minutes *. 60.0) in

@@ -37,16 +37,6 @@ let cached_input_of_entries (entries : raw_entry list) : cached_input option =
     | Keeper_decision_outcome.(Success | Checkpoint | Input_required), _, _
     | Keeper_decision_outcome.Failed, _, _ -> total) None entries
 
-(* A cost total is known only when every row in its aggregation set reports
-   cost. Keep an explicitly reported zero as a known value. *)
-let complete_float_sum field = function
-  | [] -> None
-  | first :: rest ->
-    List.fold_left
-      (fun total entry ->
-         Option.bind total (fun total -> Option.map (fun cost -> total +. cost) (field entry)))
-      (field first) rest
-
 let aggregate_by_model (entries : raw_entry list) : model_stats list =
   let tbl : raw_entry list StringMap.t =
     List.fold_left
@@ -174,7 +164,7 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
          ; coverage_reason_counts
          ; success_count
          ; error_count
-         ; total_cost_usd = complete_float_sum (fun e -> e.cost_usd) success_entries
+         ; total_cost_usd = complete_sum ( +. ) (fun e -> e.cost_usd) success_entries
          ; total_tool_calls
          ; avg_tool_calls_per_turn =
              (if n = 0 then 0.0 else Float.of_int total_tool_calls /. Float.of_int n)
@@ -287,7 +277,7 @@ let bucket_entries_for_model (entries : raw_entry list) ~(bucket_sec : int)
          ; b_p50_latency_ms = percentile_opt lat_vals 50.0
          ; b_p95_latency_ms = percentile_opt lat_vals 95.0
          ; b_error_rate = error_rate
-         ; b_total_cost_usd = complete_float_sum (fun e -> e.cost_usd) bucket_entries
+         ; b_total_cost_usd = complete_sum ( +. ) (fun e -> e.cost_usd) bucket_entries
          ; b_cache_hit_ratio = cache_hit_ratio
          ; b_cached_input = cached_input
          }

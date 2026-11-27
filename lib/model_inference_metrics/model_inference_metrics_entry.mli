@@ -217,6 +217,10 @@ val count_if : ('a -> bool) -> 'a list -> int
 val take : int -> 'a list -> 'a list
 val sum_int_opt : int list -> int option
 
+(** [complete_sum add field rows] returns [None] for empty input or when any
+    row has no value for [field]. A reported zero remains a known value. *)
+val complete_sum : ('a -> 'a -> 'a) -> ('row -> 'a option) -> 'row list -> 'a option
+
 val json_float_field_opt :
   string -> (string * Yojson.Safe.t) list -> float option
 

@@ -319,6 +319,15 @@ let rec take n = function
   | x :: xs -> x :: take (n - 1) xs
 ;;
 
+let complete_sum add field = function
+  | [] -> None
+  | first :: rest ->
+    List.fold_left
+      (fun total sample ->
+         Option.bind total (fun total -> Option.map (add total) (field sample)))
+      (field first) rest
+;;
+
 let sum_int_opt values =
   match values with
   | [] -> None

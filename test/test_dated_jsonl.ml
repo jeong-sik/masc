@@ -1333,7 +1333,32 @@ let test_range_day_file_paths_matches_iter_range () =
   check (list string) "a future range names none" []
     (Dated_jsonl.range_day_file_paths store ~since:"2099-01-01" ~until:"2099-12-31");
   check (list string) "invalid dates name none" []
-    (Dated_jsonl.range_day_file_paths store ~since:"bad" ~until:"dates")
+    (Dated_jsonl.range_day_file_paths store ~since:"bad" ~until:"dates");
+  (* Multi-month and multi-day ranges must follow the oldest-first contract in
+     [dated_jsonl.mli] and match [range_day_file_paths_result] and [iter_range]. *)
+  let multi_loc = temp_store "dated_jsonl_range_paths_order" in
+  let multi_base = Dated_jsonl.Store.dir multi_loc in
+  write_dated_file multi_base "2026-01" "02" [ {|{"i":1}|} ];
+  write_dated_file multi_base "2026-01" "15" [ {|{"i":2}|} ];
+  write_dated_file multi_base "2026-02" "01" [ {|{"i":3}|} ];
+  let multi_store = Dated_jsonl.open_store multi_loc in
+  let multi_paths =
+    Dated_jsonl.range_day_file_paths multi_store ~since:"2026-01-01" ~until:"2026-02-28"
+  in
+  let expected_paths =
+    [ Filename.concat (Filename.concat multi_base "2026-01") "02.jsonl"
+    ; Filename.concat (Filename.concat multi_base "2026-01") "15.jsonl"
+    ; Filename.concat (Filename.concat multi_base "2026-02") "01.jsonl"
+    ]
+  in
+  check (list string) "range_day_file_paths returns oldest-first across months and days"
+    expected_paths multi_paths;
+  let folded_rev, _ =
+    Dated_jsonl.fold_range_appended multi_store ~since:"2026-01-01" ~until:"2026-02-28"
+      ~cursors:[] ~init:[] ~f:(fun acc j -> json_i j :: acc)
+  in
+  check (list int) "fold_range_appended folds chronologically oldest-first"
+    [ 1; 2; 3 ] (List.rev folded_rev)
 ;;
 
 (* ── read_range filters by date ────────────────────────── *)

@@ -268,17 +268,28 @@ let maybe_emit_resource_notifications ~success ~tool_name =
   if success
   then (
     let affected_ids = affected_resource_ids_for_tool tool_name in
-    with_resource_subscription_lock (fun () ->
-      Hashtbl.iter
-        (fun session_id uris ->
-           Hashtbl.iter
-             (fun uri () ->
-                if
-                  resource_is_dynamic uri
-                  && List.mem (resource_id_of_uri uri) affected_ids
-                then send_resource_updated_notification ~session_id ~uri)
-             uris)
-        resource_subscriptions);
+    (* Snapshot matching subscriptions under the lock and emit SSE frames
+       outside it so an exception or cancellation during [Sse.send_to] cannot
+       poison [resource_subscription_mutex] or block subscribers. *)
+    let targets =
+      with_resource_subscription_lock (fun () ->
+        Hashtbl.fold
+          (fun session_id uris acc ->
+             Hashtbl.fold
+               (fun uri () acc ->
+                  if
+                    resource_is_dynamic uri
+                    && List.mem (resource_id_of_uri uri) affected_ids
+                  then (session_id, uri) :: acc
+                  else acc)
+               uris
+               acc)
+          resource_subscriptions
+          [])
+    in
+    List.iter
+      (fun (session_id, uri) -> send_resource_updated_notification ~session_id ~uri)
+      targets;
     (* The session table above is how revisions through 2025-11-25 subscribe.
        A 2026-07-28 client named its URIs on a subscriptions/listen request
        instead, and that registry keeps its own filter. *)
@@ -1521,28 +1532,36 @@ let run_stdio ~handle_request ~sw ~env state =
   Log.Mcp.info "MASC MCP Server (Eio stdio mode)";
   Log.Mcp.info "Default workspace: %s" (Mcp_server.workspace_config state).Workspace.base_path;
   let buf = Eio.Buf_read.of_flow stdin ~max_size:(16 * 1024 * 1024) in
+  let max_stdio_headers = 64 in
   let read_framed_message_after_first_line first_line =
-    let rec read_headers acc =
-      let line = Eio.Buf_read.line buf in
-      if String.length line = 0 || line = "\r"
-      then List.rev acc
-      else read_headers (line :: acc)
+    let rec read_headers count acc =
+      if count >= max_stdio_headers
+      then (
+        Log.Mcp.warn "stdio framed message exceeded %d headers; closing stream" max_stdio_headers;
+        None)
+      else
+        let line = Eio.Buf_read.line buf in
+        if String.length line = 0 || line = "\r"
+        then Some (List.rev acc)
+        else read_headers (count + 1) (line :: acc)
     in
-    let headers = read_headers [ first_line ] in
-    let content_length =
-      headers
-      |> List.find_map (fun header ->
-        let header = String.trim header in
-        if
-          String.length header > 16
-          && String.lowercase_ascii (String.sub header 0 15) = "content-length:"
-        then (
-          let len_str = String.trim (String.sub header 15 (String.length header - 15)) in
-          int_of_string_opt len_str)
-        else None)
-      |> Option.value ~default:0
-    in
-    if content_length > 0 then Some (Eio.Buf_read.take content_length buf) else None
+    match read_headers 1 [ first_line ] with
+    | None -> None
+    | Some headers ->
+      let content_length =
+        headers
+        |> List.find_map (fun header ->
+          let header = String.trim header in
+          if
+            String.length header > 15
+            && String.lowercase_ascii (String.sub header 0 15) = "content-length:"
+          then (
+            let len_str = String.trim (String.sub header 15 (String.length header - 15)) in
+            int_of_string_opt len_str)
+          else None)
+        |> Option.value ~default:0
+      in
+      if content_length > 0 then Some (Eio.Buf_read.take content_length buf) else None
   in
   (* One channel carries every response and every subscription's
      notifications, and a notification is written by whichever fiber the change

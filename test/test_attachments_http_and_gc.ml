@@ -1288,6 +1288,21 @@ let test_http_range_and_video_poster () =
       |> split_response
     in
     Alcotest.(check int) "inverted range 416" 416 st_416b;
+    List.iter
+      (fun bad_range ->
+         let st_bad, _, _ =
+           dispatch_raw
+             ~router
+             ~meth:"GET"
+             ~path:("/api/v1/attachments/" ^ id)
+             ~token:worker
+             ~headers:[ "Range", bad_range ]
+             ~body:""
+             ()
+           |> split_response
+         in
+         Alcotest.(check int) ("non-ASCII-digit range 416: " ^ bad_range) 416 st_bad)
+      [ "bytes=0x10-0x20"; "bytes=1_0-2_0"; "bytes=+0-5"; "bytes=-+5" ];
     (* Video upload + ?poster=1 + ?format=png&max_px=160 with Process_eio.init active *)
     Eio_main.run (fun env ->
       Process_eio.init

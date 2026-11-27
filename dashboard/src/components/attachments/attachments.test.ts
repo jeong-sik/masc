@@ -520,4 +520,104 @@ describe('<WorkspaceChatImage>, <AttachmentGallery>, and Markdown hydration', ()
       expect(audioAlert?.textContent).toContain('403')
     })
   })
+
+  it('handles audio and video fetch failures with ap-error + retry, media decode onError, poster failure ignore, and pre-viewport idle state', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined)
+    let audioCalls = 0
+    let videoCalls = 0
+    let blobSeq = 0
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.includes(ATT_ID_A)) {
+        audioCalls += 1
+        if (audioCalls === 1) return new Response('upstream error', { status: 502 })
+        return new Response(new Uint8Array([1, 2, 3, 4]), { status: 200, headers: { 'Content-Type': 'audio/wav' } })
+      }
+      if (url.includes('format=png')) {
+        return Promise.reject(new Error('poster unavailable'))
+      }
+      videoCalls += 1
+      if (videoCalls === 1) return new Response('video unavailable', { status: 503 })
+      return new Response(new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70]), {
+        status: 200,
+        headers: { 'Content-Type': 'video/mp4' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const createObjectURL = vi.fn(() => `blob:retry-media-${++blobSeq}`)
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL }))
+
+    const audioAtt = makeAttachmentRef({
+      id: ATT_ID_A,
+      attachment_id: ATT_ID_A,
+      url: ATT_URL_A,
+      kind: 'audio',
+      mime_type: 'audio/wav',
+      filename: 'retry.wav',
+      width: null,
+      height: null,
+    })
+    const videoAtt = makeAttachmentRef({
+      id: ATT_ID_B,
+      attachment_id: ATT_ID_B,
+      url: ATT_URL_B,
+      kind: 'video',
+      mime_type: 'video/mp4',
+      filename: 'retry.mp4',
+      width: 640,
+      height: 360,
+    })
+
+    const view = render(html`
+      <${AttachmentGallery} attachments=${[audioAtt, videoAtt]} workspaceEpoch=${currentSessionEpoch()} />
+    `)
+
+    const audioCard = view.getByTestId('attachment-audio-card')
+    const videoCard = view.getByTestId('attachment-video-card')
+
+    // 1. Initial fetch failure shows ap-error (and does NOT duplicate '비디오를 표시할 수 없습니다.')
+    await waitFor(() => {
+      expect(audioCard.querySelector('[role="alert"]')).not.toBeNull()
+      expect(videoCard.querySelector('[role="alert"]')).not.toBeNull()
+    })
+    expect(videoCard.textContent).not.toContain('비디오를 표시할 수 없습니다.')
+
+    // 2. Retry succeeds for both audio & video (while poster rejection is silently ignored)
+    const audioRetry = Array.from(audioCard.querySelectorAll('button')).find((b) => b.textContent?.trim() === '다시 불러오기')!
+    const videoRetry = Array.from(videoCard.querySelectorAll('button')).find((b) => b.textContent?.trim() === '다시 불러오기')!
+    fireEvent.click(audioRetry)
+    fireEvent.click(videoRetry)
+
+    await waitFor(() => {
+      expect(audioCard.querySelector('audio')).not.toBeNull()
+      expect(videoCard.querySelector('video')).not.toBeNull()
+    })
+    expect(videoCard.querySelector('[role="alert"]')).toBeNull()
+
+    // 3. Browser media decode onError surfaces role="alert" + retry button
+    fireEvent.error(audioCard.querySelector('audio')!)
+    fireEvent.error(videoCard.querySelector('video')!)
+
+    await waitFor(() => {
+      expect(audioCard.querySelector('[role="alert"]')?.textContent).toContain('디코딩하지 못했습니다')
+      expect(videoCard.querySelector('[role="alert"]')?.textContent).toContain('디코딩하지 못했습니다')
+    })
+    expect(videoCard.textContent).not.toContain('비디오를 표시할 수 없습니다.')
+
+    // 4. Pre-viewport video (IntersectionObserver not yet intersecting) shows idle placeholder, not error
+    cleanup()
+    vi.stubGlobal('IntersectionObserver', class {
+      observe() {}
+      disconnect() {}
+      unobserve() {}
+    })
+    const idleView = render(html`
+      <${AttachmentGallery} attachments=${[videoAtt]} workspaceEpoch=${currentSessionEpoch()} />
+    `)
+    const idleVideoCard = idleView.getByTestId('attachment-video-card')
+    expect(idleVideoCard.querySelector('[data-testid="video-idle-placeholder"]')).not.toBeNull()
+    expect(idleVideoCard.querySelector('[role="alert"]')).toBeNull()
+    expect(idleVideoCard.textContent).not.toContain('비디오를 표시할 수 없습니다.')
+  })
 })

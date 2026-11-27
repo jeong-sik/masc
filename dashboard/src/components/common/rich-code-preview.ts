@@ -27,8 +27,9 @@ import './rich-code-preview.css'
 export type RichCodeKind = 'diagram' | 'alphatex' | 'chart'
 
 /**
- * Full set of Pele / Mermaid fence language tags covering all 33 Pele diagram
- * and chart types plus common short aliases.
+ * Unambiguous Pele / Mermaid fence language tags (generic code-fence words like
+ * `class`, `state`, `block`, `er`, `sequence`, `journey`, `packet`, `requirement`,
+ * `info` are intentionally excluded so ordinary code blocks stay code blocks).
  */
 export const PELE_FENCE_TAGS: ReadonlySet<string> = new Set([
   'mermaid',
@@ -50,28 +51,19 @@ export const PELE_FENCE_TAGS: ReadonlySet<string> = new Set([
   'mindmap',
   'venn',
   'venn-beta',
+  'gitgraph',
   'wardley',
   'ishikawa',
+  'cynefin',
+  'agentflow',
+  'eventmodeling',
+  'swimlane',
+  'railroad',
   'c4',
   'architecture',
   'flowchart',
-  'sequence',
-  'class',
-  'er',
-  'state',
-  'gitgraph',
-  'journey',
-  'packet',
-  'requirement',
-  'block',
-  'swimlane',
-  'agentflow',
-  'eventmodeling',
-  'cynefin',
   'treeview',
-  'railroad',
   'usecase',
-  'info',
 ])
 
 const ALPHATEX_FENCE_TAGS: ReadonlySet<string> = new Set(['alphatex', 'atex'])

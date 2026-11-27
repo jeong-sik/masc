@@ -536,7 +536,8 @@ type t = {
   term_program : string option;
   editor_handoff : editor_handoff;
   pending_editor : (unit -> unit) option Atomic.t;
-  pending_midi_temp : string option Atomic.t;
+  pending_midi_temp_mu : Stdlib.Mutex.t;
+  pending_midi_temp : string option ref;
   wiki_editor_gen : int Atomic.t;
   editor_active : bool Atomic.t;
   in_flight_gets_mu : Stdlib.Mutex.t;
@@ -735,6 +736,40 @@ let detect_in_tmux () =
   | Some s -> not (String.equal (String.trim s) "")
   | None -> false
 
+let remove_midi_temp_quietly path =
+  try Sys.remove path with Sys_error _ -> ()
+
+let clear_pending_midi_temp_slot ~mu ~slot =
+  let prev =
+    Stdlib.Mutex.protect mu (fun () ->
+        let cur = !slot in
+        slot := None;
+        cur)
+  in
+  Option.iter remove_midi_temp_quietly prev
+
+let clear_pending_midi_temp t =
+  clear_pending_midi_temp_slot ~mu:t.pending_midi_temp_mu
+    ~slot:t.pending_midi_temp
+
+let set_pending_midi_temp t next =
+  let prev =
+    Stdlib.Mutex.protect t.pending_midi_temp_mu (fun () ->
+        let cur = !(t.pending_midi_temp) in
+        t.pending_midi_temp := next;
+        cur)
+  in
+  match prev, next with
+  | Some p, Some n when String.equal p n -> ()
+  | Some p, (Some _ | None) -> remove_midi_temp_quietly p
+  | None, (Some _ | None) -> ()
+
+let take_pending_midi_temp_if_matching t path =
+  Stdlib.Mutex.protect t.pending_midi_temp_mu (fun () ->
+      match !(t.pending_midi_temp) with
+      | Some cur when String.equal cur path -> t.pending_midi_temp := None
+      | Some _ | None -> ())
+
 let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
     ?in_tmux ?term_program
     ?(editor_handoff = noop_editor_handoff) ?(on_editor_ready = fun () -> ())
@@ -761,7 +796,8 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
   let owned_server = Atomic.make None in
   let active_memory_diagram_cancel = Atomic.make None in
   let pending_editor = Atomic.make None in
-  let pending_midi_temp = Atomic.make None in
+  let pending_midi_temp_mu = Stdlib.Mutex.create () in
+  let pending_midi_temp = ref None in
   let wiki_editor_gen = Atomic.make 0 in
   let editor_active = Atomic.make false in
   let in_flight_gets_mu = Stdlib.Mutex.create () in
@@ -796,9 +832,8 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
         (fun () -> Hashtbl.clear in_flight_gets);
       ignore (Atomic.fetch_and_add wiki_editor_gen 1 : int);
       ignore (Atomic.exchange pending_editor None : (unit -> unit) option);
-      (match Atomic.exchange pending_midi_temp None with
-      | Some p -> (try Sys.remove p with Sys_error _ -> ())
-      | None -> ());
+      clear_pending_midi_temp_slot ~mu:pending_midi_temp_mu
+        ~slot:pending_midi_temp;
       match Atomic.exchange active_memory_diagram_cancel None with
       | Some flag -> Atomic.set flag true
       | None -> ());
@@ -825,6 +860,7 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
     term_program;
     editor_handoff;
     pending_editor;
+    pending_midi_temp_mu;
     pending_midi_temp;
     wiki_editor_gen;
     editor_active;
@@ -4694,9 +4730,7 @@ let execute_editor_escape_hatch t target =
       else
         let my_gen = Atomic.fetch_and_add t.wiki_editor_gen 1 + 1 in
         ignore (Atomic.exchange t.pending_editor None : (unit -> unit) option);
-  (match Atomic.exchange t.pending_midi_temp None with
-  | Some p -> (try Sys.remove p with Sys_error _ -> ())
-  | None -> ());
+        clear_pending_midi_temp t;
         let path = Wire_knowledge.wiki_page_path ~page in
         let is_still_current () =
           (not (Atomic.get t.closed))
@@ -5188,9 +5222,7 @@ let rec execute t = function
       if not (Epoch.equal (Atomic.get t.stream_epoch) epoch) then begin
         ignore (Atomic.fetch_and_add t.wiki_editor_gen 1 : int);
         ignore (Atomic.exchange t.pending_editor None : (unit -> unit) option);
-  (match Atomic.exchange t.pending_midi_temp None with
-  | Some p -> (try Sys.remove p with Sys_error _ -> ())
-  | None -> ());
+        clear_pending_midi_temp t;
         ignore
           (Sse_hub.sync_streams t.sse_hub ~on_event [] : (Sse_hub.sync_diff, string) result)
       end;
@@ -5739,18 +5771,12 @@ let rec execute t = function
                          ~en:(Printf.sprintf "Opened in external player: %s" shown))
                     (Ok ())
               | Ok (Media_player.Handoff_alphatex midi_path) ->
-                  let remove_midi_quietly p =
-                    try Sys.remove p with Sys_error _ -> ()
-                  in
                   let launch () =
                     if temp_cleanup then
-                      ignore
-                        (Atomic.compare_and_set t.pending_midi_temp
-                           (Some midi_path) None
-                          : bool);
+                      take_pending_midi_temp_if_matching t midi_path;
                     Fun.protect
                       ~finally:(fun () ->
-                        if temp_cleanup then remove_midi_quietly midi_path)
+                        if temp_cleanup then remove_midi_temp_quietly midi_path)
                       (fun () ->
                         execute_terminal_program t
                           (Cmd.Music_import_midi midi_path))
@@ -5758,20 +5784,13 @@ let rec execute t = function
                   ignore
                     (Atomic.exchange t.pending_editor (Some launch)
                       : (unit -> unit) option);
-                  (match
-                     Atomic.exchange t.pending_midi_temp
-                       (if temp_cleanup then Some midi_path else None)
-                   with
-                  | Some prev when not (String.equal prev midi_path) ->
-                      remove_midi_quietly prev
-                  | Some _ | None -> ());
+                  set_pending_midi_temp t
+                    (if temp_cleanup then Some midi_path else None);
                   if Atomic.get t.closed then (
                     ignore
                       (Atomic.exchange t.pending_editor None
                         : (unit -> unit) option);
-                    match Atomic.exchange t.pending_midi_temp None with
-                    | Some p -> remove_midi_quietly p
-                    | None -> ())
+                    clear_pending_midi_temp t)
                   else t.on_editor_ready ()
               | Error detail ->
                   emit_play_ack
@@ -5884,9 +5903,7 @@ let shutdown ?(preserve_owned_server = false) t =
   Atomic.set t.closed true;
   ignore (Atomic.fetch_and_add t.wiki_editor_gen 1 : int);
   ignore (Atomic.exchange t.pending_editor None : (unit -> unit) option);
-  (match Atomic.exchange t.pending_midi_temp None with
-  | Some p -> (try Sys.remove p with Sys_error _ -> ())
-  | None -> ());
+  clear_pending_midi_temp t;
   cancel_active_memory_diagram t;
   Media_player.shutdown t.media_player;
   Voice_runner.stop t.voice_runner;

@@ -254,6 +254,13 @@ val get_bytes : t -> id:string -> (string option, get_error) result
 (** Read raw bytes for canonical [att_<64hex>] id with ownership and SHA-256
     integrity verification. *)
 
+val get_byte_range :
+  t -> id:string -> start:int -> length:int -> (string option, get_error) result
+(** Read only the requested byte slice [[start, start + length)] for canonical
+    [att_<64hex>] id via [seek_in] + [really_input_string] after verifying
+    metadata, regular-file ownership, and exact blob size. Used by HTTP [206]
+    Range streaming to avoid loading large video blobs into RAM per seek. *)
+
 val get_bytes_by_sha256 : t -> sha256:string -> (string option, get_error) result
 (** Read raw bytes for bare 64-hex [sha256] (for [History.Stored] and
     [/api/v1/media/<sha256>] lookups) with ownership and integrity checks. *)

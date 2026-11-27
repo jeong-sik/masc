@@ -194,15 +194,11 @@ type fence_kind =
 let fence_kind tag rest =
   match String.lowercase_ascii tag with
   | "mermaid" | "pele" | "xychart" | "xychart-beta" | "pie"
-  | "quadrant" | "quadrantchart" | "radar" | "radar-beta"
-  | "sankey" | "sankey-beta" | "treemap" | "treemap-beta"
-  | "gantt" | "timeline" | "kanban" | "mindmap"
-  | "venn" | "venn-beta" | "wardley" | "ishikawa"
-  | "c4" | "architecture" | "flowchart" | "sequence"
-  | "class" | "er" | "state" | "gitgraph" | "journey"
-  | "packet" | "requirement" | "block" | "swimlane"
-  | "agentflow" | "eventmodeling" | "cynefin" | "treeview"
-  | "railroad" | "usecase" ->
+  | "quadrantchart" | "radar-beta" | "sankey-beta" | "treemap-beta"
+  | "gantt" | "timeline" | "kanban" | "mindmap" | "venn-beta"
+  | "gitgraph" | "wardley" | "ishikawa" | "cynefin" | "agentflow"
+  | "eventmodeling" | "swimlane" | "railroad" | "c4" | "architecture"
+  | "treeview" | "usecase" ->
       Pele_mermaid
   | "chart" -> Pele_chart
   | "svg" -> Pele_svg

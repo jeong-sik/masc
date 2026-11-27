@@ -993,6 +993,65 @@ let get_bytes t ~id =
   | Ok sha256 -> read_bytes_by_validated_sha256 t ~id sha256
 ;;
 
+let get_byte_range t ~id ~start ~length =
+  let open Result.Syntax in
+  match parse_id id with
+  | Error _ -> Error (Invalid_id id)
+  | Ok sha256 ->
+    if start < 0 || length < 0
+    then Error (Read_failed (Printf.sprintf "invalid byte range start=%d length=%d" start length))
+    else (
+      let* meta_opt = read_meta_by_validated_sha256 t ~id sha256 in
+      match meta_opt with
+      | None -> Ok None
+      | Some meta ->
+        if start > meta.bytes || length > meta.bytes - start
+        then
+          Error
+            (Read_failed
+               (Printf.sprintf
+                  "byte range [%d, +%d) exceeds blob size %d"
+                  start
+                  length
+                  meta.bytes))
+        else (
+          let path = blob_path t sha256 in
+          match Unix.lstat path with
+          | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+          | exception Unix.Unix_error (code, fn, arg) ->
+            Error (Read_failed (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)))
+          | { Unix.st_kind =
+                Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
+            ; _
+            } ->
+            Error (Read_failed (Printf.sprintf "blob %s is not a regular file" path))
+          | { Unix.st_kind = Unix.S_REG; st_size; _ } ->
+            if st_size <> meta.bytes
+            then
+              Error
+                (Integrity_mismatch
+                   { id
+                   ; expected = Printf.sprintf "size:%d" meta.bytes
+                   ; actual = Printf.sprintf "size:%d" st_size
+                   })
+            else if length = 0
+            then Ok (Some "")
+            else (
+              try
+                let ic = open_in_bin path in
+                Fun.protect
+                  ~finally:(fun () -> close_in_noerr ic)
+                  (fun () ->
+                     seek_in ic start;
+                     Ok (Some (really_input_string ic length)))
+              with
+              | End_of_file ->
+                Error (Read_failed (Printf.sprintf "unexpected EOF reading range from %s" path))
+              | Sys_error msg -> Error (Read_failed msg)
+              | Unix.Unix_error (code, fn, arg) ->
+                Error (Read_failed (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))))))
+;;
+
 let remove_file_if_exists path =
   try Unix.unlink path with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> ()
@@ -1897,14 +1956,19 @@ let run_transform_argv ~blocking ~in_file ~out_file ~max_px ~src_raster ~out_ras
   try_plans [] plans
 ;;
 
-let video_extension_of_mime_string = function
-  | "video/mp4" -> Some ".mp4"
-  | "video/webm" -> Some ".webm"
-  | "video/quicktime" -> Some ".mov"
+let video_input_spec_of_mime_string = function
+  | "video/mp4" -> Some (".mp4", "mov,mp4,m4a,3gp,3g2,mj2")
+  | "video/webm" -> Some (".webm", "matroska,webm")
+  | "video/quicktime" -> Some (".mov", "mov,mp4,m4a,3gp,3g2,mj2")
   | _ -> None
 ;;
 
-let run_ffmpeg_poster_argv ~blocking ~in_file ~out_file ~max_px =
+let remove_temp_quietly path =
+  try Sys.remove path with
+  | Sys_error _ | Unix.Unix_error _ -> ()
+;;
+
+let run_ffmpeg_poster_argv ~blocking ~input_demuxer ~in_file ~out_file ~max_px =
   blocking.run_blocking (fun () ->
     try remove_file_if_exists out_file with Unix.Unix_error _ -> ());
   let scale_filter =
@@ -1922,6 +1986,10 @@ let run_ffmpeg_poster_argv ~blocking ~in_file ~out_file ~max_px =
     ; "-y"
     ; "-ss"
     ; "0"
+    ; "-protocol_whitelist"
+    ; "file"
+    ; "-f"
+    ; input_demuxer
     ; "-i"
     ; in_file
     ; "-frames:v"
@@ -1981,9 +2049,9 @@ let get_video_poster
       ~(meta : meta)
       ~raw_bytes
   =
-  match meta.kind, video_extension_of_mime_string meta.mime_type with
+  match meta.kind, video_input_spec_of_mime_string meta.mime_type with
   | (Image | Audio | Document), _ | Video, None -> Error (Not_an_image meta.mime_type)
-  | Video, Some src_ext ->
+  | Video, Some (src_ext, input_demuxer) ->
     (match max_px with
      | Some px when px <= 0 -> Error (Invalid_max_px px)
      | Some _ | None ->
@@ -2000,19 +2068,35 @@ let get_video_poster
              let in_file, in_oc =
                Filename.open_temp_file ~mode:[ Open_binary ] "masc_vid_in_" src_ext
              in
-             Fun.protect
-               ~finally:(fun () -> close_out_noerr in_oc)
-               (fun () -> output_string in_oc raw_bytes);
-             let out_file = Filename.temp_file "masc_vid_out_" ".png" in
-             in_file, out_file)
+             (try
+                Fun.protect
+                  ~finally:(fun () -> close_out_noerr in_oc)
+                  (fun () -> output_string in_oc raw_bytes)
+              with
+              | exn ->
+                remove_temp_quietly in_file;
+                raise exn);
+             try
+               let out_file = Filename.temp_file "masc_vid_out_" ".png" in
+               in_file, out_file
+             with
+             | exn ->
+               remove_temp_quietly in_file;
+               raise exn)
          in
          let res =
            Fun.protect
              ~finally:(fun () ->
-               blocking.run_blocking (fun () ->
-                 (try Sys.remove in_file with Sys_error _ | Unix.Unix_error _ -> ());
-                 (try Sys.remove out_file with Sys_error _ | Unix.Unix_error _ -> ())))
-             (fun () -> run_ffmpeg_poster_argv ~blocking ~in_file ~out_file ~max_px:poster_px)
+               Eio.Cancel.protect (fun () ->
+                 remove_temp_quietly in_file;
+                 remove_temp_quietly out_file))
+             (fun () ->
+               run_ffmpeg_poster_argv
+                 ~blocking
+                 ~input_demuxer
+                 ~in_file
+                 ~out_file
+                 ~max_px:poster_px)
          in
          match res with
          | Error detail -> Error (Transform_failed detail)

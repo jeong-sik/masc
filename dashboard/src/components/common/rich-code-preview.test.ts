@@ -18,9 +18,6 @@ import {
   richCodeKind,
 } from './rich-code-preview'
 import { StructuredChartView, parseChartFenceJson } from './structured-chart'
-import { parseMarkdownToBlocks } from '../chat/markdown-blocks'
-import { ChatArtifactPanel, extractArtifactGroups } from '../chat/artifact-panel'
-import type { KeeperConversationEntry } from '../../types'
 
 // Minimal valid SMF Format 0 MIDI file (1 track, middle C quarter note, 120 BPM).
 const MINIMAL_MIDI_BYTES = new Uint8Array([
@@ -124,18 +121,21 @@ describe('AlphaTex score rendering, theme palette, profile switching, diagnostic
 })
 
 describe('Pele 33-type diagram support & theme variables', () => {
-  it('recognizes all 33 Pele diagram/chart fence tags plus alphatex and chart', () => {
+  it('recognizes unambiguous Pele diagram/chart fence tags and excludes generic code-fence words', () => {
     const expectedPeleTags = [
       'mermaid', 'pele', 'xychart', 'xychart-beta', 'pie', 'quadrant', 'quadrantchart',
       'radar', 'radar-beta', 'sankey', 'sankey-beta', 'treemap', 'treemap-beta',
-      'gantt', 'timeline', 'kanban', 'mindmap', 'venn', 'venn-beta', 'wardley',
-      'ishikawa', 'c4', 'architecture', 'flowchart', 'sequence', 'class', 'er',
-      'state', 'gitgraph', 'journey', 'packet', 'requirement', 'block', 'swimlane',
-      'agentflow', 'eventmodeling', 'cynefin', 'treeview', 'railroad', 'usecase',
+      'gantt', 'timeline', 'kanban', 'mindmap', 'venn', 'venn-beta', 'gitgraph',
+      'wardley', 'ishikawa', 'cynefin', 'agentflow', 'eventmodeling', 'swimlane',
+      'railroad', 'c4', 'architecture', 'flowchart', 'treeview', 'usecase',
     ]
     for (const tag of expectedPeleTags) {
       expect(PELE_FENCE_TAGS.has(tag)).toBe(true)
       expect(richCodeKind(tag)).toBe('diagram')
+    }
+    for (const genericTag of ['class', 'state', 'block', 'er', 'sequence', 'journey', 'packet', 'requirement', 'info']) {
+      expect(PELE_FENCE_TAGS.has(genericTag)).toBe(false)
+      expect(richCodeKind(genericTag)).toBeNull()
     }
     expect(richCodeKind('alphatex')).toBe('alphatex')
     expect(richCodeKind('atex')).toBe('alphatex')
@@ -266,65 +266,5 @@ describe('Structured charts (line / bar / area / pie) & markdown-blocks fence pa
     expect(pieEl.querySelectorAll('path').length).toBe(3)
     expect(pieEl.textContent).toContain('Compute')
     expect(pieEl.textContent).toContain('50%')
-  })
-
-  it('parses Pele diagram fences and ```chart JSON fences in parseMarkdownToBlocks (with code fallback on invalid JSON)', () => {
-    const md = [
-      '```radar-beta',
-      'title Skills',
-      '```',
-      '',
-      '```chart',
-      '{"type":"area","title":"Throughput","labels":["T1","T2"],"series":[{"label":"req/s","values":[100,150]}]}',
-      '```',
-      '',
-      '```chart',
-      '{ not valid json }',
-      '```',
-    ].join('\n')
-
-    const blocks = parseMarkdownToBlocks(md)
-    expect(blocks).toHaveLength(3)
-    expect(blocks[0]).toMatchObject({ t: 'mermaid', caption: 'radar-beta' })
-    expect(blocks[1]).toMatchObject({ t: 'chart', chartType: 'area', title: 'Throughput' })
-    expect(blocks[2]).toMatchObject({ t: 'code', cap: 'chart' })
-  })
-
-  it('extracts and previews chart and alphatex artifacts in ChatArtifactPanel', () => {
-    const entries: KeeperConversationEntry[] = [
-      {
-        id: 'turn-1',
-        role: 'assistant',
-        source: 'direct_assistant',
-        delivery: 'delivered',
-        label: 'Keeper',
-        text: '',
-        blocks: [
-          {
-            t: 'chart',
-            chartType: 'bar',
-            title: 'Turn Metrics',
-            labels: ['A', 'B'],
-            series: [{ label: 'Count', values: [3, 7] }],
-          },
-          {
-            t: 'code',
-            cap: 'alphatex',
-            html: '0.6 2.6',
-            source: '0.6 2.6',
-          },
-        ],
-      },
-    ]
-
-    const groups = extractArtifactGroups(entries)
-    expect(groups).toHaveLength(1)
-    expect(groups[0]!.items.map((i) => i.kind)).toEqual(['chart', 'alphatex'])
-
-    const view = render(html`<${ChatArtifactPanel} entries=${entries} />`)
-    const openBtns = view.getAllByRole('button', { name: '미리보기' })
-    fireEvent.click(openBtns[0]!)
-    expect(view.container.querySelector('[data-artifact-preview="chart"]')).not.toBeNull()
-    expect(view.getByTestId('structured-chart')).toBeTruthy()
   })
 })

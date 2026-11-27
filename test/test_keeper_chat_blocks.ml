@@ -817,7 +817,9 @@ let test_chart_fence_parse_and_roundtrip () =
      Alcotest.(check (option yojson_testable))
        "wire type" (Some (`String "bar")) (List.assoc_opt "type" fields);
      Alcotest.(check (option yojson_testable))
-       "wire chart_type" (Some (`String "bar")) (List.assoc_opt "chart_type" fields);
+       "wire chart_type omitted (single canonical type key)"
+       None
+       (List.assoc_opt "chart_type" fields);
      Alcotest.(check (option yojson_testable))
        "wire xLabel" (Some (`String "Percentile")) (List.assoc_opt "xLabel" fields)
    | _ -> Alcotest.fail "unexpected chart wire JSON");
@@ -863,7 +865,15 @@ let test_pele_diagram_fences_and_alphatex_code () =
        match B.parse_text_to_blocks md with
        | [ B.Code { cap = Some c; _ } ] when String.lowercase_ascii c = tag -> ()
        | _ -> Alcotest.fail ("expected Code block with intact cap for music fence: " ^ tag))
-    [ "alphatex"; "atex" ]
+    [ "alphatex"; "atex" ];
+  (* Generic non-diagram words must remain Code blocks, not Mermaid *)
+  List.iter
+    (fun tag ->
+       let md = Printf.sprintf "```%s\nfoo = bar\n```" tag in
+       match B.parse_text_to_blocks md with
+       | [ B.Code { cap = Some c; _ } ] when String.lowercase_ascii c = tag -> ()
+       | _ -> Alcotest.fail ("expected Code block for generic fence tag: " ^ tag))
+    [ "class"; "state"; "block"; "er"; "sequence"; "journey"; "packet"; "requirement"; "info" ]
 
 let test_attach_preserves_video_and_audio_kinds () =
   let original =

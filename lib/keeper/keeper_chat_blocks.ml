@@ -587,40 +587,26 @@ let is_pele_diagram_fence = function
   | "xychart"
   | "xychart-beta"
   | "pie"
-  | "quadrant"
   | "quadrantchart"
-  | "radar"
   | "radar-beta"
-  | "sankey"
   | "sankey-beta"
-  | "treemap"
   | "treemap-beta"
   | "gantt"
   | "timeline"
   | "kanban"
   | "mindmap"
-  | "venn"
   | "venn-beta"
+  | "gitgraph"
   | "wardley"
   | "ishikawa"
-  | "c4"
-  | "architecture"
-  | "flowchart"
-  | "sequence"
-  | "class"
-  | "er"
-  | "state"
-  | "gitgraph"
-  | "journey"
-  | "packet"
-  | "requirement"
-  | "block"
-  | "swimlane"
+  | "cynefin"
   | "agentflow"
   | "eventmodeling"
-  | "cynefin"
-  | "treeview"
+  | "swimlane"
   | "railroad"
+  | "c4"
+  | "architecture"
+  | "treeview"
   | "usecase" -> true
   | _ -> false
 ;;
@@ -812,7 +798,7 @@ let block_to_yojson = function
           | None -> []
           | Some kind ->
             let s = chart_kind_to_string kind in
-            [ ("type", `String s); ("chart_type", `String s) ])
+            [ ("type", `String s) ])
        @ (match labels with
           | None -> []
           | Some xs -> [ ("labels", `List (List.map (fun s -> `String s) xs)) ])

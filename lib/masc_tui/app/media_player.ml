@@ -15,10 +15,16 @@ type play_outcome =
   | Opened_external of string
   | Handoff_alphatex of string
 
+type reap_state = {
+  reap_mu : Stdlib.Mutex.t;
+  mutable reaped : bool;
+}
+
 type active_process = {
   pid : int;
   label : string;
-  temp_path : string option;
+  reap_state : reap_state;
+  reaper : Thread.t;
 }
 
 let max_retained_temps = 4
@@ -161,31 +167,26 @@ let close_quietly fd =
   | () -> ()
   | exception Unix.Unix_error _ -> ()
 
-let kill_and_reap pid =
-  (try Unix.kill pid Sys.sigterm with Unix.Unix_error _ -> ());
-  let rec wait_grace tries =
-    match Unix.waitpid [ Unix.WNOHANG ] pid with
-    | 0, _ when tries > 0 ->
-        Unix.sleepf 0.02;
-        wait_grace (tries - 1)
-    | 0, _ ->
-        (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
-        let rec force_reap () =
-          match Unix.waitpid [] pid with
-          | _, _ -> ()
-          | exception Unix.Unix_error (Unix.EINTR, _, _) -> force_reap ()
-          | exception Unix.Unix_error _ -> ()
-        in
-        force_reap ()
-    | _, _ -> ()
-    | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_grace tries
-    | exception Unix.Unix_error _ -> ()
-  in
-  wait_grace 10
+let signal_if_alive (proc : active_process) sig_num =
+  Stdlib.Mutex.protect proc.reap_state.reap_mu (fun () ->
+      if not proc.reap_state.reaped then
+        try Unix.kill proc.pid sig_num with Unix.Unix_error _ -> ())
+
+let is_reaped (proc : active_process) =
+  Stdlib.Mutex.protect proc.reap_state.reap_mu (fun () ->
+      proc.reap_state.reaped)
 
 let reap_active_proc (proc : active_process) =
-  kill_and_reap proc.pid;
-  Option.iter remove_quietly proc.temp_path
+  signal_if_alive proc Sys.sigterm;
+  let rec wait_grace tries =
+    if is_reaped proc then ()
+    else if tries > 0 then (
+      Unix.sleepf 0.02;
+      wait_grace (tries - 1))
+    else signal_if_alive proc Sys.sigkill
+  in
+  wait_grace 10;
+  Thread.join proc.reaper
 
 let take_active t =
   Stdlib.Mutex.protect t.mu (fun () ->
@@ -247,33 +248,24 @@ let spawn_quiet ~executable ~args =
           | exception Unix.Unix_error (err, fn, _) ->
               Error (Printf.sprintf "%s: %s" fn (Unix.error_message err)))
 
-let reap_in_background t ~pid ~temp_path =
-  ignore
-    (Thread.create
-       (fun () ->
-         let rec loop () =
-           match Unix.waitpid [] pid with
-           | _, _ -> ()
-           | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
-           | exception Unix.Unix_error _ -> ()
-         in
-         loop ();
-         let owned_temp =
-           Stdlib.Mutex.protect t.mu (fun () ->
-               match t.active with
-               | Some cur when cur.pid = pid ->
-                   t.active <- None;
-                   cur.temp_path
-               | Some _ | None -> None)
-         in
-         match owned_temp with
-         | Some p -> remove_quietly p
-         | None ->
-             (* If [stop] already cleared [active], it owns temp cleanup;
-                for untracked processes we still remove [temp_path] if any. *)
-             ignore temp_path)
-       ()
-      : Thread.t)
+let start_reaper t ~pid ~temp_path ~reap_state =
+  Thread.create
+    (fun () ->
+      let rec loop () =
+        match Unix.waitpid [] pid with
+        | _, _ -> ()
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop ()
+        | exception Unix.Unix_error _ -> ()
+      in
+      loop ();
+      Stdlib.Mutex.protect reap_state.reap_mu (fun () ->
+          reap_state.reaped <- true);
+      Stdlib.Mutex.protect t.mu (fun () ->
+          match t.active with
+          | Some cur when cur.reap_state == reap_state -> t.active <- None
+          | Some _ | None -> ());
+      Option.iter remove_quietly temp_path)
+    ()
 
 let play_file t ?base_path ?resolve ?(temp_cleanup = false) ~mime_type ~label ~path () =
   let soundfont = find_soundfont ?base_path () in
@@ -315,14 +307,16 @@ let play_file t ?base_path ?resolve ?(temp_cleanup = false) ~mime_type ~label ~p
             match spawn_quiet ~executable ~args with
             | Error msg -> (Error msg, prev)
             | Ok pid ->
-                t.active <- Some { pid; label; temp_path };
-                (Ok pid, prev))
+                let reap_state =
+                  { reap_mu = Stdlib.Mutex.create (); reaped = false }
+                in
+                let reaper = start_reaper t ~pid ~temp_path ~reap_state in
+                t.active <- Some { pid; label; reap_state; reaper };
+                (Ok (), prev))
       in
       Option.iter reap_active_proc displaced;
       match spawned with
       | Error msg ->
           if temp_cleanup then remove_quietly path;
           Error msg
-      | Ok pid ->
-          reap_in_background t ~pid ~temp_path;
-          Ok (Playing label))
+      | Ok () -> Ok (Playing label))

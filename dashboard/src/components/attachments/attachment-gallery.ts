@@ -17,7 +17,8 @@
  */
 
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useState } from 'preact/hooks'
+import type { RefObject } from 'preact'
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import {
   dedupeAttachments,
   downloadAttachment,
@@ -29,7 +30,6 @@ import { isWorkspaceRasterMime } from '../../lib/keeper-media'
 import { WorkspaceChatImage } from '../chat/workspace-image'
 import { MidiScorePlayer, formatPlaybackTime } from '../common/alphatab-score'
 import { copyToClipboard } from '../common/copyable-code'
-import { useInViewOnce } from '../common/use-in-view'
 import { ChatPreviewModal } from '../primitives/chat-preview-modal'
 import {
   audioFormatBadge,
@@ -38,6 +38,30 @@ import {
   isMidiMimeType,
   videoFormatBadge,
 } from './validation'
+
+function useInViewOnce<T extends HTMLElement>(rootMargin = '200px'): [RefObject<T>, boolean] {
+  const ref = useRef<T>(null)
+  const [inView, setInView] = useState(() => typeof IntersectionObserver === 'undefined')
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el || inView) return undefined
+    if (typeof IntersectionObserver === 'undefined') {
+      setInView(true)
+      return undefined
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) setInView(true)
+      },
+      { rootMargin },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [inView, rootMargin])
+
+  return [ref, inView]
+}
 
 function revokeUrlSafe(url: string | null): void {
   if (!url || !url.startsWith('blob:')) return
@@ -194,6 +218,10 @@ function WorkspaceAudioAttachment({
           return nextUrl
         })
       })
+      .catch((err) => {
+        if (ctrl.signal.aborted) return
+        setError(err instanceof Error ? err.message : '오디오를 불러오지 못했습니다.')
+      })
       .finally(() => {
         if (!ctrl.signal.aborted) setLoading(false)
       })
@@ -271,6 +299,13 @@ function WorkspaceAudioAttachment({
               setDurationMs(Math.round(el.duration * 1000))
             }
           }}
+          onError=${() => {
+            setSrcUrl((prev) => {
+              revokeUrlSafe(prev)
+              return null
+            })
+            setError('브라우저에서 이 오디오 형식을 디코딩하지 못했습니다. 다운로드하여 확인하세요.')
+          }}
         />
       `}
     </div>
@@ -321,6 +356,10 @@ function WorkspaceVideoAttachment({
           return nextUrl
         })
       })
+      .catch((err) => {
+        if (ctrl.signal.aborted) return
+        setError(err instanceof Error ? err.message : '비디오를 불러오지 못했습니다.')
+      })
       .finally(() => {
         if (!ctrl.signal.aborted) setLoading(false)
       })
@@ -331,14 +370,18 @@ function WorkspaceVideoAttachment({
       format: 'png',
       requireRasterImage: true,
       signal: ctrl.signal,
-    }).then((res) => {
-      if (ctrl.signal.aborted || !res.ok) return
-      const nextPoster = URL.createObjectURL(res.value.blob)
-      setPosterUrl((prev) => {
-        revokeUrlSafe(prev)
-        return nextPoster
-      })
     })
+      .then((res) => {
+        if (ctrl.signal.aborted || !res.ok) return
+        const nextPoster = URL.createObjectURL(res.value.blob)
+        setPosterUrl((prev) => {
+          revokeUrlSafe(prev)
+          return nextPoster
+        })
+      })
+      .catch(() => {
+        // Ignore poster fetch rejections; video playback remains independent.
+      })
 
     return () => ctrl.abort()
   }, [attachment.url, currentWorkspace, inView, attempt])
@@ -370,28 +413,37 @@ function WorkspaceVideoAttachment({
       data-testid="attachment-video-card"
       data-attachment-id=${attachment.attachment_id}
     >
-      <div class="att-video-frame">
-        ${videoUrl
-          ? html`
-              <video
-                class="att-video-el"
-                controls
-                playsInline
-                preload="metadata"
-                src=${videoUrl}
-                poster=${posterUrl ?? undefined}
-                onLoadedMetadata=${(e: Event) => {
-                  const el = e.currentTarget as HTMLVideoElement
-                  if (el.videoWidth > 0 && el.videoHeight > 0) {
-                    setNaturalDims({ w: el.videoWidth, h: el.videoHeight })
-                  }
-                }}
-              />
-            `
-          : loading
-            ? html`<div class="rich-code-loading">비디오 불러오는 중…</div>`
-            : html`<div class="rich-code-loading">비디오를 표시할 수 없습니다.</div>`}
-      </div>
+      ${(videoUrl || loading || (!inView && !error)) && html`
+        <div class="att-video-frame">
+          ${videoUrl
+            ? html`
+                <video
+                  class="att-video-el"
+                  controls
+                  playsInline
+                  preload="metadata"
+                  src=${videoUrl}
+                  poster=${posterUrl ?? undefined}
+                  onLoadedMetadata=${(e: Event) => {
+                    const el = e.currentTarget as HTMLVideoElement
+                    if (el.videoWidth > 0 && el.videoHeight > 0) {
+                      setNaturalDims({ w: el.videoWidth, h: el.videoHeight })
+                    }
+                  }}
+                  onError=${() => {
+                    setVideoUrl((prev) => {
+                      revokeUrlSafe(prev)
+                      return null
+                    })
+                    setError('브라우저에서 이 비디오 형식을 디코딩하지 못했습니다. 다운로드하여 확인하세요.')
+                  }}
+                />
+              `
+            : loading
+              ? html`<div class="rich-code-loading">비디오 불러오는 중…</div>`
+              : html`<div class="rich-code-loading" data-testid="video-idle-placeholder">화면에 보이면 비디오를 불러옵니다…</div>`}
+        </div>
+      `}
 
       <div class="att-video-footer">
         <div class="att-card-head" style="flex:1;min-width:0">

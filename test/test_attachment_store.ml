@@ -958,6 +958,20 @@ let test_video_aliases_limits_and_poster () =
     (match A.get_video_poster store ~meta:m_midi1 ~raw_bytes:minimal_midi with
      | Error (A.Not_an_image "audio/midi") -> ()
      | Ok _ | Error _ -> Alcotest.fail "expected Not_an_image on MIDI");
+    (* get_byte_range reads exact slice via seek_in and rejects out-of-bounds/negative *)
+    (match A.get_byte_range store ~id:m_midi1.id ~start:0 ~length:4 with
+     | Ok (Some slice) -> Alcotest.(check string) "get_byte_range head" "MThd" slice
+     | Ok None | Error _ -> Alcotest.fail "expected MThd head slice");
+    (match A.get_byte_range store ~id:m_midi1.id ~start:4 ~length:4 with
+     | Ok (Some slice) ->
+       Alcotest.(check string) "get_byte_range mid" (String.sub minimal_midi 4 4) slice
+     | Ok None | Error _ -> Alcotest.fail "expected mid slice");
+    (match A.get_byte_range store ~id:m_midi1.id ~start:0 ~length:(String.length minimal_midi + 1) with
+     | Error (A.Read_failed _) -> ()
+     | Ok _ | Error _ -> Alcotest.fail "expected Read_failed for out-of-bounds range");
+    (match A.get_byte_range store ~id:m_midi1.id ~start:(-1) ~length:2 with
+     | Error (A.Read_failed _) -> ()
+     | Ok _ | Error _ -> Alcotest.fail "expected Read_failed for negative start");
     (* Real ffmpeg MP4 poster extraction when ffmpeg is installed *)
     match generate_tiny_mp4_opt () with
     | None -> ()

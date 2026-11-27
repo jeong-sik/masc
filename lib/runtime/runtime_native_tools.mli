@@ -120,6 +120,16 @@ val observe_exact_action :
   observe:(official_turn:int -> identity:action_identity -> tool_name:string -> unit) ->
   observation -> unit
 
+val opens_native_block : observation -> bool
+(** Whether the step opens its own native block on the keeper stream, on a
+    lane whose MCP server is MASC's own bridge (Claude Code, Antigravity).
+    A [Built_in] step does. An [Mcp_wrapper] step does not: it is the client's
+    record of a call to a MASC tool, and the MASC tool path already opened
+    that call's [tool_use] block. A step without a block has none for its
+    progress or end to land on. Codex reaches MASC tools as dynamic tools, so
+    its MCP items name another server's tool and that lane keeps their
+    blocks. *)
+
 val call_id : observation -> string option
 (** Return a literal provider call id when one exists. A provider step is not
     flattened into this field. *)

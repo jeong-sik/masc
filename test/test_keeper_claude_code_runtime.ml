@@ -1421,6 +1421,113 @@ let test_keeper_distinguishes_native_and_masc_tool_provenance () =
                 | _ -> false)))
 ;;
 
+(* #39360: Claude Code also reports a MASC tool call as an [mcp__masc__*]
+   tool_use. The MASC tool path already opened that call's tool_use block,
+   so the client's record opens no native block and no native chat row.
+   A built-in Read still opens both. *)
+let test_keeper_masc_call_opens_no_native_block () =
+  let base_path = temp_workspace () in
+  let marker_param : Agent_core.Types.tool_param =
+    { name = "marker"
+    ; description = "Fixture marker"
+    ; param_type = String
+    ; required = true
+    }
+  in
+  let tool =
+    Agent_core.Tool.create
+      ~name:"masc_probe"
+      ~description:"Return a deterministic fixture marker"
+      ~parameters:[ marker_param ]
+      (fun _ -> Ok { Agent_core.Types.content = "MASC_TOOL_RESULT"; content_blocks = None; _meta = None })
+  in
+  let events = ref [] in
+  let chat = Native_tool_outcome_fixture.create () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tree base_path)
+    (fun () ->
+       with_fixture
+         [ Emit_and_read mcp_initialize
+         ; Emit mcp_initialized_notification
+         ; Emit_and_read mcp_list
+         ; Emit
+             (native_tool_call_block
+                ~turn_id:"turn-mcp-1"
+                ~call_id:"provider-mcp-call-1"
+                ~tool_name:"mcp__masc__masc_probe")
+         ; Emit_and_read mcp_call
+         ; Emit
+             (native_tool_result
+                ~call_id:"provider-mcp-call-1"
+                ~content:"MASC_TOOL_RESULT")
+         ; Emit
+             (native_tool_call_block
+                ~turn_id:"turn-native-1"
+                ~call_id:"native-call-1"
+                ~tool_name:"Read")
+         ; Emit (native_tool_result ~call_id:"native-call-1" ~content:"native tool output")
+         ; Emit (assistant ~turn_id:"turn-native-1" "MASC_CLAUDE_NATIVE")
+         ; Emit (result ~turn_id:"turn-native-1" "MASC_CLAUDE_NATIVE")
+         ]
+         (fun cli_path ->
+           match
+             run_keeper_turn
+               ~tools:[ tool ]
+               ~base_path
+               ~cli_path
+               ~goal:"USE_NATIVE_AND_MASC_TOOLS"
+               ~on_event:(fun event ->
+                 events := event :: !events;
+                 Native_tool_outcome_fixture.on_event chat event)
+               ~on_native_tool_completion:(Native_tool_outcome_fixture.on_completion chat)
+               ()
+           with
+           | Error error -> fail (Agent_core.Error.to_string error)
+           | Ok _ ->
+             let events = List.rev !events in
+             let starts kind =
+               List.filter_map
+                 (function
+                   | Agent_core.Types.ContentBlockStart { content_type; tool_id; tool_name; _ }
+                     when String.equal content_type kind -> Some (tool_id, tool_name)
+                   | _ -> None)
+                 events
+             in
+             check (list (pair (option string) (option string)))
+               "only the built-in opens a native block"
+               [ Some "native-call-1", Some "Read" ]
+               (starts Runtime_native_tools.stream_content_type);
+             check (list (pair (option string) (option string)))
+               "the MASC call keeps its one tool_use block"
+               [ Some "call-1", Some "masc_probe" ]
+               (starts "tool_use");
+             let rec stops_only_opened opened = function
+               | [] -> true
+               | Agent_core.Types.ContentBlockStart { index; _ } :: rest
+               | Agent_core.Types.ContentBlockDelta { index; _ } :: rest ->
+                 stops_only_opened (index :: opened) rest
+               | Agent_core.Types.ContentBlockStop { index } :: rest ->
+                 List.mem index opened && stops_only_opened opened rest
+               | _ :: rest -> stops_only_opened opened rest
+             in
+             check bool "no stop for a block that never opened" true
+               (stops_only_opened [] events);
+             check (list (option string))
+               "one native chat row, for Read"
+               [ Some "Read" ]
+               (List.filter_map
+                  (function
+                    | Keeper_chat_events.Native_tool_start tool -> Some tool.tool_call_name
+                    | _ -> None)
+                  (Native_tool_outcome_fixture.events chat));
+             Native_tool_outcome_fixture.check chat
+               ~expected:
+                 [ { Runtime_native_tools.outcome = Result_received { is_error = None }
+                   ; exit_code = None
+                   }
+                 ]))
+;;
+
 let test_keeper_streams_text_and_tool_events () =
   let base_path = temp_workspace () in
   let events = ref [] in
@@ -7947,6 +8054,10 @@ let () =
             "distinguishes native and MASC tool provenance"
             `Quick
             test_keeper_distinguishes_native_and_masc_tool_provenance
+        ; test_case
+            "a MASC call opens no native block"
+            `Quick
+            test_keeper_masc_call_opens_no_native_block
         ; test_case
             "streams text and tool events"
             `Quick

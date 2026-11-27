@@ -408,24 +408,29 @@ let claude_stream_callback ?on_provider_retry ?on_child_content_observation ?on_
             ~raw_trace_run
             ~phase:`Started
             observation;
-          let index =
-            match Option.bind observation.identity (Hashtbl.find_opt native_tool_indexes) with
-            | Some index -> index
-            | None ->
-                let index = !next_tool_index in
-                incr next_tool_index;
-                Option.iter
-                  (fun identity -> Hashtbl.add native_tool_indexes identity index)
-                  observation.identity;
-                index
-          in
-          emit
-            (Agent_core.Types.ContentBlockStart
-               { index
-               ; content_type = Runtime_native_tools.stream_content_type
-               ; tool_id = Runtime_native_tools.call_id observation
-               ; tool_name = observation.tool_name
-               })
+          (* A MASC tool call already has its tool_use block from
+             [Dynamic_tool_started]. Its [mcp__masc__*] step registers no
+             index, so its progress and end below find no block (#39360). *)
+          if Runtime_native_tools.opens_native_block observation then begin
+            let index =
+              match Option.bind observation.identity (Hashtbl.find_opt native_tool_indexes) with
+              | Some index -> index
+              | None ->
+                  let index = !next_tool_index in
+                  incr next_tool_index;
+                  Option.iter
+                    (fun identity -> Hashtbl.add native_tool_indexes identity index)
+                    observation.identity;
+                  index
+            in
+            emit
+              (Agent_core.Types.ContentBlockStart
+                 { index
+                 ; content_type = Runtime_native_tools.stream_content_type
+                 ; tool_id = Runtime_native_tools.call_id observation
+                 ; tool_name = observation.tool_name
+                 })
+          end
         | Runtime_claude_code.Native_task_observed observation ->
           Option.iter (fun observe -> observe observation) on_native_task_observation
         | Runtime_claude_code.Native_tool_progress {identity; progress} ->

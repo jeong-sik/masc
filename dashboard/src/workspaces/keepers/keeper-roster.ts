@@ -23,6 +23,7 @@ import {
 import { withObservedTurn, type FleetTurnPreviews } from './fleet-turn-previews'
 import { TURN_RUNNING_PHRASE, turnDoing, turnDoingBrief } from './turn-doing'
 import { otherCallsLabel } from './turn-open-work'
+import { readSetupInventory, runtimeWithAccount } from '../runtime/setup-inventory-read'
 import type {
   KeeperRosterItem,
   RosterMode,
@@ -94,6 +95,7 @@ export function KeeperRoster(props: KeeperRosterProps) {
   }, [adminLocked, createOpen])
 
   const items: readonly KeeperRosterItem[] = props.roster.kind === 'value' ? props.roster.data : []
+  const setupInventory = readSetupInventory()
 
   const visible = useMemo(
     () => filterAndSortRoster(items, mode, query),
@@ -188,7 +190,8 @@ export function KeeperRoster(props: KeeperRosterProps) {
                     : WAITING_UNREAD_LABEL
                   const waiting = waitingWords(k)
                   const waitingCount = waitingUnread ? null : waiting
-                  const settled = waiting === null ? k.runtime_id : `${waiting} · ${k.runtime_id}`
+                  const runtime = runtimeWithAccount(setupInventory, k.runtime_id)
+                  const settled = waiting === null ? runtime : `${waiting} · ${runtime}`
                   // A warning or a rest is said before a turn. A row in a turn says
                   // what the turn is doing and how much waits; its runtime is in the
                   // hover and in the header.
@@ -198,7 +201,7 @@ export function KeeperRoster(props: KeeperRosterProps) {
                   const subLine = failing
                     ? `⚠ ${k.runtime_blocker_summary ?? k.last_failure?.cause ?? k.directory_issue ?? k.health}`
                     : resting
-                      ? `⏸ 휴식 · ${k.runtime_path_rest?.runtime_id ?? k.runtime_id}`
+                      ? `⏸ 휴식 · ${runtimeWithAccount(setupInventory, k.runtime_path_rest?.runtime_id ?? k.runtime_id)}`
                       : turn
                         ? `${turnPreview ? turnDoing(turnPreview).phrase : TURN_RUNNING_PHRASE} · ${settled}`
                         : settled

@@ -36,6 +36,7 @@ import { KeeperRoster, type KeeperRosterProps } from './keeper-roster'
 import { KeeperHeader, type KeeperHeaderProps } from './keeper-header'
 import { KeeperChatTab } from './keeper-chat-tab'
 import { PersonalKeepersWorkspace } from './personal-keepers-workspace'
+import { loadSetupInventory } from '../runtime/setup-inventory-read'
 import type { KeeperRosterItem } from './types'
 import './keepers.css'
 
@@ -148,6 +149,8 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
   useEffect(() => {
     if (!isSingleUser) return
     void refreshRoster('mount')
+    // The roster and header name each runtime's account from this read.
+    void loadSetupInventory('mount')
   }, [epoch, isSingleUser, refreshRoster])
 
   useEffect(() => {

@@ -42,6 +42,7 @@ import { pushShellToast } from '../../shell/shell-state'
 import { formatTurnLaneLabel } from './chat-blocks'
 import { turnDoing } from './turn-doing'
 import type { KeeperRosterItem, KeeperToolApprovalModesData } from './types'
+import { readSetupInventory, runtimeWithAccount } from '../runtime/setup-inventory-read'
 import { isWaitingUnavailable } from './turn-context'
 
 export interface KeeperHeaderProps {
@@ -149,6 +150,7 @@ export function KeeperHeader(props: KeeperHeaderProps) {
   const canAdminLifecycle = isSingleUser && !isAdminLockedForSession('admin', session)
   const epoch = sessionEpoch.value
   const approvalModesObs = resourceCache.observe<KeeperToolApprovalModesData>('keepers:tool-approval-modes').value
+  const setupInventory = readSetupInventory()
 
   useEffect(() => {
     if (!isSingleUser) return
@@ -389,7 +391,7 @@ export function KeeperHeader(props: KeeperHeaderProps) {
                 </div>
                 <div class="kp-meta-row">
                   <span class="kp-meta-key">Runtime</span>
-                  <span class="kp-meta-val">${keeper.runtime_id}</span>
+                  <span class="kp-meta-val">${runtimeWithAccount(setupInventory, keeper.runtime_id)}</span>
                 </div>
                 <div class="kp-meta-row">
                   <span class="kp-meta-key">턴 상태</span>

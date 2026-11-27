@@ -66,6 +66,9 @@ describe('a roster row', () => {
         hover: state?.getAttribute('title') ?? null,
         // The parts of a turn's line, in the order a narrow row leaves them out from the end.
         parts: turnLine ? [...turnLine.children].map((part) => part.textContent) : null,
+        unreadMarker: turnLine?.querySelector('.kp-roster-waiting-unread')?.getAttribute('title') ?? null,
+        waitingUnread: turnLine?.getAttribute('data-waiting-unread') ?? null,
+        trailingWaiting: turnLine?.querySelector('.kp-roster-waiting')?.textContent ?? null,
         // Of a tool's name, the front that gives way and the end that stays.
         name: turnLine?.querySelector('.kp-roster-tool')
           ? [...(turnLine.querySelector('.kp-roster-tool')?.children ?? [])].map((part) => part.textContent)
@@ -101,20 +104,39 @@ describe('a roster row', () => {
     expect(seen.get('c-unread')).toMatchObject({ line: '대기 목록 읽기 실패 · rt-1', parts: null })
   })
 
-  it('says what an open turn is doing, then how much waits, and leaves the runtime to the hover', () => {
+  it('says what an open turn is doing, then how much waits, and keeps a waiting read failure first', () => {
     const seen = rows([
       keeper('a-turn', { active_turn: turn([tool('Execute', 'executing')]) }),
       keeper('b-turn-waiting', { active_turn: turn([tool('Execute', 'executing')]), waiting_summary: waiting(3) }),
       keeper('c-turn-unread', { active_turn: turn([tool('Execute', 'executing')]), waiting_summary: { unavailable: true, reason: null } }),
       keeper('d-turn-none-waiting', { active_turn: turn([tool('Execute', 'executing')]), waiting_summary: waiting(0) }),
+      keeper('e-turn-words-unread', {
+        active_turn: turn([], { state: 'active', phase: 'workspace_memory', started_at_unix: 15 }),
+        waiting_summary: { unavailable: true, reason: 'store locked' },
+      }),
     ])
-    expect(seen.get('a-turn')).toMatchObject({ line: 'Execute', parts: ['Execute'], hover: 'Execute · 실행 중 · rt-1' })
-    expect(seen.get('d-turn-none-waiting')).toMatchObject({ line: 'Execute', parts: ['Execute'], hover: 'Execute · 실행 중 · rt-1' })
+    expect(seen.get('a-turn')).toMatchObject({ line: 'Execute', parts: ['Execute'], hover: 'Execute · 실행 중 · rt-1', waitingUnread: null })
+    expect(seen.get('d-turn-none-waiting')).toMatchObject({ line: 'Execute', parts: ['Execute'], hover: 'Execute · 실행 중 · rt-1', waitingUnread: null })
     expect(seen.get('b-turn-waiting')).toMatchObject({
-      line: 'Execute · 대기 3', parts: ['Execute', ' · 대기 3'], hover: 'Execute · 실행 중 · 대기 3 · rt-1',
+      line: 'Execute · 대기 3', parts: ['Execute', ' · 대기 3'], trailingWaiting: ' · 대기 3', waitingUnread: null,
+      hover: 'Execute · 실행 중 · 대기 3 · rt-1',
     })
+    // A waiting read failure stays first so a narrow row cannot drop it and look like 0 waiting.
     expect(seen.get('c-turn-unread')).toMatchObject({
-      parts: ['Execute', ' · 대기 목록 읽기 실패'], hover: 'Execute · 실행 중 · 대기 목록 읽기 실패 · rt-1',
+      line: '대기 ? · Execute',
+      parts: ['대기 ? · ', 'Execute'],
+      waitingUnread: 'true',
+      unreadMarker: '대기 목록 읽기 실패',
+      trailingWaiting: null,
+      hover: 'Execute · 실행 중 · 대기 목록 읽기 실패 · rt-1',
+    })
+    expect(seen.get('e-turn-words-unread')).toMatchObject({
+      line: '대기 ? · 준비 중 · 작업공간 메모리',
+      parts: ['대기 ? · ', '준비 중 · 작업공간 메모리'],
+      waitingUnread: 'true',
+      unreadMarker: '대기 목록 읽기 실패: store locked',
+      trailingWaiting: null,
+      hover: '준비 중 · 작업공간 메모리 · 대기 목록 읽기 실패 · rt-1',
     })
   })
 

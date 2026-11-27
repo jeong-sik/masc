@@ -48,10 +48,13 @@ export interface KeeperRosterProps {
   readonly onCreatedKeeper: (name: string) => void
 }
 
+const WAITING_UNREAD_LABEL = '대기 목록 읽기 실패'
+const WAITING_UNREAD_MARKER = '대기 ?'
+
 // What a row says about waiting: that the list could not be read, how much
 // waits, or nothing.
 function waitingWords(k: KeeperRosterItem): string | null {
-  if (isWaitingUnavailable(k.waiting_summary)) return '대기 목록 읽기 실패'
+  if (isWaitingUnavailable(k.waiting_summary)) return WAITING_UNREAD_LABEL
   return k.waiting_summary && k.waiting_summary.count > 0 ? `대기 ${k.waiting_summary.count}` : null
 }
 
@@ -185,7 +188,12 @@ export function KeeperRoster(props: KeeperRosterProps) {
                   const resting = isKeeperPathResting(k)
                   const failing = needsRosterAttention(k)
                   const selected = props.selectedKeeper === k.name
+                  const waitingUnread = isWaitingUnavailable(k.waiting_summary)
+                  const waitingUnreadTitle = waitingUnread && k.waiting_summary.reason
+                    ? `${WAITING_UNREAD_LABEL}: ${k.waiting_summary.reason}`
+                    : WAITING_UNREAD_LABEL
                   const waiting = waitingWords(k)
+                  const waitingCount = waitingUnread ? null : waiting
                   const settled = waiting === null ? k.runtime_id : `${waiting} · ${k.runtime_id}`
                   // A warning or a rest is said before a turn. A row in a turn says
                   // what the turn is doing and how much waits; its runtime is in the
@@ -258,17 +266,26 @@ export function KeeperRoster(props: KeeperRosterProps) {
                             ${doing === null
                               ? html`<span class="kp-roster-sub" data-roster-state title=${subLine}>${subLine}</span>`
                               : html`
-                                  <span class="kp-roster-sub kp-roster-turn" data-roster-state title=${subLine}>
+                                  <span
+                                    class="kp-roster-sub kp-roster-turn"
+                                    data-roster-state
+                                    data-waiting-unread=${waitingUnread ? 'true' : undefined}
+                                    title=${subLine}
+                                  >
+                                    ${waitingUnread && html`<span class="kp-roster-waiting-unread" title=${waitingUnreadTitle}>${`${WAITING_UNREAD_MARKER} · `}</span>`}
                                     ${doing.kind === 'words'
                                       ? html`<span class="kp-roster-words">${doing.words}</span>`
                                       : (([front, keptEnd]) => html`
-                                          <span class="kp-roster-tool" style=${{ flexBasis: TOOL_NAME_LEAST_ROOM }}>
+                                          <span
+                                            class="kp-roster-tool"
+                                            style=${{ flexBasis: waitingUnread ? (doing.otherCalls > 0 ? '6ch' : '0') : TOOL_NAME_LEAST_ROOM }}
+                                          >
                                             <span class="kp-roster-tool-front">${front}</span>
                                             ${keptEnd !== '' && html`<span>${keptEnd}</span>`}
                                           </span>
                                           ${doing.otherCalls > 0 && html`<span>${` ${otherCallsLabel(doing.otherCalls)}`}</span>`}
                                         `)(frontAndKeptEnd(doing.name))}
-                                    ${waiting !== null && html`<span class="kp-roster-waiting">${` · ${waiting}`}</span>`}
+                                    ${waitingCount !== null && html`<span class="kp-roster-waiting">${` · ${waitingCount}`}</span>`}
                                   </span>
                                 `}
                           </span>

@@ -339,6 +339,7 @@
   flex-shrink: 1;
   min-width: 0;
   max-width: max-content;
+  overflow: hidden;
 }
 
 .kp-roster-tool > .kp-roster-tool-front {
@@ -346,6 +347,19 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* A failed waiting read cannot drop off the line as if zero items waited:
+   put its short marker first (flex: none) and let the words after it shrink
+   within the remaining room on the same line. */
+.kp-roster-turn > .kp-roster-waiting-unread {
+  flex: none;
+  color: var(--warn-fg);
+}
+
+.kp-roster-turn[data-waiting-unread="true"] > .kp-roster-words {
+  flex: 1 1 0;
+  max-width: max-content;
 }
 
 .kp-roster-waiting {

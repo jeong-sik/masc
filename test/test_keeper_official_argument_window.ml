@@ -69,7 +69,7 @@ let projection ?(history_prefix=[]) ?tools source base_path =
   Option.bind source (fun source -> Host.argument_projection source ~tools ~history_prefix)
 let project ?argument_projection ?(capacity_bytes=max_int) ?carried_front_seed
     ?(librarian_front=progress) ?on_carried_front ?on_model_input_window_observation messages =
-  Host.start_range_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "official-arguments" }) ?argument_projection ~measure_message_bytes:measure
+  Host.start_range_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "official-arguments" }) ?argument_projection
     ~capacity_bytes ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
     ?carried_front_seed ~librarian_front
     ?on_carried_front ?on_model_input_window_observation
@@ -279,7 +279,7 @@ let test_finished_turn_results_leave_as_markers_from_the_floor () = with_base @@
       projection ?tools (source ~seed:(Some seed) ~turn_start base) base in
     Host.start_range_projection
       ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "official-results" })
-      ?argument_projection ~measure_message_bytes:measure
+      ?argument_projection
       ~capacity_bytes:max_int ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
       ~librarian_front:progress
       ~turn_start ~keeper_name:"official-results" ~runtime_id:"official.sample"
@@ -342,11 +342,10 @@ let test_completion_review_preserves_the_full_evidence_without_history_reads () 
   in
   let late_seed = accepted_seed evidence 2 in
   List.iter (fun boundary ->
-    let seed_reads = ref 0 and measured = ref 0 in
+    let seed_reads = ref 0 in
     let windows = ref 0 and carried_fronts = ref 0 in
     let sent = Host.start_range_projection
         ~input_source:Masc.Keeper_request_source.Completion_review ~argument_projection
-        ~measure_message_bytes:(fun message -> incr measured; measure message)
         ~capacity_bytes:1 ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
         ~carried_front_seed:(fun ~runtime_id:_ -> incr seed_reads;
           { Keeper_carried_front.no_seed_read with seed = Some late_seed })
@@ -362,7 +361,6 @@ let test_completion_review_preserves_the_full_evidence_without_history_reads () 
     check bool "large closed arguments stay inline as their original JSON" true
       (input "alpha" sent = alpha && input "beta" sent = beta && input "current" sent = current);
     check int "no durable Keeper seed read" 0 !seed_reads;
-    check int "no capacity measurement or shrink planning" 0 !measured;
     check int "no history-window projection callback" 0 !windows;
     check int "no carried-history projection callback" 0 !carried_fronts;
     check bool "argument demotion wrote no artifact" false

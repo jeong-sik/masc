@@ -295,7 +295,6 @@ let carried_model_input_projection ~input_source
     Host.start_range_projection
       ~input_source
       ?argument_projection
-      ~measure_message_bytes
       ~capacity_bytes
       ~unbounded_capacity_bytes:unbounded_model_input_capacity_bytes
       ~reserved_bytes:0

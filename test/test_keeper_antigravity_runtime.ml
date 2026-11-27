@@ -1781,7 +1781,6 @@ let carried_projection ?on_model_input_window_observation ?carried_front_seed ?l
   fun messages ->
   Keeper_official_client_host.start_range_projection
     ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
-    ~measure_message_bytes:Keeper_official_client_host.measure_message_bytes
     ~capacity_bytes:max_int
     ~unbounded_capacity_bytes:max_int
     ~reserved_bytes:0
@@ -2591,7 +2590,6 @@ let test_projection_refusal_emits_no_carried_observations () =
     let result =
       Keeper_official_client_host.start_range_projection
         ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "refusal-fixture" })
-        ~measure_message_bytes:Keeper_official_client_host.measure_message_bytes
         ~capacity_bytes:max_int ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
         ~on_model_input_window_observation:(fun _ -> incr windows)
         ~on_carried_front:(fun _ ~transmitted_bytes:_ ~sends_from:_ -> incr fronts)

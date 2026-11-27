@@ -13,6 +13,7 @@
 - Replace hardcoded `/bin/df` probing in `Keeper_disk_pressure` with a POSIX `statvfs(2)` C stub (`caml_masc_statvfs`) and emit observational disk health rollup fields (`status`, `health_status`, `status_reasons`, `operator_action_required`) for `/health?full=1` (#55332).
 - Expand `.masc` runtime observable store breakdown in `Otel_runtime_observables` to include `tool_blobs`, `execute_output`, `keepers`, and `playground` with symlink-safe, depth- and entry-bounded directory walks (#55332).
 - Detect ANSI escape sequences (`\x1b`) in live execute output lines and add optional `cwd` and `sandbox_profile` stream start metadata (`start_stream` / `start_execute_stream`) exposed in `active_streams` and `task_opened` SSE events (#55332).
+- MASC TUI: add typed host storage summary (`Wire_infra.host_storage_summary`), disk usage bar & ENOSPC gauge in Infra Sandboxes (Wide and Compact), low-disk/ENOSPC warnings in Pulse and Chrome top rail, collapsible sidebar sections (`Space`), keyboard-resizable sidebar and split pane widths (`{`/`}`), multi-axis Keeper fleet grouping (`Company`/`Status`/`Sandbox`/`Runtime` via `v`), and live WAV PCM RMS voice level metering with Linux PulseAudio/ALSA fallback (#55336).
 
 ### Changed
 
@@ -120,6 +121,10 @@
   turn as markers, like those of any ended turn. The turn of a chat operation is left as it
   was, because the turn that resumes it opens after its input (#55352).
 - Preserve existing `keeper.group` from `profile_defaults` when `keeper_up` persists a keeper manifest without passing `group` (#55332).
+- Block control-character and surrounding-whitespace URL bypasses (including relative `fetch` URLs) in `Browser_native_workflow`, close private-provenance laundering in `Librarian_plan`, deduplicate `broadcast_once` retries against pending mention outbox rows under one unified lookup/policy path, reject Candle self-gifts, make `Board_votes` pin/close/reopen write-ahead, notify `Board_posts_source` on comment parent guard refusal, preserve `Inactive` status on stale task cleanup/recovery, validate `artifact:` evidence paths at task admission, and support JSON Schema union `"type"` arrays in `Lane_addon_exact_shape` (#55320).
+- Stopping MIDI playback, a MIDI Clip audition or live MIDI forwarding on an external MIDI output no longer drops the last messages sent just before the stop, such as the cleanup note-offs that end held notes. The native players disposed their CoreMIDI output port and client right after the final send, and CoreMIDI could discard a message still on its way while reporting success; on a macOS CI runner this lost a message in 63 of 800 measured closes. Every MIDI output in a player process now shares one port and client that stay open until the process exits, and a stopped player refuses its own further sends instead (#55322).
+- MASC TUI: grapheme-wrap overlong words in `Chat_transcript.wrap_plain_lines` and wrap `Json_tree.flatten` tool output lines, preserve explicit `\n` paragraph breaks in `Domain_helpers.wrap_lines`, clip sandbox detail notices in `Render_util`, and cap `@target_keeper` / popup trigger widths with `‹`/`›` horizontal pan overflow indicators in `Composer` (#55336).
+- The TUI Wiki preview rail lists the heading blocks the renderer draws, so a `#` line inside a code block is no longer listed and a setext heading is (#55373).
 
 ### Performance
 
@@ -143,12 +148,14 @@
 ### Upgrade notes
 
 - `[runtime].media_failover` is removed (hard cut) and refused at startup; remove `[runtime].media_failover` from `runtime.toml` before upgrading and use optional `[runtime.media]` (`vision_reader` / `image_generator`) only when pinning a non-default fallback runtime (#55194).
+- `MASC_SHUTDOWN_DRAIN_TIMEOUT` is ignored. The server's shutdown never read it, and a malformed value no longer stops the server from starting. Operators who set it in their environment or launch scripts can remove it (#55376).
 
 ### Removed
 
 - Removed `[runtime].media_failover` configuration routing and dead legacy Dashboard board-attachment components (#55194).
 - The `MASC_KEEPER_MEMORY_OS_PENDING_MAX_BYTES` setting is gone. Nothing has read it since the pending admission queue it bounded was deleted in #54451, so setting it changed nothing (#55222).
 - Official-client raw traces no longer carry `client_context_submission` hook records. The Codex, Claude Code and Antigravity Keeper runtimes wrote one per completed context write, and nothing outside one Codex test read them (#55225).
+- The `Shutdown.initiate` phase runner, its drain phase and the `drain_timeout_s` setting, which the SIGTERM/SIGINT path never called, and the `MASC_SHUTDOWN_DRAIN_TIMEOUT` row of the environment settings snapshot. Shutdown still runs `NOTIFY -> HOOKS -> BOARD -> CANCEL` from `bin/main_eio.ml` (#55376).
 
 ## [0.83.7] - 2026-11-27
 

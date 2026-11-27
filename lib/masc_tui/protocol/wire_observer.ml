@@ -463,6 +463,8 @@ let decode_typed_event type_name json =
                   | Wire_fleet.Chunk_tool_block_end _
                   | Wire_fleet.Chunk_tool_end _
                   | Wire_fleet.Chunk_tool_quarantined _
+                  | Wire_fleet.Chunk_batch_bound _
+                  | Wire_fleet.Chunk_external_effect_completed _
                   | Wire_fleet.Chunk_reply_details _
                   | Wire_fleet.Chunk_turn_done _
                   | Wire_fleet.Chunk_error _ ->

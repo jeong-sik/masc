@@ -812,6 +812,7 @@ val decode_running_chat_batch :
 
 val accepted_input_operation : chat_message -> string option
 val terminal_operation : chat_message -> string option
+val tool_operation : chat_message -> string option
 (** Operation identity from the persisted delivery key, slot and row role. *)
 
 type interactive_outcome =
@@ -939,6 +940,11 @@ type chat_stream_chunk =
       kind : string;
       reason : string option;
     }
+  | Chunk_batch_bound of {
+      operation_id : string;
+      execution_id : string;
+    }
+  | Chunk_external_effect_completed of { operation_id : string option }
   | Chunk_reply_details of {
       operation_id : string option;
       reply : string;

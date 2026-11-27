@@ -292,6 +292,7 @@ interface ObserverOperationStream {
   evictedSeqWatermark: number
   entryCreated: boolean
   terminal: boolean
+  completedAtHistorySeq: number | null
   shadowed: boolean
 }
 
@@ -1300,11 +1301,16 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           toolCalls: snapshotTools.length > 0 ? snapshotTools : m.toolCalls,
         }), 'Streaming')
       },
-      onReplyDetails: (reply, turnRef) => {
+      onReplyDetails: (reply, turnRef, turnOutcome) => {
         markUserDelivered()
+        // Terminal_effect_settled (wire label "external_effect_completed") and
+        // No_visible_reply ("no_visible_reply") never persist an assistant text
+        // row; do not copy discarded diagnostic prose into the live bubble.
+        const discardsProse =
+          turnOutcome === 'external_effect_completed' || turnOutcome === 'no_visible_reply'
         updateAssistant((m) => ({
           ...m,
-          content: reply || m.content,
+          content: discardsProse ? m.content : (reply || m.content),
           turnRef: turnRef ?? m.turnRef,
         }), 'Streaming')
       },
@@ -1346,6 +1352,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   useEffect(() => {
     let stopped = false
     let drainScheduled = false
+    let historyReadSeq = 0
     const pending = new Set<ChatRead>()
     const running = new Map<ChatRead, AbortController>()
     observerStreamsRef.current.clear()
@@ -1401,6 +1408,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
     const readChat = async (read: ChatRead, signal: AbortSignal, epoch: number, current: () => boolean) => {
       switch (read) {
         case 'history': {
+          const readStartedAtSeq = ++historyReadSeq
           const result = await fetchKeeperChatHistoryPageApi(keeper.name, undefined, 40, signal)
           if (!current()) return
           setLoadingHistory(false)
@@ -1411,12 +1419,23 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               invalidateEarlierReads()
               hasLoadedEarlierRef.current = false
             }
+            const reconciledObserverOpIds = new Set<string>()
+            for (const candidate of observerStreamsRef.current.values()) {
+              if (
+                candidate.terminal
+                && candidate.completedAtHistorySeq !== null
+                && readStartedAtSeq > candidate.completedAtHistorySeq
+              ) {
+                reconciledObserverOpIds.add(candidate.operationId)
+              }
+            }
             setMessagesState((previous) => ({
               keeperName: keeper.name,
               entries: mergeLatestHistoryPage(
                 previous.keeperName === keeper.name ? previous.entries : [],
                 result.value.messages,
                 sendingOperationRef.current,
+                reconciledObserverOpIds.size > 0 ? reconciledObserverOpIds : undefined,
               ),
             }))
             if (authoritativeEmpty || !hasLoadedEarlierRef.current) {
@@ -1534,6 +1553,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
             evictedSeqWatermark: -1,
             entryCreated: false,
             terminal: true,
+            completedAtHistorySeq: historyReadSeq,
             shadowed: false,
           }
           if (seq !== null) recordObserverSeq(settledMarker, seq)
@@ -1559,6 +1579,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               evictedSeqWatermark: -1,
               entryCreated: false,
               terminal: true,
+              completedAtHistorySeq: historyReadSeq,
               shadowed: true,
             }
             if (seq !== null) recordObserverSeq(shadowedMarker, seq)
@@ -1581,6 +1602,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
           evictedSeqWatermark: -1,
           entryCreated: false,
           terminal: false,
+          completedAtHistorySeq: null,
           shadowed: false,
         }
 
@@ -1688,6 +1710,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       const outcome = stream.dispatcher.dispatch(agUiEvent)
       if (outcome.terminal && !stream.shadowed) {
         stream.terminal = true
+        stream.completedAtHistorySeq = historyReadSeq
         refresh('history', 'queue', 'waiting')
       }
     }

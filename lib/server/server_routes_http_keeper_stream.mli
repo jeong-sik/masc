@@ -423,6 +423,26 @@ module For_testing : sig
     failure_class:Tool_result.tool_failure_class ->
     Yojson.Safe.t
 
+  type operation_wire_projection_mode =
+    | Adapter_projects
+    | On_publish_projects
+    | No_observer_projection
+  type operation_event_bus =
+    { events : Keeper_chat_events.t
+    ; emit_pending_terminal_success : unit -> unit
+    }
+  val operation_wire_projection_mode_of_channel :
+    Keeper_continuation_channel.t -> operation_wire_projection_mode
+  val create_operation_event_bus :
+    base_path:string ->
+    keeper_name:string ->
+    continuation_channel:Keeper_continuation_channel.t ->
+    first_seq:int ->
+    ?now:(unit -> float) ->
+    journals:(Keeper_chat_operation.Operation_id.t * Keeper_chat_event_log.journal) list ->
+    unit ->
+    operation_event_bus
+
   val note_operation_wire_event :
     base_path:string -> keeper_name:string -> operation_id:string -> Ag_ui.event -> unit
   val take_operation_wire_stream :

@@ -1463,7 +1463,8 @@ export interface StreamKeeperChatCallbacks {
     readonly toolName?: string
     readonly outcome: string
   }) => void
-  readonly onReplyDetails?: (reply: string, turnRef: string | null) => void
+  readonly onExternalEffectCompleted?: () => void
+  readonly onReplyDetails?: (reply: string, turnRef: string | null, turnOutcome?: string | null) => void
   readonly onFinished?: () => void
   readonly onError?: (message: string) => void
 }
@@ -1965,9 +1966,11 @@ export function createChatStreamFrameDispatcher(params: {
         if (state === 'Succeeded' || state === 'Failed' || state === 'Cancelled') {
           acceptedTerminalState = state
         }
+      } else if (name === 'KEEPER_EXTERNAL_EFFECT_COMPLETED') {
+        params.callbacks.onExternalEffectCompleted?.()
       } else if (name === 'KEEPER_REPLY_DETAILS' && val && typeof val.reply === 'string') {
         seenReplyDetails = true
-        params.callbacks.onReplyDetails?.(val.reply, asStr(val.turn_ref))
+        params.callbacks.onReplyDetails?.(val.reply, asStr(val.turn_ref), asStr(val.turn_outcome))
       }
     }
     return { terminal }

@@ -1059,6 +1059,35 @@ describe('Chat Hierarchy Grouping, Delegate Cards, Live Autonomous Turn & Waitin
     })!
     const settled = mergeLatestHistoryPage(midTurn, [persistedBefore, acceptedUser, persistedReply])
     expect(settled.map((m) => m.id)).toEqual(['m1', 'u-tui-9', 'a-tui-9', 'obs-asst-op-tui-10'])
+
+    // Tool-only / Terminal_effect_settled observer turn (no terminal_result row in history)
+    // retires once a post-terminal history refresh lands, leaving the persisted tool row in order.
+    const observerToolOnly = {
+      id: 'obs-asst-op-ext-1',
+      role: 'assistant' as const,
+      operationId: 'op-ext-1',
+      content: '',
+      ts: 104,
+      deliveryState: 'Delivered' as const,
+      toolCalls: [{ id: 'tc-ext', name: 'masc_surface_post', executionId: 'exec-ext-1', status: 'completed' as const }],
+    }
+    const persistedToolRow = decodeHistoryRow({
+      id: 'tool-ext-1',
+      role: 'tool',
+      content: '{"ok":true}',
+      ts: 104,
+      tool_call_name: 'masc_surface_post',
+      execution_id: 'exec-ext-1',
+      delivery_key: { kind: 'operation', operation_id: 'op-ext-1' },
+      transcript_slot: { kind: 'tool_delivery', ordinal: 0 },
+    })!
+    const reconciled = mergeLatestHistoryPage(
+      [persistedBefore, observerToolOnly, observerPending],
+      [persistedBefore, persistedToolRow],
+      null,
+      new Set(['op-ext-1']),
+    )
+    expect(reconciled.map((m) => m.id)).toEqual(['m1', 'tool-ext-1', 'obs-asst-op-tui-10'])
   })
 
   it('renders grouped tool activity, accessible delegate jump outside summary, live autonomous preview card, and waiting inventory strip', async () => {

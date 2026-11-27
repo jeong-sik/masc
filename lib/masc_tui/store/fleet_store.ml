@@ -63,6 +63,8 @@ type response_start = Scope_only_start of int | Owned_start
 type chat_stream_buffer = {
   request_id : string;
   operation_id : string option;
+  execution_id : string option;
+  batch_bindings : (string * string) list;
   turn_ref : string option;
   run_started : bool;
   interrupting : bool;
@@ -80,10 +82,17 @@ type chat_stream_buffer = {
   active : bool;
   ended : bool;
   terminal_seen : bool;
+  tool_only_settled : bool;
   last_error : string option;
   from_observer : bool;
   seen_seqs : Int_set.t;
 }
+
+let buffer_operation_ids (buf : chat_stream_buffer) =
+  let primary = Option.value buf.operation_id ~default:buf.request_id in
+  match buf.execution_id with
+  | Some exec_id when not (String.equal exec_id primary) -> [ primary; exec_id ]
+  | Some _ | None -> [ primary ]
 
 let max_seen_seqs = 4096
 
@@ -1204,10 +1213,12 @@ let retire_pending_tool tool =
 
 let retire_pending_tools tools = List.map retire_pending_tool tools
 
-let has_persisted_terminal_for_op (messages : Wire_fleet.chat_message list) op_id =
+let has_persisted_op_match f (messages : Wire_fleet.chat_message list) op_ids =
   List.exists
     (fun row ->
-      Option.equal String.equal (Wire_fleet.terminal_operation row) (Some op_id))
+      match f row with
+      | Some id -> List.exists (String.equal id) op_ids
+      | None -> false)
     messages
 
 let apply_chat_history ~observed_at ~keeper (page : Wire_fleet.chat_history_page)
@@ -1218,8 +1229,13 @@ let apply_chat_history ~observed_at ~keeper (page : Wire_fleet.chat_history_page
   let chat_streams =
     match String_map.find_opt keeper t.chat_streams with
     | Some b when (not b.terminal_seen) && (b.from_observer || not b.active) ->
-        let op_id = Option.value b.operation_id ~default:b.request_id in
-        if has_persisted_terminal_for_op page.messages op_id then
+        let op_ids = buffer_operation_ids b in
+        let retired_by_history =
+          has_persisted_op_match Wire_fleet.terminal_operation page.messages op_ids
+          || (b.tool_only_settled
+              && has_persisted_op_match Wire_fleet.tool_operation page.messages op_ids)
+        in
+        if retired_by_history then
           let retired =
             {
               b with
@@ -1394,6 +1410,8 @@ let fresh_stream_buffer ~from_observer ~operation_id ~request_id =
   {
     request_id;
     operation_id;
+    execution_id = None;
+    batch_bindings = [];
     turn_ref = None;
     run_started = false;
     interrupting = false;
@@ -1411,6 +1429,7 @@ let fresh_stream_buffer ~from_observer ~operation_id ~request_id =
     active = true;
     ended = false;
     terminal_seen = false;
+    tool_only_settled = false;
     last_error = None;
     from_observer;
     seen_seqs = Int_set.empty;
@@ -1460,6 +1479,8 @@ let is_explicit_execution_start = function
   | Wire_fleet.Chunk_tool_block_end _
   | Wire_fleet.Chunk_tool_end _
   | Wire_fleet.Chunk_tool_quarantined _
+  | Wire_fleet.Chunk_batch_bound _
+  | Wire_fleet.Chunk_external_effect_completed _
   | Wire_fleet.Chunk_reply_details _
   | Wire_fleet.Chunk_turn_done _
   | Wire_fleet.Chunk_error _
@@ -1495,6 +1516,8 @@ let is_queued_acceptance = function
   | Wire_fleet.Chunk_tool_block_end _
   | Wire_fleet.Chunk_tool_end _
   | Wire_fleet.Chunk_tool_quarantined _
+  | Wire_fleet.Chunk_batch_bound _
+  | Wire_fleet.Chunk_external_effect_completed _
   | Wire_fleet.Chunk_reply_details _
   | Wire_fleet.Chunk_turn_done _
   | Wire_fleet.Chunk_error _
@@ -1680,6 +1703,25 @@ let apply_chat_stream_chunk_core ~from_observer ~allow_takeover ~keeper
   | Wire_fleet.Chunk_tool_block_end { operation_id; tool_use_id } ->
       update_stream_tool ~from_observer ~keeper ~request_id ~operation_id ~tool_use_id
         close_tool_block t
+  | Wire_fleet.Chunk_batch_bound { operation_id; execution_id } ->
+      update_live_stream ~from_observer ~keeper ~request_id
+        ~operation_id:(Some operation_id)
+        (fun b ->
+          let batch_bindings =
+            if
+              List.exists
+                (fun (m, e) ->
+                  String.equal m operation_id && String.equal e execution_id)
+                b.batch_bindings
+            then b.batch_bindings
+            else (operation_id, execution_id) :: b.batch_bindings
+          in
+          { b with execution_id = Some execution_id; batch_bindings })
+        t
+  | Wire_fleet.Chunk_external_effect_completed { operation_id } ->
+      update_live_stream ~from_observer ~keeper ~request_id ~operation_id
+        (fun b -> { b with tool_only_settled = true })
+        t
   | ( Wire_fleet.Chunk_accepted _
     | Wire_fleet.Chunk_run_started _
     | Wire_fleet.Chunk_runtime_attempt_started _
@@ -1717,6 +1759,8 @@ let apply_chat_stream_chunk_core ~from_observer ~allow_takeover ~keeper
           | Wire_fleet.Chunk_tool_block_end _
           | Wire_fleet.Chunk_tool_end _
           | Wire_fleet.Chunk_tool_quarantined _
+          | Wire_fleet.Chunk_batch_bound _
+          | Wire_fleet.Chunk_external_effect_completed _
           | Wire_fleet.Chunk_reply_details _
           | Wire_fleet.Chunk_turn_done _
           | Wire_fleet.Chunk_error _
@@ -1984,9 +2028,13 @@ let apply_chat_stream_chunk_core ~from_observer ~allow_takeover ~keeper
                   active = true;
                 }
             | Wire_fleet.Chunk_reply_details
-                { operation_id; reply; turn_ref; turn_outcome = _ } ->
+                { operation_id; reply; turn_ref; turn_outcome } ->
+                let tool_only =
+                  Option.equal String.equal turn_outcome (Some "external_effect_completed")
+                  || Option.equal String.equal turn_outcome (Some "no_visible_reply")
+                in
                 let text =
-                  if String.equal (String.trim reply) "" then prev.text
+                  if tool_only || String.equal (String.trim reply) "" then prev.text
                   else reply
                 in
                 {
@@ -1998,6 +2046,7 @@ let apply_chat_stream_chunk_core ~from_observer ~allow_takeover ~keeper
                     | None -> prev.turn_ref);
                   run_started = true;
                   text;
+                  tool_only_settled = prev.tool_only_settled || tool_only;
                   model_activity = retire_model_activity prev.model_activity;
                   active = true;
                 }
@@ -2042,6 +2091,8 @@ let apply_chat_stream_chunk_core ~from_observer ~allow_takeover ~keeper
             | Wire_fleet.Chunk_stream_protocol_error _
             | Wire_fleet.Chunk_tool_quarantined _
             | Wire_fleet.Chunk_tool_block_end _
+            | Wire_fleet.Chunk_batch_bound _
+            | Wire_fleet.Chunk_external_effect_completed _
             | Wire_fleet.Chunk_ignored -> prev
           in
           let chat_scroll_offset =
@@ -2096,6 +2147,8 @@ let is_observer_ghost_chunk = function
   | Wire_fleet.Chunk_ignored
   | Wire_fleet.Chunk_turn_done _
   | Wire_fleet.Chunk_reply_details _
+  | Wire_fleet.Chunk_external_effect_completed _
+  | Wire_fleet.Chunk_batch_bound _
   | Wire_fleet.Chunk_error _ ->
       true
   | Wire_fleet.Chunk_accepted
@@ -2152,6 +2205,8 @@ let apply_observer_chat_stream_chunk ~keeper ~operation_id ~seq chunk t =
   | Wire_fleet.Chunk_tool_block_end _
   | Wire_fleet.Chunk_tool_end _
   | Wire_fleet.Chunk_tool_quarantined _
+  | Wire_fleet.Chunk_batch_bound _
+  | Wire_fleet.Chunk_external_effect_completed _
   | Wire_fleet.Chunk_reply_details _
   | Wire_fleet.Chunk_turn_done _
   | Wire_fleet.Chunk_error _ ->
@@ -2166,6 +2221,24 @@ let apply_observer_chat_stream_chunk ~keeper ~operation_id ~seq chunk t =
         match seq with
         | Some s -> Int_set.mem s b.seen_seqs
         | None -> false
+      in
+      let is_same_batch_sibling (b : chat_stream_buffer) =
+        match b.execution_id with
+        | None -> false
+        | Some exec_id ->
+            String.equal exec_id operation_id
+            || List.exists
+                 (fun (m, e) ->
+                   String.equal m operation_id && String.equal e exec_id)
+                 b.batch_bindings
+      in
+      let record_batch_binding ~member_id ~exec_id (b : chat_stream_buffer) =
+        if
+          List.exists
+            (fun (m, e) -> String.equal m member_id && String.equal e exec_id)
+            b.batch_bindings
+        then b
+        else { b with batch_bindings = (member_id, exec_id) :: b.batch_bindings }
       in
       (match String_map.find_opt keeper t.chat_streams with
       | Some b when (not b.from_observer) && b.active ->
@@ -2197,8 +2270,48 @@ let apply_observer_chat_stream_chunk ~keeper ~operation_id ~seq chunk t =
               }
             in
             apply_on t_resumed
-      | Some b when b.from_observer && b.active ->
-          if is_explicit_execution_start chunk then apply_on t else t
+      | Some b when b.from_observer && b.active -> (
+          match chunk with
+          | Wire_fleet.Chunk_batch_bound
+              { operation_id = member_id; execution_id = exec_id } ->
+              (* Remember sibling batch bindings arriving on other members of
+                 this batch (even before the active buffer receives its own
+                 [Batch_bound]) so later [Chunk_runtime_attempt_started] frames
+                 from any sibling in an N>=2 batch never reset this buffer. *)
+              let updated = record_batch_binding ~member_id ~exec_id b in
+              if updated == b then t
+              else
+                {
+                  t with
+                  chat_streams = String_map.add keeper updated t.chat_streams;
+                }
+          | Wire_fleet.Chunk_accepted _
+          | Wire_fleet.Chunk_run_started _
+          | Wire_fleet.Chunk_runtime_attempt_started _
+          | Wire_fleet.Chunk_provider_retry _
+          | Wire_fleet.Chunk_continuation_checkpoint _
+          | Wire_fleet.Chunk_native_tool_progress _
+          | Wire_fleet.Chunk_tool_approval_event _
+          | Wire_fleet.Chunk_stream_protocol_error _
+          | Wire_fleet.Chunk_text_delta _
+          | Wire_fleet.Chunk_thinking_delta _
+          | Wire_fleet.Chunk_thinking_snapshot _
+          | Wire_fleet.Chunk_model_content _
+          | Wire_fleet.Chunk_model_response_start _
+          | Wire_fleet.Chunk_model_response_stop _
+          | Wire_fleet.Chunk_tool_start _
+          | Wire_fleet.Chunk_tool_args _
+          | Wire_fleet.Chunk_tool_block_end _
+          | Wire_fleet.Chunk_tool_end _
+          | Wire_fleet.Chunk_tool_quarantined _
+          | Wire_fleet.Chunk_external_effect_completed _
+          | Wire_fleet.Chunk_reply_details _
+          | Wire_fleet.Chunk_turn_done _
+          | Wire_fleet.Chunk_error _
+          | Wire_fleet.Chunk_ignored ->
+              if is_same_batch_sibling b then t
+              else if is_explicit_execution_start chunk then apply_on t
+              else t)
       | Some _ | None ->
           if is_observer_ghost_chunk chunk then t else apply_on t)
 

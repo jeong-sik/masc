@@ -6,21 +6,28 @@
     follow-up frame serializer are exposed so other surfaces and tests build
     the same bodies. *)
 
-(** The route's answer once an answer is recorded: [delivered] false means
-    the Keeper could not be told, which is not a success. *)
+(** The route's answer once an answer is recorded. Its pointer was committed
+    with it, so the Keeper reads it on its next intake. *)
 val ask_answer_response :
   ask_id:string ->
   actor:string ->
   answer_count:int ->
   open_remaining:int ->
-  delivered:bool ->
   Http.Status.t * Yojson.Safe.t
 
 val ask_already_answered_response :
   ask_id:string -> answers:Keeper_ask.answer list -> answered_at:float ->
-  delivered:bool -> Http.Status.t * Yojson.Safe.t
+  Http.Status.t * Yojson.Safe.t
 (** Conflict receipt for the canonical first answer, never the requesting
-    surface's losing choices. Delivery can still await automatic recovery. *)
+    surface's losing choices. *)
+
+val ask_answer_refusal_response :
+  ask_id:string -> Keeper_ask_answer_wake.answer_failure -> Http.Status.t * Yojson.Safe.t
+(** [`Service_unavailable] with [state = "keeper_shutting_down"] while a
+    shutdown holds the Keeper's intake, and [`Internal_server_error] when its
+    queue is unavailable; neither recorded the answer. Store refusals keep
+    their status: [`Not_found], [`Bad_request], [`Conflict], or
+    [`Internal_server_error] for a storage or confirmation failure. *)
 
 type ask_followup_frame =
   | Followup_started of Keeper_ask_answer_wake.followup_identity
@@ -46,18 +53,15 @@ val handle_keeper_ask_answer :
     write any name into the log. The response echoes [actor] so the caller
     sees what was recorded.
 
-    Two surfaces can submit for one ask at once and nothing locks the log. The
-    fold settles on first write, so a submission that lost returns [`Conflict]
-    carrying the answer that landed rather than a bare rejection: the surface
-    showing it has to be able to say what was chosen instead.
+    Two surfaces can submit for one ask at once. Answers for one Keeper are
+    recorded inside its queue owner lock, so a submission that lost returns
+    [`Conflict] carrying the answer that landed rather than a bare rejection:
+    the surface showing it has to be able to say what was chosen instead.
 
-    The original durable ask owns answer admission, including when its Keeper
-    is offline or unregistered. Delivery still records its own durable wake
-    outcome and does not claim a live Keeper acted on the answer.
-
-    [`Not_found] means the recorded ask is unknown, [`Bad_request] that
-    the submissions do not satisfy the recorded question, and [`Conflict] that
-    the ask was already answered or withdrawn. *)
+    The answer and the Keeper's queue pointer to it are committed together
+    ({!Keeper_ask_answer_wake.answer}), including when the Keeper is offline
+    or unregistered. A [`OK] does not claim a live Keeper acted on the answer.
+    Refusals are described by {!ask_answer_refusal_response}. *)
 
 val handle_keeper_asks_list :
   sw:Eio.Switch.t ->

@@ -22,6 +22,7 @@ type answer_failure =
   | Already_withdrawn of { reason : string; withdrawn_at : float }
   | Rejected of Keeper_ask.invalid_answer list
   | Store_failed of string
+  | Admission_failed of string
   | Answer_recorded_unconfirmed of { detail : string }
 
 type read_error =
@@ -54,6 +55,7 @@ let answer_failure_to_string = function
   | Rejected errors ->
       String.concat "; " (List.map Keeper_ask.invalid_answer_to_string errors)
   | Store_failed detail -> "store failed: " ^ detail
+  | Admission_failed detail -> "answer admission failed; nothing recorded: " ^ detail
   | Answer_recorded_unconfirmed { detail } ->
       "answer append committed but canonical answer could not be confirmed: " ^ detail
 
@@ -271,8 +273,36 @@ let find_row rows_list ask_id =
     (fun (id, row) -> if String.equal id ask_id then Some row else None)
     rows_list
 
+(* Append [Answered] and confirm the canonical first terminal row. *)
+let append_answered ~before_append ~after_append ~base_path ~keeper_name ~ask_id ~answers
+    ~responder ~now =
+  let event = Keeper_ask.Answered { ask_id; answers; responder; answered_at = now } in
+  before_append ();
+  match append_event ~base_path ~keeper_name event with
+  | Error detail -> Error (Store_failed detail)
+  | Ok () ->
+      after_append ();
+      (match rows_result ~base_path ~keeper_name with
+       | Error error -> Error (Answer_recorded_unconfirmed
+           { detail = read_error_to_string error })
+       | Ok snapshot ->
+           let rows = match snapshot with Missing_log -> [] | Stored_rows rows -> rows in
+           (match find_row rows ask_id with
+            | Some (_, Keeper_ask.Answered_by canonical)
+              when canonical.answers = answers && canonical.responder = responder
+                && canonical.answered_at = now -> Ok canonical.answers
+            | Some (_, Keeper_ask.Answered_by { answers; responder; answered_at }) ->
+                Error (Already_answered { answers; responder; answered_at })
+            (* A withdrawal appended between the preflight read and this
+               append is the first terminal row, so it wins. *)
+            | Some (_, Keeper_ask.Withdrawn_because { reason; withdrawn_at }) ->
+                Error (Already_withdrawn { reason; withdrawn_at })
+            | None | Some (_, Keeper_ask.Open) ->
+                Error (Answer_recorded_unconfirmed
+                  { detail = "committed append has no canonical answered row" })))
+
 let answer_with_interleaving ~before_append ~after_append
-    ~base_path ~keeper_name ~ask_id ~submissions ~responder ~now =
+    ~admit ~base_path ~keeper_name ~ask_id ~submissions ~responder ~now =
   let open Result.Syntax in
   let* snapshot = rows_result ~base_path ~keeper_name
       |> Result.map_error (fun error -> Store_failed (read_error_to_string error)) in
@@ -287,28 +317,11 @@ let answer_with_interleaving ~before_append ~after_append
       match Keeper_ask.parse_answers ~ask:recorded_ask ~submissions with
       | Error errors -> Error (Rejected errors)
       | Ok answers -> (
-          let event =
-            Keeper_ask.Answered { ask_id; answers; responder; answered_at = now }
-          in
-          before_append ();
-          match append_event ~base_path ~keeper_name event with
+          match admit recorded_ask with
+          | Error detail -> Error (Admission_failed detail)
           | Ok () ->
-              after_append ();
-              (match rows_result ~base_path ~keeper_name with
-               | Error error -> Error (Answer_recorded_unconfirmed
-                   { detail = read_error_to_string error })
-               | Ok snapshot ->
-                   let rows = match snapshot with Missing_log -> [] | Stored_rows rows -> rows in
-                   (match find_row rows ask_id with
-                    | Some (_, Keeper_ask.Answered_by canonical)
-                      when canonical.answers = answers && canonical.responder = responder
-                        && canonical.answered_at = now -> Ok canonical.answers
-                    | Some (_, Keeper_ask.Answered_by { answers; responder; answered_at }) ->
-                        Error (Already_answered { answers; responder; answered_at })
-                    | None | Some (_, (Keeper_ask.Open | Keeper_ask.Withdrawn_because _)) ->
-                        Error (Answer_recorded_unconfirmed
-                          { detail = "committed append has no canonical answered row" })))
-          | Error detail -> Error (Store_failed detail)))
+              append_answered ~before_append ~after_append ~base_path ~keeper_name ~ask_id
+                ~answers ~responder ~now))
 
 let answer = answer_with_interleaving ~before_append:(fun () -> ()) ~after_append:(fun () -> ())
 

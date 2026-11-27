@@ -105,11 +105,11 @@ let test_each_keeper_question_write_announces_its_change () =
       ignore
         (require
            (Result.map_error Keeper_ask_store.answer_failure_to_string
-              (Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+              (Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
                  ~submissions:(choose "a") ~responder ~now:1100.)));
       check_heard "answered" [ "answered" ] heard;
       (match
-         Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+         Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
            ~submissions:(choose "b") ~responder ~now:1200.
        with
        | Error (Keeper_ask_store.Already_answered _) -> ()

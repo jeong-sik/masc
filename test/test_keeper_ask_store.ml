@@ -73,7 +73,7 @@ let answering_closes_the_question_and_keeps_the_answer () =
   let base_path = temp_dir () in
   record base_path "ask-1";
   (match
-     Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+     Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
        ~submissions:[ ("q1", Keeper_ask.Chose { choice_ids = [ "b" ] }) ]
        ~responder ~now:1100.0
    with
@@ -92,7 +92,7 @@ let a_written_alternative_survives_reload () =
   let base_path = temp_dir () in
   record base_path "ask-alternative";
   let text = "제시된 선택지 대신 직접 확인해주세요.\n  원문 그대로  " in
-  (match Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-alternative"
+  (match Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name:keeper ~ask_id:"ask-alternative"
      ~submissions:[("q1", Keeper_ask.Wrote text)] ~responder ~now:1100. with
    | Ok _ -> ()
    | Error e -> fail_with "alternative" (Keeper_ask_store.answer_failure_to_string e));
@@ -107,7 +107,7 @@ let a_second_answer_reports_what_already_landed () =
   let base_path = temp_dir () in
   record base_path "ask-1";
   let submit choice_id now =
-    Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+    Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
       ~submissions:[ ("q1", Keeper_ask.Chose { choice_ids = [ choice_id ] }) ]
       ~responder ~now
   in
@@ -128,7 +128,7 @@ let answering_an_unknown_ask_is_refused () =
   let base_path = temp_dir () in
   record base_path "ask-1";
   match
-    Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-missing"
+    Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name:keeper ~ask_id:"ask-missing"
       ~submissions:[ ("q1", Keeper_ask.Skipped) ]
       ~responder ~now:1100.0
   with
@@ -148,7 +148,7 @@ let a_withdrawn_question_refuses_answers () =
   Alcotest.(check int) "no longer open" 0
     (Keeper_ask_store.open_ask_count ~base_path ~keeper_name:keeper);
   match
-    Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+    Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
       ~submissions:[ ("q1", Keeper_ask.Chose { choice_ids = [ "a" ] }) ]
       ~responder ~now:1200.0
   with
@@ -161,7 +161,7 @@ let an_answer_that_does_not_fit_the_question_is_refused () =
   let base_path = temp_dir () in
   record base_path "ask-1";
   match
-    Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+    Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
       ~submissions:[ ("q1", Keeper_ask.Chose { choice_ids = [ "not-offered" ] }) ]
       ~responder ~now:1100.0
   with
@@ -241,7 +241,7 @@ let strict_reads_distinguish_missing_empty_and_damage () =
    | Error (Keeper_ask_store.Log_decode_failed _) -> ()
    | Error error -> Alcotest.fail (Keeper_ask_store.read_error_to_string error)
    | Ok _ -> Alcotest.fail "damaged history authorized a complete fold");
-  (match Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+  (match Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
       ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "a" ] } ] ~responder ~now:1200. with
    | Error (Keeper_ask_store.Store_failed _) -> ()
    | Error error -> Alcotest.fail (Keeper_ask_store.answer_failure_to_string error)
@@ -253,11 +253,11 @@ let optimistic_answer_reports_the_canonical_first_writer () =
   record base_path "ask-1";
   let loser = { responder with Keeper_ask.actor_id = Some "other-operator" } in
   let before_append () =
-    match Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+    match Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
         ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "a" ] } ] ~responder ~now:1100. with
     | Ok _ -> ()
     | Error error -> Alcotest.fail (Keeper_ask_store.answer_failure_to_string error) in
-  match Keeper_ask_store.For_testing.answer_with_interleaving ~before_append
+  match Keeper_ask_store.For_testing.answer_with_interleaving ~admit:(fun _ -> Ok ()) ~before_append
       ~after_append:(fun () -> ()) ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
       ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "b" ] } ] ~responder:loser ~now:1200. with
   | Error (Keeper_ask_store.Already_answered
@@ -279,7 +279,7 @@ let committed_answer_with_unreadable_winner_is_explicit () =
     output_string out ("{broken middle row}\n" ^
       Yojson.Safe.to_string (Keeper_ask.event_to_json (Keeper_ask.Asked (an_ask ~ask_id:"ask-1"))) ^ "\n");
     close_out out in
-  (match Keeper_ask_store.For_testing.answer_with_interleaving
+  (match Keeper_ask_store.For_testing.answer_with_interleaving ~admit:(fun _ -> Ok ())
       ~before_append:(fun () -> ()) ~after_append ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
       ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "a" ] } ] ~responder ~now:1100. with
    | Error (Keeper_ask_store.Answer_recorded_unconfirmed _) -> ()
@@ -291,11 +291,94 @@ let committed_answer_with_unreadable_winner_is_explicit () =
   | Ok (Keeper_ask_store.Stored_rows [ _, (_, Keeper_ask.Answered_by _) ]) -> ()
   | Ok _ | Error _ -> Alcotest.fail "the committed answer did not survive the failed reread"
 
+(* [admit] runs with the validated ask before the append. Its refusal
+   writes nothing, so a question whose Keeper queue did not take the pointer
+   stays open. *)
+let an_admission_refusal_records_nothing () =
+  let base_path = temp_dir () in
+  record base_path "ask-1";
+  let path = Keeper_ask_store.log_path ~base_path ~keeper_name:keeper in
+  let before = (Unix.stat path).Unix.st_size in
+  let admitted = ref [] in
+  (match Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+      ~admit:(fun ask ->
+        admitted := ask.Keeper_ask.ask_id :: !admitted;
+        Error "queue unavailable")
+      ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "a" ] } ] ~responder ~now:1100. with
+   | Error (Keeper_ask_store.Admission_failed "queue unavailable") -> ()
+   | Error error -> Alcotest.fail (Keeper_ask_store.answer_failure_to_string error)
+   | Ok _ -> Alcotest.fail "a refused admission recorded an answer");
+  Alcotest.(check (list string)) "admit saw the recorded ask" [ "ask-1" ] !admitted;
+  Alcotest.(check int) "nothing appended" before (Unix.stat path).Unix.st_size;
+  Alcotest.(check int) "the question stays open" 1
+    (Keeper_ask_store.open_ask_count ~base_path ~keeper_name:keeper)
+
+let admission_precedes_the_append () =
+  let base_path = temp_dir () in
+  record base_path "ask-1";
+  let open_at_admission = ref None in
+  (match Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+      ~admit:(fun _ ->
+        open_at_admission := Some (Keeper_ask_store.open_ask_count ~base_path ~keeper_name:keeper);
+        Ok ())
+      ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "a" ] } ] ~responder ~now:1100. with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Keeper_ask_store.answer_failure_to_string error));
+  Alcotest.(check (option int)) "the ask was still open when admitted" (Some 1) !open_at_admission;
+  Alcotest.(check int) "then answered" 0
+    (Keeper_ask_store.open_ask_count ~base_path ~keeper_name:keeper)
+
+let refusals_before_admission_admit_nothing () =
+  let base_path = temp_dir () in
+  record base_path "ask-1";
+  let admit _ = Alcotest.fail "admit ran for a refused answer" in
+  (match Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-missing" ~admit
+      ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "a" ] } ] ~responder ~now:1100. with
+   | Error (Keeper_ask_store.Ask_not_found _) -> ()
+   | Error error -> Alcotest.fail (Keeper_ask_store.answer_failure_to_string error)
+   | Ok _ -> Alcotest.fail "an unknown ask was answered");
+  (match Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-1" ~admit
+      ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "no-such-choice" ] } ] ~responder
+      ~now:1100. with
+   | Error (Keeper_ask_store.Rejected _) -> ()
+   | Error error -> Alcotest.fail (Keeper_ask_store.answer_failure_to_string error)
+   | Ok _ -> Alcotest.fail "an invalid answer was recorded");
+  (match Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name:keeper
+      ~ask_id:"ask-1" ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "a" ] } ] ~responder
+      ~now:1100. with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Keeper_ask_store.answer_failure_to_string error));
+  match Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-1" ~admit
+      ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "b" ] } ] ~responder ~now:1200. with
+  | Error (Keeper_ask_store.Already_answered _) -> ()
+  | Error error -> Alcotest.fail (Keeper_ask_store.answer_failure_to_string error)
+  | Ok _ -> Alcotest.fail "a second answer was recorded"
+
+(* The Keeper withdraws without the queue owner lock, so its withdrawal can
+   land between the answer's preflight and append. The first terminal row
+   wins, and the reread reports it as withdrawn. *)
+let a_withdrawal_before_the_append_is_reported_as_withdrawn () =
+  let base_path = temp_dir () in
+  record base_path "ask-1";
+  let before_append () =
+    match Keeper_ask_store.withdraw ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+        ~reason:"found another route" ~now:1150. with
+    | Ok () -> ()
+    | Error error -> Alcotest.fail (Keeper_ask_store.withdraw_failure_to_string error) in
+  match Keeper_ask_store.For_testing.answer_with_interleaving ~admit:(fun _ -> Ok ())
+      ~before_append ~after_append:(fun () -> ()) ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+      ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "a" ] } ] ~responder ~now:1200. with
+  | Error (Keeper_ask_store.Already_withdrawn { reason; withdrawn_at }) ->
+      Alcotest.(check string) "the withdrawal reason" "found another route" reason;
+      Alcotest.(check (float 0.)) "the withdrawal time" 1150. withdrawn_at
+  | Error error -> Alcotest.fail (Keeper_ask_store.answer_failure_to_string error)
+  | Ok _ -> Alcotest.fail "a withdrawn question reported a recorded answer"
+
 let a_racing_answer_prevents_withdrawal_acknowledgement () =
   let base_path = temp_dir () in
   record base_path "ask-1";
   let before_append () =
-    match Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+    match Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
         ~submissions:["q1", Keeper_ask.Chose {choice_ids=["a"]}] ~responder ~now:1100. with
     | Ok _ -> ()
     | Error error -> Alcotest.fail (Keeper_ask_store.answer_failure_to_string error) in
@@ -413,7 +496,7 @@ let committed_withdrawal_with_unreadable_outcome_is_explicit () =
 let same_size_external_mutation_cannot_reuse_a_cached_answer () =
   let base_path = temp_dir () in
   record base_path "ask-1";
-  (match Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
+  (match Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name:keeper ~ask_id:"ask-1"
       ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "a" ] } ] ~responder ~now:1100. with
    | Ok _ -> () | Error error -> Alcotest.fail (Keeper_ask_store.answer_failure_to_string error));
   ignore (Keeper_ask_store.rows_result ~base_path ~keeper_name:keeper);
@@ -463,7 +546,7 @@ let ask_status_counts_the_same_snapshot_it_filters () =
   let base_path = temp_dir () in
   record base_path "answered";
   record base_path "pending";
-  (match Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id:"answered"
+  (match Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name:keeper ~ask_id:"answered"
       ~submissions:["q1", Keeper_ask.Chose {choice_ids=["a"]}] ~responder ~now:1100. with
    | Ok _ -> ()
    | Error error -> Alcotest.fail (Keeper_ask_store.answer_failure_to_string error));
@@ -487,7 +570,7 @@ let record_at base_path ~ask_id ~asked_at ~context =
   | Error e -> fail_with "record_ask" e
 
 let answer_ask base_path ask_id =
-  match Keeper_ask_store.answer ~base_path ~keeper_name:keeper ~ask_id
+  match Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name:keeper ~ask_id
       ~submissions:["q1", Keeper_ask.Chose {choice_ids=["a"]}] ~responder ~now:5000. with
   | Ok _ -> ()
   | Error error -> Alcotest.fail (Keeper_ask_store.answer_failure_to_string error)
@@ -712,6 +795,14 @@ let () =
             optimistic_answer_reports_the_canonical_first_writer;
           Alcotest.test_case "committed answer with unreadable winner is explicit" `Quick
             committed_answer_with_unreadable_winner_is_explicit;
+          Alcotest.test_case "an admission refusal records nothing" `Quick
+            an_admission_refusal_records_nothing;
+          Alcotest.test_case "admission precedes the append" `Quick
+            admission_precedes_the_append;
+          Alcotest.test_case "refusals before admission admit nothing" `Quick
+            refusals_before_admission_admit_nothing;
+          Alcotest.test_case "a withdrawal before the append is reported as withdrawn" `Quick
+            a_withdrawal_before_the_append_is_reported_as_withdrawn;
           Alcotest.test_case "a racing answer prevents withdrawal acknowledgement" `Quick
             a_racing_answer_prevents_withdrawal_acknowledgement;
           Alcotest.test_case "a racing withdrawal retains the first reason" `Quick

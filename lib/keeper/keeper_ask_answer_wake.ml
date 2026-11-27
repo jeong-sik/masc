@@ -333,6 +333,39 @@ let deliver ~base_path ~keeper_name ~ask_id =
             ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue stimulus)
         |> Result.map_error (fun error -> Delivery_evidence_unavailable error)) ask resolution
 
+type answer_failure =
+  | Answer_refused of Keeper_ask_store.answer_failure
+  | Keeper_intake_held of Keeper_shutdown_types.Operation_id.t
+  | Keeper_queue_unavailable of string
+
+let ask_pointer ~now (ask : Keeper_ask.ask) =
+  let payload = { Keeper_event_queue.ask_id = ask.ask_id; channel = ask.continuation } in
+  { Keeper_event_queue.post_id = Keeper_event_queue.ask_answered_post_id payload
+  ; urgency = Keeper_event_queue.Normal
+  ; arrived_at = now
+  ; payload = Keeper_event_queue.Ask_answered payload }
+
+(* The pointer becomes durable before the answer is appended, and both happen
+   inside the Keeper's queue owner lock: an answer never exists without its
+   pointer, and no ACK of that pointer lands between them. *)
+let answer ~base_path ~keeper_name ~ask_id ~submissions ~responder ~now =
+  let admitted =
+    Keeper_registry_event_queue.with_stimulus_admission ~base_path keeper_name (fun admit ->
+      Keeper_ask_store.answer ~base_path ~keeper_name ~ask_id ~submissions ~responder ~now
+        ~admit:(fun ask ->
+          admit (ask_pointer ~now ask)
+          |> Result.map (fun (_ : Keeper_event_queue_persistence.enqueue_stimulus_result) -> ())))
+  in
+  match admitted with
+  | Keeper_registry_event_queue.Admission_shutdown_reserved operation_id ->
+      Error (Keeper_intake_held operation_id)
+  | Keeper_registry_event_queue.Admission_storage_error detail ->
+      Error (Keeper_queue_unavailable detail)
+  | Keeper_registry_event_queue.Admission_completed (Error failure) -> Error (Answer_refused failure)
+  | Keeper_registry_event_queue.Admission_completed (Ok answers) ->
+      wake_hint ~log_deferred:true ~base_path ~keeper_name ~ask_id;
+      Ok answers
+
 type failure = { keeper_name : string option; ask_id : string option; error : error }
 type held_answer =
   { owner : string

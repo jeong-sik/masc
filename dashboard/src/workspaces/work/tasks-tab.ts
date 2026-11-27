@@ -31,7 +31,7 @@ import { apiGet, apiMutate } from '../../core/transport'
 import { InlineSpinner } from '../../components/common/inline-spinner'
 import { decodeVerificationCoverage, type VerificationCoverage } from '../../lib/verification-coverage'
 import { KeeperBadge } from '../../components/keeper-badge'
-import { MasterDetail } from '../../components/primitives/master-detail'
+import { LinkedItemAbsent, MasterDetail } from '../../components/primitives/master-detail'
 import { PopoverMenu } from '../../components/primitives/popover-menu'
 import { VirtualList } from '../../components/primitives/virtual-list'
 import { pushShellToast } from '../../shell/shell-state'
@@ -393,7 +393,9 @@ export function TasksTab(props: WorkspaceViewProps) {
   }, [chip, planningObs, executionObs, scheduleObs, tasksCurrent, schedulesCurrent])
   useEffect(() => {
     setSelectedTaskId((prev) => {
-      if (prev && (!tasksCurrent || tasks.some((t) => t.id === prev))) return prev
+      // The task a link names stays selected when the list does not hold it:
+      // the detail says so, and no other task is selected in its place.
+      if (prev && (!tasksCurrent || prev === props.entityId || tasks.some((t) => t.id === prev))) return prev
       return tasks[0]?.id ?? null
     })
   }, [tasks, tasksCurrent, props.entityId, epoch])
@@ -484,6 +486,9 @@ export function TasksTab(props: WorkspaceViewProps) {
     () => tasks.find((t) => t.id === selectedTaskId) ?? (selectedTaskId === null ? tasks[0] ?? null : null),
     [tasks, selectedTaskId],
   )
+  // The task a link names, once both sources of the list were read without it.
+  const linkedTaskAbsent = chip !== 'schedules' && planning !== null && execution !== null
+    && selectedTask === null && selectedTaskId !== null && selectedTaskId === (props.entityId ?? null)
   const selectedSchedule = useMemo(
     () =>
       schedules?.state === 'available'
@@ -1418,13 +1423,15 @@ export function TasksTab(props: WorkspaceViewProps) {
             </div>
           `
         })()
-      : null
+      : linkedTaskAbsent
+        ? html`<div class="wk-detail-pad"><${LinkedItemAbsent} kind="태스크" id=${selectedTaskId} class="wk-notice wk-notice--warn" /></div>`
+        : null
 
   return html`
     <${MasterDetail}
       master=${masterPane}
       detail=${detailPane}
-      hasSelection=${chip === 'schedules' ? selectedSchedule !== null : selectedTask !== null}
+      hasSelection=${chip === 'schedules' ? selectedSchedule !== null : selectedTask !== null || linkedTaskAbsent}
       selectionKey=${chip === 'schedules' ? selectedScheduleId : selectedTaskId}
       linkedKey=${props.entityId ?? null}
       masterLabel=${chip === 'schedules' ? '예약 목록' : '태스크 목록'}

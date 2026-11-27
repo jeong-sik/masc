@@ -2059,6 +2059,79 @@ describe('workspaces/work', () => {
     expect(container.querySelector('.md-detail')!.textContent).toContain('Linked goal')
   })
 
+  it('Tasks says a linked task is not in the list, and shows no other task in its place', async () => {
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: true },
+      workspaceId: 'default',
+    }
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/dashboard/planning')) {
+        return jsonResponse({
+          goals: [],
+          tasks: [{ id: 'task-1', title: 'First task', status: 'awaiting_verification', assignee: 'sangsu', priority: 1, goal_id: null }],
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/execution')) return jsonResponse({ tasks: [] })
+      if (url.startsWith('/api/v1/verification/requests')) return jsonResponse({ requests: [] })
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${WorkWorkspace} subroute="tasks" entityId="task-gone" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(4)
+
+    expect(container.querySelector('.md-split')!.getAttribute('data-pane')).toBe('detail')
+    const detail = container.querySelector('.md-detail')!
+    expect(detail.querySelector('[data-testid="linked-item-absent"]')?.textContent?.replace(/\s+/g, ' ').trim())
+      .toBe('이 링크가 가리키는 태스크(task-gone)가 목록에 없습니다.')
+    expect(detail.textContent).not.toContain('First task')
+    expect(container.querySelectorAll('.wk-row-btn[data-selected="true"]')).toHaveLength(0)
+
+    // The list is still the reader's: a row picked from it is shown.
+    ;[...container.querySelectorAll<HTMLButtonElement>('button.wk-row-btn')]
+      .find((button) => button.textContent?.includes('First task'))!.click()
+    await flushUi(4)
+    expect(container.querySelector('.md-detail')!.textContent).toContain('First task')
+    expect(container.querySelector('[data-testid="linked-item-absent"]')).toBeNull()
+  })
+
+  it('Goals says a linked goal is not in the list, and shows no other goal in its place', async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/dashboard/goals')) {
+        return jsonResponse({
+          tree: [{
+            id: 'goal-1', title: 'First goal', phase: 'Executing', priority: 1,
+            measure: { kind: 'done_when', condition: 'The tests pass' }, procedure: 'Run the tests',
+            criterion_revision: 'crev-1', criterion_review: { state: 'viable', reason: 'Concrete' },
+            linked_task_count: 0, tasks: [],
+          }],
+        })
+      }
+      if (url.startsWith('/api/v1/verification/requests')) return jsonResponse({ requests: [] })
+      return jsonResponse({})
+    }) as typeof fetch
+
+    render(
+      html`<${WorkWorkspace} subroute="goals" entityId="goal-gone" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+    await flushUi(4)
+
+    expect(container.querySelector('.md-split')!.getAttribute('data-pane')).toBe('detail')
+    const detail = container.querySelector('.md-detail')!
+    expect(detail.querySelector('[data-testid="linked-item-absent"]')?.textContent?.replace(/\s+/g, ' ').trim())
+      .toBe('이 링크가 가리키는 목표(goal-gone)가 목록에 없습니다.')
+    expect(detail.textContent).not.toContain('First goal')
+    expect(container.querySelectorAll('.wk-goal-row[data-selected="true"]')).toHaveLength(0)
+  })
+
   it('prevents unbridged 404s in multi_account_signed_in (admin) and CanAdmin 403s in single_user worker across Goals, Tasks, Inbox, and Candle', async () => {
     const seenUrls: string[] = []
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {

@@ -13,13 +13,13 @@
 
 import { html } from 'htm/preact'
 import { MarkdownContent, type LinkRewrite } from '../../components/common/markdown-renderer'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { authSession, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
 import { markViewSynced } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { apiGetV2, apiMutateV2 } from '../../core/transport'
 import { KeeperBadge } from '../../components/keeper-badge'
-import { MasterDetail } from '../../components/primitives/master-detail'
+import { LinkedItemAbsent, MasterDetail } from '../../components/primitives/master-detail'
 import { PopoverMenu } from '../../components/primitives/popover-menu'
 import { VirtualList } from '../../components/primitives/virtual-list'
 import { computeMarkdownLineDiff } from './wiki-diff'
@@ -280,8 +280,10 @@ export function WikiTab(props: WorkspaceViewProps) {
       markViewSynced()
       setSelectedSlug((prev) => {
         const pages = obs.data.pages
-        if (props.entityId && pages.some((p) => p.slug === props.entityId)) return props.entityId
-        if (prev && pages.some((p) => p.slug === prev)) return prev
+        // A read keeps what is selected: the page the reader picked, or the
+        // page a link names, in the index or not. The page is read by its
+        // slug, so one the index does not list is shown or says why not.
+        if (prev && (prev === props.entityId || pages.some((p) => p.slug === prev))) return prev
         return pages[0]?.slug ?? null
       })
     } else if (obs.kind === 'failed') {
@@ -341,6 +343,11 @@ export function WikiTab(props: WorkspaceViewProps) {
       setLoadError(`위키 검색 실패: ${res.error.message}`)
     }
   }, [])
+
+  // The address names a page: that page is selected, once for each address.
+  useLayoutEffect(() => {
+    if (props.entityId) setSelectedSlug(props.entityId)
+  }, [props.entityId])
 
   const loadPage = useCallback(async (slug: string, signal?: AbortSignal) => {
     const startEpoch = currentSessionEpoch()
@@ -827,6 +834,9 @@ export function WikiTab(props: WorkspaceViewProps) {
   // A selected page with nothing read of it and no error is one being read:
   // from the first render, before the effect that reads it has run.
   const pageLoading = selectedSlug !== null && !creatingNew && pageDetail === null && pageError === null
+  // The page a link names, once an index was read without it.
+  const linkedPageAbsent = wikiIndex !== null && selectedSlug !== null && selectedSlug === (props.entityId ?? null)
+    && !wikiIndex.pages.some((p) => p.slug === selectedSlug)
 
   const detailPane = editing && !adminLocked
     ? html`
@@ -1091,7 +1101,12 @@ export function WikiTab(props: WorkspaceViewProps) {
       : pageLoading
         ? html`<div class="kn-detail-pad"><span class="dtable-absent">Wiki 페이지 불러오는 중…</span></div>`
         : pageError
-          ? html`<div class="kn-detail-pad"><div class="kn-notice kn-notice--err" role="alert">${pageError}</div></div>`
+          ? html`
+              <div class="kn-detail-pad">
+                ${linkedPageAbsent && html`<${LinkedItemAbsent} kind="Wiki 페이지" id=${selectedSlug} class="kn-notice kn-notice--warn" />`}
+                <div class="kn-notice kn-notice--err" role="alert">${pageError}</div>
+              </div>
+            `
           : null
 
   return html`

@@ -1721,6 +1721,130 @@ describe('workspaces/knowledge', () => {
     expect(container.querySelector('.md-detail')!.textContent).toContain('Linked report')
   })
 
+  describe('a link to one item, and the list read again', () => {
+    const envelope = { schema_version: 1, instance_id: 'inst-1', generated_at_unix: 1732430000 }
+    const wikiRow = (slug: string, title: string) => ({
+      slug, file: `${slug}.md`, title, summary: '', source: 'observation',
+      author: 'librarian', created: '2026-11-20T00:00:00Z', updated: '2026-11-24T05:00:00Z',
+      revision: 1, tags: [], backlink_count: 0, outgoing_link_count: 0, sources_count: 0, hearsay_count: 0, sha256: `sha-${slug}`,
+    })
+    const wikiPage = (slug: string, title: string) => ({
+      page: slug, slug, file: `${slug}.md`,
+      frontmatter: {
+        title, summary: '', source: 'observation', author: 'librarian',
+        created: '2026-11-20T00:00:00Z', updated: '2026-11-24T05:00:00Z', revision: 1, tags: [],
+      },
+      sha256: `sha-${slug}`, body_markdown: `Body of ${slug}`,
+      outgoing_links: [], backlinks: [], sources: { references: [], hearsay: [] }, lint_findings: [],
+    })
+    const wikiFetch = (slugs: readonly string[]) => vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/wiki?')) {
+        return jsonResponse({
+          ...envelope,
+          data: {
+            pages_total: slugs.length, pages_readable: slugs.length, pages_unreadable: 0,
+            pages: slugs.map((slug) => wikiRow(slug, `Title of ${slug}`)),
+            unreadable_pages: [], tags: [], sources: { observation: slugs.length },
+            lint: { total_findings: 0, counts: {}, log_hole_suppressed: false, orphans: [], duplicate_title_candidates: [], findings: [] },
+          },
+        })
+      }
+      const slug = /^\/api\/v1\/wiki\/([a-z-]+)$/.exec(url)?.[1]
+      if (slug !== undefined) {
+        return slugs.includes(slug)
+          ? jsonResponse({ ...envelope, data: wikiPage(slug, `Title of ${slug}`) })
+          : jsonResponse({ error: 'no such page' }, 404)
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+    const artifact = (digit: string, title: string) => ({
+      id: `artifact-${digit.repeat(32)}`, revision: 1, title, summary: '', format: 'markdown', author: 'sangsu',
+      created_at: '2026-11-24T05:00:00Z', body: { _blob: { sha256: 'b'.repeat(64), bytes: 64 } },
+      task_id: null, goal_id: null,
+    })
+    const artifactFetch = (artifacts: readonly ReturnType<typeof artifact>[]) => vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/api/v1/published-artifacts') return jsonResponse({ artifacts, diagnostics: [] })
+      const id = /^\/api\/v1\/published-artifacts\/([a-z0-9-]+)/.exec(url)?.[1]
+      const found = artifacts.find((one) => one.id === id)
+      if (found) return jsonResponse({ artifact: found, content: `Text of ${found.title}`, revisions: [] })
+      if (id !== undefined) return jsonResponse({ error: 'no such artifact' }, 404)
+      return jsonResponse({})
+    }) as typeof fetch
+    const detail = () => container.querySelector('.md-detail')!
+    const selectedRows = () => [...container.querySelectorAll('.kn-row-btn[data-selected="true"]')]
+    const refresh = () => [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.trim() === '새로고침')!
+
+    it('Wiki says a linked page is not in the list, and shows no other page in its place', async () => {
+      globalThis.fetch = wikiFetch(['page-a'])
+      render(html`<${KnowledgeWorkspace} subroute="wiki" entityId="page-gone" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+      await flushUi()
+
+      expect(container.querySelector('.md-split')!.getAttribute('data-pane')).toBe('detail')
+      const absent = detail().querySelector('[data-testid="linked-item-absent"]')
+      expect(absent?.textContent?.replace(/\s+/g, ' ').trim()).toBe('이 링크가 가리키는 Wiki 페이지(page-gone)가 목록에 없습니다.')
+      // Why the page could not be read stays beside it.
+      expect(detail().querySelector('[role="alert"]')).not.toBeNull()
+      expect(detail().textContent).not.toContain('Body of page-a')
+      expect(selectedRows()).toHaveLength(0)
+    })
+
+    it('Wiki keeps the page picked after a link when the index is read again', async () => {
+      globalThis.fetch = wikiFetch(['page-a', 'page-b'])
+      render(html`<${KnowledgeWorkspace} subroute="wiki" entityId="page-b" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+      await flushUi()
+      expect(detail().textContent).toContain('Body of page-b')
+
+      const rowOfA = [...container.querySelectorAll<HTMLButtonElement>('button.kn-row-btn')]
+        .find((button) => button.textContent?.includes('Title of page-a'))!
+      rowOfA.click()
+      await flushUi()
+      expect(detail().textContent).toContain('Body of page-a')
+
+      refresh().click()
+      await flushUi()
+      expect(detail().textContent).toContain('Body of page-a')
+      expect(selectedRows().map((row) => row.textContent)).toEqual([expect.stringContaining('Title of page-a')])
+    })
+
+    it('Artifacts says a linked artifact is not in the list, and shows no other in its place', async () => {
+      const first = artifact('1', 'First report')
+      const gone = `artifact-${'9'.repeat(32)}`
+      globalThis.fetch = artifactFetch([first])
+      render(html`<${KnowledgeWorkspace} subroute="artifacts" entityId=${gone} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+      await flushUi()
+
+      expect(container.querySelector('.md-split')!.getAttribute('data-pane')).toBe('detail')
+      const absent = detail().querySelector('[data-testid="linked-item-absent"]')
+      expect(absent?.textContent?.replace(/\s+/g, ' ').trim()).toBe(`이 링크가 가리키는 아티팩트(${gone})가 목록에 없습니다.`)
+      expect(detail().querySelector('[role="alert"]')).not.toBeNull()
+      expect(detail().textContent).not.toContain('First report')
+      expect(selectedRows()).toHaveLength(0)
+    })
+
+    it('Artifacts keeps the artifact picked after a link when the list is read again', async () => {
+      const first = artifact('1', 'First report')
+      const linked = artifact('2', 'Linked report')
+      globalThis.fetch = artifactFetch([first, linked])
+      render(html`<${KnowledgeWorkspace} subroute="artifacts" entityId=${linked.id} onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+      await flushUi()
+      expect(detail().textContent).toContain('Text of Linked report')
+
+      const rowOfFirst = [...container.querySelectorAll<HTMLButtonElement>('button.kn-row-btn')]
+        .find((button) => button.textContent?.includes('First report'))!
+      rowOfFirst.click()
+      await flushUi()
+      expect(detail().textContent).toContain('Text of First report')
+
+      refresh().click()
+      await flushUi()
+      expect(detail().textContent).toContain('Text of First report')
+      expect(selectedRows().map((row) => row.textContent)).toEqual([expect.stringContaining('First report')])
+    })
+  })
+
   it('Wiki pane switch: a search result, a lint finding and a log entry each show their page, picked again or not', async () => {
     const envelope = { schema_version: 1, instance_id: 'inst-1', generated_at_unix: 1732430000 }
     const row = (slug: string, title: string) => ({

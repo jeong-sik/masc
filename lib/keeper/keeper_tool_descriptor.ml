@@ -3439,7 +3439,6 @@ let route_evidence_json d =
        , `String (keeper_model_projection_to_string d.keeper_model_projection) )
      ; "public_name", `String d.public_name
      ; "canonical_name", `String d.internal_name
-     ; "description", `String d.description
      ; "executor", `String (executor_to_string d.executor)
      ; "backend", `String (backend_to_string d.backend)
      ; "sandbox", `String (sandbox_to_string d.sandbox)

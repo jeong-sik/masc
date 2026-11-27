@@ -61,7 +61,7 @@ related: []
 
 | 하는 일 | 길 | 필요한 권한 |
 |---|---|---|
-| Keeper 목록 | `GET /api/v1/gate/keepers?detailed=true` | `channel_gate` 도구 권한 |
+| Keeper 목록 | `GET /api/v1/gate/keepers?detailed=true` | `channel_gate` = CanBroadcast(`tool_catalog.ml:275`) |
 | 지금 도는 턴·control token | `GET /api/v1/keepers/turns` | 공개 읽기 |
 | 기록 한 쪽 | `GET /api/v1/keepers/:k/chat/history/page?limit=1..400&cursor=` | 공개 읽기(strict auth 에서는 읽기 credential) |
 | 보내기와 스트림 | `POST /api/v1/keepers/chat/stream` | `masc_keeper_delegate` = CanBroadcast |
@@ -100,11 +100,11 @@ related: []
 
 `lib/keeper_chat_wire/keeper_chat_wire.atd` 에 다음만 둔다.
 
-- Keeper 목록 행: 앱이 그리는 필드만 둔다(§5 Q2).
+- Keeper 목록 행: 앱이 그리는 필드만 둔다(§5 Q1).
 - 기록 쪽과 행.
 - `chat/stream` 요청 본문. `admission_intent` 를 포함한다.
 - AG-UI frame. type-field variant 이고, 이벤트 종류마다 그 종류의 필드만 가진다.
-- 첫 버전이 그리는 CUSTOM 이벤트: 수락, `KEEPER_ATTACHMENT`, 오류. 나머지는 열린 variant 로 받는다(§5 Q1).
+- 첫 버전이 그리는 CUSTOM 이벤트: 수락, `KEEPER_ATTACHMENT`, 오류. 나머지는 열린 variant 로 받는다(D2).
 - 첨부 meta.
 
 서버는 이 파일에서 atdgen 이 만든 타입으로 쓴다.
@@ -112,6 +112,8 @@ related: []
 - 위 encoder 들의 손 yojson 은 지운다.
 - `Ag_ui.event` 는 생성된 sum type 으로 바꾼다. 쓰는 곳은 `lib/` 아래 10개 파일, 65군데다. 종류마다 필요한 필드가 타입으로 강제되어, `delta` 없는 `TEXT_MESSAGE_CONTENT` 는 만들 수 없게 된다.
 - wire 는 바뀌지 않는다. 옮기는 층은 옛 encoder 를 남겨 두고, 같은 값에서 옛 encoder 와 새 encoder 가 같은 JSON 을 내는지 테스트로 비교한다. 옛 encoder 를 지우는 층에서 그 비교 테스트도 같이 지운다.
+  - 비교 단위는 JSON 값이다. 객체 key 순서는 보지 않고, 수는 수로 비교한다. 빠진 option 은 key 가 없는 것으로 본다. 바이트는 지금처럼 transport 의 정규 JSON encoder(`Sse_wire.format_event_yojson`)가 쓴다.
+  - 비교할 값은 표본이 아니라 만드는 곳 목록에서 뽑는다. 옮기는 층은 먼저 `Ag_ui` 이벤트를 만드는 곳 65군데를 모두 적는다. 그리고 곳마다 나오는 이벤트 종류와 option 조합을 비교 테스트에 넣는다. 그 목록은 PR 본문에 둔다.
 - 그 뒤에 남는 시험은 protocol 경계 하나다. 서버 encoder 가 낸 fixture(`apps/fixtures/keeper_chat/`)를 각 언어의 생성 decoder 가 읽는지 본다.
 
 Dashboard·TUI 를 생성 타입으로 옮기는 일은 이 RFC 밖이다(§3).
@@ -134,6 +136,10 @@ Dashboard·TUI 를 생성 타입으로 옮기는 일은 이 RFC 밖이다(§3).
 - 다루는 범위: record, option, list, enum, `<json name>`, type-field variant.
   - Swift 는 associated value 를 가진 `enum` 과 `Codable` 구현이다.
   - Kotlin 은 `sealed class` 에 `@JsonClassDiscriminator("type")` 와 `@SerialName` 을 붙인다.
+- 열린 variant: 앱은 서버보다 늦게 업데이트되므로, 모르는 이름을 받아도 decode 가 실패하면 안 된다.
+  - type-field variant 에 생성기 전용 annotation `<native open>` 을 붙이면, 생성기가 `unrecognized(name, raw)` 경우를 더한다. 앱은 이 경우를 기본값으로 바꾸지 않고 「이 앱이 모르는 이벤트」로 보인다.
+  - ATD 의 `<json open_enum>` 은 payload 없는 enum 에만 쓸 수 있어 이 자리에 맞지 않는다.
+  - atdgen 은 모르는 annotation 절을 무시한다. ATD 4.2.0 에서 `<native open>` 을 붙인 파일로 `atdgen -t`·`-j` 가 그대로 통과했다. 서버는 이 variant 를 쓰기만 하므로 OCaml 쪽 동작은 바뀌지 않는다.
 - 그 밖의 annotation 은 생성을 거절한다. 다른 adapter, 다른 field name 의 `Type_field.Param` 이 여기에 든다. 모르는 모양을 비슷한 모양으로 바꿔 내지 않는다.
 - 생성물은 `apps/apple/MascWire/Generated/`, `apps/android/wire/src/main/kotlin/.../generated/` 에 커밋한다. Swift·Kotlin 은 dune 이 빌드하지 않기 때문이다.
 - 어긋남 검사는 dune rule 로 둔다. 생성기를 돌린 결과를 커밋본과 `diff` 하는 rule 을 `@check` alias 에 붙인다. 그러면 지금 도는 `type-check` 가 이 검사를 같이 한다. 응답 정의만 바꾸고 생성물을 다시 만들지 않으면 `type-check` 가 실패한다.
@@ -142,8 +148,35 @@ Dashboard·TUI 를 생성 타입으로 옮기는 일은 이 RFC 밖이다(§3).
 
 - 처음 실행할 때 사람이 서버 URL 과 token 을 넣는다. token 은 `masc login --agent <기기 이름> --role worker` 로 만든다.
 - token 은 Keychain(Apple)과 Keystore 키로 암호화한 DataStore(Android)에 둔다.
-- 보내기와 스트림은 `POST chat/stream` 하나다. 앱은 마지막으로 받은 `id:` 를 들고 있다가, 끊기면 같은 `request_id` 와 `since_seq` 로 다시 POST 한다.
+- 보내기와 스트림은 `POST chat/stream` 하나다.
 - 앱은 CanAdmin 이 필요한 길을 쓰지 않는다.
+- 첫 버전이 실시간으로 받는 턴은 앱이 보낸 턴뿐이다. TUI·Dashboard 가 시작한 턴은 대화를 열 때와 앱이 앞으로 돌아올 때 기록 쪽을 다시 읽어 보인다. 다른 곳에서 턴이 도는지는 `GET /api/v1/keepers/turns` 로 안다. 그런 턴을 실시간으로 따라가는 일은 §5 Q4 다.
+
+#### 이어 받기
+
+서버가 지키는 사실:
+
+- 같은 `request_id` 로 다시 POST 하면, 서버는 그 operation 을 알 때만 journal 을 `since_seq` 뒤부터 다시 보낸다(`server_routes_http_keeper_stream.ml:3798-3812`, `acceptance.existing`). 새 턴은 시작하지 않는다.
+- 서버가 모르는 operation 이면 `since_seq` 를 무시하고 처음 제출로 받는다.
+- 다시 보낸 본문의 admission 이 처음과 다르면 `Idempotency_conflict` 로 거절한다(`keeper_chat_operation_store.ml:1521-1524`, `admission_digest`).
+- journal 은 운영자 보존 일수(`Server_maintenance_toml_config.resolve_retention_days`)가 지나면 서버가 시작할 때 지운다.
+- journal 쓰기가 실패한 이벤트는 실시간으로만 나가고, 더 높은 seq 뒤에 올 수 있다(`live_event_is_new` 위 주석).
+
+그래서 앱은 다음과 같이 한다.
+
+- 보낼 때 operation 하나를 디스크에 먼저 적는다. 적는 것은 Keeper 이름, `request_id`, 보낸 본문 원문, 받은 seq 집합이다. 수락 frame 을 받으면 그 사실도 적는다. 턴이 끝난 frame(`RUN_FINISHED`·`RUN_ERROR`)을 받으면 지운다.
+- 중복은 seq 순서가 아니라 seq 집합으로 거른다. 위 다섯째 사실 때문이다.
+
+| 상황 | 하는 일 |
+|---|---|
+| 스트림만 끊김, 앱은 살아 있음 | 저장한 본문 원문을 그대로, `since_seq` = 받은 가장 큰 seq 로 다시 POST |
+| 앱이 뒤로 갔다 돌아옴 | 위와 같다 |
+| 앱이 종료된 뒤 다시 켬, 수락 frame 을 받았던 operation | 먼저 `GET …/:k/chat/operations/:id` 로 서버가 아는지 본다. 알면 위와 같이 다시 POST 한다 |
+| 그 조회가 `Unknown_operation` | 다시 POST 하지 않는다. 다시 보내면 새 턴이 되어 같은 말을 두 번 보내게 된다. 기록 쪽을 다시 읽고, 「보낸 것으로 확인되지 않음」을 그 메시지에 보인다 |
+| 앱이 종료된 뒤 다시 켬, 수락 frame 을 못 받은 operation | 위 조회로 정한다. 알면 다시 POST 하고, 모르면 「보내지 않음」으로 보이고 사람이 다시 보내게 둔다 |
+| 다시 POST 했는데 재생이 비고 스트림이 닫힘 | journal 이 이미 지워졌을 수 있다. 기록 쪽을 다시 읽고 message id 로 화면과 맞춘다 |
+| `Idempotency_conflict` | 원문을 그대로 보내므로 나오면 앱 버그다. 오류로 보이고 다시 시도하지 않는다 |
+| 401(token 거절) | 다시 시도하지 않는다. 서버 URL·token 입력 화면으로 간다 |
 - Android 에뮬레이터는 `adb reverse tcp:8935 tcp:8935` 로 `127.0.0.1:8935` 에 붙는다. `10.0.2.2` 로 붙으면 `Host` 가 bind 주소와 달라 400 이다.
 
 ### D4. 성능은 고정 입력으로 재고, 값은 PR 본문에 남긴다
@@ -203,17 +236,16 @@ Dashboard·TUI 를 생성 타입으로 옮기는 일은 이 RFC 밖이다(§3).
 3. **Android 앱 v1**
    - 확인: `./gradlew test`, 에뮬레이터 `connectedCheck`, D4 측정, 같은 실서버 확인.
 
-앱 빌드·테스트를 CI 에서 돌릴지는 운영자가 정한다(§5 Q5). 정하기 전에는 앱 PR 본문에 로컬 결과를 남긴다.
+앱 빌드·테스트를 CI 에서 돌릴지는 운영자가 정한다(§5 Q3). 정하기 전에는 앱 PR 본문에 로컬 결과를 남긴다.
 
 ## 5. 열린 질문
 
-- **Q1. 모르는 CUSTOM 이름.** 앱은 서버보다 늦게 업데이트된다. 그래서 모르는 이름을 받아도 decode 가 실패하면 안 된다. 기본값으로 바꾸지 않고 `unrecognized(name, raw)` 같은 variant 로 받아 「이 앱이 모르는 이벤트」로 보이는 쪽이 맞다.
-  - ATD 의 `<json open_enum>` 은 payload 없는 enum 에만 쓸 수 있다.
-  - payload 를 가진 variant 를 어떻게 열지 단계 1 에서 정한다. 생성기 전용 annotation 이 후보다.
-- **Q2. Keeper 목록 크기.** `detailed=true` 응답은 `masc_keeper_list` 도구 출력을 그대로 담는다(meta, 최근 턴, portrait). 앱 시작을 늦출 만큼 큰지 먼저 잰다. 크면 앱이 그리는 필드만 담은 목록 projection 을 따로 둔다.
-- **Q3. 기록 쪽 응답 압축.** `json_value ~compress:true` 를 쓰는 route 가 있다. 기록 쪽도 쓰는지, 터널 너머에서 몇 바이트인지 잰다.
-- **Q4. 이어 받기 중복.** 서버는 journal 에 쓰기 실패한 이벤트를 실시간으로만 보낼 수 있다(`server_routes_http_keeper_stream.ml:3527` 주석). 그 이벤트는 더 높은 seq 뒤에 올 수 있다. 앱은 seq 순서가 아니라 seq 집합으로 중복을 거른다.
-- **Q5. 앱 CI 작업.** 헌장은 PR 마다 도는 검사를 운영자 요청 없이 늘리지 않게 한다. 앱 빌드·테스트를 CI 에서 돌리려면 운영자가 정해야 한다.
+- **Q1. Keeper 목록 크기.** `detailed=true` 응답은 `masc_keeper_list` 도구 출력을 그대로 담는다(meta, 최근 턴, portrait). 앱 시작을 늦출 만큼 큰지 먼저 잰다. 크면 앱이 그리는 필드만 담은 목록 projection 을 따로 둔다.
+- **Q2. 기록 쪽 응답 압축.** `json_value ~compress:true` 를 쓰는 route 가 있다. 기록 쪽도 쓰는지, 터널 너머에서 몇 바이트인지 잰다.
+- **Q3. 앱 CI 작업.** 헌장은 PR 마다 도는 검사를 운영자 요청 없이 늘리지 않게 한다. 앱 빌드·테스트를 CI 에서 돌리려면 운영자가 정해야 한다.
   - 정한다면 `apps/apple/**` 는 macOS runner, `apps/android/**` 는 Ubuntu runner 에서 돈다. 각 작업은 그 경로가 바뀐 PR 에서만 돈다.
   - macOS runner 는 Linux runner 보다 비싸다.
   - 생성물 어긋남 검사는 이 질문과 상관없다. 이미 도는 `type-check` 안에서 돈다(D2).
+- **Q4. 다른 곳에서 시작한 턴 따라가기.** Dashboard 는 observer 스트림(`/mcp?sse_kind=observer`, 다중 계정에서는 `/api/v1/auth/events`)으로 모든 대화 operation 의 AG-UI 이벤트를 받는다(`dashboard/src/core/observer.ts`). 앱이 이 스트림을 쓰면 TUI·Dashboard 가 시작한 턴도 실시간으로 보인다.
+  - 대신 앱이 앞에 있는 동안 연결 하나를 늘 열어 둔다.
+  - Worker token 으로 열리는지, 다시 붙을 때(`Last-Event-ID`, `observer_resync_required`) 무엇을 다시 읽어야 하는지 확인한 뒤 정한다.

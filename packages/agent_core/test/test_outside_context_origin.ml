@@ -553,6 +553,63 @@ let test_anthropic_multi_round_signed_thinking_with_outside_context () =
     models
 ;;
 
+let test_pre_volatile_tail_breakpoint_with_prefix_compaction_anchor () =
+  let compaction_anchor : message =
+    { role = User
+    ; content = [ Text "Compaction epoch 1 summary." ]
+    ; name = None
+    ; tool_call_id = None
+    ; origin = Outside_context
+    ; metadata = [ "masc.compaction_anchor.v2", `Bool true ]
+    }
+  in
+  let messages =
+    [ compaction_anchor
+    ; message User [ Text "stable conversation turn" ]
+    ; message Assistant [ Text "stable assistant reply" ]
+    ; message ~origin:Outside_context User [ Text "untrusted outside context" ]
+    ; message ~origin:System_context User [ Text "per-turn system context" ]
+    ]
+  in
+  let or_config =
+    Provider_config.make
+      ~kind:Provider_config.OpenAI_compat
+      ~provider_id:"openrouter"
+      ~model_id:"anthropic/claude-opus-5"
+      ~base_url:"https://openrouter.ai/api/v1"
+      ~system_prompt:"static system"
+      ~cache_system_prompt:true
+      ~cache_extended_ttl:true
+      ()
+  in
+  let open Yojson.Safe.Util in
+  let or_body =
+    Backend_openai_request.build_request ~config:or_config ~messages ()
+    |> Yojson.Safe.from_string
+  in
+  Alcotest.(check bool)
+    "prefix Outside_context anchor keeps OpenRouter pre-volatile cache split active"
+    true
+    (or_body |> member "cache_control" = `Null);
+  let or_msgs = or_body |> member "messages" |> to_list in
+  let msg_has_cache_control m =
+    match m |> member "content" with
+    | `List blocks ->
+      List.exists (fun b -> b |> member "cache_control" <> `Null) blocks
+    | _ -> false
+  in
+  let marked_indices =
+    or_msgs
+    |> List.mapi (fun i m -> i, msg_has_cache_control m)
+    |> List.filter_map (fun (i, ok) -> if ok then Some i else None)
+  in
+  (* messages = [system; anchor; conv_user; conv_assistant; outside_ctx; sys_ctx] -> index 3 *)
+  Alcotest.(check (list int))
+    "breakpoint stays on conv_assistant before trailing volatile carriers"
+    [ 3 ]
+    marked_indices
+;;
+
 let () =
   Alcotest.run
     "outside_context_origin"
@@ -578,6 +635,10 @@ let () =
             "pre-volatile-tail cache breakpoint splits [System_context; Outside_context]"
             `Quick
             test_pre_volatile_tail_breakpoint_with_system_and_outside_context
+        ; Alcotest.test_case
+            "pre-volatile-tail cache breakpoint stays active with prefix compaction anchor"
+            `Quick
+            test_pre_volatile_tail_breakpoint_with_prefix_compaction_anchor
         ; Alcotest.test_case
             "Anthropic SSE stream preserves wire-reported cache_write_lifetime"
             `Quick

@@ -60,8 +60,9 @@ let for_compaction_replay messages =
     List.map
       (fun (msg : Agent_core.Types.message) ->
          if is_untyped_compaction_anchor msg then
-           ({ origin = Outside_context; role = User; name = None; tool_call_id = None; metadata = []
-           ; content = [ Text "Earlier turns are available in the Keeper compaction archive." ]
+           ({ origin = Outside_context; role = User; name = None; tool_call_id = None
+            ; metadata = compaction_anchor_metadata
+            ; content = [ Text "Earlier turns are available in the Keeper compaction archive." ]
             } : Agent_core.Types.message)
          else msg)
       messages

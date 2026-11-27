@@ -541,6 +541,84 @@ let test_uncertain_input_commit_is_not_a_stale_response () =
     ((read_input_checkpoint path).pending_input = None && Agent.pending_input agent = Some pending)
 ;;
 
+let test_input_sink_exception_does_not_poison_agent_lock () =
+  with_input_checkpoint @@ fun path ->
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let boom = ref false in
+  let question : Hooks.elicitation_request = {question="question";schema=None;timeout_s=None} in
+  let options = {Agent.default_options with hooks={Hooks.empty with
+    before_turn=Some (fun _ -> Hooks.ElicitInput question)}} in
+  let sink snapshot =
+    if !boom then failwith "transient sink exception"
+    else save_input_checkpoint path snapshot in
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
+      ~net:env#net ~checkpoint_sink:sink
+      ~config:(Types.default_config ~model:"input-only") ~options () in
+  ignore (Agent.run ~sw agent "original");
+  let pending = Option.get (Agent.pending_input agent) in
+  let messages = (Agent.state agent).messages in
+  boom := true;
+  let raised =
+    try
+      ignore (Agent.provide_input agent pending (Hooks.Answer (`String "yes")));
+      false
+    with Failure msg -> String.equal msg "transient sink exception"
+  in
+  Alcotest.(check bool) "sink exception propagates" true raised;
+  Alcotest.(check bool) "exception leaves messages and wait untouched" true
+    ((Agent.state agent).messages = messages && Agent.pending_input agent = Some pending);
+  boom := false;
+  Alcotest.(check bool) "subsequent input response succeeds without mutex poisoning" true
+    (Agent.provide_input agent pending (Hooks.Answer (`String "yes")) = Ok ());
+  Alcotest.(check bool) "durable and in-memory state settle after retry" true
+    ((read_input_checkpoint path).pending_input = None && Agent.pending_input agent = None)
+;;
+
+let test_input_sink_cancellation_completes_committed_state_update () =
+  with_input_checkpoint @@ fun path ->
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  let question : Hooks.elicitation_request = {question="question";schema=None;timeout_s=None} in
+  let options = {Agent.default_options with hooks={Hooks.empty with
+    before_turn=Some (fun _ -> Hooks.ElicitInput question)}} in
+  let suspend_next = ref false in
+  let sink_entered, notify_entered = Eio.Promise.create () in
+  let allow_finish, release_finish = Eio.Promise.create () in
+  let sink snapshot =
+    let res = save_input_checkpoint path snapshot in
+    if !suspend_next then (
+      suspend_next := false;
+      Eio.Promise.resolve notify_entered ();
+      Eio.Promise.await allow_finish);
+    res
+  in
+  let agent = Agent.create ~media_store:(Agent_core.History.Memory_store.create ())
+      ~net:env#net ~checkpoint_sink:sink
+      ~config:(Types.default_config ~model:"input-only") ~options () in
+  ignore (Agent.run ~sw agent "original");
+  let pending = Option.get (Agent.pending_input agent) in
+  suspend_next := true;
+  let provide_outcome = ref None in
+  (try
+     Eio.Switch.run @@ fun inner_sw ->
+     Eio.Fiber.fork ~sw:inner_sw (fun () ->
+       provide_outcome :=
+         Some (Agent.provide_input agent pending (Hooks.Answer (`String "yes"))));
+     Eio.Promise.await sink_entered;
+     Eio.Switch.fail inner_sw Exit;
+     Eio.Promise.resolve release_finish ()
+   with Exit -> ());
+  Alcotest.(check bool) "protected provide_input completes despite cancellation while sink suspends" true
+    (!provide_outcome = Some (Ok ()));
+  let committed = read_input_checkpoint path in
+  Alcotest.(check bool) "durable commit and in-memory state stay in lockstep" true
+    (committed.pending_input = None
+     && Agent.pending_input agent = None
+     && committed.messages = (Agent.state agent).messages);
+  Alcotest.(check bool) "agent mutex stays usable after protected cancellation" true
+    (Agent.provide_input agent pending (Hooks.Answer (`String "late"))
+     = Error (Agent.Input_not_current Agent_input_request.No_pending_request))
+;;
+
 let () =
   let open Alcotest in
   run
@@ -551,7 +629,10 @@ let () =
             test_callback_and_restored_response_prepare_same_model_input
         ; test_case "accepted resume is saved before later failure" `Quick test_accepted_resume_persists_before_parameter_failure
         ; test_case "failed input writes preserve the original owner" `Quick test_input_sink_failure_preserves_owned_state
-        ; test_case "uncertain writes require host reconciliation" `Quick test_uncertain_input_commit_is_not_a_stale_response ] )
+        ; test_case "uncertain writes require host reconciliation" `Quick test_uncertain_input_commit_is_not_a_stale_response
+        ; test_case "sink exception does not poison agent lock" `Quick test_input_sink_exception_does_not_poison_agent_lock
+        ; test_case "cancellation during suspending sink finishes committed state update" `Quick
+            test_input_sink_cancellation_completes_committed_state_update ] )
     ; ( "owned current input"
       , [ test_case "rejected resume and stale response preserve current wait" `Quick test_current_wait_survives_rejection_and_replacement
         ; test_case "concurrent same-name runs and durable checkpoints" `Quick test_checkpoint_retains_current_wait

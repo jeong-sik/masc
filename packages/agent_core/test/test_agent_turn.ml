@@ -240,6 +240,83 @@ let test_context_ambiguity_does_not_reject_preparation () =
     (Result.is_error prepared.request.context_message)
 ;;
 
+let test_retained_carriers_survive_compaction_anchor_and_trailing_recovery_instruction () =
+  let turn_params =
+    { Hooks.default_turn_params with
+      extra_system_context = Some "dynamic host context"
+    ; extra_outside_context = Some "pending mentions"
+    }
+  in
+  let compaction_anchor : Types.message =
+    { origin = Llm_provider.Types.Outside_context
+    ; role = Types.User
+    ; content = [ Types.Text "Earlier turns archived in compaction epoch 1." ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = [ "masc.compaction_anchor.v2", `Bool true ]
+    }
+  in
+  let gate_recovery : Llm_provider.Types.message =
+    { origin = Llm_provider.Types.Recovery_instruction
+    ; role = Types.User
+    ; content = [ Types.Text "Gate replay evidence appended after carriers." ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  let media_store = Agent_core.History.Memory_store.create () in
+  let check_retained label ~messages ~project =
+    let prepared =
+      Agent_turn.prepare_turn
+        ~media_store
+        ~tools:Tool_set.empty
+        ~messages
+        ~turn_params
+        ~model_input_projection:project
+        ()
+      |> Result.get_ok
+    in
+    (match Result.get_ok prepared.request.context_message with
+     | Some msg ->
+       Alcotest.(check string) (label ^ ": System_context retained")
+         "[system context] dynamic host context"
+         (Types.text_of_content msg.content)
+     | None -> Alcotest.fail (label ^ ": System_context carrier missing"));
+    match Result.get_ok prepared.request.retained_context_messages with
+    | [ out_msg; sys_msg ] ->
+      Alcotest.(check bool) (label ^ ": first retained is Outside_context") true
+        (out_msg.origin = Llm_provider.Types.Outside_context);
+      Alcotest.(check string) (label ^ ": Outside_context text") "pending mentions"
+        (Types.text_of_content out_msg.content);
+      Alcotest.(check bool) (label ^ ": second retained is System_context") true
+        (sys_msg.origin = Llm_provider.Types.System_context)
+    | other ->
+      Alcotest.failf "%s: expected [Outside_context; System_context], got %d message(s)"
+        label (List.length other)
+  in
+  let to_wire_with_suffix suffix history =
+    match Agent_core.History.to_wire_messages media_store history with
+    | Error error -> Error (Error.Media error)
+    | Ok wire -> Ok (Agent_core.Agent.one_request (wire @ suffix))
+  in
+  (* 1. Prefix compaction anchor alongside current Outside_context + System_context. *)
+  check_retained
+    "compaction anchor isolated from current carriers"
+    ~messages:[ compaction_anchor; Types.user_msg "hello" ]
+    ~project:(to_wire_with_suffix []);
+  (* 2. Projection appends Recovery_instruction (e.g. Gate replay evidence) after carriers. *)
+  check_retained
+    "trailing Recovery_instruction preserves both carriers"
+    ~messages:[ compaction_anchor; Types.user_msg "hello" ]
+    ~project:(to_wire_with_suffix [ gate_recovery ]);
+  (* 3. Empty-history retry: no Conversation atom between compaction anchor and carriers. *)
+  check_retained
+    "empty-history cut with compaction anchor and trailing Recovery_instruction"
+    ~messages:[ compaction_anchor ]
+    ~project:(to_wire_with_suffix [ gate_recovery ])
+;;
+
 let test_prepare_messages_system_prompt_override_noop () =
   let msgs =
     [ { origin = Llm_provider.Types.Conversation;  Types.role = Types.User
@@ -1118,6 +1195,10 @@ let () =
             test_retained_context_respects_projection
         ; Alcotest.test_case "context ambiguity does not reject preparation" `Quick
             test_context_ambiguity_does_not_reject_preparation
+        ; Alcotest.test_case
+            "retained carriers survive compaction anchor and trailing Recovery_instruction"
+            `Quick
+            test_retained_carriers_survive_compaction_anchor_and_trailing_recovery_instruction
         ; Alcotest.test_case
             "system_prompt_override noop"
             `Quick

@@ -1,11 +1,15 @@
 open Agent_types
 
-(* Use non-poisoning lock/unlock around pre-mutation persistence and callbacks:
-   an exception from [persist] or [message] leaves [agent.state] and
-   [agent.pending_input] untouched, so it must not permanently poison [agent.mu]. *)
+(* Use non-poisoning lock/unlock with [Eio.Cancel.protect] around pre-mutation
+   persistence and in-memory updates: an exception from [persist] or [message]
+   leaves [agent.state] and [agent.pending_input] untouched (so it must not
+   permanently poison [agent.mu]), while cancellation cannot split a durable
+   checkpoint commit from the subsequent in-memory state transition. *)
 let with_agent_lock agent f =
   Eio.Mutex.lock agent.mu;
-  Fun.protect ~finally:(fun () -> Eio.Mutex.unlock agent.mu) f
+  Fun.protect
+    ~finally:(fun () -> Eio.Mutex.unlock agent.mu)
+    (fun () -> Eio.Cancel.protect f)
 ;;
 
 let persist agent ~pending_input state =

@@ -28,6 +28,13 @@ let same_version left right =
   && Float.equal left.mtime right.mtime
 ;;
 
+let same_stats_version (stats : Unix.stats) (version : version) =
+  stats.Unix.st_dev = version.device
+  && stats.Unix.st_ino = version.inode
+  && stats.Unix.st_size = version.size
+  && Float.equal stats.Unix.st_mtime version.mtime
+;;
+
 type 'a slot =
   { version : version option
   ; mutable value : 'a option
@@ -39,7 +46,7 @@ type 'a t =
   ; mutex : Mutex.t
   }
 
-let create () = { slots = Hashtbl.create 1; mutex = Mutex.create () }
+let create () = { slots = Hashtbl.create 16; mutex = Mutex.create () }
 
 type 'a lookup =
   | Kept of 'a
@@ -97,13 +104,13 @@ let keep_written t path value =
     | None -> Hashtbl.remove t.slots path)
 ;;
 
-let rec load t path ~decode =
+let rec load_slow t path ~decode =
   (* A writer can publish while stat is in progress. Check the binding we
      saw before stat so a delayed read cannot displace the published value. *)
   let seen = Mutex.protect t.mutex (fun () -> Hashtbl.find_opt t.slots path) in
   let current = version_of_path path in
   match lookup t path ~seen current with
-  | None -> load t path ~decode
+  | None -> load_slow t path ~decode
   | Some (Kept value) -> Ok value
   | Some (Decode slot) ->
     let completion = ref Leave_unfilled in
@@ -117,4 +124,31 @@ let rec load t path ~decode =
             | Some _ | None -> File_changed)
        | Ok _, None | Error _, (Some _ | None) -> ());
       decoded)
+;;
+
+(* Fast path for warm cache hits: stat once, acquire [t.mutex] once, and
+   return the kept value directly without allocating a [version] record or
+   [lookup] variant. Because this path never mutates [t.slots], it cannot
+   displace a concurrent [keep_written] or [forget]; any miss, unfilled slot,
+   version mismatch, or stat error falls back to [load_slow]. *)
+let load t path ~decode =
+  match Unix.stat path with
+  | stats ->
+    Mutex.lock t.mutex;
+    (match Hashtbl.find t.slots path with
+     | { version = Some cached; value = Some value; readers = _ }
+       when same_stats_version stats cached ->
+       Mutex.unlock t.mutex;
+       Ok value
+     | { version = Some _ | None; value = Some _ | None; readers = _ } ->
+       Mutex.unlock t.mutex;
+       load_slow t path ~decode
+     | exception Not_found ->
+       Mutex.unlock t.mutex;
+       load_slow t path ~decode
+     | exception exn ->
+       let bt = Printexc.get_raw_backtrace () in
+       Mutex.unlock t.mutex;
+       Printexc.raise_with_backtrace exn bt)
+  | exception Unix.Unix_error _ -> load_slow t path ~decode
 ;;

@@ -2616,6 +2616,11 @@ let choose_permission_option ~allow options_json =
 
 (* ── Persistent client handle & JSON-RPC multiplexing ─────────────────────── *)
 
+type session_context =
+  { held_tokens : int
+  ; window_tokens : int option
+  }
+
 type active_turn_hooks =
   { session_id : string
   ; permission_policy : permission_policy
@@ -2688,6 +2693,9 @@ type t =
   ; pending : (int, rpc_response Eio.Promise.u) Hashtbl.t
   ; mutable active_turn : active_turn_hooks option
   ; session_observers : (string, stream_event -> unit) Hashtbl.t
+  ; session_context : (string, session_context) Hashtbl.t
+    (* The newest [usage_update] of each session, kept whether or not a prompt
+       is waiting: Kimi Code sends it after the prompt's response. *)
   ; mutable cached_available_modes : string list
   ; mutable cached_available_models : string list
   ; mutable cached_config_options : config_option list
@@ -2741,6 +2749,10 @@ let mcp_server_isolation t = t.mcp_server_isolation
 let capabilities t = t.capabilities
 let init_latency_ms t = t.init_latency_ms
 let is_alive t = Atomic.get t.alive && not (Atomic.get t.closed)
+
+let latest_session_context t ~session_id =
+  with_state_lock t (fun () -> Hashtbl.find_opt t.session_context session_id)
+;;
 
 let utf8_safe_suffix ~max_bytes s =
   let len = String.length s in
@@ -3095,6 +3107,20 @@ let dispatch_incoming_message t msg =
        and a prompt that ends without an answer reports its kind. *)
     if matches_observer || matches_active
     then note_activity t (agent_activity_of_update ~update_kind event_opt);
+    (match event_opt, req_session_id with
+     | Some (Usage_updated { used = Some used; size; _ }), Some sid when used > 0 ->
+       with_state_lock t (fun () ->
+         Hashtbl.replace t.session_context sid { held_tokens = used; window_tokens = size })
+     | ( Some
+           ( Usage_updated _
+           | Text_delta _
+           | Thought_delta _
+           | Tool_call_started _
+           | Tool_call_updated _
+           | Mode_updated _
+           | Config_options_updated _ )
+       | None )
+     , (Some _ | None) -> ());
     (match event_opt with
      | Some (Config_options_updated (_ :: _ as opts))
        when matches_observer || matches_active ->
@@ -3693,6 +3719,7 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
                   ; pending = Hashtbl.create 16
                   ; active_turn = None
                   ; session_observers = Hashtbl.create 4
+                  ; session_context = Hashtbl.create 4
                   ; cached_available_modes = []
                   ; cached_available_models = []
                   ; cached_config_options = []
@@ -3869,6 +3896,7 @@ let set_config_option t ~session_id ~config_id ~value =
 (* A close is best effort on a session the caller is leaving, so the caller
    bounds how long it waits for the agent to confirm. *)
 let close_session ~timeout_s t ~session_id =
+  with_state_lock t (fun () -> Hashtbl.remove t.session_context session_id);
   let method_name = "session/close" in
   let params = `Assoc [ "sessionId", `String session_id ] in
   rpc_call_with_wait

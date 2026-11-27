@@ -2545,6 +2545,36 @@ let test_kept_session_compares_with_the_stopped_prompts_count () =
     (T.compaction_reading ~baseline_at_start:counted None = T.No_prompt_compaction)
 ;;
 
+(* code-reviewer-father, 11-27: turn 3910 settled with no count, Kimi Code
+   then counted 681,551 of a 1,048,576 window, and turn 3911 resumed the same
+   session up to 842,748 against the lane's 400,000. *)
+let test_a_late_count_rolls_the_session_over_before_it_resumes () =
+  let input_limit =
+    Result.get_ok
+      (Llm_provider.Input_budget.of_agent_window
+         ~model_id:"acp-test"
+         ~max_context_tokens:400_000)
+  in
+  let before_resume ?(is_gate_continuation = false) latest =
+    Keeper_acp_runtime.For_testing.rollover_before_resume
+      ~is_gate_continuation
+      ~threshold:None
+      ~input_limit
+      latest
+  in
+  let counted held_tokens =
+    Some { Runtime_acp_client.held_tokens; window_tokens = Some 1_048_576 }
+  in
+  let rollover_t = option (pair int int) in
+  check rollover_t "the late count past 80% of the lane's limit ends the session"
+    (Some (681_551, 400_000))
+    (before_resume (counted 681_551));
+  check rollover_t "a late count below it resumes the session" None
+    (before_resume (counted 319_999));
+  check rollover_t "no count resumes the session" None (before_resume None);
+  check rollover_t "a Gate continuation stays on its settled session" None
+    (before_resume ~is_gate_continuation:true (counted 681_551))
+;;
 let test_acp_80_pct_rollover_marker_and_overflow_classification () =
   let limit tokens =
     Result.get_ok
@@ -6888,6 +6918,116 @@ let run_muse_prompt ~writes_journal ~sends_occupancy =
               failf "prompt failed: %s" (Runtime_acp_client.error_to_string err))))))
 ;;
 
+(* Kimi Code answers [session/prompt] first and sends the turn's
+   [usage_update] after it. The mock does the same. Whether the prompt's own
+   usage holds that count depends on which fiber runs first, so the test does
+   not read it; the session keeps the count either way. The second
+   [session/new] answers after the late frames on the same pipe, so the reader
+   has handled them when it returns. *)
+let late_usage_mock_script =
+  {|#!/usr/bin/env python3
+import json, sys
+
+def send(obj):
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+sessions = 0
+for line in sys.stdin:
+    line = line.strip()
+    if not line:
+        continue
+    msg = json.loads(line)
+    method = msg.get("method")
+    mid = msg.get("id")
+    params = msg.get("params") or {}
+    if method == "initialize":
+        send({"jsonrpc": "2.0", "id": mid, "result": {
+            "protocolVersion": 1,
+            "agentCapabilities": {"sessionCapabilities": {"close": {}}}
+        }})
+    elif method == "session/new":
+        sessions += 1
+        send({"jsonrpc": "2.0", "id": mid, "result": {"sessionId": "sess-late-%d" % sessions}})
+    elif method == "session/prompt":
+        sid = params.get("sessionId")
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": sid,
+            "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "pong"}}
+        }})
+        send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": sid,
+            "update": {"sessionUpdate": "usage_update", "used": 681551, "size": 1048576}
+        }})
+        send({"jsonrpc": "2.0", "method": "session/update", "params": {
+            "sessionId": sid,
+            "update": {"sessionUpdate": "usage_update", "used": 0, "size": 1048576}
+        }})
+    elif method == "session/close":
+        send({"jsonrpc": "2.0", "id": mid, "result": {}})
+    elif mid is not None:
+        send({"jsonrpc": "2.0", "id": mid, "result": {}})
+|}
+;;
+
+let test_a_usage_update_after_the_prompt_response_stays_with_the_session () =
+  let tmp = Filename.temp_dir ~perms:0o700 "acp-late-usage-" "" in
+  let mock_script = Filename.concat tmp "mock_late_usage.py" in
+  Out_channel.with_open_text mock_script (fun oc -> output_string oc late_usage_mock_script);
+  Fun.protect ~finally:(fun () -> rm_rf tmp) (fun () ->
+    Eio_main.run (fun env ->
+      let clock = Eio.Stdenv.clock env in
+      let proc_mgr = Runtime_acp_client.foreground_process_mgr ~clock ~grace_seconds:1.0 () in
+      let cfg =
+        { (Runtime_acp_client.default_config ~driver:Mistral_vibe ~cwd:tmp) with
+          cli_path = "python3"
+        ; args = [ mock_script ]
+        }
+      in
+      Eio.Switch.run (fun sw ->
+        let client =
+          match
+            Runtime_acp_client.start ~sw ~proc_mgr ~clock ~fs:(Eio.Stdenv.fs env) ~config:cfg ()
+          with
+          | Ok c -> c
+          | Error err -> failf "start failed: %s" (Runtime_acp_client.error_to_string err)
+        in
+        Fun.protect ~finally:(fun () -> Runtime_acp_client.close client) (fun () ->
+          let new_session () =
+            match Runtime_acp_client.new_session client ~cwd:tmp () with
+            | Ok s -> s.Runtime_acp_client.session_id
+            | Error err -> failf "new_session failed: %s" (Runtime_acp_client.error_to_string err)
+          in
+          let session_id = new_session () in
+          let held () =
+            Option.map
+              (fun (c : Runtime_acp_client.session_context) -> c.held_tokens, c.window_tokens)
+              (Runtime_acp_client.latest_session_context client ~session_id)
+          in
+          let held_testable = option (pair int (option int)) in
+          check held_testable "no count before the first prompt" None (held ());
+          let result =
+            match
+              Runtime_acp_client.prompt
+                client
+                ~session_id
+                ~blocks:[ Runtime_acp_client.Text_block "ping" ]
+                ()
+            with
+            | Ok result -> result
+            | Error err -> failf "prompt failed: %s" (Runtime_acp_client.error_to_string err)
+          in
+          check string "the reply" "pong" result.Runtime_acp_client.text;
+          let (_ : string) = new_session () in
+          check held_testable "the late count stays with the session; a zero count is no count"
+            (Some (681551, Some 1048576)) (held ());
+          (match Runtime_acp_client.close_session ~timeout_s:1.0 client ~session_id with
+           | Ok () -> ()
+           | Error err -> failf "close_session failed: %s" (Runtime_acp_client.error_to_string err));
+          check held_testable "a closed session has no count" None (held ())))))
+;;
+
 let test_muse_prompt_reads_its_token_counts_from_the_host_journal () =
   let result, _ = run_muse_prompt ~writes_journal:true ~sends_occupancy:true in
   let usage = result.Runtime_acp_client.usage in
@@ -7044,6 +7184,8 @@ let () =
             test_settlement_clears_held_context
         ; test_case "a kept session compares with the stopped prompt's count" `Quick
             test_kept_session_compares_with_the_stopped_prompts_count
+        ; test_case "a late count rolls the session over before it resumes" `Quick
+            test_a_late_count_rolls_the_session_over_before_it_resumes
         ; test_case "Vibe 3.1.0 configOptions clamping & permission hardening" `Quick
             test_vibe_310_config_options_and_permission_hardening
         ; test_case "ACP overflow shrink handoff single-epoch & Vibe operator login prep/finish" `Quick
@@ -7084,6 +7226,10 @@ let () =
             test_final_message_is_the_last_message_of_the_turn
         ] )
     ; "compaction", [ test_case "structural monotonic drop detection" `Quick test_compaction_detection ]
+    ; ( "session_context"
+      , [ test_case "a usage_update after the prompt response stays with the session" `Quick
+            test_a_usage_update_after_the_prompt_response_stays_with_the_session
+        ] )
     ; ( "muse_usage_journal"
       , [ test_case "prompt reads its token counts from the host journal" `Quick
             test_muse_prompt_reads_its_token_counts_from_the_host_journal

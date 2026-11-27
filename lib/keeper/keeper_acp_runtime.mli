@@ -199,6 +199,17 @@ module For_testing : sig
     -> string
 
   val rollover_threshold : float
+
+  (** The rollover a turn missed because its count came after the prompt's
+      response: [Some (used_tokens, limit_tokens)] when the session's newest
+      count reached [threshold] ({!rollover_threshold} when [None]), never for
+      a Gate continuation. *)
+  val rollover_before_resume
+    :  is_gate_continuation:bool
+    -> threshold:float option
+    -> input_limit:Llm_provider.Input_budget.t
+    -> Runtime_acp_client.session_context option
+    -> (int * int) option
   val default_keep_ratio : float
 
   val record_rollover_marker

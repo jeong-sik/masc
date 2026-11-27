@@ -314,6 +314,34 @@ let recovery_failure_of_acp_error = function
   | Acp.Client_closed -> Session_store.Transport_interrupted
 ;;
 
+(* A context overflow is judged by when it came: in a Gate continuation the
+   vendor session is full; after observed activity the effects are fenced; before
+   any activity the bootstrap floor was too high. *)
+let classify_context_overflow
+      ~is_gate_continuation
+      ~activity_observed
+      ~error_type
+      ~session_full_detail
+      ~after_activity_detail
+      ~before_activity_error
+  =
+  let reported detail =
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderReportedError
+         { provider = "acp"; error_type = Some error_type; detail })
+  in
+  if is_gate_continuation
+  then
+    ( Session_store.Vendor_session_full
+        (if activity_observed
+         then Session_store.Activity_observed
+         else Session_store.No_activity_observed)
+    , reported session_full_detail )
+  else if activity_observed
+  then Session_store.Input_rejected Session_store.Effect_fenced, reported after_activity_detail
+  else Session_store.Input_rejected Session_store.Bootstrap_floor_exceeded, before_activity_error
+;;
+
 let classify_prompt_error ~is_gate_continuation ~activity_observed = function
   | Acp.Rpc_error
       { method_name
@@ -322,40 +350,42 @@ let classify_prompt_error ~is_gate_continuation ~activity_observed = function
       ; refusal = Some (Llm_provider.Retry.Signal_context_overflow _)
       ; _
       } as rpc_err ->
-    if is_gate_continuation
-    then
-      ( Session_store.Vendor_session_full
-          (if activity_observed
-           then Session_store.Activity_observed
-           else Session_store.No_activity_observed)
-      , Agent_core.Error.Provider
-          (Llm_provider.Error.ProviderReportedError
-             { provider = "acp"
-             ; error_type = Some (Printf.sprintf "rpc_%d" code)
-             ; detail =
-                 Printf.sprintf
-                   "ACP Gate continuation session full in %s (%d): %s"
-                   method_name
-                   code
-                   message
-             }) )
-    else if activity_observed
-    then
-      ( Session_store.Input_rejected Session_store.Effect_fenced
-      , Agent_core.Error.Provider
-          (Llm_provider.Error.ProviderReportedError
-             { provider = "acp"
-             ; error_type = Some (Printf.sprintf "rpc_%d" code)
-             ; detail =
-                 Printf.sprintf
-                   "ACP RPC %s context overflow after observed activity (%d): %s"
-                   method_name
-                   code
-                   message
-             }) )
-    else
-      ( Session_store.Input_rejected Session_store.Bootstrap_floor_exceeded
-      , acp_error_to_core_error rpc_err )
+    classify_context_overflow
+      ~is_gate_continuation
+      ~activity_observed
+      ~error_type:(Printf.sprintf "rpc_%d" code)
+      ~session_full_detail:
+        (Printf.sprintf
+           "ACP Gate continuation session full in %s (%d): %s"
+           method_name
+           code
+           message)
+      ~after_activity_detail:
+        (Printf.sprintf
+           "ACP RPC %s context overflow after observed activity (%d): %s"
+           method_name
+           code
+           message)
+      ~before_activity_error:(acp_error_to_core_error rpc_err)
+  | Acp.Host_turn_failed
+      { code; message; refusal = Some (Llm_provider.Retry.Signal_context_overflow _) } as
+    failed ->
+    classify_context_overflow
+      ~is_gate_continuation
+      ~activity_observed
+      ~error_type:code
+      ~session_full_detail:
+        (Printf.sprintf
+           "ACP Gate continuation session full; the host recorded the prompt as failed \
+            (%s): %s"
+           code
+           message)
+      ~after_activity_detail:
+        (Printf.sprintf
+           "ACP host recorded a context overflow after observed activity (%s): %s"
+           code
+           message)
+      ~before_activity_error:(acp_error_to_core_error failed)
   | ( Acp.Invalid_config _
     | Acp.Spawn_refused _
     | Acp.Protocol_error _
@@ -371,7 +401,18 @@ let classify_prompt_error ~is_gate_continuation ~activity_observed = function
                 | Llm_provider.Retry.Signal_provider_unavailable _ ) )
         ; _
         }
-    | Acp.Host_turn_failed _
+    | Acp.Host_turn_failed
+        { refusal =
+            ( None
+            | Some
+                ( Llm_provider.Retry.Signal_request_body_too_large _
+                | Llm_provider.Retry.Signal_hard_quota _
+                | Llm_provider.Retry.Signal_rate_limited _
+                | Llm_provider.Retry.Signal_auth_error _
+                | Llm_provider.Retry.Signal_authorization_error _
+                | Llm_provider.Retry.Signal_provider_unavailable _ ) )
+        ; _
+        }
     | Acp.Timeout _
     | Acp.Process_exited _
     | Acp.Client_closed ) as err ->

@@ -109,7 +109,8 @@ type turn_end =
 type prompt_record =
   { compactions : int  (** [context.apply_compaction] records. *)
   ; turn_end : turn_end option
-      (** The last [turn.ended] record; [None] when the host wrote none. *)
+      (** The [turn.ended] record of the last prompt that started after the
+          mark ([turn.prompt]); [None] when the host wrote none for it. *)
   }
 
 (** [read_prompt mark] reads the records written after [mark] and returns

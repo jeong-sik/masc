@@ -308,6 +308,17 @@ let test_reads_how_the_prompt_ended () =
       "a prompt the weekly limit refused"
       "failed provider.api_error 429 You've reached your weekly (7-day) usage limit."
       (read_turn_end first);
+    (* A failed prompt keeps its mark, so the next prompt is read from it. *)
+    append_file path (text_of [ prompt_record ]);
+    check
+      string
+      "the prompt after a failure starts with no ending"
+      "none"
+      (read_turn_end first);
+    append_file path {|{"type":"turn.ended","agentId":"main","turnId":1,"reason":"cancel|};
+    check string "an ending still being written is no ending" "none" (read_turn_end first);
+    append_file path "led\",\"time\":1}\n";
+    check string "a cancelled prompt" "cancelled" (read_turn_end first);
     let second = next_of first in
     append_file path (text_of [ prompt_record; completed_record ]);
     check string "the next prompt reads only its own ending" "completed" (read_turn_end second);

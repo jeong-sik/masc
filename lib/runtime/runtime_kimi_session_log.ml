@@ -254,6 +254,7 @@ type turn_end =
       }
 
 type record =
+  | Prompt_started
   | Context_compacted
   | Turn_ended of turn_end
   | Other_event
@@ -288,6 +289,7 @@ let decode_record ~byte_offset line =
   | exception Yojson.Json_error detail -> Error (Malformed_record { byte_offset; detail })
   | json ->
     (match string_field "type" json with
+     | Some "turn.prompt" -> Ok Prompt_started
      | Some "context.apply_compaction" -> Ok Context_compacted
      | Some "turn.ended" ->
        let* turn_end = decode_turn_end ~byte_offset json in
@@ -320,6 +322,11 @@ let read_prompt m =
          else (
            let* record = decode_record ~byte_offset line in
            match record with
+           (* A prompt may end without a record: 30 of 320 did in the three
+              days to 2026-11-27, 11 of them before the next prompt. Each
+              prompt starts with no ending, so an earlier prompt's ending is
+              never read as this one's. *)
+           | Prompt_started -> Ok { acc with turn_end = None }
            | Context_compacted -> Ok { acc with compactions = acc.compactions + 1 }
            | Turn_ended turn_end -> Ok { acc with turn_end = Some turn_end }
            | Other_event -> Ok acc))

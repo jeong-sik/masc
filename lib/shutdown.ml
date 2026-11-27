@@ -303,7 +303,11 @@ let run_registered_hooks () =
 let phase_notify state ~clock ~notify_fn =
   state.phase <- Notifying;
   Log.Server.info "[Shutdown] Phase 1/4: NOTIFY (reason=%s)" state.reason;
-  notify_fn state.reason;
+  (try notify_fn state.reason with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     Log.Server.warn "[Shutdown] notify_fn failed, proceeding: %s"
+       (Printexc.to_string exn));
   Eio.Time.sleep clock state.config.notify_delay_s
 
 (** Execute drain phase: wait for in-flight work. *)
@@ -312,14 +316,20 @@ let phase_drain state ~clock ~drain_check =
   Log.Server.info "[Shutdown] Phase 2/4: DRAIN (timeout=%.1fs)" state.config.drain_timeout_s;
   let deadline = Eio.Time.now clock +. state.config.drain_timeout_s in
   let rec wait () =
-    if drain_check () then
+    match drain_check () with
+    | true ->
       Log.Server.info "[Shutdown] drain complete (all work finished)"
-    else if Eio.Time.now clock >= deadline then
-      Log.Server.warn "[Shutdown] drain timeout reached, proceeding"
-    else begin
-      Eio.Time.sleep clock 0.1;
-      wait ()
-    end
+    | false ->
+      if Eio.Time.now clock >= deadline then
+        Log.Server.warn "[Shutdown] drain timeout reached, proceeding"
+      else begin
+        Eio.Time.sleep clock 0.1;
+        wait ()
+      end
+    | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+    | exception exn ->
+      Log.Server.warn "[Shutdown] drain_check failed, proceeding: %s"
+        (Printexc.to_string exn)
   in
   wait ()
 
@@ -338,9 +348,9 @@ let phase_cleanup state ~clock =
       state.config.cleanup_timeout_s)
 
 (** Execute exit phase. *)
-let phase_exit state ~exit_fn =
+let phase_exit state ~clock ~exit_fn =
   state.phase <- Exiting;
-  let elapsed = Unix.gettimeofday () -. state.started_at in
+  let elapsed = Eio.Time.now clock -. state.started_at in
   Log.Server.info "[Shutdown] Phase 4/4: EXIT (total=%.1fs)" elapsed;
   exit_fn ();
   state.phase <- Done
@@ -374,7 +384,7 @@ let initiate state ~clock ~reason ~notify_fn ~drain_check ~exit_fn =
     phase_notify state ~clock ~notify_fn;
     phase_drain state ~clock ~drain_check;
     phase_cleanup state ~clock;
-    phase_exit state ~exit_fn
+    phase_exit state ~clock ~exit_fn
   end
 
 (** {1 Termination classification} *)

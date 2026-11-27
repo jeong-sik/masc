@@ -211,6 +211,8 @@ let redacted_url ~cut text =
   if length >= 2 && text.[length - 1] = ':' && (match text.[0] with 'a'..'z' -> true | _ -> false)
      && String.for_all is_scheme_char (String.sub text 0 (length - 1)) then
     (if cut then Ok text else shape "a scheme-only address that is not marked cut")
+  else if String.exists (fun c -> c = '\n' || c = '\r') text then
+    shape "an address that contains a line break"
   else
     let uri = Uri.of_string text in
     match Uri.scheme uri, Uri.host uri, Uri.userinfo uri, Uri.fragment uri with

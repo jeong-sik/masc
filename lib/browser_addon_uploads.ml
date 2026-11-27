@@ -154,7 +154,9 @@ let cleanup t = protect (fun () ->
         let pending=locked t (fun () -> match Hashtbl.find_opt t.grants id with
           | Some (Pending _) -> Hashtbl.replace t.grants id Releasing;true
           | None|Some (Preparing _|Claimed|Releasing|Release_failed _|Consumed) -> false) in
-        if pending then release t ~id snapshot) snapshots;
+        if pending then
+          (try release t ~id snapshot with
+           | Unix.Unix_error _ | Sys_error _ -> ())) snapshots;
       let failures=locked t (fun () ->
         await_releases t;
         Hashtbl.fold (fun _ state errors -> match state with

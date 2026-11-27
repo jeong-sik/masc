@@ -319,6 +319,11 @@ module Response = struct
       | _ ->
         let body = lazy_body () in
         let status = timeout_envelope_status_override_string ~status body in
+        let validator_headers =
+          if status = `OK then
+            [ ("etag", etag); ("cache-control", json_revalidate_cache_control) ]
+          else []
+        in
         let final_body, compression_headers =
           Http_response_payload.compress_body_on_cpu
             ~compress
@@ -327,7 +332,7 @@ module Response = struct
         in
         Http_reqd.respond_with_string reqd
           (response
-             ~before_headers:(extra_headers @ [ ("etag", etag); ("cache-control", json_revalidate_cache_control) ])
+             ~before_headers:(extra_headers @ validator_headers)
              ~tail_headers:compression_headers
              ~content_type:json_content_type status final_body)
           final_body

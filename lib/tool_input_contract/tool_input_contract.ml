@@ -448,13 +448,14 @@ let numeric_of_json : Yojson.Safe.t -> numeric_value option = function
   | `Float _ | `Null | `Bool _ | `String _ | `Assoc _ | `List _ -> None
 ;;
 
+let integer_magnitude_limit = Float.ldexp 1.0 (Sys.int_size - 1)
+
 (* Compare one native integer with one finite float without first rounding
    the integer to IEEE-754. [float_of_int] loses units above 2^53, which can
    otherwise make [maximum=9007199254740992.0] accept the integer one above
    it. OCaml ints occupy [Sys.int_size - 1] value bits; the positive limit is
    not itself representable as an int, while the negative limit is [min_int]. *)
 let compare_int_float integer floating =
-  let integer_magnitude_limit = Float.ldexp 1.0 (Sys.int_size - 1) in
   if floating >= integer_magnitude_limit
   then -1
   else if floating < -.integer_magnitude_limit
@@ -485,7 +486,7 @@ let count_bound_of_json : Yojson.Safe.t -> int option = function
   | `Float value
     when Float.is_integer value
          && value >= 0.0
-         && value <= Float.of_int Int.max_int -> Some (int_of_float value)
+         && value < integer_magnitude_limit -> Some (int_of_float value)
   | `Intlit literal ->
     (match int_of_string_opt literal with
      | Some value when value >= 0 -> Some value

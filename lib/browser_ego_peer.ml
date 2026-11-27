@@ -53,7 +53,11 @@ let tail output =
 let head message =
   if String.length message <= excerpt_bytes then message
   else
-    let rec stop index = if starts_character message index then index else stop (index - 1) in
+    let rec stop index =
+      if index <= 0 then 0
+      else if starts_character message index then index
+      else stop (index - 1)
+    in
     String.sub message 0 (stop excerpt_bytes) ^ "..."
 
 let run_failure_message = function

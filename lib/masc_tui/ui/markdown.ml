@@ -211,20 +211,6 @@ let fence_kind tag rest =
 
 let span style text = { text; style; hyperlink = None }
 
-(* Two full blocks (█ U+2588) draw a near-square chip in the cell grid. The
-   block range is the one the quote rail (▎) already draws. *)
-let color_swatch_text = "\xe2\x96\x88\xe2\x96\x88"
-
-let color_swatch_style ~bg rgb = Style.make ~fg:(Color.of_rgb rgb) ~bg ()
-
-(* Inline code previews a color only when the whole span is one CSS color
-   literal, the rule GitHub uses for colors in backticks. The CSS fence lexer
-   decides, so inline and fenced code read colors by one grammar. *)
-let inline_color_literal code =
-  match Code_lexer.lex Code_lexer.Css code with
-  | [ (segment : Code_lexer.segment) ] -> Code_lexer.color_of_token_kind segment.kind
-  | [] | _ :: _ :: _ -> None
-
 let spans_width =
   List.fold_left (fun width s -> width + Grapheme.display_width s.text) 0
 
@@ -369,10 +355,16 @@ let inline_rows ~(theme : Theme.t) ~defs ~osc8 ~(base : Style.t) inline =
           (Inline.Strikethrough.inline struck)
     | Inline.Code_span (code, _) ->
         let text = Inline.Code_span.code code in
-        Option.iter
-          (fun rgb -> emit (color_swatch_style ~bg:style.bg rgb) link color_swatch_text)
-          (inline_color_literal text);
-        emit (code_style style) link text
+        let span_style =
+          match Code_lexer.css_color_literal text with
+          | Some rgb ->
+              (* Inline code previews a color only when its whole text is one
+                 CSS color literal, the rule GitHub uses for colors in backticks. *)
+              Style.with_attrs style.attrs
+                (Code_lexer.style_of_token ~theme ~bg:style.bg (Code_lexer.Color_literal rgb))
+          | None -> code_style style
+        in
+        emit span_style link text
     | Inline.Ext_math_span (math, _) ->
         let delimiter = if Inline.Math_span.display math then "$$" else "$" in
         emit (code_style style) link (delimiter ^ Inline.Math_span.tex math ^ delimiter)
@@ -806,11 +798,8 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
       Code_lexer.rows_of_source ~language:(Code_lexer.language_of_tag lang_tag)
         (String.concat "\n" body_lines)
       |> List.map
-           (List.concat_map (fun (seg : Code_lexer.segment) ->
-                let text = span (Code_lexer.style_of_token ~theme ~bg:code_bg seg.kind) seg.text in
-                match Code_lexer.color_of_token_kind seg.kind with
-                | Some rgb -> [ span (color_swatch_style ~bg:code_bg rgb) color_swatch_text; text ]
-                | None -> [ text ]))
+           (List.map (fun (seg : Code_lexer.segment) ->
+                span (Code_lexer.style_of_token ~theme ~bg:code_bg seg.kind) seg.text))
       |> draw
     end;
     (match kind, closed with

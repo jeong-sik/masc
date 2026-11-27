@@ -451,17 +451,30 @@ let is_css_name_char c = is_identifier_start c || is_digit c || Char.equal c '-'
 (* ['#'] and six characters, the exact form {!Theme.rgb_of_hex} reads. *)
 let css_hex_color_length = 7
 
-(* A CSS hex color is ['#'] and exactly six hex digits that no further name
-   character extends. The short and alpha forms (#RGB, #RRGGBBAA) stay plain:
-   a terminal cell cannot show alpha, and one form keeps one meaning. *)
+(* A CSS hex color is ['#'] and exactly six hex digits with a name character
+   on neither side, so [url(a.svg#abcdef)] and [a#bedded] stay plain. The short
+   and alpha forms (#RGB, #RRGGBBAA) stay plain too: a terminal cell cannot
+   show alpha, and one form keeps one meaning. An id selector of six hex
+   letters ([#facade]) still reads as a color; telling it apart needs the
+   declaration context, which this lexer does not track. *)
 let css_hex_color text index =
   let stop = index + css_hex_color_length in
   let limit = String.length text in
-  if stop > limit || (stop < limit && is_css_name_char text.[stop]) then None
+  if
+    stop > limit
+    || (not (Char.equal text.[index] '#'))
+    || (index > 0 && is_css_name_char text.[index - 1])
+    || (stop < limit && is_css_name_char text.[stop])
+  then None
   else
     Theme.rgb_of_hex (String.sub text index css_hex_color_length)
     |> Result.to_option
     |> Option.map (fun rgb -> (rgb, stop))
+
+let css_color_literal text =
+  if Int.equal (String.length text) css_hex_color_length then
+    Option.map fst (css_hex_color text 0)
+  else None
 
 let css_lexer text =
   let runs = new_runs Plain in
@@ -805,7 +818,8 @@ let diff_lexer ?sub text =
                    | Json_punctuation
                    | Diff_added
                    | Diff_removed
-                   | Diff_hunk ) as specific ->
+                   | Diff_hunk
+                   | Color_literal _ ) as specific ->
                      specific
                in
                runs_add_string runs k seg.text)
@@ -823,7 +837,8 @@ let diff_lexer ?sub text =
            | Json_number
            | Json_literal
            | Json_punctuation
-           | Diff_hunk ) ->
+           | Diff_hunk
+           | Color_literal _ ) ->
            runs_add_string runs kind line);
       if idx < count - 1 then runs_add runs Plain '\n')
     lines;
@@ -945,8 +960,20 @@ let style_of_token ~(theme : Theme.t) ~bg = function
   | Keyword -> Style.make ~fg:(Color.of_rgb theme.accent) ~bg ~attrs:Attr.bold ()
   | String -> Style.make ~fg:(Color.of_rgb theme.status_ok) ~bg ()
   | Comment -> Style.make ~fg:(Color.of_rgb theme.text_muted) ~bg ~attrs:Attr.italic ()
-  | Number | Json_number | Color_literal _ ->
-      Style.make ~fg:(Color.of_rgb theme.status_attention) ~bg ()
+  | Number | Json_number -> Style.make ~fg:(Color.of_rgb theme.status_attention) ~bg ()
+  | Color_literal rgb ->
+      (* Drawn on the color it names, the way terminal editors preview colors
+         (nvim-colorizer): the text stays as written, so search, wrapping and
+         copying see the same characters. The text takes whichever of the
+         brightest text and the deepest surface contrasts more with it. *)
+      let fg =
+        if
+          Theme.contrast_ratio theme.text_bright rgb
+          >= Theme.contrast_ratio theme.surface_0 rgb
+        then theme.text_bright
+        else theme.surface_0
+      in
+      Style.make ~fg:(Color.of_rgb fg) ~bg:(Color.of_rgb rgb) ()
   | Type_or_ctor | Json_key -> Style.make ~fg:(Color.of_rgb theme.status_active) ~bg ()
   | Json_literal -> Style.make ~fg:(Color.of_rgb theme.accent) ~bg ~attrs:Attr.bold ()
   | Json_punctuation -> Style.make ~fg:(Color.of_rgb theme.text_muted) ~bg ()

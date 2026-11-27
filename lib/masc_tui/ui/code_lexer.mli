@@ -46,8 +46,9 @@ type language =
 val equal_token_kind : token_kind -> token_kind -> bool
 val equal_language : language -> language -> bool
 
-val color_of_token_kind : token_kind -> Theme.rgb option
-(** The color a {!Color_literal} names; [None] for every other kind. *)
+val css_color_literal : string -> Theme.rgb option
+(** The color when the whole string is one CSS [#RRGGBB] literal, by the same
+    rule the [Css] lexer uses; [None] otherwise. *)
 
 val language_of_tag : string -> language option
 (** Strict parser for fence info tags (e.g. ["ocaml"], ["diff:ocaml"], ["toml"],

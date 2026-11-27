@@ -34,8 +34,8 @@ val render_lines :
     text drawing. Fenced [alphatex] and [atex] are drawn as tablature via
     {!Alphatex.render_tab}. Unsupported input keeps its code and, for scores,
     the parse or layout diagnostic. Inline code that is exactly one CSS
-    [#RRGGBB] literal, and every such literal in a [css] fence, is preceded by
-    a two-cell swatch in that color. When [osc8] is [true] (default),
+    [#RRGGBB] literal, and every such literal in a [css] fence, is drawn on
+    the color it names. When [osc8] is [true] (default),
     links attach their URI to {!styled_span.hyperlink} for OSC 8 interning;
     when [false], links include a muted italic [" (target)"] preview so the
     destination stays visible. *)

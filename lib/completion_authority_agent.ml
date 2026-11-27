@@ -1522,10 +1522,12 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
 (* The retained commits one scope recovers. A scope that names verifications
    reads only theirs, by name. That lookup is the recovery a wake goes on
    without when it cannot read, so it does not verify the whole scope first. A
-   named verification whose record cannot be read is logged here and left to
-   the next whole-scope sweep; the others recover. A scope that names nothing
-   (boot, a failed backlog read) reads the scope whole. A fresh attempt is
-   allocated on neither: [next_attempt] reads the scope. *)
+   named verification whose record cannot be read is logged here and nothing
+   more is done for it in this wake; the others recover. That record stays
+   unread until it is repaired or the store comes back: a whole-scope read
+   fails on it too. A scope that names nothing (boot, a failed backlog read)
+   reads the scope whole. A fresh attempt is allocated on neither:
+   [next_attempt] reads the scope. *)
 let pending_of_scope ~terminal_pending ~store ~scope ~installation_id ~package_id =
   match scope with
   | Whole_backlog ->

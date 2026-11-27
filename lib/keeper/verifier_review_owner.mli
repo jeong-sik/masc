@@ -176,8 +176,9 @@ val named_commits :
     is allocated on [next_attempt], which reads the scope whole.
     The first part is what [pending_commits] keeps of the records that were
     read, sorted by verification id and by attempt. The second part names each
-    verification whose record is there and could not be read, with why. A
-    verification that names nothing is in neither. *)
+    verification whose record is there and could not be read, or whose
+    terminal fact the host could not authenticate, with why; none of its
+    records is kept then. A verification that names nothing is in neither. *)
 
 val judgment_to_json : original:Verifier_review_original.t -> notes:string ->
   Task.Anti_rationalization.review_result -> (Yojson.Safe.t, string) result

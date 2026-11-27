@@ -549,9 +549,9 @@ let pending_commits ~terminal_pending ~store ~selection ~installation_id ~packag
    record of a live attempt: the settled-archive sweep deletes only under the
    archive directory. If a later change ever moves an attempt that is not the
    last, this lookup stops at that gap and answers for the attempts before it.
-   The later ones then wait for the next whole-scope sweep, which reads every
-   record. A record that is there and cannot be read is an error; it is never
-   taken for the end. *)
+   The later ones then wait for a whole-scope read, which runs at boot and
+   after a failed backlog read and reads every record. A record that is there
+   and cannot be read is an error; it is never taken for the end. *)
 let attempts_by_name ~store ~verification_id ~installation_id ~package_id =
   if String.trim verification_id = ""
   then Error (Corrupt_original "verifier selection requires a non-blank verification_id")

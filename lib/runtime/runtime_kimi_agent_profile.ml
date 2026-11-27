@@ -23,33 +23,46 @@ let masc_only ~mcp_server_name =
     ]
 ;;
 
-let ensure_directory path =
+let make_directory path =
   match Sys.mkdir path 0o700 with
   | () -> Ok ()
-  | exception Sys_error _ when Sys.file_exists path && Sys.is_directory path -> Ok ()
   | exception Sys_error detail -> Error detail
 ;;
 
 let write_masc_only ~cwd ~mcp_server_name =
-  (* [Sys_error] details name the path already. *)
-  let fail detail = Error ("kimi agent profile: " ^ detail) in
   let directories = [ Filename.concat cwd ".kimi-code"; Filename.concat cwd agents_directory ] in
   let rec make = function
     | [] -> Ok ()
     | dir :: rest ->
-      let* () = ensure_directory dir in
+      let* () = make_directory dir in
       make rest
   in
-  match make directories with
-  | Error detail -> fail detail
-  | Ok () ->
-    (match
-       Out_channel.with_open_gen
-         [ Open_wronly; Open_creat; Open_excl; Open_text ]
-         0o600
-         (Filename.concat cwd file_relative_path)
-         (fun oc -> Out_channel.output_string oc (masc_only ~mcp_server_name))
-     with
-     | () -> Ok ()
-     | exception Sys_error detail -> fail detail)
+  let empty =
+    match Sys.readdir cwd with
+    | [||] -> Ok ()
+    | _ -> Error (cwd ^ ": the folder is not empty")
+    | exception Sys_error detail -> Error detail
+  in
+  (* [with_open_gen] closes without reporting errors, and a profile this
+     short is only written at the close, so the flush inside reports a full
+     disk instead of leaving an empty file behind an [Ok]. *)
+  let write () =
+    match
+      Out_channel.with_open_gen
+        [ Open_wronly; Open_creat; Open_excl; Open_text ]
+        0o600
+        (Filename.concat cwd file_relative_path)
+        (fun oc ->
+           Out_channel.output_string oc (masc_only ~mcp_server_name);
+           Out_channel.flush oc)
+    with
+    | () -> Ok ()
+    | exception Sys_error detail -> Error detail
+  in
+  let result =
+    let* () = empty in
+    let* () = make directories in
+    write ()
+  in
+  Result.map_error (fun detail -> "kimi agent profile: " ^ detail) result
 ;;

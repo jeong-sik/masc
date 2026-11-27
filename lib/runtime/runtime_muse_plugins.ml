@@ -1,20 +1,19 @@
 let ( let* ) = Result.bind
 
-type error =
-  | Command_failed of
-      { argv : string list
-      ; detail : string
-      }
-  | Unreadable_output of
-      { argv : string list
-      ; detail : string
-      }
+type failure =
+  | Did_not_start of Process_eio.spawn_refusal
+  | Command_failed of string
+  | Unreadable_output of string
 
-let error_to_string = function
-  | Command_failed { argv; detail } ->
-    Printf.sprintf "`%s` failed: %s" (String.concat " " argv) detail
-  | Unreadable_output { argv; detail } ->
-    Printf.sprintf "`%s` printed output MASC cannot read: %s" (String.concat " " argv) detail
+type error =
+  { argv : string list
+  ; failure : failure
+  }
+
+let failure_to_string = function
+  | Did_not_start refusal -> "did not start: " ^ Process_eio.spawn_refusal_to_string refusal
+  | Command_failed detail -> detail
+  | Unreadable_output detail -> "printed output MASC cannot read: " ^ detail
 ;;
 
 (* Each command took 0.13 s on 2026-11-27 (muse 1.4.25, one plugin). The
@@ -94,7 +93,10 @@ let exit_status_to_string = function
 
 (* stdout and stderr are copied by fibers of the inner switch, so both
    buffers are complete once [Switch.run] returns. A deadline cancels that
-   switch, which ends the child. *)
+   switch, which ends the child. Any other exception the run raises (a
+   reaper failure re-raised by [await], several fibers failing at once) is a
+   failed command, so the host start returns it instead of raising;
+   cancellation and the other reserved exceptions still propagate. *)
 let run ~proc_mgr ~clock ?cwd ~env argv =
   let stdout = Buffer.create 4096 in
   let stderr = Buffer.create 256 in
@@ -108,7 +110,7 @@ let run ~proc_mgr ~clock ?cwd ~env argv =
           detail
           (String_util.utf8_prefix ~max_bytes:stderr_excerpt_bytes text)
     in
-    Error (Command_failed { argv; detail })
+    Error { argv; failure = Command_failed detail }
   in
   match
     Eio.Time.with_timeout clock command_deadline_s (fun () ->
@@ -124,18 +126,20 @@ let run ~proc_mgr ~clock ?cwd ~env argv =
             ~env
             argv
         with
-        | Error refusal -> Ok (Error (Process_eio.spawn_refusal_to_string refusal))
+        | Error refusal -> Ok (Error refusal)
         | Ok child -> Ok (Ok (Eio.Process.await child))))
   with
   | Ok (Ok (`Exited 0)) -> Ok (Buffer.contents stdout)
   | Ok (Ok ((`Exited _ | `Signaled _) as status)) -> failed (exit_status_to_string status)
-  | Ok (Error refusal) -> failed ("did not start: " ^ refusal)
+  | Ok (Error refusal) -> Error { argv; failure = Did_not_start refusal }
   | Error `Timeout -> failed (Printf.sprintf "still running after %.0f s" command_deadline_s)
-  | exception (Eio.Io _ as exn) -> failed (Printexc.to_string exn)
+  | exception exn ->
+    Llm_provider.Reserved_exn.reraise_if_reserved exn;
+    failed (Printexc.to_string exn)
 ;;
 
 let read_output argv parse output =
-  Result.map_error (fun detail -> Unreadable_output { argv; detail }) (parse output)
+  Result.map_error (fun detail -> { argv; failure = Unreadable_output detail }) (parse output)
 ;;
 
 let installed_capability_ids ~proc_mgr ~clock ?cwd ~env ~cli_path () =

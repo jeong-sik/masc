@@ -3314,7 +3314,7 @@ let muse_observer_capability_ids =
    [read] the toolset below leaves its tools out, under [full] the host
    offers them. A repeated [-c] key makes the host refuse to run ("one
    setting, one occurrence"), so an operator [args] must not repeat the
-   observer keys below.
+   observer keys below or the keys of installed plugin capabilities.
    [installed] are the runtime capabilities of the plugins the operator
    installed ({!Runtime_muse_plugins}). They are switched off the same way,
    after the bundled observers, each id once. *)
@@ -3559,7 +3559,13 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
     (* The host loads only what the Keeper may use: a Muse host every
        installed plugin's runtime capabilities off, a Kimi [none] host the
        MASC tools alone. Either preparation failing refuses the start, since
-       starting anyway would load what it leaves out. *)
+       starting anyway would load what it leaves out.
+       A listing command that could not start is the same refusal the host
+       spawn would meet. One that ran and failed, or printed what cannot be
+       read, fails the same way on the next attempt, so it is a
+       [Protocol_error] rather than an [Invalid_config] a Keeper retries
+       every turn. A Kimi profile that could not be written is an
+       [Invalid_config]: the next spawn gets a new empty folder. *)
     let* muse_plugin_capabilities =
       match config.driver with
       | Muse_code ->
@@ -3570,9 +3576,15 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
           ~env
           ~cli_path:resolved_cli_path
           ()
-        |> Result.map_error (fun err ->
+        |> Result.map_error (fun { Runtime_muse_plugins.argv; failure } ->
           cleanup_gemini_dir ();
-          Invalid_config (Runtime_muse_plugins.error_to_string err))
+          match failure with
+          | Runtime_muse_plugins.Did_not_start refusal -> Spawn_refused refusal
+          | Runtime_muse_plugins.Command_failed _ | Runtime_muse_plugins.Unreadable_output _ ->
+            Protocol_error
+              { stage = String.concat " " argv
+              ; detail = Runtime_muse_plugins.failure_to_string failure
+              })
       | Antigravity | Kimi_code | Mistral_vibe -> Ok []
     in
     let* () =

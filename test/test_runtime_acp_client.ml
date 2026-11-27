@@ -785,33 +785,72 @@ for line in sys.stdin:
 ;;
 
 (* A plugin list the host cannot read leaves the operator's plugins unknown,
-   so the host is not started at all. *)
+   so the host is not started at all. A listing command that ran and failed
+   fails the same way next time, so it is a [Protocol_error] naming the
+   command, not an [Invalid_config] a Keeper retries every turn; one that
+   could not start is the refusal the host spawn would have met. *)
 let test_muse_start_refuses_when_the_plugin_list_fails () =
   let cwd = Filename.temp_dir "muse-plugin-list-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree cwd) (fun () ->
-    let script = Filename.concat cwd "muse" and started = Filename.concat cwd "started" in
-    Out_channel.with_open_text script (fun oc -> output_string oc
-      {|#!/usr/bin/env python3
-import sys
-if sys.argv[1] == "plugins":
-    print("plugin store is locked", file=sys.stderr)
+    let started = Filename.concat cwd "started" in
+    let stand_in name plugins_branch =
+      let script = Filename.concat cwd name in
+      Out_channel.with_open_text script (fun oc ->
+        output_string oc
+          ("#!/usr/bin/env python3\nimport sys\nif sys.argv[1] == \"plugins\":\n"
+           ^ plugins_branch
+           ^ "open(sys.argv[1], \"w\").close()\n"));
+      Unix.chmod script 0o755;
+      script
+    in
+    let list_fails =
+      stand_in "list-fails"
+        {|    print("plugin store is locked", file=sys.stderr)
     sys.exit(3)
-open(sys.argv[1], "w").close()
-|});
-    Unix.chmod script 0o755;
+|}
+    in
+    let list_unreadable =
+      stand_in "list-unreadable"
+        {|    print("not json")
+    sys.exit(0)
+|}
+    in
+    let inspect_fails =
+      stand_in "inspect-fails"
+        {|    if sys.argv[2] == "list":
+        print('{"plugins": [{"record": {"id": "addon"}}]}')
+        sys.exit(0)
+    sys.exit(1)
+|}
+    in
     Eio_main.run @@ fun env ->
     let clock = Eio.Stdenv.clock env in
     let proc_mgr = Runtime_acp_client.foreground_process_mgr ~clock () in
-    (Eio.Switch.run @@ fun sw ->
-     let config = { (Runtime_acp_client.default_config ~driver:Muse_code ~cwd) with
-                    cli_path = script; args = [started] } in
-     match Runtime_acp_client.start ~sw ~proc_mgr ~clock ~fs:(Eio.Stdenv.fs env) ~config
-             ~native_posture:Runtime_native_tools.Native_none () with
-     | Ok client ->
-       Runtime_acp_client.close client;
-       fail "the host started without its plugin list"
-     | Error (Runtime_acp_client.Invalid_config _) -> ()
-     | Error err -> fail (Runtime_acp_client.error_to_string err));
+    let start cli_path =
+      Eio.Switch.run @@ fun sw ->
+      let config = { (Runtime_acp_client.default_config ~driver:Muse_code ~cwd) with
+                     cli_path; args = [started] } in
+      match Runtime_acp_client.start ~sw ~proc_mgr ~clock ~fs:(Eio.Stdenv.fs env) ~config
+              ~native_posture:Runtime_native_tools.Native_none () with
+      | Ok client ->
+        Runtime_acp_client.close client;
+        Ok ()
+      | Error err -> Error err
+    in
+    let refused_at label cli_path stage =
+      match start cli_path with
+      | Error (Runtime_acp_client.Protocol_error { stage = refused; _ }) ->
+        check string (label ^ ": the error names the command") stage refused
+      | Ok () -> fail (label ^ ": the host started")
+      | Error err -> fail (label ^ ": " ^ Runtime_acp_client.error_to_string err)
+    in
+    refused_at "a failed list" list_fails (list_fails ^ " plugins list --json");
+    refused_at "an unreadable list" list_unreadable (list_unreadable ^ " plugins list --json");
+    refused_at "a failed inspect" inspect_fails (inspect_fails ^ " plugins inspect addon --json");
+    (match start (Filename.concat cwd "missing-muse") with
+     | Error (Runtime_acp_client.Spawn_refused _) -> ()
+     | Ok () -> fail "a missing muse: the host started"
+     | Error err -> fail ("a missing muse: " ^ Runtime_acp_client.error_to_string err));
     check bool "the host never ran" false (Sys.file_exists started))
 ;;
 
@@ -878,8 +917,8 @@ let test_kimi_masc_only_profile () =
 
 (* A Kimi host at none gets the MASC-only profile in its empty folder before
    it starts; at read its folder is the Keeper's own, so it gets none. A
-   profile already in the folder means MASC did not make the folder, so the
-   host is not started. *)
+   folder with anything in it was not made by MASC for this host, so nothing
+   is written there and the host is not started. *)
 let test_kimi_none_start_writes_the_masc_only_profile () =
   let dir = Filename.temp_dir "kimi-profile-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree dir) (fun () ->
@@ -931,10 +970,19 @@ for line in sys.stdin:
      | Ok () -> ()
      | Error err -> fail (Runtime_acp_client.error_to_string err));
     check bool "read: no profile is written" false (Sys.file_exists (profile_in read_cwd));
-    match start ~cwd:none_cwd Runtime_native_tools.Native_none with
-    | Ok () -> fail "the host started in a folder that already held a profile"
-    | Error (Runtime_acp_client.Invalid_config _) -> ()
-    | Error err -> fail (Runtime_acp_client.error_to_string err))
+    let refused label cwd =
+      match start ~cwd Runtime_native_tools.Native_none with
+      | Ok () -> fail (label ^ ": the host started")
+      | Error (Runtime_acp_client.Invalid_config _) -> ()
+      | Error err -> fail (label ^ ": " ^ Runtime_acp_client.error_to_string err)
+    in
+    refused "a folder that already holds a profile" none_cwd;
+    let foreign = fresh "foreign" in
+    Out_channel.with_open_text (Filename.concat foreign "notes.txt") (fun oc ->
+      output_string oc "someone else's file");
+    refused "a folder with someone else's file" foreign;
+    check bool "nothing is written into that folder" false
+      (Sys.file_exists (Filename.concat foreign ".kimi-code")))
 ;;
 
 (* base_path is the operator's checkout, so an ACP host at read or full runs

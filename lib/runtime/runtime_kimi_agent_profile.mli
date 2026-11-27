@@ -23,7 +23,8 @@ val masc_only : mcp_server_name:string option -> string
     no tool. *)
 
 val write_masc_only : cwd:string -> mcp_server_name:string option -> (unit, string) result
-(** Write {!masc_only} at {!file_relative_path} under [cwd]. The file is only
-    ever created: a [none] host's [cwd] is an empty folder MASC made for it
-    ([Runtime_acp_client.create_isolated_workspace]), so a file already there
-    means [cwd] is someone else's folder, and that is an [Error]. *)
+(** Write {!masc_only} at {!file_relative_path} under [cwd]. A [none] host's
+    [cwd] is an empty folder MASC made for it
+    ([Runtime_acp_client.create_isolated_workspace]), so a [cwd] with anything
+    in it is someone else's folder, and that is an [Error] with nothing
+    written. The file is only ever created, never replaced. *)

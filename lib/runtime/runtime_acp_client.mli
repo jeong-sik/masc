@@ -758,7 +758,17 @@ val start
     [Native_none]. [muse acp] is started with [-c run.toolset] naming the
     tools [native_posture] allows and, when [mcp_server] lists any tool, the
     tools of that server; the host runs some native tools without a
-    permission request, so refusing requests could not keep them off. *)
+    permission request, so refusing requests could not keep them off.
+
+    Before the spawn, a Muse host's installed plugins are listed
+    ({!Runtime_muse_plugins.installed_capability_ids}) and each of their
+    runtime capabilities is switched off with a [-c] setting. A listing
+    command that could not start returns [Spawn_refused]; one that failed or
+    printed unreadable output returns [Protocol_error] with the command as
+    its [stage]. A Kimi host at [Native_none] first gets
+    {!Runtime_kimi_agent_profile.masc_only} written into [config.cwd], which
+    must be an empty folder; a failed write returns [Invalid_config]. No
+    host is spawned after any of these errors. *)
 
 val driver : t -> driver
 val mcp_server_isolation : t -> mcp_server_isolation

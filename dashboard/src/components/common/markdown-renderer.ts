@@ -13,8 +13,10 @@ import {
   hydrateEmbedCards,
   hydrateWorkspaceMediaSlots,
   MarkdownImageLightbox,
+  type MarkdownLightboxImage,
+  type MarkdownLightboxRequest,
 } from './markdown-embed-runtime'
-import { isEpochCurrent, sessionEpoch } from '../../core/auth'
+import { sessionEpoch } from '../../core/auth'
 import { sanitizeHtml } from '../../lib/dompurify'
 import { escapeHtml } from '../../lib/html-escape'
 import {
@@ -27,7 +29,7 @@ import {
 } from '../../lib/keeper-media'
 import { memoizeLru } from '../../lib/lru-cache'
 import { parseUrl } from '../../lib/parse-url'
-import type { WorkspaceMediaObjectUrlLease } from '../../lib/workspace-media-cache'
+import { acquireWorkspaceMediaObjectUrl, type WorkspaceMediaObjectUrlLease } from '../../lib/workspace-media-cache'
 
 export { clearEmbedMetadataCache }
 
@@ -406,9 +408,8 @@ function rewriteLinks(container: HTMLElement, rewrites: ReadonlyMap<string, Link
 }
 
 interface LightboxState {
-  readonly path: string
   readonly alt: string
-  readonly lease: WorkspaceMediaObjectUrlLease
+  readonly image: MarkdownLightboxImage
 }
 
 export function MarkdownContent({
@@ -430,25 +431,39 @@ export function MarkdownContent({
   const root = useRef<HTMLDivElement>(null)
   const epoch = sessionEpoch.value
   const lightboxLeaseRef = useRef<WorkspaceMediaObjectUrlLease | null>(null)
+  // The request whose answer the lightbox may still show; a newer open or a
+  // close replaces it, so a late answer releases its lease instead.
+  const lightboxRequestRef = useRef<AbortController | null>(null)
   const [lightbox, setLightbox] = useState<LightboxState | null>(null)
 
   const closeLightbox = useCallback(() => {
+    lightboxRequestRef.current?.abort()
+    lightboxRequestRef.current = null
     const previous = lightboxLeaseRef.current
     lightboxLeaseRef.current = null
     previous?.release()
     setLightbox(null)
   }, [])
 
-  const openLightbox = useCallback((lease: WorkspaceMediaObjectUrlLease, alt: string) => {
-    if (!isEpochCurrent(lease.epoch)) {
-      lease.release()
-      return
-    }
-    const previous = lightboxLeaseRef.current
-    lightboxLeaseRef.current = lease
-    previous?.release()
-    setLightbox({ path: lease.path, alt, lease })
-  }, [])
+  const openLightbox = useCallback(({ path, alt }: MarkdownLightboxRequest) => {
+    closeLightbox()
+    const controller = new AbortController()
+    lightboxRequestRef.current = controller
+    setLightbox({ alt, image: { kind: 'loading' } })
+    void acquireWorkspaceMediaObjectUrl(path, { signal: controller.signal }).then((res) => {
+      if (lightboxRequestRef.current !== controller) {
+        if (res.ok) res.value.release()
+        return
+      }
+      lightboxRequestRef.current = null
+      if (!res.ok) {
+        setLightbox({ alt, image: { kind: 'error' } })
+        return
+      }
+      lightboxLeaseRef.current = res.value
+      setLightbox({ alt, image: { kind: 'ready', src: res.value.url } })
+    })
+  }, [closeLightbox])
 
   useEffect(() => {
     return () => {
@@ -502,7 +517,7 @@ export function MarkdownContent({
     ${lightbox && html`
       <${MarkdownImageLightbox}
         title=${lightbox.alt}
-        src=${lightbox.lease.url}
+        image=${lightbox.image}
         onClose=${closeLightbox}
       />
     `}

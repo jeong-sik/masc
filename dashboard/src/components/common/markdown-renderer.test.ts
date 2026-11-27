@@ -406,6 +406,68 @@ describe('MarkdownContent workspace media & rich embeds', () => {
     }
   })
 
+  it('draws a 640px thumbnail for an attachment but opens the lightbox on the original image', async () => {
+    const path = `/api/v1/attachments/att_${'d'.repeat(64)}`
+    let blobSeq = 0
+    vi.stubGlobal('URL', Object.assign(URL, {
+      createObjectURL: vi.fn(() => `blob:md-att-${++blobSeq}`),
+      revokeObjectURL: vi.fn(),
+    }))
+    vi.stubGlobal('IntersectionObserver', undefined)
+    setSingleUserToken('md-bearer-tok')
+    const originalAnswers = [503, 200]
+    const fetchMock = vi.fn<typeof globalThis.fetch>(async (input) => {
+      const url = String(input)
+      const status = url.includes('max_px=') ? 200 : originalAnswers.shift()!
+      return status === 200
+        ? new Response(PNG_1X1, { status, headers: { 'Content-Type': 'image/png' } })
+        : new Response(null, { status })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const fetched = () => fetchMock.mock.calls.map(call => String(call[0]))
+    const dialog = () => document.querySelector('[role="dialog"][aria-modal="true"]')
+
+    const container = document.createElement('div')
+    document.body.append(container)
+    try {
+      act(() => {
+        render(h(MarkdownContent, { document: true, text: `![Screenshot](${path})` }), container)
+      })
+      await waitFor(() => {
+        expect(container.querySelector('.masc-media-img')?.getAttribute('src')).toBe('blob:md-att-1')
+      })
+      expect(fetched()).toEqual([`${window.location.origin}${path}?max_px=640`])
+
+      // The first original fetch fails: the lightbox says so instead of showing the thumbnail.
+      fireEvent.click(container.querySelector<HTMLButtonElement>('.masc-media-trigger')!)
+      await waitFor(() => {
+        expect(dialog()?.textContent).toContain('원본 이미지를 불러올 수 없습니다')
+      })
+      expect(dialog()?.querySelector('img')).toBeNull()
+      fireEvent.keyDown(document, { key: 'Escape' })
+      await waitFor(() => expect(dialog()).toBeNull())
+
+      // Opening again fetches the original path, without the thumbnail query.
+      fireEvent.click(container.querySelector<HTMLButtonElement>('.masc-media-trigger')!)
+      await waitFor(() => {
+        expect(dialog()?.querySelector('img')?.getAttribute('src')).toBe('blob:md-att-2')
+      })
+      expect(fetched()).toEqual([
+        `${window.location.origin}${path}?max_px=640`,
+        `${window.location.origin}${path}`,
+        `${window.location.origin}${path}`,
+      ])
+
+      fireEvent.keyDown(document, { key: 'Escape' })
+      await waitFor(() => expect(dialog()).toBeNull())
+      act(() => render(null, container))
+      expect(getWorkspaceMediaCacheStats().activeLeases).toBe(0)
+    } finally {
+      render(null, container)
+      container.remove()
+    }
+  })
+
   it('renders typed wiki, bare wiki, artifact, invalid, and unsupported Obsidian embeds while ignoring code spans', () => {
     const artId = `artifact-${'f'.repeat(32)}`
     const onNavigate = vi.fn()

@@ -230,10 +230,17 @@ export function hydrateEmbedCards(container: HTMLElement, epoch: number): () => 
 
 // ── Workspace Media Slot Hydration (Lazy IntersectionObserver + Cache) ──
 
+/** What a slot asks the lightbox to show: the image as written, not the
+ * `?max_px=640` thumbnail the slot drew, so the large view is readable. */
+export interface MarkdownLightboxRequest {
+  readonly path: string
+  readonly alt: string
+}
+
 export function hydrateWorkspaceMediaSlots(
   container: HTMLElement,
   epoch: number,
-  onOpenLightbox: (lease: WorkspaceMediaObjectUrlLease, alt: string) => void,
+  onOpenLightbox: (request: MarkdownLightboxRequest) => void,
 ): () => void {
   const controllers: AbortController[] = []
   const leases = new Set<WorkspaceMediaObjectUrlLease>()
@@ -355,7 +362,7 @@ export function hydrateWorkspaceMediaSlots(
             event.preventDefault()
             event.stopPropagation()
             if (disposed || activeSlotLease !== lease) return
-            onOpenLightbox(lease.retain(), alt)
+            onOpenLightbox({ path, alt })
           })
           trigger.append(img)
           slot.append(trigger)
@@ -393,13 +400,18 @@ export function hydrateWorkspaceMediaSlots(
 
 let lightboxIdSeq = 0
 
+export type MarkdownLightboxImage =
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'ready'; readonly src: string }
+  | { readonly kind: 'error' }
+
 export function MarkdownImageLightbox({
   title,
-  src,
+  image,
   onClose,
 }: {
   title: string
-  src: string
+  image: MarkdownLightboxImage
   onClose: () => void
 }) {
   const titleIdRef = useRef<string | null>(null)
@@ -453,18 +465,22 @@ export function MarkdownImageLightbox({
             </button>
           </div>
           <div class="chat-preview-modal-body">
-            <img
-              src=${src}
-              alt=${title}
-              decoding="async"
-              class="max-h-[80vh] max-w-full rounded-[var(--r-1)] object-contain"
-            />
+            ${image.kind === 'ready'
+              ? html`<img
+                  src=${image.src}
+                  alt=${title}
+                  decoding="async"
+                  class="max-h-[80vh] max-w-full rounded-[var(--r-1)] object-contain"
+                />`
+              : html`<span role="status" class="text-sm text-[var(--color-fg-secondary)]">
+                  ${image.kind === 'loading' ? '원본 이미지 불러오는 중…' : '원본 이미지를 불러올 수 없습니다'}
+                </span>`}
           </div>
         <//>
       `,
       host,
     )
-  }, [src, stableOnClose, title])
+  }, [image, stableOnClose, title])
 
   return null
 }

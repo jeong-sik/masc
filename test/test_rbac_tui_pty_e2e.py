@@ -2,7 +2,7 @@
 """Live PTY RBAC E2E smoke suite for masc_tui.exe.
 
 Spawns the real compiled masc_tui.exe binary inside a real macOS/Linux PTY
-(140x40) against live single-user and multi-account main_eio.exe servers and
+(140x48) against live single-user and multi-account main_eio.exe servers and
 asserts real role badges, Auth_gate modals, and locked admin/player screens.
 """
 
@@ -23,7 +23,7 @@ from urllib.parse import urlparse
 
 
 COLS = 140
-ROWS = 40
+ROWS = 48
 BOOT_TIMEOUT_SEC = 20.0
 STEP_TIMEOUT_SEC = 10.0
 
@@ -161,45 +161,48 @@ class TuiPtySession:
 
         pid = os.fork()
         if pid == 0:
-            os.close(master_fd)
-            os.setsid()
             try:
-                fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
-            except OSError:
-                pass
-            os.dup2(slave_fd, 0)
-            os.dup2(slave_fd, 1)
-            os.dup2(slave_fd, 2)
-            if slave_fd > 2:
-                os.close(slave_fd)
+                os.close(master_fd)
+                os.setsid()
+                try:
+                    fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
+                except OSError:
+                    pass
+                os.dup2(slave_fd, 0)
+                os.dup2(slave_fd, 1)
+                os.dup2(slave_fd, 2)
+                if slave_fd > 2:
+                    os.close(slave_fd)
 
-            env = {
-                k: v
-                for k, v in os.environ.items()
-                if not k.startswith("MASC_") and not k.startswith("AGENT_CORE_")
-            }
-            env["TERM"] = "xterm-256color"
-            env["COLORTERM"] = "truecolor"
-            env["LANG"] = "en_US.UTF-8"
-            env["LC_ALL"] = "en_US.UTF-8"
-            if extra_env:
-                env.update(extra_env)
-            if token is not None:
-                env["MASC_TOKEN"] = token
+                env = {
+                    k: v
+                    for k, v in os.environ.items()
+                    if not k.startswith("MASC_") and not k.startswith("AGENT_CORE_")
+                }
+                env["TERM"] = "xterm-256color"
+                env["COLORTERM"] = "truecolor"
+                env["LANG"] = "en_US.UTF-8"
+                env["LC_ALL"] = "en_US.UTF-8"
+                if extra_env:
+                    env.update(extra_env)
+                if token is not None:
+                    env["MASC_TOKEN"] = token
 
-            argv = [
-                tui_bin,
-                "--base-path",
-                base_path,
-                "--host",
-                "127.0.0.1",
-                "--port",
-                str(port),
-                "--lang",
-                "en",
-                "--no-auto-start",
-            ]
-            os.execve(tui_bin, argv, env)
+                argv = [
+                    tui_bin,
+                    "--base-path",
+                    base_path,
+                    "--host",
+                    "127.0.0.1",
+                    "--port",
+                    str(port),
+                    "--lang",
+                    "en",
+                    "--no-auto-start",
+                ]
+                os.execve(tui_bin, argv, env)
+            except BaseException:
+                os._exit(127)
 
         os.close(slave_fd)
         self.pid = pid
@@ -411,7 +414,10 @@ def main() -> int:
         try:
             screen = s.wait_for_any(["Single-user Authentication Required"])
             assert_not_present(screen, [bad_tok], "su_bad_token must not leak token")
-            assert "rejected" in screen.lower() or "401" in screen or "required" in screen.lower()
+            low = screen.lower()
+            assert "rejected" in low or "401" in low or "invalid" in low, (
+                f"su_bad_token gate missing rejection detail:\n{screen}"
+            )
         finally:
             s.close_cleanly()
 
@@ -504,8 +510,8 @@ def main() -> int:
 
             # Open Account & Session overlay via Alt+A, swap to Worker token, verify immediate demotion.
             s.send(b"\x1ba")
-            acct = s.wait_for_any(["Account & Session"], timeout=STEP_TIMEOUT_SEC)
-            assert "Single_user" in acct
+            acct = s.wait_for_any(["Multi-Account Own Providers"], timeout=STEP_TIMEOUT_SEC)
+            assert "Account & Session" in acct and "Single_user" in acct
             assert "runtime override (masked)" in acct
             s.send(b"t")
             s.wait_for_any(["Apply"], timeout=STEP_TIMEOUT_SEC)
@@ -515,14 +521,14 @@ def main() -> int:
 
             # Close Account overlay and confirm Settings (,) is now locked for Worker.
             s.send(b"\x1b")
-            s.wait_for_absent("Account & Session", timeout=STEP_TIMEOUT_SEC)
+            s.wait_for_absent("Multi-Account Own Providers", timeout=STEP_TIMEOUT_SEC)
             s.send(b",")
             locked = s.wait_for_any(["Admin role is required"], timeout=STEP_TIMEOUT_SEC)
             assert "Admin role is required" in locked
 
             # Reopen Account overlay and press [c] Clear Token -> returns to Auth_gate immediately.
             s.send(b"\x1ba")
-            s.wait_for_any(["Account & Session"], timeout=STEP_TIMEOUT_SEC)
+            s.wait_for_any(["Multi-Account Own Providers"], timeout=STEP_TIMEOUT_SEC)
             s.send(b"c")
             cleared = s.wait_for_any(["Single-user Authentication Required"], timeout=BOOT_TIMEOUT_SEC)
             assert "Single-user Authentication Required" in cleared
@@ -546,13 +552,15 @@ def main() -> int:
             assert "PAT" in unlocked
             assert_not_present(unlocked, [pat, "Multi-account Sign-in Required"], "ma_pat_unlocked")
 
-            # Open Account & Session via Alt+A and verify MA own-provider inventory renders cleanly.
+            # Open Account & Session via Alt+A and verify both integrations and personal provider accounts load.
             s.send(b"\x1ba")
             acct = s.wait_for_any(["Multi-Account Own Providers"], timeout=STEP_TIMEOUT_SEC)
             assert "Account & Session" in acct
             assert "Multi_account" in acct
-            loaded = s.wait_for_any([worker_pa, "ollama_cloud"], timeout=STEP_TIMEOUT_SEC)
-            assert worker_pa in loaded or "ollama_cloud" in loaded
+            loaded = s.wait_for_any([worker_pa], timeout=STEP_TIMEOUT_SEC)
+            assert worker_pa in loaded and "ollama_cloud" in loaded, (
+                f"ma_account_overlay missing provider account {worker_pa!r} or ollama_cloud:\n{loaded}"
+            )
             assert_not_present(loaded, [pat], "ma_account_overlay_no_pat_leak")
         finally:
             s.close_cleanly()

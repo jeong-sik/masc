@@ -246,34 +246,48 @@ async function runHttpContractChecks() {
     const keyCapable = w1Integs.json.integrations.find(
       (i) => Array.isArray(i.connect) && i.connect.includes('key') && typeof i.integration_id === 'string',
     )
-    let ownProviderDetail = `integrations=${w1Integs.json.integrations.length}`
-    if (keyCapable) {
-      const syntheticKey = 'rbac-e2e-dummy-key-fixture-value-0001'
-      const addKey = await apiReq(maUrl, '/api/v1/setup/accounts/key', {
-        method: 'POST',
-        headers: maCookieHeaders(sessions.worker1, maUrl, true),
-        body: { integration_id: keyCapable.integration_id, key: syntheticKey },
-      })
-      assert(addKey.status === 200 && typeof addKey.json?.provider_account_id === 'string', `ma worker1 POST /setup/accounts/key status=${addKey.status} body=${addKey.text}`)
-      const createdId = addKey.json.provider_account_id
-      const afterAdd = await apiReq(maUrl, '/api/v1/auth/provider-accounts', { headers: maCookieHeaders(sessions.worker1, maUrl) })
-      assert(
-        afterAdd.status === 200 && afterAdd.json.provider_accounts.some((a) => a.provider_account_id === createdId),
-        'ma worker1 created key account missing from /provider-accounts',
-      )
-      // Admin1 cannot see worker1's personal provider account.
-      const adminAccts = await apiReq(maUrl, '/api/v1/auth/provider-accounts', { headers: maCookieHeaders(sessions.admin1, maUrl) })
-      assert(
-        adminAccts.status === 200 && !adminAccts.json.provider_accounts.some((a) => a.provider_account_id === createdId),
-        'ma admin1 leaked worker1 personal provider account',
-      )
-      const delKey = await apiReq(maUrl, `/api/v1/setup/accounts/key/${encodeURIComponent(createdId)}`, {
-        method: 'DELETE',
-        headers: maCookieHeaders(sessions.worker1, maUrl, true),
-      })
-      assert(delKey.status === 200 && delKey.json?.removed === true, `ma worker1 DELETE /setup/accounts/key status=${delKey.status}`)
-      ownProviderDetail += ` key_crud=${keyCapable.integration_id}`
-    }
+    assert(keyCapable, `ma worker1 /integrations returned no key-capable integration: ${w1Integs.text}`)
+    const syntheticKey = 'rbac-e2e-dummy-key-fixture-value-0001'
+    const rotatedKey = 'rbac-e2e-dummy-key-fixture-value-0002'
+    const addKey = await apiReq(maUrl, '/api/v1/setup/accounts/key', {
+      method: 'POST',
+      headers: maCookieHeaders(sessions.worker1, maUrl, true),
+      body: { integration_id: keyCapable.integration_id, key: syntheticKey },
+    })
+    assert(
+      addKey.status === 200 && typeof addKey.json?.provider_account_id === 'string',
+      `ma worker1 POST /setup/accounts/key status=${addKey.status} body=${addKey.text}`,
+    )
+    const createdId = addKey.json.provider_account_id
+    const afterAdd = await apiReq(maUrl, '/api/v1/auth/provider-accounts', { headers: maCookieHeaders(sessions.worker1, maUrl) })
+    assert(
+      afterAdd.status === 200 && afterAdd.json.provider_accounts.some((a) => a.provider_account_id === createdId),
+      'ma worker1 created key account missing from /provider-accounts',
+    )
+    // Admin1 cannot see worker1's personal provider account.
+    const adminAccts = await apiReq(maUrl, '/api/v1/auth/provider-accounts', { headers: maCookieHeaders(sessions.admin1, maUrl) })
+    assert(
+      adminAccts.status === 200 && !adminAccts.json.provider_accounts.some((a) => a.provider_account_id === createdId),
+      'ma admin1 leaked worker1 personal provider account',
+    )
+    // Rotate key via PUT /api/v1/setup/accounts/key/:id and confirm old keys swept.
+    const rotKey = await apiReq(maUrl, `/api/v1/setup/accounts/key/${encodeURIComponent(createdId)}`, {
+      method: 'PUT',
+      headers: maCookieHeaders(sessions.worker1, maUrl, true),
+      body: { key: rotatedKey },
+    })
+    assert(
+      rotKey.status === 200
+        && rotKey.json?.provider_account_id === createdId
+        && rotKey.json?.old_keys_removed === true,
+      `ma worker1 PUT /setup/accounts/key status=${rotKey.status} body=${rotKey.text}`,
+    )
+    const delKey = await apiReq(maUrl, `/api/v1/setup/accounts/key/${encodeURIComponent(createdId)}`, {
+      method: 'DELETE',
+      headers: maCookieHeaders(sessions.worker1, maUrl, true),
+    })
+    assert(delKey.status === 200 && delKey.json?.removed === true, `ma worker1 DELETE /setup/accounts/key status=${delKey.status}`)
+    const ownProviderDetail = `integrations=${w1Integs.json.integrations.length} key_crud+rot=${keyCapable.integration_id}`
 
     // PAT without CanAdmin: even an Admin's PAT is denied CanAdmin on bridged routes and SSE.
     const adminPatHdr = { Authorization: `Bearer ${pats.admin1}` }
@@ -812,11 +826,14 @@ async function runPlaywrightChecks() {
       const context = await browser.newContext({ viewport })
       await addMaSessionCookie(context, a2)
       const page = await context.newPage()
-      let demotionStarted = false
-      // After demotion starts, a single 403 on an admin endpoint is expected to trigger scheduleForbiddenRoleRecheck.
+      let recheckInProgress = false
+      // Only the expected 403 trigger on members/events during active recheck is permitted.
       const audit = attachNetworkAuditor(
         page,
-        (r) => demotionStarted && r.status === 403 && r.pathname.startsWith('/api/v1/'),
+        (r) =>
+          recheckInProgress
+          && r.status === 403
+          && (r.pathname === '/api/v1/auth/members' || r.pathname === '/api/v1/auth/events'),
       )
       try {
         // 1. Admin2 loads Admin-only surfaces cleanly.
@@ -840,7 +857,7 @@ async function runPlaywrightChecks() {
         audit.assertClean('playwright.ma_admin_before_demotion')
 
         // 2. Admin1 demotes Admin2 -> Member in-place via live server revoke-admin endpoint.
-        demotionStarted = true
+        recheckInProgress = true
         const revokeRes = await apiReq(maUrl, `/api/v1/auth/members/${encodeURIComponent(a2.user_id)}/revoke-admin`, {
           method: 'POST',
           headers: maCookieHeaders(a1, maUrl, true),
@@ -863,8 +880,12 @@ async function runPlaywrightChecks() {
           await page.locator('[data-testid="account-members-tab"]').count() === 0,
           'ma_admin2 demotion did not purge mounted account-members-tab',
         )
+        await waitForDashboardSettled(page)
+        // Close the recheck window so any post-demotion 403 on Settings/Infra fails the test.
+        recheckInProgress = false
 
-        // Navigating to Settings & Infra must immediately show purged admin gates (zero cached settings-workspace).
+        // Navigating to Settings & Infra must immediately show purged admin gates (zero cached settings-workspace
+        // and zero speculative 403 calls).
         await navHash(page, '/settings')
         await page.locator('[data-testid="route-gate-admin-only"]').waitFor({ timeout: 10_000 })
         assert(

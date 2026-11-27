@@ -10,9 +10,11 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DASHBOARD_DIR="${ROOT_DIR}/dashboard"
-ASSETS_DIR="${RBAC_ASSETS_DIR:-${ROOT_DIR}/assets}"
+DEFAULT_ASSETS_DIR="${ROOT_DIR}/assets"
+DEFAULT_TUI_BIN="${ROOT_DIR}/_build/default/bin/masc_tui.exe"
+ASSETS_DIR="${RBAC_ASSETS_DIR:-${DEFAULT_ASSETS_DIR}}"
 MAIN_BIN="${ROOT_DIR}/_build/default/bin/main_eio.exe"
-TUI_BIN="${RBAC_TUI_BIN:-${ROOT_DIR}/_build/default/bin/masc_tui.exe}"
+TUI_BIN="${RBAC_TUI_BIN:-${DEFAULT_TUI_BIN}}"
 SEED_BIN="${ROOT_DIR}/_build/default/test/rbac_live_e2e_seed.exe"
 READY_TIMEOUT_SEC="${RBAC_E2E_READY_TIMEOUT_SEC:-45}"
 
@@ -20,9 +22,17 @@ SCREENSHOT_DIR="${RBAC_SCREENSHOT_DIR:-}"
 SKIP_BUILD=0
 ONLY="all"
 
+require_arg() {
+  if [[ "$2" -lt 2 ]]; then
+    printf 'missing value for argument: %s\n' "$1" >&2
+    exit 2
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --screenshot-dir)
+      require_arg "$1" "$#"
       SCREENSHOT_DIR="$2"
       shift 2
       ;;
@@ -31,14 +41,17 @@ while [[ $# -gt 0 ]]; do
       shift
       ;;
     --assets-dir)
+      require_arg "$1" "$#"
       ASSETS_DIR="$2"
       shift 2
       ;;
     --tui-bin)
+      require_arg "$1" "$#"
       TUI_BIN="$2"
       shift 2
       ;;
     --only)
+      require_arg "$1" "$#"
       ONLY="$2"
       shift 2
       ;;
@@ -57,24 +70,40 @@ case "${ONLY}" in
     ;;
 esac
 
+NEED_TUI=0
+NEED_DASHBOARD=0
+if [[ "${ONLY}" == "all" || "${ONLY}" == "tui" ]]; then
+  NEED_TUI=1
+fi
+if [[ "${ONLY}" == "all" || "${ONLY}" == "dashboard" ]]; then
+  NEED_DASHBOARD=1
+fi
+
 if [[ "${SKIP_BUILD}" -eq 0 ]]; then
-  if [[ ! -x "${MAIN_BIN}" || ! -x "${TUI_BIN}" || ! -x "${SEED_BIN}" ]]; then
-    printf '[harness] building OCaml server, TUI, and fixture seeder\n'
-    (cd "${ROOT_DIR}" && dune build --root . bin/main_eio.exe bin/masc_tui.exe test/rbac_live_e2e_seed.exe)
+  DUNE_TARGETS=("bin/main_eio.exe" "test/rbac_live_e2e_seed.exe")
+  if [[ "${NEED_TUI}" -eq 1 && "${TUI_BIN}" == "${DEFAULT_TUI_BIN}" ]]; then
+    DUNE_TARGETS+=("bin/masc_tui.exe")
   fi
-  if [[ ! -f "${ASSETS_DIR}/dashboard/index.html" ]]; then
+  printf '[harness] building OCaml targets: %s\n' "${DUNE_TARGETS[*]}"
+  (cd "${ROOT_DIR}" && dune build --root . "${DUNE_TARGETS[@]}")
+
+  if [[ "${NEED_DASHBOARD}" -eq 1 && "${ASSETS_DIR}" == "${DEFAULT_ASSETS_DIR}" ]]; then
     printf '[harness] building production dashboard bundle\n'
     pnpm --dir "${DASHBOARD_DIR}" build
   fi
 fi
 
-for bin in "${MAIN_BIN}" "${TUI_BIN}" "${SEED_BIN}"; do
+REQUIRED_BINS=("${MAIN_BIN}" "${SEED_BIN}")
+if [[ "${NEED_TUI}" -eq 1 ]]; then
+  REQUIRED_BINS+=("${TUI_BIN}")
+fi
+for bin in "${REQUIRED_BINS[@]}"; do
   if [[ ! -x "${bin}" ]]; then
     printf '[harness] missing executable: %s\n' "${bin}" >&2
     exit 2
   fi
 done
-if [[ ! -f "${ASSETS_DIR}/dashboard/index.html" ]]; then
+if [[ "${NEED_DASHBOARD}" -eq 1 && ! -f "${ASSETS_DIR}/dashboard/index.html" ]]; then
   printf '[harness] missing built dashboard bundle under %s/dashboard\n' "${ASSETS_DIR}" >&2
   exit 2
 fi
@@ -113,6 +142,8 @@ cleanup() {
   fi
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 MANIFEST_PATH="$("${SEED_BIN}" --root "${TMP_ROOT}")"
 if [[ ! -f "${MANIFEST_PATH}" ]]; then

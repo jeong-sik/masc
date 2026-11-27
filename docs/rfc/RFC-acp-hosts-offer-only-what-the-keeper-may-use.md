@@ -47,7 +47,7 @@ TUI 도구 행에 오류가 두 가지로 쌓인다. Muse Keeper 에는 `omm:` �
   - `TodoList` 721, `FetchURL` 548, `Skill` 232, `Read` 93, `Grep` 91, `Bash` 75, `Glob` 56, `AskUserQuestion` 13, `WebSearch` 7, `Write` 1.
   - 허락 요청은 `Bash` 75건과 `Write` 1건뿐이다. MASC 가 모두 거절했다. TUI 의 `Bash` 오류가 이 75건이다.
   - 나머지는 묻지 않고 실행됐다. `Read` 는 `~/.kimi-code/bin/kimi` 같은 호스트 파일을 읽었고, `FetchURL` 은 웹 페이지를 가져왔다. `none` 이 허락하지 않는 일이다.
-- `kimi acp` 는 `--login`·`--region` 만 받는다.
+- `kimi acp` 는 `--login`·`--region` 만 받는다. 전역 옵션 `--agent-file` 을 `acp` 앞에 둬도 ACP 세션에는 닿지 않는다(실험 K3).
 - Kimi 는 작업 폴더의 `.kimi-code/agents/*.md` 에서 agent profile 을 읽는다. frontmatter `tools` 는 허용 목록이다. `override: true` 면 기본 profile `agent` 를 바꾼다.
 - profile 출처의 우선순위는 작업 폴더(30)가 사용자 폴더(10)와 기본값(0)보다 높다(2.7.3 코드 `AGENT_PROFILE_SOURCE_PRIORITY`).
 - 작업 폴더 profile 로 `tools: ["mcp__masc__*"]` 를 주면 세션의 도구 목록이 그것 하나가 된다(실험 K1).
@@ -120,6 +120,7 @@ TUI 도구 행에 오류가 두 가지로 쌓인다. Muse Keeper 에는 `omm:` �
 - **K2** 폴더 A 에서 세션을 만들고 호스트를 끈 뒤 A 를 지웠다. profile 이 있는 폴더 B 에서 새 호스트로 그 세션을 불러왔다.
   - A 에 profile 이 있었으면 기록은 `["mcp__masc__*"]` 하나다.
   - A 에 없었으면 기록은 기본 목록 하나다. 불러올 때 새 기록이 생기지 않았다.
+- **K3** `kimi --agent-file <profile> acp` 로 띄운 호스트에서 세션을 만들었다. profile 은 K1 의 것과 같다. `activeToolNames` 는 기본 목록이었다.
 
 ## 6. 남은 것
 

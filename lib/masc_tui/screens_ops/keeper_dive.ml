@@ -2667,7 +2667,15 @@ let render_work_sandbox_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
                 let late = Format_val.format_duration_s (now_unix -. at) in
                 Printf.sprintf "%s (%s)" (instant at)
                   (say ~ko:(late ^ " 늦음") ~en:(late ^ " late"))
-            | None -> say ~ko:"다음 시각 없음" ~en:"no next time"
+            | None -> (
+                (* The server names no next wake while a wake is being
+                   dispatched, recurring schedules included. *)
+                match sc.status with
+                | Wire_work.Sched_running -> say ~ko:"실행 중" ~en:"running now"
+                | Wire_work.Sched_scheduled | Wire_work.Sched_due
+                | Wire_work.Sched_succeeded | Wire_work.Sched_failed
+                | Wire_work.Sched_cancelled | Wire_work.Sched_expired ->
+                    say ~ko:"다음 시각 없음" ~en:"no next time")
           in
           let last =
             match sc.last_wake_unix with

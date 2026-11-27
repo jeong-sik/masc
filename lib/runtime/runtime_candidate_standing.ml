@@ -1,5 +1,4 @@
 module Backpressure = Runtime_candidate_backpressure
-module Backpressure_state = Runtime_candidate_backpressure_state
 
 type walk_start =
   | Fresh_walk_by of Backpressure.recorder
@@ -68,37 +67,12 @@ let demotion_of_backpressure ~now ~walk ~rest_sec ~quota_exhausted backpressure 
     if rate_rests ~now ~rest_sec rate_limit then Told_to_rest
     else failed_attempt_demotion ~walk failed_attempt
 
-let demotion_of_scoped ~now ~walk ~rest_sec ~quota_exhausted scoped =
-  if quota_exhausted then Told_to_rest
-  else match scoped with
-  | None -> Not_demoted
-  | Some state ->
-    let state = Backpressure_state.observe_scoped ~now state in
-    if rate_rests ~now ~rest_sec state.shared.rate_limit then Told_to_rest
-    else
-      match walk with
-      | Fresh_walk_by walker
-        when Option.is_some
-               (Backpressure_state.Recorder_map.find_opt walker state.keeper_failures) ->
-        Failed_without_rest
-      | Fresh_walk_by _ | Every_mark_demotes ->
-        failed_attempt_demotion ~walk state.shared.failed_attempt
-
 let order ~now ~policy ~quota_scope_of ~candidate_backpressure_of candidates =
   let (Keeper_walk {start = walk; rest_sec}) = policy in
   let demotion candidate =
     let quota_exhausted = quota_rests ~now ~quota_scope_of candidate in
     let backpressure = observed ~now ~candidate_backpressure_of candidate in
     demotion_of_backpressure ~now ~walk ~rest_sec ~quota_exhausted backpressure
-  in
-  in_demotion_order demotion candidates
-
-let order_for_scoped ~now ~policy ~quota_scope_of ~scoped_backpressure_of candidates =
-  let (Keeper_walk {start = walk; rest_sec}) = policy in
-  let demotion candidate =
-    let quota_exhausted = quota_rests ~now ~quota_scope_of candidate in
-    let scoped = scoped_backpressure_of candidate in
-    demotion_of_scoped ~now ~walk ~rest_sec ~quota_exhausted scoped
   in
   in_demotion_order demotion candidates
 
@@ -124,23 +98,6 @@ let is_available
       (fun candidate -> Backpressure.candidate_backpressure ~now ~candidate)
   in
   match demotion_of_backpressure ~now ~walk ~rest_sec ~quota_exhausted backpressure with
-  | Not_demoted -> true
-  | Failed_without_rest | Told_to_rest -> false
-
-let is_available_for_scoped
-    ~now
-    ?keeper_name
-    ?(rest_sec = exact_rate_rest_sec)
-    ~quota_scope
-    ~scoped_backpressure
-    () =
-  let walk = walk_of_keeper_name keeper_name in
-  let quota_exhausted =
-    Option.fold ~none:false
-      ~some:(fun scope -> Runtime_quota_window.is_exhausted ~scope ~now)
-      quota_scope
-  in
-  match demotion_of_scoped ~now ~walk ~rest_sec ~quota_exhausted scoped_backpressure with
   | Not_demoted -> true
   | Failed_without_rest | Told_to_rest -> false
 
@@ -251,16 +208,3 @@ let observe_http_error ~now ~candidate ~quota_scope error =
      | Llm_provider.Http_client.Unknown_provider_failure _ -> ())
   | Llm_provider.Http_client.NetworkError _ | Llm_provider.Http_client.Connect_failed _ | Llm_provider.Http_client.TimeoutError _
   | Llm_provider.Http_client.AcceptRejected _ | Llm_provider.Http_client.ProviderTerminal _ -> ()
-
-let observe_scoped ?keeper_name ~now observation state =
-  match observation with
-  | Answered ->
-    let cleared_provider = Backpressure_state.clear_scoped_provider_failure state in
-    (match keeper_name with
-     | None -> cleared_provider
-     | Some name ->
-       let recorded_by = Backpressure.keeper_recorder ~keeper_name:name in
-       Backpressure_state.clear_scoped_keeper_failure ~recorded_by cleared_provider)
-  | Rate_limited {retry_after} ->
-    Backpressure_state.note_scoped_rate_limit ~noted_at:now ~retry_after state
-  | Hard_quota _ | Credential_refused _ -> state

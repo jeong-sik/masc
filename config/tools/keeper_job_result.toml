@@ -6,12 +6,7 @@ cancellation and explicitly unavailable outputs; inspect status, phase and artif
 continuing. Replies include reconciliation state/reason from stored evidence; this read does \
 not refresh backend state. Use keeper_job_status with the same handle when reconciliation \
 is needed. A nonzero exit remains \
-an observed result with its exact exit_code. This read-only tool can be a prepared Composition \
-leaf. For an accepted async plan's recorded producer wait, server maintenance continues \
-the original ready run under current admission without a new Keeper model turn; use its \
-completion/result rather than submitting another plan. An explicit prepared-draft continuation \
-uses the same draft sha256 and original composition_run_id after its previous request settles. \
-Completed siblings are retained. A standalone result read creates no plan to resume. \
+an observed result with its exact exit_code. \
 When complete output is available, artifacts contains stdout then stderr as normalized {_blob: {...}} \
 references; use /artifacts/0/_blob/sha256 to pass stdout to keeper_artifact_read. \
 The original job's owner reconciles and delivers completion through the existing maintenance \

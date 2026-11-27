@@ -2423,20 +2423,6 @@ status: reference
   작업이 이어 읽는다. `yielded_to_waiting_unit`은 처리 완료나 실패를 뜻하지 않는다.
   → [Keeper_memory_lane](../../lib/keeper/keeper_memory_lane.mli)
 
-**Composition**
-: Tool 노드의 실행 선후 관계와 결과 참조 등 구조를 검사한 실행 계획. 합성 Skill은
-  허용된 계획을 `keeper_compose_<name>` Tool로 노출한다.
-  - 주소: `execution`이 `async`이면 접수 응답이 durable `request_id`와 그 실행의 논리 run id인
-    `composition_run_id`를 준다.
-  - 접수는 완료가 아니다. 이름 붙은 async 제출은 `result_wait` 바인딩을 돌려준다(→ result_wait).
-  - 노드 중 `keeper_job_start`가 시작한 소유 격리 작업(`job_id`)은 같은 합성 실행 안에서
-    `keeper_job_status`·`keeper_job_result`가 완료까지 기다릴 수 있다. 준비된 의존성 대기
-    (`waiting_for_dependencies`)는 원래 의존성(`owned_job` 또는 `composition_result`)을
-    이름하며, 서버는 그 결과가 준비되고 실행이 허용되면 새 모델 턴 없이 원래 run을 이어 간다.
-  → [실행 계획](../../lib/keeper/keeper_tool_plan.mli),
-  [durable async 요청 저장소](../../lib/keeper/keeper_msg_async.mli),
-  [합성 의존성](../../lib/keeper/keeper_composition_dependency.mli)
-
 **Parallel Tool Calls**
 : 모델 응답 하나에 여러 도구 호출이 들어오는 것. 모델의 지원 여부는 카탈로그의
   `supports_parallel_tool_calls`, 실행별 억제는 runtime binding의
@@ -3299,27 +3285,6 @@ status: reference
   본문을 읽었다는 사실은 그 절차를 실행했거나 성공했다는 증거가 아니다.
   선택적으로 제공되는 JEV 적용 가능성 의견도 권한·실행·성공의 증거가 아니다.
 
-**Composition Skill**
-: 본문의 `toml composition` fence가 도구 노드와 입력 연결을 선언하는 Skill.
-  검증된 계획이 `keeper_compose_<name>` 도구가 되며, 그 선언의 `execution = "async"`가 호출 방식을 정한다(호출 인자로 고르지 않는다). 비동기 선언의 호출은 접수 영수증을 돌려주며, 영수증은 durable `request_id`와 그 실행의 논리 id인 `composition_run_id`를 싣고, 이름 붙은 제출이면 `result_wait` 바인딩도 함께 준다. 응답에 `run_id`라는 이름의 핸들은 없다. 실행기는 선언된 입력과
-  의존 관계를 따르며, 노드 사이의 새 모델 판단을 대신하지 않는다. 필요한 노드
-  도구가 Keeper의 현재 표면에 없으면 합성 도구도 그 턴에 제공하지 않는다.
-
-**result_wait (결과 대기 바인딩)**
-: 이름 붙은 비동기(named async) Composition 제출이 접수 응답으로 돌려주는 읽기
-  바인딩이다. 접수 응답은 완료가 아니며, 이 바인딩이 접수된 요청과 실행, Skill
-  리비전, 원래 호출, 원래 턴, 있거나 없던 Task를 그대로 묶는다. 결과를 읽을
-  때는 바인딩을 고치지 않고 `keeper_composition_result`의 `binding`에 그대로
-  넣는다. 결과 읽기는 제출·재시작·수거·취소를 하지 않고, 확정된 결과 하나와
-  완전한 내구 결과 artifact만 준다. 읽기는 요청 출처와 함께 이름 붙은 생산자
-  멤버십(durable producer membership)을 검증하므로, 같은 원문 맥락만 베낀
-  일반 worker에는 멤버십이 없고 결과 소비가 거절된다. 호출자가 잃어버린 응답을
-  원래 프레임 안에서 다시 받으면 같은 첫 요청과 `result_wait`가 돌아오고 두
-  번째 worker는 시작하지 않는다 — 단, 정확한 Skill·묶인 인자·원래 Task가
-  같아야 한다.
-  → [keeper_composition_result 도구 정의](../../config/tools/keeper_composition_result.toml) ·
-  [가이드: named async 대기](../guides/keeper-owned-jobs.md)
-
 **Isolated Job (격리 Job)**
 : `keeper_job_start`가 argv를 Docker 안에서 따로 돌리는 작업. 작업은 전용 작업 공간을 쓰고
   네트워크·자격증명·Keeper 신원·호스트 작업 공간 마운트가 없다. 복사되는 것은 체크섬을
@@ -3328,7 +3293,6 @@ status: reference
   `keeper_job_status`(백엔드 상태를 대조하며 종결 증거를 저장할 수 있다)·`keeper_job_cancel`·
   `keeper_job_result`(저장된 결과만 읽고 백엔드를 건드리지 않는다. 확정 전에는 `Deferred`).
   시작이 확정되지 않았다고 같은 명령을 새로 시작하지 않는다 — 원래 핸들을 조회한다.
-  Composition이 이 작업을 시작하고 결과를 기다릴 수 있다.
   → [Keeper_owned_job_store](../../lib/keeper/keeper_owned_job_store.mli) ·
   [도구 정의](../../lib/tool_schemas/tool_schemas_owned_job.mli)
 

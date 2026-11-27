@@ -9,13 +9,6 @@ module Config_root_bootstrap = Server_runtime_config_root_bootstrap
 let bootstrap_base_path_config_root = Config_root_bootstrap.bootstrap_base_path_config_root
 let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
 
-(* Seconds withheld from tool-blob maintenance so the boot stages that follow
-   it (Runtime_params restore, credential audit, Domain_pool, Keeper gate
-   replay, lazy task groups, Discord/Slack/gRPC/WebSocket listeners) still fit
-   inside the startup watchdog. Those stages took ~2s on an idle host; the
-   reserve carries them at the ~10x slowdown observed when a concurrent build
-   saturates the disk, which is the condition under which maintenance
-   overran its host's watchdog. *)
 let existing_file path =
   let path = String.trim path in
   if String.equal path "" then
@@ -777,6 +770,7 @@ let initialize_owner_state_blocking
       (Owner_initialization_failed
          (Startup_path_guard_rejected path_diagnostics));
   Fs_compat.set_fs fs;
+  Startup_progress.enter Startup_progress.Restoring_records;
   (* Restore durable configuration before constructing any state from it.
      A failed read/restore is an initialization error, as for the other
      authoritative stores; it cannot publish a ready owner. *)
@@ -956,6 +950,7 @@ let initialize_owner_state_blocking
     | Runtime_account_access.Multi_account { zone = _; base_path = _; now = _ } ->
       Server_bootstrap_maintenance.Refilled
   in
+  Startup_progress.enter Startup_progress.Creating_server_state;
   let state, t1, prepared_keeper_persistence =
     match Server_bootstrap_maintenance.with_initial_configuration ~base_path ~fresh_root
       (fun ~runtime_config_path:locked_runtime_config_path ->
@@ -1052,6 +1047,7 @@ let initialize_owner_state_blocking
       raise (Owner_initialization_failed (Admin_credential_bootstrap_failed error)));
   sync_internal_keeper_token_env ~export_env:export_operator_tokens state;
   sync_bootable_keeper_credentials ~export_env:export_operator_tokens state;
+  Startup_progress.enter Startup_progress.Installing_keeper_owners;
   (* Shutdown admission restore below is mailbox-linearized by the Keeper
      Owner. Install the inventory before persistence preparation so a durable
      shutdown fence can be restored on a real process restart. The operation
@@ -1155,6 +1151,7 @@ let initialize_owner_state_blocking
        hours
        stale_threshold_hours
    | _ -> ());
+  Startup_progress.enter Startup_progress.Starting_executors;
   (* One budget for every domain of the process. The calling
      domain counts as one; the systhread host, the snapshot codec and the
      optional serving domain each report their own. *)
@@ -1191,6 +1188,7 @@ let initialize_owner_state_blocking
   let runtime = match Runtime_agent_execution_runtime.get () with
     | Some runtime -> runtime
     | None -> raise (Owner_initialization_failed Native_execution_runtime_unavailable) in
+  Startup_progress.enter Startup_progress.Settling_restarts;
   (match Keeper_direct_native_continuation.complete_restart_settlements ~runtime ~base_path with
    | Ok count -> Log.Keeper.info "keeper_owner: completed startup journal settlement for %d owner(s)" count
    | Error error -> raise (Keeper_owner_registry.Install_failed error));
@@ -1710,6 +1708,7 @@ let activate_owner_state
       (initialized : initialized_owner_state)
   =
   let state = initialized.state in
+  Startup_progress.enter Startup_progress.Activating_owner_state;
   (* Establish the complete barrier before the irreversible ownership commit.
      Gate restore, claim, and start stay ordered inside one transport-neutral
      function. Each composition root publishes readiness only after its own
@@ -1727,6 +1726,7 @@ let activate_owner_state
   boot_stage "lazy_tasks.begin";
   start_owner_lazy_tasks ~sw state;
   boot_stage "lazy_tasks.end";
+  Startup_progress.enter Startup_progress.Starting_keeper_loops;
   boot_stage "keeper_persistence.begin";
   claim_and_start_keeper_persistence
     ~prepared_persistence:initialized.prepared_keeper_persistence
@@ -1775,10 +1775,12 @@ let owner_initialization initialize =
   | exn -> handle_initialization_failure (Printexc.to_string exn)
 ;;
 
-(* The startup watchdog: if init does not reach state_ready within timeout,
-   log and exit so external process managers can restart the server.
-   Prevents zombie-listener state where the socket is open but HTTP
-   requests hang because init is stuck. *)
+(* The startup watchdog: if init reports no progress ([Startup_progress]) for
+   the stall limit before state_ready, log and exit so external process
+   managers can restart the server. An init that is slow but keeps reporting
+   goes on: the time since the start does not end it, only a silence of the
+   stall limit does. Prevents zombie-listener state where the socket is open
+   but HTTP requests hang because init is stuck. *)
 (* A daemon: the watchdog only sleeps and then reads a flag, so nothing
    waits for it and the switch must not either. As an ordinary fiber it
    kept a normally returning [Switch.run] parked for the rest of the
@@ -1788,16 +1790,29 @@ let start_startup_watchdog ~sw ~clock =
   Eio.Fiber.fork_daemon ~sw (fun () ->
     Eio.Switch.run ~name:"startup-watchdog" (fun _ ->
       try
-        let timeout_sec = Server_startup_state.watchdog_timeout_sec () in
-        Eio.Time.sleep clock timeout_sec;
-        let current = Server_startup_state.snapshot () in
-        if not current.state_ready then (
-          let elapsed = Server_startup_state.elapsed_since_start () in
-          Log.Server.error
-            "[watchdog] Server init did not complete within %.0fs (elapsed=%.1fs, phase=%s). Exiting."
-            timeout_sec elapsed
-            (Server_startup_state.phase_to_string current.phase);
-          exit 1)
+        let stall_seconds = Server_startup_state.stall_timeout_sec () in
+        let rec watch () =
+          let current = Server_startup_state.snapshot () in
+          match
+            Startup_progress.verdict
+              ~stall_seconds
+              ~ready:current.state_ready
+              ~idle_seconds:(Startup_progress.idle_seconds ())
+          with
+          | Startup_progress.Settled -> ()
+          | Startup_progress.Wait remaining ->
+            Eio.Time.sleep clock remaining;
+            watch ()
+          | Startup_progress.Stalled idle ->
+            Log.Server.error
+              "[watchdog] Server init made no progress for %.0fs (step=%s, elapsed=%.1fs, phase=%s). Exiting."
+              idle
+              (Startup_progress.step_to_string (Startup_progress.current_step ()))
+              (Server_startup_state.elapsed_since_start ())
+              (Server_startup_state.phase_to_string current.phase);
+            exit 1
+        in
+        watch ()
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
@@ -1808,11 +1823,13 @@ let start_startup_watchdog ~sw ~clock =
 
 (* Each later mark names the time since the previous mark and since the first
    mark; a stage that stalls leaves its .begin line as the last boot timing
-   record. Uses [Atomic.t] because the serving-domain arm and owner
+   record. Every mark also counts as boot progress for the startup watchdog.
+   Uses [Atomic.t] because the serving-domain arm and owner
    initialization fiber can record stages from different domains. *)
 let boot_stage_recorder () =
   let times = Atomic.make None in
   fun stage ->
+    Startup_progress.beat ();
     let now = Mtime_clock.now () in
     let rec record () =
       let current = Atomic.get times in

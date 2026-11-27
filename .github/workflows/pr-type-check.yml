@@ -352,6 +352,11 @@ jobs:
         working-directory: dashboard
         run: pnpm typecheck
 
+      # tsc and vitest still compile and pass a module no entry imports.
+      - name: Check that every dashboard module is reachable from an entry
+        working-directory: dashboard
+        run: pnpm check:unreached
+
       # A changed test file runs itself. A changed package.json or vitest
       # config runs every test (vitest's forceRerunTriggers). A deleted file
       # names nothing to run, so only added, copied, modified and renamed

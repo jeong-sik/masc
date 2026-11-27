@@ -85,6 +85,7 @@ type t = {
   pending_txs : pending_message list;
   next_request_seq : int;
   voice : voice_phase;
+  voice_target_keeper : string option;
   voice_caps : voice_capabilities option;
   btw : btw_status;
   popup_selected : int;

@@ -659,6 +659,9 @@ let create_schema_in_tx db ~path =
       (Printf.sprintf "PRAGMA user_version=%Ld;" schema_version)
 ;;
 
+(* The writer creates this file with this journal and readers open it with it. *)
+let sqlite_journal = Sqlite_file.Wal
+
 let init_schema db ~path =
   let* () = exec_sql db "pragma_busy" "PRAGMA busy_timeout=5000;" in
   let* () = exec_sql db "pragma_fk" "PRAGMA foreign_keys=ON;" in
@@ -670,7 +673,12 @@ let init_schema db ~path =
     (* journal_mode cannot change inside a transaction. The tables and the
        version are written under one write lock, so a second process never
        reads the tables at version 0. *)
-    let* () = exec_sql db "pragma_wal" "PRAGMA journal_mode=WAL;" in
+    let* () =
+      Sqlite_file.set_journal db sqlite_journal
+      |> Result.map_error (fun error ->
+        Sqlite_error
+          { operation = "pragma_wal"; detail = Sqlite_file.journal_error_to_string error })
+    in
     let* () = exec_sql db "begin_schema_tx" "BEGIN IMMEDIATE;" in
     let rollback () =
       ignore (exec_sql db "rollback_schema_tx" "ROLLBACK;" : (unit, store_error) result)
@@ -718,7 +726,9 @@ let ensure_dir_result dir =
 ;;
 
 (* [f] runs against a store at {!schema_version}. A read of a file with no
-   compaction tables is [Ok None], like a missing file. *)
+   compaction tables is [Ok None], like a missing file.
+   HIGH-RISK-UNREVIEWED: a read opens through Sqlite_file.open_reader with the
+   journal the writer sets (#36195). *)
 let with_db ~create ~keepers_dir ~keeper_id f =
   let path = db_path ~keepers_dir ~keeper_id in
   Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
@@ -754,12 +764,13 @@ let with_db ~create ~keepers_dir ~keeper_id f =
     else (
       match
         if create
-        then Sqlite3.db_open path
-        else Sqlite3.db_open ~mode:`READONLY path
+        then (
+          try Ok (Sqlite3.db_open path) with
+          | Sqlite3.Error detail | Sqlite3.SqliteError detail -> Error detail)
+        else Sqlite_file.open_reader (Sqlite_file.Owned sqlite_journal) path
       with
-      | exception (Sqlite3.Error detail | Sqlite3.SqliteError detail) ->
-        Error (Sqlite_error { operation = "db_open"; detail })
-      | db ->
+      | Error detail -> Error (Sqlite_error { operation = "db_open"; detail })
+      | Ok db ->
         Fun.protect
           ~finally:(fun () ->
             try ignore (Sqlite3.db_close db : bool) with
@@ -770,7 +781,6 @@ let with_db ~create ~keepers_dir ~keeper_id f =
                let* () = init_schema db ~path in
                f db
              else
-               let* () = exec_sql db "pragma_busy_ro" "PRAGMA busy_timeout=5000;" in
                let* state = schema_state db ~path in
                match state with
                | `Absent -> Ok None
@@ -958,17 +968,17 @@ let decode_live_blob_references_json path =
        | Error reason -> Error reason
        | Ok false -> Error "empty compaction database with present sqlite companions")
     | _ ->
-      (match Sqlite3.db_open ~mode:`READONLY path with
-       | exception (Sqlite3.Error detail | Sqlite3.SqliteError detail) ->
+      (* HIGH-RISK-UNREVIEWED: opens through Sqlite_file.open_reader (#36195). *)
+      (match Sqlite_file.open_reader (Sqlite_file.Owned sqlite_journal) path with
+       | Error detail ->
          Error (Printf.sprintf "compaction sqlite db_open failed: %s" detail)
-       | db ->
+       | Ok db ->
          Fun.protect
            ~finally:(fun () ->
              try ignore (Sqlite3.db_close db : bool) with
              | Sqlite3.Error _ | Sqlite3.SqliteError _ -> ())
            (fun () ->
               let res =
-                let* () = exec_sql db "pragma_busy_ro" "PRAGMA busy_timeout=5000;" in
                 let* () = exec_sql db "begin_read_tx" "BEGIN DEFERRED;" in
                 let rollback () =
                   ignore (exec_sql db "rollback_read_tx" "ROLLBACK;" : (unit, store_error) result)

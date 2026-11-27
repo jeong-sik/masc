@@ -526,6 +526,9 @@ let persistent_schema_initialized db =
        else Error (sqlite_error db "check persistent fts schema"))
 ;;
 
+(* The writer creates this file with this journal and readers open it with it. *)
+let sqlite_journal = Sqlite_file.Wal
+
 let init_persistent_schema db =
   let* () = exec_ok db "pragma busy_timeout" "PRAGMA busy_timeout=5000;" in
   let* () = exec_ok db "pragma synchronous" "PRAGMA synchronous=NORMAL;" in
@@ -533,7 +536,11 @@ let init_persistent_schema db =
   if ready
   then Ok ()
   else (
-    let* () = exec_ok db "pragma journal_mode" "PRAGMA journal_mode=WAL;" in
+    let* () =
+      Sqlite_file.set_journal db sqlite_journal
+      |> Result.map_error (fun error ->
+        Index_unavailable ("pragma journal_mode: " ^ Sqlite_file.journal_error_to_string error))
+    in
     let* () =
       exec_ok db "create fts_meta"
         "CREATE TABLE IF NOT EXISTS fts_meta (\
@@ -785,16 +792,17 @@ let query_persistent_db db ~query ~limit =
       collect [])
 ;;
 
+(* HIGH-RISK-UNREVIEWED: opens through Sqlite_file.open_reader with the journal
+   the writer sets (#36195). *)
 let open_persistent_db_ro ~keepers_dir ~keeper_id f =
   let path = db_path ~keepers_dir ~keeper_id in
   if not (Sys.file_exists path)
   then Ok None
   else (
-    match Sqlite3.db_open ~mode:`READONLY path with
-    | exception Sqlite3.Error detail -> Error (Index_unavailable detail)
-    | db ->
+    match Sqlite_file.open_reader (Sqlite_file.Owned sqlite_journal) path with
+    | Error detail -> Error (Index_unavailable detail)
+    | Ok db ->
       with_database db (fun db ->
-        let* () = exec_ok db "pragma busy_timeout_ro" "PRAGMA busy_timeout=5000;" in
         let* v = f db in
         Ok (Some v)))
 ;;

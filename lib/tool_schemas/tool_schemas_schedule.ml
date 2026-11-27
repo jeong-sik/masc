@@ -10,10 +10,10 @@ let notes_list_tool = Tool_definition_embedded.schema "masc_schedule_notes_list"
 
 (* A Lane action has its own pair of tools. One tool that took either a
    Keeper wake or a Lane action offered every caller the fields of both, and
-   callers filled the ones they did not need with placeholders: over
-   2026-11-21..27, 408 of 2,079 create and update calls were refused on the
-   shape, and the Lane action schedules Keepers did get stored named
-   installations such as "tmp" and "x". *)
+   callers filled the ones they did not need with placeholders. The one-of
+   rule refused those calls in chains, and the Lane action schedules Keepers
+   did get stored named installations such as "tmp" and "x" (RFC
+   operator-quiz §4.7 has the counts). *)
 let create_lane_act_tool = Tool_definition_embedded.schema "masc_schedule_lane_act_create"
 let update_lane_act_tool = Tool_definition_embedded.schema "masc_schedule_lane_act_update"
 

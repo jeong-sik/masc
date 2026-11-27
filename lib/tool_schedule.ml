@@ -414,10 +414,10 @@ let stamped_kind : Schedule_payload_projection.known_kind -> string = function
    version and body had two thirds of its calls rejected on shape. One tool
    that took the fields of either kind then offered every caller both sets.
    In two episodes (2026-10-30..11-01 and 2026-11-20..22) callers filled the set
-   they did not need with placeholders, the one-of rule refused them in
-   chains of up to 29 calls, and the retries that dropped the wrong set
-   stored 93 Lane actions for installations named "tmp" and "x" (RFC
-   operator-quiz §4.7). [result_delivery] is absent on purpose: it
+   they did not need with placeholders and the one-of rule refused them in
+   chains of up to 29 calls. Calls that carried the Lane set alone were
+   accepted: the 93 Lane actions Keepers stored all named an installation
+   that was not declared, such as "tmp" and "x" (RFC operator-quiz §4.7). [result_delivery] is absent on purpose: it
    is stamped from the creating turn's continuation and a supplied one is not
    honoured. *)
 let keeper_wake_payload_from_args args =

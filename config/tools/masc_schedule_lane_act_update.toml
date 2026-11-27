@@ -5,9 +5,9 @@ a new schedule_instance_id separates future evidence. Running and terminal \
 requests cannot change. If both due inputs and recurrence_kind are omitted, \
 the latest stored due time, recurrence and expiry are kept; installation_id \
 and action are replaced by this call's arguments. A changed due time before \
-the current second is refused with error_kind due_already_past. A schedule \
-you did not make is refused with error_kind not_schedule_owner. Requester and \
-scheduler stay unchanged. The replacement is a Lane action whatever the stored \
+the current second is refused with error_kind due_already_past. A named \
+caller may replace only a schedule it made; another's is refused with \
+error_kind not_schedule_owner. Requester and scheduler stay unchanged. The replacement is a Lane action whatever the stored \
 schedule was. To replace a Keeper wake with a Keeper wake, use \
 masc_schedule_update."""
 additional_properties = false

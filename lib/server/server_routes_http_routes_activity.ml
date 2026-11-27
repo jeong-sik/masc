@@ -1500,9 +1500,10 @@ let add_routes ~sw ~clock router =
             Http.Request.read_body_async reqd
               (handle_schedule_write_request ~tool:Schedule_update ~state ~agent_name
                  ~request reqd))
-  (* The Lane action pair. This route is where an operator credential makes
+  (* The Lane action pair. On the create route an operator credential makes
      the operator the schedule's creator; a Lane action scheduled through an
-     MCP or Keeper call is recorded under that caller. *)
+     MCP or Keeper call is recorded under that caller. A replacement keeps
+     the stored requester and scheduler, whoever sends it. *)
   |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_schedule_lane_act_create" }) "/api/v1/tools/masc_schedule_lane_act_create" (fun state agent_name request reqd ->
             Http.Request.read_body_async reqd
               (handle_schedule_write_request ~tool:Schedule_lane_act_create ~state ~agent_name

@@ -93,9 +93,10 @@ let reaction_raw_auth_request header value =
     "/api/v1/board/reactions"
 
 (* /api/v1/tools/* endpoints called by dashboard/src/api/board.ts, plus the
-   goal lifecycle and schedule write routes the TUI consumes, plus the Lane
-   action schedule pair, which an operator credential calls directly. Kept in
-   sync with those consumers — see module doc. *)
+   goal lifecycle routes and the schedule create and cancel routes the TUI
+   consumes, plus the schedule replacement route and the Lane action schedule
+   pair, which a credential holder calls directly. Kept in sync with those
+   consumers — see module doc. *)
 let dashboard_board_tool_routes =
   [ "/api/v1/tools/masc_board_vote"
   ; "/api/v1/tools/masc_board_post"
@@ -519,8 +520,22 @@ let test_lane_act_schedule_routes_record_the_operator () =
   let post path body =
     fst (dispatch_json ~router ~token ~path ~extra_headers:[] ~body ())
   in
+  (* The refused body is a complete Keeper wake plus the Lane fields, so the
+     Lane fields are the only reason left to refuse it. *)
+  let wake_with_lane_fields =
+    match Yojson.Safe.from_string (body 5) with
+    | `Assoc fields ->
+      `Assoc
+        (fields
+         @ [ "keeper_name", `String "credential-owner"
+           ; "message", `String "check the queue"
+           ; "allow_unregistered_keeper", `Bool true
+           ])
+      |> Yojson.Safe.to_string
+    | _ -> failf "the Lane action body is not an object"
+  in
   check int "the wake route refuses a Lane action" 400
-    (post "/api/v1/tools/masc_schedule_create" (body 5));
+    (post "/api/v1/tools/masc_schedule_create" wake_with_lane_fields);
   check int "nothing stored for the refused body" 0
     (List.length (Schedule_store.read_state config).schedules);
   check int "the Lane action route creates it" 201

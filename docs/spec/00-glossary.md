@@ -24,11 +24,13 @@ status: reference
 
 **Agent Run (에이전트 실행)**
 : `Agent_core.Agent`를 거치는 한 번의 실행. 그 수명주기를 `Agent_core.Event_bus`의 typed
-  event가 그린다 — `agent_started`·`agent_completed`·`agent_failed`·`agent_yielded`·`…`.
+  event가 그린다 — `agent_started`·`agent_completed`·`agent_failed`·`agent_cancelled`·`agent_yielded`·`…`.
   Keeper turn과 같은 단위가 아니며, 그 안에 여러 agent core Turn이 있다.
   `agent_completed`·`agent_yielded`는 걸린 시간(`elapsed_s`)을, `agent_failed`는 걸린
   시간과 오류의 `error_code`·`error`를, `agent_input_required`는 요청(`request`)을
-  payload에 싣는다. 이 event들은 payload의 `task_id`에 **Agent run ID**를 싣는다 —
+  payload에 싣는다. 밖에서 취소된 실행은 `agent_failed`가 아니라 `agent_cancelled`를
+  내고, 걸린 시간과 취소 사유(`reason`)를 싣는다. `reason`은 취소한 예외를 사람이 읽게
+  옮긴 문자열이고, 이걸로 분기하는 곳은 없다. 시간 초과는 취소가 아니라 `agent_failed`다. 이 event들은 payload의 `task_id`에 **Agent run ID**를 싣는다 —
   `agent_lifecycle_events`가 `AgentStarted`에서 연 run id를 그대로 쓴다. 그 id가 무엇이고
   Activity가 어떻게 읽는지는 **Agent run ID** 항목에 있다.
   → [Agent_core.Event_bus](../../packages/agent_core/lib/event_bus.mli),

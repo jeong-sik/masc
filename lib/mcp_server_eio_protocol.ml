@@ -200,10 +200,6 @@ let try_subscribe_resource_for_session ~session_id ~uri =
           Ok ()))
 ;;
 
-let subscribe_resource_for_session ~session_id ~uri =
-  ignore (try_subscribe_resource_for_session ~session_id ~uri)
-;;
-
 let unsubscribe_resource_for_session ~session_id ~uri =
   with_resource_subscription_lock (fun () ->
     match Hashtbl.find_opt resource_subscriptions session_id with

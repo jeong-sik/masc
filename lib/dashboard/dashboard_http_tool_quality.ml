@@ -115,12 +115,17 @@ let result_bytes_of_record record =
 
 let hour_key_of_record record =
   let hour_of_unix ts =
-    let tm = Unix.gmtime ts in
-    Printf.sprintf "%04d-%02d-%02dT%02d"
-      (tm.Unix.tm_year + 1900)
-      (tm.Unix.tm_mon + 1)
-      tm.Unix.tm_mday
-      tm.Unix.tm_hour
+    if not (Float.is_finite ts) then "<invalid ts field>"
+    else
+      try
+        let tm = Unix.gmtime ts in
+        Printf.sprintf "%04d-%02d-%02dT%02d"
+          (tm.Unix.tm_year + 1900)
+          (tm.Unix.tm_mon + 1)
+          tm.Unix.tm_mday
+          tm.Unix.tm_hour
+      with
+      | Unix.Unix_error _ | Invalid_argument _ -> "<invalid ts field>"
   in
   match record with
   | `Assoc fields ->
@@ -331,8 +336,8 @@ let summarize ~sampling records : Yojson.Safe.t =
           match record with
           | `Assoc fields ->
             (match List.assoc_opt "duration_ms" fields with
-             | Some (`Float f) -> f
-             | Some (`Int i) -> Float.of_int i
+             | Some (`Float f) when Float.is_finite f && f >= 0.0 -> f
+             | Some (`Int i) when i >= 0 -> Float.of_int i
              | _ -> 0.0)
           | _ -> 0.0
         in
@@ -426,7 +431,12 @@ let summarize ~sampling records : Yojson.Safe.t =
   let by_tool =
     String_map.fold
       (fun name { calls; successes; total_ms; truncated_count; total_output_chars } out ->
-        let avg_ms = if calls > 0 then total_ms /. Float.of_int calls else 0.0 in
+        let avg_ms =
+          if calls > 0 then
+            let v = total_ms /. Float.of_int calls in
+            if Float.is_finite v then v else 0.0
+          else 0.0
+        in
         let pct =
           if calls > 0
           then Float.of_int successes /. Float.of_int calls *. 100.0

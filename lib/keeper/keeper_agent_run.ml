@@ -153,16 +153,14 @@ let prune_raw_traces_after_turn_record
             first.detail))
 ;;
 
-(* An open tool cycle at dispatch is not corruption. Eager checkpoint
-   persistence (when [keeper.checkpoint_save_min_interval_sec = 0] or on
-   direct-native continuation runs) stores one between
-   [After_assistant_collected] and [After_tool_results_appended] so recovery
-   knows which calls were in flight, and any turn that dies in that window
-   leaves one behind — a provider timeout does it without the process ever
-   dying, which boot recovery's "process death" premise did not cover.
-   Measured 2026-08-22..25: one timeout latched one lane for 33 consecutive
-   turns and two other lanes likewise, 555 turns on 2026-08-23 alone, each
-   lane failing every turn until a restart.
+(* An open tool cycle at dispatch is not corruption. Checkpoint persistence
+   stores one on purpose between [After_assistant_collected] and
+   [After_tool_results_appended] so recovery knows which calls were in flight,
+   and any turn that dies in that window leaves one behind — a provider timeout
+   does it without the process ever dying, which boot recovery's "process
+   death" premise did not cover. Measured 2026-08-22..25: one timeout latched
+   one lane for 33 consecutive turns and two other lanes likewise, 555 turns
+   on 2026-08-23 alone, each lane failing every turn until a restart.
 
    So the routine case is closed here with the same synthesized results boot
    recovery appends, and the turn proceeds on the closed history. A structural

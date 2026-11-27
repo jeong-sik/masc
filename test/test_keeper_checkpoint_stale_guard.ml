@@ -447,39 +447,52 @@ let test_checkpoint_cadence_policy () =
     (Cadence.decide eager ~stage:Agent_core.Agent.After_context_injection
        ~checkpoint:cp_ctx_extra_msgs ~now_s:2.002 ~min_interval_sec:0.0 = Cadence.Persist);
   (* 2. With min_interval_sec = 30.0:
-        - StopToolUse + ToolUse defers to tool results, while unobserved or
-          non-StopToolUse responses carrying a ToolUse block (e.g. MaxTokens)
-          always persist so outbox settlement is never skipped.
+        - After_assistant_collected ALWAYS persists (including StopToolUse +
+          pending ToolUse, both initially and within the 30s interval) so an
+          open tool cycle is durable on disk before tools execute, and does not
+          consume the After_tool_results_appended pacing budget.
         - First tool result persists, rapid rounds skip and retain the latest
           checkpoint for error-path flush, context-only injection right after a
-          skipped tool round does not cross the threshold, extra_messages paces
-          under min_interval_sec, and MaxTokens / rejected drop reset pacing. *)
+          skipped tool round does not cross the threshold, persisting a next
+          round's After_assistant_collected supersedes any deferred tool-result
+          slot, extra_messages paces under min_interval_sec, and MaxTokens /
+          rejected drop reset pacing. *)
   let paced = Cadence.create () in
-  check bool "unobserved stop_reason with ToolUse fails closed to Persist" true
+  check bool "unobserved stop_reason with ToolUse persists" true
     (Cadence.decide paced ~stage:Agent_core.Agent.After_assistant_collected
        ~checkpoint:cp_tool_use ~now_s:4.0 ~min_interval_sec:30.0 = Cadence.Persist);
   Cadence.observe_assistant_stop_reason paced ~stop_reason:Llm_provider.Types.MaxTokens;
-  check bool "MaxTokens carrying a truncated ToolUse block still persists" true
+  check bool "MaxTokens carrying a truncated ToolUse block persists" true
     (Cadence.decide paced ~stage:Agent_core.Agent.After_assistant_collected
        ~checkpoint:cp_tool_use ~now_s:4.5 ~min_interval_sec:30.0 = Cadence.Persist);
   Cadence.observe_assistant_stop_reason paced ~stop_reason:Llm_provider.Types.StopToolUse;
-  check bool "StopToolUse + ToolUse defers to tool results under min_interval_sec > 0" true
+  check bool "StopToolUse + pending ToolUse never defers even under min_interval_sec > 0" true
     (Cadence.decide paced ~stage:Agent_core.Agent.After_assistant_collected
-       ~checkpoint:cp_tool_use ~now_s:5.0 ~min_interval_sec:30.0
-     = Cadence.Skip Cadence.Deferred_until_tool_results);
-  check bool "first tool results save persists immediately" true
+       ~checkpoint:cp_tool_use ~now_s:5.0 ~min_interval_sec:30.0 = Cadence.Persist);
+  Cadence.record_persisted paced ~stage:Agent_core.Agent.After_assistant_collected
+    ~checkpoint:cp_tool_use ~now_s:5.0;
+  check bool "first tool results save persists immediately after pre-tool assistant save" true
     (Cadence.decide paced ~stage:Agent_core.Agent.After_tool_results_appended
        ~checkpoint:cp_results ~now_s:6.0 ~min_interval_sec:30.0 = Cadence.Persist);
   Cadence.record_persisted paced ~stage:Agent_core.Agent.After_tool_results_appended
     ~checkpoint:cp_results ~now_s:6.0;
-  let round2_msgs = msgs_results @ [ assistant_tool_use; tool_result_msg ] in
+  let round2_tool_use_msgs = msgs_results @ [ assistant_tool_use ] in
+  let cp_round2_tool_use = make_msgs round2_tool_use_msgs in
+  Cadence.observe_assistant_stop_reason paced ~stop_reason:Llm_provider.Types.StopToolUse;
+  check bool "rapid second StopToolUse + pending ToolUse still persists within min_interval_sec" true
+    (Cadence.decide paced ~stage:Agent_core.Agent.After_assistant_collected
+       ~checkpoint:cp_round2_tool_use ~now_s:10.0 ~min_interval_sec:30.0 = Cadence.Persist);
+  Cadence.record_persisted paced ~stage:Agent_core.Agent.After_assistant_collected
+    ~checkpoint:cp_round2_tool_use ~now_s:10.0;
+  let round2_msgs = round2_tool_use_msgs @ [ tool_result_msg ] in
   let cp_round2_results = make_msgs round2_msgs in
   (match
      Cadence.decide paced ~stage:Agent_core.Agent.After_tool_results_appended
        ~checkpoint:cp_round2_results ~now_s:35.999 ~min_interval_sec:30.0
    with
    | Cadence.Skip (Cadence.Within_min_interval { elapsed_sec; min_interval_sec }) ->
-     check (float 0.01) "elapsed is ~29.999s" 29.999 elapsed_sec;
+     check (float 0.01) "elapsed is ~29.999s (assistant save did not reset pacing clock)"
+       29.999 elapsed_sec;
      check (float 0.001) "min interval is 30s" 30.0 min_interval_sec
    | Cadence.Persist | Cadence.Skip _ ->
      fail "expected Within_min_interval skip for rapid second tool round");
@@ -497,6 +510,25 @@ let test_checkpoint_cadence_policy () =
        (deferred_cp == cp_round2_ctx)
    | Some _ | None -> fail "expected deferred After_tool_results_appended checkpoint");
   check bool "take_deferred clears the pending slot" true
+    (Cadence.take_deferred paced = None);
+  (* When a skipped tool-results checkpoint is still pending, persisting the
+     next round's After_assistant_collected (which includes those tool results)
+     supersedes and clears the pending deferred slot. *)
+  (match
+     Cadence.decide paced ~stage:Agent_core.Agent.After_tool_results_appended
+       ~checkpoint:cp_round2_results ~now_s:35.5 ~min_interval_sec:30.0
+   with
+   | Cadence.Skip (Cadence.Within_min_interval _) -> ()
+   | Cadence.Persist | Cadence.Skip _ ->
+     fail "expected Within_min_interval before next assistant round");
+  let cp_round3_tool_use = make_msgs (round2_msgs @ [ assistant_tool_use ]) in
+  Cadence.observe_assistant_stop_reason paced ~stop_reason:Llm_provider.Types.StopToolUse;
+  check bool "next round After_assistant_collected persists right after skipped tool results" true
+    (Cadence.decide paced ~stage:Agent_core.Agent.After_assistant_collected
+       ~checkpoint:cp_round3_tool_use ~now_s:35.8 ~min_interval_sec:30.0 = Cadence.Persist);
+  Cadence.record_persisted paced ~stage:Agent_core.Agent.After_assistant_collected
+    ~checkpoint:cp_round3_tool_use ~now_s:35.8;
+  check bool "persisting next round assistant supersedes pending deferred tool results" true
     (Cadence.take_deferred paced = None);
   check bool "tool results persist once min_interval_sec has elapsed" true
     (Cadence.decide paced ~stage:Agent_core.Agent.After_tool_results_appended

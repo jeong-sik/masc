@@ -44,13 +44,14 @@ val keeper_checkpoint_history_retained : int Runtime_params.param
     what caps the range at \[0, 12\]. *)
 
 val keeper_checkpoint_save_min_interval_sec : float Runtime_params.param
-(** Minimum interval (seconds) between mid-turn checkpoint writes during a
-    Keeper's tool loop. [0.0] persists every assistant and tool-result boundary;
-    positive values defer pre-tool assistant saves to [After_tool_results_appended]
-    and pace subsequent mid-turn saves to at least this interval. Turn close
-    ([finalize]), input-wait transitions, rejected-response drops, and terminal
-    non-tool assistant responses always persist immediately. Range
-    \[0.0, 600.0\], default [30.0]. *)
+(** Minimum interval (seconds) between mid-turn [After_tool_results_appended]
+    and message-appending [After_context_injection] checkpoint writes during a
+    Keeper's tool loop. [0.0] persists every boundary immediately; positive
+    values pace subsequent tool-result and message-appending context-injection
+    writes to at least this interval. Turn close ([finalize]),
+    [After_assistant_collected] (including open [ToolUse] cycles for crash
+    recovery), input-wait transitions, and rejected-response drops always
+    persist immediately. Range \[0.0, 600.0\], default [30.0]. *)
 
 val keeper_stage_timing_ring_size : int Runtime_params.param
 (** Stage-timing ring buffer size.  Applied on fiber restart only —

@@ -267,10 +267,10 @@ let keeper_checkpoint_save_min_interval_sec =
     ~default:(fun () -> 30.0)
     ~min:0.0 ~max:600.0
     ~meta:{ description =
-              "턴 도중 체크포인트 저장 사이의 최소 간격(초). 0이면 도구 결과와 \
-               응답 경계마다 바로 저장한다. 턴 종료(finalize), 입력 대기 변경, \
-               거절 응답 제거, 도구 호출 없는 최종 응답은 간격과 무관하게 항상 \
-               저장한다";
+              "턴 도중 도구 결과·추가 메시지 컨텍스트 주입 체크포인트 저장 사이의 \
+               최소 간격(초). 0이면 매 경계마다 바로 저장한다. 턴 종료(finalize), \
+               assistant 응답(진행 중인 도구 호출 포함), 입력 대기 변경, \
+               거절 응답 제거는 간격과 무관하게 항상 저장한다";
             value_type = "float";
             min_value = Some (`Float 0.0); max_value = Some (`Float 600.0); choices = [] }
     ()

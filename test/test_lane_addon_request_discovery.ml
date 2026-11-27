@@ -58,9 +58,9 @@ let request_digest_of = function
 let body_path store digest =
   Filename.concat (Store.root store)
     (Filename.concat "tool-request-bodies" (Filename.concat (Store.digest scope) (digest ^ ".json")))
-let scope_rows ?(scope=scope) ?request_digest_of store =
+let scope_rows ?(scope=scope) ?digest_of store =
   Store.tool_request_scope_with_bodies store ~scope
-    ~request_digest_of:(Option.value request_digest_of ~default:request_digest_of)
+    ~request_digest_of:(Option.value digest_of ~default:request_digest_of)
 let test_a_scope_is_read_in_one_read_with_its_bodies () = with_store (fun root store ->
   retain store "a";
   let other = `Assoc ["input", `String "another body"] in
@@ -118,7 +118,7 @@ let test_a_scope_is_read_in_one_read_with_its_bodies () = with_store (fun root s
   save unknown "not a record";
   fail_inventory (scope_rows store ());
   Sys.remove unknown;
-  (match scope_rows ~request_digest_of:(fun _ -> Error "refused digest") store () with
+  (match scope_rows ~digest_of:(fun _ -> Error "refused digest") store () with
    | Error "refused digest" -> ()
    | Ok _ -> Alcotest.fail "a refused digest read a scope"
    | Error detail -> Alcotest.fail ("wrong refusal: " ^ detail)))

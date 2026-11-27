@@ -23,6 +23,8 @@ let protect f =
   | Unix.Unix_error (error, call, path) ->
       Error (call ^ " " ^ path ^ ": " ^ Unix.error_message error)
   | Yojson.Json_error message -> Error message
+  | File_lock_eio.Flock_timeout { caller; path; attempts } ->
+      Error (Printf.sprintf "file lock timeout (%s) on %s after %d attempts" caller path attempts)
 (* Also sync existing ancestors: they may have been created by a preceding
    attempt whose parent sync failed. A retry must establish the entire path. *)
 let sync_parent_directory parent =

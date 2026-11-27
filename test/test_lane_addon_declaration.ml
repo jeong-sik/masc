@@ -602,7 +602,52 @@ let test_keeper_manifest_outside_workspace_is_refused_unopened () =
       (Sys.file_exists (Filename.concat directory "outside.toml"));
     check (Alcotest.list Alcotest.string) "no worker started" [] !started))
 
+let test_non_operator_cannot_run_host_process_or_read_outside_snapshot () =
+  with_fixture (fun _clock config directory root started ->
+    let host_manifest = Filename.concat root ".masc/host-worker.toml" in
+    write host_manifest {|id="host-worker-test"
+revision="1"
+title="Host process fixture"
+runtime="host_process"
+command=["/bin/echo","ok"]
+contributions=["observe"]
+[resources]
+max_reply_bytes=4096
+|};
+    let outside_snapshot = Filename.temp_file "lane-outside-snap-" ".json" in
+    write outside_snapshot
+      {|{"source_id":"s","incarnation":"1","cursor":"1","complete":true,"detail":null,"observations":[]}|};
+    Fun.protect ~finally:(fun () -> if Sys.file_exists outside_snapshot then Sys.remove outside_snapshot) (fun () ->
+      let attach_host =
+        Runtime.dispatch ~caller:"keeper-a" ~config ~operation:Runtime.Attach
+          (`Assoc ["manifest_path", `String host_manifest; "run_id", `String "host-attempt";
+            "binding", `Assoc ["sources", `List []]])
+      in
+      check bool "Keeper cannot attach a host_process manifest" true (Result.is_error attach_host);
+      let save_host =
+        Runtime.save_declaration ~caller:"keeper-a" ~config
+          (request ~mode:"create" ~file_name:"host-worker.toml"
+             (declaration ~manifest_path:host_manifest ()))
+      in
+      check bool "Keeper cannot save a host_process declaration" true
+        (match save_host with Error {Editor.code = Editor.Invalid_request; _} -> true | Ok _ | Error _ -> false);
+      let attach_outside_snap =
+        Runtime.dispatch ~caller:"keeper-a" ~config ~operation:Runtime.Attach
+          (`Assoc ["manifest_path", `String (Filename.concat root ".masc/package.toml");
+            "run_id", `String "snap-attempt";
+            "binding", `Assoc ["sources", `List [`Assoc [
+              "source_id", `String "s"; "kind", `String "snapshot_file";
+              "path", `String outside_snapshot]]]])
+      in
+      check bool "Keeper cannot attach a snapshot_file outside workspace" true
+        (Result.is_error attach_outside_snap);
+      check bool "refused host_process save wrote no declaration" false
+        (Sys.file_exists (Filename.concat directory "host-worker.toml"));
+      check (Alcotest.list Alcotest.string) "no worker started" [] !started))
+
 let () = run "Lane declaration editing" ["shared TOML owner",[
+  test_case "non-operator cannot run host_process or read outside snapshot_file" `Quick
+      test_non_operator_cannot_run_host_process_or_read_outside_snapshot;
   test_case "Keeper manifest outside the workspace is refused unopened" `Quick
       test_keeper_manifest_outside_workspace_is_refused_unopened;
   test_case "invalid Ego Space never publishes or attaches" `Quick test_invalid_ego_space_never_publishes_or_attaches;

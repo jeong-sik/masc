@@ -80,9 +80,10 @@ val access_of_json : Yojson.Safe.t -> (access, string) result
 val fusion_owner : access:access -> run_id:string -> (string, string) result
 (** Read the authoritative registry owner only after the same Fusion access
     check used for acquisition. Unknown and foreign runs share one denial. *)
-val authorize : access:access -> Yojson.Safe.t -> (unit, string) result
-(** Reject unowned native Fusion bindings before attaching. Acquisition repeats
-    the check before capturing any evidence. *)
+val authorize : ?workspace:string -> access:access -> Yojson.Safe.t -> (unit, string) result
+(** Reject unowned native Fusion bindings and non-operator [snapshot_file] paths
+    outside [workspace] before attaching. Acquisition repeats the check before
+    capturing any evidence. *)
 val acquire : access:access -> store:Lane_addon_store.t -> package:Lane_addon_types.package ->
   resolve_machine_output:(Machine_lane.t -> (machine_output, string) result) ->
   resolve_lane_output:(installation_id:string -> (lane_output, string) result) ->

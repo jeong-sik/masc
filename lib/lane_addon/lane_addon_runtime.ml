@@ -1807,9 +1807,9 @@ let backend ~store ~artifact_store () = match !override with
             let* command = match package.command with
               | [] -> Error (Lifecycle.Worker_failed "native command is empty")
               | executable::arguments -> Ok {Lane_addon_native_worker.executable;arguments} in
-            let env=match package.worker_service with
-              | Mcp_tools -> None
-              | Browser_service _ -> Some (Browser_addon_environment.project (Unix.environment ())) in
+            let env = match package.worker_service with
+              | Mcp_tools | Browser_service _ ->
+                  Some (Browser_addon_environment.project (Unix.environment ())) in
             let* cleanup_context,live_ego=match package.worker_service with
               | Mcp_tools -> Ok (None,None)
               | Browser_service backend -> offload (fun () ->
@@ -2470,7 +2470,7 @@ let retain_tool_request_owner ~config ~access ~reserved ~(export : tool_export) 
     let installation_id = Lane_addon_tool_request_owner.installation_id (match e.configuration with
       | Some owner -> Lane_addon_tool_request_owner.Configuration owner.id
       | None -> Lane_addon_tool_request_owner.Manual e.instance_id) in
-    Eio.Mutex.use_rw ~protect:true m.action_mutex (fun () ->
+    Eio.Mutex.use_ro m.action_mutex (fun () ->
       offload (fun () -> Lane_addon_tool_request_owner.retain ~store:m.store ~scope ~request_id
         ~installation_id ~package_id:e.package.id ~tool:export.tool.name ~summary ~request)
       |> Result.map_error (function
@@ -3566,6 +3566,15 @@ let terminal_fault_records ~id ~source_path faults =
     if owner_concerns ~id ~source_path fault.fault_owner && fault_is_terminal fault
     then Some (`Assoc fault.fault_fields) else None) faults
 
+let host_process_denied = "host_process execution requires operator configuration"
+
+let authorize_execution ~access (package : Lane_addon_types.package) =
+  match package.execution, access with
+  | Lane_addon_types.Container _, (Lane_addon_sources.Operator_configuration | Keeper _ | Unauthenticated)
+  | Lane_addon_types.Host_process _, Lane_addon_sources.Operator_configuration -> Ok ()
+  | Lane_addon_types.Host_process _, (Lane_addon_sources.Keeper _ | Lane_addon_sources.Unauthenticated) ->
+      Error host_process_denied
+
 let attach_entry ~sw m ~run_id ~package ~binding ~configuration ~source_access ~visibility ~max_exact_in_flight =
   (* An image that is not on the host is not a worker that failed. Creating one
      would fail the same way on every attempt and leave an instance behind each
@@ -3636,7 +3645,7 @@ let edit_directory config =
       message=String.concat "; " resolution.warnings; current=None}
   | Ready | Warn | Missing_status -> Ok (Lane_addon_config.directory ~config_root:resolution.config_root.path)
 
-let authorize_document m ~access (document : Lane_addon_declaration.document) =
+let authorize_document m ~workspace ~access (document : Lane_addon_declaration.document) =
   match access with
   | Lane_addon_sources.Operator_configuration -> Ok ()
   | Keeper _ | Unauthenticated ->
@@ -3657,7 +3666,7 @@ let authorize_document m ~access (document : Lane_addon_declaration.document) =
         ~source_path:document.source_path ~source_text:document.source_text)
         |> Result.map_error (fun _ -> {Lane_addon_declaration.code=Invalid_request;
             message="Lane declaration is unavailable to this caller";current=None}) in
-      let* () = Lane_addon_sources.authorize ~access declaration.binding
+      let* () = Lane_addon_sources.authorize ~workspace ~access declaration.binding
         |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None}) in
       let* visibility = binding_visibility m ~access declaration.binding
         |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None}) in
@@ -3676,7 +3685,7 @@ let read_declaration ?(access = Lane_addon_sources.Unauthenticated) ~config json
         | (Keeper _ | Unauthenticated), Not_found -> denied
         | ((Lane_addon_sources.Keeper _ | Lane_addon_sources.Unauthenticated), (Lane_addon_declaration.Invalid_request | (Lane_addon_declaration.Revision_conflict | (Lane_addon_declaration.Invalid_declaration | Lane_addon_declaration.Io_error))))
         | (Lane_addon_sources.Operator_configuration, _) -> error) in
-    let* () = authorize_document m ~access document
+    let* () = authorize_document m ~workspace:config.Workspace.base_path ~access document
       |> Result.map_error (fun error -> match access with
         | Lane_addon_sources.Operator_configuration -> error
         | Keeper _ | Unauthenticated -> denied) in
@@ -3700,8 +3709,9 @@ let save_declaration ?(access = Lane_addon_sources.Unauthenticated) ~config json
                   |> Result.map_error (fun message -> {Lane_addon_declaration.code=Io_error;message;current=None}) in
                 (match ownership with
                  | Some owner when Lane_addon_document_owner.repair_permits owner ~keeper -> Ok ()
-                 | Some _ | None -> authorize_document m ~access current)
-            | Operator_configuration | Unauthenticated -> authorize_document m ~access current in
+                 | Some _ | None -> authorize_document m ~workspace:config.Workspace.base_path ~access current)
+            | Operator_configuration | Unauthenticated ->
+                authorize_document m ~workspace:config.Workspace.base_path ~access current in
           Ok (Some current)
       | Error {Lane_addon_declaration.code=Not_found;_} -> Ok None
       | Error ({Lane_addon_declaration.code=Invalid_request | Revision_conflict | Invalid_declaration | Io_error;_} as error) -> Error error in
@@ -3712,7 +3722,9 @@ let save_declaration ?(access = Lane_addon_sources.Unauthenticated) ~config json
             ~manifest_scope:(Lane_addon_config.Within_workspace config.Workspace.base_path)
             ~source_path:(Filename.concat directory request.file_name) ~source_text:request.source_text)
             |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_declaration;message;current=None}) in
-          let* () = Lane_addon_sources.authorize ~access declaration.binding
+          let* () = authorize_execution ~access declaration.package
+            |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None}) in
+          let* () = Lane_addon_sources.authorize ~workspace:config.Workspace.base_path ~access declaration.binding
             |> Result.map_error (fun message -> {Lane_addon_declaration.code=Invalid_request;message;current=None}) in
           (* HIGH-RISK-UNREVIEWED: reconcile attaches a Shared declaration as
              operator configuration and records no saver for it, so a record
@@ -3762,7 +3774,7 @@ let save_declaration ?(access = Lane_addon_sources.Unauthenticated) ~config json
             else Lane_addon_document_owner.revoke ~root:(Lane_addon_store.root m.store) ~source_path
               |> Result.map_error ownership_error)
       | Some _, Unconfirmed _ -> Ok () in
-    let* () = authorize_document m ~access receipt.document in
+    let* () = authorize_document m ~workspace:config.Workspace.base_path ~access receipt.document in
     m.configuration_nudge ();
     Ok (Lane_addon_declaration.receipt_to_json receipt)))
 
@@ -4337,6 +4349,7 @@ let dispatch ?caller ?(access = Lane_addon_sources.Unauthenticated) ~config ~ope
           | Some path -> Lane_addon_manifest.load ~path |> Result.map_error (function
               | Lane_addon_manifest.Invalid_manifest detail -> Request_rejected detail
               | Io_failure detail -> Runtime_failed detail)) in
+      let* () = request_result (authorize_execution ~access:source_access package) in
       let* () = request_result (Lane_addon_sources.validate binding) in
       let* () = request_result (match package.binding_schema with
         | None -> Ok ()
@@ -4345,7 +4358,7 @@ let dispatch ?caller ?(access = Lane_addon_sources.Unauthenticated) ~config ~ope
       let* sw = match Eio_context.get_root_switch_opt () with
         | Some sw -> Ok sw | None -> Error (Runtime_failed "server background owner unavailable") in
       Eio.Mutex.use_ro m.configuration_mutex (fun () ->
-      let* () = request_result (Lane_addon_sources.authorize ~access:source_access binding) in
+      let* () = request_result (Lane_addon_sources.authorize ~workspace:config.Workspace.base_path ~access:source_access binding) in
       let* visibility = request_result (binding_visibility m ~access:source_access binding) in
       (* A private attachment keeps its source owner for every later wake.
          Operator authority may discover the binding, but must not remain the
@@ -4353,7 +4366,7 @@ let dispatch ?caller ?(access = Lane_addon_sources.Unauthenticated) ~config ~ope
       let source_access = match visibility with
         | Keeper_only keeper -> Lane_addon_sources.Keeper keeper
         | Shared | Operator_only -> source_access in
-      let* () = request_result (Lane_addon_sources.authorize ~access:source_access binding) in
+      let* () = request_result (Lane_addon_sources.authorize ~workspace:config.Workspace.base_path ~access:source_access binding) in
       (* A manual Attach has no declaration to name a count. *)
       runtime_result (attach_entry ~sw m ~run_id ~package ~binding ~configuration:None ~source_access ~visibility
         ~max_exact_in_flight:Lane_addon_config.one_exact_at_a_time))

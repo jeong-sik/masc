@@ -2,12 +2,15 @@ module M = Tool_blob_maintenance
 module Board = Masc_board_handlers.Board_paths
 
 let tree name = M.Store { name; classification = M.In_scope M.Tree }
+let tree_with_blob_bodies name =
+  M.Store { name; classification = M.In_scope M.Tree_with_blob_bodies }
 let request_records name =
   M.Store { name; classification = M.In_scope M.Request_records }
 let payload_tree name = M.Store { name; classification = M.In_scope M.Payload_tree }
 let file name = M.Store { name; classification = M.In_scope M.File }
 let excluded reason name = M.Store { name; classification = M.Excluded reason }
 let no_reference = excluded M.Writes_no_reference
+let attachment_only = excluded M.Attachment_references_only
 
 let finder_metadata = excluded M.Finder_metadata M.finder_metadata_name
 
@@ -85,8 +88,10 @@ let workspace =
     ; tree Workspace_utils_paths_backend.messages_dirname
     ; tree Workspace_init.traces_dirname
     ; tree Keeper_owned_job_invocation.requests_dirname
-      (* Published reports own every revision, whatever chat or logs keep. *)
-    ; tree Published_artifact_store.dirname
+      (* Published reports own every revision, whatever chat or logs keep.
+         Their bodies live in [Tool_blob_store] and may embed [Attachment_store]
+         media, so attachment GC dereferences their live body blobs too. *)
+    ; tree_with_blob_bodies Published_artifact_store.dirname
       (* Imported project sources can outlive their tool or chat row. *)
     ; tree Artifact_project_source_store.dirname
     ; tree Artifact_project_build_store.dirname
@@ -109,7 +114,7 @@ let workspace =
     ; no_reference Workspace_utils_paths_backend.agents_dirname
     ; no_reference Workspace_utils_paths_backend.state_filename
     ; no_reference Workspace_utils_paths_backend.archive_filename
-    ; no_reference Workspace_utils_paths_backend.tasks_dirname
+    ; attachment_only Workspace_utils_paths_backend.tasks_dirname
     ; no_reference Workspace_broadcast.mention_outbox_dirname
     ; no_reference Workspace_broadcast.mention_outbox_quarantine_dirname
     ; no_reference (Board.persisted_filename Board.Reactions)
@@ -139,14 +144,14 @@ let workspace =
     ; no_reference Config_dir_resolver.locks_dirname
     ; no_reference Config_dir_resolver.credentials_dirname
     ; no_reference Config_dir_resolver.tmp_dirname
-    ; no_reference Config_dir_resolver.wiki_dirname
+    ; attachment_only Config_dir_resolver.wiki_dirname
     ; no_reference Config_dir_resolver.microvm_dirname
     ; no_reference Config_dir_resolver.runtime_dirname
     ; no_reference Dated_jsonl.Store.decision_audit_dirname
     ; no_reference Schedule_runner.schedules_dirname
     ; no_reference Schedule_store.schedules_filename
     ; no_reference Schedule_store.schedule_notes_filename
-    ; no_reference Goal_store.goals_filename
+    ; attachment_only Goal_store.goals_filename
     ; no_reference Goal_store.goal_events_filename
     ; no_reference Goal_measurement.filename
     ; no_reference Goal_verification.verifications_filename

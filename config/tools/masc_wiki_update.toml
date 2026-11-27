@@ -28,7 +28,12 @@ description = "The page's revision when you read it."
 name = "body"
 type = "string"
 required = true
-description = "The whole new page body (markdown). It replaces the old body."
+description = """
+The whole new page body (markdown). It replaces the old body. Embed workspace media \
+with ![caption](/api/v1/attachments/att_<sha256>) or ![[media:att_<sha256>|caption]] \
+(legacy /api/v1/media/<sha256> is also accepted), wiki pages with ![[wiki:<slug>|label]], \
+and published artifacts with ![[artifact:<id>|label]]. \
+Always reference workspace media by attachment ID or sha256; never paste raw base64 or data: URIs."""
 
 [[params]]
 name = "note"

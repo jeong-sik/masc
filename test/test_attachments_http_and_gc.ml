@@ -1368,6 +1368,139 @@ let test_http_range_and_video_poster () =
              Alcotest.(check string) "poster and format=png return identical cached PNG" body_p1 body_p2)))
 ;;
 
+let test_gc_protects_wiki_tasks_goals_and_published_artifact_bodies () =
+  with_temp_base_path (fun base_path ->
+    let store = Att.create ~base_path in
+    let p_wiki = make_png ~width:8 ~height:8 ~seed:21 in
+    let p_task = make_png ~width:8 ~height:8 ~seed:22 in
+    let p_goal = make_png ~width:8 ~height:8 ~seed:23 in
+    let p_artifact = make_png ~width:8 ~height:8 ~seed:24 in
+    let p_orphan = make_png ~width:8 ~height:8 ~seed:25 in
+    let put bytes =
+      Att.put ~origin:Att.User_upload ~created_by:"op" ~retention:Att.Durable store ~bytes
+      |> Result.get_ok
+    in
+    let m_wiki = put p_wiki in
+    let m_task = put p_task in
+    let m_goal = put p_goal in
+    let m_artifact = put p_artifact in
+    let m_orphan = put p_orphan in
+    let masc_dir = Common.masc_dir_from_base_path ~base_path in
+    (* 1. Wiki Markdown page referencing m_wiki *)
+    let wiki_dir = Filename.concat masc_dir Config_dir_resolver.wiki_dirname in
+    Fs_compat.mkdir_p wiki_dir;
+    Fs_compat.save_file
+      (Filename.concat wiki_dir "visual-guide.md")
+      (Printf.sprintf
+         "---\ntitle: Visual Guide\n---\n\n![Diagram](/api/v1/attachments/%s)\n"
+         m_wiki.id);
+    (* 2. Task JSON referencing m_task *)
+    let tasks_dir = Filename.concat masc_dir Workspace_utils_paths_backend.tasks_dirname in
+    Fs_compat.mkdir_p tasks_dir;
+    Fs_compat.save_file
+      (Filename.concat tasks_dir "task-1.json")
+      (Printf.sprintf
+         "{\"id\":\"task-1\",\"description\":\"See ![Shot](/api/v1/attachments/%s)\"}\n"
+         m_task.id);
+    (* 3. Goals file referencing m_goal *)
+    Fs_compat.save_file
+      (Filename.concat masc_dir Goal_store.goals_filename)
+      (Printf.sprintf "{\"goals\":[{\"id\":\"g1\",\"note\":\"%s\"}]}\n" m_goal.id);
+    (* 4. Published artifact HTML body stored in Tool_blob_store referencing m_artifact *)
+    let req =
+      Masc.Published_artifact.request_of_json
+        (`Assoc
+          [ "title", `String "Visual Report"
+          ; "summary", `String "Artifact referencing attachment in Tool_blob_store body"
+          ; "format", `String "html"
+          ; ( "content"
+            , `String
+                (Printf.sprintf
+                   "<!doctype html><html><body><img src=\"/api/v1/attachments/%s\"></body></html>"
+                   m_artifact.id) )
+          ])
+      |> Result.get_ok
+    in
+    (match
+       Eio_main.run (fun _env ->
+         Masc.Published_artifact_store.publish ~base_path ~author:"tester" req)
+     with
+     | Ok _ -> ()
+     | Error err ->
+       Alcotest.fail
+         ("publish failed: " ^ Masc.Published_artifact_store.error_message err));
+    (* Scope remains 100% classified and Tool_blob_sweep.observe succeeds on Markdown wiki dir *)
+    (match Tool_blob_sweep.observe ~base_path ~scope:Server_tool_blob_scope.scope with
+     | Ok report ->
+       Alcotest.(check (list string)) "observe unclassified empty" [] report.unclassified
+     | Error err -> Alcotest.fail (Tool_blob_sweep.error_to_string err));
+    (* Reachability protects wiki, tasks, goals, and published artifact body blobs *)
+    (match
+       Tool_blob_sweep.scan_attachment_reachability
+         ~base_path
+         ~scope:Server_tool_blob_scope.scope
+     with
+     | Error err -> Alcotest.fail err
+     | Ok reach ->
+       Alcotest.(check int) "total attachment blobs" 5 reach.total_blobs;
+       Alcotest.(check bool)
+         "wiki-referenced blob is live"
+         true
+         (Set_util.StringSet.mem m_wiki.sha256 reach.live_sha256s);
+       Alcotest.(check bool)
+         "task-referenced blob is live"
+         true
+         (Set_util.StringSet.mem m_task.sha256 reach.live_sha256s);
+       Alcotest.(check bool)
+         "goal-referenced blob is live"
+         true
+         (Set_util.StringSet.mem m_goal.sha256 reach.live_sha256s);
+       Alcotest.(check bool)
+         "published-artifact body blob is live"
+         true
+         (Set_util.StringSet.mem m_artifact.sha256 reach.live_sha256s);
+       Alcotest.(check bool)
+         "orphan blob is unreferenced"
+         true
+         (Set_util.StringSet.mem m_orphan.sha256 reach.unreferenced_sha256s));
+    let age_blob sha256 =
+      let shard = String.sub sha256 0 2 in
+      let old_ts = Unix.gettimeofday () -. 7200.0 in
+      let bpath =
+        Filename.concat (Filename.concat (Filename.concat (Att.root_dir store) "blobs") shard) sha256
+      in
+      let mpath =
+        Filename.concat
+          (Filename.concat (Filename.concat (Att.root_dir store) "meta") shard)
+          (sha256 ^ ".json")
+      in
+      Unix.utimes bpath old_ts old_ts;
+      Unix.utimes mpath old_ts old_ts
+    in
+    List.iter
+      age_blob
+      [ m_wiki.sha256; m_task.sha256; m_goal.sha256; m_artifact.sha256; m_orphan.sha256 ];
+    (match
+       Tool_blob_sweep.sweep_attachments
+         ~min_age_seconds:3600.0
+         ~base_path
+         ~scope:Server_tool_blob_scope.scope
+         ()
+     with
+     | Error err -> Alcotest.fail err
+     | Ok rep ->
+       Alcotest.(check int) "only aged orphan deleted" 1 rep.deleted;
+       Alcotest.(check bool) "not blocked" false rep.blocked_by_unclassified);
+    Alcotest.(check bool) "orphan deleted" true (Att.get_bytes store ~id:m_orphan.id = Ok None);
+    Alcotest.(check bool) "wiki blob survived" true (Att.get_bytes store ~id:m_wiki.id = Ok (Some p_wiki));
+    Alcotest.(check bool) "task blob survived" true (Att.get_bytes store ~id:m_task.id = Ok (Some p_task));
+    Alcotest.(check bool) "goal blob survived" true (Att.get_bytes store ~id:m_goal.id = Ok (Some p_goal));
+    Alcotest.(check bool)
+      "artifact body blob survived"
+      true
+      (Att.get_bytes store ~id:m_artifact.id = Ok (Some p_artifact)))
+;;
+
 let () =
   Alcotest.run
     "attachments_http_and_gc"
@@ -1377,6 +1510,7 @@ let () =
         ; Alcotest.test_case "HTTP Range 206/416 streaming and video ?poster=1" `Quick test_http_range_and_video_poster
         ; Alcotest.test_case "HTTP opaque attachment download-only and ephemeral keeper scope" `Quick test_opaque_serve_and_ephemeral_scope
         ; Alcotest.test_case "GC scope non-halt, reachability, and fail-closed sweep" `Quick test_gc_scope_non_halt_and_reachability
+        ; Alcotest.test_case "GC protects wiki, tasks, goals, and published artifact bodies" `Quick test_gc_protects_wiki_tasks_goals_and_published_artifact_bodies
         ; Alcotest.test_case "MCP masc://attachments/{id} template, BlobResourceContents, and ephemeral scope" `Quick test_mcp_attachment_resource
         ] )
     ]

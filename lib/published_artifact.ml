@@ -23,6 +23,11 @@ let valid_id id =
   && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
        (String.sub id 9 32)
 
+let extract_media_refs format content =
+  match format with
+  | Html -> Media_ref_scan.extract_html_media_refs content
+  | Markdown -> Media_ref_scan.extract_markdown_media_refs content
+
 let url ?revision id =
   "/dashboard/#/workspace?section=artifacts&artifact=" ^ id
   ^ Option.fold ~none:"" ~some:(fun n -> "&revision=" ^ string_of_int n) revision
@@ -91,10 +96,28 @@ let revision_to_json r = `Assoc (revision_fields r)
 let summary_to_json ~id r =
   `Assoc (("id", `String id) :: ("url", `String (url id)) :: revision_fields r)
 
-let publication_to_json ~id r =
-  `Assoc ["schema", `String "masc.published_artifact.v1";
-          "artifact", summary_to_json ~id r;
-          "revision_url", `String (url ~revision:r.revision id)]
+let publication_to_json ?(media_refs = []) ?(missing_media_refs = []) ~id r =
+  let missing_fields =
+    match missing_media_refs with
+    | [] -> []
+    | missing ->
+      [ "missing_media_refs", `List (List.map (fun s -> `String s) missing)
+      ; ( "warnings"
+        , `List
+            [ `String
+                (Printf.sprintf
+                   "referenced workspace media not found in store: %s"
+                   (String.concat ", " missing))
+            ] )
+      ]
+  in
+  `Assoc
+    ([ "schema", `String "masc.published_artifact.v1"
+     ; "artifact", summary_to_json ~id r
+     ; "revision_url", `String (url ~revision:r.revision id)
+     ; "media_refs", `List (List.map (fun s -> `String s) media_refs)
+     ]
+     @ missing_fields)
 
 let to_json t =
   `Assoc ["id", `String t.id; "revisions", `List (List.map revision_to_json t.revisions)]

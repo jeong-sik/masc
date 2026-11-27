@@ -1025,10 +1025,12 @@ type exclusion =
   | Vendor_client_home
   | Unpublished_write
   | Writes_no_reference
+  | Attachment_references_only
   | Repairable_pointer
 
 type source =
   | Tree
+  | Tree_with_blob_bodies
   | Payload_tree
   | File
   | Request_records
@@ -1086,7 +1088,8 @@ type consumer_source =
 let rec sources_of ~dir entries =
   List.concat_map
     (function
-      | Store { name; classification = In_scope Tree } -> [ Tree_source (Filename.concat dir name) ]
+      | Store { name; classification = In_scope (Tree | Tree_with_blob_bodies) } ->
+        [ Tree_source (Filename.concat dir name) ]
       | Store { name; classification = In_scope Payload_tree } -> [ Payload_tree_source (Filename.concat dir name) ]
       | Store { name; classification = In_scope Request_records } ->
         [ Request_records_source (Filename.concat dir name) ]
@@ -1096,6 +1099,70 @@ let rec sources_of ~dir entries =
       | Decoded_keeper_files _
       | Names _ -> []
       | Place { name; entries } -> sources_of ~dir:(Filename.concat dir name) entries)
+    entries
+;;
+
+let rec attachment_only_paths_of ~dir entries =
+  List.concat_map
+    (function
+      | Store { name; classification = Excluded Attachment_references_only } ->
+        [ Filename.concat dir name ]
+      | Store
+          { classification =
+              In_scope
+                (Tree | Tree_with_blob_bodies | Payload_tree | File | Request_records)
+              | Excluded
+                  ( Blob_store
+                  | Sweep_record
+                  | Truncated_copies
+                  | Settled_archive
+                  | Finder_metadata
+                  | Other_media_store
+                  | Operator_config
+                  | Repository_mirror
+                  | Vendor_client_home
+                  | Unpublished_write
+                  | Writes_no_reference
+                  | Repairable_pointer )
+          ; name = _
+          }
+      | Keeper_files _
+      | Decoded_keeper_files _
+      | Names _ -> []
+      | Place { name; entries } ->
+        attachment_only_paths_of ~dir:(Filename.concat dir name) entries)
+    entries
+;;
+
+let rec blob_body_paths_of ~dir entries =
+  List.concat_map
+    (function
+      | Store { name; classification = In_scope Tree_with_blob_bodies } ->
+        [ Filename.concat dir name ]
+      | Store
+          { classification =
+              In_scope (Tree | Payload_tree | File | Request_records)
+              | Excluded
+                  ( Blob_store
+                  | Sweep_record
+                  | Truncated_copies
+                  | Settled_archive
+                  | Finder_metadata
+                  | Other_media_store
+                  | Operator_config
+                  | Repository_mirror
+                  | Vendor_client_home
+                  | Unpublished_write
+                  | Writes_no_reference
+                  | Attachment_references_only
+                  | Repairable_pointer )
+          ; name = _
+          }
+      | Keeper_files _
+      | Decoded_keeper_files _
+      | Names _ -> []
+      | Place { name; entries } ->
+        blob_body_paths_of ~dir:(Filename.concat dir name) entries)
     entries
 ;;
 
@@ -1109,6 +1176,18 @@ let consumer_paths scope ~base_path =
        (function
          | Tree_source path | Payload_tree_source path | Request_records_source path
          | Optional_file path -> path)
+;;
+
+let attachment_consumer_paths scope ~base_path =
+  let workspace_masc_dir = Common.masc_dir_from_base_path ~base_path in
+  consumer_paths scope ~base_path
+  @ attachment_only_paths_of ~dir:workspace_masc_dir scope.workspace
+;;
+
+let blob_body_consumer_paths scope ~base_path =
+  blob_body_paths_of
+    ~dir:(Common.masc_dir_from_base_path ~base_path)
+    scope.workspace
 ;;
 
 type place =
@@ -1282,6 +1361,115 @@ let scan_decoded_keeper_files ~mode ~base_path ~scope references =
                    { path; reason = "a decoded keeper file must be a regular file" })))
       (Ok references)
       names
+;;
+
+let scan_tree_references ~mode ~base_path ~root =
+  let read_directory path =
+    let inspect () =
+      match
+        Fs_compat.inspect_owned_directory_chain
+          ~ownership_root:base_path
+          path
+      with
+      | Ok observation -> Ok observation
+      | Error rejection ->
+        Error
+          (Durable_source_stat_failed
+            { path
+             ; reason =
+                 Fs_compat.owned_directory_chain_rejection_to_string
+                   rejection
+             })
+    in
+    match inspect () with
+    | Error _ as error -> error
+    | Ok Fs_compat.Owned_directory_missing -> Ok None
+    | Ok (Fs_compat.Owned_directory before) ->
+      try
+        let entries = Sys.readdir path in
+        match inspect () with
+        | Error _ as error -> error
+        | Ok Fs_compat.Owned_directory_missing ->
+          Error
+            (Durable_source_stat_failed
+               { path; reason = "directory disappeared during scan" })
+        | Ok (Fs_compat.Owned_directory after) ->
+          if same_directory_snapshot before after
+          then Ok (Some entries)
+          else
+            Error
+              (Durable_source_stat_failed
+                 { path; reason = "directory identity changed during scan" })
+      with
+      | Sys_error reason ->
+        Error (Durable_source_stat_failed { path; reason })
+      | Unix.Unix_error (code, fn, arg) ->
+        Error
+          (Durable_source_stat_failed
+             { path
+             ; reason =
+                 Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
+             })
+  in
+  let rec scan_entry read_file path references =
+    try
+      match (Unix.lstat path).Unix.st_kind with
+      | Unix.S_DIR -> scan_directory read_file path references
+      | Unix.S_REG ->
+        let basename = Filename.basename path in
+        if Fs_compat.is_unpublished_write_name basename
+        then Ok references
+        else if Fs_compat.is_lock_name basename
+        then Ok references
+        else if String.equal basename finder_metadata_name
+        then Ok references
+        else if Common.is_tool_call_read_index_file basename
+        then Ok references
+        else
+          Result.map
+            (Live_reference_set.union references)
+            (read_file ~ownership_root:base_path path)
+      | Unix.S_LNK ->
+        Error
+          (Durable_source_stat_failed
+             { path
+             ; reason = "symbolic links are not durable maintenance sources"
+             })
+      | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK -> Ok references
+    with
+    | Sys_error reason -> Error (Durable_source_stat_failed { path; reason })
+    | Unix.Unix_error (code, fn, arg) ->
+      Error
+        (Durable_source_stat_failed
+           { path
+           ; reason = Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)
+           })
+  and scan_directory read_file path references =
+    match read_directory path with
+    | Error _ as error -> error
+    | Ok None -> Ok references
+    | Ok (Some entries) ->
+      entries
+      |> Array.to_list
+      |> List.sort String.compare
+      |> List.fold_left
+           (fun result name ->
+              Result.bind result (fun current ->
+                scan_entry read_file (Filename.concat path name) current))
+           (Ok references)
+  in
+  scan_directory (references_in_file ~mode) root Live_reference_set.empty
+;;
+
+let live_sha256s_in_tree ~base_path ~root =
+  Result.map
+    (fun refs ->
+       Live_reference_set.fold
+         (fun reference acc -> String_set.add (live_reference_sha256 reference) acc)
+         refs
+         String_set.empty
+       |> String_set.elements)
+    (scan_tree_references ~mode:Strict_structured ~base_path ~root)
 ;;
 
 let scan_live_references ~mode ~base_path ~scope =

@@ -153,6 +153,7 @@ type readable_page =
   ; updated : string
   ; body : string
   ; links : Wiki_link.link list
+  ; embeds : Wiki_link.embed list
   ; sources : Wiki_sources.t
   }
 
@@ -207,6 +208,7 @@ let load_pages ~base_path =
                      ; updated
                      ; body
                      ; links = Wiki_link.extract body
+                     ; embeds = Wiki_link.extract_embeds body
                      ; sources = Wiki_sources.of_body body
                      })))
         paths
@@ -221,11 +223,25 @@ let graph_of_loaded pages =
          Wiki_graph.Readable
            { page = p.slug
            ; links = p.links
+           ; embeds = p.embeds
            ; sources = p.sources
            ; revision = p.fm.revision
            }
        | Loaded_unreadable u -> Wiki_graph.Unreadable { file = u.file; reason = u.reason })
   |> Wiki_graph.of_nodes
+;;
+
+let media_exists_in ~base_path sha256 =
+  let store = Attachment_store.create ~base_path in
+  match Attachment_store.get_meta_by_sha256 store ~sha256 with
+  | Ok (Some _) -> true
+  | Ok None | Error _ ->
+    Option.is_some (Keeper_chat_media_store.file_path_of_token ~base_dir:base_path ~token:sha256)
+;;
+
+let artifact_exists_in ~base_path id =
+  Published_artifact_store.exists ~base_path ~id
+  |> Result.map_error Published_artifact_store.error_message
 ;;
 
 let finding_to_json finding =
@@ -236,7 +252,10 @@ let finding_to_json finding =
   in
   let extra =
     match finding with
-    | Wiki_lint.Broken_link { page; line; target } ->
+    | Wiki_lint.Broken_link { page; line; target }
+    | Wiki_lint.Broken_media_embed { page; line; target }
+    | Wiki_lint.Broken_wiki_embed { page; line; target }
+    | Wiki_lint.Broken_artifact_embed { page; line; target } ->
       [ "page", `String page; "line", `Int line; "target", `String target ]
     | Wiki_lint.Unsupported_link { page; line; form; target } ->
       [ "page", `String page
@@ -244,6 +263,24 @@ let finding_to_json finding =
       ; "form", `String form
       ; "target", `String target
       ]
+    | Wiki_lint.Invalid_embed { page; line; embed_kind; target } ->
+      let kind_name = Wiki_link.embed_kind_to_string embed_kind in
+      [ "page", `String page
+      ; "line", `Int line
+      ; "form", `String kind_name
+      ; "embed_kind", `String kind_name
+      ; "target", `String target
+      ]
+    | Wiki_lint.Unsupported_embed { page; line; scheme; target } ->
+      let form_field =
+        if String.equal (String.trim scheme) "" then [] else [ "form", `String scheme ]
+      in
+      [ "page", `String page
+      ; "line", `Int line
+      ; "scheme", `String scheme
+      ; "target", `String target
+      ]
+      @ form_field
     | Wiki_lint.Orphan { page } -> [ "page", `String page ]
     | Wiki_lint.Orphan_unconfirmed { page } -> [ "page", `String page ]
     | Wiki_lint.Missing_sources { page } -> [ "page", `String page ]
@@ -293,6 +330,42 @@ let link_to_json ~graph (link : Wiki_link.link) =
     ]
 ;;
 
+let embed_to_json ~graph ~media_exists ~artifact_exists (embed : Wiki_link.embed) =
+  let target_kind, target_name, exists, extra =
+    match embed.target with
+    | Wiki_link.Media_embed sha256 -> "media", sha256, Some (media_exists sha256), []
+    | Wiki_link.Wiki_embed slug -> "wiki", slug, Some (Wiki_graph.file_exists graph slug), []
+    | Wiki_link.Artifact_embed id ->
+      let exists_opt =
+        match artifact_exists id with
+        | Ok present -> Some present
+        | Error _ -> None
+      in
+      "artifact", id, exists_opt, []
+    | Wiki_link.Invalid_embed { kind; raw } ->
+      "invalid", raw, Some false, [ "embed_kind", `String (Wiki_link.embed_kind_to_string kind) ]
+    | Wiki_link.Unsupported_embed { scheme; raw } ->
+      "unsupported", raw, None, [ "scheme", `String scheme ]
+  in
+  `Assoc
+    ([ "kind", `String target_kind
+     ; "target", `String target_name
+     ; "label", Json_util.string_opt_to_json embed.label
+     ; "syntax", `String (Wiki_link.embed_syntax_to_string embed.syntax)
+     ; "raw", `String embed.raw
+     ; "line", `Int embed.line
+     ; "exists", Json_util.bool_opt_to_json exists
+     ]
+     @ extra)
+;;
+
+let wiki_media_refs ~embeds body =
+  List.sort_uniq
+    String.compare
+    (Wiki_link.media_refs_of_embeds embeds
+     @ Published_artifact.extract_media_refs Published_artifact.Markdown body)
+;;
+
 let backlinks_for ~pages target_slug =
   pages
   |> List.filter_map (function
@@ -300,18 +373,30 @@ let backlinks_for ~pages target_slug =
        | Loaded_readable p ->
          if String.equal p.slug target_slug
          then None
-         else if
-           List.exists
-             (fun (link : Wiki_link.link) ->
-                match link.target with
-                | Wiki_link.Page dst -> String.equal dst target_slug
-                | Wiki_link.Own_file _
-                | Wiki_link.External _
-                | Wiki_link.Invalid_name _
-                | Wiki_link.Unsupported _ -> false)
-             p.links
-         then Some p.slug
-         else None)
+         else
+           let links_to_target =
+             List.exists
+               (fun (link : Wiki_link.link) ->
+                  match link.target with
+                  | Wiki_link.Page dst -> String.equal dst target_slug
+                  | Wiki_link.Own_file _
+                  | Wiki_link.External _
+                  | Wiki_link.Invalid_name _
+                  | Wiki_link.Unsupported _ -> false)
+               p.links
+           in
+           let embeds_target =
+             List.exists
+               (fun (embed : Wiki_link.embed) ->
+                  match embed.target with
+                  | Wiki_link.Wiki_embed dst -> String.equal dst target_slug
+                  | Wiki_link.Media_embed _
+                  | Wiki_link.Artifact_embed _
+                  | Wiki_link.Invalid_embed _
+                  | Wiki_link.Unsupported_embed _ -> false)
+               p.embeds
+           in
+           if links_to_target || embeds_target then Some p.slug else None)
   |> List.sort String.compare
 ;;
 
@@ -328,7 +413,13 @@ let list_json ?now ?tag ?source ?(sort = Sort_title) ~base_path () =
      | Error msg -> error_result Env.Store_unavailable msg
      | Ok pages ->
        let graph = graph_of_loaded pages in
-       let findings = Wiki_lint.run graph ~log in
+       let findings =
+         Wiki_lint.run
+           ~media_exists:(media_exists_in ~base_path)
+           ~artifact_exists:(artifact_exists_in ~base_path)
+           graph
+           ~log
+       in
        let readable =
          List.filter_map
            (function
@@ -467,6 +558,11 @@ let list_json ?now ?tag ?source ?(sort = Sort_title) ~base_path () =
                Some (`String page)
              | Wiki_lint.Broken_link _
              | Wiki_lint.Unsupported_link _
+             | Wiki_lint.Broken_media_embed _
+             | Wiki_lint.Broken_wiki_embed _
+             | Wiki_lint.Broken_artifact_embed _
+             | Wiki_lint.Invalid_embed _
+             | Wiki_lint.Unsupported_embed _
              | Wiki_lint.Missing_sources _
              | Wiki_lint.Hearsay_only _
              | Wiki_lint.Unreadable_page _
@@ -726,7 +822,13 @@ let lint_json ?now ?page ~base_path () =
         | Error msg -> error_result Env.Store_unavailable msg
         | Ok pages ->
           let graph = graph_of_loaded pages in
-          let all_findings = Wiki_lint.run graph ~log in
+          let all_findings =
+            Wiki_lint.run
+              ~media_exists:(media_exists_in ~base_path)
+              ~artifact_exists:(artifact_exists_in ~base_path)
+              graph
+              ~log
+          in
           let findings =
             match page_filter with
             | None -> all_findings
@@ -806,12 +908,15 @@ let get_page_json ?now ~base_path ~slug () =
                (Printf.sprintf "wiki page %s is unreadable: %s" u.file u.reason)
            | Some (Loaded_readable p) ->
              let graph = graph_of_loaded pages in
+             let media_exists = media_exists_in ~base_path in
+             let artifact_exists = artifact_exists_in ~base_path in
              let findings =
-               Wiki_lint.run graph ~log
+               Wiki_lint.run ~media_exists ~artifact_exists graph ~log
                |> List.filter (fun f ->
                     String.equal (Wiki_lint.subject f) valid_slug)
              in
              let backlinks = backlinks_for ~pages valid_slug in
+             let media_refs = wiki_media_refs ~embeds:p.embeds p.body in
              let data =
                `Assoc
                  [ "page", `String valid_slug
@@ -822,6 +927,12 @@ let get_page_json ?now ~base_path ~slug () =
                  ; "body_markdown", `String p.body
                  ; ( "outgoing_links"
                    , `List (List.map (link_to_json ~graph) p.links) )
+                 ; ( "embeds"
+                   , `List
+                       (List.map
+                          (embed_to_json ~graph ~media_exists ~artifact_exists)
+                          p.embeds) )
+                 ; "media_refs", `List (List.map (fun s -> `String s) media_refs)
                  ; "backlinks", `List (List.map (fun s -> `String s) backlinks)
                  ; ( "sources"
                    , `Assoc
@@ -1112,25 +1223,56 @@ let put_page_json ?(now = Time_compat.now ()) ~config ~actor ~slug ~body_str () 
                                     ; "revision", `Int next_rev
                                     ]
                                   ();
+                                let media_refs =
+                                  wiki_media_refs
+                                    ~embeds:(Wiki_link.extract_embeds body)
+                                    body
+                                in
+                                let missing_media_refs =
+                                  List.filter
+                                    (fun token -> not (media_exists_in ~base_path token))
+                                    media_refs
+                                in
+                                let media_warning =
+                                  match missing_media_refs with
+                                  | [] -> None
+                                  | missing ->
+                                    Some
+                                      ("referenced workspace media not found in store: "
+                                       ^ String.concat ", " missing)
+                                in
                                 let warnings =
-                                  List.filter_map Fun.id [ log_warning; index_warning ]
+                                  List.filter_map
+                                    Fun.id
+                                    [ log_warning; index_warning; media_warning ]
+                                in
+                                let missing_media_field =
+                                  match missing_media_refs with
+                                  | [] -> []
+                                  | missing ->
+                                    [ ( "missing_media_refs"
+                                      , `List (List.map (fun s -> `String s) missing) )
+                                    ]
                                 in
                                 Ok
                                   (Env.ok
                                      ~now
                                      (`Assoc
-                                       [ "action", `String "updated"
-                                       ; "slug", `String valid_slug
-                                       ; "revision", `Int next_rev
-                                       ; "sha256", `String new_sha
-                                       ; ( "frontmatter"
-                                         , frontmatter_to_json
-                                             ~updated:(updated_day :> string)
-                                             next_fm )
-                                       ; ( "warnings"
-                                         , `List
-                                             (List.map (fun w -> `String w) warnings) )
-                                       ]))))))
+                                       ([ "action", `String "updated"
+                                        ; "slug", `String valid_slug
+                                        ; "revision", `Int next_rev
+                                        ; "sha256", `String new_sha
+                                        ; ( "frontmatter"
+                                          , frontmatter_to_json
+                                              ~updated:(updated_day :> string)
+                                              next_fm )
+                                        ; ( "media_refs"
+                                          , `List (List.map (fun s -> `String s) media_refs) )
+                                        ; ( "warnings"
+                                          , `List
+                                              (List.map (fun w -> `String w) warnings) )
+                                        ]
+                                        @ missing_media_field)))))))
                   else (
                     (* Creating a new wiki page *)
                     match expected_sha256, expected_revision with
@@ -1214,22 +1356,53 @@ let put_page_json ?(now = Time_compat.now ()) ~config ~actor ~slug ~body_str () 
                               ~dataset:"wiki"
                               ~extra:[ "slug", `String valid_slug; "revision", `Int 1 ]
                               ();
+                            let media_refs =
+                              wiki_media_refs
+                                ~embeds:(Wiki_link.extract_embeds body)
+                                body
+                            in
+                            let missing_media_refs =
+                              List.filter
+                                (fun token -> not (media_exists_in ~base_path token))
+                                media_refs
+                            in
+                            let media_warning =
+                              match missing_media_refs with
+                              | [] -> None
+                              | missing ->
+                                Some
+                                  ("referenced workspace media not found in store: "
+                                   ^ String.concat ", " missing)
+                            in
                             let warnings =
-                              List.filter_map Fun.id [ log_warning; index_warning ]
+                              List.filter_map
+                                Fun.id
+                                [ log_warning; index_warning; media_warning ]
+                            in
+                            let missing_media_field =
+                              match missing_media_refs with
+                              | [] -> []
+                              | missing ->
+                                [ ( "missing_media_refs"
+                                  , `List (List.map (fun s -> `String s) missing) )
+                                ]
                             in
                             Ok
                               (Env.ok
                                  ~now
                                  (`Assoc
-                                   [ "action", `String "created"
-                                   ; "slug", `String valid_slug
-                                   ; "revision", `Int 1
-                                   ; "sha256", `String new_sha
-                                   ; ( "frontmatter"
-                                     , frontmatter_to_json ~updated:(day :> string) fm )
-                                   ; ( "warnings"
-                                     , `List (List.map (fun w -> `String w) warnings) )
-                                   ]))))))
+                                   ([ "action", `String "created"
+                                    ; "slug", `String valid_slug
+                                    ; "revision", `Int 1
+                                    ; "sha256", `String new_sha
+                                    ; ( "frontmatter"
+                                      , frontmatter_to_json ~updated:(day :> string) fm )
+                                    ; ( "media_refs"
+                                      , `List (List.map (fun s -> `String s) media_refs) )
+                                    ; ( "warnings"
+                                      , `List (List.map (fun w -> `String w) warnings) )
+                                    ]
+                                    @ missing_media_field)))))))
               with
               | Ok res -> res
               | Error err ->

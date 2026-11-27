@@ -86,6 +86,14 @@ let read ~base_path ~id ~revision =
       let* content = read_revision_body ~base_path selected in
       Ok (artifact, selected, content))
 
+let exists ~base_path ~id =
+  if not (valid_id id) then Ok false
+  else
+    match protect (fun () -> load ~base_path id) with
+    | Ok _ -> Ok true
+    | Error Missing | Error (Invalid _) -> Ok false
+    | Error (Unavailable _ | Conflict _ | Commit_uncertain _ as err) -> Error err
+
 let with_latest_locked ~base_path ~id ~expected_revision ~f =
   if not (valid_id id) then Error (Invalid "invalid artifact id")
   else if expected_revision <= 0 then Error (Invalid "expected revision must be positive")

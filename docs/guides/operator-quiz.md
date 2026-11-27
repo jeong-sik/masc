@@ -91,7 +91,7 @@ max_output_tokens = 2048
 
 ### 4. 시간 정하기
 
-`masc_schedule_create` 로 Lane action Schedule 을 만든다.
+`masc_schedule_lane_act_create` 로 Lane action Schedule 을 만든다. 운영자 자격으로 만들려면 같은 JSON 을 `POST /api/v1/tools/masc_schedule_lane_act_create` 로 보낸다.
 
 ```json
 {"installation_id": "operator-quiz",
@@ -253,7 +253,7 @@ host 는 선언을 저장하기 전에 `[binding]` 을 아래 순서로 본다. 
 
 ## 매일 쓰기
 
-- 시간 바꾸기: `masc_schedule_update`.
+- 시간 바꾸기: `masc_schedule_lane_act_update`. `installation_id` 와 `action` 을 다시 적는다. 운영자 자격으로 만든 예약은 같은 JSON 을 `POST /api/v1/tools/masc_schedule_lane_act_update` 로 보낸다. Keeper 가 도구로 부르면 `not_schedule_owner` 로 거절된다.
 - 멈추기: Schedule 을 취소하거나 선언을 `enabled = false` 로 둔다. 선언을 끄면 worker 는 내려가고 volume 은 남는다. 열린 질문은 Approvals 에 그대로 있고, 다음 worker 가 답을 받는다.
 - 답하지 않은 질문: 기한도 개수 제한도 없다. `compose` 마다 질문이 하나씩 늘어난다. 아직 질문을 내지 않은 세션만 다음 `compose` 가 대체한다.
 - 두 개 돌리기: 다른 선언 id 로 두 번 설치한다. volume, lane, Schedule 이 따로 생긴다.

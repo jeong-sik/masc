@@ -17,6 +17,8 @@ let schedule_request_surface_tools =
   ; "masc_schedule_cancel"
   ; "masc_schedule_note_add"
   ; "masc_schedule_notes_list"
+  ; "masc_schedule_lane_act_create"
+  ; "masc_schedule_lane_act_update"
   ]
 ;;
 

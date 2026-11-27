@@ -231,6 +231,8 @@ let test_flat_tool_surface () =
     ; "masc_schedule_cancel"
     ; "masc_schedule_note_add"
     ; "masc_schedule_notes_list"
+    ; "masc_schedule_lane_act_create"
+    ; "masc_schedule_lane_act_update"
     ]
     names;
   check (list string) "public schedule surface" names
@@ -269,30 +271,45 @@ let test_flat_tool_surface () =
 
      The schema once said nothing was mandatory while the runtime rejected a
      call missing keeper_name or message, so a caller reading the declaration
-     and sending [{}] was following it and still refused. A Lane action now
-     needs installation_id and action instead (RFC operator-quiz §4.7), so
-     each call shape is one [oneOf] alternative with the fields the runtime
-     needs for it. *)
-  let shapes schema =
+     and sending [{}] was following it and still refused. Then one tool took
+     either a Keeper wake or a Lane action as two [oneOf] alternatives, and
+     callers filled the fields of the kind they did not want. Each kind now
+     has its own tools, so a schema states its mandatory fields as plain
+     [required] and offers no field of the other kind. *)
+  let offers schema name =
+    match member "properties" schema with
+    | `Assoc properties -> List.mem_assoc name properties
+    | _ -> false
+  in
+  let has_alternatives schema =
     match member "oneOf" schema with
-    | `List alternatives -> List.map required_names alternatives
-    | _ -> []
+    | `Null -> false
+    | _ -> true
   in
-  let wake_or_lane = [ [ "keeper_name"; "message" ]; [ "installation_id"; "action" ] ] in
-  check (list string) "create requires no field outside a shape" []
-    (required_names create_schema.input_schema);
-  check (list (list string)) "create schema names each shape the runtime accepts" wake_or_lane
-    (shapes create_schema.input_schema);
-  let update_schema : Masc_domain.tool_schema =
+  let lane_fields = [ "installation_id"; "action" ] in
+  let wake_fields = [ "keeper_name"; "message"; "title"; "urgency"; "delivery" ] in
+  let check_shape label (schema : Masc_domain.tool_schema) ~required ~absent =
+    check (list string) (label ^ " requires its own fields") required
+      (required_names schema.input_schema);
+    check bool (label ^ " states no alternatives") false (has_alternatives schema.input_schema);
+    check (list string) (label ^ " offers no field of the other kind") []
+      (List.filter (offers schema.input_schema) absent)
+  in
+  check_shape "create" create_schema ~required:[ "keeper_name"; "message" ] ~absent:lane_fields;
+  (* The migration accepts an omitted recurrence after loading the schedule so
+     it can keep the stored one. *)
+  check_shape "update"
     (schedule_definition Tool_schemas_schedule.Update_request).schema
-  in
-  (* The migration accepts omission after loading the schedule so it can keep
-     the stored recurrence and warn before the next version requires it. *)
-  check (list string) "update schema requires the stable identity"
-    [ "schedule_id" ]
-    (required_names update_schema.input_schema);
-  check (list (list string)) "update schema names the same shapes" wake_or_lane
-    (shapes update_schema.input_schema);
+    ~required:[ "schedule_id"; "keeper_name"; "message" ]
+    ~absent:lane_fields;
+  check_shape "lane act create"
+    (schedule_definition Tool_schemas_schedule.Create_lane_act_request).schema
+    ~required:[ "installation_id"; "action" ]
+    ~absent:wake_fields;
+  check_shape "lane act update"
+    (schedule_definition Tool_schemas_schedule.Update_lane_act_request).schema
+    ~required:[ "schedule_id"; "installation_id"; "action" ]
+    ~absent:wake_fields;
   let get_schema : Masc_domain.tool_schema =
     (schedule_definition Tool_schemas_schedule.Get_request).schema
   in
@@ -965,10 +982,10 @@ let test_removed_convenience_input_does_not_synthesize_payload () =
         ])
   in
   check bool "removed convenience input rejected" false (Tool_result.is_success result);
-  check bool "neutral payload contract names the missing field" true
+  check bool "the refusal names the missing field" true
     (String_util.contains_substring
        (Tool_result.message result)
-       "keeper_name and message");
+       "keeper_name is required");
   check int "removed convenience input is not persisted" 0
     (List.length (Schedule_store.read_state config).schedules)
 ;;
@@ -1153,14 +1170,14 @@ let test_keeper_wake_schema_validation () =
        "unknown urgency: urgent-ish")
 ;;
 
-(* A Lane action names its installation and action instead of a Keeper and a
-   message (RFC operator-quiz §4.7). The fields name the kind; fields of both
-   kinds, or of neither, are refused rather than guessed. *)
+(* A Lane action is scheduled through its own tool, which takes its
+   installation and action and no field of a Keeper wake (RFC operator-quiz
+   §4.7). *)
 let test_lane_act_schedule_is_created_from_its_own_fields () =
   with_config
   @@ fun config ->
   let create schedule_id fields =
-    dispatch_exn config Tool_schemas_schedule.Create_request
+    dispatch_exn config Tool_schemas_schedule.Create_lane_act_request
       (`Assoc ([ "schedule_id", `String schedule_id; "due_at_unix", `Float future_due_at ] @ fields))
   in
   let compose = `Assoc [ "kind", `String "compose" ] in
@@ -1185,33 +1202,34 @@ let test_lane_act_schedule_is_created_from_its_own_fields () =
   let refused label fields =
     check bool label false (Tool_result.is_success (create ("sched-" ^ label) fields))
   in
-  refused "both-kinds"
-    [ "installation_id", `String "operator-quiz"; "action", compose
-    ; "keeper_name", `String "schedule-keeper"; "message", `String "run" ];
-  refused "neither-kind" [];
+  refused "no-fields" [];
   refused "action-not-an-object"
     [ "installation_id", `String "operator-quiz"; "action", `String "compose" ];
   refused "blank-installation" [ "installation_id", `String " "; "action", compose ];
-  (* The boundary every MCP and Keeper call crosses first reads the same
-     shapes from the schema. *)
-  let create_schema : Masc_domain.tool_schema =
-    (schedule_definition Tool_schemas_schedule.Create_request).schema
-  in
-  let admitted fields =
+  (* The boundary every MCP and Keeper call crosses first reads each tool's
+     own fields from its schema. *)
+  let admitted action name fields =
+    let schema : Masc_domain.tool_schema = (schedule_definition action).schema in
     Result.is_ok
-      (Tool_input_validation.validate_args ~schema:create_schema.input_schema
-         ~name:"masc_schedule_create"
+      (Tool_input_validation.validate_args ~schema:schema.input_schema ~name
          ~args:(`Assoc ([ "due_at_unix", `Float future_due_at ] @ fields)) ())
   in
-  check bool "the schema admits a Lane action" true
-    (admitted [ "installation_id", `String "operator-quiz"; "action", compose ]);
-  check bool "the schema refuses fields of both kinds" false
-    (admitted
-       [ "installation_id", `String "operator-quiz"; "action", compose
-       ; "keeper_name", `String "schedule-keeper"; "message", `String "run" ]);
-  check bool "the schema refuses a Lane action with a wake title" false
-    (admitted
-       [ "installation_id", `String "operator-quiz"; "action", compose; "title", `String "t" ])
+  let lane = admitted Tool_schemas_schedule.Create_lane_act_request "masc_schedule_lane_act_create" in
+  let wake = admitted Tool_schemas_schedule.Create_request "masc_schedule_create" in
+  let lane_fields = [ "installation_id", `String "operator-quiz"; "action", compose ] in
+  let wake_fields = [ "keeper_name", `String "schedule-keeper"; "message", `String "run" ] in
+  check bool "the Lane action schema admits a Lane action" true (lane lane_fields);
+  check bool "the Lane action schema refuses a Keeper wake's fields" false
+    (lane (lane_fields @ wake_fields));
+  check bool "the Lane action schema refuses a wake title" false
+    (lane (lane_fields @ [ "title", `String "t" ]));
+  check bool "the wake schema admits a Keeper wake" true (wake wake_fields);
+  (* The placeholders callers sent while one tool offered both sets. *)
+  check bool "the wake schema refuses an installation_id" false
+    (wake (wake_fields @ [ "installation_id", `String "x" ]));
+  check bool "the wake schema refuses an action" false
+    (wake (wake_fields @ [ "action", `Assoc [ "kind", `String "noop" ] ]));
+  check bool "the wake schema refuses a Lane action alone" false (wake lane_fields)
 ;;
 
 let test_due_signal_and_dashboard_projection () =
@@ -2490,7 +2508,11 @@ let test_declared_bounds_match_the_handler () =
     (fun action ->
        check (option int) "due_in_sec minimum" (Some Tool_schedule.min_due_in_sec)
          (bound (property action "due_in_sec") "minimum"))
-    [ Tool_schemas_schedule.Create_request; Tool_schemas_schedule.Update_request ]
+    [ Tool_schemas_schedule.Create_request
+    ; Tool_schemas_schedule.Update_request
+    ; Tool_schemas_schedule.Create_lane_act_request
+    ; Tool_schemas_schedule.Update_lane_act_request
+    ]
 ;;
 
 
@@ -2946,7 +2968,7 @@ let test_cancel_keeper_to_lane_still_withdraws () =
   ignore (f1_create config schedule_id : Schedule_domain.schedule_request);
   ignore (f1_seed config "schedule-keeper" schedule_id "before-lane" : Keeper_event_queue.stimulus);
   check bool "public Keeper-to-Lane update succeeds" true
-    (Tool_result.is_success (dispatch_exn config Tool_schemas_schedule.Update_request
+    (Tool_result.is_success (dispatch_exn config Tool_schemas_schedule.Update_lane_act_request
        (`Assoc [ "schedule_id", `String schedule_id; "installation_id", `String "operator-quiz"
                ; "action", `Assoc [ "kind", `String "compose" ] ])));
   check bool "Lane definition cancels" true (Tool_result.is_success (f1_cancel config schedule_id));

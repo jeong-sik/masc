@@ -93,8 +93,10 @@ let reaction_raw_auth_request header value =
     "/api/v1/board/reactions"
 
 (* /api/v1/tools/* endpoints called by dashboard/src/api/board.ts, plus the
-   goal lifecycle and schedule write routes the TUI consumes. Kept in sync
-   with those consumers — see module doc. *)
+   goal lifecycle routes and the schedule create and cancel routes the TUI
+   consumes, plus the schedule replacement route and the Lane action schedule
+   pair, which a credential holder calls directly. Kept in sync with those
+   consumers — see module doc. *)
 let dashboard_board_tool_routes =
   [ "/api/v1/tools/masc_board_vote"
   ; "/api/v1/tools/masc_board_post"
@@ -103,6 +105,8 @@ let dashboard_board_tool_routes =
   ; "/api/v1/tools/masc_goal_transition"
   ; "/api/v1/tools/masc_schedule_create"
   ; "/api/v1/tools/masc_schedule_update"
+  ; "/api/v1/tools/masc_schedule_lane_act_create"
+  ; "/api/v1/tools/masc_schedule_lane_act_update"
   ; "/api/v1/tools/masc_schedule_cancel"
   ]
 
@@ -491,6 +495,68 @@ let test_schedule_create_actor_comes_from_auth () =
       stored.Schedule_domain.requested_by.Schedule_domain.id;
     check bool "the operator surface records a human operator" true
       (stored.Schedule_domain.requested_by.Schedule_domain.kind
+       = Schedule_domain.Human_operator)
+  | rows -> failf "expected one stored schedule, got %d" (List.length rows)
+;;
+
+(* A Lane action is scheduled through its own route. The wake route's schema
+   has no Lane field, so the same body there is refused before anything is
+   written; the Lane route stores it under the operator who holds the
+   credential, and replaces it by id. *)
+let test_lane_act_schedule_routes_record_the_operator () =
+  with_authenticated_activity_router
+    ~prefix:"schedule-lane-act-http-"
+    ~agent_name:"credential-owner"
+  @@ fun ~base_path:_ ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  let body questions =
+    `Assoc
+      [ "schedule_id", `String "sched-http-lane"
+      ; "installation_id", `String "operator-quiz"
+      ; "action", `Assoc [ "kind", `String "compose"; "questions", `Int questions ]
+      ; "due_in_sec", `Int 3600
+      ]
+    |> Yojson.Safe.to_string
+  in
+  let post path body =
+    fst (dispatch_json ~router ~token ~path ~extra_headers:[] ~body ())
+  in
+  (* The refused body is a complete Keeper wake plus the Lane fields, so the
+     Lane fields are the only reason left to refuse it. *)
+  let wake_with_lane_fields =
+    match Yojson.Safe.from_string (body 5) with
+    | `Assoc fields ->
+      `Assoc
+        (fields
+         @ [ "keeper_name", `String "credential-owner"
+           ; "message", `String "check the queue"
+           ; "allow_unregistered_keeper", `Bool true
+           ])
+      |> Yojson.Safe.to_string
+    | _ -> failf "the Lane action body is not an object"
+  in
+  check int "the wake route refuses a Lane action" 400
+    (post "/api/v1/tools/masc_schedule_create" wake_with_lane_fields);
+  check int "nothing stored for the refused body" 0
+    (List.length (Schedule_store.read_state config).schedules);
+  check int "the Lane action route creates it" 201
+    (post "/api/v1/tools/masc_schedule_lane_act_create" (body 5));
+  check int "the Lane action route replaces it" 200
+    (post "/api/v1/tools/masc_schedule_lane_act_update" (body 7));
+  match (Schedule_store.read_state config).schedules with
+  | [ stored ] ->
+    check bool "the stored payload is the replaced Lane action" true
+      (Yojson.Safe.equal
+         (Schedule_domain.payload_to_yojson stored.Schedule_domain.payload)
+         (`Assoc
+            [ "kind", `String Schedule_supported_kinds.lane_act
+            ; ( "body"
+              , `Assoc
+                  [ "installation_id", `String "operator-quiz"
+                  ; "action", `Assoc [ "kind", `String "compose"; "questions", `Int 7 ]
+                  ] )
+            ]));
+    check bool "the scheduler is a human operator" true
+      (stored.Schedule_domain.scheduled_by.Schedule_domain.kind
        = Schedule_domain.Human_operator)
   | rows -> failf "expected one stored schedule, got %d" (List.length rows)
 ;;
@@ -2082,6 +2148,8 @@ let () =
             test_no_tools_route_drift
         ; test_case "schedule create actor comes from auth" `Quick
             test_schedule_create_actor_comes_from_auth
+        ; test_case "Lane action schedule routes record the operator" `Quick
+            test_lane_act_schedule_routes_record_the_operator
         ; test_case "schedule create with unreadable credential answers 503" `Quick
             test_schedule_create_with_unreadable_credential_answers_503
         ; test_case "a worker credential cancelling is not the operator" `Quick

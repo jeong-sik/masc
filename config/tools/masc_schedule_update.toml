@@ -1,6 +1,6 @@
 name = "masc_schedule_update"
 description = """
-Atomically replace a scheduled or due Keeper wake. Keep schedule_id; issue a new
+Atomically replace a scheduled or due schedule with this Keeper wake. Keep schedule_id; issue a new
 schedule_instance_id to separate future evidence. Running and terminal requests
 cannot change. If both due inputs and recurrence_kind are omitted, keep the
 latest stored due time, recurrence and expiry; a content edit does not
@@ -14,8 +14,8 @@ due_already_past; resending the stored
 due time is accepted. You may update a schedule you made or one that wakes you;
 its replacement must retain that ownership or fail with error_kind
 not_schedule_owner. Requester and scheduler stay unchanged.
-A Lane action schedule is replaced the same way, with installation_id and
-action instead of keeper_name and message."""
+The replacement is a Keeper wake whatever the stored schedule was. To replace a
+Lane action with a Lane action, use masc_schedule_lane_act_update."""
 additional_properties = false
 defer_loading = true
 
@@ -46,11 +46,13 @@ RFC 3339 timestamp with Z or an explicit numeric offset, for example
 [[params]]
 name = "keeper_name"
 type = "string"
-description = "The Keeper to wake. A Keeper wake needs it and message."
+required = true
+description = "The Keeper to wake. State it again: it is not kept from the stored schedule."
 
 [[params]]
 name = "message"
 type = "string"
+required = true
 description = """
 What the Keeper is being woken to do. Write the work itself. A recurring
 wake sends this text unchanged: ask the Keeper to read current state each time,
@@ -166,30 +168,3 @@ name = "allow_unregistered_keeper"
 type = "boolean"
 description = """
 Allow a wake whose target Keeper has no durable metadata yet. Default false."""
-
-[[params]]
-name = "installation_id"
-type = "string"
-description = """
-For a Lane action instead of a Keeper wake: the declared Lane Add-on \
-installation (its declaration id) whose live worker runs action at each due \
-time. Give it with action, and without keeper_name, message, title, urgency, \
-delivery, allow_unregistered_keeper, until_github_run or until_github_checks."""
-
-[[params]]
-name = "action"
-type = "object"
-description = """
-For a Lane action: the action object the installation's package schema \
-accepts, such as {"kind": "compose", "questions": 5}. It is checked against the worker that \
-runs it, at each due time."""
-
-[[one_of]]
-required = ["keeper_name", "message"]
-forbidden = ["installation_id", "action"]
-description = "Wake a Keeper with this message."
-
-[[one_of]]
-required = ["installation_id", "action"]
-forbidden = ["keeper_name", "message", "title", "urgency", "delivery", "allow_unregistered_keeper", "until_github_run", "until_github_checks"]
-description = "Hand this action to a declared Lane installation's live worker."

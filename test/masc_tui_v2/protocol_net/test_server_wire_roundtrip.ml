@@ -837,7 +837,7 @@ let test_schedule_create_roundtrip () =
           Alcotest.fail
             (label ^ ": " ^ rejection.Masc.Tool_input_validation.message)
       | Ok args -> (
-          (match Masc.Tool_schedule.payload_from_args args with
+          (match Masc.Tool_schedule.keeper_wake_payload_from_args args with
           | Ok _ -> ()
           | Error e -> Alcotest.fail (label ^ ": " ^ e));
           match Masc.Tool_schedule.recurrence_of_arg args with

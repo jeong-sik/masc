@@ -1,7 +1,7 @@
 name = "masc_schedule_notes_list"
 description = """List the durable notes of one scheduled request. Notes are
 keyed by the stable schedule_id and survive definition replacements
-(masc_schedule_update) and terminal schedule states. Use them to read why a
+(masc_schedule_update, masc_schedule_lane_act_update) and terminal schedule states. Use them to read why a
 schedule exists and what changed and when. A wake does not carry the notes, so a
 woken Keeper reads them here when it needs them. Each page is oldest first;
 the first page is the newest window. A page holds at most limit notes, and

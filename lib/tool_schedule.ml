@@ -409,34 +409,17 @@ let stamped_kind : Schedule_payload_projection.known_kind -> string = function
   | Schedule_payload_projection.Lane_act -> Schedule_supported_kinds.lane_act
 ;;
 
-(* The tool takes each kind's fields directly instead of an envelope the
-   caller assembles. The envelope was three params -- kind, schema version,
-   body -- whose only correct values were a fixed string, the integer 1, and
-   an object with two required keys. Callers guessed, and two thirds of the
-   calls were rejected on shape before the schedule was ever considered. The
-   fields name the kind: a Keeper wake gives keeper_name and message, a Lane
-   action installation_id and action (RFC operator-quiz §4.7). Fields of both
-   are refused rather than guessed. [result_delivery] is absent on purpose: it
+(* Each kind has its own tools, and a tool takes its kind's fields directly.
+   Two earlier shapes failed on the caller's side. An envelope of kind, schema
+   version and body had two thirds of its calls rejected on shape. One tool
+   that took the fields of either kind then offered every caller both sets.
+   In two episodes (2026-10-30..11-01 and 2026-11-20..22) callers filled the set
+   they did not need with placeholders and the one-of rule refused them in
+   chains of up to 29 calls. Calls that carried the Lane set alone were
+   accepted: the 93 Lane actions Keepers stored all named an installation
+   that was not declared, such as "tmp" and "x" (RFC operator-quiz §4.7). [result_delivery] is absent on purpose: it
    is stamped from the creating turn's continuation and a supplied one is not
    honoured. *)
-let keeper_wake_arg_names =
-  [ "keeper_name"
-  ; "message"
-  ; "title"
-  ; "urgency"
-  ; "delivery"
-  ; "allow_unregistered_keeper"
-  ; Schedule_run_watch.watch_field
-  ; Schedule_checks_watch.watch_field
-  ]
-let lane_act_arg_names = [ "installation_id"; "action" ]
-
-let given args name =
-  match Json_util.assoc_member_opt name args with
-  | None | Some `Null -> false
-  | Some _ -> true
-;;
-
 let keeper_wake_payload_from_args args =
   let* keeper_name = required_string args "keeper_name" in
   let* message = required_string args "message" in
@@ -495,20 +478,10 @@ let lane_act_payload_from_args args =
       ])
 ;;
 
-let payload_from_args args =
-  match
-    List.exists (given args) keeper_wake_arg_names, List.exists (given args) lane_act_arg_names
-  with
-  | true, false -> keeper_wake_payload_from_args args
-  | false, true -> lane_act_payload_from_args args
-  | true, true ->
-    Error
-      "give keeper_name and message for a Keeper wake, or installation_id and \
-       action for a Lane action, not fields of both"
-  | false, false ->
-    Error
-      "give keeper_name and message for a Keeper wake, or installation_id and \
-       action for a Lane action"
+let payload_from_args ~kind args =
+  match kind with
+  | Schedule_payload_projection.Keeper_wake -> keeper_wake_payload_from_args args
+  | Schedule_payload_projection.Lane_act -> lane_act_payload_from_args args
 ;;
 
 (* [schedule_payload_unsupported_total] is no longer counted here. The label
@@ -982,10 +955,10 @@ type write_action =
   | Create_schedule
   | Update_schedule
 
-let handle_write ~action ~tool_name ~start_time ctx args =
+let handle_write ~action ~kind ~tool_name ~start_time ctx args =
   let dispatched_at = Tool_timing.started_at start_time in
   let result =
-    let* payload = plain (payload_from_args args) in
+    let* payload = plain (payload_from_args ~kind args) in
     let* payload = plain (ctx.stamp_keeper_wake_result_delivery ~payload) in
     let* () = plain (validate_known_payload_request ~payload) in
     let* keeper_wake_target =
@@ -1157,8 +1130,21 @@ let handle_write ~action ~tool_name ~start_time ctx args =
   | Ok (Ok request) -> ok ~tool_name ~start_time (schedule_request_json request)
 ;;
 
-let handle_create = handle_write ~action:Create_schedule
-let handle_update = handle_write ~action:Update_schedule
+let handle_create =
+  handle_write ~action:Create_schedule ~kind:Schedule_payload_projection.Keeper_wake
+;;
+
+let handle_update =
+  handle_write ~action:Update_schedule ~kind:Schedule_payload_projection.Keeper_wake
+;;
+
+let handle_lane_act_create =
+  handle_write ~action:Create_schedule ~kind:Schedule_payload_projection.Lane_act
+;;
+
+let handle_lane_act_update =
+  handle_write ~action:Update_schedule ~kind:Schedule_payload_projection.Lane_act
+;;
 
 let take limit items =
   let rec loop acc remaining = function
@@ -1823,6 +1809,8 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | Some { action = Cancel_request; _ } -> handle handle_cancel
   | Some { action = Add_note; _ } -> handle handle_note_add
   | Some { action = List_notes; _ } -> handle handle_notes_list
+  | Some { action = Create_lane_act_request; _ } -> handle handle_lane_act_create
+  | Some { action = Update_lane_act_request; _ } -> handle handle_lane_act_update
   (* [None] is "not a schedule tool". Spelling it out rather than [_] keeps the
      action match exhaustive, so an action added to Tool_schemas_schedule is a
      compile error here instead of an advertised name with no route. *)

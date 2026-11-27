@@ -6,6 +6,10 @@ type action =
   | Cancel_request
   | Add_note
   | List_notes
+  | Create_lane_act_request
+      (** A Lane action has its own pair of tools: the Keeper wake pair takes
+          no field of it. *)
+  | Update_lane_act_request
 [@@deriving enumerate]
 
 type definition =

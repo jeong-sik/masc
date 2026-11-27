@@ -461,6 +461,10 @@ let explicit_metadata : (string * metadata) list =
        listing notes is a read. *)
     ("masc_schedule_note_add", broadcast_tool);
     ("masc_schedule_notes_list", read_state_tool);
+    (* A Lane action is scheduled and replaced through its own pair, with the
+       same permission as the Keeper wake pair. *)
+    ("masc_schedule_lane_act_create", broadcast_tool);
+    ("masc_schedule_lane_act_update", broadcast_tool);
     (* Keeper-only: the language server belongs to the turn's pool, and the
        MCP boundary has no turn to end it. *)
     ( "keeper_code_query",

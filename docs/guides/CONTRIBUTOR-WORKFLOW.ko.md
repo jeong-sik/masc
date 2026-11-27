@@ -199,6 +199,8 @@ diff와 증거가 준비되면 ready for review로 바꿉니다. PR을 열거나
 필수 검사 `changes`와 `type-check`가 돕니다
 ([pr-type-check.yml](../../.github/workflows/pr-type-check.yml)). `type-check`는
 `docs/`, `changelog.d/`, `dashboard/` 밖 파일이 바뀌었을 때 `dune build @check`를 실행합니다.
+`dashboard/` 안 파일이 바뀌면 `dashboard` 작업이 대시보드 type-check 와 바뀐 파일을
+가져다 쓰는 vitest 를 돌립니다. 이 작업은 필수 검사가 아닙니다.
 
 [pr-check.yml](../../.github/workflows/pr-check.yml)은 소스·설정 문법과 credential 검사를
 명시적 요청으로 실행합니다. 선택한 정확한 소스의 native TUI 검사에는 같은 소스의

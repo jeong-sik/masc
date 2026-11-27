@@ -152,7 +152,9 @@ function, logic and code-cleanliness reviews; approve when no P0/P1/P2 issue
 remains and collect P3 issues for later. Every pull request runs the required
 `changes` and `type-check` checks (`pr-type-check.yml`); `type-check` runs
 `dune build @check` when a file outside `docs/`, `changelog.d/` and
-`dashboard/` changed. The full build and the regression suites are dispatched
+`dashboard/` changed. When a file under `dashboard/` changed, the `dashboard`
+job type-checks the dashboard and runs the tests that import a changed file; it
+is not required. The full build and the regression suites are dispatched
 explicitly.
 The operator-authorized main minimal build runs on each push to main and every
 30 minutes, reusing successful build receipts and caches; it does not replace

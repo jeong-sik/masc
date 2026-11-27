@@ -338,6 +338,8 @@
     <build_and_ci>
       PR 은 필수 검사 `changes`·`type-check` 를 자동으로 돌린다. `type-check` 는 `docs/`·`changelog.d/`·`dashboard/` 밖
       파일이 바뀌었을 때 `dune build @check` 를 돌리고, native stack 은 최상단 PR 에서 한 번만 돌린다.
+      `dashboard/` 안 파일이 바뀐 PR 은 필수가 아닌 `dashboard` 검사가 대시보드 type-check 와
+      바뀐 파일을 가져다 쓰는 vitest(`vitest related`)를 돌린다(2026-11-27 운영자 요청). native stack 은 이것도 최상단에서 한 번 돌린다.
       일반 branch push 로는 자동 CI 를 시작하지 않는다. PR 마다 도는 검사는 운영자의 명시 요청 없이 늘리지 않는다.
       운영자가 요청한 main 최소 빌드 관측은 main push 와 30분 주기로 운영 실행 파일 3개와 전체 type-check 를 확인하며,
       문서·changelog 외 입력이 이미 성공한 빌드와 같으면 toolchain 준비와 빌드를 생략한다.

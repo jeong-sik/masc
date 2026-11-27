@@ -219,7 +219,9 @@ an issue link. Mark the PR ready when its diff and evidence are ready for review
 Opening a PR and pushing to it start the required `changes` and `type-check`
 checks ([pr-type-check.yml](../../.github/workflows/pr-type-check.yml)).
 `type-check` runs `dune build @check` when a file outside `docs/`,
-`changelog.d/` and `dashboard/` changed.
+`changelog.d/` and `dashboard/` changed. When a file under `dashboard/`
+changed, the `dashboard` job type-checks the dashboard and runs the tests that
+import a changed file; it is not required.
 
 [pr-check.yml](../../.github/workflows/pr-check.yml) provides explicit source,
 configuration and credential checks.

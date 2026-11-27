@@ -17,12 +17,14 @@ change request on the same account, but does not prove the original finding was
 resolved. Before merging, the integrator reads the review and comment text and
 checks the change or explanation that addresses each outstanding concern.
 
-Every pull request runs `pr-type-check.yml`, and main requires both of its
-checks. `changes` classifies the changed paths, checks the changelog fragments
+Every pull request runs `pr-type-check.yml`, and main requires its `changes`
+and `type-check` checks. `changes` classifies the changed paths, checks the changelog fragments
 the pull request changes and rejects merge commits. `type-check` runs
 `dune build @check` when a file outside `docs/`, `changelog.d/` and
 `dashboard/` changed; a native stack is type-checked once, at its top pull
-request. `pr-python-bin-free.yml` also runs on every pull request, and
+request. When a file under `dashboard/` changed, the `dashboard` job
+type-checks the dashboard and runs the tests that import a changed file; it is
+not required, and a native stack runs it once, at its top. `pr-python-bin-free.yml` also runs on every pull request, and
 `alphatex-native.yml`, `changelog-fragments.yml` and `review-script-tests.yml`
 run only when their own paths change. No workflow runs on a push to a branch
 other than main, or on a tag push.

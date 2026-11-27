@@ -571,9 +571,16 @@ let transfer_pending_with_reservation config ~from_keeper ~to_keeper request =
             })
      with
      | exn ->
+       let bt = Printexc.get_raw_backtrace () in
        (* fire-and-forget: best-effort release; [exn] is re-raised immediately so a release failure must not mask it. *)
-       ignore (Keeper_lifecycle_reservation.release token : _);
-       raise exn)
+       let release =
+         match Fs_compat.execution_context () with
+         | Fs_compat.Eio_fiber ->
+           Eio.Cancel.protect (fun () -> Keeper_lifecycle_reservation.release token)
+         | Fs_compat.Non_eio -> Keeper_lifecycle_reservation.release token
+       in
+       ignore (release : Keeper_lifecycle_reservation.release_outcome);
+       Printexc.raise_with_backtrace exn bt)
 ;;
 
 let transfer_pending config ~from_keeper ~to_keeper request =

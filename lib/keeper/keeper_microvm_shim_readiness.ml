@@ -329,7 +329,7 @@ let new_initialization ~fs ~base ~payload_path =
   let recovery_required = ref true in
   let work = Eio.Lazy.from_fun ~cancel:`Record (fun () ->
     protect_work (fun () ->
-      Eio.Mutex.use_rw ~protect:true config_lock (fun () ->
+      Eio.Mutex.use_rw ~protect:false config_lock (fun () ->
         let result = initialize_files ~fs ~base ~payload_path in
         (match result with Ok () -> recovery_required := false | Error _ -> ());
         Atomic.set outcome (Some result);
@@ -337,7 +337,7 @@ let new_initialization ~fs ~base ~payload_path =
   {payload_path; outcome; work; config_lock; recovery_required}
 
 let recover_initialization entry ~fs ~base =
-  Eio.Mutex.use_rw ~protect:true entry.config_lock (fun () ->
+  Eio.Mutex.use_rw ~protect:false entry.config_lock (fun () ->
     match Atomic.get entry.outcome with
     | Some (Ok ()) -> Ok ()
     | None -> Error Not_initialized
@@ -431,7 +431,7 @@ let ensure_entry entry ~fs ~base =
     | None -> Eio.Lazy.force entry.work
     | Some (Ok ()) -> Ok ()
     | Some (Error _) -> recover_initialization entry ~fs ~base in
-  Eio.Mutex.use_rw ~protect:true entry.config_lock (fun () ->
+  Eio.Mutex.use_rw ~protect:false entry.config_lock (fun () ->
     ensure_config_locked entry ~fs ~base)
 
 let ensure_config ~fs ~base_path =

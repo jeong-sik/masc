@@ -208,7 +208,13 @@ let cancel_with_lifecycle
                       ~keeper_name))
        with
        | exn ->
-         let release = Keeper_lifecycle_reservation.release token in
+         let bt = Printexc.get_raw_backtrace () in
+         let release =
+           match Fs_compat.execution_context () with
+           | Fs_compat.Eio_fiber ->
+             Eio.Cancel.protect (fun () -> Keeper_lifecycle_reservation.release token)
+           | Fs_compat.Non_eio -> Keeper_lifecycle_reservation.release token
+         in
          (match release with
           | Keeper_lifecycle_reservation.Released -> ()
           | Keeper_lifecycle_reservation.Release_missing
@@ -217,7 +223,7 @@ let cancel_with_lifecycle
               "paused cancellation exception release failed keeper=%s outcome=%s"
               keeper_name
               (Keeper_lifecycle_reservation.release_outcome_to_string release));
-         raise exn)
+         Printexc.raise_with_backtrace exn bt)
   in
   match replay_committed ~base_path ~keeper_name replay with
   | Error cause -> Error (Failed { cause; reservation_release = None })

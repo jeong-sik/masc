@@ -635,6 +635,44 @@ precondition(reviewWire.isEmpty);pausedRegion.receive("{\"kind\":\"resume\"}")
 precondition(reviewExit == nil && reviewWire.map(\.1).contains([0x90,60,100]))
 let initialBoundary = asset("initial",[["seconds":0,"port":2,"bytes":[0x90,60,100,0xc0,20]]])
 mustReject { _ = try arrangement([asset("prior",[["seconds":0,"port":2,"bytes":[0xc0,10]]]),initialBoundary], [clip("prior","prior",from:0,to:1,repeatCount:1),clip("initial","initial",start:1,from:0,to:1,repeatCount:1)]) }
+// A Program Change at a region's start plays as a region event right after the
+// entry's replay. Selected before its bank select, it used the device's initial
+// bank; once a copy has sent the bank select, the next copy or a seek to that
+// start would select it under the later bank. A repeat is refused when the
+// arrangement is built, before any copy plays. One copy plays as written.
+for register: UInt8 in [0, 32] {
+    let startBank = asset("startBank\(register)",[["seconds":0.1,"port":2,"bytes":[0xc0,1,0xb0,register,4,0x90,60,100]],["seconds":0.3,"port":2,"bytes":[0x80,60,64]]])
+    let expected: UnknownPatch = .currentInitialBank(register == 0 ? .msb : .lsb)
+    do { _ = try arrangement([startBank],[clip("startBank","startBank\(register)",from:0.1,to:0.6)]); preconditionFailure("region start bank guessed at build") }
+    catch let refusal as UnknownPatch { precondition(refusal == expected, "build refusal \(refusal)") }
+    reset(0); reviewWire = []
+    let once = try arrangement([startBank],[clip("startBank","startBank\(register)",from:0.1,to:0.6,repeatCount:1)])
+    try once.reconcile(at:0)
+    precondition(reviewWire.map(\.1) == [[0xc0,1],[0xb0,register,4],[0x90,60,100]], "region start: \(reviewWire.map(\.1))")
+    // A seek back to that start is a runtime entry on a device that already
+    // holds the bank: refused before anything is sent for the region.
+    try once.reconcile(at:0.4); reviewWire = []
+    do { try once.reconcile(at:0, reconstruct:true); preconditionFailure("region start bank guessed on seek") }
+    catch let refusal as UnknownPatch { precondition(refusal == expected, "seek refusal \(refusal)") }
+    precondition(!reviewWire.map(\.1).contains([0xc0,1]), "region start re-sent: \(reviewWire.map(\.1))")
+}
+// A later region on the same channel, the next loop pass and the next common
+// cycle also enter on what was sent before, so the same start is refused when
+// they are built.
+let bankFirst = asset("bankFirst",[["seconds":0,"port":2,"bytes":[0xb0,0,4,0xc0,2,0x90,60,100]],["seconds":0.3,"port":2,"bytes":[0x80,60,64]]])
+let startAfter = asset("startAfter",[["seconds":0,"port":2,"bytes":[0xc0,1,0xb0,0,5,0x90,62,100]],["seconds":0.3,"port":2,"bytes":[0x80,62,64]]])
+let loopStart = try arrangement([startAfter],[clip("loopStart","startAfter",from:0,to:0.5,repeatCount:1)],duration:0.5)
+let cycleStart = try arrangement([asset("cycleStart",[["seconds":0.2,"port":2,"bytes":[0xc0,1,0xb0,0,4,0x90,60,100]],["seconds":0.4,"port":2,"bytes":[0x80,60,64]]])],[clip("cycleStart","cycleStart",from:0,to:1,repeatCount:1)],duration:1)
+let startCycle = try MidiCycle(start:0.2,end:0.6,duration:0.4,period:400_000_000,divisor:1)
+let laterEntries: [() throws -> Void] = [
+    { _ = try arrangement([bankFirst,startAfter],[clip("first","bankFirst",from:0,to:0.5,repeatCount:1),clip("after","startAfter",start:0.5,from:0,to:0.5,repeatCount:1)]) },
+    { _ = try MidiTransport(timeline:loopStart.timeline,uid:"1",loop:true) },
+    { _ = try MidiTransport(timeline:cycleStart.timeline,uid:"1",loop:true,coordinated:true,cycle:startCycle) }
+]
+for build in laterEntries {
+    do { try build(); preconditionFailure("later entry bank guessed at build") }
+    catch let refusal as UnknownPatch { precondition(refusal == .currentInitialBank(.msb), "later entry refusal \(refusal)") }
+}
 let lateCopies = try arrangement([regionSource],[clip("late","a")])
 reviewWire=[];try lateCopies.reconcile(at:2)
 precondition(reviewWire.isEmpty && lateCopies.regionCursors[0].copy==2)

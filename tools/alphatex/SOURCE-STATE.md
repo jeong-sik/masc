@@ -57,10 +57,12 @@ playback has sent a bank select for it since, the device holds that later bank,
 and seek/resume reports an error before replay instead of guessing the initial
 bank. This holds with or without a sounding note. A later bank select that
 playback has not reached yet does not cause the error. Entering an arrangement
-region and each copy of a rendered VST region reconstruct the same way and
-refuse on the same condition. A Program Change exactly at a region's start is
-not reconstructed: it plays with the region's events, so a repeated copy still
-sends it under the bank an earlier copy left.
+region and each copy of a rendered VST region refuse on the same condition. A
+Program Change exactly at a region's start plays as a region event right after
+the replay, and the same check covers it. When a later copy, a later region on
+the same channel or the next loop pass would send such a Program Change after
+its bank select reached the device, the arrangement or VST render is refused
+when it is prepared, before anything plays. A seek is refused when it happens.
 
 Opaque SysEx/system effects, device-specific NRPN data, Hold 2, high-resolution
 velocity-prefix state, unsupported/incomplete RPN state and channel-mode changes

@@ -182,6 +182,16 @@ try {
     laterBank.regions[0].repeatCount = 2
     await refused(laterBank)
   }
+  // The same holds for a Program Change exactly at the region's start: it plays
+  // as a region event, and the next copy would select it under bank 4.
+  for (const register of [0, 32]) {
+    const startBank = structuredClone(patched)
+    startBank.sources[0].events = [wire(0.1, [0xc0, 1]), wire(0.1, [0xb0, register, 4]), wire(0.1, [0x90, 60, 90]), wire(0.3, [0x80, 60, 40])]
+    const once = await prepare(startBank)
+    assert.deepEqual(once.rows[0].map(event => event.bytes), [[0xc0, 1], [0xb0, register, 4], [0x90, 60, 90], [0x80, 60, 40]])
+    startBank.regions[0].repeatCount = 2
+    await refused(startBank)
+  }
   cases++
   console.log(JSON.stringify({ passed: cases, failed: 0, scope: 'actual native VST region projection; no plug-in or device opened' }))
 } finally { await rm(root, { recursive: true, force: true }) }

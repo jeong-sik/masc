@@ -941,6 +941,7 @@ export function InboxTab(props: WorkspaceViewProps) {
           <${DataTable}
             data=${audit}
             columns=${auditColumns}
+            initialSort=${{ id: 'resolvedAt', desc: true }}
             getRowId=${(r: GateResolvedAuditRow) => `${r.id}-${r.resolvedAt}`}
             caption="최근 24시간 HITL 결정 감사 로그"
             emptyLabel=${gate?.auditPartial ? '조회된 범위에 결정 기록이 없습니다.' : '최근 24시간 내 처리된 결정 기록이 없습니다.'}

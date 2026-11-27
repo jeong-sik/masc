@@ -532,6 +532,44 @@ describe('components/primitives', () => {
     expect(container.querySelector('th')?.getAttribute('aria-sort')).toBe('descending')
   })
 
+  it('DataTable that opens in an order keeps saying an order, and one that opens in none can go back to none', async () => {
+    const columns: readonly DataTableColumn<LongRow>[] = [
+      { id: 'label', header: 'Label', accessor: (r) => r.label, sortable: true },
+    ]
+    const labels = () => [...container.querySelectorAll('tbody td')].map((cell) => cell.textContent)
+    const said = () => container.querySelector('th')?.getAttribute('aria-sort') ?? null
+    const press = async () => {
+      container.querySelector<HTMLButtonElement>('th button')!.click()
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    }
+
+    render(
+      html`<${DataTable} data=${longRows.slice(0, 3)} columns=${columns} initialSort=${{ id: 'label', desc: true }} />`,
+      container,
+    )
+    const orders: (string | null)[] = [said()]
+    for (let presses = 0; presses < 4; presses++) {
+      await press()
+      orders.push(said())
+    }
+    // Every press turns the order round: no press leaves the rows in an
+    // order that the header does not name.
+    expect(orders).toEqual(['descending', 'ascending', 'descending', 'ascending', 'descending'])
+    expect(labels()).toEqual(['Row 2', 'Row 1', 'Row 0'])
+
+    render(null, container)
+    render(html`<${DataTable} data=${longRows.slice(0, 3)} columns=${columns} />`, container)
+    const unsorted: (string | null)[] = [said()]
+    for (let presses = 0; presses < 3; presses++) {
+      await press()
+      unsorted.push(said())
+    }
+    // Opened in the order of its rows, a table gets that order back by the
+    // third press.
+    expect(unsorted).toEqual([null, 'ascending', 'descending', null])
+    expect(labels()).toEqual(['Row 0', 'Row 1', 'Row 2'])
+  })
+
   it('command-search matches both fuzzy Latin queries (uFuzzy) and Korean/Hangul labels', () => {
     const searcher = createCommandSearcher([
       { id: 'overview', label: 'Overview 대시보드', keywords: ['home', 'summary'] },

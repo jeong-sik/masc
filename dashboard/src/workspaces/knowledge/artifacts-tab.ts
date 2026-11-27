@@ -41,9 +41,33 @@ import {
   type WorkspaceViewProps,
 } from './types'
 
-interface ArtifactListBundle {
+export interface ArtifactListBundle {
   readonly artifacts: readonly PublishedArtifactItem[]
   readonly diagnostics: readonly { readonly id: string; readonly error: string }[]
+}
+
+export async function fetchPublishedArtifactsList(signal: AbortSignal) {
+  const res = await apiGet<unknown>('/api/v1/published-artifacts', { signal })
+  if (!res.ok) return res
+  const artifacts: PublishedArtifactItem[] = []
+  const diagnostics: { id: string; error: string }[] = []
+  if (isRecord(res.value)) {
+    if (Array.isArray(res.value.artifacts)) {
+      for (const row of res.value.artifacts) {
+        const dec = decodePublishedArtifactItem(row)
+        if (dec) artifacts.push(dec)
+      }
+    }
+    if (Array.isArray(res.value.diagnostics)) {
+      for (const d of res.value.diagnostics) {
+        if (!isRecord(d)) continue
+        const id = asNonEmptyString(d.id)
+        const errMsg = asNonEmptyString(d.error)
+        if (id && errMsg) diagnostics.push({ id, error: errMsg })
+      }
+    }
+  }
+  return ok<ArtifactListBundle>({ artifacts, diagnostics })
 }
 
 type HtmlHydrationState =
@@ -101,29 +125,7 @@ export function ArtifactsTab(props: WorkspaceViewProps) {
     setLoadError(null)
     const obs = await resourceCache.fetch<ArtifactListBundle>(
       'kn:artifacts:list',
-      async (signal) => {
-        const res = await apiGet<unknown>('/api/v1/published-artifacts', { signal })
-        if (!res.ok) return res
-        const artifacts: PublishedArtifactItem[] = []
-        const diagnostics: { id: string; error: string }[] = []
-        if (isRecord(res.value)) {
-          if (Array.isArray(res.value.artifacts)) {
-            for (const row of res.value.artifacts) {
-              const dec = decodePublishedArtifactItem(row)
-              if (dec) artifacts.push(dec)
-            }
-          }
-          if (Array.isArray(res.value.diagnostics)) {
-            for (const d of res.value.diagnostics) {
-              if (!isRecord(d)) continue
-              const id = asNonEmptyString(d.id)
-              const errMsg = asNonEmptyString(d.error)
-              if (id && errMsg) diagnostics.push({ id, error: errMsg })
-            }
-          }
-        }
-        return ok({ artifacts, diagnostics })
-      },
+      fetchPublishedArtifactsList,
       { ttlMs: 15_000, topics: ['artifacts'], reason },
     )
     if (!mountedRef.current || !isEpochCurrent(startEpoch)) return

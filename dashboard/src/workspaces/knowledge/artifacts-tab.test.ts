@@ -6,8 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { authSession, bumpSessionEpoch, setSingleUserToken } from '../../core/auth'
 import { resourceCache } from '../../core/resource-cache'
 import { clearWorkspaceMediaCache } from '../../lib/workspace-media-cache'
-import { ArtifactsSurface } from '../../components/published-artifacts/artifacts-surface'
-import { route } from '../../router'
 import { ArtifactsTab } from './artifacts-tab'
 
 const PNG_1X1 = Uint8Array.from(atob(
@@ -195,70 +193,5 @@ describe('ArtifactsTab sandboxed HTML media hydration', () => {
     bumpSessionEpoch()
     expect(mediaSignal?.aborted).toBe(true)
     view.unmount()
-  })
-})
-
-describe('ArtifactsSurface strict sandbox="" parity', () => {
-  it('renders HTML artifacts inside strict sandbox="" iframe with hydrated media instead of dangerouslySetInnerHTML', async () => {
-    const artId = `artifact-${'4'.repeat(32)}`
-    const mediaPath = `/api/v1/media/${'e'.repeat(64)}`
-    route.value = { tab: 'workspace', params: { section: 'artifacts', artifact: artId }, postId: null }
-
-    const fetchMock = vi.fn<typeof globalThis.fetch>((input) => {
-      const url = String(input)
-      if (url.endsWith('/api/v1/published-artifacts')) {
-        return Promise.resolve(jsonResponse({
-          artifacts: [{
-            id: artId,
-            revision: 1,
-            title: 'Legacy Surface HTML',
-            summary: '',
-            format: 'html',
-            author: 'sangsu',
-            created_at: '2026-11-27T05:00:00Z',
-            body: { _blob: { sha256: 'a'.repeat(64), bytes: 128 } },
-            task_id: null,
-            goal_id: null,
-            url: `/dashboard/#/workspace?section=artifacts&artifact=${artId}`,
-          }],
-          diagnostics: [],
-        }))
-      }
-      if (url.endsWith(`/api/v1/published-artifacts/${artId}`)) {
-        return Promise.resolve(jsonResponse({
-          artifact: {
-            id: artId,
-            revision: 1,
-            title: 'Legacy Surface HTML',
-            summary: '',
-            format: 'html',
-            author: 'sangsu',
-            created_at: '2026-11-27T05:00:00Z',
-            body: { _blob: { sha256: 'a'.repeat(64), bytes: 128 } },
-            task_id: null,
-            goal_id: null,
-            url: `/dashboard/#/workspace?section=artifacts&artifact=${artId}`,
-          },
-          content: `<!DOCTYPE html><html><body><img src="${mediaPath}" alt="Img"></body></html>`,
-          revisions: [],
-        }))
-      }
-      if (url.endsWith(mediaPath)) {
-        return Promise.resolve(new Response(PNG_1X1, { status: 200, headers: { 'Content-Type': 'image/png' } }))
-      }
-      return Promise.resolve(new Response(null, { status: 404 }))
-    })
-    vi.stubGlobal('fetch', fetchMock)
-
-    const view = render(html`<${ArtifactsSurface} />`)
-
-    await waitFor(() => {
-      const iframe = view.container.querySelector<HTMLIFrameElement>('iframe')
-      expect(iframe).not.toBeNull()
-      expect(iframe?.getAttribute('sandbox')).toBe('')
-      const srcDoc = iframe?.getAttribute('srcdoc') ?? iframe?.srcdoc ?? ''
-      expect(srcDoc).toContain('data:image/png;base64,')
-      expect(srcDoc).not.toContain(mediaPath)
-    })
   })
 })

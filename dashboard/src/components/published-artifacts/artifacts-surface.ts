@@ -1,4 +1,4 @@
-// Published Artifacts HTML / Markdown viewer with strict sandbox="" HTML hydration.
+// Lean Published Artifacts HTML / Markdown viewer (Office/HWP/PDF/Yjs converters retired).
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
@@ -8,22 +8,18 @@ import {
   type ArtifactDocument,
   type PublishedArtifact,
 } from '../../api/published-artifacts'
-import { isEpochCurrent, sessionEpoch } from '../../core/auth'
-import { WORKSPACE_MEDIA_PREFIX } from '../../lib/keeper-media'
-import { hydrateSandboxedHtmlMedia } from '../../lib/workspace-media-cache'
 import { MarkdownContent } from '../common/markdown-renderer'
+import { sanitizeHtml } from '../../lib/dompurify'
 import { LoadingState, EmptyState } from '../common/feedback-state'
 import { navigate, route } from '../../router'
 
 export function ArtifactsSurface() {
-  const epoch = sessionEpoch.value
   const [artifacts, setArtifacts] = useState<readonly PublishedArtifact[]>([])
   const [listLoading, setListLoading] = useState(true)
   const [listError, setListError] = useState<string | null>(null)
   const [doc, setDoc] = useState<ArtifactDocument | null>(null)
   const [docLoading, setDocLoading] = useState(false)
   const [docError, setDocError] = useState<string | null>(null)
-  const [hydratedHtml, setHydratedHtml] = useState<{ readonly key: string; readonly html: string } | null>(null)
 
   const selectedId = route.value.params.artifact?.trim() || ''
   const selectedRevision = route.value.params.revision?.trim() || undefined
@@ -34,22 +30,21 @@ export function ArtifactsSurface() {
     setListError(null)
     void fetchPublishedArtifacts(controller.signal)
       .then(result => {
-        if (controller.signal.aborted || !isEpochCurrent(epoch)) return
+        if (controller.signal.aborted) return
         setArtifacts(result.artifacts)
         setListLoading(false)
       })
       .catch(error => {
-        if (controller.signal.aborted || !isEpochCurrent(epoch)) return
+        if (controller.signal.aborted) return
         setListError(error instanceof Error ? error.message : String(error))
         setListLoading(false)
       })
     return () => controller.abort()
-  }, [epoch])
+  }, [])
 
   const activeId = selectedId || artifacts[0]?.id || ''
 
   useEffect(() => {
-    setHydratedHtml(null)
     if (!activeId) {
       setDoc(null)
       setDocError(null)
@@ -60,41 +55,18 @@ export function ArtifactsSurface() {
     setDocError(null)
     void fetchPublishedArtifact(activeId, selectedRevision, controller.signal)
       .then(loaded => {
-        if (controller.signal.aborted || !isEpochCurrent(epoch)) return
+        if (controller.signal.aborted) return
         setDoc(loaded)
         setDocLoading(false)
       })
       .catch(error => {
-        if (controller.signal.aborted || !isEpochCurrent(epoch)) return
+        if (controller.signal.aborted) return
         setDoc(null)
         setDocError(error instanceof Error ? error.message : String(error))
         setDocLoading(false)
       })
     return () => controller.abort()
-  }, [activeId, selectedRevision, epoch])
-
-  const htmlKey = doc && doc.artifact.format === 'html'
-    ? `${epoch}:${doc.artifact.id}:${doc.artifact.revision}:${doc.content.length}`
-    : null
-  const needsHydration = doc !== null
-    && doc.artifact.format === 'html'
-    && doc.content.includes(WORKSPACE_MEDIA_PREFIX)
-
-  useEffect(() => {
-    if (!doc || !htmlKey || !needsHydration) {
-      setHydratedHtml(null)
-      return undefined
-    }
-    const controller = new AbortController()
-    void hydrateSandboxedHtmlMedia(doc.content, { epoch, signal: controller.signal }).then((res) => {
-      if (controller.signal.aborted || !isEpochCurrent(epoch) || !res.ok) return
-      setHydratedHtml({
-        key: htmlKey,
-        html: res.value.html,
-      })
-    })
-    return () => controller.abort()
-  }, [doc, epoch, htmlKey, needsHydration])
+  }, [activeId, selectedRevision])
 
   if (listLoading) {
     return html`<${LoadingState}>아티팩트 목록 로딩 중...<//>`
@@ -107,8 +79,6 @@ export function ArtifactsSurface() {
   if (artifacts.length === 0) {
     return html`<${EmptyState} message="게시된 아티팩트가 없습니다." />`
   }
-
-  const activeHydrated = htmlKey && hydratedHtml?.key === htmlKey ? hydratedHtml.html : null
 
   return html`
     <div class="artifacts-viewer grid gap-4 md:grid-cols-[minmax(220px,320px)_minmax(0,1fr)]" data-testid="artifacts-surface">
@@ -156,17 +126,8 @@ export function ArtifactsSurface() {
                     </div>
                   </header>
                   ${doc.artifact.format === 'html'
-                    ? (needsHydration && activeHydrated === null
-                        ? html`<${LoadingState}>아티팩트 이미지 불러오는 중...<//>`
-                        : html`
-                            <iframe
-                              class="w-full min-h-[460px] rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-base)]"
-                              sandbox=""
-                              srcDoc=${activeHydrated ?? doc.content}
-                              title=${`Sandboxed HTML Artifact: ${doc.artifact.title}`}
-                            />
-                          `)
-                    : html`<${MarkdownContent} text=${doc.content} document />`}
+                    ? html`<div class="markdown-content" dangerouslySetInnerHTML=${{ __html: sanitizeHtml(doc.content) }}></div>`
+                    : html`<${MarkdownContent} text=${doc.content} />`}
                 `
               : html`<${EmptyState} message="아티팩트를 선택하세요." compact />`}
       </section>

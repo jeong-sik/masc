@@ -448,33 +448,35 @@ describe('MarkdownContent workspace media & rich embeds', () => {
     }
   })
 
-  it('enriches wiki & artifact embed cards when authenticated and skips fetches when unauthenticated', async () => {
+  it('enriches multiple wiki & artifact embed cards with batched index lookups and skips fetches when unauthenticated', async () => {
     vi.stubGlobal('IntersectionObserver', undefined)
     const artId = `artifact-${'d'.repeat(32)}`
     const fetchMock = vi.fn<typeof globalThis.fetch>((input) => {
       const url = String(input)
-      if (url.endsWith('/api/v1/wiki/design-guide')) {
+      if (url.endsWith('/api/v1/wiki')) {
         return Promise.resolve(new Response(JSON.stringify({
           schema_version: 1,
           instance_id: 'i',
           generated_at_unix: 1,
           data: {
-            slug: 'design-guide',
-            frontmatter: { title: 'Design Guide Title', summary: 'Core media contract', revision: 4 },
-            body_markdown: 'Body',
+            pages: [
+              { slug: 'design-guide', title: 'Design Guide Title', summary: 'Core media contract', revision: 4 },
+              { slug: 'ops-runbook', title: 'Ops Runbook', summary: 'Deploy guide', revision: 2 },
+            ],
           },
         }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       }
-      if (url.endsWith(`/api/v1/published-artifacts/${artId}`)) {
+      if (url.endsWith('/api/v1/published-artifacts')) {
         return Promise.resolve(new Response(JSON.stringify({
-          artifact: {
-            id: artId,
-            title: 'Latency Benchmark',
-            summary: 'p99 under 12ms',
-            format: 'html',
-            revision: 3,
-          },
-          content: '<h1>ok</h1>',
+          artifacts: [
+            {
+              id: artId,
+              title: 'Latency Benchmark',
+              summary: 'p99 under 12ms',
+              format: 'html',
+              revision: 3,
+            },
+          ],
         }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
       }
       return Promise.resolve(new Response(null, { status: 404 }))
@@ -488,12 +490,12 @@ describe('MarkdownContent workspace media & rich embeds', () => {
       act(() => {
         render(h(MarkdownContent, {
           document: true,
-          text: `![[wiki:design-guide]]\n\n![[artifact:${artId}]]`,
+          text: `![[ wiki : design-guide ]]\n\n![[wiki:ops-runbook]]\n\n![[wiki:ghost-page]]\n\n![[ artifact : ${artId} ]]`,
         }), container)
       })
       expect(fetchMock).toHaveBeenCalledTimes(0)
 
-      // Authenticated single-user admin: enriches both cards
+      // Authenticated single-user admin: enriches all 3 wiki cards via ONE /api/v1/wiki fetch + 1 /api/v1/published-artifacts fetch
       authSession.value = {
         kind: 'single_user_local',
         mode: 'single_user',
@@ -509,13 +511,21 @@ describe('MarkdownContent workspace media & rich embeds', () => {
       })
 
       await waitFor(() => {
-        const wikiCard = container.querySelector('a.masc-embed-card--wiki')
-        expect(wikiCard?.textContent).toContain('Design Guide Title')
-        expect(wikiCard?.textContent).toContain('Core media contract')
+        const wikiCards = container.querySelectorAll('a.masc-embed-card--wiki')
+        expect(wikiCards).toHaveLength(3)
+        expect(wikiCards[0]?.textContent).toContain('Design Guide Title')
+        expect(wikiCards[0]?.textContent).toContain('Core media contract')
+        expect(wikiCards[1]?.textContent).toContain('Ops Runbook')
+        expect(wikiCards[2]?.textContent).toContain('문서 없음')
         const artCard = container.querySelector('a.masc-embed-card--artifact')
         expect(artCard?.textContent).toContain('Latency Benchmark')
         expect(artCard?.textContent).toContain('HTML · rev 3')
       })
+
+      const wikiCalls = fetchMock.mock.calls.filter(([u]) => String(u).includes('/api/v1/wiki'))
+      const artCalls = fetchMock.mock.calls.filter(([u]) => String(u).includes('/api/v1/published-artifacts'))
+      expect(wikiCalls).toHaveLength(1)
+      expect(artCalls).toHaveLength(1)
     } finally {
       render(null, container)
       container.remove()

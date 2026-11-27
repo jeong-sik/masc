@@ -1193,7 +1193,7 @@ status: reference
   레지스트리와 일치시킨 등록된 다른 Keeper). wire 값은 각각 `"owner"`·`"external"`·
   `"keeper"`다. `Keeper`인 경우 `speaker_id`와 `speaker_name`에 해당 Keeper 식별자가 실린다
   (Keeper는 정확히 하나의 이름을 갖는다).
-  Librarian의 대화 상대방 관측(`Keeper_counterpart_observation`)에서도 같은 닫힌 세
+  커넥터로 들어온 메시지의 상대방 관측(`Keeper_counterpart_observation`)에서도 같은 닫힌 세
   변형(`Owner`·`External`·`Keeper`)으로 전달되어, 호스트 참조가 부족해도 운영자,
   등록된 Keeper, 외부 화자를 안전하게 분리한다.
   → [Keeper_chat_store](../../lib/keeper/keeper_chat_store.mli),

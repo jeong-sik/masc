@@ -739,21 +739,7 @@ let test_fleet_projection_from_a_keeper_is_keeper_speech () =
   in
   check (option string) "keeper speaker id" (Some "beta") speaker.speaker_id;
   check bool "keeper authority" true
-    (speaker.speaker_authority = Keeper_chat_store.Keeper);
-  (* The row read back from the store is what the Librarian's counterpart
-     observations are built from. *)
-  match delivery_message ~base_path:config.base_path ~keeper_name:"alpha" ~request_id with
-  | None -> fail "delivery row disappeared"
-  | Some message ->
-    (match Keeper_counterpart_observation.of_chat_message message with
-     | None -> fail "a Keeper's line produced no counterpart observation"
-     | Some observation ->
-       check (option string) "observation names the Keeper" (Some "beta")
-         observation.user_id;
-       check string "observation authority" "keeper"
-         (Keeper_counterpart_observation.authority_to_string observation.authority);
-       check bool "observation authority is typed Keeper" true
-         (observation.authority = Keeper_counterpart_observation.Keeper))
+    (speaker.speaker_authority = Keeper_chat_store.Keeper)
 ;;
 
 (* An author the registry does not hold stays external, even when its name

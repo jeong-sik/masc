@@ -572,43 +572,6 @@ let recorded_items_by_event_ids ~base_path ~keeper_name ~event_ids =
           Option.map (fun item -> event_id, item) (String_map.find_opt event_id found))
        event_ids)
 
-(* Read one bounded tail without parsing either boundary fragment. The writer
-   may be mid-append, and [from] usually lands mid-line, so only bytes strictly
-   between the first and last newline are complete records. *)
-let load_tail_events ~window_bytes ~base_path ~keeper_name =
-  let path = attention_path ~base_path ~keeper_name in
-  match Fs_compat.file_size path with
-  | None -> []
-  | Some size when size <= window_bytes ->
-      (* Small store: the full scan is already within the window. *)
-      load_events ~base_path ~keeper_name
-  | Some size ->
-      let from = size - window_bytes in
-      let slice = Fs_compat.read_slice ~path ~from ~len:window_bytes in
-      (match String.index_opt slice '\n', String.rindex_opt slice '\n' with
-       | Some i, Some j when j > i ->
-           String.sub slice (i + 1) (j - i - 1)
-           |> String.split_on_char '\n'
-           |> List.filter_map (fun line ->
-                  let line = String.trim line in
-                  if line = "" then None else parse_line ~file_path:path line)
-       | _ ->
-           (* Fewer than two newlines in the window: no complete line to
-              dedup against. Accept the (rare) duplicate over a partial
-              parse. *)
-           [])
-
-(* Connector content defaults to a 4 KiB gate. A separate 4 MiB evidence tail
-   therefore leaves ample room for the Librarian's default 72-message window
-   plus lifecycle rows, while remaining O(1) in the append-only file. An
-   operator-raised content limit degrades to a shorter window, never a scan of
-   the whole history. *)
-let evidence_window_bytes = 4 * 1024 * 1024
-
-let load_recent_evidence_events ~base_path ~keeper_name =
-  load_tail_events ~window_bytes:evidence_window_bytes ~base_path ~keeper_name
-;;
-
 let discord_message_dedupe_key ~conversation_id ~message_id =
   Printf.sprintf "discord:%s:%s" conversation_id message_id
 ;;

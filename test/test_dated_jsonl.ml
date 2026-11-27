@@ -2132,6 +2132,67 @@ let test_a_process_that_does_not_write_the_stores_keeps_no_fact () =
   Dated_jsonl.append store (`Assoc [ "i", `Int 3 ]);
   check string "after an append of this process" "read row 3" (newest ())
 
+let test_strict_dir_cache_hit_invalidation_and_symlink_rejection () =
+  let root = tmpdir "dated_jsonl_strict_dir_cache" in
+  let loc =
+    Dated_jsonl.Store.(
+      keeper (root_of_masc_dir root) ~keeper:"strict-dir-cache" Keeper.Turn_records)
+  in
+  let store = Dated_jsonl.open_store loc in
+  let base = Dated_jsonl.base_dir store in
+  let m1 = Filename.concat base "2026-10" in
+  let m2 = Filename.concat base "2026-11" in
+  Fs_compat.mkdir_p m1;
+  Fs_compat.mkdir_p m2;
+  Out_channel.with_open_bin (Filename.concat m1 "01.jsonl") (fun oc ->
+    output_string oc "{\"i\":1}\n");
+  Out_channel.with_open_bin (Filename.concat m2 "01.jsonl") (fun oc ->
+    output_string oc "{\"i\":2}\n");
+  Dated_jsonl.directories_removed ();
+  Unix.sleepf 0.08;
+  let hits_before = Dated_jsonl.For_testing.strict_dir_cache_hits () in
+  let months1 = Result.get_ok (Dated_jsonl.month_dir_paths_newest_first_result store) in
+  let days1 = Result.get_ok (Dated_jsonl.day_file_paths_newest_first_result m2) in
+  check (list string) "cold month listing" [ m2; m1 ] months1;
+  check (list string) "cold day listing" [ Filename.concat m2 "01.jsonl" ] days1;
+  check int "cold calls populate without hit" hits_before
+    (Dated_jsonl.For_testing.strict_dir_cache_hits ());
+  let months2 = Result.get_ok (Dated_jsonl.month_dir_paths_newest_first_result store) in
+  let days2 = Result.get_ok (Dated_jsonl.day_file_paths_newest_first_result m2) in
+  check (list string) "warm month listing matches" months1 months2;
+  check (list string) "warm day listing matches" days1 days2;
+  check int "both strict listings served from cache" (hits_before + 2)
+    (Dated_jsonl.For_testing.strict_dir_cache_hits ());
+  (* Mutating the month directory immediately invalidates its cached entry. *)
+  let day2 = Filename.concat m2 "02.jsonl" in
+  Out_channel.with_open_bin day2 (fun oc -> output_string oc "{\"i\":3}\n");
+  let hits_before_mut = Dated_jsonl.For_testing.strict_dir_cache_hits () in
+  let days3 = Result.get_ok (Dated_jsonl.day_file_paths_newest_first_result m2) in
+  check (list string) "new day file visible immediately"
+    [ day2; Filename.concat m2 "01.jsonl" ] days3;
+  check int "mutated dir did not serve stale cache hit" hits_before_mut
+    (Dated_jsonl.For_testing.strict_dir_cache_hits ());
+  (* Replacing a cached month directory with a symlink fails closed via lstat. *)
+  let symlink_target = tmpdir "dated_jsonl_symlink_target" in
+  Fs_compat.remove_tree m1;
+  Unix.symlink symlink_target m1;
+  (match Dated_jsonl.day_file_paths_newest_first_result m1 with
+   | Error (Dated_jsonl.Non_regular_file { kind = Dated_jsonl.Symbolic_link; _ }) -> ()
+   | Error other ->
+     fail ("expected Symbolic_link error, got: " ^ Dated_jsonl.read_error_to_string other)
+   | Ok _ -> fail "symlinked month directory must be rejected even after dir cache warm");
+  (* [directories_removed] clears strict dir cache entries as well. *)
+  Unix.sleepf 0.08;
+  ignore (Result.get_ok (Dated_jsonl.day_file_paths_newest_first_result m2));
+  let hits_after_rewarm = Dated_jsonl.For_testing.strict_dir_cache_hits () in
+  Dated_jsonl.directories_removed ();
+  ignore (Result.get_ok (Dated_jsonl.day_file_paths_newest_first_result m2));
+  check int "directories_removed forces fresh readdir" hits_after_rewarm
+    (Dated_jsonl.For_testing.strict_dir_cache_hits ());
+  ignore (Result.get_ok (Dated_jsonl.day_file_paths_newest_first_result m2));
+  check int "repopulated after clear hits again" (hits_after_rewarm + 1)
+    (Dated_jsonl.For_testing.strict_dir_cache_hits ())
+
 let () =
   run "Dated_jsonl"
     [
@@ -2272,6 +2333,8 @@ let () =
             test_recent_view_reads_a_file_replaced_with_the_same_size;
           test_case "keeps one answer per store" `Quick
             test_recent_view_keeps_one_answer_per_store;
+          test_case "strict dir cache hits, invalidates on mutation, and rejects symlinks" `Quick
+            test_strict_dir_cache_hit_invalidation_and_symlink_rejection;
         ] );
       ( "collect_matching",
         [ test_case "n counts selected rows" `Quick

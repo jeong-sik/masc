@@ -130,7 +130,9 @@ let provider_snapshots_to_yojson (snapshots : provider_snapshot list) : Yojson.S
     ]
 ;;
 
-let file_error ~op ~path = function
+let file_error ~op ~path exn =
+  Reserved_exn.reraise_if_reserved exn;
+  match exn with
   | Sys_error detail -> Error (Printf.sprintf "%s %s: %s" op path detail)
   | Unix.Unix_error (error, syscall, arg) ->
     Error

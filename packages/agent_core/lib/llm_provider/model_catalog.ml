@@ -952,9 +952,14 @@ let%test "parse_entry accepts a known base preset" =
 ;;
 
 let parse_table_array toml key parse =
-  match Otoml.find_opt toml (Otoml.get_array Fun.id) [ key ] with
-  | None -> Ok []
-  | Some items ->
+  match
+    try Ok (Otoml.find_opt toml (Otoml.get_array Fun.id) [ key ]) with
+    | Otoml.Type_error msg ->
+      Error (Printf.sprintf "model catalog field %S must be an array: %s" key msg)
+  with
+  | Error _ as err -> err
+  | Ok None -> Ok []
+  | Ok (Some items) ->
     let results = List.map parse items in
     let errors =
       List.filter_map
@@ -1035,18 +1040,16 @@ let catalog_of_toml toml =
 ;;
 
 let parse_catalog ~source parse =
-  let parse_res =
-    try Ok (parse ()) with
-    | Sys_error msg ->
-      Error (Printf.sprintf "cannot read model catalog %s: %s" source msg)
-    | Otoml.Parse_error (_pos, msg) ->
-      Error (Printf.sprintf "model catalog TOML parse error in %s: %s" source msg)
-    | Otoml.Type_error _ ->
-      Error (Printf.sprintf "model catalog TOML type error in %s" source)
-  in
-  match parse_res with
-  | Error _ as e -> e
-  | Ok toml -> catalog_of_toml toml
+  try
+    let toml = parse () in
+    catalog_of_toml toml
+  with
+  | Sys_error msg ->
+    Error (Printf.sprintf "cannot read model catalog %s: %s" source msg)
+  | Otoml.Parse_error (_pos, msg) ->
+    Error (Printf.sprintf "model catalog TOML parse error in %s: %s" source msg)
+  | Otoml.Type_error msg ->
+    Error (Printf.sprintf "model catalog TOML type error in %s: %s" source msg)
 ;;
 
 let of_toml_string ~source contents =

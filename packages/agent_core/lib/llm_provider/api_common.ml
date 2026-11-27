@@ -785,7 +785,7 @@ let merge_tool_result_followup_user_messages_with_source_indices messages =
         ; metadata = tool_msg.metadata @ followup.metadata
         }
       in
-      aux ((merged, tool_indices @ followup_indices) :: acc) rest
+      aux acc ((merged, tool_indices @ followup_indices) :: rest)
     | (({ role = System | User | Assistant | Tool; _ } as msg), indices) :: rest ->
       aux ((msg, indices) :: acc) rest
     | [] -> List.rev acc

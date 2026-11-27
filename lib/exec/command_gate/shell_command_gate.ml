@@ -315,25 +315,24 @@ let gate_raw ~text ~syntax_policy ~sandbox () : verdict =
 
 let lower_typed_pipeline ~stages ~sandbox () : verdict =
   let verdict =
-    if List.exists (fun stage -> SI.has_variable_expansion (SI.Simple stage)) stages
-    then Too_complex { reason = Unsupported_construct `Param_expansion }
-    else
     match stages with
     | [] -> Cannot_parse { reason = Parse_error }
-    | [ single ] ->
-      let ir = with_sandbox ~sandbox (SI.Simple single) in
-      Allow
-        { ast = ir
-        ; stages = simples_of ir
-        ; stage_bins = List.map (fun s -> BIN.to_string s.SI.bin) (simples_of ir)
-        }
-    | many ->
-      let ir = with_sandbox ~sandbox (SI.Pipeline (List.map (fun s -> SI.Simple s) many)) in
-      Allow
-        { ast = ir
-        ; stages = simples_of ir
-        ; stage_bins = List.map (fun s -> BIN.to_string s.SI.bin) (simples_of ir)
-        }
+    | _ :: _ ->
+      let candidate =
+        match stages with
+        | [ single ] -> SI.Simple single
+        | many -> SI.Pipeline (List.map (fun s -> SI.Simple s) many)
+      in
+      (match structural_refusal candidate with
+       | Some (`Too_complex reason) -> Too_complex { reason }
+       | Some (`Cannot_parse reason) -> Cannot_parse { reason }
+       | None ->
+         let ir = with_sandbox ~sandbox candidate in
+         Allow
+           { ast = ir
+           ; stages = simples_of ir
+           ; stage_bins = List.map (fun s -> BIN.to_string s.SI.bin) (simples_of ir)
+           })
   in
   log_verdict ~source:"typed_pipeline" verdict;
   verdict

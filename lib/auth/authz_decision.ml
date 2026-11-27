@@ -356,14 +356,15 @@ let evaluate facts (request : request) =
   let* () =
     revocation_clear
       facts
-      [ Subject.Principal initiator
-      ; Subject.Principal executor
-      ; Subject.Principal owner
-      ; Subject.Grant initiator_grant_id
-      ; Subject.Grant executor_grant_id
-      ; Subject.Runtime runtime_id
-      ; Subject.Credential provider_account
-      ]
+      ([ Subject.Principal initiator
+       ; Subject.Principal executor
+       ; Subject.Principal owner
+       ; Subject.Grant initiator_grant_id
+       ; Subject.Grant executor_grant_id
+       ; Subject.Runtime runtime_id
+       ; Subject.Credential provider_account
+       ]
+       @ Option.to_list (Option.map (fun id -> Subject.Policy id) policy_id))
   in
   let chain =
     { Chain.principals =

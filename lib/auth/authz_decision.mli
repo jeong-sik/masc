@@ -24,8 +24,8 @@
     + the Runtime's owner is an active principal with a current membership;
     + the Runtime, the channel, and every requested effect are inside the
       intersection of all limits;
-    + no revocation is pending on a principal, grant, Runtime, or credential
-      the decision stands on;
+    + no revocation is pending on a principal, grant, policy, Runtime, or
+      credential the decision stands on;
     + the chain the decision stands on is cleared.
 
     Design 6.2 does not list the PAT deadline, the PAT naming rule, the

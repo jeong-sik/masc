@@ -16,7 +16,7 @@ let header_search_limit = 1024
 let data_marker = "data"
 
 let find_data_offset buffer length =
-  let limit = min length (header_search_limit - String.length data_marker) in
+  let limit = min length header_search_limit - String.length data_marker in
   let rec scan index =
     if index > limit
     then None
@@ -34,41 +34,45 @@ let tail_rms ?(window_seconds = 0.3) path =
     Fun.protect
       ~finally:(fun () -> close_in_noerr channel)
       (fun () ->
-         let file_length = in_channel_length channel in
-         let head_length = min file_length header_search_limit in
-         let head = really_input_string channel head_length in
-         match find_data_offset head head_length with
-         (* The recorder creates the file before it writes anything into it,
-            and with a trigger it may never write. An empty file is the normal
-            state at the start of every capture, not a fault. *)
-         | None -> Error "no audio yet"
-         | Some data_offset ->
-           let available = file_length - data_offset in
-           if available < bytes_per_sample
-           then Error "no audio yet"
-           else (
-             let window_bytes =
-               int_of_float (window_seconds *. float_of_int sample_rate)
-               * bytes_per_sample
-             in
-             let span = min window_bytes available in
-             (* Odd byte counts happen: the reader can catch the recorder
-                between the two halves of a sample. *)
-             let span = span - (span mod bytes_per_sample) in
-             if span < bytes_per_sample
+         try
+           let file_length = in_channel_length channel in
+           let head_length = min file_length header_search_limit in
+           let head = really_input_string channel head_length in
+           match find_data_offset head head_length with
+           (* The recorder creates the file before it writes anything into it,
+              and with a trigger it may never write. An empty file is the normal
+              state at the start of every capture, not a fault. *)
+           | None -> Error "no audio yet"
+           | Some data_offset ->
+             let available = file_length - data_offset in
+             if available < bytes_per_sample
              then Error "no audio yet"
              else (
-               seek_in channel (file_length - span);
-               let pcm = really_input_string channel span in
-               let count = span / bytes_per_sample in
-               let sum = ref 0.0 in
-               for index = 0 to count - 1 do
-                 let low = Char.code pcm.[index * 2] in
-                 let high = Char.code pcm.[(index * 2) + 1] in
-                 let raw = low lor (high lsl 8) in
-                 let signed = if raw >= 32_768 then raw - 65_536 else raw in
-                 let sample = float_of_int signed in
-                 sum := !sum +. (sample *. sample)
-               done;
-               Ok (sqrt (!sum /. float_of_int count) /. full_scale))))
+               let window_bytes =
+                 int_of_float (window_seconds *. float_of_int sample_rate)
+                 * bytes_per_sample
+               in
+               let span = min window_bytes available in
+               (* Odd byte counts happen: the reader can catch the recorder
+                  between the two halves of a sample. *)
+               let span = span - (span mod bytes_per_sample) in
+               if span < bytes_per_sample
+               then Error "no audio yet"
+               else (
+                 seek_in channel (file_length - span);
+                 let pcm = really_input_string channel span in
+                 let count = span / bytes_per_sample in
+                 let sum = ref 0.0 in
+                 for index = 0 to count - 1 do
+                   let low = Char.code pcm.[index * 2] in
+                   let high = Char.code pcm.[(index * 2) + 1] in
+                   let raw = low lor (high lsl 8) in
+                   let signed = if raw >= 32_768 then raw - 65_536 else raw in
+                   let sample = float_of_int signed in
+                   sum := !sum +. (sample *. sample)
+                 done;
+                 Ok (sqrt (!sum /. float_of_int count) /. full_scale)))
+         with
+         | End_of_file -> Error "no audio yet"
+         | Sys_error message -> Error message)
 ;;

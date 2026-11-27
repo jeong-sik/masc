@@ -474,6 +474,7 @@ repository_id = "masc"
   - neither path replays the action. A scheduled `compose` that never ran shows as `failed_before_effect` on its receipt and has no session row.
 - The receipt's requester is the schedule's creator, with the schedule id.
 - This reuses the one scheduler MASC has. It adds no add-on timer (`docs/design/lane-addon-v0.md:99`).
+- **Its own tools (2026-11-28).** A Lane action is created with `masc_schedule_lane_act_create` and replaced with `masc_schedule_lane_act_update`. `masc_schedule_create` and `masc_schedule_update` wake a Keeper and offer neither `installation_id` nor `action`. Until then one pair took the fields of either kind as two `oneOf` alternatives. Over 2026-11-21..27 the fleet's tool-call ledger shows 408 of 2,079 create and update calls refused on that shape, with placeholder values in the Lane fields (`installation_id = "x"`, `action = {"kind": "noop"}`). Over 2026-10 and 2026-11 every one of the 93 Lane action schedules a Keeper stored through that pair named an installation that was not declared (`tmp`, `x`, `unused`). The one declared installation's schedule was made by the operator.
 
 ### 4.8 K6: Generic TUI support (core, TUI)
 
@@ -748,7 +749,7 @@ The package computes these from its log and publishes them as rows on every obse
 4. **Set the times:** create a Schedule with kind `masc.lane_act`. For example `Daily {hour = 8; minute = 30; timezone = "Asia/Seoul"}`, or `Cron "30 8 * * 1-5"` with the same timezone for weekdays. Body: `{installation_id = "operator-quiz", action = {kind = "compose", questions = 5}}`.
 
 Day to day:
-- **Change the time:** `masc_schedule_update`.
+- **Change the time:** `masc_schedule_lane_act_update` (the Lane action pair; `masc_schedule_update` replaces a Keeper wake).
 - **Pause:** cancel the Schedule (Schedules have no pause state), or set `enabled = false` on the declaration. Disabling removes the worker and keeps the volume. Open questions stay in Approvals and can still be answered; the next worker receives the answers.
 - **Ad hoc:** run `compose` from the add-on action menu.
 - **Unanswered quizzes:** nothing withdraws or limits them. Each compose raises a new question; it supersedes only a session that has not posed its questions yet (§4.9 Sessions). The operator sees how many are open, and P (§14) reports participation.

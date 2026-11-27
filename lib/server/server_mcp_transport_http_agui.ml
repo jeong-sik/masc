@@ -87,10 +87,9 @@ let handle_ag_ui_events ~deps request reqd =
                   let response = Httpun.Response.create ~headers `OK in
                   (match evicted with
                   | Some evicted_sid ->
-                      (* cap-exceeded eviction publishes the
-                         typed Evict/Close event pair. *)
-                      stop_sse_session_evict evicted_sid
-                        ~reason:Session_lifecycle_event.Cap_exceeded
+                      (* [Sse.register] dropped the oldest session to
+                         stay under its client cap. *)
+                      stop_sse_session evicted_sid
                   | None -> ());
                   (match deps.get_runtime_result () with
                   | Error msg ->
@@ -192,10 +191,9 @@ let handle_presence_events ~deps request reqd =
               let response = Httpun.Response.create ~headers `OK in
           (match evicted with
           | Some evicted_sid ->
-              (* cap-exceeded eviction publishes the typed
-                 Evict/Close event pair. *)
-              stop_sse_session_evict evicted_sid
-                ~reason:Session_lifecycle_event.Cap_exceeded
+              (* [Sse.register] dropped the oldest session to stay
+                 under its client cap. *)
+              stop_sse_session evicted_sid
           | None -> ());
           match deps.get_runtime_result () with
           | Error msg ->

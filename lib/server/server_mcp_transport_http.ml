@@ -1127,10 +1127,9 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
               end else (
           (match evicted with
           | Some evicted_sid ->
-              (* cap-exceeded eviction publishes the typed
-                 Evict/Close event pair. *)
-              stop_sse_session_evict evicted_sid
-                ~reason:Session_lifecycle_event.Cap_exceeded
+              (* [Sse.register] dropped the oldest session to stay
+                 under its client cap. *)
+              stop_sse_session evicted_sid
           | None -> ());
           match (match attested_runtime with
              | Some result -> result

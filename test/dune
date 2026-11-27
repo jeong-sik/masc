@@ -496,7 +496,6 @@
   test_log_ring_bounds
   test_log_seq_restart_continuity
   test_runtime_log_sink_render
-  test_session_lifecycle_event
   test_fd_accountant
   test_keeper_disk_pressure
   test_host_fd_pressure_poller
@@ -854,7 +853,6 @@
   test_log_ring_bounds
   test_log_seq_restart_continuity
   test_runtime_log_sink_render
-  test_session_lifecycle_event
   test_fd_accountant
   test_keeper_disk_pressure
   test_host_fd_pressure_poller

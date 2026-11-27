@@ -1,9 +1,9 @@
 ---
 rfc: "a-keeper-takes-every-waiting-message-in-one-turn"
 title: "기다리던 메시지는 한 턴에 같이 들어간다 — 큐는 업무 종류를 모른다"
-status: Draft
+status: Active
 created: 2026-11-16
-updated: 2026-11-17
+updated: 2026-11-28
 author: claude
 related: ["0377", "backlog-never-preempts-a-running-turn", "arrived-stimuli-reach-the-running-turn", "event-queue-admit-all-ready"]
 ---
@@ -184,6 +184,14 @@ related: ["0377", "backlog-never-preempts-a-running-turn", "arrived-stimuli-reac
    - 운영자 명령과 Maintenance lane 은 지금처럼 둔다.
 
    지금 슬롯 해제 알림(`notify_turn_slot_released`)은 "채팅이 먼저 가져가고 남으면 알린다"는 뜻이라 이 뜻도 바뀐다(#46120).
+
+   **구현 메모 (2026-11-27 운영자 승인, #46120).** 이 항목을 먼저 구현한다.
+   - §4.1-1·§4.1-2·§4.1-4·§4.1-5·§4.2 는 이 항목의 선행 조건이 아니다. 그 항목들은 채팅 줄 안의 순서, 채팅 줄의 멈춤, 배달, 기록을 고친다. 두 줄이 번갈아 받는 규칙이 맞는지에는 들어가지 않는다.
+   - owner 는 heartbeat 가 맡긴 자율 턴(`run_autonomous_turn`)을 쥐고 있다가 자율 줄 차례가 오면 직접 시작한다. 자율 줄 입력은 맡길 때 넘긴 읽기 함수를 owner fiber 에서 불러 저장소에서 읽는다. 다른 fiber 에 묻지 않는다.
+   - 직전 줄은 owner 메모리에만 둔다. 재시작하면 어느 줄도 차례를 빚지지 않는다. 이 값을 잃어도 durable 기록은 상하지 않는다.
+   - 슬롯 해제 알림(`notify_turn_slot_released`, wake intent `Turn_slot_released`)과 `autonomous_lost_slot` 은 지웠다. heartbeat 는 주기마다 턴을 한 번만 맡기므로 2026-08-12 의 깨움 폭주가 다시 생기지 않는다.
+   - 남은 차이: owner 는 이벤트 쪽 실행기를 heartbeat 가 턴을 맡긴 동안만 쥔다. 맡긴 턴이 없을 때 생긴 이벤트 입력은 heartbeat 의 다음 주기까지 owner 에게 보이지 않는다. 그 사이 채팅이 두 턴을 연달아 받을 수 있다. owner 가 실행기를 늘 쥐려면 heartbeat 주기를 owner 쪽 실행기로 옮겨야 한다. 그 일은 따로 한다.
+   - §8 의 TLA+ 모델은 아직 없다. 이 항목의 시험은 `test/test_keeper_owner.ml` 의 OCaml 시험 넷이다.
 4. **배달은 슬롯 밖에서 한다.** 실행의 종단 결과와 요청별 배달 의도를 같은 트랜잭션에 쓴다. 슬롯은 그때 놓는다. 배달은 그 기록을 읽어 따로 진행한다. 배달 결과는 셋으로 나눈다.
    - 보내지 않은 것이 확실하다(보내기 전 실패, 채널이 받기 전에 거절): 다시 보낸다. 모델은 다시 돌리지 않는다.
    - 받은 것이 확실하다: 끝난다.

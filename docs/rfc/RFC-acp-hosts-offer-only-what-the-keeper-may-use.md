@@ -75,15 +75,22 @@ TUI 도구 행에 오류가 두 가지로 쌓인다. Muse Keeper 에는 `omm:` �
   - 그래서 비어 있지 않다는 것은 다른 폴더를 받았다는 뜻이다. 남의 폴더에 쓰지 않으려고 멈춘다.
 - `read`·`full` 은 바꾸지 않는다. 이 둘은 Keeper 자기 폴더에서 돈다. 그 폴더가 호스트 트리일 수 있어서 MASC 가 파일을 쓰지 않는다.
 - 이 결정으로 `none` Keeper 는 `TodoList`·`Skill`·`FetchURL`·`WebSearch`·`Read`·`Grep`·`Glob`·`AskUserQuestion`·`Agent` 를 잃는다. 같은 일은 MASC 도구로 한다. Muse `none` 이 이미 이렇게 돈다.
-- 배포 전에 만든 Kimi 세션은 새 세션으로 바뀔 때까지 옛 도구 목록을 쓴다(실험 K2).
+- 배포 전에 만든 Kimi 세션은 불러와도 옛 도구 목록을 쓴다(실험 K2). 그래서 Kimi `none` 세션의 도구 표면 digest(`tool_surface_sha256`)에 이 profile 의 판을 넣는다.
+  - 배포 뒤 첫 턴에 digest 가 달라져 Kimi `none` Keeper 는 새 세션으로 한 번 바뀐다.
+  - 그때 Gate 승인을 기다리던 이어 하기는 이어지지 않는다(`Gate_continuation_unresumable`). Gate 가 bind 한 벤더 세션의 도구 목록이 바뀌었기 때문이다.
 
 ### D3. 준비가 실패하면 호스트를 띄우지 않는다
 
 - 다음 경우에 `start` 는 오류를 돌려주고 호스트를 띄우지 않는다.
-  - Muse 목록 명령을 띄우지 못했다. 호스트를 띄울 때와 같은 `Spawn_refused` 다. `muse` 가 없으면 지금처럼 다시 시도하지 않는다.
-  - Muse 목록 명령이 0 이 아닌 값으로 끝났거나, 30초 안에 끝나지 않았거나, 출력이 위의 JSON 모양이 아니다. `Protocol_error` 이고 `stage` 가 그 명령이다.
+  - Muse 목록 명령을 띄우지 못했다. 호스트를 띄울 때와 같은 `Spawn_refused` 다. 세션 기록과 예비 runtime 처리도 호스트를 띄우지 못했을 때와 같다.
+  - Muse 목록 명령이 0 이 아닌 값으로 끝났거나, 30초 안에 끝나지 않았거나, 출력이 위의 JSON 모양이 아니다. 새 오류 `Preparation_failed` 이고, 실패한 명령과 이유를 담는다.
   - Kimi profile 을 쓰지 못했다. `Invalid_config` 다.
-- 같은 명령은 다음에도 같은 결과를 낸다. 그래서 Muse 목록 실패를 매 턴 다시 시도하는 `Invalid_config` 로 두지 않는다. Keeper 는 `Protocol_error` 를 복구 기록으로 남기고, 운영자가 그 기록을 읽고 플러그인 저장소를 고친다.
+- `Preparation_failed` 는 호스트가 뜨지 않았고 벤더에 아무것도 보내지 않았다는 뜻이다. Keeper 는 이렇게 다룬다.
+  - 세션 기록은 `Pre_dispatch_failed` 로 정산한다. 이어가던 벤더 세션은 그대로 남는다. 다음에 목록이 성공하면 그 세션을 이어받는다.
+  - core 오류는 `ProviderUnavailable` 이다. 문제는 Muse 호스트의 로컬 준비에만 있으니, 예비 runtime 이 있으면 그 턴은 예비 runtime 으로 넘어간다.
+  - 다음 턴은 목록 명령을 다시 돌린다. 시간 초과나 저장소 잠금은 다음에 풀릴 수 있다. 계속 실패하면 턴마다 같은 명령과 이유가 오류에 남고, 운영자가 그것을 읽고 플러그인 저장소를 고친다.
+  - 검증(`runtime_verification`)은 provider 거절이 아니라 클라이언트가 뜨지 않은 것으로 보여 준다.
+- `Protocol_error` 로 두지 않는다. 그 오류는 세션 복구 기록이 되고, 다음 claim 이 그 기록을 자동으로 대체하면서 이어가던 세션을 버린다. core 에서는 `ParseError` 라 예비 runtime 으로 넘어가지도 않는다.
 - Kimi profile 은 다시 띄울 때 새 빈 폴더를 받으니 다시 시도할 수 있다.
 - 조용히 넘어가면 운영자 플러그인이나 내장 도구가 다시 Keeper 세션에 들어간다. 운영자 결정(2026-11-27)이다.
 
@@ -98,7 +105,9 @@ TUI 도구 행에 오류가 두 가지로 쌓인다. Muse Keeper 에는 `omm:` �
 - 시험
   - 목록과 inspect 출력의 JSON 을 읽는다. 모양이 다르면 오류다.
   - Muse argv 에 capability id 마다 `-c` 가 한 번씩 들어간다. observer 와 겹치는 id 도 한 번이다.
-  - 목록·inspect 명령이 실패하거나 출력을 읽지 못하면 `start` 가 그 명령을 담은 `Protocol_error` 로 끝나고 호스트를 띄우지 않는다. `muse` 가 없으면 `Spawn_refused` 다.
+  - 목록·inspect 명령이 실패하거나 출력을 읽지 못하면 `start` 가 그 명령을 담은 `Preparation_failed` 로 끝나고 호스트를 띄우지 않는다. `muse` 가 없으면 `Spawn_refused` 다.
+  - Keeper 는 `Preparation_failed` 를 세션 기록 `Pre_dispatch_failed` 와 core 오류 `ProviderUnavailable` 로 옮긴다.
+  - Kimi `none` 의 도구 표면 digest 는 profile 판이 들어가 다른 posture·다른 호스트와 달라진다.
   - Kimi profile 의 내용과, 폴더가 비어 있지 않으면 쓰지 않고 멈추는 동작을 본다.
 - 배포 뒤
   - Muse Keeper 세션 기록에 운영자 플러그인의 `hook_run_started` 가 0건이다.

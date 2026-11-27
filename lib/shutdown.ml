@@ -1,42 +1,34 @@
-(** Shutdown — Structured graceful shutdown with defined phases
+(** Shutdown — what the server's shutdown reads: its durations, the hard
+    process deadline, the cleanup hook registry and the global shutdown flag.
 
-    Phases execute in order:
-    1. Notify  — Broadcast shutdown intent to connected clients
-    2. Drain   — Wait for in-flight requests to complete (configurable timeout)
-    3. Cleanup — Run registered hooks (cancel fibers, flush state, save checkpoint)
-    4. Exit    — Terminate the Eio switch
-
-    Each phase logs its start/end. The process entrypoint owns the hard
-    [force_timeout_s] watchdog outside the Eio switch; phase execution never
-    disarms its own supervisor.
+    The SIGTERM/SIGINT path in [bin/main_eio.ml] runs the shutdown itself:
+    it notifies SSE clients, runs the hooks through [Shutdown_hooks], flushes
+    the Board and cancels the server. The process entrypoint owns the hard
+    [force_timeout_s] watchdog outside the Eio switch.
 
     @since 2.102.0 *)
 
 (** {1 Configuration} *)
 
 type config = {
-  notify_delay_s : float;   (** Time after notify before drain starts *)
-  drain_timeout_s : float;  (** Max time to wait for in-flight work *)
+  notify_delay_s : float;   (** Time after the SSE notice before the hooks run *)
   cleanup_timeout_s : float;(** Max time for cleanup hooks *)
   force_timeout_s : float;  (** Total max time before force exit *)
 }
 
 let default_config = {
   notify_delay_s = 0.2;
-  drain_timeout_s = 5.0;
   cleanup_timeout_s = 3.0;
   force_timeout_s = 10.0;
 }
 
 type config_field =
   | Notify_delay
-  | Drain_timeout
   | Cleanup_timeout
   | Force_timeout
 
 let config_field_env_name = function
   | Notify_delay -> "MASC_SHUTDOWN_NOTIFY_DELAY"
-  | Drain_timeout -> "MASC_SHUTDOWN_DRAIN_TIMEOUT"
   | Cleanup_timeout -> "MASC_SHUTDOWN_CLEANUP_TIMEOUT"
   | Force_timeout -> "MASC_SHUTDOWN_FORCE_TIMEOUT"
 
@@ -80,10 +72,6 @@ let config_from_env_result () =
     get_duration Notify_delay ~default:default_config.notify_delay_s
       ~positive:false
   in
-  let* drain_timeout_s =
-    get_duration Drain_timeout ~default:default_config.drain_timeout_s
-      ~positive:false
-  in
   let* cleanup_timeout_s =
     get_duration Cleanup_timeout ~default:default_config.cleanup_timeout_s
       ~positive:false
@@ -92,13 +80,7 @@ let config_from_env_result () =
     get_duration Force_timeout ~default:default_config.force_timeout_s
       ~positive:true
   in
-  Ok { notify_delay_s; drain_timeout_s; cleanup_timeout_s; force_timeout_s }
-
-let config_from_env () =
-  match config_from_env_result () with
-  | Ok config -> config
-  | Error error -> invalid_arg (config_error_to_string error)
-;;
+  Ok { notify_delay_s; cleanup_timeout_s; force_timeout_s }
 
 (** {1 Process deadline supervision} *)
 
@@ -187,49 +169,6 @@ let rec disarm_deadline_watchdog watchdog =
 
 let await_deadline_watchdog watchdog = Thread.join watchdog.thread
 
-(** {1 Phase Tracking} *)
-
-type phase =
-  | Running
-  | Notifying
-  | Draining
-  | Cleaning
-  | Exiting
-  | Done
-
-let phase_to_string = function
-  | Running -> "running"
-  | Notifying -> "notifying"
-  | Draining -> "draining"
-  | Cleaning -> "cleaning"
-  | Exiting -> "exiting"
-  | Done -> "done"
-
-type state = {
-  mutable phase : phase;
-  mutable started_at : float;
-  mutable reason : string;
-  entered : bool Atomic.t;
-    (** CAS gate: ensures [initiate] runs phases at most once per state.
-        Separate from the global [shutting_down_flag] which is a
-        process-wide sticky observability flag. *)
-  config : config;
-}
-
-let create ?config () =
-  let config =
-    match config with
-    | Some config -> config
-    | None -> config_from_env ()
-  in
-  {
-    phase = Running;
-    started_at = 0.0;
-    reason = "";
-    entered = Atomic.make false;
-    config;
-  }
-
 (** {1 Hook Registry} *)
 
 type hook = {
@@ -238,22 +177,22 @@ type hook = {
   action : unit -> unit;
 }
 
-(** Global shutdown-started flag.  Set to [true] on the first [initiate]
-    call.  This flag is sticky: it is never cleared, so it indicates that
-    shutdown has started at least once, not that shutdown is currently in
-    progress.  In production the process exits shortly after shutdown, so
-    the sticky semantics are safe.  In tests where [exit_fn] is a no-op,
-    callers must be aware that the flag stays [true]. *)
+(** Global shutdown-started flag. The SIGTERM/SIGINT handler in
+    [bin/main_eio.ml] sets it through [mark_shutting_down]. This flag is
+    sticky: it is never cleared, so it indicates that shutdown has started,
+    not that shutdown is currently in progress. In production the process
+    exits shortly after shutdown, so the sticky semantics are safe. A test
+    that sets it sees it stay [true] for the rest of its process. *)
 let shutting_down_flag = Atomic.make false
 
 let is_shutting_down_global () = Atomic.get shutting_down_flag
 
 (* Async-signal-safe marker. [Atomic.set] is lock-free, so it can be invoked
    from an OCaml signal handler. Idempotent; later calls are no-ops once the
-   sticky flag is [true]. Wiring this from [bin/main_eio.ml]'s signal handler
-   closes the gap where [Shutdown.initiate] is never called by the inline
-   shutdown path, leaving [is_shutting_down_global] permanently [false] and
-   making the keeper supervisor's graceful-shutdown branch unreachable. *)
+   sticky flag is [true]. [bin/main_eio.ml]'s signal handler calls it before
+   the watcher fiber starts the shutdown, so a Keeper fiber cancelled by that
+   shutdown reads [is_shutting_down_global] as [true] and the supervisor
+   records a graceful drop rather than a crash. *)
 let mark_shutting_down () = Atomic.set shutting_down_flag true
 
 type signal =
@@ -297,96 +236,6 @@ let run_registered_hooks () =
     all_hooks;
   !failed
 
-(** {1 Phase Execution} *)
-
-(** Execute notify phase: broadcast shutdown to clients. *)
-let phase_notify state ~clock ~notify_fn =
-  state.phase <- Notifying;
-  Log.Server.info "[Shutdown] Phase 1/4: NOTIFY (reason=%s)" state.reason;
-  (try notify_fn state.reason with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     Log.Server.warn "[Shutdown] notify_fn failed, proceeding: %s"
-       (Printexc.to_string exn));
-  Eio.Time.sleep clock state.config.notify_delay_s
-
-(** Execute drain phase: wait for in-flight work. *)
-let phase_drain state ~clock ~drain_check =
-  state.phase <- Draining;
-  Log.Server.info "[Shutdown] Phase 2/4: DRAIN (timeout=%.1fs)" state.config.drain_timeout_s;
-  let deadline = Eio.Time.now clock +. state.config.drain_timeout_s in
-  let rec wait () =
-    match drain_check () with
-    | true ->
-      Log.Server.info "[Shutdown] drain complete (all work finished)"
-    | false ->
-      if Eio.Time.now clock >= deadline then
-        Log.Server.warn "[Shutdown] drain timeout reached, proceeding"
-      else begin
-        Eio.Time.sleep clock 0.1;
-        wait ()
-      end
-    | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-    | exception exn ->
-      Log.Server.warn "[Shutdown] drain_check failed, proceeding: %s"
-        (Printexc.to_string exn)
-  in
-  wait ()
-
-(** Execute cleanup phase: run registered hooks with timeout. *)
-let phase_cleanup state ~clock =
-  state.phase <- Cleaning;
-  let all_hooks = sorted_hooks () in
-  Log.Server.info "[Shutdown] Phase 3/4: CLEANUP (%d hooks, timeout=%.1fs)"
-    (List.length all_hooks) state.config.cleanup_timeout_s;
-  (try
-    let failed = Eio.Time.with_timeout_exn clock state.config.cleanup_timeout_s run_registered_hooks in
-    if failed > 0 then
-      Log.Server.warn "[Shutdown] cleanup finished with %d hook failures" failed
-  with Eio.Time.Timeout ->
-    Log.Server.warn "[Shutdown] cleanup timeout (%.1fs) exceeded, proceeding"
-      state.config.cleanup_timeout_s)
-
-(** Execute exit phase. *)
-let phase_exit state ~clock ~exit_fn =
-  state.phase <- Exiting;
-  let elapsed = Eio.Time.now clock -. state.started_at in
-  Log.Server.info "[Shutdown] Phase 4/4: EXIT (total=%.1fs)" elapsed;
-  exit_fn ();
-  state.phase <- Done
-
-(** {1 Main Entry Point} *)
-
-(** Initiate graceful shutdown.
-
-    @param notify_fn Called with reason string to broadcast to clients
-    @param drain_check Returns true when all in-flight work is complete
-    @param exit_fn Called to terminate the process (e.g., Eio.Switch.fail) *)
-let initiate state ~clock ~reason ~notify_fn ~drain_check ~exit_fn =
-  (* CAS on per-state [entered] flag as the single-entry gate. The old
-     code checked [state.phase <> Running] non-atomically, which races
-     when two signals arrive in close succession (e.g. SIGTERM then
-     SIGINT): both callers observe [Running] before either writes the
-     new phase, both proceed, and the phases double-run with clobbered
-     [started_at]/[reason]. Per-state CAS serializes entry at the CPU
-     level without depending on the global [shutting_down_flag], which
-     is documented as a sticky observability flag and must not gate
-     repeated [initiate] calls on distinct [state]s (e.g. in tests). *)
-  if not (Atomic.compare_and_set state.entered false true) then begin
-    Log.Server.warn "[Shutdown] already in progress (phase=%s), ignoring"
-      (phase_to_string state.phase);
-  end else begin
-    Atomic.set shutting_down_flag true;
-    state.started_at <- Eio.Time.now clock;
-    state.reason <- reason;
-    Log.Server.info "[Shutdown] initiated: %s" reason;
-
-    phase_notify state ~clock ~notify_fn;
-    phase_drain state ~clock ~drain_check;
-    phase_cleanup state ~clock;
-    phase_exit state ~clock ~exit_fn
-  end
-
 (** {1 Termination classification} *)
 
 let rec is_benign_termination ~benign exn =
@@ -414,8 +263,3 @@ let rec is_benign_termination ~benign exn =
     is_benign_termination ~benign inner
   | _ -> false
 ;;
-
-(** {1 Queries} *)
-
-let current_phase state = state.phase
-let is_shutting_down state = state.phase <> Running && state.phase <> Done

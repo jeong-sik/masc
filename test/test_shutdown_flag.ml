@@ -1,8 +1,7 @@
-(* Regression: PR #19346 introduced [fiber_drop_cause.Graceful_shutdown] but the
-   sending end ([Shutdown.shutting_down_flag]) was only assigned inside
-   [Shutdown.initiate], which [bin/main_eio.ml]'s inline SIGTERM/SIGINT path
-   never calls. Without a public marker, the keeper supervisor's
-   [is_shutting_down_global] branch is unreachable. These tests pin the
+(* [bin/main_eio.ml]'s SIGTERM/SIGINT handler sets the global shutdown flag
+   through [Shutdown.mark_shutting_down]. The keeper supervisor reads it with
+   [is_shutting_down_global] to record a fiber cancelled by shutdown as
+   [fiber_drop_cause.Graceful_shutdown] (PR #19346). These tests pin the
    marker's behaviour so the signal-handler wiring cannot silently regress. *)
 
 module S = Masc.Shutdown
@@ -32,9 +31,9 @@ let mark_is_idempotent () =
     (S.is_shutting_down_global ())
 
 (* The flag is documented as sticky and process-global; once a previous test
-   sets it via [initiate] or [mark_shutting_down] it cannot be observed as
-   [false] again. We therefore run [mark_sets_global_flag] first (it asserts
-   the [false] precondition) and then idempotency. *)
+   sets it via [mark_shutting_down] it cannot be observed as [false] again.
+   We therefore run [mark_sets_global_flag] first (it asserts the [false]
+   precondition) and then idempotency. *)
 let () =
   Alcotest.run "shutdown_flag"
     [ "mark_shutting_down"

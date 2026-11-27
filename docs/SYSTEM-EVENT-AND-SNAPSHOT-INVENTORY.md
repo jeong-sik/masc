@@ -179,8 +179,8 @@ If you are watching dashboard freshness:
 ### Graceful shutdown
 
 - Process-level graceful shutdown handles `SIGTERM` and `SIGINT`.
-- Structured shutdown phases are `Notify -> Drain -> Cleanup -> Exit`.
-- Cleanup closes SSE/WS sessions and flushes in-memory buffers.
+- Shutdown phases are `NOTIFY -> HOOKS -> BOARD -> CANCEL`, run by `bin/main_eio.ml`.
+- HOOKS closes SSE/WS sessions and flushes in-memory buffers.
 
 ### Crash and force-kill
 

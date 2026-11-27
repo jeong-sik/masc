@@ -1,13 +1,10 @@
-(** Shutdown — Structured graceful shutdown with defined phases.
+(** Shutdown — what the server's shutdown reads: its durations, the hard
+    process deadline, the cleanup hook registry and the global shutdown flag.
 
-    Phases execute in order:
-    1. Notify  — Broadcast shutdown intent to connected clients
-    2. Drain   — Wait for in-flight requests to complete (configurable timeout)
-    3. Cleanup — Run registered hooks (cancel fibers, flush state, save checkpoint)
-    4. Exit    — Terminate the Eio switch
-
-    The process entrypoint owns the hard [force_timeout_s] watchdog outside
-    the Eio switch; phase execution never disarms its own supervisor.
+    The SIGTERM/SIGINT path in [bin/main_eio.ml] runs the shutdown itself:
+    it notifies SSE clients, runs the hooks through {!Shutdown_hooks}, flushes
+    the Board and cancels the server. The process entrypoint owns the hard
+    [force_timeout_s] watchdog outside the Eio switch.
 
     @since 2.102.0 *)
 
@@ -15,14 +12,12 @@
 
 type config = {
   notify_delay_s : float;
-  drain_timeout_s : float;
   cleanup_timeout_s : float;
   force_timeout_s : float;
 }
 
 type config_field =
   | Notify_delay
-  | Drain_timeout
   | Cleanup_timeout
   | Force_timeout
 
@@ -37,11 +32,6 @@ val config_from_env_result : unit -> (config, config_error) result
 (** Read and validate the shutdown duration environment variables. A present
     malformed, non-finite, or out-of-range value is an explicit error; it is
     never replaced with a default. *)
-
-val config_from_env : unit -> config
-(** Source-compatible configuration front door. Invalid present values raise
-    [Invalid_argument] with {!config_error_to_string}; callers that need typed
-    startup handling should use {!config_from_env_result}. *)
 
 val default_config : config
 (** The built-in budget used when no environment override is present. The
@@ -103,20 +93,6 @@ val await_deadline_watchdog : watchdog -> unit
 (** Join the watchdog thread. Intended for deterministic lifecycle tests and
     callers that need proof that the watchdog callback has finished. *)
 
-(** {1 Phase Tracking} *)
-
-type phase =
-  | Running
-  | Notifying
-  | Draining
-  | Cleaning
-  | Exiting
-  | Done
-
-type state
-
-val create : ?config:config -> unit -> state
-
 (** {1 Hook Registry} *)
 
 type hook = {
@@ -130,9 +106,9 @@ val run_registered_hooks : unit -> int
 (** Run every hook registered with {!register}, in priority order, and return
     how many hooks failed.
 
-    This is the cleanup core used by {!initiate}'s cleanup phase and by the
-    inline server shutdown path in {!Shutdown_hooks}. Hook exceptions are logged
-    and swallowed except for [Eio.Cancel.Cancelled], which is re-raised. *)
+    {!Shutdown_hooks.run_all} calls it during the server shutdown. Hook
+    exceptions are logged and swallowed except for [Eio.Cancel.Cancelled],
+    which is re-raised. *)
 
 (** {1 Global Shutdown Flag} *)
 
@@ -158,20 +134,6 @@ type signal =
 val signal_name : signal -> string
 (** Wire name: [SIGTERM] or [SIGINT]. *)
 
-(** {1 Phase Execution} *)
-
-val initiate :
-  state -> clock:'a Eio.Time.clock ->
-  reason:string ->
-  notify_fn:(string -> unit) ->
-  drain_check:(unit -> bool) ->
-  exit_fn:(unit -> unit) ->
-  unit
-(** Run the cooperative shutdown phases. This function deliberately does not
-    own the hard process deadline: a caller supervising an Eio switch must
-    start {!start_process_deadline_watchdog} outside that switch and disarm it
-    only after the switch has actually returned. *)
-
 (** {1 Termination classification} *)
 
 val is_benign_termination : benign:(exn -> bool) -> exn -> bool
@@ -192,8 +154,3 @@ val is_benign_termination : benign:(exn -> bool) -> exn -> bool
     entrypoint's termination exception plus [Eio.Cancel.Cancelled]); this
     function owns the [Multiple]/[Finally_raised] wrapper structure so callers
     need not know how Eio combines shutdown exceptions. *)
-
-(** {1 Queries} *)
-
-val current_phase : state -> phase
-val is_shutting_down : state -> bool

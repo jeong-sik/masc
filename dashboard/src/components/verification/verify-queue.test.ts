@@ -40,8 +40,10 @@ vi.mock('../../api/dashboard-verification-verdict', () => ({
 // ── Mock router ───────────────────────────────────────
 
 const navigateMock = vi.fn()
+const navigateToKeeperMock = vi.fn()
 vi.mock('../../router', () => ({
   navigate: (...args: unknown[]) => navigateMock(...args),
+  navigateToKeeper: (...args: unknown[]) => navigateToKeeperMock(...args),
 }))
 
 import { VerifyQueue } from './verify-queue'
@@ -91,6 +93,7 @@ beforeEach(() => {
   submitVerificationVerdict.mockReset()
   submitVerificationVerdict.mockResolvedValue({ ok: true, message: 'committed', noop: false })
   navigateMock.mockReset()
+  navigateToKeeperMock.mockReset()
   tasks.value = []
   goals.value = []
   keepers.value = []
@@ -293,7 +296,7 @@ describe('VerifyQueue', () => {
     expect(sub).toBeTruthy()
     expect(sub.textContent).toContain('sangsu')
     fireEvent.click(sub)
-    expect(navigateMock).toHaveBeenCalledWith('monitoring', { section: 'agents', view: 'keepers', keeper: 'sangsu' })
+    expect(navigateToKeeperMock).toHaveBeenCalledWith('sangsu')
   })
 
   it('jumps to the owning goal from the goal link', () => {

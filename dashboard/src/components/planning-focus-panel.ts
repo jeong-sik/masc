@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { computed } from '@preact/signals'
-import { navigate, replaceRoute, route } from '../router'
+import { navigate, navigateToKeeper, replaceRoute, route } from '../router'
 import { goals, tasks } from '../store'
 import type { Goal, Task } from '../types'
 import { FilterChips } from './common/filter-chips'
@@ -229,7 +229,7 @@ function StaleFocus({ entries }: { entries: StaleEntry[] }) {
                   <button
                     type="button"
                     class="rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-1 font-mono text-3xs text-accent-fg hover:bg-[var(--accent-15)]"
-                    onClick=${() => entry.task.assignee && navigate('monitoring', { section: 'agents', view: 'keepers', keeper: entry.task.assignee })}
+                    onClick=${() => entry.task.assignee && navigateToKeeper(entry.task.assignee)}
                   >
                     nudge
                   </button>
@@ -265,7 +265,7 @@ function LedgerFocus({ rows }: { rows: AccountabilityRow[] }) {
                     <button
                       type="button"
                       class="font-mono text-xs font-semibold text-text-strong hover:underline"
-                      onClick=${() => navigate('monitoring', { section: 'agents', view: 'keepers', keeper: row.principal })}
+                      onClick=${() => navigateToKeeper(row.principal)}
                     >
                       ${row.principal}
                     </button>

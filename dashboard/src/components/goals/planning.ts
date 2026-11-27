@@ -13,7 +13,7 @@ import {
   tasksByStatus,
   keepers,
 } from '../../store'
-import { navigate } from '../../router'
+import { navigate, navigateToKeeper } from '../../router'
 import {
   effectiveTaskPriority,
   goalProgressFor,
@@ -170,7 +170,7 @@ function KeeperToolActivity() {
                   key=${k.name}
                   type="button"
                   class="inline-flex items-center gap-1.5 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 font-mono text-3xs text-[var(--color-fg-secondary)] transition-colors hover:border-[var(--color-border-strong)] hover:text-[var(--color-fg-primary)]"
-                  onClick=${() => navigate('monitoring', { section: 'agents', keeper: k.name })}
+                  onClick=${() => navigateToKeeper(k.name)}
                 >
                   ${k.emoji ?? ''} ${k.koreanName ?? k.name}
                   <span class="text-[var(--color-fg-disabled)]">${k.turn_count ?? 0}t</span>

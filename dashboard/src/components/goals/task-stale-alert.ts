@@ -8,7 +8,7 @@
 import { html } from 'htm/preact'
 import { computed } from '@preact/signals'
 import { tasks } from '../../store'
-import { navigate } from '../../router'
+import { navigate, navigateToKeeper } from '../../router'
 import type { Task } from '../../types'
 import { SECONDS_PER_MINUTE, SECONDS_PER_HOUR, SECONDS_PER_DAY } from '../../lib/format-time'
 
@@ -101,7 +101,7 @@ export function TaskStaleAlert() {
                   class="v2-workspace-action rounded-[var(--r-1)] border border-[var(--accent-30)] bg-[var(--accent-10)] px-2 py-0.5 text-2xs text-accent-fg hover:bg-[var(--accent-15)]"
                   title="해당 키퍼 상세로 이동해 직접 nudge"
                   aria-label=${`${e.task.assignee} 키퍼 상세에서 ${e.task.id} nudge`}
-                  onClick=${() => e.task.assignee && navigate('monitoring', { section: 'agents', view: 'keepers', keeper: e.task.assignee })}
+                  onClick=${() => e.task.assignee && navigateToKeeper(e.task.assignee)}
                 >
                   nudge
                 </button>

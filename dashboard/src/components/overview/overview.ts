@@ -38,7 +38,7 @@ import {
   type DashboardCompositeHealthVerdict,
 } from '../../lib/dashboard-composite-health'
 import { createAsyncResource, type AsyncResource, type AsyncState } from '../../lib/async-state'
-import { navigate } from '../../router'
+import { navigate, navigateToKeeper } from '../../router'
 import { gateData } from '../gate-signals'
 import type { TabId } from '../../types/sse'
 import {
@@ -794,7 +794,7 @@ function OverviewKpiStrip({
     } else if (hasHealthRow) {
       navigate('monitoring', { section: 'fleet-health' })
     } else {
-      navigate('monitoring', { section: 'agents' })
+      navigateToKeeper()
     }
   }
   return html`
@@ -911,7 +911,7 @@ function OverviewAttentionPanel({
             <div
               key=${k.name}
               class="ov-attn-row v2-overview-attention-row"
-              onClick=${() => navigate('monitoring', { section: 'agents', keeper: k.name })}
+              onClick=${() => navigateToKeeper(k.name)}
               data-testid=${`attention-row-${k.name}`}
             >
               <${AgentAvatar} name=${k.name} size="sm" status=${keeperDisplayStatus(k)} />
@@ -932,7 +932,7 @@ function OverviewAttentionPanel({
                 class="ov-attn-act"
                 onClick=${(e: MouseEvent) => {
                   e.stopPropagation()
-                  navigate('monitoring', { section: 'agents', keeper: k.name })
+                  navigateToKeeper(k.name)
                 }}
               >
                 ${reason.act} →

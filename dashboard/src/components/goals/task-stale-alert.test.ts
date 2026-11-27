@@ -7,12 +7,14 @@ import type { Task } from '../../types'
 
 vi.mock('../../router', () => ({
   navigate: vi.fn(),
+  navigateToKeeper: vi.fn(),
 }))
 
-import { navigate } from '../../router'
+import { navigate, navigateToKeeper } from '../../router'
 import { TaskStaleAlert } from './task-stale-alert'
 
 const mockedNavigate = vi.mocked(navigate)
+const mockedNavigateToKeeper = vi.mocked(navigateToKeeper)
 
 function makeTask(overrides: Partial<Task>): Task {
   return {
@@ -32,12 +34,14 @@ describe('TaskStaleAlert', () => {
     vi.setSystemTime(new Date('2026-05-06T01:00:00Z'))
     tasks.value = []
     mockedNavigate.mockClear()
+    mockedNavigateToKeeper.mockClear()
   })
 
   afterEach(() => {
     cleanup()
     tasks.value = []
     mockedNavigate.mockClear()
+    mockedNavigateToKeeper.mockClear()
     vi.useRealTimers()
   })
 
@@ -98,11 +102,7 @@ describe('TaskStaleAlert', () => {
     render(h(TaskStaleAlert, {}))
 
     fireEvent.click(screen.getByRole('button', { name: 'keeper-alpha 키퍼 상세에서 task-stale-claimed nudge' }))
-    expect(mockedNavigate).toHaveBeenCalledWith('monitoring', {
-      section: 'agents',
-      view: 'keepers',
-      keeper: 'keeper-alpha',
-    })
+    expect(mockedNavigateToKeeper).toHaveBeenCalledWith('keeper-alpha')
 
     fireEvent.click(screen.getByRole('button', { name: '태스크 상세 패널 열기: task-stale-claimed' }))
     expect(mockedNavigate).toHaveBeenLastCalledWith('workspace', {

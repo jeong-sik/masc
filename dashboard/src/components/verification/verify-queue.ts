@@ -32,7 +32,7 @@ import type { Task } from '../../types'
 import { KeeperBadge } from '../keeper-badge'
 import { ErrorState } from '../common/feedback-state'
 import { relativeTime } from '../../lib/format-time'
-import { navigate } from '../../router'
+import { navigate, navigateToKeeper } from '../../router'
 import { useManagedAsyncResource } from '../../lib/use-managed-async-resource'
 
 const REQUESTS_LIMIT = 100
@@ -288,7 +288,7 @@ function VqSubmitter({ item }: { item: VqQueueItem }) {
           <button
             class="vq-sub"
             title="${actor} 대화 열기"
-            onClick=${() => navigate('monitoring', { section: 'agents', view: 'keepers', keeper: actor })}
+            onClick=${() => navigateToKeeper(actor)}
           >
             <${KeeperBadge} id=${actor} variant="sigil" size="sm" />
             <span class="mono">${actor}</span>

@@ -1178,6 +1178,12 @@ let test_encoded_pixel_snapshot () =
             in
             Printf.printf "DEBUG changed_pixels frame=%d rev=%s kind=%s " (current_frame_number ()) (match List.assoc_opt "revision" (pixels_object changed_pixels) with Some v -> Yojson.Safe.to_string v | None -> "?") (match List.assoc_opt "kind" (pixels_object changed_pixels) with Some v -> Yojson.Safe.to_string v | None -> "?");
             print_newline ();
+            (match Lane.frame () with
+             | Some f ->
+               Printf.printf "DEBUG lane_frame frame=%d rev=%s\n" (current_frame_number ())
+                 (Agent_core_sha256.to_hex (Agent_core_sha256.digest_string f.rgb));
+               print_newline ()
+             | None -> ());
             assert_pixels_kind "inline" changed_pixels;
             let pixel_fields = pixels_object changed_pixels in
             let rgb =

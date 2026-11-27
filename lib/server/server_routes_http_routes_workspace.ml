@@ -536,7 +536,7 @@ let save_workspace_file_before_publication ~before_publication
     let lock = Keeper_fs.acquire_path_lock initial.resolved_path in
     Fun.protect
       ~finally:(fun () -> Keeper_fs.release_path_lock initial.resolved_path lock)
-      (fun () -> Eio.Mutex.use_rw ~protect:true (Keeper_fs.path_lock_mutex lock) (fun () ->
+      (fun () -> Eio.Mutex.use_ro (Keeper_fs.path_lock_mutex lock) (fun () ->
         let* file = resolve () in
         let* () = if String.equal file.resolved_path initial.resolved_path
           then Ok () else Error Save_conflict in

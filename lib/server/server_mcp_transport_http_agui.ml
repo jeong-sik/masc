@@ -67,12 +67,16 @@ let handle_ag_ui_events ~deps request reqd =
               ensure_sse_backing_session_for_known_transport_session
                 ~transport_session_id:session_id ~sse_session_id:session_id;
               let expected_resource = Server_oauth_metadata.resource request_authority in
+              let owned_info : sse_conn_info option Atomic.t = Atomic.make None in
+              let disconnected = Atomic.make false in
               (match
                  Auth_oauth.with_expected_resource expected_resource (fun () ->
                    Sse.register ~kind:Sse.Observer ~auth session_id
                      (* DET-OK: unchanged from main; the authority wrapper only re-indented it. *)
                      ~last_event_id:(Option.value ~default:0 last_event_id)
-                     ~on_disconnect:(fun () -> stop_sse_session session_id))
+                     ~on_disconnect:(fun () ->
+                       Atomic.set disconnected true;
+                       Option.iter stop_sse_conn_if_current (Atomic.get owned_info)))
                with
                | Error reg_err ->
                    let msg = Sse.registration_error_to_string reg_err in
@@ -107,7 +111,15 @@ let handle_ag_ui_events ~deps request reqd =
                       ~idle:(session_idle ~session_id) reqd response
                   in
                   let info = make_sse_conn ~session_id ~client_id ~response () in
-                  register_sse_conn ~session_id ~info;
+                  let published = register_sse_conn_if_newer ~session_id ~info in
+                  Atomic.set owned_info (Some info);
+                  if not published then (
+                    Eio.Cancel.protect (fun () ->
+                      stop_sse_conn_if_current info;
+                      Server_sse_response.close response);
+                    Eio.Fiber.check ())
+                  else (
+                  if Atomic.get disconnected then stop_sse_conn_if_current info;
                   let prime =
                     Ag_ui.(
                       make_event ~thread_id:default_thread_id ~run_id:(Some session_id) Run_started
@@ -141,7 +153,7 @@ let handle_ag_ui_events ~deps request reqd =
                           | exception (Eio.Cancel.Cancelled _ as e) -> raise e
                           | exception exn ->
                             Log.Server.error "ag-ui drain loop error: %s"
-                              (Printexc.to_string exn))))))
+                              (Printexc.to_string exn)))))))
 
 let handle_presence_events ~deps request reqd =
   let request_authority = Server_request_authority.current_exn () in
@@ -171,21 +183,24 @@ let handle_presence_events ~deps request reqd =
           respond_sse_rate_limited ~deps ~origin ~session_id:(Some session_id)
             ~protocol_version ~reason ~retry_after_s reqd
       | Ok () ->
-          stop_sse_session_preserve_guard session_id;
           ensure_sse_backing_session_for_known_transport_session
             ~transport_session_id:raw_session_id ~sse_session_id:session_id;
           let expected_resource = Server_oauth_metadata.resource request_authority in
+          let owned_info : sse_conn_info option Atomic.t = Atomic.make None in
+          let disconnected = Atomic.make false in
           (match
              Auth_oauth.with_expected_resource expected_resource (fun () ->
                Sse.register ~kind:Sse.Presence ~auth session_id ~last_event_id:0
                  ~on_disconnect:(fun () ->
-                   stop_sse_session_preserve_guard session_id))
+                   Atomic.set disconnected true;
+                   Option.iter stop_sse_conn_if_current (Atomic.get owned_info)))
            with
            | Error reg_err ->
                let msg = Sse.registration_error_to_string reg_err in
                Log.Server.warn "%s" msg;
                respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
            | Ok (client_id, event_stream, evicted) ->
+              stop_sse_session_before ~client_id session_id;
               let headers =
                 presence_stream_headers ~deps raw_session_id protocol_version origin
               in
@@ -213,7 +228,15 @@ let handle_presence_events ~deps request reqd =
               ~idle:(session_idle ~session_id) reqd response
           in
           let info = make_sse_conn ~session_id ~client_id ~response () in
-          register_sse_conn ~session_id ~info;
+          let published = register_sse_conn_if_newer ~session_id ~info in
+          Atomic.set owned_info (Some info);
+          if not published then (
+            Eio.Cancel.protect (fun () ->
+              stop_sse_conn_if_current info;
+              Server_sse_response.close response);
+            Eio.Fiber.check ())
+          else (
+          if Atomic.get disconnected then stop_sse_conn_if_current info;
               let sw = runtime.sw in
               (* The drain sends the prime too, under the supervisor, so a
                  stop cancels it while it waits for the socket. *)
@@ -234,4 +257,4 @@ let handle_presence_events ~deps request reqd =
                   | exception (Eio.Cancel.Cancelled _ as e) -> raise e
                   | exception exn ->
                     Log.Server.error "presence drain loop error: %s"
-                      (Printexc.to_string exn))))
+                      (Printexc.to_string exn)))))

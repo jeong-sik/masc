@@ -184,19 +184,20 @@ let ask_followup_frame_json ~workspace ~state_ready ~keeper_name ~ask_id frame =
     "answer_progress",`Assoc (["state",`String phase;"answered_at",`Float identity.answered_at;
       "stimulus_id",`String identity.stimulus_id] @ fields)]
 
-let stream_keeper_ask_followup ~sw ~clock ~base_path ~workspace ~state_ready ~keeper_name
+let stream_keeper_ask_followup ~sw:_ ~clock ~base_path ~workspace ~state_ready ~keeper_name
     ~(ask : Keeper_ask.ask) ~resolution request reqd =
+  Eio.Switch.run @@ fun stream_sw ->
   let response = ref None in
   let stream_closed = ref false in
   let send_mu = Eio.Mutex.create () in
   let send frame =
-    Eio.Mutex.use_rw ~protect:true send_mu (fun () ->
+    Eio.Mutex.use_ro send_mu (fun () ->
       if !stream_closed then ()
       else
         let output = match !response with
           | Some output -> output
           | None ->
-            let output = Server_sse_response.respond ~sw ~clock
+            let output = Server_sse_response.respond ~sw:stream_sw ~clock
                 ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s reqd
                 (Httpun.Response.create
                    ~headers:(Stream.keeper_chat_stream_request_headers request) `OK) in
@@ -209,13 +210,12 @@ let stream_keeper_ask_followup ~sw ~clock ~base_path ~workspace ~state_ready ~ke
         | Closed | Stalled -> stream_closed := true) in
   (* A close says the response is complete, so only a stream that ran to its
      end is closed. A [send] that did not go out has closed the response
-     itself and recorded [stream_closed] without raising inside [send_mu], so
-     concurrent [on_source] fibers and the final [Followup_completed] no-op
-     instead of poisoning the mutex. Any other exception leaves the response as
-     it is and goes to the request's error handling (Server_http_ingress): a
-     500 when nothing was sent yet, a cut response after the first frame. *)
+     itself and recorded [stream_closed] without raising inside [send_mu].
+     [stream_sw] tears down the response's keepalive daemon if the route
+     raises or is cancelled, while leaving the HTTP response open for
+     Server_http_ingress to cut (500 before the first frame, reset after). *)
   let close () =
-    Eio.Mutex.use_rw ~protect:true send_mu (fun () ->
+    Eio.Mutex.use_ro send_mu (fun () ->
       if not !stream_closed then Option.iter Server_sse_response.close !response) in
   match
     if not state_ready then

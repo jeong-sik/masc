@@ -314,7 +314,7 @@ let with_workspace_cache base_path f =
           let cache = { mutex = Eio.Mutex.create (); previous = None; announced = None; sources = None } in
           Hashtbl.add caches base_path cache;
           cache) in
-  Eio.Mutex.use_rw ~protect:true cache.mutex (fun () -> f cache)
+  Eio.Mutex.use_ro cache.mutex (fun () -> f cache)
 
 let merge_inventory ~(live : Addon.inventory) ~(retained : Addon.inventory) =
   let live_ids = List.map (fun (item : Addon.inventory_instance) -> item.instance_id) live.instances in

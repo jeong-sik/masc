@@ -139,6 +139,19 @@ let test_stored_origin () =
     check (list (triple string string (option string))) "one verified reply route"
       ["110", "220", Some "100"] origins)
 
+let test_cancelled_switch_returns_503_without_stranding_sending () =
+  with_root (fun root ->
+    let failed_sw = ref None in
+    (try
+       Eio.Switch.run (fun sw ->
+         failed_sw := Some sw;
+         raise Exit)
+     with Exit -> ());
+    let sw = Option.get !failed_sw in
+    let send ~channel_id:_ ~message_id:_ ~content:_ = fail "must not dispatch on stopped switch" in
+    check_status 503 (submit ~sw ~root ~send "stopped server");
+    check_status 404 (Reply.status ~root ~actor:"operator" status_json))
+
 let () =
   run "Discord operator reply"
     [ "delivery",
@@ -146,4 +159,6 @@ let () =
       ; test_case "ambiguous response stays unknown" `Quick test_unknown_does_not_resend
       ; test_case "binding changes before dispatch" `Quick test_rebinding_before_dispatch
       ; test_case "invalid text and forged route" `Quick test_invalid_payload
-      ; test_case "persisted external row establishes route" `Quick test_stored_origin ] ]
+      ; test_case "persisted external row establishes route" `Quick test_stored_origin
+      ; test_case "stopped switch rejects with 503" `Quick
+          test_cancelled_switch_returns_503_without_stranding_sending ] ]

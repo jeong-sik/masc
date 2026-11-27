@@ -332,6 +332,28 @@ let test_reap_returns_zero_when_all_alive () =
     Alcotest.(check int) "nothing reaped" 0 reaped;
     Masc.Sse.unsubscribe_external "all-alive")
 
+let test_reap_does_not_evict_replacement_with_same_id () =
+  setup ();
+  Eio_main.run (fun _env ->
+    let replacement_received = ref 0 in
+    let replaced = ref false in
+    Fun.protect
+      ~finally:(fun () -> Masc.Sse.unsubscribe_external "reap-replace-id")
+      (fun () ->
+        Masc.Sse.subscribe_external ~id:"reap-replace-id"
+          ~is_alive:(fun () ->
+            if not !replaced then (
+              replaced := true;
+              Masc.Sse.subscribe_external ~id:"reap-replace-id"
+                ~is_alive:(fun () -> true)
+                ~callback:(fun _ -> incr replacement_received) ());
+            false)
+          ~callback:(fun _ -> ()) ();
+        let reaped = Masc.Sse.reap_dead_external_subscribers () in
+        Alcotest.(check int) "replacement not evicted" 0 reaped;
+        Masc.Sse.broadcast (`Assoc [ "msg", `String "after-replace" ]);
+        Alcotest.(check int) "replacement still receives broadcast" 1 !replacement_received))
+
 let test_external_subscriber_count_linearized_under_domain_contention () =
   setup ();
   let worker_count = 24 in
@@ -490,6 +512,8 @@ let () =
         test_reap_dead_subscribers;
       Alcotest.test_case "reap returns zero when all alive" `Quick
         test_reap_returns_zero_when_all_alive;
+      Alcotest.test_case "reap does not evict replacement with same id" `Quick
+        test_reap_does_not_evict_replacement_with_same_id;
     ]);
     ("concurrency", [
       Alcotest.test_case "external subscriber count linearized" `Quick

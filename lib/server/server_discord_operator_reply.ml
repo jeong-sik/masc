@@ -254,23 +254,33 @@ let send_once ~clock ~content origin =
 
 let dispatch ~sw ~root ~path admission send =
   let worker = admission.worker in
-  let store outcome =
-    match settle ~root ~path worker outcome with
-    | Ok () -> ()
-    | Error _ -> Log.Server.warn "Discord operator reply terminal receipt unavailable"
-  in
-  try
-    Eio.Fiber.fork ~sw (fun () ->
-      Fun.protect ~finally:(fun () -> unregister worker) (fun () ->
-        match send () with
-        | outcome -> Eio.Cancel.protect (fun () -> store outcome)
-        | exception (Eio.Cancel.Cancelled _ as cancel) ->
-          Eio.Cancel.protect (fun () -> store Unknown);
-          raise cancel
-        | exception _ -> Eio.Cancel.protect (fun () -> store Unknown)))
-  with exn ->
+  if Option.is_some (Eio.Switch.get_error sw) then (
     unregister worker;
-    raise exn
+    false)
+  else
+    let store outcome =
+      match settle ~root ~path worker outcome with
+      | Ok () -> ()
+      | Error _ -> Log.Server.warn "Discord operator reply terminal receipt unavailable"
+    in
+    let started = Atomic.make false in
+    try
+      Eio.Fiber.fork ~sw (fun () ->
+        Atomic.set started true;
+        Fun.protect ~finally:(fun () -> unregister worker) (fun () ->
+          match send () with
+          | outcome -> Eio.Cancel.protect (fun () -> store outcome)
+          | exception (Eio.Cancel.Cancelled _ as cancel) ->
+            Eio.Cancel.protect (fun () -> store Unknown);
+            raise cancel
+          | exception _ -> Eio.Cancel.protect (fun () -> store Unknown)));
+      if (not (Atomic.get started)) && Option.is_some (Eio.Switch.get_error sw) then (
+        unregister worker;
+        false)
+      else true
+    with exn ->
+      if not (Atomic.get started) then unregister worker;
+      raise exn
 
 let error status detail = status, `Assoc [field "error" detail]
 let storage_error = error `Service_unavailable unavailable
@@ -306,6 +316,8 @@ let send_response ~sw ~root ~actor ~resolve_origin ~is_current ~send json =
          | Error _ -> storage_error
          | Ok lease when not (Keeper_fs_durable_directory.lease_is_current lease) -> storage_error
          | Ok _ ->
+           if Option.is_some (Eio.Switch.get_error sw) then storage_error
+           else
            (* Once admitted, the worker belongs to the server switch. Request
               cancellation must not leave a live-worker marker without a worker. *)
            Eio.Cancel.protect (fun () ->
@@ -323,11 +335,14 @@ let send_response ~sw ~root ~actor ~resolve_origin ~is_current ~send json =
              | Error _ -> unregister admission.worker; storage_error
              | Ok (Some prior) -> unregister admission.worker; existing prior
              | Ok None ->
-               dispatch ~sw ~root ~path admission (fun () ->
-                 if is_current ~keeper_name:request.keeper_name origin
-                 then send ~content:request.content origin
-                 else Refused Binding_changed);
-               `Accepted, public_receipt request.operation_id receipt))
+               if dispatch ~sw ~root ~path admission (fun () ->
+                    if is_current ~keeper_name:request.keeper_name origin
+                    then send ~content:request.content origin
+                    else Refused Binding_changed)
+               then `Accepted, public_receipt request.operation_id receipt
+               else (
+                 ignore (settle ~root ~path admission.worker Unknown);
+                 storage_error)))
 
 let status_response ~root ~actor json =
   let operation_id =

@@ -47,8 +47,8 @@ let serve ~sw ~clock ~owner ~request reqd =
   let output = Server_sse_response.respond ~sw ~clock
       ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
       ~flush_headers_immediately:true reqd response in
-  Eio.Fiber.fork ~sw (fun () ->
-    let run () = Eio.Switch.run (fun stream_sw ->
+  Server_sse_response.serve ~sw output (fun () ->
+    Eio.Switch.run (fun stream_sw ->
       let wake = Eio.Stream.create 1 in
       let wake_mu = Stdlib.Mutex.create () in
       let active = Atomic.make true in
@@ -58,8 +58,7 @@ let serve ~sw ~clock ~owner ~request reqd =
           Stdlib.Mutex.protect wake_mu (fun () ->
             if Eio.Stream.is_empty wake then Eio.Stream.add wake ()) in
       Server_bootstrap_http.with_cleanups_on_release ~sw:stream_sw
-        [ (fun () -> Atomic.set active false; Sse.unsubscribe_external id)
-        ; (fun () -> Server_sse_response.close output) ];
+        [ (fun () -> Atomic.set active false; Sse.unsubscribe_external id) ];
       (* Register before the pool read. A write during that read retains
          one wake, so the first snapshot cannot swallow the newest commit. *)
       Sse.subscribe_external ~runtime_authority:authority ~id ~callback
@@ -92,12 +91,7 @@ let serve ~sw ~clock ~owner ~request reqd =
       in
       Eio.Fiber.first
         (fun () -> Server_observer_scope.await_stream_replaced owner)
-        (fun () -> Eio.Fiber.first
-          (fun () -> Server_sse_response.await_closed output) deliver)) in
-    match run () with
-    | () -> ()
-    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-    | exception exn -> Log.Server.warn "Tool series stream failed: %s" (Printexc.to_string exn))
+        deliver))
 ;;
 
 let add_routes ~sw ~clock router =

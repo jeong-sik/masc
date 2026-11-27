@@ -316,14 +316,41 @@ let load_record ~store ~scope ~request_id =
   match json with
   | None -> Ok None
   | Some json -> decode ~scope ~request_id json |> unavailable |> Result.map Option.some
+(* The digest a record names its body by, read before the record is decoded:
+   the whole scope's bodies are read under the same hold as its records. *)
+let request_digest_of = function
+  | `Assoc fields -> (match List.assoc_opt "request_digest" fields with
+      | Some (`String digest) when String_util.is_lowercase_sha256_hex digest -> Ok digest
+      | Some _ | None -> Error "original request record names no request digest")
+  | _ -> Error "invalid original request record"
+(* Every original of a scope as [load] reads it, in one read of the scope. The
+   records and the bodies they name are read under one hold of the serializer,
+   so a settle between them cannot leave a record whose body looks lost. Each
+   record is read once: there is no listing to compare a second read with. *)
 let load_scope ~store ~scope =
-  let* records = discover ~store ~scope in
+  let* rows =
+    Lane_addon_store.tool_request_scope_with_bodies store ~scope ~request_digest_of
+    |> unavailable
+  in
   let rec restore found = function
     | [] -> Ok (List.rev found)
-    | record::rest ->
-      let* original = load_listed ~store record in
-      restore (original::found) rest in
-  restore [] records
+    | (name, json, body) :: rest ->
+      let* request_id = (match json with
+        | `Assoc fields -> (match List.assoc_opt "request_id" fields with
+            | Some (`String value) when String.trim value <> "" -> Ok value
+            | _ -> Error "missing original request ID")
+        | _ -> Error "invalid original request record") |> unavailable in
+      let* () = if String.equal name (Lane_addon_store.digest request_id ^ ".json") then Ok ()
+        else Error (Store_unavailable "original request filename does not match its ID") in
+      let* record = decode ~scope ~request_id json |> unavailable in
+      let* request =
+        request_of_body ~request_digest:record.Record.request_digest body |> unavailable
+      in
+      restore (with_request record request :: found) rest
+  in
+  match rows with
+  | None -> Ok []
+  | Some rows -> restore [] rows
 module Observed_requests = Map.Make (String)
 type observed_request = { binding:verified_body; request:Yojson.Safe.t }
 type scope_observation = {

@@ -46,6 +46,83 @@ let test_restart_discovers_original_input_progress_and_scope () = with_store (fu
   Alcotest.(check string) "destination is the original installation" "original-installation"
     (Owner.Record.installation_id restored))
 
+(* One read of a scope carries every record with the body it names. *)
+let is_digest digest =
+  String.length digest = 64
+  && String.for_all (fun c -> (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) digest
+let request_digest_of = function
+  | `Assoc fields -> (match List.assoc_opt "request_digest" fields with
+      | Some (`String digest) when is_digest digest -> Ok digest
+      | Some _ | None -> Error "original request record names no request digest")
+  | _ -> Error "invalid original request record"
+let body_path store digest =
+  Filename.concat (Store.root store)
+    (Filename.concat "tool-request-bodies" (Filename.concat (Store.digest scope) (digest ^ ".json")))
+let scope_rows ?(scope=scope) ?request_digest_of store =
+  Store.tool_request_scope_with_bodies store ~scope
+    ~request_digest_of:(Option.value request_digest_of ~default:request_digest_of)
+let test_a_scope_is_read_in_one_read_with_its_bodies () = with_store (fun root store ->
+  retain store "a";
+  let other = `Assoc ["input", `String "another body"] in
+  owned (Owner.retain ~store ~scope ~request_id:"b" ~installation_id:"original-installation"
+    ~package_id:"curator" ~tool:"classify" ~summary:`Null ~request:other);
+  let records = owned (Owner.discover ~store ~scope) in
+  let digest_of id =
+    Owner.Record.request_digest
+      (List.find (fun (record : Owner.Record.t) -> Owner.Record.request_id record = id) records)
+  in
+  let sorted = ["a";"b"] |> List.sort (fun a b -> String.compare (Store.digest a) (Store.digest b)) in
+  let body_of id rows = match List.find (fun (name, _, _) -> name = Store.digest id ^ ".json") rows with
+    | _, _, body -> body in
+  (match get (scope_rows store ()) with
+   | None -> Alcotest.fail "a scope with two records read as absent"
+   | Some rows ->
+     Alcotest.(check (list string)) "both records, in filename order"
+       (List.map (fun id -> Store.digest id ^ ".json") sorted)
+       (List.map (fun (name, _, _) -> name) rows);
+     let body_as_json id rows = match body_of id rows with
+       | Some body -> Yojson.Safe.from_string body
+       | None -> Alcotest.fail ("record " ^ id ^ " came back without its body") in
+     Alcotest.check json "the first record's body is its request as stored" request (body_as_json "a" rows);
+     Alcotest.check json "the second record's body is its own" other (body_as_json "b" rows));
+  let originals = owned (Owner.load_scope ~store ~scope) in
+  Alcotest.(check (list string)) "load_scope reads the same scope" sorted
+    (List.map (fun (original : Owner.retained) -> original.request_id) originals);
+  Alcotest.check json "with each request" request (List.nth originals 0).request;
+  Alcotest.check json "with each request" other (List.nth originals 1).request;
+  (* A staged entry is not a record. *)
+  let stage = Filename.concat (directory root) ".atomic_incomplete.tmp" in
+  save stage "incomplete unpublished bytes";
+  (match get (scope_rows store ()) with
+   | Some rows -> Alcotest.(check int) "two records" 2 (List.length rows)
+   | None -> Alcotest.fail "a scope with a staged entry read as absent");
+  Sys.remove stage;
+  (* A scope with no directory is absent. *)
+  Alcotest.(check bool) "no directory is absence" true (get (scope_rows ~scope:"no-such-scope" store) = None);
+  Alcotest.(check (list string)) "and load_scope reads nothing" []
+    (owned (Owner.load_scope ~store ~scope:"no-such-scope"));
+  (* A record whose body is gone is neither an original nor absence. *)
+  Sys.remove (body_path store (digest_of "a"));
+  (match get (scope_rows store ()) with
+   | None -> Alcotest.fail "a scope with a record read as absent"
+   | Some rows ->
+     Alcotest.(check bool) "the record is still there, without a body" true (body_of "a" rows = None);
+     Alcotest.(check bool) "the other record keeps its body" true (body_of "b" rows <> None));
+  fail_load (Owner.load_scope ~store ~scope);
+  Unix.mkdir (body_path store (digest_of "a")) 0o700;
+  fail_inventory (scope_rows store ());
+  Unix.rmdir (body_path store (digest_of "a"));
+  fail_load (Owner.load_scope ~store ~scope);
+  (* An unknown entry, or a digest the reader refuses, rejects the whole scope. *)
+  let unknown = Filename.concat (directory root) "unknown-entry" in
+  save unknown "not a record";
+  fail_inventory (scope_rows store ());
+  Sys.remove unknown;
+  (match scope_rows ~request_digest_of:(fun _ -> Error "refused digest") store () with
+   | Error "refused digest" -> ()
+   | Ok _ -> Alcotest.fail "a refused digest read a scope"
+   | Error detail -> Alcotest.fail ("wrong refusal: " ^ detail)))
+
 let test_reload_keeps_the_verified_body_and_refuses_another_digest () = with_store (fun root store ->
   retain store "a";
   owned (Owner.retain ~store ~scope ~request_id:"b" ~installation_id:"original-installation"
@@ -766,6 +843,8 @@ let () =
   Alcotest.test_case "a held root reached through a symlink reads by relative path" `Quick
     test_held_root_through_a_symlink_reads_entries_by_relative_path;
   Alcotest.test_case "restart discovers original input and progress" `Quick test_restart_discovers_original_input_progress_and_scope;
+  Alcotest.test_case "a scope is read in one read with its bodies" `Quick
+    test_a_scope_is_read_in_one_read_with_its_bodies;
   Alcotest.test_case "reload keeps the verified body and refuses another digest" `Quick
     test_reload_keeps_the_verified_body_and_refuses_another_digest;
   Alcotest.test_case "absence requires owned settled authority and creates nothing" `Quick test_initial_absence_requires_existing_safe_anchor_without_creation;

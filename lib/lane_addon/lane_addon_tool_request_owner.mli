@@ -125,12 +125,13 @@ val fold_all_records :
     reads it with {!load_listed} inside [f]; an error [f] returns rejects the
     whole fold. Bodies [f] does not read are not validated. *)
 val load_scope : store:Lane_addon_store.t -> scope:string -> (retained list, error) result
-(** Discover record identities, then strictly load each original whose
-    identity is unchanged ({!load_listed}). A missing record or a changed
-    identity rejects the whole result. Each record's progress is as read when
-    that record was loaded, so the result is not one snapshot of the scope.
-    Unlike {!discover}, this explicitly reads every request body in the
-    scope. *)
+(** Every original of the scope with the request body it names, in directory
+    order, read in one read of the scope: the records and the bodies under one
+    hold of the serializer, each directory inventoried once. A missing body, a
+    record that does not decode, an unknown entry or a directory that changes
+    during the read rejects the whole result. Unlike {!discover}, this reads
+    every request body in the scope. This is not one snapshot across scopes or
+    a lease: a caller that acts on a record reads it again first. *)
 type scope_observation
 val observe_scope : store:Lane_addon_store.t -> scope:string ->
   (retained list * scope_observation, error) result

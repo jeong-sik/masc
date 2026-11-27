@@ -13,6 +13,7 @@ import { agentCoreEventSuffix } from '../lib/sse-event-type'
 import { assertExhaustive } from '../lib/exhaustive'
 
 import {
+  readAgentCancelledPayload,
   readAgentCompletedPayload,
   readAgentFailedPayload,
   readAgentInputRequiredPayload,
@@ -27,6 +28,7 @@ import {
   readTurnCompletedPayload,
   readTurnReadyPayload,
   readTurnStartedPayload,
+  type AgentCancelledPayload,
   type AgentCompletedPayload,
   type AgentFailedPayload,
   type AgentInputRequiredPayload,
@@ -70,6 +72,7 @@ export type TypedAgentCorePayload =
   | { kind: 'agent_yielded'; payload: AgentYieldedPayload }
   | { kind: 'agent_input_required'; payload: AgentInputRequiredPayload }
   | { kind: 'agent_failed'; payload: AgentFailedPayload }
+  | { kind: 'agent_cancelled'; payload: AgentCancelledPayload }
   | { kind: 'tool_called'; payload: ToolCalledPayload }
   | { kind: 'tool_completed'; payload: ToolCompletedPayload }
   | { kind: 'turn_started'; payload: TurnStartedPayload }
@@ -100,6 +103,7 @@ const READERS: ReaderMap = {
   agent_yielded: readAgentYieldedPayload,
   agent_input_required: readAgentInputRequiredPayload,
   agent_failed: readAgentFailedPayload,
+  agent_cancelled: readAgentCancelledPayload,
   tool_called: readToolCalledPayload,
   tool_completed: readToolCompletedPayload,
   turn_started: readTurnStartedPayload,
@@ -167,6 +171,7 @@ export function parseAgentCorePayload(
     case 'agent_yielded':
     case 'agent_input_required':
     case 'agent_failed':
+    case 'agent_cancelled':
     case 'tool_called':
     case 'tool_completed':
     case 'turn_started':

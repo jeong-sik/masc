@@ -641,6 +641,27 @@ function handleEvent(event: SSEEvent): void {
       )
       break
     }
+    case 'agent_core:agent_cancelled': {
+      // A run stopped from outside is not a failure: it gets a journal row and
+      // no error notification (sse-store.ts raises those for agent_failed only).
+      const parsed = parseAgentCorePayloadOrWarn(type, event.payload)
+      if (!parsed || parsed.kind !== 'agent_cancelled') break
+      const { payload } = parsed
+      addTypedJournalEntry(
+        payload.agent_name,
+        `Agent run cancelled${payload.task_id ? ` · ${payload.task_id}` : ''} · ${payload.elapsed_s.toFixed(1)}s`,
+        'agentCore',
+        'agent_core_event',
+        {
+          severity: event.severity,
+          source: event.source,
+          narrativeText: `${actorLabel(payload.agent_name)} agent run cancelled${payload.task_id ? ` (${payload.task_id})` : ''}: ${payload.reason}`,
+          preview: payload.reason,
+          ...envelopeFromEvent(event),
+        },
+      )
+      break
+    }
     case 'agent_core:tool_called': {
       const parsed = parseAgentCorePayloadOrWarn(type, event.payload)
       if (!parsed || parsed.kind !== 'tool_called') break

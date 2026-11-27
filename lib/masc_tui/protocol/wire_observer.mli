@@ -58,6 +58,7 @@ type agent_core_kind =
   | Agent_started
   | Agent_completed of { elapsed_s : float }
   | Agent_failed of { elapsed_s : float; error_code : string; error : string }
+  | Agent_cancelled of { elapsed_s : float; reason : string }
   | Agent_yielded of { elapsed_s : float }
   | Agent_input_required of {
       elapsed_s : float;

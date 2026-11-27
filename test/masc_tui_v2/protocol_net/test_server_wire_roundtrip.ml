@@ -823,8 +823,8 @@ let test_wiki_page_embeds_roundtrip () =
             in
             (embed.raw, (syntax, target, embed.label))
           in
-          let triple = Alcotest.(triple string string (option string)) in
-          Alcotest.(check (list (pair string triple)))
+          let embed_shape = Alcotest.(triple string string (option string)) in
+          Alcotest.(check (list (pair string embed_shape)))
             "every embed outside code decodes to its kind"
             (List.sort compare
                [

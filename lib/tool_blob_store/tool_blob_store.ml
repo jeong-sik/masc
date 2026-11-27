@@ -1174,6 +1174,26 @@ let touch_counts (observed : touches) =
   }
 ;;
 
+type touch_probe =
+  | Untouched
+  | Touched of touch
+  | Ledger_evicted
+
+let probe_touch ~sha256 =
+  with_mutex touch_ledger_mu (fun () ->
+    if touch_ledger_state.current_evicted || touch_ledger_state.previous_evicted
+    then Ledger_evicted
+    else
+      match
+        Hashtbl.find_opt touch_ledger_state.current sha256,
+        Hashtbl.find_opt touch_ledger_state.previous sha256
+      with
+      | None, None -> Untouched
+      | Some mark, None | None, Some mark -> Touched mark
+      | Some current, Some previous ->
+        Touched { put = current.put || previous.put; read = current.read || previous.read })
+;;
+
 type blob_status =
   | Present of
       { bytes : int

@@ -562,40 +562,42 @@ let reclaim_confirmed_deletable
       deletable_set
   =
   let age_cutoff = scan_started_at -. min_age_seconds in
-  String_set.fold
-    (fun sha256 tally ->
-       (* Re-check the touch ledger (including overflow flags) and file mtime
-          immediately before unlinking so a concurrent put/fetch or touch-ledger
-          eviction arriving during the scan never deletes a live blob. *)
-       let fresh_touches = Tool_blob_store.observe_touches () in
-       let fresh_counts = Tool_blob_store.touch_counts fresh_touches in
-       if fresh_counts.current_evicted || fresh_counts.previous_evicted
-       then tally
-       else
-       match Tool_blob_store.touch_of fresh_touches ~sha256 with
-       | Some _ -> tally
-       | None ->
-         (match Tool_blob_store.blob_status store ~sha256 with
-          | Tool_blob_store.Present { bytes; modified_at }
-            when modified_at < previous.recorded_scan_started_at
-                 && (min_age_seconds <= 0.0 || modified_at <= age_cutoff) ->
-            (match Tool_blob_store.delete store ~sha256 with
-             | Ok true ->
-               { tally with
-                 removed = String_set.add sha256 tally.removed
-               ; deleted_count = tally.deleted_count + 1
-               ; deleted_bytes = tally.deleted_bytes + bytes
-               }
-             | Ok false ->
-               { tally with removed = String_set.add sha256 tally.removed }
-             | Error _ ->
-               { tally with delete_failures = tally.delete_failures + 1 })
-          | Tool_blob_store.Present _
-          | Tool_blob_store.Absent
-          | Tool_blob_store.Not_regular _
-          | Tool_blob_store.Stat_failed _ -> tally))
-    deletable_set
+  let rec loop tally = function
+    | [] -> tally
+    | sha256 :: rest ->
+      (* Re-check the touch ledger (including overflow flags) and file mtime
+         immediately before unlinking so a concurrent put/fetch or touch-ledger
+         eviction arriving during the scan never deletes a live blob. *)
+      (match Tool_blob_store.probe_touch ~sha256 with
+       | Tool_blob_store.Ledger_evicted -> tally
+       | Tool_blob_store.Touched _ -> loop tally rest
+       | Tool_blob_store.Untouched ->
+         let next_tally =
+           match Tool_blob_store.blob_status store ~sha256 with
+           | Tool_blob_store.Present { bytes; modified_at }
+             when modified_at < previous.recorded_scan_started_at
+                  && (min_age_seconds <= 0.0 || modified_at <= age_cutoff) ->
+             (match Tool_blob_store.delete store ~sha256 with
+              | Ok true ->
+                { tally with
+                  removed = String_set.add sha256 tally.removed
+                ; deleted_count = tally.deleted_count + 1
+                ; deleted_bytes = tally.deleted_bytes + bytes
+                }
+              | Ok false ->
+                { tally with removed = String_set.add sha256 tally.removed }
+              | Error _ ->
+                { tally with delete_failures = tally.delete_failures + 1 })
+           | Tool_blob_store.Present _
+           | Tool_blob_store.Absent
+           | Tool_blob_store.Not_regular _
+           | Tool_blob_store.Stat_failed _ -> tally
+         in
+         loop next_tally rest)
+  in
+  loop
     { removed = String_set.empty; deleted_count = 0; deleted_bytes = 0; delete_failures = 0 }
+    (String_set.elements deletable_set)
 ;;
 
 let scan_internal ~reclaim_mode ~min_age_seconds ~base_path ~scope =

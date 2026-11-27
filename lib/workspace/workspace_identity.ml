@@ -16,19 +16,21 @@ let get_tty () = Sys.getenv_opt "TTY"
 
 let resolve_agent_name config agent_name =
   let exact_file = Filename.concat (agents_dir config) (safe_filename agent_name ^ ".json") in
-  if Sys.file_exists exact_file then
+  if path_exists config exact_file then
     agent_name
   else begin
     let dir = agents_dir config in
-    if Sys.file_exists dir then
-      let files = Sys.readdir dir in
-      let prefix = agent_name ^ "-" in
-      match Array.find_opt (fun f ->
-        String.length f > String.length prefix &&
-        String.starts_with f ~prefix
-      ) files with
-      | Some file -> String.sub file 0 (String.length file - 5)
-      | None -> agent_name
-    else
-      agent_name
+    let prefix = safe_filename agent_name ^ "-" in
+    let suffix = ".json" in
+    let min_len = String.length prefix + String.length suffix in
+    match
+      list_dir config dir
+      |> List.sort String.compare
+      |> List.find_opt (fun f ->
+           Filename.check_suffix f suffix
+           && String.length f > min_len
+           && String.starts_with f ~prefix)
+    with
+    | Some file -> Filename.chop_suffix file suffix
+    | None -> agent_name
   end

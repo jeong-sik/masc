@@ -264,6 +264,14 @@ let valid_producer_relative_path path =
    disagree about where a file is. *)
 let evidence_body_directory = "evidence"
 
+let is_plain_segment segment =
+  not (String.equal segment "")
+  && not (String.equal segment ".")
+  && not (String.equal segment "..")
+  && not (String.contains segment '/')
+  && not (String.contains segment '\\')
+  && not (String.contains segment '\000')
+
 (* Where a binary artifact's bytes are filed: the
    verification-owned evidence directory, one file per item index. The path
    recorded on the item is spelled relative to the workspace's masc
@@ -272,13 +280,17 @@ let evidence_body_directory = "evidence"
    is simply not filed. *)
 let persist_binary_body ~base_path ?request_id ?index data =
   match (request_id, index) with
-  | Some request_id, Some index ->
+  | Some request_id, Some index
+    when is_plain_segment request_id && index >= 0 ->
     let masc_dir = Common.masc_dir_from_base_path ~base_path in
     let dir = Filename.concat (Filename.concat masc_dir evidence_body_directory) request_id in
     Fs_compat.mkdir_p dir;
     let file = Printf.sprintf "%d.bin" index in
-    Fs_compat.save_file (Filename.concat dir file) data;
-    Some (Filename.concat (Filename.concat evidence_body_directory request_id) file)
+    let target = Filename.concat dir file in
+    (match Fs_compat.save_file_atomic_strict target data with
+     | Ok () ->
+       Some (Filename.concat (Filename.concat evidence_body_directory request_id) file)
+     | Error msg -> raise (Sys_error msg))
   | _ -> None
 
 (* Why a filed body did not come back as base64. Each case is a different
@@ -312,13 +324,6 @@ type read_binary_error =
    path of any other shape is refused rather than joined to the data
    directory. *)
 let filed_body_path relative =
-  let is_plain_segment segment =
-    not (String.equal segment "")
-    && not (String.equal segment ".")
-    && not (String.equal segment "..")
-    && not (String.contains segment '\\')
-    && not (String.contains segment '\000')
-  in
   match String.split_on_char '/' relative with
   | [ directory; request_id; file ]
     when String.equal directory evidence_body_directory
@@ -393,6 +398,13 @@ let store_text_artifact ~base_path ~reference ~content ~bytes =
       Evidence_artifact_unreadable
         { reference; reason = Storage_failed (Printexc.to_string error) }
 
+let store_binary_artifact ~base_path ~request_id ~index ~reference ~data ~bytes ~sha256 ~format =
+  match persist_binary_body ~base_path ?request_id ?index data with
+  | body -> Evidence_artifact_binary { reference; bytes; sha256; format; body }
+  | exception ((Sys_error _ | Unix.Unix_error _) as error) ->
+    Evidence_artifact_unreadable
+      { reference; reason = Storage_failed (Printexc.to_string error) }
+
 let inspect_producer_relative_artifact ?artifact_read ?request_id ?index ~base_path
   ~worker ~reference relative_path =
   if not (valid_producer_relative_path relative_path)
@@ -405,10 +417,8 @@ let inspect_producer_relative_artifact ?artifact_read ?request_id ?index ~base_p
         | Ok (Binary_payload { data; bytes; sha256; format }) ->
             (* Bytes that are not text are evidence too: the snapshot keeps
                the hash and the size, and the bytes are filed as the body. *)
-            let body =
-              persist_binary_body ~base_path ?request_id ?index data
-            in
-            Evidence_artifact_binary { reference; bytes; sha256; format; body }
+            store_binary_artifact
+              ~base_path ~request_id ~index ~reference ~data ~bytes ~sha256 ~format
         | Ok (Text_payload { content; bytes }) ->
           (* An injected reader hands back bytes from another lane (a guest
              [cat]), so the same scan holds the line here as in the direct
@@ -430,8 +440,8 @@ let inspect_producer_relative_artifact ?artifact_read ?request_id ?index ~base_p
     | Ok (Text_payload { content; bytes }) ->
       store_text_artifact ~base_path ~reference ~content ~bytes
     | Ok (Binary_payload { data; bytes; sha256; format }) ->
-      let body = persist_binary_body ~base_path ?request_id ?index data in
-      Evidence_artifact_binary { reference; bytes; sha256; format; body }
+      store_binary_artifact
+        ~base_path ~request_id ~index ~reference ~data ~bytes ~sha256 ~format
     | Error (Evidence_missing as reason)
     | Error (Evidence_not_regular_file as reason)
     | Error (Evidence_outside_worker_playground as reason)

@@ -299,12 +299,9 @@ let write_json config path json =
         msg
 
 let write_text_local path content =
-  mkdir_p (Filename.dirname path);
-  let tmp_path = path ^ ".tmp" in
   try
-    Fs_compat.save_file tmp_path content;
-    Unix.rename tmp_path path;
-    Ok ()
+    mkdir_p (Filename.dirname path);
+    Fs_compat.save_file_atomic_strict path content
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Printexc.to_string e)

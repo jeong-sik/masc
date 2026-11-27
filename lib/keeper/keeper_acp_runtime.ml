@@ -516,15 +516,62 @@ let held_context_of_usage (u : Acp.usage) : Runtime_observation.request_context 
     (effective_context_used u)
 ;;
 
+(* The count a session's next prompt compares its first count with. A host
+   that reports only [used] shows a compaction as a count lower than the one
+   before (Antigravity, Vibe), so the next prompt needs the count the last one
+   left. *)
+type context_baseline =
+  | No_count
+  (* A session masc just opened, or resumed without a replayed count. *)
+  | Counted of int
+  | Count_lost
+(* A session kept across a Gate pause whose stopped prompt left no count. *)
+
+let prior_context_used = function
+  | Counted used -> Some used
+  | No_count | Count_lost -> None
+;;
+
+(* A completed prompt that reports no count leaves the one before. *)
+let baseline_after_completed ~before = function
+  | Some used -> Counted used
+  | None -> before
+;;
+
+(* A stopped prompt whose session is kept for the Gate continuation. A
+   cancelled response may carry no count; then the next prompt has nothing to
+   compare its first count with. *)
+let baseline_after_stopped = function
+  | Some used -> Counted used
+  | None -> Count_lost
+;;
+
+(* What a turn's settlement knows about the host compacting the session. *)
+type compaction_reading =
+  | Prompt_compaction of Acp.context_compaction
+  | Prompt_not_returned
+  (* The host stopped the turn before its prompt returned. *)
+  | Session_count_lost
+(* The prompt saw no fall, but it started without the count to compare its
+   first count with. *)
+
+let compaction_reading ~baseline_at_start = function
+  | None -> Prompt_not_returned
+  | Some Acp.Not_compacted ->
+    (match baseline_at_start with
+     | Count_lost -> Session_count_lost
+     | No_count | Counted _ -> Prompt_compaction Acp.Not_compacted)
+  | Some ((Acp.Compacted | Acp.Compaction_unknown _) as compaction) ->
+    Prompt_compaction compaction
+;;
+
 (* Whether a turn's settlement clears held_context, so the next turn sends the
    whole World State again: the host compacted the session during the turn, or
-   masc cannot rule it out. [None] is a turn the host stopped before its prompt
-   returned. The prompt's compaction count was never taken, and the client that
-   holds the place to count from is evicted with the stopped turn. *)
+   masc cannot rule it out. *)
 let settlement_clears_held ~keeper_name ~session_id = function
-  | Some Acp.Not_compacted -> false
-  | Some Acp.Compacted -> true
-  | Some (Acp.Compaction_unknown unknown) ->
+  | Prompt_compaction Acp.Not_compacted -> false
+  | Prompt_compaction Acp.Compacted -> true
+  | Prompt_compaction (Acp.Compaction_unknown unknown) ->
     Log.Keeper.warn
       ~keeper_name
       "ACP session %s may have compacted; the next turn sends the whole World State \
@@ -532,11 +579,19 @@ let settlement_clears_held ~keeper_name ~session_id = function
       session_id
       (Acp.compaction_unknown_to_string unknown);
     true
-  | None ->
+  | Prompt_not_returned ->
     Log.Keeper.warn
       ~keeper_name
       "ACP session %s stopped before its prompt returned and may have compacted; the \
        next turn sends the whole World State again"
+      session_id;
+    true
+  | Session_count_lost ->
+    Log.Keeper.warn
+      ~keeper_name
+      "ACP session %s was kept after a stopped prompt that left no count, so a \
+       compaction at this prompt's start cannot be seen; the next turn sends the whole \
+       World State again"
       session_id;
     true
 ;;
@@ -784,7 +839,7 @@ type pool_entry =
   ; mutable last_used_at : float
   ; mutable session_id : string option
   ; mutable session_info : Acp.session_info option
-  ; mutable last_context_used : int option
+  ; mutable context_baseline : context_baseline
   ; stop_owner : unit -> unit
   }
 
@@ -1048,7 +1103,7 @@ let spawn_persistent_entry
                    ; last_used_at = Time_compat.now ()
                    ; session_id = None
                    ; session_info = None
-                   ; last_context_used = None
+                   ; context_baseline = No_count
                    ; stop_owner
                    }
                  in
@@ -3012,7 +3067,7 @@ let run_without_lifecycle
         in
         entry.session_id <- Some info.session_id;
         entry.session_info <- Some info;
-        entry.last_context_used <- None;
+        entry.context_baseline <- No_count;
         Ok (info, false, fresh_prompt, msgs)
       in
       (* Establish, reconfigure, or resume the ACP session on the persistent child. *)
@@ -3053,7 +3108,7 @@ let run_without_lifecycle
              | Some old_sid when not (String.equal old_sid session_id) ->
                entry.session_id <- None;
                entry.session_info <- None;
-               entry.last_context_used <- None;
+               entry.context_baseline <- No_count;
                close_session_best_effort old_sid
              | Some _ | None -> ());
             let resume_outcome =
@@ -3121,7 +3176,7 @@ let run_without_lifecycle
                entry.session_id <- Some info.session_id;
                entry.session_info <- Some info;
                (match info.replayed_context_used with
-                | Some n when n > 0 -> entry.last_context_used <- Some n
+                | Some n when n > 0 -> entry.context_baseline <- Counted n
                 | Some _ | None -> ());
                Ok (info, true, active_resume_prompt, prepared.messages)
              | `Unsupported ->
@@ -3275,8 +3330,11 @@ let run_without_lifecycle
       let host_stop_ref = ref None in
       let cancel_settled = ref false in
       (* A host stop discards the prompt's result; its compaction still decides
-         what the settlement holds. *)
+         what the settlement holds, and its count is what a kept session's next
+         prompt compares with. *)
       let prompt_compaction = ref None in
+      let prompt_context_used = ref None in
+      let baseline_at_start = entry.context_baseline in
       let is_gate_pause = function
         | Runtime_official_client_tool.Terminal_tool_boundary
             { outcome = Runtime_official_client_tool.Durable_stimulus_deferred; _ } -> true
@@ -3301,12 +3359,13 @@ let run_without_lifecycle
                     ~permission_policy
                     ~on_event:(fun ev ->
                       if Option.is_none !host_stop_ref then stream.on_acp_event ev)
-                    ?prior_context_used:entry.last_context_used
+                    ?prior_context_used:(prior_context_used baseline_at_start)
                     ()
                 in
                 (match res with
                  | Ok prompt_res ->
                    prompt_compaction := Some prompt_res.Acp.context_compaction;
+                   prompt_context_used := effective_context_used prompt_res.Acp.usage;
                    cancel_settled := true
                  | Error (Acp.Rpc_error _ | Acp.Host_turn_failed _) -> cancel_settled := true
                  | Error
@@ -3348,14 +3407,16 @@ let run_without_lifecycle
           && is_gate_pause stop
           && Acp.is_alive entry.client
         in
-        if not preserve_for_gate_continuation then evict_or_close ();
+        if preserve_for_gate_continuation
+        then entry.context_baseline <- baseline_after_stopped !prompt_context_used
+        else evict_or_close ();
         Ok
           (`Stopped
               ( session_id
               , effective_model
               , resumed
               , stop
-              , !prompt_compaction
+              , compaction_reading ~baseline_at_start !prompt_compaction
               , stream.observed_tool_calls () ))
       | `Runtime (Ok prompt_res) ->
         let final_usage = api_usage_of_acp_usage ~driver:config.driver prompt_res.usage in
@@ -3364,9 +3425,8 @@ let run_without_lifecycle
           ~stop_reason:(stop_reason_of_acp_stop_reason prompt_res.stop_reason)
           ~usage:stream_usage;
         let cur_used = effective_context_used prompt_res.usage in
-        (match cur_used with
-         | Some _ -> entry.last_context_used <- cur_used
-         | None -> ());
+        entry.context_baseline
+        <- baseline_after_completed ~before:entry.context_baseline cur_used;
         (* A compaction masc could not rule out counts as one: the session may
            hold the host's summary instead of what was sent, and sending the
            whole World State again is what keeps the next turn whole. *)
@@ -3374,7 +3434,9 @@ let run_without_lifecycle
           settlement_clears_held
             ~keeper_name
             ~session_id:prompt_res.Acp.session_id
-            (Some prompt_res.Acp.context_compaction)
+            (compaction_reading
+               ~baseline_at_start
+               (Some prompt_res.Acp.context_compaction))
         in
         let rollover =
           rollover_of_usage
@@ -3569,7 +3631,7 @@ let run_without_lifecycle
           ; last_used_at = Time_compat.now ()
           ; session_id = None
           ; session_info = None
-          ; last_context_used = None
+          ; context_baseline = No_count
           ; stop_owner = ignore
           }
         in
@@ -3611,7 +3673,7 @@ let run_without_lifecycle
       | Error err -> Error err
       | Ok
           (`Stopped
-              (session_id, effective_model, resumed, stop, prompt_compaction, acp_tool_calls_json))
+              (session_id, effective_model, resumed, stop, stopped_compaction, acp_tool_calls_json))
         ->
         let turn_id = provider_turn_identity ~session_id ~turn_count in
         let* () =
@@ -3656,7 +3718,7 @@ let run_without_lifecycle
         (* The same rule as a completed turn: a compaction the stopped prompt
            saw, or one masc cannot rule out, clears held_context. *)
         let compacted =
-          settlement_clears_held ~keeper_name ~session_id prompt_compaction
+          settlement_clears_held ~keeper_name ~session_id stopped_compaction
         in
         let* settled =
           (if compacted
@@ -4234,6 +4296,20 @@ module For_testing = struct
   let usage_is_nonzero = usage_is_nonzero
   let effective_context_used = effective_context_used
   let held_context_of_usage = held_context_of_usage
+  type nonrec context_baseline = context_baseline =
+    | No_count
+    | Counted of int
+    | Count_lost
+
+  type nonrec compaction_reading = compaction_reading =
+    | Prompt_compaction of Acp.context_compaction
+    | Prompt_not_returned
+    | Session_count_lost
+
+  let prior_context_used = prior_context_used
+  let baseline_after_completed = baseline_after_completed
+  let baseline_after_stopped = baseline_after_stopped
+  let compaction_reading = compaction_reading
   let settlement_clears_held = settlement_clears_held
   let stop_reason_of_acp_stop_reason = stop_reason_of_acp_stop_reason
   let effective_context_limit_tokens = effective_context_limit_tokens

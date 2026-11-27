@@ -2135,22 +2135,90 @@ let read_file_text path =
    masc cannot rule it out, whether the turn completed or the host stopped it.
    A stopped turn whose prompt never returned has no count at all. *)
 let test_settlement_clears_held_context () =
-  let clears compaction =
-    Keeper_acp_runtime.For_testing.settlement_clears_held
+  let module T = Keeper_acp_runtime.For_testing in
+  let clears reading =
+    T.settlement_clears_held
       ~keeper_name:"settlement-test"
       ~session_id:"session-settlement-test"
-      compaction
+      reading
   in
   check bool "no compaction keeps what the session holds" false
-    (clears (Some Runtime_acp_client.Not_compacted));
-  check bool "a compaction clears it" true (clears (Some Runtime_acp_client.Compacted));
+    (clears (T.Prompt_compaction Runtime_acp_client.Not_compacted));
+  check bool "a compaction clears it" true
+    (clears (T.Prompt_compaction Runtime_acp_client.Compacted));
   check bool "a compaction masc could not rule out clears it" true
     (clears
-       (Some
+       (T.Prompt_compaction
           (Runtime_acp_client.Compaction_unknown
              (Runtime_acp_client.Kimi_session_record_unreadable
                 Runtime_kimi_session_log.Home_unavailable))));
-  check bool "a prompt stopped before it returned clears it" true (clears None)
+  check bool "a prompt stopped before it returned clears it" true
+    (clears T.Prompt_not_returned);
+  check bool "a prompt that started without a count to compare clears it" true
+    (clears T.Session_count_lost)
+;;
+
+(* A session kept across a Gate pause. The counts are Vibe's from the RFC:
+   the turn before ended at 8,829, the stopped turn grew to 70,944, and the
+   continuation compacted at its start and reported 0 then 8,939. The steps
+   are the ones the stopped branch and the next prompt take. *)
+let test_kept_session_compares_with_the_stopped_prompts_count () =
+  let module T = Keeper_acp_runtime.For_testing in
+  let fell = Runtime_acp_client.For_testing.occupancy_fell in
+  let continuation_counts = List.filter (fun used -> used > 0) [ 0; 8939 ] in
+  let settle ~baseline_at_start ~prompt_saw_fall =
+    let compaction =
+      if prompt_saw_fall
+      then Runtime_acp_client.Compacted
+      else Runtime_acp_client.Not_compacted
+    in
+    T.settlement_clears_held
+      ~keeper_name:"kept-session-test"
+      ~session_id:"session-kept"
+      (T.compaction_reading ~baseline_at_start (Some compaction))
+  in
+  let before_stop =
+    T.baseline_after_completed ~before:T.No_count (Some 8829)
+  in
+  (* The stopped prompt returned with its count: the continuation compares
+     with 70,944 and sees the compaction. *)
+  let counted = T.baseline_after_stopped (Some 70944) in
+  check (option int) "the kept session compares with the stopped prompt's count"
+    (Some 70944) (T.prior_context_used counted);
+  let saw_fall =
+    fell ~prior_context_used:(T.prior_context_used counted) continuation_counts
+  in
+  check bool "the continuation's first count is below it" true saw_fall;
+  check bool "the compaction clears held context" true
+    (settle ~baseline_at_start:counted ~prompt_saw_fall:saw_fall);
+  (* Before this change the kept session still compared with the turn before
+     the stop, and 8,939 is not below 8,829. *)
+  check bool "the count before the stop misses the compaction" false
+    (fell ~prior_context_used:(T.prior_context_used before_stop) continuation_counts);
+  (* The stopped prompt returned no count: nothing to compare with, so the
+     settlement cannot rule a compaction out. *)
+  let lost = T.baseline_after_stopped None in
+  check (option int) "a lost count gives the prompt nothing to compare" None
+    (T.prior_context_used lost);
+  let saw_fall_without_count =
+    fell ~prior_context_used:(T.prior_context_used lost) continuation_counts
+  in
+  check bool "the continuation sees no fall on its own" false saw_fall_without_count;
+  check bool "the settlement clears held context anyway" true
+    (settle ~baseline_at_start:lost ~prompt_saw_fall:saw_fall_without_count);
+  check bool "the reading says the count was lost" true
+    (T.compaction_reading ~baseline_at_start:lost
+       (Some Runtime_acp_client.Not_compacted)
+     = T.Session_count_lost);
+  (* A completed continuation that reports a count gives the next prompt one
+     again; one that reports none keeps the lost count. *)
+  check bool "a counted continuation restores the baseline" true
+    (T.baseline_after_completed ~before:lost (Some 8939) = T.Counted 8939);
+  check bool "an uncounted continuation keeps it lost" true
+    (T.baseline_after_completed ~before:lost None = T.Count_lost);
+  (* A prompt the host stopped before it returned has its own reading. *)
+  check bool "a prompt that never returned" true
+    (T.compaction_reading ~baseline_at_start:counted None = T.Prompt_not_returned)
 ;;
 
 let test_acp_80_pct_rollover_marker_and_overflow_classification () =
@@ -6639,6 +6707,8 @@ let () =
             test_acp_80_pct_rollover_marker_and_overflow_classification
         ; test_case "a settlement clears held context after a compaction" `Quick
             test_settlement_clears_held_context
+        ; test_case "a kept session compares with the stopped prompt's count" `Quick
+            test_kept_session_compares_with_the_stopped_prompts_count
         ; test_case "Vibe 3.1.0 configOptions clamping & permission hardening" `Quick
             test_vibe_310_config_options_and_permission_hardening
         ; test_case "ACP overflow shrink handoff single-epoch & Vibe operator login prep/finish" `Quick

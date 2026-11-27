@@ -137,6 +137,20 @@ describe('WikiBodyWithToc', () => {
     expect(scrolled[0]).not.toBe(before[1])
   })
 
+  it('reads the list again instead of scrolling when the drawn headings changed with the page unchanged', () => {
+    showPage('## One\n\ntext\n\n## Two\n\ntext\n\n## Three')
+    const inserted = document.createElement('h2')
+    inserted.textContent = 'Inserted'
+    drawnHeadings()[1]!.before(inserted)
+
+    act(() => entryButtons()[1]!.click())
+    expect(scrolled).toEqual([])
+    expect(entryTexts()).toEqual(['One', 'Inserted', 'Two', 'Three'])
+
+    act(() => entryButtons()[2]!.click())
+    expect(scrolled).toEqual([drawnHeadings()[2]])
+  })
+
   it('opens a closed details block around the heading before scrolling to it', () => {
     showPage('## Visible\n\n<details>\n<summary>More</summary>\n\n## Folded\n\n</details>\n\n## After')
     const details = body().querySelector('details')!

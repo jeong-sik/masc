@@ -32,6 +32,14 @@ export type TocEntry = {
 /** What the list shows of an entry. The heading node is looked up again on click. */
 type TocItem = Omit<TocEntry, 'target'>
 
+const toItem = ({ level, depth, text }: TocEntry): TocItem => ({ level, depth, text })
+
+/** Whether a new read of the body has the headings the list shows, in the same order. */
+function sameHeadings(entries: readonly TocEntry[], items: readonly TocItem[]): boolean {
+  return entries.length === items.length
+    && entries.every((entry, index) => entry.level === items[index]?.level && entry.text === items[index]?.text)
+}
+
 /** The headings drawn under `body`, in document order. A heading with no text is left out. */
 export function readTocEntries(body: ParentNode): readonly TocEntry[] {
   const found: Array<Omit<TocEntry, 'depth'>> = []
@@ -73,15 +81,18 @@ export function WikiBodyWithToc({ source, children }: {
   // effect: its re-render runs before the browser paints, so a new page is
   // never shown with the entries of the one before.
   useLayoutEffect(() => {
-    const entries = bodyRef.current ? readTocEntries(bodyRef.current) : []
-    setItems(entries.map(({ level, depth, text }) => ({ level, depth, text })))
+    setItems(bodyRef.current ? readTocEntries(bodyRef.current).map(toItem) : [])
   }, [source])
 
   // A node read earlier can be replaced by an equal one while `source` stays
-  // (hydrated embeds), so the heading is looked up when it is asked for.
+  // (hydrated embeds), so the heading is looked up when it is asked for. When
+  // the body's headings no longer match the list, the click reads the list
+  // again instead of scrolling, so it never lands on a different heading.
   const showEntry = (index: number) => {
-    const target = bodyRef.current ? readTocEntries(bodyRef.current)[index]?.target : undefined
-    if (target) showHeading(target)
+    const entries = bodyRef.current ? readTocEntries(bodyRef.current) : []
+    const entry = entries[index]
+    if (entry && sameHeadings(entries, items)) showHeading(entry.target)
+    else setItems(entries.map(toItem))
   }
 
   const shown = items.length >= TOC_MIN_HEADINGS

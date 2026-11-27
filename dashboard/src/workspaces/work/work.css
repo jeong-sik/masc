@@ -537,6 +537,17 @@
   color: var(--fg-3);
 }
 
+/* A queue row's wait sits at the row's right edge, so the waits of the rows
+   read as one column. It gives way before the badges beside it do. */
+.wk-row-wait {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .wk-row-btn .wk-row-meta,
 .wk-goal-row .wk-row-meta {
   flex-wrap: nowrap;

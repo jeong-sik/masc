@@ -1360,6 +1360,56 @@ describe('workspaces/work', () => {
     expect(verificationReads).toEqual(['first', 'second'])
   })
 
+  it('lists the Inbox queue longest wait first and says each row\'s wait', async () => {
+    const nowSec = Date.now() / 1000
+    globalThis.fetch = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/keepers/tool-approvals')) {
+        return Promise.resolve(jsonResponse({
+          pending: [{
+            approval_id: 'appr-new', tool_call_id: 'tc-new', keeper: 'fixture-sender', tool: 'fixture-tool',
+            asked_at: nowSec - 60, timeout_sec: 600, revision: 'rev-1',
+          }],
+        }))
+      }
+      if (url.startsWith('/api/v1/keepers/asks')) {
+        return Promise.resolve(jsonResponse({
+          asks: [{
+            ask_id: 'ask-old', keeper: 'fixture-asker', revision: 'ask-rev-1', asked_at: nowSec - 3000,
+            resolution: { state: 'open' },
+            questions: [{ question_id: 'q-1', header: 'Old question', prompt: 'Still open?', mode: 'single', choices: [], free_text: { allowed: true, hint: null } }],
+          }],
+        }))
+      }
+      if (url.startsWith('/api/v1/dashboard/gate')) {
+        return Promise.resolve(jsonResponse({ approval_queue: [], recent_resolved: [] }))
+      }
+      if (url.startsWith('/api/v1/dashboard/planning')) {
+        return Promise.resolve(jsonResponse({
+          goals: [{ id: 'g-confirm-1', title: 'Confirm goal stability', phase: 'Awaiting_confirmation', priority: 1 }],
+          tasks: [],
+        }))
+      }
+      return Promise.resolve(jsonResponse({}))
+    })
+
+    render(html`<${WorkWorkspace} subroute="inbox" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
+    await flushUi()
+
+    const rows = [...container.querySelectorAll<HTMLElement>('.wk-row-btn')]
+    // The reads return the tool approval first; the Ask has waited fifty times as long.
+    expect(rows.map((row) => row.querySelector('.wk-row-title')?.textContent)).toEqual([
+      'Old question',
+      'fixture-tool — 도구 실행 승인',
+      'Confirm goal stability',
+    ])
+    const waits = rows.map((row) => row.querySelector('[data-testid="inbox-row-wait"]')?.textContent ?? null)
+    expect(waits[0]).toBe('50분째 대기')
+    expect(waits[1]).toMatch(/^\d+분 뒤 시간 초과 · (\d+초|1분)째 대기$/)
+    // A Goal awaiting confirmation does not say since when, so its row says no wait.
+    expect(waits[2]).toBeNull()
+  })
+
   it('keeps stale Inbox queue notices inside the fixed pane header slot without inserting in-flow warn banners above the list', async () => {
     let resolveSecondApprovals!: (r: Response) => void
     let approvalCalls = 0

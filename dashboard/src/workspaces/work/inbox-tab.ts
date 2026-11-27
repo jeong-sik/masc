@@ -44,6 +44,7 @@ import {
 import { decodeApprovalQueuePhase, normalizeKeeperSummaryAttemptDisposition } from '../../api/board'
 import { decodeGateJudgeLane, normalizeGateDecisionSource } from '../../api/dashboard-gate'
 import { approvalPhaseView, decisionSourceLabel, judgeLaneText } from '../../lib/gate-approval-labels'
+import { orderByWait, QueueWait, waitingSinceAskedAt, waitingSinceGateRead } from './inbox-queue'
 import { formatDuration } from '../../lib/format-time'
 import type { ApprovalQueuePhase, GateJudgeLane } from '../../types/gate'
 import { KeeperBadge } from '../../components/keeper-badge'
@@ -125,6 +126,7 @@ function decodeKeeperAsks(raw: unknown): KeeperAskItem[] {
     out.push({
       askId: ask.askId,
       keeper: ask.keeper,
+      askedAt: ask.askedAt,
       context: ask.context,
       questions: ask.questions.map((q) => ({
         questionId: q.questionId,
@@ -521,22 +523,23 @@ export function InboxTab(props: WorkspaceViewProps) {
     }
   }, [availableSources, epoch, loadInbox])
 
+  const gateReadAtMs = gateObs.kind === 'value' ? gateObs.updatedAt : null
   const entries = useMemo<readonly InboxEntry[]>(() => {
     const list: InboxEntry[] = []
     for (const item of approvals) {
-      list.push({ kind: 'tool_approval', key: `tool:${item.approvalId}`, item })
+      list.push({ kind: 'tool_approval', key: `tool:${item.approvalId}`, waitingSinceMs: waitingSinceAskedAt(item.askedAt), item })
     }
     for (const item of asks) {
-      list.push({ kind: 'keeper_ask', key: `ask:${item.askId}`, item })
+      list.push({ kind: 'keeper_ask', key: `ask:${item.askId}`, waitingSinceMs: waitingSinceAskedAt(item.askedAt), item })
     }
     for (const item of gates) {
-      list.push({ kind: 'channel_gate', key: `gate:${item.id}`, item })
+      list.push({ kind: 'channel_gate', key: `gate:${item.id}`, waitingSinceMs: waitingSinceGateRead(item.waitingSec, gateReadAtMs), item })
     }
     for (const goal of goals) {
-      list.push({ kind: 'goal_confirmation', key: `goal:${goal.id}`, goal })
+      list.push({ kind: 'goal_confirmation', key: `goal:${goal.id}`, waitingSinceMs: null, goal })
     }
-    return list
-  }, [approvals, asks, gates, goals])
+    return orderByWait(list)
+  }, [approvals, asks, gates, goals, gateReadAtMs])
   entryKeysRef.current = useMemo(() => new Set(entries.map((e) => e.key)), [entries])
 
   const filteredEntries = useMemo(() => {
@@ -1015,6 +1018,7 @@ export function InboxTab(props: WorkspaceViewProps) {
               <div class="wk-row-meta">
                 <${KeeperBadge} id=${keeper} size="sm" />
                 ${liveRevisionByKey[entry.key] !== undefined && html`<span class="wk-badge wk-badge--err">SSE 변경 감지됨</span>`}
+                <${QueueWait} entry=${entry} />
               </div>
             </button>
           `

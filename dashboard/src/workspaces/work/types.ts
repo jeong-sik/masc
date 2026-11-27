@@ -1090,6 +1090,8 @@ export interface AskQuestionItem {
 export interface KeeperAskItem {
   readonly askId: string
   readonly keeper: string
+  /** Unix seconds; null when the row carries no readable time. */
+  readonly askedAt: number | null
   readonly context: string | null
   readonly questions: readonly AskQuestionItem[]
   readonly revision: string
@@ -1124,11 +1126,13 @@ export interface GateResolvedAuditRow {
   readonly resolvedAt: string
 }
 
+/** `waitingSinceMs` is when the item began to wait, in ms since the epoch,
+ *  and null when its row carries no time to count from. */
 export type InboxEntry =
-  | { readonly kind: 'tool_approval'; readonly key: string; readonly item: ToolApprovalWait }
-  | { readonly kind: 'keeper_ask'; readonly key: string; readonly item: KeeperAskItem }
-  | { readonly kind: 'channel_gate'; readonly key: string; readonly item: GatePendingItem }
-  | { readonly kind: 'goal_confirmation'; readonly key: string; readonly goal: GoalItem }
+  | { readonly kind: 'tool_approval'; readonly key: string; readonly waitingSinceMs: number | null; readonly item: ToolApprovalWait }
+  | { readonly kind: 'keeper_ask'; readonly key: string; readonly waitingSinceMs: number | null; readonly item: KeeperAskItem }
+  | { readonly kind: 'channel_gate'; readonly key: string; readonly waitingSinceMs: number | null; readonly item: GatePendingItem }
+  | { readonly kind: 'goal_confirmation'; readonly key: string; readonly waitingSinceMs: null; readonly goal: GoalItem }
 
 // ── 4. Candle Ledger & Decimal-String Milli Parsers (`#36`) ───────────────
 

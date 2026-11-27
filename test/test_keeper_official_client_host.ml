@@ -3131,8 +3131,8 @@ let use_markdown_prompts () =
 (* The vendor retains its first System prompt. A newly issued Goal snapshot
    therefore has to reach its Resume User prompt, independently of the extra
    carrier that the session already holds. This exercises the actual host
-   preparation, held projection, codec and write-slot binding, not a vendor
-   session or remote model. *)
+   preparation, held projection and codec, not a vendor session or remote
+   model. *)
 let test_a_changed_system_goal_reaches_a_held_official_session () =
   let module A = Keeper_context_assembly in
   let owner = "Continue with the remaining work." in
@@ -3183,43 +3183,12 @@ let test_a_changed_system_goal_reaches_a_held_official_session () =
   let absent, absent_prepared = prepare None in
   let added = resume second second_prepared
       (Host.start_held_context ~turn_observation:None ~composed_context:absent absent_prepared.messages) in
-  check string "a Goal introduced after Start reaches Resume too" delivery.prompt added.prompt;
-  let open Yojson.Safe.Util in
-  let binding projected prompt = Keeper_context_submission_link.binding_to_json
-      ~slot:Runtime_official_client_write.Whole_write projected
-      (Runtime_official_client_write.raw prompt) in
-  let issued = binding delivery.context_projection delivery.prompt in
-  check string "the actual Resume slot matches" "matched_completed_slot"
-    (issued |> member "status" |> to_string);
-  let source = match issued |> member "occurrences" |> to_list with
-    | [occurrence] -> occurrence |> member "source"
-    | _ -> fail "exactly the changed Goal must be attributed" in
-  check string "source is the System partition, not extra context" "system_prompt"
-    (source |> member "source_carrier" |> to_string);
-  check string "projection names the actual Resume User carrier" "official_resume_user_prompt"
-    (source |> member "target_carrier" |> to_string);
-  let physical = match second.system_prompt with Some value -> value | None -> fail "issued System missing" in
-  check string "source receipt hashes the issued System bytes" physical.partition.sha256
-    (source |> member "assembly" |> member "sha256" |> to_string);
-  let span_index = match source |> member "source_span_indices" |> to_list with
-    | [index] -> to_int index | _ -> fail "one typed Goal source span required" in
-  let span = List.nth physical.partition.spans span_index in
-  check string "the selected source span is exactly the new observation" new_text
-    (String.sub physical.text span.offset span.bytes);
-  let omitted = binding repeated.context_projection repeated.prompt in
-  check bool "held omission retains explicit System source proof" true
-    (List.exists (fun proof -> member "source_carrier" proof = `String "system_prompt")
-      (omitted |> member "omitted_held" |> to_list));
-  let stale = Keeper_context_submission_link.encoded_system_observation ~block:Prompt_block_id.Active_goals ~assembly:(Some first)
-      (Agent_core.Types.user_msg new_text) in
-  check string "an observation cannot borrow an older System receipt" "unavailable"
-    (binding stale (Keeper_context_submission_link.text stale)
-      |> member "issuer_attribution" |> member "status" |> to_string)
+  check string "a Goal introduced after Start reaches Resume too" delivery.prompt added.prompt
 ;;
 
 (* Source is issued outside the User body and its Librarian-only metadata.
    Exercise the common assembler and actual official host preparation, then
-   the held-session projection and its physical source receipt. *)
+   the held-session projection. *)
 let test_direct_operation_source_reaches_official_start_and_resume () =
   use_markdown_prompts ();
   let module A = Keeper_context_assembly in
@@ -3316,26 +3285,6 @@ let test_direct_operation_source_reaches_official_start_and_resume () =
     (contains changed.prompt (Host.encode_history_message (Agent_core.Types.user_msg local_text)));
   check bool "the old peer is not carried as the new operation's source" false
     (contains changed.prompt "peer-source-sender");
-  let open Yojson.Safe.Util in
-  let binding = Keeper_context_submission_link.binding_to_json
-      ~slot:Runtime_official_client_write.Whole_write changed.context_projection
-      (Runtime_official_client_write.raw changed.prompt) in
-  check string "the delivered resume bytes bind to their actual write slot" "matched_completed_slot"
-    (binding |> member "status" |> to_string);
-  let proof = match binding |> member "occurrences" |> to_list with
-    | [occurrence] -> member "source" occurrence
-    | _ -> fail "only the changed operation source is delivered" in
-  check string "resume delivery is attributed to the separate System carrier" "system_prompt"
-    (proof |> member "source_carrier" |> to_string);
-  let physical = match second.system_prompt with
-    | Some issued -> issued | None -> fail "new operation System required" in
-  let span_index = match proof |> member "source_span_indices" |> to_list with
-    | [index] -> to_int index | _ -> fail "one operation-source span required" in
-  let span = List.nth physical.partition.spans span_index in
-  check bool "the proof names the operation source, independently of the Goal" true
-    (span.kind = A.Block Prompt_block_id.Direct_input_source);
-  check string "the exact proved source bytes are the new local operation source" local_text
-    (String.sub physical.text span.offset span.bytes);
   let later_peer = source_for (operation "later-peer-operation") peer in
   let later, later_prepared = prepare (Some later_peer) peer body in
   let later_delivery = resume later later_prepared ~goal:body ~held:held in
@@ -3387,10 +3336,9 @@ let test_direct_operation_source_reaches_official_start_and_resume () =
    context carrier, so the Agent Core System holds standing instructions only.
    An official client keeps the System-role carrier in the vendor's persistent
    System, so its turn takes the block out and delivers it as current-turn
-   input on Start and on every Resume, proved by the issuer's carrier span. *)
+   input on Start and on every Resume. *)
 let test_carrier_authority_is_current_turn_input_on_official_start_and_resume () =
   let module A = Keeper_context_assembly in
-  let open Yojson.Safe.Util in
   let block = Prompt_block_id.Completion_authority in
   let text = "Approved task-approved; verification vrf-approved; authority operator-fixture" in
   let issue ?goal authority =
@@ -3421,22 +3369,6 @@ let test_carrier_authority_is_current_turn_input_on_official_start_and_resume ()
       | Ok prepared -> prepared | Error error -> fail (Agent_core.Error.to_string error) in
     check int "issuer acquired once per prepared turn" 1 !reads;
     prepared in
-  let binding piece = Keeper_context_submission_link.binding_to_json
-      ~slot:Runtime_official_client_write.Whole_write piece
-      (Runtime_official_client_write.raw (Keeper_context_submission_link.text piece)) in
-  let only_source piece = match binding piece |> member "occurrences" |> to_list with
-    | [occurrence] -> member "source" occurrence
-    | _ -> fail "exactly one authority source occurrence required" in
-  let check_carrier_source label (issuer : A.t) source =
-    let receipt = match issuer.receipt with Some receipt -> receipt | None -> fail "carrier receipt missing" in
-    check string (label ^ ": the proof hashes the issuer's carrier") receipt.sha256
-      (source |> member "assembly" |> member "sha256" |> to_string);
-    let span = match source |> member "source_span_indices" |> to_list with
-      | [index] -> List.nth receipt.spans (to_int index)
-      | _ -> fail "one authority span required" in
-    check bool (label ^ ": the proof names the authority span") true (span.kind = A.Block block);
-    check string (label ^ ": the span bytes are the delivered authority") text
-      (String.sub (Option.get issuer.extra_system_context) span.offset span.bytes) in
   let assembly = issue (Some text) in
   check string "the Agent Core System carries no authority" "BASE"
     (A.effective_system_prompt ~base_text:"BASE" assembly);
@@ -3451,12 +3383,10 @@ let test_carrier_authority_is_current_turn_input_on_official_start_and_resume ()
   check bool "the rest of the carrier stays" true
     (List.exists (fun message -> contains (Host.encode_history_message message) "FLEET-WORLD")
        prepared.messages);
-  let start = Host.start_prompt prepared "OWNER" in
-  let start_text = Keeper_context_submission_link.text start in
+  let start_text = Host.start_prompt prepared "OWNER" in
   check bool "the initial event is delivered once in front of the Start prompt" true
     (String.starts_with ~prefix:"SYSTEM:\n" start_text
      && String.ends_with ~suffix:"\n\nOWNER" start_text && contains start_text text);
-  check_carrier_source "Start" assembly (only_source start);
   let turn_observation = prepared.turn_observation in
   let composed_context = prepared.composed_context in
   let held = Host.start_held_context ~turn_observation ?composed_context prepared.messages in
@@ -3472,10 +3402,9 @@ let test_carrier_authority_is_current_turn_input_on_official_start_and_resume ()
   check string "the authority is sent again with identical bytes" first.prompt second.prompt;
   check bool "Resume actually contains the authority" true (contains second.prompt text);
   check bool "held world state is not rebroadcast" false (contains second.prompt "FLEET-WORLD");
-  check_carrier_source "Resume" assembly (only_source second.context_projection);
   let next = prepare ~goal:"NEXT" (issue None) in
   check string "a turn without an event has no Start observation" "NEXT"
-    (Host.start_prompt next "NEXT" |> Keeper_context_submission_link.text);
+    (Host.start_prompt next "NEXT");
   check bool "a turn without an event carries no turn observation" true
     (Option.is_none next.turn_observation);
   let next_resume = Host.resume_prompt ~turn_observation:None ~goal:"NEXT" ~held:second.held_context
@@ -3485,7 +3414,7 @@ let test_carrier_authority_is_current_turn_input_on_official_start_and_resume ()
   let changed = prepare ~goal:"NEXT" (issue ~goal:"GOAL revision2" (Some changed_text)) in
   check string "the Goal keeps its Start System surface" "BASE\n\nGOAL revision2"
     changed.system_prompt;
-  let changed_start = Host.start_prompt changed "NEXT" |> Keeper_context_submission_link.text in
+  let changed_start = Host.start_prompt changed "NEXT" in
   check bool "new correlation keys reach the Start prompt" true (contains changed_start changed_text);
   check bool "old correlation keys are not borrowed" false (contains changed_start text);
   let changed_resume = Host.resume_prompt ~goal:"NEXT" ~held:next_resume.held_context
@@ -3495,7 +3424,7 @@ let test_carrier_authority_is_current_turn_input_on_official_start_and_resume ()
   List.iter (fun (label, issuer) ->
     let unknown = prepare ~goal:"NEXT" ~issuer (issue (Some changed_text)) in
     check string (label ^ ": no Start observation is invented") "NEXT"
-      (Host.start_prompt unknown "NEXT" |> Keeper_context_submission_link.text);
+      (Host.start_prompt unknown "NEXT");
     check bool (label ^ ": the carrier is kept whole") true
       (List.exists (fun message -> contains (Host.encode_history_message message) changed_text)
          unknown.messages);
@@ -3576,8 +3505,7 @@ let test_authority_leaves_the_carrier_when_the_sent_system_is_not_the_issued_one
     (List.exists (fun message -> contains (Host.encode_history_message message) "FLEET-WORLD")
        prepared.messages);
   check bool "the authority goes out with the Start prompt" true
-    (contains (Host.start_prompt prepared "NEXT" |> Keeper_context_submission_link.text)
-       authority_text)
+    (contains (Host.start_prompt prepared "NEXT") authority_text)
 ;;
 
 (* A System kept with older articles sends the articles
@@ -3676,11 +3604,9 @@ let test_an_authority_only_carrier_is_not_expected_among_the_messages () =
 (* The Goals awaiting proof leave the official carrier with the
    authority, so the vendor's persistent System never keeps a Goal's phase
    past its turn. Both go out as current-turn input on Start, in carrier
-   order, each proved by its own span of the issuer's carrier, and again on
-   every Resume. *)
+   order, and again on every Resume. *)
 let test_goals_awaiting_proof_are_current_turn_input_on_official_start_and_resume () =
   let module A = Keeper_context_assembly in
-  let open Yojson.Safe.Util in
   let awaiting_text = "### Goals Awaiting Proof (1)\n- goal-under-proof [proof pending]" in
   (* An official client JSON-encodes each message, so a containment check
      looks for a line of the block, not the block with its newline. *)
@@ -3707,8 +3633,7 @@ let test_goals_awaiting_proof_are_current_turn_input_on_official_start_and_resum
     (carried awaiting_line);
   check bool "nor the authority" false (carried authority_text);
   check bool "the rest of the carrier stays" true (carried "FLEET-WORLD");
-  let start = Host.start_prompt prepared "OWNER" in
-  let start_text = Keeper_context_submission_link.text start in
+  let start_text = Host.start_prompt prepared "OWNER" in
   check bool "the Start prompt carries both, the Goals under proof first" true
     (match String_util.find_substring start_text "goal-under-proof",
            String_util.find_substring start_text "vrf-approved" with
@@ -3717,23 +3642,6 @@ let test_goals_awaiting_proof_are_current_turn_input_on_official_start_and_resum
   check bool "and ends with the owner's prompt" true
     (String.starts_with ~prefix:"SYSTEM:\n" start_text
      && String.ends_with ~suffix:"\n\nOWNER" start_text);
-  let receipt = match assembly.receipt with Some receipt -> receipt | None -> fail "carrier receipt missing" in
-  let binding piece = Keeper_context_submission_link.binding_to_json
-      ~slot:Runtime_official_client_write.Whole_write piece
-      (Runtime_official_client_write.raw (Keeper_context_submission_link.text piece)) in
-  let sourced_blocks piece = List.map (fun occurrence ->
-      let source = member "source" occurrence in
-      check string "the proof hashes the issuer's carrier" receipt.sha256
-        (source |> member "assembly" |> member "sha256" |> to_string);
-      match source |> member "source_span_indices" |> to_list with
-      | [index] ->
-        (match (List.nth receipt.spans (to_int index)).kind with
-         | A.Block block -> Prompt_block_id.to_string block
-         | A.Unattributed _ -> fail "a turn block proof names an unattributed span")
-      | _ -> fail "one span per turn block")
-      (binding piece |> member "occurrences" |> to_list) in
-  check (list string) "each block is proved by its own carrier span"
-    [ "goals_awaiting_proof"; "completion_authority" ] (sourced_blocks start);
   let turn_observation = prepared.turn_observation in
   let composed_context = prepared.composed_context in
   let held = Host.start_held_context ~turn_observation ?composed_context prepared.messages in
@@ -3747,11 +3655,9 @@ let test_goals_awaiting_proof_are_current_turn_input_on_official_start_and_resum
   check bool "every Resume carries the Goals under proof" true
     (contains first.prompt awaiting_line && contains second.prompt awaiting_line);
   check string "with the same bytes" first.prompt second.prompt;
-  check (list string) "the Resume proofs name both spans"
-    [ "goals_awaiting_proof"; "completion_authority" ] (sourced_blocks second.context_projection);
   let next = prepare_authority_turn ~system_prompt:"BASE" (issue ~awaiting:None) in
   check bool "a turn without a Goal under proof starts without the block" false
-    (contains (Host.start_prompt next "NEXT" |> Keeper_context_submission_link.text) awaiting_line);
+    (contains (Host.start_prompt next "NEXT") awaiting_line);
   check bool "and resumes without the old one" false
     (contains (Host.resume_prompt ~goal:"NEXT" ~held:second.held_context
                  ~turn_observation:next.turn_observation ?composed_context:next.composed_context
@@ -3803,35 +3709,16 @@ let test_a_resume_sends_only_the_changed_world_state_sections () =
     (section_names same.unchanged_sections)
 ;;
 
-(* The partial World State is still the issuer's bytes: the sections it sends,
-   in order. Its attribution names the sections left out. *)
-let test_a_partial_world_state_keeps_its_issuer_attribution () =
+(* The line naming the sections a partial World State left out goes out as
+   its own System message. *)
+let test_a_partial_world_state_sends_its_notice_as_a_system_message () =
   use_markdown_prompts ();
-  let open Yojson.Safe.Util in
   let first = world_state_turn (world_state ()) in
   let second = world_state_turn (world_state ~fleet:"FLEET-TWO" ()) in
   let delivery = resume ~held:(start_holding first) second in
   let notice = Host.unchanged_sections_notice delivery.unchanged_sections |> Result.get_ok in
   check bool "the host notice remains in the encoded prompt" true
-    (contains delivery.prompt ("SYSTEM:\n" ^ Host.encode_history_message (carrier_message notice)));
-  let binding =
-    Keeper_context_submission_link.binding_to_json
-      ~slot:Runtime_official_client_write.Whole_write
-      delivery.context_projection
-      (Runtime_official_client_write.raw delivery.prompt)
-  in
-  check string "the carrier attributes to its issuer" "verified"
-    (binding |> member "issuer_attribution" |> member "status" |> to_string);
-  match binding |> member "occurrences" |> to_list with
-  | [ occurrence ] ->
-    check string "the rendering names only left-out sections"
-      "ordered_blocks_joined_by_two_newlines_without_held_world_state_sections"
-      (occurrence |> member "source" |> member "rendering" |> to_string);
-    check (list string) "the attribution names the sections left out"
-      [ "workspace_memory"; "wiki" ]
-      (occurrence |> member "source" |> member "omitted_world_state_sections"
-       |> to_option to_list |> Option.value ~default:[] |> List.map to_string)
-  | _ -> fail "the World State carrier must be one attributed occurrence"
+    (contains delivery.prompt ("SYSTEM:\n" ^ Host.encode_history_message (carrier_message notice)))
 ;;
 
 (* What arrived for this turn is sent again even when its bytes repeat: the
@@ -4076,45 +3963,10 @@ let test_recent_actions_go_out_whole_when_the_session_holds_no_row () =
     (List.for_all (sends old_copy) [ 2; 3; 4 ])
 ;;
 
-(* The section sent in part is still the issuer's bytes: its head, its other
-   rows and its tail. Its attribution names the rows left out by digest. *)
-let test_recent_action_rows_sent_in_part_keep_their_issuer_attribution () =
-  use_markdown_prompts ();
-  let open Yojson.Safe.Util in
-  let first = world_state_turn (world_state_with_actions [ 1; 2; 3 ]) in
-  let second = world_state_turn (world_state_with_actions [ 2; 3; 4 ]) in
-  let delivery = resume ~held:(start_holding first) second in
-  let binding =
-    Keeper_context_submission_link.binding_to_json
-      ~slot:Runtime_official_client_write.Whole_write
-      delivery.context_projection
-      (Runtime_official_client_write.raw delivery.prompt)
-  in
-  check string "the carrier attributes to its issuer" "verified"
-    (binding |> member "issuer_attribution" |> member "status" |> to_string);
-  match binding |> member "occurrences" |> to_list with
-  | [ occurrence ] ->
-    check string "the rendering names both kinds of omission"
-      "ordered_blocks_joined_by_two_newlines_without_held_world_state_sections_and_rows"
-      (occurrence |> member "source" |> member "rendering" |> to_string);
-    (match occurrence |> member "source" |> member "omitted_world_state_rows" |> to_list with
-     | [ entry ] ->
-       check string "the rows left out are recent actions" "own_recent_actions"
-         (entry |> member "section" |> to_string);
-       check (list string) "the attribution names the rows left out by digest"
-         (List.map
-            (fun turn -> Agent_core_sha256.(digest_string (action_row turn) |> to_hex))
-            [ 2; 3 ])
-         (entry |> member "row_sha256" |> to_list |> List.map to_string)
-     | _ -> fail "one section was sent in part")
-  | _ -> fail "the World State carrier must be one attributed occurrence"
-;;
-
 (* A session that holds only the recent-action rows and head sends every other
-   section whole, so its evidence names omitted rows and no omitted section. *)
-let test_a_rows_only_omission_is_named_as_rows () =
+   section whole, so no section is named as left out. *)
+let test_a_rows_only_omission_names_no_section () =
   use_markdown_prompts ();
-  let open Yojson.Safe.Util in
   let first = world_state_turn (world_state_with_actions [ 1; 2; 3 ]) in
   let only_recent_actions =
     List.filter
@@ -4131,19 +3983,7 @@ let test_a_rows_only_omission_is_named_as_rows () =
   let delivery =
     resume ~held:only_recent_actions (world_state_turn (world_state_with_actions [ 2; 3; 4 ]))
   in
-  check (list string) "no section is left out whole" [] (section_names delivery.unchanged_sections);
-  let binding =
-    Keeper_context_submission_link.binding_to_json
-      ~slot:Runtime_official_client_write.Whole_write
-      delivery.context_projection
-      (Runtime_official_client_write.raw delivery.prompt)
-  in
-  match binding |> member "occurrences" |> to_list with
-  | [ occurrence ] ->
-    check string "the rendering names only left-out rows"
-      "ordered_blocks_joined_by_two_newlines_without_held_world_state_rows"
-      (occurrence |> member "source" |> member "rendering" |> to_string)
-  | _ -> fail "the World State carrier must be one attributed occurrence"
+  check (list string) "no section is left out whole" [] (section_names delivery.unchanged_sections)
 ;;
 
 (* A turn's row is written again when the keeper selects another task: the
@@ -4168,25 +4008,16 @@ let test_a_row_written_again_in_place_sends_the_section_whole () =
 ;;
 
 (* Rows that repeat one text cannot be named apart, so the section is compared
-   as one text and goes out whole, still attributed to its issuer. *)
+   as one text and goes out whole. *)
 let test_repeated_rows_are_compared_as_one_text () =
   use_markdown_prompts ();
-  let open Yojson.Safe.Util in
   let first = world_state_turn (world_state_with_actions [ 1; 1; 2 ]) in
   let second = world_state_turn (world_state_with_actions [ 1; 1; 2; 3 ]) in
   let delivery = resume ~held:(start_holding first) second in
   check (list string) "nothing is named as sent in part" []
     (section_names delivery.partly_held_sections);
   check bool "every row goes out" true (List.for_all (sends delivery) [ 1; 2; 3 ]);
-  check int "no row is held by name" 0 (held_row_count delivery);
-  let binding =
-    Keeper_context_submission_link.binding_to_json
-      ~slot:Runtime_official_client_write.Whole_write
-      delivery.context_projection
-      (Runtime_official_client_write.raw delivery.prompt)
-  in
-  check string "the carrier attributes to its issuer" "verified"
-    (binding |> member "issuer_attribution" |> member "status" |> to_string)
+  check int "no row is held by name" 0 (held_row_count delivery)
 ;;
 
 (* The window moves one turn per resume for several resumes in a row; each
@@ -4358,9 +4189,9 @@ let () =
             `Quick
             test_a_resume_sends_only_the_changed_world_state_sections
         ; test_case
-            "a partial World State keeps its issuer attribution"
+            "a partial World State sends its notice as a System message"
             `Quick
-            test_a_partial_world_state_keeps_its_issuer_attribution
+            test_a_partial_world_state_sends_its_notice_as_a_system_message
         ; test_case
             "an inbox section is sent on every resume"
             `Quick
@@ -4390,13 +4221,9 @@ let () =
             `Quick
             test_recent_actions_go_out_whole_when_the_session_holds_no_row
         ; test_case
-            "recent action rows sent in part keep their issuer attribution"
+            "a rows-only omission names no section"
             `Quick
-            test_recent_action_rows_sent_in_part_keep_their_issuer_attribution
-        ; test_case
-            "a rows-only omission is named as rows"
-            `Quick
-            test_a_rows_only_omission_is_named_as_rows
+            test_a_rows_only_omission_names_no_section
         ; test_case
             "a row written again in place sends the section whole"
             `Quick

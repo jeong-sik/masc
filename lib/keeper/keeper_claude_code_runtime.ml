@@ -1265,7 +1265,6 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
       | Runtime_claude_code.Start ->
         ( Host.start_prompt prepared
             (initial_turn_prompt ~session_started_at:started_at ~history ~goal)
-          |> Keeper_context_submission_link.text
         , Host.start_held_context ~turn_observation:prepared.turn_observation
             ?composed_context prepared.messages )
       | Runtime_claude_code.Resume { session_id } ->

@@ -34,6 +34,7 @@ type tool_schedule =
 
 type tool_admission =
   | Admission_open
+  | Admission_draining
   | Admission_closed of Runtime_official_client_tool.host_stop
 
 type turn_stop_state =
@@ -63,6 +64,7 @@ type t =
   ; state : mutable_state
   ; state_mutex : Eio.Mutex.t
   ; dispatch_mutex : Eio.Mutex.t
+  ; schedule_mutex : Stdlib.Mutex.t
   ; mutable tool_schedule : tool_schedule
   ; mutable pending_reservations : unit Eio.Promise.t list
   ; mutable admission : tool_admission
@@ -92,6 +94,10 @@ let fresh_capabilities secure_random =
 let snapshot t =
   Eio.Mutex.use_ro t.dispatch_mutex (fun () ->
     let session = Runtime_official_client_mcp.snapshot_session t.session in
+    let retained_tool_reservations =
+      Stdlib.Mutex.protect t.schedule_mutex (fun () ->
+        List.length t.pending_reservations)
+    in
     Eio.Mutex.use_ro t.state_mutex (fun () ->
       { phase = session.phase
       ; authenticated_requests = t.state.authenticated_requests
@@ -101,7 +107,7 @@ let snapshot t =
       ; last_connection_error = t.state.last_connection_error
       ; listener_failure = t.state.listener_failure
       ; negotiated_protocol_version = session.negotiated_protocol_version
-      ; retained_tool_reservations = List.length t.pending_reservations
+      ; retained_tool_reservations
       }))
 ;;
 
@@ -219,27 +225,28 @@ type dispatch_error =
       ; cause : exn
       }
 
-let prune_schedule t =
+let prune_schedule_locked t =
   t.tool_schedule <-
     { serial_barrier=unresolved t.tool_schedule.serial_barrier
     ; concurrent=unresolved t.tool_schedule.concurrent };
   t.pending_reservations <- unresolved t.pending_reservations
 
 let reserve_tool t execution_mode =
-  prune_schedule t;
-  let settled, resolve = Eio.Promise.create () in
-  let predecessors = match execution_mode with
-    | Agent_core.Tool_contract.Concurrent -> t.tool_schedule.serial_barrier
-    | Serial -> t.tool_schedule.serial_barrier @ t.tool_schedule.concurrent in
-  let reservation = {predecessors;finish=(fun () ->
-    Eio.Promise.resolve resolve ();
-    (* Pure owner-domain cleanup: no lock or suspension can mask cancellation. *)
-    prune_schedule t)} in
-  t.pending_reservations <- settled :: t.pending_reservations;
-  t.tool_schedule <- (match execution_mode with
-    | Concurrent -> {t.tool_schedule with concurrent=settled :: t.tool_schedule.concurrent}
-    | Serial -> {serial_barrier=settled :: predecessors;concurrent=[]});
-  reservation
+  Stdlib.Mutex.protect t.schedule_mutex (fun () ->
+    prune_schedule_locked t;
+    let settled, resolve = Eio.Promise.create () in
+    let predecessors = match execution_mode with
+      | Agent_core.Tool_contract.Concurrent -> t.tool_schedule.serial_barrier
+      | Serial -> t.tool_schedule.serial_barrier @ t.tool_schedule.concurrent in
+    let reservation = {predecessors;finish=(fun () ->
+      Eio.Promise.resolve resolve ();
+      (* Non-yielding leaf mutex: safe under cancellation without suspending. *)
+      Stdlib.Mutex.protect t.schedule_mutex (fun () -> prune_schedule_locked t))} in
+    t.pending_reservations <- settled :: t.pending_reservations;
+    t.tool_schedule <- (match execution_mode with
+      | Concurrent -> {t.tool_schedule with concurrent=settled :: t.tool_schedule.concurrent}
+      | Serial -> {serial_barrier=settled :: predecessors;concurrent=[]});
+    reservation)
 ;;
 
 let merge_host_stop previous stop =
@@ -263,7 +270,7 @@ let close_admission t (turn_stop : turn_stop_state) stop =
         t.admission <-
           Admission_closed
             (match t.admission with
-             | Admission_open -> stop
+             | Admission_open | Admission_draining -> stop
              | Admission_closed previous -> merge_host_stop previous stop)))
 ;;
 
@@ -278,24 +285,45 @@ let run_reserved t turn_stop reservation ~on_stop call =
 ;;
 
 let begin_turn t =
-  let pending = Eio.Mutex.use_ro t.dispatch_mutex (fun () -> t.pending_reservations) in
-  List.iter Eio.Promise.await pending;
-  Eio.Mutex.use_rw ~protect:true t.dispatch_mutex (fun () ->
-    prune_schedule t;
-    t.admission <- Admission_open;
-    t.turn_stop <- make_turn_stop ())
+  let rec drain () =
+    let pending =
+      Eio.Mutex.use_rw ~protect:true t.dispatch_mutex (fun () ->
+        let pending =
+          Stdlib.Mutex.protect t.schedule_mutex (fun () ->
+            prune_schedule_locked t;
+            t.pending_reservations)
+        in
+        match pending with
+        | [] ->
+          t.admission <- Admission_open;
+          t.turn_stop <- make_turn_stop ();
+          []
+        | _ :: _ ->
+          t.admission <- Admission_draining;
+          pending)
+    in
+    match pending with
+    | [] -> ()
+    | _ :: _ ->
+      List.iter Eio.Promise.await pending;
+      drain ()
+  in
+  drain ()
 ;;
 
 let await_host_stop t =
   let turn_stop = Eio.Mutex.use_ro t.dispatch_mutex (fun () -> t.turn_stop) in
   let boundary_stop = Eio.Promise.await turn_stop.boundary in
-  let pending = Eio.Mutex.use_ro t.dispatch_mutex (fun () -> t.pending_reservations) in
+  let pending =
+    Eio.Mutex.use_ro t.dispatch_mutex (fun () ->
+      Stdlib.Mutex.protect t.schedule_mutex (fun () -> t.pending_reservations))
+  in
   List.iter Eio.Promise.await pending;
   Eio.Mutex.use_ro t.dispatch_mutex (fun () ->
     match turn_stop.stop, t.admission with
     | Some stop, _ -> stop
     | None, Admission_closed stop -> stop
-    | None, Admission_open -> boundary_stop)
+    | None, (Admission_open | Admission_draining) -> boundary_stop)
 ;;
 
 let turn_closed_result : Runtime_official_client_mcp.tool_result =
@@ -303,6 +331,14 @@ let turn_closed_result : Runtime_official_client_mcp.tool_result =
   ; content=Yojson.Safe.to_string (`Assoc
       ["execution", `String "not_started"; "reason", `String "turn_closed"])
   ; content_blocks=None }
+;;
+
+let message_request_id = function
+  | `Assoc fields ->
+    (match List.assoc_opt "id" fields with
+     | Some ((`String _ | `Int _ | `Intlit _) as id) -> id
+     | Some (`Null | `Bool _ | `Float _ | `Assoc _ | `List _) | None -> `Null)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> `Null
 ;;
 
 let dispatch t ~request ~tool_specs ~tool_execution_mode ~call_tool message =
@@ -341,7 +377,7 @@ let dispatch t ~request ~tool_specs ~tool_execution_mode ~call_tool message =
           | None -> None
           | Some execution_mode ->
             (match t.admission with
-             | Admission_closed _ -> Some turn_closed_result
+             | Admission_closed _ | Admission_draining -> Some turn_closed_result
              | Admission_open ->
                let turn_stop = t.turn_stop in
                let reservation = reserve_tool t execution_mode in
@@ -388,7 +424,7 @@ let dispatch t ~request ~tool_specs ~tool_execution_mode ~call_tool message =
          | Some (name, call_id, cause), _ ->
            Error
              (Tool_outcome_unknown
-                { id = `Null; name; call_id; cause })
+                { id = message_request_id message; name; call_id; cause })
          | None, Some cause -> Error (Tool_inventory_failed cause)
          | None, None -> Error (Tool_inventory_failed exn)))
 ;;
@@ -631,6 +667,7 @@ let start ~sw ~net ~secure_random ~server_name ~tool_specs ~tool_execution_mode 
     ; state
     ; state_mutex = Eio.Mutex.create ()
     ; dispatch_mutex = Eio.Mutex.create ()
+    ; schedule_mutex = Stdlib.Mutex.create ()
     ; tool_schedule = {serial_barrier=[];concurrent=[]}
     ; pending_reservations=[]
     ; admission=Admission_open

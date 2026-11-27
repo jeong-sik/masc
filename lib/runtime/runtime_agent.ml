@@ -285,8 +285,13 @@ let observe_provider_attempt capture ~response_of invoke =
     let bt = Printexc.get_raw_backtrace () in
     Runtime_observation.interrupt_attempt attempt ~latency_ms:(latency_ms ());
     Printexc.raise_with_backtrace exn bt
+  | exception exn when Keeper_operator_interrupt.is_operator_interrupt exn ->
+    let bt = Printexc.get_raw_backtrace () in
+    Runtime_observation.interrupt_attempt attempt ~latency_ms:(latency_ms ());
+    Printexc.raise_with_backtrace exn bt
   | exception exn ->
     let bt = Printexc.get_raw_backtrace () in
+    Llm_provider.Reserved_exn.reraise_if_reserved exn;
     Runtime_observation.close_attempt attempt
       (Runtime_observation.Attempt_failed
          { latency_ms = Some (latency_ms ()); error = Printexc.to_string exn });
@@ -1562,7 +1567,12 @@ let run_blocks_internal_in_scope
     let bt = Printexc.get_raw_backtrace () in
     settle_cancelled_attempts execution_capture;
     Printexc.raise_with_backtrace exn bt
+  | exn when Keeper_operator_interrupt.is_operator_interrupt exn ->
+    let bt = Printexc.get_raw_backtrace () in
+    settle_cancelled_attempts execution_capture;
+    Printexc.raise_with_backtrace exn bt
   | exn ->
+    Llm_provider.Reserved_exn.reraise_if_reserved exn;
     let bt = Printexc.get_backtrace () in
     let detail =
       Printf.sprintf "execution exception: %s" (Printexc.to_string exn)

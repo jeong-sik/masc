@@ -573,6 +573,11 @@ let claim_first_preparation home_dir =
       true))
 ;;
 
+let release_preparation_claim home_dir =
+  Mutex.protect provisioned_lock (fun () ->
+    Hashtbl.remove provisioned_this_process home_dir)
+;;
+
 (* A disposable root is claimed once and never prepared again, so its claim
    would stay in the table for the life of the process. *)
 let forget_prepared_below ~runtime_root =
@@ -640,6 +645,18 @@ let login_keychain_path home_dir =
   List.fold_left Filename.concat home_dir [ "Library"; "Keychains"; "login.keychain-db" ]
 ;;
 
+let run_claimed home_dir f =
+  match f () with
+  | Provisioned -> Provisioned
+  | (Present | Unsupported | Failed _) as outcome ->
+    release_preparation_claim home_dir;
+    outcome
+  | exception exn ->
+    let bt = Printexc.get_raw_backtrace () in
+    release_preparation_claim home_dir;
+    Printexc.raise_with_backtrace exn bt
+;;
+
 let ensure_login_keychain home_dir =
   let path = login_keychain_path home_dir in
   if not (try Unix.access security_tool [ Unix.X_OK ]; true with Unix.Unix_error _ -> false)
@@ -648,12 +665,13 @@ let ensure_login_keychain home_dir =
     match inspect_keychain_path path with
     | `Unusable detail -> Failed detail
     | `Missing ->
-      ignore (claim_first_preparation home_dir : bool);
-      provision ~home_dir path
+      if claim_first_preparation home_dir
+      then run_claimed home_dir (fun () -> provision ~home_dir path)
+      else provision ~home_dir path
     | `Present ->
       (* Carried over from a securityd session this process cannot ask about. *)
       if claim_first_preparation home_dir
-      then replace_keychain ~home_dir path
+      then run_claimed home_dir (fun () -> replace_keychain ~home_dir path)
       else Present)
 ;;
 

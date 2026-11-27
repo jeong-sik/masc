@@ -72,8 +72,14 @@ let observation_effect t name = match t.phase with
 let call_operator t ~admit ~arguments = match t.phase with
   | Initializing | Validating_owner | Retired -> Error Protocol.Operator_unavailable
   | Serving ->
-      try Protocol.call_operator t.protocol ~admit ~arguments with
-      | Eio.Cancel.Cancelled _ as exn -> request_stop t; raise exn
+      let dispatched = ref false in
+      try
+        Protocol.call_operator ~on_dispatch:(fun () -> dispatched := true)
+          t.protocol ~admit ~arguments
+      with
+      | Eio.Cancel.Cancelled _ as exn ->
+          if !dispatched then request_stop t;
+          raise exn
 (* A call cancelled after it wrote to the worker leaves an effect we cannot
    see, so the worker stops. [reached] says whether it wrote anything. *)
 let call ?(reached = fun () -> true) t work =
@@ -83,10 +89,22 @@ let call ?(reached = fun () -> true) t work =
       try work () |> protocol_result with Eio.Cancel.Cancelled _ as exn ->
         if reached () then request_stop t;
         raise exn
-let observe t ~binding ~sources = call t (fun () -> Protocol.observe t.protocol ~binding ~sources)
-let act t ~arguments = call t (fun () -> Protocol.act t.protocol ~arguments)
-let host_requests t ~after = call t (fun () -> Protocol.host_requests t.protocol ~after)
-let host_result t ~arguments = call t (fun () -> Protocol.host_result t.protocol ~arguments)
+let observe t ~binding ~sources =
+  let dispatched = ref false in
+  call ~reached:(fun () -> !dispatched) t (fun () ->
+    Protocol.observe ~on_dispatch:(fun () -> dispatched := true) t.protocol ~binding ~sources)
+let act t ~arguments =
+  let dispatched = ref false in
+  call ~reached:(fun () -> !dispatched) t (fun () ->
+    Protocol.act ~on_dispatch:(fun () -> dispatched := true) t.protocol ~arguments)
+let host_requests t ~after =
+  let dispatched = ref false in
+  call ~reached:(fun () -> !dispatched) t (fun () ->
+    Protocol.host_requests ~on_dispatch:(fun () -> dispatched := true) t.protocol ~after)
+let host_result t ~arguments =
+  let dispatched = ref false in
+  call ~reached:(fun () -> !dispatched) t (fun () ->
+    Protocol.host_result ~on_dispatch:(fun () -> dispatched := true) t.protocol ~arguments)
 let call_exported_tool ?on_result ?(on_dispatch = fun () -> ()) ?finalize_result ?authorize ?principal
     t ~name ~arguments =
   let dispatched = ref false in

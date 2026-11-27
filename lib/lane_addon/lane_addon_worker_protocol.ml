@@ -196,8 +196,10 @@ let initialize t client =
 let protect_call ?(reached = fun () -> true) t work =
   try work () with Eio.Cancel.Cancelled _ as exn -> if reached () then revoke t; raise exn
 
-let call_operator t ~admit ~arguments =
-  protect_call t (fun () ->
+let call_operator ?(on_dispatch = fun () -> ()) t ~admit ~arguments =
+  let dispatched = ref false in
+  let on_dispatch () = dispatched := true; on_dispatch () in
+  protect_call ~reached:(fun () -> !dispatched) t (fun () ->
     Eio.Mutex.use_ro t.mutex (fun () ->
       let* ready = ready_for_call t |> Result.map_error (fun _ -> Operator_unavailable) in
       let* schema = Option.to_result ~none:Operator_unavailable ready.operator_schema in
@@ -209,6 +211,7 @@ let call_operator t ~admit ~arguments =
          not use exported-tool finalizers, on_result or action receipts here. *)
       let unknown () = revoke t; Error Operator_outcome_unknown in
       try
+        on_dispatch ();
         let* result = Agent_core.Mcp.call_tool_full ready.client ~name:operator_tool ~arguments
           |> Result.map_error (fun _ -> revoke t; Operator_outcome_unknown) in
         let* () = match t.attachment with
@@ -224,18 +227,21 @@ let call_operator t ~admit ~arguments =
          text: parser exceptions can embed a worker response containing secrets. *)
       | _ -> unknown ()))
 
-let observe t ~binding ~sources =
-  protect_call t (fun () ->
+let observe ?(on_dispatch = fun () -> ()) t ~binding ~sources =
+  let dispatched = ref false in
+  let on_dispatch () = dispatched := true; on_dispatch () in
+  protect_call ~reached:(fun () -> !dispatched) t (fun () ->
   if revoked t then Error Stopped
   (* Cancellation must remain possible during an unresponsive request. After
-     cancellation this client is retired, so no future request can consume a
-     response belonging to the cancelled call. *)
+     post-dispatch cancellation this client is retired, so no future request
+     can consume a response belonging to the cancelled call. *)
   else Eio.Mutex.use_ro t.mutex (fun () ->
     if revoked t then Error Stopped
     else
       let read () =
       try
         let* client = client_for_call t in
+        on_dispatch ();
         let* result = Agent_core.Mcp.call_tool_full client ~name:"lane_observe"
             ~arguments:(`Assoc ([ "binding", binding; "sources", sources ] @
               match t.contract.action_tool with None -> []
@@ -278,8 +284,10 @@ let observe t ~binding ~sources =
 
 (* This call only reports transport success or the package's explicit outcome.
    Once dispatched, errors never establish that the environment was unchanged. *)
-let act t ~arguments =
-  protect_call t (fun () ->
+let act ?(on_dispatch = fun () -> ()) t ~arguments =
+  let dispatched = ref false in
+  let on_dispatch () = dispatched := true; on_dispatch () in
+  protect_call ~reached:(fun () -> !dispatched) t (fun () ->
   if revoked t then Error Stopped
   else Eio.Mutex.use_ro t.mutex (fun () ->
     if revoked t then Error Stopped
@@ -290,6 +298,7 @@ let act t ~arguments =
         | _ -> Error (Protocol_failed "worker does not advertise an available action port") in
       let* arguments = Lane_addon_action.validate ~schema ~name arguments
         |> Result.map_error (fun detail -> Protocol_failed detail) in
+      on_dispatch ();
       let* result = Agent_core.Mcp.call_tool_full client ~name ~arguments
         |> Result.map_error (fun error -> Protocol_failed (Agent_core.Error.to_string error)) in
       match result.Mcp_protocol.Mcp_types.is_error with
@@ -354,11 +363,15 @@ let call_exported_tool ?(on_result = fun _ -> ()) ?(on_dispatch = fun () -> ())
       | (Eio.Io _ | Unix.Unix_error _ | Sys_error _ | End_of_file | Failure _ | Invalid_argument _) as exn ->
           Error (Protocol_failed (Printexc.to_string exn)))
 
-let call_host_tool t ~name ~arguments = protect_call t (fun () ->
+let call_host_tool ?(on_dispatch = fun () -> ()) t ~name ~arguments =
+  let dispatched = ref false in
+  let on_dispatch () = dispatched := true; on_dispatch () in
+  protect_call ~reached:(fun () -> !dispatched) t (fun () ->
   if not t.contract.host_requests then Error (Protocol_failed "worker contract has no host request ports")
   else Eio.Mutex.use_ro t.mutex (fun () ->
     let* ready=ready_for_call t in
     try
+      on_dispatch ();
       let* result=Agent_core.Mcp.call_tool_full ready.client ~name ~arguments
         |> Result.map_error (fun error -> Protocol_failed (Agent_core.Error.to_string error)) in
       match result.Mcp_protocol.Mcp_types.is_error with
@@ -367,6 +380,6 @@ let call_host_tool t ~name ~arguments = protect_call t (fun () ->
     with
     | (Eio.Io _|Unix.Unix_error _|Sys_error _|End_of_file|Failure _|Invalid_argument _) as exn ->
         Error (Protocol_failed (Printexc.to_string exn))))
-let host_requests t ~after =
-  call_host_tool t ~name:host_requests_tool ~arguments:(Lane_addon_host_request.listing_arguments ~after)
-let host_result t ~arguments = call_host_tool t ~name:host_result_tool ~arguments
+let host_requests ?on_dispatch t ~after =
+  call_host_tool ?on_dispatch t ~name:host_requests_tool ~arguments:(Lane_addon_host_request.listing_arguments ~after)
+let host_result ?on_dispatch t ~arguments = call_host_tool ?on_dispatch t ~name:host_result_tool ~arguments

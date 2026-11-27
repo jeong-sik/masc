@@ -173,27 +173,30 @@ let rows store ~declaration_id =
 
 let declarations store =
   let dir = directory store in
-  if not (Sys.file_exists dir) then Ok []
-  else
-    let* ids =
-      Array.to_list (Sys.readdir dir)
-      |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
-      |> List.fold_left
-           (fun acc name ->
-              let* acc = acc in
-              let* events = load_path store (Filename.concat dir name) in
-              match
-                List.find_map
-                  (function
-                    | Keeper_ask.Asked (a : ask) -> Some a.declaration_id
-                    | Keeper_ask.Answered _ | Keeper_ask.Withdrawn _ -> None)
-                  events
-              with
-              | Some id -> Ok (id :: acc)
-              | None -> Ok acc)
-           (Ok [])
-    in
-    Ok (List.sort_uniq String.compare ids)
+  let* entries =
+    try Ok (Array.to_list (Sys.readdir dir)) with
+    | Sys_error _ when not (Sys.file_exists dir) -> Ok []
+    | Sys_error detail -> Error detail
+  in
+  let* ids =
+    entries
+    |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
+    |> List.fold_left
+         (fun acc name ->
+            let* acc = acc in
+            let* events = load_path store (Filename.concat dir name) in
+            match
+              List.find_map
+                (function
+                  | Keeper_ask.Asked (a : ask) -> Some a.declaration_id
+                  | Keeper_ask.Answered _ | Keeper_ask.Withdrawn _ -> None)
+                events
+            with
+            | Some id -> Ok (id :: acc)
+            | None -> Ok acc)
+         (Ok [])
+  in
+  Ok (List.sort_uniq String.compare ids)
 
 let append_durable store ~declaration_id event =
   let path = log_path store ~declaration_id in
@@ -226,15 +229,22 @@ let find rows ask_id = List.find_map (fun (id, row) -> if String.equal id ask_id
 type record_outcome = Recorded | Already_recorded | Id_reused
 
 let record store (a : ask) =
+  let classify_existing recorded =
+    if recorded.questions = a.questions && recorded.context = a.context && String.equal recorded.title a.title
+    then Already_recorded else Id_reused
+  in
   let* current = rows store ~declaration_id:a.declaration_id in
   match find current a.ask_id with
-  | Some (recorded, _) ->
-    Ok
-      (if recorded.questions = a.questions && recorded.context = a.context && String.equal recorded.title a.title
-       then Already_recorded else Id_reused)
+  | Some (recorded, _) -> Ok (classify_existing recorded)
   | None ->
     let* () = append store ~declaration_id:a.declaration_id (Keeper_ask.Asked a) in
-    Ok Recorded
+    (* Another writer may have recorded this ask_id between the read and the
+       append; re-read the log so the first committed ask decides the outcome. *)
+    let* after = rows store ~declaration_id:a.declaration_id in
+    (match find after a.ask_id with
+     | Some (recorded, _) when recorded = a -> Ok Recorded
+     | Some (recorded, _) -> Ok (classify_existing recorded)
+     | None -> Error "the committed installation question has no recorded row")
 
 type answer_failure =
   | Ask_not_found
@@ -285,4 +295,13 @@ let withdraw store ~declaration_id ~ask_id ~reason ~now =
   | Some (_, Keeper_ask.Withdrawn_because _) -> Ok Was_withdrawn
   | Some (_, Keeper_ask.Open) ->
     let* () = append store ~declaration_id (Keeper_ask.Withdrawn { ask_id; reason; withdrawn_at = now }) in
-    Ok Withdrawn
+    (* Another surface may have answered or withdrawn between the read and the
+       append; the log's first terminal event decides the outcome. *)
+    let* after = rows store ~declaration_id in
+    (match find after ask_id with
+     | Some (_, Keeper_ask.Withdrawn_because canonical)
+       when String.equal canonical.reason reason && canonical.withdrawn_at = now ->
+       Ok Withdrawn
+     | Some (_, Keeper_ask.Withdrawn_because _) -> Ok Was_withdrawn
+     | Some (_, Keeper_ask.Answered_by _) -> Ok Was_answered
+     | Some (_, Keeper_ask.Open) | None -> Error "the committed withdrawal has no withdrawn row")

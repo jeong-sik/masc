@@ -47,13 +47,10 @@ import { approvalPhaseView, decisionSourceLabel, judgeLaneText } from '../../lib
 import { formatDuration } from '../../lib/format-time'
 import type { ApprovalQueuePhase, GateJudgeLane } from '../../types/gate'
 import { KeeperBadge } from '../../components/keeper-badge'
-import {
-  DataTable,
-  MasterDetail,
-  TargetLockedAction,
-  VirtualList,
-  type DataTableColumn,
-} from '../../components/primitives'
+import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
+import { MasterDetail } from '../../components/primitives/master-detail'
+import { TargetLockedAction } from '../../components/primitives/target-locked-action'
+import { VirtualList } from '../../components/primitives/virtual-list'
 import {
   asFiniteNumber,
   asNonEmptyString,
@@ -540,7 +537,7 @@ export function InboxTab(props: WorkspaceViewProps) {
     }
     return list
   }, [approvals, asks, gates, goals])
-  entryKeysRef.current = new Set(entries.map((e) => e.key))
+  entryKeysRef.current = useMemo(() => new Set(entries.map((e) => e.key)), [entries])
 
   const filteredEntries = useMemo(() => {
     if (filter === 'all') return entries

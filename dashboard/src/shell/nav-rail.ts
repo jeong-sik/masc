@@ -21,6 +21,7 @@ import {
   navigate,
   type WorkspaceNavDef,
 } from '../routes/router'
+import { preloadWorkspace } from '../workspaces/registry'
 import { ShellIcon, type ShellIconName } from './icons'
 import {
   formatInboxBadge,
@@ -64,6 +65,12 @@ function renderNavItem(
       title=${tooltip}
       data-nav-id=${item.id}
       data-rbac-locked=${locked ? 'true' : undefined}
+      onPointerEnter=${() => {
+        if (!locked && canAccessMemberWorkspace(authSession.peek())) preloadWorkspace(item.id)
+      }}
+      onFocus=${() => {
+        if (!locked && canAccessMemberWorkspace(authSession.peek())) preloadWorkspace(item.id)
+      }}
       onClick=${(event: MouseEvent) => {
         if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
         event.preventDefault()

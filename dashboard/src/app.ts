@@ -23,7 +23,6 @@ import {
 import { startObserverStream, stopObserverStream } from './core/observer'
 import { releaseAllViewStreams } from './core/view-stream-slot'
 import { isEditableTarget, isImeComposing } from './lib/keyboard'
-import { QuickPeekDrawer } from './components/primitives/quick-peek-drawer'
 import {
   TRUNK_NAV,
   currentRoute,
@@ -32,20 +31,18 @@ import {
   isAdminLockedForSession,
   navigate,
 } from './routes/router'
-import { getWorkspaceComponent, WorkspaceLoadError } from './workspaces/registry'
+import { getWorkspaceComponent, preloadWorkspace, WorkspaceLoadError } from './workspaces/registry'
+import { ShellIcon } from './shell/icons'
+import { MobileNav } from './shell/mobile-nav'
+import { NavRail } from './shell/nav-rail'
+import { TopBar } from './shell/top-bar'
 import {
-  FastApprovalStrip,
-  IncidentsOverlayBody,
-  MobileNav,
-  NavRail,
-  QueueContextOverlayBody,
-  ShellIcon,
-  TopBar,
   closeActiveOverlay,
   commandPaletteMounted,
   commandPaletteOpen,
   currentShellOverlay,
   dismissShellToast,
+  hasFastApprovalStripContent,
   installShellObservers,
   installViewportListener,
   isMobileViewport,
@@ -61,10 +58,26 @@ import {
   toggleIncidentsOverlay,
   toggleQueueContextOverlay,
   toggleRail,
-} from './shell/index'
+} from './shell/shell-state'
+
+const LazyFastApprovalStrip = lazy(async () => ({
+  default: (await import('./shell/fast-approval-strip')).FastApprovalStrip,
+}))
 
 const LazyCommandPalette = lazy(async () => ({
   default: (await import('./shell/command-palette')).CommandPalette,
+}))
+
+const LazyQuickPeekDrawer = lazy(async () => ({
+  default: (await import('./components/primitives/quick-peek-drawer')).QuickPeekDrawer,
+}))
+
+const LazyQueueContextOverlayBody = lazy(async () => ({
+  default: (await import('./shell/queue-context-overlay')).QueueContextOverlayBody,
+}))
+
+const LazyIncidentsOverlayBody = lazy(async () => ({
+  default: (await import('./shell/incidents-overlay')).IncidentsOverlayBody,
 }))
 
 /**
@@ -207,6 +220,9 @@ function WorkspaceHost(): VNode {
 
   if (!decision.allowed) {
     if (decision.reason === 'probing') {
+      if (route.access === 'member') {
+        preloadWorkspace(route.workspace)
+      }
       return html`
         <section class="ap-gate" role="status" data-testid="route-gate-probing">
           <div class="ap-card">
@@ -333,47 +349,62 @@ function WorkspaceHost(): VNode {
   `
 }
 
+function FastApprovalHost(): VNode | null {
+  if (!hasFastApprovalStripContent.value) return null
+  return html`
+    <${Suspense} fallback=${null}>
+      <${LazyFastApprovalStrip} />
+    <//>
+  `
+}
+
 function QuickPeekHost(): VNode | null {
   const overlay = currentShellOverlay.value
   if (overlay === null) return null
 
   if (overlay.kind === 'queue_context') {
     return html`
-      <${QuickPeekDrawer}
-        open=${true}
-        title="Queue & Context"
-        subtitle="⌘T Read-Only Quick-Peek"
-        onClose=${closeActiveOverlay}
-      >
-        <${QueueContextOverlayBody} />
+      <${Suspense} fallback=${null}>
+        <${LazyQuickPeekDrawer}
+          open=${true}
+          title="Queue & Context"
+          subtitle="⌘T Read-Only Quick-Peek"
+          onClose=${closeActiveOverlay}
+        >
+          <${LazyQueueContextOverlayBody} />
+        <//>
       <//>
     `
   }
 
   if (overlay.kind === 'incidents') {
     return html`
-      <${QuickPeekDrawer}
-        open=${true}
-        title="Historical Incidents (Ch3)"
-        subtitle="[I] Read-Only · Isolated from Live SSOT"
-        onClose=${closeActiveOverlay}
-      >
-        <${IncidentsOverlayBody} />
+      <${Suspense} fallback=${null}>
+        <${LazyQuickPeekDrawer}
+          open=${true}
+          title="Historical Incidents (Ch3)"
+          subtitle="[I] Read-Only · Isolated from Live SSOT"
+          onClose=${closeActiveOverlay}
+        >
+          <${LazyIncidentsOverlayBody} />
+        <//>
       <//>
     `
   }
 
   const { payload } = overlay
   return html`
-    <${QuickPeekDrawer}
-      open=${true}
-      title=${payload.title}
-      subtitle=${payload.subtitle}
-      onClose=${closeActiveOverlay}
-    >
-      ${payload.render
-        ? payload.render()
-        : html`<pre class="ap-inspect-json mono">${JSON.stringify(payload.data ?? {}, null, 2)}</pre>`}
+    <${Suspense} fallback=${null}>
+      <${LazyQuickPeekDrawer}
+        open=${true}
+        title=${payload.title}
+        subtitle=${payload.subtitle}
+        onClose=${closeActiveOverlay}
+      >
+        ${payload.render
+          ? payload.render()
+          : html`<pre class="ap-inspect-json mono">${JSON.stringify(payload.data ?? {}, null, 2)}</pre>`}
+      <//>
     <//>
   `
 }
@@ -531,7 +562,7 @@ export function App(): VNode {
     >
       <${SkipLink} />
       <${TopBar} />
-      <${FastApprovalStrip} />
+      <${FastApprovalHost} />
 
       <div class="ap-stage">
         ${!mobile && html`<${NavRail} />`}

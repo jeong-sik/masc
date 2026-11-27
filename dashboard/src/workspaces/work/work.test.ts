@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('uplot', () => {
   class MockUPlot {
@@ -35,6 +35,7 @@ import {
   decodeGoalPhaseStrict,
   formatMilliCandles,
   parseCandleMilli,
+  preloadWorkSubroute,
   validateNewGoalInput,
   type TaskItem,
   type WorkspacePreconditionSnapshot,
@@ -71,6 +72,14 @@ function setMultiAccountSessionForTest(): void {
 describe('workspaces/work', () => {
   let container: HTMLDivElement
   const origFetch = globalThis.fetch
+
+  beforeAll(async () => {
+    await Promise.all([
+      preloadWorkSubroute('tasks'),
+      preloadWorkSubroute('inbox'),
+      preloadWorkSubroute('candle'),
+    ])
+  })
 
   beforeEach(() => {
     resetAuthStateForTests()

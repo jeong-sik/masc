@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { effect } from '@preact/signals'
 import { err, ok } from '../lib/result'
 import { bumpSessionEpoch, resetAuthStateForTests } from './auth'
 import {
@@ -126,5 +127,39 @@ describe('core/resource-cache & Observed<T>', () => {
     // Subsequent fetch is NOT wedged by a stale inFlight promise
     const recovered = await cache.fetch('exploding', async () => ok({ ok: true }))
     expect(recovered.kind).toBe('value')
+  })
+
+  it('batches multi-topic invalidation and avoids redundant stale emissions on refresh', async () => {
+    await Promise.all([
+      cache.fetch('k1', async () => ok('v1'), { ttlMs: 30_000, topics: ['keeper', 'shell'] }),
+      cache.fetch('k2', async () => ok('v2'), { ttlMs: 30_000, topics: ['keeper', 'keeper_turn'] }),
+    ])
+    const s1 = cache.observe<string>('k1')
+    const s2 = cache.observe<string>('k2')
+
+    let runs = 0
+    const dispose = effect(() => {
+      void s1.value
+      void s2.value
+      runs += 1
+    })
+    expect(runs).toBe(1)
+
+    const count = cache.invalidateTopics(['keeper', 'shell', 'keeper_turn'])
+    expect(count).toBe(2)
+    expect(runs).toBe(2) // Single batched flush across both entries & overlapping topics
+
+    // Starting a fetch for an already-stale value must NOT emit a duplicate stale render
+    let resolveNext!: (v: ReturnType<typeof ok<string>>) => void
+    const pending = cache.fetch<string>(
+      'k1',
+      () => new Promise<ReturnType<typeof ok<string>>>((r) => { resolveNext = r }),
+      { ttlMs: 30_000, reason: 'sse' },
+    )
+    expect(runs).toBe(2)
+    resolveNext(ok('v1-next'))
+    await pending
+    expect(runs).toBe(3)
+    dispose()
   })
 })

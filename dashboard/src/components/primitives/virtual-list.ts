@@ -4,7 +4,7 @@
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
-import { useEffect, useRef, useState } from 'preact/hooks'
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import {
   Virtualizer,
   elementScroll,
@@ -13,6 +13,8 @@ import {
   type ScrollToOptions,
   type VirtualItem,
 } from '@tanstack/virtual-core'
+
+const HEIGHT_100_STYLE = Object.freeze({ height: '100%' })
 
 export interface UseVirtualListOptions<TScrollElement extends Element = HTMLDivElement> {
   readonly count: number
@@ -87,28 +89,44 @@ export interface VirtualListProps<T> {
 
 export function VirtualList<T>(props: VirtualListProps<T>) {
   const scrollRef = useRef<HTMLDivElement>(null)
-  const estimateFn = typeof props.estimateSize === 'function'
-    ? props.estimateSize
-    : () => props.estimateSize as number
+  const estimateRef = useRef(props.estimateSize)
+  estimateRef.current = props.estimateSize
+  const itemsRef = useRef(props.items)
+  itemsRef.current = props.items
+  const getItemKeyRef = useRef(props.getItemKey)
+  getItemKeyRef.current = props.getItemKey
+
+  const getScrollElement = useCallback(() => scrollRef.current, [])
+  const estimateSize = useCallback(
+    (index: number) => {
+      const est = estimateRef.current
+      return typeof est === 'function' ? est(index) : est
+    },
+    [],
+  )
+  const stableGetItemKey = useCallback(
+    (index: number) => getItemKeyRef.current!(itemsRef.current[index]!, index),
+    [],
+  )
 
   const { virtualItems, totalSize } = useVirtualList({
     count: props.items.length,
-    getScrollElement: () => scrollRef.current,
-    estimateSize: estimateFn,
+    getScrollElement,
+    estimateSize,
     overscan: props.overscan,
     initialHeight: typeof props.height === 'number' ? props.height : 480,
-    getItemKey: props.getItemKey
-      ? (index) => props.getItemKey!(props.items[index]!, index)
-      : undefined,
+    getItemKey: props.getItemKey ? stableGetItemKey : undefined,
   })
 
   if (props.items.length === 0 && props.empty !== undefined) {
     return html`<div class=${props.className ?? ''}>${props.empty}</div>`
   }
 
-  const containerStyle = props.height !== undefined
-    ? { height: typeof props.height === 'number' ? `${props.height}px` : props.height }
-    : undefined
+  const containerStyle = props.height === '100%'
+    ? HEIGHT_100_STYLE
+    : props.height !== undefined
+      ? { height: typeof props.height === 'number' ? `${props.height}px` : props.height }
+      : undefined
 
   return html`
     <div

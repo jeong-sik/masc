@@ -4,7 +4,9 @@ import {
   bootstrapAuthSession,
   bumpSessionEpoch,
   currentSessionEpoch,
+  registerWorkspaceTargets,
   resetAuthStateForTests,
+  selectWorkspace,
   setSingleUserToken,
 } from './auth'
 import {
@@ -293,5 +295,195 @@ describe('core/transport', () => {
     await apiGet('/api/v1/dashboard/logs', { fetchImpl: fetchMock as unknown as typeof fetch })
     await new Promise((r) => setTimeout(r, 10))
     expect(whoamiFetches).toBe(2)
+  })
+
+  it('coalesces simultaneous GET requests while preserving independent caller AbortSignals', async () => {
+    let resolveFetch!: (res: Response) => void
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      return new Promise<Response>((resolve, reject) => {
+        resolveFetch = resolve
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+      })
+    })
+
+    const ac1 = new AbortController()
+    const ac2 = new AbortController()
+    const p1 = apiGet<{ ok: boolean }>('/api/v1/keepers/tool-approvals', {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      signal: ac1.signal,
+    })
+    const p2 = apiGet<{ ok: boolean }>('/api/v1/keepers/tool-approvals', {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      signal: ac2.signal,
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    ac1.abort()
+    const r1 = await p1
+    expect(r1.ok).toBe(false)
+    if (!r1.ok) expect(r1.error.kind).toBe('aborted')
+
+    resolveFetch(jsonResponse({ ok: true }))
+    const r2 = await p2
+    expect(r2.ok).toBe(true)
+    if (r2.ok) expect(r2.value.ok).toBe(true)
+  })
+
+  it('reuses ETag-cached body on 304 Not Modified and clears cache after unsafe mutations', async () => {
+    let seenIfNoneMatch: string | null = null
+    let calls = 0
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const hdrs = (init?.headers ?? {}) as Record<string, string>
+      if (init?.method === 'POST') {
+        return jsonResponse({ ok: true })
+      }
+      calls += 1
+      seenIfNoneMatch = hdrs['If-None-Match'] ?? null
+      if (seenIfNoneMatch === 'W/"v1"') {
+        return new Response(null, { status: 304 })
+      }
+      return new Response(JSON.stringify({ url, seq: calls }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', ETag: 'W/"v1"' },
+      })
+    })
+
+    const first = await apiGet<{ seq: number }>('/api/v1/dashboard/planning', {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    expect(first.ok).toBe(true)
+    if (first.ok) expect(first.value.seq).toBe(1)
+
+    const second = await apiGet<{ seq: number }>('/api/v1/dashboard/planning', {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    expect(seenIfNoneMatch).toBe('W/"v1"')
+    expect(second.ok).toBe(true)
+    if (second.ok) expect(second.value.seq).toBe(1)
+
+    await apiMutate('POST', '/api/v1/dashboard/goals/mutate', {}, {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    const third = await apiGet<{ seq: number }>('/api/v1/dashboard/planning', {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    expect(seenIfNoneMatch).toBeNull()
+    expect(third.ok).toBe(true)
+    if (third.ok) expect(third.value.seq).toBe(3)
+  })
+
+  it('does not coalesce post-mutation GET onto a pre-mutation flight or poison ETag cache', async () => {
+    let resolvePre!: (res: Response) => void
+    let getCalls = 0
+    const seenIfNoneMatch: Array<string | null> = []
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ ok: true }))
+      }
+      getCalls += 1
+      const hdrs = (init?.headers ?? {}) as Record<string, string>
+      seenIfNoneMatch.push(hdrs['If-None-Match'] ?? null)
+      if (getCalls === 1) {
+        return new Promise<Response>((resolve) => {
+          resolvePre = resolve
+        })
+      }
+      return Promise.resolve(new Response(JSON.stringify({ rev: getCalls }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json', ETag: `W/"r${getCalls}"` },
+      }))
+    })
+
+    const preGet = apiGet<{ rev: number }>('/api/v1/dashboard/planning', {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    expect(getCalls).toBe(1)
+
+    // Unsafe mutation completes while preGet is still in flight
+    const mutRes = await apiMutate('POST', '/api/v1/dashboard/goals/mutate', {}, {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    expect(mutRes.ok).toBe(true)
+
+    // Post-mutation GET must start a fresh flight (must NOT coalesce onto preGet)
+    const postGet = await apiGet<{ rev: number }>('/api/v1/dashboard/planning', {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    expect(getCalls).toBe(2)
+    expect(postGet.ok).toBe(true)
+    if (postGet.ok) expect(postGet.value.rev).toBe(2)
+
+    // Pre-mutation GET settles late with an old ETag — must NOT overwrite ETag cache
+    resolvePre(new Response(JSON.stringify({ rev: 1 }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json', ETag: 'W/"stale-r1"' },
+    }))
+    await preGet
+
+    await apiGet<{ rev: number }>('/api/v1/dashboard/planning', {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    expect(seenIfNoneMatch[2]).toBe('W/"r2"')
+  })
+
+  it('synchronously aborts shared flight on last caller abort so immediate replacement GET starts fresh', async () => {
+    let calls = 0
+    const signals: Array<AbortSignal | null | undefined> = []
+    const fetchMock = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
+      calls += 1
+      signals.push(init?.signal)
+      if (calls === 1) {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+        })
+      }
+      return Promise.resolve(jsonResponse({ fresh: true }))
+    })
+
+    const ac = new AbortController()
+    const p1 = apiGet<{ fresh: boolean }>('/api/v1/dashboard/planning', {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+      signal: ac.signal,
+    })
+    // Abort and immediately issue replacement GET in the same synchronous turn (no await between)
+    ac.abort()
+    expect(signals[0]?.aborted).toBe(true)
+    const p2 = apiGet<{ fresh: boolean }>('/api/v1/dashboard/planning', {
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    })
+    expect(calls).toBe(2)
+
+    const [r1, r2] = await Promise.all([p1, p2])
+    expect(r1.ok).toBe(false)
+    if (!r1.ok) expect(r1.error.kind).toBe('aborted')
+    expect(r2.ok).toBe(true)
+    if (r2.ok) expect(r2.value.fresh).toBe(true)
+  })
+
+  it('does not consume literal /api/v1/dashboard/shell bootstrap handoff when workspace baseUrl prefixes the URL', async () => {
+    const requested: string[] = []
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+      requested.push(url)
+      if (url === '/health') return jsonResponse({ account_mode: 'Single_user' })
+      if (url === '/api/v1/dashboard/shell') return jsonResponse({ source: 'root-bootstrap' })
+      if (url === '/ws/sub/api/v1/dashboard/shell') return jsonResponse({ source: 'sub-workspace' })
+      return jsonResponse({}, 404)
+    })
+
+    try {
+      await bootstrapAuthSession()
+      // Registering targets with the already-active 'default' id having a baseUrl keeps the same epoch
+      registerWorkspaceTargets([{ id: 'default', label: 'Sub', baseUrl: '/ws/sub' }])
+      const res = await apiGet<{ source: string }>('/api/v1/dashboard/shell')
+      expect(res.ok).toBe(true)
+      if (res.ok) expect(res.value.source).toBe('sub-workspace')
+      expect(requested).toContain('/ws/sub/api/v1/dashboard/shell')
+      // Avoid unused warning on selectWorkspace import while verifying workspace switch path too
+      expect(selectWorkspace('default')).toBe(false)
+    } finally {
+      fetchSpy.mockRestore()
+    }
   })
 })

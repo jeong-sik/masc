@@ -7,6 +7,7 @@ import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
 import { dashboardAuthAccess } from '../lib/dashboard-auth-access'
 import { isInFlightDelivery } from '../lib/keeper-delivery'
 import { relativeTime, NO_TIME_INFO } from '../lib/format-time'
+import { nowMs1sSignal, useNowMs1sTicker } from '../lib/now-signal'
 import { isAbortError } from '../lib/async-state'
 import type {
   ChatBlock,
@@ -796,14 +797,10 @@ export function KeeperConversationPanel({
         ? '응답 중 — 새 durable operation을 바로 접수할 수 있습니다'
         : placeholder
 
-  // 1 s ticker while a stream is active so the stall badge can compare
-  // against wall-clock time. External-system sync (timer), not data init.
-  const [, setStallTick] = useState(0)
-  useEffect(() => {
-    if (!sending) return
-    const id = setInterval(() => setStallTick(t => t + 1), 1000)
-    return () => clearInterval(id)
-  }, [sending, keeperName])
+  // Shared 1 s ticker while a stream is active so the stall badge compares
+  // against wall-clock time without spawning a per-instance setInterval.
+  useNowMs1sTicker(sending)
+  const nowMs = sending ? Math.max(nowMs1sSignal.value, Date.now()) : 0
 
   const streamStartedAt = keeperStreamStartedAt.value[keeperName] ?? null
   // Before the first SSE event arrives, measure the stall from stream
@@ -814,7 +811,7 @@ export function KeeperConversationPanel({
   // there is not a missing response frame. Running replies still expose age.
   const lastSignalAt = waitingOnly ? null : keeperStreamLastEventAt.value[keeperName] ?? streamStartedAt
   const stalled =
-    sending && lastSignalAt !== null && Date.now() - lastSignalAt >= STREAM_STALL_THRESHOLD_S * 1000
+    sending && lastSignalAt !== null && nowMs - lastSignalAt >= STREAM_STALL_THRESHOLD_S * 1000
 
   const expandHistory = async () => {
     await loadFullKeeperHistory(keeperName)

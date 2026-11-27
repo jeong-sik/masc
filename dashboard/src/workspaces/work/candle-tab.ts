@@ -26,13 +26,9 @@ import { observedAbsent, observedValue, resourceCache } from '../../core/resourc
 import { apiGet, apiGetV2, apiMutate } from '../../core/transport'
 import { err, ok } from '../../lib/result'
 import { KeeperBadge } from '../../components/keeper-badge'
-import {
-  DataTable,
-  TargetLockedAction,
-  UPlotChart,
-  type DataTableColumn,
-  type UPlotSeriesSpec,
-} from '../../components/primitives'
+import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
+import { TargetLockedAction } from '../../components/primitives/target-locked-action'
+import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives/uplot-chart'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   asNonEmptyString,

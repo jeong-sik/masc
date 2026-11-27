@@ -278,12 +278,21 @@ export function QueueContextOverlayBody(): VNode {
 
   useEffect(() => {
     if (!canAccess) return
+    let disposed = false
+    let reloadQueued = false
     const unsub = subscribeObserverFrames((frame) => {
       const topics = extractObserverTopics(frame)
       if (!topics.some((t) => SCHEDULE_TOPICS.includes(t))) return
-      void loadSchedulesRef.current(epoch)
+      if (reloadQueued) return
+      reloadQueued = true
+      queueMicrotask(() => {
+        reloadQueued = false
+        if (disposed || !mountedRef.current || !isEpochCurrent(epoch)) return
+        void loadSchedulesRef.current(epoch)
+      })
     })
     return () => {
+      disposed = true
       unsub()
     }
   }, [canAccess, epoch])

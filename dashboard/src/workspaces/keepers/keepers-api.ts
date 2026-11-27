@@ -424,21 +424,20 @@ export function filterAndSortRoster(
       )
 
   if (mode === 'attention') {
-    return filtered.sort((a, b) => {
-      const score = (k: KeeperRosterItem) =>
-        needsRosterAttention(k) ? 0 : isKeeperPathResting(k) ? 1 : k.paused ? 2 : 3
-      const aScore = score(a)
-      const bScore = score(b)
-      if (aScore !== bScore) return aScore - bScore
-      const ctxVal = (k: KeeperRosterItem): number => {
-        if (k.context_ratio !== null) return k.context_ratio
-        if (k.context_provenance === 'estimated' && k.estimated_context_ratio != null) {
-          return k.estimated_context_ratio
-        }
-        return -1
-      }
-      return ctxVal(b) - ctxVal(a) || a.name.localeCompare(b.name)
+    const scored = filtered.map((item) => {
+      const score = needsRosterAttention(item) ? 0 : isKeeperPathResting(item) ? 1 : item.paused ? 2 : 3
+      const ctx = item.context_ratio !== null
+        ? item.context_ratio
+        : item.context_provenance === 'estimated' && item.estimated_context_ratio != null
+          ? item.estimated_context_ratio
+          : -1
+      return { item, score, ctx }
     })
+    scored.sort((a, b) => {
+      if (a.score !== b.score) return a.score - b.score
+      return b.ctx - a.ctx || a.item.name.localeCompare(b.item.name)
+    })
+    return scored.map((entry) => entry.item)
   }
   if (mode === 'wall24h') {
     return filtered.sort((a, b) => {
@@ -736,13 +735,24 @@ export function decodeHistoryRow(raw: unknown): ChatTranscriptEntry | null {
       : undefined
   const directToolCalls = decodeToolBlocks(raw) ?? []
   const mergedToolCalls: ChatToolBlock[] = [...directToolCalls]
-  for (const bt of decodedBlocks.toolCalls) {
-    const dup = mergedToolCalls.some(
-      (existing) =>
-        (bt.executionId && existing.executionId === bt.executionId)
-        || (bt.id && existing.id === bt.id && existing.name === bt.name),
-    )
-    if (!dup) mergedToolCalls.push(bt)
+  if (decodedBlocks.toolCalls.length > 0) {
+    const seenExecIds = new Set<string>()
+    const seenIdNames = new Set<string>()
+    for (let i = 0; i < mergedToolCalls.length; i++) {
+      const existing = mergedToolCalls[i]!
+      if (existing.executionId) seenExecIds.add(existing.executionId)
+      if (existing.id) seenIdNames.add(`${existing.id}\0${existing.name}`)
+    }
+    for (let i = 0; i < decodedBlocks.toolCalls.length; i++) {
+      const bt = decodedBlocks.toolCalls[i]!
+      const idNameKey = bt.id ? `${bt.id}\0${bt.name}` : null
+      if ((bt.executionId && seenExecIds.has(bt.executionId)) || (idNameKey !== null && seenIdNames.has(idNameKey))) {
+        continue
+      }
+      mergedToolCalls.push(bt)
+      if (bt.executionId) seenExecIds.add(bt.executionId)
+      if (idNameKey !== null) seenIdNames.add(idNameKey)
+    }
   }
   const toolCalls = mergedToolCalls.length > 0 ? mergedToolCalls : undefined
   const autonomousTurn =

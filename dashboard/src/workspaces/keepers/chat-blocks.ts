@@ -199,12 +199,59 @@ function extractAuxiliaryBlocks(content: string) {
   return { thinking, memory, body: body.join('').trim() }
 }
 
+interface ParsedChatBlocksCacheEntry {
+  readonly role: ChatTranscriptEntry['role']
+  readonly kind: ChatTranscriptEntry['kind']
+  readonly content: string
+  readonly thinking: string | undefined
+  readonly toolName: string | undefined
+  readonly executionId: string | undefined
+  readonly toolCalls: readonly ChatToolBlock[] | undefined
+  readonly memoryItems: readonly string[] | undefined
+  readonly autonomousTurn: boolean | undefined
+  readonly parsed: ParsedChatBlocks
+}
+
+const parsedChatBlocksCache = new WeakMap<ChatTranscriptEntry, ParsedChatBlocksCacheEntry>()
+
 /**
  * Classifies a `ChatTranscriptEntry` into structured collapsible blocks so raw
  * JSON blobs from Tool Calls/Results, Memory Recall, and Autonomous Turns render
  * as clean cards governed by the 3 toolbar toggles.
  */
 export function parseChatMessageBlocks(msg: ChatTranscriptEntry): ParsedChatBlocks {
+  const cached = parsedChatBlocksCache.get(msg)
+  if (
+    cached !== undefined
+    && cached.role === msg.role
+    && cached.kind === msg.kind
+    && cached.content === msg.content
+    && cached.thinking === msg.thinking
+    && cached.toolName === msg.toolName
+    && cached.executionId === msg.executionId
+    && cached.toolCalls === msg.toolCalls
+    && cached.memoryItems === msg.memoryItems
+    && cached.autonomousTurn === msg.autonomousTurn
+  ) {
+    return cached.parsed
+  }
+  const parsed = parseChatMessageBlocksUncached(msg)
+  parsedChatBlocksCache.set(msg, {
+    role: msg.role,
+    kind: msg.kind,
+    content: msg.content,
+    thinking: msg.thinking,
+    toolName: msg.toolName,
+    executionId: msg.executionId,
+    toolCalls: msg.toolCalls,
+    memoryItems: msg.memoryItems,
+    autonomousTurn: msg.autonomousTurn,
+    parsed,
+  })
+  return parsed
+}
+
+function parseChatMessageBlocksUncached(msg: ChatTranscriptEntry): ParsedChatBlocks {
   if (msg.role === 'user') {
     return {
       thinkingText: null,

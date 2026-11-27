@@ -30,3 +30,15 @@ export const nowSecondsSignal = ticker.signal
  * (the ticker keeps running regardless of `document.visibilityState`).
  */
 export const useNowSecondsTicker = ticker.use
+
+const TICK_1S_MS = 1_000
+const ticker1s = createSharedTicker(TICK_1S_MS, () => Date.now())
+
+/** Shared 1 s wall-clock signal in milliseconds for active turn/stream timers. */
+export const nowMs1sSignal = ticker1s.signal
+
+/**
+ * Reference-counted 1 s ticker hook: pass `active = false` to unsubscribe when
+ * idle so zero timers run while no turn or stream is active.
+ */
+export const useNowMs1sTicker = ticker1s.use

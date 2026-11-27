@@ -92,6 +92,19 @@ export const WORKSPACE_LOADERS: Readonly<Record<WorkspaceId, WorkspaceLoaderEntr
 })
 
 const lazyCache = new Map<WorkspaceId, WorkspaceComponent>()
+const pendingLoads = new Map<WorkspaceId, Promise<{ default: WorkspaceComponent }>>()
+const subroutePreloaders = new Map<WorkspaceId, (subroute: string) => void>()
+
+export function registerSubroutePreloader(
+  id: WorkspaceId,
+  preloader: (subroute: string) => void,
+): void {
+  subroutePreloaders.set(id, preloader)
+}
+
+export function preloadWorkspaceSubroute(id: WorkspaceId, subroute: string): void {
+  subroutePreloaders.get(id)?.(subroute)
+}
 
 export class WorkspaceLoadError extends Error {
   constructor(cause: unknown) {
@@ -99,12 +112,41 @@ export class WorkspaceLoadError extends Error {
   }
 }
 
+function loadWorkspaceOnce(id: WorkspaceId): Promise<{ default: WorkspaceComponent }> {
+  let pending = pendingLoads.get(id)
+  if (!pending) {
+    const loadPromise = WORKSPACE_LOADERS[id].load().then(
+      (mod) => mod,
+      (error) => {
+        if (pendingLoads.get(id) === loadPromise) {
+          pendingLoads.delete(id)
+        }
+        throw error
+      },
+    )
+    pending = loadPromise
+    pendingLoads.set(id, pending)
+  }
+  return pending
+}
+
+/**
+ * Starts loading a workspace chunk in parallel with auth probing without
+ * mounting it. Shares the exact promise with `getWorkspaceComponent(id)` so
+ * `WORKSPACE_LOADERS[id].load()` is invoked at most once. Transient rejections
+ * clear `pendingLoads` automatically so a failed background preload never
+ * poisons subsequent navigation to that workspace.
+ */
+export function preloadWorkspace(id: WorkspaceId): void {
+  void loadWorkspaceOnce(id).catch(() => {})
+}
+
 export function getWorkspaceComponent(id: WorkspaceId): WorkspaceComponent {
   let cached = lazyCache.get(id)
   if (!cached) {
     cached = lazy(async () => {
       try {
-        return await WORKSPACE_LOADERS[id].load()
+        return await loadWorkspaceOnce(id)
       } catch (error) {
         throw new WorkspaceLoadError(error)
       }

@@ -10,7 +10,6 @@
  */
 
 import type { ComponentChildren } from 'preact'
-import { diffLines } from 'diff'
 import type { TimeWindow } from '../../core/time-window'
 import { err, ok, type Result } from '../../lib/result'
 
@@ -67,6 +66,20 @@ export function asStringArray(v: unknown): string[] {
   return v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
 }
 
+const PARSED_ISO_CACHE_MAX = 512
+const parsedIsoMsCache = new Map<string, number>()
+
+function parseIsoTimestampMs(raw: string): number {
+  const cached = parsedIsoMsCache.get(raw)
+  if (cached !== undefined) return cached
+  const parsed = Date.parse(raw)
+  if (parsedIsoMsCache.size >= PARSED_ISO_CACHE_MAX) {
+    parsedIsoMsCache.clear()
+  }
+  parsedIsoMsCache.set(raw, parsed)
+  return parsed
+}
+
 export function formatRelativeTime(tsInput: number | string | null | undefined, nowMs = Date.now()): string {
   if (tsInput === null || tsInput === undefined || tsInput === '') return '없음'
   let ms: number
@@ -74,7 +87,7 @@ export function formatRelativeTime(tsInput: number | string | null | undefined, 
     if (!Number.isFinite(tsInput)) return '없음'
     ms = tsInput < 1_000_000_000_000 ? tsInput * 1000 : tsInput
   } else {
-    const parsed = Date.parse(tsInput)
+    const parsed = parseIsoTimestampMs(tsInput)
     if (Number.isNaN(parsed)) return tsInput
     ms = parsed
   }
@@ -243,35 +256,71 @@ export interface FoldedBoardEntry {
  */
 export function foldSuccessionChains(posts: readonly BoardPostItem[]): readonly FoldedBoardEntry[] {
   const byId = new Map<string, BoardPostItem>()
-  for (const p of posts) byId.set(p.id, p)
+  for (let i = 0; i < posts.length; i++) {
+    const p = posts[i]!
+    byId.set(p.id, p)
+  }
+
+  const headMemo = new Map<string, string>()
 
   const resolveHeadId = (startId: string): string => {
+    const memoized = headMemo.get(startId)
+    if (memoized !== undefined) return memoized
+    const first = byId.get(startId)
+    const firstNext = first?.closed?.successorId
+    if (!firstNext || !byId.has(firstNext) || firstNext === startId) {
+      headMemo.set(startId, startId)
+      return startId
+    }
     const visited = new Set<string>([startId])
-    let cur = startId
+    const path: string[] = [startId]
+    let cur = firstNext
+    let hitCycle = false
     while (true) {
+      const known = headMemo.get(cur)
+      if (known !== undefined) {
+        cur = known
+        break
+      }
+      visited.add(cur)
+      path.push(cur)
       const post = byId.get(cur)
       const next = post?.closed?.successorId
-      if (!next || !byId.has(next) || visited.has(next)) return cur
-      visited.add(next)
+      if (!next || !byId.has(next)) break
+      if (visited.has(next)) {
+        hitCycle = true
+        break
+      }
       cur = next
     }
+    if (!hitCycle) {
+      for (let i = 0; i < path.length; i++) {
+        headMemo.set(path[i]!, cur)
+      }
+    }
+    return cur
   }
 
   const predecessorsByHead = new Map<string, BoardPostItem[]>()
   const foldedIds = new Set<string>()
 
-  for (const p of posts) {
+  for (let i = 0; i < posts.length; i++) {
+    const p = posts[i]!
     const headId = resolveHeadId(p.id)
     if (headId !== p.id) {
       foldedIds.add(p.id)
-      const list = predecessorsByHead.get(headId) ?? []
+      let list = predecessorsByHead.get(headId)
+      if (!list) {
+        list = []
+        predecessorsByHead.set(headId, list)
+      }
       list.push(p)
-      predecessorsByHead.set(headId, list)
     }
   }
 
   const out: FoldedBoardEntry[] = []
-  for (const p of posts) {
+  for (let i = 0; i < posts.length; i++) {
+    const p = posts[i]!
     if (foldedIds.has(p.id)) continue
     out.push({
       head: p,
@@ -294,13 +343,28 @@ export function decodeBoardAudience(raw: unknown): BoardAudience | null {
   return null
 }
 
+function wireTimestampToIso(val: unknown): string {
+  if (typeof val === 'string') return val
+  if (typeof val === 'number' && Number.isFinite(val)) {
+    const ms = val < 1_000_000_000_000 ? val * 1000 : val
+    return new Date(ms).toISOString()
+  }
+  return ''
+}
+
+function firstLineTitleFallback(body: string): string {
+  const nl = body.indexOf('\n')
+  const firstLine = (nl === -1 ? body : body.slice(0, nl)).trim()
+  return firstLine.length > 0 ? firstLine.slice(0, 80) : '제목 없음'
+}
+
 export function decodeBoardPost(raw: unknown): BoardPostItem | null {
   if (!isRecord(raw)) return null
   const id = asNonEmptyString(raw.id)
   const author = asNonEmptyString(raw.author)
   if (!id || !author) return null
   const body = asString(raw.body, asString(raw.content, ''))
-  const title = asNonEmptyString(raw.title) ?? (body.split('\n')[0]?.trim().slice(0, 80) || '제목 없음')
+  const title = asNonEmptyString(raw.title) ?? firstLineTitleFallback(body)
   const rawKind = asString(raw.post_kind, '').toLowerCase()
   const postKind =
     rawKind === 'human' || rawKind === 'direct' ? 'direct'
@@ -315,7 +379,8 @@ export function decodeBoardPost(raw: unknown): BoardPostItem | null {
 
   const reactions: BoardReactionSummary[] = []
   if (Array.isArray(raw.reactions)) {
-    for (const r of raw.reactions) {
+    for (let i = 0; i < raw.reactions.length; i++) {
+      const r = raw.reactions[i]
       if (!isRecord(r)) continue
       const emoji = asNonEmptyString(r.emoji)
       if (!emoji) continue
@@ -339,14 +404,6 @@ export function decodeBoardPost(raw: unknown): BoardPostItem | null {
 
   const createdRaw = raw.created_at_iso ?? raw.created_at
   const updatedRaw = raw.updated_at_iso ?? raw.updated_at ?? createdRaw
-  const toIso = (val: unknown): string => {
-    if (typeof val === 'string') return val
-    if (typeof val === 'number' && Number.isFinite(val)) {
-      const ms = val < 1_000_000_000_000 ? val * 1000 : val
-      return new Date(ms).toISOString()
-    }
-    return ''
-  }
 
   return {
     id,
@@ -361,8 +418,8 @@ export function decodeBoardPost(raw: unknown): BoardPostItem | null {
     votes,
     currentVote,
     commentCount: asFiniteNumber(raw.comment_count) ?? asFiniteNumber(raw.reply_count) ?? 0,
-    createdAt: toIso(createdRaw),
-    updatedAt: toIso(updatedRaw),
+    createdAt: wireTimestampToIso(createdRaw),
+    updatedAt: wireTimestampToIso(updatedRaw),
     tags: asStringArray(raw.tags),
     reactions,
     supportedReactionEmojis: asStringArray(raw.supported_reaction_emojis),
@@ -572,17 +629,6 @@ export interface WikiPutRespData {
 export interface LineDiffChunk {
   readonly kind: 'equal' | 'added' | 'removed'
   readonly text: string
-}
-
-/**
- * Computes line-by-line diff between server's latest Wiki markdown and operator's
- * local draft for explicit `409 conflict_cas` reload-and-diff recovery.
- */
-export function computeMarkdownLineDiff(serverText: string, localText: string): readonly LineDiffChunk[] {
-  return diffLines(serverText, localText).map((part) => ({
-    kind: part.added ? 'added' : part.removed ? 'removed' : 'equal',
-    text: part.value,
-  }))
 }
 
 // ── 3. Lean Artifacts Types (HTML & Markdown ONLY — Zero Office/HWP/PDF) ──

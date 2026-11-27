@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { effect } from '@preact/signals'
 import {
   authSession,
   bootstrapAuthSession,
@@ -19,6 +20,7 @@ import {
   resetObserverStateForTests,
   resolveObserverEndpoint,
   startObserverStream,
+  subscribeObserverFrames,
   subscribeObserverResync,
   viewProvenance,
 } from './observer'
@@ -514,7 +516,6 @@ describe('core/observer & core/time-window', () => {
     expect(postObs.kind === 'value' && postObs.data).toBe('post-invalidation-payload')
     expect(postObs.kind === 'value' && postObs.stale).toBe(false)
   })
-
   it('enforces x-masc-observer-idle-timeout-ms, clears sseInstanceId on idle timeout, and expands new runtime/addon topic aliases', async () => {
     const stalledStream = new ReadableStream<Uint8Array>({
       start() { /* intentionally never emits or closes */ },
@@ -547,5 +548,67 @@ describe('core/observer & core/time-window', () => {
     expect(extractObserverTopics(frame)).toEqual(
       expect.arrayContaining(['runtime', 'provider_usage', 'lane_addon', 'connectors', 'clients', 'keeper_costs']),
     )
+  })
+
+  it('batches SSE burst frames into one signal flush and prevents same-topic refetch abort storms', async () => {
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    let fetchCount = 0
+    let abortedCount = 0
+    const loader = (sig: AbortSignal) => {
+      fetchCount += 1
+      sig.addEventListener('abort', () => { abortedCount += 1 })
+      return Promise.resolve(ok(`snap-${fetchCount}`))
+    }
+    await resourceCache.fetch('keepers:burst', loader, { ttlMs: 60_000, topics: ['keeper_turn'] })
+    expect(fetchCount).toBe(1)
+
+    const cacheSig = resourceCache.observe<string>('keepers:burst')
+    let effectRuns = 0
+    const disposeEffect = effect(() => {
+      void observerLastEventId.value
+      void cacheSig.value
+      effectRuns += 1
+    })
+    const initialRuns = effectRuns
+
+    const unsub = subscribeObserverFrames((frame) => {
+      if (extractObserverTopics(frame).includes('keeper_turn')) {
+        void resourceCache.fetch('keepers:burst', loader, { ttlMs: 60_000, topics: ['keeper_turn'], reason: 'sse' })
+      }
+    })
+
+    // Deliver 10 same-topic frames in a single SSE chunk
+    const burstPayload = Array.from({ length: 10 }, (_, idx) =>
+      `id: ${idx + 1}\nevent: keeper_turn_changed\ndata: {"type":"keeper_turn_changed","seq":${idx + 1}}\n\n`,
+    ).join('')
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(burstPayload))
+        controller.close()
+      },
+    })
+
+    await startObserverStream({
+      fetchImpl: async () => new Response(stream, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      }),
+      autoReconnect: false,
+    })
+    unsub()
+    disposeEffect()
+
+    // Burst invalidates ONCE before listeners run -> 1 coalesced refresh, 0 aborts!
+    expect(fetchCount).toBe(2)
+    expect(abortedCount).toBe(0)
+    expect(observerLastEventId.value).toBe('10')
+    // Effect ran once for the batched burst (+ at most 1 for the async loader completion), NOT 10+ times!
+    expect(effectRuns - initialRuns).toBeLessThanOrEqual(2)
   })
 })

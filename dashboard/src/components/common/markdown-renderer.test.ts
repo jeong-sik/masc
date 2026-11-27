@@ -184,6 +184,20 @@ describe('MarkdownContent', () => {
     expect(container.querySelector('details[open] kbd')?.textContent).toBe('Enter')
   })
 
+  it('strips target from document links whose href is stripped or empty/fragment after sanitization', () => {
+    const container = document.createElement('div')
+    render(h(MarkdownContent, {
+      document: true,
+      text: '[Bad](javascript:alert(1)) · <a href="   " target="_blank">Blank</a> · <a href=" #sec" target="_blank">Padded</a>',
+    }), container)
+    const links = Array.from(container.querySelectorAll('a'))
+    expect(links).toHaveLength(3)
+    expect(links[0]?.hasAttribute('href')).toBe(false)
+    expect(links[0]?.hasAttribute('target')).toBe(false)
+    expect(links[1]?.hasAttribute('target')).toBe(false)
+    expect(links[2]?.hasAttribute('target')).toBe(false)
+  })
+
   it('scrolls to a document fragment without changing the Dashboard route', () => {
     const container = document.createElement('div')
     const previousUrl = window.location.href

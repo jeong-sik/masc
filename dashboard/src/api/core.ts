@@ -271,7 +271,33 @@ export function setRejectedCredentialListener(
 }
 
 function sentBearerToken(headers: HeadersInit | undefined): string | null {
-  const value = new Headers(headers).get('Authorization')
+  if (!headers) return null
+  let value: string | null = null
+  if (headers instanceof Headers) {
+    value = headers.get('Authorization')
+  } else if (Array.isArray(headers)) {
+    for (let i = 0; i < headers.length; i++) {
+      const pair = headers[i]
+      if (pair && pair[0].toLowerCase() === 'authorization') {
+        value = pair[1]
+        break
+      }
+    }
+  } else {
+    const rec = headers as Record<string, string | undefined>
+    if (typeof rec.Authorization === 'string') {
+      value = rec.Authorization
+    } else if (typeof rec.authorization === 'string') {
+      value = rec.authorization
+    } else {
+      for (const key in rec) {
+        if (Object.prototype.hasOwnProperty.call(rec, key) && key.toLowerCase() === 'authorization') {
+          value = rec[key] ?? null
+          break
+        }
+      }
+    }
+  }
   if (value === null || !value.startsWith(BEARER_PREFIX)) return null
   const token = value.slice(BEARER_PREFIX.length).trim()
   return token === '' ? null : token
@@ -424,6 +450,10 @@ class ResponseHeaderRejected extends Error {
  * explicit caller-provided AbortSignal.
  */
 export function fetchControlPlane(path: string, init: RequestInit): Promise<Response> {
+  const method = typeof init.method === 'string' ? init.method.toUpperCase() : 'GET'
+  if (method !== 'GET' && method !== 'HEAD') {
+    bumpLegacyMutationGen(globalThis.fetch)
+  }
   return credentialedFetch(path, {
     ...init,
     cache: init.cache ?? 'no-store',
@@ -677,6 +707,14 @@ export async function apiRequestErrorFromResponse(
   })
 }
 
+function isBlankText(s: string): boolean {
+  const len = s.length
+  if (len === 0) return true
+  const c0 = s.charCodeAt(0)
+  if (c0 > 32 && c0 < 127) return false
+  return s.trim() === ''
+}
+
 async function parseJsonResponse<T>(
   method: string,
   path: string,
@@ -698,7 +736,7 @@ async function parseJsonResponse<T>(
     })
   }
 
-  if (rawText.trim() === '') {
+  if (isBlankText(rawText)) {
     throw new ApiRequestError({
       method,
       path,
@@ -856,8 +894,184 @@ export type GetOptions = AbortableRequestOptions & {
   reportCredentialRefusal?: boolean
 }
 
+// --- In-flight GET coalescing (per globalThis.fetch & mutation generation) ---
+
+interface SharedLegacyGetFlight {
+  readonly controller: AbortController
+  refCount: number
+  readonly promise: Promise<{ readonly data: unknown; readonly headers: Headers }>
+}
+
+const inflightLegacyGetsByFetch = new WeakMap<typeof fetch, Map<string, SharedLegacyGetFlight>>()
+const legacyMutationGenByFetch = new WeakMap<typeof fetch, number>()
+
+function currentLegacyMutationGen(fetchImpl: typeof fetch): number {
+  return legacyMutationGenByFetch.get(fetchImpl) ?? 0
+}
+
+function bumpLegacyMutationGen(fetchImpl: typeof fetch): void {
+  legacyMutationGenByFetch.set(fetchImpl, currentLegacyMutationGen(fetchImpl) + 1)
+  inflightLegacyGetsByFetch.get(fetchImpl)?.clear()
+}
+
+function legacyInflightMapFor(fetchImpl: typeof fetch): Map<string, SharedLegacyGetFlight> {
+  let map = inflightLegacyGetsByFetch.get(fetchImpl)
+  if (!map) {
+    map = new Map()
+    inflightLegacyGetsByFetch.set(fetchImpl, map)
+  }
+  return map
+}
+
+function sortedHeaderSig(headers: Record<string, string>): string {
+  const keys = Object.keys(headers)
+  if (keys.length === 0) return ''
+  keys.sort()
+  let out = ''
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i]!
+    out += `${k.toLowerCase()}=${headers[k]!}\0`
+  }
+  return out
+}
+
+async function coalescedLegacyGet<T>(
+  path: string,
+  headers: Record<string, string>,
+  cache: RequestCache,
+  anonymous: boolean,
+  timeoutMs: number,
+  upstreamSignal: AbortSignal | undefined,
+  reportCredentialRefusal: boolean | undefined,
+  preserveErrorBodyFailure: boolean | undefined,
+  rejectDuplicateJsonMembers: boolean | undefined,
+): Promise<{ readonly data: T; readonly headers: Headers }> {
+  const fetchImpl = globalThis.fetch
+  const flightGen = currentLegacyMutationGen(fetchImpl)
+  const owner = captureDashboardCredentialOwner()
+  const flightKey =
+    `${flightGen}\0${anonymous ? 1 : 0}\0${cache}\0${path}\0${sortedHeaderSig(headers)}`
+    + `\0${owner.tokenRevision}:${owner.actorRevision}:${owner.managed ? 1 : 0}:${owner.managedActorRevision}:${owner.managedAuthRevision}:${owner.managedRefusalObservation}`
+    + `\0${reportCredentialRefusal === false ? 0 : 1}:${preserveErrorBodyFailure === true ? 1 : 0}:${rejectDuplicateJsonMembers === true ? 1 : 0}`
+
+  const flights = legacyInflightMapFor(fetchImpl)
+  let flight = flights.get(flightKey)
+  if (flight && flight.controller.signal.aborted) {
+    flights.delete(flightKey)
+    flight = undefined
+  }
+  if (!flight) {
+    const flightController = new AbortController()
+    const requestInit: CredentialedRequestInit = {
+      headers,
+      ...(anonymous ? { credentials: 'omit' as const } : {}),
+      cache,
+      signal: flightController.signal,
+      reportCredentialRefusal,
+    }
+    const promise = (async (): Promise<{ readonly data: unknown; readonly headers: Headers }> => {
+      try {
+        const res = await credentialedFetch(path, requestInit)
+        if (!res.ok) {
+          if (flights.get(flightKey)?.controller === flightController) {
+            flights.delete(flightKey)
+          }
+          const warmPayload = await bootstrapWarmPayload(path, res.clone())
+          if (warmPayload !== null) return { data: warmPayload, headers: new Headers() }
+          throw await apiRequestErrorFromResponse('GET', path, res, true, preserveErrorBodyFailure)
+        }
+        const data = await parseJsonResponse<unknown>('GET', path, res, true, rejectDuplicateJsonMembers)
+        if (DASHBOARD_BOOTSTRAP_WARM_PATHS.has(path) && isNotInitializedEnvelope(data)) {
+          const payload = bootstrapInitializingPayload(path)
+          if (payload !== null) return { data: payload, headers: new Headers() }
+        }
+        return { data, headers: res.headers }
+      } finally {
+        if (flights.get(flightKey)?.controller === flightController) {
+          flights.delete(flightKey)
+        }
+      }
+    })()
+    // Prevent unhandled rejection when all callers detach early and transport aborts.
+    promise.catch(() => {})
+    flight = { controller: flightController, refCount: 0, promise }
+    flights.set(flightKey, flight)
+  }
+
+  flight.refCount += 1
+  let detached = false
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let rejectCaller: ((reason: unknown) => void) | null = null
+
+  const detachAndMaybeAbort = (abortTransport: boolean): void => {
+    if (detached) return
+    detached = true
+    flight.refCount -= 1
+    if (abortTransport && flight.refCount <= 0) {
+      if (flights.get(flightKey) === flight) {
+        flights.delete(flightKey)
+      }
+      flight.controller.abort()
+    }
+  }
+
+  const abortFromUpstream = () => {
+    detachAndMaybeAbort(true)
+    rejectCaller?.(new DOMException('Request cancelled', 'AbortError'))
+  }
+
+  const callerRace = new Promise<never>((_resolve, reject) => {
+    rejectCaller = reject
+    timer = setTimeout(() => {
+      detachAndMaybeAbort(true)
+      reject(new ApiRequestError({ method: 'GET', path, timeout: true, timeoutMs }))
+    }, timeoutMs)
+    if (upstreamSignal) {
+      upstreamSignal.addEventListener('abort', abortFromUpstream, { once: true })
+    }
+  })
+
+  try {
+    const result = await Promise.race([flight.promise, callerRace])
+    return result as { readonly data: T; readonly headers: Headers }
+  } catch (err) {
+    if (isAbortError(err)) {
+      if (upstreamSignal?.aborted) throw err
+      throw new ApiRequestError({ method: 'GET', path, timeout: true, timeoutMs })
+    }
+    throw err
+  } finally {
+    if (timer !== null) clearTimeout(timer)
+    upstreamSignal?.removeEventListener('abort', abortFromUpstream)
+    detachAndMaybeAbort(false)
+  }
+}
+
 async function getRequest<T>(path: string, opts: GetOptions, anonymous: boolean): Promise<T> {
   const consumeWithinTimeout = opts.consumeWithinTimeout ?? true
+  const headers: Record<string, string> = anonymous
+    ? {}
+    : { ...authHeaders({ includeActor: opts.includeActorHeader }), ...opts.extraHeaders }
+  const cache = readCacheMode(path)
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS
+
+  // Skip in-flight coalescing for credentialless non-anonymous GETs so
+  // concurrent requests honor the credentialless 401 refusal contract (#54963).
+  if (consumeWithinTimeout && !opts.signal?.aborted && (anonymous || sentBearerToken(headers) !== null)) {
+    const result = await coalescedLegacyGet<T>(
+      path,
+      headers,
+      cache,
+      anonymous,
+      timeoutMs,
+      opts.signal,
+      opts.reportCredentialRefusal,
+      undefined,
+      undefined,
+    )
+    return result.data
+  }
+
   const consume = async (res: Response): Promise<T> => {
     if (!res.ok) {
       const warmPayload = await bootstrapWarmPayload(path, res.clone())
@@ -872,13 +1086,12 @@ async function getRequest<T>(path: string, opts: GetOptions, anonymous: boolean)
     return data
   }
   const init = {
-    headers: anonymous ? {} : { ...authHeaders({ includeActor: opts.includeActorHeader }), ...opts.extraHeaders },
+    headers,
     ...(anonymous ? { credentials: 'omit' as const } : {}),
-    cache: readCacheMode(path),
+    cache,
     signal: opts.signal,
     reportCredentialRefusal: opts.reportCredentialRefusal,
   }
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS
   if (consumeWithinTimeout) return fetchWithTimeout(path, init, timeoutMs, consume)
   return consume(await fetchWithTimeout(path, init, timeoutMs))
 }
@@ -909,6 +1122,32 @@ export async function getWithResponse<T>(
   } = {},
 ): Promise<{ readonly data: T; readonly headers: Headers }> {
   const consumeWithinTimeout = opts.consumeWithinTimeout ?? true
+  const headers: Record<string, string> = {
+    ...authHeaders({ includeActor: opts.includeActorHeader }),
+    ...opts.extraHeaders,
+  }
+  const cache = readCacheMode(path)
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS
+
+  if (
+    consumeWithinTimeout
+    && !opts.beforeResponseBody
+    && !opts.signal?.aborted
+    && sentBearerToken(headers) !== null
+  ) {
+    return coalescedLegacyGet<T>(
+      path,
+      headers,
+      cache,
+      false,
+      timeoutMs,
+      opts.signal,
+      opts.reportCredentialRefusal,
+      opts.preserveErrorBodyFailure,
+      opts.rejectDuplicateJsonMembers,
+    )
+  }
+
   const consume = async (res: Response): Promise<{ readonly data: T; readonly headers: Headers }> => {
     if (opts.beforeResponseBody) {
       try { opts.beforeResponseBody(res) }
@@ -930,12 +1169,11 @@ export async function getWithResponse<T>(
     return { data, headers: res.headers }
   }
   const init = {
-    headers: { ...authHeaders({ includeActor: opts.includeActorHeader }), ...opts.extraHeaders },
-    cache: readCacheMode(path),
+    headers,
+    cache,
     signal: opts.signal,
     reportCredentialRefusal: opts.reportCredentialRefusal,
   }
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_GET_TIMEOUT_MS
   if (consumeWithinTimeout) return fetchWithTimeout(path, init, timeoutMs, consume)
   return consume(await fetchWithTimeout(path, init, timeoutMs))
 }
@@ -954,6 +1192,7 @@ export async function post<T>(
   opts: { reportCredentialRefusal?: boolean; preserveErrorBodyFailure?: boolean;
     beforeResponseBody?: (response: Pick<Response, 'status' | 'statusText' | 'ok' | 'headers'>) => void } = {},
 ): Promise<T> {
+  const fetchImpl = globalThis.fetch
   const init = {
     method: 'POST',
     headers: {
@@ -974,6 +1213,7 @@ export async function post<T>(
       }
     }
     if (!res.ok) throw await apiRequestErrorFromResponse('POST', path, res, consumeBody, opts.preserveErrorBodyFailure)
+    bumpLegacyMutationGen(fetchImpl)
     return parseJsonResponse<T>('POST', path, res, consumeBody)
   }
   if (consumeBody) return fetchWithTimeout(path, init, timeoutMs, consume)
@@ -986,6 +1226,7 @@ export async function postControlPlane<T>(
   extraHeaders?: Record<string, string>,
   opts: AbortableRequestOptions = {},
 ): Promise<T> {
+  const fetchImpl = globalThis.fetch
   const res = await fetchControlPlane(path, {
     method: 'POST',
     headers: {
@@ -998,6 +1239,7 @@ export async function postControlPlane<T>(
   if (!res.ok) {
     throw await apiRequestErrorFromResponse('POST', path, res)
   }
+  bumpLegacyMutationGen(fetchImpl)
   return parseJsonResponse<T>('POST', path, res)
 }
 
@@ -1007,6 +1249,7 @@ export async function patch<T>(
   extraHeaders?: Record<string, string>,
   timeoutMs = DEFAULT_POST_TIMEOUT_MS,
 ): Promise<T> {
+  const fetchImpl = globalThis.fetch
   // Backend uses POST with PATCH semantics (OCaml server only routes POST)
   const res = await fetchWithTimeout(path, {
     method: 'POST',
@@ -1019,6 +1262,7 @@ export async function patch<T>(
   if (!res.ok) {
     throw await apiRequestErrorFromResponse('PATCH', path, res)
   }
+  bumpLegacyMutationGen(fetchImpl)
   return parseJsonResponse<T>('PATCH', path, res)
 }
 
@@ -1027,6 +1271,7 @@ export async function del<T>(
   extraHeaders?: Record<string, string>,
   timeoutMs = DEFAULT_POST_TIMEOUT_MS,
 ): Promise<T> {
+  const fetchImpl = globalThis.fetch
   const res = await fetchWithTimeout(path, {
     method: 'DELETE',
     headers: {
@@ -1037,6 +1282,7 @@ export async function del<T>(
   if (!res.ok) {
     throw await apiRequestErrorFromResponse('DELETE', path, res)
   }
+  bumpLegacyMutationGen(fetchImpl)
   return parseJsonResponse<T>('DELETE', path, res)
 }
 
@@ -1046,6 +1292,7 @@ export async function put<T>(
   extraHeaders?: Record<string, string>,
   timeoutMs = DEFAULT_POST_TIMEOUT_MS,
 ): Promise<T> {
+  const fetchImpl = globalThis.fetch
   const res = await fetchWithTimeout(path, {
     method: 'PUT',
     headers: {
@@ -1057,6 +1304,7 @@ export async function put<T>(
   if (!res.ok) {
     throw await apiRequestErrorFromResponse('PUT', path, res)
   }
+  bumpLegacyMutationGen(fetchImpl)
   return parseJsonResponse<T>('PUT', path, res)
 }
 

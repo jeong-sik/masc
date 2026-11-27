@@ -35,7 +35,8 @@ export function quotaWindowStanding(point: PulseProviderUsagePoint, nowSec: numb
 }
 
 function quotaWindowKey(point: PulseProviderUsagePoint): string {
-  return JSON.stringify([point.scope_id, point.kind, point.limit_id])
+  const limitPart = point.limit_id === null ? 'null' : `${point.limit_id.length}:${point.limit_id}`
+  return `${point.scope_id.length}:${point.scope_id}|${point.kind.length}:${point.kind}|${limitPart}`
 }
 
 /**

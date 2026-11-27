@@ -12,7 +12,7 @@
  * - Auto-releases when `sessionEpoch` advances (Account or Workspace switch).
  */
 
-import { signal, type ReadonlySignal } from '@preact/signals'
+import { batch, signal, type ReadonlySignal } from '@preact/signals'
 import { currentSessionEpoch, sessionEpoch } from './auth'
 
 export type ViewStreamConnector = (signal: AbortSignal, generation: number) => void | (() => void)
@@ -62,9 +62,11 @@ function startSlotConnection(slot: ActiveSlot): void {
     pausedSignal.value = true
     return
   }
-  pausedSignal.value = false
   const nextGen = generationSignal.peek() + 1
-  generationSignal.value = nextGen
+  batch(() => {
+    pausedSignal.value = false
+    generationSignal.value = nextGen
+  })
   slot.generation = nextGen
   const controller = new AbortController()
   slot.controller = controller
@@ -81,8 +83,10 @@ function startSlotConnection(slot: ActiveSlot): void {
     }
     if (activeSlot === slot) {
       activeSlot = null
-      activeKeySignal.value = null
-      pausedSignal.value = false
+      batch(() => {
+        activeKeySignal.value = null
+        pausedSignal.value = false
+      })
     }
     throw err
   }
@@ -134,8 +138,10 @@ export function acquireViewStream(
     cleanup: null,
   }
   activeSlot = slot
-  activeKeySignal.value = key
-  startSlotConnection(slot)
+  batch(() => {
+    activeKeySignal.value = key
+    startSlotConnection(slot)
+  })
 
   return {
     key,
@@ -147,8 +153,10 @@ export function acquireViewStream(
       if (activeSlot !== slot) return
       stopSlotConnection(slot)
       activeSlot = null
-      activeKeySignal.value = null
-      pausedSignal.value = false
+      batch(() => {
+        activeKeySignal.value = null
+        pausedSignal.value = false
+      })
     },
   }
 }
@@ -158,8 +166,10 @@ export function releaseAllViewStreams(): void {
     stopSlotConnection(activeSlot)
     activeSlot = null
   }
-  activeKeySignal.value = null
-  pausedSignal.value = false
+  batch(() => {
+    activeKeySignal.value = null
+    pausedSignal.value = false
+  })
 }
 
 export function getActiveViewStreamKey(): string | null {

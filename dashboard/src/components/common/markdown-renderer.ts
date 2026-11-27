@@ -17,10 +17,6 @@ const documentRenderer = {
   checkbox({ checked }: Tokens.Checkbox) {
     return checked ? '☑ ' : '☐ '
   },
-}
-
-const renderer = {
-  ...documentRenderer,
   link(this: Renderer, token: Tokens.Link) {
     const rendered = Renderer.prototype.link.call(this, token)
     const href = token.href?.trim() ?? ''
@@ -28,6 +24,8 @@ const renderer = {
     return rendered.replace(/^<a /, '<a target="_blank" rel="noopener noreferrer" ')
   },
 }
+
+const renderer = documentRenderer
 
 const md = new Marked({ gfm: true, breaks: false }).use({ renderer: documentRenderer })
 
@@ -79,8 +77,43 @@ function renderMarkdownUncached(text: string): string {
 const MARKDOWN_CACHE_MAX = 256
 export const renderMarkdown = memoizeLru(renderMarkdownUncached, { max: MARKDOWN_CACHE_MAX })
 
+function allDocumentLinksAlreadyNormalized(sanitizedHtml: string): boolean {
+  let pos = 0
+  while (true) {
+    const start = sanitizedHtml.indexOf('<a', pos)
+    if (start === -1) return true
+    const nextCh = sanitizedHtml.charCodeAt(start + 2)
+    if (nextCh !== 32 && nextCh !== 62 && nextCh !== 9 && nextCh !== 10) {
+      pos = start + 2
+      continue
+    }
+    const end = sanitizedHtml.indexOf('>', start + 2)
+    if (end === -1) return false
+    const tag = sanitizedHtml.slice(start, end + 1)
+    const hrefAttrIdx = tag.indexOf(' href="')
+    const hrefStart = hrefAttrIdx !== -1 ? hrefAttrIdx + 7 : -1
+    const hrefEnd = hrefStart !== -1 ? tag.indexOf('"', hrefStart) : -1
+    const hrefTrimmed = hrefStart !== -1 && hrefEnd !== -1
+      ? tag.slice(hrefStart, hrefEnd).trim()
+      : ''
+    const isExternalNormalized =
+      hrefTrimmed.length > 0
+      && !hrefTrimmed.startsWith('#')
+      && tag.includes(' target="_blank"')
+      && tag.includes(' rel="noopener noreferrer"')
+    const isLocalAnchorNormalized =
+      !tag.includes('target=')
+      && (hrefAttrIdx !== -1
+        ? (hrefTrimmed.length === 0 || hrefTrimmed.startsWith('#'))
+        : !tag.includes('href='))
+    if (!isExternalNormalized && !isLocalAnchorNormalized) return false
+    pos = end + 1
+  }
+}
+
 function normalizeDocumentLinks(sanitizedHtml: string): string {
   if (!sanitizedHtml.includes('<a')) return sanitizedHtml
+  if (allDocumentLinksAlreadyNormalized(sanitizedHtml)) return sanitizedHtml
   const template = window.document.createElement('template')
   template.innerHTML = sanitizedHtml
   for (const anchor of template.content.querySelectorAll('a')) {
@@ -100,6 +133,7 @@ const renderMarkdownDocument = memoizeLru(
     sanitizeHtml(md.parse(text, { async: false }), {
       USE_PROFILES: { html: true },
       FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form'],
+      ADD_ATTR: ['target'],
     }),
   ),
   { max: MARKDOWN_CACHE_MAX },

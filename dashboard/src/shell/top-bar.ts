@@ -44,6 +44,7 @@ import {
   navigate,
 } from '../routes/router'
 import { PopoverMenu } from '../components/primitives/popover-menu'
+import { preloadWorkspaceSubroute } from '../workspaces/registry'
 import { ShellIcon } from './icons'
 import {
   activeOverlay,
@@ -461,7 +462,7 @@ function ProvenancePill(): VNode {
         onClick=${() => {
           const next = !open
           setOpen(next)
-          if (next) void probeBuildConnectionInfo()
+          if (next) void probeBuildConnectionInfo(undefined, { force: true })
         }}
       >
         <span class=${`ap-prov-glyph${meta.tone === 'live' ? ' is-live' : ''}`} aria-hidden="true">
@@ -496,7 +497,7 @@ function ProvenancePill(): VNode {
               class="btn-ghost"
               onClick=${() => {
                 void startObserverStream()
-                void probeBuildConnectionInfo()
+                void probeBuildConnectionInfo(undefined, { force: true })
               }}
             >
               <${ShellIcon} name="refresh" size=${13} />
@@ -563,6 +564,12 @@ export function TopBar(): VNode {
         title=${subtabLabel}
         data-subtab=${tab.id}
         data-rbac-locked=${tab.locked ? 'true' : undefined}
+        onPointerEnter=${() => {
+          if (!tab.locked && canAccessMemberWorkspace(authSession.peek())) preloadWorkspaceSubroute(route.workspace, tab.id)
+        }}
+        onFocus=${() => {
+          if (!tab.locked && canAccessMemberWorkspace(authSession.peek())) preloadWorkspaceSubroute(route.workspace, tab.id)
+        }}
         onClick=${(event: MouseEvent) => {
           if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
           event.preventDefault()

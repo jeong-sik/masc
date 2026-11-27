@@ -6,7 +6,7 @@ import { App, shouldBootstrapCommandPaletteShortcut } from './app'
 import { authSession, resetAuthStateForTests } from './core/auth'
 import { resetObserverStateForTests } from './core/observer'
 import { currentRoute, navigate, resetRouterForTests } from './routes/router'
-import { WORKSPACE_LOADERS } from './workspaces/registry'
+import { WORKSPACE_LOADERS, getWorkspaceComponent, preloadWorkspace } from './workspaces/registry'
 import {
   activeOverlay,
   commandPaletteMounted,
@@ -297,5 +297,74 @@ describe('shouldBootstrapCommandPaletteShortcut', () => {
     expect(shouldBootstrapCommandPaletteShortcut({ altKey: false, ctrlKey: true, key: 'k', metaKey: false, isComposing: true }, false)).toBe(false)
     expect(shouldBootstrapCommandPaletteShortcut({ altKey: false, ctrlKey: true, key: 'k', metaKey: false, keyCode: 229 }, false)).toBe(false)
     expect(shouldBootstrapCommandPaletteShortcut({ altKey: false, ctrlKey: true, key: 'k', metaKey: false, defaultPrevented: true }, false)).toBe(false)
+  })
+})
+
+describe('workspaces/registry preloadWorkspace', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('clears a rejected preload from pendingLoads so subsequent navigation retries cleanly', async () => {
+    const DummyKnowledge = () => h('div', { 'data-testid': 'dummy-knowledge' }, 'Knowledge Ready')
+    const load = vi.spyOn(WORKSPACE_LOADERS.knowledge, 'load')
+      .mockRejectedValueOnce(new Error('transient preload failure'))
+      .mockResolvedValueOnce({ default: DummyKnowledge })
+
+    // Background preload fails transiently
+    preloadWorkspace('knowledge')
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(load).toHaveBeenCalledTimes(1)
+
+    // Subsequent component mount must NOT reuse the rejected promise — it retries and succeeds
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    try {
+      const KnowledgeComp = getWorkspaceComponent('knowledge')
+      const { Suspense } = await import('preact/compat')
+      await act(async () => {
+        render(h(Suspense, { fallback: null }, h(KnowledgeComp, {
+          subroute: '',
+          onNavigate: () => {},
+          onInspect: () => {},
+        })), container)
+      })
+      await waitFor(() => {
+        expect(container.querySelector('[data-testid="dummy-knowledge"]')).not.toBeNull()
+      })
+      expect(load).toHaveBeenCalledTimes(2)
+    } finally {
+      render(null, container)
+      container.remove()
+    }
+  })
+
+  it('shares a successful preload promise with getWorkspaceComponent without duplicate loads', async () => {
+    const DummyKeepers = () => h('div', { 'data-testid': 'dummy-keepers' }, 'Keepers Ready')
+    const load = vi.spyOn(WORKSPACE_LOADERS.keepers, 'load')
+      .mockResolvedValueOnce({ default: DummyKeepers })
+
+    preloadWorkspace('keepers')
+    const container = document.createElement('div')
+    document.body.appendChild(container)
+    try {
+      const KeepersComp = getWorkspaceComponent('keepers')
+      const { Suspense } = await import('preact/compat')
+      await act(async () => {
+        render(h(Suspense, { fallback: null }, h(KeepersComp, {
+          subroute: '',
+          onNavigate: () => {},
+          onInspect: () => {},
+        })), container)
+      })
+      await waitFor(() => {
+        expect(container.querySelector('[data-testid="dummy-keepers"]')).not.toBeNull()
+      })
+      expect(load).toHaveBeenCalledTimes(1)
+    } finally {
+      render(null, container)
+      container.remove()
+    }
   })
 })

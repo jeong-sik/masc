@@ -20,6 +20,7 @@ import {
   type Observed,
 } from '../../core/resource-cache'
 import {
+  extractObserverTopics,
   markViewSynced,
   subscribeObserverFrames,
   subscribeObserverReconnect,
@@ -33,7 +34,7 @@ import { currentSessionEpoch, sessionEpoch } from '../../core/auth'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives/uplot-chart'
 import type { WorkspaceViewProps } from '../types'
-import { loadPulseBundle, readPulseBundle } from './pulse-data'
+import { loadPulseBundle, PULSE_OBSERVER_TOPICS, readPulseBundle } from './pulse-data'
 import {
   buildAttentionQueue,
   buildCompanyFleetGroups,
@@ -219,7 +220,16 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null
-    const unsub = subscribeObserverFrames(() => {
+    const unsub = subscribeObserverFrames((frame) => {
+      const topics = extractObserverTopics(frame)
+      let relevant = false
+      for (let i = 0; i < topics.length; i++) {
+        if (PULSE_OBSERVER_TOPICS.has(topics[i]!)) {
+          relevant = true
+          break
+        }
+      }
+      if (!relevant) return
       if (timer) return
       timer = setTimeout(() => {
         timer = null

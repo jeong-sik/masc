@@ -9,7 +9,7 @@
  * - Exposes honest provenance state: `'LIVE SSE' | 'SYNCED' | 'SNAPSHOT' | 'STREAM_GAP'`.
  */
 
-import { signal, type ReadonlySignal } from '@preact/signals'
+import { batch, signal, type ReadonlySignal } from '@preact/signals'
 import {
   authSession,
   currentSessionEpoch,
@@ -50,6 +50,33 @@ export const observerSseInstanceId: ReadonlySignal<string | null> = sseInstanceI
 const frameListeners = new Set<ObserverListener>()
 const resyncListeners = new Set<ResyncListener>()
 const reconnectListeners = new Set<ReconnectListener>()
+
+let frameListenersSnapshot: readonly ObserverListener[] | null = null
+let resyncListenersSnapshot: readonly ResyncListener[] | null = null
+let reconnectListenersSnapshot: readonly ReconnectListener[] | null = null
+
+const topicsCache = new WeakMap<ObserverFrame, readonly string[]>()
+
+function getFrameListenersSnapshot(): readonly ObserverListener[] {
+  if (frameListenersSnapshot === null) {
+    frameListenersSnapshot = Array.from(frameListeners)
+  }
+  return frameListenersSnapshot
+}
+
+function getResyncListenersSnapshot(): readonly ResyncListener[] {
+  if (resyncListenersSnapshot === null) {
+    resyncListenersSnapshot = Array.from(resyncListeners)
+  }
+  return resyncListenersSnapshot
+}
+
+function getReconnectListenersSnapshot(): readonly ReconnectListener[] {
+  if (reconnectListenersSnapshot === null) {
+    reconnectListenersSnapshot = Array.from(reconnectListeners)
+  }
+  return reconnectListenersSnapshot
+}
 
 let activeController: AbortController | null = null
 let activeEpoch = 0
@@ -121,9 +148,11 @@ sessionEpoch.subscribe((epoch) => {
     trackedInstanceEpoch = epoch
     clearReconnectTimer()
     reconnectAttempt = 0
-    lastEventIdSignal.value = null
-    sseInstanceIdSignal.value = null
     sseInstanceIdEpoch = 0
+    batch(() => {
+      lastEventIdSignal.value = null
+      sseInstanceIdSignal.value = null
+    })
   }
 })
 
@@ -177,47 +206,82 @@ export function markViewSnapshot(): void {
 }
 
 export function markStreamGap(reason: string): void {
-  provenanceSignal.value = 'STREAM_GAP'
-  for (const listener of [...resyncListeners]) {
-    try { listener(reason) } catch { /* isolate listener */ }
-  }
+  batch(() => {
+    provenanceSignal.value = 'STREAM_GAP'
+    const listeners = getResyncListenersSnapshot()
+    for (let i = 0; i < listeners.length; i++) {
+      try { listeners[i]!(reason) } catch { /* isolate listener */ }
+    }
+  })
 }
 
 export function subscribeObserverFrames(listener: ObserverListener): () => void {
   frameListeners.add(listener)
-  return () => { frameListeners.delete(listener) }
+  frameListenersSnapshot = null
+  return () => {
+    if (frameListeners.delete(listener)) frameListenersSnapshot = null
+  }
 }
 
 export function subscribeObserverResync(listener: ResyncListener): () => void {
   resyncListeners.add(listener)
-  return () => { resyncListeners.delete(listener) }
+  resyncListenersSnapshot = null
+  return () => {
+    if (resyncListeners.delete(listener)) resyncListenersSnapshot = null
+  }
 }
 
 export function subscribeObserverReconnect(listener: ReconnectListener): () => void {
   reconnectListeners.add(listener)
-  return () => { reconnectListeners.delete(listener) }
+  reconnectListenersSnapshot = null
+  return () => {
+    if (reconnectListeners.delete(listener)) reconnectListenersSnapshot = null
+  }
 }
 
 export function parseSseBlock(block: string): ObserverFrame | null {
-  const lines = block.split(/\r?\n/)
   let id: string | null = null
   let event = 'message'
-  const dataLines: string[] = []
+  let singleData: string | null = null
+  let multiData: string[] | null = null
 
-  for (const line of lines) {
-    if (!line || line.startsWith(':')) continue
-    const sep = line.indexOf(':')
-    const field = sep === -1 ? line : line.slice(0, sep)
-    const rawVal = sep === -1 ? '' : line.slice(sep + 1)
-    const value = rawVal.startsWith(' ') ? rawVal.slice(1) : rawVal
+  const len = block.length
+  let pos = 0
+  while (pos < len) {
+    const nl = block.indexOf('\n', pos)
+    const rawEnd = nl === -1 ? len : nl
+    const lineEnd = rawEnd > pos && block.charCodeAt(rawEnd - 1) === 13 ? rawEnd - 1 : rawEnd
+    if (lineEnd > pos && block.charCodeAt(pos) !== 58) {
+      const colonIdx = block.indexOf(':', pos)
+      const sep = colonIdx !== -1 && colonIdx < lineEnd ? colonIdx : -1
+      const field = sep === -1 ? block.slice(pos, lineEnd) : block.slice(pos, sep)
+      let value: string
+      if (sep === -1) {
+        value = ''
+      } else {
+        const valStart = sep + 1 < lineEnd && block.charCodeAt(sep + 1) === 32 ? sep + 2 : sep + 1
+        value = block.slice(valStart, lineEnd)
+      }
 
-    if (field === 'id') id = value
-    else if (field === 'event') event = value || 'message'
-    else if (field === 'data') dataLines.push(value)
+      if (field === 'id') id = value
+      else if (field === 'event') event = value || 'message'
+      else if (field === 'data') {
+        if (multiData !== null) {
+          multiData.push(value)
+        } else if (singleData === null) {
+          singleData = value
+        } else {
+          multiData = [singleData, value]
+          singleData = null
+        }
+      }
+    }
+    if (nl === -1) break
+    pos = nl + 1
   }
 
-  if (dataLines.length === 0 && id === null && event === 'message') return null
-  const raw = dataLines.join('\n')
+  if (singleData === null && multiData === null && id === null && event === 'message') return null
+  const raw = multiData !== null ? multiData.join('\n') : (singleData ?? '')
   let data: unknown = raw
   if (raw.length > 0) {
     try { data = JSON.parse(raw) } catch { /* plain text payload */ }
@@ -232,7 +296,7 @@ function addTopic(out: Set<string>, candidate: unknown): void {
       out.add(trimmed)
       const aliases = SERVER_TOPIC_ALIASES[trimmed]
       if (aliases) {
-        for (const alias of aliases) out.add(alias)
+        for (let i = 0; i < aliases.length; i++) out.add(aliases[i]!)
       }
     }
   }
@@ -240,10 +304,12 @@ function addTopic(out: Set<string>, candidate: unknown): void {
 
 function addTopicList(out: Set<string>, candidate: unknown): void {
   if (!Array.isArray(candidate)) return
-  for (const item of candidate) addTopic(out, item)
+  for (let i = 0; i < candidate.length; i++) addTopic(out, candidate[i])
 }
 
 export function extractObserverTopics(frame: ObserverFrame): readonly string[] {
+  const cached = topicsCache.get(frame)
+  if (cached !== undefined) return cached
   const topics = new Set<string>()
   addTopic(topics, frame.event)
   if (typeof frame.data === 'object' && frame.data !== null) {
@@ -276,27 +342,66 @@ export function extractObserverTopics(frame: ObserverFrame): readonly string[] {
       addTopicList(topics, params.datasets)
     }
   }
-  return [...topics]
+  const result = Array.from(topics)
+  topicsCache.set(frame, result)
+  return result
 }
 
-function dispatchFrame(frame: ObserverFrame): void {
-  if (frame.id) lastEventIdSignal.value = frame.id
-
-  const topics = extractObserverTopics(frame)
-
-  if (topics.includes('observer_resync_required')) {
-    markStreamGap('observer_resync_required')
-    return
+function dispatchNormalSegment(
+  frames: readonly ObserverFrame[],
+  topics: ReadonlySet<string>,
+): void {
+  if (frames.length === 0) return
+  if (topics.size > 0) {
+    // Invalidate all topics across the chunk segment ONCE before listeners run
+    // so repeated same-topic frames in one SSE burst cannot abort and supersede
+    // the refresh started by an earlier frame in the same chunk.
+    resourceCache.invalidateTopics(topics)
   }
-
-  // Invalidate matching cache topics lazily (no refetch storm!)
-  for (const topic of topics) {
-    resourceCache.invalidateTopic(topic)
+  for (let i = 0; i < frames.length; i++) {
+    const frame = frames[i]!
+    if (frame.id) lastEventIdSignal.value = frame.id
+    const listeners = getFrameListenersSnapshot()
+    for (let j = 0; j < listeners.length; j++) {
+      try { listeners[j]!(frame) } catch { /* isolate listener */ }
+    }
   }
+}
 
-  for (const listener of [...frameListeners]) {
-    try { listener(frame) } catch { /* isolate listener */ }
-  }
+function dispatchFrameBurst(frames: readonly ObserverFrame[]): void {
+  if (frames.length === 0) return
+  batch(() => {
+    let segmentFrames: ObserverFrame[] | null = null
+    let segmentTopics: Set<string> | null = null
+
+    const flushSegment = () => {
+      if (segmentFrames !== null && segmentFrames.length > 0) {
+        dispatchNormalSegment(segmentFrames, segmentTopics!)
+        segmentFrames.length = 0
+        segmentTopics!.clear()
+      }
+    }
+
+    for (let i = 0; i < frames.length; i++) {
+      const frame = frames[i]!
+      const topics = extractObserverTopics(frame)
+      if (topics.includes('observer_resync_required')) {
+        flushSegment()
+        if (frame.id) lastEventIdSignal.value = frame.id
+        markStreamGap('observer_resync_required')
+        continue
+      }
+      if (segmentFrames === null) {
+        segmentFrames = []
+        segmentTopics = new Set()
+      }
+      segmentFrames.push(frame)
+      for (let t = 0; t < topics.length; t++) {
+        segmentTopics!.add(topics[t]!)
+      }
+    }
+    flushSegment()
+  })
 }
 
 function clearReconnectTimer(): void {
@@ -363,10 +468,12 @@ export async function startObserverStream(
 
   const unsubEpoch = sessionEpoch.subscribe((epoch) => {
     if (epoch !== startEpoch) {
-      lastEventIdSignal.value = null
       reconnectAttempt = 0
-      stopObserverStream()
-      provenanceSignal.value = 'SNAPSHOT'
+      batch(() => {
+        lastEventIdSignal.value = null
+        stopObserverStream()
+        provenanceSignal.value = 'SNAPSHOT'
+      })
     }
   })
 
@@ -393,9 +500,11 @@ export async function startObserverStream(
 
     if (isEpochCurrent(startEpoch) && !controller.signal.aborted) {
       if (!response.ok || !response.body) {
-        connectedSignal.value = false
-        setObserverSseInstanceId(null)
-        markStreamGap(`observer_http_${response.status}`)
+        batch(() => {
+          connectedSignal.value = false
+          setObserverSseInstanceId(null)
+          markStreamGap(`observer_http_${response.status}`)
+        })
         // Retry only transient server/network failures (408/429/5xx or empty 200 body); skip permanent 4xx.
         shouldReconnect =
           response.status === 408
@@ -408,9 +517,6 @@ export async function startObserverStream(
         const nextSseInstanceId = sseInstanceHeader && sseInstanceHeader.trim().length > 0
           ? sseInstanceHeader.trim()
           : null
-        if (nextSseInstanceId) {
-          setObserverSseInstanceId(nextSseInstanceId)
-        }
         const idleHeader = response.headers.get(OBSERVER_IDLE_TIMEOUT_HEADER)?.trim() ?? null
         const parsedIdleMs = idleHeader !== null && /^[1-9][0-9]*$/.test(idleHeader)
           ? Number(idleHeader)
@@ -426,23 +532,30 @@ export async function startObserverStream(
           || (prevSseInstanceId !== null && nextSseInstanceId !== null && prevSseInstanceId !== nextSseInstanceId)
 
         reconnectAttempt = 0
-        connectedSignal.value = true
-        // Wait for mounted views to complete recovery reads before declaring LIVE SSE
-        // after a STREAM_GAP/reconnect; when no views subscribe, restore LIVE SSE directly.
-        provenanceSignal.value =
-          wasGapOrReconnect && reconnectListeners.size > 0 ? 'SYNCED' : 'LIVE SSE'
-
-        if (wasGapOrReconnect) {
-          resourceCache.invalidateAll()
-          for (const listener of [...reconnectListeners]) {
-            try { listener() } catch { /* isolate listener */ }
+        batch(() => {
+          if (nextSseInstanceId) {
+            setObserverSseInstanceId(nextSseInstanceId)
           }
-        }
+          connectedSignal.value = true
+          // Wait for mounted views to complete recovery reads before declaring LIVE SSE
+          // after a STREAM_GAP/reconnect; when no views subscribe, restore LIVE SSE directly.
+          provenanceSignal.value =
+            wasGapOrReconnect && reconnectListeners.size > 0 ? 'SYNCED' : 'LIVE SSE'
+
+          if (wasGapOrReconnect) {
+            resourceCache.invalidateAll()
+            const listeners = getReconnectListenersSnapshot()
+            for (let i = 0; i < listeners.length; i++) {
+              try { listeners[i]!() } catch { /* isolate listener */ }
+            }
+          }
+        })
 
         const reader = response.body.getReader()
         readerRef = reader
         const decoder = new TextDecoder()
         let buffer = ''
+        const blockSepRegex = /\r?\n\r?\n/g
 
         const readChunk = async (): Promise<ReadableStreamReadResult<Uint8Array>> => {
           if (idleTimeoutMs === undefined) return reader.read()
@@ -467,27 +580,54 @@ export async function startObserverStream(
           if (done) break
           if (!isEpochCurrent(startEpoch) || controller.signal.aborted) break
           buffer += decoder.decode(value, { stream: true })
-          const blocks = buffer.split(/\r?\n\r?\n/)
-          buffer = blocks.pop() ?? ''
-          for (const block of blocks) {
-            const frame = parseSseBlock(block)
-            if (frame) dispatchFrame(frame)
+
+          const parsedFrames: ObserverFrame[] = []
+          if (buffer.indexOf('\r') === -1) {
+            let start = 0
+            while (true) {
+              const sepIdx = buffer.indexOf('\n\n', start)
+              if (sepIdx === -1) break
+              const block = buffer.slice(start, sepIdx)
+              const frame = parseSseBlock(block)
+              if (frame) parsedFrames.push(frame)
+              start = sepIdx + 2
+            }
+            if (start > 0) buffer = buffer.slice(start)
+          } else {
+            blockSepRegex.lastIndex = 0
+            let start = 0
+            let match: RegExpExecArray | null
+            while ((match = blockSepRegex.exec(buffer)) !== null) {
+              const block = buffer.slice(start, match.index)
+              const frame = parseSseBlock(block)
+              if (frame) parsedFrames.push(frame)
+              start = match.index + match[0].length
+            }
+            if (start > 0) buffer = buffer.slice(start)
+          }
+
+          if (parsedFrames.length > 0) {
+            dispatchFrameBurst(parsedFrames)
           }
         }
 
         if (isEpochCurrent(startEpoch) && !controller.signal.aborted) {
-          connectedSignal.value = false
-          setObserverSseInstanceId(null)
-          markStreamGap('observer_eof')
+          batch(() => {
+            connectedSignal.value = false
+            setObserverSseInstanceId(null)
+            markStreamGap('observer_eof')
+          })
           shouldReconnect = true
         }
       }
     }
   } catch {
     if (isEpochCurrent(startEpoch) && !controller.signal.aborted) {
-      connectedSignal.value = false
-      setObserverSseInstanceId(null)
-      markStreamGap('observer_disconnected')
+      batch(() => {
+        connectedSignal.value = false
+        setObserverSseInstanceId(null)
+        markStreamGap('observer_disconnected')
+      })
       shouldReconnect = true
     }
   } finally {
@@ -505,14 +645,19 @@ export async function startObserverStream(
 }
 
 export function resetObserverStateForTests(): void {
-  stopObserverStream()
-  reconnectAttempt = 0
-  lastEventIdSignal.value = null
-  sseInstanceIdSignal.value = null
-  sseInstanceIdEpoch = 0
-  trackedInstanceEpoch = sessionEpoch.peek()
-  provenanceSignal.value = 'SNAPSHOT'
+  batch(() => {
+    stopObserverStream()
+    reconnectAttempt = 0
+    lastEventIdSignal.value = null
+    sseInstanceIdSignal.value = null
+    sseInstanceIdEpoch = 0
+    trackedInstanceEpoch = sessionEpoch.peek()
+    provenanceSignal.value = 'SNAPSHOT'
+  })
   frameListeners.clear()
   resyncListeners.clear()
   reconnectListeners.clear()
+  frameListenersSnapshot = null
+  resyncListenersSnapshot = null
+  reconnectListenersSnapshot = null
 }

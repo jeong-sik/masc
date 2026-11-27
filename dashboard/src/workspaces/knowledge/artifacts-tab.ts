@@ -16,7 +16,9 @@ import { resourceCache } from '../../core/resource-cache'
 import { apiGet } from '../../core/transport'
 import { ok } from '../../lib/result'
 import { KeeperBadge } from '../../components/keeper-badge'
-import { MasterDetail, PopoverMenu, VirtualList } from '../../components/primitives'
+import { MasterDetail } from '../../components/primitives/master-detail'
+import { PopoverMenu } from '../../components/primitives/popover-menu'
+import { VirtualList } from '../../components/primitives/virtual-list'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   asNonEmptyString,

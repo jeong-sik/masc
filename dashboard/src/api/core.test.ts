@@ -965,6 +965,70 @@ describe('get bootstrap warm-up mapping', () => {
       message: 'GET /api/v1/dashboard/gate: invalid JSON response',
     })
   })
+
+  it('coalesces concurrent credentialed legacy get() requests while preserving independent caller AbortSignals and read-after-write freshness', async () => {
+    setStoredToken('coalesce-test-token')
+    try {
+      let resolveFirst!: (res: Response) => void
+      let getCalls = 0
+      const fetchMock = vi.fn((_path: RequestInfo | URL, init?: RequestInit) => {
+        if (init?.method === 'POST') {
+          return Promise.resolve(new Response('{"ok":true}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+        }
+        getCalls += 1
+        if (getCalls === 1) {
+          return new Promise<Response>((resolve, reject) => {
+            resolveFirst = resolve
+            init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+          })
+        }
+        return Promise.resolve(new Response(JSON.stringify({ rev: getCalls }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      })
+      vi.stubGlobal('fetch', fetchMock)
+
+      const ac1 = new AbortController()
+      const ac2 = new AbortController()
+      const p1 = get<{ rev: number }>('/api/v1/dashboard/execution', { signal: ac1.signal })
+      const p2 = get<{ rev: number }>('/api/v1/dashboard/execution', { signal: ac2.signal })
+      expect(getCalls).toBe(1)
+
+      // Aborting caller 1 must not abort caller 2's shared transport
+      ac1.abort()
+      await expect(p1).rejects.toMatchObject({ name: 'AbortError' })
+
+      // Unsafe mutation invalidates coalescing so post-mutation GET starts a fresh flight
+      await post('/api/v1/dashboard/goals', { title: 'fresh' })
+      const postGet = await get<{ rev: number }>('/api/v1/dashboard/execution')
+      expect(getCalls).toBe(2)
+      expect(postGet).toEqual({ rev: 2 })
+
+      resolveFirst(new Response('{"rev":1}', { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      expect(await p2).toEqual({ rev: 1 })
+    } finally {
+      clearStoredToken()
+    }
+  })
+
+  it('does not coalesce getWithResponse calls with distinct rejectDuplicateJsonMembers flags', async () => {
+    setStoredToken('coalesce-test-token')
+    try {
+      const fetchMock = vi.fn(() =>
+        Promise.resolve(new Response('{"a":1,"a":2}', { status: 200, headers: { 'Content-Type': 'application/json' } })),
+      )
+      vi.stubGlobal('fetch', fetchMock)
+
+      const pLenient = getWithResponse<{ a: number }>('/api/v1/dashboard/goals', { rejectDuplicateJsonMembers: false })
+      const pStrict = getWithResponse<{ a: number }>('/api/v1/dashboard/goals', { rejectDuplicateJsonMembers: true })
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect((await pLenient).data).toEqual({ a: 2 })
+      await expect(pStrict).rejects.toMatchObject({ name: 'ApiRequestError', detail: 'invalid JSON response' })
+    } finally {
+      clearStoredToken()
+    }
+  })
 })
 
 describe('extractApiError', () => {

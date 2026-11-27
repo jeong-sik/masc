@@ -1207,10 +1207,15 @@ let observe ~config ~keeper_name ~hostname =
          let probe_with_ephemeral_config env =
            let probe_dir = Filename.temp_dir "masc-gh-observe-" "" in
            let cleanup () =
-             try Fs_compat.remove_tree probe_dir with
-             | Sys_error _ | Unix.Unix_error _ -> ()
+             let release () =
+               try Fs_compat.remove_tree probe_dir with
+               | Sys_error _ | Unix.Unix_error _ -> ()
+             in
+             match Fs_compat.execution_context () with
+             | Fs_compat.Non_eio -> release ()
+             | Fs_compat.Eio_fiber -> Eio.Cancel.protect release
            in
-           Eio_guard.protect
+           Fun.protect
              ~finally:cleanup
              (fun () ->
                 Unix.chmod probe_dir 0o700;

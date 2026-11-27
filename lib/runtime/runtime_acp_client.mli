@@ -747,7 +747,9 @@ type error =
           session record says the prompt failed. [kimi acp] answers a prompt
           it could not run, such as one refused for the account's usage
           limit, with [end_turn] and no message; the cause is only in its
-          record. *)
+          record. Kimi Code 2.7.3 writes that record after the answer, so
+          {!prompt} reads it again for up to 3 s until it holds the prompt's
+          ending (#55292). *)
   | Client_closed
   | Message_over_client_limit of message_over_limit
       (** {!validate_prompt_blocks} refused the message before it was sent:

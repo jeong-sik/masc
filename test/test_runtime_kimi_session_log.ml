@@ -379,7 +379,7 @@ let test_reads_how_the_prompt_ended () =
 let kimi_mock_host_script =
   Printf.sprintf
     {|#!/usr/bin/env python3
-import json, os, re, sys
+import json, os, re, sys, time
 
 SESSION = %S
 WORKSPACE = %S
@@ -394,6 +394,13 @@ def send(obj):
     sys.stdout.flush()
 
 record = None
+
+# Kimi Code 2.7.3 writes how a prompt ended after its answer: on 2026-11-27
+# the [turn.ended] record came 100 ms to 1 s after [end_turn] (#55292).
+def answer_then_record(mid, ending):
+    send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+    time.sleep(0.3)
+    append(ending)
 
 # The test removes the record before its last prompt; the host goes on.
 def append(text):
@@ -435,8 +442,7 @@ for line in sys.stdin:
         # Like Kimi Code 2.7.3 past the weekly limit: no message, end_turn, and
         # the cause only in the record.
         if "weekly" in text:
-            append(WEEKLY_LIMIT)
-            send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+            answer_then_record(mid, WEEKLY_LIMIT)
             continue
         send({"jsonrpc": "2.0", "method": "session/update", "params": {
             "sessionId": SESSION,
@@ -447,8 +453,7 @@ for line in sys.stdin:
             "sessionId": SESSION,
             "update": {"sessionUpdate": "usage_update", "used": used, "size": 1048576}
         }})
-        append(COMPLETED)
-        send({"jsonrpc": "2.0", "id": mid, "result": {"stopReason": "end_turn"}})
+        answer_then_record(mid, COMPLETED)
     else:
         send({"jsonrpc": "2.0", "id": mid, "result": {}})
 |}

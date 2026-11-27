@@ -100,7 +100,8 @@ val mark : root -> session_id:string -> (mark, error) result
     the account's weekly usage limit was reached and every [kimi acp] prompt
     came back that way; the host wrote the cause only here, as
     [{"reason":"failed","error":{"code":"provider.api_error","message":
-    "You've reached your weekly (7-day) usage limit. ..."}}]. *)
+    "You've reached your weekly (7-day) usage limit. ..."}}]. It wrote the
+    record 100 ms to 1 s after the answer (#55292). *)
 type turn_end =
   | Turn_completed
   | Turn_cancelled

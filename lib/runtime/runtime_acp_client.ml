@@ -4797,6 +4797,30 @@ let usage_of_muse_turn (acp_usage : usage) (turn : Runtime_muse_session_log.turn
   }
 ;;
 
+(* Kimi Code 2.7.3 answers a prompt before it writes the prompt's [turn.ended]
+   record. In four prompts measured on 2026-11-27 the record was missing at the
+   answer and 20 ms later in all four, and present after 100 ms in one, after
+   300 ms in three and after 1 s in all four (#55292). The record is read again
+   until it holds the prompt's ending. A record that has none when the wait
+   ends gives the prompt no ending, as a prompt the host never closed: 11 of
+   187 prompts in three days of records had no [turn.ended], all of them
+   cancelled or with no record at all. *)
+let kimi_turn_end_wait_s = 3.0
+let kimi_turn_end_poll_s = 0.05
+
+let read_kimi_prompt_until_it_ends ~clock mark =
+  let deadline = Eio.Time.now clock +. kimi_turn_end_wait_s in
+  let rec read () =
+    match Runtime_kimi_session_log.read_prompt mark with
+    | Ok ({ Runtime_kimi_session_log.turn_end = None; _ }, _)
+      when Eio.Time.now clock < deadline ->
+      Eio.Time.sleep clock kimi_turn_end_poll_s;
+      read ()
+    | (Ok _ | Error _) as read_result -> read_result
+  in
+  read ()
+;;
+
 let prompt
       t
       ~session_id
@@ -4974,13 +4998,13 @@ let prompt
         Eio.Cancel.protect (fun () -> cancel t ~session_id);
         raise exn)
   in
-  (* A host that keeps its own record of the session wrote down how the
-     prompt ended. Read it once, after the answer. *)
+  (* A host that keeps its own record of the session writes down how the
+     prompt ended, after its answer. *)
   let host_record =
     match result, compaction_mark with
     | Error _, (None | Some _) | Ok _, None -> Host_record_counted No_host_record
     | Ok _, Some (counted_to, marked) ->
-      (match Result.bind marked Runtime_kimi_session_log.read_prompt with
+      (match Result.bind marked (read_kimi_prompt_until_it_ends ~clock:t.clock) with
        | Ok ({ Runtime_kimi_session_log.turn_end; compactions }, next) ->
          (match turn_end with
           | Some (Runtime_kimi_session_log.Turn_failed { code; message; status }) ->

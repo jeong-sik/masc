@@ -19,6 +19,14 @@ import { isAdminLockedForSession } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
 import { KeeperReadNotice, useKeeperRead } from './keeper-read'
 import {
+  FactClaim,
+  FactDigest,
+  FactSeen,
+  ordinaryFactKey,
+  sourceBoundFactKey,
+  withToggled,
+} from './keeper-memory-fact-cells'
+import {
   fetchKeeperMemoryFactsApi,
   fetchKeeperMemoryJournalApi,
   fetchKeeperMemoryOsInternalsApi,
@@ -26,11 +34,6 @@ import {
   postKeeperMemoryRetractions,
 } from './keepers-api'
 import type { MemoryActPayload, OrdinaryMemoryFact, SourceBoundMemoryFact } from './types'
-
-/** The ID cell shows this many digest characters after the `sha256:` prefix;
- *  the full ID is its tooltip. */
-const MEMORY_ID_DIGEST_CHARS = 8
-const MEMORY_ID_PREFIX = 'sha256:'
 
 export interface KeeperMemoryTabProps {
   readonly keeperName: string
@@ -109,6 +112,12 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
   const [showAllActivity, setShowAllActivity] = useState(false)
   const [toolsOpen, setToolsOpen] = useState(false)
 
+  // The claims the reader opened, by fact, for the keeper shown. Kept here and
+  // not in the cell: a row that scrolls out of a windowed table is unmounted,
+  // and it has to come back the way it was left.
+  const [openClaims, setOpenClaims] = useState<ReadonlySet<string>>(() => new Set())
+  const toggleClaim = useCallback((key: string) => setOpenClaims((open) => withToggled(open, key)), [])
+
   // memory/act controls
   const [actKind, setActKind] = useState<'resume' | 'adopt' | 'restart_reading' | 'skip_line' | 'skip_item'>('resume')
   const [actObserved, setActObserved] = useState('')
@@ -155,17 +164,36 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
   }, [facts, search])
 
   const ordinaryColumns = useMemo<readonly DataTableColumn<OrdinaryMemoryFact>[]>(() => [
-    { id: 'category', header: 'Category', accessor: (r) => r.category, sortable: true },
-    { id: 'claim', header: 'Claim', cell: (r) => html`<${MarkdownContent} text=${r.claim} />` },
     {
-      id: 'memory_id',
-      header: 'ID',
-      accessor: (r) => r.memory_id,
-      cell: (r) => html`<span class="kp-mem-id" title=${r.memory_id}>${(r.memory_id.startsWith(MEMORY_ID_PREFIX) ? r.memory_id.slice(MEMORY_ID_PREFIX.length) : r.memory_id).slice(0, MEMORY_ID_DIGEST_CHARS)}</span>`,
+      id: 'category',
+      header: 'Category',
+      width: '10rem',
+      accessor: (r) => r.category,
+      cell: (r) => html`<span class="kp-mem-clip" title=${r.category}>${r.category}</span>`,
+      sortable: true,
     },
+    {
+      id: 'claim',
+      header: 'Claim',
+      cell: (r) => html`
+        <${FactClaim} open=${openClaims.has(ordinaryFactKey(r))} onToggle=${() => toggleClaim(ordinaryFactKey(r))}>
+          <${MarkdownContent} text=${r.claim} />
+        <//>
+      `,
+    },
+    {
+      id: 'last_seen',
+      header: 'Last seen',
+      width: '6.5rem',
+      cell: (r) => html`<${FactSeen} seenAt=${r.last_seen} firstSeenAt=${r.first_seen} />`,
+      sortable: true,
+      sortValue: (r) => r.last_seen,
+    },
+    { id: 'memory_id', header: 'ID', width: '6rem', cell: (r) => html`<${FactDigest} digest=${r.memory_id} />` },
     {
       id: 'act',
       header: 'Cleanup',
+      width: '8rem',
       cell: (r) => html`
         <button
           type="button"
@@ -180,13 +208,29 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
         </button>
       `,
     },
-  ], [retractReason])
+  ], [retractReason, openClaims, toggleClaim])
 
   const sourceBoundColumns = useMemo<readonly DataTableColumn<SourceBoundMemoryFact>[]>(() => [
-    { id: 'path', header: 'Source Path', accessor: (r) => r.path, sortable: true },
-    { id: 'claim', header: 'Claim', cell: (r) => html`<${MarkdownContent} text=${r.claim} />` },
-    { id: 'sha', header: 'SHA256', accessor: (r) => r.sha256.slice(0, 12) },
-  ], [])
+    { id: 'path', header: 'Source Path', width: '18rem', accessor: (r) => r.path, sortable: true },
+    {
+      id: 'claim',
+      header: 'Claim',
+      cell: (r) => html`
+        <${FactClaim} open=${openClaims.has(sourceBoundFactKey(r))} onToggle=${() => toggleClaim(sourceBoundFactKey(r))}>
+          <${MarkdownContent} text=${r.claim} />
+        <//>
+      `,
+    },
+    {
+      id: 'first_seen',
+      header: 'First seen',
+      width: '6.5rem',
+      cell: (r) => html`<${FactSeen} seenAt=${r.first_seen} />`,
+      sortable: true,
+      sortValue: (r) => r.first_seen,
+    },
+    { id: 'sha', header: 'SHA256', width: '6rem', cell: (r) => html`<${FactDigest} digest=${r.sha256} />` },
+  ], [openClaims, toggleClaim])
 
   const handleRunAct = async () => {
     const cur = authSession.peek()
@@ -384,9 +428,12 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
                   <${DataTable}
                     data=${filteredOrdinary}
                     columns=${ordinaryColumns}
-                    getRowId=${(r: OrdinaryMemoryFact, idx: number) => r.memory_id || String(idx)}
-                    maxHeight=${280}
-                    className="kp-mem-facts kp-mem-facts-ordinary"
+                    getRowId=${ordinaryFactKey}
+                    initialSort=${{ id: 'last_seen', desc: true }}
+                    selectedRowId=${retractId || null}
+                    estimateRowHeight=${96}
+                    maxHeight=${360}
+                    className="kp-mem-facts"
                     emptyLabel="Ordinary fact 없음"
                     caption="Keeper Ordinary Memory Facts"
                   />
@@ -416,9 +463,10 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
                   <${DataTable}
                     data=${filteredSourceBound}
                     columns=${sourceBoundColumns}
-                    getRowId=${(r: SourceBoundMemoryFact, idx: number) => `${r.path}:${idx}`}
+                    getRowId=${sourceBoundFactKey}
+                    initialSort=${{ id: 'first_seen', desc: true }}
                     maxHeight=${220}
-                    className="kp-mem-facts kp-mem-facts-source"
+                    className="kp-mem-facts"
                     emptyLabel="Source-bound fact 없음"
                     caption="Keeper Source-Bound Memory Facts"
                   />

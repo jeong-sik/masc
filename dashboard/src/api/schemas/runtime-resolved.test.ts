@@ -115,6 +115,21 @@ describe('runtime-resolved schema', () => {
       .toThrow(RuntimeResolvedSchemaDriftError)
   })
 
+  it.each(['fixed', 'spread_by_keeper'] as const)('accepts lane ordering mode %s', (order) => {
+    const parsed = parseRuntimeResolvedResponse({
+      ...responseWith(validRuntime),
+      lanes: [{ ...validLane, order }],
+    })
+    expect(parsed.lanes[0]?.order).toBe(order)
+  })
+
+  it('rejects an unknown lane ordering mode', () => {
+    expect(() => parseRuntimeResolvedResponse({
+      ...responseWith(validRuntime),
+      lanes: [{ ...validLane, order: 'round_robin' }],
+    })).toThrow(RuntimeResolvedSchemaDriftError)
+  })
+
   it('decodes provider usage by account scope without turning no report into zero', () => {
     const base = responseWith(validRuntime)
     const provider_usage_windows = [

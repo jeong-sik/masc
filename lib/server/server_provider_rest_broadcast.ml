@@ -2,7 +2,7 @@
 let shown_rest ~now keeper_name =
   match Keeper_meta_contract.runtime_route_of_keeper_name keeper_name with
   | None -> `Null
-  | Some route -> Keeper_tool_surface_ops.runtime_path_rest_json ~now route
+  | Some route -> Keeper_tool_surface_ops.runtime_path_rest_json ~keeper_name ~now route
 ;;
 
 (* The names the roster lists: the registry's and the persisted ones. *)

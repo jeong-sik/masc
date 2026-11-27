@@ -1520,6 +1520,58 @@ let test_lane_rejects_unknown_key () =
          errors)
   | Ok _ -> fail "unknown lane key must fail config parsing"
 
+let test_lane_order_parsing_and_rejection () =
+  let lane_order_testable =
+    Alcotest.testable Runtime_lane.pp_order Runtime_lane.equal_order
+  in
+  let valid_config =
+    "[runtime.lanes.implicit_fixed]\n\
+     candidates = [\"local.a\", \"local.b\"]\n\
+     \n\
+     [runtime.lanes.explicit_fixed]\n\
+     order = \"fixed\"\n\
+     candidates = [\"local.a\", \"local.b\"]\n\
+     \n\
+     [runtime.lanes.spread_pool]\n\
+     order = \"spread_by_keeper\"\n\
+     candidates = [\"local.a\", \"local.b\"]\n"
+  in
+  (match Runtime_toml.parse_string valid_config with
+   | Error errors ->
+     failf "valid lane order config must parse: %s"
+       (String.concat "; "
+          (List.map (fun (e : Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors))
+   | Ok cfg ->
+     let find_order id =
+       match List.find_opt (fun (d : Runtime_schema.lane_decl) -> String.equal d.id id) cfg.lane_decls with
+       | Some decl -> decl.order
+       | None -> failf "expected lane %S" id
+     in
+     check lane_order_testable "omitted order defaults to Fixed"
+       Runtime_lane.Fixed (find_order "implicit_fixed");
+     check lane_order_testable "explicit fixed order parses"
+       Runtime_lane.Fixed (find_order "explicit_fixed");
+     check lane_order_testable "spread_by_keeper order parses"
+       Runtime_lane.Spread_by_keeper (find_order "spread_pool"));
+  List.iter
+    (fun (label, order_line) ->
+       let invalid_config =
+         Printf.sprintf
+           "[runtime.lanes.pool]\n%s\ncandidates = [\"local.a\"]\n"
+           order_line
+       in
+       match Runtime_toml.parse_string invalid_config with
+       | Error errors ->
+         check bool (label ^ " names runtime.lanes.pool.order") true
+           (List.exists
+              (fun (error : Runtime_toml.parse_error) ->
+                 String.equal error.path "runtime.lanes.pool.order")
+              errors)
+       | Ok _ -> failf "%s must fail config parsing" label)
+    [ "unknown lane order string", "order = \"round_robin\""
+    ; "non-string lane order value", "order = true"
+    ]
+
 (* A misspelt [tools_support = true] is not [tools-support]; loading it as a
    model without tool support would give the keeper no tools. *)
 let test_model_rejects_unknown_key () =
@@ -5653,6 +5705,63 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
          check bool "json names disabled runtime" true
            (String_util.contains_substring rendered "ollama.missing"))
 
+let test_server_degraded_init_preserves_lane_order () =
+  let lane_order_testable =
+    Alcotest.testable Runtime_lane.pp_order Runtime_lane.equal_order
+  in
+  let catalog =
+    "[[models]]\n\
+     model_id = \"good\"\n\
+     provider_name = \"ollama\"\n\
+     base = \"ollama\"\n\
+     max_context_tokens = 1024\n"
+  in
+  let runtime_toml =
+    "[providers.ollama]\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [models.good]\n\
+     api-name = \"good\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.missing]\n\
+     api-name = \"missing-from-agent_core-catalog\"\n\
+     \n\
+     [ollama.good]\n\
+     \n\
+     [ollama.missing]\n\
+     \n\
+     [runtime]\n\
+     default = \"ollama.good\"\n\
+     \n\
+     [runtime.lanes.spread_safe]\n\
+     order = \"spread_by_keeper\"\n\
+     candidates = [\"ollama.good\"]\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_model_catalog_content catalog @@ fun () ->
+       with_temp_runtime_toml runtime_toml @@ fun path ->
+       match Runtime.init_default_degraded_report ~config_path:path with
+       | Error err ->
+         failf "degraded init should preserve valid spread lane: %s"
+           (Runtime.strict_init_error_to_string err)
+       | Ok Runtime.Initialized -> fail "expected degraded startup outcome"
+       | Ok (Runtime.Initialized_degraded _) ->
+         (match
+            List.find_opt
+              (fun (lane : Runtime_lane.t) -> String.equal lane.id "spread_safe")
+              (Runtime.lanes ())
+          with
+          | None -> fail "spread_safe lane should survive degraded startup"
+          | Some lane ->
+            check lane_order_testable "degraded startup preserves lane order"
+              Runtime_lane.Spread_by_keeper
+              (Runtime_lane.order lane)))
+
 let test_server_degraded_init_rejects_uncatalogued_default () =
   let catalog =
     "[[models]]\n\
@@ -8141,6 +8250,8 @@ let () =
             test_addon_exact_output_lane_tables_are_refused_where_wrong;
           test_case "lane rejects unknown keys" `Quick
             test_lane_rejects_unknown_key;
+          test_case "lane order parsing and strict rejection" `Quick
+            test_lane_order_parsing_and_rejection;
           test_case "model rejects unknown keys" `Quick
             test_model_rejects_unknown_key;
           test_case "repo runtime.toml loads through runtime parser" `Quick
@@ -8235,6 +8346,8 @@ let () =
           test_case
             "server degraded init disables unreferenced uncatalogued runtimes"
             `Quick test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes;
+          test_case "server degraded init preserves lane order"
+            `Quick test_server_degraded_init_preserves_lane_order;
           test_case
             "server degraded init rejects uncatalogued default"
             `Quick test_server_degraded_init_rejects_uncatalogued_default;

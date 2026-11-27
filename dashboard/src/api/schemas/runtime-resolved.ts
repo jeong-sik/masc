@@ -91,11 +91,15 @@ const RuntimeResolutionSchema = object({
   failed_attempt: optional(nullable(RuntimeFailedAttemptSchema)),
 })
 
+const RuntimeLaneOrderSchema = union([literal('fixed'), literal('spread_by_keeper')])
+
 const RuntimeLaneSchema = object({
   id: string(),
   declared: boolean(),
-  // The lane as declared, head first: the order a fresh cycle walks.
+  // The lane as declared, head first: the base order a fresh cycle walks (or
+  // rotates per keeper when order === 'spread_by_keeper').
   runtime_ids: array(string()),
+  order: optional(RuntimeLaneOrderSchema),
 })
 
 const ResolvedAssignmentTargetSchema = union([

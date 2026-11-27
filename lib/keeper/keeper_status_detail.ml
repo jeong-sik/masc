@@ -378,7 +378,8 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
       let context_budget =
         let route = runtime_id_of_meta m in
         match
-          Keeper_context_runtime.resolve_max_context_resolution_for_route
+          Keeper_context_runtime.resolve_max_context_resolution_for_keeper_route
+            ~keeper_name:m.name
             ~requested_override:m.max_context_override
             ~route
         with

@@ -648,6 +648,252 @@ let test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens () =
       true
       (Option.is_none (Runtime.get_runtime_by_id "resilient")))
 
+let runtime_toml_with_spread_lane ~order =
+  Printf.sprintf
+    {|
+[runtime]
+default = "primary.test_model"
+
+[runtime.assignments]
+alpha = "spread_pool"
+gamma = "spread_pool"
+
+[runtime.lanes.spread_pool]
+order = %S
+candidates = [ "primary.test_model", "fallback.test_model" ]
+
+[providers.primary]
+display-name = "Primary Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[providers.fallback]
+display-name = "Fallback Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:2"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[primary.test_model]
+is-default = true
+max-concurrent = 1
+
+[fallback.test_model]
+max-concurrent = 1
+|}
+    order
+
+let test_lane_spread_by_keeper_rotates_and_composes_with_backpressure () =
+  let order_testable =
+    Alcotest.testable Runtime_lane.pp_order Runtime_lane.equal_order
+  in
+  Alcotest.(check (option order_testable))
+    "order_of_string parses fixed"
+    (Some Runtime_lane.Fixed)
+    (Runtime_lane.order_of_string (Runtime_lane.order_to_string Runtime_lane.Fixed));
+  Alcotest.(check (option order_testable))
+    "order_of_string parses spread_by_keeper"
+    (Some Runtime_lane.Spread_by_keeper)
+    (Runtime_lane.order_of_string (Runtime_lane.order_to_string Runtime_lane.Spread_by_keeper));
+  Alcotest.(check (option order_testable))
+    "order_of_string rejects unknown values"
+    None
+    (Runtime_lane.order_of_string "round_robin");
+  let fixed_three =
+    Runtime_lane.make ~order:Runtime_lane.Fixed ~id:"fixed3" [ "a"; "b"; "c" ]
+  in
+  Alcotest.(check (list string))
+    "fixed lane ignores keeper_name"
+    [ "a"; "b"; "c" ]
+    (Runtime_lane.ordered_candidates_for ~keeper_name:"keeper-b" fixed_three);
+  let spread_three =
+    Runtime_lane.make ~order:Runtime_lane.Spread_by_keeper ~id:"spread3" [ "a"; "b"; "c" ]
+  in
+  Alcotest.(check (list string))
+    "spread lane without keeper_name keeps declared order"
+    [ "a"; "b"; "c" ]
+    (Runtime_lane.ordered_candidates_for spread_three);
+  Alcotest.(check (list string))
+    "spread lane with blank keeper_name keeps declared order"
+    [ "a"; "b"; "c" ]
+    (Runtime_lane.ordered_candidates_for ~keeper_name:"   " spread_three);
+  (* Deterministic cyclic rotations covering every slot for 3 candidates. *)
+  Alcotest.(check (list string))
+    "keeper-a enters at index 0"
+    [ "a"; "b"; "c" ]
+    (Runtime_lane.ordered_candidates_for ~keeper_name:"keeper-a" spread_three);
+  Alcotest.(check (list string))
+    "keeper-b rotates to index 1"
+    [ "b"; "c"; "a" ]
+    (Runtime_lane.ordered_candidates_for ~keeper_name:"keeper-b" spread_three);
+  Alcotest.(check (list string))
+    "keeper-d rotates to index 2"
+    [ "c"; "a"; "b" ]
+    (Runtime_lane.ordered_candidates_for ~keeper_name:"keeper-d" spread_three);
+  with_runtime_config (runtime_toml_with_spread_lane ~order:"spread_by_keeper") (fun () ->
+    (match Runtime.resolve_assignment "spread_pool" with
+     | `Lane lane ->
+       Alcotest.(check order_testable)
+         "loaded lane preserves spread_by_keeper order"
+         Runtime_lane.Spread_by_keeper
+         (Runtime_lane.order lane)
+     | `Missing | `Unavailable _ -> Alcotest.fail "spread_pool must resolve");
+    let now = Unix.gettimeofday () in
+    let gamma_walk =
+      Driver.Fresh_walk_by
+        (Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"gamma")
+    in
+    let alpha_walk =
+      Driver.Fresh_walk_by
+        (Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"alpha")
+    in
+    (match Driver.assignment_walk_order ~now ~walk:gamma_walk "spread_pool" with
+     | Error _ -> Alcotest.fail "gamma walk resolves"
+     | Ok walk ->
+       Alcotest.(check (list string)) "gamma declared stays declared order"
+         [ "primary.test_model"; "fallback.test_model" ] walk.Driver.declared;
+       Alcotest.(check (list string)) "gamma starts on primary"
+         [ "primary.test_model"; "fallback.test_model" ] walk.Driver.order);
+    (match Driver.assignment_walk_order ~now ~walk:alpha_walk "spread_pool" with
+     | Error _ -> Alcotest.fail "alpha walk resolves"
+     | Ok walk ->
+       Alcotest.(check (list string)) "alpha declared stays declared order"
+         [ "primary.test_model"; "fallback.test_model" ] walk.Driver.declared;
+       Alcotest.(check (list string)) "alpha rotates to fallback first"
+         [ "fallback.test_model"; "primary.test_model" ] walk.Driver.order);
+    Alcotest.(check (option string))
+      "entry_runtime_id_of_route without keeper keeps declared head"
+      (Some "primary.test_model")
+      (Runtime.entry_runtime_id_of_route "spread_pool");
+    Alcotest.(check (option string))
+      "entry_runtime_id_of_route rotates for alpha"
+      (Some "fallback.test_model")
+      (Runtime.entry_runtime_id_of_route ~keeper_name:"alpha" "spread_pool");
+    (match Driver.assignment_walk_rest ~keeper_name:"alpha" ~now "spread_pool" with
+     | Driver.Walk_head_serving { runtime_id } ->
+       Alcotest.(check string) "walk rest reports alpha's rotated serving head"
+         "fallback.test_model" runtime_id
+     | Driver.Walk_waits_until _ -> Alcotest.fail "healthy spread_pool must serve");
+    (match
+       Masc.Keeper_context_runtime.resolve_max_context_resolution_for_keeper_route
+         ~keeper_name:"alpha" ~requested_override:None ~route:"spread_pool"
+     with
+     | Ok (resolved_id, _) ->
+       Alcotest.(check string) "context resolution picks alpha's rotated entry"
+         "fallback.test_model" resolved_id
+     | Error err ->
+       Alcotest.failf "context resolution failed: %s"
+         (Masc.Keeper_context_runtime.max_context_resolution_error_to_string err));
+    (* Backpressure composes on top of per-keeper rotation: a 429 on alpha's
+       rotated head demotes fallback behind primary for alpha while gamma keeps
+       walking healthy primary first. *)
+    let fallback_rt = Option.get (Runtime.get_runtime_by_id "fallback.test_model") in
+    Runtime_candidate_backpressure.note_rate_limit
+      ~candidate:fallback_rt.Runtime_instance.candidate_backpressure ~retry_after:None;
+    let after_429 = Unix.gettimeofday () in
+    (match Driver.assignment_walk_order ~now:after_429 ~walk:alpha_walk "spread_pool" with
+     | Error _ -> Alcotest.fail "alpha walk resolves after 429"
+     | Ok walk ->
+       Alcotest.(check (list string)) "alpha demotes resting fallback behind healthy primary"
+         [ "primary.test_model"; "fallback.test_model" ] walk.Driver.order);
+    (match Driver.assignment_walk_order ~now:after_429 ~walk:gamma_walk "spread_pool" with
+     | Error _ -> Alcotest.fail "gamma walk resolves after 429"
+     | Ok walk ->
+       Alcotest.(check (list string)) "gamma stays on healthy primary"
+         [ "primary.test_model"; "fallback.test_model" ] walk.Driver.order));
+  (* Resumed walks also preserve per-keeper rotation for Retry_of_tried
+     candidates rather than collapsing back onto declared candidates[0]. *)
+  let spread_three_toml =
+    {|
+[runtime]
+default = "primary.test_model"
+
+[runtime.lanes.spread_three]
+order = "spread_by_keeper"
+candidates = [ "primary.test_model", "fallback.test_model", "third.test_model" ]
+
+[providers.primary]
+display-name = "Primary Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[providers.fallback]
+display-name = "Fallback Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:2"
+
+[providers.third]
+display-name = "Third Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:3"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[primary.test_model]
+is-default = true
+max-concurrent = 1
+
+[fallback.test_model]
+max-concurrent = 1
+
+[third.test_model]
+max-concurrent = 1
+|}
+  in
+  with_runtime_config spread_three_toml (fun () ->
+    let hint =
+      Driver.restore_deferred_runtime_lane
+        ~assignment_id:"spread_three"
+        ~failed_runtime_id:"fallback.test_model"
+        ~next_runtime_id:"fallback.test_model"
+        ~later_runtime_ids:[]
+        ~failure:(Agent_core.Error.Internal "tool-effect retry on last candidate")
+    in
+    let now = Unix.gettimeofday () in
+    (* keeper-d rotates [primary; fallback; third] -> [third; primary; fallback],
+       so Retry_of_tried stays [third; primary] rather than [primary; third]. *)
+    let resumed =
+      Driver.resumed_runtime_lane ~keeper_name:"keeper-d" ~now hint
+    in
+    Alcotest.(check (list string))
+      "resumed walk preserves keeper-d rotation for Retry_of_tried candidates"
+      [ "fallback.test_model"; "third.test_model"; "primary.test_model" ]
+      (Driver.resumed_walk_ids resumed);
+    let fallback_rt = Option.get (Runtime.get_runtime_by_id "fallback.test_model") in
+    Runtime_candidate_backpressure.note_rate_limit
+      ~candidate:fallback_rt.Runtime_instance.candidate_backpressure ~retry_after:None;
+    let resumed_resting =
+      Driver.resumed_runtime_lane ~keeper_name:"keeper-d" ~now:(Unix.gettimeofday ()) hint
+    in
+    Alcotest.(check (list string))
+      "resting deferred head promotes keeper-d's rotated Retry_of_tried head"
+      [ "third.test_model"; "primary.test_model"; "fallback.test_model" ]
+      (Driver.resumed_walk_ids resumed_resting))
+
+let test_keeper_dispatch_snapshot_detects_lane_order_change () =
+  with_runtime_config (runtime_toml_with_spread_lane ~order:"fixed") (fun () ->
+    let alpha_before = Runtime.keeper_dispatch_snapshot ~keeper_name:"alpha" in
+    let gamma_before = Runtime.keeper_dispatch_snapshot ~keeper_name:"gamma" in
+    reload_runtime_config (runtime_toml_with_spread_lane ~order:"spread_by_keeper");
+    let alpha_after = Runtime.keeper_dispatch_snapshot ~keeper_name:"alpha" in
+    let gamma_after = Runtime.keeper_dispatch_snapshot ~keeper_name:"gamma" in
+    Alcotest.(check bool)
+      "switching lane order invalidates snapshot for a keeper whose head rotates"
+      false
+      (Runtime.same_keeper_dispatch alpha_before alpha_after);
+    Alcotest.(check bool)
+      "switching lane order preserves snapshot for a keeper whose rotated order is unchanged"
+      true
+      (Runtime.same_keeper_dispatch gamma_before gamma_after))
+
 let test_resolve_assignment_prefers_lane_over_runtime () =
   with_runtime_config runtime_toml_lane_shadows_runtime (fun () ->
     match Runtime.resolve_assignment "primary.test_model" with
@@ -8609,6 +8855,14 @@ let () =
             "entry_runtime_id_of_route resolves a route to the binding it opens"
             `Quick
             test_entry_runtime_id_resolves_a_route_to_the_binding_it_opens;
+          Alcotest.test_case
+            "spread_by_keeper lane rotates per keeper and composes with backpressure"
+            `Quick
+            test_lane_spread_by_keeper_rotates_and_composes_with_backpressure;
+          Alcotest.test_case
+            "keeper_dispatch_snapshot detects lane order changes"
+            `Quick
+            test_keeper_dispatch_snapshot_detects_lane_order_change;
           Alcotest.test_case
             "a bare runtime assignment walks only itself"
             `Quick

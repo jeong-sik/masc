@@ -122,14 +122,15 @@ type runtime_retry_deferral =
   ; on_deferred : deferred_runtime_lane -> unit
   }
 val resumed_runtime_lane :
-  now:float -> deferred_runtime_lane -> deferred_runtime_lane
+  ?keeper_name:string -> now:float -> deferred_runtime_lane -> deferred_runtime_lane
 (** The hint with the order of the walk that resumes it fixed in [resumed]:
     its [Untried] candidates, then the [Retry_of_tried] ones in the order the
-    assignment's current lane declares them, then the [Failed_last] runtime,
-    all ordered by the quota and backpressure demotion that orders the rest of
-    every walk. The hint fields are kept as they are. Call once before
-    building pre-dispatch execution so prompt shaping and dispatch consume the
-    same selected runtime. Resuming a resumed lane orders its hint again. *)
+    assignment's current lane walks them (rotated for [keeper_name] on a
+    [spread_by_keeper] lane), then the [Failed_last] runtime, all ordered by
+    the quota and backpressure demotion that orders the rest of every walk.
+    The hint fields are kept as they are. Call once before building
+    pre-dispatch execution so prompt shaping and dispatch consume the same
+    selected runtime. Resuming a resumed lane orders its hint again. *)
 
 val resumed_walk_ids : deferred_runtime_lane -> string list
 (** The candidates the walk that resumes the hint dispatches, head first: the
@@ -242,14 +243,15 @@ type walk_start = Runtime_candidate_standing.walk_start =
 (** The rest of the walk a turn resuming a deferred suffix dispatches
     ({!resumed_runtime_lane}). A resting suffix path does not hold the turn
     while a lane candidate that was not told to rest can take it. *)
-val deferred_lane_rest : now:float -> deferred_runtime_lane -> walk_rest
+val deferred_lane_rest : ?keeper_name:string -> now:float -> deferred_runtime_lane -> walk_rest
 
 (** The candidates a fresh walk of an assignment dispatches, in [order]: the
-    lane [declared], then quota and backpressure demotion, which moves a
-    resting or exhausted candidate behind its siblings and excludes none.
-    Nothing else reorders it: a success leaves no preference behind, so the
-    cycle after a failover starts from the declared head again. The walk may
-    still replace the head for an input modality it cannot take.
+    lane [declared] (cyclically rotated per Keeper when the lane declares
+    [order = "spread_by_keeper"]), then quota and backpressure demotion, which
+    moves a resting or exhausted candidate behind its siblings and excludes
+    none. Nothing else reorders it: a success leaves no preference behind, so
+    the cycle after a failover starts from that Keeper's entry candidate again.
+    The walk may still replace the head for an input modality it cannot take.
     A turn that failed and deferred its input walks {!resumed_walk_ids}
     instead. The suffix it deferred only says where that walk starts: the
     candidates after the one that failed, or, for a chat operation with no
@@ -279,8 +281,10 @@ val assignment_walk_order :
   now:float -> walk:walk_start -> string -> (walk_order, assignment_refusal) result
 
 (** A fresh walk of an assignment, ordered as a turn without a deferred suffix
-    orders it: {!assignment_walk_order}'s head and its rest. *)
-val assignment_walk_rest : now:float -> string -> walk_rest
+    orders it: {!assignment_walk_order}'s head and its rest. When [keeper_name]
+    is supplied, a [spread_by_keeper] lane rotates to that Keeper's entry
+    candidate before checking rest. *)
+val assignment_walk_rest : ?keeper_name:string -> now:float -> string -> walk_rest
 
 val assignment_next_dated_release : now:float -> string -> float option
 (** The earliest time after [now] at which a rest on the assignment's fresh
@@ -313,6 +317,7 @@ type next_dispatch =
       }
 
 val next_dispatch_after_failure :
+  ?keeper_name:string ->
   now:float ->
   route:Keeper_runtime_failure_route.route ->
   assignment_id:string ->

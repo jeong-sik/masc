@@ -675,7 +675,7 @@ wizard-default = true
     let json = Runtime_wizard_inventory.to_json config in
     let open Yojson.Safe.Util in
     let selected = {config with default_runtime_id=Some "cloud.first";
-      lane_decls=[{Runtime_schema.id="cloud.first"; candidate_ids=["cloud.first";"cloud.third";"cloud.second"]}]} in
+      lane_decls=[{Runtime_schema.id="cloud.first"; candidate_ids=["cloud.first";"cloud.third";"cloud.second"]; order=Runtime_lane.Fixed}]} in
     check (list string) "setup retains declared fallback order rather than binding order"
       ["cloud.first";"cloud.third";"cloud.second"]
       (Runtime_wizard_inventory.to_json selected |> member "default_runtime_selection" |> to_list |> List.map to_string);
@@ -684,7 +684,7 @@ wizard-default = true
       (Runtime_wizard_inventory.to_json {selected with lane_decls=[]}
        |> member "default_runtime_selection" |> to_list |> List.map to_string);
     let named = {selected with default_runtime_id=Some "conversation";
-      lane_decls=[{Runtime_schema.id="conversation";candidate_ids=["cloud.second";"cloud.first"]}]} in
+      lane_decls=[{Runtime_schema.id="conversation";candidate_ids=["cloud.second";"cloud.first"]; order=Runtime_lane.Fixed}]} in
     let named_json = Runtime_wizard_inventory.to_json named in
     check string "named default route remains separate" "conversation"
       (named_json |> member "default_runtime_id" |> to_string);
@@ -692,7 +692,7 @@ wizard-default = true
       ["cloud.second";"cloud.first"]
       (named_json |> member "default_runtime_selection" |> to_list |> List.map to_string);
     let shadowed = {named with default_runtime_id=Some "cloud.first";
-      lane_decls=[{Runtime_schema.id="cloud.first";candidate_ids=["cloud.second"]}]} in
+      lane_decls=[{Runtime_schema.id="cloud.first";candidate_ids=["cloud.second"]; order=Runtime_lane.Fixed}]} in
     check (list string) "lane shadow does not prepend its concrete namesake"
       ["cloud.second"]
       (Runtime_wizard_inventory.to_json shadowed |> member "default_runtime_selection" |> to_list |> List.map to_string);

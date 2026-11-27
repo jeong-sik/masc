@@ -151,10 +151,13 @@ export interface RuntimeResolution {
   readonly failed_attempt?: RuntimeFailedAttempt | null
 }
 
+export type RuntimeLaneOrder = 'fixed' | 'spread_by_keeper'
+
 export interface RuntimeLaneSnapshot {
   readonly id: string
   readonly declared: boolean
   readonly runtime_ids: readonly string[]
+  readonly order?: RuntimeLaneOrder
 }
 
 export interface RuntimeAssignment {

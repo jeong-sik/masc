@@ -1127,7 +1127,9 @@ type delivery_evidence_file =
 let max_delivery_evidence_files = 256
 let delivery_evidence_files : (string, delivery_evidence_file) Hashtbl.t = Hashtbl.create 64
 let delivery_evidence_files_clock = ref 0
-let delivery_evidence_files_mu = Stdlib.Mutex.create ()
+(* Taken by [read_delivery_evidence] on the caller, before the read goes to
+   the pool. *)
+let delivery_evidence_files_lock = Cross_context_mutex.create ()
 
 let delivery_evidence_scan_store_label = "reaction_ledger_delivery"
 
@@ -1137,7 +1139,7 @@ let file_size path =
   | exception Unix.Unix_error _ -> 0
 ;;
 
-(* Called with [delivery_evidence_files_mu] held. *)
+(* Called with [delivery_evidence_files_lock] held. *)
 let read_delivery_evidence_file ~keeper_name path =
   let read ~cursor ~init =
     Dated_jsonl.fold_file_appended_entries_result path ~cursor ~init
@@ -1197,36 +1199,53 @@ let read_delivery_evidence_file ~keeper_name path =
        from_start ())
 ;;
 
+(* Called with [delivery_evidence_files_lock] held. *)
 let read_delivery_evidence_cached ~keeper_name store ~not_before =
   let open Result.Syntax in
   let* paths =
     Dated_jsonl.range_day_file_paths_result store
       ~since:(Jsonl_writer.day_key ~ts:not_before) ~until:"9999-12-31"
   in
-  Stdlib.Mutex.protect delivery_evidence_files_mu (fun () ->
-    List.fold_left
-      (fun acc path ->
-         let* acc = acc in
-         let* file_evidence = read_delivery_evidence_file ~keeper_name path in
-         Ok (append_delivery_evidence acc file_evidence))
-      (Ok no_delivery_evidence)
-      paths)
+  List.fold_left
+    (fun acc path ->
+       let* acc = acc in
+       let* file_evidence = read_delivery_evidence_file ~keeper_name path in
+       Ok (append_delivery_evidence acc file_evidence))
+    (Ok no_delivery_evidence)
+    paths
 ;;
 
+(* A read runs as a pool job, in a system thread of the worker's domain, so
+   set unions do not share the main scheduler's runtime lock. Keeping
+   open/read/close inside the job avoids transferring a live channel across
+   cancellation. Queue ownership and the durable enqueue transaction remain on
+   the calling fiber.
+
+   One read at a time uses the file cache, and the wait for it happens on the
+   caller, before the read is submitted. A job that waited for the cache held
+   its pool slot while it did nothing: during the ask answer recovery pass
+   every worker of the CPU pool sat in that wait, and checkpoint encoding
+   queued behind them for tens of seconds (#55146). The lock is the durable
+   form, so a cancelled caller keeps it until its submitted read returns and
+   two reads never update the cache together. *)
 let read_delivery_evidence ~keeper_name store ~not_before =
-  (* Move the complete read before acquiring its native cache mutex. Keeping
-     open/read/close inside the job avoids transferring a live channel across
-     cancellation. Its system thread belongs to the worker domain, so set
-     unions do not share the main scheduler's runtime lock. Queue ownership
-     and the durable enqueue transaction remain on the calling fiber. *)
-  Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-    Eio_guard.run_in_systhread ~label:"keeper-delivery-evidence" (fun () ->
-      if not_before <= 0.
-      then read_delivery_evidence_uncached ~keeper_name store ~not_before
-      else
-        match read_delivery_evidence_cached ~keeper_name store ~not_before with
-        | Ok _ as evidence -> evidence
-        | Error _ -> read_delivery_evidence_uncached ~keeper_name store ~not_before))
+  let name = __FUNCTION__ in
+  let offload read =
+    Domain_pool_ref.submit_cpu_or_inline ~name (fun () ->
+      Eio_guard.run_in_systhread ~label:"keeper-delivery-evidence" read)
+  in
+  let uncached () =
+    offload (fun () -> read_delivery_evidence_uncached ~keeper_name store ~not_before)
+  in
+  if not_before <= 0.
+  then uncached ()
+  else
+    match
+      Cross_context_mutex.with_durable_lock delivery_evidence_files_lock (fun () ->
+        offload (fun () -> read_delivery_evidence_cached ~keeper_name store ~not_before))
+    with
+    | Ok _ as evidence -> evidence
+    | Error _ -> uncached ()
 ;;
 
 type strict_source_delivery_snapshot = delivery_evidence

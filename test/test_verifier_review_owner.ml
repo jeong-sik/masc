@@ -591,7 +591,7 @@ let test_named_commits_answer_beside_a_record_the_scope_cannot_verify () =
   ignore (routing_fixture ~summary_edit:(replace_field "attempt" (`Int 0))
     store ~key_id:"a" ~summary_id:"b" ~body_id:"a" ());
   ignore (judged_first ~store ~verification_id:"target");
-  expect_scope_error (O.pending_commits ~selection:(O.Verification "target")
+  expect_scope_error (O.pending_commits ~store ~selection:(O.Verification "target")
     ~terminal_pending:(fun _ -> Ok false) ~installation_id:"i" ~package_id:"p");
   expect_named store ["target"] ["target"]
 

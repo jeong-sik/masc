@@ -113,15 +113,20 @@ let install_plan_if_source
     ~session_dir
     ~(expected_source_ref : Keeper_checkpoint_ref.t)
     ~(candidate_ref : Keeper_checkpoint_ref.t)
-    (plan : Objects.plan) =
+    ~(summary_objects : head_objects)
+    ~(objects : (Objects.digest * string) list)
+    ~(head_bytes : string)
+    (head : Objects.head) =
     let expected_session_id = expected_source_ref.trace_id in
     let observed_ref = ref None in
     let committed_installation = ref None in
-    (* Every path through here has installed the plan's head, so the file is
-       the candidate: its summary is the plan's head, without reading the
-       file back. *)
+    (* Every path through here has installed [head], so the file is the
+       candidate: its summary is [head], without reading the file back. What
+       the summary knows of the head's objects is [summary_objects]. *)
     let publish ~canonical_path auxiliary =
-      ignore (publish_summary_after_write ~canonical_path plan.head : canonical_identity option);
+      ignore
+        (publish_summary_after_write ~canonical_path ~objects:summary_objects head
+         : canonical_identity option);
       let installed = { installed_ref = candidate_ref; auxiliary } in
       committed_installation := Some installed;
       Installed installed
@@ -162,7 +167,7 @@ let install_plan_if_source
                ~session_id:(Keeper_id.Trace_id.to_string expected_session_id)
            in
            let ownership_root = Filename.dirname session_dir in
-           (match Keeper_checkpoint_object_store.write ~session_dir plan.objects with
+           (match Keeper_checkpoint_object_store.write ~session_dir objects with
             | Error error -> not_installed (Objects_not_installed error)
             | Ok (_ : int) ->
               (match
@@ -170,14 +175,14 @@ let install_plan_if_source
                    ~on_durable_commit:observe_commit
                    ~ownership_root
                    ~path:canonical_path
-                   ~bytes:plan.head_bytes
+                   ~bytes:head_bytes
                with
                | Error error when error.Keeper_fs.renamed ->
                  publish ~canonical_path [ Commit_durability_unknown error ]
                | Error error -> not_installed (Commit_not_installed error)
                | Ok Keeper_fs.Committed ->
-                 (* The durable writer installs the plan's head verbatim, and
-                    [candidate_ref] is that plan's content digest, so the
+                 (* The durable writer installs [head_bytes] verbatim, and
+                    [candidate_ref] is that head's content digest, so the
                     published file and the returned ref agree by
                     construction. The hint is auxiliary and cannot downgrade
                     that fact. *)
@@ -242,7 +247,9 @@ let save_agent_core_if_source_with
      | Ok candidate_ref ->
        install_plan_if_source
          ~require_absent ~with_checkpoint_cas_lock ~write_checkpoint_bytes
-         ~on_checkpoint_commit_observer ~session_dir ~expected_source_ref ~candidate_ref plan)
+         ~on_checkpoint_commit_observer ~session_dir ~expected_source_ref ~candidate_ref
+         ~summary_objects:Objects_seen ~objects:plan.objects ~head_bytes:plan.head_bytes
+         plan.head)
 
 let write_checkpoint_bytes
     ~on_durable_commit
@@ -277,5 +284,81 @@ let save_agent_core_if_absent ~session_dir ~boundary candidate =
        install_plan_if_source
          ~require_absent:true ~with_checkpoint_cas_lock ~write_checkpoint_bytes
          ~on_checkpoint_commit_observer:(fun _ -> ())
-         ~session_dir ~expected_source_ref:candidate_ref ~candidate_ref plan)
+         ~session_dir ~expected_source_ref:candidate_ref ~candidate_ref
+         ~summary_objects:Objects_seen ~objects:plan.objects ~head_bytes:plan.head_bytes
+         plan.head)
+;;
+
+let trace_of_head (head : Objects.head) =
+  Keeper_id.Trace_id.of_string head.header.session_id
+  |> Result.map_error (fun reason -> Session_id_invalid reason)
+;;
+
+let ref_of_head trace_id (head : Objects.head) =
+  Keeper_checkpoint_ref.of_persisted
+    ~trace_id
+    ~turn_count:head.header.turn_count
+    ~sha256:(Objects.head_content_digest head :> string)
+  |> Result.map_error (fun error -> Ref_create_failed error)
+;;
+
+(* [closing] installed over the canonical of [session_id] while that file
+   still holds [known]'s head content. Both heads must name [session_id]:
+   the canonical path is built from it, and a head copied under another
+   session's name is refused as the source check refuses it. Closing keeps
+   the turn count and the content digest, so the candidate ref, read from
+   the closing head, is the source ref. Only the open messages were read, so
+   the summary keeps what [known] knew of the other objects: a head only
+   parsed stays unchecked, and the next save looks for absent objects as it
+   would have. *)
+let close_open_turn_if_source
+    ~session_dir
+    ~session_id
+    (known : known_canonical)
+    (closing : Objects.closing)
+  =
+  let ( let* ) = Result.bind in
+  let refs =
+    let* expected =
+      Keeper_id.Trace_id.of_string session_id
+      |> Result.map_error (fun reason ->
+        Source_unavailable (Ref_identity_invalid (Session_id_invalid reason)))
+    in
+    let* source_trace =
+      trace_of_head known.known_head
+      |> Result.map_error (fun error -> Source_unavailable (Ref_identity_invalid error))
+    in
+    let* () =
+      if Keeper_id.Trace_id.equal source_trace expected
+      then Ok ()
+      else Error (Source_unavailable (Ref_session_mismatch { expected; actual = source_trace }))
+    in
+    let* candidate_trace =
+      trace_of_head closing.closing_head
+      |> Result.map_error (fun error -> Candidate_identity_invalid error)
+    in
+    let* () =
+      if Keeper_id.Trace_id.equal candidate_trace expected
+      then Ok ()
+      else Error (Candidate_session_mismatch { expected; candidate = candidate_trace })
+    in
+    let* source_ref =
+      ref_of_head expected known.known_head
+      |> Result.map_error (fun error -> Source_unavailable (Ref_identity_invalid error))
+    in
+    let* candidate_ref =
+      ref_of_head expected closing.closing_head
+      |> Result.map_error (fun error -> Candidate_identity_invalid error)
+    in
+    Ok (source_ref, candidate_ref)
+  in
+  match refs with
+  | Error cause -> not_installed cause
+  | Ok (source_ref, candidate_ref) ->
+    install_plan_if_source
+      ~require_absent:false ~with_checkpoint_cas_lock ~write_checkpoint_bytes
+      ~on_checkpoint_commit_observer:(fun (_ : Keeper_checkpoint_ref.t) -> ())
+      ~session_dir ~expected_source_ref:source_ref ~candidate_ref
+      ~summary_objects:known.known_objects ~objects:closing.closing_objects
+      ~head_bytes:closing.closing_head_bytes closing.closing_head
 ;;

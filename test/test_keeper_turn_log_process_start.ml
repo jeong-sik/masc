@@ -203,7 +203,7 @@ let closing_text : Start.closing -> string = function
   | Closing Nothing_open -> "nothing open"
   | Closing (Closed_open { messages }) -> Printf.sprintf "closed %d" messages
   | Closing (Not_closed (Head_unread _)) -> "not closed: head unread"
-  | Closing (Not_closed (History_unread _)) -> "not closed: history unread"
+  | Closing (Not_closed (Open_turn_unread _)) -> "not closed: open turn unread"
   | Closing (Not_closed (Save_not_installed _)) -> "not closed: save not installed"
 ;;
 
@@ -429,6 +429,113 @@ let test_a_store_start_with_no_metadata =
     (Result.is_error (Store_start.run config "unknown"))
 ;;
 
+let canonical_path (place : Recorder.place) =
+  Keeper_checkpoint_store_history_files.agent_core_checkpoint_path ~session_dir:place.session_dir
+    ~session_id:place.session_id
+;;
+
+let known (place : Recorder.place) =
+  match Keeper_checkpoint_store_canonical.known_canonical ~canonical_path:(canonical_path place) with
+  | Ok (Some known) -> known
+  | Ok None -> fail "the Keeper has a canonical"
+  | Error error -> fail (Keeper_checkpoint_store_session.checkpoint_load_error_to_string error)
+;;
+
+let left_open (place : Recorder.place) =
+  run_turn_one place;
+  let (_ : Writer.admitted) = admitted place 2 in
+  save place ~boundary:Objects.Turn_continues ~turn_count:2 (turn_one @ [ message User "a asks 2" ])
+;;
+
+let place_left_open config name =
+  let place = persisted_keeper config name in
+  left_open place;
+  place
+;;
+
+(* The step reads the head and the open messages' objects, not the history
+   closed before them. Turn 1's bundle is gone: a closing that loaded the
+   history would stop on it, and this one closes the open message. The hole
+   stays for the next whole load to report. *)
+let test_closing_reads_only_the_open_turn =
+  with_workspace
+  @@ fun config ->
+  let place = persisted_keeper config "closed-history-unread" in
+  left_open place;
+  let turn_one_bundle =
+    match (known place).known_head.history.turns with
+    | [ turn ] -> turn.bundle
+    | turns -> failf "the head names turn 1 alone, not %d turns" (List.length turns)
+  in
+  Sys.remove (Keeper_checkpoint_object_store.path ~session_dir:place.session_dir turn_one_bundle);
+  start ~closed_open:1 "the start after the kill" config
+    "closed 1; closed process exited at 3, before [], own [0+1]";
+  check int "no message is open" 0 (open_messages place);
+  check bool "a whole load still stops on the missing turn" true
+    (Result.is_error
+       (Keeper_checkpoint_store.load_agent_core_with_ref ~session_dir:place.session_dir
+          ~session_id:place.session_id))
+;;
+
+(* A head this process only parsed, as every head is after a restart, names
+   objects nobody looked for. Closing looks for the open ones only, so the
+   head it installs is still unchecked, and the next save looks for absent
+   objects as it would have. *)
+let test_closing_keeps_the_rest_unchecked =
+  with_workspace
+  @@ fun config ->
+  let place = persisted_keeper config "unchecked-head" in
+  left_open place;
+  (* The same bytes under a new file: the summary this process took when it
+     saved no longer describes the file, so the next read parses it. *)
+  let path = canonical_path place in
+  let copy = path ^ ".copy" in
+  Out_channel.with_open_bin copy (fun channel -> output_string channel (Fs_compat.load_file path));
+  Unix.chmod copy 0o600;
+  Unix.rename copy path;
+  check bool "the head was only parsed" true
+    ((known place).known_objects = Keeper_checkpoint_store_summary.Objects_unchecked);
+  start ~closed_open:1 "the start after the kill" config
+    "closed 1; closed process exited at 3, before [], own [0+1]";
+  check int "no message is open" 0 (open_messages place);
+  check bool "the closed head is still unchecked" true
+    ((known place).known_objects = Keeper_checkpoint_store_summary.Objects_unchecked)
+;;
+
+(* A head copied under another session's name, with the open message's
+   object beside it. The canonical path is built from the session, so the
+   head that names another session is refused as the source check refuses
+   it, and neither head changes. *)
+let test_closing_refuses_a_head_of_another_session =
+  with_workspace
+  @@ fun config ->
+  let owner = place_left_open config "head-owner" in
+  let other = persisted_keeper config "head-copier" in
+  let owner_head = (known owner).known_head in
+  Fs_compat.save_file (canonical_path other) (Fs_compat.load_file (canonical_path owner));
+  Unix.chmod (canonical_path other) 0o600;
+  List.iter
+    (fun digest ->
+       let target = Keeper_checkpoint_object_store.path ~session_dir:other.session_dir digest in
+       let shard = Filename.dirname target in
+       List.iter
+         (fun dir -> if not (Sys.file_exists dir) then Unix.mkdir dir 0o700)
+         [ Filename.dirname shard; shard ];
+       Fs_compat.save_file target
+         (Fs_compat.load_file (Keeper_checkpoint_object_store.path ~session_dir:owner.session_dir digest));
+       Unix.chmod target 0o600)
+    owner_head.history.open_messages;
+  (match Keeper_turn_log_closing.close_open other with
+   | Not_closed
+       (Save_not_installed
+          (Keeper_checkpoint_store.Source_unavailable (Keeper_checkpoint_store.Ref_session_mismatch _)))
+     -> ()
+   | Nothing_open | Closed_open _ | Not_closed _ ->
+     fail "a head naming another session is refused as another session's");
+  check int "the copied head is still open" 1 (open_messages other);
+  check int "the owner's head is still open" 1 (open_messages owner)
+;;
+
 let () =
   run "keeper_turn_log_process_start"
     [ ( "process start"
@@ -439,6 +546,10 @@ let () =
         ; test_case "open messages with no open turn are left" `Quick
             test_open_messages_with_no_open_turn_are_left
         ; test_case "a closing save that fails" `Quick test_a_closing_save_that_fails
+        ; test_case "closing reads only the open turn" `Quick test_closing_reads_only_the_open_turn
+        ; test_case "closing keeps the rest unchecked" `Quick test_closing_keeps_the_rest_unchecked
+        ; test_case "closing refuses a head of another session" `Quick
+            test_closing_refuses_a_head_of_another_session
         ; test_case "a log that cannot be read" `Quick test_a_log_that_cannot_be_read
         ; test_case "a Keeper with no metadata" `Quick test_a_keeper_with_no_metadata
         ] )

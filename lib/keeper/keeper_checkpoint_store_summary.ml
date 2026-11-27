@@ -237,9 +237,9 @@ let publish_summary_after_parse ~canonical_path ~identity_before ~objects head =
 
 (* After a durable atomic write under the session lock: the file at the path
    is the one just installed. *)
-let publish_summary_after_write ~canonical_path head =
+let publish_summary_after_write ~canonical_path ~objects head =
   match canonical_identity_opt canonical_path with
   | Some identity ->
-    publish_summary ~canonical_path (summary_of_head ~identity ~objects:Objects_seen head);
+    publish_summary ~canonical_path (summary_of_head ~identity ~objects head);
     Some identity
   | None -> None

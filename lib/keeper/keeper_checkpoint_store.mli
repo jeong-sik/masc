@@ -743,6 +743,21 @@ val save_agent_core_if_absent :
   Agent_core.Checkpoint.t ->
   checkpoint_installation
 
+(** Install a head whose open turn was closed from the open messages' objects
+    ({!Agent_core.Checkpoint_objects.close_open_turn} of [known]'s head),
+    under the same stable session lock and source check as
+    [save_agent_core_if_source]. Closing keeps the turn count and content
+    digest, so the installed ref is the source's. The published summary keeps
+    [known]'s knowledge of the head's objects, since only the open messages
+    were read. Both heads must name [session_id], the session whose canonical
+    is replaced; a head naming another session is refused. *)
+val close_open_turn_if_source :
+  session_dir:string ->
+  session_id:string ->
+  Keeper_checkpoint_store_canonical.known_canonical ->
+  Agent_core.Checkpoint_objects.closing ->
+  checkpoint_installation
+
 (** Retain an accepted immutable checkpoint outside rolling history, as a head
     whose objects sit with the canonical's. The path is derived internally
     from its reference, under [session_dir]. An existing head must validate

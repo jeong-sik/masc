@@ -1109,6 +1109,103 @@ let test_changed_header_bytes_are_parsed_before_validation () =
   Alcotest.(check int) "invalid head bytes never read objects" 0 !read_count
 ;;
 
+(* ── Closing the open turn from its objects ─────────────── *)
+
+let digests objects = List.map (fun ((digest : O.digest), bytes) -> (digest :> string), bytes) objects
+
+(* A head whose open turn follows [closed] closed turns, with every object
+   stored, and the messages it names. *)
+let open_after_closed_turns ~store closed =
+  let memo = O.create_memo () in
+  let plans, messages = close_turns ~store ~memo closed in
+  let previous =
+    match List.rev plans with
+    | [] -> None
+    | (last : O.plan) :: (_ : O.plan list) -> Some last.head
+  in
+  let messages = messages @ turn (closed + 1) @ [ user "follow-up" ] in
+  let open_plan = plan_ok ?previous memo O.Turn_continues (checkpoint messages) in
+  write store open_plan;
+  open_plan, messages
+;;
+
+let close_ok ~read_object head =
+  match O.close_open_turn ~read_object head with
+  | Ok (Some closing) -> closing
+  | Ok None -> Alcotest.fail "the head has an open turn"
+  | Error error -> Alcotest.fail (O.load_error_to_string error)
+;;
+
+(* Closing from the objects writes what a closing save of the whole
+   checkpoint writes, head bytes included, with and without new segments. *)
+let test_closing_the_open_turn_writes_what_a_closing_save_writes () =
+  List.iter
+    (fun closed ->
+       let store = store () in
+       let open_plan, messages = open_after_closed_turns ~store closed in
+       let closing = close_ok ~read_object:(read store) open_plan.head in
+       let saved =
+         plan_ok (O.create_memo ()) ~previous:open_plan.head O.Turn_closes (checkpoint messages)
+       in
+       let label what = Printf.sprintf "after %d closed turns: %s" closed what in
+       Alcotest.(check string) (label "the head bytes") saved.head_bytes closing.closing_head_bytes;
+       Alcotest.(check (list (pair string string))) (label "the objects")
+         (digests saved.objects) (digests closing.closing_objects);
+       Alcotest.(check string) (label "the content digest stays")
+         (O.head_content_digest open_plan.head :> string)
+         (O.head_content_digest closing.closing_head :> string);
+       Alcotest.(check int) (label "no message is open") 0
+         (List.length closing.closing_head.history.open_messages);
+       List.iter (fun (digest, bytes) -> Hashtbl.replace store (digest : O.digest :> string) bytes)
+         closing.closing_objects;
+       let head =
+         match O.head_of_string closing.closing_head_bytes with
+         | Ok head -> head
+         | Error error -> Alcotest.fail (O.load_error_to_string error)
+       in
+       (match O.load (O.create_memo ()) ~read_object:(read store) head with
+        | Ok cp -> same_messages (label "the closed head loads the messages") messages cp
+        | Error error -> Alcotest.fail (O.load_error_to_string error)))
+    (* No closed turn; some; one short of a segment, so closing makes the
+       first; one short of a second, so closing makes one naming the first. *)
+    [ 0; 3; O.turns_per_segment - 1; (2 * O.turns_per_segment) - 1 ]
+;;
+
+let test_closing_reads_only_the_open_messages () =
+  let store = store () in
+  let open_plan, (_ : Types.message list) = open_after_closed_turns ~store (O.turns_per_segment + 5) in
+  let asked = ref [] in
+  let read_object digest =
+    asked := (digest : O.digest :> string) :: !asked;
+    read store digest
+  in
+  let (_ : O.closing) = close_ok ~read_object open_plan.head in
+  Alcotest.(check (list string)) "each open message once, in order, and nothing else"
+    (List.map (fun (digest : O.digest) -> (digest :> string)) open_plan.head.history.open_messages)
+    (List.rev !asked)
+;;
+
+let test_closing_refuses_an_open_message_it_cannot_prove () =
+  let store = store () in
+  let open_plan, (_ : Types.message list) = open_after_closed_turns ~store 2 in
+  let first_open = List.hd open_plan.head.history.open_messages in
+  let key = (first_open : O.digest :> string) in
+  let stored = Hashtbl.find store key in
+  let refused label expected =
+    match O.close_open_turn ~read_object:(read store) open_plan.head with
+    | Error error -> Alcotest.(check bool) label true (load_error_kind error = expected)
+    | Ok (Some _ | None) -> Alcotest.fail label
+  in
+  Hashtbl.remove store key;
+  refused "a missing open message" `Object_missing;
+  Hashtbl.replace store key (stored ^ " ");
+  refused "an open message whose bytes are not its digest's" `Object_digest_mismatch;
+  let closed = plan_ok (O.create_memo ()) O.Turn_closes (checkpoint (turn 1)) in
+  (match O.close_open_turn ~read_object:(fun _ -> Alcotest.fail "nothing to read") closed.head with
+   | Ok None -> ()
+   | Ok (Some _) | Error _ -> Alcotest.fail "a head with no open message has nothing to close")
+;;
+
 let () =
   Alcotest.run "checkpoint_objects"
     [ ( "save and load"
@@ -1145,6 +1242,14 @@ let () =
         ; Alcotest.test_case "an absent segment is not kept" `Quick test_an_absent_segment_is_not_kept
         ; Alcotest.test_case "header validation does not read history" `Quick
             test_header_validation_does_not_read_history
+        ] )
+    ; ( "closing the open turn"
+      , [ Alcotest.test_case "it writes what a closing save writes" `Quick
+            test_closing_the_open_turn_writes_what_a_closing_save_writes
+        ; Alcotest.test_case "it reads only the open messages" `Quick
+            test_closing_reads_only_the_open_messages
+        ; Alcotest.test_case "it refuses an open message it cannot prove" `Quick
+            test_closing_refuses_an_open_message_it_cannot_prove
         ] )
     ; ( "refusals"
       , [ Alcotest.test_case "a load refuses what it cannot prove" `Quick

@@ -8,7 +8,8 @@
     file. [cached_summary] answers only while the file at the path still has
     the identity the summary was taken under. [publish_summary_after_parse]
     publishes only when the identity did not change during the read, and
-    [publish_summary_after_write] publishes the file a save just installed.
+    [publish_summary_after_write] publishes the file a save just installed,
+    with what that save knows of the head's objects.
     [summary_key] names the cache entry of a path through the session roots
     that [resolve_session_root] resolves once per spelling and
     [remember_session_root] records. [Keeper_checkpoint_store] includes this
@@ -99,4 +100,5 @@ val publish_summary_after_parse :
   objects:head_objects -> Agent_core.Checkpoint_objects.head -> unit
 
 val publish_summary_after_write :
-  canonical_path:string -> Agent_core.Checkpoint_objects.head -> canonical_identity option
+  canonical_path:string ->
+  objects:head_objects -> Agent_core.Checkpoint_objects.head -> canonical_identity option

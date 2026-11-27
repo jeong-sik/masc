@@ -140,3 +140,23 @@ val reclaim :
       least [min_age_seconds] (default 24h) older than this scan's opening
       (re-checked immediately before unlinking).
     Blocking, with no Eio effects: run it off the main domain. *)
+
+(** {1 Attachment reachability} *)
+
+type attachment_reachability =
+  { live_sha256s : Set_util.StringSet.t
+  ; total_blobs : int
+  ; unreferenced_sha256s : Set_util.StringSet.t
+  ; scanned_files : int
+  }
+
+val scan_attachment_reachability :
+  base_path:string ->
+  scope:Tool_blob_maintenance.scope ->
+  (attachment_reachability, string) result
+(** Read-only reachability scan for {!Attachment_store}: walks every in-scope
+    durable store named by [scope] (including [keeper_chat/*.jsonl],
+    [board_posts.jsonl], [keepers/], etc.), config keeper files, and active
+    ephemeral pins under [<base>/.masc/attachments/ephemeral/] for canonical
+    [att_<64hex>] references, then computes live and unreferenced digests
+    against [<base>/.masc/attachments/blobs/]. Deletes nothing. *)

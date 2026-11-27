@@ -309,6 +309,7 @@
   ;; language server, and the client sits below this library so it can.
   masc.lsp_client
   masc.masc_tool_blob_store
+  masc.attachment_store
   masc.activity_graph
   masc.dated_jsonl
   masc.prompt_registry

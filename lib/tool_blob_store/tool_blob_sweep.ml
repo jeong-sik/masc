@@ -735,3 +735,82 @@ let reclaim ?(min_age_seconds = Masc_time_constants.day) ~base_path ~scope () =
     ~base_path
     ~scope
 ;;
+
+(* {1 Attachment reachability} *)
+
+type attachment_reachability =
+  { live_sha256s : String_set.t
+  ; total_blobs : int
+  ; unreferenced_sha256s : String_set.t
+  ; scanned_files : int
+  }
+
+let is_skippable_scan_name name =
+  String.equal name Tool_blob_maintenance.finder_metadata_name
+  || Fs_compat.is_unpublished_write_name name
+  || Fs_compat.is_lock_name name
+;;
+
+let scan_file_for_attachments ~base_path path (live, scanned) =
+  match Fs_compat.load_owned_regular_file ~ownership_root:base_path path with
+  | Ok (Some payload) ->
+    let found = Attachment_store.referenced_sha256_of_json_text payload in
+    String_set.union live found, scanned + 1
+  | Ok None | Error _ -> live, scanned
+;;
+
+let rec walk_for_attachments ~base_path path acc =
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_REG; _ } -> scan_file_for_attachments ~base_path path acc
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    (match Sys.readdir path with
+     | entries ->
+       Array.fold_left
+         (fun acc name ->
+            if is_skippable_scan_name name
+            then acc
+            else walk_for_attachments ~base_path (Filename.concat path name) acc)
+         acc
+         entries
+     | exception (Sys_error _ | Unix.Unix_error _) -> acc)
+  | { Unix.st_kind =
+        Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
+    ; _
+    }
+  | exception Unix.Unix_error _ -> acc
+;;
+
+let scan_attachment_reachability ~base_path ~scope =
+  let store = Attachment_store.create ~base_path in
+  match Attachment_store.list_all_blobs store with
+  | Error _ as err -> err
+  | Ok blobs ->
+    let consumer_roots = Tool_blob_maintenance.consumer_paths scope ~base_path in
+    let config_keepers_dir = scope.Tool_blob_maintenance.config_keepers_dir ~base_path in
+    let all_roots =
+      if Sys.file_exists config_keepers_dir
+      then config_keepers_dir :: consumer_roots
+      else consumer_roots
+    in
+    let live_from_files, scanned_files =
+      List.fold_left
+        (fun acc root -> walk_for_attachments ~base_path root acc)
+        (String_set.empty, 0)
+        all_roots
+    in
+    let ephemeral_pins = Attachment_store.list_all_ephemeral_pins store in
+    let live_sha256s = String_set.union live_from_files ephemeral_pins in
+    let unreferenced_sha256s =
+      List.fold_left
+        (fun acc sha ->
+           if String_set.mem sha live_sha256s then acc else String_set.add sha acc)
+        String_set.empty
+        blobs
+    in
+    Ok
+      { live_sha256s
+      ; total_blobs = List.length blobs
+      ; unreferenced_sha256s
+      ; scanned_files
+      }
+;;

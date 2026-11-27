@@ -252,7 +252,10 @@ let add_routes router =
                     ])
            | Some token -> serve_clip ~token request reqd)
   (* model-generated media (image/audio/document) fetched by an
-     authenticated content locator. Content hashes are not capabilities. *)
+     authenticated content locator. Content hashes are not capabilities.
+     Delegates to [Attachment_store] first (accepting [att_<64hex>] or bare
+     [<64hex>]) and falls back to legacy [Keeper_chat_media_store] only when
+     absent. *)
   |> Server_route.prefix_get (Server_route.Permission Masc_domain.CanReadState) Masc_network_defaults.media_path_prefix (fun state request reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            let path = Http.Request.path request in
@@ -260,13 +263,24 @@ let add_routes router =
            | None ->
                respond_json_value_with_cors ~status:`Bad_request request reqd
                  (`Assoc [ ("error", `String "token path parameter required") ])
-           | Some raw when not (Keeper_chat_media_store.valid_token raw) ->
-               respond_json_value_with_cors ~status:`Bad_request request reqd
-                 (`Assoc
-                    [ ("error", `String "invalid token")
-                    ; ("reason", `String "expected 64-char lowercase hex (SHA-256)")
-                    ])
-           | Some token -> serve_media ~base_path ~token request reqd)
+           | Some raw ->
+               (match Attachment_store.parse_id_or_sha256 raw with
+                | Error _ ->
+                    respond_json_value_with_cors ~status:`Bad_request request reqd
+                      (`Assoc
+                         [ ("error", `String "invalid token")
+                         ; ("reason", `String "expected att_<64hex> or 64-char lowercase hex (SHA-256)")
+                         ])
+                | Ok sha256 ->
+                    if
+                      Server_routes_http_routes_attachments.serve_attachment_by_sha256
+                        ~base_path ~sha256 request reqd
+                    then ()
+                    else if Keeper_chat_media_store.valid_token raw then
+                      serve_media ~base_path ~token:raw request reqd
+                    else
+                      respond_json_value_with_cors ~status:`Not_found request reqd
+                        (`Assoc [ ("error", `String "not found"); ("token", `String raw) ])))
   (* browser-captured speech -> text. Admin/owner-only
      ([CanAdmin]) — each call spends an ElevenLabs STT credit, so unlike
      the GET audio route this carries no public capability. *)

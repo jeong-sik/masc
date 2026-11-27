@@ -47,6 +47,7 @@ type resource_target =
   | World_memory_log
   | Keeper_memory of string
   | Keeper_memory_health of string
+  | Attachment of string
   | Unknown of string
 
 val parse_resource_target : string -> resource_target

@@ -47,7 +47,7 @@ function makeScope(overrides: Partial<ProviderUsageScope> = {}): ProviderUsageSc
 }
 
 describe('quota-scope-view', () => {
-  it('computes elapsed time to exhaustion for a spent 5h window with resets_at', () => {
+  it('computes elapsed time from window start to the last observation for a spent 5h window with resets_at', () => {
     // 5h = 18000s. Reset in 3h (10800s) -> window started 2h (7200s) ago.
     // Observed spent 18m (1080s) ago -> elapsed before cutoff = 7200 - 1080 = 6120s (1h 42m).
     const burn = analyzeWindowBurn(

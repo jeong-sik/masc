@@ -652,7 +652,7 @@ describe('workspaces/runtime', () => {
 
     // Shows cutoff elapsed duration and 24h call count on card
     const claudeCard = container.querySelector('[data-testid="quota-scope-card-claude_sub"]')!
-    expect(claudeCard.textContent).toContain('1시간 42분 만에 소진 관측')
+    expect(claudeCard.textContent).toContain('창 시작 후 1시간 42분 시점에 마지막 소진 관측')
     expect(claudeCard.textContent).toContain('24h 호출 35회 · 오류 3')
     expect(claudeCard.textContent).toContain('최근 7일 소진 1일')
 
@@ -687,7 +687,7 @@ describe('workspaces/runtime', () => {
     expect(inspectArg.title).toContain('Claude Sub')
     const drawerHost = document.createElement('div')
     render(inspectArg.render(), drawerHost)
-    expect(drawerHost.textContent).toContain('창 시작 후 1시간 42분 만에 소진 관측')
+    expect(drawerHost.textContent).toContain('창 시작 후 1시간 42분 시점에 마지막 소진 관측')
     expect(drawerHost.textContent).toContain('claude_sub.sonnet')
     expect(drawerHost.textContent).toContain('wkbl-data')
     expect(drawerHost.textContent).toContain('pool-a')

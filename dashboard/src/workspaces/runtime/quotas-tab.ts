@@ -1029,7 +1029,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
           </section>
 
           <section class="wka-card" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
-            <h4 style=${{ margin: 0, fontSize: 'var(--fs-13)', color: 'var(--fg-1)' }}>창별 소진 · 지속 시간 분석 (얼마 만에 끊겼나)</h4>
+            <h4 style=${{ margin: 0, fontSize: 'var(--fs-13)', color: 'var(--fg-1)' }}>창별 소진 · 지속 시간 분석 (마지막 소진 관측 기준)</h4>
             ${windowBurns.length === 0
               ? html`<div class="dtable-absent">보고된 할당량 창이 없습니다.</div>`
               : html`
@@ -1058,7 +1058,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
                         ${burn.spent && burn.elapsedSinceStartSec !== null
                           ? html`
                               <div class="mono tnum" style=${{ fontSize: 'var(--fs-12)', color: 'var(--err-fg)', fontWeight: 600 }}>
-                                ⏱ 창 시작 후 ${formatDurationKo(burn.elapsedSinceStartSec)} 만에 소진 관측
+                                ⏱ 창 시작 후 ${formatDurationKo(burn.elapsedSinceStartSec)} 시점에 마지막 소진 관측
                               </div>
                             `
                           : burn.elapsedSinceStartSec !== null
@@ -1331,7 +1331,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
                   fontWeight: 600,
                 }}
               >
-                ⏱ ${cutoffBurn.label} 창 · ${formatDurationKo(cutoffBurn.elapsedSinceStartSec)} 만에 소진 관측
+                ⏱ ${cutoffBurn.label} 창 · 창 시작 후 ${formatDurationKo(cutoffBurn.elapsedSinceStartSec)} 시점에 마지막 소진 관측
               </span>
             `}
             ${item.calls24h !== null && html`

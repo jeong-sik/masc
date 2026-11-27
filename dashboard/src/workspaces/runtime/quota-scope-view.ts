@@ -231,6 +231,9 @@ export function analyzeWindowBurn(w: ProviderUsageWindow, nowUnix: number): Wind
   const windowStartSec = durationSec !== null && resetsAtSec !== null
     ? resetsAtSec - durationSec
     : null
+  // observed_at is the latest report of this window, not the moment it ran out:
+  // the server replaces it on every newer report. This is "window start to last
+  // observation", never "time to exhaustion".
   const elapsedSinceStartSec = windowStartSec !== null && durationSec !== null && w.observed_at >= windowStartSec
     ? Math.min(durationSec, Math.max(0, w.observed_at - windowStartSec))
     : null

@@ -180,7 +180,7 @@ let test_register_rejects_duplicate_bucket_bounds () =
   (* Rejected registration must not poison the instance mutex. *)
   let c = Metrics.counter m ~name:"after.dup" ~unit_:"1" in
   Metrics.incr c 1;
-  check int "usable after duplicate bucket rejection" 1 (Metrics.counter_value c)
+  check int "usable after duplicate bucket rejection" 1 (Metrics.counter_value c ())
 ;;
 
 let test_prometheus_text_histogram_exports_zero_series_on_create_and_reset () =

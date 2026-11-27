@@ -21,6 +21,20 @@
 - A pull request that changes `dashboard/` runs a `dashboard` check: the dashboard type-check and the vitest tests that import a changed file. A native stack runs it once, at its top. It is not a required check yet (#55077).
 - A text evidence artifact is captured whole. Up to 200,000 bytes it is written into the request record; above that it is stored in the content-addressed blob store and the record keeps its content address. The completion verifier pages and searches it through `keeper_artifact_read` by that sha256. A text file over 64 MiB is recorded as unreadable with `too_large` instead of being read. Known binary formats are unchanged (#55072).
 - The request record directory is classified in the tool blob sweep scope, so the sweep counts the content addresses that records hold (#55072).
+- The `dashboard` pull request check no longer leaves the job token in its checkout, as `type-check` already did. The job runs dependency code and none of its steps needs the token (#55086).
+- A Muse host is not started when `muse plugins list --json` or
+  `muse plugins inspect <id> --json` fails or prints output MASC cannot read.
+  A command that ran and failed is a preparation failure naming the command:
+  the Keeper settles the turn before dispatch, so the session it was
+  continuing stays, the turn moves to a fallback runtime when there is one,
+  and the next turn lists the plugins again. Runtime verification shows the
+  client as not started. A command that could not start is the spawn refusal
+  the host itself would meet (#55128).
+- The TUI keeper dive lists a keeper's schedules by next wake, earliest
+  first, and leads each row with its wall-clock time (HH:MM today,
+  MM-DD HH:MM on another day of the year, YYYY-MM-DD HH:MM otherwise)
+  beside the relative time, plus the time of the last wake (when it
+  finished, or when it started if it has not) (#55174).
 
 ### Fixed
 
@@ -53,6 +67,29 @@
 - The dashboard preserves excess properties when `wire-schema` decodes structs with `onExcessProperty: 'preserve'` (restoring stored `origin` and `change` metadata in the Workspace Memory Context raw-snapshot viewer, which had been silently stripped since #54560), and aligns five legacy dashboard component tests with current TelemetryPanel, ACP setup, modal Escape-capture, and navigation contracts (#55172).
 - **dashboard**: Align `status.test.ts` and `lane-declaration-editor.test.ts` with the `runtime` default monitoring section after retirement of the `agents` monitoring route (#55179).
 - A `kimi acp` prompt the host recorded as failed, such as one refused for the weekly usage limit, now ends as `Host_turn_failed` with the host's code and message instead of an empty response (#55202).
+- Clean up unused Keeper client-tool producer lease `.lock` files on cancellation-safe switch release, receipt acknowledgment, and fail-closed startup pruning (#55079).
+- An ACP turn the host stopped at a terminal tool boundary now settles by its compaction like a completed turn: if the stopped prompt saw a compaction, or never returned so masc cannot rule one out, the next turn sends the whole World State again and the Keeper logs why. Before, the settlement kept the held context, and on Kimi Code the stopped prompt had already counted past the compaction, so the next turn sent only what had changed to a session that held a summary (#55089).
+- The Kimi Code session record reader counts `full_compaction.begin` as well as `context.apply_compaction`: with `compaction_trigger_ratio` below the block ratio, Kimi Code compacts after a step without waiting, so the apply record can land after the prompt's response and is counted with the next prompt. A compaction then clears held context at both prompts (#55089).
+- A session kept across a Gate pause now keeps the stopped prompt's context count, so the continuation compares its first count with it. Before, Antigravity and Vibe compared with the turn before the stop and could miss a compaction at the continuation's start. When the stopped prompt returned no count, the continuation's settlement sends the whole World State again (#55089).
+- A Muse host that MASC starts switches off every runtime capability (hooks,
+  reminders, MCP servers) of the plugins the operator installed, so an operator
+  plugin hook no longer runs, or fails, inside Keeper sessions (#55128).
+- A Kimi Code host at native posture `none` offers only the MASC tools. MASC
+  writes a workspace agent profile into the host's empty folder, so the host's
+  own shell, file, web, todo and skill tools are no longer offered (#55128).
+- A delivery evidence read of the reaction ledger now waits for its cache lock on the caller before it is submitted to the CPU pool, so the wait no longer holds a pool slot and checkpoint encoding no longer queues behind it (#55171).
+- The TUI Keeper detail now says how long a failing Keeper has been failing. Its failure line adds "실패 시작 <age> 전" after the last failure while the Keeper is running and failing, degraded or recovering; without the server's `failing_since` it adds nothing (#55226).
+- A server restart no longer outruns the start watchdog while it closes the
+  turns the previous process left open. Each Keeper's open turn now closes
+  from the checkpoint head and the open messages' objects alone, instead of
+  loading and saving the Keeper's whole history before the server is ready
+  (13-17 s per Keeper with 28-80 MB of history, one Keeper after another, on
+  the 11-27 restart that the 240 s watchdog ended) (#55235).
+- Enforce pending policy revocations in `Authz_decision.evaluate`, normalize trailing slashes in `Authz_presence`, reject `.`/`..` keeper names in `Playground_paths`, rewrite `Subst` inside delegated shell stages, cap Bash substitution nesting depth, apply `structural_refusal` in `lower_typed_pipeline`, and guard `Voice_pcm` short/truncated WAV reads (#55245)
+- Bound Unix-fallback stderr capture with `Exec_buffer`, make `Forked_map` signal/EINTR/cancellation-safe, track dispatch before revoking `Lane_addon_worker_protocol` / stopping `Lane_addon_native_worker`, propagate cancellation in `Lane_addon_declaration.replacement_result`, re-read canonical rows in `Lane_addon_asks` and catch `Sys_error` in `declarations`, and harden `Browser_upload_lease` cleanup and ENOENT anchor recovery (#55246)
+- Pre-stage Antigravity OAuth files before keychain clear and offload `import_signed_in` to a systhread, release failed keychain preparation claims in `Runtime_antigravity_home`, synchronize MCP HTTP tool reservations and drain turns atomically with real JSON-RPC error ids, require `Awaiting_initialized` on `notifications/initialized`, propagate operator interrupts and reserved exceptions in `Runtime_agent`, isolate sparse retraction watermarks in `Runtime_provider_usage_observations`, and report exact missing-slot errors in `Runtime_lane_edit.plan_replace_exact_slot` (#55247)
+- Verify exact encoded commit line on tail recovery in `Librarian_store`, synchronize `Fusion_run_registry` progress updates and pruning against current atomic store metadata, offload `Keeper_disk_pressure` `df` probes to a systhread without caching `Probe_error` or swallowing reserved exceptions, and replace `Eio.Mutex` with `Stdlib.Mutex` for `Keeper_id.Uid` RNG (#55248)
+- When the host loses its network, a runtime whose connection did not open is no longer moved behind its lane siblings. The request was never sent, so the failure adds no failed-attempt mark and clears none, and every Keeper keeps its declared runtime order; the turn still moves on to the next runtime. The failure stays on the turn receipt as `provider_connect_failed` / `not_sent`, and `/api/v1/runtime/resolved` no longer shows it as a `network_transient` failed attempt. A network failure after the request was sent and a provider timeout still mark the runtime as before (#55092).
 
 ### Documentation
 
@@ -65,6 +102,28 @@
   answers per Keeper for the life of the process, so only new or undelivered
   answers cost a delivery-evidence read, and checkpoint saves stop queueing
   behind those reads on the background pool (#55156).
+- Add settled stat-validated day-file and directory listing caches plus `Audit_log.settled_tail_stamp` to accelerate `/api/v1/audit` tail reads (#55079).
+- Eliminate duplicate Board JSON row tables (~180 MB RAM), replace per-post lock loops with single-lock batching, and add O(limit) index walks and reader-karma caching (#55079).
+- Serve pre-encoded zstd/gzip HTTP payloads with weak ETag 304 support across `/health`, `/api/v1/status`, `/api/v1/audit`, `/api/v1/gate/keepers`, and dashboard read surfaces (#55080).
+- Eliminate double Keeper observation runs on `/api/v1/dashboard/briefing`, fix `Execution_json` uncompressed drift fallback via CPU-pool prep and CAS promotion, and memoize `Candle_balance.replay`, `Candle_observe` account revisions, and warm `Keeper_board_address` lookups (#55080).
+- Add bounded settled stat-caches across auth/workspace/config readers, remove per-request OAuth `lstat` systhreads on static bearers, reuse resolved bearer roles in `/api/v1/dashboard/shell`, and add SQLite composite indexes and bounded read-only connection pooling in `Tool_metrics_store` (#55080).
+- Replace boxed `Cell_grid` cells with a packed SoA unboxed `Bigarray` buffer and optimize `Presenter.present_back` and `Grapheme` width/truncation paths to cut 220x32 full-frame TUI rendering below 0.1 ms (#55081).
+- Add physical-equality short-circuits, zero-allocation text/wire scanners, and theme-keyed caches across TUI app, store, screen, and protocol hot paths (#55081).
+- Replace the closure-heavy `parseUniqueJson` scanner with a zero-closure iterative verifier, cutting 1 MB execution payload scan overhead by 3.7x while preserving strict duplicate-key detection (#55082).
+- Coalesce concurrent dashboard GETs/ETags and SSE/ResourceCache updates, shrink the initial boot JS bundle, and lazy-split secondary Knowledge, Keepers, and Work workspace tabs to halve Knowledge/Board tab-switch latency and lower boot FCP (#55082).
+
+### Upgrade notes
+
+- A Kimi Code session keeps the tool list it was created with when it is
+  loaded again, so the tool surface digest of a Kimi Code Keeper at native
+  posture `none` now carries the MASC-only profile. After the upgrade each
+  such Keeper starts a new session once. A Gate continuation waiting at the
+  upgrade cannot resume its old session and is refused (#55128).
+
+### Removed
+
+- The wall-clock counterpart observation path that lost its last Librarian caller in #54451: `Keeper_agent_run_post_turn_memory.counterpart_observations_before` and `counterpart_observations_before_offloaded` with their `For_testing` module, `Keeper_counterpart_observation.of_chat_message` / `to_yojson` / `render_for_prompt` / `digest` and the `Durable_chat` origin only `of_chat_message` built, and `Keeper_external_attention.load_recent_evidence_events`. Only tests called them; no runtime behavior changes (#55085).
+- `POST /api/v1/artifacts` is gone. Its only client, the legacy TUI board composer, was removed with the TUI cutover (#54402); the dashboard reads stored artifacts through `GET /api/v1/artifacts/<sha256>` and `GET /api/v1/artifact-bytes/<sha256>`, which stay. A POST to that path now returns 404 (#55237).
 
 ## [0.83.5] - 2026-11-27
 

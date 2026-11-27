@@ -412,6 +412,28 @@ describe('components/primitives', () => {
     }
   })
 
+  it('VirtualList keeps drawing rows when its scroll container has no layout box', async () => {
+    // No layOut() spy: happy-dom reports clientHeight === 0 for the scroll container.
+    const items = Array.from({ length: 50 }, (_, i) => `Row #${i}`)
+    render(
+      html`
+        <${VirtualList}
+          items=${items}
+          estimateSize=${32}
+          height=${320}
+          renderItem=${(item: string) => html`<span>${item}</span>`}
+        />
+      `,
+      container,
+    )
+    await new Promise((r) => setTimeout(r, 0))
+
+    const rows = [...container.querySelectorAll<HTMLElement>('.vlist-row')]
+    expect(rows.length).toBeGreaterThan(0)
+    expect(rows.length).toBeLessThan(50)
+    expect(rows[0]!.textContent).toBe('Row #0')
+  })
+
   interface LongRow {
     readonly id: string
     readonly label: string

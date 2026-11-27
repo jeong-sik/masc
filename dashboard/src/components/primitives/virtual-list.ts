@@ -10,6 +10,7 @@ import {
   elementScroll,
   observeElementOffset,
   observeElementRect,
+  type Rect,
   type ScrollToOptions,
   type VirtualItem,
 } from '@tanstack/virtual-core'
@@ -55,6 +56,22 @@ function measureRow<TScrollElement extends Element>(
 }
 
 /**
+ * Observes the scroll viewport's size while ignoring a 0-height report when
+ * the container has no layout box (a hidden ancestor, or a DOM that does no
+ * layout). Without this guard, `observeElementRect` overwrites `initialRect`
+ * with `{ width: 0, height: 0 }` on mount, causing `@tanstack/virtual-core`'s
+ * `calculateRange` (`outerSize === 0`) to drop every row from the DOM.
+ */
+function observeViewportRect<TScrollElement extends Element>(
+  instance: Virtualizer<TScrollElement, Element>,
+  cb: (rect: Rect) => void,
+): (() => void) | undefined {
+  return observeElementRect(instance, (rect) => {
+    if (rect.height > 0) cb(rect)
+  })
+}
+
+/**
  * Windows a long list over `getScrollElement()`. To have a row measured, give
  * its element `data-index` and `ref=${measureElement}`; a row drawn without them
  * keeps `estimateSize`.
@@ -73,7 +90,7 @@ export function useVirtualList<TScrollElement extends Element = HTMLDivElement>(
     initialRect: { width: 0, height: opts.initialHeight ?? 480 },
     scrollToFn: elementScroll,
     measureElement: measureRow,
-    observeElementRect,
+    observeElementRect: observeViewportRect,
     observeElementOffset,
     ...(opts.getItemKey ? { getItemKey: opts.getItemKey } : {}),
     onChange: () => {

@@ -3590,6 +3590,31 @@ let test_keeper_cadence_next_due () =
   Alcotest.(check bool) "gamma may lie past the page read" true
     (due ~more_pages:true "gamma" = Keeper_cadence.Past_page_read)
 
+(* A keeper's schedule list reads in time order: the earliest next wake first,
+   a late one included, and a row that names no next wake last. *)
+let test_keeper_cadence_by_next_due () =
+  let no_next =
+    {|{"schedule_instance_id":"si-none","schedule_id":"none","status":"running","source":"operator",
+       "due_at":1795400100.0,"next_due_at":null,"recurrence_kind":"once","recurrence_summary":"once",
+       "payload_kind":"keeper_wake","payload_support":"supported","payload_target":"alpha",
+       "payload_keeper_name":"alpha","payload_summary":"poll"}|}
+  in
+  let rows =
+    cadence_schedules
+      (String.concat ","
+         [
+           cadence_row ~id:"later" ~keeper:"alpha" ~next_due:"1795400900.0";
+           no_next;
+           cadence_row ~id:"soon" ~keeper:"alpha" ~next_due:"1795400300.0";
+           cadence_row ~id:"late" ~keeper:"alpha" ~next_due:"1795399000.0";
+         ])
+  in
+  Alcotest.(check (list string)) "earliest next wake first, no next wake last"
+    [ "late"; "soon"; "later"; "none" ]
+    (List.map
+       (fun (sc : Wire_work.schedule_row) -> sc.schedule_id)
+       (Keeper_cadence.by_next_due rows))
+
 let test_wave2_keeper_context_tool_calls_and_schedules () =
   let m0 = make_populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en in
   let tr_json =
@@ -5096,6 +5121,8 @@ let () =
             test_keeper_cadence_window_counts_causes;
           Alcotest.test_case "cadence next due is the keeper's earliest" `Quick
             test_keeper_cadence_next_due;
+          Alcotest.test_case "keeper schedules read earliest next wake first" `Quick
+            test_keeper_cadence_by_next_due;
           Alcotest.test_case "all 3 roster modes at 140x40 & 90x28 (KO/EN)"
             `Quick test_keepers_all_modes_viewports_langs;
           Alcotest.test_case "strict live SSOT vs historical 12h trail" `Quick

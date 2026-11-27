@@ -2641,7 +2641,13 @@ let render_work_sandbox_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
     if keeper_scheds = [] then
       push_line ~fg:theme.text_muted ~attrs:Attr.italic
         (Ops_common.say model ~ko:"등록된 일정이 없습니다" ~en:"No scheduled jobs")
-    else
+    else (
+      (* Today's times read as HH:MM, other days carry their date, as the
+         memory timeline writes them. *)
+      let instant at =
+        Memory_lineage.format_instant ~tz_offset_sec:model.tz_offset_sec
+          ~now:now_unix at
+      in
       List.iter
         (fun (sc : Wire_work.schedule_row) ->
           let wake_txt, wake_tok =
@@ -2651,17 +2657,29 @@ let render_work_sandbox_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
           let summary =
             match sc.payload_summary with Some s -> " · " ^ s | None -> ""
           in
-          let due =
+          let next =
             match sc.next_due_at_unix with
             | Some at when at >= now_unix ->
-                " · " ^ say ~ko:"다음 " ~en:"next " ^ Format_val.format_duration_s (at -. now_unix)
+                let left = Format_val.format_duration_s (at -. now_unix) in
+                Printf.sprintf "%s (%s)" (instant at)
+                  (say ~ko:(left ^ " 뒤") ~en:("in " ^ left))
             | Some at ->
-                " · " ^ say ~ko:"늦음 " ~en:"late " ^ Format_val.format_duration_s (now_unix -. at)
-            | None -> ""
+                let late = Format_val.format_duration_s (now_unix -. at) in
+                Printf.sprintf "%s (%s)" (instant at)
+                  (say ~ko:(late ^ " 늦음") ~en:(late ^ " late"))
+            | None -> say ~ko:"다음 시각 없음" ~en:"no next time"
+          in
+          let last =
+            match sc.last_wake_unix with
+            | Some at ->
+                Printf.sprintf "%s %s %s" (say ~ko:"마지막" ~en:"last")
+                  (instant at) wake_txt
+            | None -> wake_txt
           in
           push_line ~fg:(Theme.status_color theme wake_tok) ~attrs:Attr.none
-            (Printf.sprintf "%s%s · %s%s" sc.recurrence_summary due wake_txt summary))
-        keeper_scheds;
+            (Printf.sprintf "%s · %s · %s%s" next sc.recurrence_summary last
+               summary))
+        (Keeper_cadence.by_next_due keeper_scheds));
     let total_posts = List.length keeper_posts in
     push_blank ();
     push_hairline

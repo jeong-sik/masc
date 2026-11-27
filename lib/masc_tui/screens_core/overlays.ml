@@ -4600,7 +4600,8 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Task_link_goal _
                 | Nav.Addon_invoke_action _
                 | Nav.Ma_keeper_assign_form _
-            | Nav.Fusion_launch_form ->
+            | Nav.Fusion_launch_form
+            | Nav.Board_new_post ->
                 if inner.h - status_rows >= 6 then 1 else 0
             | Nav.Board_goal_proposal
             | Nav.Goal_confirmation_proof
@@ -4617,7 +4618,6 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Goal_drop _
                 | Nav.Schedule_form
                 | Nav.Repo_add_form
-                | Nav.Board_new_post
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_search_form
@@ -4818,6 +4818,37 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   (Cell_grid.put_text ~clip:er grid ~x:er.x ~y:er.y
                      ~style:whisper_st
                      (Grapheme.truncate_to_width ~max_width:er.w hint))
+            | Nav.Board_new_post ->
+                let chips =
+                  List.map Wire_attachment.format_chip
+                    model.drafts.board_attachments
+                in
+                let up_s =
+                  if model.drafts.board_uploading_count > 0 then
+                    [
+                      Say.resolve lang
+                        (Say.make
+                           ~ko:(Printf.sprintf "업로드 중(%d)…"
+                                  model.drafts.board_uploading_count)
+                           ~en:(Printf.sprintf "Uploading(%d)…"
+                                  model.drafts.board_uploading_count));
+                    ]
+                  else []
+                in
+                let hint =
+                  match chips @ up_s with
+                  | [] ->
+                      Say.resolve lang
+                        (Say.make
+                           ~ko:"첨부: [Ctrl+V] 클립보드 이미지 또는 파일 경로 붙여넣기"
+                           ~en:"Attachments: [Ctrl+V] clipboard image or paste file path")
+                  | parts ->
+                      "📎 " ^ String.concat " " parts ^ " · [Ctrl+V]"
+                in
+                ignore
+                  (Cell_grid.put_text ~clip:er grid ~x:er.x ~y:er.y
+                     ~style:(if chips <> [] then acc_st else whisper_st)
+                     (Grapheme.truncate_to_width ~max_width:er.w hint))
             | Nav.Board_goal_proposal
             | Nav.Goal_confirmation_proof
             | Nav.Memory_act_form
@@ -4833,7 +4864,6 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Goal_drop _
                 | Nav.Schedule_form
                 | Nav.Repo_add_form
-                | Nav.Board_new_post
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_search_form
@@ -5132,9 +5162,16 @@ let render_help_overlay grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
 let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~gate =
   let lang = model.lang in
-  let w = Int.min (Int.max 0 (rect.w - 4)) 78 in
-  let h = Int.min (Int.max 0 (rect.h - 2)) 15 in
-  let modal_r = center_rect ~outer:rect ~w ~h in
+  let modal_r =
+    match gate, model.image_inspector with
+    | Nav.Media_viewer, Some _ -> Model.inspector_modal_rect ~outer:rect
+    | Nav.Media_viewer, None
+    | (Nav.Server_offline | Nav.Auth_gate | Nav.Micro_viewport), (Some _ | None)
+      ->
+        let w = Int.min (Int.max 0 (rect.w - 4)) 78 in
+        let h = Int.min (Int.max 0 (rect.h - 2)) 15 in
+        center_rect ~outer:rect ~w ~h
+  in
   if Rect.is_empty modal_r then ()
   else
     let bg = Color.of_rgb theme.surface_2 in
@@ -5405,6 +5442,166 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
              (whisper_st, remediation_line);
            ]
           @ token_lines)
+    | Nav.Media_viewer when Option.is_some model.image_inspector -> (
+        match model.image_inspector with
+        | None -> ()
+        | Some st ->
+            let total = List.length st.images in
+            let zoom_pct = int_of_float (Float.round (st.zoom *. 100.0)) in
+            let title =
+              Say.resolve lang
+                (Say.make
+                   ~ko:(Printf.sprintf "이미지 인스펙터 (%d/%d)" (st.index + 1)
+                          (Int.max 1 total))
+                   ~en:(Printf.sprintf "Image Inspector (%d/%d)" (st.index + 1)
+                          (Int.max 1 total)))
+            in
+            let inner =
+              Card.draw ~cache grid ~rect:modal_r ~theme
+                {
+                  (Card.default_spec ~title) with
+                  badge =
+                    Some
+                      {
+                        glyph = None;
+                        text = Printf.sprintf "%d%%" zoom_pct;
+                        tone = Some Theme.Status_active;
+                      };
+                  hotkey =
+                    Some
+                      (Say.resolve lang
+                         (Say.make
+                            ~ko:"[+/-] 확대 · [hjkl] 이동 · [</>] 전환 · [Esc]"
+                            ~en:"[+/-] Zoom · [hjkl] Pan · [</>] Prev/Next · [Esc]"));
+                  footer_hint =
+                    Some
+                      (Say.resolve lang
+                         (Say.make
+                            ~ko:"[0] 원본 · [o] 열기 · [e] 저장 · [y] ID복사 · [r] 재조회"
+                            ~en:"[0] Reset · [o] Open · [e] Save · [y] Copy ID · [r] Reload"));
+                  focused = true;
+                  elevated = true;
+                }
+            in
+            let pad_x = if inner.w >= 48 then 2 else 1 in
+            let content = Card.pad_inner ~pad_x inner in
+            if not (Rect.is_empty content) then begin
+              let img_opt = Model.current_inspected_image st in
+              let meta_line =
+                match img_opt with
+                | None ->
+                    Say.resolve lang
+                      (Say.make ~ko:"선택된 이미지 없음" ~en:"No image selected")
+                | Some img ->
+                    let name =
+                      Option.value img.filename
+                        ~default:
+                          (Option.value img.attachment_id ~default:img.media_path)
+                    in
+                    let dims_s =
+                      match st.fetched with
+                      | Observed.Value { data = _, _, Some (w, h); _ } ->
+                          Printf.sprintf "%dx%d" w h
+                      | Observed.Value { data = _, _, None; _ }
+                      | Observed.Loading _
+                      | Observed.Failed _
+                      | Observed.Absent
+                      | Observed.Unreported -> (
+                          match img.width, img.height with
+                          | Some w, Some h when w > 0 && h > 0 ->
+                              Printf.sprintf "%dx%d" w h
+                          | Some _, (Some _ | None) | None, (Some _ | None) ->
+                              "")
+                    in
+                    let bytes_s =
+                      match img.bytes with
+                      | Some b when b > 0 ->
+                          if b >= 1024 * 1024 then
+                            Printf.sprintf "%.1fMiB"
+                              (float_of_int b /. 1048576.0)
+                          else if b >= 1024 then
+                            Printf.sprintf "%dKiB" (b / 1024)
+                          else Printf.sprintf "%dB" b
+                      | Some _ | None -> ""
+                    in
+                    let mime_s = Option.value img.mime_type ~default:"" in
+                    let parts =
+                      List.filter
+                        (fun s -> not (String.equal s ""))
+                        [ name; mime_s; dims_s; bytes_s ]
+                    in
+                    String.concat " · " parts
+              in
+              let hdr_r = Rect.make ~x:content.x ~y:content.y ~w:content.w ~h:1 in
+              ignore
+                (Cell_grid.put_text ~clip:hdr_r grid ~x:hdr_r.x ~y:hdr_r.y
+                   ~style:anchor_st
+                   (Grapheme.truncate_to_width ~max_width:hdr_r.w meta_line));
+              if content.h >= 2 then
+                Card.draw_hairline ~bg ~pad_x:0 grid
+                  ~rect:(Rect.make ~x:content.x ~y:(content.y + 1) ~w:content.w ~h:1)
+                  ~y:(content.y + 1) ~theme;
+              let canvas = Model.inspector_canvas_rect_of_modal modal_r in
+              if not (Rect.is_empty canvas) then
+                match st.fetched with
+                | Observed.Loading _ ->
+                    ignore
+                      (Cell_grid.put_text ~clip:canvas grid ~x:canvas.x ~y:canvas.y
+                         ~style:whisper_st
+                         (Grapheme.truncate_to_width ~max_width:canvas.w
+                            (Say.resolve lang
+                               (Say.make ~ko:"◌ 이미지 불러오는 중…"
+                                  ~en:"◌ Loading image…"))))
+                | Observed.Failed { reason; _ } ->
+                    ignore
+                      (Cell_grid.put_text ~clip:canvas grid ~x:canvas.x ~y:canvas.y
+                         ~style:crit_st
+                         (Grapheme.truncate_to_width ~max_width:canvas.w
+                            (Say.resolve lang
+                               (Say.make
+                                  ~ko:("이미지 로드 실패: " ^ reason ^ " · [r] 재시도")
+                                  ~en:("Failed to load image: " ^ reason ^ " · [r] Retry")))))
+                | Observed.Absent | Observed.Unreported ->
+                    ignore
+                      (Cell_grid.put_text ~clip:canvas grid ~x:canvas.x ~y:canvas.y
+                         ~style:whisper_st
+                         (Grapheme.truncate_to_width ~max_width:canvas.w
+                            (Say.resolve lang
+                               (Say.make ~ko:"[r] 이미지 불러오기"
+                                  ~en:"[r] Load image"))))
+                | Observed.Value { data = _, png_bytes, dims; _ } -> (
+                    match Png_decode.decode_rgba png_bytes with
+                    | Ok img ->
+                        let vw =
+                          Model.inspector_viewport_window
+                            ~img_px:(img.width, img.height) ~zoom:st.zoom
+                            ~pan_x:st.pan_x ~pan_y:st.pan_y ~cols:canvas.w
+                            ~rows:canvas.h
+                        in
+                        Halfblock.draw_rgba grid ~rect:canvas
+                          ~bg_rgb:theme.surface_2
+                          ~viewport:
+                            {
+                              Halfblock.src_x = vw.x;
+                              src_y = vw.y;
+                              src_w = vw.width;
+                              src_h = vw.height;
+                            }
+                          img
+                    | Error err ->
+                        let dim_hint =
+                          match dims with
+                          | Some (w, h) -> Printf.sprintf " (%dx%d)" w h
+                          | None -> ""
+                        in
+                        ignore
+                          (Cell_grid.put_text ~clip:canvas grid ~x:canvas.x
+                             ~y:canvas.y ~style:whisper_st
+                             (Grapheme.truncate_to_width ~max_width:canvas.w
+                                (Printf.sprintf
+                                   "Image preview unavailable%s (%s) · [o] Open externally"
+                                   dim_hint err))))
+            end)
     | Nav.Media_viewer ->
         let title =
           Say.resolve lang

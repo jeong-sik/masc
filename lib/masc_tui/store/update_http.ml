@@ -9287,6 +9287,10 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Cmd.Cancel_memory_diagram
                 | Cmd.Fetch_artifact_and_copy _
                 | Cmd.Export_artifact _
+                | Cmd.Upload_attachment_file _
+                | Cmd.Paste_clipboard_image _
+                | Cmd.Fetch_inspector_image _
+                | Cmd.Export_attachment _
                 | Cmd.Open_dos_screen _
                 | Cmd.Open_external_url _
                 | Cmd.Open_editor_escape_hatch _

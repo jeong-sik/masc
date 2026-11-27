@@ -24,6 +24,10 @@ let has_explicit_sync_streams cmds =
       | Cmd.Cancel_memory_diagram
       | Cmd.Fetch_artifact_and_copy _
       | Cmd.Export_artifact _
+      | Cmd.Upload_attachment_file _
+      | Cmd.Paste_clipboard_image _
+      | Cmd.Fetch_inspector_image _
+      | Cmd.Export_attachment _
       | Cmd.Open_dos_screen _
       | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _
@@ -592,6 +596,75 @@ let step_raw ~now (m : Model.t) = function
           Runtime_store.mark_setup_login_input_ready true m.runtime
         in
         ({ m with runtime }, [])
+  | Msg.Attachment_uploaded { epoch; target; filename; result } ->
+      if not (Epoch.is_current ~current:m.epoch ~reply:epoch) then (m, [])
+      else
+        let drafts0 =
+          match target with
+          | Cmd.Upload_for_keeper keeper ->
+              Drafts.dec_uploading ~keeper m.drafts
+          | Cmd.Upload_for_board ->
+              Drafts.dec_board_uploading m.drafts
+        in
+        (match result with
+        | Ok att ->
+            let drafts =
+              match target with
+              | Cmd.Upload_for_keeper keeper ->
+                  Drafts.add_attachment ~keeper att drafts0
+              | Cmd.Upload_for_board ->
+                  Drafts.add_board_attachment att drafts0
+            in
+            let chip = Wire_attachment.format_chip att in
+            let next =
+              { m with drafts }
+              |> Model.with_toast ~now ~level:Model.Toast_success
+                   (Say.make
+                      ~ko:(Printf.sprintf "첨부 완료 %s" chip)
+                      ~en:(Printf.sprintf "Attached %s" chip))
+            in
+            (next, [])
+        | Error reason ->
+            let label =
+              match filename with
+              | Some s when not (String.equal (String.trim s) "") ->
+                  String.trim s
+              | Some _ | None -> "attachment"
+            in
+            let next =
+              { m with drafts = drafts0 }
+              |> Model.with_toast ~now ~level:Model.Toast_warning
+                   (Say.make
+                      ~ko:(Printf.sprintf "첨부 실패 (%s): %s" label reason)
+                      ~en:(Printf.sprintf "Attach failed (%s): %s" label reason))
+            in
+            (next, []))
+  | Msg.Inspector_image_fetched { epoch; url; result } ->
+      if not (Epoch.is_current ~current:m.epoch ~reply:epoch) then (m, [])
+      else
+        (match m.image_inspector with
+        | None -> (m, [])
+        | Some st -> (
+            match Model.current_inspected_image st with
+            | Some img when String.equal img.media_path url ->
+                let fetched =
+                  match result with
+                  | Ok (bytes, dims) ->
+                      let resolved_dims =
+                        match dims with
+                        | Some d -> Some d
+                        | None -> (
+                            match img.width, img.height with
+                            | Some w, Some h when w > 0 && h > 0 -> Some (w, h)
+                            | _ -> None)
+                      in
+                      Observed.value ~observed_at:now
+                        (url, bytes, resolved_dims)
+                  | Error reason ->
+                      Observed.failed ~reason ~retryable:true ~at:now
+                in
+                ({ m with image_inspector = Some { st with fetched } }, [])
+            | Some _ | None -> (m, [])))
 
 let clear_work_reads (work : Work_store.t) =
   let clear = function

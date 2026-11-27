@@ -122,6 +122,8 @@ let composer_state_of_model (m : Model.t) : Composer.state =
     voice = voice_state_of_drafts m.drafts;
     popup = popup_of_draft m draft;
     draft_count_other_keepers = Drafts.other_keepers_draft_count m.drafts;
+    attachments = List.map Wire_attachment.format_chip draft.attachments;
+    uploading_count = draft.uploading_count;
   }
 
 let snapshot_age_str ~(model : Model.t) (obs_opt : Clock.Mono.t option) =

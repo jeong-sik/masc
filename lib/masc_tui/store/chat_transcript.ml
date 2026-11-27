@@ -747,43 +747,142 @@ let markdown_body_lines ~theme ~width ~rail_present ~prefix text =
   Markdown.render_lines ~theme ~width:body_w ~osc8:true rewritten
 
 let retained_image_height ~(model : Model.t) ~keeper ~width =
-  let fresh =
-    Fleet_store.String_map.find_opt keeper model.fleet.chat_histories
-    |> Option.exists (fun history -> Observed.is_value history && not (Observed.is_stale history))
-  in
-  match (Probe.current_observation ()).graphics with
-  | Some Graphics_supported when fresh && width >= 16 -> 6
-  | Some Graphics_supported | Some (Graphics_refused _) | None -> 1
+  let _ = (model, keeper) in
+  if width >= 16 then 6 else 1
 
-let is_inline_png_retained_image (img : Wire_fleet.retained_image) =
-  match img.mime_type with
-  | None -> true
-  | Some m -> String.equal (String.lowercase_ascii (String.trim m)) "image/png"
+let is_inline_retained_image (img : Wire_fleet.retained_image) =
+  match img.kind, img.mime_type with
+  | Wire_attachment.Kind_image, None -> true
+  | Wire_attachment.Kind_image, Some m -> Wire_attachment.is_raster_image_mime m
+  | (Wire_attachment.Kind_audio | Wire_attachment.Kind_document), _ -> false
+
+let format_retained_bytes = function
+  | Some n when n > 0 ->
+      if n < 1024 then Some (Printf.sprintf "%dB" n)
+      else if n < 1024 * 1024 then Some (Printf.sprintf "%dKB" ((n + 511) / 1024))
+      else Some (Printf.sprintf "%.1fMB" (float_of_int n /. (1024.0 *. 1024.0)))
+  | Some _ | None -> None
 
 let retained_image_rows ~(theme : Theme.t) ~lang ~width ~height images =
   List.concat_map
     (fun (img : Wire_fleet.retained_image) ->
-      let { Wire_fleet.media_path; caption; mime_type } = img in
-      let default_name = Say.resolve lang (Say.make ~ko:"생성 이미지" ~en:"Generated image") in
-      let base_name = Option.value caption ~default:default_name in
-      if is_inline_png_retained_image img then
-        let text = Grapheme.truncate_to_width ~max_width:(Int.max 1 (width - 4)) base_name in
-        let spans = [ { Markdown.text; style = Typography.whisper theme; hyperlink = None } ] in
-        let count = height - 1 in
-        let rows : Cell_grid.document_image_rows = { source = Retained_png media_path; count } in
-        { Markdown.spans; image_part = None }
-        :: List.init count (fun index ->
-               { Markdown.spans = []; image_part = Some { rows; index; left_inset = 0 } })
-      else
-        let label =
-          match mime_type with
-          | Some m -> Printf.sprintf "[%s] %s (%s)" m base_name media_path
-          | None -> Printf.sprintf "%s (%s)" base_name media_path
+      let default_name =
+        match img.kind with
+        | Wire_attachment.Kind_image ->
+            Say.resolve lang (Say.make ~ko:"이미지" ~en:"Image")
+        | Wire_attachment.Kind_audio ->
+            Say.resolve lang (Say.make ~ko:"오디오" ~en:"Audio")
+        | Wire_attachment.Kind_document ->
+            Say.resolve lang (Say.make ~ko:"문서" ~en:"Document")
+      in
+      let base_name =
+        match img.caption, img.filename with
+        | Some c, _ when not (String.equal (String.trim c) "") -> c
+        | _, Some f when not (String.equal (String.trim f) "") -> Filename.basename f
+        | _ -> default_name
+      in
+      let dims_part =
+        match img.width, img.height with
+        | Some w, Some h when w > 0 && h > 0 -> Some (Printf.sprintf "%dx%d" w h)
+        | _ -> None
+      in
+      let size_part = format_retained_bytes img.bytes in
+      if is_inline_retained_image img then
+        let meta_parts =
+          List.filter_map Fun.id
+            [
+              dims_part;
+              size_part;
+              Some (Say.resolve lang (Say.make ~ko:"[M] 크게 보기" ~en:"[M] Inspect"));
+            ]
         in
-        let text = Grapheme.truncate_to_width ~max_width:(Int.max 1 (width - 4)) label in
-        let spans = [ { Markdown.text; style = Typography.whisper theme; hyperlink = None } ] in
+        let caption_line =
+          Printf.sprintf "[img] %s · %s" base_name
+            (String.concat " · " meta_parts)
+        in
+        let text =
+          Grapheme.truncate_to_width ~max_width:(Int.max 1 (width - 4)) caption_line
+        in
+        let spans =
+          [ { Markdown.text; style = Typography.whisper theme; hyperlink = None } ]
+        in
+        let count = Int.max 0 (height - 1) in
+        if count = 0 then [ { Markdown.spans; image_part = None } ]
+        else
+          let rows : Cell_grid.document_image_rows =
+            {
+              source =
+                Cell_grid.Retained_image
+                  { path = img.media_path; mime_type = img.mime_type };
+              count;
+            }
+          in
+          { Markdown.spans; image_part = None }
+          :: List.init count (fun index ->
+                 {
+                   Markdown.spans = [];
+                   image_part = Some { rows; index; left_inset = 0 };
+                 })
+      else
+        let tag =
+          match img.kind, img.mime_type with
+          | Wire_attachment.Kind_audio, _ -> "audio"
+          | Wire_attachment.Kind_document, Some m
+            when String.equal (String.lowercase_ascii m) "application/pdf" ->
+              "pdf"
+          | Wire_attachment.Kind_document, _ -> "file"
+          | Wire_attachment.Kind_image, Some m -> m
+          | Wire_attachment.Kind_image, None -> "img"
+        in
+        let meta =
+          List.filter_map Fun.id [ size_part; Some img.media_path ]
+        in
+        let label =
+          Printf.sprintf "[%s] %s · %s" tag base_name (String.concat " · " meta)
+        in
+        let text =
+          Grapheme.truncate_to_width ~max_width:(Int.max 1 (width - 4)) label
+        in
+        let spans =
+          [ { Markdown.text; style = Typography.whisper theme; hyperlink = None } ]
+        in
         [ { Markdown.spans; image_part = None } ])
     images
+
+let collect_chat_images ~(model : Model.t) ~keeper =
+  let seen = Hashtbl.create 16 in
+  let rev_acc = ref [] in
+  let add (img : Wire_fleet.retained_image) =
+    if is_inline_retained_image img then
+      let key =
+        match img.attachment_id with
+        | Some id when not (String.equal id "") -> "id:" ^ id
+        | Some _ | None -> "url:" ^ img.media_path
+      in
+      if not (Hashtbl.mem seen key) then begin
+        Hashtbl.replace seen key ();
+        rev_acc := img :: !rev_acc
+      end
+  in
+  let hist_msgs =
+    match Fleet_store.String_map.find_opt keeper model.fleet.chat_histories with
+    | Some obs -> (
+        match Observed.to_option obs with Some p -> p.messages | None -> [])
+    | None -> []
+  in
+  List.iter
+    (fun (msg : Wire_fleet.chat_message) -> List.iter add msg.retained_images)
+    hist_msgs;
+  List.iter
+    (fun (tx : Drafts.pending_message) ->
+      List.iter
+        (fun att -> add (Wire_fleet.retained_image_of_attachment att))
+        tx.attachments)
+    (Drafts.pending_txs_for_keeper ~keeper model.drafts);
+  (match Fleet_store.String_map.find_opt keeper model.fleet.chat_streams with
+   | Some buf -> List.iter add buf.attachments
+   | None -> ());
+  List.rev !rev_acc
 
 let stream_reply_already_persisted (hist_msgs : Wire_fleet.chat_message list)
     (buf : Fleet_store.chat_stream_buffer) =
@@ -1697,6 +1796,7 @@ type stream_projection = {
   show_thinking : bool;
   show_tools : bool;
   show_text : bool;
+  show_attachments : bool;
   show_error : string option;
 }
 
@@ -2544,6 +2644,7 @@ let project_transcript ~(model : Model.t) ~keeper =
           in
           let show_tools = buf.tools <> [] in
           let show_text = not (String.equal (String.trim buf.text) "") in
+          let show_attachments = buf.attachments <> [] in
           let show_error =
             match buf.last_error with
             | None -> None
@@ -2579,6 +2680,7 @@ let project_transcript ~(model : Model.t) ~keeper =
             Option.is_none show_retry && Option.is_none show_checkpoint
             && Option.is_none show_protocol_warning
             && (not show_thinking) && (not show_tools) && (not show_text)
+            && (not show_attachments)
             && Option.is_none show_error
           then None
           else
@@ -2592,6 +2694,7 @@ let project_transcript ~(model : Model.t) ~keeper =
                 show_thinking;
                 show_tools;
                 show_text;
+                show_attachments;
                 show_error;
               }
   in
@@ -2726,6 +2829,8 @@ let keeper_content_rect_size ~embedded ~(model : Model.t) =
             popup = Composer.Popup_none;
             draft_count_other_keepers =
               Drafts.other_keepers_draft_count sized_model.drafts;
+            attachments = List.map Wire_attachment.format_chip draft.attachments;
+            uploading_count = draft.uploading_count;
           }
         in
         Composer.desired_height ~breakpoint ~max_height:max_h comp_st
@@ -2989,7 +3094,7 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
           in
           let media_r =
             List.fold_left
-              (fun sum img -> sum + if is_inline_png_retained_image img then retained_height else 1)
+              (fun sum img -> sum + if is_inline_retained_image img then retained_height else 1)
               0 msg.retained_images
           in
           (false, acc + spacing + msg_r + media_r))
@@ -3040,11 +3145,19 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
         + count_markdown_rows ~theme ~width ~rail_present:false ~prefix:"  "
             buf.text
     in
+    let att_r =
+      if not sp.show_attachments then 0
+      else
+        List.fold_left
+          (fun sum img ->
+            sum + if is_inline_retained_image img then retained_height else 1)
+          0 buf.attachments
+    in
     let retry_r = match sp.show_retry with Some _ -> 1 | None -> 0 in
     let ckpt_r = match sp.show_checkpoint with Some _ -> 1 | None -> 0 in
     let proto_r = match sp.show_protocol_warning with Some _ -> 1 | None -> 0 in
     let err_r = match sp.show_error with Some _ -> 1 | None -> 0 in
-    retry_r + ckpt_r + proto_r + think_r + tools_r + text_r + err_r
+    retry_r + ckpt_r + proto_r + think_r + tools_r + text_r + att_r + err_r
   in
   let sections = project_transcript ~model ~keeper in
   let _, total =
@@ -3059,7 +3172,20 @@ let count_transcript_rows ~(model : Model.t) ~keeper ~width =
               in
               summary + progress_row_count turn
               + if Option.is_some (active_turn_preview_tail turn) then 1 else 0
-          | Section_pending txs -> List.length txs
+          | Section_pending txs ->
+              List.fold_left
+                (fun sum (item : pending_tx_projection) ->
+                  let att_rows =
+                    if item.notice_only then 0
+                    else
+                      List.fold_left
+                        (fun a att ->
+                          let img = Wire_fleet.retained_image_of_attachment att in
+                          a + if is_inline_retained_image img then retained_height else 1)
+                        0 item.tx.attachments
+                  in
+                  sum + 1 + att_rows)
+                0 txs
           | Section_stream sp -> count_stream sp
         in
         if rows = 0 then (first, acc)

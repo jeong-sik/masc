@@ -67,6 +67,8 @@ type state = {
   voice : voice_state;
   popup : popup;
   draft_count_other_keepers : int;
+  attachments : string list;
+  uploading_count : int;
 }
 
 let equal_pending_tx a b =
@@ -130,6 +132,8 @@ let empty ~target_keeper =
     voice = Voice_off;
     popup = Popup_none;
     draft_count_other_keepers = 0;
+    attachments = [];
+    uploading_count = 0;
   }
 
 let pending_tx_label = function
@@ -214,20 +218,27 @@ let is_voice_active = function
   | Voice_off -> false
   | Voice_recording _ | Voice_transcribing -> true
 
+let has_attachment_tray (st : state) =
+  st.attachments <> [] || st.uploading_count > 0
+
 let resolve_mode ~breakpoint (st : state) =
-  let has_draft = String.length st.draft > 0 in
+  let has_draft = String.length st.draft > 0 || has_attachment_tray st in
   let voice_on = is_voice_active st.voice in
   let has_pending = not (equal_pending_tx st.pending_tx Tx_idle) in
   match breakpoint with
   | Layout.Compact ->
       if (not st.focused) && (not has_draft) && (not voice_on) && not has_pending
       then Auto_folded_pill
-      else if st.focused || String.contains st.draft '\n' || voice_on then
-        Expanded_multiline
+      else if
+        st.focused || String.contains st.draft '\n' || voice_on
+        || has_attachment_tray st
+      then Expanded_multiline
       else Collapsed_bar
   | Layout.Wide | Layout.Standard ->
-      if st.focused || String.contains st.draft '\n' || voice_on then
-        Expanded_multiline
+      if
+        st.focused || String.contains st.draft '\n' || voice_on
+        || has_attachment_tray st
+      then Expanded_multiline
       else Collapsed_bar
   | Layout.Micro -> Collapsed_bar
 
@@ -238,7 +249,10 @@ let desired_height ~breakpoint ~max_height (st : state) =
   | Collapsed_bar -> 1
   | Expanded_multiline ->
       let draft_lines = List.length (String.split_on_char '\n' st.draft) in
-      let extra = if is_voice_active st.voice then 1 else 0 in
+      let extra =
+        (if is_voice_active st.voice then 1 else 0)
+        + if has_attachment_tray st then 1 else 0
+      in
       Int.max 2 (Int.min cap (draft_lines + 1 + extra))
 
 let folded_footer_pill ~lang (st : state) =
@@ -661,8 +675,63 @@ let draw ?(show_pending_tx = true) ?(terminal_focused = true) grid
         end
         else begin
           (* Expanded multiline editor below header row *)
+          let att_tray_rows =
+            if has_attachment_tray st && rect.h - 1 - voice_row_offset >= 2 then
+              let ty = rect.y + rect.h - 1 - voice_row_offset in
+              let tr = Rect.make ~x:rect.x ~y:ty ~w:rect.w ~h:1 in
+              let chip_style = Typography.accent ~bg ~bold:true theme in
+              let upload_style =
+                Typography.status ~bg ~italic:true theme Theme.Status_active
+              in
+              let hint_style = Typography.whisper ~bg theme in
+              let cx = ref left_x in
+              let right_lim = Rect.right rect - 1 in
+              List.iter
+                (fun chip ->
+                  let avail = right_lim - !cx in
+                  if avail >= 6 then begin
+                    let adv =
+                      Cell_grid.put_text ~clip:tr grid ~x:!cx ~y:ty
+                        ~style:chip_style
+                        (Grapheme.truncate_to_width ~max_width:avail chip)
+                    in
+                    cx := !cx + adv + 1
+                  end)
+                st.attachments;
+              if st.uploading_count > 0 && right_lim - !cx >= 8 then begin
+                let lbl =
+                  Say.resolve lang
+                    (Say.make
+                       ~ko:(Printf.sprintf "업로드 중(%d)…" st.uploading_count)
+                       ~en:(Printf.sprintf "Uploading(%d)…" st.uploading_count))
+                in
+                let adv =
+                  Cell_grid.put_text ~clip:tr grid ~x:!cx ~y:ty
+                    ~style:upload_style
+                    (Grapheme.truncate_to_width
+                       ~max_width:(right_lim - !cx) lbl)
+                in
+                cx := !cx + adv + 1
+              end;
+              if st.attachments <> [] && right_lim - !cx >= 12 then begin
+                let hint =
+                  Say.resolve lang
+                    (Say.make ~ko:"· /detach 또는 Backspace 제거"
+                       ~en:"· /detach or Backspace to remove")
+                in
+                ignore
+                  (Cell_grid.put_text ~clip:tr grid ~x:!cx ~y:ty
+                     ~style:hint_style
+                     (Grapheme.truncate_to_width
+                        ~max_width:(right_lim - !cx) hint))
+              end;
+              1
+            else 0
+          in
           let body_top = rect.y + 1 in
-          let body_rows = Int.max 0 (rect.h - 1 - voice_row_offset) in
+          let body_rows =
+            Int.max 0 (rect.h - 1 - voice_row_offset - att_tray_rows)
+          in
           if body_rows = 0 then Presenter.hidden_cursor
           else begin
             let lines = String.split_on_char '\n' st.draft in

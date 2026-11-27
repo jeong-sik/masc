@@ -206,6 +206,7 @@ let mk_post ~id ~title ~author ~signal : Wire_knowledge.board_post =
     chain_depth = None;
     is_signal = signal;
     pinned = false;
+    attachments = [];
   }
 
 let mk_wiki_summary ~slug ~title : Wire_knowledge.wiki_page_summary =
@@ -741,6 +742,8 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
             declared_reasoning_effort = None;
             transport = Some "https";
             is_default = true;
+            supports_image_input = None;
+            supports_image_output = None;
           };
           {
             id = "gpt-5";
@@ -750,9 +753,12 @@ let populated_model ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_en)
             declared_reasoning_effort = None;
             transport = Some "https";
             is_default = false;
+            supports_image_input = None;
+            supports_image_output = None;
           };
         ];
       usage_windows = Some usage_windows;
+      media = None;
     }
   in
   let tools : Wire_runtime.tool_summary list =
@@ -4473,6 +4479,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
         lanes = many_lanes;
         runtimes = [];
         usage_windows = None;
+        media = None;
       }
     in
     {
@@ -4980,6 +4987,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
         ];
       runtimes = [];
       usage_windows = None;
+      media = None;
     }
   in
   let m_lane_p1 =
@@ -5583,6 +5591,7 @@ let test_pillar2_scroll_bounds_all_surfaces () =
           body;
           created_at_unix = 1700000100.0 +. float_of_int i;
           score = 1;
+          attachments = [];
         })
   in
   let post1 =

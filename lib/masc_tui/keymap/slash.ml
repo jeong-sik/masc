@@ -14,6 +14,9 @@ type command_id =
   | Cmd_incidents
   | Cmd_jump
   | Cmd_voice
+  | Cmd_attach
+  | Cmd_detach
+  | Cmd_paste_image
   | Cmd_btw
   | Cmd_discord_reply
   | Cmd_wake
@@ -188,6 +191,9 @@ type parsed =
   | Incidents
   | Jump
   | Voice
+  | Attach of string
+  | Detach of [ `Last | `All | `Index of int ]
+  | Paste_image
   | Btw of string
   | Discord_reply
   | Wake of string option
@@ -271,6 +277,9 @@ let command_id_rank = function
   | Cmd_quit -> 35
   | Cmd_discord_reply -> 36
   | Cmd_account -> 37
+  | Cmd_attach -> 38
+  | Cmd_detach -> 39
+  | Cmd_paste_image -> 40
 
 let equal_command_id a b = Int.equal (command_id_rank a) (command_id_rank b)
 
@@ -628,6 +637,15 @@ let parsed_tag = function
   | Score _ -> 37
   | Discord_reply -> 38
   | Account -> 39
+  | Attach _ -> 40
+  | Detach _ -> 41
+  | Paste_image -> 42
+
+let equal_detach_target a b =
+  match a, b with
+  | `Last, `Last | `All, `All -> true
+  | `Index x, `Index y -> Int.equal x y
+  | (`Last | `All | `Index _), (`Last | `All | `Index _) -> false
 
 let equal_parsed a b =
   if not (Int.equal (parsed_tag a) (parsed_tag b)) then false
@@ -636,6 +654,8 @@ let equal_parsed a b =
     | Keeper x, Keeper y -> Option.equal String.equal x y
     | Model x, Model y -> Option.equal String.equal x y
     | Config x, Config y -> Option.equal String.equal x y
+    | Attach x, Attach y -> String.equal x y
+    | Detach x, Detach y -> equal_detach_target x y
     | Btw x, Btw y -> String.equal x y
     | Wake x, Wake y -> Option.equal String.equal x y
     | Up x, Up y -> Option.equal String.equal x y
@@ -669,6 +689,7 @@ let equal_parsed a b =
     | Incidents, Incidents
     | Jump, Jump
     | Voice, Voice
+    | Paste_image, Paste_image
     | Discord_reply, Discord_reply
     | Queue, Queue
     | Context, Context
@@ -690,6 +711,9 @@ let equal_parsed a b =
       | Incidents
       | Jump
       | Voice
+      | Attach _
+      | Detach _
+      | Paste_image
       | Btw _
       | Discord_reply
       | Wake _
@@ -780,6 +804,17 @@ let all : spec list =
       ~en:"Teleport to highest-priority blocked item" Slash_interaction;
     mk Cmd_voice "/voice" ~ko:"음성 입력(PTT) 토글"
       ~en:"Toggle Voice Push-to-Talk" Slash_interaction;
+    mk Cmd_attach "/attach"
+      ~arg_hint:(Say.make ~ko:"<경로>" ~en:"<path>")
+      ~ko:"로컬 이미지·PDF·오디오 파일 첨부"
+      ~en:"Attach a local image, PDF, or audio file" Slash_interaction;
+    mk Cmd_detach "/detach"
+      ~arg_hint:(Say.make ~ko:"[번호|all]" ~en:"[index|all]")
+      ~ko:"작성 중인 첨부 제거"
+      ~en:"Remove draft attachment(s)" Slash_interaction;
+    mk Cmd_paste_image "/paste-image"
+      ~ko:"클립보드 이미지 첨부 (Ctrl+V)"
+      ~en:"Attach image from system clipboard (Ctrl+V)" Slash_interaction;
     mk Cmd_discord_reply "/discord-reply"
       ~ko:"키퍼 채팅에서 Discord 원본을 골라 답장"
       ~en:"Select a Discord message in Keeper chat and reply" Slash_interaction;
@@ -2027,6 +2062,40 @@ let parse raw =
     | "/help" -> no_arg cmd Help arg
     | "/restart" -> no_arg cmd Restart arg
     | "/quit" -> no_arg cmd Quit arg
+    | "/attach" -> (
+        match arg with
+        | Some path when not (String.equal (String.trim path) "") ->
+            Ok (Attach (String.trim path))
+        | Some _ | None ->
+            Error
+              (Invalid_argument
+                 {
+                   command = cmd;
+                   expected = Say.make ~ko:"<파일 경로>" ~en:"<file path>";
+                   got = "";
+                 }))
+    | "/detach" -> (
+        match arg with
+        | None -> Ok (Detach `Last)
+        | Some raw -> (
+            let low = String.lowercase_ascii (String.trim raw) in
+            if String.equal low "" || String.equal low "last" then
+              Ok (Detach `Last)
+            else if String.equal low "all" then Ok (Detach `All)
+            else
+              match int_of_string_opt low with
+              | Some n when n >= 1 -> Ok (Detach (`Index n))
+              | Some _ | None ->
+                  Error
+                    (Invalid_argument
+                       {
+                         command = cmd;
+                         expected =
+                           Say.make ~ko:"all | <1부터 시작하는 번호>"
+                             ~en:"all | <1-based index>";
+                         got = raw;
+                       })))
+    | "/paste-image" | "/paste-img" -> no_arg cmd Paste_image arg
     | other -> (
         match unlisted_word_of_command other with
         | Some Music_word -> parse_music ~cmd arg

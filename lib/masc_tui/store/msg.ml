@@ -964,3 +964,14 @@ type t =
       epoch : Epoch.t;
       login_id : string option;
     }
+  | Attachment_uploaded of {
+      epoch : Epoch.t;
+      target : Cmd.attachment_upload_target;
+      filename : string option;
+      result : (Wire_attachment.t, string) result;
+    }
+  | Inspector_image_fetched of {
+      epoch : Epoch.t;
+      url : string;
+      result : (string * (int * int) option, string) result;
+    }

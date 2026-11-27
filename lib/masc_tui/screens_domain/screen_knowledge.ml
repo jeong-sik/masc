@@ -196,9 +196,19 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
               | Some ((Knowledge_store.Vote_post _ | Knowledge_store.Vote_comment _), _)
               | None ->
                   ());
+              let comment_md =
+                if c.attachments = [] then c.body
+                else
+                  let chips =
+                    c.attachments
+                    |> List.map Wire_attachment.format_chip
+                    |> String.concat " "
+                  in
+                  c.body ^ "\n\n" ^ chips
+              in
               ignore
                 (Markdown.draw grid ~rect:content ~theme ~osc8:true
-                   ~scroll:k.thread_comment_scroll c.body)
+                   ~scroll:k.thread_comment_scroll comment_md)
           | None, Some _ ->
               let content = H.pad_content ~bp inner in
               ignore
@@ -225,10 +235,21 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
         in
         (preview_title, Some (chain_subtitle p), Some karma_b)
   in
+  let has_board_images =
+    match post_opt with
+    | Some p ->
+        List.exists
+          (fun (a : Wire_attachment.t) ->
+            Wire_attachment.is_raster_image_mime a.mime_type)
+          p.attachments
+    | None -> false
+  in
   let inner =
     let can_board_write =
       Rbac.is_allowed model.auth_session Rbac.Single_user_write
     in
+    let img_hint_ko = if has_board_images then " · [M] 이미지" else "" in
+    let img_hint_en = if has_board_images then " · [M] Image" else "" in
     Card.draw ~cache grid ~rect ~theme
       (H.card_spec ?subtitle ?badge
          ~hotkey:
@@ -236,15 +257,15 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
               (if zoomed then
                  if can_board_write then
                    Say.make
-                     ~ko:"[v] 댓글 전문 · < / > 댓글 · [c] 답글 · +/- 투표"
-                     ~en:"[v] Comments · < / > Step · [c] Reply · +/- Vote"
+                     ~ko:("[v] 댓글 전문 · < / > 댓글 · [c] 답글 · +/- 투표" ^ img_hint_ko)
+                     ~en:("[v] Comments · < / > Step · [c] Reply · +/- Vote" ^ img_hint_en)
                  else
-                   Say.make ~ko:"[v] 댓글 전문 · < / > 댓글"
-                     ~en:"[v] Comments · < / > Step"
+                   Say.make ~ko:("[v] 댓글 전문 · < / > 댓글" ^ img_hint_ko)
+                     ~en:("[v] Comments · < / > Step" ^ img_hint_en)
                else
                  Say.make
-                   ~ko:"[Enter/z] 확대 · [v] 댓글 전문 · < / > 댓글"
-                   ~en:"[Enter/z] Zoom · [v] Comments · < / > Step"))
+                   ~ko:("[Enter/z] 확대 · [v] 댓글 전문 · < / > 댓글" ^ img_hint_ko)
+                   ~en:("[Enter/z] Zoom · [v] Comments · < / > Step" ^ img_hint_en)))
          ~focused title)
   in
   if Rect.is_empty inner then ()
@@ -460,11 +481,49 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                                     @ [ `Body (body_indent, `Plain more) ]
                                   else List.map render_one lines
                             in
-                            `Hdr (hdr, c_age) :: body_rows)
+                            let att_rows =
+                              if c.attachments = [] then []
+                              else
+                                let chips =
+                                  c.attachments
+                                  |> List.map Wire_attachment.format_chip
+                                  |> String.concat " "
+                                in
+                                [ `Body (body_indent, `Plain chips) ]
+                            in
+                            `Hdr (hdr, c_age) :: (body_rows @ att_rows))
                           threaded)
           in
-          let comment_count = List.length comment_rows_list in
-          let total_lines = body_count + comment_count in
+          let post_attachment_rows =
+            if p.attachments = [] then []
+            else
+              let img_h = if content.w >= 16 then 6 else 0 in
+              let img_rows_of (att : Wire_attachment.t) count =
+                {
+                  Cell_grid.source =
+                    Cell_grid.Retained_image
+                      { path = att.url; mime_type = Some att.mime_type };
+                  count;
+                }
+              in
+              List.concat
+                (List.map
+                   (fun (att : Wire_attachment.t) ->
+                     if
+                       img_h > 0
+                       && Wire_attachment.is_raster_image_mime att.mime_type
+                     then
+                       let rows = img_rows_of att img_h in
+                       let slots =
+                         List.init img_h (fun row_off -> `Img_slot (rows, row_off))
+                       in
+                       slots @ [ `Img_caption att ]
+                     else [ `Att_chip att ])
+                   p.attachments)
+          in
+          let combined_rows = post_attachment_rows @ comment_rows_list in
+          let extra_count = List.length combined_rows in
+          let total_lines = body_count + extra_count in
           let rem_h = Int.max 0 (bottom - !y) in
           let has_indicator = total_lines > rem_h && rem_h >= 2 in
           let eff_h = if has_indicator then rem_h - 1 else rem_h in
@@ -518,9 +577,42 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
             end;
             let c_skip = Int.max 0 (scroll - body_count) in
             let c_avail = Int.max 0 (bottom - !y) in
-            if c_avail > 0 && comment_count > 0 then
+            if c_avail > 0 && extra_count > 0 then begin
+              let visible_rows =
+                Store_scroll.drop c_skip combined_rows |> H.safe_take c_avail
+              in
               List.iter
                 (function
+                  | `Img_slot (rows, row_off) ->
+                      if !y < bottom then begin
+                        let row_rect =
+                          Rect.make ~x:content.x ~y:!y ~w:content.w ~h:1
+                        in
+                        Cell_grid.register_document_image_part grid
+                          ~rect:row_rect
+                          { Cell_grid.rows; index = row_off; left_inset = 0 };
+                        incr y
+                      end
+                  | `Img_caption (att : Wire_attachment.t) ->
+                      if !y < bottom then begin
+                        let cap =
+                          Wire_attachment.format_chip att ^ " · [M] "
+                          ^ Say.resolve lang (Say.make ~ko:"확대" ~en:"Inspect")
+                        in
+                        ignore
+                          (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                             ~max_w:content.w ~style:(H.whisper_style ~theme ())
+                             cap);
+                        incr y
+                      end
+                  | `Att_chip (att : Wire_attachment.t) ->
+                      if !y < bottom then begin
+                        ignore
+                          (H.put_clipped ~grid ~clip:content ~x:content.x ~y:!y
+                             ~max_w:content.w ~style:(H.accent_style ~theme ())
+                             (Wire_attachment.format_chip att));
+                        incr y
+                      end
                   | `Divider ->
                       if !y < bottom then begin
                         let page_s =
@@ -583,7 +675,8 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
                                  ~style:(H.secondary_style ~theme ()) text));
                         incr y
                       end)
-                (Store_scroll.drop c_skip comment_rows_list |> H.safe_take c_avail)
+                visible_rows
+            end
           end
 
 let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)

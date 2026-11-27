@@ -80,7 +80,8 @@ let test_config_schema_server_to_tui_roundtrip () =
       (Printf.sprintf
          "[runtime]\n\
           default = \"lane.primary\"\n\
-          media_failover = [\"vision.a\", \"vision.b\"]\n\
+          [runtime.media]\n\
+          vision_reader = \"vision.a\"\n\
           [runtime.assignments]\n\
           code_reviewer = \"lane.review\"\n\
           [runtime.lanes.primary]\n\
@@ -190,7 +191,6 @@ let test_config_schema_server_to_tui_roundtrip () =
                 true
                 (List.mem expected_key routing_keys))
            [ "runtime.default"
-           ; "runtime.media_failover"
            ; "runtime.assignments.code_reviewer"
            ; "runtime.lanes.primary.members"
            ; "routing.strategy"

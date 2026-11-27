@@ -144,7 +144,12 @@ let apply_page_checked (page : Journal.page) t =
                 | Drop -> fold ~pieces ~ownership rest)
             | Journal.Run_finished | Journal.Event_error ->
                 Ok (finish ~pieces ~ownership Ended)
-            | Journal.Other -> fold ~pieces ~ownership rest)
+            | Journal.Attachment_emitted _
+            | Journal.Media_delta _
+            | Journal.Image_block _
+            | Journal.Audio_block _
+            | Journal.Other ->
+                fold ~pieces ~ownership rest)
       in
       fold ~pieces:[ t.text ] ~ownership:t.ownership page.events
 

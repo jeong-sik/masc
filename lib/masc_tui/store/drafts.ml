@@ -22,6 +22,7 @@ type pending_message = {
   request_id : string;
   keeper : string;
   body : string;
+  attachments : Wire_attachment.t list;
   mode : delivery_mode;
   operation_id : string option;
   batch_execution_id : Keeper_chat_operation.Operation_id.t option;
@@ -34,6 +35,8 @@ type keeper_draft = {
   text : string;
   cursor : int;
   preferred_mode : delivery_mode;
+  attachments : Wire_attachment.t list;
+  uploading_count : int;
 }
 
 type voice_phase =
@@ -83,6 +86,8 @@ type t = {
   popup_selected : int;
   popup_navigated : bool;
   popup_dismissed : bool;
+  board_attachments : Wire_attachment.t list;
+  board_uploading_count : int;
 }
 
 let default_keeper_key = "_default"
@@ -90,7 +95,13 @@ let max_voice_levels = 32
 let max_retained_txs = 64
 
 let empty_keeper_draft =
-  { text = ""; cursor = 0; preferred_mode = Mode_follow_up }
+  {
+    text = "";
+    cursor = 0;
+    preferred_mode = Mode_follow_up;
+    attachments = [];
+    uploading_count = 0;
+  }
 
 let empty =
   {
@@ -106,6 +117,8 @@ let empty =
     popup_selected = 0;
     popup_navigated = false;
     popup_dismissed = false;
+    board_attachments = [];
+    board_uploading_count = 0;
   }
 
 let equal_delivery_mode a b =
@@ -161,14 +174,17 @@ let clamp_cursor = Masc_tui_core.Text_util.clamp_utf8_cursor
 let prev_utf8_boundary = Masc_tui_core.Text_util.prev_utf8_boundary
 let next_utf8_boundary = Masc_tui_core.Text_util.next_utf8_boundary
 
-let with_keeper_draft ~keeper ?(reset_popup = true) f t =
+let draft_is_completely_empty (d : keeper_draft) =
+  String.equal d.text ""
+  && d.attachments = []
+  && d.uploading_count <= 0
+  && equal_delivery_mode d.preferred_mode Mode_follow_up
+
+let with_keeper_draft ?(reset_popup = true) ~keeper f t =
   let prev = draft_for ~keeper t in
   let next = f prev in
   let by_keeper =
-    if
-      String.equal next.text ""
-      && equal_delivery_mode next.preferred_mode Mode_follow_up
-    then String_map.remove keeper t.by_keeper
+    if draft_is_completely_empty next then String_map.remove keeper t.by_keeper
     else String_map.add keeper next t.by_keeper
   in
   if reset_popup && String.equal keeper (target_keeper_key t) then
@@ -182,8 +198,7 @@ let with_keeper_draft ~keeper ?(reset_popup = true) f t =
   else { t with by_keeper }
 
 let with_current_draft ?(reset_popup = true) f t =
-  with_keeper_draft ~keeper:(target_keeper_key t) ~reset_popup f t
-
+  with_keeper_draft ~reset_popup ~keeper:(target_keeper_key t) f t
 let set_active_keeper name t =
   let trimmed = String.trim name in
   if String.equal trimmed "" then t
@@ -237,7 +252,8 @@ let set_focus focused t =
 let is_focused t = t.focused
 
 let has_non_empty_draft t =
-  not (String.equal (current_draft t).text "")
+  let d = current_draft t in
+  (not (String.equal d.text "")) || d.attachments <> []
 
 let current_draft_is_multiline t =
   String.contains (current_draft t).text '\n'
@@ -249,7 +265,7 @@ let other_keepers_draft_count t =
       if
         (not (String.equal k active))
         && (not (String.equal k default_keeper_key))
-        && not (String.equal d.text "")
+        && ((not (String.equal d.text "")) || d.attachments <> [])
       then acc + 1
       else acc)
     t.by_keeper 0
@@ -288,7 +304,12 @@ let backspace t =
   with_current_draft
     (fun d ->
       let c = clamp_cursor d.text d.cursor in
-      if c <= 0 then d
+      if c <= 0 then
+        if String.equal d.text "" && d.attachments <> [] then
+          match List.rev d.attachments with
+          | _ :: rest -> { d with attachments = List.rev rest }
+          | [] -> d
+        else d
       else
         let prev = prev_utf8_boundary d.text c in
         let before = String.sub d.text 0 prev in
@@ -483,10 +504,92 @@ let move_cursor_line dir t =
     t
 
 let clear_current_draft t =
-  with_current_draft (fun d -> { d with text = ""; cursor = 0 }) t
+  with_current_draft (fun d -> { d with text = ""; cursor = 0; attachments = [] }) t
 
 let set_preferred_mode preferred_mode t =
   with_current_draft ~reset_popup:false (fun d -> { d with preferred_mode }) t
+
+let append_unique_attachment att list =
+  if List.exists (fun (a : Wire_attachment.t) -> String.equal a.attachment_id att.Wire_attachment.attachment_id) list
+  then list
+  else list @ [ att ]
+
+let add_attachment ~keeper att t =
+  with_keeper_draft ~reset_popup:false ~keeper
+    (fun d -> { d with attachments = append_unique_attachment att d.attachments })
+    t
+
+let remove_last_attachment t =
+  let d = current_draft t in
+  match List.rev d.attachments with
+  | [] -> (t, None)
+  | last :: rest ->
+      let next =
+        with_current_draft ~reset_popup:false
+          (fun cur -> { cur with attachments = List.rev rest })
+          t
+      in
+      (next, Some last)
+
+let remove_attachment_at idx_1based t =
+  let d = current_draft t in
+  let target = idx_1based - 1 in
+  if target < 0 || target >= List.length d.attachments then (t, None)
+  else
+    let removed = ref None in
+    let kept =
+      List.filteri
+        (fun i a ->
+          if Int.equal i target then begin
+            removed := Some a;
+            false
+          end
+          else true)
+        d.attachments
+    in
+    let next =
+      with_current_draft ~reset_popup:false
+        (fun cur -> { cur with attachments = kept })
+        t
+    in
+    (next, !removed)
+
+let clear_attachments t =
+  let n = List.length (current_draft t).attachments in
+  if n = 0 then (t, 0)
+  else
+    ( with_current_draft ~reset_popup:false
+        (fun cur -> { cur with attachments = [] })
+        t
+    , n )
+
+let inc_uploading ~keeper t =
+  with_keeper_draft ~reset_popup:false ~keeper
+    (fun d -> { d with uploading_count = d.uploading_count + 1 })
+    t
+
+let dec_uploading ~keeper t =
+  with_keeper_draft ~reset_popup:false ~keeper
+    (fun d -> { d with uploading_count = Int.max 0 (d.uploading_count - 1) })
+    t
+
+let add_board_attachment att t =
+  { t with board_attachments = append_unique_attachment att t.board_attachments }
+
+let remove_last_board_attachment t =
+  match List.rev t.board_attachments with
+  | [] -> (t, None)
+  | last :: rest ->
+      ({ t with board_attachments = List.rev rest }, Some last)
+
+let clear_board_attachments t =
+  { t with board_attachments = []; board_uploading_count = 0 }
+
+let inc_board_uploading t =
+  { t with board_uploading_count = t.board_uploading_count + 1 }
+
+let dec_board_uploading t =
+  { t with board_uploading_count = Int.max 0 (t.board_uploading_count - 1) }
 
 let move_popup ~delta ~count ~wrap t =
   if count <= 0 then { t with popup_selected = 0; popup_navigated = false }
@@ -542,7 +645,7 @@ let append_bounded_tx msg txs =
 
 let enqueue_submission ~now ~keeper ~mode t =
   let d = draft_for ~keeper t in
-  if String.equal (String.trim d.text) "" then None
+  if String.equal (String.trim d.text) "" && d.attachments = [] then None
   else
     let request_id = fresh_request_id "chat" t.next_request_seq in
     let next_seq =
@@ -553,6 +656,7 @@ let enqueue_submission ~now ~keeper ~mode t =
         request_id;
         keeper;
         body = d.text;
+        attachments = d.attachments;
         mode;
         operation_id = None;
         batch_execution_id = None;
@@ -561,11 +665,10 @@ let enqueue_submission ~now ~keeper ~mode t =
         updated_at = now;
       }
     in
+    let cleared = { d with text = ""; cursor = 0; attachments = [] } in
     let by_keeper =
-      if equal_delivery_mode d.preferred_mode Mode_follow_up then
-        String_map.remove keeper t.by_keeper
-      else
-        String_map.add keeper { d with text = ""; cursor = 0 } t.by_keeper
+      if draft_is_completely_empty cleared then String_map.remove keeper t.by_keeper
+      else String_map.add keeper cleared t.by_keeper
     in
     let pending_txs = append_bounded_tx msg t.pending_txs in
     Some

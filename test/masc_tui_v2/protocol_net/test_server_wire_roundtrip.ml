@@ -544,6 +544,7 @@ let test_board_comment_votes_roundtrip () =
       expires_at = 1795338400.0;
       votes_up = 3;
       votes_down = 1;
+      attachment_ids = [];
     }
   in
   let thread =

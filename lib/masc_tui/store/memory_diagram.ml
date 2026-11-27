@@ -251,6 +251,8 @@ let chrome_body_rect (m : Model.t) =
               popup = Composer.Popup_none;
               draft_count_other_keepers =
                 Drafts.other_keepers_draft_count sized_model.drafts;
+              attachments = List.map Wire_attachment.format_chip draft.attachments;
+              uploading_count = draft.uploading_count;
             }
           in
           Composer.desired_height ~breakpoint:bp ~max_height:max_h comp_st

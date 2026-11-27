@@ -82,6 +82,7 @@ type board_post = {
   chain_depth : int option;
   is_signal : bool;
   pinned : bool;
+  attachments : Wire_attachment.t list;
 }
 
 type board_comment = {
@@ -92,6 +93,7 @@ type board_comment = {
   body : string;
   created_at_unix : float;
   score : int;  (** [votes_up - votes_down] from the server row. *)
+  attachments : Wire_attachment.t list;
 }
 
 type board_feed = {
@@ -158,6 +160,14 @@ type board_hearth_entry = {
 }
 
 val decode_board_hearths : Yojson.Safe.t -> (board_hearth_entry list, string) result
+
+val encode_board_create :
+  title:string ->
+  body:string ->
+  ?hearth:string ->
+  ?attachment_ids:string list ->
+  unit ->
+  Yojson.Safe.t
 
 val encode_board_comment :
   post_id:string -> content:string -> ?parent_id:string -> unit -> Yojson.Safe.t

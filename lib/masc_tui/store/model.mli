@@ -262,6 +262,16 @@ type mouse_selection_state =
     wheel, resize, or new press clears it. The settled text copy is
     performed by the app shell once (see [copied]). *)
 
+type image_inspector_state = {
+  images : Wire_fleet.retained_image list;
+  index : int;
+  zoom : float;
+  pan_x : float;
+  pan_y : float;
+  fetched : (string * string * (int * int) option) Observed.t;
+      (** [(url, png_bytes, pixel_dims)] for the currently selected image. *)
+}
+
 type t = {
   epoch : Epoch.t;
   viewport : viewport;
@@ -292,6 +302,7 @@ type t = {
   personal_keepers : Personal_keepers_store.t;
   palette : palette_state;
   inline_modal : inline_modal_state option;
+  image_inspector : image_inspector_state option;
   discord_replies : Discord_reply_store.t;
   ask_modal : ask_modal option;
   toast : toast option;
@@ -304,6 +315,38 @@ type t = {
   mouse_selection : mouse_selection_state;
   terminal_focused : bool;
 }
+
+val current_inspected_image :
+  image_inspector_state -> Wire_fleet.retained_image option
+val open_image_inspector :
+  now:Clock.Mono.t ->
+  images:Wire_fleet.retained_image list ->
+  ?index:int ->
+  t ->
+  t
+val close_image_inspector : t -> t
+val inspector_zoom_by :
+  factor:float -> image_inspector_state -> image_inspector_state
+val inspector_reset_view : image_inspector_state -> image_inspector_state
+val inspector_pan_by :
+  dx:float -> dy:float -> image_inspector_state -> image_inspector_state
+val inspector_select_delta :
+  now:Clock.Mono.t ->
+  delta:int ->
+  image_inspector_state ->
+  image_inspector_state
+val inspector_viewport_window :
+  img_px:int * int ->
+  zoom:float ->
+  pan_x:float ->
+  pan_y:float ->
+  cols:int ->
+  rows:int ->
+  Masc_tui_term.Graphics.viewport_window
+
+val inspector_modal_rect : outer:Rect.t -> Rect.t
+val inspector_canvas_rect_of_modal : Rect.t -> Rect.t
+val image_inspector_viewport_rect : model:t -> Rect.t option
 
 val equal_cell_pos : cell_pos -> cell_pos -> bool
 val equal_mouse_selection_state : mouse_selection_state -> mouse_selection_state -> bool

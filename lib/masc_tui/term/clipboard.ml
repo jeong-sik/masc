@@ -104,7 +104,17 @@ let xclip =
     stdout_to_dest = true;
   }
 
-let readers = [ osascript; wl_paste; xclip ]
+let pngpaste =
+  {
+    name = "pngpaste";
+    build =
+      (fun ~dest ->
+        String.concat " " [ "pngpaste"; Filename.quote dest; quiet_stderr ]);
+    argv = (fun ~dest -> [| "pngpaste"; dest |]);
+    stdout_to_dest = false;
+  }
+
+let readers = [ pngpaste; osascript; wl_paste; xclip ]
 
 let find_executable name =
   match Sys.getenv_opt "PATH" with

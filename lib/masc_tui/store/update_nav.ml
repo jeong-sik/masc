@@ -153,9 +153,9 @@ let slash_spec_takes_arg (spec : Slash.spec) = Option.is_some spec.arg_hint
 
 let slash_spec_requires_arg (spec : Slash.spec) =
   match spec.id with
-  | Slash.Cmd_btw | Slash.Cmd_ctl | Slash.Cmd_gate | Slash.Cmd_exec
-  | Slash.Cmd_skill | Slash.Cmd_prompt | Slash.Cmd_lane | Slash.Cmd_addon
-  | Slash.Cmd_browser ->
+  | Slash.Cmd_btw | Slash.Cmd_attach | Slash.Cmd_ctl | Slash.Cmd_gate
+  | Slash.Cmd_exec | Slash.Cmd_skill | Slash.Cmd_prompt | Slash.Cmd_lane
+  | Slash.Cmd_addon | Slash.Cmd_browser ->
       true
   | Slash.Cmd_pulse
   | Slash.Cmd_work
@@ -170,6 +170,8 @@ let slash_spec_requires_arg (spec : Slash.spec) =
   | Slash.Cmd_incidents
   | Slash.Cmd_jump
   | Slash.Cmd_voice
+  | Slash.Cmd_detach
+  | Slash.Cmd_paste_image
   | Slash.Cmd_wake
   | Slash.Cmd_up
   | Slash.Cmd_resume
@@ -245,6 +247,9 @@ let resolve_slash_arg_candidates ?cmd_name (m : Model.t) (spec : Slash.spec)
         | Slash.Cmd_incidents
         | Slash.Cmd_jump
         | Slash.Cmd_voice
+        | Slash.Cmd_attach
+        | Slash.Cmd_detach
+        | Slash.Cmd_paste_image
         | Slash.Cmd_btw
         | Slash.Cmd_queue
         | Slash.Cmd_context
@@ -363,6 +368,9 @@ let resolve_slash_arg_candidates ?cmd_name (m : Model.t) (spec : Slash.spec)
   | Slash.Cmd_incidents
   | Slash.Cmd_jump
   | Slash.Cmd_voice
+  | Slash.Cmd_attach
+  | Slash.Cmd_detach
+  | Slash.Cmd_paste_image
   | Slash.Cmd_btw
   | Slash.Cmd_queue
   | Slash.Cmd_context
@@ -2912,7 +2920,7 @@ let build_chat_submit_cmd (m : Model.t) (tx : Drafts.pending_message) ~mode
       mode;
       turn_instructions = None;
       since_seq = None;
-      attachments = [];
+      attachments = tx.attachments;
     }
   in
   Cmd.Http_post_stream
@@ -5407,12 +5415,23 @@ let submit_inline_modal ~now (m : Model.t) =
               let hearth =
                 if String.equal hearth_raw "" then None else Some hearth_raw
               in
-              ( mark_submitting m
+              let attachment_ids =
+                List.map
+                  (fun (a : Wire_attachment.t) -> a.attachment_id)
+                  m.drafts.board_attachments
+              in
+              let m1 =
+                mark_submitting
+                  { m with drafts = Drafts.clear_board_attachments m.drafts }
+              in
+              ( m1
               , [
                   Cmd.Http_post
                     {
                       epoch = m.epoch;
-                      req = Cmd.Post_board_create { title; body; hearth };
+                      req =
+                        Cmd.Post_board_create
+                          { title; body; hearth; attachment_ids };
                     };
                 ] )
           | Nav.Board_goal_proposal -> (
@@ -5456,6 +5475,7 @@ let submit_inline_modal ~now (m : Model.t) =
                                 title = "[Goal Proposal] " ^ title;
                                 body;
                                 hearth = Some "goals";
+                                attachment_ids = [];
                               };
                         };
                     ] ))
@@ -5872,7 +5892,7 @@ let submit_inline_modal ~now (m : Model.t) =
                         if not (Wire_runtime.is_named_routing_lane raw_lane_id)
                         then
                           set_modal_error
-                            "Reserved route name: choose a failover lane ID (not default, media_failover, or exact/*)"
+                            "Reserved route name: choose a failover lane ID (not default or exact/*)"
                         else
                           ( mark_submitting m
                           , [
@@ -5893,7 +5913,6 @@ let submit_inline_modal ~now (m : Model.t) =
                           match Wire_runtime.classify_routing_lane raw_lane_id with
                           | Wire_runtime.Route_exact bare -> bare
                           | Wire_runtime.Route_default
-                          | Wire_runtime.Route_media_failover
                           | Wire_runtime.Route_named _ ->
                               raw_lane_id
                         in

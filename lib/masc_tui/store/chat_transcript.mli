@@ -61,9 +61,16 @@ val markdown_body_lines :
 
 val retained_image_height : model:Model.t -> keeper:string -> width:int -> int
 
+val is_inline_retained_image : Wire_fleet.retained_image -> bool
+
 val retained_image_rows :
   theme:Theme.t -> lang:Say.lang -> width:int -> height:int -> Wire_fleet.retained_image list ->
   Markdown.rendered_line list
+
+val collect_chat_images :
+  model:Model.t -> keeper:string -> Wire_fleet.retained_image list
+(** All raster images across persisted history, live stream, and pending user
+    transmissions for [keeper], deduplicated in transcript order. *)
 
 val stream_reply_already_persisted :
   Wire_fleet.chat_message list -> Fleet_store.chat_stream_buffer -> bool
@@ -170,6 +177,7 @@ type stream_projection = {
   show_thinking : bool;
   show_tools : bool;
   show_text : bool;
+  show_attachments : bool;
   show_error : string option;
 }
 

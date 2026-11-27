@@ -451,6 +451,7 @@ let populated_model ~cols ~rows ~lang =
             chain_depth = Some 22;
             is_signal = true;
             pinned = false;
+            attachments = [];
           };
           {
             id = "p-2";
@@ -469,6 +470,7 @@ let populated_model ~cols ~rows ~lang =
             chain_depth = None;
             is_signal = true;
             pinned = false;
+            attachments = [];
           };
           {
             id = "p-noise";
@@ -487,6 +489,7 @@ let populated_model ~cols ~rows ~lang =
             chain_depth = None;
             is_signal = false;
             pinned = false;
+            attachments = [];
           };
         ];
       count = 3;
@@ -670,6 +673,8 @@ let populated_model ~cols ~rows ~lang =
             declared_reasoning_effort = None;
             transport = Some "http";
             is_default = true;
+            supports_image_input = None;
+            supports_image_output = None;
           };
           {
             id = "glm-5-3";
@@ -679,9 +684,12 @@ let populated_model ~cols ~rows ~lang =
             declared_reasoning_effort = None;
             transport = Some "http";
             is_default = false;
+            supports_image_input = None;
+            supports_image_output = None;
           };
         ];
       usage_windows = None;
+      media = None;
     }
   in
   let runtime_probe : Wire_runtime.runtime_probe_snapshot =

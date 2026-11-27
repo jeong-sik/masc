@@ -231,6 +231,15 @@ type mouse_selection_state =
   | Dragging of { anchor : cell_pos; cursor : cell_pos }
   | Settled of { anchor : cell_pos; cursor : cell_pos; copied : bool }
 
+type image_inspector_state = {
+  images : Wire_fleet.retained_image list;
+  index : int;
+  zoom : float;
+  pan_x : float;
+  pan_y : float;
+  fetched : (string * string * (int * int) option) Observed.t;
+}
+
 type t = {
   epoch : Epoch.t;
   viewport : viewport;
@@ -261,6 +270,7 @@ type t = {
   personal_keepers : Personal_keepers_store.t;
   palette : palette_state;
   inline_modal : inline_modal_state option;
+  image_inspector : image_inspector_state option;
   discord_replies : Discord_reply_store.t;
   ask_modal : ask_modal option;
   toast : toast option;
@@ -273,6 +283,156 @@ type t = {
   mouse_selection : mouse_selection_state;
   terminal_focused : bool;
 }
+
+let current_inspected_image (st : image_inspector_state) =
+  List.nth_opt st.images st.index
+
+let open_image_inspector ~now ~(images : Wire_fleet.retained_image list) ?index
+    (m : t) =
+  match images with
+  | [] -> { m with image_inspector = None }
+  | _ ->
+      let count = List.length images in
+      let idx =
+        match index with
+        | Some i -> Int.max 0 (Int.min (count - 1) i)
+        | None -> count - 1
+      in
+      let st =
+        {
+          images;
+          index = idx;
+          zoom = 1.0;
+          pan_x = 0.5;
+          pan_y = 0.5;
+          fetched = Observed.loading ~since_ns:now;
+        }
+      in
+      { m with image_inspector = Some st }
+
+let close_image_inspector (m : t) =
+  match m.image_inspector with
+  | None -> m
+  | Some _ -> { m with image_inspector = None }
+
+let clamp_unit f = Float.max 0.0 (Float.min 1.0 f)
+
+let inspector_zoom_by ~factor (st : image_inspector_state) =
+  let zoom = Float.max 1.0 (Float.min 8.0 (st.zoom *. factor)) in
+  if zoom <= 1.001 then { st with zoom = 1.0; pan_x = 0.5; pan_y = 0.5 }
+  else { st with zoom }
+
+let inspector_reset_view (st : image_inspector_state) =
+  { st with zoom = 1.0; pan_x = 0.5; pan_y = 0.5 }
+
+let inspector_pan_by ~dx ~dy (st : image_inspector_state) =
+  if st.zoom <= 1.001 then st
+  else
+    let step_scale = 1.0 /. st.zoom in
+    {
+      st with
+      pan_x = clamp_unit (st.pan_x +. (dx *. step_scale));
+      pan_y = clamp_unit (st.pan_y +. (dy *. step_scale));
+    }
+
+let inspector_select_delta ~now ~delta (st : image_inspector_state) =
+  let n = List.length st.images in
+  if n <= 1 then st
+  else
+    let next_idx = ((st.index + delta) mod n + n) mod n in
+    if next_idx = st.index then st
+    else
+      {
+        st with
+        index = next_idx;
+        zoom = 1.0;
+        pan_x = 0.5;
+        pan_y = 0.5;
+        fetched = Observed.loading ~since_ns:now;
+      }
+
+let inspector_viewport_window ~img_px:(img_w, img_h) ~zoom ~pan_x ~pan_y ~cols
+    ~rows : Masc_tui_term.Graphics.viewport_window =
+  let iw = Int.max 1 img_w in
+  let ih = Int.max 1 img_h in
+  let z = Float.max 1.0 (Float.min 8.0 zoom) in
+  let w =
+    Int.max 1 (Int.min iw (int_of_float (Float.round (float_of_int iw /. z))))
+  in
+  let h =
+    Int.max 1 (Int.min ih (int_of_float (Float.round (float_of_int ih /. z))))
+  in
+  let max_x = Int.max 0 (iw - w) in
+  let max_y = Int.max 0 (ih - h) in
+  let x =
+    Int.max 0
+      (Int.min max_x
+         (int_of_float (Float.round (clamp_unit pan_x *. float_of_int max_x))))
+  in
+  let y =
+    Int.max 0
+      (Int.min max_y
+         (int_of_float (Float.round (clamp_unit pan_y *. float_of_int max_y))))
+  in
+  {
+    Masc_tui_term.Graphics.x;
+    y;
+    width = w;
+    height = h;
+    columns = Int.max 1 cols;
+    rows = Int.max 1 rows;
+  }
+
+let inspector_modal_rect ~(outer : Rect.t) =
+  let w = Int.min (Int.max 0 (outer.w - 4)) 104 in
+  let h = Int.min (Int.max 0 (outer.h - 2)) 36 in
+  let cw = Int.max 0 (Int.min outer.w w) in
+  let ch = Int.max 0 (Int.min outer.h h) in
+  let x = outer.x + ((outer.w - cw) / 2) in
+  let y = outer.y + ((outer.h - ch) / 2) in
+  Rect.make ~x ~y ~w:cw ~h:ch
+
+let inspector_canvas_rect_of_modal (modal_r : Rect.t) =
+  if modal_r.w < 4 || modal_r.h < 6 then Rect.empty
+  else
+    let inner =
+      Rect.make ~x:(modal_r.x + 1) ~y:(modal_r.y + 1)
+        ~w:(Int.max 0 (modal_r.w - 2))
+        ~h:(Int.max 0 (modal_r.h - 2))
+    in
+    let pad_x = if inner.w >= 48 then 2 else 1 in
+    let content_x = inner.x + pad_x in
+    let content_w = Int.max 0 (inner.w - (2 * pad_x)) in
+    if inner.h <= 2 || content_w <= 0 then Rect.empty
+    else
+      Rect.make ~x:content_x ~y:(inner.y + 2) ~w:content_w
+        ~h:(Int.max 0 (inner.h - 2))
+
+let image_inspector_viewport_rect ~(model : t) =
+  match model.nav.overlay, model.image_inspector with
+  | Some (Nav.System_gate Nav.Media_viewer), Some _ ->
+      let cols = model.viewport.cols in
+      let rows = model.viewport.rows in
+      let overlay_rect =
+        Rect.make ~x:0 ~y:1 ~w:cols ~h:(Int.max 0 (rows - 2))
+      in
+      let modal_r = inspector_modal_rect ~outer:overlay_rect in
+      let r = inspector_canvas_rect_of_modal modal_r in
+      if Rect.is_empty r then None else Some r
+  | Some (Nav.System_gate Nav.Media_viewer), None
+  | ( Some
+        ( Nav.Palette
+        | Nav.Settings _
+        | Nav.Incidents
+        | Nav.Queue_context _
+        | Nav.Inline_action _
+        | Nav.Ask_answer
+        | Nav.Help
+        | Nav.System_gate
+            (Nav.Auth_gate | Nav.Server_offline | Nav.Micro_viewport) )
+    | None )
+  , (Some _ | None) ->
+      None
 
 let equal_cell_pos (a : cell_pos) (b : cell_pos) =
   Int.equal a.x b.x && Int.equal a.y b.y
@@ -639,6 +799,7 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
     personal_keepers = Personal_keepers_store.empty;
     palette = { mode = Palette_commands; query = ""; selected = 0 };
     inline_modal = None;
+    image_inspector = None;
     discord_replies = Discord_reply_store.empty;
     ask_modal = None;
     toast = None;

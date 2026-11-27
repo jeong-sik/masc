@@ -21,6 +21,9 @@ type command_id =
   | Cmd_incidents
   | Cmd_jump
   | Cmd_voice
+  | Cmd_attach
+  | Cmd_detach
+  | Cmd_paste_image
   | Cmd_btw
   | Cmd_discord_reply
   | Cmd_wake
@@ -195,6 +198,9 @@ type parsed =
   | Incidents
   | Jump
   | Voice
+  | Attach of string
+  | Detach of [ `Last | `All | `Index of int ]
+  | Paste_image
   | Btw of string
   | Discord_reply
   | Wake of string option

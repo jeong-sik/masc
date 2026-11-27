@@ -164,6 +164,7 @@ type board_post = {
   chain_depth : int option;
   is_signal : bool;
   pinned : bool;
+  attachments : Wire_attachment.t list;
 }
 
 type board_comment = {
@@ -174,6 +175,7 @@ type board_comment = {
   body : string;
   created_at_unix : float;
   score : int;
+  attachments : Wire_attachment.t list;
 }
 
 type board_feed = {
@@ -343,6 +345,19 @@ let[@inline] board_opt_ts key = function
       fail_board
         (field_type_error key "a unix timestamp, RFC3339 string, or null" bad)
 
+let decode_attachments_list = function
+  | `List items ->
+      List.filter_map
+        (fun item ->
+          match Wire_attachment.decode_attachment_ref item with
+          | Ok att -> Some att
+          | Error _ -> None)
+        items
+  | _ -> []
+
+let decode_optional_attachments json =
+  decode_attachments_list (member "attachments" json)
+
 let decode_board_post ~observed_at json =
   match json with
   | `Assoc fields -> (
@@ -365,6 +380,7 @@ let decode_board_post ~observed_at json =
       let f_chain_depth = ref None in
       let f_is_signal = ref None in
       let f_pinned = ref None in
+      let f_attachments = ref None in
       let[@inline] set_once r v =
         if Option.is_none !r then r := Some v
       in
@@ -390,6 +406,7 @@ let decode_board_post ~observed_at json =
           | "chain_depth" -> set_once f_chain_depth v
           | "is_signal" -> set_once f_is_signal v
           | "pinned" -> set_once f_pinned v
+          | "attachments" -> set_once f_attachments v
           | _ -> ())
         fields;
       try
@@ -462,6 +479,11 @@ let decode_board_post ~observed_at json =
           | Some _ ->
               fail_board (decode_bool_field_or json "pinned" ~default:false)
         in
+        let attachments =
+          match !f_attachments with
+          | Some v -> decode_attachments_list v
+          | None -> []
+        in
         Ok
           {
             id;
@@ -480,6 +502,7 @@ let decode_board_post ~observed_at json =
             chain_depth;
             is_signal;
             pinned;
+            attachments;
           }
       with Board_decode_err msg -> Error msg)
   | _ ->
@@ -518,6 +541,7 @@ let decode_board_post ~observed_at json =
         else Ok (is_signal_board_post ~post_kind ~hearth ~title ~body)
       in
       let* pinned = decode_bool_field_or json "pinned" ~default:false in
+      let attachments = decode_optional_attachments json in
       Ok
         {
           id;
@@ -536,6 +560,7 @@ let decode_board_post ~observed_at json =
           chain_depth;
           is_signal;
           pinned;
+          attachments;
         }
 
 let decode_board_comment json =
@@ -561,7 +586,8 @@ let decode_board_comment json =
       let* votes_down = required_nonnegative_int_field json "votes_down" in
       Ok (votes_up - votes_down)
   in
-  Ok { id; post_id; parent_id; author; body; created_at_unix; score }
+  let attachments = decode_optional_attachments json in
+  Ok { id; post_id; parent_id; author; body; created_at_unix; score; attachments }
 
 let decode_board_feed ~observed_at json =
   let* _, body = unwrap_v2_or_raw json in
@@ -1576,6 +1602,28 @@ let decode_board_hearths json =
   let* _, body = unwrap_v2_or_raw json in
   let* items = required_list_field body "hearths" in
   decode_list "hearths" decode_board_hearth_entry items
+
+let encode_board_create ~title ~body ?hearth ?(attachment_ids = []) () =
+  let base = [ ("title", `String title); ("body", `String body) ] in
+  let hearth_field =
+    match hearth with
+    | Some h when not (String.equal (String.trim h) "") ->
+        [ ("hearth", `String (String.trim h)) ]
+    | Some _ | None -> []
+  in
+  let att_ids =
+    List.filter_map
+      (fun id ->
+        let t = String.trim id in
+        if String.equal t "" then None else Some (`String t))
+      attachment_ids
+  in
+  let att_field =
+    match att_ids with
+    | [] -> []
+    | xs -> [ ("attachment_ids", `List xs) ]
+  in
+  `Assoc (base @ hearth_field @ att_field)
 
 let encode_board_comment ~post_id ~content ?parent_id () =
   let base =

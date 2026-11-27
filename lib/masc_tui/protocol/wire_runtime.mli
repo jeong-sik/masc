@@ -402,6 +402,13 @@ type runtime_option = {
   declared_reasoning_effort : string option;
   transport : string option;
   is_default : bool;
+  supports_image_input : bool option;
+  supports_image_output : bool option;
+}
+
+type runtime_media_overrides = {
+  vision_reader : string option;
+  image_generator : string option;
 }
 
 type runtime_resolved_snapshot = {
@@ -411,6 +418,7 @@ type runtime_resolved_snapshot = {
   lanes : failover_lane list;
   runtimes : runtime_option list;
   usage_windows : provider_usage_windows option;
+  media : runtime_media_overrides option;
 }
 
 type runtime_standing = {
@@ -1645,7 +1653,6 @@ type runtime_routing_action =
       runtime_ids : string list;
       expected_source_revision : string option;
     }
-  | Route_set_media_failover of { runtime_ids : string list }
   | Route_exact_append of { lane_id : string; runtime_id : string }
   | Route_exact_drop of { lane_id : string; runtime_id : string }
   | Route_exact_move of {
@@ -1661,7 +1668,6 @@ type runtime_routing_action =
 
 type routing_lane_kind =
   | Route_default
-  | Route_media_failover
   | Route_exact of string
   | Route_named of string
 

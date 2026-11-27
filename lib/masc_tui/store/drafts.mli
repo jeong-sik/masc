@@ -28,6 +28,7 @@ type pending_message = {
   request_id : string;
   keeper : string;
   body : string;
+  attachments : Wire_attachment.t list;
   mode : delivery_mode;
   operation_id : string option;
   batch_execution_id : Keeper_chat_operation.Operation_id.t option;
@@ -42,6 +43,8 @@ type keeper_draft = {
   text : string;
   cursor : int;
   preferred_mode : delivery_mode;
+  attachments : Wire_attachment.t list;
+  uploading_count : int;
 }
 
 type voice_phase =
@@ -91,6 +94,8 @@ type t = {
   popup_selected : int;
   popup_navigated : bool;
   popup_dismissed : bool;
+  board_attachments : Wire_attachment.t list;
+  board_uploading_count : int;
 }
 
 val default_keeper_key : string
@@ -129,6 +134,19 @@ val move_cursor_word : [ `Left | `Right ] -> t -> t
 val move_cursor_line : [ `Start | `End ] -> t -> t
 val clear_current_draft : t -> t
 val set_preferred_mode : delivery_mode -> t -> t
+
+val add_attachment : keeper:string -> Wire_attachment.t -> t -> t
+val remove_last_attachment : t -> t * Wire_attachment.t option
+val remove_attachment_at : int -> t -> t * Wire_attachment.t option
+val clear_attachments : t -> t * int
+val inc_uploading : keeper:string -> t -> t
+val dec_uploading : keeper:string -> t -> t
+
+val add_board_attachment : Wire_attachment.t -> t -> t
+val remove_last_board_attachment : t -> t * Wire_attachment.t option
+val clear_board_attachments : t -> t
+val inc_board_uploading : t -> t
+val dec_board_uploading : t -> t
 
 val move_popup : delta:int -> count:int -> wrap:bool -> t -> t
 val set_popup_selected : int -> t -> t

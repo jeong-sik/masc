@@ -719,14 +719,18 @@ let field_leaf_label ~lang (f : schema_field) =
   | "capabilities", ("tools-support" | "tools_support" | "tools") ->
       pick ~ko:"도구 호출 지원" ~en:"Tool Calling"
   | "capabilities", "streaming" -> pick ~ko:"스트리밍 지원" ~en:"Streaming"
-  | "capabilities", ("supports-image-input" | "supports_image_input" | "vision") ->
-      pick ~ko:"비전(이미지) 지원" ~en:"Vision (Image Input)"
+  | "capabilities", ("supports-image-input" | "supports_image_input" | "image-input" | "image_input") ->
+      pick ~ko:"이미지 입력 (비전)" ~en:"Vision Input"
+  | "capabilities", ("supports-image-output" | "supports_image_output" | "image-output" | "image_output") ->
+      pick ~ko:"이미지 생성 출력" ~en:"Image Output"
   | "capabilities", ("supports-prompt-caching" | "supports_prompt_caching" | "prompt-caching" | "prompt_caching") ->
       pick ~ko:"프롬프트 캐싱" ~en:"Prompt Caching"
   | _, ("tools-support" | "tools_support") ->
       pick ~ko:"도구 호출 지원" ~en:"Tool Calling"
   | _, ("supports-image-input" | "supports_image_input") ->
-      pick ~ko:"비전(이미지) 지원" ~en:"Vision (Image Input)"
+      pick ~ko:"이미지 입력 (비전)" ~en:"Vision Input"
+  | _, ("supports-image-output" | "supports_image_output") ->
+      pick ~ko:"이미지 생성 출력" ~en:"Image Output"
   | _, ("supports-prompt-caching" | "supports_prompt_caching") ->
       pick ~ko:"프롬프트 캐싱" ~en:"Prompt Caching"
   | _, ("cache-retention" | "cache_retention") ->
@@ -761,8 +765,10 @@ let field_leaf_label ~lang (f : schema_field) =
   | _, ("reasoning-effort" | "reasoning_effort") ->
       pick ~ko:"추론 강도" ~en:"Reasoning Effort"
   | "runtime", "default" -> pick ~ko:"기본 실행 경로" ~en:"Default Runtime"
-  | "runtime", "media_failover" ->
-      pick ~ko:"미디어 페일오버" ~en:"Media Failover"
+  | "media", ("vision_reader" | "vision-reader") ->
+      pick ~ko:"비전 리더 오버라이드" ~en:"Vision Reader Override"
+  | "media", ("image_generator" | "image-generator") ->
+      pick ~ko:"이미지 생성기 오버라이드" ~en:"Image Generator Override"
   | _, ("candidates" | "order" | "members") ->
       pick ~ko:"후보 순서" ~en:"Failover Order"
   | _, "host" -> pick ~ko:"호스트" ~en:"Host"

@@ -1042,8 +1042,7 @@ let open_runtime_lane_edit_modal ~now (m : Model.t)
   let exact_output, bare_id =
     match Wire_runtime.classify_routing_lane lane.id with
     | Wire_runtime.Route_exact bare -> (true, bare)
-    | Wire_runtime.Route_default | Wire_runtime.Route_media_failover
-    | Wire_runtime.Route_named _ ->
+    | Wire_runtime.Route_default | Wire_runtime.Route_named _ ->
         (false, lane.id)
   in
   let opened_revision = runtime_config_revision_opt m in
@@ -2085,6 +2084,9 @@ let rec execute_slash ~now (m : Model.t) cmd =
     | Slash.Incidents
     | Slash.Jump
     | Slash.Voice
+    | Slash.Attach _
+    | Slash.Detach _
+    | Slash.Paste_image
     | Slash.Btw _
     | Slash.Discord_reply
     | Slash.Wake _
@@ -2163,6 +2165,112 @@ let rec execute_slash ~now (m : Model.t) cmd =
       Update_nav.open_overlay { m with incidents } Nav.Incidents
   | Slash.Jump -> Update_nav.teleport_blocked ~now m
   | Slash.Voice -> Update_nav.toggle_voice ~now m
+  | Slash.Attach raw_path -> (
+      let target_path =
+        match Wire_attachment.normalize_pasted_path raw_path with
+        | Some p -> p
+        | None -> String.trim raw_path
+      in
+      if String.equal target_path "" then
+        ( Model.with_toast ~now ~level:Model.Toast_warning
+            (Say.make ~ko:"첨부할 파일 경로를 입력하세요"
+               ~en:"Specify a local file path to attach")
+            m
+        , [] )
+      else
+        let keeper =
+          Option.value (Update_nav.resolve_target_keeper m)
+            ~default:(Drafts.target_keeper_key m.drafts)
+        in
+        let drafts =
+          m.drafts
+          |> Drafts.set_active_keeper keeper
+          |> Drafts.inc_uploading ~keeper
+        in
+        let fname = Filename.basename target_path in
+        ( Model.with_toast ~now ~level:Model.Toast_info
+            (Say.make
+               ~ko:(Printf.sprintf "첨부 업로드 중: %s…" fname)
+               ~en:(Printf.sprintf "Uploading attachment: %s…" fname))
+            { m with drafts }
+        , [
+            Cmd.Upload_attachment_file
+              {
+                epoch = m.epoch;
+                target = Cmd.Upload_for_keeper keeper;
+                path = target_path;
+              };
+          ] ))
+  | Slash.Detach which -> (
+      match which with
+      | `Last -> (
+          let drafts, removed = Drafts.remove_last_attachment m.drafts in
+          match removed with
+          | Some att ->
+              let chip = Wire_attachment.format_chip att in
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:("첨부 제거됨: " ^ chip)
+                     ~en:("Removed attachment: " ^ chip))
+                  { m with drafts }
+              , [] )
+          | None ->
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make ~ko:"제거할 첨부가 없습니다"
+                     ~en:"No draft attachments to remove")
+                  m
+              , [] ))
+      | `Index idx -> (
+          let drafts, removed = Drafts.remove_attachment_at idx m.drafts in
+          match removed with
+          | Some att ->
+              let chip = Wire_attachment.format_chip att in
+              ( Model.with_toast ~now ~level:Model.Toast_info
+                  (Say.make
+                     ~ko:("첨부 제거됨: " ^ chip)
+                     ~en:("Removed attachment: " ^ chip))
+                  { m with drafts }
+              , [] )
+          | None ->
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make
+                     ~ko:(Printf.sprintf "%d번 첨부가 없습니다" idx)
+                     ~en:(Printf.sprintf "No draft attachment #%d" idx))
+                  m
+              , [] ))
+      | `All ->
+          let drafts, count = Drafts.clear_attachments m.drafts in
+          if count = 0 then
+            ( Model.with_toast ~now ~level:Model.Toast_warning
+                (Say.make ~ko:"제거할 첨부가 없습니다"
+                   ~en:"No draft attachments to remove")
+                m
+            , [] )
+          else
+            ( Model.with_toast ~now ~level:Model.Toast_info
+                (Say.make
+                   ~ko:(Printf.sprintf "첨부 %d개 모두 제거됨" count)
+                   ~en:(Printf.sprintf "Cleared %d draft attachment(s)" count))
+                { m with drafts }
+            , [] ))
+  | Slash.Paste_image ->
+      let keeper =
+        Option.value (Update_nav.resolve_target_keeper m)
+          ~default:(Drafts.target_keeper_key m.drafts)
+      in
+      let drafts =
+        m.drafts
+        |> Drafts.set_active_keeper keeper
+        |> Drafts.inc_uploading ~keeper
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_info
+          (Say.make ~ko:"클립보드 이미지 읽는 중…"
+             ~en:"Reading clipboard image…")
+          { m with drafts }
+      , [
+          Cmd.Paste_clipboard_image
+            { epoch = m.epoch; target = Cmd.Upload_for_keeper keeper };
+        ] )
   | Slash.Btw prompt -> Update_nav.start_btw_query ~now ~prompt m
   | Slash.Wake arg -> (
       match resolve_slash_lifecycle_keeper m arg with
@@ -2961,6 +3069,10 @@ let rec execute_slash ~now (m : Model.t) cmd =
                 | Cmd.Cancel_memory_diagram
                 | Cmd.Fetch_artifact_and_copy _
                 | Cmd.Export_artifact _
+                | Cmd.Upload_attachment_file _
+                | Cmd.Paste_clipboard_image _
+                | Cmd.Fetch_inspector_image _
+                | Cmd.Export_attachment _
                 | Cmd.Open_dos_screen _
                 | Cmd.Open_external_url _
                 | Cmd.Open_editor_escape_hatch _
@@ -3865,6 +3977,9 @@ and submit_composer ~now ~mode (m : Model.t) =
             | Slash.Cmd_incidents
             | Slash.Cmd_jump
             | Slash.Cmd_voice
+            | Slash.Cmd_attach
+            | Slash.Cmd_detach
+            | Slash.Cmd_paste_image
             | Slash.Cmd_btw
             | Slash.Cmd_discord_reply
             | Slash.Cmd_queue
@@ -3908,14 +4023,15 @@ and submit_composer ~now ~mode (m : Model.t) =
       | Some cand -> (Update_nav.apply_popup_completion cand m, [])
       | None -> (m, []))
   | Update_nav.Composer_popup_none -> (
-      if String.equal trimmed "" then (m, [])
-      else if Char.equal trimmed.[0] '/' then submit_slash_text ~now m trimmed
+      if String.equal trimmed "" && draft.attachments = [] then (m, [])
+      else if (not (String.equal trimmed "")) && Char.equal trimmed.[0] '/' then
+        submit_slash_text ~now m trimmed
       else (
         match Rbac_policy.can_chat_with_keeper m.auth_session with
         | Rbac.Denied reason -> rbac_denied_toast ~now reason m
         | Rbac.Allowed ->
         let leading_mention_opt =
-          if Char.equal trimmed.[0] '@' then
+          if (not (String.equal trimmed "")) && Char.equal trimmed.[0] '@' then
             let len = String.length trimmed in
             let sp_idx =
               let rec scan i =
@@ -4511,6 +4627,7 @@ and execute_action ~now (m : Model.t) action =
                 m0 with
                 nav;
                 inline_modal = None;
+                image_inspector = None;
                 ask_modal =
                   (if Model.has_preserved_ask_return nav then m0.ask_modal
                    else None);
@@ -4965,6 +5082,8 @@ and execute_action ~now (m : Model.t) action =
           let drafts =
             match kind with
             | Nav.Btw_query -> Drafts.clear_btw m.drafts
+            | Nav.Board_new_post ->
+                Drafts.clear_board_attachments m.drafts
             | Nav.Gate_reject _
             | Nav.Verification_reject _
             | Nav.Harness_overrule _
@@ -4973,7 +5092,6 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Schedule_form
             | Nav.Connector_form
             | Nav.Repo_add_form
-            | Nav.Board_new_post
             | Nav.Board_goal_proposal
             | Nav.Goal_confirmation_proof
             | Nav.Memory_act_form
@@ -5112,6 +5230,7 @@ and execute_action ~now (m : Model.t) action =
                 };
               config = Config_store.cancel_edit_field m.config;
               inline_modal = None;
+              image_inspector = None;
               ask_modal =
                 (if Model.has_preserved_ask_return m.nav then m.ask_modal
                  else None);
@@ -5975,6 +6094,10 @@ and execute_action ~now (m : Model.t) action =
                   | Cmd.Cancel_memory_diagram
                   | Cmd.Fetch_artifact_and_copy _
                   | Cmd.Export_artifact _
+                  | Cmd.Upload_attachment_file _
+                  | Cmd.Paste_clipboard_image _
+                  | Cmd.Fetch_inspector_image _
+                  | Cmd.Export_attachment _
                   | Cmd.Open_dos_screen _
                   | Cmd.Open_external_url _
                   | Cmd.Open_editor_escape_hatch _
@@ -6270,9 +6393,12 @@ and execute_action ~now (m : Model.t) action =
       let artifact_target_opt =
         match m.nav.overlay with
         | Some (Nav.System_gate Nav.Media_viewer) -> (
-            match Model.focused_artifact m with
-            | Some a -> `Artifact a
-            | None -> `Other)
+            match m.image_inspector with
+            | Some _ -> `Other
+            | None -> (
+                match Model.focused_artifact m with
+                | Some a -> `Artifact a
+                | None -> `Other))
         | Some
             ( Nav.Palette
             | Nav.Settings _
@@ -6803,9 +6929,39 @@ and execute_action ~now (m : Model.t) action =
                   m
               , [] ))
       | Some (Nav.System_gate Nav.Media_viewer) -> (
-          match Model.focused_artifact m with
-          | Some art -> export_and_open_artifact art
-          | None -> (m, []))
+          match m.image_inspector with
+          | Some st -> (
+              match Model.current_inspected_image st with
+              | Some img ->
+                  let raw_name =
+                    Option.value img.filename
+                      ~default:
+                        (Option.value img.attachment_id ~default:"masc-image")
+                  in
+                  let filename_stem = Filename.remove_extension raw_name in
+                  let ext =
+                    Wire_attachment.extension_of_mime
+                      (Option.value img.mime_type ~default:"image/png")
+                  in
+                  ( Model.with_toast ~now ~level:Model.Toast_info
+                      (Say.make ~ko:"이미지 외부 프로그램으로 여는 중…"
+                         ~en:"Opening image externally…")
+                      m
+                  , [
+                      Cmd.Export_attachment
+                        {
+                          epoch = m.epoch;
+                          url = img.media_path;
+                          filename_stem;
+                          ext;
+                          open_after = true;
+                        };
+                    ] )
+              | None -> (m, []))
+          | None -> (
+              match Model.focused_artifact m with
+              | Some art -> export_and_open_artifact art
+              | None -> (m, [])))
       | Some
           ( Nav.Palette
           | Nav.Incidents

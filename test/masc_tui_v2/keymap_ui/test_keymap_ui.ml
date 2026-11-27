@@ -323,7 +323,7 @@ let test_keymap_footer_width_budget () =
 (* --- 2. Slash Commands Tests --- *)
 
 let test_slash_37_commands () =
-  Alcotest.(check int) "exactly 38 slash commands" 38 (List.length Slash.all);
+  Alcotest.(check int) "exactly 41 slash commands" 41 (List.length Slash.all);
   let cases =
     [
       ("/account", Slash.Account);

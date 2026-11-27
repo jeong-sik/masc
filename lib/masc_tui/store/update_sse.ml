@@ -1053,6 +1053,8 @@ let apply_observer_event (m : Model.t) = function
         | Wire_fleet.Chunk_tool_quarantined _
         | Wire_fleet.Chunk_batch_bound _
         | Wire_fleet.Chunk_external_effect_completed _
+        | Wire_fleet.Chunk_attachment _
+        | Wire_fleet.Chunk_media_delta _
         | Wire_fleet.Chunk_reply_details _
         | Wire_fleet.Chunk_ignored ->
             (next, []))
@@ -1425,6 +1427,8 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ?seq ~chunk
       | Wire_fleet.Chunk_tool_end _
       | Wire_fleet.Chunk_batch_bound _
       | Wire_fleet.Chunk_external_effect_completed _
+      | Wire_fleet.Chunk_attachment _
+      | Wire_fleet.Chunk_media_delta _
       | Wire_fleet.Chunk_tool_quarantined _
       | Wire_fleet.Chunk_ignored ->
           m.drafts
@@ -1528,6 +1532,8 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ?seq ~chunk
       | Wire_fleet.Chunk_stream_protocol_error _
       | Wire_fleet.Chunk_batch_bound _
       | Wire_fleet.Chunk_external_effect_completed _
+      | Wire_fleet.Chunk_attachment _
+      | Wire_fleet.Chunk_media_delta _
       | Wire_fleet.Chunk_tool_quarantined _
       | Wire_fleet.Chunk_tool_block_end _
       | Wire_fleet.Chunk_ignored -> (m.drafts, [])
@@ -1568,6 +1574,8 @@ let apply_chat_stream_chunk ~now ~keeper ~request_id ~is_btw ?seq ~chunk
     | Wire_fleet.Chunk_tool_quarantined _
     | Wire_fleet.Chunk_batch_bound _
     | Wire_fleet.Chunk_external_effect_completed _
+    | Wire_fleet.Chunk_attachment _
+    | Wire_fleet.Chunk_media_delta _
     | Wire_fleet.Chunk_reply_details _
     | Wire_fleet.Chunk_turn_done _
     | Wire_fleet.Chunk_error _

@@ -703,13 +703,7 @@ type submit_mode =
     that id against its operation store and cuts it only while it is the one
     running, so a steer never reaches a turn this client did not start. *)
 
-type chat_attachment = {
-  attachment_id : string;
-  name : string;
-  mime_type : string;
-  size : int;
-  data_base64 : string;
-}
+type chat_attachment = Wire_attachment.t
 
 type chat_submit_request = {
   request_id : string;
@@ -728,13 +722,22 @@ type history_thinking =
   | Thinking_partial of string
 
 val media_path_prefix : string
-(** Canonical ["/api/v1/media/"] prefix for retained workspace media paths. *)
+(** Legacy ["/api/v1/media/"] prefix for retained workspace media paths. *)
 
 type retained_image = {
   media_path : string;
   caption : string option;
   mime_type : string option;
+  attachment_id : string option;
+  width : int option;
+  height : int option;
+  bytes : int option;
+  filename : string option;
+  kind : Wire_attachment.kind;
 }
+
+val retained_image_of_attachment :
+  ?caption:string -> Wire_attachment.t -> retained_image
 
 type trace_tool_status =
   | Trace_tool_pending
@@ -950,6 +953,20 @@ type chat_stream_chunk =
       execution_id : string;
     }
   | Chunk_external_effect_completed of { operation_id : string option }
+  | Chunk_attachment of {
+      operation_id : string option;
+      attachment : Wire_attachment.t;
+      block_index : int option;
+      tool_call_id : string option;
+      role : string option;
+    }
+  | Chunk_media_delta of {
+      operation_id : string option;
+      mime_type : string;
+      url : string option;
+      attachment_id : string option;
+      block_index : int option;
+    }
   | Chunk_reply_details of {
       operation_id : string option;
       reply : string;

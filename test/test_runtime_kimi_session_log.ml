@@ -3,7 +3,8 @@
    three records of one automatic compaction, with the fields they carried on
    2026-11-27. The summary text of [context.apply_compaction] is replaced,
    because the reader reads only [type]. The reader counts
-   [full_compaction.begin]. *)
+   [full_compaction.begin] and [context.apply_compaction], so one whole
+   compaction is two records. *)
 
 open Alcotest
 module Log = Runtime_kimi_session_log
@@ -200,9 +201,9 @@ let test_counts_the_compactions_after_the_mark () =
     let mark = mark_of home in
     check_compactions "nothing written since the mark" 0 mark;
     append_file path (text_of (prompt_record :: compaction_records));
-    check_compactions "one compaction since the mark" 1 mark;
+    check_compactions "one compaction's begin and apply records" 2 mark;
     append_file path (text_of compaction_records);
-    check_compactions "two compactions since the mark" 2 mark)
+    check_compactions "two compactions' records since the mark" 4 mark)
 ;;
 
 let test_a_record_still_being_written_is_left_out () =
@@ -241,7 +242,7 @@ let test_the_next_count_starts_where_this_one_stopped () =
     let began = List.nth compaction_records 0 in
     append_file path began;
     let second = next_of mark in
-    check_compactions "the first count" 1 mark;
+    check_compactions "the first count" 2 mark;
     check_compactions "nothing whole since the first count" 0 second;
     append_file path "\n";
     let third = next_of second in
@@ -267,7 +268,9 @@ let test_a_compaction_counts_where_it_began () =
     let next = next_of mark in
     check_compactions "the prompt that began the compaction" 1 mark;
     append_file path (text_of (rest @ [ prompt_record ]));
-    check_compactions "the apply and complete after the response" 0 next)
+    (* The apply landed after the response. The compaction may summarize the
+       next prompt's input too, so that prompt counts it as well. *)
+    check_compactions "the apply after the response counts for the next prompt" 1 next)
 ;;
 
 let test_unreadable_slices () =
@@ -625,7 +628,7 @@ let () =
             `Quick
             test_the_next_count_starts_where_this_one_stopped
         ; test_case
-            "a compaction counts where it began"
+            "a compaction counts where it began and where it was applied"
             `Quick
             test_a_compaction_counts_where_it_began
         ; test_case "slices that cannot be read" `Quick test_unreadable_slices

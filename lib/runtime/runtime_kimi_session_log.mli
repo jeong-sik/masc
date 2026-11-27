@@ -113,7 +113,10 @@ type turn_end =
       }
 
 type prompt_record =
-  { compactions : int  (** [full_compaction.begin] records. *)
+  { compactions : int
+      (** [full_compaction.begin] and [context.apply_compaction] records. One
+          compaction can count twice, or once in each of two prompts when its
+          apply record lands after the prompt's response. *)
   ; turn_end : turn_end option
       (** The [turn.ended] record of the last prompt that started after the
           mark ([turn.prompt]); [None] when the host wrote none for it. *)

@@ -256,6 +256,7 @@ type turn_end =
 type record =
   | Prompt_started
   | Compaction_began
+  | Compaction_applied
   | Turn_ended of turn_end
   | Other_event
 
@@ -291,6 +292,7 @@ let decode_record ~byte_offset line =
     (match string_field "type" json with
      | Some "turn.prompt" -> Ok Prompt_started
      | Some "full_compaction.begin" -> Ok Compaction_began
+     | Some "context.apply_compaction" -> Ok Compaction_applied
      | Some "turn.ended" ->
        let* turn_end = decode_turn_end ~byte_offset json in
        Ok (Turn_ended turn_end)
@@ -327,7 +329,14 @@ let read_prompt m =
               prompt starts with no ending, so an earlier prompt's ending is
               never read as this one's. *)
            | Prompt_started -> Ok { acc with turn_end = None }
-           | Compaction_began -> Ok { acc with compactions = acc.compactions + 1 }
+           (* Kimi compacts after a step without waiting when
+              compaction_trigger_ratio is below the block ratio, so the apply
+              record can land after the prompt's response and be read with
+              the next prompt. Both records count: a compaction begun in one
+              prompt and applied in the next may summarize the next one's
+              input too, and counting both costs one more whole World State. *)
+           | Compaction_began | Compaction_applied ->
+             Ok { acc with compactions = acc.compactions + 1 }
            | Turn_ended turn_end -> Ok { acc with turn_end = Some turn_end }
            | Other_event -> Ok acc))
       (Ok { compactions = 0; turn_end = None })

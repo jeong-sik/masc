@@ -36,9 +36,11 @@ val note_closing_save : t -> closing_save -> unit
 
 (** Said by the turn when a save in the middle of its Agent Core run was
     installed: the head now holds open messages of this turn. If the turn
-    ends without a closing save, its end closes the head's open messages
-    with one save
-    ({!Keeper_turn_log_closing.close_open}) before its [Closed] is written.
+    ends without a closing save, and its operation is not one that can resume
+    ({!note_resumable_operation}), its end closes the head's open messages
+    with one save ({!Keeper_turn_log_closing.close_open}) before its [Closed]
+    is written. That save closes every open message of the head, as a turn's
+    closing save does: those of this turn and any an earlier turn left.
     When that save fails the turn's [Closed] is labelled as a failed closing
     save, the failure is logged and counted ([TurnLogOpenCloseFailures]), and
     the messages stay open for the next save that closes.

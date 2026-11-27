@@ -131,7 +131,8 @@ let antigravity_error_is_binding_rest : Runtime_antigravity.error -> bool = func
   | Runtime_antigravity.Process_exited _
   | Runtime_antigravity.Child_fd_ceiling_exceeded _
   | Runtime_antigravity.Unhandled_exception _
-  | Runtime_antigravity.Timeout _ -> false
+  | Runtime_antigravity.Timeout _
+  | Runtime_antigravity.Message_over_client_limit _ -> false
 ;;
 
 let acp_error_is_binding_rest : Runtime_acp_client.error -> bool = function
@@ -144,7 +145,8 @@ let acp_error_is_binding_rest : Runtime_acp_client.error -> bool = function
   | Runtime_acp_client.Protocol_error _
   | Runtime_acp_client.Timeout _
   | Runtime_acp_client.Process_exited _
-  | Runtime_acp_client.Client_closed -> false
+  | Runtime_acp_client.Client_closed
+  | Runtime_acp_client.Message_over_client_limit _ -> false
 ;;
 
 let refused_for_binding_rest = function
@@ -207,7 +209,8 @@ let codex_error_is_input_size : Runtime_codex_app_server.error -> bool = functio
 ;;
 
 let antigravity_error_is_input_size : Runtime_antigravity.error -> bool = function
-  | Runtime_antigravity.Context_window_exceeded _ -> true
+  | Runtime_antigravity.Context_window_exceeded _
+  | Runtime_antigravity.Message_over_client_limit _ -> true
   | Runtime_antigravity.Invalid_config _
   | Runtime_antigravity.Spawn_refused _
   | Runtime_antigravity.Spawn_capacity_busy _
@@ -238,7 +241,8 @@ let refused_for_input_size = function
             ( Runtime_acp_client.Rpc_error
                 { refusal = Some (Llm_provider.Retry.Signal_context_overflow _); _ }
             | Runtime_acp_client.Host_turn_failed
-                { refusal = Some (Llm_provider.Retry.Signal_context_overflow _); _ } )
+                { refusal = Some (Llm_provider.Retry.Signal_context_overflow _); _ }
+            | Runtime_acp_client.Message_over_client_limit _ )
       ; runtime_id = _
       } -> true
   | Execution_failed
@@ -284,25 +288,6 @@ let refused_for_input_size = function
   | Invalid_json_output _
   | Invalid_domain_output _
   | Held _ -> false
-;;
-
-type input_size_refusal =
-  | Input_over_limit of
-      { estimated_tokens : int
-      ; limit_tokens : int
-      }
-
-let check_input_size ~estimated_tokens ~(overflow : Runtime.overflow_behavior) =
-  match overflow with
-  | Runtime.Caller_bounded { max_input_tokens } ->
-    if estimated_tokens > max_input_tokens
-    then
-      Error
-        (Input_over_limit
-           { estimated_tokens; limit_tokens = max_input_tokens })
-    else Ok ()
-  | Runtime.Rejects_oversize_input
-  | Runtime.Truncates_silently -> Ok ()
 ;;
 
 type refused_slot =

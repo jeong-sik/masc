@@ -192,6 +192,9 @@ let antigravity_error = function
   | Runtime_antigravity.Timeout _
   | Runtime_antigravity.Spawn_capacity_busy _ -> Transient
   | Runtime_antigravity.Spawn_refused refusal -> spawn_refusal refusal
+  (* The client's own body limit, counted before the CLI started (#41906):
+     the same request meets the same limit. *)
+  | Runtime_antigravity.Message_over_client_limit _ -> Input_refused Request_body
 
 let cli_failure = function
   (* Not called before the time its provider stated. The same request may
@@ -214,6 +217,8 @@ let cli_failure = function
        Configuration_refused
      | Fusion_official_client.Acp_failure (Runtime_acp_client.Spawn_refused refusal) ->
        spawn_refusal refusal
+     | Fusion_official_client.Acp_failure (Runtime_acp_client.Message_over_client_limit _) ->
+       Input_refused Request_body
      | Fusion_official_client.Acp_failure
          ( Runtime_acp_client.Timeout _
          | Runtime_acp_client.Preparation_failed _

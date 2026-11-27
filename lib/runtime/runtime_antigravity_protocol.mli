@@ -106,6 +106,7 @@ type error =
       ; ceiling : int
       }
   | Timeout of Runtime_timeout_payload.t
+  | Message_over_client_limit of Runtime_acp_client.message_over_limit
 
 type wire_event =
   | Init of

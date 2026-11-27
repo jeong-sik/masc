@@ -213,12 +213,16 @@ let antigravity (error : Runtime_antigravity.error) : 'rejection Outcome.unanswe
      | false, false -> Refused (Sized Input_too_large)
      | true, false | false, true | true, true -> Refused (Sized Window_reached))
   | Spawn_capacity_busy _ -> Silent Not_called
+  (* Counted before the CLI started: agy would cut a message this long
+     (#41906). *)
+  | Message_over_client_limit _ -> Refused (Sized Input_too_large)
   | Invalid_config _ | Spawn_refused _ | Child_fd_ceiling_exceeded _ -> Silent Unavailable
   | Protocol_error _ | State_callback_failed _ | Turn_failed _ | Result_not_completed _
   | Actions_denied _ | Process_exited _ | Unhandled_exception _ | Timeout _ -> Silent Lost
 
 let acp (error : Runtime_acp_client.error) : 'rejection Outcome.unanswered =
   match error with
+  | Message_over_client_limit _ -> Refused (Sized Input_too_large)
   | Invalid_config _ | Spawn_refused _ | Preparation_failed _ -> Silent Unavailable
   | Protocol_error _ | Rpc_error _ | Host_turn_failed _ | Timeout _ | Process_exited _
   | Client_closed -> Silent Lost

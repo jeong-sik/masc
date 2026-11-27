@@ -123,6 +123,18 @@ let runtime_error_to_core_error = function
       (Keeper_internal_error.Internal_unhandled_exception
          { site = runtime_boundary_site; exn_repr; transport_error_kind = None })
   | Runtime_antigravity.State_callback_failed detail -> internal_error detail
+  (* agy would cut this message (#41906), so the binding refuses the turn
+     before the CLI starts, like the Claude Code admission probe (#47787).
+     [Attempt_rejected] moves the walk to the next candidate
+     ([Keeper_turn_driver_try_runtime.attempt_rejected_should_try_next]),
+     records [Rejected_before_dispatch], and rests no account. It is not a
+     size refusal, so the same candidate gets no shorter retry. *)
+  | Runtime_antigravity.Message_over_client_limit _ as error ->
+    Agent_core.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         { message = Runtime_antigravity.error_to_string error
+         ; reason = Llm_provider.Retry.Attempt_rejected
+         })
 ;;
 
 let recovery_failure_of_runtime_error = function
@@ -156,6 +168,7 @@ let recovery_failure_of_runtime_error = function
        else Session_store.Bootstrap_floor_exceeded)
   | Runtime_antigravity.Turn_failed _
   | Runtime_antigravity.Actions_denied _ -> Session_store.Provider_rejected
+  | Runtime_antigravity.Message_over_client_limit _ -> Session_store.Pre_dispatch_failed
 ;;
 
 let recovery_failure_of_attempt ~conversation_mode ~gate_continuation error =
@@ -182,7 +195,8 @@ let recovery_failure_of_attempt ~conversation_mode ~gate_continuation error =
       | Runtime_antigravity.Process_exited _
       | Runtime_antigravity.Unhandled_exception _
       | Runtime_antigravity.Child_fd_ceiling_exceeded _
-      | Runtime_antigravity.Timeout _ ) ) ->
+      | Runtime_antigravity.Timeout _
+      | Runtime_antigravity.Message_over_client_limit _ ) ) ->
     recovery_failure_of_runtime_error error
 ;;
 
@@ -1553,7 +1567,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
                 | Runtime_antigravity.Process_exited _
                 | Runtime_antigravity.Unhandled_exception _
                 | Runtime_antigravity.Child_fd_ceiling_exceeded _
-                | Runtime_antigravity.Timeout _ -> error
+                | Runtime_antigravity.Timeout _
+                | Runtime_antigravity.Message_over_client_limit _ -> error
               in
               context_overflow_retry_safe :=
                 (match conversation_mode, official_client_continuation, error with
@@ -1577,7 +1592,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
                      | Runtime_antigravity.Process_exited _
                      | Runtime_antigravity.Unhandled_exception _
                      | Runtime_antigravity.Child_fd_ceiling_exceeded _
-                     | Runtime_antigravity.Timeout _ ) ) -> false);
+                     | Runtime_antigravity.Timeout _
+                     | Runtime_antigravity.Message_over_client_limit _ ) ) -> false);
               (match error with
                | Runtime_antigravity.Context_window_exceeded
                    { tool_effect_attempted = false; response_emitted = false; _ } ->
@@ -1594,7 +1610,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
                | Runtime_antigravity.Process_exited _
                | Runtime_antigravity.Unhandled_exception _
                | Runtime_antigravity.Child_fd_ceiling_exceeded _
-               | Runtime_antigravity.Timeout _ -> ());
+               | Runtime_antigravity.Timeout _
+               | Runtime_antigravity.Message_over_client_limit _ -> ());
               recovery_failure :=
                 recovery_failure_of_attempt
                   ~conversation_mode

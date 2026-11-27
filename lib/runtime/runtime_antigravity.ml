@@ -322,6 +322,7 @@ type error = Protocol.error =
       ; ceiling : int
       }
   | Timeout of Runtime_timeout_payload.t
+  | Message_over_client_limit of Runtime_acp_client.message_over_limit
 
 exception Runtime_error of error
 
@@ -363,6 +364,11 @@ let error_to_string = function
       "Antigravity CLI file usage was unobservable under system fd pressure; the turn was failed at the %d-file ceiling rather than risk ENFILE (#43259)"
       ceiling
   | Timeout { seconds; _ } -> Printf.sprintf "Antigravity stream was idle for %.3fs" seconds
+  | Message_over_client_limit { message_bytes; max_bytes } ->
+    Printf.sprintf
+      "Antigravity prompt of %d bytes is over the %d bytes agy keeps whole; the CLI was not started"
+      message_bytes
+      max_bytes
 ;;
 
 let protocol_error stage detail = Error (Protocol_error { stage; detail })
@@ -714,12 +720,20 @@ let validate_config config ~conversation_mode ~prompt =
   else if String.trim prompt = ""
   then Error (Invalid_config "prompt must not be empty")
   else
-    match config.agent, conversation_mode with
-    | Some agent, _ when String.trim agent = "" ->
-      Error (Invalid_config "agent must not be empty when present")
-    | _, Resume { conversation_id } when String.trim conversation_id = "" ->
-      Error (Invalid_config "resume conversation_id must not be empty")
-    | (None | Some _), (Start | Resume _) -> Ok ()
+    let* () =
+      match config.agent, conversation_mode with
+      | Some agent, _ when String.trim agent = "" ->
+        Error (Invalid_config "agent must not be empty when present")
+      | _, Resume { conversation_id } when String.trim conversation_id = "" ->
+        Error (Invalid_config "resume conversation_id must not be empty")
+      | (None | Some _), (Start | Resume _) -> Ok ()
+    in
+    (* The prompt goes to stdin whole and agy makes it one message, so its
+       length is the message's (#41906). *)
+    Runtime_acp_client.check_message_bytes
+      Runtime_acp_client.Antigravity
+      ~message_bytes:(String.length prompt)
+    |> Result.map_error (fun over -> Message_over_client_limit over)
 ;;
 
 let validate_turn ?(conversation_mode = Start) config ~prompt =

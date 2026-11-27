@@ -287,7 +287,8 @@ let panel_failure ~runtime_id = function
        | Runtime_antigravity.Actions_denied _
        | Runtime_antigravity.Process_exited _
        | Runtime_antigravity.Child_fd_ceiling_exceeded _
-       | Runtime_antigravity.Unhandled_exception _ ) as error) ->
+       | Runtime_antigravity.Unhandled_exception _
+       | Runtime_antigravity.Message_over_client_limit _ ) as error) ->
     provider_error ~runtime_id (Runtime_antigravity.error_to_string error)
   | Acp_failure (Runtime_acp_client.Timeout _) -> Fusion_types.Timeout
   | Acp_failure
@@ -298,7 +299,8 @@ let panel_failure ~runtime_id = function
        | Runtime_acp_client.Rpc_error _
        | Runtime_acp_client.Host_turn_failed _
        | Runtime_acp_client.Process_exited _
-       | Runtime_acp_client.Client_closed ) as error) ->
+       | Runtime_acp_client.Client_closed
+       | Runtime_acp_client.Message_over_client_limit _ ) as error) ->
     provider_error ~runtime_id (Runtime_acp_client.error_to_string error)
 
 
@@ -532,7 +534,10 @@ let antigravity_standing_of_error ~now :
   | Runtime_antigravity.Process_exited _
   | Runtime_antigravity.Child_fd_ceiling_exceeded _
   | Runtime_antigravity.Unhandled_exception _
-  | Runtime_antigravity.Timeout _ -> None
+  | Runtime_antigravity.Timeout _
+  (* The message's size, not the account's: nothing to remember about the
+     candidate (#41906). *)
+  | Runtime_antigravity.Message_over_client_limit _ -> None
 ;;
 
 let acp_standing_of_error ~now :
@@ -546,7 +551,8 @@ let acp_standing_of_error ~now :
   | Runtime_acp_client.Protocol_error _
   | Runtime_acp_client.Timeout _
   | Runtime_acp_client.Process_exited _
-  | Runtime_acp_client.Client_closed -> None
+  | Runtime_acp_client.Client_closed
+  | Runtime_acp_client.Message_over_client_limit _ -> None
 ;;
 
 let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runtime_instance.t) ~system_prompt ?timeout_s ?output_schema ~prompt () =

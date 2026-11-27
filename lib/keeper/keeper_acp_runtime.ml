@@ -259,6 +259,17 @@ let acp_error_to_core_error = function
     Agent_core.Error.Provider
       (Llm_provider.Error.ProviderUnavailable
          { provider = "acp"; detail = "ACP client closed" })
+  (* The host would cut this message (#41906), so the binding refuses the
+     turn before sending it, as the Antigravity CLI runtime does.
+     [Attempt_rejected] moves the walk to the next candidate, records
+     [Rejected_before_dispatch], and rests no account; it is not a size
+     refusal, so the same candidate gets no shorter retry. *)
+  | Acp.Message_over_client_limit _ as over ->
+    Agent_core.Error.Api
+      (Llm_provider.Retry.InvalidRequest
+         { message = Acp.error_to_string over
+         ; reason = Llm_provider.Retry.Attempt_rejected
+         })
 ;;
 
 (* Preserve a healthy persistent ACP child across upstream quota / rate-limit
@@ -282,6 +293,8 @@ let should_evict_persistent_child_on_error = function
   | Acp.Timeout _
   | Acp.Process_exited _
   | Acp.Client_closed -> true
+  (* Refused before sending: the child and its session saw nothing. *)
+  | Acp.Message_over_client_limit _ -> false
 ;;
 
 let recovery_failure_of_acp_error = function
@@ -320,6 +333,7 @@ let recovery_failure_of_acp_error = function
   | Acp.Timeout _ -> Session_store.Transport_interrupted
   | Acp.Process_exited _ -> Session_store.Transport_interrupted
   | Acp.Client_closed -> Session_store.Transport_interrupted
+  | Acp.Message_over_client_limit _ -> Session_store.Pre_dispatch_failed
 ;;
 
 (* A context overflow is judged by when it came: in a Gate continuation the
@@ -424,7 +438,8 @@ let classify_prompt_error ~is_gate_continuation ~activity_observed = function
         }
     | Acp.Timeout _
     | Acp.Process_exited _
-    | Acp.Client_closed ) as err ->
+    | Acp.Client_closed
+    | Acp.Message_over_client_limit _ ) as err ->
     recovery_failure_of_acp_error err, acp_error_to_core_error err
 ;;
 
@@ -434,7 +449,8 @@ let should_evict_on_session_setup_error = function
   | Acp.Spawn_refused _
   | Acp.Preparation_failed _
   | Acp.Rpc_error _
-  | Acp.Host_turn_failed _ -> false
+  | Acp.Host_turn_failed _
+  | Acp.Message_over_client_limit _ -> false
 ;;
 
 let api_usage_of_acp_usage ~driver (u : Acp.usage) : Agent_core.Types.api_usage =
@@ -3188,7 +3204,8 @@ let run_without_lifecycle
                      | Acp.Host_turn_failed _
                      | Acp.Timeout _
                      | Acp.Process_exited _
-                     | Acp.Client_closed ) as err) ->
+                     | Acp.Client_closed
+                     | Acp.Message_over_client_limit _ ) as err) ->
                   `Failed err)
               else if caps.load_session
               then (
@@ -3271,6 +3288,18 @@ let run_without_lifecycle
         | Some _ | None -> Acp.model_selection_to_string config.model
       in
       let prompt_blocks = blocks_of_prompt active_prompt_text in
+      (* [Acp.prompt] makes the same check, but only after the session is
+         marked active and the input recorded as sent. A message the host
+         would cut is refused here, before either (#41906). *)
+      let* () =
+        Acp.check_message_bytes
+          config.driver
+          ~message_bytes:(Acp.prompt_text_bytes prompt_blocks)
+        |> Result.map_error (fun over ->
+          let err = Acp.Message_over_client_limit over in
+          recovery_failure := recovery_failure_of_acp_error err;
+          acp_error_to_core_error err)
+      in
       let position =
         if resumed then Keeper_usage_resolution.Resumed else Keeper_usage_resolution.Fresh
       in
@@ -3412,7 +3441,8 @@ let run_without_lifecycle
                      | Acp.Protocol_error _
                      | Acp.Timeout _
                      | Acp.Process_exited _
-                     | Acp.Client_closed ) -> ());
+                     | Acp.Client_closed
+                     | Acp.Message_over_client_limit _ ) -> ());
                 `Runtime res)
               ~watcher:(fun () ->
                 let stop = Runtime_official_client_mcp_http.await_host_stop entry.bridge in
@@ -3578,7 +3608,8 @@ let run_without_lifecycle
          | Acp.Host_turn_failed _
          | Acp.Timeout _
          | Acp.Process_exited _
-         | Acp.Client_closed -> ());
+         | Acp.Client_closed
+         | Acp.Message_over_client_limit _ -> ());
         let failure, core_err =
           classify_prompt_error ~is_gate_continuation ~activity_observed err
         in

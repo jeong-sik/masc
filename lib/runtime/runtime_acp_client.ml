@@ -165,6 +165,32 @@ type compaction_point_channel =
   | Muse_compaction_settings
   | No_compaction_point
 
+(* How much of one prompt message a host keeps whole. *)
+type message_limit =
+  | Keeps_messages_through of { max_bytes : int }
+  | Message_limit_not_measured
+
+type message_over_limit =
+  { message_bytes : int
+  ; max_bytes : int
+  }
+
+(* The largest message MASC sends to Antigravity, through [agy acp] or the
+   CLI. agy wraps one message in a user step: [<USER_REQUEST>\n] (15 bytes)
+   before it, then [\n</USER_REQUEST>] and agy's own metadata after it (403
+   to 405 bytes on the CLI). It keeps the first 192,000 bytes of the step and
+   replaces the rest with a [<truncated N bytes>] notice. The turn still
+   succeeds, and nothing on the wire says a part was dropped (#41906).
+
+   Measured on the steps agy stores ([transcript_full.jsonl]): the two
+   [agy acp] 1.5.16 steps of 2026-11-25 end at byte 192,161 (192,000 kept and
+   a 161-byte notice); on 2026-11-27, 1,492 of 1,557 Keeper CLI steps of
+   11-19..27 were cut, the notice at byte offset 192,000 or 1 to 2 bytes
+   before it (a UTF-8 boundary). 192,000 - 15 - 405 - 1 keeps the whole step
+   at 191,999 bytes or less. Whether a step of exactly 192,000 bytes is cut
+   was not measured. RFC-antigravity-runs-only-on-the-acp-driver 3.3, 4.3. *)
+let antigravity_message_max_bytes = 191_579
+
 type driver_profile =
   { driver : driver
   ; default_command : string
@@ -186,6 +212,7 @@ type driver_profile =
   ; model_config_id : string
   ; effort_config_id : string option
   ; compaction_point : compaction_point_channel
+  ; message_limit : message_limit
   }
 
 (* The name the drivers whose host takes it as is give their bridge, and the
@@ -233,6 +260,8 @@ let profile_of_driver = function
        [agy acp] with the same variable let a session grow to 51,026 tokens
        over two prompts without compacting. *)
     ; compaction_point = No_compaction_point
+    ; message_limit =
+        Keeps_messages_through { max_bytes = antigravity_message_max_bytes }
     }
   | Kimi_code ->
     { driver = Kimi_code
@@ -263,6 +292,7 @@ let profile_of_driver = function
        variable that sets it ([KIMI_MODEL_MAX_CONTEXT_SIZE]) is read only for
        a provider named by environment instead of the signed-in one. *)
     ; compaction_point = No_compaction_point
+    ; message_limit = Message_limit_not_measured
     }
   | Mistral_vibe ->
     { driver = Mistral_vibe
@@ -303,6 +333,7 @@ let profile_of_driver = function
        own; the settings' environment layer refuses a per-model value. A point
        passed through it could go unused without a word. *)
     ; compaction_point = No_compaction_point
+    ; message_limit = Message_limit_not_measured
     }
   | Muse_code ->
     { driver = Muse_code
@@ -398,7 +429,15 @@ let profile_of_driver = function
        a limit above the model's own window shows up as the provider's
        overflow, not as the start-time window check. *)
     ; compaction_point = Muse_compaction_settings
+    ; message_limit = Message_limit_not_measured
     }
+;;
+
+let check_message_bytes driver ~message_bytes =
+  match (profile_of_driver driver).message_limit with
+  | Message_limit_not_measured -> Ok ()
+  | Keeps_messages_through { max_bytes } ->
+    if message_bytes <= max_bytes then Ok () else Error { message_bytes; max_bytes }
 ;;
 
 (* The digits are the first eight hex digits of the owner's SHA-256. A digest
@@ -970,6 +1009,7 @@ type error =
       ; refusal : Llm_provider.Retry.signal_refusal option
       }
   | Client_closed
+  | Message_over_client_limit of message_over_limit
 
 let rec redact_string_value ~depth (raw : string) : string =
   let trimmed = String.trim raw in
@@ -1044,6 +1084,11 @@ let error_to_string = function
   | Host_turn_failed { code; message; refusal = _ } ->
     Printf.sprintf "ACP host recorded the prompt as failed (%s): %s" code message
   | Client_closed -> "ACP client is closed"
+  | Message_over_client_limit { message_bytes; max_bytes } ->
+    Printf.sprintf
+      "message of %d bytes is over the %d bytes the ACP host keeps whole; it was not sent"
+      message_bytes
+      max_bytes
 ;;
 
 type jsonrpc_code =
@@ -1098,7 +1143,16 @@ let image_input_unsupported_detail driver =
     (driver_to_string driver)
 ;;
 
-let validate_prompt_blocks ~driver ~(capabilities : agent_capabilities) blocks =
+let prompt_text_bytes blocks =
+  List.fold_left
+    (fun total -> function
+       | Text_block text -> total + String.length text
+       | Image_block _ -> total)
+    0
+    blocks
+;;
+
+let validate_prompt_images ~driver ~(capabilities : agent_capabilities) blocks =
   let images =
     List.filter_map
       (function
@@ -1115,6 +1169,15 @@ let validate_prompt_blocks ~driver ~(capabilities : agent_capabilities) blocks =
     else
       Runtime_official_client_tool.validate_image_inputs images
       |> Result.map_error (fun detail -> Invalid_config detail)
+;;
+
+(* The size comes first: a message the host would cut is not sent whatever
+   its images are. Only text blocks count; whether agy counts an image toward
+   its cut was not measured (RFC-antigravity-runs-only-on-the-acp-driver 4.3). *)
+let validate_prompt_blocks ~driver ~capabilities blocks =
+  match check_message_bytes driver ~message_bytes:(prompt_text_bytes blocks) with
+  | Error over -> Error (Message_over_client_limit over)
+  | Ok () -> validate_prompt_images ~driver ~capabilities blocks
 ;;
 
 (* ── Higher-rank polymorphic JSON decoding helpers ────────────────────────── *)
@@ -3189,7 +3252,8 @@ let rpc_call_with_wait
        | Process_exited { detail; stderr_tail; last_activity = _ } ->
          ended_without_answer ~detail ~stderr_tail
        | Invalid_config _ | Spawn_refused _ | Preparation_failed _ | Protocol_error _
-       | Rpc_error _ | Timeout _ | Host_turn_failed _ | Client_closed -> Error err)
+       | Rpc_error _ | Timeout _ | Host_turn_failed _ | Client_closed
+       | Message_over_client_limit _ -> Error err)
     | Ok () ->
       let remove_pending () =
         with_state_lock t (fun () -> Hashtbl.remove t.pending id)

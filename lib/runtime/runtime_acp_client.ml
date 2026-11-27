@@ -1258,6 +1258,8 @@ let branch_of_tool_kind = function
     Branch_restricted
 ;;
 
+(* HIGH-RISK-UNREVIEWED: [Tool_unknown] ranks above the other restricted
+   kinds, so a conflict mark survives a merge with an [edit] frame. *)
 let within_branch_rank = function
   | Tool_read -> 0
   | Tool_search | Tool_think -> 1
@@ -1406,7 +1408,8 @@ let raw_input_conflicts prev inc =
    Execute/Edit) can weaken policy enforcement. Missing fields may still be
    enriched and locations are unioned. Any conflicting non-empty structured
    identity field ([name], [_meta.server_name], [_meta.tool_name], key-order-
-   insensitive [raw_input]), conflicting whitespace-free MCP identifier [title]
+   insensitive [raw_input]), a [name] that differs from the other frame's
+   [_meta.tool_name] (either order), conflicting whitespace-free MCP identifier [title]
    (under any MCP- or wrapper-eligible kind including [Tool_execute] for
    Antigravity [mcp(<srv>/<tool>)], while preserving live ACP human-display
    title progress such as [kimi acp 2.7.2] "Read" -> "Reading hello.txt"), or
@@ -1437,10 +1440,23 @@ let merge_tool_call_wire ~(prior : tool_call_wire) ~(incoming : tool_call_wire) 
       differs incoming.name || differs incoming.meta_tool_name
     | Some _ | None -> false
   in
+  (* The host writes both [name] and [_meta.tool_name], and
+     {!classify_tool_call} reads [_meta.tool_name] first. If one frame's
+     [name] differs from another frame's [_meta.tool_name], the later frame
+     would switch which tool the call is judged as. So the two fields
+     conflict across frames in either order. *)
+  let cross_field_name_conflict =
+    string_opt_conflicts prior.name incoming.meta_tool_name
+    || string_opt_conflicts prior.meta_tool_name incoming.name
+  in
+  (* HIGH-RISK-UNREVIEWED: decides when two frames of one call disagree on
+     which tool runs. A conflict sets [kind] to [Tool_unknown], so the call
+     classifies as a native tool that only [Allow_all] admits. *)
   let identity_conflict =
     string_opt_conflicts prior.name incoming.name
     || string_opt_conflicts prior.meta_server_name incoming.meta_server_name
     || string_opt_conflicts prior.meta_tool_name incoming.meta_tool_name
+    || cross_field_name_conflict
     || raw_input_conflicts prior.raw_input incoming.raw_input
     || structured_name_introduced_conflict
     || ((not has_structured_tool_name)
@@ -1736,7 +1752,8 @@ let identifier_text = function
    keeper_memory_search, keeper_capability_search, masc_board_search and Grep
    with kind [search], and for Write with kind [edit] (56 frames, 2026-11-26
    and 27). [Tool_unknown] is also the mark of a conflict
-   {!merge_tool_call_wire} found, so it never admits. *)
+   {!merge_tool_call_wire} found, so it never admits.
+   HIGH-RISK-UNREVIEWED: this decides which kinds may carry an MCP call. *)
 let kind_admits_mcp_identifier ~kind = function
   | Display_title _ -> is_allowed_mcp_kind kind
   | Host_tool_name _ ->
@@ -1832,6 +1849,8 @@ let classify_tool_call ~driver ?managed_schema_root ?mcp_server_name (wire : too
         | None, None, Some tool -> Some (Display_title tool)
         | None, None, None -> None
       in
+      (* HIGH-RISK-UNREVIEWED: admits [_meta.server_name]'s server for any
+         driver. No recorded host sends that field. *)
       (match candidate_tool with
        | Some field when kind_admits_mcp_identifier ~kind:wire.kind field ->
          Mcp_tool { server = Explicit_server srv; tool_name = identifier_text field }
@@ -1893,6 +1912,8 @@ let classify_tool_call ~driver ?managed_schema_root ?mcp_server_name (wire : too
               | None -> fallback ())
             else fallback ()
           | None ->
+            (* HIGH-RISK-UNREVIEWED: a driver-qualified name becomes an MCP
+               call here. *)
             (match field with
              | Some field when kind_admits_mcp_identifier ~kind:wire.kind field ->
                (match

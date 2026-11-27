@@ -6702,6 +6702,16 @@ CALLS = [
             "title": BRIDGE + "Read", "kind": "read"}, {"name": BRIDGE + "Write"}),
     (3009, {"toolCallId": "tc-late-same-name",
             "title": BRIDGE + "Read", "kind": "read"}, {"name": BRIDGE + "Read"}),
+    (3010, {"toolCallId": "tc-name-then-meta",
+            "title": "read_file", "name": "read_file", "kind": "read"},
+           {"_meta": {"tool_name": BRIDGE + "Write"}}),
+    (3011, {"toolCallId": "tc-meta-then-name",
+            "title": "Read file", "kind": "read",
+            "_meta": {"tool_name": BRIDGE + "Read"}},
+           {"name": "read_file"}),
+    (3012, {"toolCallId": "tc-name-and-meta-agree",
+            "title": BRIDGE + "Read", "name": BRIDGE + "Read", "kind": "read"},
+           {"_meta": {"tool_name": BRIDGE + "Read"}}),
 ]
 IDS = [rid for rid, _, _ in CALLS]
 
@@ -6820,6 +6830,15 @@ for line in sys.stdin:
                 , "a later name that differs from the title is denied under kind read"
                 , "reject_once_id" )
               ; "3009", "a later name equal to the title is allowed", "allow_once_id"
+              ; ( "3010"
+                , "a later _meta.tool_name that differs from the earlier name is denied"
+                , "reject_once_id" )
+              ; ( "3011"
+                , "a later name that differs from the earlier _meta.tool_name is denied"
+                , "reject_once_id" )
+              ; ( "3012"
+                , "a later _meta.tool_name equal to the earlier name is allowed"
+                , "allow_once_id" )
               ])))))
 ;;
 

@@ -1659,23 +1659,33 @@ let accept_running ?finished_at config ~now ~attempt ?detail () =
   settle_running config ~now ~finished_at:(Option.value finished_at ~default:now) ~attempt (Accept detail)
 ;;
 
-let cancel_matching config ~should_cancel =
+let cancel_matching ?withdraw_queued_wakes config ~should_cancel =
   with_observed_mutation config (fun write_state ->
     let* state = load_for_mutation config in
-    let rec cancel schedules changed = function
-      | [] -> Ok (List.rev schedules, changed)
+    let rec cancel schedules changed matched = function
+      | [] -> Ok (List.rev schedules, changed, List.rev matched)
       | (request : schedule_request) :: rest when not (should_cancel request) ->
-        cancel (request :: schedules) changed rest
+        cancel (request :: schedules) changed matched rest
       | ({ status = (Scheduled | Due); _ } as request) :: rest ->
-        cancel ({ request with status = Cancelled } :: schedules) true rest
+        cancel ({ request with status = Cancelled } :: schedules) true (request :: matched) rest
       | ({ status = Running; _ } as request) :: _ ->
         Error
           (transition_refused state request ~attempted:Cancel_for_consumer_retirement)
-      (* Already terminal: nothing to cancel, and no error to raise. *)
+      (* Already terminal: nothing to cancel in the ledger, and no error to raise,
+         but still pass to [withdraw_queued_wakes] so already-delivered stimuli
+         waiting in the consumer's queue are withdrawn under the ledger lock. *)
       | ({ status = Succeeded | Failed | Cancelled | Expired; _ } as request) :: rest ->
-        cancel (request :: schedules) changed rest
+        cancel (request :: schedules) changed (request :: matched) rest
     in
-    let* schedules, changed = cancel [] false state.schedules in
+    let* schedules, changed, matched = cancel [] false [] state.schedules in
+    let* () =
+      match withdraw_queued_wakes, matched with
+      | None, ([] | _ :: _) | Some _, [] -> Ok ()
+      | Some withdraw, (_ :: _ as matched) ->
+        withdraw matched
+        |> Result.map_error (fun detail ->
+          Persistence_failed ("scheduled wake withdrawal failed: " ^ detail))
+    in
     if changed
     then
       (* Disposition at the cancel boundary: the matched schedules just

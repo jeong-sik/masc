@@ -505,12 +505,20 @@ let prefix_digest ~system_prompt ~tools =
 module Table = struct
   module M = Map.Make (String)
 
+  let max_entries = 512
+
+  type entry =
+    { ledger : t
+    ; last_accessed : int
+    }
+
   type state =
-    { mutable ledgers : t M.t
+    { mutable ledgers : entry M.t
+    ; mutable clock : int
     ; mutex : Eio.Mutex.t
     }
 
-  let global = { ledgers = M.empty; mutex = Eio.Mutex.create () }
+  let global = { ledgers = M.empty; clock = 0; mutex = Eio.Mutex.create () }
   (* One ledger per history: the session names the checkpoint the atoms
      are positions in, so a recovery worker's turn on the same keeper and
      runtime, or a new session, never reads or writes another's front. *)
@@ -518,17 +526,65 @@ module Table = struct
     keeper_name ^ "\000" ^ runtime_id ^ "\000" ^ session_id
   ;;
 
+  let evict_if_full ~incoming_key ledgers =
+    if (not (M.mem incoming_key ledgers)) && M.cardinal ledgers >= max_entries
+    then (
+      match
+        M.fold
+          (fun k (e : entry) acc ->
+             match acc with
+             | None -> Some (k, e.last_accessed)
+             | Some (_, min_seq) when e.last_accessed < min_seq ->
+               Some (k, e.last_accessed)
+             | Some _ -> acc)
+          ledgers
+          None
+      with
+      | Some (oldest_key, _) -> M.remove oldest_key ledgers
+      | None -> ledgers)
+    else ledgers
+  ;;
+
   let observe ~keeper_name ~runtime_id ~session_id ~digest_at ~request ~usage =
     let key = key ~keeper_name ~runtime_id ~session_id in
-    Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
-      let observation = observe ~digest_at (M.find_opt key global.ledgers) request usage in
-      global.ledgers <- M.add key observation.ledger global.ledgers;
-      observation)
+    let rec commit_loop () =
+      let prev =
+        Eio.Mutex.use_ro global.mutex (fun () ->
+          Option.map (fun (e : entry) -> e.ledger) (M.find_opt key global.ledgers))
+      in
+      (* Run caller-supplied [digest_at] outside [global.mutex] so an exception
+         cannot poison the process-wide mutex under [~protect:true]. *)
+      let observation = observe ~digest_at prev request usage in
+      let committed =
+        Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
+          let current =
+            Option.map (fun (e : entry) -> e.ledger) (M.find_opt key global.ledgers)
+          in
+          let unchanged =
+            match prev, current with
+            | None, None -> true
+            | Some p, Some c -> p == c
+            | None, Some _ | Some _, None -> false
+          in
+          if not unchanged
+          then false
+          else (
+            global.clock <- global.clock + 1;
+            let ledgers = evict_if_full ~incoming_key:key global.ledgers in
+            global.ledgers <-
+              M.add key { ledger = observation.ledger; last_accessed = global.clock } ledgers;
+            true))
+      in
+      if committed then observation else commit_loop ()
+    in
+    commit_loop ()
   ;;
 
   let lookup ~keeper_name ~runtime_id ~session_id =
     Eio.Mutex.use_ro global.mutex (fun () ->
-      M.find_opt (key ~keeper_name ~runtime_id ~session_id) global.ledgers)
+      Option.map
+        (fun (e : entry) -> e.ledger)
+        (M.find_opt (key ~keeper_name ~runtime_id ~session_id) global.ledgers))
   ;;
 
   type in_history =
@@ -547,14 +603,17 @@ module Table = struct
       let key = key ~keeper_name ~runtime_id ~session_id in
       Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
         match M.find_opt key global.ledgers with
-        | Some current when current == stale -> global.ledgers <- M.remove key global.ledgers
+        | Some current when current.ledger == stale ->
+          global.ledgers <- M.remove key global.ledgers
         | Some _ | None -> ());
       Dropped_stale stale
   ;;
 
   module For_testing = struct
     let reset () =
-      Eio.Mutex.use_rw ~protect:true global.mutex (fun () -> global.ledgers <- M.empty)
+      Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->
+        global.ledgers <- M.empty;
+        global.clock <- 0)
     ;;
   end
 end

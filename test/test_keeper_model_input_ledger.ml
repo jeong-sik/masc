@@ -479,6 +479,55 @@ let test_table_observations_are_session_scoped () =
   Ledger.Table.For_testing.reset ()
 ;;
 
+let test_table_observe_exception_does_not_poison_mutex () =
+  Ledger.Table.For_testing.reset ();
+  let keeper_name = "alpha" and runtime_id = "r" and session_id = "trace-poison" in
+  ignore
+    (Ledger.Table.observe ~keeper_name ~runtime_id ~session_id
+       ~digest_at:(history ~atom_count:10)
+       ~request:(request ~first_atom:0 ~atom_count:10 ()) ~usage:(Some (usage 1_000)));
+  let raised =
+    try
+      ignore
+        (Ledger.Table.observe ~keeper_name ~runtime_id ~session_id
+           ~digest_at:(fun _ -> failwith "boom in digest_at")
+           ~request:(request ~first_atom:0 ~atom_count:12 ()) ~usage:(Some (usage 1_200)));
+      false
+    with
+    | Failure msg -> String.equal msg "boom in digest_at"
+  in
+  check bool "digest_at exception propagates to caller" true raised;
+  let after =
+    Ledger.Table.observe ~keeper_name ~runtime_id ~session_id
+      ~digest_at:(history ~atom_count:12)
+      ~request:(request ~first_atom:0 ~atom_count:12 ()) ~usage:(Some (usage 1_200))
+  in
+  check bool "table remains usable after digest_at raises" true
+    (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id = Some after.ledger);
+  Ledger.Table.For_testing.reset ()
+;;
+
+let test_table_evicts_oldest_entries_beyond_cap () =
+  Ledger.Table.For_testing.reset ();
+  let keeper_name = "alpha" and runtime_id = "r" in
+  for i = 1 to 520 do
+    ignore
+      (Ledger.Table.observe ~keeper_name ~runtime_id
+         ~session_id:(Printf.sprintf "session-%03d" i)
+         ~digest_at:(history ~atom_count:10)
+         ~request:(request ~first_atom:0 ~atom_count:10 ()) ~usage:(Some (usage 1_000)))
+  done;
+  check bool "oldest session beyond 512 cap is evicted" true
+    (Option.is_none (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:"session-001"));
+  check bool "8th oldest session beyond 512 cap is evicted" true
+    (Option.is_none (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:"session-008"));
+  check bool "newest 512th session survives" true
+    (Option.is_some (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:"session-009"));
+  check bool "most recent session survives" true
+    (Option.is_some (Ledger.Table.lookup ~keeper_name ~runtime_id ~session_id:"session-520"));
+  Ledger.Table.For_testing.reset ()
+;;
+
 (* The same number of atoms is not the same history. An attempt that was never
    saved appended atom 9; the next turn appended its own new input at the same
    index. The count matches, the message at the last index does not, and the
@@ -814,6 +863,11 @@ let () =
         ; test_case "prefix digest" `Quick test_prefix_digest_is_stable_and_separates_prompts
         ] )
     ; ( "table"
-      , [ test_case "session-scoped observation" `Quick test_table_observations_are_session_scoped ] )
+      , [ test_case "session-scoped observation" `Quick test_table_observations_are_session_scoped
+        ; test_case "digest_at exception does not poison mutex" `Quick
+            test_table_observe_exception_does_not_poison_mutex
+        ; test_case "bounded table evicts oldest entries" `Quick
+            test_table_evicts_oldest_entries_beyond_cap
+        ] )
     ]
 ;;

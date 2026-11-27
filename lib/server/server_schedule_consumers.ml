@@ -1007,41 +1007,34 @@ let cancel_keeper_schedules config ~keeper_name =
        | Schedule_domain.Human_operator | Schedule_domain.System -> false)
     | Error _ -> false
   in
-  (* Cancel propagation (task-370): the queue drain must see the schedule
-     ledger before the schedules leave it, so it runs first. Removing the
-     ledger rows first would orphan pending queue stimuli whose only schedule
-     authority is the request being cancelled. *)
-  let schedule_ids =
-    let state = Schedule_store.read_state config in
-    List.filter_map
-      (fun (request : Schedule_domain.schedule_request) ->
-         if should_cancel request then Some request.schedule_id else None)
-      state.schedules
+  (* Cancel propagation (task-370): run the queue drain inside
+     [Schedule_store.cancel_matching] under the ledger lock, after primary
+     authority is verified and any [Running] schedule has refused the call,
+     and before the ledger rows turn [Cancelled]. *)
+  let withdraw_queued_wakes matched =
+    let schedule_ids =
+      List.map (fun (request : Schedule_domain.schedule_request) -> request.schedule_id) matched
+    in
+    let applied_at = Unix.gettimeofday () in
+    match
+      Keeper_registry_event_queue.cancel_scheduled_wakes_result
+        ~base_path:config.Workspace_utils.base_path
+        keeper_name
+        ~applied_at
+        ~schedule_ids
+        ~reason:"schedule cancelled; enqueued utterance withdrawn"
+    with
+    | Ok 0 -> Ok ()
+    | Ok n ->
+      Log.Keeper.info
+        "cancel_keeper_schedules: withdrew %d pending queue stimulus for \
+         keeper=%s"
+        n
+        keeper_name;
+      Ok ()
+    | Error detail -> Error detail
   in
-  let applied_at = Unix.gettimeofday () in
-  let withdrawal = match schedule_ids with
-   | [] -> Ok ()
-   | _ ->
-     (match
-        Keeper_registry_event_queue.cancel_scheduled_wakes_result
-          ~base_path:config.Workspace_utils.base_path
-          keeper_name
-          ~applied_at
-          ~schedule_ids
-          ~reason:"schedule cancelled; enqueued utterance withdrawn"
-      with
-      | Ok 0 -> Ok ()
-      | Ok n ->
-        Log.Keeper.info
-          "cancel_keeper_schedules: withdrew %d pending queue stimulus for \
-           keeper=%s"
-          n
-          keeper_name;
-        Ok ()
-      | Error detail ->
-        Error (Schedule_store.Persistence_failed
-          ("scheduled wake withdrawal failed: " ^ detail))) in
-  Result.bind withdrawal (fun () -> Schedule_store.cancel_matching config ~should_cancel)
+  Schedule_store.cancel_matching config ~withdraw_queued_wakes ~should_cancel
 ;;
 
 (* Self-clock heartbeat schedules (#36213). A [result_delivery = None] interval

@@ -419,13 +419,17 @@ val due_wake_candidates :
     the payload consumer. *)
 
 val cancel_matching :
+  ?withdraw_queued_wakes:(Schedule_domain.schedule_request list -> (unit, string) result) ->
   Workspace_utils.config ->
   should_cancel:(Schedule_domain.schedule_request -> bool) ->
   (unit, store_error) result
 (** Atomically cancels every matching [Scheduled] or [Due] request, for a
     consumer that is being retired. A matching [Running] request refuses the
     whole call with [Transition_refused] and [Cancel_for_consumer_retirement],
-    because wake delivery is still in progress. *)
+    because wake delivery is still in progress. When [withdraw_queued_wakes] is
+    supplied and at least one schedule matches, it runs under the ledger lock
+    after primary authority is verified and [Running] schedules have been
+    rejected, and before any schedule row turns [Cancelled]. *)
 
 val prune_completed :
   Workspace_utils.config ->

@@ -451,6 +451,45 @@ let test_running_wake_missing_says_whether_the_wake_finished () =
   | Error err -> fail (store_error_to_string err)
 ;;
 
+let test_cancel_matching_withdrawal_respects_running_and_failure () =
+  with_workspace
+  @@ fun config ->
+  let running_req = insert_ok config (make_request ~schedule_id:"cm-running" ()) in
+  let scheduled_req = insert_ok config (make_request ~schedule_id:"cm-scheduled" ()) in
+  ignore (store_ok "due" (refresh_due config ~now:201.0));
+  ignore (store_ok "start" (start_request config ~now:202.0 ~schedule_id:running_req.schedule_id));
+  let withdrawn_calls = ref 0 in
+  (match
+     cancel_matching
+       ~withdraw_queued_wakes:(fun _ ->
+         incr withdrawn_calls;
+         Ok ())
+       config
+       ~should_cancel:(fun _ -> true)
+   with
+   | Error (Transition_refused { current = Running; _ }) ->
+     check int "withdrawal is skipped when a matching schedule is running" 0 !withdrawn_calls
+   | Ok () -> fail "cancel_matching cancelled while a schedule was running"
+   | Error err -> fail (store_error_to_string err));
+  (match
+     cancel_matching
+       ~withdraw_queued_wakes:(fun matched ->
+         incr withdrawn_calls;
+         check int "only the matched scheduled row is passed" 1 (List.length matched);
+         Error "queue unavailable")
+       config
+       ~should_cancel:(fun req -> String.equal req.schedule_id scheduled_req.schedule_id)
+   with
+   | Error (Persistence_failed detail) ->
+     check bool "withdrawal error propagates" true (String.length detail > 0);
+     check int "withdrawal ran once" 1 !withdrawn_calls;
+     (match get_schedule config ~schedule_id:scheduled_req.schedule_id with
+      | Some row -> check_status "failed withdrawal keeps schedule due" Due row.status
+      | None -> fail "schedule disappeared after failed withdrawal")
+   | Ok () -> fail "cancel_matching succeeded despite withdrawal failure"
+   | Error err -> fail (store_error_to_string err))
+;;
+
 (* A recurring request keeps its instance id across occurrences, so the
    ledger holds the finished wakes of occurrences already delivered. A running
    occurrence whose own wake is missing is absent, not settled by an older
@@ -2767,6 +2806,8 @@ let () =
             test_store_rejects_non_scheduled_initial_status;
           test_case "cancel request marks cancelled" `Quick
             test_cancel_request_marks_cancelled;
+          test_case "cancel_matching withdraws queued wakes atomically under lock" `Quick
+            test_cancel_matching_withdrawal_respects_running_and_failure;
           test_case "running wake stays live across refused cancel" `Quick
             test_running_wake_is_settleable_so_prune_keeps_it;
           test_case "legacy running wake against cancelled schedule is disposed by sweep" `Quick

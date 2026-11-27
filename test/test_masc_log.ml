@@ -256,6 +256,66 @@ let test_sink_line_stays_valid_utf8_json () =
          entry.message
          Yojson.Safe.Util.(json |> member "message" |> to_string))
 
+let test_restore_classifies_surviving_diagnostics () =
+  let module_name = "TestLogRestoreDiag" in
+  let dir = Filename.temp_dir "masc-log-restore-diag-" "" in
+  let cleanup () =
+    (match Sys.readdir dir with
+     | entries ->
+       Array.iter
+         (fun name ->
+           try Sys.remove (Filename.concat dir name) with Sys_error _ -> ())
+         entries
+     | exception Sys_error _ -> ());
+    try Unix.rmdir dir with Unix.Unix_error _ -> ()
+  in
+  Fun.protect ~finally:cleanup (fun () ->
+    let today = Log.format_utc_date_of (Unix.gettimeofday ()) in
+    let path = Filename.concat dir (Printf.sprintf "system_log_%s.jsonl" today) in
+    let make_row seq message =
+      Log.Ring.entry_to_json
+        {
+          seq;
+          ts = "2026-11-27T00:00:00Z";
+          level = Log.Warn;
+          source = Log.Structured;
+          module_name;
+          keeper_name = None;
+          turn_id = None;
+          message;
+          details = `Null;
+          category = None;
+          diagnostic_kind = None;
+        }
+      |> Yojson.Safe.to_string
+    in
+    let oc = open_out_bin path in
+    Fun.protect
+      ~finally:(fun () -> close_out_noerr oc)
+      (fun () ->
+        List.iter
+          (fun line -> output_string oc line; output_char oc '\n')
+          [
+            make_row 1 "[MASC] Received SIGTERM, shutting down";
+            make_row 2 "[MASC] Received SIGINT, shutting down";
+            make_row 3 "heartbeat: invalid agent JSON for alpha";
+            make_row 4 "ordinary routine log line";
+          ]);
+    open_file_sink dir;
+    let restored =
+      Log.Ring.recent ~limit:10 ~module_filter:module_name ~order:`Oldest_first ()
+    in
+    let kinds = List.map (fun (e : Log.Ring.entry) -> e.diagnostic_kind) restored in
+    Alcotest.(check int) "four entries restored" 4 (List.length kinds);
+    let check_kind idx expected =
+      Alcotest.(check bool) (Printf.sprintf "entry %d diagnostic_kind" idx) true
+        (List.nth kinds idx = expected)
+    in
+    check_kind 0 (Some (Log.External_signal "SIGTERM"));
+    check_kind 1 (Some (Log.External_signal "SIGINT"));
+    check_kind 2 (Some Log.Agent_decode_failure);
+    check_kind 3 None)
+
 let test_publication_hook_observes_actual_ring_overwrite () =
   Console_sink.For_testing.set_writer (Some (fun _ -> ()));
   let module_name = Masc.Failure_envelope.tool_host_log_module_name in
@@ -325,5 +385,7 @@ let () =
           test_push_masks_secrets_in_details;
         Alcotest.test_case "sink line stays valid UTF-8 JSON" `Quick
           test_sink_line_stays_valid_utf8_json;
+        Alcotest.test_case "restore classifies surviving diagnostic kinds" `Quick
+          test_restore_classifies_surviving_diagnostics;
       ] );
   ]

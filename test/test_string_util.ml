@@ -179,6 +179,20 @@ let test_find_substring_rejects_negative_pos () =
     "String_util.find_substring: negative position")
     (fun () -> ignore (SU.find_substring ~pos:(-1) "abc" "a"))
 
+let test_find_substring_partial_prefix_and_single_char () =
+  check_int_option "retries past false first-byte hits" (Some 7)
+    (SU.find_substring "abacabaabacabd" "abacabd");
+  check_int_option "first-byte match at last valid index fails tail cleanly" None
+    (SU.find_substring "xax" "ab");
+  check_int_option "first-byte match past last valid index" None
+    (SU.find_substring "xyzab" "abc");
+  check_int_option "single-byte needle" (Some 4)
+    (SU.find_substring ~pos:2 "abacda" "d");
+  check_int_option "single-byte needle at last index" (Some 5)
+    (SU.find_substring ~pos:5 "abacda" "a");
+  check_int_option "pos at max_int does not overflow" None
+    (SU.find_substring ~pos:max_int "abc" "a")
+
 let test_rfind_substring_basic () =
   check_int_option "last of several" (Some 8)
     (SU.rfind_substring "ab--ab--ab" "ab");
@@ -188,6 +202,10 @@ let test_rfind_substring_basic () =
     (SU.rfind_substring "xxabxx" "ba");
   check_int_option "overlapping candidates take the last" (Some 1)
     (SU.rfind_substring "aaaa" "aaa");
+  check_int_option "retries past false trailing first-byte hits" (Some 1)
+    (SU.rfind_substring "xabacabdabacaba" "abacabd");
+  check_int_option "first-byte match at index 0 fails tail cleanly" None
+    (SU.rfind_substring "ax" "ab");
   check_int_option "UTF-8 bytes" (Some 6)
     (SU.rfind_substring "가나가" "가")
 
@@ -227,6 +245,20 @@ let test_contains_substring_literal_metacharacters () =
 let test_contains_substring_utf8_bytes () =
   check bool "Korean substring" true (SU.contains_substring korean_title "머지");
   check bool "emoji substring" true (SU.contains_substring three_smileys "😀")
+
+let test_replace_substring_edges () =
+  check string "replaces all non-overlapping" "XY--XY--XY"
+    (SU.replace_substring ~needle:"ab" ~by:"XY" "ab--ab--ab");
+  check string "non-overlapping on repeated runs" "XXa"
+    (SU.replace_substring ~needle:"aa" ~by:"X" "aaaaa");
+  check string "absent needle keeps string" "hello"
+    (SU.replace_substring ~needle:"zz" ~by:"!" "hello");
+  check string "empty needle keeps string" "hello"
+    (SU.replace_substring ~needle:"" ~by:"!" "hello");
+  check string "replaces to empty" "ac"
+    (SU.replace_substring ~needle:"b" ~by:"" "abbbbc");
+  check string "replaces at exact end" "fooBAR"
+    (SU.replace_substring ~needle:"baz" ~by:"BAR" "foobaz")
 
 let test_contains_substring_ci_ascii () =
   check bool "ASCII case-insensitive" true
@@ -684,7 +716,9 @@ let () =
           test_case "boundaries" `Quick test_find_substring_boundaries;
           test_case "empty needle" `Quick test_find_substring_empty_needle;
           test_case "negative pos rejected" `Quick
-            test_find_substring_rejects_negative_pos ] );
+            test_find_substring_rejects_negative_pos;
+          test_case "partial prefix and single char" `Quick
+            test_find_substring_partial_prefix_and_single_char ] );
       ( "rfind_substring",
         [ test_case "basic" `Quick test_rfind_substring_basic;
           test_case "boundaries" `Quick test_rfind_substring_boundaries;
@@ -696,6 +730,9 @@ let () =
           test_case "literal metacharacters" `Quick
             test_contains_substring_literal_metacharacters;
           test_case "UTF-8 bytes" `Quick test_contains_substring_utf8_bytes ] );
+      ( "replace_substring",
+        [ test_case "edges and non-overlapping" `Quick
+            test_replace_substring_edges ] );
       ( "contains_substring_ci",
         [ test_case "ASCII" `Quick test_contains_substring_ci_ascii;
           test_case "empty and literal" `Quick

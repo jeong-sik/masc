@@ -153,7 +153,51 @@ let test_decode_rejects_legacy_raw_level_row () =
      extra fields are ignored. The point is no schema panic over the
      extras. *)
   let decoded = Log.Ring.entry_of_json legacy_row in
-  Alcotest.(check string) "legacy row decodable" "old row" decoded.message
+  Alcotest.(check string) "legacy row decodable" "old row" decoded.message;
+  Alcotest.(check bool) "missing details defaults to Null" true
+    (decoded.details = `Null)
+
+let test_decode_duplicate_keys_first_wins () =
+  (* Matches [Yojson.Safe.Util.member] first-occurrence precedence even when
+     the first key is [null]. *)
+  let dup_valid =
+    `Assoc [
+      ("seq", `Int 10);
+      ("seq", `Int 99);
+      ("ts", `String "2026-05-14T00:00:00Z");
+      ("level", `String "WARN");
+      ("level", `String "ERROR");
+      ("source", `String "structured");
+      ("module", `String "FirstMod");
+      ("module", `String "SecondMod");
+      ("message", `String "first");
+      ("message", `String "second");
+      ("details", `Int 1);
+      ("details", `Int 2);
+    ]
+  in
+  let decoded = Log.Ring.entry_of_json dup_valid in
+  Alcotest.(check int) "first seq wins" 10 decoded.seq;
+  Alcotest.(check bool) "first level wins" true (decoded.level = Log.Warn);
+  Alcotest.(check string) "first module wins" "FirstMod" decoded.module_name;
+  Alcotest.(check string) "first message wins" "first" decoded.message;
+  Alcotest.(check bool) "first details wins" true (decoded.details = `Int 1);
+  let dup_null_first =
+    `Assoc [
+      ("seq", `Null);
+      ("seq", `Int 42);
+      ("ts", `String "2026-05-14T00:00:00Z");
+      ("level", `String "INFO");
+      ("source", `String "structured");
+      ("module", `String "Test");
+      ("message", `String "x");
+    ]
+  in
+  match Log.Ring.entry_of_json dup_null_first with
+  | exception Log.Ring.Entry_decode_error msg ->
+      Alcotest.(check string) "null first triggers missing seq"
+        "missing field: seq" msg
+  | _ -> Alcotest.fail "expected Entry_decode_error when first seq is null"
 
 let () =
   Alcotest.run "log_ring_encoder"
@@ -171,5 +215,6 @@ let () =
         Alcotest.test_case "unknown level" `Quick test_decode_rejects_unknown_level;
         Alcotest.test_case "unknown source" `Quick test_decode_rejects_unknown_source;
         Alcotest.test_case "legacy extras tolerated" `Quick test_decode_rejects_legacy_raw_level_row;
+        Alcotest.test_case "duplicate keys first wins" `Quick test_decode_duplicate_keys_first_wins;
       ]);
     ]

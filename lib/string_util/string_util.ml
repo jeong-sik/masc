@@ -1,29 +1,39 @@
+(* Shared byte-wise search using [String.index_from_opt] (libc [memchr]) to
+   jump straight to candidate start bytes before checking the remaining
+   bytes of [needle].  Caller must ensure [pos >= 0], [needle_len > 0], and
+   [pos <= hay_len - needle_len]. *)
+let find_substring_from haystack hay_len needle needle_len pos =
+  let first = String.unsafe_get needle 0 in
+  let last = hay_len - needle_len in
+  let rec match_tail i j =
+    if j = needle_len then true
+    else if Char.equal (String.unsafe_get haystack (i + j))
+              (String.unsafe_get needle j)
+    then match_tail i (j + 1)
+    else false
+  in
+  let rec loop i =
+    if i > last then None
+    else
+      match String.index_from_opt haystack i first with
+      | None -> None
+      | Some hit ->
+          if hit > last then None
+          else if needle_len = 1 || match_tail hit 1 then Some hit
+          else loop (hit + 1)
+  in
+  loop pos
+
 (* Byte-wise substring containment.
 
-   Old form allocated [String.sub] per inner-loop step; this version
-   uses [String.unsafe_get] with index-checked match.  Empty-needle
-   short-circuits to [true] (matching [Re.str ""] / [Re.execp]
+   Empty-needle short-circuits to [true] (matching [Re.str ""] / [Re.execp]
    semantics that callers relied on). *)
 let contains_substring haystack needle =
   let hay_len = String.length haystack in
   let needle_len = String.length needle in
   if needle_len = 0 then true
   else if needle_len > hay_len then false
-  else
-    let rec match_at i j =
-      if j = needle_len then true
-      else if String.unsafe_get haystack (i + j)
-            <> String.unsafe_get needle j
-      then false
-      else match_at i (j + 1)
-    in
-    let last = hay_len - needle_len in
-    let rec loop i =
-      if i > last then false
-      else if match_at i 0 then true
-      else loop (i + 1)
-    in
-    loop 0
+  else Option.is_some (find_substring_from haystack hay_len needle needle_len 0)
 
 (* Byte-wise substring search: returns the index of the first match at or
    after [pos] (default 0), or [None] if absent. Empty needle returns
@@ -33,22 +43,8 @@ let find_substring ?(pos = 0) haystack needle =
   let hay_len = String.length haystack in
   let needle_len = String.length needle in
   if needle_len = 0 then Some pos
-  else if pos + needle_len > hay_len then None
-  else
-    let rec match_at i j =
-      if j = needle_len then true
-      else if String.unsafe_get haystack (i + j)
-            <> String.unsafe_get needle j
-      then false
-      else match_at i (j + 1)
-    in
-    let last = hay_len - needle_len in
-    let rec loop i =
-      if i > last then None
-      else if match_at i 0 then Some i
-      else loop (i + 1)
-    in
-    loop pos
+  else if pos > hay_len - needle_len then None
+  else find_substring_from haystack hay_len needle needle_len pos
 
 (* Byte-wise substring search from the end: returns the index of the last
    match, or [None] if absent. Empty needle returns [Some (String.length
@@ -56,19 +52,25 @@ let find_substring ?(pos = 0) haystack needle =
 let rfind_substring haystack needle =
   let hay_len = String.length haystack in
   let needle_len = String.length needle in
-  if needle_len > hay_len then None
+  if needle_len = 0 then Some hay_len
+  else if needle_len > hay_len then None
   else
-    let rec match_at i j =
+    let first = String.unsafe_get needle 0 in
+    let rec match_tail i j =
       if j = needle_len then true
-      else if String.unsafe_get haystack (i + j)
-            <> String.unsafe_get needle j
-      then false
-      else match_at i (j + 1)
+      else if Char.equal (String.unsafe_get haystack (i + j))
+                (String.unsafe_get needle j)
+      then match_tail i (j + 1)
+      else false
     in
     let rec loop i =
       if i < 0 then None
-      else if match_at i 0 then Some i
-      else loop (i - 1)
+      else
+        match String.rindex_from_opt haystack i first with
+        | None -> None
+        | Some hit ->
+            if needle_len = 1 || match_tail hit 1 then Some hit
+            else loop (hit - 1)
     in
     loop (hay_len - needle_len)
 
@@ -215,32 +217,29 @@ let equals_ci a b =
 let replace_substring ~needle ~by haystack =
   let hay_len = String.length haystack in
   let needle_len = String.length needle in
-  if needle_len = 0 || needle_len > hay_len || not (contains_substring haystack needle)
-  then haystack
+  if needle_len = 0 || needle_len > hay_len then haystack
   else
-    let buf = Buffer.create hay_len in
-    let rec match_at i j =
-      if j = needle_len then true
-      else if String.unsafe_get haystack (i + j)
-            <> String.unsafe_get needle j
-      then false
-      else match_at i (j + 1)
-    in
-    let last = hay_len - needle_len in
-    let rec loop i =
-      if i > last then
-        Buffer.add_substring buf haystack i (hay_len - i)
-      else if match_at i 0 then begin
-        Buffer.add_string buf by;
-        loop (i + needle_len)
-      end
-      else begin
-        Buffer.add_char buf (String.unsafe_get haystack i);
-        loop (i + 1)
-      end
-    in
-    loop 0;
-    Buffer.contents buf
+    match find_substring_from haystack hay_len needle needle_len 0 with
+    | None -> haystack
+    | Some first_hit ->
+        let buf = Buffer.create hay_len in
+        let rec loop start hit =
+          if hit > start then
+            Buffer.add_substring buf haystack start (hit - start);
+          Buffer.add_string buf by;
+          let next = hit + needle_len in
+          if next > hay_len - needle_len then begin
+            if next < hay_len then
+              Buffer.add_substring buf haystack next (hay_len - next)
+          end else
+            match find_substring_from haystack hay_len needle needle_len next with
+            | None ->
+                if next < hay_len then
+                  Buffer.add_substring buf haystack next (hay_len - next)
+            | Some next_hit -> loop next next_hit
+        in
+        loop 0 first_hit;
+        Buffer.contents buf
 
 type truncation =
   | Untouched of string

@@ -1274,6 +1274,107 @@ let test_fold_jsonl_lines_missing_file () =
   check int "missing file returns init" 0 result
 ;;
 
+let test_fold_jsonl_lines_whitespace_and_multi_chunk () =
+  with_tmp_dir
+  @@ fun base ->
+  let path = Filename.concat base "multichunk.jsonl" in
+  (* Exceed the 1 MiB chunk size so at least one JSONL row straddles a chunk
+     boundary while leading/trailing ASCII whitespace and blank lines are also
+     exercised on both direct-slice and buffered paths. *)
+  let payload = String.make 1000 'x' in
+  let oc = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+       output_string oc " \t\012\r\n";
+       for i = 1 to 1200 do
+         output_string
+           oc
+           (Printf.sprintf "  {\"n\":%d,\"p\":\"%s\"}\r\n" i payload)
+       done;
+       output_string oc "   \t  \n";
+       output_string oc "  {\"n\":1201,\"p\":\"tail\"}  ");
+  let count, last_line_no, sum =
+    Fs_compat.fold_jsonl_lines
+      ~init:(0, 0, 0)
+      ~f:(fun (count, _last, sum) ~line_no json ->
+        let n =
+          match json with
+          | `Assoc fields ->
+            (match List.assoc_opt "n" fields with
+             | Some (`Int n) -> n
+             | _ -> fail "missing int field n")
+          | _ -> fail "expected json object"
+        in
+        count + 1, line_no, sum + n)
+      path
+  in
+  check int "all 1201 rows parsed across chunk boundary" 1201 count;
+  check int "line_no ignores blank lines" 1201 last_line_no;
+  check int "sum of all rows" ((1201 * 1202) / 2) sum
+;;
+
+let test_fold_appended_lines_raw_blank_and_multi_chunk () =
+  with_tmp_dir
+  @@ fun base ->
+  let path = Filename.concat base "appended.jsonl" in
+  let pad = String.make 1024 'a' in
+  let first_line = "  {\"i\":0}\r" in
+  let blank_line = "   \t\r" in
+  let last_complete = Printf.sprintf "{\"i\":1100,\"p\":\"%s\"}" pad in
+  let partial_tail = "{\"partial\":true" in
+  let oc = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () ->
+       output_string oc first_line;
+       output_char oc '\n';
+       output_string oc blank_line;
+       output_char oc '\n';
+       for i = 1 to 1099 do
+         output_string oc (Printf.sprintf "{\"i\":%d,\"p\":\"%s\"}\n" i pad)
+       done;
+       output_string oc last_complete;
+       output_char oc '\n';
+       output_string oc partial_tail);
+  let total_size = (Unix.stat path).Unix.st_size in
+  let expected_boundary = total_size - String.length partial_tail in
+  let lines_rev, boundary =
+    Fs_compat.fold_appended_lines
+      ~path
+      ~from:0
+      ~init:[]
+      ~f:(fun acc line -> line :: acc)
+  in
+  let lines = List.rev lines_rev in
+  check int "boundary excludes trailing partial line" expected_boundary boundary;
+  check int "blank line skipped, 1101 complete lines folded" 1101 (List.length lines);
+  List.iteri
+    (fun idx line ->
+       let expected =
+         if idx = 0 then first_line
+         else if idx = 1100 then last_complete
+         else Printf.sprintf "{\"i\":%d,\"p\":\"%s\"}" idx pad
+       in
+       check string (Printf.sprintf "line %d matches intact" idx) expected line)
+    lines;
+  (* Appending the newline completes the partial line from the saved boundary. *)
+  let oc2 = open_out_gen [ Open_wronly; Open_append; Open_binary ] 0o644 path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc2)
+    (fun () -> output_string oc2 "}\n");
+  let delta_rev, boundary2 =
+    Fs_compat.fold_appended_lines
+      ~path
+      ~from:boundary
+      ~init:[]
+      ~f:(fun acc line -> line :: acc)
+  in
+  check (list string) "incremental delta reads completed tail"
+    [ "{\"partial\":true}" ] (List.rev delta_rev);
+  check int "new boundary reaches EOF" (total_size + 2) boundary2
+;;
+
 let test_is_directory_kinds () =
   with_tmp_dir @@ fun base ->
   let dir = Filename.concat base "dir" in
@@ -1506,6 +1607,14 @@ let () =
             "missing file returns init"
             `Quick
             test_fold_jsonl_lines_missing_file
+        ; test_case
+            "whitespace trimming and multi-chunk boundary"
+            `Quick
+            test_fold_jsonl_lines_whitespace_and_multi_chunk
+        ; test_case
+            "fold_appended_lines raw lines and multi-chunk boundary"
+            `Quick
+            test_fold_appended_lines_raw_blank_and_multi_chunk
         ] )
     ]
 ;;

@@ -46,6 +46,9 @@ type append_path_mutex_key
 val capture_append_path_mutex_key : string -> append_path_mutex_key
 (** Capture the existing canonical pathname key in a filesystem worker. This
     does not identify arbitrary hardlink or leaf-symlink aliases of an inode. *)
+val append_path_mutex_key_path : append_path_mutex_key -> string
+(** Canonicalized pathname carried by a captured mutex key, so multi-chunk
+    readers can reopen the exact canonicalized path they lock. *)
 val with_captured_append_path_mutex : append_path_mutex_key -> (unit -> 'a) -> 'a
 (** Reenter the existing registry with the captured key and ordinary active
     entry accounting. The callback must not reenter the same path mutex. *)

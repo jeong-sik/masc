@@ -24736,12 +24736,105 @@ let test_wiki_body_link_follow_and_back () =
   Alcotest.(check bool) "with no trail left, Esc unzooms as before" false
     (Model.is_zoomed_active m5)
 
+(* The GET paths a command list sends. Every other command sends no GET. *)
+let rec sent_get_paths (cmd : Cmd.t) =
+  match cmd with
+  | Cmd.Batch cmds -> List.concat_map sent_get_paths cmds
+  | Cmd.Http_get { req; _ } -> [ Cmd.get_request_path req ]
+  | Cmd.Http_post _ | Cmd.Http_put _ | Cmd.Http_delete _
+  | Cmd.Http_post_stream _ | Cmd.Sync_streams _ | Cmd.Set_bearer_token _
+  | Cmd.Reset_bearer_token_to_default
+  | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _ | Cmd.Copy_clipboard _
+  | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram
+  | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _
+  | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
+  | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
+  | Cmd.Start_local_server | Cmd.Restart_tui | Cmd.Quit _ ->
+      []
+
+(* #41964: a provider id hashes the connection, so the runtime label names
+   the account by the email the setup inventory read for that provider. *)
+let test_keeper_runtime_account_email () =
+  let integration id runtime_ids : Wire_runtime.setup_integration =
+    {
+      id;
+      display_name = "Claude Code";
+      protocol = Some "claude-code-cli";
+      origin = "runtime_config";
+      setup_support = "existing_binding";
+      enabled = true;
+      credential_kind = Some "none";
+      configured_runtime_ids = runtime_ids;
+    }
+  in
+  let inventory : Wire_runtime.setup_inventory =
+    {
+      default_runtime_id = None;
+      integrations =
+        [
+          integration "claude_code_ac22e641"
+            [ "claude_code_ac22e641.claude-opus"; "claude_code_ac22e641.claude-sonnet" ];
+          integration "claude_code_5b7f0c19" [ "claude_code_5b7f0c19.claude-opus" ];
+          integration "claude_code_9d3a2e70" [ "claude_code_9d3a2e70.claude-opus" ];
+        ];
+      account_emails =
+        [
+          {
+            integration_id = "claude_code_ac22e641";
+            account =
+              Wire_runtime.Account_read
+                { email = "alice@example.com"; plan = [ "max" ] };
+          };
+          {
+            integration_id = "claude_code_9d3a2e70";
+            account = Wire_runtime.Account_not_read { cause = "source_unavailable" };
+          };
+        ];
+    }
+  in
+  let m0 =
+    Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 ()
+  in
+  let loaded =
+    Runtime_store.apply_setup_inventory ~observed_at:t0 inventory m0.runtime
+  in
+  let email = Runtime_store.runtime_account_email in
+  Alcotest.(check (option string)) "a read login names its email"
+    (Some "alice@example.com")
+    (email loaded "claude_code_ac22e641.claude-opus");
+  Alcotest.(check (option string)) "every runtime of that provider names it"
+    (Some "alice@example.com")
+    (email loaded "claude_code_ac22e641.claude-sonnet");
+  Alcotest.(check (option string))
+    "a provider with no row names no email, not another provider's" None
+    (email loaded "claude_code_5b7f0c19.claude-opus");
+  Alcotest.(check (option string)) "a login not read names no email" None
+    (email loaded "claude_code_9d3a2e70.claude-opus");
+  Alcotest.(check (option string))
+    "a runtime no provider lists names no email, whatever its prefix" None
+    (email loaded "claude_code_ac22e641.unknown-model");
+  Alcotest.(check (option string)) "an unread inventory names no email" None
+    (email m0.runtime "claude_code_ac22e641.claude-opus");
+  let sent (m : Model.t) =
+    List.concat_map sent_get_paths
+      (View_fetches.fetches_for_current_view ~force:false
+         { m with nav = { m.nav with workspace = Nav.Keepers } })
+  in
+  let inventory_path = Cmd.get_request_path Cmd.Get_setup_inventory in
+  Alcotest.(check bool) "Keepers reads the setup inventory" true
+    (List.mem inventory_path (sent m0));
+  Alcotest.(check bool) "a fresh inventory in the store is not read again" false
+    (List.mem inventory_path (sent { m0 with runtime = loaded }))
+
 let () =
   Alcotest.run "masc_tui_store"
     [
       ( "keeper_failing_since"
       , [ Alcotest.test_case "failing_since only while the keeper is unhealthy" `Quick
             test_keeper_failing_since ] );
+      ( "keeper_runtime_account"
+      , [ Alcotest.test_case "runtime label account email and its reads" `Quick
+            test_keeper_runtime_account_email ] );
       ( "discord_reply"
       , [ Alcotest.test_case "recorded origin and safe receipt recovery" `Quick
             test_discord_reply_source_and_receipt ] );

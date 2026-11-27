@@ -61,11 +61,11 @@ import {
   type QuotaRestSortKey,
 } from './quota-rest-groups'
 import { RuntimeLivenessPanel } from './runtime-liveness-panel'
+import { loadSetupInventory, SETUP_INVENTORY_KEY } from './setup-inventory-read'
 import {
   classifyQuotaScope,
   decodeMultiAccountIntegrations,
   decodeMultiAccountProviderAccounts,
-  decodeSetupInventoryPayload,
   formatResetCountdown,
   formatUnixTime,
   loadProviderUsageHistory,
@@ -225,7 +225,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
   const resolvedObs = resourceCache.observe<RuntimeResolvedPayload>('runtime:resolved').value
   const historyKey = `runtime:provider-usage-history:${providerDays}`
   const historyObs = resourceCache.observe<ProviderUsageHistoryResponse>(historyKey).value
-  const inventoryKey = isMultiAccountSignedIn ? 'runtime:auth-provider-accounts' : 'runtime:setup-inventory'
+  const inventoryKey = isMultiAccountSignedIn ? 'runtime:auth-provider-accounts' : SETUP_INVENTORY_KEY
   const inventoryObs = resourceCache.observe<SetupInventoryPayload | MultiAccountProviderAccountsResponse>(inventoryKey).value
   const personIntegObs = resourceCache.observe<MultiAccountIntegrationsResponse>('runtime:auth-integrations').value
 
@@ -304,16 +304,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
         ),
       )
     } else if (singleLocal && !isAdminLockedForSession('admin', curSession)) {
-      jobs.push(
-        resourceCache.fetch<SetupInventoryPayload>(
-          'runtime:setup-inventory',
-          (signal) => apiGet<SetupInventoryPayload>('/api/v1/setup/inventory', {
-            signal,
-            decode: decodeSetupInventoryPayload,
-          }),
-          { ttlMs: 20_000, topics: ['setup_inventory', 'config'], reason },
-        ),
-      )
+      jobs.push(loadSetupInventory(reason))
       rawConfigAbortRef.current?.abort()
       const ctrl = new AbortController()
       rawConfigAbortRef.current = ctrl

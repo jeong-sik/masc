@@ -1148,6 +1148,36 @@ let runtime_options t =
   | Some snap -> snap.runtimes
   | None -> []
 
+(* A provider id hashes the connection, not the account, so the id does not
+   say which login a runtime runs on; the email the setup inventory read for
+   that provider does. The inventory also lists each provider's runtime ids,
+   so one read answers both steps. Only a read login names an email: a
+   runtime no provider lists, a provider with no row, or a login not read
+   gives [None], never another provider's email. *)
+let runtime_account_email t runtime_id =
+  match Observed.to_option t.setup_inventory with
+  | None -> None
+  | Some inventory -> (
+      match
+        List.find_opt
+          (fun (integration : Wire_runtime.setup_integration) ->
+            List.exists (String.equal runtime_id) integration.configured_runtime_ids)
+          inventory.integrations
+      with
+      | None -> None
+      | Some integration -> (
+          match
+            List.find_opt
+              (fun (row : Wire_runtime.setup_account_email) ->
+                String.equal row.integration_id integration.id)
+              inventory.account_emails
+          with
+          | Some { Wire_runtime.account = Wire_runtime.Account_read { email; _ }; _ } ->
+              Some email
+          | Some { Wire_runtime.account = Wire_runtime.Account_not_read _; _ }
+          | None ->
+              None))
+
 let all_accounts t =
   match Observed.to_option t.usage_windows with
   | Some uw -> uw.accounts

@@ -482,6 +482,13 @@ val selected_browser_client : t -> Wire_runtime.browser_client_row option
 val selected_browser_tab : t -> Wire_runtime.browser_tab_row option
 val runtime_options : t -> Wire_runtime.runtime_option list
 
+val runtime_account_email : t -> string -> string option
+(** The email of the login the runtime's provider runs on, from the setup
+    inventory: the integration whose [configured_runtime_ids] holds the
+    runtime, then that integration's row in [account_emails]. [None] while
+    the inventory is unread, for a runtime no integration lists, and for a
+    provider whose login was not read. *)
+
 val move_selection :
   ?pane_index:int ->
   ?viewport_rows:int ->

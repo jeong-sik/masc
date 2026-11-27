@@ -242,18 +242,29 @@ let decode_record ~byte_offset line =
      | None -> Error (Malformed_record { byte_offset; detail = "no string \"type\" field" }))
 ;;
 
+(* The next count starts after the last newline read, so a record the host
+   was still writing is read once it ends. *)
+let next_mark m ~start slice =
+  match String.rindex_opt slice '\n' with
+  | Some newline -> { m with offset = max m.offset (start + newline + 1) }
+  | None -> m
+;;
+
 let compactions m =
   let* start, slice = read_slice m in
-  List.fold_left
-    (fun count (byte_offset, line) ->
-       let* count = count in
-       if line = ""
-       then Ok count
-       else (
-         let* record = decode_record ~byte_offset line in
-         match record with
-         | Context_compacted -> Ok (count + 1)
-         | Other_event -> Ok count))
-    (Ok 0)
-    (complete_lines ~start ~offset:m.offset slice)
+  let* count =
+    List.fold_left
+      (fun count (byte_offset, line) ->
+         let* count = count in
+         if line = ""
+         then Ok count
+         else (
+           let* record = decode_record ~byte_offset line in
+           match record with
+           | Context_compacted -> Ok (count + 1)
+           | Other_event -> Ok count))
+      (Ok 0)
+      (complete_lines ~start ~offset:m.offset slice)
+  in
+  Ok (count, next_mark m ~start slice)
 ;;

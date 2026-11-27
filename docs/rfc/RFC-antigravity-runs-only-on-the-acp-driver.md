@@ -139,6 +139,7 @@ ACP 만의 크기 계산을 따로 두지 않는다. Agent Core 레인이 이미
       - 2026-11-27 01:51 KST 에 실제로 놓쳤다. uncle 세션이 압축했는데 02:07 정산이 held_context 34건을 그대로 뒀다.
       - 그래서 kimi 는 세션 기록도 읽는다. 위치는 `<KIMI_CODE_HOME, 없으면 ~/.kimi-code>/sessions/<작업 폴더>/<세션 id>/agents/main/wire.jsonl` 이다.
       - prompt 를 보내기 전 파일 길이를 재 두고, 끝난 뒤 그 뒤에 쓰인 `context.apply_compaction` 기록을 센다.
+      - 같은 세션의 다음 prompt 는 직전에 센 곳에서 이어 센다. 실패하거나 취소된 prompt 동안 생긴 압축도 다음 prompt 에서 센다.
       - 첫 줄 `metadata` 의 `protocol_version` 이 확인한 1.5 가 아니면 읽지 않는다.
     - 기록을 못 읽으면 `Compaction_unknown` 이다. 세션이 요약만 들고 있을 수 있으니 정산은 압축으로 보고 World State 를 다시 보낸다. 경고 로그에 이유가 남는다. Muse journal 을 못 읽을 때도 같다.
     - Mistral Vibe 실측(2026-11-26, medium-3.5, 압축 값 50,000): 한 턴에 파일 여덟 개를 읽어 `used` 가 8,829 에서 70,944 가 됐다. 그 턴 안에서는 압축하지 않았다. 다음 prompt 를 시작할 때 「Compacting context」 tool_call 을 보내고 `used` 를 0, 그다음 8,939 로 알렸다. 0 을 뺀 값이 70,944 에서 8,939 로 줄어 감지된다.

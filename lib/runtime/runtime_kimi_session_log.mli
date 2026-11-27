@@ -17,7 +17,9 @@
     context, between its [full_compaction.begin] and [full_compaction.complete]
     records. A prompt's compactions are the [context.apply_compaction] records
     the file gained between {!mark}, taken before [session/prompt] is sent, and
-    {!compactions}, taken after it returns.
+    {!compactions}, taken after it returns. The mark {!compactions} returns
+    lets the next prompt count from there, so a prompt that failed or was
+    cancelled before its count leaves its records to the next one.
 
     The format is the host's own and has no published schema. This module
     requires the [protocol_version] it was checked against and reports
@@ -85,7 +87,9 @@ type mark
 val mark : root -> session_id:string -> (mark, error) result
 
 (** [compactions mark] counts the [context.apply_compaction] records written
-    after [mark]. Only records ending in a newline count: a record the host is
-    still writing is left out. A record that was half written at [mark]
-    belongs to earlier activity and is skipped. *)
-val compactions : mark -> (int, error) result
+    after [mark], and returns the mark the next count starts from: the end of
+    the last whole record read. Only records ending in a newline count: a
+    record the host is still writing is left out and counted from the next
+    mark. A record that was half written at [mark] belongs to earlier activity
+    and is skipped. *)
+val compactions : mark -> (int * mark, error) result

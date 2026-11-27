@@ -2621,11 +2621,14 @@ type usage_journal =
       (Runtime_muse_session_log.root, Runtime_muse_session_log.error) result
 
 (* Where a host that counts usage too rarely to show its compactions records
-   them, resolved once from the environment the host was started with. *)
+   them, resolved once from the environment the host was started with, and
+   for each session the mark its next prompt counts from. *)
 type compaction_journal =
   | No_compaction_journal
   | Kimi_compaction_journal of
-      (Runtime_kimi_session_log.root, Runtime_kimi_session_log.error) result
+      { root : (Runtime_kimi_session_log.root, Runtime_kimi_session_log.error) result
+      ; counted_to : (string, Runtime_kimi_session_log.mark) Hashtbl.t
+      }
 
 type activity_mark =
   { seen : agent_activity
@@ -3486,7 +3489,10 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
       match profile.compaction_record with
       | Compaction_in_usage -> No_compaction_journal
       | Compaction_in_kimi_session_record ->
-        Kimi_compaction_journal (Runtime_kimi_session_log.root_of_environment env)
+        Kimi_compaction_journal
+          { root = Runtime_kimi_session_log.root_of_environment env
+          ; counted_to = Hashtbl.create 4
+          }
     in
     let resolved_cli_path =
       Runtime_official_cli_install.spawn_path
@@ -4534,14 +4540,23 @@ let prompt
         (let* root = root in
          Runtime_muse_session_log.mark root ~session_id)
   in
-  (* The same for a host that records its compactions in its own file. *)
+  (* The same for a host that records its compactions in its own file. A
+     prompt counts from where the session's last count stopped, so a prompt
+     that failed or was cancelled leaves its compactions to this one. *)
   let compaction_mark =
     match t.compaction_journal with
     | No_compaction_journal -> None
-    | Kimi_compaction_journal root ->
-      Some
-        (let* root = root in
-         Runtime_kimi_session_log.mark root ~session_id)
+    | Kimi_compaction_journal { root; counted_to } ->
+      let marked =
+        match Hashtbl.find_opt counted_to session_id with
+        | Some mark -> Ok mark
+        | None ->
+          let* root = root in
+          let* mark = Runtime_kimi_session_log.mark root ~session_id in
+          Hashtbl.replace counted_to session_id mark;
+          Ok mark
+      in
+      Some (counted_to, marked)
   in
   let result =
     Fun.protect ~finally:clear_active_turn (fun () ->
@@ -4590,12 +4605,16 @@ let prompt
     let context_compaction =
       match compaction_mark with
       | None -> usage_compaction
-      | Some marked ->
+      | Some (counted_to, marked) ->
+        (* A record that could not be read is marked afresh at the next prompt. *)
         let recorded =
           match Result.bind marked Runtime_kimi_session_log.compactions with
-          | Ok 0 -> Not_compacted
-          | Ok _ -> Compacted
-          | Error err -> Compaction_unknown (Kimi_session_record_unreadable err)
+          | Ok (count, next) ->
+            Hashtbl.replace counted_to session_id next;
+            if count = 0 then Not_compacted else Compacted
+          | Error err ->
+            Hashtbl.remove counted_to session_id;
+            Compaction_unknown (Kimi_session_record_unreadable err)
         in
         either_compaction usage_compaction recorded
     in

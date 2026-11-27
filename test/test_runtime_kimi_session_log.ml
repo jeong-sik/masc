@@ -87,7 +87,13 @@ let mark_of home =
 ;;
 
 let check_compactions name expected mark =
-  check (result int error_t) name (Ok expected) (Log.compactions mark)
+  check (result int error_t) name (Ok expected) (Result.map fst (Log.compactions mark))
+;;
+
+let next_of mark =
+  match Log.compactions mark with
+  | Ok (_, next) -> next
+  | Error err -> failf "count failed: %s" (Log.error_to_string err)
 ;;
 
 (* ── Where the record is ─────────────────────────────────────────────────── *)
@@ -209,6 +215,25 @@ let test_a_record_cut_by_the_mark_is_earlier_activity () =
     check_compactions "a whole record after it" 1 mark)
 ;;
 
+(* Each count returns where the next one starts, so consecutive counts see
+   every record once, a record still being written included. *)
+let test_the_next_count_starts_where_this_one_stopped () =
+  with_home (fun home ->
+    let path = record_path home ~workspace ~id:session_id in
+    write_file path (text_of [ metadata_record ~version:"1.5"; binding_record ]);
+    let mark = mark_of home in
+    append_file path (text_of compaction_records);
+    let apply = List.nth compaction_records 1 in
+    append_file path apply;
+    let second = next_of mark in
+    check_compactions "the first count" 1 mark;
+    check_compactions "nothing whole since the first count" 0 second;
+    append_file path "\n";
+    let third = next_of second in
+    check_compactions "the record that ended after the first count" 1 second;
+    check_compactions "nothing since the second count" 0 third)
+;;
+
 let test_unreadable_slices () =
   with_home (fun home ->
     let path = record_path home ~workspace ~id:session_id in
@@ -219,20 +244,20 @@ let test_unreadable_slices () =
     (match Log.compactions mark with
      | Error (Log.Malformed_record { byte_offset; _ }) ->
        check int "the bad record's offset" (String.length start) byte_offset
-     | Ok n -> failf "a record that is not JSON was read, count %d" n
+     | Ok (n, _) -> failf "a record that is not JSON was read, count %d" n
      | Error err -> failf "expected a malformed record, got %s" (Log.error_to_string err));
     write_file path start;
     append_file path {|{"agentId":"main"}|};
     append_file path "\n";
     (match Log.compactions mark with
      | Error (Log.Malformed_record _) -> ()
-     | Ok n -> failf "a record without a type was read, count %d" n
+     | Ok (n, _) -> failf "a record without a type was read, count %d" n
      | Error err -> failf "expected a malformed record, got %s" (Log.error_to_string err));
     write_file path (text_of [ metadata_record ~version:"1.5" ]);
     match Log.compactions mark with
     | Error (Log.Record_shrank { marked_at; _ }) ->
       check int "the length at the mark" (String.length start) marked_at
-    | Ok n -> failf "a shrunk record was read, count %d" n
+    | Ok (n, _) -> failf "a shrunk record was read, count %d" n
     | Error err -> failf "expected a shrunk record, got %s" (Log.error_to_string err))
 ;;
 
@@ -241,7 +266,8 @@ let test_unreadable_slices () =
 (* A stand-in for [kimi acp]: it creates the session record when the session is
    made, appends to it while a prompt runs, and like Kimi Code 2.7.3 sends one
    [usage_update] per prompt, just before the response. The prompt text says
-   whether the prompt compacts and what [used] the update carries. *)
+   whether the prompt compacts, whether it fails, and what [used] the update
+   carries. *)
 let kimi_mock_host_script =
   Printf.sprintf
     {|#!/usr/bin/env python3
@@ -293,6 +319,9 @@ for line in sys.stdin:
         append(PROMPT_RECORD)
         if "compact" in text:
             append(COMPACTION)
+        if "fail" in text:
+            send({"jsonrpc": "2.0", "id": mid, "error": {"code": -32603, "message": "mock failure"}})
+            continue
         send({"jsonrpc": "2.0", "method": "session/update", "params": {
             "sessionId": SESSION,
             "update": {"sessionUpdate": "agent_message_chunk", "content": {"type": "text", "text": "pong"}}
@@ -382,19 +411,41 @@ let test_a_kimi_prompt_reads_its_compactions_from_the_session_record () =
               "a prompt that did not compact"
               "not compacted"
               (compaction_name (prompt ~prior:60000 "carry on used=70000"));
+            (match
+               Runtime_acp_client.prompt
+                 client
+                 ~session_id:session.session_id
+                 ~blocks:[ Runtime_acp_client.Text_block "compact and fail" ]
+                 ~prior_context_used:70000
+                 ()
+             with
+             | Error _ -> ()
+             | Ok _ -> fail "the mock host answers this prompt with an error");
+            check
+              string
+              "a compaction during a failed prompt counts at the next one"
+              "compacted"
+              (compaction_name (prompt ~prior:70000 "carry on used=80000"));
             check
               string
               "a drop in the count still counts"
               "compacted"
-              (compaction_name (prompt ~prior:70000 "carry on used=30000"));
+              (compaction_name (prompt ~prior:80000 "carry on used=30000"));
             remove_tree (Filename.concat home "sessions");
-            match prompt ~prior:30000 "carry on used=40000" with
+            (match prompt ~prior:30000 "carry on used=40000" with
+             | Runtime_acp_client.Compaction_unknown
+                 (Runtime_acp_client.Kimi_session_record_unreadable (Log.Read_failed _)) -> ()
+             | other ->
+               failf
+                 "a record gone since the last count must leave the compaction unknown, got %s"
+                 (compaction_name other));
+            match prompt ~prior:40000 "carry on used=50000" with
             | Runtime_acp_client.Compaction_unknown
                 (Runtime_acp_client.Kimi_session_record_unreadable
                    (Log.Session_record_not_found _)) -> ()
             | other ->
               failf
-                "a prompt whose record is gone must leave the compaction unknown, got %s"
+                "a session without a record must leave the compaction unknown, got %s"
                 (compaction_name other))))))
 ;;
 
@@ -417,6 +468,10 @@ let () =
             "a record cut by the mark"
             `Quick
             test_a_record_cut_by_the_mark_is_earlier_activity
+        ; test_case
+            "the next count starts where this one stopped"
+            `Quick
+            test_the_next_count_starts_where_this_one_stopped
         ; test_case "slices that cannot be read" `Quick test_unreadable_slices
         ] )
     ; ( "acp client"

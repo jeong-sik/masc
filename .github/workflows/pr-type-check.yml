@@ -323,7 +323,12 @@ jobs:
     env:
       SINCE: ${{ needs.changes.outputs.dashboard_since }}
     steps:
+      # The steps below run dependency code (esbuild's postinstall, then tsc
+      # and vitest), and none needs the job token: the fetch reads a public
+      # repository. So the token stays out of .git/config, as in type-check.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       # A plain two-commit diff needs only these two commits. `vitest
       # --changed` diffs from their merge base instead, which a shallow

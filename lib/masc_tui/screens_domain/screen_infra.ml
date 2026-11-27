@@ -3094,7 +3094,7 @@ let render_code ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             if is_sel then
               H.paint_selected_row_bg ~grid ~clip:left_inner ~row_rect ~theme
                 ~focused:tree_focused ();
-            let indent = String.make (Int.min 12 (nd.depth * 2)) ' ' in
+            let indent = String.make (Int.max 0 (Int.min 12 (nd.depth * 2))) ' ' in
             let caret =
               if nd.has_children then
                 if Infra_store.String_set.mem nd.path code.expanded_dirs then

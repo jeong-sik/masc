@@ -105,11 +105,6 @@ let sanitize_single_line s =
       String.trim (Buffer.contents buf)
     end
 
-let short_hash ?(len = 8) s =
-  let trimmed = String.trim s in
-  let cap = Int.max 0 len in
-  if String.length trimmed <= cap then trimmed else String.sub trimmed 0 cap
-
 let is_utf8_cont b = b land 0xC0 = 0x80
 
 let clamp_utf8_cursor s idx =
@@ -121,6 +116,12 @@ let clamp_utf8_cursor s idx =
     else i
   in
   align c
+
+let short_hash ?(len = 8) s =
+  let trimmed = String.trim s in
+  let cap = Int.max 0 len in
+  if String.length trimmed <= cap then trimmed
+  else String.sub trimmed 0 (clamp_utf8_cursor trimmed cap)
 
 let prev_utf8_boundary s idx =
   let i = clamp_utf8_cursor s idx in

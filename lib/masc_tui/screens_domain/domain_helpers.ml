@@ -430,14 +430,21 @@ let format_countdown ~now_unix resets_at_unix =
     let rem = resets_at_unix -. now_unix in
     if rem <= 0.0 then "0s" else Format_val.format_duration_s rem
 
+let utf8_prefix_bytes s cap =
+  if String.length s <= cap then s
+  else String.sub s 0 (Text_util.clamp_utf8_cursor s cap)
+
 let extract_hhmmss ts =
   match String.index_opt ts 'T' with
-  | Some idx when idx + 9 <= String.length ts -> String.sub ts (idx + 1) 8
+  | Some idx when idx + 9 <= String.length ts ->
+      let tail = String.sub ts (idx + 1) (String.length ts - idx - 1) in
+      utf8_prefix_bytes tail 8
   | Some _ | None -> (
       match String.index_opt ts ' ' with
-      | Some idx when idx + 9 <= String.length ts -> String.sub ts (idx + 1) 8
-      | Some _ | None ->
-          if String.length ts >= 8 then String.sub ts 0 8 else ts)
+      | Some idx when idx + 9 <= String.length ts ->
+          let tail = String.sub ts (idx + 1) (String.length ts - idx - 1) in
+          utf8_prefix_bytes tail 8
+      | Some _ | None -> utf8_prefix_bytes ts 8)
 
 let format_local_hhmmss ~tz_offset_sec ts =
   match Wire_common.parse_rfc3339_unix ts with

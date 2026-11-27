@@ -107,19 +107,21 @@ let parse_host_port authority =
     match String.index_opt authority ']' with
     | None -> Error "unterminated IPv6 host in --url"
     | Some close_idx ->
-        let host = String.sub authority 0 (close_idx + 1) in
-        if close_idx + 1 = len then Ok (host, None)
-        else if Char.equal authority.[close_idx + 1] ':' then
-          let port_str =
-            String.sub authority (close_idx + 2) (len - close_idx - 2)
-          in
-          match parse_port port_str with
-          | Ok p -> Ok (host, Some p)
-          | Error _ ->
-              Error
-                (Printf.sprintf "invalid port %S in --url: expected 1..65535"
-                   port_str)
-        else Error "unexpected characters after IPv6 host in --url"
+        if close_idx <= 1 then Error "URL host must not be empty"
+        else
+          let host = String.sub authority 0 (close_idx + 1) in
+          if close_idx + 1 = len then Ok (host, None)
+          else if Char.equal authority.[close_idx + 1] ':' then
+            let port_str =
+              String.sub authority (close_idx + 2) (len - close_idx - 2)
+            in
+            match parse_port port_str with
+            | Ok p -> Ok (host, Some p)
+            | Error _ ->
+                Error
+                  (Printf.sprintf "invalid port %S in --url: expected 1..65535"
+                     port_str)
+          else Error "unexpected characters after IPv6 host in --url"
   else
     match String.rindex_opt authority ':' with
     | None -> Ok (authority, None)
@@ -129,6 +131,11 @@ let parse_host_port authority =
           String.sub authority (colon_idx + 1) (len - colon_idx - 1)
         in
         if String.equal host "" then Error "URL host must not be empty"
+        else if String.contains host ':' then
+          Error
+            (Printf.sprintf
+               "invalid host %S in --url: enclose IPv6 literals in brackets"
+               host)
         else
           match parse_port port_str with
           | Ok p -> Ok (host, Some p)
@@ -155,10 +162,15 @@ let parse_url raw =
     match scheme_and_rest with
     | Error _ as err -> err
     | Ok (scheme, authority) -> (
-        if String.contains authority '/' || String.contains authority '?' then
+        if
+          String.contains authority '/'
+          || String.contains authority '?'
+          || String.contains authority '#'
+          || String.contains authority '@'
+        then
           Error
             (Printf.sprintf
-               "invalid --url %S: path or query is not allowed in server base URL"
+               "invalid --url %S: path, query, fragment, or userinfo is not allowed in server base URL"
                raw)
         else
           match parse_host_port authority with
@@ -367,13 +379,15 @@ let parse ?(version = Build_version.current)
   | Error (`Err msg) -> Parse_error msg
   | Ok d -> (
       let scheme = Option.value ~default:default_scheme d.scheme in
-      let host =
+      let host_res =
         match d.host with
-        | Some h -> h
+        | Some h -> Ok h
         | None -> (
             match nonblank_opt (env "MASC_HOST") with
-            | Some h -> h
-            | None -> default_host)
+            | Some h when has_whitespace_or_ctl h ->
+                Error (Printf.sprintf "invalid MASC_HOST %S" h)
+            | Some h -> Ok h
+            | None -> Ok default_host)
       in
       let port_res =
         match d.explicit_port with
@@ -393,9 +407,9 @@ let parse ?(version = Build_version.current)
                         | Some raw -> parse_port raw
                         | None -> Ok default_port))))
       in
-      match port_res with
-      | Error msg -> Parse_error msg
-      | Ok port ->
+      match host_res, port_res with
+      | Error msg, _ | Ok _, Error msg -> Parse_error msg
+      | Ok host, Ok port ->
           let raw_base =
             match d.base_path with
             | Some p -> p

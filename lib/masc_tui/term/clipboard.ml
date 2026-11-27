@@ -264,74 +264,77 @@ let read_image ?(timeout_s = default_timeout_s) ?(cancelled = fun () -> false) (
   match installed with
   | [] -> Error (No_reader { tried = List.map reader_name readers })
   | _ :: _ ->
-      let dest = Filename.temp_file "masc-tui-clipboard" ".img" in
-      Fun.protect
-        ~finally:(fun () ->
-          match Sys.remove dest with
-          | () -> ()
-          | exception Sys_error _ -> ())
-        (fun () ->
-          let rec attempt reported = function
-            | [] ->
-                Error
-                  (match reported with
-                   | Some error -> error
-                   | None -> No_reader { tried = List.map reader_name readers })
-            | (reader, prog) :: rest -> (
-                let keep error =
-                  let first_err =
-                    match reported with Some prev -> prev | None -> error
-                  in
-                  attempt (Some first_err) rest
-                in
-                let stdout_path =
-                  if reader.stdout_to_dest then Some dest else None
-                in
-                match
-                  run_process_bounded ~timeout_s ~cancelled ~prog
-                    ~argv:(reader.argv ~dest) ~stdin_path:None ~stdout_path ()
-                with
-                | Exited (Unix.WEXITED 0) -> (
-                    match read_all dest with
-                    | Ok bytes when String.length bytes > 0 -> Ok bytes
-                    | Ok _ ->
-                        keep
-                          (Unreadable
-                             {
-                               reader = reader.name;
-                               detail = "the reader wrote no bytes";
-                             })
-                    | Error detail ->
-                        keep (Unreadable { reader = reader.name; detail }))
-                | Exited (Unix.WEXITED _) -> keep (No_image { reader = reader.name })
-                | Exited (Unix.WSIGNALED signal) ->
-                    keep
-                      (Unreadable
-                         {
-                           reader = reader.name;
-                           detail = Printf.sprintf "killed by signal %d" signal;
-                         })
-                | Exited (Unix.WSTOPPED signal) ->
-                    keep
-                      (Unreadable
-                         {
-                           reader = reader.name;
-                           detail = Printf.sprintf "stopped by signal %d" signal;
-                         })
-                | Timed_out ->
-                    keep
-                      (Unreadable
-                         {
-                           reader = reader.name;
-                           detail = Printf.sprintf "timed out after %.1fs" timeout_s;
-                         })
-                | Cancelled ->
-                    Error
-                      (Unreadable { reader = reader.name; detail = "cancelled" })
-                | Spawn_error detail ->
-                    keep (Unreadable { reader = reader.name; detail }))
-          in
-          attempt None installed)
+      (match Filename.temp_file "masc-tui-clipboard" ".img" with
+       | exception Sys_error detail ->
+           Error (Unreadable { reader = "clipboard"; detail })
+       | dest ->
+           Fun.protect
+             ~finally:(fun () ->
+               match Sys.remove dest with
+               | () -> ()
+               | exception Sys_error _ -> ())
+             (fun () ->
+               let rec attempt reported = function
+                 | [] ->
+                     Error
+                       (match reported with
+                        | Some error -> error
+                        | None -> No_reader { tried = List.map reader_name readers })
+                 | (reader, prog) :: rest -> (
+                     let keep error =
+                       let first_err =
+                         match reported with Some prev -> prev | None -> error
+                       in
+                       attempt (Some first_err) rest
+                     in
+                     let stdout_path =
+                       if reader.stdout_to_dest then Some dest else None
+                     in
+                     match
+                       run_process_bounded ~timeout_s ~cancelled ~prog
+                         ~argv:(reader.argv ~dest) ~stdin_path:None ~stdout_path ()
+                     with
+                     | Exited (Unix.WEXITED 0) -> (
+                         match read_all dest with
+                         | Ok bytes when String.length bytes > 0 -> Ok bytes
+                         | Ok _ ->
+                             keep
+                               (Unreadable
+                                  {
+                                    reader = reader.name;
+                                    detail = "the reader wrote no bytes";
+                                  })
+                         | Error detail ->
+                             keep (Unreadable { reader = reader.name; detail }))
+                     | Exited (Unix.WEXITED _) -> keep (No_image { reader = reader.name })
+                     | Exited (Unix.WSIGNALED signal) ->
+                         keep
+                           (Unreadable
+                              {
+                                reader = reader.name;
+                                detail = Printf.sprintf "killed by signal %d" signal;
+                              })
+                     | Exited (Unix.WSTOPPED signal) ->
+                         keep
+                           (Unreadable
+                              {
+                                reader = reader.name;
+                                detail = Printf.sprintf "stopped by signal %d" signal;
+                              })
+                     | Timed_out ->
+                         keep
+                           (Unreadable
+                              {
+                                reader = reader.name;
+                                detail = Printf.sprintf "timed out after %.1fs" timeout_s;
+                              })
+                     | Cancelled ->
+                         Error
+                           (Unreadable { reader = reader.name; detail = "cancelled" })
+                     | Spawn_error detail ->
+                         keep (Unreadable { reader = reader.name; detail }))
+               in
+               attempt None installed))
 
 let error_to_string = function
   | No_reader { tried } ->

@@ -1,0 +1,11 @@
+/* A chip in the color a CSS literal names. The border keeps a color that
+   matches the page background visible. */
+.md-color-swatch {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  margin-inline-end: 0.3em;
+  border: 1px solid var(--line-2);
+  border-radius: 2px;
+  vertical-align: -0.05em;
+}

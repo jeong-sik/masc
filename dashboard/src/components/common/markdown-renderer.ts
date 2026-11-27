@@ -3,6 +3,7 @@
 import { html } from 'htm/preact'
 import type { JSX } from 'preact'
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'preact/hooks'
+import { decorateColorLiterals } from './color-swatch'
 import { enhanceRichCode } from './rich-code-preview'
 import { Marked, Renderer, type Tokens } from 'marked'
 import { fetchAttachmentBlob } from '../../api/attachments'
@@ -306,9 +307,11 @@ export function MarkdownContent({
     if (!element) return undefined
     const restoreImages = htmlStr.includes('<img ') ? enhanceMarkdownImages(element) : undefined
     const restoreFences = !streaming && htmlStr.includes('language-') ? enhanceRichCode(element) : undefined
+    const restoreColors = decorateColorLiterals(element)
     return () => {
       restoreImages?.()
       restoreFences?.()
+      restoreColors()
     }
   }, [htmlStr, streaming, epoch])
   // Apart from the enhancers, so a new rewrite map does not rebuild diagrams;

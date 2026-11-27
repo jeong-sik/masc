@@ -2855,6 +2855,111 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     }
   })
 
+  it('retires observer bubble cleanly for terminal_effect_settled / tool-only connector turns without leaking discarded prose', async () => {
+    const keeper = makeRosterKeeper({ name: 'connector-keeper' })
+    const encoder = new TextEncoder()
+    let observer!: ReadableStreamDefaultController<Uint8Array>
+    const frame = (event: object) => encoder.encode(`data: ${JSON.stringify(event)}\n\n`)
+    const opEvent = (operationId: string, agUiEvent: object, seq: number) => frame({
+      type: 'keeper_chat_operation_event',
+      name: keeper.name,
+      operation_id: operationId,
+      seq,
+      ag_ui_event: agUiEvent,
+      ts_unix: 1_700_000_900,
+    })
+
+    let historyMessages: Record<string, unknown>[] = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url === '/mcp?sse_kind=observer') {
+        return new Response(new ReadableStream({ start: (c) => { observer = c } }), {
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+      }
+      if (url.includes('/chat/history/page')) {
+        return Response.json({ messages: historyMessages, has_more: false, next_cursor: null })
+      }
+      if (url.includes('/chat/operations')) {
+        return Response.json(queuedOperations())
+      }
+      return Response.json({ rows: [] })
+    }))
+
+    const obsPromise = startObserverStream({ autoReconnect: false })
+    await waitFor(() => expect(observerConnected.value).toBe(true))
+    const view = render(html`<${KeeperChatTab} keeper=${keeper} onInspect=${vi.fn()} onMutated=${vi.fn()} />`)
+
+    try {
+      observer.enqueue(opEvent('op-discord-tool-only', { type: 'RUN_STARTED', runId: 'r-1' }, 0))
+      observer.enqueue(opEvent('op-discord-tool-only', {
+        type: 'TOOL_CALL_START',
+        toolCallId: 'tc-surf',
+        toolCallName: 'masc_surface_post',
+      }, 1))
+      observer.enqueue(opEvent('op-discord-tool-only', {
+        type: 'CUSTOM',
+        name: 'KEEPER_TOOL_RESULT_READY',
+        value: { toolCallId: 'tc-surf', executionId: 'exec-surf-1', isError: false },
+      }, 2))
+      observer.enqueue(opEvent('op-discord-tool-only', {
+        type: 'CUSTOM',
+        name: 'KEEPER_REPLY_DETAILS',
+        value: { reply: 'discarded internal diagnostic prose', turn_outcome: 'terminal_effect_settled', turn_ref: 'tr-1' },
+      }, 3))
+      observer.enqueue(opEvent('op-discord-tool-only', {
+        type: 'CUSTOM',
+        name: 'KEEPER_EXTERNAL_EFFECT_COMPLETED',
+        value: { target: { kind: 'discord', channel_id: 'c-1' } },
+      }, 4))
+
+      await waitFor(() => expect(view.queryAllByText(/masc_surface_post/).length).toBe(1))
+      expect(view.queryByText(/discarded internal diagnostic prose/)).toBeNull()
+
+      // History now holds ONLY the persisted tool row + a newer user turn (no assistant row for op-discord-tool-only)
+      historyMessages = [
+        {
+          id: 'u-discord-1',
+          role: 'user',
+          content: 'Discord question',
+          ts: 100,
+          delivery_key: { kind: 'operation', operation_id: 'op-discord-tool-only' },
+          transcript_slot: { kind: 'accepted_user' },
+        },
+        {
+          id: 'tool-discord-1',
+          role: 'tool',
+          content: '{"ok":true}',
+          ts: 101,
+          tool_call_name: 'masc_surface_post',
+          execution_id: 'exec-surf-1',
+          delivery_key: { kind: 'operation', operation_id: 'op-discord-tool-only' },
+          transcript_slot: { kind: 'tool_delivery', ordinal: 0 },
+        },
+        {
+          id: 'u-newer-2',
+          role: 'user',
+          content: 'Later follow-up message',
+          ts: 102,
+        },
+      ]
+      observer.enqueue(opEvent('op-discord-tool-only', { type: 'RUN_FINISHED', runId: 'r-1' }, 5))
+
+      await waitFor(() => {
+        expect(view.queryByText('Later follow-up message')).toBeTruthy()
+        expect(view.queryAllByText(/masc_surface_post/).length).toBe(1)
+      })
+      // Persisted tool row stays BEFORE the later follow-up (not pinned at bottom by a ghost bubble)
+      const fullText = view.container.textContent ?? ''
+      expect(fullText.indexOf('masc_surface_post')).toBeLessThan(fullText.indexOf('Later follow-up message'))
+      expect(fullText).not.toContain('discarded internal diagnostic prose')
+    } finally {
+      view.unmount()
+      observer.close()
+      await obsPromise
+    }
+  })
+
   it('drains replayed frames after terminal ACCEPTED, drops stale-attempt deltas, rejects truncated enqueue, avoids /btw slot preemption, and classifies tool outcomes', async () => {
     const enc = new TextEncoder()
     const sse = (frames: unknown[]) =>

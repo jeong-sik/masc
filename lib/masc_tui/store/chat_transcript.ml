@@ -698,10 +698,18 @@ let retained_image_rows ~(theme : Theme.t) ~lang ~width ~height images =
 
 let stream_reply_already_persisted (hist_msgs : Wire_fleet.chat_message list)
     (buf : Fleet_store.chat_stream_buffer) =
-  let buf_op_id = Option.value buf.operation_id ~default:buf.request_id in
-  List.exists
-    (fun row -> Option.equal String.equal (Wire_fleet.terminal_operation row) (Some buf_op_id))
-    hist_msgs
+  let op_ids = Fleet_store.buffer_operation_ids buf in
+  let matches_any f row =
+    match f row with
+    | Some id -> List.exists (String.equal id) op_ids
+    | None -> false
+  in
+  List.exists (matches_any Wire_fleet.terminal_operation) hist_msgs
+  || (buf.terminal_seen && Option.is_none buf.last_error
+      && (buf.tool_only_settled || String.equal (String.trim buf.text) "")
+      && (List.exists (matches_any Wire_fleet.tool_operation) hist_msgs
+          || (buf.tool_only_settled && buf.tools = []
+              && String.equal (String.trim buf.text) "")))
 
 type live_chat_phase =
   | Phase_idle

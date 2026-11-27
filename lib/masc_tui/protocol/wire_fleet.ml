@@ -2449,6 +2449,11 @@ type chat_stream_chunk =
   | Chunk_tool_quarantined of {
       operation_id : string option; tool_use_id : string; kind : string; reason : string option;
     }
+  | Chunk_batch_bound of {
+      operation_id : string;
+      execution_id : string;
+    }
+  | Chunk_external_effect_completed of { operation_id : string option }
   | Chunk_reply_details of {
       operation_id : string option;
       reply : string;
@@ -2971,6 +2976,25 @@ let terminal_operation row =
       (row.role = Role_request_failure && transcript_slot_equal slot Settled_failure) ->
       Some id
   | None | Some _ -> None
+
+let tool_operation (row : chat_message) =
+  let open Keeper_chat_delivery_identity in
+  match row.provenance with
+  | Some { delivery_key; transcript_slot = (Tool_call _ | Tool_delivery _) } -> (
+      match delivery_key with
+      | Operation id
+      | Operation_checkpoint { operation_id = id; _ }
+      | Operation_native { operation_id = id; _ } ->
+          Some (Request_id.to_string id)
+      | Fusion_run _ | Workspace_message _ | Connector_message _
+      | Approval_lifecycle _ | Autonomous_turn _ ->
+          None)
+  | Some { transcript_slot = (Accepted_user | Terminal_result | Settled_failure
+                            | Approval_request | Approval_resolution | Approval_replay
+                            | Approval_replay_correction | Approval_continuation
+                            | Autonomous_input_binding _); _ }
+  | None ->
+      None
 
 let chat_operations_path ~keeper =
   Printf.sprintf "/api/v1/keepers/%s/chat/operations" (percent_encode keeper)
@@ -3503,6 +3527,19 @@ let decode_custom_chat_chunk json =
                  status_label = "admitted";
                  refresh_approvals = false;
                }))
+  | "KEEPER_CHAT_BATCH_BOUND" -> (
+      let* value_opt = optional_object_field json "value" in
+      match value_opt with
+      | None -> Ok Chunk_ignored
+      | Some value -> (
+          let* op_id = optional_nonblank_string value "operation_id" in
+          let* exec_id = optional_nonblank_string value "execution_id" in
+          match op_id, exec_id with
+          | Some operation_id, Some execution_id ->
+              Ok (Chunk_batch_bound { operation_id; execution_id })
+          | Some _, None | None, Some _ | None, None -> Ok Chunk_ignored))
+  | "KEEPER_EXTERNAL_EFFECT_COMPLETED" ->
+      Ok (Chunk_external_effect_completed { operation_id = outer_op_id })
   | "KEEPER_CONNECTED"
   | "KEEPER_STREAM_MESSAGE_DELTA"
   | "KEEPER_STREAM_PING"
@@ -3510,8 +3547,6 @@ let decode_custom_chat_chunk json =
   | "KEEPER_CONTENT_BLOCK_STOP"
   | "KEEPER_THINKING_SIGNATURE_DELTA"
   | "KEEPER_MEDIA_DELTA"
-  | "KEEPER_CHAT_BATCH_BOUND"
-  | "KEEPER_EXTERNAL_EFFECT_COMPLETED"
   | "KEEPER_TOOL_TRANSCRIPT_COMMITTED" ->
       Ok Chunk_ignored
   | other -> Error (Printf.sprintf "unknown CUSTOM chat stream event %S" other)

@@ -58,6 +58,10 @@ type response_start
 type chat_stream_buffer = {
   request_id : string;
   operation_id : string option;
+  execution_id : string option;
+      (** Primary execution operation ID when this member belongs to a coalesced
+          batch ([KEEPER_CHAT_BATCH_BOUND]). Persisted terminal/tool rows are
+          keyed by [execution_id]. *)
   turn_ref : string option;
   run_started : bool;
   interrupting : bool;
@@ -80,6 +84,10 @@ type chat_stream_buffer = {
           persisted history retirement). Remains [false] after transport EOF
           ({!finish_chat_stream}) or epoch detach ({!detach_chat_streams}) so
           observer SSE frames for a still-running operation can take over. *)
+  tool_only_settled : bool;
+      (** [true] when the turn settled without persisting a separate assistant
+          reply row ([KEEPER_EXTERNAL_EFFECT_COMPLETED], [terminal_effect_settled],
+          or [no_visible_reply]). *)
   last_error : string option;
   from_observer : bool;
       (** [true] when this buffer is driven by observer SSE
@@ -90,6 +98,11 @@ type chat_stream_buffer = {
           already applied to this buffer across direct [POST /chat/stream] and
           observer SSE delivery, used to ignore duplicate or replayed frames. *)
 }
+
+val buffer_operation_ids : chat_stream_buffer -> string list
+(** Operation IDs under which persisted history rows for this buffer may be
+    recorded (the buffer's own operation/request ID plus its coalesced batch
+    [execution_id], when distinct). *)
 
 val max_seen_seqs : int
 (** Maximum number of event sequence numbers retained in [seen_seqs] per

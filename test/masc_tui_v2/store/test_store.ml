@@ -17354,6 +17354,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
       {
         request_id = "old-req-0";
         operation_id = Some "old-req-0";
+        execution_id = None;
         turn_ref = None;
         run_started = true;
         interrupting = false;
@@ -17371,6 +17372,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
         active = false;
         ended = true;
         terminal_seen = true;
+        tool_only_settled = false;
         last_error = None;
         from_observer = false;
         seen_seqs = Fleet_store.Int_set.empty;
@@ -17597,6 +17599,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
     {
       request_id = "prior-req";
       operation_id = Some "prior-req";
+      execution_id = None;
       turn_ref = None;
       run_started = true;
       interrupting = false;
@@ -17627,6 +17630,7 @@ let test_active_turn_preview_visibility_and_queued_followup () =
       active = false;
       ended = true;
       terminal_seen = true;
+      tool_only_settled = false;
       last_error = None;
       from_observer = false;
       seen_seqs = Fleet_store.Int_set.empty;
@@ -31515,6 +31519,135 @@ let () =
               Alcotest.(check string)
                 "delayed observer delta after persisted history is ignored"
                 "Hel" buf_eof_hist.text;
+              (* (f) Coalesced batch sibling binds execution_id to primary and retires
+                 cleanly against primary's persisted Terminal_result row. *)
+              let fleet_batch =
+                Fleet_store.empty
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-batch-primary" ~seq:(Some 0)
+                     (Wire_fleet.Chunk_run_started
+                        { operation_id = Some "op-batch-primary" })
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-batch-sibling" ~seq:(Some 0)
+                     (Wire_fleet.Chunk_run_started
+                        { operation_id = Some "op-batch-sibling" })
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-batch-sibling" ~seq:(Some 1)
+                     (Wire_fleet.Chunk_batch_bound
+                        {
+                          operation_id = "op-batch-sibling";
+                          execution_id = "op-batch-primary";
+                        })
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-batch-sibling" ~seq:(Some 2)
+                     (Wire_fleet.Chunk_text_delta
+                        {
+                          operation_id = Some "op-batch-sibling";
+                          delta = "Batch reply";
+                          owner = Wire_chat_journal.Unobserved_scope (Some 0);
+                        })
+                (* Primary duplicate run_started does not wipe sibling buffer. *)
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-batch-primary" ~seq:(Some 3)
+                     (Wire_fleet.Chunk_run_started
+                        { operation_id = Some "op-batch-primary" })
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-batch-sibling" ~seq:(Some 4)
+                     (Wire_fleet.Chunk_turn_done
+                        {
+                          operation_id = Some "op-batch-sibling";
+                          turn_ref = None;
+                          reply = None;
+                        })
+              in
+              let buf_batch =
+                Fleet_store.String_map.find keeper fleet_batch.chat_streams
+              in
+              Alcotest.(check (option string))
+                "batch sibling records primary execution_id"
+                (Some "op-batch-primary") buf_batch.execution_id;
+              Alcotest.(check string)
+                "primary frame did not wipe batch reply text" "Batch reply"
+                buf_batch.text;
+              let primary_persisted : Wire_fleet.chat_message =
+                {
+                  persisted_eof_row with
+                  id = "m-batch-primary-reply";
+                  content = "Batch reply";
+                  provenance =
+                    operation_provenance "op-batch-primary" Terminal_result;
+                }
+              in
+              Alcotest.(check bool)
+                "batch stream retires when primary Terminal_result is in history"
+                true
+                (Chat_transcript.stream_reply_already_persisted
+                   [ primary_persisted ] buf_batch);
+              (* (g) Terminal_effect_settled / tool-only connector turn ignores discarded
+                 diagnostic prose and retires cleanly once its tool row is in history. *)
+              let fleet_tool_only =
+                Fleet_store.empty
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-ext-effect" ~seq:(Some 0)
+                     (Wire_fleet.Chunk_run_started
+                        { operation_id = Some "op-ext-effect" })
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-ext-effect" ~seq:(Some 1)
+                     (Wire_fleet.Chunk_tool_start
+                        {
+                          operation_id = Some "op-ext-effect";
+                          tool_use_id = "tu-ext-1";
+                          stream_scope = Some 1;
+                          tool_name = "masc_surface_post";
+                          args_preview = None;
+                        })
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-ext-effect" ~seq:(Some 2)
+                     (Wire_fleet.Chunk_reply_details
+                        {
+                          operation_id = Some "op-ext-effect";
+                          reply = "discarded internal diagnostic";
+                          turn_outcome = Some "terminal_effect_settled";
+                          turn_ref = None;
+                        })
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-ext-effect" ~seq:(Some 3)
+                     (Wire_fleet.Chunk_external_effect_completed
+                        { operation_id = Some "op-ext-effect" })
+                |> Fleet_store.apply_observer_chat_stream_chunk ~keeper
+                     ~operation_id:"op-ext-effect" ~seq:(Some 4)
+                     (Wire_fleet.Chunk_turn_done
+                        {
+                          operation_id = Some "op-ext-effect";
+                          turn_ref = None;
+                          reply = None;
+                        })
+              in
+              let buf_tool_only =
+                Fleet_store.String_map.find keeper fleet_tool_only.chat_streams
+              in
+              Alcotest.(check string)
+                "terminal_effect_settled does not copy discarded diagnostic prose"
+                "" buf_tool_only.text;
+              Alcotest.(check bool) "tool_only_settled is marked true" true
+                buf_tool_only.tool_only_settled;
+              let persisted_tool_row : Wire_fleet.chat_message =
+                {
+                  persisted_eof_row with
+                  id = "m-tool-ext-1";
+                  role = Wire_fleet.Role_tool;
+                  content = "{\"ok\":true}";
+                  tool_call_name = Some "masc_surface_post";
+                  provenance =
+                    operation_provenance "op-ext-effect"
+                      (Tool_delivery { ordinal = 0 });
+                }
+              in
+              Alcotest.(check bool)
+                "tool-only stream retires once its persisted tool row lands in history"
+                true
+                (Chat_transcript.stream_reply_already_persisted
+                   [ persisted_tool_row ] buf_tool_only);
               (* (e) seen_seqs stays bounded at Fleet_store.max_seen_seqs by pruning oldest. *)
               let overflow = 10 in
               let total_seqs = Fleet_store.max_seen_seqs + overflow in

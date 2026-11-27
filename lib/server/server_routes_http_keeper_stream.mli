@@ -427,6 +427,10 @@ module For_testing : sig
     | Adapter_projects
     | On_publish_projects
     | No_observer_projection
+  type operation_event_bus =
+    { events : Keeper_chat_events.t
+    ; emit_pending_terminal_success : unit -> unit
+    }
   val operation_wire_projection_mode_of_channel :
     Keeper_continuation_channel.t -> operation_wire_projection_mode
   val create_operation_event_bus :
@@ -437,7 +441,7 @@ module For_testing : sig
     ?now:(unit -> float) ->
     journals:(Keeper_chat_operation.Operation_id.t * Keeper_chat_event_log.journal) list ->
     unit ->
-    Keeper_chat_events.t
+    operation_event_bus
 
   val note_operation_wire_event :
     base_path:string -> keeper_name:string -> operation_id:string -> Ag_ui.event -> unit

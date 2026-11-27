@@ -896,11 +896,18 @@ export function mergeLatestHistoryPage(
   prev: readonly ChatTranscriptEntry[],
   incoming: readonly ChatTranscriptEntry[],
   streaming: { readonly operationId: string; readonly executionId: string } | null = null,
+  reconciledObserverOpIds?: ReadonlySet<string>,
 ): readonly ChatTranscriptEntry[] {
+  const isRetiredObserverReply = (entry: ChatTranscriptEntry): boolean =>
+    entry.role === 'assistant'
+    && entry.deliveryProvenance === undefined
+    && entry.deliveryState === 'Delivered'
+    && entry.operationId !== undefined
+    && reconciledObserverOpIds?.has(entry.operationId) === true
   // An authoritative empty latest page (e.g. after `/clear` or `/reset`) drops
   // old persisted entries while retaining local requests awaiting a transcript receipt.
   if (incoming.length === 0) {
-    return prev.filter(isUnconfirmedEntry)
+    return prev.filter((entry) => isUnconfirmedEntry(entry) && !isRetiredObserverReply(entry))
   }
   // Keep the open stream's bubbles at their committed positions so incoming
   // history cannot reorder them or replace entries that still receive deltas.
@@ -937,6 +944,7 @@ export function mergeLatestHistoryPage(
     if (loadedIds.has(entry.id)) return false
     if (entry.operationId === undefined || entry.deliveryProvenance !== undefined) return true
     if (entry.role === 'user') return !accepted.has(entry.operationId)
+    if (isRetiredObserverReply(entry)) return false
     return !settled.has(entry.operationId)
       && (entry.replyOperationId === undefined || !settled.has(entry.replyOperationId))
   }

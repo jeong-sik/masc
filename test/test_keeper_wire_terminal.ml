@@ -1134,11 +1134,12 @@ let test_connector_bus_streams_live_observer_events_and_redacts_secrets () =
     unregister_sink ();
     ignore (Stream.For_testing.take_operation_wire_stream ~base_path ~keeper_name ~operation_id:op_str))
   @@ fun () ->
-  let events =
+  let bus =
     Stream.For_testing.create_operation_event_bus ~base_path ~keeper_name
       ~continuation_channel:(discord_channel ()) ~first_seq:0
       ~now:(fun () -> 100.0) ~journals:[ op_id, journal ] ()
   in
+  let events = bus.events in
   (* Live observer projection must work even if the external adapter is absent or slow. *)
   Events.reader_gone events;
   Events.publish events
@@ -1160,6 +1161,10 @@ let test_connector_bus_streams_live_observer_events_and_redacts_secrets () =
     (Events.Status_block { kind = Keeper_chat_blocks.Continuation_checkpoint });
   Events.publish events Events.Text_message_end;
   Events.publish events (Events.Run_finished { run_id = "run-orig" });
+  (* RUN_FINISHED stays deferred until external delivery succeeds. *)
+  check int "RUN_FINISHED is held before external delivery settles" 6
+    (List.length (observer_op_events ~keeper_name !sse_received));
+  bus.emit_pending_terminal_success ();
   let frames = observer_op_events ~keeper_name !sse_received in
   let open Yojson.Safe.Util in
   let seqs = List.map (fun j -> j |> member "seq" |> to_int) frames in
@@ -1195,11 +1200,15 @@ let test_connector_bus_streams_live_observer_events_and_redacts_secrets () =
         ~continuation_channel:channel ~first_seq:0 ~now:(fun () -> 101.0)
         ~journals:[ id, j ] ()
     in
-    Events.reader_gone bus;
-    Events.publish bus (Events.Run_started { run_id = "r"; thread_id = "keeper:" ^ keeper_name });
-    Events.publish bus (Events.Text_delta { text = "hi"; response = Events.Unobserved_scope None });
-    Events.publish bus (Events.Run_finished { run_id = "r" });
-    check int (label ^ " emits 3 observer frames") 3 (List.length !sse_received - before);
+    Events.reader_gone bus.events;
+    Events.publish bus.events (Events.Run_started { run_id = "r"; thread_id = "keeper:" ^ keeper_name });
+    Events.publish bus.events (Events.Text_delta { text = "hi"; response = Events.Unobserved_scope None });
+    Events.publish bus.events (Events.Run_finished { run_id = "r" });
+    check int (label ^ " holds RUN_FINISHED until delivery settles") 2
+      (List.length !sse_received - before);
+    bus.emit_pending_terminal_success ();
+    check int (label ^ " emits 3 observer frames after delivery succeeds") 3
+      (List.length !sse_received - before);
     check bool (label ^ " marks Wire_terminal_sent") true
       (Stream.For_testing.take_operation_wire_stream ~base_path ~keeper_name ~operation_id:id_str
        = Some Stream.Wire_terminal_sent))
@@ -1231,11 +1240,12 @@ let test_connector_bus_projects_batch_members_and_settles_interruption () =
       ignore (Stream.For_testing.take_operation_wire_stream ~base_path ~keeper_name ~operation_id:op_id))
       [ op_a_str; op_b_str ])
   @@ fun () ->
-  let events =
+  let bus =
     Stream.For_testing.create_operation_event_bus ~base_path ~keeper_name
       ~continuation_channel:(slack_channel ()) ~first_seq:0
       ~now:(fun () -> 200.0) ~journals ()
   in
+  let events = bus.events in
   Events.reader_gone events;
   Events.publish events
     (Events.Run_started { run_id = "shared-run"; thread_id = "keeper:" ^ keeper_name });
@@ -1292,9 +1302,10 @@ let test_dashboard_and_unrouted_buses_skip_on_publish_projection () =
         ~continuation_channel:channel ~first_seq:0 ~now:(fun () -> 300.0)
         ~journals:[ op_id, journal ] ()
     in
-    Events.reader_gone bus;
-    Events.publish bus (Events.Run_started { run_id = "r"; thread_id = "keeper:" ^ keeper_name });
-    Events.publish bus (Events.Text_delta { text = "hello"; response = Events.Unobserved_scope None });
+    Events.reader_gone bus.events;
+    Events.publish bus.events (Events.Run_started { run_id = "r"; thread_id = "keeper:" ^ keeper_name });
+    Events.publish bus.events (Events.Text_delta { text = "hello"; response = Events.Unobserved_scope None });
+    bus.emit_pending_terminal_success ();
     check int (label ^ " emits no on_publish observer frames") 0
       (List.length (observer_op_events ~keeper_name !sse_received));
     check bool (label ^ " leaves wire stream unset") true
@@ -1327,9 +1338,9 @@ let test_connector_bus_masks_internal_event_error_detail () =
       ~continuation_channel:(discord_channel ()) ~first_seq:0 ~now:(fun () -> 400.0)
       ~journals:[ op_id, journal ] ()
   in
-  Events.reader_gone bus;
-  Events.publish bus (Events.Run_started { run_id = "r"; thread_id = "keeper:" ^ keeper_name });
-  Events.publish bus (Events.Event_error { message = "raw internal stacktrace with secret" });
+  Events.reader_gone bus.events;
+  Events.publish bus.events (Events.Run_started { run_id = "r"; thread_id = "keeper:" ^ keeper_name });
+  Events.publish bus.events (Events.Event_error { message = "raw internal stacktrace with secret" });
   let frames = observer_op_events ~keeper_name !sse_received in
   check int "emits RUN_STARTED and RUN_ERROR" 2 (List.length frames);
   let open Yojson.Safe.Util in
@@ -1343,6 +1354,73 @@ let test_connector_bus_masks_internal_event_error_detail () =
   check bool "wire stream reaches Wire_terminal_sent" true
     (Stream.For_testing.take_operation_wire_stream ~base_path ~keeper_name ~operation_id:op_str
      = Some Stream.Wire_terminal_sent)
+
+let test_connector_delivery_failure_emits_run_error_after_run_finished () =
+  with_workspace @@ fun base_path ->
+  let keeper_name = "connector-delivery-failed" in
+  let op_str = "op-discord-delivery-fail" in
+  let op_id = Keeper_chat_operation.Operation_id.of_string op_str |> ok_or_fail in
+  let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id:op_str () in
+  let authority = Sse.runtime_authority_exn ~base_path in
+  let sse_received = ref [] in
+  let sub_id = "test-connector-delivery-fail" in
+  Sse.subscribe_external ~runtime_authority:authority ~id:sub_id
+    ~callback:(fun ev -> sse_received := ev :: !sse_received) ();
+  let sink_received = ref [] in
+  let unregister_sink =
+    Stream.For_testing.register_operation_live_sink ~base_path ~keeper_name
+      ~operation_id:op_str (fun ~seq ev -> sink_received := (seq, ev) :: !sink_received)
+  in
+  Fun.protect ~finally:(fun () ->
+    Sse.unsubscribe_external sub_id;
+    unregister_sink ();
+    ignore (Stream.For_testing.take_operation_wire_stream ~base_path ~keeper_name ~operation_id:op_str))
+  @@ fun () ->
+  let bus =
+    Stream.For_testing.create_operation_event_bus ~base_path ~keeper_name
+      ~continuation_channel:(discord_channel ()) ~first_seq:0 ~now:(fun () -> 500.0)
+      ~journals:[ op_id, journal ] ()
+  in
+  Events.reader_gone bus.events;
+  Events.publish bus.events (Events.Run_started { run_id = "r"; thread_id = "keeper:" ^ keeper_name });
+  Events.publish bus.events (Events.Text_delta { text = "answer"; response = Events.Unobserved_scope None });
+  Events.publish bus.events (Events.Run_finished { run_id = "r" });
+  (* Simulate post-turn Delivery_failed: emit_pending_terminal_success is NOT called. *)
+  Stream.For_testing.synthesize_wire_terminal_on_settle ~base_path ~keeper_name
+    ~operation_id:op_str
+    ~execution:(Keeper_owner.Operation_failed
+      { kind = Keeper_chat_operation.Delivery_failed
+      ; detail = "DISCORD_BOT_TOKEN is not configured"
+      ; outcome_ref = None
+      });
+  let frames = observer_op_events ~keeper_name !sse_received in
+  let open Yojson.Safe.Util in
+  let types =
+    List.map (fun j -> j |> member "ag_ui_event" |> member "type" |> to_string) frames
+  in
+  check (list string) "delivery failure emits RUN_ERROR without premature RUN_FINISHED"
+    [ "RUN_STARTED"; "TEXT_MESSAGE_CONTENT"; "RUN_ERROR" ] types;
+  check int "live sink receives the same 3 frames ending in RUN_ERROR" 3
+    (List.length !sink_received);
+  check int "durable journal records terminal error after Run_finished" 1
+    (List.length (error_entries (read_journal ~base_path ~keeper_name ~operation_id:op_str)))
+
+let test_on_operation_execution_settled_reclaims_wire_stream_on_journal_failure () =
+  with_workspace @@ fun base_path ->
+  let keeper_name = "settled-journal-leak" in
+  let op_str = "op-settled-journal-leak" in
+  let op_id = Keeper_chat_operation.Operation_id.of_string op_str |> ok_or_fail in
+  ignore (Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id:op_str ());
+  Unix.mkdir (Journal.journal_path ~base_dir:base_path ~keeper_name ~operation_id:op_str) 0o700;
+  Stream.For_testing.note_operation_wire_event ~base_path ~keeper_name
+    ~operation_id:op_str (custom_event ());
+  Stream.For_testing.on_operation_execution_settled ~base_path ~keeper_name
+    ~claimed_operation_id:(Some op_id)
+    ~operations:[ failed_operation keeper_name op_id ]
+    ~execution:(failed_execution "interrupted with unwritable journal");
+  check bool "unwritable journal still reclaims operation_wire_streams entry" true
+    (Option.is_none
+       (Stream.For_testing.take_operation_wire_stream ~base_path ~keeper_name ~operation_id:op_str))
 
 let () =
   Alcotest.run "keeper_wire_terminal"
@@ -1359,6 +1437,10 @@ let () =
             test_dashboard_and_unrouted_buses_skip_on_publish_projection
         ; test_case "connector bus masks internal event error detail" `Quick
             test_connector_bus_masks_internal_event_error_detail
+        ; test_case "connector delivery failure emits RUN_ERROR after Run_finished" `Quick
+            test_connector_delivery_failure_emits_run_error_after_run_finished
+        ; test_case "on_operation_execution_settled reclaims wire stream on journal failure" `Quick
+            test_on_operation_execution_settled_reclaims_wire_stream_on_journal_failure
         ; test_case "same request ID has separate Keeper wire audiences" `Quick
             test_same_request_id_keeps_keeper_wire_audiences_separate
         ; test_case "same request ID has separate terminal and unsubscribe state" `Quick

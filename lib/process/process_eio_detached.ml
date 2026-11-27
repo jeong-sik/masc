@@ -271,7 +271,10 @@ let sleep_step step =
   match Eio_guard.execution_context () with
   | Eio_guard.Eio_fiber ->
       (try Eio_unix.sleep step with
-       | Effect.Unhandled _ -> Eio.Fiber.yield ())
+       | Effect.Unhandled _ ->
+         (* Mock/non-Unix schedulers can yield but cannot sleep on a Unix
+            timer. The caller still checks a monotonic deadline. *)
+         Eio.Fiber.yield ())
   | Eio_guard.Non_eio ->
       (* With no descriptors and a positive timeout, a signal (EINTR) is
          the only way [select] fails; the next turn checks the group again. *)
@@ -306,6 +309,13 @@ let tree_kill ~pgid ~signal ~grace_sec =
           wait_loop ()
         end
       in
-      wait_loop ()
+      match wait_loop () with
+      | () -> ()
+      | exception (Eio.Cancel.Cancelled _ as cancelled) ->
+        let bt = Printexc.get_raw_backtrace () in
+        (* A cancelled shutdown cannot wait out the grace period, but must
+           still stop a group that ignored the initial signal. *)
+        safe_kill Sys.sigkill;
+        Printexc.raise_with_backtrace cancelled bt
     end
   end

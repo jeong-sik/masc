@@ -316,7 +316,7 @@ let test_durable_lock_contended_wait_cooperates_until_release () =
       | Some r -> check bool "observed at least one paced retry" true (r >= 1)
       | None -> fail "durable lock attempt hook did not fire")
 
-let test_durable_lock_reopens_after_unlinked_inode () =
+let check_lock_reopens_after_unlinked_inode ~with_lock () =
   with_temp_path @@ fun path ->
   let lock_path = path ^ ".lock" in
   with_external_lock_holder lock_path @@ fun release_holder ->
@@ -331,7 +331,7 @@ let test_durable_lock_reopens_after_unlinked_inode () =
     (fun () ->
        Eio.Promise.resolve signal_waiting ();
        match
-         File_lock_eio.with_durable_lock ~lock_path (fun () ->
+         with_lock ~clock ~path ~lock_path (fun () ->
            body_ran := true;
            let cur_stat = Unix.lstat lock_path in
            locked_current_inode := cur_stat.Unix.st_ino <> initial_ino;
@@ -369,6 +369,18 @@ let test_durable_lock_reopens_after_unlinked_inode () =
   check bool "body ran after stale inode retry" true !body_ran;
   check bool "reopened fresh inode at lock_path" true !locked_current_inode;
   check bool "separate process saw fresh inode locked" true !child_saw_contended
+
+let test_durable_lock_reopens_after_unlinked_inode () =
+  check_lock_reopens_after_unlinked_inode
+    ~with_lock:(fun ~clock:_ ~path:_ ~lock_path f ->
+      File_lock_eio.with_durable_lock ~lock_path f)
+    ()
+
+let test_scoped_lock_reopens_after_unlinked_inode () =
+  check_lock_reopens_after_unlinked_inode
+    ~with_lock:(fun ~clock ~path ~lock_path:_ f ->
+      Ok (File_lock_eio.with_lock ~clock path f))
+    ()
 
 let test_durable_lock_rejects_symlink_without_spinning () =
   with_temp_path @@ fun path ->
@@ -478,6 +490,8 @@ let () =
             test_durable_lock_contended_wait_cooperates_until_release;
           test_case "durable lock reopens fresh inode when stale inode is unlinked" `Quick
             test_durable_lock_reopens_after_unlinked_inode;
+          test_case "scoped lock reopens fresh inode when stale inode is unlinked" `Quick
+            test_scoped_lock_reopens_after_unlinked_inode;
           test_case "durable lock rejects symlink lock_path without spinning" `Quick
             test_durable_lock_rejects_symlink_without_spinning;
           test_case "unlink_if_unheld preserves file held by BSD flock liveness lock" `Quick

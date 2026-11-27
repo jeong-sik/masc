@@ -937,7 +937,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
         ~hooks:(Some hooks)
     in
     let* tool_outbox, retained_carrier =
-      Keeper_client_tool_outbox.run_carrier_load retained_results
+      Keeper_official_client_retained_results.load
+        ~superseded:superseded_rejection retained_results
       |> Result.map_error internal_error in
     (* Hooks may replace the system prompt or append an ordinary Nudge. Bind
        the final non-carried composition, and retain the mandatory workspace

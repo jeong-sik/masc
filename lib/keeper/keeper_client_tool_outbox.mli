@@ -349,6 +349,18 @@ val run_carrier_load : run_carrier -> (snapshot * carrier, string) result
     Cancellation during preparation publishes no cached carrier and performs
     no ACK. A run's attempts call it one after another. *)
 
+val run_carrier_load_by_address : run_carrier -> (snapshot * carrier, string) result
+(** {!run_carrier_load}, then the switch the capacity-refusal hook makes
+    ({!carrier_reprojection}), before the run sends a request instead of after
+    a refusal. The carrier stays [Inline] when it holds no receipt or its
+    [By_address] text is not strictly shorter. A failed blob write returns
+    [Error]; the loaded carrier stays [Inline], and {!run_carrier_load} still
+    returns it. A carrier that is already [By_address] is returned as it is.
+
+    For a run that starts in place of a session whose turn was refused for
+    its size: a run that starts [Inline] would send that session's receipts
+    again in full. *)
+
 val run_carrier_reprojection :
   run_carrier ->
   then_:Keeper_memory_delivery_reprojection.t ->

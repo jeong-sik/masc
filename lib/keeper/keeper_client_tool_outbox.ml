@@ -954,6 +954,11 @@ let run_carrier_load run =
     Atomic.set run.run_loaded (Some loaded);
     Ok loaded
 
+let run_carrier_load_by_address run =
+  let* ((_, carrier) as loaded) = run_carrier_load run in
+  let* (_ : Keeper_memory_delivery_reprojection.reduction) = switch_to_address carrier in
+  Ok loaded
+
 let run_carrier_reprojection run ~then_ ~refusal =
   match Atomic.get run.run_loaded with
   | None -> then_ ~refusal

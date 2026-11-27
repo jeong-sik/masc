@@ -1084,6 +1084,83 @@ let test_run_carrier_reprojection_waits_for_the_load () = with_workspace (fun ba
     (Outbox.run_carrier_reprojection retained ~then_:memory ~refusal);
   check int "the memory hook ran again" 2 !calls)
 
+let run_of base_path =
+  Outbox.run_carrier ~read_media:None ~base_path ~keeper_name ~artifact_reader_available:true
+    ~viewer:Outbox.Unowned_only
+
+(* A run that starts in place of a session refused for its size switches the
+   form before its first request, where another run switches after a refusal
+   (RFC retained-results-carrier-shrinks-to-an-address 11.7). *)
+let test_run_carrier_load_by_address_switches_before_the_first_request () = with_workspace (fun base_path ->
+  retain_vendor_receipts base_path (List.init 4 (fun index ->
+    vendor_receipt ~call_id:(Printf.sprintf "ahead-%d" index) ~tool_name:"Read"
+      (`String (String.make 2048 'a'))));
+  let inline = Outbox.developer_context (load base_path) in
+  let retained = run_of base_path in
+  let snapshot, carrier = get (Outbox.run_carrier_load_by_address retained) in
+  check int "the run holds the four receipts" 4 (List.length (Outbox.receipt_ids snapshot));
+  check form "the run starts by address" Outbox.By_address (Outbox.carrier_form carrier);
+  let reference = carried_reference (carried_text carrier) in
+  check (option string) "the blob holds the inline text byte for byte"
+    (Some (String.concat "\n\n" inline))
+    (held (blob_store base_path) reference.Tool_output.sha256);
+  let _, later = get (Outbox.run_carrier_load retained) in
+  check bool "a later attempt gets the same carrier" true (carrier == later);
+  let _, again = get (Outbox.run_carrier_load_by_address retained) in
+  check bool "a second load by address gets the same carrier" true (carrier == again);
+  let calls = ref 0 in
+  let memory ~refusal:_ = incr calls; Ok Reprojection.Unchanged in
+  check_reduction "a refusal after that is left to the memory hook" Reprojection.Unchanged
+    (Outbox.run_carrier_reprojection retained ~then_:memory ~refusal);
+  check int "the memory hook ran" 1 !calls)
+
+let test_run_carrier_load_by_address_keeps_a_form_that_is_not_shorter () = with_workspace (fun base_path ->
+  let _, none = get (Outbox.run_carrier_load_by_address (run_of base_path)) in
+  check form "a run without receipts has nothing to switch" Outbox.Inline
+    (Outbox.carrier_form none);
+  check (list string) "a run without receipts carries nothing" [] (Outbox.carrier_context none);
+  get (Outbox.retain ~base_path ~keeper_name
+    (vendor_receipt ~call_id:"tiny" ~tool_name:"Ping" (`String "ok")));
+  let inline = Outbox.developer_context (load base_path) in
+  let _, tiny = get (Outbox.run_carrier_load_by_address (run_of base_path)) in
+  check form "an address form that is not shorter is not taken" Outbox.Inline
+    (Outbox.carrier_form tiny);
+  check (list string) "the run carries the inline text" inline (Outbox.carrier_context tiny);
+  check (option string) "no blob is written for a form that is not taken" None
+    (held (blob_store base_path) (sha256_hex (String.concat "\n\n" inline))))
+
+let test_run_carrier_load_by_address_reports_a_failed_blob_write () = with_workspace (fun base_path ->
+  retain_vendor_receipts base_path (List.init 4 (fun index ->
+    vendor_receipt ~call_id:(Printf.sprintf "ahead-blocked-%d" index) ~tool_name:"Read"
+      (`String (String.make 2048 'k'))));
+  (* As in the hook's test: a regular file where the blob directory belongs. *)
+  Out_channel.with_open_bin (Tool_blob_store.root_dir (blob_store base_path))
+    (fun channel -> Out_channel.output_string channel "not a directory");
+  let retained = run_of base_path in
+  (match Outbox.run_carrier_load_by_address retained with
+   | Error _ -> ()
+   | Ok _ -> fail "a blob that cannot be written cannot start the run by address");
+  let _, carrier = get (Outbox.run_carrier_load retained) in
+  check form "the loaded carrier stays inline" Outbox.Inline (Outbox.carrier_form carrier))
+
+(* What the session record says of the session a run replaces decides the form
+   the run starts in. *)
+let test_a_run_that_supersedes_a_size_rejection_starts_by_address () = with_workspace (fun base_path ->
+  let module Session = Keeper_official_client_session_store in
+  retain_vendor_receipts base_path (List.init 4 (fun index ->
+    vendor_receipt ~call_id:(Printf.sprintf "superseding-%d" index) ~tool_name:"Read"
+      (`String (String.make 2048 's'))));
+  let started superseded =
+    let _, carrier =
+      get (Keeper_official_client_retained_results.load ~superseded (run_of base_path)) in
+    Outbox.carrier_form carrier in
+  check form "a run that supersedes no size rejection starts inline" Outbox.Inline
+    (started Session.Not_superseding_input_rejection);
+  check form "a run after a size refusal that followed an effect starts by address"
+    Outbox.By_address (started Session.Superseding_effect_fenced);
+  check form "a run after a size refusal at the floor starts by address"
+    Outbox.By_address (started Session.Superseding_bootstrap_floor_exceeded))
+
 (* Rows that reached the Keeper's queue while the client ran the turn go out
    after the tool's own text, once each, and the original result keeps its
    retention marker. *)
@@ -1531,7 +1608,15 @@ let () = run "Original official-client host result retention"
    "retained-results carrier run",[
     test_case "run carrier loads once" `Quick test_run_carrier_loads_once;
     test_case "run carrier reprojection waits for the load" `Quick
-      test_run_carrier_reprojection_waits_for_the_load];
+      test_run_carrier_reprojection_waits_for_the_load;
+    test_case "load by address switches before the first request" `Quick
+      test_run_carrier_load_by_address_switches_before_the_first_request;
+    test_case "load by address keeps a form that is not shorter" `Quick
+      test_run_carrier_load_by_address_keeps_a_form_that_is_not_shorter;
+    test_case "load by address reports a failed blob write" `Quick
+      test_run_carrier_load_by_address_reports_a_failed_blob_write;
+    test_case "a run that supersedes a size rejection starts by address" `Quick
+      test_a_run_that_supersedes_a_size_rejection_starts_by_address];
    "retained media reading",[
     test_case "shared raw reader and exact address text" `Quick test_retained_readings_share_raw_reader_and_shrink_exact_text;
     test_case "later host attachments survive an earlier history timeout" `Quick test_later_host_attachments_are_read_after_a_history_timeout;

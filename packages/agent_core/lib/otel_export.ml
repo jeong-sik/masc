@@ -43,19 +43,31 @@ type export_result =
 let _log = Log.create ~module_name:"otel_export" ()
 
 (* Reuses the process-wide cached TLS configuration
-   ({!Llm_provider.Api_common.tls_client_config}). [flush_to_collector]
-   builds a client per flush tick; loading the system trust store each
-   time re-ran `security find-certificate` + a full PEM parse every
-   [flush_interval_sec] on macOS. *)
+   ({!Llm_provider.Api_common.make_https_result}) and validates the peer host
+   name / IP address via {!Llm_provider.Api_common.tls_peer_of_host} so every
+   HTTPS collector connection sends SNI and verifies certificate identity. *)
 let make_https () =
-  match Llm_provider.Api_common.tls_client_config () with
+  match Llm_provider.Api_common.make_https_result () with
   | Error err ->
     Log.warn
       _log
       "TLS client configuration unavailable"
       [ Log.S ("error", Llm_provider.Api_common.https_init_error_to_string err) ];
     None
-  | Ok tls_config -> Some (fun _uri socket -> Tls_eio.client_of_flow tls_config socket)
+  | Ok start_tls ->
+    Some
+      (fun uri socket ->
+         let host =
+           match Uri.host uri with
+           | Some h when not (String.equal (String.trim h) "") -> h
+           | Some _ | None ->
+             invalid_arg "Otel_export: HTTPS endpoint requires a host name"
+         in
+         match Llm_provider.Api_common.tls_peer_of_host host with
+         | Ok peer -> start_tls peer socket
+         | Error reason ->
+           invalid_arg
+             (Printf.sprintf "Otel_export: invalid HTTPS host %S: %s" host reason))
 ;;
 
 let make_client ~net = Cohttp_eio.Client.make ~https:(make_https ()) net
@@ -187,8 +199,9 @@ let post_otlp ~clock ~client ~config ~endpoint body =
     | Ok result -> result
     | Error `Timeout -> Error (Printf.sprintf "timeout after %.1fs" config.timeout_sec)
   with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> Error (Printexc.to_string exn)
+  | exn ->
+    Llm_provider.Reserved_exn.reraise_if_reserved exn;
+    Error (Printexc.to_string exn)
 ;;
 
 (* ── Batch + retry logic ────────────────────────────────────── *)
@@ -239,11 +252,16 @@ let take_batch max_size lst =
   go max_size [] lst
 ;;
 
-let rec split_batches max_size acc = function
-  | [] -> List.rev acc
-  | spans ->
-    let batch, rest = take_batch max_size spans in
-    split_batches max_size (batch :: acc) rest
+let split_batches max_size acc spans =
+  if max_size <= 0
+  then invalid_arg "Otel_export.split_batches: max_size must be positive";
+  let rec go acc = function
+    | [] -> List.rev acc
+    | remaining ->
+      let batch, rest = take_batch max_size remaining in
+      go (batch :: acc) rest
+  in
+  go acc spans
 ;;
 
 let flush_to_collector ~sw:_ ~clock ~net ~config instance =
@@ -257,7 +275,8 @@ let flush_to_collector ~sw:_ ~clock ~net ~config instance =
   else (
     let client = make_client ~net in
     let service_name = instance.Otel_tracer.config.service_name in
-    let batches = split_batches config.max_batch_size [] spans in
+    let batch_size = max 1 config.max_batch_size in
+    let batches = split_batches batch_size [] spans in
     let span_total = List.length spans in
     let metric_total = List.length metrics in
     let exported_spans = ref 0 in
@@ -318,8 +337,8 @@ let start_daemon ~sw ~clock ~net ~config ?on_export instance =
         | Some cb -> cb result
         | None -> ()
       with
-      | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
+        Llm_provider.Reserved_exn.reraise_if_reserved exn;
         Log.warn
           _log
           "otel export daemon tick failed"

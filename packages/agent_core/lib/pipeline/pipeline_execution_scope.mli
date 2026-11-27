@@ -72,6 +72,6 @@ val settled_invocations
 
 val settled_response
   :  settled_boundary
-  -> (Llm_provider.Types.api_response, Error.t) result
+  -> (Execution_provider_response_snapshot.t, Error.t) result
 
 val close_success : t -> (unit, Error.t) result

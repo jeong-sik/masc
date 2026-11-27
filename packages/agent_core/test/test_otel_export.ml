@@ -225,6 +225,18 @@ let test_split_batches_empty () =
   Alcotest.(check int) "0 batches" 0 (List.length batches)
 ;;
 
+let test_split_batches_rejects_non_positive_size () =
+  let spans = List.init 2 (fun _ -> make_test_span ()) in
+  Alcotest.check_raises
+    "zero max_size raises Invalid_argument"
+    (Invalid_argument "Otel_export.split_batches: max_size must be positive")
+    (fun () -> ignore (split_batches 0 [] spans : Otel_tracer.span list list));
+  Alcotest.check_raises
+    "negative max_size raises Invalid_argument"
+    (Invalid_argument "Otel_export.split_batches: max_size must be positive")
+    (fun () -> ignore (split_batches (-1) [] spans : Otel_tracer.span list list))
+;;
+
 (* ── Flush with no spans ─────────────────────────────────────── *)
 
 let test_flush_empty_instance () =
@@ -548,6 +560,10 @@ let () =
         ; Alcotest.test_case "multiple_batches" `Quick test_split_batches_multiple
         ; Alcotest.test_case "exact_split" `Quick test_split_batches_exact
         ; Alcotest.test_case "empty" `Quick test_split_batches_empty
+        ; Alcotest.test_case
+            "rejects_non_positive_size"
+            `Quick
+            test_split_batches_rejects_non_positive_size
         ] )
     ; ( "flush"
       , [ Alcotest.test_case "empty_instance" `Quick test_flush_empty_instance

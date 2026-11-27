@@ -33,7 +33,6 @@ type histogram_series =
 
 type histogram_data =
   { h_name : string
-  ; h_buckets : float list
   ; h_sorted_buckets : float array
   ; h_values : histogram_series LabelMap.t
   }
@@ -174,7 +173,6 @@ let histogram t ~name ~buckets =
               let sorted_buckets = Array.of_list (List.sort Float.compare buckets) in
               let h =
                 { h_name = name
-                ; h_buckets = buckets
                 ; h_sorted_buckets = sorted_buckets
                 ; h_values = empty_histogram_values (Array.length sorted_buckets)
                 }
@@ -296,13 +294,27 @@ let counter_to_json (c : counter_data) : Yojson.Safe.t =
     ]
 ;;
 
-let histogram_datapoint_to_json buckets labels series : Yojson.Safe.t =
-  let bc = Array.to_list series.hs_bucket_counts @ [ series.hs_count ] in
+(* OTLP HistogramDataPoint bucket_counts are per-bucket (non-cumulative) counts
+   aligned with ascending explicit_bounds, unlike Prometheus cumulative buckets. *)
+let bucket_counts_otlp series =
+  let n = Array.length series.hs_bucket_counts in
+  let rec go i prev acc =
+    if i >= n
+    then List.rev ((series.hs_count - prev) :: acc)
+    else (
+      let cum = series.hs_bucket_counts.(i) in
+      go (i + 1) cum ((cum - prev) :: acc))
+  in
+  go 0 0 []
+;;
+
+let histogram_datapoint_to_json sorted_buckets labels series : Yojson.Safe.t =
+  let bc = bucket_counts_otlp series in
   let base =
     [ "count", `String (string_of_int series.hs_count)
     ; "sum", `Float series.hs_sum
     ; "bucketCounts", `List (List.map (fun n -> `String (string_of_int n)) bc)
-    ; "explicitBounds", `List (List.map (fun b -> `Float b) buckets)
+    ; "explicitBounds", `List (List.map (fun b -> `Float b) sorted_buckets)
     ]
   in
   let fields =
@@ -314,10 +326,11 @@ let histogram_datapoint_to_json buckets labels series : Yojson.Safe.t =
 ;;
 
 let histogram_to_json (h : histogram_data) : Yojson.Safe.t =
+  let sorted_buckets = Array.to_list h.h_sorted_buckets in
   let data_points =
     LabelMap.fold
       (fun labels series acc ->
-         histogram_datapoint_to_json h.h_buckets labels series :: acc)
+         histogram_datapoint_to_json sorted_buckets labels series :: acc)
       h.h_values
       []
   in

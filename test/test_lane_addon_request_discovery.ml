@@ -101,6 +101,10 @@ let test_a_scope_is_read_in_one_read_with_its_bodies () = with_store (fun root s
   Alcotest.(check bool) "no directory is absence" true (get (scope_rows ~scope:"no-such-scope" store ()) = None);
   Alcotest.(check (list string)) "and load_scope reads nothing" []
     (owned (Owner.load_scope ~store ~scope:"no-such-scope"));
+  (match Owner.load_scope ~store ~scope:" " with
+   | Error (Owner.Invalid_identity "scope") -> ()
+   | Ok _ -> Alcotest.fail "a blank scope read as a scope"
+   | Error error -> Alcotest.fail ("wrong refusal for a blank scope: " ^ Owner.error_to_string error));
   (* A record whose body is gone is neither an original nor absence. *)
   Sys.remove (body_path store (digest_of "a"));
   (match get (scope_rows store ()) with

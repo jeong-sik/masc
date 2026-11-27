@@ -328,6 +328,7 @@ let request_digest_of = function
    so a settle between them cannot leave a record whose body looks lost. Each
    record is read once: there is no listing to compare a second read with. *)
 let load_scope ~store ~scope =
+  let* () = validate_identity ["scope", scope] in
   let* rows =
     Lane_addon_store.tool_request_scope_with_bodies store ~scope ~request_digest_of
     |> unavailable

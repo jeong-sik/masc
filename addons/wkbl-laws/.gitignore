@@ -1,0 +1,13 @@
+# Outputs of building Laws.v and driver.ml outside the image.
+*.vo
+*.vok
+*.vos
+*.glob
+.*.aux
+.lia.cache
+*.o
+laws.ml
+laws.mli
+law-cases.actual
+assumptions.txt
+wkbl-laws-check

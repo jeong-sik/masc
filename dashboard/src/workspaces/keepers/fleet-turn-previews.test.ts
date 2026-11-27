@@ -154,7 +154,7 @@ describe('the Keepers workspace between two reads of the turns', () => {
     vi.unstubAllGlobals()
   })
 
-  it('says in the header what the turn is doing now, without reading the turns again', async () => {
+  it('says in the header and in the roster what each turn is doing now, without reading the turns again', async () => {
     const now = Date.now() / 1000
     const tool = (name: string, stage: 'executing' | 'requested') => ({
       kind: 'tool', tool_use_id: name, name, stage, started_at_unix: now - 5, since_unix: now - 4, cohort: null, reach: null,
@@ -193,8 +193,15 @@ describe('the Keepers workspace between two reads of the turns', () => {
     const view = render(html`<${KeepersWorkspace} subroute="" entityId="alpha-one" entityTab="memory" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`)
     const pill = () => view.container.querySelector('[data-turn-pill]')
     const says = () => pill()?.textContent?.trim()
+    const rosterLine = (name: string) =>
+      view.container.querySelector(`.kp-roster-row[data-keeper="${name}"] [data-roster-state]`)?.textContent
     await waitFor(() => expect(says()).toBe('● 자율 턴 · Grep · 실행 중'))
     expect(pill()?.getAttribute('title')).toBe('rt-1 · tool running: Grep')
+    expect(rosterLine('alpha-one')).toBe('Grep')
+    expect(rosterLine('beta-two')).toBe('Read')
+    // How long the turn has run stands before the state (#55073).
+    expect(view.container.querySelector('.kp-roster-row[data-keeper="alpha-one"] [data-roster-state]')
+      ?.previousElementSibling?.hasAttribute('data-roster-elapsed')).toBe(true)
     const readsBefore = turnsRead
 
     const send = (name: string, ownerKey: string, revision: number, statusText: string, open: readonly object[]) =>
@@ -204,13 +211,16 @@ describe('the Keepers workspace between two reads of the turns', () => {
       })}\n\n`))
     const thinking = [{ kind: 'response', channel: 'thinking', started_at_unix: now - 2, since_unix: now - 1 }]
 
-    // The Keeper on screen moves on to two other tools.
+    // The Keeper on screen moves on to two other tools; the one beside it starts to think.
     send('alpha-one', 'A', 4, 'rt-1 · tool running: Execute · tool called: Read', [tool('Execute', 'executing'), tool('Read', 'requested')])
+    send('beta-two', 'B', 4, 'rt-1 · receiving reasoning', thinking)
     await waitFor(() => expect(says()).toBe('● 자율 턴 · Execute 외 1건 · 실행 중'))
     expect(pill()?.getAttribute('title')).toBe('rt-1 · tool running: Execute · tool called: Read')
+    expect(rosterLine('alpha-one')).toBe('Execute 외 1건')
+    await waitFor(() => expect(rosterLine('beta-two')).toBe('추론 중'))
 
-    // What the Keeper beside it does, a preview of a turn the snapshot does not
-    // name, and one that is not newer, change nothing here.
+    // A preview that carries the owner key of another Keeper's turn, one of a
+    // turn the snapshot does not name, and one that is not newer, change nothing.
     send('beta-two', 'A', 9, 'rt-1 · tool called: WebFetch', [tool('WebFetch', 'requested')])
     send('alpha-one', 'Z', 9, 'rt-1 · tool running: Glob', [tool('Glob', 'executing')])
     send('alpha-one', 'A', 2, 'rt-1 · tool running: Grep', [tool('Grep', 'executing')])
@@ -218,6 +228,8 @@ describe('the Keepers workspace between two reads of the turns', () => {
     send('alpha-one', 'A', 5, 'rt-1 · receiving reasoning · tool running: Execute', [...thinking, tool('Execute', 'executing')])
     await waitFor(() => expect(pill()?.getAttribute('title')).toBe('rt-1 · receiving reasoning · tool running: Execute'))
     expect(says()).toBe('● 자율 턴 · Execute · 실행 중')
+    expect(rosterLine('alpha-one')).toBe('Execute')
+    expect(rosterLine('beta-two')).toBe('추론 중')
 
     // A preview is not a reason to read the turns again: it is the news itself.
     expect(KEEPER_ROSTER_OBSERVER_TOPICS).not.toContain('keeper_turn_preview_changed')
@@ -227,6 +239,8 @@ describe('the Keepers workspace between two reads of the turns', () => {
     // The session change also ends this session's stream.
     bumpSessionEpoch()
     await waitFor(() => expect(says()).toBe('● 자율 턴 · Grep · 실행 중'))
+    expect(rosterLine('alpha-one')).toBe('Grep')
+    expect(rosterLine('beta-two')).toBe('Read')
     await stream
   })
 })

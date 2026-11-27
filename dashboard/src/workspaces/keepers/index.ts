@@ -32,7 +32,7 @@ import {
   withObservedTurn,
   type FleetTurnPreviews,
 } from './fleet-turn-previews'
-import { KeeperRoster } from './keeper-roster'
+import { KeeperRoster, type KeeperRosterProps } from './keeper-roster'
 import { KeeperHeader, type KeeperHeaderProps } from './keeper-header'
 import { KeeperChatTab } from './keeper-chat-tab'
 import { PersonalKeepersWorkspace } from './personal-keepers-workspace'
@@ -77,6 +77,13 @@ registerSubroutePreloader('keepers', (tab) => {
 
 interface ObservedTurns {
   readonly turnPreviews: ReadonlySignal<FleetTurnPreviews>
+}
+
+// The roster with the previews the fleet's turns have sent since the turns
+// snapshot. It is a component of its own, so a preview redraws the rows on
+// screen and not the tab beside them.
+function ObservedKeeperRoster({ turnPreviews, ...rest }: Omit<KeeperRosterProps, 'turnPreviews'> & ObservedTurns) {
+  return html`<${KeeperRoster} ...${rest} turnPreviews=${turnPreviews.value} />`
 }
 
 // The header with its Keeper's turn as the stream last described it. It is a
@@ -284,7 +291,8 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
 
   return html`
     <div class="kp-root" data-workspace="keepers">
-      <${KeeperRoster}
+      <${ObservedKeeperRoster}
+        turnPreviews=${fleetTurnPreviews}
         roster=${roster}
         turnsObservation=${turnsObservation}
         selectedKeeper=${activeKeeper?.name ?? null}

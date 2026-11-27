@@ -238,12 +238,26 @@
 .kp-status-dot[data-tone="bad"] { background: var(--err); }
 .kp-status-dot[data-tone="brass"] { background: var(--brass-1); }
 
-.kp-roster-info {
+/* Two lines, each cut where it runs out: the name beside the context pill,
+   and what the Keeper is doing beside the small label of the chosen mode. */
+.kp-roster-text {
   display: flex;
   flex-direction: column;
   gap: var(--sp-0);
   min-width: 0;
   flex: 1 1 auto;
+}
+
+.kp-roster-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.kp-roster-line > :first-child {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .kp-roster-name {
@@ -264,18 +278,97 @@
   white-space: nowrap;
 }
 
-.kp-roster-right {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: var(--sp-0);
+.kp-roster-line > .kp-pill {
   flex-shrink: 0;
-  max-width: 104px;
+}
+
+/* The state of a row: how long its turn has run, kept whole, then what the
+   Keeper is doing in the room that is left. */
+.kp-roster-state {
+  display: flex;
+  align-items: baseline;
+}
+
+.kp-roster-state > [data-roster-state] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.kp-roster-elapsed {
+  flex: none;
+  white-space: pre;
+}
+
+.kp-roster-state[data-in-turn] > .kp-roster-elapsed {
+  color: var(--fg-2);
+}
+
+/* The line of a Keeper in a turn: what the turn is doing, how many more calls
+   are open, how much waits. A part is drawn whole or not at all: one that
+   does not fit drops to a second line, and the line shows one. The last part
+   is the first to go. */
+.kp-roster-turn {
+  display: flex;
+  flex-wrap: wrap;
+  line-height: var(--lh-body);
+  block-size: calc(1em * var(--lh-body));
+  color: var(--fg-2);
+}
+
+.kp-roster-turn span {
+  flex: none;
+  white-space: pre;
+}
+
+/* Words are kept whole before the parts after them, and cut at their end
+   only when they are alone on the line and still longer than it. */
+.kp-roster-turn > .kp-roster-words {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A tool's name makes room for the parts after it before any of them is left
+   out: its front gives way, down to the room set on the element, and its end
+   stays. */
+.kp-roster-turn > .kp-roster-tool {
+  display: flex;
+  flex-grow: 1;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: max-content;
   overflow: hidden;
 }
 
-.kp-roster-right .kp-roster-sub {
-  max-width: 100%;
+.kp-roster-tool > .kp-roster-tool-front {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* A failed waiting read cannot drop off the line as if zero items waited:
+   put its short marker first (flex: none) and let the words after it shrink
+   within the remaining room on the same line. */
+.kp-roster-turn > .kp-roster-waiting-unread {
+  flex: none;
+  color: var(--warn-fg);
+}
+
+.kp-roster-turn[data-waiting-unread="true"] > .kp-roster-words {
+  flex: 1 1 0;
+  max-width: max-content;
+}
+
+.kp-roster-waiting {
+  color: var(--fg-3);
+}
+
+.kp-roster-side {
+  flex-shrink: 0;
+  max-width: 104px;
 }
 
 /* ── Right Active Keeper Detail Stage ── */

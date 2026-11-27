@@ -208,13 +208,34 @@ type user_info_ok = {
   display_name : string option;
 }
 
+let is_form_unreserved = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '.' | '_' | '~' -> true
+  | _ -> false
+
+(* Percent-encode every byte outside RFC 3986 unreserved characters so
+   application/x-www-form-urlencoded bodies never turn base64 '+', '/', or '='
+   in Slack pagination cursors into spaces or parameter delimiters. *)
+let form_pct_encode text =
+  let buf = Buffer.create (String.length text) in
+  String.iter
+    (fun c ->
+      if is_form_unreserved c then Buffer.add_char buf c
+      else Buffer.add_string buf (Printf.sprintf "%%%02X" (Char.code c)))
+    text;
+  Buffer.contents buf
+
+let form_encode params =
+  params
+  |> List.map (fun (k, v) -> form_pct_encode k ^ "=" ^ form_pct_encode v)
+  |> String.concat "&"
+
 let build_users_info_request ~token ~user_id =
   let url = "https://slack.com/api/users.info" in
   let headers =
     ("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
     :: auth_headers ~token
   in
-  (url, headers, "user=" ^ user_id)
+  (url, headers, form_encode [ ("user", user_id) ])
 
 let parse_users_info_response ~status ~body =
   if status < 200 || status >= 300 then Error (Http_status { code = status; body })
@@ -268,7 +289,7 @@ let build_conversations_info_request ~token ~channel_id =
     ("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
     :: auth_headers ~token
   in
-  (url, headers, "channel=" ^ channel_id)
+  (url, headers, form_encode [ ("channel", channel_id) ])
 
 let parse_conversations_info_response ~status ~body =
   if status < 200 || status >= 300 then Error (Http_status { code = status; body })
@@ -341,20 +362,20 @@ let build_conversations_history_request ~token ~channel_id ?oldest ?latest ?limi
     ("Content-Type", "application/x-www-form-urlencoded; charset=utf-8")
     :: auth_headers ~token
   in
-  let parts = [ "channel=" ^ channel_id ] in
-  let parts =
-    match oldest with Some oldest -> parts @ [ "oldest=" ^ oldest ] | None -> parts
+  let params = [ ("channel", channel_id) ] in
+  let params =
+    match oldest with Some oldest -> params @ [ ("oldest", oldest) ] | None -> params
   in
-  let parts =
-    match latest with Some latest -> parts @ [ "latest=" ^ latest ] | None -> parts
+  let params =
+    match latest with Some latest -> params @ [ ("latest", latest) ] | None -> params
   in
-  let parts =
-    match limit with Some limit -> parts @ [ "limit=" ^ string_of_int limit ] | None -> parts
+  let params =
+    match limit with Some limit -> params @ [ ("limit", string_of_int limit) ] | None -> params
   in
-  let parts =
-    match cursor with Some cursor -> parts @ [ "cursor=" ^ cursor ] | None -> parts
+  let params =
+    match cursor with Some cursor -> params @ [ ("cursor", cursor) ] | None -> params
   in
-  (url, headers, String.concat "&" parts)
+  (url, headers, form_encode params)
 
 (* Gate_rest_json exposes no array field; messages are destructured over
    Yojson with a local string extractor rather than widening the shared

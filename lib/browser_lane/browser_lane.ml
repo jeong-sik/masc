@@ -1121,6 +1121,11 @@ let hold_client ~client_id =
    answers both from one place. Work this connection's transport does not
    serve is a selection failure too: nothing is queued, and another
    connection is the remedy. *)
+type live_issue_admission =
+  | Admitted
+  | Refused_admission of answer
+  | Disconnected_admission
+
 let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb ~timeout_sec =
   match activity_check verb with
   | Some refusal -> Ok refusal
@@ -1131,7 +1136,7 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
     Error (Transport_unsupported
       { client_id = client.info.client_id; transport = client.info.transport; capability })
   else
-    Ok (Eio.Switch.run (fun sw ->
+    Eio.Switch.run (fun sw ->
       let policy = live_reply_policy client.info.transport verb in
       let id = Random_id.uuid_v7 () in
       let promise, resolver = Eio.Promise.create () in
@@ -1140,28 +1145,31 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
         | Reply_window -> Some (Monotonic_deadline.after ~seconds:timeout_sec)
         | Executor_owned -> None in
       let accepted = Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
-        match activity_check verb with
-        | Some refusal -> Error refusal
+        if not (connected_unlocked client) then Disconnected_admission
+        else match activity_check verb with
+        | Some refusal -> Refused_admission refusal
         | None -> if only_if_idle &&
            (Hashtbl.length client.waiters <> 0 || Eio.Stream.length client.commands <> 0)
-        then Error (Refused "optional_document_observation_busy")
+        then Refused_admission (Refused "optional_document_observation_busy")
         else (Hashtbl.add client.waiters id {resolver;deadline;interrupted;interrupt};
           (match policy with
            | Executor_owned -> Hashtbl.add client.executor_work id Interaction_queued
            | Reply_window -> ());
           Hashtbl.add client.interactions id
             {request_id=id;actor;action=activity_name verb;tab_id=activity_scope verb;phase=Interaction_queued};
-          Ok ())) in
-      Eio.Switch.on_release sw (fun () ->
-        Eio.Mutex.use_rw ~protect:true client.mutex (fun () -> Hashtbl.remove client.waiters id;
-          (match Hashtbl.find_opt client.interactions id with
-           | None -> ()
-           | Some work -> settle_activity client id (match work.phase with
-               | Interaction_queued -> Activity_refused | Interaction_running -> Activity_unknown));
-          Hashtbl.remove client.executor_work id));
+          Admitted)) in
       match accepted with
-      | Error refusal -> refusal
-      | Ok () ->
+      | Disconnected_admission ->
+        Error (Selected_client_disconnected client.info.client_id)
+      | Refused_admission refusal -> Ok refusal
+      | Admitted ->
+        Eio.Switch.on_release sw (fun () ->
+          Eio.Mutex.use_rw ~protect:true client.mutex (fun () -> Hashtbl.remove client.waiters id;
+            (match Hashtbl.find_opt client.interactions id with
+             | None -> ()
+             | Some work -> settle_activity client id (match work.phase with
+                 | Interaction_queued -> Activity_refused | Interaction_running -> Activity_unknown));
+            Hashtbl.remove client.executor_work id));
         let execute () =
           let payload = match verb_json verb, actor with
             | `Assoc fields, Some actor -> `Assoc (("actor",`String actor)::fields)
@@ -1169,7 +1177,7 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
             | payload, Some _ -> payload in
           Eio.Stream.add client.commands {id; verb_json=payload};
           Answered (Eio.Promise.await promise) in
-        (try match policy with
+        Ok (try match policy with
          | Executor_owned -> execute ()
          | Reply_window -> Watched_work.run execute
              ~watcher:(fun () ->
@@ -1178,7 +1186,7 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
                  | None -> timeout_sec);
                Timed_out)
          with Eio.Cancel.Cancelled _ as exn ->
-           ignore (Eio.Promise.try_resolve interrupt ()); raise exn)))
+           ignore (Eio.Promise.try_resolve interrupt ()); raise exn))
 let issue_live ?only_if_idle client ~verb ~timeout_sec =
   issue_live_with ~activity_check:(activity_refusal Lane_name.Live) ?only_if_idle client ~verb ~timeout_sec
 type backend_observation = Live_clients of int

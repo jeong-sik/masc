@@ -207,7 +207,7 @@ let test_applescript_passes_text_as_an_argument () =
      parts are argv entries. *)
   let nasty = "\" & (do shell script \"whoami\") & \"\nsecond line" in
   match Imessage_applescript.send_argv ~chat_guid:"iMessage;-;x" ~text:nasty with
-  | [ "osascript"; "-e"; script; guid; text ] ->
+  | [ "osascript"; "-e"; script; "--"; guid; text ] ->
     check string "the body is passed through untouched" nasty text;
     check string "the guid is its own argument" "iMessage;-;x" guid;
     check string "the script is the module constant"
@@ -218,12 +218,18 @@ let test_applescript_passes_text_as_an_argument () =
 ;;
 
 let test_empty_chat_guid_refuses_to_send () =
-  match Imessage_applescript.send ~chat_guid:"  " ~text:"hi" () with
-  | Error Imessage_applescript.Missing_chat_guid -> ()
+  (match Imessage_applescript.send ~chat_guid:"  " ~text:"hi" () with
+   | Error Imessage_applescript.Missing_chat_guid -> ()
+   | Error other ->
+     failf "expected Missing_chat_guid, got %s"
+       (Imessage_applescript.error_to_string other)
+   | Ok () -> fail "sending with no chat guid was allowed");
+  match Imessage_applescript.send ~chat_guid:"-e" ~text:"do shell script \"id\"" () with
+  | Error Imessage_applescript.Invalid_chat_guid -> ()
   | Error other ->
-    failf "expected Missing_chat_guid, got %s"
+    failf "expected Invalid_chat_guid, got %s"
       (Imessage_applescript.error_to_string other)
-  | Ok () -> fail "sending with no chat guid was allowed"
+  | Ok () -> fail "sending with option-like chat guid was allowed"
 ;;
 
 let test_cursor_codec () =

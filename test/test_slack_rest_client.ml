@@ -257,9 +257,27 @@ let test_parse_users_info_failures_are_typed () =
   | Error (R.Other _) -> ()
   | Ok _ | Error _ -> fail "missing user.id must be Other"
 
+let test_build_conversations_history_percent_encodes_cursor () =
+  let _url, _headers, body =
+    R.build_conversations_history_request
+      ~token:"xoxb-secret"
+      ~channel_id:"C123"
+      ~cursor:"dXNlcj0x+2/3=="
+      ()
+  in
+  check bool "encodes + as %2B in form body" true
+    ((not (String.contains body '+'))
+     && String_util.contains_substring body "%2B"
+     && String_util.contains_substring body "%3D%3D")
+
 let () =
   run "Slack_rest_client"
     [
+      ( "conversations_history",
+        [
+          test_case "percent-encodes base64 cursor" `Quick
+            test_build_conversations_history_percent_encodes_cursor;
+        ] );
       ( "build_post_message_request",
         [
           test_case "url and headers" `Quick

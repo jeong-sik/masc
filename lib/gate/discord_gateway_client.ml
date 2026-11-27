@@ -168,6 +168,7 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient ~on_phase
   } in
   let state = ref (Discord_gateway_state.create ~config) in
   let conn_ref : Discord_wss_connection.conn option ref = ref None in
+  let connect_gen = Atomic.make 0 in
   let input_mailbox = Eio.Stream.create 64 in
   let published_mailbox = Some input_mailbox in
   Atomic.set input_mailbox_cell published_mailbox;
@@ -297,51 +298,38 @@ let run ~sw ~env ~token ~intents ~trigger_policy ~on_event ~on_ambient ~on_phase
       Discord_observability.record_gateway_event
         ~route:Discord_observability.Control
         Discord_observability.Open_wss;
+      let gen = Atomic.fetch_and_add connect_gen 1 + 1 in
       (match !conn_ref with
        | Some old_conn ->
-         (* Defensive cleanup: the state machine may not have emitted
-            Close_wss before this Open_wss (e.g. Wss_closed from a server
-            Close frame that didn't go through our explicit Close_wss path).
-            Discord_wss_connection.close is idempotent (peek-resolve
-            pattern), so calling it on an already-closed connection is
-            safe. Without this, the stale conn_ref blocks reconnection
-            permanently — the FSM transitions to Awaiting_hello but no
-            socket is opened, and no timeout escapes that state. *)
          log_effect `Warn
            "Open_wss while conn_ref still Some; force-closing stale connection";
          Discord_wss_connection.close old_conn;
          conn_ref := None
        | None -> ());
-      (match Discord_wss_connection.connect ~sw ~env ~url with
-       | conn ->
-         conn_ref := Some conn;
-         (* Fork the reader on the connection's OWN session switch (not the
-            gateway-wide [sw]) so a per-connection [Close_wss] cancels it. On
-            the gateway-wide [sw] the reader would survive close — blocked in
-            [Stream.take] with nothing left to wake it — and leak one fiber per
-            reconnect cycle. *)
-         Discord_wss_connection.spawn conn (fun () -> reader_loop conn)
-       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-       | exception exn ->
-         (* DNS / connect / TLS handshake failure: the socket never came up.
-            Feed Connect_failed so the FSM schedules a backoff reconnect
-            (reusing backoff_ms), instead of letting the exception unwind out
-            of the drive loop and kill the gateway with no restart. *)
-         let reason = Printexc.to_string exn in
-         log_effect `Warn
-           (Printf.sprintf "WSS connect failed: %s; scheduling reconnect"
-              reason);
-         Eio.Stream.add input_mailbox
-           (Discord_gateway_state.Connect_failed { reason }))
+      (* Connect off the drive loop so slow DNS/TLS handshakes never stall
+         drive () and Connect_failed enqueueing cannot self-deadlock on a
+         full bounded input_mailbox. *)
+      Eio.Fiber.fork ~sw (fun () ->
+        match Discord_wss_connection.connect ~sw ~env ~url with
+        | conn ->
+          if Atomic.get connect_gen = gen then begin
+            conn_ref := Some conn;
+            Discord_wss_connection.spawn conn (fun () -> reader_loop conn)
+          end else
+            Discord_wss_connection.close conn
+        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+        | exception exn ->
+          if Atomic.get connect_gen = gen then begin
+            let reason = Printexc.to_string exn in
+            log_effect `Warn
+              (Printf.sprintf "WSS connect failed: %s; scheduling reconnect"
+                 reason);
+            Eio.Stream.add input_mailbox
+              (Discord_gateway_state.Connect_failed { reason })
+          end)
     | Close_wss { code; reason = _ } ->
-      (* Phase 1.4b: explicit close. Discord_wss_connection.close resolves the
-         inner session switch's close-signal promise, which lets that switch
-         return, turning it off and cancelling every fiber forked on it — the
-         driver, and (because Open_wss forked it via [spawn]) this reader. The
-         reader's pending [Stream.take] therefore raises Cancelled; reader_loop
-         treats cancellation as terminal (the [:211] arm) so a stale reader
-         cannot enqueue a late Wss_closed for the next connection. *)
       Discord_observability.record_gateway_close ~code;
+      ignore (Atomic.fetch_and_add connect_gen 1);
       (match !conn_ref with
        | Some c -> Discord_wss_connection.close c
        | None -> ());

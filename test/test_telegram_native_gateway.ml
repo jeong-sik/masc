@@ -98,6 +98,82 @@ let test_sender_identity_topics_partial_failure () = with_token(fun clock ->
   check int "uncertain transport not retried" 2 (List.length !sends);
   List.iter(fun body -> check bool "topic conserved" true (Yojson.Safe.Util.member "message_thread_id" body=`Int 7);
     check bool "native reply coordinate conserved" true (Yojson.Safe.Util.member "reply_parameters" body=`Assoc["message_id",`Int 8])) !sends)
+
+let recording_clock () =
+  let now_ref = ref 0.0 in
+  let sleeps = ref [] in
+  let module Recording_clock = struct
+    type t = unit
+    type time = float
+    let now () = !now_ref
+    let sleep_until () target =
+      sleeps := !sleeps @ [ target -. !now_ref ];
+      now_ref := target
+  end in
+  let clock : float Eio.Time.clock_ty Eio.Resource.t =
+    Eio.Resource.T ((), Eio.Time.Pi.clock (module Recording_clock))
+  in
+  sleeps, clock
+
+let test_rate_limit_retry_bounds () = with_token (fun _real_clock ->
+  let bot_ok = Ok (200, {|{"ok":true,"result":{"id":777,"is_bot":true,"first_name":"Bot"}}|}) in
+  let send_ok = Ok (200, {|{"ok":true,"result":{"message_id":99,"chat":{"id":-1001234567890}}}|}) in
+  let rate_limited seconds =
+    Ok (429, Printf.sprintf {|{"ok":false,"error_code":429,"description":"Too Many Requests","parameters":{"retry_after":%d}}|} seconds)
+  in
+  let send ~post ~clock =
+    Channel_gate_telegram_state.send_message ~post ~clock ~bot_user_id:777L ~chat_id:(-1001234567890L)
+      ~message_thread_id:None ~direct_messages_topic_id:None ~reply_to_message_id:None ~html:false ~messages:["hello"] ()
+  in
+  (* 1. retry_after = 0 clamps to the 1.0s floor and succeeds on retry. *)
+  let sleeps, clock = recording_clock () in
+  let attempts = ref 0 in
+  let post_zero ~url ~body:_ =
+    match Filename.basename (Uri.path (Uri.of_string url)) with
+    | "getMe" -> bot_ok
+    | "sendMessage" ->
+      incr attempts;
+      if !attempts = 1 then rate_limited 0 else send_ok
+    | _ -> fail "unexpected method"
+  in
+  (match send ~post:post_zero ~clock with
+   | Ok () -> ()
+   | Error (Channel_gate_telegram_state.Api_failure _ | Channel_gate_telegram_state.Partial_delivery _) ->
+     fail "zero retry_after should clamp to 1s floor and succeed");
+  check int "zero retry_after retried once" 2 !attempts;
+  check (list (float 0.001)) "zero retry_after clamped to 1s floor" [ 1.0 ] !sleeps;
+  (* 2. retry_after > 60 is rejected immediately without sleeping. *)
+  let sleeps, clock = recording_clock () in
+  let attempts = ref 0 in
+  let post_over_cap ~url ~body:_ =
+    match Filename.basename (Uri.path (Uri.of_string url)) with
+    | "getMe" -> bot_ok
+    | "sendMessage" -> incr attempts; rate_limited 61
+    | _ -> fail "unexpected method"
+  in
+  (match send ~post:post_over_cap ~clock with
+   | Error (Channel_gate_telegram_state.Api_failure (Api.Api_error { retry_after = Some 61; _ })) -> ()
+   | Error (Channel_gate_telegram_state.Api_failure (Api.Api_error _ | Api.Invalid_request _ | Api.Invalid_response _ | Api.Transport_failed | Api.Http_status _))
+   | Error (Channel_gate_telegram_state.Partial_delivery _)
+   | Ok () -> fail "retry_after > 60 must be refused without retry");
+  check int "over-cap retry_after makes a single attempt" 1 !attempts;
+  check (list (float 0.001)) "over-cap retry_after does not sleep" [] !sleeps;
+  (* 3. persistent retry_after stops after max_rate_limit_retries (5 retries = 6 attempts). *)
+  let sleeps, clock = recording_clock () in
+  let attempts = ref 0 in
+  let post_always_limited ~url ~body:_ =
+    match Filename.basename (Uri.path (Uri.of_string url)) with
+    | "getMe" -> bot_ok
+    | "sendMessage" -> incr attempts; rate_limited 2
+    | _ -> fail "unexpected method"
+  in
+  (match send ~post:post_always_limited ~clock with
+   | Error (Channel_gate_telegram_state.Api_failure (Api.Api_error { retry_after = Some 2; _ })) -> ()
+   | Error (Channel_gate_telegram_state.Api_failure (Api.Api_error _ | Api.Invalid_request _ | Api.Invalid_response _ | Api.Transport_failed | Api.Http_status _))
+   | Error (Channel_gate_telegram_state.Partial_delivery _)
+   | Ok () -> fail "persistent retry_after must fail once retries are exhausted");
+  check int "bounded retries make 1 initial + 5 retry attempts" 6 !attempts;
+  check (list (float 0.001)) "bounded retries sleep 5 times for 2s" [ 2.0; 2.0; 2.0; 2.0; 2.0 ] !sleeps)
 let test_direct_topic_and_chunk_bytes () =
   let u=parsed {|{"ok":true,"result":[{"update_id":1,"message":{"message_id":1,"chat":{"id":-1005},"direct_messages_topic":{"topic_id":9007199254740991},"from":{"id":123,"is_bot":false,"first_name":"A"},"text":"hello"}}]}|} in
   (match u.kind with Api.Message m -> check (option int64) "large direct topic" (Some 9007199254740991L) m.direct_messages_topic_id | _ -> fail "message");
@@ -309,6 +385,7 @@ let ()=run "Telegram native gateway" ["continuity",[
   test_case "producer exact source and original receipt" `Quick test_producer_exact_route_and_receipt;
   test_case "unreadable binding stays owed" `Quick test_unreadable_binding_is_not_ignored;
   test_case "sender identity topics and partial receipt" `Quick test_sender_identity_topics_partial_failure;
+  test_case "rate limit retry count, cap, and floor" `Quick test_rate_limit_retry_bounds;
   test_case "direct topic and UTF-8 preservation" `Quick test_direct_topic_and_chunk_bytes;
   test_case "terminal and delivery evidence" `Quick test_adapter_requires_terminal_and_actual_send;
   test_case "committed rich blocks and HTML boundaries" `Quick test_committed_blocks_and_html;

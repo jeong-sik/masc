@@ -145,6 +145,43 @@ let close_to_event ~code ~reason =
    fibers) on the given inner switch. Returns the writer descriptor and the
    inbound event stream; [close] is wired by the outer [connect] via the
    promise pair. *)
+let connect_timeout_s = 15.0
+let max_per_address_connect_timeout_s = 5.0
+let min_per_address_connect_timeout_s = 1.0
+
+let per_address_timeout_s addresses =
+  match List.length addresses with
+  | 0 | 1 -> connect_timeout_s
+  | count ->
+    Float.max min_per_address_connect_timeout_s
+      (Float.min max_per_address_connect_timeout_s
+         (connect_timeout_s /. float_of_int count))
+;;
+
+let connect_first_address ~clock ~sw ~net ~host addresses =
+  let attempt_timeout_s = per_address_timeout_s addresses in
+  let rec loop last_err = function
+    | [] ->
+      (match last_err with
+       | Some exn -> raise exn
+       | None ->
+         failwith ("discord_wss_connection: getaddrinfo returned no result for " ^ host))
+    | addr :: rest ->
+      let connect () = Eio.Net.connect ~sw net addr in
+      let attempt () =
+        match rest with
+        | [] -> connect ()
+        | _ :: _ ->
+          Eio.Time.with_timeout_exn clock attempt_timeout_s connect
+      in
+      (match attempt () with
+       | socket -> socket
+       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+       | exception exn -> loop (Some exn) rest)
+  in
+  loop None addresses
+;;
+
 let build_session ~sw ~env ~url =
   let uri = Uri.of_string url in
   (match Uri.scheme uri with
@@ -160,16 +197,7 @@ let build_session ~sw ~env ~url =
   let port = Option.value (Uri.port uri) ~default:443 in
   let resource = resource_of_uri uri in
   let net = Eio.Stdenv.net env in
-  let addr =
-    match Eio.Net.getaddrinfo_stream net host ~service:(string_of_int port) with
-    | [] ->
-      failwith ("discord_wss_connection: getaddrinfo returned no result for " ^ host)
-    | a :: _ -> a
-  in
-  let socket = Eio.Net.connect ~sw net addr in
-  let tls_cfg = client_tls_config () in
-  let host_dn = host_domain host in
-  let flow = Tls_eio.client_of_flow tls_cfg ?host:host_dn socket in
+  let clock = Eio.Stdenv.clock env in
   let events = Eio.Stream.create inbound_capacity in
   let builder (_wsd : Ws_wsd.t) =
     Ws_endpoint.handlers
@@ -183,8 +211,15 @@ let build_session ~sw ~env ~url =
       ()
   in
   let wsd =
-    Ws_direct_eio.Client.connect ~sw ~clock:(Eio.Stdenv.clock env) ~host
-      ~resource flow builder
+    Eio.Time.with_timeout_exn clock connect_timeout_s (fun () ->
+      let addresses =
+        Eio.Net.getaddrinfo_stream net host ~service:(string_of_int port)
+      in
+      let socket = connect_first_address ~clock ~sw ~net ~host addresses in
+      let tls_cfg = client_tls_config () in
+      let host_dn = host_domain host in
+      let flow = Tls_eio.client_of_flow tls_cfg ?host:host_dn socket in
+      Ws_direct_eio.Client.connect ~sw ~clock ~host ~resource flow builder)
   in
   wsd, events
 ;;

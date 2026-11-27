@@ -964,6 +964,7 @@ let cleanup_session session_id =
   update_ws_session_count_metric ();
   Sse.unsubscribe_external session_id;
   Client_registry_eio.unregister_mcp_session session_id;
+  Mcp_server_eio_protocol.clear_resource_subscriptions_for_session session_id;
   match detached with
   | None -> ()
   | Some session ->

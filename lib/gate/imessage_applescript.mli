@@ -12,6 +12,8 @@
 type error =
   | Missing_chat_guid
       (** No chat to address. The connector declines rather than guessing one. *)
+  | Invalid_chat_guid
+      (** Chat guid starts with '-' or contains control characters. *)
   | Osascript_failed of { exit_code : int; stderr : string }
   | Osascript_timed_out of float
 

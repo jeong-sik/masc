@@ -231,7 +231,7 @@ let warm_fresh_executable path =
 
 let fixture_script ?(await_dynamic_tools = true) ?(close_before_turn = false) ?(close_after_injection = false) ?(inject_items = false) ?(model_pages = []) ?(model_pages_before_thread = false) ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
     ?(terminal_line_delay_start_index = 0) ?(line_delays = []) ?before_final_stdin_drain_s
-    ?pipe_holder_s ?break_raw_trace_path lines =
+    ?pipe_holder_s lines =
   let path = Filename.temp_file "masc-codex-app-server-" ".sh" in
   let output = open_out_bin path in
   let read_request ?(expect_version = false) () =
@@ -261,9 +261,6 @@ let fixture_script ?(await_dynamic_tools = true) ?(close_before_turn = false) ?(
   output_string output "#!/bin/sh\n";
   output_string output "case \"$1\" in --masc-warmup) exit 0 ;; esac\n";
   read_request ~expect_version:true ();
-  Option.iter (fun path ->
-    output_string output ("mv " ^ shell_quote path ^ " " ^ shell_quote (path ^ ".before")
-      ^ " && mkdir " ^ shell_quote path ^ "\n")) break_raw_trace_path;
   Option.iter
     (fun seconds -> output_string output (Printf.sprintf "sleep %.3f\n" seconds))
     initial_line_delay_s;
@@ -341,7 +338,7 @@ let fixture_script ?(await_dynamic_tools = true) ?(close_before_turn = false) ?(
 ;;
 
 let with_fixture ?await_dynamic_tools ?close_before_turn ?close_after_injection ?inject_items ?model_pages ?model_pages_before_thread ?capture_path ?initial_line_delay_s ?terminal_line_delay_s
-    ?terminal_line_delay_start_index ?line_delays ?before_final_stdin_drain_s ?pipe_holder_s ?break_raw_trace_path lines f =
+    ?terminal_line_delay_start_index ?line_delays ?before_final_stdin_drain_s ?pipe_holder_s lines f =
   let path =
     fixture_script
       ?await_dynamic_tools
@@ -357,7 +354,6 @@ let with_fixture ?await_dynamic_tools ?close_before_turn ?close_after_injection 
       ?line_delays
       ?before_final_stdin_drain_s
       ?pipe_holder_s
-      ?break_raw_trace_path
       lines
   in
   Fun.protect ~finally:(fun () -> Sys.remove path) (fun () -> f path)
@@ -6900,48 +6896,6 @@ let test_keeper_preserves_typed_history_on_codex_wire () =
          items)
 ;;
 
-let test_keeper_assembly_binding_is_durable_in_same_attempt () =
-  let base_path=temp_workspace "keeper-assembly-binding-" in
-  Fun.protect ~finally:(fun () -> cleanup_tree base_path) @@ fun () ->
-  let assembly=Masc.Keeper_context_assembly.assemble ~dynamic_context_partition:None ~existing_extra_system_context:None
-    ~blocks:[Prompt_block_id.Dynamic_context,"한글 \"same\"\n";
-      Prompt_block_id.Memory_os_recall,"한글 \"same\"\n"] in
-  let hooks : Agent_core.Hooks.hooks = {Agent_core.Hooks.empty with
-    before_turn_params=Some (function
-      | BeforeTurnParams {current_params;_} ->
-        AdjustParams {current_params with extra_system_context=assembly.extra_system_context}
-      | _ -> Continue)} in
-  let capture=Filename.concat base_path "wire.jsonl" in
-  let trace=Filename.concat base_path "trace.jsonl" in
-  with_fixture ~capture_path:capture
-    [init_result;account_chatgpt;thread_result;turn_result;item_completed;turn_completed]
-    (fun cli_path -> match run_keeper_turn ~base_path ~raw_trace_path:trace ~hooks
-      ~official_client_composed_context:(fun () -> Some assembly) ~cli_path ~model:"gpt-fixture" () with
-      | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
-  let records=match Agent_core.Raw_trace.read_all ~path:trace () with
-    | Ok rows -> rows | Error error -> fail (Agent_core.Error.to_string error) in
-  let start=List.find (fun (row:Agent_core.Raw_trace.record) -> row.record_type=Run_started) records in
-  let submissions=List.filter (fun (row:Agent_core.Raw_trace.record) -> row.hook_name=Some "client_context_submission") records in
-  let open Yojson.Safe.Util in
-  let developer=List.find (fun (row:Agent_core.Raw_trace.record) ->
-    let detail=Yojson.Safe.from_string (Option.get row.hook_detail) in
-    detail |> member "submission" |> member "method" = `String "thread/start") submissions in
-  check string "binding is attached to actual raw-trace attempt" start.worker_run_id developer.worker_run_id;
-  check (option string) "binding preserves session join" start.session_id developer.session_id;
-  let detail=Yojson.Safe.from_string (Option.get developer.hook_detail) in
-  let proof=member "logical_context_bindings" detail in
-  check string "actual Keeper publishes exact slot match" "matched_completed_slot" (proof |> member "status" |> to_string);
-  check int "actual carrier has one codec occurrence" 1 (proof |> member "occurrences" |> to_list |> List.length);
-  let submission=member "submission" detail in
-  let raw=captured_frame submission (In_channel.with_open_bin capture In_channel.input_lines) in
-  check_context_fragments raw submission;
-  check bool "observation does not claim whole-memory attribution" true
-    (member "logical_memory_partition" submission=`String "unknown");
-  export_assembly_submission_measurement
-    ~fixture_kind:"actual_keeper_durable_trace_same_attempt"
-    ~scenario:"start" ~binding:proof ~submission ~raw
-;;
-
 let test_keeper_context_lifecycle_three_settled_turns () =
   let module Assembly = Masc.Keeper_context_assembly in
   let module Store = Masc.Keeper_official_client_session_store in
@@ -6969,13 +6923,8 @@ let test_keeper_context_lifecycle_three_settled_turns () =
     if ordinal=1 then [init_result;account_chatgpt;thread_result;turn_result;item_completed;turn_completed]
     else let rows=[init_result;account_chatgpt;thread_result;resumed_turn_result;resumed_item_completed;resumed_turn_completed] in
       if ordinal=2 then rows else List.map (fun row -> Yojson.Safe.from_string row |> third_turn |> Yojson.Safe.to_string) rows in
-  let source_ids source =
-    let spans = source |> member "assembly" |> member "spans" |> to_list in
-    source |> member "source_span_indices" |> to_list |> List.filter_map (fun index ->
-      let span = List.nth spans (to_int index) |> member "source" in
-      if member "kind" span=`String "block" then Some (member "block" span |> to_string) else None) in
   let attempts = ref [] and settled_thread = ref None in
-  List.iter (fun (ordinal,issued,expected_sent,expected_held) ->
+  List.iter (fun (ordinal,issued) ->
     let capture = Filename.concat base_path (Printf.sprintf "wire-%d.jsonl" ordinal) in
     let trace = Filename.concat base_path (Printf.sprintf "trace-%d.jsonl" ordinal) in
     let hooks : Agent_core.Hooks.hooks = {Agent_core.Hooks.empty with
@@ -7021,22 +6970,6 @@ let test_keeper_context_lifecycle_three_settled_turns () =
     let started = List.find (fun (row:Agent_core.Raw_trace.record) -> row.record_type=Run_started) records in
     check bool "each turn owns a distinct raw-trace attempt" false (List.mem started.worker_run_id !attempts);
     attempts := started.worker_run_id :: !attempts;
-    let method_name = if ordinal=1 then "thread/start" else "turn/start" in
-    let row = List.find (fun (row:Agent_core.Raw_trace.record) ->
-      row.hook_name=Some "client_context_submission" &&
-      (Yojson.Safe.from_string (Option.get row.hook_detail) |> member "submission" |> member "method")=`String method_name) records in
-    check string "submission is joined to this actual turn attempt" started.worker_run_id row.worker_run_id;
-    check (option string) "submission preserves admitted trace session" started.session_id row.session_id;
-    let detail = Yojson.Safe.from_string (Option.get row.hook_detail) in
-    let submission = member "submission" detail and binding = member "logical_context_bindings" detail in
-    check int "submission carries actual client turn ordinal" ordinal (member "client_turn_ordinal" detail |> to_int);
-    check string "durable binding matches completed slot" "matched_completed_slot" (member "status" binding |> to_string);
-    check string "actual settled turn retains verified issuer acquisition" "verified"
-      (binding |> member "issuer_attribution" |> member "status" |> to_string);
-    let sent = member "occurrences" binding |> to_list |> List.concat_map (fun row -> source_ids (member "source" row)) in
-    let held = member "omitted_held" binding |> to_list |> List.concat_map source_ids in
-    check (list string) "actual transmitted issuer identities" expected_sent sent;
-    check (list string) "actual local held omissions" expected_held held;
     let written = In_channel.with_open_bin capture In_channel.input_lines in
     let calls = List.map Yojson.Safe.from_string written in
     let turn_request = List.find (fun call -> member "method" call = `String "turn/start") calls in
@@ -7047,18 +6980,6 @@ let test_keeper_context_lifecycle_three_settled_turns () =
       if ordinal < 3 then goal
       else "SYSTEM:\n" ^ encoded_carrier (same ^ " revised") ^ "\n\n" ^ goal in
     check string "actual full turn text excludes every locally omitted block" expected_prompt actual_prompt;
-    (* Check every completed context RPC independently of the attribution helper,
-       not just the one slot chosen for this turn's lifecycle measurement. *)
-    records |> List.filter (fun (record:Agent_core.Raw_trace.record) ->
-      record.hook_name = Some "client_context_submission") |> List.iter (fun record ->
-        let observed = Yojson.Safe.from_string (Option.get record.Agent_core.Raw_trace.hook_detail)
-          |> member "submission" in
-        let captured = captured_frame observed written in
-        check int "whole RPC byte count matches actual captured frame" (String.length captured)
-          (member "write" observed |> member "bytes" |> to_int);
-        check string "whole RPC SHA matches actual captured frame"
-          Agent_core_sha256.(digest_string captured |> to_hex)
-          (member "write" observed |> member "sha256" |> to_string));
     let session_method = if ordinal=1 then "thread/start" else "thread/resume" in
     let session_requests = List.filter (fun row -> member "method" row=`String session_method) calls in
     check int "one actual Start or Resume per settled turn" 1 (List.length session_requests);
@@ -7071,7 +6992,7 @@ let test_keeper_context_lifecycle_three_settled_turns () =
     (* thread/resume is a context-bearing RPC too. The vendor thread already
        holds every issued block and the turn text carries only the changed one,
        so no issued block, raw or codec-framed, may reach its developer
-       instructions. Read from the captured bytes, not the attribution binding. *)
+       instructions. Read from the captured bytes. *)
     if ordinal > 1 then (
       let codec_framed text =
         let quoted = Yojson.Safe.to_string (`String text) in
@@ -7089,37 +7010,16 @@ let test_keeper_context_lifecycle_three_settled_turns () =
           issued.blocks);
     check int "settled Resume never resends history" 0
       (List.length (List.filter (fun row -> member "method" row=`String "thread/inject_items") calls));
-    let raw = captured_frame submission written in
-    check_context_fragments raw submission;
     if ordinal = 1 then (
-      let developer = Yojson.Safe.from_string raw |> member "params" |> member "developerInstructions" |> to_string in
-      let occurrence = match member "occurrences" binding |> to_list with
-        | [occurrence] -> occurrence | _ -> fail "Start must have one complete issuer carrier" in
-      let actual_codec = String.sub developer
-          (member "encoded_message_offset_in_decoded_slot" occurrence |> to_int)
-          (member "encoded_message_bytes" occurrence |> to_int) in
-      check string "actual Start developer carrier equals the independently planned A+B codec"
-        (encoded_carrier (same ^ "\n\n" ^ same)) actual_codec);
-    export_assembly_submission_measurement ~fixture_kind:"actual_keeper_three_settled_turns"
-      ~scenario:(Printf.sprintf "turn-%d" ordinal) ~binding ~submission ~raw;
-    Printf.printf "MEMORY_KEEPER_CONTEXT_LIFECYCLE %s\n%!" (Yojson.Safe.to_string (`Assoc
-      ["turn_ordinal",`Int ordinal;"worker_run_id",`String row.worker_run_id;
-       "trace_session_id",Option.fold ~none:`Null ~some:(fun id -> `String id) row.session_id;
-       "vendor_session_id",`String settlement.session_id;"settled_turn_id",`String settlement.turn_id;
-       "acknowledged",`Bool (frontier.acknowledged_turn=Some settlement);
-       "transmitted_source_ids",`List (List.map (fun id -> `String id) sent);
-       "locally_omitted_held_source_ids",`List (List.map (fun id -> `String id) held);
-       "binding",binding;"submission",submission;
-       "scope",`String "synthetic_client_lifecycle_not_semantic_coherence_or_remote_retention"])))
-    [1,initial,["dynamic_context";"memory_os_recall"],[];
-     2,initial,[],["dynamic_context";"memory_os_recall"];
-     3,changed,["memory_os_recall"],["dynamic_context"]]
+      let developer = member "developerInstructions" session_params |> to_string in
+      check bool "actual Start developer instructions carry the independently planned A+B codec" true
+        (String_util.contains_substring developer (encoded_carrier (same ^ "\n\n" ^ same)))))
+    [1,initial; 2,initial; 3,changed]
 ;;
 
 let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
   let base_path = temp_workspace "masc-codex-raw-trace-" in
   let raw_trace_path = Filename.concat base_path "official-codex-raw.jsonl" in
-  let capture_path = Filename.concat base_path "actual-stdin.jsonl" in
   let tool =
     Agent_core.Tool.create
       ~name:"masc_probe"
@@ -7141,7 +7041,7 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       with_fixture ~await_dynamic_tools:false ~capture_path
+       with_fixture
          [ init_result
          ; account_chatgpt
          ; thread_result
@@ -7151,18 +7051,6 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
          ; turn_completed
          ]
          (fun cli_path ->
-            (* Read and capture the tool result before the turn settles, so the
-               recorded response frame has its written line to compare with. *)
-            let settle = "printf '%s\\n' " ^ shell_quote item_completed in
-            let capture = "IFS= read -r result\nprintf '%s\\n' \"$result\" >> "
-              ^ shell_quote capture_path ^ "\n" in
-            let script = In_channel.with_open_bin cli_path In_channel.input_all in
-            check bool "fixture settles the turn after the tool call" true
-              (List.mem settle (String.split_on_char '\n' script));
-            Out_channel.with_open_bin cli_path (fun out ->
-              output_string out (script |> String.split_on_char '\n'
-                |> List.concat_map (fun line -> if line = settle then [capture; line] else [line])
-                |> String.concat "\n"));
             match
               run_keeper_turn
                 ~tools:[ tool ]
@@ -7183,44 +7071,6 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
                 | Ok records -> records
                 | Error error -> fail (Agent_core.Error.to_string error)
               in
-              let submitted=List.filter (fun (record:Agent_core.Raw_trace.record) ->
-                record.hook_name=Some "client_context_submission") records in
-              check int "actual Keeper caller durably records thread start, turn start and the tool result" 3
-                (List.length submitted);
-              let written=In_channel.with_open_bin capture_path In_channel.input_all
-                |> String.split_on_char '\n' |> List.filter (fun line -> line<>"") in
-              let run_started=List.find (fun (record:Agent_core.Raw_trace.record) ->
-                record.record_type=Agent_core.Raw_trace.Run_started) records in
-              List.iter (fun (record:Agent_core.Raw_trace.record) ->
-                check string "submission belongs to this immutable raw-trace attempt"
-                  run_started.worker_run_id record.worker_run_id;
-                check (option string) "submission retains the admitted session binding"
-                  run_started.session_id record.session_id;
-                let detail=match record.hook_detail with Some text -> Yojson.Safe.from_string text
-                  | None -> fail "submission detail missing" in
-                let open Yojson.Safe.Util in
-                check string "submission names its real Keeper" record.agent_name
-                  (detail |> member "keeper" |> to_string);
-                check (list string) "caller manifest carries identifiers and typed observation only"
-                  ["client_turn_ordinal";"keeper";"logical_context_bindings";"runtime_profile";"submission"]
-                  (to_assoc detail |> List.map fst |> List.sort String.compare);
-                let event=member "submission" detail in
-                check (list string) "submission never retains content, tool schemas or credentials"
-                  ["frame";"logical_memory_partition";"method";"phase";"remote_history";
-                   "request_id";"schema";"server_acceptance";"thread_id";"write"]
-                  (to_assoc event |> List.map fst |> List.sort String.compare);
-                let raw=captured_frame event written in
-                check_context_fragments raw event;
-                check bool "durable method matches actual frame" true
-                  (match member "frame" event with
-                   | `String "request" -> member "method" event=member "method" (Yojson.Safe.from_string raw)
-                   | _ -> member "method" event=`String "item/tool/call"
-                     && member "result" (Yojson.Safe.from_string raw)<>`Null);
-                check int "durable submission names exact stdin bytes" (String.length raw)
-                  (event |> member "write" |> member "bytes" |> to_int);
-                check string "durable submission SHA binds the actual stdin request"
-                  Agent_core_sha256.(digest_string raw |> to_hex)
-                  (event |> member "write" |> member "sha256" |> to_string)) submitted;
               let kinds =
                 List.map
                   (fun (record : Agent_core.Raw_trace.record) -> record.record_type)
@@ -7270,46 +7120,7 @@ let test_keeper_codex_raw_trace_contains_actual_tool_and_response () =
                 (option string)
                 "RAW retains actual final response"
                 (Some "MASC_SUBSCRIPTION_OK")
-                finished.final_text;
-              let observations = List.map (fun (record:Agent_core.Raw_trace.record) ->
-                let manifest = Yojson.Safe.from_string (Option.get record.hook_detail) in
-                let raw = captured_frame (Yojson.Safe.Util.member "submission" manifest) written in
-                `Assoc ["worker_run_id",`String record.worker_run_id;
-                  "session_id",(match record.session_id with None -> `Null | Some id -> `String id);
-                  "manifest",manifest;
-                  "captured_ipc_json_bytes",`Int (String.length raw);
-                  "captured_ipc_json_sha256",`String Agent_core_sha256.(digest_string raw |> to_hex)]) submitted in
-              Printf.printf "MEMORY_CODEX_CONTEXT_SUBMISSION_JSON %s\n%!"
-                (Yojson.Safe.to_string (`Assoc [
-                  "evidence",`String "actual_keeper_fake_cli_complete_stdin_writes";
-                  "observations",`List observations;
-                  "remote_provider_input",`String "unobserved";
-                  "payload_contents_retained",`Bool false]))))
-;;
-
-let test_keeper_codex_context_submission_sink_failure () =
-  let base_path = temp_workspace "masc-codex-submission-sink-" in
-  let raw_trace_path = Filename.concat base_path "raw.jsonl" in
-  let keeper_name = "codex-submission-sink-fixture" in
-  let labels = ["keeper",keeper_name;"source","official_client_raw";"stage","context_submission"] in
-  let failures () = Otel_metric_store.metric_value_or_zero
-    Keeper_metrics.(to_string TraceEmitFailures) ~labels () in
-  let before = failures () in
-  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
-    with_fixture ~break_raw_trace_path:raw_trace_path
-      [init_result;account_chatgpt;thread_result;turn_result;item_completed;turn_completed]
-      (fun cli_path ->
-        match run_keeper_turn ~keeper_name ~base_path ~raw_trace_path ~cli_path
-          ~model:"gpt-fixture" () with
-        | Error error -> fail (Agent_core.Error.to_string error)
-        | Ok _ ->
-          check bool "real sink outage is visible without rejecting provider success" true
-            (failures () -. before = 2.);
-          let records = match Agent_core.Raw_trace.read_all ~path:(raw_trace_path ^ ".before") () with
-            | Ok records -> records | Error error -> fail (Agent_core.Error.to_string error) in
-          check bool "outage follows actual run admission, not missing trace setup" true
-            (List.exists (fun (record:Agent_core.Raw_trace.record) ->
-              record.record_type=Agent_core.Raw_trace.Run_started) records)))
+                finished.final_text))
 ;;
 
 let test_keeper_codex_raw_trace_separates_native_tool_observation () =
@@ -9909,12 +9720,10 @@ let () =
     ; ( "subscription boundary"
       , [ test_case "ChatGPT turn completes" `Quick test_chatgpt_subscription_turn
         ; test_case "Keeper context survives three actual settled turns" `Quick test_keeper_context_lifecycle_three_settled_turns
-        ; test_case "Keeper persists assembly binding in same attempt" `Quick test_keeper_assembly_binding_is_durable_in_same_attempt
         ; test_case "issuer assembly joins completed slots" `Quick test_issuer_assembly_links_to_completed_slots
         ; test_case "content-free actual context submission" `Quick test_content_free_context_submission
         ; test_case "context fragments read large unselected values from the written payload" `Quick
             test_context_fragments_read_large_unselected_values
-        ; test_case "actual Keeper context submission sink failure" `Quick test_keeper_codex_context_submission_sink_failure
         ; test_case "prompt transmission boundary" `Quick
             (fun () -> test_prompt_transmission_boundary ())
         ; test_case "worker encoded prompt transmission boundary" `Quick

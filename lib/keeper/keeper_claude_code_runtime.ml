@@ -1794,10 +1794,6 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
              ~on_prompt_sent:(fun () ->
                note_uncertainty_beyond_masc_tools ~built_ins effect_cell;
                report_transmitted_input ())
-             ~on_context_submission:(fun submission ->
-               Host.record_context_submission ~keeper_name ~raw_trace_run
-                 ~runtime_profile:runtime_id ~client_turn_ordinal:turn_count
-                 ~submission:(Runtime_claude_code.context_submission_to_json submission) ())
              ~on_turn_starting:(fun ~session_id ->
                update_session "turn-starting transition" (fun expected ->
                  Session_store.mark_turn_starting

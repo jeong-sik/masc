@@ -7523,6 +7523,15 @@ let test_a_start_superseding_a_full_gate_session_carries_the_address_form () =
     ~detail:"the Gate continuation's resume overflowed"
 ;;
 
+(* A floor refusal came before any effect: its hook had run and had nothing
+   left to shorten. The run that takes its place starts from the anchor
+   alone, and the receipts the refused run kept still go by address. *)
+let test_a_start_superseding_a_floor_refusal_carries_the_address_form () =
+  superseding_start_carries_the_address_form
+    ~failure:Keeper_official_client_session_store.(Input_rejected Bootstrap_floor_exceeded)
+    ~detail:"the smallest request the run could send overflowed"
+;;
+
 (* A run that offers keeper_artifact_read names it in the address form. *)
 let test_address_form_names_the_offered_reader () =
   let module R = Retained_overflow in
@@ -8084,6 +8093,8 @@ let () =
            test_a_start_superseding_a_fenced_size_refusal_carries_the_address_form;
          test_case "a Start superseding a full Gate session carries the address form" `Quick
            test_a_start_superseding_a_full_gate_session_carries_the_address_form;
+         test_case "a Start superseding a floor refusal carries the address form" `Quick
+           test_a_start_superseding_a_floor_refusal_carries_the_address_form;
          test_case "the address form names the offered reader" `Quick
            test_address_form_names_the_offered_reader])
     ; ( "native action", [ test_case "partial content boundary identity" `Quick test_partial_content_boundaries_keep_message_and_channel_identity

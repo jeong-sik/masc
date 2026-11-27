@@ -12,20 +12,11 @@ let source_row ~id ~path =
     path
 ;;
 
-let config_with_resource_read_max_bytes resource_read_max_bytes sources =
-  let text =
-    Printf.sprintf
-      "[skills]\nresource-read-max-bytes = %d\n"
-      resource_read_max_bytes
-    ^ sources
-  in
-  match Skill_source_config.parse_text text with
-  | Ok config ->
-    (* The bound is derived now (task-1779 B); tests that exercise the
-       oversize path set a smaller one through the test seam. *)
-    Skill_source_config.For_testing.with_resource_read_max_bytes
-      resource_read_max_bytes
-      config
+(* The parsed configuration carries the real resource read bound, the Skill
+   file cap. *)
+let config sources =
+  match Skill_source_config.parse_text ("[skills]\n" ^ sources) with
+  | Ok config -> config
   | Error diagnostics ->
     fail
       (String.concat
@@ -33,7 +24,14 @@ let config_with_resource_read_max_bytes resource_read_max_bytes sources =
          (List.map Skill_source_config.diagnostic_to_string diagnostics))
 ;;
 
-let config = config_with_resource_read_max_bytes 16384
+(* The bound is fixed (task-1779 B); tests that exercise the oversize path set
+   a smaller one through the test seam instead of writing a file over the
+   cap. *)
+let config_with_resource_read_max_bytes resource_read_max_bytes sources =
+  Skill_source_config.For_testing.with_resource_read_max_bytes
+    resource_read_max_bytes
+    (config sources)
+;;
 
 let document ~name ~description body =
   Printf.sprintf "---\nname: %s\ndescription: %s\n---\n%s" name description body
@@ -844,6 +842,135 @@ let test_resource_is_read_only_when_exact_file_is_requested () =
          "escape-heavy boundary content is not replaced by an artifact marker"
          boundary_contents
          boundary_output)
+;;
+
+(* #39054: a resource over the inline tool-result boundary comes back the way
+   a long body does since #54389, as a structured handle with a preview, not
+   as a refusal. The live failures read 18-21 KB files from
+   [tui-chat-design/references/]. The resource root and its read bound come
+   from the catalog, as in a turn. A small resource and the body still come
+   back inline, and only a file over the Skill file cap is refused. *)
+let test_resource_over_inline_boundary_returns_a_handle () =
+  Eio_main.run @@ fun _ ->
+  let workspace = Filename.temp_dir "keeper-skill-large-resource-" "" in
+  let references =
+    List.fold_left Filename.concat workspace [ "skills"; "guide"; "references" ]
+  in
+  Fs_compat.mkdir_p references;
+  let large_contents =
+    "LARGE_HEAD\n" ^ String.make (Common.max_tool_result_wire_bytes + 4_096) 'r'
+    ^ "\nLARGE_TAIL"
+  in
+  let cap = Skill_source_config.skill_file_max_bytes in
+  Fs_compat.save_file (Filename.concat references "LARGE.md") large_contents;
+  Fs_compat.save_file (Filename.concat references "SMALL.md") "SMALL_RESOURCE";
+  Fs_compat.save_file (Filename.concat references "OVER-CAP.md") (String.make (cap + 1) 'o');
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree workspace)
+    (fun () ->
+       let config = config (source_row ~id:"only" ~path:"skills") in
+       let source =
+         match config.sources with
+         | [ source ] -> source
+         | _ -> fail "expected one source"
+       in
+       let skill_snapshot =
+         match
+           Snapshot.configured
+             ~config
+             [ scan
+                 ~base_path:workspace
+                 source
+                 [ "guide", document ~name:"guide" ~description:"guide" "GUIDE_BODY" ]
+             ]
+         with
+         | Ok snapshot -> snapshot
+         | Error _ -> fail "fixture snapshot was rejected"
+       in
+       let catalog, _ = Masc.Keeper_skill_catalog.of_snapshot skill_snapshot in
+       let instruction_skills =
+         Masc.Keeper_instruction_skill.instruction_skills_of_catalog catalog
+       in
+       (match instruction_skills with
+        | [ { Masc.Keeper_instruction_skill.resource_location = Some location; _ } ] ->
+          check int
+            "the catalog's resource read bound is the Skill file cap"
+            cap
+            (Skill_source_config.resource_read_max_bytes_to_int
+               location.Masc.Keeper_instruction_skill.resource_read_max_bytes)
+        | _ -> fail "expected one instruction Skill with a resource root");
+       let reference =
+         exact_reference
+           skill_snapshot
+           ~source_id:source.id
+           ~package_id:"guide"
+           ~name:"guide"
+       in
+       let tool =
+         Masc.Keeper_instruction_skill.make_instruction_skill_tool
+           ~config:(Masc.Workspace.default_config workspace)
+           ~instruction_skills
+           ()
+         |> Result.get_ok
+       in
+       let read_file file =
+         match Reference.to_yojson reference with
+         | `Assoc fields -> run_skill_tool tool (`Assoc (("file", `String file) :: fields))
+         | _ -> fail "exact reference is not an object"
+       in
+       let large_output = read_file "references/LARGE.md" in
+       (match Tool_output.decode_from_agent_core large_output with
+        | Tool_output.Decoded artifact ->
+          check int
+            "the handle covers the whole resource"
+            (String.length large_contents)
+            artifact.bytes;
+          check bool
+            "the preview stays within the preview bound"
+            true
+            (String.length artifact.preview <= Tool_blob_store.preview_max);
+          check bool
+            "the preview keeps the resource head"
+            true
+            (String.starts_with ~prefix:"LARGE_HEAD" artifact.preview);
+          check bool
+            "the preview keeps the resource tail"
+            true
+            (String.ends_with ~suffix:"LARGE_TAIL" artifact.preview);
+          (match
+             Tool_blob_store.fetch
+               (Tool_blob_store.create ~base_path:workspace)
+               ~sha256:artifact.sha256
+           with
+           | Ok (Some stored) ->
+             check string "the handle reads back the exact resource bytes" large_contents stored
+           | Ok None -> fail "the handle's stored bytes are absent"
+           | Error error -> fail (Tool_blob_store.fetch_error_to_string error))
+        | Tool_output.Not_marker ->
+          failf
+            "a resource over the inline boundary did not come back as a handle: %s"
+            (String.sub large_output 0 (min 300 (String.length large_output)))
+        | Tool_output.Invalid_marker { detail } -> fail detail);
+       check string
+         "a small resource stays inline"
+         "SMALL_RESOURCE"
+         (read_file "references/SMALL.md");
+       check string
+         "the body read is unchanged"
+         "GUIDE_BODY"
+         (run_skill_tool tool (Reference.to_yojson reference));
+       let over_cap_output = read_file "references/OVER-CAP.md" in
+       check bool
+         "a resource over the Skill file cap is refused with the cap"
+         true
+         (String_util.contains_substring over_cap_output "too_large"
+          && String_util.contains_substring
+               over_cap_output
+               (Printf.sprintf "max_bytes=%d" cap));
+       check bool
+         "a refused resource is not stored behind a handle"
+         false
+         (Tool_output.is_marker over_cap_output))
 ;;
 
 (* A Task pins a Skill by exact content revision. Editing or deleting that
@@ -1766,6 +1893,8 @@ let () =
             test_resolved_body_stays_frozen_after_new_snapshot
         ; test_case "resource read is exact and deferred" `Quick
             test_resource_is_read_only_when_exact_file_is_requested
+        ; test_case "resource over the inline boundary returns a handle" `Quick
+            test_resource_over_inline_boundary_returns_a_handle
         ; test_case "JEV advice reaches model without changing selection" `Quick
             test_jev_advice_reaches_the_model_without_selecting_or_authorizing
         ; test_case "unavailable JEV clock sends nothing and preserves policy" `Quick

@@ -321,7 +321,8 @@ let test_projection_names_equal_turn_surface_authority () =
        check (option int) "shared instruction schema is not double-counted" None
          instruction.tool_schema_bytes
      | profiles -> failf "expected one instruction Skill profile, got %d" (List.length profiles));
-    check (option int) "resource bound follows frozen snapshot" (Some 16384)
+    check (option int) "resource bound follows frozen snapshot"
+      (Some Skill_source_config.skill_file_max_bytes)
       surface.skill_resource_read_max_bytes;
     check string
       "surface names the frozen Skill snapshot"

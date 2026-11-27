@@ -1,8 +1,9 @@
 (** Shared quota/rate/failure ordering over the actual candidate observation.
     {!order} preserves every candidate and declared order within each class.
     {!order_exact} sets aside the candidates a provider asked not to be called
-    yet and still returns them. Neither confers dispatch or mutation
-    authority. *)
+    yet and still returns them. {!stated_until} is the time such a candidate
+    was told; a Keeper walk reads it before each call. None of them confers
+    dispatch or mutation authority. *)
 
 type walk_start =
   | Fresh_walk_by of Runtime_candidate_backpressure.recorder
@@ -43,6 +44,19 @@ val is_available :
 (** [true] when the candidate is not demoted at [now] for [keeper_name]
     under {!order} ([Fresh_walk_by] when [Some keeper_name],
     [Every_mark_demotes] when omitted). *)
+
+val stated_until :
+  now:float ->
+  quota_scope_of:('a -> Runtime_quota_window.scope option) ->
+  candidate_backpressure_of:('a -> Runtime_candidate_backpressure.candidate option) ->
+  'a -> float option
+(** The time the provider stated for the candidate, while that time is still
+    ahead of [now]: the reset of its quota scope, or the end of its own usable
+    Retry-After, whichever is later. [None] for a rest MASC chose (an undated
+    quota observation, a rate limit without a usable Retry-After), for a
+    failed-attempt mark, and for a candidate whose projections are missing.
+    {!order_exact} holds a candidate back on this value, and a Keeper walk
+    does not call one before it (RFC-provider-path-rest 6.1, K1). *)
 
 type 'a exact_order =
   { walk : 'a list

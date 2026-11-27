@@ -61,11 +61,17 @@ val mark_own_keeper_forbidden : at:Clock.Mono.t -> reason:string -> t -> t
 val mark_conversation_forbidden : at:Clock.Mono.t -> reason:string -> t -> t
 val clear_forbidden : t -> t
 
+type conv_fetch_target =
+  | Fetch_none
+  | Fetch_current
+  | Fetch_conversation of string
+
 val select_keeper_by_id : string -> t -> t
 val move_keeper_selection : delta:int -> t -> t
-val select_conversation_by_delta : delta:int -> t -> t * string option
+val select_conversation_by_delta : delta:int -> t -> t * conv_fetch_target
 val set_requested_conversation : string option -> t -> t
-val scroll_transcript : delta:int -> t -> t
+val max_transcript_scroll : pane_w:int -> pane_h:int -> t -> int
+val scroll_transcript : ?max_scroll:int -> delta:int -> t -> t
 
 val start_turn_in_flight : keeper_id:string -> preview:string -> t -> t
 val finish_turn_ok :

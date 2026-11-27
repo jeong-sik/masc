@@ -1158,17 +1158,13 @@ let apply_http_reply ~now (m : Model.t) reply =
   | Msg.Reply_auth_provider_accounts (Error err) ->
       err_reply
         ~fail:(fun m' ->
-          let reason =
-            Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
-          in
           {
             m' with
             account =
               {
                 m'.account with
                 provider_accounts =
-                  Observed.failed ~at:now ~reason
-                    ~retryable:(Msg.http_error_retryable err);
+                  failed_slot err m'.account.provider_accounts;
               };
           })
         ~source:(Health.Source_runtime "provider_accounts")
@@ -1188,17 +1184,12 @@ let apply_http_reply ~now (m : Model.t) reply =
   | Msg.Reply_auth_integrations (Error err) ->
       err_reply
         ~fail:(fun m' ->
-          let reason =
-            Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
-          in
           {
             m' with
             account =
               {
                 m'.account with
-                integrations =
-                  Observed.failed ~at:now ~reason
-                    ~retryable:(Msg.http_error_retryable err);
+                integrations = failed_slot err m'.account.integrations;
               };
           })
         ~source:(Health.Source_runtime "integrations")
@@ -1419,17 +1410,12 @@ let apply_http_reply ~now (m : Model.t) reply =
   | Msg.Reply_auth_keepers (Error err) ->
       err_reply
         ~fail:(fun m' ->
-          let reason =
-            Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
-          in
           {
             m' with
             personal_keepers =
               {
                 m'.personal_keepers with
-                keepers =
-                  Observed.failed ~at:now ~reason
-                    ~retryable:(Msg.http_error_retryable err);
+                keepers = failed_slot err m'.personal_keepers.keepers;
               };
           })
         ~source:(Health.Source_runtime "personal_keepers")
@@ -1549,15 +1535,36 @@ let apply_http_reply ~now (m : Model.t) reply =
           (Msg.http_error_summary err) next
       , cmds @ refresh_cmds )
   | Msg.Reply_auth_keeper_conversation
-      { keeper_id; conversation_id = _; result = Ok snap } ->
-      let personal_keepers =
-        Personal_keepers_store.apply_conversation ~observed_at:now ~keeper_id
-          snap m.personal_keepers
+      { keeper_id; conversation_id; result = Ok snap } ->
+      let matches_selection =
+        Option.equal String.equal
+          (Personal_keepers_store.selected_keeper_id m.personal_keepers)
+          (Some keeper_id)
+        && Option.equal String.equal
+             m.personal_keepers.requested_conversation_id conversation_id
       in
-      ({ m with personal_keepers }, [])
+      if not matches_selection then (m, [])
+      else
+        let personal_keepers =
+          Personal_keepers_store.apply_conversation ~observed_at:now ~keeper_id
+            snap m.personal_keepers
+        in
+        ({ m with personal_keepers }, [])
   | Msg.Reply_auth_keeper_conversation
-      { keeper_id; conversation_id = _; result = Error (Msg.Http_error { status = 403; _ } as err) } ->
-      if Observed.is_value m.personal_keepers.keepers then
+      {
+        keeper_id;
+        conversation_id;
+        result = Error (Msg.Http_error { status = 403; _ } as err);
+      } ->
+      let matches_selection =
+        Option.equal String.equal
+          (Personal_keepers_store.selected_keeper_id m.personal_keepers)
+          (Some keeper_id)
+        && Option.equal String.equal
+             m.personal_keepers.requested_conversation_id conversation_id
+      in
+      if not matches_selection then (m, [])
+      else if Observed.is_value m.personal_keepers.keepers then
         let detail =
           Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
         in
@@ -1594,26 +1601,42 @@ let apply_http_reply ~now (m : Model.t) reply =
                ~en:("Personal conversation fetch: " ^ keeper_id))
           ~toast:None err m
   | Msg.Reply_auth_keeper_conversation
-      { keeper_id; conversation_id = _; result = Error err } ->
-      err_reply
-        ~fail:(fun m' ->
-          let reason =
-            Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
-          in
-          {
-            m' with
-            personal_keepers =
-              {
-                m'.personal_keepers with
-                conversation =
-                  Observed.failed ~at:now ~reason
-                    ~retryable:(Msg.http_error_retryable err);
-              };
-          })
-        ~source:(Health.Source_runtime "personal_keepers")
-        ~ko:("개인 키퍼 대화 조회: " ^ keeper_id)
-        ~en:("Personal conversation fetch: " ^ keeper_id)
-        err
+      { keeper_id; conversation_id; result = Error err } ->
+      let matches_selection =
+        Option.equal String.equal
+          (Personal_keepers_store.selected_keeper_id m.personal_keepers)
+          (Some keeper_id)
+        && Option.equal String.equal
+             m.personal_keepers.requested_conversation_id conversation_id
+      in
+      if not matches_selection then (m, [])
+      else
+        err_reply
+          ~fail:(fun m' ->
+            let same_cached_keeper =
+              match Observed.to_option m'.personal_keepers.conversation with
+              | Some (ckid, _) -> String.equal ckid keeper_id
+              | None -> false
+            in
+            let conversation =
+              if same_cached_keeper then
+                failed_slot err m'.personal_keepers.conversation
+              else
+                let reason =
+                  Chat_transcript.scrub_secrets_in_text
+                    (Msg.http_error_detail err)
+                in
+                Observed.failed ~at:now ~reason
+                  ~retryable:(Msg.http_error_retryable err)
+            in
+            {
+              m' with
+              personal_keepers = { m'.personal_keepers with conversation };
+            })
+          ~source:(Health.Source_runtime "personal_keepers")
+          ~ko:("개인 키퍼 대화 조회: " ^ keeper_id)
+          ~en:("Personal conversation fetch: " ^ keeper_id)
+          err
   | Msg.Reply_auth_keeper_conversation_start
       { keeper_id = _; result = Ok started } ->
       let personal_keepers =
@@ -1647,6 +1670,17 @@ let apply_http_reply ~now (m : Model.t) reply =
         ~toast:(Some (Model.Toast_error, Msg.http_error_summary err))
         err m
   | Msg.Reply_auth_keeper_conversation_start { keeper_id; result = Error err } ->
+      let next0 =
+        match err with
+        | Msg.Decode_error _ ->
+            {
+              m with
+              personal_keepers =
+                Personal_keepers_store.set_requested_conversation None
+                  m.personal_keepers;
+            }
+        | Msg.Transport _ | Msg.Workspace_mismatch _ | Msg.Http_error _ -> m
+      in
       let next, cmds =
         record_http_incident ~now
           ~source:(Health.Source_runtime "personal_keepers")
@@ -1654,7 +1688,7 @@ let apply_http_reply ~now (m : Model.t) reply =
             (Say.make
                ~ko:("새 대화 시작: " ^ keeper_id)
                ~en:("Start new conversation: " ^ keeper_id))
-          err m
+          err next0
       in
       let refresh_cmds =
         match err with
@@ -1748,9 +1782,24 @@ let apply_http_reply ~now (m : Model.t) reply =
       let detail =
         Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
       in
+      let should_reload_conv =
+        match err with
+        | Msg.Decode_error _ -> true
+        | Msg.Http_error { status; _ }
+          when status >= 500 || status = 409 || status = 429
+               || Option.equal String.equal (api_error_other_code err)
+                    (Some "answer_unrecorded") ->
+            true
+        | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _ -> false
+      in
       let personal_keepers =
-        Personal_keepers_store.finish_turn_error ~keeper_id ~reason:detail
-          m.personal_keepers
+        let pk0 =
+          Personal_keepers_store.finish_turn_error ~keeper_id ~reason:detail
+            m.personal_keepers
+        in
+        if should_reload_conv then
+          Personal_keepers_store.set_requested_conversation None pk0
+        else pk0
       in
       let next, cmds =
         record_http_incident ~now
@@ -1760,16 +1809,6 @@ let apply_http_reply ~now (m : Model.t) reply =
                ~ko:("개인 키퍼 턴 전송: " ^ keeper_id)
                ~en:("Personal keeper turn: " ^ keeper_id))
           err { m with personal_keepers }
-      in
-      let should_reload_conv =
-        match err with
-        | Msg.Decode_error _ -> true
-        | Msg.Http_error { status; _ }
-          when status >= 500
-               || Option.equal String.equal (api_error_other_code err)
-                    (Some "answer_unrecorded") ->
-            true
-        | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _ -> false
       in
       let refresh_cmds =
         if should_reload_conv then

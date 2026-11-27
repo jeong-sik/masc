@@ -3732,12 +3732,20 @@ let test_ma_own_provider_wire_and_actions () =
     (Msg.Reply_ma_setup_account_key_remove
        { provider_account_id = "pa-key-1"; result = Error (Msg.Decode_error "truncated") });
 
-  (* #55063 P3-3: Observed.Failed.reason in provider_accounts & integrations is scrubbed in store and render *)
-  let m_scrub, _ =
-    Update.step ~now:t0 m_loaded
+  (* #55063 P3-3 + P2-5: initial load failure scrubs secrets in Observed.Failed
+     AND transient refresh failure on already-loaded slot retains stale Value *)
+  let m_unloaded_acct =
+    let m0 =
+      Model.initial ~auth_session:m_loaded.auth_session ~cols:120 ~rows:36
+        ~lang:Say.Lang_en ()
+    in
+    fst (Update_nav.open_overlay m0 Nav.Account)
+  in
+  let m_scrub_pa, _ =
+    Update.step ~now:t0 m_unloaded_acct
       (Msg.Http_reply
          {
-           epoch = m_loaded.epoch;
+           epoch = m_unloaded_acct.epoch;
            reply =
              Msg.Reply_auth_provider_accounts
                (Error
@@ -3749,23 +3757,104 @@ let test_ma_own_provider_wire_and_actions () =
                      }));
          })
   in
-  let m_scrub_render =
-    {
-      m_scrub with
-      account =
-        {
-          m_scrub.account with
-          integrations =
-            Observed.failed ~at:t0 ~retryable:false
-              ~reason:"bad bearer sk-proj-SHOULDNOTSHOW88888888";
-        };
-    }
+  let m_scrub_both, _ =
+    Update.step ~now:t0 m_scrub_pa
+      (Msg.Http_reply
+         {
+           epoch = m_scrub_pa.epoch;
+           reply =
+             Msg.Reply_auth_integrations
+               (Error
+                  (Msg.Http_error
+                     {
+                       status = 500;
+                       body = "bad bearer sk-proj-SHOULDNOTSHOW88888888";
+                       api_error = None;
+                     }));
+         })
   in
-  let txt_scrub = render_full_frame m_scrub_render in
+  Alcotest.(check bool) "unloaded provider_accounts failure lands scrubbed Observed.Failed"
+    true
+    (match m_scrub_both.account.provider_accounts with
+    | Observed.Failed { reason; _ } -> not (contains_ci ~needle:"LEAKED9999999999" reason)
+    | Observed.Value _ | Observed.Loading _ | Observed.Absent | Observed.Unreported -> false);
+  Alcotest.(check bool) "unloaded integrations failure lands scrubbed Observed.Failed"
+    true
+    (match m_scrub_both.account.integrations with
+    | Observed.Failed { reason; _ } -> not (contains_ci ~needle:"SHOULDNOTSHOW88888888" reason)
+    | Observed.Value _ | Observed.Loading _ | Observed.Absent | Observed.Unreported -> false);
+  let txt_scrub = render_full_frame m_scrub_both in
   Alcotest.(check bool) "Account overlay scrubs secrets in provider_accounts & integrations errors"
     true
     ((not (contains_ci ~needle:"LEAKED9999999999" txt_scrub))
      && not (contains_ci ~needle:"SHOULDNOTSHOW88888888" txt_scrub));
+
+  let t1 = Clock.Mono.of_ns 12_000_000_000L in
+  let m_stale_pa, _ =
+    Update.step ~now:t1 m_loaded
+      (Msg.Http_reply
+         {
+           epoch = m_loaded.epoch;
+           reply =
+             Msg.Reply_auth_provider_accounts
+               (Error (Msg.Transport Health.Timeout));
+         })
+  in
+  let m_stale_int, _ =
+    Update.step ~now:t1 m_stale_pa
+      (Msg.Http_reply
+         {
+           epoch = m_stale_pa.epoch;
+           reply =
+             Msg.Reply_auth_integrations
+               (Error (Msg.Transport Health.Timeout));
+         })
+  in
+  Alcotest.(check bool) "transient refresh failure retains stale provider_accounts Value"
+    true
+    (match m_stale_int.account.provider_accounts with
+    | Observed.Value { stale = true; _ } -> true
+    | Observed.Value { stale = false; _ }
+    | Observed.Loading _ | Observed.Failed _ | Observed.Absent | Observed.Unreported -> false);
+  Alcotest.(check bool) "transient refresh failure retains stale integrations Value"
+    true
+    (match m_stale_int.account.integrations with
+    | Observed.Value { stale = true; _ } -> true
+    | Observed.Value { stale = false; _ }
+    | Observed.Loading _ | Observed.Failed _ | Observed.Absent | Observed.Unreported -> false);
+
+  (* P2-3: Account clear_token_armed disarms on unhandled/global keys, overlay close & mouse *)
+  let m_acct_arm, _ =
+    Update.step ~now:t1 m_loaded (Msg.Key_event (char_key "c"))
+  in
+  Alcotest.(check bool) "Account [c] arms clear_token_armed" true
+    m_acct_arm.account.clear_token_armed;
+  let m_acct_alt_a, _ =
+    Update.step ~now:t1 m_acct_arm
+      (Msg.Key_event
+         {
+           Keymap.Input.key = Keymap.Input.Char "a";
+           mods = { Keymap.Input.no_mods with alt = true };
+         })
+  in
+  Alcotest.(check bool) "Account [c] then Alt+A disarms clear_token_armed" false
+    m_acct_alt_a.account.clear_token_armed;
+  let m_acct_reopen, _ =
+    Update.step ~now:t1 m_acct_alt_a (Msg.Key_event (char_key "@"))
+  in
+  let m_acct_c_again, cmds_c_again =
+    Update.step ~now:t1 m_acct_reopen (Msg.Key_event (char_key "c"))
+  in
+  Alcotest.(check bool) "reopened Account single [c] arms fresh instead of clearing"
+    true
+    (m_acct_c_again.account.clear_token_armed && cmds_c_again = []);
+  let m_acct_mouse, _ =
+    Update.step ~now:t1 m_acct_c_again
+      (Msg.Mouse_event
+         (Keymap.Input.Wheel { dir = Keymap.Input.Wheel_down; col = 10; row = 10 }))
+  in
+  Alcotest.(check bool) "mouse event disarms Account clear_token_armed" false
+    m_acct_mouse.account.clear_token_armed;
 
   (* #55063 P3-4: Reject empty/whitespace integration ID or API key before submitting MA key modal *)
   let m_blank_add, _ =
@@ -4306,6 +4395,338 @@ let test_ma_personal_keepers_wire_and_lifecycle () =
   Alcotest.(check bool) "turn_refused does NOT set own_keeper_forbidden" true
     (Option.is_none m_tref.personal_keepers.own_keeper_forbidden
      && Option.is_some m_tref.personal_keepers.last_turn_error);
+
+  (* P2-2: Stale/out-of-order Reply_auth_keeper_conversation (Ok, 403, Error) never clobbers active keeper or conversation *)
+  let m_two_keepers, _ =
+    Update.step ~now:t1 m_seeded
+      (Msg.Http_reply
+         {
+           epoch = m_seeded.epoch;
+           reply =
+             Msg.Reply_auth_keepers
+               (Ok
+                  [
+                    { keeper_id = "k1"; runtime_id = Some "rt-1" };
+                    { keeper_id = "k2"; runtime_id = Some "rt-1" };
+                  ]);
+         })
+  in
+  (* Switch from k1 -> k2 *)
+  let m_on_k2, _ = Update.step ~now:t1 m_two_keepers (Msg.Key_event (char_key "j")) in
+  Alcotest.(check (option string)) "selected keeper moved to k2" (Some "k2")
+    (Personal_keepers_store.selected_keeper_id m_on_k2.personal_keepers);
+  let k2_snap : Wire_personal_keepers.conversation_snapshot =
+    {
+      keeper_id = "k2";
+      current_conversation_id = Some "conv-k2";
+      conversation_id = Some "conv-k2";
+      conversations =
+        [
+          {
+            conversation_id = "conv-k2";
+            provider_account_id = "pa-1";
+            started_at_ms = 1_795_254_000_000;
+            deletion = Wire_personal_keepers.Deletion_kept;
+          };
+          {
+            conversation_id = "conv-k2-old";
+            provider_account_id = "pa-1";
+            started_at_ms = 1_795_250_000_000;
+            deletion = Wire_personal_keepers.Deletion_kept;
+          };
+        ];
+      turns = [];
+    }
+  in
+  let m_k2_loaded, _ =
+    Update.step ~now:t1 m_on_k2
+      (Msg.Http_reply
+         {
+           epoch = m_on_k2.epoch;
+           reply =
+             Msg.Reply_auth_keeper_conversation
+               { keeper_id = "k2"; conversation_id = None; result = Ok k2_snap };
+         })
+  in
+  (* Deliver late Ok, 403, and 500 replies for stale keeper k1 *)
+  let k1_late_snap = { k2_snap with keeper_id = "k1"; conversation_id = Some "conv-k1-late" } in
+  let m_after_late_ok, _ =
+    Update.step ~now:t1 m_k2_loaded
+      (Msg.Http_reply
+         {
+           epoch = m_k2_loaded.epoch;
+           reply =
+             Msg.Reply_auth_keeper_conversation
+               { keeper_id = "k1"; conversation_id = None; result = Ok k1_late_snap };
+         })
+  in
+  let m_after_late_403, _ =
+    Update.step ~now:t1 m_after_late_ok
+      (Msg.Http_reply
+         {
+           epoch = m_after_late_ok.epoch;
+           reply =
+             Msg.Reply_auth_keeper_conversation
+               {
+                 keeper_id = "k1";
+                 conversation_id = None;
+                 result = Error (Msg.Http_error { status = 403; body = "forbidden"; api_error = None });
+               };
+         })
+  in
+  let m_after_late_err, _ =
+    Update.step ~now:t1 m_after_late_403
+      (Msg.Http_reply
+         {
+           epoch = m_after_late_403.epoch;
+           reply =
+             Msg.Reply_auth_keeper_conversation
+               {
+                 keeper_id = "k1";
+                 conversation_id = None;
+                 result = Error (Msg.Transport Health.Timeout);
+               };
+         })
+  in
+  Alcotest.(check bool) "late k1 Ok/403/Error conversation replies do NOT overwrite k2 pane"
+    true
+    (Option.is_none m_after_late_err.personal_keepers.conversation_forbidden
+     &&
+     match Personal_keepers_store.conversation_for_selected m_after_late_err.personal_keepers with
+     | Some s -> String.equal s.keeper_id "k2" && s.conversation_id = Some "conv-k2"
+     | None -> false);
+  (* Cycle ']' to conv-k2-old -> late current (None) reply is ignored; cycle '[' back to current emits conversation_id = None *)
+  let m_k2_hist, cmds_hist =
+    Update.step ~now:t1 m_k2_loaded (Msg.Key_event (char_key "]"))
+  in
+  Alcotest.(check (option string)) "cycling to history sets requested_conversation_id"
+    (Some "conv-k2-old") m_k2_hist.personal_keepers.requested_conversation_id;
+  Alcotest.(check bool) "cycling to history emits GET with Some conv-k2-old" true
+    (List.exists
+       (function
+         | Cmd.Http_get
+             {
+               req =
+                 Cmd.Get_auth_keeper_conversation
+                   { keeper_id = "k2"; conversation_id = Some "conv-k2-old" };
+               _;
+             } -> true
+         | _ -> false)
+       (Cmd.flatten cmds_hist));
+  let m_stale_conv_reply, _ =
+    Update.step ~now:t1 m_k2_hist
+      (Msg.Http_reply
+         {
+           epoch = m_k2_hist.epoch;
+           reply =
+             Msg.Reply_auth_keeper_conversation
+               {
+                 keeper_id = "k2";
+                 conversation_id = None;
+                 result = Error (Msg.Http_error { status = 403; body = "stale"; api_error = None });
+               };
+         })
+  in
+  Alcotest.(check bool) "mismatched conversation_id reply is dropped" true
+    (Option.is_none m_stale_conv_reply.personal_keepers.conversation_forbidden);
+  let m_k2_back, cmds_back =
+    Update.step ~now:t1 m_k2_hist (Msg.Key_event (char_key "["))
+  in
+  Alcotest.(check bool) "cycling back to [current] emits GET with conversation_id = None"
+    true
+    (Option.is_none m_k2_back.personal_keepers.requested_conversation_id
+     && List.exists
+          (function
+            | Cmd.Http_get
+                {
+                  req =
+                    Cmd.Get_auth_keeper_conversation
+                      { keeper_id = "k2"; conversation_id = None };
+                  _;
+                } -> true
+            | _ -> false)
+          (Cmd.flatten cmds_back));
+
+  (* P2-5: transient refresh error on loaded keepers and same-keeper conversation retains stale Value *)
+  let m_pk_stale_k, _ =
+    Update.step ~now:t1 m_k2_loaded
+      (Msg.Http_reply
+         {
+           epoch = m_k2_loaded.epoch;
+           reply = Msg.Reply_auth_keepers (Error (Msg.Transport Health.Timeout));
+         })
+  in
+  let m_pk_stale_c, _ =
+    Update.step ~now:t1 m_pk_stale_k
+      (Msg.Http_reply
+         {
+           epoch = m_pk_stale_k.epoch;
+           reply =
+             Msg.Reply_auth_keeper_conversation
+               {
+                 keeper_id = "k2";
+                 conversation_id = None;
+                 result = Error (Msg.Transport Health.Timeout);
+               };
+         })
+  in
+  Alcotest.(check bool) "transient keepers & same-keeper conversation refresh failure retains stale Values"
+    true
+    ((match m_pk_stale_c.personal_keepers.keepers with
+     | Observed.Value { stale = true; _ } -> true
+     | Observed.Value { stale = false; _ }
+     | Observed.Loading _ | Observed.Failed _ | Observed.Absent | Observed.Unreported -> false)
+     &&
+     match m_pk_stale_c.personal_keepers.conversation with
+     | Observed.Value { stale = true; data = ("k2", _); _ } -> true
+     | Observed.Value _ | Observed.Loading _ | Observed.Failed _
+     | Observed.Absent | Observed.Unreported -> false);
+
+  (* P2-3: delete_armed_conv_id disarms on workspace switch (1 -> 4), Tab, and mouse events *)
+  let m_del_arm2, _ = Update.step ~now:t1 m_k2_loaded (Msg.Key_event (char_key "d")) in
+  Alcotest.(check (option string)) "[d] arms delete on conv-k2" (Some "conv-k2")
+    m_del_arm2.personal_keepers.delete_armed_conv_id;
+  let m_ws_pulse, _ = Update.step ~now:t1 m_del_arm2 (Msg.Key_event (char_key "1")) in
+  Alcotest.(check (option string)) "switching workspace [1] disarms delete_armed_conv_id"
+    None m_ws_pulse.personal_keepers.delete_armed_conv_id;
+  let m_ws_back, _ = Update.step ~now:t1 m_ws_pulse (Msg.Key_event (char_key "4")) in
+  let m_d_after_ws, cmds_d_after_ws =
+    Update.step ~now:t1 m_ws_back (Msg.Key_event (char_key "d"))
+  in
+  Alcotest.(check bool) "single [d] after returning from workspace switch arms fresh (0 DELETE)"
+    true
+    (m_d_after_ws.personal_keepers.delete_armed_conv_id = Some "conv-k2"
+     && cmds_d_after_ws = []);
+  let m_after_tab, _ =
+    Update.step ~now:t1 m_d_after_ws
+      (Msg.Key_event { Keymap.Input.key = Keymap.Input.Tab; mods = Keymap.Input.no_mods })
+  in
+  Alcotest.(check (option string)) "[Tab] disarms delete_armed_conv_id" None
+    m_after_tab.personal_keepers.delete_armed_conv_id;
+  let m_del_arm3, _ = Update.step ~now:t1 m_k2_loaded (Msg.Key_event (char_key "d")) in
+  let m_del_mouse, _ =
+    Update.step ~now:t1 m_del_arm3
+      (Msg.Mouse_event
+         (Keymap.Input.Wheel { dir = Keymap.Input.Wheel_down; col = 50; row = 10 }))
+  in
+  Alcotest.(check (option string)) "mouse event disarms delete_armed_conv_id" None
+    m_del_mouse.personal_keepers.delete_armed_conv_id;
+
+  (* P2-4: UTF-8 multi-byte Korean turn preview does not split codepoints mid-sequence *)
+  let m_turn_modal, _ = Update.step ~now:t1 m_k2_loaded (Msg.Key_event (char_key "s")) in
+  let ko_msg = String.concat "" (List.init 35 (fun _ -> "가")) in
+  let m_turn_filled =
+    match m_turn_modal.inline_modal with
+    | Some md ->
+        let fields =
+          List.map
+            (fun (f : Model.modal_form_field) ->
+              if String.equal f.key "ma_turn_message" then { f with value = ko_msg }
+              else f)
+            md.fields
+        in
+        { m_turn_modal with inline_modal = Some { md with fields } }
+    | None -> Alcotest.fail "expected Ma_keeper_turn_form modal"
+  in
+  let m_turn_sent, _ =
+    Update.step ~now:t1 m_turn_filled
+      (Msg.Key_event { Keymap.Input.key = Keymap.Input.Enter; mods = Keymap.Input.no_mods })
+  in
+  Alcotest.(check bool) "Korean >60-byte turn preview is valid UTF-8 and truncated cleanly"
+    true
+    (match m_turn_sent.personal_keepers.turn_in_flight with
+    | Some ("k2", preview) ->
+        String.is_valid_utf_8 preview
+        && Masc_tui_term.Grapheme.display_width preview <= 60
+        && String.length preview < String.length ko_msg
+    | Some _ | None -> false);
+
+  (* P3-1: POST /turn HTTP 409 and HTTP 429 trigger conversation reload with conversation_id = None *)
+  List.iter
+    (fun (status, code) ->
+      let m_err, cmds_err =
+        Update.step ~now:t1 m_k2_hist
+          (Msg.Http_reply
+             {
+               epoch = m_k2_hist.epoch;
+               reply =
+                 Msg.Reply_auth_keeper_turn
+                   {
+                     keeper_id = "k2";
+                     message = "hi";
+                     result =
+                       Error
+                         (Msg.Http_error
+                            {
+                              status;
+                              body = Printf.sprintf {|{"error":"%s"}|} code;
+                              api_error = None;
+                            });
+                   };
+             })
+      in
+      Alcotest.(check bool)
+        (Printf.sprintf "POST /turn HTTP %d reloads conversation without conversation_id" status)
+        true
+        (Option.is_none m_err.personal_keepers.requested_conversation_id
+         && List.exists
+              (function
+                | Cmd.Http_get
+                    {
+                      req =
+                        Cmd.Get_auth_keeper_conversation
+                          { keeper_id = "k2"; conversation_id = None };
+                      _;
+                    } -> true
+                | _ -> false)
+              (Cmd.flatten cmds_err)))
+    [ (409, "not_signed_in"); (429, "no_quota") ];
+
+  (* P3-3: transcript_scroll clamps to max_transcript_scroll so scrolling up responds immediately *)
+  let long_turns =
+    List.init 25 (fun i : Wire_personal_keepers.conversation_turn ->
+        {
+          message = Printf.sprintf "Question line %d" i;
+          asked_at_ms = 1_795_254_000_000 + (i * 1000);
+          outcome =
+            Wire_personal_keepers.Turn_answered
+              {
+                text = Printf.sprintf "Answer line %d" i;
+                model = "claude-sonnet-4-6";
+                answered_at_ms = 1_795_254_000_500 + (i * 1000);
+              };
+        })
+  in
+  let m_long_conv, _ =
+    Update.step ~now:t1 m_k2_loaded
+      (Msg.Http_reply
+         {
+           epoch = m_k2_loaded.epoch;
+           reply =
+             Msg.Reply_auth_keeper_conversation
+               {
+                 keeper_id = "k2";
+                 conversation_id = None;
+                 result = Ok { k2_snap with turns = long_turns };
+               };
+         })
+  in
+  let m_pane1 = { m_long_conv with nav = { m_long_conv.nav with pane_index = 1 } } in
+  let m_scrolled_bot =
+    let rec loop n cur =
+      if n = 0 then cur
+      else loop (n - 1) (fst (Update.step ~now:t1 cur (Msg.Key_event (char_key "j"))))
+    in
+    loop 500 m_pane1
+  in
+  let bot_scroll = m_scrolled_bot.personal_keepers.transcript_scroll in
+  let m_scroll_up_1, _ =
+    Update.step ~now:t1 m_scrolled_bot (Msg.Key_event (char_key "k"))
+  in
+  Alcotest.(check bool) "scrolling down clamps to max_scroll so first [k] decrements immediately"
+    true
+    (bot_scroll > 0 && bot_scroll < 500
+     && m_scroll_up_1.personal_keepers.transcript_scroll = bot_scroll - 1);
 
   (* Session epoch purge on token swap / revert / identity change completely empties personal_keepers *)
   let m_purged, _ =

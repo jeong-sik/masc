@@ -3416,8 +3416,8 @@ let modal_field_help ~key =
   | "ma_keeper_id" ->
       Some
         (Say.make
-           ~ko:"영문자·숫자·'.'·'_'·'-' 조합 (1~128자, '.'/'..' 및 예약어 불가)"
-           ~en:"Letters, digits, '.', '_', '-' (1..128 chars, not '.'/'..' or reserved)")
+           ~ko:"소문자 영문·숫자·'.'·'_'·'-' 조합 (1~128자, 대문자·'.'/'..' 및 예약어 불가)"
+           ~en:"Lowercase letters, digits, '.', '_', '-' ([a-z0-9._-], 1..128 chars, no uppercase or reserved)")
   | "ma_runtime_id" ->
       Some
         (Say.make

@@ -799,6 +799,8 @@ let switch_workspace (m : Model.t) ws =
       config;
       knowledge;
       attention;
+      account = Account_store.disarm_clear_token m.account;
+      personal_keepers = Personal_keepers_store.disarm_delete m.personal_keepers;
       infra = { m.infra with show_raw_json = false };
       runtime = { m.runtime with pending_addon_decl_path = None };
       inline_modal = None;
@@ -1519,9 +1521,26 @@ let open_overlay (m : Model.t) overlay =
     | Nav.System_gate _ ->
         None
   in
-  let account = Account_store.close_token_editor m.account in
+  let account =
+    Account_store.close_token_editor m.account
+    |> Account_store.disarm_clear_token
+  in
+  let personal_keepers =
+    Personal_keepers_store.disarm_delete m.personal_keepers
+  in
   let next =
-    { m with nav; drafts; config; account; incidents; knowledge; inline_modal; ask_modal }
+    {
+      m with
+      nav;
+      drafts;
+      config;
+      account;
+      personal_keepers;
+      incidents;
+      knowledge;
+      inline_modal;
+      ask_modal;
+    }
     |> Model.sync_sidebar_cursor |> refresh_queue_on_entry
   in
   (next, View_fetches.fetches_for_current_view next)
@@ -7130,8 +7149,8 @@ let submit_inline_modal ~now (m : Model.t) =
               | Ok message ->
                   let preview =
                     let s = Text_util.sanitize_single_line message in
-                    if String.length s > 60 then String.sub s 0 60 ^ "..."
-                    else s
+                    Masc_tui_term.Grapheme.truncate_to_width ~max_width:60
+                      ~ellipsis:"..." s
                   in
                   let personal_keepers =
                     Personal_keepers_store.start_turn_in_flight ~keeper_id

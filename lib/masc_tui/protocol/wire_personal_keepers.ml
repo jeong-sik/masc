@@ -24,6 +24,8 @@ let max_keeper_id_length = 128
 let max_authz_id_length = 255
 let max_message_bytes = 4096
 let turn_timeout_sec = 130.0
+(* Server vendor conversation purge uses vendor_timeout_s = 60.0; give headroom. *)
+let delete_timeout_sec = 70.0
 
 (* Reserved root store directory names rejected by [Common.is_keepers_root_store_dirname]. *)
 let reserved_keeper_store_dirnames =

@@ -1743,13 +1743,24 @@ let dispatch_ma_personal_keepers_key ~now (m : Model.t)
               Personal_keepers_store.disarm_delete m.personal_keepers;
           }
       in
+      let pk_max_scroll (m : Model.t) =
+        let pane_w, pane_h =
+          match Model.pane_rects m with
+          | _ :: r :: _ -> (r.Rect.w, r.Rect.h)
+          | [ r ] -> (r.Rect.w, r.Rect.h)
+          | [] -> (m.viewport.cols, m.viewport.rows)
+        in
+        Personal_keepers_store.max_transcript_scroll ~pane_w ~pane_h
+          m.personal_keepers
+      in
       let move_or_scroll delta =
         if m.nav.pane_index = 1 then
+          let max_scroll = pk_max_scroll m in
           Some
             ( {
                 m with
                 personal_keepers =
-                  Personal_keepers_store.scroll_transcript ~delta
+                  Personal_keepers_store.scroll_transcript ~max_scroll ~delta
                     m.personal_keepers;
               }
             , [] )
@@ -1773,26 +1784,39 @@ let dispatch_ma_personal_keepers_key ~now (m : Model.t)
         match Personal_keepers_store.selected_keeper_id m.personal_keepers with
         | None -> Some (m, [])
         | Some keeper_id ->
-            let pk, fetch_cid =
+            let pk, fetch_target =
               Personal_keepers_store.select_conversation_by_delta ~delta
                 m.personal_keepers
             in
             let next = { m with personal_keepers = pk } in
             let cmds =
-              match fetch_cid with
-              | Some cid
-                when Option.is_none pk.own_keeper_forbidden
-                     && Option.is_none pk.conversation_forbidden ->
-                  [
-                    Cmd.Http_get
-                      {
-                        epoch = next.epoch;
-                        req =
-                          Cmd.Get_auth_keeper_conversation
-                            { keeper_id; conversation_id = Some cid };
-                      };
-                  ]
-              | Some _ | None -> []
+              if
+                Option.is_some pk.own_keeper_forbidden
+                || Option.is_some pk.conversation_forbidden
+              then []
+              else
+                match fetch_target with
+                | Personal_keepers_store.Fetch_none -> []
+                | Personal_keepers_store.Fetch_current ->
+                    [
+                      Cmd.Http_get
+                        {
+                          epoch = next.epoch;
+                          req =
+                            Cmd.Get_auth_keeper_conversation
+                              { keeper_id; conversation_id = None };
+                        };
+                    ]
+                | Personal_keepers_store.Fetch_conversation cid ->
+                    [
+                      Cmd.Http_get
+                        {
+                          epoch = next.epoch;
+                          req =
+                            Cmd.Get_auth_keeper_conversation
+                              { keeper_id; conversation_id = Some cid };
+                        };
+                    ]
             in
             Some (next, cmds)
       in
@@ -1804,21 +1828,23 @@ let dispatch_ma_personal_keepers_key ~now (m : Model.t)
       | Keymap.Input.Up when (not norm.mods.ctrl) && not norm.mods.alt ->
           move_or_scroll (-1)
       | Keymap.Input.Page_down when (not norm.mods.ctrl) && not norm.mods.alt ->
+          let max_scroll = pk_max_scroll m in
           Some
             ( {
                 m with
                 personal_keepers =
-                  Personal_keepers_store.scroll_transcript ~delta:8
+                  Personal_keepers_store.scroll_transcript ~max_scroll ~delta:8
                     m.personal_keepers;
               }
             , [] )
       | Keymap.Input.Page_up when (not norm.mods.ctrl) && not norm.mods.alt ->
+          let max_scroll = pk_max_scroll m in
           Some
             ( {
                 m with
                 personal_keepers =
-                  Personal_keepers_store.scroll_transcript ~delta:(-8)
-                    m.personal_keepers;
+                  Personal_keepers_store.scroll_transcript ~max_scroll
+                    ~delta:(-8) m.personal_keepers;
               }
             , [] )
       | Keymap.Input.Char "n" when is_printable_key norm ->
@@ -2213,6 +2239,38 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
         elapsed >= 0.0 && elapsed < Model.keeper_stop_arm_window_s
     | None -> false
   in
+  let replayed_norm = Keymap.replay_ime_event norm in
+  let on_clear_token_surface =
+    (not m.account.token_editor.active)
+    && (Option.equal Nav.equal_overlay m.nav.overlay (Some Nav.Account)
+       || Option.equal Nav.equal_overlay m.nav.overlay
+            (Some (Nav.System_gate Nav.Auth_gate)))
+  in
+  let is_clear_token_confirm_key =
+    on_clear_token_surface && is_printable_key replayed_norm
+    && Keymap.Input.equal_key replayed_norm.key (Keymap.Input.Char "c")
+  in
+  let clear_token_arm_active =
+    on_clear_token_surface && m.account.clear_token_armed
+  in
+  let on_pk_delete_surface =
+    Option.is_none m.nav.overlay
+    && Option.is_none (Model.active_inspector m)
+    && (not (Model.sidebar_has_focus m))
+    && (not (Drafts.is_focused m.drafts))
+    && (not m.nav.filter_focused)
+    && Nav.equal_workspace m.nav.workspace Nav.Keepers
+    && Rbac.is_multi_account m.auth_session
+    && Rbac.is_allowed m.auth_session Rbac.Multi_account_own_keeper
+  in
+  let is_pk_delete_confirm_key =
+    on_pk_delete_surface && is_printable_key replayed_norm
+    && Keymap.Input.equal_key replayed_norm.key (Keymap.Input.Char "d")
+  in
+  let pk_delete_arm_active =
+    on_pk_delete_surface
+    && Option.is_some m.personal_keepers.delete_armed_conv_id
+  in
   let m =
     if Option.is_some m.quit_armed_at && not is_quit_key then
       Model.disarm_quit m
@@ -2221,6 +2279,23 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
   let m =
     if Option.is_some m.keeper_stop_armed && not is_keeper_stop_key then
       Model.disarm_keeper_stop m
+    else m
+  in
+  let m =
+    if m.account.clear_token_armed && not is_clear_token_confirm_key then
+      { m with account = Account_store.disarm_clear_token m.account }
+    else m
+  in
+  let m =
+    if
+      Option.is_some m.personal_keepers.delete_armed_conv_id
+      && not is_pk_delete_confirm_key
+    then
+      {
+        m with
+        personal_keepers =
+          Personal_keepers_store.disarm_delete m.personal_keepers;
+      }
     else m
   in
   let is_plain_escape =
@@ -2246,13 +2321,29 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
     | Keymap.Input.Function _ ->
         false
   in
-  (* Plain Esc consumes only an active arm (quit or keeper stop) without popping
-     an active dive/modal. Every other non-confirm key disarms above AND
-     continues normal dispatch so the user's first keypress is never lost. *)
+  (* Plain Esc consumes only an active arm (quit, keeper stop, token clear,
+     or personal conversation delete) without popping an active dive/overlay.
+     Every other non-confirm key disarms above AND continues normal dispatch
+     so the user's first keypress is never lost. *)
   if
     (quit_arm_active && (not is_quit_key) && is_plain_escape)
     || (keeper_stop_arm_active && (not is_keeper_stop_key) && is_plain_escape)
   then (m, [])
+  else if
+    clear_token_arm_active && (not is_clear_token_confirm_key)
+    && is_plain_escape
+  then
+    ( Model.with_toast ~now ~level:Model.Toast_info
+        (Say.make ~ko:"토큰 해제 취소됨" ~en:"Token clear cancelled")
+        m
+    , [] )
+  else if
+    pk_delete_arm_active && (not is_pk_delete_confirm_key) && is_plain_escape
+  then
+    ( Model.with_toast ~now ~level:Model.Toast_info
+        (Say.make ~ko:"대화 삭제 취소됨" ~en:"Conversation delete cancelled")
+        m
+    , [] )
   else
   (* Top-precedence Micro_viewport gate per tui-chat-design/SKILL.md: never
      mutate hidden drafts or underlying overlays. On <40x12 only Quit_app is
@@ -3856,6 +3947,20 @@ let apply_paste ~now:_ (m : Model.t) text =
           ({ m with drafts }, [])
 
 let apply_mouse ~now (m : Model.t) (ev : Keymap.Input.mouse_event) =
+  let m =
+    let m =
+      if m.account.clear_token_armed then
+        { m with account = Account_store.disarm_clear_token m.account }
+      else m
+    in
+    if Option.is_some m.personal_keepers.delete_armed_conv_id then
+      {
+        m with
+        personal_keepers =
+          Personal_keepers_store.disarm_delete m.personal_keepers;
+      }
+    else m
+  in
   if
     Model.is_too_small_viewport m.viewport
     || (Model.equal_breakpoint m.breakpoint Model.Micro

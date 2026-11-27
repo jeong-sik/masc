@@ -1473,6 +1473,10 @@ let test_ma_personal_keepers_loopback_http () =
                    Cmd.Delete_auth_keeper_conversation
                      { keeper_id = "alpha"; conversation_id = "conv-fail" };
                });
+          Alcotest.(check bool) "delete_timeout_sec exceeds server 60s vendor timeout"
+            true (Wpk.delete_timeout_sec > 60.0);
+          Alcotest.(check bool) "turn_timeout_sec exceeds server 120s turn timeout"
+            true (Wpk.turn_timeout_sec > 120.0);
           Alcotest.(check bool) "DELETE /conversation/conv-fail surfaces 503 conversation_not_deleted"
             true
             (match await_reply () with

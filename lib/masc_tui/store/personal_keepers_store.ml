@@ -245,30 +245,35 @@ let move_keeper_selection ~delta t =
     | Some k -> select_keeper_by_id k.keeper_id t
     | None -> t
 
+type conv_fetch_target =
+  | Fetch_none
+  | Fetch_current
+  | Fetch_conversation of string
+
 let select_conversation_by_delta ~delta t =
   match conversation_for_selected t with
-  | None -> (t, None)
+  | None -> (t, Fetch_none)
   | Some snap ->
       let count = List.length snap.conversations in
-      if count <= 0 then ({ t with selected_conv_idx = 0 }, None)
+      if count <= 0 then ({ t with selected_conv_idx = 0 }, Fetch_none)
       else
         let next_idx = clamp_idx count (t.selected_conv_idx + delta) in
         let chosen = List.nth_opt snap.conversations next_idx in
-        let next_req, fetch_cid =
+        let next_req, fetch_target =
           match chosen with
-          | None -> (t.requested_conversation_id, None)
+          | None -> (t.requested_conversation_id, Fetch_none)
           | Some c -> (
               match c.deletion with
               | Wire_personal_keepers.Deletion_failed ->
                   (* Never fetch ?conversation_id=<failed_id> (server returns 404). *)
-                  (None, None)
+                  (None, Fetch_none)
               | Wire_personal_keepers.Deletion_kept ->
                   let is_current =
                     Option.equal String.equal snap.current_conversation_id
                       (Some c.conversation_id)
                   in
-                  if is_current then (None, Some c.conversation_id)
-                  else (Some c.conversation_id, Some c.conversation_id))
+                  if is_current then (None, Fetch_current)
+                  else (Some c.conversation_id, Fetch_conversation c.conversation_id))
         in
         ( {
             t with
@@ -277,13 +282,106 @@ let select_conversation_by_delta ~delta t =
             delete_armed_conv_id = None;
             transcript_scroll = 0;
           }
-        , fetch_cid )
+        , fetch_target )
 
 let set_requested_conversation cid t =
   { t with requested_conversation_id = cid; transcript_scroll = 0 }
 
-let scroll_transcript ~delta t =
-  { t with transcript_scroll = Int.max 0 (t.transcript_scroll + delta) }
+let wrapped_line_count ~avail text =
+  let avail = Int.max 8 avail in
+  let lines = String.split_on_char '\n' text in
+  List.fold_left
+    (fun acc line ->
+      let w = Masc_tui_term.Grapheme.display_width line in
+      acc + Int.max 1 ((w + avail - 1) / avail))
+    0 lines
+
+let max_transcript_scroll ~pane_w ~pane_h t =
+  let inner_w = Int.max 0 (pane_w - 2) in
+  let pad_x = if inner_w >= 40 then 1 else 0 in
+  let cw = Int.max 12 (inner_w - (2 * pad_x)) in
+  let inner_h = Int.max 0 (pane_h - 2) in
+  let footer_h = if inner_h >= 6 then 1 else 0 in
+  let snap_opt = conversation_for_selected t in
+  let ephemeral =
+    match selected_keeper_id t with
+    | Some keeper_id -> ephemeral_turns_for ~keeper_id t
+    | None -> []
+  in
+  let conv_rows =
+    match snap_opt with
+    | Some s -> Int.min 4 (List.length s.conversations)
+    | None -> 0
+  in
+  let banner_rows =
+    let count_opt = function Some _ -> 1 | None -> 0 in
+    let matches_sel = function
+      | Some (tk, _) ->
+          Option.equal String.equal (selected_keeper_id t) (Some tk)
+      | None -> false
+    in
+    count_opt t.delete_armed_conv_id
+    + count_opt t.last_delete_notice
+    + count_opt t.conversation_forbidden
+    + (if matches_sel t.turn_in_flight then 1 else 0)
+    + if matches_sel t.last_turn_error then 1 else 0
+  in
+  (* Header line (Keeper/Runtime) + conv list + Turns hairline + banners. *)
+  let used_top = 1 + conv_rows + 1 + banner_rows in
+  let avail = Int.max 1 (inner_h - footer_h - used_top) in
+  let total_lines =
+    let snap_lines =
+      match snap_opt with
+      | None -> 0
+      | Some s ->
+          if s.turns = [] && ephemeral = [] then 1
+          else
+            List.fold_left
+              (fun acc (turn : Wire_personal_keepers.conversation_turn) ->
+                let user_lines =
+                  wrapped_line_count ~avail:(Int.max 8 (cw - 5)) turn.message
+                in
+                let reply_lines =
+                  match turn.outcome with
+                  | Wire_personal_keepers.Turn_answered { text; model; _ } ->
+                      let pfx_w = String.length model + 10 in
+                      wrapped_line_count ~avail:(Int.max 8 (cw - pfx_w)) text
+                  | Wire_personal_keepers.Turn_failed _
+                  | Wire_personal_keepers.Turn_unrecorded _ ->
+                      1
+                in
+                acc + user_lines + reply_lines + 1)
+              0 s.turns
+    in
+    let eph_lines =
+      List.fold_left
+        (fun acc (ep : ephemeral_turn) ->
+          let user_lines =
+            wrapped_line_count ~avail:(Int.max 8 (cw - 5)) ep.message
+          in
+          let ans_lines =
+            wrapped_line_count ~avail:(Int.max 8 (cw - 2)) ep.answer.text
+          in
+          acc + user_lines + 1 + ans_lines + 1)
+        0 ephemeral
+    in
+    snap_lines + eph_lines
+  in
+  Int.max 0 (total_lines - avail)
+
+let scroll_transcript ?max_scroll ~delta t =
+  let base =
+    match max_scroll with
+    | Some ms -> Int.min (Int.max 0 ms) t.transcript_scroll
+    | None -> t.transcript_scroll
+  in
+  let next = Int.max 0 (base + delta) in
+  let clamped =
+    match max_scroll with
+    | Some ms -> Int.min (Int.max 0 ms) next
+    | None -> next
+  in
+  { t with transcript_scroll = clamped }
 
 let start_turn_in_flight ~keeper_id ~preview t =
   {

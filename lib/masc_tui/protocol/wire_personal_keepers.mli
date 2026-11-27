@@ -23,6 +23,7 @@ val max_keeper_id_length : int
 val max_authz_id_length : int
 val max_message_bytes : int
 val turn_timeout_sec : float
+val delete_timeout_sec : float
 
 (** {1 Client-side Validators Matching Server Contracts} *)
 

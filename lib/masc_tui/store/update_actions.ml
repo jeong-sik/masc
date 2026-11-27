@@ -4897,7 +4897,12 @@ and execute_action ~now (m : Model.t) action =
           close_overlay_and_resync m
       | Some Nav.Account ->
           if m.account.token_editor.active then
-            ( { m with account = Account_store.close_token_editor m.account }
+            ( {
+                m with
+                account =
+                  Account_store.close_token_editor m.account
+                  |> Account_store.disarm_clear_token;
+              }
             , [] )
           else
             ( {
@@ -4909,7 +4914,9 @@ and execute_action ~now (m : Model.t) action =
                     return_overlay = None;
                     filter_focused = false;
                   };
-                account = Account_store.close_token_editor m.account;
+                account =
+                  Account_store.close_token_editor m.account
+                  |> Account_store.disarm_clear_token;
                 inline_modal = None;
               }
             , [] )

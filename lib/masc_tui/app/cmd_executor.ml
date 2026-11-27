@@ -4007,7 +4007,7 @@ let execute_delete t ~epoch req =
             match
               match
                 Http_client.delete_raw ~io:t.io ~clock:t.clock
-                  ~timeout_sec:standard_timeout_sec ep ~path
+                  ~timeout_sec:Wire_personal_keepers.delete_timeout_sec ep ~path
               with
               | Error err -> Error (msg_error_of_http err)
               | Ok raw ->

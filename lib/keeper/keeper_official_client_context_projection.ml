@@ -138,12 +138,10 @@ let history_role_label = function
    is kept there outlives its turn: an event, or a Goal's phase after the Goal
    left it. The official turn therefore takes these blocks out of the carrier
    once and delivers them as current-turn input: in front of the Start prompt
-   and on every Resume. Each block's source proof is the issuer's own carrier
-   span. *)
+   and on every Resume. *)
 type turn_block =
   { block : Prompt_block_id.t
   ; text : string
-  ; issuer : Keeper_context_assembly.t
   }
 
 (* The blocks one official turn took out of its carrier, in carrier order. *)
@@ -164,9 +162,10 @@ let turn_block_message turn_block = extra_system_context_message turn_block.text
 (* A blank line between rendered messages and before the goal. *)
 let resume_section_separator = "\n\n"
 
-let turn_block_piece turn_block =
-  Keeper_context_submission_link.encoded_carrier ~assembly:(Some turn_block.issuer)
-    ~selected_blocks:(Some [ turn_block.block ]) (turn_block_message turn_block)
+(* A rendered message as it goes out: its role label, then the message
+   through the canonical codec. *)
+let rendered_text (message : Agent_core.Types.message) =
+  history_role_label message.role ^ encode_history_message message
 ;;
 
 let carrier_text (message : Agent_core.Types.message) =
@@ -184,8 +183,7 @@ let carrier_text (message : Agent_core.Types.message) =
 ;;
 
 (* Take every turn block out of [issuer]'s carrier, one after another in
-   carrier order: [rest] is the issuer re-issued without them, and each block
-   names [issuer], whose carrier holds its span. [None] when a turn block
+   carrier order: [rest] is the issuer re-issued without them. [None] when a turn block
    cannot be taken out exactly once ({!Keeper_context_assembly.split_block}),
    which keeps the carrier whole. *)
 let split_turn_blocks (issuer : Keeper_context_assembly.t) =
@@ -195,7 +193,7 @@ let split_turn_blocks (issuer : Keeper_context_assembly.t) =
        | None -> None
        | Some (current, taken) when is_turn_block id ->
          Option.map
-           (fun (rest, text) -> rest, { block = id; text; issuer } :: taken)
+           (fun (rest, text) -> rest, { block = id; text } :: taken)
            (Keeper_context_assembly.split_block id current)
        | Some _ -> split)
     (Some (issuer, []))
@@ -257,15 +255,11 @@ let project_start_system ~system_prompt ~composed_context messages =
   in
   let start_context =
     match turn_observation with
-    | None -> Keeper_context_submission_link.literal ""
+    | None -> ""
     | Some observation ->
-      Keeper_context_submission_link.concat ~separator:resume_section_separator
+      String.concat resume_section_separator
         (List.map
-           (fun turn_block ->
-              Keeper_context_submission_link.concat ~separator:""
-                [ Keeper_context_submission_link.literal
-                    (history_role_label (turn_block_message turn_block).role)
-                ; turn_block_piece turn_block ])
+           (fun turn_block -> rendered_text (turn_block_message turn_block))
            (turn_blocks observation))
   in
   messages, start_context, composed_context, turn_observation
@@ -343,7 +337,6 @@ type composed_context = Keeper_context_assembly.t
 
 type resume_delivery =
   { prompt : string
-  ; context_projection : Keeper_context_submission_link.t
   ; held_context : Session_store.held_context list
   ; unchanged_sections : Keeper_context_layers.source list
   ; partly_held_sections : Keeper_context_layers.source list
@@ -385,7 +378,6 @@ type carried_source =
   | Message_context
   | Issued_system_observation of Prompt_block_id.t
   | Turn_observation of turn_block
-type rendered_source = Carried_source of carried_source | Host_notice
 
 (* One carried context a turn composes: its name and digest, whether a resume
    sends it again when the session holds the same bytes, the message a
@@ -852,8 +844,7 @@ let sent_notices = function
 ;;
 
 (* The line goes out as its own System message after the carrier it speaks
-   for. It is host text, not issuer bytes, so it claims no context
-   provenance. *)
+   for. *)
 let unchanged_sections_message notice =
   extra_system_context_message notice
 ;;
@@ -861,28 +852,22 @@ let unchanged_sections_message notice =
 let rec rendered_messages = function
   | [] -> []
   | sent :: rest when is_block (sent_item sent) ->
-    let rec take_blocks texts ids unchanged held_rows notices = function
+    let rec take_blocks texts notices = function
       | next :: rest when is_block (sent_item next) ->
         (match sent_text next, block_id (sent_item next) with
-         | Some text, Some id ->
-           take_blocks (text :: texts) (id :: ids)
-             (List.rev_append (sent_unchanged next) unchanged)
-             (List.rev_append (sent_held_rows next) held_rows)
-             (List.rev_append (sent_notices next) notices)
-             rest
-         | _ -> (texts, ids, unchanged, held_rows, notices), next :: rest)
-      | rest -> (texts, ids, unchanged, held_rows, notices), rest in
+         | Some text, Some _ ->
+           take_blocks (text :: texts) (List.rev_append (sent_notices next) notices) rest
+         | _ -> (texts, notices), next :: rest)
+      | rest -> (texts, notices), rest in
     (match sent_text sent, block_id (sent_item sent) with
-     | Some text, Some id ->
-       let (texts, ids, unchanged, held_rows, notices), rest =
-         take_blocks [text] [id] (List.rev (sent_unchanged sent))
-           (List.rev (sent_held_rows sent)) (List.rev (sent_notices sent)) rest in
-       (extra_system_context_message (String.concat resume_section_separator (List.rev texts)),
-        Some (List.rev ids, List.rev unchanged, List.rev held_rows), Carried_source Message_context)
-       :: List.rev_map (fun notice -> unchanged_sections_message notice, None, Host_notice) notices
+     | Some text, Some _ ->
+       let (texts, notices), rest =
+         take_blocks [text] (List.rev (sent_notices sent)) rest in
+       extra_system_context_message (String.concat resume_section_separator (List.rev texts))
+       :: List.rev_map unchanged_sections_message notices
        @ rendered_messages rest
-     | _ -> ((sent_item sent).message,None,Carried_source (sent_item sent).source) :: rendered_messages rest)
-  | sent :: rest -> ((sent_item sent).message,None,Carried_source (sent_item sent).source) :: rendered_messages rest
+     | _ -> (sent_item sent).message :: rendered_messages rest)
+  | sent :: rest -> (sent_item sent).message :: rendered_messages rest
 ;;
 
 let resume_prompt ~goal ~held ~turn_observation ?composed_context
@@ -895,29 +880,14 @@ let resume_prompt ~goal ~held ~turn_observation ?composed_context
           Prompt_block_id.equal block current_block && item.held.sha256 = sha256_hex text)
           system_observations_in_developer)
       | Turn_observation _ | Message_context -> true) in
-  let deliveries = List.map (fun item -> item, carried_delivery ~held item) carried in
-  let sent = List.filter_map (fun (_, delivery) -> match delivery with
+  let sent = List.filter_map (fun item -> match carried_delivery ~held item with
     | Sent sent -> Some sent
-    | Already_held -> None) deliveries in
-  let omitted = List.filter_map (fun (item, delivery) -> match delivery with
-    | Already_held -> Some item
-    | Sent _ -> None) deliveries in
-  let context_projection =
+    | Already_held -> None) carried in
+  let rendered =
     sent |> rendered_messages
-    |> List.map (fun ((message : Agent_core.Types.message),selection,source) ->
-      Keeper_context_submission_link.concat ~separator:""
-        [Keeper_context_submission_link.literal (history_role_label message.role);
-         (match source with
-          | Host_notice -> Keeper_context_submission_link.literal (encode_history_message message)
-          | Carried_source (Issued_system_observation block) -> Keeper_context_submission_link.encoded_system_observation
-              ~block ~assembly:composed_context message
-          | Carried_source (Turn_observation turn_block) -> turn_block_piece turn_block
-          | Carried_source Message_context -> Keeper_context_submission_link.encoded_carrier ~assembly:composed_context
-              ~selected_blocks:(Option.map (fun (ids, _, _) -> ids) selection)
-              ?omitted_sections:(Option.map (fun (_, unchanged, _) -> unchanged) selection)
-              ?omitted_rows:(Option.map (fun (_, _, held_rows) -> held_rows) selection) message)])
-    |> Keeper_context_submission_link.concat ~separator:resume_section_separator
-    |> Keeper_context_submission_link.trim in
+    |> List.map rendered_text
+    |> String.concat resume_section_separator
+    |> String.trim in
   let composed = held_of_carried carried in
   (* A context composed this turn supersedes what the session held under the
      same name. A whole carrier and the typed blocks name the same text, so
@@ -1005,21 +975,10 @@ let resume_prompt ~goal ~held ~turn_observation ?composed_context
            && not (List.exists (fun item -> supersedes item previous) carried))
         held
   in
-  let context_projection =
-    if Keeper_context_submission_link.text context_projection = "" then
-      Keeper_context_submission_link.literal goal
-    else Keeper_context_submission_link.concat ~separator:resume_section_separator
-      [context_projection;Keeper_context_submission_link.literal goal] in
-  let context_projection = List.fold_left (fun projection item ->
-    match item.source with
-    | Issued_system_observation block -> Keeper_context_submission_link.omit_held_system_observation
-        ~block ~assembly:composed_context item.message projection
-    | Turn_observation turn_block -> Keeper_context_submission_link.omit_held
-        ~assembly:(Some turn_block.issuer) ~blocks:(Some [ turn_block.block ]) item.message projection
-    | Message_context -> Keeper_context_submission_link.omit_held ~assembly:composed_context
-        ~blocks:(Option.map (fun id -> [id]) (block_id item)) item.message projection)
-    context_projection omitted in
-  { prompt = Keeper_context_submission_link.text context_projection; held_context; context_projection
+  let prompt =
+    if rendered = "" then goal
+    else String.concat resume_section_separator [rendered; goal] in
+  { prompt; held_context
   ; unchanged_sections = List.concat_map sent_unchanged sent
   ; partly_held_sections = List.concat_map (fun sent -> List.map fst (sent_held_rows sent)) sent }
 

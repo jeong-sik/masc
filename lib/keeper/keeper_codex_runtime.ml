@@ -66,14 +66,13 @@ let finish_raw_success ~keeper_name raw_trace_run (result : Runtime_agent.run_re
    inside the app-server connection. The shared catalog clamp is for clients
    without that discovery contract. *)
 
-let project_messages ~assembly ~started_at messages =
+let project_messages ~started_at messages =
   let rec loop developer history = function
     | [] -> Ok (List.rev developer, List.rev history)
     | (message : Agent_core.Types.message) :: rest ->
       (match message.role with
        | Agent_core.Types.System ->
-         let projection=Keeper_context_submission_link.encoded_carrier ~assembly ~selected_blocks:None message in
-         loop (projection :: developer) history rest
+         loop (Host.encode_history_message message :: developer) history rest
        | Agent_core.Types.User ->
          let text = Host.encode_start_message ~started_at message in
          loop developer
@@ -1232,10 +1231,10 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
     in
     let composed_context = prepared.composed_context in
     let compose_developer_instructions developer_messages =
-      (List.map Keeper_context_submission_link.literal (prepared.system_prompt :: posture_notes)) @ developer_messages
-      |> List.filter (fun piece -> String.trim (Keeper_context_submission_link.text piece) <> "")
-      |> Keeper_context_submission_link.concat ~separator:"\n\n"
-      |> Keeper_context_submission_link.trim
+      (prepared.system_prompt :: posture_notes) @ developer_messages
+      |> List.filter (fun piece -> String.trim piece <> "")
+      |> String.concat "\n\n"
+      |> String.trim
     in
     let* () = Keeper_official_task_reference.require_preserved
       ~reference:historical_task_message prepared.messages
@@ -1266,7 +1265,7 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
     let* history, context_frontier, composed_developer_instructions, system_projection =
       Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
         let* developer_messages, history =
-          project_messages ~assembly:composed_context ~started_at
+          project_messages ~started_at
             (match thread_mode with
              | Runtime_codex_app_server.Start -> prepared.messages
              | Runtime_codex_app_server.Resume _ ->
@@ -1308,7 +1307,7 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
     let previously_held = Keeper_official_client_session_store.held_context_for_resume
       claim_plan ~expected:stored_session in
     let system_plan = Keeper_codex_system_context.prepare
-      ~full_system:(Keeper_context_submission_link.text system_projection)
+      ~full_system:system_projection
       ~system_prompt:prepared.system_prompt ~posture_notes
       ~assembly:composed_context
       ~previously_held:(match thread_mode with
@@ -1318,7 +1317,7 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
     let prompt, held_context =
       match thread_mode with
       | Runtime_codex_app_server.Start ->
-        Keeper_context_submission_link.text (Host.start_prompt prepared prompt),
+        Host.start_prompt prepared prompt,
         Host.start_held_context ~turn_observation:prepared.turn_observation
           ?composed_context prepared.messages
       | Runtime_codex_app_server.Resume { thread_id } ->
@@ -1341,7 +1340,7 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
     let held_context = Keeper_codex_system_context.with_carried_context system_plan held_context in
     let context_frontier = { context_frontier with held_context } in
     let settled_held_context = ref held_context in
-    let developer_instructions = Some (Keeper_context_submission_link.text composed_developer_instructions) in
+    let developer_instructions = Some composed_developer_instructions in
     (* Completion Authority is current-turn User context on Start and Resume;
        it never enters the vendor's persistent developerInstructions. Other
        Start System context keeps its existing instruction surface. *)

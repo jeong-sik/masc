@@ -26,7 +26,6 @@ type composed_context = Keeper_official_client_context_projection.composed_conte
 
 type resume_delivery = Keeper_official_client_context_projection.resume_delivery =
   { prompt : string
-  ; context_projection : Keeper_context_submission_link.t
   ; held_context : Keeper_official_client_session_store.held_context list
   ; unchanged_sections : Keeper_context_layers.source list
   ; partly_held_sections : Keeper_context_layers.source list
@@ -220,7 +219,7 @@ let host_stop_result
 type prepared_turn =
   { messages : Agent_core.Types.message list
   ; system_prompt : string
-  ; start_context : Keeper_context_submission_link.t
+  ; start_context : string
   ; composed_context : Keeper_context_assembly.t option
   ; turn_observation : turn_observation option
   ; tools : Agent_core.Tool.t list
@@ -228,10 +227,9 @@ type prepared_turn =
   }
 
 let start_prompt prepared prompt =
-  if Keeper_context_submission_link.text prepared.start_context = ""
-  then Keeper_context_submission_link.literal prompt
-  else Keeper_context_submission_link.concat ~separator:"\n\n"
-      [prepared.start_context; Keeper_context_submission_link.literal prompt]
+  if prepared.start_context = ""
+  then prompt
+  else String.concat "\n\n" [prepared.start_context; prompt]
 ;;
 
 type transmitted_model_input =
@@ -1181,8 +1179,7 @@ let framed_prompt_for_turn ?composed_context ?resume_system_notice ~held ~delive
        ; Some (required_frame_label (Antigravity_input_frame.current_goal_label ()) ^ goal)
        ]
        |> List.filter_map Fun.id
-       |> String.concat Antigravity_input_frame.section_separator)
-      |> Keeper_context_submission_link.text)
+       |> String.concat Antigravity_input_frame.section_separator))
 ;;
 
 let prepare_turn ~runtime_label ~keeper_name ~turn_count ~system_prompt ~tools

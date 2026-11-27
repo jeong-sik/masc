@@ -47,15 +47,22 @@ let image_bytes ~damaged =
   Bytes.to_string bytes
 ;;
 
+let volume_entry_json name source =
+  `Assoc
+    [ "id", `String name
+    ; ( "configuration"
+      , `Assoc
+          [ "name", `String name; "format", `String "ext4"; "source", `String source ] )
+    ]
+;;
+
 let inspect_json name source =
+  Yojson.Safe.to_string (`List [ volume_entry_json name source ])
+;;
+
+let list_json volumes =
   Yojson.Safe.to_string
-    (`List
-       [ `Assoc
-           [ "configuration",
-             `Assoc
-               [ "name", `String name; "format", `String "ext4"; "source", `String source ]
-           ]
-       ])
+    (`List (List.map (fun (name, source, _) -> volume_entry_json name source) volumes))
 ;;
 
 let fake_container ~bin ~calls volumes =
@@ -63,6 +70,9 @@ let fake_container ~bin ~calls volumes =
   Out_channel.with_open_bin path (fun out ->
     Printf.fprintf out "#!/bin/sh\nprintf '%%s\\n' \"$*\" >> %s\ncase \"$*\" in\n"
       (Filename.quote calls);
+    Printf.fprintf out "  %s) printf '%%s\\n' %s ;;\n"
+      (Filename.quote "volume list --format json")
+      (Filename.quote (list_json volumes));
     List.iter
       (fun (name, source, _) ->
          Printf.fprintf out "  %s) printf '%%s\\n' %s ;;\n"
@@ -246,11 +256,8 @@ let test_running_sweep_does_not_mutate_volumes () =
         |> List.filter (fun line -> not (String.equal line ""))
         |> List.sort String.compare
       in
-      let expected =
-        List.map (fun (name, _, _) -> "volume inspect " ^ name) volumes
-        |> List.sort String.compare
-      in
-      check (list string) "the fake runtime received only volume inspections" expected actual;
+      let expected = [ "volume list --format json" ] in
+      check (list string) "the fake runtime received only one batched volume listing" expected actual;
       List.iter
         (fun (_, image, before) ->
            check string "image bytes stayed unchanged" before

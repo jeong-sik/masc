@@ -11,6 +11,10 @@ let schedules_path config =
   Filename.concat (Workspace_utils.masc_dir config) "schedules.json"
 ;;
 
+let schedule_notes_path config =
+  Filename.concat (Workspace_utils.masc_dir config) Schedule_store.schedule_notes_filename
+;;
+
 let json = testable Yojson.Safe.pp Yojson.Safe.equal
 
 (* Most cases here are about what becomes Due, not about what leaves the
@@ -1186,7 +1190,8 @@ let write_attempt_fixture config (state : Schedule_store.state) =
     [ "version", `Int state.version; "updated_at", `Float state.updated_at
     ; "schedules", `List (List.map schedule_request_to_yojson state.schedules)
     ; "wakes", `List (List.map wake_record_to_yojson state.wakes)
-    ; "notes", `List (List.map schedule_note_to_yojson state.notes) ] in
+    ; ( "note_last_written_at"
+      , `Assoc (List.map (fun (id, ts) -> id, `Float ts) state.note_last_written_at) ) ] in
   Workspace_core.write_text config (schedules_path config) (Yojson.Safe.to_string json)
 ;;
 
@@ -1780,6 +1785,8 @@ let test_mutations_refuse_stale_mirror () =
     let check_preserved () =
       check string "stale mirror remains evidence" stale_mirror
         (Workspace_core.read_text config (recovery_path config));
+      check bool "notes log is not created while primary is unavailable" false
+        (Sys.file_exists (schedule_notes_path config));
       match cause with
       | Primary_missing -> check bool "missing primary is not recreated" false
           (Workspace_utils.path_exists config (schedules_path config))
@@ -1947,7 +1954,7 @@ let test_find_schedule_and_notes_for_schedule_use_prepared_indexes () =
   (match Schedule_store.find_schedule state ~schedule_id:"sched-missing" with
    | None -> ()
    | Some _ -> fail "unexpected schedule returned for missing id");
-  let notes = Schedule_store.notes_for_schedule state ~schedule_id:"sched-index-b" in
+  let notes = Schedule_store.read_notes_for_schedule config ~schedule_id:"sched-index-b" in
   check (list string) "notes sorted oldest-first per schedule"
     [ "earlier note"; "later note" ]
     (List.map (fun (n : Schedule_domain.schedule_note) -> n.body) notes)
@@ -2325,21 +2332,34 @@ let test_the_state_kept_after_a_write_is_the_state_the_file_decodes_to () =
   with_workspace
   @@ fun config ->
   let request = insert_ok config (make_request ()) in
-  (match
-     append_note config ~schedule_id:request.schedule_id ~author_id:"operator"
-       ~author_kind:Human_operator ~body:"caf\xff" ~now:150.0
-   with
-   | Ok _ -> ()
-   | Error err -> fail ("note: " ^ store_error_to_string err));
+  let returned_note =
+    match
+      append_note config ~schedule_id:request.schedule_id ~author_id:"operator"
+        ~author_kind:Human_operator ~body:"caf\xff" ~now:150.0
+    with
+    | Ok (note, _) -> note
+    | Error err -> fail ("note: " ^ store_error_to_string err)
+  in
   let kept = read_state config in
+  let kept_notes = read_notes_for_schedule config ~schedule_id:request.schedule_id in
   replace_ledger_outside_the_store config;
+  (* Also replace schedule_notes.jsonl outside the store so the note cache reloads. *)
+  let notes_path = schedule_notes_path config in
+  let notes_bytes = Fs_compat.load_file notes_path in
+  let notes_tmp = notes_path ^ ".outside" in
+  Fs_compat.save_file notes_tmp notes_bytes;
+  Unix.rename notes_tmp notes_path;
   let decoded = read_state config in
+  let decoded_notes = read_notes_for_schedule config ~schedule_id:request.schedule_id in
   check bool "the second read decoded the file" false (kept == decoded);
   check bool "and decoded the state that was kept" true (kept = decoded);
+  check bool "and decoded the notes that were kept" true (kept_notes = decoded_notes);
+  check bool "returned note body is already UTF-8 repaired" false
+    (String.equal returned_note.body "caf\xff");
   check bool "whose note body is the repaired one" false
     (List.exists
        (fun (note : Schedule_domain.schedule_note) -> String.equal note.body "caf\xff")
-       kept.notes)
+       kept_notes)
 ;;
 
 (* Compact JSON has no spelling for NaN or an infinity, so a schedule time that
@@ -2467,11 +2487,7 @@ let test_a_finished_schedule_leaves_the_ledger_a_week_after_its_wake () =
           if String.equal wake.schedule_id "ran-long-ago" then Some wake.schedule_id else None)
        state.wakes);
   check int "and its note stays, because a note is not state" 1
-    (List.length
-       (List.filter
-          (fun (note : Schedule_domain.schedule_note) ->
-             String.equal note.schedule_id "ran-long-ago")
-          state.notes));
+    (List.length (read_notes_for_schedule config ~schedule_id:"ran-long-ago"));
   (* Nothing left to forget: the next tick writes nothing. *)
   let before = Workspace_core.read_text config (schedules_path config) in
   ignore (store_ok "quiet refresh" (refresh_due config ~now));
@@ -2673,7 +2689,7 @@ let test_concurrent_notes_keep_both_accepted_appends () =
   check (list string) "both accepted notes survive with the earlier note"
     [ "seed"; "first"; "second" ]
     (List.map (fun (note : schedule_note) -> note.body)
-       (notes_for_schedule after ~schedule_id:request.schedule_id));
+       (read_notes_for_schedule config ~schedule_id:request.schedule_id));
   check bool "accepted appends receive distinct identities" false
     (String.equal first_note.note_id second_note.note_id);
   check (list int) "counts describe successive committed appends" [ 2; 3 ]
@@ -2697,6 +2713,220 @@ let test_note_read_failure_is_not_schedule_absence () =
     (Workspace_core.read_text config (schedules_path config));
   check string "mirror evidence stays" mirror_before
     (Workspace_core.read_text config (schedules_recovery_path config))
+;;
+
+let test_notes_live_in_separate_append_only_jsonl_not_schedules_json () =
+  with_workspace @@ fun config ->
+  let request = insert_ok config (make_request ~schedule_id:"split-notes" ()) in
+  ignore
+    (store_ok "note 1"
+       (append_note config ~schedule_id:request.schedule_id ~author_id:"operator"
+          ~author_kind:Human_operator ~body:"first" ~now:101.0));
+  ignore
+    (store_ok "note 2"
+       (append_note config ~schedule_id:request.schedule_id ~author_id:"operator"
+          ~author_kind:Human_operator ~body:"second" ~now:102.0));
+  let check_no_inline_notes label path =
+    match Workspace_core.read_json config path with
+    | `Assoc fields ->
+      check bool (label ^ " omits inline notes") true (List.assoc_opt "notes" fields = None);
+      check bool (label ^ " tracks note_last_written_at") true
+        (match List.assoc_opt "note_last_written_at" fields with
+         | Some (`Assoc entries) -> List.assoc_opt request.schedule_id entries = Some (`Float 102.0)
+         | _ -> false)
+    | _ -> fail (label ^ " is not a JSON object")
+  in
+  check_no_inline_notes "primary schedules.json" (schedules_path config);
+  check_no_inline_notes "recovery mirror" (schedules_recovery_path config);
+  let notes_file = schedule_notes_path config in
+  check bool "schedule_notes.jsonl created" true (Sys.file_exists notes_file);
+  let lines =
+    Fs_compat.load_file notes_file
+    |> String.split_on_char '\n'
+    |> List.filter (fun l -> String.trim l <> "")
+  in
+  check int "two jsonl lines persisted" 2 (List.length lines);
+  check (list string) "notes read back oldest first" [ "first"; "second" ]
+    (List.map (fun (n : schedule_note) -> n.body)
+       (read_notes_for_schedule config ~schedule_id:request.schedule_id))
+;;
+
+let test_legacy_inline_notes_migrate_losslessly_and_idempotently () =
+  with_workspace @@ fun config ->
+  let request = insert_ok config (make_request ~schedule_id:"legacy-sched" ()) in
+  let state = read_state config in
+  let legacy_note id created_at body =
+    { note_id = id
+    ; schedule_id = request.schedule_id
+    ; author_id = "operator"
+    ; author_kind = Human_operator
+    ; created_at
+    ; body
+    }
+  in
+  let n1 = legacy_note "10" 110.0 "legacy-one" in
+  let n2 = legacy_note "11" 120.0 "legacy-two" in
+  (* Keep [version] well below [n2.note_id] ("11") so the new id check below
+     proves [max_numeric_id] is honored rather than just [state.version + 1]. *)
+  let legacy_json =
+    `Assoc
+      [ "version", `Int 2
+      ; "updated_at", `Float state.updated_at
+      ; "schedules", `List (List.map schedule_request_to_yojson state.schedules)
+      ; "wakes", `List (List.map wake_record_to_yojson state.wakes)
+      ; "notes", `List [ schedule_note_to_yojson n1; schedule_note_to_yojson n2 ]
+      ]
+  in
+  Workspace_core.write_text config (schedules_path config) (Yojson.Safe.to_string legacy_json);
+  (* Read-only path must merge legacy notes without creating schedule_notes.jsonl. *)
+  check bool "notes log absent before write" false (Sys.file_exists (schedule_notes_path config));
+  check (list string) "read sees unmigrated legacy notes" [ "legacy-one"; "legacy-two" ]
+    (List.map (fun (n : schedule_note) -> n.body)
+       (read_notes_for_schedule config ~schedule_id:request.schedule_id));
+  check bool "read_notes_for_schedule never writes to disk" false
+    (Sys.file_exists (schedule_notes_path config));
+  let loaded_state = read_state config in
+  check (option (float 0.001)) "legacy notes populate note_last_written_at" (Some 120.0)
+    (List.assoc_opt request.schedule_id loaded_state.note_last_written_at);
+  (* Simulate a crashed partial migration where n1 already landed in schedule_notes.jsonl. *)
+  Fs_compat.save_file (schedule_notes_path config)
+    (Yojson.Safe.to_string (schedule_note_to_yojson n1) ^ "\n");
+  check (list string) "partial migration deduplicates by note_id" [ "legacy-one"; "legacy-two" ]
+    (List.map (fun (n : schedule_note) -> n.body)
+       (read_notes_for_schedule config ~schedule_id:request.schedule_id));
+  (* Appending n3 migrates only missing n2, writes n3, and strips inline notes from schedules.json. *)
+  let n3, count =
+    store_ok "append after legacy"
+      (append_note config ~schedule_id:request.schedule_id ~author_id:"operator"
+         ~author_kind:Human_operator ~body:"post-migration" ~now:130.0)
+  in
+  check int "note count includes migrated and new notes" 3 count;
+  check int "new note id stays above legacy max numeric id" 12 (int_of_string n3.note_id);
+  let disk_lines =
+    Fs_compat.load_file (schedule_notes_path config)
+    |> String.split_on_char '\n'
+    |> List.filter (fun l -> String.trim l <> "")
+  in
+  check int "schedule_notes.jsonl on disk has exactly 3 deduplicated lines" 3
+    (List.length disk_lines);
+  check (list string) "all three notes survive without duplicates"
+    [ "legacy-one"; "legacy-two"; "post-migration" ]
+    (List.map (fun (n : schedule_note) -> n.body)
+       (read_notes_for_schedule config ~schedule_id:request.schedule_id));
+  (match Workspace_core.read_json config (schedules_path config) with
+   | `Assoc fields ->
+     check bool "migrated schedules.json no longer carries inline notes" true
+       (List.assoc_opt "notes" fields = None)
+   | _ -> fail "migrated schedules.json is not an object");
+  (* Non-note mutation ([insert_request] via [observed_write]) also migrates inline legacy notes. *)
+  let state_after = read_state config in
+  let n4 = legacy_note "20" 140.0 "migrated-by-insert" in
+  let legacy_for_insert =
+    `Assoc
+      [ "version", `Int state_after.version
+      ; "updated_at", `Float state_after.updated_at
+      ; "schedules", `List (List.map schedule_request_to_yojson state_after.schedules)
+      ; "wakes", `List (List.map wake_record_to_yojson state_after.wakes)
+      ; "notes", `List [ schedule_note_to_yojson n4 ]
+      ]
+  in
+  Workspace_core.write_text config (schedules_path config) (Yojson.Safe.to_string legacy_for_insert);
+  ignore (insert_ok config (make_request ~schedule_id:"triggers-migration" ()));
+  let disk_lines_after_insert =
+    Fs_compat.load_file (schedule_notes_path config)
+    |> String.split_on_char '\n'
+    |> List.filter (fun l -> String.trim l <> "")
+  in
+  check int "non-note mutation migrated legacy note to disk" 4
+    (List.length disk_lines_after_insert);
+  check (list string) "all four notes readable after non-note migration"
+    [ "legacy-one"; "legacy-two"; "post-migration"; "migrated-by-insert" ]
+    (List.map (fun (n : schedule_note) -> n.body)
+       (read_notes_for_schedule config ~schedule_id:request.schedule_id))
+;;
+
+let test_corrupt_notes_log_fails_closed_and_torn_tail_recovers () =
+  with_workspace @@ fun config ->
+  let request = insert_ok config (make_request ~schedule_id:"torn-and-corrupt" ()) in
+  ignore
+    (store_ok "seed note"
+       (append_note config ~schedule_id:request.schedule_id ~author_id:"operator"
+          ~author_kind:Human_operator ~body:"committed" ~now:101.0));
+  let notes_file = schedule_notes_path config in
+  (* Integer created_at JSONL rows are accepted alongside float timestamps. *)
+  let int_ts_row =
+    {|{"note_id":"99","schedule_id":"torn-and-corrupt","author_id":"operator","author_kind":"human_operator","created_at":101,"body":"int-ts"}|}
+  in
+  Fs_compat.append_file notes_file (int_ts_row ^ "\n");
+  (* A crash-torn trailing fragment without newline is ignored on read and cut on next append. *)
+  Fs_compat.append_file notes_file "{\"note_id\":\"torn-fragment";
+  check (list string) "torn tail ignored on read" [ "committed"; "int-ts" ]
+    (List.map (fun (n : schedule_note) -> n.body)
+       (read_notes_for_schedule config ~schedule_id:request.schedule_id));
+  let _, count =
+    store_ok "append after torn tail"
+      (append_note config ~schedule_id:request.schedule_id ~author_id:"operator"
+         ~author_kind:Human_operator ~body:"after-torn" ~now:102.0)
+  in
+  check int "count after torn tail recovery" 3 count;
+  let recovered_lines =
+    Fs_compat.load_file notes_file
+    |> String.split_on_char '\n'
+    |> List.filter (fun l -> String.trim l <> "")
+  in
+  check int "recovered notes file on disk has 3 valid lines without torn tail" 3
+    (List.length recovered_lines);
+  check bool "every recovered line on disk parses cleanly as a schedule_note" true
+    (List.for_all
+       (fun line -> Result.is_ok (schedule_note_of_yojson (Yojson.Safe.from_string line)))
+       recovered_lines);
+  check (list string) "notes after torn tail recovery" [ "committed"; "int-ts"; "after-torn" ]
+    (List.map (fun (n : schedule_note) -> n.body)
+       (read_notes_for_schedule config ~schedule_id:request.schedule_id));
+  (* A newline-terminated malformed row must fail closed on read and refuse append
+     without modifying schedules.json. *)
+  let ledger_before = Workspace_core.read_text config (schedules_path config) in
+  Fs_compat.append_file notes_file "{not-json\n";
+  (match read_notes_for_schedule_result config ~schedule_id:request.schedule_id with
+   | Error (Corrupt_notes_log _) -> ()
+   | Error (Corrupt_notes_ledger err) ->
+     fail ("expected Corrupt_notes_log, got ledger error: " ^ read_error_to_string err)
+   | Ok _ -> fail "corrupt notes log silently succeeded");
+  (match
+     append_note config ~schedule_id:request.schedule_id ~author_id:"operator"
+       ~author_kind:Human_operator ~body:"must-not-write" ~now:103.0
+   with
+   | Error (Persistence_failed _) -> ()
+   | Error err -> fail ("expected Persistence_failed, got: " ^ store_error_to_string err)
+   | Ok _ -> fail "append_note accepted a corrupt notes log");
+  check string "failed append on corrupt notes log leaves schedules.json intact"
+    ledger_before (Workspace_core.read_text config (schedules_path config))
+;;
+
+let test_notes_split_works_on_memory_backend () =
+  with_workspace @@ fun filesystem ->
+  let memory =
+    { filesystem with
+      Workspace_utils.backend = Workspace_utils.Memory (Backend.Memory.create ())
+    }
+  in
+  let request = insert_ok memory (make_request ~schedule_id:"mem-notes" ()) in
+  let n1, c1 =
+    store_ok "mem note 1"
+      (append_note memory ~schedule_id:request.schedule_id ~author_id:"operator"
+         ~author_kind:Human_operator ~body:"mem-first" ~now:200.0)
+  in
+  let n2, c2 =
+    store_ok "mem note 2"
+      (append_note memory ~schedule_id:request.schedule_id ~author_id:"operator"
+         ~author_kind:Human_operator ~body:"mem-second" ~now:150.0)
+  in
+  check int "first memory count" 1 c1;
+  check int "second memory count" 2 c2;
+  check bool "distinct memory note ids" false (String.equal n1.note_id n2.note_id);
+  check (list string) "memory notes read oldest first" [ "mem-second"; "mem-first" ]
+    (List.map (fun (n : schedule_note) -> n.body)
+       (read_notes_for_schedule memory ~schedule_id:request.schedule_id))
 ;;
 
 let () =
@@ -2871,6 +3101,14 @@ let () =
             test_prune_does_not_bind_orphan_receipt_to_reused_public_id;
           test_case "contract vocabularies own strings and errors" `Quick
             test_contract_vocabularies_own_strings_and_errors;
+          test_case "notes live in separate append-only jsonl not schedules.json" `Quick
+            test_notes_live_in_separate_append_only_jsonl_not_schedules_json;
+          test_case "legacy inline notes migrate losslessly and idempotently" `Quick
+            test_legacy_inline_notes_migrate_losslessly_and_idempotently;
+          test_case "corrupt notes log fails closed and torn tail recovers" `Quick
+            test_corrupt_notes_log_fails_closed_and_torn_tail_recovers;
+          test_case "notes split works on memory backend" `Quick
+            test_notes_split_works_on_memory_backend;
         ] );
     ]
 ;;

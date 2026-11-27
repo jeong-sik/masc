@@ -8,7 +8,10 @@ type state =
   ; updated_at : float
   ; schedules : Schedule_domain.schedule_request list
   ; wakes : Schedule_domain.wake_record list
-  ; notes : Schedule_domain.schedule_note list
+  ; note_last_written_at : (string * float) list
+        (** Newest note timestamp per [schedule_id], sorted by [schedule_id].
+            Retained in the hot ledger so {!refresh_due} judges retention
+            without reading the append-only note log. *)
   }
 
 module Schedule_id_map : Map.S with type key = string
@@ -457,10 +460,33 @@ val append_note :
     (masc_schedule_update) does not orphan the prose that explains it. Notes
     are append-only: no edit, no removal. *)
 
-val notes_for_schedule :
-  state -> schedule_id:string -> Schedule_domain.schedule_note list
-(** Every retained note of one schedule_id, oldest first. Notes survive
-    terminal state transitions: they are history, not state. *)
+type notes_read_error =
+  | Corrupt_notes_log of string
+  | Corrupt_notes_ledger of read_error
+
+val notes_read_error_to_string : notes_read_error -> string
+
+val read_notes_for_schedule_result :
+  Workspace_utils.config ->
+  schedule_id:string ->
+  (Schedule_domain.schedule_note list, notes_read_error) result
+(** Every retained note of one [schedule_id], oldest first. Reads the
+    append-only {!schedule_notes_filename} log (cached by file version on
+    [FileSystem] backends) and merges any unmigrated legacy notes still
+    present in [schedules.json] (or its [.last-good] recovery mirror),
+    deduplicating by [note_id]. Notes survive terminal state transitions:
+    they are history, not state. Never writes to disk. *)
+
+val read_notes_for_schedule :
+  Workspace_utils.config ->
+  schedule_id:string ->
+  Schedule_domain.schedule_note list
+(** Like {!read_notes_for_schedule_result}, raising {!Corrupt_ledger_exn}
+    when the schedule ledger is corrupt or [Failure] when the notes log is
+    corrupt. *)
 
 val schedules_filename : string
 (** The schedule ledger below [<base>/.masc]. *)
+
+val schedule_notes_filename : string
+(** The append-only schedule notes JSONL log below [<base>/.masc]. *)

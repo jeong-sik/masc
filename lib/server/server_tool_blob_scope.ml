@@ -142,6 +142,7 @@ let workspace =
     ; no_reference Dated_jsonl.Store.decision_audit_dirname
     ; no_reference Schedule_runner.schedules_dirname
     ; no_reference Schedule_store.schedules_filename
+    ; no_reference Schedule_store.schedule_notes_filename
     ; no_reference Goal_store.goals_filename
     ; no_reference Goal_store.goal_events_filename
     ; no_reference Goal_measurement.filename

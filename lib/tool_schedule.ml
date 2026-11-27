@@ -1784,10 +1784,12 @@ let handle_notes_list ~tool_name ~start_time ctx args =
   with
   | Error refusal -> refusal_result ~tool_name ~start_time refusal
   | Ok (schedule_id, limit, before_note_id, contains) ->
-    (match Schedule_store.read_state_result ctx.config with
-     | Error err -> schedule_read_runtime_error ~tool_name ~start_time err
-     | Ok state ->
-       let all_notes = Schedule_store.notes_for_schedule state ~schedule_id in
+    (match Schedule_store.read_notes_for_schedule_result ctx.config ~schedule_id with
+     | Error (Schedule_store.Corrupt_notes_ledger err) ->
+       schedule_read_runtime_error ~tool_name ~start_time err
+     | Error (Schedule_store.Corrupt_notes_log detail) ->
+       runtime_error ~tool_name ~start_time ("schedule notes read failed: " ^ detail)
+     | Ok all_notes ->
        (match make_notes_page ~limit ~before_note_id ~contains all_notes with
         | Error refusal -> refusal_result ~tool_name ~start_time refusal
         | Ok page ->

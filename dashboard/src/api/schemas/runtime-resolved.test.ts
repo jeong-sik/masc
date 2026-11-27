@@ -109,6 +109,16 @@ describe('runtime-resolved schema', () => {
       .toThrow(RuntimeResolvedSchemaDriftError)
   })
 
+  // A keeper assigned to a bare runtime resolves to a lane holding that
+  // runtime alone (server_dashboard_runtime_resolved_json.ml), so the server
+  // sends only lane, unavailable and missing.
+  it('rejects an assignment target kind the server does not send', () => {
+    expect(() => parseRuntimeResolvedResponse({
+      ...responseWith(validRuntime),
+      assignments: [{ keeper: 'k', assignment_source: 'explicit', resolved: { kind: 'single_runtime', id: 'rt-a' } }],
+    })).toThrow(RuntimeResolvedSchemaDriftError)
+  })
+
   it('rejects a lane without its declaration origin', () => {
     const { declared: _declared, ...lane } = validLane
     expect(() => parseRuntimeResolvedResponse({ ...responseWith(validRuntime), lanes: [lane] }))

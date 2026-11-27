@@ -121,7 +121,7 @@ const RuntimeLaneSchema = object({
 
 const ResolvedAssignmentTargetSchema = union([
   object({
-    kind: union([literal('lane'), literal('single_runtime'), literal('missing')]),
+    kind: union([literal('lane'), literal('missing')]),
     id: nullable(string()),
   }),
   object({

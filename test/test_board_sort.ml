@@ -244,6 +244,65 @@ let test_updated_cursor_range_lifecycle () =
     (20.0, Some "p-a") (Board.current_post_cursor store)
 ;;
 
+let test_count_posts_in_window_uses_recent_index () =
+  Eio_main.run @@ fun _env ->
+  let base_path = Filename.temp_dir "masc-board-window-" "" in
+  Fun.protect ~finally:(fun () -> Unix.rmdir base_path) @@ fun () ->
+  let store = Board.create_store ~base_path () in
+  let add id created_at =
+    Board.put_post store
+      (make_post ~id ~created_at ~votes_up:0 ~votes_down:0 ~reply_count:0 ())
+  in
+  add "p-zero" 0.0;
+  add "p-100" 100.0;
+  add "p-200" 200.0;
+  add "p-300" 300.0;
+  add "p-350-stale" 350.0;
+  add "p-400" 400.0;
+  add "p-500" 500.0;
+  (* Leave a dangling key in [recent_post_index] to verify stale pruning. *)
+  Hashtbl.remove store.Board.posts "p-350-stale";
+  let stale_key : Board.recent_post_key =
+    { recent_created_at = 350.0; recent_post_id = "p-350-stale" }
+  in
+  Alcotest.(check bool)
+    "stale key is present before window count"
+    true
+    (Board.Recent_post_set.mem stale_key store.Board.recent_post_index);
+  Alcotest.(check int)
+    "counts inclusive bounds and skips stale key"
+    3
+    (Board.count_posts_in_window store ~since:200.0 ~until:400.0);
+  Alcotest.(check bool)
+    "stale key was pruned from recent_post_index"
+    false
+    (Board.Recent_post_set.mem stale_key store.Board.recent_post_index);
+  Alcotest.(check int)
+    "historical window skips newer posts cleanly"
+    2
+    (Board.count_posts_in_window store ~since:100.0 ~until:200.0);
+  Alcotest.(check int)
+    "narrow interior window counts only matching post"
+    1
+    (Board.count_posts_in_window store ~since:250.0 ~until:350.0);
+  Alcotest.(check int)
+    "negative-zero upper bound still includes post at +0.0"
+    1
+    (Board.count_posts_in_window store ~since:(-1.0) ~until:(-0.0));
+  Alcotest.(check int)
+    "inverted window returns zero"
+    0
+    (Board.count_posts_in_window store ~since:400.0 ~until:200.0);
+  Alcotest.(check int)
+    "NaN since bound returns zero"
+    0
+    (Board.count_posts_in_window store ~since:Float.nan ~until:500.0);
+  Alcotest.(check int)
+    "NaN until bound returns zero"
+    0
+    (Board.count_posts_in_window store ~since:100.0 ~until:Float.nan)
+;;
+
 let () =
   Alcotest.run "Board_sort"
     [ ( "trending"
@@ -256,5 +315,7 @@ let () =
         ; Alcotest.test_case "updated cursor range lifecycle" `Quick test_updated_cursor_range_lifecycle
         ; Alcotest.test_case "indexed reads across votes, deletions, and reloads" `Quick
             test_indexed_reads_lifecycle_across_votes_deletions_and_reloads
+        ; Alcotest.test_case "count_posts_in_window uses recent index" `Quick
+            test_count_posts_in_window_uses_recent_index
         ] )
     ]

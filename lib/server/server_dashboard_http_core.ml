@@ -178,10 +178,10 @@ let shell_projection_trace_finish = Shell_projection_trace.finish
 let shell_projection_trace_diagnostics = Shell_projection_trace.diagnostics
 let shell_projection_trace_log = Shell_projection_trace.log
 
-(* Closed mapping from internal projection labels to Server_timing phases.
-   Total over the label set actually emitted by [dashboard_shell_payload_json];
-   any label outside that set is recorded as [Custom label] so an unintended
-   typo surfaces in the response header rather than vanishing silently. *)
+(* Mapping from internal projection labels to Server_timing phases.
+   Known dedicated phases map to typed constructors; secondary projections such
+   as [persisted_keepers] and [scorecard_24h] emit as [Custom label] so they
+   still surface in Server-Timing headers rather than vanishing silently. *)
 let shell_projection_label_to_phase : string -> Server_timing.phase = function
   | "status" -> Projection_status
   | "agents" -> Projection_agents
@@ -344,6 +344,8 @@ let verifications_24h_of_runs ~now (runs : Verification_run_registry.run list)
     Some (!passed, !rejected)
 ;;
 
+let scorecard_future_skew_s = 300.0
+
 let board_posts_24h_in_process ~config ~now ~light : int option =
   if light || not (String.equal (Board_dispatch.backend_name ()) "jsonl")
   then None
@@ -354,29 +356,25 @@ let board_posts_24h_in_process ~config ~now ~light : int option =
       | Error _ -> None
       | Ok () ->
         let cutoff = now -. Masc_time_constants.day in
-        let posts =
-          Board_dispatch.list_posts_unchecked ~sort_by:Board_dispatch.Recent ~limit:1000 ()
-        in
-        let count =
-          List.fold_left
-            (fun acc (post : Board.post) ->
-               if post.created_at >= cutoff && post.created_at <= now +. 300.0
-               then acc + 1
-               else acc)
-            0
-            posts
-        in
-        Some count
+        Some
+          (Board.count_posts_in_window
+             store
+             ~since:cutoff
+             ~until:(now +. scorecard_future_skew_s))
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | _ -> None)
 ;;
 
-let cost_24h_usd_in_process ~base_path ~now ~light : float option =
+(* 24h provider cost aggregation scans every keeper decisions.jsonl and dated
+   cost file on cold cache, which can exceed the 16s shell timeout and cancel
+   before the cursor is stored. [Server_dashboard_snapshot_sources] warms and
+   refreshes the shared 1440-minute cursor in an independent background worker;
+   shell reads only the zero-I/O cached observation, matching how [turns_24h]
+   reads the pre-seeded [Keeper_turn_pulse] table. *)
+let cost_24h_usd_in_process ~base_path ~now : float option =
   try
-    if light
-    then Server_model_metrics_stream.peek_cached_cost_24h_usd ~base_path ~now
-    else Server_model_metrics_stream.read_cost_24h_usd ~base_path ~now
+    Server_model_metrics_stream.peek_cached_cost_24h_usd ~base_path ~now
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | _ -> None
@@ -525,48 +523,49 @@ let dashboard_shell_payload_json
     let configured_names =
       Keeper_types_profile.snapshot_configured_keeper_names profile_snapshot
     in
-    let scorecard_24h_json =
-      let turns_24h_opt =
-        fleet_turns_24h_from_pulse
-          ~now:started_at
-          ~base_path:config.Workspace.base_path
-          configured_names
-      in
-      let verif_passed_opt, verif_rejected_opt =
-        match
-          verifications_24h_of_runs
+    let scorecard_24h_json, scorecard_24h_ms =
+      measure_ms "scorecard_24h" (fun () ->
+        let turns_24h_opt =
+          fleet_turns_24h_from_pulse
             ~now:started_at
-            (Verification_run_registry.list_runs (Verification_run_registry.global ()))
-        with
-        | Some (passed, rejected) -> Some passed, Some rejected
-        | None -> None, None
-      in
-      let board_posts_opt =
-        board_posts_24h_in_process ~config ~now:started_at ~light
-      in
-      let cost_24h_opt =
-        cost_24h_usd_in_process ~base_path:config.Workspace.base_path ~now:started_at ~light
-      in
-      let additive_fields =
-        (match turns_24h_opt with
-         | Some turns_24h -> [ "turns_24h", `Int turns_24h ]
-         | None -> [])
-        @ [ "verifications_passed_24h", Json_util.int_opt_to_json verif_passed_opt
-          ; "verifications_rejected_24h", Json_util.int_opt_to_json verif_rejected_opt
-          ; "board_posts_24h", Json_util.int_opt_to_json board_posts_opt
-          ; "cost_24h_usd", Json_util.float_opt_to_json cost_24h_opt
-          ]
-      in
-      `Assoc
-        ([ "tasks_done_24h", `Int tasks_done_24h
-         ; "tasks_done_total", `Int done_total
-         ; "tasks_in_progress", `Int in_progress
-         ; "tasks_claimed", `Int claimed
-         ; "tasks_awaiting_verification", `Int awaiting_verification
-         ; "tasks_todo", `Int todo
-         ; "tasks_cancelled", `Int cancelled
-         ]
-         @ additive_fields)
+            ~base_path:config.Workspace.base_path
+            configured_names
+        in
+        let verif_passed_opt, verif_rejected_opt =
+          match
+            verifications_24h_of_runs
+              ~now:started_at
+              (Verification_run_registry.list_runs (Verification_run_registry.global ()))
+          with
+          | Some (passed, rejected) -> Some passed, Some rejected
+          | None -> None, None
+        in
+        let board_posts_opt =
+          board_posts_24h_in_process ~config ~now:started_at ~light
+        in
+        let cost_24h_opt =
+          cost_24h_usd_in_process ~base_path:config.Workspace.base_path ~now:started_at
+        in
+        let additive_fields =
+          (match turns_24h_opt with
+           | Some turns_24h -> [ "turns_24h", `Int turns_24h ]
+           | None -> [])
+          @ [ "verifications_passed_24h", Json_util.int_opt_to_json verif_passed_opt
+            ; "verifications_rejected_24h", Json_util.int_opt_to_json verif_rejected_opt
+            ; "board_posts_24h", Json_util.int_opt_to_json board_posts_opt
+            ; "cost_24h_usd", Json_util.float_opt_to_json cost_24h_opt
+            ]
+        in
+        `Assoc
+          ([ "tasks_done_24h", `Int tasks_done_24h
+           ; "tasks_done_total", `Int done_total
+           ; "tasks_in_progress", `Int in_progress
+           ; "tasks_claimed", `Int claimed
+           ; "tasks_awaiting_verification", `Int awaiting_verification
+           ; "tasks_todo", `Int todo
+           ; "tasks_cancelled", `Int cancelled
+           ]
+           @ additive_fields))
     in
     let keeper_group_entries =
       List.map
@@ -619,6 +618,7 @@ let dashboard_shell_payload_json
             ; "configured_keepers_ms", `Int configured_keepers_ms
             ; "config_resolution_ms", `Int config_resolution_ms
             ; "runtime_resolution_ms", `Int runtime_resolution_ms
+            ; "scorecard_24h_ms", `Int scorecard_24h_ms
             ; "light", `Bool light
             ]
             @ shell_projection_trace_diagnostics cache_key)

@@ -104,12 +104,13 @@ let rec update_shared_kept_state f =
   else update_shared_kept_state f
 ;;
 
+let entry_is_fresh ~now entry =
+  now < entry.kept_updated_at
+  || now -. entry.kept_updated_at <= max_cached_staleness_s
+;;
+
 let prune_stale_shared_kept ~now entries =
-  Window_map.filter
-    (fun _key entry ->
-       now < entry.kept_updated_at
-       || now -. entry.kept_updated_at <= max_cached_staleness_s)
-    entries
+  Window_map.filter (fun _key entry -> entry_is_fresh ~now entry) entries
 ;;
 
 let oldest_shared_kept_key entries =
@@ -169,6 +170,11 @@ let store_shared_kept ~base_path ~window_minutes ~now ?cost_usd kept_value =
       { entries; next_seq = kept_access_seq }, ())
 ;;
 
+let snapshot_read_succeeded = function
+  | Ok { retry_read = false; _ } -> true
+  | Ok { retry_read = true; _ } | Error _ -> false
+;;
+
 let read_cached_snapshot ~base_path ~(request : request) ~now =
   let previous =
     load_shared_kept ~base_path ~window_minutes:request.window_minutes ~now
@@ -177,31 +183,61 @@ let read_cached_snapshot ~base_path ~(request : request) ~now =
   let next, cost_usd, result =
     read_snapshot_with_cost ~base_path ~request ~now previous
   in
-  store_shared_kept ~base_path ~window_minutes:request.window_minutes ~now ?cost_usd next;
+  if snapshot_read_succeeded result
+  then
+    store_shared_kept
+      ~base_path
+      ~window_minutes:request.window_minutes
+      ~now
+      ?cost_usd
+      next;
   result
 ;;
 
-let peek_cached_cost_24h_usd ~base_path ~now =
+type cost_24h_observation =
+  { cost_usd : float option
+  ; read_failed : bool
+  ; next_change_at : float option
+  ; cache_was_absent : bool
+  }
+
+let find_fresh_shared_kept ~base_path ~window_minutes ~now =
   let state = Atomic.get shared_kept_state in
-  match Window_map.find_opt (base_path, 1440) state.entries with
-  | Some entry
-    when now < entry.kept_updated_at
-         || now -. entry.kept_updated_at <= max_cached_staleness_s ->
-    entry.kept_cost_usd
+  match Window_map.find_opt (base_path, window_minutes) state.entries with
+  | Some entry when entry_is_fresh ~now entry -> Some entry
   | Some _ | None -> None
 ;;
 
-let read_cost_24h_usd ~base_path ~now =
+let peek_cached_cost_24h_usd ~base_path ~now =
+  match find_fresh_shared_kept ~base_path ~window_minutes:1440 ~now with
+  | Some entry -> entry.kept_cost_usd
+  | None -> None
+;;
+
+let observe_cost_24h_usd ~base_path ~now =
   let request = { window_minutes = 1440; bucket_minutes = 0 } in
+  let cache_was_absent =
+    Option.is_none (peek_cached_cost_24h_usd ~base_path ~now)
+  in
   let previous =
     load_shared_kept ~base_path ~window_minutes:1440 ~now
       ~fallback:Model_inference_metrics_kept.empty
   in
-  let next, cost_usd, _result =
+  let next, cost_usd, result =
     read_snapshot_with_cost ~base_path ~request ~now previous
   in
-  store_shared_kept ~base_path ~window_minutes:1440 ~now ?cost_usd next;
-  cost_usd
+  let read_failed, next_change_at =
+    match result with
+    | Error _ -> true, None
+    | Ok snap -> snap.retry_read, snap.next_change_at
+  in
+  if not read_failed
+  then store_shared_kept ~base_path ~window_minutes:1440 ~now ?cost_usd next;
+  { cost_usd; read_failed; next_change_at; cache_was_absent }
+;;
+
+let read_cost_24h_usd ~base_path ~now =
+  (observe_cost_24h_usd ~base_path ~now).cost_usd
 ;;
 
 let observation_dataset = Workspace_dataset_event.dataset_name
@@ -281,8 +317,10 @@ let serve ~sw ~clock ~owner ~request reqd =
             let next, cost_usd, result =
               read_snapshot_with_cost ~base_path ~request ~now previous
             in
-            store_shared_kept ~base_path ~window_minutes:request.window_minutes
-              ~now ?cost_usd next;
+            if snapshot_read_succeeded result
+            then
+              store_shared_kept ~base_path ~window_minutes:request.window_minutes
+                ~now ?cost_usd next;
             now, next, result)) in
           kept := (next_at, next);
           match result with

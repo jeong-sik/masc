@@ -465,6 +465,11 @@ val posts_after_cursor : store -> float * string option -> post list
     limit returns no posts. *)
 val search_posts : store -> predicate:(post -> bool) -> limit:int -> post list
 
+(** Count posts whose [created_at] lies in [[since, until]] by walking the
+    Recent index ([created_at DESC]) and stopping once timestamps fall below
+    [since]. Returns [0] when either bound is NaN or [since > until]. *)
+val count_posts_in_window : store -> since:float -> until:float -> int
+
 (** {1 Comment operations} *)
 
 val add_comment

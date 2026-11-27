@@ -40,11 +40,26 @@ val read_cached_snapshot :
     lane; atomic CAS state updates touch only the in-memory table, never disk
     I/O. *)
 
+type cost_24h_observation =
+  { cost_usd : float option
+  ; read_failed : bool
+  ; next_change_at : float option
+  ; cache_was_absent : bool
+  }
+
 val peek_cached_cost_24h_usd :
   base_path:string -> now:float -> float option
 (** Zero-I/O peek of the most recently computed 24h provider total cost in USD
     for [base_path] from the shared retained-row LRU. Returns [None] when no
     fresh 24h observation is cached or when no model reported cost. *)
+
+val observe_cost_24h_usd :
+  base_path:string -> now:float -> cost_24h_observation
+(** Refresh the 24h provider total cost in USD for [base_path] using the shared
+    1440-minute retained-row cursor and return typed retry/deadline metadata.
+    When [read_failed] is true, the shared cache entry is left untouched so a
+    transient store error neither wipes the last cached cost nor extends its
+    staleness TTL. *)
 
 val read_cost_24h_usd :
   base_path:string -> now:float -> float option

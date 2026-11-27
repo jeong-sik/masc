@@ -1,15 +1,16 @@
 module Input = Server_observation_input
 module Commit = Dashboard_observation_commit
 
-type component = Shell | Tools | Telemetry
+type component = Shell | Tools | Telemetry | Cost_24h
 
 let components_of_topic : Sse_event.Types.dashboard_observation_topic -> component list = function
   | `Runtime_resolved | `Runtime_probe -> [Shell; Tools]
   | `Ide_presence -> [Shell]
   | `Tools | `Tool_metrics | `Skill_usage -> [Tools; Telemetry]
   | `Telemetry -> [Telemetry]
+  | `Model_metrics -> [Cost_24h]
   | `Logs | `Health | `Attribution | `Keeper_composite | `Keeper_runtime_trace
-  | `Keeper_sandbox | `Keeper_turns | `Keeper_memory_health | `Model_metrics
+  | `Keeper_sandbox | `Keeper_turns | `Keeper_memory_health
   | `Runtime_observables | `Scheduled_automation | `Skills | `Async_requests
   | `Skill_activations | `Published_artifacts | `Artifact_checks
   | `Verification_requests | `Verification_specs | `Tlc_results | `Activity
@@ -49,6 +50,7 @@ type readers = {
   shell : light:bool -> Workspace.config -> Yojson.Safe.t;
   tools : Workspace.config -> Dashboard_snapshot.tools_result;
   telemetry : now:float -> Workspace.config -> Telemetry_unified.summary_observation;
+  cost_24h : now:float -> Workspace.config -> Server_model_metrics_stream.cost_24h_observation;
 }
 
 let readers = ref {
@@ -60,7 +62,42 @@ let readers = ref {
     Telemetry_unified.observe_summary ~now ~masc_root:(Workspace.masc_dir config)
       ~keeper_keepalive_interval_s:(Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec |> float_of_int)
       ~keeper_metric_producer_active:(Keeper_status_runtime.keeper_metric_producer_active ~base_path) ());
+  cost_24h = (fun ~now config ->
+    Server_model_metrics_stream.observe_cost_24h_usd
+      ~base_path:config.Workspace.base_path ~now);
 }
+
+(* Cold 24h model-metrics scans can read tens to hundreds of MB of keeper
+   decisions.jsonl and dated cost logs once before the append cursor is stored.
+   Keep the background warmer on a generous timeout so the first cursor build
+   completes, space incremental change reads so high-frequency turns coalesce,
+   and refresh active workspaces before [max_cached_staleness_s] can evict the
+   cursor. *)
+let cost_24h_refresh_timeout_s = 120.0
+let cost_24h_change_read_spacing_s = 30.0
+let cost_24h_keepalive_interval_s =
+  Server_model_metrics_stream.max_cached_staleness_s *. 0.5
+
+let cost_24h_needs_shell_refresh previous (obs : Server_model_metrics_stream.cost_24h_observation) =
+  if obs.read_failed
+  then false
+  else
+    (* If the 24h cache entry was evicted or stale before this refresh, Shell
+       may have published [null] in the interim; re-signal even when the dollar
+       total itself did not change. *)
+    (obs.cache_was_absent && Option.is_some obs.cost_usd)
+    ||
+    match previous, obs.cost_usd with
+    | None, Some _ -> true
+    | None, None -> false
+    | Some prev_opt, next_opt -> not (Option.equal Float.equal prev_opt next_opt)
+
+let cost_24h_next_deadline ~now (obs : Server_model_metrics_stream.cost_24h_observation) =
+  let keepalive = now +. cost_24h_keepalive_interval_s in
+  match obs.cost_usd, obs.next_change_at with
+  | None, None -> None
+  | _, Some edge -> Some (Float.min edge keepalive)
+  | Some _, None -> Some keepalive
 
 module Source_change = struct
   type t =
@@ -73,6 +110,7 @@ module Commit_changes = Server_workspace_invalidation.Make (Source_change)
 
 exception Tools_read_failed
 exception Telemetry_read_failed
+exception Cost_24h_read_failed
 type tools_read =
   | Awaiting_tools
   | Failed_tools
@@ -88,10 +126,14 @@ let install ~state ~sw ~clock ~mono_clock ~on_shell_published =
       let mutex = Stdlib.Mutex.create () in
       let shell_changes = Eio.Stream.create 1
       and tools_changes = Eio.Stream.create 1
-      and telemetry_changes = Eio.Stream.create 1 in
+      and telemetry_changes = Eio.Stream.create 1
+      and cost_24h_changes = Eio.Stream.create 1 in
       let signal component =
         let changes = match component with
-          | Shell -> shell_changes | Tools -> tools_changes | Telemetry -> telemetry_changes in
+          | Shell -> shell_changes
+          | Tools -> tools_changes
+          | Telemetry -> telemetry_changes
+          | Cost_24h -> cost_24h_changes in
         Stdlib.Mutex.protect mutex (fun () ->
           if Eio.Stream.is_empty changes then Eio.Stream.add changes ())
       in
@@ -131,16 +173,30 @@ let install ~state ~sw ~clock ~mono_clock ~on_shell_published =
         { (Proactive_refresh.default_config ~label ~interval_s) with
           timeout_s; change_read_spacing_s = interval_s } in
       let offload work = Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ work) in
+      (* Let the first Shell attempt settle before the cold 24h cost scan claims
+         a background pool worker, so a 1-domain pool never queues Shell behind
+         a multi-second JSONL scan on startup. *)
+      let shell_settled, resolve_shell_settled = Eio.Promise.create () in
+      let shell_settled_once = Atomic.make false in
+      let mark_shell_settled () =
+        if Atomic.compare_and_set shell_settled_once false true
+        then Eio.Promise.resolve resolve_shell_settled ()
+      in
+      let shell_config =
+        { (worker_config "dashboard Shell sources" Env_config_runtime.Dashboard.shell_timeout_sec) with
+          on_failure = Some (fun _ -> mark_shell_settled ()) } in
       Proactive_refresh.start_on_change ~sw ~clock ~changes:shell_changes
-        ~config:(worker_config "dashboard Shell sources" Env_config_runtime.Dashboard.shell_timeout_sec)
+        ~config:shell_config
         ~compute:(fun () -> offload (fun () ->
           let shell = (!readers).shell ~light:false config in
           let shell_light = (!readers).shell ~light:true config in
           shell, shell_light))
-        ~on_result:(fun (shell, shell_light) -> if is_current () then (
-          Dashboard_snapshot.publish_shell publisher ~shell ~shell_light;
-          on_shell_published ~scope ~shell ~shell_light;
-          announce `Runtime_resolved));
+        ~on_result:(fun (shell, shell_light) ->
+          mark_shell_settled ();
+          if is_current () then (
+            Dashboard_snapshot.publish_shell publisher ~shell ~shell_light;
+            on_shell_published ~scope ~shell ~shell_light;
+            announce `Runtime_resolved));
       Proactive_refresh.start_on_change ~sw ~clock ~changes:tools_changes
         ~config:(worker_config "dashboard Tools sources" Server_dashboard_http_core_cache.dashboard_request_timeout_s)
         ~compute:(fun () -> offload (fun () -> match (!readers).tools config with
@@ -165,7 +221,22 @@ let install ~state ~sw ~clock ~mono_clock ~on_shell_published =
         ~on_result:(fun (observation, prepared) -> if is_current () then (
           Dashboard_snapshot.publish_telemetry_prepared prepared;
           announce `Telemetry;
-          if observation.read_failed then raise Telemetry_read_failed)))
+          if observation.read_failed then raise Telemetry_read_failed));
+      let last_cost_24h : float option option ref = ref None in
+      let cost_24h_config =
+        { (worker_config "dashboard 24h cost sources" cost_24h_refresh_timeout_s) with
+          change_read_spacing_s = cost_24h_change_read_spacing_s } in
+      Proactive_refresh.start_on_change_or_deadline ~sw ~clock ~changes:cost_24h_changes
+        ~config:cost_24h_config
+        ~compute:(fun () ->
+          Eio.Promise.await shell_settled;
+          offload (fun () -> (!readers).cost_24h ~now:(Eio.Time.now clock) config))
+        ~next_deadline:(fun obs -> cost_24h_next_deadline ~now:(Eio.Time.now clock) obs)
+        ~on_result:(fun obs -> if is_current () then (
+          if obs.Server_model_metrics_stream.read_failed then raise Cost_24h_read_failed;
+          let should_signal = cost_24h_needs_shell_refresh !last_cost_24h obs in
+          last_cost_24h := Some obs.cost_usd;
+          if should_signal then signal Shell)))
 ;;
 
 module For_testing = struct
@@ -173,6 +244,7 @@ module For_testing = struct
     shell : light:bool -> Workspace.config -> Yojson.Safe.t;
     tools : Workspace.config -> Dashboard_snapshot.tools_result;
     telemetry : now:float -> Workspace.config -> Telemetry_unified.summary_observation;
+    cost_24h : now:float -> Workspace.config -> Server_model_metrics_stream.cost_24h_observation;
   }
   let with_readers replacement f =
     let previous = !readers in readers := replacement;

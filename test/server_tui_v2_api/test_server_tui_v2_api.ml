@@ -2599,16 +2599,45 @@ let test_track_a_scorecard_and_capabilities () =
       ; "board_posts_24h"
       ; "cost_24h_usd"
       ];
-    (* Non-light mode observes recent unvoted board posts via Board_dispatch.Recent *)
-    Eio_main.run (fun _env ->
+    (* Non-light mode observes recent unvoted board posts via Board.count_posts_in_window,
+       emits scorecard_24h_ms diagnostics, and reads cached 24h cost without scanning
+       cold decision logs synchronously on the shell path. *)
+    Eio_main.run (fun env ->
+      let previous_fs = Fs_compat.get_fs_opt () in
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
       let reset_board () =
         Board_dispatch.reset_for_test ();
-        Board.reset_global_for_test ()
+        Board.reset_global_for_test ();
+        match previous_fs with
+        | Some fs -> Fs_compat.set_fs fs
+        | None -> Fs_compat.clear_fs ()
       in
       Fun.protect
         ~finally:reset_board
         (fun () ->
-           reset_board ();
+           Board_dispatch.reset_for_test ();
+           Board.reset_global_for_test ();
+           let now = Unix.gettimeofday () in
+           let decision_row =
+             `Assoc
+               [ "ts_unix", `Float (now -. 30.0)
+               ; "trace_id", `String "shell-cost-test"
+               ; "turn_id", `Int 1
+               ; "tool_call_count", `Int 0
+               ; "tools_used", `List []
+               ; ( "telemetry"
+                 , `Assoc
+                     [ "model_used", `String "test-model"
+                     ; "outcome", `String "success"
+                     ; "turn_count", `Int 1
+                     ; "agent_core_turn_ordinal", `Int 0
+                     ; "usage_reported", `Bool true
+                     ; "telemetry_reported", `Bool true
+                     ; "cost_usd", `Float 1.25
+                     ] )
+               ]
+           in
+           Keeper_types_support.append_decision_record config "cost-keeper" decision_row;
            (match
               Board_dispatch.init_jsonl
                 ~base_path:config.Workspace.base_path
@@ -2630,19 +2659,54 @@ let test_track_a_scorecard_and_capabilities () =
            let full_shell =
              Server_dashboard_http_core.dashboard_shell_payload_json ~light:false config
            in
+           let full_diag = json_member_exn "projection_diagnostics" full_shell in
+           Alcotest.(check bool)
+             "full shell diagnostics include scorecard_24h_ms"
+             true
+             (json_int_exn "scorecard_24h_ms" full_diag >= 0);
            let full_sc = json_member_exn "scorecard_24h" full_shell in
            Alcotest.(check int)
              "board_posts_24h counts recent unvoted post in non-light mode"
              1
              (json_int_exn "board_posts_24h" full_sc);
+           Alcotest.(check bool)
+             "cold full shell does not synchronously scan decisions.jsonl for cost_24h_usd"
+             true
+             (json_member_exn "cost_24h_usd" full_sc = `Null);
+           let warmed_cost =
+             Server_model_metrics_stream.read_cost_24h_usd
+               ~base_path:config.Workspace.base_path
+               ~now:(Unix.gettimeofday ())
+           in
+           Alcotest.(check (option (float 0.001)))
+             "background cost warmer populates shared 24h cache"
+             (Some 1.25)
+             warmed_cost;
+           let warmed_full_shell =
+             Server_dashboard_http_core.dashboard_shell_payload_json ~light:false config
+           in
+           let warmed_full_sc = json_member_exn "scorecard_24h" warmed_full_shell in
+           Alcotest.(check (float 0.001))
+             "warmed full shell serves cached cost_24h_usd"
+             1.25
+             (Yojson.Safe.Util.to_float (json_member_exn "cost_24h_usd" warmed_full_sc));
            let light_shell =
              Server_dashboard_http_core.dashboard_shell_payload_json ~light:true config
            in
+           let light_diag = json_member_exn "projection_diagnostics" light_shell in
+           Alcotest.(check bool)
+             "light shell diagnostics include scorecard_24h_ms"
+             true
+             (json_int_exn "scorecard_24h_ms" light_diag >= 0);
            let light_sc = json_member_exn "scorecard_24h" light_shell in
            Alcotest.(check bool)
              "board_posts_24h stays null in light mode"
              true
-             (json_member_exn "board_posts_24h" light_sc = `Null))))
+             (json_member_exn "board_posts_24h" light_sc = `Null);
+           Alcotest.(check (float 0.001))
+             "warmed light shell serves cached cost_24h_usd"
+             1.25
+             (Yojson.Safe.Util.to_float (json_member_exn "cost_24h_usd" light_sc)))))
 ;;
 
 let test_track_a_memory_diff_human_claim_text () =

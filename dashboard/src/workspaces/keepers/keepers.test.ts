@@ -2127,6 +2127,27 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     expect(header(turn('autonomous', null))).toEqual({ says: '● 자율 턴', tone: 'brass', title: null })
   })
 
+  it('colors the Ctx pill of the header and the ring of the Chat tab by how full the context is, and leaves them plain with no reading', () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ operations: [], messages: [], rows: [], keepers: [] })))
+    const seen = (context_ratio: number | null) => {
+      const keeper = makeRosterKeeper({ context_ratio, estimated_context_ratio: null, context_provenance: null })
+      const header = render(
+        html`<${KeeperHeader} keeper=${keeper} activeTab="chat" onSelectTab=${vi.fn()} onLifecycleMutated=${vi.fn()} onDeleted=${vi.fn()} />`,
+      )
+      const pill = header.container.querySelector('[data-ctx="true"]')?.getAttribute('data-tone') ?? null
+      header.unmount()
+      const chat = render(html`<${KeeperChatTab} keeper=${keeper} onInspect=${vi.fn()} onMutated=${vi.fn()} />`)
+      const ring = chat.container.querySelector('.kp-ring-fill')?.getAttribute('data-tone') ?? null
+      chat.unmount()
+      return { pill, ring }
+    }
+    expect(seen(0.64)).toEqual({ pill: 'ok', ring: 'ok' })
+    expect(seen(0.65)).toEqual({ pill: 'warn', ring: 'warn' })
+    expect(seen(0.85)).toEqual({ pill: 'bad', ring: 'bad' })
+    // The pill takes no color; the ring draws its empty track.
+    expect(seen(null)).toEqual({ pill: null, ring: 'absent' })
+  })
+
   it('hides Boot on already-booted or paused Keepers and shows Boot only when offline/unbooted/stopped', () => {
     const runningKeeper = makeRosterKeeper({ keepalive_running: true, status: 'running', phase: 'running', paused: false })
     expect(isKeeperBooted(runningKeeper)).toBe(true)

@@ -12,6 +12,7 @@
 
 import { decodeDiscordReplyOrigin } from './discord-reply'
 import {
+  contextSeverityTone,
   decodeKeeperLaneFailures,
   decodeKeeperPathRest,
   formatMilliCandleObserved,
@@ -178,6 +179,17 @@ export function observeRosterContextPct(item: KeeperRosterItem): Observed<number
     return observedAbsent(item.context_unavailable_reason)
   }
   return observedAbsent()
+}
+
+/**
+ * The color of a Keeper's context pill: how full the context is, and no color
+ * when it was not read. The header and the roster show the same Keeper, so
+ * they take the color from here.
+ */
+export function contextPillTone(context: Observed<number>): 'ok' | 'warn' | 'bad' | undefined {
+  if (context.kind !== 'value') return undefined
+  const tone = contextSeverityTone(context.data)
+  return tone === 'absent' ? undefined : tone
 }
 
 export function formatContextDetail(item: Pick<

@@ -19,6 +19,7 @@ import { WorkspaceChatImage } from '../../components/chat/workspace-image'
 import { PopoverMenu } from '../../components/primitives/popover-menu'
 import { lazy, Suspense } from 'preact/compat'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
+import { contextSeverityTone } from '../../api/keeper-diagnostics'
 import {
   authSession,
   canUseSingleUserTokenAdmin,
@@ -2431,7 +2432,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
   const ringOffset = ctxPct !== null
     ? RING_CIRCUMFERENCE * (1 - ctxPct / 100)
     : RING_CIRCUMFERENCE
-  const ringTone = ctxPct === null ? 'absent' : ctxPct >= 85 ? 'bad' : ctxPct >= 65 ? 'warn' : 'ok'
+  const ringTone = contextSeverityTone(ctxPct)
 
   const parsedEntries = useMemo(
     () => scopedMessages.slice(-renderWindow).map((msg) => ({ msg, blocks: parseChatMessageBlocks(msg) })),

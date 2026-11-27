@@ -9,9 +9,8 @@ type operation =
 val eligible : Keeper_tool_plan.t -> bool
 (** At least one leaf is Edit or Write; every leaf is a canonical ordinary
     Read, Edit or Write with its original execution contract.
-    Fixed inline children flattened to such leaves are included. Read-only
-    plans, synthetic child targets, other effects and terminal leaves retain
-    ordinary admission. Named inline Write plans can transfer their existing
+    Read-only plans, other effects and terminal leaves retain ordinary
+    admission. Named inline Write plans can transfer their existing
     producer-owned resource claims to the outer SDK batch, just as Edit plans
     do; this changes neither async admission nor effect/replay authority. *)
 
@@ -80,8 +79,7 @@ module Ready : sig
     -> Keeper_tool_plan.t
     -> t option
   (** Original source-bound inline plans containing an Edit or Write, canonical
-      Reads, ordinary Serial/Concurrent leaves and pure
-      compiled child argument validation. Inputs may depend on upstream
+      Reads and ordinary Serial/Concurrent leaves. Inputs may depend on upstream
       results. No file is opened until its node has a resolved, validated
       input. Write can bind existing physical parents, including a missing
       target; unprepared paths retain their original exclusive handler.

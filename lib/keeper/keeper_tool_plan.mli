@@ -232,7 +232,6 @@ type error =
       ; error : Json_pointer.schema_error
       }
   | Unknown_descriptor_id of string
-  | Compiled_child_conflict of Node_id.t
   | Duplicate_node_id of Node_id.t
   | Duplicate_tool_name of string
   | Unknown_tool of
@@ -309,35 +308,8 @@ val create
     and exports; [Opaque_output] is the default and means no declared
     contract, so the registry contract survives it. *)
 
-type inline_arguments = private
-  { alias : Node_id.t
-  ; reference : Skill_reference.t
-  ; node : node
-  ; input_schema : Yojson.Safe.t
-  ; output_schema : Yojson.Safe.t
-  }
-(** Pure compiler-owned argument validation. Its resolved value is available
-    only after the frozen parameter schema accepts it. It submits no work. *)
-
-val inline_arguments : alias:Node_id.t -> reference:Skill_reference.t ->
-  id:Node_id.t -> tool_name:string -> input:Json_template.t ->
-  input_schema:Yojson.Safe.t -> output_schema:Yojson.Safe.t ->
-  ?after:Node_id.t list -> unit -> inline_arguments
-
-val create_compiled : descriptors:Keeper_tool_descriptor.t list ->
-  ?arguments:inline_arguments list -> ?branch_failure_policy:branch_failure_policy ->
-  ?exports:export list -> node list -> (t, error) result
-(** Native compiler entry. Every compiled node must exactly match its operand;
-    a plain node or model JSON cannot acquire an argument route by tool name.
-    Canonical unique nodes and their resolved contracts are indexed once for
-    this immutable plan. Validation retains its original node/error order;
-    reconstructed or parameter-bound plans build their own index. *)
-type execution_target =
-  | Descriptor_target of Keeper_tool_descriptor.t
-  | Child_arguments of inline_arguments
-
 type contract = private
-  { target : execution_target
+  { target : Keeper_tool_descriptor.t
   ; input_schema : Yojson.Safe.t
   ; composable_output : Keeper_tool_descriptor.composable_output
   ; execution : Keeper_tool_descriptor.execution
@@ -347,16 +319,15 @@ val contract : t -> Node_id.t -> contract option
     the plan's declared output override lives in [composable_output] only. *)
 val readonly_for_input : t -> node_id:Node_id.t -> input:Yojson.Safe.t -> bool option
 (** Resolve the exact per-node contract. Reuses this plan's original resolved
-    contract without searching the node/argument/descriptor lists again. [descriptor] below returns
-    [None] for compiled nodes. The index grants no effect or replay authority. *)
+    contract without searching the node/descriptor lists again. The index
+    grants no effect or replay authority. *)
 
 val nodes : t -> node list
 val exports : t -> export list
 val dependencies : node -> Node_id.t list
 
 (** Stable topological layers of the validated plan. Each layer retains the
-    relative order in [nodes] and the original node objects, including compiled
-    operands. A call builds an immutable dependency frontier without retaining
+    relative order in [nodes] and the original node objects. A call builds an immutable dependency frontier without retaining
     state across calls. This is not an execution schedule: serial, concurrent,
     terminal and resource semantics are applied by the executor. *)
 val dependency_layers : t -> node list list
@@ -416,8 +387,8 @@ val resolve_export
   -> lookup:(Node_id.t -> Yojson.Safe.t option)
   -> export
   -> (Yojson.Safe.t, export_resolution_error) result
-(** Resolve a mapped child export through this plan's authoritative producer
-    descriptor and pointer. A child export need not be an outer selected field. *)
+(** Resolve one declared export through this plan's authoritative producer
+    descriptor and pointer. *)
 
 val resolve_exports
   :  t

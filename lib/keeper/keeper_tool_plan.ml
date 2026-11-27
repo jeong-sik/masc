@@ -715,7 +715,6 @@ type error =
       ; error : Json_pointer.schema_error
       }
   | Unknown_descriptor_id of string
-  | Compiled_child_conflict of Node_id.t
   | Duplicate_node_id of Node_id.t
   | Duplicate_tool_name of string
   | Unknown_tool of
@@ -767,7 +766,6 @@ let error_to_string = function
     Printf.sprintf "export %S has invalid pointer %s for node %S"
       name (Json_pointer.to_string pointer) (Node_id.to_string node_id)
   | Unknown_descriptor_id id -> Printf.sprintf "descriptor id %S is not canonical" id
-  | Compiled_child_conflict id -> Printf.sprintf "compiled child node %S differs from its fixed operand" (Node_id.to_string id)
   | Duplicate_node_id node_id ->
     Printf.sprintf "duplicate node id %S" (Node_id.to_string node_id)
   | Duplicate_tool_name tool_name ->
@@ -901,8 +899,6 @@ let error_to_json error =
       [ "name", `String name; "node_id", node_id_to_json node_id
       ; "pointer", `String (Json_pointer.to_string pointer)
       ; "error", pointer_schema_error_to_json error ]
-  | Compiled_child_conflict node_id ->
-    tag "compiled_child_conflict" [ "node_id", node_id_to_json node_id ]
   | Unknown_descriptor_id descriptor_id ->
     tag "unknown_descriptor_id" [ "descriptor_id", `String descriptor_id ]
   | Duplicate_node_id node_id ->
@@ -976,28 +972,15 @@ let branch_failure_policy_to_string = function
 let branch_failure_policy_of_string s = List.find_opt (fun v -> String.equal (branch_failure_policy_to_string v) s) all_of_branch_failure_policy
 ;;
 
-type inline_arguments =
-  { alias : Node_id.t
-  ; reference : Skill_reference.t
-  ; node : node
-  ; input_schema : Yojson.Safe.t
-  ; output_schema : Yojson.Safe.t
-  }
-
 type t =
   { identity : int
   ; nodes : node list
   ; operands : (node * contract) Node_map.t
-  ; arguments : inline_arguments list
   ; branch_failure_policy : branch_failure_policy
   ; exports : export list
   }
-and execution_target =
-  | Descriptor_target of Keeper_tool_descriptor.t
-  | Child_arguments of inline_arguments
-
 and contract =
-  { target : execution_target
+  { target : Keeper_tool_descriptor.t
   ; input_schema : Yojson.Safe.t
   ; composable_output : Keeper_tool_descriptor.composable_output
   ; execution : Keeper_tool_descriptor.execution
@@ -1173,21 +1156,15 @@ let node_for_id nodes id =
   List.find_opt (fun node -> Node_id.equal node.id id) nodes
 ;;
 
-let contract_for_node descriptors arguments (node : node) =
-  match List.find_opt (fun (arguments : inline_arguments) ->
-      Node_id.equal arguments.node.id node.id) arguments with
-  | Some arguments -> Some
-      {target=Child_arguments arguments;input_schema=arguments.input_schema;
-       composable_output=Keeper_tool_descriptor.Json_output {schema=arguments.output_schema};
-       execution=Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent}
-  | None -> Option.map (fun (descriptor : Keeper_tool_descriptor.t) ->
+let contract_for_node descriptors (node : node) =
+  Option.map (fun (descriptor : Keeper_tool_descriptor.t) ->
       (* Runtime authority is the original registry object. The copied
          plan-owned output contract must not cross the handler's physical
          descriptor check; validation below still uses that declared output. *)
       let target=match Descriptor_id_map.find_opt descriptor.id registered_by_id with
         | Some registered -> registered.descriptor
         | None -> descriptor in
-      {target=Descriptor_target target;input_schema=descriptor.input_schema;
+      {target;input_schema=descriptor.input_schema;
        composable_output=descriptor.composable_output;execution=descriptor.execution})
       (descriptor_for_name descriptors node.tool_name)
 
@@ -1197,14 +1174,10 @@ let node_in_plan plan node_id =
 let contract plan node_id =
   Option.map snd (Node_map.find_opt node_id plan.operands)
 
-let inline_arguments ~alias ~reference ~id ~tool_name ~input ~input_schema ~output_schema ?(after=[]) () =
-  {alias;reference;node=node ~id ~tool_name ~input ~after ();input_schema;output_schema}
-
 let readonly_for_input plan ~node_id ~input =
   match contract plan node_id with
   | None -> None
-  | Some {target=Descriptor_target descriptor;_} -> Keeper_tool_descriptor.readonly_for_input descriptor ~input
-  | Some {target=Child_arguments _;_} -> Some true
+  | Some {target=descriptor;_} -> Keeper_tool_descriptor.readonly_for_input descriptor ~input
 
 let bind_known_tools (resolve : node -> contract option) off_surface nodes =
   let rec bind operands = function
@@ -1384,24 +1357,11 @@ let validate_terminal_dependency_boundary (resolve : node -> contract option) no
       nodes
 ;;
 
-let create_compiled ~descriptors ?(arguments=[]) ?(branch_failure_policy = default_branch_failure_policy) ?(exports = []) nodes =
+let create ~descriptors ?(branch_failure_policy = default_branch_failure_policy) ?(exports = []) nodes =
   match nodes with
   | [] -> Error Empty_plan
   | _ ->
-    let fixed_nodes = List.map (fun (arguments : inline_arguments) -> arguments.node) arguments in
-    let aliases = List.map (fun (arguments : inline_arguments) -> arguments.alias) arguments in
-    let conflict = match first_duplicate Node_id.equal aliases with
-      | Some id -> Some id
-      | None -> match first_duplicate Node_id.equal (List.map (fun node -> node.id) fixed_nodes) with
-      | Some id -> Some id
-      | None -> List.find_map (fun expected ->
-          match node_for_id nodes expected.id with
-          | Some actual when actual = expected -> None
-          | Some _ | None -> Some expected.id) fixed_nodes in
-    (match conflict with
-     | Some id -> Error (Compiled_child_conflict id)
-     | None ->
-    match canonicalize_descriptors descriptors with
+    (match canonicalize_descriptors descriptors with
      | Error _ as error -> error
      | Ok canonical_descriptors ->
        (match first_duplicate Node_id.equal (List.map (fun node -> node.id) nodes) with
@@ -1416,7 +1376,7 @@ let create_compiled ~descriptors ?(arguments=[]) ?(branch_failure_policy = defau
                 the same unknown/off-surface node. Later validators request
                 only these original nodes, directly or through [node_for_id].
                 Keep phase/error order list-driven and retain the contracts. *)
-             (match bind_known_tools (contract_for_node descriptors arguments) off_surface nodes with
+             (match bind_known_tools (contract_for_node descriptors) off_surface nodes with
               | Error error -> Error error
               | Ok operands ->
                 let resolve (node : node) = Option.map snd (Node_map.find_opt node.id operands) in
@@ -1444,14 +1404,9 @@ let create_compiled ~descriptors ?(arguments=[]) ?(branch_failure_policy = defau
                                     { identity = Atomic.fetch_and_add next_plan_identity 1
                                     ; nodes
                                     ; operands
-                                    ; arguments
                                     ; branch_failure_policy
                                     ; exports
                                     }))))))))))
-;;
-
-let create ~descriptors ?branch_failure_policy ?exports nodes =
-  create_compiled ~descriptors ?branch_failure_policy ?exports nodes
 ;;
 
 type parameter_binding_error =
@@ -1463,7 +1418,7 @@ let instantiate_params ~descriptors ~args plan =
     | `Assoc fields -> List.assoc_opt name fields
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None in
   let rec rebuild rebuilt = function
-    | [] -> create_compiled ~descriptors ~arguments:plan.arguments
+    | [] -> create ~descriptors
         ~branch_failure_policy:plan.branch_failure_policy ~exports:plan.exports (List.rev rebuilt)
       |> Result.map_error (fun error -> Instantiated_plan_rejected error)
     | (node : node) :: rest ->
@@ -1520,8 +1475,8 @@ let dependency_layers plan =
 
 let descriptor plan node_id =
   match contract plan node_id with
-  | Some {target=Descriptor_target descriptor;_} -> Some descriptor
-  | Some {target=Child_arguments _;_} | None -> None
+  | Some {target=descriptor;_} -> Some descriptor
+  | None -> None
 ;;
 
 type output =

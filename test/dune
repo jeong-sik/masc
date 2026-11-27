@@ -802,6 +802,7 @@
   test_board_context_inference_resolution
   test_runtime_model_input_tail_window
   test_keeper_model_input_demotion
+  test_keeper_message_measurement_memo
   test_workspace_handoff_boundary
   test_exec_command_gate_log_sink)
  (modules
@@ -1159,6 +1160,7 @@
   test_board_context_inference_resolution
   test_runtime_model_input_tail_window
   test_keeper_model_input_demotion
+  test_keeper_message_measurement_memo
   test_workspace_handoff_boundary
   test_exec_command_gate_log_sink
   )

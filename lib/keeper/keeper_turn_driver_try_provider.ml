@@ -791,6 +791,16 @@ let memoize_message_measurement measure =
       bytes
 ;;
 
+(* The Agent Core history encoder reads the message alone, so a Keeper's
+   sizes under it hold from one attempt to the next
+   ([Keeper_message_measurement_memo]). The wire encoder reads the provider
+   config and keeps the attempt memo above. *)
+let history_measurement =
+  Keeper_message_measurement_memo.encoder
+    ~max_retained_bytes:Keeper_message_measurement_memo.per_keeper_retained_bytes
+    Keeper_context_core.message_measurer
+;;
+
 (* Model-input projection walks the durable message history and encodes every
    candidate it measures. Live Keeper checkpoints carry tens of thousands of
    messages, so doing that work on the main Eio domain starves unrelated HTTP
@@ -2245,30 +2255,34 @@ let bounded_model_input_projection
       in
       reserved_bytes, prefix_digest)
   in
-  (* One memo per provider attempt, not per request.  A turn issues one
-     projection per provider request — measured on the live wire capture:
-     83 requests for turn 12263, 62 for 15638 — and every request re-measures
-     the same history, which is tens of thousands of messages on a live
-     Keeper.  Building the memo inside the per-request closure threw that work
-     away between requests.
+  (* One walk of this Keeper's history-size table per provider attempt, not
+     one memo per request or per attempt. A turn issues one projection per
+     provider request — measured on the live wire capture: 83 requests for
+     turn 12263, 62 for 15638 — and every request re-measures the same
+     history, which is tens of thousands of messages on a live Keeper. A
+     memo built for one attempt still threw that work away between attempts,
+     and every turn starts one (RFC
+     finished-turn-result-plans-are-computed-once).
 
-     Safe to share: [run_try_provider_attempt] builds one closure per
-     provider attempt, so no two Keepers share a memo; AGENT_CORE drives the
+     The walk measures with its own measurer and buffer. AGENT_CORE drives the
      turn loop sequentially (no [Fiber.fork] around [prepare_turn_for_agent]
-     in pipeline_stage_prepare.ml); and [Domain_pool.submit_cpu] is
+     in pipeline_stage_prepare.ml), and [Domain_pool.submit_cpu] is
      [Eio.Executor_pool.submit_exn], which blocks until the job finishes, so
      successive jobs are ordered even when they land on different domains.
+     The table takes a lock for each lookup, as other walks share it.
 
-     The memo is keyed by message value ([Agent_core.Types.Message_value]), so
-     a record that projection rebuilt for this request still hits the entry an
-     earlier request measured. *)
+     The table is keyed by message value ([Agent_core.Types.Message_value]), so
+     a record that projection rebuilt for this request, or that this run
+     decoded again from the checkpoint, still hits the entry an earlier walk
+     measured. *)
   let measure_message_bytes =
-    memoize_message_measurement (Keeper_context_core.message_measurer ())
+    Keeper_message_measurement_memo.measurer ~keeper_name:ctx.keeper_name
+      history_measurement
   in
   (* This attempt's own encoder, which decides whether a marker makes a
-     result smaller on the wire this lane sends (RFC-0363 §3.1.2). Memoized
-     for the same reason and with the same safety: every request of the
-     attempt asks it about the same aged results. *)
+     result smaller on the wire this lane sends (RFC-0363 §3.1.2). It reads
+     the provider config, so its memo lives as long as the attempt: every
+     request of the attempt asks it about the same aged results. *)
   let measure_wire_bytes =
     memoize_message_measurement (Keeper_model_input_wire_bytes.measurer ~config:provider_config)
   in

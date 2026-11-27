@@ -1,0 +1,76 @@
+{
+  "source_id": "wkbl-law-cases",
+  "incarnation": "law-cases-v1",
+  "cursor": "law-cases/7",
+  "complete": true,
+  "detail": "Constructed cases, one per law; not captured from any store",
+  "observations": [
+    {
+      "id": "case-clean", "kind": "wkbl_game_box", "observed_at": 1795000000.0,
+      "actor": null, "evidence": [], "game_id": "case-clean",
+      "home": {"team": "홈팀", "final": 10, "quarters": [3, 2, 3, 2]},
+      "away": {"team": "원정팀", "final": 8, "quarters": [2, 2, 2, 2]},
+      "lines": [
+        ["clean-1", "홈팀", "p1", 6, 0, 2, 0],
+        ["clean-2", "홈팀", "p2", 4, 2, 0, 0],
+        ["clean-3", "원정팀", "p3", 8, 1, 2, 0]
+      ]
+    },
+    {
+      "id": "case-box", "kind": "wkbl_game_box", "observed_at": 1795000001.0,
+      "actor": null, "evidence": [], "game_id": "case-box",
+      "home": {"team": "홈팀", "final": 12, "quarters": [3, 3, 3, 3]},
+      "away": {"team": "원정팀", "final": 5, "quarters": null},
+      "lines": [
+        ["box-1", "홈팀", "p1", 7, 2, 1, 0],
+        ["box-2", "홈팀", "p2", 3, 0, 1, 0]
+      ]
+    },
+    {
+      "id": "case-quarters", "kind": "wkbl_game_box", "observed_at": 1795000002.0,
+      "actor": null, "evidence": [], "game_id": "case-quarters",
+      "home": {"team": "홈팀", "final": 9, "quarters": [2, 2, 2, 2]},
+      "away": {"team": "원정팀", "final": 7, "quarters": [1, 2, 3, 1]},
+      "lines": []
+    },
+    {
+      "id": "case-composition", "kind": "wkbl_game_box", "observed_at": 1795000003.0,
+      "actor": null, "evidence": [], "game_id": "case-composition",
+      "home": {"team": "홈팀", "final": 7, "quarters": null},
+      "away": {"team": "원정팀", "final": 0, "quarters": null},
+      "lines": [
+        ["composition-1", "홈팀", "p1", 7, 2, 0, 2]
+      ]
+    },
+    {
+      "id": "case-foreign", "kind": "wkbl_game_box", "observed_at": 1795000004.0,
+      "actor": null, "evidence": [], "game_id": "case-foreign",
+      "home": {"team": "홈팀", "final": 2, "quarters": null},
+      "away": {"team": "원정팀", "final": 3, "quarters": null},
+      "lines": [
+        ["foreign-1", "홈팀", "p1", 2, 1, 0, 0],
+        ["foreign-2", "원정팀", "p2", 3, 0, 1, 0],
+        ["foreign-3", "다른팀", "p3", 0, 0, 0, 0]
+      ]
+    },
+    {
+      "id": "case-repeated", "kind": "wkbl_game_box", "observed_at": 1795000005.0,
+      "actor": null, "evidence": [], "game_id": "case-repeated",
+      "home": {"team": "홈팀", "final": 4, "quarters": null},
+      "away": {"team": "원정팀", "final": null, "quarters": null},
+      "lines": [
+        ["repeated-1", "홈팀", "p9", 2, 1, 0, 0],
+        ["repeated-2", "홈팀", "p9", 2, 1, 0, 0],
+        ["repeated-3", "홈팀", null, 0, 0, 0, 0],
+        ["repeated-4", "홈팀", null, 0, 0, 0, 0]
+      ]
+    },
+    {
+      "id": "case-unplayed", "kind": "wkbl_game_box", "observed_at": 1795000006.0,
+      "actor": null, "evidence": [], "game_id": "case-unplayed",
+      "home": {"team": "홈팀", "final": null, "quarters": null},
+      "away": {"team": "원정팀", "final": null, "quarters": null},
+      "lines": []
+    }
+  ]
+}

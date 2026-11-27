@@ -735,6 +735,19 @@ export function restingProviderIds(
   return ids
 }
 
+/** The quota rest the card of a scope speaks of: that of a runtime whose
+ *  provider the scope lists, joined as `restingProviderIds` joins. `null`
+ *  when none of them rests. */
+export function quotaRestOfScope(
+  scope: ProviderUsageScope,
+  runtimes: readonly RuntimeResolution[],
+): RuntimeQuotaRest | null {
+  for (const rt of runtimes) {
+    if (rt.quota_rest !== null && scope.providers.some((p) => p.id === rt.provider_id)) return rt.quota_rest
+  }
+  return null
+}
+
 export function partitionQuotaScopes(
   scopes: readonly ProviderUsageScope[],
   restingProviders: ReadonlySet<string> = new Set(),
@@ -815,7 +828,8 @@ export function formatIsoTime(iso: string | null | undefined): string {
 export function formatResetCountdown(resetsAtUnix: number | null | undefined, nowUnix = Date.now() / 1000): string {
   if (typeof resetsAtUnix !== 'number' || !Number.isFinite(resetsAtUnix) || resetsAtUnix <= 0) return '없음'
   const diff = Math.max(0, Math.round(resetsAtUnix - nowUnix))
-  if (diff === 0) return '리셋됨'
+  // The one line that shows this starts with "리셋": the word is not said twice.
+  if (diff === 0) return '지남'
   const hours = Math.floor(diff / 3600)
   const mins = Math.floor((diff % 3600) / 60)
   if (hours >= 24) return `${Math.floor(hours / 24)}d ${hours % 24}h`

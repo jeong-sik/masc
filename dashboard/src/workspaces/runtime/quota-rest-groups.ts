@@ -15,6 +15,8 @@ export interface ReleaseSummary {
   readonly localTime: string | null
   readonly isSoon: boolean
   readonly isEstimated: boolean
+  /** The release time is behind the clock. Whether the rest is lifted is known at the next read. */
+  readonly hasPassed: boolean
 }
 
 export type RestingRuntime = RuntimeResolution & {
@@ -130,14 +132,14 @@ export function formatReleaseSummary(
 ): ReleaseSummary {
   const isEstimated = !resetStated
   if (!isValidUnix(untilUnix)) {
-    return { countdown: '미정', localTime: null, isSoon: false, isEstimated }
+    return { countdown: '미정', localTime: null, isSoon: false, isEstimated, hasPassed: false }
   }
   const effectiveNow = isValidUnix(nowUnix) ? nowUnix : Date.now() / 1000
   const rem = untilUnix - effectiveNow
   const localTime = formatLocalReleaseTime(untilUnix, effectiveNow)
 
   if (rem <= 0) {
-    return { countdown: '해제됨', localTime, isSoon: false, isEstimated }
+    return { countdown: '해제됨', localTime, isSoon: false, isEstimated, hasPassed: true }
   }
 
   const isSoon = rem > 0 && rem <= 1800
@@ -156,7 +158,42 @@ export function formatReleaseSummary(
     countdown = hours > 0 ? `${days}일 ${hours}시간 후` : `${days}일 후`
   }
 
-  return { countdown, localTime, isSoon, isEstimated }
+  return { countdown, localTime, isSoon, isEstimated, hasPassed: false }
+}
+
+/** The paused panel's words for its soonest release. Next to its label the
+ *  word for a passed time read "가장 빠른 해제 해제됨": one thing said twice,
+ *  and more than the tab knows before it reads again. */
+export function soonestReleaseWords(release: ReleaseSummary): string {
+  const what = release.hasPassed ? '가장 빠른 해제 시각 지남' : `가장 빠른 해제 ${release.countdown}`
+  return `${what}${release.localTime ? ` (${release.localTime})` : ''}${release.isEstimated ? ' · 예상' : ''}`
+}
+
+/** The longest a tab that shows a rest goes without looking at the clock
+ *  again. A rest the server still reports past its end is read for again at
+ *  the next look. */
+export const REST_LOOK_AGAIN_MS = 30_000
+/** The server drops a rest on the first read after its end, by its own clock.
+ *  The read that follows an end waits this long, so it is not a moment early. */
+const REST_END_READ_MARGIN_MS = 1_000
+
+/** How long after `nowMs` a tab that shows these rests looks at the clock
+ *  again: when the next of them is over, or after the longest wait, whichever
+ *  comes first. Null when nothing rests. */
+export function restClockDelayMs(restEndsUnix: readonly number[], nowMs: number): number | null {
+  if (restEndsUnix.length === 0) return null
+  let delayMs = REST_LOOK_AGAIN_MS
+  for (const endUnix of restEndsUnix) {
+    const overInMs = endUnix * 1000 + REST_END_READ_MARGIN_MS - nowMs
+    if (overInMs > 0 && overInMs < delayMs) delayMs = overInMs
+  }
+  return delayMs
+}
+
+/** Whether one of these rests is over on this page's clock. The answer that
+ *  holds it was read before its end: the server has not been asked since. */
+export function someRestIsOver(restEndsUnix: readonly number[], nowMs: number): boolean {
+  return restEndsUnix.some((endUnix) => endUnix * 1000 <= nowMs)
 }
 
 const PREFIX_SEPARATORS = new Set([':', '/', '.', '-', '_'])

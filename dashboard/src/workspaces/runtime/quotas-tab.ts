@@ -52,6 +52,9 @@ import {
   formatReleaseSummary,
   groupRestingRuntimes,
   quotaRestCauseMeta,
+  restClockDelayMs,
+  someRestIsOver,
+  soonestReleaseWords,
   stripProviderPrefix,
   type QuotaRestCauseFilter,
   type QuotaRestSortKey,
@@ -68,6 +71,7 @@ import {
   loadRuntimeResolved,
   maxUtilizationPct,
   partitionQuotaScopes,
+  quotaRestOfScope,
   restingProviderIds,
   windowKindLabel,
   type MultiAccountIntegration,
@@ -383,6 +387,26 @@ export function QuotasTab(props: WorkspaceViewProps) {
     if (resolvedData) setNowUnix(Date.now() / 1000)
   }, [resolvedData])
 
+  // The tab's clock ticks every 30 seconds and its countdowns follow it. A
+  // rest ends between two ticks, and at its end the server stops reporting
+  // it, while the tab reads on mount and on the button only. So while
+  // something rests the tab also looks at the clock a second after the next
+  // end, and reads again once a rest is over.
+  const restEnds = useMemo(
+    () => (resolvedData?.runtimes ?? []).flatMap((rt) => (rt.quota_rest !== null ? [rt.quota_rest.until] : [])),
+    [resolvedData],
+  )
+  const [clockLooks, setClockLooks] = useState(0)
+  useEffect(() => {
+    const delayMs = restClockDelayMs(restEnds, Date.now())
+    if (delayMs === null) return undefined
+    const timer = window.setTimeout(() => {
+      setNowUnix(Date.now() / 1000)
+      if (someRestIsOver(restEnds, Date.now())) void loadAll('manual')
+      setClockLooks((looks) => looks + 1)
+    }, delayMs)
+    return () => window.clearTimeout(timer)
+  }, [restEnds, clockLooks, providerDays, session.kind, epoch, adminLocked])
   const restingProviders = useMemo(
     () => restingProviderIds(resolvedData?.runtimes ?? [], nowUnix),
     [resolvedData, nowUnix],
@@ -880,6 +904,14 @@ export function QuotasTab(props: WorkspaceViewProps) {
       .map((p) => accountLine(accountEmails.get(p.id)))
       .filter((line): line is string => line !== null)
     const badgeStyle = costBadgeStyle(cls.kind)
+    // A card of a resting scope says so, in the words the paused panel uses
+    // for the cause. It is why the card is in Tier 1 whatever its usage says.
+    // When the rest ends is in the panel: a window's reset on this card is
+    // another fact, and the two side by side read as one. A rest that is over
+    // on this page's clock is one the panel calls released until the next
+    // read drops it, so the card does not call it paused.
+    const rest = quotaRestOfScope(scope, resolvedData?.runtimes ?? [])
+    const restMeta = rest !== null && rest.until * 1000 > Date.now() ? quotaRestCauseMeta(rest.cause) : null
 
     return html`
       <article
@@ -892,6 +924,11 @@ export function QuotasTab(props: WorkspaceViewProps) {
             <div style=${{ fontWeight: 600, fontSize: 'var(--fs-13)', color: 'var(--fg-1)' }}>${name}</div>
             <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${scope.scope}</div>
             ${accounts.map((line) => html`<div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>${line}</div>`)}
+            ${restMeta !== null && html`
+              <div data-testid="quota-card-rest" style=${{ fontSize: 'var(--fs-11)', color: causeBadgeStyle(restMeta.tone).color }}>
+                일시 중지 · ${restMeta.shortLabel}
+              </div>
+            `}
           </div>
           <span
             class="mono tnum"
@@ -1199,9 +1236,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
                     `
                   : html`
                       <span class="mono tnum" style=${{ fontSize: 'var(--fs-12)' }}>
-                        일시 중지 ${pausedSummary.restingCount}/${pausedSummary.totalRegistered} (${pausedSummary.groupCount}개 계정) · 가용 ${pausedSummary.availableCount}${globalSoonestRelease
-                          ? ` · 가장 빠른 해제 ${globalSoonestRelease.countdown}${globalSoonestRelease.localTime ? ` (${globalSoonestRelease.localTime})` : ''}${globalSoonestRelease.isEstimated ? ' · 예상' : ''}`
-                          : ''}
+                        일시 중지 ${pausedSummary.restingCount}/${pausedSummary.totalRegistered} (${pausedSummary.groupCount}개 계정) · 가용 ${pausedSummary.availableCount}${globalSoonestRelease ? ` · ${soonestReleaseWords(globalSoonestRelease)}` : ''}
                       </span>
                     `}
               </span>
@@ -1211,7 +1246,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
               <div style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap', flexShrink: 0 }}>
                 ${globalSoonestRelease && html`
                   <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: globalSoonestRelease.isSoon ? 'var(--ok-fg)' : 'var(--fg-2)' }}>
-                    가장 빠른 해제 ${globalSoonestRelease.countdown}${globalSoonestRelease.localTime ? ` (${globalSoonestRelease.localTime})` : ''}${globalSoonestRelease.isEstimated ? ' · 예상' : ''}
+                    ${soonestReleaseWords(globalSoonestRelease)}
                   </span>
                 `}
                 <${PopoverMenu}

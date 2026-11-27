@@ -9,7 +9,9 @@
      instructions;
    - the chat history surface is recorded as [Surface_ref.Gate];
    - external connector traffic still gets contextualized messages and
-     External speaker authority. *)
+     External speaker authority;
+   - the turn's tool approval gate follows who started it: the operator and a
+     connector person get one, a request another Keeper sent gets none. *)
 
 open Alcotest
 open Masc
@@ -159,6 +161,44 @@ let test_dashboard_without_channel_is_owner () =
   check string "empty channel" ""
     (Keeper_invocation_contract.direct_message_channel message)
 
+(* The Owner operation runner records [chat_speaker_of_request] and the turn
+   builds its approval gate from that speaker. A Keeper's masc_keeper_msg and
+   an operator's MCP call both arrive on the agent channel with no connector
+   speaker; only [sender_keeper], which a Keeper's own turn alone submits,
+   tells them apart. test_keeper_owner covers a caller that gives a
+   registered Keeper's name. *)
+let gets_approval_gate payload =
+  Stream.For_testing.approval_gate_for_speaker
+    (Stream.For_testing.chat_speaker_of_request payload)
+    ~create:(fun () -> ())
+  |> Option.is_some
+
+let test_approval_gate_follows_who_started_the_turn () =
+  let dashboard =
+    parse_ok {|{"request_id":"req-copilot-fixture","name":"luna","message":"run it"}|}
+  in
+  let operator_over_mcp = { dashboard with Stream.channel = "agent" } in
+  let sender =
+    match Keeper_identity.Keeper_id.of_string "masc-the-leader" with
+    | Some keeper_id -> keeper_id
+    | None -> fail "fixture Keeper id must parse"
+  in
+  let sent_by_keeper =
+    { operator_over_mcp with Stream.sender_keeper = Some sender }
+  in
+  let connector_person =
+    parse_ok
+      {|{"request_id":"req-copilot-fixture","name":"luna","message":"run it","channel":"discord","channel_user_id":"user-42","channel_user_name":"Alice","channel_workspace_id":"workspace-9"}|}
+  in
+  check bool "operator on the dashboard gets a gate" true
+    (gets_approval_gate dashboard);
+  check bool "operator over MCP gets a gate" true
+    (gets_approval_gate operator_over_mcp);
+  check bool "person on a connector gets a gate" true
+    (gets_approval_gate connector_person);
+  check bool "request another Keeper sent gets none" false
+    (gets_approval_gate sent_by_keeper)
+
 let () =
   run "copilot_dock_channel_wiring"
     [
@@ -175,6 +215,11 @@ let () =
             test_external_connector_still_contextualized;
           test_case "dashboard without channel records Dashboard surface" `Quick
             test_dashboard_without_channel_is_owner;
+        ] );
+      ( "approval gate",
+        [
+          test_case "gate follows who started the turn" `Quick
+            test_approval_gate_follows_who_started_the_turn;
         ] );
       ( "prompt",
         [

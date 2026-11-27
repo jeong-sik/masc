@@ -2617,9 +2617,12 @@ let handle_masc_keeper_with_outcome
       ~call_summary:None
       continue
   in
+  (* HIGH-RISK-UNREVIEWED: the one production place a [Turn_caller] is made.
+     [meta] is the Keeper whose turn this runtime is running, so a
+     masc_keeper_msg or masc_keeper_delegate it sends is that Keeper's work. *)
   !Keeper_dispatch_ref.dispatch
       ~config
-      ~agent_name:meta.name
+      ~caller:(Keeper_dispatch_ref.Turn_caller.of_running_turn meta)
       ~publication_recovery_provider
       ?sw
       ?clock

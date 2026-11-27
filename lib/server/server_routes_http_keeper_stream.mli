@@ -94,10 +94,11 @@ type keeper_chat_stream_request = {
   channel_user_name : string;
   channel_workspace_id : string;
   sender_keeper : Keeper_identity.Keeper_id.t option;
-      (** The registered Keeper that sent this request, carried from the
-          durable operation source where the submitting tool matched the
-          Keeper registry. The HTTP body cannot set it: the parser always
-          yields [None]. *)
+      (** The Keeper whose own turn sent this request, carried from the
+          durable operation source. Only a Keeper's own turn submits one
+          ([Keeper_dispatch_ref.Turn_caller]); a caller over MCP or HTTP never
+          does, whatever name it gives. The HTTP body cannot set it: the
+          parser always yields [None]. *)
   attachments : Keeper_chat_store.attachment list;
   direct_message : Keeper_invocation_contract.direct_message;
   since_seq : Keeper_chat_event_log.replay_position;
@@ -376,6 +377,11 @@ module For_testing : sig
   val message_for_request : keeper_chat_stream_request -> string
   val chat_surface_of_request : keeper_chat_stream_request -> Surface_ref.t
   val chat_speaker_of_request : keeper_chat_stream_request -> Keeper_chat_store.speaker
+  val approval_gate_for_speaker :
+    Keeper_chat_store.speaker -> create:(unit -> 'gate) -> 'gate option
+  (** The tool approval gate a turn gets from who started it: [create ()]
+      for the operator and for a person on a connector, [None] for a request
+      a Keeper sent. *)
   val input_speaker_of_request : keeper_chat_stream_request -> Keeper_input_speaker.t
   val turn_instructions_for_request : keeper_chat_stream_request -> string option
   val direct_message_of_request :

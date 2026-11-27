@@ -504,7 +504,7 @@ let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
              ~tool_name:name
              (Keeper_tool_surface_ops.handle_keeper_delegate
                 ?invocation_ref
-                ~submitted_by:ctx.agent_name
+                ~submitter:(Keeper_tool_surface_ops.Named_caller ctx.agent_name)
                 ctx
                 args))
     | Keeper_tool_name.Keeper_msg ->
@@ -512,7 +512,7 @@ let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
           (tool_result_with_tool_name
              ~tool_name:name
              (Keeper_tool_surface_ops.handle_keeper_msg_from_args
-                ~submitted_by:ctx.agent_name
+                ~submitter:(Keeper_tool_surface_ops.Named_caller ctx.agent_name)
                 ctx
                 args))
     | Keeper_tool_name.Keeper_delegate_status ->
@@ -565,14 +565,21 @@ let dispatch_keeper_msg ~submitted_by ?continuation_channel ctx ~message : tool_
   let ctx = resolve_ctx ctx ~name in
   tool_result_with_tool_name
     ~tool_name:name
-    (handle_keeper_msg ?continuation_channel ~submitted_by ctx message)
+    (handle_keeper_msg
+       ?continuation_channel
+       ~submitter:(Keeper_tool_surface_ops.Named_caller submitted_by)
+       ctx
+       message)
 ;;
 
 let submit_keeper_msg ~submitted_by ?continuation_channel ctx ~message =
   let name = Keeper_tool_name.(to_string Keeper_msg) in
   let ctx = resolve_ctx ctx ~name in
   Keeper_tool_surface_ops.submit_keeper_msg
-    ?continuation_channel ~submitted_by ctx message
+    ?continuation_channel
+    ~submitter:(Keeper_tool_surface_ops.Named_caller submitted_by)
+    ctx
+    message
   |> Result.map_error (fun error ->
          tool_result_of_handler_error error
          |> tool_result_with_tool_name ~tool_name:name)
@@ -677,7 +684,8 @@ let eio_context_missing tool_name =
 
 let () =
   Keeper_dispatch_ref.dispatch
-  := fun ~config ~agent_name ~publication_recovery_provider ?sw ?clock ?proc_mgr ?net ?mcp_session_id:_ ?authorize_external_effect ~name ~args () ->
+  := fun ~config ~caller:turn_caller ~publication_recovery_provider ?sw ?clock ?proc_mgr ?net ?mcp_session_id:_ ?authorize_external_effect ~name ~args () ->
+    let agent_name = Keeper_dispatch_ref.Turn_caller.keeper_name turn_caller in
     let run_external_effect continue =
       match authorize_external_effect with
       | None -> continue ()
@@ -784,7 +792,7 @@ let () =
         with_eio_context (fun ctx ->
           Some
             (Keeper_tool_surface_ops.handle_keeper_delegate
-               ~submitted_by:agent_name
+               ~submitter:(Keeper_tool_surface_ops.Own_turn turn_caller)
                ctx
                args))
       | Keeper_tool_name.Keeper_msg ->
@@ -793,7 +801,7 @@ let () =
             (tool_result_with_tool_name
                ~tool_name:name
                (Keeper_tool_surface_ops.handle_keeper_msg_from_args
-                  ~submitted_by:agent_name
+                  ~submitter:(Keeper_tool_surface_ops.Own_turn turn_caller)
                   ctx
                   args)))
       | Keeper_tool_name.Keeper_up ->

@@ -64,7 +64,7 @@ related: ["0503", "0486"]
 ### 1.5 자율 턴에는 스트림 길이 없다
 
 - 채팅 스트림(`/api/v1/keepers/chat/stream`)은 요청 하나에 붙는다. 같은 `request_id`를 다시 보내면 그 요청의 기록을 이어 보낸다(`lib/server/server_routes_http_keeper_stream.ml`, `since_seq` 주석).
-- 도구 승인 대기도 운영자가 시작한 턴에만 있다(같은 파일, `approval_gate` 주석: 「An autonomous cycle gets none -- nobody is watching it」).
+- 도구 승인 대기는 운영자나 커넥터의 사람이 채팅 요청으로 시작한 턴에만 있다(같은 파일, `approval_gate_for_speaker`). 자율 턴과 다른 Keeper가 보낸 요청에는 없다.
 - 자율 턴의 유일한 길은 미리보기다. 미리보기가 틀리면 화면이 틀린다.
 
 ## 2. 결정

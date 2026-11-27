@@ -686,18 +686,33 @@ let operation_id_of_invocation_ref invocation_ref =
   "kmsg-" ^ String.sub digest 0 32
 ;;
 
-(* Who sent this, as the recipient's transcript and Librarian will see it.
-   Registry membership decides it, the same exact lookup
-   [delegate_continuation_channel] uses: a name shaped like a Keeper id is
-   not proof, since people and external bots mint the same shape.
-   An operator or agent driving the tool over HTTP is not
-   in the registry and stays [None], which the route records as the owner. *)
-let sender_keeper_of_submitter ~(config : Workspace.config) ~submitted_by =
-  match Keeper_identity.Keeper_id.of_string submitted_by with
-  | Some keeper_id
-    when Keeper_registry.is_registered ~base_path:config.base_path submitted_by ->
-    Some keeper_id
-  | Some _ | None -> None
+(* HIGH-RISK-UNREVIEWED: who submits a masc_keeper_msg or
+   masc_keeper_delegate operation. It decides the sender the recipient's
+   transcript and Librarian see, and whether the recipient's turn is Keeper
+   work that runs without the tool approval gate (#55029).
+
+   - [Own_turn]: a Keeper's own running turn, reaching these tools through
+     [Keeper_dispatch_ref] with the caller the in-process tool runtime made
+     from that turn's meta.
+   - [Named_caller]: everyone else -- an MCP client, an HTTP route, the
+     dashboard -- with the name it gave or its route resolved. It is never a
+     sender Keeper, even when the name is a registered Keeper's. MCP takes
+     the request's [_agent_name] / [agent_name]; with auth off, with no
+     token required, or with the internal Keeper token and the
+     [x-masc-keeper-name] header its holder chooses, nothing binds that name
+     to the caller. The route then records the request as the owner's. *)
+type submitter =
+  | Own_turn of Keeper_dispatch_ref.Turn_caller.t
+  | Named_caller of string
+
+let submitter_name = function
+  | Own_turn caller -> Keeper_dispatch_ref.Turn_caller.keeper_name caller
+  | Named_caller name -> name
+;;
+
+let sender_keeper_of_submitter = function
+  | Own_turn caller -> Keeper_dispatch_ref.Turn_caller.sender caller
+  | Named_caller _ -> None
 ;;
 
 (* Where the answer goes. A Keeper that delegates or messages another Keeper is
@@ -723,7 +738,7 @@ let delegate_continuation_channel ~(config : Workspace.config) ~submitted_by =
 let submit_agent_operation
       ?continuation_channel
       ?operation_id_raw
-      ~submitted_by
+      ~submitter
       ~keeper_name
       ~message
       ~user_blocks
@@ -733,6 +748,7 @@ let submit_agent_operation
       ctx
   =
   let ( let* ) = Result.bind in
+  let submitted_by = submitter_name submitter in
   let operation_id_raw =
     Option.value
       operation_id_raw
@@ -773,7 +789,7 @@ let submit_agent_operation
       ~external_message_id:None
       ~workspace_id:None
       ~extra_mentions:[]
-      ~sender_keeper:(sender_keeper_of_submitter ~config:ctx.config ~submitted_by)
+      ~sender_keeper:(sender_keeper_of_submitter submitter)
       ~user_row_origin:Keeper_chat_store.Needs_append
     |> Result.map_error (operation_payload_error ~class_:Tool_result.Policy_rejection "invalid_input")
   in
@@ -833,7 +849,7 @@ let tool_result_of_operation_acceptance
         @ extra))
 ;;
 
-let submit_keeper_msg ?continuation_channel ~submitted_by ctx message =
+let submit_keeper_msg ?continuation_channel ~submitter ctx message =
   let* name, meta =
     (* The caller named a keeper that is not there. *)
     message_error ~class_:Tool_result.Workflow_rejection (resolve_keeper ctx message)
@@ -852,7 +868,7 @@ let submit_keeper_msg ?continuation_channel ~submitted_by ctx message =
   in
   let* acceptance = submit_agent_operation
     ?continuation_channel
-    ~submitted_by
+    ~submitter
     ~keeper_name:name
     ~message:(Keeper_invocation_contract.direct_message_prompt message)
     ~user_blocks:(Keeper_invocation_contract.direct_message_user_blocks message)
@@ -866,14 +882,14 @@ let submit_keeper_msg ?continuation_channel ~submitted_by ctx message =
   Ok (name, acceptance)
 ;;
 
-let handle_keeper_msg ?continuation_channel ~submitted_by ctx message : tool_result =
-  match submit_keeper_msg ?continuation_channel ~submitted_by ctx message
+let handle_keeper_msg ?continuation_channel ~submitter ctx message : tool_result =
+  match submit_keeper_msg ?continuation_channel ~submitter ctx message
   with
   | Ok (_keeper_name, acceptance) -> tool_result_of_operation_acceptance acceptance
   | Error error -> tool_result_of_handler_error error
 ;;
 
-let handle_keeper_delegate ?invocation_ref ~submitted_by ctx args =
+let handle_keeper_delegate ?invocation_ref ~submitter ctx args =
   match
     let* request =
       Keeper_invocation_contract.request_of_json args
@@ -909,8 +925,10 @@ let handle_keeper_delegate ?invocation_ref ~submitted_by ctx args =
       submit_agent_operation
         ?operation_id_raw:(Option.map operation_id_of_invocation_ref invocation_ref)
         ?continuation_channel:
-          (delegate_continuation_channel ~config:ctx.config ~submitted_by)
-        ~submitted_by
+          (delegate_continuation_channel
+             ~config:ctx.config
+             ~submitted_by:(submitter_name submitter))
+        ~submitter
         ~keeper_name
         ~message
         ~user_blocks:[]
@@ -935,7 +953,7 @@ let handle_keeper_delegate ?invocation_ref ~submitted_by ctx args =
    args decode so both dispatch tables (Keeper_tool_surface.dispatch and
    Keeper_dispatch_ref.dispatch) can register it the same way. Target
    resolution, preflight, and submission stay inside [handle_keeper_msg]. *)
-let handle_keeper_msg_from_args ~submitted_by ctx args : tool_result =
+let handle_keeper_msg_from_args ~submitter ctx args : tool_result =
   match
     Keeper_invocation_contract.direct_message
       ~media_store:(Tool_blob_media_store.of_base_path ~base_path:ctx.config.Workspace.base_path)
@@ -949,7 +967,7 @@ let handle_keeper_msg_from_args ~submitted_by ctx args : tool_result =
     |> Result.map_error Keeper_invocation_contract.request_error_to_string
     |> message_error ~class_:Tool_result.Policy_rejection
   with
-  | Ok message -> handle_keeper_msg ~submitted_by ctx message
+  | Ok message -> handle_keeper_msg ~submitter ctx message
   | Error error -> tool_result_of_handler_error error
 ;;
 

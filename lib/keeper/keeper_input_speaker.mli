@@ -64,7 +64,7 @@ val classify : Agent_core.Types.metadata -> classification
 
 (** The person who answered an Ask, from the surface the answer arrived on.
     Only the dashboard is the operator. Every other surface is external,
-    including [Agent]: an Ask answer carries no registry-matched sender. *)
+    including [Agent]: an Ask answer carries no sender Keeper. *)
 val of_ask_responder : Keeper_ask.responder -> person
 
 (** The value of a Librarian conversation header's [speaker=] field, e.g.

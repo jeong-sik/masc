@@ -60,18 +60,27 @@ let with_workspace f =
     (fun () -> f config)
 ;;
 
+let keeper_meta ~keeper_name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+          [ "name", `String keeper_name
+          ; "activation_mode", `String "manual"
+          ])
+  with
+  | Ok meta -> meta
+  | Error err -> fail ("keeper meta fixture failed: " ^ err)
+;;
+
+(* What the in-process tool runtime submits when [keeper_name]'s own turn
+   calls masc_keeper_delegate or masc_keeper_msg. *)
+let own_turn ~keeper_name =
+  Ops.Own_turn
+    (Masc.Keeper_dispatch_ref.Turn_caller.of_running_turn (keeper_meta ~keeper_name))
+;;
+
 let ensure_keeper config ~keeper_name =
-  let meta =
-    match
-      Masc_test_deps.meta_of_json_fixture
-        (`Assoc
-            [ "name", `String keeper_name
-            ; "activation_mode", `String "manual"
-            ])
-    with
-    | Ok meta -> meta
-    | Error err -> fail ("keeper meta fixture failed: " ^ err)
-  in
+  let meta = keeper_meta ~keeper_name in
   (match Keeper_meta_store.replace_snapshot config meta with
    | Ok _ -> ()
    | Error err -> fail ("write keeper meta failed: " ^ err));
@@ -516,27 +525,29 @@ let only_a_keeper_is_answered_on_its_queue () =
 ;;
 
 (* The recipient records a Keeper's masc_keeper_msg /
-   delegate as that Keeper. Registry membership decides it, as it decides the
-   reply route above; an operator driving the tool is not a Keeper. The typed
-   sender then survives the durable operation source. *)
-let only_a_registered_keeper_is_the_sender () =
+   delegate as that Keeper only when that Keeper's own turn sent it. A caller
+   over MCP or HTTP names itself with a string, and a registered Keeper's
+   name does not make it that Keeper. The typed sender then survives the
+   durable operation source. *)
+let only_a_keepers_own_turn_is_the_sender () =
   with_workspace (fun config ->
     ensure_keeper config ~keeper_name:asker;
-    (match Ops.sender_keeper_of_submitter ~config ~submitted_by:asker with
+    (match Ops.sender_keeper_of_submitter (own_turn ~keeper_name:asker) with
      | Some keeper_id ->
-       check string "a registered Keeper is the sender" asker
+       check string "a Keeper's own turn is the sender" asker
          (Masc.Keeper_identity.Keeper_id.to_string keeper_id)
-     | None -> fail "a registered Keeper must be recorded as the sender");
+     | None -> fail "a Keeper's own turn must be recorded as the sender");
+    check bool "a caller giving a registered Keeper's name is not a sender Keeper" true
+      (Option.is_none (Ops.sender_keeper_of_submitter (Ops.Named_caller asker)));
     check bool "an operator is not a sender Keeper" true
-      (Option.is_none
-         (Ops.sender_keeper_of_submitter ~config ~submitted_by:"operator"));
+      (Option.is_none (Ops.sender_keeper_of_submitter (Ops.Named_caller "operator")));
     let thread_id = "keeper:" ^ delegate in
     let continuation_channel =
       match Keeper_continuation_channel.keeper ~keeper_name:asker with
       | Ok channel -> channel
       | Error detail -> fail detail
     in
-    let sender_keeper = Ops.sender_keeper_of_submitter ~config ~submitted_by:asker in
+    let sender_keeper = Ops.sender_keeper_of_submitter (own_turn ~keeper_name:asker) in
     let encoded =
       match
         Masc.Keeper_chat_operation_payload.source_to_json
@@ -587,7 +598,7 @@ let cancelled_or_restarted_delegation_wakes_the_asker () =
         ~external_message_id:None
         ~workspace_id:None
         ~extra_mentions:[]
-        ~sender_keeper:(Ops.sender_keeper_of_submitter ~config ~submitted_by:asker)
+        ~sender_keeper:(Ops.sender_keeper_of_submitter (own_turn ~keeper_name:asker))
         ~user_row_origin:Masc.Keeper_chat_store.Needs_append
       |> Result.get_ok
     in
@@ -706,9 +717,9 @@ let () =
             `Quick
             only_a_keeper_is_answered_on_its_queue
         ; test_case
-            "only a registered Keeper is the sender"
+            "only a Keeper's own turn is the sender"
             `Quick
-            only_a_registered_keeper_is_the_sender
+            only_a_keepers_own_turn_is_the_sender
         ; test_case
             "cancelled or restarted delegation wakes the asker"
             `Quick

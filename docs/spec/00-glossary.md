@@ -1037,7 +1037,8 @@ status: reference
   `state`가 대기·실행·성공·실패·취소를 구분한다. Board 맥락 추론이나 다른 Keeper(`masc_keeper_msg`·
   `masc_keeper_delegate`)도 이 operation을 제출하고, 응답의 `keeper_name`은 제출 경로가 해석한 실제 대상
   Keeper다. 소스 스키마는 `masc.keeper_chat_operation.source.v2`이며 `sender_keeper` 키를
-  반드시 싣는다. 값은 다른 Keeper가 보낸 경우 그 Keeper 식별자이고, 운영자·커넥터 화자면 `null`이다.
+  반드시 싣는다. 값은 다른 Keeper가 자기 턴에서 보낸 경우 그 Keeper 식별자이고, 운영자·커넥터 화자면 `null`이다.
+  MCP·HTTP 호출자가 등록된 Keeper 이름을 대도 `null`이다. 이 값이 있으면 받는 턴은 도구 승인 대기를 붙이지 않는다.
   접수 응답은 실행 완료를 뜻하지 않는다.
   → [Keeper_chat_operation_payload](../../lib/keeper/keeper_chat_operation_payload.mli)
 

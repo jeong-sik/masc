@@ -1,5 +1,125 @@
 ## [Unreleased]
 
+## [0.83.7] - 2026-11-27
+
+### Upgrade notes
+
+- No fresh state is needed unless a stored async request record still has status `waiting_for_dependencies`. Such a record now fails to load as an unknown status. To check, run `rg -l '"waiting_for_dependencies"' <base-path>/.masc/keeper_msg_requests`; the operator workspace had none of its 1,321 records (#55244).
+
+### Fresh state required
+
+- Connector state is no longer read from `<base>/.gate/runtime/<kind>/`; it
+  now defaults to `<base>/.masc/connectors/<kind>/`. With the server stopped
+  and before starting this version, run `mkdir -p <base>/.masc/connectors`,
+  then move each existing `<base>/.gate/runtime/<kind>` directory to
+  `<base>/.masc/connectors/<kind>` for `discord`, `imessage`, `slack` and
+  `telegram`. If `<base>/.masc/connectors/<kind>` already exists, it holds
+  bindings from the layout used before 0.9.1, or state an earlier start of
+  this version wrote, and the server reads it as current: remove it before
+  the move. A connector whose directory is not moved starts with no bindings,
+  so its channel messages reach no Keeper. Move the whole directory: an
+  iMessage binding moved without its `cursor.json` re-reads Messages.app
+  from ROWID 0 and delivers the bound conversation's history again. Paths set
+  through `MASC_*_BINDING_STORE_PATH`, `MASC_*_BINDING_AUDIT_PATH`,
+  `TELEGRAM_BINDING_*_PATH` or `MASC_IMESSAGE_CURSOR_PATH` are unchanged
+  (#55239).
+
+### Added
+
+- Add Multi-Account Personal Keepers (`/api/v1/auth/keepers*`, `Manage_own_keeper`) to the TUI Keepers workspace (`4`, `/keepers`, or `@`/`Alt+A` then `p`) with strict fail-closed codecs, lowercase `[a-z0-9._-]` keeper creation, strict key-order runtime assignment, current/historical conversation browsing, 130s turn execution with honest answered/ephemeral/failed/`model_may_have_read` display, 2-step confirmed conversation deletion with 70s timeout and `503 conversation_not_deleted` recovery, non-logout PAT 403 handling, Service principal `LOCKED` gating, and session-epoch purge (#55140).
+- Add `[f]` Revert to File/Env Token (`Cmd.Reset_bearer_token_to_default`) and 2-step `[c]` Clear Token confirmation with central disarm across keys, mouse events, overlays, and workspace switches in `Nav.Account` and `Nav.Auth_gate` (#55140).
+- The dashboard keeper detail status tab lists the schedules that wake that
+  Keeper, by next run, each with its date and time, recurrence, status and
+  last run, and opens a schedule from its row (#55183).
+- In the dashboard Wiki tab, a body link to an existing wiki page (`[text](page.md)`) opens that page in the tab instead of a broken browser tab, Back returns to the page it was followed from, and hovering shows the target page's summary. Missing pages and external links behave as before (#55185).
+- In the TUI Wiki page card (focused or zoomed), `<`/`>` select a body link to another existing wiki page, drawn reversed with the target page's summary under the title; `Enter` opens it in place and `Esc` returns to the page, scroll and link it was followed from (#55204).
+
+### Changed
+
+- A review wake that names verifications reads only their retained records when it looks for work to recover. It read the whole retained-review scope twice (#55229).
+
+### Removed
+
+- `Session_lifecycle_event` and `Server_mcp_transport_http_conn.stop_sse_session_evict`.
+  Only a test installed the event publisher, so the server dropped every
+  SSE eviction event it built, and nothing read the `session_lifecycle`
+  topic. Cap evictions now call `stop_sse_session` directly, which is the
+  work the removed function did (#55234).
+- The half-built Keeper response feedback (`Keeper_response_feedback`), its
+  `GET /api/v1/keepers/:name/feedback` route, the `<name>.feedback.jsonl`
+  root log name, and the `feedback` key under Keeper status
+  `storage_paths`. Nothing wrote the log and no dashboard or TUI view called
+  the route, so it always answered an empty tally. Keeper purge no longer
+  removes a leftover `<name>.feedback.jsonl`; no reader for old feedback
+  files is kept (#55241).
+- `keeper_composition_result` is no longer in the Keeper tool table. It refused every call since the composition engine was removed; its schema, TOML and handler are gone (#55244).
+- Async requests no longer have the `waiting_for_dependencies` status, and their status JSON no longer carries `dependencies` or `worker_released`. Nothing has written that status since the composition engine was removed. `keeper_job_result` no longer describes itself as a composition leaf (#55244).
+
+### Fixed
+
+- Keeper Chat's progress line says what a running turn has open, not only the activity's word (#54982).
+- While a turn is being prepared, Keeper Chat's progress line names the step and since when it has run (#54983).
+- The turn pill of the Keeper header says the lane and what the turn is doing, in the progress line's words, and follows the stream (#54984).
+- A roster row of a Keeper in a turn says what the turn is doing and how much waits; the runtime id moves to the hover text (#54985).
+- A Keeper's Ctx pill takes the same colour thresholds in the header, the roster and the Chat context ring (#54986).
+- The pill of the Chat turn card names a tool only when no open row names it, and the open-work list keeps each row's time near its words (#54987).
+- The Chat turn card says the turn in the dashboard's words: one line for what no open row names, the rows of open work, and why an attempt failed (#54991).
+- Windowed lists and tables measure the rows they draw, so a deep scroll no longer leaves an empty band or gaps between rows (#55020).
+- The columns of the Keeper cost table and the Keeper Tool Calls table hold still while the table scrolls (#55021).
+- Keeper memory fact tables: a claim shows three lines with a button to open it, an id shows 8 digits with the whole value as its tooltip, a seen-time column gives the opening order, and the row picked for retraction is marked (#55022).
+- Work › Inbox › 24h Decisions opens newest first, with that order shown in the 시각 header (#55023).
+- On the runtime lens, a selected turn run by a confirmed official-client
+  runtime (Claude Code, Antigravity, Codex app-server, ACP clients) now marks
+  its Agent Core lane `not applicable`. The trace-window
+  `turn_terminal_incomplete` warning disappears only when every finished turn
+  in the trace window resolves to a confirmed official-client runtime; if any
+  finished turn has an unknown owner (including errored turns that record a
+  lane name instead of a catalog runtime id) or the window mixes runtime
+  owners, `checkpoint_saved` remains owed. Missing `checkpoint_saved` gaps
+  continue to be evaluated at trace-window granularity (warning when the
+  window records zero `checkpoint_saved` events, not per individual AGENT_CORE
+  turn when another AGENT_CORE turn in the same window saved) (#55033).
+- iMessage osascript argv now terminates options with -- and rejects option-like chat guids, Browser Lane re-checks liveness under lock to prevent disconnect hangs, Discord/Slack gateways connect off the drive loop with connect timeouts, Slack REST form bodies percent-encode pagination cursors, Telegram 429 retries are bounded, and MCP resource subscriptions validate and cap entries (#55109).
+- Refresh provider accounts after API key CRUD `Decode_error` responses, scrub secrets while retaining stale loaded values on transient provider/integration/personal-keeper refresh errors, and reject blank integration IDs or API keys inline before modal submission (#55140).
+- Decouple 24h provider cost scanning from `/api/v1/dashboard/shell` into an independent background warmer in `Server_dashboard_snapshot_sources`, count 24h board posts via the recent index without full-table sorting, eliminate redundant cost-row JSON decodes, and record `scorecard_24h_ms` in shell projection diagnostics (#55147).
+- **Runtime**: prevented semaphore permit leaks on timeout/cancel in `Runtime_cli_spawn_gate`, released `Runtime_provider_usage_read` claims when a cancelled root switch drops a fork, bounded `Runtime_model_discovery` pagination and `Runtime_model_discovery`/`Runtime_serving_context` HTTP probe timeouts, caught `Eio.Io` teardown errors in `Runtime_setup_login_session`, and called `forget_prepared_below` on disposable `Runtime_antigravity_usage` roots (#55165).
+- **Fusion, HTTP Pool & Auth**: committed durable Keeper wake stimuli before marking Fusion runs completed, prevented `Eio.Mutex` poisoning on pooled `Fusion_delivery_obligation` locks, removed empty host buckets and fixed URI casing/IPv6/default-port `Host` headers in `Masc_http_client.Pool`, capped `Cache-Control` `max-age` and refused caching `Malformed_jwks` in `Oidc_google_exchange`, and restricted `Authz_login` commit retries to pre-append `Refused` errors (#55167).
+- **agent_core**: Enforce TLS peer/SNI verification and positive batch sizes in `Otel_export`, close MCP subprocess pipes on startup failure, export sorted non-cumulative OTLP histogram buckets in `Metrics`, pair tool completion observers across non-cancellation/durability unwinds, and resume all-admission-refused `StopToolUse` checkpoints cleanly (#55175).
+- Each release now publishes `masc-exec-shim-licenses-linux-amd64.tar.gz` and `masc-exec-shim-licenses-linux-arm64.tar.gz` beside the exec shim binaries. Each holds the notices of the OCaml packages and the musl that shim links statically, and names the sha256 of the shim it belongs to. The release stops when a notice is missing. The shim binaries keep their names, so installing and downloading the shim works as before (#55184).
+- **lsp_client**: Drain server stderr with bounded chunked reads, enforce LSP header/message bounds, close spawn pipe FDs on partial startup failure, wrap router/pool teardown in `Eio.Cancel.protect`, and remove timed-out/cancelled entries from `router.pending` (#55205).
+- Preserve wrapped operator/runtime cancellations in keeper async submit and guest sockets, prevent phantom approval waiters/prompts, protect transition audit rings with `Stdlib.Mutex`, and finalize keeper chat SQLite statements on all exceptions (#55213).
+- Harden browser/machine spectator fibers, atomically pair WebSocket dashboard delta frames and guard subscribe races, prevent iMessage gateway head-of-line blocks and SQLite leaks, recover stuck operator snapshot cache slots, and guard single-flight refresh forks plus TCP RTT probes (#55216).
+- Preserve Anthropic deferred tools under prompt caching, remap lowered prefix-reasoning indices, verify Responses stream `item_id`s, fold consecutive tool-result followups, validate provider file upload/delete inputs, and harden Agent Core I/O, lock cleanup, and OTel span teardown (#55221).
+- Render `FreshnessLine` coverage gaps properly, isolate keeper-switch async state across turn inspector/tool telemetry/sandbox/note panels, scope ask submissions by `askId`, fix schedule fresh-load queueing, and bump `AsyncResource` generation in `applyKeeperConfigUpdate` (#55227).
+- Discord, iMessage, Slack and Telegram bindings, binding audits and poll
+  cursors default to `<base>/.masc/connectors/<kind>/`. The workspace tree and
+  file routes no longer list or serve them, and a container that keeps only
+  `.masc` on a volume keeps them across a recreate (#55239).
+- Isolate `Agent_turn` volatile carrier collection from prefix compaction anchors while preserving carriers when projections append trailing `Recovery_instruction` evidence, tag replayed v1 compaction notices with `compaction_anchor_metadata` so `Keeper_agent_prompt_metrics` retains both v1 and v2 anchors, allow prefix `Outside_context` anchors in `Backend_openai_request.split_strictly_trailing_system_context`, and avoid poisoning `agent.mu` while keeping `Eio.Cancel.protect` across durable commit and in-memory mutation in `Agent_input_checkpoint` (#55249)
+- Use CAS loops in `Keeper_lifecycle_reservation`, retain monotonic snapshot generation watermarks in `Keeper_approval_queue`, wrap persistent SQLite FTS5 reads/syncs in transactions and close cancelled `:memory:` handles in `Keeper_memory_search_index`, use `Stdlib.Mutex` for `Keeper_shutdown_runtime.worker_mu`, and switch `Keeper_sandbox_factory` and `Keeper_msg_async_locks` to non-poisoning locks (#55250)
+- Enforce `body_max_bytes` and exact `ESC ESC \` / `ESC BEL` transitions in `Input_decoder.body_byte`, and route arriving TUI voice transcripts to the originating `voice_target_keeper` draft in `Drafts` (#55253)
+- **Security, repo manager, and CLI safety** — fail closed on non-canonical `--deny-root` paths in `masc_antigravity_path_hook`, reject trailing `/..`/backslash/NUL traversal in `Safe_path.validate_relative`, validate arguments and timeouts in `Repo_git.get_recent_commits`, write fetch receipts atomically, unwind stuck `Cloning` sync state on error/cancel, and harden stdio shutdown and SSH bootstrap atomic writes (#55271).
+- **Workspace identity, verification store, and blob sweep** — use backend-aware `.json` filtering in `Workspace_identity.resolve_agent_name` and `Workspace_lifecycle`, validate `request_id` and handle atomic storage failures in `Workspace_verification_store`, eliminate shared `.tmp` races in `Workspace_utils_ops.write_text_local`, and replace per-blob touch-ledger snapshotting with O(1) `Tool_blob_store.probe_touch` (#55273).
+- `masc_board_sub_board_update` now clears a sub-board description when `description` is an empty or whitespace-only string; it used to read `""` as "not given" and keep the old text. The MCP tool and `PUT /api/v1/board/sub-boards/<id>` share one decoder (absent or `null` keeps, blank clears, other strings set, a non-string is rejected), and `update_sub_board` takes the typed `sub_board_description_edit` (#55276)
+- **Session actor, metrics/tool-call flush, rate limiter, telemetry cache, and metric hooks** — eliminate shutdown TOCTOU hangs and stale-state overwrites in `Session`, reset `queue_active`/`async_append_active` on switch exit, guard `Rate_limit` against backward clock steps and unbounded bucket growth, key and clone `Telemetry_eio.tool_usage_cache` per workspace, and make `Workspace_metric_hooks` temp dirs atomic and hook registration idempotent (#55277).
+- Harden runtime account revocation checks, Antigravity home 0600 staging and locking, Muse plugin inspection bounds, lane-addon record write serialization, HTTPS URL validation, and Discord/Slack gateway state handling (#55281).
+- Prevent microVM shim readiness `config_lock` mutex poisoning by replacing `Eio.Mutex.use_rw` with a non-poisoning, cancel-protected `lock`/`Fun.protect ~finally:unlock` critical section, and fix cancellation-induced lifecycle reservation leaks, registry gauge/observer drift on SSE broadcast cancellation, memory-writer global hook teardown races, and premature turn-switch clearing on interrupt failure (#55283).
+- Scope Keeper gRPC heartbeat attempts to per-attempt switches with reconnect on stream errors and interruptible backoff, release dashboard runtime probe cache in-flight entries on cancellation without misclassifying finished switches as wrong-domain, re-raise cancellation in skill publish receipts, and guard connection socket close against closed-FD races (#55284).
+- Preserve fiber-bound Server_request_authority across deferred Http_reqd.read_body callbacks on HTTP/1.1, HTTP/2, and relayed domains so async POST routes keep admitted CORS headers and authority context (#55285).
+- Bracket IPv6 hosts in TUI HTTP URLs, clear stale SSE observer instance IDs across reconnects, clamp UTF-8 browser receipt summaries, unstage no-op config edits and reset the edit cursor, validate OSC 4 palette indices, and clamp memory tree scroll bounds (#55287).
+- Fix blank StatusChip pills and error-masking empty states in runtime, gate, and verification specs monitors, eliminate Rules of Hooks violations in agent detail, attribution, task detail, and tool quality panels, fix ToolMonitorReactivityBoard cold-load and async races, add mutation re-entrancy guards across approvals, connectors, board comments, GC, and broadcast composer, and delegate FetchScheduler.requestNowAndWait to requestNow (#55288).
+- Windowed lists and tables keep drawing rows when their scroll container has a 0-height layout box (#55300).
+
+### Performance
+
+- Keeper tool-call index skips SQLite write transactions, day-file opens, and `.continuity/*.json` reloads on unchanged ledger files, and skips re-stamping `PRAGMA user_version` when reopening a matching-version index (#55206).
+- `Tool_metrics_store.summary` caches row count and latest timestamp on the open SQLite handle keyed by `PRAGMA data_version` instead of scanning the full table on every refresh, `Telemetry_unified` caches `goal_events.jsonl` summary stats by file metadata, `Tool_usage_log.source_metadata_json` reuses `Dated_jsonl.count_and_read_recent_view`, and dashboard source change-read spacing rises to 3s for Tools and 5s for Telemetry (#55209).
+- `Keeper_approval.Audit.read_recent` parks waiting outside-pool readers on their own Eio fibers instead of occupying CPU pool workers while preserving deadlock-free worker takeover, and `Operator_control_snapshot` reuses its pre-loaded Keeper profile snapshot in `Keeper_runtime_trust_snapshot` instead of re-reading per-Keeper TOML profiles from disk (#55215).
+- `Schedule_store` moves append-only schedule notes out of hot `schedules.json` (and `.last-good`) into `<base>/.masc/schedule_notes.jsonl` with lossless, idempotent migration on write, single-fence lease publication, and `File_version_cache`-backed reads (#55230).
+- Stat-verify unchanged Board attention candidate ledgers to skip per-keeper systhread/lockf round-trips on read, and replace per-item `Eio_guard.fair_yield` calls in workspace message/task loops with metered yields and O(1) recent-window pruning (#55256)
+- Batch `Fs_compat.Retention_directory` regular-file and empty-directory removals into 256-entry systhread chunks and collapse repeated `.masc/keepers/` prune walks in `Dated_jsonl` and `Server_runtime_startup_maintenance` into single passes (#55272)
+- Skip `objects/` and `native-executions/` content subtrees inside session directories during startup retained-checkpoint sweeps, cutting the live `.masc/traces` walk from 17,476 directories (12.8s) to 68 directories (98.7ms) (#55299).
+
 ## [0.83.6] - 2026-11-27
 
 ### Fresh state required

@@ -1463,7 +1463,8 @@ let test_pending_read_error_does_not_block_unrelated_due_work () =
   let primary = `Assoc
     [ "version", `Int state.version; "updated_at", `Float state.updated_at
     ; "schedules", `List (List.map schedule_request_to_yojson state.schedules)
-    ; "notes", `List (List.map schedule_note_to_yojson state.notes)
+    ; ( "note_last_written_at"
+      , `Assoc (List.map (fun (id, ts) -> id, `Float ts) state.note_last_written_at) )
     ; "wakes", `List (List.map (fun (wake : wake_record) ->
         wake_record_to_yojson { wake with attempt_identity = Unidentified }) state.wakes) ] in
   Workspace_core.write_text config (pending_primary_path config) (Yojson.Safe.to_string primary);

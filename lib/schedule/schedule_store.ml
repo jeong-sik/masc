@@ -5,7 +5,12 @@ type state =
   ; updated_at : float
   ; schedules : Schedule_domain.schedule_request list
   ; wakes : Schedule_domain.wake_record list
-  ; notes : Schedule_domain.schedule_note list
+  ; note_last_written_at : (string * float) list
+  }
+
+type raw_ledger =
+  { state : state
+  ; legacy_notes : Schedule_domain.schedule_note list
   }
 
 type attempted_transition =
@@ -102,6 +107,10 @@ type read_error =
       ; recovery_err : string option
       }
 
+type notes_read_error =
+  | Corrupt_notes_log of string
+  | Corrupt_notes_ledger of read_error
+
 type read_source =
   | Uninitialized
   | Primary_ledger
@@ -113,15 +122,15 @@ type read_source =
    [default_state] is correct. [write_state] commits the primary before its
    mirror, so the mirror can lag an acknowledged write. A parseable mirror
    beside an absent or broken primary yields [Recovered] for observation only;
-   [load_for_mutation] refuses that source and preserves the surviving bytes.
+   [load_for_mutation_raw] refuses that source and preserves the surviving bytes.
 
    [Corrupt] = at least one of the two files exists and no state can be parsed
    from either; callers must NOT collapse this to [default_state] and must NOT
    overwrite the on-disk files, because the bytes may still hold schedule intent
    worth manual recovery. *)
 type load_outcome =
-  | Loaded of state
-  | Recovered of state * recovery_cause
+  | Loaded of raw_ledger
+  | Recovered of raw_ledger * recovery_cause
   | Fresh
   | Corrupt of
       { primary_err : string
@@ -265,14 +274,24 @@ let read_error_to_string = function
     corrupt_message ~primary_err ~recovery_err
 ;;
 
+let notes_read_error_to_string = function
+  | Corrupt_notes_log detail -> "schedule notes log could not be read: " ^ detail
+  | Corrupt_notes_ledger err -> read_error_to_string err
+;;
+
 (* NDT-OK: store boundary timestamp for projection metadata; replay uses the
    persisted [updated_at] value instead of recomputing it. *)
 let now () = Unix.gettimeofday ()
 
 let schedules_filename = "schedules.json"
+let schedule_notes_filename = "schedule_notes.jsonl"
 
 let schedules_path config =
   Filename.concat (Workspace_utils.masc_dir config) schedules_filename
+;;
+
+let schedule_notes_path config =
+  Filename.concat (Workspace_utils.masc_dir config) schedule_notes_filename
 ;;
 
 let with_ledger_lock config f =
@@ -288,7 +307,7 @@ let default_state () =
   ; updated_at = now ()
   ; schedules = []
   ; wakes = []
-  ; notes = []
+  ; note_last_written_at = []
   }
 ;;
 
@@ -302,8 +321,8 @@ let state_to_yojson (state : state) =
     ; ( "wakes"
       , `List
           (List.map Schedule_domain.wake_record_to_yojson state.wakes) )
-    ; ( "notes"
-      , `List (List.map Schedule_domain.schedule_note_to_yojson state.notes) )
+    ; ( "note_last_written_at"
+      , `Assoc (List.map (fun (id, ts) -> id, `Float ts) state.note_last_written_at) )
     ]
 ;;
 
@@ -334,6 +353,23 @@ let collect_results parse rows =
 module Schedule_id_map = Map.Make (String)
 module Schedule_id_set = Set.Make (String)
 module Attempt_id_set = Set.Make (String)
+module Note_id_set = Set.Make (String)
+
+let merge_last_written_into map schedule_id ts =
+  match Schedule_id_map.find_opt schedule_id map with
+  | Some seen when seen >= ts -> map
+  | Some _ | None -> Schedule_id_map.add schedule_id ts map
+;;
+
+let upsert_note_last_written_at entries ~schedule_id ~ts =
+  let map =
+    List.fold_left
+      (fun acc (id, existing_ts) -> merge_last_written_into acc id existing_ts)
+      Schedule_id_map.empty
+      entries
+  in
+  Schedule_id_map.bindings (merge_last_written_into map schedule_id ts)
+;;
 
 module Schedule_instance_key = struct
   type t = string * string
@@ -346,20 +382,43 @@ end
 
 module Schedule_instance_map = Map.Make (Schedule_instance_key)
 
-let state_of_yojson = function
+let parse_note_last_written_at fields =
+  match List.assoc_opt "note_last_written_at" fields with
+  | None -> Ok Schedule_id_map.empty
+  | Some (`Assoc entries) ->
+    let rec loop acc = function
+      | [] -> Ok acc
+      | (schedule_id, value) :: rest ->
+        let* ts =
+          match value with
+          | `Float v when Float.is_finite v -> Ok v
+          | `Int v -> Ok (float_of_int v)
+          | `Float _ | `Bool _ | `Intlit _ | `String _ | `Null | `Assoc _ | `List _ ->
+            Error ("note_last_written_at." ^ schedule_id ^ ": expected finite float")
+        in
+        loop (merge_last_written_into acc schedule_id ts) rest
+    in
+    loop Schedule_id_map.empty entries
+  | Some (`Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _) ->
+    Error "expected object field: note_last_written_at"
+;;
+
+let raw_ledger_of_yojson = function
   | `Assoc fields ->
     let* version = int_field "version" fields in
     let* updated_at = Schedule_domain.float_field "updated_at" fields in
     let* schedules_json = list_field "schedules" fields in
     let* wakes_json = list_field "wakes" fields in
-    let* notes_json =
-      (* Back-compat: ledgers written before task-381 carry no [notes] list.
-         Decode the absent field as an empty list rather than failing the whole
-         state parse. *)
+    let* note_last_written_map = parse_note_last_written_at fields in
+    let* legacy_notes_json =
+      (* Back-compat: ledgers written before the schedule_notes.jsonl split may
+         still carry an inline [notes] list; keep decoding and validating it so
+         reads include legacy notes and the next mutation migrates them safely. *)
       match List.assoc_opt "notes" fields with
       | None -> Ok []
       | Some (`List value) -> Ok value
-      | Some _ -> Error "expected list field: notes"
+      | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `Null | `String _) ->
+        Error "expected list field: notes"
     in
     let* schedules =
       collect_results Schedule_domain.schedule_request_of_yojson schedules_json
@@ -381,19 +440,38 @@ let state_of_yojson = function
       in
       unique Attempt_id_set.empty wakes
     in
-    let* notes =
-      collect_results Schedule_domain.schedule_note_of_yojson notes_json
+    let* legacy_notes =
+      collect_results Schedule_domain.schedule_note_of_yojson legacy_notes_json
     in
-    Ok { version; updated_at; schedules; wakes; notes }
+    let note_last_written_map =
+      List.fold_left
+        (fun acc (note : Schedule_domain.schedule_note) ->
+           if Float.is_finite note.created_at
+           then merge_last_written_into acc note.schedule_id note.created_at
+           else acc)
+        note_last_written_map
+        legacy_notes
+    in
+    let state =
+      { version
+      ; updated_at
+      ; schedules
+      ; wakes
+      ; note_last_written_at = Schedule_id_map.bindings note_last_written_map
+      }
+    in
+    Ok { state; legacy_notes }
   | json -> Error ("state_of_yojson: " ^ Yojson.Safe.to_string json)
 ;;
+
+let state_of_yojson json = Result.map (fun raw -> raw.state) (raw_ledger_of_yojson json)
 
 (* Probe result for the [.last-good] recovery mirror. An absent mirror and an
    unparseable mirror are kept apart because they lead to opposite outcomes when
    the primary is also absent: no mirror means an uninitialised store ([Fresh]),
    an unparseable mirror means corruption the operator must see ([Corrupt]). *)
 type recovery_outcome =
-  | Recovery_loaded of state
+  | Recovery_loaded of raw_ledger
   | Recovery_absent
   | Recovery_unparseable of string
 
@@ -404,8 +482,8 @@ let load_recovery config : recovery_outcome =
   match Workspace_utils.read_json_doc config (recovery_path config) with
   | Ok None -> Recovery_absent
   | Ok (Some recovery_json) ->
-    (match state_of_yojson recovery_json with
-     | Ok state -> Recovery_loaded state
+    (match raw_ledger_of_yojson recovery_json with
+     | Ok raw -> Recovery_loaded raw
      | Error parse_err -> Recovery_unparseable parse_err)
   | Error read_err ->
     Recovery_unparseable (Workspace_utils.json_doc_error_to_string read_err)
@@ -425,31 +503,31 @@ type primary_failure =
 (* An existing-but-broken primary — unreadable, unparsable, blank, or not a
    state — surfaces as [Primary_unparseable] rather than being silently
    swallowed; only a primary that does not exist is [Primary_absent]. *)
-let decode_primary config path : (state, primary_failure) Result.t =
+let decode_primary config path : (raw_ledger, primary_failure) Result.t =
   match Workspace_utils.read_json_doc config path with
   | Ok None -> Error Primary_absent
   | Ok (Some json) ->
-    (match state_of_yojson json with
-     | Ok state -> Ok state
+    (match raw_ledger_of_yojson json with
+     | Ok raw -> Ok raw
      | Error parse_err -> Error (Primary_unparseable parse_err))
   | Error read_err ->
     Error (Primary_unparseable (Workspace_utils.json_doc_error_to_string read_err))
 ;;
 
 (* The decoded primary, kept with the file version it was read from. The
-   ledger keeps terminal schedules until their retention passes and is
-   several megabytes, and it is read far more often than it is written -- every Keeper's world
-   observation, the dashboard and the schedule tools read all of it, a runner
-   commit writes it -- so a reader of an unchanged file takes the state the
-   last miss decoded. [write_state] keeps the state it wrote, so its own write
-   is not a miss. A miss reads,
-   parses and decodes as one job on the domain pool when one is installed. *)
-let decoded_primary : state File_version_cache.t = File_version_cache.create ()
+   ledger keeps terminal schedules until their retention passes, and it is
+   read far more often than it is written -- every Keeper's world observation,
+   the dashboard and the schedule tools read all of it, a runner commit writes
+   it -- so a reader of an unchanged file takes the state the last miss
+   decoded. [write_state] keeps the state it wrote, so its own write is not a
+   miss. A miss reads, parses and decodes as one job on the domain pool when
+   one is installed. *)
+let decoded_primary : raw_ledger File_version_cache.t = File_version_cache.create ()
 
 (* The Memory backend is authoritative over its local mirror. A mirror's
    inode/mtime cannot version backend state, nor distinguish two independent
    backend instances using the same workspace path. *)
-let load_primary config : (state, primary_failure) Result.t =
+let load_primary config : (raw_ledger, primary_failure) Result.t =
   let path = schedules_path config in
   let decode () =
     Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () -> decode_primary config path) in
@@ -477,18 +555,18 @@ let load config : load_outcome =
   let path = schedules_path config in
   (* A mirror may lag an acknowledged primary write. Keep it available for
      observation, with its provenance, but never authorize mutations from it. *)
-  let recovered_from_mirror ~primary_err ~cause state =
+  let recovered_from_mirror ~primary_err ~cause (raw : raw_ledger) =
     Log.Misc.warn
       "schedule_store: %s; loaded %d schedules and %d wakes from recovery \
        mirror %s"
       primary_err
-      (List.length state.schedules)
-      (List.length state.wakes)
+      (List.length raw.state.schedules)
+      (List.length raw.state.wakes)
       (recovery_path config);
-    Recovered (state, cause)
+    Recovered (raw, cause)
   in
   match load_primary config with
-  | Ok state -> Loaded state
+  | Ok raw -> Loaded raw
   | Error primary ->
     let primary_err = primary_failure_message ~path primary in
     (* The outcome depends on both probes, so both are matched together. The
@@ -500,10 +578,10 @@ let load config : load_outcome =
        no primary and no mirror is an uninitialised store ([Fresh]), while a
        broken primary and no mirror is corruption the operator must see. *)
     (match primary, load_recovery config with
-     | Primary_absent, Recovery_loaded state ->
-       recovered_from_mirror ~primary_err ~cause:Primary_missing state
-     | Primary_unparseable _, Recovery_loaded state ->
-       recovered_from_mirror ~primary_err ~cause:Primary_unusable state
+     | Primary_absent, Recovery_loaded raw ->
+       recovered_from_mirror ~primary_err ~cause:Primary_missing raw
+     | Primary_unparseable _, Recovery_loaded raw ->
+       recovered_from_mirror ~primary_err ~cause:Primary_unusable raw
      | Primary_absent, Recovery_absent -> Fresh
      | Primary_unparseable _, Recovery_absent ->
        Corrupt { primary_err; recovery_err = None }
@@ -519,8 +597,8 @@ let load config : load_outcome =
    masquerading as "no schedules". Does not write to disk. *)
 let read_state_observed config =
   match load config with
-  | Loaded state -> Ok (state, Primary_ledger)
-  | Recovered (state, cause) -> Ok (state, Recovery_mirror cause)
+  | Loaded raw -> Ok (raw.state, Primary_ledger)
+  | Recovered (raw, cause) -> Ok (raw.state, Recovery_mirror cause)
   | Fresh -> Ok (default_state (), Uninitialized)
   | Corrupt { primary_err; recovery_err } ->
     Error (Corrupt_read_ledger { primary_err; recovery_err })
@@ -540,59 +618,372 @@ let read_state config =
 (* The primary is the mutation authority. Recovery mirrors can lag successful
    commits, so promoting one would lose accepted work or revive settled wakes.
    [Fresh] means neither file exists and may initialize a new ledger. *)
-let load_for_mutation config : (state, store_error) result =
+let load_for_mutation_raw config : (raw_ledger, store_error) result =
   match load config with
-  | Loaded state -> Ok state
+  | Loaded raw -> Ok raw
   | Recovered (_, cause) -> Error (Primary_ledger_unavailable cause)
-  | Fresh -> Ok (default_state ())
+  | Fresh -> Ok { state = default_state (); legacy_notes = [] }
   | Corrupt { primary_err; recovery_err } ->
     Error (Corrupt_ledger { primary_err; recovery_err })
 ;;
 
-(* Write the primary ledger, then mirror to [.last-good]. The [.last-good] file
-   is written only here, immediately after a fully-formed in-memory [state] is
-   serialised, so it can only ever hold a parseable snapshot. The previous
-   recovery path was useless because corruption arrived on disk out-of-band
-   (e.g. schema evolution / partial write of the primary), never through this
-   serialise step. Refusing to read a corrupt primary into [state] (above) means
-   we never round-trip corruption through here either. *)
-let write_state config state =
-  ensure_dirs config;
-  (* One encoding serves both files, compact and on the pool. The ledger keeps
-     every terminal schedule (4.3 MB, 1,250 of 1,272 rows, 2026-09-16), and
-     encoding it pretty once per file was a 135-151 ms run on the scheduler
-     domain each time: four of them within a second when a schedule fired.
-     Yojson prints that document compact in 15 ms where the pretty printer
-     takes 107 ms. *)
-  (* The same job decodes the document it encodes. That state is what a
-     reader of the written file decodes -- the strings are the UTF-8 repaired
-     ones the bytes carry -- and [written_state] below keeps it, so a write
-     does not make the next reader parse the whole ledger again. Parsing is
-     the larger part of a read; this decode starts from the document already
-     in hand. *)
-  let* content, reread =
-    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-      let raw_json = state_to_yojson state in
-      let+ content, json =
-        Workspace_utils.encode_json_compact_with_value raw_json
-      in
-      let reread =
-        if json == raw_json then Ok state else state_of_yojson json
-      in
-      content, reread)
-    |> Result.map_error (fun msg -> Persistence_failed ("ledger encoding failed: " ^ msg))
+(* Append-only schedule note log ([schedule_notes.jsonl]). Notes are history,
+   never edited or pruned with terminal schedules; keeping them out of hot
+   [schedules.json] keeps runner ticks and [.last-good] rewrites bounded by
+   active and recent schedules instead of unbounded note history. *)
+type notes_index =
+  { rev_by_schedule_id : Schedule_domain.schedule_note list Schedule_id_map.t
+        (** Newest-first by [created_at] so monotonic appends are O(1) and
+            [List.rev] yields oldest-first chronological order. *)
+  ; counts : int Schedule_id_map.t
+  ; seen_ids : Note_id_set.t
+  ; max_numeric_id : int
+  ; rows_end : int
+  ; file_identity : (int * int) option
+        (** [(st_dev, st_ino)] of [schedule_notes.jsonl] when decoded from a
+            local file, used to verify the same inode before [keep_written]. *)
+  }
+
+let empty_notes_index =
+  { rev_by_schedule_id = Schedule_id_map.empty
+  ; counts = Schedule_id_map.empty
+  ; seen_ids = Note_id_set.empty
+  ; max_numeric_id = 0
+  ; rows_end = 0
+  ; file_identity = None
+  }
+;;
+
+let stat_identity_and_size path =
+  match Unix.stat path with
+  | st -> Some ((st.Unix.st_dev, st.Unix.st_ino), st.Unix.st_size)
+  | exception Unix.Unix_error _ -> None
+;;
+
+let numeric_note_id_opt id =
+  match int_of_string_opt id with
+  | Some n when n > 0 -> Some n
+  | Some _ | None -> None
+;;
+
+(* Insert into a newest-first list (descending [created_at]). Equal timestamps
+   stay newer-first so [List.rev] preserves earlier-appended notes first. *)
+let rec insert_newest_first (note : Schedule_domain.schedule_note) = function
+  | [] -> [ note ]
+  | (head : Schedule_domain.schedule_note) :: tail as list ->
+    if Float.compare note.created_at head.created_at >= 0
+    then note :: list
+    else head :: insert_newest_first note tail
+;;
+
+let insert_note_into_index (idx : notes_index) (note : Schedule_domain.schedule_note) =
+  if Note_id_set.mem note.note_id idx.seen_ids
+  then idx
+  else (
+    let seen_ids = Note_id_set.add note.note_id idx.seen_ids in
+    let max_numeric_id =
+      match numeric_note_id_opt note.note_id with
+      | Some n -> max idx.max_numeric_id n
+      | None -> idx.max_numeric_id
+    in
+    let prev_rev =
+      Option.value (Schedule_id_map.find_opt note.schedule_id idx.rev_by_schedule_id) ~default:[]
+    in
+    let prev_count =
+      Option.value (Schedule_id_map.find_opt note.schedule_id idx.counts) ~default:0
+    in
+    { rev_by_schedule_id =
+        Schedule_id_map.add note.schedule_id (insert_newest_first note prev_rev) idx.rev_by_schedule_id
+    ; counts = Schedule_id_map.add note.schedule_id (prev_count + 1) idx.counts
+    ; seen_ids
+    ; max_numeric_id
+    ; rows_end = idx.rows_end
+    ; file_identity = idx.file_identity
+    })
+;;
+
+let decode_notes_jsonl_bytes ~path ~rows_end ~file_identity content : (notes_index, string) result =
+  let lines = String.split_on_char '\n' content in
+  let rec loop line_no idx = function
+    | [] -> Ok { idx with rows_end; file_identity }
+    | raw :: rest ->
+      let trimmed = String.trim raw in
+      if String.equal trimmed ""
+      then loop (line_no + 1) idx rest
+      else (
+        match Yojson.Safe.from_string trimmed with
+        | exception Yojson.Json_error msg ->
+          Error (Printf.sprintf "%s line %d: invalid JSON (%s)" path line_no msg)
+        | json ->
+          (match Schedule_domain.schedule_note_of_yojson json with
+           | Error msg -> Error (Printf.sprintf "%s line %d: %s" path line_no msg)
+           | Ok note -> loop (line_no + 1) (insert_note_into_index idx note) rest))
   in
+  loop 1 empty_notes_index lines
+;;
+
+let decoded_notes : notes_index File_version_cache.t = File_version_cache.create ()
+
+let read_notes_from_local_file path : (notes_index, string) result =
+  let before_id = Option.map fst (stat_identity_and_size path) in
+  let handle_rows = function
+    | Fs_compat.Private_jsonl_rows.Rows_missing -> Ok empty_notes_index
+    | Fs_compat.Private_jsonl_rows.Rows_present { rows; rows_end; end_offset = _ } ->
+      let after_id = Option.map fst (stat_identity_and_size path) in
+      let file_identity =
+        match before_id, after_id with
+        | Some b, Some a when b = a -> Some a
+        | (Some _ | None), (Some _ | None) -> None
+      in
+      Domain_pool_ref.submit_cpu_or_inline ~name:"Schedule_store.decode_notes_jsonl" (fun () ->
+        decode_notes_jsonl_bytes ~path ~rows_end ~file_identity rows)
+  in
+  match Fs_compat.read_private_jsonl_rows_locked_result path with
+  | Fs_compat.Private_file_succeeded rows -> handle_rows rows
+  | Fs_compat.Private_file_succeeded_with_cleanup_failure { value = rows; cleanup_failure } ->
+    Log.Misc.warn
+      "schedule_store: schedule notes read succeeded; descriptor cleanup failed for %s: %s"
+      path
+      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+    handle_rows rows
+  | Fs_compat.Private_file_failed error ->
+    Error (Fs_compat.Private_jsonl_rows.error_to_string error)
+  | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+    Error
+      (Fs_compat.Private_jsonl_rows.error_to_string error
+       ^ "; "
+       ^ Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure)
+;;
+
+let load_notes_index config : (notes_index, string) result =
+  let path = schedule_notes_path config in
+  match config.Workspace_utils.backend with
+  | Workspace_utils.FileSystem _ ->
+    File_version_cache.load decoded_notes path ~decode:(fun () ->
+      read_notes_from_local_file path)
+  | Workspace_utils.Memory _ ->
+    (match Workspace_utils.key_of_path config path with
+     | Some key ->
+       (match Workspace_utils.backend_get config ~key with
+        | Error err ->
+          Error
+            (Printf.sprintf "backend_get failed for %s: %s" key (Backend_types.show_error err))
+        | Ok None -> Ok empty_notes_index
+        | Ok (Some content) ->
+          decode_notes_jsonl_bytes
+            ~path
+            ~rows_end:(String.length content)
+            ~file_identity:None
+            content)
+     | None -> read_notes_from_local_file path)
+;;
+
+let encode_note_line (note : Schedule_domain.schedule_note)
+  : (string * Schedule_domain.schedule_note, string) result
+  =
+  let* encoded, repaired_json =
+    Workspace_utils.encode_json_compact_with_value
+      (Schedule_domain.schedule_note_to_yojson note)
+  in
+  let* repaired_note = Schedule_domain.schedule_note_of_yojson repaired_json in
+  Ok ((encoded :> string), repaired_note)
+;;
+
+(* Pure preparation of any unmigrated legacy inline notes from [schedules.json].
+   Validates and encodes all missing rows before any disk write runs. *)
+let prepare_legacy_notes_batch ~(current_index : notes_index)
+    (legacy_notes : Schedule_domain.schedule_note list)
+  : ((string * Schedule_domain.schedule_note list) option, store_error) result
+  =
+  let missing_rev, _ =
+    List.fold_left
+      (fun (acc, seen) (note : Schedule_domain.schedule_note) ->
+         if Note_id_set.mem note.note_id seen
+         then acc, seen
+         else note :: acc, Note_id_set.add note.note_id seen)
+      ([], current_index.seen_ids)
+      legacy_notes
+  in
+  let missing = List.rev missing_rev in
+  match missing with
+  | [] -> Ok None
+  | _ :: _ ->
+    let* payload, repaired_notes =
+      Domain_pool_ref.submit_cpu_or_inline ~name:"Schedule_store.encode_legacy_notes" (fun () ->
+        let buf = Buffer.create (List.length missing * 256) in
+        let rec loop acc = function
+          | [] -> Ok (Buffer.contents buf, List.rev acc)
+          | note :: rest ->
+            let* line, repaired = encode_note_line note in
+            Buffer.add_string buf line;
+            Buffer.add_char buf '\n';
+            loop (repaired :: acc) rest
+        in
+        loop [] missing)
+      |> Result.map_error (fun msg ->
+        Persistence_failed ("legacy schedule notes encoding failed: " ^ msg))
+    in
+    Ok (Some (payload, repaired_notes))
+;;
+
+(* Precondition: for [FileSystem], caller already holds the lease fence via
+   [Workspace_utils.commit_under_held_lease config (schedules_path config)].
+   [keep_written] runs inside that fence only when the observed inode and
+   exact byte size match the expected append end offset. *)
+let append_encoded_notes_under_fence config ~(current_index : notes_index) ~notes suffix
+  : (notes_index, store_error) result
+  =
+  ensure_dirs config;
+  let path = schedule_notes_path config in
+  let updated_idx = List.fold_left insert_note_into_index current_index notes in
+  match config.Workspace_utils.backend with
+  | Workspace_utils.Memory _ ->
+    (match Workspace_utils.key_of_path config path with
+     | Some key ->
+       let* existing =
+         match Workspace_utils.backend_get config ~key with
+         | Ok None -> Ok ""
+         | Ok (Some content) -> Ok content
+         | Error err ->
+           Error
+             (Persistence_failed
+                (Printf.sprintf "backend_get failed for %s: %s" key (Backend_types.show_error err)))
+       in
+       let next_content = existing ^ suffix in
+       let* () =
+         match Workspace_utils.backend_set config ~key ~value:next_content with
+         | Ok () -> Ok ()
+         | Error err ->
+           Error
+             (Persistence_failed
+                (Printf.sprintf "backend_set failed for %s: %s" key (Backend_types.show_error err)))
+       in
+       if Workspace_utils.should_dual_write_local config
+       then (
+         match Fs_compat.save_file_atomic_rename_only path next_content with
+         | Ok () -> ()
+         | Error detail ->
+           Log.Misc.warn
+             "schedule_store: authoritative notes committed; local mirror write failed for %s: %s"
+             path
+             detail);
+       File_version_cache.forget decoded_notes path;
+       Ok { updated_idx with rows_end = String.length next_content; file_identity = None }
+     | None ->
+       Error (Persistence_failed ("schedule notes path outside workspace: " ^ path)))
+  | Workspace_utils.FileSystem _ ->
+    let* end_offset =
+      match Fs_compat.append_private_jsonl_durable_locked_with_end_offset_result path suffix with
+      | Fs_compat.Private_file_succeeded end_offset -> Ok end_offset
+      | Fs_compat.Private_file_succeeded_with_cleanup_failure { value = end_offset; cleanup_failure } ->
+        Log.Misc.warn
+          "schedule_store: schedule notes append committed; descriptor cleanup failed for %s: %s"
+          path
+          (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+        Ok end_offset
+      | Fs_compat.Private_file_failed error ->
+        File_version_cache.forget decoded_notes path;
+        Error (Persistence_failed (Fs_compat.private_jsonl_append_error_to_string error))
+      | Fs_compat.Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+        File_version_cache.forget decoded_notes path;
+        Error
+          (Persistence_failed
+             (Fs_compat.private_jsonl_append_error_to_string error
+              ^ "; "
+              ^ Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure))
+    in
+    let expected_end = current_index.rows_end + String.length suffix in
+    match stat_identity_and_size path with
+    | Some (cur_id, cur_size)
+      when end_offset = expected_end
+           && cur_size = end_offset
+           && (match current_index.file_identity with
+               | None -> current_index.rows_end = 0
+               | Some prev_id -> prev_id = cur_id) ->
+      let next_idx = { updated_idx with rows_end = end_offset; file_identity = Some cur_id } in
+      File_version_cache.keep_written decoded_notes path next_idx;
+      Ok next_idx
+    | Some _ | None ->
+      File_version_cache.forget decoded_notes path;
+      (* The note append already committed durably; never report a reload error
+         as [Persistence_failed] that could invite a duplicate retry. *)
+      (match read_notes_from_local_file path with
+       | Ok refreshed -> Ok refreshed
+       | Error msg ->
+         Log.Misc.warn
+           "schedule_store: notes committed; post-append reload failed for %s: %s"
+           path
+           msg;
+         Ok { updated_idx with rows_end = end_offset; file_identity = None })
+;;
+
+let read_notes_for_schedule_result config ~schedule_id =
+  let* legacy_notes =
+    match load config with
+    | Loaded raw -> Ok raw.legacy_notes
+    | Recovered (raw, _) -> Ok raw.legacy_notes
+    | Fresh -> Ok []
+    | Corrupt { primary_err; recovery_err } ->
+      Error (Corrupt_notes_ledger (Corrupt_read_ledger { primary_err; recovery_err }))
+  in
+  let* notes_idx =
+    load_notes_index config
+    |> Result.map_error (fun detail -> Corrupt_notes_log detail)
+  in
+  let merged =
+    match legacy_notes with
+    | [] -> notes_idx
+    | _ :: _ -> List.fold_left insert_note_into_index notes_idx legacy_notes
+  in
+  let rev_notes =
+    Option.value
+      (Schedule_id_map.find_opt schedule_id merged.rev_by_schedule_id)
+      ~default:[]
+  in
+  Ok (List.rev rev_notes)
+;;
+
+let read_notes_for_schedule config ~schedule_id =
+  match read_notes_for_schedule_result config ~schedule_id with
+  | Ok notes -> notes
+  | Error (Corrupt_notes_ledger (Corrupt_read_ledger { primary_err; recovery_err })) ->
+    raise (Corrupt_ledger_exn { primary_err; recovery_err })
+  | Error (Corrupt_notes_log detail) ->
+    failwith ("schedule notes log could not be read: " ^ detail)
+;;
+
+let encode_state_payload state =
+  Domain_pool_ref.submit_cpu_or_inline ~name:"Schedule_store.write_state" (fun () ->
+    let raw_json = state_to_yojson state in
+    let+ content, json =
+      Workspace_utils.encode_json_compact_with_value raw_json
+    in
+    let reread =
+      if json == raw_json then Ok { state; legacy_notes = [] }
+      else raw_ledger_of_yojson json
+    in
+    content, reread)
+  |> Result.map_error (fun msg -> Persistence_failed ("ledger encoding failed: " ^ msg))
+;;
+
+(* Precondition: caller already holds the lease fence via
+   [Workspace_utils.commit_under_held_lease config (schedules_path config)].
+   Write the primary ledger, update [decoded_primary], then mirror to
+   [.last-good] inside the same fence so a lost lease cannot clobber a newer
+   holder's primary or recovery mirror. *)
+let write_encoded_state_under_fence config ~content ~reread =
+  ensure_dirs config;
   let path = schedules_path config in
   let written = Workspace_utils.write_encoded_json_commit_result config path content in
-  (* Every writer of the ledger holds its lock, and the FileSystem backend
-     renames a new file into place, so after a write that landed the file at
-     [path] is the bytes [reread] was decoded for. Anything else -- a write
-     that failed and may or may not have landed, a Memory backend whose local
-     file is a mirror, a state that does not decode from its own encoding --
-     leaves the file a version nothing is kept for. *)
+  (* Every writer of the ledger holds its lock and lease fence, and the
+     FileSystem backend renames a new file into place, so after a write that
+     landed the file at [path] is the bytes [reread] was decoded for. Anything
+     else -- a write that failed and may or may not have landed, a Memory
+     backend whose local file is a mirror, a state that does not decode from
+     its own encoding -- leaves the file a version nothing is kept for. *)
   (match written, reread, config.Workspace_utils.backend with
-   | Ok { Workspace_utils.mirror_error = None }, Ok written_state, Workspace_utils.FileSystem _ ->
-     File_version_cache.keep_written decoded_primary path written_state
+   | Ok { Workspace_utils.mirror_error = None }, Ok written_raw, Workspace_utils.FileSystem _ ->
+     File_version_cache.keep_written decoded_primary path written_raw
    | (Ok _ | Error _), (Ok _ | Error _), (Workspace_utils.FileSystem _ | Workspace_utils.Memory _) ->
      File_version_cache.forget decoded_primary path);
   let* commit = written |> Result.map_error (fun msg -> Persistence_failed msg) in
@@ -616,6 +1007,13 @@ let write_state config state =
        (recovery_path config)
        msg);
   Ok ()
+;;
+
+let publish_under_ledger_lease config publish =
+  match Workspace_utils.commit_under_held_lease config (schedules_path config) publish with
+  | Ok outcome -> outcome
+  | Error refusal ->
+    Error (Persistence_failed (Workspace_utils.lease_commit_refusal_to_string refusal))
 ;;
 
 let change_observer : (base_path:string -> unit) Atomic.t =
@@ -646,16 +1044,13 @@ let notify_change_observer config =
 (* A publication can fail after landing. Remember an attempted write under the
    lock, but notify only after releasing it: an observer may re-read the
    ledger. A no-op runner tick and a rejected mutation do not notify. *)
-let with_observed_mutation config f =
+let with_observed_mutation_core config f =
   let attempted = ref false in
-  let observed_write config state =
-    attempted := true;
-    write_state config state
-  in
+  let mark_attempted () = attempted := true in
   let result =
     try
       Ok (Workspace_utils.with_file_lock config (schedules_path config)
-            (fun () -> f observed_write))
+            (fun () -> f ~mark_attempted))
     with exn -> Error (exn, Printexc.get_raw_backtrace ())
   in
   match result with
@@ -671,6 +1066,40 @@ let with_observed_mutation config f =
          | Eio.Cancel.Cancelled _ -> ()
          | _ -> raise cancelled));
     Printexc.raise_with_backtrace exn backtrace
+;;
+
+let with_observed_mutation config f =
+  with_observed_mutation_core config (fun ~mark_attempted ->
+    let observed_write ~legacy_notes config state =
+      (* Mark attempted at entry so encoding/publication failures still trigger
+         observer revalidation, while keeping all disk I/O after encoding. *)
+      mark_attempted ();
+      let* content, reread = encode_state_payload state in
+      let* legacy_plan =
+        match legacy_notes with
+        | [] -> Ok None
+        | _ :: _ ->
+          let* current_index =
+            load_notes_index config
+            |> Result.map_error (fun msg ->
+              Persistence_failed ("schedule notes load failed: " ^ msg))
+          in
+          let* batch = prepare_legacy_notes_batch ~current_index legacy_notes in
+          Ok (Option.map (fun (payload, notes) -> current_index, payload, notes) batch)
+      in
+      publish_under_ledger_lease config (fun () ->
+        let* () =
+          match legacy_plan with
+          | None -> Ok ()
+          | Some (current_index, payload, notes) ->
+            let* _ =
+              append_encoded_notes_under_fence config ~current_index ~notes payload
+            in
+            Ok ()
+        in
+        write_encoded_state_under_fence config ~content ~reread)
+    in
+    f observed_write)
 ;;
 
 (* Terminal wake records are history, not state: the runner never reads a
@@ -817,13 +1246,16 @@ let prune_wakes ~now ~schedules wakes =
   live @ List.rev retained_rev
 ;;
 
-let bump_state state ~schedules ~wakes ~notes =
+let bump_state ?note_last_written_at state ~schedules ~wakes =
   let stamp = now () in
+  let note_last_written_at =
+    Option.value note_last_written_at ~default:state.note_last_written_at
+  in
   { version = state.version + 1
   ; updated_at = stamp
   ; schedules
   ; wakes = prune_wakes ~now:stamp ~schedules wakes
-  ; notes
+  ; note_last_written_at
   }
 ;;
 
@@ -849,10 +1281,10 @@ let ledger_times state =
   in
   let written_about =
     List.fold_left
-      (fun written_about (note : Schedule_domain.schedule_note) ->
-         keep written_about note.Schedule_domain.schedule_id note.Schedule_domain.created_at)
+      (fun written_about (schedule_id, created_at) ->
+         keep written_about schedule_id created_at)
       written_about
-      state.notes
+      state.note_last_written_at
   in
   finished, written_about
 ;;
@@ -890,31 +1322,8 @@ type prepared_state =
   { state : state
   ; schedules_by_id : Schedule_domain.schedule_request Schedule_id_map.t
   ; wakes_by_instance : Schedule_domain.wake_record list Schedule_instance_map.t
-  ; notes_by_schedule_id :
-      Schedule_domain.schedule_note list Schedule_id_map.t option Atomic.t
   ; oldest_finished_last_written : float option
   }
-
-let build_notes_by_schedule_id (state : state)
-  : Schedule_domain.schedule_note list Schedule_id_map.t
-  =
-  let notes_rev_by_schedule_id =
-    List.fold_left
-      (fun acc (note : Schedule_domain.schedule_note) ->
-         let existing =
-           Option.value (Schedule_id_map.find_opt note.schedule_id acc) ~default:[]
-         in
-         Schedule_id_map.add note.schedule_id (note :: existing) acc)
-      Schedule_id_map.empty
-      state.notes
-  in
-  Schedule_id_map.map
-    (fun rev_notes ->
-       List.rev rev_notes
-       |> List.sort (fun left right ->
-         Float.compare left.Schedule_domain.created_at right.Schedule_domain.created_at))
-    notes_rev_by_schedule_id
-;;
 
 let build_prepared_state (state : state) : prepared_state =
   let schedules_by_id =
@@ -944,7 +1353,6 @@ let build_prepared_state (state : state) : prepared_state =
   { state
   ; schedules_by_id
   ; wakes_by_instance
-  ; notes_by_schedule_id = Atomic.make None
   ; oldest_finished_last_written
   }
 ;;
@@ -963,18 +1371,6 @@ let prepared_of_state (state : state) : prepared_state =
     prepared
 ;;
 
-let notes_by_schedule_id_of_prepared (prepared : prepared_state) =
-  match Atomic.get prepared.notes_by_schedule_id with
-  | Some notes_map -> notes_map
-  | None ->
-    let notes_map =
-      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-        build_notes_by_schedule_id prepared.state)
-    in
-    Atomic.set prepared.notes_by_schedule_id (Some notes_map);
-    notes_map
-;;
-
 let find_schedule state ~schedule_id =
   let prepared = prepared_of_state state in
   Schedule_id_map.find_opt schedule_id prepared.schedules_by_id
@@ -990,54 +1386,84 @@ let replace_schedule schedules (updated : schedule_request) =
     schedules
 ;;
 
-(* Notes (task-381): the store owns identity and ordering. [note_id] is a
-   global counter (like [version]), so ids never collide after deletes or
-   across schedules, and [notes_for_schedule] can promise oldest-first
-   reading. Note appends intentionally bypass [bump_state]: notes must not be
-   pruned with terminal state, because their value is surviving it. *)
-let next_note_id state = string_of_int (state.version + 1)
-
-let make_note state ~schedule_id ~author_id ~author_kind ~body ~now =
-  let note_id = next_note_id state in
-  { Schedule_domain.note_id
-  ; schedule_id
-  ; author_id
-  ; author_kind
-  ; created_at = now
-  ; body
-  }
-;;
-
-let notes_for_schedule state ~schedule_id =
-  let prepared = prepared_of_state state in
-  let notes_by_schedule_id = notes_by_schedule_id_of_prepared prepared in
-  Option.value
-    (Schedule_id_map.find_opt schedule_id notes_by_schedule_id)
-    ~default:[]
-;;
-
-let note_count_per_schedule state schedule_id =
-  notes_for_schedule state ~schedule_id |> List.length
-;;
-
+(* Notes (task-381): the store owns identity and ordering. [note_id] stays a
+   monotonic counter above both [state.version] and the highest numeric id in
+   [schedule_notes.jsonl], so ids never collide after deletes, restarts, or
+   partial failures. Note appends intentionally bypass [bump_state] so wakes
+   are not pruned, and append the note body to [schedule_notes.jsonl] instead
+   of rewriting note history inside [schedules.json]. *)
 let append_note config ~schedule_id ~author_id ~author_kind ~body ~now =
-  with_observed_mutation config (fun write_state ->
-    let* state = load_for_mutation config in
+  with_observed_mutation_core config (fun ~mark_attempted ->
+    let* raw = load_for_mutation_raw config in
+    let state = raw.state in
     match find_schedule state ~schedule_id with
     | None -> Error Schedule_not_found
     | Some _ ->
-      let note = make_note state ~schedule_id ~author_id ~author_kind ~body ~now in
-      let notes = state.notes @ [ note ] in
+      let* notes_idx =
+        load_notes_index config
+        |> Result.map_error (fun msg ->
+          Persistence_failed ("schedule notes load failed: " ^ msg))
+      in
+      mark_attempted ();
+      let* legacy_batch =
+        prepare_legacy_notes_batch ~current_index:notes_idx raw.legacy_notes
+      in
+      let legacy_max_id =
+        List.fold_left
+          (fun acc (n : Schedule_domain.schedule_note) ->
+             match numeric_note_id_opt n.note_id with
+             | Some id -> max acc id
+             | None -> acc)
+          notes_idx.max_numeric_id
+          raw.legacy_notes
+      in
+      let next_numeric_id = max (state.version + 1) (legacy_max_id + 1) in
+      let note =
+        { Schedule_domain.note_id = string_of_int next_numeric_id
+        ; schedule_id
+        ; author_id
+        ; author_kind
+        ; created_at = now
+        ; body
+        }
+      in
+      let* encoded_line, repaired_note =
+        encode_note_line note
+        |> Result.map_error (fun msg ->
+          Persistence_failed ("schedule note encoding failed: " ^ msg))
+      in
+      let note_last_written_at =
+        upsert_note_last_written_at state.note_last_written_at ~schedule_id ~ts:now
+      in
       let next_state =
         { version = state.version + 1
         ; updated_at = now
         ; schedules = state.schedules
         ; wakes = state.wakes
-        ; notes
+        ; note_last_written_at
         }
       in
-      let* () = write_state config next_state in
-      Ok (note, note_count_per_schedule next_state schedule_id))
+      let* content, reread = encode_state_payload next_state in
+      (* All validation and encoding succeeded. Enter a single lease-fenced
+         publication section: flush missing legacy notes first (if any), commit
+         the slim ledger + recovery mirror, then append the new note line. *)
+      publish_under_ledger_lease config (fun () ->
+        let* notes_idx =
+          match legacy_batch with
+          | None -> Ok notes_idx
+          | Some (payload, repaired_legacy) ->
+            append_encoded_notes_under_fence config ~current_index:notes_idx
+              ~notes:repaired_legacy payload
+        in
+        let* () = write_encoded_state_under_fence config ~content ~reread in
+        let* next_idx =
+          append_encoded_notes_under_fence config ~current_index:notes_idx
+            ~notes:[ repaired_note ] (encoded_line ^ "\n")
+        in
+        let count =
+          Option.value (Schedule_id_map.find_opt schedule_id next_idx.counts) ~default:0
+        in
+        Ok (repaired_note, count)))
 ;;
 
 let is_due_wake_candidate (request : schedule_request) =
@@ -1168,7 +1594,8 @@ let expiry_reaches_first_due ~runner_tick_sec (request : schedule_request) =
 
 let insert_request config ~runner_tick_sec (request : Schedule_domain.schedule_request) =
   with_observed_mutation config (fun write_state ->
-    let* state = load_for_mutation config in
+    let* raw = load_for_mutation_raw config in
+    let state = raw.state in
     match find_schedule state ~schedule_id:request.schedule_id with
     | Some _ -> Error Schedule_already_exists
     | None ->
@@ -1177,9 +1604,9 @@ let insert_request config ~runner_tick_sec (request : Schedule_domain.schedule_r
       let* () = expiry_reaches_first_due ~runner_tick_sec request in
       let schedules = request :: state.schedules in
       let next_state =
-        bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes
+        bump_state state ~schedules ~wakes:state.wakes
       in
-      let* () = write_state config next_state in
+      let* () = write_state ~legacy_notes:raw.legacy_notes config next_state in
       Ok request)
 ;;
 
@@ -1233,7 +1660,8 @@ let authorize_mutation authority ~(current : schedule_request) ~target =
 let update_request config ~authority ~now ~runner_tick_sec ?(timing_update = Replace_timing)
     ?expected_instance_id (request : Schedule_domain.schedule_request) =
   with_observed_mutation config (fun write_state ->
-    let* state = load_for_mutation config in
+    let* raw = load_for_mutation_raw config in
+    let state = raw.state in
     match find_schedule state ~schedule_id:request.schedule_id with
     | None -> Error Schedule_not_found
     | Some current ->
@@ -1279,8 +1707,8 @@ let update_request config ~authority ~now ~runner_tick_sec ?(timing_update = Rep
         let* () = interval_fires_as_declared ~runner_tick_sec request in
         let* () = expiry_reaches_first_due ~runner_tick_sec request in
         let schedules = replace_schedule state.schedules request in
-        let next_state = bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes in
-        let* () = write_state config next_state in
+        let next_state = bump_state state ~schedules ~wakes:state.wakes in
+        let* () = write_state ~legacy_notes:raw.legacy_notes config next_state in
         Ok request)
       else Error (transition_refused state current ~attempted:Modify_schedule))
 ;;
@@ -1297,7 +1725,8 @@ let update_request config ~authority ~now ~runner_tick_sec ?(timing_update = Rep
    queue's own cancellation receipt, and the next occurrence fires as due. *)
 let cancel_request config ~authority ~schedule_id ~cancellation ~withdraw_queued_wakes =
   with_observed_mutation config (fun write_state ->
-    let* state = load_for_mutation config in
+    let* raw = load_for_mutation_raw config in
+    let state = raw.state in
     match find_schedule state ~schedule_id with
     | None -> Error Schedule_not_found
     | Some request ->
@@ -1327,9 +1756,9 @@ let cancel_request config ~authority ~schedule_id ~cancellation ~withdraw_queued
            settle_wakes_for_cancelled_schedule ~now:(now ()) state.wakes ~schedule_id
          in
          let next_state =
-           bump_state state ~schedules ~wakes ~notes:state.notes
+           bump_state state ~schedules ~wakes
          in
-         let* () = write_state config next_state in
+         let* () = write_state ~legacy_notes:raw.legacy_notes config next_state in
          Ok updated_request))
 ;;
 
@@ -1390,11 +1819,17 @@ let forget_finished_schedules ~now ~retention_days state =
   let holds_a_kept_schedule schedule_id =
     not (Schedule_id_set.mem schedule_id forgotten_ids)
   in
+  let note_last_written_at =
+    List.filter
+      (fun (schedule_id, _) -> holds_a_kept_schedule schedule_id)
+      state.note_last_written_at
+  in
   ( kept
   , List.filter
       (fun (wake : Schedule_domain.wake_record) ->
          holds_a_kept_schedule wake.Schedule_domain.schedule_id)
       state.wakes
+  , note_last_written_at
   , forgotten_count )
 ;;
 
@@ -1408,7 +1843,8 @@ let oldest_last_written state =
 
 let refresh_due config ~now ~retention_days =
   with_observed_mutation config (fun write_state ->
-    let* state = load_for_mutation config in
+    let* raw = load_for_mutation_raw config in
+    let state = raw.state in
     let schedules_rev, changed =
       List.fold_left
         (fun (schedules, changed) request ->
@@ -1432,11 +1868,11 @@ let refresh_due config ~now ~retention_days =
       | None -> true
       | Some oldest -> not (past_retention ~now ~retention_days oldest)
     in
-    let schedules, wakes, forgotten =
+    let schedules, wakes, note_last_written_at, forgotten =
       if now < state.updated_at
-      then schedules, state.wakes, 0
+      then schedules, state.wakes, state.note_last_written_at, 0
       else if changed = 0 && nothing_to_forget ()
-      then schedules, state.wakes, 0
+      then schedules, state.wakes, state.note_last_written_at, 0
       else forget_finished_schedules ~now ~retention_days { state with schedules }
     in
     if changed = 0 && forgotten = 0
@@ -1448,15 +1884,18 @@ let refresh_due config ~now ~retention_days =
           "schedule_store: forgot %d schedule(s) whose wake finished more than %d days ago"
           forgotten
           retention_days;
-      let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
-      let* () = write_state config next_state in
+      let next_state =
+        bump_state ~note_last_written_at state ~schedules ~wakes
+      in
+      let* () = write_state ~legacy_notes:raw.legacy_notes config next_state in
       Ok (next_state, changed)))
 ;;
 
 let reschedule_due_recurring config ~now ~schedule_ids =
   let target_ids = Schedule_id_set.of_list schedule_ids in
   with_observed_mutation config (fun write_state ->
-    let* state = load_for_mutation config in
+    let* raw = load_for_mutation_raw config in
+    let state = raw.state in
     let schedules_rev, changed =
       List.fold_left
         (fun (schedules, changed) (request : schedule_request) ->
@@ -1475,9 +1914,9 @@ let reschedule_due_recurring config ~now ~schedule_ids =
       Ok (state, 0)
     else (
       let next_state =
-        bump_state state ~schedules ~wakes:state.wakes ~notes:state.notes
+        bump_state state ~schedules ~wakes:state.wakes
       in
-      let* () = write_state config next_state in
+      let* () = write_state ~legacy_notes:raw.legacy_notes config next_state in
       Ok (next_state, changed)))
 ;;
 
@@ -1492,9 +1931,9 @@ let attempt_unavailable schedule_id reason =
   Error (Running_attempt_unavailable { schedule_id; reason })
 ;;
 
-let load_authoritative config ~schedule_id =
+let load_authoritative_raw config ~schedule_id =
   match load_primary config with
-  | Ok state -> Ok state
+  | Ok raw -> Ok raw
   | Error failure ->
     attempt_unavailable schedule_id
       (primary_failure_message ~path:(schedules_path config) failure)
@@ -1530,7 +1969,8 @@ let start_due_candidate ?started_at config ~now ~(candidate : schedule_request) 
   let started_at = Option.value started_at ~default:now in
   let schedule_id = candidate.schedule_id in
   with_observed_mutation config (fun write_state ->
-    let* state = load_authoritative config ~schedule_id in
+    let* raw = load_authoritative_raw config ~schedule_id in
+    let state = raw.state in
     match find_schedule state ~schedule_id with
     | None -> Error Schedule_not_found
     | Some request ->
@@ -1543,8 +1983,8 @@ let start_due_candidate ?started_at config ~now ~(candidate : schedule_request) 
         let wake = make_wake_record ~attempt_id ~now:started_at request in
         let schedules = replace_schedule state.schedules updated in
         let wakes = wake :: state.wakes in
-        let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
-        let* () = write_state config next_state in
+        let next_state = bump_state state ~schedules ~wakes in
+        let* () = write_state ~legacy_notes:raw.legacy_notes config next_state in
         Ok { request = updated; attempt = { original = updated; attempt_id; scope } })
 ;;
 
@@ -1607,7 +2047,8 @@ let settle_running config ~now ~finished_at ~(attempt : running_attempt) verdict
     let* scope = attempt_scope config ~schedule_id in
     let* () = if same_scope scope attempt.scope then Ok ()
       else attempt_unavailable schedule_id "workspace or backend changed" in
-    let* state = load_authoritative config ~schedule_id in
+    let* raw = load_authoritative_raw config ~schedule_id in
+    let state = raw.state in
     match find_schedule state ~schedule_id with
     | None -> Error Schedule_not_found
     | Some request ->
@@ -1654,8 +2095,8 @@ let settle_running config ~now ~finished_at ~(attempt : running_attempt) verdict
         let schedules = replace_schedule state.schedules updated in
         let wakes = List.map (fun current -> if is_attempt current
           then settle_wake ~finished_at verdict wake else current) state.wakes in
-        let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
-        let* () = write_state config next_state in
+        let next_state = bump_state state ~schedules ~wakes in
+        let* () = write_state ~legacy_notes:raw.legacy_notes config next_state in
         Ok updated)
 ;;
 
@@ -1665,7 +2106,8 @@ let accept_running ?finished_at config ~now ~attempt ?detail () =
 
 let cancel_matching ?withdraw_queued_wakes config ~should_cancel =
   with_observed_mutation config (fun write_state ->
-    let* state = load_for_mutation config in
+    let* raw = load_for_mutation_raw config in
+    let state = raw.state in
     let rec cancel schedules changed matched = function
       | [] -> Ok (List.rev schedules, changed, List.rev matched)
       | (request : schedule_request) :: rest when not (should_cancel request) ->
@@ -1719,7 +2161,7 @@ let cancel_matching ?withdraw_queued_wakes config ~should_cancel =
              else wake)
           state.wakes
       in
-      write_state config (bump_state state ~schedules ~wakes ~notes:state.notes)
+      write_state ~legacy_notes:raw.legacy_notes config (bump_state state ~schedules ~wakes)
     else Ok ())
 ;;
 
@@ -1735,7 +2177,8 @@ let retry_running ?finished_at config ~now ~attempt ~reason =
 let recover_running_on_startup config ~now =
   let reason = Interrupted_by_process_restart in
   with_observed_mutation config (fun write_state ->
-    let* state = load_for_mutation config in
+    let* raw = load_for_mutation_raw config in
+    let state = raw.state in
     let rec recover schedules_rev wakes recovered = function
       | [] -> Ok (List.rev schedules_rev, wakes, recovered)
       | (request : schedule_request) :: rest ->
@@ -1765,8 +2208,8 @@ let recover_running_on_startup config ~now =
     if recovered = 0 then
       Ok (state, 0)
     else
-      let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
-      let* () = write_state config next_state in
+      let next_state = bump_state state ~schedules ~wakes in
+      let* () = write_state ~legacy_notes:raw.legacy_notes config next_state in
       Ok (next_state, recovered))
 ;;
 
@@ -1776,7 +2219,8 @@ let fail_due_candidate ?attempted_at config ~now ~(candidate : schedule_request)
   let attempted_at = Option.value attempted_at ~default:now in
   let schedule_id = candidate.schedule_id in
   with_observed_mutation config (fun write_state ->
-    let* state = load_authoritative config ~schedule_id in
+    let* raw = load_authoritative_raw config ~schedule_id in
+    let state = raw.state in
     match find_schedule state ~schedule_id with
     | None -> Error Schedule_not_found
     | Some request ->
@@ -1794,14 +2238,15 @@ let fail_due_candidate ?attempted_at config ~now ~(candidate : schedule_request)
         in
         let schedules = replace_schedule state.schedules updated in
         let wakes = wake :: state.wakes in
-        let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
-        let* () = write_state config next_state in
+        let next_state = bump_state state ~schedules ~wakes in
+        let* () = write_state ~legacy_notes:raw.legacy_notes config next_state in
         Ok updated)
 ;;
 
 let prune_completed config =
   with_observed_mutation config (fun write_state ->
-    let* state = load_for_mutation config in
+    let* raw = load_for_mutation_raw config in
+    let state = raw.state in
     let before_count = List.length state.schedules in
     let schedules =
       List.filter
@@ -1825,11 +2270,19 @@ let prune_completed config =
            Schedule_id_set.mem wake.schedule_id remaining_ids)
         state.wakes
     in
-    if pruned_count = 0 && List.length wakes = List.length state.wakes then
+    let note_last_written_at =
+      List.filter
+        (fun (schedule_id, _) -> Schedule_id_set.mem schedule_id remaining_ids)
+        state.note_last_written_at
+    in
+    if pruned_count = 0
+       && List.length wakes = List.length state.wakes
+       && List.length note_last_written_at = List.length state.note_last_written_at
+    then
       Ok (state, 0)
     else
-      let next_state = bump_state state ~schedules ~wakes ~notes:state.notes in
-      let* () = write_state config next_state in
+      let next_state = bump_state ~note_last_written_at state ~schedules ~wakes in
+      let* () = write_state ~legacy_notes:raw.legacy_notes config next_state in
       Ok (next_state, pruned_count))
 ;;
 

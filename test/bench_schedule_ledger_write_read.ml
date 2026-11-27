@@ -1,14 +1,14 @@
-(* Not a test: prints how long a schedule ledger mutation takes and how long
-   the read that follows it takes, for a ledger of a given size.
+(* Not a test: prints how long a schedule note append takes and how long the
+   ledger read that follows it takes, for a note log of a given size.
 
      bench_schedule_ledger_write_read NOTES NOTE_BYTES CYCLES
 
-   A ledger holding one schedule and NOTES notes of NOTE_BYTES each is put
-   under a temporary workspace by writing the file directly. A domain pool of
-   one domain is set, as a server has one. Each cycle appends a note through
-   the store and then reads the ledger; the two are timed apart. One line:
-   the ledger's size and the median and largest time of each, in ms. Run it
-   several times and note the host's load. *)
+   One schedule and NOTES notes of NOTE_BYTES each are put under a temporary
+   workspace ([schedules.json] + [schedule_notes.jsonl]). A domain pool of
+   one domain is set, as a server has one. Both caches are warmed before the
+   loop; each cycle appends a note through the store and then reads the hot
+   ledger. One line: the note log's size and the median and largest time of
+   each, in ms. Run it several times and note the host's load. *)
 
 open Schedule_domain
 
@@ -30,12 +30,18 @@ let append_note config ~body =
        ~author_kind:operator.kind ~body ~now:(now ()))
 ;;
 
-(* The ledger the store wrote for one schedule and one note, with that note
-   repeated: the same row under another id and with a body of the size asked
-   for. *)
-let grown_ledger ~notes ~note_bytes text =
+(* The note log the store wrote for one note, repeated: the same row under
+   another id and with a body of the size asked for. *)
+let grown_notes_jsonl ~notes ~note_bytes text =
+  let first_line =
+    text
+    |> String.split_on_char '\n'
+    |> List.find (fun line -> String.trim line <> "")
+  in
   let body = String.make note_bytes 'n' in
-  let repeated index = function
+  let template = Yojson.Safe.from_string first_line in
+  let repeated index =
+    match template with
     | `Assoc fields ->
       `Assoc
         (List.map
@@ -45,19 +51,15 @@ let grown_ledger ~notes ~note_bytes text =
               | "body" -> name, `String body
               | _ -> name, value)
            fields)
+      |> Yojson.Safe.to_string
     | _ -> failwith "bench_schedule_ledger_write_read: a note is not an object"
   in
-  match Yojson.Safe.from_string text with
-  | `Assoc fields ->
-    `Assoc
-      (List.map
-         (fun (name, value) ->
-            match name, value with
-            | "notes", `List [ note ] -> name, `List (List.init notes (fun index -> repeated index note))
-            | _ -> name, value)
-         fields)
-    |> Yojson.Safe.to_string
-  | _ -> failwith "bench_schedule_ledger_write_read: the ledger is not an object"
+  let buf = Buffer.create (notes * (note_bytes + 128)) in
+  for index = 0 to notes - 1 do
+    Buffer.add_string buf (repeated index);
+    Buffer.add_char buf '\n'
+  done;
+  Buffer.contents buf
 ;;
 
 let () =
@@ -86,15 +88,18 @@ let () =
   in
   ignore (store_ok (Schedule_store.insert_request config ~runner_tick_sec request));
   ignore (append_note config ~body:"first");
-  let path = Filename.concat (Workspace_utils.masc_dir config) "schedules.json" in
-  let ledger =
-    grown_ledger ~notes ~note_bytes (In_channel.with_open_bin path In_channel.input_all)
+  let notes_path =
+    Filename.concat (Workspace_utils.masc_dir config) Schedule_store.schedule_notes_filename
   in
-  Out_channel.with_open_bin path (fun channel -> output_string channel ledger);
+  let grown_notes =
+    grown_notes_jsonl ~notes ~note_bytes (In_channel.with_open_bin notes_path In_channel.input_all)
+  in
+  Out_channel.with_open_bin notes_path (fun channel -> output_string channel grown_notes);
   Domain_pool_ref.set (Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env));
   Fun.protect ~finally:Domain_pool_ref.clear_for_tests
   @@ fun () ->
   ignore (Schedule_store.read_state config);
+  ignore (Schedule_store.read_notes_for_schedule config ~schedule_id);
   let writes = Array.make cycles 0.0 in
   let reads = Array.make cycles 0.0 in
   for cycle = 0 to cycles - 1 do
@@ -109,7 +114,7 @@ let () =
   Array.sort Float.compare writes;
   Array.sort Float.compare reads;
   Printf.printf
-    "ledger %.1f MB  cycles %d  write p50 %.1f max %.1f ms  read after it p50 %.1f max %.1f ms\n"
-    (float_of_int (String.length ledger) /. 1_048_576.0)
+    "notes %.1f MB  cycles %d  write p50 %.1f max %.1f ms  read after it p50 %.1f max %.1f ms\n"
+    (float_of_int (String.length grown_notes) /. 1_048_576.0)
     cycles (median writes) writes.(cycles - 1) (median reads) reads.(cycles - 1)
 ;;

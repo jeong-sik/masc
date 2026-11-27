@@ -179,11 +179,19 @@ let schedule_note_of_yojson (json : Yojson.Safe.t) : (schedule_note, string) res
       Some (note_id, schedule_id, author_id, author_kind, created_at, body)
     in
     (match shape with
-     | Some (`String note_id, `String schedule_id, `String author_id, `String kind, `Float created_at, `String body) ->
-       (match actor_kind_of_string kind with
-        | Ok author_kind ->
+     | Some (`String note_id, `String schedule_id, `String author_id, `String kind, created_at_json, `String body) ->
+       let created_at_result =
+         match created_at_json with
+         | `Float ts when Float.is_finite ts -> Ok ts
+         | `Int ts -> Ok (float_of_int ts)
+         | `Float _ -> Error "schedule_note: created_at must be finite"
+         | `Assoc _ | `Bool _ | `Intlit _ | `List _ | `Null | `String _ ->
+           Error "schedule_note: field type mismatch"
+       in
+       (match created_at_result, actor_kind_of_string kind with
+        | Ok created_at, Ok author_kind ->
           Ok { note_id; schedule_id; author_id; author_kind; created_at; body }
-        | Error msg -> Error msg)
+        | Error msg, (Ok _ | Error _) | Ok _, Error msg -> Error msg)
      | _ ->
        Error "schedule_note: field type mismatch")
   | _ -> Error "schedule_note: expected an object"

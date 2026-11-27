@@ -809,7 +809,21 @@ let test_execution_location_names_the_guest_root () =
     (Result.is_error
        (Masc.Keeper_tool_execute_path.resolve_tool_execute_cwd
           ~remote_workspace_root:(Some guest_root) ~config ~meta ~write_enabled:false
-          ~args:(`Assoc [ "cwd", `String "/masc-work/vm-other" ])))
+          ~args:(`Assoc [ "cwd", `String "/masc-work/vm-other" ])));
+  (* Read and Grep take the same guest cwd: one resolver serves every tool. *)
+  (match
+     Masc.Keeper_tool_shared_runtime.resolve_keeper_read_path ~config ~meta
+       ~raw_path:"/masc-work/vm-guest-root/repos/masc"
+   with
+   | Ok cwd ->
+     Alcotest.(check string) "Read resolves the shown guest cwd to the host bundle"
+       (normalize (Filename.concat host_root "repos/masc")) (normalize cwd)
+   | Error (refusal : Masc.Keeper_alerting_path.path_refusal) ->
+     Alcotest.failf "Read refused the shown guest cwd: %s" refusal.message);
+  Alcotest.(check bool) "Read still refuses a sibling keeper's guest path" true
+    (Result.is_error
+       (Masc.Keeper_tool_shared_runtime.resolve_keeper_read_path ~config ~meta
+          ~raw_path:"/masc-work/vm-other/notes.txt"))
 ;;
 
 let test_turn_start_argv_shape () =

@@ -23,8 +23,8 @@ let resolve ~(config : Workspace.config)
 let project_input ~remote_workspace_root ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta) path =
   match meta.sandbox_profile with
-  | Keeper_types_profile_sandbox.Docker -> path
-  | Remote_ssh | Micro_vm ->
+  | Keeper_types_profile_sandbox.Docker | Micro_vm -> path
+  | Remote_ssh ->
     match Keeper_remote_path.endpoint_to_host ~base_path:config.base_path
       ~remote_workspace_root ~keeper:meta.name path with
     | Some host -> host

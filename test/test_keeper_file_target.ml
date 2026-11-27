@@ -144,7 +144,14 @@ let check_relative_path_names_file_under_workspace_base sandbox =
          [ ( "container absolute"
            , Filename.concat (Keeper_sandbox.container_root meta.name) "sub/dir/a.txt" )
          ]
-       | Micro_vm | Remote_ssh -> [])
+       | Micro_vm ->
+         (* The guest root is where Execute runs and reports its cwd. *)
+         [ ( "guest absolute"
+           , Filename.concat
+               (Masc.Keeper_sandbox_microvm.keeper_work_root ~keeper_name:meta.name)
+               "sub/dir/a.txt" )
+         ]
+       | Remote_ssh -> [])
   in
   List.iter
     (fun (spelling, raw_path) ->

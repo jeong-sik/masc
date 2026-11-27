@@ -29,4 +29,4 @@ val poll_interval_sec_opt : unit -> string option
 
 val cursor_path_opt : unit -> string option
 (** [MASC_IMESSAGE_CURSOR_PATH] — where the last delivered [message.ROWID] is
-    kept. Absent ⇒ [.gate/runtime/imessage/cursor.json] under the base path. *)
+    kept. Absent ⇒ [.masc/connectors/imessage/cursor.json] under the base path. *)

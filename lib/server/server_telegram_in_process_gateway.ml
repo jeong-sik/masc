@@ -89,8 +89,10 @@ let start ~sw ~env ~state =
       | Some token ->
         let result =
           let* client=Api.create ~token |> Result.map_error (fun e->Custody.Api e) in
-          let bot_root ~bot_user_id = Filename.concat config.base_path
-            (Printf.sprintf ".gate/runtime/telegram/%Ld" bot_user_id) in
+          let bot_root ~bot_user_id = Filename.concat
+            (Common.connector_state_dir_of_base ~base_path:config.base_path
+               Common.Connector_telegram)
+            (Int64.to_string bot_user_id) in
           let path ~bot_user_id = Filename.concat (bot_root ~bot_user_id) "cursor.json" in
           let* custody=Custody.open_cursor ~clock ~client ~path () in
           let bot_user_id=Custody.bot_user_id custody in

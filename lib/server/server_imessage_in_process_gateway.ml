@@ -37,12 +37,14 @@ let resolved_poll_interval_sec () =
 
 (* ---- Durable cursor ---- *)
 
-let default_cursor_path = ".gate/runtime/imessage/cursor.json"
-
 let cursor_path () =
   match Env_config_imessage.cursor_path_opt () with
   | Some path -> Env_config_core.resolve_against_base_path path
-  | None -> Env_config_core.resolve_against_base_path default_cursor_path
+  | None ->
+    Filename.concat
+      (Common.connector_state_dir_of_base
+         ~base_path:(Env_config_core.base_path ()) Common.Connector_imessage)
+      "cursor.json"
 ;;
 
 let cursor_to_json rowid =

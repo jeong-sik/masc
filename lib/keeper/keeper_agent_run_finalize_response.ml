@@ -384,8 +384,17 @@ let finalize
          | Runtime_execution.Masc_agent_core -> Keeper_canonical_turn_store.Agent_core_http
          | Runtime_execution.Official_client -> Keeper_canonical_turn_store.Official_cli
        in
+       (* The turn store's tool calls are read back as model input only
+          ([Keeper_canonical_turn_store.messages_of_canonical_turn] renders
+          them as text). Route evidence describes the descriptor and the
+          route a call took; [Keeper_tool_call_log] writes it per call, and a
+          model resuming the turn has no use for it. *)
        let tool_calls_json =
-         `List (List.map tool_call_detail_to_json (List.rev acc.tool_calls))
+         `List
+           (List.map
+              (fun (detail : Keeper_agent_result.tool_call_detail) ->
+                 tool_call_detail_to_json { detail with route_evidence = None })
+              (List.rev acc.tool_calls))
        in
        let usage_json =
          `Assoc

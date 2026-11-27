@@ -52,7 +52,7 @@ let test_server_argv () =
   Alcotest.(check (list string))
     "argv has no shell interpolation"
     [ "/bin/masc"; "start"; "--base-path"; "/ws"; "--host"; "127.0.0.1"; "--port"; "8935" ]
-    (L.server_argv ~masc_bin:"/bin/masc" ~base_path:"/ws" ~host:"127.0.0.1"
+    (L.server_argv ~masc_bin:"/bin/masc" ~flags:[] ~base_path:"/ws" ~host:"127.0.0.1"
        ~port:8935)
 
 let outcome_str = function
@@ -140,7 +140,7 @@ let test_start_stop_reaped () =
   close_out oc;
   Unix.chmod script 0o755;
   match
-    L.start ~masc_bin:script ~base_path:dir ~host:"127.0.0.1" ~port:18999
+    L.start ~masc_bin:script ~flags:[] ~base_path:dir ~host:"127.0.0.1" ~port:18999
       ~env:(Unix.environment ())
   with
   | Error e -> Alcotest.failf "start failed: %s" e
@@ -205,7 +205,7 @@ let await_exit_report owned =
 
 let start_fake ~script ~base_path ~port =
   match
-    L.start ~masc_bin:script ~base_path ~host:"127.0.0.1" ~port
+    L.start ~masc_bin:script ~flags:[] ~base_path ~host:"127.0.0.1" ~port
       ~env:(Unix.environment ())
   with
   | Error e -> Alcotest.failf "start failed: %s" e

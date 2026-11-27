@@ -1,6 +1,7 @@
-(** On-demand background server startup shared by CLI setup and TUI clients.
+(** On-demand background server startup shared by CLI setup, TUI clients and
+    a [masc start] run from a terminal.
 
-    [start] launches the sibling [masc start] in a detached process group.
+    [start] launches the sibling [masc start] in a detached session.
     The server keeps running after the caller exits. The startup handle is used
     to observe and reap the child, not to tie its lifetime to the caller.
     [stop] is an explicit operation for the owner of that handle. *)
@@ -47,8 +48,14 @@ val discover_server_binary :
     [path_lookup] so the resolution order is testable without a filesystem. *)
 
 val server_argv :
-  masc_bin:string -> base_path:string -> host:string -> port:int -> string list
-(** The exact argv for the child server. No shell interpolation. *)
+  masc_bin:string ->
+  flags:string list ->
+  base_path:string ->
+  host:string ->
+  port:int ->
+  string list
+(** The exact argv for the child server: [masc_bin start], then [flags] as
+    given, then the base path, host and port. No shell interpolation. *)
 
 type 'exit health_outcome =
   | Ready  (** [/health] answered ok within the budget. *)
@@ -135,19 +142,76 @@ val exit_report : owned_server -> exit_report option
 
 val start :
   masc_bin:string ->
+  flags:string list ->
   base_path:string ->
   host:string ->
   port:int ->
   env:string array ->
   (owned_server, string) result
-(** Spawn [masc_bin] as a detached child in its own process group, stdout
-    and stderr to {!startup_output_path} (emptied first). No pipe is kept,
-    so the server is never blocked or broken by this process exiting.
-    Returns the owned handle, or a message on spawn failure. *)
+(** Spawn {!server_argv} as a detached child in a session of its own, so it
+    has no controlling terminal, with stdout and stderr to
+    {!startup_output_path} (emptied first) and the base path as its working
+    directory. No pipe is kept, so the server is never blocked or broken by
+    this process exiting. Returns the owned handle, or a message on spawn
+    failure. *)
 
 val stop : owned_server -> grace_sec:float -> unit
 (** Tree-kill only this owned server: SIGTERM to the process group, then
     SIGKILL after [grace_sec] if anything survives. Idempotent. *)
+
+(** {1 A server started from a terminal}
+
+    A server that holds a controlling terminal stops whole once any process
+    in its group reads that terminal from the background: the kernel stops
+    the group with SIGTTIN or SIGTTOU (#38700). A [masc start] that has a
+    terminal therefore starts the server with {!start}, which leaves it no
+    terminal, and stays on the terminal as its supervisor (RFC-0470 §4.2). *)
+
+type terminal =
+  | Controlling_terminal  (** [/dev/tty] opened. *)
+  | No_controlling_terminal  (** [/dev/tty] did not open. *)
+
+val controlling_terminal : unit -> terminal
+(** Opens [/dev/tty] close-on-exec and closes it again. Nothing is read or
+    written, so asking does not stop a background job. Any failure to open
+    it reads as [No_controlling_terminal], as RFC-0470 §4.2 says. *)
+
+type ended =
+  | Ended of Unix.process_status
+  | Ended_unobserved
+      (** Something else in this process collected the status first. *)
+
+val supervise :
+  masc_bin:string ->
+  flags:string list ->
+  base_path:string ->
+  host:string ->
+  port:int ->
+  env:string array ->
+  into:Unix.file_descr ->
+  notices:Unix.file_descr ->
+  (ended, string) result
+(** Starts the server with {!start} and stays until it ends.
+
+    - SIGINT, SIGTERM, SIGHUP and SIGQUIT sent to this process become one
+      SIGTERM to the server's process group each. A signal this process
+      inherited as ignored stays ignored, so [nohup] keeps its meaning. One
+      that arrives before the server's group exists is sent once it does.
+      SIGTSTP, SIGTTIN and SIGTTOU keep their default: they stop this
+      process only, and the server goes on writing to its file.
+    - The startup output file is read from its start and copied to [into].
+      If [into] refuses a write, copying stops and the wait goes on. If the
+      file was not kept or does not open, a line on [notices] says so.
+    - When the server ends, what it wrote last is copied, and a line on
+      [notices] names a signal that ended it.
+
+    [Error] is {!start}'s spawn failure. The signal handlers are installed
+    for the whole process and are not removed: call it from a process that
+    exits once it returns. *)
+
+val exit_code : ended -> int
+(** The server's exit status. A server ended by signal [n] gives [128 + n],
+    as a shell reports it. A status collected elsewhere gives 1. *)
 
 (** {1 How a start ended, for an event loop}
 

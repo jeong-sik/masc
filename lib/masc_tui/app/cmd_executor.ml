@@ -4628,7 +4628,7 @@ let execute_start_local_server t =
         | Masc_server_lifecycle.On_path masc_bin -> (
             let start_res =
               Eio_unix.run_in_systhread (fun () ->
-                  Masc_server_lifecycle.start ~masc_bin
+                  Masc_server_lifecycle.start ~masc_bin ~flags:[]
                     ~base_path:t.cli.base_path ~host:t.cli.host
                     ~port:t.cli.port ~env:(Unix.environment ()))
             in

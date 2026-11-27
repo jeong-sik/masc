@@ -16,8 +16,9 @@ val run :
     an owner that announces nothing is refused by its pid, and so is a [host]
     that is not an IP address or that 127.0.0.1 cannot reach. The replacement
     is [masc start --wait-for-previous-owner] when a server was asked to stop
-    and plain [masc start] when none ran, spawned in its own process group
-    with its output appended to [log_path] (default
+    and plain [masc start] when none ran, spawned in a session of its own
+    (no controlling terminal, so it serves rather than supervises) with its
+    output appended to [log_path] (default
     [<base>/.masc/logs/masc-start-<UTC time>.log], opened only after the stop
     request). Returns 0 once [/health/ready] answers 200 and the replacement
     holds the announcement byte of [port], 1 when it is refused or the

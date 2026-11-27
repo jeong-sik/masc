@@ -261,7 +261,7 @@ let prepare_server ~base_path ~port ~owned =
             (match Upgrade.replacement_readiness ~run_dir ~base_path ~port with
              | Ok Upgrade.Replacement_can_start ->
                (match Masc_server_lifecycle.start
-                        ~masc_bin:Sys.executable_name ~base_path ~host:"127.0.0.1" ~port
+                        ~masc_bin:Sys.executable_name ~flags:[] ~base_path ~host:"127.0.0.1" ~port
                         ~env:(Config_dir_resolver.environment_for_workspace
                           ~cwd:(Sys.getcwd ()) ~base_path ~env:(Unix.environment ())) with
                 | Error message -> fail message

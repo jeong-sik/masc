@@ -282,10 +282,10 @@ let readiness_answer = function
 (* HIGH-RISK-UNREVIEWED: restart reports the replacement ready only when the
    process it spawned holds the announcement byte of [port], and reports it
    as the kind of server whose file the kernel named it on. *)
-let look ~clock ~run_dir ~base_path ~port (child : Posix_spawn_detached.t) =
+let look ~clock ~run_dir ~base_path ~port ~child_pid =
   let answer = fresh_get ~clock ~port Server_health_paths.readiness in
   let sighting holder =
-    Upgrade.replacement_sighting ~child_pid:child.pid (readiness_answer answer)
+    Upgrade.replacement_sighting ~child_pid (readiness_answer answer)
       ~port_holder:(fun () -> holder ~run_dir ~base_path ~port)
   in
   let another pid =
@@ -309,9 +309,21 @@ let look ~clock ~run_dir ~base_path ~port (child : Posix_spawn_detached.t) =
      | Upgrade.Announcement_unreadable rejection -> unreadable rejection
      | Upgrade.Nobody_announces | Upgrade.No_ready_answer -> Waiting (describe_answer answer))
 
-let watch ~clock ~run_dir ~base_path ~port (child : Posix_spawn_detached.t) =
+(* The replacement is not a child Eio spawned, so nothing else in this process
+   reaps it; its end is read without blocking at the readiness pace. [None]:
+   another waiter collected it anyway. *)
+let rec exited ~clock pid =
+  match Unix.waitpid [ Unix.WNOHANG ] pid with
+  | 0, (_ : Unix.process_status) ->
+    Eio.Time.sleep clock readiness_poll_interval_s;
+    exited ~clock pid
+  | (_ : int), status -> Some status
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> exited ~clock pid
+  | exception Unix.Unix_error (Unix.ECHILD, _, _) -> None
+
+let watch ~clock ~run_dir ~base_path ~port ~child_pid =
   let rec ready last =
-    match look ~clock ~run_dir ~base_path ~port child with
+    match look ~clock ~run_dir ~base_path ~port ~child_pid with
     | Ready kind -> Replacement_ready kind
     | Waiting note ->
       (match note with
@@ -321,7 +333,7 @@ let watch ~clock ~run_dir ~base_path ~port (child : Posix_spawn_detached.t) =
       ready (if Option.is_some note then note else last)
   in
   Eio.Fiber.first
-    (fun () -> Replacement_exited (Eio.Promise.await child.exited))
+    (fun () -> Replacement_exited (exited ~clock child_pid))
     (fun () -> ready None)
 
 (* The replacement is this executable, so its commit is the one built into
@@ -383,17 +395,23 @@ let replace ~sw ~clock ~run_dir ~base_path ~port ~host ~log_path ~agent ~login =
   in
   (* Opened only now, so a refusal above leaves no empty log behind. *)
   let* log_fd = open_log log_path in
+  (* A session of its own leaves the replacement no controlling terminal, so
+     none of its children can stop it by reading this one (#38700). It is
+     also why [masc start] there serves itself instead of supervising
+     (RFC-0470 §4.2), and the process spawned here is the one that announces
+     the port. [~cwd:""] keeps this command's directory. *)
   let* child =
     Fun.protect ~finally:(fun () -> Unix.close log_fd) (fun () ->
-      Posix_spawn_detached.spawn ~sw ~argv ~env:(Unix.environment ()) ~output:log_fd
+      Process_eio_detached.spawn_detached_writing_to ~argv ~env:(Unix.environment ())
+        ~cwd:"" ~output:log_fd
       |> Result.map_error (fun reason -> Spawn_failed reason))
   in
-  let pid = child.Posix_spawn_detached.pid in
+  let pid = child.Process_eio_detached.devnull_pid in
   Printf.printf "Started pid %d. Log: %s\n\
                  Waiting for it to become ready; Ctrl-C stops watching, not the server.\n%!"
     pid log_path;
   let started_at = Eio.Time.now clock in
-  match watch ~clock ~run_dir ~base_path ~port child with
+  match watch ~clock ~run_dir ~base_path ~port ~child_pid:pid with
   | Replacement_ready kind ->
     Printf.printf "Ready after %.1f s: %s, pid %d, serving %s on port %d.\n%!"
       (Eio.Time.now clock -. started_at) (build_summary ~clock ~port kind) pid base_path port;

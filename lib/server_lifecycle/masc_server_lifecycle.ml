@@ -44,17 +44,9 @@ let discover_server_binary ~tui_exe ~file_exists ~path_lookup ~base_path ~host
     | None ->
         Not_found { manual_command = manual_start_command ~base_path ~host ~port }
 
-let server_argv ~masc_bin ~base_path ~host ~port =
-  [
-    masc_bin;
-    "start";
-    "--base-path";
-    base_path;
-    "--host";
-    host;
-    "--port";
-    string_of_int port;
-  ]
+let server_argv ~masc_bin ~flags ~base_path ~host ~port =
+  (masc_bin :: "start" :: flags)
+  @ [ "--base-path"; base_path; "--host"; host; "--port"; string_of_int port ]
 
 type 'exit health_outcome =
   | Ready
@@ -222,8 +214,8 @@ let open_startup_output ~base_path ~port =
     (Not_kept { path; reason = Unix.error_message error }, None)
   | exception Sys_error reason -> (Not_kept { path; reason }, None)
 
-let start ~masc_bin ~base_path ~host ~port ~env =
-  let argv = server_argv ~masc_bin ~base_path ~host ~port in
+let start ~masc_bin ~flags ~base_path ~host ~port ~env =
+  let argv = server_argv ~masc_bin ~flags ~base_path ~host ~port in
   let output, fd = open_startup_output ~base_path ~port in
   let spawned =
     match fd with
@@ -248,6 +240,175 @@ let start ~masc_bin ~base_path ~host ~port ~env =
 
 let stop t ~grace_sec =
   Process_eio_detached.tree_kill ~pgid:t.pgid ~signal:Sys.sigterm ~grace_sec
+
+(* RFC-0470 §4.2: the supervisor of a server started from a terminal. *)
+
+type terminal =
+  | Controlling_terminal
+  | No_controlling_terminal
+
+let terminal_device = "/dev/tty"
+
+(* open(2) is not one of the calls that stop a background job; only reading
+   the terminal, or writing it under [stty tostop], is. *)
+let rec controlling_terminal () =
+  match
+    Unix.openfile terminal_device [ Unix.O_RDONLY; Unix.O_NOCTTY; Unix.O_CLOEXEC ] 0
+  with
+  | fd ->
+    (try Unix.close fd with Unix.Unix_error _ -> ());
+    Controlling_terminal
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> controlling_terminal ()
+  | exception Unix.Unix_error ((_ : Unix.error), _, _) -> No_controlling_terminal
+
+type ended =
+  | Ended of Unix.process_status
+  | Ended_unobserved
+
+(* The signals a terminal sends its foreground job (^C, ^\, hangup) and the
+   one a shell or [kill] sends by default. RFC-0470 §4.2 turns each into a
+   SIGTERM to the server, which shuts down as it does on its own SIGTERM. *)
+let forwarded_signals = [ Sys.sigint; Sys.sigterm; Sys.sighup; Sys.sigquit ]
+
+(* The handler runs before [start] returns the group as well: a ^C pressed
+   while the server is being spawned is kept in [requested] and sent once the
+   group is known. *)
+type forwarding = {
+  group : int option Atomic.t;
+  requested : bool Atomic.t;
+}
+
+(* ESRCH: the group is gone. EPERM: Darwin's answer for a group whose members
+   are all exiting or zombies. Either way nothing is left to stop. *)
+let terminate_group pgid =
+  try Unix.kill (-pgid) Sys.sigterm
+  with Unix.Unix_error ((Unix.ESRCH | Unix.EPERM), _, _) -> ()
+
+let forward_signals forwarding =
+  let forward (_ : int) =
+    Atomic.set forwarding.requested true;
+    Option.iter terminate_group (Atomic.get forwarding.group)
+  in
+  List.iter
+    (fun signal ->
+      match Sys.signal signal (Sys.Signal_handle forward) with
+      | Sys.Signal_ignore -> Sys.set_signal signal Sys.Signal_ignore
+      | Sys.Signal_default | Sys.Signal_handle _ -> ())
+    forwarded_signals
+
+let forward_to forwarding pgid =
+  Atomic.set forwarding.group (Some pgid);
+  if Atomic.get forwarding.requested then terminate_group pgid
+
+let rec write_all fd buffer offset length =
+  if length > 0 then
+    match Unix.single_write fd buffer offset length with
+    | written -> write_all fd buffer (offset + written) (length - written)
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> write_all fd buffer offset length
+    | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) ->
+      (* A terminal is shared: another program may have made it
+         non-blocking. Wait until it takes more instead of dropping output. *)
+      (match Unix.select [] [ fd ] [] (-1.0) with
+       | (_ : Unix.file_descr list * Unix.file_descr list * Unix.file_descr list) -> ()
+       | exception Unix.Unix_error (Unix.EINTR, _, _) -> ());
+      write_all fd buffer offset length
+
+(* A notice goes to a terminal that may already be gone; there is nobody
+   left to tell that it could not be written. *)
+let notice fd text =
+  let line = Bytes.of_string ("masc start: " ^ text ^ "\n") in
+  try write_all fd line 0 (Bytes.length line) with Unix.Unix_error _ -> ()
+
+(* How long the follower waits before it looks for more output and for the
+   server's end again. It bounds how late a line or the exit shows; the
+   server never waits on it. *)
+let follow_interval_s = 0.2
+
+let follow_chunk_bytes = 65_536
+
+type copy =
+  | Copying of Unix.file_descr
+      (** The startup output file, read up to where the last copy stopped. *)
+  | Not_copying
+
+let open_output_copy ~notices = function
+  | Written_to path -> (
+    match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
+    | fd -> Copying fd
+    | exception Unix.Unix_error (error, _, _) ->
+      notice notices
+        (Printf.sprintf "the server's output is not shown here (%s): %s"
+           (Unix.error_message error) path);
+      Not_copying)
+  | Not_kept _ as output ->
+    notice notices ("the server's output is not shown here; " ^ describe_output output);
+    Not_copying
+
+let stop_copying fd =
+  (try Unix.close fd with Unix.Unix_error _ -> ());
+  Not_copying
+
+(* Copies what the file holds past the last read, up to its current end. *)
+let rec copy_available ~into ~notices buffer = function
+  | Not_copying -> Not_copying
+  | Copying source as copying -> (
+    match Unix.read source buffer 0 (Bytes.length buffer) with
+    | 0 -> copying
+    | count -> (
+      match write_all into buffer 0 count with
+      | () -> copy_available ~into ~notices buffer copying
+      | exception Unix.Unix_error ((_ : Unix.error), _, _) ->
+        (* The terminal or pipe this copied to is gone. The server keeps
+           writing its file; only the copy ends. *)
+        stop_copying source)
+    | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+      copy_available ~into ~notices buffer copying
+    | exception Unix.Unix_error (error, _, _) ->
+      notice notices
+        ("stopped showing the server's output: " ^ Unix.error_message error);
+      stop_copying source)
+
+let rec follow (t : owned_server) ~into ~notices buffer copying =
+  let copying = copy_available ~into ~notices buffer copying in
+  let finish ended =
+    (match copy_available ~into ~notices buffer copying with
+     | Copying source -> ignore (stop_copying source : copy)
+     | Not_copying -> ());
+    ended
+  in
+  match observe_exit t with
+  | Still_running ->
+    Unix.sleepf follow_interval_s;
+    follow t ~into ~notices buffer copying
+  | Exited_with (Unix.WEXITED _ as status) -> finish (Ended status)
+  | Exited_with ((Unix.WSIGNALED _ | Unix.WSTOPPED _) as status) ->
+    let ended = finish (Ended status) in
+    notice notices
+      (Printf.sprintf "the server (pid %d) %s" t.pgid (Process_exit_text.of_status status));
+    ended
+  | Reaped_elsewhere ->
+    let ended = finish Ended_unobserved in
+    notice notices
+      (Printf.sprintf "the server (pid %d) ended; its exit status was collected elsewhere"
+         t.pgid);
+    ended
+
+let supervise ~masc_bin ~flags ~base_path ~host ~port ~env ~into ~notices =
+  let forwarding = { group = Atomic.make None; requested = Atomic.make false } in
+  forward_signals forwarding;
+  match start ~masc_bin ~flags ~base_path ~host ~port ~env with
+  | Error _ as error -> error
+  | Ok (server : owned_server) ->
+    forward_to forwarding server.pgid;
+    let copying = open_output_copy ~notices server.output in
+    Ok (follow server ~into ~notices (Bytes.create follow_chunk_bytes) copying)
+
+(* [observe_exit] waits without WUNTRACED, so a stop is never reported; it
+   shares the signal arm only because [Unix.process_status] carries it. *)
+let exit_code = function
+  | Ended (Unix.WEXITED code) -> code
+  | Ended (Unix.WSIGNALED signal | Unix.WSTOPPED signal) -> 128 + Sys.signal_to_int signal
+  | Ended_unobserved -> 1
 
 type settled_start = {
   server : owned_server;

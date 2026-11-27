@@ -449,6 +449,9 @@ let test_get_headers_etag_304_and_disposition () =
            (Httpun.Headers.get h304 "x-content-type-options");
          Alcotest.(check (option string)) "304 keeps CSP" (Some Media.media_csp)
            (Httpun.Headers.get h304 "content-security-policy");
+         Alcotest.(check (option string)) "304 keeps Content-Disposition"
+           (Some (Printf.sprintf "inline; filename=\"%s.png\"" sha))
+           (Httpun.Headers.get h304 "content-disposition");
          Alcotest.(check (list string)) "304 keeps single merged Vary"
            [ "Origin, Authorization, Cookie" ]
            (Httpun.Headers.get_multi h304 "vary");
@@ -471,7 +474,12 @@ let test_get_headers_etag_304_and_disposition () =
       Yojson.Safe.Util.(json_of_response bad |> member "code" |> to_string);
     (* PDF gets attachment Content-Disposition; MIDI gets inline. *)
     let pdf_sha, pdf_path =
-      match Store.persist_result ~base_dir ~media_type:"application/pdf" ~data:"%PDF-1.7\n%%EOF\n" with
+      match
+        Store.persist_result
+          ~base_dir:base_path
+          ~media_type:"application/pdf"
+          ~data:"%PDF-1.7\n%%EOF\n"
+      with
       | Ok pair -> pair
       | Error err -> Alcotest.fail err
     in
@@ -482,7 +490,12 @@ let test_get_headers_etag_304_and_disposition () =
       (Some (Printf.sprintf "attachment; filename=\"%s.pdf\"" pdf_sha))
       (Httpun.Headers.get pdf_headers "content-disposition");
     let mid_sha, mid_path =
-      match Store.persist_result ~base_dir ~media_type:"audio/midi" ~data:"MThd\x00\x00\x00\x06" with
+      match
+        Store.persist_result
+          ~base_dir:base_path
+          ~media_type:"audio/midi"
+          ~data:"MThd\x00\x00\x00\x06"
+      with
       | Ok pair -> pair
       | Error err -> Alcotest.fail err
     in

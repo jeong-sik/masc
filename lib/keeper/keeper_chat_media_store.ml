@@ -351,8 +351,17 @@ let sniff_media_mime data =
 
 (* ---- Pure OCaml raster dimension header parsers ---- *)
 
+let max_raster_dimension = 16_777_216
+let max_jpeg_segments = 4096
+
 let positive_dimensions ~width ~height =
-  if width > 0 && height > 0 then Some { width; height } else None
+  if
+    width > 0
+    && height > 0
+    && width <= max_raster_dimension
+    && height <= max_raster_dimension
+  then Some { width; height }
+  else None
 ;;
 
 let read_be_u16 s off =
@@ -420,8 +429,8 @@ let parse_jpeg_dimensions data =
     let rec skip_ff i =
       if i < len && Char.code data.[i] = 0xFF then skip_ff (i + 1) else i
     in
-    let rec loop pos =
-      if pos + 1 >= len || Char.code data.[pos] <> 0xFF
+    let rec loop steps pos =
+      if steps >= max_jpeg_segments || pos + 1 >= len || Char.code data.[pos] <> 0xFF
       then None
       else
         let marker_pos = skip_ff (pos + 1) in
@@ -433,7 +442,7 @@ let parse_jpeg_dimensions data =
           match marker with
           | 0x00 | 0xD9 | 0xDA -> None
           | 0x01 | 0xD0 | 0xD1 | 0xD2 | 0xD3 | 0xD4 | 0xD5 | 0xD6 | 0xD7 | 0xD8 ->
-            loop body_pos
+            loop (steps + 1) body_pos
           | _ ->
             if body_pos + 2 > len
             then None
@@ -443,15 +452,15 @@ let parse_jpeg_dimensions data =
               then None
               else if is_jpeg_sof_marker marker
               then
-                if seg_len < 7 || body_pos + 7 > len
+                if seg_len < 8 || body_pos + 8 > len
                 then None
                 else
                   let height = read_be_u16 data (body_pos + 3) in
                   let width = read_be_u16 data (body_pos + 5) in
                   positive_dimensions ~width ~height
-              else loop (body_pos + seg_len)
+              else loop (steps + 1) (body_pos + seg_len)
     in
-    loop 2
+    loop 0 2
 ;;
 
 let parse_webp_dimensions data =

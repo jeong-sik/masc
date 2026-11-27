@@ -41,7 +41,7 @@ let content_disposition_of_media ~sha256 mime =
   | Store.Application_pdf -> Printf.sprintf "attachment; filename=\"%s\"" filename
 ;;
 
-let media_validator_headers ~cors ~sha256 =
+let media_validator_headers ~cors ~sha256 ~mime =
   let has_origin_vary =
     List.exists
       (fun (name, (_ : string)) -> String.equal (String.lowercase_ascii name) "vary")
@@ -62,6 +62,7 @@ let media_validator_headers ~cors ~sha256 =
   ; "cache-control", immutable_cache_control
   ; nosniff_header
   ; "content-security-policy", media_csp
+  ; "content-disposition", content_disposition_of_media ~sha256 mime
   ; "vary", vary_value
   ]
   @ cors_without_vary
@@ -244,9 +245,9 @@ let handle_get ~cors ~base_path request reqd =
                ; "size_bytes", `Int size
                ])
         | Some _ ->
-          let validator_headers = media_validator_headers ~cors ~sha256:token in
+          let headers = media_validator_headers ~cors ~sha256:token ~mime in
           if Http.Response.request_holds_tag ~etag:token request
-          then Http.Response.not_modified ~headers:validator_headers reqd
+          then Http.Response.not_modified ~headers reqd
           else (
             match Fs_compat.load_file_opt file_path with
             | None ->
@@ -261,10 +262,6 @@ let handle_get ~cors ~base_path request reqd =
                    ; "token", `String token
                    ])
             | Some body ->
-              let headers =
-                validator_headers
-                @ [ "content-disposition", content_disposition_of_media ~sha256:token mime ]
-              in
               Http.Response.bytes
                 ~content_type:(Store.media_mime_to_string mime)
                 ~headers
@@ -276,7 +273,8 @@ let handle_upload ~cors ~base_path ~actor request reqd =
   let max_bytes = Store.max_raw_bytes () in
   let content_type = Http.Request.header request "content-type" in
   let declared =
-    Option.bind (Http.Request.header request "content-length") int_of_string_opt
+    Option.bind (Http.Request.header request "content-length") (fun raw ->
+      int_of_string_opt (String.trim raw))
   in
   let refuse refusal =
     let json, status = upload_refusal_response refusal in

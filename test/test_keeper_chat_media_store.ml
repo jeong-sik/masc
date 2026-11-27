@@ -297,6 +297,8 @@ let test_raster_dimension_parsing () =
     (M.parse_raster_dimensions M.Image_png "\x89PNG\r\n\x1a\nshort");
   check "zero-dimension PNG yields None" None
     (M.parse_raster_dimensions M.Image_png (make_png ~width:0 ~height:100));
+  check "dimension above 16_777_216 ceiling yields None" None
+    (M.parse_raster_dimensions M.Image_png (make_png ~width:16_777_217 ~height:100));
   check "GIF89a LSD" (Some { M.width = 320; height = 240 })
     (M.parse_raster_dimensions M.Image_gif sample_gif);
   check "GIF87a LSD" (Some { M.width = 16; height = 32 })
@@ -305,6 +307,16 @@ let test_raster_dimension_parsing () =
     (M.parse_raster_dimensions M.Image_jpeg sample_jpeg);
   check "JPEG SOF2 progressive" (Some { M.width = 1280; height = 720 })
     (M.parse_raster_dimensions M.Image_jpeg (make_jpeg ~sof_marker:0xC2 ~width:1280 ~height:720 ()));
+  let short_sof_jpeg = "\xff\xd8\xff\xc0\x00\x07\x08\x00\x10\x00\x20\xff\xd9" in
+  check "JPEG SOF seg_len < 8 rejected" None
+    (M.parse_raster_dimensions M.Image_jpeg short_sof_jpeg);
+  let many_rst_markers =
+    "\xff\xd8"
+    ^ String.concat "" (List.init 4097 (fun _ -> "\xff\xd0"))
+    ^ "\xff\xc0\x00\x0b\x08\x00\x10\x00\x20\x01\x01\x11\x00\xff\xd9"
+  in
+  check "JPEG exceeding 4096-segment step cap yields None" None
+    (M.parse_raster_dimensions M.Image_jpeg many_rst_markers);
   check "WebP VP8 lossy" (Some { M.width = 1024; height = 768 })
     (M.parse_raster_dimensions M.Image_webp sample_webp_vp8);
   check "WebP VP8L lossless" (Some { M.width = 300; height = 200 })

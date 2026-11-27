@@ -22,6 +22,11 @@ val target_ref_stale_after_s : int
 (** Maximum age of a local target-ref observation before equality with HEAD
     must be reported as stale in both host and endpoint probes. *)
 
+val probe_budget_sec : float
+(** How long the endpoint probe may run as a whole. Separate from
+    {!Repo_git.inspection_timeout_sec}, which budgets git subprocesses on this
+    host. The measured basis is written next to the value. *)
+
 type inspected_checkout =
   { checkout : Keeper_playground_checkouts.checkout
   ; origin : remote_origin
@@ -79,4 +84,5 @@ val discover_and_inspect :
     * inspected_checkout list
   , Keeper_playground_checkouts.scan_error ) result
 (** Acquire the keeper's attached endpoint, run the remote discovery and
-    inspection probe within [timeout_sec], and parse the results. *)
+    inspection probe within [timeout_sec], and parse the results. Each git
+    call inside the probe is given the same [timeout_sec]. *)

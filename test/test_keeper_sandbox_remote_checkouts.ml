@@ -272,11 +272,12 @@ let test_probe_tells_a_missing_origin_from_a_configured_one () =
              "sh -c %s"
              (Filename.quote
                 (Printf.sprintf
-                   "cd %s && python3 -c %s %s 32 8192 %d inspect > %s"
+                   "cd %s && python3 -c %s %s 32 8192 %d inspect %g > %s"
                    (Filename.quote tree)
                    (Filename.quote R.For_testing.probe_script)
                    (Filename.quote {|[{"url":"https://github.com/jeong-sik/masc.git","default_branch":"main"}]|})
                    R.target_ref_stale_after_s
+                   R.probe_budget_sec
                    (Filename.quote out))));
         let raw = In_channel.with_open_bin out In_channel.input_all in
         match R.parse_probe_json ~root:tree raw with
@@ -369,11 +370,11 @@ let test_layout_probe_observes_paths_without_git () =
       Out_channel.with_open_text git (fun ch ->
         Printf.fprintf ch "#!/bin/sh\ntouch %s\nexit 1\n" (Filename.quote marker));
       Unix.chmod git 0o755;
-      let command = Printf.sprintf "cd %s && PATH=%s:$PATH python3 -c %s '[]' %d %d %d layout > %s"
+      let command = Printf.sprintf "cd %s && PATH=%s:$PATH python3 -c %s '[]' %d %d %d layout %g > %s"
         (Filename.quote tree) (Filename.quote root)
         (Filename.quote R.For_testing.probe_script)
         C.max_reported_checkouts C.max_scanned_entries
-        R.target_ref_stale_after_s (Filename.quote output) in
+        R.target_ref_stale_after_s R.probe_budget_sec (Filename.quote output) in
       check int "layout probe completes" 0 (Sys.command command);
       check bool "layout does not execute producer git configuration" false
         (Sys.file_exists marker);
@@ -388,11 +389,64 @@ let test_layout_probe_observes_paths_without_git () =
           (List.map (fun (checkout : C.checkout) -> checkout.relative_path) checkouts))
 ;;
 
+(* #35039: the host's git reads and the endpoint's whole probe are different
+   work, so each tree location gets its own budget. *)
+let test_each_tree_location_has_its_own_budget () =
+  let budget = Masc.Keeper_sandbox_control.For_testing.inspection_budget_sec in
+  check (float 0.) "a host tree uses the local git budget"
+    Repo_git.inspection_timeout_sec (budget Keeper_types_profile_sandbox.Shared_mount);
+  check (float 0.) "an endpoint tree uses the remote probe budget"
+    R.probe_budget_sec (budget Keeper_types_profile_sandbox.Endpoint_owned)
+;;
+
+(* The per-call git timeout is the one the caller passes, not a number written
+   into the probe. Each git here answers a URL after 3 s; under a 0.2 s
+   timeout every call is cut off, so the origin and the head read as unread
+   instead of as that URL. *)
+let test_probe_git_calls_take_the_timeout_they_are_given () =
+  let root = Filename.temp_dir "masc-probe-timeout-" "" in
+  let tree = Filename.concat root "tree" in
+  let bin = Filename.concat root "bin" in
+  let output = Filename.concat root "probe.json" in
+  Fun.protect
+    ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote root)))
+    (fun () ->
+      List.iter (fun dir -> Unix.mkdir dir 0o700)
+        [ tree; Filename.concat tree "repo"; Filename.concat tree "repo/.git"; bin ];
+      let git = Filename.concat bin "git" in
+      (* One process, so the timeout's kill reaches the sleeping git itself. *)
+      Out_channel.with_open_text git (fun ch ->
+        output_string ch
+          "#!/bin/sh\nexec python3 -c 'import time; time.sleep(3); print(\"https://example.invalid/repo.git\")'\n");
+      Unix.chmod git 0o755;
+      let command = Printf.sprintf "cd %s && PATH=%s:$PATH python3 -c %s '[]' %d %d %d inspect %g > %s"
+        (Filename.quote tree) (Filename.quote bin)
+        (Filename.quote R.For_testing.probe_script)
+        C.max_reported_checkouts C.max_scanned_entries
+        R.target_ref_stale_after_s 0.2 (Filename.quote output) in
+      check int "probe completes" 0 (Sys.command command);
+      let raw = In_channel.with_open_bin output In_channel.input_all in
+      match R.parse_probe_json ~root:tree raw with
+      | Error detail -> fail detail
+      | Ok (_, [ row ]) ->
+        (match row.origin with
+         | R.Origin_unread -> ()
+         | R.Origin_url _ | R.Origin_not_configured -> fail "origin lookup was not cut off");
+        check (result string string) "head lookup was cut off" (Error "head unavailable") row.head
+      | Ok (_, rows) -> failf "expected one checkout, got %d" (List.length rows))
+;;
+
 let () =
   run
     "Keeper_sandbox_remote_checkouts"
     [ ( "layout", [ test_case "endpoint layout avoids git and preserves traversal boundaries" `Quick
         test_layout_probe_observes_paths_without_git ] )
+    ; ( "budget"
+      , [ test_case "each tree location has its own budget" `Quick
+            test_each_tree_location_has_its_own_budget
+        ; test_case "probe git calls take the timeout they are given" `Quick
+            test_probe_git_calls_take_the_timeout_they_are_given
+        ] )
     ; ( "parse_probe_json"
       , [ test_case "complete discovery" `Quick test_parse_probe_json_complete
         ; test_case "checkout budget limit" `Quick test_parse_probe_json_limit_checkout_budget

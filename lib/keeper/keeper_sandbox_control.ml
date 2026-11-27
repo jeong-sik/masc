@@ -803,10 +803,20 @@ let repository_checkouts_json_with_budget ~inspection_budget_sec ~config ~meta =
     ~meta
 ;;
 
-let repository_checkouts_json ~include_repository_checkouts ~config ~meta =
+(* A host tree is read by git subprocesses on this host. An endpoint tree is
+   read by one probe that has to reach the endpoint, walk the workspace and
+   run git in every checkout it finds, so it gets its own budget. *)
+let inspection_budget_sec : Keeper_types_profile_sandbox.tree_location -> float = function
+  | Shared_mount -> Repo_git.inspection_timeout_sec
+  | Endpoint_owned -> Keeper_sandbox_remote_checkouts.probe_budget_sec
+;;
+
+let repository_checkouts_json ~include_repository_checkouts ~config ~(meta : keeper_meta) =
   if include_repository_checkouts then
     repository_checkouts_json_with_budget
-      ~inspection_budget_sec:Repo_git.inspection_timeout_sec
+      ~inspection_budget_sec:
+        (inspection_budget_sec
+           (Keeper_types_profile_sandbox.tree_location_of_profile meta.sandbox_profile))
       ~config
       ~meta
   else
@@ -880,6 +890,7 @@ let checkout_identity_rows ~(config : Workspace.config) checkouts =
 ;;
 
 module For_testing = struct
+  let inspection_budget_sec = inspection_budget_sec
   let repository_checkouts_json_with_budget = repository_checkouts_json_with_budget
 
   let repository_checkouts_json_with_budget_after_discovery

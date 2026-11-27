@@ -2,6 +2,24 @@ open Keeper_meta_contract
 
 let target_ref_stale_after_s = 900
 
+(* How long the endpoint probe may run: the shim's limit on the payload
+   (python start, the walk, and every git call in every checkout found) and
+   the wait for the endpoint around it. [Repo_git.inspection_timeout_sec]
+   budgets git subprocesses on this host, which is different work.
+   Measured 2026-11-27 (#35039), the same probe and argv run uncapped on live
+   endpoints, 5 runs per Keeper:
+     microvm (apple_container): n=20 over 4 Keepers, p90 18.9 s, max 20.3 s
+     remote_ssh:                n=20 over 4 Keepers, p90 39.4 s, max 55.4 s
+   The slow runs are Keepers at the 32-checkout cap, slowest on a cold cache.
+   40 s is the remote_ssh p90 rounded up. The runner's own wall limit adds the
+   connect (10 s on every endpoint configured today) and 4 s grace: 54 s,
+   inside the dashboard's 60 s request timeout (DEFAULT_MCP_TIMEOUT_MS) that
+   waits on this probe. Other steps of that request (guest admission, the
+   absence check after a failure, live status) are not counted in the 54 s.
+   The cold remote_ssh tail (52-55 s) does not fit under that timeout at any
+   budget; only a cheaper probe can bring it in. *)
+let probe_budget_sec = 40.0
+
 type remote_origin =
   | Origin_url of string
   | Origin_not_configured
@@ -39,6 +57,7 @@ target_ref_stale_after_s = int(sys.argv[4])
 mode = sys.argv[5]
 if mode not in ('inspect', 'layout'):
     raise ValueError('unknown probe mode')
+git_timeout_sec = float(sys.argv[6])
 
 def canon_url(u):
     if not u: return ''
@@ -61,7 +80,8 @@ for repo in catalog:
 def inspect_git(path):
     def git(*args):
         try:
-            r = subprocess.run(['git', '-C', path] + list(args), capture_output=True, text=True, timeout=5)
+            r = subprocess.run(['git', '-C', path] + list(args), capture_output=True, text=True,
+                               timeout=git_timeout_sec)
             return r.stdout.strip() if r.returncode == 0 else None
         except (subprocess.TimeoutExpired, OSError):
             # No git on the endpoint, or one call past its budget: that
@@ -77,7 +97,7 @@ def inspect_git(path):
     origin_state = 'unavailable'
     try:
         r = subprocess.run(['git', '-C', path, 'remote', 'get-url', 'origin'],
-                           capture_output=True, text=True, timeout=5)
+                           capture_output=True, text=True, timeout=git_timeout_sec)
         if r.returncode == 0 and r.stdout.strip():
             origin = r.stdout.strip()
             origin_state = 'present'
@@ -508,6 +528,10 @@ let run_probe ?read_authority ~timeout_sec ~(config : Workspace.config)
         ; string_of_int Keeper_playground_checkouts.max_scanned_entries
         ; string_of_int target_ref_stale_after_s
         ; (match mode with Inspect -> "inspect" | Layout -> "layout")
+          (* Each git call in the probe gets the same budget as the whole
+             payload, so no call is promised more time than the shim gives
+             the probe. *)
+        ; Printf.sprintf "%g" timeout_sec
         ]
       in
       (* Matched rather than collapsed with [status_tuple]: that helper turns

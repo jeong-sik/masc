@@ -920,27 +920,42 @@ let test_markdown_embeds () =
     Markdown.render_lines ~theme ~width:60 ~embeds text
     |> List.filter_map (fun (line : Markdown.rendered_line) ->
            match line.image_part with
-           | Some { Cell_grid.rows = { Cell_grid.source = Cell_grid.Retained_png path; count }; _ } ->
+           | Some
+               {
+                 Cell_grid.rows =
+                   { Cell_grid.source = Cell_grid.Retained_image { path; mime_type = None }; count };
+                 _;
+               } ->
                Some (path, count)
-           | Some { Cell_grid.rows = { Cell_grid.source = Cell_grid.Mermaid _ | Cell_grid.Embedded_png _; _ }; _ }
+           | Some
+               {
+                 Cell_grid.rows =
+                   {
+                     Cell_grid.source =
+                       ( Cell_grid.Mermaid _ | Cell_grid.Embedded_png _ | Cell_grid.Retained_png _
+                       | Cell_grid.Retained_image { mime_type = Some _; _ } );
+                     _;
+                   };
+                 _;
+               }
            | None ->
                None)
   in
   let obsidian = "![[media:" ^ String.make 64 'a' ^ "|Chart]]" in
   Alcotest.(check (list (pair string int)))
-    "an image embed alone in a paragraph asks for the retained PNG"
+    "an image embed alone in a paragraph asks for the retained image"
     [ (path, 3); (path, 3); (path, 3) ]
     (retained [ image obsidian ] obsidian);
   (* The server gives a Markdown image's URL as its raw, and the image is found
      by its destination. *)
   let markdown = "![Chart](" ^ path ^ ")" in
   Alcotest.(check (list (pair string int)))
-    "a Markdown media image alone in a paragraph asks for the same PNG"
+    "a Markdown media image alone in a paragraph asks for the same image"
     [ (path, 3); (path, 3); (path, 3) ]
     (retained [ image path ] markdown);
   let attachment_url = "/api/v1/attachments/att_" ^ String.make 64 'a' in
   Alcotest.(check (list (pair string int)))
-    "a Markdown image written with an attachment URL asks for its media PNG"
+    "a Markdown image written with an attachment URL asks for its media image"
     [ (path, 3); (path, 3); (path, 3) ]
     (retained [ image attachment_url ] ("![Chart](" ^ attachment_url ^ ")"));
   Alcotest.(check (list (pair string int))) "an image embed inside text asks for nothing" []

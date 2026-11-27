@@ -740,8 +740,8 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~embeds ~(base_style : Style
     attach_image ~source:(Embedded_png image) ~left_inset ~start
   in
   (* A paragraph that holds only an image embed: its label, then rows the
-     retained PNG covers once it loads. Until then, or when it is not a PNG,
-     the first of them shows [fallback]. *)
+     retained image covers once it loads. Until then, or when it cannot be
+     drawn, the first of them shows [fallback]. *)
   let paragraph_image inline =
     let image_path node =
       match Inline.Link.reference_definition defs node with
@@ -766,7 +766,9 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~embeds ~(base_style : Style
     draw_rows layout [ [ span whisper image.label ] ];
     let start = !row_count in
     draw_rows layout ([ span whisper image.fallback ] :: List.init (image.rows - 1) (fun _ -> []));
-    attach_image ~source:(Retained_png image.path)
+    (* The embed list carries no MIME type, so the graphics layer asks the
+       server for a PNG rendition where the terminal needs one. *)
+    attach_image ~source:(Retained_image { path = image.path; mime_type = None })
       ~left_inset:(spans_width (continuation layout)) ~start
   in
   let draw_rule layout requested_width =

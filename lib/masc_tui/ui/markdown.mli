@@ -22,9 +22,9 @@ type rendered_line = {
 
 type embed_image = {
   label : string;
-  path : string;  (** Server path of the retained PNG. *)
+  path : string;  (** Server path the retained image is fetched from. *)
   rows : int;  (** Rows the image takes below [label]; [0] shows [label] only. *)
-  fallback : string;  (** Shown in those rows until the PNG is drawn. *)
+  fallback : string;  (** Shown in those rows until the image is drawn. *)
 }
 
 type embed_shown =

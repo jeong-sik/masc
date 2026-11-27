@@ -2205,8 +2205,8 @@ let wiki_markdown_embeds ~lang t (detail : Wire_knowledge.wiki_page_detail) =
                    path = Wire_fleet.media_path_prefix ^ sha256;
                    rows = (if graphics then wiki_image_rows else 0);
                    fallback =
-                     say ~ko:"그림을 불러오는 중이에요. PNG 가 아니면 여기에 그리지 않아요."
-                       ~en:"Loading the image. Only a PNG is drawn here.";
+                     say ~ko:"그림을 불러오는 중이에요."
+                       ~en:"Loading the image.";
                  })
         | Wire_knowledge.Embed_media { sha256; exists = false } ->
             Some

@@ -17,9 +17,9 @@ the comments you asked for are the same as in that first result."""
 identity_fields = []
 defer_loading = true
 # A read whose text equals an earlier read of the same turn goes to the
-# provider as a pointer to that turn's first result (RFC-0510 D6). This is
-# the one tool that led the same-turn repeats in all three measured windows
-# (RFC-0510 §2.3, §2.7, §2.8).
+# provider as a pointer to that turn's first result (RFC-0510 D6). The tool
+# is among the same-turn repeats of all three measured windows (RFC-0510
+# §2.3, §2.7, §2.8), and its result is a post, not a file's content (§5-5).
 same_turn_result_stub = true
 
 [[params]]

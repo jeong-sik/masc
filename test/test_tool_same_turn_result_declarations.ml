@@ -103,18 +103,24 @@ let test_the_board_read_declares_it_and_execute_does_not () =
     "masc_board_post_get"
     (Some Tool_definition_toml.Repeat_sent_as_pointer)
     (Tool_same_turn_result_declarations.declared "masc_board_post_get");
+  (* The request assembly reads a descriptor's internal name, and Execute's
+     is tool_execute: that file decides what the model's Execute results do. *)
   check
     (option same_turn_result)
-    "Execute"
+    "tool_execute"
     (Some Tool_definition_toml.Repeat_sent_whole)
-    (Tool_same_turn_result_declarations.declared "Execute");
+    (Tool_same_turn_result_declarations.declared "tool_execute");
+  let model_names = Keeper_tool_descriptor.same_turn_result_pointer_model_names () in
   check
     bool
     "the request assembly is asked about masc_board_post_get"
     true
-    (List.exists
-       (String.equal "masc_board_post_get")
-       (Keeper_tool_descriptor.same_turn_result_pointer_model_names ()))
+    (List.exists (String.equal "masc_board_post_get") model_names);
+  check
+    bool
+    "the request assembly is not asked about Execute"
+    false
+    (List.exists (String.equal "Execute") model_names)
 ;;
 
 let () =

@@ -163,6 +163,20 @@ let resolve_args = function
     in
     [ "--noproxy"; "*" ] @ entry host @ dotless
 
+let default_json_max_response_bytes = 16 * 1024 * 1024
+
+let has_control_or_space s =
+  String.exists (fun ch -> let code = Char.code ch in code <= 0x20 || code = 0x7f) s
+
+let is_allowed_http_url url =
+  let trimmed = String.trim url in
+  if String.equal trimmed "" || has_control_or_space trimmed then false
+  else
+    let uri = Uri.of_string trimmed in
+    match Uri.scheme uri, Uri.host uri with
+    | Some ("http" | "https"), Some host when not (String.equal (String.trim host) "") -> true
+    | _ -> false
+
 let curl_get_argv ?(timeout_sec = default_timeout_sec) ?(headers = [])
     ?(follow_redirects = false) ?(max_redirects = 3) ?(compressed = false)
     ?max_response_bytes ?pinned_resolution url =
@@ -176,14 +190,19 @@ let curl_get_argv ?(timeout_sec = default_timeout_sec) ?(headers = [])
   (* [-q] must be the first argument: it stops curl from reading the server
      user's ~/.curlrc, which could add a proxy or a netrc credential source
      to a request the model composed. [-g] disables URL globbing on []/{},
-     [--] ends option parsing before [url], and [-K -] passes request headers
-     over stdin so Authorization/API keys stay out of argv. *)
+     [--proto =http,https --proto-redir =http,https] blocks file://, gopher://,
+     and non-HTTP redirects, [--] ends option parsing before [url], and [-K -]
+     passes request headers over stdin so Authorization/API keys stay out of argv. *)
   [
     "curl";
     "-q";
     "-sS";
     "-g";
     "--http1.1";
+    "--proto";
+    "=http,https";
+    "--proto-redir";
+    "=http,https";
     "--max-time";
     Int.to_string timeout_sec;
   ]
@@ -202,8 +221,15 @@ let curl_post_json_argv ~timeout_sec ~url () =
     "-sS";
     "-g";
     "--http1.1";
+    "--proto";
+    "=http,https";
+    "--proto-redir";
+    "=http,https";
     "--max-time";
     Int.to_string timeout_sec;
+  ]
+  @ max_response_args (Some default_json_max_response_bytes)
+  @ [
     "-K";
     "-";
     "-w";
@@ -226,8 +252,15 @@ let curl_post_json_response_argv_with_timeout ~timeout_sec ~url =
     "-sS";
     "-g";
     "--http1.1";
+    "--proto";
+    "=http,https";
+    "--proto-redir";
+    "=http,https";
     "--max-time";
     Printf.sprintf "%.17g" timeout_sec;
+  ]
+  @ max_response_args (Some default_json_max_response_bytes)
+  @ [
     "-K";
     "-";
     "-i";
@@ -300,6 +333,8 @@ let transport_failure_cause = function
 let http_get_text_response_with_headers ?(timeout_sec = default_timeout_sec)
     ?(headers = []) ?(follow_redirects = false) ?(max_redirects = 3)
     ?(compressed = false) ?max_response_bytes ?pinned_resolution url =
+  if not (is_allowed_http_url url) then Error (Curl_exited 1)
+  else
   let timeout_sec = max 1 timeout_sec in
   let argv =
     curl_get_argv ~timeout_sec ~headers ~follow_redirects ~max_redirects
@@ -319,7 +354,14 @@ let http_get_text_response_with_headers ?(timeout_sec = default_timeout_sec)
           argv)
   in
   match transport_failure_of_status status with
-  | None -> Ok (split_http_body_and_response body)
+  | None ->
+      let response = split_http_body_and_response body in
+      (match max_response_bytes with
+       | Some cap when cap > 0 && String.length response.body > cap ->
+           (* curl --max-filesize bounds wire transfer size, not decompressed
+              output under --compressed; fail closed with CURLE_FILESIZE_EXCEEDED. *)
+           Error (Curl_exited 63)
+       | Some _ | None -> Ok response)
   | Some failure -> Error failure
 
 let http_get_text_with_status_with_headers ?timeout_sec ?headers ?follow_redirects
@@ -335,7 +377,10 @@ let http_get_text_with_status ?timeout_sec ?max_response_bytes url =
   http_get_text_with_status_with_headers ?timeout_sec ?max_response_bytes url
 
 let http_get_json_with_status ?(timeout_sec = default_timeout_sec) url =
-  match http_get_text_with_status ~timeout_sec url with
+  match
+    http_get_text_with_status ~timeout_sec
+      ~max_response_bytes:default_json_max_response_bytes url
+  with
   | Error _ as err -> err
   | Ok (http_status, payload) -> (
       try Ok (http_status, Yojson.Safe.from_string payload)
@@ -344,6 +389,9 @@ let http_get_json_with_status ?(timeout_sec = default_timeout_sec) url =
 
 let http_post_json_text_with_status_with_headers ~timeout_sec ?(headers = []) ~url
     ~body_json () =
+  if not (is_allowed_http_url url) then
+    Error (Printf.sprintf "unsupported URL scheme for %s: only http and https are allowed" url)
+  else
   let timeout_sec = max 1 timeout_sec in
   let argv = curl_post_json_argv ~timeout_sec ~url () in
   let stdin_content = curl_post_json_config ~headers ~body_json in
@@ -357,7 +405,10 @@ let http_post_json_text_with_status_with_headers ~timeout_sec ?(headers = []) ~u
   match transport_failure_of_status status with
   | None ->
       let payload, http_status = split_http_body_and_status body in
-      Ok (http_status, payload)
+      if String.length payload > default_json_max_response_bytes then
+        Error (Printf.sprintf "response from %s exceeded %d bytes" url default_json_max_response_bytes)
+      else
+        Ok (http_status, payload)
   | Some failure -> Error (transport_failure_to_string ~url failure)
 
 let http_post_json_text_with_status ~timeout_sec ~url ~body_json =
@@ -444,6 +495,9 @@ let split_http_response_with_headers text =
   block_from 0
 
 let http_post_json_response_with_headers ~timeout_sec ?deadline ?(headers = []) ~url ~body_json () =
+  if not (is_allowed_http_url url) then
+    Error (Printf.sprintf "unsupported URL scheme for %s: only http and https are allowed" url)
+  else
   let timeout_sec = max 1 timeout_sec in
   let remaining () =
     match deadline with

@@ -95,6 +95,76 @@ let validate_ps_timeout_sec =
 let normalize_ollama_server_url raw =
   String.trim raw |> Masc_network_defaults.trim_trailing_slashes
 
+let ipv4_link_local_prefix = Ipaddr.V4.Prefix.of_string_exn "169.254.0.0/16"
+let ipv6_link_local_prefix = Ipaddr.V6.Prefix.of_string_exn "fe80::/10"
+let ipv6_aws_imds = Ipaddr.V6.of_string_exn "fd00:ec2::254"
+
+let is_disallowed_ollama_host host =
+  let lower = String.lowercase_ascii (String.trim host) in
+  let dotless =
+    if String.ends_with ~suffix:"." lower then
+      String.sub lower 0 (String.length lower - 1)
+    else lower
+  in
+  if String.equal dotless "metadata.google.internal"
+     || String.equal dotless "metadata.goog"
+  then true
+  else
+    let bare =
+      if String.length dotless >= 2
+         && Char.equal dotless.[0] '['
+         && Char.equal dotless.[String.length dotless - 1] ']'
+      then String.sub dotless 1 (String.length dotless - 2)
+      else dotless
+    in
+    match Ipaddr.of_string bare with
+    | Error _ -> false
+    | Ok (Ipaddr.V4 v4) ->
+        Ipaddr.V4.compare v4 Ipaddr.V4.any = 0
+        || Ipaddr.V4.Prefix.mem v4 ipv4_link_local_prefix
+    | Ok (Ipaddr.V6 v6) ->
+        Ipaddr.V6.compare v6 Ipaddr.V6.unspecified = 0
+        || Ipaddr.V6.Prefix.mem v6 ipv6_link_local_prefix
+        || Ipaddr.V6.compare v6 ipv6_aws_imds = 0
+        || (match Ipaddr.v4_of_v6 v6 with
+            | Some v4 ->
+                Ipaddr.V4.compare v4 Ipaddr.V4.any = 0
+                || Ipaddr.V4.Prefix.mem v4 ipv4_link_local_prefix
+            | None -> false)
+
+let validate_ollama_server_url raw =
+  let normalized = normalize_ollama_server_url raw in
+  if String.equal normalized "" then
+    Error "server_url must not be empty"
+  else if String.exists (fun ch -> let code = Char.code ch in code <= 0x20 || code = 0x7f) normalized then
+    Error "server_url must not contain spaces or control characters"
+  else
+    let uri = Uri.of_string normalized in
+    match Uri.scheme uri with
+    | Some ("http" | "https") ->
+        (match Uri.host uri with
+         | None -> Error "server_url must include a host"
+         | Some host when String.equal (String.trim host) "" ->
+             Error "server_url must include a host"
+         | Some host when is_disallowed_ollama_host host ->
+             Error "server_url host is not allowed (link-local, metadata, or unspecified address)"
+         | Some _ ->
+             if Option.is_some (Uri.userinfo uri) then
+               Error "server_url must not include userinfo"
+             else if Uri.query uri <> [] then
+               Error "server_url must not include a query string"
+             else if Option.is_some (Uri.fragment uri) then
+               Error "server_url must not include a fragment"
+             else if List.exists (String.equal "..") (String.split_on_char '/' (Uri.path uri)) then
+               Error "server_url path must not contain '..'"
+             else
+               (match Uri.port uri with
+                | Some p when p < 1 || p > 65535 ->
+                    Error "server_url port must be between 1 and 65535"
+                | Some _ | None -> Ok normalized))
+    | Some _ | None ->
+        Error "server_url must use http or https scheme"
+
 let ollama_ps_url server_url =
   normalize_ollama_server_url server_url
   ^ Masc_network_defaults.ollama_api_ps_path
@@ -515,18 +585,18 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
     ?keep_alive ?(max_tokens = 16) ?(think_mode = Think_auto)
     ?(timeout_sec = 6) ?(ps_timeout_sec = 2) ?(generate_when_unloaded = true)
     ?(run_generate = true) () =
-  let server_url =
-    Option.bind server_url String_util.trim_nonempty
-    |> Option.value ~default:Env_config_runtime.Ollama.server_url
-    |> normalize_ollama_server_url
-  in
-  let prompt =
-    Option.bind prompt String_util.trim_nonempty |> Option.value ~default:(default_probe_prompt ())
-  in
   let accept validate value =
     match validate value with
     | Ok accepted -> accepted
     | Error message -> invalid_arg message
+  in
+  let server_url =
+    Option.bind server_url String_util.trim_nonempty
+    |> Option.value ~default:Env_config_runtime.Ollama.server_url
+    |> accept validate_ollama_server_url
+  in
+  let prompt =
+    Option.bind prompt String_util.trim_nonempty |> Option.value ~default:(default_probe_prompt ())
   in
   let probe_runs = accept validate_probe_runs probe_runs in
   let max_tokens = accept validate_max_tokens max_tokens in

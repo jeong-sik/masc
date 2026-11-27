@@ -92,6 +92,12 @@ val normalize_ollama_server_url : string -> string
     strips trailing slashes.  Pure — used for path concatenation
     by {!ollama_ps_url} / {!ollama_generate_url}. *)
 
+val validate_ollama_server_url : string -> (string, string) result
+(** Validate and normalize an Ollama [server_url] argument: requires [http] or
+    [https], a non-empty host that is not a link-local/metadata/unspecified
+    address, a valid port if given, and no userinfo, query, fragment, control
+    characters, or [..] path segments. *)
+
 val ollama_ps_url : string -> string
 (** [ollama_ps_url server_url] is
     [normalize_ollama_server_url server_url ^

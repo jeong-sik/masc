@@ -371,6 +371,21 @@ let test_a_log_that_cannot_be_read =
   check (float 0.0) "and the failure is counted" (counted +. 1.0) (line_failures place)
 ;;
 
+(* Each Keeper the step examines tells the startup watchdog that the boot is
+   moving, so a long history is slow, not stuck. *)
+let test_each_keeper_reports_startup_progress =
+  with_workspace
+  @@ fun config ->
+  let (_ : Recorder.place) = persisted_keeper config "reports-progress" in
+  Startup_progress.reset ();
+  Unix.sleepf 0.5;
+  let silent = Startup_progress.idle_seconds () in
+  let report = Start.run config in
+  check int "the Keeper is examined" 1 report.examined;
+  check bool "the examination ended the silence" true
+    (Startup_progress.idle_seconds () < silent)
+;;
+
 (* A Keeper file this build does not read as metadata is skipped. *)
 let test_a_keeper_with_no_metadata =
   with_workspace
@@ -552,6 +567,8 @@ let () =
             test_closing_refuses_a_head_of_another_session
         ; test_case "a log that cannot be read" `Quick test_a_log_that_cannot_be_read
         ; test_case "a Keeper with no metadata" `Quick test_a_keeper_with_no_metadata
+        ; test_case "each Keeper reports startup progress" `Quick
+            test_each_keeper_reports_startup_progress
         ] )
     ; ( "store start"
       , [ test_case "the first line, and an open turn left open" `Quick test_a_store_start

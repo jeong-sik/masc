@@ -192,6 +192,29 @@ let test_a_keeper_without_a_canonical_checkpoint_has_nothing_to_recover () =
   | outcomes -> failf "unexpected outcomes: %d" (List.length outcomes)
 ;;
 
+(* Each keeper the recovery examines tells the startup watchdog that the boot
+   is moving, so a long history is slow, not stuck. *)
+let test_each_keeper_reports_startup_progress () =
+  with_workspace @@ fun config ->
+  let meta = make_meta "reports-progress" in
+  (match Keeper_meta_store.replace_snapshot config meta with
+   | Ok () -> ()
+   | Error detail -> failf "keeper meta persistence failed: %s" detail);
+  let session_dir =
+    Filename.concat
+      (Keeper_fs.session_base_dir config)
+      (Keeper_id.Trace_id.to_string meta.Keeper_meta_contract.runtime.trace_id)
+  in
+  Unix.mkdir session_dir 0o700;
+  Startup_progress.reset ();
+  Unix.sleepf 0.5;
+  let silent = Startup_progress.idle_seconds () in
+  let report = Recovery.recover_open_tails config in
+  check int "one keeper examined" 1 report.Recovery.examined;
+  check bool "the examination ended the silence" true
+    (Startup_progress.idle_seconds () < silent)
+;;
+
 (* A canonical the build before the last [checkpoint_version] bump wrote, whose
    history ends in a tool call with no result. The next turn starts fresh and
    does not replay it, so there is nothing to close: every boot leaves the
@@ -421,6 +444,10 @@ let () =
             "a keeper without a canonical checkpoint has nothing to recover"
             `Quick
             test_a_keeper_without_a_canonical_checkpoint_has_nothing_to_recover
+        ; test_case
+            "each keeper reports startup progress"
+            `Quick
+            test_each_keeper_reports_startup_progress
         ; test_case
             "a superseded checkpoint has nothing to recover"
             `Quick

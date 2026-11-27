@@ -661,6 +661,10 @@ let install_from_store ~sw ~operation_runner ~on_turn_slot_released config =
       let rec start_all count = function
         | [] -> Ok count
         | meta :: rest ->
+          (* One owner at a time: each one tells the startup watchdog that the
+             boot is moving, so a long history of Keepers is not mistaken for
+             a hang. *)
+          Startup_progress.beat ();
           (match ensure_in_pool pool meta with
            | Ok _ -> start_all (count + 1) rest
            | Error (Owner_initialization_failed error) ->
@@ -758,6 +762,7 @@ let complete_restart_settlements ~base_path ~journal_terminal =
     let rec complete count = function
       | [] -> Ok count
       | (keeper_name, owner) :: rest ->
+        Startup_progress.beat ();
         (match settle_restart_owner pool ~journal_terminal ~keeper_name owner with
          | Ok () -> complete (count + 1) rest
          | Error Restart_inventory_stopping -> unavailable "inventory stopped during restart settlement"

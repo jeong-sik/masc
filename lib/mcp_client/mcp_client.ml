@@ -175,12 +175,26 @@ let bearer_challenge_parameters headers =
   | Some params ->
     parameter params "error", parameter params "scope", parameter params "resource_metadata"
 
+let member key json =
+  match json with
+  | `Assoc pairs -> List.assoc_opt key pairs
+  | _ -> None
+
+let unique_member key json =
+  match json with
+  | `Assoc fields ->
+    (match List.filter_map (fun (name, value) -> if String.equal name key then Some value else None) fields with
+     | [] -> Ok None
+     | [ value ] -> Ok (Some value)
+     | _ :: _ :: _ -> Error (Malformed ("the response repeats " ^ key)))
+  | _ -> Error (Malformed "the result is not an object")
+
 (* Streamable HTTP answers a POST either with a JSON body or with an event
    stream carrying the same message. Which one arrives is the server's
    choice, so both are read. The content type decides -- not the shape of
    the bytes, which would make a JSON body that happens to start with
    "data:" into a stream. *)
-let json_of_body ~content_type body =
+let json_of_body ~id ~content_type body =
   let is_event_stream =
     match content_type with
     | Some value ->
@@ -200,8 +214,8 @@ let json_of_body ~content_type body =
        eighty columns arrives as several of them, and reading each line as
        its own message would find nothing parseable in any of them.
 
-       The last event that parses is the answer: a stream may carry progress
-       notifications first, and those are messages of their own. *)
+       Match the response carrying our request [id] so trailing server
+       notifications after the response do not shadow the RPC result. *)
     let strip_cr line =
       match String.length line with
       | length when length > 0 && Char.equal line.[length - 1] '\r' ->
@@ -249,23 +263,19 @@ let json_of_body ~content_type body =
             | exception Yojson.Json_error _ -> None))
         events
     in
-    match List.rev parsed with
-    | last :: _ -> Ok last
-    | [] -> Error (Malformed "the event stream carried no readable message"))
-
-let member key json =
-  match json with
-  | `Assoc pairs -> List.assoc_opt key pairs
-  | _ -> None
-
-let unique_member key json =
-  match json with
-  | `Assoc fields ->
-    (match List.filter_map (fun (name, value) -> if String.equal name key then Some value else None) fields with
-     | [] -> Ok None
-     | [ value ] -> Ok (Some value)
-     | _ :: _ :: _ -> Error (Malformed ("the response repeats " ^ key)))
-  | _ -> Error (Malformed "the result is not an object")
+    let matches_request_id json =
+      match unique_member "id" json with
+      | Ok (Some (`Int actual)) when actual = id -> true
+      | Ok (Some _ | None) | Error _ -> false
+    in
+    match List.filter matches_request_id parsed with
+    | [ matching ] -> Ok matching
+    | _ :: _ :: _ ->
+      Error (Malformed "the event stream carried multiple responses for the request")
+    | [] ->
+      (match List.rev parsed with
+       | last :: _ -> Ok last
+       | [] -> Error (Malformed "the event stream carried no readable message")))
 
 let result_of_rpc ~id json =
   let* version = unique_member "jsonrpc" json in
@@ -388,6 +398,7 @@ let rpc ?deadline ~extra_headers ~post t ~include_protocol_version ~id ~method_ 
   | Ok response ->
     let* json =
       json_of_body
+        ~id
         ~content_type:(header_value response.Masc_http_client.headers "content-type")
         response.Masc_http_client.body
     in

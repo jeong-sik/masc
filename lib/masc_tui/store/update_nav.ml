@@ -7973,38 +7973,17 @@ let queue_context_max_scroll (m : Model.t) tab =
   in
   max 0 (total_rows - body_h)
 
-(* Width and height of the Markdown body in the wiki card [rect], as
-   [Screen_knowledge.draw_wiki_preview] lays out a loaded page. *)
-let wiki_preview_markdown_size ~bp ~show_inline_rail ~(rect : Rect.t) =
-  let inner = ui_card_inner rect in
-  let band_h = if inner.h >= 7 then 2 else 1 in
-  let below =
-    Rect.make ~x:inner.x ~y:(inner.y + band_h) ~w:inner.w
-      ~h:(max 0 (inner.h - band_h))
-  in
-  if Rect.is_empty inner || Rect.is_empty below then None
-  else
-    let show_toc_rail =
-      show_inline_rail
-      && Masc_tui_ui.Layout.equal_breakpoint bp Masc_tui_ui.Layout.Wide
-      && below.w >= 68
-      && below.h >= 8
-    in
-    if show_toc_rail then
-      let toc_w = 22 in
-      let prose_w = max 20 (below.w - toc_w - 1) in
-      let prose_rect =
-        Rect.make ~x:below.x ~y:below.y ~w:prose_w ~h:below.h
-        |> ui_pad_content ~bp ~pad_y:1
-      in
-      Some (prose_rect.w, prose_rect.h)
-    else
-      let content = ui_pad_content ~bp below in
-      Some (content.w, max 0 (content.h - 2))
+(* The Markdown area of the loaded page in the wiki card, where
+   [Screen_knowledge.draw_wiki_preview] draws it; [None] when the title band
+   fills the card. *)
+let wiki_page_markdown_rect ~bp (frame : Wiki_card_layout.frame) =
+  Wiki_card_layout.page bp ~inline_rail:frame.inline_rail
+    (Masc_tui_ui.Card.inner_rect frame.preview)
+  |> Wiki_card_layout.page_markdown
 
-let wiki_preview_max_scroll ~bp ~theme ~show_inline_rail ~(rect : Rect.t)
+let wiki_preview_max_scroll ~bp ~theme (frame : Wiki_card_layout.frame)
     (k : Knowledge_store.t) =
-  let inner = ui_card_inner rect in
+  let inner = Masc_tui_ui.Card.inner_rect frame.preview in
   if Rect.is_empty inner then 0
   else
     let sel_summary = Knowledge_store.selected_wiki_page k in
@@ -8013,18 +7992,18 @@ let wiki_preview_max_scroll ~bp ~theme ~show_inline_rail ~(rect : Rect.t)
       | Some s -> Observed.to_option (Knowledge_store.wiki_page_for ~slug:s.slug k)
       | None -> None
     in
+    let max_scroll_in (r : Rect.t) text =
+      markdown_max_scroll ~theme ~width:r.w ~height:r.h text
+    in
     match page_detail with
     | Some d -> (
-        match wiki_preview_markdown_size ~bp ~show_inline_rail ~rect with
-        | Some (width, height) ->
-            markdown_max_scroll ~theme ~width ~height d.body_markdown
+        match wiki_page_markdown_rect ~bp frame with
+        | Some r -> max_scroll_in r d.body_markdown
         | None -> 0)
     | None -> (
         match sel_summary with
         | Some s ->
-            let content = ui_pad_content ~bp inner in
-            let md_h = max 0 (content.h - 3) in
-            markdown_max_scroll ~theme ~width:content.w ~height:md_h s.summary
+            max_scroll_in (Wiki_card_layout.summary bp inner).markdown s.summary
         | None -> 0)
 
 let wrap_lines ~width text =
@@ -9299,29 +9278,11 @@ let memory_right_pane_max_scroll ~bp ~(rect : Rect.t)
         let avail_h = max 1 (bottom - !y) in
         max 0 (Knowledge_store.memory_diff_line_count k - avail_h)
 
-(* The card the wiki page is drawn in and whether it may show the inline
-   TOC rail, for the zoomed and split layouts of [Screen_knowledge]. *)
+(* The Wiki tab's cards, laid out as [Screen_knowledge.render_wiki] draws
+   them. *)
 let wiki_preview_frame (m : Model.t) =
-  let bp = ui_bp m in
-  let br = ui_body_rect m in
-  let body_after_bar =
-    match
-      Masc_tui_ui.Layout.split_v br
-        [ Masc_tui_ui.Layout.Fixed 1; Masc_tui_ui.Layout.Flex 1 ]
-    with
-    | [ _; b ] -> b
-    | _ -> br
-  in
-  if Model.is_zoomed_active m then
-    ( fst
-        (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
-           ~left_ratio:0.66 ~top_ratio:0.68 bp body_after_bar),
-      false )
-  else
-    ( snd
-        (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
-           ~left_ratio:0.38 ~top_ratio:0.48 bp body_after_bar),
-      true )
+  Wiki_card_layout.frame ~zoomed:(Model.is_zoomed_active m) (ui_bp m)
+    (ui_body_rect m)
 
 let knowledge_detail_max_scroll (m : Model.t) =
   let bp = ui_bp m in
@@ -9416,8 +9377,7 @@ let knowledge_detail_max_scroll (m : Model.t) =
               let eff_h = if has_indicator then rem - 1 else rem in
               max 0 (total_lines - max 1 eff_h))
   | Nav.Knowledge_wiki ->
-      let rect, show_inline_rail = wiki_preview_frame m in
-      wiki_preview_max_scroll ~bp ~theme ~show_inline_rail ~rect k
+      wiki_preview_max_scroll ~bp ~theme (wiki_preview_frame m) k
   | Nav.Knowledge_artifacts -> (
       match Knowledge_store.selected_artifact k with
       | None -> 0
@@ -9521,10 +9481,12 @@ let step_wiki_link ~now ~delta (m : Model.t) =
           (fun detail -> (sel.slug, detail))
           (Observed.to_option (Knowledge_store.wiki_page_for ~slug:sel.slug k)))
   in
-  let rect, show_inline_rail = wiki_preview_frame m in
-  match
-    (page, wiki_preview_markdown_size ~bp:(ui_bp m) ~show_inline_rail ~rect)
-  with
+  let size =
+    Option.map
+      (fun (r : Rect.t) -> (r.w, r.h))
+      (wiki_page_markdown_rect ~bp:(ui_bp m) (wiki_preview_frame m))
+  in
+  match (page, size) with
   | Some (slug, (detail : Wire_knowledge.wiki_page_detail)), Some (width, height)
     ->
       let theme = Theme.of_preset m.theme_preset in

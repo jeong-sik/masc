@@ -4755,6 +4755,185 @@ let test_pr2_rail_focus_and_runtime_p3_invariants () =
         false (contains_sub ~needle:"HTTP 429" ~haystack:txt))
     [ (Say.Lang_ko, "가용 1", "속도 제한"); (Say.Lang_en, "1 avail", "Rate limit") ]
 
+(* [Update_nav] measures the Wiki card with the layout [Screen_knowledge]
+   draws. Checked zoomed (stacked body), split on a wide screen (TOC rail),
+   and with only the index summary loaded:
+   - the max scroll is where the drawn card stops moving: one line more
+     changes nothing and one line less changes the frame;
+   - [>] picks the link below the first screenful, and the drawn card shows
+     it reversed.
+   The paragraphs wrap, so a width that differs between the two sides also
+   changes the line count. *)
+let test_wiki_card_scroll_matches_the_drawn_card () =
+  let paragraph i =
+    String.concat " " (List.init 40 (fun j -> Printf.sprintf "w%d-%d" i j))
+  in
+  let long_text = String.concat "\n\n" (List.init 40 paragraph) in
+  let page_a : Wire_knowledge.wiki_page_detail =
+    {
+      page = "page-a";
+      slug = "page-a";
+      file = "page-a.md";
+      frontmatter =
+        {
+          title = "page-a";
+          summary = "";
+          source = Wire_knowledge.Source_observation;
+          author = "alpha";
+          created = "2026-11-20";
+          updated = "2026-11-22";
+          revision = 1;
+          tags = [];
+        };
+      sha256 = "sha-page-a";
+      body_markdown = long_text ^ "\n\nSee [B](page-b.md).";
+      outgoing_links =
+        [
+          {
+            text = "B";
+            target = Wire_knowledge.Link_page { slug = "page-b"; exists = true };
+            raw = "page-b.md";
+            line = 1;
+          };
+        ];
+      backlinks = [ "page-b" ];
+      lint_findings = [];
+    }
+  in
+  let summary slug text : Wire_knowledge.wiki_page_summary =
+    {
+      slug;
+      file = slug ^ ".md";
+      title = slug;
+      summary = text;
+      source = Wire_knowledge.Source_observation;
+      author = "alpha";
+      created = "2026-11-20";
+      updated = "2026-11-22";
+      revision = 1;
+      tags = [];
+      backlink_count = 0;
+      outgoing_link_count = 0;
+      sources_count = 0;
+      hearsay_count = 0;
+      sha256 = "sha-" ^ slug;
+    }
+  in
+  let idx : Wire_knowledge.wiki_index =
+    {
+      pages_total = 2;
+      pages_readable = 2;
+      pages_unreadable = 0;
+      pages = [ summary "page-a" long_text; summary "page-b" "About page-b" ];
+      unreadable_pages = [];
+      lint =
+        {
+          total_findings = 0;
+          counts =
+            {
+              broken_link = 0;
+              unsupported_link = 0;
+              orphan = 0;
+              orphan_unconfirmed = 0;
+              missing_sources = 0;
+              hearsay_only = 0;
+              unreadable_page = 0;
+              revision_log_gap = 0;
+              revision_log_hole = 0;
+              duplicate_title_candidates = 0;
+            };
+          log_hole_suppressed = false;
+          orphans = [];
+          duplicate_title_candidates = [];
+          findings = [];
+        };
+    }
+  in
+  let model ~cols ~rows ~zoomed ~pane_index ~loaded =
+    let m0 =
+      Model.initial ~auth_session:Rbac.single_user_local_admin ~cols ~rows
+        ~lang:Say.Lang_en ()
+    in
+    let index =
+      Knowledge_store.empty
+      |> Knowledge_store.set_tab Nav.Knowledge_wiki
+      |> Knowledge_store.apply_wiki_index ~observed_at:now_mono idx
+    in
+    let knowledge =
+      (if loaded then
+         Knowledge_store.set_wiki_page ~slug:"page-a"
+           (Observed.value ~observed_at:now_mono page_a)
+           index
+       else index)
+      |> Knowledge_store.select_wiki_slug ~slug:"page-a"
+    in
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Knowledge; zoomed; pane_index };
+      knowledge;
+    }
+  in
+  (* Chrome hands the screen an inset body rect (x > 0) of the size
+     [Model.inner_body_width] x [Model.inner_body_height]. *)
+  let draw (m : Model.t) =
+    let w = Model.inner_body_width m and h = Model.inner_body_height m in
+    let grid = Cell_grid.create ~cols:(w + 1) ~rows:(h + 1) in
+    let cache = Card.Cache.create () in
+    Screen_knowledge.render ~model:m ~cache ~rect:(Rect.make ~x:1 ~y:1 ~w ~h)
+      grid;
+    grid
+  in
+  let at_scroll (m : Model.t) n =
+    grid_all_text
+      (draw { m with knowledge = { m.knowledge with detail_scroll_offset = n } })
+  in
+  let check_max_scroll label (m : Model.t) =
+    let s = Update_nav.knowledge_detail_max_scroll m in
+    Alcotest.(check bool) (label ^ ": the card scrolls") true (s > 0);
+    Alcotest.(check bool)
+      (label ^ ": one line past the max scroll draws the same frame") true
+      (String.equal (at_scroll m s) (at_scroll m (s + 1)));
+    Alcotest.(check bool)
+      (label ^ ": one line before the max scroll draws another frame") false
+      (String.equal (at_scroll m (s - 1)) (at_scroll m s))
+  in
+  let reversed_cells grid =
+    let n = ref 0 in
+    for y = 0 to Cell_grid.rows grid - 1 do
+      for x = 0 to Cell_grid.cols grid - 1 do
+        if Attr.has (Cell_grid.get grid ~x ~y).style.attrs Attr.reverse then
+          incr n
+      done
+    done;
+    !n
+  in
+  List.iter
+    (fun (label, cols, rows, zoomed, pane_index) ->
+      let m = model ~cols ~rows ~zoomed ~pane_index ~loaded:true in
+      Alcotest.(check bool) (label ^ ": the page card is the wiki detail") true
+        (Model.is_wiki_detail_active m);
+      check_max_scroll label m;
+      let picked, _ = Update_nav.step_wiki_link ~now:now_mono ~delta:1 m in
+      Alcotest.(check (option string)) (label ^ ": > picks the link")
+        (Some "page-b.md")
+        (Knowledge_store.selected_wiki_link ~slug:"page-a" picked.knowledge);
+      Alcotest.(check bool) (label ^ ": > scrolls past the first screenful")
+        true
+        (picked.knowledge.detail_scroll_offset > 0);
+      let unpicked =
+        {
+          picked with
+          knowledge =
+            Knowledge_store.select_wiki_link ~slug:"page-a" None
+              picked.knowledge;
+        }
+      in
+      Alcotest.(check int) (label ^ ": the picked link is drawn reversed") 1
+        (reversed_cells (draw picked) - reversed_cells (draw unpicked)))
+    [ ("zoomed 140x40", 140, 40, true, 0); ("split 220x50", 220, 50, false, 1) ];
+  check_max_scroll "summary only, split 220x50"
+    (model ~cols:220 ~rows:50 ~zoomed:false ~pane_index:1 ~loaded:false)
+
 let () =
   Alcotest.run "masc_tui_screens_domain"
     [
@@ -4764,6 +4943,9 @@ let () =
             `Quick test_knowledge_all_tabs_and_dives;
           Alcotest.test_case "Layer 3: Repos PRs/git drift & Board multi-line/meta/error visibility"
             `Quick test_layer3_repos_prs_git_drift_and_board_multiline_visibility;
+          Alcotest.test_case
+            "Wiki card scroll and > match the drawn card (zoomed, rail, summary)"
+            `Quick test_wiki_card_scroll_matches_the_drawn_card;
         ] );
       ( "runtime"
       , [

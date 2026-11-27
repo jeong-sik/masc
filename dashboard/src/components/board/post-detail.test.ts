@@ -156,6 +156,7 @@ import {
 import { detailCommentPage, detailComments, detailPostId, detailFocusedCommentId, detailLoading, detailReadPhase, loadPostDetail, refreshPostDetail, setCommentText, setReplyingTo, submitComment } from './board-state'
 import { requestBoardContextInference, toggleReaction, voteComment, votePost } from '../../api/board'
 import type { BoardComment, BoardPost } from '../../types/core'
+import { keepers } from '../../store'
 
 afterEach(() => {
   cleanup()
@@ -247,6 +248,24 @@ describe('comment drafts on screen', () => {
 })
 
 describe('CommentThread', () => {
+  it('opens a Keeper comment author in the keepers tab and leaves other authors unlinked', () => {
+    keepers.value = [{ name: 'sangsu', status: 'running' }]
+    try {
+      const comments: BoardComment[] = [
+        { id: 'by-keeper', post_id: 'post-1', author: 'sangsu', content: 'keeper comment', created_at: '2026-04-02T00:00:00Z' },
+        { id: 'by-reader', post_id: 'post-1', author: 'reader', content: 'reader comment', created_at: '2026-04-02T00:00:00Z' },
+      ]
+      render(h(CommentThread, { comments, postId: 'post-1' }))
+
+      fireEvent.click(screen.getByRole('button', { name: '작성자 sangsu 프로필로 이동' }))
+      expect(routerMock.navigate).toHaveBeenCalledWith('keepers', { keeper: 'sangsu' })
+      expect(screen.queryByRole('button', { name: '작성자 reader 프로필로 이동' })).toBeNull()
+      expect(screen.getByText('reader')).toBeInTheDocument()
+    } finally {
+      keepers.value = []
+    }
+  })
+
   it('does not cast from an unreadable vote state on a comment', () => {
     const comments: BoardComment[] = [{ id: 'unknown-vote', post_id: 'post-1',
       author: 'reader', content: 'Readable comment', created_at: '2026-04-02T00:00:00Z' }]
@@ -641,6 +660,28 @@ describe('filterCommentTree', () => {
 })
 
 describe('PostDetail', () => {
+  it('opens a Keeper post author in the keepers tab and leaves other authors unlinked', () => {
+    keepers.value = [{ name: 'sangsu', status: 'running' }]
+    try {
+      const base = {
+        title: 'Post', body: 'Body', tags: [], votes: 0, comment_count: 0,
+        created_at: '2026-09-30T00:00:00Z', updated_at: '2026-09-30T00:00:00Z',
+      }
+      const byKeeper: BoardPost = { ...base, id: 'post-keeper', author: 'sangsu' }
+      const mounted = render(h(PostDetail, { post: byKeeper }))
+      fireEvent.click(screen.getByRole('button', { name: '작성자 sangsu 프로필로 이동' }))
+      expect(routerMock.navigate).toHaveBeenCalledWith('keepers', { keeper: 'sangsu' })
+      mounted.unmount()
+
+      const byReader: BoardPost = { ...base, id: 'post-reader', author: 'reader' }
+      render(h(PostDetail, { post: byReader }))
+      expect(screen.queryByRole('button', { name: '작성자 reader 프로필로 이동' })).toBeNull()
+      expect(screen.getByText('reader')).toBeInTheDocument()
+    } finally {
+      keepers.value = []
+    }
+  })
+
   it('clears retained route focus when the same full detail is reopened ordinarily', async () => {
     const post = { id: 'post-1', author: 'agent', title: 'Reopened', body: 'Body', content: 'Body', tags: [], votes: 0, comment_count: 0,
       created_at: '2026-04-02T00:00:00Z', updated_at: '2026-04-02T00:00:00Z', post_kind: 'direct' } as any

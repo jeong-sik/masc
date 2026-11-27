@@ -47,6 +47,7 @@ vi.mock('../../router', async () => {
     navigate: vi.fn(),
     navigateToPost: vi.fn(),
     hashForRoute: vi.fn(() => '#board'),
+    keeperHref: vi.fn((name: string) => `#keepers?keeper=${name}`),
   }
 })
 
@@ -655,7 +656,7 @@ describe('BoardSurface Component', () => {
     expect(screen.queryByText('닫힘')).not.toBeInTheDocument()
   })
 
-  it('renders post authors as keyboard-discoverable links', () => {
+  it('renders Keeper post authors as keyboard-discoverable links', () => {
     boardPosts.value = [
       makePost({
         id: 'post-1',
@@ -664,10 +665,14 @@ describe('BoardSurface Component', () => {
         author: 'ani1999',
       }),
     ]
+    keepers.value = [{ name: 'ani1999', status: 'running' }]
+    try {
+      render(h(BoardSurface, null))
 
-    render(h(BoardSurface, null))
-
-    expect(screen.getByRole('link', { name: 'ani1999' })).toHaveAttribute('href')
+      expect(screen.getByRole('link', { name: 'ani1999' })).toHaveAttribute('href', '#keepers?keeper=ani1999')
+    } finally {
+      keepers.value = []
+    }
   })
 
   it('asks for the reactions of every drawn row in one request', async () => {
@@ -1956,6 +1961,49 @@ describe('BoardSurface Component', () => {
     const sigil = container.querySelector<HTMLElement>('.bd-sigil')
     expect(sigil).not.toBeNull()
     expect(sigil?.textContent).toBe('AL')
+  })
+
+  it('links a Keeper author to its Keeper and shows any other author as plain text', () => {
+    boardPosts.value = [
+      makePost({
+        id: 'post-by-keeper',
+        title: 'keeper post',
+        author: 'sangsu-runtime',
+        post_kind: 'direct',
+        author_identity: {
+          kind: 'keeper',
+          id: 'sangsu',
+          key: 'keeper:sangsu',
+          display_name: 'sangsu',
+          raw: 'sangsu-runtime',
+        },
+      }),
+      makePost({
+        id: 'post-by-agent',
+        title: 'agent post',
+        author: 'operator',
+        post_kind: 'direct',
+        author_identity: {
+          kind: 'agent',
+          id: 'operator-1',
+          key: 'operator',
+          display_name: 'Operator',
+          raw: 'operator-1',
+        },
+      }),
+    ]
+    keepers.value = [{ name: 'sangsu', status: 'running' }]
+    try {
+      render(h(BoardSurface, null))
+
+      const keeperLink = screen.getByTestId('bd-post-post-by-keeper').querySelector('.bd-post-h a.who')
+      expect(keeperLink).toHaveAttribute('href', '#keepers?keeper=sangsu')
+      const agentHeader = screen.getByTestId('bd-post-post-by-agent').querySelector('.bd-post-h')
+      expect(agentHeader?.querySelector('a.who')).toBeNull()
+      expect(agentHeader?.querySelector('span.who')).not.toBeNull()
+    } finally {
+      keepers.value = []
+    }
   })
 
   it('disables context inference button for non-keeper authored posts when keepers list is empty', () => {

@@ -1,6 +1,8 @@
-import { describe, it, expect } from 'vitest'
+import { afterEach, describe, it, expect } from 'vitest'
+import { keepers } from '../store'
 import {
   boardActorSigilLabel,
+  boardAuthorKeeper,
   boardPostHash,
   boardPostPermalink,
   boardPostTrackbackMarkdown,
@@ -123,5 +125,40 @@ describe('boardActorSigilLabel', () => {
       display_name: 'sangsu',
       raw: 'keeper-sangsu-agent',
     })).toBe('sangsu')
+  })
+})
+
+describe('boardAuthorKeeper', () => {
+  afterEach(() => {
+    keepers.value = []
+  })
+
+  it('finds the Keeper behind a Keeper identity whose raw name differs', () => {
+    keepers.value = [{ name: 'sangsu', status: 'running' }]
+    const identity = {
+      kind: 'keeper' as const,
+      id: 'sangsu',
+      key: 'keeper:sangsu',
+      display_name: 'sangsu',
+      raw: 'sangsu-runtime',
+    }
+    expect(boardAuthorKeeper('sangsu-runtime', identity)?.name).toBe('sangsu')
+  })
+
+  it('finds a Keeper by author name when the post has no identity', () => {
+    keepers.value = [{ name: 'sangsu', status: 'running' }]
+    expect(boardAuthorKeeper('Sangsu')?.name).toBe('sangsu')
+  })
+
+  it('returns null for an author that is not a Keeper', () => {
+    keepers.value = [{ name: 'sangsu', status: 'running' }]
+    const identity = {
+      kind: 'agent' as const,
+      id: 'operator-1',
+      key: 'operator',
+      display_name: 'Operator',
+      raw: 'operator-1',
+    }
+    expect(boardAuthorKeeper('operator', identity)).toBeNull()
   })
 })

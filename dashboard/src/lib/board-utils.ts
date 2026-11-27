@@ -31,11 +31,9 @@ export function previewBoardMessage(message: Message): string {
   return message.content.trim() || '(empty)'
 }
 
-import { navigate } from '../router'
 import type { Message } from '../types'
 import { findKeeper } from './keeper-utils'
-import { openKeeperDetail } from '../components/keeper-detail'
-import type { BoardActorIdentity, BoardPost } from '../types'
+import type { BoardActorIdentity, BoardPost, Keeper } from '../types'
 
 /** Strip inline markdown formatting from title text (bold, italic, code). */
 export function stripInlineMarkdown(text: string): string {
@@ -166,20 +164,14 @@ export function boardActorTitle(
   return runtime && runtime !== display ? `런타임 ${runtime}` : undefined
 }
 
-/** Navigate to keeper detail if author is a keeper, otherwise agent profile. */
-export function navigateToAuthor(
+/** The Keeper that wrote a post or comment, or null when the author is not a
+ *  Keeper. Only a Keeper author has a page to open, so the board links the
+ *  author name only when this returns a Keeper. */
+export function boardAuthorKeeper(
   authorName: string,
-  event?: Event,
   identity?: BoardActorIdentity | null,
-) {
-  event?.stopPropagation()
-  const keeper =
-    identity?.kind === 'keeper'
-      ? findKeeper(identity.id) ?? findKeeper(identity.raw) ?? findKeeper(authorName)
-      : findKeeper(authorName)
-  if (keeper) {
-    openKeeperDetail(keeper)
-  } else {
-    navigate('monitoring', { section: 'agents', agent: identity?.raw ?? authorName })
-  }
+): Keeper | null {
+  return identity?.kind === 'keeper'
+    ? findKeeper(identity.id) ?? findKeeper(identity.raw) ?? findKeeper(authorName)
+    : findKeeper(authorName)
 }

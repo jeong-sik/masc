@@ -11,7 +11,7 @@ import { RichComposer } from '../common/rich-composer'
 import { BoardRichContent } from './board-rich-content'
 import { TextInput } from '../common/input'
 import { TurnInspectorDrawer } from '../keeper-turn-inspector-drawer'
-import { findKeeper } from '../../lib/keeper-utils'
+import { openKeeperDetail } from '../keeper-detail-state'
 import { route } from '../../router'
 import { votePost, voteComment } from '../../api/board'
 import { ReactionBar } from './reaction-bar'
@@ -22,7 +22,7 @@ import {
   boardActorAvatarKey,
   boardActorDisplayName,
   boardActorTitle,
-  navigateToAuthor,
+  boardAuthorKeeper,
 } from '../../lib/board-utils'
 import {
   detailComments,
@@ -267,6 +267,7 @@ function CommentItem({
   const authorLabel = boardActorDisplayName(comment.author, comment.author_identity)
   const authorAvatarKey = boardActorAvatarKey(comment.author, comment.author_identity)
   const authorTitle = boardActorTitle(comment.author, comment.author_identity)
+  const authorKeeper = boardAuthorKeeper(comment.author, comment.author_identity)
   const voteKnown = comment.current_vote !== undefined
   const upvoteActive = comment.current_vote === 'up'
   const downvoteActive = comment.current_vote === 'down'
@@ -309,7 +310,9 @@ function CommentItem({
             >${repliesExpanded ? '−' : '+'}</button>
           ` : null}
           <span class="text-xs">${authorAvatar(authorAvatarKey)}</span>
-          <${ActionButton} variant="subtle" size="sm" class="bd-author-action text-xs font-medium text-[var(--color-fg-primary)] hover:text-[var(--color-accent-fg)] bg-transparent border-none p-0" title=${authorTitle} ariaLabel=${`작성자 ${authorLabel} 프로필로 이동`} onClick=${() => navigateToAuthor(comment.author, undefined, comment.author_identity)}>${authorLabel}<//>
+          ${authorKeeper
+            ? html`<${ActionButton} variant="subtle" size="sm" class="bd-author-action text-xs font-medium text-[var(--color-fg-primary)] hover:text-[var(--color-accent-fg)] bg-transparent border-none p-0" title=${authorTitle} ariaLabel=${`작성자 ${authorLabel} 프로필로 이동`} onClick=${() => openKeeperDetail(authorKeeper)}>${authorLabel}<//>`
+            : html`<span class="text-xs font-medium text-[var(--color-fg-primary)]" title=${authorTitle}>${authorLabel}</span>`}
           <span class="text-2xs text-[var(--color-fg-muted)] opacity-60"><${TimeAgo} timestamp=${comment.created_at} /></span>
           <div class="ml-auto flex items-center gap-1">
             <button
@@ -623,14 +626,11 @@ export function PostDetail({ post }: { post: BoardPost }) {
   // A board post minted from a keeper turn carries origin.turn_ref.
   // When present, surface a "턴" affordance that opens the originating turn in
   // the shared turn inspector (which self-fetches the keeper's turn records by
-  // keeperName). Resolve the author keeper the same way navigateToAuthor does.
+  // keeperName).
   const [turnInspectorOpen, setTurnInspectorOpen] = useState(false)
   const originTurnRef = post.origin?.turn_ref ?? null
-  const originKeeper =
-    post.author_identity?.kind === 'keeper'
-      ? findKeeper(post.author_identity.id) ?? findKeeper(post.author_identity.raw) ?? findKeeper(post.author)
-      : findKeeper(post.author)
-  const turnKeeperName = originKeeper?.name ?? post.author
+  const authorKeeper = boardAuthorKeeper(post.author, post.author_identity)
+  const turnKeeperName = authorKeeper?.name ?? post.author
 
   return html`
     <div>
@@ -663,7 +663,9 @@ export function PostDetail({ post }: { post: BoardPost }) {
           <!-- Author and meta -->
           <div class="flex gap-2.5 items-center flex-wrap pt-3 border-t border-[var(--color-border-divider)]">
             <span class="text-sm">${authorAvatar(authorAvatarKey)}</span>
-            <${ActionButton} variant="subtle" size="sm" class="bd-author-action text-xs text-[var(--color-fg-primary)] hover:text-[var(--color-accent-fg)] bg-transparent border-none p-0" title=${authorTitle} ariaLabel=${`작성자 ${authorLabel} 프로필로 이동`} onClick=${() => navigateToAuthor(post.author, undefined, post.author_identity)}>${authorLabel}<//>
+            ${authorKeeper
+              ? html`<${ActionButton} variant="subtle" size="sm" class="bd-author-action text-xs text-[var(--color-fg-primary)] hover:text-[var(--color-accent-fg)] bg-transparent border-none p-0" title=${authorTitle} ariaLabel=${`작성자 ${authorLabel} 프로필로 이동`} onClick=${() => openKeeperDetail(authorKeeper)}>${authorLabel}<//>`
+              : html`<span class="text-xs text-[var(--color-fg-primary)]" title=${authorTitle}>${authorLabel}</span>`}
             <span class="text-2xs text-[var(--color-fg-muted)]"><${TimeAgo} timestamp=${post.created_at} /></span>
             <span
               class="text-2xs text-[var(--color-fg-muted)]"

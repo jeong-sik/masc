@@ -13,7 +13,7 @@ import { Select } from '../common/select'
 import { Checkbox } from '../common/checkbox'
 import { BoardRichContent } from './board-rich-content'
 import { CursorPagination } from '../common/pagination'
-import { route } from '../../router'
+import { keeperHref, route } from '../../router'
 import { keepers as dashboardKeepers, messages, refreshExecution } from '../../store'
 import { fetchBoardReactionsBatch, votePost } from '../../api/board'
 import { broadcastReceiptMessage, createPost, currentDashboardActor, sendBroadcast } from '../../api'
@@ -47,7 +47,7 @@ import {
   boardActorDisplayName,
   boardActorSigilLabel,
   boardActorTitle,
-  navigateToAuthor,
+  boardAuthorKeeper,
   stripInlineMarkdown,
   dedupeLeadingHeading,
 } from '../../lib/board-utils'
@@ -293,6 +293,7 @@ function PostCard({ post, batchObservation, getLatestBatchRevision }: {
   const authorLabel = boardActorDisplayName(post.author, post.author_identity)
   const authorSigilLabel = boardActorSigilLabel(post.author, post.author_identity)
   const authorTitle = boardActorTitle(post.author, post.author_identity)
+  const authorKeeper = boardAuthorKeeper(post.author, post.author_identity)
   const voteKnown = post.current_vote !== undefined
   const upvoteActive = post.current_vote === 'up'
   const downvoteActive = post.current_vote === 'down'
@@ -378,15 +379,14 @@ function PostCard({ post, batchObservation, getLatestBatchRevision }: {
     >
       <div class="bd-post-h">
         <${BdAuthor} label=${authorSigilLabel} />
-        <a
-          class="who bd-author-action"
-          href=${`#monitoring/agents/${encodeURIComponent(post.author_identity?.raw ?? post.author)}`}
-          title=${authorTitle}
-          onClick=${(e: Event) => {
-            e.stopPropagation()
-            navigateToAuthor(post.author, e, post.author_identity)
-          }}
-        >${authorLabel}</a>
+        ${authorKeeper
+          ? html`<a
+              class="who bd-author-action"
+              href=${keeperHref(authorKeeper.name)}
+              title=${authorTitle}
+              onClick=${(e: Event) => e.stopPropagation()}
+            >${authorLabel}</a>`
+          : html`<span class="who" title=${authorTitle}>${authorLabel}</span>`}
         ${post.pinned ? html`<span class="bd-badge pin" title="고정된 게시글">고정</span>` : null}
         ${post.closed
           ? html`<span class="bd-badge closed" title=${`${post.closed.closed_by}님이 닫음`}>닫힘${

@@ -14,7 +14,9 @@
  */
 
 import { html } from 'htm/preact'
+import '../knowledge/wiki-editor.css'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
+import { WORKSPACE_MEDIA_ACCEPT, useWorkspaceMediaComposer } from '../../lib/use-workspace-media-composer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { authSession, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import {
@@ -357,6 +359,13 @@ export function TasksTab(props: WorkspaceViewProps) {
   const [busyAction, setBusyAction] = useState<string | null>(null)
   const [feedback, setFeedback] = useState<{ kind: 'err' | 'warn'; message: string } | null>(null)
 
+  const taskDescMedia = useWorkspaceMediaComposer({
+    value: newTaskDesc,
+    onChange: setNewTaskDesc,
+    draftKey: showCreateTask ? 'tasks:new-task' : 'tasks:new-task:closed',
+    disabled: busyAction !== null || authSession.value.kind !== 'single_user_local',
+  })
+
   useEffect(() => {
     setBusyAction(null)
     setFeedback(null)
@@ -598,6 +607,10 @@ export function TasksTab(props: WorkspaceViewProps) {
   const handleCreateTask = async (e: Event) => {
     e.preventDefault()
     if (authSession.peek().kind !== 'single_user_local') return
+    if (taskDescMedia.uploading) {
+      setFeedback({ kind: 'err', message: '이미지 업로드가 끝난 뒤 태스크를 생성할 수 있습니다.' })
+      return
+    }
     const trimmed = newTaskTitle.trim()
     if (!trimmed) {
       setFeedback({ kind: 'err', message: '태스크 제목을 입력하세요.' })
@@ -618,6 +631,7 @@ export function TasksTab(props: WorkspaceViewProps) {
       setFeedback({ kind: 'err', message: `태스크 생성 실패: ${res.error.message}` })
       return
     }
+    taskDescMedia.reset()
     setNewTaskTitle('')
     setNewTaskDesc('')
     setNewTaskGoalId('')
@@ -894,19 +908,49 @@ export function TasksTab(props: WorkspaceViewProps) {
           </div>
           <div class="wk-field">
             <label for="new-task-desc">설명</label>
-            <textarea
-              id="new-task-desc"
-              class="wk-textarea"
-              value=${newTaskDesc}
-              onInput=${(e: Event) => setNewTaskDesc((e.target as HTMLTextAreaElement).value)}
-              onKeyDown=${(e: KeyboardEvent) => {
-                if (e.isComposing || e.keyCode === 229) return
-                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && busyAction === null) {
-                  e.preventDefault()
-                  void handleCreateTask(e)
-                }
-              }}
-            />
+            <div
+              class="kn-editor-dropzone"
+              data-testid="task-desc-dropzone"
+              data-drag-active=${taskDescMedia.dragActive ? 'true' : 'false'}
+              ondragenter=${taskDescMedia.handleDragEnter}
+              ondragover=${taskDescMedia.handleDragOver}
+              ondragleave=${taskDescMedia.handleDragLeave}
+              ondrop=${taskDescMedia.handleDrop}
+            >
+              <textarea
+                id="new-task-desc"
+                ref=${taskDescMedia.textareaRef}
+                class="wk-textarea"
+                value=${newTaskDesc}
+                onInput=${(e: Event) => {
+                  taskDescMedia.syncSelection()
+                  setNewTaskDesc((e.target as HTMLTextAreaElement).value)
+                }}
+                onpaste=${taskDescMedia.handlePaste}
+                onSelect=${taskDescMedia.syncSelection}
+                onKeyUp=${taskDescMedia.syncSelection}
+                onClick=${taskDescMedia.syncSelection}
+                onKeyDown=${(e: KeyboardEvent) => {
+                  if (e.isComposing || e.keyCode === 229) return
+                  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && busyAction === null && !taskDescMedia.uploading) {
+                    e.preventDefault()
+                    void handleCreateTask(e)
+                  }
+                }}
+              />
+              ${taskDescMedia.dragActive && html`
+                <div class="kn-editor-drop-overlay">이미지를 놓아 업로드 (PNG, JPEG, GIF, WebP)</div>
+              `}
+            </div>
+            ${taskDescMedia.uploadProgress && html`
+              <div class="kn-notice kn-notice--info kn-section-head" role="status" aria-live="polite" data-testid="task-desc-upload-status">
+                <span>이미지 업로드 중… (${taskDescMedia.uploadProgress.current}/${taskDescMedia.uploadProgress.total})</span>
+                <button type="button" class="btn-ghost kn-btn-compact" onClick=${taskDescMedia.cancelUpload}>업로드 취소</button>
+              </div>
+            `}
+            ${taskDescMedia.uploadError && html`
+              <div class="kn-notice kn-notice--err" role="alert" data-testid="task-desc-upload-error">${taskDescMedia.uploadError}</div>
+            `}
           </div>
           <div class="wk-form-grid">
             <div class="wk-field">
@@ -922,8 +966,27 @@ export function TasksTab(props: WorkspaceViewProps) {
             </div>
           </div>
           <div class="wk-actions">
-            <button type="submit" class="btn-primary" disabled=${busyAction !== null}>생성</button>
-            <button type="button" class="btn-ghost" onClick=${() => setShowCreateTask(false)}>취소</button>
+            <input
+              ref=${taskDescMedia.fileInputRef}
+              type="file"
+              accept=${WORKSPACE_MEDIA_ACCEPT}
+              multiple
+              class="kn-editor-file-input"
+              tabIndex=${-1}
+              aria-hidden="true"
+              onChange=${taskDescMedia.handleFileInputChange}
+            />
+            <button
+              type="button"
+              class="btn-ghost kn-btn-compact"
+              data-testid="task-desc-upload-btn"
+              disabled=${busyAction !== null || taskDescMedia.uploading}
+              onClick=${taskDescMedia.openFilePicker}
+            >
+              ${taskDescMedia.uploading ? '업로드 중…' : '이미지 첨부'}
+            </button>
+            <button type="submit" class="btn-primary" disabled=${busyAction !== null || taskDescMedia.uploading}>생성</button>
+            <button type="button" class="btn-ghost" onClick=${() => { taskDescMedia.reset(); setShowCreateTask(false) }}>취소</button>
           </div>
         </form>
       `}

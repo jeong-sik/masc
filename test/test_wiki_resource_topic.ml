@@ -673,6 +673,77 @@ let test_symlinked_wiki_root_and_log_append_are_rejected () =
          (In_channel.with_open_text outside_target In_channel.input_all))
 ;;
 
+let test_referenced_media_tokens_and_embed_tool_feedback () =
+  let dir = test_dir () in
+  let outside = test_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      rm_rf dir;
+      rm_rf outside)
+    (fun () ->
+       Eio_main.run @@ fun env ->
+       Fs_compat.set_fs (Eio.Stdenv.fs env);
+       (match Lib.Tool_wiki.referenced_media_tokens ~base_path:dir with
+        | Ok tokens -> check (list string) "missing wiki yields empty refs" [] tokens
+        | Error msg -> fail ("missing wiki should not error: " ^ msg));
+       let png =
+         "\137PNG\r\n\026\n\000\000\000\rIHDR\000\000\000\001\000\000\000\001\008\002\000\000\000\144wS\222"
+       in
+       let live_sha, live_url =
+         match Lib.Keeper_chat_media_store.persist_result
+                 ~base_dir:dir ~media_type:"image/png" ~data:png with
+         | Ok pair -> pair
+         | Error msg -> fail msg
+       in
+       let missing_sha = String.make 64 'f' in
+       let ctx : Lib.Tool_wiki.context = { base_path = dir; agent_name = "alice" } in
+       let body =
+         Printf.sprintf
+           "![Live](%s)\n![[media:%s|Absent]]\n## Sources\n- repo:jeong-sik/masc:lib/tool_wiki.ml\n"
+           live_url missing_sha
+       in
+       let created =
+         match
+           Lib.Tool_wiki.dispatch ctx ~name:"masc_wiki_create"
+             ~args:
+               (`Assoc
+                  [ "page", `String "media-report"
+                  ; "title", `String "Media Report"
+                  ; "summary", `String "Page with media embeds"
+                  ; "source", `String "observation"
+                  ; "body", `String body
+                  ])
+         with
+         | Some r -> r
+         | None -> fail "masc_wiki_create not dispatched"
+       in
+       check bool "create succeeded" true (Tool_result.is_success created);
+       check bool "create warns about missing media" true
+         (String_util.contains_substring (Tool_result.message created) missing_sha);
+       check bool "create attaches media_refs metadata" true
+         (Option.is_some (Tool_result.metadata created));
+       let expected = List.sort String.compare [ live_sha; missing_sha ] in
+       (match Lib.Tool_wiki.referenced_media_tokens ~base_path:dir with
+        | Ok tokens -> check (list string) "GC collector finds all wiki media refs" expected tokens
+        | Error msg -> fail ("referenced_media_tokens failed: " ^ msg));
+       let lint_res =
+         match Lib.Tool_wiki.dispatch ctx ~name:"masc_wiki_lint" ~args:(`Assoc []) with
+         | Some r -> r
+         | None -> fail "masc_wiki_lint not dispatched"
+       in
+       check bool "lint succeeded" true (Tool_result.is_success lint_res);
+       check bool "lint reports broken_media_embed" true
+         (String_util.contains_substring (Tool_result.message lint_res) "broken_media_embed");
+       (* A symlinked .md page inside .masc/wiki must fail closed for GC. *)
+       let outside_md = Filename.concat outside "escape.md" in
+       write outside_md "escaped";
+       let link_path = Filename.concat (Lib.Tool_wiki.wiki_root ~base_path:dir) "symlinked.md" in
+       Unix.symlink outside_md link_path;
+       match Lib.Tool_wiki.referenced_media_tokens ~base_path:dir with
+       | Error _ -> ()
+       | Ok _ -> fail "symlinked wiki page must fail closed in referenced_media_tokens")
+;;
+
 let () =
   run
     "wiki_resource_topic"
@@ -718,6 +789,10 @@ let () =
             "symlinked wiki root and symlinked log.md append are rejected"
             `Quick
             test_symlinked_wiki_root_and_log_append_are_rejected
+        ; test_case
+            "wiki media_refs GC collector and embed tool feedback"
+            `Quick
+            test_referenced_media_tokens_and_embed_tool_feedback
         ] )
     ; ( "listing"
       , [ test_case

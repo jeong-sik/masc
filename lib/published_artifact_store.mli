@@ -26,6 +26,17 @@ val list_with_authors : base_path:string -> (listing, error) result
     or establish current editor presence. *)
 val read : base_path:string -> id:string -> revision:int option ->
   (Published_artifact.t * Published_artifact.revision * string, error) result
+val exists : base_path:string -> id:string -> bool
+(** [true] iff [id] is a valid artifact id whose metadata file exists and
+    decodes cleanly under [<base_path>/.masc/published_artifacts]. Does not
+    read revision body blobs. *)
+val referenced_media_tokens : base_path:string -> (string list, error) result
+(** Fail-closed collector of every workspace media SHA-256 token referenced
+    across all revisions of all published artifacts under [base_path].
+    Resolves every revision body through {!Tool_blob_store} so media GC never
+    misses references stored in body blobs. Returns [Ok []] only when the
+    published-artifacts directory is absent; any unreadable directory, corrupt
+    metadata, invalid filename, or unreadable revision body returns [Error]. *)
 val with_latest_locked : base_path:string -> id:string -> expected_revision:int ->
   f:(Published_artifact.revision -> string -> 'a) -> ('a, error) result
 (** Acquire the same per-artifact lock as [publish], then read and validate the

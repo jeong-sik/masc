@@ -848,6 +848,144 @@ let test_publication_and_sharing_notify () = with_base (fun base_path ->
     Alcotest.(check bool) "notification retains the writer's workspace scope" true
       (List.for_all (fun (source, scope) -> String.equal source base_path && scope = `Workspace) !changes)))
 
+let sample_png_bytes =
+  "\137PNG\r\n\026\n\000\000\000\rIHDR\000\000\000\001\000\000\000\001\008\002\000\000\000\144wS\222"
+
+let test_extract_media_refs_markdown_and_html () =
+  let sha1 = String.make 64 '1' in
+  let sha2 = String.make 64 '2' in
+  let sha3 = String.make 64 '3' in
+  let upper = String.make 64 'A' in
+  let md =
+    String.concat "\n"
+      [ Printf.sprintf "![one](/api/v1/media/%s)" sha2
+      ; Printf.sprintf "![[media:%s|caption]]" sha1
+      ; Printf.sprintf "`![code](/api/v1/media/%s)`" sha3
+      ; "```"
+      ; Printf.sprintf "![[media:%s]]" sha3
+      ; "```"
+      ; Printf.sprintf "![ext](https://evil.example/api/v1/media/%s)" sha3
+      ; Printf.sprintf "![long](/api/v1/media/%sdead)" sha3
+      ; Printf.sprintf "![upper](/api/v1/media/%s)" upper
+      ; Printf.sprintf "![dup](/api/v1/media/%s)" sha1
+      ]
+  in
+  Alcotest.(check (list string)) "markdown media refs sorted and deduped"
+    [ sha1; sha2 ] (A.extract_media_refs A.Markdown md);
+  let html =
+    Printf.sprintf
+      "<!doctype html><html><body><img src=\"/api/v1/media/%s\"><img src='/api/v1/media/%s'>\
+       <img src=/api/v1/media/%s><img src=\"https://other.example/api/v1/media/%s\">\
+       <img src=\"/api/v1/media/%s0\"></body></html>"
+      sha2 sha1 sha2 sha3 sha3
+  in
+  Alcotest.(check (list string)) "html media refs sorted and deduped"
+    [ sha1; sha2 ] (A.extract_media_refs A.Html html)
+
+let test_referenced_media_tokens_and_http_projection () = with_base (fun base_path ->
+  let module Routes = Server_routes_http_routes_published_artifacts in
+  Alcotest.(check (list string)) "absent store has no media refs" []
+    (S.referenced_media_tokens ~base_path |> store_ok);
+  let live_token, live_url =
+    match Masc.Keeper_chat_media_store.persist_result
+            ~base_dir:base_path ~media_type:"image/png" ~data:sample_png_bytes with
+    | Ok pair -> pair
+    | Error msg -> Alcotest.fail msg in
+  let missing_token = String.make 64 'e' in
+  let md = Printf.sprintf "# Report\n\n![live](%s)\n![[media:%s|missing]]\n" live_url missing_token in
+  let pub_result = Masc.Keeper_artifact_publish.handle ~base_path ~author:"keeper-media"
+      ~args:(request_json md) in
+  let pub_data = publication_data pub_result in
+  let expected_refs = List.sort String.compare [ live_token; missing_token ] in
+  check_json "keeper receipt exposes media_refs"
+    (`List (List.map (fun s -> `String s) expected_refs))
+    (json_member "media_refs" pub_data);
+  check_json "keeper receipt warns on missing_media_refs"
+    (`List [ `String missing_token ])
+    (json_member "missing_media_refs" pub_data);
+  let id = pub_data |> json_member "artifact" |> json_member "id" |> json_string in
+  Alcotest.(check bool) "exists true for published artifact" true (S.exists ~base_path ~id);
+  Alcotest.(check bool) "exists false for missing artifact" false
+    (S.exists ~base_path ~id:("artifact-" ^ String.make 32 '0'));
+  Alcotest.(check bool) "exists false for invalid id" false (S.exists ~base_path ~id:"bad");
+  let html_token = String.make 64 'c' in
+  let html = Printf.sprintf "<!doctype html><html><body><img src=\"/api/v1/media/%s\"></body></html>" html_token in
+  ignore (publish ~base_path (request ~id ~expected_revision:1 ~format:"html" html));
+  let all_refs = S.referenced_media_tokens ~base_path |> store_ok in
+  Alcotest.(check (list string)) "GC collector unions all revisions across formats"
+    (List.sort String.compare [ live_token; missing_token; html_token ]) all_refs;
+  let req = Httpun.Request.create `GET ("/api/v1/published-artifacts/" ^ id) in
+  (match Routes.read ~base_path ~actor:(Some "admin") ~request:req with
+   | Routes.Response { Routes.status = `OK; json } ->
+     check_json "HTTP read exposes latest revision media_refs"
+       (`List [ `String html_token ])
+       (json_member "media_refs" json)
+   | Routes.Private | Routes.Response _ -> Alcotest.fail "HTTP read of HTML artifact failed");
+  (* Corrupt metadata must fail closed for referenced_media_tokens. *)
+  Fs_compat.save_file (metadata_path base_path id) "{corrupt";
+  check_unavailable (S.referenced_media_tokens ~base_path))
+
+let test_wiki_http_embeds_media_refs_and_lint () = with_base (fun base_path ->
+  let config = Masc.Workspace.default_config base_path in
+  let live_token, live_url =
+    match Masc.Keeper_chat_media_store.persist_result
+            ~base_dir:base_path ~media_type:"image/png" ~data:sample_png_bytes with
+    | Ok pair -> pair
+    | Error msg -> Alcotest.fail msg in
+  let missing_token = String.make 64 'd' in
+  let artifact, _ = publish ~base_path (request "# Embedded Artifact") in
+  let missing_artifact = "artifact-" ^ String.make 32 '9' in
+  let put ~slug ~title ~body =
+    let payload = Yojson.Safe.to_string (`Assoc [
+      "title", `String title; "summary", `String "wiki embed fixture";
+      "source", `String "observation"; "tags", `List [ `String "media" ];
+      "body", `String body ]) in
+    match Server_dashboard_http_wiki.put_page_json ~config ~actor:"tester" ~slug ~body_str:payload () with
+    | Ok json -> json
+    | Error (_, err) -> Alcotest.fail ("wiki PUT failed: " ^ Yojson.Safe.to_string err) in
+  ignore (put ~slug:"target-note" ~title:"Target Note"
+    ~body:"## Sources\n- repo:jeong-sik/masc:lib/wiki_link.ml\n");
+  let host_body =
+    String.concat "\n"
+      [ Printf.sprintf "![Live](%s)" live_url
+      ; Printf.sprintf "![[media:%s|Missing Media]]" missing_token
+      ; "![[wiki:target-note|Target]]"
+      ; Printf.sprintf "![[artifact:%s|Live Artifact]]" artifact.id
+      ; Printf.sprintf "![[artifact:%s|Missing Artifact]]" missing_artifact
+      ; "## Sources"
+      ; "- repo:jeong-sik/masc:lib/wiki_link.ml"
+      ] in
+  let put_json = put ~slug:"host-note" ~title:"Host Note" ~body:host_body in
+  let put_data = json_member "data" put_json in
+  let expected_media = List.sort String.compare [ live_token; missing_token ] in
+  check_json "wiki PUT exposes media_refs"
+    (`List (List.map (fun s -> `String s) expected_media))
+    (json_member "media_refs" put_data);
+  check_json "wiki PUT reports missing_media_refs"
+    (`List [ `String missing_token ])
+    (json_member "missing_media_refs" put_data);
+  let get_data =
+    match Server_dashboard_http_wiki.get_page_json ~base_path ~slug:"host-note" () with
+    | Ok json -> json_member "data" json
+    | Error (_, err) -> Alcotest.fail ("wiki GET failed: " ^ Yojson.Safe.to_string err) in
+  check_json "wiki GET exposes sorted media_refs"
+    (`List (List.map (fun s -> `String s) expected_media))
+    (json_member "media_refs" get_data);
+  let embeds = match json_member "embeds" get_data with
+    | `List items -> items | _ -> Alcotest.fail "embeds must be a JSON list" in
+  Alcotest.(check int) "five structured embeds" 5 (List.length embeds);
+  let target_data =
+    match Server_dashboard_http_wiki.get_page_json ~base_path ~slug:"target-note" () with
+    | Ok json -> json_member "data" json
+    | Error (_, err) -> Alcotest.fail ("target GET failed: " ^ Yojson.Safe.to_string err) in
+  check_json "wiki embed registers backlink"
+    (`List [ `String "host-note" ]) (json_member "backlinks" target_data);
+  let findings = match json_member "lint_findings" get_data with
+    | `List items -> items | _ -> Alcotest.fail "lint_findings must be a JSON list" in
+  let kinds = List.map (fun f -> json_member "kind" f |> json_string) findings in
+  Alcotest.(check bool) "broken_media_embed reported" true (List.mem "broken_media_embed" kinds);
+  Alcotest.(check bool) "broken_artifact_embed reported" true (List.mem "broken_artifact_embed" kinds))
+
 let () = Eio_main.run (fun _ ->
   Alcotest.run "published reports"
     ["durable catalog", [
@@ -855,7 +993,10 @@ let () = Eio_main.run (fun _ ->
       Alcotest.test_case "omitted, cleared and replaced work links" `Quick test_publication_link_updates;
       Alcotest.test_case "reject malformed UTF-8 at publication and read" `Quick test_utf8_boundaries;
       Alcotest.test_case "unsafe directory is unavailable, not empty" `Quick test_unsafe_directory;
-      Alcotest.test_case "metadata symlink is unavailable" `Quick test_metadata_symlink];
+      Alcotest.test_case "metadata symlink is unavailable" `Quick test_metadata_symlink;
+      Alcotest.test_case "extract media refs from Markdown and HTML" `Quick test_extract_media_refs_markdown_and_html;
+      Alcotest.test_case "GC collector and HTTP/Keeper media refs projection" `Quick test_referenced_media_tokens_and_http_projection;
+      Alcotest.test_case "Wiki HTTP embeds, media_refs, backlinks and embed lint" `Quick test_wiki_http_embeds_media_refs_and_lint];
      "external sharing", [
       Alcotest.test_case "publication and sharing notify their readers" `Quick test_publication_and_sharing_notify;
       Alcotest.test_case "concurrent requests and later replay" `Quick test_share_transactions;

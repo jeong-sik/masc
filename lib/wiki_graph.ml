@@ -4,6 +4,7 @@ type node =
   | Readable of
       { page : string
       ; links : Wiki_link.link list
+      ; embeds : Wiki_link.embed list
       ; sources : Wiki_sources.t
       ; revision : int
       }
@@ -14,6 +15,7 @@ type node =
 
 type page_facts =
   { links : Wiki_link.link list
+  ; embeds : Wiki_link.embed list
   ; sources : Wiki_sources.t
   ; revision : int
   }
@@ -28,8 +30,8 @@ let of_nodes nodes =
   let pages, unreadable =
     List.fold_left
       (fun (pages, unreadable) -> function
-        | Readable { page; links; sources; revision } ->
-          String_map.add page { links; sources; revision } pages, unreadable
+        | Readable { page; links; embeds; sources; revision } ->
+          String_map.add page { links; embeds; sources; revision } pages, unreadable
         | Unreadable { file; reason } ->
           pages, String_map.add file reason unreadable)
       (String_map.empty, String_map.empty)
@@ -37,8 +39,8 @@ let of_nodes nodes =
   in
   let incoming_by_page =
     String_map.fold
-      (fun page ({ links; _ } : page_facts) acc ->
-         let targets =
+      (fun page ({ links; embeds; _ } : page_facts) acc ->
+         let link_targets =
            List.filter_map
              (fun (link : Wiki_link.link) ->
                 match link.target with
@@ -49,8 +51,20 @@ let of_nodes nodes =
                 | Wiki_link.Invalid_name _
                 | Wiki_link.Unsupported _ -> None)
              links
-           |> List.sort_uniq String.compare
          in
+         let embed_targets =
+           List.filter_map
+             (fun (embed : Wiki_link.embed) ->
+                match embed.target with
+                | Wiki_link.Wiki_embed name when not (String.equal name page) -> Some name
+                | Wiki_link.Wiki_embed _
+                | Wiki_link.Media_embed _
+                | Wiki_link.Artifact_embed _
+                | Wiki_link.Invalid_embed _
+                | Wiki_link.Unsupported_embed _ -> None)
+             embeds
+         in
+         let targets = List.sort_uniq String.compare (link_targets @ embed_targets) in
          List.fold_left
            (fun acc name ->
               let count = Option.value (String_map.find_opt name acc) ~default:0 in
@@ -79,6 +93,21 @@ let links_of t name =
   match String_map.find_opt name t.pages with
   | Some { links; _ } -> links
   | None -> []
+;;
+
+let embeds_of t name =
+  match String_map.find_opt name t.pages with
+  | Some { embeds; _ } -> embeds
+  | None -> []
+;;
+
+let all_media_refs t =
+  String_map.fold
+    (fun _ ({ embeds; _ } : page_facts) acc ->
+       Wiki_link.media_refs_of_embeds embeds @ acc)
+    t.pages
+    []
+  |> List.sort_uniq String.compare
 ;;
 
 let sources_of t name =

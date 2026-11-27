@@ -113,6 +113,16 @@ let scan_line ~line_no text found =
     then found
     else if
       Char.equal text.[index] '!'
+      && index + 2 < length
+      && Char.equal text.[index + 1] '['
+      && Char.equal text.[index + 2] '['
+    then (
+      (* An Obsidian embed is handled by [extract_embeds]; skip its whole token. *)
+      match String_util.find_substring ~pos:(index + 3) text "]]" with
+      | Some stop -> go (stop + 2) found
+      | None -> go (index + 3) found)
+    else if
+      Char.equal text.[index] '!'
       && index + 1 < length
       && Char.equal text.[index + 1] '['
     then (
@@ -182,7 +192,7 @@ let fence_of_line line =
       else None))
 ;;
 
-let extract body =
+let fold_unquoted_lines scan body =
   let lines = String.split_on_char '\n' body in
   let strip_cr line =
     let length = String.length line in
@@ -197,7 +207,7 @@ let extract body =
          match fence, fence_of_line line with
          | None, Some (mark, count, _info) -> Some (mark, count), line_no + 1, found
          | None, None ->
-           None, line_no + 1, scan_line ~line_no (blank_code_spans line) found
+           None, line_no + 1, scan ~line_no (blank_code_spans line) found
          | Some (mark, count), Some (closing_mark, closing_count, rest)
            when Char.equal mark closing_mark
                 && closing_count >= count
@@ -207,4 +217,178 @@ let extract body =
       lines
   in
   List.rev found
+;;
+
+let extract body = fold_unquoted_lines scan_line body
+
+type embed_syntax =
+  | Obsidian_embed
+  | Markdown_media
+
+type embed_kind =
+  | Embed_media
+  | Embed_wiki
+  | Embed_artifact
+
+type embed_target =
+  | Media_embed of string
+  | Wiki_embed of string
+  | Artifact_embed of string
+  | Invalid_embed of
+      { kind : embed_kind
+      ; raw : string
+      }
+  | Unsupported_embed of
+      { scheme : string
+      ; raw : string
+      }
+
+type embed =
+  { target : embed_target
+  ; label : string option
+  ; syntax : embed_syntax
+  ; raw : string
+  ; line : int
+  }
+
+let embed_kind_to_string = function
+  | Embed_media -> "media"
+  | Embed_wiki -> "wiki"
+  | Embed_artifact -> "artifact"
+;;
+
+let embed_syntax_to_string = function
+  | Obsidian_embed -> "obsidian"
+  | Markdown_media -> "markdown_media"
+;;
+
+let is_valid_media_token token = Result.is_ok (Tool_output.validate_sha256 token)
+
+let classify_wiki_embed raw =
+  match Wiki_page_name.validate_page_name raw with
+  | Ok slug -> Wiki_embed slug
+  | Error
+      ( Wiki_page_name.Empty_page_name
+      | Wiki_page_name.Bad_page_characters
+      | Wiki_page_name.Dash_at_edge
+      | Wiki_page_name.Reserved_page_name ) ->
+    Invalid_embed { kind = Embed_wiki; raw }
+;;
+
+let classify_obsidian_embed raw_target =
+  match String.index_opt raw_target ':' with
+  | None -> classify_wiki_embed raw_target
+  | Some colon ->
+    let scheme = String.sub raw_target 0 colon in
+    let payload =
+      String.sub raw_target (colon + 1) (String.length raw_target - colon - 1)
+    in
+    (match scheme with
+     | "media" ->
+       if is_valid_media_token payload
+       then Media_embed payload
+       else Invalid_embed { kind = Embed_media; raw = payload }
+     | "wiki" -> classify_wiki_embed payload
+     | "artifact" ->
+       if Published_artifact.valid_id payload
+       then Artifact_embed payload
+       else Invalid_embed { kind = Embed_artifact; raw = payload }
+     | other -> Unsupported_embed { scheme = other; raw = payload })
+;;
+
+let split_obsidian_inner inner =
+  match String.index_opt inner '|' with
+  | None -> inner, None
+  | Some bar ->
+    let raw_target = String.sub inner 0 bar in
+    let raw_label =
+      String.sub inner (bar + 1) (String.length inner - bar - 1) |> String.trim
+    in
+    let label = if String.equal raw_label "" then None else Some raw_label in
+    raw_target, label
+;;
+
+let scan_embeds_line ~line_no text found =
+  let length = String.length text in
+  let media_prefix = Masc_network_defaults.media_path_prefix in
+  let media_prefix_len = String.length media_prefix in
+  let rec go index found =
+    if index >= length
+    then found
+    else if
+      Char.equal text.[index] '!'
+      && index + 2 < length
+      && Char.equal text.[index + 1] '['
+      && Char.equal text.[index + 2] '['
+    then (
+      match String_util.find_substring ~pos:(index + 3) text "]]" with
+      | Some stop ->
+        let inner = String.sub text (index + 3) (stop - index - 3) in
+        let raw_target, label = split_obsidian_inner inner in
+        let embed =
+          { target = classify_obsidian_embed raw_target
+          ; label
+          ; syntax = Obsidian_embed
+          ; raw = "![[" ^ inner ^ "]]"
+          ; line = line_no
+          }
+        in
+        go (stop + 2) (embed :: found)
+      | None -> go (index + 3) found)
+    else if
+      Char.equal text.[index] '!'
+      && index + 1 < length
+      && Char.equal text.[index + 1] '['
+    then (
+      match closing_bracket text (index + 1) with
+      | Some close when close + 1 < length && Char.equal text.[close + 1] '(' ->
+        (match String.index_from_opt text (close + 2) ')' with
+         | Some stop ->
+           let raw_url =
+             target_of_inner (String.sub text (close + 2) (stop - close - 2))
+           in
+           if String.starts_with ~prefix:media_prefix raw_url
+           then (
+             let payload =
+               String.sub raw_url media_prefix_len (String.length raw_url - media_prefix_len)
+             in
+             let target =
+               if is_valid_media_token payload
+               then Media_embed payload
+               else Invalid_embed { kind = Embed_media; raw = payload }
+             in
+             let alt =
+               String.sub text (index + 2) (close - index - 2) |> String.trim
+             in
+             let label = if String.equal alt "" then None else Some alt in
+             let embed =
+               { target
+               ; label
+               ; syntax = Markdown_media
+               ; raw = raw_url
+               ; line = line_no
+               }
+             in
+             go (stop + 1) (embed :: found))
+           else go (stop + 1) found
+         | None -> go (index + 2) found)
+      | Some _ | None -> go (index + 2) found)
+    else go (index + 1) found
+  in
+  go 0 found
+;;
+
+let extract_embeds body = fold_unquoted_lines scan_embeds_line body
+
+let media_refs_of_embeds embeds =
+  List.filter_map
+    (fun (embed : embed) ->
+       match embed.target with
+       | Media_embed sha256 -> Some sha256
+       | Wiki_embed _
+       | Artifact_embed _
+       | Invalid_embed _
+       | Unsupported_embed _ -> None)
+    embeds
+  |> List.sort_uniq String.compare
 ;;

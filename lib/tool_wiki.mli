@@ -161,6 +161,13 @@ val read_index_entries :
     has no page or no directory. [Error] carries why the wiki directory could
     not be listed. *)
 
+val referenced_media_tokens : base_path:string -> (string list, string) result
+(** Fail-closed collector of every workspace media SHA-256 token referenced by
+    embeds across all [.md] pages in {!wiki_root}. Returns [Ok []] only when
+    the wiki directory is absent; returns [Error] if the wiki root or any
+    [.md] page file is a symlink, unreadable, or oversized so media GC never
+    deletes live wiki media. *)
+
 (** {1 Context} *)
 
 type context = {

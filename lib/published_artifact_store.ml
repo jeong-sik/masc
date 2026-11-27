@@ -86,6 +86,44 @@ let read ~base_path ~id ~revision =
       let* content = read_revision_body ~base_path selected in
       Ok (artifact, selected, content))
 
+let exists ~base_path ~id =
+  if not (valid_id id) then false
+  else
+    match protect (fun () -> load ~base_path id) with
+    | Ok _ -> true
+    | Error _ -> false
+
+let referenced_media_tokens ~base_path = protect (fun () ->
+  let* entries = directory_entries ~base_path in
+  match entries with
+  | None -> Ok []
+  | Some files ->
+    let json_files =
+      List.filter (fun f -> Filename.check_suffix f ".json") files
+      |> List.sort String.compare
+    in
+    let* collected =
+      List.fold_left
+        (fun acc filename ->
+           let* tokens = acc in
+           let id = Filename.remove_extension filename in
+           if not (valid_id id)
+           then Error (Unavailable ("invalid artifact filename: " ^ filename))
+           else
+             let* artifact = load ~base_path id in
+             List.fold_left
+               (fun rev_acc (rev : revision) ->
+                  let* rev_tokens = rev_acc in
+                  let* content = read_revision_body ~base_path rev in
+                  let refs = Published_artifact.extract_media_refs rev.format content in
+                  Ok (refs @ rev_tokens))
+               (Ok tokens)
+               artifact.revisions)
+        (Ok [])
+        json_files
+    in
+    Ok (List.sort_uniq String.compare collected))
+
 let with_latest_locked ~base_path ~id ~expected_revision ~f =
   if not (valid_id id) then Error (Invalid "invalid artifact id")
   else if expected_revision <= 0 then Error (Invalid "expected revision must be positive")

@@ -1,11 +1,10 @@
-(** Links in a wiki page body. Pure: the page text goes in, a list of links
-    comes out, and nothing is read or written.
+(** Links and typed rich embeds in a wiki page body. Pure: the page text goes
+    in, lists of links or embeds come out, and nothing is read or written.
 
-    The parser is total. It never raises and never drops a link shape it does
-    not know; it names the shape and leaves it to the lint rules to decide
-    whether that is an error. Text
-    inside a fenced code block, inside an inline code span, and an image
-    [![alt](target)] are not links and are skipped. *)
+    Both parsers are total. They never raise and never drop a shape they do
+    not know; they name the shape as a closed sum variant and leave it to the
+    lint rules to decide whether that is an error. Text inside a fenced code
+    block and inside an inline code span is skipped by both parsers. *)
 
 type target =
   | Page of string
@@ -36,4 +35,72 @@ val classify : string -> target
 (** The shape of one link target as written. *)
 
 val extract : string -> link list
-(** The links of a page body, in reading order. *)
+(** The links of a page body, in reading order. Images ([![alt](target)]) and
+    Obsidian embeds ([![[…]]]) are skipped here and extracted by
+    {!extract_embeds}. *)
+
+(** {1 Typed embeds} *)
+
+type embed_syntax =
+  | Obsidian_embed
+      (** [![[media:<sha256>]]], [![[wiki:<slug>]]], bare [![[<slug>]]], or
+          [![[artifact:<id>]]] (with optional [|label]). *)
+  | Markdown_media
+      (** Standard Markdown image targeting the workspace media route:
+          [![alt](/api/v1/media/<sha256>)]. *)
+
+type embed_kind =
+  | Embed_media
+  | Embed_wiki
+  | Embed_artifact
+
+type embed_target =
+  | Media_embed of string
+      (** Valid 64-char lowercase hexadecimal SHA-256 workspace media token. *)
+  | Wiki_embed of string
+      (** Valid wiki page slug passing {!Wiki_page_name.validate_page_name}. *)
+  | Artifact_embed of string
+      (** Valid published artifact id passing {!Published_artifact.valid_id}. *)
+  | Invalid_embed of
+      { kind : embed_kind
+      ; raw : string
+      }
+      (** Recognized embed syntax whose target fails its identifier rule. *)
+  | Unsupported_embed of
+      { scheme : string
+      ; raw : string
+      }
+      (** [![[<scheme>:<raw>]]] with an unknown scheme; never coerced to a
+          wiki slug. *)
+
+type embed =
+  { target : embed_target
+  ; label : string option
+      (** Optional caption/label after [|] in Obsidian syntax, or trimmed alt
+          text in Markdown media syntax. *)
+  ; syntax : embed_syntax
+  ; raw : string
+      (** The full [![[…]]] token for Obsidian syntax, or the URL target as
+          written for Markdown media syntax. *)
+  ; line : int  (** 1-based line in the text given to {!extract_embeds}. *)
+  }
+
+val embed_kind_to_string : embed_kind -> string
+(** Wire name: ["media"], ["wiki"], or ["artifact"]. *)
+
+val embed_syntax_to_string : embed_syntax -> string
+(** Wire name: ["obsidian"] or ["markdown_media"]. *)
+
+val is_valid_media_token : string -> bool
+(** [true] iff the string is a 64-character lowercase hex SHA-256 digest. *)
+
+val classify_obsidian_embed : string -> embed_target
+(** Classify the target part (before any [|label]) of an [![[…]]] embed. *)
+
+val extract_embeds : string -> embed list
+(** All typed embeds of a page body, in reading order. Non-media Markdown
+    images ([![alt](https://…)], [![alt](pic.png)]) are ignored. *)
+
+val media_refs_of_embeds : embed list -> string list
+(** Sorted, deduplicated workspace media SHA-256 digests referenced by
+    {!Media_embed} entries. *)

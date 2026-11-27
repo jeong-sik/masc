@@ -36,6 +36,16 @@ let finding_to_json (finding : Wiki_lint.finding) : Yojson.Safe.t =
   match finding with
   | Wiki_lint.Broken_link { page; line; target } ->
     `Assoc [ "kind", kind; "page", `String page; "line", `Int line; "target", `String target ]
+  | Wiki_lint.Broken_media_embed { page; line; target }
+  | Wiki_lint.Broken_wiki_embed { page; line; target }
+  | Wiki_lint.Broken_artifact_embed { page; line; target } ->
+    `Assoc
+      [ "kind", kind
+      ; "subject", `String page
+      ; "page", `String page
+      ; "line", `Int line
+      ; "target", `String target
+      ]
   | Wiki_lint.Unsupported_link { page; line; form; target } ->
     `Assoc
       [ "kind", kind
@@ -44,6 +54,30 @@ let finding_to_json (finding : Wiki_lint.finding) : Yojson.Safe.t =
       ; "form", `String form
       ; "target", `String target
       ]
+  | Wiki_lint.Invalid_embed { page; line; embed_kind; target } ->
+    let kind_name = Wiki_link.embed_kind_to_string embed_kind in
+    `Assoc
+      [ "kind", kind
+      ; "subject", `String page
+      ; "page", `String page
+      ; "line", `Int line
+      ; "form", `String kind_name
+      ; "embed_kind", `String kind_name
+      ; "target", `String target
+      ]
+  | Wiki_lint.Unsupported_embed { page; line; scheme; target } ->
+    let form_field =
+      if String.equal (String.trim scheme) "" then [] else [ "form", `String scheme ]
+    in
+    `Assoc
+      ([ "kind", kind
+       ; "subject", `String page
+       ; "page", `String page
+       ; "line", `Int line
+       ; "scheme", `String scheme
+       ; "target", `String target
+       ]
+       @ form_field)
   | Wiki_lint.Orphan { page }
   | Wiki_lint.Orphan_unconfirmed { page }
   | Wiki_lint.Missing_sources { page }

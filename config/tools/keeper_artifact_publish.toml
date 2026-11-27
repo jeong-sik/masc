@@ -12,9 +12,11 @@ a new date or version can go in the title while the id stays. A different \
 subject is a new artifact without id. Previous revisions remain readable. When \
 the id is not at hand, keeper_artifact_draft find lists candidate ids and current \
 revisions by title, summary, author, Task and Goal. When the revision has moved, \
-the error reports the current revision. HTML can use inline JavaScript/CSS and embedded images, but cannot \
-access the dashboard or its credentials; external subresource loads and fetch \
-requests are blocked. Author \
+the error reports the current revision. HTML renders inside a strict sandbox="" \
+iframe (inline CSS works; scripts, dashboard credentials, and external subresource \
+fetches are blocked). Workspace images referenced via /api/v1/media/<sha256> (or \
+![[media:<sha256>|caption]] in Markdown) are pre-hydrated cleanly by the dashboard \
+without putting raw base64 into context. Author \
 is the current Keeper. This tool does not post another chat or Board message."""
 additional_properties = false
 

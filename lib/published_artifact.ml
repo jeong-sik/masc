@@ -23,6 +23,154 @@ let valid_id id =
   && String.for_all (function '0' .. '9' | 'a' .. 'f' -> true | _ -> false)
        (String.sub id 9 32)
 
+let is_valid_media_token token = Result.is_ok (Tool_output.validate_sha256 token)
+
+let is_url_start_boundary = function
+  | '(' | '<' | '"' | '\'' | '=' | ' ' | '\t' | '\n' | '\r' -> true
+  | _ -> false
+
+let is_url_end_boundary = function
+  | ')' | '>' | '"' | '\'' | ']' | '|' | ' ' | '\t' | '\n' | '\r' | ',' | ';' -> true
+  | _ -> false
+
+let extract_url_media_refs text acc =
+  let prefix = Masc_network_defaults.media_path_prefix in
+  let prefix_len = String.length prefix in
+  let token_len = 64 in
+  let len = String.length text in
+  let rec scan pos acc =
+    if pos >= len then acc
+    else
+      match String_util.find_substring ~pos text prefix with
+      | None -> acc
+      | Some idx ->
+        let start_ok = idx = 0 || is_url_start_boundary text.[idx - 1] in
+        let token_start = idx + prefix_len in
+        let token_end = token_start + token_len in
+        let acc =
+          if start_ok && token_end <= len
+             && (token_end = len || is_url_end_boundary text.[token_end])
+          then
+            let token = String.sub text token_start token_len in
+            if is_valid_media_token token then token :: acc else acc
+          else acc
+        in
+        scan (idx + prefix_len) acc
+  in
+  scan 0 acc
+
+let blank_code_spans line =
+  let length = String.length line in
+  let bytes = Bytes.of_string line in
+  let run_end from =
+    let stop = ref from in
+    while !stop < length && Char.equal line.[!stop] '`' do
+      incr stop
+    done;
+    !stop
+  in
+  let rec closing ~run from =
+    if from >= length then None
+    else if Char.equal line.[from] '`' then
+      let stop = run_end from in
+      if stop - from = run then Some stop else closing ~run stop
+    else closing ~run (from + 1)
+  in
+  let rec scan index =
+    if index < length then
+      if Char.equal line.[index] '`' then
+        let stop = run_end index in
+        match closing ~run:(stop - index) stop with
+        | Some close ->
+          Bytes.fill bytes index (close - index) ' ';
+          scan close
+        | None -> scan stop
+      else scan (index + 1)
+  in
+  scan 0;
+  Bytes.to_string bytes
+
+let fence_of_line line =
+  let length = String.length line in
+  let rec indent index =
+    if index < length && index < 3 && Char.equal line.[index] ' '
+    then indent (index + 1)
+    else index
+  in
+  let start = indent 0 in
+  if start >= length then None
+  else
+    let mark = line.[start] in
+    if not (Char.equal mark '`' || Char.equal mark '~') then None
+    else
+      let stop = ref start in
+      while !stop < length && Char.equal line.[!stop] mark do
+        incr stop
+      done;
+      let count = !stop - start in
+      if count >= 3
+      then Some (mark, count, String.trim (String.sub line !stop (length - !stop)))
+      else None
+
+let extract_obsidian_media_refs line acc =
+  let open_tok = "![[media:" in
+  let open_len = String.length open_tok in
+  let len = String.length line in
+  let rec scan pos acc =
+    if pos >= len then acc
+    else
+      match String_util.find_substring ~pos line open_tok with
+      | None -> acc
+      | Some idx ->
+        let payload_start = idx + open_len in
+        (match String_util.find_substring ~pos:payload_start line "]]" with
+         | None -> acc
+         | Some stop ->
+           let inner = String.sub line payload_start (stop - payload_start) in
+           let raw_token =
+             match String.index_opt inner '|' with
+             | None -> inner
+             | Some bar -> String.sub inner 0 bar
+           in
+           let acc = if is_valid_media_token raw_token then raw_token :: acc else acc in
+           scan (stop + 2) acc)
+  in
+  scan 0 acc
+
+let extract_media_refs format content =
+  let raw =
+    match format with
+    | Html -> extract_url_media_refs content []
+    | Markdown ->
+      let strip_cr line =
+        let length = String.length line in
+        if length > 0 && Char.equal line.[length - 1] '\r'
+        then String.sub line 0 (length - 1)
+        else line
+      in
+      let _, acc =
+        List.fold_left
+          (fun (fence, acc) raw_line ->
+             let line = strip_cr raw_line in
+             match fence, fence_of_line line with
+             | None, Some (mark, count, _info) -> Some (mark, count), acc
+             | None, None ->
+               let unquoted = blank_code_spans line in
+               let acc = extract_url_media_refs unquoted acc in
+               let acc = extract_obsidian_media_refs unquoted acc in
+               None, acc
+             | Some (mark, count), Some (closing_mark, closing_count, rest)
+               when Char.equal mark closing_mark
+                    && closing_count >= count
+                    && String.equal rest "" -> None, acc
+             | Some open_fence, (Some _ | None) -> Some open_fence, acc)
+          (None, [])
+          (String.split_on_char '\n' content)
+      in
+      acc
+  in
+  List.sort_uniq String.compare raw
+
 let url ?revision id =
   "/dashboard/#/workspace?section=artifacts&artifact=" ^ id
   ^ Option.fold ~none:"" ~some:(fun n -> "&revision=" ^ string_of_int n) revision
@@ -91,10 +239,28 @@ let revision_to_json r = `Assoc (revision_fields r)
 let summary_to_json ~id r =
   `Assoc (("id", `String id) :: ("url", `String (url id)) :: revision_fields r)
 
-let publication_to_json ~id r =
-  `Assoc ["schema", `String "masc.published_artifact.v1";
-          "artifact", summary_to_json ~id r;
-          "revision_url", `String (url ~revision:r.revision id)]
+let publication_to_json ?(media_refs = []) ?(missing_media_refs = []) ~id r =
+  let missing_fields =
+    match missing_media_refs with
+    | [] -> []
+    | missing ->
+      [ "missing_media_refs", `List (List.map (fun s -> `String s) missing)
+      ; ( "warnings"
+        , `List
+            [ `String
+                (Printf.sprintf
+                   "referenced workspace media not found in store: %s"
+                   (String.concat ", " missing))
+            ] )
+      ]
+  in
+  `Assoc
+    ([ "schema", `String "masc.published_artifact.v1"
+     ; "artifact", summary_to_json ~id r
+     ; "revision_url", `String (url ~revision:r.revision id)
+     ; "media_refs", `List (List.map (fun s -> `String s) media_refs)
+     ]
+     @ missing_fields)
 
 let to_json t =
   `Assoc ["id", `String t.id; "revisions", `List (List.map revision_to_json t.revisions)]

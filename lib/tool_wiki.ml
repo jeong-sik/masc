@@ -309,6 +309,52 @@ let read_index_entries ~base_path =
   | entries -> Ok entries
   | exception Sys_error detail -> Error detail
 
+(* Fail-closed media reference collector for workspace media GC. Unlike
+   [list_pages] (which skips symlinks or oversized files for interactive UI),
+   any unreadable, symlinked, or oversized page returns [Error] so a media
+   sweeper never treats an unreadable wiki page as having zero references. *)
+let referenced_media_tokens ~base_path =
+  match verify_wiki_root_is_regular_dir ~base_path with
+  | Error msg -> Error msg
+  | Ok `Missing -> Ok []
+  | Ok `Present ->
+    let dir = wiki_root ~base_path in
+    let entries =
+      try Ok (Sys.readdir dir |> Array.to_list |> List.sort String.compare) with
+      | Sys_error detail -> Error detail
+      | Unix.Unix_error (error, operation, _) ->
+        Error (Printf.sprintf "%s: %s" operation (Unix.error_message error))
+    in
+    let open Result.Syntax in
+    let* entries = entries in
+    let page_files =
+      List.filter
+        (fun f -> Filename.check_suffix f ".md" && not (Wiki_journal.is_own_file f))
+        entries
+    in
+    let* collected =
+      List.fold_left
+        (fun acc filename ->
+           let* tokens = acc in
+           let full = Filename.concat dir filename in
+           match load_regular_page full with
+           | Error detail ->
+             Error (Printf.sprintf "wiki page %s could not be read: %s" filename detail)
+           | Ok raw ->
+             let body_for_embeds =
+               match parse_frontmatter raw with
+               | Ok _ -> page_body raw
+               | Error _ -> raw
+             in
+             let refs =
+               Wiki_link.media_refs_of_embeds (Wiki_link.extract_embeds body_for_embeds)
+             in
+             Ok (refs @ tokens))
+        (Ok [])
+        page_files
+    in
+    Ok (List.sort_uniq String.compare collected)
+
 (* Handlers in this module return typed
    [Tool_result.result]. Boundary back to [Tool_result.result option] in
    [dispatch] below via [lift]. Two input-rejection helpers
@@ -445,7 +491,18 @@ let with_wiki_lock ~tool_name ~start_time ctx f : Tool_result.result =
    is already on disk when the other two are written, so a failure there is
    reported as one: the caller learns that the page changed and which file did
    not follow. *)
-let write_page ~tool_name ~start_time ctx ~path ~content ~action ~revision ~page
+let media_refs_of_body ~base_path body =
+  let media_refs = Wiki_link.media_refs_of_embeds (Wiki_link.extract_embeds body) in
+  let missing_media_refs =
+    List.filter
+      (fun token ->
+         Option.is_none
+           (Keeper_chat_media_store.file_path_of_token ~base_dir:base_path ~token))
+      media_refs
+  in
+  media_refs, missing_media_refs
+
+let write_page ~tool_name ~start_time ctx ~path ~content ~body ~action ~revision ~page
     ~(author : Line.t) ~(note : Line.t) ~written
   : Tool_result.result
   =
@@ -474,7 +531,33 @@ let write_page ~tool_name ~start_time ctx ~path ~content ~action ~revision ~page
         | Error message ->
           runtime_err ~tool_name ~start_time
             (sprintf "%s, but index.md could not be rebuilt: %s" written message)
-        | Ok () -> text_ok ~tool_name ~start_time written))
+        | Ok () ->
+          let media_refs, missing_media_refs =
+            media_refs_of_body ~base_path:ctx.base_path body
+          in
+          let message =
+            match media_refs, missing_media_refs with
+            | [], _ -> written
+            | refs, [] ->
+              sprintf "%s\nMedia refs (%d): %s" written (List.length refs)
+                (String.concat ", " refs)
+            | refs, missing ->
+              sprintf
+                "%s\nMedia refs (%d): %s\nWarning: missing media_refs not found in workspace media store: %s"
+                written (List.length refs) (String.concat ", " refs)
+                (String.concat ", " missing)
+          in
+          let result = text_ok ~tool_name ~start_time message in
+          match media_refs with
+          | [] -> result
+          | refs ->
+            Tool_result.with_metadata
+              (`Assoc
+                 [ "media_refs", `List (List.map (fun s -> `String s) refs)
+                 ; ( "missing_media_refs"
+                   , `List (List.map (fun s -> `String s) missing_media_refs) )
+                 ])
+              result))
 
 (* A field the schema does not offer but a caller sent anyway. *)
 let has_field args name =
@@ -598,7 +681,7 @@ let handle_create ~tool_name ~start_time ctx args : Tool_result.result =
             { title; summary; source; author; created = day; revision = 1; tags }
             ~updated:day ~body
         in
-        write_page ~tool_name ~start_time ctx ~path ~content
+        write_page ~tool_name ~start_time ctx ~path ~content ~body
           ~action:Wiki_journal.Created ~revision:1 ~page ~author ~note:summary
           ~written:(sprintf "Created wiki page %s at revision 1: %s" page path)
       | exception Unix.Unix_error (error, operation, _) ->
@@ -710,7 +793,7 @@ let handle_update ~tool_name ~start_time ctx args : Tool_result.result =
                  }
                  ~updated:(today ()) ~body
              in
-             write_page ~tool_name ~start_time ctx ~path ~content
+             write_page ~tool_name ~start_time ctx ~path ~content ~body
                ~action:Wiki_journal.Updated ~revision ~page ~author:editor ~note
                ~written:(sprintf "Updated wiki page %s to revision %d" page revision)))
 
@@ -829,6 +912,7 @@ let lint_nodes ~base_path =
            (Wiki_graph.Readable
               { page = Filename.chop_suffix file ".md"
               ; links = Wiki_link.extract body
+              ; embeds = Wiki_link.extract_embeds body
               ; sources = Wiki_sources.of_body body
               ; revision = frontmatter.revision
               })
@@ -931,7 +1015,16 @@ let handle_lint ~tool_name ~start_time ctx args : Tool_result.result =
                 | Wiki_graph.Readable _ -> false)
               nodes)
        in
-       let findings = Wiki_lint.run (Wiki_graph.of_nodes nodes) ~log in
+       let media_exists token =
+         Option.is_some
+           (Keeper_chat_media_store.file_path_of_token ~base_dir:ctx.base_path ~token)
+       in
+       let artifact_exists id =
+         Published_artifact_store.exists ~base_path:ctx.base_path ~id
+       in
+       let findings =
+         Wiki_lint.run ~media_exists ~artifact_exists (Wiki_graph.of_nodes nodes) ~log
+       in
        (match
           Wiki_lint_report.render
             ~pages_total:(List.length nodes)

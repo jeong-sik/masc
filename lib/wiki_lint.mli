@@ -2,9 +2,9 @@
     same graph gives the same findings in the same order.
 
     The lint finds broken links, links in a shape it does not interpret,
-    orphan pages, pages without sources, pages whose only sources are
-    hearsay, pages whose header does not read, the page the log has run
-    ahead of, and a revision the log skips. *)
+    broken/invalid/unsupported embeds, orphan pages, pages without sources,
+    pages whose only sources are hearsay, pages whose header does not read,
+    the page the log has run ahead of, and a revision the log skips. *)
 
 type finding =
   | Broken_link of
@@ -17,6 +17,33 @@ type finding =
       ; line : int
       ; form : string  (** The shape: ["anchor"], ["path"], ["wikilink"], … *)
       ; target : string
+      }
+  | Broken_media_embed of
+      { page : string
+      ; line : int
+      ; target : string  (** As written in the page. *)
+      }
+  | Broken_wiki_embed of
+      { page : string
+      ; line : int
+      ; target : string  (** As written in the page. *)
+      }
+  | Broken_artifact_embed of
+      { page : string
+      ; line : int
+      ; target : string  (** As written in the page. *)
+      }
+  | Invalid_embed of
+      { page : string
+      ; line : int
+      ; embed_kind : Wiki_link.embed_kind
+      ; target : string  (** As written in the page. *)
+      }
+  | Unsupported_embed of
+      { page : string
+      ; line : int
+      ; scheme : string
+      ; target : string  (** As written in the page. *)
       }
   | Orphan of { page : string }
   | Orphan_unconfirmed of { page : string }
@@ -55,7 +82,9 @@ type finding =
           not at [r1], so a page with no create line is not reported forever. *)
 
 val kind : finding -> string
-(** The wire name: ["broken_link"], ["unsupported_link"], ["orphan"],
+(** The wire name: ["broken_link"], ["unsupported_link"],
+    ["broken_media_embed"], ["broken_wiki_embed"], ["broken_artifact_embed"],
+    ["invalid_embed"], ["unsupported_embed"], ["orphan"],
     ["orphan_unconfirmed"], ["missing_sources"], ["hearsay_only"],
     ["unreadable_page"], ["revision_log_gap"], ["revision_log_hole"]. *)
 
@@ -65,10 +94,20 @@ val all_kinds : string list
 val subject : finding -> string
 (** The page (or file) the finding is about. *)
 
-val run : Wiki_graph.t -> log:Wiki_log.t -> finding list
+val run :
+  ?media_exists:(string -> bool) ->
+  ?artifact_exists:(string -> bool) ->
+  Wiki_graph.t ->
+  log:Wiki_log.t ->
+  finding list
 (** Every finding, sorted by subject, then line, then kind. The log is the
     one {!Wiki_log} read of the same directory; {!Wiki_log.empty} is what a
-    wiki with no [log.md] gives. *)
+    wiki with no [log.md] gives. When [media_exists] or [artifact_exists] is
+    supplied, {!Wiki_link.Media_embed} and {!Wiki_link.Artifact_embed} targets
+    whose predicate returns [false] emit {!Broken_media_embed} and
+    {!Broken_artifact_embed} respectively; omitted predicates skip external
+    existence checks while still reporting {!Broken_wiki_embed},
+    {!Invalid_embed}, and {!Unsupported_embed}. *)
 
 val log_hole_suppressed : Wiki_log.t -> bool
 (** [true] when the log has a line the parser dropped ([unknown_action] or

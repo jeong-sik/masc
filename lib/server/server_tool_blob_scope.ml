@@ -11,6 +11,14 @@ let no_reference = excluded M.Writes_no_reference
 
 let finder_metadata = excluded M.Finder_metadata M.finder_metadata_name
 
+(* Unified workspace media directory ([<base>/.masc/media]). Kept in lockstep
+   with [Keeper_chat_media_store.media_subdir] so this scope classifies it
+   without creating an unclassified entry that blocks [Tool_blob_sweep].
+   Media blobs referenced from Chat, Wiki ([Tool_wiki.referenced_media_tokens]),
+   and Published Artifacts ([Published_artifact_store.referenced_media_tokens])
+   are managed outside [Tool_blob_store]. *)
+let workspace_media_dirname = "media"
+
 let unpublished_writes =
   M.Names { matches = Fs_compat.is_unpublished_write_name; reason = M.Unpublished_write }
 ;;
@@ -94,6 +102,7 @@ let workspace =
     ; lane_addons
     ; excluded M.Blob_store Tool_blob_store.dirname
     ; excluded M.Sweep_record Tool_blob_maintenance.dirname
+    ; excluded M.Other_media_store workspace_media_dirname
     ; excluded M.Truncated_copies (Common.keeper_runtime_store_dirname Common.Keeper_trajectories)
     ; excluded M.Operator_config Config_dir_resolver.config_dirname
     ; excluded M.Repository_mirror Config_dir_resolver.repos_dirname
@@ -136,6 +145,10 @@ let workspace =
     ; no_reference Config_dir_resolver.locks_dirname
     ; no_reference Config_dir_resolver.credentials_dirname
     ; no_reference Config_dir_resolver.tmp_dirname
+      (* Wiki pages are Markdown files holding workspace media embeds
+         ([/api/v1/media/<sha256>], [![[media:<sha256>]]]), not tool_blobs
+         markers. Their media references live in [<base>/.masc/media] and are
+         discovered fail-closed by [Tool_wiki.referenced_media_tokens]. *)
     ; no_reference Config_dir_resolver.wiki_dirname
     ; no_reference Config_dir_resolver.microvm_dirname
     ; no_reference Config_dir_resolver.runtime_dirname

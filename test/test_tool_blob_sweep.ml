@@ -1151,6 +1151,33 @@ let test_duplicate_sha256_keys_in_malformed_blob_pin_all_or_fail_closed () =
       Alcotest.(check bool) "dead blob still preserved fail-closed" true
         (Sys.file_exists (blob_path store dead_fail_closed)))
 
+let test_workspace_media_and_wiki_leave_sweep_classified () =
+  with_temp_dir (fun base_path ->
+      let masc = Common.masc_dir_from_base_path ~base_path in
+      Fs_compat.mkdir_p masc;
+      let store = B.create ~base_path in
+      let stale = put store "stale output beside workspace media and wiki" in
+      set_mtime store stale (long_ago ());
+      forget_marks ();
+      let media_file = Filename.concat masc ("media/" ^ String.make 64 'a' ^ ".png") in
+      let wiki_file = Filename.concat masc "wiki/visual-report.md" in
+      Fs_compat.mkdir_p (Filename.dirname media_file);
+      Fs_compat.mkdir_p (Filename.dirname wiki_file);
+      Fs_compat.save_file media_file
+        "\137PNG\r\n\026\n\000\000\000\rIHDR\000\000\000\001\000\000\000\001\008\002\000\000\000\144wS\222";
+      Fs_compat.save_file wiki_file
+        ("---\ntitle: Visual Report\nsummary: Test\nsource: observation\nauthor: alice\n\
+          created: 2026-11-27\nupdated: 2026-11-27\nrevision: 1\ntags: [media]\n---\n\n\
+          ![Chart](/api/v1/media/" ^ String.make 64 'a' ^ ")\n");
+      let first = observe_ok ~base_path in
+      Alcotest.(check (list string)) "media and wiki directories are classified" []
+        first.unclassified;
+      let second = observe_ok ~base_path in
+      Alcotest.(check (list string)) "media and wiki stay classified on second scan" []
+        second.unclassified;
+      Alcotest.(check int) "stale tool blob becomes deletable despite media and wiki dirs" 1
+        second.deletable)
+
 let () =
   Alcotest.run "tool_blob_sweep"
     [ ( "sweep"
@@ -1194,6 +1221,8 @@ let () =
             test_activity_events_leaves_sweep_classified
         ; Alcotest.test_case "official-clients leaves the sweep classified" `Quick
             test_official_clients_leaves_sweep_classified
+        ; Alcotest.test_case "workspace media and wiki leave the sweep classified" `Quick
+            test_workspace_media_and_wiki_leave_sweep_classified
         ; Alcotest.test_case "lane-addon records keep embedded tool blobs live" `Quick
             test_lane_addon_records_keep_embedded_tool_blobs_live
         ; Alcotest.test_case "request records keep stored text bodies live" `Quick

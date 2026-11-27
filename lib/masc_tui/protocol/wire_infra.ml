@@ -162,8 +162,11 @@ type host_storage_summary = {
   used_bytes : int64 option;
   capacity_percent : float option;
   enospc_observations : int;
+  last_enospc_ts : float option;
   probe_error : string option;
 }
+
+let enospc_recent_window_sec = 900.0
 
 let host_storage_status_of_string raw =
   let s = String.lowercase_ascii (String.trim raw) in
@@ -276,6 +279,11 @@ let parse_host_storage json =
         let enospc_observations =
           match enospc_opt with Some n -> n | None -> 0
         in
+        let last_enospc_ts =
+          match json_finite_float_opt "last_storage_space_exhaustion_ts" json with
+          | Some ts when ts > 0.0 -> Some ts
+          | Some _ | None -> None
+        in
         Some
           {
             status;
@@ -285,12 +293,24 @@ let parse_host_storage json =
             used_bytes;
             capacity_percent;
             enospc_observations;
+            last_enospc_ts;
             probe_error;
           }
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 
-let host_storage_is_critical (hs : host_storage_summary) =
-  hs.enospc_observations > 0
+let host_storage_has_recent_enospc ~now (hs : host_storage_summary) =
+  if hs.enospc_observations <= 0 || not (Float.is_finite now) || now <= 0.0 then
+    false
+  else
+    match hs.last_enospc_ts with
+    | Some ts when Float.is_finite ts && ts > 0.0 ->
+        Float.max 0.0 (now -. ts) <= enospc_recent_window_sec
+    | Some _ | None -> false
+
+let host_storage_is_critical ?now (hs : host_storage_summary) =
+  (match now with
+  | Some now_ts -> host_storage_has_recent_enospc ~now:now_ts hs
+  | None -> false)
   || (match hs.capacity_percent with
      | Some pct -> Float.is_finite pct && pct >= 95.0
      | None -> false)
@@ -301,8 +321,8 @@ let host_storage_is_critical (hs : host_storage_summary) =
   | None ->
       false
 
-let host_storage_is_alert (hs : host_storage_summary) =
-  host_storage_is_critical hs
+let host_storage_is_alert ?now (hs : host_storage_summary) =
+  host_storage_is_critical ?now hs
   || Option.is_some hs.probe_error
   || (match hs.capacity_percent with
      | Some pct -> Float.is_finite pct && pct >= 85.0

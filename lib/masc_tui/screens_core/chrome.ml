@@ -413,17 +413,19 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
       else None
     in
     let disk_item =
+      let now_unix = model.freshness.last_wall_unix in
       match
         Option.bind (Observed.to_option model.infra.sandboxes)
           Wire_infra.host_storage_of_snapshot
       with
-      | Some hs when Wire_infra.host_storage_is_alert hs ->
+      | Some hs when Wire_infra.host_storage_is_alert ~now:now_unix hs ->
           let tone =
-            if Wire_infra.host_storage_is_critical hs then Theme.Status_critical
+            if Wire_infra.host_storage_is_critical ~now:now_unix hs then
+              Theme.Status_critical
             else Theme.Status_attention
           in
           let label =
-            if hs.enospc_observations > 0 then
+            if Wire_infra.host_storage_has_recent_enospc ~now:now_unix hs then
               match hs.capacity_percent with
               | Some pct when not compact ->
                   Printf.sprintf "%s DISK %.0f%%·ENOSPC"

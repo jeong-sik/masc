@@ -865,10 +865,11 @@ let render_disk_bar ~width pct =
     done;
     Buffer.contents buf
 
-let disk_gauge_summary ~lang ~bar_w (hs : Wire_infra.host_storage_summary) =
+let disk_gauge_summary ~lang ~now ~bar_w (hs : Wire_infra.host_storage_summary) =
+  let recent_enospc = Wire_infra.host_storage_has_recent_enospc ~now hs in
   let tone =
-    if Wire_infra.host_storage_is_critical hs then Some Theme.Status_critical
-    else if Wire_infra.host_storage_is_alert hs then Some Theme.Status_attention
+    if Wire_infra.host_storage_is_critical ~now hs then Some Theme.Status_critical
+    else if Wire_infra.host_storage_is_alert ~now hs then Some Theme.Status_attention
     else Some Theme.Status_ok
   in
   let text =
@@ -906,10 +907,12 @@ let disk_gauge_summary ~lang ~bar_w (hs : Wire_infra.host_storage_summary) =
           | None -> ""
         in
         let enospc_part =
-          if hs.enospc_observations > 0 then
+          if recent_enospc then
             Printf.sprintf " · %s ENOSPC ×%d"
               (Glyph.to_utf8 Glyph.Warning_triangle)
               hs.enospc_observations
+          else if hs.enospc_observations > 0 then
+            Printf.sprintf " · ENOSPC hist ×%d" hs.enospc_observations
           else ""
         in
         bar_prefix ^ bytes_part ^ pct_part ^ enospc_part
@@ -1221,7 +1224,9 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
                    let bar_w =
                      if i3.w >= 42 then 8 else if i3.w >= 32 then 6 else 0
                    in
-                   let txt, tone_opt = disk_gauge_summary ~lang ~bar_w hs in
+                   let txt, tone_opt =
+                     disk_gauge_summary ~lang ~now:model.freshness.last_wall_unix ~bar_w hs
+                   in
                    let st =
                      match tone_opt with
                      | Some t -> H.status_style ~theme t
@@ -1253,7 +1258,9 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
            if !y < bot then begin
              let row2_s, row2_style =
                match hs_opt with
-               | Some hs when hs.enospc_observations > 0 ->
+               | Some hs
+                 when Wire_infra.host_storage_has_recent_enospc
+                        ~now:model.freshness.last_wall_unix hs ->
                    let mount_s =
                      match hs.mounted_on with
                      | Some m -> " · " ^ m
@@ -1263,6 +1270,15 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
                        (Glyph.to_utf8 Glyph.Warning_triangle)
                        hs.enospc_observations mount_s,
                      H.status_style ~theme Theme.Status_critical )
+               | Some hs when hs.enospc_observations > 0 ->
+                   let mount_s =
+                     match hs.mounted_on with
+                     | Some m -> " · " ^ m
+                     | None -> ""
+                   in
+                   ( Printf.sprintf "ENOSPC hist ×%d%s"
+                       hs.enospc_observations mount_s,
+                     H.secondary_style ~theme () )
                | Some _ | None ->
                    let gc_s =
                      match snap.volume_gc_report with
@@ -1372,7 +1388,9 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
                  | None -> ""
                  | Some hs ->
                      let bar_w = if ci.w >= 76 then 6 else 0 in
-                     let txt, _ = disk_gauge_summary ~lang ~bar_w hs in
+                     let txt, _ =
+                       disk_gauge_summary ~lang ~now:model.freshness.last_wall_unix ~bar_w hs
+                     in
                      " · Disk " ^ txt
              in
              ignore
@@ -1385,7 +1403,9 @@ let render_sandboxes ~(model : Model.t) ~cache ~(rect : Rect.t)
                | None -> ()
                | Some hs ->
                    let bar_w = if ci.w >= 44 then 8 else 6 in
-                   let txt, tone_opt = disk_gauge_summary ~lang ~bar_w hs in
+                   let txt, tone_opt =
+                     disk_gauge_summary ~lang ~now:model.freshness.last_wall_unix ~bar_w hs
+                   in
                    let style =
                      match tone_opt with
                      | Some t -> H.status_style ~theme t

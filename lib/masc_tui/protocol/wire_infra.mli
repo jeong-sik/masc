@@ -176,8 +176,11 @@ type host_storage_summary = {
   used_bytes : int64 option;
   capacity_percent : float option;
   enospc_observations : int;
+  last_enospc_ts : float option;
   probe_error : string option;
 }
+
+val enospc_recent_window_sec : float
 
 val host_storage_status_of_string : string -> host_storage_status option
 (** Strict parser for host storage status strings; blank strings return [None]. *)
@@ -186,14 +189,19 @@ val parse_host_storage : Yojson.Safe.t -> host_storage_summary option
 (** Parse typed host filesystem and ENOSPC exhaustion telemetry from a
     [host_storage] JSON object, or [None] when the payload is absent/untyped. *)
 
-val host_storage_is_alert : host_storage_summary -> bool
-(** [true] when disk status is warning/degraded/critical/error,
-    [capacity_percent >= 85.0], [enospc_observations > 0], or a probe error
-    was reported. *)
+val host_storage_has_recent_enospc : now:float -> host_storage_summary -> bool
+(** [true] when [enospc_observations > 0] and [last_enospc_ts] falls within
+    {!enospc_recent_window_sec} of [now]. Stale cumulative counts do not
+    trigger a permanent critical alert after disk recovery. *)
 
-val host_storage_is_critical : host_storage_summary -> bool
-(** [true] when [enospc_observations > 0], [capacity_percent >= 95.0], or
-    status is critical/error. *)
+val host_storage_is_alert : ?now:float -> host_storage_summary -> bool
+(** [true] when disk status is warning/degraded/critical/error,
+    [capacity_percent >= 85.0], {!host_storage_has_recent_enospc} holds at
+    [now], or a probe error was reported. *)
+
+val host_storage_is_critical : ?now:float -> host_storage_summary -> bool
+(** [true] when {!host_storage_has_recent_enospc} holds at [now],
+    [capacity_percent >= 95.0], or status is critical/error. *)
 
 type sandboxes_snapshot = {
   probe_state : probe_freshness;

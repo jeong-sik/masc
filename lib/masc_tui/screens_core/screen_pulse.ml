@@ -691,18 +691,19 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
                   ~right_style:act_st;
               if body_h >= 3 then begin
                 let disk_alert =
+                  let now_unix = model.freshness.last_wall_unix in
                   match
                     Option.bind (Observed.to_option model.infra.sandboxes)
                       Wire_infra.host_storage_of_snapshot
                   with
-                  | Some hs when Wire_infra.host_storage_is_alert hs ->
+                  | Some hs when Wire_infra.host_storage_is_alert ~now:now_unix hs ->
                       let tone =
-                        if Wire_infra.host_storage_is_critical hs then
+                        if Wire_infra.host_storage_is_critical ~now:now_unix hs then
                           Theme.Status_critical
                         else Theme.Status_attention
                       in
                       let lbl =
-                        if hs.enospc_observations > 0 then
+                        if Wire_infra.host_storage_has_recent_enospc ~now:now_unix hs then
                           match hs.capacity_percent with
                           | Some pct ->
                               Printf.sprintf "%s Disk %.0f%% · ENOSPC×%d"

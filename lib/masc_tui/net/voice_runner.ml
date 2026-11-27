@@ -265,32 +265,30 @@ let poll_wav_rms_sync ~path ~offset =
       Fun.protect
         ~finally:(fun () -> In_channel.close_noerr ic)
         (fun () ->
-          let file_len =
-            match In_channel.length ic with
-            | n -> Int64.to_int n
-            | exception Sys_error _ -> 0
-          in
-          let start = Int.max header_bytes offset in
-          let avail = file_len - start in
-          let aligned = avail - (avail mod 2) in
-          if aligned <= 0 then (start, None)
-          else
-            let max_chunk = 8192 in
-            let read_from, to_read =
-              if aligned > max_chunk then
-                let skipped = aligned - max_chunk in
-                let skipped_even = skipped - (skipped mod 2) in
-                (start + skipped_even, aligned - skipped_even)
-              else (start, aligned)
-            in
-            In_channel.seek ic (Int64.of_int read_from);
-            let buf = Bytes.create to_read in
-            let got = In_channel.input ic buf 0 to_read in
-            let got_even = got - (got mod 2) in
-            if got_even <= 0 then (start, None)
+          try
+            let file_len = Int64.to_int (In_channel.length ic) in
+            let start = Int.max header_bytes offset in
+            let avail = file_len - start in
+            let aligned = avail - (avail mod 2) in
+            if aligned <= 0 then (start, None)
             else
-              let level = rms_level_of_pcm16_le buf ~offset:0 ~len:got_even in
-              (read_from + got_even, Some level))
+              let max_chunk = 8192 in
+              let read_from, to_read =
+                if aligned > max_chunk then
+                  let skipped = aligned - max_chunk in
+                  let skipped_even = skipped - (skipped mod 2) in
+                  (start + skipped_even, aligned - skipped_even)
+                else (start, aligned)
+              in
+              In_channel.seek ic (Int64.of_int read_from);
+              let buf = Bytes.create to_read in
+              let got = In_channel.input ic buf 0 to_read in
+              let got_even = got - (got mod 2) in
+              if got_even <= 0 then (start, None)
+              else
+                let level = rms_level_of_pcm16_le buf ~offset:0 ~len:got_even in
+                (read_from + got_even, Some level)
+          with Sys_error _ | End_of_file -> (offset, None))
   | exception Sys_error _ -> (offset, None)
 
 let unlink_quiet_sync path =
@@ -444,12 +442,12 @@ let http_and_local_backend ~io ~clock ~endpoint =
             | () ->
                 Eio.Cancel.protect reap_if_spawned;
                 Ok out_path
-            | exception (Eio.Cancel.Cancelled _ as cancelled) ->
+            | exception exn ->
                 cleanup_all ();
-                raise cancelled)
-        | exception (Eio.Cancel.Cancelled _ as cancelled) ->
+                raise exn)
+        | exception exn ->
             cleanup_all ();
-            raise cancelled)
+            raise exn)
   in
   let transcribe ~audio_path =
     let read_res =

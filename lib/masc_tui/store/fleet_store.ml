@@ -638,7 +638,7 @@ let group_key_of_keeper t (k : Wire_fleet.keeper_summary) =
       | Some (Wire_fleet.Profile_other s) ->
           let trimmed = String.trim s in
           if String.equal trimmed "" then "Other" else trimmed
-      | None -> "Local / Unreported")
+      | None -> "Unreported")
   | Group_by_runtime ->
       let rt = String.trim k.runtime_id in
       if String.equal rt "" then "(unassigned)" else rt
@@ -2896,6 +2896,7 @@ let set_group_axis axis t =
 let cycle_group_axis t = set_group_axis (next_group_axis t.group_axis) t
 
 let collapse_all_groups t =
+  let prev_index = resolve_current_index t (filtered_keepers t) in
   let groups = grouped_keepers t in
   let collapsed_companies =
     List.fold_left
@@ -2907,12 +2908,11 @@ let collapse_all_groups t =
     | (g : Wire_fleet.company_group) :: _ -> Some g.company
     | [] -> None
   in
-  {
-    t with
-    collapsed_companies;
-    selected_collapsed_company = first_group;
-    scroll_offset = 0;
-  }
+  let synced =
+    sync_selection_after_change ~prev_index ~reset_scroll:true
+      ~clear_if_empty:true { t with collapsed_companies }
+  in
+  { synced with selected_collapsed_company = first_group; scroll_offset = 0 }
 
 let expand_all_groups t =
   let prev_index = resolve_current_index t (filtered_keepers t) in

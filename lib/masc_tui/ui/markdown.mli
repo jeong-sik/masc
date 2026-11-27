@@ -52,6 +52,17 @@ val alphatex_code_blocks : string -> string list
     language tag is [alphatex] or [atex] (case-insensitive), in document
     reading order. Shares the exact {!Cmarkit} parser and fence classification
     used by {!render_lines}. *)
+type heading = {
+  level : int;  (** 1 to 6. *)
+  text : string;  (** The heading's plain text. *)
+}
+
+val headings : string -> heading list
+(** The heading blocks of the Markdown text, in reading order, read with the same
+    {!Cmarkit} parser options as {!render_lines}. A [#] line inside a code
+    block is not a heading. A setext heading and a heading inside a quote or a
+    list item are. *)
+
 val link_first_lines : rendered_line list -> (string * int) list
 (** Each distinct link target in [lines], with the index of the first line it
     is on, in reading order. *)

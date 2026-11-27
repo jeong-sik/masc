@@ -2644,6 +2644,23 @@ let test_card_legacy_rule_label () =
     "ordinary line returns None" None
     (Card.legacy_rule_label "plain text line")
 
+(* The outline lists the heading blocks the renderer draws, not '#' lines. *)
+let test_markdown_headings () =
+  let source =
+    String.concat "\n"
+      [
+        "# Title"; ""; "```sh"; "# install"; "make"; "```"; "";
+        "Setext two"; "----------"; ""; "#### Deep *em* `code`"; "";
+        "    # indented code"; ""; "> ### Quoted"; "";
+      ]
+  in
+  Alcotest.(check (list (pair int string)))
+    "headings outside code, setext included, inline marks dropped"
+    [ (1, "Title"); (2, "Setext two"); (4, "Deep em code"); (3, "Quoted") ]
+    (List.map
+       (fun ({ level; text } : Markdown.heading) -> (level, text))
+       (Markdown.headings source))
+
 let test_markdown_link_first_lines_and_selected_link () =
   let theme = Theme.default in
   let source =
@@ -2754,6 +2771,8 @@ let () =
             `Quick test_markdown_parse_inline_linear_unmatched_delimiters;
           Alcotest.test_case "Markdown link targets by first line and the selected link"
             `Quick test_markdown_link_first_lines_and_selected_link;
+          Alcotest.test_case "Markdown headings are the heading blocks" `Quick
+            test_markdown_headings;
           Alcotest.test_case "Wave 2: Html_doc strips script/style/hidden, aligns tables & search highlights"
             `Quick test_wave2_html_doc_renderer;
         ] );

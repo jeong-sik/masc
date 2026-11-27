@@ -1214,17 +1214,9 @@ let wiki_source_badge ~lang = function
   | Wire_knowledge.Source_observation ->
       Say.resolve lang (Say.make ~ko:"관측" ~en:"Observation")
 
-let extract_markdown_headings (md : string) : (int * string) list =
-  String.split_on_char '\n' md
-  |> List.filter_map (fun raw ->
-         let s = String.trim raw in
-         if String.starts_with ~prefix:"### " s then
-           Some (3, String.trim (String.sub s 4 (String.length s - 4)))
-         else if String.starts_with ~prefix:"## " s then
-           Some (2, String.trim (String.sub s 3 (String.length s - 3)))
-         else if String.starts_with ~prefix:"# " s then
-           Some (1, String.trim (String.sub s 2 (String.length s - 2)))
-         else None)
+(* The wiki rail lists headings of level 1 to 3. It has six rows, and deeper
+   headings would take them from the page's sections. *)
+let wiki_rail_heading_depth = 3
 
 let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
     ~(rect : Rect.t) ~(theme : Theme.t) ~bp ~lang ~(k : Knowledge_store.t)
@@ -1381,7 +1373,11 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
                        ~scroll ?selected_link d.body_markdown);
                 if not (Rect.is_empty rail_rect) then begin
                   let ry = ref rail_rect.y and rbot = Rect.bottom rail_rect in
-                  let headings = extract_markdown_headings d.body_markdown in
+                  let headings =
+                    Markdown.headings d.body_markdown
+                    |> List.filter (fun (heading : Markdown.heading) ->
+                           heading.level <= wiki_rail_heading_depth)
+                  in
                   if !ry < rbot then begin
                     ignore
                       (H.put_clipped ~grid ~clip:rail_rect ~x:rail_rect.x ~y:!ry
@@ -1402,7 +1398,7 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
                   end
                   else
                     List.iter
-                      (fun (lvl, htxt) ->
+                      (fun ({ level = lvl; text = htxt } : Markdown.heading) ->
                         if !ry < rbot then begin
                           let indent = if lvl >= 3 then "  " else if lvl = 2 then " " else "" in
                           ignore

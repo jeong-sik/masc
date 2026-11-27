@@ -283,7 +283,7 @@ let option_age ~now = function
 let latest_error_is_newer snapshot =
   match snapshot.last_error_at, last_success_at snapshot with
   | Some _, None -> true
-  | Some error_at, Some success_at -> error_at >= success_at
+  | Some error_at, Some success_at -> error_at > success_at
   | None, _ -> false
 ;;
 
@@ -304,13 +304,23 @@ let latest_tick_has_dispatch_failure snapshot =
 
 let status ?now ?stale_after_sec snapshot : Schedule_contract_values.runner_status =
   let stale =
-    match now, stale_after_sec, snapshot.last_tick_finished_at with
-    | Some now, Some stale_after_sec, Some finished_at ->
-      now -. finished_at > stale_after_sec
-    | _ -> false
+    match now, stale_after_sec with
+    | Some now, Some stale_after_sec ->
+      let anchor =
+        if snapshot.tick_in_flight
+        then snapshot.last_tick_started_at
+        else snapshot.last_tick_finished_at
+      in
+      (match anchor with
+       | Some ts -> now -. ts > stale_after_sec
+       | None -> false)
+    | (Some _ | None), (Some _ | None) -> false
   in
   if snapshot.tick_in_flight
-  then Schedule_contract_values.Runner_running
+  then (
+    if stale
+    then Schedule_contract_values.Runner_stale
+    else Schedule_contract_values.Runner_running)
   else if snapshot.tick_count = 0
   then Schedule_contract_values.Runner_not_started
   else if stale

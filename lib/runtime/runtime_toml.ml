@@ -168,15 +168,14 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
 ;;
 
 (* [\[runtime.lanes.<id>\]] — ordered failover candidate lists. Each lane is a
-   table with [candidates] (array of runtime ids). Candidate ids are resolved
+   table with [candidates] (required array of runtime ids) and optional [order]
+   (["fixed"] default or ["spread_by_keeper"]). Candidate ids are resolved
    against materialized runtimes at load time, not here, so the parser returns
    declarations only.
 
-   [candidates] is the whole vocabulary. The routing rebirth dropped
-   the strategy ADT (a lane is ordered by construction), and until this check
-   a leftover [strategy = "ordered"] line was accepted and ignored — a key an
-   operator could edit with no effect. Unknown keys fail the load instead,
-   the same shape as [parse_exact_output_lane] below. *)
+   Unknown keys (such as the legacy [strategy] key dropped by the routing
+   rebirth) fail the load instead of being silently ignored, matching the
+   strict parsing contract of [parse_exact_output_lane] below. *)
 let parse_lane ~(id : string) (tbl : Otoml.t)
   : (Runtime_schema.lane_decl, parse_error list) result
   =
@@ -186,14 +185,14 @@ let parse_lane ~(id : string) (tbl : Otoml.t)
     | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
       List.concat_map
         (fun (key, _) ->
-           if String.equal key "candidates"
+           if String.equal key "candidates" || String.equal key "order"
            then []
            else
              error
                (path ^ "." ^ key)
                (Printf.sprintf
-                  "unknown lane key %S; expected candidates (lanes are ordered \
-                   by construction; there is no strategy key)"
+                  "unknown lane key %S; expected candidates or order \
+                   (\"fixed\" | \"spread_by_keeper\")"
                   key))
         entries
     | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
@@ -213,13 +212,47 @@ let parse_lane ~(id : string) (tbl : Otoml.t)
                  "lane candidates must be an array of string runtime ids; got %s"
                  msg)))
   in
-  match candidate_ids_result with
-  | Error e -> Error (unknown_key_errors @ e)
-  | Ok _ when unknown_key_errors <> [] -> Error unknown_key_errors
-  | Ok candidate_ids ->
-    if candidate_ids = []
-    then Error (error path "lane must have at least one candidate")
-    else Ok { Runtime_schema.id; candidate_ids }
+  let order_result =
+    match Otoml.find_opt tbl Fun.id [ "order" ] with
+    | None -> Ok Runtime_lane.Fixed
+    | Some value ->
+      (try
+         let raw = Otoml.get_string value in
+         match Runtime_lane.order_of_string raw with
+         | Some order -> Ok order
+         | None ->
+           Error
+             (error
+                (path ^ ".order")
+                (Printf.sprintf
+                   "unknown lane order %S; expected \"fixed\" or \"spread_by_keeper\""
+                   raw))
+       with
+       | Otoml.Type_error msg ->
+         Error
+           (error
+              (path ^ ".order")
+              (Printf.sprintf
+                 "lane order must be a string (\"fixed\" or \"spread_by_keeper\"); got %s"
+                 msg)))
+  in
+  match unknown_key_errors, candidate_ids_result, order_result with
+  | [], Ok [], Ok _ -> Error (error path "lane must have at least one candidate")
+  | [], Ok (_ :: _ as candidate_ids), Ok order ->
+    Ok { Runtime_schema.id; candidate_ids; order }
+  | ([] | _ :: _), (Ok _ | Error _), (Ok _ | Error _) ->
+    let candidate_errors =
+      match candidate_ids_result with
+      | Error e -> e
+      | Ok [] -> error path "lane must have at least one candidate"
+      | Ok (_ :: _) -> []
+    in
+    let order_errors =
+      match order_result with
+      | Error e -> e
+      | Ok _ -> []
+    in
+    Error (unknown_key_errors @ candidate_errors @ order_errors)
 ;;
 
 let parse_lanes (toml : Otoml.t) : (Runtime_schema.lane_decl list, parse_error list) result =

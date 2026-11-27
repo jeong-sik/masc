@@ -425,6 +425,7 @@ assignments. Unknown keys are load errors.
 | Key | Meaning |
 | --- | --- |
 | `candidates` | ordered binding ids; later entries are failover targets |
+| `order` | optional `"fixed"` (default) or `"spread_by_keeper"`. `"fixed"` starts every Keeper at `candidates[0]`. `"spread_by_keeper"` deterministically rotates the starting candidate per Keeper name (cyclic left-rotation), distributing concurrent Keepers across distinct primary candidates while keeping each Keeper sticky to its own primary and preserving full failover and quota/backpressure demotion |
 
 Lane behavior to plan around: after a turn breaks on repeated output, the lane
 skips candidates whose `api-name` equals the one that repeated; the lane's turn

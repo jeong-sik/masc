@@ -176,6 +176,7 @@ let lane_json ((lane : Runtime_lane.t), origin) : Yojson.Safe.t =
   `Assoc
     [ "id", `String (Runtime_lane.id lane)
     ; "runtime_ids", Json_util.json_string_list (Runtime_lane.ordered_candidates lane)
+    ; "order", `String (Runtime_lane.order_to_string (Runtime_lane.order lane))
     ; ( "declared"
       , `Bool (match origin with Declared -> true | From_assignment -> false) )
     ]

@@ -118,6 +118,14 @@ val resolve_max_context_resolution_for_route
 (** Resolves a configured route (declared lane or direct runtime ID) to the
     selected concrete candidate runtime ID and its context resolution. *)
 
+val resolve_max_context_resolution_for_keeper_route
+  :  keeper_name:string
+  -> requested_override:int option
+  -> route:string
+  -> (string * max_context_resolution, max_context_resolution_error) result
+(** Like {!resolve_max_context_resolution_for_route}, rotating a
+    [spread_by_keeper] lane to [keeper_name]'s entry candidate. *)
+
 val max_context_resolution_error_to_string
   :  max_context_resolution_error
   -> string

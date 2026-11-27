@@ -420,11 +420,12 @@ end
    [Keeper_turn_driver.next_dispatch_after_failure], which the chat lane's
    deferred retry also reads; this maps it onto the heartbeat's sleep. The
    assignment is the one a turn without a deferred suffix walks. *)
-let after_failure ~now ~assignment_id (failure : Keeper_unified_turn.turn_failure)
+let after_failure ?keeper_name ~now ~assignment_id (failure : Keeper_unified_turn.turn_failure)
   : after_failure option
   =
   match
     Keeper_turn_driver.next_dispatch_after_failure
+      ?keeper_name
       ~now
       ~route:failure.route
       ~assignment_id
@@ -448,6 +449,7 @@ let after_failure_of_cycle_outcome ~now
   match cycle_outcome with
   | Some (Cycle.Failed { failure; meta }) ->
     after_failure
+      ~keeper_name:meta.name
       ~now
       ~assignment_id:(Keeper_meta_contract.runtime_id_of_meta meta)
       failure
@@ -477,8 +479,8 @@ let provider_wait_interrupt
       ~keeper_name ~dispatch_snapshot ~assignment_id ~deferred_runtime_lane ~basis =
   let walk_rest ~now =
     match deferred_runtime_lane with
-    | Some lane -> Keeper_turn_driver.deferred_lane_rest ~now lane
-    | None -> Keeper_turn_driver.assignment_walk_rest ~now assignment_id
+    | Some lane -> Keeper_turn_driver.deferred_lane_rest ~keeper_name ~now lane
+    | None -> Keeper_turn_driver.assignment_walk_rest ~keeper_name ~now assignment_id
   in
   fun ~now ->
     not
@@ -2298,7 +2300,9 @@ module For_testing = struct
     batch_disposition_records_continuation
   ;;
 
-  let after_failure = after_failure
+  let after_failure ~now ~assignment_id failure =
+    after_failure ~now ~assignment_id failure
+  ;;
   let next_cycle_starts_now = next_cycle_starts_now
   let cycle_wake = cycle_wake
   let periodic_cadence_after_cycle = periodic_cadence_after_cycle

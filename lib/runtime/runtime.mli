@@ -818,7 +818,7 @@ val resolve_assignment :
     entry is absent. [Missing] means the id was not configured. Neither selects
     the default in place of the requested runtime. *)
 
-val entry_runtime_id_of_route : string -> string option
+val entry_runtime_id_of_route : ?keeper_name:string -> string -> string option
 (** The concrete binding id a route opens first: the declared lane's entry
     candidate, or the runtime itself when the route names one. [None] when the
     route names neither. Callers needing a materialized runtime resolve the

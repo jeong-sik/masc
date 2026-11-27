@@ -283,6 +283,16 @@ let fresh_walk_of = function
     Fresh_walk_by (Runtime_candidate_backpressure.keeper_recorder ~keeper_name:engine_name)
   | One_shot_walk -> Every_mark_demotes
 
+let keeper_name_of_walk_start = function
+  | Fresh_walk_by recorder ->
+    Some (Runtime_candidate_backpressure.recorder_keeper_name recorder)
+  | Every_mark_demotes -> None
+
+let keeper_name_of_walk_owner = function
+  | Fleet_keeper_turn { keeper_name } -> Some keeper_name
+  | Person_keeper_turn { engine_name; _ } -> Some engine_name
+  | One_shot_walk -> None
+
 let account_request walk_owner ~runtime_id =
   match walk_owner with
   | Fleet_keeper_turn { keeper_name } ->
@@ -555,10 +565,10 @@ let quota_ordered_runtime_ids ~now ~walk runtime_ids =
    them: the input is not handed straight back to it, and the walk still
    reaches it. An assignment that resolves to no lane adds nothing to the
    hint. *)
-let resumed_walk_order hint =
+let resumed_walk_order ?keeper_name hint =
   let lane =
     match Runtime.resolve_assignment hint.assignment_id with
-    | `Lane lane -> Runtime_lane.ordered_candidates lane
+    | `Lane lane -> Runtime_lane.ordered_candidates_for ?keeper_name lane
     | `Missing | `Unavailable _ -> []
   in
   let named =
@@ -585,8 +595,11 @@ let resumed_walk_order hint =
    [resumed_walk_order] under the quota and backpressure demotion that orders
    the rest of every walk. The hint itself is kept, so a lane already resumed
    is resumed again from its hint. *)
-let resumed_runtime_lane ~now hint =
-  match quota_ordered_runtime_ids ~now ~walk:Every_mark_demotes (resumed_walk_order hint) with
+let resumed_runtime_lane ?keeper_name ~now hint =
+  match
+    quota_ordered_runtime_ids ~now ~walk:Every_mark_demotes
+      (resumed_walk_order ?keeper_name hint)
+  with
   | head :: rest -> { hint with resumed = Resumed { head; rest } }
   | [] -> hint
 ;;
@@ -748,15 +761,15 @@ let walk_rest ~now ~head ~later =
 (* The walk a turn resuming the deferred suffix dispatches
    ([resumed_runtime_lane]), so a resting suffix path does not hold the turn
    while a lane candidate that was not told to rest can take it. *)
-let deferred_lane_rest ~now hint =
-  match resumed_walk_ids (resumed_runtime_lane ~now hint) with
+let deferred_lane_rest ?keeper_name ~now hint =
+  match resumed_walk_ids (resumed_runtime_lane ?keeper_name ~now hint) with
   | head :: later -> walk_rest ~now ~head ~later
   | [] -> walk_rest ~now ~head:hint.next_runtime_id ~later:hint.later_runtime_ids
 ;;
 
 (* A fresh walk of an assignment, ordered as [run_named] orders a turn without
-   a deferred suffix: the lane as declared, then quota and backpressure
-   demotion. *)
+   a deferred suffix: the lane's declared candidates (cyclically rotated per
+   Keeper on [spread_by_keeper] lanes), then quota and backpressure demotion. *)
 type walk_order =
   { lane_id : string
   ; declared : string list
@@ -778,19 +791,30 @@ let assignment_walk_order ~now ~walk assignment_id =
   | `Lane lane ->
     let lane_id = Runtime_lane.id lane in
     let declared = Runtime_lane.ordered_candidates lane in
-    Ok { lane_id; declared; order = quota_ordered_runtime_ids ~now ~walk declared }
+    let starting_order =
+      Runtime_lane.ordered_candidates_for
+        ?keeper_name:(keeper_name_of_walk_start walk)
+        lane
+    in
+    Ok { lane_id; declared; order = quota_ordered_runtime_ids ~now ~walk starting_order }
   | `Unavailable missing -> Error (Catalog_unavailable missing)
   | `Missing -> Error Assignment_missing
 ;;
 
 (* An assignment the walk would refuse still names a path whose rest the
    failure wait reads; it rests as its own single candidate. *)
-let assignment_walk_rest ~now assignment_id =
+let assignment_walk_rest ?keeper_name ~now assignment_id =
   (* Whose walk it is only moves a failed attempt, and a failed attempt never
-     rests (RFC-0458 §3.4), so every walker reaches the same rest. *)
-  match assignment_walk_order ~now ~walk:Every_mark_demotes assignment_id with
-  | Ok { order = head :: later; _ } -> walk_rest ~now ~head ~later
-  | Ok { order = []; _ } | Error (Assignment_missing | Catalog_unavailable _) ->
+     rests (RFC-0458 §3.4), so [Every_mark_demotes] keeps rest semantics intact
+     while [ordered_candidates_for] aligns the reported serving head with the
+     Keeper's rotated entry candidate on a [spread_by_keeper] lane. *)
+  match Runtime.resolve_assignment assignment_id with
+  | `Lane lane ->
+    let starting_order = Runtime_lane.ordered_candidates_for ?keeper_name lane in
+    (match quota_ordered_runtime_ids ~now ~walk:Every_mark_demotes starting_order with
+     | head :: later -> walk_rest ~now ~head ~later
+     | [] -> Walk_head_serving { runtime_id = assignment_id })
+  | `Unavailable _ | `Missing ->
     Walk_head_serving { runtime_id = assignment_id }
 ;;
 
@@ -828,14 +852,14 @@ let assignment_next_dated_release ~now assignment_id =
    turn's route need not name what its attempts were told. An effect fence
    ends a turn as [Exhausted_visible_alive] even when the fenced attempt was a
    provider-stated quota, and that attempt has already rested its path. *)
-let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
+let next_dispatch_after_failure ?keeper_name ~now ~route ~assignment_id deferred =
   let module Route = Keeper_runtime_failure_route in
   let cap_sec = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
   let route_release retry_class retry_after =
     now +. Route.path_rest_sec ~cap_sec ~retry_class ~retry_after_hint:retry_after
   in
   let observed_walk_rest () =
-    match assignment_walk_rest ~now assignment_id with
+    match assignment_walk_rest ?keeper_name ~now assignment_id with
     | Walk_head_serving _ -> None
     | Walk_waits_until { release_at; release_basis = _; resting_runtime_id } ->
       Some (Wait_until { release_at; waiting_on = resting_runtime_id; basis = Observed_path_rest })
@@ -852,7 +876,7 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
       | Route.Rotate_now _ | Route.Exhausted_visible_alive _ )
     , Some hint ) ->
     Some
-      (match deferred_lane_rest ~now hint with
+      (match deferred_lane_rest ?keeper_name ~now hint with
        | Walk_head_serving { runtime_id } -> Dispatch_now { runtime_id }
        | Walk_waits_until { release_at; release_basis = _; resting_runtime_id } ->
          Wait_until { release_at; waiting_on = resting_runtime_id; basis = Observed_path_rest })
@@ -870,7 +894,7 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
      | Error (Assignment_missing | Catalog_unavailable _) ->
        let failed_release_at = route_release retry_class retry_after in
        let release_at, waiting_on, basis =
-         match assignment_walk_rest ~now assignment_id with
+         match assignment_walk_rest ?keeper_name ~now assignment_id with
          | Walk_waits_until { release_at; release_basis = _; resting_runtime_id }
            when Float.compare release_at failed_release_at > 0 ->
            release_at, resting_runtime_id, Observed_path_rest
@@ -2861,11 +2885,14 @@ let run_named
        | Resume resumed -> Ok (Some (Keeper_direct_native_continuation.runtime_id resumed))
        | Terminal_pending _ -> Error (Agent_core.Error.Internal
            "native terminal disposition awaits Owner settlement")) in
+  let walk_keeper_name = keeper_name_of_walk_owner walk_owner in
   let* lane_candidate_ids =
     match native_runtime with
     | Some saved_runtime ->
       let fallback = match Runtime.resolve_assignment runtime_id with
-        | `Lane lane -> Runtime_lane.ordered_candidates lane |> demote_quota_exhausted
+        | `Lane lane ->
+          Runtime_lane.ordered_candidates_for ?keeper_name:walk_keeper_name lane
+          |> demote_quota_exhausted
         | `Missing | `Unavailable _ -> [] in
       Ok (saved_runtime :: List.filter (fun id -> not (String.equal id saved_runtime)) fallback)
     | None -> (match output_contract, deferred_runtime_lane with
@@ -2877,7 +2904,10 @@ let run_named
        | `Unavailable missing ->
          Error (Runtime_agent_core_runner.runtime_catalog_error_to_core_error
            ("Capability catalog entry unavailable: " ^ Runtime.missing_catalog_model_to_string missing))
-       | `Lane lane -> Ok (Runtime_lane.ordered_candidates lane |> demote_quota_exhausted)))
+       | `Lane lane ->
+         Ok
+           (Runtime_lane.ordered_candidates_for ?keeper_name:walk_keeper_name lane
+            |> demote_quota_exhausted)))
   in
   if lane_candidate_ids = []
   then

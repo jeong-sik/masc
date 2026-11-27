@@ -311,8 +311,8 @@ let keeper_failure_cause = function
    two. [release_basis] is who set that time on the path that owns it. A rest
    the provider gave no end ends at MASC's own floor or cap, fixed when the
    rest was noted, so the time does not move between reads. *)
-let runtime_path_rest_json ~now assignment_id =
-  match Keeper_turn_driver.assignment_walk_rest ~now assignment_id with
+let runtime_path_rest_json ?keeper_name ~now assignment_id =
+  match Keeper_turn_driver.assignment_walk_rest ?keeper_name ~now assignment_id with
   | Keeper_turn_driver.Walk_head_serving { runtime_id } ->
     `Assoc
       [ "status", `String Keeper_turn_driver.walk_rest_serving_wire
@@ -406,7 +406,10 @@ let keeper_list_row_json_of_shape ~shape ~runtime_class config name =
         | None -> "offline"
       in
       let runtime_path_rest =
-        runtime_path_rest_json ~now:now_ts (Keeper_meta_contract.runtime_id_of_meta meta)
+        runtime_path_rest_json
+          ~keeper_name:meta.name
+          ~now:now_ts
+          (Keeper_meta_contract.runtime_id_of_meta meta)
       in
       match shape with
       | Roster_row ->

@@ -507,6 +507,7 @@ let degrade_loaded_for_missing_catalog
              :: dropped_lanes )
          | _ ->
            ( Runtime_lane.make
+               ~order:(Runtime_lane.order lane)
                ~id:(Runtime_lane.id lane)
                kept_candidates
              :: kept
@@ -1964,7 +1965,7 @@ let keeper_dispatch_snapshot ~keeper_name =
     let candidates =
       match Option.map (resolve_assignment_in state) route with
       | Some (`Lane lane) ->
-        Runtime_lane.ordered_candidates lane
+        Runtime_lane.ordered_candidates_for ~keeper_name lane
         |> List.map (fun id ->
           id,
           Option.map (fun (runtime : t) -> runtime.candidate_backpressure)
@@ -1987,15 +1988,17 @@ let same_keeper_dispatch left right =
 
 (* A keeper assignment and a route id are routing labels: each names a declared
    lane or a runtime. The binding a turn actually opens is the lane's first
-   candidate — the rule [Keeper_unified_turn_pre_dispatch.build_runtime_execution]
-   already applies to pick its entry runtime. A caller that needs a concrete
-   binding (a provider posture, a declared byte ceiling, a catalog row) resolves
-   the label here; [get_runtime_by_id] knows nothing about lanes and answers
-   [None] for a lane name. *)
-let entry_runtime_id_of_route (route : string) : string option =
+   candidate for this Keeper (which rotates deterministically when the lane
+   declares [order = "spread_by_keeper"]) — the rule
+   [Keeper_unified_turn_pre_dispatch.build_runtime_execution] already applies to
+   pick its entry runtime. A caller that needs a concrete binding (a provider
+   posture, a declared byte ceiling, a catalog row) resolves the label here;
+   [get_runtime_by_id] knows nothing about lanes and answers [None] for a lane
+   name. *)
+let entry_runtime_id_of_route ?keeper_name (route : string) : string option =
   match resolve_assignment route with
   | `Lane lane ->
-    (match Runtime_lane.ordered_candidates lane with
+    (match Runtime_lane.ordered_candidates_for ?keeper_name lane with
      | entry :: _ -> Some entry
      (* A lane with no candidates is refused while loading the configuration. *)
      | [] -> None)

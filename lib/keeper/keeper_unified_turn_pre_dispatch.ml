@@ -79,7 +79,7 @@ let build_runtime_execution
     match assignment with
     | `Missing -> Ok (runtime_id, [])
     | `Lane lane ->
-      (match Runtime_lane.ordered_candidates lane with
+      (match Runtime_lane.ordered_candidates_for ~keeper_name:meta.name lane with
        | first :: rest -> Ok (first, rest)
        | [] ->
          Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig

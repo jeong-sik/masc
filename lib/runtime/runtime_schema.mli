@@ -482,6 +482,7 @@ type binding =
 type lane_decl =
   { id : string
   ; candidate_ids : string list
+  ; order : Runtime_lane.order
   }
 [@@deriving show, eq]
 

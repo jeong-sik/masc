@@ -234,6 +234,7 @@ let run_keeper_cycle
   let deferred_runtime_lane =
     Option.map
       (Keeper_turn_driver.resumed_runtime_lane
+         ~keeper_name:meta.name
          ~now:quota_snapshot_now)
       deferred_runtime_lane
   in

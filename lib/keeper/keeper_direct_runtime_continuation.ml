@@ -42,7 +42,7 @@ let rebase_retry ~keeper_name (retry : Semantic.runtime_retry) =
   | `Missing -> Error "current direct retry assignment is unavailable"
   | `Unavailable missing -> Error (Runtime.missing_catalog_model_to_string missing)
   | `Lane lane ->
-    (match Runtime_lane.ordered_candidates lane with
+    (match Runtime_lane.ordered_candidates_for ~keeper_name lane with
      | [] -> Error "current direct retry assignment has no candidates"
      | next_runtime_id :: later_runtime_ids ->
        Semantic.runtime_retry ~not_before:None ~checkpoint:retry.checkpoint
@@ -83,7 +83,7 @@ let rec retry_wait ~keeper_name ~dispatch_snapshot ~lane ~now ~observed =
       let* retry = rebase_retry ~keeper_name observed in
       Ok (retry, restored_lane retry)
     else Ok (observed, lane) in
-  let next_rest = Keeper_turn_driver.deferred_lane_rest ~now next_lane in
+  let next_rest = Keeper_turn_driver.deferred_lane_rest ~keeper_name ~now next_lane in
   match dispatch_changed, next_rest with
   | false, Keeper_turn_driver.Walk_waits_until _ -> Ok Keeper_owner.Keep_retry_wait
   | (true, Keeper_turn_driver.Walk_waits_until _)
@@ -158,7 +158,7 @@ let load ~base_path ~keeper_name ~operation_id ~session_dir ~session_id =
        next dispatch, including when a restart discarded the live witness. *)
     let* dispatch_retry = restore_retry ~keeper_name observed in
     let lane = restored_lane dispatch_retry
-      |> Keeper_turn_driver.resumed_runtime_lane ~now:(Time_compat.now ()) in
+      |> Keeper_turn_driver.resumed_runtime_lane ~keeper_name ~now:(Time_compat.now ()) in
     Ok (Some {checkpoint; observed; lane})
 
 let consume ~base_path ~keeper_name ~operation_id admission =
@@ -172,7 +172,7 @@ let consume ~base_path ~keeper_name ~operation_id admission =
    head keeps the retry until its release. Claiming a
    retry on a resting path re-issues a refused call in a tight loop (the chat
    lane retry storm of the 2026-09-10 drain investigation). *)
-let retry_not_before ~now (lane : Keeper_turn_driver.deferred_runtime_lane) =
+let retry_not_before ?keeper_name ~now (lane : Keeper_turn_driver.deferred_runtime_lane) =
   let route =
     Keeper_runtime_failure_route.route_of_error
       ~boundary:Keeper_runtime_failure_route.Agent_core_execution
@@ -180,6 +180,7 @@ let retry_not_before ~now (lane : Keeper_turn_driver.deferred_runtime_lane) =
   in
   match
     Keeper_turn_driver.next_dispatch_after_failure
+      ?keeper_name
       ~now
       ~route
       ~assignment_id:lane.assignment_id
@@ -197,7 +198,7 @@ let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id ~dispat
     |> Result.map ignore
     |> Result.map_error (fun _ -> "direct runtime checkpoint retention is not durably confirmed") in
   let checkpoint = Checkpoint.exact_snapshot_reference snapshot in
-  let not_before = retry_not_before ~now:(Time_compat.now ()) lane in
+  let not_before = retry_not_before ~keeper_name ~now:(Time_compat.now ()) lane in
   let* continuation = Semantic.runtime_retry ~not_before ~checkpoint ~assignment_id:lane.assignment_id
     ~failed_runtime_id:lane.failed_runtime_id ~next_runtime_id:lane.next_runtime_id
     ~later_runtime_ids:lane.later_runtime_ids in
@@ -215,7 +216,7 @@ let defer ~base_path ~keeper_name ~operation_id ~session_dir ~session_id ~dispat
 module For_testing = struct
   let current_assignment = current_assignment
   let validate_scope = validate_scope
-  let retry_not_before = retry_not_before
+  let retry_not_before ~now lane = retry_not_before ~now lane
   let retry_wait = retry_wait
   let restore_retry = restore_retry
 end

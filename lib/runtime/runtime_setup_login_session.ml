@@ -486,15 +486,18 @@ let run_with interpreter t ~saved_login ~on_auth_hint ~env ~child_env ~cwd ~argv
       let buffer = Cstruct.create 4096 in
       (* See helper protocol: stderr is drained for liveness; only typed stdout frames are exposed. *)
       (try while true do ignore (Eio.Flow.single_read stderr_r buffer) done
-       with End_of_file -> ()); `Stop_daemon);
+       with End_of_file | Eio.Io _ -> ()); `Stop_daemon);
     Eio.Fiber.fork_daemon ~sw (fun () ->
       let rec send () =
         let command = Eio.Stream.take t.commands in
         match command with
         | Input _ when check_saved_login () -> `Stop_daemon
         | Cancel | Input _ ->
-          Eio.Flow.copy_string (Yojson.Safe.to_string (command_json command) ^ "\n") stdin_w;
-          (match command with Cancel -> `Stop_daemon | Input _ -> send ()) in
+          (match
+             Eio.Flow.copy_string (Yojson.Safe.to_string (command_json command) ^ "\n") stdin_w
+           with
+           | () -> (match command with Cancel -> `Stop_daemon | Input _ -> send ())
+           | exception Eio.Io _ -> `Stop_daemon) in
       send ());
     Atomic.set t.phase Running;
     on_ready ();

@@ -52,32 +52,47 @@ let oldest_cli_spawn_wait_s () =
 
 let with_cli_spawn_slot ~clock ?(wait_timeout_s = max_slot_wait_s) f =
   let started = Unix.gettimeofday () in
-  let acquired =
-    track_waiter (fun () ->
-      Eio.Time.with_timeout clock wait_timeout_s (fun () ->
-        Eio.Semaphore.acquire slots;
-        Ok ()))
+  let acquired = ref false in
+  let timed_out =
+    try
+      track_waiter (fun () ->
+        match
+          Eio.Time.with_timeout clock wait_timeout_s (fun () ->
+            Eio.Semaphore.acquire slots;
+            acquired := true;
+            Ok ())
+        with
+        | Ok () -> false
+        | Error `Timeout -> true)
+    with
+    | exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      if !acquired then Eio.Semaphore.release slots;
+      Printexc.raise_with_backtrace exn bt
   in
-  (match acquired with
-   | Error `Timeout ->
-     let waited = Unix.gettimeofday () -. started in
-     raise (Slot_timeout { waited_s = waited; limit_s = wait_timeout_s })
-   | Ok () ->
-     (* Acquire returned: the slot is held. Release cannot suspend, so
-        the finally arm is total. *)
-     let waited = Unix.gettimeofday () -. started in
-     if Float.compare waited 1.0 > 0
-     then
-       Log.Runtime_agent.debug
-         "CLI spawn slot acquired after %.1fs (%d still waiting)"
-         waited
-         (waiting_cli_spawns ());
-     Atomic.incr active;
-     Fun.protect
-       ~finally:(fun () ->
-         Atomic.decr active;
-         Eio.Semaphore.release slots)
-       (fun () -> Fd_accountant.observe ~kind:Fd_accountant.Provider_cli f))
+  if timed_out || not !acquired
+  then (
+    if !acquired then Eio.Semaphore.release slots;
+    let waited = Unix.gettimeofday () -. started in
+    raise (Slot_timeout { waited_s = waited; limit_s = wait_timeout_s }))
+  else (
+    (* Acquire returned: the slot is held. Release cannot suspend, so the
+       finally arm is total; establish it before any logging or check. *)
+    Atomic.incr active;
+    Fun.protect
+      ~finally:(fun () ->
+        Atomic.decr active;
+        Eio.Semaphore.release slots)
+      (fun () ->
+        Eio.Fiber.check ();
+        let waited = Unix.gettimeofday () -. started in
+        if Float.compare waited 1.0 > 0
+        then
+          Log.Runtime_agent.debug
+            "CLI spawn slot acquired after %.1fs (%d still waiting)"
+            waited
+            (waiting_cli_spawns ());
+        Fd_accountant.observe ~kind:Fd_accountant.Provider_cli f))
 ;;
 
 type child_fds =

@@ -455,18 +455,26 @@ let start_background ~scope ~fork ~read =
   match claim scope with
   | Running _ -> Already_reading
   | Claimed held ->
-    (match fork (fun () -> Fun.protect ~finally:(fun () -> release held) read) with
-    | () -> Started
-    | exception (Eio.Cancel.Cancelled _ as cancelled) ->
-      release held;
-      raise cancelled
-    | exception exn ->
-      release held;
-      Log.Runtime_agent.warn
-        "provider usage read could not be scheduled for %s: %s"
-        (Runtime_quota_window.scope_to_string scope)
-        (Printexc.exn_slot_name exn);
-      Scheduling_failed)
+    let entered = ref false in
+    (match
+       fork (fun () ->
+         entered := true;
+         Fun.protect ~finally:(fun () -> release held) read)
+     with
+     | () when !entered -> Started
+     | () ->
+       release held;
+       Scheduling_failed
+     | exception (Eio.Cancel.Cancelled _ as cancelled) ->
+       if not !entered then release held;
+       raise cancelled
+     | exception exn ->
+       if not !entered then release held;
+       Log.Runtime_agent.warn
+         "provider usage read could not be scheduled for %s: %s"
+         (Runtime_quota_window.scope_to_string scope)
+         (Printexc.exn_slot_name exn);
+       Scheduling_failed)
 ;;
 
 let read_client_in_background ~clock ~cwd ~scope read =
@@ -495,10 +503,13 @@ let read_client_in_background ~clock ~cwd ~scope read =
       match Eio_context.get_root_switch_opt () with
       | None -> No_root_switch
       | Some sw ->
-        (* No request waits on this read. *)
+        (* No request waits on this read. Keep [Pool_lane.with_background]
+           inside [start_background]'s [Fun.protect] so any failure releases
+           [held], and let [start_background]'s [entered] check map a
+           cancelled root switch cleanly to [Scheduling_failed]. *)
         start_background ~scope
-          ~fork:(fun read -> Eio.Fiber.fork ~sw (fun () -> Pool_lane.with_background read))
-          ~read:read_logged)
+          ~fork:(fun body -> Eio.Fiber.fork ~sw body)
+          ~read:(fun () -> Pool_lane.with_background read_logged))
   with
   | outcome -> outcome
   | exception (Eio.Cancel.Cancelled _ as cancelled) -> raise cancelled

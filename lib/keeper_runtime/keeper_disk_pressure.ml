@@ -30,6 +30,7 @@ type health_status =
 let low_space_available_pct = 15.0
 let critical_space_available_pct = 5.0
 let critical_space_available_bytes = 2 * 1024 * 1024 * 1024
+let enospc_recent_window_sec = 900.0
 
 let health_status_to_string = function
   | Healthy -> "healthy"
@@ -39,8 +40,19 @@ let health_status_to_string = function
   | Probe_unavailable -> "probe_unavailable"
 ;;
 
-let classify_health ~enospc_observations snapshot =
-  if enospc_observations > 0
+let is_enospc_recent ~now ~enospc_observations ~last_enospc_ts =
+  if enospc_observations <= 0
+  then false
+  else (
+    match last_enospc_ts with
+    | Some ts when Float.is_finite ts && ts > 0.0 ->
+      Float.max 0.0 (now -. ts) <= enospc_recent_window_sec
+    | Some _ | None -> false)
+;;
+
+let classify_health ?now ~enospc_observations ~last_enospc_ts snapshot =
+  let now_ts = Option.value ~default:(Time_compat.now ()) now in
+  if is_enospc_recent ~now:now_ts ~enospc_observations ~last_enospc_ts
   then Exhausted_enospc
   else (
     match snapshot with
@@ -69,7 +81,7 @@ let operator_action_required_of_health = function
   | Critical_space | Exhausted_enospc -> true
 ;;
 
-let status_reasons_of ~enospc_observations snapshot health =
+let status_reasons_of snapshot health =
   let snapshot_reason =
     match snapshot with
     | Probe_error _ -> [ "disk_probe_unavailable" ]
@@ -85,10 +97,7 @@ let status_reasons_of ~enospc_observations snapshot health =
   match health with
   | Healthy -> []
   | Low_space | Critical_space | Probe_unavailable -> snapshot_reason
-  | Exhausted_enospc ->
-    if enospc_observations > 0
-    then "storage_space_exhausted_enospc" :: snapshot_reason
-    else snapshot_reason
+  | Exhausted_enospc -> "storage_space_exhausted_enospc" :: snapshot_reason
 ;;
 
 type cache_entry =
@@ -250,10 +259,14 @@ let observation_fields () =
 ;;
 
 let snapshot_json ?now ~masc_root () =
-  let snapshot = probe_masc_root ?now ~masc_root () in
+  let now_ts = Option.value ~default:(Time_compat.now ()) now in
+  let snapshot = probe_masc_root ~now:now_ts ~masc_root () in
   let enospc_observations = Atomic.get storage_space_exhaustion_total in
-  let health = classify_health ~enospc_observations snapshot in
-  let reasons = status_reasons_of ~enospc_observations snapshot health in
+  let last_enospc_ts = Atomic.get last_storage_space_exhaustion_ts in
+  let health =
+    classify_health ~now:now_ts ~enospc_observations ~last_enospc_ts snapshot
+  in
+  let reasons = status_reasons_of snapshot health in
   `Assoc
     ([ "masc_root", `String masc_root
      ; "snapshot_ttl_sec", `Float (snapshot_ttl_sec ())

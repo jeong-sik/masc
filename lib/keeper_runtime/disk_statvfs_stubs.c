@@ -15,6 +15,7 @@
 #include <caml/alloc.h>
 #include <caml/memory.h>
 #include <caml/mlvalues.h>
+#include <caml/signals.h>
 
 static value make_error(const char *message)
 {
@@ -72,11 +73,25 @@ CAMLprim value caml_masc_statvfs(value v_path)
     CAMLreturn(make_error("statvfs path contains embedded NUL byte"));
   }
 
+  /* Copy the path off the OCaml heap and release the domain runtime lock
+     before calling statvfs(2) so a hung NFS/FUSE mount cannot stall other
+     fibers or threads in the same domain. */
+  char *c_path = caml_stat_strdup(path);
   struct statvfs st;
-  if (statvfs(path, &st) != 0) {
-    int err = errno;
+  int rc;
+  int saved_errno = 0;
+
+  caml_enter_blocking_section();
+  rc = statvfs(c_path, &st);
+  if (rc != 0) {
+    saved_errno = errno;
+  }
+  caml_leave_blocking_section();
+  caml_stat_free(c_path);
+
+  if (rc != 0) {
     char errbuf[256];
-    format_errno_message(err, errbuf, sizeof(errbuf));
+    format_errno_message(saved_errno, errbuf, sizeof(errbuf));
     CAMLreturn(make_error(errbuf));
   }
 

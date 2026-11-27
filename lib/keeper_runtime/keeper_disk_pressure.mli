@@ -32,9 +32,15 @@ type health_status =
 val low_space_available_pct : float
 val critical_space_available_pct : float
 val critical_space_available_bytes : int
+val enospc_recent_window_sec : float
 
 val health_status_to_string : health_status -> string
-val classify_health : enospc_observations:int -> snapshot_result -> health_status
+val classify_health :
+  ?now:float ->
+  enospc_observations:int ->
+  last_enospc_ts:float option ->
+  snapshot_result ->
+  health_status
 
 val note_exception : ?site:string -> exn -> unit
 (** Record and log only typed [Unix_error (ENOSPC, _, _)]. *)

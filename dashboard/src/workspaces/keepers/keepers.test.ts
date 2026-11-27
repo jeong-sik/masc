@@ -3385,7 +3385,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
       })
     }))
 
-    // 1. Multi-account Admin: KeepersWorkspace renders mode notice with 0x /gate/keepers or /keepers/* 404s
+    // 1. Multi-account Admin: KeepersWorkspace mounts Personal Keepers UI using /api/v1/auth/keepers* with 0x /gate/keepers or /keepers/* 404s
     const maAdmin = {
       kind: 'multi_account_signed_in' as const,
       mode: 'multi_account' as const,
@@ -3400,11 +3400,55 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     authSession.value = maAdmin
     expect(canFetchPortraitForSession(maAdmin)).toBe(false)
 
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      seenUrls.push(url)
+      if (url === '/api/v1/auth/keepers') {
+        return new Response(JSON.stringify({ keepers: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url === '/api/v1/auth/provider-accounts') {
+        return new Response(JSON.stringify({ provider_accounts: [], runtimes: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      if (url.includes('/api/v1/infra/sandboxes/other-keeper')) {
+        return new Response(JSON.stringify({ error: { code: 'forbidden', message: 'not owner' } }), {
+          status: 403,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.includes('/api/v1/keepers/oauth/attached-tools')) {
+        return new Response(JSON.stringify({
+          keeper: 'code-reviewer-sister',
+          providers: [{ provider: 'github', provider_label: 'GitHub', attached: true, enabled: true, tools: ['gh_pr'] }],
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+
     const wsView = render(html`<${KeepersWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`)
-    expect(wsView.getByTestId('keepers-mode-notice')).toBeTruthy()
+    expect(wsView.getByTestId('ma-personal-keepers-workspace')).toBeTruthy()
+    await waitFor(() => {
+      expect(seenUrls).toContain('/api/v1/auth/keepers')
+      expect(seenUrls).toContain('/api/v1/auth/provider-accounts')
+    })
+    expect(seenUrls.some((u) => u.includes('/api/v1/gate/keepers') || u.includes('/api/v1/keepers/'))).toBe(false)
+    wsView.unmount()
+
+    // Signed-out multi-account session renders mode notice with 0x fetches
+    seenUrls.length = 0
+    authSession.value = {
+      kind: 'multi_account_signed_out',
+      mode: 'multi_account',
+      authMethods: { google: true, github: false, dev_token: false },
+    }
+    const signedOutView = render(html`<${KeepersWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`)
+    expect(signedOutView.getByTestId('keepers-mode-notice')).toBeTruthy()
     await new Promise((r) => setTimeout(r, 20))
     expect(seenUrls).toEqual([])
-    wsView.unmount()
+    signedOutView.unmount()
+    authSession.value = maAdmin
 
     // Sandbox 403 surfaces clear ownership message in multi_account
     const sandboxRes = await fetchKeeperSandboxApi('other-keeper')

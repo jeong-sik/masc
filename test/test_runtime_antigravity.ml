@@ -909,8 +909,12 @@ let test_successful_official_client_turn () =
          check bool "measured wall duration" true (turn.wall_duration_s >= 0.0))
 ;;
 
+(* The largest prompt agy keeps whole (#41906), and still past the pipe
+   buffer: the write has to stream over stdin while the child reads it. *)
+let largest_whole_prompt () = String.make Runtime_acp_client.antigravity_message_max_bytes 'x'
+
 let test_large_prompt_streams_over_stdin () =
-  let prompt = String.make 1_100_000 'x' in
+  let prompt = largest_whole_prompt () in
   let captured = Filename.temp_file "antigravity-prompt-" ".txt" in
   Fun.protect ~finally:(fun () -> Sys.remove captured) (fun () ->
     let sent = ref 0 in
@@ -980,6 +984,41 @@ let test_before_spawn_failure_is_a_state_callback_failure () =
     | Ok _ -> fail "a failed publication still ran the turn")
 ;;
 
+(* agy keeps the first 192,000 bytes of the step it builds around one message
+   and drops the rest without refusing (#41906). One byte past the limit, the
+   prompt is refused before the CLI starts: nothing is spawned or sent. The
+   prompt at the limit is sent whole ([test_large_prompt_streams_over_stdin]). *)
+let test_a_prompt_agy_would_cut_is_refused_before_spawn () =
+  let max_bytes = Runtime_acp_client.antigravity_message_max_bytes in
+  let spawned = ref false in
+  let sent = ref 0 in
+  with_fixture [ init (); result () ] (fun path ->
+    match
+      run_fixture
+        ~prompt:(String.make (max_bytes + 1) 'x')
+        ~before_spawn:(fun () -> spawned := true; Ok ())
+        ~on_spawned:(fun ~pid:_ -> spawned := true)
+        ~on_prompt_sent:(fun () -> incr sent)
+        path
+    with
+    | Error (Runtime_antigravity.Message_over_client_limit over) ->
+      check int "the prompt's bytes" (max_bytes + 1) over.message_bytes;
+      check int "the limit" max_bytes over.max_bytes;
+      check bool "the CLI was not started" false !spawned;
+      check int "nothing was sent" 0 !sent
+    | Error error ->
+      failf "expected Message_over_client_limit, got %s" (Runtime_antigravity.error_to_string error)
+    | Ok _ -> fail "a prompt agy would cut was sent");
+  let at_limit = String.make max_bytes 'x' in
+  let config = Runtime_antigravity.default_config ~cwd:"/tmp" ~model:"gemini-fixture" in
+  check bool "validate_turn takes the prompt at the limit" true
+    (Result.is_ok (Runtime_antigravity.validate_turn config ~prompt:at_limit));
+  check bool "validate_turn refuses one byte more" true
+    (match Runtime_antigravity.validate_turn config ~prompt:(at_limit ^ "x") with
+     | Error (Runtime_antigravity.Message_over_client_limit _) -> true
+     | Error _ | Ok _ -> false)
+;;
+
 let test_incomplete_prompt_is_not_reported () =
   let sent = ref 0 in
   let spawned = ref 0 in
@@ -992,7 +1031,7 @@ let test_incomplete_prompt_is_not_reported () =
   with_fixture ~stdin:Close_unread [] (fun path ->
     (* Larger than the pipe buffer: the child closes stdin without consuming
        it, so a successful spawn cannot imply a complete prompt write. *)
-    let result = run_fixture ~prompt:(String.make 1_100_000 'x')
+    let result = run_fixture ~prompt:(largest_whole_prompt ())
       ~on_spawned:(fun ~pid:_ -> incr spawned)
       ~on_prompt_sent:(fun () -> incr sent)
       ~on_context_submission:(fun _ -> incr sent) path in
@@ -1015,7 +1054,7 @@ let test_a_cli_that_answers_without_reading_the_prompt_does_not_hold_the_turn ()
   with_fixture ~stdin:Leave_unread ~capture_stdout:journal ~exit_delay_s:5.0 frames (fun path ->
     match
       run_fixture
-        ~prompt:(String.make 1_100_000 'x')
+        ~prompt:(largest_whole_prompt ())
         ~admission_timeout_s:1.5
         ~timeout_s:5.0
         ~on_prompt_sent:(fun () -> incr sent)
@@ -2606,6 +2645,10 @@ let () =
             "large prompt uses stdin"
             `Quick
             test_large_prompt_streams_over_stdin
+        ; test_case
+            "a prompt agy would cut is refused before spawn"
+            `Quick
+            test_a_prompt_agy_would_cut_is_refused_before_spawn
         ; test_case "before_spawn failure is a state callback failure" `Quick
             test_before_spawn_failure_is_a_state_callback_failure
         ; test_case "spawn observer receives the actual child PID" `Quick

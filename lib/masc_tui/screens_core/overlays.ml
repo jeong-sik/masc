@@ -3932,6 +3932,40 @@ let inline_action_title ~lang (kind : Nav.inline_action_kind) =
   | Nav.Setup_login_start_form ->
       Say.resolve lang
         (Say.make ~ko:"공식 CLI 계정 로그인" ~en:"Start Official CLI Login")
+  | Nav.Ma_provider_login_form ->
+      Say.resolve lang
+        (Say.make ~ko:"다중 계정 CLI 로그인" ~en:"Multi-Account CLI Login")
+  | Nav.Ma_provider_key_add_form ->
+      Say.resolve lang
+        (Say.make ~ko:"개인 프로바이더 API 키 등록"
+           ~en:"Register Personal Provider API Key")
+  | Nav.Ma_provider_key_replace_form { provider_account_id; integration_id } ->
+      Say.resolve lang
+        (Say.make
+           ~ko:
+             (Printf.sprintf "개인 API 키 교체 · %s (%s)" integration_id
+                provider_account_id)
+           ~en:
+             (Printf.sprintf "Rotate Personal API Key · %s (%s)" integration_id
+                provider_account_id))
+  | Nav.Ma_provider_key_remove_confirm { provider_account_id; integration_id } ->
+      Say.resolve lang
+        (Say.make
+           ~ko:
+             (Printf.sprintf "개인 API 키 계정 삭제 · %s (%s)" integration_id
+                provider_account_id)
+           ~en:
+             (Printf.sprintf "Remove Personal Key Account · %s (%s)"
+                integration_id provider_account_id))
+  | Nav.Ma_provider_verify_form { provider_account_id; integration_id } ->
+      Say.resolve lang
+        (Say.make
+           ~ko:
+             (Printf.sprintf "프로바이더 계정 검증 · %s (%s)" integration_id
+                provider_account_id)
+           ~en:
+             (Printf.sprintf "Verify Provider Account · %s (%s)" integration_id
+                provider_account_id))
   | Nav.Btw_query ->
       Say.resolve lang (Say.make ~ko:"임시 질문 (/btw)" ~en:"Side-Query (/btw)")
   | Nav.Gate_reject id ->
@@ -4199,6 +4233,11 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     | Nav.Runtime_assign_form
     | Nav.Setup_account_key_form
     | Nav.Setup_login_start_form
+    | Nav.Ma_provider_login_form
+    | Nav.Ma_provider_key_add_form
+    | Nav.Ma_provider_key_replace_form _
+    | Nav.Ma_provider_key_remove_confirm _
+    | Nav.Ma_provider_verify_form _
     | Nav.Board_comment _
     | Nav.Github_token_form _
     | Nav.Code_search_form
@@ -4292,6 +4331,11 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Runtime_assign_form
       | Nav.Setup_account_key_form
       | Nav.Setup_login_start_form
+      | Nav.Ma_provider_login_form
+      | Nav.Ma_provider_key_add_form
+      | Nav.Ma_provider_key_replace_form _
+      | Nav.Ma_provider_key_remove_confirm _
+      | Nav.Ma_provider_verify_form _
       | Nav.Board_comment _
       | Nav.Github_token_form _
       | Nav.Code_finder_form
@@ -4479,6 +4523,11 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Nav.Runtime_assign_form
       | Nav.Setup_account_key_form
       | Nav.Setup_login_start_form
+      | Nav.Ma_provider_login_form
+      | Nav.Ma_provider_key_add_form
+      | Nav.Ma_provider_key_replace_form _
+      | Nav.Ma_provider_key_remove_confirm _
+      | Nav.Ma_provider_verify_form _
       | Nav.Board_comment _
       | Nav.Github_token_form _
       | Nav.Code_finder_form
@@ -4573,7 +4622,12 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Keeper_purge_confirm _
                 | Nav.Addon_attach_form
                 | Nav.Addon_detach_confirm _
-                | Nav.Setup_login_input_form _ ->
+                | Nav.Setup_login_input_form _
+                | Nav.Ma_provider_login_form
+                | Nav.Ma_provider_key_add_form
+                | Nav.Ma_provider_key_replace_form _
+                | Nav.Ma_provider_key_remove_confirm _
+                | Nav.Ma_provider_verify_form _ ->
                 0
           in
           let form_r =
@@ -4759,7 +4813,12 @@ let render_inline_action_modal grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Keeper_purge_confirm _
                 | Nav.Addon_attach_form
                 | Nav.Addon_detach_confirm _
-                | Nav.Setup_login_input_form _ ->
+                | Nav.Setup_login_input_form _
+                | Nav.Ma_provider_login_form
+                | Nav.Ma_provider_key_add_form
+                | Nav.Ma_provider_key_replace_form _
+                | Nav.Ma_provider_key_remove_confirm _
+                | Nav.Ma_provider_verify_form _ ->
                 ()
           end;
           if status_rows = 1 then begin
@@ -5242,17 +5301,47 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         let remediation_line =
           Say.resolve lang (Rbac.auth_gate_remediation model.auth_session)
         in
-        draw_lines inner ~rail_tone:(Some Theme.Status_attention)
-          [
-            (anchor_st, scope_info);
-            (crit_st, Glyph.to_utf8 Glyph.Locked ^ " " ^ detail_line);
-            (whisper_st, remediation_line);
-            (whisper_st, "");
-            ( acc_st,
+        let token_lines =
+          if model.account.token_editor.active then
+            let masked =
+              Account_store.masked_draft_display model.account.token_editor
+            in
+            let prompt =
               Say.resolve lang
-                (Say.make ~ko:"[r] 인증 재확인  ·  [Ctrl+Q] 종료"
-                   ~en:"[r] Retry authentication  ·  [Ctrl+Q] Quit") );
-          ]
+                (Say.make ~ko:"Bearer / PAT (마스킹): "
+                   ~en:"Bearer / PAT (masked): ")
+            in
+            let err_lines =
+              match model.account.token_editor.error with
+              | Some err -> [ (crit_st, err) ]
+              | None -> []
+            in
+            [ (anchor_st, prompt ^ masked ^ " ") ]
+            @ err_lines
+            @ [
+                ( acc_st,
+                  Say.resolve lang
+                    (Say.make
+                       ~ko:"[Enter] 토큰 적용 및 재시도  ·  [Ctrl+U] 지우기  ·  [Esc] 취소"
+                       ~en:"[Enter] Apply token & retry  ·  [Ctrl+U] Wipe  ·  [Esc] Cancel") );
+              ]
+          else
+            [
+              (whisper_st, "");
+              ( acc_st,
+                Say.resolve lang
+                  (Say.make
+                     ~ko:"[t] 토큰/PAT 입력  ·  [c] 토큰 해제  ·  [r] 재확인  ·  [Ctrl+Q] 종료"
+                     ~en:"[t] Enter/Rotate Token  ·  [c] Clear Token  ·  [r] Retry  ·  [Ctrl+Q] Quit") );
+            ]
+        in
+        draw_lines inner ~rail_tone:(Some Theme.Status_attention)
+          ([
+             (anchor_st, scope_info);
+             (crit_st, Glyph.to_utf8 Glyph.Locked ^ " " ^ detail_line);
+             (whisper_st, remediation_line);
+           ]
+          @ token_lines)
     | Nav.Media_viewer ->
         let title =
           Say.resolve lang
@@ -6078,6 +6167,7 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         let theme = Theme.of_preset model.theme_preset in
         match overlay with
         | Nav.Palette -> render_palette grid ~cache ~rect ~theme ~model
+        | Nav.Account -> Overlay_account.render grid ~cache ~rect ~theme ~model
         | Nav.Settings active_tab ->
             render_settings grid ~cache ~rect ~theme ~model ~active_tab
         | Nav.Incidents ->

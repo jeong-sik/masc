@@ -58,6 +58,7 @@ let settings_is_open (m : Model.t) =
   | Some (Nav.Settings _) -> true
   | Some
       ( Nav.Palette
+      | Nav.Account
       | Nav.Incidents
       | Nav.Queue_context _
       | Nav.Inline_action _
@@ -889,10 +890,248 @@ let dispatch_help_overlay_key ~now (m : Model.t)
   | Keymap.Input.Function _ ->
       None
 
-let dispatch_system_gate_key ~now (m : Model.t) gate
+let dispatch_token_editor_key ~now (m : Model.t)
     (norm : Keymap.Input.key_event) =
-  let norm = Keymap.replay_ime_event norm in
+  match norm.key with
+  | Keymap.Input.Escape ->
+      ({ m with account = Account_store.close_token_editor m.account }, [])
+  | Keymap.Input.Enter ->
+      let trimmed = String.trim m.account.token_editor.draft in
+      if String.equal trimmed "" then
+        ( {
+            m with
+            account =
+              Account_store.set_token_editor_error
+                "Enter a non-empty Bearer token or PAT (or press Esc to cancel)"
+                m.account;
+          }
+        , [] )
+      else Update_http.apply_runtime_token_swap ~now ~token:(Some trimmed) m
+  | Keymap.Input.Backspace ->
+      ({ m with account = Account_store.backspace_token_text m.account }, [])
+  | Keymap.Input.Char "u" when norm.mods.ctrl && not norm.mods.alt ->
+      ({ m with account = Account_store.wipe_token_draft m.account }, [])
+  | Keymap.Input.Char s when is_printable_key norm ->
+      ({ m with account = Account_store.append_token_text s m.account }, [])
+  | Keymap.Input.Char _
+  | Keymap.Input.Tab
+  | Keymap.Input.Delete
+  | Keymap.Input.Insert
+  | Keymap.Input.Up
+  | Keymap.Input.Down
+  | Keymap.Input.Left
+  | Keymap.Input.Right
+  | Keymap.Input.Home
+  | Keymap.Input.End
+  | Keymap.Input.Page_up
+  | Keymap.Input.Page_down
+  | Keymap.Input.Function _ -> (
+      match Keymap.dispatch ~scope_chain:[ Keymap.Global ] norm with
+      | Some act when Keymap.equal_action act Keymap.Quit_app ->
+          Update_actions.execute_action ~now m Keymap.Quit_app
+      | Some _ | None -> (m, []))
+
+let dispatch_account_overlay_key ~now (m : Model.t)
+    (norm : Keymap.Input.key_event) =
+  if m.account.token_editor.active then
+    Some (dispatch_token_editor_key ~now m norm)
+  else
+    let norm = Keymap.replay_ime_event norm in
+    let require_ma_own_provider f =
+      match Rbac.decide m.auth_session Rbac.Multi_account_own_provider with
+      | Rbac.Allowed -> f ()
+      | Rbac.Denied reason ->
+          ( Model.with_toast ~now ~level:Model.Toast_warning
+              (Rbac.deny_reason_say reason) m
+          , [] )
+    in
+    match norm.key with
+    | Keymap.Input.Char "t" when is_printable_key norm ->
+        Some ({ m with account = Account_store.open_token_editor m.account }, [])
+    | Keymap.Input.Char "c" when is_printable_key norm ->
+        Some (Update_http.apply_runtime_token_swap ~now ~token:None m)
+    | Keymap.Input.Char "r" when is_printable_key norm ->
+        Some (Update_actions.execute_action ~now m Keymap.Refresh)
+    | Keymap.Input.Char "j" when is_printable_key norm ->
+        Some
+          ( { m with account = Account_store.move_selection ~delta:1 m.account }
+          , [] )
+    | Keymap.Input.Char "k" when is_printable_key norm ->
+        Some
+          ( {
+              m with
+              account = Account_store.move_selection ~delta:(-1) m.account;
+            }
+          , [] )
+    | Keymap.Input.Char "g" when is_printable_key norm ->
+        Some
+          ( {
+              m with
+              account = Account_store.move_selection ~delta:(-100000) m.account;
+            }
+          , [] )
+    | Keymap.Input.Char "G" when is_printable_key norm ->
+        Some
+          ( {
+              m with
+              account = Account_store.move_selection ~delta:100000 m.account;
+            }
+          , [] )
+    | Keymap.Input.Char "?" when is_printable_key norm ->
+        Some (Update_actions.execute_action ~now m Keymap.Open_help)
+    | Keymap.Input.Char "l" when is_printable_key norm ->
+        Some
+          (require_ma_own_provider (fun () ->
+               Update_nav.open_inline_modal m Nav.Ma_provider_login_form))
+    | Keymap.Input.Char "K" when is_printable_key norm ->
+        Some
+          (require_ma_own_provider (fun () ->
+               Update_nav.open_inline_modal m Nav.Ma_provider_key_add_form))
+    | Keymap.Input.Char "u" when is_printable_key norm ->
+        Some
+          (require_ma_own_provider (fun () ->
+               match Account_store.selected_provider_account m.account with
+               | Some { provider_account_id; integration_id; kind = Wire_account.Provider_key _; _ } ->
+                   Update_nav.open_inline_modal m
+                     (Nav.Ma_provider_key_replace_form
+                        { provider_account_id; integration_id })
+               | Some { kind = Wire_account.Provider_login; _ } ->
+                   ( Model.with_toast ~now ~level:Model.Toast_warning
+                       (Say.make
+                          ~ko:"로그인 계정은 API 키 교체를 지원하지 않습니다 ([l] 재로그인)"
+                          ~en:"Login accounts cannot rotate API keys (use [l] to re-login)")
+                       m
+                   , [] )
+               | None ->
+                   ( Model.with_toast ~now ~level:Model.Toast_warning
+                       (Say.make ~ko:"선택된 프로바이더 계정이 없습니다"
+                          ~en:"No provider account selected")
+                       m
+                   , [] )))
+    | Keymap.Input.Char "d" when is_printable_key norm ->
+        Some
+          (require_ma_own_provider (fun () ->
+               match Account_store.selected_provider_account m.account with
+               | Some { provider_account_id; integration_id; kind = Wire_account.Provider_key _; _ } ->
+                   Update_nav.open_inline_modal m
+                     (Nav.Ma_provider_key_remove_confirm
+                        { provider_account_id; integration_id })
+               | Some { kind = Wire_account.Provider_login; _ } ->
+                   ( Model.with_toast ~now ~level:Model.Toast_warning
+                       (Say.make
+                          ~ko:"API 키 계정만 삭제할 수 있습니다"
+                          ~en:"Only API-key provider accounts can be removed here")
+                       m
+                   , [] )
+               | None ->
+                   ( Model.with_toast ~now ~level:Model.Toast_warning
+                       (Say.make ~ko:"선택된 프로바이더 계정이 없습니다"
+                          ~en:"No provider account selected")
+                       m
+                   , [] )))
+    | Keymap.Input.Char "v" when is_printable_key norm ->
+        Some
+          (require_ma_own_provider (fun () ->
+               match Account_store.selected_provider_account m.account with
+               | Some { provider_account_id; integration_id; _ } ->
+                   Update_nav.open_inline_modal m
+                     (Nav.Ma_provider_verify_form
+                        { provider_account_id; integration_id })
+               | None ->
+                   ( Model.with_toast ~now ~level:Model.Toast_warning
+                       (Say.make ~ko:"검증할 프로바이더 계정을 선택하세요"
+                          ~en:"Select a provider account to verify")
+                       m
+                   , [] )))
+    | Keymap.Input.Char "e" when is_printable_key norm ->
+        Some
+          (require_ma_own_provider (fun () ->
+               match Runtime_store.active_setup_login_id m.runtime with
+               | Some login_id ->
+                   Update_nav.open_inline_modal m
+                     (Nav.Setup_login_input_form { login_id })
+               | None ->
+                   ( Model.with_toast ~now ~level:Model.Toast_info
+                       (Say.make ~ko:"진행 중인 CLI 로그인 세션이 없습니다"
+                          ~en:"No active CLI login session")
+                       m
+                   , [] )))
+    | Keymap.Input.Char "x" when is_printable_key norm ->
+        Some
+          (require_ma_own_provider (fun () ->
+               match Runtime_store.active_setup_login_id m.runtime with
+               | Some login_id ->
+                   ( Model.with_toast ~now ~level:Model.Toast_info
+                       (Say.make
+                          ~ko:("CLI 로그인 취소 중: " ^ login_id)
+                          ~en:("Cancelling CLI login: " ^ login_id))
+                       m
+                   , [
+                       Cmd.Http_post
+                         {
+                           epoch = m.epoch;
+                           req = Cmd.Post_setup_login_cancel { login_id };
+                         };
+                     ] )
+               | None ->
+                   ( Model.with_toast ~now ~level:Model.Toast_info
+                       (Say.make ~ko:"취소할 진행 중인 CLI 로그인이 없습니다"
+                          ~en:"No active CLI login session to cancel")
+                       m
+                   , [] )))
+    | Keymap.Input.Char "L" when is_printable_key norm ->
+        Some
+          (require_ma_own_provider (fun () ->
+               match Runtime_store.active_setup_login_id m.runtime with
+               | Some login_id ->
+                   ( Model.with_toast ~now ~level:Model.Toast_info
+                       (Say.make
+                          ~ko:("로그인 상태 조회 중: " ^ login_id)
+                          ~en:("Polling login status: " ^ login_id))
+                       m
+                   , [
+                       Cmd.Http_get
+                         {
+                           epoch = m.epoch;
+                           req = Cmd.Get_setup_login_status { login_id };
+                         };
+                     ] )
+               | None ->
+                   ( Model.with_toast ~now ~level:Model.Toast_info
+                       (Say.make ~ko:"조회할 진행 중인 CLI 로그인이 없습니다"
+                          ~en:"No active CLI login session to poll")
+                       m
+                   , [] )))
+    | Keymap.Input.Char _
+    | Keymap.Input.Enter
+    | Keymap.Input.Tab
+    | Keymap.Input.Backspace
+    | Keymap.Input.Escape
+    | Keymap.Input.Delete
+    | Keymap.Input.Insert
+    | Keymap.Input.Up
+    | Keymap.Input.Down
+    | Keymap.Input.Left
+    | Keymap.Input.Right
+    | Keymap.Input.Home
+    | Keymap.Input.End
+    | Keymap.Input.Page_up
+    | Keymap.Input.Page_down
+    | Keymap.Input.Function _ ->
+        None
+
+let dispatch_system_gate_key ~now (m : Model.t) gate
+    (raw_norm : Keymap.Input.key_event) =
+  match gate with
+  | Nav.Auth_gate when m.account.token_editor.active ->
+      Some (dispatch_token_editor_key ~now m raw_norm)
+  | Nav.Auth_gate | Nav.Server_offline | Nav.Media_viewer | Nav.Micro_viewport ->
+  let norm = Keymap.replay_ime_event raw_norm in
   match gate, norm.key with
+  | Nav.Auth_gate, Keymap.Input.Char "t" when is_printable_key norm ->
+      Some ({ m with account = Account_store.open_token_editor m.account }, [])
+  | Nav.Auth_gate, Keymap.Input.Char "c" when is_printable_key norm ->
+      Some (Update_http.apply_runtime_token_swap ~now ~token:None m)
   | Nav.Server_offline, Keymap.Input.Char "s" when is_printable_key norm -> (
       match m.server_identity.mismatch_state with
       | Model.Mismatch_halted ->
@@ -1661,6 +1900,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
         Keymap.Refresh;
         Keymap.Teleport_blocked;
         Keymap.Open_settings;
+        Keymap.Open_account;
         Keymap.Open_palette;
         Keymap.Open_help;
         Keymap.Open_incidents;
@@ -1694,6 +1934,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
     | Some
         ( Nav.System_gate Nav.Media_viewer
         | Nav.Palette
+        | Nav.Account
         | Nav.Settings _
         | Nav.Incidents
         | Nav.Queue_context _
@@ -1838,6 +2079,11 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Runtime_assign_form
                         | Nav.Setup_account_key_form
                         | Nav.Setup_login_start_form
+                        | Nav.Ma_provider_login_form
+                        | Nav.Ma_provider_key_add_form
+                        | Nav.Ma_provider_key_replace_form _
+                        | Nav.Ma_provider_key_remove_confirm _
+                        | Nav.Ma_provider_verify_form _
                         | Nav.Board_comment _
                         | Nav.Github_token_form _
                         | Nav.Code_finder_form
@@ -2086,6 +2332,11 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                         | Nav.Runtime_assign_form
                         | Nav.Setup_account_key_form
                         | Nav.Setup_login_start_form
+                        | Nav.Ma_provider_login_form
+                        | Nav.Ma_provider_key_add_form
+                        | Nav.Ma_provider_key_replace_form _
+                        | Nav.Ma_provider_key_remove_confirm _
+                        | Nav.Ma_provider_verify_form _
                         | Nav.Board_comment _
                         | Nav.Github_token_form _
                         | Nav.Code_finder_form
@@ -2381,6 +2632,16 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                       norm
                   with
                   | Some act -> guard_settings_dirty_leave ~now m act
+                  | None -> (m, [])))
+          | Some Nav.Account -> (
+              match dispatch_account_overlay_key ~now m norm with
+              | Some res -> res
+              | None -> (
+                  match
+                    Keymap.dispatch ~scope_chain:(Model.focus_scope_chain m)
+                      norm
+                  with
+                  | Some act -> Update_actions.execute_action ~now m act
                   | None -> (m, [])))
           | Some Nav.Incidents -> (
               let is_clear_key =
@@ -2821,6 +3082,7 @@ let rec apply_key_event ~now (m : Model.t) (ev : Keymap.Input.key_event) =
                       | Keymap.Sub_tab _
                       | Keymap.Open_palette
                       | Keymap.Open_settings
+                      | Keymap.Open_account
                       | Keymap.Open_incidents
                       | Keymap.Open_queue_context
                       | Keymap.Open_help
@@ -3026,9 +3288,12 @@ let apply_paste ~now:_ (m : Model.t) text =
   then (m, [])
   else
     match m.nav.overlay with
-    | Some
-        (Nav.System_gate
-           (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline)) ->
+    | Some (Nav.System_gate Nav.Auth_gate) | Some Nav.Account ->
+        if m.account.token_editor.active then
+          ( { m with account = Account_store.append_token_text text m.account }
+          , [] )
+        else (m, [])
+    | Some (Nav.System_gate (Nav.Micro_viewport | Nav.Server_offline)) ->
         (m, [])
     | Some Nav.Palette ->
         let query = m.palette.query ^ strip_newlines text in
@@ -3070,6 +3335,11 @@ let apply_paste ~now:_ (m : Model.t) text =
                   | Nav.Runtime_assign_form
                   | Nav.Setup_account_key_form
                   | Nav.Setup_login_start_form
+                  | Nav.Ma_provider_login_form
+                  | Nav.Ma_provider_key_add_form
+                  | Nav.Ma_provider_key_replace_form _
+                  | Nav.Ma_provider_key_remove_confirm _
+                  | Nav.Ma_provider_verify_form _
                   | Nav.Board_comment _
                   | Nav.Github_token_form _
                   | Nav.Code_finder_form

@@ -104,11 +104,14 @@ let msg_error_of_http = function
 let standard_timeout_sec = 12.0
 let heavy_timeout_sec = 30.0
 let chat_stream_header_timeout_sec = 45.0
+let provider_verify_timeout_sec = 125.0
 
 let timeout_sec_for_get : Cmd.get_request -> float = function
   (* Standard tier: lightweight state reads and single-entity lookups *)
   | Cmd.Get_health
   | Cmd.Get_auth_whoami
+  | Cmd.Get_auth_provider_accounts
+  | Cmd.Get_auth_integrations
   | Cmd.Get_keeper_turns
   | Cmd.Get_chat_queue _
   | Cmd.Get_chat_status _
@@ -245,6 +248,7 @@ let timeout_sec_for_get : Cmd.get_request -> float = function
 
 let timeout_sec_for_post : Cmd.post_request -> float = function
   (* Standard tier: quick mutations *)
+  | Cmd.Post_setup_account_verify _ -> provider_verify_timeout_sec
   | Cmd.Post_ask_answer _
   | Cmd.Post_tool_approval _
   | Cmd.Post_gate_resolution _
@@ -263,7 +267,9 @@ let timeout_sec_for_post : Cmd.post_request -> float = function
   | Cmd.Post_runtime_lane_update _
   | Cmd.Post_runtime_lane_delete _
   | Cmd.Post_setup_account_key _
+  | Cmd.Post_ma_setup_account_key _
   | Cmd.Post_setup_login_input _
+  | Cmd.Post_setup_login_cancel _
   | Cmd.Post_tui_preference _
   | Cmd.Post_keeper_turn_interrupt _
   | Cmd.Post_keeper_lifecycle
@@ -509,7 +515,7 @@ type t = {
   clock : float Eio.Time.clock_ty Eio.Resource.t;
   cli : Cli_args.config;
   bus : bus;
-  explicit_bearer_override : bool;
+  explicit_bearer_override : bool Atomic.t;
   endpoint : Http_client.endpoint Atomic.t;
   stream_epoch : Epoch.t Atomic.t;
   owned_server : Masc_server_lifecycle.owned_server option Atomic.t;
@@ -701,9 +707,11 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
   Eio.Switch.check sw;
   let clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t) in
   let explicit_bearer_override =
-    (match bearer_token with Some _ -> true | None -> false)
-    || Option.is_some cli.Cli_args.token
-    || Option.is_some (Option.bind (Sys.getenv_opt "MASC_TOKEN") nonblank_trimmed)
+    Atomic.make
+      ((match bearer_token with Some _ -> true | None -> false)
+       || Option.is_some cli.Cli_args.token
+       || Option.is_some
+            (Option.bind (Sys.getenv_opt "MASC_TOKEN") nonblank_trimmed))
   in
   let initial_ep = endpoint_of_cli ?bearer_token cli in
   let endpoint = Atomic.make initial_ep in
@@ -776,6 +784,22 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
 
 let current_endpoint t = Atomic.get t.endpoint
 
+let set_bearer_token t (tok : string option) =
+  let normalized = Option.bind tok nonblank_trimmed in
+  Atomic.set t.explicit_bearer_override true;
+  let rec swap () =
+    let cur = Atomic.get t.endpoint in
+    let next_ep = { cur with bearer_token = normalized } in
+    if Atomic.compare_and_set t.endpoint cur next_ep then next_ep
+    else swap ()
+  in
+  let next_ep = swap () in
+  Sse_hub.update_endpoint t.sse_hub next_ep;
+  Stdlib.Mutex.lock t.in_flight_gets_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock t.in_flight_gets_mu)
+    (fun () -> Hashtbl.clear t.in_flight_gets)
+
 let has_pending_editor t = Option.is_some (Atomic.get t.pending_editor)
 
 let run_pending_editor ?(can_launch = fun () -> true) t =
@@ -812,11 +836,27 @@ let decode_raw_json t ~decode raw_body =
   in
   run_cpu_if_large t ~name:"tui_json_decode" ~bytes:(String.length raw_body) work
 
-let fetch_and_decode_get ~timeout_sec t ~path ~decode =
-  let ep = Atomic.get t.endpoint in
+let fetch_and_decode_get_with_endpoint ~timeout_sec t ep ~path ~decode =
   match Http_client.get_raw ~io:t.io ~clock:t.clock ~timeout_sec ep ~path with
   | Error err -> Error (msg_error_of_http err)
   | Ok raw -> decode_raw_json t ~decode raw
+
+let fetch_and_decode_get ~timeout_sec t ~path ~decode =
+  fetch_and_decode_get_with_endpoint ~timeout_sec t (Atomic.get t.endpoint)
+    ~path ~decode
+
+let fetch_health_with_anon_fallback ~fetch (ep : Http_client.endpoint) =
+  match fetch ep with
+  | Error (Msg.Http_error { status = (401 | 403); _ })
+    when Option.is_some ep.bearer_token ->
+      fetch { ep with bearer_token = None }
+  | ( Ok _
+    | Error
+        ( Msg.Http_error _
+        | Msg.Transport _
+        | Msg.Decode_error _
+        | Msg.Workspace_mismatch _ ) ) as result ->
+      result
 
 let post_and_decode ~timeout_sec t ~path ~body ~decode =
   let ep = Atomic.get t.endpoint in
@@ -1036,6 +1076,8 @@ let get_request_keys ~epoch ~path ~requested_at (req : Cmd.get_request) =
       Some base, snapshot_key
   | Cmd.Get_health
   | Cmd.Get_auth_whoami
+  | Cmd.Get_auth_provider_accounts
+  | Cmd.Get_auth_integrations
   | Cmd.Get_dashboard_shell
   | Cmd.Get_keepers_roster
   | Cmd.Get_keeper_turns
@@ -1212,7 +1254,7 @@ let rec execute_get t ~epoch req =
                   let msg =
         match req with
         | Cmd.Get_health ->
-            if not t.explicit_bearer_override then begin
+            if not (Atomic.get t.explicit_bearer_override) then begin
               let fresh_tok =
                 Eio_unix.run_in_systhread (fun () ->
                     load_bearer_token ~base_path:t.cli.base_path ())
@@ -1224,9 +1266,11 @@ let rec execute_get t ~epoch req =
                 Sse_hub.update_endpoint t.sse_hub next_ep
               end
             end;
+            let ep = Atomic.get t.endpoint in
             let result =
-              fetch_and_decode_get t ~path
-                ~decode:Wire_common.decode_server_health
+              fetch_health_with_anon_fallback ep ~fetch:(fun probe_ep ->
+                  fetch_and_decode_get_with_endpoint ~timeout_sec t probe_ep
+                    ~path ~decode:Wire_common.decode_server_health)
             in
             Msg.Server_health_result { epoch; result }
         | Cmd.Get_auth_whoami ->
@@ -1234,6 +1278,20 @@ let rec execute_get t ~epoch req =
               Msg.Reply_auth_whoami
                 (fetch_and_decode_get t ~path
                    ~decode:Wire_common.decode_auth_whoami)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_auth_provider_accounts ->
+            let reply =
+              Msg.Reply_auth_provider_accounts
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_account.decode_provider_accounts_snapshot)
+            in
+            Msg.Http_reply { epoch; reply }
+        | Cmd.Get_auth_integrations ->
+            let reply =
+              Msg.Reply_auth_integrations
+                (fetch_and_decode_get t ~path
+                   ~decode:Wire_account.decode_person_integrations_snapshot)
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_dashboard_shell ->
@@ -2913,6 +2971,24 @@ let execute_post t ~epoch req =
         | Cmd.Post_setup_account_key { integration_id; _ } ->
             let result = post_ack t ~path ~body in
             Some (Msg.Reply_setup_account_key { integration_id; result })
+        | Cmd.Post_ma_setup_account_key { integration_id; _ } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_account.decode_key_register_response
+            in
+            Some
+              (Msg.Reply_ma_setup_account_key_register
+                 { integration_id; result })
+        | Cmd.Post_setup_account_verify { provider_account_id; _ } ->
+            let result =
+              post_and_decode t ~path ~body
+                ~decode:Wire_account.decode_account_verify_response
+            in
+            Some
+              (Msg.Reply_setup_account_verify { provider_account_id; result })
+        | Cmd.Post_setup_login_cancel { login_id } ->
+            let result = post_ack t ~path ~body in
+            Some (Msg.Reply_setup_login_cancel { login_id; result })
         | Cmd.Post_setup_login_start _ ->
             let ep = Atomic.get t.endpoint in
             let body_str = Yojson.Safe.to_string body in
@@ -3748,7 +3824,37 @@ let execute_put t ~epoch req =
                 Error (Msg.Transport (Health.Other_io (Printexc.to_string ex)))
           in
           Ui_bus.publish_stream_receipt t.bus
-            (Msg.Http_reply { epoch; reply = Msg.Reply_wiki_put { page; result } }))
+            (Msg.Http_reply { epoch; reply = Msg.Reply_wiki_put { page; result } })
+      | Cmd.Put_ma_setup_account_key { provider_account_id; _ } ->
+          let ep = Atomic.get t.endpoint in
+          let result =
+            match
+              let body_str = Yojson.Safe.to_string body in
+              match
+                Http_client.put_raw ~io:t.io ~clock:t.clock
+                  ~timeout_sec:standard_timeout_sec
+                  ~content_type:"application/json" ~body:body_str ep ~path
+              with
+              | Error err -> Error (msg_error_of_http err)
+              | Ok raw ->
+                  decode_raw_json t
+                    ~decode:Wire_account.decode_key_replace_response raw
+            with
+            | r -> r
+            | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
+            | exception Io_domain.Closed ->
+                Error (Msg.Transport (Health.Other_io "IO domain closed"))
+            | exception ex ->
+                Error (Msg.Transport (Health.Other_io (Printexc.to_string ex)))
+          in
+          Ui_bus.publish_stream_receipt t.bus
+            (Msg.Http_reply
+               {
+                 epoch;
+                 reply =
+                   Msg.Reply_ma_setup_account_key_replace
+                     { provider_account_id; result };
+               }))
 
 let execute_delete t ~epoch req =
   let path = Cmd.delete_request_path req in
@@ -3783,6 +3889,34 @@ let execute_delete t ~epoch req =
                  reply =
                    Msg.Reply_skill_editor_outcome
                      { action = `Delete; reference; result };
+               })
+      | Cmd.Delete_ma_setup_account_key { provider_account_id } ->
+          let ep = Atomic.get t.endpoint in
+          let result =
+            match
+              match
+                Http_client.delete_raw ~io:t.io ~clock:t.clock
+                  ~timeout_sec:standard_timeout_sec ep ~path
+              with
+              | Error err -> Error (msg_error_of_http err)
+              | Ok raw ->
+                  decode_raw_json t
+                    ~decode:Wire_account.decode_key_remove_response raw
+            with
+            | r -> r
+            | exception (Eio.Cancel.Cancelled _ as ex) -> raise ex
+            | exception Io_domain.Closed ->
+                Error (Msg.Transport (Health.Other_io "IO domain closed"))
+            | exception ex ->
+                Error (Msg.Transport (Health.Other_io (Printexc.to_string ex)))
+          in
+          Ui_bus.publish_stream_receipt t.bus
+            (Msg.Http_reply
+               {
+                 epoch;
+                 reply =
+                   Msg.Reply_ma_setup_account_key_remove
+                     { provider_account_id; result };
                }))
 
 (* A chat operation keeps running when its stream drops: the server journals
@@ -4525,7 +4659,7 @@ let execute_start_local_server t =
                     (* Reload admin.token whenever no explicit MASC_TOKEN or
                        bearer_token override was supplied so a freshly minted
                        token replaces any stale pre-boot file token. *)
-                    if not t.explicit_bearer_override then begin
+                    if not (Atomic.get t.explicit_bearer_override) then begin
                       let fresh_tok =
                         Eio_unix.run_in_systhread (fun () ->
                             load_bearer_token ~base_path:t.cli.base_path ())
@@ -4920,6 +5054,7 @@ let rec execute t = function
                        result = Error (Msg.Transport (Health.Protocol_error msg));
                      };
                }))
+  | Cmd.Set_bearer_token tok -> set_bearer_token t tok
   | Cmd.Update_workspace_guard { instance_id; workspace_sha256 } ->
       update_workspace_guard t ~instance_id ~workspace_sha256
   | Cmd.Voice_cmd vc -> Voice_runner.dispatch t.voice_runner (voice_cmd_of_store vc)

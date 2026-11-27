@@ -168,6 +168,11 @@ let target_of_form (kind : Nav.inline_action_kind) =
   | Nav.Runtime_assign_form
   | Nav.Setup_account_key_form
   | Nav.Setup_login_start_form
+  | Nav.Ma_provider_login_form
+  | Nav.Ma_provider_key_add_form
+  | Nav.Ma_provider_key_replace_form _
+  | Nav.Ma_provider_key_remove_confirm _
+  | Nav.Ma_provider_verify_form _
   | Nav.Board_comment _
   | Nav.Github_token_form _
   | Nav.Code_finder_form

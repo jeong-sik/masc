@@ -36,6 +36,7 @@ type command_id =
   | Cmd_clear
   | Cmd_theme
   | Cmd_lang
+  | Cmd_account
   | Cmd_help
   | Cmd_restart
   | Cmd_quit
@@ -209,6 +210,7 @@ type parsed =
   | Clear
   | Theme of Theme.preset option
   | Lang of Say.lang option
+  | Account
   | Help
   | Restart
   | Quit
@@ -268,6 +270,7 @@ let command_id_rank = function
   | Cmd_restart -> 34
   | Cmd_quit -> 35
   | Cmd_discord_reply -> 36
+  | Cmd_account -> 37
 
 let equal_command_id a b = Int.equal (command_id_rank a) (command_id_rank b)
 
@@ -624,6 +627,7 @@ let parsed_tag = function
   | Music _ -> 36
   | Score _ -> 37
   | Discord_reply -> 38
+  | Account -> 39
 
 let equal_parsed a b =
   if not (Int.equal (parsed_tag a) (parsed_tag b)) then false
@@ -669,6 +673,7 @@ let equal_parsed a b =
     | Queue, Queue
     | Context, Context
     | Clear, Clear
+    | Account, Account
     | Help, Help
     | Restart, Restart
     | Quit, Quit ->
@@ -707,6 +712,7 @@ let equal_parsed a b =
       | Clear
       | Theme _
       | Lang _
+      | Account
       | Help
       | Restart
       | Quit
@@ -888,6 +894,10 @@ let all : spec list =
       ~arg_hint:(Say.make ~ko:"[ko|en]" ~en:"[ko|en]")
       ~ko:"UI 언어 전환 (한국어/English)"
       ~en:"Switch UI language (ko/en)" Slash_display;
+    mk Cmd_account "/account"
+      ~ko:"계정·세션·토큰 전환 및 다중 계정 프로바이더 오버레이 열기"
+      ~en:"Open Account, Session, Token & Multi-Account Provider overlay"
+      Slash_session;
     mk Cmd_help "/help" ~ko:"동적 단축키 및 명령 도움말 열기"
       ~en:"Open dynamic keymap & command help" Slash_session;
     mk Cmd_restart "/restart" ~ko:"TUI 세션 안전 재시작 요청"
@@ -2009,6 +2019,7 @@ let parse raw =
                        expected = Say.make ~ko:"ko | en" ~en:"ko | en";
                        got = raw_lang;
                      })))
+    | "/account" -> no_arg cmd Account arg
     | "/help" -> no_arg cmd Help arg
     | "/restart" -> no_arg cmd Restart arg
     | "/quit" -> no_arg cmd Quit arg

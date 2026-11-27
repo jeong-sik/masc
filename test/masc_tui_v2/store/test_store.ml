@@ -144,6 +144,8 @@ let has_get_health cmds =
           {
             req =
               ( Cmd.Get_auth_whoami
+              | Cmd.Get_auth_provider_accounts
+              | Cmd.Get_auth_integrations
               | Cmd.Get_dashboard_shell
               | Cmd.Get_keepers_roster
               | Cmd.Get_keeper_turns
@@ -280,7 +282,7 @@ let has_get_health cmds =
       | Cmd.Http_put _ | Cmd.Http_delete _
       | Cmd.Http_post_stream _
       | Cmd.Sync_streams _
-      | Cmd.Update_workspace_guard _
+      | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
       | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
@@ -300,7 +302,7 @@ let has_sync_streams cmds =
       | Cmd.Http_post _
       | Cmd.Http_put _ | Cmd.Http_delete _
       | Cmd.Http_post_stream _
-      | Cmd.Update_workspace_guard _
+      | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
       | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
@@ -321,7 +323,7 @@ let has_quit cmds =
       | Cmd.Http_put _ | Cmd.Http_delete _
       | Cmd.Http_post_stream _
       | Cmd.Sync_streams _
-      | Cmd.Update_workspace_guard _
+      | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
       | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
@@ -518,7 +520,7 @@ let test_three_channel_separation () =
         | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
-        | Cmd.Update_workspace_guard _
+        | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
         | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
@@ -551,7 +553,7 @@ let test_three_channel_separation () =
         | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
-        | Cmd.Update_workspace_guard _
+        | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
         | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
@@ -1108,6 +1110,7 @@ let test_workspace_mismatch_recovery () =
         | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
         | Cmd.Start_local_server
         | Cmd.Restart_tui
+        | Cmd.Set_bearer_token _
         | Cmd.Quit _ ->
             false)
       cmds3
@@ -1542,7 +1545,7 @@ let test_verifier_regressions () =
         | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
-        | Cmd.Update_workspace_guard _
+        | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
         | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
@@ -1825,7 +1828,7 @@ let test_verifier_regressions () =
     | Cmd.Http_put _ | Cmd.Http_delete _
     | Cmd.Http_post_stream _
     | Cmd.Sync_streams _
-    | Cmd.Update_workspace_guard _
+    | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _
     | Cmd.Voice_cmd _
     | Cmd.Copy_clipboard _
     | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
@@ -1916,8 +1919,11 @@ let test_verifier_regressions () =
         | Cmd.Post_runtime_lane_update _
         | Cmd.Post_runtime_lane_delete _
         | Cmd.Post_setup_account_key _
+        | Cmd.Post_ma_setup_account_key _
+        | Cmd.Post_setup_account_verify _
         | Cmd.Post_setup_login_start _
         | Cmd.Post_setup_login_input _
+        | Cmd.Post_setup_login_cancel _
         | Cmd.Post_sandbox_probe _
         | Cmd.Post_tui_preference _
         | Cmd.Post_keeper_turn_interrupt _
@@ -1999,7 +2005,7 @@ let test_verifier_regressions () =
     | Cmd.Http_put _ | Cmd.Http_delete _
     | Cmd.Http_post_stream _
     | Cmd.Sync_streams _
-    | Cmd.Update_workspace_guard _
+    | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _
     | Cmd.Voice_cmd _
     | Cmd.Copy_clipboard _
     | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
@@ -2096,7 +2102,7 @@ let test_verifier_regressions () =
         | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
-        | Cmd.Update_workspace_guard _
+        | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
         | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
@@ -2227,7 +2233,7 @@ let test_round1_settings_and_overlay_transitions () =
         | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
-        | Cmd.Update_workspace_guard _
+        | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
         | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
@@ -2331,7 +2337,7 @@ let test_round2_store_regressions () =
         | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
-        | Cmd.Update_workspace_guard _
+        | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
         | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
@@ -2638,7 +2644,7 @@ let test_v25_data_pipeline_and_settings_2pane () =
             String.equal (Cmd.get_request_path req) expected
         | Cmd.Batch _ | Cmd.Http_post _ | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
-        | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
+        | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _ | Cmd.Start_local_server
         | Cmd.Restart_tui | Cmd.Quit _ ->
@@ -3051,7 +3057,7 @@ let test_v25_data_pipeline_and_settings_2pane () =
             String.equal (Cmd.get_request_path req) "/api/v1/runtime/metrics"
         | Cmd.Batch _ | Cmd.Http_post _ | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
-        | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
+        | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _ | Cmd.Start_local_server
         | Cmd.Restart_tui | Cmd.Quit _ ->
@@ -3767,7 +3773,7 @@ let test_p0_actions_settings_safety_and_wired_cmds () =
         | Cmd.Http_post { req; _ } -> Some req
         | Cmd.Batch _ | Cmd.Http_get _ | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
-        | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
+        | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _
         | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _
         | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
@@ -6614,7 +6620,7 @@ let test_p1_work_inbox_ask_approval_sync () =
         | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
-        | Cmd.Update_workspace_guard _
+        | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
         | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
@@ -6668,7 +6674,7 @@ let test_p1_work_inbox_ask_approval_sync () =
         | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
-        | Cmd.Update_workspace_guard _
+        | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _ | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
@@ -8079,7 +8085,7 @@ let test_memory_explorer_store_fetches_reading_and_sse () =
         | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
-        | Cmd.Update_workspace_guard _
+        | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _
         | Cmd.Render_memory_diagram _ | Cmd.Cancel_memory_diagram
@@ -9063,7 +9069,7 @@ let test_failure_is_asked_again_for_a_new_question () =
             String.equal keeper "beta"
         | Cmd.Http_get _ | Cmd.Batch _ | Cmd.Http_post _ | Cmd.Http_put _ | Cmd.Http_delete _
         | Cmd.Http_post_stream _ | Cmd.Sync_streams _
-        | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
+        | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _ | Cmd.Voice_cmd _
         | Cmd.Copy_clipboard _ | Cmd.Render_memory_diagram _
         | Cmd.Cancel_memory_diagram | Cmd.Fetch_artifact_and_copy _
         | Cmd.Export_artifact _ | Cmd.Open_dos_screen _ | Cmd.Open_external_url _
@@ -9700,7 +9706,7 @@ let sent_get req cmds =
       | Cmd.Http_put _ | Cmd.Http_delete _
       | Cmd.Http_post_stream _
       | Cmd.Sync_streams _
-      | Cmd.Update_workspace_guard _
+      | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
       | Cmd.Render_memory_diagram _
@@ -21565,7 +21571,7 @@ let test_layer2_pane_scroll_nav_wayfinding () =
          (Knowledge_store.Window_revs { from_rev = 1; to_rev = 4 }));
 
   (* #17: All 6 keeper tabs map 1:1 in Nav.all_menu_items & Model.active_menu_target *)
-  Alcotest.(check int) "#17: Nav.all_menu_items has 33 items" 33
+  Alcotest.(check int) "#17: Nav.all_menu_items has 34 items" 34
     (List.length Nav.all_menu_items);
   List.iter
     (fun kt ->

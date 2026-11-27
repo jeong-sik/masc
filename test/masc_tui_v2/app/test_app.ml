@@ -841,6 +841,15 @@ let test_cmd_executor_dispatch_and_cancellation () =
            (Some "inst-1") ep.guard.expected_instance;
          Alcotest.(check (option string)) "guard workspace updated"
            (Some "ws-1") ep.guard.expected_workspace;
+         (* Runtime Set_bearer_token updates endpoint synchronously and clears cleanly *)
+         Cmd_executor.execute exec (Cmd.Set_bearer_token (Some "  pat-runtime-42  "));
+         Alcotest.(check (option string)) "Set_bearer_token updates bearer_token"
+           (Some "pat-runtime-42")
+           (Cmd_executor.current_endpoint exec).bearer_token;
+         Cmd_executor.execute exec (Cmd.Set_bearer_token None);
+         Alcotest.(check (option string)) "Set_bearer_token None clears bearer_token"
+           None
+           (Cmd_executor.current_endpoint exec).bearer_token;
          Alcotest.(check bool) "restart callback fired" true !restart_seen;
          (match !quit_seen with
          | Some Exit_reason.Quit_key -> ()
@@ -907,6 +916,268 @@ let test_cmd_executor_dispatch_and_cancellation () =
    with
   | () -> Alcotest.fail "expected switch cancellation with Exit"
   | exception Exit -> ())
+
+let test_health_anon_fallback_and_explicit_token_override () =
+  let module W = Masc_tui_protocol.Wire_common in
+  let rec ensure_dir dir =
+    if Sys.file_exists dir then ()
+    else begin
+      ensure_dir (Filename.dirname dir);
+      Unix.mkdir dir 0o700
+    end
+  in
+  let base_ep : Http_client.endpoint =
+    {
+      scheme = "http";
+      host = "127.0.0.1";
+      port = 8935;
+      bearer_token = Some "tok-initial";
+      guard = Http_client.no_guard;
+    }
+  in
+  let public_health : W.server_health =
+    {
+      ok = true;
+      live = Some true;
+      ready = Some true;
+      phase = Some "ready";
+      status = "ok";
+      version = "0.99.0";
+      binary_commit = None;
+      uptime_display = None;
+      uptime_sec = None;
+      scope = W.Public_health;
+      gc = None;
+      active_keepers = None;
+      account_mode = Rbac.Single_user;
+      auth_methods = Rbac.default_auth_methods;
+    }
+  in
+  let full_health : W.server_health =
+    {
+      public_health with
+      scope =
+        W.Full_health
+          {
+            instance_id = Some "inst-1";
+            base_path = "/tmp";
+            masc_root = "/tmp/.masc";
+            workspace_sha256 = Some "sha-1";
+          };
+    }
+  in
+  (* 1. Pure fetch_health_with_anon_fallback: 401 & 403 with token retry ONCE anonymously *)
+  List.iter
+    (fun status ->
+      let seen_tokens = ref [] in
+      let res =
+        Cmd_executor.fetch_health_with_anon_fallback base_ep ~fetch:(fun ep ->
+            seen_tokens := ep.bearer_token :: !seen_tokens;
+            match ep.bearer_token with
+            | Some _ ->
+                Error
+                  (Msg.Http_error { status; body = "denied"; api_error = None })
+            | None -> Ok public_health)
+      in
+      let lbl = Printf.sprintf "HTTP %d with token" status in
+      Alcotest.(check (list (option string)))
+        (lbl ^ " retries once anonymously")
+        [ Some "tok-initial"; None ]
+        (List.rev !seen_tokens);
+      Alcotest.(check bool) (lbl ^ " resolves Ok Public_health") true
+        (match res with
+        | Ok { scope = W.Public_health; _ } -> true
+        | Ok { scope = W.Full_health _; _ } | Error _ -> false))
+    [ 401; 403 ];
+  (* 2. Valid token returning Full_health does NOT retry anonymously *)
+  let valid_calls = ref 0 in
+  let res_full =
+    Cmd_executor.fetch_health_with_anon_fallback base_ep ~fetch:(fun _ ->
+        incr valid_calls;
+        Ok full_health)
+  in
+  Alcotest.(check int) "Full_health calls fetch once" 1 !valid_calls;
+  Alcotest.(check bool) "Full_health preserved" true
+    (match res_full with
+    | Ok { scope = W.Full_health _; _ } -> true
+    | Ok { scope = W.Public_health; _ } | Error _ -> false);
+  (* 3. 401/403 with bearer_token = None does NOT retry *)
+  let anon_calls = ref 0 in
+  let res_anon_401 =
+    Cmd_executor.fetch_health_with_anon_fallback
+      { base_ep with bearer_token = None }
+      ~fetch:(fun _ ->
+        incr anon_calls;
+        Error (Msg.Http_error { status = 401; body = "unauth"; api_error = None }))
+  in
+  Alcotest.(check int) "anon 401 calls fetch once (no loop)" 1 !anon_calls;
+  Alcotest.(check bool) "anon 401 returns Error" true (Result.is_error res_anon_401);
+  (* 4. 500 & Transport errors with token do NOT fall back anonymously *)
+  let err500_calls = ref 0 in
+  ignore
+    (Cmd_executor.fetch_health_with_anon_fallback base_ep ~fetch:(fun _ ->
+         incr err500_calls;
+         Error (Msg.Http_error { status = 500; body = "oops"; api_error = None })));
+  Alcotest.(check int) "HTTP 500 calls fetch once" 1 !err500_calls;
+  let transport_calls = ref 0 in
+  ignore
+    (Cmd_executor.fetch_health_with_anon_fallback base_ep ~fetch:(fun _ ->
+         incr transport_calls;
+         Error (Msg.Transport Health.Timeout)));
+  Alcotest.(check int) "Transport error calls fetch once" 1 !transport_calls;
+
+  (* 5. Live loopback Cmd_executor:
+     - 403 on authenticated GET /health falls back anonymously WITHOUT mutating stored token
+     - Explicit Set_bearer_token None prevents Get_health from reloading disk admin.token *)
+  let tmp = make_temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf tmp)
+    (fun () ->
+      let token_path = Cmd_executor.admin_token_path ~base_path:tmp in
+      ensure_dir (Filename.dirname token_path);
+      Out_channel.with_open_bin token_path (fun oc ->
+          Out_channel.output_string oc "disk-admin-token-99\n");
+      Eio_main.run @@ fun env ->
+      Eio.Time.with_timeout_exn env#clock 5. @@ fun () ->
+      Eio.Switch.run @@ fun sw ->
+      let seen_auth_headers = ref [] in
+      let listener =
+        Eio.Net.listen ~sw ~backlog:4 env#net
+          (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+      in
+      let port =
+        match Eio.Net.listening_addr listener with
+        | `Tcp (_, p) -> p
+        | `Unix _ -> Alcotest.fail "expected TCP listener"
+      in
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+          let rec accept () =
+            Eio.Net.accept_fork ~sw listener
+              ~on_error:(function End_of_file -> () | exn -> raise exn)
+              (fun flow _ ->
+                let reader = Eio.Buf_read.of_flow flow ~max_size:4096 in
+                let _request = Eio.Buf_read.line reader in
+                let headers =
+                  Eio.Buf_read.lines reader
+                  |> Seq.take_while (fun s -> s <> "")
+                  |> List.of_seq
+                in
+                let auth_hdr =
+                  List.find_map
+                    (fun h ->
+                      match String.index_opt h ':' with
+                      | None -> None
+                      | Some idx ->
+                          let k =
+                            String.lowercase_ascii
+                              (String.trim (String.sub h 0 idx))
+                          in
+                          if String.equal k "authorization" then
+                            Some
+                              (String.trim
+                                 (String.sub h (idx + 1)
+                                    (String.length h - idx - 1)))
+                          else None)
+                    headers
+                in
+                seen_auth_headers := auth_hdr :: !seen_auth_headers;
+                let status, raw =
+                  match auth_hdr with
+                  | Some _ ->
+                      ( 403
+                      , {|{"error":"player token lacks CanReadState"}|} )
+                  | None ->
+                      ( 200
+                      , {|{"ok":true,"live":true,"ready":true,"status":"ok","version":"0.99.0","account_mode":"single_user","auth_methods":{"google":false,"github":false,"dev_token":true}}|}
+                      )
+                in
+                Eio.Flow.copy_string
+                  (Printf.sprintf
+                     "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s"
+                     status
+                     (if status = 200 then "OK" else "Forbidden")
+                     (String.length raw) raw)
+                  flow);
+            accept ()
+          in
+          accept ());
+      let cli =
+        match
+          Cli_args.parse ~env:empty_env ~cwd:tmp
+            [
+              "--port";
+              string_of_int port;
+              "--base-path";
+              tmp;
+              "--no-auto-start";
+            ]
+        with
+        | Cli_args.Run cli -> cli
+        | Cli_args.Info _ | Cli_args.Parse_error _ ->
+            Alcotest.fail "expected valid Cli_args.Run"
+      in
+      let io = Io_domain.start ~sw ~env in
+      let worker = Worker_pool.create ~sw env#domain_mgr in
+      let bus = Cmd_executor.create_bus () in
+      let exec =
+        Cmd_executor.create ~sw ~io ~worker ~clock:env#clock ~cli ~bus
+          ~bearer_token:(Some "su-player-tok") ~on_quit:ignore ~on_restart:ignore
+          ()
+      in
+      let await_health () =
+        let rec loop () =
+          match
+            Ui_bus.drain bus
+            |> List.find_map (function
+                 | Ui_bus.Snapshot (_, Msg.Server_health_result { result; _ })
+                 | Ui_bus.Stream_event (Msg.Server_health_result { result; _ }) ->
+                     Some result
+                 | _ -> None)
+          with
+          | Some r -> r
+          | None ->
+              Eio.Time.sleep env#clock 0.002;
+              loop ()
+        in
+        loop ()
+      in
+      Fun.protect
+        ~finally:(fun () -> Cmd_executor.shutdown exec)
+        (fun () ->
+          (* First: runtime Set_bearer_token pins explicit override; Get_health gets 403 then retries anon *)
+          Cmd_executor.execute exec (Cmd.Set_bearer_token (Some "su-player-tok"));
+          Cmd_executor.execute exec
+            (Cmd.Http_get { epoch = Epoch.initial; req = Cmd.Get_health });
+          let res1 = await_health () in
+          Alcotest.(check bool) "live 403 /health settles to Ok Public_health"
+            true
+            (match res1 with
+            | Ok { scope = W.Public_health; account_mode = Rbac.Single_user; _ } ->
+                true
+            | Ok _ | Error _ -> false);
+          Alcotest.(check (option string))
+            "anon /health fallback does NOT clear stored bearer_token"
+            (Some "su-player-tok")
+            (Cmd_executor.current_endpoint exec).bearer_token;
+          Alcotest.(check (list (option string)))
+            "server saw Bearer then anonymous retry"
+            [ Some "Bearer su-player-tok"; None ]
+            (List.rev !seen_auth_headers);
+          (* Second: Set_bearer_token None + Get_health must NOT reload disk admin.token *)
+          seen_auth_headers := [];
+          Cmd_executor.execute exec (Cmd.Set_bearer_token None);
+          Cmd_executor.execute exec
+            (Cmd.Http_get { epoch = Epoch.next Epoch.initial; req = Cmd.Get_health });
+          let res2 = await_health () in
+          Alcotest.(check bool) "cleared token Get_health succeeds anonymously"
+            true (Result.is_ok res2);
+          Alcotest.(check (option string))
+            "Set_bearer_token None not clobbered by disk admin.token on Get_health"
+            None
+            (Cmd_executor.current_endpoint exec).bearer_token;
+          Alcotest.(check (list (option string)))
+            "cleared token sends single anonymous /health request" [ None ]
+            (List.rev !seen_auth_headers)))
 
 let test_remote_editor_escape_hatch_blocked () =
   (* 1. Pure loopback host check. *)
@@ -3751,6 +4022,9 @@ let () =
             test_cmd_executor_mappings_and_url_safety;
           Alcotest.test_case "async dispatch, Ui_bus replies & cancellation"
             `Quick test_cmd_executor_dispatch_and_cancellation;
+          Alcotest.test_case
+            "GET /health 401/403 anonymous fallback & explicit bearer token override"
+            `Quick test_health_anon_fallback_and_explicit_token_override;
           Alcotest.test_case
             "remote --url blocks local TOML $EDITOR & Target_keeper_create refuses fallback"
             `Quick test_remote_editor_escape_hatch_blocked;

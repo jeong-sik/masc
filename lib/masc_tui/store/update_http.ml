@@ -38,6 +38,7 @@ let handle_workspace_mismatch ~now ~expected ~observed ~message (m : Model.t) =
     | Some (Nav.Ask_answer | Nav.Inline_action _) -> { nav with overlay = None }
     | Some
         ( Nav.Palette
+        | Nav.Account
         | Nav.Settings _
         | Nav.Incidents
         | Nav.Queue_context _
@@ -63,6 +64,7 @@ let handle_workspace_mismatch ~now ~expected ~observed ~message (m : Model.t) =
           nav = clear_modal_nav m.nav;
           ask_modal = None;
           inline_modal = None;
+          account = Account_store.close_token_editor m.account;
           incidents;
           freshness;
           server_identity;
@@ -92,6 +94,7 @@ let handle_workspace_mismatch ~now ~expected ~observed ~message (m : Model.t) =
           nav = clear_modal_nav m.nav;
           ask_modal = None;
           inline_modal = None;
+          account = Account_store.close_token_editor m.account;
           incidents;
           freshness;
           server_identity;
@@ -345,6 +348,11 @@ let purge_disallowed_state ~(session : Rbac.auth_session) (m : Model.t) :
         late_approval_auth_denied = false;
       }
   in
+  let account =
+    let a0 = Account_store.close_token_editor m.account in
+    if Rbac.is_allowed session Rbac.Multi_account_own_provider then a0
+    else Account_store.purge_own_provider_data a0
+  in
   let next =
     {
       m with
@@ -357,6 +365,7 @@ let purge_disallowed_state ~(session : Rbac.auth_session) (m : Model.t) :
       keeper_context;
       knowledge;
       work;
+      account;
     }
   in
   if Rbac.can_single_user_token_admin session then next
@@ -368,6 +377,7 @@ let clear_auth_gate_overlay = function
       ( Nav.System_gate
           (Nav.Micro_viewport | Nav.Server_offline | Nav.Media_viewer)
       | Nav.Palette
+      | Nav.Account
       | Nav.Settings _
       | Nav.Incidents
       | Nav.Queue_context _
@@ -376,6 +386,57 @@ let clear_auth_gate_overlay = function
       | Nav.Help ) as ov ->
       ov
   | None -> None
+
+let apply_runtime_token_swap ~now ~(token : string option) (m : Model.t) =
+  let next_epoch = Epoch.next m.epoch in
+  let account =
+    let a0 =
+      match token with
+      | Some _ -> Account_store.mark_token_runtime_set m.account
+      | None -> Account_store.mark_token_runtime_cleared m.account
+    in
+    Account_store.purge_own_provider_data a0
+  in
+  let server_identity =
+    {
+      m.server_identity with
+      workspace = None;
+      observer_instance_id = None;
+      mismatch_state = Model.Mismatch_none;
+    }
+  in
+  let toast_msg =
+    match token with
+    | Some _ ->
+        Say.make ~ko:"토큰 적용됨 · 세션 재확인 중"
+          ~en:"Token applied · re-checking session"
+    | None ->
+        Say.make ~ko:"토큰 해제됨 · 세션 재확인 중"
+          ~en:"Token cleared · re-checking session"
+  in
+  let next =
+    {
+      m with
+      epoch = next_epoch;
+      auth_session = Rbac.Probing_health;
+      last_auth_recheck_mono = None;
+      server_identity;
+      account;
+      infra = Infra_store.forget_log_cursor m.infra;
+    }
+    |> purge_disallowed_state ~session:Rbac.Probing_health
+    |> Model.mark_all_domains_stale
+    |> Model.with_toast ~now ~level:Model.Toast_info toast_msg
+  in
+  let cmds =
+    [
+      Cmd.Set_bearer_token token;
+      Cmd.Update_workspace_guard { instance_id = None; workspace_sha256 = None };
+      Cmd.Sync_streams { epoch = next_epoch; streams = [] };
+      Cmd.Http_get { epoch = next_epoch; req = Cmd.Get_health };
+    ]
+  in
+  (next, cmds)
 
 let apply_auth_session_transition ~now ~(next_session : Rbac.auth_session)
     (m : Model.t) =
@@ -521,6 +582,27 @@ let record_http_incident ~now ~source ~context err (m : Model.t) =
 
 (* A decision POST that failed leaves its attention item actionable again,
    records an incident, and toasts the failure. *)
+let handle_ma_own_provider_forbidden ~now ~source ~context ~toast err
+    (m : Model.t) =
+  let detail = Msg.http_error_detail err in
+  let summary =
+    Say.concat ~sep:": " [ context; Msg.http_error_summary err ]
+  in
+  let incidents, _ =
+    Incidents.push ~occurred_at_unix:m.freshness.last_wall_unix ~source
+      ~summary ~detail ~status:Health.Resolved m.incidents
+  in
+  let account =
+    Account_store.mark_own_provider_forbidden ~at:now ~reason:detail m.account
+  in
+  let m1 = { m with incidents; account } in
+  let next =
+    match toast with
+    | Some (level, msg) -> Model.with_toast ~now ~level msg m1
+    | None -> m1
+  in
+  (next, [])
+
 let fail_decision_post ~now ~attention_id ~context err (m : Model.t) =
   let attention =
     match attention_id with
@@ -896,6 +978,275 @@ let apply_http_reply ~now (m : Model.t) reply =
         apply_auth_session_transition ~now ~next_session m1
       in
       (next, inc_cmds @ trans_cmds)
+  | Msg.Reply_auth_provider_accounts (Ok snap) ->
+      ( {
+          m with
+          account = Account_store.apply_provider_accounts ~observed_at:now snap m.account;
+        }
+      , [] )
+  | Msg.Reply_auth_provider_accounts
+      (Error (Msg.Http_error { status = 403; _ } as err)) ->
+      handle_ma_own_provider_forbidden ~now
+        ~source:(Health.Source_runtime "provider_accounts")
+        ~context:(Say.make ~ko:"프로바이더 계정 조회" ~en:"Provider accounts fetch")
+        ~toast:
+          (Some
+             ( Model.Toast_warning
+             , Say.make
+                 ~ko:"프로바이더 관리 권한 부족 (HTTP 403) — manage_own_provider 스코프가 필요합니다"
+                 ~en:"Own-provider access denied (HTTP 403) — PAT lacks manage_own_provider scope"
+             ))
+        err m
+  | Msg.Reply_auth_provider_accounts (Error err) ->
+      err_reply
+        ~fail:(fun m' ->
+          {
+            m' with
+            account =
+              {
+                m'.account with
+                provider_accounts = failed_slot err m'.account.provider_accounts;
+              };
+          })
+        ~source:(Health.Source_runtime "provider_accounts")
+        ~ko:"프로바이더 계정 조회" ~en:"Provider accounts fetch" err
+  | Msg.Reply_auth_integrations (Ok snap) ->
+      ( {
+          m with
+          account = Account_store.apply_integrations ~observed_at:now snap m.account;
+        }
+      , [] )
+  | Msg.Reply_auth_integrations
+      (Error (Msg.Http_error { status = 403; _ } as err)) ->
+      handle_ma_own_provider_forbidden ~now
+        ~source:(Health.Source_runtime "integrations")
+        ~context:(Say.make ~ko:"연동 목록 조회" ~en:"Integrations fetch")
+        ~toast:None err m
+  | Msg.Reply_auth_integrations (Error err) ->
+      err_reply
+        ~fail:(fun m' ->
+          {
+            m' with
+            account =
+              {
+                m'.account with
+                integrations = failed_slot err m'.account.integrations;
+              };
+          })
+        ~source:(Health.Source_runtime "integrations")
+        ~ko:"연동 목록 조회" ~en:"Integrations fetch" err
+  | Msg.Reply_setup_account_verify { provider_account_id; result = Ok resp } ->
+      let account =
+        Account_store.apply_verification ~provider_account_id resp m.account
+      in
+      let v = resp.verification in
+      let level, toast =
+        match v.status with
+        | Wire_account.Verify_verified ->
+            ( Model.Toast_success
+            , Say.make
+                ~ko:(Printf.sprintf "검증 완료: %s (%s)" provider_account_id v.runtime_id)
+                ~en:(Printf.sprintf "Verified: %s (%s)" provider_account_id v.runtime_id) )
+        | Wire_account.Verify_failed | Wire_account.Verify_unavailable ->
+            let reason =
+              match v.failure with
+              | Some f -> Printf.sprintf "%s: %s" f.code f.message
+              | None -> Wire_account.verification_status_to_string v.status
+            in
+            ( Model.Toast_warning
+            , Say.make
+                ~ko:(Printf.sprintf "검증 실패 (%s): %s" provider_account_id reason)
+                ~en:(Printf.sprintf "Verification failed (%s): %s" provider_account_id reason) )
+      in
+      ( Model.with_toast ~now ~level toast { m with account }
+      , [
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_auth_provider_accounts };
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_resolved };
+        ] )
+  | Msg.Reply_setup_account_verify
+      { provider_account_id; result = Error (Msg.Http_error { status = 403; _ } as err) } ->
+      handle_ma_own_provider_forbidden ~now
+        ~source:(Health.Source_runtime "provider_verify")
+        ~context:
+          (Say.make
+             ~ko:("프로바이더 검증: " ^ provider_account_id)
+             ~en:("Verify provider account: " ^ provider_account_id))
+        ~toast:(Some (Model.Toast_error, Msg.http_error_summary err))
+        err m
+  | Msg.Reply_setup_account_verify { provider_account_id; result = Error err } ->
+      let next, cmds =
+        record_http_incident ~now ~source:(Health.Source_runtime "provider_verify")
+          ~context:
+            (Say.make
+               ~ko:("프로바이더 검증: " ^ provider_account_id)
+               ~en:("Verify provider account: " ^ provider_account_id))
+          err m
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_ma_setup_account_key_register { integration_id; result = Ok resp } ->
+      let next =
+        Model.with_toast ~now ~level:Model.Toast_success
+          (Say.make
+             ~ko:
+               (Printf.sprintf "API 키 계정 등록 완료: %s (%s)" integration_id
+                  resp.provider_account_id)
+             ~en:
+               (Printf.sprintf "Key account registered: %s (%s)" integration_id
+                  resp.provider_account_id))
+          m
+      in
+      ( next
+      , [
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_auth_provider_accounts };
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_resolved };
+        ] )
+  | Msg.Reply_ma_setup_account_key_register
+      { integration_id; result = Error (Msg.Http_error { status = 403; _ } as err) } ->
+      handle_ma_own_provider_forbidden ~now
+        ~source:(Health.Source_runtime "provider_key")
+        ~context:
+          (Say.make
+             ~ko:("API 키 등록: " ^ integration_id)
+             ~en:("Register API key: " ^ integration_id))
+        ~toast:(Some (Model.Toast_error, Msg.http_error_summary err))
+        err m
+  | Msg.Reply_ma_setup_account_key_register { integration_id; result = Error err } ->
+      let next, cmds =
+        record_http_incident ~now ~source:(Health.Source_runtime "provider_key")
+          ~context:
+            (Say.make
+               ~ko:("API 키 등록: " ^ integration_id)
+               ~en:("Register API key: " ^ integration_id))
+          err m
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_ma_setup_account_key_replace { provider_account_id; result = Ok resp } ->
+      let toast =
+        if resp.old_keys_removed then
+          Say.make
+            ~ko:("API 키 교체 완료: " ^ resp.provider_account_id)
+            ~en:("API key rotated: " ^ resp.provider_account_id)
+        else
+          Say.make
+            ~ko:("API 키 교체 완료 (기존 키 정리 미완료): " ^ resp.provider_account_id)
+            ~en:("API key rotated (old key cleanup incomplete): " ^ resp.provider_account_id)
+      in
+      let level =
+        if resp.old_keys_removed then Model.Toast_success else Model.Toast_warning
+      in
+      let _ = provider_account_id in
+      ( Model.with_toast ~now ~level toast m
+      , [
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_auth_provider_accounts };
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_resolved };
+        ] )
+  | Msg.Reply_ma_setup_account_key_replace
+      { provider_account_id; result = Error (Msg.Http_error { status = 403; _ } as err) } ->
+      handle_ma_own_provider_forbidden ~now
+        ~source:(Health.Source_runtime "provider_key")
+        ~context:
+          (Say.make
+             ~ko:("API 키 교체: " ^ provider_account_id)
+             ~en:("Rotate API key: " ^ provider_account_id))
+        ~toast:(Some (Model.Toast_error, Msg.http_error_summary err))
+        err m
+  | Msg.Reply_ma_setup_account_key_replace { provider_account_id; result = Error err } ->
+      let next, cmds =
+        record_http_incident ~now ~source:(Health.Source_runtime "provider_key")
+          ~context:
+            (Say.make
+               ~ko:("API 키 교체: " ^ provider_account_id)
+               ~en:("Rotate API key: " ^ provider_account_id))
+          err m
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_ma_setup_account_key_remove { provider_account_id; result = Ok resp } ->
+      let _ = provider_account_id in
+      let next =
+        Model.with_toast ~now ~level:Model.Toast_success
+          (Say.make
+             ~ko:("API 키 계정 삭제됨: " ^ resp.provider_account_id)
+             ~en:("Key account removed: " ^ resp.provider_account_id))
+          m
+      in
+      ( next
+      , [
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_auth_provider_accounts };
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_resolved };
+        ] )
+  | Msg.Reply_ma_setup_account_key_remove
+      { provider_account_id; result = Error (Msg.Http_error { status = 403; _ } as err) } ->
+      handle_ma_own_provider_forbidden ~now
+        ~source:(Health.Source_runtime "provider_key")
+        ~context:
+          (Say.make
+             ~ko:("API 키 삭제: " ^ provider_account_id)
+             ~en:("Remove API key: " ^ provider_account_id))
+        ~toast:(Some (Model.Toast_error, Msg.http_error_summary err))
+        err m
+  | Msg.Reply_ma_setup_account_key_remove { provider_account_id; result = Error err } ->
+      let next, cmds =
+        record_http_incident ~now ~source:(Health.Source_runtime "provider_key")
+          ~context:
+            (Say.make
+               ~ko:("API 키 삭제: " ^ provider_account_id)
+               ~en:("Remove API key: " ^ provider_account_id))
+          err m
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
+  | Msg.Reply_setup_login_cancel { login_id; result = Ok () } ->
+      let m1 = close_setup_login_input ~login_id m in
+      let runtime = Runtime_store.mark_setup_login_input_ready false m1.runtime in
+      let next =
+        Model.with_toast ~now ~level:Model.Toast_info
+          (Say.make
+             ~ko:("로그인 취소 요청됨: " ^ login_id)
+             ~en:("Login cancellation requested: " ^ login_id))
+          { m1 with runtime }
+      in
+      ( next
+      , [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_setup_login_status { login_id } } ] )
+  | Msg.Reply_setup_login_cancel
+      { login_id; result = Error (Msg.Http_error { status = 403; _ } as err) }
+    when Rbac.is_multi_account m.auth_session ->
+      let detail = Msg.http_error_detail err in
+      let context =
+        Say.make
+          ~ko:("로그인 취소: " ^ login_id)
+          ~en:("Cancel login: " ^ login_id)
+      in
+      let summary = Say.concat ~sep:": " [ context; Msg.http_error_summary err ] in
+      let incidents, _ =
+        Incidents.push ~occurred_at_unix:m.freshness.last_wall_unix
+          ~source:(Health.Source_runtime "setup_login") ~summary ~detail
+          ~status:Health.Resolved m.incidents
+      in
+      let account =
+        Account_store.mark_own_provider_forbidden ~at:now ~reason:detail m.account
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) { m with incidents; account }
+      , [] )
+  | Msg.Reply_setup_login_cancel { login_id; result = Error err } ->
+      let next, cmds =
+        record_http_incident ~now ~source:(Health.Source_runtime "setup_login")
+          ~context:
+            (Say.make
+               ~ko:("로그인 취소: " ^ login_id)
+               ~en:("Cancel login: " ^ login_id))
+          err m
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds )
   | Msg.Reply_dashboard_shell (Ok shell) ->
       let freshness, fleet0 =
         match shell.generated_at_unix with
@@ -1330,6 +1681,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                 }
             | Some
                 ( Nav.Palette
+                | Nav.Account
                 | Nav.Settings _
                 | Nav.Incidents
                 | Nav.Queue_context _
@@ -1738,6 +2090,7 @@ let apply_http_reply ~now (m : Model.t) reply =
               | Some Nav.Ask_answer -> { m.nav with overlay = None }
               | Some
                   ( Nav.Palette
+                  | Nav.Account
                   | Nav.Settings _
                   | Nav.Incidents
                   | Nav.Queue_context _
@@ -2036,6 +2389,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Runtime_assign_form
         | Nav.Setup_account_key_form
         | Nav.Setup_login_start_form
+        | Nav.Ma_provider_login_form
+        | Nav.Ma_provider_key_add_form
+        | Nav.Ma_provider_key_replace_form _
+        | Nav.Ma_provider_key_remove_confirm _
+        | Nav.Ma_provider_verify_form _
         | Nav.Code_finder_form
         | Nav.Code_search_form
         | Nav.Github_token_form _
@@ -2086,6 +2444,7 @@ let apply_http_reply ~now (m : Model.t) reply =
               ( Nav.Inline_action _
               | Nav.Ask_answer
               | Nav.Palette
+              | Nav.Account
               | Nav.Settings _
               | Nav.Incidents
               | Nav.Queue_context _
@@ -2154,6 +2513,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Code_finder_form
             | Nav.Code_search_form
             | Nav.Github_token_form _
@@ -2277,6 +2641,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Runtime_assign_form
         | Nav.Setup_account_key_form
         | Nav.Setup_login_start_form
+        | Nav.Ma_provider_login_form
+        | Nav.Ma_provider_key_add_form
+        | Nav.Ma_provider_key_replace_form _
+        | Nav.Ma_provider_key_remove_confirm _
+        | Nav.Ma_provider_verify_form _
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
@@ -2339,6 +2708,7 @@ let apply_http_reply ~now (m : Model.t) reply =
           | Some
               ( Nav.Inline_action _
               | Nav.Palette
+              | Nav.Account
               | Nav.Settings _
               | Nav.Incidents
               | Nav.Queue_context _
@@ -2426,6 +2796,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -3409,6 +3784,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Runtime_assign_form
         | Nav.Setup_account_key_form
         | Nav.Setup_login_start_form
+        | Nav.Ma_provider_login_form
+        | Nav.Ma_provider_key_add_form
+        | Nav.Ma_provider_key_replace_form _
+        | Nav.Ma_provider_key_remove_confirm _
+        | Nav.Ma_provider_verify_form _
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
@@ -3505,6 +3885,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -3597,6 +3982,11 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Runtime_assign_form
                 | Nav.Setup_account_key_form
                 | Nav.Setup_login_start_form
+                | Nav.Ma_provider_login_form
+                | Nav.Ma_provider_key_add_form
+                | Nav.Ma_provider_key_replace_form _
+                | Nav.Ma_provider_key_remove_confirm _
+                | Nav.Ma_provider_verify_form _
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -3702,6 +4092,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -3811,6 +4206,11 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Runtime_assign_form
                 | Nav.Setup_account_key_form
                 | Nav.Setup_login_start_form
+                | Nav.Ma_provider_login_form
+                | Nav.Ma_provider_key_add_form
+                | Nav.Ma_provider_key_replace_form _
+                | Nav.Ma_provider_key_remove_confirm _
+                | Nav.Ma_provider_verify_form _
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -3933,6 +4333,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -4295,10 +4700,17 @@ let apply_http_reply ~now (m : Model.t) reply =
       in
       let refresh_cmds =
         if is_done then
-          [
-            Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_setup_inventory };
-            Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_resolved };
-          ]
+          if Rbac.is_multi_account m.auth_session then
+            [
+              Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_auth_provider_accounts };
+              Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_auth_integrations };
+              Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_resolved };
+            ]
+          else
+            [
+              Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_setup_inventory };
+              Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_runtime_resolved };
+            ]
         else []
       in
       (next, refresh_cmds)
@@ -4320,6 +4732,23 @@ let apply_http_reply ~now (m : Model.t) reply =
         in
         ( Model.with_toast ~now ~level:Model.Toast_error
             (Say.concat ~sep:": " [context; Msg.http_error_summary error]) next, cmds )
+  | Msg.Reply_setup_login_receipt
+      (Error (Msg.Http_error { status = 403; _ } as err))
+    when Rbac.is_multi_account m.auth_session ->
+      let detail = Msg.http_error_detail err in
+      let context = Say.make ~ko:"계정 로그인" ~en:"Account login" in
+      let summary = Say.concat ~sep:": " [ context; Msg.http_error_summary err ] in
+      let incidents, _ =
+        Incidents.push ~occurred_at_unix:m.freshness.last_wall_unix
+          ~source:(Health.Source_runtime "setup_login") ~summary ~detail
+          ~status:Health.Resolved m.incidents
+      in
+      let account =
+        Account_store.mark_own_provider_forbidden ~at:now ~reason:detail m.account
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) { m with incidents; account }
+      , [] )
   | Msg.Reply_setup_login_receipt (Error err) ->
       let next, cmds =
         record_http_incident ~now ~source:(Health.Source_runtime "setup_login")
@@ -4416,6 +4845,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Runtime_assign_form
         | Nav.Setup_account_key_form
         | Nav.Setup_login_start_form
+        | Nav.Ma_provider_login_form
+        | Nav.Ma_provider_key_add_form
+        | Nav.Ma_provider_key_replace_form _
+        | Nav.Ma_provider_key_remove_confirm _
+        | Nav.Ma_provider_verify_form _
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
@@ -4468,6 +4902,7 @@ let apply_http_reply ~now (m : Model.t) reply =
           | Some
               ( Nav.Inline_action _
               | Nav.Palette
+              | Nav.Account
               | Nav.Settings _
               | Nav.Incidents
               | Nav.Queue_context _
@@ -4549,6 +4984,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Runtime_assign_form
         | Nav.Setup_account_key_form
         | Nav.Setup_login_start_form
+        | Nav.Ma_provider_login_form
+        | Nav.Ma_provider_key_add_form
+        | Nav.Ma_provider_key_replace_form _
+        | Nav.Ma_provider_key_remove_confirm _
+        | Nav.Ma_provider_verify_form _
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
@@ -5063,6 +5503,7 @@ let apply_http_reply ~now (m : Model.t) reply =
               | Some Nav.Ask_answer -> { m.nav with overlay = None }
               | Some
                   ( Nav.Palette
+                  | Nav.Account
                   | Nav.Settings _
                   | Nav.Incidents
                   | Nav.Queue_context _
@@ -5139,6 +5580,11 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Runtime_assign_form
         | Nav.Setup_account_key_form
         | Nav.Setup_login_start_form
+        | Nav.Ma_provider_login_form
+        | Nav.Ma_provider_key_add_form
+        | Nav.Ma_provider_key_replace_form _
+        | Nav.Ma_provider_key_remove_confirm _
+        | Nav.Ma_provider_verify_form _
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
@@ -5207,6 +5653,7 @@ let apply_http_reply ~now (m : Model.t) reply =
           | Some
               ( Nav.Inline_action _
               | Nav.Palette
+              | Nav.Account
               | Nav.Settings _
               | Nav.Incidents
               | Nav.Queue_context _
@@ -5260,6 +5707,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -5579,6 +6031,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -5641,6 +6098,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -5697,6 +6159,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -5744,6 +6211,11 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Runtime_assign_form
              | Nav.Setup_account_key_form
              | Nav.Setup_login_start_form
+             | Nav.Ma_provider_login_form
+             | Nav.Ma_provider_key_add_form
+             | Nav.Ma_provider_key_replace_form _
+             | Nav.Ma_provider_key_remove_confirm _
+             | Nav.Ma_provider_verify_form _
              | Nav.Board_comment _
              | Nav.Github_token_form _
              | Nav.Code_finder_form
@@ -5795,6 +6267,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                 { m.nav with overlay = m.nav.return_overlay; return_overlay = None }
             | Some
                 ( Nav.Palette
+                | Nav.Account
                 | Nav.Settings _
                 | Nav.Incidents
                 | Nav.Queue_context _
@@ -5865,6 +6338,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -5927,6 +6405,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -5983,6 +6466,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -6030,6 +6518,11 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Runtime_assign_form
              | Nav.Setup_account_key_form
              | Nav.Setup_login_start_form
+             | Nav.Ma_provider_login_form
+             | Nav.Ma_provider_key_add_form
+             | Nav.Ma_provider_key_replace_form _
+             | Nav.Ma_provider_key_remove_confirm _
+             | Nav.Ma_provider_verify_form _
              | Nav.Board_comment _
              | Nav.Github_token_form _
              | Nav.Code_finder_form
@@ -7750,6 +8243,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -7880,6 +8378,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Cmd.Open_editor_escape_hatch _
                 | Cmd.Open_terminal_program _
                 | Cmd.Start_local_server
+                | Cmd.Set_bearer_token _
                 | Cmd.Restart_tui
                 | Cmd.Quit _ ->
                     false)
@@ -7924,6 +8423,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -8086,6 +8590,11 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Runtime_assign_form
                 | Nav.Setup_account_key_form
                 | Nav.Setup_login_start_form
+                | Nav.Ma_provider_login_form
+                | Nav.Ma_provider_key_add_form
+                | Nav.Ma_provider_key_replace_form _
+                | Nav.Ma_provider_key_remove_confirm _
+                | Nav.Ma_provider_verify_form _
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -8171,6 +8680,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -8399,6 +8913,11 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Runtime_assign_form
                 | Nav.Setup_account_key_form
                 | Nav.Setup_login_start_form
+                | Nav.Ma_provider_login_form
+                | Nav.Ma_provider_key_add_form
+                | Nav.Ma_provider_key_replace_form _
+                | Nav.Ma_provider_key_remove_confirm _
+                | Nav.Ma_provider_verify_form _
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -8477,6 +8996,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -8570,6 +9094,11 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Runtime_assign_form
                 | Nav.Setup_account_key_form
                 | Nav.Setup_login_start_form
+                | Nav.Ma_provider_login_form
+                | Nav.Ma_provider_key_add_form
+                | Nav.Ma_provider_key_replace_form _
+                | Nav.Ma_provider_key_remove_confirm _
+                | Nav.Ma_provider_verify_form _
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -8655,6 +9184,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -9046,6 +9580,11 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Runtime_assign_form
                 | Nav.Setup_account_key_form
                 | Nav.Setup_login_start_form
+                | Nav.Ma_provider_login_form
+                | Nav.Ma_provider_key_add_form
+                | Nav.Ma_provider_key_replace_form _
+                | Nav.Ma_provider_key_remove_confirm _
+                | Nav.Ma_provider_verify_form _
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -9146,6 +9685,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -9306,6 +9850,11 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Runtime_assign_form
                 | Nav.Setup_account_key_form
                 | Nav.Setup_login_start_form
+                | Nav.Ma_provider_login_form
+                | Nav.Ma_provider_key_add_form
+                | Nav.Ma_provider_key_replace_form _
+                | Nav.Ma_provider_key_remove_confirm _
+                | Nav.Ma_provider_verify_form _
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -9392,6 +9941,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -9463,6 +10017,11 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Runtime_assign_form
                 | Nav.Setup_account_key_form
                 | Nav.Setup_login_start_form
+                | Nav.Ma_provider_login_form
+                | Nav.Ma_provider_key_add_form
+                | Nav.Ma_provider_key_replace_form _
+                | Nav.Ma_provider_key_remove_confirm _
+                | Nav.Ma_provider_verify_form _
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -9545,6 +10104,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -9771,6 +10335,11 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Runtime_assign_form
                 | Nav.Setup_account_key_form
                 | Nav.Setup_login_start_form
+                | Nav.Ma_provider_login_form
+                | Nav.Ma_provider_key_add_form
+                | Nav.Ma_provider_key_replace_form _
+                | Nav.Ma_provider_key_remove_confirm _
+                | Nav.Ma_provider_verify_form _
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -9840,6 +10409,11 @@ let apply_http_reply ~now (m : Model.t) reply =
               | Nav.Runtime_assign_form
               | Nav.Setup_account_key_form
               | Nav.Setup_login_start_form
+              | Nav.Ma_provider_login_form
+              | Nav.Ma_provider_key_add_form
+              | Nav.Ma_provider_key_replace_form _
+              | Nav.Ma_provider_key_remove_confirm _
+              | Nav.Ma_provider_verify_form _
               | Nav.Board_comment _
               | Nav.Github_token_form _
               | Nav.Code_finder_form
@@ -9920,6 +10494,11 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form

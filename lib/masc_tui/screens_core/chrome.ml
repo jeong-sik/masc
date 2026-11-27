@@ -1243,13 +1243,32 @@ let footer_right_status_hint ~(model : Model.t) =
     | Some Nav.Palette ->
         Say.resolve lang
           (Say.make ~ko:"↑↓ 이동 · Enter 실행" ~en:"↑↓ select · Enter run")
+    | Some Nav.Account ->
+        if model.account.token_editor.active then
+          Say.resolve lang
+            (Say.make ~ko:"Enter 적용 · Ctrl+U 지우기 · Esc 취소"
+               ~en:"Enter apply · Ctrl+U wipe · Esc cancel")
+        else
+          Say.resolve lang
+            (Say.make ~ko:"t 토큰 · c 해제 · r 재확인 · Esc 닫기"
+               ~en:"t token · c clear · r recheck · Esc close")
     | Some Nav.Incidents ->
         Say.resolve lang
           (Say.make ~ko:"Ch 3 과거 이력 · 실시간 상태 무관"
              ~en:"Ch 3 historical trail · live SSOT unaffected")
-    | Some (Nav.System_gate (Nav.Auth_gate | Nav.Server_offline)) ->
+    | Some (Nav.System_gate Nav.Auth_gate) ->
+        if model.account.token_editor.active then
+          Say.resolve lang
+            (Say.make ~ko:"Enter 적용 · Ctrl+U 지우기 · Esc 취소"
+               ~en:"Enter apply · Ctrl+U wipe · Esc cancel")
+        else
+          Say.resolve lang
+            (Say.make ~ko:"t 토큰 · c 해제 · r 재시도 · Ctrl+Q 종료"
+               ~en:"t token · c clear · r retry · Ctrl+Q quit")
+    | Some (Nav.System_gate Nav.Server_offline) ->
         Say.resolve lang
-          (Say.make ~ko:"r 재시도 · Ctrl+Q 종료" ~en:"r Retry · Ctrl+Q Quit")
+          (Say.make ~ko:"s 시작 · r 재시도 · Ctrl+Q 종료"
+             ~en:"s start · r retry · Ctrl+Q quit")
     | Some (Nav.System_gate Nav.Micro_viewport) ->
         Say.resolve lang
           (Say.make ~ko:"터미널 >= 40x12 · Ctrl+Q 종료"
@@ -1415,6 +1434,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
          else [])
         @ (if not (Model.is_too_small_viewport model.viewport) then
              [
+               mk "@" "계정" "Account" Keymap.Open_account;
                mk "Ctrl+," "설정" "Settings" Keymap.Open_settings;
                mk "?" "도움말" "Help" Keymap.Open_help;
              ]
@@ -1423,10 +1443,50 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
       else
       match model.nav.overlay with
       | Some (Nav.System_gate Nav.Auth_gate) ->
-          [
-            mk "r" "재시도" "Retry" Keymap.Refresh;
-            mk "Ctrl+Q" "종료" "Quit" Keymap.Quit_app;
-          ]
+          if model.account.token_editor.active then
+            [
+              mk "Enter" "토큰 적용" "Apply Token" Keymap.Confirm_selected;
+              mk "Ctrl+U" "지우기" "Wipe" Keymap.Composer_kill_word;
+              mk "Esc" "취소" "Cancel" Keymap.Pop_back_or_close;
+              mk "Ctrl+Q" "종료" "Quit" Keymap.Quit_app;
+            ]
+          else
+            [
+              mk "t" "토큰 입력" "Set Token" Keymap.Open_account;
+              mk "c" "토큰 해제" "Clear Token" Keymap.Open_account;
+              mk "r" "재시도" "Retry" Keymap.Refresh;
+              mk "Ctrl+Q" "종료" "Quit" Keymap.Quit_app;
+            ]
+      | Some Nav.Account ->
+          if model.account.token_editor.active then
+            [
+              mk "Enter" "토큰 적용" "Apply Token" Keymap.Confirm_selected;
+              mk "Ctrl+U" "지우기" "Wipe" Keymap.Composer_kill_word;
+              mk "Esc" "취소" "Cancel" Keymap.Pop_back_or_close;
+            ]
+          else
+            let ma_hints =
+              if
+                Rbac.is_allowed model.auth_session
+                  Rbac.Multi_account_own_provider
+              then
+                [
+                  mk "l" "로그인" "Login" Keymap.Account_login;
+                  mk "K" "키 추가" "Add Key" Keymap.Open_account;
+                  mk "v" "검증" "Verify" Keymap.Open_account;
+                ]
+              else []
+            in
+            [
+              mk "t" "토큰" "Token" Keymap.Open_account;
+              mk "c" "해제" "Clear" Keymap.Open_account;
+              mk "r" "재확인" "Recheck" Keymap.Refresh;
+            ]
+            @ ma_hints
+            @ [
+                mk "?" "도움말" "Help" Keymap.Open_help;
+                mk "Esc" "닫기" "Close" Keymap.Pop_back_or_close;
+              ]
       | Some (Nav.System_gate Nav.Server_offline) ->
           [
             mk "s" "서버 시작" "Start Server" Keymap.Confirm_selected;
@@ -1482,7 +1542,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
         in
         let show_tab_hint =
           match model.nav.overlay with
-          | Some (Nav.Help | Nav.Incidents | Nav.System_gate _) -> false
+          | Some (Nav.Account | Nav.Help | Nav.Incidents | Nav.System_gate _) -> false
           | Some (Nav.Settings _) ->
               Config_store.is_two_pane_width ~cols:model.viewport.cols
           | Some (Nav.Palette | Nav.Queue_context _) -> true
@@ -1511,7 +1571,8 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
         let show_overlay_confirm_hint =
           match model.nav.overlay with
           | Some
-              ( Nav.Help
+              ( Nav.Account
+              | Nav.Help
               | Nav.System_gate _
               | Nav.Queue_context _ ) ->
               false
@@ -1549,7 +1610,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           | Some (Nav.Queue_context _) -> Some ("탭", "Tab")
           | Some Nav.Palette -> Some ("다음", "Next")
           | Some Nav.Ask_answer -> Some ("질문", "Q")
-          | Some (Nav.Inline_action _ | Nav.Help | Nav.Incidents | Nav.System_gate _) ->
+          | Some (Nav.Account | Nav.Inline_action _ | Nav.Help | Nav.Incidents | Nav.System_gate _) ->
               None
           | None ->
               if
@@ -1579,6 +1640,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               | None -> false)
           | Some
               ( Nav.Palette
+              | Nav.Account
               | Nav.Incidents
               | Nav.Inline_action _
               | Nav.Help
@@ -1754,6 +1816,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               | Rbac.Single_user_token_admin_only
               | Rbac.Own_provider_manage
               | Rbac.Own_keeper_sandbox_read
+              | Rbac.Multi_account_own_provider
               | Rbac.Memory_diff_read _
               | Rbac.Machine_play ->
                   false))
@@ -2168,6 +2231,7 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Menu_keeper_tab _
                 | Nav.Menu_runtime _
                 | Nav.Menu_infra _
+                | Nav.Menu_account
                 | Nav.Menu_settings
                 | Nav.Menu_incidents
                 | Nav.Menu_queue_context

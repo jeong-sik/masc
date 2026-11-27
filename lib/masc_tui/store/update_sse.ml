@@ -17,6 +17,7 @@ let is_viewing_keeper_context ~keeper (m : Model.t) =
       | None -> false)
   | Some
       ( Nav.Palette
+      | Nav.Account
       | Nav.Settings _
       | Nav.Incidents
       | Nav.Queue_context (Nav.Drawer_queue | Nav.Drawer_schedules)
@@ -307,6 +308,7 @@ let apply_dataset_invalidation (m : Model.t) ds =
             [ get_cmd e (Cmd.Get_config_schema config.target) ]
         | Some
             ( Nav.Palette
+            | Nav.Account
             | Nav.Incidents
             | Nav.Queue_context _
             | Nav.Inline_action _

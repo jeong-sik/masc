@@ -322,6 +322,19 @@ let fetches_for_overlay ~force (m : Model.t) =
       if needs_fetch ~force m.work.schedules then
         [ Cmd.Get_schedules { cursor = None } ]
       else []
+  | Some Nav.Account ->
+      if
+        Rbac.is_allowed m.auth_session Rbac.Multi_account_own_provider
+        && (force || Option.is_none m.account.own_provider_forbidden)
+      then
+        []
+        |> add_if
+             (needs_fetch ~force m.account.provider_accounts)
+             Cmd.Get_auth_provider_accounts
+        |> add_if
+             (needs_fetch ~force m.account.integrations)
+             Cmd.Get_auth_integrations
+      else []
   | Some
       ( Nav.Palette
       | Nav.Incidents

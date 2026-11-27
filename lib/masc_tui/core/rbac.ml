@@ -90,6 +90,7 @@ type route_access =
   | Single_user_role_admin
   | Single_user_token_admin_only
   | Own_provider_manage
+  | Multi_account_own_provider
   | Own_keeper_sandbox_read
   | Memory_diff_read of { keeper_scoped : bool }
   | Machine_play
@@ -366,7 +367,8 @@ let decide_single_user ~auth_enabled ~require_token ~token_valid ~role
   in
   match req with
   | Always_public | Single_user_shell_probe -> Allowed
-  | Multi_account_whoami_probe -> Denied Multi_account_only_in_single_user
+  | Multi_account_whoami_probe | Multi_account_own_provider ->
+      Denied Multi_account_only_in_single_user
   | Workspace_read
   | Single_user_read
   | Single_user_write
@@ -415,7 +417,7 @@ let decide_multi_account ~(principal : principal) ~role
       | Admin, Service_credential -> Denied Requires_admin
       | (Worker | Player), (Session | Pat | Service_credential) ->
           Denied Requires_admin)
-  | Own_provider_manage -> (
+  | Own_provider_manage | Multi_account_own_provider -> (
       match (principal.kind, has_worker_or_admin) with
       | Human, true -> Allowed
       | Service, (true | false) -> Denied Service_cannot_manage_own_provider
@@ -443,12 +445,13 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
+      | Multi_account_own_provider
       | Own_keeper_sandbox_read
       | Memory_diff_read _
       | Machine_play ) ) ->
       Denied Probing_auth
   | Probing_single_user _, Single_user_shell_probe -> Allowed
-  | Probing_single_user _, Multi_account_whoami_probe ->
+  | Probing_single_user _, (Multi_account_whoami_probe | Multi_account_own_provider) ->
       Denied Multi_account_only_in_single_user
   | ( Probing_single_user _
     , ( Workspace_read
@@ -476,13 +479,14 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
+      | Multi_account_own_provider
       | Own_keeper_sandbox_read
       | Memory_diff_read _
       | Machine_play ) ) ->
       Denied Probing_auth
   | Single_user_auth_required { reason; _ }, Single_user_shell_probe ->
       Denied (Auth_required reason)
-  | Single_user_auth_required _, Multi_account_whoami_probe ->
+  | Single_user_auth_required _, (Multi_account_whoami_probe | Multi_account_own_provider) ->
       Denied Multi_account_only_in_single_user
   | ( Single_user_auth_required { reason; _ }
     , ( Workspace_read
@@ -510,6 +514,7 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
+      | Multi_account_own_provider
       | Own_keeper_sandbox_read
       | Memory_diff_read _
       | Machine_play ) ) ->
@@ -526,6 +531,7 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
+      | Multi_account_own_provider
       | Own_keeper_sandbox_read
       | Memory_diff_read _
       | Machine_play ) ) ->
@@ -543,6 +549,7 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
+      | Multi_account_own_provider
       | Own_keeper_sandbox_read
       | Memory_diff_read _
       | Machine_play ) ) ->
@@ -560,6 +567,7 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
+      | Multi_account_own_provider
       | Own_keeper_sandbox_read
       | Memory_diff_read _
       | Machine_play ) ) ->
@@ -584,6 +592,7 @@ let tracked_capabilities =
     Single_user_role_admin;
     Single_user_token_admin_only;
     Own_provider_manage;
+    Multi_account_own_provider;
     Own_keeper_sandbox_read;
     Memory_diff_read { keeper_scoped = true };
     Machine_play;
@@ -754,251 +763,79 @@ let equal_auth_session a b =
       | Multi_account_signed_in _ ) ) ->
       false
 
+let route_access_rank = function
+  | Always_public -> 0
+  | Single_user_shell_probe -> 1
+  | Multi_account_whoami_probe -> 2
+  | Workspace_read -> 3
+  | Single_user_read -> 4
+  | Single_user_token_read -> 5
+  | Single_user_write -> 6
+  | Su_read_ma_admin -> 7
+  | Bridged_token_admin -> 8
+  | Single_user_role_admin -> 9
+  | Single_user_token_admin_only -> 10
+  | Own_provider_manage -> 11
+  | Multi_account_own_provider -> 12
+  | Own_keeper_sandbox_read -> 13
+  | Memory_diff_read _ -> 14
+  | Machine_play -> 15
+
 let equal_route_access a b =
-  match (a, b) with
-  | Always_public, Always_public
-  | Single_user_shell_probe, Single_user_shell_probe
-  | Multi_account_whoami_probe, Multi_account_whoami_probe
-  | Workspace_read, Workspace_read
-  | Single_user_read, Single_user_read
-  | Single_user_token_read, Single_user_token_read
-  | Single_user_write, Single_user_write
-  | Su_read_ma_admin, Su_read_ma_admin
-  | Bridged_token_admin, Bridged_token_admin
-  | Single_user_role_admin, Single_user_role_admin
-  | Single_user_token_admin_only, Single_user_token_admin_only
-  | Own_provider_manage, Own_provider_manage
-  | Own_keeper_sandbox_read, Own_keeper_sandbox_read
-  | Machine_play, Machine_play ->
-      true
-  | Memory_diff_read x, Memory_diff_read y ->
-      Bool.equal x.keeper_scoped y.keeper_scoped
-  | ( Always_public
-    , ( Single_user_shell_probe
-      | Multi_account_whoami_probe
-      | Workspace_read
-      | Single_user_read
-      | Single_user_token_read
-      | Single_user_write
-      | Su_read_ma_admin
-      | Bridged_token_admin
-      | Single_user_role_admin
-      | Single_user_token_admin_only
-      | Own_provider_manage
-      | Own_keeper_sandbox_read
-      | Memory_diff_read _
-      | Machine_play ) )
-  | ( Single_user_shell_probe
-    , ( Always_public
-      | Multi_account_whoami_probe
-      | Workspace_read
-      | Single_user_read
-      | Single_user_token_read
-      | Single_user_write
-      | Su_read_ma_admin
-      | Bridged_token_admin
-      | Single_user_role_admin
-      | Single_user_token_admin_only
-      | Own_provider_manage
-      | Own_keeper_sandbox_read
-      | Memory_diff_read _
-      | Machine_play ) )
-  | ( Multi_account_whoami_probe
-    , ( Always_public
-      | Single_user_shell_probe
-      | Workspace_read
-      | Single_user_read
-      | Single_user_token_read
-      | Single_user_write
-      | Su_read_ma_admin
-      | Bridged_token_admin
-      | Single_user_role_admin
-      | Single_user_token_admin_only
-      | Own_provider_manage
-      | Own_keeper_sandbox_read
-      | Memory_diff_read _
-      | Machine_play ) )
-  | ( Workspace_read
-    , ( Always_public
-      | Single_user_shell_probe
-      | Multi_account_whoami_probe
-      | Single_user_read
-      | Single_user_token_read
-      | Single_user_write
-      | Su_read_ma_admin
-      | Bridged_token_admin
-      | Single_user_role_admin
-      | Single_user_token_admin_only
-      | Own_provider_manage
-      | Own_keeper_sandbox_read
-      | Memory_diff_read _
-      | Machine_play ) )
-  | ( Single_user_read
-    , ( Always_public
-      | Single_user_shell_probe
-      | Multi_account_whoami_probe
-      | Workspace_read
-      | Single_user_token_read
-      | Single_user_write
-      | Su_read_ma_admin
-      | Bridged_token_admin
-      | Single_user_role_admin
-      | Single_user_token_admin_only
-      | Own_provider_manage
-      | Own_keeper_sandbox_read
-      | Memory_diff_read _
-      | Machine_play ) )
-  | ( Single_user_token_read
-    , ( Always_public
-      | Single_user_shell_probe
-      | Multi_account_whoami_probe
-      | Workspace_read
-      | Single_user_read
-      | Single_user_write
-      | Su_read_ma_admin
-      | Bridged_token_admin
-      | Single_user_role_admin
-      | Single_user_token_admin_only
-      | Own_provider_manage
-      | Own_keeper_sandbox_read
-      | Memory_diff_read _
-      | Machine_play ) )
-  | ( Single_user_write
-    , ( Always_public
-      | Single_user_shell_probe
-      | Multi_account_whoami_probe
-      | Workspace_read
-      | Single_user_read
-      | Single_user_token_read
-      | Su_read_ma_admin
-      | Bridged_token_admin
-      | Single_user_role_admin
-      | Single_user_token_admin_only
-      | Own_provider_manage
-      | Own_keeper_sandbox_read
-      | Memory_diff_read _
-      | Machine_play ) )
-  | ( Su_read_ma_admin
-    , ( Always_public
-      | Single_user_shell_probe
-      | Multi_account_whoami_probe
-      | Workspace_read
-      | Single_user_read
-      | Single_user_token_read
-      | Single_user_write
-      | Bridged_token_admin
-      | Single_user_role_admin
-      | Single_user_token_admin_only
-      | Own_provider_manage
-      | Own_keeper_sandbox_read
-      | Memory_diff_read _
-      | Machine_play ) )
-  | ( Bridged_token_admin
-    , ( Always_public
-      | Single_user_shell_probe
-      | Multi_account_whoami_probe
-      | Workspace_read
-      | Single_user_read
-      | Single_user_token_read
-      | Single_user_write
-      | Su_read_ma_admin
-      | Single_user_role_admin
-      | Single_user_token_admin_only
-      | Own_provider_manage
-      | Own_keeper_sandbox_read
-      | Memory_diff_read _
-      | Machine_play ) )
-  | ( Single_user_role_admin
-    , ( Always_public
-      | Single_user_shell_probe
-      | Multi_account_whoami_probe
-      | Workspace_read
-      | Single_user_read
-      | Single_user_token_read
-      | Single_user_write
-      | Su_read_ma_admin
-      | Bridged_token_admin
-      | Single_user_token_admin_only
-      | Own_provider_manage
-      | Own_keeper_sandbox_read
-      | Memory_diff_read _
-      | Machine_play ) )
-  | ( Single_user_token_admin_only
-    , ( Always_public
-      | Single_user_shell_probe
-      | Multi_account_whoami_probe
-      | Workspace_read
-      | Single_user_read
-      | Single_user_token_read
-      | Single_user_write
-      | Su_read_ma_admin
-      | Bridged_token_admin
-      | Single_user_role_admin
-      | Own_provider_manage
-      | Own_keeper_sandbox_read
-      | Memory_diff_read _
-      | Machine_play ) )
-  | ( Own_provider_manage
-    , ( Always_public
-      | Single_user_shell_probe
-      | Multi_account_whoami_probe
-      | Workspace_read
-      | Single_user_read
-      | Single_user_token_read
-      | Single_user_write
-      | Su_read_ma_admin
-      | Bridged_token_admin
-      | Single_user_role_admin
-      | Single_user_token_admin_only
-      | Own_keeper_sandbox_read
-      | Memory_diff_read _
-      | Machine_play ) )
-  | ( Own_keeper_sandbox_read
-    , ( Always_public
-      | Single_user_shell_probe
-      | Multi_account_whoami_probe
-      | Workspace_read
-      | Single_user_read
-      | Single_user_token_read
-      | Single_user_write
-      | Su_read_ma_admin
-      | Bridged_token_admin
-      | Single_user_role_admin
-      | Single_user_token_admin_only
-      | Own_provider_manage
-      | Memory_diff_read _
-      | Machine_play ) )
-  | ( Memory_diff_read _
-    , ( Always_public
-      | Single_user_shell_probe
-      | Multi_account_whoami_probe
-      | Workspace_read
-      | Single_user_read
-      | Single_user_token_read
-      | Single_user_write
-      | Su_read_ma_admin
-      | Bridged_token_admin
-      | Single_user_role_admin
-      | Single_user_token_admin_only
-      | Own_provider_manage
-      | Own_keeper_sandbox_read
-      | Machine_play ) )
-  | ( Machine_play
-    , ( Always_public
-      | Single_user_shell_probe
-      | Multi_account_whoami_probe
-      | Workspace_read
-      | Single_user_read
-      | Single_user_token_read
-      | Single_user_write
-      | Su_read_ma_admin
-      | Bridged_token_admin
-      | Single_user_role_admin
-      | Single_user_token_admin_only
-      | Own_provider_manage
-      | Own_keeper_sandbox_read
-      | Memory_diff_read _ ) ) ->
-      false
+  if not (Int.equal (route_access_rank a) (route_access_rank b)) then false
+  else
+    match (a, b) with
+    | Always_public, Always_public
+    | Single_user_shell_probe, Single_user_shell_probe
+    | Multi_account_whoami_probe, Multi_account_whoami_probe
+    | Workspace_read, Workspace_read
+    | Single_user_read, Single_user_read
+    | Single_user_token_read, Single_user_token_read
+    | Single_user_write, Single_user_write
+    | Su_read_ma_admin, Su_read_ma_admin
+    | Bridged_token_admin, Bridged_token_admin
+    | Single_user_role_admin, Single_user_role_admin
+    | Single_user_token_admin_only, Single_user_token_admin_only
+    | Own_provider_manage, Own_provider_manage
+    | Multi_account_own_provider, Multi_account_own_provider
+    | Own_keeper_sandbox_read, Own_keeper_sandbox_read
+    | Machine_play, Machine_play ->
+        true
+    | Memory_diff_read x, Memory_diff_read y ->
+        Bool.equal x.keeper_scoped y.keeper_scoped
+    | ( ( Always_public
+        | Single_user_shell_probe
+        | Multi_account_whoami_probe
+        | Workspace_read
+        | Single_user_read
+        | Single_user_token_read
+        | Single_user_write
+        | Su_read_ma_admin
+        | Bridged_token_admin
+        | Single_user_role_admin
+        | Single_user_token_admin_only
+        | Own_provider_manage
+        | Multi_account_own_provider
+        | Own_keeper_sandbox_read
+        | Memory_diff_read _
+        | Machine_play )
+      , ( Always_public
+        | Single_user_shell_probe
+        | Multi_account_whoami_probe
+        | Workspace_read
+        | Single_user_read
+        | Single_user_token_read
+        | Single_user_write
+        | Su_read_ma_admin
+        | Bridged_token_admin
+        | Single_user_role_admin
+        | Single_user_token_admin_only
+        | Own_provider_manage
+        | Multi_account_own_provider
+        | Own_keeper_sandbox_read
+        | Memory_diff_read _
+        | Machine_play ) ) ->
+        false
 
 let equal_deny_reason a b =
   match (a, b) with
@@ -1271,19 +1108,190 @@ let auth_gate_detail = function
 let auth_gate_remediation = function
   | Single_user_auth_required _ ->
       Say.make
-        ~ko:"MASC_TOKEN 환경 변수 또는 <workspace>/.masc/auth/admin.token 파일을 설정한 뒤 [r]을 눌러 다시 확인하세요."
-        ~en:"Set MASC_TOKEN or populate <workspace>/.masc/auth/admin.token, then press [r] to retry."
+        ~ko:"[t]를 눌러 Bearer 토큰을 직접 입력하거나 MASC_TOKEN / <workspace>/.masc/auth/admin.token을 설정한 뒤 [r]로 재확인하세요."
+        ~en:"Press [t] to enter a Bearer token, or set MASC_TOKEN / <workspace>/.masc/auth/admin.token and press [r] to retry."
   | Multi_account_signed_out _ ->
       Say.make
-        ~ko:"웹 계정 콘솔에서 read_state 범위의 PAT를 발급받아 MASC_TOKEN에 설정한 뒤 TUI를 다시 실행하거나 [r]로 재시도하세요."
-        ~en:"Issue a PAT with read_state scope in the account console, export MASC_TOKEN, then restart or press [r] to retry."
+        ~ko:"[t]를 눌러 PAT(read_state / manage_own_provider)를 직접 입력하거나 MASC_TOKEN에 설정한 뒤 [r]로 재시도하세요."
+        ~en:"Press [t] to enter a PAT (read_state / manage_own_provider), or export MASC_TOKEN and press [r] to retry."
   | Auth_unavailable _ ->
       Say.make
-        ~ko:"서버 계정 저장소 또는 인증 응답이 복구되면 [r]을 눌러 재시도하세요."
-        ~en:"Wait for server account auth to recover, then press [r] to retry."
+        ~ko:"서버 계정 저장소 또는 인증 응답이 복구되면 [r]로 재시도하거나 [t]로 토큰을 변경하세요."
+        ~en:"Wait for server account auth to recover, press [r] to retry, or press [t] to set a token."
   | Probing_health
   | Probing_single_user _
   | Probing_multi_account _
   | Single_user_local _
   | Multi_account_signed_in _ ->
-      Say.make ~ko:"[r] 재시도 · [Ctrl+Q] 종료" ~en:"[r] Retry · [Ctrl+Q] Quit"
+      Say.make ~ko:"[t] 토큰 설정 · [r] 재시도 · [Ctrl+Q] 종료"
+        ~en:"[t] Set Token · [r] Retry · [Ctrl+Q] Quit"
+
+type binding_display =
+  | Binding_session
+  | Binding_pat
+  | Binding_service_credential
+  | Binding_dev_token
+  | Binding_none
+
+let binding_display_rank = function
+  | Binding_session -> 0
+  | Binding_pat -> 1
+  | Binding_service_credential -> 2
+  | Binding_dev_token -> 3
+  | Binding_none -> 4
+
+let equal_binding_display a b =
+  Int.equal (binding_display_rank a) (binding_display_rank b)
+
+let binding_display_to_string = function
+  | Binding_session -> "session"
+  | Binding_pat -> "pat"
+  | Binding_service_credential -> "service_credential"
+  | Binding_dev_token -> "dev_token"
+  | Binding_none -> "none"
+
+let binding_display_of_session = function
+  | Multi_account_signed_in { binding = { kind = Session; _ }; _ } ->
+      Binding_session
+  | Multi_account_signed_in { binding = { kind = Pat; _ }; _ } -> Binding_pat
+  | Multi_account_signed_in { binding = { kind = Service_credential; _ }; _ } ->
+      Binding_service_credential
+  | Single_user_local { token_present = true; token_valid = true; _ } ->
+      Binding_dev_token
+  | Single_user_local { token_present = false; _ }
+  | Single_user_local { token_valid = false; _ }
+  | Probing_health
+  | Probing_single_user _
+  | Probing_multi_account _
+  | Single_user_auth_required _
+  | Multi_account_signed_out _
+  | Auth_unavailable _ ->
+      Binding_none
+
+let binding_id_of_session = function
+  | Multi_account_signed_in { binding; _ } -> Some binding.id
+  | Probing_health
+  | Probing_single_user _
+  | Probing_multi_account _
+  | Single_user_local _
+  | Single_user_auth_required _
+  | Multi_account_signed_out _
+  | Auth_unavailable _ ->
+      None
+
+let principal_display = function
+  | Multi_account_signed_in { principal; _ } ->
+      Printf.sprintf "%s:%s" (principal_kind_to_string principal.kind)
+        principal.id
+  | Single_user_local { effective_agent = Some agent; _ } -> agent
+  | Single_user_local { effective_agent = None; _ } -> "local"
+  | Probing_health
+  | Probing_single_user _
+  | Probing_multi_account _
+  | Single_user_auth_required _
+  | Multi_account_signed_out _
+  | Auth_unavailable _ ->
+      "none"
+
+let role_display = function
+  | Single_user_local { role = Admin; effective_admin = false; _ } -> "worker"
+  | Single_user_local { role = Admin; effective_admin = true; _ } -> "admin"
+  | Single_user_local { role = (Worker | Player as role); _ }
+  | Multi_account_signed_in { role = (Admin | Worker | Player as role); _ } ->
+      role_to_string role
+  | Probing_health
+  | Probing_single_user _
+  | Probing_multi_account _
+  | Single_user_auth_required _
+  | Multi_account_signed_out _
+  | Auth_unavailable _ ->
+      "unauthenticated"
+
+let auth_error_detail_of_session = function
+  | Single_user_local { auth_error_code; auth_error_detail; _ } -> (
+      match (nonblank_opt auth_error_code, nonblank_opt auth_error_detail) with
+      | Some c, Some d when String.equal c d -> Some d
+      | Some c, Some d -> Some (Printf.sprintf "%s: %s" c d)
+      | Some c, None -> Some c
+      | None, Some d -> Some d
+      | None, None -> None)
+  | Single_user_auth_required { reason; _ }
+  | Multi_account_signed_out { reason; _ } -> (
+      match reason with
+      | Token_required -> Some "token_required"
+      | Token_invalid d -> Some d
+      | Signed_out (Some d) -> Some d
+      | Signed_out None -> Some "signed_out"
+      | Forbidden_credential d -> Some d
+      | Auth_unavailable d -> Some d)
+  | Auth_unavailable { reason; _ } -> nonblank_opt (Some reason)
+  | Probing_health
+  | Probing_single_user _
+  | Probing_multi_account _
+  | Multi_account_signed_in _ ->
+      None
+
+type capability_matrix = {
+  can_read : bool;
+  can_write : bool;
+  can_admin : bool;
+  can_token_read : bool;
+  can_token_admin : bool;
+  can_manage_own_provider : bool;
+}
+
+type capability_row = {
+  key : string;
+  label : Say.t;
+  route : route_access;
+  allowed : bool;
+  verdict : access_verdict;
+}
+
+let capability_matrix_of_session session =
+  {
+    can_read = is_allowed session Workspace_read;
+    can_write = is_allowed session Single_user_write;
+    can_admin = is_allowed session Bridged_token_admin;
+    can_token_read = is_allowed session Single_user_token_read;
+    can_token_admin = is_allowed session Single_user_token_admin_only;
+    can_manage_own_provider = is_allowed session Own_provider_manage;
+  }
+
+let capability_rows_of_session session =
+  let mk key ~ko ~en route =
+    let verdict = decide session route in
+    let allowed = match verdict with Allowed -> true | Denied _ -> false in
+    { key; label = Say.make ~ko ~en; route; allowed; verdict }
+  in
+  [
+    mk "can_read" ~ko:"워크스페이스 조회" ~en:"Workspace read" Workspace_read;
+    mk "can_write" ~ko:"단일 사용자 쓰기" ~en:"Single-user write"
+      Single_user_write;
+    mk "can_admin" ~ko:"브리지 관리자" ~en:"Bridged admin" Bridged_token_admin;
+    mk "can_token_read" ~ko:"토큰 상태 조회" ~en:"Token state read"
+      Single_user_token_read;
+    mk "can_token_admin" ~ko:"단일 사용자 토큰 관리자" ~en:"Single-user token admin"
+      Single_user_token_admin_only;
+    mk "can_manage_own_provider" ~ko:"개인 프로바이더 관리"
+      ~en:"Manage own provider" Own_provider_manage;
+  ]
+
+let short_deny_reason_say = function
+  | Probing_auth -> Say.make ~ko:"확인 중" ~en:"probing"
+  | Auth_required Token_required -> Say.make ~ko:"토큰 필요" ~en:"token required"
+  | Auth_required (Token_invalid _) -> Say.make ~ko:"토큰 무효" ~en:"invalid token"
+  | Auth_required (Signed_out _) -> Say.make ~ko:"미로그인" ~en:"signed out"
+  | Auth_required (Forbidden_credential _) -> Say.make ~ko:"자격 거부" ~en:"forbidden"
+  | Auth_required (Auth_unavailable _) -> Say.make ~ko:"인증 불가" ~en:"unavailable"
+  | Requires_admin -> Say.make ~ko:"관리자 필요" ~en:"admin required"
+  | Pat_cannot_admin -> Say.make ~ko:"PAT 관리자 불가" ~en:"PAT cannot admin"
+  | Token_auth_not_enabled -> Say.make ~ko:"토큰 인증 꺼짐" ~en:"token auth off"
+  | Service_cannot_manage_own_provider ->
+      Say.make ~ko:"서비스 계정 불가" ~en:"service denied"
+  | Requires_worker_or_admin ->
+      Say.make ~ko:"Worker/Admin 필요" ~en:"worker/admin required"
+  | Single_user_only_in_multi_account ->
+      Say.make ~ko:"단일 사용자 전용" ~en:"single-user only"
+  | Multi_account_only_in_single_user ->
+      Say.make ~ko:"다중 계정 전용" ~en:"multi-account only"

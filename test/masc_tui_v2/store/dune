@@ -76,4 +76,5 @@
   masc_tui_screens_core
   masc_tui_screens_ops
   masc_tui_screens_domain
+  yojson
   alcotest))

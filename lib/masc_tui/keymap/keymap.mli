@@ -40,6 +40,7 @@ type action =
   | Dive_selected
   | Confirm_selected
   | Pop_back_or_close
+  | Open_account
   | Open_settings
   | Teleport_blocked
   | Open_incidents

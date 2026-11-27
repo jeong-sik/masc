@@ -100,6 +100,7 @@ let is_blocked_by_gate (m : Model.t) =
   | Some
       ( Nav.System_gate (Nav.Micro_viewport | Nav.Media_viewer)
       | Nav.Palette
+      | Nav.Account
       | Nav.Settings _
       | Nav.Incidents
       | Nav.Queue_context _

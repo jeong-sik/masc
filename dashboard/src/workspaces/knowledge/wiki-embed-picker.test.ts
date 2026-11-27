@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { html } from 'htm/preact'
 import { render } from 'preact'
+import { axe } from 'jest-axe'
 import { authSession, bumpSessionEpoch } from '../../core/auth'
 import { resourceCache } from '../../core/resource-cache'
 import {
@@ -231,5 +232,26 @@ describe('WikiEmbedPicker', () => {
     bumpSessionEpoch()
     await flushUi(6)
     expect(container.textContent).not.toContain('Old Workspace Artifact')
+  })
+
+  it('passes axe accessibility checks in open list and empty-search states', async () => {
+    render(
+      html`<${WikiEmbedPicker}
+        wikiPages=${SAMPLE_PAGES}
+        currentSlug="architecture-notes"
+        onInsertEmbed=${vi.fn()}
+      />`,
+      container,
+    )
+    container.querySelector<HTMLButtonElement>('[data-testid="wiki-embed-picker-trigger"]')!.click()
+    await flushUi()
+    expect(await axe(container)).toHaveNoViolations()
+
+    const search = container.querySelector<HTMLInputElement>('[data-testid="wiki-embed-picker-search"]')!
+    search.value = 'no-match-xyz'
+    search.dispatchEvent(new Event('input', { bubbles: true }))
+    await flushUi()
+    expect(container.querySelector('[role="list"]')).toBeNull()
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

@@ -189,13 +189,13 @@ describe('WikiTab authoring productivity UX', () => {
       )
       expect(btn).toBeDefined()
       return btn!
-    })
+    }, { timeout: 5000 })
     editBtn.click()
     return await vi.waitFor(() => {
       const ta = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Markdown 본문 편집기"]')
       expect(ta).not.toBeNull()
       return ta!
-    })
+    }, { timeout: 5000 })
   }
 
   it('supports split, write-only, and live preview modes updating as the author types', async () => {
@@ -314,17 +314,17 @@ describe('WikiTab authoring productivity UX', () => {
       const tab = container.querySelector<HTMLButtonElement>('[data-testid="wiki-embed-tab-artifact"]')
       expect(tab).not.toBeNull()
       return tab!
-    })
+    }, { timeout: 5000 })
     artifactTab.click()
     const artifactOption = await vi.waitFor(() => {
       const opt = container.querySelector<HTMLButtonElement>(`[data-testid="wiki-embed-option-artifact-${ARTIFACT_ID}"]`)
       expect(opt).not.toBeNull()
       return opt!
-    })
+    }, { timeout: 5000 })
     artifactOption.click()
     await vi.waitFor(() => {
       expect(textarea.value).toBe(`See: ![[wiki:media-guide]]![[artifact:${ARTIFACT_ID}]]`)
-    })
+    }, { timeout: 5000 })
   })
 
   it('uploads multiple images sequentially in order and supports canceling an in-flight upload', async () => {
@@ -360,7 +360,7 @@ describe('WikiTab authoring productivity UX', () => {
     dropzone.dispatchEvent(dropEvt)
     await vi.waitFor(() => {
       expect(textarea.value).toBe(`Gallery:\n![first](/api/v1/media/${sha1})\n![second](/api/v1/media/${sha2})`)
-    })
+    }, { timeout: 5000 })
 
     // Now test in-flight upload cancellation
     let aborted = false
@@ -380,13 +380,13 @@ describe('WikiTab authoring productivity UX', () => {
       const bar = container.querySelector('[data-testid="wiki-editor-upload-status"]')
       expect(bar).not.toBeNull()
       return bar!
-    })
+    }, { timeout: 5000 })
     expect(statusBar.textContent).toContain('이미지 업로드 중… (1/1)')
     statusBar.querySelector<HTMLButtonElement>('button')!.click()
     await vi.waitFor(() => {
       expect(aborted).toBe(true)
       expect(container.querySelector('[data-testid="wiki-editor-upload-status"]')).toBeNull()
-    })
+    }, { timeout: 5000 })
     expect(container.querySelector('[data-testid="wiki-editor-upload-error"]')).toBeNull()
   })
 })

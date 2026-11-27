@@ -240,15 +240,14 @@ export function WikiEmbedPicker({
         />
 
         ${tab === 'wiki'
-          ? html`
-              <div class="kn-embed-picker-list" role="list" aria-label="삽입할 위키 페이지 목록">
-                ${filteredPages.length === 0
-                  ? html`<span class="dtable-absent">일치하는 위키 페이지가 없습니다.</span>`
-                  : filteredPages.map((page) => html`
+          ? filteredPages.length === 0
+            ? html`<div class="kn-embed-picker-list"><span class="dtable-absent">일치하는 위키 페이지가 없습니다.</span></div>`
+            : html`
+                <div class="kn-embed-picker-list" role="list" aria-label="삽입할 위키 페이지 목록">
+                  ${filteredPages.map((page) => html`
+                    <div key=${page.slug} role="listitem">
                       <button
-                        key=${page.slug}
                         type="button"
-                        role="listitem"
                         class="kn-embed-picker-item"
                         data-testid=${`wiki-embed-option-wiki-${page.slug}`}
                         onClick=${() => selectEmbed(formatWikiEmbed(page.slug))}
@@ -262,9 +261,10 @@ export function WikiEmbedPicker({
                           <span>rev ${page.revision}</span>
                         </span>
                       </button>
-                    `)}
-              </div>
-            `
+                    </div>
+                  `)}
+                </div>
+              `
           : !isSingleUser
             ? html`
                 <div class="kn-notice kn-notice--info" role="status">
@@ -281,15 +281,14 @@ export function WikiEmbedPicker({
                 ? html`<div class="kn-notice kn-notice--err" role="alert">${artifactsError}</div>`
                 : artifactsLoading && artifacts.length === 0
                   ? html`<span class="dtable-absent">아티팩트 목록 불러오는 중…</span>`
-                  : html`
-                      <div class="kn-embed-picker-list" role="list" aria-label="삽입할 아티팩트 목록">
-                        ${filteredArtifacts.length === 0
-                          ? html`<span class="dtable-absent">일치하는 아티팩트가 없습니다.</span>`
-                          : filteredArtifacts.map((item) => html`
+                  : filteredArtifacts.length === 0
+                    ? html`<div class="kn-embed-picker-list"><span class="dtable-absent">일치하는 아티팩트가 없습니다.</span></div>`
+                    : html`
+                        <div class="kn-embed-picker-list" role="list" aria-label="삽입할 아티팩트 목록">
+                          ${filteredArtifacts.map((item) => html`
+                            <div key=${item.id} role="listitem">
                               <button
-                                key=${item.id}
                                 type="button"
-                                role="listitem"
                                 class="kn-embed-picker-item"
                                 data-testid=${`wiki-embed-option-artifact-${item.id}`}
                                 onClick=${() => selectEmbed(formatArtifactEmbed(item.id))}
@@ -300,9 +299,10 @@ export function WikiEmbedPicker({
                                   <span class="kn-badge">${item.format.toUpperCase()}</span>
                                 </span>
                               </button>
-                            `)}
-                      </div>
-                    `}
+                            </div>
+                          `)}
+                        </div>
+                      `}
       `}
     <//>
   `

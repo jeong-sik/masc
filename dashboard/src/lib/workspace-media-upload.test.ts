@@ -37,6 +37,7 @@ const XML_BOM_SVG_BYTES = new Uint8Array([
   0xEF, 0xBB, 0xBF,
   ...new TextEncoder().encode('  <?xml version="1.0"?><svg></svg>'),
 ])
+const COMMENTED_SVG_BYTES = new TextEncoder().encode('<!-- generated diagram -->\n<svg xmlns="http://www.w3.org/2000/svg"></svg>')
 
 function jsonResponse(body: unknown, status = 201): Response {
   return new Response(JSON.stringify(body), {
@@ -78,6 +79,7 @@ describe('workspace-media-upload', () => {
       expect(sniffMediaBytes(WEBP_BYTES)).toEqual({ kind: 'raster', mime: 'image/webp' })
       expect(sniffMediaBytes(SVG_BYTES)).toEqual({ kind: 'svg' })
       expect(sniffMediaBytes(XML_BOM_SVG_BYTES)).toEqual({ kind: 'svg' })
+      expect(sniffMediaBytes(COMMENTED_SVG_BYTES)).toEqual({ kind: 'svg' })
       expect(sniffMediaBytes(new TextEncoder().encode('plain text'))).toEqual({ kind: 'unknown' })
     })
 
@@ -126,6 +128,16 @@ describe('workspace-media-upload', () => {
       const svgRes2 = await validateWorkspaceMediaFile(svgDisguisedAsPng)
       expect(svgRes2.ok).toBe(false)
       if (!svgRes2.ok) expect(svgRes2.error.kind).toBe('svg_not_allowed')
+
+      const svgEmptyType = new File([COMMENTED_SVG_BYTES], 'vector.svg', { type: '' })
+      const svgRes3 = await validateWorkspaceMediaFile(svgEmptyType)
+      expect(svgRes3.ok).toBe(false)
+      if (!svgRes3.ok) expect(svgRes3.error.kind).toBe('svg_not_allowed')
+
+      const svgExtWithNonSvgBytes = new File([PNG_BYTES], 'renamed.SVG', { type: '' })
+      const svgRes4 = await validateWorkspaceMediaFile(svgExtWithNonSvgBytes)
+      expect(svgRes4.ok).toBe(false)
+      if (!svgRes4.ok) expect(svgRes4.error.kind).toBe('svg_not_allowed')
 
       const mismatch = new File([JPEG_BYTES], 'wrong.png', { type: 'image/png' })
       const mismatchRes = await validateWorkspaceMediaFile(mismatch)

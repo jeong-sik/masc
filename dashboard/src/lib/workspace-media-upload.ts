@@ -42,8 +42,9 @@ export const WORKSPACE_MEDIA_ACCEPT = WORKSPACE_RASTER_MIMES.join(',')
 export const WORKSPACE_MEDIA_UPLOAD_PATH = '/api/v1/media'
 export const WORKSPACE_MEDIA_MAX_BYTES = 50 * 1024 * 1024
 
-const SNIFF_HEADER_BYTES = 64
+const SNIFF_HEADER_BYTES = 256
 const SHA256_HEX_RE = /^[0-9a-f]{64}$/
+const SVG_FILE_EXT_RE = /\.svg$/i
 const IMAGE_FILE_EXT_RE = /\.(png|jpe?g|gif|webp|svg)$/i
 
 export type SniffedMediaKind =
@@ -175,18 +176,35 @@ export function sniffMediaBytes(bytes: Uint8Array): SniffedMediaKind {
     return { kind: 'raster', mime: 'image/webp' }
   }
 
-  // Detect XML/SVG payload (skip optional UTF-8 BOM and ASCII whitespace)
+  // Detect XML/SVG payload (skip optional UTF-8 BOM, ASCII whitespace, and leading XML comments)
   let offset = 0
   if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
     offset = 3
   }
-  while (offset < bytes.length) {
-    const b = bytes[offset]!
-    if (b === 0x20 || b === 0x09 || b === 0x0A || b === 0x0D) {
-      offset += 1
-    } else {
-      break
+  const skipWhitespace = () => {
+    while (offset < bytes.length) {
+      const b = bytes[offset]!
+      if (b === 0x20 || b === 0x09 || b === 0x0A || b === 0x0D) {
+        offset += 1
+      } else {
+        break
+      }
     }
+  }
+  skipWhitespace()
+  while (matchesAsciiPrefixCaseInsensitive(bytes, offset, '<!--')) {
+    offset += 4
+    let closed = false
+    while (offset + 2 < bytes.length) {
+      if (bytes[offset] === 0x2D && bytes[offset + 1] === 0x2D && bytes[offset + 2] === 0x3E) {
+        offset += 3
+        closed = true
+        break
+      }
+      offset += 1
+    }
+    if (!closed) break
+    skipWhitespace()
   }
   if (
     matchesAsciiPrefixCaseInsensitive(bytes, offset, '<?xml')
@@ -279,7 +297,8 @@ export async function validateWorkspaceMediaFile(
 
   const declaredRaw = file.type.trim()
   const declared = declaredRaw ? parseDeclaredRasterMime(declaredRaw) : null
-  if (declared === 'svg') {
+  const hasSvgExt = 'name' in file && typeof file.name === 'string' && SVG_FILE_EXT_RE.test(file.name.trim())
+  if (declared === 'svg' || hasSvgExt) {
     return err({
       kind: 'svg_not_allowed',
       status: null,

@@ -377,8 +377,38 @@ let empty_report =
     already_pending=0; already_delivered=0; shutdown_reserved=[];
     owners_absent=[]; failures=[] }
 
-let reconcile_rows ~base_path ~keeper_name report rows =
+(* An answer whose delivery the evidence showed, named by its ask and its
+   canonical answer time. The reaction ledger is append-only, so a source it
+   shows delivered stays delivered while this process runs: the supervisor
+   keeps these names and its later passes read no evidence for them. A new
+   answer to the same ask carries a new answer time and is read again. *)
+module Settled_answers = Set.Make (struct
+  type t = string * float
+
+  let compare (ask_a, at_a) (ask_b, at_b) =
+    match String.compare ask_a ask_b with
+    | 0 -> Float.compare at_a at_b
+    | order -> order
+end)
+
+let settled_answer (ask_id, (_, resolution)) =
+  match resolution with
+  | Keeper_ask.Answered_by { answered_at; _ } -> Some (ask_id, answered_at)
+  | Keeper_ask.Open | Keeper_ask.Withdrawn_because _ -> None
+
+(* Returns the pass's report and the answers now known delivered: those of
+   [settled] still in [rows], and those this pass's evidence showed delivered.
+   An answer in [settled] is counted inspected and already delivered without
+   an evidence read. *)
+let reconcile_rows ~base_path ~keeper_name ~settled report rows =
   let open Result.Syntax in
+  let known, rows = List.partition (fun row ->
+      match settled_answer row with
+      | Some answer -> Settled_answers.mem answer settled
+      | None -> false) rows in
+  let report = { report with
+                 inspected = report.inspected + List.length known;
+                 already_delivered = report.already_delivered + List.length known } in
   let answered, demands = List.fold_left (fun (answered, demands) row ->
     let _, (_, resolution) = row in
     match resolution with
@@ -422,25 +452,31 @@ let reconcile_rows ~base_path ~keeper_name report rows =
         ~post_id:stimulus.post_id
         ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue stimulus))
     |> Result.map_error (fun error -> Delivery_evidence_unavailable error) in
-  let report = List.fold_left (fun report (ask_id, (ask, resolution)) ->
+  let still_settled = Settled_answers.of_list (List.filter_map settled_answer known) in
+  let report, settled = List.fold_left (fun (report, settled) ((ask_id, (ask, resolution)) as row) ->
     let report = { report with inspected = report.inspected + 1 } in
     match deliver_row ~base_path ~keeper_name ~already_delivered ask resolution with
-    | Ok Enqueued -> { report with enqueued = report.enqueued + 1 }
-    | Ok Already_pending -> { report with already_pending = report.already_pending + 1 }
-    | Ok Already_delivered -> { report with already_delivered = report.already_delivered + 1 }
+    | Ok Enqueued -> { report with enqueued = report.enqueued + 1 }, settled
+    | Ok Already_pending -> { report with already_pending = report.already_pending + 1 }, settled
+    | Ok Already_delivered ->
+        let settled = match settled_answer row with
+          | Some answer -> Settled_answers.add answer settled
+          | None -> settled in
+        { report with already_delivered = report.already_delivered + 1 }, settled
     (* The answer stays in the ask log and nothing failed: the Keeper's
        shutdown holds its intake. The pass after the release enqueues it. *)
     | Error (Intake_shutdown_reserved shutdown_operation_id) ->
         { report with shutdown_reserved =
             { owner = keeper_name; answered_ask_id = ask_id; shutdown_operation_id }
-            :: report.shutdown_reserved }
+            :: report.shutdown_reserved }, settled
     | Error (( Ask_store_unavailable _ | Ask_missing _ | Ask_not_answered _
              | Invalid_answered_record _ | Delivery_evidence_unavailable _
              | Queue_storage_failed _ | Owner_unavailable _ ) as error) ->
         { report with failures = { keeper_name = Some keeper_name;
-        ask_id = Some ask_id; error } :: report.failures }) report answered in
+        ask_id = Some ask_id; error } :: report.failures }, settled)
+    (report, still_settled) answered in
   { report with evidence_window_reads =
-      report.evidence_window_reads + !window_reads }
+      report.evidence_window_reads + !window_reads }, settled
 
 (* Only a missing meta file is a gone Keeper, the reading the approval queue
    and the fleet health already use. A file this binary does not decode
@@ -472,7 +508,8 @@ let reconcile ~base_path =
           if not (has_answered rows) then report
           else
             match owner_of ~base_path ~keeper_name with
-            | Owner_present -> reconcile_rows ~base_path ~keeper_name report rows
+            | Owner_present ->
+                fst (reconcile_rows ~base_path ~keeper_name ~settled:Settled_answers.empty report rows)
             | Owner_absent -> { report with owners_absent = keeper_name :: report.owners_absent }
             | Owner_unreadable detail ->
                 { report with failures = { keeper_name = Some keeper_name; ask_id = None;
@@ -538,10 +575,13 @@ type t =
   ; on_report : keeper_name:string -> report -> unit
   ; on_discovery : base_path:string -> (unit, Keeper_ask_store.read_error) result -> unit
   ; mutable active : Set_util.StringSet.t
+  ; mutable settled : Settled_answers.t Set_util.StringMap.t
+      (* Per Keeper, the answers a pass of this supervisor saw delivered. *)
   ; mutable discovery_active : bool }
 
 let create ~base_path ?(on_report=log_report ~base_path) ?(on_discovery=log_discovery) () =
-  {base_path;on_report;on_discovery;active=Set_util.StringSet.empty;discovery_active=false}
+  {base_path;on_report;on_discovery;active=Set_util.StringSet.empty;
+   settled=Set_util.StringMap.empty;discovery_active=false}
 
 let discover_and_schedule ~sw supervisor =
   let open Result.Syntax in
@@ -563,8 +603,11 @@ let discover_and_schedule ~sw supervisor =
                even when the configured filesystem completes inline. *)
             Eio.Fiber.yield ();
             observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Started;
-            let report = reconcile_rows ~base_path:supervisor.base_path
-                ~keeper_name empty_report rows in
+            let settled = Option.value ~default:Settled_answers.empty
+                (Set_util.StringMap.find_opt keeper_name supervisor.settled) in
+            let report, settled = reconcile_rows ~base_path:supervisor.base_path
+                ~keeper_name ~settled empty_report rows in
+            supervisor.settled <- Set_util.StringMap.add keeper_name settled supervisor.settled;
             let report = {report with failures=List.rev report.failures;
               shutdown_reserved=List.rev report.shutdown_reserved} in
             observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns (Settled report);
@@ -584,6 +627,13 @@ let discover_and_schedule ~sw supervisor =
       let bt = Printexc.get_raw_backtrace () in
       release ();
       Printexc.raise_with_backtrace exn bt in
+  (* A Keeper whose ask log is no longer read keeps no settled answers: if its
+     log comes back, its answers are read against the evidence again. *)
+  let discovered = List.fold_left (fun names -> function
+    | Keeper_ask_store.Canonical_rows { keeper_name; _ } -> Set_util.StringSet.add keeper_name names
+    | Keeper_ask_store.Unreadable_log _ -> names) Set_util.StringSet.empty logs in
+  supervisor.settled <- Set_util.StringMap.filter
+      (fun keeper_name _ -> Set_util.StringSet.mem keeper_name discovered) supervisor.settled;
   let owners_absent = List.fold_left (fun owners_absent -> function
     | Keeper_ask_store.Unreadable_log error ->
         Log.Server.warn "ask answer recovery discovery retained error=%s base_path=%S"
@@ -595,7 +645,11 @@ let discover_and_schedule ~sw supervisor =
         else
           match owner_of ~base_path:supervisor.base_path ~keeper_name with
           | Owner_present -> schedule keeper_name rows; owners_absent
-          | Owner_absent -> keeper_name :: owners_absent
+          | Owner_absent ->
+              (* A Keeper stored again under this name may start from an empty
+                 ledger, so what the gone Keeper's evidence showed is dropped. *)
+              supervisor.settled <- Set_util.StringMap.remove keeper_name supervisor.settled;
+              keeper_name :: owners_absent
           | Owner_unreadable detail ->
               Log.Server.warn "ask answer recovery retained keeper=%s error=%s base_path=%S"
                 keeper_name (error_to_string (Owner_unavailable detail)) supervisor.base_path;

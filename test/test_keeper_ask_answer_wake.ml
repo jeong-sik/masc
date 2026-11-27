@@ -646,6 +646,54 @@ let test_answers_wait_while_their_keeper_has_no_meta_file () =
        (pending_asks ~base_path ~keeper_name:"gone"))
 ;;
 
+(* A pass that saw an answer delivered keeps it: the supervisor's later passes
+   count it delivered without reading the reaction ledger again and read only
+   the answers not yet seen delivered. *)
+let test_supervisor_reads_no_evidence_for_answers_it_saw_delivered () =
+  with_persistence @@ fun config ensure_keeper ->
+  let base_path = config.Workspace.base_path and keeper_name = "alpha" in
+  ensure_keeper keeper_name;
+  let (_ : Keeper_ask.ask) = persist_answer ~base_path ~keeper_name ~ask_id:"settled-answer" () in
+  let first = reconcile_or_fail ~base_path in
+  check int "the answer is enqueued" 1 first.enqueued;
+  let source = match pending_asks ~base_path ~keeper_name with
+    | [ source, _ ] -> source
+    | _ -> fail "recovery did not create one answer source" in
+  terminalize_answer ~base_path ~keeper_name source;
+  Eio.Switch.run (fun sw ->
+    let discoveries = Eio.Stream.create 1 in
+    let reports = Eio.Stream.create 1 in
+    let recovery = Wake.create ~base_path
+        ~on_discovery:(fun ~base_path:_ result -> Eio.Stream.add discoveries result)
+        ~on_report:(fun ~keeper_name:_ report -> Eio.Stream.add reports report) () in
+    (* One pulse, its discovery, and the owner's report. The yields let the
+       discovery and owner cleanups run so the next pulse starts a new pass. *)
+    let pass () =
+      Wake.pulse ~sw recovery;
+      (match Eio.Stream.take discoveries with
+       | Ok () -> ()
+       | Error error -> fail (Keeper_ask_store.read_error_to_string error));
+      Eio.Fiber.yield ();
+      let report = Eio.Stream.take reports in
+      Eio.Fiber.yield ();
+      report in
+    let read = pass () in
+    check int "the first pass reads the evidence" 1 read.evidence_window_reads;
+    check int "the first pass sees the answer delivered" 1 read.already_delivered;
+    let kept = pass () in
+    check int "a later pass reads no evidence for it" 0 kept.evidence_window_reads;
+    check int "a later pass still inspects it" 1 kept.inspected;
+    check int "a later pass still counts it delivered" 1 kept.already_delivered;
+    check int "a later pass enqueues nothing" 0 kept.enqueued;
+    let (_ : Keeper_ask.ask) =
+      persist_answer ~base_path ~keeper_name ~ask_id:"fresh-answer" ~answered_at:250. () in
+    let fresh = pass () in
+    check int "only the answer not yet seen delivered is read" 1 fresh.evidence_window_reads;
+    check int "the fresh answer is enqueued" 1 fresh.enqueued;
+    check int "the settled answer stays delivered" 1 fresh.already_delivered;
+    check int "both answers are inspected" 2 fresh.inspected)
+;;
+
 let test_durable_write_failure_is_recovered_from_the_answer_record () =
   with_persistence @@ fun config ensure_keeper ->
   let base_path = config.Workspace.base_path in
@@ -1439,6 +1487,8 @@ let () =
             test_recorded_answer_recovers_once_on_original_continuation
         ; test_case "answers wait while their Keeper has no meta file" `Quick
             test_answers_wait_while_their_keeper_has_no_meta_file
+        ; test_case "supervisor reads no evidence for answers it saw delivered" `Quick
+            test_supervisor_reads_no_evidence_for_answers_it_saw_delivered
         ; test_case "durable write failure recovers from the answer record" `Quick
             test_durable_write_failure_is_recovered_from_the_answer_record
         ; test_case "corrupt delivery evidence cannot recreate accepted source" `Quick

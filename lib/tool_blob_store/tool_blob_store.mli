@@ -39,11 +39,12 @@ val root_dir : t -> string
 val preview_max : int
 (** Hard ceiling on the smart head+tail preview length {!put} produces (4 KiB).
 
-    Callers measuring a string body's marker use {!make_preview} so planning
-    and addressing share the exact sanitized head+tail bytes. Nothing outside
-    this module should restate the ceiling; {!Tool_output.make_artifact_ref}
-    does not enforce it, so it is a property of {!put}, not of
-    {!Tool_output.artifact_ref}. *)
+    A caller measuring the marker {!put} will write uses {!make_preview}, so
+    planning and addressing share the exact sanitized head+tail bytes. Nothing
+    outside this module should restate this ceiling;
+    {!Tool_output.make_artifact_ref} does not enforce it, so it is a property
+    of {!put}, not of {!Tool_output.artifact_ref}. A writer whose marker
+    carries another preview passes its own bound to {!make_head_preview}. *)
 
 val make_preview : string -> string
 (** Exact sanitized 4 KiB head+tail preview used by blob addressing. Pure;

@@ -27,7 +27,7 @@
     transmitted list is rebuilt from durable state every turn, so demoting
     everything eagerly would re-store thousands of blobs per turn. Instead
     the unmodified history first chooses the authoritative window cut. {!plan}
-    substitutes a marker with the store's exact preview below the caller's boundary (the
+    substitutes a marker that previews the body's first 200 bytes below the caller's boundary (the
     keeper's assembly uses the refused request's end, see {!plan}), the window cuts
     again against the smaller messages, and {!materialize} stores only the
     messages that survived. The real marker is never larger than the

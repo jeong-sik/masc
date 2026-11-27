@@ -478,15 +478,26 @@ let with_reference kind (block : Agent_core.Types.content_block) reference =
    this was; the address is what reads it again. The blob store's own
    preview is for a body its reader has never seen: it holds up to 4 KiB of
    head and tail, so a marker carrying it is no smaller than a body under
-   that bound and nothing of that size would be demoted (#55296). *)
+   that bound and nothing of that size would be demoted (#55296).
+
+   200 B is the preview this marker had until #54361. The age-out RFC's
+   re-read rate (1.32% of aged markers, 2026-11-08..10) was measured with
+   it, and with it the marker is at most about 1,530 B on a lane that escapes
+   it twice, below the 2,048 B the request assembly demotes from. Results and
+   call arguments share it. *)
 let demoted_preview_max_bytes = 200
 
-(* Planning and materializing build the marker's reference here, from the
-   same body, so both halves agree on its preview, MIME and byte count. Fixed
-   width hex digits give the planned reference the real address's wire size. *)
+let demoted_preview bytes =
+  Tool_blob_store.make_head_preview ~max_bytes:demoted_preview_max_bytes bytes
+;;
+
+(* The plan measures this reference and [materialize] writes the stored one
+   with the same preview, so the marker sent is the size that was measured.
+   Fixed width hex digits give the planned reference the real address's wire
+   size. *)
 let planned_reference ~kind ~sha256 ~bytes =
   Tool_output.make_artifact_ref ~sha256 ~bytes:(String.length bytes)
-    ~preview:(Tool_blob_store.make_head_preview ~max_bytes:demoted_preview_max_bytes bytes)
+    ~preview:(demoted_preview bytes)
     ~mime:(payload_mime kind)
   |> Result.to_option
 ;;
@@ -812,16 +823,12 @@ let materialize ~store ~addresses ~pending messages =
                             | Tool_output.Stored stored ->
                               (* The store answers with its own preview. The
                                  marker carries the one the plan measured. *)
-                              (match
-                                 planned_reference
-                                   ~kind:entry.kind
-                                   ~sha256:stored.sha256
-                                   ~bytes:entry.bytes
-                               with
-                               | Some reference -> written entry current reference
-                               | None ->
-                                 incr reverted;
-                                 current)
+                              written
+                                entry
+                                current
+                                (Tool_output.with_preview
+                                   stored
+                                   (demoted_preview entry.bytes))
                             | exception Sys_error _ ->
                               incr reverted;
                               current))

@@ -208,11 +208,13 @@ let fetch_error_to_string = function
         expected
         actual
 
-(* Shared smart 4 KiB head+tail preview byte ceiling. Planning and storage both
-   call [make_preview] so reference size estimates use the exact sanitized
-   head+tail bytes, eliminating multi-turn artifact-read loops for typical
-   command/build outputs while preserving both beginning context and trailing
-   errors/summaries. *)
+(* Smart 4 KiB head+tail preview byte ceiling of a stored result. [put],
+   [address] and a caller that measures the marker [put] will write all call
+   [make_preview], so the estimate uses the exact sanitized head+tail bytes.
+   The size spares a reader that has never seen the body a multi-turn
+   artifact-read loop for typical command/build outputs, keeping both the
+   beginning and the trailing errors/summaries. A marker that stands where
+   its reader already received the body takes [make_head_preview]. *)
 let preview_max = 4096
 
 let sanitize_utf8_slice slice =

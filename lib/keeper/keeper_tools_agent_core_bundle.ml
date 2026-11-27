@@ -148,7 +148,6 @@ let receipt_wait_on_completed
   | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
   | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
   | Keeper_tool_descriptor.Tool_keeper_job_dispatch
-  | Keeper_tool_descriptor.Tool_keeper_composition_result_dispatch
   | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
   | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
   | Keeper_tool_descriptor.Tool_masc_fusion_dispatch

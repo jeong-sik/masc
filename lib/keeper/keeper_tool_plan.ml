@@ -402,25 +402,6 @@ module Run_id = struct
   let equal = Int.equal
 end
 
-module Composition_run_id = struct
-  type t = string
-
-  type error = Invalid_uuid_v7 of string
-
-  let fresh = Random_id.uuid_v7
-  let of_string value =
-    Random_id.parse_uuid_v7 value
-    |> Result.map_error (fun reason -> Invalid_uuid_v7 reason)
-  ;;
-
-  let to_string value = value
-  let equal = String.equal
-  let result_receipt_id identity = "composition-result:" ^ identity
-  let child_tool_use_id identity ~parent_tool_use_id ~alias =
-    "composition-skill:" ^ Yojson.Safe.to_string
-      (`List [`String identity;`String parent_tool_use_id;`String (Node_id.to_string alias)])
-end
-
 type schema_value_error =
   | Unsupported_schema_type of Yojson.Safe.t
   | Missing_required_field of
@@ -1008,31 +989,13 @@ type t =
   ; nodes : node list
   ; operands : (node * contract) Node_map.t
   ; descriptors : (string * Keeper_tool_descriptor.t) list
-  ; children : child_nodes list
   ; arguments : inline_arguments list
   ; branch_failure_policy : branch_failure_policy
   ; exports : export list
   }
-and async_child =
-  { alias : Node_id.t
-  ; reference : Skill_reference.t
-  ; tool_name : string
-  ; input : Json_template.t
-  ; input_schema : Yojson.Safe.t
-  ; declared_plan : t
-  }
-and child_nodes =
-  { child : async_child
-  ; submission : node
-  ; result : node
-  ; output_schema : Yojson.Safe.t
-  }
-
 and execution_target =
   | Descriptor_target of Keeper_tool_descriptor.t
   | Child_arguments of inline_arguments
-  | Child_submission of child_nodes
-  | Child_result of child_nodes
 
 and contract =
   { target : execution_target
@@ -1040,17 +1003,6 @@ and contract =
   ; composable_output : Keeper_tool_descriptor.composable_output
   ; execution : Keeper_tool_descriptor.execution
   }
-
-let fixed_async_child ~alias ~reference ~tool_name ~args ~input_schema ~bound_plan : async_child =
-  {alias;reference;tool_name;input=Json_template.literal args;input_schema;declared_plan=bound_plan}
-let dynamic_async_child ~alias ~reference ~tool_name ~input ~input_schema ~declared_plan : async_child =
-  {alias;reference;tool_name;input;input_schema;declared_plan}
-let child_alias (child : async_child) = child.alias
-let child_reference (child : async_child) = child.reference
-let child_tool_name (child : async_child) = child.tool_name
-let child_input (child : async_child) = child.input
-let child_input_schema (child : async_child) = child.input_schema
-let child_plan child = child.declared_plan
 
 let next_plan_identity = Atomic.make 0
 
@@ -1222,30 +1174,13 @@ let node_for_id nodes id =
   List.find_opt (fun node -> Node_id.equal node.id id) nodes
 ;;
 
-let empty_object_schema = `Assoc
-  ["type",`String "object";"properties",`Assoc [];"required",`List [];"additionalProperties",`Bool false]
-
-let contract_for_node descriptors children arguments (node : node) =
-  let target = match List.find_opt (fun (arguments : inline_arguments) ->
+let contract_for_node descriptors arguments (node : node) =
+  match List.find_opt (fun (arguments : inline_arguments) ->
       Node_id.equal arguments.node.id node.id) arguments with
-    | Some arguments -> Some (Child_arguments arguments)
-    | None -> List.find_map (fun child ->
-    if Node_id.equal child.submission.id node.id then Some (Child_submission child)
-    else if Node_id.equal child.result.id node.id then Some (Child_result child)
-    else None) children in
-  match target with
-  | Some (Child_arguments arguments as target) -> Some
-      {target;input_schema=arguments.input_schema;
+  | Some arguments -> Some
+      {target=Child_arguments arguments;input_schema=arguments.input_schema;
        composable_output=Keeper_tool_descriptor.Json_output {schema=arguments.output_schema};
        execution=Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent}
-  | Some (Child_submission child as target) -> Some
-      {target;input_schema=child.child.input_schema;composable_output=Keeper_tool_descriptor.Opaque_output;
-       execution=Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Serial}
-  | Some (Child_result child as target) -> Some
-      {target;input_schema=empty_object_schema;
-       composable_output=Keeper_tool_descriptor.Json_output {schema=child.output_schema};
-       execution=Keeper_tool_descriptor.Ordinary Keeper_tool_descriptor.Concurrent}
-  | Some (Descriptor_target _) -> invalid_arg "compiled target cannot own an ordinary descriptor"
   | None -> Option.map (fun (descriptor : Keeper_tool_descriptor.t) ->
       (* Runtime authority is the original registry object. The copied
          plan-owned output contract must not cross the handler's physical
@@ -1263,29 +1198,6 @@ let node_in_plan plan node_id =
 let contract plan node_id =
   Option.map snd (Node_map.find_opt node_id plan.operands)
 
-let child_exports_schema plan =
-  let properties = List.map (fun (export : export) ->
-    let producer = match node_in_plan plan export.node_id with
-      | Some node -> node | None -> invalid_arg "validated child export lost its producer" in
-    let schema = match contract plan producer.id with
-      | Some {composable_output=Keeper_tool_descriptor.Json_output {schema};_} -> schema
-      | Some {composable_output=Keeper_tool_descriptor.Opaque_output;_} | None ->
-        invalid_arg "validated child export lost its output contract" in
-    let selected = match Json_pointer.resolve_schema export.pointer schema with
-      | Ok schema -> schema | Error _ -> invalid_arg "validated child export lost its pointer contract" in
-    export.name,selected) plan.exports in
-  `Assoc ["type",`String "object";"properties",`Assoc properties;
-    "required",`List (List.map (fun (name,_) -> `String name) properties);"additionalProperties",`Bool false]
-
-let child_nodes ~child ~submission_id ~result_id ?(after=[]) () =
-  { child
-  ; submission = node ~id:submission_id ~tool_name:child.tool_name ~after
-      ~input:child.input ()
-  ; result = node ~id:result_id ~tool_name:Tools.composition_result_schema.name
-      ~after:[submission_id] ~input:(Json_template.literal (`Assoc [])) ()
-  ; output_schema = child_exports_schema child.declared_plan
-  }
-
 let inline_arguments ~alias ~reference ~id ~tool_name ~input ~input_schema ~output_schema ?(after=[]) () =
   {alias;reference;node=node ~id ~tool_name ~input ~after ();input_schema;output_schema}
 
@@ -1293,8 +1205,7 @@ let readonly_for_input plan ~node_id ~input =
   match contract plan node_id with
   | None -> None
   | Some {target=Descriptor_target descriptor;_} -> Keeper_tool_descriptor.readonly_for_input descriptor ~input
-  | Some {target=Child_submission _;_} -> Some false
-  | Some {target=(Child_arguments _ | Child_result _);_} -> Some true
+  | Some {target=Child_arguments _;_} -> Some true
 
 let bind_known_tools (resolve : node -> contract option) off_surface nodes =
   let rec bind operands = function
@@ -1474,14 +1385,12 @@ let validate_terminal_dependency_boundary (resolve : node -> contract option) no
       nodes
 ;;
 
-let create_compiled ~descriptors ~children ?(arguments=[]) ?(branch_failure_policy = default_branch_failure_policy) ?(exports = []) nodes =
+let create_compiled ~descriptors ?(arguments=[]) ?(branch_failure_policy = default_branch_failure_policy) ?(exports = []) nodes =
   match nodes with
   | [] -> Error Empty_plan
   | _ ->
-    let fixed_nodes = List.map (fun (arguments : inline_arguments) -> arguments.node) arguments
-      @ List.concat_map (fun child -> [child.submission;child.result]) children in
-    let aliases = List.map (fun child -> child.child.alias) children
-      @ List.map (fun (arguments : inline_arguments) -> arguments.alias) arguments in
+    let fixed_nodes = List.map (fun (arguments : inline_arguments) -> arguments.node) arguments in
+    let aliases = List.map (fun (arguments : inline_arguments) -> arguments.alias) arguments in
     let conflict = match first_duplicate Node_id.equal aliases with
       | Some id -> Some id
       | None -> match first_duplicate Node_id.equal (List.map (fun node -> node.id) fixed_nodes) with
@@ -1508,7 +1417,7 @@ let create_compiled ~descriptors ~children ?(arguments=[]) ?(branch_failure_poli
                 the same unknown/off-surface node. Later validators request
                 only these original nodes, directly or through [node_for_id].
                 Keep phase/error order list-driven and retain the contracts. *)
-             (match bind_known_tools (contract_for_node descriptors children arguments) off_surface nodes with
+             (match bind_known_tools (contract_for_node descriptors arguments) off_surface nodes with
               | Error error -> Error error
               | Ok operands ->
                 let resolve (node : node) = Option.map snd (Node_map.find_opt node.id operands) in
@@ -1537,7 +1446,6 @@ let create_compiled ~descriptors ~children ?(arguments=[]) ?(branch_failure_poli
                                     ; nodes
                                     ; operands
                                     ; descriptors
-                                    ; children
                                     ; arguments
                                     ; branch_failure_policy
                                     ; exports
@@ -1545,7 +1453,7 @@ let create_compiled ~descriptors ~children ?(arguments=[]) ?(branch_failure_poli
 ;;
 
 let create ~descriptors ?branch_failure_policy ?exports nodes =
-  create_compiled ~descriptors ~children:[] ?branch_failure_policy ?exports nodes
+  create_compiled ~descriptors ?branch_failure_policy ?exports nodes
 ;;
 
 type parameter_binding_error =
@@ -1557,7 +1465,7 @@ let instantiate_params ~descriptors ~args plan =
     | `Assoc fields -> List.assoc_opt name fields
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None in
   let rec rebuild rebuilt = function
-    | [] -> create_compiled ~descriptors ~children:plan.children ~arguments:plan.arguments
+    | [] -> create_compiled ~descriptors ~arguments:plan.arguments
         ~branch_failure_policy:plan.branch_failure_policy ~exports:plan.exports (List.rev rebuilt)
       |> Result.map_error (fun error -> Instantiated_plan_rejected error)
     | (node : node) :: rest ->
@@ -1565,34 +1473,6 @@ let instantiate_params ~descriptors ~args plan =
       | Error (Json_template.Missing_param name) -> Error (Missing_argument name)
       | Ok input -> rebuild ({node with input} :: rebuilt) rest in
   rebuild [] plan.nodes
-;;
-
-type child_binding_error =
-  | Child_arguments_rejected of Tool_input_validation.rejection
-  | Fixed_child_input_mismatch
-  | Child_plan_rejected of parameter_binding_error
-
-let child_binding_error_to_string = function
-  | Child_arguments_rejected rejection -> rejection.Tool_input_validation.message
-  | Fixed_child_input_mismatch -> "child arguments differ from the original fixed input"
-  | Child_plan_rejected (Missing_argument name) -> Printf.sprintf "missing child argument %S" name
-  | Child_plan_rejected (Instantiated_plan_rejected error) -> error_to_string error
-;;
-
-let bind_child_plan ~input (child : async_child) =
-  let open Result.Syntax in
-  let* args = Tool_input_validation.validate ~schema:child.input_schema ~name:child.tool_name ~args:input ()
-    |> Result.map_error (fun error -> Child_arguments_rejected error) in
-  let* () = match Json_template.dependencies child.input with
-    | _::_ -> Ok ()
-    | [] ->
-      (match Json_template.resolve ~lookup:(fun _ -> None) child.input with
-       | Ok original when Yojson.Safe.equal (Yojson.Safe.sort original) (Yojson.Safe.sort args) -> Ok ()
-       | Ok _ | Error _ -> Error Fixed_child_input_mismatch) in
-  let descriptors = List.map snd child.declared_plan.descriptors
-    |> List.sort_uniq (fun (left : Keeper_tool_descriptor.t) (right : Keeper_tool_descriptor.t) -> String.compare left.id right.id) in
-  instantiate_params ~descriptors ~args child.declared_plan
-  |> Result.map_error (fun error -> Child_plan_rejected error)
 ;;
 
 let dependency_layers plan =
@@ -1643,7 +1523,7 @@ let dependency_layers plan =
 let descriptor plan node_id =
   match contract plan node_id with
   | Some {target=Descriptor_target descriptor;_} -> Some descriptor
-  | Some {target=(Child_arguments _ | Child_submission _ | Child_result _);_} | None -> None
+  | Some {target=Child_arguments _;_} | None -> None
 ;;
 
 type output =

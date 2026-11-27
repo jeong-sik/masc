@@ -47,14 +47,6 @@ type tool_kind =
   | Composition_tool
   | Async_composition_tool
 
-type prepared_leaf_admission =
-  | Read_only_ordinary_leaf
-  | Owned_job_launch_leaf
-  | Owned_ask_leaf
-  | Owned_file_mutation_leaf
-  | Inline_effect_leaf
-  | Direct_only
-
 let tool_kind_to_string = function
   | Atomic_tool -> "atomic"
   | Composition_tool -> "composition"
@@ -148,7 +140,6 @@ type runtime_handler =
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_keeper_job_dispatch
-  | Tool_keeper_composition_result_dispatch
   | Tool_keeper_code_query_dispatch
   | Tool_receipt_wait
   | Tool_masc_keeper_dispatch
@@ -283,7 +274,6 @@ let runtime_handler_to_string = function
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
   | Tool_masc_schedule_dispatch -> "tool_masc_schedule_dispatch"
   | Tool_keeper_job_dispatch -> "tool_keeper_job_dispatch"
-  | Tool_keeper_composition_result_dispatch -> "tool_keeper_composition_result_dispatch"
   | Tool_keeper_code_query_dispatch -> "tool_keeper_code_query_dispatch"
   | Tool_receipt_wait -> "tool_receipt_wait"
   | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
@@ -347,7 +337,6 @@ let lane_addon_export = function
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_keeper_job_dispatch
-  | Tool_keeper_composition_result_dispatch
   | Tool_keeper_code_query_dispatch
   | Tool_receipt_wait
   | Tool_masc_keeper_dispatch
@@ -395,7 +384,7 @@ let reach_of_handler : runtime_handler -> Keeper_tool_reach.t option = function
   | Tool_task_dispatch | Tool_board_dispatch | Tool_masc_task_dispatch
   | Tool_masc_plan_dispatch | Tool_masc_run_dispatch | Tool_masc_agent_dispatch
   | Tool_masc_workspace_dispatch | Tool_masc_agent_timeline_dispatch
-  | Tool_masc_schedule_dispatch | Tool_keeper_composition_result_dispatch
+  | Tool_masc_schedule_dispatch
   | Tool_receipt_wait | Tool_masc_fusion_status | Tool_masc_fusion_decision
   | Tool_masc_wiki_dispatch ->
       Some Keeper_tool_reach.Masc_state
@@ -625,7 +614,6 @@ let descriptor
       | Tool_constitution_write
       | Tool_constitution_read
       | Tool_constitution_remove
-      | Tool_keeper_composition_result_dispatch
       | Tool_keeper_code_query_dispatch
       | Tool_receipt_wait
       | Tool_search_files
@@ -2368,28 +2356,6 @@ let keeper_owned_job_descriptor (definition : Tool_schemas_owned_job.definition)
   |> with_composable_output (Json_output { schema = owned_job_output_schema })
 ;;
 
-let keeper_composition_result_descriptor () =
-  let schema : Masc_domain.tool_schema = Tools.composition_result_schema in
-  (* No [with_composable_output]: the dispatch handler is retired
-     (Keeper_tool_runtime answers "Composition result dispatch has been
-     retired" with a Policy_rejection), so this tool can never emit a value
-     a composition node could validate. Declaring Json_output here made
-     test_every_composable_tool_has_an_output_probe demand a producer probe
-     for a tool that refuses every call. *)
-  cluster_descriptor_with_schema_source
-    ~capability_identity:Internal_name_identity
-    ~keeper_model_projection:Internal_name
-    ~input_schema_source:Canonical_registry
-    ~input_schema:schema.input_schema
-    ~id:"masc.composition_result"
-    ~name:schema.name
-    ~description:schema.description
-    ~handler:Tool_keeper_composition_result_dispatch
-    ~ordinary_execution_mode:Concurrent
-    ~readonly:true
-    ()
-;;
-
 let keeper_code_query_descriptor () =
   let schema : Masc_domain.tool_schema = Tools.code_query_schema in
   cluster_descriptor_with_schema_source
@@ -3237,7 +3203,6 @@ let internal_descriptors : t list =
   ]
   @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions
   @ List.map keeper_owned_job_descriptor Tool_schemas_owned_job.definitions
-  @ [ keeper_composition_result_descriptor () ]
   (* ── keeper_code_query (1 entry) ───────────────────── *)
   @ [ keeper_code_query_descriptor () ]
   @ [ keeper_receipt_wait_descriptor () ]
@@ -3431,93 +3396,6 @@ let descriptors_for_internal internal_name =
 
 let readonly_static_hint d = d.policy.readonly_hint
 let readonly_for_input d ~input = d.policy.readonly_of_input input
-
-(* Composition node set: [Tool_execute] and masc_board_post answer
-   [Inline_effect_leaf], so only an inline composition may name them. An
-   async one fails in [Keeper_composition_nested.validate_leaves]
-   ([Unsupported_leaf]) and, for async catalog entries, in
-   [Keeper_tool_composition_catalog.parse_composition]
-   ([Async_leaf_not_admitted]). *)
-let prepared_leaf_admission descriptor =
-  match descriptor.execution with
-  | Terminal -> Direct_only
-  | Ordinary Serial when descriptor.runtime_handler = Tool_edit_file
-      || descriptor.runtime_handler = Tool_write_file -> Owned_file_mutation_leaf
-  | Ordinary (Serial | Concurrent) ->
-    (match readonly_static_hint descriptor with
-     | Some true -> Read_only_ordinary_leaf
-     | None | Some false ->
-       (match descriptor.runtime_handler with
-        | Tool_keeper_job_dispatch ->
-          (match Tool_schemas_owned_job.find_definition descriptor.internal_name with
-           | Some {action=Tool_schemas_owned_job.Start;_} -> Owned_job_launch_leaf
-           | Some {action=(Tool_schemas_owned_job.Status | Cancel | Read_result);_}
-           | None -> Direct_only)
-        | Tool_masc_misc_dispatch
-          when String.equal descriptor.internal_name "masc_ask" ->
-          Owned_ask_leaf
-        | Tool_execute -> Inline_effect_leaf
-        | Tool_board_dispatch
-          when String.equal descriptor.internal_name
-            (Tool_name.Board_name.to_string Tool_name.Board_name.Board_post) ->
-          Inline_effect_leaf
-        | Tool_lane_addon _
-        | Tool_search_files
-        | Tool_read_file
-        | Tool_edit_file
-        | Tool_write_file
-        | Tool_lane_status
-        | Tool_tools_list
-        | Tool_capability_search
-        | Tool_context_status
-        | Tool_peer_artifact
-        | Tool_artifact_read
-        | Tool_skill_validate
-        | Tool_artifact_draft | Tool_artifact_publish | Tool_skill_publish
-        | Tool_workspace_memory_read
-        | Tool_memory_search
-        | Tool_memory_select
-        | Tool_memory_retract
-        | Tool_memory_write
-        | Tool_constitution_write
-        | Tool_constitution_read
-        | Tool_constitution_remove
-        | Tool_wiki_search
-        | Tool_wiki_read
-        | Tool_surface_read
-        | Tool_surface_post
-        | Tool_ide_annotate
-        | Tool_voice_dispatch
-        | Tool_task_dispatch
-        | Tool_board_dispatch
-        | Tool_masc_task_dispatch
-        | Tool_masc_plan_dispatch
-        | Tool_masc_run_dispatch
-        | Tool_masc_agent_dispatch
-        | Tool_masc_workspace_dispatch
-        | Tool_masc_misc_dispatch
-        | Tool_web_search
-        | Tool_web_fetch
-        | Tool_browser_tabs
-        | Tool_browser_read
-        | Tool_browser_session
-        | Tool_browser_goto
-        | Tool_browser_act
-        | Tool_browser_interact
-        | Tool_masc_agent_timeline_dispatch
-        | Tool_masc_schedule_dispatch
-        | Tool_keeper_composition_result_dispatch
-        | Tool_keeper_code_query_dispatch
-        | Tool_receipt_wait
-        | Tool_masc_keeper_dispatch
-        | Tool_masc_fusion_dispatch
-        | Tool_masc_fusion_status
-        | Tool_masc_fusion_decision
-        | Tool_masc_file_dispatch
-        | Tool_masc_wiki_dispatch
-        | Tool_masc_local_runtime_dispatch
-        | Tool_analyze_image | Tool_read_image -> Direct_only))
-;;
 
 let readonly_internal_names () =
   all_descriptors ()

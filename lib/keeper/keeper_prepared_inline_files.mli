@@ -87,8 +87,7 @@ module Ready : sig
       target; unprepared paths retain their original exclusive handler.
       Non-file ordinary leaves keep their original handlers and execution
       modes; unknown footprint orders against file mutations without inventing
-      file claims. Terminal and async child submission/result targets remain
-      ineligible. This does not widen the plan's admission or replay authority. *)
+      file claims. Terminal targets remain ineligible. This does not widen the plan's admission or replay authority. *)
 
   val plan : t -> Keeper_tool_plan.t
   val dependency_layers : t -> Keeper_tool_plan.node list list

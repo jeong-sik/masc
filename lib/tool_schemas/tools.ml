@@ -22,10 +22,6 @@ let identity_tool_search_schema : tool_schema =
   Tool_definition_embedded.schema "keeper_tool_search"
 ;;
 
-let composition_result_schema : tool_schema =
-  Tool_definition_embedded.schema "keeper_composition_result"
-;;
-
 let workspace_schemas : tool_schema list =
   Tool_schemas_workspace_core.schemas @ Tool_schemas_workspace_extra.schemas
 ;;

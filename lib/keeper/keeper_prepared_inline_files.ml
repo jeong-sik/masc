@@ -195,7 +195,7 @@ module Ready = struct
       | (node : Plan.node) :: rest ->
         match Node_map.find_opt node.id members with
         | None | Some (_, None)
-        | Some (_, Some {target = (Plan.Child_arguments _ | Plan.Child_submission _ | Plan.Child_result _); _}) ->
+        | Some (_, Some {target = Plan.Child_arguments _; _}) ->
           collect earlier orders rest
         | Some (_, Some {target = Plan.Descriptor_target descriptor; _}) ->
           if not (is_file descriptor) then collect ((node.id,descriptor) :: earlier) orders rest
@@ -227,7 +227,7 @@ module Ready = struct
               supported,
               (descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file
                || descriptor.runtime_handler = Keeper_tool_descriptor.Tool_write_file)
-            | Some {target = (Plan.Child_submission _ | Plan.Child_result _); _} | None -> false, false in
+            | None -> false, false in
           if not supported then None
           else collect (Node_map.add node.id (node,contract) members) (has_mutation || mutation) rest in
       (match collect Node_map.empty false (Plan.nodes plan) with
@@ -263,8 +263,7 @@ module Ready = struct
              ~tool_name:node.tool_name descriptor ~input with
            | Some operation -> Prepared_file {operation; scopes = operation_scopes operation}
            | None -> Unprepared_file mode)
-    | Some {target = (Plan.Child_submission _ | Plan.Child_result _); _} | None ->
-      invalid_arg "ready Inline file lost its original producer"
+    | None -> invalid_arg "ready Inline file lost its original producer"
   ;;
 
   let operation = function

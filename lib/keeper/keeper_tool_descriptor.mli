@@ -66,25 +66,6 @@ type tool_kind =
   | Composition_tool
   | Async_composition_tool
 
-type prepared_leaf_admission =
-  | Read_only_ordinary_leaf
-  | Owned_job_launch_leaf
-  | Owned_ask_leaf
-  | Owned_file_mutation_leaf
-  | Inline_effect_leaf
-  | Direct_only
-(** Prepared leaves retain their original producer's ownership. File Edit and
-    Write are available to inline drafts; durable async plans require read-only
-    leaves, the owned-job producer's replayable launch contract, or [masc_ask].
-    File mutations and job launch retain their Serial effectful descriptor
-    contracts. A file mutation admission is not a prepared resource claim.
-    [Inline_effect_leaf] admits Execute and masc_board_post to inline drafts
-    only: each node's effect passes through the invoking Keeper's
-    own dispatch boundary — Execute through effect Gate approval, a board post
-    through Board policy — exactly as a direct call does. Durable async plans
-    refuse them: their effects are neither replayable nor idempotent, so an
-    interrupted run could not re-prove them. *)
-
 (** Descriptor-owned output contract for typed composition. [Opaque_output]
     cannot be referenced by another plan node. [Json_output] carries a schema
     in the closed composable-output subset checked by [Keeper_tool_plan.create]:
@@ -164,7 +145,6 @@ type runtime_handler =
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_schedule_dispatch
   | Tool_keeper_job_dispatch
-  | Tool_keeper_composition_result_dispatch
   | Tool_keeper_code_query_dispatch
   | Tool_receipt_wait
   | Tool_masc_keeper_dispatch
@@ -327,10 +307,6 @@ val descriptors_for_internal : string -> t list
 
 val readonly_static_hint : t -> bool option
 val readonly_for_input : t -> input:Yojson.Safe.t -> bool option
-val prepared_leaf_admission : t -> prepared_leaf_admission
-(** Classify the exact descriptor route and canonical owned-job action. The
-    consumer applies the inline/durable distinction. Terminal calls and other
-    effectful tools retain their direct admission. *)
 val translate_input_for_descriptor : t -> Yojson.Safe.t -> Yojson.Safe.t
 
 (** Descriptor-owned read-only projection. The returned names are internal

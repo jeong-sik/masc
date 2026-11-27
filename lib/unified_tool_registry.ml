@@ -121,7 +121,6 @@ let tag_of_runtime_handler
   | Tool_masc_fusion_decision
   | Tool_masc_file_dispatch
   | Tool_keeper_job_dispatch
-  | Tool_keeper_composition_result_dispatch
   | Tool_lane_addon _
   | Tool_analyze_image | Tool_read_image -> Mod_external
 
@@ -170,8 +169,6 @@ let runtime_schema_for_descriptor
   =
   let inventory =
     match descriptor.runtime_handler with
-    | Keeper_tool_descriptor.Tool_keeper_composition_result_dispatch ->
-      [ Tools.composition_result_schema ]
     | Keeper_tool_descriptor.Tool_execute | Keeper_tool_descriptor.Tool_search_files
     | Keeper_tool_descriptor.Tool_read_file | Keeper_tool_descriptor.Tool_edit_file
     | Keeper_tool_descriptor.Tool_write_file | Keeper_tool_descriptor.Tool_lane_status

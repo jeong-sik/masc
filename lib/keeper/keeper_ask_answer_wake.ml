@@ -1,28 +1,4 @@
-type delivery = Enqueued | Already_pending | Already_delivered
-
-type error =
-  | Ask_store_unavailable of Keeper_ask_store.read_error
-  | Ask_missing of string
-  | Ask_not_answered of string
-  | Invalid_answered_record of string
-  | Delivery_evidence_unavailable of Keeper_reaction_ledger.strict_delivery_evidence_error
-  | Intake_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
-  | Queue_storage_failed of string
-  | Owner_unavailable of string
-
-let error_to_string = function
-  | Ask_store_unavailable error -> Keeper_ask_store.read_error_to_string error
-  | Ask_missing ask_id -> "canonical ask is missing: " ^ ask_id
-  | Ask_not_answered ask_id -> "canonical ask is not answered: " ^ ask_id
-  | Invalid_answered_record detail -> "canonical answer is invalid: " ^ detail
-  | Delivery_evidence_unavailable error ->
-      Keeper_reaction_ledger.strict_delivery_evidence_error_to_string error
-  | Intake_shutdown_reserved operation_id ->
-      "answer wake held: " ^ Keeper_registry_event_queue.shutdown_reserved_detail operation_id
-  | Queue_storage_failed detail -> "answer wake storage failed: " ^ detail
-  | Owner_unavailable detail -> "answer owner metadata unreadable: " ^ detail
-
-let wake_hint ~log_deferred ~base_path ~keeper_name ~ask_id =
+let wake_hint ~base_path ~keeper_name ~ask_id =
   try
     match Keeper_registry.wakeup_running ~intent:Keeper_registry.Reactive_signal
         ~base_path keeper_name with
@@ -30,33 +6,37 @@ let wake_hint ~log_deferred ~base_path ~keeper_name ~ask_id =
     | Keeper_registry.Deferred_not_running _
     | Keeper_registry.Deferred_lifecycle _
     | Keeper_registry.Deferred_unregistered ->
-        if log_deferred then
-          Log.Keeper.info ~keeper_name "answer wake durably pending; live hint deferred ask_id=%s" ask_id
+        Log.Keeper.info ~keeper_name "answer wake durably pending; live hint deferred ask_id=%s" ask_id
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Log.Keeper.warn ~keeper_name "answer wake hint failed after commit ask_id=%s: %s"
       ask_id (Printexc.to_string exn)
 
+(* The pointer the answer route admits: the canonical answer time is its
+   arrival time, so the followup's source identity is the queued pointer's. *)
+let ask_pointer ~now (ask : Keeper_ask.ask) =
+  let payload = { Keeper_event_queue.ask_id = ask.ask_id; channel = ask.continuation } in
+  { Keeper_event_queue.post_id = Keeper_event_queue.ask_answered_post_id payload
+  ; urgency = Keeper_event_queue.Normal
+  ; arrived_at = now
+  ; payload = Keeper_event_queue.Ask_answered payload }
+
 let answered_stimulus ~keeper_name (ask : Keeper_ask.ask) resolution =
   if not (String.equal keeper_name ask.keeper_name) then
-    Error (Invalid_answered_record "ask belongs to a different Keeper")
+    Error "canonical answer is invalid: ask belongs to a different Keeper"
   else match resolution with
-  | Keeper_ask.Open | Keeper_ask.Withdrawn_because _ -> Error (Ask_not_answered ask.ask_id)
+  | Keeper_ask.Open | Keeper_ask.Withdrawn_because _ ->
+      Error ("canonical ask is not answered: " ^ ask.ask_id)
   | Keeper_ask.Answered_by { answers; answered_at; responder = _ } ->
       if not (Float.is_finite answered_at) then
-        Error (Invalid_answered_record "answer timestamp is not finite")
+        Error "canonical answer is invalid: answer timestamp is not finite"
       else
         let submissions = List.map (fun (answer : Keeper_ask.answer) ->
             answer.question_id, answer.response) answers in
         (match Keeper_ask.parse_answers ~ask ~submissions with
-         | Error errors -> Error (Invalid_answered_record
-             (String.concat "; " (List.map Keeper_ask.invalid_answer_to_string errors)))
-         | Ok _ ->
-             let payload = { Keeper_event_queue.ask_id = ask.ask_id; channel = ask.continuation } in
-             Ok { Keeper_event_queue.post_id = Keeper_event_queue.ask_answered_post_id payload
-                ; urgency = Keeper_event_queue.Normal
-                ; arrived_at = answered_at
-                ; payload = Keeper_event_queue.Ask_answered payload })
+         | Error errors -> Error ("canonical answer is invalid: "
+             ^ String.concat "; " (List.map Keeper_ask.invalid_answer_to_string errors))
+         | Ok _ -> Ok (ask_pointer ~now:answered_at ask))
 
 type tool_action = {
   execution_id : string;
@@ -189,8 +169,7 @@ type followup_source =
 
 let observe_followup ?on_started ?on_source ~base_path ~keeper_name ~ask ~resolution () =
   let open Result.Syntax in
-  let* stimulus = answered_stimulus ~keeper_name ask resolution
-      |> Result.map_error error_to_string in
+  let* stimulus = answered_stimulus ~keeper_name ask resolution in
   let stimulus_id = Keeper_reaction_ledger.stimulus_id_of_event_queue stimulus in
   let identity : followup_identity = {answered_at=stimulus.arrived_at; stimulus_id} in
   Option.iter (fun started -> started identity) on_started;
@@ -288,62 +267,10 @@ let followup_to_json (followup : followup) =
     "tool_actions", tool_actions_to_json followup.tool_actions;
     "linked_task", linked_task_to_json followup.linked_task])
 
-let deliver_row ~base_path ~keeper_name ~already_delivered ask resolution =
-  let open Result.Syntax in
-  let* stimulus = answered_stimulus ~keeper_name ask resolution in
-  let* consumed = already_delivered stimulus in
-  if consumed then Ok Already_delivered
-  else
-    (* Delivery evidence cannot predate the answer it delivers: bound every
-       evidence read by the canonical answer time so a torn write from
-       before the answer cannot reject this delivery. *)
-    let evidence_since = stimulus.Keeper_event_queue.arrived_at in
-    match Keeper_registry_event_queue.enqueue_stimulus_once_durable_result
-        ~not_before:evidence_since ~base_path keeper_name stimulus with
-    | Keeper_registry_event_queue.Stimulus_shutdown_reserved operation_id ->
-        Error (Intake_shutdown_reserved operation_id)
-    | Keeper_registry_event_queue.Stimulus_storage_error detail -> Error (Queue_storage_failed detail)
-    | Keeper_registry_event_queue.Stimulus_enqueued ->
-        wake_hint ~log_deferred:true ~base_path ~keeper_name ~ask_id:ask.Keeper_ask.ask_id;
-        Ok Enqueued
-    | Keeper_registry_event_queue.Stimulus_already_present ->
-        (* The owner-lock recheck may have observed consumption after our
-           snapshot. Check again before sending even a live wake hint. *)
-        let* consumed = Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
-            ~base_path ~keeper_name ~not_before:evidence_since ~post_id:stimulus.post_id
-          ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue stimulus)
-            |> Result.map_error (fun error -> Delivery_evidence_unavailable error) in
-        if consumed then Ok Already_delivered
-        else (
-          wake_hint ~log_deferred:false ~base_path ~keeper_name ~ask_id:ask.Keeper_ask.ask_id;
-          Ok Already_pending)
-
-let deliver ~base_path ~keeper_name ~ask_id =
-  let open Result.Syntax in
-  let* snapshot = Keeper_ask_store.rows_result ~base_path ~keeper_name
-      |> Result.map_error (fun error -> Ask_store_unavailable error) in
-  let rows = match snapshot with Keeper_ask_store.Missing_log -> [] | Stored_rows rows -> rows in
-  match List.assoc_opt ask_id rows with
-  | None -> Error (Ask_missing ask_id)
-  | Some (ask, resolution) ->
-      deliver_row ~base_path ~keeper_name ~already_delivered:(fun stimulus ->
-        Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
-          ~base_path ~keeper_name ~not_before:stimulus.Keeper_event_queue.arrived_at
-          ~post_id:stimulus.Keeper_event_queue.post_id
-            ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue stimulus)
-        |> Result.map_error (fun error -> Delivery_evidence_unavailable error)) ask resolution
-
 type answer_failure =
   | Answer_refused of Keeper_ask_store.answer_failure
   | Keeper_intake_held of Keeper_shutdown_types.Operation_id.t
   | Keeper_queue_unavailable of string
-
-let ask_pointer ~now (ask : Keeper_ask.ask) =
-  let payload = { Keeper_event_queue.ask_id = ask.ask_id; channel = ask.continuation } in
-  { Keeper_event_queue.post_id = Keeper_event_queue.ask_answered_post_id payload
-  ; urgency = Keeper_event_queue.Normal
-  ; arrived_at = now
-  ; payload = Keeper_event_queue.Ask_answered payload }
 
 (* The pointer becomes durable before the answer is appended, and both happen
    inside the Keeper's queue owner lock: an answer never exists without its
@@ -363,385 +290,5 @@ let answer ~base_path ~keeper_name ~ask_id ~submissions ~responder ~now =
       Error (Keeper_queue_unavailable detail)
   | Keeper_registry_event_queue.Admission_completed (Error failure) -> Error (Answer_refused failure)
   | Keeper_registry_event_queue.Admission_completed (Ok answers) ->
-      wake_hint ~log_deferred:true ~base_path ~keeper_name ~ask_id;
+      wake_hint ~base_path ~keeper_name ~ask_id;
       Ok answers
-
-type failure = { keeper_name : string option; ask_id : string option; error : error }
-type held_answer =
-  { owner : string
-  ; answered_ask_id : string
-  ; shutdown_operation_id : Keeper_shutdown_types.Operation_id.t
-  }
-type report =
-  { inspected : int
-  ; evidence_window_reads : int
-  ; enqueued : int
-  ; already_pending : int
-  ; already_delivered : int
-  ; shutdown_reserved : held_answer list
-  ; owners_absent : string list
-  ; failures : failure list
-  }
-
-type delivery_window = Whole_store | Answer_day of string
-type window_demand = One_source | Multiple_sources
-module Delivery_windows = Map.Make (struct
-  type t = delivery_window
-
-  let compare a b =
-    match a, b with
-    | Whole_store, Whole_store -> 0
-    | Whole_store, Answer_day _ -> -1
-    | Answer_day _, Whole_store -> 1
-    | Answer_day d1, Answer_day d2 -> String.compare d1 d2
-end)
-
-let delivery_window since =
-  if since <= 0. then Ok Whole_store
-  else
-    match Jsonl_writer.day_key ~ts:since with
-    | day -> Ok (Answer_day day)
-    | exception ((Unix.Unix_error _ | Invalid_argument _) as exn) ->
-        Error (Invalid_answered_record
-          ("answer timestamp has no UTC calendar day: " ^ Printexc.to_string exn))
-
-let empty_report =
-  { inspected=0; evidence_window_reads=0; enqueued=0;
-    already_pending=0; already_delivered=0; shutdown_reserved=[];
-    owners_absent=[]; failures=[] }
-
-(* An answer whose delivery the evidence showed, named by its ask and its
-   canonical answer time. The reaction ledger is append-only, so a source it
-   shows delivered stays delivered while this process runs: the supervisor
-   keeps these names and its later passes read no evidence for them. A new
-   answer to the same ask carries a new answer time and is read again. *)
-module Settled_answers = Set.Make (struct
-  type t = string * float
-
-  let compare (ask_a, at_a) (ask_b, at_b) =
-    match String.compare ask_a ask_b with
-    | 0 -> Float.compare at_a at_b
-    | order -> order
-end)
-
-let settled_answer (ask_id, (_, resolution)) =
-  match resolution with
-  | Keeper_ask.Answered_by { answered_at; _ } -> Some (ask_id, answered_at)
-  | Keeper_ask.Open | Keeper_ask.Withdrawn_because _ -> None
-
-(* Returns the pass's report and the answers now known delivered: those of
-   [settled] still in [rows], and those this pass's evidence showed delivered.
-   An answer in [settled] is counted inspected and already delivered without
-   an evidence read. *)
-let reconcile_rows ~base_path ~keeper_name ~settled report rows =
-  let open Result.Syntax in
-  let known, rows = List.partition (fun row ->
-      match settled_answer row with
-      | Some answer -> Settled_answers.mem answer settled
-      | None -> false) rows in
-  let report = { report with
-                 inspected = report.inspected + List.length known;
-                 already_delivered = report.already_delivered + List.length known } in
-  let answered, demands = List.fold_left (fun (answered, demands) row ->
-    let _, (_, resolution) = row in
-    match resolution with
-    | Keeper_ask.Open | Keeper_ask.Withdrawn_because _ -> answered, demands
-    | Keeper_ask.Answered_by { answered_at; _ } ->
-        let demands = if not (Float.is_finite answered_at) then demands
-          else
-            match delivery_window answered_at with
-            | Error _ -> demands
-            | Ok window ->
-                let demand = match Delivery_windows.find_opt window demands with
-                  | None -> One_source
-                  | Some (One_source | Multiple_sources) -> Multiple_sources in
-                Delivery_windows.add window demand demands in
-        row :: answered, demands) ([], Delivery_windows.empty) rows in
-  let answered = List.rev answered in
-  (* A pass owns these immutable reads. Keeper and UTC-day boundaries
-     remain distinct; a failed earlier window cannot taint a later one.
-     Demand the first read in row order, rather than preparing a barrier
-     before the first ready answer can reach the queue owner. *)
-  let windows = ref Delivery_windows.empty in
-  let window_reads = ref 0 in
-  let already_delivered (stimulus : Keeper_event_queue.stimulus) =
-    let since = stimulus.arrived_at in
-    let* window = delivery_window since in
-    let snapshot = match Delivery_windows.find_opt window !windows with
-      | Some snapshot -> snapshot
-      | None ->
-          incr window_reads;
-          let snapshot = Keeper_reaction_ledger.strict_source_delivery_snapshot_result
-              ~base_path ~keeper_name ~since in
-          (* A single-use window is not retained alongside the shared
-             ones. All-distinct dates keep no large proof snapshots. *)
-          (match Delivery_windows.find_opt window demands with
-           | Some Multiple_sources ->
-               windows := Delivery_windows.add window snapshot !windows
-           | Some One_source | None -> ());
-          snapshot in
-    Result.bind snapshot (fun snapshot ->
-      Keeper_reaction_ledger.source_delivery_seen_in_snapshot snapshot
-        ~post_id:stimulus.post_id
-        ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue stimulus))
-    |> Result.map_error (fun error -> Delivery_evidence_unavailable error) in
-  let still_settled = Settled_answers.of_list (List.filter_map settled_answer known) in
-  let report, settled = List.fold_left (fun (report, settled) ((ask_id, (ask, resolution)) as row) ->
-    let report = { report with inspected = report.inspected + 1 } in
-    match deliver_row ~base_path ~keeper_name ~already_delivered ask resolution with
-    | Ok Enqueued -> { report with enqueued = report.enqueued + 1 }, settled
-    | Ok Already_pending -> { report with already_pending = report.already_pending + 1 }, settled
-    | Ok Already_delivered ->
-        let settled = match settled_answer row with
-          | Some answer -> Settled_answers.add answer settled
-          | None -> settled in
-        { report with already_delivered = report.already_delivered + 1 }, settled
-    (* The answer stays in the ask log and nothing failed: the Keeper's
-       shutdown holds its intake. The pass after the release enqueues it. *)
-    | Error (Intake_shutdown_reserved shutdown_operation_id) ->
-        { report with shutdown_reserved =
-            { owner = keeper_name; answered_ask_id = ask_id; shutdown_operation_id }
-            :: report.shutdown_reserved }, settled
-    | Error (( Ask_store_unavailable _ | Ask_missing _ | Ask_not_answered _
-             | Invalid_answered_record _ | Delivery_evidence_unavailable _
-             | Queue_storage_failed _ | Owner_unavailable _ ) as error) ->
-        { report with failures = { keeper_name = Some keeper_name;
-        ask_id = Some ask_id; error } :: report.failures }, settled)
-    (report, still_settled) answered in
-  { report with evidence_window_reads =
-      report.evidence_window_reads + !window_reads }, settled
-
-(* Only a missing meta file is a gone Keeper, the reading the approval queue
-   and the fleet health already use. A file this binary does not decode
-   ([Meta_not_current]) still names a Keeper that boot re-materialises from its
-   declaration. A gone Keeper has nobody to wake, so its answered asks stay in
-   its log; a pass after the name is stored again delivers them. *)
-type owner = Owner_present | Owner_absent | Owner_unreadable of string
-
-let owner_of ~base_path ~keeper_name =
-  match Keeper_meta_store.read_meta_presence (Workspace.default_config base_path) keeper_name with
-  | Error detail -> Owner_unreadable detail
-  | Ok Keeper_meta_store.Meta_absent -> Owner_absent
-  | Ok (Keeper_meta_store.Meta_present _ | Keeper_meta_store.Meta_not_current _) -> Owner_present
-
-let has_answered rows =
-  List.exists (fun (_, (_, resolution)) -> match resolution with
-    | Keeper_ask.Answered_by _ -> true
-    | Keeper_ask.Open | Keeper_ask.Withdrawn_because _ -> false) rows
-
-let reconcile ~base_path =
-  let open Result.Syntax in
-  let* logs = Keeper_ask_store.discover_rows_result ~base_path in
-  let report = List.fold_left (fun report log ->
-      match log with
-      | Keeper_ask_store.Unreadable_log error ->
-          { report with failures = { keeper_name = None; ask_id = None;
-              error = Ask_store_unavailable error } :: report.failures }
-      | Keeper_ask_store.Canonical_rows { keeper_name; rows } ->
-          if not (has_answered rows) then report
-          else
-            match owner_of ~base_path ~keeper_name with
-            | Owner_present ->
-                fst (reconcile_rows ~base_path ~keeper_name ~settled:Settled_answers.empty report rows)
-            | Owner_absent -> { report with owners_absent = keeper_name :: report.owners_absent }
-            | Owner_unreadable detail ->
-                { report with failures = { keeper_name = Some keeper_name; ask_id = None;
-                    error = Owner_unavailable detail } :: report.failures })
-    empty_report logs in
-  Ok {report with failures=List.rev report.failures;
-                  shutdown_reserved=List.rev report.shutdown_reserved;
-                  owners_absent=List.rev report.owners_absent}
-
-type recovery_phase = Reserved | Started | Settled of report | Interrupted | Raised
-
-let observe_recovery ~base_path ~keeper_name ~started_ns phase =
-  let emit () = try Log.Server.routine_lazy (fun () ->
-      let phase, detail = match phase with
-        | Reserved -> "reserved", ""
-        | Started -> "started", ""
-        | Interrupted -> "interrupted", ""
-        | Raised -> "raised", ""
-        | Settled report -> "settled", Printf.sprintf
-            " inspected=%d evidence_windows=%d enqueued=%d pending=%d already_delivered=%d shutdown_reserved=%d failures=%d"
-            report.inspected report.evidence_window_reads report.enqueued
-            report.already_pending report.already_delivered
-            (List.length report.shutdown_reserved) (List.length report.failures) in
-      Printf.sprintf "ask_recovery_owner keeper=%s started_ns=%Ld phase=%s at_ns=%Ld%s base_path=%S"
-        keeper_name started_ns phase (Mtime_clock.elapsed_ns ()) detail base_path)
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | _ -> () in
-  Eio.Cancel.protect emit
-
-let log_report ~base_path ~keeper_name report =
-  List.iter (fun (failure : failure) ->
-    Log.Server.warn "ask answer recovery retained keeper=%s ask_id=%s error=%s base_path=%S"
-      keeper_name
-      (match failure.ask_id with Some ask_id -> ask_id | None -> "<store>")
-      (error_to_string failure.error) base_path) report.failures;
-  (* A hold is the Keeper's shutdown state, which the shutdown announces
-     itself, so it is told at the level the skipped owners are. *)
-  (match report.shutdown_reserved with
-   | [] -> ()
-   | _ :: _ as held ->
-       Log.Server.routine "ask answer recovery held by shutdown keeper=%s asks=%s operations=%s base_path=%S"
-         keeper_name
-         (String.concat "," (List.map (fun (held : held_answer) -> held.answered_ask_id) held))
-         (String.concat ","
-            (List.sort_uniq String.compare
-               (List.map (fun (held : held_answer) ->
-                    Keeper_shutdown_types.Operation_id.to_string held.shutdown_operation_id) held)))
-         base_path);
-  if report.enqueued > 0 then Log.Server.info
-    "ask answer recovery keeper=%s inspected=%d evidence_windows=%d enqueued=%d pending=%d already_delivered=%d shutdown_reserved=%d failures=%d base_path=%S"
-    keeper_name report.inspected report.evidence_window_reads report.enqueued
-    report.already_pending report.already_delivered
-    (List.length report.shutdown_reserved) (List.length report.failures) base_path
-
-let log_discovery ~base_path = function
-  | Ok () -> ()
-  | Error error -> Log.Server.warn "ask answer recovery discovery unavailable: %s base_path=%S"
-      (Keeper_ask_store.read_error_to_string error) base_path
-
-type t =
-  { base_path : string
-  ; on_report : keeper_name:string -> report -> unit
-  ; on_discovery : base_path:string -> (unit, Keeper_ask_store.read_error) result -> unit
-  ; mutable active : Set_util.StringSet.t
-  ; mutable settled : Settled_answers.t Set_util.StringMap.t
-      (* Per Keeper, the answers a pass of this supervisor saw delivered. *)
-  ; mutable discovery_active : bool }
-
-let create ~base_path ?(on_report=log_report ~base_path) ?(on_discovery=log_discovery) () =
-  {base_path;on_report;on_discovery;active=Set_util.StringSet.empty;
-   settled=Set_util.StringMap.empty;discovery_active=false}
-
-let discover_and_schedule ~sw supervisor =
-  let open Result.Syntax in
-  Eio.Switch.check sw;
-  let* logs = Keeper_ask_store.discover_rows_result ~base_path:supervisor.base_path in
-  let schedule keeper_name rows =
-    Eio.Switch.check sw;
-    let started_ns = Mtime_clock.elapsed_ns () in
-    supervisor.active <- Set_util.StringSet.add keeper_name supervisor.active;
-    let release () =
-      supervisor.active <- Set_util.StringSet.remove keeper_name supervisor.active in
-    try
-      observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Reserved;
-      Eio.Switch.check sw;
-      Eio.Fiber.fork ~sw (fun () ->
-        Fun.protect ~finally:release (fun () ->
-          try
-            (* Reserve all independent owners without joining their queues,
-               even when the configured filesystem completes inline. *)
-            Eio.Fiber.yield ();
-            observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Started;
-            let settled = Option.value ~default:Settled_answers.empty
-                (Set_util.StringMap.find_opt keeper_name supervisor.settled) in
-            let report, settled = reconcile_rows ~base_path:supervisor.base_path
-                ~keeper_name ~settled empty_report rows in
-            supervisor.settled <- Set_util.StringMap.add keeper_name settled supervisor.settled;
-            let report = {report with failures=List.rev report.failures;
-              shutdown_reserved=List.rev report.shutdown_reserved} in
-            observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns (Settled report);
-            (try supervisor.on_report ~keeper_name report with
-             | Eio.Cancel.Cancelled _ as exn -> raise exn
-             | exn -> Log.Server.warn "ask answer recovery observer failed keeper=%s: %s base_path=%S"
-                 keeper_name (Printexc.to_string exn) supervisor.base_path)
-          with
-          | Eio.Cancel.Cancelled _ as exn ->
-              observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Interrupted;
-              raise exn
-          | exn ->
-              observe_recovery ~base_path:supervisor.base_path ~keeper_name ~started_ns Raised;
-              Log.Server.warn "ask answer recovery worker retained keeper=%s: %s base_path=%S"
-                keeper_name (Printexc.to_string exn) supervisor.base_path))
-    with exn ->
-      let bt = Printexc.get_raw_backtrace () in
-      release ();
-      Printexc.raise_with_backtrace exn bt in
-  (* A Keeper whose ask log is no longer read keeps no settled answers: if its
-     log comes back, its answers are read against the evidence again. *)
-  let discovered = List.fold_left (fun names -> function
-    | Keeper_ask_store.Canonical_rows { keeper_name; _ } -> Set_util.StringSet.add keeper_name names
-    | Keeper_ask_store.Unreadable_log _ -> names) Set_util.StringSet.empty logs in
-  supervisor.settled <- Set_util.StringMap.filter
-      (fun keeper_name _ -> Set_util.StringSet.mem keeper_name discovered) supervisor.settled;
-  let owners_absent = List.fold_left (fun owners_absent -> function
-    | Keeper_ask_store.Unreadable_log error ->
-        Log.Server.warn "ask answer recovery discovery retained error=%s base_path=%S"
-          (Keeper_ask_store.read_error_to_string error) supervisor.base_path;
-        owners_absent
-    | Keeper_ask_store.Canonical_rows {keeper_name; rows} ->
-        if Set_util.StringSet.mem keeper_name supervisor.active || not (has_answered rows)
-        then owners_absent
-        else
-          match owner_of ~base_path:supervisor.base_path ~keeper_name with
-          | Owner_present -> schedule keeper_name rows; owners_absent
-          | Owner_absent ->
-              (* A Keeper stored again under this name may start from an empty
-                 ledger, so what the gone Keeper's evidence showed is dropped. *)
-              supervisor.settled <- Set_util.StringMap.remove keeper_name supervisor.settled;
-              keeper_name :: owners_absent
-          | Owner_unreadable detail ->
-              Log.Server.warn "ask answer recovery retained keeper=%s error=%s base_path=%S"
-                keeper_name (error_to_string (Owner_unavailable detail)) supervisor.base_path;
-              owners_absent) [] logs in
-  (match owners_absent with
-   | [] -> ()
-   | _ :: _ ->
-       Log.Server.routine "ask answer recovery skipped keepers without metadata count=%d keepers=%s base_path=%S"
-         (List.length owners_absent) (String.concat "," (List.rev owners_absent)) supervisor.base_path);
-  Ok ()
-
-type discovery_phase =
-  | Discovery_reserved | Discovery_started
-  | Discovery_settled of (unit, Keeper_ask_store.read_error) result
-  | Discovery_interrupted | Discovery_raised
-
-let observe_discovery ~base_path ~reserved_ns phase =
-  let emit () = try Log.Server.routine_lazy (fun () ->
-      let phase, detail = match phase with
-        | Discovery_reserved -> "reserved", ""
-        | Discovery_started -> "started", ""
-        | Discovery_settled result -> "settled",
-            (match result with Ok () -> " outcome=returned" | Error _ -> " outcome=failed")
-        | Discovery_interrupted -> "interrupted", ""
-        | Discovery_raised -> "raised", "" in
-      Printf.sprintf "ask_recovery_discovery reserved_ns=%Ld phase=%s at_ns=%Ld%s base_path=%S"
-        reserved_ns phase (Mtime_clock.elapsed_ns ()) detail base_path)
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | _ -> () in
-  Eio.Cancel.protect emit
-
-let pulse ~sw supervisor =
-  Eio.Switch.check sw;
-  if not supervisor.discovery_active then (
-    let reserved_ns = Mtime_clock.elapsed_ns () in
-    let observe = observe_discovery ~base_path:supervisor.base_path ~reserved_ns in
-    supervisor.discovery_active <- true;
-    let release () = supervisor.discovery_active <- false in
-    try
-      observe Discovery_reserved;
-      Eio.Switch.check sw;
-      Eio.Fiber.fork ~sw (fun () ->
-        Fun.protect ~finally:release (fun () ->
-          try
-            Eio.Fiber.yield ();
-            observe Discovery_started;
-            let result = discover_and_schedule ~sw supervisor in
-            observe (Discovery_settled result);
-            (try supervisor.on_discovery ~base_path:supervisor.base_path result with
-             | Eio.Cancel.Cancelled _ as exn -> raise exn
-             | exn -> Log.Server.warn "ask discovery observer failed: %s base_path=%S"
-                 (Printexc.to_string exn) supervisor.base_path)
-          with
-          | Eio.Cancel.Cancelled _ as exn -> observe Discovery_interrupted; raise exn
-          | exn ->
-              observe Discovery_raised;
-              Log.Server.warn "ask discovery worker retained: %s base_path=%S" (Printexc.to_string exn) supervisor.base_path))
-    with exn ->
-      let bt = Printexc.get_raw_backtrace () in
-      release ();
-      Printexc.raise_with_backtrace exn bt)

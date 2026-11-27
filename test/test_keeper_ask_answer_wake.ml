@@ -404,15 +404,6 @@ let persist_answer ~base_path ~keeper_name ~ask_id ?task_id ?(answered_at = 200.
   ask
 ;;
 
-(* A torn write from before the answer: predating the canonical answer time,
-   it must be outside every delivery-evidence window. *)
-let write_preanswer_corruption ~base_path ~keeper_name =
-  let dir = Filename.concat
-      (Keeper_reaction_ledger.store_dir ~base_path ~keeper_name) "2020-01" in
-  Fs_compat.mkdir_p dir;
-  Fs_compat.save_file (Filename.concat dir "01.jsonl") "{torn pre-answer write}\n"
-;;
-
 let pending_asks ~base_path ~keeper_name =
   match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name with
   | Error error -> fail error
@@ -425,24 +416,6 @@ let pending_asks ~base_path ~keeper_name =
           | Tool_result_ready _ | Owned_job_completed _
           | Connector_attention _ | Hitl_resolved _ | Completion_authority_rejected _
           | Task_outcome _ | Task_cancelled _ | Workspace_message _ | Delegate_completed _ -> None)
-;;
-
-let reconcile_or_fail ~base_path =
-  match Wake.reconcile ~base_path with
-  | Ok report -> report
-  | Error error -> fail (Keeper_ask_store.read_error_to_string error)
-;;
-
-(* Which Keeper's answers a pass held, and whether one shutdown holds them all. *)
-let held_answers (report : Wake.report) =
-  List.map (fun (held : Wake.held_answer) -> held.owner, held.answered_ask_id)
-    report.shutdown_reserved
-;;
-
-let held_by operation_id (report : Wake.report) =
-  List.for_all (fun (held : Wake.held_answer) ->
-      Keeper_shutdown_types.Operation_id.equal operation_id held.shutdown_operation_id)
-    report.shutdown_reserved
 ;;
 
 let terminalize_answer ~base_path ~keeper_name source =
@@ -646,536 +619,6 @@ let test_original_question_input_uses_canonical_store_and_keeps_unlinked_state (
   check int "input projection did not enqueue a wake" 0 (List.length (pending_asks ~base_path ~keeper_name))
 ;;
 
-let test_recorded_answer_recovers_once_on_original_continuation () =
-  with_persistence @@ fun config ensure_keeper ->
-  let base_path = config.Workspace.base_path in
-  let keeper_name = "alpha" in
-  ensure_keeper keeper_name;
-  let ask = persist_answer ~base_path ~keeper_name ~ask_id:"answer-recovery" () in
-  let log_path = Keeper_ask_store.log_path ~base_path ~keeper_name in
-  let original_log = Fs_compat.load_file log_path in
-  let queue_path = Filename.concat
-      (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
-      Keeper_event_queue_persistence.snapshot_filename in
-  Fs_compat.mkdir_p (Filename.dirname queue_path);
-  Fs_compat.save_file queue_path "invalid queue snapshot";
-  (match Wake.deliver ~base_path ~keeper_name ~ask_id:ask.ask_id with
-   | Error (Wake.Queue_storage_failed _) -> ()
-   | Error error -> fail (Wake.error_to_string error)
-   | Ok _ -> fail "failed queue storage acknowledged answer delivery");
-  Unix.unlink queue_path;
-  let deferred_hint_logs_since since_seq =
-    let expected = Printf.sprintf "answer wake durably pending; live hint deferred ask_id=%s" ask.ask_id in
-    Log.Ring.recent ~since_seq ~module_filter:"Keeper" ~order:`Oldest_first ()
-    |> List.filter (fun (entry : Log.Ring.entry) -> String.equal entry.message expected)
-    |> List.length
-  in
-  let seq0 = (Log.Ring.bounds ()).total - 1 in
-  let recovered = reconcile_or_fail ~base_path in
-  check int "canonical record recovers without another answer" 1 recovered.enqueued;
-  check int "recovery has no retained failures" 0 (List.length recovered.failures);
-  check int "initial enqueue logs deferred wake hint once" 1 (deferred_hint_logs_since seq0);
-  let source = match pending_asks ~base_path ~keeper_name with
-    | [ source, payload ] ->
-        check string "original ask pointer" ask.ask_id payload.Keeper_event_queue.ask_id;
-        check bool "original continuation is retained" true (payload.channel = ask.continuation);
-        check (float 0.) "canonical answer timestamp is stable" 200. source.Keeper_event_queue.arrived_at;
-        source
-    | _ -> fail "recovery did not create one exact answer source" in
-  let seq1 = (Log.Ring.bounds ()).total - 1 in
-  (match Wake.deliver ~base_path ~keeper_name ~ask_id:ask.ask_id with
-   | Ok Wake.Already_pending -> ()
-   | Ok _ -> fail "pending answer delivery was not idempotent"
-   | Error error -> fail (Wake.error_to_string error));
-  check int "already-pending delivery suppresses repeat deferred wake log" 0 (deferred_hint_logs_since seq1);
-  check int "duplicate delivery leaves one pending source" 1 (List.length (pending_asks ~base_path ~keeper_name));
-  terminalize_answer ~base_path ~keeper_name source;
-  let repeated = reconcile_or_fail ~base_path in
-  check int "accepted source evidence suppresses re-enqueue" 0 repeated.enqueued;
-  check int "accepted source is recognized by exact evidence" 1 repeated.already_delivered;
-  check int "accepted source stays absent from pending" 0 (List.length (pending_asks ~base_path ~keeper_name));
-  check string "delivery and recovery never replay the answer write" original_log (Fs_compat.load_file log_path)
-;;
-
-(* An answer for a Keeper whose meta file is gone is not enqueued, on either
-   recovery path. Its log stays, so storing the meta again lets the next pass
-   deliver it. *)
-let test_answers_wait_while_their_keeper_has_no_meta_file () =
-  with_persistence @@ fun config ensure_keeper ->
-  let base_path = config.Workspace.base_path in
-  ensure_keeper "alpha";
-  let kept = persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"kept-answer" () in
-  let gone = persist_answer ~base_path ~keeper_name:"gone" ~ask_id:"gone-answer" () in
-  let gone_queue = Filename.concat
-      (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) "gone")
-      Keeper_event_queue_persistence.snapshot_filename in
-  let report = reconcile_or_fail ~base_path in
-  check int "the stored Keeper's answer is enqueued" 1 report.enqueued;
-  check (list string) "the Keeper without a meta file is named" [ "gone" ] report.owners_absent;
-  check int "a missing meta file is not a failure" 0 (List.length report.failures);
-  check (list string) "the stored Keeper holds its answer" [ kept.ask_id ]
-    (List.map (fun (_, payload) -> payload.Keeper_event_queue.ask_id)
-       (pending_asks ~base_path ~keeper_name:"alpha"));
-  check bool "no queue is written for the Keeper without a meta file" false
-    (Sys.file_exists gone_queue);
-  let reported = ref [] in
-  Eio.Switch.run (fun sw ->
-    let discoveries = Eio.Stream.create 1 in
-    let recovery = Wake.create ~base_path
-        ~on_discovery:(fun ~base_path:_ result -> Eio.Stream.add discoveries result)
-        ~on_report:(fun ~keeper_name _ -> reported := keeper_name :: !reported) () in
-    Wake.pulse ~sw recovery;
-    match Eio.Stream.take discoveries with
-    | Ok () -> ()
-    | Error error -> fail (Keeper_ask_store.read_error_to_string error));
-  check (list string) "the pulse starts a worker only for the stored Keeper" [ "alpha" ] !reported;
-  check bool "the pulse writes no queue for the Keeper without a meta file" false
-    (Sys.file_exists gone_queue);
-  ensure_keeper "gone";
-  let restored = reconcile_or_fail ~base_path in
-  check int "the kept answer is delivered once the meta file is stored" 1 restored.enqueued;
-  check (list string) "no Keeper is absent" [] restored.owners_absent;
-  check (list string) "the restored Keeper holds its original answer" [ gone.ask_id ]
-    (List.map (fun (_, payload) -> payload.Keeper_event_queue.ask_id)
-       (pending_asks ~base_path ~keeper_name:"gone"))
-;;
-
-(* A pass that saw an answer delivered keeps it: the supervisor's later passes
-   count it delivered without reading the reaction ledger again and read only
-   the answers not yet seen delivered. *)
-let test_supervisor_reads_no_evidence_for_answers_it_saw_delivered () =
-  with_persistence @@ fun config ensure_keeper ->
-  let base_path = config.Workspace.base_path and keeper_name = "alpha" in
-  ensure_keeper keeper_name;
-  let (_ : Keeper_ask.ask) = persist_answer ~base_path ~keeper_name ~ask_id:"settled-answer" () in
-  let first = reconcile_or_fail ~base_path in
-  check int "the answer is enqueued" 1 first.enqueued;
-  let source = match pending_asks ~base_path ~keeper_name with
-    | [ source, _ ] -> source
-    | _ -> fail "recovery did not create one answer source" in
-  terminalize_answer ~base_path ~keeper_name source;
-  Eio.Switch.run (fun sw ->
-    let discoveries = Eio.Stream.create 1 in
-    let reports = Eio.Stream.create 1 in
-    let recovery = Wake.create ~base_path
-        ~on_discovery:(fun ~base_path:_ result -> Eio.Stream.add discoveries result)
-        ~on_report:(fun ~keeper_name:_ report -> Eio.Stream.add reports report) () in
-    (* One pulse, its discovery, and the owner's report. The yields let the
-       discovery and owner cleanups run so the next pulse starts a new pass. *)
-    let pass () =
-      Wake.pulse ~sw recovery;
-      (match Eio.Stream.take discoveries with
-       | Ok () -> ()
-       | Error error -> fail (Keeper_ask_store.read_error_to_string error));
-      Eio.Fiber.yield ();
-      let report = Eio.Stream.take reports in
-      Eio.Fiber.yield ();
-      report in
-    let read = pass () in
-    check int "the first pass reads the evidence" 1 read.evidence_window_reads;
-    check int "the first pass sees the answer delivered" 1 read.already_delivered;
-    let kept = pass () in
-    check int "a later pass reads no evidence for it" 0 kept.evidence_window_reads;
-    check int "a later pass still inspects it" 1 kept.inspected;
-    check int "a later pass still counts it delivered" 1 kept.already_delivered;
-    check int "a later pass enqueues nothing" 0 kept.enqueued;
-    let (_ : Keeper_ask.ask) =
-      persist_answer ~base_path ~keeper_name ~ask_id:"fresh-answer" ~answered_at:250. () in
-    let fresh = pass () in
-    check int "only the answer not yet seen delivered is read" 1 fresh.evidence_window_reads;
-    check int "the fresh answer is enqueued" 1 fresh.enqueued;
-    check int "the settled answer stays delivered" 1 fresh.already_delivered;
-    check int "both answers are inspected" 2 fresh.inspected)
-;;
-
-let test_durable_write_failure_is_recovered_from_the_answer_record () =
-  with_persistence @@ fun config ensure_keeper ->
-  let base_path = config.Workspace.base_path in
-  ensure_keeper "alpha";
-  let ask = persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"write-failure" () in
-  let payload = { Keeper_event_queue.ask_id = ask.ask_id; channel = ask.continuation } in
-  let source = { Keeper_event_queue.post_id = Keeper_event_queue.ask_answered_post_id payload;
-    urgency = Keeper_event_queue.Normal; arrived_at = 200.; payload = Keeper_event_queue.Ask_answered payload } in
-  let before = Fs_compat.load_file (Keeper_ask_store.log_path ~base_path ~keeper_name:"alpha") in
-  (match Keeper_event_queue_persistence.For_testing.enqueue_stimulus_once_with_confirmation
-      ~base_path ~keeper_name:"alpha"
-      ~already_delivered:(fun () -> Keeper_reaction_ledger.event_queue_delivery_seen_for_source_strict_result
-        ~base_path ~keeper_name:"alpha" ~not_before:source.arrived_at ~post_id:source.post_id
-        ~stimulus_kind:(Keeper_reaction_ledger.stimulus_kind_of_event_queue source)
-        |> Result.map_error Keeper_reaction_ledger.strict_delivery_evidence_error_to_string)
-      ~confirm_snapshot:(fun _path _state -> Error "injected durable snapshot confirmation failure") source with
-   | Error _ -> () | Ok () -> fail "snapshot confirmation failure acknowledged delivery");
-  check int "failed confirmation does not publish pending answer" 0 (List.length (pending_asks ~base_path ~keeper_name:"alpha"));
-  let report = reconcile_or_fail ~base_path in
-  check int "recovery uses the original canonical answer" 1 report.enqueued;
-  check string "recovery does not answer again" before
-    (Fs_compat.load_file (Keeper_ask_store.log_path ~base_path ~keeper_name:"alpha"))
-;;
-
-let test_corrupt_delivery_evidence_cannot_recreate_an_accepted_source () =
-  with_persistence @@ fun config ensure_keeper ->
-  let base_path = config.Workspace.base_path in
-  ensure_keeper "alpha";
-  let ask = persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"evidence-recovery" () in
-  (match Wake.deliver ~base_path ~keeper_name:"alpha" ~ask_id:ask.ask_id with
-   | Ok Wake.Enqueued -> () | Ok _ -> fail "fresh answer was not enqueued"
-   | Error error -> fail (Wake.error_to_string error));
-  let source = match pending_asks ~base_path ~keeper_name:"alpha" with
-    | [ source, _ ] -> source | _ -> fail "answer source is missing" in
-  terminalize_answer ~base_path ~keeper_name:"alpha" source;
-  let paths = Dated_jsonl.range_day_file_paths_result
-      (Dated_jsonl.open_store (Keeper_reaction_ledger.location ~base_path ~keeper_name:"alpha"))
-      ~since:"1970-01-01" ~until:"9999-12-31" |> Result.get_ok in
-  check bool "real accepted-source ledger files exist" true (paths <> []);
-  let originals = List.map (fun path -> path, Fs_compat.load_file path) paths in
-  List.iter (fun (path, _) -> Fs_compat.save_file path "{corrupt delivery evidence}\n") originals;
-  let blocked = reconcile_or_fail ~base_path in
-  check int "incomplete evidence retains one recovery failure" 1 (List.length blocked.failures);
-  check int "incomplete evidence cannot authorize re-enqueue" 0 blocked.enqueued;
-  check int "accepted source remains absent from pending" 0 (List.length (pending_asks ~base_path ~keeper_name:"alpha"));
-  List.iter (fun (path, bytes) -> Fs_compat.save_file path bytes) originals;
-  let restored = reconcile_or_fail ~base_path in
-  check int "restored exact evidence recognizes delivered source" 1 restored.already_delivered;
-  check int "restoration never recreates that source" 0 restored.enqueued
-;;
-
-(* A torn ledger write from before the answer predates every delivery this
-   answer can produce: it must not make the evidence incomplete, must not
-   reject enqueue, and must not hide delivery evidence written after the
-   answer. *)
-let test_fresh_answer_delivers_past_preanswer_corruption () =
-  with_persistence @@ fun config ensure_keeper ->
-  let base_path = config.Workspace.base_path in
-  ensure_keeper "alpha";
-  write_preanswer_corruption ~base_path ~keeper_name:"alpha";
-  let ask = persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"post-corruption-answer"
-      ~answered_at:(Unix.gettimeofday ()) () in
-  (match Wake.deliver ~base_path ~keeper_name:"alpha" ~ask_id:ask.ask_id with
-   | Ok Wake.Enqueued -> ()
-   | Ok _ -> fail "fresh answer after pre-answer corruption was not enqueued"
-   | Error error -> fail (Wake.error_to_string error));
-  let source = match pending_asks ~base_path ~keeper_name:"alpha" with
-    | [ source, _ ] -> source | _ -> fail "answer source is missing" in
-  terminalize_answer ~base_path ~keeper_name:"alpha" source;
-  let repeated = reconcile_or_fail ~base_path in
-  check int "in-window delivery evidence suppresses re-enqueue" 0 repeated.enqueued;
-  check int "in-window delivery evidence recognizes the delivered source" 1 repeated.already_delivered;
-  check int "corruption before the answer never blocks this keeper again" 0
-    (List.length repeated.failures)
-;;
-
-(* The maintenance pulse takes the same bounded evidence path, so a fresh
-   answer recorded after old corruption recovers on the next pulse. *)
-let test_reconcile_delivers_past_preanswer_corruption () =
-  with_persistence @@ fun config ensure_keeper ->
-  let base_path = config.Workspace.base_path in
-  ensure_keeper "alpha";
-  ensure_keeper "beta";
-  write_preanswer_corruption ~base_path ~keeper_name:"alpha";
-  ignore (persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"historical-answer" ());
-  ignore (persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"historical-sibling" ());
-  let now = Unix.gettimeofday () in
-  let original = persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"fresh-original"
-      ~task_id:"task-original" ~answered_at:now () in
-  ignore (persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"fresh-sibling"
-      ~answered_at:now ());
-  (* The same source ID and day belong to a different Keeper. Alpha's failed
-     window must not hide beta's valid absence or later positive proof. *)
-  ignore (persist_answer ~base_path ~keeper_name:"beta" ~ask_id:"historical-answer" ());
-  let canonical_logs = List.map (fun keeper_name ->
-      let path = Keeper_ask_store.log_path ~base_path ~keeper_name in
-      path, Fs_compat.load_file path) ["alpha"; "beta"] in
-  let check_pending keeper_name expected =
-    let actual = pending_asks ~base_path ~keeper_name
-        |> List.map (fun (_, payload) -> payload.Keeper_event_queue.ask_id)
-        |> List.sort String.compare in
-    check (list string) (keeper_name ^ " exact pending answer sources")
-      (List.sort String.compare expected) actual in
-  let check_failures report =
-    let failed = List.map (fun (failure : Wake.failure) ->
-        (match failure.keeper_name, failure.ask_id, failure.error with
-         | Some "alpha", Some ask_id,
-             Wake.Delivery_evidence_unavailable (Keeper_reaction_ledger.Evidence_incomplete _) -> ask_id
-         | _ -> fail "a Keeper/window failure replaced an independent source outcome")) report.Wake.failures in
-    check (list string) "only the original damaged answer window is retained"
-      ["historical-answer"; "historical-sibling"] (List.sort String.compare failed) in
-  let report = reconcile_or_fail ~base_path in
-  check_failures report;
-  check_pending "alpha" ["fresh-original"; "fresh-sibling"];
-  check_pending "beta" ["historical-answer"];
-  let beta_source = match pending_asks ~base_path ~keeper_name:"beta" with
-    | [source, _] -> source | _ -> fail "beta's original answer source is missing" in
-  terminalize_answer ~base_path ~keeper_name:"beta" beta_source;
-  check_failures (reconcile_or_fail ~base_path);
-  check_pending "alpha" ["fresh-original"; "fresh-sibling"];
-  check_pending "beta" [];
-  (* A new pulse must replace its failed captures rather than keep a negative
-     cache. The durable queue still performs its own current once-only check. *)
-  Sys.remove (Filename.concat
-    (Keeper_reaction_ledger.store_dir ~base_path ~keeper_name:"alpha") "2020-01/01.jsonl");
-  let recovered = reconcile_or_fail ~base_path in
-  (match recovered.failures with [] -> () | _ -> fail "repaired window was not read afresh");
-  check_pending "alpha" ["fresh-original"; "fresh-sibling"; "historical-answer"; "historical-sibling"];
-  check_pending "beta" [];
-  (match Keeper_ask_store.rows_result ~base_path ~keeper_name:"alpha" with
-   | Ok (Keeper_ask_store.Stored_rows rows) ->
-       (match List.assoc_opt original.ask_id rows with
-        | Some (ask, _) ->
-            check (option string) "original question retains its Task association"
-              (Some "task-original") ask.Keeper_ask.task_id
-        | None -> fail "original question disappeared")
-   | Ok Keeper_ask_store.Missing_log | Error _ -> fail "canonical question log unavailable");
-  List.iter (fun (path, content) ->
-    check string "recovery never rewrites the answer" content (Fs_compat.load_file path)) canonical_logs
-;;
-
-let test_recovery_pulse_keeps_independent_owners_moving () =
-  with_persistence @@ fun config ensure_keeper ->
-  let base_path = config.Workspace.base_path in
-  ensure_keeper "alpha";
-  ensure_keeper "beta";
-  let original = persist_answer ~base_path ~keeper_name:"alpha"
-      ~ask_id:"original-alpha" ~task_id:"original-task" () in
-  let independent = persist_answer ~base_path ~keeper_name:"beta"
-      ~ask_id:"original-beta" ~task_id:"independent-task" () in
-  let beta_path = Keeper_ask_store.log_path ~base_path ~keeper_name:"beta" in
-  let beta_log = Fs_compat.load_file beta_path in
-  Eio.Switch.run (fun sw ->
-    let entered, enter = Eio.Promise.create () in
-    let release, unlock = Eio.Promise.create () in
-    let first_alpha, publish_first_alpha = Eio.Promise.create () in
-    let next_alpha, publish_next_alpha = Eio.Promise.create () in
-    let beta, publish_beta = Eio.Promise.create () in
-    let discoveries = Eio.Stream.create 0 in
-    let fence = ref None in
-    let finish () =
-      if not (Eio.Promise.is_resolved release) then Eio.Promise.resolve unlock ();
-      Option.iter (fun operation_id ->
-        ignore (Keeper_shutdown_intake_fence.rollback_shutdown
-            ~base_path ~keeper_name:"alpha" ~operation_id)) !fence in
-    Fun.protect ~finally:finish (fun () ->
-      (* Hold the actual lifecycle-intake mutex, not a replacement recovery
-         callback. Alpha's queue mutation must wait while beta remains usable. *)
-      let holder = Eio.Fiber.fork_promise ~sw (fun () ->
-        Keeper_shutdown_intake_fence.run_durable_intake_if_open
-          ~base_path ~keeper_name:"alpha" (fun _ ->
-            Eio.Promise.resolve enter ();
-            Eio.Promise.await release)) in
-      Eio.Promise.await entered;
-      let recovery = Wake.create ~base_path
-        ~on_discovery:(fun ~base_path:_ result -> Eio.Stream.add discoveries result)
-        ~on_report:(fun ~keeper_name report ->
-          if String.equal keeper_name "alpha" then (
-            if not (Eio.Promise.is_resolved first_alpha) then
-              Eio.Promise.resolve publish_first_alpha report
-            else if not (Eio.Promise.is_resolved next_alpha) then
-              Eio.Promise.resolve publish_next_alpha report)
-          else if String.equal keeper_name "beta" then (
-            if not (Eio.Promise.is_resolved beta) then Eio.Promise.resolve publish_beta report)
-          else fail "a recovery report replaced its canonical owner") () in
-      let pulse () =
-        Wake.pulse ~sw recovery;
-        let discovered = Eio.Stream.take discoveries in
-        (* Let this observer return and its pure discovery reservation cleanup
-           run. Owner delivery remains independently blocked by the real fence. *)
-        Eio.Fiber.yield ();
-        match discovered with
-        | Ok () -> () | Error error -> fail (Keeper_ask_store.read_error_to_string error) in
-      pulse ();
-      let beta_report = Eio.Promise.await beta in
-      (match beta_report.failures with [] -> () | _ -> fail "independent owner failed");
-      check bool "alpha is still waiting for its actual intake" false
-        (Eio.Promise.is_resolved first_alpha);
-      (match pending_asks ~base_path ~keeper_name:"beta" with
-       | [_, payload] ->
-           check string "independent original Ask already committed"
-             independent.ask_id payload.Keeper_event_queue.ask_id
-       | _ -> fail "blocked alpha prevented beta's exact delivery");
-      check (list string) "blocked owner has no pending delivery" []
-        (List.map (fun (_, payload) -> payload.Keeper_event_queue.ask_id)
-           (pending_asks ~base_path ~keeper_name:"alpha"));
-      let later = persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"later-alpha" () in
-      let alpha_path = Keeper_ask_store.log_path ~base_path ~keeper_name:"alpha" in
-      let alpha_log = Fs_compat.load_file alpha_path in
-      (* A second pulse may discover the new answer but cannot replace the
-         active owner's original captured batch or start another worker. *)
-      pulse ();
-      let operation_id = Keeper_shutdown_types.Operation_id.generate () in
-      fence := Some operation_id;
-      ignore (Keeper_shutdown_intake_fence.begin_shutdown
-          ~base_path ~keeper_name:"alpha" ~operation_id);
-      Eio.Promise.resolve unlock ();
-      (match Eio.Promise.await_exn holder with
-       | Keeper_shutdown_intake_fence.Intake_committed () -> ()
-       | Intake_shutdown_reserved _ -> fail "the already admitted holder changed");
-      let blocked = Eio.Promise.await first_alpha in
-      (* The shutdown that took the intake holds alpha's captured batch. It is
-         a hold on that one original answer, not a delivery failure. *)
-      check (list (pair string string)) "fresh shutdown holds the original active batch"
-        [ "alpha", original.ask_id ] (held_answers blocked);
-      check bool "the hold names the shutdown that took the intake" true
-        (held_by operation_id blocked);
-      (match blocked.failures with
-       | [] -> ()
-       | failure :: _ ->
-           fail ("intake fence was reported as a delivery failure: "
-                 ^ Wake.error_to_string failure.Wake.error));
-      check (list string) "fresh shutdown refuses delivery" []
-        (List.map (fun (_, payload) -> payload.Keeper_event_queue.ask_id)
-           (pending_asks ~base_path ~keeper_name:"alpha"));
-      ignore (Keeper_shutdown_intake_fence.rollback_shutdown
-          ~base_path ~keeper_name:"alpha" ~operation_id);
-      fence := None;
-      pulse ();
-      let recovered = Eio.Promise.await next_alpha in
-      (match recovered.failures with [] -> () | _ -> fail "released owner did not recover");
-      let pending = pending_asks ~base_path ~keeper_name:"alpha" in
-      check (list string) "later pulse commits both original answer sources"
-        (List.sort String.compare [original.ask_id;later.ask_id])
-        (List.sort String.compare (List.map
-          (fun (_, payload) -> payload.Keeper_event_queue.ask_id) pending));
-      List.iter (fun (_, (payload : Keeper_event_queue.ask_answered)) ->
-        check bool "original continuation survives recovery" true
-          (Keeper_continuation_channel.same_route original.continuation payload.Keeper_event_queue.channel)) pending;
-      (match Keeper_ask_store.rows_result ~base_path ~keeper_name:"alpha" with
-       | Ok (Keeper_ask_store.Stored_rows rows) ->
-           (match List.assoc_opt original.ask_id rows with
-            | Some (ask, _) -> check (option string) "original Task retained"
-                original.task_id ask.Keeper_ask.task_id
-            | None -> fail "original question was lost")
-       | Ok Keeper_ask_store.Missing_log | Error _ -> fail "original question unavailable");
-      (match pending_asks ~base_path ~keeper_name:"beta" with
-       | [_, payload] when String.equal payload.Keeper_event_queue.ask_id independent.ask_id -> ()
-       | _ -> fail "repeated pulse replaced or duplicated beta's original source");
-      check string "alpha recovery does not rewrite answers" alpha_log (Fs_compat.load_file alpha_path);
-      check string "beta recovery does not rewrite answers" beta_log (Fs_compat.load_file beta_path)))
-;;
-
-let test_discovery_failure_is_observed_asynchronously_and_recovers_original_answer () =
-  with_persistence @@ fun config ensure_keeper ->
-  let base_path = config.Workspace.base_path in
-  ensure_keeper "alpha";
-  ensure_keeper "beta";
-  let original = persist_answer ~base_path ~keeper_name:"alpha"
-      ~ask_id:"discovery-original" ~task_id:"discovery-original-task" () in
-  let log_path = Keeper_ask_store.log_path ~base_path ~keeper_name:"alpha" in
-  let original_log = Fs_compat.load_file log_path in
-  let ask_directory = Filename.dirname log_path in
-  let saved_directory = ask_directory ^ ".fixture-saved" in
-  Unix.rename ask_directory saved_directory;
-  Fs_compat.save_file ask_directory "directory unavailable during discovery";
-  let exception Discovery_observer_failed in
-  let discoveries = Eio.Stream.create 0 in
-  let recovery = Wake.create ~base_path ~on_discovery:(fun ~base_path result ->
-    Eio.Stream.add discoveries (base_path,result);
-    match result with
-    | Ok () -> ()
-    | Error _ -> raise Discovery_observer_failed) () in
-  let independent : Keeper_event_queue.stimulus =
-    {post_id="independent-during-ask-discovery";urgency=Normal;arrived_at=201.;payload=Bootstrap} in
-  let failed = Eio.Switch.run (fun sw ->
-    Wake.pulse ~sw recovery;
-    (* Actual durable work can proceed before joining the discovery outcome.
-       No replacement directory reader or recovery callback is installed. *)
-    (match Keeper_registry_event_queue.enqueue_durable_result ~base_path "beta" independent with
-     | Ok () -> () | Error detail -> fail detail);
-    Eio.Stream.take discoveries) in
-  (match failed with
-   | observed_base, Error (Keeper_ask_store.Log_read_failed {path;_}) ->
-     check string "discovery failure retains original workspace" base_path observed_base;
-     check string "actual directory failure is retained" ask_directory path
-   | _, Error (Keeper_ask_store.Log_decode_failed _) -> fail "directory failure became a decode failure"
-   | _, Ok () -> fail "unfinished or failed discovery was reported as successful");
-  check (list string) "unavailable discovery admits no original answer" []
-    (List.map (fun (_,payload) -> payload.Keeper_event_queue.ask_id)
-      (pending_asks ~base_path ~keeper_name:"alpha"));
-  (match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name:"beta" with
-   | Error detail -> fail detail
-   | Ok queue -> check bool "independent durable queue retains its actual source" true
-       (Keeper_event_queue.to_list queue
-        |> List.exists (Keeper_event_queue.stimulus_identity_equal independent)));
-  Sys.remove ask_directory;
-  Unix.rename saved_directory ask_directory;
-  let fresh_round () = Eio.Switch.run (fun sw ->
-    Wake.pulse ~sw recovery;
-    Eio.Stream.take discoveries) in
-  (match fresh_round () with
-   | observed_base, Ok () -> check string "fresh discovery retains original workspace" base_path observed_base
-   | _, Error error -> fail (Keeper_ask_store.read_error_to_string error));
-  let check_original_delivery () =
-    match pending_asks ~base_path ~keeper_name:"alpha" with
-    | [_,payload] ->
-      check string "fresh discovery delivers original Ask" original.ask_id payload.Keeper_event_queue.ask_id;
-      check bool "original continuation survives discovery failure" true
-        (Keeper_continuation_channel.same_route original.continuation payload.channel)
-    | [] | _ :: _ -> fail "original answer was lost, replaced or duplicated" in
-  check_original_delivery ();
-  (match fresh_round () with
-   | _, Ok () -> ()
-   | _, Error error -> fail (Keeper_ask_store.read_error_to_string error));
-  check_original_delivery ();
-  (match Keeper_ask_store.rows_result ~base_path ~keeper_name:"alpha" with
-   | Ok (Keeper_ask_store.Stored_rows rows) ->
-     (match List.assoc_opt original.ask_id rows with
-      | Some (ask,_) -> check (option string) "original Task is retained" original.task_id ask.Keeper_ask.task_id
-      | None -> fail "original question disappeared")
-   | Ok Keeper_ask_store.Missing_log -> fail "original log disappeared"
-   | Error error -> fail (Keeper_ask_store.read_error_to_string error));
-  check string "discovery and delivery never rewrite original answer bytes"
-    original_log (Fs_compat.load_file log_path)
-;;
-
-let test_lifecycle_fence_defers_delivery_until_recovery () =
-  with_persistence @@ fun config ensure_keeper ->
-  let base_path = config.Workspace.base_path in
-  ensure_keeper "alpha";
-  let fenced = persist_answer ~base_path ~keeper_name:"alpha" ~ask_id:"fenced-answer" () in
-  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
-  ignore (Keeper_shutdown_intake_fence.begin_shutdown ~base_path ~keeper_name:"alpha" ~operation_id);
-  Fun.protect ~finally:(fun () ->
-      ignore (Keeper_shutdown_intake_fence.rollback_shutdown ~base_path ~keeper_name:"alpha" ~operation_id))
-    (fun () ->
-      (match Wake.deliver ~base_path ~keeper_name:"alpha" ~ask_id:fenced.ask_id with
-       | Error (Wake.Intake_shutdown_reserved reserved_by) ->
-           check bool "answering names the shutdown that holds the intake" true
-             (Keeper_shutdown_types.Operation_id.equal operation_id reserved_by)
-       | Error error -> fail (Wake.error_to_string error)
-       | Ok _ -> fail "a Keeper whose shutdown holds the intake accepted an answer");
-      let blocked = reconcile_or_fail ~base_path in
-      check (list (pair string string)) "shutdown holds the answered ask"
-        [ "alpha", fenced.ask_id ] (held_answers blocked);
-      check bool "the hold names the shutdown that holds the intake" true
-        (held_by operation_id blocked);
-      check int "a held answer is not a delivery failure" 0 (List.length blocked.failures);
-      check int "fence admits no answer source" 0 blocked.enqueued;
-      check int "pending stays empty" 0 (List.length (pending_asks ~base_path ~keeper_name:"alpha")));
-  let recovered = reconcile_or_fail ~base_path in
-  check int "existing pulse recovers after the fence opens" 1 recovered.enqueued;
-  check (list (pair string string)) "the released answer is no longer held" []
-    (held_answers recovered)
-;;
-
-let test_canonical_owner_survives_a_nonidentity_filename () =
-  with_persistence @@ fun config ensure_keeper ->
-  let base_path = config.Workspace.base_path in
-  let keeper_name = "alpha.one" in
-  ensure_keeper keeper_name;
-  let ask = persist_answer ~base_path ~keeper_name ~ask_id:"owner-spelling" () in
-  let path = Keeper_ask_store.log_path ~base_path ~keeper_name in
-  let stem = Filename.chop_suffix (Filename.basename path) ".jsonl" in
-  check bool "fixture crosses a nonidentity sanitizer" false (String.equal keeper_name stem);
-  (match Keeper_ask_store.rows_result ~base_path ~keeper_name:stem with
-   | Error (Keeper_ask_store.Log_decode_failed _) -> ()
-   | Error error -> fail (Keeper_ask_store.read_error_to_string error)
-   | Ok _ -> fail "filename alias was accepted as canonical owner");
-  let recovered = reconcile_or_fail ~base_path in
-  check int "discovery uses the recorded canonical Keeper name" 1 recovered.enqueued;
-  check int "owner spelling has no recovery failure" 0 (List.length recovered.failures);
-  match pending_asks ~base_path ~keeper_name with
-  | [ _, payload ] -> check string "original ask arrives at canonical owner" ask.ask_id payload.Keeper_event_queue.ask_id
-  | _ -> fail "sanitized filename lost its canonical owner"
-;;
-
 let test_already_answered_receipt_keeps_the_conflict () =
   let ask = ask_with [ question ~id:"q1" ~header:"deploy" ~choices:[ choice ~id:"c1" ~label:"yes" ] ] in
   let answers = answers_for ask [ "q1", Keeper_ask.Chose { choice_ids = [ "c1" ] } ] in
@@ -1238,21 +681,23 @@ let test_followup_reads_exact_source_without_waking () =
   with_persistence @@ fun config ensure_keeper ->
   let base_path = config.Workspace.base_path and keeper_name = "alpha" in
   ensure_keeper keeper_name;
-  let ask = persist_answer ~base_path ~keeper_name ~ask_id:"followup-original" () in
+  let ask = record_open_ask ~base_path ~keeper_name ~ask_id:"followup-original" () in
+  (match answer_as_the_route ~base_path ~keeper_name ~ask_id:ask.ask_id ~now:200. with
+   | Ok _ -> () | Error failure -> fail (refusal_text failure));
   let resolution = match Keeper_ask_store.rows_result ~base_path ~keeper_name with
     | Ok (Keeper_ask_store.Stored_rows rows) -> snd (List.assoc ask.ask_id rows)
     | Ok Missing_log -> fail "canonical answer disappeared"
     | Error error -> fail (Keeper_ask_store.read_error_to_string error) in
   let observe () = Wake.observe_followup ~base_path ~keeper_name ~ask ~resolution ()
       |> function Ok value -> value | Error detail -> fail detail in
-  let before = observe () |> Wake.followup_to_json in
+  let before = observe () in
   check bool "no turn is invented from recording the answer" true
-    (Yojson.Safe.Util.member "turn_started_at" (Yojson.Safe.Util.member "reaction_evidence" before) = `Null);
-  check int "observing never enqueues a wake" 0 (List.length (pending_asks ~base_path ~keeper_name));
-  (match Wake.deliver ~base_path ~keeper_name ~ask_id:ask.ask_id with
-   | Ok _ -> () | Error error -> fail (Wake.error_to_string error));
+    (Yojson.Safe.Util.member "turn_started_at"
+       (Yojson.Safe.Util.member "reaction_evidence" (Wake.followup_to_json before)) = `Null);
   let source = match pending_asks ~base_path ~keeper_name with
-    | [source, _] -> source | _ -> fail "original wake did not persist exactly once" in
+    | [source, _] -> source | _ -> fail "the answer's pointer did not persist exactly once" in
+  check string "the followup source is the queued pointer"
+    (Keeper_reaction_ledger.stimulus_id_of_event_queue source) before.stimulus_id;
   Keeper_reaction_ledger.record_event_queue_turn_started ~base_path ~keeper_name source;
   let entered = observe () |> Wake.followup_to_json in
   check bool "original source turn entry is observed" true
@@ -1375,13 +820,13 @@ let test_followup_queue_settlement_does_not_invent_a_turn () =
   with_persistence @@ fun config ensure_keeper ->
   let base_path = config.Workspace.base_path and keeper_name = "alpha" in
   ensure_keeper keeper_name;
-  let ask = persist_answer ~base_path ~keeper_name ~ask_id:"queue-only" () in
+  let ask = record_open_ask ~base_path ~keeper_name ~ask_id:"queue-only" () in
+  (match answer_as_the_route ~base_path ~keeper_name ~ask_id:ask.ask_id ~now:200. with
+   | Ok _ -> () | Error failure -> fail (refusal_text failure));
   let resolution = match Keeper_ask_store.rows_result ~base_path ~keeper_name with
     | Ok (Keeper_ask_store.Stored_rows rows) -> snd (List.assoc ask.ask_id rows)
     | Ok Missing_log -> fail "answer disappeared"
     | Error error -> fail (Keeper_ask_store.read_error_to_string error) in
-  (match Wake.deliver ~base_path ~keeper_name ~ask_id:ask.ask_id with
-   | Ok _ -> () | Error error -> fail (Wake.error_to_string error));
   let selection = match select_queue_entry ~base_path ~keeper_name ~now:300. ~ready:(fun _ -> true) with
     | Ok (Some selection) -> selection
     | Ok None -> fail "original wake not selected" | Error detail -> fail detail in
@@ -1582,28 +1027,6 @@ let () =
             test_a_queue_failure_records_no_answer
         ; test_case "a consumed answer admits no second pointer" `Quick
             test_a_consumed_answer_admits_no_second_pointer
-        ; test_case "recorded answer recovers once on original continuation" `Quick
-            test_recorded_answer_recovers_once_on_original_continuation
-        ; test_case "answers wait while their Keeper has no meta file" `Quick
-            test_answers_wait_while_their_keeper_has_no_meta_file
-        ; test_case "supervisor reads no evidence for answers it saw delivered" `Quick
-            test_supervisor_reads_no_evidence_for_answers_it_saw_delivered
-        ; test_case "durable write failure recovers from the answer record" `Quick
-            test_durable_write_failure_is_recovered_from_the_answer_record
-        ; test_case "corrupt delivery evidence cannot recreate accepted source" `Quick
-            test_corrupt_delivery_evidence_cannot_recreate_an_accepted_source
-        ; test_case "fresh answer delivers past pre-answer corruption" `Quick
-            test_fresh_answer_delivers_past_preanswer_corruption
-        ; test_case "reconcile delivers past pre-answer corruption" `Quick
-            test_reconcile_delivers_past_preanswer_corruption
-        ; test_case "blocked recovery owner preserves independent delivery and fresh authority" `Quick
-            test_recovery_pulse_keeps_independent_owners_moving
-        ; test_case "async discovery failure preserves original answer and fresh recovery" `Quick
-            test_discovery_failure_is_observed_asynchronously_and_recovers_original_answer
-        ; test_case "lifecycle fence defers answer delivery" `Quick
-            test_lifecycle_fence_defers_delivery_until_recovery
-        ; test_case "canonical owner survives nonidentity filename" `Quick
-            test_canonical_owner_survives_a_nonidentity_filename
         ; test_case "already answered receipt keeps the conflict" `Quick
             test_already_answered_receipt_keeps_the_conflict
 

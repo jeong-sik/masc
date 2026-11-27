@@ -75,6 +75,8 @@ let exec db sql =
   match Sqlite3.exec db sql with
   | rc when Sqlite3.Rc.is_success rc -> Ok ()
   | rc -> Error (failure db sql rc)
+  | exception (Sqlite3.Error detail | Sqlite3.SqliteError detail) ->
+    Error (sql ^ ": " ^ detail)
 ;;
 
 let open_mode = function
@@ -83,10 +85,13 @@ let open_mode = function
 ;;
 
 let setup db file =
-  Sqlite3.busy_timeout db reader_busy_timeout_ms;
-  match file with
-  | Owned Delete -> exec db "PRAGMA query_only=1"
-  | Owned Wal | External -> Ok ()
+  match Sqlite3.busy_timeout db reader_busy_timeout_ms with
+  | exception (Sqlite3.Error detail | Sqlite3.SqliteError detail) ->
+    Error ("busy_timeout: " ^ detail)
+  | () ->
+    (match file with
+     | Owned Delete -> exec db "PRAGMA query_only=1"
+     | Owned Wal | External -> Ok ())
 ;;
 
 let open_reader file path =
@@ -98,8 +103,5 @@ let open_reader file path =
      | Ok () -> Ok db
      | Error _ as error ->
        close ();
-       error
-     | exception (Sqlite3.Error detail | Sqlite3.SqliteError detail) ->
-       close ();
-       Error detail)
+       error)
 ;;

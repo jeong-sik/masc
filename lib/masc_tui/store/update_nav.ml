@@ -1136,16 +1136,28 @@ let jump_to_knowledge_wiki ?zoomed ?return_from (m : Model.t) (slug : string) =
   let drafts = m.drafts |> Drafts.set_focus false |> clear_btw_if_leaving m in
   let config = Config_store.cancel_edit_field m.config in
   let knowledge =
-    m.knowledge
-    |> Knowledge_store.unpin_memory_diff_revs
-    |> Knowledge_store.close_memory_reading
-    |> Knowledge_store.close_memory_diagram
-    |> Knowledge_store.clear_pending_wiki_edit
-    |> Knowledge_store.clear_armed_vote
-    |> Knowledge_store.clear_pending_artifact_revision
-    |> close_board_recovery
-    |> Knowledge_store.select_wiki_slug ~slug
-    |> Knowledge_store.mark_index_stale_for_pending_wiki_jump
+    let k0 =
+      m.knowledge
+      |> Knowledge_store.unpin_memory_diff_revs
+      |> Knowledge_store.close_memory_reading
+      |> Knowledge_store.close_memory_diagram
+      |> Knowledge_store.clear_pending_wiki_edit
+      |> Knowledge_store.clear_armed_vote
+      |> Knowledge_store.clear_pending_artifact_revision
+      |> close_board_recovery
+      |> Knowledge_store.select_wiki_slug ~slug
+    in
+    match (k0.pending_wiki_jump_slug, k0.wiki_index) with
+    | Some _, Observed.Value { stale = false; _ } ->
+        { k0 with wiki_index = Observed.mark_stale k0.wiki_index }
+    | ( Some _
+      , ( Observed.Loading _
+        | Observed.Value { stale = true; _ }
+        | Observed.Absent
+        | Observed.Unreported
+        | Observed.Failed _ ) )
+    | None, _ ->
+        k0
   in
   let next0 =
     {
@@ -4173,7 +4185,7 @@ let wiki_selected_link_target (k : Knowledge_store.t) =
           List.find_map
             (fun (raw, target) ->
               if String.equal raw link then Some (link, target) else None)
-            (Knowledge_store.wiki_page_links detail)
+            (Knowledge_store.wiki_page_links k detail)
       | (Some _ | None), _ -> None)
 
 let enter_plan (m : Model.t) : enter_plan =
@@ -4712,13 +4724,15 @@ let toggle_zoom_view (m : Model.t) : Model.t * bool * Cmd.t list =
 let follow_wiki_link ~link ~target (m : Model.t) =
   match Knowledge_store.selected_wiki_page m.knowledge with
   | None -> (m, [])
-  | Some sel ->
-      let knowledge =
+  | Some sel -> (
+      match
         Knowledge_store.follow_wiki_link ~from:sel.slug ~link ~target
           m.knowledge
-      in
-      let next = { m with knowledge } in
-      (next, View_fetches.fetches_for_current_view next)
+      with
+      | Some knowledge ->
+          let next = { m with knowledge } in
+          (next, View_fetches.fetches_for_current_view next)
+      | None -> (m, []))
 
 let dive_selected (m : Model.t) =
   match enter_plan m with
@@ -9339,7 +9353,7 @@ let step_wiki_link ~now ~delta (m : Model.t) =
       let lines =
         Masc_tui_ui.Markdown.render_lines ~theme ~width detail.body_markdown
       in
-      let page_links = Knowledge_store.wiki_page_links detail in
+      let page_links = Knowledge_store.wiki_page_links k detail in
       let links =
         Masc_tui_ui.Markdown.link_first_lines lines
         |> List.filter (fun (uri, _) ->
@@ -9354,7 +9368,8 @@ let step_wiki_link ~now ~delta (m : Model.t) =
             m,
           [] )
       else
-        let scroll = k.detail_scroll_offset in
+        let max_scroll = Int.max 0 (List.length lines - height) in
+        let scroll = Int.min max_scroll k.detail_scroll_offset in
         let current =
           Option.bind (Knowledge_store.selected_wiki_link ~slug k) (fun uri ->
               Array.find_index (fun (seen, _) -> String.equal seen uri) links)
@@ -9374,7 +9389,6 @@ let step_wiki_link ~now ~delta (m : Model.t) =
               last_in_view (count - 1)
         in
         let uri, line = links.(index) in
-        let max_scroll = Int.max 0 (List.length lines - height) in
         let detail_scroll_offset =
           if line >= scroll && line < scroll + height then scroll
           else Int.min max_scroll line
@@ -9397,10 +9411,19 @@ let wiki_link_back_knowledge (m : Model.t) =
 
 let wiki_link_back_ready m = Option.is_some (wiki_link_back_knowledge m)
 
+(* The restored scroll is clamped: the card may have been resized since. *)
 let wiki_link_back (m : Model.t) =
   match wiki_link_back_knowledge m with
   | Some knowledge ->
       let next = { m with knowledge } in
+      let detail_scroll_offset =
+        Int.min
+          (knowledge_detail_max_scroll next)
+          knowledge.detail_scroll_offset
+      in
+      let next =
+        { next with knowledge = { knowledge with detail_scroll_offset } }
+      in
       (next, View_fetches.fetches_for_current_view next)
   | None -> (m, [])
 

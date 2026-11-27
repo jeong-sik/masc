@@ -1186,21 +1186,23 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
               | [] -> ""
               | ts -> " · #" ^ String.concat " #" ts
             in
-            let selected_link =
-              Knowledge_store.selected_wiki_link ~slug:d.slug k
-            in
+            (* A selected link the page no longer has, or whose target the
+               index no longer lists, is neither drawn nor followed. *)
             let link_target =
-              Option.bind selected_link (fun link ->
+              Option.bind (Knowledge_store.selected_wiki_link ~slug:d.slug k)
+                (fun link ->
                   List.find_map
                     (fun (raw, target) ->
-                      if String.equal raw link then Some target else None)
-                    (Knowledge_store.wiki_page_links d))
+                      if String.equal raw link then Some (link, target)
+                      else None)
+                    (Knowledge_store.wiki_page_links k d))
             in
+            let selected_link = Option.map fst link_target in
             (* While a body link is selected, the subtitle says where Enter
                goes: the target page and its summary from the index. *)
             let sub =
               match link_target with
-              | Some target ->
+              | Some (_, target) ->
                   let summary =
                     Option.bind (Observed.to_option k.wiki_index)
                       (fun (idx : Wire_knowledge.wiki_index) ->

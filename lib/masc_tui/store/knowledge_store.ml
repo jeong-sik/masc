@@ -2113,26 +2113,23 @@ let select_wiki_slug ~slug t =
     scroll_offset;
     detail_scroll_offset = 0;
     pending_wiki_jump_slug;
+    wiki_reading = None;
   }
 
-let mark_index_stale_for_pending_wiki_jump t =
-  match (t.pending_wiki_jump_slug, t.wiki_index) with
-  | Some _, Observed.Value { stale = false; _ } ->
-      { t with wiki_index = Observed.mark_stale t.wiki_index }
-  | ( Some _
-    , ( Observed.Loading _
-      | Observed.Value { stale = true; _ }
-      | Observed.Absent
-      | Observed.Unreported
-      | Observed.Failed _ ) )
-  | None, _ ->
-      t
+let wiki_index_lists ~slug t =
+  match Observed.to_option t.wiki_index with
+  | Some idx ->
+      List.exists
+        (fun (p : Wire_knowledge.wiki_page_summary) -> String.equal p.slug slug)
+        idx.pages
+  | None -> false
 
-let wiki_page_links (detail : Wire_knowledge.wiki_page_detail) =
+let wiki_page_links t (detail : Wire_knowledge.wiki_page_detail) =
   List.filter_map
     (fun (link : Wire_knowledge.wiki_outgoing_link) ->
       match link.target with
-      | Wire_knowledge.Link_page { slug; exists = true } -> Some (link.raw, slug)
+      | Wire_knowledge.Link_page { slug; exists = true } ->
+          if wiki_index_lists ~slug t then Some (link.raw, slug) else None
       | Wire_knowledge.Link_page { exists = false; _ }
       | Wire_knowledge.Link_own_file _
       | Wire_knowledge.Link_external _
@@ -2161,6 +2158,11 @@ let select_wiki_link ~slug link t =
     wiki_reading = Some { reading_page = slug; selected_link = link; trail };
   }
 
+(* [select_wiki_slug] clears [filter_query], the list's only filter, when it
+   hides the slug, so a slug the index lists is always selected. *)
+let select_listed_wiki_slug ~slug t =
+  if wiki_index_lists ~slug t then Some (select_wiki_slug ~slug t) else None
+
 let follow_wiki_link ~from ~link ~target t =
   let stop =
     {
@@ -2170,34 +2172,33 @@ let follow_wiki_link ~from ~link ~target t =
     }
   in
   let trail = stop :: wiki_trail ~slug:from t in
-  let next =
-    select_wiki_slug ~slug:target t |> mark_index_stale_for_pending_wiki_jump
-  in
-  {
-    next with
-    wiki_reading = Some { reading_page = target; selected_link = None; trail };
-  }
+  Option.map
+    (fun next ->
+      {
+        next with
+        wiki_reading =
+          Some { reading_page = target; selected_link = None; trail };
+      })
+    (select_listed_wiki_slug ~slug:target t)
 
 let wiki_link_back ~slug t =
   match wiki_trail ~slug t with
   | [] -> None
   | stop :: trail ->
-      let next =
-        select_wiki_slug ~slug:stop.stop_page t
-        |> mark_index_stale_for_pending_wiki_jump
-      in
-      Some
-        {
-          next with
-          detail_scroll_offset = stop.stop_scroll;
-          wiki_reading =
-            Some
-              {
-                reading_page = stop.stop_page;
-                selected_link = stop.stop_link;
-                trail;
-              };
-        }
+      Option.map
+        (fun next ->
+          {
+            next with
+            detail_scroll_offset = stop.stop_scroll;
+            wiki_reading =
+              Some
+                {
+                  reading_page = stop.stop_page;
+                  selected_link = stop.stop_link;
+                  trail;
+                };
+          })
+        (select_listed_wiki_slug ~slug:stop.stop_page t)
 
 let select_artifact_by_id ~id_or_sha t =
   let base0 = set_tab Nav.Knowledge_artifacts t in
@@ -2869,6 +2870,7 @@ let move_selection ?(pane_index = 0) ?viewport_rows ?max_detail_scroll ~delta t 
           active_thread_target;
           pending_wiki_jump_slug =
             (if same_selection then t.pending_wiki_jump_slug else None);
+          wiki_reading = (if same_selection then t.wiki_reading else None);
           scroll_offset;
           detail_scroll_offset;
           pending_wiki_edit_slug;

@@ -235,6 +235,26 @@ let test_durable_encoded_pieces_write_the_joined_bytes () =
         | Error error -> fail (KF.durable_write_error_to_string error));
        check string "an empty piece is skipped" "headtail" (read_file with_empty))
 
+let test_durable_raw_bytes_stats_contract () =
+  Eio_main.run
+  @@ fun _env ->
+  let base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let path = Filename.concat base "raw-stats.bin" in
+       let payload = "{\"head\":true,\"bytes\":\"\000\xff\"}" in
+       let stats =
+         match KF.save_bytes_durable_atomic_stats ~ownership_root:base path payload with
+         | Ok stats -> stats
+         | Error error -> fail (KF.durable_write_error_to_string error)
+       in
+       let installed = Unix.stat path in
+       check string "installed bytes match" payload (read_file path);
+       check int "descriptor size matches payload" (String.length payload) stats.Unix.st_size;
+       check int "descriptor inode matches installed path" installed.Unix.st_ino stats.Unix.st_ino;
+       check bool "no temp left behind" false (has_tmp_files base))
+
 let test_durable_write_pre_publish_failure_preserves_target () =
   Eio_main.run
   @@ fun _env ->
@@ -679,6 +699,7 @@ let () =
           test_case "creates parent dir" `Quick test_save_atomic_creates_parent_dir;
           test_case "json atomic" `Quick test_save_json_atomic;
           test_case "durable raw bytes" `Quick test_durable_raw_bytes_contract;
+          test_case "durable raw bytes stats" `Quick test_durable_raw_bytes_stats_contract;
           test_case "durable encoded pieces" `Quick
             test_durable_encoded_pieces_write_the_joined_bytes;
         ] );

@@ -261,6 +261,20 @@ let keeper_checkpoint_history_retained =
             min_value = Some (`Int 0); max_value = Some (`Int 12); choices = [] }
     ()
 
+let keeper_checkpoint_save_min_interval_sec =
+  register_float
+    ~key:"keeper.checkpoint_save_min_interval_sec"
+    ~default:(fun () -> 30.0)
+    ~min:0.0 ~max:600.0
+    ~meta:{ description =
+              "턴 도중 체크포인트 저장 사이의 최소 간격(초). 0이면 도구 결과와 \
+               응답 경계마다 바로 저장한다. 턴 종료(finalize), 입력 대기 변경, \
+               거절 응답 제거, 도구 호출 없는 최종 응답은 간격과 무관하게 항상 \
+               저장한다";
+            value_type = "float";
+            min_value = Some (`Float 0.0); max_value = Some (`Float 600.0); choices = [] }
+    ()
+
 let keeper_stage_timing_ring_size =
   register_int
     ~key:"keeper.stage_timing_ring_size"
@@ -450,9 +464,10 @@ let surfaces =
     };
     {
       id = "keeper_retention";
-      description = "How much of a keeper's past each store keeps";
+      description = "How much of a keeper's past each store keeps and how often mid-turn checkpoints persist";
       param_keys = [
         "keeper.checkpoint_history_retained";
+        "keeper.checkpoint_save_min_interval_sec";
       ];
     };
     {

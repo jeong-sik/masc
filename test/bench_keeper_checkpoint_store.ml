@@ -8,8 +8,8 @@
     - saves the whole history once, as closed turns;
     - runs tool rounds shaped like the pipeline's, inside an open turn: save
       after the assistant tool call, save after its result, save once more for
-      the context injection stage. Each save carries its own [created_at], so
-      the store keeps and prunes snapshot files as it does live;
+      the context injection stage. Rolling history snapshots are archived on
+      [Turn_closes] saves rather than mid-turn [Turn_continues] saves;
     - reads the exact snapshot while the store still holds what it wrote
       (Librarian's case during a Keeper's run), and again after dropping it;
     - drops what the store keeps and loads the history through

@@ -187,9 +187,9 @@ module For_testing = struct
       ~before_stage ~keeper_name ~session_dir ~history_retained ~boundary ckpt
     =
     save_agent_core_classified_typed
-      ~write_canonical:(fun ~ownership_root path encoded_source ->
-        Keeper_fs.For_testing.save_encoded_durable_atomic_from
-          ~before_stage ~ownership_root path encoded_source)
+      ~write_canonical:(fun ~ownership_root path bytes ->
+        Keeper_fs.For_testing.save_bytes_durable_atomic_stats
+          ~before_stage ~ownership_root path bytes)
       ~save_lineage:(Save_for_keeper keeper_name) ~payload_writer:Checkpoint_payload_writer.Unmeasured ~session_dir ~history_retained ~boundary ckpt
     |> Result.map_error save_agent_core_error_to_string
   ;;

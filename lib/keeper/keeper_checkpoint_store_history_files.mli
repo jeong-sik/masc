@@ -36,12 +36,10 @@ module Checkpoint_payload_writer :
   sig
     type t = Unmeasured | Measured of (int option -> unit)
     val note : t -> int option -> unit
-    val count_pieces : string list -> int option
     val canonical :
       t ->
-      write:(ownership_root:'a ->
-             'b -> (unit -> string list) -> ('c, 'd) result) ->
-      ownership_root:'a -> 'b -> (unit -> string list) -> ('c, 'd) result
+      write:(ownership_root:'a -> 'b -> string -> ('c, 'd) result) ->
+      ownership_root:'a -> 'b -> string -> ('c, 'd) result
     val archive : t -> string -> string -> (unit, string) result
   end
 

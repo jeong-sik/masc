@@ -96,6 +96,17 @@ val save_bytes_durable_atomic
   -> string
   -> (unit, durable_write_error) result
 
+(** Like {!save_bytes_durable_atomic}, returning the stats of the installed
+    file from its own descriptor after the payload fsync. Unlike
+    {!save_encoded_durable_atomic_from}, this writes already-encoded bytes
+    directly without submitting a CPU job to the executor pool. *)
+val save_bytes_durable_atomic_stats
+  :  ?ownership_root:string
+  -> ?temp_dir:string
+  -> string
+  -> string
+  -> (Unix.stats, durable_write_error) result
+
 (** Strict durable atomic JSON write. Unlike the compatibility
     [save_json_atomic] boundary, parent-directory fsync failure is returned as
     an error and never downgraded to success. When [temp_dir] differs from the
@@ -180,6 +191,15 @@ module For_testing : sig
     -> string
     -> string
     -> (unit, durable_write_error) result
+
+  val save_bytes_durable_atomic_stats
+    :  before_stage:(durable_write_stage -> unit)
+    -> ?before_directory_fsync:(string -> unit)
+    -> ?ownership_root:string
+    -> ?temp_dir:string
+    -> string
+    -> string
+    -> (Unix.stats, durable_write_error) result
 
   val save_encoded_durable_atomic_from
     :  before_stage:(durable_write_stage -> unit)

@@ -153,14 +153,16 @@ let prune_raw_traces_after_turn_record
             first.detail))
 ;;
 
-(* An open tool cycle at dispatch is not corruption. Checkpoint persistence
-   stores one on purpose between [After_assistant_collected] and
-   [After_tool_results_appended] so recovery knows which calls were in flight,
-   and any turn that dies in that window leaves one behind — a provider timeout
-   does it without the process ever dying, which boot recovery's "process
-   death" premise did not cover. Measured 2026-08-22..25: one timeout latched
-   one lane for 33 consecutive turns and two other lanes likewise, 555 turns
-   on 2026-08-23 alone, each lane failing every turn until a restart.
+(* An open tool cycle at dispatch is not corruption. Eager checkpoint
+   persistence (when [keeper.checkpoint_save_min_interval_sec = 0] or on
+   direct-native continuation runs) stores one between
+   [After_assistant_collected] and [After_tool_results_appended] so recovery
+   knows which calls were in flight, and any turn that dies in that window
+   leaves one behind — a provider timeout does it without the process ever
+   dying, which boot recovery's "process death" premise did not cover.
+   Measured 2026-08-22..25: one timeout latched one lane for 33 consecutive
+   turns and two other lanes likewise, 555 turns on 2026-08-23 alone, each
+   lane failing every turn until a restart.
 
    So the routine case is closed here with the same synthesized results boot
    recovery appends, and the turn proceeds on the closed history. A structural
@@ -1582,6 +1584,11 @@ let run_turn
          let checkpoint_progress =
            Atomic.make Keeper_turn_driver_try_provider.No_checkpoint_stage
          in
+         let checkpoint_cadence = Keeper_checkpoint_cadence.create () in
+         let checkpoint_cadence_clock = Mtime_clock.counter () in
+         let checkpoint_cadence_now_s () =
+           Mtime.Span.to_float_ns (Mtime_clock.count checkpoint_cadence_clock) /. 1e9
+         in
          (* masc#28885: typed pre_tool_use rejects recorded by the
             official-client host during this turn. Flushed into the
             replay checkpoint only when the turn dies, so the model can
@@ -1596,7 +1603,85 @@ let run_turn
                ~keeper_name:meta.name ~session_dir:session.session_dir ~trace_id:meta.runtime.trace_id
                ~source:resume_agent_core_checkpoint |> Result.map Option.some in
          let input_producer = ref input_producer in
-         let checkpoint_sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
+          let persist_checkpoint_now ~stage_label ~stage checkpoint =
+                let save_started_at = Time_compat.now () in
+                let save_started_mono = Mtime_clock.now () in
+                let save_result =
+                  Keeper_checkpoint_store.save_agent_core_for_keeper
+                    ~keeper_name:meta.name
+                    ~session_dir:session.session_dir
+                    ~history_retained:
+                      (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
+                    ~boundary:Agent_core.Checkpoint_objects.Turn_continues
+                    checkpoint
+                in
+                let save_finished_mono = Mtime_clock.now () in
+                let save_finished_at = Time_compat.now () in
+                let duration_ms =
+                  Mtime.Span.to_float_ns (Mtime.span save_started_mono save_finished_mono)
+                  /. 1_000_000.
+                in
+                let outcome, canonical_bytes =
+                  match save_result with
+                  | Ok (Keeper_checkpoint_store.Saved { canonical_bytes; _ }) ->
+                    "saved", string_of_int canonical_bytes
+                  | Ok (Keeper_checkpoint_store.Stale_noop _) -> "stale_noop", "unknown"
+                  | Error _ -> "error", "unknown"
+                in
+                Log.Keeper.info ~keeper_name:meta.name ~turn_id:manifest_keeper_turn_id
+                  "checkpoint_save trace_id=%s stage=%s turn_count=%d start_s=%.6f end_s=%.6f duration_ms=%.3f canonical_bytes=%s outcome=%s"
+                  trace_id
+                  stage_label
+                  checkpoint.turn_count
+                  save_started_at
+                  save_finished_at
+                  duration_ms
+                  canonical_bytes
+                  outcome;
+                match save_result with
+                | Ok (Keeper_checkpoint_store.Saved { checkpoint = stored; _ }) ->
+                  Keeper_checkpoint_cadence.record_persisted
+                    checkpoint_cadence
+                    ~stage
+                    ~checkpoint
+                    ~now_s:(checkpoint_cadence_now_s ());
+                  last_persisted_checkpoint_ref := Some stored;
+                  Keeper_turn_driver_try_provider.observe_checkpoint_saved
+                    checkpoint_progress
+                    stage;
+                  Ok ()
+                | Ok (Keeper_checkpoint_store.Stale_noop _) ->
+                  (match stage with
+                   | Agent_core.Agent.After_input_wait_changed ->
+                     Error "input-wait checkpoint did not replace the current owner"
+                   | Agent_core.Agent.After_assistant_collected
+                   | After_tool_results_appended
+                   | After_context_injection
+                   | After_rejected_response_dropped -> Ok ())
+                | Error _ as error -> error
+          in
+          let flush_deferred_checkpoint () =
+            match Keeper_checkpoint_cadence.take_deferred checkpoint_cadence with
+            | None -> ()
+            | Some (stage, checkpoint) ->
+              let stage_label =
+                "flush_deferred:" ^ Agent_core.Agent.checkpoint_stage_to_string stage
+              in
+              (try
+                 match persist_checkpoint_now ~stage_label ~stage checkpoint with
+                 | Ok () -> ()
+                 | Error detail ->
+                   Log.Keeper.warn ~keeper_name:meta.name ~turn_id:manifest_keeper_turn_id
+                     "failed to flush deferred mid-turn checkpoint (%s): %s"
+                     stage_label detail
+               with
+               | Eio.Cancel.Cancelled _ as exn -> raise exn
+               | exn ->
+                 Log.Keeper.warn ~keeper_name:meta.name ~turn_id:manifest_keeper_turn_id
+                   "deferred mid-turn checkpoint flush raised (%s): %s"
+                   stage_label (Printexc.to_string exn))
+          in
+          let checkpoint_sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
                 Option.iter (fun observe -> observe snapshot.stage) on_checkpoint_stage;
                 (* AGENT_CORE's per-turn pipeline builds checkpoints with an empty
                    session_id (the AGENT_CORE agent carries no session field), so the
@@ -1628,57 +1713,49 @@ let run_turn
                 match publication with
                 | Error _ as error -> error
                 | Ok () ->
-                let save_started_at = Time_compat.now () in
-                let save_started_mono = Mtime_clock.now () in
-                let save_result =
-                  Keeper_checkpoint_store.save_agent_core_for_keeper
-                    ~keeper_name:meta.name
-                    ~session_dir:session.session_dir
-                    ~history_retained:
-                      (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
-                    ~boundary:Agent_core.Checkpoint_objects.Turn_continues
-                    checkpoint
+                let min_interval_sec =
+                  Runtime_params.get Runtime_settings.keeper_checkpoint_save_min_interval_sec
                 in
-                let save_finished_mono = Mtime_clock.now () in
-                let save_finished_at = Time_compat.now () in
-                let duration_ms =
-                  Mtime.Span.to_float_ns (Mtime.span save_started_mono save_finished_mono)
-                  /. 1_000_000.
-                in
-                let outcome, canonical_bytes =
-                  match save_result with
-                  | Ok (Keeper_checkpoint_store.Saved { canonical_bytes; _ }) ->
-                    "saved", string_of_int canonical_bytes
-                  | Ok (Keeper_checkpoint_store.Stale_noop _) -> "stale_noop", "unknown"
-                  | Error _ -> "error", "unknown"
-                in
-                Log.Keeper.info ~keeper_name:meta.name ~turn_id:manifest_keeper_turn_id
-                  "checkpoint_save trace_id=%s stage=%s turn_count=%d start_s=%.6f end_s=%.6f duration_ms=%.3f canonical_bytes=%s outcome=%s"
-                  trace_id
-                  (Agent_core.Agent.checkpoint_stage_to_string snapshot.stage)
-                  checkpoint.turn_count
-                  save_started_at
-                  save_finished_at
-                  duration_ms
-                  canonical_bytes
-                  outcome;
-                match save_result with
-                | Ok (Keeper_checkpoint_store.Saved { checkpoint = stored; _ }) ->
-                  last_persisted_checkpoint_ref := Some stored;
-                  Keeper_turn_driver_try_provider.observe_checkpoint_saved
-                    checkpoint_progress
-                    snapshot.stage;
-                  Ok ()
-                | Ok (Keeper_checkpoint_store.Stale_noop _) ->
-                  (match snapshot.stage with
-                   | Agent_core.Agent.After_input_wait_changed ->
-                     Error "input-wait checkpoint did not replace the current owner"
-                   | Agent_core.Agent.After_assistant_collected
-                   | After_tool_results_appended
-                   | After_context_injection
-                   | After_rejected_response_dropped -> Ok ())
-                | Error _ as error -> error
-         in
+                let stage_label = Agent_core.Agent.checkpoint_stage_to_string snapshot.stage in
+                (match
+                   Keeper_checkpoint_cadence.decide
+                     checkpoint_cadence
+                     ~stage:snapshot.stage
+                     ~checkpoint
+                     ~now_s:(checkpoint_cadence_now_s ())
+                     ~min_interval_sec
+                 with
+                 | Keeper_checkpoint_cadence.Skip reason ->
+                   Log.Keeper.info ~keeper_name:meta.name ~turn_id:manifest_keeper_turn_id
+                     "checkpoint_save trace_id=%s stage=%s turn_count=%d duration_ms=0.000 outcome=skipped reason=%s"
+                     trace_id
+                     stage_label
+                     checkpoint.turn_count
+                     (Keeper_checkpoint_cadence.skip_reason_to_string reason);
+                   Ok ()
+                 | Keeper_checkpoint_cadence.Persist ->
+                   persist_checkpoint_now ~stage_label ~stage:snapshot.stage checkpoint)
+          in
+          let hooks =
+            let observe_stop_reason =
+              { Agent_core.Hooks.empty with
+                after_turn =
+                  Some
+                    (function
+                      | Agent_core.Hooks.AfterTurn { response; _ } ->
+                        Keeper_checkpoint_cadence.observe_assistant_stop_reason
+                          checkpoint_cadence ~stop_reason:response.stop_reason;
+                        Agent_core.Hooks.Continue
+                      | Agent_core.Hooks.AfterRestoredTurn _
+                      | Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _
+                      | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.PostToolUse _
+                      | Agent_core.Hooks.PostToolUseFailure _ | Agent_core.Hooks.OnStop _
+                      | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _ ->
+                        Agent_core.Hooks.Continue)
+              }
+            in
+            Agent_core.Hooks.compose ~outer:observe_stop_reason ~inner:hooks
+          in
          let call_run_named ~raw_trace ~initial_messages () =
                 match !input_producer with
                 | Error error -> Error (Agent_core.Error.Internal
@@ -2000,8 +2077,26 @@ let run_turn
                  degrades to [None] (turn runs untraced, typed record
                  emitted) — sink trouble never fails the turn pre-dispatch. *)
          (match
+              (* Release hook flushes any closed tool-result checkpoint skipped by
+                 interval pacing on both Error returns and cooperative cancellation
+                 (Eio.Switch.on_release runs under Eio.Cancel.protect). On Ok _,
+                 the pending slot is cleared before the switch closes so finalize
+                 owns the closing Turn_closes write. *)
               let run =
-                call_run_named ~raw_trace ~initial_messages:history_messages () in
+                Eio.Switch.run (fun run_sw ->
+                  Eio.Switch.on_release run_sw flush_deferred_checkpoint;
+                  let run =
+                    call_run_named ~raw_trace ~initial_messages:history_messages ()
+                  in
+                  (match run with
+                   | Ok _ ->
+                     let (_ : (Agent_core.Agent.checkpoint_stage * Agent_core.Checkpoint.t) option) =
+                       Keeper_checkpoint_cadence.take_deferred checkpoint_cadence
+                     in
+                     ()
+                   | Error _ -> ());
+                  run)
+              in
               (* The run of this turn has returned, so nothing it began is
                  still open. A stream block whose end never came, such as a
                  native run with no result frame, would otherwise stay open

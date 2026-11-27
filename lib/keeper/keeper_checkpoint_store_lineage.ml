@@ -12,7 +12,7 @@ open Keeper_checkpoint_store_summary
    gives for them -- the decode of the files, not a second truth, so the disk
    stays the only watermark. A save keeps what it wrote, under
    the identity of the head it wrote, taken from that file's descriptor
-   ([Keeper_fs.save_encoded_durable_atomic_from]).
+   ([Keeper_fs.save_bytes_durable_atomic_stats]).
    [load_agent_core_for_save] keeps what it read, with the memo the load
    filled ([Agent_core.Checkpoint_objects.load]), so the first save after a
    restart or after another writer encodes only the new messages. A

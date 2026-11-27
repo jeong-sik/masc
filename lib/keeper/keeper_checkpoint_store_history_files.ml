@@ -81,50 +81,77 @@ let agent_core_history_snapshot_id_of_created_at (created_at : float) : string =
 let agent_core_history_snapshot_id_of_checkpoint (ckpt : Agent_core.Checkpoint.t) : string =
   agent_core_history_snapshot_id_of_created_at ckpt.created_at
 
-let prune_agent_core_history ~(session_dir : string) ~(retained : int) : unit =
-  let files = list_agent_core_history_files ~session_dir in
-  if List.length files > retained then
+let list_history_files_in_current_thread ~(session_dir : string) : string list =
+  if not (Sys.file_exists session_dir) then []
+  else
+    Sys.readdir session_dir
+    |> Array.to_list
+    |> List.filter (is_agent_core_history_file ~session_dir)
+    |> List.sort (fun a b -> String.compare b a)
+
+let prune_in_current_thread ~(session_dir : string) ~(retained : int) : (string * string) list =
+  let files = list_history_files_in_current_thread ~session_dir in
+  if List.length files <= retained then []
+  else
     files
     |> List.filteri (fun index _ -> index >= retained)
-    |> List.iter (fun filename ->
+    |> List.filter_map (fun filename ->
          let path = agent_core_history_path ~session_dir ~snapshot_id:filename in
          try
-           Eio_guard.run_in_systhread ~label:"keeper.checkpoint.history.unlink"
-             (fun () -> Sys.remove path)
+           Sys.remove path;
+           None
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-             Log.Keeper.warn "AGENT_CORE snapshot cleanup failed for %s: %s"
-               path (Printexc.to_string exn);
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string CheckpointFailures)
-               ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Agent_core_cleanup))]
-               ())
+         | exn -> Some (path, Printexc.to_string exn))
 
-let hardlink_agent_core_history_from_canonical
+let report_prune_failures failures =
+  List.iter
+    (fun (path, detail) ->
+      Log.Keeper.warn "AGENT_CORE snapshot cleanup failed for %s: %s" path detail;
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string CheckpointFailures)
+        ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Agent_core_cleanup))]
+        ())
+    failures
+
+let prune_agent_core_history ~(session_dir : string) ~(retained : int) : unit =
+  (* Run directory scan and unlinks in one systhread rather than queuing on
+     the shared Domain_pool and hopping into a separate systhread per file. *)
+  let failures =
+    Eio_guard.run_in_systhread ~label:"keeper.checkpoint.history.prune" (fun () ->
+      prune_in_current_thread ~session_dir ~retained)
+  in
+  report_prune_failures failures
+
+let hardlink_and_prune_agent_core_history
     ~(session_dir : string)
     ~(session_id : string)
-    ~(snapshot_id : string) : (unit, string) result =
+    ~(snapshot_id : string)
+    ~(retained : int) : (unit, string) result * (string * string) list =
   let canonical_path = agent_core_checkpoint_path ~session_dir ~session_id in
   let snapshot_path = agent_core_history_path ~session_dir ~snapshot_id in
-  if not (Fs_compat.file_exists canonical_path) then
-    Error "canonical AGENT_CORE checkpoint is missing"
-  else
-    try
-      let snapshot_exists = Fs_compat.file_exists snapshot_path in
-      Eio_guard.run_in_systhread ~label:"keeper.checkpoint.history.link" (fun () ->
-        Option.iter (fun hook -> hook ()) (Atomic.get before_history_link_hook);
-        if snapshot_exists then Sys.remove snapshot_path;
-        Unix.link canonical_path snapshot_path);
-      Ok ()
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn -> Error (Printexc.to_string exn)
+  Eio_guard.run_in_systhread ~label:"keeper.checkpoint.history.link_and_prune" (fun () ->
+    let link_result =
+      if not (Sys.file_exists canonical_path) then
+        Error "canonical AGENT_CORE checkpoint is missing"
+      else
+        try
+          Option.iter (fun hook -> hook ()) (Atomic.get before_history_link_hook);
+          if Sys.file_exists snapshot_path then Sys.remove snapshot_path;
+          Unix.link canonical_path snapshot_path;
+          Ok ()
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn -> Error (Printexc.to_string exn)
+    in
+    match link_result with
+    | Error _ as error -> error, []
+    | Ok () -> Ok (), prune_in_current_thread ~session_dir ~retained)
 
 (* A save-scoped capability is carried to each checkpoint payload writer. It
-   observes the pieces actually submitted to a successful canonical write and
-   the bytes submitted to a successful archive fallback. A failed archive can
-   have a partial effect, so its observation is unknown. *)
+   observes the bytes submitted to a successful canonical write and the bytes
+   submitted to a successful archive fallback. A failed archive can have a
+   partial effect, so its observation is unknown. *)
 module Checkpoint_payload_writer = struct
   type t = Unmeasured | Measured of (int option -> unit)
 
@@ -133,23 +160,13 @@ module Checkpoint_payload_writer = struct
     | Unmeasured -> ()
     | Measured observe -> observe observation
 
-  let count_pieces pieces =
-    List.fold_left (fun total piece ->
-      match total with
-      | Some bytes when String.length piece <= max_int - bytes -> Some (bytes + String.length piece)
-      | Some _ | None -> None) (Some 0) pieces
-
-  let canonical capability ~write ~ownership_root path encode =
+  let canonical capability ~write ~ownership_root path bytes =
     match capability with
-    | Unmeasured -> write ~ownership_root path encode
+    | Unmeasured -> write ~ownership_root path bytes
     | Measured observe ->
-      let submitted = ref None in
-      let result = write ~ownership_root path (fun () ->
-        let pieces = encode () in
-        submitted := count_pieces pieces;
-        pieces) in
+      let result = write ~ownership_root path bytes in
       (match result with
-       | Ok _ -> observe !submitted
+       | Ok _ -> observe (Some (String.length bytes))
        | Error _ -> ());
       result
 
@@ -174,23 +191,20 @@ let save_agent_core_history
     Checkpoint_payload_writer.archive payload_writer
       (agent_core_history_path ~session_dir ~snapshot_id) head_bytes
   in
-  let save_result =
-    match
-      hardlink_agent_core_history_from_canonical
-        ~session_dir ~session_id:ckpt.session_id ~snapshot_id
-    with
-    | Ok () -> Ok ()
-    | Error _ -> save_snapshot_file ()
-  in
-  match save_result with
-  | Ok () ->
-    prune_agent_core_history ~session_dir ~retained
-  | Error msg ->
-    Log.Keeper.warn "save_agent_core_history failed for %s: %s" snapshot_id msg;
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string CheckpointFailures)
-      ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Agent_core_save))]
-      ()
+  match
+    hardlink_and_prune_agent_core_history
+      ~session_dir ~session_id:ckpt.session_id ~snapshot_id ~retained
+  with
+  | Ok (), failures -> report_prune_failures failures
+  | Error _, _ ->
+    (match save_snapshot_file () with
+     | Ok () -> prune_agent_core_history ~session_dir ~retained
+     | Error msg ->
+       Log.Keeper.warn "save_agent_core_history failed for %s: %s" snapshot_id msg;
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string CheckpointFailures)
+         ~labels:[("site", Keeper_checkpoint_store_failure_site.(to_label Agent_core_save))]
+         ())
   end
 
 type history_delete_result =

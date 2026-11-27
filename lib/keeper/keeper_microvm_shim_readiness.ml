@@ -323,13 +323,27 @@ let initialize_files ~fs ~base ~payload_path =
       (Shim.shim_config_content ~payload_path)
     |> Result.map_error (fun error -> Config_unavailable (Recovery_publication_failed error)))
 
+(* Hold [config_lock] without Eio.Mutex poisoning while keeping the critical
+   section cancel-protected: [Eio.Mutex.use_rw] always poisons the mutex on any
+   escaping exception regardless of [~protect], and [~protect:false] would also
+   let cancellation abort an in-flight publication lane. [ensure_config_locked]
+   arms [recovery_required := true] before opening a lane and clears it only on
+   [Ok ()], so unlocking without poisoning lets subsequent [ensure_config] and
+   [verify] calls recover cleanly while callers still observe pending
+   cancellation via [Eio_guard.check_if_ready ()] right after unlocking. *)
+let with_config_lock mu f =
+  Eio.Mutex.lock mu;
+  Fun.protect
+    ~finally:(fun () -> Eio.Mutex.unlock mu)
+    (fun () -> protect_work f)
+
 let new_initialization ~fs ~base ~payload_path =
   let outcome = Atomic.make None in
   let config_lock = Eio.Mutex.create () in
   let recovery_required = ref true in
   let work = Eio.Lazy.from_fun ~cancel:`Record (fun () ->
     protect_work (fun () ->
-      Eio.Mutex.use_rw ~protect:false config_lock (fun () ->
+      with_config_lock config_lock (fun () ->
         let result = initialize_files ~fs ~base ~payload_path in
         (match result with Ok () -> recovery_required := false | Error _ -> ());
         Atomic.set outcome (Some result);
@@ -337,7 +351,7 @@ let new_initialization ~fs ~base ~payload_path =
   {payload_path; outcome; work; config_lock; recovery_required}
 
 let recover_initialization entry ~fs ~base =
-  Eio.Mutex.use_rw ~protect:false entry.config_lock (fun () ->
+  with_config_lock entry.config_lock (fun () ->
     match Atomic.get entry.outcome with
     | Some (Ok ()) -> Ok ()
     | None -> Error Not_initialized
@@ -431,7 +445,7 @@ let ensure_entry entry ~fs ~base =
     | None -> Eio.Lazy.force entry.work
     | Some (Ok ()) -> Ok ()
     | Some (Error _) -> recover_initialization entry ~fs ~base in
-  Eio.Mutex.use_rw ~protect:false entry.config_lock (fun () ->
+  with_config_lock entry.config_lock (fun () ->
     ensure_config_locked entry ~fs ~base)
 
 let ensure_config ~fs ~base_path =

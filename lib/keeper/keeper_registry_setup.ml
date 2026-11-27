@@ -1459,11 +1459,11 @@ let interrupt_current_turn_exact observed_entry =
          { turn_id = None
          ; detail = "live turn switch exists without a turn observation"
          }
-    | Some turn_sw, Some turn_id ->
+    | (Some turn_sw as current_sw), Some turn_id ->
       (try
          Eio.Switch.fail turn_sw Operator_interrupt;
          ignore
-           (Atomic.compare_and_set entry.current_turn_switch (Some turn_sw) None : bool);
+           (Atomic.compare_and_set entry.current_turn_switch current_sw None : bool);
          Exact_turn_cancelled turn_id
        with
        | exn -> (* cancel-guard-ok: Eio.Switch.fail is a synchronous cancel, no suspension *)

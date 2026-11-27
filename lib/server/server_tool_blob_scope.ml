@@ -265,10 +265,10 @@ let config_keepers =
       { suffix = Keeper_memory_search_index.db_suffix
       ; reason = M.Writes_no_reference
       }
-    (* Per-Keeper compaction WAL stores immutable compaction anchors, raw
-       verbatim archived turns, and active microcompacted blob handles. Scan
-       all three through the read-only SQLite decoder so active handles stay
-       sweep-protected and SQLite sidecars (-wal/-shm/-journal) stay classified. *)
+    (* Per-Keeper compaction WAL stores immutable compaction anchors and the
+       verbatim archived atoms. Scan both through the read-only SQLite decoder
+       so their blob references stay sweep-protected and SQLite sidecars
+       (-wal/-shm/-journal) stay classified. *)
   ; M.Decoded_keeper_files
       { suffix = Keeper_compaction.db_suffix
       ; decode = Keeper_compaction.decode_live_blob_references_json

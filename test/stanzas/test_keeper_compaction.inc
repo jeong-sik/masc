@@ -6,6 +6,7 @@
   masc_server
   alcotest
   masc.agent_core
+  masc.agent_core.llm_provider
   fs_compat
   masc_types
   masc_core

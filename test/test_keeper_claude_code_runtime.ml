@@ -7351,14 +7351,13 @@ let test_p0_5_resume_overflow_zero_atoms_and_anchor_commit () =
             let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
             match Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id:"claude-pre-dispatch" with
             | Ok (Some anchor) ->
-              let covers = Ids.Turn_id.to_string anchor.covers_through_turn in
-              let expected_prefix = Printf.sprintf "atom-%d-" (dropped_atoms - 1) in
               check bool
-                (Printf.sprintf "covers_through_turn (%s) covers strictly the evicted prefix (%s*)"
-                   covers expected_prefix)
+                (Printf.sprintf "coverage (%s) ends at the last evicted atom (leading/%d)"
+                   (Keeper_compaction_atom.coverage_to_string anchor.coverage)
+                   (dropped_atoms - 1))
                 true
-                (String.equal covers (Printf.sprintf "atom-%d" (dropped_atoms - 1))
-                 || String.starts_with ~prefix:expected_prefix covers);
+                (anchor.coverage.through
+                 = Some (Keeper_compaction_atom.Through_leading (dropped_atoms - 1)));
               let anchor_text =
                 Agent_core.Types.text_of_message (Keeper_compaction.anchor_to_message anchor)
               in
@@ -7467,11 +7466,11 @@ let test_p0_4_minimal_anchor_only_latched_across_memory_retry () =
             | Ok (Some anchor) ->
               check int "compaction anchor committed strictly once (not duplicated on memory retry)"
                 1 anchor.epoch_id;
-              let covers = Ids.Turn_id.to_string anchor.covers_through_turn in
               check bool
-                (Printf.sprintf "anchor (%s) covers all 4 evicted history atoms (atom-3*)" covers)
+                (Printf.sprintf "anchor (%s) covers all 4 evicted history atoms (leading/3)"
+                   (Keeper_compaction_atom.coverage_to_string anchor.coverage))
                 true
-                (String.equal covers "atom-3" || String.starts_with ~prefix:"atom-3-" covers)
+                (anchor.coverage.through = Some (Keeper_compaction_atom.Through_leading 3))
             | Ok None -> fail "expected committed compaction anchor"
             | Error err -> fail (Keeper_compaction.store_error_to_string err)))
 ;;
@@ -7665,11 +7664,11 @@ let test_p0_4_minimal_anchor_only_commits_anchor_despite_librarian_front () =
             let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
             match Keeper_compaction.latest_anchor ~keepers_dir ~keeper_id:keeper_name with
             | Ok (Some anchor) ->
-              let covers = Ids.Turn_id.to_string anchor.covers_through_turn in
               check bool
-                (Printf.sprintf "anchor (%s) covers all 4 evicted history atoms (atom-3*)" covers)
+                (Printf.sprintf "anchor (%s) covers all 4 evicted history atoms (leading/3)"
+                   (Keeper_compaction_atom.coverage_to_string anchor.coverage))
                 true
-                (String.equal covers "atom-3" || String.starts_with ~prefix:"atom-3-" covers)
+                (anchor.coverage.through = Some (Keeper_compaction_atom.Through_leading 3))
             | Ok None -> fail "expected committed compaction anchor despite raw librarian_front"
             | Error err -> fail (Keeper_compaction.store_error_to_string err)))
 ;;

@@ -205,57 +205,32 @@ let load_compaction_anchor ~base_path ~keeper_name =
       None)
 ;;
 
-let commit_compaction_anchor_for_messages
-      ~base_path ~keeper_name ~tools ~trigger evicted_messages
-  =
-  if String.equal (String.trim base_path) "" || evicted_messages = []
+let commit_compaction_anchor_for_messages ~base_path ~keeper_name ~trigger ~prefix messages =
+  if String.equal (String.trim base_path) "" || prefix <= 0
   then None
   else (
     let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-    let blob_store =
-      if Result.is_ok (Keeper_recovery_transmission.require_reader tools)
-      then Some (Tool_blob_store.create ~base_path)
-      else None
-    in
     match
       Keeper_compaction.compact_evicted_messages
-        ?blob_store ~keepers_dir ~keeper_id:keeper_name ~trigger ~evicted_messages ()
+        ~keepers_dir
+        ~keeper_id:keeper_name
+        ~trigger
+        ~frame:Keeper_compaction_atom.Message_history
+        ~messages
+        ~eviction:{ Keeper_compaction_atom.prefix; later = [] }
+        ()
     with
     | Ok (Some anchor) ->
       Log.Keeper.info ~keeper_name
-        "Antigravity anchored compaction committed epoch=%d covers_through=%s"
+        "Antigravity anchored compaction committed epoch=%d covers=%s"
         anchor.epoch_id
-        (Ids.Turn_id.to_string anchor.covers_through_turn);
+        (Keeper_compaction_atom.coverage_to_string anchor.coverage);
       Some anchor
     | Ok None -> load_compaction_anchor ~base_path ~keeper_name
     | Error err ->
       Log.Keeper.warn ~keeper_name "Antigravity anchored compaction commit failed: %s"
         (Keeper_compaction.store_error_to_string err);
       load_compaction_anchor ~base_path ~keeper_name)
-;;
-
-let evicted_prefix_of_window ~offered ~windowed =
-  let drop_preamble =
-    List.filter (fun msg -> not (Runtime_model_input_tail_window.is_synthetic_preamble msg))
-  in
-  let offered_labelled, offered_atoms =
-    Runtime_model_input_tail_window.annotate (drop_preamble offered)
-  in
-  let _, kept_atoms =
-    Runtime_model_input_tail_window.annotate (drop_preamble windowed)
-  in
-  let dropped_atoms = offered_atoms - kept_atoms in
-  if dropped_atoms <= 0
-  then [], 0
-  else
-    ( List.filter_map
-        (fun (msg, label) ->
-           match label with
-           | Runtime_model_input_tail_window.Atom idx when idx < dropped_atoms -> Some msg
-           | Runtime_model_input_tail_window.Atom _
-           | Runtime_model_input_tail_window.Pinned -> None)
-        offered_labelled
-    , dropped_atoms )
 ;;
 
 let attach_rollover_anchor_if_needed
@@ -269,11 +244,13 @@ let attach_rollover_anchor_if_needed
      || List.exists Runtime_model_input_tail_window.is_compaction_anchor windowed
   then windowed
   else (
-    let evicted_prefix, dropped_atoms = evicted_prefix_of_window ~offered ~windowed in
+    let offered_messages, dropped_atoms =
+      Keeper_compaction.prefix_eviction_of_window ~offered ~windowed
+    in
     let anchor =
       if dropped_atoms > 0
       then
-        (match commit_evicted_prefix ~dropped_atoms evicted_prefix with
+        (match commit_evicted_prefix ~dropped_atoms offered_messages with
          | Some committed -> Some committed
          | None -> rollover_anchor)
       else if minimal_anchor_only
@@ -1848,12 +1825,13 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ?argument_source
   let shrink_trigger =
     ref (Keeper_compaction.Provider_context_overflow { provider_limit_tokens = None })
   in
-  let commit_evicted_prefix ~dropped_atoms evicted_prefix =
+  let commit_evicted_prefix ~dropped_atoms offered_messages =
     if !rollover_eviction_active && dropped_atoms > !committed_evicted_atoms
     then (
       match
         commit_compaction_anchor_for_messages
-          ~base_path ~keeper_name ~tools ~trigger:!shrink_trigger evicted_prefix
+          ~base_path ~keeper_name ~trigger:!shrink_trigger ~prefix:dropped_atoms
+          offered_messages
       with
       | Some anchor ->
         committed_evicted_atoms := dropped_atoms;

@@ -3,7 +3,7 @@
 
 open Result.Syntax
 
-let bridged_turn_ref_metadata_key = "masc.bridged_turn_ref"
+let bridged_turn_ref_metadata_key = Keeper_turn_ref_metadata.bridged_key
 let client_turns_filename = "client-turns.jsonl"
 
 type session_key =

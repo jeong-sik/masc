@@ -1,0 +1,193 @@
+(** Names for the atoms of a conversation, and the part of a conversation a
+    compaction anchor covers.
+
+    An atom is the unit {!Runtime_model_input_tail_window.annotate} cuts on: a
+    [User] or [Assistant] message together with the [Tool] results that answer
+    it. Its name is the Keeper turn it belongs to and its place inside that
+    turn, read from {!Keeper_turn_ref_metadata} on the message that opens it.
+
+    Each compaction producer names the atoms of its own list: the Agent Core
+    history, an official client's start seed, the ACP list rebuilt from the
+    canonical turn store. A producer carries on only coverage written over the
+    same kind of list ({!frame}). The summary and the per-turn consumer read
+    the furthest of the two kinds' latest boundaries ({!front}). Finding a
+    boundary compares names, so it reads metadata only; nothing is serialized
+    or hashed. See RFC compaction-anchor-names-a-turn-atom. *)
+
+type name =
+  | Leading of int
+      (** An atom before the first atom that names a turn: history written
+          before turn ids were stamped. Counted from the front of the list. *)
+  | In_turn of
+      { turn : Ids.Turn_id.t
+      ; ordinal : int
+      }
+      (** The [ordinal]-th atom (from 0) of [turn] in this list. An atom whose
+          opening message names no turn belongs to the turn of the atom before
+          it. Ordinals count per turn across the whole list, so a turn that
+          shows up again later continues its count and no two atoms of one
+          list share a name. *)
+
+val equal_name : name -> name -> bool
+val name_to_string : name -> string
+val name_to_json : name -> Yojson.Safe.t
+val name_of_json : Yojson.Safe.t -> (name, string) result
+
+(** The kind of list a producer names. Leading positions and ordinals are
+    counted inside one list, so a producer carries on only coverage written
+    over its own kind (see {!Keeper_compaction.compact_evicted_messages}).
+
+    - [Message_history]: the Keeper's message history as the turn driver and
+      the official clients start from it, including canonical turns hydrated
+      into it.
+    - [Canonical_turns]: the list the ACP runtime rebuilds from the canonical
+      turn store after its watermark: one user and one assistant message per
+      turn. *)
+type frame =
+  | Message_history
+  | Canonical_turns
+
+val frame_to_string : frame -> string
+
+(** How much of the boundary turn an anchor covers. *)
+type extent =
+  | Whole_turn
+      (** Every atom of the turn. Written only when the turn's atoms run
+          without a gap from its first atom to the boundary, an atom of
+          another turn follows the boundary, and every earlier turn is
+          covered too. *)
+  | Up_to of
+      { ordinal : int
+      ; settled : Ids.Turn_id.t option
+      }
+      (** The turn's atoms through [ordinal]; the turn may continue past it.
+          [settled] is the last turn every atom of which is covered, the turn
+          the canonical turn store may prune through. *)
+
+(** The front of a list an anchor covers without a gap. *)
+type through =
+  | Through_leading of int  (** Leading atoms [0..k]. *)
+  | Through_turn of
+      { turn : Ids.Turn_id.t
+      ; extent : extent
+      }
+      (** Everything before [turn]'s first atom, and [turn] as far as
+          [extent] says. *)
+
+type coverage =
+  { through : through option
+  ; beyond : name list
+      (** Atoms past [through] that are already archived: completed tool
+          rounds the Agent Core window dropped from the middle of a turn. *)
+  }
+
+val settled_turn : coverage -> Ids.Turn_id.t option
+(** The last turn every atom of which is covered: the boundary turn under
+    {!Whole_turn}, [settled] under {!Up_to}, none before any turn. *)
+
+val coverage_to_string : coverage -> string
+(** Short display form for logs, the anchor text and the dashboard. *)
+
+val coverage_to_json : coverage -> Yojson.Safe.t
+val coverage_of_json : Yojson.Safe.t -> (coverage, string) result
+
+type atom =
+  { name : name
+  ; messages : Agent_core.Types.message list
+  ; last_position : int  (** Index in the input list of the atom's last message. *)
+  }
+
+val atoms_of_messages : Agent_core.Types.message list -> atom array
+(** Name every atom of the list, in order. Pinned messages belong to no atom. *)
+
+(** Where a boundary lands in a list. *)
+type placement =
+  | Covers_none  (** No boundary, or one that covers none of the list's atoms. *)
+  | Covers_through of int  (** Index of the last atom the boundary surely covers. *)
+  | Not_in_list
+      (** The boundary names a turn no atom of the list names. Usually the
+          list starts after that turn, because the canonical turn store pruned
+          its row; but the list may also hold the turn under another id, or
+          lack it. *)
+
+val covered_end : through option -> atom array -> placement
+(** Where [through] lands in [atoms].
+
+    - {!Through_leading} [k] covers the leading atoms through [k].
+    - {!Through_turn} is {!Not_in_list} when no atom names its turn. Otherwise
+      it covers every atom before the turn's first atom, then under
+      {!Whole_turn} the turn's first run of atoms, and under {!Up_to} the
+      turn's atoms through the one with the largest ordinal not above
+      [ordinal].
+
+    A boundary that is missing from the list gets no guessed span, so a list
+    that does not hold the boundary is never cut past what the anchor
+    summarized. *)
+
+(** The coverage of the latest epoch written over each kind of list. *)
+type latest =
+  { message_history : coverage option
+  ; canonical_turns : coverage option
+  }
+
+val latest_over : frame -> latest -> coverage option
+
+(** How far the summary has reached in a list. *)
+type front =
+  | Front of int
+      (** Both kinds' latest boundaries land in the list: they cover its atoms
+          through this index ([-1]: none), and of the later ones only those a
+          boundary archived past itself ([beyond]). Read over the other kind,
+          a boundary covers by turn: a canonical turn list boundary covers its
+          turns' tool rounds in the message history, which its summary does
+          not hold. *)
+  | Front_at_least of int
+      (** A latest boundary names a turn the list does not hold: the
+          boundaries cover the atoms through this index and may cover later
+          ones. *)
+
+val front_index : front -> int
+
+val front : frame:frame -> latest -> atom array -> front
+(** The front of [atoms], a list of kind [frame]: the furthest of [latest]'s
+    two boundaries. The summary fold and the per-turn consumer read it. Which
+    atoms are archived still comes from each kind's own coverage.
+
+    A boundary written over the other kind of list is read by its turn. Both
+    kinds keep the conversation's turns in the same order, so it covers that
+    list's atoms before its turn. Inside the turn the kinds differ: the
+    canonical turn list holds a turn as its user message (none when the prompt
+    was blank) and its final answer.
+
+    - A canonical turn list boundary is a whole turn or a turn's user message,
+      the turn's first atom in the message history too.
+    - A message-history boundary inside a turn may stop before the final
+      answer. In the canonical turn list it covers the turn's user message, or
+      only the turns before when the turn has no user message there; a final
+      answer the boundary did reach is summarized again. *)
+
+(** Atoms a producer dropped from its list: every atom before [prefix], and
+    [later] atoms at or past [prefix]. *)
+type eviction =
+  { prefix : int
+  ; later : int list
+  }
+
+type advance =
+  { coverage : coverage
+  ; fresh : int list  (** Evicted atoms the previous coverage did not hold, ascending. *)
+  }
+
+val advance
+  :  previous:coverage option
+  -> atom array
+  -> eviction
+  -> (advance option, string) result
+(** Extend [previous] by [eviction] over [atoms]. [Ok None] when every evicted
+    atom is already covered. [Error] when an index lies outside [atoms] or a
+    [later] index lies before [prefix].
+
+    The new boundary is the later of [previous]'s covered end in [atoms] and
+    the end of the evicted prefix; when the prefix ends no later, [previous]'s
+    boundary is kept as written. [beyond] keeps the [later] atoms and
+    [previous]'s still-present [beyond] atoms that lie past the new boundary. *)

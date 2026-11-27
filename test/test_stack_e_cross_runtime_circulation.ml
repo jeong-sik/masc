@@ -169,34 +169,43 @@ let test_cross_runtime_continuity_compaction_and_blob_sweep () =
     (contains ~needle:"HTTP turn 1 confirmed SQLite WAL" pre_text);
   check bool "handoff preserves ACP turn 2 output" true
     (contains ~needle:"ACP turn 2 verified Server_tool_blob_scope" pre_text);
-  (* Commit immutable compaction epoch covering through Turn 2. *)
-  let evicted_for_epoch =
-    [ { Compaction.turn_id = t1_id; messages = Canonical.messages_of_canonical_turn t1 }
-    ; { Compaction.turn_id = t2_id; messages = Canonical.messages_of_canonical_turn t2 }
-    ]
-  in
-  let anchor =
-    Compaction.fold_evicted_span
-      ~evicted_turns:evicted_for_epoch
-      ~summarize:Compaction.deterministic_fold
-      ()
-    |> require_ok
+  (* Commit an immutable compaction epoch over Turns 1 and 2. The list already
+     holds Turn 3's input, as a live history does, so Turn 2 is covered whole. *)
+  let t3_id = Ids.Turn_id.of_string "trace-circ:3" in
+  let t3_input =
+    { (Agent_core.Types.make_message
+         ~role:Agent_core.Types.User
+         [ Agent_core.Types.Text "Resume after compaction on HTTP." ])
+      with
+      metadata =
+        [ Canonical.canonical_turn_id_metadata_key, `String (Ids.Turn_id.to_string t3_id) ]
+    }
   in
   let committed_anchor =
-    Compaction.commit_epoch
-      ~keepers_dir
-      ~keeper_id
-      ~trigger:(Compaction.Explicit_hard_limit { capacity_bytes = 64_000; observed_bytes = 70_000 })
-      ~anchor
-      ~evicted_turns:evicted_for_epoch
-    |> require_compaction
+    match
+      Compaction.compact_evicted_messages
+        ~keepers_dir
+        ~keeper_id
+        ~trigger:(Compaction.Explicit_hard_limit { capacity_bytes = 64_000; observed_bytes = 70_000 })
+        ~frame:Masc.Keeper_compaction_atom.Canonical_turns
+        ~messages:
+          (Canonical.messages_of_canonical_turn t1
+           @ Canonical.messages_of_canonical_turn t2
+           @ [ t3_input ])
+        ~eviction:{ Masc.Keeper_compaction_atom.prefix = 4; later = [] }
+        ()
+      |> require_compaction
+    with
+    | Some anchor -> anchor
+    | None -> fail "expected compaction epoch 1"
   in
   check int "compaction epoch 1 committed" 1 committed_anchor.epoch_id;
-  check string "anchor covers through ACP turn 2"
-    (Ids.Turn_id.to_string t2_id)
-    (Ids.Turn_id.to_string committed_anchor.covers_through_turn);
+  check (option string) "anchor settles ACP turn 2"
+    (Some (Ids.Turn_id.to_string t2_id))
+    (Option.map
+       Ids.Turn_id.to_string
+       (Masc.Keeper_compaction_atom.settled_turn committed_anchor.coverage));
   (* Turn 3: Failover back to HTTP after compaction epoch 1. *)
-  let t3_id = Ids.Turn_id.of_string "trace-circ:3" in
   let t3 =
     Canonical.commit_turn
       ~keepers_dir
@@ -246,7 +255,7 @@ let test_cross_runtime_continuity_compaction_and_blob_sweep () =
   (match post_handoff.anchor with
    | None -> fail "expected committed compaction anchor in handoff context"
    | Some a -> check int "handoff carries epoch 1 anchor" 1 a.epoch_id);
-  check (list string) "handoff includes only turns strictly after anchor.covers_through_turn"
+  check (list string) "handoff includes only turns after the settled turn"
     [ "trace-circ:3"; "trace-circ:4" ]
     (List.map (fun (t : Canonical.canonical_turn) -> Ids.Turn_id.to_string t.turn_id)
        post_handoff.turns_after_anchor);

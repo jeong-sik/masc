@@ -1020,89 +1020,49 @@ let load_persisted_compaction_anchor ~base_path ~keeper_name =
        None)
 ;;
 
-let evicted_prefix_before_atom ~first_atom messages =
-  if first_atom <= 0
-  then []
-  else
-    let labelled, _ = Runtime_model_input_tail_window.annotate messages in
-    List.filter_map
-      (fun (msg, label) ->
-         match label with
-         | Runtime_model_input_tail_window.Atom idx when idx < first_atom -> Some msg
-         | Runtime_model_input_tail_window.Atom _ | Runtime_model_input_tail_window.Pinned ->
-           None)
-      labelled
-;;
-
-let commit_compaction_for_messages
+let commit_compaction
       ~base_path
       ~keeper_name
-      ~reader_available
       ~trigger
       ~(state : attempt_state)
-      evicted_messages
+      ~(eviction : Keeper_compaction_atom.eviction)
+      messages
   =
   match keepers_dir_for_base_path base_path with
   | None -> false
   | Some keepers_dir ->
-    (match evicted_messages with
-     | [] -> false
-     | _ :: _ ->
-       let blob_store =
-         if reader_available then Some (Tool_blob_store.create ~base_path) else None
-       in
-       (match
-          Keeper_compaction.compact_evicted_messages
-            ?blob_store
-            ~keepers_dir
-            ~keeper_id:keeper_name
-            ~trigger
-            ~evicted_messages
-            ()
-        with
-        | Ok (Some anchor) ->
-          state.compaction_anchor := Some anchor;
-          Log.Keeper.info ~keeper_name
-            "anchored compaction committed epoch=%d covers_through=%s"
-            anchor.epoch_id
-            (Ids.Turn_id.to_string anchor.covers_through_turn);
-          true
-        | Ok None -> false
-        | Error err ->
-          Log.Keeper.warn ~keeper_name "anchored compaction commit failed: %s"
-            (Keeper_compaction.store_error_to_string err);
-          false))
+    (match
+       Keeper_compaction.compact_evicted_messages
+         ~keepers_dir
+         ~keeper_id:keeper_name
+         ~trigger
+         ~frame:Keeper_compaction_atom.Message_history
+         ~messages
+         ~eviction
+         ()
+     with
+     | Ok (Some anchor) ->
+       state.compaction_anchor := Some anchor;
+       Log.Keeper.info ~keeper_name
+         "anchored compaction committed epoch=%d covers=%s"
+         anchor.epoch_id
+         (Keeper_compaction_atom.coverage_to_string anchor.coverage);
+       true
+     | Ok None -> false
+     | Error err ->
+       Log.Keeper.warn ~keeper_name "anchored compaction commit failed: %s"
+         (Keeper_compaction.store_error_to_string err);
+       false)
 ;;
 
-let commit_compaction_for_evicted
-      ~base_path
-      ~keeper_name
-      ~reader_available
-      ~trigger
-      ~first_atom
-      ~(state : attempt_state)
-      messages
-  =
-  commit_compaction_for_messages
+let commit_compaction_for_evicted ~base_path ~keeper_name ~trigger ~first_atom ~state messages =
+  commit_compaction
     ~base_path
     ~keeper_name
-    ~reader_available
     ~trigger
     ~state
-    (evicted_prefix_before_atom ~first_atom messages)
-;;
-
-let evicted_messages_for_drop ~first_atom ~dropped_atoms messages =
-  let labelled, _ = Runtime_model_input_tail_window.annotate messages in
-  List.filter_map
-    (fun (msg, label) ->
-       match label with
-       | Runtime_model_input_tail_window.Atom idx
-         when idx < first_atom || Message_indices.mem idx dropped_atoms ->
-         Some msg
-       | Runtime_model_input_tail_window.Atom _ | Runtime_model_input_tail_window.Pinned ->
-         None)
-    labelled
+    ~eviction:{ Keeper_compaction_atom.prefix = first_atom; later = [] }
+    messages
 ;;
 
 (* Select the oldest completed tool-round cycle(s) inside the current turn
@@ -2569,7 +2529,6 @@ let bounded_model_input_projection
           commit_compaction_for_evicted
             ~base_path:ctx.base_path
             ~keeper_name:ctx.keeper_name
-            ~reader_available
             ~trigger:
               (Keeper_compaction.Explicit_hard_limit
                  { capacity_bytes =
@@ -2614,7 +2573,6 @@ let bounded_model_input_projection
             commit_compaction_for_evicted
               ~base_path:ctx.base_path
               ~keeper_name:ctx.keeper_name
-              ~reader_available
               ~trigger:
                 (Keeper_compaction.Provider_context_overflow
                    { provider_limit_tokens = !(state.last_input_limit) })
@@ -3157,7 +3115,6 @@ let history_rungs (ctx : try_provider_ctx) ~(state : attempt_state) ~(continuity
                (commit_compaction_for_evicted
                   ~base_path:ctx.base_path
                   ~keeper_name:ctx.keeper_name
-                  ~reader_available:(Result.is_ok (Keeper_recovery_transmission.require_reader ctx.tools))
                   ~trigger:
                     (Keeper_compaction.Provider_context_overflow
                        { provider_limit_tokens = !(state.last_input_limit) })
@@ -3220,7 +3177,6 @@ let history_rungs (ctx : try_provider_ctx) ~(state : attempt_state) ~(continuity
                (commit_compaction_for_evicted
                   ~base_path:ctx.base_path
                   ~keeper_name:ctx.keeper_name
-                  ~reader_available:(Result.is_ok (Keeper_recovery_transmission.require_reader ctx.tools))
                   ~trigger:
                     (Keeper_compaction.Provider_context_overflow
                        { provider_limit_tokens = !(state.last_input_limit) })
@@ -3736,22 +3692,22 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                   (fun acc atom -> Message_indices.add atom acc)
                   !(state.dropped_current_turn_atoms)
                   to_drop;
-              let evicted_messages =
-                evicted_messages_for_drop
-                  ~first_atom
-                  ~dropped_atoms:!(state.dropped_current_turn_atoms)
-                  messages
+              (* Dropped atoms before [first_atom] are part of the evicted prefix. *)
+              let later =
+                List.filter
+                  (fun atom -> atom >= first_atom)
+                  (Message_indices.elements !(state.dropped_current_turn_atoms))
               in
               ignore
-                (commit_compaction_for_messages
+                (commit_compaction
                    ~base_path:ctx.base_path
                    ~keeper_name:ctx.keeper_name
-                   ~reader_available
                    ~trigger:
                      (Keeper_compaction.Provider_context_overflow
                         { provider_limit_tokens = !(state.last_input_limit) })
                    ~state
-                   evicted_messages
+                   ~eviction:{ Keeper_compaction_atom.prefix = first_atom; later }
+                   messages
                  : bool);
               Log.Keeper.info ~keeper_name:ctx.keeper_name
                 "model input oldest current-turn tool rounds dropped after overflow \

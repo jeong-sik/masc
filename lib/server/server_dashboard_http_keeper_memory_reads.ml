@@ -595,14 +595,14 @@ let memory_os_internals_json ~(config : Workspace.config) ~keeper_id =
         | None -> `Null, `Null, `Null, 0
         | Some a ->
           ( `Int a.epoch_id
-          , `String (Ids.Turn_id.to_string a.covers_through_turn)
+          , `String (Keeper_compaction_atom.coverage_to_string a.coverage)
           , Json_util.int_opt_to_json a.archived_epochs_through
           , List.length a.observations )
       in
       `Assoc
         [ "present", `Bool s.present
         ; "epoch_count", `Int s.epoch_count
-        ; "archived_turns_count", `Int s.archived_turns_count
+        ; "archived_turns_count", `Int s.archived_atom_count
         ; "anchor_bytes", `Int s.anchor_bytes
         ; "latest_epoch_id", latest_epoch_id
         ; "covers_through_turn", covers_through_turn

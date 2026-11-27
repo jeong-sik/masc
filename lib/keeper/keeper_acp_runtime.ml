@@ -1781,70 +1781,263 @@ let make_stream_projection
 
 let default_keep_ratio = 0.25
 
+(* A compaction of the handoff list keeps at least this many of its most
+   recent atoms, so it leaves a list of this many atoms or fewer whole. *)
+let min_kept_atoms = 2
+
+let without_synthetic_preamble (messages : Agent_core.Types.message list) =
+  List.filter
+    (fun (m : Agent_core.Types.message) ->
+       not (Runtime_model_input_tail_window.is_synthetic_preamble m))
+    messages
+;;
+
+(* [messages] without synthetic preambles, and how many of its atoms to evict
+   from the front. The split is on [Runtime_model_input_tail_window] [Atom]
+   boundaries, so pinned entries (System, compaction anchors, working state,
+   outside context) are never counted or evicted and [Assistant(tool_use)] +
+   [Tool(tool_result)] pairs are never split apart. *)
 let split_older_for_rollover ?keep_ratio (messages : Agent_core.Types.message list) =
-  (* Ignore synthetic preambles and slice strictly on [Runtime_model_input_tail_window]
-     [Atom] boundaries so pinned entries (System, compaction anchors, working state,
-     outside context) are never counted/evicted and [Assistant(tool_use)] +
-     [Tool(tool_result)] pairs are never split apart. *)
-  let without_preamble =
-    List.filter
-      (fun (m : Agent_core.Types.message) ->
-         not (Runtime_model_input_tail_window.is_synthetic_preamble m))
-      messages
-  in
+  let without_preamble = without_synthetic_preamble messages in
   let ratio = Option.value keep_ratio ~default:default_keep_ratio in
-  let labelled, atom_count = Runtime_model_input_tail_window.annotate without_preamble in
-  if atom_count <= 2
-  then []
+  let _, atom_count = Runtime_model_input_tail_window.annotate without_preamble in
+  if atom_count <= min_kept_atoms
+  then without_preamble, 0
   else (
-    let keep_recent = max 2 (int_of_float (Float.of_int atom_count *. ratio)) in
-    let evict_atoms = max 1 (atom_count - keep_recent) in
-    List.filter_map
-      (fun (m, label) ->
-         match label with
-         | Runtime_model_input_tail_window.Atom idx when idx < evict_atoms -> Some m
-         | Runtime_model_input_tail_window.Atom _ | Runtime_model_input_tail_window.Pinned ->
-           None)
-      labelled)
+    let keep_recent =
+      max min_kept_atoms (int_of_float (Float.of_int atom_count *. ratio))
+    in
+    without_preamble, max 1 (atom_count - keep_recent))
+;;
+
+(* [messages] without synthetic preambles, and the index of its first atom
+   whose turn has one of [rows]. *)
+let first_atom_with_row
+      ~(rows : Keeper_canonical_turn_store.canonical_turn list)
+      (messages : Agent_core.Types.message list)
+  =
+  let without_preamble = without_synthetic_preamble messages in
+  let atoms = Keeper_compaction_atom.atoms_of_messages without_preamble in
+  let row_turns : (string, unit) Hashtbl.t = Hashtbl.create (List.length rows) in
+  List.iter
+    (fun (row : Keeper_canonical_turn_store.canonical_turn) ->
+       Hashtbl.replace row_turns (Ids.Turn_id.to_string row.turn_id) ())
+    rows;
+  let has_row (atom : Keeper_compaction_atom.atom) =
+    match atom.name with
+    | Keeper_compaction_atom.In_turn { turn; ordinal = _ } ->
+      Hashtbl.mem row_turns (Ids.Turn_id.to_string turn)
+    | Keeper_compaction_atom.Leading _ -> false
+  in
+  without_preamble, Array.find_index has_row atoms, Array.length atoms
+;;
+
+(* What the fresh session after a rollover or an overflow retry starts from
+   decides the list both ACP producers compact. That start sends the handoff
+   list when it holds anything, else the run's message history
+   ({!hydrate_start_messages}). The history is [initial_messages], never a
+   projected start window: a boundary covers everything before it, so the
+   turns in front of the window would count as archived and the watermark
+   would prune their rows. *)
+type next_start =
+  | Handoff_list of Agent_core.Types.message list
+  (* The handoff list, when a summary applies or its rows reach back to the
+     history's first atom. The start holds the new summary and the rows past
+     its settled turn, so the most recent atoms stay whole. *)
+  | History_before_rows of
+      { history : Agent_core.Types.message list
+      ; before_rows : int
+      }
+  (* No summary applies yet, the first [before_rows] atoms of [history]
+     belong to turns the handoff list does not hold, such as the turns before
+     a Fresh state, and the next atom's turn has a row. The summary takes
+     those atoms. Its settled turn has no row, so the watermark prunes none,
+     and the handoff list, which then holds the summary and every row, is
+     compacted next. *)
+  | History_without_rows of
+      { history : Agent_core.Types.message list
+      ; atom_count : int
+      }
+  (* No summary applies yet, and no turn of [history] has a row: there is no
+     row, or every row carries an id the history lacks, such as the current
+     turn's ACP turn id. The summary takes every atom, and the start holds it
+     and every row. Nothing tells which turns those rows are: the summary may
+     hold them under Keeper turn ids, and summarizing them again could make
+     an older request the active intent (#55026). So the rows stay whole, and
+     when an overflow retry still overflows, a later shrink drops the oldest
+     of them from its start window. *)
+  | History_list of Agent_core.Types.message list
+  (* The canonical turn store cannot be read, and this is the history. The
+     start sends it while the store stays unreadable, so the most recent
+     atoms stay whole. *)
+
+let next_start_list ~keepers_dir ~keeper_id ~history =
+  match Keeper_canonical_turn_store.load_handoff_context ~keepers_dir ~keeper_id with
+  | Ok { Keeper_canonical_turn_store.anchor = Some _; messages; turns_after_anchor = _ } ->
+    Ok (Handoff_list messages)
+  | Ok { Keeper_canonical_turn_store.anchor = None; messages; turns_after_anchor = rows } ->
+    (match first_atom_with_row ~rows history with
+     | _, Some 0, _ | _, None, 0 -> Ok (Handoff_list messages)
+     | history, Some before_rows, _ -> Ok (History_before_rows { history; before_rows })
+     | history, None, atom_count -> Ok (History_without_rows { history; atom_count }))
+  | Error (Keeper_canonical_turn_store.Compaction_store err) ->
+    (* The compaction would fail on the same store. *)
+    Error err
+  | Error
+      ((Keeper_canonical_turn_store.Sqlite_error _
+       | Keeper_canonical_turn_store.Corrupt_record _
+       | Keeper_canonical_turn_store.Schema_not_current _) as err) ->
+    Log.Keeper.warn
+      ~keeper_name:keeper_id
+      "ACP compaction uses the message history; handoff list unreadable: %s"
+      (Keeper_canonical_turn_store.store_error_to_string err);
+    Ok (History_list history)
+;;
+
+let compact_prefix ~keepers_dir ~keeper_id ~trigger ~frame ~messages ~prefix =
+  if prefix = 0
+  then Ok None
+  else
+    Keeper_compaction.compact_evicted_messages
+      ~keepers_dir
+      ~keeper_id
+      ~trigger
+      ~frame
+      ~messages
+      ~eviction:{ Keeper_compaction_atom.prefix; later = [] }
+      ()
+;;
+
+let compact_handoff_list ?keep_ratio ~keepers_dir ~keeper_id ~trigger source =
+  let messages, prefix = split_older_for_rollover ?keep_ratio source in
+  compact_prefix
+    ~keepers_dir
+    ~keeper_id
+    ~trigger
+    ~frame:Keeper_compaction_atom.Canonical_turns
+    ~messages
+    ~prefix
+;;
+
+(* What compacting the list the next fresh session starts from did. *)
+type start_compaction =
+  | Start_compacted
+  (* That list is compacted as far as a compaction takes it. *)
+  | Nothing_new
+  (* No epoch committed: the atoms a compaction would take were too few or
+     already archived. *)
+  | Rows_kept_whole
+  (* The history before the rows was summarized, but no row was compacted
+     after it: the handoff list could not be read or compacted. The cause is
+     logged where it happened. *)
+  | History_cleared
+  (* The history before the rows was summarized, and the history was cleared
+     before the handoff list was read, so that summary does not apply. This
+     run's history is from before the clear. *)
+
+(* Whether an overflow retry counts its run compacted, so that it compacts
+   nothing more in that run: when the start's list is compacted as far as it
+   goes, and after a clear, since compacting this run's history again would
+   put atoms from before the clear into a summary that applies. Otherwise the
+   next shrink compacts the list it then starts from. *)
+let run_compacted = function
+  | Start_compacted | History_cleared -> true
+  | Nothing_new | Rows_kept_whole -> false
+;;
+
+let compacted_or_nothing_new = function
+  | Some (_ : Keeper_compaction.compaction_anchor) -> Start_compacted
+  | None -> Nothing_new
+;;
+
+(* The second step of a [History_before_rows] compaction, once the summary of
+   the history before the rows committed: [handoff] is the handoff list read
+   after that commit. *)
+let compact_rows_after_summary ?keep_ratio ~keepers_dir ~keeper_id ~trigger handoff =
+  let rows_kept detail =
+    Log.Keeper.warn
+      ~keeper_name:keeper_id
+      "ACP compaction summarized the history before the rows but kept every row: %s"
+      detail;
+    Rows_kept_whole
+  in
+  match handoff with
+  | Ok { Keeper_canonical_turn_store.anchor = Some _; messages; turns_after_anchor = _ } ->
+    (match compact_handoff_list ?keep_ratio ~keepers_dir ~keeper_id ~trigger messages with
+     | Ok (Some _ | None) -> Start_compacted
+     | Error err -> rows_kept (Keeper_compaction.store_error_to_string err))
+  | Ok { Keeper_canonical_turn_store.anchor = None; messages = _; turns_after_anchor = _ } ->
+    Log.Keeper.warn
+      ~keeper_name:keeper_id
+      "ACP compaction summarized the history before the rows, and the history was \
+       cleared after it";
+    History_cleared
+  | Error err -> rows_kept (Keeper_canonical_turn_store.store_error_to_string err)
+;;
+
+(* [Error] only when no epoch committed. *)
+let compact_next_start_list ?keep_ratio ~keepers_dir ~keeper_id ~trigger ~history () =
+  let* start = next_start_list ~keepers_dir ~keeper_id ~history in
+  let compact_history ~messages ~prefix =
+    compact_prefix
+      ~keepers_dir
+      ~keeper_id
+      ~trigger
+      ~frame:Keeper_compaction_atom.Message_history
+      ~messages
+      ~prefix
+  in
+  match start with
+  | Handoff_list source ->
+    compact_handoff_list ?keep_ratio ~keepers_dir ~keeper_id ~trigger source
+    |> Result.map compacted_or_nothing_new
+  | History_list source ->
+    let messages, prefix = split_older_for_rollover ?keep_ratio source in
+    compact_history ~messages ~prefix |> Result.map compacted_or_nothing_new
+  | History_without_rows { history; atom_count } ->
+    compact_history ~messages:history ~prefix:atom_count
+    |> Result.map compacted_or_nothing_new
+  | History_before_rows { history; before_rows } ->
+    let* summary = compact_history ~messages:history ~prefix:before_rows in
+    (match summary with
+     | None -> Ok Nothing_new
+     | Some (_ : Keeper_compaction.compaction_anchor) ->
+       Ok
+         (compact_rows_after_summary
+            ?keep_ratio
+            ~keepers_dir
+            ~keeper_id
+            ~trigger
+            (Keeper_canonical_turn_store.load_handoff_context ~keepers_dir ~keeper_id)))
 ;;
 
 let compact_for_rollover
-      ?blob_store
       ?keep_ratio
       ~keepers_dir
       ~keeper_id
       ~(rollover : rollover)
-      ~fallback_messages
+      ~initial_messages
       ()
   =
-  let source_messages =
-    match Keeper_canonical_turn_store.load_handoff_context ~keepers_dir ~keeper_id with
-    | Ok handoff when handoff.messages <> [] -> handoff.messages
-    | Ok _ | Error _ -> fallback_messages
+  let trigger =
+    Keeper_compaction.Provider_counted_window
+      { used_tokens = rollover.used_tokens; limit_tokens = rollover.limit_tokens }
   in
-  let evicted_messages = split_older_for_rollover ?keep_ratio source_messages in
-  if evicted_messages = []
-  then ()
-  else (
-    let trigger =
-      Keeper_compaction.Provider_counted_window
-        { used_tokens = rollover.used_tokens; limit_tokens = rollover.limit_tokens }
-    in
-    match
-      Keeper_compaction.compact_evicted_messages
-        ?blob_store
-        ~keepers_dir
-        ~keeper_id
-        ~trigger
-        ~evicted_messages
-        ()
-    with
-    | Ok _ -> ()
-    | Error err ->
-      Log.Keeper.warn
-        ~keeper_name:keeper_id
-        "proactive ACP context rollover compaction skipped: %s"
-        (Keeper_compaction.store_error_to_string err))
+  match
+    compact_next_start_list
+      ?keep_ratio
+      ~keepers_dir
+      ~keeper_id
+      ~trigger
+      ~history:initial_messages
+      ()
+  with
+  | Ok (Start_compacted | Nothing_new | Rows_kept_whole | History_cleared) -> ()
+  | Error err ->
+    Log.Keeper.warn
+      ~keeper_name:keeper_id
+      "proactive ACP context rollover compaction skipped: %s"
+      (Keeper_compaction.store_error_to_string err)
 ;;
 
 let effective_held_for_resume ~resume_system_notice previously_held =
@@ -2139,7 +2332,6 @@ let run_without_lifecycle
     | Some r -> Keeper_official_client_tool_receipts.hooks r hooks
   in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let blob_store = Tool_blob_store.create ~base_path in
   let* env =
     match Eio_context.get_env_opt () with
     | Some env -> Ok env
@@ -3542,12 +3734,11 @@ let run_without_lifecycle
         (match rollover with
          | Some rollover ->
           compact_for_rollover
-            ~blob_store
             ?keep_ratio:(Runtime.compaction_keep_ratio_of_runtime_id runtime_id)
             ~keepers_dir
             ~keeper_id:keeper_name
             ~rollover
-            ~fallback_messages:prepared.messages
+            ~initial_messages
             ();
           record_rollover_marker ~base_path ~keeper_id:keeper_name ~runtime_id ~session_id;
           Log.Keeper.info
@@ -3658,7 +3849,6 @@ let overflow_trigger ~input_limit ~previous_capacity ~refused_sent_bytes ~capaci
 ;;
 
 let compact_once_for_overflow_with
-      ?blob_store
       ?keep_ratio
       ~already_compacted
       ~keepers_dir
@@ -3672,23 +3862,26 @@ let compact_once_for_overflow_with
   =
   if not !already_compacted
   then (
-    let evicted_messages = split_older_for_rollover ?keep_ratio initial_messages in
-    if evicted_messages <> []
-    then (
-      let trigger =
-        overflow_trigger ~input_limit ~previous_capacity ~refused_sent_bytes ~capacity
-      in
-      match
-        Keeper_compaction.compact_evicted_messages
-          ?blob_store
-          ~keepers_dir
-          ~keeper_id
-          ~trigger
-          ~evicted_messages
-          ()
-      with
-      | Ok (Some _) -> already_compacted := true
-      | Ok None | Error _ -> ()))
+    (* The retry starts a fresh session ([force_fresh_retry]), so this shrinks
+       the same list a rollover does. *)
+    let trigger =
+      overflow_trigger ~input_limit ~previous_capacity ~refused_sent_bytes ~capacity
+    in
+    match
+      compact_next_start_list
+        ?keep_ratio
+        ~keepers_dir
+        ~keeper_id
+        ~trigger
+        ~history:initial_messages
+        ()
+    with
+    | Ok outcome -> if run_compacted outcome then already_compacted := true
+    | Error err ->
+      Log.Keeper.warn
+        ~keeper_name:keeper_id
+        "ACP context overflow compaction skipped: %s"
+        (Keeper_compaction.store_error_to_string err))
 ;;
 
 let compact_once_for_overflow
@@ -3771,7 +3964,6 @@ let run
   in
   let min_reserve_bytes = String.length system_prompt + String.length goal in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let blob_store = Tool_blob_store.create ~base_path in
   let force_fresh_retry = ref false in
   let compacted_for_overflow = ref false in
   Keeper_official_client_attempt.run
@@ -3819,7 +4011,6 @@ let run
               evict_keeper_for_workspace ~base_path ~keeper_name;
               force_fresh_retry := true;
               compact_once_for_overflow_with
-                ~blob_store
                 ?keep_ratio:(Runtime.compaction_keep_ratio_of_runtime_id runtime_id)
                 ~already_compacted:compacted_for_overflow
                 ~keepers_dir
@@ -3924,6 +4115,28 @@ module For_testing = struct
   let rollover_marker_matches = rollover_marker_matches
   let clear_rollover_marker = clear_rollover_marker
   let split_older_for_rollover = split_older_for_rollover
+
+  type nonrec next_start = next_start
+
+  let next_start_list = next_start_list
+
+  type nonrec start_compaction = start_compaction =
+    | Start_compacted
+    | Nothing_new
+    | Rows_kept_whole
+    | History_cleared
+
+  let run_compacted = run_compacted
+  let compact_rows_after_summary = compact_rows_after_summary
+
+  let compact_for_rollover ~keepers_dir ~keeper_id ~used_tokens ~limit_tokens ~initial_messages =
+    compact_for_rollover
+      ~keepers_dir
+      ~keeper_id
+      ~rollover:{ used_tokens; limit_tokens }
+      ~initial_messages
+      ()
+  ;;
   let prefer_handoff_for_start = prefer_handoff_for_start
   let start_unless_stopped = start_unless_stopped
   let hydrate_start_messages = hydrate_start_messages

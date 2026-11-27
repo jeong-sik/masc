@@ -183,7 +183,66 @@ module For_testing : sig
   val split_older_for_rollover
     :  ?keep_ratio:float
     -> Agent_core.Types.message list
-    -> Agent_core.Types.message list
+    -> Agent_core.Types.message list * int
+
+  (** The list both ACP producers compact, picked by what a fresh session
+      after a rollover or an overflow retry starts from. *)
+  type next_start
+
+  (** The handoff list, kept to its most recent atoms, when a summary applies,
+      when its rows reach back to the first atom of [history], or when
+      [history] has no atom. Else [history] through the last atom before the
+      first atom whose turn has a row under its id, then the handoff list kept
+      to its most recent atoms; or all of [history], with every row left
+      whole, when no turn of [history] has a row under its id: nothing tells
+      which turns those rows are. When the canonical turn store cannot be
+      read, [history] kept to its most recent atoms, which the start sends
+      while the store stays unreadable. [Error] when the compaction store
+      cannot be read, which the compaction would hit too. *)
+  val next_start_list
+    :  keepers_dir:string
+    -> keeper_id:string
+    -> history:Agent_core.Types.message list
+    -> (next_start, Keeper_compaction.store_error) result
+
+  (** What compacting the list the next fresh session starts from did. *)
+  type start_compaction =
+    | Start_compacted  (** That list is compacted as far as a compaction takes it. *)
+    | Nothing_new  (** No epoch committed. *)
+    | Rows_kept_whole
+        (** The history before the rows was summarized, but no row was
+            compacted after it: the handoff list could not be read or
+            compacted. *)
+    | History_cleared
+        (** The history before the rows was summarized, and the history was
+            cleared before the handoff list was read. *)
+
+  (** Whether an overflow retry counts its run compacted and compacts nothing
+      more in it: when the start's list is compacted as far as it goes, and
+      after a clear, since the run's history is from before the clear. *)
+  val run_compacted : start_compaction -> bool
+
+  (** The step after the summary of the history before the rows committed:
+      compact the handoff list read after that commit ([handoff]), or keep
+      every row and log why when it cannot be read or its compaction fails.
+      [History_cleared] when the summary does not apply. *)
+  val compact_rows_after_summary
+    :  ?keep_ratio:float
+    -> keepers_dir:string
+    -> keeper_id:string
+    -> trigger:Keeper_compaction.compaction_trigger
+    -> ( Keeper_canonical_turn_store.handoff_context
+         , Keeper_canonical_turn_store.store_error )
+         result
+    -> start_compaction
+
+  val compact_for_rollover
+    :  keepers_dir:string
+    -> keeper_id:string
+    -> used_tokens:int
+    -> limit_tokens:int
+    -> initial_messages:Agent_core.Types.message list
+    -> unit
 
   val prefer_handoff_for_start
     :  planned_fresh_rollover:bool

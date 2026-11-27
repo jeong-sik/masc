@@ -289,10 +289,15 @@ let extend_tools ?order t added =
                   t.options.deferred_tools))
           fresh
       in
-      (match fresh_eager with
-       | [] -> ()
-       | _ :: _ ->
-         t.eager_tools <- Tool_set.merge t.eager_tools (Tool_set.of_list fresh_eager));
+      (match fresh_eager, order with
+       | [], (Some _ | None) -> ()
+       | _ :: _, None ->
+         t.eager_tools <- Tool_set.merge t.eager_tools (Tool_set.of_list fresh_eager)
+       | _ :: _, Some order ->
+         let fresh_eager = Tool_set.to_list (Tool_set.of_list fresh_eager) in
+         t.eager_tools <-
+           Tool_set.of_list
+             (insert_ranked ~order (Tool_set.to_list t.eager_tools) fresh_eager));
       match fresh, order with
       | [], (Some _ | None) -> ()
       | _ :: _, None -> t.tools <- Tool_set.merge t.tools (Tool_set.of_list fresh)

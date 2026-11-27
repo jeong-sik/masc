@@ -45,6 +45,57 @@ let file_object_of_yojson (json : Yojson.Safe.t) : (file_object, string) result 
   | _ -> Error "file object is not a JSON object"
 ;;
 
+let string_contains ~haystack ~needle =
+  let hlen = String.length haystack in
+  let nlen = String.length needle in
+  if nlen = 0 then true
+  else if nlen > hlen then false
+  else
+    let rec loop i =
+      if i + nlen > hlen then false
+      else if String.sub haystack i nlen = needle then true
+      else loop (i + 1)
+    in
+    loop 0
+;;
+
+let is_ascii_ctl c =
+  let code = Char.code c in
+  code < 0x20 || code = 0x7f
+;;
+
+let validate_multipart_inputs ~boundary ~filename ~purpose ~content =
+  let bad_boundary_char c =
+    is_ascii_ctl c || c = ' ' || c = '\t' || c = '"' || c = ';' || c = '\\'
+  in
+  let bad_filename_char c =
+    is_ascii_ctl c || c = '"' || c = '\\'
+  in
+  let delimiter = "--" ^ boundary in
+  if String.length boundary = 0 || String.length boundary > 70
+     || String.exists bad_boundary_char boundary
+  then Error "files upload: invalid multipart boundary"
+  else if String.exists bad_filename_char filename
+  then Error "files upload: invalid filename for multipart header"
+  else if string_contains ~haystack:content ~needle:delimiter
+          || string_contains ~haystack:purpose ~needle:delimiter
+  then Error "files upload: payload collides with multipart boundary"
+  else Ok ()
+;;
+
+let validate_file_id file_id =
+  let bad_char c =
+    is_ascii_ctl c || c = ' ' || c = '\t' || c = '/' || c = '\\'
+    || c = '?' || c = '#' || c = '%'
+  in
+  if String.length file_id = 0
+     || String.equal file_id "."
+     || String.equal file_id ".."
+     || String.exists bad_char file_id
+  then Error "files delete: invalid file_id"
+  else Ok ()
+;;
+
 (* multipart/form-data encoder. The boundary is caller-supplied so tests can
    pin the exact bytes; production callers mint one from the random id module.
    Two form fields per the API: `file` (filename + bytes) and `purpose`
@@ -52,6 +103,9 @@ let file_object_of_yojson (json : Yojson.Safe.t) : (file_object, string) result 
 let multipart_upload_body ~(boundary : string) ~(filename : string)
     ~(purpose : string) ~(content : string)
   : string =
+  (match validate_multipart_inputs ~boundary ~filename ~purpose ~content with
+   | Ok () -> ()
+   | Error detail -> invalid_arg detail);
   let dash = "--" in
   let crlf = "\r\n" in
   String.concat ""
@@ -98,20 +152,23 @@ let parse_body_file_object (body : string) : (file_object, string) result =
 
 let upload ~sw ~net ~(base_url : string) ~(api_key : string) ~boundary ~filename ~purpose ~content ()
   : (file_object, string) result =
-  let body = multipart_upload_body ~boundary ~filename ~purpose ~content in
-  match
-    Http_client.post_sync ~sw ~net
-      ~url:(normalize_base_url base_url ^ "/files")
-      ~headers:
-        (auth_headers ~api_key
-        @ [ ("Content-Type", content_type_with_boundary ~boundary) ])
-      ~body ()
-  with
-  | Error _ -> Error "files upload: HTTP dispatch failed"
-  | Ok response -> (
-    match response.Http_client.status with
-    | 200 -> parse_body_file_object response.body
-    | code -> Error (Printf.sprintf "files upload: HTTP %d" code))
+  match validate_multipart_inputs ~boundary ~filename ~purpose ~content with
+  | Error _ as err -> err
+  | Ok () ->
+    let body = multipart_upload_body ~boundary ~filename ~purpose ~content in
+    match
+      Http_client.post_sync ~sw ~net
+        ~url:(normalize_base_url base_url ^ "/files")
+        ~headers:
+          (auth_headers ~api_key
+          @ [ ("Content-Type", content_type_with_boundary ~boundary) ])
+        ~body ()
+    with
+    | Error _ -> Error "files upload: HTTP dispatch failed"
+    | Ok response -> (
+      match response.Http_client.status with
+      | 200 -> parse_body_file_object response.body
+      | code -> Error (Printf.sprintf "files upload: HTTP %d" code))
 ;;
 
 let list_files ~sw ~net ~(base_url : string) ~(api_key : string) ()
@@ -154,24 +211,27 @@ let list_files ~sw ~net ~(base_url : string) ~(api_key : string) ()
 
 let delete ~sw ~net ~(base_url : string) ~(api_key : string) ~(file_id : string) ()
   : (bool, string) result =
-  match
-    Http_client.delete_sync ~sw ~net
-      ~url:(normalize_base_url base_url ^ "/files/" ^ file_id)
-      ~headers:(auth_headers ~api_key)
-      ()
-  with
-  | Error _ -> Error "files delete: HTTP dispatch failed"
-  | Ok response -> (
-    (* The API answers {"id":…,"object":"file","deleted":true}; the boolean is
-       the whole fact, and a non-200 is the caller's error. *)
-    match response.Http_client.status with
-    | 200 ->
-      (match Json_util.from_string_bounded_exn response.body with
-       | exception Yojson.Json_error _ -> Error "files delete: reply is not JSON"
-       | `Assoc fields -> (
-         match List.assoc_opt "deleted" fields with
-         | Some (`Bool true) -> Ok true
-         | _ -> Error "files delete: reply did not confirm deletion")
-       | _ -> Error "files delete: reply is not a JSON object")
-    | code -> Error (Printf.sprintf "files delete: HTTP %d" code))
+  match validate_file_id file_id with
+  | Error _ as err -> err
+  | Ok () ->
+    match
+      Http_client.delete_sync ~sw ~net
+        ~url:(normalize_base_url base_url ^ "/files/" ^ file_id)
+        ~headers:(auth_headers ~api_key)
+        ()
+    with
+    | Error _ -> Error "files delete: HTTP dispatch failed"
+    | Ok response -> (
+      (* The API answers {"id":…,"object":"file","deleted":true}; the boolean is
+         the whole fact, and a non-200 is the caller's error. *)
+      match response.Http_client.status with
+      | 200 ->
+        (match Json_util.from_string_bounded_exn response.body with
+         | exception Yojson.Json_error _ -> Error "files delete: reply is not JSON"
+         | `Assoc fields -> (
+           match List.assoc_opt "deleted" fields with
+           | Some (`Bool true) -> Ok true
+           | _ -> Error "files delete: reply did not confirm deletion")
+         | _ -> Error "files delete: reply is not a JSON object")
+      | code -> Error (Printf.sprintf "files delete: HTTP %d" code))
 ;;

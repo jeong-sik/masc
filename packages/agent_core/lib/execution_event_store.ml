@@ -558,6 +558,12 @@ let acquire_writer_lock ~sw ~create dir =
        with_io "open writer lock" (fun () ->
          Eio.Path.open_out ~sw ~create (lock_path dir))
      with
+     | exception exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       Eio.Cancel.protect (fun () ->
+         let (_ : bool) = Eio.Switch.try_remove_hook claim_hook in
+         release_writer_path claim);
+       Printexc.raise_with_backtrace exn backtrace
      | Error error ->
        let (_ : bool) = Eio.Switch.try_remove_hook claim_hook in
        release_writer_path claim;
@@ -583,7 +589,26 @@ let acquire_writer_lock ~sw ~create dir =
            with
            | Unix.Unix_error ((Unix.EACCES | Unix.EAGAIN), _, _) ->
              fail Writer_already_active
-           | exn -> fail (io_error "lock writer" exn))))
+           | exn ->
+             let backtrace = Printexc.get_raw_backtrace () in
+             (match io_error "lock writer" exn with
+              | error -> fail error
+              | exception reserved ->
+                (match
+                   Eio.Cancel.protect (fun () ->
+                     release_acquired_resources file claim claim_hook)
+                 with
+                 | Ok () -> Printexc.raise_with_backtrace reserved backtrace
+                 | Error cleanup ->
+                   Printexc.raise_with_backtrace
+                     (Cleanup_failed_after_exception (reserved, cleanup))
+                     backtrace
+                 | exception cleanup_exn ->
+                   let cleanup_backtrace = Printexc.get_raw_backtrace () in
+                   Printexc.raise_with_backtrace
+                     (Cleanup_raised_after_exception
+                        ((reserved, backtrace), (cleanup_exn, cleanup_backtrace)))
+                     backtrace)))))
 ;;
 
 type 'a writer_observation =

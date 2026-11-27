@@ -498,9 +498,11 @@ let responses_sse_to_events (state : openai_stream_state) event_type data_str
          (match responses_member_string_opt "delta" json with
           | Some delta when delta <> "" ->
             let output_index = responses_member_int_default "output_index" json in
-            let content_index = responses_member_int_default "content_index" json in
-            let index = responses_ensure_text_block state emit ~output_index ~content_index in
-            emit (ContentBlockDelta { index; delta = TextDelta delta })
+            if responses_accept_output_identity state emit output_index
+                 (responses_member_string_opt "item_id" json) then (
+              let content_index = responses_member_int_default "content_index" json in
+              let index = responses_ensure_text_block state emit ~output_index ~content_index in
+              emit (ContentBlockDelta { index; delta = TextDelta delta }))
           | Some _ | None -> ())
        | "response.refusal.delta" | "response.refusal.done" ->
          state.refusal_seen <- true
@@ -508,9 +510,11 @@ let responses_sse_to_events (state : openai_stream_state) event_type data_str
          (match responses_member_string_opt "text" json with
           | Some text ->
             let output_index=responses_member_int_default "output_index" json in
-            let content_index=responses_member_int_default "content_index" json in
-            let index=responses_ensure_text_block state emit ~output_index ~content_index in
-            emit(ContentBlockDelta {index;delta=TextSnapshot text})
+            if responses_accept_output_identity state emit output_index
+                 (responses_member_string_opt "item_id" json) then (
+              let content_index=responses_member_int_default "content_index" json in
+              let index=responses_ensure_text_block state emit ~output_index ~content_index in
+              emit(ContentBlockDelta {index;delta=TextSnapshot text}))
           | None -> ())
        | ("response.reasoning_summary_text.delta" | "response.reasoning_text.delta"
          | "response.reasoning_summary_text.done" | "response.reasoning_text.done") as event ->
@@ -539,18 +543,20 @@ let responses_sse_to_events (state : openai_stream_state) event_type data_str
        | "response.output_item.added" ->
          let output_index = responses_member_int_default "output_index" json in
          let item = json |> member "item" in
-         (match responses_member_string_opt "type" item with
-          | Some ("function_call" | "custom_tool_call") ->
-            let (_ : int option) =
-              responses_ensure_tool_block
-                state
-                emit
-                ~output_index
-                ~tool_id:(responses_tool_id_of_item item)
-                ~tool_name:(responses_member_string_opt "name" item)
-            in
-            ()
-          | Some _ | None -> ())
+         if responses_accept_output_identity state emit output_index
+              (responses_member_string_opt "id" item) then
+           (match responses_member_string_opt "type" item with
+            | Some ("function_call" | "custom_tool_call") ->
+              let (_ : int option) =
+                responses_ensure_tool_block
+                  state
+                  emit
+                  ~output_index
+                  ~tool_id:(responses_tool_id_of_item item)
+                  ~tool_name:(responses_member_string_opt "name" item)
+              in
+              ()
+            | Some _ | None -> ())
        | "response.output_item.done" ->
          let output_index=responses_member_int_default "output_index" json in
          responses_capture_output_item state emit ~output_index (json |> member "item")
@@ -558,21 +564,23 @@ let responses_sse_to_events (state : openai_stream_state) event_type data_str
          (match responses_member_string_opt "delta" json with
           | Some delta when delta <> "" ->
             let output_index = responses_member_int_default "output_index" json in
-            let index =
-              responses_ensure_tool_block
-                state
-                emit
-                ~output_index
-                  (* [call_id] is the function-call identity on every official
-                   arguments event. [item_id] identifies only the output item
-                   and is never substituted for it. *)
-                ~tool_id:(responses_member_string_opt "call_id" json)
-                ~tool_name:None
-            in
-            (match index with
-             | Some index ->
-               emit (ContentBlockDelta { index; delta = InputJsonDelta delta })
-             | None -> ())
+            if responses_accept_output_identity state emit output_index
+                 (responses_member_string_opt "item_id" json) then (
+              let index =
+                responses_ensure_tool_block
+                  state
+                  emit
+                  ~output_index
+                    (* [call_id] is the function-call identity on every official
+                     arguments event. [item_id] identifies only the output item
+                     and is never substituted for it. *)
+                  ~tool_id:(responses_member_string_opt "call_id" json)
+                  ~tool_name:None
+              in
+              (match index with
+               | Some index ->
+                 emit (ContentBlockDelta { index; delta = InputJsonDelta delta })
+               | None -> ()))
           | Some _ | None -> ())
        | "response.completed" | "response.incomplete" ->
          let response = json |> member "response" in

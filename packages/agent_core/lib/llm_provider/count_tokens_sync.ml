@@ -44,6 +44,13 @@ let post_count_request
         ( Input_token_count.Transport (Http_client.AcceptRejected { reason })
         , Measurement_before_dispatch ))
   in
+  let filtered_headers =
+    List.filter
+      (fun (key, _) ->
+         let lower = String.lowercase_ascii (String.trim key) in
+         not (String.equal lower "content-type" || String.equal lower "content-length"))
+      (headers @ auth_headers)
+  in
   match
     Http_client.post_sync_once_with_evidence
       ?cache:connection_cache
@@ -52,8 +59,7 @@ let post_count_request
       ~net
       ~url
       ~headers:
-        (headers
-         @ auth_headers
+        (filtered_headers
          @ [ "Content-Type", "application/json"
            ; "Content-Length", string_of_int (String.length body)
            ])

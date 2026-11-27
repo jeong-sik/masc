@@ -182,6 +182,14 @@ let inst_with_lock inst f =
     Fun.protect f ~finally:(fun () -> Mutex.unlock mu)
 ;;
 
+let inst_with_lock_cancel_protected inst f =
+  match inst.mu with
+  | Eio_mu mu -> Eio.Cancel.protect (fun () -> Eio.Mutex.use_rw ~protect:true mu f)
+  | Stdlib_mu mu ->
+    Mutex.lock mu;
+    Fun.protect f ~finally:(fun () -> Mutex.unlock mu)
+;;
+
 (** Return the fiber-local span-stack ref cell, if we are running inside
     an Eio fiber that has the instance's [fiber_key] bound. *)
 let get_fiber_stack inst : span_cell list ref option =
@@ -316,7 +324,7 @@ let inst_end_span inst (s : span) ~ok =
            !stack_ref;
       !target
     | None ->
-      inst_with_lock inst
+      inst_with_lock_cancel_protected inst
       @@ fun () ->
       let target = ref None in
       inst.current_spans
@@ -335,7 +343,7 @@ let inst_end_span inst (s : span) ~ok =
   in
   match target_opt with
   | Some completed ->
-    inst_with_lock inst (fun () ->
+    inst_with_lock_cancel_protected inst (fun () ->
       inst.completed_spans
       <- push_bounded ~limit:max_completed_spans completed inst.completed_spans)
   | None -> ()
@@ -457,8 +465,9 @@ let run_span_scope ~start_span ~end_span ~on_entropy_unavailable f =
        end_span span ~ok:true;
        result
      | exception exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
        end_span span ~ok:false;
-       raise exn)
+       Printexc.raise_with_backtrace exn backtrace)
   | exception Entropy_unavailable detail ->
     on_entropy_unavailable detail;
     f ()

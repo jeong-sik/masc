@@ -132,10 +132,10 @@ let write_file path content =
 let append_file path content =
   try
     let* () = ensure_dir_recursive (Filename.dirname path) in
-    let oc = open_out_gen [ Open_append; Open_creat; Open_binary ] 0o600 path in
-    Fun.protect
-      ~finally:(fun () -> close_out_noerr oc)
-      (fun () -> output_string oc content);
+    Out_channel.with_open_gen [ Open_append; Open_creat; Open_binary ] 0o600 path
+      (fun oc ->
+         Out_channel.output_string oc content;
+         Out_channel.flush oc);
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

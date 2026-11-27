@@ -735,7 +735,7 @@ let add_cache_control_to_last_non_deferred cache_control tools =
         "Backend_anthropic.build_request: at least one tool must have defer_loading=false"
     | tool :: rest ->
       if tool_is_deferred tool
-      then visit rest
+      then tool :: visit rest
       else
         (match tool with
          | `Assoc fields -> `Assoc (("cache_control", cache_control) :: fields) :: rest
@@ -842,16 +842,41 @@ let observe_spent_context_lowered ~stage ~before ~after =
    fold itself spends — an assistant removal that leaves a row unanswerable —
    lowers away after the fold, in the wrapper below and at the serializer's
    own boundary, so every reader sees the transcript the wire sends (#49549). *)
+let drop_expired_turn_scoped_contexts_with_indices policy projected_messages =
+  let tagged =
+    List.mapi
+      (fun index (msg : Types.message) ->
+         { msg with
+           metadata = ("__masc_projected_index", `Int index) :: msg.metadata
+         })
+      projected_messages
+  in
+  let lowered_tagged =
+    Message_origin_lowering.drop_expired_turn_scoped_contexts policy tagged
+  in
+  let projected_arr = Array.of_list projected_messages in
+  let indices =
+    List.map
+      (fun (msg : Types.message) ->
+         match msg.metadata with
+         | ("__masc_projected_index", `Int idx) :: _ -> idx
+         | _ -> invalid_arg "Backend_anthropic: missing projected index tag")
+      lowered_tagged
+  in
+  List.map (Array.get projected_arr) indices, Array.of_list indices
+;;
+
 let merged_prefix_history ~policy ~tools (config : Provider_config.t) projected_messages =
   let projected_messages = project_tool_references ~config ~tools projected_messages in
-  let lowered =
-    Message_origin_lowering.drop_expired_turn_scoped_contexts policy projected_messages
+  let lowered, lowered_to_projected =
+    drop_expired_turn_scoped_contexts_with_indices policy projected_messages
   in
   observe_spent_context_lowered ~stage:"pre_merge"
     ~before:(List.length projected_messages) ~after:(List.length lowered);
-  let projected_messages = lowered in
   let merged =
-    Api_common.merge_tool_result_followup_user_messages_with_source_indices projected_messages
+    Api_common.merge_tool_result_followup_user_messages_with_source_indices lowered
+    |> List.map (fun (msg, sources) ->
+      msg, List.map (Array.get lowered_to_projected) sources)
   in
   let messages = List.map fst merged in
   let verdict =

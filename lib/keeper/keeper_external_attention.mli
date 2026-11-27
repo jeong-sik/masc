@@ -211,12 +211,6 @@ val recorded_items_by_event_ids :
     Connector_attention intake (N companions must not cost N full-file
     reads). *)
 
-val load_recent_evidence_events :
-  base_path:string -> keeper_name:string -> event list
-(** Read a bounded recent tail sized for prompt evidence rather than connector
-    redelivery. The first and last partial lines are excluded when the file is
-    larger than the internal evidence window. This is not a whole-history API. *)
-
 val recent_recorded_item :
   base_path:string -> keeper_name:string -> event_id:string -> (item option, string) result
 (** Read within the same byte window as ingress duplicate detection. An item

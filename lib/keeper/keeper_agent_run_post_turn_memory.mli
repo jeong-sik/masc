@@ -26,9 +26,8 @@ val run :
 (** Run the full post-turn memory series.
 
     [post_turn_t0] is the timestamp (from [Time_compat.now ()]) taken
-    immediately before this function is called. It fences asynchronous
-    counterpart evidence so a later turn is not admitted into this Librarian
-    unit, and starts the [post_turn_ms] metric written to the decision log.
+    immediately before this function is called. It starts the
+    [post_turn_ms] metric written to the decision log.
 
     [inference_telemetry] is [result.response.telemetry] from the AGENT_CORE
     result; it is optional because some providers do not emit telemetry.
@@ -37,17 +36,3 @@ val run :
     discards any remembered direct closure: an Agent-Core turn is read from
     its checkpoint, an official-client turn from the history fragments its
     [turn_ref] names. Disabled or invalid configuration wakes nothing. *)
-
-module For_testing : sig
-  val counterpart_observations_before :
-    base_dir:string ->
-    keeper_name:string ->
-    before:float ->
-    Keeper_counterpart_observation.t list
-
-  val counterpart_observations_before_offloaded :
-    base_dir:string ->
-    keeper_name:string ->
-    before:float ->
-    Keeper_counterpart_observation.t list
-end

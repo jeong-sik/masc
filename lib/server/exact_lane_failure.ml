@@ -216,6 +216,7 @@ let cli_failure = function
        spawn_refusal refusal
      | Fusion_official_client.Acp_failure
          ( Runtime_acp_client.Timeout _
+         | Runtime_acp_client.Preparation_failed _
          | Runtime_acp_client.Protocol_error _
          | Runtime_acp_client.Rpc_error _
          | Runtime_acp_client.Host_turn_failed _

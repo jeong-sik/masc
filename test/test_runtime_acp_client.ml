@@ -785,10 +785,11 @@ for line in sys.stdin:
 ;;
 
 (* A plugin list the host cannot read leaves the operator's plugins unknown,
-   so the host is not started at all. A listing command that ran and failed
-   fails the same way next time, so it is a [Protocol_error] naming the
-   command, not an [Invalid_config] a Keeper retries every turn; one that
-   could not start is the refusal the host spawn would have met. *)
+   so the host is not started at all. A listing command that ran and failed is
+   a [Preparation_failed] naming the command. The Keeper settles it before
+   dispatch, keeping the session it was continuing, and lets the candidate
+   walk move on. A listing command that could not start is the refusal the
+   host spawn would have met. *)
 let test_muse_start_refuses_when_the_plugin_list_fails () =
   let cwd = Filename.temp_dir "muse-plugin-list-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree cwd) (fun () ->
@@ -837,10 +838,18 @@ let test_muse_start_refuses_when_the_plugin_list_fails () =
         Ok ()
       | Error err -> Error err
     in
-    let refused_at label cli_path stage =
+    let refused_at label cli_path command =
       match start cli_path with
-      | Error (Runtime_acp_client.Protocol_error { stage = refused; _ }) ->
-        check string (label ^ ": the error names the command") stage refused
+      | Error (Runtime_acp_client.Preparation_failed { argv; _ } as err) ->
+        check string (label ^ ": the error names the command") command
+          (String.concat " " argv);
+        let module K = Keeper_acp_runtime.For_testing in
+        (match K.recovery_failure_of_acp_error err with
+         | Keeper_official_client_session_store.Pre_dispatch_failed -> ()
+         | _ -> fail (label ^ ": the session does not settle before dispatch"));
+        (match K.acp_error_to_core_error err with
+         | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) -> ()
+         | core -> fail (label ^ ": the candidate walk stops at " ^ Agent_core.Error.to_string core))
       | Ok () -> fail (label ^ ": the host started")
       | Error err -> fail (label ^ ": " ^ Runtime_acp_client.error_to_string err)
     in
@@ -1947,6 +1956,34 @@ let prepare_tool_choice ~tools ~turn_count choice =
   | Error error -> fail (Agent_core.Error.to_string error)
 ;;
 
+(* A Kimi Code session keeps the tools recorded when it was created, so a
+   [none] session made before the MASC-only profile is replaced once rather
+   than loaded with its old tools. Only the Kimi [none] digest carries the
+   profile. *)
+let test_kimi_none_session_digest_carries_the_profile () =
+  let module Acp = Keeper_acp_runtime.For_testing in
+  let tool = Agent_core.Tool.create ~name:"status" ~description:"Read status" ~parameters:[]
+      (fun _ -> fail "the digest fixture must never call a tool") in
+  let claim_plan : Keeper_official_client_session_store.claim_plan =
+    { previous_settlement = None; turn_count = 1; required_tool_surface_sha256 = None } in
+  let prepared = prepare_tool_choice ~tools:[ tool ] ~turn_count:1 None in
+  let digest driver native_posture =
+    match Acp.reconcile_prepared_tools ~driver ~native_posture ~claim_plan prepared with
+    | Ok (_, digest) -> digest
+    | Error error -> fail (Agent_core.Error.to_string error)
+  in
+  let open Runtime_native_tools in
+  check bool "a Kimi none session differs from one made without the profile" false
+    (String.equal (digest Runtime_acp_client.Kimi_code Native_none)
+       (digest Runtime_acp_client.Muse_code Native_none));
+  check string "Kimi read gets no profile, so its digest is the plain one"
+    (digest Runtime_acp_client.Muse_code Native_read)
+    (digest Runtime_acp_client.Kimi_code Native_read);
+  check string "the same profile gives the same digest"
+    (digest Runtime_acp_client.Kimi_code Native_none)
+    (digest Runtime_acp_client.Kimi_code Native_none)
+;;
+
 let test_hook_selected_surface_pins_the_session_and_bridge () =
   let module Acp = Keeper_acp_runtime.For_testing in
   let module Store = Keeper_official_client_session_store in
@@ -1962,7 +1999,7 @@ let test_hook_selected_surface_pins_the_session_and_bridge () =
       | Some (digest, count) -> Some {Store.session_id = "session"; turn_id = "turn"}, count + 1, Some digest in
     let claim_plan : Store.claim_plan = { previous_settlement; turn_count; required_tool_surface_sha256 } in
     let prepared = prepare_tool_choice ~tools:declared ~turn_count choice in
-    let plan, digest = match Acp.reconcile_prepared_tools
+    let plan, digest = match Acp.reconcile_prepared_tools ~driver:Runtime_acp_client.Muse_code
         ~native_posture:Runtime_native_tools.Native_none ~claim_plan prepared with
       | Ok surface -> surface
       | Error error -> fail (Agent_core.Error.to_string error) in
@@ -1973,7 +2010,7 @@ let test_hook_selected_surface_pins_the_session_and_bridge () =
         {client_kind=Acp; runtime_id="muse.fixture"; session_id="session"; turn_id="turn";
          tool_surface_sha256=old_digest; frame=Keeper_repetition_snapshot.empty} in
       check bool "a current Gate accepts exactly the matching prepared catalog" reuse
-        (Result.is_ok (Acp.reconcile_prepared_tools ~continuation
+        (Result.is_ok (Acp.reconcile_prepared_tools ~continuation ~driver:Runtime_acp_client.Muse_code
           ~native_posture:Runtime_native_tools.Native_none ~claim_plan prepared))) previous;
     let key : Acp.pool_key =
       { keeper_name = "surface"; runtime_id = "muse.fixture"; tool_surface_sha256 = digest;
@@ -2025,7 +2062,7 @@ let test_previous_acp_tool_surface () =
         |> Result.map_error Store.claim_error_to_string |> require in
     let prepared = prepare_tool_choice ~tools ~turn_count:plan.turn_count None in
     let reconcile ?continuation () = Keeper_acp_runtime.For_testing.reconcile_prepared_tools
-        ?continuation ~native_posture ~claim_plan:plan prepared in
+        ?continuation ~driver:Runtime_acp_client.Muse_code ~native_posture ~claim_plan:plan prepared in
     let ordinary, digest = reconcile () |> Result.map_error Agent_core.Error.to_string |> require in
     check bool "the old digest proves this effective catalog" resumable (String.equal old_digest digest);
     check bool "ordinary cold resume uses a proven catalog" resumable (Option.is_some ordinary.previous_settlement);
@@ -6817,6 +6854,8 @@ let () =
         ; test_case "muse argv switches each capability off once" `Quick
             test_muse_argv_switches_each_capability_off_once
         ; test_case "kimi masc-only profile" `Quick test_kimi_masc_only_profile
+        ; test_case "a kimi none session digest carries the profile" `Quick
+            test_kimi_none_session_digest_carries_the_profile
         ; test_case "kimi none start writes the masc-only profile" `Quick
             test_kimi_none_start_writes_the_masc_only_profile
         ; test_case "acp read and full run in the Keeper's private folder" `Quick

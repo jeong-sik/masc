@@ -29,6 +29,8 @@ let make_directory path =
   | exception Sys_error detail -> Error detail
 ;;
 
+let surface_revision = masc_only ~mcp_server_name:None
+
 let write_masc_only ~cwd ~mcp_server_name =
   let directories = [ Filename.concat cwd ".kimi-code"; Filename.concat cwd agents_directory ] in
   let rec make = function

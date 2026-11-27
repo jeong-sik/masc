@@ -22,6 +22,11 @@ val masc_only : mcp_server_name:string option -> string
     host's default system prompt ([${base_prompt}]). With no server it allows
     no tool. *)
 
+val surface_revision : string
+(** {!masc_only} without a server name. A Keeper session's tool surface digest
+    carries it, so a session made with another profile is replaced instead of
+    loaded with the tools it recorded. *)
+
 val write_masc_only : cwd:string -> mcp_server_name:string option -> (unit, string) result
 (** Write {!masc_only} at {!file_relative_path} under [cwd]. A [none] host's
     [cwd] is an empty folder MASC made for it

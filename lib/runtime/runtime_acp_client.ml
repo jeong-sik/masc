@@ -943,6 +943,10 @@ let activity_trace_to_string { last; age_s; masc_tools_in_flight } =
 type error =
   | Invalid_config of string
   | Spawn_refused of Process_eio.spawn_refusal
+  | Preparation_failed of
+      { argv : string list
+      ; detail : string
+      }
   | Protocol_error of
       { stage : string
       ; detail : string
@@ -1015,6 +1019,11 @@ let error_to_string = function
   | Invalid_config detail -> "invalid ACP config: " ^ detail
   | Spawn_refused refusal ->
     "failed to start ACP client: " ^ Process_eio.spawn_refusal_to_string refusal
+  | Preparation_failed { argv; detail } ->
+    Printf.sprintf
+      "ACP host not started; its preparation failed (%s): %s"
+      (String.concat " " argv)
+      detail
   | Protocol_error { stage; detail } ->
     Printf.sprintf "ACP protocol error (%s): %s" stage detail
   | Rpc_error { method_name; code; message; data; refusal = _ } ->
@@ -3179,8 +3188,8 @@ let rpc_call_with_wait
       (match err with
        | Process_exited { detail; stderr_tail; last_activity = _ } ->
          ended_without_answer ~detail ~stderr_tail
-       | Invalid_config _ | Spawn_refused _ | Protocol_error _ | Rpc_error _ | Timeout _
-       | Host_turn_failed _ | Client_closed -> Error err)
+       | Invalid_config _ | Spawn_refused _ | Preparation_failed _ | Protocol_error _
+       | Rpc_error _ | Timeout _ | Host_turn_failed _ | Client_closed -> Error err)
     | Ok () ->
       let remove_pending () =
         with_state_lock t (fun () -> Hashtbl.remove t.pending id)
@@ -3562,9 +3571,9 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
        starting anyway would load what it leaves out.
        A listing command that could not start is the same refusal the host
        spawn would meet. One that ran and failed, or printed what cannot be
-       read, fails the same way on the next attempt, so it is a
-       [Protocol_error] rather than an [Invalid_config] a Keeper retries
-       every turn. A Kimi profile that could not be written is an
+       read, is a [Preparation_failed]: the host never started and nothing
+       reached the vendor, and a timeout or a locked plugin store may clear by
+       the next start. A Kimi profile that could not be written is an
        [Invalid_config]: the next spawn gets a new empty folder. *)
     let* muse_plugin_capabilities =
       match config.driver with
@@ -3581,10 +3590,8 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
           match failure with
           | Runtime_muse_plugins.Did_not_start refusal -> Spawn_refused refusal
           | Runtime_muse_plugins.Command_failed _ | Runtime_muse_plugins.Unreadable_output _ ->
-            Protocol_error
-              { stage = String.concat " " argv
-              ; detail = Runtime_muse_plugins.failure_to_string failure
-              })
+            Preparation_failed
+              { argv; detail = Runtime_muse_plugins.failure_to_string failure })
       | Antigravity | Kimi_code | Mistral_vibe -> Ok []
     in
     let* () =

@@ -293,6 +293,7 @@ let panel_failure ~runtime_id = function
   | Acp_failure
       (( Runtime_acp_client.Invalid_config _
        | Runtime_acp_client.Spawn_refused _
+       | Runtime_acp_client.Preparation_failed _
        | Runtime_acp_client.Protocol_error _
        | Runtime_acp_client.Rpc_error _
        | Runtime_acp_client.Host_turn_failed _
@@ -541,6 +542,7 @@ let acp_standing_of_error ~now :
   | Runtime_acp_client.Host_turn_failed { refusal; _ } -> standing_of_signal_refusal ~now refusal
   | Runtime_acp_client.Invalid_config _
   | Runtime_acp_client.Spawn_refused _
+  | Runtime_acp_client.Preparation_failed _
   | Runtime_acp_client.Protocol_error _
   | Runtime_acp_client.Timeout _
   | Runtime_acp_client.Process_exited _

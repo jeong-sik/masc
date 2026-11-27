@@ -556,6 +556,7 @@ let official_failure_can_advance : Fusion_official_client.failure -> bool = func
   | Acp_failure
       ( Runtime_acp_client.Spawn_refused _
       | Runtime_acp_client.Invalid_config _
+      | Runtime_acp_client.Preparation_failed _
       | Runtime_acp_client.Protocol_error _
       | Runtime_acp_client.Timeout _
       | Runtime_acp_client.Process_exited _
@@ -642,8 +643,10 @@ let official_failure_effect : Fusion_official_client.failure -> Tool_result.fail
       | Quota_blocked { tool_effect_attempted = false; response_emitted = false; _ }
       | Context_window_exceeded { tool_effect_attempted = false; response_emitted = false; _ }
       | Turn_failed_with_observation { tool_effect_attempted = false; response_emitted = false; _ }) -> Proven_pre_effect
-  | Acp_failure (Runtime_acp_client.Invalid_config _ | Runtime_acp_client.Spawn_refused _) ->
-    Proven_pre_effect
+  | Acp_failure
+      ( Runtime_acp_client.Invalid_config _
+      | Runtime_acp_client.Spawn_refused _
+      | Runtime_acp_client.Preparation_failed _ ) -> Proven_pre_effect
   | Missing_reply | Antigravity_failure _
   | Acp_failure
       ( Runtime_acp_client.Protocol_error _
@@ -1083,6 +1086,7 @@ let execution_of_vision_outcome = function
       | Missing_reply | Setup_failure _ | Antigravity_failure _
       | Acp_failure
           ( Runtime_acp_client.Invalid_config _ | Runtime_acp_client.Spawn_refused _
+          | Runtime_acp_client.Preparation_failed _
           | Runtime_acp_client.Protocol_error _ | Runtime_acp_client.Rpc_error _
           | Runtime_acp_client.Host_turn_failed _ | Runtime_acp_client.Process_exited _
           | Runtime_acp_client.Client_closed )

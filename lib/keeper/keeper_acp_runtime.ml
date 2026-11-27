@@ -206,6 +206,12 @@ let acp_error_to_core_error = function
          ; detail =
              "ACP client spawn refused: " ^ Process_eio.spawn_refusal_to_string refusal
          })
+  (* Only the host's local preparation failed and nothing reached the
+     vendor, so the candidate walk may try the next runtime. *)
+  | Acp.Preparation_failed _ as failed ->
+    Agent_core.Error.Provider
+      (Llm_provider.Error.ProviderUnavailable
+         { provider = "acp"; detail = Acp.error_to_string failed })
   | Acp.Protocol_error { stage; detail } ->
     Agent_core.Error.Provider
       (Llm_provider.Error.ParseError
@@ -271,6 +277,7 @@ let should_evict_persistent_child_on_error = function
      | None -> true)
   | Acp.Invalid_config _
   | Acp.Spawn_refused _
+  | Acp.Preparation_failed _
   | Acp.Protocol_error _
   | Acp.Timeout _
   | Acp.Process_exited _
@@ -280,6 +287,7 @@ let should_evict_persistent_child_on_error = function
 let recovery_failure_of_acp_error = function
   | Acp.Invalid_config _ -> Session_store.Pre_dispatch_failed
   | Acp.Spawn_refused refusal -> Session_store.recovery_failure_of_spawn_refusal refusal
+  | Acp.Preparation_failed _ -> Session_store.Pre_dispatch_failed
   | Acp.Protocol_error _ -> Session_store.Protocol_failed
   | Acp.Rpc_error { refusal = Some (Llm_provider.Retry.Signal_context_overflow _); _ }
   | Acp.Host_turn_failed
@@ -388,6 +396,7 @@ let classify_prompt_error ~is_gate_continuation ~activity_observed = function
       ~before_activity_error:(acp_error_to_core_error failed)
   | ( Acp.Invalid_config _
     | Acp.Spawn_refused _
+    | Acp.Preparation_failed _
     | Acp.Protocol_error _
     | Acp.Rpc_error
         { refusal =
@@ -421,8 +430,11 @@ let classify_prompt_error ~is_gate_continuation ~activity_observed = function
 
 let should_evict_on_session_setup_error = function
   | Acp.Timeout _ | Acp.Protocol_error _ | Acp.Process_exited _ | Acp.Client_closed -> true
-  | Acp.Invalid_config _ | Acp.Spawn_refused _ | Acp.Rpc_error _ | Acp.Host_turn_failed _ ->
-    false
+  | Acp.Invalid_config _
+  | Acp.Spawn_refused _
+  | Acp.Preparation_failed _
+  | Acp.Rpc_error _
+  | Acp.Host_turn_failed _ -> false
 ;;
 
 let api_usage_of_acp_usage ~driver (u : Acp.usage) : Agent_core.Types.api_usage =
@@ -2174,10 +2186,24 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id 
 
 (* ── Main Keeper ACP turn execution ───────────────────────────────────────── *)
 
-let reconcile_prepared_tools ?account_home ?continuation ~native_posture ~claim_plan
+(* A profile masc writes for the host is part of the session's tool surface:
+   a Kimi Code session keeps the tools recorded when it was created, even when
+   it is loaded with another profile in place. *)
+let host_tool_profile ~driver native_posture =
+  match driver, native_posture with
+  | Acp.Kimi_code, Runtime_native_tools.Native_none ->
+    Some Runtime_kimi_agent_profile.surface_revision
+  | Acp.Kimi_code, (Runtime_native_tools.Native_read | Runtime_native_tools.Native_full)
+  | ( (Acp.Antigravity | Acp.Mistral_vibe | Acp.Muse_code)
+    , ( Runtime_native_tools.Native_none
+      | Runtime_native_tools.Native_read
+      | Runtime_native_tools.Native_full ) ) -> None
+;;
+
+let reconcile_prepared_tools ?account_home ?continuation ~driver ~native_posture ~claim_plan
       (prepared : Host.prepared_turn) =
   let digest = Session_store.tool_surface_sha256 ?account_home ~native_posture prepared.tools in
-  let tool_surface_sha256 =
+  let prepared_digest =
     match prepared.tools with
     | [] -> digest
     | _ :: _ ->
@@ -2185,6 +2211,14 @@ let reconcile_prepared_tools ?account_home ?continuation ~native_posture ~claim_
            nonempty digest could therefore describe an empty bridge. Old empty
            digests are conclusive: a hook can remove tools but cannot add any. *)
         Agent_core_sha256.(digest_string ("masc.acp.prepared-tools.v1\000" ^ digest) |> to_hex)
+  in
+  let tool_surface_sha256 =
+    match host_tool_profile ~driver native_posture with
+    | None -> prepared_digest
+    | Some profile ->
+      Agent_core_sha256.(
+        digest_string ("masc.acp.host-tool-profile.v1\000" ^ profile ^ "\000" ^ prepared_digest)
+        |> to_hex)
   in
   match continuation with
   | Some (checkpoint : Keeper_semantic_execution.official_client_checkpoint)
@@ -2497,7 +2531,7 @@ let run_without_lifecycle
   in
   let* claim_plan, tool_surface_sha256 =
     reconcile_prepared_tools ?account_home:config.oauth_source ?continuation:official_client_continuation
-      ~native_posture ~claim_plan prepared
+      ~driver:config.driver ~native_posture ~claim_plan prepared
   in
   let initial_non_carried_count =
     List.length (List.filter is_non_carried_message initial_messages)
@@ -3066,6 +3100,7 @@ let run_without_lifecycle
                 | Error
                     (( Acp.Invalid_config _
                      | Acp.Spawn_refused _
+                     | Acp.Preparation_failed _
                      | Acp.Protocol_error _
                      | Acp.Rpc_error _
                      | Acp.Host_turn_failed _
@@ -3282,6 +3317,7 @@ let run_without_lifecycle
                  | Error
                      ( Acp.Invalid_config _
                      | Acp.Spawn_refused _
+                     | Acp.Preparation_failed _
                      | Acp.Protocol_error _
                      | Acp.Timeout _
                      | Acp.Process_exited _
@@ -3430,6 +3466,7 @@ let run_without_lifecycle
            observe_effect_quiet ()
          | Acp.Invalid_config _
          | Acp.Spawn_refused _
+         | Acp.Preparation_failed _
          | Acp.Protocol_error _
          | Acp.Rpc_error
              { refusal =

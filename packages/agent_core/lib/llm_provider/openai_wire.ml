@@ -401,10 +401,10 @@ let parse_openai_sse_chunk ~streaming_reasoning data_str : openai_sse_parse_resu
                          (`List blocks)
                      in
                      let visible =
-                       if Api_common.string_is_blank text then None else Some text
+                       if String.equal text "" then None else Some text
                      in
                      let trace =
-                       if Api_common.string_is_blank thinking then None else Some thinking
+                       if String.equal thinking "" then None else Some thinking
                      in
                      (visible, trace)
                    | `Assoc _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->

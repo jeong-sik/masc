@@ -300,38 +300,42 @@ let parse_ollama_tool_arguments ~tool_index json =
 
 let parse_ollama_tool_call ~tool_index tc =
   let open Yojson.Safe.Util in
-  let* fn =
-    match tc |> member "function" with
-    | `Assoc _ as fn -> Ok fn
-    | `Null | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ ->
-      Error
-        (Printf.sprintf "malformed_ollama_tool_call:index:%d:missing_function" tool_index)
-  in
-  let* name =
-    match fn |> member "name" |> to_string_option with
-    | Some name when not (Api_common.string_is_blank name) -> Ok name
-    | Some _ | None ->
-      Error (Printf.sprintf "malformed_ollama_tool_call:index:%d:missing_name" tool_index)
-  in
-  let* arguments = parse_ollama_tool_arguments ~tool_index (fn |> member "arguments") in
-  let id =
-    match tc |> member "id" |> to_string_option with
-    | Some id when not (Api_common.string_is_blank id) -> id
-    | Some _ | None -> Api_common.fresh_tool_use_id ()
-  in
-  match arguments with
-  | Object_arguments input -> Ok (Either.Left (ToolUse { id; name; input }))
-  | Unreadable_arguments { text; problem } ->
-    Ok
-      (Either.Right
-         ({ tool_use_id = id
-          ; tool_name = name
-          ; tool_use_ordinal = tool_index
-          ; arguments = text
-          ; arguments_problem = problem
-          ; arguments_assembly = None
-          }
-          : Types.unreadable_tool_use))
+  match tc with
+  | `Assoc _ ->
+    let* fn =
+      match tc |> member "function" with
+      | `Assoc _ as fn -> Ok fn
+      | `Null | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ ->
+        Error
+          (Printf.sprintf "malformed_ollama_tool_call:index:%d:missing_function" tool_index)
+    in
+    let* name =
+      match fn |> member "name" |> to_string_option with
+      | Some name when not (Api_common.string_is_blank name) -> Ok name
+      | Some _ | None ->
+        Error (Printf.sprintf "malformed_ollama_tool_call:index:%d:missing_name" tool_index)
+    in
+    let* arguments = parse_ollama_tool_arguments ~tool_index (fn |> member "arguments") in
+    let id =
+      match tc |> member "id" |> to_string_option with
+      | Some id when not (Api_common.string_is_blank id) -> id
+      | Some _ | None -> Api_common.fresh_tool_use_id ()
+    in
+    (match arguments with
+     | Object_arguments input -> Ok (Either.Left (ToolUse { id; name; input }))
+     | Unreadable_arguments { text; problem } ->
+       Ok
+         (Either.Right
+            ({ tool_use_id = id
+             ; tool_name = name
+             ; tool_use_ordinal = tool_index
+             ; arguments = text
+             ; arguments_problem = problem
+             ; arguments_assembly = None
+             }
+             : Types.unreadable_tool_use)))
+  | `Null | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ ->
+    Error (Printf.sprintf "malformed_ollama_tool_call:index:%d:not_object" tool_index)
 ;;
 
 let parse_ollama_tool_calls = function
@@ -354,12 +358,15 @@ let parse_ollama_tool_calls = function
 let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_inline_reasoning) json_str =
   let open Yojson.Safe.Util in
   let* json = Json_util.from_string_bounded json_str in
-  match json |> member "error" with
-  | `String s -> Error s
-  | `Assoc _ as err -> Error (Yojson.Safe.to_string err)
-  | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ ->
-    Error "malformed_ollama_error:not_string_or_object"
-  | `Null ->
+  try
+    match json with
+    | `Assoc _ ->
+      (match json |> member "error" with
+       | `String s -> Error s
+       | `Assoc _ as err -> Error (Yojson.Safe.to_string err)
+       | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ ->
+         Error "malformed_ollama_error:not_string_or_object"
+       | `Null ->
     let message = json |> member "message" in
     let* text_content, tool_blocks, unreadable_tool_uses, thinking_blocks =
       match message with
@@ -502,7 +509,12 @@ let parse_ollama_response ?(content_inline_reasoning = Capabilities.No_content_i
                ~cache_creation_input_tokens:None
                ~cache_read_input_tokens:reported_cache_read
                (Some (Types.with_reported_model ~model telemetry)))
-      }
+      })
+    | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
+      Error "malformed_ollama_response:not_object"
+  with
+  | Yojson.Safe.Util.Type_error (msg, _) | Yojson.Safe.Util.Undefined (msg, _) ->
+    Error msg
 ;;
 
 (* ── Inline tests ────────────────────────────────── *)

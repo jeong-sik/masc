@@ -145,7 +145,7 @@ let thinking_text_of_openai_content_block (block : Yojson.Safe.t) : string optio
                  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None)
          |> String.concat ""
        in
-       if Api_common.string_is_blank text then None else Some text
+       if String.equal text "" then None else Some text
      | Some (`Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) | None
        -> None)
   | `String _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
@@ -474,25 +474,42 @@ let parse_openai_response_result_json_raw
     | `List [] -> raw_json
     | other -> other
   in
-  match json |> member "error" with
-  | `Null ->
-    let choice = json |> member "choices" |> index 0 in
-    let msg = choice |> member "message" in
-    let* finish_reason =
-      match choice |> member "finish_reason" |> to_string_option with
-      | Some finish_reason -> Ok finish_reason
-      | None ->
-        Error (unreadable_response "malformed_openai_response:missing_finish_reason")
-    in
-    let* () =
-      if Stop_reason_wire.is_provider_error_finish finish_reason
-      then
-        Error
-          (provider_error
-             (Openai_error_envelope.of_errored_choice
-                choice))
-      else Ok ()
-    in
+  try
+    match json with
+    | `Assoc _ ->
+      (match json |> member "error" with
+       | `Null ->
+         let* choice =
+           match json |> member "choices" with
+           | `List ((`Assoc _ as choice) :: _) -> Ok choice
+           | `List (_ :: _) ->
+             Error (unreadable_response "malformed_openai_response:choice_not_object")
+           | `List [] ->
+             Error (unreadable_response "malformed_openai_response:empty_choices")
+           | `Null | `Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ ->
+             Error (unreadable_response "malformed_openai_response:missing_choices")
+         in
+         let* finish_reason =
+           match choice |> member "finish_reason" |> to_string_option with
+           | Some finish_reason -> Ok finish_reason
+           | None ->
+             Error (unreadable_response "malformed_openai_response:missing_finish_reason")
+         in
+         let* () =
+           if Stop_reason_wire.is_provider_error_finish finish_reason
+           then
+             Error
+               (provider_error
+                  (Openai_error_envelope.of_errored_choice
+                     choice))
+           else Ok ()
+         in
+         let* msg =
+           match choice |> member "message" with
+           | `Assoc _ as msg -> Ok msg
+           | `Null | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ ->
+             Error (unreadable_response "malformed_openai_response:missing_message")
+         in
     let* has_refusal =
       Stop_reason_wire.refusal_of_json (msg |> member "refusal")
       |> Result.map_error (fun () -> unreadable_response "malformed_openai_response:refusal_not_string")
@@ -593,10 +610,15 @@ let parse_openai_response_result_json_raw
                ~cache_read_input_tokens
                (Some (Types.with_reported_model ~model telemetry)))
       }
-  | err ->
-    (match Openai_error_envelope.of_error_value err with
-     | Some envelope -> Error (provider_error envelope)
-     | None -> Error (unreadable_response "malformed_openai_response:error_not_object_or_string"))
+       | err ->
+         (match Openai_error_envelope.of_error_value err with
+          | Some envelope -> Error (provider_error envelope)
+          | None -> Error (unreadable_response "malformed_openai_response:error_not_object_or_string")))
+    | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null ->
+      Error (unreadable_response "malformed_openai_response:not_object")
+  with
+  | Yojson.Safe.Util.Type_error (msg, _) | Yojson.Safe.Util.Undefined (msg, _) ->
+    Error (unreadable_response msg)
 ;;
 
 (* Preserve only authoritative policy/truncation stops without content.

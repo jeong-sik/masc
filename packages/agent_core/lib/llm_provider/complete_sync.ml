@@ -190,7 +190,8 @@ let parse_sync_response_observed
   with
   | Yojson.Json_error message
   | Yojson.Safe.Util.Type_error (message, _)
-  | Yojson.Safe.Util.Undefined (message, _) ->
+  | Yojson.Safe.Util.Undefined (message, _)
+  | Invalid_argument message ->
     without_observation (provider_parse_failure
       ~parser:(Provider_config.string_of_provider_kind provider_kind)
       message)

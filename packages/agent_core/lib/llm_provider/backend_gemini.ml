@@ -1170,8 +1170,7 @@ let parse_response json =
       List.concat_map
         (fun part ->
            let part_thought_signature = thought_signature_of_part part in
-           match part |> member "text" with
-           | `String s ->
+           let emit_textual_part s =
              let is_thought = Cli_common_json.member_bool "thought" part in
              let target, block =
                if is_thought
@@ -1179,43 +1178,75 @@ let parse_response json =
                else Gemini_text_part, Text s
              in
              blocks_with_part_signature ~target ~block part_thought_signature
-           | _ ->
+           in
+           let emit_function_call fc =
+             let name = fc |> member "name" |> to_string in
+             let args =
+               match fc |> member "args" with
+               | `Null -> `Assoc []
+               | (`Assoc _ | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _)
+                 as other -> other
+             in
+             let id =
+               match string_field_opt "id" fc with
+               | Some id -> id
+               | None -> Api_common.fresh_tool_use_id ()
+             in
+             let tool_use = ToolUse { id; name; input = args } in
+             match part_thought_signature with
+             | Some thought_signature ->
+               [ gemini_thought_signature_carrier ~tool_use_id:id ~thought_signature
+               ; tool_use
+               ]
+             | None -> [ tool_use ]
+           in
+           let emit_inline_data inline_data =
+             let target, block = media_content_block_of_inline_data inline_data in
+             blocks_with_part_signature ~target ~block part_thought_signature
+           in
+           let emit_non_text_part () =
+             match part |> member "functionCall" with
+             | `Assoc _ as fc -> emit_function_call fc
+             | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+               (match part |> member "inlineData" with
+                | `Assoc _ as inline_data -> emit_inline_data inline_data
+                | `Null ->
+                  (match part_thought_signature with
+                   | Some _ ->
+                     raise
+                       (Gemini_api_error
+                          "Gemini thoughtSignature is attached to an unsupported Part")
+                   | None -> [])
+                | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+                  raise (Gemini_api_error "Gemini inlineData must be an object"))
+           in
+           match part |> member "text" with
+           | `String s when not (String.equal s "") -> emit_textual_part s
+           | `String empty_text ->
              (match part |> member "functionCall" with
-              | `Assoc _ as fc ->
-                let name = fc |> member "name" |> to_string in
-                let args = fc |> member "args" in
-                let id =
-                  match string_field_opt "id" fc with
-                  | Some id -> id
-                  | None -> Api_common.fresh_tool_use_id ()
-                in
-                let tool_use = ToolUse { id; name; input = args } in
-                (match part_thought_signature with
-                 | Some thought_signature ->
-                   [ gemini_thought_signature_carrier ~tool_use_id:id ~thought_signature
-                   ; tool_use
-                   ]
-                 | None -> [ tool_use ])
-              | _ ->
+              | `Assoc _ as fc -> emit_function_call fc
+              | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
                 (match part |> member "inlineData" with
-                 | `Assoc _ as inline_data ->
-                   let target, block = media_content_block_of_inline_data inline_data in
-                   blocks_with_part_signature ~target ~block part_thought_signature
-                 | `Null ->
-                   (match part_thought_signature with
-                    | Some _ ->
-                      raise
-                        (Gemini_api_error
-                           "Gemini thoughtSignature is attached to an unsupported Part")
-                    | None -> [])
-                 | _ -> raise (Gemini_api_error "Gemini inlineData must be an object"))))
+                 | `Assoc _ as inline_data -> emit_inline_data inline_data
+                 | `Null -> emit_textual_part empty_text
+                 | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+                   raise (Gemini_api_error "Gemini inlineData must be an object")))
+           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ ->
+             emit_non_text_part ())
         parts
     in
-    let finish_reason =
-      candidate
-      |> member "finishReason"
-      |> to_string_option
-      |> Option.value ~default:"FINISH_REASON_UNSPECIFIED"
+    let candidate_finish_reason =
+      match candidate |> member "finishReason" |> to_string_option with
+      | Some "" | None -> None
+      | Some _ as reason -> reason
+    in
+    let prompt_block_reason =
+      match json |> member "promptFeedback" with
+      | `Assoc _ as feedback ->
+        (match feedback |> member "blockReason" |> to_string_option with
+         | Some reason when not (Api_common.string_is_blank reason) -> Some reason
+         | Some _ | None -> None)
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
     in
     let has_tool_use =
       (* The typed content-block match makes Gemini stop-reason inference
@@ -1235,7 +1266,14 @@ let parse_response json =
            | Audio _ -> false)
         content
     in
-    let stop_reason = stop_reason_of_finish_reason ~has_tool_use finish_reason in
+    let stop_reason =
+      match candidate_finish_reason, prompt_block_reason with
+      | Some finish_reason, _ ->
+        stop_reason_of_finish_reason ~has_tool_use finish_reason
+      | None, Some _ -> Refusal
+      | None, None ->
+        stop_reason_of_finish_reason ~has_tool_use "FINISH_REASON_UNSPECIFIED"
+    in
     let um = json |> member "usageMetadata" in
     let raw_cache_read =
       if um = `Null

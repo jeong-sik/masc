@@ -768,6 +768,13 @@ let complete_stream_http
           ();
         Error err
       | Ok (eff_first_event_timeout_s, eff_body_timeout_s) ->
+      let pre_header_first_event_timeout_s =
+        match eff_first_event_timeout_s, eff_body_timeout_s with
+        | Some first_s, Some body_s -> Some (Float.min first_s body_s)
+        | Some first_s, None -> Some first_s
+        | None, Some body_s -> Some body_s
+        | None, None -> None
+      in
       match
         try
           with_request_metadata ~body:body_with_stream (fun () ->
@@ -775,7 +782,7 @@ let complete_stream_http
             ?cache:connection_cache
             ?clock
             ?connect_timeout_s:config.connect_timeout_s
-            ?first_event_timeout_s:eff_first_event_timeout_s
+            ?first_event_timeout_s:pre_header_first_event_timeout_s
             ~on_response_status
             ~net
             ~url
@@ -788,9 +795,9 @@ let complete_stream_http
                @ auth_headers)
             ~body:body_with_stream
             ~f:(fun ~pre_header_elapsed_s reader ->
-            (* The first-event budget is one window from the request to the
-               first token; explicit cachedContents setup and the connection,
-               request and headers have already spent part of it, and the
+            (* The first-event and body budgets both start when the request is
+               dispatched; explicit cachedContents setup and the connection,
+               request and headers have already spent part of them, and the
                reader arms the rest. A rest of zero is a budget that ran out
                as the headers arrived: the first read reports it. *)
             let first_event_timeout_s =
@@ -798,7 +805,11 @@ let complete_stream_http
                 (fun budget_s -> Float.max 0.0 (budget_s -. pre_header_elapsed_s))
                 eff_first_event_timeout_s
             in
-            let body_timeout_s = eff_body_timeout_s in
+            let body_timeout_s =
+              Option.map
+                (fun budget_s -> Float.max 0.0 (budget_s -. pre_header_elapsed_s))
+                eff_body_timeout_s
+            in
             emit_stream_event on_event Types.Connected;
             (* AGENT_CORE exposes one redacted provider observation to a caller-owned
                nonblocking offer. Queueing, persistence, capacity, and retries
@@ -885,7 +896,13 @@ let complete_stream_http
                       ~block_kind_at:(Complete_stream_acc.block_kind_at acc)
                       emitted_evt
                   in
-                  if kind_is_production kind then produced_this_event := true;
+                  let in_output_phase =
+                    match !position with
+                    | After_first_output _ -> true
+                    | Before_first_output _ -> false
+                  in
+                  if first_token || (in_output_phase && kind_is_production kind)
+                  then produced_this_event := true;
                   match kind with
                   | `Skip -> ()
                   | `Thinking ->

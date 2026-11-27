@@ -213,29 +213,38 @@ let build_request ?stream ~config ~messages ?tools () =
     [{"error":{"code":"1305","message":"..."}}]
     Standard Openai uses numeric HTTP codes. *)
 let check_glm_error_json (json : Yojson.Safe.t) : glm_error option =
-  try
-    let open Yojson.Safe.Util in
-    match json |> member "error" with
-    | `Null | `Assoc [] -> None
-    | err ->
-      let code =
-        match err |> member "code" with
-        | `String s -> Some s
-        | `Int n -> Some (string_of_int n)
-        | `Assoc _ | `List _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
-      in
-      let message =
-        err
-        |> member "message"
-        |> to_string_option
-        |> Option.value ~default:(Yojson.Safe.to_string err)
-      in
-      let error_class =
-        Option.bind code (fun code -> classify_glm_error ~code)
-      in
-      Some { code; message; error_class; origin = Provider_response }
-  with
-  | Yojson.Json_error _ -> None
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "error" fields with
+     | None | Some `Null | Some (`Assoc []) -> None
+     | Some (`String message) ->
+       Some { code = None; message; error_class = None; origin = Provider_response }
+     | Some (`Assoc err_fields as err) ->
+       let code =
+         match List.assoc_opt "code" err_fields with
+         | Some (`String s) -> Some s
+         | Some (`Int n) -> Some (string_of_int n)
+         | Some (`Assoc _ | `List _ | `Intlit _ | `Float _ | `Bool _ | `Null) | None ->
+           None
+       in
+       let message =
+         match List.assoc_opt "message" err_fields with
+         | Some (`String s) -> s
+         | Some (`Assoc _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+         | None -> Yojson.Safe.to_string err
+       in
+       let error_class =
+         Option.bind code (fun code -> classify_glm_error ~code)
+       in
+       Some { code; message; error_class; origin = Provider_response }
+     | Some ((`List _ | `Int _ | `Intlit _ | `Float _ | `Bool _) as err) ->
+       Some
+         { code = None
+         ; message = Yojson.Safe.to_string err
+         ; error_class = None
+         ; origin = Provider_response
+         })
+  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
 ;;
 
 let check_glm_error body : glm_error option =

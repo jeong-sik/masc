@@ -125,7 +125,7 @@ let run_case ~how root =
     {ready=(fun ~keeper_name:_ -> true); execute;
      on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution:_ -> ())} in
   Registry.install_from_store ~sw ~operation_runner:(Some runner)
-    ~on_turn_slot_released:None workspace |> require "install Owner" |> ignore;
+    workspace |> require "install Owner" |> ignore;
   Keeper_direct_native_continuation.complete_restart_settlements
     ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path:root
     |> require "complete startup native journal settlement" |> ignore;
@@ -325,7 +325,7 @@ let test_boot_terminal_settlement ~with_runner ~unknown_receipt ~failed_commit (
        Keeper_owner.Operation_failed {kind=Operation.Turn_invariant;detail="unexpected boot dispatch";outcome_ref=None});
      on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution:_ -> ())} in
   Registry.install_from_store ~sw ~operation_runner:(if with_runner then Some runner else None)
-    ~on_turn_slot_released:None workspace |> require "install before runtime" |> ignore;
+    workspace |> require "install before runtime" |> ignore;
   let owner = Registry.get ~base_path:root ~keeper_name |> require "installed original Owner" in
   let initial_rows = Registry.batch_operations ~base_path:root ~keeper_name operation_id
     |> require "pre-runtime batch inputs" in
@@ -395,7 +395,7 @@ let test_late_boot_terminal_settlement ~before_ready ~unknown_receipt ~failed_co
      on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution:_ -> ())} in
   check int "the first inventory has no metadata Owners" 0
     (Registry.install_from_store ~sw ~operation_runner:(if before_ready then Some runner else None)
-       ~on_turn_slot_released:None workspace |> require "empty inventory before runtime");
+       workspace |> require "empty inventory before runtime");
   let create name trace_id =
     let meta = Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String name;
       "trace_id",`String trace_id; "activation_mode",`String "manual"]) |> require "materialized meta" in
@@ -479,7 +479,7 @@ let test_creation_during_restart_snapshot () =
   let meta name trace_id = Masc_test_deps.meta_of_json_fixture (`Assoc ["name",`String name;
     "trace_id",`String trace_id; "activation_mode",`String "manual"]) |> require "snapshot meta" in
   Keeper_meta_store.replace_snapshot workspace (meta keeper_name session_id) |> require "first Owner snapshot";
-  Registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None workspace
+  Registry.install_from_store ~sw ~operation_runner:None workspace
     |> require "install first snapshot Owner" |> ignore;
   Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr:env#domain_mgr ~domain_count:1
     |> require "racing application runtime";

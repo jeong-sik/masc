@@ -224,7 +224,7 @@ let run_call ~scenario root =
        | Owner.Operation_succeeded _ | Owner.Operation_failed _ ->
          Eio.Promise.resolve resolve_settled execution)} in
   Registry.install_from_store ~sw ~operation_runner:(Some runner)
-    ~on_turn_slot_released:None workspace |> require "install Owner" |> ignore;
+    workspace |> require "install Owner" |> ignore;
   Keeper_direct_native_continuation.complete_restart_settlements
     ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path:root
     |> require "complete startup native journal settlement" |> ignore;

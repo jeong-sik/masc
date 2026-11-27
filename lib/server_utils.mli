@@ -102,9 +102,9 @@ val board_fetch_limit :
     keeper_name. Misses fall through as [`agent`] kind with
     [source: "raw_agent"]. *)
 
-(** [board_actor_key ~kind id] produces the canonical lookup key
-    [<kind>:<lowercased trimmed id>].  Used by the dashboard's
-    actor-aggregation pipeline. *)
+(** The identity's [key] is [keeper:<keeper_name>] for a registry keeper,
+    whose name is already lowercase, and [agent:<lowercased trimmed raw>]
+    otherwise.  Used by the dashboard's actor-aggregation pipeline. *)
 
 (** [board_actor_keeper_identity raw] returns
     [Some (keeper_name, source)] when [raw] is a registry keeper

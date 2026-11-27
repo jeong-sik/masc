@@ -120,8 +120,11 @@ let board_sort_order_of_request request =
 (** Issue #8449 PR C: thin alias over the Variant SSOT helper. *)
 let board_sort_label = Board_dispatch.sort_order_to_string
 
-let board_actor_key ~kind id =
-  kind ^ ":" ^ String.lowercase_ascii (String.trim id)
+(* A registry Keeper name is already lowercase ([Keeper_id.Keeper_name]), so
+   its key holds the name as the registry does. Any other author is keyed by
+   its trimmed spelling in lower case. *)
+let board_keeper_actor_key keeper_name = "keeper:" ^ keeper_name
+let board_agent_actor_key raw = "agent:" ^ String.lowercase_ascii (String.trim raw)
 
 let board_actor_keeper_identity raw =
   let raw = String.trim raw in
@@ -139,7 +142,7 @@ let board_actor_identity_json raw : Yojson.Safe.t =
         [
           ("kind", `String "keeper");
           ("id", `String keeper_name);
-          ("key", `String (board_actor_key ~kind:"keeper" keeper_name));
+          ("key", `String (board_keeper_actor_key keeper_name));
           ("display_name", `String keeper_name);
           ("raw", `String raw);
           ("source", `String source);
@@ -149,7 +152,7 @@ let board_actor_identity_json raw : Yojson.Safe.t =
         [
           ("kind", `String "agent");
           ("id", `String raw);
-          ("key", `String (board_actor_key ~kind:"agent" raw));
+          ("key", `String (board_agent_actor_key raw));
           ("display_name", `String raw);
           ("raw", `String raw);
           ("source", `String "raw_agent");

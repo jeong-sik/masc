@@ -76,6 +76,7 @@ let post_board_receipt ~actor (reference : Skill_reference.t) ~status =
   | Error failure ->
     Log.Server.warn "skill publish receipt not recorded: %s"
       (Board.Post_publication_failure.to_string failure)
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn ->
     Log.Server.warn "skill publish receipt raised: %s" (Printexc.to_string exn)
 ;;

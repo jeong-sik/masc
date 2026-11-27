@@ -406,7 +406,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
       setClockLooks((looks) => looks + 1)
     }, delayMs)
     return () => window.clearTimeout(timer)
-  }, [restEnds, clockLooks, providerDays, accountMode])
+  }, [restEnds, clockLooks, providerDays, session.kind, epoch, adminLocked])
   const restingProviders = useMemo(
     () => restingProviderIds(resolvedData?.runtimes ?? [], nowUnix),
     [resolvedData, nowUnix],

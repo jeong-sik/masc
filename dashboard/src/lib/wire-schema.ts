@@ -369,7 +369,22 @@ export const Schema = {
         }
       }
 
-      return issues.length > 0 ? { ok: false, issues } : iOk(out as DecodedStruct<Fields>)
+      if (issues.length > 0) return { ok: false, issues }
+
+      if (opts.onExcessProperty === 'preserve') {
+        for (const key of Object.keys(input)) {
+          if (!allowed.has(key)) {
+            Object.defineProperty(out, key, {
+              value: input[key],
+              writable: true,
+              enumerable: true,
+              configurable: true,
+            })
+          }
+        }
+      }
+
+      return iOk(out as DecodedStruct<Fields>)
     }, fields) as StructWireSchema<Fields>
   },
 

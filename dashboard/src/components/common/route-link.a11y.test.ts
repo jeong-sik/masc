@@ -51,11 +51,12 @@ describe('RouteLink a11y', () => {
   it('link with params passes axe', async () => {
     render(
       html`<${RouteLink}
-        tab="command"
+        tab="keepers"
         params=${{ keeper: 'sigma' }}
-      >Command sigma<//>`,
+      >Keeper sigma<//>`,
       container,
     )
+    expect(container.querySelector('a')?.getAttribute('href')).toBe('#keepers?keeper=sigma')
     expect(await axe(container)).toHaveNoViolations()
   })
 })

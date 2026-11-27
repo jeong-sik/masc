@@ -384,11 +384,13 @@ let finalize
          | Runtime_execution.Masc_agent_core -> Keeper_canonical_turn_store.Agent_core_http
          | Runtime_execution.Official_client -> Keeper_canonical_turn_store.Official_cli
        in
-       (* The turn store's tool calls are read back as model input only
-          ([Keeper_canonical_turn_store.messages_of_canonical_turn] renders
-          them as text). Route evidence describes the descriptor and the
-          route a call took; [Keeper_tool_call_log] writes it per call, and a
-          model resuming the turn has no use for it. *)
+       (* The turn store's tool calls have two readers:
+          [Keeper_canonical_turn_store.messages_of_canonical_turn] renders
+          them as text for model input, and the tool blob sweep scans them
+          for blob references. Route evidence describes the descriptor and
+          the route a call took and carries no blob reference;
+          [Keeper_tool_call_log] writes it per call, and a model resuming
+          the turn has no use for it. *)
        let tool_calls_json =
          `List
            (List.map

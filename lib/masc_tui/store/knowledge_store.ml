@@ -2202,7 +2202,7 @@ let wiki_markdown_embeds ~lang t (detail : Wire_knowledge.wiki_page_detail) =
                    label =
                      named ~ko:"그림" ~en:"Image"
                        (Option.value embed.label ~default:(String.sub sha256 0 (Int.min 12 (String.length sha256))));
-                   path = Wire_fleet.media_path_prefix ^ sha256;
+                   path = Wire_attachment.media_path_prefix ^ sha256;
                    rows = (if graphics then wiki_image_rows else 0);
                    fallback =
                      say ~ko:"그림을 불러오는 중이에요."

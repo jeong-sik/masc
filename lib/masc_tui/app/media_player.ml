@@ -21,12 +21,16 @@ type active_process = {
   temp_path : string option;
 }
 
+let max_retained_temps = 4
+
 type t = {
   mu : Stdlib.Mutex.t;
   mutable active : active_process option;
+  mutable retained_temps : string list;
 }
 
-let create () = { mu = Stdlib.Mutex.create (); active = None }
+let create () =
+  { mu = Stdlib.Mutex.create (); active = None; retained_temps = [] }
 
 let detect_os () =
   match Sys.os_type with
@@ -179,24 +183,52 @@ let kill_and_reap pid =
   in
   wait_grace 10
 
+let reap_active_proc (proc : active_process) =
+  kill_and_reap proc.pid;
+  Option.iter remove_quietly proc.temp_path
+
+let take_active t =
+  Stdlib.Mutex.protect t.mu (fun () ->
+      let cur = t.active in
+      t.active <- None;
+      cur)
+
 let stop t =
-  let prev =
-    Stdlib.Mutex.protect t.mu (fun () ->
-        let cur = t.active in
-        t.active <- None;
-        cur)
-  in
-  match prev with
+  match take_active t with
   | None -> None
   | Some proc ->
-      kill_and_reap proc.pid;
-      Option.iter remove_quietly proc.temp_path;
+      reap_active_proc proc;
       Some proc.label
 
 let is_playing t =
   Stdlib.Mutex.protect t.mu (fun () -> Option.is_some t.active)
 
-let shutdown t = ignore (stop t : string option)
+let record_retained_temp t path =
+  let evicted =
+    Stdlib.Mutex.protect t.mu (fun () ->
+        let deduped =
+          path :: List.filter (fun p -> not (String.equal p path)) t.retained_temps
+        in
+        let rec split n acc = function
+          | [] -> (List.rev acc, [])
+          | rest when n <= 0 -> (List.rev acc, rest)
+          | x :: xs -> split (n - 1) (x :: acc) xs
+        in
+        let kept, old = split max_retained_temps [] deduped in
+        t.retained_temps <- kept;
+        old)
+  in
+  List.iter remove_quietly evicted
+
+let shutdown t =
+  ignore (stop t : string option);
+  let retained =
+    Stdlib.Mutex.protect t.mu (fun () ->
+        let paths = t.retained_temps in
+        t.retained_temps <- [];
+        paths)
+  in
+  List.iter remove_quietly retained
 
 let spawn_quiet ~executable ~args =
   match Unix.openfile "/dev/null" [ Unix.O_RDWR; Unix.O_CLOEXEC ] 0o600 with
@@ -243,9 +275,9 @@ let reap_in_background t ~pid ~temp_path =
        ()
       : Thread.t)
 
-let play_file t ?base_path ?(temp_cleanup = false) ~mime_type ~label ~path () =
+let play_file t ?base_path ?resolve ?(temp_cleanup = false) ~mime_type ~label ~path () =
   let soundfont = find_soundfont ?base_path () in
-  match plan_playback ?soundfont ~mime_type ~path () with
+  match plan_playback ?resolve ?soundfont ~mime_type ~path () with
   | Error msg ->
       if temp_cleanup then remove_quietly path;
       Error msg
@@ -258,7 +290,8 @@ let play_file t ?base_path ?(temp_cleanup = false) ~mime_type ~label ~path () =
           if temp_cleanup then remove_quietly path;
           Error msg
       | Ok pid ->
-          (* Wait briefly for [open]/[xdg-open] launcher; keep temp file for OS player. *)
+          if temp_cleanup then record_retained_temp t path;
+          (* Reap [open]/[xdg-open] launcher in background; temp file stays until [shutdown] or LRU eviction. *)
           ignore
             (Thread.create
                (fun () ->
@@ -273,14 +306,23 @@ let play_file t ?base_path ?(temp_cleanup = false) ~mime_type ~label ~path () =
               : Thread.t);
           Ok (Opened_external label))
   | Ok (Audio_spawn { executable; args } | Midi_fluidsynth { executable; args }) -> (
-      ignore (stop t : string option);
-      match spawn_quiet ~executable ~args with
+      Option.iter reap_active_proc (take_active t);
+      let temp_path = if temp_cleanup then Some path else None in
+      let spawned, displaced =
+        Stdlib.Mutex.protect t.mu (fun () ->
+            let prev = t.active in
+            t.active <- None;
+            match spawn_quiet ~executable ~args with
+            | Error msg -> (Error msg, prev)
+            | Ok pid ->
+                t.active <- Some { pid; label; temp_path };
+                (Ok pid, prev))
+      in
+      Option.iter reap_active_proc displaced;
+      match spawned with
       | Error msg ->
           if temp_cleanup then remove_quietly path;
           Error msg
       | Ok pid ->
-          let temp_path = if temp_cleanup then Some path else None in
-          Stdlib.Mutex.protect t.mu (fun () ->
-              t.active <- Some { pid; label; temp_path });
           reap_in_background t ~pid ~temp_path;
           Ok (Playing label))

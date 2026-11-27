@@ -2035,7 +2035,33 @@ let test_rich_media_pele_alphatex_and_playback () =
     (Some "/custom/sonivox.sf2")
     (Media_player.find_soundfont
        ~getenv:(function "MASC_SOUNDFONT" -> Some "/custom/sonivox.sf2" | _ -> None)
-       ~file_exists:(String.equal "/custom/sonivox.sf2") ())
+       ~file_exists:(String.equal "/custom/sonivox.sf2") ());
+  (* P2: Video_open with temp_cleanup:true retains temp file while running and removes it on shutdown *)
+  let true_bin =
+    if Sys.file_exists "/usr/bin/true" then "/usr/bin/true" else "/bin/true"
+  in
+  let tmp_video = Filename.temp_file "masc-test-video-" ".mp4" in
+  let player = Media_player.create () in
+  Fun.protect
+    ~finally:(fun () ->
+      Media_player.shutdown player;
+      if Sys.file_exists tmp_video then
+        try Sys.remove tmp_video with Sys_error _ -> ())
+    (fun () ->
+      (match
+         Media_player.play_file player
+           ~resolve:(fun _ -> Some true_bin)
+           ~temp_cleanup:true ~mime_type:"video/mp4" ~label:"clip.mp4"
+           ~path:tmp_video ()
+       with
+      | Ok (Media_player.Opened_external "clip.mp4") -> ()
+      | Ok _ -> fail "expected Opened_external for video/mp4"
+      | Error msg -> fail ("expected Video_open Ok, got Error: " ^ msg));
+      check bool "external video temp file is retained while session runs" true
+        (Sys.file_exists tmp_video);
+      Media_player.shutdown player;
+      check bool "external video temp file is removed on Media_player.shutdown"
+        false (Sys.file_exists tmp_video))
 
 let () =
   run "masc_tui_v2_vision_attachments"

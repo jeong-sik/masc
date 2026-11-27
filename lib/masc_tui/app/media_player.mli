@@ -53,6 +53,7 @@ val plan_playback :
 val play_file :
   t ->
   ?base_path:string ->
+  ?resolve:(string -> string option) ->
   ?temp_cleanup:bool ->
   mime_type:string ->
   label:string ->
@@ -60,10 +61,10 @@ val play_file :
   unit ->
   (play_outcome, string) result
 (** Stop any previous active player, then play [path] according to
-    {!plan_playback}. When [temp_cleanup] is [true] and the file is played by a
-    background process, [path] is removed once playback ends or {!stop} is
-    called. On {!Handoff_alphatex}, the caller owns [path] until the external
-    viewer finishes. *)
+    {!plan_playback}. When [temp_cleanup] is [true]:
+    - on {!Playing}, [path] is removed once playback ends or {!stop}/{!shutdown} is called;
+    - on {!Opened_external}, [path] is retained (bounded LRU) for the external player and removed on {!shutdown};
+    - on {!Handoff_alphatex}, the caller owns [path] until the external viewer finishes. *)
 
 val stop : t -> string option
 (** Terminate and reap any active audio/MIDI player process, remove its owned

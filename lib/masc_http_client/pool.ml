@@ -65,14 +65,16 @@ module Host_key = struct
   let default_port = function "https" -> 443 | _ -> 80
 
   let of_uri uri =
-    let scheme = Uri.scheme uri |> Option.value ~default:"http" in
+    let scheme =
+      Uri.scheme uri |> Option.value ~default:"http" |> String.lowercase_ascii
+    in
     (* [Uri.host] returns [Some ""] for URLs like "http:///path" instead
        of [None] (empty authority section). Treat empty as missing so
        downstream connect doesn't try to resolve "". *)
     let host =
       match Uri.host uri with
       | Some "" | None -> "localhost"
-      | Some h -> h
+      | Some h -> String.lowercase_ascii h
     in
     let port = Uri.port uri |> Option.value ~default:(default_port scheme) in
     { scheme; host; port }
@@ -396,15 +398,20 @@ let evict_expired_entries t now =
       t.connect_failures;
     let evicted_clients = ref [] in
     let remaining =
-      Host_map.map (fun entries ->
-        List.filter (fun e ->
-          if now -. e.last_used_ts > t.config.idle_ttl_seconds
-          then begin
-            evicted_clients := e.client :: !evicted_clients;
-            t.counters.evict_count_total <- t.counters.evict_count_total + 1;
-            false
-          end else true
-        ) entries
+      Host_map.filter_map (fun _key entries ->
+        let kept =
+          List.filter (fun e ->
+            if now -. e.last_used_ts > t.config.idle_ttl_seconds
+            then begin
+              evicted_clients := e.client :: !evicted_clients;
+              t.counters.evict_count_total <- t.counters.evict_count_total + 1;
+              false
+            end else true
+          ) entries
+        in
+        match kept with
+        | [] -> None
+        | _ :: _ -> Some kept
       ) t.idle
     in
     t.idle <- remaining;
@@ -827,10 +834,18 @@ let ensure_host_header ~uri headers =
   if has_host_header headers
   then Some headers
   else (
+    let scheme =
+      Uri.scheme uri |> Option.value ~default:"http" |> String.lowercase_ascii
+    in
     match Uri.host uri, Uri.port uri with
-    | Some host, Some port ->
-      Some (("host", Printf.sprintf "%s:%d" host port) :: headers)
-    | (Some _ | None), _ -> if headers = [] then None else Some headers)
+    | Some host, Some port when port <> Host_key.default_port scheme ->
+      let authority_host =
+        if String.contains host ':' && not (String.starts_with ~prefix:"[" host)
+        then Printf.sprintf "[%s]" host
+        else host
+      in
+      Some (("host", Printf.sprintf "%s:%d" authority_host port) :: headers)
+    | (Some _ | None), (Some _ | None) -> if headers = [] then None else Some headers)
 
 (* Enforce an explicit caller limit before retaining a body chunk. A refused
    body remains unread; the request owner closes that connection on Error. *)

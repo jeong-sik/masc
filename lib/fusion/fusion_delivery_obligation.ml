@@ -431,7 +431,15 @@ let with_operation_lock path f =
   let lock = acquire_operation_lock path in
   Fun.protect
     ~finally:(fun () -> release_operation_lock path lock)
-    (fun () -> Eio.Mutex.use_rw ~protect:true lock.mutex f)
+    (fun () ->
+      (* Do not use [Eio.Mutex.use_rw ~protect:true], which permanently poisons
+         pooled per-path locks on unexpected exceptions; atomic file operations
+         hold no torn in-memory state. *)
+      Eio.Fiber.check ();
+      Eio.Mutex.lock lock.mutex;
+      Fun.protect
+        ~finally:(fun () -> Eio.Mutex.unlock lock.mutex)
+        (fun () -> Eio.Cancel.protect f))
 ;;
 
 let load_path_unlocked ~base_path path =

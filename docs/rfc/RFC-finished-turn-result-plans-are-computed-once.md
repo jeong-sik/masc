@@ -83,13 +83,15 @@ related: ["tool-results-age-out-of-context"]
   - 두 측정 모두 `String.length (encode_history_message message)`(248)이고 memo 가 없다.
   - Claude Code(60)·Codex(106)·Antigravity(191) 런타임의 `measure_model_input_message_bytes` 와 ACP(2620)의 `Host.measure_message_bytes` 가 모두 이 식이다.
 
-### 1.4 기억에 드는 값 (11-27 20시)
+### 1.4 기억에 드는 값 (11-27 20~22시)
 
 - run 을 시작할 때 넘겨받은 checkpoint 가 없으면 디스크에서 다시 읽는다(`keeper_run_context.ml:192-203`).
   - 그래서 앞 run 의 메시지 값은 이번 run 의 메시지와 문자열을 나눠 쓰지 않는다. 표의 키는 사본 하나를 붙잡는다.
 - 기록을 셌다. 11-26 이후 snapshot 을 쓴 trace 14개의 history segment 와 turn bundle 을 읽었다.
   - 도구 결과 글이 2,048바이트 이상인 메시지: Keeper 하나에 많게는 3,295개(저장 JSON 28.6MB), 14개를 합치면 19,905개(206.1MB).
-  - 이 서버의 RSS 는 띄운 지 2시간에 8.0GB 였다(PID 98020).
+  - 이 서버(PID 98020)의 RSS(`ps -o rss`)
+    - 띄운 지 1시간 59분: 8,045,856KiB(7.7GiB)
+    - 3시간 12분(21:47): 10,642,176KiB(10.1GiB)
 - history 인코더(`Keeper_context_core.message_measurer`)는 측정기 하나에 버퍼 하나를 둔다(`keeper_context_core_message_json.ml:169-189`). 측정기는 걸음 하나의 것이다.
 - `Provider_config.t` 의 `credential_source` 는 `Refreshable_credential of (unit -> …)` 를 담는다.
   - `Stdlib.compare` 는 함수 값에서 예외를 낸다. 설정 값을 통째로 표의 키로 쓸 수 없다.
@@ -130,9 +132,13 @@ related: ["tool-results-age-out-of-context"]
 
 - 상한은 표 하나에 64MiB 다. 항목의 크기는 그 메시지를 잰 바이트 수로 센다.
   - 키가 붙잡는 문자열은 인코딩한 길이보다 크지 않다. 이스케이프는 길이를 늘리기만 한다.
+    - 인코딩 전 UTF-8 수리도 잘못된 바이트 하나를 U+FFFD 세 바이트로 바꾼다(`lib/core/safe_ops.ml:204-217`).
   - §1.4 에서 가장 큰 Keeper 가 28.6MB 다. 두 배 남짓 여유를 둔다.
 - 새 항목이 상한을 넘기면, 이번 걸음과 바로 앞 걸음이 묻지 않은 항목을 먼저 뺀다.
 - 그래도 넘치면 새 항목을 넣지 않는다. 측정값은 그대로 돌려준다.
+- 한 걸음은 표를 한 번만 훑는다.
+  - 항목은 걸음을 얻기만 한다. 같은 걸음이 다시 훑어도 뺄 항목이 없다.
+  - 이 제한이 없으면, 기록이 상한보다 큰 Keeper 는 넣지 못한 메시지마다 표 전체를 훑는다.
 - LRU 로 빼지 않는다.
   - 걸음은 기록을 늘 같은 순서로 훑는다. 작업 집합이 상한을 넘으면 LRU 는 모든 조회를 놓친다.
   - #55146 의 원장 파일 캐시(256개, 파일 549개)가 그렇게 됐다.
@@ -186,8 +192,9 @@ related: ["tool-results-age-out-of-context"]
   - Keeper 가 다르거나 인코더가 다르면 표를 나눠 쓰지 않는다.
   - 상한을 넘으면 새 항목을 넣지 않고, 그래도 잰 값을 돌려준다.
   - 두 걸음 동안 안 쓴 항목은 자리가 모자랄 때 빠진다.
+  - 한 걸음이 상한을 넘겨도 메시지마다 제 크기를 돌려주고, 먼저 넣은 항목은 남는다.
 - 운영
   - 배포한 뒤, 재시작 11분 뒤와 2시간 뒤에 `sample <pid> 5` 를 뜬다.
   - 스레드별 바쁜 표본에서 `Yojson.Safe.write_string_body` 가 주로 쓰는 스레드의 몫을 18:46(45%)과 비교한다.
-  - 같은 시각 RSS 를 18:46 의 8.0GB 와 비교한다.
+  - 띄운 지 2시간 무렵의 RSS 를 PID 98020 의 8,045,856KiB(1시간 59분)와 비교한다.
   - wire capture 로 요청 바이트가 바뀌지 않았는지 본다.

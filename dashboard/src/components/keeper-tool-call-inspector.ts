@@ -813,7 +813,7 @@ export function KeeperToolCallInspector({ keeperName }: { keeperName: string }) 
     return () => {
       resource.cancel()
     }
-  }, [loadToolCalls, resource])
+  }, [filterSandbox, filterTool, loadToolCalls, resource])
 
   useEffect(() => {
     const unsubscribe = lastEvent.subscribe((event) => {

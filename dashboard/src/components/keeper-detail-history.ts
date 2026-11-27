@@ -180,7 +180,8 @@ export function KeeperCheckpointPanel({
   const mountedRef = useRef(true)
   const activeKeeperRef = useRef(keeperName)
   const loadGenRef = useRef(0)
-  const mutationGenRef = useRef(0)
+  const deleteGenRef = useRef(0)
+  const purgeGenRef = useRef(0)
   const deletingRef = useRef(false)
   const purgePendingRef = useRef<'preview' | 'apply' | null>(null)
   activeKeeperRef.current = keeperName
@@ -190,7 +191,8 @@ export function KeeperCheckpointPanel({
     return () => {
       mountedRef.current = false
       loadGenRef.current += 1
-      mutationGenRef.current += 1
+      deleteGenRef.current += 1
+      purgeGenRef.current += 1
     }
   }, [])
 
@@ -219,7 +221,8 @@ export function KeeperCheckpointPanel({
   }
 
   useEffect(() => {
-    mutationGenRef.current += 1
+    deleteGenRef.current += 1
+    purgeGenRef.current += 1
     deletingRef.current = false
     purgePendingRef.current = null
     setDeleting(false)
@@ -243,12 +246,12 @@ export function KeeperCheckpointPanel({
   }
 
   const deleteSelected = () => {
-    if (deletingRef.current) return
+    if (deletingRef.current || purgePendingRef.current !== null) return
     const targetKeeper = keeperName
     const ids = [...selectedIds]
-    const gen = ++mutationGenRef.current
-    const isCurrent = () =>
-      mountedRef.current && activeKeeperRef.current === targetKeeper && mutationGenRef.current === gen
+    const gen = ++deleteGenRef.current
+    const isSameKeeper = () => mountedRef.current && activeKeeperRef.current === targetKeeper
+    const isCurrent = () => isSameKeeper() && deleteGenRef.current === gen
     void (async () => {
       if (ids.length === 0) {
         showToast('삭제할 snapshot을 먼저 고르세요', 'warning')
@@ -260,7 +263,7 @@ export function KeeperCheckpointPanel({
         tone: 'danger',
         confirmText: '삭제',
       })
-      if (!confirmed || !isCurrent() || deletingRef.current) return
+      if (!confirmed || !isCurrent() || deletingRef.current || purgePendingRef.current !== null) return
       deletingRef.current = true
       setDeleting(true)
       try {
@@ -287,7 +290,7 @@ export function KeeperCheckpointPanel({
           showToast(err instanceof Error ? err.message : 'snapshot 삭제 실패', 'error')
         }
       } finally {
-        if (isCurrent()) {
+        if (isSameKeeper()) {
           deletingRef.current = false
           setDeleting(false)
         }
@@ -296,11 +299,11 @@ export function KeeperCheckpointPanel({
   }
 
   const previewPurge = () => {
-    if (purgePendingRef.current !== null) return
+    if (purgePendingRef.current !== null || deletingRef.current) return
     const targetKeeper = keeperName
-    const gen = ++mutationGenRef.current
-    const isCurrent = () =>
-      mountedRef.current && activeKeeperRef.current === targetKeeper && mutationGenRef.current === gen
+    const gen = ++purgeGenRef.current
+    const isSameKeeper = () => mountedRef.current && activeKeeperRef.current === targetKeeper
+    const isCurrent = () => isSameKeeper() && purgeGenRef.current === gen
     void (async () => {
       purgePendingRef.current = 'preview'
       setPurgePending('preview')
@@ -314,7 +317,7 @@ export function KeeperCheckpointPanel({
           showToast(err instanceof Error ? err.message : 'checkpoint purge 미리보기 실패', 'error')
         }
       } finally {
-        if (isCurrent()) {
+        if (isSameKeeper()) {
           purgePendingRef.current = null
           setPurgePending(null)
         }
@@ -323,12 +326,12 @@ export function KeeperCheckpointPanel({
   }
 
   const applyPurge = () => {
-    if (purgePendingRef.current !== null || !purgePreview) return
+    if (purgePendingRef.current !== null || deletingRef.current || !purgePreview) return
     const targetKeeper = keeperName
     const report = purgePreview.report
-    const gen = ++mutationGenRef.current
-    const isCurrent = () =>
-      mountedRef.current && activeKeeperRef.current === targetKeeper && mutationGenRef.current === gen
+    const gen = ++purgeGenRef.current
+    const isSameKeeper = () => mountedRef.current && activeKeeperRef.current === targetKeeper
+    const isCurrent = () => isSameKeeper() && purgeGenRef.current === gen
     void (async () => {
       const confirmed = await requestConfirm({
         title: '현재 checkpoint 청소',
@@ -336,7 +339,7 @@ export function KeeperCheckpointPanel({
         tone: 'danger',
         confirmText: '백업 후 청소',
       })
-      if (!confirmed || !isCurrent() || purgePendingRef.current !== null) return
+      if (!confirmed || !isCurrent() || purgePendingRef.current !== null || deletingRef.current) return
       purgePendingRef.current = 'apply'
       setPurgePending('apply')
       try {
@@ -357,7 +360,7 @@ export function KeeperCheckpointPanel({
           showToast(err instanceof Error ? err.message : 'checkpoint purge 적용 실패', 'error')
         }
       } finally {
-        if (isCurrent()) {
+        if (isSameKeeper()) {
           purgePendingRef.current = null
           setPurgePending(null)
         }
@@ -413,7 +416,7 @@ export function KeeperCheckpointPanel({
           <button
             type="button"
             class="rounded-[var(--r-1)] border border-[var(--bad-30)] bg-[var(--bad-10)] px-3 py-1.5 text-2xs font-semibold text-[var(--rose-light)] hover:bg-[var(--bad-soft)] cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 v2-monitoring-action"
-            disabled=${deleting || selectedIds.length === 0}
+            disabled=${deleting || purgePending !== null || selectedIds.length === 0}
             onClick=${deleteSelected}
           >${deleting ? '삭제 중...' : `선택 삭제 (${selectedIds.length})`}</button>
         </div>
@@ -441,7 +444,7 @@ export function KeeperCheckpointPanel({
             <${ActionButton}
               variant="ghost"
               size="md"
-              disabled=${purgePending !== null || inventory.current_status !== 'available'}
+              disabled=${deleting || purgePending !== null || inventory.current_status !== 'available'}
               ariaBusy=${purgePending === 'preview'}
               testId="keeper-checkpoint-purge-preview"
               onClick=${previewPurge}
@@ -450,7 +453,8 @@ export function KeeperCheckpointPanel({
               variant="danger"
               size="md"
               disabled=${
-                purgePending !== null
+                deleting
+                || purgePending !== null
                 || !purgePreview
                 || !purgePreview.apply_allowed
                 || purgePreview.report.bytes_removed <= 0

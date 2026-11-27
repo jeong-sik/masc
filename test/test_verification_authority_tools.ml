@@ -86,6 +86,18 @@ let ssh_fixture_endpoint = "fixture"
    compile -- the same contract test_keeper_sandbox_read_backend keeps. *)
 let ssh_fixture_body = "remote-file-content"
 
+(* [Keeper_sandbox_remote_checkouts] invokes [python3 -c <probe_script> ...]
+   with [mode] ("layout" | "inspect") at [probe_mode_argv_index], followed by
+   budget/worker arguments (#55055, #55071). Match the mode slot by index
+   instead of [argv[-1]] so trailing probe arguments never break this fixture. *)
+let is_layout_probe_py =
+  let idx = Masc.Keeper_sandbox_remote_checkouts.For_testing.probe_mode_argv_index in
+  Printf.sprintf
+    "(len(argv) > %d and argv[:2] == ['python3', '-c'] and argv[%d] == 'layout')"
+    idx
+    idx
+;;
+
 let ssh_script_for ~layout_body =
   Printf.sprintf
     {|#!/usr/bin/env python3
@@ -95,11 +107,12 @@ length = int.from_bytes(prefix, "big")
 frame = prefix + sys.stdin.buffer.read(length)
 request, _ = json.JSONDecoder().raw_decode(frame[8:].decode())
 argv = [base64.b64decode(arg).decode() for arg in request['argv']]
-body = %s if argv[-1] == 'layout' else %s
+body = %s if %s else %s
 sys.stdout.write(body)
 sys.stderr.write(%s)
 |}
     (Yojson.Safe.to_string (`String layout_body))
+    is_layout_probe_py
     (Yojson.Safe.to_string (`String ssh_fixture_body))
     (Yojson.Safe.to_string (`String
        (Exec_ssh_protocol.render_trailer
@@ -1386,9 +1399,9 @@ request, _ = json.JSONDecoder().raw_decode(sys.stdin.buffer.read(length).decode(
 argv = [base64.b64decode(arg).decode() for arg in request['argv']]
 with open(%s, 'a') as log:
     log.write(json.dumps({'ssh': sys.argv[1:], 'argv': argv, 'cwd': base64.b64decode(request['cwd']).decode()}) + '\n')
-sys.stdout.write('{"entries":[],"checkouts":[],"limit":null}' if argv[-1] == 'layout' else 'original endpoint content')
+sys.stdout.write('{"entries":[],"checkouts":[],"limit":null}' if %s else 'original endpoint content')
 sys.stderr.write(%s)
-|} (Yojson.Safe.to_string (`String log_path)) (Yojson.Safe.to_string (`String trailer)) in
+|} (Yojson.Safe.to_string (`String log_path)) is_layout_probe_py (Yojson.Safe.to_string (`String trailer)) in
     with_surface ~ssh_script:script (fun config surface ->
       let get = function Ok value -> value | Error reason -> Alcotest.fail reason in
       let original_endpoint = Masc.Keeper_sandbox_ssh.resolve_endpoint

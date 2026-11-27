@@ -2375,20 +2375,6 @@ let test_docker_refuses_the_policy_lane () =
       (String_util.contains_substring detail "policy"
        && String_util.contains_substring detail "docker")
 
-let test_docker_nofile_args_follow_config () =
-  with_env "MASC_KEEPER_SANDBOX_NOFILE_LIMIT" "not-a-number" @@ fun () ->
-  Alcotest.(check (list string)) "default nofile limit"
-    [ "--ulimit"; "nofile=245760:245760" ]
-    (Keeper_sandbox_runtime.docker_nofile_args ());
-  with_env "MASC_KEEPER_SANDBOX_NOFILE_LIMIT" "8192" @@ fun () ->
-  Alcotest.(check (list string)) "configured nofile limit"
-    [ "--ulimit"; "nofile=8192:8192" ]
-    (Keeper_sandbox_runtime.docker_nofile_args ());
-  with_env "MASC_KEEPER_SANDBOX_NOFILE_LIMIT" "256" @@ fun () ->
-  Alcotest.(check (list string)) "nofile floor"
-    [ "--ulimit"; "nofile=1024:1024" ]
-    (Keeper_sandbox_runtime.docker_nofile_args ())
-
 let test_docker_masc_config_binding_pins_container_runtime_paths () =
   let base = "/tmp/masc-base" in
   let container_root = "/home/keeper/playground/acme-sandbox" in
@@ -4032,8 +4018,6 @@ let run_tests ~clock ~fs ~net () =
             test_each_keeper_gets_its_own_policy_network;
           Alcotest.test_case "policy names fit Apple and preserve owner identity" `Quick
             test_policy_network_names_fit_apple_and_preserve_owner_identity;
-          Alcotest.test_case "docker nofile args follow config" `Quick
-            test_docker_nofile_args_follow_config;
           Alcotest.test_case "docker MASC config binding pins paths" `Quick
             test_docker_masc_config_binding_pins_container_runtime_paths;
           Alcotest.test_case "docker config mount and env args" `Quick

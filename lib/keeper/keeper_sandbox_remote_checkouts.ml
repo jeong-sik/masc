@@ -546,12 +546,32 @@ let budgets ~timeout_sec =
   }
 ;;
 
-module For_testing = struct
-  let probe_script = probe_script
-  let budgets = budgets
-end
+(* Zero-based index of the mode argument (["inspect"] / ["layout"]) inside the
+   [python3 -c <probe_script> ...] [argv] built in [probe_argv] below. Inside
+   [probe_script] this corresponds to [sys.argv[5]]. *)
+let probe_mode_argv_index = 7
 
 type probe_mode = Inspect | Layout
+
+let probe_argv ~catalog_arg ~mode ~(budgets : budgets) =
+  [ "python3"
+  ; "-c"
+  ; probe_script
+  ; catalog_arg
+  ; string_of_int Keeper_playground_checkouts.max_reported_checkouts
+  ; string_of_int Keeper_playground_checkouts.max_scanned_entries
+  ; string_of_int target_ref_stale_after_s
+  ; (match mode with Inspect -> "inspect" | Layout -> "layout")
+  ; Printf.sprintf "%g" budgets.checkout_sec
+  ; string_of_int budgets.workers
+  ]
+;;
+
+module For_testing = struct
+  let probe_script = probe_script
+  let probe_mode_argv_index = probe_mode_argv_index
+  let budgets = budgets
+end
 
 let run_probe ?read_authority ~timeout_sec ~(config : Workspace.config)
     ~(meta : keeper_meta) ~catalog ~mode ~parse ()
@@ -576,19 +596,7 @@ let run_probe ?read_authority ~timeout_sec ~(config : Workspace.config)
       let catalog_arg = catalog_to_json_arg catalog in
       (* The probe takes both budgets from here so the endpoint walk and the
          host walk in [Keeper_playground_checkouts] stop at the same numbers. *)
-      let argv =
-        [ "python3"
-        ; "-c"
-        ; probe_script
-        ; catalog_arg
-        ; string_of_int Keeper_playground_checkouts.max_reported_checkouts
-        ; string_of_int Keeper_playground_checkouts.max_scanned_entries
-        ; string_of_int target_ref_stale_after_s
-        ; (match mode with Inspect -> "inspect" | Layout -> "layout")
-        ; Printf.sprintf "%g" budgets.checkout_sec
-        ; string_of_int budgets.workers
-        ]
-      in
+      let argv = probe_argv ~catalog_arg ~mode ~budgets in
       (* Matched rather than collapsed with [status_tuple]: that helper turns
          a transport failure into a non-zero status (the timeout status or
          [WEXITED 1]), and the non-zero-exit arm below reports

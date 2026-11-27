@@ -70,17 +70,17 @@ let string_field node key =
 
 let find_node nodes p = List.find_opt (fun n -> path_of_node n = p) nodes
 
+(* The files are planted where the connectors write them by default, so a
+   default that leaves [.masc] would show up in the listing. *)
 let test_connector_state_excluded () =
   with_temp_dir (fun base ->
-    touch (Filename.concat base ".masc/connectors/slack/bindings.json");
-    touch (Filename.concat base ".masc/connectors/slack/binding_audit.jsonl");
+    let dir = Common.connector_state_dir_of_base ~base_path:base Common.Connector_slack in
+    touch (Filename.concat dir Common.connector_bindings_filename);
+    touch (Filename.concat dir Common.connector_binding_audit_filename);
     touch (Filename.concat base "lib/bar.ml");
-    let nodes = W.scan_dir ~base ~depth:0 ~max_depth:4 ~max_nodes:200 [] base in
-    let ps = paths nodes in
-    let under_masc p = p = ".masc" || String.starts_with ~prefix:".masc/" p in
-    let has_lib = List.exists (fun p -> p = "lib" || p = "lib/bar.ml") ps in
-    check bool "connector state must not appear in tree" false (List.exists under_masc ps);
-    check bool "lib must appear in tree" true has_lib)
+    let nodes = W.scan_dir ~base ~depth:0 ~max_depth:5 ~max_nodes:200 [] base in
+    check (list string) "only workspace content is listed" [ "lib"; "lib/bar.ml" ]
+      (List.sort String.compare (paths nodes)))
 ;;
 
 let test_other_internal_dirs_still_excluded () =

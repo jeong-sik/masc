@@ -318,6 +318,14 @@ export function defaultParamsForTab(tabId: TabId): Record<string, string> {
   return DASHBOARD_SURFACES.find(surface => surface.id === tabId)?.defaultParams ?? {}
 }
 
+/** The route that shows a Keeper: the keepers tab on that Keeper, or on the
+ *  keepers roster when no name is given. Every dashboard link that opens a
+ *  Keeper takes its target from here. */
+export function keeperRoute(name?: string): { tab: TabId; params: Record<string, string> } {
+  const keeper = name?.trim()
+  return { tab: 'keepers', params: keeper ? { keeper } : {} }
+}
+
 export function sectionItemsForTab(tabId: TabId): DashboardSectionNavItem[] {
   if (isSectionlessSurface(tabId)) return []
   return DASHBOARD_SECTION_ITEMS[tabId as NonHomeTabId]

@@ -1,7 +1,9 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   initRouter,
+  keeperHref,
   navigate,
+  navigateToKeeper,
   navigateToPost,
   replaceRoute,
   route,
@@ -186,5 +188,26 @@ describe('deep links written by hand', () => {
     )
     expect(route.value.tab).toBe('monitoring')
     expect(route.value.params.keeper).toBe('a+b%20c')
+  })
+})
+
+describe('navigateToKeeper', () => {
+  it('opens a Keeper in the keepers tab', () => {
+    navigateToKeeper('sangsu')
+    expect(route.value.tab).toBe('keepers')
+    expect(route.value.params).toEqual({ keeper: 'sangsu' })
+    expect(window.location.hash).toBe('#keepers?keeper=sangsu')
+  })
+
+  it('opens the keepers roster when no name is given', () => {
+    navigateToKeeper('  ')
+    expect(route.value.tab).toBe('keepers')
+    expect(route.value.params).toEqual({})
+    expect(window.location.hash).toBe('#keepers')
+  })
+
+  it('links to the route it opens', () => {
+    expect(keeperHref('sangsu')).toBe('#keepers?keeper=sangsu')
+    expect(keeperHref()).toBe('#keepers')
   })
 })

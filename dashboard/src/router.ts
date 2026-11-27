@@ -4,7 +4,7 @@
 import { signal } from '@preact/signals'
 import type { RouteState, TabId } from './types'
 import { VALID_TABS } from './types'
-import { normalizeRouteParams } from './config/navigation'
+import { keeperRoute, normalizeRouteParams } from './config/navigation'
 
 const DEFAULT_ROUTE: RouteState = { tab: 'overview', params: {}, postId: null }
 
@@ -174,6 +174,19 @@ export function navigate(tab: TabId, params?: Record<string, string>): void {
   if (window.location.hash !== nextHash) {
     window.location.hash = nextHash
   }
+}
+
+/** Opens a Keeper in the keepers tab, or the keepers roster when no name is
+ *  given. */
+export function navigateToKeeper(name?: string): void {
+  const target = keeperRoute(name)
+  navigate(target.tab, target.params)
+}
+
+/** The hash of {@link navigateToKeeper}'s target, for links. */
+export function keeperHref(name?: string): string {
+  const target = keeperRoute(name)
+  return hashForRoute(target.tab, target.params)
 }
 
 export function replaceRoute(tab: TabId, params?: Record<string, string>): void {

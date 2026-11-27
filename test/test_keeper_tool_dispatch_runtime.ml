@@ -4474,7 +4474,7 @@ let test_agent_core_handler_threads_eio_context_to_keeper_dispatch () =
           Masc.Keeper_registry.For_testing.unregister ~base_path:config.base_path meta.name)
         (fun () ->
           Masc.Keeper_dispatch_ref.dispatch :=
-            (fun ~config:_ ~agent_name:_
+            (fun ~config:_ ~caller:_
                  ~publication_recovery_provider:observed_provider
                  ?sw ?clock ?proc_mgr:_ ?net:_ ?mcp_session_id:_
                  ?authorize_external_effect:_

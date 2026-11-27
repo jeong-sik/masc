@@ -1934,6 +1934,11 @@ let test_keeper_dispatch_ref_reaches_every_keeper_descriptor () =
         | Descriptor.Tool_masc_keeper_dispatch -> true
         | _ -> false)
     in
+    let caller =
+      match Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String agent_name ]) with
+      | Ok meta -> Keeper_dispatch_ref.Turn_caller.of_running_turn meta
+      | Error detail -> Alcotest.fail ("keeper meta fixture failed: " ^ detail)
+    in
     let unreachable =
       List.filter_map
         (fun d ->
@@ -1941,7 +1946,7 @@ let test_keeper_dispatch_ref_reaches_every_keeper_descriptor () =
            match
              !Keeper_dispatch_ref.dispatch
                ~config
-               ~agent_name
+               ~caller
                ~publication_recovery_provider:publication_recovery.provider
                ~name
                ~args:(`Assoc [])

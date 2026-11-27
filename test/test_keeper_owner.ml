@@ -5951,7 +5951,7 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
           in
           let refused =
             Keeper_tool_surface_ops.handle_keeper_delegate
-              ~submitted_by:"agent-operation-caller" ctx absent
+              ~submitter:(Keeper_tool_surface_ops.Named_caller "agent-operation-caller") ctx absent
           in
           check bool "an absent artifact is a workflow rejection" true
             (Tool_result.failure_class refused = Some Tool_result.Workflow_rejection);
@@ -5981,12 +5981,12 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
           check bool "a damaged artifact is a runtime failure" true
             (Tool_result.failure_class
                (Keeper_tool_surface_ops.handle_keeper_delegate
-                  ~submitted_by:"agent-operation-caller" ctx unreadable)
+                  ~submitter:(Keeper_tool_surface_ops.Named_caller "agent-operation-caller") ctx unreadable)
              = Some Tool_result.Runtime_failure));
        let result =
          Keeper_tool_surface_ops.handle_keeper_delegate
            ~invocation_ref
-           ~submitted_by:"agent-operation-caller"
+           ~submitter:(Keeper_tool_surface_ops.Named_caller "agent-operation-caller")
            ctx
            args
        in
@@ -6008,7 +6008,7 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
        let repeated =
          Keeper_tool_surface_ops.handle_keeper_delegate
            ~invocation_ref
-           ~submitted_by:"agent-operation-caller"
+           ~submitter:(Keeper_tool_surface_ops.Named_caller "agent-operation-caller")
            ctx
            args
        in
@@ -6300,7 +6300,9 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
        let submitted =
          Keeper_tool_surface_ops.handle_keeper_delegate
            ~invocation_ref:asker_invocation_ref
-           ~submitted_by:asker_meta.name
+           ~submitter:
+             (Keeper_tool_surface_ops.Own_turn
+                (Keeper_dispatch_ref.Turn_caller.of_running_turn asker_meta))
            ctx
            args
        in
@@ -6330,7 +6332,67 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
        check_woken_notice "Queued" (asker_read ());
        let owner = Owner_registry.get ~base_path ~keeper_name:meta.name |> Result.get_ok in
        ignore (owner_ok (Owner.claim_next_operation owner));
-       check_woken_notice "Running" (asker_read ())
+       check_woken_notice "Running" (asker_read ());
+       (* An MCP client or an HTTP route names itself with a string. Giving the
+          registered asker's name does not make its delegate the asker's: the
+          stored operation names no sender Keeper, and the turn it starts gets
+          the tool approval gate. The asker's own turn above is Keeper work
+          and gets none. Both read the stored source, as the turn does. *)
+       let gets_approval_gate submission =
+         let operation_id =
+           match
+             Chat_operation.Operation_id.of_string
+               Yojson.Safe.Util.(
+                 Tool_result.data submission |> member "operation_id" |> to_string)
+           with
+           | Ok operation_id -> operation_id
+           | Error detail -> fail detail
+         in
+         let operation =
+           match
+             Owner_registry.exact_operation ~base_path ~keeper_name:meta.name operation_id
+           with
+           | Ok (Some operation) -> operation
+           | Ok None -> fail "submitted delegate operation is missing"
+           | Error error -> fail (Owner_registry.command_error_to_string error)
+         in
+         let source =
+           match Keeper_chat_operation_payload.source_of_json operation.source with
+           | Ok source -> source
+           | Error detail -> fail detail
+         in
+         let request =
+           match
+             Server_routes_http_keeper_stream.For_testing.parse_request
+               ~media_store:(Agent_core.History.Memory_store.create ())
+               {|{"request_id":"req-approval-gate","name":"agent-operation-target","message":"run it"}|}
+           with
+           | Ok request -> request
+           | Error detail -> fail detail
+         in
+         let request =
+           { request with
+             Server_routes_http_keeper_stream.channel = source.channel
+           ; sender_keeper = source.sender_keeper
+           }
+         in
+         Server_routes_http_keeper_stream.For_testing.approval_gate_for_speaker
+           (Server_routes_http_keeper_stream.For_testing.chat_speaker_of_request request)
+           ~create:(fun () -> ())
+         |> Option.is_some
+       in
+       let named_after_the_asker =
+         Keeper_tool_surface_ops.handle_keeper_delegate
+           ~submitter:(Keeper_tool_surface_ops.Named_caller asker_meta.name)
+           ctx
+           args
+       in
+       check bool "a caller naming a registered Keeper is accepted" true
+         (Tool_result.is_success named_after_the_asker);
+       check bool "a caller naming a registered Keeper keeps the approval gate" true
+         (gets_approval_gate named_after_the_asker);
+       check bool "the Keeper's own delegate runs without the approval gate" false
+         (gets_approval_gate submitted)
        end)
 ;;
 

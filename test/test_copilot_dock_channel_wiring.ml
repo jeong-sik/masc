@@ -164,7 +164,9 @@ let test_dashboard_without_channel_is_owner () =
 (* The Owner operation runner records [chat_speaker_of_request] and the turn
    builds its approval gate from that speaker. A Keeper's masc_keeper_msg and
    an operator's MCP call both arrive on the agent channel with no connector
-   speaker; only the registry-matched [sender_keeper] tells them apart. *)
+   speaker; only [sender_keeper], which a Keeper's own turn alone submits,
+   tells them apart. test_keeper_owner covers a caller that gives a
+   registered Keeper's name. *)
 let gets_approval_gate payload =
   Stream.For_testing.approval_gate_for_speaker
     (Stream.For_testing.chat_speaker_of_request payload)

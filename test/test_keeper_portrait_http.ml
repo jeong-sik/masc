@@ -932,7 +932,12 @@ beanie = %d
     check string "refusal did not mutate ledger" initial (ledger_bytes ());
     let read_roster () =
       Keeper_tool_surface.For_testing.reset_keeper_list_cache ();
-      match !Keeper_dispatch_ref.dispatch ~config ~agent_name:"observer"
+      let observer =
+        Keeper_dispatch_ref.Turn_caller.of_running_turn
+          (require_ok Fun.id
+             (Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String "observer" ])))
+      in
+      match !Keeper_dispatch_ref.dispatch ~config ~caller:observer
         ~publication_recovery_provider:Masc_test_deps.non_runtime_publication_recovery_provider
         ~name:"masc_keeper_list" ~args:(`Assoc ["detailed", `Bool true]) () with
       | Some result -> Yojson.Safe.from_string (Tool_result.message result)

@@ -97,7 +97,7 @@ let with_keeper_dispatch_probe f =
   let calls = ref [] in
   let dispatch
         ~config:_
-        ~agent_name:_
+        ~caller:_
         ~publication_recovery_provider:_
         ?sw:_
         ?clock:_

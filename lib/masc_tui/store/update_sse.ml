@@ -645,6 +645,21 @@ let apply_agent_core (m : Model.t) (ev : Wire_observer.agent_core_event) =
           m.infra
       in
       ({ m with incidents; infra }, [])
+  | Wire_observer.Agent_cancelled { reason; _ } ->
+      (* A run stopped from outside (an operator stop, an interrupt, a lost
+         race) is not a failure: it goes to Activity and raises no incident. *)
+      let infra =
+        Infra_store.push_activity
+          {
+            at_unix = ev.at_unix;
+            kind = Infra_store.Activity_agent_core;
+            keeper = ev.agent;
+            summary = "agent_cancelled";
+            detail = Some reason;
+          }
+          m.infra
+      in
+      ({ m with infra }, [])
   | Wire_observer.Relay_subscription_loss { source_id; dropped_count; _ } ->
       let infra =
         m.infra

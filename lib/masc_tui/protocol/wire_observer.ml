@@ -96,6 +96,7 @@ type agent_core_kind =
   | Agent_started
   | Agent_completed of { elapsed_s : float }
   | Agent_failed of { elapsed_s : float; error_code : string; error : string }
+  | Agent_cancelled of { elapsed_s : float; reason : string }
   | Agent_yielded of { elapsed_s : float }
   | Agent_input_required of {
       elapsed_s : float;
@@ -272,6 +273,11 @@ let decode_agent_core_kind ~event_type payload =
       let* error_code = required_string_field payload "error_code" in
       let* error = required_string_field payload "error" in
       Ok (Agent_failed { elapsed_s; error_code; error })
+  | "agent_cancelled" ->
+      let* payload = require_payload_object ~event_type payload in
+      let* elapsed_s = required_finite_float payload "elapsed_s" in
+      let* reason = required_string_field payload "reason" in
+      Ok (Agent_cancelled { elapsed_s; reason })
   | "agent_yielded" ->
       let* payload = require_payload_object ~event_type payload in
       let* elapsed_s = required_finite_float payload "elapsed_s" in

@@ -7,6 +7,7 @@ import {
   type TypedAgentCorePayload,
 } from './sse-event-payload'
 import {
+  writeAgentCancelledPayload,
   writeAgentCompletedPayload,
   writeAgentFailedPayload,
   writeAgentInputRequiredPayload,
@@ -64,6 +65,10 @@ const ALL_PAYLOAD_CASES: TypedAgentCorePayload[] = [
       error_detail: { variant: 'rate_limited', message: 'slow down' },
     },
   },
+  {
+    kind: 'agent_cancelled',
+    payload: { agent_name: 'a', task_id: 't', reason: 'Stdlib.Exit', elapsed_s: 1 },
+  },
   { kind: 'tool_called', payload: { agent_name: 'a', tool_name: 'bash' } },
   { kind: 'tool_completed', payload: { agent_name: 'a', tool_name: 'bash' } },
   { kind: 'turn_started', payload: { agent_name: 'a', turn: 1 } },
@@ -113,6 +118,8 @@ function serializePayload(payload: TypedAgentCorePayload): Record<string, unknow
       return writeAgentInputRequiredPayload(payload.payload)
     case 'agent_failed':
       return writeAgentFailedPayload(payload.payload)
+    case 'agent_cancelled':
+      return writeAgentCancelledPayload(payload.payload)
     case 'tool_called':
       return writeToolCalledPayload(payload.payload)
     case 'tool_completed':
@@ -186,6 +193,30 @@ describe('parseAgentCorePayload', () => {
       turn: 3,
       elapsed_s: 12.5,
     })
+  })
+
+  // #38608: a cancelled run is its own outcome, not an agent_failed internal
+  // error. The reason is a rendered exception for people; it is required.
+  it('parses agent_core:agent_cancelled and requires its reason', () => {
+    const result = parseAgentCorePayload('agent_core:agent_cancelled', {
+      agent_name: 'beta',
+      task_id: 'task_99',
+      reason: 'Masc.Keeper_owner_signals.Stop_active_child',
+      elapsed_s: 12.5,
+    })
+    expect(result.success).toBe(true)
+    if (!result.success || result.data.kind !== 'agent_cancelled') return
+    expect(result.data.payload).toEqual({
+      agent_name: 'beta',
+      task_id: 'task_99',
+      reason: 'Masc.Keeper_owner_signals.Stop_active_child',
+      elapsed_s: 12.5,
+    })
+    expect(parseAgentCorePayload('agent_core:agent_cancelled', {
+      agent_name: 'beta',
+      task_id: 'task_99',
+      elapsed_s: 12.5,
+    }).success).toBe(false)
   })
 
   it('parses agent_core:agent_input_required with the typed request', () => {

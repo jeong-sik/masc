@@ -165,6 +165,32 @@ describe('server-push Agent Core typed-payload handlers', () => {
     expect(lastJournalEntry()?.text).toBe('Agent run yielded · T2 · 1.5s')
   })
 
+  // #38608: a cancelled run arrives as its own event, not as agent_failed.
+  it('records a cancelled run with its reason', () => {
+    emitEvent({
+      type: 'agent_core:agent_cancelled',
+      event_type: 'agent_cancelled',
+      ts_unix: 1_000,
+      correlation_id: 'c1',
+      run_id: 'r1',
+      agent_name: 'alpha',
+      task_id: 't1',
+      turn: null,
+      tool_name: null,
+      payload: {
+        agent_name: 'alpha',
+        task_id: 't1',
+        reason: 'Masc.Keeper_owner_signals.Stop_active_child',
+        elapsed_s: 1.5,
+      },
+    })
+    expect(journal.value).toHaveLength(1)
+    expect(lastJournalEntry()?.agent).toBe('alpha')
+    expect(lastJournalEntry()?.eventType).toBe('agent_core_event')
+    expect(lastJournalEntry()?.preview).toBe('Masc.Keeper_owner_signals.Stop_active_child')
+    expect(lastJournalEntry()?.runId).toBe('r1')
+  })
+
   it('records a typed input request without calling it failure', () => {
     emitEvent({
       type: 'agent_core:agent_input_required',

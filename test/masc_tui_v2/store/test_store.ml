@@ -660,6 +660,36 @@ let test_three_channel_separation () =
   Alcotest.(check int) "a remembered approval records the decision" 2
     (List.length m_remembered.work.recent_decisions_24h)
 
+(* #38608: a cancelled run is not a failure. The row the server writes for it
+   decodes as Agent_cancelled and raises no incident, where the same
+   cancellation used to arrive as agent_failed and raise one. *)
+let test_cancelled_run_raises_no_incident () =
+  let row =
+    Yojson.Safe.from_string
+      {|{"type":"agent_core:agent_cancelled","event_type":"agent_cancelled","ts_unix":1795252090.0,"agent_name":"alpha","task_id":"run-1","payload":{"agent_name":"alpha","task_id":"run-1","reason":"Stdlib.Exit","elapsed_s":1.5}}|}
+  in
+  let event =
+    match Wire_observer.event_of_json row with
+    | Ok (Wire_observer.Agent_core { kind = Wire_observer.Agent_cancelled { reason; _ }; _ } as event) ->
+        Alcotest.(check string) "reason decoded" "Stdlib.Exit" reason;
+        event
+    | Ok _ -> Alcotest.fail "agent_cancelled decoded to another event"
+    | Error detail -> Alcotest.fail ("agent_cancelled did not decode: " ^ detail)
+  in
+  let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
+  let m1, cmds =
+    Update.step ~now:t1 m0
+      (Msg.Sse_event
+         {
+           epoch = m0.epoch;
+           event =
+             Msg.Sse_observer_delivery
+               { cursor = Some 1; decoded = Wire_observer.Event event };
+         })
+  in
+  Alcotest.(check int) "no incident" 0 (Incidents.count m1.incidents);
+  Alcotest.(check int) "no request" 0 (List.length cmds)
+
 let test_exact_settlement_releases_last_attention_selection () =
   let m = Model.initial ~auth_session:Rbac.single_user_local_admin ~cols:140 ~rows:40 () in
   let inbox = { m with nav = { m.nav with workspace = Nav.Work; sidebar_focused = false };
@@ -24525,6 +24555,8 @@ let () =
       , [
           Alcotest.test_case "health/attention/incident isolation" `Quick
             test_three_channel_separation;
+          Alcotest.test_case "a cancelled run raises no incident" `Quick
+            test_cancelled_run_raises_no_incident;
           Alcotest.test_case "exact settlement releases the last selected approval" `Quick
             test_exact_settlement_releases_last_attention_selection;
         ] );

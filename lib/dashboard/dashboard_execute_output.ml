@@ -22,6 +22,8 @@ type active_stream = {
   stream_id : int;
   task_id : string option;
   command : string;
+  cwd : string option;
+  sandbox_profile : string option;
   started_at : float;
 }
 
@@ -52,6 +54,9 @@ type logged_event =
       seq : int;
       stream_id : int;
       task_id : string option;
+      command : string;
+      cwd : string option;
+      sandbox_profile : string option;
       generated_at : float;
     }
   | Line_event of {
@@ -213,6 +218,8 @@ let append_logged_locked ~keeper (make : int -> logged_event) =
       keeper
       { slots = Array.make event_log_capacity first; next_seq = first_seq + 1 }
 
+let has_ansi_escape text = String.contains text '\x1b'
+
 let append_lines_locked ~keeper ~stream_id ~task_id ~generated_at ~stream texts =
   let ts_ms = ts_ms_of_unix generated_at in
   List.iter
@@ -221,7 +228,15 @@ let append_lines_locked ~keeper ~stream_id ~task_id ~generated_at ~stream texts 
          Line_event
            { keeper
            ; task_id
-           ; line = { seq; stream_id; task_id; ts_ms; stream; text; ansi = false }
+           ; line =
+               { seq
+               ; stream_id
+               ; task_id
+               ; ts_ms
+               ; stream
+               ; text
+               ; ansi = has_ansi_escape text
+               }
            ; generated_at
            }))
     texts
@@ -284,7 +299,7 @@ let record_completed ~keeper_name ~task_id ~stdout ~stderr ~status ?(streamed = 
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> record_failure exn
 
-let record_stream_start ~keeper_name ~stream_id ~task_id ~command =
+let start_stream ?cwd ?sandbox_profile ~keeper_name ~stream_id ~task_id ~command () =
   let keeper = normalize_keeper keeper_name in
   if keeper = ""
   then ()
@@ -292,13 +307,19 @@ let record_stream_start ~keeper_name ~stream_id ~task_id ~command =
     let generated_at = now_unix () in
     with_lock (fun () ->
       let opened_seq = last_logged_seq_locked keeper + 1 in
-      let active = { stream_id; task_id; command; started_at = generated_at } in
+      let active =
+        { stream_id; task_id; command; cwd; sandbox_profile; started_at = generated_at }
+      in
       Hashtbl.replace open_streams (keeper, stream_id) { active; opened_seq };
       append_logged_locked ~keeper (fun seq ->
-        Task_opened_event { keeper; seq; stream_id; task_id; generated_at });
+        Task_opened_event
+          { keeper; seq; stream_id; task_id; command; cwd; sandbox_profile; generated_at });
       append_lines_locked ~keeper ~stream_id:(Some stream_id) ~task_id
         ~generated_at ~stream:"cmd" (line_texts command);
       wake_subscribers_locked keeper))
+
+let record_stream_start ~keeper_name ~stream_id ~task_id ~command =
+  start_stream ~keeper_name ~stream_id ~task_id ~command ()
 
 let append_stream_chunk ~keeper_name ~stream_id ~stream chunk =
   let keeper = normalize_keeper keeper_name in
@@ -460,6 +481,15 @@ let snapshot ~keeper_name =
       ; generated_at
       }
 
+let optional_metadata_fields ~cwd ~sandbox_profile =
+  (match cwd with
+   | Some value -> [ "cwd", `String (String_util.sanitize_utf8 value) ]
+   | None -> [])
+  @
+  match sandbox_profile with
+  | Some value -> [ "sandbox_profile", `String (String_util.sanitize_utf8 value) ]
+  | None -> []
+
 let option_json f = function
   | Some value -> f value
   | None -> `Null
@@ -488,10 +518,14 @@ let snapshot_json (s : snapshot) =
     ; "lines", `List (List.map output_line_json s.lines)
     ; ( "active_streams"
       , `List (List.map (fun (stream : active_stream) ->
-          `Assoc [ "stream_id", `Int stream.stream_id
-                 ; "task_id", option_json (fun value -> `String value) stream.task_id
-                 ; "command", `String (String_util.sanitize_utf8 stream.command)
-                 ; "started_at", `Float stream.started_at ]) s.active_streams) )
+          `Assoc
+            ([ "stream_id", `Int stream.stream_id
+             ; "task_id", option_json (fun value -> `String value) stream.task_id
+             ; "command", `String (String_util.sanitize_utf8 stream.command)
+             ; "started_at", `Float stream.started_at
+             ]
+             @ optional_metadata_fields ~cwd:stream.cwd ~sandbox_profile:stream.sandbox_profile))
+          s.active_streams) )
     ; "active_count", `Int (List.length s.active_streams)
     ; "first_retained_seq", `Int s.first_retained_seq
     ; "last_seq", `Int s.last_seq
@@ -524,18 +558,20 @@ let event_json ~keeper_name =
   | None -> no_task_json keeper_name
 
 let logged_event_json = function
-  | Task_opened_event { keeper; seq; stream_id; task_id; generated_at } ->
+  | Task_opened_event { keeper; seq; stream_id; task_id; command; cwd; sandbox_profile; generated_at } ->
     `Assoc
-      [ "type", `String "task_opened"
-      ; "kind", `String "task_opened"
-      ; "keeper", `String keeper
-      ; "keeper_id", `String keeper
-      ; "seq", `Int seq
-      ; "stream_id", `Int stream_id
-      ; "task_id", option_json (fun value -> `String value) task_id
-      ; "closed", `Bool false
-      ; "generated_at", `Float generated_at
-      ]
+      ([ "type", `String "task_opened"
+       ; "kind", `String "task_opened"
+       ; "keeper", `String keeper
+       ; "keeper_id", `String keeper
+       ; "seq", `Int seq
+       ; "stream_id", `Int stream_id
+       ; "task_id", option_json (fun value -> `String value) task_id
+       ; "command", `String (String_util.sanitize_utf8 command)
+       ; "closed", `Bool false
+       ; "generated_at", `Float generated_at
+       ]
+       @ optional_metadata_fields ~cwd ~sandbox_profile)
   | Line_event { keeper; task_id; line; generated_at } ->
     `Assoc
       [ "type", `String "line"
@@ -693,9 +729,9 @@ let () =
 ;;
 
 let () =
-  Keeper_keepalive_signal.register_record_execute_stream_start
-    (fun ~keeper_name ~stream_id ~task_id ~command ->
-       record_stream_start ~keeper_name ~stream_id ~task_id ~command)
+  Keeper_keepalive_signal.register_start_execute_stream
+    (fun ?cwd ?sandbox_profile ~keeper_name ~stream_id ~task_id ~command () ->
+       start_stream ?cwd ?sandbox_profile ~keeper_name ~stream_id ~task_id ~command ())
 ;;
 
 let () =

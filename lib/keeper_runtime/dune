@@ -6,7 +6,7 @@
  (wrapped false)
  (foreign_stubs
   (language c)
-  (names nofile_stubs))
+  (names nofile_stubs disk_statvfs_stubs))
  (modules
   keeper_event_queue_schema
   keeper_owned_job_identity

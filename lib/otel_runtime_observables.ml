@@ -22,8 +22,17 @@ let watched_store_dirs =
   ; "trajectories"
   ; Keeper_transition_audit.store_dirname
   ; "logs"
+  ; "tool_blobs"
+  ; "execute_output"
+  ; "keepers"
+  ; "playground"
   ]
 ;;
+
+(* Bound per-store traversal so large keeper playgrounds (e.g. build trees or
+   package caches) cannot stall the background I/O pool. *)
+let max_walk_depth = 32
+let max_walk_entries_per_store = 50_000
 
 (* Directory walks are not free on a 0.5s export tick; recompute at most
    once per minute and serve the cached samples in between. The walk itself
@@ -47,29 +56,50 @@ let gauge ?(labels = []) name value =
 ;;
 
 let walk_dir_totals root =
-  (* (bytes, files) for regular files under [root], recursive. *)
+  (* (bytes, files) for regular files under [root], recursive without
+     following symlinks and bounded in depth and entry count. *)
   let bytes = ref 0.0 in
   let files = ref 0 in
-  let rec go path =
-    match (Unix.LargeFile.lstat path : Unix.LargeFile.stats) with
-    | exception _ -> ()  (* cancel-guard-ok: guards Unix.stat: no Eio cancellation point *)
-    | st ->
-      (match st.st_kind with
-       | Unix.S_REG ->
-         bytes := !bytes +. Int64.to_float st.st_size;
-         incr files
-       | Unix.S_DIR ->
-         (match Sys.readdir path with
-          | exception _ -> ()  (* cancel-guard-ok: guards Sys.readdir: no Eio cancellation point *)
-          | entries ->
-            Array.iter (fun e -> go (Filename.concat path e)) entries)
-       | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK -> ())
+  let visited = ref 0 in
+  let rec go ~depth path =
+    if !visited >= max_walk_entries_per_store || depth > max_walk_depth
+    then ()
+    else (
+      incr visited;
+      match (Unix.LargeFile.lstat path : Unix.LargeFile.stats) with
+      | exception (Unix.Unix_error _ | Sys_error _) -> ()
+      | st ->
+        (match st.st_kind with
+         | Unix.S_REG ->
+           bytes := !bytes +. Int64.to_float st.st_size;
+           incr files
+         | Unix.S_DIR ->
+           if depth < max_walk_depth && !visited < max_walk_entries_per_store
+           then (
+             match Sys.readdir path with
+             | exception (Unix.Unix_error _ | Sys_error _) -> ()
+             | entries ->
+               let len = Array.length entries in
+               let i = ref 0 in
+               while !i < len && !visited < max_walk_entries_per_store do
+                 go ~depth:(depth + 1) (Filename.concat path entries.(!i));
+                 incr i
+               done)
+         | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK -> ()))
   in
-  go root;
+  go ~depth:0 root;
   (!bytes, !files)
 ;;
 
 let store_cache = Atomic.make (neg_infinity, [])
+
+let is_existing_dir path =
+  match (Unix.LargeFile.lstat path : Unix.LargeFile.stats) with
+  | { st_kind = Unix.S_DIR; _ } -> true
+  | { st_kind = Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK; _ } ->
+    false
+  | exception (Unix.Unix_error _ | Sys_error _) -> false
+;;
 
 let rec store_samples ~masc_root () =
   let now = Unix.gettimeofday () in
@@ -82,7 +112,7 @@ let rec store_samples ~masc_root () =
         List.concat_map
           (fun store ->
             let dir = Filename.concat masc_root store in
-            if Sys.file_exists dir
+            if is_existing_dir dir
             then (
               let bytes, files = walk_dir_totals dir in
               [ gauge ~labels:[ "store", store ] Otel_metric_store.metric_store_bytes bytes

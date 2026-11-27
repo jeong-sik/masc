@@ -42,6 +42,27 @@ val register_record_execute_stream_chunk :
   (keeper_name:string -> stream_id:int -> stream:[ `Stdout | `Stderr ] -> string -> unit) ->
   unit
 
+val start_execute_stream :
+  ?cwd:string ->
+  ?sandbox_profile:string ->
+  keeper_name:string ->
+  stream_id:int ->
+  task_id:string option ->
+  command:string ->
+  unit ->
+  unit
+
+val register_start_execute_stream :
+  (?cwd:string ->
+   ?sandbox_profile:string ->
+   keeper_name:string ->
+   stream_id:int ->
+   task_id:string option ->
+   command:string ->
+   unit ->
+   unit) ->
+  unit
+
 val record_execute_stream_start :
   keeper_name:string -> stream_id:int -> task_id:string option -> command:string -> unit
 

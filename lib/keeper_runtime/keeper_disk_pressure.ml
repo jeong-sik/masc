@@ -1,8 +1,9 @@
 (** Observation-only filesystem-space facts.
 
-    Actual [ENOSPC] exceptions and raw filesystem probes are facts. Free-space
-    floors, cooldowns, and admission decisions were estimates that could stop
-    unrelated Keepers, so they do not belong here. *)
+    Actual [ENOSPC] exceptions and raw [statvfs(2)] filesystem probes are
+    facts. This module never admits, delays, pauses, or rejects Keeper work;
+    health classification is purely observational for operator visibility and
+    [/health?full=1] rollup. *)
 
 type disk_snapshot =
   { path : string
@@ -19,6 +20,86 @@ type snapshot_result =
   | Snapshot of disk_snapshot
   | Probe_error of string
 
+type health_status =
+  | Healthy
+  | Low_space
+  | Critical_space
+  | Exhausted_enospc
+  | Probe_unavailable
+
+let low_space_available_pct = 15.0
+let critical_space_available_pct = 5.0
+let critical_space_available_bytes = 2 * 1024 * 1024 * 1024
+let enospc_recent_window_sec = 900.0
+
+let health_status_to_string = function
+  | Healthy -> "healthy"
+  | Low_space -> "low_space"
+  | Critical_space -> "critical_space"
+  | Exhausted_enospc -> "exhausted_enospc"
+  | Probe_unavailable -> "probe_unavailable"
+;;
+
+let is_enospc_recent ~now ~enospc_observations ~last_enospc_ts =
+  if enospc_observations <= 0
+  then false
+  else (
+    match last_enospc_ts with
+    | Some ts when Float.is_finite ts && ts > 0.0 ->
+      Float.max 0.0 (now -. ts) <= enospc_recent_window_sec
+    | Some _ | None -> false)
+;;
+
+let classify_health ?now ~enospc_observations ~last_enospc_ts snapshot =
+  let now_ts = Option.value ~default:(Time_compat.now ()) now in
+  if is_enospc_recent ~now:now_ts ~enospc_observations ~last_enospc_ts
+  then Exhausted_enospc
+  else (
+    match snapshot with
+    | Probe_error _ -> Probe_unavailable
+    | Snapshot s ->
+      if
+        s.available_percent <= critical_space_available_pct
+        || s.available_bytes <= critical_space_available_bytes
+      then Critical_space
+      else if s.available_percent <= low_space_available_pct
+      then Low_space
+      else Healthy)
+;;
+
+(* Wire vocabulary read by [Server_health_rollup] via [Health_status.of_string_opt]. *)
+let rollup_status_of_health = function
+  | Healthy -> "ok"
+  | Low_space -> "warning"
+  | Critical_space -> "critical"
+  | Exhausted_enospc -> "error"
+  | Probe_unavailable -> "unavailable"
+;;
+
+let operator_action_required_of_health = function
+  | Healthy | Low_space | Probe_unavailable -> false
+  | Critical_space | Exhausted_enospc -> true
+;;
+
+let status_reasons_of snapshot health =
+  let snapshot_reason =
+    match snapshot with
+    | Probe_error _ -> [ "disk_probe_unavailable" ]
+    | Snapshot s ->
+      if
+        s.available_percent <= critical_space_available_pct
+        || s.available_bytes <= critical_space_available_bytes
+      then [ "critical_disk_space" ]
+      else if s.available_percent <= low_space_available_pct
+      then [ "low_disk_space" ]
+      else []
+  in
+  match health with
+  | Healthy -> []
+  | Low_space | Critical_space | Probe_unavailable -> snapshot_reason
+  | Exhausted_enospc -> "storage_space_exhausted_enospc" :: snapshot_reason
+;;
+
 type cache_entry =
   { path : string
   ; at : float
@@ -28,6 +109,10 @@ type cache_entry =
 let cache : cache_entry option Atomic.t = Atomic.make None
 let storage_space_exhaustion_total = Atomic.make 0
 let last_storage_space_exhaustion_ts = Atomic.make None
+
+external caml_masc_statvfs :
+  string -> (int64 * int64 * int64, string) result
+  = "caml_masc_statvfs"
 
 let note_exception ?(site = "unknown") exn =
   match System_error_class.errno_of_exn exn with
@@ -66,89 +151,58 @@ let rec nearest_existing_path path =
     if String.equal parent path then "/" else nearest_existing_path parent)
 ;;
 
-let is_hspace = function
-  | ' ' | '\t' -> true
-  | _ -> false
+let clamp_int64_to_int value =
+  if value <= 0L
+  then 0
+  else if value >= Int64.of_int max_int
+  then max_int
+  else Int64.to_int value
 ;;
 
-let split_ws line =
-  let trimmed = String.trim line in
-  let len = String.length trimmed in
-  let rec skip_ws i = if i < len && is_hspace trimmed.[i] then skip_ws (i + 1) else i in
-  let rec scan_tok i =
-    if i < len && not (is_hspace trimmed.[i]) then scan_tok (i + 1) else i
-  in
-  let rec loop i acc =
-    let start = skip_ws i in
-    if start >= len
-    then List.rev acc
-    else (
-      let stop = scan_tok start in
-      loop stop (String.sub trimmed start (stop - start) :: acc))
-  in
-  loop 0 []
-;;
+let clamp_percent pct = Float.max 0.0 (Float.min 100.0 pct)
 
-let parse_capacity_percent raw =
-  let trimmed = String.trim raw in
-  let number =
-    if String.ends_with ~suffix:"%" trimmed
-    then String.sub trimmed 0 (String.length trimmed - 1)
-    else trimmed
+let snapshot_of_statvfs ~path ~total_bytes:total_64 ~used_bytes:used_64 ~available_bytes:avail_64 =
+  let total_f = Int64.to_float total_64 in
+  let used_f = Int64.to_float used_64 in
+  let avail_f = Int64.to_float avail_64 in
+  let available_percent =
+    if total_64 <= 0L
+    then 0.0
+    else clamp_percent (avail_f /. total_f *. 100.0)
   in
-  float_of_string_opt number
-;;
-
-let parse_df_output ~path lines =
-  match lines with
-  | _header :: row :: _ ->
-    (match split_ws row with
-     | filesystem :: blocks :: used :: available :: capacity :: mounted_parts ->
-       (match
-          ( int_of_string_opt blocks
-          , int_of_string_opt used
-          , int_of_string_opt available
-          , parse_capacity_percent capacity )
-        with
-        | Some blocks_k, Some used_k, Some available_k, Some capacity_percent ->
-          let total_bytes = blocks_k * 1024 in
-          let used_bytes = used_k * 1024 in
-          let available_bytes = available_k * 1024 in
-          let available_percent =
-            if total_bytes <= 0
-            then 0.0
-            else float_of_int available_bytes /. float_of_int total_bytes *. 100.0
-          in
-          Snapshot
-            { path
-            ; filesystem
-            ; total_bytes
-            ; used_bytes
-            ; available_bytes
-            ; capacity_percent
-            ; available_percent
-            ; mounted_on = String.concat " " mounted_parts
-            }
-        | _ -> Probe_error ("unable to parse df filesystem row: " ^ row))
-     | _ -> Probe_error ("unexpected df output: " ^ row))
-  | _ -> Probe_error "df returned no filesystem row"
+  let usable_f = used_f +. avail_f in
+  let capacity_percent =
+    if usable_f > 0.0
+    then clamp_percent (used_f /. usable_f *. 100.0)
+    else if total_64 > 0L
+    then clamp_percent (used_f /. total_f *. 100.0)
+    else 0.0
+  in
+  Snapshot
+    { path
+    ; filesystem = "statvfs"
+    ; total_bytes = clamp_int64_to_int total_64
+    ; used_bytes = clamp_int64_to_int used_64
+    ; available_bytes = clamp_int64_to_int avail_64
+    ; capacity_percent
+    ; available_percent
+    ; mounted_on = path
+    }
 ;;
 
 let probe_uncached path =
   let path = nearest_existing_path path in
   try
     match
-      Eio_guard.run_in_systhread ~label:"keeper_disk_pressure.df" (fun () ->
-        With_process.with_process_args_in
-          "/bin/df"
-          [| "df"; "-Pk"; path |]
-          With_process.drain_lines)
+      Eio_guard.run_in_systhread ~label:"keeper_disk_pressure.statvfs" (fun () ->
+        caml_masc_statvfs path)
     with
-    | lines, Unix.WEXITED 0 -> parse_df_output ~path lines
-    | _lines, ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status) ->
-      let detail = "df -Pk " ^ With_process.status_to_string status in
-      Log.Keeper.warn "disk_observation: probe failed path=%s detail=%s" path detail;
-      Probe_error detail
+    | Ok (total_bytes, used_bytes, available_bytes) ->
+      snapshot_of_statvfs ~path ~total_bytes ~used_bytes ~available_bytes
+    | Error detail ->
+      let msg = "statvfs: " ^ detail in
+      Log.Keeper.warn "disk_observation: probe failed path=%s detail=%s" path msg;
+      Probe_error msg
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -205,10 +259,21 @@ let observation_fields () =
 ;;
 
 let snapshot_json ?now ~masc_root () =
-  let snapshot = probe_masc_root ?now ~masc_root () in
+  let now_ts = Option.value ~default:(Time_compat.now ()) now in
+  let snapshot = probe_masc_root ~now:now_ts ~masc_root () in
+  let enospc_observations = Atomic.get storage_space_exhaustion_total in
+  let last_enospc_ts = Atomic.get last_storage_space_exhaustion_ts in
+  let health =
+    classify_health ~now:now_ts ~enospc_observations ~last_enospc_ts snapshot
+  in
+  let reasons = status_reasons_of snapshot health in
   `Assoc
     ([ "masc_root", `String masc_root
      ; "snapshot_ttl_sec", `Float (snapshot_ttl_sec ())
+     ; "status", `String (rollup_status_of_health health)
+     ; "health_status", `String (health_status_to_string health)
+     ; "status_reasons", `List (List.map (fun reason -> `String reason) reasons)
+     ; "operator_action_required", `Bool (operator_action_required_of_health health)
      ; "filesystem", snapshot_result_to_json snapshot
      ]
      @ observation_fields ())

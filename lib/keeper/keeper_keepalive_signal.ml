@@ -74,17 +74,47 @@ let record_execute_stream_chunk ~keeper_name ~stream_id ~stream chunk =
 let register_record_execute_stream_chunk f =
   Atomic.set record_execute_stream_chunk_callback f
 
-let record_execute_stream_start_callback
-    : (keeper_name:string -> stream_id:int -> task_id:string option -> command:string -> unit) Atomic.t
+let execute_stream_start_callback
+    : (?cwd:string ->
+       ?sandbox_profile:string ->
+       keeper_name:string ->
+       stream_id:int ->
+       task_id:string option ->
+       command:string ->
+       unit ->
+       unit)
+      Atomic.t
   =
-  Atomic.make (fun ~keeper_name:_ ~stream_id:_ ~task_id:_ ~command:_ -> ())
+  Atomic.make
+    (fun ?cwd:_ ?sandbox_profile:_ ~keeper_name:_ ~stream_id:_ ~task_id:_ ~command:_ () -> ())
+
+let start_execute_stream ?cwd ?sandbox_profile ~keeper_name ~stream_id ~task_id ~command () =
+  (Atomic.get execute_stream_start_callback)
+    ?cwd
+    ?sandbox_profile
+    ~keeper_name
+    ~stream_id
+    ~task_id
+    ~command
+    ()
+;;
+
+let register_start_execute_stream f =
+  Atomic.set execute_stream_start_callback f
 
 let record_execute_stream_start ~keeper_name ~stream_id ~task_id ~command =
-  (Atomic.get record_execute_stream_start_callback) ~keeper_name ~stream_id ~task_id ~command
+  (Atomic.get execute_stream_start_callback)
+    ~keeper_name
+    ~stream_id
+    ~task_id
+    ~command
+    ()
 ;;
 
 let register_record_execute_stream_start f =
-  Atomic.set record_execute_stream_start_callback f
+  Atomic.set execute_stream_start_callback
+    (fun ?cwd:_ ?sandbox_profile:_ ~keeper_name ~stream_id ~task_id ~command () ->
+       f ~keeper_name ~stream_id ~task_id ~command)
 
 let record_execute_stream_end_callback
     : (keeper_name:string -> stream_id:int -> task_id:string option -> status:Yojson.Safe.t -> unit) Atomic.t

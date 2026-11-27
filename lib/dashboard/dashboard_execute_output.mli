@@ -21,6 +21,8 @@ type active_stream = {
   stream_id : int;
   task_id : string option;
   command : string;
+  cwd : string option;
+  sandbox_profile : string option;
   started_at : float;
 }
 
@@ -70,10 +72,22 @@ val record_completed :
     are logged here.  Non-cancellation failures are logged and swallowed by
     the implementation because this path is observational. *)
 
+val start_stream :
+  ?cwd:string ->
+  ?sandbox_profile:string ->
+  keeper_name:string ->
+  stream_id:int ->
+  task_id:string option ->
+  command:string ->
+  unit ->
+  unit
+(** Log a [task_opened] marker, the already-redacted command, and optional
+    execution metadata ([cwd], [sandbox_profile]). Each stream is identified
+    independently even when several belong to one task. *)
+
 val record_stream_start :
   keeper_name:string -> stream_id:int -> task_id:string option -> command:string -> unit
-(** Log a [task_opened] marker and the already-redacted command. Each stream
-    is identified independently even when several belong to one task. *)
+(** Convenience wrapper around {!start_stream} without optional metadata. *)
 
 val append_stream_chunk :
   keeper_name:string -> stream_id:int -> stream:[ `Stdout | `Stderr ] -> string -> unit

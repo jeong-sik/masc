@@ -3481,6 +3481,130 @@ let test_read_window_result_rejects_unreadable_month_and_day_file () =
       Alcotest.fail ("window read did not recover after restore: " ^ detail))
 ;;
 
+let sqlite_data_version db =
+  let stmt = Sqlite3.prepare db "PRAGMA data_version" in
+  Fun.protect ~finally:(fun () -> ignore (Sqlite3.finalize stmt : Sqlite3.Rc.t)) (fun () ->
+    match Sqlite3.step stmt with
+    | Sqlite3.Rc.ROW ->
+      (match Sqlite3.column stmt 0 with
+       | Sqlite3.Data.INT value -> Int64.to_int value
+       | _ -> Alcotest.fail "PRAGMA data_version did not return an integer")
+    | rc -> Alcotest.fail ("PRAGMA data_version failed: " ^ Sqlite3.Rc.to_string rc))
+;;
+
+let test_read_index_skips_sqlite_writes_on_unchanged_files () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    let ledger_dir = Dated_jsonl.base_dir store in
+    let old_path = List.fold_left Filename.concat ledger_dir [ "2026-01"; "01.jsonl" ] in
+    Jsonl_writer.append_jsonl ~path:old_path
+      (`Assoc [ "keeper", `String "alice"; "tool", `String "historical"; "ts", `Float 1.0 ]);
+    write_rows store ~keeper:"alice" ~count:2 ~base_ts:(Unix.gettimeofday ()) ~label:"live";
+    Alcotest.(check int) "initial read indexes all rows" 3
+      (List.length (index_rows store ~keeper_name:"alice" ()));
+    let observer = Sqlite3.db_open ~mode:`READONLY (Keeper_tool_call_index.database_path ~ledger_dir) in
+    Fun.protect ~finally:(fun () -> ignore (Sqlite3.db_close observer : bool)) (fun () ->
+      let v0 = sqlite_data_version observer in
+      Alcotest.(check int) "warm unchanged read sees all rows" 3
+        (List.length (index_rows store ~keeper_name:"alice" ()));
+      let v1 = sqlite_data_version observer in
+      Alcotest.(check int) "warm unchanged read performs no SQLite writes" v0 v1;
+      Keeper_tool_call_index.forget_for_ledger ~ledger_dir;
+      Alcotest.(check int) "cold unchanged read sees all rows" 3
+        (List.length (index_rows store ~keeper_name:"alice" ()));
+      let v2 = sqlite_data_version observer in
+      Alcotest.(check int) "cold unchanged read performs no SQLite writes" v1 v2;
+      write_rows store ~keeper:"alice" ~count:1 ~base_ts:(Unix.gettimeofday ()) ~label:"appended";
+      Alcotest.(check int) "append is indexed on next read" 4
+        (List.length (index_rows store ~keeper_name:"alice" ()));
+      let v3 = sqlite_data_version observer in
+      Alcotest.(check bool) "changed file does write to SQLite" true (v3 > v2)))
+;;
+
+let test_read_index_warm_fast_path_detects_tampered_continuity () =
+  with_tmp_log (fun () ->
+    let store = log_store () in
+    let ledger_dir = Dated_jsonl.base_dir store in
+    write_rows store ~keeper:"alice" ~count:2 ~base_ts:(Unix.gettimeofday ()) ~label:"tamper";
+    Alcotest.(check int) "initial read populates warm observation" 2
+      (List.length (index_rows store ~keeper_name:"alice" ()));
+    let continuity_dir = Filename.concat ledger_dir ".continuity" in
+    let json_records =
+      Sys.readdir continuity_dir
+      |> Array.to_list
+      |> List.filter (fun name -> Filename.check_suffix name ".json")
+    in
+    Alcotest.(check int) "one continuity record exists" 1 (List.length json_records);
+    let record_path = Filename.concat continuity_dir (List.hd json_records) in
+    let saved_bytes = Fs_compat.load_file record_path in
+    (* Corrupt the continuity file while the ledger file and warm cache stay intact. *)
+    Fs_compat.save_file record_path "{not-json";
+    (match Keeper_tool_call_index.recent_rows ~store ~keeper_name:"alice" ~n:50 () with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "warm fast path ignored corrupted continuity record");
+    (* Removing the continuity file while a cursor exists must also fail closed. *)
+    Sys.remove record_path;
+    (match Keeper_tool_call_index.recent_rows ~store ~keeper_name:"alice" ~n:50 () with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "warm fast path ignored deleted continuity record");
+    (* Replacing the continuity file with a symlink must also fail closed. *)
+    let target_path = Filename.concat continuity_dir "symlink-target.tmp" in
+    Fs_compat.save_file target_path saved_bytes;
+    Unix.symlink target_path record_path;
+    (match Keeper_tool_call_index.recent_rows ~store ~keeper_name:"alice" ~n:50 () with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "warm fast path accepted symlink continuity record");
+    Sys.remove record_path;
+    Sys.remove target_path;
+    Fs_compat.save_file record_path saved_bytes;
+    Alcotest.(check int) "restored continuity record recovers cleanly" 2
+      (List.length (index_rows store ~keeper_name:"alice" ()));
+    let frontier_before =
+      match Keeper_tool_call_index.current_frontier ~store ~keeper_name:"alice" with
+      | Ok frontier -> frontier
+      | Error detail -> Alcotest.fail ("frontier before tamper failed: " ^ detail)
+    in
+    (* Mutating prefix_digest to another valid 64-hex digest while the ledger
+       file stays unchanged must reject the warm observation and start a new
+       generation rather than preserving the old frontier. *)
+    let mutated_bytes =
+      match Yojson.Safe.from_string saved_bytes with
+      | `Assoc fields ->
+        let replaced =
+          List.map
+            (fun (k, v) ->
+              if String.equal k "prefix_digest" then
+                let bogus =
+                  match v with
+                  | `String digest when String.length digest > 0 && digest.[0] = '0' ->
+                    "1" ^ String.sub digest 1 (String.length digest - 1)
+                  | `String digest when String.length digest > 0 ->
+                    "0" ^ String.sub digest 1 (String.length digest - 1)
+                  | _ -> String.make 64 '0'
+                in
+                k, `String bogus
+              else k, v)
+            fields
+        in
+        Yojson.Safe.to_string (`Assoc replaced)
+      | _ -> Alcotest.fail "saved continuity record was not a JSON object"
+    in
+    (match Fs_compat.save_file_atomic_strict record_path mutated_bytes with
+     | Ok () -> ()
+     | Error detail -> Alcotest.fail ("failed to write mutated continuity: " ^ detail));
+    Alcotest.(check int) "tampered prefix_digest rebuilds and returns all rows" 2
+      (List.length (index_rows store ~keeper_name:"alice" ()));
+    let frontier_after =
+      match Keeper_tool_call_index.current_frontier ~store ~keeper_name:"alice" with
+      | Ok frontier -> frontier
+      | Error detail -> Alcotest.fail ("frontier after tamper failed: " ^ detail)
+    in
+    Alcotest.(check bool)
+      "tampered prefix_digest starts a new generation"
+      false
+      (Keeper_tool_call_index.equal_frontiers frontier_before frontier_after))
+;;
+
 let () =
   Alcotest.run "keeper_tool_call_log"
     [ ( "invocation observation",
@@ -3679,6 +3803,10 @@ let () =
             test_read_index_rejects_unlistable_month
         ; eio_test "read_window_result rejects unreadable month dir and day file"
             test_read_window_result_rejects_unreadable_month_and_day_file
+        ; eio_test "unchanged warm and cold reads skip SQLite write transactions"
+            test_read_index_skips_sqlite_writes_on_unchanged_files
+        ; eio_test "warm fast path still rejects tampered or missing continuity records"
+            test_read_index_warm_fast_path_detects_tampered_continuity
         ] )
     ; ( "async_append",
         [ eio_env_test "committed flush reports maintenance failures after draining"

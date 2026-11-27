@@ -75,14 +75,35 @@ CREATE TABLE IF NOT EXISTS cursors (
 ) WITHOUT ROWID;
 |}
 
+module String_set = Set.Make (String)
+module String_map = Map.Make (String)
+
+type continuity =
+  { generation : string
+  ; boundary : int
+  ; prefix_digest : string
+  ; device : int
+  ; inode : int
+  }
+
 (* [on_record] says whether the observation is also written beside its
    continuity record, so a write that failed is tried again by
-   the next read rather than left out until the file changes. *)
-type observed = { stamp : Unix.stats; on_record : bool }
+   the next read rather than left out until the file changes.
+   [continuity] and [continuity_stamp] tie the cached observation to the
+   exact continuity file and record it vouched for, so an unchanged file
+   whose SQLite cursor and continuity file still match needs neither
+   continuity JSON parsing nor a SQLite write transaction. *)
+type observed =
+  { stamp : Unix.stats
+  ; continuity : continuity
+  ; continuity_stamp : Unix.stats
+  ; on_record : bool
+  }
 
 type store =
   { db : Sqlite3.db
   ; observations : (string, observed) Hashtbl.t
+  ; continuity_names : (string, string) Hashtbl.t
   }
 
 let store_mu = Stdlib.Mutex.create ()
@@ -250,7 +271,8 @@ let single_int db ~operation sql =
     | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.DONE | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_error db operation rc))
 ;;
 
-let configure db =
+let configure ~stamp_version db =
+  let* () = exec db ~operation:"set busy timeout" "PRAGMA busy_timeout=5000" in
   let* _ =
     with_stmt db ~operation:"set WAL journal mode" "PRAGMA journal_mode=WAL" (fun stmt ->
       match Sqlite3.step stmt with
@@ -258,16 +280,17 @@ let configure db =
       | (Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _) as rc -> Error (sqlite_error db "set WAL journal mode" rc))
   in
   let* () = exec db ~operation:"set NORMAL synchronous" "PRAGMA synchronous=NORMAL" in
-  let* () = exec db ~operation:"set busy timeout" "PRAGMA busy_timeout=5000" in
   (* INSERT OR REPLACE deletes a prior indexed row. Its delete trigger must
      run too, so the derived identity witness counts retained rows exactly. *)
   let* () = exec db ~operation:"enable identity replacement triggers" "PRAGMA recursive_triggers=ON" in
   let* () = exec db ~operation:"enable derived source ownership" "PRAGMA foreign_keys=ON" in
   let* () = exec db ~operation:"create index schema" schema_sql in
-  exec
-    db
-    ~operation:"stamp schema version"
-    (Printf.sprintf "PRAGMA user_version=%d" schema_version)
+  if stamp_version then
+    exec
+      db
+      ~operation:"stamp schema version"
+      (Printf.sprintf "PRAGMA user_version=%d" schema_version)
+  else Ok ()
 ;;
 
 let open_database ~path ~initialize =
@@ -303,16 +326,25 @@ let open_store ~ledger_dir =
         let* version = single_int db ~operation:"read schema version" "PRAGMA user_version" in
         if version <> schema_version then Ok None
         else
-          let* () = configure db in
+          let* () = configure ~stamp_version:false db in
           keep := true;
           Ok (Some db))
   in
   match existing with
-  | Some db -> Ok { db; observations = Hashtbl.create 8 }
+  | Some db ->
+    Ok
+      { db
+      ; observations = Hashtbl.create 8
+      ; continuity_names = Hashtbl.create 8
+      }
   | None ->
     Sys.remove path;
-    let* db = open_database ~path ~initialize:configure in
-    Ok { db; observations = Hashtbl.create 8 }
+    let* db = open_database ~path ~initialize:(configure ~stamp_version:true) in
+    Ok
+      { db
+      ; observations = Hashtbl.create 8
+      ; continuity_names = Hashtbl.create 8
+      }
 ;;
 
 let get_store ~ledger_dir =
@@ -506,21 +538,38 @@ let inspect_file path =
   else Error ("ledger path is not a regular file: " ^ path)
 ;;
 
-type continuity =
-  { generation : string
-  ; boundary : int
-  ; prefix_digest : string
-  ; device : int
-  ; inode : int
-  }
-
 exception Continuity_unavailable of string
 
 let continuity_dir ledger_dir = Filename.concat ledger_dir ".continuity"
 let ledger_dir_of_day_path path = Filename.dirname (Filename.dirname path)
+
+let continuity_filename path =
+  Agent_core_sha256.(to_hex (digest_string path)) ^ ".json"
+;;
+
 let continuity_path path =
-  let key = Agent_core_sha256.(to_hex (digest_string path)) ^ ".json" in
-  Filename.concat (continuity_dir (ledger_dir_of_day_path path)) key
+  Filename.concat (continuity_dir (ledger_dir_of_day_path path)) (continuity_filename path)
+;;
+
+let continuity_filename_cached store path =
+  match Hashtbl.find_opt store.continuity_names path with
+  | Some name -> name
+  | None ->
+    let name = continuity_filename path in
+    Hashtbl.replace store.continuity_names path name;
+    name
+;;
+
+let continuity_path_cached store path =
+  Filename.concat
+    (continuity_dir (ledger_dir_of_day_path path))
+    (continuity_filename_cached store path)
+;;
+
+let lstat_opt path =
+  try Some (Unix.lstat path) with
+  | Unix.Unix_error _ -> None
+;;
 
 let same_observed_file (left : Unix.stats) (right : Unix.stats) =
   left.st_dev = right.st_dev && left.st_ino = right.st_ino
@@ -534,10 +583,13 @@ let empty_digest = Agent_core_sha256.(to_hex (digest_string ""))
 let extend_digest digest line =
   Agent_core_sha256.(to_hex (get (feed_string (feed_string (feed_string empty digest) line) "\n")))
 
-let load_continuity path =
+let load_continuity_with_stamp ~record_path path =
   try
-    let _ = Unix.lstat (continuity_path path) in
-    let bytes = Fs_compat.load_file (continuity_path path) in
+    let stamp = Unix.lstat record_path in
+    if stamp.Unix.st_kind <> Unix.S_REG then
+      Error "tool-call ledger continuity is not a regular file"
+    else
+    let bytes = Fs_compat.load_file record_path in
     match Yojson.Safe.from_string bytes with
     | `Assoc fields ->
       (match List.assoc_opt "ledger_path" fields,
@@ -549,12 +601,13 @@ let load_continuity path =
          when String.equal ledger_path path && boundary >= 0 && Option.is_some (Uuidm.of_string generation) ->
          (match Agent_core_sha256.consistent_of_hex_opt prefix_digest with
           | Some digest when String.equal prefix_digest (Agent_core_sha256.to_hex digest) ->
-            Ok (Some { generation; boundary; prefix_digest; device; inode })
+            Ok (Some ({ generation; boundary; prefix_digest; device; inode }, stamp))
           | Some _ | None -> Error "invalid continuity digest")
        | _ -> Error "invalid tool-call ledger continuity record")
     | _ -> Error "tool-call ledger continuity is not an object"
   with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | Unix.Unix_error (code, _, _) -> Error (Unix.error_message code)
   | Sys_error detail -> Error detail
   | Yojson.Json_error detail -> Error ("invalid tool-call ledger continuity: " ^ detail)
 
@@ -564,8 +617,9 @@ let save_continuity path (held : continuity) =
     ; "generation", `String held.generation; "boundary", `Int held.boundary
     ; "prefix_digest", `String held.prefix_digest
     ; "device", `Int held.device; "inode", `Int held.inode ] in
+  let record_path = continuity_path path in
   Fs_compat.mkdir_p (continuity_dir (ledger_dir_of_day_path path));
-  Fs_compat.save_file_atomic_strict (continuity_path path) (Yojson.Safe.to_string json)
+  Fs_compat.save_file_atomic_strict record_path (Yojson.Safe.to_string json)
 
 (* The unchanged-observation fast path lived only in this
    process's [store.observations], so a new process proved every day file's
@@ -701,25 +755,54 @@ type prefix_proof =
   | Recorded  (* the observation a process recorded beside [held] *)
   | Read_again  (* the prefix itself, hashed now *)
 
-let advance_one store ~before_scan ~path ~(cursor : cursor option) =
+let cursor_matches_continuity ~(before : Unix.stats) ~(cursor : cursor option) (held : continuity) =
+  match cursor with
+  | Some cursor ->
+    String.equal cursor.generation held.generation
+    && cursor.device = before.st_dev
+    && cursor.inode = before.st_ino
+    && cursor.boundary = held.boundary
+  | None -> false
+;;
+
+let advance_one store ~(before_scan : (path:string -> unit) option) ~path ~(cursor : cursor option) =
   let* before = inspect_file path in
-  let unchanged_observation =
+  let record_path = continuity_path_cached store path in
+  let observed_match =
     match Hashtbl.find_opt store.observations path with
-    | Some observed when same_observed_file observed.stamp before -> Some observed.on_record
-    | Some _ | None -> None in
+    | Some observed when same_observed_file observed.stamp before -> Some observed
+    | Some _ | None -> None
+  in
+  (* Warm fast path: when no test hook needs a scan callback, the day file,
+     its SQLite cursor, and its continuity record file all carry the exact
+     identity and stats already verified in this process. Skip continuity JSON
+     parsing, day-file opens, and the SQLite write transaction. *)
+  let warm_fast_path =
+    match before_scan, observed_match with
+    | None, Some observed
+      when cursor_matches_continuity ~before ~cursor observed.continuity
+           && Option.fold ~none:false ~some:(same_observed_file observed.continuity_stamp)
+                (lstat_opt record_path) ->
+      Some observed
+    | (Some _ | None), (Some _ | None) -> None
+  in
+  match warm_fast_path with
+  | Some observed ->
+    if not observed.on_record && record_observation path observed.continuity before then
+      Hashtbl.replace store.observations path { observed with on_record = true };
+    Ok ()
+  | None ->
   let verified_observation = ref None in
   let verified_continuity = ref None in
   let result =
-    let saved = match load_continuity path with
+    let saved_with_stamp = match load_continuity_with_stamp ~record_path path with
       | Ok saved -> saved
-      | Error detail -> raise (Continuity_unavailable detail) in
-    let cursor_continues (held : continuity) =
-      match cursor with
-      | Some cursor ->
-        String.equal cursor.generation held.generation
-        && cursor.device = before.st_dev && cursor.inode = before.st_ino
-        && cursor.boundary = held.boundary
-      | None -> false in
+      | Error detail ->
+        Hashtbl.remove store.observations path;
+        raise (Continuity_unavailable detail) in
+    let saved = Option.map fst saved_with_stamp in
+    let saved_stamp = Option.map snd saved_with_stamp in
+    let cursor_continues held = cursor_matches_continuity ~before ~cursor held in
     (* A recorded observation is consulted only where the scan would start at
        [held]'s boundary. Without that cursor the scan reads the prefix from
        its first byte anyway, and a record the content contradicts would turn
@@ -729,9 +812,10 @@ let advance_one store ~before_scan ~path ~(cursor : cursor option) =
     let proof_of (held : continuity) =
       if not (held.device = before.st_dev && held.inode = before.st_ino
               && held.boundary <= before.st_size) then None
-      else match unchanged_observation with
-        | Some on_record -> Some (Observed_here { on_record })
-        | None ->
+      else match observed_match with
+        | Some observed when observed.continuity = held ->
+          Some (Observed_here { on_record = observed.on_record })
+        | Some _ | None ->
           if cursor_continues held && recorded_observation_matches path held before then Some Recorded
           else if prefix_matches path held then Some Read_again
           else None in
@@ -740,12 +824,39 @@ let advance_one store ~before_scan ~path ~(cursor : cursor option) =
       ; device = before.st_dev; inode = before.st_ino } in
     let* held, proof = match saved with
       | None when Option.is_some cursor ->
+        Hashtbl.remove store.observations path;
         raise (Continuity_unavailable ("authoritative ledger continuity is missing: " ^ path))
       | Some held ->
         (match proof_of held with
          | Some proof -> Ok (held, Some proof)
          | None -> Ok (fresh (), None))
       | None -> Ok (fresh (), None) in
+    (* Cold/revalidated fast path: an unchanged closed file whose prefix is
+       already proved, whose byte size equals [held.boundary], and whose
+       SQLite cursor already matches [held] has zero bytes to scan. Confirm
+       [before] did not move and cache it without a SQLite write transaction. *)
+    let unchanged_at_boundary =
+      match before_scan, proof, saved_stamp with
+      | None, Some proof_kind, Some continuity_stamp
+        when cursor_continues held && before.st_size = held.boundary ->
+        (match inspect_file path with
+         | Ok after when same_observed_file before after ->
+           let already_recorded =
+             match proof_kind with
+             | Observed_here { on_record } -> on_record
+             | Recorded -> true
+             | Read_again -> false
+           in
+           Some (after, continuity_stamp, already_recorded)
+         | Ok _ | Error _ -> None)
+      | (Some _ | None), (Some _ | None), (Some _ | None) -> None
+    in
+    match unchanged_at_boundary with
+    | Some (after, continuity_stamp, already_recorded) ->
+      verified_observation := Some after;
+      verified_continuity := Some (held, Some continuity_stamp, already_recorded);
+      Ok ()
+    | None ->
     let from, invalidate = match cursor with
       | Some cursor when cursor_continues held -> cursor.boundary, false
       | Some _ -> 0, true
@@ -757,7 +868,7 @@ let advance_one store ~before_scan ~path ~(cursor : cursor option) =
       let* boundary =
         with_stmt store.db ~operation:"insert row" insert_sql (fun insert ->
         with_stmt store.db ~operation:"insert answer source" insert_answer_source_sql (fun insert_source ->
-          before_scan ~path;
+          Option.iter (fun hook -> hook ~path) before_scan;
           let pending, boundary =
             fold_indexed_lines
               ~path ~from ~init:(Ok ())
@@ -828,14 +939,18 @@ let advance_one store ~before_scan ~path ~(cursor : cursor option) =
          | Some Recorded -> true
          | Some Read_again | None -> false)
         && next = held && same_observed_file before after in
-      verified_continuity := Some (next, already_recorded);
       (* Commit authoritative continuity before the disposable SQLite cursor.
          A failed SQLite commit is repaired from this same durable generation. *)
-      let () =
-        if Some next <> saved then
+      let continuity_stamp =
+        if Some next <> saved then (
           match save_continuity path next with
-          | Ok () -> ()
-          | Error detail -> raise (Continuity_unavailable detail) in
+          | Ok () -> lstat_opt record_path
+          | Error detail ->
+            Hashtbl.remove store.observations path;
+            raise (Continuity_unavailable detail))
+        else saved_stamp
+      in
+      verified_continuity := Some (next, continuity_stamp, already_recorded);
       with_stmt store.db ~operation:"write cursor" cursor_sql (fun stmt ->
         let* () = bind_all store.db ~operation:"bind cursor" stmt
             [ Sqlite3.Data.TEXT path
@@ -847,15 +962,19 @@ let advance_one store ~before_scan ~path ~(cursor : cursor option) =
   (match result with
    | Ok () ->
      (match !verified_observation, !verified_continuity with
-      | Some stamp, Some (next, already_recorded) when same_observed_file stamp (Unix.lstat path) ->
+      | Some stamp, Some (next, Some continuity_stamp, already_recorded)
+        when Option.fold ~none:false ~some:(same_observed_file stamp) (lstat_opt path)
+             && Option.fold ~none:false ~some:(same_observed_file continuity_stamp)
+                  (lstat_opt record_path) ->
         let on_record = already_recorded || record_observation path next stamp in
-        Hashtbl.replace store.observations path { stamp; on_record }
+        Hashtbl.replace store.observations path
+          { stamp; continuity = next; continuity_stamp; on_record }
       | Some _, _ | None, _ -> Hashtbl.remove store.observations path)
    | Error _ -> Hashtbl.remove store.observations path);
   result
 ;;
 
-let retire_missing_continuities ~ledger_dir =
+let retire_missing_continuities ~ledger_dir ~expected_names =
   let directory = continuity_dir ledger_dir in
   let entries =
     match Unix.lstat directory with
@@ -871,6 +990,11 @@ let retire_missing_continuities ~ledger_dir =
        | None -> false)
     | _ -> false in
   List.iter (fun name ->
+    (* Live ledger files are validated in [advance_one] (including continuity
+       file stats and JSON checks), so skip re-reading their continuity records
+       here. Any record not belonging to the current live paths is still opened,
+       validated, and retired if its ledger file is absent. *)
+    if not (String_set.mem name expected_names) then (
     let record_path = Filename.concat directory name in
     let json =
       try Yojson.Safe.from_string (Fs_compat.load_file record_path) with
@@ -889,18 +1013,28 @@ let retire_missing_continuities ~ledger_dir =
       (* The observation first, so a stop between the two never leaves one
          without the record it names. *)
       forget_recorded_observation path;
-      Unix.unlink record_path)
+      Unix.unlink record_path))
     (List.filter managed_name entries)
 ;;
 
 let advance store ~before_scan ~paths ~cursors =
+  let path_set =
+    List.fold_left (fun acc path -> String_set.add path acc) String_set.empty paths
+  in
+  let cursor_map =
+    List.fold_left
+      (fun acc (path, cursor) -> String_map.add path cursor acc)
+      String_map.empty
+      cursors
+  in
   let* () =
     List.fold_left
       (fun acc (path, _) ->
         let* () = acc in
-        if List.mem path paths then Ok ()
+        if String_set.mem path path_set then Ok ()
         else transaction store (fun () ->
           Hashtbl.remove store.observations path;
+          Hashtbl.remove store.continuity_names path;
           let* () = delete_path store ~table:"rows" ~path in
           delete_path store ~table:"cursors" ~path))
       (Ok ()) cursors
@@ -908,7 +1042,7 @@ let advance store ~before_scan ~paths ~cursors =
   List.fold_left
     (fun acc path ->
       let* () = acc in
-      advance_one store ~before_scan ~path ~cursor:(List.assoc_opt path cursors))
+      advance_one store ~before_scan ~path ~cursor:(String_map.find_opt path cursor_map))
     (Ok ()) paths
 ;;
 
@@ -1027,7 +1161,7 @@ let map_locations ~f locations =
 
 let rows_of_locations locations = map_locations ~f:(fun _ json -> Some json) locations
 
-let with_index ~before_scan ~store:ledger ~read =
+let with_index ?before_scan ~store:ledger ~read =
     blocking (fun () ->
       let ledger_dir = Dated_jsonl.base_dir ledger in
       Stdlib.Mutex.protect store_mu (fun () ->
@@ -1044,7 +1178,13 @@ let with_index ~before_scan ~store:ledger ~read =
                 let rec advance_snapshot () =
                   let* paths = paths_now () in
                   let* cursors = read_cursors store in
-                  retire_missing_continuities ~ledger_dir;
+                  let expected_names =
+                    List.fold_left
+                      (fun acc path -> String_set.add (continuity_filename_cached store path) acc)
+                      String_set.empty
+                      paths
+                  in
+                  retire_missing_continuities ~ledger_dir ~expected_names;
                   let* () = advance store ~before_scan ~paths ~cursors in
                   let* after = paths_now () in
                   (* A writer can rotate the current file after enumeration
@@ -1085,20 +1225,22 @@ let with_index ~before_scan ~store:ledger ~read =
         with Continuity_unavailable detail -> Error detail))
 ;;
 
-let recent_rows_with ~before_scan ~store ?keeper_name ~n () =
+let recent_rows_with ?before_scan ~store ?keeper_name ~n () =
   if n <= 0 then Ok []
-  else with_index ~before_scan ~store ~read:(fun index ->
+  else with_index ?before_scan ~store ~read:(fun index ->
     let* locations = select_locations index ~keeper_name ~n in
     rows_of_locations locations)
 ;;
 
-let recent_rows = recent_rows_with ~before_scan:(fun ~path:_ -> ())
+let recent_rows ~store ?keeper_name ~n () =
+  recent_rows_with ~store ?keeper_name ~n ()
+;;
 
 let by_execution_ids ~store ~keeper_name ~execution_ids =
   match execution_ids with
   | [] -> Ok []
   | _ ->
-    with_index ~before_scan:(fun ~path:_ -> ()) ~store ~read:(fun index ->
+    with_index ~store ~read:(fun index ->
       let* locations = select_identity_locations ~sql:select_execution_sql index ~keeper_name ~identities:execution_ids in
       rows_of_locations locations)
 ;;
@@ -1107,7 +1249,7 @@ let fold_by_execution_ids ~store ~keeper_name ~execution_ids ~init ~f =
   match execution_ids with
   | [] -> Ok init
   | _ ->
-    let* folded = with_index ~before_scan:(fun ~path:_ -> ()) ~store ~read:(fun index ->
+    let* folded = with_index ~store ~read:(fun index ->
       let* locations = select_identity_locations ~sql:select_execution_sql index
           ~keeper_name ~identities:execution_ids in
       let accumulated = ref (Ok init) in
@@ -1121,7 +1263,7 @@ let fold_by_execution_ids ~store ~keeper_name ~execution_ids ~init ~f =
 
 let addressed_rows ~store ~codebase ?keeper_name ~limit ~offset () =
   if limit <= 0 || offset < 0 then Error "invalid addressed-row pagination"
-  else with_index ~before_scan:(fun ~path:_ -> ()) ~store ~read:(fun index ->
+  else with_index ~store ~read:(fun index ->
     let* invalid = single_int index.db ~operation:"check observation integrity"
         "SELECT EXISTS(SELECT 1 FROM rows WHERE observation_invalid = 1)" in
     let* ambiguous = single_int index.db ~operation:"check observation execution identity"
@@ -1171,7 +1313,7 @@ let select_answer_source_sql =
 let fold_by_answer_source ~store ~keeper_name ~source_id ~init ~f =
   if String.equal source_id "" then Error "answer source identity is empty"
   else
-    let* folded = with_index ~before_scan:(fun ~path:_ -> ()) ~store ~read:(fun index ->
+    let* folded = with_index ~store ~read:(fun index ->
     let* locations = select_identity_locations ~sql:select_answer_source_sql index
         ~keeper_name ~identities:[source_id] in
     let accumulated = ref (Ok init) in
@@ -1215,11 +1357,11 @@ let select_frontier store ~keeper_name =
     in loop [])
 
 let current_frontier ~store ~keeper_name =
-  with_index ~before_scan:(fun ~path:_ -> ()) ~store ~read:(fun index ->
+  with_index ~store ~read:(fun index ->
     select_frontier index ~keeper_name)
 
 let rows_after ~store ~keeper_name ~after ~project =
-  with_index ~before_scan:(fun ~path:_ -> ()) ~store ~read:(fun index ->
+  with_index ~store ~read:(fun index ->
     let* frontier = select_frontier index ~keeper_name in
     let sql =
       "SELECT ledger_path, ledger_offset, ledger_length, keeper_name, ts, execution_id \
@@ -1265,7 +1407,8 @@ let rows_after ~store ~keeper_name ~after ~project =
 
 module For_testing = struct
   let select_execution_sql = select_execution_sql
-  let recent_rows = recent_rows_with
+  let recent_rows ~before_scan ~store ?keeper_name ~n () =
+    recent_rows_with ~before_scan ~store ?keeper_name ~n ()
   let empty_digest = empty_digest
   let extend_digest = extend_digest
   let digest_prefix = digest_prefix

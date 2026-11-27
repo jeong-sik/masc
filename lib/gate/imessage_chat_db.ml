@@ -134,34 +134,49 @@ let with_db ~db_path f =
     match Sqlite3.db_open ~mode:`READONLY db_path with
     | exception Sqlite3.Error detail -> Error (Query_failed ("open: " ^ detail))
     | db ->
-      let result =
-        try f db with
-        | Sqlite3.Error detail -> Error (Query_failed detail)
+      let close_db () =
+        (* The statement is finalized inside [f]; if it were not, this returns
+           false and the handle leaks rather than the error being hidden. *)
+        if not (Sqlite3.db_close db) then
+          Log.Gate.warn "imessage: chat.db handle still had live statements"
       in
-      (* The statement is finalized inside [f]; if it were not, this returns
-         false and the handle leaks rather than the error being hidden. *)
-      if not (Sqlite3.db_close db) then
-        Log.Gate.warn "imessage: chat.db handle still had live statements";
-      result)
+      (match f db with
+       | result ->
+         close_db ();
+         result
+       | exception Sqlite3.Error detail ->
+         close_db ();
+         Error (Query_failed detail)
+       | exception exn ->
+         let backtrace = Printexc.get_raw_backtrace () in
+         (try close_db () with
+          | Sqlite3.Error _ -> ());
+         Printexc.raise_with_backtrace exn backtrace))
 ;;
 
 let with_statement db sql f =
   match Sqlite3.prepare db sql with
   | exception Sqlite3.Error detail -> Error (Query_failed ("prepare: " ^ detail))
   | stmt ->
-    let result =
-      try f stmt with
-      | Sqlite3.Error detail -> Error (Query_failed detail)
-    in
-    let finalized =
+    let finalize_stmt () =
       match Sqlite3.finalize stmt with
       | rc -> Sqlite3.Rc.is_success rc
       | exception Sqlite3.Error _ -> false
     in
-    (match result with
-     | Error _ as error -> error
-     | Ok _ when not finalized -> Error (Query_failed "finalize statement")
-     | Ok _ as ok -> ok)
+    (match f stmt with
+     | result ->
+       let finalized = finalize_stmt () in
+       (match result with
+        | Error _ as error -> error
+        | Ok _ when not finalized -> Error (Query_failed "finalize statement")
+        | Ok _ as ok -> ok)
+     | exception Sqlite3.Error detail ->
+       ignore (finalize_stmt () : bool);
+       Error (Query_failed detail)
+     | exception exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       ignore (finalize_stmt () : bool);
+       Printexc.raise_with_backtrace exn backtrace)
 ;;
 
 (* [Sqlite3.Rc.t] carries 31 constructors, so a three-arm pattern match needs a

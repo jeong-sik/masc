@@ -61,14 +61,23 @@ let cached_shell_json_for_namespace ~state ~scope ~config =
   | None -> namespace_truth_bootstrap_shell_json ()
 
 let schedule_namespace_truth_shell_refresh ~state ~scope ~sw ~clock config =
-  if Atomic.compare_and_set namespace_truth_shell_refreshing false true then (
+  if
+    Option.is_none (Eio.Switch.get_error sw)
+    && Atomic.compare_and_set namespace_truth_shell_refreshing false true
+  then (
+    let started = Atomic.make false in
+    let clear_refreshing () =
+      Atomic.set namespace_truth_shell_refreshing false
+    in
     (* The reader answers from the cached shell; no request waits on this
        refresh. *)
-    Eio.Fiber.fork ~sw (fun () ->
-        Pool_lane.with_background @@ fun () ->
+    try
+      Eio.Fiber.fork ~sw (fun () ->
+        Atomic.set started true;
         Eio_guard.protect
-          ~finally:(fun () -> Atomic.set namespace_truth_shell_refreshing false)
+          ~finally:clear_refreshing
           (fun () ->
+             Pool_lane.with_background @@ fun () ->
              let timeout_s = namespace_truth_shell_refresh_timeout_s in
              let t0 = Time_compat.now () in
              try
@@ -101,7 +110,13 @@ let schedule_namespace_truth_shell_refresh ~state ~scope ~sw ~clock config =
              | exn ->
                  Log.Dashboard.warn
                    "project-snapshot async shell refresh failed: %s"
-                   (Printexc.to_string exn))))
+                   (Printexc.to_string exn)));
+      if not (Atomic.get started) && Option.is_some (Eio.Switch.get_error sw)
+      then clear_refreshing ()
+    with
+    | exn ->
+      clear_refreshing ();
+      raise exn)
 
 let with_observer_instance ~scope = function
   | `Assoc fields -> `Assoc (("observer_instance_id", `String (Server_observer_scope.instance_id scope))

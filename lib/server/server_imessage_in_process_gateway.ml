@@ -196,7 +196,11 @@ let handle_row ~dispatch_for_delivery ~(row : Db.inbound_row) =
     Consume
   | Ok (Some resolution) ->
     (match delivery_of_row ~row with
-     | Error detail -> Retry ("delivery coordinates rejected: " ^ detail)
+     | Error detail ->
+       Log.Server.warn
+         "imessage: skipping row %d with invalid delivery coordinates: %s"
+         row.rowid detail;
+       Consume
      | Ok delivery ->
        let message =
          inbound_message_of_row ~keeper_name:resolution.State.keeper_name row
@@ -230,7 +234,10 @@ let refresh_self_chat_guid ~db_path =
   match Env_config_imessage.self_chat_guid_opt () with
   | Some guid -> State.record_self_chat_guid guid
   | None ->
-    (match Db.resolve_self_chat_guid ~db_path with
+    (match
+       Eio_guard.run_in_systhread ~label:"imessage-self-chat-guid" (fun () ->
+         Db.resolve_self_chat_guid ~db_path)
+     with
      | Ok (Some guid) -> State.record_self_chat_guid guid
      | Ok None | Error _ -> ())
 ;;
@@ -274,7 +281,10 @@ let start ~sw ~env ~state =
                  when the server boots, so keep looking rather than deciding
                  once at startup that replies are impossible forever. *)
               refresh_self_chat_guid ~db_path;
-              match Db.read_new ~db_path ~after_rowid:cursor with
+              match
+                Eio_guard.run_in_systhread ~label:"imessage-chat-db-poll" (fun () ->
+                  Db.read_new ~db_path ~after_rowid:cursor)
+              with
               | Error read_error ->
                 State.record_poll_error (Db.error_to_string read_error);
                 loop cursor

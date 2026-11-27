@@ -136,33 +136,45 @@ let reader = ref read
 let observation_interval_s = 2.0
 
 let start ~sw ~clock ~stop_promise ~scope ~config =
-  Eio.Fiber.fork ~sw (fun () ->
-      let watcher = watch scope in
-      let last_error = ref None in
-      let report result =
-        match result with
-        | Ok None -> last_error := None
-        | Ok (Some observation) ->
-            last_error := None;
-            Event.announce ~base_path:config.Workspace.base_path
-              (Event.Browser_observation observation)
-        | Error detail ->
-            if not (Option.equal String.equal !last_error (Some detail)) then
-              Log.Server.warn "browser spectator observation failed: %s" detail;
-            last_error := Some detail
-      in
-      let rec sample () =
-        report
-          (match !reader ~config scope with
-           | Ok payload -> observe watcher payload
-           | Error detail -> Error detail);
-        Eio.Time.sleep clock observation_interval_s;
-        sample ()
-      in
-      ignore
-        (Eio.Fiber.first
-           (fun () -> sample ())
-           (fun () -> Eio.Promise.await stop_promise; `Observer_closed)))
+  if Eio.Promise.is_resolved stop_promise then ()
+  else
+    Eio.Fiber.fork ~sw (fun () ->
+        try
+          let watcher = watch scope in
+          let last_error = ref None in
+          let report result =
+            match result with
+            | Ok None -> last_error := None
+            | Ok (Some observation) ->
+                last_error := None;
+                Event.announce ~base_path:config.Workspace.base_path
+                  (Event.Browser_observation observation)
+            | Error detail ->
+                if not (Option.equal String.equal !last_error (Some detail)) then
+                  Log.Server.warn "browser spectator observation failed: %s" detail;
+                last_error := Some detail
+          in
+          let rec sample () =
+            report
+              (match !reader ~config scope with
+               | Ok payload -> observe watcher payload
+               | Error detail -> Error detail);
+            Eio.Time.sleep clock observation_interval_s;
+            sample ()
+          in
+          ignore
+            (Eio.Fiber.first
+               (fun () ->
+                 Eio.Promise.await stop_promise;
+                 `Observer_closed)
+               (fun () ->
+                 Eio.Fiber.yield ();
+                 sample ()))
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            Log.Server.error "browser spectator fiber failed: %s"
+              (Printexc.to_string exn))
 
 module For_testing = struct
   let with_reader replacement f =

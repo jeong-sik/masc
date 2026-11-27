@@ -23,34 +23,19 @@ let bool_of_env_default name ~(default : bool) =
 
 (* ── Name validation ────────────────────────────────────────── *)
 
-(* A keeper's directory is [keepers/<name>], beside the stores kept directly
-   under [keepers/]; a keeper named like one of them would share its
-   directory. [Keeper_id.Keeper_name.of_string] refuses the same names. *)
-let is_keepers_root_store_name = Common.is_keepers_root_store_dirname
-
 let validate_name name =
   Result.is_ok (Keeper_id.Keeper_name.of_string name)
 
+(* The reason is the typed name's own, so a rule added there is explained here
+   without a second copy of it. *)
 let invalid_name_error name =
-  if Safe_identifier.is_portable_name name && is_keepers_root_store_name name
-  then
-    Printf.sprintf
-      "invalid keeper name %S: keepers/%s is a runtime store directory, not a keeper"
-      name name
-  else if
-    Safe_identifier.is_portable_name name
-    && String.length name > Keeper_id.Keeper_name.max_length
-  then
-    Printf.sprintf
-      "invalid keeper name %S: length %d exceeds %d: the name becomes a filesystem component"
-      name
-      (String.length name)
-      Keeper_id.Keeper_name.max_length
-  else
-    Printf.sprintf
-      "invalid keeper name %S: %s"
-      name
-      (Safe_identifier.portable_name_error ~field:"keeper name")
+  let reason =
+    match Keeper_id.Keeper_name.of_string name with
+    | Error reason -> reason
+    | Ok (_ : Keeper_id.Keeper_name.t) ->
+      Safe_identifier.portable_name_error ~field:"keeper_name"
+  in
+  Printf.sprintf "invalid keeper name %S: %s" name reason
 ;;
 
 (* ── UTF-8 string processing ────────────────────────────────── *)

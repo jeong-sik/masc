@@ -15,8 +15,9 @@ val bool_of_env_default : string -> default:bool -> bool
 (* ── Name validation ────────────────────────────────────────── *)
 
 val validate_name : string -> bool
-(** A portable name bounded by {!Keeper_id.Keeper_name.max_length} that is not
-    the directory name of a runtime store kept directly under [keepers/]
+(** {!Keeper_id.Keeper_name.of_string} accepts it: a portable lowercase name
+    bounded by {!Keeper_id.Keeper_name.max_length} that is not the directory
+    name of a runtime store kept directly under [keepers/]
     ([Common.Keepers_root_scoped]). *)
 val invalid_name_error : string -> string
 (** Canonical explanation for a value rejected by {!validate_name}. *)

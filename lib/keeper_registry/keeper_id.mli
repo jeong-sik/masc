@@ -4,14 +4,19 @@
 module Keeper_name : sig
   type t = private string
   (** Keeper name parsed with the shared portable-name grammar
-      [[A-Za-z0-9._-]+] used by {!Keeper_config.validate_name}, excluding the
-      reserved path components [.] and [..]. *)
+      [[A-Za-z0-9._-]+] used by {!Keeper_config.validate_name}, without capital
+      letters, and excluding the reserved path components [.] and [..]. The
+      name becomes a directory, and a file system that does not tell case
+      apart (APFS as installed) would give [Foo] and [foo] one directory, so a
+      name holds no capital letter. *)
   val max_length : int
   (** Longest accepted name. The name becomes a filesystem component
       ([.masc/keepers/<name>/]), so it is bounded for the same reason
       {!Trace_id} is. *)
 
   val of_string : string -> (t, string) result
+  (** [Error] for a capital letter, naming its byte index; the name is not
+      lowered. *)
   val to_string : t -> string
   val equal : t -> t -> bool
   val compare : t -> t -> int

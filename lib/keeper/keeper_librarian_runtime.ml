@@ -39,16 +39,6 @@ type outward_effect =
   | No_outward_effect
   | Outward_effect_started
 
-type input_capacity_evidence =
-  | No_input_capacity_refusal
-  | Input_capacity_refused
-
-type message_descent =
-  | No_descent_evidence
-  | Smaller_input_may_help
-  | Invalid_output_blocks_descent
-  | Unsettled_native_blocks_descent
-
 type exact_execution_error =
   { outward_effect : outward_effect
   ; failure_evidence : Failure_evidence.t
@@ -349,39 +339,6 @@ let rec extraction_failure_evidence = function
       Failure_evidence.held
   | Prompt_render_failed _ | Exact_setup_failed _ | No_transport_declared ->
     Failure_evidence.empty
-;;
-
-let input_capacity_of_failure evidence =
-  if Failure_evidence.refuses_input_capacity evidence
-  then Input_capacity_refused
-  else No_input_capacity_refusal
-;;
-
-let message_descent_of_failure (evidence : Failure_evidence.t) =
-  if evidence.unsettled_native_execution
-  then Unsettled_native_blocks_descent
-  else if evidence.invalid_output
-  then Invalid_output_blocks_descent
-  else if evidence.historical_range_size || evidence.named_input_capacity
-  then Smaller_input_may_help
-  else No_descent_evidence
-;;
-
-type not_committed =
-  { input_capacity_evidence : input_capacity_evidence
-  ; input_capacity_only : bool
-  ; message_descent : message_descent
-  ; provider_input_refusals : Keeper_exact_input_refusal.t list
-  ; detail : string
-  }
-
-let not_committed_of_failure ~detail (evidence : Failure_evidence.t) =
-  { detail
-  ; message_descent = message_descent_of_failure evidence
-  ; input_capacity_evidence = input_capacity_of_failure evidence
-  ; input_capacity_only = Failure_evidence.input_capacity_only evidence
-  ; provider_input_refusals = evidence.provider_input_refusals
-  }
 ;;
 
 type no_callback_error = |
@@ -789,7 +746,6 @@ let context_write_json = function
 
 let run_best_effort
       ?(on_cli_input_limit = fun _ -> ())
-      ?(on_not_committed = fun _ -> ())
       ?(on_context_committed = fun _ -> ())
       ?cli_runner
       ~base_path
@@ -805,13 +761,6 @@ let run_best_effort
       (match acquired with
        | Error (Exact_setup_failed (Exact_lane_unavailable (Exact_lane_off _))) ->
          let detail = "Librarian is off; pending input remains unconsumed" in
-         on_not_committed
-           { detail
-           ; message_descent = No_descent_evidence
-           ; input_capacity_evidence = No_input_capacity_refusal
-           ; input_capacity_only = false
-           ; provider_input_refusals = []
-           };
          Log.Keeper.info ~keeper_name:keeper_id "%s" detail
        | Ok _
        | Error (Prompt_render_failed _)
@@ -1022,7 +971,6 @@ let run_best_effort
               let evidence = extraction_failure_evidence error in
               Option.iter on_cli_input_limit evidence.measured_cli_capacity;
               let detail = extraction_error_to_string error in
-              on_not_committed (not_committed_of_failure ~detail evidence);
               complete
                 (Exact_lane_run_registry.Failed { code = "librarian_failed"; detail })
                 (`Assoc []);
@@ -1072,13 +1020,6 @@ let run_best_effort
           "memory os librarian skipped: Eio net/clock context unavailable lane=%s"
           exact_lane_id
       in
-      on_not_committed
-        { detail
-        ; message_descent = No_descent_evidence
-        ; input_capacity_evidence = No_input_capacity_refusal
-        ; input_capacity_only = false
-        ; provider_input_refusals = []
-        };
       record_failure
         ~keepers_dir
         ~keeper_id
@@ -1093,13 +1034,6 @@ let run_best_effort
       ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
       ();
     Keeper_memory_health_input.written ~keepers_dir ~keeper_id;
-    on_not_committed
-      { detail = "librarian raised: " ^ Printexc.to_string exn
-      ; message_descent = No_descent_evidence
-      ; input_capacity_evidence = No_input_capacity_refusal
-      ; input_capacity_only = false
-      ; provider_input_refusals = []
-      };
     record_failure
       ~keepers_dir
       ~keeper_id
@@ -1121,14 +1055,4 @@ module For_testing = struct
   let classified_error_kind = extraction_error_kind
   let execute_working_context_classified = execute_working_context_classified
   let record_failure = record_failure
-
-  let cause_shows_size cause = Failure_evidence.shows_range_size (Failure_evidence.of_cause cause)
-
-  let cli_failure_shows_size failure =
-    Failure_evidence.shows_range_size (Failure_evidence.of_cli_failure failure)
-  ;;
-
-  let disposition_shows_size disposition =
-    Failure_evidence.shows_range_size (Failure_evidence.of_disposition disposition)
-  ;;
 end

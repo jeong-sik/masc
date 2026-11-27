@@ -41,9 +41,6 @@ val held : t
 val with_invalid_output : t -> t
 val without_measured_cli_capacity : t -> t
 
-val shows_range_size : t -> bool
-(** Historical range-fitting evidence after the invalid-output veto. *)
-
 val refuses_input_capacity : t -> bool
 (** A named input-capacity observation after the invalid-output veto, not
     permission to recursively partition the input. A quota or other independent

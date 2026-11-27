@@ -55,15 +55,11 @@ let test_callback ?(cli_errors = []) ?expected_limit ~base_path ~registry ~keepe
     cli_calls := !cli_calls @ [runtime_id];
     Error (List.assoc runtime_id cli_errors) in
   let refused = ref 0 and committed = ref false and observed_limit = ref None in
-  let provider_refusals = ref [] in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   Runtime.run_best_effort ~cli_runner
     ~on_cli_input_limit:(fun limit ->
       incr refused;
       observed_limit := Some (limit.Keeper_lane_cli_oneshot.runtime_id, limit.capacity.max_chars))
-    ~on_not_committed:(fun outcome ->
-      provider_refusals := List.sort_uniq compare
-        (!provider_refusals @ outcome.Runtime.provider_input_refusals))
     ~on_context_committed:(fun _ -> committed := true)
     ~base_path ~keepers_dir ~keeper_id input;
   Alcotest.(check int) "only a CLI slot reports an input limit" expected !refused;
@@ -75,13 +71,6 @@ let test_callback ?(cli_errors = []) ?expected_limit ~base_path ~registry ~keepe
   Option.iter (fun (_, count) -> Alcotest.(check int)
     "body-refused first provider really ran" 1 !count) first;
   Alcotest.(check bool) "refused request never commits Memory" false !committed;
-  let expected_refusals =
-    if first_overflow || status = `Request_entity_too_large
-    then [Keeper_exact_input_refusal.Request_body_refused]
-    else [] in
-  Alcotest.(check (list string)) "named HTTP body refusal survives subsequent slots and CLI fallback"
-    (List.map Keeper_exact_input_refusal.to_string expected_refusals)
-    (List.map Keeper_exact_input_refusal.to_string !provider_refusals);
   let runs = Runs.list_runs registry |> List.filter
     (fun (run : Runs.run) -> String.equal run.actor keeper_id) in
   match runs with
@@ -89,9 +78,6 @@ let test_callback ?(cli_errors = []) ?expected_limit ~base_path ~registry ~keepe
       (Runs.status_label run.status)
   | _ -> Alcotest.fail "expected one recorded Librarian run"
 
-(* The size verdict, cause by cause. A walk reads less when any of its
-   failures answers true, so this table is the whole rule: a row that flips
-   changes what a keeper reads after a refusal. *)
 let test_named_provider_input_refusals () =
   let module E = Agent_core.Exact_output in
   let module I = Keeper_exact_input_refusal in
@@ -156,8 +142,6 @@ let test_native_context_receipt_flags () =
         (not expected) combined.Shared.unsettled_native_execution)
       [Shared.combine evidence Shared.input_capacity_refusal;
        Shared.combine Shared.input_capacity_refusal evidence];
-    Alcotest.(check bool) "context refusal is not a measured character limit" false
-      (Shared.shows_range_size evidence);
     Alcotest.(check bool) "original typed context flags and reason survive roundtrip" true
       (Yojson.Safe.equal json (Shared.cli_observation_to_yojson decoded));
     let without_flags = match json with
@@ -202,141 +186,6 @@ let test_held_cli_observation_round_trips () =
       (Result.is_error (Shared.cli_observation_of_yojson (observation until))))
     [0.0; -1.0; Float.nan; Float.infinity]
 
-let test_size_verdict_table () =
-  let module E = Agent_core.Exact_output in
-  (* The verdict reads the refusal and never the status it arrived with. *)
-  let any_status = 400 in
-  let refused refusal = E.Provider_response_refused { http_status = any_status; refusal; retry_after_s = None } in
-  let module Http = Agent_core.Llm_provider.Http_client in
-  let module Types = Agent_core.Llm_provider.Types in
-  let sent error = E.Completion_failed { error; dispatch = E.Generation_dispatch_started } in
-  let unsent error = E.Completion_failed { error; dispatch = E.No_generation_dispatch } in
-  let failed kind = sent (Http.ProviderFailure { kind; message = "" }) in
-  let network kind = sent (Http.NetworkError { message = ""; kind }) in
-  let timed_out phase = sent (Http.TimeoutError { message = ""; phase }) in
-  let empty stop_reason = failed (Http.Empty_completion { stop_reason }) in
-  List.iter
-    (fun (name, cause, expected) ->
-       Alcotest.(check bool) name expected (Runtime.For_testing.cause_shows_size cause))
-    [ "context overflow", refused E.Context_overflow, true
-    ; "input capacity", refused E.Input_capacity, true
-    ; "request body refused", refused E.Request_body_refused, true
-    ; "timeout", refused E.Timeout, true
-    ; "invalid request, reason unknown", refused E.Invalid_request, true
-    ; "refusal body not received", refused E.Refusal_body_not_received, true
-    ; "rate limited", refused E.Rate_limited, false
-    ; "overloaded", refused E.Overloaded, false
-    ; "server error", refused E.Server_error, false
-    ; "network error", refused E.Network_error, false
-    ; "connection not opened", refused E.Connect_failed, false
-    ; "authentication failed", refused E.Auth_failed, false
-    ; "authorization refused", refused E.Authorization_refused, false
-    ; "payment required", refused E.Payment_required, false
-    ; "model not found", refused E.Not_found, false
-    (* A provider error that is not an HTTP refusal, read by its typed kind
-       (#37899). On 2026-09-22 msx-retro-mania's walk narrowed from 130 to 16
-       atoms on quota and empty-response failures while its keeper's request
-       kept growing. *)
-    ; "completion failed, context overflow", failed (Http.Context_overflow { limit = None }), true
-    ; ( "completion failed, response too large"
-      , failed (Http.Response_body_too_large { limit_bytes = 1 })
-      , true )
-    ; "completion failed, empty at the context window", empty Types.ContextWindowExceeded, true
-    ; "completion failed, empty at the output budget", empty Types.MaxTokens, true
-    ; "completion failed, empty at end of turn", empty Types.EndTurn, false
-    ; "completion failed, empty for a reason not named", empty (Types.Unknown "x"), false
-    ; "completion failed, hard quota", failed (Http.Hard_quota { retry_after = None }), false
-    ; ( "completion failed, capacity exhausted"
-      , failed
-          (Http.Capacity_exhausted
-             { scope = Http.Failure_scope_account; retry_after = None; model = None })
-      , false )
-    ; ( "completion failed, unclassified provider failure"
-      , failed (Http.Unknown_provider_failure { reason = None })
-      , false )
-    ; "completion failed, dns failure", network Http.Dns_failure, false
-    ; "completion failed, no route to the network or host", network Http.Unreachable, false
-    ; "completion failed, connection refused", network Http.Connection_refused, false
-    ; "completion failed, tls failure", network Http.Tls_error, false
-    ; "completion failed, peer reset", network Http.Connection_reset, false
-    ; "completion failed, peer closed", network Http.End_of_file, false
-    ; "completion failed, unclassified network failure", network Http.Unknown, false
-    (* Deadlines on a sent request: those on the provider's handling of the
-       whole request count, those that say nothing about its size do not. *)
-    ; "completion failed, sent, whole-call deadline", timed_out Http.Wall_clock, true
-    ; "completion failed, sent, awaiting headers", timed_out Http.Http_operation, true
-    ; "completion failed, sent, awaiting first token", timed_out Http.First_token, true
-    ; ( "completion failed, sent, idle stream"
-      , timed_out (Http.Stream_idle Http.Streaming_answer)
-      , false )
-    ; "completion failed, sent, deadline not named", timed_out Http.Unknown_timeout, false
-    ; "completion failed, queued past its deadline", timed_out Http.Queue, false
-    ; "completion failed, capacity backpressure", timed_out Http.Capacity_backpressure, false
-    (* The transport reports a connect deadline as [Http_operation]. A request
-       that was never sent was judged by no provider. *)
-    ; ( "completion failed, connect deadline, not sent"
-      , unsent (Http.TimeoutError { message = ""; phase = Http.Http_operation })
-      , false )
-    (* RFC #52028 §2.3: a connection that did not open sent nothing. *)
-    ; ( "completion failed, connection not opened, not sent"
-      , unsent (Http.Connect_failed { message = ""; kind = Http.Connection_refused })
-      , false )
-    ; ( "completion failed, context overflow, not sent"
-      , unsent (Http.ProviderFailure { kind = Http.Context_overflow { limit = None }; message = "" })
-      , false )
-    ; ( "completion failed, provider terminal"
-      , sent (Http.ProviderTerminal { kind = Http.Session_conflict; message = "" })
-      , false )
-    ; "completion failed, wiring rejected", sent (Http.AcceptRejected { reason = "" }), false
-    ; "output limit", E.Output_limit_reached, true
-    ; "window reached, no output", E.Window_reached { output = E.No_output }, true
-    ; "window reached, partial output", E.Window_reached { output = E.Partial_output }, true
-    ; "incomplete output", E.Incomplete_output { stop = E.End_turn }, true
-    ; "missing output", E.Missing_output, true
-    ; "ambiguous output", E.Ambiguous_output 2, true
-    ; "unexpected output content", E.Unexpected_output_content, true
-    ; "invalid json output", E.Invalid_json_output, false
-    ; "response body deadline exceeded", E.Response_body_deadline_exceeded, true
-    ]
-
-(* Unclassified execution failures still cannot narrow input. Typed Codex
-   character-capacity evidence is tested through the actual fallback walk. *)
-let test_cli_size_verdict_table () =
-  let module L = Keeper_lane_cli_oneshot in
-  let runtime_id = Fixture.cli_primary_runtime in
-  List.iter
-    (fun (name, failure, expected) ->
-       Alcotest.(check bool) name expected (Runtime.For_testing.cli_failure_shows_size failure))
-    [ "an answer that is not JSON", L.Invalid_json_output { runtime_id; detail = "truncated" }, false
-    ; "an answer the domain refused", L.Invalid_domain_output { runtime_id; detail = "schema" }, false
-    ; "an id this module cannot run", L.Not_an_official_client { runtime_id }, false
-    ; "an id this module cannot find", L.Unknown_runtime { runtime_id }, false
-    ; "a client that failed without saying why",
-      L.Execution_failed
-        { runtime_id; cause = Fusion_official_client.Setup_failure "quota" },
-      false
-    ]
-
-(* A candidate turned away before dispatch. Only a projection over the slot's
-   window is about the range; the rest answer a smaller range the same way. *)
-let test_disposition_size_verdict_table () =
-  let module E = Agent_core.Exact_output in
-  let over_the_window : E.candidate_rejection_disposition =
-    E.Input_capacity
-      (E.Token_measurement_required { accepted_through_tokens = 1; rejected_from_tokens = Some 2 })
-  in
-  List.iter
-    (fun (name, (disposition : E.candidate_rejection_disposition), expected) ->
-       Alcotest.(check bool) name expected
-         (Runtime.For_testing.disposition_shows_size disposition))
-    [ "a projection over the slot's window", over_the_window, true
-    ; "a slot that is unavailable", E.Runtime_slot_unavailable, false
-    ; "a runtime contract that refused", E.Runtime_contract_rejected, false
-    ; "an input contract that refused", E.Input_contract_rejected, false
-    ; "an output requirement that refused", E.Output_requirement_rejected, false
-    ; "a request that could not be prepared", E.Request_preparation_failed, false
-    ]
-
 let () =
   let base_path = Filename.temp_dir "librarian-capacity-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
@@ -373,24 +222,15 @@ let () =
        Alcotest.test_case "original native context flags remain admission authority" `Quick
          test_native_context_receipt_flags;
        Alcotest.test_case "a held CLI observation survives the stored form" `Quick
-         test_held_cli_observation_round_trips;
-       Alcotest.test_case "every provider cause, one row each" `Quick
-       test_size_verdict_table;
-       Alcotest.test_case "every official-client failure, one row each" `Quick
-         test_cli_size_verdict_table;
-       Alcotest.test_case "every pre-dispatch rejection, one row each" `Quick
-         test_disposition_size_verdict_table];
+         test_held_cli_observation_round_trips];
      "actual HTTP outcomes", [
       (* An API slot states its limit in provider prose, which this process
          cannot read back into a number, so it reports none. *)
-      (* A body a provider refused for its size is named whether it came
-         first or last; a quota or an authorization refusal never is. *)
       case "capacity-final" false `Request_entity_too_large 0;
       case "quota-final" false `Too_many_requests 0;
       case "capacity-then-quota" true `Too_many_requests 0;
       case "capacity-then-auth" true `Unauthorized 0;
       case "capacity-then-capacity" true `Request_entity_too_large 0;
-      (* An empty answer that ended its turn names no input refusal (#37899). *)
       case "empty-completion-final" false `OK 0];
     "HTTP to CLI outcomes", [
       (* Typed capacity survives later quota failures in either walk order. *)
@@ -411,7 +251,6 @@ let () =
       cli_case ~expected_limit:(Fixture.cli_secondary_runtime, 17) "cli-equal-capacities-reversed"
         [Fixture.cli_secondary_runtime, capacity; Fixture.cli_primary_runtime, capacity] 1;
       (* The API walk that sent the pass to the official client met a size
-         refusal. The client's own failure names none, and the refusal the
-         walk met before it survives. *)
+         refusal. The client's own failure names no limit. *)
       cli_case ~first_overflow:true "capacity-then-quota-then-cli-generic-rpc"
         [Fixture.cli_primary_runtime, generic] 0]]

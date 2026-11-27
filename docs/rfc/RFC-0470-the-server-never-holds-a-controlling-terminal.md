@@ -8,7 +8,7 @@ author: vincent + claude
 supersedes: []
 superseded_by: null
 related: ["#38700", "#38633"]
-implementation_prs: ["#38633"]
+implementation_prs: ["#38633", "#55120"]
 ---
 
 # RFC-0470 — masc 서버는 어떻게 띄워도 제어 터미널을 갖지 않는다

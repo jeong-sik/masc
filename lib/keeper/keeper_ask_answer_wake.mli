@@ -172,6 +172,14 @@ val create :
     original Keeper batch, not answer consumption, Task progress or effect
     success. Observer failure cannot undo committed deliveries.
 
+    For the life of the process the supervisor keeps, per Keeper, the answers
+    (ask ID and canonical answer time) a pass saw delivered. The reaction
+    ledger is append-only, so a later pass counts such an answer in
+    [already_delivered] without reading its evidence again; only answers not
+    yet seen delivered cost an evidence read. A Keeper loses that set when a
+    discovery no longer reads its ask log or finds its meta file gone.
+    {!reconcile} keeps nothing between calls.
+
     [on_discovery] receives the actual directory/log discovery and owner
     reservation result, with the original base path. [Ok ()] means that pass
     returned, not that owner delivery finished. Partial unreadable logs retain

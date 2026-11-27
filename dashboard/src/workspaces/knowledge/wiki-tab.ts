@@ -57,6 +57,7 @@ import {
   type WikiSource,
   type WorkspaceViewProps,
 } from './types'
+import { WikiBodyWithToc } from './wiki-toc'
 
 function decodeWikiIndexData(raw: unknown): WikiIndexData {
   const ctx = 'GET /api/v1/wiki'
@@ -1037,9 +1038,11 @@ export function WikiTab(props: WorkspaceViewProps) {
               </div>
             `}
 
-            <article class="kn-md-panel" onClick=${openBodyPageLink}>
-              <${MarkdownContent} text=${pageDetail.body_markdown} document linkRewrites=${bodyPageLinks.rewrites} />
-            </article>
+            <${WikiBodyWithToc} source=${pageDetail.body_markdown}>
+              <article class="kn-md-panel" onClick=${openBodyPageLink}>
+                <${MarkdownContent} text=${pageDetail.body_markdown} document linkRewrites=${bodyPageLinks.rewrites} />
+              </article>
+            </${WikiBodyWithToc}>
 
             <details class="ap-disclosure" data-testid="wiki-links-disclosure">
               <summary class="ap-disclosure-trigger">

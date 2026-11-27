@@ -5,11 +5,11 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { authSession, resetAuthStateForTests } from '../../core/auth'
 import { resetObserverStateForTests } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
-import { KnowledgeWorkspace } from './index'
+import { KnowledgeWorkspace, preloadKnowledgeSubroute } from './index'
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
@@ -28,6 +28,12 @@ async function settle(rounds = 8): Promise<void> {
 describe('WikiTab body links', () => {
   let container: HTMLDivElement
   const origFetch = globalThis.fetch
+
+  // KnowledgeWorkspace loads WikiTab via a lazy chunk inside <Suspense fallback={null}>;
+  // preload before running tests so settle() does not race Vite's cold dynamic-import transform.
+  beforeAll(async () => {
+    await preloadKnowledgeSubroute('wiki')
+  })
 
   beforeEach(() => {
     resetAuthStateForTests()
@@ -87,7 +93,8 @@ describe('WikiTab body links', () => {
     ({ text, kind, target, raw, line: 1, exists })
 
   // Page A links to page B, to a missing page and to a site; page B has no links.
-  async function openWikiWithPageA(pageALinks: unknown[]): Promise<void> {
+  const pageABody = 'See [B](page-b.md), [gone](page-gone.md) and [site](https://example.com).'
+  async function openWikiWithPageA(pageALinks: unknown[], body = pageABody): Promise<void> {
     globalThis.fetch = vi.fn((input: RequestInfo | URL) => {
       const url = String(input)
       if (url.startsWith('/api/v1/wiki?')) {
@@ -104,11 +111,7 @@ describe('WikiTab body links', () => {
         }))
       }
       if (url === '/api/v1/wiki/page-a') {
-        return Promise.resolve(jsonResponse(pageEnvelope(
-          'page-a',
-          'See [B](page-b.md), [gone](page-gone.md) and [site](https://example.com).',
-          pageALinks,
-        )))
+        return Promise.resolve(jsonResponse(pageEnvelope('page-a', body, pageALinks)))
       }
       if (url === '/api/v1/wiki/page-b') {
         return Promise.resolve(jsonResponse(pageEnvelope('page-b', 'Body of page B', [])))
@@ -171,5 +174,22 @@ describe('WikiTab body links', () => {
 
     expect(container.querySelector('.kn-md-panel')).toBeNull()
     expect(container.querySelector('.kn-notice--err[role="alert"]')).not.toBeNull()
+  })
+
+  it('A page lists its body headings in a table of contents that scrolls the body to each', async () => {
+    const scrolled: Element[] = []
+    // jsdom has no scrollIntoView.
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this) }
+    try {
+      await openWikiWithPageA([], '## Setup\n\nText.\n\n### Keys\n\nMore.\n\n## Use')
+      const entries = [...container.querySelectorAll<HTMLButtonElement>('nav[aria-label="목차"] button')]
+      expect(entries.map((entry) => entry.textContent?.trim())).toEqual(['Setup', 'Keys', 'Use'])
+
+      scrolled.length = 0
+      act(() => entries[1]!.click())
+      expect(scrolled).toEqual([container.querySelector('.kn-md-panel h3')])
+    } finally {
+      Reflect.deleteProperty(Element.prototype, 'scrollIntoView')
+    }
   })
 })

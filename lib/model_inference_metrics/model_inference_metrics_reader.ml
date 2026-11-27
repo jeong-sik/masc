@@ -136,7 +136,7 @@ let decision_log_paths ~base_path =
          Keeper_runtime_root_entry.classify_basename f
          |> List.exists (function
            | Keeper_runtime_root_entry.Keeper { artifact = Decision_log; _ } -> true
-           | Keeper_runtime_root_entry.Keeper { artifact = Metadata | Feedback_log | Tla_trace_log; _ } -> false))
+           | Keeper_runtime_root_entry.Keeper { artifact = Metadata | Tla_trace_log; _ } -> false))
        |> List.sort String.compare
        |> List.map (Filename.concat keeper_dir))
 

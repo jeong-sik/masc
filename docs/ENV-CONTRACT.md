@@ -127,7 +127,7 @@ Examples:
 #### Keeper auxiliary JSONL rotation
 
 The `[metrics]` keys `max_bytes` and `max_rotated` configure the auxiliary
-JSONL writer used for decision logs, response feedback and runtime manifests.
+JSONL writer used for decision logs and runtime manifests.
 The typed
 [`runtime setting registry`](../lib/config/keeper_runtime_setting_registry.ml)
 owns their defaults, bounds and operator-facing descriptions.

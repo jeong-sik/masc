@@ -18,7 +18,6 @@ type keeper_route =
   | Tool_result
   | Tool_calls
   | Waiting_inventory
-  | Feedback
   | Working_context
   | Memory_facts
   | Memory_journal
@@ -64,7 +63,6 @@ let suffix = function
   | Tool_result -> "/tool-result"
   | Tool_calls -> "/tool-calls"
   | Waiting_inventory -> "/waiting-inventory"
-  | Feedback -> "/feedback"
   | Working_context -> Types.keeper_suffix_working_context
   | Memory_facts -> "/memory-facts"
   | Memory_journal -> "/memory-journal"
@@ -164,7 +162,6 @@ let permission ?(include_thinking = false) =
      | Config
      | Tool_stats
      | Waiting_inventory
-     | Feedback
      | Operator_note
      | Turn_transcript
      | Transitions

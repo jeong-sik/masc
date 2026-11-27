@@ -1,7 +1,6 @@
 type keeper_artifact =
   | Metadata
   | Decision_log
-  | Feedback_log
   | Tla_trace_log
 
 type t =
@@ -14,7 +13,6 @@ type t =
 let keeper_suffix = function
   | Metadata -> ".json"
   | Decision_log -> ".decisions.jsonl"
-  | Feedback_log -> ".feedback.jsonl"
   | Tla_trace_log -> ".tla-trace.jsonl"
 ;;
 
@@ -36,7 +34,6 @@ type descriptor =
    while keeping classification total and deterministic. *)
 let descriptors =
   [ Keeper_descriptor { artifact = Decision_log; rotatable = true }
-  ; Keeper_descriptor { artifact = Feedback_log; rotatable = true }
   ; Keeper_descriptor { artifact = Tla_trace_log; rotatable = true }
   ; Keeper_descriptor { artifact = Metadata; rotatable = false }
   ]
@@ -103,5 +100,5 @@ let metadata_keeper_name observed_basename =
   |> List.find_map (function
     | Keeper { keeper_name; artifact = Metadata; rotation = None } -> Some keeper_name
     | Keeper { artifact = Metadata; rotation = Some _; _ }
-    | Keeper { artifact = Decision_log | Feedback_log | Tla_trace_log; _ } -> None)
+    | Keeper { artifact = Decision_log | Tla_trace_log; _ } -> None)
 ;;

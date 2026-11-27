@@ -471,25 +471,6 @@ let handle_keeper_get_subroutes state req request reqd =
            | Instance_mismatch | Scope_changed -> `Conflict, "observer_instance_changed" in
          Http.Response.json_value ~status ~request:req
            (`Assoc ["code", `String code; "error", `String "observer generation unavailable"]) reqd))
-  | Some Route.(Keeper (Feedback, name)) -> (
-    (* keeper-v2 #9: aggregated response-feedback tally (read API).
-       GET /api/v1/keepers/:name/feedback. The per-keeper feedback log is the
-       SSOT; the view renders this tally (no view-side derivation). A read IO
-       fault surfaces as 500, never a silently-empty success. *)
-    if not (Keeper_config.validate_name name) then
-      Http.Response.json_value ~status:`Bad_request
-        (`Assoc
-           [ ("error", `String (Printf.sprintf "invalid keeper name: %s" name)) ])
-        reqd
-    else
-      let config = Mcp_server.workspace_config state in
-      (match Keeper_response_feedback.read_tally ~config ~keeper_id:name with
-       | Ok tally ->
-         Http.Response.json_value ~compress:true ~request:req
-           (Keeper_response_feedback.tally_to_json tally) reqd
-       | Error (`Io msg) ->
-         Http.Response.json_value ~status:`Internal_server_error
-           (`Assoc [ ("error", `String msg) ]) reqd))
   | Some Route.(Keeper (Working_context, name)) ->
     Memory_reads.handle_working_context_get state req reqd name
   | Some Route.(Keeper (Memory_facts, name)) ->

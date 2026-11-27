@@ -428,9 +428,11 @@ let is_retryable = function
 
    Only a timeout is reclassified. A [Cancel.Cancelled] carrying anything else
    is a genuine cancellation with no typed variant here, and inventing one to
-   absorb it would be worse than reporting it plainly. Callers re-raise the
-   original exception regardless — this decides what an observer is told, never
-   whether the exception propagates. *)
+   absorb it would be worse than reporting it plainly. The run lifecycle does
+   not bring such a cancellation here: [Agent_lifecycle_events] publishes it as
+   its own [Cancelled] outcome. Callers re-raise the original exception
+   regardless — this decides what an observer is told, never whether the
+   exception propagates. *)
 let of_raised_exn (exn : exn) : t =
   match exn with
   | Eio.Time.Timeout | Eio.Cancel.Cancelled Eio.Time.Timeout ->

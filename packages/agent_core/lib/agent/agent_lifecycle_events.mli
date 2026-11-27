@@ -24,6 +24,9 @@ type outcome =
   | Yielded of { turn : int }
   | Input_required of Error.input_required
   | Failed of Error.t
+  | Cancelled of { reason : exn }
+      (** The run raised [Eio.Cancel.Cancelled reason]. [reason] is not
+          examined here. *)
 
 val current_invocation_id : unit -> string option
 (** The enclosing started invocation in this fiber, including its child
@@ -32,8 +35,8 @@ val current_invocation_id : unit -> string option
 (** Wrap a run with [AgentStarted] and exactly one typed invocation outcome.
 
     Successful runs publish [AgentCompleted]. Failed runs and synchronous
-    exceptions publish [AgentFailed]. A run never publishes both terminal
-    variants.
+    exceptions publish [AgentFailed]. A cancelled run publishes
+    [AgentCancelled]. A run publishes exactly one terminal variant.
 
     [current_run_id] is queried lazily so the outcome event reflects the
     raw-trace run id active when the call returns. [classify] maps the concrete
@@ -43,9 +46,12 @@ val current_invocation_id : unit -> string option
     without an event bus. Input persistence occurs at the actual pipeline
     boundary inside that scope, before execution terminal disposition.
 
-    If [f] raises, [AgentFailed] is still published with an [Error.Internal]
-    projection of the exception; the original exception is then re-raised
-    with its backtrace intact. *)
+    If [f] raises [Eio.Cancel.Cancelled reason], [AgentCancelled] is published
+    with that [reason]. A timeout ([Eio.Time.Timeout], bare or as the
+    cancellation reason) publishes [AgentFailed] with [Error.Api Timeout]. Any
+    other exception publishes [AgentFailed] with [Error.of_raised_exn] of it.
+    In every case the original exception is then re-raised with its backtrace
+    intact. *)
 val with_run_lifecycle_events
   :  event_bus:Event_bus.t option
   -> agent_name:string

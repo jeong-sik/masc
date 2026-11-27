@@ -48,6 +48,7 @@ let spawn_subscriber ~sw ~clock ~bus =
               | Agent_core.Event_bus.AgentYielded _
               | Agent_core.Event_bus.AgentInputRequired _
               | Agent_core.Event_bus.AgentFailed _
+              | Agent_core.Event_bus.AgentCancelled _
               | Agent_core.Event_bus.ToolCalled _
               | Agent_core.Event_bus.ToolCompleted _
               | Agent_core.Event_bus.TurnStarted _

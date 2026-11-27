@@ -33,6 +33,7 @@ type outcome =
   | Yielded of { turn : int }
   | Input_required of Error.input_required
   | Failed of Error.t
+  | Cancelled of { reason : exn }
 
 let invocation_key : string Eio.Fiber.key = Eio.Fiber.create_key ()
 let current_invocation_id () = Eio.Fiber.get invocation_key
@@ -75,8 +76,25 @@ let publish_finished ~event_bus ~agent_name ~started ~current_run_id ~outcome ~e
      | Failed error ->
        publish
          "AgentFailed"
-         (AgentFailed { agent_name; task_id = started_run_id; error; elapsed }))
+         (AgentFailed { agent_name; task_id = started_run_id; error; elapsed })
+     | Cancelled { reason } ->
+       publish
+         "AgentCancelled"
+         (AgentCancelled { agent_name; task_id = started_run_id; reason; elapsed }))
   | None, _ -> ()
+;;
+
+(* What an observer is told about a raised run. A cancellation is its own
+   outcome: [Error.Internal] is reserved for broken agent-core invariants, and
+   an operator stop, an interrupt or a lost [Fiber.first] race is none of
+   those. The cancelling exception travels as the reason without being
+   examined. A timeout is not treated as a cancellation: bare or wrapped, it
+   stays a failure with the typed [Api Timeout] that [Error.of_raised_exn]
+   gives it. *)
+let outcome_of_raised_exn = function
+  | Eio.Cancel.Cancelled Eio.Time.Timeout as exn -> Failed (Error.of_raised_exn exn)
+  | Eio.Cancel.Cancelled reason -> Cancelled { reason }
+  | exn -> Failed (Error.of_raised_exn exn)
 ;;
 
 let validate_run_callbacks ~on_yield ~on_resume =
@@ -121,18 +139,18 @@ let with_run_lifecycle_events
     result
   | exception exn ->
     let backtrace = Printexc.get_raw_backtrace () in
-    (* Classified rather than blanket-[Internal]: a timeout published as an
-       invariant failure reads to an operator as a broken agent, and gives a
-       downstream classifier free-form text instead of a variant. The re-raise
-       below is unchanged, so this never absorbs a cancellation. *)
-    let error = Error.of_raised_exn exn in
+    (* Classified rather than blanket-[Internal]: a cancellation or a timeout
+       published as an invariant failure reads to an operator as a broken
+       agent. The re-raise below is unchanged, so this never absorbs a
+       cancellation. *)
+    let outcome = outcome_of_raised_exn exn in
     Eio.Cancel.protect (fun () ->
       publish_finished
         ~event_bus
         ~agent_name
         ~started
         ~current_run_id:(current_run_id ())
-        ~outcome:(Failed error)
+        ~outcome
         ~elapsed:(Unix.gettimeofday () -. started_at));
     Printexc.raise_with_backtrace exn backtrace
 ;;

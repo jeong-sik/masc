@@ -46,6 +46,12 @@ type payload =
       ; error : Error.t
       ; elapsed : float
       }
+  | AgentCancelled of
+      { agent_name : string
+      ; task_id : string
+      ; reason : exn
+      ; elapsed : float
+      }
   | ToolCalled of
       { invocation : Tool_contract.Invocation.t
       ; agent_name : string
@@ -126,6 +132,7 @@ let payload_kind = function
   | AgentYielded _ -> "agent_yielded"
   | AgentInputRequired _ -> "agent_input_required"
   | AgentFailed _ -> "agent_failed"
+  | AgentCancelled _ -> "agent_cancelled"
   | ToolCalled _ -> "tool_called"
   | ToolCompleted _ -> "tool_completed"
   | TurnStarted _ -> "turn_started"
@@ -249,6 +256,7 @@ let rec matches filter event =
      | AgentYielded r -> r.agent_name = name
      | AgentInputRequired r -> r.agent_name = name
      | AgentFailed r -> r.agent_name = name
+     | AgentCancelled r -> r.agent_name = name
      | ToolCalled r -> r.agent_name = name
      | ToolCompleted r -> r.agent_name = name
      | TurnStarted r -> r.agent_name = name
@@ -268,6 +276,7 @@ let rec matches filter event =
      | AgentYielded _
      | AgentInputRequired _
      | AgentFailed _
+     | AgentCancelled _
      | TurnStarted _
      | TurnReady _
      | TurnCompleted _
@@ -285,6 +294,7 @@ let rec matches filter event =
      | AgentYielded _
      | AgentInputRequired _
      | AgentFailed _
+     | AgentCancelled _
      | ToolCalled _
      | ToolCompleted _
      | TurnStarted _

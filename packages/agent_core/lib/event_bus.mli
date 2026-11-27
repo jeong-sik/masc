@@ -51,6 +51,19 @@ type payload =
   (** Failed terminal outcome for one agent run. A failed run does not also
       publish [AgentCompleted].
       @since 0.154.0 *)
+  | AgentCancelled of
+      { agent_name : string
+      ; task_id : string
+      ; reason : exn
+      ; elapsed : float
+      }
+  (** Cancelled terminal outcome for one agent run: the run raised
+      [Eio.Cancel.Cancelled reason] before it reached a result. [reason] is
+      the exception the cancelling context carried. agent-core does not
+      inspect it; a host that cancels with its own exception can match that
+      constructor. A timeout cancellation ([Eio.Time.Timeout]) is a failure and
+      publishes [AgentFailed] with [Error.Api Timeout] instead. A cancelled run
+      publishes no other terminal variant. *)
   | ToolCalled of
       { invocation : Tool_contract.Invocation.t
         (** Exact run-scoped model-tool occurrence. @since 0.216.0 *)

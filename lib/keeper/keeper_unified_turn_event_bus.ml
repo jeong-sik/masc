@@ -115,7 +115,7 @@ let record_fsm_tool_transitions ~keeper_name ~turn_id old_count events =
            if prev = 1 then transitions := Leave_awaiting :: !transitions)
        | Agent_core.Event_bus.AgentStarted _ | Agent_core.Event_bus.AgentCompleted _
        | Agent_core.Event_bus.AgentYielded _ | Agent_core.Event_bus.AgentInputRequired _
-       | Agent_core.Event_bus.AgentFailed _ | Agent_core.Event_bus.TurnStarted _
+       | Agent_core.Event_bus.AgentFailed _ | Agent_core.Event_bus.AgentCancelled _ | Agent_core.Event_bus.TurnStarted _
        | Agent_core.Event_bus.TurnReady _ | Agent_core.Event_bus.TurnCompleted _
        | Agent_core.Event_bus.HandoffRequested _ | Agent_core.Event_bus.HandoffCompleted _
        | Agent_core.Event_bus.ElicitationCompleted _ | Agent_core.Event_bus.ToolApprovalCompleted _

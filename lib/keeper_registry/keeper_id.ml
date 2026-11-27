@@ -130,16 +130,17 @@ end
 module Uid = struct
   (** Stable unique identifier for a keeper, assigned once and never changed.
       Format: "keeper-<uuidv4>" (44 chars total).
-      Uses [Uuidm.v4_gen] with an [Eio.Mutex]-protected RNG for fiber safety,
-      following the same discipline as [Client_identity]. *)
+      Uses [Uuidm.v4_gen] with a non-yielding [Stdlib.Mutex]-protected RNG so
+      UID generation works safely both inside Eio fibers and outside Eio
+      contexts (systhreads, startup, and tests). *)
 
   type t = string
 
   let prefix = "keeper-"
 
   let rng = Random.State.make_self_init ()
-  let rng_mutex = Eio.Mutex.create ()
-  let with_rng f = Eio.Mutex.use_ro rng_mutex (fun () -> f rng)
+  let rng_mutex = Stdlib.Mutex.create ()
+  let with_rng f = Stdlib.Mutex.protect rng_mutex (fun () -> f rng)
 
   let generate () =
     let uuid = with_rng (fun r -> Uuidm.v4_gen r ()) in

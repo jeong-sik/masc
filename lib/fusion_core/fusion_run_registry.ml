@@ -237,11 +237,11 @@ let register_running t ~run_id ~keeper ~preset ~roster ~topology ~started_at =
 ;;
 
 let mark_progress t ~run_id ~progress =
-  match Store.get t.store ~id:run_id with
-  | Some { status = Store.Running; _ } ->
-    Stdlib.Mutex.protect t.progress_mutex (fun () ->
-      Hashtbl.replace t.progress_by_run run_id progress)
-  | Some { status = Store.Completed _; _ } | None -> ()
+  Stdlib.Mutex.protect t.progress_mutex (fun () ->
+    match Store.get_metadata t.store ~id:run_id with
+    | Some { status = Store.Running; _ } ->
+      Hashtbl.replace t.progress_by_run run_id progress
+    | Some { status = Store.Completed _; _ } | None -> ())
 ;;
 
 let mark_completed t ~run_id ~outcome =
@@ -292,17 +292,9 @@ let list_runs t =
   Stdlib.Mutex.protect t.progress_mutex (fun () ->
     Hashtbl.filter_map_inplace
       (fun run_id progress ->
-         if
-           List.exists
-             (fun (entry : Store.entry) ->
-                String.equal entry.id run_id
-                &&
-                match entry.status with
-                | Store.Running -> true
-                | Store.Completed _ -> false)
-             entries
-         then Some progress
-         else None)
+         match Store.get_metadata t.store ~id:run_id with
+         | Some { status = Store.Running; _ } -> Some progress
+         | Some { status = Store.Completed _; _ } | None -> None)
       t.progress_by_run);
   List.map (run_of_entry t) entries
 ;;

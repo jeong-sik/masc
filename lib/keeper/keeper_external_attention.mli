@@ -95,9 +95,9 @@ val original_message_scope : item -> Connector_memory_scope.t option
 (** What the store records: an external message arrived and this is what it
     was. Whether a Keeper still owes it an answer is not here. Since #34662 the
     event queue's pending entry does not answer it either: a completed turn
-    consumes the entry whether or not it replied. No store answers it today;
-    #34666 tracks the projection. Two stores answering one question is how
-    they came to disagree. *)
+    consumes the entry whether or not it replied. No store answers it, and
+    none is meant to: two stores answering one question is how they came to
+    disagree. *)
 type event = Recorded of item
 
 val event_id_of_dedupe_key : string -> string

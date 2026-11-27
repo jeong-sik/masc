@@ -2217,16 +2217,21 @@ let test_transient_goal_retry ~drop () =
             | Ok () -> () | Error `Timeout -> fail "verifier retry did not progress" in
           (* Wait until the real scheduling owner has registered its timer. *)
           await (fun () ->
+            (* A drop resolves the retry's cancel promise, which takes the
+               timer off the mock clock: once the retry is no longer pending
+               there is no sleeper left to advance. *)
             let rec advance () =
               if Eio_mock.Clock.try_advance clock then ()
+              else if drop && not (Agent.retry_pending ~goal_id) then ()
               else (Eio.Time.sleep actual_clock idle_tick_s; advance ())
             in
             let rec scheduled () =
               if Agent.retry_pending ~goal_id then ()
               else (Eio.Time.sleep actual_clock idle_tick_s; scheduled ()) in
             scheduled ();
-            if drop then
+            if drop then (
               ignore (must_succeed "drop waiting proof" (transition ctx goal_id "drop"));
+              check bool "drop retires the pending retry" false (Agent.retry_pending ~goal_id));
             Atomic.set AR.run_llm_reviewer_fn
               (recording_reviewer calls ["verifier-a", Stub_approve "provider recovered, target measured"]);
             advance ());

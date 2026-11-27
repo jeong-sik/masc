@@ -22,7 +22,7 @@ type breach =
   (** An absolute path is under neither the endpoint root nor the Keeper's
       host bookkeeping root. *)
 
-type jail_refusal =
+type jail_refusal = private
   { lane : lane
   ; breach : breach
   ; path : string  (** The path as the caller gave it. *)

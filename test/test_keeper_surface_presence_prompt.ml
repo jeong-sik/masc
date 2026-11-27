@@ -795,7 +795,7 @@ let sandbox_root_for profile =
   let visible_root = match profile with
     | Masc.Keeper_types_profile.Docker -> Masc.Keeper_sandbox.container_root meta.name
     | Remote_ssh -> "/srv/prompt-fixture/keeper"
-    | Micro_vm -> Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+    | Micro_vm -> Masc.Keeper_sandbox_microvm.keeper_work_root ~keeper_name:meta.name in
   let system_prompt =
     match Prompt.build_system_prompt ~workspace_root:visible_root ~meta ~config () with
     | Ok system -> system

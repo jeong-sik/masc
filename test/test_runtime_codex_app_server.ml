@@ -416,7 +416,8 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
     ?(timeout_s = 2.0) ?admission_timeout_s ?(no_turn_deadline = false)
     ?on_thread_ready ?on_thread_ready_delay_s ?on_turn_started_delay_s ?on_stream_event
     ?on_prompt_sent ?on_context_submission ?on_context_submission_delay_s ?on_reasoning_effort_resolved ?on_undelivered_tool_result ?(prompt = "Return the fixture marker")
-    ?(images = []) ?output_schema ?(native = Runtime_native_tools.codex_default) path =
+    ?(images = []) ?output_schema ?(native = Runtime_native_tools.codex_default)
+    ?(git_author_environment = []) path =
   let observer_failure = ref None in
   let on_stream_event = Option.map (fun callback event ->
     try callback event with
@@ -446,6 +447,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       ; developer_instructions
       ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
       ; timeout_s = if no_turn_deadline then None else Some timeout_s
+      ; git_author_environment
       }
     in
     let config = { config with output_schema } in
@@ -747,6 +749,37 @@ let test_fixture_exposes_stream_observer_failure () =
     check_raises "fixture rethrows an isolated observer failure" failure
       (fun () -> ignore (run_fixture ~on_stream_event path));
     check bool "production turn completes despite observer failure" true !finished)
+;;
+
+(* A Keeper's turn names the Keeper as author and committer of the commits
+   the app-server makes, over the names the server inherited (#38259). *)
+let test_keeper_names_the_git_author_of_the_turn () =
+  let keeper =
+    match Keeper_id.Keeper_name.of_string "keeper-a" with
+    | Ok keeper -> keeper
+    | Error detail -> failwith detail
+  in
+  Masc_test_deps.with_process_env "GIT_AUTHOR_NAME" (Some "operator") (fun () ->
+    Masc_test_deps.with_process_env "GIT_COMMITTER_NAME" (Some "operator") (fun () ->
+      with_fixture [init_result; account_chatgpt; thread_result; turn_result;
+        agent_message_delta; item_completed; turn_completed] (fun fixture ->
+        let wrapper = Filename.temp_file "masc-codex-git-author-" ".sh" in
+        Fun.protect ~finally:(fun () -> Sys.remove wrapper) (fun () ->
+          let output = open_out_bin wrapper in
+          output_string output "#!/bin/sh\nset -eu\n";
+          output_string output "[ \"${GIT_AUTHOR_NAME-}\" = keeper-a ] || exit 73\n";
+          output_string output "[ \"${GIT_COMMITTER_NAME-}\" = keeper-a ] || exit 74\n";
+          output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+          close_out output;
+          Unix.chmod wrapper 0o700;
+          match
+            run_fixture
+              ~git_author_environment:
+                (Keeper_official_client_host.git_author_environment keeper)
+              wrapper
+          with
+          | Ok _ -> ()
+          | Error error -> fail (Runtime_codex_app_server.error_to_string error)))))
 ;;
 
 let test_fixture_preserves_stream_observer_interrupt () =
@@ -10119,6 +10152,8 @@ let () =
             test_serial_tool_fences_concurrent_calls
         ; test_case "fixture exposes isolated stream observer failure" `Quick
             test_fixture_exposes_stream_observer_failure
+        ; test_case "Keeper names the git author of the turn" `Quick
+            test_keeper_names_the_git_author_of_the_turn
         ; test_case "fixture preserves stream observer interrupt" `Quick
             test_fixture_preserves_stream_observer_interrupt
         ; test_case "fixture preserves stream observer cancellation" `Quick

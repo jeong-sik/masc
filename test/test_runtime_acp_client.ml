@@ -123,7 +123,8 @@ let test_vibe_takes_the_posture_as_its_tool_allowlist () =
   in
   let allowlists ?mcp_server posture =
     Runtime_acp_client.For_testing.host_environment
-      ~base_env ~driver:Mistral_vibe ~extra_strip_env:[] ?mcp_server posture
+      ~base_env ~driver:Mistral_vibe ~extra_strip_env:[] ~git_author_environment:[]
+      ?mcp_server posture
     |> Array.to_list
     |> List.filter (String.starts_with ~prefix:"VIBE_ENABLED_TOOLS=")
   in
@@ -145,7 +146,7 @@ let test_vibe_takes_the_posture_as_its_tool_allowlist () =
   check (option string) "PATH is kept" (Some "/usr/bin")
     (find_env "PATH"
        (Runtime_acp_client.For_testing.host_environment
-          ~base_env ~driver:Mistral_vibe ~extra_strip_env:[]
+          ~base_env ~driver:Mistral_vibe ~extra_strip_env:[] ~git_author_environment:[]
           (Some Runtime_native_tools.Native_none)))
 ;;
 
@@ -994,6 +995,68 @@ for line in sys.stdin:
       (Sys.file_exists (Filename.concat foreign ".kimi-code")))
 ;;
 
+let keeper_a_git_author_environment () =
+  match Keeper_id.Keeper_name.of_string "keeper-a" with
+  | Ok keeper -> Keeper_official_client_host.git_author_environment keeper
+  | Error detail -> failwith detail
+;;
+
+(* A Keeper's host names the Keeper as author and committer of its git
+   commits. The names replace the ones the server inherited: a child reads
+   the first entry of a name, so an inherited one left in place would win
+   (#38259). *)
+let test_host_environment_names_the_keeper_as_git_author () =
+  let base_env =
+    [| "PATH=/usr/bin"; "GIT_AUTHOR_NAME=operator"; "GIT_COMMITTER_NAME=operator" |]
+  in
+  let git_entries =
+    Runtime_acp_client.For_testing.host_environment
+      ~base_env ~driver:Mistral_vibe ~extra_strip_env:[]
+      ~git_author_environment:(keeper_a_git_author_environment ())
+      (Some Runtime_native_tools.Native_full)
+    |> Array.to_list
+    |> List.filter (String.starts_with ~prefix:"GIT_")
+  in
+  check (list string) "the Keeper's names, once each"
+    [ "GIT_AUTHOR_NAME=keeper-a"; "GIT_COMMITTER_NAME=keeper-a" ]
+    git_entries
+;;
+
+(* [start] spawns the host with the config's git author names. A stand-in
+   host writes the names it was started with. *)
+let test_start_spawns_the_host_with_the_keeper_as_git_author () =
+  let cwd = Filename.temp_dir "acp-git-author-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree cwd) (fun () ->
+    let script = Filename.concat cwd "host.py" and env_file = Filename.concat cwd "env" in
+    Out_channel.with_open_text script (fun oc -> output_string oc
+      {|import json, os, sys
+with open(sys.argv[1], "w") as out:
+    json.dump([os.environ.get("GIT_AUTHOR_NAME"), os.environ.get("GIT_COMMITTER_NAME")], out)
+for line in sys.stdin:
+    request = json.loads(line)
+    if "id" in request:
+        result = {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}}
+        print(json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": result}), flush=True)
+|});
+    Eio_main.run @@ fun env ->
+    let clock = Eio.Stdenv.clock env in
+    let proc_mgr = Runtime_acp_client.foreground_process_mgr ~clock () in
+    let names =
+      Eio.Switch.run @@ fun sw ->
+      let config = { (Runtime_acp_client.default_config ~driver:Mistral_vibe ~cwd) with
+                     cli_path = "python3"; args = [script; env_file]
+                   ; git_author_environment = keeper_a_git_author_environment () } in
+      match Runtime_acp_client.start ~sw ~proc_mgr ~clock ~fs:(Eio.Stdenv.fs env) ~config
+              ~native_posture:Runtime_native_tools.Native_full () with
+      | Error err -> fail (Runtime_acp_client.error_to_string err)
+      | Ok client ->
+        Runtime_acp_client.close client;
+        Yojson.Safe.from_file env_file
+        |> Yojson.Safe.Util.to_list
+        |> List.map Yojson.Safe.Util.to_string
+    in
+    check (list string) "author and committer" [ "keeper-a"; "keeper-a" ] names)
+;;
 (* base_path is the operator's checkout, so an ACP host at read or full runs
    in the Keeper's private folder, the rule Codex follows (#39444). At none
    the host gets a new empty folder each time it spawns. *)
@@ -6948,6 +7011,10 @@ let () =
             test_kimi_none_session_digest_carries_the_profile
         ; test_case "kimi none start writes the masc-only profile" `Quick
             test_kimi_none_start_writes_the_masc_only_profile
+        ; test_case "host environment names the Keeper as git author" `Quick
+            test_host_environment_names_the_keeper_as_git_author
+        ; test_case "start spawns the host with the Keeper as git author" `Quick
+            test_start_spawns_the_host_with_the_keeper_as_git_author
         ; test_case "acp read and full run in the Keeper's private folder" `Quick
             test_acp_read_and_full_run_in_the_keepers_private_folder
         ; test_case "acp read without a Keeper file stops at the sandbox field" `Quick

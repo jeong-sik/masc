@@ -244,7 +244,7 @@ let fixture_account ?account_home () =
 
 let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
     ?(native = Runtime_native_tools.claude_code_default)
-    ?account_home
+    ?account_home ?(git_author_environment = [])
     ?admission_timeout_s ?(no_turn_deadline = false) ?on_session_ready_delay_s
     ?on_turn_started_delay_s ?on_stream_event ?on_input_observation ?on_prompt_sent ?on_spawned
     ?on_context_submission ?system_prompt
@@ -258,6 +258,7 @@ let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
       ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
       ; timeout_s = if no_turn_deadline then None else Some timeout_s
       ; system_prompt
+      ; git_author_environment
       }
     in
     let on_session_ready =
@@ -335,6 +336,39 @@ let test_relative_inherited_home_keeps_auth_environment () =
           close_out output;
           Unix.chmod wrapper 0o700;
           match run_fixture wrapper with
+          | Ok _ -> ()
+          | Error error -> fail (Runtime_claude_code.error_to_string error)))))
+;;
+
+(* A Keeper's turn names the Keeper as author and committer of the commits its
+   CLI makes, over the names the server inherited (#38259). The [auth status]
+   probe makes no commit and is not checked. *)
+let test_keeper_names_the_git_author_of_the_turn () =
+  let keeper =
+    match Keeper_id.Keeper_name.of_string "keeper-a" with
+    | Ok keeper -> keeper
+    | Error detail -> failwith detail
+  in
+  Masc_test_deps.with_process_env "GIT_AUTHOR_NAME" (Some "operator") (fun () ->
+    Masc_test_deps.with_process_env "GIT_COMMITTER_NAME" (Some "operator") (fun () ->
+      with_fixture [ Emit assistant; Emit result ] (fun fixture ->
+        let wrapper = Filename.temp_file "masc-claude-git-author-" ".sh" in
+        Fun.protect ~finally:(fun () -> Sys.remove wrapper) (fun () ->
+          let output = open_out_bin wrapper in
+          output_string output "#!/bin/sh\nset -eu\n";
+          output_string output "if [ \"${2-}\" != auth ]; then\n";
+          output_string output "  [ \"${GIT_AUTHOR_NAME-}\" = keeper-a ] || exit 73\n";
+          output_string output "  [ \"${GIT_COMMITTER_NAME-}\" = keeper-a ] || exit 74\n";
+          output_string output "fi\n";
+          output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+          close_out output;
+          Unix.chmod wrapper 0o700;
+          match
+            run_fixture
+              ~git_author_environment:
+                (Keeper_official_client_host.git_author_environment keeper)
+              wrapper
+          with
           | Ok _ -> ()
           | Error error -> fail (Runtime_claude_code.error_to_string error)))))
 ;;
@@ -5334,6 +5368,8 @@ let () =
             test_selected_account_home_reaches_claude_child
         ; test_case "relative inherited home keeps authentication environment" `Quick
             test_relative_inherited_home_keeps_auth_environment
+        ; test_case "Keeper names the git author of the turn" `Quick
+            test_keeper_names_the_git_author_of_the_turn
         ; test_case
             "long turn with many progress messages completes"
             `Quick

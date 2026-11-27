@@ -103,80 +103,87 @@ let check_no_normalized_collision_unlocked t ~kind ~name =
     then false (* same name + same kind = idempotent re-register *)
     else String.equal (prometheus_identifier raw) prom_name
   in
-  let fail existing_kind raw =
-    invalid_arg
-      (Printf.sprintf
-         "Metrics.%s: name %S normalizes to %S, which collides with the \
-          already-registered %s %S"
-         kind
-         name
-         prom_name
-         existing_kind
-         raw)
+  let collision_msg existing_kind raw =
+    Printf.sprintf
+      "Metrics.%s: name %S normalizes to %S, which collides with the \
+       already-registered %s %S"
+      kind
+      name
+      prom_name
+      existing_kind
+      raw
   in
-  List.iter
-    (fun c -> if collides_with "counter" c.c_name then fail "counter" c.c_name)
-    t.counters;
-  List.iter
-    (fun h -> if collides_with "histogram" h.h_name then fail "histogram" h.h_name)
-    t.histograms
+  match List.find_opt (fun c -> collides_with "counter" c.c_name) t.counters with
+  | Some c -> Error (collision_msg "counter" c.c_name)
+  | None ->
+    (match List.find_opt (fun h -> collides_with "histogram" h.h_name) t.histograms with
+     | Some h -> Error (collision_msg "histogram" h.h_name)
+     | None -> Ok ())
 ;;
 
-(* [check_no_duplicate_buckets_unlocked ~name ~buckets] raises
-   [Invalid_argument] if [buckets] contains the same bound twice. A
-   duplicate bound would cause the Prometheus text exposition path to
-   emit the same [..._bucket{le="..."}] line twice for the same series,
-   triggering duplicate-sample errors at scrape time.
-
-   Detecting at register time mirrors [check_no_normalized_collision_unlocked]:
-   the bug is in the caller's metric definition, not in any runtime
-   observation, so we surface it as a programmer error at startup
-   instead of silently deduping on every emit (PR #1564 workaround). *)
-let check_no_duplicate_buckets_unlocked ~name ~buckets =
+(* [check_no_duplicate_buckets ~name ~buckets] returns [Error msg] if [buckets]
+   contains the same bound twice. Raising inside [Eio.Mutex.use_rw] would poison
+   the mutex, so registration helpers return [Result.t] from the critical
+   section and raise [Invalid_argument] only after unlocking. *)
+let check_no_duplicate_buckets ~name ~buckets =
   let sorted = List.sort Float.compare buckets in
   let rec find_dup = function
     | a :: (b :: _ as rest) ->
       if Float.equal a b
       then
-        invalid_arg
+        Error
           (Printf.sprintf
              "Metrics.histogram: name %S has duplicate bucket bound %g"
              name
              a)
       else find_dup rest
-    | _ -> ()
+    | _ -> Ok ()
   in
   find_dup sorted
 ;;
 
 let counter t ~name ~unit_ =
-  with_lock t (fun () ->
-    match List.find_opt (fun c -> c.c_name = name) t.counters with
-    | Some _ -> t, name
-    | None ->
-      check_no_normalized_collision_unlocked t ~kind:"counter" ~name;
-      let c = { c_name = name; c_unit = unit_; c_values = LabelMap.empty } in
-      t.counters <- c :: t.counters;
-      t, name)
+  match
+    with_lock t (fun () ->
+      match List.find_opt (fun c -> c.c_name = name) t.counters with
+      | Some _ -> Ok (t, name)
+      | None ->
+        (match check_no_normalized_collision_unlocked t ~kind:"counter" ~name with
+         | Error msg -> Error msg
+         | Ok () ->
+           let c = { c_name = name; c_unit = unit_; c_values = LabelMap.empty } in
+           t.counters <- c :: t.counters;
+           Ok (t, name)))
+  with
+  | Ok counter -> counter
+  | Error msg -> invalid_arg msg
 ;;
 
 let histogram t ~name ~buckets =
-  with_lock t (fun () ->
-    match List.find_opt (fun h -> h.h_name = name) t.histograms with
-    | Some _ -> t, name
-    | None ->
-      check_no_normalized_collision_unlocked t ~kind:"histogram" ~name;
-      check_no_duplicate_buckets_unlocked ~name ~buckets;
-      let sorted_buckets = Array.of_list (List.sort Float.compare buckets) in
-      let h =
-        { h_name = name
-        ; h_buckets = buckets
-        ; h_sorted_buckets = sorted_buckets
-        ; h_values = empty_histogram_values (Array.length sorted_buckets)
-        }
-      in
-      t.histograms <- h :: t.histograms;
-      t, name)
+  match
+    with_lock t (fun () ->
+      match List.find_opt (fun h -> h.h_name = name) t.histograms with
+      | Some _ -> Ok (t, name)
+      | None ->
+        (match check_no_normalized_collision_unlocked t ~kind:"histogram" ~name with
+         | Error msg -> Error msg
+         | Ok () ->
+           (match check_no_duplicate_buckets ~name ~buckets with
+            | Error msg -> Error msg
+            | Ok () ->
+              let sorted_buckets = Array.of_list (List.sort Float.compare buckets) in
+              let h =
+                { h_name = name
+                ; h_buckets = buckets
+                ; h_sorted_buckets = sorted_buckets
+                ; h_values = empty_histogram_values (Array.length sorted_buckets)
+                }
+              in
+              t.histograms <- h :: t.histograms;
+              Ok (t, name))))
+  with
+  | Ok histogram -> histogram
+  | Error msg -> invalid_arg msg
 ;;
 
 let incr (t, name) ?(labels = []) n =

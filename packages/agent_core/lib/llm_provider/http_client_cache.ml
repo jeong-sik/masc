@@ -189,13 +189,21 @@ let create ~sw ~mono_clock ?(max_idle_per_host = 8) ?(idle_ttl_seconds = 60.0) (
           Eio.Mutex.use_rw ~protect:true cache.mu (fun () ->
             let stale = ref [] in
             let remaining =
-              Key_map.map
-                (List.filter (fun e ->
-                   if is_reusable ~idle_ttl:cache.idle_ttl ~now e
-                   then true
-                   else (
-                     stale := e :: !stale;
-                     false)))
+              Key_map.filter_map
+                (fun _ entries ->
+                   let kept =
+                     List.filter
+                       (fun e ->
+                          if is_reusable ~idle_ttl:cache.idle_ttl ~now e
+                          then true
+                          else (
+                            stale := e :: !stale;
+                            false))
+                       entries
+                   in
+                   match kept with
+                   | [] -> None
+                   | _ -> Some kept)
                 cache.entries
             in
             cache.entries <- remaining;
@@ -267,12 +275,15 @@ let park (cache : t) key owned : unit =
     let entry = { owned; last_used_at = now cache } in
     let parked =
       Eio.Mutex.use_rw ~protect:true cache.mu (fun () ->
-        let existing = Key_map.find_opt key cache.entries |> Option.value ~default:[] in
-        if List.length existing < cache.max_idle_per_host
-        then (
-          cache.entries <- Key_map.add key (entry :: existing) cache.entries;
-          true)
-        else false)
+        if Atomic.get cache.stop || not (owner_is_on owned)
+        then false
+        else (
+          let existing = Key_map.find_opt key cache.entries |> Option.value ~default:[] in
+          if List.length existing < cache.max_idle_per_host
+          then (
+            cache.entries <- Key_map.add key (entry :: existing) cache.entries;
+            true)
+          else false))
     in
     if not parked then Eio.Resource.close connection)
 ;;

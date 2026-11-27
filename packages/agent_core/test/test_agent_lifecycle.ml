@@ -47,6 +47,34 @@ let test_build_snapshot_merge_previous () =
   Alcotest.(check (option (float 0.001))) "finished_at set" (Some 200.0) snap.finished_at
 ;;
 
+let test_build_snapshot_preserves_first_progress_at () =
+  let first =
+    Agent_lifecycle.build_snapshot
+      ~agent_name:"test-agent"
+      ~model:"claude-sonnet-5"
+      ~first_progress_at:105.0
+      ~last_progress_at:105.0
+      Agent_lifecycle.Running
+  in
+  let second =
+    Agent_lifecycle.build_snapshot
+      ~agent_name:"test-agent"
+      ~model:"claude-sonnet-5"
+      ~previous:first
+      ~first_progress_at:120.0
+      ~last_progress_at:120.0
+      Agent_lifecycle.Running
+  in
+  Alcotest.(check (option (float 0.001)))
+    "first_progress_at is not overwritten by later progress events"
+    (Some 105.0)
+    second.first_progress_at;
+  Alcotest.(check (option (float 0.001)))
+    "last_progress_at advances"
+    (Some 120.0)
+    second.last_progress_at
+;;
+
 let test_build_snapshot_last_error () =
   let prev =
     Agent_lifecycle.build_snapshot
@@ -328,6 +356,10 @@ let () =
     [ ( "build_snapshot"
       , [ Alcotest.test_case "fresh snapshot" `Quick test_build_snapshot_fresh
         ; Alcotest.test_case "merge previous" `Quick test_build_snapshot_merge_previous
+        ; Alcotest.test_case
+            "preserves first_progress_at"
+            `Quick
+            test_build_snapshot_preserves_first_progress_at
         ; Alcotest.test_case "last_error carry" `Quick test_build_snapshot_last_error
         ; Alcotest.test_case
             "with provider config"

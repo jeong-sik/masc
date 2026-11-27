@@ -273,14 +273,10 @@ let stage_collect
     }
     (fun _tracer ->
        let ts = Pipeline_common.timestamp_now ?clock () in
-       (* Preserve an already-recorded first_progress_at (e.g. from streaming
-          first-token or tool-execution events). Overwriting it with the
-          collection timestamp would make latency-to-first-progress metrics
-          silently regress to the end of the turn. *)
-       (match agent.lifecycle with
-        | Some prev when Option.is_some prev.first_progress_at ->
-          set_lifecycle agent ~last_progress_at:ts Running
-        | _ -> set_lifecycle agent ~first_progress_at:ts ~last_progress_at:ts Running);
+       (* [Agent_lifecycle.build_snapshot] preserves an already-recorded
+          [first_progress_at] (e.g. from streaming first-token or tool-execution
+          events) while advancing [last_progress_at]. *)
+       set_lifecycle agent ~first_progress_at:ts ~last_progress_at:ts Running;
        trace_assistant_blocks raw_trace_run response.content;
        (* Admission runs after the raw trace and before anything derives from
           the response, because history and tool dispatch read [response.content]

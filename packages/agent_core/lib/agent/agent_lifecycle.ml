@@ -129,7 +129,9 @@ let build_snapshot
   ; accepted_at = pick (Option.bind previous (fun s -> s.accepted_at)) accepted_at
   ; ready_at = pick (Option.bind previous (fun s -> s.ready_at)) ready_at
   ; first_progress_at =
-      pick (Option.bind previous (fun s -> s.first_progress_at)) first_progress_at
+      Util.first_some
+        (Option.bind previous (fun s -> s.first_progress_at))
+        first_progress_at
   ; started_at = pick (Option.bind previous (fun s -> s.started_at)) started_at
   ; last_progress_at =
       pick (Option.bind previous (fun s -> s.last_progress_at)) last_progress_at

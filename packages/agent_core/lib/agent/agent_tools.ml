@@ -1224,7 +1224,9 @@ let execute_scheduled_tool
               ( (pending.result.content, pending.result.content_blocks, pending.result.outcome)
               , fun () ->
                   Fun.protect
-                    ~finally:(fun () -> Execution_context.settle_tool_observers invocation)
+                    ~finally:(fun () ->
+                      Eio.Cancel.protect (fun () ->
+                        Execution_context.settle_tool_observers invocation))
                     (fun () ->
                       let (_ : tool_dispatch) = finish_effect pending ~tool_name in
                       ()) )))

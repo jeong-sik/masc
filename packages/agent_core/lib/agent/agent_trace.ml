@@ -318,7 +318,7 @@ let with_raw_trace_run_classified_result
        the pre-terminal lifecycle; even a reserved callback/diagnostic exception
        cannot skip the lifecycle transition from the authoritative result. *)
     Fun.protect
-      ~finally:(fun () -> set_lifecycle_for_result result)
+      ~finally:(fun () -> Eio.Cancel.protect (fun () -> set_lifecycle_for_result result))
       (fun () ->
         finish_trace ~final_text ~stop_reason ~error
           ~message:"raw trace finalization failed after run result" ~fields:[];
@@ -332,12 +332,14 @@ let with_raw_trace_run_classified_result
     let error_msg = Error.to_string (Error.of_raised_exn exn) in
     Fun.protect
       ~finally:(fun () ->
-        set_lifecycle agent ~finished_at:(Unix.gettimeofday ())
-          ~last_error:error_msg Failed)
+        Eio.Cancel.protect (fun () ->
+          set_lifecycle agent ~finished_at:(Unix.gettimeofday ())
+            ~last_error:error_msg Failed))
       (fun () ->
-        finish_trace ~final_text:None ~stop_reason:None ~error:(Some error_msg)
-          ~message:"raw trace finalization failed after run exception"
-          ~fields:[ Log.S ("primary_exception", Printexc.to_string exn) ];
+        Eio.Cancel.protect (fun () ->
+          finish_trace ~final_text:None ~stop_reason:None ~error:(Some error_msg)
+            ~message:"raw trace finalization failed after run exception"
+            ~fields:[ Log.S ("primary_exception", Printexc.to_string exn) ]);
         Printexc.raise_with_backtrace exn backtrace)
 ;;
 

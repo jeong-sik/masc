@@ -328,16 +328,55 @@ chase.receive("{\"kind\":\"seek\",\"seconds\":0.25}")
 precondition(chase.state == .paused && reviewWire.isEmpty)
 chase.receive("{\"kind\":\"resume\"}")
 precondition(chase.state == .playing && reviewWire.map(\.1) == restored)
-// A held note keeps the patch of its attack. Exercise actual pause/resume, not
-// only the model's refusal predicate: nothing may be replayed before the error.
-let changedPrograms: [[[UInt8]]] = [
-    [[0xc0,1],[0x90,60,100],[0xc0,2]],
-    [[0x90,60,100],[0xc0,1]],
-    [[0xb0,0,4],[0xc0,1],[0x90,60,100],[0xb0,0,5],[0xc0,1],[0xb0,0,4]],
-    [[0xc0,1],[0xb0,64,127],[0x90,60,100],[0x80,60,42],[0xc0,2]],
-    [[0xc0,1],[0x90,60,100],[0xb0,66,127],[0x80,60,42],[0xc0,2]]
+// A held note keeps the patch of its attack, including notes a pedal retains.
+// Actual pause/resume re-sends it under that patch: its bank selects and Program
+// Change, the Note On, then the channel's current patch and pending bank.
+let patchReplays: [(source: [[UInt8]], replay: [[UInt8]])] = [
+    ([[0xc0,1],[0x90,60,100],[0xc0,2]], [[0xc0,2],[0xc0,1],[0x90,60,100],[0xc0,2]]),
+    ([[0xb0,0,4],[0xc0,1],[0x90,60,100],[0xb0,0,5],[0xc0,1],[0xb0,0,4]],
+     [[0xb0,0,5],[0xc0,1],[0xb0,0,4],[0xb0,0,4],[0xc0,1],[0x90,60,100],[0xb0,0,5],[0xc0,1],[0xb0,0,4]]),
+    ([[0xc0,1],[0xb0,64,127],[0x90,60,100],[0x80,60,42],[0xc0,2]],
+     [[0xc0,2],[0xb0,64,127],[0xc0,1],[0x90,60,100],[0xc0,2],[0x80,60,42]]),
+    ([[0xc0,1],[0x90,60,100],[0xb0,66,127],[0x80,60,42],[0xc0,2]],
+     [[0xc0,2],[0xc0,1],[0x90,60,100],[0xb0,66,127],[0xc0,2],[0x80,60,42]]),
+    ([[0xc0,1],[0x90,60,100],[0xc0,2],[0x90,62,90],[0xc0,3]],
+     [[0xc0,3],[0xc0,1],[0x90,60,100],[0xc0,2],[0x90,62,90],[0xc0,3]]),
+    ([[0xc0,1],[0x90,60,100],[0xc0,2],[0x90,62,90]], [[0xc0,2],[0xc0,1],[0x90,60,100],[0xc0,2],[0x90,62,90]]),
+    // The last note is on the current patch, so its selection already restored
+    // the program; the bank selected after that Program Change is still re-sent.
+    ([[0xb0,0,4],[0xc0,1],[0x90,60,100],[0xb0,0,5],[0xc0,2],[0x90,62,90],[0xb0,0,6]],
+     [[0xb0,0,5],[0xc0,2],[0xb0,0,6],[0xb0,0,4],[0xc0,1],[0x90,60,100],[0xb0,0,5],[0xc0,2],[0x90,62,90],[0xb0,0,6]]),
+    ([[0xb0,32,4],[0xc0,1],[0x90,60,100],[0xb0,32,5],[0xc0,2],[0x90,62,90],[0xb0,32,6]],
+     [[0xb0,32,5],[0xc0,2],[0xb0,32,6],[0xb0,32,4],[0xc0,1],[0x90,60,100],[0xb0,32,5],[0xc0,2],[0x90,62,90],[0xb0,32,6]])
 ]
-for messages in changedPrograms {
+for (messages, replay) in patchReplays {
+    reset(0); reviewWire = []
+    let owner = try wire([["seconds":0,"port":0,"bytes":messages.flatMap { $0 }]])
+    owner.tick(); reviewClock = 300_000_000
+    owner.receive("{\"kind\":\"pause\"}"); precondition(owner.state == .paused)
+    reviewWire = []; owner.receive("{\"kind\":\"resume\"}")
+    precondition(owner.state == .playing && reviewExit == nil && reviewWire.map(\.1) == replay, "unexpected patch replay: \(reviewWire.map(\.1))")
+}
+// A seek while playing silences, then reconstructs at the target: after the
+// Program Change the held note returns under its own patch; before it, under
+// the only patch it had.
+let patchSeek: [[String: Any]] = [["seconds":0,"port":0,"bytes":[0xc0,1,0x90,60,100]], ["seconds":0.2,"port":0,"bytes":[0xc0,2]]]
+for (target, replay): (Double, [[UInt8]]) in [(0.3, [[0xc0,2],[0xc0,1],[0x90,60,100],[0xc0,2]]), (0.1, [[0xc0,1],[0x90,60,100]])] {
+    reset(500_000_000); reviewWire = []
+    let owner = try wire(patchSeek); owner.tick()
+    reviewWire = []; owner.receive("{\"kind\":\"seek\",\"seconds\":\(target)}")
+    precondition(owner.state == .playing && reviewExit == nil && reviewWire.map(\.1) == [[0x80,60,0]] + replay, "unexpected seek replay: \(reviewWire.map(\.1))")
+}
+// A note attacked before its channel's first Program Change, or under a bank
+// register the source later set, has the device's unknown initial patch.
+// Nothing may be replayed before that error.
+let unknownPatches: [[[UInt8]]] = [
+    [[0x90,60,100],[0xc0,1]],
+    [[0xc0,1],[0x90,60,100],[0xb0,0,5],[0xc0,2]],
+    [[0xc0,1],[0x90,60,100],[0xb0,32,3],[0xc0,2]],
+    [[0xc0,1],[0x90,60,100],[0xb0,66,127],[0x80,60,42],[0xb0,0,5],[0xc0,2]]
+]
+for messages in unknownPatches {
     reset(0); reviewWire = []
     let owner = try wire([["seconds":0,"port":0,"bytes":messages.flatMap { $0 }]])
     owner.tick(); reviewClock = 300_000_000
@@ -362,7 +401,7 @@ sameProgram.tick(); reviewClock = 300_000_000
 sameProgram.receive("{\"kind\":\"pause\"}"); reviewWire = []
 sameProgram.receive("{\"kind\":\"resume\"}")
 precondition(sameProgram.state == .playing && reviewWire.map(\.1) == [[0xc0,1],[0x90,60,100]])
-print("SOURCE_PROGRAM_RECONSTRUCTION_PASS: explicit refusal before replay for unknown/changed patches and pedal-held notes; bank latches, restored patches and released notes retained")
+print("SOURCE_PROGRAM_RECONSTRUCTION_PASS: held and pedal-held notes replay under their attack patch on resume and seek, then the current patch and pending bank return; unknown initial patches refuse before replay; bank latches and released notes retained")
 var parameter = SourceChase()
 for bytes: [UInt8] in [[0xb0,101,0],[0xb0,100,0],[0xb0,6,12],[0xb0,38,0],[0xb0,96,0],[0xb0,97,0]] { parameter.observe(bytes, port: 0) }
 let parameters = try parameter.bootstrap(replacing: parameter)

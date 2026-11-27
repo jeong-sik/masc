@@ -234,10 +234,11 @@ extension OwnershipLedger where Key == SourceOwned {
 // Reconstruction re-sends original messages in their original order, but only
 // those that still decide state: the last write of each field, each earlier
 // write a kept message reads (the bank a Program Change applies, the parameter
-// selection of a Data Entry, the patch a sounding Note On keeps) and every
-// message that is not a replaceable absolute write. A write replaced in every
-// field it set and read by no kept message is dropped: a long controller
-// stream restores as its final value instead of its whole history.
+// selection of a Data Entry) and every message that is not a replaceable
+// absolute write. A write replaced in every field it set and read by no kept
+// message is dropped: a long controller stream restores as its final value
+// instead of its whole history. A sounding note's own patch is re-sent from its
+// ChaseNote, not from this replay.
 struct StateReplay<Field: Hashable, Message> {
     private var messages: [Int: Message] = [:], reads: [Int: [Int]] = [:], holds: [Int: Int] = [:]
     private(set) var current: [Field: Int] = [:]
@@ -293,6 +294,26 @@ struct ChaseChannel {
     var replay = StateReplay<ChaseField.Kind, [UInt8]>()
     mutating func prune() {
         notes.removeAll { !$0.held && sustain < 64 && !(sostenuto >= 64 && $0.captured) }
+    }
+    // Bank selects and the Program Change that make `patch` current again. A
+    // bank register the source had not set when `patch` was selected held the
+    // device's unknown initial value, reproducible only while the source has
+    // not set that register since. A note attacked before the channel's first
+    // Program Change has the device's unknown initial program.
+    func selecting(_ patch: ChaseProgram?, channel: UInt8) throws -> [[UInt8]] {
+        guard let patch else {
+            throw MidiFailure("source state reconstruction cannot restore a held note attacked before its channel's first program change")
+        }
+        var messages: [[UInt8]] = []
+        let banks: [(controller: UInt8, value: UInt8?, register: UInt8?)] = [(0, patch.bankMSB, bankMSB), (32, patch.bankLSB, bankLSB)]
+        for bank in banks {
+            if let value = bank.value { messages.append([0xb0 | channel, bank.controller, value]) }
+            else if bank.register != nil {
+                throw MidiFailure("source state reconstruction cannot restore a held note's patch selected under an unknown initial bank")
+            }
+        }
+        messages.append([0xc0 | channel, patch.number])
+        return messages
     }
 }
 enum ChaseObstacle: String, Hashable {
@@ -431,28 +452,41 @@ struct SourceChase {
         guard previous.touched.isSubset(of: known) else {
             throw MidiFailure("source seek cannot restore an initial channel value absent from the source prefix")
         }
-        // Replaying the final program before every held Note On would change
-        // voices that began under an earlier patch, including pedal-held notes.
-        // Refuse that reconstruction until per-note patch replay is supported;
-        // an entry without notes replays no Note On and needs no refusal.
-        guard !notes || channels.values.allSatisfy({ state in state.notes.allSatisfy { $0.program == state.program } }) else {
-            throw MidiFailure("source state reconstruction cannot restore held notes across program or bank changes")
-        }
         var result = channels.flatMap { key, state in state.replay.entries.map { (order: $0.order, port: key >> 8, bytes: $0.message) } }
             .sorted { $0.order < $1.order }.map { ($0.port, $0.bytes) }
         for key in channels.keys.sorted() {
             let state = channels[key]!, port = key >> 8, channel = UInt8(key & 15)
+            // Each sounding note keeps the patch of its attack, including notes a
+            // pedal retains: one that began under an earlier program or bank is
+            // re-sent under that patch. The replay above leaves the current one.
+            var patch = state.program, selected = false
+            func attack(_ note: ChaseNote) throws {
+                if note.program != patch {
+                    result += try state.selecting(note.program, channel: channel).map { (port, $0) }
+                    patch = note.program; selected = true
+                }
+                result.append((port, [0x90 | channel, note.pitch, note.velocity]))
+            }
             if notes {
                 // silence() already releases owned keys/pedals. Restore the captured
                 // set before switching sostenuto on; later keys must remain outside it.
-                for note in state.notes where note.captured { result.append((port, [0x90 | channel, note.pitch, note.velocity])) }
+                for note in state.notes where note.captured { try attack(note) }
             }
             // Pedal position is physical state a mid-region entry has to re-establish,
             // not an event of the source prefix, so it survives `notes: false`.
             if known.contains(ChaseField(port: port, channel: channel, kind: .controller(66))) { result.append((port, [0xb0 | channel, 66, state.sostenuto])) }
             if known.contains(ChaseField(port: port, channel: channel, kind: .controller(64))) { result.append((port, [0xb0 | channel, 64, state.sustain])) }
             if notes {
-                for note in state.notes where !note.captured { result.append((port, [0x90 | channel, note.pitch, note.velocity])) }
+                for note in state.notes where !note.captured { try attack(note) }
+                if selected {
+                    // Later source messages play under the current patch, and a
+                    // bank selection sent after its Program Change stays pending.
+                    // Any selection above overwrote the pending bank, even when
+                    // the last note was attacked under the current patch.
+                    if patch != state.program { result += try state.selecting(state.program, channel: channel).map { (port, $0) } }
+                    if let msb = state.bankMSB, msb != state.program?.bankMSB { result.append((port, [0xb0 | channel, 0, msb])) }
+                    if let lsb = state.bankLSB, lsb != state.program?.bankLSB { result.append((port, [0xb0 | channel, 32, lsb])) }
+                }
                 for note in state.notes where !note.held { result.append((port, [note.releaseStatus, note.pitch, note.release])) }
             }
             // Channel pressure and poly aftertouch are captured values too; silence()

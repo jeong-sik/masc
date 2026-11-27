@@ -130,10 +130,26 @@ let try_admission zone ~(snapshot : Authz_zone.snapshot) ~now_ms ~draw ~identity
                 ; previously_deleted = Principals.was_deleted committed.snapshot.state.principals identity
                 }))
      | Error error ->
+       let retryable =
+         match error with
+         | Authz_zone.Refused _ -> true
+         | Authz_zone.Store_stopped _
+         | Authz_zone.Log_stopped _
+         | Authz_zone.Uncertain _
+         | Authz_zone.Store_holds_no_answer
+         | Authz_zone.Log_holds_records _
+         | Authz_zone.Record_not_built _
+         | Authz_zone.Store_entry_refused _
+         | Authz_zone.Abort_not_confirmed _
+         | Authz_zone.Settlement_not_written _
+         | Authz_zone.Intent_not_written _
+         | Authz_zone.Record_not_appended _
+         | Authz_zone.Answer_not_written _ -> false
+       in
        let moved =
          Authz_record.next_seq (Authz_zone.snapshot zone).head <> Authz_record.next_seq snapshot.head
        in
-       if moved then Ok (`Again (Commit_failed error)) else Error (Commit_failed error))
+       if retryable && moved then Ok (`Again (Commit_failed error)) else Error (Commit_failed error))
 ;;
 
 (* The way in, read from each snapshot: the invitation whose token came with

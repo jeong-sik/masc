@@ -32,6 +32,10 @@ let header name headers =
 let is_digits text = String.length text > 0 && String.for_all (fun c -> c >= '0' && c <= '9') text
 
 (* RFC 9111 section 5.2: a comma-separated list of [token [ "=" value ]]. *)
+(* Cap Cache-Control max-age at 24h before converting to ms so huge upstream
+   values cannot overflow signed int. *)
+let max_cache_seconds = 86_400
+
 let cache_lifetime_ms headers =
   match header "cache-control" headers with
   | None -> None
@@ -46,7 +50,9 @@ let cache_lifetime_ms headers =
         (fun directive ->
           match String.split_on_char '=' directive with
           | [ "max-age"; seconds ] when is_digits seconds ->
-            Option.map (fun seconds -> seconds * 1000) (int_of_string_opt seconds)
+            Option.map
+              (fun seconds -> Int.min seconds max_cache_seconds * 1000)
+              (int_of_string_opt seconds)
           | _ -> None)
         directives
 ;;
@@ -205,12 +211,26 @@ let verified ~get cache ~now ~now_ms endpoints token =
   in
   let read_and_check () =
     let* answer = fetch ~get ~url:endpoints.jwks_uri ~unavailable:(fun detail -> Keys_unavailable detail) in
-    Mutex.protect cache.mutex (fun () ->
-      cache.jwks
-      <- Option.map
-           (fun lifetime_ms -> { value = answer.body; fresh_until_ms = now_ms + lifetime_ms })
-           (cache_lifetime_ms answer.headers));
-    check answer.body
+    let outcome = check answer.body in
+    (* Never poison cache.jwks with a malformed JWKS document for the full
+       Cache-Control TTL (e.g. 6 hours). *)
+    (match outcome with
+     | Error (Signature_refused Oidc_id_token_signature.Malformed_jwks) -> ()
+     | Ok _
+     | Error
+         ( Discovery_unavailable _ | Discovery_malformed _ | Token_unavailable _
+         | Token_refused _ | Token_answer_malformed | Keys_unavailable _
+         | Claims_refused _
+         | Signature_refused
+             ( Malformed_token | Algorithm_not_allowed | Unsupported_critical_header
+             | Missing_key_id | Unknown_key_id | Key_not_rs256 | Key_too_short
+             | Invalid_signature | Invalid_expiry | Expired ) ) ->
+       Mutex.protect cache.mutex (fun () ->
+         cache.jwks
+         <- Option.map
+              (fun lifetime_ms -> { value = answer.body; fresh_until_ms = now_ms + lifetime_ms })
+              (cache_lifetime_ms answer.headers)));
+    outcome
   in
   match
     Mutex.protect cache.mutex (fun () ->

@@ -491,7 +491,7 @@ let broadcast_run_status ~registry ~run_id =
    failure is logged, not raised, because the keeper replays the durable
    stimulus on its next admitted turn (mirrors HITL's post-commit signal).
    Eio structural cancellation (Cancelled) is always re-raised. *)
-let wake_keeper_on_fusion_completion
+let commit_keeper_wake_stimulus
       ~base_dir ~keeper ~run_id ~channel ~terminal ~board_post_id :
     (unit, string) result =
   let fusion_completion =
@@ -520,42 +520,57 @@ let wake_keeper_on_fusion_completion
     Log.Keeper.error ~keeper_name:keeper
       "fusion completion wake durable-commit failed run_id=%s: %s" run_id reason;
     Error reason
-  | Ok () ->
-    Log.Keeper.info "fusion completion wake: keeper=%s run_id=%s terminal=%s" keeper
+  | Ok () -> Ok ()
+;;
+
+let signal_keeper_wakeup ~base_dir ~keeper ~run_id ~terminal =
+  Log.Keeper.info "fusion completion wake: keeper=%s run_id=%s terminal=%s" keeper
+    run_id
+    (match terminal with
+     | Keeper_event_queue.Fusion_succeeded _ -> "succeeded"
+     | Keeper_event_queue.Fusion_failed _ -> "failed"
+     | Keeper_event_queue.Fusion_cancelled -> "cancelled");
+  try
+    match
+      Keeper_registry.wakeup_running
+        ~intent:Keeper_registry.Reactive_signal
+        ~base_path:base_dir
+        keeper
+    with
+    | Keeper_registry.Signaled -> ()
+    | Keeper_registry.Deferred_unregistered ->
+      Log.Keeper.info ~keeper_name:keeper
+        "fusion completion wake deferred: keeper is no longer registered run_id=%s"
+        run_id
+    | Keeper_registry.Deferred_not_running phase ->
+      Log.Keeper.info ~keeper_name:keeper
+        "fusion completion wake deferred: phase=%s run_id=%s"
+        (Keeper_state_machine.phase_to_string phase)
+        run_id
+    | Keeper_registry.Deferred_lifecycle denial ->
+      Log.Keeper.info ~keeper_name:keeper
+        "fusion completion wake deferred by lifecycle: reason=%s run_id=%s"
+        (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
+        run_id
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Keeper.warn ~keeper_name:keeper
+      "fusion completion wake hint failed after durable commit run_id=%s: %s"
       run_id
-      (match terminal with
-       | Keeper_event_queue.Fusion_succeeded _ -> "succeeded"
-       | Keeper_event_queue.Fusion_failed _ -> "failed"
-       | Keeper_event_queue.Fusion_cancelled -> "cancelled");
-    (try
-       match
-         Keeper_registry.wakeup_running
-           ~intent:Keeper_registry.Reactive_signal
-           ~base_path:base_dir
-           keeper
-       with
-       | Keeper_registry.Signaled -> ()
-       | Keeper_registry.Deferred_unregistered ->
-         Log.Keeper.info ~keeper_name:keeper
-           "fusion completion wake deferred: keeper is no longer registered run_id=%s"
-           run_id
-       | Keeper_registry.Deferred_not_running phase ->
-         Log.Keeper.info ~keeper_name:keeper
-           "fusion completion wake deferred: phase=%s run_id=%s"
-           (Keeper_state_machine.phase_to_string phase)
-           run_id
-       | Keeper_registry.Deferred_lifecycle denial ->
-         Log.Keeper.info ~keeper_name:keeper
-           "fusion completion wake deferred by lifecycle: reason=%s run_id=%s"
-           (Keeper_lifecycle_admission.autonomous_denial_to_wire denial)
-           run_id
-     with
-     | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn ->
-       Log.Keeper.warn ~keeper_name:keeper
-         "fusion completion wake hint failed after durable commit run_id=%s: %s"
-         run_id
-         (Printexc.to_string exn));
+      (Printexc.to_string exn)
+;;
+
+let wake_keeper_on_fusion_completion
+      ~base_dir ~keeper ~run_id ~channel ~terminal ~board_post_id :
+    (unit, string) result =
+  match
+    commit_keeper_wake_stimulus
+      ~base_dir ~keeper ~run_id ~channel ~terminal ~board_post_id
+  with
+  | Error _ as err -> err
+  | Ok () ->
+    signal_keeper_wakeup ~base_dir ~keeper ~run_id ~terminal;
     Ok ()
 
 let delivery_key_of_run_id run_id =
@@ -761,53 +776,50 @@ let emit ~source_context ~registry ~base_dir ~keeper ~run_id ~channel ~question 
              (Board.Post_publication_failure.to_string e);
            ""
        in
-       (* registry를 Completed로 갱신(가시성). wake 직전 무조건 호출.
-          실패 시 사유/태그를 함께 기록해 masc_fusion_status·SSE가 opaque
-          "failed"가 되지 않게 한다. *)
-       let wake_result =
+       (* Commit the durable wake stimulus BEFORE marking the registry completed
+          and broadcasting SSE, so a failed wake commit never falsely publishes
+          a terminal Completed run while the producer obligation still retries.
+          Signal the Keeper wakeup AFTER mark_completed so the woken Keeper
+          immediately observes Completed. *)
+       let outcome, terminal =
          match judge with
          | Ok j ->
-           Fusion_run_registry.mark_completed registry ~run_id
-             ~outcome:
-               (Fusion_run_registry.Succeeded_with_summary
-                  { decision =
-                      (* The constructor flattens whitespace, trims, and caps at
-                         [Fusion_run_registry.decision_preview_max_bytes]. *)
-                      Fusion_run_registry.decision_preview_of_string
-                        (render_decision j.decision)
-                  ; summary = registry_preview ~max_bytes:240 j.resolved_answer
-                  });
-           broadcast_run_status ~registry ~run_id;
-           wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~channel
-             ~terminal:
-               (Keeper_event_queue.Fusion_succeeded j.Fusion_types.resolved_answer)
-             ~board_post_id
+           ( Fusion_run_registry.Succeeded_with_summary
+               { decision =
+                   (* The constructor flattens whitespace, trims, and caps at
+                      [Fusion_run_registry.decision_preview_max_bytes]. *)
+                   Fusion_run_registry.decision_preview_of_string
+                     (render_decision j.decision)
+               ; summary = registry_preview ~max_bytes:240 j.resolved_answer
+               }
+           , Keeper_event_queue.Fusion_succeeded j.Fusion_types.resolved_answer )
          | Error e ->
-           Fusion_run_registry.mark_completed registry ~run_id
-             ~outcome:
-               (Fusion_run_registry.Failed
-                  { reason = Fusion_types.judge_failure_text e
-                  ; code = Fusion_types.judge_failure_tag e
-                  });
-           broadcast_run_status ~registry ~run_id;
            (* 심판이 실패한 것이지 run 이 취소된 것이 아니므로 [Fusion_failed] 다. *)
-           wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~channel
-             ~terminal:
-               (Keeper_event_queue.Fusion_failed
-                  (Printf.sprintf "fusion run failed — %s" (render_failure e)))
-             ~board_post_id
+           ( Fusion_run_registry.Failed
+               { reason = Fusion_types.judge_failure_text e
+               ; code = Fusion_types.judge_failure_tag e
+               }
+           , Keeper_event_queue.Fusion_failed
+               (Printf.sprintf "fusion run failed — %s" (render_failure e)) )
        in
        (* Chat/Board are independently idempotent, but the producer obligation
           covers the durable continuation wake too. Returning [Error] retains
           that obligation; a retry converges on the existing chat/Board rows. *)
-       (match wake_result with
-        | Ok () -> Ok ()
+       (match
+          commit_keeper_wake_stimulus
+            ~base_dir ~keeper ~run_id ~channel ~terminal ~board_post_id
+        with
         | Error reason ->
           Otel_metric_store.inc_counter
             Keeper_metrics.(to_string KeepaliveSignalFailures)
             ~labels:[ ("keeper", keeper); ("phase", "fusion_completion_wake") ]
             ();
-          Error reason))
+          Error reason
+        | Ok () ->
+          Fusion_run_registry.mark_completed registry ~run_id ~outcome;
+          broadcast_run_status ~registry ~run_id;
+          signal_keeper_wakeup ~base_dir ~keeper ~run_id ~terminal;
+          Ok ()))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)
@@ -827,9 +839,13 @@ let emit_failure ~registry ~base_dir ~keeper ~run_id ~channel ~failure =
       ~keeper_name:keeper ~delivery_key ~content ()
     |> Result.map (fun (_ : Keeper_chat_store.append_once_result) -> ())
   in
+  let terminal = terminal_of_delivery_failure failure ~content in
+  let* () =
+    commit_keeper_wake_stimulus
+      ~base_dir ~keeper ~run_id ~channel ~terminal ~board_post_id:""
+  in
   Fusion_run_registry.mark_completed registry ~run_id
     ~outcome:(Fusion_run_registry.Failed { reason = detail; code = failure_code });
   broadcast_run_status ~registry ~run_id;
-  wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~channel
-    ~terminal:(terminal_of_delivery_failure failure ~content)
-    ~board_post_id:""
+  signal_keeper_wakeup ~base_dir ~keeper ~run_id ~terminal;
+  Ok ()

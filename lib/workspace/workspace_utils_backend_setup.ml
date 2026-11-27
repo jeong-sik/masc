@@ -424,7 +424,13 @@ let default_config base_path =
     | Some cfg -> cfg
     | None ->
         let cfg = build_default_config base_path in
-        Hashtbl.replace default_config_cache base_path cfg;
+        (* Never memoize a degraded [Memory] fallback produced when called
+           outside an Eio scheduler or before [Fs_compat.set_fs]; otherwise
+           later Eio fibers would stay pinned to in-memory storage instead of
+           the live [FileSystem] backend. *)
+        (match cfg.backend with
+         | FileSystem _ -> Hashtbl.replace default_config_cache base_path cfg
+         | Memory _ -> ());
         cfg)
 
 (** Create config bypassing the {!default_config} cache, syncing the test

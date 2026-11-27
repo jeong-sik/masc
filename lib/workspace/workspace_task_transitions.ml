@@ -937,393 +937,381 @@ let commit_verdict_r
     | Ok _ -> Ok ()
   in
   let lock_path = backlog_lock_path config in
-  with_file_lock_r config lock_path (fun () ->
-    try
-      match read_backlog_r config with
-      | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
-      | Ok backlog ->
-        (match
-           List.find_opt (fun (t : task) -> String.equal t.id task_id) backlog.tasks
-         with
-         | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
-         | Some task ->
-           let now = now_iso () in
-           let* decided =
-             match
-               Workspace_task_lifecycle.decide_verdict
-                 ~authority
-                 ~verdict
-                 ~task_id
-                 ~verification_id
-                 ~task_status:task.task_status
-                 ~now
-                 ~notes
-             with
-             | Ok decided -> Ok decided
-             | Error
-                 Workspace_task_lifecycle.Verdict_rejection_reason_required ->
-               Error
-                 (Masc_domain.Task
-                    (Masc_domain.Task_error.InvalidState
-                       "a rejection verdict requires a non-empty reason explaining \
-                        what must be fixed"))
-             | Error
-                 Workspace_task_lifecycle.Verdict_authority_identity_required ->
-               Error
-                 (Masc_domain.Task
-                    (Masc_domain.Task_error.InvalidState
-                        "a completion verdict requires a non-empty authenticated \
-                        authority identity"))
-             | Error
-                 (Workspace_task_lifecycle.Verification_id_mismatch
-                       { expected; actual }) ->
-               Error
-                 (Masc_domain.Task
-                    (Masc_domain.Task_error.VerificationSuperseded
-                       { task_id; requested = expected; current = actual }))
-             | Error Workspace_task_lifecycle.Not_awaiting_verdict ->
-               Error
-                 (Masc_domain.Task
-                    (Masc_domain.Task_error.InvalidState
-                       (Printf.sprintf
-                          "Task %s is %s; a completion verdict applies only to an \
-                           obligation awaiting one"
-                          task_id
-                          (task_status_to_string task.task_status))))
-           in
-           let new_status = decided.Workspace_task_lifecycle.decision.new_status in
-           let authority = decided.Workspace_task_lifecycle.authority in
-           let authority_kind = Masc_domain.completion_authority_kind authority in
-           let authority_actor = Masc_domain.completion_authority_actor authority in
-           let authority_actor_kind =
-             match authority with
-             | Masc_domain.Human_operator _ -> Workspace_task_classify.Operator
-             | Masc_domain.System_llm_agent _ -> Workspace_task_classify.System
-           in
-           let producer = decided.Workspace_task_lifecycle.producer in
-           let verification_id = decided.Workspace_task_lifecycle.verification_id in
-           (* An approval leaves the producer's handoff where it is: it is the
-              producer's account of the work, and the verdict
-              has its own record. A rejection replaces it with what must be
-              fixed, because that is what the producer resumes from. *)
-           let handoff_context =
-             match verdict with
-             | Masc_domain.Verdict_approved -> task.handoff_context
-             | Masc_domain.Verdict_rejected { reason } ->
-               Some
-                 (Masc_domain.Handoff_decoded
-                    { Masc_domain.summary = reason
-                    ; reason = Some reason
-                    ; next_step = None
-                    ; failure_mode = None
-                    ; evidence_refs = []
-                    ; updated_at = Some now
-                    ; updated_by = Some authority_actor
-                    })
-           in
-           let pending_completion_rejections =
-             List.filter
-               (fun (pending : Masc_domain.pending_completion_rejection) ->
-                 not (String.equal pending.task_id task_id))
-               backlog.pending_completion_rejections
-           in
-           let pending_completion_rejections =
-             match verdict with
-             | Masc_domain.Verdict_approved -> pending_completion_rejections
-             | Masc_domain.Verdict_rejected { reason } ->
-               { Masc_domain.task_id; verification_id; producer; reason; authority
-               ; committed_at = now
-               } :: pending_completion_rejections
-           in
-           let delivered_completion_rejections =
-             List.filter
-               (fun (delivered : Masc_domain.pending_completion_rejection) ->
-                 not (String.equal delivered.task_id task_id))
-               backlog.delivered_completion_rejections
-           in
-           let pending_completion_approvals =
-             match verdict with
-             | Masc_domain.Verdict_rejected _ -> backlog.pending_completion_approvals
-             | Masc_domain.Verdict_approved ->
-               { Masc_domain.task_id; verification_id; producer; authority; committed_at = now }
-               :: backlog.pending_completion_approvals
-           in
-           (* A rejection overwrites the stored note; an unreadable one it
-              replaces goes on the verdict audit row (#38219). *)
-           let replaced_unreadable_handoff_fields =
-             match verdict with
-             | Masc_domain.Verdict_approved -> []
-             | Masc_domain.Verdict_rejected _ ->
-               (match
-                  Workspace_task_transition_executor.unreadable_handoff_replaced
-                    task.handoff_context
-                with
-                | Some replaced ->
-                  [ ( "replaced_unreadable_handoff"
-                    , Masc_domain.replaced_unreadable_handoff_to_yojson replaced )
-                  ]
-                | None -> [])
-           in
-           let committed_task = { task with task_status = new_status; handoff_context } in
-           let new_backlog =
-             { backlog with
-               pending_completion_rejections;
-               delivered_completion_rejections;
-               pending_completion_approvals;
-               tasks =
-                 List.map
-                   (fun (t : task) ->
-                      if String.equal t.id task_id
-                      then committed_task
-                      else t)
-                   backlog.tasks
-             }
-           in
-           (* [write_backlog] stamps version/last_updated at the commit point. *)
-           write_backlog config new_backlog;
-           let run_post_commit label f =
-             try f () with
-             | Eio.Cancel.Cancelled _ as exn -> raise exn
-             | exn ->
-               Log.TaskState.error
-                 "completion verdict committed but post-commit projection failed \
-                  task_id=%s authority=%s label=%s detail=%s"
-                 task_id
-                 authority_actor
-                 label
-                 (Printexc.to_string exn)
-           in
-           run_post_commit "producer_task_binding" (fun () ->
-             match decided.Workspace_task_lifecycle.decision.set_current with
-             | Some rejected_task ->
-               (* [new_backlog] is the document this commit just wrote while
-                  holding the backlog lock, so the producer's other task cannot
-                  be released or finished between that write and this read. *)
-               update_local_agent_state config ~agent_name:producer (fun agent ->
-                 let current_task =
-                   Workspace_task_lifecycle.focus_after_rejection
-                     ~producer
-                     ~rejected_task
-                     ~current_task:agent.current_task
-                     ~tasks:new_backlog.tasks
-                 in
-                 { agent with status = Busy; current_task = Some current_task })
-             | None ->
-               Task_cache_invariant.clear_stale_agent_task
-                 config
-                 ~cause:Task_cache_invariant.After_commit
-                 ~agent_name:producer
-                 ~task_id
-                 ~status:new_status
-                 ~module_name:"commit_verdict_r");
-           let reconcile_terminal () =
-              run_post_commit "terminal_reconciliation" (fun () ->
-                match
-                  (Atomic.get Workspace_hooks.task_terminal_committed_fn)
-                    config
-                    ~actor:(match authority with
-                      | Masc_domain.Human_operator { operator_id } ->
-                        Workspace_hooks.Task_terminal_operator operator_id
-                      | Masc_domain.System_llm_agent _ ->
-                        Workspace_hooks.Task_terminal_system authority_actor)
-                    ~task:committed_task
-                with
-                | Workspace_hooks.Task_terminal_delivered -> ()
-                | Workspace_hooks.Task_terminal_delivery_degraded { kind; detail } ->
-                  Log.TaskState.error
-                    "task verdict terminal reconciliation degraded task_id=%s \
-                     producer=%s kind=%s detail=%s"
-                    task_id
-                    producer
-                    kind
-                    detail)
-           in
-           (* Completion hooks key off the RESULT, and the completer is the
-              producer — never the authority, which is not an agent and owns no
-              task. *)
-           (match new_status with
-            | Masc_domain.Done { assignee; _ } ->
-              (* The observation surface has the same gap the completion metric
-                 below records: a verdict does not pass through the agent
-                 transition surface, so nothing emitted the audit entry or the
-                 [Task_completed] telemetry for a task finished this way. The
-                 audit trail stopped at [submit_for_verification] and never said
-                 who approved the completion. A
-                 Done produced by an approval verdict is a Done like any other,
-                 and the actor is the record's assignee — the authority is not an
-                 agent. [authority] rides in the details so the trail keeps the
-                 provenance the actor field cannot carry. *)
-              run_post_commit "transition_observation" (fun () ->
-                observe_task_transition
-                  config
-                  ~agent_name:assignee
-                  ~task_id
-                  ~transition:Masc_domain.Done_action
-                  ~details:
-                    (let base =
-                       task_transition_details
-                         ~from_status:task.task_status
-                         ~to_status:new_status
-                         ?notes:(if notes = "" then None else Some notes)
-                         ?duration_ms:
-                           (task_duration_ms_since
-                              ~now:(Time_compat.now ())
-                              task.task_status)
-                         ()
-                     in
-                     match base with
-                     | `Assoc fields ->
-                       `Assoc (fields @ [ "authority", `String authority_actor ])
-                     | other -> other));
-              reconcile_terminal ();
-              run_post_commit "done_hooks" (fun () ->
-                Workspace_task_cleanup.run_done_hooks config ~agent_name:assignee);
-              (* Completion metrics fire on this path too: a verdict does not pass
-                 through the agent transition surface, so without this a
-                 verdict-completed task would record no completion at all.
-                 [collaborators] is empty by construction: the authority is not
-                 an agent and does not collaborate on the task. A start that does
-                 not parse records no metric: this hook measures duration, and one
-                 measured from an invented start lands in the same average as a
-                 real one. *)
-              run_post_commit "completion_metric" (fun () ->
-                match task_started_at_unix task.task_status with
-                | Some started_at ->
-                  (Atomic.get Workspace_hooks.record_task_metric_fn)
-                    config
-                    ~agent_id:assignee
-                    ~task_id
-                    ~started_at
-                    ~completed_at:(Some (Time_compat.now ()))
-                    ~terminal:Task_outcome_measurement.Approved
-                    ~error_message:None
-                    ~collaborators:[]
-                    ~handoff_from:None
-                    ~handoff_to:None
-                | None -> ())
-            | Masc_domain.Cancelled _ -> reconcile_terminal ()
-            | Masc_domain.Todo
-            | Masc_domain.Claimed _
-            | Masc_domain.InProgress _
-            | Masc_domain.AwaitingVerification _ -> ());
-           (* [decide_verdict] yields [Done] for every approval, so there is no
-              approved-into-[Cancelled] shape to map: the old inner match
-              labeled an unreachable status. *)
-           let event_kind =
-             match verdict with
-             | Masc_domain.Verdict_approved -> Event_kind.Task.Approved
-             | Masc_domain.Verdict_rejected _ -> Event_kind.Task.Rejected
-           in
-           (* [authority_actor] is a fresh id per review, so it identifies the
-              run and nothing else — grouping 74 verdicts by it yields 74 groups.
-              [evaluator_runtime] is the config key that bound the provider and
-              model which judged, so it is the axis a verdict history can
-              actually be aggregated on. It was already computed and carried in
-              the review notes blob; every structured projection dropped it.
-              [None] for a human operator verdict, where no evaluator ran. *)
-           let evaluator_runtime_field =
-             match evaluator_runtime with
-             | None -> []
-             | Some runtime -> [ "evaluator_runtime", `String runtime ]
-           in
-           let authority_fields =
-             [ "task_id", `String task_id
-             ; "authority_kind", `String authority_kind
-             ; "authority_actor", `String authority_actor
-             ; Event_kind.Task.producer_payload_key, `String producer
-             ; "verification_id", `String verification_id
-             ]
-             @ evaluator_runtime_field
-           in
-           (* The task status deliberately stays a small lifecycle sum: a
-              rejection returns the producer to [InProgress]. Keep the
-              verdict and its reason in every durable/observable projection so
-              a failed Board, SSE, or producer-wake projection cannot erase
-              what the completion authority decided. *)
-           let verdict_fields =
-             match verdict with
-             | Masc_domain.Verdict_approved ->
-               ("verdict", `String "approved")
-               :: (match String.trim notes with
-                   | "" -> []
-                   | stated -> [ "notes", `String stated ])
-             | Masc_domain.Verdict_rejected { reason } ->
-               [ "verdict", `String "rejected"; "reason", `String reason ]
-           in
-           let completion_verdict_fields = authority_fields @ verdict_fields in
-           run_post_commit "task_activity" (fun () ->
-             emit_task_activity
-               config
-               ~actor_kind:authority_actor_kind
-               ~agent_name:authority_actor
-               ~task_id
-               ~kind:(Event_kind.Task.to_string event_kind)
-               ~payload:(`Assoc completion_verdict_fields));
-           run_post_commit "verification_notification" (fun () ->
-             let decision =
-               match verdict with
-               | Masc_domain.Verdict_approved -> `Approve notes
-               | Masc_domain.Verdict_rejected { reason } -> `Reject reason
+  let run_post_commit ~authority_actor label f =
+    try f () with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Log.TaskState.error
+        "completion verdict committed but post-commit projection failed \
+         task_id=%s authority=%s label=%s detail=%s"
+        task_id
+        authority_actor
+        label
+        (Printexc.to_string exn)
+  in
+  let committed_result =
+    with_file_lock_r config lock_path (fun () ->
+      try
+        match read_backlog_r config with
+        | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
+        | Ok backlog ->
+          (match
+             List.find_opt (fun (t : task) -> String.equal t.id task_id) backlog.tasks
+           with
+           | None -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
+           | Some task ->
+             let now = now_iso () in
+             let* decided =
+               match
+                 Workspace_task_lifecycle.decide_verdict
+                   ~authority
+                   ~verdict
+                   ~task_id
+                   ~verification_id
+                   ~task_status:task.task_status
+                   ~now
+                   ~notes
+               with
+               | Ok decided -> Ok decided
+               | Error
+                   Workspace_task_lifecycle.Verdict_rejection_reason_required ->
+                 Error
+                   (Masc_domain.Task
+                      (Masc_domain.Task_error.InvalidState
+                         "a rejection verdict requires a non-empty reason explaining \
+                          what must be fixed"))
+               | Error
+                   Workspace_task_lifecycle.Verdict_authority_identity_required ->
+                 Error
+                   (Masc_domain.Task
+                      (Masc_domain.Task_error.InvalidState
+                          "a completion verdict requires a non-empty authenticated \
+                          authority identity"))
+               | Error
+                   (Workspace_task_lifecycle.Verification_id_mismatch
+                         { expected; actual }) ->
+                 Error
+                   (Masc_domain.Task
+                      (Masc_domain.Task_error.VerificationSuperseded
+                         { task_id; requested = expected; current = actual }))
+               | Error Workspace_task_lifecycle.Not_awaiting_verdict ->
+                 Error
+                   (Masc_domain.Task
+                      (Masc_domain.Task_error.InvalidState
+                         (Printf.sprintf
+                            "Task %s is %s; a completion verdict applies only to an \
+                             obligation awaiting one"
+                            task_id
+                            (task_status_to_string task.task_status))))
              in
-             (* [producer] is the assignee whose evidence was judged — the
-                same identity [authority_fields] above records — so it is the
-                keeper to wake for either verdict. *)
-             (Atomic.get Workspace_hooks.verification_notify_verdict_fn)
-               config
-               ~task_id
-               ~producer
-               ~authority
-               ~verification_id
-               ~decision);
-           run_post_commit "task_transition_subscription" (fun () ->
-             (Atomic.get Workspace_hooks.push_task_event_fn)
-               ~event_type:"masc/task_transition"
-               ~details:
-                 ([ "task_id", `String task_id
-                  ; "action", `String "completion_verdict"
-                  ; "authority_kind", `String authority_kind
-                  ; "authority_actor", `String authority_actor
-                  ; "verification_id", `String verification_id
-                  ]
-                  @ verdict_fields));
-           (* Authority provenance is recorded here as structured fields. It is
-              deliberately NOT written into [Done.notes]: the previous code put
-              "Verified by <keeper> (vrf:<id>)" in that human-readable string,
-              making it the only record of who approved, and nothing parsed it. *)
-           run_post_commit "verdict_audit" (fun () ->
-             log_event
-               config
-               (`Assoc
-                 (("type", `String "task_completion_verdict")
-                  :: ("from_status", `String (task_status_to_string task.task_status))
-                  :: ("to_status", `String (task_status_to_string new_status))
-                  :: ("ts", `String now)
-                  :: (completion_verdict_fields
-                      @ replaced_unreadable_handoff_fields))));
-           Ok
-             { message =
-                 Printf.sprintf
-                   "%s %s → %s (verdict by %s)"
-                   task_id
-                   (task_status_to_string task.task_status)
-                   (task_status_to_string new_status)
-                   authority_kind
-             ; noop = false
-             })
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | e ->
-      Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e))))
-  |> Workspace_task_verification.flatten_lock_result
-  |> fun result ->
-  (match result, verdict with
-   | Ok _, (Masc_domain.Verdict_rejected _ | Masc_domain.Verdict_approved) ->
-     (try (Atomic.get Workspace_hooks.rejection_delivery_requested_fn) config with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn ->
-        Log.TaskState.error
-          "verdict delivery signal failed; durable obligation remains task_id=%s detail=%s"
-          task_id (Printexc.to_string exn))
-   | Error _, _ -> ());
-  result
+             let new_status = decided.Workspace_task_lifecycle.decision.new_status in
+             let authority = decided.Workspace_task_lifecycle.authority in
+             let authority_kind = Masc_domain.completion_authority_kind authority in
+             let authority_actor = Masc_domain.completion_authority_actor authority in
+             let authority_actor_kind =
+               match authority with
+               | Masc_domain.Human_operator _ -> Workspace_task_classify.Operator
+               | Masc_domain.System_llm_agent _ -> Workspace_task_classify.System
+             in
+             let producer = decided.Workspace_task_lifecycle.producer in
+             let verification_id = decided.Workspace_task_lifecycle.verification_id in
+             (* An approval leaves the producer's handoff where it is: it is the
+                producer's account of the work, and the verdict
+                has its own record. A rejection replaces it with what must be
+                fixed, because that is what the producer resumes from. *)
+             let handoff_context =
+               match verdict with
+               | Masc_domain.Verdict_approved -> task.handoff_context
+               | Masc_domain.Verdict_rejected { reason } ->
+                 Some
+                   (Masc_domain.Handoff_decoded
+                      { Masc_domain.summary = reason
+                      ; reason = Some reason
+                      ; next_step = None
+                      ; failure_mode = None
+                      ; evidence_refs = []
+                      ; updated_at = Some now
+                      ; updated_by = Some authority_actor
+                      })
+             in
+             let pending_completion_rejections =
+               List.filter
+                 (fun (pending : Masc_domain.pending_completion_rejection) ->
+                   not (String.equal pending.task_id task_id))
+                 backlog.pending_completion_rejections
+             in
+             let pending_completion_rejections =
+               match verdict with
+               | Masc_domain.Verdict_approved -> pending_completion_rejections
+               | Masc_domain.Verdict_rejected { reason } ->
+                 { Masc_domain.task_id; verification_id; producer; reason; authority
+                 ; committed_at = now
+                 } :: pending_completion_rejections
+             in
+             let delivered_completion_rejections =
+               List.filter
+                 (fun (delivered : Masc_domain.pending_completion_rejection) ->
+                   not (String.equal delivered.task_id task_id))
+                 backlog.delivered_completion_rejections
+             in
+             let pending_completion_approvals =
+               match verdict with
+               | Masc_domain.Verdict_rejected _ -> backlog.pending_completion_approvals
+               | Masc_domain.Verdict_approved ->
+                 { Masc_domain.task_id; verification_id; producer; authority; committed_at = now }
+                 :: backlog.pending_completion_approvals
+             in
+             (* A rejection overwrites the stored note; an unreadable one it
+                replaces goes on the verdict audit row (#38219). *)
+             let replaced_unreadable_handoff_fields =
+               match verdict with
+               | Masc_domain.Verdict_approved -> []
+               | Masc_domain.Verdict_rejected _ ->
+                 (match
+                    Workspace_task_transition_executor.unreadable_handoff_replaced
+                      task.handoff_context
+                  with
+                  | Some replaced ->
+                    [ ( "replaced_unreadable_handoff"
+                      , Masc_domain.replaced_unreadable_handoff_to_yojson replaced )
+                    ]
+                  | None -> [])
+             in
+             let committed_task = { task with task_status = new_status; handoff_context } in
+             let new_backlog =
+               { backlog with
+                 pending_completion_rejections;
+                 delivered_completion_rejections;
+                 pending_completion_approvals;
+                 tasks =
+                   List.map
+                     (fun (t : task) ->
+                        if String.equal t.id task_id
+                        then committed_task
+                        else t)
+                     backlog.tasks
+               }
+             in
+             (* [write_backlog] stamps version/last_updated at the commit point. *)
+             write_backlog config new_backlog;
+             run_post_commit ~authority_actor "producer_task_binding" (fun () ->
+               match decided.Workspace_task_lifecycle.decision.set_current with
+               | Some rejected_task ->
+                 (* [new_backlog] is the document this commit just wrote while
+                    holding the backlog lock, so the producer's other task cannot
+                    be released or finished between that write and this read. *)
+                 update_local_agent_state config ~agent_name:producer (fun agent ->
+                   let current_task =
+                     Workspace_task_lifecycle.focus_after_rejection
+                       ~producer
+                       ~rejected_task
+                       ~current_task:agent.current_task
+                       ~tasks:new_backlog.tasks
+                   in
+                   { agent with status = Busy; current_task = Some current_task })
+               | None ->
+                 Task_cache_invariant.clear_stale_agent_task
+                   config
+                   ~cause:Task_cache_invariant.After_commit
+                   ~agent_name:producer
+                   ~task_id
+                   ~status:new_status
+                   ~module_name:"commit_verdict_r");
+             Ok
+               ( task
+               , committed_task
+               , new_status
+               , authority
+               , authority_kind
+               , authority_actor
+               , authority_actor_kind
+               , producer
+               , verification_id
+               , now
+               , replaced_unreadable_handoff_fields ))
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | e ->
+        Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e))))
+    |> Workspace_task_verification.flatten_lock_result
+  in
+  match committed_result with
+  | Error _ as error -> error
+  | Ok
+      ( task
+      , committed_task
+      , new_status
+      , authority
+      , authority_kind
+      , authority_actor
+      , authority_actor_kind
+      , producer
+      , verification_id
+      , now
+      , replaced_unreadable_handoff_fields ) ->
+    (* The backlog acquisition has ended. Run cross-subsystem projections and
+       terminal reconciliation outside [backlog.json.lock] so Board writes,
+       intake hooks, and notifications cannot deadlock or starve the backlog
+       lock (matching [perform_task_transition]). *)
+    let run_post_commit label f = run_post_commit ~authority_actor label f in
+    let reconcile_terminal () =
+      run_post_commit "terminal_reconciliation" (fun () ->
+        match
+          (Atomic.get Workspace_hooks.task_terminal_committed_fn)
+            config
+            ~actor:(match authority with
+              | Masc_domain.Human_operator { operator_id } ->
+                Workspace_hooks.Task_terminal_operator operator_id
+              | Masc_domain.System_llm_agent _ ->
+                Workspace_hooks.Task_terminal_system authority_actor)
+            ~task:committed_task
+        with
+        | Workspace_hooks.Task_terminal_delivered -> ()
+        | Workspace_hooks.Task_terminal_delivery_degraded { kind; detail } ->
+          Log.TaskState.error
+            "task verdict terminal reconciliation degraded task_id=%s \
+             producer=%s kind=%s detail=%s"
+            task_id
+            producer
+            kind
+            detail)
+    in
+    (* Completion hooks key off the RESULT, and the completer is the
+       producer — never the authority, which is not an agent and owns no
+       task. *)
+    (match new_status with
+     | Masc_domain.Done { assignee; _ } ->
+       run_post_commit "transition_observation" (fun () ->
+         observe_task_transition
+           config
+           ~agent_name:assignee
+           ~task_id
+           ~transition:Masc_domain.Done_action
+           ~details:
+             (let base =
+                task_transition_details
+                  ~from_status:task.task_status
+                  ~to_status:new_status
+                  ?notes:(if notes = "" then None else Some notes)
+                  ?duration_ms:
+                    (task_duration_ms_since
+                       ~now:(Time_compat.now ())
+                       task.task_status)
+                  ()
+              in
+              match base with
+              | `Assoc fields ->
+                `Assoc (fields @ [ "authority", `String authority_actor ])
+              | other -> other));
+       reconcile_terminal ();
+       run_post_commit "done_hooks" (fun () ->
+         Workspace_task_cleanup.run_done_hooks config ~agent_name:assignee);
+       run_post_commit "completion_metric" (fun () ->
+         match task_started_at_unix task.task_status with
+         | Some started_at ->
+           (Atomic.get Workspace_hooks.record_task_metric_fn)
+             config
+             ~agent_id:assignee
+             ~task_id
+             ~started_at
+             ~completed_at:(Some (Time_compat.now ()))
+             ~terminal:Task_outcome_measurement.Approved
+             ~error_message:None
+             ~collaborators:[]
+             ~handoff_from:None
+             ~handoff_to:None
+         | None -> ())
+     | Masc_domain.Cancelled _ -> reconcile_terminal ()
+     | Masc_domain.Todo
+     | Masc_domain.Claimed _
+     | Masc_domain.InProgress _
+     | Masc_domain.AwaitingVerification _ -> ());
+    let event_kind =
+      match verdict with
+      | Masc_domain.Verdict_approved -> Event_kind.Task.Approved
+      | Masc_domain.Verdict_rejected _ -> Event_kind.Task.Rejected
+    in
+    let evaluator_runtime_field =
+      match evaluator_runtime with
+      | None -> []
+      | Some runtime -> [ "evaluator_runtime", `String runtime ]
+    in
+    let authority_fields =
+      [ "task_id", `String task_id
+      ; "authority_kind", `String authority_kind
+      ; "authority_actor", `String authority_actor
+      ; Event_kind.Task.producer_payload_key, `String producer
+      ; "verification_id", `String verification_id
+      ]
+      @ evaluator_runtime_field
+    in
+    let verdict_fields =
+      match verdict with
+      | Masc_domain.Verdict_approved ->
+        ("verdict", `String "approved")
+        :: (match String.trim notes with
+            | "" -> []
+            | stated -> [ "notes", `String stated ])
+      | Masc_domain.Verdict_rejected { reason } ->
+        [ "verdict", `String "rejected"; "reason", `String reason ]
+    in
+    let completion_verdict_fields = authority_fields @ verdict_fields in
+    run_post_commit "task_activity" (fun () ->
+      emit_task_activity
+        config
+        ~actor_kind:authority_actor_kind
+        ~agent_name:authority_actor
+        ~task_id
+        ~kind:(Event_kind.Task.to_string event_kind)
+        ~payload:(`Assoc completion_verdict_fields));
+    run_post_commit "verification_notification" (fun () ->
+      let decision =
+        match verdict with
+        | Masc_domain.Verdict_approved -> `Approve notes
+        | Masc_domain.Verdict_rejected { reason } -> `Reject reason
+      in
+      (Atomic.get Workspace_hooks.verification_notify_verdict_fn)
+        config
+        ~task_id
+        ~producer
+        ~authority
+        ~verification_id
+        ~decision);
+    run_post_commit "task_transition_subscription" (fun () ->
+      (Atomic.get Workspace_hooks.push_task_event_fn)
+        ~event_type:"masc/task_transition"
+        ~details:
+          ([ "task_id", `String task_id
+           ; "action", `String "completion_verdict"
+           ; "authority_kind", `String authority_kind
+           ; "authority_actor", `String authority_actor
+           ; "verification_id", `String verification_id
+           ]
+           @ verdict_fields));
+    run_post_commit "verdict_audit" (fun () ->
+      log_event
+        config
+        (`Assoc
+          (("type", `String "task_completion_verdict")
+           :: ("from_status", `String (task_status_to_string task.task_status))
+           :: ("to_status", `String (task_status_to_string new_status))
+           :: ("ts", `String now)
+           :: (completion_verdict_fields
+               @ replaced_unreadable_handoff_fields))));
+    (try (Atomic.get Workspace_hooks.rejection_delivery_requested_fn) config with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.TaskState.error
+         "verdict delivery signal failed; durable obligation remains task_id=%s detail=%s"
+         task_id (Printexc.to_string exn));
+    Ok
+      { message =
+          Printf.sprintf
+            "%s %s → %s (verdict by %s)"
+            task_id
+            (task_status_to_string task.task_status)
+            (task_status_to_string new_status)
+            authority_kind
+      ; noop = false
+      }
 ;;

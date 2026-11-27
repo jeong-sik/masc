@@ -165,7 +165,7 @@ let claim_task_with_details_r
     | Ok _, Ok _ -> Ok ()
   in
   let lock_path = backlog_lock_path config in
-  with_file_lock config lock_path (fun () ->
+  with_file_lock_r config lock_path (fun () ->
     match read_prepared_backlog_r config with
     | Error msg -> Error (Masc_domain.System (Masc_domain.System_error.IoError msg))
     | Ok prepared ->
@@ -367,6 +367,7 @@ let claim_task_with_details_r
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | e -> Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e)))))
+  |> Workspace_task_verification.flatten_lock_result
 ;;
 
 let claim_task_r config ~agent_name ~task_id ?(auto_start = false) ()

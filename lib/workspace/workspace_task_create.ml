@@ -147,114 +147,121 @@ let add_task_with_result
   let goal_id = Workspace_task_classify.trim_opt goal_id in
   let predecessor_task_id = Workspace_task_classify.trim_opt predecessor_task_id in
   try
-    protect_task_create_settlement (fun () ->
-    with_file_lock config lock_path (fun () ->
-      match read_backlog_r config with
-      | Error msg -> Error (Backlog_read_failed msg)
-      | Ok backlog ->
-        (* A re-run link must point at an existing, terminal task.
-           Validated inside the lock against the same backlog snapshot the new
-           task is appended to, so the check cannot race a concurrent write. *)
-        (match
-           match predecessor_task_id with
-           | None -> Ok ()
-           | Some pid ->
-             (match
-                List.find_opt (fun (t : task) -> String.equal t.id pid) backlog.tasks
-              with
-              | None -> Error (Unknown_predecessor pid)
-              | Some p ->
-                if task_status_is_terminal p.task_status
-                then Ok ()
-                else
-                  Error
-                    (Predecessor_not_terminal
-                       { predecessor_task_id = pid
-                       ; status = task_status_to_string p.task_status
-                       }))
-         with
-         | Error e -> Error e
-         | Ok () ->
-           let task_id =
-             Printf.sprintf "task-%03d" (next_task_number config backlog)
-           in
-           let contract =
-             Option.map Workspace_task_classify.normalize_task_contract contract
-           in
-           let new_task =
-             { id = task_id
-             ; title
-             ; description
-             ; task_status = Todo
-             ; priority
-             ; files = []
-             ; created_at = now_iso ()
-             ; created_by
-             ; predecessor_task_id
-             ; contract
-             ; handoff_context = None
-             ; cycle_count = 0
-             ; execution_links = Masc_domain.no_execution_links
-             ; skills
-             }
-           in
-           (* [write_backlog] stamps version/last_updated at the commit point. *)
-           let task_creation_receipts = match creation_request_id with
-             | None -> backlog.task_creation_receipts
-             | Some creation_request_id ->
-               backlog.task_creation_receipts @ [{creation_request_id;created_task_id=task_id}] in
-           let new_backlog =
-             { backlog with tasks = backlog.tasks @ [ new_task ]; task_creation_receipts } in
-           (match
-              match goal_id with
-              | None -> Ok ()
-              | Some goal_id ->
-                Workspace_goal_index.link_task_to_goal_result
-                  config
-                  ~goal_id
-                  ~task_id
-            with
-            | Error msg ->
-              Error
-                (Goal_link_write_failed
-                   (append_goal_link_rollback_failures
-                      msg
-                      (rollback_goal_links config [ task_id, goal_id ])))
-            | Ok () -> (
-              match write_backlog_result config new_backlog with
-              | Error msg ->
-                  (* Rollback the goal link we just wrote so the registry does
-                     not reference a task that was not durably published. *)
-                  Error
-                    (Backlog_write_failed
-                       (append_goal_link_rollback_failures
-                          msg
-                          (rollback_goal_links config [ task_id, goal_id ])))
-              | Ok _ ->
-                  let created_by_json = Json_util.string_opt_to_json created_by in
-                  Workspace_task_classify.emit_task_activity
-                    config
-                    ~agent_name:actor
-                    ~task_id
-                    ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
-                    ~payload:
-                      (`Assoc
-                          [ "task_id", `String task_id
-                          ; "title", `String title
-                          ; "goal_id", Json_util.string_opt_to_json goal_id
-                          ; "priority", `Int priority
-                          ; "created_by", created_by_json
-                          ; ( "predecessor_task_id"
-                            , Json_util.string_opt_to_json predecessor_task_id )
-                          ]);
-                  let _ =
-                    broadcast ~audience:System_record
-                      config
-                      ~from_agent:actor
-                      ~content:(Printf.sprintf "New quest: %s" title)
-                  in
-                  let summary = Printf.sprintf "Added %s: %s" task_id title in
-                  Ok { task_id; summary; title; priority; description; goal_id })))))
+    match
+      with_file_lock_r config lock_path (fun () ->
+        match read_backlog_r config with
+        | Error msg -> Error (Backlog_read_failed msg)
+        | Ok backlog ->
+          (* A re-run link must point at an existing, terminal task.
+             Validated inside the lock against the same backlog snapshot the new
+             task is appended to, so the check cannot race a concurrent write. *)
+          (match
+             match predecessor_task_id with
+             | None -> Ok ()
+             | Some pid ->
+               (match
+                  List.find_opt (fun (t : task) -> String.equal t.id pid) backlog.tasks
+                with
+                | None -> Error (Unknown_predecessor pid)
+                | Some p ->
+                  if task_status_is_terminal p.task_status
+                  then Ok ()
+                  else
+                    Error
+                      (Predecessor_not_terminal
+                         { predecessor_task_id = pid
+                         ; status = task_status_to_string p.task_status
+                         }))
+           with
+           | Error e -> Error e
+           | Ok () ->
+             let task_id =
+               Printf.sprintf "task-%03d" (next_task_number config backlog)
+             in
+             let contract =
+               Option.map Workspace_task_classify.normalize_task_contract contract
+             in
+             let new_task =
+               { id = task_id
+               ; title
+               ; description
+               ; task_status = Todo
+               ; priority
+               ; files = []
+               ; created_at = now_iso ()
+               ; created_by
+               ; predecessor_task_id
+               ; contract
+               ; handoff_context = None
+               ; cycle_count = 0
+               ; execution_links = Masc_domain.no_execution_links
+               ; skills
+               }
+             in
+             (* [write_backlog] stamps version/last_updated at the commit point. *)
+             let task_creation_receipts = match creation_request_id with
+               | None -> backlog.task_creation_receipts
+               | Some creation_request_id ->
+                 backlog.task_creation_receipts @ [{creation_request_id;created_task_id=task_id}] in
+             let new_backlog =
+               { backlog with tasks = backlog.tasks @ [ new_task ]; task_creation_receipts } in
+             (* Scope [Cancel.protect] strictly to the irreversible goal-link
+                + backlog commit + rollback settlement, never across lock
+                acquisition or read/validation. *)
+             protect_task_create_settlement (fun () ->
+               match
+                 match goal_id with
+                 | None -> Ok ()
+                 | Some goal_id ->
+                   Workspace_goal_index.link_task_to_goal_result
+                     config
+                     ~goal_id
+                     ~task_id
+               with
+               | Error msg ->
+                 Error
+                   (Goal_link_write_failed
+                      (append_goal_link_rollback_failures
+                         msg
+                         (rollback_goal_links config [ task_id, goal_id ])))
+               | Ok () -> (
+                 match write_backlog_result config new_backlog with
+                 | Error msg ->
+                     (* Rollback the goal link we just wrote so the registry does
+                        not reference a task that was not durably published. *)
+                     Error
+                       (Backlog_write_failed
+                          (append_goal_link_rollback_failures
+                             msg
+                             (rollback_goal_links config [ task_id, goal_id ])))
+                 | Ok _ ->
+                     let created_by_json = Json_util.string_opt_to_json created_by in
+                     Workspace_task_classify.emit_task_activity
+                       config
+                       ~agent_name:actor
+                       ~task_id
+                       ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
+                       ~payload:
+                         (`Assoc
+                             [ "task_id", `String task_id
+                             ; "title", `String title
+                             ; "goal_id", Json_util.string_opt_to_json goal_id
+                             ; "priority", `Int priority
+                             ; "created_by", created_by_json
+                             ; ( "predecessor_task_id"
+                               , Json_util.string_opt_to_json predecessor_task_id )
+                             ]);
+                     let _ =
+                       broadcast ~audience:System_record
+                         config
+                         ~from_agent:actor
+                         ~content:(Printf.sprintf "New quest: %s" title)
+                     in
+                     let summary = Printf.sprintf "Added %s: %s" task_id title in
+                     Ok { task_id; summary; title; priority; description; goal_id }))))
+    with
+    | Ok result -> result
+    | Error err -> Error (Backlog_read_failed (Masc_domain.masc_error_to_string err))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | e -> Error (Unexpected_error (Printexc.to_string e))
@@ -281,123 +288,127 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
   ensure_initialized config;
   let lock_path = backlog_lock_path config in
   let actor = Option.value ~default:"system" created_by in
-  protect_task_create_settlement (fun () ->
-  with_file_lock config lock_path (fun () ->
-    match read_backlog_r config with
-    | Error msg -> Error (Batch_backlog_read_failed msg)
-    | Ok backlog ->
-      (try
-         let next_num = ref (next_task_number config backlog) in
-         let added_tasks_with_goal_ids =
-           List.map
-             (fun (title, priority, description, contract, goal_id) ->
-                let task_id = Printf.sprintf "task-%03d" !next_num in
-                incr next_num;
-                let contract =
-                  Option.map
-                    Workspace_task_classify.normalize_task_contract
-                    contract
-                in
-                let task =
-                  { id = task_id
-                  ; title
-                  ; description
-                  ; task_status = Todo
-                  ; priority
-                  ; files = []
-                  ; created_at = now_iso ()
-                  ; created_by
-                  (* batch add does not carry re-run links: only
-                     masc_add_task takes that arg *)
-                  ; predecessor_task_id = None
-                  ; contract
-                  ; handoff_context = None
-                  ; cycle_count = 0
-                  ; execution_links = Masc_domain.no_execution_links
-                  ; skills = []
-                  }
-                in
-                (task, goal_id))
-             tasks
-         in
-         let added_tasks = List.map fst added_tasks_with_goal_ids in
-         (* [write_backlog] stamps version/last_updated at the commit point. *)
-         let new_backlog = { backlog with tasks = backlog.tasks @ added_tasks } in
-         (match
-            Workspace_goal_index.link_tasks_to_goals_result
-              config
-              (List.map
-                 (fun ((task : Masc_domain.task), goal_id) -> task.id, goal_id)
-                 added_tasks_with_goal_ids)
-          with
-          | Error msg ->
-            Error
-              (Batch_goal_link_write_failed
-                 (append_goal_link_rollback_failures
-                    msg
-                    (rollback_goal_links
-                       config
-                       (List.map
-                          (fun ((task : Masc_domain.task), goal_id) -> task.id, goal_id)
-                          added_tasks_with_goal_ids))))
-          | Ok () -> (
-            match write_backlog_result config new_backlog with
+  try
+    match
+      with_file_lock_r config lock_path (fun () ->
+        match read_backlog_r config with
+        | Error msg -> Error (Batch_backlog_read_failed msg)
+        | Ok backlog ->
+          let next_num = ref (next_task_number config backlog) in
+          let added_tasks_with_goal_ids =
+            List.map
+              (fun (title, priority, description, contract, goal_id) ->
+                 let task_id = Printf.sprintf "task-%03d" !next_num in
+                 incr next_num;
+                 let contract =
+                   Option.map
+                     Workspace_task_classify.normalize_task_contract
+                     contract
+                 in
+                 let task =
+                   { id = task_id
+                   ; title
+                   ; description
+                   ; task_status = Todo
+                   ; priority
+                   ; files = []
+                   ; created_at = now_iso ()
+                   ; created_by
+                   (* batch add does not carry re-run links: only
+                      masc_add_task takes that arg *)
+                   ; predecessor_task_id = None
+                   ; contract
+                   ; handoff_context = None
+                   ; cycle_count = 0
+                   ; execution_links = Masc_domain.no_execution_links
+                   ; skills = []
+                   }
+                 in
+                 (task, goal_id))
+              tasks
+          in
+          let added_tasks = List.map fst added_tasks_with_goal_ids in
+          (* [write_backlog] stamps version/last_updated at the commit point. *)
+          let new_backlog = { backlog with tasks = backlog.tasks @ added_tasks } in
+          protect_task_create_settlement (fun () ->
+            match
+              Workspace_goal_index.link_tasks_to_goals_result
+                config
+                (List.map
+                   (fun ((task : Masc_domain.task), goal_id) -> task.id, goal_id)
+                   added_tasks_with_goal_ids)
+            with
             | Error msg ->
-                (* Rollback goal links for the tasks that were just linked so
-                   the registry does not reference unpublished tasks. *)
-                Error
-                  (Batch_backlog_write_failed
-                     (append_goal_link_rollback_failures
-                        msg
-                        (rollback_goal_links
-                           config
-                           (List.map
-                              (fun ((task : Masc_domain.task), goal_id) -> task.id, goal_id)
-                              added_tasks_with_goal_ids))))
-            | Ok _ ->
-                List.iter
-                  (fun ((task : Masc_domain.task), goal_id) ->
-                     let created_by_json = Json_util.string_opt_to_json task.created_by in
-                     Workspace_task_classify.emit_task_activity
-                       config
-                       ~agent_name:actor
-                       ~task_id:task.id
-                       ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
-                       ~payload:
-                         (`Assoc
-                             [ "task_id", `String task.id
-                             ; "title", `String task.title
-                             ; "goal_id", Json_util.string_opt_to_json goal_id
-                             ; "priority", `Int task.priority
-                             ; "created_by", created_by_json
-                             ]))
-                  added_tasks_with_goal_ids;
-                let summary =
-                  String.concat
-                    ", "
-                    (List.map (fun (t : Masc_domain.task) -> t.id) added_tasks)
-                in
-                let msg =
-                  Printf.sprintf
-                    "New batch of %d quests added: %s"
-                    (List.length added_tasks)
-                    summary
-                in
-                (match broadcast ~audience:System_record config ~from_agent:actor ~content:msg with
-                 | Ok _ -> ()
-                 | Error error ->
-                   Log.Workspace.error
-                     "batch task creation committed but broadcast was not persisted actor=%s task_ids=%s detail=%s"
-                     actor
-                     summary
-                     (broadcast_error_to_string error));
-                let count = List.length added_tasks in
-                let task_ids = List.map (fun (task : Masc_domain.task) -> task.id) added_tasks in
-                let summary = Printf.sprintf "Added %d tasks: %s" count summary in
-                Ok { task_ids; summary; count }))
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | e -> Error (Batch_unexpected_error (Printexc.to_string e)))))
+              Error
+                (Batch_goal_link_write_failed
+                   (append_goal_link_rollback_failures
+                      msg
+                      (rollback_goal_links
+                         config
+                         (List.map
+                            (fun ((task : Masc_domain.task), goal_id) -> task.id, goal_id)
+                            added_tasks_with_goal_ids))))
+            | Ok () -> (
+              match write_backlog_result config new_backlog with
+              | Error msg ->
+                  (* Rollback goal links for the tasks that were just linked so
+                     the registry does not reference unpublished tasks. *)
+                  Error
+                    (Batch_backlog_write_failed
+                       (append_goal_link_rollback_failures
+                          msg
+                          (rollback_goal_links
+                             config
+                             (List.map
+                                (fun ((task : Masc_domain.task), goal_id) -> task.id, goal_id)
+                                added_tasks_with_goal_ids))))
+              | Ok _ ->
+                  List.iter
+                    (fun ((task : Masc_domain.task), goal_id) ->
+                       let created_by_json = Json_util.string_opt_to_json task.created_by in
+                       Workspace_task_classify.emit_task_activity
+                         config
+                         ~agent_name:actor
+                         ~task_id:task.id
+                         ~kind:(Event_kind.Task.to_string Event_kind.Task.Created)
+                         ~payload:
+                           (`Assoc
+                               [ "task_id", `String task.id
+                               ; "title", `String task.title
+                               ; "goal_id", Json_util.string_opt_to_json goal_id
+                               ; "priority", `Int task.priority
+                               ; "created_by", created_by_json
+                               ]))
+                    added_tasks_with_goal_ids;
+                  let summary =
+                    String.concat
+                      ", "
+                      (List.map (fun (t : Masc_domain.task) -> t.id) added_tasks)
+                  in
+                  let msg =
+                    Printf.sprintf
+                      "New batch of %d quests added: %s"
+                      (List.length added_tasks)
+                      summary
+                  in
+                  (match broadcast ~audience:System_record config ~from_agent:actor ~content:msg with
+                   | Ok _ -> ()
+                   | Error error ->
+                     Log.Workspace.error
+                       "batch task creation committed but broadcast was not persisted actor=%s task_ids=%s detail=%s"
+                       actor
+                       summary
+                       (broadcast_error_to_string error));
+                  let count = List.length added_tasks in
+                  let task_ids = List.map (fun (task : Masc_domain.task) -> task.id) added_tasks in
+                  let summary = Printf.sprintf "Added %d tasks: %s" count summary in
+                  Ok { task_ids; summary; count })))
+    with
+    | Ok result -> result
+    | Error err -> Error (Batch_backlog_read_failed (Masc_domain.masc_error_to_string err))
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | e -> Error (Batch_unexpected_error (Printexc.to_string e))
 ;;
 
 let batch_add_tasks_internal ?created_by config tasks =

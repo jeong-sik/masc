@@ -32191,15 +32191,15 @@ let () =
                 Config_store.empty
                 |> Config_store.set_target (Wire_config.Target_keeper "alpha")
                 |> Config_store.stage_patch ~full_key:"keeper.model"
-                     (Wire_config.Op_set
-                        { key = "keeper.model"; value = Wire_config.Val_string "m1" })
+                     (Wire_config.Set_scalar
+                        { table = "keeper"; key = "model"; value = "m1" })
               in
               let cfg_beta =
                 cfg_alpha
                 |> Config_store.set_target (Wire_config.Target_keeper "beta")
                 |> Config_store.stage_patch ~full_key:"keeper.model"
-                     (Wire_config.Op_set
-                        { key = "keeper.model"; value = Wire_config.Val_string "m2" })
+                     (Wire_config.Set_scalar
+                        { table = "keeper"; key = "model"; value = "m2" })
               in
               let m1 = { m0 with config = cfg_beta } in
               let resp : Wire_config.patch_response =

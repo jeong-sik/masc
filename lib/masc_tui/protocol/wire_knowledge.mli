@@ -243,7 +243,9 @@ type wiki_embed = {
   target : wiki_embed_target;
   label : string option;
   syntax : wiki_embed_syntax;
-  raw : string;  (** The source text, found outside code. *)
+  raw : string;
+      (** What the server found outside code: the whole embed as written for
+          [Embed_obsidian], only the URL for [Embed_markdown_media]. *)
 }
 
 type wiki_lint_kind =

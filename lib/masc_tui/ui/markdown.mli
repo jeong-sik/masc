@@ -37,9 +37,11 @@ type embed_shown =
 
 type embed = {
   raw : string;
-      (** Source text the server found outside code. Each place it occurs in a
-          text run is drawn as [shown]. A Markdown image whose destination is
-          an [Embed_image]'s [path] counts too. *)
+      (** What the server found outside code. An Obsidian embed's [raw] is the
+          embed as written, and each place it occurs in a text run is drawn as
+          [shown]. A Markdown image's [raw] is only its URL, so a Markdown
+          image is found by its destination instead: one whose destination is
+          an [Embed_image]'s [path]. *)
   shown : embed_shown;
 }
 

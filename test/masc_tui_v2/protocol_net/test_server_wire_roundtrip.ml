@@ -834,7 +834,8 @@ let test_wiki_page_embeds_roundtrip () =
                   ("obsidian", "wiki missing-page false", None));
                  ("![[media:" ^ sha ^ "|Chart]]",
                   ("obsidian", "media " ^ sha ^ " false", Some "Chart"));
-                 ("![Chart](/api/v1/media/" ^ sha ^ ")",
+                 (* A Markdown image's raw is its URL, not the whole image. *)
+                 ("/api/v1/media/" ^ sha,
                   ("markdown", "media " ^ sha ^ " false", Some "Chart"));
                  ("![[artifact:" ^ artifact ^ "]]",
                   ("obsidian", "artifact " ^ artifact, None));

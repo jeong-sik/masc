@@ -893,12 +893,13 @@ let test_markdown_embeds () =
     }
   in
   let in_text = spans [ page ] "see ![[wiki:a|A page]] here" in
-  Alcotest.(check bool) "a page embed is a link to that page" true
-    (List.exists
-       (fun (span : Markdown.styled_span) ->
-         String.equal span.text "A page"
-         && Option.equal String.equal span.hyperlink (Some "a.md"))
-       in_text);
+  (* Wrapping splits a span at its spaces, so the link's words are joined back. *)
+  Alcotest.(check string) "a page embed is a link to that page" "A page"
+    (in_text
+    |> List.filter (fun (span : Markdown.styled_span) ->
+           Option.equal String.equal span.hyperlink (Some "a.md"))
+    |> List.map (fun (span : Markdown.styled_span) -> span.text)
+    |> String.concat "");
   Alcotest.(check bool) "the embed source is not shown" false
     (List.exists
        (fun (span : Markdown.styled_span) -> contains_sub ~needle:"![[" ~haystack:span.text)
@@ -932,11 +933,13 @@ let test_markdown_embeds () =
     "an image embed alone in a paragraph asks for the retained PNG"
     [ (path, 3); (path, 3); (path, 3) ]
     (retained [ image obsidian ] obsidian);
+  (* The server gives a Markdown image's URL as its raw, and the image is found
+     by its destination. *)
   let markdown = "![Chart](" ^ path ^ ")" in
   Alcotest.(check (list (pair string int)))
     "a Markdown media image alone in a paragraph asks for the same PNG"
     [ (path, 3); (path, 3); (path, 3) ]
-    (retained [ image markdown ] markdown);
+    (retained [ image path ] markdown);
   Alcotest.(check (list (pair string int))) "an image embed inside text asks for nothing" []
     (retained [ image obsidian ] ("before " ^ obsidian ^ " after"));
   Alcotest.(check (list (pair string int)))

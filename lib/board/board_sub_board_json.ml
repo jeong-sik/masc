@@ -84,6 +84,30 @@ let sub_board_members_field_of_yojson (args : Yojson.Safe.t) =
          ("arguments must be a JSON object, got " ^ Yojson.Safe.to_string other))
 ;;
 
+let description_field = "description"
+
+let sub_board_description_field_of_yojson (args : Yojson.Safe.t) =
+  match args with
+  | `Assoc fields ->
+    (match List.assoc_opt description_field fields with
+     | None | Some `Null -> Ok Keep_description
+     | Some (`String raw) ->
+       if String.equal (String.trim raw) ""
+       then Ok Clear_description
+       else Ok (Set_description raw)
+     | Some other ->
+       Error
+         (Validation_error
+            (Printf.sprintf
+               "%s must be a string, got %s"
+               description_field
+               (Yojson.Safe.to_string other))))
+  | other ->
+    Error
+      (Validation_error
+         ("arguments must be a JSON object, got " ^ Yojson.Safe.to_string other))
+;;
+
 let valid_sub_board_slug_pattern =
   Re.Pcre.re {|^[a-z0-9][a-z0-9_-]*$|} |> Re.compile
 ;;

@@ -819,6 +819,8 @@ let sub_board_access_field_of_yojson =
   Board_sub_board_json.sub_board_access_field_of_yojson
 let sub_board_members_field_of_yojson =
   Board_sub_board_json.sub_board_members_field_of_yojson
+let sub_board_description_field_of_yojson =
+  Board_sub_board_json.sub_board_description_field_of_yojson
 let sub_board_post_counts_unlocked store =
   let counts = Hashtbl.create 64 in
   Hashtbl.iter

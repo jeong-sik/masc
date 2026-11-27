@@ -3175,7 +3175,7 @@ let test_sub_board_update () =
     | Ok sb -> Board.Sub_board_id.to_string sb.Board.id
   in
   (match Board_dispatch.update_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:id ~name:"After"
-           ~description:"new desc" ~access:Board.Members_only ~members:["agent-a"] () with
+           ~description:(Board.Set_description "new desc") ~access:Board.Members_only ~members:["agent-a"] () with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok sb ->
        Alcotest.(check string) "updated name" "After" sb.Board.name;

@@ -1411,6 +1411,49 @@ let test_sub_board_update_empty_members_clears_non_owners () =
   check int "non-string members element returns 400" 400 status
 ;;
 
+(* The HTTP update reads [description] with the same decoder as the MCP tool:
+   omitted keeps it, [""] clears it, and a non-string is a 400. *)
+let test_sub_board_update_description_keep_clear_reject () =
+  with_authenticated_activity_router
+    ~prefix:"sub-board-http-description-"
+    ~agent_name:"dana"
+  @@ fun ~base_path ~config:_ ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  with_board_store ~base_path
+  @@ fun () ->
+  let request ?meth path fields =
+    dispatch_json ?meth ~router ~token ~path ~extra_headers:[]
+      ~body:(Yojson.Safe.to_string (`Assoc fields)) ()
+  in
+  let open Yojson.Safe.Util in
+  let description_of json = json |> member "description" |> to_string in
+  let status, created =
+    request "/api/v1/board/sub-boards"
+      [ "slug", `String "http-described-room"
+      ; "name", `String "HTTP Described Room"
+      ; "description", `String "original text"
+      ]
+  in
+  check int "sub-board create returns 200" 200 status;
+  let sub_board_id = created |> member "id" |> to_string in
+  let path = "/api/v1/board/sub-boards/" ^ sub_board_id in
+  let status, renamed =
+    request ~meth:"PUT" path [ "name", `String "HTTP Described Room Renamed" ]
+  in
+  check int "update omitting description returns 200" 200 status;
+  check string "omitted description is kept" "original text" (description_of renamed);
+  let status, cleared = request ~meth:"PUT" path [ "description", `String "" ] in
+  check int "update with empty description returns 200" 200 status;
+  check string "empty description clears it" "" (description_of cleared);
+  let status, _ = request ~meth:"PUT" path [ "description", `String "kept text" ] in
+  check int "update with new description returns 200" 200 status;
+  let status, _ = request ~meth:"PUT" path [ "description", `Int 5 ] in
+  check int "non-string description returns 400" 400 status;
+  match Masc.Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id with
+  | Error error -> fail (Board_tool.board_error_to_string error)
+  | Ok sub_board ->
+    check string "rejected update leaves description" "kept text" sub_board.description
+;;
+
 (* Strict HTTP auth covers the sub-board reads like every other Board read. *)
 let test_sub_board_reads_require_auth_in_strict_mode () =
   with_authenticated_activity_router
@@ -2067,6 +2110,8 @@ let () =
             test_sub_board_routes_reject_unknown_access
         ; test_case "sub-board update with empty members clears non-owners" `Quick
             test_sub_board_update_empty_members_clears_non_owners
+        ; test_case "sub-board update keeps, clears and rejects the description" `Quick
+            test_sub_board_update_description_keep_clear_reject
         ; test_case "sub-board reads follow strict auth" `Quick
             test_sub_board_reads_require_auth_in_strict_mode
         ; test_case "context inference uses typed Owner receipt and authenticated actor" `Quick

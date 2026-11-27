@@ -311,6 +311,13 @@ type sub_board = {
   post_count : int;
 }
 
+(** What a sub-board update does to [description]. The stored form of "no
+    description" is [""]. *)
+type sub_board_description_edit =
+  | Keep_description  (** Leave the stored description as it is. *)
+  | Clear_description  (** Store the empty description. *)
+  | Set_description of string  (** Store this text, trimmed. *)
+
 (** {1 Read pagination and sweeper defaults} *)
 
 module Limits : sig

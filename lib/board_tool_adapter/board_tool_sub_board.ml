@@ -123,7 +123,9 @@ let handle_sub_board_get ~reader ~tool_name ~start_time args : Tool_result.resul
 let handle_sub_board_update ~reader ~tool_name ~start_time args : Tool_result.result =
   let sub_board_id = get_string_opt args "sub_board_id" |> Option.value ~default:"" in
   let name = get_string_opt args "name" in
-  let description = get_string_opt args "description" in
+  match Board.sub_board_description_field_of_yojson args with
+  | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
+  | Ok description ->
   match Board.sub_board_members_field_of_yojson args with
   | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
   | Ok members ->
@@ -140,7 +142,7 @@ let handle_sub_board_update ~reader ~tool_name ~start_time args : Tool_result.re
     Board_dispatch.update_sub_board ~reader
       ~sub_board_id
       ?name
-      ?description
+      ~description
       ?members
       ?access
       ()

@@ -362,6 +362,11 @@ type sub_board = {
   post_count: int;
 }
 
+type sub_board_description_edit =
+  | Keep_description
+  | Clear_description
+  | Set_description of string
+
 (** {1 Read pagination and sweeper defaults} *)
 
 module Limits = struct

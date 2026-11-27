@@ -1334,6 +1334,66 @@ let test_sub_board_update_empty_members_clears_non_owners () =
       [ "bob" ]
       (List.map Board.Agent_id.to_string sb.Board.members)
 
+(* An update without [description] keeps it, a string replaces it, and a
+   blank string clears it. The empty string used to read as "not given". *)
+let test_sub_board_update_description_keep_set_clear () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let stored_description () =
+    match
+      Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator
+        ~sub_board_id:"described-room"
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok sb -> sb.Board.description
+  in
+  let update fields =
+    dispatch
+      "masc_board_sub_board_update"
+      (make_args
+         ([ "sub_board_id", `String "described-room"; "owner", `String "dana" ] @ fields))
+  in
+  let ok, _ =
+    dispatch
+      "masc_board_sub_board_create"
+      (make_args
+         [ "slug", `String "described-room"
+         ; "name", `String "Described Room"
+         ; "description", `String "original text"
+         ; "owner", `String "dana"
+         ])
+  in
+  Alcotest.(check bool) "create with description succeeds" true ok;
+  let ok, _ = update [ "name", `String "Described Room Renamed" ] in
+  Alcotest.(check bool) "update without description succeeds" true ok;
+  Alcotest.(check string) "omitted description is kept" "original text"
+    (stored_description ());
+  let ok, _ = update [ "description", `Null ] in
+  Alcotest.(check bool) "update with null description succeeds" true ok;
+  Alcotest.(check string) "null description is kept" "original text"
+    (stored_description ());
+  let ok, _ = update [ "description", `String "replacement text" ] in
+  Alcotest.(check bool) "update with new description succeeds" true ok;
+  Alcotest.(check string) "new description replaces the old one" "replacement text"
+    (stored_description ());
+  let ok, _ = update [ "description", `String "" ] in
+  Alcotest.(check bool) "update with empty description succeeds" true ok;
+  Alcotest.(check string) "empty description clears it" "" (stored_description ());
+  let ok, _ = update [ "description", `String "again" ] in
+  Alcotest.(check bool) "update sets description again" true ok;
+  let ok, _ = update [ "description", `String "   " ] in
+  Alcotest.(check bool) "update with blank description succeeds" true ok;
+  Alcotest.(check string) "blank description clears it" "" (stored_description ());
+  let ok, _ = update [ "description", `String "kept after rejection" ] in
+  Alcotest.(check bool) "update sets description before rejection" true ok;
+  let ok, message = update [ "description", `Int 5 ] in
+  Alcotest.(check bool) "non-string description rejected" false ok;
+  Alcotest.(check bool) "rejection names the description field" true
+    (String_util.contains_substring message "description");
+  Alcotest.(check string) "rejected update leaves description" "kept after rejection"
+    (stored_description ())
+
 let test_direct_board_reaction_binds_keeper_identity () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -4449,6 +4509,8 @@ let () =
             test_sub_board_unknown_access_is_rejected;
           Alcotest.test_case "sub-board update with empty members clears non-owners" `Quick
             test_sub_board_update_empty_members_clears_non_owners;
+          Alcotest.test_case "sub-board update keeps, sets and clears the description" `Quick
+            test_sub_board_update_description_keep_set_clear;
           Alcotest.test_case "direct Board reaction binds keeper identity" `Quick
             test_direct_board_reaction_binds_keeper_identity;
           Alcotest.test_case

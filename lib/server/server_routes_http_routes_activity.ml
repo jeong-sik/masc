@@ -1283,18 +1283,18 @@ let add_routes ~sw ~clock router =
            try
              let args = Yojson.Safe.from_string body in
              let name = Safe_ops.json_string_opt "name" args in
-             let description = Safe_ops.json_string_opt "description" args in
              let path = Http.Request.path request in
              (match
-                Result.bind (Board.sub_board_members_field_of_yojson args) (fun members_arg ->
-                  Result.map (fun access -> members_arg, access)
-                    (Board.sub_board_access_field_of_yojson args))
+                Result.bind (Board.sub_board_description_field_of_yojson args) (fun description ->
+                  Result.bind (Board.sub_board_members_field_of_yojson args) (fun members_arg ->
+                    Result.map (fun access -> description, members_arg, access)
+                      (Board.sub_board_access_field_of_yojson args)))
               with
               | Error e ->
                   Http.Response.json_value ~status:`Bad_request
                     (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
                     reqd
-              | Ok (members_arg, access) ->
+              | Ok (description, members_arg, access) ->
              match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
               | None ->
                   Http.Response.json_value ~status:`Bad_request
@@ -1312,7 +1312,7 @@ let add_routes ~sw ~clock router =
                          (sub_board_owner_error ~owner ~sub_board_id sb)
                          reqd
                    | Ok _ ->
-                  (match Board_dispatch.update_sub_board ~reader ~sub_board_id ?name ?description ?members:members_arg ?access () with
+                  (match Board_dispatch.update_sub_board ~reader ~sub_board_id ?name ~description ?members:members_arg ?access () with
                    | Ok sb ->
                        Http.Response.json_value (Board.sub_board_to_yojson sb) reqd
                    | Error e ->

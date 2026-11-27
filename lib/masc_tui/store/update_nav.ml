@@ -8606,9 +8606,13 @@ let keeper_identity_lines ~width ~name (m : Model.t) : styled_line list =
           let gh_s =
             if ks.github_auth_denied then "CanAdmin required (401/403)"
             else
-              match Observed.to_option ks.github_identity with
-              | None -> "loading..."
-              | Some g ->
+              match ks.github_identity with
+              (* The read goes out when this tab opens: until its reply the
+                 slot is unreported. *)
+              | Observed.Loading _ | Observed.Unreported -> "loading..."
+              | Observed.Absent -> "not reported"
+              | Observed.Failed { reason; _ } -> "read error: " ^ reason
+              | Observed.Value { data = g; _ } ->
                   let eff =
                     if g.effective.authenticated then
                       "@" ^ Option.value ~default:"ok" g.effective.login

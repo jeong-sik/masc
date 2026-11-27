@@ -3482,6 +3482,41 @@ let test_agui_chat_chronological_projection_and_phase_parity () =
   Alcotest.(check string) "Attention badge disambiguated in Korean" "승인/질문 필요"
     (Say.resolve Say.Lang_ko attn_lbl)
 
+(* #55067: a turn that has waited 9.9 hours reads the same as one that just
+   began unless the roster row carries its elapsed time. *)
+let test_roster_turn_summary_carries_elapsed () =
+  let m0 = make_populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en in
+  let reviewer =
+    match Fleet_store.find_keeper ~name:"code-reviewer" m0.fleet with
+    | Some k -> k
+    | None -> Alcotest.fail "code-reviewer missing in populated model"
+  in
+  let turn =
+    match reviewer.active_turn with
+    | Some turn -> turn
+    | None -> Alcotest.fail "code-reviewer has no running turn"
+  in
+  let observed state =
+    {
+      m0 with
+      fleet =
+        Fleet_store.apply_turns ~observed_at:now_mono
+          [ { keeper_name = "code-reviewer"; chat_control_token = None; state } ]
+          m0.fleet;
+      freshness =
+        { m0.freshness with last_wall_unix = turn.started_at_unix +. 35_602.0 };
+    }
+  in
+  let summary state = Ops_common.keeper_turn_summary ~model:(observed state) reviewer in
+  Alcotest.(check string) "fresh snapshot of this turn shows how long it has run"
+    "verify · 9h 53m"
+    (summary (Wire_fleet.Turn_active turn));
+  Alcotest.(check string) "a different turn in the snapshot shows no elapsed time"
+    "verify"
+    (summary (Wire_fleet.Turn_active { turn with interrupt_token = "tok-other" }));
+  Alcotest.(check string) "an idle snapshot shows no elapsed time" "verify"
+    (summary Wire_fleet.Turn_idle)
+
 let cadence_slot ~starts_at ~ok ~scheduled ~reacted ~chat ~own : Wire_fleet.turn_slot =
   { starts_at; ok; rested = 0; failed = 0; scheduled; reacted; chat; own; unknown = 0 }
 
@@ -5101,6 +5136,8 @@ let () =
             `Quick test_chat_history_rows_tool_result_refs_cache_and_invalidation;
           Alcotest.test_case "AG-UI chat chronological projection, dedup & SSOT phase parity"
             `Quick test_agui_chat_chronological_projection_and_phase_parity;
+          Alcotest.test_case "roster turn summary carries a live turn's elapsed time"
+            `Quick test_roster_turn_summary_carries_elapsed;
           Alcotest.test_case "Keeper cadence window counts wake causes and notes short windows"
             `Quick test_keeper_cadence_window_counts_causes;
           Alcotest.test_case "Keeper cadence next_due selects earliest keeper schedule"

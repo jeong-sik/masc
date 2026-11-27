@@ -92,6 +92,12 @@ val active_turn_short_activity : Wire_fleet.active_turn -> Say.t
 (** Concise live activity label for a running Owner-slot turn, derived from
     [turn.preview], and "Running" before the turn has one. *)
 
+val live_turn_elapsed :
+  model:Model.t -> keeper:string -> Wire_fleet.active_turn -> Say.t option
+(** How long [turn] has run, the figure the chat view shows. [None] unless
+    the fresh turns snapshot still holds this turn, and when the wall clock
+    cannot be read against its start. *)
+
 type keeper_work_row =
   | Work_status of (Glyph.t * Theme.status_token * Say.t)
   | Work_detail of Say.t

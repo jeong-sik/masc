@@ -178,7 +178,10 @@ val keeper_candle_milli :
     ledger or fleet roster fallback map. *)
 
 val keeper_turn_summary :
-  lang:Say.lang -> Wire_fleet.keeper_summary -> string
+  model:Model.t -> Wire_fleet.keeper_summary -> string
+(** For a running turn: its lane, its activity once the turn has a preview,
+    and how long it has run while the fresh turns snapshot holds it.
+    Otherwise the current task, or the activation mode. *)
 
 val goal_phase_badge :
   Wire_work.goal_phase -> Glyph.t * Theme.status_token * Say.t

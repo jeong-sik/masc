@@ -591,19 +591,26 @@ let keeper_candle_milli ~(model : Model.t) name =
       | Some m -> Some (m, Int.to_string m)
       | None -> None)
 
-let keeper_turn_summary ~lang (k : Wire_fleet.keeper_summary) =
+(* A running turn's elapsed time rides the row so a turn stuck for hours
+   does not read like one that just began. *)
+let keeper_turn_summary ~(model : Model.t) (k : Wire_fleet.keeper_summary) =
   match k.active_turn with
-  | Some turn -> (
-      let lane = Say.resolve lang (turn_lane_label turn.lane) in
-      match turn.preview with
-      | Some _ ->
-          Printf.sprintf "%s · %s" lane
-            (Say.resolve lang (Chat_transcript.active_turn_short_activity turn))
-      | None -> lane)
+  | Some turn ->
+      let activity =
+        match turn.preview with
+        | Some _ -> [ Chat_transcript.active_turn_short_activity turn ]
+        | None -> []
+      in
+      let elapsed =
+        Option.to_list
+          (Chat_transcript.live_turn_elapsed ~model ~keeper:k.name turn)
+      in
+      Say.resolve model.lang
+        (Say.concat ~sep:" · " ((turn_lane_label turn.lane :: activity) @ elapsed))
   | None -> (
       match k.current_task_id with
       | Some tid -> tid
-      | None -> Say.resolve lang (activation_label k.activation_mode))
+      | None -> Say.resolve model.lang (activation_label k.activation_mode))
 
 let goal_phase_badge = function
   | Wire_work.Executing ->

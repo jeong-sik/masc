@@ -928,6 +928,10 @@ let open_work_duration ~(model : Model.t) (turn : Wire_fleet.active_turn) =
           then None
           else Some (format_elapsed (Int.of_float (wall -. since))))
 
+let live_turn_elapsed ~model ~keeper turn =
+  if live_turn_observed ~model ~keeper turn then active_turn_duration ~model turn
+  else None
+
 (* Why a message the operator sent is not running yet: it waits for the
    turn in front of it. *)
 let queued_messages_phrase count =

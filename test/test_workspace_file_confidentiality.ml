@@ -103,7 +103,8 @@ let confidential_examples =
     ".env.local", "prefixed .env.local";
     "src/.env.production", "nested .env.production";
     ".masc/config/credentials.toml", "the concrete leak from the report";
-    ".masc-ide/by-url/x/tool_events.jsonl", "keeper tool-event store";
+    ".masc/connectors/slack/bindings.json", "connector channel bindings";
+    ".masc-owner/lease", "owner lease beside .masc";
     "credentials.toml", "root credentials file";
     "config/credentials", "nested credentials";
     ".git/config", "git config with credential URLs";
@@ -280,8 +281,8 @@ let test_denylist_matches_tree_hidden () =
        from the tree, proving both consume the same SSOT. *)
     mkdir_p (Filename.concat base ".masc/config");
     touch (Filename.concat base ".masc/config/credentials.toml");
-    mkdir_p (Filename.concat base ".masc-ide/by-url");
-    touch (Filename.concat base ".masc-ide/by-url/tool_events.jsonl");
+    touch (Filename.concat base ".masc/connectors/slack/bindings.json");
+    touch (Filename.concat base ".masc-owner/lease");
     mkdir_p (Filename.concat base ".git");
     touch (Filename.concat base ".git/config");
     touch (Filename.concat base ".env");
@@ -291,7 +292,7 @@ let test_denylist_matches_tree_hidden () =
     touch (Filename.concat base "lib/main.ml");
     let ps = paths (W.scan_dir ~base ~depth:0 ~max_depth:3 ~max_nodes:500 [] base) in
     let top_components =
-      [ ".masc"; ".masc-ide"; ".git"; ".env"; "credentials.toml"; ".ssh" ]
+      [ ".masc"; ".masc-owner"; ".git"; ".env"; "credentials.toml"; ".ssh" ]
     in
     List.iter
       (fun name ->

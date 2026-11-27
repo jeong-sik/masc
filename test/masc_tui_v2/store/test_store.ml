@@ -24534,6 +24534,146 @@ let test_keeper_failing_since () =
   Alcotest.(check (option (float 0.0))) "a keeper not in the roster names nothing"
     None (since_of "absent")
 
+let test_wiki_body_link_follow_and_back () =
+  let m0, _ =
+    Update.step ~now:t0
+      (Model.initial ~auth_session:Rbac.single_user_local_admin ())
+      (Msg.Resize { cols = 140; rows = 40 })
+  in
+  let step m ev = Update.step ~now:t0 m (Msg.Key_event ev) in
+  let page slug body outgoing_links : Wire_knowledge.wiki_page_detail =
+    {
+      page = slug;
+      slug;
+      file = slug ^ ".md";
+      frontmatter =
+        {
+          title = slug;
+          summary = "";
+          source = Wire_knowledge.Source_observation;
+          author = "alpha";
+          created = "2026-11-20";
+          updated = "2026-11-22";
+          revision = 1;
+          tags = [];
+        };
+      sha256 = "sha-" ^ slug;
+      body_markdown = body;
+      outgoing_links;
+      backlinks = [];
+      lint_findings = [];
+    }
+  in
+  let link text slug exists raw : Wire_knowledge.wiki_outgoing_link =
+    { text; target = Wire_knowledge.Link_page { slug; exists }; raw; line = 1 }
+  in
+  let page_a =
+    page "page-a" "See [B](page-b.md) and [gone](page-gone.md)."
+      [
+        link "B" "page-b" true "page-b.md";
+        link "gone" "page-gone" false "page-gone.md";
+      ]
+  in
+  let page_b = page "page-b" "Body of page B." [] in
+  let summary (d : Wire_knowledge.wiki_page_detail) :
+      Wire_knowledge.wiki_page_summary =
+    {
+      slug = d.slug;
+      file = d.file;
+      title = d.frontmatter.title;
+      summary = "About " ^ d.slug;
+      source = d.frontmatter.source;
+      author = d.frontmatter.author;
+      created = d.frontmatter.created;
+      updated = d.frontmatter.updated;
+      revision = d.frontmatter.revision;
+      tags = d.frontmatter.tags;
+      backlink_count = 0;
+      outgoing_link_count = 0;
+      sources_count = 0;
+      hearsay_count = 0;
+      sha256 = d.sha256;
+    }
+  in
+  let idx : Wire_knowledge.wiki_index =
+    {
+      pages_total = 2;
+      pages_readable = 2;
+      pages_unreadable = 0;
+      pages = [ summary page_a; summary page_b ];
+      unreadable_pages = [];
+      lint =
+        {
+          total_findings = 0;
+          counts =
+            {
+              broken_link = 0;
+              unsupported_link = 0;
+              orphan = 0;
+              orphan_unconfirmed = 0;
+              missing_sources = 0;
+              hearsay_only = 0;
+              unreadable_page = 0;
+              revision_log_gap = 0;
+              revision_log_hole = 0;
+              duplicate_title_candidates = 0;
+            };
+          log_hole_suppressed = false;
+          orphans = [];
+          duplicate_title_candidates = [];
+          findings = [];
+        };
+    }
+  in
+  let m_wiki =
+    {
+      m0 with
+      nav = { m0.nav with workspace = Nav.Knowledge; zoomed = true };
+      knowledge =
+        Knowledge_store.empty
+        |> Knowledge_store.set_tab Nav.Knowledge_wiki
+        |> Knowledge_store.apply_wiki_index ~observed_at:t0 idx
+        |> Knowledge_store.set_wiki_page ~slug:"page-a"
+             (Observed.value ~observed_at:t0 page_a)
+        |> Knowledge_store.set_wiki_page ~slug:"page-b"
+             (Observed.value ~observed_at:t0 page_b)
+        |> Knowledge_store.select_wiki_slug ~slug:"page-a";
+    }
+  in
+  let shown (m : Model.t) =
+    Option.map
+      (fun (p : Wire_knowledge.wiki_page_summary) -> p.slug)
+      (Knowledge_store.selected_wiki_page m.knowledge)
+  in
+  let link_of (m : Model.t) slug = Knowledge_store.selected_wiki_link ~slug m.knowledge in
+  Alcotest.(check bool) "the zoomed page card is the wiki detail" true
+    (Model.is_wiki_detail_active m_wiki);
+  let m_plain_enter, _ = step m_wiki (key Keymap.Input.Enter) in
+  Alcotest.(check (option string)) "Enter with no link selected keeps the page"
+    (Some "page-a") (shown m_plain_enter);
+  let m1, _ = step m_wiki (char_key ">") in
+  Alcotest.(check (option string)) "> selects the link to the existing page"
+    (Some "page-b.md") (link_of m1 "page-a");
+  let m2, _ = step m1 (char_key ">") in
+  Alcotest.(check (option string)) "a link to a missing page is not selectable"
+    (Some "page-b.md") (link_of m2 "page-a");
+  let m3, _ = step m2 (key Keymap.Input.Enter) in
+  Alcotest.(check (option string)) "Enter opens the linked page" (Some "page-b")
+    (shown m3);
+  Alcotest.(check bool) "the opened page stays zoomed" true
+    (Model.is_zoomed_active m3);
+  Alcotest.(check (option string)) "the opened page has no link selected" None
+    (link_of m3 "page-b");
+  let m4, _ = step m3 (key Keymap.Input.Escape) in
+  Alcotest.(check (option string)) "Esc returns to the page the link was followed from"
+    (Some "page-a") (shown m4);
+  Alcotest.(check (option string)) "with the followed link selected again"
+    (Some "page-b.md") (link_of m4 "page-a");
+  Alcotest.(check bool) "and still zoomed" true (Model.is_zoomed_active m4);
+  let m5, _ = step m4 (key Keymap.Input.Escape) in
+  Alcotest.(check bool) "with no trail left, Esc unzooms as before" false
+    (Model.is_zoomed_active m5)
+
 let () =
   Alcotest.run "masc_tui_store"
     [
@@ -24546,6 +24686,9 @@ let () =
       ( "uncached_knowledge_jumps"
       , [ Alcotest.test_case "uncached Board and wiki jumps show their target" `Quick
             test_uncached_knowledge_jumps ] );
+      ( "wiki_body_links"
+      , [ Alcotest.test_case "select a body link, follow it with Enter, return with Esc"
+            `Quick test_wiki_body_link_follow_and_back ] );
       ( "hidden_music_command"
       , [ Alcotest.test_case "unlisted /music parses, requests the handoff and keeps the popup out" `Quick
             test_hidden_music_command;

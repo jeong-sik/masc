@@ -5,11 +5,11 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { authSession, resetAuthStateForTests } from '../../core/auth'
 import { resetObserverStateForTests } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
-import { KnowledgeWorkspace } from './index'
+import { KnowledgeWorkspace, preloadKnowledgeSubroute } from './index'
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
@@ -28,6 +28,12 @@ async function settle(rounds = 8): Promise<void> {
 describe('WikiTab body links', () => {
   let container: HTMLDivElement
   const origFetch = globalThis.fetch
+
+  // KnowledgeWorkspace loads WikiTab via a lazy chunk inside <Suspense fallback={null}>;
+  // preload before running tests so settle() does not race Vite's cold dynamic-import transform.
+  beforeAll(async () => {
+    await preloadKnowledgeSubroute('wiki')
+  })
 
   beforeEach(() => {
     resetAuthStateForTests()

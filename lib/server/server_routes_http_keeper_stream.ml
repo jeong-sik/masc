@@ -2723,6 +2723,89 @@ let persist_batch_user_rows ~base_dir ~keeper_name members =
         |> Result.map (fun _ -> ())) (Ok ()) members
 ;;
 
+type operation_wire_projection_mode =
+  | Adapter_projects
+  | On_publish_projects
+  | No_observer_projection
+
+let operation_wire_projection_mode_of_channel = function
+  | Keeper_continuation_channel.Dashboard _
+  | Keeper_continuation_channel.Gate _ -> Adapter_projects
+  | Keeper_continuation_channel.Discord _
+  | Keeper_continuation_channel.Slack _
+  | Keeper_continuation_channel.Telegram _
+  | Keeper_continuation_channel.Imessage _
+  | Keeper_continuation_channel.Keeper _ -> On_publish_projects
+  | Keeper_continuation_channel.Unrouted _ -> No_observer_projection
+
+let project_and_emit_operation_member ~base_path ~keeper_name ~redact_text ~seq ~ts
+    ~member_id projection event =
+  let member_event =
+    Keeper_chat_operation_batch.event_for_member ~operation_id:member_id event
+  in
+  let projection, projected =
+    Server_keeper_chat_agui_projection.project
+      ~timestamp:ts ~redact_text projection member_event
+  in
+  Option.iter (fun event ->
+    let operation_id = Keeper_chat_operation.Operation_id.to_string member_id in
+    note_operation_wire_event ~base_path ~keeper_name ~operation_id event;
+    Keeper_chat_broadcast.operation_event
+      ~base_path ~keeper_name ~operation_id ~seq:(Some seq) ~event;
+    publish_operation_live_event
+      ~base_path ~keeper_name ~operation_id ~seq:(Some seq) event)
+    projected;
+  projection
+
+let create_operation_event_bus ~base_path ~keeper_name ~continuation_channel
+    ~first_seq ?now ~journals () =
+  let journal_redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
+  let journal_redact_text = Keeper_secret_redaction.redact_text journal_redaction in
+  let projection_mode = operation_wire_projection_mode_of_channel continuation_channel in
+  (* Only invoked sequentially from the single turn-publisher fiber inside
+     [Keeper_chat_events.publish_with_sequence], immediately after every member
+     journal append completes. *)
+  let observer_projections =
+    ref
+      (match projection_mode with
+       | On_publish_projects ->
+         List.map (fun (member_id, _) ->
+           member_id, Server_keeper_chat_agui_projection.initial) journals
+       | Adapter_projects | No_observer_projection -> [])
+  in
+  Keeper_chat_events.create ~first_seq ?now
+    ~on_publish:(fun ~seq ~ts event ->
+      let public_event =
+        Keeper_chat_events.public_content ~redact_text:journal_redact_text event
+      in
+      List.iter (fun (operation_id, journal) ->
+        Keeper_chat_event_log.append journal ~seq ~ts
+          (Keeper_chat_operation_batch.event_for_member ~operation_id public_event))
+        journals;
+      match projection_mode with
+      | Adapter_projects | No_observer_projection -> ()
+      | On_publish_projects ->
+        (* [public_event] is already redacted via [Keeper_chat_events.public_content],
+           so projection keeps [Fun.id] and isolates each member so an observer
+           projection failure cannot interrupt journaling or connector delivery. *)
+        observer_projections :=
+          List.map (fun (member_id, projection) ->
+            match
+              project_and_emit_operation_member ~base_path ~keeper_name
+                ~redact_text:Fun.id ~seq ~ts ~member_id projection public_event
+            with
+            | next_projection -> member_id, next_projection
+            | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+            | exception exn ->
+              Log.Keeper.warn ~keeper_name
+                "keeper_stream: observer projection failed operation=%s seq=%d: %s"
+                (Keeper_chat_operation.Operation_id.to_string member_id)
+                seq
+                (Printexc.to_string exn);
+              member_id, projection)
+            !observer_projections)
+    ()
+
 let operation_executor ~state ~clock : Keeper_owner.operation_executor =
   let base_path = (Mcp_server.workspace_config state).base_path in
   fun ~sw ~keeper_name ~claim ->
@@ -2775,9 +2858,11 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
             let operation_id =
               Keeper_owner.Chat_operation.Operation_id.to_string operation.operation_id
             in
-            (* Every request keeps its request-bound live and replay journal. One
-               bus subscriber below projects events to all admitted requests;
-               multiple subscribers would divide, rather than copy, events. *)
+            (* Every request keeps its request-bound live and replay journal.
+               Dashboard and Gate project AG-UI frames on their adapter
+               subscriber; connector and Keeper-delegate channels consume the
+               bus for their own delivery and project observer AG-UI frames
+               inside [on_publish] right after each journal append. *)
             let journals = List.map (fun member_id ->
               member_id, Keeper_chat_event_log.open_journal
                 ~base_dir:(Mcp_server.workspace_config state).base_path
@@ -2799,14 +2884,11 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                failed Keeper_chat_operation.Store_unavailable
                  (Keeper_chat_event_log.version_mismatch_to_string version)
              | Ok first_seq ->
-            let journal_redaction = Keeper_secret_redaction.snapshot ~base_path ~keeper_name in
-            let events = Keeper_chat_events.create ~first_seq
-              ~on_publish:(fun ~seq ~ts event ->
-                let event = Keeper_chat_events.public_content
-                    ~redact_text:(Keeper_secret_redaction.redact_text journal_redaction) event in
-                List.iter (fun (operation_id, journal) -> Keeper_chat_event_log.append journal ~seq ~ts
-                  (Keeper_chat_operation_batch.event_for_member ~operation_id event)) journals)
-              () in
+            let events =
+              create_operation_event_bus ~base_path ~keeper_name
+                ~continuation_channel:operation_payload.source.continuation_channel
+                ~first_seq ~journals ()
+            in
             let closed = ref false in
             let delivery, resolve_delivery = Eio.Promise.create () in
             let settle_delivery result =
@@ -2849,15 +2931,9 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                      if not terminal_seen then settle_delivery (Error no_terminal_before_close)
                    | Keeper_chat_events.Next { Keeper_chat_events.seq; ts; event } ->
                    let projections = List.map (fun (member_id, projection) ->
-                     let member_event = Keeper_chat_operation_batch.event_for_member ~operation_id:member_id event in
-                     let projection, projected = Server_keeper_chat_agui_projection.project
-                       ~timestamp:ts ~redact_text projection member_event in
-                     Option.iter (fun event ->
-                       let operation_id = Keeper_chat_operation.Operation_id.to_string member_id in
-                       note_operation_wire_event ~base_path ~keeper_name ~operation_id event;
-                       Keeper_chat_broadcast.operation_event ~base_path ~keeper_name ~operation_id ~seq:(Some seq) ~event;
-                       publish_operation_live_event ~base_path ~keeper_name ~operation_id ~seq:(Some seq) event) projected;
-                     member_id, projection) projections in
+                     member_id,
+                     project_and_emit_operation_member ~base_path ~keeper_name
+                       ~redact_text ~seq ~ts ~member_id projection event) projections in
                    let is_terminal = Keeper_chat_run_signal.is_terminal event in
                    if is_terminal && not terminal_seen then settle_delivery (Ok ());
                    loop ~terminal_seen:(terminal_seen || is_terminal) projections
@@ -3625,6 +3701,13 @@ module For_testing = struct
   let control_turn_delivery = control_turn_delivery
   let surface_context_to_instructions = surface_context_to_instructions
   let keeper_tool_failure_log_details = keeper_tool_failure_log_details
+  type nonrec operation_wire_projection_mode = operation_wire_projection_mode =
+    | Adapter_projects
+    | On_publish_projects
+    | No_observer_projection
+  let operation_wire_projection_mode_of_channel =
+    operation_wire_projection_mode_of_channel
+  let create_operation_event_bus = create_operation_event_bus
   let note_operation_wire_event = note_operation_wire_event
   let take_operation_wire_stream = take_operation_wire_stream
   let synthesize_wire_terminal_on_settle = synthesize_wire_terminal_on_settle

@@ -1044,11 +1044,321 @@ let test_operation_settlement_tail_of_another_settlement_still_appends () =
   check int "two terminals" 2
     (List.length (error_entries (read_journal ~base_path ~keeper_name ~operation_id)))
 
+let ok_or_fail = function Ok v -> v | Error detail -> fail detail
+
+let discord_channel () =
+  Keeper_continuation_channel.discord ~guild_id:(Some "g-1") ~channel_id:"c-1"
+    ~parent_channel_id:None ~thread_id:None ~user_id:"u-1" () |> ok_or_fail
+
+let slack_channel () =
+  Keeper_continuation_channel.slack ~team_id:(Some "t-1") ~channel_id:"c-1"
+    ~thread_ts:(Some "1700.001") ~user_id:"u-1" |> ok_or_fail
+
+let telegram_channel () =
+  Keeper_continuation_channel.telegram ~bot_user_id:1L ~chat_id:2L
+    ~message_thread_id:None ~direct_messages_topic_id:None
+    ~reply_to_message_id:None ~user_id:3L |> ok_or_fail
+
+let imessage_channel () =
+  Keeper_continuation_channel.imessage ~chat_identifier:"chat-1"
+    ~chat_guid:(Some "iMessage;-;+1555") ~user_id:"u-1" |> ok_or_fail
+
+let keeper_channel () =
+  Keeper_continuation_channel.keeper ~keeper_name:"asker-keeper" |> ok_or_fail
+
+let dashboard_channel () =
+  Keeper_continuation_channel.dashboard ~thread_id:"keeper:wire-test" |> ok_or_fail
+
+let gate_channel () =
+  Keeper_continuation_channel.gate ~channel:"gate-http" ~workspace_id:None
+    ~conversation_id:None ~user_id:"u-1" |> ok_or_fail
+
+let test_projection_mode_covers_every_continuation_channel () =
+  let mode_name = function
+    | Stream.For_testing.Adapter_projects -> "adapter"
+    | Stream.For_testing.On_publish_projects -> "on_publish"
+    | Stream.For_testing.No_observer_projection -> "none"
+  in
+  let check_mode label expected channel =
+    check string label (mode_name expected)
+      (mode_name (Stream.For_testing.operation_wire_projection_mode_of_channel channel))
+  in
+  check_mode "dashboard" Adapter_projects (dashboard_channel ());
+  check_mode "gate" Adapter_projects (gate_channel ());
+  check_mode "discord" On_publish_projects (discord_channel ());
+  check_mode "slack" On_publish_projects (slack_channel ());
+  check_mode "telegram" On_publish_projects (telegram_channel ());
+  check_mode "imessage" On_publish_projects (imessage_channel ());
+  check_mode "keeper" On_publish_projects (keeper_channel ());
+  check_mode "unrouted" No_observer_projection
+    (Keeper_continuation_channel.unrouted "missing route")
+
+let observer_op_events ~keeper_name events =
+  List.rev events
+  |> List.filter_map (fun (ev : Sse.external_event) ->
+       let open Yojson.Safe.Util in
+       match ev.Sse.ext_payload |> member "type" |> to_string_option with
+       | Some "keeper_chat_operation_event" ->
+         let name = ev.Sse.ext_payload |> member "name" |> to_string_option in
+         if Option.equal String.equal name (Some keeper_name)
+         then Some ev.Sse.ext_payload
+         else None
+       | Some _ | None -> None)
+
+let test_connector_bus_streams_live_observer_events_and_redacts_secrets () =
+  with_workspace @@ fun base_path ->
+  let keeper_name = "connector-live" in
+  let secret = "connector-super-secret-token-999" in
+  let secret_file =
+    Keeper_secret_redaction.ssh_remote_token_file ~base_path ~keeper_name
+  in
+  Fs_compat.mkdir_p (Filename.dirname secret_file);
+  Out_channel.with_open_bin secret_file (fun oc -> output_string oc (secret ^ "\n"));
+  let op_str = "op-discord-live-1" in
+  let op_id = Keeper_chat_operation.Operation_id.of_string op_str |> ok_or_fail in
+  let journal =
+    Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id:op_str ()
+  in
+  let authority = Sse.runtime_authority_exn ~base_path in
+  let sse_received = ref [] in
+  let sub_id = "test-connector-observer-live" in
+  Sse.subscribe_external ~runtime_authority:authority ~id:sub_id
+    ~callback:(fun ev -> sse_received := ev :: !sse_received) ();
+  let sink_received = ref [] in
+  let unregister_sink =
+    Stream.For_testing.register_operation_live_sink ~base_path ~keeper_name
+      ~operation_id:op_str (fun ~seq ev -> sink_received := (seq, ev) :: !sink_received)
+  in
+  Fun.protect ~finally:(fun () ->
+    Sse.unsubscribe_external sub_id;
+    unregister_sink ();
+    ignore (Stream.For_testing.take_operation_wire_stream ~base_path ~keeper_name ~operation_id:op_str))
+  @@ fun () ->
+  let events =
+    Stream.For_testing.create_operation_event_bus ~base_path ~keeper_name
+      ~continuation_channel:(discord_channel ()) ~first_seq:0
+      ~now:(fun () -> 100.0) ~journals:[ op_id, journal ] ()
+  in
+  (* Live observer projection must work even if the external adapter is absent or slow. *)
+  Events.reader_gone events;
+  Events.publish events
+    (Events.Run_started { run_id = "run-orig"; thread_id = "keeper:" ^ keeper_name });
+  Events.publish events
+    (Events.Text_message_start { message_id = "msg-orig"; role = Events.Assistant });
+  Events.publish events
+    (Events.Agent_core_thinking_delta { index = 0; delta = "checking " ^ secret; response = None });
+  Events.publish events
+    (Events.Tool_call_start
+       { occurrence = { stream_scope = 1; provider_message_id = None; block_index = 0 }
+       ; tool_call_id = Some "tc-1"
+       ; tool_call_name = "Read"
+       });
+  Events.publish events
+    (Events.Text_delta { text = "answer " ^ secret; response = Events.Unobserved_scope None });
+  (* Connector-only block: persisted to journal, omitted from AG-UI observer stream. *)
+  Events.publish events
+    (Events.Status_block { kind = Keeper_chat_blocks.Continuation_checkpoint });
+  Events.publish events Events.Text_message_end;
+  Events.publish events (Events.Run_finished { run_id = "run-orig" });
+  let frames = observer_op_events ~keeper_name !sse_received in
+  let open Yojson.Safe.Util in
+  let seqs = List.map (fun j -> j |> member "seq" |> to_int) frames in
+  let types =
+    List.map (fun j -> j |> member "ag_ui_event" |> member "type" |> to_string) frames
+  in
+  check (list int) "projected seqs skip connector-only block"
+    [ 0; 1; 2; 3; 4; 6; 7 ] seqs;
+  check (list string) "AG-UI event sequence"
+    [ "RUN_STARTED"; "TEXT_MESSAGE_START"; "CUSTOM"; "TOOL_CALL_START"
+    ; "TEXT_MESSAGE_CONTENT"; "TEXT_MESSAGE_END"; "RUN_FINISHED" ]
+    types;
+  List.iter (fun frame ->
+    let raw = Yojson.Safe.to_string frame in
+    check bool "observer frame never leaks secret" false
+      (Astring.String.is_infix ~affix:secret raw))
+    frames;
+  let text_frame = List.nth frames 4 in
+  check string "text delta is redacted" "answer [REDACTED]"
+    (text_frame |> member "ag_ui_event" |> member "delta" |> to_string);
+  check int "live sink receives the same 7 projected frames" 7 (List.length !sink_received);
+  check bool "wire stream reaches Wire_terminal_sent" true
+    (Stream.For_testing.take_operation_wire_stream ~base_path ~keeper_name ~operation_id:op_str
+     = Some Stream.Wire_terminal_sent);
+  (* Also verify Slack, Telegram, iMessage, and Keeper delegation emit live frames. *)
+  List.iter (fun (label, channel) ->
+    let id_str = "op-" ^ label in
+    let id = Keeper_chat_operation.Operation_id.of_string id_str |> ok_or_fail in
+    let j = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id:id_str () in
+    let before = List.length !sse_received in
+    let bus =
+      Stream.For_testing.create_operation_event_bus ~base_path ~keeper_name
+        ~continuation_channel:channel ~first_seq:0 ~now:(fun () -> 101.0)
+        ~journals:[ id, j ] ()
+    in
+    Events.reader_gone bus;
+    Events.publish bus (Events.Run_started { run_id = "r"; thread_id = "keeper:" ^ keeper_name });
+    Events.publish bus (Events.Text_delta { text = "hi"; response = Events.Unobserved_scope None });
+    Events.publish bus (Events.Run_finished { run_id = "r" });
+    check int (label ^ " emits 3 observer frames") 3 (List.length !sse_received - before);
+    check bool (label ^ " marks Wire_terminal_sent") true
+      (Stream.For_testing.take_operation_wire_stream ~base_path ~keeper_name ~operation_id:id_str
+       = Some Stream.Wire_terminal_sent))
+    [ "slack", slack_channel ()
+    ; "telegram", telegram_channel ()
+    ; "imessage", imessage_channel ()
+    ; "keeper", keeper_channel ()
+    ]
+
+let test_connector_bus_projects_batch_members_and_settles_interruption () =
+  with_workspace @@ fun base_path ->
+  let keeper_name = "connector-batch" in
+  let op_a_str = "op-slack-batch-a" and op_b_str = "op-slack-batch-b" in
+  let op_a = Keeper_chat_operation.Operation_id.of_string op_a_str |> ok_or_fail in
+  let op_b = Keeper_chat_operation.Operation_id.of_string op_b_str |> ok_or_fail in
+  let journals =
+    [ op_a, Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id:op_a_str ()
+    ; op_b, Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id:op_b_str ()
+    ]
+  in
+  let authority = Sse.runtime_authority_exn ~base_path in
+  let sse_received = ref [] in
+  let sub_id = "test-connector-batch-observer" in
+  Sse.subscribe_external ~runtime_authority:authority ~id:sub_id
+    ~callback:(fun ev -> sse_received := ev :: !sse_received) ();
+  Fun.protect ~finally:(fun () ->
+    Sse.unsubscribe_external sub_id;
+    List.iter (fun op_id ->
+      ignore (Stream.For_testing.take_operation_wire_stream ~base_path ~keeper_name ~operation_id:op_id))
+      [ op_a_str; op_b_str ])
+  @@ fun () ->
+  let events =
+    Stream.For_testing.create_operation_event_bus ~base_path ~keeper_name
+      ~continuation_channel:(slack_channel ()) ~first_seq:0
+      ~now:(fun () -> 200.0) ~journals ()
+  in
+  Events.reader_gone events;
+  Events.publish events
+    (Events.Run_started { run_id = "shared-run"; thread_id = "keeper:" ^ keeper_name });
+  Events.publish events
+    (Events.Batch_bound { operation_id = op_a; execution_id = op_a });
+  Events.publish events
+    (Events.Text_delta { text = "partial"; response = Events.Unobserved_scope None });
+  let frames = observer_op_events ~keeper_name !sse_received in
+  let open Yojson.Safe.Util in
+  let frames_for op_id =
+    List.filter (fun j -> String.equal (j |> member "operation_id" |> to_string) op_id) frames
+  in
+  check int "member A gets 3 frames" 3 (List.length (frames_for op_a_str));
+  check int "member B gets 3 frames" 3 (List.length (frames_for op_b_str));
+  let b_start = List.hd (frames_for op_b_str) in
+  check string "member B gets its own runId" ("keeper-operation-run-" ^ op_b_str)
+    (b_start |> member "ag_ui_event" |> member "runId" |> to_string);
+  let b_batch = List.nth (frames_for op_b_str) 1 in
+  check string "member B batch event names member B" op_b_str
+    (b_batch |> member "ag_ui_event" |> member "value" |> member "operation_id" |> to_string);
+  (* Interrupt before Run_finished: settle synthesizes RUN_ERROR for each open member. *)
+  List.iter (fun op_id ->
+    Stream.For_testing.synthesize_wire_terminal_on_settle ~base_path ~keeper_name
+      ~operation_id:op_id ~execution:(failed_execution "interrupted mid-turn"))
+    [ op_a_str; op_b_str ];
+  let after_settle = observer_op_events ~keeper_name !sse_received in
+  List.iter (fun op_id ->
+    let op_frames =
+      List.filter (fun j -> String.equal (j |> member "operation_id" |> to_string) op_id) after_settle
+    in
+    check int (op_id ^ " gets synthesized terminal") 4 (List.length op_frames);
+    let terminal = List.nth op_frames 3 in
+    check string (op_id ^ " terminal is RUN_ERROR") "RUN_ERROR"
+      (terminal |> member "ag_ui_event" |> member "type" |> to_string);
+    check int (op_id ^ " journal records one durable error") 1
+      (List.length (error_entries (read_journal ~base_path ~keeper_name ~operation_id:op_id))))
+    [ op_a_str; op_b_str ]
+
+let test_dashboard_and_unrouted_buses_skip_on_publish_projection () =
+  with_workspace @@ fun base_path ->
+  let keeper_name = "no-on-publish" in
+  let authority = Sse.runtime_authority_exn ~base_path in
+  let sse_received = ref [] in
+  let sub_id = "test-no-on-publish-observer" in
+  Sse.subscribe_external ~runtime_authority:authority ~id:sub_id
+    ~callback:(fun ev -> sse_received := ev :: !sse_received) ();
+  Fun.protect ~finally:(fun () -> Sse.unsubscribe_external sub_id) @@ fun () ->
+  List.iter (fun (label, channel) ->
+    let op_str = "op-" ^ label in
+    let op_id = Keeper_chat_operation.Operation_id.of_string op_str |> ok_or_fail in
+    let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id:op_str () in
+    let bus =
+      Stream.For_testing.create_operation_event_bus ~base_path ~keeper_name
+        ~continuation_channel:channel ~first_seq:0 ~now:(fun () -> 300.0)
+        ~journals:[ op_id, journal ] ()
+    in
+    Events.reader_gone bus;
+    Events.publish bus (Events.Run_started { run_id = "r"; thread_id = "keeper:" ^ keeper_name });
+    Events.publish bus (Events.Text_delta { text = "hello"; response = Events.Unobserved_scope None });
+    check int (label ^ " emits no on_publish observer frames") 0
+      (List.length (observer_op_events ~keeper_name !sse_received));
+    check bool (label ^ " leaves wire stream unset") true
+      (Option.is_none
+         (Stream.For_testing.take_operation_wire_stream ~base_path ~keeper_name ~operation_id:op_str));
+    check int (label ^ " still journals every event") 2
+      (List.length (read_journal ~base_path ~keeper_name ~operation_id:op_str)))
+    [ "dashboard", dashboard_channel ()
+    ; "gate", gate_channel ()
+    ; "unrouted", Keeper_continuation_channel.unrouted "missing route"
+    ]
+
+let test_connector_bus_masks_internal_event_error_detail () =
+  with_workspace @@ fun base_path ->
+  let keeper_name = "connector-error-mask" in
+  let op_str = "op-discord-err" in
+  let op_id = Keeper_chat_operation.Operation_id.of_string op_str |> ok_or_fail in
+  let journal = Journal.open_journal ~base_dir:base_path ~keeper_name ~operation_id:op_str () in
+  let authority = Sse.runtime_authority_exn ~base_path in
+  let sse_received = ref [] in
+  let sub_id = "test-connector-error-mask" in
+  Sse.subscribe_external ~runtime_authority:authority ~id:sub_id
+    ~callback:(fun ev -> sse_received := ev :: !sse_received) ();
+  Fun.protect ~finally:(fun () ->
+    Sse.unsubscribe_external sub_id;
+    ignore (Stream.For_testing.take_operation_wire_stream ~base_path ~keeper_name ~operation_id:op_str))
+  @@ fun () ->
+  let bus =
+    Stream.For_testing.create_operation_event_bus ~base_path ~keeper_name
+      ~continuation_channel:(discord_channel ()) ~first_seq:0 ~now:(fun () -> 400.0)
+      ~journals:[ op_id, journal ] ()
+  in
+  Events.reader_gone bus;
+  Events.publish bus (Events.Run_started { run_id = "r"; thread_id = "keeper:" ^ keeper_name });
+  Events.publish bus (Events.Event_error { message = "raw internal stacktrace with secret" });
+  let frames = observer_op_events ~keeper_name !sse_received in
+  check int "emits RUN_STARTED and RUN_ERROR" 2 (List.length frames);
+  let open Yojson.Safe.Util in
+  let err_frame = List.nth frames 1 in
+  check string "error frame is RUN_ERROR" "RUN_ERROR"
+    (err_frame |> member "ag_ui_event" |> member "type" |> to_string);
+  check string "error message uses public safe copy" Events.public_error_message
+    (err_frame |> member "ag_ui_event" |> member "message" |> to_string);
+  check bool "raw detail never leaks" false
+    (Astring.String.is_infix ~affix:"raw internal stacktrace" (Yojson.Safe.to_string err_frame));
+  check bool "wire stream reaches Wire_terminal_sent" true
+    (Stream.For_testing.take_operation_wire_stream ~base_path ~keeper_name ~operation_id:op_str
+     = Some Stream.Wire_terminal_sent)
+
 let () =
   Alcotest.run "keeper_wire_terminal"
     [ ( "wire-terminal"
       , [ test_case "note marks started then terminal" `Quick
             test_note_marks_started_then_terminal
+        ; test_case "projection mode covers every continuation channel" `Quick
+            test_projection_mode_covers_every_continuation_channel
+        ; test_case "connector bus streams live observer events and redacts secrets" `Quick
+            test_connector_bus_streams_live_observer_events_and_redacts_secrets
+        ; test_case "connector bus projects batch members and settles interruption" `Quick
+            test_connector_bus_projects_batch_members_and_settles_interruption
+        ; test_case "dashboard, gate, and unrouted buses skip on_publish projection" `Quick
+            test_dashboard_and_unrouted_buses_skip_on_publish_projection
+        ; test_case "connector bus masks internal event error detail" `Quick
+            test_connector_bus_masks_internal_event_error_detail
         ; test_case "same request ID has separate Keeper wire audiences" `Quick
             test_same_request_id_keeps_keeper_wire_audiences_separate
         ; test_case "same request ID has separate terminal and unsubscribe state" `Quick

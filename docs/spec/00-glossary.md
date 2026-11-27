@@ -3296,16 +3296,6 @@ status: reference
   → [Keeper_owned_job_store](../../lib/keeper/keeper_owned_job_store.mli) ·
   [도구 정의](../../lib/tool_schemas/tool_schemas_owned_job.mli)
 
-**Ready-Wave Scheduler (레디 웨이브 스케줄러)**
-: 검증된 도구 실행 계획(Tool Plan) 및 Composition Skill의 DAG 노드를 동적으로 즉시 발송하고 분기 실패를 처리하는 스케줄링 엔진(#41815, task-2186).
-  정적 레이어 배리어(static batch barrier)로 인해 독립 분기(B)가 다른 완료 분기(A→C)의 후속 실행을 가로막던 문제를 해소하고, 선언된 의존성(`after` 간선 및 상류 JSON 출력 참조)이 해결된 노드를 레디 웨이브(ready wave)로 즉시 디스패치한다.
-  - **분기 실패 정책 (Branch Failure Policy)**: 닫힌 타입 `Keeper_tool_plan.branch_failure_policy`의 두 값(`Fail_fast`, `Continue_independent`)으로 제어된다. 기본값은 `Fail_fast`다.
-    - `Fail_fast`: 한 노드가 실패하면 아직 발송되지 않은 모든 노드의 실행을 즉시 중단한다.
-    - `Continue_independent`: 한 노드가 실패하면 그 노드의 하류 자손들만 차단하고, 독립된 다른 분기의 실행과 완료는 정상 진행한다.
-  - **직렬 체인 대기 해제 불변식 (Serial Chain Stand-Down)**: 직렬(`serial`) 및 종단(`terminal`) 노드는 정적 계획 순서대로 단독 실행된다. 선행 직렬 노드가 실패하거나 지연(`Deferred`, 원인 존재)되거나 건너뛰어지면, 분기 실패 정책과 무관하게 후속 직렬 체인의 모든 노드는 도구를 발송하지 않고 즉시 실행 대기를 해제(stand down)하며, 실패한 직렬 선행자가 계획 인덱스 순서에 따라 실패 원인(`cause`)을 끝까지 운반한다.
-  - **결정론적 완료 순서 (Canonical Plan Order)**: 실행 완료된 결과는 비감소 `planned_index` 순서로 정규 보고되며, 진행 중인(in-flight) 노드가 모두 정착된 후에 가장 낮은 계획 인덱스를 가진 실패 원인을 최종 선정한다.
-  → [Keeper_tool_plan](../../lib/keeper/keeper_tool_plan.mli)
-
 **Skill Reference**
 : source, package, name으로 이뤄진 신원과 content revision의 조합
   (`Skill_reference.t`). 이름 하나가 아닌 이 참조로 읽을 내용을 지정한다.

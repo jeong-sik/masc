@@ -610,11 +610,11 @@ let probe_tcp_rtt ~host ~port ~timeout_sec =
       | _, writable, _ -> writable
       | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait_writable fd)
   in
-  let check () =
+  let check_unix () =
     match Unix.getaddrinfo host (string_of_int port) [ Unix.AI_SOCKTYPE Unix.SOCK_STREAM ] with
     | [] -> Ssh_unreachable { detail = "host resolution returned no addresses"; measured_at = Unix.gettimeofday () }
     | ai :: _ ->
-      let fd = Unix.socket ai.ai_family ai.ai_socktype ai.ai_protocol in
+      let fd = Unix.socket ~cloexec:true ai.ai_family ai.ai_socktype ai.ai_protocol in
       Fun.protect
         ~finally:(fun () ->
           try Unix.close fd with Unix.Unix_error _ -> ())
@@ -654,6 +654,37 @@ let probe_tcp_rtt ~host ~port ~timeout_sec =
                   { detail = Unix.error_message err
                   ; measured_at = Unix.gettimeofday ()
                   }))
+  in
+  let check () =
+    match
+      Eio_guard.execution_context (), Eio_context.get_net_opt (), Eio_context.get_clock_opt ()
+    with
+    | Eio_guard.Eio_fiber, Some net, Some clock ->
+      (match
+         Eio.Time.with_timeout clock timeout_sec (fun () ->
+           Eio.Switch.run (fun sw ->
+             match Eio.Net.getaddrinfo_stream net host ~service:(string_of_int port) with
+             | [] ->
+               Ok
+                 (Ssh_unreachable
+                    { detail = "host resolution returned no addresses"
+                    ; measured_at = Unix.gettimeofday ()
+                    })
+             | addr :: _ ->
+               let conn = Eio.Net.connect ~sw net addr in
+               Eio.Flow.close conn;
+               let rtt_ms = elapsed_s () *. 1000.0 in
+               Ok (Ssh_reachable { rtt_ms; measured_at = Unix.gettimeofday () })))
+       with
+       | Ok result -> result
+       | Error `Timeout ->
+         Ssh_unreachable
+           { detail = Printf.sprintf "TCP connect timed out after %.1fs" timeout_sec
+           ; measured_at = Unix.gettimeofday ()
+           })
+    | Eio_guard.Eio_fiber, Some _, None
+    | Eio_guard.Eio_fiber, None, (Some _ | None)
+    | Eio_guard.Non_eio, (Some _ | None), (Some _ | None) -> check_unix ()
   in
   try check () with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -734,9 +765,6 @@ let run_background_probe ~base_path =
 ;;
 
 let trigger_probe ~sw ~clock:_ ~base_path () =
-  (* Check switch liveness BEFORE claiming the single-flight slot so a
-     cancelled/closed switch can never leave [refreshing = true] behind. *)
-  Eio.Switch.check sw;
   (* Never perform filesystem I/O while holding [cache_mu]. *)
   let has_entry =
     Stdlib.Mutex.protect cache_mu (fun () -> Hashtbl.mem cache_tbl base_path)
@@ -752,6 +780,10 @@ let trigger_probe ~sw ~clock:_ ~base_path () =
            ~base_path
            ())
   in
+  (* Re-check switch liveness AFTER yielding filesystem I/O and immediately
+     before claiming the single-flight slot so a cancelled switch cannot leave
+     [refreshing = true] stuck. *)
+  Eio.Switch.check sw;
   let clear_refreshing () =
     Stdlib.Mutex.protect cache_mu (fun () ->
       match Hashtbl.find_opt cache_tbl base_path with
@@ -782,14 +814,18 @@ let trigger_probe ~sw ~clock:_ ~base_path () =
   in
   if should_fork
   then (
+    let started = Atomic.make false in
     try
       Eio.Fiber.fork ~sw (fun () ->
+        Atomic.set started true;
         (* Put [Eio.Fiber.yield ()] inside [Fun.protect] so cancellation before
            work starts still releases the single-flight reservation. *)
         Fun.protect ~finally:clear_refreshing (fun () ->
           Eio.Fiber.yield ();
           Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-            run_background_probe ~base_path)))
+            run_background_probe ~base_path)));
+      if not (Atomic.get started) && Option.is_some (Eio.Switch.get_error sw)
+      then clear_refreshing ()
     with
     | exn ->
       clear_refreshing ();

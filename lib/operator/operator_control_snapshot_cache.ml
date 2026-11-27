@@ -120,69 +120,81 @@ let max_wait_sec () =
     with an extended stale window so callers are not blocked. *)
 let do_bg_compute ~key ~token ~ttl ~stale_value compute =
   let stale_grace = ttl *. Env_config_runtime_services.Operator.cache_stale_grace_factor in
+  let restore_stale () =
+    let ts = now () in
+    atomic_update table (fun map ->
+        match SMap.find_opt key map with
+        | Some (Computing { token = t; _ }) when t = token ->
+          ((),
+           SMap.add
+             key
+             (Ready
+                { value = stale_value
+                ; expires_at = ts
+                ; stale_until = ts +. (stale_grace *. 2.0)
+                })
+             map)
+        | Some (Ready _) | None | Some (Computing _) -> ((), map))
+  in
   let run () =
-    try
-      let value = compute () in
-      let ts = now () in
-      atomic_update table (fun map ->
-          match SMap.find_opt key map with
-          | Some (Computing { token = t; _ }) when t = token ->
-            let entry =
-              { value
-              ; expires_at = ts +. ttl
-              ; stale_until = ts +. ttl +. stale_grace
-              }
-            in
-            ((), SMap.add key (Ready entry) map)
-          | Some (Ready _) | None | Some (Computing _) -> Log.Dashboard.debug
-              "operator_snapshot_cache: bg-revalidate discarded for %s (slot replaced)"
-              key;
-            ((), map))
-    with
-    | Eio.Cancel.Cancelled _ as e ->
-      (* Restore stale fallback so the next read does not block. *)
-      let ts = now () in
-      atomic_update table (fun map ->
-          match SMap.find_opt key map with
-          | Some (Computing { token = t; _ }) when t = token ->
-            ((),
-             SMap.add
-               key
-               (Ready
-                  { value = stale_value
-                  ; expires_at = ts
-                  ; stale_until = ts +. (stale_grace *. 2.0)
-                  })
-               map)
-          | Some (Ready _) | None | Some (Computing _) -> ((), map));
-      raise e
-    | exn ->
-      Log.Dashboard.warn
-        "operator_snapshot_cache: bg-revalidate failed (%s): %s"
-        key
-        (Printexc.to_string exn);
-      let ts = now () in
-      atomic_update table (fun map ->
-          match SMap.find_opt key map with
-          | Some (Computing { token = t; _ }) when t = token ->
-            ((),
-             SMap.add
-               key
-               (Ready
-                  { value = stale_value
-                  ; expires_at = ts
-                  ; stale_until = ts +. (stale_grace *. 2.0)
-                  })
-               map)
-          | Some (Ready _) | None | Some (Computing _) -> ((), map))
+    let settled = ref false in
+    Fun.protect
+      ~finally:(fun () -> if not !settled then restore_stale ())
+      (fun () ->
+        try
+          let value = compute () in
+          let ts = now () in
+          atomic_update table (fun map ->
+              match SMap.find_opt key map with
+              | Some (Computing { token = t; _ }) when t = token ->
+                let entry =
+                  { value
+                  ; expires_at = ts +. ttl
+                  ; stale_until = ts +. ttl +. stale_grace
+                  }
+                in
+                ((), SMap.add key (Ready entry) map)
+              | Some (Ready _) | None | Some (Computing _) ->
+                Log.Dashboard.debug
+                  "operator_snapshot_cache: bg-revalidate discarded for %s (slot replaced)"
+                  key;
+                ((), map));
+          settled := true
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Dashboard.warn
+            "operator_snapshot_cache: bg-revalidate failed (%s): %s"
+            key
+            (Printexc.to_string exn))
   in
   match Eio_context.get_switch_opt () with
   | Some sw ->
-    (* Readers already have the stale value; the inline fallback below is
-       waited on and keeps the caller's lane. *)
-    (try Eio.Fiber.fork ~sw (fun () -> Pool_lane.with_background run) with
-     | Invalid_argument _ -> run ()
-     | Eio.Cancel.Cancelled _ -> ())
+    if Option.is_some (Eio.Switch.get_error sw) then
+      restore_stale ()
+    else (
+      let started = Atomic.make false in
+      (* Readers already have the stale value; the inline fallback below is
+         waited on and keeps the caller's lane. *)
+      try
+        Eio.Fiber.fork ~sw (fun () ->
+          Atomic.set started true;
+          let completed = ref false in
+          Fun.protect
+            ~finally:(fun () -> if not !completed then restore_stale ())
+            (fun () ->
+              Pool_lane.with_background run;
+              completed := true));
+        if not (Atomic.get started) && Option.is_some (Eio.Switch.get_error sw)
+        then restore_stale ()
+      with
+      | Invalid_argument _ -> run ()
+      | Eio.Cancel.Cancelled _ as e ->
+        restore_stale ();
+        raise e
+      | exn ->
+        restore_stale ();
+        raise exn)
   | None ->
     Log.Dashboard.warn
       "operator_snapshot_cache: no switch for background revalidation, computing inline (%s)"
@@ -269,7 +281,26 @@ let get_or_compute key ~ttl compute =
               let token = next_token () in
               ( `Stale (entry.value, token)
               , SMap.add key (Computing { token; started_at = now (); stale = Some entry.value }) map )
-            | Some (Computing { stale = Some stale_value; _ }) -> (`Hit stale_value, map)
+            | Some (Computing { token = _; started_at; stale = Some stale_value }) ->
+              let elapsed = now () -. started_at in
+              let ceiling = max_wait_sec () in
+              if elapsed > ceiling
+              then (
+                Log.Dashboard.warn
+                  "operator_snapshot_cache: replacing stuck Computing(stale) slot for %s (%.1fs elapsed)"
+                  key
+                  elapsed;
+                let fresh_token = next_token () in
+                ( `Stale (stale_value, fresh_token)
+                , SMap.add
+                    key
+                    (Computing
+                       { token = fresh_token
+                       ; started_at = now ()
+                       ; stale = Some stale_value
+                       })
+                    map ))
+              else (`Hit stale_value, map)
             | Some (Computing { token; started_at; stale = None }) ->
               let waited =
                 match watching_token with

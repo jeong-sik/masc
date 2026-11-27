@@ -60,6 +60,7 @@ type dashboard_auth_state =
     connection's domain writes to it: every other fiber queues one of these. *)
 type outbound =
   | Text_frame of Bigstringaf.t
+  | Text_frame_pair of Bigstringaf.t * Bigstringaf.t
   | Ping_frame
   | Close_frame
 
@@ -313,6 +314,36 @@ let send_text_bigstring session payload =
     end
   end
 
+(* Enqueue two text frames as one mailbox item so concurrent domain senders
+   cannot interleave between a dashboard delta payload and its seq frame. *)
+let send_text_pair_bigstrings session first second =
+  if is_session_closed session
+  then false
+  else begin
+    let queued_before = Atomic.fetch_and_add session.outbound_queued 2 in
+    if queued_before + 1 >= max_outbound_frames_per_session
+    then begin
+      ignore (Atomic.fetch_and_add session.outbound_queued (-2) : int);
+      if Atomic.compare_and_set session.closed false true
+      then ignore (Domain_mailbox.send session.outbound Close_frame : bool);
+      false
+    end
+    else if Domain_mailbox.send session.outbound (Text_frame_pair (first, second))
+    then begin
+      let len1 = Bigstringaf.length first in
+      let len2 = Bigstringaf.length second in
+      Transport_metrics.inc_ws_bytes_sent ~bytes:(len1 + len2);
+      Transport_metrics.observe_ws_message_bytes_sent len1;
+      Transport_metrics.observe_ws_message_bytes_sent len2;
+      true
+    end
+    else begin
+      ignore (Atomic.fetch_and_add session.outbound_queued (-2) : int);
+      Atomic.set session.closed true;
+      false
+    end
+  end
+
 (** WebSocket text frames must contain valid UTF-8.  Raw SSE broadcasts can
     include tool/provider output bytes that are valid for local persistence but
     invalid as browser WebSocket text, so repair at the final wire boundary. *)
@@ -374,9 +405,6 @@ let send_text_shared_checked ~context session text =
   let sent = send_text_shared session text in
   if not sent then log_ws_delivery_dropped ~context session.id;
   sent
-
-let send_json_checked ~context session json =
-  send_text_checked ~context session (Yojson.Safe.to_string json)
 
 let jsonrpc_notification method_ params =
   `Assoc
@@ -513,56 +541,72 @@ let dashboard_hello ~base_path ~session_id ?token () =
   result
 
 let dashboard_subscribe ~session_id ?route ~slices () =
-  match find_session session_id with
-  | None -> Error "WebSocket session not found"
-  | Some session ->
-      if not (dashboard_auth_is_authenticated (dashboard_auth session)) then
-        Error "dashboard/subscribe requires dashboard/hello first"
-      else begin
-        let invalid =
-          List.filter (fun slice -> not (valid_dashboard_slice slice)) slices
-        in
-        match invalid with
-        | bad :: _ ->
-            Error (Printf.sprintf "unsupported dashboard slice: %s" bad)
-        | [] ->
-            with_sessions_rw (fun () ->
-                slice_index_remove_session_locked session_id;
-                Atomic.set session.dashboard_slices
-                  (List.sort_uniq String.compare slices);
-                List.iter
-                  (fun slice -> slice_index_add_locked ~session_id ~slice)
-                  slices);
-            Atomic.set session.dashboard_route route;
-            Ok
-              (`Assoc
-                [
-                  ("session", dashboard_session_result session);
-                ])
-      end
+  let invalid =
+    List.filter (fun slice -> not (valid_dashboard_slice slice)) slices
+  in
+  let result =
+    with_sessions_rw (fun () ->
+        match Hashtbl.find_opt sessions session_id with
+        | None -> Error "WebSocket session not found"
+        | Some session when is_session_closed session ->
+            Error "WebSocket session not found"
+        | Some session ->
+            if not (dashboard_auth_is_authenticated (dashboard_auth session)) then
+              Error "dashboard/subscribe requires dashboard/hello first"
+            else begin
+              match invalid with
+              | bad :: _ ->
+                  Error (Printf.sprintf "unsupported dashboard slice: %s" bad)
+              | [] ->
+                  slice_index_remove_session_locked session_id;
+                  Atomic.set session.dashboard_slices
+                    (List.sort_uniq String.compare slices);
+                  List.iter
+                    (fun slice -> slice_index_add_locked ~session_id ~slice)
+                    slices;
+                  Atomic.set session.dashboard_route route;
+                  Ok session
+            end)
+  in
+  match result with
+  | Error _ as err -> err
+  | Ok session ->
+      Ok
+        (`Assoc
+          [
+            ("session", dashboard_session_result session);
+          ])
 
 let dashboard_unsubscribe ~session_id ?slices () =
-  match find_session session_id with
-  | None -> Error "WebSocket session not found"
-  | Some session ->
-      if not (dashboard_auth_is_authenticated (dashboard_auth session)) then
-        Error "dashboard/unsubscribe requires dashboard/hello first"
-      else begin
-        with_sessions_rw (fun () ->
-            match slices with
-            | None ->
-                Atomic.set session.dashboard_slices [];
-                slice_index_remove_session_locked session_id
-            | Some slices ->
-                Atomic.set session.dashboard_slices
-                  (List.filter
-                     (fun s -> not (List.mem s slices))
-                     (Atomic.get session.dashboard_slices));
-                List.iter
-                  (fun slice -> slice_index_remove_locked ~session_id ~slice)
-                  slices);
-        Ok (`Assoc [ ("session", dashboard_session_result session) ])
-      end
+  let result =
+    with_sessions_rw (fun () ->
+        match Hashtbl.find_opt sessions session_id with
+        | None -> Error "WebSocket session not found"
+        | Some session when is_session_closed session ->
+            Error "WebSocket session not found"
+        | Some session ->
+            if not (dashboard_auth_is_authenticated (dashboard_auth session)) then
+              Error "dashboard/unsubscribe requires dashboard/hello first"
+            else begin
+              (match slices with
+               | None ->
+                   Atomic.set session.dashboard_slices [];
+                   slice_index_remove_session_locked session_id
+               | Some slices ->
+                   Atomic.set session.dashboard_slices
+                     (List.filter
+                        (fun s -> not (List.mem s slices))
+                        (Atomic.get session.dashboard_slices));
+                   List.iter
+                     (fun slice -> slice_index_remove_locked ~session_id ~slice)
+                     slices);
+              Ok session
+            end)
+  in
+  match result with
+  | Error _ as err -> err
+  | Ok session ->
+      Ok (`Assoc [ ("session", dashboard_session_result session) ])
 
 let dashboard_ping ~session_id () =
   match find_session session_id with
@@ -708,14 +752,24 @@ let send_dashboard_delta_frame session { slice; text } =
   else begin
     Transport_metrics.inc_ws_delta_built ();
     let seq = next_dashboard_seq session in
-    if send_text_shared_checked ~context:"dashboard-delta-payload" session text
+    let payload = bigstring_of_shared_text text in
+    let seq_text =
+      websocket_text_payload
+        (Yojson.Safe.to_string (dashboard_delta_seq_notification seq))
+    in
+    let seq_payload =
+      Bigstringaf.of_string seq_text ~off:0 ~len:(String.length seq_text)
+    in
+    if send_text_pair_bigstrings session payload seq_payload
     then begin
-      Atomic.set session.dashboard_last_delta_seq seq;
+      atomic_bump_max session.dashboard_last_delta_seq seq;
       Atomic.set session.dashboard_last_delta_at (Time_compat.now ());
-      send_json_checked ~context:"dashboard-delta-seq" session
-        (dashboard_delta_seq_notification seq)
+      true
     end
-    else false
+    else begin
+      log_ws_delivery_dropped ~context:"dashboard-delta" session.id;
+      false
+    end
   end
 
 let send_dashboard_delta_for_parsed session sse_event parsed =
@@ -1032,6 +1086,7 @@ let __test_dashboard_delta_payload_text_for_event (ev : Sse.external_event) =
 let serve_outbound ~scope session_id session wsd =
   let release_queued = function
     | Text_frame _ -> Atomic.decr session.outbound_queued
+    | Text_frame_pair _ -> ignore (Atomic.fetch_and_add session.outbound_queued (-2) : int)
     | Ping_frame | Close_frame -> ()
   in
   let write frame =
@@ -1044,6 +1099,12 @@ let serve_outbound ~scope session_id session wsd =
       | Text_frame payload ->
         Atomic.decr session.outbound_queued;
         Ws_wsd.send_text_bigstring wsd payload;
+        `Continue
+      | Text_frame_pair (first, second) ->
+        ignore (Atomic.fetch_and_add session.outbound_queued (-2) : int);
+        Ws_wsd.send_text_bigstring wsd first;
+        if not (Ws_wsd.is_closed wsd) then
+          Ws_wsd.send_text_bigstring wsd second;
         `Continue
       | Ping_frame ->
         Ws_wsd.send_ping wsd ();

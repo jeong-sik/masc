@@ -29,22 +29,30 @@ let step = ref (fun ~config ~machine ->
   | Machine_lane.Dos -> Ok ())
 
 let start ~sw ~clock ~stop_promise ~machine ~config =
-  Eio.Fiber.fork ~sw (fun () ->
-    let rec tick () =
-      match !step ~config ~machine with
-      | Error (Unavailable detail) ->
-          Log.Server.warn "machine spectator worker unavailable; retrying: %s" detail;
-          Eio.Time.sleep clock 1.0;
-          tick ()
-      | Error (Outcome_unknown detail | Host_refusal detail) ->
-          Log.Server.warn "machine spectator tick stopped: %s" detail
-      | Ok () ->
-          Eio.Time.sleep clock 0.3;
-          tick ()
-    in
-    ignore (Eio.Fiber.first
-      (fun () -> tick (); `Tick_stopped)
-      (fun () -> Eio.Promise.await stop_promise; `Observer_closed)))
+  if Eio.Promise.is_resolved stop_promise then ()
+  else
+    Eio.Fiber.fork ~sw (fun () ->
+      try
+        let rec tick () =
+          match !step ~config ~machine with
+          | Error (Unavailable detail) ->
+              Log.Server.warn "machine spectator worker unavailable; retrying: %s" detail;
+              Eio.Time.sleep clock 1.0;
+              tick ()
+          | Error (Outcome_unknown detail | Host_refusal detail) ->
+              Log.Server.warn "machine spectator tick stopped: %s" detail
+          | Ok () ->
+              Eio.Time.sleep clock 0.3;
+              tick ()
+        in
+        ignore (Eio.Fiber.first
+          (fun () -> Eio.Promise.await stop_promise; `Observer_closed)
+          (fun () -> Eio.Fiber.yield (); tick (); `Tick_stopped))
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+          Log.Server.error "machine spectator fiber failed: %s"
+            (Printexc.to_string exn))
 
 module For_testing = struct
   let with_step replacement f =

@@ -1047,6 +1047,56 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     expect(timers()).toEqual([])
   })
 
+  it('says which preparation step a turn is in, and that a step which did not finish stopped', async () => {
+    const keeper = makeRosterKeeper()
+    let observer!: ReadableStreamDefaultController<Uint8Array>
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/mcp?sse_kind=observer') {
+        return new Response(new ReadableStream({ start: (controller) => { observer = controller } }),
+          { headers: { 'Content-Type': 'text/event-stream' } })
+      }
+      return Response.json({ operations: [], messages: [], rows: [], keepers: [] })
+    }))
+    const stream = startObserverStream({ autoReconnect: false })
+    await waitFor(() => expect(observerConnected.value).toBe(true))
+    const read = observedValue(new Map(), Date.now() - 1000)
+    const view = render(html`<${KeeperChatTab} keeper=${keeper} onInspect=${vi.fn()} onMutated=${vi.fn()} turnSnapshot=${read} />`)
+    const now = Date.now() / 1000
+    let revision = 0
+    const send = (preparation: object | undefined) => observer.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({
+      type: 'keeper_turn_preview_changed', name: keeper.name,
+      observation: { owner_key: 'A', preview: {
+        revision: ++revision, status_text: 'rt · preparing', activity: 'preparing', last_tool: null, updated_at_unix: now,
+        open_activities: [], preparation,
+      } },
+    })}\n\n`))
+    const progress = () => view.container.querySelector('.kp-turn-progress-active')
+    const sentence = () => progress()?.textContent?.replace(/\s+/g, ' ').trim()
+    const step = { phase: 'workspace_memory', turn_ref: null, started_at_unix: now - 4, state: 'active', finished_at_unix: null, elapsed_ns: null }
+
+    send(step)
+    await waitFor(() => expect(sentence()).toMatch(/^Working · 준비 중 · 작업공간 메모리 · [45]s · Keeper 턴$/))
+    expect(progress()?.getAttribute('data-tone')).toBe('info')
+
+    // The step is done and the server has seen nothing after it yet: no time runs.
+    send({ ...step, state: 'prepared', finished_at_unix: now - 1, elapsed_ns: '3000000000' })
+    await waitFor(() => expect(sentence()).toBe('Working · 작업공간 메모리 준비 완료 · Keeper 턴'))
+
+    // A step that did not finish: the turn is not said to be working.
+    send({ ...step, phase: 'tools', state: 'raised', finished_at_unix: now, elapsed_ns: '4000000000' })
+    await waitFor(() => expect(sentence()).toBe('도구 준비 중 예외 · Keeper 턴'))
+    expect(progress()?.getAttribute('data-tone')).toBe('bad')
+    expect(view.container.querySelector('.kp-turn-progress-active .kp-live-dot')).toBeNull()
+
+    // A server from before the field, or a step this dashboard cannot read: the activity's word.
+    send(undefined)
+    await waitFor(() => expect(sentence()).toBe('Working · 준비 중 · Keeper 턴'))
+    expect(progress()?.getAttribute('data-tone')).toBe('info')
+
+    observer.close()
+    await stream
+  })
+
   it('invalidates in-flight earlier-page prepend and resets pagination when reconnect observes an authoritative empty history', async () => {
     const keeper = makeRosterKeeper()
     let observer: ReadableStreamDefaultController<Uint8Array> | undefined

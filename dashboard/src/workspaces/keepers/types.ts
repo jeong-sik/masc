@@ -162,6 +162,8 @@ export interface KeeperTurnCauses {
 export interface KeeperTurnPreparation {
   readonly phase: string
   readonly state: 'active' | 'prepared' | 'rejected' | 'raised' | 'cancelled'
+  /** When the step began. `null` when the frame did not say. */
+  readonly started_at_unix: number | null
 }
 
 export interface KeeperTurnWorkContext {

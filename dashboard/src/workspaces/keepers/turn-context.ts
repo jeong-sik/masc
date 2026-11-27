@@ -46,7 +46,9 @@ export function decodeTurnPreparation(raw: unknown): KeeperTurnPreparation | nul
   if (!isRecord(raw)) return null
   const phase = nonBlank(raw.phase)
   const state = decodePreparationState(raw.state)
-  return phase !== null && state !== null ? { phase, state } : null
+  if (phase === null || state === null) return null
+  const startedAt = raw.started_at_unix
+  return { phase, state, started_at_unix: typeof startedAt === 'number' && Number.isFinite(startedAt) ? startedAt : null }
 }
 
 /** Server `work_context_to_json`. */
@@ -62,21 +64,6 @@ export function decodeTurnWorkContext(raw: unknown): KeeperTurnWorkContext | nul
   return { task_id: nonBlank(raw.task_id), start_reasons: reasons }
 }
 
-/** A preparation that ended other than `prepared`: the turn cannot go on
- *  from it, so it is not "working". */
-export function preparationHalted(preparation: KeeperTurnPreparation | null): boolean {
-  if (preparation === null) return false
-  switch (preparation.state) {
-    case 'rejected':
-    case 'raised':
-    case 'cancelled':
-      return true
-    case 'active':
-    case 'prepared':
-      return false
-  }
-}
-
 const PREPARATION_PHASE_LABEL: Readonly<Record<string, string>> = {
   task: 'Task',
   world: '월드',
@@ -89,8 +76,14 @@ const PREPARATION_PHASE_LABEL: Readonly<Record<string, string>> = {
   wiki: '위키',
 }
 
+/** The word for a preparation phase. A phase this table does not know is
+ *  shown as the server wrote it. */
+export function preparationPhaseLabel(phase: string): string {
+  return PREPARATION_PHASE_LABEL[phase] ?? phase
+}
+
 export function preparationHaltedLabel(preparation: KeeperTurnPreparation): string {
-  const phase = PREPARATION_PHASE_LABEL[preparation.phase] ?? preparation.phase
+  const phase = preparationPhaseLabel(preparation.phase)
   switch (preparation.state) {
     case 'rejected':
       return `${phase} 준비 거절`

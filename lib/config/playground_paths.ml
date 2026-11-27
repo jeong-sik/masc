@@ -76,6 +76,8 @@ let parse_playground_file_path ~base_path ~abs_path =
       let safe_relative keeper_name segments =
         if
           String.equal keeper_name ""
+          || String.equal keeper_name "."
+          || String.equal keeper_name ".."
           || segments = []
           || List.exists
                (fun segment ->

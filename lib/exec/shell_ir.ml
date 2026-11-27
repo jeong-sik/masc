@@ -65,7 +65,11 @@ let rec with_sandbox (target : Sandbox_target.t) (ir : t) : t =
   in
   let stage (simple : simple) : simple =
     match simple.sandbox with
-    | Sandbox_target.Delegated _ -> simple
+    | Sandbox_target.Delegated _ ->
+      { simple with
+        args = List.map arg_rewritten simple.args
+      ; env = List.map (fun (k, v) -> k, arg_rewritten v) simple.env
+      }
     | Sandbox_target.Host
     | Sandbox_target.Docker _
     | Sandbox_target.Micro_vm _
@@ -104,7 +108,11 @@ let rec with_sandbox_cwd
   in
   let stage (simple : simple) : simple =
     match simple.sandbox with
-    | Sandbox_target.Delegated _ -> simple
+    | Sandbox_target.Delegated _ ->
+      { simple with
+        args = List.map arg_rewritten simple.args
+      ; env = List.map (fun (k, v) -> k, arg_rewritten v) simple.env
+      }
     | Sandbox_target.Host
     | Sandbox_target.Docker _
     | Sandbox_target.Micro_vm _

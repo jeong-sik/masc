@@ -197,28 +197,36 @@ let to_shell_ir
    scanned the whole string for the first metacharacter off an ordered list
    after either failure; it had no case for [$], so an expansion next to a
    redirect was reported as the redirect. *)
+let max_subst_depth = 64
+
 let parse_string (source : string) : Shell_ir.t Parsed.t =
   (* One invocation owns the counter. Recursive source parses capture the
-     same counter, so substitutions spend their parent's remaining budget. *)
+     same counter, so substitutions spend their parent's remaining budget,
+     and nesting depth is capped to prevent O(D^2) copies / stack overflow. *)
   let token_count = ref 0 in
-  let rec parse_source (source : string) : Shell_ir.t Parsed.t =
-    let lexbuf = Lexing.from_string source in
-    try
-      let raw =
-        Bash_subset.command (Bash_lexer.token token_count parse_source) lexbuf
-      in
-      to_shell_ir raw
-    with
-    | Bash_lexer.Token_limit_exceeded -> Parsed.Parse_aborted `Token_limit_50k
-    | Bash_lexer.Excluded_construct reason -> Parsed.Too_complex reason
-    | Bash_lexer.Subst_inner_refusal refusal ->
-      (* An inner [$( )] body refused for its own reason; the refusal rides
-         up unchanged — the same rules, the same reasons. *)
-      refusal
-    | Bash_subset.Error -> Parsed.Parse_error (make_parse_error lexbuf)
-    (* [int_of_string] on a descriptor the rule matched but no machine has, as
-       in [99999999999999999999>out]. The token is well formed and unusable,
-       which is what a parse error says. *)
-    | Failure _ -> Parsed.Parse_error (make_parse_error lexbuf)
+  let rec parse_source ~depth (source : string) : Shell_ir.t Parsed.t =
+    if depth > max_subst_depth
+    then Parsed.Parse_aborted `Depth_limit
+    else (
+      let lexbuf = Lexing.from_string source in
+      try
+        let raw =
+          Bash_subset.command
+            (Bash_lexer.token token_count (parse_source ~depth:(depth + 1)))
+            lexbuf
+        in
+        to_shell_ir raw
+      with
+      | Bash_lexer.Token_limit_exceeded -> Parsed.Parse_aborted `Token_limit_50k
+      | Bash_lexer.Excluded_construct reason -> Parsed.Too_complex reason
+      | Bash_lexer.Subst_inner_refusal refusal ->
+        (* An inner [$( )] body refused for its own reason; the refusal rides
+           up unchanged — the same rules, the same reasons. *)
+        refusal
+      | Bash_subset.Error -> Parsed.Parse_error (make_parse_error lexbuf)
+      (* [int_of_string] on a descriptor the rule matched but no machine has, as
+         in [99999999999999999999>out]. The token is well formed and unusable,
+         which is what a parse error says. *)
+      | Failure _ -> Parsed.Parse_error (make_parse_error lexbuf))
   in
-  parse_source source
+  parse_source ~depth:0 source

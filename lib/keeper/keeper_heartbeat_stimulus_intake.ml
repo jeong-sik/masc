@@ -629,6 +629,22 @@ let tool_result_outbox_reader ~config ~keeper_name =
   fun () -> Lazy.force cached
 ;;
 
+(* What intake reads again, under the queue owner lock, before it drops an ask
+   pointer whose ask looked unanswered. *)
+type ask_pointer_recheck =
+  | Ask_answered_since of Keeper_ask_store.rows_snapshot
+  | Ask_recheck_unreadable of Keeper_ask_store.read_error
+
+let recheck_ask_pointer ~base_path ~keeper_name ~ask_id () =
+  match Keeper_ask_store.rows_result ~base_path ~keeper_name with
+  | Error error -> Ok (Some (Ask_recheck_unreadable error))
+  | Ok Keeper_ask_store.Missing_log -> Ok None
+  | Ok (Keeper_ask_store.Stored_rows rows as snapshot) ->
+    (match List.assoc_opt ask_id rows with
+     | Some (_, Keeper_ask.Answered_by _) -> Ok (Some (Ask_answered_since snapshot))
+     | Some (_, (Keeper_ask.Open | Keeper_ask.Withdrawn_because _)) | None -> Ok None)
+;;
+
 let reconcile_spent_selection_with
       ~tool_result_outbox
       ~config
@@ -1117,28 +1133,40 @@ let heartbeat_event_intake
              in
              loop remaining observations_rev selections_rev first_withdrawn rest
            in
-           let ack_terminal_ask detail =
-             (* The canonical Ask log is append-only, so a missing log, an
-                absent ask id, and an Open or Withdrawn resolution can never
-                gain the answer this pointer names: unlike a read failure,
-                no later state resolves them. Retaining such a source
-                reselects the same poison on every snapshot and reports an
-                intake error every heartbeat. Withdraw it with the same
-                typed terminal ACK as a Board source with no remaining
-                observation; answer recovery re-enqueues a fresh pointer if
-                a later answer is recorded. *)
+           let ack_terminal_ask ~ask_id detail =
+             (* The answer route admits this pointer before it records the
+                answer, inside the same queue owner lock, so an ask this
+                snapshot read as unanswered may have been answered since.
+                Decide the ACK under that lock from a fresh read. An answer
+                recorded since then is observed now, from that read. A
+                missing log, an absent ask id, or an Open or Withdrawn ask
+                there cannot gain this pointer's answer: the append-only log
+                gives a later answer its own admission. Retaining such a
+                source would reselect the same poison every heartbeat, so it
+                is withdrawn with the typed terminal ACK a Board source with
+                no remaining observation gets. *)
              (match
-                Keeper_registry_event_queue.ack_pending_result
+                Keeper_registry_event_queue.ack_pending_unless_result
                   ~base_path
                   keeper_name
                   ~selection
+                  ~withhold:(recheck_ask_pointer ~base_path ~keeper_name ~ask_id)
               with
-              | Ok () ->
+              | Ok Keeper_event_queue_persistence.Ack_committed ->
                 Log.Keeper.info
                   "turn entry: acknowledged terminal ask answer keeper=%s: %s"
                   keeper_name
                   detail;
                 loop remaining observations_rev selections_rev first_withdrawn rest
+              | Ok (Keeper_event_queue_persistence.Ack_withheld (Ask_answered_since snapshot)) ->
+                Log.Keeper.info
+                  "turn entry: ask answered while its pointer was read keeper=%s ask_id=%s"
+                  keeper_name
+                  ask_id;
+                ask_snapshot := Some (Ok snapshot);
+                loop remaining observations_rev selections_rev first_withdrawn (selection :: rest)
+              | Ok (Keeper_event_queue_persistence.Ack_withheld (Ask_recheck_unreadable error)) ->
+                retain_ask (Ask_read_failed error)
               | Error message ->
                 let failure_detail =
                   "failed to acknowledge terminal ask answer source ("
@@ -1201,9 +1229,9 @@ let heartbeat_event_intake
               loop remaining observations_rev selections_rev first_withdrawn rest
             | Stimulus_ask_retry_later error -> retain_ask (Ask_read_failed error)
             | Stimulus_ask_missing ask_id ->
-              ack_terminal_ask ("ask answer source missing: " ^ ask_id)
+              ack_terminal_ask ~ask_id ("ask answer source missing: " ^ ask_id)
             | Stimulus_ask_not_answered ask_id ->
-              ack_terminal_ask ("ask source has no recorded answer: " ^ ask_id)
+              ack_terminal_ask ~ask_id ("ask source has no recorded answer: " ^ ask_id)
             | Stimulus_completion_rejection_retry_later detail ->
               let error = Completion_rejection_read_failed detail in
               Log.Keeper.warn "turn entry: retaining unread completion rejection keeper=%s: %s"

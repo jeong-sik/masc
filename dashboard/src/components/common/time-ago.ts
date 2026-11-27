@@ -28,26 +28,33 @@ const relativeClock = clockTicker.signal
     Exposed for unit tests so the normalization rule is verifiable. */
 export function toMs(ts: string | number): number {
   if (typeof ts === 'string') return new Date(ts).getTime()
+  if (!Number.isFinite(ts)) return Number.NaN
   return ts < 1_000_000_000_000 ? ts * 1000 : ts
 }
 
 /** ISO 8601 string for the `<time datetime="...">` attribute. Machine-readable
     timestamp that dev tools and crawlers can parse without re-running our
-    format logic. */
+    format logic. Returns empty string for invalid/non-finite timestamps
+    instead of throwing RangeError. */
 export function toIsoDatetime(ts: string | number): string {
-  return new Date(toMs(ts)).toISOString()
+  const ms = toMs(ts)
+  if (!Number.isFinite(ms)) return ''
+  return new Date(ms).toISOString()
 }
 
 /** Unix-seconds form for `formatTimestampKo`, which expects seconds. */
 function toUnixSeconds(ts: string | number): number {
-  return Math.floor(toMs(ts) / 1000)
+  const ms = toMs(ts)
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : Number.NaN
 }
 
 /** Accessible label for screen readers: combines relative "2분 전" with
     the absolute ko-KR formatted date. Without this, an AT user hears only
     "2분 전" and loses the anchor point. */
 export function toAccessibleLabel(ts: string | number): string {
-  return `${formatTimeAgo(ts)} (${formatTimestampKo(toUnixSeconds(ts))})`
+  const ms = toMs(ts)
+  if (!Number.isFinite(ms)) return '—'
+  return `${formatTimeAgo(ts)} (${formatTimestampKo(Math.floor(ms / 1000))})`
 }
 
 /** Pure: the hover-tooltip string for the <time> element. GitHub,
@@ -59,11 +66,15 @@ export function toAccessibleLabel(ts: string | number): string {
     relative + absolute together — so hovering confirms whatever
     you'd hear with a screen reader. */
 export function toHumanTooltip(ts: string | number): string {
-  return `${formatTimeAgo(ts)} (${formatTimestampKo(toUnixSeconds(ts))})`
+  const ms = toMs(ts)
+  if (!Number.isFinite(ms)) return '—'
+  return `${formatTimeAgo(ts)} (${formatTimestampKo(Math.floor(ms / 1000))})`
 }
 
 /** Pick the displayed text based on mode. */
 export function pickDisplayText(ts: string | number, mode: TimeAgoMode): string {
+  const ms = toMs(ts)
+  if (!Number.isFinite(ms)) return '—'
   const rel = formatTimeAgo(ts)
   if (mode === 'relative') return rel
   const abs = formatTimestampKo(toUnixSeconds(ts))
@@ -81,5 +92,5 @@ export function TimeAgo({ timestamp, mode = 'relative', class: cx }: TimeAgoProp
   const label = toAccessibleLabel(timestamp)
   const tooltip = toHumanTooltip(timestamp)
   const cls = cx ? `time-ago ${cx}` : 'time-ago'
-  return html`<time class=${cls} datetime=${iso} title=${tooltip} aria-label=${label}>${text}</time>`
+  return html`<time class=${cls} datetime=${iso || undefined} title=${tooltip} aria-label=${label}>${text}</time>`
 }

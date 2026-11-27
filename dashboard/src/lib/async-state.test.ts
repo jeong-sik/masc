@@ -74,6 +74,15 @@ describe('managed read failure', () => {
     expect(resource.state.peek()).toEqual({ data: 'current', loading: false, error: null })
     expect(resource.readError()).toBeNull()
   })
+
+  it('settles loading=false when fn rejects with an external AbortError', async () => {
+    const resource = createManagedAsyncResource<string>('cached')
+    await resource.load(async () => {
+      throw new DOMException('Upstream aborted', 'AbortError')
+    })
+    expect(resource.state.peek()).toEqual({ data: 'cached', loading: false, error: null })
+    expect(resource.readError()).toBeNull()
+  })
 })
 
 describe('plain read failure', () => {

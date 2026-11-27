@@ -159,10 +159,22 @@ export async function readWorkspacePrecondition(
       retryable: false,
     })
   }
-  const obs = await resourceCache.fetch<WorkspacePreconditionSnapshot>(
+  const abortedResult = (): Result<WorkspacePreconditionSnapshot, ApiError> =>
+    err({
+      kind: 'aborted',
+      status: null,
+      code: 'aborted',
+      message: '작업 공간 경로 조회가 취소되었습니다.',
+      retryable: true,
+    })
+  if (signal?.aborted) return abortedResult()
+
+  // Decouple caller-scoped AbortSignal from the shared resourceCache flight so
+  // one unmounting view cannot abort a shared fetch and leave the cache stuck.
+  const sharedFetch = resourceCache.fetch<WorkspacePreconditionSnapshot>(
     'work:workspace-precondition',
     async (s) => {
-      const res = await apiGet<Record<string, unknown>>('/health?full=1', { signal: signal ?? s })
+      const res = await apiGet<Record<string, unknown>>('/health?full=1', { signal: s })
       if (!res.ok) return res
       const paths = isRecord(res.value.paths) ? res.value.paths : null
       const basePath = paths
@@ -188,6 +200,23 @@ export async function readWorkspacePrecondition(
     },
     { ttlMs: 30_000, topics: ['workspace', 'config'] },
   )
+
+  let obs: Awaited<typeof sharedFetch> | null = null
+  if (signal) {
+    let onAbort: (() => void) | null = null
+    try {
+      const aborted = new Promise<null>((resolve) => {
+        onAbort = () => resolve(null)
+        signal.addEventListener('abort', onAbort, { once: true })
+      })
+      obs = await Promise.race([sharedFetch, aborted])
+    } finally {
+      if (onAbort) signal.removeEventListener('abort', onAbort)
+    }
+    if (obs === null || signal.aborted) return abortedResult()
+  } else {
+    obs = await sharedFetch
+  }
   if (obs.kind === 'value') return ok(obs.data)
   if (obs.kind === 'failed') return err(obs.error)
   return err({

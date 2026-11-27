@@ -14,7 +14,7 @@
 import { html } from 'htm/preact'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { authSession, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
+import { authSession, canUseSingleUserTokenRead, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
 import {
   extractObserverTopics,
   markViewSynced,
@@ -221,6 +221,7 @@ export function BoardTab(props: WorkspaceViewProps) {
   const isSingleUser = session.kind === 'single_user_local'
   const isMultiAccount = !isSingleUser
   const canAdminBoard = isSingleUser && !isAdminLockedForSession('admin', session)
+  const canReactBoard = canUseSingleUserTokenRead(session)
   const [bundle, setBundle] = useState<BoardBundle>({
     posts: [],
     hearths: [],
@@ -870,7 +871,7 @@ export function BoardTab(props: WorkspaceViewProps) {
   }
 
   const handleToggleReaction = async (targetType: 'post' | 'comment', targetId: string, emoji: string) => {
-    if (authSession.peek().kind !== 'single_user_local') return
+    if (!canUseSingleUserTokenRead(authSession.peek())) return
     const startEpoch = currentSessionEpoch()
     const targetPostId = selectedPostIdRef.current
     setBusy(true)
@@ -1258,7 +1259,7 @@ export function BoardTab(props: WorkspaceViewProps) {
           <${ReactionBar}
             reactions=${activePost.reactions}
             supportedEmojis=${activePost.supportedReactionEmojis}
-            disabled=${busy || isMultiAccount}
+            disabled=${busy || !canReactBoard}
             onToggle=${(emoji: string) => void handleToggleReaction('post', activePost.id, emoji)}
           />
 
@@ -1314,7 +1315,7 @@ export function BoardTab(props: WorkspaceViewProps) {
                   <${ReactionBar}
                     reactions=${c.reactions}
                     supportedEmojis=${activePost.supportedReactionEmojis}
-                    disabled=${busy}
+                    disabled=${busy || !canReactBoard}
                     onToggle=${(emoji: string) => void handleToggleReaction('comment', c.id, emoji)}
                   />
                 </div>

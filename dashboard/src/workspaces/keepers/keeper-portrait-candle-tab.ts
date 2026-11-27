@@ -264,7 +264,11 @@ export function KeeperPortraitCandleTab(props: KeeperPortraitCandleTabProps) {
           <div class="kp-card-head">
             <h3>Candle Economy & Catalog</h3>
             <span class="kp-pill" data-tone=${loadError ? 'bad' : ledger?.policy_configuration === 'enabled' ? 'brass' : 'default'}>
-              ${loadError ? '조회 실패' : ledger?.policy_configuration ?? items?.status ?? 'off'}
+              ${loading && !ledger && !items
+                ? '불러오는 중'
+                : loadError
+                  ? '조회 실패'
+                  : ledger?.policy_configuration ?? items?.status ?? (!canReadItems ? '토큰 필요' : 'off')}
             </span>
           </div>
           ${loadError && html`
@@ -326,13 +330,31 @@ export function KeeperPortraitCandleTab(props: KeeperPortraitCandleTabProps) {
                   })}
                 </div>
               `
-            : html`
-                <div class="kp-empty">
-                  ${items?.status === 'disabled'
-                    ? `Candle 상점 비활성: ${items.reason ?? 'disabled'}`
-                    : 'Candle 상점이 꺼져 있습니다 (초상화 장신구 전용 보상 화폐).'}
-                </div>
-              `}
+            : !canReadItems
+              ? html`
+                  <div class="kp-empty" data-testid="candle-catalog-token-locked" role="status">
+                    Candle 상점 카탈로그 조회는 토큰 인증 싱글유저 세션 전용입니다.
+                  </div>
+                `
+              : loading
+                ? html`
+                    <div class="kp-empty" role="status">
+                      Candle 상점 카탈로그를 불러오는 중…
+                    </div>
+                  `
+                : loadError && !items
+                  ? html`
+                      <div class="kp-empty" role="alert">
+                        Candle 상점 카탈로그를 불러오지 못했습니다.
+                      </div>
+                    `
+                  : html`
+                      <div class="kp-empty">
+                        ${items?.status === 'disabled'
+                          ? `Candle 상점 비활성: ${items.reason ?? 'disabled'}`
+                          : 'Candle 상점이 꺼져 있습니다 (초상화 장신구 전용 보상 화폐).'}
+                      </div>
+                    `}
         </section>
       </div>
 

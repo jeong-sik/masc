@@ -3567,5 +3567,47 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     )
     expect(playerHdr.queryByRole('button', { name: 'Interrupt Turn' })).toBeNull()
     playerHdr.unmount()
+
+    // 4. Candle Portrait tab & Debug Companion Context tab show token-locked state (never fake "꺼져 있습니다" or all-zero cache) when canTokenRead=false
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: false,
+      role: 'admin',
+      canTokenAdmin: false,
+      canTokenRead: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    const lockedFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes('/api/v1/candle/ledger')) {
+        return new Response(JSON.stringify({
+          schema_version: 1,
+          instance_id: 'i1',
+          generated_at_unix: 1,
+          data: {
+            ledger_state: 'present',
+            total_events: 0,
+            policy: { configuration: 'enabled', disabled_reason: null, pricing_mode: 'fixed', half_life: { mode: 'none', half_life_hours: null } },
+            supply: { issued_milli: '0', burned_milli: '0', circulating_milli: '0' },
+            balances: [],
+            recent_events: [],
+          },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response(JSON.stringify({}), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', lockedFetch)
+    const candleLocked = render(html`<${KeeperPortraitCandleTab} keeper=${makeRosterKeeper()} onMutated=${vi.fn()} />`)
+    await waitFor(() => expect(candleLocked.queryByTestId('candle-catalog-token-locked')).not.toBeNull())
+    expect(candleLocked.container.textContent).not.toContain('Candle 상점이 꺼져 있습니다')
+    candleLocked.unmount()
+
+    const debugLocked = render(html`<${KeeperDebugCompanion} keeperName="code-reviewer-sister" onClose=${vi.fn()} onInspect=${vi.fn()} />`)
+    fireEvent.click(debugLocked.getByRole('tab', { name: 'Context' }))
+    await waitFor(() => expect(debugLocked.queryByTestId('companion-context-token-locked')).not.toBeNull())
+    expect(debugLocked.container.textContent).not.toContain('Cache Read')
+    debugLocked.unmount()
   })
 })

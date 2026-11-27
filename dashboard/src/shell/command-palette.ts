@@ -284,16 +284,21 @@ export function buildPaletteCommands(session: AuthSession): readonly PaletteComm
 
   // 6. Direct Actions
   cmds.push(
-    {
-      id: 'action:queue-context',
-      label: 'Action: Toggle Queue & Context Quick-Peek',
-      category: 'Action',
-      keywords: ['queue', 'context', 'ctx', 'peek', '큐', '컨텍스트'],
-      group: 'Action',
-      subtitle: 'Read-only live queue & context overview',
-      shortcut: '⌘T',
-      run: () => toggleQueueContextOverlay(),
-    },
+    ...(canAccessMemberWorkspace(session)
+      ? [{
+          id: 'action:queue-context',
+          label: 'Action: Toggle Queue & Context Quick-Peek',
+          category: 'Action',
+          keywords: ['queue', 'context', 'ctx', 'peek', '큐', '컨텍스트'],
+          group: 'Action' as const,
+          subtitle: 'Read-only live queue & context overview',
+          shortcut: '⌘T',
+          run: () => {
+            if (!canAccessMemberWorkspace(authSession.peek())) return
+            toggleQueueContextOverlay()
+          },
+        }]
+      : []),
     {
       id: 'action:incidents',
       label: 'Action: Toggle Historical Incidents (Ch3)',
@@ -451,8 +456,9 @@ export function CommandPalette(): VNode | null {
 
   const commands = useMemo(
     () => buildPaletteCommands(session),
-    // Recompute when auth kind/role or theme/contrast changes
-    [session.kind, session.kind === 'multi_account_signed_in' ? session.role : null, activeTheme.value, activeContrast.value],
+    // Recompute on any AuthSession change (including single_user_local role,
+    // canTokenAdmin, canTokenRead) or theme/contrast changes.
+    [session, activeTheme.value, activeContrast.value],
   )
   const searcher = useMemo(() => createCommandSearcher(commands), [commands])
   const results = useMemo(() => searcher.search(query, 30), [searcher, query])

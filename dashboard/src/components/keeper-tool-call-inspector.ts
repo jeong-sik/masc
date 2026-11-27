@@ -69,31 +69,6 @@ function tryPrettyJson(s: string): string | null {
   return prettyJson(s)
 }
 
-// Route links derive from the recorded row (action_radius target plus the
-// identity fields the writer persisted) instead of re-deriving them from the
-// tool input here: the server parses the redacted input once at record time
-// (keeper_runtime_contract.action_radius_json), so every consumer reads the
-// same recorded value.
-//
-// target_kind says whether the target is a file or a directory, so Code link
-// promotion reads it directly. Execute rows used to be held back here by name,
-// because their cwd arrived as target_kind "path" and there was no way to tell
-// it from a file (masc#29013); the writer now records "directory" for a cwd or
-// a repo_path.
-
-/** Pure: the route links one recorded row earns. Exported so tests can pin
-    which target_kind values promote a Code link without rendering the row. */
-export interface ToolCallRouteLink {
-  readonly id: string
-  readonly label: string
-  readonly evidence: string
-  readonly params?: Record<string, string>
-}
-
-export function toolCallRouteLinks(_entry: ToolCallEntry): ReadonlyArray<ToolCallRouteLink> {
-  return []
-}
-
 // ── Composition tree grouping ───────────────────────────
 
 export type ToolCallTreeNode = {
@@ -226,7 +201,6 @@ export type KeeperToolCallDossier = {
   headline: string
   tone: StatusChipTone
   cards: ToolCallDossierCard[]
-  evidenceLinks: Array<{ label: string; count: number }>
   issues: ToolCallDossierIssue[]
 }
 
@@ -255,18 +229,6 @@ function countByTool(entries: readonly ToolCallEntry[]): Array<{ tool: string; c
   return [...counts.entries()]
     .map(([tool, count]) => ({ tool, count }))
     .sort((a, b) => b.count - a.count || a.tool.localeCompare(b.tool))
-}
-
-function countEvidenceLinks(entries: readonly ToolCallEntry[]): Array<{ label: string; count: number }> {
-  const counts = new Map<string, number>()
-  for (const entry of entries) {
-    for (const link of toolCallRouteLinks(entry)) {
-      counts.set(link.label, (counts.get(link.label) ?? 0) + 1)
-    }
-  }
-  return [...counts.entries()]
-    .map(([label, count]) => ({ label, count }))
-    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
 }
 
 function sourceTone(health: string | undefined): StatusChipTone {
@@ -385,8 +347,6 @@ export function deriveKeeperToolCallDossier(
   const unsettled = entries.filter(entry => toolCallOutcome(entry) === 'unsettled')
   const toolCounts = countByTool(entries)
   const hotTool = toolCounts[0] ?? null
-  const evidenceLinks = countEvidenceLinks(entries)
-  const evidenceCount = evidenceLinks.reduce((sum, item) => sum + item.count, 0)
   const freshnessTone = sourceTone(response?.health)
   const rows = typeof response?.entry_count === 'number' ? response.entry_count : entries.length
   const totalCalls = entries.length
@@ -453,15 +413,6 @@ export function deriveKeeperToolCallDossier(
       tone: hotTool ? 'info' : 'neutral',
     },
     {
-      key: 'linked-evidence',
-      label: 'linked evidence',
-      value: `${evidenceCount}`,
-      detail: evidenceLinks.length > 0
-        ? evidenceLinks.slice(0, 4).map(item => `${item.label}:${item.count}`).join(' · ')
-        : 'no routeable evidence links',
-      tone: evidenceCount > 0 ? 'info' : 'neutral',
-    },
-    {
       key: 'source',
       label: 'source',
       value: response?.health ?? 'unknown',
@@ -501,7 +452,6 @@ export function deriveKeeperToolCallDossier(
     headline,
     tone,
     cards,
-    evidenceLinks: evidenceLinks.slice(0, 8),
     issues,
   }
 }
@@ -730,7 +680,6 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
   const expanded = useSignal(false)
   const cat = toolCategory(entry.tool)
   const formattedInput = formatInput(entry.input)
-  const routeLinks = toolCallRouteLinks(entry)
 
   return html`
     <div
@@ -785,24 +734,6 @@ function ToolCallRow({ entry }: { entry: ToolCallEntry }) {
           <div class="text-3xs text-[var(--color-fg-muted)]">
             occurrence: <span class="text-[var(--color-fg-secondary)] font-mono">${entryScopeLabel(entry)}</span>
           </div>
-          ${routeLinks.length > 0 ? html`
-            <div class="flex items-center justify-between gap-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2.5 py-2 v2-monitoring-toolbar">
-              <span class="min-w-0 truncate text-3xs font-mono text-[var(--color-fg-muted)]" title=${routeLinks.map(link => link.evidence).join(' · ')}>
-                ${routeLinks.map(link => link.evidence).join(' · ')}
-              </span>
-              <div class="flex shrink-0 flex-wrap justify-end gap-1">
-                ${routeLinks.map((link: { id: string; label: string; evidence: string }) => html`
-                  <span
-                    key=${link.id}
-                    class="keeper-tool-route-link rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-1 text-3xs font-semibold text-[var(--color-fg-muted)]"
-                    title=${link.evidence}
-                  >
-                    ${link.label}
-                  </span>
-                `)}
-              </div>
-            </div>
-          ` : null}
           <${ToolCallEvidenceSection} entry=${entry} />
           <${CopyableToolCallBlock}
             title="입력"
@@ -847,20 +778,6 @@ function ToolCallDossier({ entries, response }: { entries: readonly ToolCallEntr
           </div>
         `)}
       </div>
-      ${dossier.evidenceLinks.length > 0 ? html`
-        <div class="mt-3 flex min-w-0 flex-wrap items-center gap-1.5 v2-monitoring-row">
-          <span class="shrink-0 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Evidence links</span>
-          ${dossier.evidenceLinks.map(item => html`
-            <span
-              key=${item.label}
-              class="inline-flex max-w-full items-center gap-1 rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-2 py-0.5 text-3xs text-[var(--color-fg-secondary)]"
-            >
-              <span class="min-w-0 truncate">${item.label}</span>
-              <span class="font-mono text-[var(--color-fg-muted)]">${item.count}</span>
-            </span>
-          `)}
-        </div>
-      ` : null}
       ${dossier.issues.length > 0 ? html`
         <div class="mt-3 grid gap-1.5 v2-monitoring-row">
           ${dossier.issues.map(issue => html`

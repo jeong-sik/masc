@@ -546,6 +546,268 @@ let test_reads_inside_and_outside_a_one_worker_pool () =
     agrees "the read outside the pool" outside
 ;;
 
+(* Concurrent outside-pool reads waiting on an in-flight audit build must wait
+   on their own fiber rather than occupying other CPU pool workers. With two
+   workers and six waiting readers behind a 30 MB first build running on worker
+   1, an unrelated pool job must still run immediately on the free second
+   worker while worker 1 is still inside [Audit.read_recent]. *)
+let test_outside_waiters_do_not_occupy_other_pool_workers () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  let file = day_path ~base_path ~month:"2026-10" ~day:"01.jsonl" in
+  append_lines file (List.init 30_000 (fun _ -> padded_row "beta") @ [ row "alpha" ]);
+  let expected = scan ~base_path ~keeper_name:"alpha" ~n:1 () in
+  let check_matches label answer =
+    match answer, expected with
+    | Ok rows, Ok scanned ->
+      check int (label ^ " count") (List.length scanned) (List.length rows);
+      check bool (label ^ " rows") true (List.for_all2 Yojson.Safe.equal rows scanned)
+    | Error error, Ok _ ->
+      failf "%s refused: %s" label (Audit.read_error_to_string error)
+    | Ok _, Error detail ->
+      failf "%s answered while scan refused (%s)" label detail
+    | Error _, Error _ -> ()
+  in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let pool = Domain_pool.create ~sw ~domain_count:2 (Eio.Stdenv.domain_mgr env) in
+  Domain_pool_ref.set pool;
+  Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
+  let result =
+    Eio.Time.with_timeout (Eio.Stdenv.clock env) 30.0 (fun () ->
+      let build_started, notify_build_started = Eio.Promise.create () in
+      let build_done = Atomic.make false in
+      let first =
+        Eio.Fiber.fork_promise ~sw (fun () ->
+          Domain_pool.submit_cpu ~name:"first audit build" pool (fun () ->
+            Eio.Promise.resolve notify_build_started ();
+            let answer = Audit.read_recent ~base_path ~keeper_name:"alpha" ~n:1 () in
+            Atomic.set build_done true;
+            answer))
+      in
+      Eio.Promise.await build_started;
+      Eio.Time.sleep (Eio.Stdenv.clock env) 0.005;
+      let waiters =
+        List.init 6 (fun _ ->
+          Eio.Fiber.fork_promise ~sw (fun () ->
+            Audit.read_recent ~base_path ~keeper_name:"alpha" ~n:1 ()))
+      in
+      Eio.Fiber.yield ();
+      Eio.Fiber.yield ();
+      check bool "the first build still runs when waiters arrive" false (Atomic.get build_done);
+      let probe_saw_build_done =
+        Domain_pool.submit_cpu ~name:"probe free worker" pool (fun () ->
+          Atomic.get build_done)
+      in
+      let answers = Eio.Promise.await_exn first :: List.map Eio.Promise.await_exn waiters in
+      Ok (probe_saw_build_done, answers))
+  in
+  match result with
+  | Error `Timeout -> fail "waiters or probe deadlocked"
+  | Ok (probe_saw_build_done, answers) ->
+    check bool "unrelated pool work ran while outside waiters were parked" false probe_saw_build_done;
+    List.iteri (fun idx answer -> check_matches (Printf.sprintf "reader %d" idx) answer) answers
+;;
+
+(* When a pool worker takes over an unclaimed [Run] flight from an outside
+   caller, the outside caller must wake as soon as the worker resolves the
+   flight promise without waiting for its own queued pool job to reach the
+   worker. Here the sole worker awaits the outside caller's completion before
+   returning, which would deadlock if the outside caller remained stuck in
+   the pool queue. *)
+let test_takeover_wakes_outside_caller_while_worker_held () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  append_lines (day_path ~base_path ~month:"2026-10" ~day:"01.jsonl")
+    (rows "alpha" 3 @ rows "beta" 2);
+  let expected = scan ~base_path ~keeper_name:"alpha" ~n:2 () in
+  let read () = Audit.read_recent ~base_path ~keeper_name:"alpha" ~n:2 () in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  Domain_pool_ref.set pool;
+  Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
+  let worker_ready, notify_worker_ready = Eio.Promise.create () in
+  let allow_worker_read, release_worker_read = Eio.Promise.create () in
+  let outside_done, notify_outside_done = Eio.Promise.create () in
+  let resolve_once p u =
+    match Eio.Promise.peek p with
+    | None -> Eio.Promise.resolve u ()
+    | Some () -> ()
+  in
+  let outcome =
+    Fun.protect
+      ~finally:(fun () ->
+        resolve_once allow_worker_read release_worker_read;
+        resolve_once outside_done notify_outside_done)
+      (fun () ->
+        Eio.Time.with_timeout (Eio.Stdenv.clock env) 30.0 (fun () ->
+          let worker_ans =
+            Eio.Fiber.fork_promise ~sw (fun () ->
+              Domain_pool.submit_cpu ~name:"takeover holder" pool (fun () ->
+                Eio.Promise.resolve notify_worker_ready ();
+                Eio.Promise.await allow_worker_read;
+                let answer = read () in
+                (* Keep holding the only worker until the outside caller returns. *)
+                Eio.Promise.await outside_done;
+                answer))
+          in
+          Eio.Promise.await worker_ready;
+          let outside_ans =
+            Eio.Fiber.fork_promise ~sw (fun () ->
+              let answer = read () in
+              resolve_once outside_done notify_outside_done;
+              answer)
+          in
+          Eio.Fiber.yield ();
+          Eio.Fiber.yield ();
+          resolve_once allow_worker_read release_worker_read;
+          Ok (Eio.Promise.await_exn worker_ans, Eio.Promise.await_exn outside_ans)))
+  in
+  match outcome with
+  | Error `Timeout -> fail "outside caller stayed blocked in pool queue after worker takeover"
+  | Ok (worker_ans, outside_ans) ->
+    let check_matches label answer =
+      match answer, expected with
+      | Ok rows, Ok scanned ->
+        check int (label ^ " count") (List.length scanned) (List.length rows);
+        check bool (label ^ " rows") true (List.for_all2 Yojson.Safe.equal rows scanned)
+      | Error error, Ok _ -> failf "%s refused: %s" label (Audit.read_error_to_string error)
+      | Ok _, Error detail -> failf "%s answered while scan refused (%s)" label detail
+      | Error _, Error _ -> ()
+    in
+    check_matches "worker takeover read" worker_ans;
+    check_matches "outside read" outside_ans
+;;
+
+(* When a read already runs (e.g. from another pool or a Non_eio thread) and
+   an outside Eio fiber has installed a [queued] follow-up flight, a sole pool
+   worker arriving at [(Some queued, Some running)] must await [running] and
+   then take over [queued] inline rather than parking on [queued.promise]
+   while the outside fiber tries to submit [queued] to that same worker. *)
+let test_worker_arrival_with_running_and_queued_does_not_deadlock () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  let file = day_path ~base_path ~month:"2026-10" ~day:"01.jsonl" in
+  append_lines file (List.init 30_000 (fun _ -> padded_row "beta") @ [ row "alpha" ]);
+  let expected = scan ~base_path ~keeper_name:"alpha" ~n:1 () in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  Domain_pool_ref.set pool;
+  Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
+  let non_eio_started = Atomic.make false in
+  let non_eio_domain =
+    Domain.spawn (fun () ->
+      Atomic.set non_eio_started true;
+      Audit.read_recent ~base_path ~keeper_name:"alpha" ~n:1 ())
+  in
+  Fun.protect
+    ~finally:(fun () -> ignore (Domain.join non_eio_domain))
+    (fun () ->
+       let outcome =
+         Eio.Time.with_timeout (Eio.Stdenv.clock env) 30.0 (fun () ->
+           while not (Atomic.get non_eio_started) do
+             Eio.Time.sleep (Eio.Stdenv.clock env) 0.001
+           done;
+           Eio.Time.sleep (Eio.Stdenv.clock env) 0.005;
+           let outside_queued =
+             Eio.Fiber.fork_promise ~sw (fun () ->
+               Audit.read_recent ~base_path ~keeper_name:"alpha" ~n:1 ())
+           in
+           Eio.Fiber.yield ();
+           Eio.Fiber.yield ();
+           let worker_answer =
+             Domain_pool.submit_cpu ~name:"sole worker arrives behind queued" pool (fun () ->
+               Audit.read_recent ~base_path ~keeper_name:"alpha" ~n:1 ())
+           in
+           let outside_answer = Eio.Promise.await_exn outside_queued in
+           Ok (worker_answer, outside_answer))
+       in
+       match outcome with
+       | Error `Timeout -> fail "sole pool worker deadlocked on (Some queued, Some running)"
+       | Ok (worker_answer, outside_answer) ->
+         let check_matches label answer =
+           match answer, expected with
+           | Ok rows, Ok scanned ->
+             check int (label ^ " count") (List.length scanned) (List.length rows);
+             check bool (label ^ " rows") true (List.for_all2 Yojson.Safe.equal rows scanned)
+           | Error error, Ok _ -> failf "%s refused: %s" label (Audit.read_error_to_string error)
+           | Ok _, Error detail -> failf "%s answered while scan refused (%s)" label detail
+           | Error _, Error _ -> ()
+         in
+         check_matches "worker answer" worker_answer;
+         check_matches "outside queued answer" outside_answer)
+;;
+
+(* Cancelling a queued [Run] or [Run_after] owner must abandon its flight and
+   wake parked waiters so they re-arrive and succeed once the pool is free. *)
+let test_cancelled_run_and_run_after_wake_waiters () =
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
+  append_lines (day_path ~base_path ~month:"2026-10" ~day:"01.jsonl")
+    (rows "alpha" 3 @ rows "beta" 1);
+  let expected = scan ~base_path ~keeper_name:"alpha" ~n:2 () in
+  let read () = Audit.read_recent ~base_path ~keeper_name:"alpha" ~n:2 () in
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  Domain_pool_ref.set pool;
+  Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
+  let release_worker, do_release_worker = Eio.Promise.create () in
+  let release_once () =
+    match Eio.Promise.peek release_worker with
+    | None -> Eio.Promise.resolve do_release_worker ()
+    | Some () -> ()
+  in
+  let outcome =
+    Fun.protect ~finally:release_once (fun () ->
+      Eio.Time.with_timeout (Eio.Stdenv.clock env) 30.0 (fun () ->
+        let worker_ready, notify_worker_ready = Eio.Promise.create () in
+        let holder =
+          Eio.Fiber.fork_promise ~sw (fun () ->
+            Domain_pool.submit_cpu ~name:"hold worker for cancellation test" pool (fun () ->
+              Eio.Promise.resolve notify_worker_ready ();
+              Eio.Promise.await release_worker))
+        in
+        Eio.Promise.await worker_ready;
+        (* [run_owner] queues [f1] ([Run], 60ms timeout). [run_after_owner]
+           installs [f2] ([Run_after], 20ms timeout) and cancels while still
+           awaiting [f1], abandoning [f2] and waking [waiter] to re-arrive as
+           [Run_after (f1, f3)]. Then [run_owner] times out at 60ms, abandoning
+           [f1] and waking [waiter] to promote [f3]. *)
+        let run_owner =
+          Eio.Fiber.fork_promise ~sw (fun () ->
+            Eio.Time.with_timeout (Eio.Stdenv.clock env) 0.06 (fun () -> Ok (read ())))
+        in
+        Eio.Fiber.yield ();
+        let run_after_owner =
+          Eio.Fiber.fork_promise ~sw (fun () ->
+            Eio.Time.with_timeout (Eio.Stdenv.clock env) 0.02 (fun () -> Ok (read ())))
+        in
+        Eio.Fiber.yield ();
+        let waiter = Eio.Fiber.fork_promise ~sw (fun () -> read ()) in
+        let r2 = Eio.Promise.await_exn run_after_owner in
+        let r1 = Eio.Promise.await_exn run_owner in
+        release_once ();
+        Eio.Promise.await_exn holder;
+        let waiter_ans = Eio.Promise.await_exn waiter in
+        Ok (r1, r2, waiter_ans)))
+  in
+  match outcome with
+  | Error `Timeout -> fail "waiter deadlocked after cancelled Run / Run_after"
+  | Ok (r1, r2, waiter_ans) ->
+    check bool "Run owner timed out as expected" true (r1 = Error `Timeout);
+    check bool "Run_after owner timed out as expected" true (r2 = Error `Timeout);
+    match waiter_ans, expected with
+    | Ok rows, Ok scanned ->
+      check int "waiter count" (List.length scanned) (List.length rows);
+      check bool "waiter rows" true (List.for_all2 Yojson.Safe.equal rows scanned)
+    | Error error, Ok _ -> failf "waiter refused: %s" (Audit.read_error_to_string error)
+    | Ok _, Error detail -> failf "waiter answered while scan refused (%s)" detail
+    | Error _, Error _ -> ()
+;;
+
 let test_bounds () =
   let base_path = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
@@ -582,6 +844,14 @@ let () =
             test_a_read_during_a_build_sees_a_row_appended_before_it
         ; test_case "reads inside and outside a one-worker pool" `Quick
             test_reads_inside_and_outside_a_one_worker_pool
+        ; test_case "outside waiters do not occupy other pool workers" `Quick
+            test_outside_waiters_do_not_occupy_other_pool_workers
+        ; test_case "takeover wakes outside caller while worker is held" `Quick
+            test_takeover_wakes_outside_caller_while_worker_held
+        ; test_case "worker arrival with running and queued does not deadlock" `Quick
+            test_worker_arrival_with_running_and_queued_does_not_deadlock
+        ; test_case "cancelled Run and Run_after wake waiters" `Quick
+            test_cancelled_run_and_run_after_wake_waiters
         ; test_case "bounds" `Quick test_bounds
         ] )
     ]

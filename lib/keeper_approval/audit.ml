@@ -724,17 +724,26 @@ let read_recent_max_rows = Audit_recent_index.max_rows
    only the slot; the advance runs outside it, and a waiting read suspends
    its fiber instead of blocking its domain on a lock.
 
-   The whole of a read, arrival included, is one job on the domain pool
-   (inline when the read is already a pool job). So whoever runs an advance
-   already holds a worker. A read outside the pool that ran the advance
-   itself would submit it as a job and wait for a worker, while reads inside
-   pool jobs held every worker waiting for that advance. A read inside a pool
-   job still holds that job's place while it waits. *)
+   Waiting happens on the caller BEFORE submitting to the domain pool, so
+   concurrent outside-pool readers (e.g. 16 [keepers_json] fibers) do not
+   occupy CPU pool workers while awaiting another read's promise. Only the
+   flight that actually runs [advance_recent_index] submits a pool job.
+   To keep a one-worker pool deadlock-free when an outside read queues a job
+   while a pool job already holds the worker and then reads, a caller already
+   in worker context claims and runs any not-yet-started [running] or
+   [queued] flight inline on its own worker. *)
 type recent_flight_result =
   | Finished of (Audit_recent_index.t * Audit_recent_index.refusal option, string) result
   | Abandoned  (** Its runner was cancelled or raised. Its waiters arrive again. *)
 
-type recent_flight = recent_flight_result Eio.Promise.t * recent_flight_result Eio.Promise.u
+type recent_flight =
+  { promise : recent_flight_result Eio.Promise.t
+  ; resolver : recent_flight_result Eio.Promise.u
+  ; mutable started : bool
+        (** True once a runner has claimed [advance_recent_index] for this
+            flight, or the flight was abandoned before starting. Guarded by
+            [recent_slots_mu]. *)
+  }
 
 type recent_slot =
   { mutable index : Audit_recent_index.t option  (** Written only by the running flight. *)
@@ -747,10 +756,25 @@ type recent_slot =
 let recent_slots : (string, recent_slot) Hashtbl.t = Hashtbl.create 4
 let recent_slots_mu = Stdlib.Mutex.create ()
 
+let make_flight () =
+  let promise, resolver = Eio.Promise.create () in
+  { promise; resolver; started = false }
+;;
+
 type recent_arrival =
   | Run of recent_flight
+      (** Outside-pool Eio caller that installed [slot.running] unclaimed and
+          submits it to the domain pool. *)
+  | Run_claimed of recent_flight
+      (** Caller running inline ([not in_eio || in_worker]) that atomically
+          claimed [flight.started = true] under [recent_slots_mu]. *)
   | Await of recent_flight_result Eio.Promise.t
-  | Run_after of recent_flight_result Eio.Promise.t * recent_flight
+  | Await_or_takeover of recent_flight * recent_flight
+      (** Worker that arrived while [running] was already started and [queued]
+          was waiting. Awaits [running.promise], then claims [queued] inline
+          if still unclaimed so a worker pool cannot deadlock waiting for its
+          own workers to execute [queued]. *)
+  | Run_after of recent_flight * recent_flight
   | Read_alone of Audit_recent_index.t option
       (** Outside Eio a read cannot await a promise; while a flight runs it
           advances its own copy and publishes nothing. *)
@@ -764,8 +788,8 @@ let advance_recent_index store = function
      | Ok Audit_recent_index.Rebuild_needed -> Audit_recent_index.rebuild store)
 ;;
 
-(* The caller has made [flight] the slot's running one. *)
-let run_recent_flight store slot ((_, resolver) as flight) =
+(* Precondition: [flight.started] is already true and [slot.running == Some flight]. *)
+let run_claimed_flight ?on_error store slot flight =
   let index = Stdlib.Mutex.protect recent_slots_mu (fun () -> slot.index) in
   match advance_recent_index store index with
   | result ->
@@ -773,16 +797,19 @@ let run_recent_flight store slot ((_, resolver) as flight) =
       (match result with
        | Ok (index, _) -> slot.index <- Some index
        | Error _ -> ());
-      slot.running <- None);
-    Eio.Promise.resolve resolver (Finished result);
+      match slot.running with
+      | Some running when running == flight -> slot.running <- None
+      | Some _ | None -> ());
+    Eio.Promise.resolve flight.resolver (Finished result);
     result
   | exception exn ->
     let backtrace = Printexc.get_raw_backtrace () in
+    Option.iter (fun record -> record exn backtrace) on_error;
     Stdlib.Mutex.protect recent_slots_mu (fun () ->
       match slot.running with
       | Some running when running == flight -> slot.running <- None
       | Some _ | None -> ());
-    Eio.Promise.resolve resolver Abandoned;
+    Eio.Promise.resolve flight.resolver Abandoned;
     Printexc.raise_with_backtrace exn backtrace
 ;;
 
@@ -792,6 +819,7 @@ let arrive_at_recent_slot ~base_path =
     | Fs_compat.Eio_fiber -> true
     | Fs_compat.Non_eio -> false
   in
+  let in_worker = Executor_pool_ref.in_worker_context () in
   Stdlib.Mutex.protect recent_slots_mu (fun () ->
     let slot =
       match Hashtbl.find_opt recent_slots base_path with
@@ -804,13 +832,28 @@ let arrive_at_recent_slot ~base_path =
     let arrival =
       match slot.queued, slot.running with
       | None, None ->
-        let flight = Eio.Promise.create () in
+        let flight = make_flight () in
         slot.running <- Some flight;
-        Run flight
-      | (Some _, _ | None, Some _) when not in_eio -> Read_alone slot.index
-      | Some (queued, _), _ -> Await queued
-      | None, Some (running, _) ->
-        let flight = Eio.Promise.create () in
+        if not in_eio || in_worker
+        then (
+          flight.started <- true;
+          Run_claimed flight)
+        else Run flight
+      | (Some _, (Some _ | None) | None, Some _) when not in_eio ->
+        Read_alone slot.index
+      | (Some _ | None), Some running when in_worker && not running.started ->
+        running.started <- true;
+        Run_claimed running
+      | Some queued, None when in_worker && not queued.started ->
+        slot.queued <- None;
+        slot.running <- Some queued;
+        queued.started <- true;
+        Run_claimed queued
+      | Some queued, Some running when in_worker ->
+        Await_or_takeover (running, queued)
+      | Some queued, (Some _ | None) -> Await queued.promise
+      | None, Some running ->
+        let flight = make_flight () in
         slot.queued <- Some flight;
         Run_after (running, flight)
     in
@@ -818,25 +861,142 @@ let arrive_at_recent_slot ~base_path =
 ;;
 
 let rec current_recent_index ~base_path store =
+  let execute_flight slot flight =
+    let own_failure = Atomic.make None in
+    let abandon_if_unclaimed () =
+      let should_abandon =
+        Stdlib.Mutex.protect recent_slots_mu (fun () ->
+          if flight.started
+          then false
+          else (
+            flight.started <- true;
+            (match slot.running with
+             | Some running when running == flight -> slot.running <- None
+             | Some _ | None -> ());
+            true))
+      in
+      if should_abandon then Eio.Promise.resolve flight.resolver Abandoned
+    in
+    let already_started =
+      Stdlib.Mutex.protect recent_slots_mu (fun () -> flight.started)
+    in
+    let outcome =
+      if already_started
+      then Eio.Promise.await flight.promise
+      else (
+        try
+          (* Race pool submission against [flight.promise] so a worker takeover
+             wakes this caller immediately and withdraws the queued pool job.
+             If a second worker enters after takeover, it returns immediately
+             without awaiting on the worker thread. *)
+          Eio.Fiber.first
+            (fun () ->
+               Domain_pool_ref.submit_cpu_or_inline
+                 ~name:"Keeper_approval.Audit.read_recent"
+                 (fun () ->
+                    let claimed =
+                      Stdlib.Mutex.protect recent_slots_mu (fun () ->
+                        if flight.started
+                        then false
+                        else (
+                          flight.started <- true;
+                          true))
+                    in
+                    if claimed
+                    then (
+                      try
+                        ignore
+                          (run_claimed_flight
+                             ~on_error:(fun exn bt ->
+                               Atomic.set own_failure (Some (exn, bt)))
+                             store
+                             slot
+                             flight)
+                      with
+                      | Eio.Cancel.Cancelled _ as exn -> raise exn
+                      | _ -> ()));
+               Eio.Promise.await flight.promise)
+            (fun () -> Eio.Promise.await flight.promise)
+        with
+        | exn ->
+          let backtrace = Printexc.get_raw_backtrace () in
+          abandon_if_unclaimed ();
+          Printexc.raise_with_backtrace exn backtrace)
+    in
+    match outcome with
+    | Finished result -> result
+    | Abandoned ->
+      (match Atomic.get own_failure with
+       | Some (exn, bt) -> Printexc.raise_with_backtrace exn bt
+       | None -> current_recent_index ~base_path store)
+  in
   let slot, arrival = arrive_at_recent_slot ~base_path in
   match arrival with
-  | Run flight -> run_recent_flight store slot flight
+  | Run flight -> execute_flight slot flight
+  | Run_claimed flight -> run_claimed_flight store slot flight
   | Read_alone index -> advance_recent_index store index
   | Await queued ->
     (match Eio.Promise.await queued with
      | Finished result -> result
      | Abandoned -> current_recent_index ~base_path store)
-  | Run_after (running, ((_, resolver) as flight)) ->
-    (match Eio.Promise.await running with
+  | Await_or_takeover (running, queued) ->
+    (match Eio.Promise.await running.promise with
      | Finished _ | Abandoned ->
-       Stdlib.Mutex.protect recent_slots_mu (fun () ->
-         slot.queued <- None;
-         slot.running <- Some flight);
-       run_recent_flight store slot flight
+       let claimed =
+         Stdlib.Mutex.protect recent_slots_mu (fun () ->
+           match slot.queued, slot.running with
+           | Some current, None when current == queued && not queued.started ->
+             slot.queued <- None;
+             slot.running <- Some queued;
+             queued.started <- true;
+             true
+           | (Some _ | None), Some current when current == queued && not queued.started ->
+             queued.started <- true;
+             true
+           | (Some _ | None), (Some _ | None) -> false)
+       in
+       if claimed
+       then run_claimed_flight store slot queued
+       else (
+         match Eio.Promise.await queued.promise with
+         | Finished result -> result
+         | Abandoned -> current_recent_index ~base_path store))
+  | Run_after (running, flight) ->
+    (match Eio.Promise.await running.promise with
+     | Finished _ | Abandoned ->
+       let in_worker = Executor_pool_ref.in_worker_context () in
+       let next =
+         Stdlib.Mutex.protect recent_slots_mu (fun () ->
+           match slot.queued, slot.running with
+           | Some current, None when current == flight && not flight.started ->
+             slot.queued <- None;
+             slot.running <- Some flight;
+             if in_worker
+             then (
+               flight.started <- true;
+               `Run_claimed)
+             else `Execute
+           | (Some _ | None), (Some _ | None) -> `Await)
+       in
+       (match next with
+        | `Run_claimed -> run_claimed_flight store slot flight
+        | `Execute -> execute_flight slot flight
+        | `Await ->
+          (match Eio.Promise.await flight.promise with
+           | Finished result -> result
+           | Abandoned -> current_recent_index ~base_path store))
      | exception exn ->
        let backtrace = Printexc.get_raw_backtrace () in
-       Stdlib.Mutex.protect recent_slots_mu (fun () -> slot.queued <- None);
-       Eio.Promise.resolve resolver Abandoned;
+       let should_abandon =
+         Stdlib.Mutex.protect recent_slots_mu (fun () ->
+           match slot.queued with
+           | Some current when current == flight ->
+             slot.queued <- None;
+             flight.started <- true;
+             true
+           | Some _ | None -> false)
+       in
+       if should_abandon then Eio.Promise.resolve flight.resolver Abandoned;
        Printexc.raise_with_backtrace exn backtrace)
 ;;
 
@@ -855,10 +1015,7 @@ let read_recent ~base_path ?keeper_name ?(n = 20) ()
     match get_audit_store ~base_path () with
     | Error detail -> refused detail
     | Ok store ->
-      (match
-         Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-           current_recent_index ~base_path store)
-       with
+      (match current_recent_index ~base_path store with
        | Error detail -> refused detail
        | Ok (index, refused_at) ->
          (match Audit_recent_index.select index ~refused:refused_at ~keeper_name ~n with

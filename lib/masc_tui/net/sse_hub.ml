@@ -325,9 +325,10 @@ let run_stream_loop t ~generation ~cancelled ~on_event (spec : Stream_spec.t) ~s
                   ~headers:resp_headers
               with
               | Handshake_ok res ->
-                  (match res.handshake with
-                  | Some hs -> Atomic.set instance_id_ref (Some hs.instance_id)
-                  | None -> ());
+                  Atomic.set instance_id_ref
+                    (Option.map
+                       (fun (hs : Sse_wire.observer_handshake) -> hs.instance_id)
+                       res.handshake);
                   emit (Observer_handshake res)
               | (Handshake_retry_without_cursor _ | Handshake_invalid _) as bad
                 ->
@@ -382,7 +383,9 @@ let run_stream_loop t ~generation ~cancelled ~on_event (spec : Stream_spec.t) ~s
           | Some cur
             when String.equal cur.instance_id stale_cursor.instance_id
                  && cur.event_id = stale_cursor.event_id ->
-              Atomic.set cursor_ref None
+              Atomic.set cursor_ref None;
+              Atomic.set instance_id_ref None;
+              Atomic.set revision_ref 0
           | Some _ | None -> ());
           schedule_reconnect (Health.Protocol_error reason)
       | `Handshake_rejected (Handshake_invalid reason) ->

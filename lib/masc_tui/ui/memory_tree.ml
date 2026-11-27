@@ -218,7 +218,8 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ?tz_offset_sec ~ko ?now
       render_lines ?tz_offset_sec ~ko ?now ?keeper_name ~max_width:rect.w chart
     in
     let total = List.length lines in
-    let start = Int.max 0 scroll in
+    let max_scroll = Int.max 0 (total - rect.h) in
+    let start = Int.min max_scroll (Int.max 0 scroll) in
     let visible =
       lines
       |> List.filteri (fun idx _ -> idx >= start && idx < start + rect.h)

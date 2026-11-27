@@ -2117,6 +2117,36 @@ let is_valid_keeper_name s =
   in
   check 0
 
+let op_matches_field_value (op : Wire_config.patch_op)
+    (value : Wire_config.field_value) =
+  match op, value with
+  | Wire_config.Set_scalar { value = next; _ }, Wire_config.Val_string orig ->
+      String.equal next orig
+  | Wire_config.Set_bool { value = next; _ }, Wire_config.Val_bool orig ->
+      Bool.equal next orig
+  | Wire_config.Set_int { value = next; _ }, Wire_config.Val_int orig ->
+      Int.equal next orig
+  | Wire_config.Set_float { value = next; _ }, Wire_config.Val_float orig ->
+      Float.equal next orig
+  | ( Wire_config.Set_string_array { values = next; _ }
+    , Wire_config.Val_string_list orig ) ->
+      List.equal String.equal next orig
+  | ( ( Wire_config.Set_scalar _
+      | Wire_config.Set_bool _
+      | Wire_config.Set_int _
+      | Wire_config.Set_float _
+      | Wire_config.Set_string_array _
+      | Wire_config.Remove_key _ )
+    , ( Wire_config.Val_string _
+      | Wire_config.Val_bool _
+      | Wire_config.Val_int _
+      | Wire_config.Val_float _
+      | Wire_config.Val_string_list _
+      | Wire_config.Val_structured _
+      | Wire_config.Val_secret _
+      | Wire_config.Val_null ) ) ->
+      false
+
 let commit_edit_field t =
   match t.editing_field_key with
   | None -> Error "Not currently editing a field"
@@ -2127,7 +2157,13 @@ let commit_edit_field t =
           "Keeper name must be 1..64 ASCII letters, digits, '-' or '_'"
       else
         let updated = set_new_keeper_name trimmed t in
-        Ok { updated with editing_field_key = None; editing_buffer = "" }
+        Ok
+          {
+            updated with
+            editing_field_key = None;
+            editing_buffer = "";
+            editing_cursor = 0;
+          }
   | Some key -> (
       let all_fields =
         (match Observed.to_option t.schema with
@@ -2235,8 +2271,18 @@ let commit_edit_field t =
           match op_res with
           | Error _ as err -> err
           | Ok op ->
-              let staged = stage_patch ~full_key:f.full_key op t in
-              Ok { staged with editing_field_key = None; editing_buffer = "" }))
+              let staged =
+                if op_matches_field_value op f.value then
+                  unstage_patch ~full_key:f.full_key t
+                else stage_patch ~full_key:f.full_key op t
+              in
+              Ok
+                {
+                  staged with
+                  editing_field_key = None;
+                  editing_buffer = "";
+                  editing_cursor = 0;
+                }))
 
 let move_selection ?viewport_rows ~delta t =
   match t.settings_pane with

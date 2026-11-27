@@ -111,7 +111,12 @@ let build_url ep ~path =
   let clean_path =
     if String.length path > 0 && path.[0] = '/' then path else "/" ^ path
   in
-  Printf.sprintf "%s://%s:%d%s" ep.scheme ep.host ep.port clean_path
+  let host =
+    if String.contains ep.host ':' && not (String.starts_with ~prefix:"[" ep.host)
+    then "[" ^ ep.host ^ "]"
+    else ep.host
+  in
+  Printf.sprintf "%s://%s:%d%s" ep.scheme host ep.port clean_path
 
 let build_headers ?(extra = []) ?content_type ep =
   let has_header name lst =

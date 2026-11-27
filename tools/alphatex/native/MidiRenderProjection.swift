@@ -77,23 +77,10 @@ struct MidiRenderPart {
         let events = region.events.filter { $0.port == port }
         let entry = midiRegionEntry(events, at: region.spec.sourceStart)
         var previous = SourceChase()
-        var held: [UInt16: Int] = [:], pedals = Set<UInt16>()
+        // The render stream keeps the live source owner's ownership rule.
+        var ownership = OwnershipLedger<SourceOwned>()
         func send(_ at: Double, _ bytes: [UInt8]) throws {
-            let status = bytes[0], channel = UInt16(status & 15), type = status & 0xf0
-            try emit(at, bytes)
-            if status == 0xff { held.removeAll(); pedals.removeAll() }
-            else if bytes.count == 3 {
-                let key = channel << 8 | UInt16(bytes[1])
-                if type == 0x90 && bytes[2] > 0 { held[key, default: 0] += 1 }
-                if type == 0x80 || type == 0x90 && bytes[2] == 0 { held[key] = max(0, (held[key] ?? 0) - 1) }
-                if type == 0xb0 {
-                    if [64, 66, 69].contains(bytes[1]) {
-                        if bytes[2] >= 64 { pedals.insert(key) } else { pedals.remove(key) }
-                    }
-                    if bytes[1] == 121 { pedals = pedals.filter { $0 >> 8 != channel } }
-                    if [120, 123, 124, 125, 126, 127].contains(bytes[1]) { held = held.filter { $0.key >> 8 != channel } }
-                }
-            }
+            try ownership.transmit(SourceOwned.change(sending: bytes, port: port)) { try emit(at, bytes) }
         }
         for copy in 0..<region.spec.repeatCount {
             let at = region.boundary(copy) - region.start
@@ -113,10 +100,7 @@ struct MidiRenderPart {
             // Cleanup follows messages actually emitted, including source reset,
             // channel-mode release and Hold 2. Released pedal-held voices need
             // only their pedal release, not another synthesized Note Off.
-            for (key, count) in held.sorted(by: { $0.key < $1.key }) {
-                for _ in 0..<count { try send(end, [0x80 | UInt8(key >> 8), UInt8(key & 127), 0]) }
-            }
-            for key in pedals.sorted() { try send(end, [0xb0 | UInt8(key >> 8), UInt8(key & 127), 0]) }
+            for bytes in ownership.releases(port: port) { try send(end, bytes) }
             previous = model
             for key in previous.channels.keys { previous.channels[key]?.notes.removeAll() }
         }

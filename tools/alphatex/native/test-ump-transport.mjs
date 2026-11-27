@@ -43,6 +43,25 @@ let pedal:[UInt32]=[0x43b54000,0xffffffff]
 try owned.output.apply(UmpEvent(seconds:0,source:"A",words:pedal));try owned.output.silence();precondition(reviewSent.last!.1==[0x43b54000,0])
 let sx:[UInt32]=[0x33120102,0];try owned.output.apply(UmpEvent(seconds:0,source:"A",words:sx));try owned.output.silence()
 precondition(reviewSent.last!.1==[0x33300000,0])
+// The UMP owner keeps the shared ledger rule on pedal, SysEx and channel-mode
+// sends: a failed acquisition or release stays owned and cleanup sends one
+// release per owned unit, once.
+let ledger=try UmpTransport(timeline:timeline([packet(0,"A",zeroOn)]));reviewSent=[]
+let pedalOff:[UInt32]=[0x43b54000,0],allNotesOff:[UInt32]=[0x43b57b00,0]
+reviewFail=true;requireFailure{try ledger.output.apply(UmpEvent(seconds:0,source:"A",words:sx))};precondition(ledger.output.exclusive.count==1)
+try ledger.output.apply(UmpEvent(seconds:0,source:"A",words:pedal))
+reviewFail=true;requireFailure{try ledger.output.apply(UmpEvent(seconds:0,source:"A",words:pedalOff))};precondition(ledger.output.pedals.count==1)
+try ledger.output.apply(UmpEvent(seconds:0,source:"A",words:on))
+reviewFail=true;requireFailure{try ledger.output.apply(UmpEvent(seconds:0,source:"A",words:allNotesOff))};precondition(ledger.output.held.values.reduce(0,+)==1)
+reviewSent=[];try ledger.output.silence()
+precondition(reviewSent.map{$0.1}==[[0x33300000,0],[0x43853c00,0],[0x43b54000,0]])
+precondition(ledger.output.held.isEmpty && ledger.output.pedals.isEmpty && ledger.output.exclusive.isEmpty)
+reviewSent=[];try ledger.output.silence();precondition(reviewSent.isEmpty)
+reviewFail=true;requireFailure{try ledger.output.apply(UmpEvent(seconds:0,source:"A",words:pedal))};precondition(ledger.output.pedals.count==1)
+try ledger.output.apply(UmpEvent(seconds:0,source:"A",words:on));try ledger.output.apply(UmpEvent(seconds:0,source:"A",words:allNotesOff))
+precondition(ledger.output.held.isEmpty && ledger.output.pedals.count==1)
+reviewSent=[];try ledger.output.silence();precondition(reviewSent.map{$0.1}==[[0x43b54000,0]])
+print("UMP_OWNERSHIP_LEDGER_PASS: failed SysEx start, pedal-on, pedal-off and All Notes Off stay owned; cleanup releases each owned unit once; a sent channel-mode message releases its keys")
 let bindings=[UmpBinding(source:"A",destination:"42"),UmpBinding(source:"B",destination:"42")]
 requireFailure{_ = try timeline([packet(0,"A",on),packet(1,"B",on)],bindings).events()}
 _ = try timeline([packet(0,"A",on),packet(1,"B",[0x41923c00,0x90010000])],bindings).events()

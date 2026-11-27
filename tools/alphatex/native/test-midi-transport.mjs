@@ -132,8 +132,10 @@ let heldEvents: [[String: Any]] = [
     ["kind":"on", "seconds":0.0, "channel":0, "pitch":65, "velocity":100],
     ["kind":"off", "seconds":1.0, "channel":0, "pitch":65]
 ]
-reset(1_000_000_000, cost: 100_000_000)
-let drift = try transport(heldEvents); drift.index = 2; drift.held[65] = drift.timeline.events[1]; drift.tick()
+// A key becomes owned only through the send ledger, so the sounding note is
+// sent before the measured clock starts.
+let drift = try transport(heldEvents); drift.index = 2; try drift.apply(drift.timeline.events[1])
+reset(1_000_000_000, cost: 100_000_000); drift.tick()
 precondition(drift.anchor == 1_000_000_000)
 near(drift.position(), Double(reviewClock % 1_000_000_000) / 1e9)
 reset(600_000_000)
@@ -153,8 +155,8 @@ precondition(ons() == [[0x90,60,80]])
 reset(1_250_000_000)
 let ended = try transport(events, loop: false); ended.index = 1; ended.tick()
 precondition(ons().isEmpty && ended.state == .stopped && reviewExit == 0)
+let paused = try transport(heldEvents); paused.index = 2; try paused.apply(paused.timeline.events[1])
 reset(2_250_000_000)
-let paused = try transport(heldEvents); paused.index = 2; paused.held[65] = paused.timeline.events[1]
 paused.receive("{\"kind\":\"pause\"}")
 precondition(paused.state == .paused); near(paused.offset, 0.25)
 reviewClock = 2_300_000_000; paused.receive("{\"kind\":\"resume\"}")
@@ -210,6 +212,7 @@ func wire(_ events: [[String: Any]], duration: Double = 1, bindings: [[String: A
     value.state = .playing
     return value
 }
+func ownedKeys(_ owner: MidiTransport, _ key: UInt16) -> Int { owner.sourceOwnership.units[.note(port: 0, key: key)] ?? 0 }
 var decoder = WireState()
 let decoded1 = try decoder.feed([0xf0,0x7d,1,0xf8,2]); precondition(decoded1 == [[0xf0,0x7d,1],[0xf8],[2]])
 let decoded2 = try decoder.feed([3,0xf7,0x90,60]); precondition(decoded2 == [[3,0xf7]])
@@ -721,9 +724,9 @@ reset(0);reviewWire=[]
 let failingLoop=try loopArrangement(failureEvents);failingLoop.tick()
 reviewWire=[];reviewWireFail=true
 mustReject { try failingLoop.reconcile(at:1,observedAt:1.25) }
-precondition(failingLoop.sourceHeld[0]?[60] == 1)
+precondition(ownedKeys(failingLoop, 60) == 1)
 try failingLoop.silence()
-precondition(failingLoop.sourceHeld[0]?[60] == 0 && reviewWire.map(\.1) == [[0x80,60,77],[0x80,60,0]])
+precondition(ownedKeys(failingLoop, 60) == 0 && reviewWire.map(\.1) == [[0x80,60,77],[0x80,60,0]])
 print("MIDI_LOOP_DECISIONS_PASS: late wrap skips expired unacquired attacks, exact endpoints survive, FIFO releases retain velocity, pedals and uncertain release cleanup remain owned")
 
 // Shared audio/MIDI cycles retain original project/source regions, and their
@@ -876,7 +879,7 @@ for (staged,active) in [(0.0,true),(0.0,false),(0.45,false)] { for late:UInt64 i
  reviewClock=wrap+late;owner.tick()
  let notes=reviewWire.map(\.1).filter { $0[0]&0xe0==0x80 }
  precondition(notes == (active ? [[0x80,83,70]]:[]),"late wrap re-attacked a key whose attack expired before the cut")
- precondition(owner.state == .playing && owner.cycleIndex==1 && owner.sourceHeld[0]?[83] ?? 0==0)
+ precondition(owner.state == .playing && owner.cycleIndex==1 && ownedKeys(owner, 83)==0)
 }}
 print("COMMON_MIDI_WRAP_EXPIRED_ATTACK_PASS: active, first and seeked callbacks at or after the wrap keep keys a cut copy attacked earlier silent; the drained copy's acquired release survives")
 // A cut entry acquires no key it did not send, so a same-batch original
@@ -920,13 +923,13 @@ for (base,cut,boundary) in [(heldEndBase,false,0.125),(heldEndBase,true,0.5),(he
  for edge in stride(from:0.125,to:boundary,by:0.125) {
   reviewClock=try heldCutCycle.deadline(position:edge,index:0,offset:0,anchor:1_000_000_000);owner.tick()
  }
- precondition(owner.sourceHeld[0]?[84]==1,"the ending copy does not hold the key")
+ precondition(ownedKeys(owner, 84)==1,"the ending copy does not hold the key")
  reviewWire=[]
  reviewClock=try heldCutCycle.deadline(position:cut ? heldCutCycle.end:boundary,index:0,offset:0,anchor:1_000_000_000);owner.tick()
  let wire=reviewWire.map(\.1), notes=wire.filter { $0[0]&0xe0==0x80 }
  precondition(notes == [[0x80,84,0],[0x90,84,100]],"the ending copy's sounding key was not released exactly once before the next owner's attack")
  precondition(wire.first == [0x80,84,0],"the next owner began before the ending copy released its sounding key")
- precondition(owner.state == .playing && owner.terminalFailure==nil && owner.sourceHeld[0]?[84]==1 && owner.cycleIndex==(cut ? 1:0))
+ precondition(owner.state == .playing && owner.terminalFailure==nil && ownedKeys(owner, 84)==1 && owner.cycleIndex==(cut ? 1:0))
 }
 print("COMMON_MIDI_END_RELEASES_HELD_PASS: a copy's end releases a key it still holds, once, before the next copy, a cut entry at the wrap or an adjacent region on the channel begins")
 let zeroBase=try arrangement([asset("zero",[
@@ -973,12 +976,12 @@ for fail in [false,true] {
     reset(0);reviewWire=[];try owner.stageCoordinated(at:0);try owner.runCoordinated(anchorNanoseconds:1_000_000_000)
     reviewClock=1_000_000_000;owner.tick();reviewWire=[]
     reviewClock=1_400_000_000;owner.tick()
-    precondition(reviewWire.map(\.1)==[[0x90,60,90]] && owner.sourceHeld[0]?[60]==1,"expired A release stole live B")
+    precondition(reviewWire.map(\.1)==[[0x90,60,90]] && ownedKeys(owner, 60)==1,"expired A release stole live B")
     reviewClock=1_800_000_000;reviewWireFail=fail;owner.tick()
     if fail {
         precondition(owner.state == .stopped && owner.terminalFailure != nil)
-        precondition(Array(reviewWire.suffix(2)).map(\.1)==[[0x80,60,77],[0x80,60,0]] && owner.sourceHeld[0]?[60]==0,"uncertain B release lost cleanup ownership")
-    } else { precondition(reviewWire.map(\.1)==[[0x90,60,90],[0x80,60,77]] && owner.sourceHeld[0]?[60]==0) }
+        precondition(Array(reviewWire.suffix(2)).map(\.1)==[[0x80,60,77],[0x80,60,0]] && ownedKeys(owner, 60)==0,"uncertain B release lost cleanup ownership")
+    } else { precondition(reviewWire.map(\.1)==[[0x90,60,90],[0x80,60,77]] && ownedKeys(owner, 60)==0) }
 }
 let scopeA=asset("scopeA",[
     ["seconds":0.3,"port":2,"bytes":[0x90,60,100]], ["seconds":0.5,"port":2,"bytes":[0x80,60,45]],
@@ -993,9 +996,9 @@ precondition(scoped.regionScopes==[Set([0]),Set([1])])
 scoped.prepared=true;scoped.destination=fifoBase.destination;scoped.sourceDestinations=fifoBase.sourceDestinations
 reset(0);reviewWire=[];try scoped.stageCoordinated(at:0);try scoped.runCoordinated(anchorNanoseconds:1_000_000_000)
 reviewClock=1_100_000_000;scoped.tick()
-precondition(scoped.sourceHeld[0]?[60]==1 && scoped.sourceHeld[0]?[UInt16(1<<8|64)]==1)
+precondition(ownedKeys(scoped, 60)==1 && ownedKeys(scoped, UInt16(1<<8|64))==1)
 reviewWire=[];try scoped.sourceSilence(addresses:scoped.regionScopes[0])
-precondition(reviewWire.map(\.1)==[[0x80,60,0]] && scoped.sourceHeld[0]?[UInt16(1<<8|64)]==1,"one window scope silenced a disjoint owner")
+precondition(reviewWire.map(\.1)==[[0x80,60,0]] && ownedKeys(scoped, UInt16(1<<8|64))==1,"one window scope silenced a disjoint owner")
 // An ended prefix key has no restoration effect and must not reserve its
 // channel or erase the state of another, genuinely audible region owner.
 let deadPrefix=asset("deadPrefix",[
@@ -1012,7 +1015,7 @@ deadOwner.prepared=true;deadOwner.destination=fifoBase.destination;deadOwner.sou
 reset(0);reviewWire=[];try deadOwner.stageCoordinated(at:0);try deadOwner.runCoordinated(anchorNanoseconds:1_000_000_000)
 reviewClock=1_060_000_000;deadOwner.tick();precondition(deadOwner.sourceModel.channels[1]?.notes.first?.pitch==64)
 reviewClock=1_150_000_000;deadOwner.tick()
-precondition(deadOwner.sourceModel.channels[1]?.notes.first?.pitch==64 && deadOwner.sourceHeld[0]?[UInt16(1<<8|64)]==1,"dead prefix replacement erased another region's state")
+precondition(deadOwner.sourceModel.channels[1]?.notes.first?.pitch==64 && ownedKeys(deadOwner, UInt16(1<<8|64))==1,"dead prefix replacement erased another region's state")
 // A range can span only the suffix and prefix of adjacent copies. Its absent
 // middle channel is not audible merely because the region repeats.
 let partialCopies=try arrangement([asset("partialCopies",[

@@ -107,9 +107,10 @@ let test_missing_and_wrong_fields () =
       | _ -> false)
 ;;
 
-(* task-1779 B: the bound is derived from the inline tool-result boundary.
-   The key is accepted for one version with a notice; its value is reported
-   but never used as the bound (#39284 refuses it next). *)
+(* task-1779 B: the bound is fixed at the Skill file cap (#39054), not the
+   inline tool-result boundary. The key is accepted for one version with a
+   notice; its value is reported but never used as the bound (#39284 refuses
+   it next). *)
 let test_resource_read_max_bytes_contract () =
   let sources_block =
     "[[skills.sources]]\nid = \"docs\"\nanchor = \"base-path\"\npath = \"skills\"\naccess = \"read-only\"\n"
@@ -127,19 +128,19 @@ let test_resource_read_max_bytes_contract () =
     | None -> fail "configured [skills] has no resource read bound"
   in
   let config, notices = parse_with_notices (with_bound_line "") in
-  check int "absent key: derived bound" Common.max_tool_result_wire_bytes (bound config);
+  check int "absent key: Skill file cap" skill_file_max_bytes (bound config);
   check int "absent key: no notice" 0 (List.length notices);
   List.iter
     (fun (line, expected_value) ->
        let config, notices = parse_with_notices (with_bound_line line) in
-       check int ("ignored value: " ^ line) Common.max_tool_result_wire_bytes (bound config);
+       check int ("ignored value: " ^ line) skill_file_max_bytes (bound config);
        check bool
          ("ignored key is noticed with its value: " ^ line)
          true
          (notices = [ Ignored_resource_read_max_bytes expected_value ]))
     [ "resource-read-max-bytes = 12345\n", Keeper_toml_loader.Toml_int 12345
-    ; ( Printf.sprintf "resource-read-max-bytes = %d\n" (Common.max_tool_result_wire_bytes * 4)
-      , Keeper_toml_loader.Toml_int (Common.max_tool_result_wire_bytes * 4) )
+    ; ( Printf.sprintf "resource-read-max-bytes = %d\n" (skill_file_max_bytes * 4)
+      , Keeper_toml_loader.Toml_int (skill_file_max_bytes * 4) )
     ; "resource-read-max-bytes = 0\n", Keeper_toml_loader.Toml_int 0
     ; "resource-read-max-bytes = \"16384\"\n", Keeper_toml_loader.Toml_string "16384"
     ];
@@ -286,7 +287,7 @@ let test_seed_declares_sources () =
    | Some value ->
      check int
        "seed resource read bound"
-       16384
+       skill_file_max_bytes
        (resource_read_max_bytes_to_int value)
    | None -> fail "seed omitted the resource read bound");
   let projected =
@@ -316,7 +317,7 @@ let test_projection_names_policy () =
   match to_yojson (parse_exn ordered_sources) with
   | `Assoc fields ->
     (match List.assoc_opt "resource_read_max_bytes" fields with
-     | Some (`Int value) -> check int "resource read bound" 16384 value
+     | Some (`Int value) -> check int "resource read bound" skill_file_max_bytes value
      | _ -> fail "resource read bound projection was not an integer")
   | _ -> fail "Skill source projection was not an object"
 ;;

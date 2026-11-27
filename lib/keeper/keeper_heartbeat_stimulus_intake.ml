@@ -597,7 +597,40 @@ type spent_selection_reconciliation =
       ; absence : Keeper_approval_queue_result.resolution_absence
       }
 
-let reconcile_spent_selection
+(* What a [Tool_result_ready] row is checked against: the unowned receipts, or
+   a route that cannot consume them at all. *)
+type tool_result_outbox_view =
+  | Route_cannot_consume
+  | Unowned_receipts of Keeper_client_tool_outbox.snapshot
+
+(* One read of the Keeper's meta and unowned outbox, kept for one turn entry.
+   A row is enqueued only after its receipt is retained ([notify] loads the
+   outbox, then enqueues), so a read taken after the rows were listed finds
+   each row's receipt either still pending or already acknowledged. A receipt
+   acknowledged after this read still looks pending: that row is admitted and
+   the next turn entry retires it. Reading the whole outbox again for every
+   row made retiring N rows N full loads of N receipts. *)
+let tool_result_outbox_reader ~config ~keeper_name =
+  let read () =
+    let open Result.Syntax in
+    let* meta = Keeper_meta_store.read_effective_meta config keeper_name in
+    match meta with
+    | Some meta when Keeper_client_tool_outbox_wake.route_can_consume meta ->
+      let* snapshot =
+        Keeper_client_tool_outbox.load
+          ~base_path:config.Workspace_utils.base_path
+          ~keeper_name
+          ~viewer:Keeper_client_tool_outbox.Unowned_only
+      in
+      Ok (Unowned_receipts snapshot)
+    | Some _ | None -> Ok Route_cannot_consume
+  in
+  let cached = lazy (read ()) in
+  fun () -> Lazy.force cached
+;;
+
+let reconcile_spent_selection_with
+      ~tool_result_outbox
       ~config
       ~keeper_name
       (selection : Keeper_event_queue_state.pending_selection)
@@ -610,16 +643,13 @@ let reconcile_spent_selection
       let* () = Keeper_registry_event_queue.ack_pending_result ~base_path keeper_name ~selection in
       Ok Tool_result_hint_retired
     in
-    let* meta = Keeper_meta_store.read_effective_meta config keeper_name in
-    (match meta with
-     | Some meta when Keeper_client_tool_outbox_wake.route_can_consume meta ->
-       let* snapshot =
-         Keeper_client_tool_outbox.load ~base_path ~keeper_name
-           ~viewer:Keeper_client_tool_outbox.Unowned_only in
+    let* view = tool_result_outbox () in
+    (match view with
+     | Unowned_receipts snapshot ->
        if Keeper_client_tool_outbox.contains_receipt snapshot ~receipt_id then
          Ok Selection_actionable
        else retire_hint ()
-     | Some _ | None ->
+     | Route_cannot_consume ->
        (* Route retirement must not depend on a store that this client cannot
           consume. Even unreadable evidence stays untouched while unrelated
           work proceeds; Codex re-entry resumes authoritative receipt reads. *)
@@ -821,6 +851,14 @@ let reconcile_spent_selection
     Ok Selection_actionable
 ;;
 
+let reconcile_spent_selection ~config ~keeper_name selection =
+  reconcile_spent_selection_with
+    ~tool_result_outbox:(tool_result_outbox_reader ~config ~keeper_name)
+    ~config
+    ~keeper_name
+    selection
+;;
+
 type intake_source_scope =
   | General_sources
   | Routed_attention
@@ -1003,6 +1041,7 @@ let heartbeat_event_intake
             keeper_name !missing_count;
         selected, !first_missing
     in
+    let tool_result_outbox = tool_result_outbox_reader ~config:ctx.config ~keeper_name in
     let rec loop
           remaining
           observations_rev
@@ -1031,7 +1070,8 @@ let heartbeat_event_intake
         loop remaining observations_rev selections_rev first_withdrawn selections
       | _, selection :: rest ->
         (match
-           reconcile_spent_selection
+           reconcile_spent_selection_with
+             ~tool_result_outbox
              ~config:ctx.config
              ~keeper_name
              selection

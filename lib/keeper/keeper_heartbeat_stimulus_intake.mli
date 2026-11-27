@@ -198,6 +198,28 @@ type spent_selection_reconciliation =
       (** the store has no resolution behind the queued approval; the entry
           was acknowledged without a turn *)
 
+type tool_result_outbox_view
+
+val tool_result_outbox_reader
+  :  config:Workspace_utils.config
+  -> keeper_name:string
+  -> unit
+  -> (tool_result_outbox_view, string) result
+(** One read of the Keeper's meta and unowned tool-result outbox, taken on the
+    first call and returned by every later call. Turn entry makes one reader
+    and checks all its [Tool_result_ready] rows against it, instead of loading
+    the whole outbox once per row. A receipt acknowledged after the read still
+    counts as pending for that reader. *)
+
+val reconcile_spent_selection_with
+  :  tool_result_outbox:(unit -> (tool_result_outbox_view, string) result)
+  -> config:Workspace_utils.config
+  -> keeper_name:string
+  -> Keeper_event_queue_state.pending_selection
+  -> (spent_selection_reconciliation, string) result
+(** {!reconcile_spent_selection} with a [Tool_result_ready] row checked against
+    [tool_result_outbox]. *)
+
 val reconcile_spent_selection
   :  config:Workspace_utils.config
   -> keeper_name:string

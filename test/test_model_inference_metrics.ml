@@ -1615,7 +1615,7 @@ let test_buckets_cache_hit_ratio_uses_inclusive_input () =
       let bucket = (List.hd result).mb_buckets |> List.hd in
       check (option (float 0.001)) "cached input is part of reported input"
         expected_ratio bucket.b_cache_hit_ratio;
-      let paired = Option.map (fun value ->
+      let paired = Option.map (fun (value : M.cached_input) ->
         value.ci_input_tokens, value.ci_cache_read_tokens, value.ci_sample_count)
         bucket.b_cached_input in
       check (option (triple int int int)) "bucket retains paired totals"

@@ -1068,7 +1068,14 @@ describe('keeper runtime trace', () => {
     expect(result.runtime_lens.axes.provider_lane.resolved).toBe(false)
     expect(result.runtime_lens.swimlanes.memory_context.terminal_status).toBe('unknown')
     expect(result.runtime_lens.clock_edges[0]?.edge_id).toBe('edge-runtime-routed')
-    expect(result.runtime_lens.swimlanes.tool_runtime.completeness).toBe('complete')
+    expect(result.runtime_lens.swimlanes.tool_runtime.completeness).toEqual({
+      state: 'reported',
+      value: 'complete',
+    })
+    expect(result.runtime_lens.swimlanes.memory_context.completeness).toEqual({
+      state: 'rejected',
+      raw: null,
+    })
     expect(result.runtime_lens.clock_edges[0]?.event).toBe('runtime_routed')
     expect(result.runtime_lens.clock_edges[0]?.event_bus_event_count).toBe(2)
     expect(result.runtime_lens.clock_edges[0]?.event_bus_payload_kinds).toEqual(['tool_called', 'tool_completed'])
@@ -1079,6 +1086,29 @@ describe('keeper runtime trace', () => {
     expect(result.runtime_lens.gaps.map(gap => gap.code)).toEqual([
       'clock_context_injection_missing',
     ])
+  })
+
+  it('reads a lane the turn owes nothing as not_applicable and rejects an unknown verdict', () => {
+    const laneWith = (completeness: unknown) => ({
+      lane: 'agent_core_agent',
+      label: 'AGENT_CORE',
+      event_count: 1,
+      terminal_status: 'checkpoint_loaded',
+      completeness,
+      gap_codes: [],
+      events: [{ event: 'checkpoint_loaded', count: 1 }],
+    })
+    const parseAgentCore = (completeness: unknown) =>
+      parseKeeperRuntimeTrace({
+        keeper: 'sangsu',
+        trace_id: 'trace-lens',
+        runtime_lens: { swimlanes: { agent_core_agent: laneWith(completeness) } },
+      }).runtime_lens.swimlanes.agent_core_agent.completeness
+
+    expect(parseAgentCore('not_applicable')).toEqual({ state: 'reported', value: 'not_applicable' })
+    expect(parseAgentCore('future_verdict')).toEqual({ state: 'rejected', raw: 'future_verdict' })
+    expect(parseAgentCore('unknown')).toEqual({ state: 'rejected', raw: 'unknown' })
+    expect(parseAgentCore(3)).toEqual({ state: 'rejected', raw: null })
   })
 
   it('fetches runtime trace evidence with query params', async () => {

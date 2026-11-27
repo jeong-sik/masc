@@ -19,6 +19,7 @@ type runtime_manifest_scan =
   ; has_terminal : bool
   ; terminal_row : Keeper_runtime_manifest.t option
   ; terminal_keeper_turn_ids : int list
+  ; terminal_runtime_ids : string option list
   ; max_agent_core_turn_count : int option
   ; keeper_turn_ids : int list
   ; event_bus_count : int
@@ -64,6 +65,7 @@ let make_runtime_manifest_scan ~path ~limit ~scan_line_limit ~scan_scope =
   ; has_terminal = false
   ; terminal_row = None
   ; terminal_keeper_turn_ids = []
+  ; terminal_runtime_ids = []
   ; max_agent_core_turn_count = None
   ; keeper_turn_ids = []
   ; event_bus_count = 0
@@ -265,7 +267,14 @@ let update_runtime_manifest_scan scan (row : Keeper_runtime_manifest.t) =
   in
   match row.Keeper_runtime_manifest.event with
   | Keeper_runtime_manifest.Turn_finished ->
-    let scan = { scan with has_terminal = true; terminal_row = Some row } in
+    let scan =
+      { scan with
+        has_terminal = true
+      ; terminal_row = Some row
+      ; terminal_runtime_ids =
+          row.Keeper_runtime_manifest.runtime_id :: scan.terminal_runtime_ids
+      }
+    in
     (match row.Keeper_runtime_manifest.keeper_turn_id with
      | Some value ->
        { scan with

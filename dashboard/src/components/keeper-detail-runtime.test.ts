@@ -18,7 +18,11 @@ vi.mock('../api/dashboard', async () => {
 
 import type { DashboardRuntimeProviderSnapshot } from '../api/dashboard'
 import type { DashboardMissionKeeperBrief, Keeper } from '../types'
-import type { KeeperCompositeSnapshot, KeeperRuntimeTraceResponse } from '../api/keeper'
+import type {
+  KeeperCompositeSnapshot,
+  KeeperRuntimeLensLaneCompletenessReading,
+  KeeperRuntimeTraceResponse,
+} from '../api/keeper'
 import { fetchKeeperComposite } from '../api/keeper'
 import { resetRuntimeCatalog } from '../lib/runtime-catalog-resource'
 import { deriveKeeperOperationalState } from '../lib/keeper-operational-state'
@@ -286,12 +290,16 @@ describe('RuntimeLensSection', () => {
     eventCount: number,
     terminalStatus: string,
     gapCodes: string[] = [],
+    completeness: KeeperRuntimeLensLaneCompletenessReading = {
+      state: 'reported',
+      value: eventCount > 0 ? 'complete' : 'incomplete',
+    },
   ) => ({
     lane: key,
     label,
     event_count: eventCount,
     terminal_status: terminalStatus,
-    completeness: eventCount > 0 ? 'complete' : 'incomplete',
+    completeness,
     gap_codes: gapCodes,
     gap_badge: gapCodes[0] ?? null,
     events: eventCount > 0 ? [{ event: `${key}_event`, count: eventCount }] : [],
@@ -614,6 +622,46 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('event ids')).toBeInTheDocument()
     expect(screen.getByText('corr corr-1 · run run-1')).toBeInTheDocument()
     expect(screen.getByText('Tool Runtime')).toBeInTheDocument()
+    expect(screen.queryByText('not applicable')).toBeNull()
+  })
+
+  it('renders a lane the turn owes nothing as neutral, not ok and not warn', () => {
+    const trace = runtimeTraceFixture()
+    trace.runtime_lens.swimlanes.agent_core_agent = lane(
+      'agent_core_agent',
+      'Agent Core',
+      2,
+      'checkpoint_loaded',
+      [],
+      { state: 'reported', value: 'not_applicable' },
+    )
+
+    render(h(RuntimeLensSection, { trace }))
+
+    expect(screen.getByText('not applicable')).toHaveAttribute('data-status-chip-tone', 'neutral')
+    expect(screen.getByText('checkpoint_loaded', { exact: true })).toHaveAttribute(
+      'data-status-chip-tone',
+      'neutral',
+    )
+  })
+
+  it('shows a completeness value it does not know instead of reading it as a verdict', () => {
+    const trace = runtimeTraceFixture()
+    trace.runtime_lens.swimlanes.agent_core_agent = lane(
+      'agent_core_agent',
+      'Agent Core',
+      2,
+      'checkpoint_saved',
+      [],
+      { state: 'rejected', raw: 'future_verdict' },
+    )
+
+    render(h(RuntimeLensSection, { trace }))
+
+    expect(screen.getByText('completeness future_verdict unrecognized')).toHaveAttribute(
+      'data-status-chip-tone',
+      'warn',
+    )
   })
 
   it('surfaces unsupported and invalid manifest rows', () => {

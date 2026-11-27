@@ -17,6 +17,9 @@ type runtime_manifest_scan =
   ; has_terminal : bool
   ; terminal_row : Keeper_runtime_manifest.t option
   ; terminal_keeper_turn_ids : int list
+  ; terminal_runtime_ids : string option list
+        (** The runtime id of every turn_finished row, newest first; [None]
+            for a row that names no runtime. *)
   ; max_agent_core_turn_count : int option
   ; keeper_turn_ids : int list
   ; event_bus_count : int

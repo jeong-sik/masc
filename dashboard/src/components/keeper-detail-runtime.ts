@@ -38,6 +38,7 @@ import type {
   KeeperRuntimeLensClockEdge,
   KeeperRuntimeLensClockGroup,
   KeeperRuntimeLensLane,
+  KeeperRuntimeLensLaneCompletenessReading,
   KeeperRuntimeLensPayloadRoleAxis,
   KeeperRuntimeLensSourceClockAxis,
   KeeperRuntimeTraceResponse,
@@ -1041,8 +1042,15 @@ function lensGapTone(severity: string): StatusChipTone {
   }
 }
 
+function laneNotApplicable(completeness: KeeperRuntimeLensLaneCompletenessReading): boolean {
+  return completeness.state === 'reported' && completeness.value === 'not_applicable'
+}
+
 function lensLaneTone(lane: KeeperRuntimeLensLane): StatusChipTone {
   if (lane.gap_codes.length > 0) return 'warn'
+  // The turn owes none of this lane's events (an official-client turn and
+  // the AGENT_CORE checkpoint save). Its rows are context, not a verdict.
+  if (laneNotApplicable(lane.completeness)) return 'neutral'
   if (lane.terminal_status === 'empty' || lane.event_count === 0) return 'neutral'
   if (lane.terminal_status.includes('error') || lane.terminal_status.includes('missing')) return 'bad'
   return 'ok'
@@ -1130,6 +1138,26 @@ function RuntimeLensClockEdgeRow({ edge }: { edge: KeeperRuntimeLensClockEdge })
   `
 }
 
+function LaneCompletenessChip({ completeness }: { completeness: KeeperRuntimeLensLaneCompletenessReading }) {
+  if (completeness.state === 'rejected') {
+    return html`
+      <${StatusChip} tone="warn" uppercase=${false}>
+        ${`completeness ${completeness.raw ?? 'missing'} unrecognized`}
+      <//>
+    `
+  }
+  switch (completeness.value) {
+    case 'not_applicable':
+      return html`<${StatusChip} tone="neutral" uppercase=${false}>not applicable<//>`
+    case 'complete':
+    case 'finished':
+    case 'mandatory_present':
+    case 'incomplete':
+    case 'not_observed':
+      return null
+  }
+}
+
 function RuntimeLensLaneRow({ lane }: { lane: KeeperRuntimeLensLane }) {
   return html`
     <div class="grid grid-cols-[minmax(8rem,1fr)_auto] md:grid-cols-[minmax(9rem,1fr)_auto_auto] gap-2 items-center rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2 min-w-0">
@@ -1146,6 +1174,7 @@ function RuntimeLensLaneRow({ lane }: { lane: KeeperRuntimeLensLane }) {
       </span>
       <div class="col-span-2 md:col-span-1 flex flex-wrap gap-1 justify-start md:justify-end min-w-0">
         <${StatusChip} tone=${lensLaneTone(lane)} uppercase=${false}>${lane.terminal_status}<//>
+        <${LaneCompletenessChip} completeness=${lane.completeness} />
         ${lane.gap_codes.map(code => html`
           <${StatusChip} tone="warn" uppercase=${false}>${code}<//>
         `)}

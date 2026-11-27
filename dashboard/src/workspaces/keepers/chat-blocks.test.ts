@@ -1254,4 +1254,81 @@ describe('Chat Hierarchy Grouping, Delegate Cards, Live Autonomous Turn & Waitin
       expect(delDetails.textContent).toContain('다시 확인')
     })
   })
+
+  it('keeps many delegate jump chips outside <summary> inside .kp-collapsible-actions when a tool group opens', async () => {
+    const targets = [
+      'code-reviewer-uncle',
+      'code-reviewer-father',
+      'context-reviewer',
+      'code-reviewer-brother',
+      'code-reviewer-sister',
+      'code-reviewer-mother',
+    ]
+    const mockFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url
+      if (url.includes('/chat/history')) {
+        return new Response(
+          JSON.stringify({
+            messages: [
+              {
+                id: 't-exec',
+                role: 'tool',
+                content: '{"command":"gh pr view 55194"}',
+                ts: 10,
+                tool_call_name: 'Execute',
+              },
+              ...targets.map((target, idx) => ({
+                id: `t-del-${idx}`,
+                role: 'tool',
+                content: JSON.stringify({ target: { kind: 'keeper', name: target }, prompt: `Review PR #${idx}` }),
+                ts: 11 + idx,
+                tool_call_name: 'masc_keeper_delegate',
+              })),
+            ],
+            has_more: false,
+            next_cursor: null,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      if (url.includes('/waiting-inventory')) {
+        return Response.json({ schema: 'masc.keeper_waiting_inventory.v1', keeper_count: 0, waiting_keeper_count: 0, row_count: 0, total_row_count: 0, oldest_age_seconds: null, rows: [] })
+      }
+      if (url.includes('/chat/operations')) {
+        return Response.json({ schema: 'masc.keeper_chat_operations.list.v1', state: 'Idle', operations: [] })
+      }
+      return Response.json({})
+    })
+    vi.stubGlobal('fetch', mockFetch)
+
+    const onSelectKeeper = vi.fn()
+    const { container } = render(
+      html`<${KeeperChatTab} keeper=${makeRosterKeeper()} onInspect=${vi.fn()} onSelectKeeper=${onSelectKeeper} onMutated=${vi.fn()} />`,
+    )
+
+    await waitFor(() => {
+      const group = container.querySelector('[data-testid="chat-tool-group"]')
+      expect(group).not.toBeNull()
+      expect(group!.classList.contains('kp-collapsible-shell')).toBe(true)
+      const actions = group!.querySelector(':scope > .kp-collapsible-actions')
+      expect(actions).not.toBeNull()
+      expect(actions!.querySelectorAll('.kp-delegate-jump')).toHaveLength(targets.length)
+    })
+
+    expect(container.querySelectorAll('summary button')).toHaveLength(0)
+
+    const groupDetails = container.querySelector('[data-testid="chat-tool-group"] > details.kp-collapsible-details') as HTMLDetailsElement
+    expect(groupDetails).not.toBeNull()
+    groupDetails.open = true
+    fireEvent(groupDetails, new Event('toggle'))
+
+    await waitFor(() => {
+      expect(groupDetails.open).toBe(true)
+      expect(groupDetails.querySelectorAll('[data-testid="chat-delegate-card"]')).toHaveLength(targets.length)
+    })
+
+    const lastJump = container.querySelector('[data-testid="chat-tool-group"] > .kp-collapsible-actions .kp-delegate-jump:last-child') as HTMLButtonElement
+    fireEvent.click(lastJump)
+    expect(onSelectKeeper).toHaveBeenCalledWith('code-reviewer-mother')
+  })
 })

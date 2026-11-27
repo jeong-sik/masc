@@ -945,6 +945,9 @@
 
 .kp-delegate-jump {
   flex: 0 0 auto;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -964,16 +967,26 @@
   list-style: none;
 }
 
+/* Keep the disclosure summary compact beside one or two delegate jump chips
+   when collapsed, wrap the chips onto their own row once many targets compete
+   for the line, and give an opened disclosure full card width so nested tool
+   cards and JSON payloads are never squeezed into a narrow side column. */
 .kp-collapsible-shell {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
-  gap: var(--sp-2);
+  gap: var(--sp-1) var(--sp-2);
   min-width: 0;
 }
 
 .kp-collapsible-details {
-  flex: 1 1 auto;
+  flex: 1 1 16rem;
   min-width: 0;
+}
+
+.kp-collapsible-details[open] {
+  flex: 1 0 100%;
+  width: 100%;
 }
 
 .kp-collapsible-actions {
@@ -981,7 +994,15 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--sp-1);
-  flex: 0 0 auto;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.kp-collapsible-details[open] + .kp-collapsible-actions {
+  flex-basis: 100%;
+  padding-top: var(--sp-1);
+  border-top: 1px dashed var(--line-1);
 }
 
 /* ── Hierarchical Work Trace, Tool Activity Groups & Live Autonomous Card ── */
@@ -1285,8 +1306,10 @@ details[open] > .kp-sub-summary::before {
   color: var(--fg-2);
 }
 
+/* Zero flex-basis lets sibling status pills keep their natural width before
+   the monospace preview claims the remaining space and truncates. */
 .kp-block-preview {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

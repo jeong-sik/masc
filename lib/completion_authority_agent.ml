@@ -1519,14 +1519,29 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
       verification_id
 ;;
 
+(* The retained commits one scope recovers. A scope that names verifications
+   reads only theirs, by name. That lookup is the recovery a wake goes on
+   without when it cannot read, so it does not verify the whole scope first. A
+   scope that names nothing (boot, a failed backlog read) reads the scope
+   whole. A fresh attempt is allocated on neither: [next_attempt] reads the
+   scope. *)
+let pending_of_scope ~terminal_pending ~store ~scope ~installation_id ~package_id =
+  match scope with
+  | Whole_backlog ->
+      Verifier_review_owner.pending_commits ~terminal_pending ~store
+        ~selection:Verifier_review_owner.All_verifications ~installation_id ~package_id
+  | Targets keys ->
+      Verifier_review_owner.named_commits ~terminal_pending ~store
+        ~verification_ids:(List.map (fun (key : review_key) -> key.verification_id) keys)
+        ~installation_id ~package_id
+
 let recover_terminal_publications (runtime:runtime) ~registry ~scope =
   let module O=Verifier_review_owner in
   let module V=Verifier_review_original in
   let module P=Lane_addon_request_progress in
   let store=Lane_addon_store.of_config runtime.config in
-  let* pending=O.pending_commits ~terminal_pending:Verifier_review_publication.needs_publication
-    ~selection:O.All_verifications
-    ~store ~installation_id:host_installation_id ~package_id:host_package_id
+  let* pending=pending_of_scope ~terminal_pending:Verifier_review_publication.needs_publication
+    ~store ~scope ~installation_id:host_installation_id ~package_id:host_package_id
     |> Result.map_error (function O.Not_found -> "review publication inventory absent"
       | Load_store_unavailable detail | Corrupt_original detail -> detail) in
   let terminal=List.filter_map (fun retained -> match P.phase (O.progress retained) with
@@ -1575,9 +1590,8 @@ let process_scope (runtime : runtime) ~scope =
         backlog.tasks
     in
     let store=Lane_addon_store.of_config runtime.config in
-    let entries = match Verifier_review_owner.pending_commits
-      ~selection:Verifier_review_owner.All_verifications
-      ~terminal_pending:Verifier_review_publication.needs_publication ~store
+    let entries = match pending_of_scope
+      ~terminal_pending:Verifier_review_publication.needs_publication ~store ~scope
       ~installation_id:host_installation_id ~package_id:host_package_id with
       | Error _ ->
         Log.Misc.error "verifier original commit inventory unavailable; no commit recovery inferred";

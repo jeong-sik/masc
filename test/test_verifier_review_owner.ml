@@ -524,6 +524,87 @@ let test_negative_attempt_is_a_wrong_key_for_every_entry () =
     (O.load_retained ~store ~verification_id:"vrf-neg" ~attempt:(-1)
        ~installation_id:"i" ~package_id:"p")
 
+(* A review wake that names verifications recovers by name. *)
+let named store ?(pending = fun _ -> Ok false) verification_ids =
+  O.named_commits ~terminal_pending:pending ~store ~verification_ids
+    ~installation_id:"i" ~package_id:"p"
+
+let retained_first ~store ~verification_id =
+  let original = make_original ~verification_id ~attempt:0 in
+  (match O.retain ~store ~verification_id ~attempt:0 ~installation_id:"i" ~package_id:"p" original with
+   | Ok () -> ()
+   | Error err -> failwith ("retain failed: " ^ string_of_retain_error err));
+  original
+
+(* An attempt that stopped right after its judgment was retained. *)
+let judged_first ~store ~verification_id =
+  let original = retained_first ~store ~verification_id in
+  let retained = loaded_or_fail
+    (O.load_retained ~store ~verification_id ~attempt:0 ~installation_id:"i" ~package_id:"p") in
+  let result : AR.review_result =
+    { AR.verdict = Some (AR.Reject "the contract is not met")
+    ; evaluator_runtime = "rt-a"
+    ; generator_runtime = None
+    ; evaluator_execution = None
+    ; gate = AR.Structured_tool
+    ; fallback_reason = None
+    ; retryable_runtimes = []
+    ; model_absent_runtimes = []
+    } in
+  let judgment =
+    match O.judgment_to_json ~original ~notes:"notes" result with
+    | Ok judgment -> judgment
+    | Error detail -> failwith ("judgment fixture failed: " ^ detail) in
+  ignore (loaded_or_fail (O.advance_events ~store retained
+    [ Progress.Dispatch_intended; Progress.Judgment_retained judgment ]))
+
+let expect_named store expected verification_ids =
+  match named store verification_ids with
+  | Ok retained -> assert (List.map (fun retained -> V.verification_id (O.original retained)) retained = expected)
+  | Error err -> failwith ("named commits failed: " ^ string_of_load_error err)
+
+let test_named_commits_read_the_named_verifications_by_name () =
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
+  ignore (judged_first ~store ~verification_id:"vrf-named");
+  ignore (judged_first ~store ~verification_id:"vrf-other");
+  (* A refused attempt and one that was only captured are not commits to recover. *)
+  ignore (refused_first ~store ~verification_id:"vrf-refused");
+  ignore (retained_first ~store ~verification_id:"vrf-captured");
+  (* Only the named verifications are answered, each once, sorted by id. *)
+  expect_named store ["vrf-named"] ["vrf-named"; "vrf-fresh"];
+  expect_named store [] ["vrf-refused"; "vrf-captured"];
+  expect_named store ["vrf-named"] ["vrf-named"; "vrf-named"];
+  expect_named store ["vrf-named"; "vrf-other"] ["vrf-other"; "vrf-named"];
+  expect_named store [] [];
+  (match named store [" "] with
+   | Error (O.Corrupt_original _) -> ()
+   | Ok _ -> failwith "a blank verification id must not be read"
+   | Error (O.Not_found | O.Load_store_unavailable _) ->
+       failwith "a blank verification id is a wrong key, not a store failure")
+
+let test_named_commits_answer_beside_a_record_the_scope_cannot_verify () =
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
+  (* A foreign record whose summary names another verification than its body
+     does. The scope cannot be verified, so a whole-scope selection fails. *)
+  ignore (routing_fixture ~summary_edit:(replace_field "attempt" (`Int 0))
+    store ~key_id:"a" ~summary_id:"b" ~body_id:"a" ());
+  ignore (judged_first ~store ~verification_id:"target");
+  expect_scope_error (O.pending_commits ~selection:(O.Verification "target")
+    ~terminal_pending:(fun _ -> Ok false) ~installation_id:"i" ~package_id:"p");
+  expect_named store ["target"] ["target"]
+
+let test_named_commits_fail_on_an_unreadable_record_of_a_named_verification () =
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
+  ignore (routing_fixture ~supported:true ~body_edit:(replace_field "generator_runtime" (`String " "))
+    store ~key_id:"target" ~summary_id:"target" ~body_id:"target" ());
+  (match named store ["target"] with
+   | Error (O.Corrupt_original _ | O.Load_store_unavailable _) -> ()
+   | Ok _ -> failwith "an unreadable record of the named verification must not read as nothing"
+   | Error O.Not_found -> failwith "a record that is there must not read as absent")
+
 let () =
   test_before_dispatch_refusal_opens_the_next_attempt_with_current_lookup ();
   test_unreadable_before_dispatch_refusal_opens_nothing ();
@@ -544,4 +625,7 @@ let () =
   test_foreign_routing_requires_independent_key_header_and_body ();
   test_target_corruption_and_unreadable_foreign_body_are_not_absence ();
   test_duplicate_metadata_cannot_hide_a_target ();
+  test_named_commits_read_the_named_verifications_by_name ();
+  test_named_commits_answer_beside_a_record_the_scope_cannot_verify ();
+  test_named_commits_fail_on_an_unreadable_record_of_a_named_verification ();
   print_endline "test_verifier_review_owner: all tests passed"

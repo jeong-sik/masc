@@ -535,3 +535,44 @@ let pending_commits ~terminal_pending ~store ~selection ~installation_id ~packag
         loop acc rest
   in
   loop [] records
+
+(* The attempts of one verification, read by name: attempt 0 first and then
+   each next one until a name holds nothing. An owner record is never removed
+   and every successor takes its parent's number plus one, so the attempts are
+   consecutive. A record that is there and cannot be read is an error; it is
+   never taken for the end. *)
+let attempts_by_name ~store ~verification_id ~installation_id ~package_id =
+  if String.trim verification_id = ""
+  then Error (Corrupt_original "verifier selection requires a non-blank verification_id")
+  else
+    let rec read attempt acc =
+      match load_retained ~store ~verification_id ~attempt ~installation_id ~package_id with
+      | Error Not_found -> Ok (List.rev acc)
+      | Error ((Load_store_unavailable _ | Corrupt_original _) as error) -> Error error
+      | Ok retained -> read (attempt + 1) (retained :: acc)
+    in
+    read 0 []
+
+let named_commits ~terminal_pending ~store ~verification_ids ~installation_id ~package_id =
+  let keep acc retained =
+    match Progress.phase (progress retained) with
+    | Finished _ | Conflicted _ ->
+      let* pending =
+        terminal_pending retained
+        |> Result.map_error (fun detail -> Corrupt_original detail)
+      in
+      Ok (if pending then retained :: acc else acc)
+    | Judged _ | Committing _ | Commit_unknown _ -> Ok (retained :: acc)
+    | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _
+    | Subdividing _ | Subdivided _ -> Ok acc
+  in
+  let pending =
+    List.fold_left (fun acc verification_id ->
+      let* acc = acc in
+      let* attempts = attempts_by_name ~store ~verification_id ~installation_id ~package_id in
+      List.fold_left
+        (fun acc retained -> let* acc = acc in keep acc retained)
+        (Ok acc) attempts)
+      (Ok []) (List.sort_uniq String.compare verification_ids)
+  in
+  Result.map List.rev pending

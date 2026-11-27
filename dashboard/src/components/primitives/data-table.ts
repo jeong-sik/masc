@@ -92,6 +92,13 @@ function renderCellContent<T>(col: DataTableColumn<T>, row: T): ComponentChildre
   return col.formatValue ? col.formatValue(raw) : String(raw)
 }
 
+// Keep cell rendering behind a stable component type so rebuilding `columns`
+// updates existing cell subtrees in place instead of unmounting/remounting
+// every cell (which would drop focus and re-run child effects).
+function DataCell<T>({ col, row }: { readonly col: DataTableColumn<T>; readonly row: T }) {
+  return html`${renderCellContent(col, row)}`
+}
+
 export function DataTable<T extends object>(props: DataTableProps<T>) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [sorting, setSorting] = useState<SortingState>(() =>
@@ -277,7 +284,9 @@ export function DataTable<T extends object>(props: DataTableProps<T>) {
                               class=${meta?.numeric ? 'is-num' : ''}
                               data-label=${meta?.header ?? cell.column.id}
                             >
-                              ${flexRender(cell.column.columnDef.cell, cell.getContext())}
+                              ${meta
+                                ? html`<${DataCell} col=${meta} row=${row.original} />`
+                                : flexRender(cell.column.columnDef.cell, cell.getContext())}
                             </td>
                           `
                         })}

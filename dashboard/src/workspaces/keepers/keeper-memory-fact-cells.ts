@@ -20,7 +20,8 @@ export function ordinaryFactKey(fact: OrdinaryMemoryFact): string {
   return fact.memory_id || fact.claim
 }
 
-/** A source can bind several claims, so the path alone does not tell them apart. */
+/** Paths are unique in a source-bound snapshot; pairing the path with its claim
+ *  keeps a replaced claim for the same path from inheriting open state. */
 export function sourceBoundFactKey(fact: SourceBoundMemoryFact): string {
   return `${fact.path}\n${fact.claim}`
 }

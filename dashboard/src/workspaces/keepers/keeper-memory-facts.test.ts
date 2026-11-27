@@ -19,10 +19,10 @@ const ordinaryFact = (hex: string, claim: string, lastSeen: number) => ({
   last_seen: lastSeen,
 })
 
-const sourceBoundFact = (claim: string) => ({
+const sourceBoundFact = (claim: string, path = 'docs/guides/operations.md') => ({
   claim,
   first_seen: 200,
-  path: 'docs/guides/operations.md',
+  path,
   sha256: digest('e'),
 })
 
@@ -162,20 +162,33 @@ describe('Keeper memory fact tables', () => {
       expect(button?.textContent?.trim()).toBe('더 보기')
       return button as HTMLButtonElement
     })
+    const longBox = long?.querySelector('.kp-mem-claim-text')
+    const briefBox = brief?.querySelector('.kp-mem-claim-text')
     expect(more.getAttribute('aria-expanded')).toBe('false')
-    expect(document.getElementById(more.getAttribute('aria-controls') ?? '')).toBe(long?.querySelector('.kp-mem-claim-text'))
+    expect(document.getElementById(more.getAttribute('aria-controls') ?? '')).toBe(longBox)
 
+    more.focus()
+    expect(document.activeElement).toBe(more)
     fireEvent.click(more)
 
     await waitFor(() => expect(cells(table, 'Claim')[0]?.querySelector('.kp-mem-claim')?.getAttribute('data-open')).toBe('true'))
-    const less = cells(table, 'Claim')[0]?.querySelector('button')
-    expect(less?.textContent?.trim()).toBe('접기')
-    expect(less?.getAttribute('aria-expanded')).toBe('true')
+    expect(more.isConnected).toBe(true)
+    expect(document.activeElement).toBe(more)
+    expect(more.textContent?.trim()).toBe('접기')
+    expect(more.getAttribute('aria-expanded')).toBe('true')
+    expect(cells(table, 'Claim')[0]?.querySelector('.kp-mem-claim-text')).toBe(longBox)
+    expect(cells(table, 'Claim')[1]?.querySelector('.kp-mem-claim-text')).toBe(briefBox)
   })
 
-  it('opens one claim of a source and leaves the other claims of that source cut', async () => {
+  it('opens one source-bound claim and leaves the other cut', async () => {
     layOutClaims()
-    serveMemory([ordinaryFact('a', 'a claim', 300)], [sourceBoundFact('a long first claim'), sourceBoundFact('a long second claim')])
+    serveMemory(
+      [ordinaryFact('a', 'a claim', 300)],
+      [
+        sourceBoundFact('a long first claim', 'docs/guides/operations.md'),
+        sourceBoundFact('a long second claim', 'docs/guides/recovery.md'),
+      ],
+    )
     const { table } = await openTab('Source-Bound Memory Facts')
     await waitFor(() => expect(table.querySelectorAll('td[data-label="Claim"] button')).toHaveLength(2))
 
@@ -189,7 +202,13 @@ describe('Keeper memory fact tables', () => {
   })
 
   it('keeps a row with its fact when a search leaves fewer rows', async () => {
-    serveMemory([ordinaryFact('a', 'a claim', 300)], [sourceBoundFact('the first claim'), sourceBoundFact('the second claim')])
+    serveMemory(
+      [ordinaryFact('a', 'a claim', 300)],
+      [
+        sourceBoundFact('the first claim', 'docs/guides/operations.md'),
+        sourceBoundFact('the second claim', 'docs/guides/recovery.md'),
+      ],
+    )
     const { view, table } = await openTab('Source-Bound Memory Facts')
     const rowOf = (word: string) => cells(table, 'Claim').find((cell) => cell.textContent?.includes(word))?.closest('tr')
     const second = rowOf('second')

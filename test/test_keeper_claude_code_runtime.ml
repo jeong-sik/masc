@@ -5792,28 +5792,51 @@ let test_context_overflow_maps_to_input_rejected_recovery () =
     (map (Runtime_claude_code.Subscription_required "auth required")
     = Keeper_official_client_session_store.Provider_rejected)
     true;
-  let org_unavailable ?api_error_status ?api_error_cause () =
-    Runtime_claude_code.Turn_failed_with_observation
-      { detail = "org settings unavailable"
+  let startup_refused ?api_error_status reason =
+    Runtime_claude_code.Startup_refused
+      { reason
       ; api_error_status
-      ; api_error_cause
-      ; startup_failure_reason = Some Runtime_claude_code.Org_config_required_unavailable
-      ; tool_effect_attempted = false
-      ; response_emitted = false
+      ; detail = "startup refused"
       }
   in
+  let to_core = Keeper_claude_code_runtime.For_testing.claude_error_to_core_error in
   check bool "clean pre-init org_config_required_unavailable is Pre_dispatch_failed"
-    (map (org_unavailable ())
+    (map (startup_refused Runtime_claude_code.Org_config_required_unavailable)
     = Keeper_official_client_session_store.Pre_dispatch_failed)
     true;
   check bool "org_config_required_unavailable with HTTP status stays Provider_rejected"
-    (map (org_unavailable ~api_error_status:401 ())
+    (map (startup_refused ~api_error_status:401 Runtime_claude_code.Org_config_required_unavailable)
     = Keeper_official_client_session_store.Provider_rejected)
     true;
-  check bool "org_config_required_unavailable with Authentication_failed stays Provider_rejected"
-    (map (org_unavailable ~api_error_cause:Runtime_claude_code.Authentication_failed ())
+  check bool "org_config_refused stays Provider_rejected"
+    (map (startup_refused Runtime_claude_code.Org_config_refused)
     = Keeper_official_client_session_store.Provider_rejected)
-    true
+    true;
+  check bool "other startup refusal stays Provider_rejected"
+    (map (startup_refused (Runtime_claude_code.Other_startup_failure "config_file_invalid"))
+    = Keeper_official_client_session_store.Provider_rejected)
+    true;
+  (match to_core (startup_refused ~api_error_status:401 Runtime_claude_code.Org_config_required_unavailable) with
+   | Agent_core.Error.Provider (Llm_provider.Error.AuthError _) -> ()
+   | other -> fail ("expected AuthError for 401 Startup_refused, got: " ^ Agent_core.Error.to_string other));
+  (match to_core (startup_refused ~api_error_status:403 Runtime_claude_code.Org_config_required_unavailable) with
+   | Agent_core.Error.Provider (Llm_provider.Error.AuthorizationError _) -> ()
+   | other -> fail ("expected AuthorizationError for 403 Startup_refused, got: " ^ Agent_core.Error.to_string other));
+  (match to_core (startup_refused ~api_error_status:429 Runtime_claude_code.Org_config_required_unavailable) with
+   | Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError { error_type = Some "startup_refused"; _ }) -> ()
+   | other -> fail ("expected ProviderReportedError for 429 Startup_refused, got: " ^ Agent_core.Error.to_string other));
+  (match to_core (startup_refused ~api_error_status:500 Runtime_claude_code.Org_config_refused) with
+   | Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError { error_type = Some "startup_refused"; _ }) -> ()
+   | other -> fail ("expected ProviderReportedError for 500 Org_config_refused, got: " ^ Agent_core.Error.to_string other));
+  (match to_core (startup_refused Runtime_claude_code.Org_config_refused) with
+   | Agent_core.Error.Provider (Llm_provider.Error.AuthError _) -> ()
+   | other -> fail ("expected AuthError for Org_config_refused, got: " ^ Agent_core.Error.to_string other));
+  (match to_core (startup_refused Runtime_claude_code.Org_config_required_unavailable) with
+   | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) -> ()
+   | other -> fail ("expected ProviderUnavailable for Org_config_required_unavailable, got: " ^ Agent_core.Error.to_string other));
+  (match to_core (startup_refused (Runtime_claude_code.Other_startup_failure "config_file_invalid")) with
+   | Agent_core.Error.Provider (Llm_provider.Error.ProviderReportedError { error_type = Some "startup_refused"; _ }) -> ()
+   | other -> fail ("expected ProviderReportedError for Other_startup_failure, got: " ^ Agent_core.Error.to_string other))
 ;;
 
 (* A Gate continuation's resume refused as full ends the Gate whatever it did

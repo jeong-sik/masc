@@ -521,12 +521,18 @@ type error =
         (** The cause named by the root response's API diagnostic envelope
             that ended the turn; [None] when no such envelope ended it or the
             envelope named none. *)
-      ; startup_failure_reason : startup_failure_reason option
-        (** The typed [startup_failure_reason] on a pre-initialize startup
-            failure result frame, when present. *)
       ; tool_effect_attempted : bool
       ; response_emitted : bool
       }
+  | Startup_refused of
+      { reason : startup_failure_reason
+      ; api_error_status : int option
+        (** Structured HTTP status on the startup refusal frame, when present. *)
+      ; detail : string
+      }
+      (** The CLI refused to open the session before initialize completed and
+          named [startup_failure_reason] on its result frame. No turn input
+          was sent, no tool ran, and no response was emitted. *)
   | Stopped_by_host of
       { stop : host_stop
       ; latest_request_input : request_input option

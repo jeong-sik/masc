@@ -186,19 +186,13 @@ let claude (error : Runtime_claude_code.error) : 'rejection Outcome.unanswered =
     (match tool_effect_attempted, response_emitted with
      | false, false -> Refused (Sized Input_too_large)
      | true, false | false, true | true, true -> Refused (Sized Window_reached))
-  | Turn_failed_with_observation { api_error_cause = Some Authentication_failed; _ }
-  | Turn_failed_with_observation
-      { api_error_cause = None | Some Other_api_error_cause
-      ; startup_failure_reason = Some Org_config_refused
-      ; _
-      } ->
+  | Turn_failed_with_observation { api_error_cause = Some Authentication_failed; _ } ->
     Silent Unavailable
-  | Turn_failed_with_observation
-      { api_error_cause = None | Some Other_api_error_cause
-      ; startup_failure_reason =
-          None | Some (Org_config_required_unavailable | Other_startup_failure _)
-      ; _
-      } ->
+  | Turn_failed_with_observation { api_error_cause = None | Some Other_api_error_cause; _ } ->
+    Silent Lost
+  | Startup_refused { reason = Org_config_refused; _ } ->
+    Silent Unavailable
+  | Startup_refused { reason = Org_config_required_unavailable | Other_startup_failure _; _ } ->
     Silent Lost
   | Quota_blocked _ -> Silent Busy
   | Invalid_config _ | Spawn_refused _ | Subscription_required _ -> Silent Unavailable

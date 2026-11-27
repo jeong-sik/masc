@@ -201,14 +201,20 @@ let antigravity_usage : Antigravity.usage =
 let claude_overflow ~tool_effect_attempted ~response_emitted =
   Claude.Context_window_exceeded { message = ""; tool_effect_attempted; response_emitted }
 
-let claude_observation ?startup_failure_reason api_error_cause =
+let claude_observation api_error_cause =
   Claude.Turn_failed_with_observation
     { detail = ""
     ; api_error_status = None
     ; api_error_cause
-    ; startup_failure_reason
     ; tool_effect_attempted = false
     ; response_emitted = false
+    }
+
+let claude_startup_refused reason =
+  Claude.Startup_refused
+    { reason
+    ; api_error_status = None
+    ; detail = ""
     }
 
 let schema_violation =
@@ -396,16 +402,16 @@ let samples =
   ; at claude "Turn_failed" (Claude.Turn_failed "")
   ; at claude "Turn_failed_with_observation" ~case:"api_error_cause = Some Authentication_failed"
       (claude_observation (Some Authentication_failed))
-  ; at claude "Turn_failed_with_observation" ~case:"startup_failure_reason = Some Org_config_refused"
-      (claude_observation ~startup_failure_reason:Org_config_refused None)
   ; at claude "Turn_failed_with_observation" ~case:"api_error_cause = None or Some Other_api_error_cause"
       (claude_observation None)
   ; at claude "Turn_failed_with_observation" ~case:"api_error_cause = None or Some Other_api_error_cause"
-      (claude_observation ~startup_failure_reason:Org_config_required_unavailable None)
-  ; at claude "Turn_failed_with_observation" ~case:"api_error_cause = None or Some Other_api_error_cause"
-      (claude_observation ~startup_failure_reason:(Other_startup_failure "config_file_invalid") None)
-  ; at claude "Turn_failed_with_observation" ~case:"api_error_cause = None or Some Other_api_error_cause"
       (claude_observation (Some Other_api_error_cause))
+  ; at claude "Startup_refused" ~case:"reason = Org_config_refused"
+      (claude_startup_refused Org_config_refused)
+  ; at claude "Startup_refused" ~case:"reason = Org_config_required_unavailable or Other_startup_failure"
+      (claude_startup_refused Org_config_required_unavailable)
+  ; at claude "Startup_refused" ~case:"reason = Org_config_required_unavailable or Other_startup_failure"
+      (claude_startup_refused (Other_startup_failure "config_file_invalid"))
   ; at claude "Stopped_by_host" (Claude.Stopped_by_host { stop = host_stop; latest_request_input = None })
   ; at claude "Quota_blocked"
       (Claude.Quota_blocked

@@ -30,8 +30,9 @@ type vendor_session_activity = Keeper_internal_error.vendor_session_activity =
 
 type recovery_failure =
   | Pre_dispatch_failed
-      (** Local preparation failed before entering the provider process; the
-          claim can be released without an ambiguous effect recovery fence. *)
+      (** Local preparation or pre-admission client startup failed before
+          session admission or turn input dispatch; the claim can be released
+          without an ambiguous effect recovery fence. *)
   | Spawn_resources_busy
       (** The child could not start for a shortage that passes (descriptors,
           memory, process slots, a full spawn gate). Transient. *)

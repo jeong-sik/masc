@@ -270,6 +270,7 @@ let status_summary_string (ctx : context) =
     |> List.sort (fun (a : Masc_domain.agent) (b : Masc_domain.agent) ->
       String.compare a.name b.name)
   in
+  let task_yield_meter = Eio_guard.create_yield_meter () in
   let ( active_tasks
       , todo_count
       , claimed_count
@@ -280,7 +281,7 @@ let status_summary_string (ctx : context) =
     List.fold_left
       (fun (active, todo_cnt, claimed_cnt, in_progress_cnt, done_cnt, cancelled_cnt)
         (task : Masc_domain.task) ->
-         Eio_guard.fair_yield ();
+         Eio_guard.yield_step task_yield_meter;
          match task.task_status with
          | Masc_domain.Todo ->
            ( task :: active

@@ -220,6 +220,26 @@ let report_rejected_rows ~context rejected =
    re-parsed and rewrote the whole ledger; measured 2026-09-05 on a 25 MB
    ledger, that was ~4.5 GB allocated per 4 minutes across the fleet (RFC
    main-domain-scheduler-latency §8, P4a). *)
+type regular_file_stamp =
+  { stamp_dev : int
+  ; stamp_ino : int
+  ; stamp_size : int
+  ; stamp_perm : int
+  ; stamp_uid : int
+  ; stamp_gid : int
+  ; stamp_mtime : float
+  ; stamp_ctime : float
+  }
+
+type data_file_stamp =
+  | Data_missing
+  | Data_regular of regular_file_stamp
+
+type ledger_stamp =
+  { data_stamp : data_file_stamp
+  ; lock_stamp : regular_file_stamp
+  }
+
 type ledger_state =
   { by_id : (int * candidate) Candidate_map.t
     (* first index among the decoded rows on disk, and the latest row of that id *)
@@ -227,7 +247,97 @@ type ledger_state =
   ; decoded_rows : int (* rows on disk the decoder accepted; also the next first index *)
   ; rejected_rows : int (* rows on disk the decoder refused *)
   ; cursor : Fs_compat.Private_jsonl_cursor.t (* store identity and end offset *)
+  ; stamp : ledger_stamp option
+    (* [lstat] snapshot of the data and lock files matching [cursor], used by
+       read-only callers to skip the systhread + POSIX lockf round-trip when
+       neither file changed. *)
   }
+
+let regular_stamp_of_stats (st : Unix.stats) =
+  { stamp_dev = st.Unix.st_dev
+  ; stamp_ino = st.Unix.st_ino
+  ; stamp_size = st.Unix.st_size
+  ; stamp_perm = st.Unix.st_perm land 0o7777
+  ; stamp_uid = st.Unix.st_uid
+  ; stamp_gid = st.Unix.st_gid
+  ; stamp_mtime = st.Unix.st_mtime
+  ; stamp_ctime = st.Unix.st_ctime
+  }
+;;
+
+let regular_stamp_matches (expected : regular_file_stamp) (st : Unix.stats) =
+  st.Unix.st_kind = Unix.S_REG
+  && st.Unix.st_nlink = 1
+  && Int.equal st.Unix.st_dev expected.stamp_dev
+  && Int.equal st.Unix.st_ino expected.stamp_ino
+  && Int.equal st.Unix.st_size expected.stamp_size
+  && Int.equal (st.Unix.st_perm land 0o7777) expected.stamp_perm
+  && Int.equal st.Unix.st_uid expected.stamp_uid
+  && Int.equal st.Unix.st_gid expected.stamp_gid
+  && Float.equal st.Unix.st_mtime expected.stamp_mtime
+  && Float.equal st.Unix.st_ctime expected.stamp_ctime
+;;
+
+let capture_lock_stamp ~path =
+  let lock_path = Fs_compat.private_jsonl_lock_path path in
+  match Unix.lstat lock_path with
+  | exception (Unix.Unix_error _ | Sys_error _) -> None
+  | st
+    when st.Unix.st_kind = Unix.S_REG
+         && st.Unix.st_nlink = 1
+         && Int.equal st.Unix.st_size Fs_compat.private_jsonl_stable_lock_ready_size
+         && (st.Unix.st_perm land 0o7777) = 0o600 ->
+    Some (regular_stamp_of_stats st)
+  | (_ : Unix.stats) -> None
+;;
+
+let capture_data_stamp ~path (cursor : Fs_compat.Private_jsonl_cursor.t) =
+  if Fs_compat.Private_jsonl_cursor.is_missing cursor
+  then
+    match Unix.lstat path with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Some Data_missing
+    | exception (Unix.Unix_error _ | Sys_error _) -> None
+    | (_ : Unix.stats) -> None
+  else
+    match Unix.lstat path with
+    | exception (Unix.Unix_error _ | Sys_error _) -> None
+    | st when Fs_compat.Private_jsonl_cursor.matches_regular_stats cursor st ->
+      Some (Data_regular (regular_stamp_of_stats st))
+    | (_ : Unix.stats) -> None
+;;
+
+let capture_ledger_stamp ~path cursor =
+  match capture_data_stamp ~path cursor, capture_lock_stamp ~path with
+  | Some data_stamp, Some lock_stamp -> Some { data_stamp; lock_stamp }
+  | Some _, None | None, (Some _ | None) -> None
+;;
+
+let lock_stamp_matches ~path (expected : regular_file_stamp) =
+  let lock_path = Fs_compat.private_jsonl_lock_path path in
+  match Unix.lstat lock_path with
+  | exception (Unix.Unix_error _ | Sys_error _) -> false
+  | st ->
+    Int.equal st.Unix.st_size Fs_compat.private_jsonl_stable_lock_ready_size
+    && (st.Unix.st_perm land 0o7777) = 0o600
+    && regular_stamp_matches expected st
+;;
+
+let data_stamp_matches ~path = function
+  | Data_missing ->
+    (match Unix.lstat path with
+     | exception Unix.Unix_error (Unix.ENOENT, _, _) -> true
+     | exception (Unix.Unix_error _ | Sys_error _) -> false
+     | (_ : Unix.stats) -> false)
+  | Data_regular expected ->
+    (match Unix.lstat path with
+     | exception (Unix.Unix_error _ | Sys_error _) -> false
+     | st -> regular_stamp_matches expected st)
+;;
+
+let ledger_stamp_matches ~path (stamp : ledger_stamp) =
+  data_stamp_matches ~path stamp.data_stamp
+  && lock_stamp_matches ~path stamp.lock_stamp
+;;
 
 type ledger_entry =
   { ledger_mutex : Cross_context_mutex.t
@@ -268,6 +378,7 @@ let empty_ledger_state cursor =
   ; decoded_rows = 0
   ; rejected_rows = 0
   ; cursor
+  ; stamp = None
   }
 ;;
 
@@ -310,6 +421,7 @@ let apply_snapshot ~path state (snapshot : Fs_compat.private_jsonl_snapshot) =
   { state with
     rejected_rows = state.rejected_rows + List.length rejected
   ; cursor = snapshot.Fs_compat.cursor
+  ; stamp = capture_ledger_stamp ~path snapshot.Fs_compat.cursor
   }
 ;;
 
@@ -317,12 +429,12 @@ let apply_snapshot ~path state (snapshot : Fs_compat.private_jsonl_snapshot) =
    replaced, truncated, or removed store is a [Cursor_mismatch]; the cache is
    dropped and the state rebuilt from a whole-store read. Any other failure
    drops the cache so the next access reads the store again. *)
-let rec refresh_ledger ~path entry =
+let rec refresh_ledger_locked ~path entry =
   let after = Option.map (fun state -> state.cursor) entry.ledger_cache in
   match Fs_compat.read_private_jsonl_durable_locked_result path ~after with
   | Error (Fs_compat.Cursor_mismatch _) when Option.is_some after ->
     entry.ledger_cache <- None;
-    refresh_ledger ~path entry
+    refresh_ledger_locked ~path entry
   | (Error (Fs_compat.Transaction_content_changed _ | Fs_compat.Invalid_transaction_suffix | (Fs_compat.Stable_lock_contended _ | (Fs_compat.Unexpected_stable_lock_permissions _ | (Fs_compat.Invalid_stable_lock_state _ | (Fs_compat.Unexpected_transaction_file_kind _ | (Fs_compat.Ambiguous_transaction_file_identity _ | (Fs_compat.Transaction_path_binding_changed _ | (Fs_compat.Incomplete_transaction_tail _ | (Fs_compat.Private_jsonl_operation_failed _ | (Fs_compat.Rewrite_stage_failed _ | (Fs_compat.Rewrite_published_durability_unknown _ | (Fs_compat.Transaction_settlement_failed _ | Fs_compat.Transaction_append_failed _)))))))))))) | Ok _ | Error (Cursor_mismatch _)) as result -> (match snapshot_result ~path result with
      | Error error ->
        entry.ledger_cache <- None;
@@ -336,6 +448,14 @@ let rec refresh_ledger ~path entry =
        let state = apply_snapshot ~path base snapshot in
        entry.ledger_cache <- Some state;
        Ok state)
+;;
+
+let refresh_ledger ~allow_stat_fast_path ~path entry =
+  match entry.ledger_cache with
+  | Some ({ stamp = Some stamp; _ } as state)
+    when allow_stat_fast_path && ledger_stamp_matches ~path stamp ->
+    Ok state
+  | Some _ | None -> refresh_ledger_locked ~path entry
 ;;
 
 (* Rejections are returned, not only logged: a caller that must fail closed on
@@ -390,7 +510,9 @@ let load_candidates ~base_path ~keeper_name =
   let path = candidate_path ~base_path ~keeper_name in
   let entry = ledger_entry path in
   Cross_context_mutex.with_lock entry.ledger_mutex (fun () ->
-    Result.map (fun state -> state.latest) (refresh_ledger ~path entry))
+    Result.map
+      (fun state -> state.latest)
+      (refresh_ledger ~allow_stat_fast_path:true ~path entry))
 ;;
 
 let append_row candidate = Yojson.Safe.to_string (candidate_to_json candidate) ^ "\n"
@@ -431,7 +553,7 @@ let update_ledger_many ~base_path ~keeper_name decide =
   let entry = ledger_entry path in
   try
     Cross_context_mutex.with_durable_lock entry.ledger_mutex (fun () ->
-      let* state = refresh_ledger ~path entry in
+      let* state = refresh_ledger ~allow_stat_fast_path:false ~path entry in
       match decide state.latest with
       | Error _ as error -> error
       | Ok (None, result) -> Ok result
@@ -463,10 +585,11 @@ let update_ledger_many ~base_path ~keeper_name decide =
            entry.ledger_cache <- None;
            Error error
          | Ok cursor ->
+           let stamp = capture_ledger_stamp ~path cursor in
            let next =
              if compact
-             then apply_decoded_rows (empty_ledger_state cursor) appended.latest
-             else { appended with cursor }
+             then { (apply_decoded_rows (empty_ledger_state cursor) appended.latest) with stamp }
+             else { appended with cursor; stamp }
            in
            entry.ledger_cache <- Some next;
            Ok result))
@@ -560,7 +683,7 @@ let prune_consumed_behind_cursor ~base_path ~keeper_name ~open_partition_candida
   let entry = ledger_entry path in
   try
     Cross_context_mutex.with_durable_lock entry.ledger_mutex (fun () ->
-      let* state = refresh_ledger ~path entry in
+      let* state = refresh_ledger ~allow_stat_fast_path:false ~path entry in
       if state.rejected_rows > 0
       then Ok 0
       else
@@ -584,12 +707,18 @@ let prune_consumed_behind_cursor ~base_path ~keeper_name ~open_partition_candida
               ~expected:state.cursor
               (serialize_candidates kept)
           in
-          let* cursor = cursor_result ~path written in
-          let next =
-            apply_decoded_rows (empty_ledger_state cursor) kept
-          in
-          entry.ledger_cache <- Some next;
-          Ok removed)
+          (match cursor_result ~path written with
+           | Error error ->
+             entry.ledger_cache <- None;
+             Error error
+           | Ok cursor ->
+             let next =
+               { (apply_decoded_rows (empty_ledger_state cursor) kept) with
+                 stamp = capture_ledger_stamp ~path cursor
+               }
+             in
+             entry.ledger_cache <- Some next;
+             Ok removed))
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
@@ -626,7 +755,7 @@ let lookup ~base_path ~keeper_name ~candidate_id =
          | Some candidate, (_ : int) -> In_ledger candidate
          | None, 0 -> Not_in_ledger
          | None, rejected_rows -> Behind_rejected_rows { rejected_rows })
-      (refresh_ledger ~path entry))
+      (refresh_ledger ~allow_stat_fast_path:true ~path entry))
 ;;
 
 let record ~base_path candidate =

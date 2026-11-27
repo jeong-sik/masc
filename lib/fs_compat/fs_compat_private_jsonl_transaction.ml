@@ -64,6 +64,17 @@ module Private_jsonl_cursor = struct
       then Some end_offset
       else None
   ;;
+
+  let matches_regular_stats cursor (st : Unix.stats) =
+    match cursor with
+    | Missing -> false
+    | Present { device; inode; end_offset } ->
+      st.Unix.st_kind = Unix.S_REG
+      && st.Unix.st_nlink = 1
+      && Int.equal device st.Unix.st_dev
+      && Int.equal inode st.Unix.st_ino
+      && Int.equal end_offset st.Unix.st_size
+  ;;
 end
 
 type private_jsonl_snapshot =
@@ -489,6 +500,9 @@ let private_jsonl_transaction_unix_io =
 ;;
 
 let private_jsonl_stable_lock_ready_marker = "\xA5"
+let private_jsonl_stable_lock_ready_size =
+  String.length private_jsonl_stable_lock_ready_marker
+;;
 
 type private_jsonl_stable_lock_state =
   | Stable_lock_initializing

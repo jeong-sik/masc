@@ -1642,12 +1642,126 @@ let test_actual_write_metadata_preserves_the_store_result () =
         (List.length (ok "read purged source" (A.load_candidates ~base_path ~keeper_name:"alpha")))))
 ;;
 
+let test_stat_fast_path_detects_external_mutations_and_fails_closed () =
+  with_temp_base "board-attention-candidate-stat-fastpath" @@ fun base_path ->
+  let path = ledger_path ~base_path in
+  let lock_path = Fs_compat.private_jsonl_lock_path path in
+  (* 1. Missing ledger: warm cache then re-read unchanged. *)
+  Alcotest.(check (list string))
+    "missing ledger initially empty"
+    []
+    (List.map (fun (c : A.candidate) -> c.candidate_id)
+       (ok "cold missing load" (A.load_candidates ~base_path ~keeper_name:"alpha")));
+  Alcotest.(check (list string))
+    "warm missing load stays empty"
+    []
+    (List.map (fun (c : A.candidate) -> c.candidate_id)
+       (ok "warm missing load" (A.load_candidates ~base_path ~keeper_name:"alpha")));
+  (* 2. External file creation invalidates the missing stamp. *)
+  let first = candidate (signal "stat-fastpath-first") in
+  write_ledger_rows ~base_path [ A.candidate_to_json first ];
+  Alcotest.(check bool)
+    "external creation after missing stamp is observed"
+    true
+    (ok "load after external create" (A.load_candidates ~base_path ~keeper_name:"alpha")
+     = [ first ]);
+  Alcotest.(check bool)
+    "warm present load returns cached state"
+    true
+    (ok "warm present load" (A.load_candidates ~base_path ~keeper_name:"alpha")
+     = [ first ]);
+  (match ok "warm lookup" (A.lookup ~base_path ~keeper_name:"alpha" ~candidate_id:first.candidate_id) with
+   | A.In_ledger found ->
+     Alcotest.(check bool) "warm lookup matches candidate" true (found = first)
+   | A.Not_in_ledger | A.Behind_rejected_rows _ ->
+     Alcotest.fail "warm lookup missed cached candidate");
+  (* 3. External append and external torn tail both invalidate the present stamp. *)
+  let second = candidate (signal "stat-fastpath-second") in
+  Out_channel.with_open_gen [ Open_append; Open_binary ] 0o600 path (fun ch ->
+    output_string ch (Yojson.Safe.to_string (A.candidate_to_json second) ^ "\n"));
+  Alcotest.(check bool)
+    "external append is observed"
+    true
+    (ok "load after external append" (A.load_candidates ~base_path ~keeper_name:"alpha")
+     = [ first; second ]);
+  Out_channel.with_open_gen [ Open_append; Open_binary ] 0o600 path (fun ch ->
+    output_string ch {|{"kind":|});
+  (match A.load_candidates ~base_path ~keeper_name:"alpha" with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "stat fast path accepted an externally appended torn tail");
+  ignore (ok "recover torn tail" (A.recover_for_process_start ~base_path ~keeper_name:"alpha"));
+  Alcotest.(check bool)
+    "recovered rows stay readable"
+    true
+    (ok "load after recovery" (A.load_candidates ~base_path ~keeper_name:"alpha")
+     = [ first; second ]);
+  (* 4. Lock permission and size tampering both invalidate the lock stamp and fail closed. *)
+  Unix.chmod lock_path 0o644;
+  (match A.load_candidates ~base_path ~keeper_name:"alpha" with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "stat fast path ignored unexpected lock permissions");
+  Unix.chmod lock_path 0o600;
+  Alcotest.(check bool)
+    "restored lock permissions allow reading again"
+    true
+    (ok "load after lock perm restore" (A.load_candidates ~base_path ~keeper_name:"alpha")
+     = [ first; second ]);
+  let original_lock_bytes = In_channel.with_open_bin lock_path In_channel.input_all in
+  Out_channel.with_open_bin lock_path (fun ch -> output_string ch "xx");
+  (match A.load_candidates ~base_path ~keeper_name:"alpha" with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "stat fast path ignored invalid lock file length");
+  Out_channel.with_open_bin lock_path (fun ch -> output_string ch original_lock_bytes);
+  Alcotest.(check bool)
+    "restored lock bytes allow reading again"
+    true
+    (ok "load after lock bytes restore" (A.load_candidates ~base_path ~keeper_name:"alpha")
+     = [ first; second ]);
+  (* 5. External unlink, symlink (dangling and regular), and directory fail closed
+     even when preceded by a warmed Data_missing stamp. *)
+  Unix.unlink path;
+  Alcotest.(check (list string))
+    "external unlink reloads as empty"
+    []
+    (List.map (fun (c : A.candidate) -> c.candidate_id)
+       (ok "load after unlink" (A.load_candidates ~base_path ~keeper_name:"alpha")));
+  Unix.symlink (Filename.concat base_path "nonexistent-target.jsonl") path;
+  (match A.load_candidates ~base_path ~keeper_name:"alpha" with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "stat fast path accepted a dangling symlink");
+  Unix.unlink path;
+  ignore (ok "rewarm missing before symlink" (A.load_candidates ~base_path ~keeper_name:"alpha"));
+  let target = Filename.concat base_path "symlink-target.jsonl" in
+  Out_channel.with_open_bin target (fun ch ->
+    output_string ch (Yojson.Safe.to_string (A.candidate_to_json first) ^ "\n"));
+  Unix.symlink target path;
+  (match A.load_candidates ~base_path ~keeper_name:"alpha" with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "stat fast path accepted a symlink to a regular file");
+  Unix.unlink path;
+  ignore (ok "rewarm missing before mkdir" (A.load_candidates ~base_path ~keeper_name:"alpha"));
+  Unix.mkdir path 0o700;
+  (match A.load_candidates ~base_path ~keeper_name:"alpha" with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "stat fast path accepted a directory at the ledger path");
+  Unix.rmdir path;
+  Alcotest.(check (list string))
+    "removing directory restores empty read"
+    []
+    (List.map (fun (c : A.candidate) -> c.candidate_id)
+       (ok "load after rmdir" (A.load_candidates ~base_path ~keeper_name:"alpha")))
+;;
+
 let () =
   Alcotest.run
     "keeper_board_attention_candidate"
     [ ( "durable candidate"
       , [ Alcotest.test_case "actual write metadata preserves its durable outcome" `Quick
             test_actual_write_metadata_preserves_the_store_result
+        ; Alcotest.test_case
+            "stat fast path detects external mutations and fails closed"
+            `Quick
+            test_stat_fast_path_detects_external_mutations_and_fails_closed
         ; Alcotest.test_case
             "an unreadable row does not hide the rest"
             `Quick

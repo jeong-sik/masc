@@ -19,6 +19,7 @@ module Private_jsonl_cursor :
     val fingerprint : t -> string
     val prefix_end_offset :
       t -> device:int -> inode:int -> file_length:int -> int option
+    val matches_regular_stats : t -> Unix.stats -> bool
   end
 
 type private_jsonl_snapshot =
@@ -175,6 +176,7 @@ val lock_suffix : string
 val is_lock_name : string -> bool
 
 val private_jsonl_lock_path : string -> string
+val private_jsonl_stable_lock_ready_size : int
 
 type private_jsonl_transaction_io_for_testing =
   { before_sync_parent : string -> unit

@@ -1191,6 +1191,63 @@ let test_goal_event_source_and_summary () =
     "/api/v1/dashboard/goals"
     (json_string_field "dashboard_surface" goal_summary)
 
+let test_goal_event_summary_cache_tracks_append_rewrite_and_removal () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let dir = tmpdir "telem_goal_event_cache" in
+  let root = masc_root dir in
+  Fs_compat.mkdir_p root;
+  let path = Filename.concat root "goal_events.jsonl" in
+  let event_line ts kind =
+    Yojson.Safe.to_string
+      (`Assoc
+         [ ("ts", `String (Masc_domain.iso8601_of_unix_seconds ts))
+         ; ("goal_id", `String "goal-cache")
+         ; ("event_type", `String kind)
+         ])
+    ^ "\n"
+  in
+  let stats () =
+    let goal_summary =
+      Telemetry_unified.summary_json ~masc_root:root ()
+      |> source_summary "goal_event"
+    in
+    let entry_count = json_int_field "entry_count" goal_summary in
+    let latest_ts =
+      match Yojson.Safe.Util.member "latest_ts_unix" goal_summary with
+      | `Float ts -> Some ts
+      | `Null -> None
+      | other ->
+        Alcotest.fail ("unexpected latest_ts_unix: " ^ Yojson.Safe.to_string other)
+    in
+    (entry_count, latest_ts)
+  in
+  let now = Float.floor (Unix.gettimeofday ()) in
+  let t1 = now -. 10.0 in
+  let t2 = now -. 5.0 in
+  let t3 = now in
+  Fs_compat.append_file path (event_line t1 "created");
+  let c1, ts1 = stats () in
+  Alcotest.(check int) "initial count" 1 c1;
+  Alcotest.(check (option (float 0.01))) "initial latest_ts" (Some t1) ts1;
+  let c1_hit, ts1_hit = stats () in
+  Alcotest.(check int) "unchanged cache hit keeps count" 1 c1_hit;
+  Alcotest.(check (option (float 0.01))) "unchanged cache hit keeps latest_ts" (Some t1) ts1_hit;
+  Fs_compat.append_file path (event_line t2 "updated");
+  let c2, ts2 = stats () in
+  Alcotest.(check int) "append invalidates cache" 2 c2;
+  Alcotest.(check (option (float 0.01))) "append updates latest_ts" (Some t2) ts2;
+  (* Replace with a shorter single-line file. *)
+  Fs_compat.save_file path (event_line t3 "replaced");
+  let c3, ts3 = stats () in
+  Alcotest.(check int) "rewrite invalidates cache" 1 c3;
+  Alcotest.(check (option (float 0.01))) "rewrite updates latest_ts" (Some t3) ts3;
+  (* Removal evicts cache and reports zero / null timestamp. *)
+  Sys.remove path;
+  let c4, ts4 = stats () in
+  Alcotest.(check int) "removal clears cached count" 0 c4;
+  Alcotest.(check (option (float 0.01))) "removal clears cached latest_ts" None ts4
+
 let test_goal_event_missing_reports_not_yet () =
   (* Goal_event store is created lazily by goal_fsm on the first verification.
      A fleet that has not yet verified a goal MUST surface as a neutral
@@ -1813,6 +1870,9 @@ let () =
             test_summary_ignores_recovered_coverage_gap;
           Alcotest.test_case "goal_event missing reports not_yet" `Quick
             test_goal_event_missing_reports_not_yet;
+          Alcotest.test_case "goal_event summary cache tracks append, rewrite, and removal"
+            `Quick
+            test_goal_event_summary_cache_tracks_append_rewrite_and_removal;
           Alcotest.test_case "tool_call_io missing stays missing" `Quick
             test_tool_call_io_missing_still_reports_missing;
           Alcotest.test_case "bad trajectory root observed once" `Quick

@@ -89,32 +89,34 @@ let set_pinned store ~post_id ~pinned : (unit, board_error) Result.t =
   | Error e -> Error e
   | Ok pid ->
     with_persist_lock store (fun () ->
-      let result =
+      let staged =
         with_lock store (fun () ->
           match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
           | None -> Error (Post_not_found post_id)
           | Some post ->
               let now = Time_compat.now () in
-              let updated = { post with pinned; updated_at = now } in
-              put_post store updated;
-              invalidate_post_caches store;
-              Ok (post, updated))
+              Ok { post with pinned; updated_at = now })
       in
-      match result with
+      match staged with
       | Error e -> Error e
-      | Ok (previous, updated) ->
+      | Ok updated ->
           (match append_post store updated with
-           | (Posts_written _ | Posts_write_unknown _) as outcome -> finish_posts_write outcome
-           | (Posts_not_written _ as outcome) ->
+           | (Posts_not_written _ | Posts_write_unknown _) as outcome ->
+               finish_posts_write outcome
+           | Posts_written _ as outcome ->
                with_lock store (fun () ->
-                 let key = Post_id.to_string previous.id in
-                 (match Hashtbl.find_opt store.posts key with
-                  | Some current
-                    when current.pinned = updated.pinned
-                         && Stdlib.Float.equal current.updated_at updated.updated_at ->
-                    put_post store previous;
-                    invalidate_post_caches store
-                  | _ -> ()));
+                 let key = Post_id.to_string updated.id in
+                 match Hashtbl.find_opt store.posts key with
+                 | Some current ->
+                   let committed =
+                     { current with
+                       pinned;
+                       updated_at = Stdlib.Float.max current.updated_at updated.updated_at;
+                     }
+                   in
+                   put_post store committed;
+                   invalidate_post_caches store
+                 | None -> ());
                finish_posts_write outcome))
 
 (** A close must state its successor decision explicitly: [Successor id]
@@ -175,7 +177,7 @@ let set_closed ?(authorize = fun _ -> Ok ()) store ~post_id ~closed_by ~successo
      | Error e -> Error e
      | Ok successor_id ->
        with_persist_lock store (fun () ->
-         let result =
+         let staged =
            with_lock store (fun () ->
              match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
              | None -> Error (Post_not_found post_id)
@@ -199,26 +201,28 @@ let set_closed ?(authorize = fun _ -> Ok ()) store ~post_id ~closed_by ~successo
                let closed =
                  Some { closed_by = closed_by_id; closed_at = now; successor_id; summary = Some summary }
                in
-               let updated = { post with closed; updated_at = now } in
-               put_post store updated;
-               invalidate_post_caches store;
-               Ok (post, updated))
+               Ok { post with closed; updated_at = now })
          in
-         match result with
+         match staged with
          | Error e -> Error e
-         | Ok (previous, updated) ->
+         | Ok updated ->
            (match append_post store updated with
-            | (Posts_written _ | Posts_write_unknown _) as outcome -> finish_posts_write outcome
-            | (Posts_not_written _ as outcome) ->
+            | (Posts_not_written _ | Posts_write_unknown _) as outcome ->
+              finish_posts_write outcome
+            | Posts_written _ as outcome ->
               with_lock store (fun () ->
-                let key = Post_id.to_string previous.id in
-                (match Hashtbl.find_opt store.posts key with
-                 | Some current
-                   when Option.is_some current.closed = Option.is_some updated.closed
-                        && Stdlib.Float.equal current.updated_at updated.updated_at ->
-                   put_post store previous;
-                   invalidate_post_caches store
-                 | _ -> ()));
+                let key = Post_id.to_string updated.id in
+                match Hashtbl.find_opt store.posts key with
+                | Some current ->
+                  let committed =
+                    { current with
+                      closed = updated.closed;
+                      updated_at = Stdlib.Float.max current.updated_at updated.updated_at;
+                    }
+                  in
+                  put_post store committed;
+                  invalidate_post_caches store
+                | None -> ());
               finish_posts_write outcome)))
 ;;
 
@@ -233,7 +237,7 @@ let reopen ?(authorize = fun _ -> Ok ()) store ~post_id : (unit, board_error) Re
   | Error e -> Error e
   | Ok pid ->
     with_persist_lock store (fun () ->
-      let result =
+      let staged =
         with_lock store (fun () ->
           match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
           | None -> Error (Post_not_found post_id)
@@ -242,27 +246,29 @@ let reopen ?(authorize = fun _ -> Ok ()) store ~post_id : (unit, board_error) Re
             if Option.is_none post.closed then Ok None
             else (
               let now = Time_compat.now () in
-              let updated = { post with closed = None; updated_at = now } in
-              put_post store updated;
-              invalidate_post_caches store;
-              Ok (Some (post, updated))))
+              Ok (Some { post with closed = None; updated_at = now })))
       in
-      match result with
+      match staged with
       | Error e -> Error e
       | Ok None -> Ok () (* already open: no write, no updated_at bump *)
-      | Ok (Some (previous, updated)) ->
+      | Ok (Some updated) ->
         (match append_post store updated with
-         | (Posts_written _ | Posts_write_unknown _) as outcome -> finish_posts_write outcome
-         | (Posts_not_written _ as outcome) ->
+         | (Posts_not_written _ | Posts_write_unknown _) as outcome ->
+           finish_posts_write outcome
+         | Posts_written _ as outcome ->
            with_lock store (fun () ->
-             let key = Post_id.to_string previous.id in
-             (match Hashtbl.find_opt store.posts key with
-              | Some current
-                when Option.is_none current.closed
-                     && Stdlib.Float.equal current.updated_at updated.updated_at ->
-                put_post store previous;
-                invalidate_post_caches store
-              | _ -> ()));
+             let key = Post_id.to_string updated.id in
+             match Hashtbl.find_opt store.posts key with
+             | Some current ->
+               let committed =
+                 { current with
+                   closed = None;
+                   updated_at = Stdlib.Float.max current.updated_at updated.updated_at;
+                 }
+               in
+               put_post store committed;
+               invalidate_post_caches store
+             | None -> ());
            finish_posts_write outcome))
 ;;
 

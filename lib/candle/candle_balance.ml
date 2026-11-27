@@ -294,7 +294,7 @@ let gift state ~at ~from_keeper ~to_keeper ~amount_milli ~reason =
   let* state = advance_keeper state ~at ~keeper:to_keeper in
   let available_milli = balance state ~keeper:from_keeper in
   let current = balance state ~keeper:to_keeper in
-  if amount_milli <= 0
+  if amount_milli <= 0 || String.equal from_keeper to_keeper
   then Error (Invalid_gift { from_keeper; to_keeper; amount_milli })
   else if Gifts.mem (from_keeper, to_keeper, reason, amount_milli) state.gifts
   then Error (Duplicate_gift { from_keeper; to_keeper; reason })

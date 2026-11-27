@@ -25,7 +25,8 @@ let unresolvable_evidence_ref value =
     Workspace_verification_store.classify_evidence_reference (String.trim value)
   with
   | Workspace_verification_store.Unresolvable_reference -> true
-  | Workspace_verification_store.Artifact_reference _
+  | Workspace_verification_store.Artifact_reference path ->
+    not (Workspace_verification_store.valid_producer_relative_path path)
   | Workspace_verification_store.Note_reference _
   | Workspace_verification_store.Collaboration_reference _ -> false
 ;;

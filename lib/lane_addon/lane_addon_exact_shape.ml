@@ -81,23 +81,36 @@ let check_scalar_constraints ~at schema output =
     | `Null | `Bool _ | `Assoc _ | `List _ | `Tuple _ | `Variant _ -> None
 ;;
 
+let matches_single_type type_name output =
+  match type_name, output with
+  | "object", `Assoc _
+  | "array", `List _
+  | "string", `String _
+  | "boolean", `Bool _
+  | "integer", (`Int _ | `Intlit _)
+  | "number", (`Int _ | `Intlit _ | `Float _)
+  | "null", `Null -> true
+  | ("object" | "array" | "string" | "boolean" | "integer" | "number" | "null"), _ -> false
+  | _, _ -> true
+;;
+
 let rec issue ~at schema output =
   match field "anyOf" schema with
   | Some (`List (_ :: _ as alternatives)) ->
     let issues = List.map (fun alternative -> issue ~at alternative output) alternatives in
     if List.exists Option.is_none issues then None else List.find_map Fun.id issues
   | Some _ | None ->
+    let explicit_type = field "type" schema in
     let type_matches =
-      match field "type" schema, output with
-      | Some (`String "object"), `Assoc _
-      | Some (`String "array"), `List _
-      | Some (`String "string"), `String _
-      | Some (`String "boolean"), `Bool _
-      | Some (`String "integer"), (`Int _ | `Intlit _)
-      | Some (`String "number"), (`Int _ | `Intlit _ | `Float _)
-      | Some (`String "null"), `Null -> true
-      | Some (`String ("object" | "array" | "string" | "boolean" | "integer" | "number" | "null")), _ -> false
-      | (Some _ | None), _ -> true
+      match explicit_type with
+      | Some (`String t) -> matches_single_type t output
+      | Some (`List types) ->
+        (* An array type with no string entries is malformed JSON Schema (reject);
+           unknown string type names remain forward-compatible via matches_single_type. *)
+        (match List.filter_map (function `String t -> Some t | _ -> None) types with
+         | [] -> false
+         | names -> List.exists (fun t -> matches_single_type t output) names)
+      | Some _ | None -> true
     in
     if not type_matches
     then Some (Incompatible_required_shape at)
@@ -157,8 +170,9 @@ let rec issue ~at schema output =
                       properties
                   | None -> None)))
          | `List elements ->
-           if Option.is_some (field "required" schema)
-              || Option.is_some (field "properties" schema)
+           if Option.is_none explicit_type
+              && (Option.is_some (field "required" schema)
+                  || Option.is_some (field "properties" schema))
            then Some (Incompatible_required_shape at)
            else
              let len = List.length elements in
@@ -192,9 +206,10 @@ let rec issue ~at schema output =
                   check_items 0 elements
                 | Some _ | None -> None)
          | _ ->
-           if Option.is_some (field "required" schema)
-              || Option.is_some (field "properties" schema)
-              || Option.is_some (field "items" schema)
+           if Option.is_none explicit_type
+              && (Option.is_some (field "required" schema)
+                  || Option.is_some (field "properties" schema)
+                  || Option.is_some (field "items" schema))
            then Some (Incompatible_required_shape at)
            else None)
 ;;

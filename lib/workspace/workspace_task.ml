@@ -198,7 +198,13 @@ let project_task_release_to_todo
   ; run_post_commit "agent_state" (fun () ->
       update_local_agent_state config ~agent_name:previous_assignee (fun agent ->
         if agent.current_task = Some task_id
-        then { agent with status = Active; current_task = None }
+        then
+          let status =
+            match agent.status with
+            | Inactive -> Inactive
+            | Active | Busy | Listening -> Active
+          in
+          { agent with status; current_task = None }
         else agent))
   ; run_post_commit "transition_log" (fun () ->
       log_event

@@ -81,6 +81,8 @@ let run_phase ~child root =
     let read_call () = Registry.direct_native_call ~base_path:root ~keeper_name ~operation_id
       |> require "read the Owner's native call" in
     let admission = Native.load ~binding |> require "load native admission" in
+    (* [cut] is the Active call and the messages of its retained checkpoint,
+       read before the replacing Bind removes that file. *)
     let context, checkpoint, input, cut = match child, admission with
       | true, Native.No_pending ->
         let context = Agent_core.Context.create () in
@@ -95,7 +97,7 @@ let run_phase ~child root =
           | Keeper_native_call.No_native_call | Keeper_native_call.Terminal_unacknowledged _ ->
             fail "the requeued operation holds no Active native call" in
         Native.restored_context resumed, Some (Native.checkpoint resumed),
-        Native.input resumed, Some cut
+        Native.input resumed, Some (cut, retained_messages ~session_dir cut.checkpoint)
       | true, (Native.Resume _ | Native.Terminal_pending _)
       | false, (Native.No_pending | Native.Terminal_pending _) ->
         fail "expected a fresh child call and an Active call after the restart" in
@@ -122,7 +124,7 @@ let run_phase ~child root =
     let result = match Result.map_error Runtime_agent.run_failure_error result with
       | Ok result -> result
       | Error error -> fail (Agent_core.Error.to_string error) in
-    let cut = match cut with
+    let cut, cut_messages = match cut with
       | Some cut -> cut
       | None -> fail "the child answered before its crash boundary" in
     check string "the new call answers the cut turn" answer
@@ -145,8 +147,7 @@ let run_phase ~child root =
        fail "the new call took new input instead of the retained checkpoint");
     (* Bind checks history only when the cut call admitted a Tool attempt. *)
     check bool "the new seed is the cut call's retained checkpoint, unchanged" true
-      (retained_messages ~session_dir call.seed_checkpoint
-       = retained_messages ~session_dir cut.checkpoint);
+      (retained_messages ~session_dir call.seed_checkpoint = cut_messages);
     let cut_dir = Eio.Path.(env#fs / session_dir / "native-executions" / cut.call_id) in
     let projection = Agent_core.Agent.open_execution_projection ~runtime ~dir:cut_dir cut.locator
       |> require "open the cut call's journal" in

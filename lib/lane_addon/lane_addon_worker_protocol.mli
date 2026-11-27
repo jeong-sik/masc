@@ -47,23 +47,27 @@ val observation_effect : t -> string -> Lane_addon_call_context.observation_effe
     marker, a package that declares that name as an action or export, or a
     worker that is not Ready is [May_change]. MCP [readOnlyHint] never decides
     this. *)
-val call_operator : t -> admit:(unit -> (unit, operator_error) result) ->
+val call_operator : ?on_dispatch:(unit -> unit) -> t ->
+  admit:(unit -> (unit, operator_error) result) ->
   arguments:Yojson.Safe.t -> (Yojson.Safe.t, operator_error) result
 (** Private [lane_operator] port. Only the authenticated operator HTTP boundary
     may call it. This bypasses model exports, hooks, result callbacks, receipts
     and observation retention. Errors never contain worker/request text.
     Discovery is optional, exact and atomic with Ready. A lost reply is never
-    replayed. Cancellation revokes the original connection. [admit] rechecks
+    replayed. Cancellation after dispatch revokes the original connection. [admit] rechecks
     original host authority under the per-worker RPC mutex, just before send;
     the host must not hold global lifecycle locks while waiting for the reply. *)
-val host_requests : t -> after:string option -> (Yojson.Safe.t, error) result
-val host_result : t -> arguments:Yojson.Safe.t -> (Yojson.Safe.t, error) result
+val host_requests : ?on_dispatch:(unit -> unit) -> t -> after:string option ->
+  (Yojson.Safe.t, error) result
+val host_result : ?on_dispatch:(unit -> unit) -> t -> arguments:Yojson.Safe.t ->
+  (Yojson.Safe.t, error) result
 (** Private host request/result ports. Both must be advertised exactly once
     before a model-capable contract becomes Ready. They cannot be exported as
     model-facing tools or called through a contract that disabled them. *)
-val observe : t -> binding:Yojson.Safe.t -> sources:Yojson.Safe.t ->
-  (Lane_addon_types.output, error) result
-val act : t -> arguments:Yojson.Safe.t -> (Lane_addon_action.package_result, error) result
+val observe : ?on_dispatch:(unit -> unit) -> t -> binding:Yojson.Safe.t ->
+  sources:Yojson.Safe.t -> (Lane_addon_types.output, error) result
+val act : ?on_dispatch:(unit -> unit) -> t -> arguments:Yojson.Safe.t ->
+  (Lane_addon_action.package_result, error) result
 type result_finalizer = name:string -> arguments:Yojson.Safe.t ->
   principal:Lane_addon_call_context.principal -> result:Mcp_protocol.Mcp_types.tool_result ->
   (Mcp_protocol.Mcp_types.tool_result, string) result

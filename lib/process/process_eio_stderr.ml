@@ -75,7 +75,24 @@ let remove_temp_file_quietly path =
   | Sys_error _ -> ()
 
 let read_stderr_capture path =
-  try In_channel.with_open_bin path In_channel.input_all with
+  try
+    In_channel.with_open_bin path (fun ic ->
+      let capture =
+        Exec_buffer.create
+          ~head_cap:Common.max_process_capture_head_bytes
+          ~tail_cap:Common.max_process_capture_tail_bytes
+      in
+      let chunk = Bytes.create 16384 in
+      let rec drain () =
+        let n = input ic chunk 0 (Bytes.length chunk) in
+        if n > 0
+        then (
+          Exec_buffer.add_bytes capture chunk 0 n;
+          drain ())
+      in
+      drain ();
+      Exec_buffer.render capture)
+  with
   | Sys_error msg ->
       Printf.sprintf
         "(stderr capture error) %s: %s"

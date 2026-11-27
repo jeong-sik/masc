@@ -111,13 +111,15 @@ let read ~packages ~directory ~source_path =
 let replacement_result ~document ~state = function
   | Ok () -> Ok {document;state;durability=Durable}
   | Error (failure : Fs_compat.atomic_replace_failure) ->
-      (match failure.stage with
-       | Fs_compat.After_rename -> Ok {document;state;
-           durability=Unconfirmed (Fs_compat.atomic_replace_failure_to_string failure)}
-       | Fs_compat.Before_rename ->
-           (match failure.exception_ with
-            | Eio.Cancel.Cancelled _ -> Printexc.raise_with_backtrace failure.exception_ failure.backtrace
-            | _ -> reject Io_error (Fs_compat.atomic_replace_failure_to_string failure)))
+      (match failure.exception_ with
+       | Eio.Cancel.Cancelled _ ->
+           Printexc.raise_with_backtrace failure.exception_ failure.backtrace
+       | _ ->
+           match failure.stage with
+           | Fs_compat.After_rename -> Ok {document;state;
+               durability=Unconfirmed (Fs_compat.atomic_replace_failure_to_string failure)}
+           | Fs_compat.Before_rename ->
+               reject Io_error (Fs_compat.atomic_replace_failure_to_string failure))
 
 (* A fully written, synced sibling is linked into an absent target. link(2)
    cannot replace a concurrently created declaration. The staging filename is

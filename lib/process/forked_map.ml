@@ -29,6 +29,7 @@ let poll_interval_s = 0.02
 let run_job thunk =
   match thunk () with
   | value -> Ok value
+  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn -> Error (Raised (Printexc.to_string exn))
 
 (* What a child leaves behind is one file, written under another name and moved
@@ -78,8 +79,13 @@ let remove_directory directory =
 let kill_and_reap pid =
   (try Unix.kill pid Sys.sigkill with
    | Unix.Unix_error _ -> ());
-  try ignore (Unix.waitpid [] pid) with
-  | Unix.Unix_error _ -> ()
+  let rec wait () =
+    match Unix.waitpid [] pid with
+    | _ -> ()
+    | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+    | exception Unix.Unix_error _ -> ()
+  in
+  wait ()
 
 let interrupting_signals = [ Sys.sigint; Sys.sigterm ]
 
@@ -114,21 +120,21 @@ let map ~jobs ?(on_start = fun _ -> ()) ?(on_result = fun _ _ -> ()) thunks =
       running := [];
       remove_directory directory
     in
-    let ended_by signal =
-      cleanup ();
-      Sys.set_signal signal Sys.Signal_default;
-      Unix.kill (Unix.getpid ()) signal
+    let interrupted_by = ref None in
+    let on_interrupt signal =
+      if Option.is_none !interrupted_by then interrupted_by := Some signal
     in
     let previous =
       List.map
-        (fun signal -> signal, Sys.signal signal (Sys.Signal_handle ended_by))
+        (fun signal -> signal, Sys.signal signal (Sys.Signal_handle on_interrupt))
         interrupting_signals
     in
     let restore_signals () =
       List.iter (fun (signal, behavior) -> Sys.set_signal signal behavior) previous
     in
     (* A signal that lands between the fork and the child resetting its
-       handlers would run the caller's handler in the child. *)
+       handlers would run the caller's handler in the child. Record the child
+       before unblocking signals so cleanup never misses a freshly forked pid. *)
     let launch index =
       on_start index;
       flush_all ();
@@ -139,8 +145,8 @@ let map ~jobs ?(on_start = fun _ -> ()) ?(on_result = fun _ _ -> ()) thunks =
         ignore (Unix.sigprocmask Unix.SIG_SETMASK mask);
         run_child ~path:(path index) thunks.(index)
       | pid ->
-        ignore (Unix.sigprocmask Unix.SIG_SETMASK mask);
-        running := (pid, index) :: !running
+        running := (pid, index) :: !running;
+        ignore (Unix.sigprocmask Unix.SIG_SETMASK mask)
       | exception exn ->
         ignore (Unix.sigprocmask Unix.SIG_SETMASK mask);
         results.(index) <-
@@ -170,7 +176,7 @@ let map ~jobs ?(on_start = fun _ -> ()) ?(on_result = fun _ _ -> ()) thunks =
       ended <> []
     in
     let fill () =
-      while !next < count && List.length !running < jobs do
+      while Option.is_none !interrupted_by && !next < count && List.length !running < jobs do
         let index = !next in
         incr next;
         launch index
@@ -183,12 +189,19 @@ let map ~jobs ?(on_start = fun _ -> ()) ?(on_result = fun _ _ -> ()) thunks =
       (fun () ->
          fill ();
          deliver ();
-         while !running <> [] do
-           if not (reap ()) then Unix.sleepf poll_interval_s;
+         while !running <> [] && Option.is_none !interrupted_by do
+           if not (reap ()) then (
+             try Unix.sleepf poll_interval_s with
+             | Unix.Unix_error (Unix.EINTR, _, _) -> ());
            deliver ();
            fill ()
          done;
-         deliver ())
+         if Option.is_none !interrupted_by then deliver ());
+    match !interrupted_by with
+    | None -> ()
+    | Some signal ->
+      Sys.set_signal signal Sys.Signal_default;
+      Unix.kill (Unix.getpid ()) signal
   in
   (if jobs <= 1 || count <= 1 then run_here ()
    else

@@ -19,8 +19,11 @@ type rendered_line = {
   image_part : Cell_grid.document_image_part option;
 }
 
+(* [wrap_styled_spans] never wraps narrower than this many cells. *)
+let min_wrap_width = 4
+
 let wrap_styled_spans ~width ~prefix ~continuation spans =
-  let width = Int.max 4 width in
+  let width = Int.max min_wrap_width width in
   let lines = ref [] in
   let cur = ref (List.rev prefix) in
   let cur_w =
@@ -752,67 +755,125 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
   in
   let draw_table layout table =
     let separator = span hairline_style (" " ^ Glyph.to_utf8 Glyph.Box_v ^ " ") in
+    let separator_width = spans_width [ separator ] in
     let row_width = width - spans_width (continuation layout) in
     let columns = Block.Table.col_count table in
-    let column_width = (row_width - (3 * (columns - 1))) / Int.max 1 columns in
     let header_style =
       Typography.structure ~bg:(Color.of_rgb theme.surface_2) ~bold:true theme
     in
-    let cell_rows style content =
-      inline_rows ~theme ~defs ~osc8 ~base:style content
-      |> List.concat_map (wrap_styled_spans ~width:column_width ~prefix:[] ~continuation:[])
+    let rows =
+      List.map
+        (fun ((row, _), _) ->
+          match row with
+          | `Header cells -> `Cells (header_style, List.map fst cells)
+          | `Sep _ -> `Rule
+          | `Data cells -> `Cells (layout.base, List.map fst cells))
+        (Block.Table.rows table)
     in
-    let draw_cells style cells =
-      let cells = List.map fst cells in
-      if column_width < 4 then begin
-        draw_rule layout row_width;
-        List.iter
-          (fun cell ->
-            let marker = span hairline_style (Glyph.to_utf8 Glyph.Box_v ^ " ") in
-            let padding = span style "  " in
-            let cell_layout = inset layout ~first:marker ~rest:padding in
-            draw_inlines { cell_layout with base = style } cell)
-          cells
-      end else
-        let cells = List.filteri (fun i _ -> i < columns) cells in
-        let wrapped = List.map (cell_rows style) cells in
-        let wrapped = wrapped @ List.init (columns - List.length cells) (fun _ -> []) in
+    let equal_share = (row_width - (separator_width * (columns - 1))) / Int.max 1 columns in
+    if equal_share < min_wrap_width then
+      (* Too narrow for cells side by side: each cell gets its own rows. *)
+      List.iter
+        (function
+          | `Rule -> ()
+          | `Cells (style, cells) ->
+              draw_rule layout row_width;
+              List.iter
+                (fun cell ->
+                  let marker = span hairline_style (Glyph.to_utf8 Glyph.Box_v ^ " ") in
+                  let padding = span style "  " in
+                  let cell_layout = inset layout ~first:marker ~rest:padding in
+                  draw_inlines { cell_layout with base = style } cell)
+                cells)
+        rows
+    else begin
+      (* Each cell's unwrapped lines, one entry per column. *)
+      let rows =
+        List.map
+          (function
+            | `Rule -> `Rule
+            | `Cells (style, cells) ->
+                let cells = List.filteri (fun i _ -> i < columns) cells in
+                `Cells
+                  ( style,
+                    List.map (inline_rows ~theme ~defs ~osc8 ~base:style) cells
+                    @ List.init (columns - List.length cells) (fun _ -> []) ))
+          rows
+      in
+      (* Size each column from its text, as [wrap_styled_spans] breaks it: at
+         spaces inside a span and between spans. A column that has to wrap
+         keeps the wrapper's minimum width, so its lines never spill into the
+         next column. *)
+      let min_content = Array.make columns 1 and max_content = Array.make columns 1 in
+      let word_width (sp : styled_span) =
+        String.split_on_char ' ' sp.text
+        |> List.fold_left (fun acc word -> Int.max acc (Grapheme.display_width word)) 0
+      in
+      List.iter
+        (function
+          | `Rule -> ()
+          | `Cells (_, cells) ->
+              List.iteri
+                (fun i lines ->
+                  List.iter
+                    (fun spans ->
+                      max_content.(i) <- Int.max max_content.(i) (spans_width spans);
+                      List.iter
+                        (fun sp -> min_content.(i) <- Int.max min_content.(i) (word_width sp))
+                        spans)
+                    lines)
+                cells)
+        rows;
+      let widths =
+        Layout.fit_content ~total:row_width ~gap:separator_width
+          (List.init columns (fun i ->
+               {
+                 Layout.min_content =
+                   Int.max min_content.(i) (Int.min max_content.(i) min_wrap_width);
+                 max_content = max_content.(i);
+               }))
+      in
+      let table_width = List.fold_left ( + ) (separator_width * (columns - 1)) widths in
+      let draw_cells style cells =
         let rec join = function
-          | [] -> ()
-          | rows when List.for_all (function [] -> true | _ :: _ -> false) rows -> ()
-          | rows ->
-              let visible, remaining =
+          | cells when List.for_all (function _, [] -> true | _, _ :: _ -> false) cells -> ()
+          | cells ->
+              let parts, remaining =
                 List.split
                   (List.map
-                     (function
-                       | [] -> { spans = []; image_part = None }, []
-                       | current :: rest -> current, rest)
-                     rows)
+                     (fun (column_width, lines) ->
+                       let line, rest =
+                         match lines with
+                         | [] -> ({ spans = []; image_part = None }, [])
+                         | current :: rest -> (current, rest)
+                       in
+                       ( (pad_line_to_width ~width:column_width ~pad_style:style line).spans,
+                         (column_width, rest) ))
+                     cells)
               in
-              let parts =
-                List.map
-                  (fun line -> (pad_line_to_width ~width:column_width ~pad_style:style line).spans)
-                  visible
-              in
-              let prefix = prefix layout in
               let rec join_cells = function
                 | [] -> []
                 | [ cell ] -> cell
                 | cell :: rest -> cell @ (separator :: join_cells rest)
               in
-              let spans = prefix @ join_cells parts in
-              push_lines [ { spans; image_part = None } ];
+              push_lines [ { spans = prefix layout @ join_cells parts; image_part = None } ];
               join remaining
         in
-        join wrapped
-    in
-    List.iter
-      (fun ((row, _), _) ->
-        match row with
-        | `Header cells -> draw_cells header_style cells
-        | `Sep _ -> if column_width >= 4 then draw_rule layout row_width
-        | `Data cells -> draw_cells layout.base cells)
-      (Block.Table.rows table)
+        join
+          (List.map2
+             (fun column_width lines ->
+               ( column_width,
+                 List.concat_map
+                   (wrap_styled_spans ~width:column_width ~prefix:[] ~continuation:[])
+                   lines ))
+             widths cells)
+      in
+      List.iter
+        (function
+          | `Rule -> draw_rule layout table_width
+          | `Cells (style, cells) -> draw_cells style cells)
+        rows
+    end
   in
   let rec render layout = function
     | Block.Blocks (blocks, _) -> List.iter (render layout) blocks

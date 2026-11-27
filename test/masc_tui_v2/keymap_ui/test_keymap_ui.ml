@@ -850,6 +850,32 @@ let test_chart_degradation_and_tiers () =
   Alcotest.(check bool) "tiny positive Ratio_gauge never floors to blank (draws ▏)"
     true (contains_sub ~needle:"\xe2\x96\x8f" ~haystack:gauge_row)
 
+(* Markdown table columns are sized from their text. *)
+let test_fit_content_columns () =
+  let col min_content max_content = { Layout.min_content; max_content } in
+  let check_widths name expected ~total cols =
+    Alcotest.(check (list int)) name expected (Layout.fit_content ~total ~gap:3 cols)
+  in
+  check_widths "columns that fit keep their text width" [ 5; 30 ] ~total:80
+    [ col 3 5; col 10 30 ];
+  check_widths "a short column keeps its width next to a long one" [ 3; 54 ] ~total:60
+    [ col 2 3; col 8 200 ];
+  let long_words = [ col 30 40; col 4 300; col 20 25 ] in
+  let widths = Layout.fit_content ~total:70 ~gap:3 long_words in
+  Alcotest.(check bool) "no column is narrower than its longest word when all fit" true
+    (List.for_all2 (fun w (c : Layout.content_width) -> w >= c.min_content) widths long_words);
+  Alcotest.(check int) "columns that wrap use every cell" 64 (List.fold_left ( + ) 0 widths);
+  let too_wide = [ col 30 30; col 4 50; col 2 2 ] in
+  let widths = Layout.fit_content ~total:40 ~gap:3 too_wide in
+  Alcotest.(check int) "one size per column" 3 (List.length widths);
+  Alcotest.(check bool) "words wider than the row still leave each column an even share" true
+    (List.for_all2
+       (fun w (c : Layout.content_width) -> w >= Int.min c.min_content (34 / 3))
+       widths too_wide);
+  Alcotest.(check bool) "sizes and gaps stay inside the row" true
+    (List.fold_left ( + ) 6 widths <= 40);
+  Alcotest.(check (list int)) "no columns" [] (Layout.fit_content ~total:40 ~gap:3 [])
+
 (* --- 6. Table Responsive Column Priority & CJK Safety --- *)
 
 let test_table_priority_and_cjk () =
@@ -2710,6 +2736,8 @@ let () =
         [
           Alcotest.test_case "column priority dropping & CJK width safety" `Quick
             test_table_priority_and_cjk;
+          Alcotest.test_case "Markdown table columns sized from their text" `Quick
+            test_fit_content_columns;
         ] );
       ( "rich_content",
         [

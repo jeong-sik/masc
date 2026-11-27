@@ -90,6 +90,24 @@ val allocate : total:int -> ?gap:int -> constraint_ list -> int list
     [constraints], all sizes are non-negative, and the sum of sizes plus gaps
     never exceeds [max 0 total]. *)
 
+type content_width = {
+  min_content : int;  (** The longest word, which should not be broken. *)
+  max_content : int;  (** The longest line when nothing wraps. *)
+}
+(** How wide a column of text wants to be, in terminal cells. *)
+
+val fit_content : total:int -> ?gap:int -> content_width list -> int list
+(** Size text columns separated by [gap] within [total] cells.
+
+    When every column fits at its [max_content], each gets exactly that and the
+    sizes may sum to less than [total]. Otherwise a column whose [max_content]
+    fits in an even share of the cells left keeps it, as long as every other
+    column's [min_content] still fits, so short columns do not wrap. Each other
+    column first gets its [min_content], or an even share of
+    what is left when those do not fit together, and then the rest in
+    proportion to how much more it wants, never past its [max_content]. Same
+    length and bounds as {!allocate}. *)
+
 val split_h : ?gap:int -> Rect.t -> constraint_ list -> Rect.t list
 (** Partition [rect] horizontally left-to-right according to [constraints]. *)
 

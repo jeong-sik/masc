@@ -406,33 +406,13 @@ let braille_right_up = [| 0x00; 0x80; 0xA0; 0xB0; 0xB8 |]
 let braille_left_down = [| 0x00; 0x01; 0x03; 0x07; 0x47 |]
 let braille_right_down = [| 0x00; 0x08; 0x18; 0x38; 0xB8 |]
 
-let spark_unicode_lut =
-  [|
-    " ";
-    "\xe2\x96\x81"; (* ▁ *)
-    "\xe2\x96\x82"; (* ▂ *)
-    "\xe2\x96\x83"; (* ▃ *)
-    "\xe2\x96\x84"; (* ▄ *)
-    "\xe2\x96\x85"; (* ▅ *)
-    "\xe2\x96\x86"; (* ▆ *)
-    "\xe2\x96\x87"; (* ▇ *)
-    "\xe2\x96\x88"; (* █ *)
-  |]
+let spark_unicode_cp_lut =
+  [| 0x20; 0x2581; 0x2582; 0x2583; 0x2584; 0x2585; 0x2586; 0x2587; 0x2588 |]
 
 let spark_ascii_lut = [| ' '; '.'; ':'; '-'; '='; '+'; '*'; '#'; '@' |]
 
-let eighth_block_lut =
-  [|
-    " ";
-    "\xe2\x96\x8f"; (* ▏ *)
-    "\xe2\x96\x8e"; (* ▎ *)
-    "\xe2\x96\x8d"; (* ▍ *)
-    "\xe2\x96\x8c"; (* ▌ *)
-    "\xe2\x96\x8b"; (* ▋ *)
-    "\xe2\x96\x8a"; (* ▊ *)
-    "\xe2\x96\x89"; (* ▉ *)
-    "\xe2\x96\x88"; (* █ *)
-  |]
+let eighth_block_cp_lut =
+  [| 0x20; 0x258F; 0x258E; 0x258D; 0x258C; 0x258B; 0x258A; 0x2589; 0x2588 |]
 
 let block_vert_up_lut =
   [|
@@ -453,8 +433,7 @@ let block_vert_down_lut =
   |]
 
 let ascii_vert_lut = [| ' '; '.'; ':'; '='; '#' |]
-let track_unicode = "\xe2\x96\x91" (* ░ *)
-let full_block_utf8 = "\xe2\x96\x88" (* █ *)
+let track_unicode_cp = 0x2591 (* ░ *)
 
 let series_max_value (samples : Series.sample array) =
   Array.fold_left
@@ -530,6 +509,8 @@ let draw_sparkline_run ?clip grid ~x ~y ~width ~(theme : Theme.t) ~bg ~unicode
     let max_v = series_max_value resampled in
     let ceiling = if max_v > 0.0 then max_v else 1.0 in
     let base_style = Style.make ~fg:(Color.of_rgb theme.text_muted) ~bg () in
+    let last_rgb = ref (-1) in
+    let last_style = ref base_style in
     for i = 0 to width - 1 do
       let lvl = Series.sample_dot_level ~dots:8 ~floor:0.0 ~ceiling resampled.(i) in
       if lvl > 0 then
@@ -537,14 +518,21 @@ let draw_sparkline_run ?clip grid ~x ~y ~width ~(theme : Theme.t) ~bg ~unicode
           if lvl = 1 then base_style
           else
             let share = float_of_int (lvl - 2) /. 6.0 in
-            let fg = Color.of_rgb (Gradient.sample_rgb theme gradient share) in
-            Style.make ~fg ~bg ()
+            let rgb = Gradient.sample_rgb theme gradient share in
+            if rgb = !last_rgb then !last_style
+            else begin
+              let st = Style.make ~fg:(Color.of_rgb rgb) ~bg () in
+              last_rgb := rgb;
+              last_style := st;
+              st
+            end
         in
         if unicode then
-          Cell_grid.set_cell ?clip grid ~x:(x + i) ~y
-            { glyph = Cell_grid.Utf8 spark_unicode_lut.(lvl); width = 1; style }
+          Cell_grid.put_uchar_w1 ?clip grid ~x:(x + i) ~y ~style
+            (Array.unsafe_get spark_unicode_cp_lut lvl)
         else
-          Cell_grid.put_ascii ?clip grid ~x:(x + i) ~y ~style spark_ascii_lut.(lvl)
+          Cell_grid.put_ascii ?clip grid ~x:(x + i) ~y ~style
+            (Array.unsafe_get spark_ascii_lut lvl)
     done;
     width
 
@@ -563,23 +551,31 @@ let draw_ratio_bar_run ?clip grid ~x ~y ~width ~(theme : Theme.t) ~bg ~unicode
       else Int.max 1 (int_of_float (Float.round (clamped *. float_of_int total_eighths)))
     in
     let track_style = Style.make ~fg:(Color.of_rgb theme.border_inactive) ~bg () in
+    let last_rgb = ref (-1) in
+    let last_style = ref track_style in
+    let denom = if width <= 1 then 1.0 else float_of_int (width - 1) in
     for i = 0 to width - 1 do
       let cell_eighths = Int.max 0 (Int.min 8 (filled_eighths - (i * 8))) in
-      let pos =
-        if width <= 1 then clamped
-        else float_of_int i /. float_of_int (width - 1)
-      in
       if cell_eighths = 0 then
         if unicode then
-          Cell_grid.set_cell ?clip grid ~x:(x + i) ~y
-            { glyph = Cell_grid.Utf8 track_unicode; width = 1; style = track_style }
+          Cell_grid.put_uchar_w1 ?clip grid ~x:(x + i) ~y ~style:track_style
+            track_unicode_cp
         else Cell_grid.put_ascii ?clip grid ~x:(x + i) ~y ~style:track_style '-'
       else
-        let fg = Color.of_rgb (Gradient.sample_rgb theme gradient pos) in
-        let style = Style.make ~fg ~bg () in
+        let pos = if width <= 1 then clamped else float_of_int i /. denom in
+        let rgb = Gradient.sample_rgb theme gradient pos in
+        let style =
+          if rgb = !last_rgb then !last_style
+          else begin
+            let st = Style.make ~fg:(Color.of_rgb rgb) ~bg () in
+            last_rgb := rgb;
+            last_style := st;
+            st
+          end
+        in
         if unicode then
-          Cell_grid.set_cell ?clip grid ~x:(x + i) ~y
-            { glyph = Cell_grid.Utf8 eighth_block_lut.(cell_eighths); width = 1; style }
+          Cell_grid.put_uchar_w1 ?clip grid ~x:(x + i) ~y ~style
+            (Array.unsafe_get eighth_block_cp_lut cell_eighths)
         else
           let ch = if cell_eighths >= 5 then '#' else '=' in
           Cell_grid.put_ascii ?clip grid ~x:(x + i) ~y ~style ch
@@ -1223,8 +1219,8 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~(caps : Presenter.capabilitie
            let track_style = Style.make ~fg:(Color.of_rgb theme.border_inactive) ~bg () in
            for i = 0 to Int.min bar_cols rect.w - 1 do
              if unicode then
-               Cell_grid.set_cell ~clip:rect grid ~x:(rect.x + i) ~y:rect.y
-                 { glyph = Cell_grid.Utf8 track_unicode; width = 1; style = track_style }
+               Cell_grid.put_uchar_w1 ~clip:rect grid ~x:(rect.x + i) ~y:rect.y
+                 ~style:track_style track_unicode_cp
              else Cell_grid.put_ascii ~clip:rect grid ~x:(rect.x + i) ~y:rect.y ~style:track_style '-'
            done
          end
@@ -1238,8 +1234,8 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~(caps : Presenter.capabilitie
                for _ = 1 to count do
                  if !cx < Rect.right rect then begin
                    if unicode then
-                     Cell_grid.set_cell ~clip:rect grid ~x:!cx ~y:rect.y
-                       { glyph = Cell_grid.Utf8 full_block_utf8; width = 1; style }
+                     Cell_grid.put_uchar_w1 ~clip:rect grid ~x:!cx ~y:rect.y
+                       ~style 0x2588
                    else Cell_grid.put_ascii ~clip:rect grid ~x:!cx ~y:rect.y ~style '#';
                    incr cx
                  end

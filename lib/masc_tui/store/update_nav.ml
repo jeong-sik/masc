@@ -3848,36 +3848,50 @@ let selected_memory_reading ?(force_diff = false) ~keeper_opt
         | None -> None)
 
 let acting_keepers (m : Model.t) : string list =
-  let seen = Hashtbl.create 16 in
-  let acc = ref [] in
-  let add k =
-    let k = String.trim k in
-    if (not (String.equal k "")) && not (Hashtbl.mem seen k) then (
-      Hashtbl.add seen k ();
-      acc := k :: !acc)
+  let turns =
+    match Observed.to_option m.fleet.turns with Some xs -> xs | None -> []
   in
-  (match Observed.to_option m.fleet.turns with
-  | Some turns ->
-      List.iter (fun (t : Wire_fleet.keeper_turn_row) -> add t.keeper_name) turns
-  | None -> ());
-  (match Observed.to_option m.fleet.keepers with
-  | Some keepers ->
-      List.iter
-        (fun (k : Wire_fleet.keeper_summary) ->
-          match k.health with
-          | Wire_fleet.Keeper_working | Wire_fleet.Keeper_recovering
-          | Wire_fleet.Keeper_booting ->
-              add k.name
-          | Wire_fleet.Keeper_healthy
-          | Wire_fleet.Keeper_idle
-          | Wire_fleet.Keeper_degraded
-          | Wire_fleet.Keeper_failing
-          | Wire_fleet.Keeper_offline
-          | Wire_fleet.Keeper_paused ->
-              ())
-        keepers
-  | None -> ());
-  List.rev !acc
+  let keepers =
+    match Observed.to_option m.fleet.keepers with Some xs -> xs | None -> []
+  in
+  if turns = [] && keepers = [] then []
+  else
+    let acc = ref [] in
+    let count = ref 0 in
+    let seen_tbl = ref None in
+    let add k =
+      let k = String.trim k in
+      if not (String.equal k "") then
+        match !seen_tbl with
+        | Some tbl ->
+            if not (Hashtbl.mem tbl k) then (
+              Hashtbl.add tbl k ();
+              acc := k :: !acc)
+        | None ->
+            if not (List.exists (String.equal k) !acc) then (
+              acc := k :: !acc;
+              incr count;
+              if !count >= 12 then (
+                let tbl = Hashtbl.create 32 in
+                List.iter (fun x -> Hashtbl.replace tbl x ()) !acc;
+                seen_tbl := Some tbl))
+    in
+    List.iter (fun (t : Wire_fleet.keeper_turn_row) -> add t.keeper_name) turns;
+    List.iter
+      (fun (k : Wire_fleet.keeper_summary) ->
+        match k.health with
+        | Wire_fleet.Keeper_working | Wire_fleet.Keeper_recovering
+        | Wire_fleet.Keeper_booting ->
+            add k.name
+        | Wire_fleet.Keeper_healthy
+        | Wire_fleet.Keeper_idle
+        | Wire_fleet.Keeper_degraded
+        | Wire_fleet.Keeper_failing
+        | Wire_fleet.Keeper_offline
+        | Wire_fleet.Keeper_paused ->
+            ())
+      keepers;
+    List.rev !acc
 
 let code_fuzzy_matches ~query (m : Model.t) : string list =
   let files =
@@ -4833,6 +4847,91 @@ let enter_hint (m : Model.t) =
   else if Model.is_keeper_config_active m && not (Drafts.is_focused m.drafts) then
     if Config_store.is_editing_field m.config then Enter_hint_confirm_field
     else Enter_hint_edit_field
+  else if
+    Option.is_none (Memory_diagram.active_diagram m)
+    && Option.is_none (Model.active_inspector m)
+    && Nav.equal_workspace m.nav.workspace Nav.Pulse
+  then
+    (* Fast existence checks for Pulse panes avoid full company grouping /
+       thread sorting / goal sorting just to decide whether Enter dives. *)
+    let has_target =
+      match Model.active_pulse_pane m with
+      | Model.Pulse_attention ->
+          Option.is_some (Attention.current_triage_item m.attention)
+      | Model.Pulse_companies ->
+          if String.equal (String.trim m.fleet.filter_query) "" then
+            match Observed.to_option m.fleet.keepers with
+            | Some (_ :: _) -> true
+            | Some [] | None -> false
+          else Fleet_store.filtered_keepers m.fleet <> []
+      | Model.Pulse_goals ->
+          List.exists
+            (fun (g : Wire_work.goal) ->
+              match g.phase with
+              | Wire_work.Awaiting_confirmation
+              | Wire_work.Verifying
+              | Wire_work.Executing ->
+                  true
+              | Wire_work.Completed
+              | Wire_work.Dropped
+              | Wire_work.Paused _
+              | Wire_work.Blocked _ ->
+                  false)
+            (Work_store.goals m.work)
+      | Model.Pulse_world -> (
+          match Observed.to_option m.knowledge.board with
+          | None -> false
+          | Some feed ->
+              List.exists
+                (fun (p : Wire_knowledge.board_post) ->
+                  p.is_signal
+                  && Wire_knowledge.is_signal_board_post ~post_kind:p.post_kind
+                       ~hearth:p.hearth ~title:p.title ~body:p.body)
+                feed.posts)
+    in
+    if has_target then Enter_hint_dive else Enter_hint_hidden
+  else if
+    Option.is_none (Memory_diagram.active_diagram m)
+    && Option.is_none (Model.active_inspector m)
+    && Nav.equal_workspace m.nav.workspace Nav.Knowledge
+    && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_board
+    && m.nav.pane_index = 0
+    && (not (Model.is_zoomed_active m))
+    && Option.is_none m.knowledge.active_thread_target
+  then
+    (* Avoid building succession-chain groups in [board_detail_post] just to
+       decide whether Enter can zoom a board post. *)
+    let has_post =
+      match Observed.to_option m.knowledge.board with
+      | None -> false
+      | Some feed ->
+          let k = m.knowledge in
+          let q = String.trim k.filter_query in
+          if
+            (not k.board_signal_only)
+            && Option.is_none k.board_hearth
+            && String.equal q ""
+          then feed.posts <> []
+          else
+            List.exists
+              (fun (p : Wire_knowledge.board_post) ->
+                (not k.board_signal_only
+                 || (p.is_signal
+                     && Wire_knowledge.is_signal_board_post ~post_kind:p.post_kind
+                          ~hearth:p.hearth ~title:p.title ~body:p.body))
+                && (match k.board_hearth with
+                    | None -> true
+                    | Some h ->
+                        Option.equal String.equal
+                          (Option.map String.lowercase_ascii p.hearth)
+                          (Some (String.lowercase_ascii h)))
+                && (String.equal q ""
+                    || contains_ci ~needle:q p.title
+                    || contains_ci ~needle:q p.author
+                    || contains_ci ~needle:q p.body))
+              feed.posts
+    in
+    if has_post then Enter_hint_dive else Enter_hint_hidden
   else
     match enter_plan m with
     | Enter_noop -> Enter_hint_hidden

@@ -726,8 +726,62 @@ type task_backlog_counts = {
   cancelled : int;
 }
 
+exception Task_decode_err of string
+
+let[@inline] fail_task_result = function
+  | Ok v -> v
+  | Error msg -> raise (Task_decode_err msg)
+
+let[@inline] trim_fast s =
+  let len = String.length s in
+  if len = 0 then ""
+  else
+    let c0 = String.unsafe_get s 0 in
+    let c1 = String.unsafe_get s (len - 1) in
+    let is_ws c =
+      c = ' ' || c = '\t' || c = '\n' || c = '\r' || c = '\012'
+    in
+    if (not (is_ws c0)) && not (is_ws c1) then s else String.trim s
+
+let[@inline] task_req_str key = function
+  | Some (`String s) -> s
+  | None | Some `Null -> fail_task_result (missing_field key)
+  | Some bad -> fail_task_result (field_type_error key "a string" bad)
+
+let[@inline] task_req_nonblank key opt =
+  let raw = task_req_str key opt in
+  let trimmed = trim_fast raw in
+  if String.equal trimmed "" then
+    raise (Task_decode_err (Printf.sprintf "field %S must not be blank" key))
+  else trimmed
+
+let[@inline] task_opt_nonblank key = function
+  | None | Some `Null -> None
+  | Some (`String s) ->
+      let trimmed = trim_fast s in
+      if String.equal trimmed "" then None else Some trimmed
+  | Some bad -> fail_task_result (field_type_error key "a string or null" bad)
+
+let[@inline] task_req_int key = function
+  | Some (`Int n) -> n
+  | Some (`Intlit raw) -> (
+      match int_of_string_opt raw with
+      | Some n -> n
+      | None ->
+          raise
+            (Task_decode_err (Printf.sprintf "field '%s' has invalid int %S" key raw)))
+  | None | Some `Null -> fail_task_result (missing_field key)
+  | Some bad -> fail_task_result (field_type_error key "an int" bad)
+
 let decode_task_status_fields kind obj =
-  match String.lowercase_ascii kind with
+  let k =
+    match kind with
+    | "todo" | "claimed" | "in_progress" | "inprogress"
+    | "awaiting_verification" | "awaitingverification" | "done" | "cancelled" ->
+        kind
+    | _ -> String.lowercase_ascii kind
+  in
+  match k with
   | "todo" -> Ok Todo
   | "claimed" ->
       let* assignee = required_string_field obj "assignee" in
@@ -758,19 +812,25 @@ let decode_task_status_fields kind obj =
   | other -> Error (Printf.sprintf "unknown task_status %S" other)
 
 let decode_task_status json =
-  match required_member json "task_status" with
-  | Ok (`String kind) -> decode_task_status_fields kind json
-  | Ok (`Assoc _ as obj) ->
+  let ts_opt =
+    match json with
+    | `Assoc fields -> List.assoc_opt "task_status" fields
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+        None
+  in
+  match ts_opt with
+  | Some (`String kind) -> decode_task_status_fields kind json
+  | Some (`Assoc _ as obj) ->
       let* kind =
         if has_field obj "kind" then required_nonblank_string obj "kind"
         else required_nonblank_string obj "status"
       in
       decode_task_status_fields kind obj
-  | Ok (`List [ `String kind ]) -> decode_task_status_fields kind json
-  | Ok (`List [ `String kind; (`Assoc _ as obj) ]) ->
+  | Some (`List [ `String kind ]) -> decode_task_status_fields kind json
+  | Some (`List [ `String kind; (`Assoc _ as obj) ]) ->
       decode_task_status_fields kind obj
-  | Ok bad -> field_type_error "task_status" "a status string or object" bad
-  | Error _ -> (
+  | Some bad -> field_type_error "task_status" "a status string or object" bad
+  | None -> (
       match required_member json "status" with
       | Ok (`String kind) -> decode_task_status_fields kind json
       | Ok (`Assoc _ as obj) ->
@@ -780,26 +840,163 @@ let decode_task_status json =
       | Error _ as err -> err)
 
 let decode_task json =
-  let* id = required_nonblank_string json "id" in
-  let* title = required_nonblank_string json "title" in
-  let* description = optional_nonblank_string json "description" in
-  let* priority = required_int_field json "priority" in
-  let* status = decode_task_status json in
-  let* goal_id = optional_nonblank_string json "goal_id" in
-  let goal_link = match goal_id with None -> Unlinked | Some g -> Linked g in
-  let* created_at = optional_nonblank_string json "created_at" in
-  let* updated_at = optional_nonblank_string json "updated_at" in
-  Ok
-    {
-      id;
-      title;
-      description;
-      priority;
-      status;
-      goal_link;
-      created_at;
-      updated_at;
-    }
+  match json with
+  | `Assoc fields -> (
+      let f_id = ref None in
+      let f_title = ref None in
+      let f_description = ref None in
+      let f_priority = ref None in
+      let f_task_status = ref None in
+      let f_status = ref None in
+      let f_goal_id = ref None in
+      let f_created_at = ref None in
+      let f_updated_at = ref None in
+      let f_assignee = ref None in
+      let f_claimed_at = ref None in
+      let f_started_at = ref None in
+      let f_submitted_at = ref None in
+      let f_verification_id = ref None in
+      let f_completed_at = ref None in
+      let f_notes = ref None in
+      let f_cancelled_by = ref None in
+      let f_cancelled_at = ref None in
+      let f_reason = ref None in
+      let[@inline] set_once r v =
+        if Option.is_none !r then r := Some v
+      in
+      List.iter
+        (fun (k, v) ->
+          match k with
+          | "id" -> set_once f_id v
+          | "title" -> set_once f_title v
+          | "description" -> set_once f_description v
+          | "priority" -> set_once f_priority v
+          | "task_status" -> set_once f_task_status v
+          | "status" -> set_once f_status v
+          | "goal_id" -> set_once f_goal_id v
+          | "created_at" -> set_once f_created_at v
+          | "updated_at" -> set_once f_updated_at v
+          | "assignee" -> set_once f_assignee v
+          | "claimed_at" -> set_once f_claimed_at v
+          | "started_at" -> set_once f_started_at v
+          | "submitted_at" -> set_once f_submitted_at v
+          | "verification_id" -> set_once f_verification_id v
+          | "completed_at" -> set_once f_completed_at v
+          | "notes" -> set_once f_notes v
+          | "cancelled_by" -> set_once f_cancelled_by v
+          | "cancelled_at" -> set_once f_cancelled_at v
+          | "reason" -> set_once f_reason v
+          | _ -> ())
+        fields;
+      try
+        let id = task_req_nonblank "id" !f_id in
+        let title = task_req_nonblank "title" !f_title in
+        let description = task_opt_nonblank "description" !f_description in
+        let priority = task_req_int "priority" !f_priority in
+        let decode_flat_status kind =
+          let k =
+            match kind with
+            | "todo" | "claimed" | "in_progress" | "inprogress"
+            | "awaiting_verification" | "awaitingverification" | "done"
+            | "cancelled" ->
+                kind
+            | _ -> String.lowercase_ascii kind
+          in
+          match k with
+          | "todo" -> Todo
+          | "claimed" ->
+              let assignee = task_req_str "assignee" !f_assignee in
+              let claimed_at = task_req_nonblank "claimed_at" !f_claimed_at in
+              Claimed { assignee; claimed_at }
+          | "in_progress" | "inprogress" ->
+              let assignee = task_req_str "assignee" !f_assignee in
+              let started_at = task_req_nonblank "started_at" !f_started_at in
+              InProgress { assignee; started_at }
+          | "awaiting_verification" | "awaitingverification" ->
+              let assignee = task_req_str "assignee" !f_assignee in
+              let started_at = task_req_nonblank "started_at" !f_started_at in
+              let submitted_at =
+                task_req_nonblank "submitted_at" !f_submitted_at
+              in
+              let verification_id =
+                task_req_nonblank "verification_id" !f_verification_id
+              in
+              AwaitingVerification
+                { assignee; started_at; submitted_at; verification_id }
+          | "done" ->
+              let assignee = task_req_str "assignee" !f_assignee in
+              let completed_at =
+                task_req_nonblank "completed_at" !f_completed_at
+              in
+              let notes = task_opt_nonblank "notes" !f_notes in
+              Done { assignee; completed_at; notes }
+          | "cancelled" ->
+              let cancelled_by = task_req_str "cancelled_by" !f_cancelled_by in
+              let cancelled_at =
+                task_req_nonblank "cancelled_at" !f_cancelled_at
+              in
+              let reason = task_opt_nonblank "reason" !f_reason in
+              Cancelled { cancelled_by; cancelled_at; reason }
+          | other ->
+              raise (Task_decode_err (Printf.sprintf "unknown task_status %S" other))
+        in
+        let status =
+          match !f_task_status with
+          | Some (`String kind) -> decode_flat_status kind
+          | Some (`List [ `String kind ]) -> decode_flat_status kind
+          | Some _ -> fail_task_result (decode_task_status json)
+          | None -> (
+              match !f_status with
+              | Some (`String kind) -> decode_flat_status kind
+              | Some (`Assoc _ as obj) ->
+                  let kind =
+                    fail_task_result (required_nonblank_string obj "kind")
+                  in
+                  fail_task_result (decode_task_status_fields kind obj)
+              | Some bad ->
+                  fail_task_result
+                    (field_type_error "status" "a task status" bad)
+              | None -> fail_task_result (missing_field "status"))
+        in
+        let goal_id = task_opt_nonblank "goal_id" !f_goal_id in
+        let goal_link =
+          match goal_id with None -> Unlinked | Some g -> Linked g
+        in
+        let created_at = task_opt_nonblank "created_at" !f_created_at in
+        let updated_at = task_opt_nonblank "updated_at" !f_updated_at in
+        Ok
+          {
+            id;
+            title;
+            description;
+            priority;
+            status;
+            goal_link;
+            created_at;
+            updated_at;
+          }
+      with Task_decode_err msg -> Error msg)
+  | _ ->
+      let* id = required_nonblank_string json "id" in
+      let* title = required_nonblank_string json "title" in
+      let* description = optional_nonblank_string json "description" in
+      let* priority = required_int_field json "priority" in
+      let* status = decode_task_status json in
+      let* goal_id = optional_nonblank_string json "goal_id" in
+      let goal_link = match goal_id with None -> Unlinked | Some g -> Linked g in
+      let* created_at = optional_nonblank_string json "created_at" in
+      let* updated_at = optional_nonblank_string json "updated_at" in
+      Ok
+        {
+          id;
+          title;
+          description;
+          priority;
+          status;
+          goal_link;
+          created_at;
+          updated_at;
+        }
 
 let check_goal_link_assignable (t : task) =
   match t.goal_link with
@@ -901,28 +1098,40 @@ let encode_task_link_goal ~goal_id ~expected_workspace =
     ]
 
 let enrich_planning_with_tasks ~observed_at (snap : planning_snapshot) tasks =
-  let count_for_goal goal_id =
-    List.fold_left
-      (fun acc (t : task) ->
-        match t.goal_link with
-        | Linked gid when String.equal gid goal_id -> acc + 1
-        | Linked _ | Unlinked -> acc)
-      0 tasks
-  in
-  let goals =
-    List.map
+  let needs_enrichment =
+    List.exists
       (fun (g : goal) ->
         match g.linked_task_count with
-        | Observed.Absent | Observed.Unreported ->
-            {
-              g with
-              linked_task_count =
-                Observed.value ~observed_at (count_for_goal g.id);
-            }
-        | Observed.Value _ | Observed.Loading _ | Observed.Failed _ -> g)
+        | Observed.Absent | Observed.Unreported -> true
+        | Observed.Value _ | Observed.Loading _ | Observed.Failed _ -> false)
       snap.goals
   in
-  { goals; tasks }
+  if not needs_enrichment then { goals = snap.goals; tasks }
+  else
+    let counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
+    List.iter
+      (fun (t : task) ->
+        match t.goal_link with
+        | Linked gid ->
+            let prev =
+              match Hashtbl.find_opt counts gid with Some n -> n | None -> 0
+            in
+            Hashtbl.replace counts gid (prev + 1)
+        | Unlinked -> ())
+      tasks;
+    let goals =
+      List.map
+        (fun (g : goal) ->
+          match g.linked_task_count with
+          | Observed.Absent | Observed.Unreported ->
+              let n =
+                match Hashtbl.find_opt counts g.id with Some c -> c | None -> 0
+              in
+              { g with linked_task_count = Observed.value ~observed_at n }
+          | Observed.Value _ | Observed.Loading _ | Observed.Failed _ -> g)
+        snap.goals
+    in
+    { goals; tasks }
 
 let decode_planning_snapshot ~observed_at json =
   let* _, body = unwrap_v2_or_raw json in

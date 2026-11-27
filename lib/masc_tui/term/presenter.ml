@@ -1,4 +1,6 @@
 module Clock = Masc_tui_core.Clock
+module Raw = Cell_grid.Raw
+module Ba1 = Bigarray.Array1
 
 type capabilities = {
   synchronized_output : bool;
@@ -81,6 +83,7 @@ type t = {
   mutable force_full : bool;
   mutable last_cursor : cursor option;
   mutable dirty_row_flags : bool array;
+  utf8_scratch : Bytes.t;
   buf : Buffer.t;
 }
 
@@ -97,6 +100,7 @@ let create ~cols ~rows ~capabilities =
     force_full = true;
     last_cursor = None;
     dirty_row_flags = Array.make cols false;
+    utf8_scratch = Bytes.create 4;
     buf = Buffer.create initial_buffer_bytes;
   }
 
@@ -119,7 +123,18 @@ let resize t ~cols ~rows =
 
 let invalidate t = t.force_full <- true
 
-let add_int buf n = Buffer.add_string buf (Int.to_string n)
+let int_str_lut = Array.init 256 Int.to_string
+
+let[@inline] add_int buf n =
+  if n >= 0 && n < 256 then
+    Buffer.add_string buf (Array.unsafe_get int_str_lut n)
+  else if n >= 256 && n < 1000 then begin
+    let q = n / 10 in
+    Buffer.add_char buf (Char.unsafe_chr (48 + (q / 10)));
+    Buffer.add_char buf (Char.unsafe_chr (48 + (q mod 10)));
+    Buffer.add_char buf (Char.unsafe_chr (48 + (n mod 10)))
+  end
+  else Buffer.add_string buf (Int.to_string n)
 
 let emit_cup buf ~row ~col =
   Buffer.add_string buf "\x1b[";
@@ -128,55 +143,97 @@ let emit_cup buf ~row ~col =
   add_int buf (col + 1);
   Buffer.add_char buf 'H'
 
-let emit_fg buf color =
-  match color with
-  | Color.Default -> Buffer.add_string buf "\x1b[39m"
-  | Color.Ansi16 idx ->
+let[@inline] downscale_packed_color ~depth packed =
+  match depth with
+  | Color.Truecolor -> packed
+  | Color.Ansi256 ->
+      if packed lsr 24 = 3 then
+        (2 lsl 24) lor Color.rgb_to_ansi256 (packed land 0xFFFFFF)
+      else packed
+  | Color.Ansi16 ->
+      let tag = packed lsr 24 in
+      if tag = 3 then
+        (1 lsl 24) lor Color.rgb_to_ansi16 (packed land 0xFFFFFF)
+      else if tag = 2 then
+        let idx = packed land 0xFFFFFF in
+        if idx >= 0 && idx < 16 then (1 lsl 24) lor idx
+        else (1 lsl 24) lor Color.rgb_to_ansi16 (Color.ansi256_to_rgb idx)
+      else packed
+
+let emit_fg_packed buf packed =
+  match packed lsr 24 with
+  | 0 -> Buffer.add_string buf "\x1b[39m"
+  | 1 ->
+      let idx = packed land 0xFFFFFF in
       let code = if idx < 8 then 30 + idx else 90 + (idx - 8) in
       Buffer.add_string buf "\x1b[";
       add_int buf code;
       Buffer.add_char buf 'm'
-  | Color.Ansi256 idx ->
+  | 2 ->
       Buffer.add_string buf "\x1b[38;5;";
-      add_int buf idx;
+      add_int buf (packed land 0xFFFFFF);
       Buffer.add_char buf 'm'
-  | Color.Rgb rgb ->
+  | _ ->
+      let rgb = packed land 0xFFFFFF in
       Buffer.add_string buf "\x1b[38;2;";
-      add_int buf (Color.red rgb);
+      add_int buf ((rgb lsr 16) land 0xFF);
       Buffer.add_char buf ';';
-      add_int buf (Color.green rgb);
+      add_int buf ((rgb lsr 8) land 0xFF);
       Buffer.add_char buf ';';
-      add_int buf (Color.blue rgb);
+      add_int buf (rgb land 0xFF);
       Buffer.add_char buf 'm'
 
-let emit_bg buf color =
-  match color with
-  | Color.Default -> Buffer.add_string buf "\x1b[49m"
-  | Color.Ansi16 idx ->
+let emit_bg_packed buf packed =
+  match packed lsr 24 with
+  | 0 -> Buffer.add_string buf "\x1b[49m"
+  | 1 ->
+      let idx = packed land 0xFFFFFF in
       let code = if idx < 8 then 40 + idx else 100 + (idx - 8) in
       Buffer.add_string buf "\x1b[";
       add_int buf code;
       Buffer.add_char buf 'm'
-  | Color.Ansi256 idx ->
+  | 2 ->
       Buffer.add_string buf "\x1b[48;5;";
-      add_int buf idx;
+      add_int buf (packed land 0xFFFFFF);
       Buffer.add_char buf 'm'
-  | Color.Rgb rgb ->
+  | _ ->
+      let rgb = packed land 0xFFFFFF in
       Buffer.add_string buf "\x1b[48;2;";
-      add_int buf (Color.red rgb);
+      add_int buf ((rgb lsr 16) land 0xFF);
       Buffer.add_char buf ';';
-      add_int buf (Color.green rgb);
+      add_int buf ((rgb lsr 8) land 0xFF);
       Buffer.add_char buf ';';
-      add_int buf (Color.blue rgb);
+      add_int buf (rgb land 0xFF);
       Buffer.add_char buf 'm'
 
-(* Never emits SGR dim (CSI 2m) — Attr contains only bold/italic/underline/reverse/strike. *)
-let emit_attr_flags buf added =
-  if Attr.has added Attr.bold then Buffer.add_string buf "\x1b[1m";
-  if Attr.has added Attr.italic then Buffer.add_string buf "\x1b[3m";
-  if Attr.has added Attr.underline then Buffer.add_string buf "\x1b[4m";
-  if Attr.has added Attr.reverse then Buffer.add_string buf "\x1b[7m";
-  if Attr.has added Attr.strike then Buffer.add_string buf "\x1b[9m"
+(* Never emits SGR dim (CSI 2m) — Attr bits 0..4 are bold/italic/underline/reverse/strike. *)
+let emit_attr_bits buf bits =
+  if bits land 1 <> 0 then Buffer.add_string buf "\x1b[1m";
+  if bits land 2 <> 0 then Buffer.add_string buf "\x1b[3m";
+  if bits land 4 <> 0 then Buffer.add_string buf "\x1b[4m";
+  if bits land 8 <> 0 then Buffer.add_string buf "\x1b[7m";
+  if bits land 16 <> 0 then Buffer.add_string buf "\x1b[9m"
+
+let[@inline] emit_utf8_scalar buf scratch cp =
+  if cp < 0x80 then Buffer.add_char buf (Char.unsafe_chr cp)
+  else if cp < 0x800 then begin
+    Bytes.unsafe_set scratch 0 (Char.unsafe_chr (0xC0 lor (cp lsr 6)));
+    Bytes.unsafe_set scratch 1 (Char.unsafe_chr (0x80 lor (cp land 0x3F)));
+    Buffer.add_subbytes buf scratch 0 2
+  end
+  else if cp < 0x10000 then begin
+    Bytes.unsafe_set scratch 0 (Char.unsafe_chr (0xE0 lor (cp lsr 12)));
+    Bytes.unsafe_set scratch 1 (Char.unsafe_chr (0x80 lor ((cp lsr 6) land 0x3F)));
+    Bytes.unsafe_set scratch 2 (Char.unsafe_chr (0x80 lor (cp land 0x3F)));
+    Buffer.add_subbytes buf scratch 0 3
+  end
+  else begin
+    Bytes.unsafe_set scratch 0 (Char.unsafe_chr (0xF0 lor (cp lsr 18)));
+    Bytes.unsafe_set scratch 1 (Char.unsafe_chr (0x80 lor ((cp lsr 12) land 0x3F)));
+    Bytes.unsafe_set scratch 2 (Char.unsafe_chr (0x80 lor ((cp lsr 6) land 0x3F)));
+    Bytes.unsafe_set scratch 3 (Char.unsafe_chr (0x80 lor (cp land 0x3F)));
+    Buffer.add_subbytes buf scratch 0 4
+  end
 
 let popcount8 mask =
   let x = mask land 0xFF in
@@ -192,30 +249,131 @@ let ascii_fallback_of_braille mask =
   | 5 | 6 -> '='
   | _ -> '#'
 
-let is_el0_erasable (cell : Cell_grid.cell) =
-  match cell.glyph with
-  | Cell_grid.Empty ->
-      Color.equal cell.style.bg Color.Default
-      && Int.equal cell.style.hyperlink_id 0
-      && not (Attr.has cell.style.attrs Attr.reverse)
-      && not (Attr.has cell.style.attrs Attr.underline)
-      && not (Attr.has cell.style.attrs Attr.strike)
-  | Ascii _ | Braille _ | Utf8 _ | Continuation -> false
-
-let cells_differ ~front ~back idx =
-  let fc = Cell_grid.get_linear front idx in
-  let bc = Cell_grid.get_linear back idx in
-  if not (Cell_grid.cell_equal fc bc) then true
-  else if bc.style.hyperlink_id = 0 then false
-  else
-    not
-      (Option.equal String.equal
-         (Cell_grid.hyperlink_uri front fc.style.hyperlink_id)
-         (Cell_grid.hyperlink_uri back bc.style.hyperlink_id))
-
 let ensure_row_flags t cols =
   if Array.length t.dirty_row_flags < cols then
     t.dirty_row_flags <- Array.make cols false
+
+let[@inline] cells_differ_slow ~front ~back ~(f_glyphs : Raw.int_buf)
+    ~(b_glyphs : Raw.int_buf) ~(f_styles : Raw.int_buf)
+    ~(b_styles : Raw.int_buf) idx =
+  let fg = Ba1.unsafe_get f_glyphs idx in
+  let bg = Ba1.unsafe_get b_glyphs idx in
+  let fs = Ba1.unsafe_get f_styles idx in
+  let bs = Ba1.unsafe_get b_styles idx in
+  if fg <> bg || fs <> bs then true
+  else
+    let extra_diff =
+      if (fg land Raw.glyph_extra_flag) <> 0 then
+        not (String.equal (Raw.extra_utf8_at front idx) (Raw.extra_utf8_at back idx))
+      else false
+    in
+    if extra_diff then true
+    else if (fs land Raw.style_has_link_bit) <> 0 then
+      let fid = Raw.link_id_at front idx in
+      let bid = Raw.link_id_at back idx in
+      fid <> bid
+      || not
+           (Option.equal String.equal
+              (Cell_grid.hyperlink_uri front fid)
+              (Cell_grid.hyperlink_uri back bid))
+    else false
+
+(* Hoisted zero-allocation scanners (monomorphic [Raw.int_buf] avoids
+   polymorphic Bigarray C FFI calls and closure allocation). *)
+let rec find_first_diff_linear (f_glyphs : Raw.int_buf) (b_glyphs : Raw.int_buf)
+    (f_styles : Raw.int_buf) (b_styles : Raw.int_buf) idx n =
+  if idx + 4 <= n then
+    if
+      Ba1.unsafe_get f_glyphs idx <> Ba1.unsafe_get b_glyphs idx
+      || Ba1.unsafe_get f_styles idx <> Ba1.unsafe_get b_styles idx
+    then idx
+    else if
+      Ba1.unsafe_get f_glyphs (idx + 1) <> Ba1.unsafe_get b_glyphs (idx + 1)
+      || Ba1.unsafe_get f_styles (idx + 1) <> Ba1.unsafe_get b_styles (idx + 1)
+    then idx + 1
+    else if
+      Ba1.unsafe_get f_glyphs (idx + 2) <> Ba1.unsafe_get b_glyphs (idx + 2)
+      || Ba1.unsafe_get f_styles (idx + 2) <> Ba1.unsafe_get b_styles (idx + 2)
+    then idx + 2
+    else if
+      Ba1.unsafe_get f_glyphs (idx + 3) <> Ba1.unsafe_get b_glyphs (idx + 3)
+      || Ba1.unsafe_get f_styles (idx + 3) <> Ba1.unsafe_get b_styles (idx + 3)
+    then idx + 3
+    else find_first_diff_linear f_glyphs b_glyphs f_styles b_styles (idx + 4) n
+  else if idx >= n then -1
+  else if
+    Ba1.unsafe_get f_glyphs idx = Ba1.unsafe_get b_glyphs idx
+    && Ba1.unsafe_get f_styles idx = Ba1.unsafe_get b_styles idx
+  then find_first_diff_linear f_glyphs b_glyphs f_styles b_styles (idx + 1) n
+  else idx
+
+let rec find_first_diff_general front back (f_glyphs : Raw.int_buf)
+    (b_glyphs : Raw.int_buf) (f_styles : Raw.int_buf) (b_styles : Raw.int_buf)
+    extra_flag link_bit idx n =
+  if idx >= n then -1
+  else
+    let fg = Ba1.unsafe_get f_glyphs idx in
+    let bg = Ba1.unsafe_get b_glyphs idx in
+    let fs = Ba1.unsafe_get f_styles idx in
+    let bs = Ba1.unsafe_get b_styles idx in
+    if fg <> bg || fs <> bs then idx
+    else if (fg land extra_flag) = 0 && (fs land link_bit) = 0 then
+      find_first_diff_general front back f_glyphs b_glyphs f_styles b_styles
+        extra_flag link_bit (idx + 1) n
+    else if
+      ((fg land extra_flag) <> 0
+       && not
+            (String.equal (Raw.extra_utf8_at front idx)
+               (Raw.extra_utf8_at back idx)))
+      || ((fs land link_bit) <> 0
+          &&
+          let fid = Raw.link_id_at front idx in
+          let bid = Raw.link_id_at back idx in
+          fid <> bid
+          || not
+               (Option.equal String.equal
+                  (Cell_grid.hyperlink_uri front fid)
+                  (Cell_grid.hyperlink_uri back bid)))
+    then idx
+    else
+      find_first_diff_general front back f_glyphs b_glyphs f_styles b_styles
+        extra_flag link_bit (idx + 1) n
+
+let rec find_first_dirty_simple (f_glyphs : Raw.int_buf) (b_glyphs : Raw.int_buf)
+    (f_styles : Raw.int_buf) (b_styles : Raw.int_buf) row_base cols col =
+  if col >= cols then -1
+  else
+    let idx = row_base + col in
+    if Ba1.unsafe_get f_glyphs idx = Ba1.unsafe_get b_glyphs idx
+       && Ba1.unsafe_get f_styles idx = Ba1.unsafe_get b_styles idx
+    then
+      find_first_dirty_simple f_glyphs b_glyphs f_styles b_styles row_base cols
+        (col + 1)
+    else col
+
+let rec find_first_dirty_slow front back (f_glyphs : Raw.int_buf)
+    (b_glyphs : Raw.int_buf) (f_styles : Raw.int_buf) (b_styles : Raw.int_buf)
+    row_base cols col =
+  if col >= cols then -1
+  else if
+    cells_differ_slow ~front ~back ~f_glyphs ~b_glyphs ~f_styles ~b_styles
+      (row_base + col)
+  then col
+  else
+    find_first_dirty_slow front back f_glyphs b_glyphs f_styles b_styles
+      row_base cols (col + 1)
+
+let rec find_tail_start_loop (b_glyphs : Raw.int_buf) (b_styles : Raw.int_buf)
+    glyph_empty el0_mask row_base col =
+  if col <= 0 then 0
+  else
+    let idx = row_base + col - 1 in
+    if Ba1.unsafe_get b_glyphs idx = glyph_empty
+       && (Ba1.unsafe_get b_styles idx land el0_mask) = 0
+    then
+      find_tail_start_loop b_glyphs b_styles glyph_empty el0_mask row_base
+        (col - 1)
+    else col
 
 let diff_and_emit t ~next_grid ~cursor ~write =
   let t0 = Clock.Mono.now () in
@@ -229,20 +387,32 @@ let diff_and_emit t ~next_grid ~cursor ~write =
   if cols <> Cell_grid.cols t.front || rows <> Cell_grid.rows t.front then
     t.front <- Cell_grid.create ~cols ~rows;
   ensure_row_flags t cols;
-  let total_dirty = ref 0 in
-  if full_repaint then total_dirty := cols * rows
-  else begin
-    let total_cells = cols * rows in
-    for idx = 0 to total_cells - 1 do
-      if cells_differ ~front:t.front ~back:next_grid idx then incr total_dirty
-    done
-  end;
   let cursor_changed =
     match t.last_cursor with
     | None -> true
     | Some prev -> not (cursor_equal prev cursor)
   in
-  if !total_dirty = 0 && not cursor_changed then
+  let f_glyphs = Raw.glyphs t.front in
+  let f_styles = Raw.styles t.front in
+  let b_glyphs = Raw.glyphs next_grid in
+  let b_styles = Raw.styles next_grid in
+  let simple_grids =
+    not
+      (Raw.has_extra_utf8 t.front || Raw.has_extra_utf8 next_grid
+       || Raw.has_links t.front || Raw.has_links next_grid)
+  in
+  (* Zero-allocation NO-OP fast path + first-dirty-row skip before allocating
+     any emission refs/closures (works for both simple grids and grids with
+     hyperlinks / multi-scalar graphemes). *)
+  let pre_first_idx =
+    if full_repaint then 0
+    else if simple_grids then
+      find_first_diff_linear f_glyphs b_glyphs f_styles b_styles 0 (cols * rows)
+    else
+      find_first_diff_general t.front next_grid f_glyphs b_glyphs f_styles
+        b_styles Raw.glyph_extra_flag Raw.style_has_link_bit 0 (cols * rows)
+  in
+  if (not full_repaint) && pre_first_idx < 0 && not cursor_changed then
     let diff_us = Clock.Mono.us_since (Clock.Mono.now ()) ~since:t0 in
     {
       dirty_cells = 0;
@@ -251,177 +421,261 @@ let diff_and_emit t ~next_grid ~cursor ~write =
       diff_us = Int.max 0 diff_us;
       full_repaint = false;
     }
-  else begin
-    let buf = t.buf in
-    Buffer.clear buf;
-    if t.caps.synchronized_output then Buffer.add_string buf "\x1b[?2026h";
-    Buffer.add_string buf "\x1b[?25l";
-    Buffer.add_string buf "\x1b[?7l";
-    if full_repaint then Buffer.add_string buf "\x1b[0m";
-    let pen_fg = ref Color.Default in
-    let pen_bg = ref Color.Default in
-    let pen_attrs = ref Attr.none in
-    let pen_link = ref 0 in
-    let pen_x = ref (-1) in
-    let pen_y = ref (-1) in
-    let dirty_runs = ref 0 in
-    let reset_pen_for_clear () =
-      if !pen_link <> 0 && t.caps.osc8_hyperlinks then begin
-        Buffer.add_string buf "\x1b]8;;\x1b\\";
-        pen_link := 0
-      end;
-      if
-        not (Color.equal !pen_bg Color.Default)
-        || not (Attr.equal !pen_attrs Attr.none)
-      then begin
-        Buffer.add_string buf "\x1b[0m";
-        pen_fg := Color.Default;
-        pen_bg := Color.Default;
-        pen_attrs := Attr.none
-      end
+  else
+  let buf = t.buf in
+  let scratch = t.utf8_scratch in
+  let header_emitted = ref false in
+  let ensure_header () =
+    if not !header_emitted then begin
+      header_emitted := true;
+      Buffer.clear buf;
+      if t.caps.synchronized_output then Buffer.add_string buf "\x1b[?2026h";
+      Buffer.add_string buf "\x1b[?25l";
+      Buffer.add_string buf "\x1b[?7l";
+      if full_repaint then Buffer.add_string buf "\x1b[0m"
+    end
+  in
+  let pen_fg = ref 0 in
+  let pen_bg = ref 0 in
+  let pen_attrs = ref 0 in
+  let pen_link = ref 0 in
+  let pen_packed = ref (-1) in
+  let pen_x = ref (-1) in
+  let pen_y = ref (-1) in
+  let dirty_runs = ref 0 in
+  let total_dirty = ref 0 in
+  let color_depth = t.caps.color_depth in
+  let is_truecolor = color_depth = Color.Truecolor in
+  let osc8 = t.caps.osc8_hyperlinks in
+  let braille_safe = t.caps.braille_safe in
+  let b_row_has_wide = Raw.row_has_wide next_grid in
+  let el0_mask = Raw.style_el0_forbidden_mask in
+  let glyph_empty = Raw.glyph_empty in
+  let glyph_cont = Raw.glyph_continuation in
+  let glyph_wide_min = Raw.glyph_wide_min in
+  let glyph_extra_flag = Raw.glyph_extra_flag in
+  let link_bit = Raw.style_has_link_bit in
+  let reset_pen_for_clear () =
+    if !pen_link <> 0 && osc8 then begin
+      Buffer.add_string buf "\x1b]8;;\x1b\\";
+      pen_link := 0;
+      pen_packed := -1
+    end;
+    if !pen_bg <> 0 || !pen_attrs <> 0 then begin
+      Buffer.add_string buf "\x1b[0m";
+      pen_fg := 0;
+      pen_bg := 0;
+      pen_attrs := 0;
+      pen_packed := 0
+    end
+  in
+  let apply_packed_style s idx =
+    let fg_raw = s land 0x3FF_FFFF in
+    let bg_raw = (s lsr 26) land 0x3FF_FFFF in
+    let next_bits = (s lsr 52) land 0x1F in
+    let target_fg =
+      if is_truecolor then fg_raw
+      else downscale_packed_color ~depth:color_depth fg_raw
     in
-    let apply_style (style : Style.t) =
-      let target_fg = Color.downscale ~depth:t.caps.color_depth style.fg in
-      let target_bg = Color.downscale ~depth:t.caps.color_depth style.bg in
-      let target_attrs = style.attrs in
-      let target_link =
-        if t.caps.osc8_hyperlinks then style.hyperlink_id else 0
-      in
-      let cur_bits = Attr.to_bits !pen_attrs in
-      let next_bits = Attr.to_bits target_attrs in
-      if cur_bits land lnot next_bits <> 0 then begin
-        Buffer.add_string buf "\x1b[0m";
-        pen_fg := Color.Default;
-        pen_bg := Color.Default;
-        pen_attrs := Attr.none;
-        emit_attr_flags buf target_attrs;
-        pen_attrs := target_attrs
-      end
-      else if cur_bits <> next_bits then begin
-        let added_bits = next_bits land lnot cur_bits in
-        if added_bits land Attr.to_bits Attr.bold <> 0 then
-          Buffer.add_string buf "\x1b[1m";
-        if added_bits land Attr.to_bits Attr.italic <> 0 then
-          Buffer.add_string buf "\x1b[3m";
-        if added_bits land Attr.to_bits Attr.underline <> 0 then
-          Buffer.add_string buf "\x1b[4m";
-        if added_bits land Attr.to_bits Attr.reverse <> 0 then
-          Buffer.add_string buf "\x1b[7m";
-        if added_bits land Attr.to_bits Attr.strike <> 0 then
-          Buffer.add_string buf "\x1b[9m";
-        pen_attrs := target_attrs
-      end;
-      if not (Color.equal !pen_fg target_fg) then begin
-        emit_fg buf target_fg;
-        pen_fg := target_fg
-      end;
-      if not (Color.equal !pen_bg target_bg) then begin
-        emit_bg buf target_bg;
-        pen_bg := target_bg
-      end;
-      if !pen_link <> target_link then begin
-        (match Cell_grid.hyperlink_uri next_grid target_link with
-         | Some uri ->
-             Buffer.add_string buf "\x1b]8;;";
-             Buffer.add_string buf uri;
-             Buffer.add_string buf "\x1b\\"
-         | None -> Buffer.add_string buf "\x1b]8;;\x1b\\");
-        pen_link := target_link
-      end
+    let target_bg =
+      if is_truecolor then bg_raw
+      else downscale_packed_color ~depth:color_depth bg_raw
     in
-    let emit_cell (cell : Cell_grid.cell) =
-      match cell.glyph with
-      | Cell_grid.Continuation -> ()
-      | Empty ->
-          apply_style cell.style;
-          Buffer.add_char buf ' ';
-          pen_x := !pen_x + 1
-      | Ascii ch ->
-          apply_style cell.style;
-          Buffer.add_char buf ch;
-          pen_x := !pen_x + 1
-      | Braille mask ->
-          apply_style cell.style;
-          if t.caps.braille_safe then
-            Buffer.add_string buf (Cell_grid.braille_utf8 mask)
-          else Buffer.add_char buf (ascii_fallback_of_braille mask);
-          pen_x := !pen_x + 1
-      | Utf8 s ->
-          apply_style cell.style;
-          Buffer.add_string buf s;
-          pen_x := !pen_x + cell.width
+    let target_link =
+      if osc8 && (s land link_bit) <> 0 then Raw.link_id_at next_grid idx
+      else 0
     in
-    let flags = t.dirty_row_flags in
-    for row = 0 to rows - 1 do
-      let row_base = row * cols in
-      let row_has_dirty = ref false in
-      for col = 0 to cols - 1 do
-        let d = full_repaint || cells_differ ~front:t.front ~back:next_grid (row_base + col) in
-        flags.(col) <- d;
-        if d then row_has_dirty := true
-      done;
-      if !row_has_dirty then begin
-        (* Wide-glyph dirty coupling: ensure lead and continuation halves always
-           re-emit together as an atomic pair. *)
-        for col = 0 to cols - 1 do
-          if flags.(col) then begin
-            let cell = Cell_grid.get_linear next_grid (row_base + col) in
-            (match cell.glyph with
-             | Cell_grid.Continuation when col > 0 -> flags.(col - 1) <- true
-             | Cell_grid.Utf8 _ when cell.width = 2 && col + 1 < cols ->
-                 flags.(col + 1) <- true
-             | Cell_grid.Empty
-             | Cell_grid.Ascii _
-             | Cell_grid.Braille _
-             | Cell_grid.Utf8 _
-             | Cell_grid.Continuation ->
-                 ())
-          end
-        done;
-        (* Find trailing EL0-erasable blank suffix [tail_start .. cols - 1]. *)
-        let rec find_tail_start col =
-          if col <= 0 then 0
-          else if is_el0_erasable (Cell_grid.get_linear next_grid (row_base + col - 1)) then
-            find_tail_start (col - 1)
-          else col
+    let cur_bits = !pen_attrs in
+    if cur_bits land lnot next_bits <> 0 then begin
+      Buffer.add_string buf "\x1b[0m";
+      pen_fg := 0;
+      pen_bg := 0;
+      pen_attrs := next_bits;
+      if next_bits <> 0 then emit_attr_bits buf next_bits
+    end
+    else if cur_bits <> next_bits then begin
+      emit_attr_bits buf (next_bits land lnot cur_bits);
+      pen_attrs := next_bits
+    end;
+    if !pen_fg <> target_fg then begin
+      emit_fg_packed buf target_fg;
+      pen_fg := target_fg
+    end;
+    if !pen_bg <> target_bg then begin
+      emit_bg_packed buf target_bg;
+      pen_bg := target_bg
+    end;
+    if !pen_link <> target_link then begin
+      (match Cell_grid.hyperlink_uri next_grid target_link with
+       | Some uri ->
+           Buffer.add_string buf "\x1b]8;;";
+           Buffer.add_string buf uri;
+           Buffer.add_string buf "\x1b\\"
+       | None -> Buffer.add_string buf "\x1b]8;;\x1b\\");
+      pen_link := target_link
+    end;
+    pen_packed := if target_link = 0 && (s land link_bit) = 0 then s else -1
+  in
+  let[@inline] emit_cell_at idx =
+    let g = Ba1.unsafe_get b_glyphs idx in
+    if g = glyph_cont then ()
+    else begin
+      let s = Ba1.unsafe_get b_styles idx in
+      if s <> !pen_packed then apply_packed_style s idx;
+      if g = glyph_empty then begin
+        Buffer.add_char buf ' ';
+        pen_x := !pen_x + 1
+      end
+      else if g < 0x100 then begin
+        Buffer.add_char buf (Char.unsafe_chr g);
+        pen_x := !pen_x + 1
+      end
+      else if g < 0x200 then begin
+        let mask = g land 0xFF in
+        if braille_safe then
+          Buffer.add_string buf (Array.unsafe_get Cell_grid.braille_lut mask)
+        else Buffer.add_char buf (ascii_fallback_of_braille mask);
+        pen_x := !pen_x + 1
+      end
+      else if (g land glyph_extra_flag) = 0 then begin
+        emit_utf8_scalar buf scratch (g land 0x1FFFFF);
+        pen_x := !pen_x + (g lsr 24)
+      end
+      else begin
+        Buffer.add_string buf (Raw.extra_utf8_at next_grid idx);
+        pen_x := !pen_x + (g lsr 24)
+      end
+    end
+  in
+  if full_repaint then begin
+    total_dirty := cols * rows;
+    if cols > 0 && rows > 0 then begin
+      ensure_header ();
+      for row = 0 to rows - 1 do
+        let row_base = row * cols in
+        let tail_start =
+          find_tail_start_loop b_glyphs b_styles glyph_empty el0_mask row_base cols
         in
-        let tail_start = find_tail_start cols in
+        if tail_start > 0 then begin
+          if !pen_y <> row || !pen_x <> 0 then begin
+            emit_cup buf ~row ~col:0;
+            pen_y := row;
+            pen_x := 0
+          end;
+          incr dirty_runs;
+          for c = 0 to tail_start - 1 do
+            emit_cell_at (row_base + c)
+          done
+        end;
+        if tail_start < cols then begin
+          if !pen_y <> row || !pen_x <> tail_start then begin
+            emit_cup buf ~row ~col:tail_start;
+            pen_y := row;
+            pen_x := tail_start
+          end;
+          reset_pen_for_clear ();
+          Buffer.add_string buf "\x1b[K";
+          incr dirty_runs;
+          pen_x := cols
+        end
+      done
+    end
+  end
+  else begin
+    let flags = t.dirty_row_flags in
+    let start_row, first_row_col =
+      if pre_first_idx < 0 then (rows, -1)
+      else (pre_first_idx / cols, pre_first_idx mod cols)
+    in
+    for row = start_row to rows - 1 do
+      let row_base = row * cols in
+      let first_dirty =
+        if row = start_row && first_row_col >= 0 then first_row_col
+        else if simple_grids then
+          find_first_dirty_simple f_glyphs b_glyphs f_styles b_styles row_base cols 0
+        else
+          find_first_dirty_slow t.front next_grid f_glyphs b_glyphs f_styles
+            b_styles row_base cols 0
+      in
+      if first_dirty >= 0 then begin
+        ensure_header ();
+        if first_dirty > 0 then Array.fill flags 0 first_dirty false;
+        Array.unsafe_set flags first_dirty true;
+        let row_dirty = ref 1 in
+        if simple_grids then
+          for col = first_dirty + 1 to cols - 1 do
+            let idx = row_base + col in
+            let d =
+              Ba1.unsafe_get f_glyphs idx <> Ba1.unsafe_get b_glyphs idx
+              || Ba1.unsafe_get f_styles idx <> Ba1.unsafe_get b_styles idx
+            in
+            Array.unsafe_set flags col d;
+            if d then incr row_dirty
+          done
+        else
+          for col = first_dirty + 1 to cols - 1 do
+            let d =
+              cells_differ_slow ~front:t.front ~back:next_grid
+                ~f_glyphs ~b_glyphs ~f_styles ~b_styles (row_base + col)
+            in
+            Array.unsafe_set flags col d;
+            if d then incr row_dirty
+          done;
+        total_dirty := !total_dirty + !row_dirty;
+        let row_has_wide = Array.unsafe_get b_row_has_wide row in
+        if row_has_wide then
+          for col = first_dirty to cols - 1 do
+            if Array.unsafe_get flags col then begin
+              let g = Ba1.unsafe_get b_glyphs (row_base + col) in
+              if g = glyph_cont && col > 0 then
+                Array.unsafe_set flags (col - 1) true
+              else if g >= glyph_wide_min && col + 1 < cols then
+                Array.unsafe_set flags (col + 1) true
+            end
+          done;
+        let tail_start =
+          find_tail_start_loop b_glyphs b_styles glyph_empty el0_mask row_base cols
+        in
         let tail_dirty = ref false in
-        for col = tail_start to cols - 1 do
-          if flags.(col) then tail_dirty := true
-        done;
+        if tail_start < cols then begin
+          let c = ref (Int.max tail_start first_dirty) in
+          while !c < cols && not !tail_dirty do
+            if Array.unsafe_get flags !c then tail_dirty := true;
+            incr c
+          done
+        end;
         let emit_limit = if !tail_dirty then tail_start else cols in
-        let col = ref 0 in
+        let start_scan =
+          if first_dirty > 0 && Array.unsafe_get flags (first_dirty - 1) then
+            first_dirty - 1
+          else first_dirty
+        in
+        let col = ref start_scan in
         while !col < emit_limit do
-          if not flags.(!col) then incr col
+          if not (Array.unsafe_get flags !col) then incr col
           else begin
             let run_start = !col in
             let run_end = ref run_start in
             let scan = ref (run_start + 1) in
             let clean_gap = ref 0 in
             while !scan < emit_limit && !clean_gap <= run_bridge_max_clean do
-              if flags.(!scan) then begin
+              if Array.unsafe_get flags !scan then begin
                 run_end := !scan;
                 clean_gap := 0
               end
               else incr clean_gap;
               incr scan
             done;
-            (* Keep wide glyphs whole at run boundaries. *)
             let start_c =
-              match (Cell_grid.get_linear next_grid (row_base + run_start)).glyph with
-              | Cell_grid.Continuation when run_start > 0 -> run_start - 1
-              | Cell_grid.Empty
-              | Cell_grid.Ascii _
-              | Cell_grid.Braille _
-              | Cell_grid.Utf8 _
-              | Cell_grid.Continuation ->
-                  run_start
+              if row_has_wide && run_start > 0
+                 && Ba1.unsafe_get b_glyphs (row_base + run_start) = glyph_cont
+              then run_start - 1
+              else run_start
             in
             let end_c =
-              let last_cell = Cell_grid.get_linear next_grid (row_base + !run_end) in
-              if last_cell.width = 2 && !run_end + 1 < emit_limit then
-                !run_end + 1
+              if row_has_wide && !run_end + 1 < emit_limit
+                 && Ba1.unsafe_get b_glyphs (row_base + !run_end) >= glyph_wide_min
+              then !run_end + 1
               else !run_end
             in
             if !pen_y <> row || !pen_x <> start_c then begin
@@ -431,7 +685,7 @@ let diff_and_emit t ~next_grid ~cursor ~write =
             end;
             incr dirty_runs;
             for c = start_c to end_c do
-              emit_cell (Cell_grid.get_linear next_grid (row_base + c))
+              emit_cell_at (row_base + c)
             done;
             col := end_c + 1
           end
@@ -448,8 +702,20 @@ let diff_and_emit t ~next_grid ~cursor ~write =
           pen_x := cols
         end
       end
-    done;
-    if !pen_link <> 0 && t.caps.osc8_hyperlinks then
+    done
+  end;
+  if not !header_emitted && not cursor_changed then
+    let diff_us = Clock.Mono.us_since (Clock.Mono.now ()) ~since:t0 in
+    {
+      dirty_cells = 0;
+      dirty_runs = 0;
+      bytes_emitted = 0;
+      diff_us = Int.max 0 diff_us;
+      full_repaint = false;
+    }
+  else begin
+    ensure_header ();
+    if !pen_link <> 0 && osc8 then
       Buffer.add_string buf "\x1b]8;;\x1b\\";
     Buffer.add_string buf "\x1b[0m";
     Buffer.add_string buf "\x1b[?7h";

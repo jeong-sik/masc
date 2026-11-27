@@ -19,7 +19,8 @@ let add_attr flag t = { t with attrs = Attr.(t.attrs lor flag) }
 let with_hyperlink hyperlink_id t = { t with hyperlink_id }
 
 let equal a b =
-  Color.equal a.fg b.fg
-  && Color.equal a.bg b.bg
-  && Attr.equal a.attrs b.attrs
-  && Int.equal a.hyperlink_id b.hyperlink_id
+  a == b
+  || (Color.equal a.fg b.fg
+      && Color.equal a.bg b.bg
+      && Attr.equal a.attrs b.attrs
+      && Int.equal a.hyperlink_id b.hyperlink_id)

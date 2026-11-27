@@ -152,19 +152,22 @@ let put_aligned grid ~clip ~x ~y ~w ~align ~style text =
   if w <= 0 then ()
   else
     let fitted = Grapheme.truncate_to_width ~max_width:w text in
-    let fw = Grapheme.display_width fitted in
     let dx =
       match align with
       | Left -> 0
-      | Right -> Int.max 0 (w - fw)
-      | Center -> Int.max 0 ((w - fw) / 2)
+      | Right -> Int.max 0 (w - Grapheme.display_width fitted)
+      | Center -> Int.max 0 ((w - Grapheme.display_width fitted) / 2)
     in
     ignore (Cell_grid.put_text ~clip grid ~x:(x + dx) ~y ~style fitted)
 
-let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~(caps : Presenter.capabilities)
-    ~lang ?(scroll = 0) ?selected ?(focused = true) ?(zebra = false) ?col_gap
-    ?(header_separator = true) ~columns rows =
-  let total_rows = List.length rows in
+let rec find_cell id = function
+  | [] -> None
+  | (k, v) :: rest -> if String.equal k id then Some v else find_cell id rest
+
+let draw_virtual grid ~(rect : Rect.t) ~(theme : Theme.t)
+    ~(caps : Presenter.capabilities) ~lang ?(scroll = 0) ?selected
+    ?(focused = true) ?(zebra = false) ?col_gap ?(header_separator = true)
+    ~columns ~total_rows row_at =
   if Rect.is_empty rect then
     {
       visible_columns = [];
@@ -193,128 +196,188 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~(caps : Presenter.capabilitie
     let viewport_start, selected_visible =
       compute_viewport ~total_rows ~viewport_rows ~scroll ~selected
     in
-    let header_bg = Color.of_rgb theme.surface_2 in
-    let header_style = Typography.structure ~bg:header_bg ~bold:true theme in
+    let surface_card = Color.of_rgb theme.surface_1 in
+    let surface_elev = Color.of_rgb theme.surface_2 in
+    let surface_canvas = Color.of_rgb theme.surface_0 in
+    let surface_sel = Color.of_rgb theme.selection_bg in
+    let text_bright = Color.of_rgb theme.text_bright in
+    let text_primary = Color.of_rgb theme.text_primary in
+    let header_style = Typography.structure ~bg:surface_elev ~bold:true theme in
+    let col_positions =
+      let cx = ref (rect.x + selection_gutter) in
+      Array.of_list
+        (List.map
+           (fun (col, w) ->
+             let x = !cx in
+             cx := x + w + gap;
+             (col, x, w))
+           visible_columns)
+    in
+    let n_vis_cols = Array.length col_positions in
     if header_rows = 1 then begin
       let hdr_rect = Rect.make ~x:rect.x ~y:rect.y ~w:rect.w ~h:1 in
       Cell_grid.fill_rect ~clip:rect grid ~rect:hdr_rect ~style:header_style ();
-      let cx = ref (rect.x + selection_gutter) in
-      List.iter
-        (fun (col, w) ->
-          let hdr = Say.resolve lang col.header in
-          put_aligned grid ~clip:hdr_rect ~x:!cx ~y:rect.y ~w ~align:col.align
-            ~style:header_style hdr;
-          cx := !cx + w + gap)
-        visible_columns
+      for c = 0 to n_vis_cols - 1 do
+        let col, x, w = Array.unsafe_get col_positions c in
+        let hdr = Say.resolve lang col.header in
+        put_aligned grid ~clip:hdr_rect ~x ~y:rect.y ~w ~align:col.align
+          ~style:header_style hdr
+      done
     end;
     if sep_rows = 1 then
-      Card.draw_hairline ~unicode:caps.unicode_blocks
-        ~bg:(Color.of_rgb theme.surface_1) grid ~rect ~y:(rect.y + header_rows)
-        ~theme;
-    let rows_arr = Array.of_list rows in
+      Card.draw_hairline ~unicode:caps.unicode_blocks ~bg:surface_card grid ~rect
+        ~y:(rect.y + header_rows) ~theme;
     let body_y = rect.y + header_rows + sep_rows in
-    let surface_card = Color.of_rgb theme.surface_1 in
+    let base_normal = Typography.primary ~bg:surface_card theme in
+    let base_zebra = Typography.primary ~bg:surface_canvas theme in
+    let base_sel_unfocused = Typography.primary ~bg:surface_elev theme in
+    let base_sel_focused = Typography.primary ~bg:surface_sel theme in
+    let anchor_sel_focused = Typography.anchor ~bg:surface_sel theme in
+    let rail_style = Typography.accent ~bg:surface_sel ~bold:true theme in
+    let empty_style = Typography.whisper ~bg:surface_card ~italic:false theme in
+    let normal_st_ok = Typography.status ~bg:surface_card ~bold:true theme Theme.Status_ok in
+    let normal_st_active = Typography.status ~bg:surface_card ~bold:true theme Theme.Status_active in
+    let normal_st_attention = Typography.status ~bg:surface_card ~bold:true theme Theme.Status_attention in
+    let normal_st_critical = Typography.status ~bg:surface_card ~bold:true theme Theme.Status_critical in
+    let normal_st_ai = Typography.status ~bg:surface_card ~bold:true theme Theme.Status_ai in
+    let normal_st_hist = Typography.status ~bg:surface_card ~bold:true theme Theme.Status_historical in
+    let normal_status_style = function
+      | Theme.Status_ok -> normal_st_ok
+      | Theme.Status_active -> normal_st_active
+      | Theme.Status_attention -> normal_st_attention
+      | Theme.Status_critical -> normal_st_critical
+      | Theme.Status_ai -> normal_st_ai
+      | Theme.Status_historical -> normal_st_hist
+    in
+    if viewport_rows > 0 then begin
+      let body_rect = Rect.make ~x:rect.x ~y:body_y ~w:rect.w ~h:viewport_rows in
+      Cell_grid.fill_rect ~clip:rect grid ~rect:body_rect ~style:base_normal ()
+    end;
+    let cached_fg = ref Color.Default in
+    let cached_attrs = ref Attr.none in
+    let cached_style = ref base_normal in
+    let has_cached = ref false in
     for vrow = 0 to viewport_rows - 1 do
       let idx = viewport_start + vrow in
       let py = body_y + vrow in
-      let row_rect = Rect.make ~x:rect.x ~y:py ~w:rect.w ~h:1 in
       if idx < total_rows then begin
-        let row = rows_arr.(idx) in
+        let row = row_at idx in
         let is_selected =
           match selected with Some s -> Int.equal s idx | None -> false
         in
-        let bg_rgb =
-          if is_selected && focused then theme.selection_bg
-          else if is_selected then theme.surface_2
-          else if zebra && idx mod 2 = 1 then theme.surface_0
-          else theme.surface_1
+        let is_normal_bg =
+          (not is_selected) && not (zebra && idx land 1 = 1)
         in
-        let bg = Color.of_rgb bg_rgb in
-        let base_style = Typography.primary ~bg theme in
-        let gauge_lbl_style =
-          if is_selected && focused then Typography.anchor ~bg theme
-          else Typography.primary ~bg theme
-        in
-        Cell_grid.fill_rect ~clip:rect grid ~rect:row_rect ~style:base_style ();
-        if is_selected && focused then begin
-          let rail_style = Typography.accent ~bg ~bold:true theme in
-          if caps.unicode_blocks then
-            Cell_grid.put_glyph ~clip:row_rect grid ~x:rect.x ~y:py
-              ~style:rail_style Glyph.Left_rail
+        let bg, base_style, gauge_lbl_style =
+          if is_normal_bg then (surface_card, base_normal, base_normal)
           else
-            Cell_grid.put_ascii ~clip:row_rect grid ~x:rect.x ~y:py
-              ~style:rail_style '|'
-        end;
-        let cx = ref (rect.x + selection_gutter) in
-        List.iter
-          (fun ((col : column), w) ->
-            let cell_clip = Rect.make ~x:!cx ~y:py ~w ~h:1 in
-            (match List.assoc_opt col.id row.cells with
-             | None -> ()
-             | Some (Text { text; fg; attrs }) ->
-                 let fg_color, eff_attrs =
-                   if is_selected && focused && col.priority = 0 then
-                     let c =
-                       match fg with
-                       | Some explicit -> explicit
-                       | None -> Color.of_rgb theme.text_bright
-                     in
-                     (c, Attr.(bold lor attrs))
-                   else
-                     let c =
-                       match fg with
-                       | Some explicit -> explicit
-                       | None -> Color.of_rgb theme.text_primary
-                     in
-                     (c, attrs)
-                 in
-                 let style = Style.make ~fg:fg_color ~bg ~attrs:eff_attrs () in
-                 put_aligned grid ~clip:cell_clip ~x:!cx ~y:py ~w
-                   ~align:col.align ~style text
-             | Some (Badge { glyph; text; tone }) ->
-                 (* Preserve semantic badge hue on both normal and selected rows *)
-                 let style = Typography.status ~bg ~bold:true theme tone in
-                 let label =
-                   match glyph with
-                   | Some g -> Glyph.to_utf8 g ^ " " ^ text
-                   | None -> text
-                 in
-                 put_aligned grid ~clip:cell_clip ~x:!cx ~y:py ~w
-                   ~align:col.align ~style label
-             | Some (Sparkline { samples; gradient }) ->
-                 ignore
-                   (Chart.draw_sparkline_run ~clip:cell_clip grid ~x:!cx ~y:py
-                      ~width:w ~theme ~bg ~unicode:caps.unicode_blocks ~gradient
-                      samples)
-             | Some (Gauge { ratio; gradient; label }) -> (
-                 match label with
-                 | None ->
-                     ignore
-                       (Chart.draw_ratio_bar_run ~clip:cell_clip grid ~x:!cx
-                          ~y:py ~width:w ~theme ~bg ~unicode:caps.unicode_blocks
-                          ~gradient ~ratio)
-                 | Some lbl ->
-                     let lw = Grapheme.display_width lbl in
-                     let bar_w = Int.max 0 (w - lw - 1) in
-                     if bar_w >= 3 then begin
-                       ignore
-                         (Chart.draw_ratio_bar_run ~clip:cell_clip grid ~x:!cx
-                            ~y:py ~width:bar_w ~theme ~bg
-                            ~unicode:caps.unicode_blocks ~gradient ~ratio);
-                       put_aligned grid ~clip:cell_clip ~x:(!cx + bar_w + 1)
-                         ~y:py ~w:(w - bar_w - 1) ~align:Right
-                         ~style:gauge_lbl_style lbl
-                     end
-                     else
-                       put_aligned grid ~clip:cell_clip ~x:!cx ~y:py ~w
-                         ~align:col.align ~style:gauge_lbl_style lbl));
-            cx := !cx + w + gap)
-          visible_columns;
+            let bg, bs, gs =
+              if is_selected && focused then
+                (surface_sel, base_sel_focused, anchor_sel_focused)
+              else if is_selected then
+                (surface_elev, base_sel_unfocused, base_sel_unfocused)
+              else (surface_canvas, base_zebra, base_zebra)
+            in
+            let row_rect = Rect.make ~x:rect.x ~y:py ~w:rect.w ~h:1 in
+            Cell_grid.fill_rect ~clip:rect grid ~rect:row_rect ~style:bs ();
+            if is_selected && focused then begin
+              if caps.unicode_blocks then
+                Cell_grid.put_glyph ~clip:row_rect grid ~x:rect.x ~y:py
+                  ~style:rail_style Glyph.Left_rail
+              else
+                Cell_grid.put_ascii ~clip:row_rect grid ~x:rect.x ~y:py
+                  ~style:rail_style '|'
+            end;
+            (bg, bs, gs)
+        in
+        for c = 0 to n_vis_cols - 1 do
+          let (col : column), cx, w = Array.unsafe_get col_positions c in
+          match find_cell col.id row.cells with
+          | None -> ()
+          | Some cell -> (
+              match cell with
+              | Text { text; fg; attrs } ->
+                  let style =
+                    if is_selected && focused && col.priority = 0 then
+                      match fg with
+                      | None when attrs = Attr.none -> anchor_sel_focused
+                      | Some explicit ->
+                          Style.make ~fg:explicit ~bg
+                            ~attrs:Attr.(bold lor attrs)
+                            ()
+                      | None ->
+                          Style.make ~fg:text_bright ~bg
+                            ~attrs:Attr.(bold lor attrs)
+                            ()
+                    else
+                      match fg with
+                      | None when attrs = Attr.none -> base_style
+                      | Some explicit ->
+                          if is_normal_bg then
+                            if !has_cached && Color.equal !cached_fg explicit && !cached_attrs = attrs then
+                              !cached_style
+                            else begin
+                              let st = Style.make ~fg:explicit ~bg ~attrs () in
+                              cached_fg := explicit;
+                              cached_attrs := attrs;
+                              cached_style := st;
+                              has_cached := true;
+                              st
+                            end
+                          else Style.make ~fg:explicit ~bg ~attrs ()
+                      | None -> Style.make ~fg:text_primary ~bg ~attrs ()
+                  in
+                  put_aligned grid ~clip:rect ~x:cx ~y:py ~w
+                    ~align:col.align ~style text
+              | Badge { glyph; text; tone } ->
+                  (* Preserve semantic badge hue on both normal and selected rows *)
+                  let style =
+                    if is_normal_bg then normal_status_style tone
+                    else Typography.status ~bg ~bold:true theme tone
+                  in
+                  let label =
+                    match glyph with
+                    | Some g ->
+                        if String.length text = 0 then Glyph.to_utf8 g
+                        else Glyph.to_utf8 g ^ " " ^ text
+                    | None -> text
+                  in
+                  put_aligned grid ~clip:rect ~x:cx ~y:py ~w
+                    ~align:col.align ~style label
+              | Sparkline { samples; gradient } ->
+                  ignore
+                    (Chart.draw_sparkline_run ~clip:rect grid ~x:cx ~y:py
+                       ~width:w ~theme ~bg ~unicode:caps.unicode_blocks
+                       ~gradient samples)
+              | Gauge { ratio; gradient; label } -> (
+                  match label with
+                  | None ->
+                      ignore
+                        (Chart.draw_ratio_bar_run ~clip:rect grid ~x:cx
+                           ~y:py ~width:w ~theme ~bg
+                           ~unicode:caps.unicode_blocks ~gradient ~ratio)
+                  | Some lbl ->
+                      let lw = Grapheme.display_width lbl in
+                      let bar_w = Int.max 0 (w - lw - 1) in
+                      if bar_w >= 3 then begin
+                        ignore
+                          (Chart.draw_ratio_bar_run ~clip:rect grid ~x:cx
+                             ~y:py ~width:bar_w ~theme ~bg
+                             ~unicode:caps.unicode_blocks ~gradient ~ratio);
+                        put_aligned grid ~clip:rect ~x:(cx + bar_w + 1)
+                          ~y:py ~w:(w - bar_w - 1) ~align:Right
+                          ~style:gauge_lbl_style lbl
+                      end
+                      else
+                        put_aligned grid ~clip:rect ~x:cx ~y:py ~w
+                          ~align:col.align ~style:gauge_lbl_style lbl))
+        done;
         ignore row.id
       end
-      else
-        let empty_style = Typography.whisper ~bg:surface_card ~italic:false theme in
+      else if empty_style != base_normal then begin
+        let row_rect = Rect.make ~x:rect.x ~y:py ~w:rect.w ~h:1 in
         Cell_grid.fill_rect ~clip:rect grid ~rect:row_rect ~style:empty_style ()
+      end
     done;
     if has_hidden_notice then begin
       let py = Rect.bottom rect - 1 in
@@ -325,10 +388,13 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~(caps : Presenter.capabilitie
         |> String.concat ", "
       in
       let msg =
-        Say.resolve lang
-          (Say.make
-             ~ko:(Printf.sprintf "%s 외 %d열 숨김: %s" (Glyph.to_utf8 Glyph.Separator_dot) dropped_count names)
-             ~en:(Printf.sprintf "%s +%d hidden cols: %s" (Glyph.to_utf8 Glyph.Separator_dot) dropped_count names))
+        match lang with
+        | Say.Lang_ko ->
+            Glyph.to_utf8 Glyph.Separator_dot ^ " 외 "
+            ^ Int.to_string dropped_count ^ "열 숨김: " ^ names
+        | Say.Lang_en ->
+            Glyph.to_utf8 Glyph.Separator_dot ^ " +"
+            ^ Int.to_string dropped_count ^ " hidden cols: " ^ names
       in
       let notice_style = Typography.whisper ~bg:surface_card theme in
       let notice_rect = Rect.make ~x:rect.x ~y:py ~w:rect.w ~h:1 in
@@ -348,3 +414,12 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~(caps : Presenter.capabilitie
       total_rows;
       selected_visible;
     }
+
+let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ~(caps : Presenter.capabilities)
+    ~lang ?scroll ?selected ?focused ?zebra ?col_gap ?header_separator ~columns
+    rows =
+  let rows_arr = Array.of_list rows in
+  let total_rows = Array.length rows_arr in
+  draw_virtual grid ~rect ~theme ~caps ~lang ?scroll ?selected ?focused ?zebra
+    ?col_gap ?header_separator ~columns ~total_rows
+    (fun idx -> Array.unsafe_get rows_arr idx)

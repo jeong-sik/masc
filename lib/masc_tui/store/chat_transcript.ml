@@ -205,164 +205,205 @@ let find_url_cred_end s i =
 
 let scrub_secrets_in_text_with ~replacement raw =
   let len = String.length raw in
-  let buf = Buffer.create len in
-  let scan_quoted start_pos =
-    let qch = raw.[start_pos] in
-    Buffer.add_char buf qch;
-    Buffer.add_string buf replacement;
+  let buf_ref = ref None in
+  let flushed = ref 0 in
+  let ensure_buf up_to =
+    let b =
+      match !buf_ref with
+      | Some b -> b
+      | None ->
+          let b = Buffer.create len in
+          buf_ref := Some b;
+          b
+    in
+    if up_to > !flushed then begin
+      Buffer.add_substring b raw !flushed (up_to - !flushed);
+      flushed := up_to
+    end;
+    b
+  in
+  let scan_quoted b start_pos =
+    let qch = String.unsafe_get raw start_pos in
+    Buffer.add_char b qch;
+    Buffer.add_string b replacement;
     let rec scan_q j esc =
       if j >= len then len
       else if esc then scan_q (j + 1) false
-      else if Char.equal raw.[j] '\\' then scan_q (j + 1) true
-      else if Char.equal raw.[j] qch then (
-        Buffer.add_char buf qch;
-        j + 1)
-      else scan_q (j + 1) false
+      else
+        let c = String.unsafe_get raw j in
+        if Char.equal c '\\' then scan_q (j + 1) true
+        else if Char.equal c qch then (
+          Buffer.add_char b qch;
+          j + 1)
+        else scan_q (j + 1) false
     in
     scan_q (start_pos + 1) false
   in
   let rec loop i =
     if i >= len then ()
     else
-      match find_pem_private_key_end raw i with
+      let ch = String.unsafe_get raw i in
+      match if Char.equal ch '-' then find_pem_private_key_end raw i else None with
       | Some pem_end ->
-          Buffer.add_string buf replacement;
+          let b = ensure_buf i in
+          Buffer.add_string b replacement;
+          flushed := pem_end;
           loop pem_end
       | None -> (
-          match find_url_cred_end raw i with
+          match if Char.equal ch ':' then find_url_cred_end raw i else None with
           | Some at_pos ->
-              Buffer.add_string buf ("://" ^ replacement ^ "@");
+              let b = ensure_buf i in
+              Buffer.add_string b "://";
+              Buffer.add_string b replacement;
+              Buffer.add_char b '@';
+              flushed := at_pos + 1;
               loop (at_pos + 1)
           | None ->
-              let prev_ok = i = 0 || not (is_ident_char raw.[i - 1]) in
+              let prev_ok =
+                i = 0 || not (is_ident_char (String.unsafe_get raw (i - 1)))
+              in
               if
                 prev_ok
+                && (Char.equal ch 'b' || Char.equal ch 'B')
                 && starts_at_ci raw i "bearer"
                 && i + 6 < len
-                && is_ascii_ws raw.[i + 6]
+                && is_ascii_ws (String.unsafe_get raw (i + 6))
               then begin
                 let val_start = scan_sep_ws raw (i + 6) in
                 let val_end =
                   scan_while raw is_secret_token_char val_start
                 in
                 if val_end > val_start then begin
-                  Buffer.add_string buf ("Bearer " ^ replacement);
+                  let b = ensure_buf i in
+                  Buffer.add_string b "Bearer ";
+                  Buffer.add_string b replacement;
+                  flushed := val_end;
                   loop val_end
                 end
-                else begin
-                  Buffer.add_char buf raw.[i];
-                  loop (i + 1)
-                end
+                else loop (i + 1)
               end
-              else if is_ident_char raw.[i] then begin
+              else if is_ident_char ch then begin
                 let key_end = scan_while raw is_ident_char i in
-                let key = String.sub raw i (key_end - i) in
-                if prev_ok && Json_tree.is_secret_key key then begin
+                if not prev_ok then loop key_end
+                else
                   let after_q =
                     if
                       key_end < len
-                      && (Char.equal raw.[key_end] '"'
-                          || Char.equal raw.[key_end] '\'')
+                      && (let c = String.unsafe_get raw key_end in
+                          Char.equal c '"' || Char.equal c '\'')
                     then key_end + 1
                     else key_end
                   in
-                  let sep_pos =
-                    scan_while raw is_horiz_ws after_q
-                  in
+                  let sep_pos = scan_while raw is_horiz_ws after_q in
                   if
                     sep_pos < len
-                    && (Char.equal raw.[sep_pos] ':'
-                        || Char.equal raw.[sep_pos] '=')
-                  then begin
-                    let val_start = scan_sep_ws raw (sep_pos + 1) in
-                    Buffer.add_substring buf raw i (val_start - i);
-                    if val_start >= len then ()
-                    else if
-                      Char.equal raw.[val_start] '"'
-                      || Char.equal raw.[val_start] '\''
-                    then loop (scan_quoted val_start)
-                    else if
-                      Char.equal raw.[sep_pos] ':' && is_cookie_header_key key
-                    then begin
-                      let enclosed_in_double_quote =
-                        i > 0 && Char.equal raw.[i - 1] '"'
-                      in
-                      let enclosed_in_single_quote =
-                        i > 0 && Char.equal raw.[i - 1] '\''
-                      in
-                      let val_end =
-                        scan_cookie_header_value ~enclosed_in_double_quote
-                          ~enclosed_in_single_quote raw val_start
-                      in
-                      if val_end = val_start then loop val_start
-                      else begin
-                        Buffer.add_string buf replacement;
-                        loop val_end
-                      end
-                    end
-                    else begin
-                      let val_end =
-                        scan_while raw is_unquoted_val_char val_start
-                      in
-                      if val_end = val_start then loop val_start
+                    && (let sc = String.unsafe_get raw sep_pos in
+                        Char.equal sc ':' || Char.equal sc '=')
+                  then
+                    let key = String.sub raw i (key_end - i) in
+                    if Json_tree.is_secret_key key then begin
+                      let val_start = scan_sep_ws raw (sep_pos + 1) in
+                      if val_start >= len then ()
                       else
-                        let first_tok =
-                          String.sub raw val_start (val_end - val_start)
-                        in
-                        if is_http_auth_scheme first_tok then begin
-                          let ws_end = scan_sep_ws raw val_end in
-                          if ws_end > val_end && ws_end < len then begin
-                            if
-                              Char.equal raw.[ws_end] '"'
-                              || Char.equal raw.[ws_end] '\''
-                            then begin
-                              Buffer.add_string buf first_tok;
-                              Buffer.add_char buf ' ';
-                              loop (scan_quoted ws_end)
-                            end
-                            else
-                              let cred_end =
-                                scan_while raw is_unquoted_val_char ws_end
-                              in
-                              if cred_end > ws_end then begin
-                                Buffer.add_string buf first_tok;
-                                Buffer.add_char buf ' ';
-                                Buffer.add_string buf replacement;
-                                loop cred_end
-                              end
-                              else begin
-                                Buffer.add_string buf replacement;
-                                loop val_end
-                              end
-                          end
+                        let vc = String.unsafe_get raw val_start in
+                        if Char.equal vc '"' || Char.equal vc '\'' then begin
+                          let b = ensure_buf val_start in
+                          let next_i = scan_quoted b val_start in
+                          flushed := next_i;
+                          loop next_i
+                        end
+                        else if
+                          Char.equal (String.unsafe_get raw sep_pos) ':'
+                          && is_cookie_header_key key
+                        then begin
+                          let enclosed_in_double_quote =
+                            i > 0 && Char.equal (String.unsafe_get raw (i - 1)) '"'
+                          in
+                          let enclosed_in_single_quote =
+                            i > 0 && Char.equal (String.unsafe_get raw (i - 1)) '\''
+                          in
+                          let val_end =
+                            scan_cookie_header_value ~enclosed_in_double_quote
+                              ~enclosed_in_single_quote raw val_start
+                          in
+                          if val_end = val_start then loop val_start
                           else begin
-                            Buffer.add_string buf replacement;
+                            let b = ensure_buf val_start in
+                            Buffer.add_string b replacement;
+                            flushed := val_end;
                             loop val_end
                           end
                         end
                         else begin
-                          Buffer.add_string buf replacement;
-                          loop val_end
+                          let val_end =
+                            scan_while raw is_unquoted_val_char val_start
+                          in
+                          if val_end = val_start then loop val_start
+                          else
+                            let first_tok =
+                              String.sub raw val_start (val_end - val_start)
+                            in
+                            if is_http_auth_scheme first_tok then begin
+                              let ws_end = scan_sep_ws raw val_end in
+                              if ws_end > val_end && ws_end < len then begin
+                                let wc = String.unsafe_get raw ws_end in
+                                if Char.equal wc '"' || Char.equal wc '\'' then begin
+                                  let b = ensure_buf val_start in
+                                  Buffer.add_string b first_tok;
+                                  Buffer.add_char b ' ';
+                                  let next_i = scan_quoted b ws_end in
+                                  flushed := next_i;
+                                  loop next_i
+                                end
+                                else
+                                  let cred_end =
+                                    scan_while raw is_unquoted_val_char ws_end
+                                  in
+                                  if cred_end > ws_end then begin
+                                    let b = ensure_buf val_start in
+                                    Buffer.add_string b first_tok;
+                                    Buffer.add_char b ' ';
+                                    Buffer.add_string b replacement;
+                                    flushed := cred_end;
+                                    loop cred_end
+                                  end
+                                  else begin
+                                    let b = ensure_buf val_start in
+                                    Buffer.add_string b replacement;
+                                    flushed := val_end;
+                                    loop val_end
+                                  end
+                              end
+                              else begin
+                                let b = ensure_buf val_start in
+                                Buffer.add_string b replacement;
+                                flushed := val_end;
+                                loop val_end
+                              end
+                            end
+                            else begin
+                              let b = ensure_buf val_start in
+                              Buffer.add_string b replacement;
+                              flushed := val_end;
+                              loop val_end
+                            end
                         end
                     end
-                  end
-                  else begin
-                    Buffer.add_substring buf raw i (key_end - i);
-                    loop key_end
-                  end
-                end
-                else begin
-                  Buffer.add_substring buf raw i (key_end - i);
-                  loop key_end
-                end
+                    else loop key_end
+                  else loop key_end
               end
-              else begin
-                Buffer.add_char buf raw.[i];
-                loop (i + 1)
-              end)
+              else loop (i + 1))
   in
   loop 0;
-  Secret_patterns.redact_structural_values ~replacement (Buffer.contents buf)
+  let scrubbed =
+    match !buf_ref with
+    | None -> raw
+    | Some b ->
+        if len > !flushed then
+          Buffer.add_substring b raw !flushed (len - !flushed);
+        Buffer.contents b
+  in
+  Secret_patterns.redact_structural_values ~replacement scrubbed
 
 let scrub_secrets_in_text raw =
   scrub_secrets_in_text_with ~replacement:"[redacted]" raw
@@ -405,63 +446,88 @@ let short_id id =
   let len = String.length id in
   if len <= 10 then id else String.sub id 0 10
 
+let rec has_masc_link_candidate text len i =
+  if i + 7 > len then false
+  else
+    let c = String.unsafe_get text i in
+    if (Char.equal c 'b' && starts_at_exact text i "board:p-")
+       || (Char.equal c 'g' && starts_at_exact text i "github:")
+    then true
+    else has_masc_link_candidate text len (i + 1)
+
 let rewrite_masc_links_for_markdown text =
   let len = String.length text in
-  let buf = Buffer.create (len + 32) in
-  let rec loop i =
-    if i >= len then ()
-    else if Char.equal text.[i] '[' && starts_at_exact text (i + 1) "board:p-"
-    then begin
-      let id_start = i + 7 in
-      let id_end = scan_token_end text id_start in
-      if
-        id_end < len
-        && Char.equal text.[id_end] ']'
-        && not (id_end + 1 < len && Char.equal text.[id_end + 1] '(')
-      then begin
-        let post_id = String.sub text id_start (id_end - id_start) in
-        Buffer.add_string buf
-          (Printf.sprintf "[Board %s](masc://board/%s)" (short_id post_id)
-             post_id);
-        loop (id_end + 1)
-      end
-      else begin
-        Buffer.add_char buf text.[i];
-        loop (i + 1)
-      end
-    end
-    else
-      let prev_is_paren = i > 0 && Char.equal text.[i - 1] '(' in
-      if (not prev_is_paren) && starts_at_exact text i "board:p-" then begin
-        let id_start = i + 6 in
-        let id_end = scan_token_end text id_start in
-        let post_id = String.sub text id_start (id_end - id_start) in
-        Buffer.add_string buf
-          (Printf.sprintf "[Board %s](masc://board/%s)" (short_id post_id)
-             post_id);
-        loop id_end
-      end
-      else if (not prev_is_paren) && starts_at_exact text i "github:" then begin
-        let path_start = i + 7 in
-        let path_end = scan_token_end text path_start in
-        let gh_path = String.sub text path_start (path_end - path_start) in
-        if String.length gh_path > 0 then begin
-          Buffer.add_string buf
-            (Printf.sprintf "[GitHub %s](https://github.com/%s)" gh_path gh_path);
-          loop path_end
+  if len < 7 || not (has_masc_link_candidate text len 0) then text
+  else
+    let buf = Buffer.create (len + 32) in
+    let rec loop i =
+      if i >= len then ()
+      else
+        let c = String.unsafe_get text i in
+        if Char.equal c '[' && starts_at_exact text (i + 1) "board:p-" then begin
+          let id_start = i + 7 in
+          let id_end = scan_token_end text id_start in
+          if
+            id_end < len
+            && Char.equal (String.unsafe_get text id_end) ']'
+            && not
+                 (id_end + 1 < len
+                  && Char.equal (String.unsafe_get text (id_end + 1)) '(')
+          then begin
+            let post_id = String.sub text id_start (id_end - id_start) in
+            Buffer.add_string buf "[Board ";
+            Buffer.add_string buf (short_id post_id);
+            Buffer.add_string buf "](masc://board/";
+            Buffer.add_string buf post_id;
+            Buffer.add_char buf ')';
+            loop (id_end + 1)
+          end
+          else begin
+            Buffer.add_char buf c;
+            loop (i + 1)
+          end
+        end
+        else if Char.equal c 'b'
+                && (i = 0 || not (Char.equal (String.unsafe_get text (i - 1)) '('))
+                && starts_at_exact text i "board:p-"
+        then begin
+          let id_start = i + 6 in
+          let id_end = scan_token_end text id_start in
+          let post_id = String.sub text id_start (id_end - id_start) in
+          Buffer.add_string buf "[Board ";
+          Buffer.add_string buf (short_id post_id);
+          Buffer.add_string buf "](masc://board/";
+          Buffer.add_string buf post_id;
+          Buffer.add_char buf ')';
+          loop id_end
+        end
+        else if Char.equal c 'g'
+                && (i = 0 || not (Char.equal (String.unsafe_get text (i - 1)) '('))
+                && starts_at_exact text i "github:"
+        then begin
+          let path_start = i + 7 in
+          let path_end = scan_token_end text path_start in
+          if path_end > path_start then begin
+            let gh_path = String.sub text path_start (path_end - path_start) in
+            Buffer.add_string buf "[GitHub ";
+            Buffer.add_string buf gh_path;
+            Buffer.add_string buf "](https://github.com/";
+            Buffer.add_string buf gh_path;
+            Buffer.add_char buf ')';
+            loop path_end
+          end
+          else begin
+            Buffer.add_char buf c;
+            loop (i + 1)
+          end
         end
         else begin
-          Buffer.add_char buf text.[i];
+          Buffer.add_char buf c;
           loop (i + 1)
         end
-      end
-      else begin
-        Buffer.add_char buf text.[i];
-        loop (i + 1)
-      end
-  in
-  loop 0;
-  Buffer.contents buf
+    in
+    loop 0;
+    Buffer.contents buf
 
 let wrap_plain_lines ~width text =
   let max_w = Int.max 12 width in
@@ -619,28 +685,51 @@ let flattened_tool_call_lines (st : Keeper_context_store.keeper_state)
           tool_call_tree_cache := Some (call, res_opt, lines));
       lines
 
+module Tool_output_key = struct
+  type t = {
+    raw : string;
+    theme : Theme.t;
+    tools_mode : Slash.tools_mode;
+    width : int;
+  }
+
+  let equal a b =
+    Int.equal a.width b.width
+    && a.tools_mode = b.tools_mode
+    && (a.theme == b.theme || a.theme = b.theme)
+    && (a.raw == b.raw || String.equal a.raw b.raw)
+
+  let hash k =
+    let h = Hashtbl.hash k.raw in
+    let h = (h * 31) lxor (Hashtbl.hash k.theme.preset) in
+    let h = (h * 31) lxor k.theme.surface_0 lxor k.theme.text_primary in
+    let h = (h * 31) lxor (Hashtbl.hash k.tools_mode) in
+    (h * 31) lxor k.width
+end
+
+module Tool_output_tbl = Hashtbl.Make (Tool_output_key)
+
 let max_render_cache_entries = 512
 
 let tool_output_cache_mu = Stdlib.Mutex.create ()
 let tool_output_cache :
-    (string * Theme.t * Slash.tools_mode * int,
-     Markdown.rendered_line list * int) Hashtbl.t =
-  Hashtbl.create 128
+    (Markdown.rendered_line list * int) Tool_output_tbl.t =
+  Tool_output_tbl.create 128
 
 let tool_output_display_lines ~(theme : Theme.t) ~tools_mode ~width raw =
-  let key = (raw, theme, tools_mode, width) in
+  let key = { Tool_output_key.raw; theme; tools_mode; width } in
   match
     Stdlib.Mutex.protect tool_output_cache_mu (fun () ->
-        Hashtbl.find_opt tool_output_cache key)
+        Tool_output_tbl.find_opt tool_output_cache key)
   with
   | Some hit -> hit
   | None ->
       let result = tool_output_display_lines_uncached ~theme ~tools_mode ~width raw in
       Stdlib.Mutex.protect tool_output_cache_mu (fun () ->
           if String.length raw <= 524_288 then begin
-            if Hashtbl.length tool_output_cache >= max_render_cache_entries then
-              Hashtbl.clear tool_output_cache;
-            Hashtbl.replace tool_output_cache key result
+            if Tool_output_tbl.length tool_output_cache >= max_render_cache_entries then
+              Tool_output_tbl.clear tool_output_cache;
+            Tool_output_tbl.replace tool_output_cache key result
           end);
       result
 

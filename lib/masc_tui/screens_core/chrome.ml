@@ -85,7 +85,6 @@ let compute_layout ~(model : Model.t) ~cols ~rows =
       else None
     in
     let top_h = top_rail.h + sub_h in
-    let comp_state = Render_util.composer_state_of_model sized_model in
     let comp_mode = Model.composer_mode sized_model in
     let composer_folded =
       Model.equal_composer_mode comp_mode Model.Auto_folded_pill
@@ -95,6 +94,7 @@ let compute_layout ~(model : Model.t) ~cols ~rows =
       | Model.Auto_folded_pill -> 0
       | Model.Collapsed_bar -> 1
       | Model.Expanded_multiline ->
+          let comp_state = Render_util.composer_state_of_model sized_model in
           let max_h = Int.max 2 (Int.min 6 (rows / 4)) in
           Composer.desired_height ~breakpoint ~max_height:max_h comp_state
     in
@@ -204,13 +204,26 @@ let workspace_basename (m : Model.t) =
 
 type rail_item = {
   priority : int;
+  width : int;
   segments : (string * Style.t) list;
 }
 
-let rail_item_width (item : rail_item) =
-  List.fold_left
-    (fun acc (s, _) -> acc + Grapheme.display_width s)
-    0 item.segments
+let make_rail_item ~priority segments =
+  let width =
+    List.fold_left (fun acc (s, _) -> acc + Grapheme.display_width s) 0 segments
+  in
+  { priority; width; segments }
+
+let ws_idx_labels = [| "0 "; "1 "; "2 "; "3 "; "4 "; "5 "; "6 "; "7 "; "8 "; "9 " |]
+
+let ws_idx_label idx =
+  if idx >= 0 && idx < Array.length ws_idx_labels then
+    Array.unsafe_get ws_idx_labels idx
+  else Printf.sprintf "%d " idx
+
+let left_rail_prefixed = " " ^ Glyph.to_utf8 Glyph.Left_rail
+let action_req_space = Glyph.to_utf8 Glyph.Action_required ^ " "
+let brand_sep_str = " " ^ Glyph.to_utf8 Glyph.Box_v ^ "  "
 
 let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     ~breakpoint =
@@ -261,7 +274,7 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
       let d_adv =
         Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y
           ~style:(Typography.accent ~bg ~bold:true theme)
-          (Glyph.to_utf8 Glyph.Action_required ^ " ")
+          action_req_space
       in
       x := !x + d_adv;
       let b_adv =
@@ -273,7 +286,7 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
       let v_adv =
         Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y
           ~style:(Style.make ~fg:(Color.of_rgb theme.border_subtle) ~bg ())
-          (" " ^ Glyph.to_utf8 Glyph.Box_v ^ "  ")
+          brand_sep_str
       in
       x := !x + v_adv
     end;
@@ -296,7 +309,7 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
         let a2 =
           Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y
             ~style:(Typography.accent ~bg:pill_bg ~bold:true theme)
-            (" " ^ Glyph.to_utf8 Glyph.Left_rail ^ Printf.sprintf "%d " idx)
+            (left_rail_prefixed ^ ws_idx_label idx)
         in
         x := !x + a2;
         let a3 =
@@ -309,6 +322,12 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
       else begin
         let use_compact_tabs = rect.w < 98 in
         let tab_gap = Layout.tab_gap breakpoint in
+        let accent_pill_st = Typography.accent ~bg:pill_bg ~bold:true theme in
+        let anchor_pill_u_st =
+          Typography.anchor ~bg:pill_bg ~underline:true theme
+        in
+        let anchor_pill_st = Typography.anchor ~bg:pill_bg theme in
+        let struct_st = Typography.structure ~bg theme in
         List.iter
           (fun ws ->
             let idx = Nav.workspace_index ws in
@@ -328,40 +347,32 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
                  with 1-cell inner padding each side — ZERO solid cobalt slab! *)
               let p0 =
                 Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y
-                  ~style:(Typography.accent ~bg:pill_bg ~bold:true theme)
-                  (" " ^ Glyph.to_utf8 Glyph.Left_rail)
+                  ~style:accent_pill_st left_rail_prefixed
               in
               x := !x + p0;
               let p1 =
                 Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y
-                  ~style:(Typography.accent ~bg:pill_bg ~bold:true theme)
-                  (Printf.sprintf "%d " idx)
+                  ~style:accent_pill_st (ws_idx_label idx)
               in
               x := !x + p1;
               let p2 =
                 Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y
-                  ~style:(Typography.anchor ~bg:pill_bg ~underline:true theme)
-                  lbl
+                  ~style:anchor_pill_u_st lbl
               in
               x := !x + p2;
-              let p3 =
-                Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y
-                  ~style:(Typography.anchor ~bg:pill_bg theme)
-                  " "
-              in
-              x := !x + p3 + tab_gap
+              Cell_grid.put_ascii ~clip:rect grid ~x:!x ~y:rect.y
+                ~style:anchor_pill_st ' ';
+              x := !x + 1 + tab_gap
             end
             else begin
               let d_adv =
                 Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y
-                  ~style:(Typography.whisper ~bg ~italic:false theme)
-                  (Printf.sprintf "%d " idx)
+                  ~style:sep_style (ws_idx_label idx)
               in
               x := !x + d_adv;
               let l_adv =
                 Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y
-                  ~style:(Typography.structure ~bg theme)
-                  lbl
+                  ~style:struct_st lbl
               in
               x := !x + l_adv + tab_gap
             end)
@@ -371,6 +382,7 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     in
     (* Build right-aligned telemetry items in display order (left-to-right),
        each tagged with drop priority (higher number drops first if narrow). *)
+    let struct_bg_st = Typography.structure ~bg theme in
     let freshness_item ~compact =
       let glyph, label, tone = Render_util.freshness_pill ~model ~compact in
       let segments =
@@ -378,32 +390,29 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
         | Theme.Status_ok ->
             [
               (Glyph.to_utf8 glyph, Typography.status ~bg ~bold:true theme tone);
-              (" " ^ label, Typography.structure ~bg theme);
+              (" " ^ label, struct_bg_st);
             ]
         | Theme.Status_active | Theme.Status_attention | Theme.Status_critical
         | Theme.Status_ai | Theme.Status_historical ->
             [
-              ( Printf.sprintf "%s %s" (Glyph.to_utf8 glyph) label,
+              ( Glyph.to_utf8 glyph ^ " " ^ label,
                 Typography.status ~bg ~bold:true theme tone );
             ]
       in
-      { priority = 1; segments }
+      make_rail_item ~priority:1 segments
     in
     let attn_count = Attention.count model.attention in
     let attn_item =
       if attn_count > 0 then
         Some
-          {
-            priority = 1;
-            segments =
-              [
-                ( Printf.sprintf "%s %d"
-                    (Glyph.to_utf8 Glyph.Action_required)
-                    attn_count,
-                  Typography.status ~bg ~bold:true theme Theme.Status_attention
-                );
-              ];
-          }
+          (make_rail_item ~priority:1
+             [
+               ( Printf.sprintf "%s %d"
+                   (Glyph.to_utf8 Glyph.Action_required)
+                   attn_count,
+                 Typography.status ~bg ~bold:true theme Theme.Status_attention
+               );
+             ])
       else None
     in
     let inc_count = Incidents.active_count model.incidents in
@@ -414,13 +423,10 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           else Printf.sprintf "[I] Inc(%d)" inc_count
         in
         Some
-          {
-            priority = 2;
-            segments =
-              [
-                (label, Typography.status ~bg ~bold:true theme Theme.Status_historical);
-              ];
-          }
+          (make_rail_item ~priority:2
+             [
+               (label, Typography.status ~bg ~bold:true theme Theme.Status_historical);
+             ])
       else None
     in
     let auth_item =
@@ -437,20 +443,18 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
         else (Theme.Status_historical, "")
       in
       Some
-        {
-          priority = 2;
-          segments =
-            [
-              ( prefix ^ badge_s,
-                Typography.status ~bg ~bold:true theme tone );
-            ];
-        }
+        (make_rail_item ~priority:2
+           [
+             ( prefix ^ badge_s,
+               Typography.status ~bg ~bold:true theme tone );
+           ])
     in
     let help_badge =
       Some
         {
           priority = 3;
-          segments = [ ("[?]", Typography.whisper ~bg ~italic:false theme) ];
+          width = 3;
+          segments = [ ("[?]", sep_style) ];
         }
     in
     let ws_item =
@@ -458,11 +462,7 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
         match workspace_basename model with
         | Some ws_name ->
             let clipped = Grapheme.truncate_to_width ~max_width:14 ws_name in
-            Some
-              {
-                priority = 7;
-                segments = [ (clipped, Typography.structure ~bg theme) ];
-              }
+            Some (make_rail_item ~priority:7 [ (clipped, struct_bg_st) ])
         | None -> None
       else None
     in
@@ -475,6 +475,7 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           Some
             {
               priority = 6;
+              width = String.length hhmm;
               segments = [ (hhmm, Typography.whisper ~bg theme) ];
             }
       | None -> None
@@ -482,10 +483,10 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     let max_right_w = Int.max 0 (Rect.right rect - 1 - tabs_end_x - 1) in
     let fresh_item = freshness_item ~compact in
     let attention_width =
-      match attn_item with Some item -> rail_item_width item + sep_w | None -> 0
+      match attn_item with Some item -> item.width + sep_w | None -> 0
     in
     let fresh_item =
-      if not compact && rail_item_width fresh_item + attention_width > max_right_w
+      if not compact && fresh_item.width + attention_width > max_right_w
       then freshness_item ~compact:true
       else fresh_item
     in
@@ -507,16 +508,17 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
     let measure_items xs =
       let rec loop acc = function
         | [] -> acc
-        | [ it ] -> acc + rail_item_width it
-        | it :: rest -> loop (acc + rail_item_width it + sep_w) rest
+        | [ it ] -> acc + it.width
+        | it :: rest -> loop (acc + it.width + sep_w) rest
       in
       loop 0 xs
     in
     let rec drop_lowest_priority xs =
-      if measure_items xs <= max_right_w then xs
+      let w = measure_items xs in
+      if w <= max_right_w then (xs, w)
       else
         match xs with
-        | [] | [ _ ] -> xs
+        | [] | [ _ ] -> (xs, w)
         | _ ->
             let max_p =
               List.fold_left (fun acc it -> Int.max acc it.priority) 0 xs
@@ -534,8 +536,7 @@ let render_top_rail grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
             in
             drop_lowest_priority next
     in
-    let fitted = drop_lowest_priority raw_items in
-    let total_rw = measure_items fitted in
+    let fitted, total_rw = drop_lowest_priority raw_items in
     if total_rw > 0 && total_rw <= max_right_w then begin
       let rx = ref (Rect.right rect - 1 - total_rw) in
       let rec draw_list = function
@@ -1362,8 +1363,8 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           let focus_raw =
             Say.resolve model.lang (Model.active_focus_label model)
           in
-          Printf.sprintf " %s %s " caret
-            (Grapheme.truncate_to_width ~max_width:24 focus_raw)
+          " " ^ caret ^ " "
+          ^ Grapheme.truncate_to_width ~max_width:24 focus_raw ^ " "
       in
       let pill_bg = Color.of_rgb theme.surface_2 in
       let focus_st =
@@ -1540,6 +1541,11 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           Keymap.footer_hints ~scope_chain ~max_width:(remaining_w + 180)
             ~lang:model.lang
         in
+        let body_focus_panes =
+          match model.nav.overlay with
+          | None -> Model.focusable_pane_count model
+          | Some _ -> 1
+        in
         let show_tab_hint =
           match model.nav.overlay with
           | Some (Nav.Account | Nav.Help | Nav.Incidents | Nav.System_gate _) -> false
@@ -1565,8 +1571,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
                           false)
               | None -> false)
           | None ->
-              Model.focusable_pane_count model > 1
-              || Model.sidebar_visible model
+              body_focus_panes > 1 || Model.sidebar_visible model
         in
         let show_overlay_confirm_hint =
           match model.nav.overlay with
@@ -1613,9 +1618,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           | Some (Nav.Account | Nav.Inline_action _ | Nav.Help | Nav.Incidents | Nav.System_gate _) ->
               None
           | None ->
-              if
-                Model.focusable_pane_count model <= 1
-                && Model.sidebar_visible model
+              if body_focus_panes <= 1 && Model.sidebar_visible model
               then Some ("메뉴", "Menu")
               else None
         in
@@ -1826,20 +1829,20 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
       | [] -> ()
       | _ when count >= max_pairs -> ()
       | (h : Keymap.footer_hint) :: rest ->
-          let key_badge = " " ^ h.key_display ^ " " in
-          let pair_w =
-            Grapheme.display_width key_badge
-            + 1
-            + Grapheme.display_width h.label
-          in
+          let key_w = Grapheme.display_width h.key_display in
+          let pair_w = key_w + 3 + Grapheme.display_width h.label in
           let need_gap = if count > 0 then pair_gap else 0 in
           if !x + need_gap + pair_w <= hints_right_limit then begin
             x := !x + need_gap;
+            Cell_grid.put_ascii ~clip:rect grid ~x:!x ~y:rect.y
+              ~style:keycap_st ' ';
             let k_adv =
-              Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y
-                ~style:keycap_st key_badge
+              Cell_grid.put_text ~clip:rect grid ~x:(!x + 1) ~y:rect.y
+                ~style:keycap_st h.key_display
             in
-            x := !x + k_adv + 1;
+            Cell_grid.put_ascii ~clip:rect grid ~x:(!x + 1 + k_adv) ~y:rect.y
+              ~style:keycap_st ' ';
+            x := !x + k_adv + 3;
             let l_adv =
               Cell_grid.put_text ~clip:rect grid ~x:!x ~y:rect.y ~style:lbl_st
                 h.label
@@ -2094,6 +2097,64 @@ let render_micro_cockpit grid ~cache ~(body : Rect.t) ~(theme : Theme.t)
       put_line whisper resize_note
     end
 
+let sidebar_keeper_counts (m : Model.t) =
+  let keepers =
+    match Observed.to_option m.fleet.keepers with Some ks -> ks | None -> []
+  in
+  match Observed.to_option m.fleet.fleet_reading with
+  | Some fr -> (fr.running_count, Int.max fr.executable_count (List.length keepers))
+  | None ->
+      let rec count run tot = function
+        | [] -> (run, tot)
+        | (k : Wire_fleet.keeper_summary) :: rest ->
+            let run' =
+              if k.keepalive_running && not k.paused then run + 1 else run
+            in
+            count run' (tot + 1) rest
+      in
+      count 0 0 keepers
+
+type cached_sidebar_row =
+  | Cached_section of {
+      ko_upper : string;
+      en_upper : string;
+      sc_opt : string option;
+      sc_w : int;
+    }
+  | Cached_item of {
+      index : int;
+      item : Nav.menu_item;
+      sc_w : int;
+    }
+
+let cached_sidebar_rows_arr =
+  Array.of_list
+    (List.map
+       (function
+         | Model.Sidebar_section sec ->
+             let lbl = Nav.menu_section_label sec in
+             let sc_opt = Nav.menu_section_shortcut sec in
+             let sc_w =
+               match sc_opt with
+               | None -> 0
+               | Some s -> Grapheme.display_width s
+             in
+             Cached_section
+               {
+                 ko_upper = String.uppercase_ascii (Say.resolve Say.Lang_ko lbl);
+                 en_upper = String.uppercase_ascii (Say.resolve Say.Lang_en lbl);
+                 sc_opt;
+                 sc_w;
+               }
+         | Model.Sidebar_item { index; item } ->
+             let sc_w =
+               match item.shortcut with
+               | None -> 0
+               | Some s -> Grapheme.display_width s
+             in
+             Cached_item { index; item; sc_w })
+       Model.sidebar_visual_rows)
+
 let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) ~elevated =
   if Rect.is_empty rect then ()
@@ -2124,7 +2185,7 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         if logical_focused then model.nav.sidebar_cursor
         else Nav.menu_item_index active_target
       in
-      let rows = Array.of_list Model.sidebar_visual_rows in
+      let rows = cached_sidebar_rows_arr in
       let total = Array.length rows in
       let start =
         Model.sidebar_viewport_start ~inner_h:inner.h
@@ -2135,28 +2196,25 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       in
       let attn_n = Attention.count model.attention in
       let inc_n = Incidents.active_count model.incidents in
-      let hero = Model.pulse_hero_metrics model in
+      let running_keepers, total_keepers = sidebar_keeper_counts model in
+      let sec_st = Typography.whisper ~bg ~italic:false theme in
+      let pri_bg_st = Typography.primary ~bg theme in
+      let struct_bg_st = Typography.structure ~bg theme in
+      let accent_bg_st = Typography.accent ~bg ~bold:false theme in
       for i = 0 to data_rows - 1 do
         let row_idx = start + i in
         if row_idx < total then begin
           let py = inner.y + i in
           let row_r = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
-          match rows.(row_idx) with
-          | Model.Sidebar_section sec ->
+          match Array.unsafe_get rows row_idx with
+          | Cached_section { ko_upper; en_upper; sc_opt; sc_w } ->
               let sec_lbl =
-                String.uppercase_ascii
-                  (Say.resolve lang (Nav.menu_section_label sec))
+                match lang with Say.Lang_ko -> ko_upper | Say.Lang_en -> en_upper
               in
-              let sec_st = Typography.whisper ~bg ~italic:false theme in
               let right_edge = Rect.right inner - 1 in
-              let sc_opt = Nav.menu_section_shortcut sec in
-              let sc_w =
-                match sc_opt with
-                | None -> 0
-                | Some s -> Grapheme.display_width s + 1
-              in
+              let sc_reserve = if sc_w > 0 then sc_w + 1 else 0 in
               let max_sec_w =
-                Int.max 0 (right_edge - (inner.x + 1) - sc_w)
+                Int.max 0 (right_edge - (inner.x + 1) - sc_reserve)
               in
               ignore
                 (Cell_grid.put_text ~clip:row_r grid ~x:(inner.x + 1) ~y:py
@@ -2165,26 +2223,25 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               (match sc_opt with
                | None -> ()
                | Some s ->
-                   let sw = Grapheme.display_width s in
-                   let sx = right_edge - sw in
+                   let sx = right_edge - sc_w in
                    if sx > inner.x + 2 then
                      ignore
                        (Cell_grid.put_text ~clip:row_r grid ~x:sx ~y:py
                           ~style:sec_st s))
-          | Model.Sidebar_item { index; item } ->
+          | Cached_item { index; item; sc_w } ->
               let is_cursor = focused && Int.equal index model.nav.sidebar_cursor in
               let is_blurred_cursor =
                 logical_focused && (not focused)
                 && Int.equal index model.nav.sidebar_cursor
               in
               let is_active = Nav.equal_menu_target item.target active_target in
-              let row_bg_rgb =
-                if is_cursor then theme.selection_bg
-                else if is_blurred_cursor then theme.surface_2
-                else bg_rgb
+              let use_base_bg = (not is_cursor) && not is_blurred_cursor in
+              let row_bg =
+                if is_cursor then Color.of_rgb theme.selection_bg
+                else if is_blurred_cursor then Color.of_rgb theme.surface_2
+                else bg
               in
-              let row_bg = Color.of_rgb row_bg_rgb in
-              if is_cursor || is_blurred_cursor then
+              if not use_base_bg then
                 Cell_grid.fill_rect ~clip:inner grid ~rect:row_r
                   ~style:(Typography.primary ~bg:row_bg theme) ();
               if is_cursor then
@@ -2196,26 +2253,36 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               let item_locked =
                 not (Rbac_policy.can_access_menu_target model.auth_session item.target)
               in
-              let badge_opt : (string * Style.t) option =
+              let whisper_row_st =
+                if use_base_bg then sec_st
+                else Typography.whisper ~bg:row_bg ~italic:false theme
+              in
+              let badge_opt : (string * int * Style.t) option =
                 if item_locked then
                   Some
                     ( Glyph.to_utf8 Glyph.Locked,
+                      1,
                       Typography.status ~bg:row_bg theme Theme.Status_attention )
                 else
                 match item.target with
                 | Nav.Menu_work Nav.Work_inbox when attn_n > 0 ->
+                    let s = Int.to_string attn_n in
                     Some
-                      ( Printf.sprintf "%d" attn_n,
+                      ( s,
+                        String.length s,
                         Typography.status ~bg:row_bg ~bold:true theme
                           Theme.Status_attention )
-                | Nav.Menu_keepers when hero.total_keepers > 0 ->
-                    Some
-                      ( Printf.sprintf "%d/%d" hero.running_keepers
-                          hero.total_keepers,
-                        Typography.whisper ~bg:row_bg ~italic:false theme )
+                | Nav.Menu_keepers when total_keepers > 0 ->
+                    let s =
+                      Int.to_string running_keepers ^ "/"
+                      ^ Int.to_string total_keepers
+                    in
+                    Some (s, String.length s, whisper_row_st)
                 | Nav.Menu_incidents when inc_n > 0 ->
+                    let s = Int.to_string inc_n in
                     Some
-                      ( Printf.sprintf "%d" inc_n,
+                      ( s,
+                        String.length s,
                         Typography.status ~bg:row_bg theme
                           Theme.Status_historical )
                 | Nav.Menu_pulse
@@ -2237,28 +2304,29 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 | Nav.Menu_queue_context
                 | Nav.Menu_help -> (
                     match item.shortcut with
-                    | Some sc ->
-                        Some
-                          ( sc,
-                            Typography.whisper ~bg:row_bg ~italic:false theme )
+                    | Some sc -> Some (sc, sc_w, whisper_row_st)
                     | None -> None)
               in
               let right_edge = Rect.right inner - 1 in
               let badge_w =
                 match badge_opt with
                 | None -> 0
-                | Some (btxt, _) -> Grapheme.display_width btxt + 1
+                | Some (_, bw, _) -> bw + 1
               in
               let lbl_x = inner.x + 2 in
               let max_lbl_w = Int.max 0 (right_edge - lbl_x - badge_w) in
               let lbl_st =
                 if is_cursor then Typography.anchor ~bg:row_bg theme
                 else if is_active then
-                  if focused then Typography.accent ~bg:row_bg ~bold:false theme
+                  if focused then
+                    (if use_base_bg then accent_bg_st
+                     else Typography.accent ~bg:row_bg ~bold:false theme)
+                  else if use_base_bg then pri_bg_st
                   else Typography.primary ~bg:row_bg theme
                 else if focused || is_blurred_cursor then
-                  Typography.primary ~bg:row_bg theme
-                else Typography.structure ~bg:row_bg theme
+                  (if use_base_bg then pri_bg_st
+                   else Typography.primary ~bg:row_bg theme)
+                else struct_bg_st
               in
               let lbl =
                 Grapheme.truncate_to_width ~max_width:max_lbl_w
@@ -2269,8 +2337,7 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                    ~style:lbl_st lbl);
               (match badge_opt with
                | None -> ()
-               | Some (btxt, bst) ->
-                   let bw = Grapheme.display_width btxt in
+               | Some (btxt, bw, bst) ->
                    let bx = right_edge - bw in
                    if bx > lbl_x + 2 then
                      ignore
@@ -2288,9 +2355,9 @@ let render_sidebar grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         let hidden_n =
           let count = ref 0 in
           for idx = start + data_rows to total - 1 do
-            match rows.(idx) with
-            | Model.Sidebar_item _ -> incr count
-            | Model.Sidebar_section _ -> ()
+            match Array.unsafe_get rows idx with
+            | Cached_item _ -> incr count
+            | Cached_section _ -> ()
           done;
           Int.max 1 !count
         in

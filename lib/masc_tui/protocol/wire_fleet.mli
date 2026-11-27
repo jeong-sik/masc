@@ -513,6 +513,10 @@ val group_by_company :
     aggregated 24h sparkline. Named groups sort alphabetically with ["Other"]
     last. *)
 
+val count_companies : keeper_summary list -> int
+(** Count distinct company groups produced by {!group_by_company} without
+    sorting members or aggregating sparklines/costs. *)
+
 val keeper_health_of_string : string -> keeper_health option
 val activation_mode_of_string : string -> activation_mode option
 val turn_lane_of_string : string -> turn_lane option

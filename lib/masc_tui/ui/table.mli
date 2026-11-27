@@ -78,6 +78,25 @@ val compute_viewport :
 (** Compute [(clamped_start, selected_visible)] keeping [selected] in view when
     present. *)
 
+val draw_virtual :
+  Cell_grid.t ->
+  rect:Rect.t ->
+  theme:Theme.t ->
+  caps:Presenter.capabilities ->
+  lang:Say.lang ->
+  ?scroll:int ->
+  ?selected:int ->
+  ?focused:bool ->
+  ?zebra:bool ->
+  ?col_gap:int ->
+  ?header_separator:bool ->
+  columns:column list ->
+  total_rows:int ->
+  (int -> row) ->
+  layout_result
+(** Like {!draw}, but materializes only visible viewport rows via [row_at idx]
+    ([0 <= idx < total_rows]), avoiding per-frame allocation of off-screen rows. *)
+
 val draw :
   Cell_grid.t ->
   rect:Rect.t ->

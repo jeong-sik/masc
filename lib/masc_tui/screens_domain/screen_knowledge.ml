@@ -291,10 +291,10 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
               else Typography.sep_dot ^ String.concat Typography.sep_dot items
         in
         let meta =
-          Printf.sprintf "@%s%s%s%s%d %s%s%s" p.author Typography.sep_dot age
-            Typography.sep_dot p.comment_count
-            (Say.resolve lang (Say.make ~ko:"댓글" ~en:"comments"))
-            vis_part extra_tags
+          "@" ^ p.author ^ Typography.sep_dot ^ age ^ Typography.sep_dot
+          ^ Int.to_string p.comment_count ^ " "
+          ^ (match lang with Say.Lang_ko -> "댓글" | Say.Lang_en -> "comments")
+          ^ vis_part ^ extra_tags
         in
         let band_h = if inner.h >= 7 then 2 else 1 in
         Card.draw_section_band ~pad_x grid
@@ -475,15 +475,19 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
             let vis_end = Int.min total_lines (scroll + eff_h) in
             let below = Int.max 0 (total_lines - vis_end) in
             let ind =
+              let span_s =
+                "L" ^ Int.to_string vis_start ^ "-" ^ Int.to_string vis_end
+                ^ "/" ^ Int.to_string total_lines
+              in
               if below > 0 then
-                Say.resolve lang
-                  (Say.make
-                     ~ko:(Printf.sprintf "L%d-%d/%d · ↓ +%d줄 ([↑↓/PgDn] 스크롤)"
-                            vis_start vis_end total_lines below)
-                     ~en:(Printf.sprintf "L%d-%d/%d · ↓ +%dL ([↑↓/PgDn] scroll)"
-                            vis_start vis_end total_lines below))
-              else
-                Printf.sprintf "L%d-%d/%d" vis_start vis_end total_lines
+                match lang with
+                | Say.Lang_ko ->
+                    span_s ^ " · ↓ +" ^ Int.to_string below
+                    ^ "줄 ([↑↓/PgDn] 스크롤)"
+                | Say.Lang_en ->
+                    span_s ^ " · ↓ +" ^ Int.to_string below
+                    ^ "L ([↑↓/PgDn] scroll)"
+              else span_s
             in
             ignore
               (H.put_right ~grid ~clip:content
@@ -499,10 +503,17 @@ let draw_board_preview ~grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~bp
               else 0
             in
             if body_vis > 0 then begin
-              let md_rect = Rect.make ~x:content.x ~y:!y ~w:content.w ~h:body_vis in
-              ignore
-                (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true
-                   ~scroll p.body);
+              let rec paint_lines i = function
+                | [] -> ()
+                | _ when i >= body_vis -> ()
+                | line :: rest ->
+                    let row_rect =
+                      Rect.make ~x:content.x ~y:(!y + i) ~w:content.w ~h:1
+                    in
+                    Markdown.draw_line grid ~rect:row_rect ~osc8:true line;
+                    paint_lines (i + 1) rest
+              in
+              paint_lines 0 (Store_scroll.drop scroll body_lines);
               y := !y + body_vis
             end;
             let c_skip = Int.max 0 (scroll - body_count) in
@@ -584,23 +595,21 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     match Observed.to_option k.board with Some f -> f.posts | None -> []
   in
   let filtered = Knowledge_store.filtered_posts k in
+  let filtered_len = List.length filtered in
   let server_filtered_out =
     match k.board_feed_meta with
     | Some meta -> Int.max 0 meta.filtered_out_count
     | None -> 0
   in
-  let local_non_signal =
-    List.fold_left
-      (fun acc (p : Wire_knowledge.board_post) ->
-        if p.is_signal then acc else acc + 1)
-      0 all_posts
-  in
-  (* Count hidden verify/non-signal posts from server filtered_out_count plus
-     any client-filtered non-signal rows, never mixing in `/` search exclusions. *)
-  let hidden_verify = server_filtered_out + local_non_signal in
-  let verify_count_in_posts =
-    List.fold_left
-      (fun acc (p : Wire_knowledge.board_post) ->
+  let all_posts_len, local_non_signal, verify_count_in_posts, direct_count =
+    let total = ref 0
+    and non_sig = ref 0
+    and ver = ref 0
+    and dir = ref 0 in
+    List.iter
+      (fun (p : Wire_knowledge.board_post) ->
+        incr total;
+        if not p.is_signal then incr non_sig;
         let is_verify =
           (not p.is_signal)
           ||
@@ -610,23 +619,22 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           | None ->
               false
         in
-        if is_verify then acc + 1 else acc)
-      0 all_posts
-  in
-  let verify_count = server_filtered_out + verify_count_in_posts in
-  let direct_count =
-    List.fold_left
-      (fun acc (p : Wire_knowledge.board_post) ->
+        if is_verify then incr ver;
         match p.visibility with
-        | Some Wire_knowledge.Vis_direct -> acc + 1
+        | Some Wire_knowledge.Vis_direct -> incr dir
         | Some
             ( Wire_knowledge.Vis_public
             | Wire_knowledge.Vis_unlisted
             | Wire_knowledge.Vis_internal )
         | None ->
-            acc)
-      0 all_posts
+            ())
+      all_posts;
+    (!total, !non_sig, !ver, !dir)
   in
+  (* Count hidden verify/non-signal posts from server filtered_out_count plus
+     any client-filtered non-signal rows, never mixing in `/` search exclusions. *)
+  let hidden_verify = server_filtered_out + local_non_signal in
+  let verify_count = server_filtered_out + verify_count_in_posts in
   let filter_rect, body_rect =
     match Layout.split_v rect [ Layout.Fixed 1; Layout.Flex 1 ] with
     | [ f; b ] -> (f, b)
@@ -634,14 +642,14 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   in
   let signal_lbl =
     if k.board_signal_only && hidden_verify > 0 then
-      Say.resolve lang
-        (Say.make
-           ~ko:(Printf.sprintf "신호만 (-%d Verify)" hidden_verify)
-           ~en:(Printf.sprintf "Signal Only (-%d Verify)" hidden_verify))
+      let hv = Int.to_string hidden_verify in
+      match lang with
+      | Say.Lang_ko -> "신호만 (-" ^ hv ^ " Verify)"
+      | Say.Lang_en -> "Signal Only (-" ^ hv ^ " Verify)"
     else Say.resolve lang (Say.make ~ko:"신호만" ~en:"Signal Only")
   in
   let sort_lbl =
-    Printf.sprintf "[S] %s" (Wire_knowledge.board_sort_to_string k.board_sort_by)
+    "[S] " ^ Wire_knowledge.board_sort_to_string k.board_sort_by
   in
   let hearth_pill_lbl =
     match k.board_hearth with
@@ -658,9 +666,8 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       };
       {
         H.label =
-          Printf.sprintf "%s (%d)"
-            (Say.resolve lang (Say.make ~ko:"전체" ~en:"All"))
-            (List.length all_posts);
+          (match lang with Say.Lang_ko -> "전체 (" | Say.Lang_en -> "All (")
+          ^ Int.to_string all_posts_len ^ ")";
         active = not k.board_signal_only;
         tone = None;
         glyph = None;
@@ -681,16 +688,15 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         glyph = None;
       };
       {
-        H.label = Printf.sprintf "Verify (%d)" verify_count;
+        H.label = "Verify (" ^ Int.to_string verify_count ^ ")";
         active = false;
         tone = Some Theme.Status_historical;
         glyph = None;
       };
       {
         H.label =
-          Printf.sprintf "%s (%d)"
-            (Say.resolve lang (Say.make ~ko:"직접" ~en:"Direct"))
-            direct_count;
+          (match lang with Say.Lang_ko -> "직접 (" | Say.Lang_en -> "Direct (")
+          ^ Int.to_string direct_count ^ ")";
         active = false;
         tone = Some Theme.Status_active;
         glyph = None;
@@ -709,7 +715,36 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       ]
   in
   ignore (H.draw_pills ~grid ~rect:filter_rect ~theme pills);
-  let selected_post = Knowledge_store.board_detail_post k in
+  let groups = Knowledge_store.group_succession_chains filtered in
+  let display_posts =
+    List.concat_map
+      (fun (grp : Knowledge_store.succession_group) ->
+        let is_expanded =
+          match grp.chain_root_id with
+          | Some root_id when not (String.equal (String.trim root_id) "") ->
+              Knowledge_store.is_succession_chain_expanded ~root_id k
+              && List.length grp.members > 1
+          | Some _ | None -> false
+        in
+        if is_expanded then grp.members else [ grp.lead ])
+      groups
+  in
+  let selected_list_post =
+    List.nth_opt display_posts
+      (H.clamp_index (List.length display_posts) k.selected_index)
+  in
+  let selected_post =
+    match k.active_thread_target with
+    | Some post_id
+      when not
+             (List.exists
+                (fun (p : Wire_knowledge.board_post) -> String.equal p.id post_id)
+                display_posts) -> (
+        match Observed.to_option k.active_thread with
+        | Some (tp, _) when String.equal tp.Wire_knowledge.id post_id -> Some tp
+        | Some _ | None -> None)
+    | Some _ | None -> selected_list_post
+  in
   if Model.is_zoomed_active model then
     draw_board_preview ~grid ~cache ~rect:body_rect ~theme ~bp ~lang ~now_unix
       ~model ~k selected_post ~focused:(Model.body_has_focus model)
@@ -719,29 +754,37 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         ~top_ratio:0.54 bp body_rect
     in
     let list_title =
+      let n_s = Int.to_string filtered_len in
       if k.board_signal_only then
-        Say.resolve lang
-          (Say.make
-             ~ko:(Printf.sprintf "신호 타래 · %d건" (List.length filtered))
-             ~en:(Printf.sprintf "Signal Threads · %d" (List.length filtered)))
+        match lang with
+        | Say.Lang_ko -> "신호 타래 · " ^ n_s ^ "건"
+        | Say.Lang_en -> "Signal Threads · " ^ n_s
       else
-        Say.resolve lang
-          (Say.make
-             ~ko:(Printf.sprintf "전체 보드 · %d건" (List.length filtered))
-             ~en:(Printf.sprintf "All Board · %d" (List.length filtered)))
+        match lang with
+        | Say.Lang_ko -> "전체 보드 · " ^ n_s ^ "건"
+        | Say.Lang_en -> "All Board · " ^ n_s
+    in
+    let has_expandable_chain =
+      match selected_list_post with
+      | Some { Wire_knowledge.succession_chain_root_id = Some root_id; _ } ->
+          List.exists
+            (fun (grp : Knowledge_store.succession_group) ->
+              Option.equal String.equal grp.chain_root_id (Some root_id)
+              && List.length grp.members > 1)
+            groups
+      | Some { Wire_knowledge.succession_chain_root_id = None; _ } | None ->
+          false
     in
     let space_hint =
-      match Knowledge_store.board_space_effect k with
-      | Knowledge_store.Board_space_toggle_chain _ ->
-          Say.make ~ko:"[→/Tab] 댓글 · [Space] 계승 · [c] 댓글 · + / - 투표(2회)"
-            ~en:"[→/Tab] Comments · [Space] Chain · [c] Reply · + / - Vote(2x)"
-      | Knowledge_store.Board_space_toggle_signal_only ->
-          if k.board_signal_only then
-            Say.make ~ko:"[→/Tab] 댓글 · [s] 전체 · [c] 댓글 · + / - 투표(2회)"
-              ~en:"[→/Tab] Comments · [s] All · [c] Reply · + / - Vote(2x)"
-          else
-            Say.make ~ko:"[→/Tab] 댓글 · [s] 신호만 · [c] 댓글 · + / - 투표(2회)"
-              ~en:"[→/Tab] Comments · [s] Signal · [c] Reply · + / - Vote(2x)"
+      if has_expandable_chain then
+        Say.make ~ko:"[→/Tab] 댓글 · [Space] 계승 · [c] 댓글 · + / - 투표(2회)"
+          ~en:"[→/Tab] Comments · [Space] Chain · [c] Reply · + / - Vote(2x)"
+      else if k.board_signal_only then
+        Say.make ~ko:"[→/Tab] 댓글 · [s] 전체 · [c] 댓글 · + / - 투표(2회)"
+          ~en:"[→/Tab] Comments · [s] All · [c] Reply · + / - Vote(2x)"
+      else
+        Say.make ~ko:"[→/Tab] 댓글 · [s] 신호만 · [c] 댓글 · + / - 투표(2회)"
+          ~en:"[→/Tab] Comments · [s] Signal · [c] Reply · + / - Vote(2x)"
     in
     let feed_meta_sub =
       match k.board_feed_meta with
@@ -841,9 +884,8 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       let pad_r = if list_inner.w >= 24 then 2 else 1 in
       (match k.board with
        | Observed.Value _ when filtered <> [] ->
-           let groups = Knowledge_store.group_succession_chains filtered in
            let sel_id =
-             match Knowledge_store.selected_post k with
+             match selected_list_post with
              | Some p -> Some p.id
              | None -> None
            in
@@ -903,6 +945,14 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                ~viewport_rows:feed_rect.h ~scroll:k.scroll_offset
                ~selected:sel_v_idx
            in
+           let left_focused = Model.pane_focused model 0 in
+           let base_bg_rgb = theme.surface_1 in
+           let base_whisper_st = H.whisper_style ~theme ~bg:base_bg_rgb () in
+           let base_sec_st = H.secondary_style ~theme ~bg:base_bg_rgb () in
+           let base_accent_bold_st =
+             H.accent_style ~theme ~bg:base_bg_rgb ~attrs:Attr.bold ()
+           in
+           let base_pri_st = H.text_style ~theme ~bg:base_bg_rgb () in
            for row_i = 0 to feed_rect.h - 1 do
              let idx = start_v + row_i in
              if idx < total_v then begin
@@ -915,35 +965,45 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                match v_arr.(idx) with
                | `Group (grp, is_expanded, is_sel) ->
                    let p = grp.lead in
-                   let left_focused = Model.pane_focused model 0 in
-                   let row_bg =
-                     if is_sel then
-                       H.selected_row_bg ~theme ~focused:left_focused
-                     else theme.surface_1
+                   let whisper_st, sec_st, accent_bold_st, title_style =
+                     if is_sel then begin
+                       let row_bg =
+                         H.selected_row_bg ~theme ~focused:left_focused
+                       in
+                       H.paint_selected_row_bg ~grid ~clip:feed_rect
+                         ~row_rect:r_rect ~theme ~focused:left_focused ();
+                       ( H.whisper_style ~theme ~bg:row_bg (),
+                         H.secondary_style ~theme ~bg:row_bg (),
+                         H.accent_style ~theme ~bg:row_bg ~attrs:Attr.bold (),
+                         H.row_text_style ~theme ~selected:true
+                           ~focused:left_focused ~bg:row_bg )
+                     end
+                     else
+                       ( base_whisper_st,
+                         base_sec_st,
+                         base_accent_bold_st,
+                         base_pri_st )
                    in
-                   if is_sel then
-                     H.paint_selected_row_bg ~grid ~clip:feed_rect
-                       ~row_rect:r_rect ~theme ~focused:left_focused ();
                    let p_eff_ts =
                      match p.updated_at_unix with
                      | Some u when u > p.created_at_unix -> u
                      | Some _ | None -> p.created_at_unix
                    in
                    let age = H.format_age ~now_unix p_eff_ts in
-                   let replies_s = Printf.sprintf "%dc" p.comment_count in
+                   let replies_s = Int.to_string p.comment_count ^ "c" in
                    let age_w = Grapheme.display_width age in
-                   let rep_w = Grapheme.display_width replies_s in
+                   let rep_w = String.length replies_s in
                    let right_total = rep_w + 2 + age_w in
-                   ignore
-                     (H.put_right ~grid ~clip:r_rect ~right_x:right_edge ~y:py
-                        ~max_w:age_w
-                        ~style:(H.whisper_style ~theme ~bg:row_bg ())
-                        age);
-                   ignore
-                     (H.put_right ~grid ~clip:r_rect
-                        ~right_x:(right_edge - age_w - 2) ~y:py ~max_w:rep_w
-                        ~style:(H.secondary_style ~theme ~bg:row_bg ())
-                        replies_s);
+                   if age_w > 0 then
+                     ignore
+                       (Cell_grid.put_text ~clip:r_rect grid
+                          ~x:(Int.max r_rect.x (right_edge - age_w))
+                          ~y:py ~style:whisper_st age);
+                   if rep_w > 0 then
+                     ignore
+                       (Cell_grid.put_text ~clip:r_rect grid
+                          ~x:(Int.max r_rect.x (right_edge - age_w - 2 - rep_w))
+                          ~y:py ~style:sec_st replies_s);
                    let left_limit = right_edge - right_total - 2 in
                    let cx = ref tx in
                    if grp.chain_count > 1 then begin
@@ -953,18 +1013,17 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                      in
                      let tag =
                        if grp.unique_keepers > 1 then
-                         Printf.sprintf "%s [x%d] %dk " (Glyph.to_utf8 caret)
-                           grp.chain_count grp.unique_keepers
+                         Glyph.to_utf8 caret ^ " [x"
+                         ^ Int.to_string grp.chain_count ^ "] "
+                         ^ Int.to_string grp.unique_keepers ^ "k "
                        else
-                         Printf.sprintf "%s [x%d] " (Glyph.to_utf8 caret)
-                           grp.chain_count
+                         Glyph.to_utf8 caret ^ " [x"
+                         ^ Int.to_string grp.chain_count ^ "] "
                      in
                      let adv =
                        H.put_clipped ~grid ~clip:r_rect ~x:!cx ~y:py
                          ~max_w:(Int.max 0 (left_limit - !cx))
-                         ~style:
-                           (H.accent_style ~theme ~bg:row_bg ~attrs:Attr.bold ())
-                         tag
+                         ~style:accent_bold_st tag
                      in
                      cx := !cx + adv
                    end
@@ -975,18 +1034,12 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                            Grapheme.truncate_to_width ~max_width:10 ("#" ^ h)
                          in
                          let adv =
-                           H.put_clipped ~grid ~clip:r_rect ~x:!cx ~y:py
-                             ~max_w:10
-                             ~style:(H.secondary_style ~theme ~bg:row_bg ())
-                             h_s
+                           Cell_grid.put_text ~clip:r_rect grid ~x:!cx ~y:py
+                             ~style:sec_st h_s
                          in
                          cx := !cx + adv + 2
                      | Some _ | None -> ()
                    end;
-                   let title_style =
-                     H.row_text_style ~theme ~selected:is_sel
-                       ~focused:left_focused ~bg:row_bg
-                   in
                    let closed_prefix =
                      match Knowledge_store.post_extras_for ~post_id:p.id k with
                      | Some ex
@@ -995,16 +1048,19 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                          "[CLOSED] "
                      | Some _ | None -> ""
                    in
+                   let title_txt =
+                     if String.length closed_prefix = 0 then p.title
+                     else closed_prefix ^ p.title
+                   in
                    ignore
                      (H.put_clipped ~grid ~clip:r_rect ~x:!cx ~y:py
                         ~max_w:(Int.max 0 (left_limit - !cx))
-                        ~style:title_style (closed_prefix ^ p.title))
+                        ~style:title_style title_txt)
                | `Member (m, is_last, is_sel) ->
-                   let left_focused = Model.pane_focused model 0 in
                    let row_bg =
                      if is_sel then
                        H.selected_row_bg ~theme ~focused:left_focused
-                     else theme.surface_1
+                     else base_bg_rgb
                    in
                    if is_sel then
                      H.paint_selected_row_bg ~grid ~clip:feed_rect

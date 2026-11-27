@@ -677,16 +677,16 @@ let selected_keeper_name m =
         if String.equal trimmed "" then None else Some trimmed)
   in
   let filter_empty = String.equal (String.trim m.fleet.filter_query) "" in
-  match Fleet_store.selected_keeper_summary m.fleet with
-  | Some k -> (
-      match explicit with
-      | Some name
-        when filter_empty
-             && (m.nav.zoomed
-                 || Option.is_some (Fleet_store.find_keeper ~name m.fleet)) ->
-          Some name
-      | Some _ | None -> Some k.name)
-  | None -> if filter_empty then explicit else None
+  match explicit with
+  | Some name
+    when filter_empty
+         && (m.nav.zoomed
+             || Option.is_some (Fleet_store.find_keeper ~name m.fleet)) ->
+      Some name
+  | Some _ | None -> (
+      match Fleet_store.selected_keeper_summary m.fleet with
+      | Some k -> Some k.name
+      | None -> if filter_empty then explicit else None)
 
 let target_keeper m =
   match m.drafts.active_keeper with
@@ -1408,12 +1408,18 @@ let focusable_pane_count m =
               | Nav.Work_harness -> 2)
           | Nav.Knowledge -> 2
           | Nav.Keepers ->
+              let empty_filter =
+                String.equal (String.trim m.fleet.filter_query) ""
+              in
               let has_roster_or_loading =
-                Fleet_store.filtered_keepers m.fleet <> []
-                || Fleet_store.companies_nav_rows m.fleet <> []
+                (if empty_filter then
+                   match Observed.to_option m.fleet.keepers with
+                   | Some (_ :: _) -> true
+                   | Some [] | None -> not (Observed.is_value m.fleet.keepers)
+                 else
+                   Fleet_store.filtered_keepers m.fleet <> []
+                   || Fleet_store.companies_nav_rows m.fleet <> [])
                 || Option.is_some (selected_keeper_name m)
-                || (String.equal (String.trim m.fleet.filter_query) ""
-                    && not (Observed.is_value m.fleet.keepers))
               in
               if
                 (equal_breakpoint m.breakpoint Wide
@@ -1778,9 +1784,8 @@ let active_focus_label m =
     let n = focusable_pane_count m in
     if n > 1 then
       let idx = Int.min n (Int.max 1 (m.nav.pane_index + 1)) in
-      Say.make
-        ~ko:(Printf.sprintf "%d/%d %s" idx n ko)
-        ~en:(Printf.sprintf "%d/%d %s" idx n en)
+      let prefix = Int.to_string idx ^ "/" ^ Int.to_string n ^ " " in
+      Say.make ~ko:(prefix ^ ko) ~en:(prefix ^ en)
     else Say.make ~ko ~en
   in
   if is_too_small_viewport m.viewport then
@@ -4246,8 +4251,8 @@ let effective_scorecard m : Wire_fleet.daily_scorecard =
     cost_24h_usd = or_observed base.cost_24h_usd spend_from_rt;
   }
 
-let pulse_hero_metrics m =
-  let sc = effective_scorecard m in
+let pulse_hero_metrics_with ?company_count ?scorecard m =
+  let sc = match scorecard with Some s -> s | None -> effective_scorecard m in
   let obs_at =
     match m.fleet.shell with
     | Observed.Value { observed_at; _ } -> observed_at
@@ -4269,7 +4274,11 @@ let pulse_hero_metrics m =
         in
         (run, List.length keepers)
   in
-  let company_count = List.length (Fleet_store.company_groups m.fleet) in
+  let company_count =
+    match company_count with
+    | Some n -> n
+    | None -> Fleet_store.company_count m.fleet
+  in
   let tool_calls_24h, tool_error_rate_pct, p95_latency_ms =
     match Runtime_store.tool_series_totals m.runtime with
     | Some (calls, fails, p95_opt) when calls > 0 ->
@@ -4362,6 +4371,8 @@ let pulse_hero_metrics m =
     verifications_awaiting;
     candle_circulating_milli;
   }
+
+let pulse_hero_metrics m = pulse_hero_metrics_with m
 
 let sync_effective_scorecard ~now:_ m =
   let eff = effective_scorecard m in

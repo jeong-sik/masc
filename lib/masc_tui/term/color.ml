@@ -98,6 +98,8 @@ let lift_for_contrast = Theme.lift_for_contrast
 let lerp_oklab = Theme.lerp_oklab
 
 let equal a b =
+  a == b
+  ||
   match a, b with
   | Default, Default -> true
   | Ansi16 x, Ansi16 y | Ansi256 x, Ansi256 y | Rgb x, Rgb y -> Int.equal x y

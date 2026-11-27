@@ -13,6 +13,14 @@ val utf8_scalar_byte_length : char -> int option
 val scalar_width : Uchar.t -> int
 (** Terminal cell width of one Unicode scalar ([0], [1], or [2]). *)
 
+val is_all_printable_ascii : string -> bool
+(** True when every byte is printable ASCII ([0x20..0x7E]). Zero allocation. *)
+
+val is_simple_ascii_or_cjk_hangul : string -> bool
+(** True when every scalar is printable ASCII, a non-combining width-1 UI
+    symbol, precomposed Hangul syllable, or CJK Unified Ideograph. Zero
+    allocation. *)
+
 val sanitize_controls : string -> string
 (** Strip raw ANSI CSI/OSC sequences, C0/DEL/C1 control characters, and unsafe
     default-ignorable invisibles (bidi overrides, lone joiners/selectors, tag

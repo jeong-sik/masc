@@ -193,93 +193,99 @@ let days_in_month ~year ~month =
   | 2 -> if is_leap_year year then 29 else 28
   | _ -> 0
 
-let parse_digits s ~off ~len =
-  if off < 0 || len <= 0 || off + len > String.length s then None
-  else
-    let rec loop idx acc =
-      if idx = off + len then Some acc
-      else
-        let c = s.[idx] in
-        if c >= '0' && c <= '9' then
-          loop (idx + 1) ((acc * 10) + (Char.code c - Char.code '0'))
-        else None
-    in
-    loop off 0
+let[@inline] parse_2_digits s off =
+  let d0 = Char.code (String.unsafe_get s off) - 48 in
+  let d1 = Char.code (String.unsafe_get s (off + 1)) - 48 in
+  if d0 >= 0 && d0 <= 9 && d1 >= 0 && d1 <= 9 then (d0 * 10) + d1 else -1
+
+let[@inline] parse_4_digits s off =
+  let hi = parse_2_digits s off in
+  let lo = parse_2_digits s (off + 2) in
+  if hi >= 0 && lo >= 0 then (hi * 100) + lo else -1
+
+let[@inline] is_trim_ws = function
+  | ' ' | '\t' | '\n' | '\r' | '\012' -> true
+  | _ -> false
 
 let parse_rfc3339_unix raw =
-  let s = String.trim raw in
-  let n = String.length s in
+  let raw_len = String.length raw in
+  let rec trim_left i =
+    if i < raw_len && is_trim_ws (String.unsafe_get raw i) then trim_left (i + 1)
+    else i
+  in
+  let rec trim_right i start =
+    if i > start && is_trim_ws (String.unsafe_get raw (i - 1)) then
+      trim_right (i - 1) start
+    else i
+  in
+  let start = trim_left 0 in
+  let stop = trim_right raw_len start in
+  let n = stop - start in
   if n < 20 then Error (Printf.sprintf "invalid RFC3339 timestamp %S" raw)
   else
-    let sep = s.[10] in
+    let sep = String.unsafe_get raw (start + 10) in
     if
-      s.[4] <> '-' || s.[7] <> '-'
+      String.unsafe_get raw (start + 4) <> '-'
+      || String.unsafe_get raw (start + 7) <> '-'
       || (sep <> 'T' && sep <> 't' && sep <> ' ')
-      || s.[13] <> ':' || s.[16] <> ':'
+      || String.unsafe_get raw (start + 13) <> ':'
+      || String.unsafe_get raw (start + 16) <> ':'
     then Error (Printf.sprintf "invalid RFC3339 timestamp %S" raw)
     else
-      match
-        ( parse_digits s ~off:0 ~len:4
-        , parse_digits s ~off:5 ~len:2
-        , parse_digits s ~off:8 ~len:2
-        , parse_digits s ~off:11 ~len:2
-        , parse_digits s ~off:14 ~len:2
-        , parse_digits s ~off:17 ~len:2 )
-      with
-      | Some year, Some month, Some day, Some hour, Some minute, Some second ->
-          let valid_date =
-            month >= 1 && month <= 12 && day >= 1
-            && day <= days_in_month ~year ~month
-            && hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59
-            && second >= 0 && second <= 60
+      let year = parse_4_digits raw start in
+      let month = parse_2_digits raw (start + 5) in
+      let day = parse_2_digits raw (start + 8) in
+      let hour = parse_2_digits raw (start + 11) in
+      let minute = parse_2_digits raw (start + 14) in
+      let second = parse_2_digits raw (start + 17) in
+      if year < 0 || month < 0 || day < 0 || hour < 0 || minute < 0 || second < 0
+      then Error (Printf.sprintf "invalid RFC3339 digits in %S" raw)
+      else if
+        month < 1 || month > 12 || day < 1
+        || day > days_in_month ~year ~month
+        || hour > 23 || minute > 59 || second > 60
+      then Error (Printf.sprintf "out-of-range RFC3339 timestamp %S" raw)
+      else
+        let rec scan_frac idx frac scale =
+          if idx < stop then
+            let d = Char.code (String.unsafe_get raw idx) - 48 in
+            if d >= 0 && d <= 9 then
+              scan_frac (idx + 1) (frac +. (float_of_int d *. scale)) (scale *. 0.1)
+            else (idx, frac)
+          else (idx, frac)
+        in
+        let p = start + 19 in
+        let idx, frac, frac_ok =
+          if p < stop && String.unsafe_get raw p = '.' then
+            let next_i, f = scan_frac (p + 1) 0.0 0.1 in
+            (next_i, f, next_i > p + 1)
+          else (p, 0.0, true)
+        in
+        if not frac_ok then
+          Error (Printf.sprintf "invalid fractional seconds in %S" raw)
+        else
+          let finish tz =
+            let days = days_from_civil ~year ~month ~day in
+            Ok
+              ((Float.of_int days *. 86400.0)
+              +. Float.of_int ((hour * 3600) + (minute * 60) + second - tz)
+              +. frac)
           in
-          if not valid_date then
-            Error (Printf.sprintf "out-of-range RFC3339 timestamp %S" raw)
-          else
-            let idx = ref 19 in
-            let frac = ref 0.0 in
-            let frac_ok = ref true in
-            if !idx < n && s.[!idx] = '.' then begin
-              incr idx;
-              let start = !idx in
-              let scale = ref 0.1 in
-              while !idx < n && s.[!idx] >= '0' && s.[!idx] <= '9' do
-                let d = float_of_int (Char.code s.[!idx] - Char.code '0') in
-                frac := !frac +. (d *. !scale);
-                scale := !scale *. 0.1;
-                incr idx
-              done;
-              if !idx = start then frac_ok := false
-            end;
-            if not !frac_ok then
-              Error (Printf.sprintf "invalid fractional seconds in %S" raw)
-            else
-              let tz_offset_sec =
-                if !idx = n - 1 && (s.[!idx] = 'Z' || s.[!idx] = 'z') then Ok 0
-                else if
-                  !idx + 6 = n
-                  && (s.[!idx] = '+' || s.[!idx] = '-')
-                  && s.[!idx + 3] = ':'
-                then
-                  let sign = if s.[!idx] = '+' then 1 else -1 in
-                  match
-                    ( parse_digits s ~off:(!idx + 1) ~len:2
-                    , parse_digits s ~off:(!idx + 4) ~len:2 )
-                  with
-                  | Some th, Some tm when th <= 23 && tm <= 59 ->
-                      Ok (sign * ((th * 3600) + (tm * 60)))
-                  | _ -> Error (Printf.sprintf "invalid timezone offset in %S" raw)
-                else Error (Printf.sprintf "missing or invalid timezone in %S" raw)
-              in
-              let* tz = tz_offset_sec in
-              let days = days_from_civil ~year ~month ~day in
-              let secs =
-                (Float.of_int days *. 86400.0)
-                +. Float.of_int ((hour * 3600) + (minute * 60) + second - tz)
-                +. !frac
-              in
-              Ok secs
-      | _ -> Error (Printf.sprintf "invalid RFC3339 digits in %S" raw)
+          if idx = stop - 1
+             && let c = String.unsafe_get raw idx in c = 'Z' || c = 'z'
+          then finish 0
+          else if
+            idx + 6 = stop
+            && (let c = String.unsafe_get raw idx in c = '+' || c = '-')
+            && String.unsafe_get raw (idx + 3) = ':'
+          then
+            let sign = if String.unsafe_get raw idx = '+' then 1 else -1 in
+            let th = parse_2_digits raw (idx + 1) in
+            let tm = parse_2_digits raw (idx + 4) in
+            if th >= 0 && th <= 23 && tm >= 0 && tm <= 59 then
+              finish (sign * ((th * 3600) + (tm * 60)))
+            else Error (Printf.sprintf "invalid timezone offset in %S" raw)
+          else Error (Printf.sprintf "missing or invalid timezone in %S" raw)
 
 let format_unix_rfc3339 ts =
   if not (Float.is_finite ts) then "1970-01-01T00:00:00Z"
@@ -306,16 +312,24 @@ let decode_timestamp_unix json key =
   | Ok (`String s) -> parse_rfc3339_unix s
   | Ok bad -> field_type_error key "a unix timestamp or RFC3339 string" bad
 
+let is_blank_string s =
+  let len = String.length s in
+  let rec loop i =
+    if i >= len then true
+    else if is_trim_ws (String.unsafe_get s i) then loop (i + 1)
+    else false
+  in
+  loop 0
+
 let decode_optional_timestamp_unix json key =
   match assoc_member_opt key json with
   | None | Some `Null -> Ok None
   | Some (`Float f) when Float.is_finite f -> Ok (Some f)
   | Some (`Int i) -> Ok (Some (Float.of_int i))
   | Some (`String s) ->
-      let trimmed = String.trim s in
-      if String.equal trimmed "" then Ok None
+      if is_blank_string s then Ok None
       else
-        let* ts = parse_rfc3339_unix trimmed in
+        let* ts = parse_rfc3339_unix s in
         Ok (Some ts)
   | Some bad ->
       field_type_error key "a unix timestamp, RFC3339 string, or null" bad

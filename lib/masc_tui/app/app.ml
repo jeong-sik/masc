@@ -1329,9 +1329,11 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
               end
               else next_model, cmds
             in
+            let prev_model = !model in
             model := next_model;
-            scheduler :=
-              Frame_scheduler.mark_dirty ~pace:(msg_pace msg) !scheduler;
+            if next_model != prev_model then
+              scheduler :=
+                Frame_scheduler.mark_dirty ~pace:(msg_pace msg) !scheduler;
             if cmds <> [] then Cmd_executor.execute_all executor cmds
           end
         in

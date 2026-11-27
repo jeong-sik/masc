@@ -452,9 +452,28 @@ let context_display = function
   | Wire_fleet.Context_not_measured { reason; estimated_ratio = None } ->
       Context_unavailable reason
 
+let context_pct_lut = Array.init 101 (fun i -> Int.to_string i ^ "%")
+let context_est_pct_lut = Array.init 101 (fun i -> "~" ^ Int.to_string i ^ "%")
+
 let context_fill_label ~estimated ratio =
   let pct = ratio *. 100.0 in
-  if estimated then Printf.sprintf "~%.0f%%" pct else Printf.sprintf "%.0f%%" pct
+  if Float.is_finite pct && pct >= 0.0 && pct <= 100.0 then
+    let fl = Float.floor pct in
+    let frac = pct -. fl in
+    let i = int_of_float fl in
+    let rounded =
+      if frac > 0.5 then i + 1
+      else if frac < 0.5 then i
+      else if i land 1 = 0 then i
+      else i + 1
+    in
+    if rounded >= 0 && rounded <= 100 then
+      if estimated then Array.unsafe_get context_est_pct_lut rounded
+      else Array.unsafe_get context_pct_lut rounded
+    else if estimated then Printf.sprintf "~%.0f%%" pct
+    else Printf.sprintf "%.0f%%" pct
+  else if estimated then Printf.sprintf "~%.0f%%" pct
+  else Printf.sprintf "%.0f%%" pct
 
 let context_unavailable_label = function
   | Wire_fleet.Context_measurement_missing ->
@@ -621,6 +640,8 @@ let company_groups_with_costs ?attention ?now_unix ~keeper_costs_24h t =
 
 let company_groups ?attention ?now_unix t =
   company_groups_with_costs ?attention ?now_unix ~keeper_costs_24h:[] t
+
+let company_count t = Wire_fleet.count_companies (filter_matched_keepers t)
 
 let sandbox_profile_of ~keeper t =
   String_map.find_opt keeper t.sandbox_profiles

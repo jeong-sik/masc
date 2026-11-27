@@ -594,16 +594,20 @@ let is_rejected_verification (v : Wire_work.verification_request) =
 
 (* --- Sub-Tab 1: Pipeline (Adaptive Goals + Linked Tasks & Verifications + Rich Goal Inspector) --- *)
 
-let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
-    ~(model : Model.t) ~cache ~sel_goal ~unlinked_n ~total_tasks ~link_warnings =
+let render_linked_tasks_card ?precomputed_linked ?precomputed_verifs grid
+    ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t) ~cache ~sel_goal
+    ~unlinked_n ~total_tasks ~link_warnings =
   if Rect.is_empty rect then ()
   else
     let linked, related_verifs =
-      match sel_goal with
-      | Some (g : Wire_work.goal) ->
-          ( Work_store.goal_linked_tasks ~goal_id:g.id model.work
-          , Work_store.goal_linked_verifications ~goal_id:g.id model.work )
-      | None -> ([], [])
+      match precomputed_linked, precomputed_verifs with
+      | Some lk, Some vs -> (lk, vs)
+      | _ -> (
+          match sel_goal with
+          | Some (g : Wire_work.goal) ->
+              ( Work_store.goal_linked_tasks ~goal_id:g.id model.work
+              , Work_store.goal_linked_verifications ~goal_id:g.id model.work )
+          | None -> ([], []))
     in
     let task_notice =
       work_read_notice model ~label:(Ops_common.say model ~ko:"작업" ~en:"Tasks")
@@ -871,13 +875,21 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
                      ~en:"No linked tasks in this read");
               incr y
             end;
+            let cand_cap = Int.max 0 (body_bot - verif_reserve - !y - 1) in
             let candidates =
-              Work_store.tasks model.work
-              |> List.filter (fun (tk : Wire_work.task) ->
-                     match tk.goal_link with
-                     | Wire_work.Unlinked -> Ops_common.task_is_active tk.status
-                     | Wire_work.Linked _ -> false)
-              |> List.take (Int.max 0 (body_bot - verif_reserve - !y - 1))
+              if cand_cap <= 0 then []
+              else
+                let rec take_active rem acc = function
+                  | [] -> List.rev acc
+                  | _ when rem <= 0 -> List.rev acc
+                  | (tk : Wire_work.task) :: rest -> (
+                      match tk.goal_link with
+                      | Wire_work.Unlinked when Ops_common.task_is_active tk.status ->
+                          take_active (rem - 1) (tk :: acc) rest
+                      | Wire_work.Unlinked | Wire_work.Linked _ ->
+                          take_active rem acc rest)
+                in
+                take_active cand_cap [] (Work_store.tasks model.work)
             in
             if candidates <> [] && !y < body_bot - verif_reserve then begin
               Card.draw_hairline ~pad_x:0 ~bg
@@ -886,6 +898,8 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
                      ~en:"Active Unlinked Candidates")
                 grid ~rect:content ~y:!y ~theme;
               incr y;
+              let pri_st = Typography.primary ~bg theme in
+              let whisper_st = Typography.whisper ~bg theme in
               List.iter
                 (fun (tk : Wire_work.task) ->
                   if !y < body_bot - verif_reserve then begin
@@ -909,14 +923,14 @@ let render_linked_tasks_card grid ~(rect : Rect.t) ~(theme : Theme.t)
                     ignore
                       (Ops_common.put_line ~clip:content grid
                          ~x:(content.x + adv1) ~y:!y ~max_w:mid_w
-                         ~style:(Typography.primary ~bg theme)
-                         (Printf.sprintf "%s  %s" tk.id tk.title));
+                         ~style:pri_st
+                         (tk.id ^ "  " ^ tk.title));
                     if who_w > 0 && content.w > adv1 + who_w + 4 then
                       ignore
                         (Ops_common.put_line ~clip:content grid
                            ~x:(Rect.right content - who_w)
                            ~y:!y ~max_w:who_w
-                           ~style:(Typography.whisper ~bg theme)
+                           ~style:whisper_st
                            who);
                     incr y
                   end)
@@ -1552,13 +1566,15 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       work_read_notice model ~label:(Ops_common.say model ~ko:"작업" ~en:"Tasks")
         model.work.planning
     in
+    let goals_arr = Array.of_list goals in
+    let n_goals = Array.length goals_arr in
     let zoomed = Model.is_zoomed_active model in
     let sel_goal_idx =
       let index = model.work.selected_index in
-      if index < 0 || goals = [] then None
-      else Some (Int.min (List.length goals - 1) index)
+      if index < 0 || n_goals = 0 then None
+      else Some (Int.min (n_goals - 1) index)
     in
-    let sel_goal = Option.bind sel_goal_idx (List.nth_opt goals) in
+    let sel_goal = Option.map (Array.unsafe_get goals_arr) sel_goal_idx in
     if zoomed then
       render_goal_zoomed ~sel_goal ~model ~cache ~rect ~theme grid
     else
@@ -1572,49 +1588,96 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       else
         let top_h =
           Int.min (Int.max 5 (rect.h / 2))
-            (Layout.adaptive_list_height ~items:(List.length goals) ~overhead:4
+            (Layout.adaptive_list_height ~items:n_goals ~overhead:4
                ~min_h:5 ~max_h:10 ())
         in
         match Layout.split_v_bp bp rect [ Layout.Fixed top_h; Layout.Flex 1 ] with
         | [ t; b ] -> (t, b)
         | _ -> (rect, Rect.empty)
     in
-    let unlinked_n = Work_store.unlinked_task_count model.work in
-    let total_tasks = List.length (Work_store.tasks model.work) in
+    (* Single pass over all tasks: total count, unlinked count, per-goal
+       completion counts, and selected goal's linked tasks. *)
+    let sel_goal_id = Option.map (fun (g : Wire_work.goal) -> g.id) sel_goal in
+    let goal_task_counts : (string, int ref * int ref) Hashtbl.t =
+      Hashtbl.create 16
+    in
+    let total_tasks_r = ref 0 in
+    let unlinked_r = ref 0 in
+    let sel_linked_rev = ref [] in
+    List.iter
+      (fun (tk : Wire_work.task) ->
+        incr total_tasks_r;
+        match tk.goal_link with
+        | Wire_work.Unlinked -> incr unlinked_r
+        | Wire_work.Linked gid ->
+            let d = if Ops_common.task_is_done tk.status then 1 else 0 in
+            (match Hashtbl.find_opt goal_task_counts gid with
+            | Some (done_r, tot_r) ->
+                done_r := !done_r + d;
+                incr tot_r
+            | None -> Hashtbl.add goal_task_counts gid (ref d, ref 1));
+            (match sel_goal_id with
+            | Some sg when String.equal sg gid ->
+                sel_linked_rev := tk :: !sel_linked_rev
+            | Some _ | None -> ()))
+      (Work_store.tasks model.work);
+    let total_tasks = !total_tasks_r in
+    let unlinked_n = !unlinked_r in
+    let sel_linked = List.rev !sel_linked_rev in
+    let sel_related_verifs =
+      match sel_linked with
+      | [] -> []
+      | linked -> (
+          match Work_store.verifications_list model.work with
+          | [] -> []
+          | verifs ->
+              let id_tbl = Hashtbl.create (Int.max 8 (List.length linked)) in
+              List.iter
+                (fun (tk : Wire_work.task) -> Hashtbl.replace id_tbl tk.id ())
+                linked;
+              List.filter
+                (fun (v : Wire_work.verification_request) ->
+                  Hashtbl.mem id_tbl v.task_id)
+                verifs)
+    in
     let link_warnings =
       let missing_links =
         if unlinked_n > 0 then
+          let ratio_s =
+            Int.to_string unlinked_n ^ "/" ^ Int.to_string total_tasks
+          in
           Some
-            (Ops_common.say model
-               ~ko:(Printf.sprintf "표시 작업 %d/%d건 목표 미연결" unlinked_n total_tasks)
-               ~en:(Printf.sprintf "%d/%d shown tasks lack goal links" unlinked_n total_tasks))
+            (match model.lang with
+             | Say.Lang_ko -> "표시 작업 " ^ ratio_s ^ "건 목표 미연결"
+             | Say.Lang_en -> ratio_s ^ " shown tasks lack goal links")
         else None
       in
       let unattributed =
         match Observed.to_option model.work.candle_ledger with
         | Some ledger when ledger.diagnostics.unattributed_count > 0 ->
-            let count = ledger.diagnostics.unattributed_count in
+            let cs = Int.to_string ledger.diagnostics.unattributed_count in
             Some
-              (Ops_common.say model
-                 ~ko:(Printf.sprintf "미귀속 캔들 %d건" count)
-                 ~en:(Printf.sprintf "%d unattributed Candles" count))
+              (match model.lang with
+               | Say.Lang_ko -> "미귀속 캔들 " ^ cs ^ "건"
+               | Say.Lang_en -> cs ^ " unattributed Candles")
         | Some _ | None -> None
       in
       List.filter_map Fun.id [ missing_links; unattributed ]
     in
     let done_goals =
-      List.fold_left
-        (fun acc (g : Wire_work.goal) ->
-          match g.phase with
-          | Wire_work.Completed -> acc + 1
-          | Wire_work.Executing
-          | Wire_work.Verifying
-          | Wire_work.Awaiting_confirmation
-          | Wire_work.Dropped
-          | Wire_work.Paused _
-          | Wire_work.Blocked _ ->
-              acc)
-        0 goals
+      let acc = ref 0 in
+      for i = 0 to n_goals - 1 do
+        match (Array.unsafe_get goals_arr i).phase with
+        | Wire_work.Completed -> incr acc
+        | Wire_work.Executing
+        | Wire_work.Verifying
+        | Wire_work.Awaiting_confirmation
+        | Wire_work.Dropped
+        | Wire_work.Paused _
+        | Wire_work.Blocked _ ->
+            ()
+      done;
+      !acc
     in
     (* Anti-Void Adaptive Height: clamp(goal_count + 4, 6, 12) for Goals,
        reclaiming the entire bottom-left space for Linked Tasks & Verifications! *)
@@ -1624,7 +1687,7 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         && rect.w >= 96 && left_rect.h >= 14
       then
         let want_h =
-          Layout.adaptive_list_height ~items:(List.length goals) ~overhead:4
+          Layout.adaptive_list_height ~items:n_goals ~overhead:4
             ~min_h:6 ~max_h:12 ()
         in
         let clamped_h = Int.min want_h (left_rect.h - 6) in
@@ -1668,14 +1731,16 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                 Ops_common.say model ~ko:"목표 파이프라인" ~en:"Goals Pipeline"
               in
               if Option.is_some goal_notice then title
-              else Printf.sprintf "%s (%d/%d)" title done_goals (List.length goals)))
+              else
+                title ^ " (" ^ Int.to_string done_goals ^ "/"
+                ^ Int.to_string n_goals ^ ")"))
         with
         subtitle = goal_notice;
         badge =
           Some
             {
               Card.glyph = None;
-              text = Printf.sprintf "%s · %s" filter_badge_lbl sort_badge_lbl;
+              text = filter_badge_lbl ^ " · " ^ sort_badge_lbl;
               tone = filter_tone;
             };
         hotkey =
@@ -1688,7 +1753,7 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     in
     let l_inner = Card.draw ~cache grid ~rect:goals_rect ~theme left_spec in
     if not (Rect.is_empty l_inner) then begin
-      if goals = [] then
+      if n_goals = 0 then
         Ops_common.draw_observed_empty grid ~rect:l_inner ~theme ~lang:model.lang
           goals_read
           ~empty_msg:(Say.make ~ko:"조건에 맞는 목표가 없습니다" ~en:"No matching goals")
@@ -1733,59 +1798,71 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
             };
           ]
         in
-        let rows =
-          List.map
-            (fun (g : Wire_work.goal) ->
-              let pg, ptok, plbl = Ops_common.goal_phase_badge g.phase in
-              let linked = Work_store.goal_linked_tasks ~goal_id:g.id model.work in
-              let progress_cell =
-                match Work_store.linked_task_completion model.work linked with
-                | None -> Table.text_cell "—"
-                | Some (done_count, total) ->
-                    Table.Gauge
-                      {
-                        ratio = Float.of_int done_count /. Float.of_int total;
-                        gradient = Chart.Gradient.Efficiency;
-                        label = Some (Printf.sprintf "%d/%d" done_count total);
-                      }
-              in
-              let link_cell =
-                match task_notice with
-                | Some _ -> Table.text_cell "—"
-                | None ->
-                    Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
-                      (Int.to_string (List.length linked))
-              in
-              {
-                Table.id = g.id;
-                cells =
-                  [
-                    ( "phase"
-                    , Table.Badge
-                        {
-                          glyph = Some pg;
-                          text = Say.resolve model.lang plbl;
-                          tone = ptok;
-                        } );
-                    ( "goal"
-                    , Table.text_cell (Printf.sprintf "P%d %s" g.priority g.title)
-                    );
-                    ("prog", progress_cell);
-                    ("links", link_cell);
-                  ];
-              })
-            goals
+        let planning_fresh =
+          match model.work.planning with
+          | Observed.Value { stale = false; _ } -> true
+          | Observed.Value _ | Observed.Failed _ | Observed.Loading _
+          | Observed.Unreported | Observed.Absent -> false
+        in
+        let sec_fg = Color.of_rgb theme.text_secondary in
+        let dash_cell = Table.text_cell "—" in
+        let row_at idx =
+          let g = Array.unsafe_get goals_arr idx in
+          let pg, ptok, plbl = Ops_common.goal_phase_badge g.phase in
+          let done_count, total_linked =
+            match Hashtbl.find_opt goal_task_counts g.id with
+            | Some (d, tot) -> (!d, !tot)
+            | None -> (0, 0)
+          in
+          let progress_cell =
+            if (not planning_fresh) || total_linked = 0 then dash_cell
+            else
+              Table.Gauge
+                {
+                  ratio = Float.of_int done_count /. Float.of_int total_linked;
+                  gradient = Chart.Gradient.Efficiency;
+                  label =
+                    Some
+                      (Int.to_string done_count ^ "/"
+                      ^ Int.to_string total_linked);
+                }
+          in
+          let link_cell =
+            match task_notice with
+            | Some _ -> dash_cell
+            | None -> Table.text_cell ~fg:sec_fg (Int.to_string total_linked)
+          in
+          {
+            Table.id = g.id;
+            cells =
+              [
+                ( "phase"
+                , Table.Badge
+                    {
+                      glyph = Some pg;
+                      text = Say.resolve model.lang plbl;
+                      tone = ptok;
+                    } );
+                ( "goal"
+                , Table.text_cell ("P" ^ Int.to_string g.priority ^ " " ^ g.title) );
+                ("prog", progress_cell);
+                ("links", link_cell);
+              ];
+          }
         in
         ignore
-          (Table.draw grid ~rect:l_inner ~theme ~caps:Ops_common.default_caps
-             ~lang:model.lang ~scroll:model.work.scroll_offset
-             ?selected:sel_goal_idx ~focused:(Model.pane_focused model 0)
-             ~col_gap:(Layout.table_col_gap bp) ~columns:cols rows)
+          (Table.draw_virtual grid ~rect:l_inner ~theme
+             ~caps:Ops_common.default_caps ~lang:model.lang
+             ~scroll:model.work.scroll_offset ?selected:sel_goal_idx
+             ~focused:(Model.pane_focused model 0)
+             ~col_gap:(Layout.table_col_gap bp) ~columns:cols
+             ~total_rows:n_goals row_at)
     end;
     (* Bottom-left peer card: Linked Tasks & Verifications for selected goal *)
     if not (Rect.is_empty linked_card_rect) then
-      render_linked_tasks_card grid ~rect:linked_card_rect ~theme ~model ~cache
-        ~sel_goal ~unlinked_n ~total_tasks ~link_warnings;
+      render_linked_tasks_card ~precomputed_linked:sel_linked
+        ~precomputed_verifs:sel_related_verifs grid ~rect:linked_card_rect ~theme
+        ~model ~cache ~sel_goal ~unlinked_n ~total_tasks ~link_warnings;
     let right_rect =
       if Rect.is_empty linked_card_rect && not (Rect.is_empty right_rect) then
         let notices =
@@ -1868,10 +1945,8 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
             else begin
             let y = ref r_inner.y in
             let bottom = Rect.bottom r_inner in
-            let linked = Work_store.goal_linked_tasks ~goal_id:g.id model.work in
-            let related_verifs =
-              Work_store.goal_linked_verifications ~goal_id:g.id model.work
-            in
+            let linked = sel_linked in
+            let related_verifs = sel_related_verifs in
             let rejected_verif =
               List.find_opt is_rejected_verification related_verifs
             in
@@ -2020,11 +2095,18 @@ let render_pipeline ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                 Rect.make ~x:content.x ~y:!y ~w:content.w ~h:md_h
               in
               let md_src =
-                Printf.sprintf "**%s:** %s\n\n**%s:** %s"
-                  (Ops_common.say model ~ko:"성공 조건" ~en:"Success Measure")
-                  (Ops_common.rewrite_masc_links_for_markdown g.measure)
-                  (Ops_common.say model ~ko:"측정 절차" ~en:"Procedure")
-                  (Ops_common.rewrite_masc_links_for_markdown g.procedure)
+                "**"
+                ^ (match model.lang with
+                   | Say.Lang_ko -> "성공 조건"
+                   | Say.Lang_en -> "Success Measure")
+                ^ ":** "
+                ^ Ops_common.rewrite_masc_links_for_markdown g.measure
+                ^ "\n\n**"
+                ^ (match model.lang with
+                   | Say.Lang_ko -> "측정 절차"
+                   | Say.Lang_en -> "Procedure")
+                ^ ":** "
+                ^ Ops_common.rewrite_masc_links_for_markdown g.procedure
               in
               ignore
                 (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true
@@ -2450,13 +2532,14 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
     let bp = Ops_common.layout_bp model in
     let zoomed = Model.is_zoomed_active model in
     let filtered_tasks = Work_store.filtered_tasks model.work in
-    let n_tasks = List.length filtered_tasks in
+    let tasks_arr = Array.of_list filtered_tasks in
+    let n_tasks = Array.length tasks_arr in
     let task_sel_opt =
       if n_tasks > 0 then
         Some (Int.max 0 (Int.min (n_tasks - 1) model.work.selected_index))
       else None
     in
-    let sel_task = Option.bind task_sel_opt (List.nth_opt filtered_tasks) in
+    let sel_task = Option.map (Array.unsafe_get tasks_arr) task_sel_opt in
     if zoomed then
       render_task_zoomed ~sel_task ~model ~cache ~rect ~theme grid
     else
@@ -2467,25 +2550,40 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
        predicate as the rows below. The planning read also carries totals for
        the whole backlog. The task list is a separate read and can hold fewer
        rows, so mixing the two put "All 648" next to "Done 664". *)
-    let count_status status =
-      List.fold_left
-        (fun n (tk : Wire_work.task) ->
-          if Work_store.task_matches_status status tk then n + 1 else n)
-        0 all_tasks
+    let all_tasks_n, active_n, verify_n, todo_n, unlinked_n, done_n =
+      let tot = ref 0
+      and act = ref 0
+      and ver = ref 0
+      and td = ref 0
+      and unl = ref 0
+      and dn = ref 0 in
+      List.iter
+        (fun (tk : Wire_work.task) ->
+          incr tot;
+          if Work_store.task_matches_status Work_store.Status_active tk then
+            incr act;
+          if
+            Work_store.task_matches_status
+              Work_store.Status_awaiting_verification tk
+          then incr ver;
+          if Work_store.task_matches_status Work_store.Status_todo tk then
+            incr td;
+          if Work_store.task_matches_status Work_store.Status_unlinked tk then
+            incr unl;
+          if Work_store.task_matches_status Work_store.Status_done tk then
+            incr dn)
+        all_tasks;
+      (!tot, !act, !ver, !td, !unl, !dn)
     in
-    let active_n = count_status Work_store.Status_active in
-    let verify_n = count_status Work_store.Status_awaiting_verification in
-    let todo_n = count_status Work_store.Status_todo in
-    let unlinked_n = count_status Work_store.Status_unlinked in
-    let done_n = count_status Work_store.Status_done in
     (* The task list holds every open task and only the latest finished ones.
        When the backlog counts more finished tasks than the list has rows for,
        the chip says both: the rows it would show, of the backlog's total. *)
     let done_text =
       match Work_store.effective_task_counts model.work with
       | Some backlog when backlog.Wire_work.done_total > done_n ->
-          Printf.sprintf "%d/%d" done_n backlog.Wire_work.done_total
-      | Some _ | None -> string_of_int done_n
+          Int.to_string done_n ^ "/"
+          ^ Int.to_string backlog.Wire_work.done_total
+      | Some _ | None -> Int.to_string done_n
     in
     let pill_rect, body_rect = Rect.split_v rect ~top_h:1 in
     let status = model.work.task_status_filter in
@@ -2496,23 +2594,23 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           match status with
           | Work_store.Status_all ->
               ( Ops_common.say model ~ko:"전체" ~en:"All"
-              , string_of_int (List.length all_tasks)
+              , Int.to_string all_tasks_n
               , None )
           | Work_store.Status_active ->
               ( Ops_common.say model ~ko:"진행" ~en:"Active"
-              , string_of_int active_n
+              , Int.to_string active_n
               , Some Theme.Status_active )
           | Work_store.Status_awaiting_verification ->
               ( Ops_common.say model ~ko:"검증대기" ~en:"AwaitingVerify"
-              , string_of_int verify_n
+              , Int.to_string verify_n
               , Some Theme.Status_attention )
           | Work_store.Status_todo ->
               ( Ops_common.say model ~ko:"대기" ~en:"Todo"
-              , string_of_int todo_n
+              , Int.to_string todo_n
               , None )
           | Work_store.Status_unlinked ->
               ( Ops_common.say model ~ko:"미연결" ~en:"Unlinked"
-              , string_of_int unlinked_n
+              , Int.to_string unlinked_n
               , Some Theme.Status_attention )
           | Work_store.Status_done ->
               ( Ops_common.say model ~ko:"완료" ~en:"Done"
@@ -2520,42 +2618,49 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
               , Some Theme.Status_ok )
         in
         [
-          ( Printf.sprintf "%s: %s (%s) [v]"
-              (Ops_common.say model ~ko:"상태" ~en:"Status")
-              active_label active_count
+          ( (match model.lang with
+             | Say.Lang_ko -> "상태: "
+             | Say.Lang_en -> "Status: ")
+            ^ active_label ^ " (" ^ active_count ^ ") [v]"
           , true
           , active_tone );
         ]
       else
         [
-          ( Printf.sprintf "%s %d"
-              (Ops_common.say model ~ko:"전체" ~en:"All")
-              (List.length all_tasks)
+          ( (match model.lang with
+             | Say.Lang_ko -> "전체 "
+             | Say.Lang_en -> "All ")
+            ^ Int.to_string all_tasks_n
           , is_status Work_store.Status_all
           , None );
-          ( Printf.sprintf "%s %d"
-              (Ops_common.say model ~ko:"진행" ~en:"Active")
-              active_n
+          ( (match model.lang with
+             | Say.Lang_ko -> "진행 "
+             | Say.Lang_en -> "Active ")
+            ^ Int.to_string active_n
           , is_status Work_store.Status_active
           , Some Theme.Status_active );
-          ( Printf.sprintf "%s %d"
-              (Ops_common.say model ~ko:"검증대기" ~en:"AwaitingVerify")
-              verify_n
+          ( (match model.lang with
+             | Say.Lang_ko -> "검증대기 "
+             | Say.Lang_en -> "AwaitingVerify ")
+            ^ Int.to_string verify_n
           , is_status Work_store.Status_awaiting_verification
           , Some Theme.Status_attention );
-          ( Printf.sprintf "%s %d"
-              (Ops_common.say model ~ko:"대기" ~en:"Todo")
-              todo_n
+          ( (match model.lang with
+             | Say.Lang_ko -> "대기 "
+             | Say.Lang_en -> "Todo ")
+            ^ Int.to_string todo_n
           , is_status Work_store.Status_todo
           , None );
-          ( Printf.sprintf "%s %d"
-              (Ops_common.say model ~ko:"미연결" ~en:"Unlinked")
-              unlinked_n
+          ( (match model.lang with
+             | Say.Lang_ko -> "미연결 "
+             | Say.Lang_en -> "Unlinked ")
+            ^ Int.to_string unlinked_n
           , is_status Work_store.Status_unlinked
           , Some Theme.Status_attention );
-          ( Printf.sprintf "%s %s"
-              (Ops_common.say model ~ko:"완료" ~en:"Done")
-              done_text
+          ( (match model.lang with
+             | Say.Lang_ko -> "완료 "
+             | Say.Lang_en -> "Done ")
+            ^ done_text
           , is_status Work_store.Status_done
           , Some Theme.Status_ok );
         ]
@@ -2598,9 +2703,10 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         {
           (Card.default_spec
              ~title:
-               (Printf.sprintf "%s (%d)"
-                  (Ops_common.say model ~ko:"작업 목록" ~en:"Tasks")
-                  n_tasks))
+               ((match model.lang with
+                 | Say.Lang_ko -> "작업 목록 ("
+                 | Say.Lang_en -> "Tasks (")
+                ^ Int.to_string n_tasks ^ ")"))
           with
           hotkey =
             Some
@@ -2611,7 +2717,7 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       in
       let t_inner = Card.draw ~cache grid ~rect:tasks_rect ~theme t_spec in
       if not (Rect.is_empty t_inner) then begin
-        if filtered_tasks = [] then
+        if n_tasks = 0 then
           Ops_common.draw_observed_empty grid ~rect:t_inner ~theme
             ~lang:model.lang model.work.planning
             ~empty_msg:(Say.make ~ko:"해당 작업 없음" ~en:"No matching tasks")
@@ -2656,50 +2762,54 @@ let render_tasks ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
               };
             ]
           in
-          let rows =
-            List.map
-              (fun (tk : Wire_work.task) ->
-                let g, tok, lbl = Ops_common.task_status_badge tk.status in
-                let who =
-                  match Ops_common.task_assignee_opt tk.status with
-                  | Some a -> a
-                  | None -> Glyph.to_utf8 Glyph.Missing_absent
-                in
-                let goal_cell =
-                  match tk.goal_link with
-                  | Wire_work.Linked gid ->
-                      Table.text_cell ~fg:(Color.of_rgb theme.status_ok) gid
-                  | Wire_work.Unlinked ->
-                      Table.Badge
-                        {
-                          glyph = Some Glyph.Warning_triangle;
-                          text = Ops_common.say model ~ko:"미연결" ~en:"Unlinked";
-                          tone = Theme.Status_attention;
-                        }
-                in
-                {
-                  Table.id = tk.id;
-                  cells =
-                    [
-                      ( "st"
-                      , Table.Badge
-                          {
-                            glyph = Some g;
-                            text = Say.resolve model.lang lbl;
-                            tone = tok;
-                          } );
-                      ("title", Table.text_cell (Printf.sprintf "%s %s" tk.id tk.title));
-                      ("who", Table.text_cell ~fg:(Color.of_rgb theme.text_secondary) who);
-                      ("goal", goal_cell);
-                    ];
-                })
-              filtered_tasks
+          let sec_fg = Color.of_rgb theme.text_secondary in
+          let ok_fg = Color.of_rgb theme.status_ok in
+          let absent_glyph = Glyph.to_utf8 Glyph.Missing_absent in
+          let unlinked_cell =
+            Table.Badge
+              {
+                glyph = Some Glyph.Warning_triangle;
+                text = Ops_common.say model ~ko:"미연결" ~en:"Unlinked";
+                tone = Theme.Status_attention;
+              }
+          in
+          let row_at idx =
+            let tk = Array.unsafe_get tasks_arr idx in
+            let g, tok, lbl = Ops_common.task_status_badge tk.status in
+            let who =
+              match Ops_common.task_assignee_opt tk.status with
+              | Some a -> a
+              | None -> absent_glyph
+            in
+            let goal_cell =
+              match tk.goal_link with
+              | Wire_work.Linked gid -> Table.text_cell ~fg:ok_fg gid
+              | Wire_work.Unlinked -> unlinked_cell
+            in
+            {
+              Table.id = tk.id;
+              cells =
+                [
+                  ( "st"
+                  , Table.Badge
+                      {
+                        glyph = Some g;
+                        text = Say.resolve model.lang lbl;
+                        tone = tok;
+                      } );
+                  ("title", Table.text_cell (tk.id ^ " " ^ tk.title));
+                  ("who", Table.text_cell ~fg:sec_fg who);
+                  ("goal", goal_cell);
+                ];
+            }
           in
           ignore
-            (Table.draw grid ~rect:t_inner ~theme ~caps:Ops_common.default_caps
-               ~lang:model.lang ~scroll:model.work.scroll_offset
-               ?selected:task_sel_opt ~focused:(Model.pane_focused model 0)
-               ~col_gap:(Layout.table_col_gap bp) ~columns:cols rows)
+            (Table.draw_virtual grid ~rect:t_inner ~theme
+               ~caps:Ops_common.default_caps ~lang:model.lang
+               ~scroll:model.work.scroll_offset ?selected:task_sel_opt
+               ~focused:(Model.pane_focused model 0)
+               ~col_gap:(Layout.table_col_gap bp) ~columns:cols
+               ~total_rows:n_tasks row_at)
       end;
       (* 2. Task Detail Inspector *)
       if not (Rect.is_empty detail_rect) then begin

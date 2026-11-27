@@ -289,105 +289,139 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ?(scroll = 0) ?selected
   let total = List.length lines in
   if Rect.is_empty rect || total = 0 then total
   else
-    let arr = Array.of_list lines in
     let max_start = Int.max 0 (total - rect.h) in
     let start = Int.max 0 (Int.min max_start scroll) in
     let visible = Int.min rect.h (total - start) in
-    for i = 0 to visible - 1 do
-      let idx = start + i in
-      let line = arr.(idx) in
-      let py = rect.y + i in
-      let row_rect = Rect.make ~x:rect.x ~y:py ~w:rect.w ~h:1 in
-      let is_selected =
-        match selected with Some s -> Int.equal s idx | None -> false
+    if visible > 0 then begin
+      let base_bg = Color.of_rgb theme.surface_1 in
+      let base_fill =
+        Style.make ~fg:(Color.of_rgb theme.text_primary) ~bg:base_bg ()
       in
-      let bg_rgb = if is_selected then theme.selection_bg else theme.surface_1 in
-      let bg = Color.of_rgb bg_rgb in
-      let fill_style =
-        Style.make
-          ~fg:(Color.of_rgb (if is_selected then theme.text_bright else theme.text_primary))
-          ~bg ()
+      let fill_r = Rect.make ~x:rect.x ~y:rect.y ~w:rect.w ~h:visible in
+      Cell_grid.fill_rect ~clip:rect grid ~rect:fill_r ~style:base_fill ();
+      let base_muted = Style.make ~fg:(Color.of_rgb theme.text_muted) ~bg:base_bg () in
+      let base_key = Style.make ~fg:(Color.of_rgb theme.status_active) ~bg:base_bg () in
+      let base_str = Style.make ~fg:(Color.of_rgb theme.status_ok) ~bg:base_bg () in
+      let base_num =
+        Style.make ~fg:(Color.of_rgb theme.status_attention) ~bg:base_bg ()
       in
-      Cell_grid.fill_rect ~clip:rect grid ~rect:row_rect ~style:fill_style ();
-      (* Preserve calibrated semantic syntax hues on calm selection_bg *)
-      let muted_style = Style.make ~fg:(Color.of_rgb theme.text_muted) ~bg () in
-      let key_style =
-        Style.make ~fg:(Color.of_rgb theme.status_active) ~bg
-          ~attrs:(if is_selected then Attr.bold else Attr.none) ()
+      let base_lit =
+        Style.make ~fg:(Color.of_rgb theme.accent) ~bg:base_bg ~attrs:Attr.bold ()
       in
-      let str_style = Style.make ~fg:(Color.of_rgb theme.status_ok) ~bg () in
-      let num_style = Style.make ~fg:(Color.of_rgb theme.status_attention) ~bg () in
-      let lit_style =
-        Style.make ~fg:(Color.of_rgb theme.accent) ~bg ~attrs:Attr.bold ()
-      in
-      let redact_style =
-        Style.make ~fg:(Color.of_rgb theme.status_attention) ~bg ~attrs:Attr.bold ()
+      let base_redact =
+        Style.make ~fg:(Color.of_rgb theme.status_attention) ~bg:base_bg
+          ~attrs:Attr.bold ()
       in
       let has_selection_gutter = Option.is_some selected in
-      let cx = ref (if has_selection_gutter then rect.x + 2 else rect.x) in
       let limit = Rect.right rect in
-      if is_selected then
-        Cell_grid.put_glyph ~clip:row_rect grid ~x:rect.x ~y:py
-          ~style:(Style.make ~fg:(Color.of_rgb theme.accent) ~bg ~attrs:Attr.bold ())
-          Glyph.Left_rail;
-      (* Indent guides *)
-      for _ = 1 to line.depth do
-        if !cx + 2 <= limit then begin
-          Cell_grid.put_glyph ~clip:row_rect grid ~x:!cx ~y:py ~style:muted_style
-            Glyph.Tree_pipe;
-          cx := !cx + 2
-        end
-      done;
-      (* Expand/collapse indicator *)
-      if !cx + 2 <= limit then begin
-        if line.collapsible then
-          let g =
-            if line.expanded then Glyph.Expand_open else Glyph.Expand_closed
-          in
-          Cell_grid.put_glyph ~clip:row_rect grid ~x:!cx ~y:py ~style:muted_style g
-        else
-          Cell_grid.put_glyph ~clip:row_rect grid ~x:!cx ~y:py ~style:muted_style
-            Glyph.Separator_dot;
-        cx := !cx + 2
-      end;
-      (* Optional key *)
-      (match line.key with
-       | Some k when !cx < limit ->
-           let adv_k =
-             Cell_grid.put_text ~clip:row_rect grid ~x:!cx ~y:py ~style:key_style k
-           in
-           cx := !cx + adv_k;
-           let adv_sep =
-             Cell_grid.put_text ~clip:row_rect grid ~x:!cx ~y:py
-               ~style:muted_style ": "
-           in
-           cx := !cx + adv_sep
-       | Some _ | None -> ());
-      (* Value display *)
-      let avail = Int.max 0 (limit - !cx) in
-      if avail > 0 then
-        let put_val style s =
-          let fit = Grapheme.truncate_to_width ~max_width:avail s in
-          ignore (Cell_grid.put_text ~clip:row_rect grid ~x:!cx ~y:py ~style fit)
-        in
-        match line.value with
-        | Object_node { count } ->
-            let summary =
-              if line.expanded then Printf.sprintf "{%d}" count
-              else Printf.sprintf "{%d keys}" count
-            in
-            put_val muted_style summary
-        | Array_node { count } ->
-            let summary =
-              if line.expanded then Printf.sprintf "[%d]" count
-              else Printf.sprintf "[%d items]" count
-            in
-            put_val muted_style summary
-        | String_val s -> put_val str_style (Printf.sprintf "\"%s\"" s)
-        | Redacted_secret -> put_val redact_style "[redacted]"
-        | Int_val n -> put_val num_style (Int.to_string n)
-        | Float_val f -> put_val num_style (Printf.sprintf "%g" f)
-        | Bool_val b -> put_val lit_style (if b then "true" else "false")
-        | Null_val -> put_val lit_style "null"
-    done;
+      let rec drop k xs =
+        if k <= 0 then xs
+        else match xs with [] -> [] | _ :: rest -> drop (k - 1) rest
+      in
+      let rec paint i = function
+        | [] -> ()
+        | line :: rest ->
+            if i < visible then begin
+              let idx = start + i in
+              let py = rect.y + i in
+              let row_rect = Rect.make ~x:rect.x ~y:py ~w:rect.w ~h:1 in
+              let is_selected =
+                match selected with Some s -> Int.equal s idx | None -> false
+              in
+              let muted_style, key_style, str_style, num_style, lit_style, redact_style =
+                if not is_selected then
+                  (base_muted, base_key, base_str, base_num, base_lit, base_redact)
+                else
+                  let bg = Color.of_rgb theme.selection_bg in
+                  let fill_style =
+                    Style.make ~fg:(Color.of_rgb theme.text_bright) ~bg ()
+                  in
+                  Cell_grid.fill_rect ~clip:rect grid ~rect:row_rect
+                    ~style:fill_style ();
+                  Cell_grid.put_glyph ~clip:row_rect grid ~x:rect.x ~y:py
+                    ~style:
+                      (Style.make ~fg:(Color.of_rgb theme.accent) ~bg
+                         ~attrs:Attr.bold ())
+                    Glyph.Left_rail;
+                  ( Style.make ~fg:(Color.of_rgb theme.text_muted) ~bg (),
+                    Style.make ~fg:(Color.of_rgb theme.status_active) ~bg
+                      ~attrs:Attr.bold (),
+                    Style.make ~fg:(Color.of_rgb theme.status_ok) ~bg (),
+                    Style.make ~fg:(Color.of_rgb theme.status_attention) ~bg (),
+                    Style.make ~fg:(Color.of_rgb theme.accent) ~bg
+                      ~attrs:Attr.bold (),
+                    Style.make ~fg:(Color.of_rgb theme.status_attention) ~bg
+                      ~attrs:Attr.bold () )
+              in
+              let cx = ref (if has_selection_gutter then rect.x + 2 else rect.x) in
+              (* Indent guides *)
+              for _ = 1 to line.depth do
+                if !cx + 2 <= limit then begin
+                  Cell_grid.put_glyph ~clip:row_rect grid ~x:!cx ~y:py
+                    ~style:muted_style Glyph.Tree_pipe;
+                  cx := !cx + 2
+                end
+              done;
+              (* Expand/collapse indicator *)
+              if !cx + 2 <= limit then begin
+                if line.collapsible then
+                  let g =
+                    if line.expanded then Glyph.Expand_open
+                    else Glyph.Expand_closed
+                  in
+                  Cell_grid.put_glyph ~clip:row_rect grid ~x:!cx ~y:py
+                    ~style:muted_style g
+                else
+                  Cell_grid.put_glyph ~clip:row_rect grid ~x:!cx ~y:py
+                    ~style:muted_style Glyph.Separator_dot;
+                cx := !cx + 2
+              end;
+              (* Optional key *)
+              (match line.key with
+               | Some k when !cx < limit ->
+                   let adv_k =
+                     Cell_grid.put_text ~clip:row_rect grid ~x:!cx ~y:py
+                       ~style:key_style k
+                   in
+                   cx := !cx + adv_k;
+                   let adv_sep =
+                     Cell_grid.put_text ~clip:row_rect grid ~x:!cx ~y:py
+                       ~style:muted_style ": "
+                   in
+                   cx := !cx + adv_sep
+               | Some _ | None -> ());
+              (* Value display *)
+              let avail = Int.max 0 (limit - !cx) in
+              if avail > 0 then begin
+                let put_val style s =
+                  let fit = Grapheme.truncate_to_width ~max_width:avail s in
+                  ignore
+                    (Cell_grid.put_text ~clip:row_rect grid ~x:!cx ~y:py ~style
+                       fit)
+                in
+                match line.value with
+                | Object_node { count } ->
+                    let summary =
+                      if line.expanded then "{" ^ Int.to_string count ^ "}"
+                      else "{" ^ Int.to_string count ^ " keys}"
+                    in
+                    put_val muted_style summary
+                | Array_node { count } ->
+                    let summary =
+                      if line.expanded then "[" ^ Int.to_string count ^ "]"
+                      else "[" ^ Int.to_string count ^ " items]"
+                    in
+                    put_val muted_style summary
+                | String_val s -> put_val str_style ("\"" ^ s ^ "\"")
+                | Redacted_secret -> put_val redact_style "[redacted]"
+                | Int_val n -> put_val num_style (Int.to_string n)
+                | Float_val f -> put_val num_style (Printf.sprintf "%g" f)
+                | Bool_val b -> put_val lit_style (if b then "true" else "false")
+                | Null_val -> put_val lit_style "null"
+              end;
+              paint (i + 1) rest
+            end
+      in
+      paint 0 (drop start lines)
+    end;
     total

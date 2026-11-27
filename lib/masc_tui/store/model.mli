@@ -709,6 +709,14 @@ val effective_scorecard : t -> Wire_fleet.daily_scorecard
     24h turn pulses, [runtime.models_metrics]/[runtime_metrics]/[keeper_costs],
     and [knowledge.board] so Pulse never falls back to [—] when live data exists. *)
 
+val pulse_hero_metrics_with :
+  ?company_count:int ->
+  ?scorecard:Wire_fleet.daily_scorecard ->
+  t ->
+  pulse_hero_metrics
+(** Like {!pulse_hero_metrics}, reusing precomputed [company_count] and/or
+    [scorecard] within the same frame to avoid redundant scans. *)
+
 val pulse_hero_metrics : t -> pulse_hero_metrics
 (** Single authoritative selector for the Pulse 4-KPI Hero Band & 24h Daily
     Scorecard across both live [8935] and [feat/tui-v2] servers. *)

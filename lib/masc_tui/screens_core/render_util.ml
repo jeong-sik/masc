@@ -102,8 +102,15 @@ let popup_of_draft (m : Model.t) (_draft : Drafts.keeper_draft) =
       Composer.Popup_mention { query; items = List.map to_item items; selected }
 
 let composer_state_of_model (m : Model.t) : Composer.state =
-  let lookup_keeper = target_keeper_of_model m in
-  let target_keeper = display_target_keeper_of_model m in
+  let tk_opt = Model.target_keeper m in
+  let lookup_keeper =
+    match tk_opt with Some k -> k | None -> Drafts.target_keeper_key m.drafts
+  in
+  let target_keeper =
+    match tk_opt with
+    | Some k -> k
+    | None -> Say.resolve m.lang (Say.make ~ko:"미선택" ~en:"none")
+  in
   let draft = Drafts.current_draft m.drafts in
   let phase = Chat_transcript.live_chat_phase ~model:m ~keeper:lookup_keeper in
   {
@@ -305,11 +312,12 @@ let format_milli_candles raw =
       if String.equal trimmed "" then Glyph.to_utf8 Glyph.Missing_absent
       else trimmed ^ " C"
 
+let box_h_glyph = Cell_grid.Utf8 (Glyph.to_utf8 Glyph.Box_h)
+
 let draw_hline ?clip grid ~x ~y ~w ~style =
   if w > 0 then
-    for dx = 0 to w - 1 do
-      Cell_grid.put_glyph ?clip grid ~x:(x + dx) ~y ~style Glyph.Box_h
-    done
+    Cell_grid.fill_rect ?clip grid ~rect:(Rect.make ~x ~y ~w ~h:1) ~style
+      ~glyph:box_h_glyph ()
 
 let draw_pill ?clip grid ~x ~y ~fg ~bg ?(bold = false) text =
   if String.length text = 0 then 0

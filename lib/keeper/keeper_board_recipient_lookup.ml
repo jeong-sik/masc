@@ -35,39 +35,6 @@ let reading read =
     Error (Printf.sprintf "%s: %s" operation (Unix.error_message error))
 ;;
 
-(* Keeper names retain their spelling in metadata filenames. On a
-   case-sensitive filesystem the folded name may miss an existing Keeper, so
-   check the other persisted spellings of that same identity before the alias
-   scan. Only these Keepers' settings are read: an unrelated broken setting
-   must not prevent a healthy Keeper's own name from being addressed. Read all
-   matching spellings before accepting, so a later unreadable one is reported.
-   A file whose payload name differs from its filename can claim an alias, but
-   does not acquire own-name priority merely from that filename. *)
-let alternate_own_name_answers ~config ~id ~folded_name names =
-  let rec find answered = function
-    | [] -> Ok answered
-    | name :: rest ->
-      let matches =
-        match Keeper_identity.Keeper_id.of_string name with
-        | Some other -> Keeper_identity.Keeper_id.equal id other
-        | None -> false
-      in
-      if not matches || String.equal name folded_name
-      then find answered rest
-      else
-        (match reading (fun () -> Keeper_meta_store.read_effective_meta_presence config name) with
-         | Error _ as error -> error
-         | Ok (Keeper_meta_store.Meta_not_current detail) ->
-           Error
-             (Printf.sprintf "Keeper %s has settings this build cannot read: %s" name detail)
-         | Ok (Keeper_meta_store.Meta_present meta) ->
-           let owns_name = String.equal name meta.name in
-           find (answered || (owns_name && answers meta id)) rest
-         | Ok Keeper_meta_store.Meta_absent -> find answered rest)
-  in
-  find false names
-;;
-
 (* [all_metas] is every Keeper's settings, read the first time a name needs
    them and then kept for the rest of the write. *)
 let declared ~config ~all_names ~all_metas candidate =
@@ -109,13 +76,9 @@ let declared ~config ~all_names ~all_metas candidate =
                && answers meta id
              | None -> false
            in
-           if canonical_owner_answers
-           then recipient id
-           else
-             (match alternate_own_name_answers ~config ~id ~folded_name:name names with
-              | Error detail -> failed detail
-              | Ok true -> recipient id
-              | Ok false -> find_alias ())
+           (* A Keeper name is lowercase ([Keeper_id.Keeper_name]), so the
+              folded name is the only spelling a Keeper's own file can have. *)
+           if canonical_owner_answers then recipient id else find_alias ()
        in
        (* A file this build cannot read is not "no such Keeper": taking it for
           one would turn the address into prose without a word to the author. *)

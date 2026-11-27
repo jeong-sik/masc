@@ -171,12 +171,11 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
         (* Compare under the fold ledger attribution uses:
            [Keeper_identity.Keeper_id.of_string] lowercases, so "Alpha"
            and keeper "alpha" share one attribution id. A byte compare
-           admits exactly the collision this gate exists to refuse. *)
+           admits exactly the collision this gate exists to refuse. A
+           Keeper name is already lowercase ([Keeper_id.Keeper_name]), so
+           only the joining name is folded. *)
         let joining = String.lowercase_ascii (String.trim agent_name) in
-        if
-          List.exists
-            (fun keeper -> String.equal joining (String.lowercase_ascii keeper))
-            keeper_names
+        if List.exists (String.equal joining) keeper_names
         then
           Some
             (Printf.sprintf

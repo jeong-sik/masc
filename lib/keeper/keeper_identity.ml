@@ -8,10 +8,11 @@ let generate_trace_id ?(now = Time_compat.now ()) () : string =
   Printf.sprintf "trace-%d-%05x" ts seq
 
 (* The alias/nickname canonicalizer chain is gone. A keeper's
-   id is its keeper_name, trimmed and case-folded; non-keeper authors
-   (humans, external bots) mint comparable ids from their own name the
-   same way. Whether a name denotes a keeper is a registry/meta lookup
-   at the caller, never a property of the string's shape. *)
+   id is its keeper_name, which [Keeper_id.Keeper_name] keeps lowercase, so
+   the fold leaves it as written; non-keeper authors (humans, external bots)
+   and names written in text mint comparable ids by the fold. Whether a name
+   denotes a keeper is a registry/meta lookup at the caller, never a property
+   of the string's shape. *)
 (* Naming: [Keeper_id] and [Validation.Id_shape] sit on different axes, and
    the names now say which.
 

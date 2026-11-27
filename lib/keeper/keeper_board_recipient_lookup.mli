@@ -18,22 +18,21 @@ val make : config:Workspace.config -> Recipient_lookup.t
     - A candidate that cannot be a Keeper name ({!Keeper_id.Keeper_name.of_string}:
       a path component of at most 128 bytes) is never used to build an own-name
       file path. It can still be a declared alias, which is found by the scan.
-    - A Keeper's own name is declared when that Keeper answers to it. Keeper
-      identity is case-folded, including when the persisted filename retains
-      uppercase letters on a case-sensitive filesystem. A Keeper whose
-      [mention_targets] leave its own name out does not answer to it, so the
-      name is looked up among the aliases like any other. A matching own name
-      retains priority over alias collisions. The router compares the recorded
-      target with each Keeper's effective target list, subject to its separate
+    - A Keeper's own name is declared when that Keeper answers to it. The
+      written name is case-folded, and a Keeper name is already lowercase
+      ({!Keeper_id.Keeper_name.of_string}), so the folded name is the one file
+      a Keeper's own settings can be in. A Keeper whose [mention_targets]
+      leave its own name out does not answer to it, so the name is looked up
+      among the aliases like any other. A matching own name retains priority
+      over alias collisions. The router compares the recorded target with
+      each Keeper's effective target list, subject to its separate
       suppression of signals authored by that Keeper. The own-name shortcut
       requires the observed filename spelling and payload name to match
-      exactly. The lookup lists persisted names even for the canonical shortcut
-      (a listing error fails the lookup), but it does not read unrelated
-      settings on that shortcut. When alternate spellings are checked, every
-      matching file must be readable before the name can be accepted. The
-      metadata read and filename listing are separate observations: concurrent
-      replacement can mix them, so this is not an atomic or latest-state
-      ownership guarantee.
+      exactly. The lookup lists persisted names even for the canonical
+      shortcut (a listing error fails the lookup), but it does not read
+      unrelated settings on that shortcut. The metadata read and filename
+      listing are separate observations: concurrent replacement can mix them,
+      so this is not an atomic or latest-state ownership guarantee.
     - An alias is found by reading every Keeper's settings, once for the write
       and only if a name needs it.  One unreadable setting, or two Keepers
       claiming one alias, fails the lookup.  The detail names the Keeper or the

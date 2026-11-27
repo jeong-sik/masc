@@ -14,22 +14,49 @@ module Keeper_name = struct
      14 on this machine is 24 bytes. *)
   let max_length = 128
 
+  (* The name is also a directory, and a file system that does not tell case
+     apart (APFS as installed) gives [Foo] and [foo] one directory. A capital
+     letter is refused, not lowered: lowering would make the name mean a
+     Keeper other than the one written. [Authz_types.Account_home_namespace]
+     refuses capitals for the same reason. *)
+  let first_capital s =
+    Seq.find_map
+      (fun (index, byte) ->
+         match byte with
+         | 'A' .. 'Z' -> Some index
+         | _ -> None)
+      (String.to_seqi s)
+  ;;
+
   let of_string s =
     if not (Safe_identifier.is_portable_name s)
     then Error (Safe_identifier.portable_name_error ~field:"keeper_name")
-    else if Common.is_keepers_root_store_dirname s
-    then
-      Error
-        (Printf.sprintf "keeper_name %S is the keepers/%s runtime store directory" s s)
-    else if String.length s > max_length
-    then
-      Error
-        (Printf.sprintf
-           "keeper_name length %d exceeds %d: the name becomes a filesystem \
-            component"
-           (String.length s)
-           max_length)
-    else Ok s
+    else (
+      match first_capital s with
+      | Some index ->
+        Error
+          (Printf.sprintf
+             "keeper_name must be lowercase: capital letter at byte %d. The name \
+              becomes a directory, and a file system that does not tell case \
+              apart gives two names that differ only in case one directory"
+             index)
+      | None ->
+        if Common.is_keepers_root_store_dirname s
+        then
+          Error
+            (Printf.sprintf
+               "keeper_name %S is the keepers/%s runtime store directory"
+               s
+               s)
+        else if String.length s > max_length
+        then
+          Error
+            (Printf.sprintf
+               "keeper_name length %d exceeds %d: the name becomes a filesystem \
+                component"
+               (String.length s)
+               max_length)
+        else Ok s)
   ;;
 
   let to_string s = s

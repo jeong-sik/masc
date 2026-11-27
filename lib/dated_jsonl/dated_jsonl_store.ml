@@ -310,6 +310,44 @@ let fold_retention_directories root held store ~f =
       Directory.fold_children directory ~init:0
         ~f:(fun count name child -> count + f (decision_audit root ~keeper_dirname:name) child))
 
+let fold_keeper_retention_directories
+      root
+      held
+      ~keeper_stores
+      ~reaction_ledger:reaction_ledger_arg
+      ~f
+  =
+  if keeper_stores = [] && Option.is_none reaction_ledger_arg
+  then 0
+  else
+    let module Directory = Fs_compat.Retention_directory in
+    let reaction_ledger_dir =
+      Common.keeper_runtime_store_dirname Common.Keeper_reaction_ledger
+    in
+    Directory.descend held [ Common.keepers_runtime_dirname ] (fun keepers_dir ->
+      Directory.fold_children keepers_dir ~init:0 ~f:(fun count keeper_name keeper_dir ->
+        let present = Directory.names keeper_dir in
+        let count =
+          List.fold_left
+            (fun acc (store, arg) ->
+               let dirname = Keeper.dirname store in
+               if List.mem dirname present
+               then
+                 acc
+                 + Directory.descend keeper_dir [ dirname ]
+                     (f arg (keeper root ~keeper:keeper_name store))
+               else acc)
+            count
+            keeper_stores
+        in
+        match reaction_ledger_arg with
+        | Some arg when List.mem reaction_ledger_dir present ->
+          count
+          + Directory.descend keeper_dir [ reaction_ledger_dir ] (fun ledger ->
+              Directory.fold_children ledger ~init:0 ~f:(fun acc generation directory ->
+                acc + f arg (reaction_ledger root ~keeper:keeper_name ~generation) directory))
+        | Some _ | None -> count))
+
 type dated_path =
   { base_dir : string
   ; month_dir : string

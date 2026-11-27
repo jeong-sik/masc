@@ -152,6 +152,18 @@ val fold_retention_directories :
 (** The same closed store geometry, traversed only through the held root.
     Location paths are labels/lock keys; they never authorize traversal. *)
 
+val fold_keeper_retention_directories :
+  root ->
+  Fs_compat.Retention_directory.t ->
+  keeper_stores:(Keeper.t * 'a) list ->
+  reaction_ledger:'a option ->
+  f:('a -> location -> Fs_compat.Retention_directory.t -> int) ->
+  int
+(** Single-pass traversal of [<masc>/keepers] across all requested
+    keeper-scoped stores and [Reaction_ledger]. Lists each keeper directory
+    once and descends only into store subdirectories that are present,
+    avoiding one full walk of [<masc>/keepers] per store variant. *)
+
 (** A store's day file: [<dir>/YYYY-MM/DD.jsonl]. *)
 type dated_path =
   { base_dir : string  (** The store's directory. *)

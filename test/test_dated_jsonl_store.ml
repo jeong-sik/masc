@@ -373,6 +373,62 @@ let test_a_missing_store_counts_nothing () =
     (prune_declared_stores root ~operator_window_days:30)
 ;;
 
+(* Single-pass keeper traversal visits [<masc>/keepers] once rather than once
+   per keeper-scoped store variant, and skips absent store subdirectories. *)
+let test_keeper_pass_visits_keepers_directory_once () =
+  with_workspace
+  @@ fun root ->
+  let write_future location =
+    let dir = Filename.concat (Store.dir location) "2999-01" in
+    Fs_compat.mkdir_p dir;
+    let path = Filename.concat dir "01.jsonl" in
+    Out_channel.with_open_text path (fun oc -> output_string oc "{}\n");
+    path
+  in
+  let cr_fresh =
+    List.init 8 (fun i ->
+      let keeper = Printf.sprintf "completion-review-%02d" i in
+      write_future (Store.keeper root ~keeper Continuity_requests))
+  in
+  let real_old =
+    List.concat_map
+      (fun keeper ->
+         [ write_day_file (Store.keeper root ~keeper Metrics) ~age_days:400
+         ; write_day_file (Store.keeper root ~keeper Turn_records) ~age_days:400
+         ; write_day_file (Store.reaction_ledger root ~keeper ~generation:"v7") ~age_days:400
+         ])
+      [ "alice"; "bob" ]
+  in
+  let masc_dir = Filename.dirname (Store.dir (Store.at root Audit)) in
+  let stray = Filename.concat (Filename.concat masc_dir "keepers") "stray.txt" in
+  Out_channel.with_open_text stray (fun oc -> output_string oc "x");
+  let io_calls = ref 0 in
+  let io : Fs_compat.Retention_directory.io =
+    { run = (fun f -> incr io_calls; f ()) }
+  in
+  let pruned, pass_io_calls =
+    match
+      Fs_compat.Retention_directory.with_root ~io (Unix.realpath masc_dir) (fun held ->
+        io_calls := 0;
+        let n =
+          Dated_jsonl.prune_listed_stores_bound root held ~operator_window_days:30
+            ~on_pruned:ignore
+        in
+        n, !io_calls)
+    with
+    | Some res -> res
+    | None -> fail "masc dir disappeared"
+  in
+  check int "all six old keeper files pruned" 6 pruned;
+  List.iter (fun path -> check bool path false (Sys.file_exists path)) real_old;
+  List.iter (fun path -> check bool path true (Sys.file_exists path)) cr_fresh;
+  check bool "stray file preserved" true (Sys.file_exists stray);
+  check bool
+    (Printf.sprintf "single-pass keeper prune uses <= 110 io calls (observed %d)" pass_io_calls)
+    true
+    (pass_io_calls <= 110)
+;;
+
 let () =
   run
     "dated_jsonl_store"
@@ -408,6 +464,8 @@ let () =
             test_a_broken_keeper_link_does_not_stop_the_pass
         ; test_case "a missing store counts nothing" `Quick
             test_a_missing_store_counts_nothing
+        ; test_case "keeper pass visits keepers directory once" `Quick
+            test_keeper_pass_visits_keepers_directory_once
         ] )
     ]
 ;;

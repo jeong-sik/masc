@@ -22,17 +22,17 @@ let is_flat_jsonl_file name =
     && Filename.check_suffix (String.sub name 0 dot) ".jsonl"
 
 (* Decisions use the observed mtime, and deletion remains relative to its
-   held parent even if any pathname above it is replaced. The Fs_compat
-   facade offloads each blocking operation; callbacks stay on their fiber. *)
+   held parent even if any pathname above it is replaced. Matching leaves are
+   inspected and unlinked in bounded batches through [Fs_compat] so large flat
+   directories do not pay one cross-domain systhread hop per file. *)
 let prune_flat_files_in ~matches ~days directory =
   if days <= 0 then 0
   else
     (* NDT-OK: file retention is explicitly measured against wall-clock mtime. *)
     let cutoff = Unix.gettimeofday () -. (float_of_int days *. Masc_time_constants.day) in
     Retention_directory.names directory
-    |> List.fold_left (fun count name ->
-      if matches name && Retention_directory.remove_regular_file ~older_than:cutoff directory name
-      then count + 1 else count) 0
+    |> List.filter matches
+    |> Retention_directory.remove_regular_files ~older_than:cutoff directory
 
 let prune_flat_jsonl_in ~days = prune_flat_files_in ~matches:is_flat_jsonl_file ~days
 
@@ -82,20 +82,22 @@ let prune_empty_completion_review_dirs_bound held =
       Retention_directory.names keepers
       |> List.filter (String.starts_with ~prefix:completion_review_prefix)
     in
-    List.iter
-      (fun name ->
-         ignore
-           (Retention_directory.with_child keepers name (fun review_dir ->
-              List.iter
-                (fun sub -> Retention_directory.remove_empty_child review_dir sub)
-                completion_review_empty_subdirs));
-         Retention_directory.remove_empty_child keepers name)
-      candidates;
-    let remaining =
-      Retention_directory.names keepers
-      |> List.filter (String.starts_with ~prefix:completion_review_prefix)
-    in
-    max 0 (List.length candidates - List.length remaining))
+    if candidates = [] then 0
+    else (
+      List.iter
+        (fun name ->
+           ignore
+             (Retention_directory.with_child keepers name (fun review_dir ->
+                Retention_directory.remove_empty_children
+                  review_dir
+                  completion_review_empty_subdirs)))
+        candidates;
+      Retention_directory.remove_empty_children keepers candidates;
+      let remaining =
+        Retention_directory.names keepers
+        |> List.filter (String.starts_with ~prefix:completion_review_prefix)
+      in
+      max 0 (List.length candidates - List.length remaining)))
 ;;
 
 let prune_empty_completion_review_dirs ~masc_root =
@@ -114,24 +116,58 @@ let prune_shared_jsonl_stores ~days ~masc_root =
       Retention_directory.descend held components (fun parent ->
         Retention_directory.fold_children parent ~init:0
           ~f:(fun count _name child -> count + prune_flat_jsonl_in ~days child)) in
-    let removed_files =
+    let prune_keepers_flat_and_empty_reviews () =
+      if days <= 0 then (
+        ignore (prune_empty_completion_review_dirs_bound held : int);
+        0)
+      else
+        Retention_directory.descend held [ Common.keepers_runtime_dirname ] (fun keepers ->
+          let review_candidates = ref [] in
+          let count =
+            Retention_directory.fold_children keepers ~init:0
+              ~f:(fun count name keeper ->
+                let child_names = Retention_directory.names keeper in
+                let count =
+                  List.fold_left (fun count store ->
+                    if List.mem store child_names
+                    then count + Retention_directory.descend keeper [ store ] (prune_flat_jsonl_in ~days)
+                    else count)
+                    count keeper_scoped_flat_stores
+                in
+                if String.starts_with ~prefix:completion_review_prefix name then (
+                  review_candidates := name :: !review_candidates;
+                  let present_empty_subdirs =
+                    List.filter
+                      (fun sub -> List.mem sub child_names)
+                      completion_review_empty_subdirs
+                  in
+                  if present_empty_subdirs <> [] then
+                    Retention_directory.remove_empty_children keeper present_empty_subdirs);
+                count)
+          in
+          if !review_candidates <> [] then
+            Retention_directory.remove_empty_children keepers (List.rev !review_candidates);
+          count)
+    in
+    (* Explicit sequencing: OCaml evaluates [+] right-to-left, and empty
+       [completion-review-*] cleanup must run only after [Dated_jsonl] has
+       pruned aged day-files and empty month directories under [keepers/]. *)
+    let dated_removed =
       Dated_jsonl.prune_listed_stores_bound root held ~operator_window_days:days
         ~on_pruned:(pruned_store ~masc_root)
-      + Retention_directory.descend held [ "logs" ] (prune_flat_jsonl_in ~days)
-      + prune_children [ "trajectories" ]
-      + prune_children [ Keeper_chat_event_log.events_dirname ]
-      + prune_children [ Keeper_chat_event_log.turn_events_dirname ]
-      + Retention_directory.descend held [ "messages" ]
-          (prune_flat_files_in ~matches:(fun name -> Filename.check_suffix name ".json") ~days)
-      + Retention_directory.descend held [ Common.keepers_runtime_dirname ] (fun keepers ->
-          Retention_directory.fold_children keepers ~init:0
-            ~f:(fun count _name keeper ->
-              count + List.fold_left (fun count store ->
-                count + Retention_directory.descend keeper [ store ] (prune_flat_jsonl_in ~days))
-                0 keeper_scoped_flat_stores))
     in
-    ignore (prune_empty_completion_review_dirs_bound held);
-    removed_files) with
+    let flat_other_removed =
+      if days <= 0 then 0
+      else
+        Retention_directory.descend held [ "logs" ] (prune_flat_jsonl_in ~days)
+        + prune_children [ "trajectories" ]
+        + prune_children [ Keeper_chat_event_log.events_dirname ]
+        + prune_children [ Keeper_chat_event_log.turn_events_dirname ]
+        + Retention_directory.descend held [ "messages" ]
+            (prune_flat_files_in ~matches:(fun name -> Filename.check_suffix name ".json") ~days)
+    in
+    let flat_keepers_removed = prune_keepers_flat_and_empty_reviews () in
+    dated_removed + flat_other_removed + flat_keepers_removed) with
   | None -> 0
   | Some count -> count
 

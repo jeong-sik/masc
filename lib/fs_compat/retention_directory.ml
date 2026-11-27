@@ -82,18 +82,72 @@ let rec descend directory components f =
      | None -> 0
      | Some result -> result)
 
+(* Cap each [io.run] batch so large flat directories (tens of thousands of
+   files) amortize cross-domain systhread dispatch without monopolizing a
+   worker thread or delaying cancellation checks between chunks. *)
+let batch_size = 256
+
+let rec take_chunk n acc xs =
+  if n <= 0
+  then List.rev acc, xs
+  else
+    match xs with
+    | [] -> List.rev acc, []
+    | x :: rest -> take_chunk (n - 1) (x :: acc) rest
+
+let log_remove_regular_error directory operation name error =
+  (* A rejected leaf stays for the next pass. Its failure must not prevent
+     unrelated stores from applying their own retention policy. This path
+     is a diagnostic label only; authority remains the held descriptor. *)
+  let diagnostic_path =
+    if name = "" then directory.path else Filename.concat directory.path name
+  in
+  try
+    Stdlib.Printf.eprintf "[retention] %s(%S): %s; keeping entry for next pass\n%!"
+      operation diagnostic_path (Unix.error_message error)
+  with Sys_error _ | Unix.Unix_error _ -> ()
+
 let remove_regular_file ?older_than directory name =
   leaf name;
   match directory.io.run (fun () -> remove_regular (descriptor directory) name older_than) with
   | removed -> removed
   | exception Unix.Unix_error (error, operation, _) ->
-    (* A rejected leaf stays for the next pass. Its failure must not prevent
-       unrelated stores from applying their own retention policy. This path
-       is a diagnostic label only; authority remains the held descriptor. *)
-    (try Stdlib.Printf.eprintf "[retention] %s(%S): %s; keeping entry for next pass\n%!"
-           operation (Filename.concat directory.path name) (Unix.error_message error)
-     with Sys_error _ | Unix.Unix_error _ -> ());
+    log_remove_regular_error directory operation name error;
     false
+
+let remove_regular_files ?older_than directory names =
+  List.iter leaf names;
+  ignore (descriptor directory : Unix.file_descr);
+  let rec loop total = function
+    | [] -> total
+    | remaining ->
+      let chunk, rest = take_chunk batch_size [] remaining in
+      let removed, warnings =
+        match
+          directory.io.run (fun () ->
+            let fd = descriptor directory in
+            let rec run_chunk count warnings = function
+              | [] -> count, List.rev warnings
+              | name :: tail ->
+                (match remove_regular fd name older_than with
+                 | true -> run_chunk (count + 1) warnings tail
+                 | false -> run_chunk count warnings tail
+                 | exception Unix.Unix_error (error, operation, _) ->
+                   run_chunk count ((operation, name, error) :: warnings) tail)
+            in
+            run_chunk 0 [] chunk)
+        with
+        | result -> result
+        | exception Unix.Unix_error (error, operation, param) ->
+          0, [ (operation, param, error) ]
+      in
+      List.iter
+        (fun (operation, name, error) ->
+           log_remove_regular_error directory operation name error)
+        warnings;
+      loop (total + removed) rest
+  in
+  loop 0 names
 
 let unlink_entry directory name =
   leaf name;
@@ -106,3 +160,17 @@ let remove_empty_child_checked directory name =
 let remove_empty_child directory name =
   leaf name;
   directory.io.run (fun () -> remove_empty (descriptor directory) name)
+
+let remove_empty_children directory names =
+  List.iter leaf names;
+  ignore (descriptor directory : Unix.file_descr);
+  let rec loop = function
+    | [] -> ()
+    | remaining ->
+      let chunk, rest = take_chunk batch_size [] remaining in
+      directory.io.run (fun () ->
+        let fd = descriptor directory in
+        List.iter (remove_empty fd) chunk);
+      loop rest
+  in
+  loop names

@@ -5156,6 +5156,7 @@ describe('fetchRuntimeModelMetrics', () => {
               error_rate: 0,
               total_cost_usd: null,
               cache_hit_ratio: null,
+              cached_input: { input_tokens: 100, cache_read_tokens: 0, sample_count: 2 },
             },
           ],
         },
@@ -5199,6 +5200,11 @@ describe('fetchRuntimeModelMetrics', () => {
     expect(metric.recent_entries?.[0]?.coverage_stage).toBe('agentCore')
     expect(metric.buckets?.[0]?.p95_latency_ms).toBeNull()
     expect(metric.buckets?.[0]?.cache_hit_ratio).toBeNull()
+    expect(metric.buckets?.[0]?.cached_input).toEqual({
+      input_tokens: 100,
+      cache_read_tokens: 0,
+      sample_count: 2,
+    })
   })
 })
 

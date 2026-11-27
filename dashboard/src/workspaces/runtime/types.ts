@@ -1,5 +1,6 @@
 import type { ComponentChildren } from 'preact'
 import { isWindowCurrentlySpent } from '../../lib/quota-window'
+import { decodeCachedInput, type CachedInputMetric } from '../../lib/cached-input'
 import { readSse } from '../../lib/sse-reader'
 import type { Result } from '../../lib/result'
 import {
@@ -345,6 +346,8 @@ export interface CacheStatsPayload {
   )[]
 }
 
+export type ModelMetricsCachedInput = CachedInputMetric
+
 export interface ModelMetricsBucket {
   readonly ts_start: number
   readonly entry_count: number
@@ -355,6 +358,7 @@ export interface ModelMetricsBucket {
   readonly error_rate: number
   readonly total_cost_usd: number | null
   readonly cache_hit_ratio: number | null
+  readonly cached_input: ModelMetricsCachedInput | null
   readonly input_tokens?: number | null
   readonly output_tokens?: number | null
 }
@@ -368,11 +372,7 @@ export interface ModelMetricsRow {
   readonly total_input_tokens: number | null
   readonly total_output_tokens: number | null
   readonly total_cache_read_tokens: number | null
-  readonly cached_input: {
-    readonly input_tokens: number
-    readonly cache_read_tokens: number
-    readonly sample_count: number
-  } | null
+  readonly cached_input: ModelMetricsCachedInput | null
   readonly total_cache_creation_tokens: number | null
   readonly success_count: number
   readonly error_count: number
@@ -869,8 +869,17 @@ export function decodeModelsMetricsPayload(raw: unknown): ModelsMetricsPayload {
   const rawModels = expectOptionalArrayField<unknown>(rec, 'models', ctx)
   const models = rawModels.map((m, idx) => {
     const mRec = expectWireRecord(m, `${ctx} models[${idx}]`)
-    const buckets = expectOptionalRecordArrayField<ModelMetricsBucket>(mRec, 'buckets', `${ctx} models[${idx}]`)
-    return { ...(mRec as unknown as ModelMetricsRow), buckets }
+    const modelCtx = `${ctx} models[${idx}]`
+    const buckets = expectOptionalRecordArrayField<Record<string, unknown>>(mRec, 'buckets', modelCtx)
+      .map(bucket => ({
+        ...(bucket as unknown as ModelMetricsBucket),
+        cached_input: decodeCachedInput(bucket.cached_input),
+      }))
+    return {
+      ...(mRec as unknown as ModelMetricsRow),
+      cached_input: decodeCachedInput(mRec.cached_input),
+      buckets,
+    }
   })
   return { ...(rec as unknown as ModelsMetricsPayload), models }
 }

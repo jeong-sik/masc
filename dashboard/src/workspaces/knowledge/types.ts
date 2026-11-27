@@ -911,8 +911,8 @@ export function decodeWorldMemory(raw: unknown): Result<WorldMemoryViewModel, st
 
 export function decodeWorkspaceInventoryFallback(raw: unknown): Result<WorldMemoryViewModel, string> {
   if (!isRecord(raw)) return err('workspace-memory-inventory 응답이 객체가 아닙니다.')
-  const status = asString(raw.status, 'missing').toLowerCase()
-  const ledgerState = status === 'available' ? 'available' : 'missing'
+  const ledgerState = raw.status === 'available' ? 'available' : raw.status === 'missing' ? 'missing' : null
+  if (!ledgerState) return err(`알 수 없는 workspace-memory-inventory status: ${String(raw.status)}`)
   const oa = isRecord(raw.ordinary_absence) ? raw.ordinary_absence : {}
   const br = isRecord(raw.briefing) ? raw.briefing : {}
   const bp = isRecord(br.building) ? br.building : null

@@ -89,7 +89,7 @@ const CACHE_SERIES: readonly UPlotSeriesSpec[] = [
 
 const VELOCITY_SPEND_SERIES: readonly UPlotSeriesSpec[] = [
   { label: '처리량 (요청/버킷)', colorToken: '--info-fg', width: 2, fillAlpha: 0.12 },
-  { label: '비용 ($ × 100 센트)', colorToken: '--brass-1', width: 2, unit: '¢' },
+  { label: '보고 비용 ($ × 100 센트)', colorToken: '--brass-1', width: 2, unit: '¢' },
 ]
 
 const COOLDOWN_SERIES: readonly UPlotSeriesSpec[] = [
@@ -105,24 +105,58 @@ const TOOL_EXACT_SERIES: readonly UPlotSeriesSpec[] = [
 interface AggregatedModelBucket {
   readonly ts: number
   readonly entries: number
-  readonly costUsd: number
+  readonly costUsd: number | null
+  readonly costCoverage: 'reported' | 'partial' | 'unreported'
   readonly cacheHitPct: number | null
+  readonly cacheReportedSamples: number | null
+  readonly cacheExpectedSamples: number | null
+  readonly cacheSource: 'paired' | 'legacy_single_model' | 'unreported'
 }
 
-function aggregateModelBuckets(payload: ModelsMetricsPayload | null): readonly AggregatedModelBucket[] {
+export function aggregateModelBuckets(payload: ModelsMetricsPayload | null): readonly AggregatedModelBucket[] {
   if (!payload) return []
-  const map = new Map<number, { entries: number; cost: number; cacheWeightedSum: number; cacheWeight: number }>()
+  const map = new Map<number, {
+    entries: number
+    cost: number
+    costReports: number
+    costUnknown: number
+    modelBuckets: number
+    pairedInputTokens: number
+    pairedCacheReadTokens: number
+    pairedSamples: number
+    expectedSamples: number
+    legacyCacheRatios: number[]
+  }>()
   for (const m of payload.models) {
     for (const b of m.buckets) {
-      const cur = map.get(b.ts_start) ?? { entries: 0, cost: 0, cacheWeightedSum: 0, cacheWeight: 0 }
+      const cur = map.get(b.ts_start) ?? {
+        entries: 0,
+        cost: 0,
+        costReports: 0,
+        costUnknown: 0,
+        modelBuckets: 0,
+        pairedInputTokens: 0,
+        pairedCacheReadTokens: 0,
+        pairedSamples: 0,
+        expectedSamples: 0,
+        legacyCacheRatios: [],
+      }
+      cur.modelBuckets += 1
       cur.entries += b.entry_count
+      cur.expectedSamples += Math.max(0, b.success_count ?? b.entry_count)
       if (typeof b.total_cost_usd === 'number' && Number.isFinite(b.total_cost_usd)) {
         cur.cost += b.total_cost_usd
+        cur.costReports += 1
+      } else {
+        cur.costUnknown += 1
       }
-      if (typeof b.cache_hit_ratio === 'number' && Number.isFinite(b.cache_hit_ratio)) {
-        const weight = b.entry_count > 0 ? b.entry_count : 1
-        cur.cacheWeightedSum += b.cache_hit_ratio * 100 * weight
-        cur.cacheWeight += weight
+      if (b.cached_input) {
+        cur.pairedInputTokens += b.cached_input.input_tokens
+        cur.pairedCacheReadTokens += b.cached_input.cache_read_tokens
+        cur.pairedSamples += b.cached_input.sample_count
+      } else if (typeof b.cache_hit_ratio === 'number' && Number.isFinite(b.cache_hit_ratio)) {
+        // A pre-paired wire can still give a rate for one model bucket.
+        cur.legacyCacheRatios.push(Math.min(1, Math.max(0, b.cache_hit_ratio)) * 100)
       }
       map.set(b.ts_start, cur)
     }
@@ -132,9 +166,84 @@ function aggregateModelBuckets(payload: ModelsMetricsPayload | null): readonly A
     .map(([ts, agg]) => ({
       ts,
       entries: agg.entries,
-      costUsd: agg.cost,
-      cacheHitPct: agg.cacheWeight > 0 ? Number((agg.cacheWeightedSum / agg.cacheWeight).toFixed(1)) : null,
+      // Keep a gap if any model bucket did not report a cost. Older servers
+      // may still report partial sums, so the chart describes reported cost.
+      costUsd: agg.costReports > 0 && agg.costUnknown === 0 ? agg.cost : null,
+      costCoverage: agg.costReports === 0 ? 'unreported' : agg.costUnknown > 0 ? 'partial' : 'reported',
+      // Paired totals combine exactly across models, including partial
+      // telemetry. Old wires lack those totals, so only a single model ratio
+      // can be shown without inventing a cross-model weighting.
+      cacheHitPct: agg.pairedInputTokens > 0
+        ? Number((agg.pairedCacheReadTokens * 100 / agg.pairedInputTokens).toFixed(1))
+        : agg.modelBuckets === 1 && agg.legacyCacheRatios.length === 1
+          ? Number(agg.legacyCacheRatios[0]!.toFixed(1))
+          : null,
+      cacheReportedSamples: agg.pairedInputTokens > 0 ? agg.pairedSamples : null,
+      cacheExpectedSamples: agg.pairedInputTokens > 0 ? agg.expectedSamples : null,
+      cacheSource: agg.pairedInputTokens > 0
+        ? 'paired'
+        : agg.modelBuckets === 1 && agg.legacyCacheRatios.length === 1
+          ? 'legacy_single_model'
+          : 'unreported',
     }))
+}
+
+export function pairedCacheCoverage(models: ModelsMetricsPayload['models']) {
+  let inputTokens = 0
+  let cacheReadTokens = 0
+  let reportedSamples = 0
+  let expectedSamples = 0
+  for (const model of models) {
+    expectedSamples += Math.max(0, model.success_count ?? model.entry_count)
+    const paired = model.cached_input
+    if (!paired) continue
+    inputTokens += paired.input_tokens
+    cacheReadTokens += paired.cache_read_tokens
+    reportedSamples += paired.sample_count
+  }
+  return {
+    hitPct: inputTokens > 0 ? Math.min(100, (cacheReadTokens / inputTokens) * 100) : null,
+    reportedSamples,
+    expectedSamples,
+  }
+}
+
+export function modelCostCoverage(models: ModelsMetricsPayload['models']) {
+  let reportedUsd = 0
+  let reportedSuccessModels = 0
+  let successModels = 0
+  let unknownSuccessModels = 0
+  for (const model of models) {
+    const successes = model.success_count
+    if (typeof successes !== 'number' || !Number.isSafeInteger(successes) || successes < 0) {
+      unknownSuccessModels += 1
+      continue
+    }
+    if (successes === 0) continue
+    successModels += 1
+    if (typeof model.total_cost_usd !== 'number' || !Number.isFinite(model.total_cost_usd)) continue
+    reportedUsd += model.total_cost_usd
+    reportedSuccessModels += 1
+  }
+  return {
+    reportedUsd,
+    reportedSuccessModels,
+    successModels,
+    unknownSuccessModels,
+    hasReported: reportedSuccessModels > 0,
+  }
+}
+
+export function cacheBucketCoverageLabel(buckets: readonly AggregatedModelBucket[]): string {
+  const pairedBuckets = buckets.filter((bucket) => bucket.cacheSource === 'paired')
+  const legacyBuckets = buckets.filter((bucket) => bucket.cacheSource === 'legacy_single_model').length
+  if (pairedBuckets.length > 0) {
+    const reported = pairedBuckets.reduce((sum, bucket) => sum + (bucket.cacheReportedSamples ?? 0), 0)
+    const expected = pairedBuckets.reduce((sum, bucket) => sum + (bucket.cacheExpectedSamples ?? 0), 0)
+    return `paired 보고가 있는 구간 내 ${reported}/${expected} 샘플${legacyBuckets > 0 ? ` · 구형 단일 모델 버킷 ${legacyBuckets}개` : ''}`
+  }
+  if (legacyBuckets > 0) return `구형 단일 모델 비율 ${legacyBuckets}개 · 표본 커버리지 미확인`
+  return 'paired 입력 없음 · 복수 모델의 구형 비율은 합산하지 않음'
 }
 
 interface JoinedKeeperSpendRow {
@@ -360,6 +469,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
 
 
   const buckets = useMemo(() => aggregateModelBuckets(effectiveModels), [effectiveModels])
+  const cacheBucketCoverage = useMemo(() => cacheBucketCoverageLabel(buckets), [buckets])
 
   const cacheChartData = useMemo<uPlot.AlignedData>(() => {
     if (buckets.length === 0) return [[], []]
@@ -374,7 +484,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
     return [
       buckets.map((b) => b.ts),
       buckets.map((b) => b.entries),
-      buckets.map((b) => Number((b.costUsd * 100).toFixed(2))),
+      buckets.map((b) => b.costUsd === null ? null : Number((b.costUsd * 100).toFixed(2))),
     ]
   }, [buckets])
 
@@ -401,32 +511,17 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
 
   // KPI calculations (honest Observed<T>)
   const kpis = useMemo(() => {
-    let totalIn = 0
-    let totalCacheRead = 0
-    let totalCost: number | null = null
-    if (effectiveModels) {
-      for (const m of effectiveModels.models ?? []) {
-        if (m.cached_input) {
-          totalIn += m.cached_input.input_tokens
-          totalCacheRead += m.cached_input.cache_read_tokens
-        } else if (typeof m.total_input_tokens === 'number' && typeof m.total_cache_read_tokens === 'number') {
-          totalIn += m.total_input_tokens
-          totalCacheRead += m.total_cache_read_tokens
-        }
-        if (typeof m.total_cost_usd === 'number') {
-          totalCost = (totalCost ?? 0) + m.total_cost_usd
-        }
-      }
-    }
-    const cacheHitObs: Observed<number> = totalIn > 0
-      ? observedValue(Math.min(100, (totalCacheRead / totalIn) * 100))
+    const cacheCoverage = pairedCacheCoverage(effectiveModels?.models ?? [])
+    const costCoverage = modelCostCoverage(effectiveModels?.models ?? [])
+    const cacheHitObs: Observed<number> = cacheCoverage.hitPct !== null
+      ? observedValue(cacheCoverage.hitPct)
       : !effectiveModels && modelsObs.kind === 'failed'
         ? observedFailed(modelsObs.error)
         : !effectiveModels && modelsObs.kind === 'loading'
           ? observedLoading()
           : observedUnreported()
-    const spendObs: Observed<number> = totalCost !== null
-      ? observedValue(totalCost)
+    const spendObs: Observed<number> = costCoverage.hasReported
+      ? observedValue(costCoverage.reportedUsd)
       : !effectiveModels && modelsObs.kind === 'failed'
         ? observedFailed(modelsObs.error)
         : !effectiveModels && modelsObs.kind === 'loading'
@@ -457,7 +552,7 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
             ? observedUnreported()
             : observedAbsent()
 
-    return { cacheHitObs, spendObs, exactPassObs, toolErrObs }
+    return { cacheHitObs, spendObs, exactPassObs, toolErrObs, cacheCoverage, costCoverage }
   }, [effectiveModels, modelsObs, exactObs, toolSeriesObs, adminLocked])
 
   const joinedKeepers = useMemo<readonly JoinedKeeperSpendRow[]>(() => {
@@ -627,12 +722,14 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
 
       <section class="ov-kpis" aria-label="효율성 핵심 지표">
         <div class="ov-kpi">
-          <div class="ov-kpi-k">플리트 프롬프트 캐시 적중률</div>
+          <div class="ov-kpi-k">프롬프트 캐시 적중률 (paired 입력)</div>
           <div class="ov-kpi-v ok">${formatObserved(kpis.cacheHitObs, (v) => formatPercent(v))}</div>
+          ${kpis.cacheCoverage.expectedSamples > 0 && html`<div class="ov-sub" data-testid="efficiency-cache-coverage">캐시 telemetry ${kpis.cacheCoverage.reportedSamples}/${kpis.cacheCoverage.expectedSamples} 샘플</div>`}
         </div>
         <div class="ov-kpi">
-          <div class="ov-kpi-k">기간 비용 (${modelsWindowLabel})</div>
+          <div class="ov-kpi-k">보고된 비용 합계 (${modelsWindowLabel})</div>
           <div class="ov-kpi-v volt">${formatObserved(kpis.spendObs, (v) => formatUsd(v))}</div>
+          ${(kpis.costCoverage.successModels + kpis.costCoverage.unknownSuccessModels) > 0 && html`<div class="ov-sub" data-testid="efficiency-cost-coverage">성공 기록 기준 · 비용 보고 ${kpis.costCoverage.reportedSuccessModels}/${kpis.costCoverage.successModels} 성공 모델${kpis.costCoverage.unknownSuccessModels > 0 ? ` · 성공 수 미확인 ${kpis.costCoverage.unknownSuccessModels}개 모델` : ''} · 전체 여부 미확인</div>`}
         </div>
         <div class="ov-kpi">
           <div class="ov-kpi-k">도구 오류율</div>
@@ -659,9 +756,9 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
           title="1. Prompt Cache Hit % & 대시보드 캐시"
           subtitle=${cacheStats
             ? html`<span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
-                API 캐시 적중 ${(cacheStats.hit_ratio * 100).toFixed(1)}% · 항목 ${cacheStats.entries}/${cacheStats.max_entries} (신선 ${cacheStats.fresh})
+                ${cacheBucketCoverage} · API 캐시 적중 ${(cacheStats.hit_ratio * 100).toFixed(1)}% · 항목 ${cacheStats.entries}/${cacheStats.max_entries} (신선 ${cacheStats.fresh})
               </span>`
-            : html`<span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>스냅샷</span>`}
+            : html`<span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${cacheBucketCoverage} · 스냅샷</span>`}
           data=${cacheChartData}
           series=${CACHE_SERIES}
           height=${190}
@@ -679,8 +776,8 @@ export function EfficiencyTab(props: WorkspaceViewProps) {
             class="mono"
             data-testid="efficiency-stream-badge"
             style=${{ fontSize: 'var(--fs-11)', color: live ? 'var(--ok-fg)' : 'var(--fg-3)' }}
-          >
-            ${seriesSource}
+          >${seriesSource}</span><span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
+            · 구간 기록 기준 보고 비용 · 전체 여부 미확인 (미보고 버킷은 공백)
           </span>`}
           data=${velocitySpendChartData}
           series=${VELOCITY_SPEND_SERIES}

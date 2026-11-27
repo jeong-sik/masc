@@ -112,7 +112,7 @@ function resolveMicroVmSocket(r: InfraMicroVmGuest): {
     const { status, path_basename, file_kind } = r.agent_socket
     switch (status) {
       case 'socket_present':
-        return { label: 'present', tone: 'ok', tooltip: path_basename }
+        return { label: '소켓 경로 존재', tone: 'muted', tooltip: path_basename }
       case 'socket_absent':
         return { label: 'absent', tone: 'muted', tooltip: path_basename }
       case 'non_socket':
@@ -125,7 +125,7 @@ function resolveMicroVmSocket(r: InfraMicroVmGuest): {
   }
   if (typeof r.socket_present === 'boolean') {
     return r.socket_present
-      ? { label: 'present', tone: 'ok' }
+      ? { label: '소켓 경로 존재', tone: 'muted' }
       : { label: 'missing', tone: 'err' }
   }
   return null
@@ -698,7 +698,7 @@ export function SandboxesTab(props: WorkspaceViewProps) {
               <div class="ov-kpi-v ok">${data.summary.microvm_running} / ${data.summary.microvm_declared}</div>
             </div>
             <div class="ov-kpi">
-              <div class="ov-kpi-k">소켓 정상 / Shim 불일치</div>
+              <div class="ov-kpi-k">소켓 경로 존재 / Shim 불일치</div>
               <div class=${`ov-kpi-v ${data.summary.microvm_shim_mismatch > 0 ? 'bad' : ''}`}>
                 ${data.summary.microvm_sockets_present} / ${data.summary.microvm_shim_mismatch}
               </div>

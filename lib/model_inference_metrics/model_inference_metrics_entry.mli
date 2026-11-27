@@ -33,6 +33,14 @@ type coverage_reason_count =
   ; crc_count : int
   }
 
+(** Cache totals from the same successful calls with reported, valid input/cache pairs.
+    Cache reads are a subset of inclusive input tokens. *)
+type cached_input = {
+  ci_input_tokens : int;
+  ci_cache_read_tokens : int;
+  ci_sample_count : int;
+}
+
 type bucket_metric =
   { b_ts_start : float
   ; b_entry_count : int
@@ -42,25 +50,22 @@ type bucket_metric =
   ; b_p95_latency_ms : float option
   ; b_error_rate : float
   ; b_total_cost_usd : float option
+    (** Complete sum across every entry in this bucket; [None] when the
+        bucket is empty or any entry has no reported cost. Explicit zeros
+        count as reported values. *)
   ; b_cache_hit_ratio : float option
     (** Sum of cache reads divided by inclusive input tokens from the same
         successful entries reporting both fields, with positive input and
         cache reads between zero and input. [None] when no such pair exists;
         [Some 0.0] when valid pairs report zero cache reads. *)
+  ; b_cached_input : cached_input option
+    (** Totals from the same successful calls used by [b_cache_hit_ratio]. *)
   }
 
 type model_bucketed =
   { mb_model_id : string
   ; mb_buckets : bucket_metric list
   }
-
-(** Cache totals from the same successful calls with reported, valid input/cache pairs.
-    Cache reads are a subset of inclusive input tokens. *)
-type cached_input = {
-  ci_input_tokens : int;
-  ci_cache_read_tokens : int;
-  ci_sample_count : int;
-}
 
 (** How much of a model's successful turns reported usage and telemetry. *)
 type coverage_status =
@@ -106,6 +111,9 @@ type model_stats =
   ; success_count : int
   ; error_count : int
   ; total_cost_usd : float option
+    (** Complete sum across successful entries for this model; [None] when
+        there are no successful entries or any successful entry has no
+        reported cost. Explicit zeros count as reported values. *)
   ; avg_tool_calls_per_turn : float
   ; total_tool_calls : int
   ; top_tools : (string * int) list
@@ -208,7 +216,6 @@ val percentile_opt : float array -> float -> float option
 val count_if : ('a -> bool) -> 'a list -> int
 val take : int -> 'a list -> 'a list
 val sum_int_opt : int list -> int option
-val sum_float_opt : float list -> float option
 
 val json_float_field_opt :
   string -> (string * Yojson.Safe.t) list -> float option

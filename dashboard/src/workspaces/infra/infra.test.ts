@@ -282,7 +282,8 @@ describe('workspaces/infra', () => {
     expect(text).not.toContain('[object Object]')
     // MicroVM OCaml wire fields rendered cleanly
     expect(text).toContain('e-masc-the-leader')
-    expect(text).toContain('present')
+    expect(text).toContain('소켓 경로 존재')
+    expect(text).not.toContain('소켓 정상')
     expect(text).toContain('mismatch')
     expect(text).toContain('apple_container · 2c / 2048MiB · net:none')
     // SSH pool OCaml wire fields rendered cleanly

@@ -286,6 +286,48 @@ describe('Keepers Workspace — Pure Contracts & Parsers', () => {
     expect(segs.output).toBe(5_000)
     expect(segs.cacheHitPct).toBe(70)
 
+    const missingCache = computePromptCacheSegments({
+      ...sampleRecord,
+      cache_read_input_tokens: undefined,
+      cache_creation_input_tokens: undefined,
+    })
+    expect(missingCache).toEqual({
+      cacheRead: null,
+      cacheCreate: null,
+      uncachedInput: null,
+      output: 5_000,
+      total: null,
+      cacheHitPct: null,
+    })
+
+    const partialCache = computePromptCacheSegments({
+      ...sampleRecord,
+      cache_creation_input_tokens: undefined,
+    })
+    expect(partialCache.cacheRead).toBe(70_000)
+    expect(partialCache.cacheCreate).toBeNull()
+    expect(partialCache.uncachedInput).toBeNull()
+    expect(partialCache.cacheHitPct).toBeNull()
+
+    for (const usage_scope of ['turn_total', 'conversation_cumulative', 'unavailable'] as const) {
+      const scoped = computePromptCacheSegments({ ...sampleRecord, usage_scope })
+      expect(scoped.cacheRead).toBe(70_000)
+      expect(scoped.cacheCreate).toBe(10_000)
+      expect(scoped.uncachedInput).toBeNull()
+      expect(scoped.cacheHitPct).toBeNull()
+      expect(scoped.total).toBeNull()
+    }
+
+    expect(computePromptCacheSegments({ ...sampleRecord, input_tokens: undefined }).cacheHitPct).toBeNull()
+    expect(computePromptCacheSegments({ ...sampleRecord, input_tokens: 70_000 }).uncachedInput).toBeNull()
+    expect(computePromptCacheSegments({
+      ...sampleRecord,
+      input_tokens: 0,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 0,
+      output_tokens: 0,
+    })).toEqual({ cacheRead: 0, cacheCreate: 0, uncachedInput: 0, output: 0, total: 0, cacheHitPct: null })
+
     // input_tokens (100k) already includes cached tokens (70k + 10k) — must NOT double-count to 180k (90%)!
     const series = buildContextFillSeries([
       { ...sampleRecord, absolute_turn: 1, ts: 100, input_tokens: 100_000, cache_read_input_tokens: 70_000, cache_creation_input_tokens: 10_000 },

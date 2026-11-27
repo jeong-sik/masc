@@ -47,6 +47,12 @@ type coverage_reason_count =
   ; crc_count : int
   }
 
+type cached_input = {
+  ci_input_tokens : int;
+  ci_cache_read_tokens : int;
+  ci_sample_count : int;
+}
+
 type bucket_metric =
   { b_ts_start : float
   ; b_entry_count : int
@@ -57,20 +63,13 @@ type bucket_metric =
   ; b_error_rate : float
   ; b_total_cost_usd : float option
   ; b_cache_hit_ratio : float option
+  ; b_cached_input : cached_input option
   }
 
 type model_bucketed =
   { mb_model_id : string
   ; mb_buckets : bucket_metric list
   }
-
-(** Cache totals from the same successful calls with reported, valid input/cache pairs.
-    Cache reads are a subset of inclusive input tokens. *)
-type cached_input = {
-  ci_input_tokens : int;
-  ci_cache_read_tokens : int;
-  ci_sample_count : int;
-}
 
 type coverage_status =
   | Coverage_error_only
@@ -324,12 +323,6 @@ let sum_int_opt values =
   match values with
   | [] -> None
   | xs -> Some (List.fold_left ( + ) 0 xs)
-;;
-
-let sum_float_opt values =
-  match values with
-  | [] -> None
-  | xs -> Some (List.fold_left ( +. ) 0.0 xs)
 ;;
 
 (* ── JSON field readers ─────────────────────────────────── *)

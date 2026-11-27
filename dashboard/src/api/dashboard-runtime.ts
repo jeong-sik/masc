@@ -7,6 +7,7 @@ import { ApiRequestError, get, post, type AbortableRequestOptions } from './core
 import { announceRuntimeTomlWritten } from '../lib/runtime-toml-source-generation'
 import { isRecord, asBoolean, asNumber, asNullableString, asRecordArray, asString, asStringArray } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
+import { decodeCachedInput, type CachedInputMetric } from '../lib/cached-input'
 import type { RuntimeDefaultsResponse } from './schemas/runtime-defaults'
 import type { RuntimeResolvedResponse } from './schemas/runtime-resolved'
 import type { KeeperRuntimeAssignmentRevision } from '../types'
@@ -342,6 +343,7 @@ export interface BucketMetric {
   error_rate: number
   total_cost_usd: number | null
   cache_hit_ratio: number | null
+  cached_input: CachedInputMetric | null
 }
 
 export interface DashboardRuntimeModelMetric {
@@ -376,7 +378,7 @@ export interface DashboardRuntimeModelMetric {
   total_input_tokens?: number | null
   total_output_tokens?: number | null
   total_cache_read_tokens?: number | null
-  cached_input?: { input_tokens: number; cache_read_tokens: number; sample_count: number } | null
+  cached_input?: CachedInputMetric | null
   total_cache_creation_tokens?: number | null
   total_reasoning_tokens?: number | null
   usage_sample_count?: number | null
@@ -865,17 +867,6 @@ function decodeRuntimeProvidersResponse(raw: unknown): DashboardRuntimeProviders
   }
 }
 
-function decodeCachedInput(raw: unknown): DashboardRuntimeModelMetric['cached_input'] {
-  if (!isRecord(raw)) return null
-  const input = asNumber(raw.input_tokens)
-  const cached = asNumber(raw.cache_read_tokens)
-  const count = asNumber(raw.sample_count)
-  if (input == null || cached == null || count == null
-    || !Number.isSafeInteger(input) || !Number.isSafeInteger(cached) || !Number.isSafeInteger(count)
-    || input <= 0 || cached < 0 || cached > input || count <= 0) return null
-  return { input_tokens: input, cache_read_tokens: cached, sample_count: count }
-}
-
 function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | null {
   if (!isRecord(raw)) return null
   const modelId = asString(raw.model_id)
@@ -972,6 +963,7 @@ function decodeRuntimeModelMetric(raw: unknown): DashboardRuntimeModelMetric | n
             error_rate: asNumber(b.error_rate) ?? 0,
             total_cost_usd: asNumber(b.total_cost_usd) ?? null,
             cache_hit_ratio: asNumber(b.cache_hit_ratio) ?? null,
+            cached_input: decodeCachedInput(b.cached_input),
           }))
       : null,
   }

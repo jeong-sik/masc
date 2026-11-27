@@ -232,30 +232,31 @@ let read_source store =
                 let raw_bytes = receipt.value.bytes in
                 Board_posts_rows.iter_lines_with_offsets raw_bytes
                   (fun ~line_number ~start ~stop ~has_newline ->
-                     let text = String.sub raw_bytes start (stop - start) in
-                     match Board_posts_rows.decode ~line:line_number text with
-                     | Blank -> ()
-                     | Accepted { post; diagnostics } ->
-                       Board_content_diagnostics.emit diagnostics;
-                       posts := post :: !posts;
-                       let id = Post_id.to_string post.id in
-                       by_id := Set_util.StringMap.add id post !by_id;
-                       let prev_len =
-                         match Set_util.StringMap.find_opt id !slices with
-                         | Some (s : Board_posts_rows.slice) -> s.length
-                         | None -> 0
-                       in
-                       if Board_posts_rows.is_canonical_slice raw_bytes ~start ~stop ~has_newline then begin
-                         let length = stop - start + 1 in
-                         slices := Set_util.StringMap.add id { Board_posts_rows.offset = start; length } !slices;
-                         covered_bytes := !covered_bytes - prev_len + length
-                       end else begin
-                         slices := Set_util.StringMap.remove id !slices;
-                         covered_bytes := !covered_bytes - prev_len
-                       end
-                     | Rejected { error; diagnostics } ->
-                       Board_content_diagnostics.emit diagnostics;
-                       errors := error :: !errors);
+                     if Board_posts_rows.slice_has_content raw_bytes ~start ~stop then
+                       let text = String.sub raw_bytes start (stop - start) in
+                       match Board_posts_rows.decode ~line:line_number text with
+                       | Blank -> ()
+                       | Accepted { post; diagnostics } ->
+                         Board_content_diagnostics.emit diagnostics;
+                         posts := post :: !posts;
+                         let id = Post_id.to_string post.id in
+                         by_id := Set_util.StringMap.add id post !by_id;
+                         let prev_len =
+                           match Set_util.StringMap.find_opt id !slices with
+                           | Some (s : Board_posts_rows.slice) -> s.length
+                           | None -> 0
+                         in
+                         if Board_posts_rows.is_canonical_slice raw_bytes ~start ~stop ~has_newline then begin
+                           let length = stop - start + 1 in
+                           slices := Set_util.StringMap.add id { Board_posts_rows.offset = start; length } !slices;
+                           covered_bytes := !covered_bytes - prev_len + length
+                         end else begin
+                           slices := Set_util.StringMap.remove id !slices;
+                           covered_bytes := !covered_bytes - prev_len
+                         end
+                       | Rejected { error; diagnostics } ->
+                         Board_content_diagnostics.emit diagnostics;
+                         errors := error :: !errors);
                 let posts = List.rev !posts and errors = List.rev !errors in
                 let observation : posts_source_observation =
                   { source_path = path; snapshot = receipt.value; workspace_observation } in

@@ -30,6 +30,11 @@ type slice = {
   length : int;
 }
 
+val slice_has_content : string -> start:int -> stop:int -> bool
+(** True when [bytes[start..stop)] contains at least one non-ASCII-whitespace
+    byte, without allocating a trimmed copy. Raises [Invalid_argument] when
+    [start < 0] or [stop > String.length bytes]. *)
+
 val is_canonical_slice : string -> start:int -> stop:int -> has_newline:bool -> bool
 (** True when [bytes[start..stop)] is a clean JSON object line without leading
     or trailing whitespace and followed by ['\n']. *)

@@ -50,8 +50,8 @@ let parse_comments_index bytes =
   (try
      Board_posts_rows.iter_lines_with_offsets bytes
        (fun ~line_number:_ ~start ~stop ~has_newline ->
-          let text = String.sub bytes start (stop - start) in
-          if String.trim text <> "" then
+          if Board_posts_rows.slice_has_content bytes ~start ~stop then
+            let text = String.sub bytes start (stop - start) in
             match Yojson.Safe.from_string text with
             | json ->
               (match (Board_content_json.comment_of_yojson json).value with
@@ -364,7 +364,8 @@ let receipt_diagnostics error = match error with
    display-only: it does not fabricate a stable snapshot from prefix bytes. *)
 let read_display_prefix store path =
   let decode (comments, diagnostics) text =
-    if String.trim text = "" then comments, diagnostics
+    if not (Board_posts_rows.slice_has_content text ~start:0 ~stop:(String.length text))
+    then comments, diagnostics
     else match Yojson.Safe.from_string text with
       | json ->
         let decoded = Board_content_json.comment_of_yojson json in
@@ -450,8 +451,8 @@ let read store = match store.comments_source with
                 and covered = ref 0 in
                 Board_posts_rows.iter_lines_with_offsets raw_bytes
                   (fun ~line_number ~start ~stop ~has_newline ->
-                    let text = String.sub raw_bytes start (stop - start) in
-                    if String.trim text <> "" then
+                    if Board_posts_rows.slice_has_content raw_bytes ~start ~stop then
+                      let text = String.sub raw_bytes start (stop - start) in
                       match Yojson.Safe.from_string text with
                       | json ->
                         let decoded = Board_content_json.comment_of_yojson json in

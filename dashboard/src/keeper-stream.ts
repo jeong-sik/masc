@@ -13,7 +13,7 @@ import {
   normalizeKeeperExternalEffectTarget,
 } from './keeper-message'
 import { projectFinalReplyBlocks, producerReplyBlocks } from './lib/keeper-reply-block-projection'
-import type { KeeperChatStreamEvent } from './api'
+import type { KeeperChatStreamEvent } from './lib/keeper-chat-stream-contract'
 import { currentStoredTokenRevision } from './api/core'
 import type { KeeperConversationDetails, KeeperConversationEntry } from './types'
 import {

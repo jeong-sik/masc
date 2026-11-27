@@ -199,6 +199,9 @@ describe('the Keepers workspace between two reads of the turns', () => {
     expect(pill()?.getAttribute('title')).toBe('rt-1 · tool running: Grep')
     expect(rosterLine('alpha-one')).toBe('Grep')
     expect(rosterLine('beta-two')).toBe('Read')
+    // How long the turn has run stands before the state (#55073).
+    expect(view.container.querySelector('.kp-roster-row[data-keeper="alpha-one"] [data-roster-state]')
+      ?.previousElementSibling?.hasAttribute('data-roster-elapsed')).toBe(true)
     const readsBefore = turnsRead
 
     const send = (name: string, ownerKey: string, revision: number, statusText: string, open: readonly object[]) =>

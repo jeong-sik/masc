@@ -282,6 +282,27 @@
   flex-shrink: 0;
 }
 
+/* The state of a row: how long its turn has run, kept whole, then what the
+   Keeper is doing in the room that is left. */
+.kp-roster-state {
+  display: flex;
+  align-items: baseline;
+}
+
+.kp-roster-state > [data-roster-state] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.kp-roster-elapsed {
+  flex: none;
+  white-space: pre;
+}
+
+.kp-roster-state[data-in-turn] > .kp-roster-elapsed {
+  color: var(--fg-2);
+}
+
 /* The line of a Keeper in a turn: what the turn is doing, how many more calls
    are open, how much waits. A part is drawn whole or not at all: one that
    does not fit drops to a second line, and the line shows one. The last part

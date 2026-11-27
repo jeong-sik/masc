@@ -201,12 +201,15 @@ export function KeeperRoster(props: KeeperRosterProps) {
                         ? `${turnPreview ? turnDoing(turnPreview).phrase : TURN_RUNNING_PHRASE} · ${settled}`
                         : settled
                   // How long the turn has run comes first on the state line (#55073).
+                  // It stands before the state, kept whole, and the state is laid
+                  // out in the room that is left: inside the turn's line it would be
+                  // a part that pushes words that do not fit beside it off the line.
                   const elapsed = turnsObservation && k.active_turn && k.active_turn.started_at_unix > 0
-                    ? html`<${KeeperTurnElapsed}
+                    ? html`<span class="kp-roster-sub kp-roster-elapsed" data-roster-elapsed><${KeeperTurnElapsed}
                         startedAt=${k.active_turn.started_at_unix * 1000}
                         observedAt=${turnsObservation.observedAt}
                         live=${turnsObservation.live}
-                      />`
+                      />${' · '}</span>`
                     : null
                   const actionableDisposition =
                     k.operator_disposition && k.operator_disposition !== 'pass'
@@ -250,23 +253,25 @@ export function KeeperRoster(props: KeeperRosterProps) {
                           </span>
                         </span>
                         <span class="kp-roster-line">
-                          ${doing === null
-                            ? html`<span class="kp-roster-sub" data-roster-state title=${subLine}>${elapsed !== null && html`${elapsed}${' · '}`}${subLine}</span>`
-                            : html`
-                                <span class="kp-roster-sub kp-roster-turn" data-roster-state title=${subLine}>
-                                  ${elapsed !== null && html`${elapsed}<span>${' · '}</span>`}
-                                  ${doing.kind === 'words'
-                                    ? html`<span class="kp-roster-words">${doing.words}</span>`
-                                    : (([front, keptEnd]) => html`
-                                        <span class="kp-roster-tool" style=${{ flexBasis: TOOL_NAME_LEAST_ROOM }}>
-                                          <span class="kp-roster-tool-front">${front}</span>
-                                          ${keptEnd !== '' && html`<span>${keptEnd}</span>`}
-                                        </span>
-                                        ${doing.otherCalls > 0 && html`<span>${` ${otherCallsLabel(doing.otherCalls)}`}</span>`}
-                                      `)(frontAndKeptEnd(doing.name))}
-                                  ${waiting !== null && html`<span class="kp-roster-waiting">${` · ${waiting}`}</span>`}
-                                </span>
-                              `}
+                          <span class="kp-roster-state" data-in-turn=${doing !== null ? 'true' : undefined}>
+                            ${elapsed}
+                            ${doing === null
+                              ? html`<span class="kp-roster-sub" data-roster-state title=${subLine}>${subLine}</span>`
+                              : html`
+                                  <span class="kp-roster-sub kp-roster-turn" data-roster-state title=${subLine}>
+                                    ${doing.kind === 'words'
+                                      ? html`<span class="kp-roster-words">${doing.words}</span>`
+                                      : (([front, keptEnd]) => html`
+                                          <span class="kp-roster-tool" style=${{ flexBasis: TOOL_NAME_LEAST_ROOM }}>
+                                            <span class="kp-roster-tool-front">${front}</span>
+                                            ${keptEnd !== '' && html`<span>${keptEnd}</span>`}
+                                          </span>
+                                          ${doing.otherCalls > 0 && html`<span>${` ${otherCallsLabel(doing.otherCalls)}`}</span>`}
+                                        `)(frontAndKeptEnd(doing.name))}
+                                    ${waiting !== null && html`<span class="kp-roster-waiting">${` · ${waiting}`}</span>`}
+                                  </span>
+                                `}
+                          </span>
                           <span class="kp-roster-sub kp-roster-side" title=${rightSub}>${rightSub}</span>
                         </span>
                       </span>

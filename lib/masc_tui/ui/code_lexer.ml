@@ -19,6 +19,7 @@ type token_kind =
   | Diff_added
   | Diff_removed
   | Diff_hunk
+  | Color_literal of Theme.rgb
 
 type segment = {
   text : string;
@@ -35,6 +36,7 @@ type language =
   | Sql
   | C_like
   | Python
+  | Css
   | Markdown
 
 let token_kind_rank = function
@@ -51,8 +53,20 @@ let token_kind_rank = function
   | Diff_added -> 10
   | Diff_removed -> 11
   | Diff_hunk -> 12
+  | Color_literal _ -> 13
 
-let equal_token_kind a b = Int.equal (token_kind_rank a) (token_kind_rank b)
+let color_of_token_kind = function
+  | Color_literal rgb -> Some rgb
+  | Plain | Keyword | String | Comment | Number | Type_or_ctor | Json_key
+  | Json_number | Json_literal | Json_punctuation | Diff_added | Diff_removed
+  | Diff_hunk ->
+      None
+
+(* Two color literals are one token only when they name the same color, so
+   adjacent literals never share a segment under the first literal's color. *)
+let equal_token_kind a b =
+  Int.equal (token_kind_rank a) (token_kind_rank b)
+  && Option.equal Int.equal (color_of_token_kind a) (color_of_token_kind b)
 
 let rec equal_language a b =
   match (a, b) with
@@ -64,6 +78,7 @@ let rec equal_language a b =
   | Sql, Sql
   | C_like, C_like
   | Python, Python
+  | Css, Css
   | Markdown, Markdown ->
       true
   | Diff x, Diff y -> Option.equal equal_language x y
@@ -76,6 +91,7 @@ let rec equal_language a b =
     | Sql
     | C_like
     | Python
+    | Css
     | Markdown ),
     _ ->
       false
@@ -422,6 +438,52 @@ let c_like_lexer text =
       else if is_identifier_start ch then
         advance (take_identifier ~is_reserved:is_c_like_reserved text i runs)
       else if is_digit ch then advance (take_number text i runs)
+      else begin
+        runs_add runs Plain ch;
+        advance (i + 1)
+      end
+  in
+  advance 0;
+  runs_segments runs
+
+let is_css_name_char c = is_identifier_start c || is_digit c || Char.equal c '-'
+
+(* ['#'] and six characters, the exact form {!Theme.rgb_of_hex} reads. *)
+let css_hex_color_length = 7
+
+(* A CSS hex color is ['#'] and exactly six hex digits that no further name
+   character extends. The short and alpha forms (#RGB, #RRGGBBAA) stay plain:
+   a terminal cell cannot show alpha, and one form keeps one meaning. *)
+let css_hex_color text index =
+  let stop = index + css_hex_color_length in
+  let limit = String.length text in
+  if stop > limit || (stop < limit && is_css_name_char text.[stop]) then None
+  else
+    Theme.rgb_of_hex (String.sub text index css_hex_color_length)
+    |> Result.to_option
+    |> Option.map (fun rgb -> (rgb, stop))
+
+let css_lexer text =
+  let runs = new_runs Plain in
+  let limit = String.length text in
+  let rec advance i =
+    if i >= limit then ()
+    else
+      let ch = text.[i] in
+      if i + 1 < limit && Char.equal ch '/' && Char.equal text.[i + 1] '*' then
+        advance (take_c_block_comment text i runs)
+      else if Char.equal ch '"' then advance (take_quoted ~quote:'"' text i runs)
+      else if Char.equal ch '\'' then advance (take_quoted ~quote:'\'' text i runs)
+      else if Char.equal ch '#' then (
+        match css_hex_color text i with
+        | Some (rgb, stop) ->
+            paint ~kind:(Color_literal rgb) text i stop runs;
+            advance stop
+        | None ->
+            runs_add runs Plain ch;
+            advance (i + 1))
+      else if is_css_name_char ch then
+        advance (take_while text i is_css_name_char Plain runs)
       else begin
         runs_add runs Plain ch;
         advance (i + 1)
@@ -812,6 +874,7 @@ let rec language_of_tag raw =
       | "scala" | "php" | "dart" ->
           Some C_like
       | "python" | "py" -> Some Python
+      | "css" -> Some Css
       | "markdown" | "md" -> Some Markdown
       | _ -> None)
 
@@ -825,6 +888,7 @@ let language_of_path path =
   else if has ".toml" then Some Toml
   else if has ".sql" then Some Sql
   else if has ".py" then Some Python
+  else if has ".css" then Some Css
   else if has ".md" || has ".markdown" then Some Markdown
   else if has ".patch" || has ".diff" then Some (Diff None)
   else if
@@ -847,6 +911,7 @@ let rec lex lang text =
   | Sql -> sql_lexer text
   | C_like -> c_like_lexer text
   | Python -> python_lexer text
+  | Css -> css_lexer text
   | Markdown -> markdown_source_lexer text
 
 let normalize_crlf text =
@@ -880,7 +945,8 @@ let style_of_token ~(theme : Theme.t) ~bg = function
   | Keyword -> Style.make ~fg:(Color.of_rgb theme.accent) ~bg ~attrs:Attr.bold ()
   | String -> Style.make ~fg:(Color.of_rgb theme.status_ok) ~bg ()
   | Comment -> Style.make ~fg:(Color.of_rgb theme.text_muted) ~bg ~attrs:Attr.italic ()
-  | Number | Json_number -> Style.make ~fg:(Color.of_rgb theme.status_attention) ~bg ()
+  | Number | Json_number | Color_literal _ ->
+      Style.make ~fg:(Color.of_rgb theme.status_attention) ~bg ()
   | Type_or_ctor | Json_key -> Style.make ~fg:(Color.of_rgb theme.status_active) ~bg ()
   | Json_literal -> Style.make ~fg:(Color.of_rgb theme.accent) ~bg ~attrs:Attr.bold ()
   | Json_punctuation -> Style.make ~fg:(Color.of_rgb theme.text_muted) ~bg ()

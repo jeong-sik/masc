@@ -1,5 +1,5 @@
-(** Pure syntax tokenizers for source code, diffs, JSON, TOML, YAML, SQL, and
-    Markdown — painting directly onto {!Masc_tui_term.Cell_grid.t} using an
+(** Pure syntax tokenizers for source code, diffs, JSON, TOML, YAML, SQL, CSS,
+    and Markdown — painting directly onto {!Masc_tui_term.Cell_grid.t} using an
     explicit {!Masc_tui_core.Theme.t} (zero global refs, closed sum types). *)
 
 module Rect = Masc_tui_core.Rect
@@ -22,6 +22,8 @@ type token_kind =
   | Diff_added
   | Diff_removed
   | Diff_hunk
+  | Color_literal of Theme.rgb
+      (** A CSS [#RRGGBB] literal, carrying the color it names. *)
 
 type segment = {
   text : string;
@@ -38,10 +40,14 @@ type language =
   | Sql
   | C_like
   | Python
+  | Css
   | Markdown
 
 val equal_token_kind : token_kind -> token_kind -> bool
 val equal_language : language -> language -> bool
+
+val color_of_token_kind : token_kind -> Theme.rgb option
+(** The color a {!Color_literal} names; [None] for every other kind. *)
 
 val language_of_tag : string -> language option
 (** Strict parser for fence info tags (e.g. ["ocaml"], ["diff:ocaml"], ["toml"],

@@ -5351,14 +5351,16 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
                             ~en:"  Waiting inventory error: ")
                       ^ H.redact_secrets_in_text reason);
                   ]
-              | Observed.Absent ->
+              | Observed.Absent
+                when Runtime_store.is_keeper_waiting_inventory_absent ~keeper rt
+                ->
                   [
                     plain
                       (Say.resolve lang
                          (Say.make ~ko:"  대기 인벤토리 미지원 (404)"
                             ~en:"  Waiting inventory absent (404)"));
                   ]
-              | Observed.Value _ | Observed.Unreported ->
+              | Observed.Absent | Observed.Value _ | Observed.Unreported ->
                   [
                     plain
                       (Say.resolve lang
@@ -5617,21 +5619,35 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
                 H.draw_observed_placeholder ~grid ~rect:list_r ~theme ~lang obs)
         | Runtime_store.Sec_async_requests -> (
             match rt.async_requests with
-            | Observed.Value _ ->
-                let items = Runtime_store.filtered_async_requests rt in
-                draw_list_rows
-                  (List.map
-                     (fun (r : Wire_runtime.async_request_row) ->
-                       let tone =
-                         match r.ok with
-                         | Some true -> Some Theme.Status_ok
-                         | Some false -> Some Theme.Status_critical
-                         | None -> Some Theme.Status_attention
-                       in
-                       ( "[" ^ r.status ^ "]"
-                       , Printf.sprintf "@%s · %s" r.keeper_name r.request_id
-                       , tone ))
-                     items)
+            | Observed.Value { data = snap; _ } -> (
+                match snap.state, snap.requests with
+                | Wire_runtime.Async_unavailable { status; error_detail }, [] ->
+                    let msg =
+                      match error_detail with
+                      | Some e ->
+                          Printf.sprintf "Broker %s: %s" status
+                            (H.redact_secrets_in_text e)
+                      | None ->
+                          Printf.sprintf "Broker %s (counts unavailable)" status
+                    in
+                    draw_list_rows
+                      [ ("[unavailable]", msg, Some Theme.Status_attention) ]
+                | Wire_runtime.Async_ready _, _
+                | Wire_runtime.Async_unavailable _, _ :: _ ->
+                    let items = Runtime_store.filtered_async_requests rt in
+                    draw_list_rows
+                      (List.map
+                         (fun (r : Wire_runtime.async_request_row) ->
+                           let tone =
+                             match r.ok with
+                             | Some true -> Some Theme.Status_ok
+                             | Some false -> Some Theme.Status_critical
+                             | None -> Some Theme.Status_attention
+                           in
+                           ( "[" ^ r.status ^ "]"
+                           , Printf.sprintf "@%s · %s" r.keeper_name r.request_id
+                           , tone ))
+                         items))
             | ( Observed.Loading _
               | Observed.Absent
               | Observed.Unreported
@@ -5799,28 +5815,49 @@ let render_tools_usage ~(model : Model.t) ~cache ~(rect : Rect.t)
           | Runtime_store.Sec_async_requests -> (
               let summary_hdr =
                 match Observed.to_option rt.async_requests with
-                | Some snap ->
+                | Some { state = Wire_runtime.Async_ready c; _ } ->
                     [
                       plain
                         (Printf.sprintf
-                           "Broker: %s · active=%d · runtime_owned=%d · unknown=%d · errors=%d"
-                           snap.status snap.active snap.runtime_owned
-                           snap.ownership_unknown snap.record_errors_count);
+                           "Broker: ready · active=%d · runtime_owned=%d · unknown=%d · errors=%d"
+                           c.active c.runtime_owned c.ownership_unknown
+                           c.record_errors_count);
                     ]
-                    @ (match snap.error_detail with
+                | Some
+                    {
+                      state =
+                        Wire_runtime.Async_unavailable { status; error_detail };
+                      _;
+                    } ->
+                    [
+                      plain
+                        (Printf.sprintf "Broker: %s (counts unavailable)" status);
+                    ]
+                    @ (match error_detail with
                       | Some e -> [ plain ("Error: " ^ H.redact_secrets_in_text e) ]
                       | None -> [])
                 | None -> []
               in
               let sel_lines =
                 match Runtime_store.selected_async_request rt with
-                | None ->
-                    [
-                      plain
-                        (Say.resolve lang
-                           (Say.make ~ko:"활성 비동기 요청 없음"
-                              ~en:"No active async requests"));
-                    ]
+                | None -> (
+                    match Observed.to_option rt.async_requests with
+                    | Some { state = Wire_runtime.Async_unavailable _; _ } ->
+                        [
+                          plain
+                            (Say.resolve lang
+                               (Say.make
+                                  ~ko:"비동기 브로커 미가용 — 활성 요청 수 미보고"
+                                  ~en:
+                                    "Async broker unavailable — request counts not reported"));
+                        ]
+                    | Some { state = Wire_runtime.Async_ready _; _ } | None ->
+                        [
+                          plain
+                            (Say.resolve lang
+                               (Say.make ~ko:"활성 비동기 요청 없음"
+                                  ~en:"No active async requests"));
+                        ])
                 | Some r ->
                     [
                       sec "── Request Detail";

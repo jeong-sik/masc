@@ -5743,14 +5743,23 @@ type async_request_row = {
   result_preview : string option;
 }
 
-type async_requests_snapshot = {
-  status : string;
+type async_requests_counts = {
   active : int;
   runtime_owned : int;
   ownership_unknown : int;
   record_errors_count : int;
+}
+
+type async_requests_state =
+  | Async_ready of async_requests_counts
+  | Async_unavailable of {
+      status : string;
+      error_detail : string option;
+    }
+
+type async_requests_snapshot = {
+  state : async_requests_state;
   requests : async_request_row list;
-  error_detail : string option;
 }
 
 let decode_async_request_row item =
@@ -5810,17 +5819,6 @@ let decode_async_request_row item =
 let decode_async_requests json =
   let* _, body = unwrap_v2_or_raw json in
   let* status = required_nonblank_string body "status" in
-  let active, runtime_owned, ownership_unknown, record_errors_count =
-    match optional_object_field body "summary" with
-    | Ok (Some s) ->
-        let gi k =
-          match optional_int_field s k with
-          | Ok (Some n) -> n
-          | Ok None | Error _ -> 0
-        in
-        (gi "active", gi "runtime_owned", gi "ownership_unknown", gi "record_errors")
-    | Ok None | Error _ -> (0, 0, 0, 0)
-  in
   let* raw_reqs = optional_list_field body "requests" in
   let* requests = decode_list "requests" decode_async_request_row raw_reqs in
   let error_detail =
@@ -5836,16 +5834,27 @@ let decode_async_requests json =
         | Ok None | Error _ -> Some kind)
     | Ok None | Error _ -> None
   in
-  Ok
-    {
-      status;
-      active;
-      runtime_owned;
-      ownership_unknown;
-      record_errors_count;
-      requests;
-      error_detail;
-    }
+  let state =
+    match status with
+    | "ready" | "ok" -> (
+        match optional_object_field body "summary" with
+        | Ok (Some s) ->
+            let gi k =
+              match optional_int_field s k with
+              | Ok (Some n) -> n
+              | Ok None | Error _ -> 0
+            in
+            Async_ready
+              {
+                active = gi "active";
+                runtime_owned = gi "runtime_owned";
+                ownership_unknown = gi "ownership_unknown";
+                record_errors_count = gi "record_errors";
+              }
+        | Ok None | Error _ -> Async_unavailable { status; error_detail })
+    | _ -> Async_unavailable { status; error_detail }
+  in
+  Ok { state; requests }
 
 type prompt_item = {
   key : string;

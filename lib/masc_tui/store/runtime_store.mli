@@ -11,6 +11,7 @@ open Masc_tui_keymap
 open Masc_tui_protocol
 
 module String_map : Map.S with type key = string
+module String_set : Set.S with type elt = string
 
 type fusion_draft = {
   keeper : string option;
@@ -151,7 +152,7 @@ type t = {
   gate_tool_events_absent : bool;
   keeper_waiting_inventory :
     (string * Wire_runtime.keeper_waiting_inventory) Observed.t;
-  keeper_waiting_inventory_absent : bool;
+  keeper_waiting_inventory_absent_keepers : String_set.t;
   mcp_tools_list : Wire_runtime.mcp_tool_schema_entry list Observed.t;
   mcp_call_result : Wire_runtime.mcp_tool_call_result Observed.t;
   mcp_call_form : (int * Nav.inline_action_kind) option;
@@ -279,6 +280,12 @@ val apply_fusion_runs :
 val apply_tool_series :
   observed_at:Clock.Mono.t -> Wire_runtime.tool_series -> t -> t
 val apply_tool_series_summary :
+  ?update_24h:bool ->
+  observed_at:Clock.Mono.t ->
+  Wire_runtime.tool_series_summary ->
+  t ->
+  t
+val apply_live_tool_series_summary :
   observed_at:Clock.Mono.t -> Wire_runtime.tool_series_summary -> t -> t
 val apply_tool_detail_series :
   observed_at:Clock.Mono.t ->
@@ -537,6 +544,9 @@ val apply_keeper_waiting_inventory :
   Wire_runtime.keeper_waiting_inventory ->
   t ->
   t
+val is_keeper_waiting_inventory_absent : keeper:string -> t -> bool
+val mark_keeper_waiting_inventory_absent : keeper:string -> t -> t
+val clear_keeper_waiting_inventory_absent : keeper:string -> t -> t
 val keeper_waiting_inventory_for :
   keeper:string -> t -> Wire_runtime.keeper_waiting_inventory option
 

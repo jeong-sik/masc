@@ -4005,11 +4005,14 @@ let test_wave2_tools_artifacts_board_renders () =
          }
     |> Runtime_store.apply_async_requests ~observed_at:now_mono
          {
-           status = "ok";
-           active = 1;
-           runtime_owned = 1;
-           ownership_unknown = 0;
-           record_errors_count = 0;
+           state =
+             Wire_runtime.Async_ready
+               {
+                 active = 1;
+                 runtime_owned = 1;
+                 ownership_unknown = 0;
+                 record_errors_count = 0;
+               };
            requests =
              [
                {
@@ -4025,7 +4028,6 @@ let test_wave2_tools_artifacts_board_renders () =
                  result_preview = None;
                };
              ];
-           error_detail = None;
          }
   in
   List.iter

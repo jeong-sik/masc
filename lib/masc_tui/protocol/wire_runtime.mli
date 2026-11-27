@@ -1507,14 +1507,23 @@ type async_request_row = {
   result_preview : string option;
 }
 
-type async_requests_snapshot = {
-  status : string;
+type async_requests_counts = {
   active : int;
   runtime_owned : int;
   ownership_unknown : int;
   record_errors_count : int;
+}
+
+type async_requests_state =
+  | Async_ready of async_requests_counts
+  | Async_unavailable of {
+      status : string;
+      error_detail : string option;
+    }
+
+type async_requests_snapshot = {
+  state : async_requests_state;
   requests : async_request_row list;
-  error_detail : string option;
 }
 
 val decode_async_requests :

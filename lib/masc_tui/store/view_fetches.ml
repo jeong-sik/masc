@@ -539,14 +539,17 @@ let keeper_tab_fetches ~force ~name ~tab (m : Model.t) =
    keeper's cost and tokens from keeper-costs. *)
 let fetches_for_keeper_tab ~force ~name ~tab (m : Model.t) =
   let waiting_needed =
-    (force || not m.runtime.keeper_waiting_inventory_absent)
+    (force
+    || not
+         (Runtime_store.is_keeper_waiting_inventory_absent ~keeper:name
+            m.runtime))
     &&
     match m.runtime.keeper_waiting_inventory with
     | Observed.Value { data = prev_k, _; stale = false; _ } ->
         force || not (String.equal prev_k name)
+    | Observed.Absent -> true
     | Observed.Loading _
     | Observed.Value { stale = true; _ }
-    | Observed.Absent
     | Observed.Unreported
     | Observed.Failed _ ->
         needs_fetch ~force m.runtime.keeper_waiting_inventory
@@ -1127,16 +1130,20 @@ let fetches_for_workspace ~force (m : Model.t) =
                   | None -> []
                   | Some keeper ->
                       let wait_needed =
+                        (force
+                        || not
+                             (Runtime_store.is_keeper_waiting_inventory_absent
+                                ~keeper m.runtime))
+                        &&
                         match m.runtime.keeper_waiting_inventory with
                         | Observed.Value { data = k, _; stale = false; _ } ->
                             force || not (String.equal k keeper)
+                        | Observed.Absent -> true
                         | Observed.Loading _
                         | Observed.Value { stale = true; _ }
-                        | Observed.Absent
                         | Observed.Unreported
                         | Observed.Failed _ ->
-                            (force || not m.runtime.keeper_waiting_inventory_absent)
-                            && needs_fetch ~force m.runtime.keeper_waiting_inventory
+                            needs_fetch ~force m.runtime.keeper_waiting_inventory
                       in
                       if wait_needed then
                         [ Cmd.Get_keeper_waiting_inventory { keeper } ]

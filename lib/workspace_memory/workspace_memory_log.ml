@@ -383,6 +383,52 @@ let with_log_lock ~path f =
   | Error lock_err ->
     Error (Io_error (File_lock_eio.durable_lock_error_to_string lock_err))
 
+let rec fsync_fd fd =
+  try Unix.fsync fd with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> fsync_fd fd
+;;
+
+let close_fd_quiet fd =
+  try Unix.close fd with
+  | Unix.Unix_error _ -> ()
+;;
+
+let fsync_parent_dir dir =
+  let fd = Unix.openfile dir [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+  Fun.protect
+    ~finally:(fun () -> close_fd_quiet fd)
+    (fun () -> fsync_fd fd)
+;;
+
+let write_all_fd fd payload =
+  let total = String.length payload in
+  let rec loop offset =
+    if offset < total then
+      match Unix.single_write_substring fd payload offset (total - offset) with
+      | 0 ->
+        raise (Unix.Unix_error (Unix.EIO, "write", "workspace memory WAL wrote zero bytes"))
+      | n -> loop (offset + n)
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop offset
+  in
+  loop 0
+;;
+
+let append_durable_unlocked ~path payload =
+  Fs_compat.Systhread_host.run ~label:"workspace_memory_log_append" (fun () ->
+    let fd =
+      Unix.openfile
+        path
+        [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND; Unix.O_CLOEXEC ]
+        0o600
+    in
+    Fun.protect
+      ~finally:(fun () -> close_fd_quiet fd)
+      (fun () ->
+        write_all_fd fd payload;
+        fsync_fd fd);
+    fsync_parent_dir (Filename.dirname path))
+;;
+
 let truncate_incomplete_tail_unlocked ~path =
   match Fs_compat.load_file_opt path with
   | None -> ()
@@ -394,14 +440,19 @@ let truncate_incomplete_tail_unlocked ~path =
         | Some idx -> idx + 1
         | None -> 0
       in
-      Unix.truncate path clean_len
+      Fs_compat.Systhread_host.run ~label:"workspace_memory_log_truncate" (fun () ->
+        Unix.truncate path clean_len;
+        let fd = Unix.openfile path [ Unix.O_RDWR; Unix.O_CLOEXEC ] 0 in
+        Fun.protect
+          ~finally:(fun () -> close_fd_quiet fd)
+          (fun () -> fsync_fd fd))
 
 let append_record_unlocked ~path record =
   io (fun () ->
     Fs_compat.mkdir_p (Filename.dirname path);
     truncate_incomplete_tail_unlocked ~path;
     let line = record_to_json_line record ^ "\n" in
-    Fs_compat.append_lines path line;
+    append_durable_unlocked ~path line;
     Ok ())
 
 let append_record ~path record =
@@ -437,7 +488,10 @@ let load_log_unlocked ~path =
       in
       decode_all [] non_empty_lines)
 
-let load_log ~path = load_log_unlocked ~path
+let load_log ~path =
+  if not (Sys.file_exists path)
+  then Ok []
+  else with_log_lock ~path (fun () -> load_log_unlocked ~path)
 
 let batch_id_in_record batch_id = function
   | Prepared h -> String.equal h.batch_id batch_id
@@ -516,11 +570,13 @@ let append_batch
         let payload =
           String.concat "\n" (List.map record_to_json_line records) ^ "\n"
         in
-        Fs_compat.append_lines path payload;
+        append_durable_unlocked ~path payload;
         Ok final_seq))
 
-let abort_incomplete_batches ~path ~aborted_at ~reason (report : recovery_report) =
+let abort_incomplete_batches ~path ~aborted_at ~reason (_stale_report : recovery_report) =
   with_log_lock ~path (fun () ->
+    let* current_records = load_log_unlocked ~path in
+    let report = recover current_records in
     let rec append_all acc_aborted = function
       | [] ->
         Ok
@@ -589,7 +645,7 @@ let commit_prepared_batch ~path ~batch_id ~changes ~committed_at =
         let payload =
           String.concat "\n" (List.map record_to_json_line records) ^ "\n"
         in
-        Fs_compat.append_lines path payload;
+        append_durable_unlocked ~path payload;
         Ok final_seq))
 
 let abort_prepared_batch ~path ~batch_id ~aborted_at ~reason =

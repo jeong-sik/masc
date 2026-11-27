@@ -205,6 +205,18 @@ let run_blocking_lock_op f = Eio_guard.run_in_systhread ~label:"file-lock-op" f
 let retry_sleep_sec = 0.01
 let wait_after_contention () = Eio_unix.sleep retry_sleep_sec
 
+let rec openfile_no_eintr path mode perm =
+  try Unix.openfile path mode perm with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> openfile_no_eintr path mode perm
+
+let rec try_tlock_no_eintr fd =
+  try
+    Unix.lockf fd Unix.F_TLOCK 0;
+    true
+  with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> try_tlock_no_eintr fd
+  | Unix.Unix_error ((Unix.EAGAIN | Unix.EACCES), _, _) -> false
+
 (** Acquire a non-blocking Unix file lock (F_TLOCK) with retry.
     This is the blocking variant for callers that already run in a systhread
     (for example backend and Hebbian file I/O paths). On success, returns the
@@ -212,7 +224,7 @@ let wait_after_contention () = Eio_unix.sleep retry_sleep_sec
     raises [Flock_timeout]. *)
 let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
     ?(max_attempts = 200) ?(sleep_sec = retry_sleep_sec) ~caller () =
-  let fd = Unix.openfile lock_path mode perm in
+  let fd = openfile_no_eintr lock_path mode perm in
   let started_at = Time_compat.now () in
   let rec acquire attempts =
     if attempts <= 0 then begin
@@ -221,14 +233,7 @@ let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
       raise (Flock_timeout { caller; path = lock_path; attempts = max_attempts })
     end
     else
-      let success =
-        try
-          Unix.lockf fd Unix.F_TLOCK 0;
-          true
-        with
-        | Unix.Unix_error (Unix.EAGAIN, _, _)
-        | Unix.Unix_error (Unix.EACCES, _, _) -> false
-      in
+      let success = try_tlock_no_eintr fd in
       if success then begin
         observe_lock_attempt ~caller
           ~retries:(max_attempts - attempts) ~started_at ~outcome:"acquired";
@@ -243,18 +248,6 @@ let acquire_flock_retry ?clock:(_clock = None) ~lock_path ~mode ~perm
   with exn ->  (* re-raises below *)
     (try Unix.close fd with Unix.Unix_error _ -> ());  (* re-raises below *)
     raise exn
-
-let rec openfile_no_eintr path mode perm =
-  try Unix.openfile path mode perm with
-  | Unix.Unix_error (Unix.EINTR, _, _) -> openfile_no_eintr path mode perm
-
-let rec try_tlock_no_eintr fd =
-  try
-    Unix.lockf fd Unix.F_TLOCK 0;
-    true
-  with
-  | Unix.Unix_error (Unix.EINTR, _, _) -> try_tlock_no_eintr fd
-  | Unix.Unix_error ((Unix.EAGAIN | Unix.EACCES), _, _) -> false
 
 (** Fiber-friendly wrapper around [acquire_flock_retry].
     Runs non-blocking [F_TLOCK] directly without dispatching to [run_in_systhread]
@@ -291,19 +284,59 @@ let acquire_flock_retry_cooperative ?clock ~lock_path ~mode ~perm
   in
   try acquire max_attempts
   with exn ->  (* re-raises below *)
+    (* Lock was NOT acquired along this exception path: do not call F_ULOCK,
+       which in POSIX releases any lock held by another descriptor on the same
+       inode within this process. *)
     let bt = Printexc.get_raw_backtrace () in
-    (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
     (try Unix.close fd with Unix.Unix_error _ -> ());
     Printexc.raise_with_backtrace exn bt
-
-let acquire_flock_fd ?clock lock_path =
-  acquire_flock_retry_cooperative ?clock ~lock_path
-    ~mode:[ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_CLOEXEC ] ~perm:0o644
-    ~caller:"File_lock_eio" ()
 
 let release_flock_fd fd =
   (try Unix.lockf fd Unix.F_ULOCK 0 with Unix.Unix_error _ -> ());
   Unix.close fd
+
+let locked_fd_is_current ~lock_path fd =
+  try
+    let fd_stat = Unix.fstat fd in
+    let path_stat = Unix.lstat lock_path in
+    if path_stat.Unix.st_kind = Unix.S_LNK then
+      raise (Unix.Unix_error (Unix.ELOOP, "lstat", lock_path))
+    else if path_stat.Unix.st_kind <> Unix.S_REG || fd_stat.Unix.st_kind <> Unix.S_REG then
+      raise (Unix.Unix_error (Unix.EINVAL, "lstat", lock_path))
+    else
+      fd_stat.Unix.st_dev = path_stat.Unix.st_dev
+      && fd_stat.Unix.st_ino = path_stat.Unix.st_ino
+      && fd_stat.Unix.st_nlink > 0
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) -> false
+
+let acquire_flock_fd ?clock lock_path =
+  let max_stale_retries = 8 in
+  let rec acquire_current_inode remaining =
+    let fd =
+      acquire_flock_retry_cooperative ?clock ~lock_path
+        ~mode:[ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_CLOEXEC ] ~perm:0o644
+        ~caller:"File_lock_eio" ()
+    in
+    let current =
+      try locked_fd_is_current ~lock_path fd with
+      | exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        release_flock_fd fd;
+        Printexc.raise_with_backtrace exn bt
+    in
+    if current then fd
+    else begin
+      release_flock_fd fd;
+      if remaining <= 1 then
+        raise (Flock_timeout { caller = "File_lock_eio.stale_inode"; path = lock_path; attempts = max_stale_retries });
+      (match Eio_guard.execution_context () with
+       | Eio_guard.Eio_fiber -> Eio.Fiber.check ()
+       | Eio_guard.Non_eio -> ());
+      acquire_current_inode (remaining - 1)
+    end
+  in
+  acquire_current_inode max_stale_retries
 
 let with_mutex_canonical canonical f =
   let key, lock = get_entry_canonical canonical in
@@ -497,13 +530,17 @@ let acquire_durable_flock ~execution_context lock_path =
           Eio.Fiber.check ();
           acquire_eio 0
         | Eio_guard.Non_eio ->
-          (try
-             Unix.lockf fd Unix.F_LOCK 0;
-             Atomic.set process_lock_held true;
-             Ok ()
-           with
-           | Unix.Unix_error (error, operation, argument) ->
-             Error (unix_failure (error, operation, argument)))
+          let rec lock_no_eintr () =
+            try
+              Unix.lockf fd Unix.F_LOCK 0;
+              Atomic.set process_lock_held true;
+              Ok ()
+            with
+            | Unix.Unix_error (Unix.EINTR, _, _) -> lock_no_eintr ()
+            | Unix.Unix_error (error, operation, argument) ->
+              Error (unix_failure (error, operation, argument))
+          in
+          lock_no_eintr ()
       in
       let acquired =
         match acquire () with

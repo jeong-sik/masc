@@ -254,43 +254,58 @@ let spawn_detached_writing_to ~argv ~env ~cwd ~output =
     ~output:(Write_to output)
 
 let is_pgid_alive ~pgid =
-  try
-    Unix.kill (-pgid) 0;
-    true
-  with
-  | Unix.Unix_error (Unix.ESRCH, _, _) -> false
-  | Unix.Unix_error (Unix.EPERM, _, _) ->
-      (* EPERM means the process exists but we can't signal it —
-         conservative "alive" answer. *)
+  if pgid <= 1 then false
+  else
+    try
+      Unix.kill (-pgid) 0;
       true
-  | _ -> false (* cancel-guard-ok: Unix.kill performs no Eio operation *)
+    with
+    | Unix.Unix_error (Unix.ESRCH, _, _) -> false
+    | Unix.Unix_error (Unix.EPERM, _, _) ->
+        (* EPERM means the process exists but we can't signal it —
+           conservative "alive" answer. *)
+        true
+    | _ -> false (* cancel-guard-ok: Unix.kill performs no Eio operation *)
+
+let sleep_step step =
+  match Eio_guard.execution_context () with
+  | Eio_guard.Eio_fiber ->
+      (try Eio_unix.sleep step with
+       | Effect.Unhandled _ -> Eio.Fiber.yield ())
+  | Eio_guard.Non_eio ->
+      (* With no descriptors and a positive timeout, a signal (EINTR) is
+         the only way [select] fails; the next turn checks the group again. *)
+      (try ignore (Unix.select [] [] [] step) with
+       | Unix.Unix_error (Unix.EINTR, _, _) -> ())
 
 let tree_kill ~pgid ~signal ~grace_sec =
-  let safe_kill s =
-    try Unix.kill (-pgid) s
-    with
-    | Unix.Unix_error (Unix.ESRCH, _, _) -> ()
-    | Unix.Unix_error (Unix.EPERM, _, _) ->
-        (* macOS can return EPERM after all processes in the group
-           have exited but the session object lingers. Treat as
-           "already gone". *)
-        ()
-  in
-  safe_kill signal;
-  if grace_sec > 0.0 then begin
-    let deadline = Monotonic_deadline.after ~seconds:grace_sec in
-    let step = min 0.1 (grace_sec /. 10.0) in
-    let rec wait_loop () =
-      if not (is_pgid_alive ~pgid) then ()
-      else if Monotonic_deadline.passed deadline then
-        safe_kill Sys.sigkill
-      else begin
-        (* With no descriptors and a positive timeout, a signal (EINTR) is
-           the only way [select] fails; the next turn checks the group again. *)
-        (try ignore (Unix.select [] [] [] step) with
-         | Unix.Unix_error (Unix.EINTR, _, _) -> ());
-        wait_loop ()
-      end
+  (* kill(2) reads 0 as the caller's own group and -1 as every process the
+     caller may signal; negative values target arbitrary PIDs. *)
+  if pgid <= 1 then ()
+  else begin
+    let safe_kill s =
+      try Unix.kill (-pgid) s
+      with
+      | Unix.Unix_error (Unix.ESRCH, _, _) -> ()
+      | Unix.Unix_error (Unix.EPERM, _, _) ->
+          (* macOS can return EPERM after all processes in the group
+             have exited but the session object lingers. Treat as
+             "already gone". *)
+          ()
     in
-    wait_loop ()
+    safe_kill signal;
+    if grace_sec > 0.0 then begin
+      let deadline = Monotonic_deadline.after ~seconds:grace_sec in
+      let step = min 0.1 (grace_sec /. 10.0) in
+      let rec wait_loop () =
+        if not (is_pgid_alive ~pgid) then ()
+        else if Monotonic_deadline.passed deadline then
+          safe_kill Sys.sigkill
+        else begin
+          sleep_step step;
+          wait_loop ()
+        end
+      in
+      wait_loop ()
+    end
   end

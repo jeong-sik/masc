@@ -99,6 +99,7 @@ let spawn ~sw ~argv ~env ~output =
   match argv with
   | [] -> Error "posix_spawn: empty argv"
   | executable :: _ ->
+    Eio.Switch.check sw;
     ensure_sigchld_handler ();
     let started =
       match spawn_with ~executable ~argv ~env ~output with

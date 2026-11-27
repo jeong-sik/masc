@@ -155,10 +155,10 @@ let rec discard_to_eof r chunk =
    child flushing on TERM never blocks on a full pipe. The same grace bounds
    the wait; a reaper that failed leaves it to the grace. *)
 let await_settled_child ~clock proc sources =
-  let chunk = Cstruct.create drain_chunk_size in
   let read_to_eof () =
-    List.iter
+    Eio.Fiber.List.iter
       (fun (label, r) ->
+         let chunk = Cstruct.create drain_chunk_size in
          try discard_to_eof r chunk with
          | Eio.Io _ | Invalid_argument _ ->
            Log.Misc.debug
@@ -454,11 +454,17 @@ let spawn_and_drain_both_with_stdin_held_open
         ~sinks:[ "stdin", stdin_w ]
         ~sources:[ "stdout", stdout_r; "stderr", stderr_r ])
     (fun () ->
-      (try Eio.Flow.copy_string stdin_content stdin_w with
-       | exn when is_downstream_pipe_closed exn -> ());
-      Eio.Fiber.both
-        (fun () -> drain_to_eof stdout_r stdout_buf ~on_chunk:on_stdout_chunk; observe proc Stdout_closed)
-        (fun () -> drain_to_eof stderr_r stderr_buf ~on_chunk:on_stderr_chunk; observe proc Stderr_closed);
+      Eio.Fiber.all
+        [ (fun () ->
+            try Eio.Flow.copy_string stdin_content stdin_w with
+            | exn when is_downstream_pipe_closed exn -> ());
+          (fun () ->
+            drain_to_eof stdout_r stdout_buf ~on_chunk:on_stdout_chunk;
+            observe proc Stdout_closed);
+          (fun () ->
+            drain_to_eof stderr_r stderr_buf ~on_chunk:on_stderr_chunk;
+            observe proc Stderr_closed);
+        ];
       observe proc Awaiting_exit;
       let s = Eio.Process.await proc in
       status := Some s;

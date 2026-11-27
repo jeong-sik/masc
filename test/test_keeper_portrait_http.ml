@@ -335,7 +335,7 @@ let with_router ?(install_owners = false) f =
       if install_owners then begin
         ignore (require_ok Keeper_owner_registry.install_error_to_string
           (Keeper_owner_registry.install_from_store ~sw ~operation_runner:None
-             ~on_turn_slot_released:None config));
+             config));
         ignore (Keeper_registry.For_testing.register ~base_path:config.base_path keeper meta);
         Eio.Switch.on_release sw (fun () ->
           Keeper_registry.For_testing.unregister ~base_path:config.base_path keeper)

@@ -5,11 +5,13 @@ let legacy_media_dirname = "media"
 let id_prefix = "att_"
 let url_prefix = "/api/v1/attachments/"
 let default_max_bytes = 20 * 1024 * 1024
+let default_max_video_bytes = 50 * 1024 * 1024
 let default_ephemeral_max_entries = 500
 let default_ephemeral_max_bytes = 20 * 1024 * 1024
 let thumb_px_buckets = [ 160; 320; 640; 1280 ]
 let min_thumb_px = 160
 let max_thumb_px = 1280
+let default_poster_px = 640
 let transform_timeout_sec = 10.0
 
 (* Serialize metadata read-modify-write, durable promotions, ephemeral pin
@@ -27,13 +29,19 @@ let quantize_thumb_px px =
   find thumb_px_buckets
 ;;
 
-let max_bytes () =
-  match Sys.getenv_opt "MASC_ATTACHMENT_MAX_BYTES" with
-  | None -> default_max_bytes
+let positive_env_int_or ~default var_name =
+  match Sys.getenv_opt var_name with
+  | None -> default
   | Some raw ->
     (match int_of_string_opt (String.trim raw) with
      | Some n when n > 0 -> n
-     | Some _ | None -> default_max_bytes)
+     | Some _ | None -> default)
+;;
+
+let max_bytes () = positive_env_int_or ~default:default_max_bytes "MASC_ATTACHMENT_MAX_BYTES"
+
+let max_video_bytes () =
+  positive_env_int_or ~default:default_max_video_bytes "MASC_ATTACHMENT_MAX_VIDEO_BYTES"
 ;;
 
 type origin =
@@ -70,11 +78,13 @@ let retention_to_wire_string = function
 type media_kind =
   | Image
   | Audio
+  | Video
   | Document
 
 let media_kind_to_string = function
   | Image -> "image"
   | Audio -> "audio"
+  | Video -> "video"
   | Document -> "document"
 ;;
 
@@ -82,6 +92,7 @@ let media_kind_of_string raw =
   match String.lowercase_ascii (String.trim raw) with
   | "image" -> Some Image
   | "audio" -> Some Audio
+  | "video" -> Some Video
   | "document" -> Some Document
   | _ -> None
 ;;
@@ -98,6 +109,9 @@ type supported_mime =
   | Audio_midi
   | Audio_mp4
   | Audio_webm
+  | Video_mp4
+  | Video_webm
+  | Video_quicktime
 
 let mime_to_string = function
   | Image_png -> "image/png"
@@ -111,11 +125,15 @@ let mime_to_string = function
   | Audio_midi -> "audio/midi"
   | Audio_mp4 -> "audio/mp4"
   | Audio_webm -> "audio/webm"
+  | Video_mp4 -> "video/mp4"
+  | Video_webm -> "video/webm"
+  | Video_quicktime -> "video/quicktime"
 ;;
 
 let media_kind_of_mime = function
   | Image_png | Image_jpeg | Image_webp | Image_gif -> Image
   | Audio_mpeg | Audio_wav | Audio_ogg | Audio_midi | Audio_mp4 | Audio_webm -> Audio
+  | Video_mp4 | Video_webm | Video_quicktime -> Video
   | Application_pdf -> Document
 ;;
 
@@ -131,6 +149,9 @@ let extension_of_mime = function
   | Audio_midi -> ".mid"
   | Audio_mp4 -> ".m4a"
   | Audio_webm -> ".webm"
+  | Video_mp4 -> ".mp4"
+  | Video_webm -> ".webm"
+  | Video_quicktime -> ".mov"
 ;;
 
 let supported_mime_of_normalized = function
@@ -145,6 +166,9 @@ let supported_mime_of_normalized = function
   | "audio/midi" | "audio/x-midi" | "audio/mid" -> Some Audio_midi
   | "audio/mp4" | "audio/x-m4a" | "audio/m4a" -> Some Audio_mp4
   | "audio/webm" -> Some Audio_webm
+  | "video/mp4" | "video/x-m4v" -> Some Video_mp4
+  | "video/webm" -> Some Video_webm
+  | "video/quicktime" -> Some Video_quicktime
   | _ -> None
 ;;
 
@@ -261,10 +285,10 @@ let mp4_has_video_handler_in_range bytes ~start ~stop =
   loop (max 0 start)
 ;;
 
-let is_audio_mp4 bytes =
+let sniff_iso_bmff bytes =
   let len = String.length bytes in
   if len < 12 || String.sub bytes 4 4 <> "ftyp"
-  then false
+  then None
   else (
     let box_size =
       (Char.code bytes.[0] lsl 24)
@@ -273,35 +297,53 @@ let is_audio_mp4 bytes =
       lor Char.code bytes.[3]
     in
     if box_size < 12 || box_size > len || box_size mod 4 <> 0
-    then false
+    then None
     else (
-      let is_audio_brand = function
-        | "M4A " | "M4B " | "mp42" | "isom" | "dash" -> true
+      let is_quicktime_brand = function
+        | "qt  " -> true
         | _ -> false
       in
-      let is_video_brand = function
-        | "M4V " | "m4v " | "qt  " | "3gp4" | "3gp5" | "3gp6" | "3g2a"
+      let is_mp4_video_brand = function
+        | "M4V " | "m4v " | "3gp4" | "3gp5" | "3gp6" | "3g2a"
         | "avc1" | "hev1" | "hvc1" -> true
+        | _ -> false
+      in
+      let is_mp4_generic_brand = function
+        | "isom" | "mp41" | "mp42" | "iso2" | "dash" -> true
+        | _ -> false
+      in
+      let is_m4a_audio_brand = function
+        | "M4A " | "M4B " -> true
         | _ -> false
       in
       let major = String.sub bytes 8 4 in
       let compat_limit = min box_size 128 in
-      let rec scan_brands off has_audio has_video =
+      let rec scan_brands off has_qt has_vid has_generic has_m4a =
         if off + 4 > compat_limit
-        then has_audio, has_video
+        then has_qt, has_vid, has_generic, has_m4a
         else (
           let brand = String.sub bytes off 4 in
           scan_brands
             (off + 4)
-            (has_audio || is_audio_brand brand)
-            (has_video || is_video_brand brand))
+            (has_qt || is_quicktime_brand brand)
+            (has_vid || is_mp4_video_brand brand)
+            (has_generic || is_mp4_generic_brand brand)
+            (has_m4a || is_m4a_audio_brand brand))
       in
-      let has_audio, has_video =
-        scan_brands 16 (is_audio_brand major) (is_video_brand major)
+      let has_qt, has_vid, has_generic, has_m4a =
+        scan_brands
+          16
+          (is_quicktime_brand major)
+          (is_mp4_video_brand major)
+          (is_mp4_generic_brand major)
+          (is_m4a_audio_brand major)
       in
-      if (not has_audio) || has_video
-      then false
-      else (
+      if is_quicktime_brand major || (has_qt && not (has_vid || has_generic || has_m4a))
+      then Some Video_quicktime
+      else if has_vid
+      then Some Video_mp4
+      else if has_generic || has_m4a
+      then (
         let has_vide_track =
           if len <= 512 * 1024
           then mp4_has_video_handler_in_range bytes ~start:0 ~stop:len
@@ -312,20 +354,21 @@ let is_audio_mp4 bytes =
                  ~start:(len - (256 * 1024))
                  ~stop:len
         in
-        not has_vide_track)))
+        if has_vide_track then Some Video_mp4 else Some Audio_mp4)
+      else None))
 ;;
 
-let is_audio_webm bytes =
+let sniff_webm bytes =
   let len = String.length bytes in
   if len < 16 || not (String.starts_with ~prefix:"\x1a\x45\xdf\xa3" bytes)
-  then false
+  then None
   else (
     let header_stop = min len 128 in
     let has_webm_doctype =
       contains_sub_in_range ~needle:"\x42\x82\x84webm" ~haystack:bytes ~start:4 ~stop:header_stop
     in
     if not has_webm_doctype
-    then false
+    then None
     else (
       let scan_stop = min len 65536 in
       let has_video =
@@ -334,7 +377,7 @@ let is_audio_webm bytes =
         || contains_sub_in_range ~needle:"V_AV1" ~haystack:bytes ~start:4 ~stop:scan_stop
         || contains_sub_in_range ~needle:"\x83\x81\x01" ~haystack:bytes ~start:4 ~stop:scan_stop
       in
-      not has_video))
+      if has_video then Some Video_webm else Some Audio_webm))
 ;;
 
 let sniff_mime bytes =
@@ -356,13 +399,16 @@ let sniff_mime bytes =
   then Some Audio_ogg
   else if len >= 4 && starts "MThd"
   then Some Audio_midi
-  else if is_audio_mp4 bytes
-  then Some Audio_mp4
-  else if is_audio_webm bytes
-  then Some Audio_webm
-  else if (len >= 3 && starts "ID3") || is_mpeg_audio_frame_sync bytes
-  then Some Audio_mpeg
-  else None
+  else
+    match sniff_iso_bmff bytes with
+    | Some _ as m -> m
+    | None ->
+      (match sniff_webm bytes with
+       | Some _ as m -> m
+       | None ->
+         if (len >= 3 && starts "ID3") || is_mpeg_audio_frame_sync bytes
+         then Some Audio_mpeg
+         else None)
 ;;
 
 let be16 bytes offset =
@@ -467,7 +513,17 @@ let detect_image_dimensions bytes =
   | Some Image_jpeg -> jpeg_walk bytes 2
   | Some Image_gif -> gif_dimensions bytes
   | Some Image_webp -> webp_dimensions bytes
-  | Some (Application_pdf | Audio_mpeg | Audio_wav | Audio_ogg | Audio_midi | Audio_mp4 | Audio_webm)
+  | Some
+      ( Application_pdf
+      | Audio_mpeg
+      | Audio_wav
+      | Audio_ogg
+      | Audio_midi
+      | Audio_mp4
+      | Audio_webm
+      | Video_mp4
+      | Video_webm
+      | Video_quicktime )
   | None -> None
 ;;
 
@@ -937,6 +993,65 @@ let get_bytes t ~id =
   | Ok sha256 -> read_bytes_by_validated_sha256 t ~id sha256
 ;;
 
+let get_byte_range t ~id ~start ~length =
+  let open Result.Syntax in
+  match parse_id id with
+  | Error _ -> Error (Invalid_id id)
+  | Ok sha256 ->
+    if start < 0 || length < 0
+    then Error (Read_failed (Printf.sprintf "invalid byte range start=%d length=%d" start length))
+    else (
+      let* meta_opt = read_meta_by_validated_sha256 t ~id sha256 in
+      match meta_opt with
+      | None -> Ok None
+      | Some meta ->
+        if start > meta.bytes || length > meta.bytes - start
+        then
+          Error
+            (Read_failed
+               (Printf.sprintf
+                  "byte range [%d, +%d) exceeds blob size %d"
+                  start
+                  length
+                  meta.bytes))
+        else (
+          let path = blob_path t sha256 in
+          match Unix.lstat path with
+          | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+          | exception Unix.Unix_error (code, fn, arg) ->
+            Error (Read_failed (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)))
+          | { Unix.st_kind =
+                Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
+            ; _
+            } ->
+            Error (Read_failed (Printf.sprintf "blob %s is not a regular file" path))
+          | { Unix.st_kind = Unix.S_REG; st_size; _ } ->
+            if st_size <> meta.bytes
+            then
+              Error
+                (Integrity_mismatch
+                   { id
+                   ; expected = Printf.sprintf "size:%d" meta.bytes
+                   ; actual = Printf.sprintf "size:%d" st_size
+                   })
+            else if length = 0
+            then Ok (Some "")
+            else (
+              try
+                let ic = open_in_bin path in
+                Fun.protect
+                  ~finally:(fun () -> close_in_noerr ic)
+                  (fun () ->
+                     seek_in ic start;
+                     Ok (Some (really_input_string ic length)))
+              with
+              | End_of_file ->
+                Error (Read_failed (Printf.sprintf "unexpected EOF reading range from %s" path))
+              | Sys_error msg -> Error (Read_failed msg)
+              | Unix.Unix_error (code, fn, arg) ->
+                Error (Read_failed (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))))))
+;;
+
 let remove_file_if_exists path =
   try Unix.unlink path with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> ()
@@ -1349,43 +1464,55 @@ let put
       ~bytes
   =
   let open Result.Syntax in
-  let limit = Option.value max_bytes_opt ~default:(max_bytes ()) in
   let actual = String.length bytes in
   if actual = 0
   then Error Empty_payload
-  else if actual > limit
-  then Error (Payload_too_large { actual; maximum = limit })
-  else
-    let* () =
-      match retention with
-      | Durable -> Ok ()
-      | Ephemeral { keeper } ->
-        if is_valid_keeper_name keeper
-        then Ok ()
-        else Error (Invalid_keeper_name keeper)
+  else (
+    let pre_limit =
+      match max_bytes_opt with
+      | Some explicit -> explicit
+      | None ->
+        (match sniff_mime bytes with
+         | Some sniffed ->
+           (match media_kind_of_mime sniffed with
+            | Video -> max_video_bytes ()
+            | Image | Audio | Document -> max_bytes ())
+         | None -> max (max_bytes ()) (max_video_bytes ()))
     in
-    let* sniffed = validate_mime ~declared_mime ~bytes in
-    let sha256 = Agent_core_sha256.to_hex (Agent_core_sha256.digest_string bytes) in
-    let width, height =
-      match detect_image_dimensions bytes with
-      | Some (w, h) -> Some w, Some h
-      | None -> None, None
-    in
-    persist_verified
-      ~ephemeral_max_entries
-      ~ephemeral_max_bytes
-      ~now
-      ~mime_type:(mime_to_string sniffed)
-      ~kind:(media_kind_of_mime sniffed)
-      ~width
-      ~height
-      ~filename
-      ~origin
-      ~created_by
-      ~retention
-      t
-      ~bytes
-      ~sha256
+    if actual > pre_limit
+    then Error (Payload_too_large { actual; maximum = pre_limit })
+    else (
+      let* () =
+        match retention with
+        | Durable -> Ok ()
+        | Ephemeral { keeper } ->
+          if is_valid_keeper_name keeper
+          then Ok ()
+          else Error (Invalid_keeper_name keeper)
+      in
+      let* sniffed = validate_mime ~declared_mime ~bytes in
+      let kind = media_kind_of_mime sniffed in
+      let sha256 = Agent_core_sha256.to_hex (Agent_core_sha256.digest_string bytes) in
+      let width, height =
+        match detect_image_dimensions bytes with
+        | Some (w, h) -> Some w, Some h
+        | None -> None, None
+      in
+      persist_verified
+        ~ephemeral_max_entries
+        ~ephemeral_max_bytes
+        ~now
+        ~mime_type:(mime_to_string sniffed)
+        ~kind
+        ~width
+        ~height
+        ~filename
+        ~origin
+        ~created_by
+        ~retention
+        t
+        ~bytes
+        ~sha256))
 ;;
 
 let put_opaque
@@ -1829,6 +1956,174 @@ let run_transform_argv ~blocking ~in_file ~out_file ~max_px ~src_raster ~out_ras
   try_plans [] plans
 ;;
 
+let video_input_spec_of_mime_string = function
+  | "video/mp4" -> Some (".mp4", "mov,mp4,m4a,3gp,3g2,mj2")
+  | "video/webm" -> Some (".webm", "matroska,webm")
+  | "video/quicktime" -> Some (".mov", "mov,mp4,m4a,3gp,3g2,mj2")
+  | _ -> None
+;;
+
+let remove_temp_quietly path =
+  try Sys.remove path with
+  | Sys_error _ | Unix.Unix_error _ -> ()
+;;
+
+let run_ffmpeg_poster_argv ~blocking ~input_demuxer ~in_file ~out_file ~max_px =
+  blocking.run_blocking (fun () ->
+    try remove_file_if_exists out_file with Unix.Unix_error _ -> ());
+  let scale_filter =
+    Printf.sprintf
+      "scale='min(%d,iw)':'min(%d,ih)':force_original_aspect_ratio=decrease"
+      max_px
+      max_px
+  in
+  let argv =
+    [ "ffmpeg"
+    ; "-nostdin"
+    ; "-hide_banner"
+    ; "-loglevel"
+    ; "error"
+    ; "-y"
+    ; "-ss"
+    ; "0"
+    ; "-protocol_whitelist"
+    ; "file"
+    ; "-f"
+    ; input_demuxer
+    ; "-i"
+    ; in_file
+    ; "-frames:v"
+    ; "1"
+    ; "-vf"
+    ; scale_filter
+    ; "-f"
+    ; "image2"
+    ; "-vcodec"
+    ; "png"
+    ; out_file
+    ]
+  in
+  (* Subprocess invocation runs directly on the caller's Eio fiber (never
+     inside [blocking]), matching [run_transform_argv]. *)
+  match
+    Process_eio.run_argv_with_status_split_or_refusal
+      ~timeout_sec:transform_timeout_sec
+      argv
+  with
+  | Error refusal ->
+    Error (Printf.sprintf "ffmpeg: %s" (Process_eio.spawn_refusal_to_string refusal))
+  | Ok (status, _stdout, stderr) ->
+    (match Process_eio.exit_reason_of_status status with
+     | Process_eio.Completed 0 ->
+       blocking.run_blocking (fun () ->
+         if Sys.file_exists out_file
+            &&
+            (match Fs_compat.file_size out_file with
+             | Some sz -> sz > 0
+             | None -> false)
+         then (
+           let out_bytes = read_file_binary out_file in
+           match Option.map mime_to_string (sniff_mime out_bytes) with
+           | Some "image/png" ->
+             (match detect_image_dimensions out_bytes with
+              | Some (w, h) when max w h <= max_px -> Ok ("image/png", out_bytes)
+              | Some _ | None ->
+                Error "ffmpeg poster output dimensions exceeded max_px or were unreadable")
+           | Some other ->
+             Error (Printf.sprintf "ffmpeg wrote %s instead of image/png" other)
+           | None -> Error "ffmpeg wrote unrecognized poster output")
+         else
+           Error
+             (Printf.sprintf "ffmpeg exited 0 without writing poster (%s)" (String.trim stderr)))
+     | Process_eio.Completed code ->
+       Error (Printf.sprintf "ffmpeg exited %d (%s)" code (String.trim stderr))
+     | Process_eio.Timed_out -> Error "ffmpeg timed out"
+     | Process_eio.Signaled sig_n -> Error (Printf.sprintf "ffmpeg signaled %d" sig_n)
+     | Process_eio.Stopped sig_n -> Error (Printf.sprintf "ffmpeg stopped %d" sig_n))
+;;
+
+let get_video_poster
+      ?(blocking = inline_blocking)
+      ?max_px
+      t
+      ~(meta : meta)
+      ~raw_bytes
+  =
+  match meta.kind, video_input_spec_of_mime_string meta.mime_type with
+  | (Image | Audio | Document), _ | Video, None -> Error (Not_an_image meta.mime_type)
+  | Video, Some (src_ext, input_demuxer) ->
+    (match max_px with
+     | Some px when px <= 0 -> Error (Invalid_max_px px)
+     | Some _ | None ->
+       let poster_px =
+         quantize_thumb_px (Option.value max_px ~default:default_poster_px)
+       in
+       let variant_key = Printf.sprintf "poster_%d" poster_px in
+       let cache_path =
+         thumb_path t ~sha256:meta.sha256 ~variant_key ~ext:".png"
+       in
+       let generate () =
+         let in_file, out_file =
+           blocking.run_blocking (fun () ->
+             let in_file, in_oc =
+               Filename.open_temp_file ~mode:[ Open_binary ] "masc_vid_in_" src_ext
+             in
+             (try
+                Fun.protect
+                  ~finally:(fun () -> close_out_noerr in_oc)
+                  (fun () -> output_string in_oc raw_bytes)
+              with
+              | exn ->
+                remove_temp_quietly in_file;
+                raise exn);
+             try
+               let out_file = Filename.temp_file "masc_vid_out_" ".png" in
+               in_file, out_file
+             with
+             | exn ->
+               remove_temp_quietly in_file;
+               raise exn)
+         in
+         let res =
+           Fun.protect
+             ~finally:(fun () ->
+               Eio.Cancel.protect (fun () ->
+                 remove_temp_quietly in_file;
+                 remove_temp_quietly out_file))
+             (fun () ->
+               run_ffmpeg_poster_argv
+                 ~blocking
+                 ~input_demuxer
+                 ~in_file
+                 ~out_file
+                 ~max_px:poster_px)
+         in
+         match res with
+         | Error detail -> Error (Transform_failed detail)
+         | Ok (actual_mime, out_bytes) ->
+           blocking.run_blocking (fun () ->
+             match ensure_owned_dir t (Filename.dirname cache_path) with
+             | Ok () -> ignore (Fs_compat.save_file_atomic_strict cache_path out_bytes)
+             | Error _ -> ());
+           Ok (actual_mime, out_bytes)
+       in
+       let cached_hit =
+         blocking.run_blocking (fun () ->
+           match Fs_compat.load_owned_regular_file ~ownership_root:t.base_path cache_path with
+           | Ok (Some cached) ->
+             (match Option.map mime_to_string (sniff_mime cached), detect_image_dimensions cached with
+              | Some "image/png", Some (w, h) when max w h <= poster_px ->
+                Some ("image/png", cached)
+              | (Some _ | None), (Some _ | None) ->
+                (try remove_file_if_exists cache_path with Unix.Unix_error _ -> ());
+                None)
+           | Ok None | Error _ -> None)
+       in
+       match cached_hit with
+       | Some hit -> Ok hit
+       | None -> generate ())
+;;
+
 let get_image_derivative
       ?(blocking = inline_blocking)
       ?max_px
@@ -1838,6 +2133,10 @@ let get_image_derivative
       ~raw_bytes
   =
   match meta.kind, raster_mime_of_string meta.mime_type with
+  | Video, _ ->
+    (match target_format with
+     | Force_png -> get_video_poster ~blocking ?max_px t ~meta ~raw_bytes
+     | Native_format -> Error (Not_an_image meta.mime_type))
   | (Audio | Document), _ | Image, None -> Error (Not_an_image meta.mime_type)
   | Image, Some src_raster ->
     (match max_px with

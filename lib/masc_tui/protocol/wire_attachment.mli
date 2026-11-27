@@ -5,6 +5,7 @@
 type kind =
   | Kind_image
   | Kind_audio
+  | Kind_video
   | Kind_document
 
 type t = {
@@ -52,6 +53,27 @@ val attachment_render_path :
 
 val is_raster_image_mime : string -> bool
 (** [true] for [image/png], [image/jpeg], [image/webp], and [image/gif]. *)
+
+val is_video_mime : string -> bool
+(** [true] for [video/mp4], [video/webm], and [video/quicktime] (plus aliases). *)
+
+val is_playable_media_mime : string -> bool
+(** [true] for supported audio/MIDI or video MIME types playable via [/play]. *)
+
+val normalize_mime : string -> string
+(** Normalize common MIME aliases ([audio/x-midi]/[audio/mid] -> [audio/midi],
+    [audio/x-wav]/[audio/wave] -> [audio/wav], [video/x-m4v] -> [video/mp4],
+    [image/jpg] -> [image/jpeg], [audio/x-m4a] -> [audio/mp4]). *)
+
+val max_non_video_upload_bytes : int
+(** Default 20 MiB upload limit for images, audio, and documents. *)
+
+val max_video_upload_bytes : int
+(** Default 50 MiB upload limit for video attachments. *)
+
+val max_upload_bytes_for_mime : string -> int
+(** Return {!max_video_upload_bytes} for video MIME types and
+    {!max_non_video_upload_bytes} otherwise. *)
 
 val extension_of_mime : string -> string
 (** Canonical file extension including leading dot (e.g. [".png"], [".jpg"]). *)

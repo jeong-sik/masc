@@ -57,8 +57,15 @@ val clear : ?style:Style.t -> t -> unit
 val resize : cols:int -> rows:int -> t -> t
 val copy_into : src:t -> dst:t -> unit
 
+type pele_format =
+  | Pele_mermaid
+  | Pele_chart
+  | Pele_svg
+  | Pele_graph
+
 type document_image =
   | Mermaid of string
+  | Pele_scene of { format : pele_format; source : string }
   | Embedded_png of Graphics.embedded_png
   | Retained_png of string
   | Retained_image of { path : string; mime_type : string option }

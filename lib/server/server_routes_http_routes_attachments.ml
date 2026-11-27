@@ -113,6 +113,9 @@ let content_disposition_of ~download ~(meta : Attachment_store.meta) =
     | "audio/midi" -> ".mid"
     | "audio/mp4" -> ".m4a"
     | "audio/webm" -> ".webm"
+    | "video/mp4" -> ".mp4"
+    | "video/webm" -> ".webm"
+    | "video/quicktime" -> ".mov"
     | _ -> ".bin"
   in
   let fallback_name = meta.id ^ ext in
@@ -352,7 +355,9 @@ let put_error_http = function
 
 let handle_upload state request reqd =
   let base_path = (Mcp_server.workspace_config state).base_path in
-  let max_attachment = Attachment_store.max_bytes () in
+  let max_upload =
+    max (Attachment_store.max_bytes ()) (Attachment_store.max_video_bytes ())
+  in
   let declared_len =
     Option.bind (Http.Request.header request "content-length") int_of_string_opt
   in
@@ -363,7 +368,7 @@ let handle_upload state request reqd =
     | None -> false
   in
   let read_limit =
-    if is_multipart then max_attachment + multipart_overhead_bytes else max_attachment
+    if is_multipart then max_upload + multipart_overhead_bytes else max_upload
   in
   let created_by =
     sanitized_dashboard_actor_for_request ~base_path request
@@ -413,7 +418,6 @@ let handle_upload state request reqd =
              Eio_unix.run_in_systhread (fun () ->
                let store = Attachment_store.create ~base_path in
                Attachment_store.put
-                 ~max_bytes:max_attachment
                  ?declared_mime
                  ?filename
                  ~origin:Attachment_store.User_upload
@@ -456,6 +460,7 @@ let handle_upload state request reqd =
 
 type fetch_query =
   { download : bool
+  ; poster : bool
   ; target_format : Attachment_store.target_format
   ; max_px : int option
   }
@@ -464,6 +469,11 @@ let parse_fetch_query (request : Httpun.Request.t) =
   let uri = Uri.of_string request.target in
   let download =
     match Uri.get_query_param uri "download" with
+    | Some ("1" | "true" | "TRUE") -> true
+    | Some _ | None -> false
+  in
+  let poster =
+    match Uri.get_query_param uri "poster" with
     | Some ("1" | "true" | "TRUE") -> true
     | Some _ | None -> false
   in
@@ -486,16 +496,85 @@ let parse_fetch_query (request : Httpun.Request.t) =
          Error (Printf.sprintf "invalid max_px %S (expected positive integer)" raw))
   in
   match format_res, max_px_res with
-  | Ok target_format, Ok max_px -> Ok { download; target_format; max_px }
+  | Ok target_format, Ok max_px -> Ok { download; poster; target_format; max_px }
   | Error msg, _ | _, Error msg -> Error msg
 ;;
 
 let etag_for_query ~(meta : Attachment_store.meta) (q : fetch_query) =
-  match q.target_format, q.max_px with
-  | Attachment_store.Native_format, None -> meta.sha256
-  | Attachment_store.Force_png, None -> meta.sha256 ^ "-png"
-  | Attachment_store.Native_format, Some px -> Printf.sprintf "%s-max%d" meta.sha256 px
-  | Attachment_store.Force_png, Some px -> Printf.sprintf "%s-max%d-png" meta.sha256 px
+  if q.poster || (meta.kind = Attachment_store.Video && q.target_format = Attachment_store.Force_png)
+  then Printf.sprintf "%s-poster-%d" meta.sha256 (Option.value q.max_px ~default:640)
+  else
+    match q.target_format, q.max_px with
+    | Attachment_store.Native_format, None -> meta.sha256
+    | Attachment_store.Force_png, None -> meta.sha256 ^ "-png"
+    | Attachment_store.Native_format, Some px -> Printf.sprintf "%s-max%d" meta.sha256 px
+    | Attachment_store.Force_png, Some px -> Printf.sprintf "%s-max%d-png" meta.sha256 px
+;;
+
+type byte_range_outcome =
+  | No_range
+  | Satisfiable of
+      { start_pos : int
+      ; end_pos : int
+      }
+  | Unsatisfiable
+
+let parse_ascii_nonneg_int s =
+  let len = String.length s in
+  if len = 0
+  then None
+  else (
+    let rec check i =
+      if i >= len
+      then int_of_string_opt s
+      else (
+        match s.[i] with
+        | '0' .. '9' -> check (i + 1)
+        | _ -> None)
+    in
+    check 0)
+;;
+
+(* Parse RFC 9110 §14.1.2 single byte range: bytes=start-end, bytes=start-,
+   or bytes=-suffix. Rejects malformed, non-ASCII-digit (0x10, 1_0, +1, -1),
+   inverted, multi-range, and out-of-bounds specs cleanly as [Unsatisfiable] -> HTTP 416. *)
+let parse_byte_range ~total (request : Httpun.Request.t) =
+  match Http.Request.header request "range" with
+  | None -> No_range
+  | Some raw ->
+    let trimmed = String.trim raw in
+    let lower = String.lowercase_ascii trimmed in
+    if total <= 0 || not (String.starts_with ~prefix:"bytes=" lower)
+    then Unsatisfiable
+    else (
+      let spec = String.trim (String.sub trimmed 6 (String.length trimmed - 6)) in
+      if String.equal spec "" || String.contains spec ','
+      then Unsatisfiable
+      else (
+        match String.split_on_char '-' spec with
+        | [ left; right ] ->
+          let left = String.trim left in
+          let right = String.trim right in
+          (match left, right with
+           | "", "" -> Unsatisfiable
+           | "", suffix_s ->
+             (match parse_ascii_nonneg_int suffix_s with
+              | Some suffix when suffix > 0 ->
+                let start_pos = max 0 (total - suffix) in
+                Satisfiable { start_pos; end_pos = total - 1 }
+              | Some _ | None -> Unsatisfiable)
+           | start_s, "" ->
+             (match parse_ascii_nonneg_int start_s with
+              | Some start_pos when start_pos >= 0 && start_pos < total ->
+                Satisfiable { start_pos; end_pos = total - 1 }
+              | Some _ | None -> Unsatisfiable)
+           | start_s, end_s ->
+             (match parse_ascii_nonneg_int start_s, parse_ascii_nonneg_int end_s with
+              | Some start_pos, Some end_req
+                when start_pos >= 0 && end_req >= start_pos && start_pos < total ->
+                Satisfiable { start_pos; end_pos = min end_req (total - 1) }
+              | _ -> Unsatisfiable))
+        | _ -> Unsatisfiable))
 ;;
 
 let respond_get_error request reqd err =
@@ -560,69 +639,144 @@ let serve_loaded_meta ~base_path ~store ~(meta : Attachment_store.meta) ~query r
       let force_download = query.download || opaque in
       let disposition = content_disposition_of ~download:force_download ~meta in
       let headers = attachment_security_headers ~etag ~disposition request in
-      let raw_res =
-        Eio_unix.run_in_systhread (fun () ->
-          Attachment_store.get_bytes_by_sha256 store ~sha256:meta.sha256)
+      let is_raw_native =
+        (not query.poster)
+        && query.target_format = Attachment_store.Native_format
+        && Option.is_none query.max_px
       in
-      match raw_res with
-      | Error err -> respond_get_error request reqd err
-      | Ok None ->
-        respond_err
-          ~status:`Not_found
-          ~code:"not_found"
-          ~message:"attachment blob not found"
-          request
+      let content_type =
+        if opaque then "application/octet-stream" else meta.mime_type
+      in
+      match is_raw_native, parse_byte_range ~total:meta.bytes request with
+      | true, Satisfiable { start_pos; end_pos } ->
+        let slice_len = end_pos - start_pos + 1 in
+        let slice_res =
+          Eio_unix.run_in_systhread (fun () ->
+            Attachment_store.get_byte_range
+              store
+              ~id:meta.id
+              ~start:start_pos
+              ~length:slice_len)
+        in
+        (match slice_res with
+         | Error err -> respond_get_error request reqd err
+         | Ok None ->
+           respond_err
+             ~status:`Not_found
+             ~code:"not_found"
+             ~message:"attachment blob not found"
+             request
+             reqd
+         | Ok (Some slice) ->
+           let range_headers =
+             ("content-range", Printf.sprintf "bytes %d-%d/%d" start_pos end_pos meta.bytes)
+             :: ("accept-ranges", "bytes")
+             :: headers
+           in
+           Http.Response.bytes
+             ~status:`Partial_content
+             ~content_type
+             ~headers:range_headers
+             slice
+             reqd)
+      | true, Unsatisfiable ->
+        let unsat_headers =
+          ("content-range", Printf.sprintf "bytes */%d" meta.bytes)
+          :: ("accept-ranges", "bytes")
+          :: headers
+        in
+        Http.Response.bytes
+          ~status:(`Code 416)
+          ~content_type:"text/plain; charset=utf-8"
+          ~headers:unsat_headers
+          ""
           reqd
-      | Ok (Some raw_bytes) ->
-        (match query.target_format, query.max_px with
-         | Attachment_store.Native_format, None ->
-           let content_type =
-             if opaque then "application/octet-stream" else meta.mime_type
+      | true, No_range | false, (No_range | Satisfiable _ | Unsatisfiable) ->
+        let raw_res =
+          Eio_unix.run_in_systhread (fun () ->
+            Attachment_store.get_bytes_by_sha256 store ~sha256:meta.sha256)
+        in
+        (match raw_res with
+         | Error err -> respond_get_error request reqd err
+         | Ok None ->
+           respond_err
+             ~status:`Not_found
+             ~code:"not_found"
+             ~message:"attachment blob not found"
+             request
+             reqd
+         | Ok (Some raw_bytes) ->
+           let respond_derivative deriv_res =
+             match deriv_res with
+             | Ok (out_mime, out_bytes) ->
+               Http.Response.bytes ~content_type:out_mime ~headers out_bytes reqd
+             | Error (Attachment_store.Not_an_image _ as err) ->
+               respond_err
+                 ~status:(`Code 422)
+                 ~code:"not_an_image"
+                 ~message:(Attachment_store.derivative_error_to_string err)
+                 request
+                 reqd
+             | Error (Attachment_store.Invalid_max_px _ as err) ->
+               respond_err
+                 ~status:`Bad_request
+                 ~code:"invalid_max_px"
+                 ~message:(Attachment_store.derivative_error_to_string err)
+                 request
+                 reqd
+             | Error (Attachment_store.Transform_failed _ as err) ->
+               Log.Misc.error
+                 "attachment transform failed id=%s: %s"
+                 meta.id
+                 (Attachment_store.derivative_error_to_string err);
+               respond_err
+                 ~status:`Internal_server_error
+                 ~code:"transform_failed"
+                 ~message:"image transform failed"
+                 request
+                 reqd
            in
-           Http.Response.bytes ~content_type ~headers raw_bytes reqd
-         | (Attachment_store.Force_png as target_format), max_px
-         | (Attachment_store.Native_format as target_format), (Some _ as max_px) ->
-           (* Disk I/O (cache checks, temp files, thumb save) is offloaded via
-              [systhread_blocking], while [Process_eio] runs directly on this
-              Eio fiber so [Eio.Switch.run] succeeds once [Process_eio.init] is
-              active. *)
-           let deriv_res =
-             Attachment_store.get_image_derivative
-               ~blocking:systhread_blocking
-               ?max_px
-               ~target_format
-               store
-               ~meta
-               ~raw_bytes
-           in
-           (match deriv_res with
-            | Ok (out_mime, out_bytes) ->
-              Http.Response.bytes ~content_type:out_mime ~headers out_bytes reqd
-            | Error (Attachment_store.Not_an_image _ as err) ->
-              respond_err
-                ~status:(`Code 422)
-                ~code:"not_an_image"
-                ~message:(Attachment_store.derivative_error_to_string err)
-                request
-                reqd
-            | Error (Attachment_store.Invalid_max_px _ as err) ->
-              respond_err
-                ~status:`Bad_request
-                ~code:"invalid_max_px"
-                ~message:(Attachment_store.derivative_error_to_string err)
-                request
-                reqd
-            | Error (Attachment_store.Transform_failed _ as err) ->
-              Log.Misc.error
-                "attachment transform failed id=%s: %s"
-                meta.id
-                (Attachment_store.derivative_error_to_string err);
-              respond_err
-                ~status:`Internal_server_error
-                ~code:"transform_failed"
-                ~message:"image transform failed"
-                request
-                reqd))))
+           if query.poster
+           then
+             (match meta.kind with
+              | Attachment_store.Video ->
+                respond_derivative
+                  (Attachment_store.get_video_poster
+                     ~blocking:systhread_blocking
+                     ?max_px:query.max_px
+                     store
+                     ~meta
+                     ~raw_bytes)
+              | Attachment_store.Image ->
+                respond_derivative
+                  (Attachment_store.get_image_derivative
+                     ~blocking:systhread_blocking
+                     ?max_px:query.max_px
+                     ~target_format:Attachment_store.Force_png
+                     store
+                     ~meta
+                     ~raw_bytes)
+              | Attachment_store.Audio | Attachment_store.Document ->
+                respond_derivative (Error (Attachment_store.Not_an_image meta.mime_type)))
+           else
+             (match query.target_format, query.max_px with
+              | Attachment_store.Native_format, None ->
+                let ok_headers = ("accept-ranges", "bytes") :: headers in
+                Http.Response.bytes ~content_type ~headers:ok_headers raw_bytes reqd
+              | (Attachment_store.Force_png as target_format), max_px
+              | (Attachment_store.Native_format as target_format), (Some _ as max_px) ->
+                (* Disk I/O (cache checks, temp files, thumb save) is offloaded via
+                   [systhread_blocking], while [Process_eio] runs directly on this
+                   Eio fiber so [Eio.Switch.run] succeeds once [Process_eio.init] is
+                   active. *)
+                respond_derivative
+                  (Attachment_store.get_image_derivative
+                     ~blocking:systhread_blocking
+                     ?max_px
+                     ~target_format
+                     store
+                     ~meta
+                     ~raw_bytes)))))
 ;;
 
 let serve_attachment_by_sha256 ~base_path ~sha256 request reqd =

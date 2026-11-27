@@ -219,6 +219,8 @@ type directive =
   | Title
   | Subtitle
   | Artist
+  | Metadata_text
+  | Capo
   | Track
   | Staff
   | Instrument
@@ -241,14 +243,19 @@ type token =
   | Tk_bar
   | Tk_word of string
 
-let directive_of_word = function
+let directive_of_word name =
+  match String.lowercase_ascii name with
   | "title" -> Some Title
   | "subtitle" -> Some Subtitle
   | "artist" -> Some Artist
+  | "album" | "words" | "music" | "copyright" | "tab" | "instructions"
+  | "notices" ->
+      Some Metadata_text
+  | "capo" -> Some Capo
   | "track" -> Some Track
   | "staff" -> Some Staff
   | "instrument" -> Some Instrument
-  | "ks" -> Some Key_signature
+  | "ks" | "key" -> Some Key_signature
   | "clef" -> Some Clef
   | "section" -> Some Section
   | "tempo" -> Some Tempo
@@ -866,21 +873,21 @@ let key_signature name =
   | "b" | "bmajor" -> key 5 Major
   | "f#" | "f#major" -> key 6 Major
   | "c#" | "c#major" -> key 7 Major
-  | "abminor" -> key (-7) Minor
-  | "ebminor" -> key (-6) Minor
-  | "bbminor" -> key (-5) Minor
-  | "fminor" -> key (-4) Minor
-  | "cminor" -> key (-3) Minor
-  | "gminor" -> key (-2) Minor
-  | "dminor" -> key (-1) Minor
-  | "aminor" -> key 0 Minor
-  | "eminor" -> key 1 Minor
-  | "bminor" -> key 2 Minor
-  | "f#minor" -> key 3 Minor
-  | "c#minor" -> key 4 Minor
-  | "g#minor" -> key 5 Minor
-  | "d#minor" -> key 6 Minor
-  | "a#minor" -> key 7 Minor
+  | "abminor" | "abm" -> key (-7) Minor
+  | "ebminor" | "ebm" -> key (-6) Minor
+  | "bbminor" | "bbm" -> key (-5) Minor
+  | "fminor" | "fm" -> key (-4) Minor
+  | "cminor" | "cm" -> key (-3) Minor
+  | "gminor" | "gm" -> key (-2) Minor
+  | "dminor" | "dm" -> key (-1) Minor
+  | "aminor" | "am" -> key 0 Minor
+  | "eminor" | "em" -> key 1 Minor
+  | "bminor" | "bm" -> key 2 Minor
+  | "f#minor" | "f#m" -> key 3 Minor
+  | "c#minor" | "c#m" -> key 4 Minor
+  | "g#minor" | "g#m" -> key 5 Minor
+  | "d#minor" | "d#m" -> key 6 Minor
+  | "a#minor" | "a#m" -> key 7 Minor
   | _ -> None
 
 (* A clef, too, changes standard notation, not the string/fret coordinates of
@@ -888,22 +895,36 @@ let key_signature name =
 let clef_of_name name =
   match String.lowercase_ascii name with
   | "neutral" | "n" -> Some Neutral
-  | "c3" | "alto" -> Some C3
+  | "c3" | "alto" | "c" -> Some C3
   | "c4" | "tenor" -> Some C4
-  | "f4" | "bass" -> Some F4
-  | "g2" | "treble" -> Some G2
+  | "f4" | "bass" | "f" -> Some F4
+  | "g2" | "treble" | "g" -> Some G2
   | _ -> None
 
 (* General MIDI programs 24--39 are guitars and basses. Their timbres do not
    alter explicit fret coordinates, but their default string sets differ, so
    accepting one below also requires an explicit tuning before any beat. *)
+let normalize_instrument_name name =
+  let buf = Buffer.create (String.length name) in
+  String.iter
+    (fun c ->
+      match Char.lowercase_ascii c with
+      | ('a'..'z' | '0'..'9') as ch -> Buffer.add_char buf ch
+      | _ -> ())
+    name;
+  Buffer.contents buf
+
 let fretted_instrument name =
-  match String.lowercase_ascii name with
-  | "acoustic guitar nylon" | "acoustic guitar steel" | "electric guitar jazz"
-  | "electric guitar clean" | "electric guitar muted" | "overdriven guitar"
-  | "distortion guitar" | "guitar harmonics" | "acoustic bass"
-  | "electric bass finger" | "electric bass pick" | "fretless bass"
-  | "slap bass 1" | "slap bass 2" | "synth bass 1" | "synth bass 2" -> true
+  match normalize_instrument_name name with
+  | "guitar" | "acousticguitar" | "nylonguitar" | "steelguitar"
+  | "classicalguitar" | "electricguitar" | "cleanguitar" | "jazzguitar"
+  | "overdriveguitar" | "bass" | "electricbass"
+  | "acousticguitarnylon" | "acousticguitarsteel" | "electricguitarjazz"
+  | "electricguitarclean" | "electricguitarmuted" | "overdrivenguitar"
+  | "distortionguitar" | "guitarharmonics" | "acousticbass"
+  | "electricbassfinger" | "electricbasspick" | "fretlessbass"
+  | "slapbass1" | "slapbass2" | "synthbass1" | "synthbass2" ->
+      true
   | _ ->
       String.length name > 0 && String.for_all is_digit name
       && (match int_of_string_opt name with
@@ -1185,6 +1206,12 @@ let read source =
     | Tk_directive Artist :: rest ->
         let* _, after = text_argument Artist_text rest in
         step state after
+    | Tk_directive Metadata_text :: rest ->
+        let* _, after = text_argument Artist_text rest in
+        step state after
+    | Tk_directive Capo :: rest ->
+        let* _, after = number_argument Tempo_number rest in
+        step state after
     | Tk_directive Section :: rest ->
         let* _, after = text_argument Section_text rest in
         (* The two-string form adds a section marker before its name. Neither
@@ -1255,7 +1282,34 @@ let read source =
           in
           step { state with b_staff_declared = true } after
     | Tk_directive Tempo :: rest ->
-        let* value, after = number_argument Tempo_number rest in
+        (* Support \tempo 120, \tempo 120 "Allegro", and \tempo "Moderato" 96. *)
+        let rest_no_leading_label =
+          match rest with
+          | Tk_quoted _ :: after -> after
+          | ([]
+            | ( Tk_directive _
+              | Tk_unknown_directive _
+              | Tk_effect _
+              | Tk_chord _
+              | Tk_bar
+              | Tk_word _ )
+              :: _) as tokens ->
+              tokens
+        in
+        let* value, after = number_argument Tempo_number rest_no_leading_label in
+        let after =
+          match after with
+          | Tk_quoted _ :: tail -> tail
+          | ([]
+            | ( Tk_directive _
+              | Tk_unknown_directive _
+              | Tk_effect _
+              | Tk_chord _
+              | Tk_bar
+              | Tk_word _ )
+              :: _) as tokens ->
+              tokens
+        in
         step { state with b_tempo = value; b_tempo_or_section = true } after
     | Tk_directive Time_signature :: rest ->
         let* top, after = number_argument Time_signature_numbers rest in

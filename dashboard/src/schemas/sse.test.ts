@@ -1734,6 +1734,7 @@ describe('KEEPER_ATTACHMENT wire contract (Attachment_store.meta_to_wire_json pa
     expect(KeeperChatStreamEventSchema.safeParse(streamEvent({ ...fullMetaPayload, created_at_unix: 'now' })).success).toBe(false)
     expect(KeeperChatStreamEventSchema.safeParse(streamEvent({ ...fullMetaPayload, retention: '' })).success).toBe(false)
     expect(KeeperChatStreamEventSchema.safeParse(streamEvent({ ...fullMetaPayload, retention: 123 })).success).toBe(false)
-    expect(KeeperChatStreamEventSchema.safeParse(streamEvent({ ...fullMetaPayload, kind: 'video' })).success).toBe(false)
+    expect(KeeperChatStreamEventSchema.safeParse(streamEvent({ ...fullMetaPayload, kind: 'video' })).success).toBe(true)
+    expect(KeeperChatStreamEventSchema.safeParse(streamEvent({ ...fullMetaPayload, kind: 'executable' })).success).toBe(false)
   })
 })

@@ -1143,12 +1143,238 @@ let test_mcp_attachment_resource () =
       (missing_resp |> member "error" |> member "code" |> to_int))
 ;;
 
+let generate_tiny_mp4_in_eio () =
+  let out = Filename.temp_file "masc_http_test_vid_" ".mp4" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove out with Sys_error _ -> ())
+    (fun () ->
+       match
+         Process_eio.run_argv_with_status_split_or_refusal
+           ~timeout_sec:10.0
+           [ "ffmpeg"
+           ; "-nostdin"
+           ; "-hide_banner"
+           ; "-loglevel"
+           ; "error"
+           ; "-y"
+           ; "-f"
+           ; "lavfi"
+           ; "-i"
+           ; "color=c=red:s=320x240:d=0.2:r=5"
+           ; "-pix_fmt"
+           ; "yuv420p"
+           ; "-movflags"
+           ; "+faststart"
+           ; out
+           ]
+       with
+       | Ok (Unix.WEXITED 0, _, _) when Sys.file_exists out ->
+         let ic = open_in_bin out in
+         let bytes =
+           Fun.protect
+             ~finally:(fun () -> close_in_noerr ic)
+             (fun () -> really_input_string ic (in_channel_length ic))
+         in
+         if String.length bytes > 0 then Some bytes else None
+       | _ -> None)
+;;
+
+let test_http_range_and_video_poster () =
+  with_router (fun ~base_path:_ ~state:_ ~router ~worker ~player:_ ->
+    let png = make_png ~width:16 ~height:16 ~seed:88 in
+    let total = String.length png in
+    let st_up, _, body_up =
+      dispatch_raw
+        ~router
+        ~meth:"POST"
+        ~path:"/api/v1/attachments"
+        ~token:worker
+        ~headers:[ "Content-Type", "image/png" ]
+        ~body:png
+        ()
+      |> split_response
+    in
+    Alcotest.(check int) "upload 201" 201 st_up;
+    let open Yojson.Safe.Util in
+    let id = Yojson.Safe.from_string body_up |> member "data" |> member "id" |> to_string in
+    (* Full GET advertises Accept-Ranges: bytes *)
+    let st_200, hdrs_200, _ =
+      dispatch_raw ~router ~meth:"GET" ~path:("/api/v1/attachments/" ^ id) ~token:worker ~body:"" ()
+      |> split_response
+    in
+    Alcotest.(check int) "full GET 200" 200 st_200;
+    Alcotest.(check (option string)) "Accept-Ranges bytes" (Some "bytes") (List.assoc_opt "accept-ranges" hdrs_200);
+    (* Bounded Range: bytes=0-9 -> 206 *)
+    let st_r1, hdrs_r1, body_r1 =
+      dispatch_raw
+        ~router
+        ~meth:"GET"
+        ~path:("/api/v1/attachments/" ^ id)
+        ~token:worker
+        ~headers:[ "Range", "bytes=0-9" ]
+        ~body:""
+        ()
+      |> split_response
+    in
+    Alcotest.(check int) "bounded range 206" 206 st_r1;
+    Alcotest.(check string) "bounded range slice" (String.sub png 0 10) body_r1;
+    Alcotest.(check (option string))
+      "bounded Content-Range"
+      (Some (Printf.sprintf "bytes 0-9/%d" total))
+      (List.assoc_opt "content-range" hdrs_r1);
+    Alcotest.(check (option string)) "206 Accept-Ranges" (Some "bytes") (List.assoc_opt "accept-ranges" hdrs_r1);
+    (* Open-ended Range: bytes=10- -> 206 *)
+    let st_r2, hdrs_r2, body_r2 =
+      dispatch_raw
+        ~router
+        ~meth:"GET"
+        ~path:("/api/v1/attachments/" ^ id)
+        ~token:worker
+        ~headers:[ "Range", "bytes=10-" ]
+        ~body:""
+        ()
+      |> split_response
+    in
+    Alcotest.(check int) "open-ended range 206" 206 st_r2;
+    Alcotest.(check string) "open-ended slice" (String.sub png 10 (total - 10)) body_r2;
+    Alcotest.(check (option string))
+      "open-ended Content-Range"
+      (Some (Printf.sprintf "bytes 10-%d/%d" (total - 1) total))
+      (List.assoc_opt "content-range" hdrs_r2);
+    (* Suffix Range: bytes=-8 -> 206 *)
+    let st_r3, hdrs_r3, body_r3 =
+      dispatch_raw
+        ~router
+        ~meth:"GET"
+        ~path:("/api/v1/attachments/" ^ id)
+        ~token:worker
+        ~headers:[ "Range", "bytes=-8" ]
+        ~body:""
+        ()
+      |> split_response
+    in
+    Alcotest.(check int) "suffix range 206" 206 st_r3;
+    Alcotest.(check string) "suffix slice" (String.sub png (total - 8) 8) body_r3;
+    Alcotest.(check (option string))
+      "suffix Content-Range"
+      (Some (Printf.sprintf "bytes %d-%d/%d" (total - 8) (total - 1) total))
+      (List.assoc_opt "content-range" hdrs_r3);
+    (* Out-of-bounds and malformed ranges -> 416 with Content-Range: bytes */<total> *)
+    let st_416a, hdrs_416a, _ =
+      dispatch_raw
+        ~router
+        ~meth:"GET"
+        ~path:("/api/v1/attachments/" ^ id)
+        ~token:worker
+        ~headers:[ "Range", "bytes=999999-" ]
+        ~body:""
+        ()
+      |> split_response
+    in
+    Alcotest.(check int) "out-of-bounds range 416" 416 st_416a;
+    Alcotest.(check (option string))
+      "416 Content-Range"
+      (Some (Printf.sprintf "bytes */%d" total))
+      (List.assoc_opt "content-range" hdrs_416a);
+    let st_416b, _, _ =
+      dispatch_raw
+        ~router
+        ~meth:"GET"
+        ~path:("/api/v1/attachments/" ^ id)
+        ~token:worker
+        ~headers:[ "Range", "bytes=20-10" ]
+        ~body:""
+        ()
+      |> split_response
+    in
+    Alcotest.(check int) "inverted range 416" 416 st_416b;
+    List.iter
+      (fun bad_range ->
+         let st_bad, _, _ =
+           dispatch_raw
+             ~router
+             ~meth:"GET"
+             ~path:("/api/v1/attachments/" ^ id)
+             ~token:worker
+             ~headers:[ "Range", bad_range ]
+             ~body:""
+             ()
+           |> split_response
+         in
+         Alcotest.(check int) ("non-ASCII-digit range 416: " ^ bad_range) 416 st_bad)
+      [ "bytes=0x10-0x20"; "bytes=1_0-2_0"; "bytes=+0-5"; "bytes=-+5" ];
+    (* Video upload + ?poster=1 + ?format=png&max_px=160 with Process_eio.init active *)
+    Eio_main.run (fun env ->
+      Process_eio.init
+        ~cwd_default:(Eio.Stdenv.cwd env)
+        ~proc_mgr:(Eio.Stdenv.process_mgr env)
+        ~clock:(Eio.Stdenv.clock env);
+      Fun.protect
+        ~finally:Process_eio.reset_for_testing
+        (fun () ->
+           match generate_tiny_mp4_in_eio () with
+           | None -> ()
+           | Some mp4_bytes ->
+             let st_vid, _, body_vid =
+               dispatch_in_eio
+                 ~router
+                 ~meth:"POST"
+                 ~path:"/api/v1/attachments"
+                 ~token:worker
+                 ~headers:[ "Content-Type", "video/mp4"; "X-Filename", "demo.mp4" ]
+                 ~body:mp4_bytes
+                 ()
+               |> split_response
+             in
+             Alcotest.(check int) "video upload 201" 201 st_vid;
+             let vdata = Yojson.Safe.from_string body_vid |> member "data" in
+             let vid = vdata |> member "id" |> to_string in
+             Alcotest.(check string) "video kind" "video" (vdata |> member "kind" |> to_string);
+             Alcotest.(check string) "video mime" "video/mp4" (vdata |> member "mime_type" |> to_string);
+             let st_p1, hdrs_p1, body_p1 =
+               dispatch_in_eio
+                 ~router
+                 ~meth:"GET"
+                 ~path:("/api/v1/attachments/" ^ vid ^ "?poster=1&max_px=160")
+                 ~token:worker
+                 ~body:""
+                 ()
+               |> split_response
+             in
+             Alcotest.(check int) "video ?poster=1&max_px=160 returns 200" 200 st_p1;
+             Alcotest.(check (option string))
+               "poster content-type"
+               (Some "image/png")
+               (List.assoc_opt "content-type" hdrs_p1);
+             Alcotest.(check bool)
+               "poster sniffs PNG"
+               true
+               (Att.sniff_mime body_p1 = Some Att.Image_png);
+             let st_p2, hdrs_p2, body_p2 =
+               dispatch_in_eio
+                 ~router
+                 ~meth:"GET"
+                 ~path:("/api/v1/attachments/" ^ vid ^ "?format=png&max_px=160")
+                 ~token:worker
+                 ~body:""
+                 ()
+               |> split_response
+             in
+             Alcotest.(check int) "video ?format=png&max_px=160 returns 200" 200 st_p2;
+             Alcotest.(check (option string))
+               "video format=png content-type"
+               (Some "image/png")
+               (List.assoc_opt "content-type" hdrs_p2);
+             Alcotest.(check string) "poster and format=png return identical cached PNG" body_p1 body_p2)))
+;;
+
 let () =
   Alcotest.run
     "attachments_http_and_gc"
     [ ( "http, gc scope, and mcp resource"
       , [ Alcotest.test_case "HTTP upload/get/head/304/download/thumb/meta/media-delegation" `Quick test_http_auth_and_upload_variants
         ; Alcotest.test_case "HTTP ?max_px and ?format=png with Process_eio.init active" `Quick test_derivatives_with_process_eio_init
+        ; Alcotest.test_case "HTTP Range 206/416 streaming and video ?poster=1" `Quick test_http_range_and_video_poster
         ; Alcotest.test_case "HTTP opaque attachment download-only and ephemeral keeper scope" `Quick test_opaque_serve_and_ephemeral_scope
         ; Alcotest.test_case "GC scope non-halt, reachability, and fail-closed sweep" `Quick test_gc_scope_non_halt_and_reachability
         ; Alcotest.test_case "MCP masc://attachments/{id} template, BlobResourceContents, and ephemeral scope" `Quick test_mcp_attachment_resource

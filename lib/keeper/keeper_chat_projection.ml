@@ -155,6 +155,7 @@ let chat_stream_contract_json ~trace_lookup_available ~trace_block
               | Keeper_chat_blocks.Table _
               | Keeper_chat_blocks.Code _
               | Keeper_chat_blocks.Mermaid _
+              | Keeper_chat_blocks.Chart _
               | Keeper_chat_blocks.Svg _
               | Keeper_chat_blocks.Voice _
               | Keeper_chat_blocks.Attach _

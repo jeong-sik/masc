@@ -211,6 +211,7 @@ let rich_embed_of_chat_block = function
   | Keeper_chat_blocks.Unordered_list _
   | Keeper_chat_blocks.Callout _
   | Keeper_chat_blocks.Table _
+  | Keeper_chat_blocks.Chart _
   | Keeper_chat_blocks.Svg _
   | Keeper_chat_blocks.Voice _
   | Keeper_chat_blocks.Attach _

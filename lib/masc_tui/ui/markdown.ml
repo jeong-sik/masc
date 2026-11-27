@@ -120,8 +120,9 @@ let pad_line_to_width ~width ~pad_style (line : rendered_line) =
         @ [ { text = String.make rem ' '; style = pad_style; hyperlink = None } ];
     }
 
-let max_inline_mermaid_bytes = 8192
-let max_inline_mermaid_lines = 80
+let max_inline_mermaid_bytes = 32768
+let max_inline_mermaid_lines = 200
+let min_pele_placeholder_rows = 8
 
 let is_diagram_line_cluster = function
   | "\xe2\x94\x80" (* ─ *) | "\xe2\x94\x82" (* │ *) | "\xe2\x94\x8c" (* ┌ *)
@@ -185,11 +186,26 @@ let try_render_mermaid_fence ~inner_w body_lines =
       | Ok (_ :: _ as rows) -> Some rows
       | Ok [] | Error _ -> None
 
-type fence_kind = Diagram | Score of { rhythm : bool } | Code
+type fence_kind =
+  | Pele_mermaid
+  | Pele_chart
+  | Pele_svg
+  | Pele_graph
+  | Score of { rhythm : bool }
+  | Code
 
 let fence_kind tag rest =
   match String.lowercase_ascii tag with
-  | "mermaid" | "pele" -> Diagram
+  | "mermaid" | "pele" | "xychart" | "xychart-beta" | "pie"
+  | "quadrantchart" | "radar-beta" | "sankey-beta" | "treemap-beta"
+  | "gantt" | "timeline" | "kanban" | "mindmap" | "venn-beta"
+  | "gitgraph" | "wardley" | "ishikawa" | "cynefin" | "agentflow"
+  | "eventmodeling" | "swimlane" | "railroad" | "c4" | "architecture"
+  | "treeview" | "usecase" ->
+      Pele_mermaid
+  | "chart" -> Pele_chart
+  | "svg" -> Pele_svg
+  | "graph" -> Pele_graph
   | "alphatex" | "atex" -> Score { rhythm = String.equal rest "rhythm" }
   | _ -> Code
 
@@ -596,7 +612,9 @@ let alphatex_code_blocks raw =
                 |> String.concat "\n"
               in
               body :: acc
-          | Score _, false | (Diagram | Code), (true | false) -> acc
+          | Score _, false
+          | (Pele_mermaid | Pele_chart | Pele_svg | Pele_graph | Code), (true | false) ->
+              acc
         in
         Folder.ret acc
     | _ -> Folder.default
@@ -732,7 +750,7 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
     let kind = fence_kind lang_tag info_tail in
     let rendered =
       match kind, closed with
-      | Diagram, true -> (
+      | Pele_mermaid, true -> (
           match try_render_mermaid_fence ~inner_w body_lines with
           | None -> false
           | Some rows ->
@@ -750,11 +768,20 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
           | Ok rows ->
               draw (List.map (fun row -> [ span code_pad row ]) rows);
               true
-          | Error reason ->
-              let style = Typography.status ~bg:code_bg theme Theme.Status_attention in
-              draw [ [ span style (Alphatex.failure_text reason) ] ];
+          | Error _ ->
+              let hint_style = Typography.whisper ~bg:code_bg theme in
+              draw
+                [
+                  [
+                    span hint_style
+                      "AlphaTex score · /score to open graphical sheet & audio (악보·오디오 열기)";
+                  ];
+                ];
               false)
-      | (Diagram | Score _), false | Code, _ -> false
+      | (Pele_chart | Pele_svg | Pele_graph), true
+      | (Pele_mermaid | Pele_chart | Pele_svg | Pele_graph | Score _), false
+      | Code, (true | false) ->
+          false
     in
     if not rendered then begin
       Code_lexer.rows_of_source ~language:(Code_lexer.language_of_tag lang_tag)
@@ -765,12 +792,46 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
       |> draw
     end;
     (match kind, closed with
-    | Diagram, true
+    | (Pele_mermaid | Pele_chart | Pele_svg | Pele_graph), true
       when List.length body_lines <= max_inline_mermaid_lines ->
         let source = String.concat "\n" body_lines in
-        if String.length source <= max_inline_mermaid_bytes && !row_count - body_start >= 2 then
-          attach_image ~source:(Mermaid source) ~left_inset:(width - inner_w) ~start:body_start
-    | (Diagram | Score _ | Code), _ -> ())
+        let image_source_opt =
+          match kind, rendered with
+          | Pele_mermaid, true -> Some (Cell_grid.Mermaid source)
+          | Pele_mermaid, false ->
+              Some
+                (Cell_grid.Pele_scene
+                   { format = Cell_grid.Pele_mermaid; source })
+          | Pele_chart, (true | false) ->
+              Some
+                (Cell_grid.Pele_scene
+                   { format = Cell_grid.Pele_chart; source })
+          | Pele_svg, (true | false) ->
+              Some
+                (Cell_grid.Pele_scene { format = Cell_grid.Pele_svg; source })
+          | Pele_graph, (true | false) ->
+              Some
+                (Cell_grid.Pele_scene
+                   { format = Cell_grid.Pele_graph; source })
+          | (Score _ | Code), (true | false) -> None
+        in
+        (match image_source_opt with
+        | Some image_source
+          when String.length source <= max_inline_mermaid_bytes
+               && not (String.equal (String.trim source) "") ->
+            if
+              (not rendered)
+              && !row_count - body_start < min_pele_placeholder_rows
+            then begin
+              let need = min_pele_placeholder_rows - (!row_count - body_start) in
+              draw (List.init need (fun _ -> []))
+            end;
+            if !row_count - body_start >= 2 then
+              attach_image ~source:image_source ~left_inset:(width - inner_w)
+                ~start:body_start
+        | Some _ | None -> ())
+    | (Pele_mermaid | Pele_chart | Pele_svg | Pele_graph | Score _ | Code), (true | false) ->
+        ())
   in
   let draw_table layout table =
     let separator = span hairline_style (" " ^ Glyph.to_utf8 Glyph.Box_v ^ " ") in

@@ -5,6 +5,7 @@ type format =
   | Mermaid
   | Svg
   | Graph
+  | Chart
 
 type scene = {
   format : format;
@@ -258,6 +259,7 @@ let render ~cache_dir ?timeout_s ?clock ?(cancelled = fun () -> false) ?raster
           | Mermaid -> "mermaid"
           | Svg -> "svg"
           | Graph -> "graph"
+          | Chart -> "chart"
         in
         let fields =
           [

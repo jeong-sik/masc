@@ -5,7 +5,7 @@ import { renderDocument } from './engine.mjs';
 const protocolVersion = 1;
 
 if (process.argv.length === 3 && process.argv[2] === '--help') {
-  console.log('masc-pele: read {format:mermaid|svg|graph,source,maxWidth,fontSize?,now?,colors?,raster?:{width,height,crop?:{left,top,right,bottom}}} JSON from stdin; write PNG to stdout');
+  console.log('masc-pele: read {format:mermaid|svg|graph|chart,source,maxWidth,fontSize?,now?,colors?,raster?:{width,height,crop?:{left,top,right,bottom}}} JSON from stdin; write PNG to stdout');
 } else {
   try {
     const request = JSON.parse(readFileSync(0, 'utf8'));

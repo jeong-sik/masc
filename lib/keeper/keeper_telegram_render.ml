@@ -26,6 +26,15 @@ let parts = function
   | Table {head;rows} -> [Pre(String.concat "\n" (List.map(fun row -> String.concat " | " (List.map cell row)) (head::rows)))]
   | Code {cap;html;source} -> [Bold(optional cap); Pre(Option.value ~default:(text_of_html html) source)]
   | Mermaid {source;caption} -> [Bold("Mermaid "^optional caption);Pre source]
+  | Chart {title;series;chart_type=_;labels=_;x_label=_;y_label=_;y_max=_} ->
+    let summary =
+      List.map
+        (fun (s : Blocks.chart_series) ->
+           s.label ^ ": " ^ String.concat ", " (List.map (Printf.sprintf "%g") s.values))
+        series
+      |> String.concat "\n"
+    in
+    [Bold("Chart: "^title); Pre summary]
   | Svg {svg;cap} -> [Bold("SVG "^optional cap);Pre svg]
   | Voice {src;transcript;via;secs=_;wave=_;size=_} ->
     [Bold("Audio "^optional via);Plain(optional transcript)] @ link ~url:(optional src) ~title:(optional src)

@@ -172,6 +172,8 @@ let slash_spec_requires_arg (spec : Slash.spec) =
   | Slash.Cmd_voice
   | Slash.Cmd_detach
   | Slash.Cmd_paste_image
+  | Slash.Cmd_play
+  | Slash.Cmd_stop
   | Slash.Cmd_wake
   | Slash.Cmd_up
   | Slash.Cmd_resume
@@ -250,6 +252,8 @@ let resolve_slash_arg_candidates ?cmd_name (m : Model.t) (spec : Slash.spec)
         | Slash.Cmd_attach
         | Slash.Cmd_detach
         | Slash.Cmd_paste_image
+        | Slash.Cmd_play
+        | Slash.Cmd_stop
         | Slash.Cmd_btw
         | Slash.Cmd_queue
         | Slash.Cmd_context
@@ -371,6 +375,8 @@ let resolve_slash_arg_candidates ?cmd_name (m : Model.t) (spec : Slash.spec)
   | Slash.Cmd_attach
   | Slash.Cmd_detach
   | Slash.Cmd_paste_image
+  | Slash.Cmd_play
+  | Slash.Cmd_stop
   | Slash.Cmd_btw
   | Slash.Cmd_queue
   | Slash.Cmd_context

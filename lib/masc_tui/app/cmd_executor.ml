@@ -531,10 +531,13 @@ type t = {
   skill_read_in_flight : string option Atomic.t;
   sse_hub : Sse_hub.t;
   voice_runner : Voice_runner.t;
+  media_player : Media_player.t;
   in_tmux : bool;
   term_program : string option;
   editor_handoff : editor_handoff;
   pending_editor : (unit -> unit) option Atomic.t;
+  pending_midi_temp_mu : Stdlib.Mutex.t;
+  pending_midi_temp : string option ref;
   wiki_editor_gen : int Atomic.t;
   editor_active : bool Atomic.t;
   in_flight_gets_mu : Stdlib.Mutex.t;
@@ -733,6 +736,40 @@ let detect_in_tmux () =
   | Some s -> not (String.equal (String.trim s) "")
   | None -> false
 
+let remove_midi_temp_quietly path =
+  try Sys.remove path with Sys_error _ -> ()
+
+let clear_pending_midi_temp_slot ~mu ~slot =
+  let prev =
+    Stdlib.Mutex.protect mu (fun () ->
+        let cur = !slot in
+        slot := None;
+        cur)
+  in
+  Option.iter remove_midi_temp_quietly prev
+
+let clear_pending_midi_temp t =
+  clear_pending_midi_temp_slot ~mu:t.pending_midi_temp_mu
+    ~slot:t.pending_midi_temp
+
+let set_pending_midi_temp t next =
+  let prev =
+    Stdlib.Mutex.protect t.pending_midi_temp_mu (fun () ->
+        let cur = !(t.pending_midi_temp) in
+        t.pending_midi_temp := next;
+        cur)
+  in
+  match prev, next with
+  | Some p, Some n when String.equal p n -> ()
+  | Some p, (Some _ | None) -> remove_midi_temp_quietly p
+  | None, (Some _ | None) -> ()
+
+let take_pending_midi_temp_if_matching t path =
+  Stdlib.Mutex.protect t.pending_midi_temp_mu (fun () ->
+      match !(t.pending_midi_temp) with
+      | Some cur when String.equal cur path -> t.pending_midi_temp := None
+      | Some _ | None -> ())
+
 let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
     ?in_tmux ?term_program
     ?(editor_handoff = noop_editor_handoff) ?(on_editor_ready = fun () -> ())
@@ -759,6 +796,8 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
   let owned_server = Atomic.make None in
   let active_memory_diagram_cancel = Atomic.make None in
   let pending_editor = Atomic.make None in
+  let pending_midi_temp_mu = Stdlib.Mutex.create () in
+  let pending_midi_temp = ref None in
   let wiki_editor_gen = Atomic.make 0 in
   let editor_active = Atomic.make false in
   let in_flight_gets_mu = Stdlib.Mutex.create () in
@@ -782,15 +821,19 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
         | Voice_runner.Voice_error _ ->
             Ui_bus.publish_stream_receipt bus msg)
   in
+  let media_player = Media_player.create () in
   let closed = Atomic.make false in
   Eio.Switch.on_release sw (fun () ->
       Atomic.set closed true;
+      Media_player.shutdown media_player;
       Stdlib.Mutex.lock in_flight_gets_mu;
       Fun.protect
         ~finally:(fun () -> Stdlib.Mutex.unlock in_flight_gets_mu)
         (fun () -> Hashtbl.clear in_flight_gets);
       ignore (Atomic.fetch_and_add wiki_editor_gen 1 : int);
       ignore (Atomic.exchange pending_editor None : (unit -> unit) option);
+      clear_pending_midi_temp_slot ~mu:pending_midi_temp_mu
+        ~slot:pending_midi_temp;
       match Atomic.exchange active_memory_diagram_cancel None with
       | Some flag -> Atomic.set flag true
       | None -> ());
@@ -812,10 +855,13 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
     skill_read_in_flight;
     sse_hub;
     voice_runner;
+    media_player;
     in_tmux;
     term_program;
     editor_handoff;
     pending_editor;
+    pending_midi_temp_mu;
+    pending_midi_temp;
     wiki_editor_gen;
     editor_active;
     in_flight_gets_mu;
@@ -4684,6 +4730,7 @@ let execute_editor_escape_hatch t target =
       else
         let my_gen = Atomic.fetch_and_add t.wiki_editor_gen 1 + 1 in
         ignore (Atomic.exchange t.pending_editor None : (unit -> unit) option);
+        clear_pending_midi_temp t;
         let path = Wire_knowledge.wiki_page_path ~page in
         let is_still_current () =
           (not (Atomic.get t.closed))
@@ -5175,6 +5222,7 @@ let rec execute t = function
       if not (Epoch.equal (Atomic.get t.stream_epoch) epoch) then begin
         ignore (Atomic.fetch_and_add t.wiki_editor_gen 1 : int);
         ignore (Atomic.exchange t.pending_editor None : (unit -> unit) option);
+        clear_pending_midi_temp t;
         ignore
           (Sse_hub.sync_streams t.sse_hub ~on_event [] : (Sse_hub.sync_diff, string) result)
       end;
@@ -5601,6 +5649,182 @@ let rec execute t = function
                                  Error (Msg.Transport (Health.Other_io detail));
                              };
                        })))
+  | Cmd.Play_media { epoch; source; mime_type; label } ->
+      fork_safe t (fun () ->
+          let emit_play_ack ~toast_label result =
+            Ui_bus.publish_stream_receipt t.bus
+              (Msg.Http_reply
+                 {
+                   epoch;
+                   reply =
+                     Msg.Reply_action_ack
+                       {
+                         label = toast_label;
+                         ack_scope = Msg.Ack_toast_only;
+                         for_modal = None;
+                         result;
+                       };
+                 })
+          in
+          let ext_of_mime mime fallback_name =
+            let mapped = Wire_attachment.extension_of_mime mime in
+            if not (String.equal mapped ".bin") then mapped
+            else
+              let e = Filename.extension fallback_name in
+              if String.equal e "" then ".bin" else e
+          in
+          let read_head_bytes path =
+            try
+              In_channel.with_open_bin path (fun ic ->
+                  let buf = Bytes.create 512 in
+                  let n = In_channel.input ic buf 0 512 in
+                  Bytes.sub_string buf 0 n)
+            with Sys_error _ | Unix.Unix_error _ -> ""
+          in
+          let prepared =
+            match source with
+            | `Local local_path ->
+                let head =
+                  Eio_unix.run_in_systhread (fun () ->
+                      read_head_bytes local_path)
+                in
+                let eff_mime =
+                  match
+                    Wire_attachment.sniff_mime
+                      ~filename:(Filename.basename local_path)
+                      head
+                  with
+                  | Some m -> m
+                  | None -> (
+                      match mime_type with
+                      | Some m -> Wire_attachment.normalize_mime m
+                      | None -> "application/octet-stream")
+                in
+                Ok (local_path, false, eff_mime)
+            | `Remote (url, name_hint) -> (
+                let ep = current_endpoint t in
+                let fetch_path =
+                  if Wire_attachment.is_attachment_path url then
+                    Wire_attachment.attachment_render_path ~download:true url
+                  else url
+                in
+                match
+                  Http_client.get_attachment_bytes ~io:t.io ~clock:t.clock ep
+                    ~path:fetch_path
+                with
+                | Error err -> Error (msg_error_of_http err)
+                | Ok bytes -> (
+                    let eff_mime =
+                      match
+                        Wire_attachment.sniff_mime ~filename:name_hint bytes
+                      with
+                      | Some m -> m
+                      | None -> (
+                          match mime_type with
+                          | Some m -> Wire_attachment.normalize_mime m
+                          | None -> "application/octet-stream")
+                    in
+                    let ext = ext_of_mime eff_mime name_hint in
+                    let write_res =
+                      Eio_unix.run_in_systhread (fun () ->
+                          try
+                            let tmp = Filename.temp_file "masc-media-" ext in
+                            Out_channel.with_open_bin tmp (fun oc ->
+                                Out_channel.output_string oc bytes);
+                            Ok tmp
+                          with
+                          | Sys_error detail -> Error detail
+                          | Unix.Unix_error (code, fn, arg) ->
+                              Error
+                                (Printf.sprintf "%s(%s): %s" fn arg
+                                   (Unix.error_message code)))
+                    in
+                    match write_res with
+                    | Ok tmp -> Ok (tmp, true, eff_mime)
+                    | Error detail ->
+                        Error (Msg.Transport (Health.Other_io detail))))
+          in
+          match prepared with
+          | Error err ->
+              emit_play_ack
+                ~toast_label:(Say.make ~ko:"미디어 재생" ~en:"Play media")
+                (Error err)
+          | Ok (path, temp_cleanup, eff_mime) -> (
+              match
+                Eio_unix.run_in_systhread (fun () ->
+                    Media_player.play_file t.media_player
+                      ~base_path:t.cli.base_path ~temp_cleanup
+                      ~mime_type:eff_mime ~label ~path ())
+              with
+              | Ok (Media_player.Playing shown) ->
+                  emit_play_ack
+                    ~toast_label:
+                      (Say.make
+                         ~ko:(Printf.sprintf "재생 중: %s (/stop 으로 중지)" shown)
+                         ~en:(Printf.sprintf "Playing: %s (/stop to stop)" shown))
+                    (Ok ())
+              | Ok (Media_player.Opened_external shown) ->
+                  emit_play_ack
+                    ~toast_label:
+                      (Say.make
+                         ~ko:(Printf.sprintf "외부 플레이어로 열기: %s" shown)
+                         ~en:(Printf.sprintf "Opened in external player: %s" shown))
+                    (Ok ())
+              | Ok (Media_player.Handoff_alphatex midi_path) ->
+                  let launch () =
+                    if temp_cleanup then
+                      take_pending_midi_temp_if_matching t midi_path;
+                    Fun.protect
+                      ~finally:(fun () ->
+                        if temp_cleanup then remove_midi_temp_quietly midi_path)
+                      (fun () ->
+                        execute_terminal_program t
+                          (Cmd.Music_import_midi midi_path))
+                  in
+                  ignore
+                    (Atomic.exchange t.pending_editor (Some launch)
+                      : (unit -> unit) option);
+                  set_pending_midi_temp t
+                    (if temp_cleanup then Some midi_path else None);
+                  if Atomic.get t.closed then (
+                    ignore
+                      (Atomic.exchange t.pending_editor None
+                        : (unit -> unit) option);
+                    clear_pending_midi_temp t)
+                  else t.on_editor_ready ()
+              | Error detail ->
+                  emit_play_ack
+                    ~toast_label:(Say.make ~ko:"미디어 재생" ~en:"Play media")
+                    (Error (Msg.Transport (Health.Other_io detail)))))
+  | Cmd.Stop_media_playback ->
+      let epoch = Atomic.get t.stream_epoch in
+      fork_safe t (fun () ->
+          let stopped =
+            Eio_unix.run_in_systhread (fun () -> Media_player.stop t.media_player)
+          in
+          let label =
+            match stopped with
+            | Some shown ->
+                Say.make
+                  ~ko:(Printf.sprintf "재생 중지됨: %s" shown)
+                  ~en:(Printf.sprintf "Stopped playback: %s" shown)
+            | None ->
+                Say.make ~ko:"재생 중인 미디어가 없습니다"
+                  ~en:"No active media playback"
+          in
+          Ui_bus.publish_stream_receipt t.bus
+            (Msg.Http_reply
+               {
+                 epoch;
+                 reply =
+                   Msg.Reply_action_ack
+                     {
+                       label;
+                       ack_scope = Msg.Ack_toast_only;
+                       for_modal = None;
+                       result = Ok ();
+                     };
+               }))
   | Cmd.Open_dos_screen { epoch } ->
       let is_current () =
         not (Atomic.get t.closed)
@@ -5679,7 +5903,9 @@ let shutdown ?(preserve_owned_server = false) t =
   Atomic.set t.closed true;
   ignore (Atomic.fetch_and_add t.wiki_editor_gen 1 : int);
   ignore (Atomic.exchange t.pending_editor None : (unit -> unit) option);
+  clear_pending_midi_temp t;
   cancel_active_memory_diagram t;
+  Media_player.shutdown t.media_player;
   Voice_runner.stop t.voice_runner;
   Sse_hub.shutdown t.sse_hub;
   if not preserve_owned_server then

@@ -250,6 +250,7 @@ let slack_block_of_chat_block = function
   | Keeper_chat_blocks.Unordered_list _
   | Keeper_chat_blocks.Callout _
   | Keeper_chat_blocks.Table _
+  | Keeper_chat_blocks.Chart _
   | Keeper_chat_blocks.Svg _
   | Keeper_chat_blocks.Voice _
   | Keeper_chat_blocks.Attach _
@@ -273,6 +274,7 @@ let content_blocks_of_text text =
         | Keeper_chat_blocks.Table _
         | Keeper_chat_blocks.Code _
         | Keeper_chat_blocks.Mermaid _
+        | Keeper_chat_blocks.Chart _
         | Keeper_chat_blocks.Svg _
         | Keeper_chat_blocks.Voice _
         | Keeper_chat_blocks.Attach _

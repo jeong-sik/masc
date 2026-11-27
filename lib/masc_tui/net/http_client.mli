@@ -189,7 +189,10 @@ val post_json :
 (** {1 Binary Attachment Upload & Fetch ([/api/v1/attachments])} *)
 
 val max_attachment_upload_bytes : int
-(** Client pre-flight size cap matching the server's 32 MiB limit. *)
+(** Client pre-flight size cap for non-video attachments (20 MiB). *)
+
+val max_video_attachment_upload_bytes : int
+(** Client pre-flight size cap for video attachments (50 MiB). *)
 
 val upload_attachment :
   io:Io_domain.t ->

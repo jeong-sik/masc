@@ -311,6 +311,8 @@ let find_render_cmd cmds =
       | Cmd.Paste_clipboard_image _
       | Cmd.Fetch_inspector_image _
       | Cmd.Export_attachment _
+      | Cmd.Play_media _
+      | Cmd.Stop_media_playback
       | Cmd.Open_dos_screen _
       | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
@@ -341,6 +343,8 @@ let has_cancel_diagram_cmd cmds =
       | Cmd.Paste_clipboard_image _
       | Cmd.Fetch_inspector_image _
       | Cmd.Export_attachment _
+      | Cmd.Play_media _
+      | Cmd.Stop_media_playback
       | Cmd.Open_dos_screen _
       | Cmd.Open_external_url _
       | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
@@ -531,6 +535,8 @@ let test_store_diagram_keybindings_and_scope_safety () =
       | Cmd.Paste_clipboard_image _
       | Cmd.Fetch_inspector_image _
       | Cmd.Export_attachment _
+      | Cmd.Play_media _
+      | Cmd.Stop_media_playback
         | Cmd.Open_dos_screen _
         | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
@@ -1245,6 +1251,8 @@ let test_visibility_enter_refresh_and_resize () =
       | Cmd.Paste_clipboard_image _
       | Cmd.Fetch_inspector_image _
       | Cmd.Export_attachment _
+      | Cmd.Play_media _
+      | Cmd.Stop_media_playback
         | Cmd.Open_dos_screen _
         | Cmd.Open_external_url _
         | Cmd.Open_editor_escape_hatch _ | Cmd.Open_terminal_program _
@@ -1675,7 +1683,7 @@ let test_all_subviews_and_orphan_fact_snapshot () =
       in
       let scene_for_snapshot (scene : Pele.scene) =
         check bool "single Mermaid fact scene" true
-          (match scene.format with Pele.Mermaid -> true | Svg | Graph -> false);
+          (match scene.format with Pele.Mermaid -> true | Svg | Graph | Chart -> false);
         check string "Pele receives the same source as the clipboard"
           d_orphan.copy_source scene.source;
         check bool "snapshot has one fact node and no event or edge" true

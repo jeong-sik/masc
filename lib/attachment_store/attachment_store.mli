@@ -25,11 +25,18 @@ val url_prefix : string
 (** Canonical HTTP fetch URL prefix: ["/api/v1/attachments/"]. *)
 
 val default_max_bytes : int
-(** Default maximum attachment size in bytes (20 MiB). *)
+(** Default maximum non-video attachment size in bytes (20 MiB). *)
 
 val max_bytes : unit -> int
-(** Effective maximum attachment size in bytes, reading
+(** Effective maximum non-video attachment size in bytes, reading
     [MASC_ATTACHMENT_MAX_BYTES] when set to a positive integer. *)
+
+val default_max_video_bytes : int
+(** Default maximum video attachment size in bytes (50 MiB). *)
+
+val max_video_bytes : unit -> int
+(** Effective maximum video attachment size in bytes, reading
+    [MASC_ATTACHMENT_MAX_VIDEO_BYTES] when set to a positive integer. *)
 
 val default_ephemeral_max_entries : int
 (** Default maximum ephemeral pins retained per keeper (500). *)
@@ -70,6 +77,7 @@ val retention_to_wire_string : retention -> string
 type media_kind =
   | Image
   | Audio
+  | Video
   | Document
 
 val media_kind_to_string : media_kind -> string
@@ -87,6 +95,9 @@ type supported_mime =
   | Audio_midi
   | Audio_mp4
   | Audio_webm
+  | Video_mp4
+  | Video_webm
+  | Video_quicktime
 
 val mime_to_string : supported_mime -> string
 val media_kind_of_mime : supported_mime -> media_kind
@@ -243,6 +254,13 @@ val get_bytes : t -> id:string -> (string option, get_error) result
 (** Read raw bytes for canonical [att_<64hex>] id with ownership and SHA-256
     integrity verification. *)
 
+val get_byte_range :
+  t -> id:string -> start:int -> length:int -> (string option, get_error) result
+(** Read only the requested byte slice [[start, start + length)] for canonical
+    [att_<64hex>] id via [seek_in] + [really_input_string] after verifying
+    metadata, regular-file ownership, and exact blob size. Used by HTTP [206]
+    Range streaming to avoid loading large video blobs into RAM per seek. *)
+
 val get_bytes_by_sha256 : t -> sha256:string -> (string option, get_error) result
 (** Read raw bytes for bare 64-hex [sha256] (for [History.Stored] and
     [/api/v1/media/<sha256>] lookups) with ownership and integrity checks. *)
@@ -262,7 +280,23 @@ val get_image_derivative :
   (string * string, derivative_error) result
 (** Produce or retrieve a cached image derivative [(out_mime, out_bytes)] under
     [thumbs/<aa>/] for [?max_px=] (quantized via {!quantize_thumb_px})
-    and/or [?format=png]. Rejects non-image attachments with {!Not_an_image}. *)
+    and/or [?format=png]. On [Video] attachments with [Force_png], delegates to
+    {!get_video_poster}. Rejects non-image/non-video attachments with
+    {!Not_an_image}. *)
+
+val get_video_poster :
+  ?blocking:blocking_runner ->
+  ?max_px:int ->
+  t ->
+  meta:meta ->
+  raw_bytes:string ->
+  (string * string, derivative_error) result
+(** Extract and cache a single PNG poster keyframe for a [Video] attachment via
+    [ffmpeg] under [thumbs/<aa>/<sha>_poster_<px>.png] (default [px = 640],
+    quantized via {!quantize_thumb_px}). Subprocess execution runs directly on
+    the caller's Eio fiber (never inside [blocking]), while temp file and cache
+    I/O run through [blocking]. Rejects non-video attachments with
+    {!Not_an_image}. *)
 
 val promote_to_durable : t -> id:string -> (meta option, get_error) result
 (** Atomically promote an [Ephemeral] attachment to [Durable]. Returns [Ok None]

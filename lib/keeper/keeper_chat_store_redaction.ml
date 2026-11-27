@@ -277,6 +277,23 @@ let redact_block redaction = function
       { source = redact_string redaction source
       ; caption = redact_string_opt redaction caption
       }
+  | Keeper_chat_blocks.Chart { chart_type; title; series; labels; x_label; y_label; y_max } ->
+    Keeper_chat_blocks.Chart
+      { chart_type
+      ; title = redact_string redaction title
+      ; series =
+          List.map
+            (fun ({ label; color; values } : Keeper_chat_blocks.chart_series) ->
+               { Keeper_chat_blocks.label = redact_string redaction label
+               ; color
+               ; values
+               })
+            series
+      ; labels = Option.map (List.map (redact_string redaction)) labels
+      ; x_label = redact_string_opt redaction x_label
+      ; y_label = redact_string_opt redaction y_label
+      ; y_max
+      }
   | Keeper_chat_blocks.Svg { svg; cap } ->
     Keeper_chat_blocks.Svg
       { svg = redact_string redaction svg

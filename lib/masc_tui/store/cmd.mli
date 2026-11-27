@@ -728,6 +728,13 @@ type t =
       ext : string;
       open_after : bool;
     }
+  | Play_media of {
+      epoch : Epoch.t;
+      source : [ `Remote of string * string | `Local of string ];
+      mime_type : string option;
+      label : string;
+    }
+  | Stop_media_playback
   | Open_dos_screen of { epoch : Epoch.t }
   | Open_external_url of string
   | Open_editor_escape_hatch of editor_target

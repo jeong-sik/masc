@@ -789,10 +789,12 @@ export type KeeperImageReference =
 
 export type KeeperConversationAttachment =
   | {
-      /** Bytes this client already holds, as a data URL. */
+      /** Bytes this client already holds, as a data URL or same-origin attachment URL. */
       kind?: undefined
       id: string
-      type: 'image' | 'file'
+      type: 'image' | 'file' | 'audio' | 'video'
+      /** Optional typed media kind preserved from Attachment_store (`image` | `audio` | `video` | `document`). */
+      mediaKind?: 'image' | 'audio' | 'video' | 'document'
       name: string
       size: number
       mimeType: string
@@ -861,7 +863,16 @@ export type ChatShellBlock = { t: 'shell'; title?: string; lines: ChatShellLine[
 export type ChatArtifactBlock = { t: 'artifact'; kind?: string; name: string; size?: string; note?: string; data?: string; mimeType?: string }
 
 export type ChatChartSeries = { label: string; color?: string; values: number[] }
-export type ChatChartBlock = { t: 'chart'; title: string; series: ChatChartSeries[]; labels?: string[]; xLabel?: string; yMax?: number }
+export type ChatChartBlock = {
+  t: 'chart'
+  chartType?: 'line' | 'bar' | 'area' | 'pie'
+  title: string
+  series: ChatChartSeries[]
+  labels?: string[]
+  xLabel?: string
+  yLabel?: string
+  yMax?: number
+}
 
 export type ChatSuggestionItem = { icon?: string; label: string; action?: string }
 export type ChatSuggestionsBlock = { t: 'suggestions'; items: ChatSuggestionItem[] }

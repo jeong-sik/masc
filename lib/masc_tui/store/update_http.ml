@@ -9306,6 +9306,8 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Cmd.Paste_clipboard_image _
                 | Cmd.Fetch_inspector_image _
                 | Cmd.Export_attachment _
+                | Cmd.Play_media _
+                | Cmd.Stop_media_playback
                 | Cmd.Open_dos_screen _
                 | Cmd.Open_external_url _
                 | Cmd.Open_editor_escape_hatch _

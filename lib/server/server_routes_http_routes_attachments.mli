@@ -10,11 +10,13 @@
       [{ "ok": true, "data": <meta_wire_json> }].
     - [GET /api/v1/attachments/<id>] and [HEAD /api/v1/attachments/<id>]
       ([CanReadState]): serves verified binary bytes with [Content-Type],
-      [X-Content-Type-Options: nosniff],
+      [Accept-Ranges: bytes], RFC 9110 byte [Range] streaming ([206 Partial
+      Content] / [416 Range Not Satisfiable]), [X-Content-Type-Options: nosniff],
       [Content-Security-Policy: default-src 'none'; sandbox],
       [ETag: "<sha256>"], [Cache-Control: private, max-age=31536000, immutable],
       conditional [If-None-Match] -> [304 Not Modified], optional
       [?download=1] (with RFC 5987 [filename*=UTF-8''] for non-ASCII names),
+      [?poster=1] (video keyframe PNG extraction via [ffmpeg]),
       [?format=png], and [?max_px=N] (quantized to [[160; 320; 640; 1280]]).
       Internal opaque binaries persisted via {!Attachment_store.put_opaque} are
       ALWAYS served as [application/octet-stream] with

@@ -287,7 +287,7 @@ type KeeperChatCustomEvent =
         sha256?: string
         url: string
         mime_type: string
-        kind: 'image' | 'audio' | 'document'
+        kind: 'image' | 'audio' | 'video' | 'document'
         bytes?: number
         width?: number | null
         height?: number | null

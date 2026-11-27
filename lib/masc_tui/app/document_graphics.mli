@@ -4,7 +4,7 @@
     - Kitty: PNG transmission ([f=100]); requests [?format=png] for non-PNG
       [/api/v1/attachments/<id>] images.
     - iTerm2: inline OSC 1337 placement natively supporting PNG/JPEG/WebP/GIF.
-    - Standard / tmux / non-graphics terminals: requests [?format=png&max_px=160]
+    - Standard / tmux / non-graphics terminals: requests [?format=png&max_px=240]
       and paints 24-bit truecolor Unicode half-block (['▀']) previews directly
       onto {!Masc_tui_term.Cell_grid.t}. *)
 

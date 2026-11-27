@@ -17,6 +17,8 @@ type command_id =
   | Cmd_attach
   | Cmd_detach
   | Cmd_paste_image
+  | Cmd_play
+  | Cmd_stop
   | Cmd_btw
   | Cmd_discord_reply
   | Cmd_wake
@@ -194,6 +196,8 @@ type parsed =
   | Attach of string
   | Detach of [ `Last | `All | `Index of int ]
   | Paste_image
+  | Play of string option
+  | Stop
   | Btw of string
   | Discord_reply
   | Wake of string option
@@ -280,6 +284,8 @@ let command_id_rank = function
   | Cmd_attach -> 38
   | Cmd_detach -> 39
   | Cmd_paste_image -> 40
+  | Cmd_play -> 41
+  | Cmd_stop -> 42
 
 let equal_command_id a b = Int.equal (command_id_rank a) (command_id_rank b)
 
@@ -640,6 +646,8 @@ let parsed_tag = function
   | Attach _ -> 40
   | Detach _ -> 41
   | Paste_image -> 42
+  | Play _ -> 43
+  | Stop -> 44
 
 let equal_detach_target a b =
   match a, b with
@@ -656,6 +664,7 @@ let equal_parsed a b =
     | Config x, Config y -> Option.equal String.equal x y
     | Attach x, Attach y -> String.equal x y
     | Detach x, Detach y -> equal_detach_target x y
+    | Play x, Play y -> Option.equal String.equal x y
     | Btw x, Btw y -> String.equal x y
     | Wake x, Wake y -> Option.equal String.equal x y
     | Up x, Up y -> Option.equal String.equal x y
@@ -690,6 +699,7 @@ let equal_parsed a b =
     | Jump, Jump
     | Voice, Voice
     | Paste_image, Paste_image
+    | Stop, Stop
     | Discord_reply, Discord_reply
     | Queue, Queue
     | Context, Context
@@ -714,6 +724,8 @@ let equal_parsed a b =
       | Attach _
       | Detach _
       | Paste_image
+      | Play _
+      | Stop
       | Btw _
       | Discord_reply
       | Wake _
@@ -806,8 +818,9 @@ let all : spec list =
       ~en:"Toggle Voice Push-to-Talk" Slash_interaction;
     mk Cmd_attach "/attach"
       ~arg_hint:(Say.make ~ko:"<경로>" ~en:"<path>")
-      ~ko:"로컬 이미지·PDF·오디오 파일 첨부"
-      ~en:"Attach a local image, PDF, or audio file" Slash_interaction;
+      ~ko:"로컬 이미지·PDF·오디오·MIDI·비디오 파일 첨부"
+      ~en:"Attach a local image, PDF, audio, MIDI, or video file"
+      Slash_interaction;
     mk Cmd_detach "/detach"
       ~arg_hint:(Say.make ~ko:"[번호|all]" ~en:"[index|all]")
       ~ko:"작성 중인 첨부 제거"
@@ -815,6 +828,14 @@ let all : spec list =
     mk Cmd_paste_image "/paste-image"
       ~ko:"클립보드 이미지 첨부 (Ctrl+V)"
       ~en:"Attach image from system clipboard (Ctrl+V)" Slash_interaction;
+    mk Cmd_play "/play"
+      ~arg_hint:(Say.make ~ko:"[번호|ID|경로]" ~en:"[index|att_id|path]")
+      ~ko:"채팅 오디오·MIDI·비디오 첨부 또는 로컬 파일 재생"
+      ~en:"Play latest chat audio/MIDI/video attachment or local media file"
+      Slash_interaction;
+    mk Cmd_stop "/stop"
+      ~ko:"재생 중인 오디오·MIDI 중지"
+      ~en:"Stop active audio/MIDI playback" Slash_interaction;
     mk Cmd_discord_reply "/discord-reply"
       ~ko:"키퍼 채팅에서 Discord 원본을 골라 답장"
       ~en:"Select a Discord message in Keeper chat and reply" Slash_interaction;
@@ -2096,6 +2117,8 @@ let parse raw =
                          got = raw;
                        })))
     | "/paste-image" | "/paste-img" -> no_arg cmd Paste_image arg
+    | "/play" -> Ok (Play arg)
+    | "/stop" -> no_arg cmd Stop arg
     | other -> (
         match unlisted_word_of_command other with
         | Some Music_word -> parse_music ~cmd arg

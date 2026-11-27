@@ -40,7 +40,7 @@ let block_is_answer_content = function
   | Keeper_chat_blocks.Text _ | Keeper_chat_blocks.Heading _
   | Keeper_chat_blocks.Unordered_list _ | Keeper_chat_blocks.Callout _
   | Keeper_chat_blocks.Table _ | Keeper_chat_blocks.Code _
-  | Keeper_chat_blocks.Mermaid _ | Keeper_chat_blocks.Svg _
+  | Keeper_chat_blocks.Mermaid _ | Keeper_chat_blocks.Chart _ | Keeper_chat_blocks.Svg _
   | Keeper_chat_blocks.Voice _ | Keeper_chat_blocks.Attach _
   | Keeper_chat_blocks.Image _ | Keeper_chat_blocks.Link _
   | Keeper_chat_blocks.Fusion _ ->

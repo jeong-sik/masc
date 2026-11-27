@@ -960,7 +960,10 @@ function validateKeeperCustomPayload(
         const validRetention = requiredString(value, 'retention')
         if (!validRetention.success) return validRetention
       }
-      return value.kind === 'image' || value.kind === 'audio' || value.kind === 'document'
+      return value.kind === 'image'
+        || value.kind === 'audio'
+        || value.kind === 'video'
+        || value.kind === 'document'
         ? ok(true)
         : fail('ag_ui_event.value.kind', 'Expected typed attachment kind')
     }

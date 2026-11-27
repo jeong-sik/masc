@@ -3,11 +3,11 @@
 
 import './markdown-embeds.css'
 import { html } from 'htm/preact'
-import type { JSX } from 'preact'
+import { render as preactRender, type JSX } from 'preact'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { Marked, Renderer, type Tokens } from 'marked'
+import { DialogOverlay } from './dialog'
 import { enhanceRichCode } from './rich-code-preview'
-import { ChatPreviewModal } from '../primitives/chat-preview-modal'
 import {
   authSession,
   canAccessMemberWorkspace,
@@ -782,6 +782,84 @@ interface LightboxState {
   readonly alt: string
   readonly lease: WorkspaceMediaObjectUrlLease
 }
+
+let lightboxIdSeq = 0
+
+function MarkdownImageLightbox({
+  title,
+  src,
+  onClose,
+}: {
+  title: string
+  src: string
+  onClose: () => void
+}) {
+  const titleIdRef = useRef<string | null>(null)
+  if (titleIdRef.current === null) {
+    lightboxIdSeq += 1
+    titleIdRef.current = `masc-md-lightbox-title-${lightboxIdSeq}`
+  }
+  const hostRef = useRef<HTMLDivElement | null>(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+  const stableOnClose = useCallback(() => {
+    onCloseRef.current()
+  }, [])
+
+  // Render into document.body with native Preact (avoiding preact/compat global
+  // options.vnode side effects) so the fixed overlay escapes content-visibility
+  // and paint/layout containment inside markdown containers.
+  useEffect(() => {
+    const host = document.createElement('div')
+    host.className = 'masc-md-lightbox-portal'
+    document.body.appendChild(host)
+    hostRef.current = host
+    return () => {
+      preactRender(null, host)
+      host.remove()
+      if (hostRef.current === host) hostRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    preactRender(
+      html`
+        <${DialogOverlay}
+          labelledBy=${titleIdRef.current!}
+          onClose=${stableOnClose}
+          overlayClass="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
+          panelClass="relative max-h-[90vh] max-w-[90vw] overflow-auto rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 shadow-[var(--shadow-raised)]"
+        >
+          <div class="mb-3 flex items-center justify-between gap-4">
+            <span id=${titleIdRef.current!} class="truncate text-sm font-semibold text-[var(--color-fg-primary)]">${title}</span>
+            <button
+              type="button"
+              class="rounded-[var(--r-0)] px-2 py-1 text-xs text-[var(--color-fg-secondary)] hover:bg-[var(--color-bg-hover)] hover:text-[var(--color-fg-primary)]"
+              onClick=${stableOnClose}
+              aria-label="닫기"
+            >
+              ✕
+            </button>
+          </div>
+          <div class="chat-preview-modal-body">
+            <img
+              src=${src}
+              alt=${title}
+              decoding="async"
+              class="max-h-[80vh] max-w-full rounded-[var(--r-1)] object-contain"
+            />
+          </div>
+        <//>
+      `,
+      host,
+    )
+  }, [src, stableOnClose, title])
+
+  return null
+}
+
 export function MarkdownContent({
   text,
   class: className,
@@ -869,14 +947,11 @@ export function MarkdownContent({
       dangerouslySetInnerHTML=${{ __html: htmlStr }}
     ></div>
     ${lightbox && html`
-      <${ChatPreviewModal} title=${lightbox.alt} onClose=${closeLightbox}>
-        <img
-          src=${lightbox.lease.url}
-          alt=${lightbox.alt}
-          decoding="async"
-          class="max-h-[80vh] max-w-full rounded-[var(--r-1)] object-contain"
-        />
-      <//>
+      <${MarkdownImageLightbox}
+        title=${lightbox.alt}
+        src=${lightbox.lease.url}
+        onClose=${closeLightbox}
+      />
     `}
   `
 }

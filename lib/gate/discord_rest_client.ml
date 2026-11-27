@@ -570,10 +570,13 @@ let build_embed_request ~token ~channel_id ~content ?reply_to_message_id ?embeds
   let headers =
     ("Content-Type", "application/json") :: auth_headers ~token
   in
-  let fields =
+  let has_content =
     match content with
-    | "" | " " -> []
-    | c -> [ ("content", `String c) ]
+    | "" | " " -> false
+    | _ -> true
+  in
+  let fields =
+    if has_content then [ ("content", `String content) ] else []
   in
   let fields =
     match embeds with
@@ -582,7 +585,10 @@ let build_embed_request ~token ~channel_id ~content ?reply_to_message_id ?embeds
   in
   let fields =
     match reply_to_message_id with
-    | None -> fields
+    | None ->
+      if has_content then
+        ("allowed_mentions", allowed_mentions_json ~is_reply:false []) :: fields
+      else fields
     | Some _ ->
       ("allowed_mentions", allowed_mentions_json ~is_reply:true [])
       :: add_message_reference reply_to_message_id fields

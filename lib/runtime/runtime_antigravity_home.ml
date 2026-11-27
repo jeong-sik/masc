@@ -336,11 +336,15 @@ let acp_settings_json ?mcp_server_name ~gemini_dir () =
 ;;
 
 let write_private_file ~make_error path contents =
-  match Fs_compat.save_file_atomic_strict path contents with
-  | Error detail -> Error (make_error path detail)
+  match
+    Fs_compat.write_file_atomic_strict_staged path ~write:(fun channel ->
+      Unix.fchmod (Unix.descr_of_out_channel channel) 0o600;
+      output_string channel contents)
+  with
+  | Error failure ->
+    Error (make_error path (Fs_compat.atomic_replace_failure_to_string failure))
   | Ok () ->
     (try
-       Unix.chmod path 0o600;
        let stat = Unix.lstat path in
        let mode = stat.Unix.st_perm land 0o7777 in
        if stat.Unix.st_kind <> Unix.S_REG
@@ -475,37 +479,35 @@ let security_environment ~home_dir =
 ;;
 
 let run_security_direct ~env args =
-  let devnull = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0 in
+  let devnull = Unix.openfile "/dev/null" [ Unix.O_RDWR; Unix.O_CLOEXEC ] 0 in
   let close () = try Unix.close devnull with Unix.Unix_error _ -> () in
-  match
-    Unix.create_process_env
-      security_tool
-      (Array.of_list (security_tool :: args))
-      env
-      devnull
-      devnull
-      devnull
-  with
-  | exception Unix.Unix_error (error, fn, arg) ->
-    close ();
-    Error (unix_error_detail error fn arg)
-  | pid ->
-    let rec wait () =
-      match Unix.waitpid [] pid with
-      | _, status -> Ok status
-      | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
-      | exception Unix.Unix_error (error, fn, arg) ->
-        Error (unix_error_detail error fn arg)
-    in
-    let result = wait () in
-    close ();
-    Result.bind result (function
-      | Unix.WEXITED 0 -> Ok ()
-      | Unix.WEXITED code -> Error (Printf.sprintf "security exited with %d" code)
-      | Unix.WSIGNALED signal ->
-        Error (Printf.sprintf "security killed by signal %d" signal)
-      | Unix.WSTOPPED signal ->
-        Error (Printf.sprintf "security stopped by signal %d" signal))
+  Fun.protect ~finally:close (fun () ->
+    match
+      Unix.create_process_env
+        security_tool
+        (Array.of_list (security_tool :: args))
+        env
+        devnull
+        devnull
+        devnull
+    with
+    | exception Unix.Unix_error (error, fn, arg) ->
+      Error (unix_error_detail error fn arg)
+    | pid ->
+      let rec wait () =
+        match Unix.waitpid [] pid with
+        | _, status -> Ok status
+        | exception Unix.Unix_error (Unix.EINTR, _, _) -> wait ()
+        | exception Unix.Unix_error (error, fn, arg) ->
+          Error (unix_error_detail error fn arg)
+      in
+      Result.bind (wait ()) (function
+        | Unix.WEXITED 0 -> Ok ()
+        | Unix.WEXITED code -> Error (Printf.sprintf "security exited with %d" code)
+        | Unix.WSIGNALED signal ->
+          Error (Printf.sprintf "security killed by signal %d" signal)
+        | Unix.WSTOPPED signal ->
+          Error (Printf.sprintf "security stopped by signal %d" signal)))
 ;;
 
 let run_security_eio mgr ~env args =
@@ -620,8 +622,35 @@ let create_login_keychain ~home_dir path =
      fatal, but it does mean the file is readable to anything that reaches the
      directory. *)
   try
-    Unix.chmod path 0o600;
-    Ok ()
+    let lstat = Unix.lstat path in
+    if lstat.Unix.st_kind <> Unix.S_REG
+    then
+      Error
+        ("created, but could not narrow to 0600: expected regular file, found "
+         ^ file_kind_name lstat.Unix.st_kind)
+    else if lstat.Unix.st_uid <> effective_uid
+    then
+      Error
+        (Printf.sprintf
+           "created, but could not narrow to 0600: owned by uid %d, expected %d"
+           lstat.Unix.st_uid
+           effective_uid)
+    else
+      let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
+      Fun.protect
+        ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
+        (fun () ->
+           let fstat = Unix.fstat fd in
+           if fstat.Unix.st_kind <> Unix.S_REG
+              || fstat.Unix.st_uid <> effective_uid
+              || fstat.Unix.st_dev <> lstat.Unix.st_dev
+              || fstat.Unix.st_ino <> lstat.Unix.st_ino
+           then
+             Error
+               "created, but could not narrow to 0600: keychain path changed before chmod"
+           else (
+             Unix.fchmod fd 0o600;
+             Ok ()))
   with
   | Unix.Unix_error (error, fn, arg) ->
     Error ("created, but could not narrow to 0600: " ^ unix_error_detail error fn arg)
@@ -1035,12 +1064,20 @@ let prepare ~host:(_ : Runtime_account_access.host_account) ~runtime_root ~owner
 ;;
 
 let prepare_for_login ~host:(_ : Runtime_account_access.host_account) ~runtime_root ~owner_leaf =
-  let* paths = Eio_guard.run_in_systhread ~label:"antigravity-login-storage" (fun () ->
-    let* home_dir = prepare_owner_directory ~runtime_root ~owner_leaf in
-    prepare_home_storage ~home_dir ~oauth_seed:None) in
-  let home = home_with_keychain ~runtime_root paths in
-  let* () = write_private_settings home in
-  Ok home
+  let* () = Eio_guard.run_in_systhread ~label:"antigravity-login-root" (fun () ->
+    if not (Fs_compat.is_capability_leaf owner_leaf)
+    then Error (Invalid_owner_leaf owner_leaf)
+    else verify_runtime_root runtime_root) in
+  let lock_path = keeper_prepare_lock_path ~runtime_root ~owner_leaf in
+  match File_lock_eio.with_durable_lock ~lock_path (fun () ->
+    let* paths = Eio_guard.run_in_systhread ~label:"antigravity-login-storage" (fun () ->
+      let* home_dir = prepare_owner_directory ~runtime_root ~owner_leaf in
+      prepare_home_storage ~home_dir ~oauth_seed:None) in
+    let home = home_with_keychain ~runtime_root paths in
+    let* () = write_private_settings home in
+    Ok home) with
+  | Ok result -> result
+  | Error error -> Error (Invalid_runtime_root (File_lock_eio.durable_lock_error_to_string error))
 ;;
 
 let oauth_path t = t.oauth_path

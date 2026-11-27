@@ -406,6 +406,14 @@ let load_successor_request ~store ~scope (successor : Lane_addon_request_progres
   let* bytes = Lane_addon_store.load_tool_request_body store ~scope
     ~request_digest:successor.request_digest |> unavailable in
   request_of_body ~request_digest:successor.request_digest bytes |> unavailable
+let with_record_write_lock ~store ~scope ~request_id f =
+  let key =
+    Filename.concat (Lane_addon_store.root store)
+      ("tool-request-owner-cas/" ^ Lane_addon_store.digest scope
+       ^ "/" ^ Lane_addon_store.digest request_id)
+  in
+  File_lock_eio.with_mutex key f
+
 let retain ~store ~scope ~request_id ~installation_id ~package_id ~tool ~summary ~request =
   let* () = validate_identity ["scope", scope; "request_id", request_id;
     "installation_id", installation_id; "package_id", package_id; "tool", tool] in
@@ -416,20 +424,21 @@ let retain ~store ~scope ~request_id ~installation_id ~package_id ~tool ~summary
   let bytes = Yojson.Safe.to_string request in
   let expected = {scope; request_id; installation_id; package_id; tool;
     request_digest = Lane_addon_store.digest bytes; summary; request; progress=Lane_addon_request_progress.captured} in
-  let* previous = load ~store ~scope ~request_id in
-  match previous with
-  | Some previous ->
-    (* Retaining the immutable input must not reset an already advancing tail. *)
-    if same_record {previous with progress=Lane_addon_request_progress.captured} expected
-    then Ok () else Error Binding_conflict
-  | None ->
-    (* The body is durable before any record names it. A retain interrupted
-       between the two writes leaves a body no record names: retaining the same
-       request again writes it again, and nothing reads it otherwise. *)
-    let* () = Lane_addon_store.save_tool_request_body store ~scope ~request_digest:expected.request_digest bytes
-      |> Result.map_error (fun detail -> Store_unavailable detail) in
-    Lane_addon_store.save_tool_request_owner store ~scope ~request_id (to_json expected)
-      |> Result.map_error (fun detail -> Store_unavailable detail)
+  with_record_write_lock ~store ~scope ~request_id (fun () ->
+    let* previous = load ~store ~scope ~request_id in
+    match previous with
+    | Some previous ->
+      (* Retaining the immutable input must not reset an already advancing tail. *)
+      if same_record {previous with progress=Lane_addon_request_progress.captured} expected
+      then Ok () else Error Binding_conflict
+    | None ->
+      (* The body is durable before any record names it. A retain interrupted
+         between the two writes leaves a body no record names: retaining the same
+         request again writes it again, and nothing reads it otherwise. *)
+      let* () = Lane_addon_store.save_tool_request_body store ~scope ~request_digest:expected.request_digest bytes
+        |> Result.map_error (fun detail -> Store_unavailable detail) in
+      Lane_addon_store.save_tool_request_owner store ~scope ~request_id (to_json expected)
+        |> Result.map_error (fun detail -> Store_unavailable detail))
 type update_error = Ownership_error of error | State_conflict | Invalid_transition of string
 type publication = Stored of retained | Already_stored of retained | Unconfirmed of string
 type record_publication = Record_stored of Record.t | Record_already_stored of Record.t
@@ -446,21 +455,22 @@ let advance_record_events_with ~save ~store ~(expected : Record.t) ~events =
     | _ -> append_events expected.progress events in
   let next = {expected with progress} in
   let unavailable detail = Ownership_error (Store_unavailable detail) in
-  let* stored = Lane_addon_store.load_tool_request_owner store ~scope:expected.scope ~request_id:expected.request_id
-    |> Result.map_error unavailable in
-  match stored with
-  | None -> Error State_conflict
-  | Some json ->
-    (* Progress reads and rewrites only the record. A record naming another
-       body differs from [expected] in its digest. *)
-    let* previous = decode ~scope:expected.scope ~request_id:expected.request_id json
+  with_record_write_lock ~store ~scope:expected.scope ~request_id:expected.request_id (fun () ->
+    let* stored = Lane_addon_store.load_tool_request_owner store ~scope:expected.scope ~request_id:expected.request_id
       |> Result.map_error unavailable in
-    if same_listed previous next then Ok (Record_already_stored previous)
-    else if not (same_listed previous expected) then Error State_conflict
-    else match save store
-        ~scope:expected.scope ~request_id:expected.request_id (record_to_json next) with
-      | Ok () -> Ok (Record_stored next)
-      | Error detail -> Ok (Record_unconfirmed detail)
+    match stored with
+    | None -> Error State_conflict
+    | Some json ->
+      (* Progress reads and rewrites only the record. A record naming another
+         body differs from [expected] in its digest. *)
+      let* previous = decode ~scope:expected.scope ~request_id:expected.request_id json
+        |> Result.map_error unavailable in
+      if same_listed previous next then Ok (Record_already_stored previous)
+      else if not (same_listed previous expected) then Error State_conflict
+      else match save store
+          ~scope:expected.scope ~request_id:expected.request_id (record_to_json next) with
+        | Ok () -> Ok (Record_stored next)
+        | Error detail -> Ok (Record_unconfirmed detail))
 let advance_record_events ~store ~expected ~events =
   advance_record_events_with ~save:Lane_addon_store.save_tool_request_owner ~store ~expected ~events
 let advance_record ~store ~expected ~event =
@@ -501,17 +511,18 @@ end
 type settle_error = Settle_unavailable of string | Settle_changed
 let settle ~store ~date (expected : Record.t) =
   let unavailable detail = Settle_unavailable detail in
-  let check_record = function
-    (* An absent record was settled already, or is in neither place, which the
-       store reports. *)
-    | None -> Ok true
-    | Some json ->
-      let* stored = decode ~scope:expected.scope ~request_id:expected.request_id json in
-      Ok (same_listed stored expected) in
-  let* moved = Lane_addon_store.settle_tool_request store ~scope:expected.scope ~date
-      ~request_id:expected.request_id ~request_digest:expected.request_digest ~check_record
-    |> Result.map_error unavailable in
-  if moved then Ok () else Error Settle_changed
+  with_record_write_lock ~store ~scope:expected.scope ~request_id:expected.request_id (fun () ->
+    let check_record = function
+      (* An absent record was settled already, or is in neither place, which the
+         store reports. *)
+      | None -> Ok true
+      | Some json ->
+        let* stored = decode ~scope:expected.scope ~request_id:expected.request_id json in
+        Ok (same_listed stored expected) in
+    let* moved = Lane_addon_store.settle_tool_request store ~scope:expected.scope ~date
+        ~request_id:expected.request_id ~request_digest:expected.request_digest ~check_record
+      |> Result.map_error unavailable in
+    if moved then Ok () else Error Settle_changed)
 let settled ~store ~scope ~date ~request_id =
   Lane_addon_store.tool_request_settled store ~scope ~date ~request_id
   |> Result.map_error (fun detail -> Store_unavailable detail)

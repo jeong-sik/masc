@@ -113,16 +113,36 @@ import CoreMIDI
   let raw:[UInt32]=[0x47923c03,0x90011234]
   let exact=UmpOutput(bindings:[UmpBinding(source:"A",destination:midi2)],compatibleEvents:[event(raw)])
   try exact.prepare();try exact.apply(event(raw));try exact.close()
-  tracePrecondition(exact.held.isEmpty && exact.pedals.isEmpty)
+  tracePrecondition(exact.closed && exact.ownership.units.isEmpty)
   let native2Expected=raw+[0x47823c00,0]
   tracePrecondition(receivedWords(2,count:native2Expected.count)==native2Expected)
+  // The closed owner refuses later sends; the process port itself stays open.
+  refuses {try exact.transmit(raw,source:"A")}
   for incompatible in [[event([0x47923c00,0xb4d30000]),event([0x48923c00,0xb4d30000])],
     [event([0x27923c5a]),event([0x47823c00,0])],[event(raw)]] {
    let denied=UmpOutput(bindings:[UmpBinding(source:"A",destination:midi1)],compatibleEvents:incompatible)
-   refuses {try denied.prepare()};tracePrecondition(denied.port==0 && denied.client==0 && denied.selected.isEmpty)
+   refuses {try denied.prepare()};tracePrecondition(denied.port==0 && denied.selected.isEmpty && denied.ownership.units.isEmpty)
+   refuses {try denied.transmit(raw,source:"A")}
   }
   let future=UmpOutput(bindings:[UmpBinding(source:"A",destination:midi1)])
-  refuses {try future.prepare()};tracePrecondition(future.port==0 && future.client==0)
+  refuses {try future.prepare()};tracePrecondition(future.port==0 && future.selected.isEmpty && future.ownership.units.isEmpty)
+  refuses {try future.transmit(raw,source:"A")}
+  // One process client serves every output (#45224). Removing a destination must
+  // still reach each open owner bound to it through the shared listener table,
+  // while a closed owner reports nothing.
+  let removedUID=try endpoint(._2_0,3),removed=destinations.removeLast()
+  let watched=[UmpOutput(bindings:[UmpBinding(source:"A",destination:removedUID)]),UmpOutput(bindings:[UmpBinding(source:"A",destination:removedUID)])]
+  let retired=UmpOutput(bindings:[UmpBinding(source:"A",destination:removedUID)])
+  var reported=Set<ObjectIdentifier>()
+  for owner in watched+[retired] {owner.onFailure={[unowned owner] _ in reported.insert(ObjectIdentifier(owner))};try owner.prepare()}
+  try retired.close()
+  try checked(MIDIEndpointDispose(removed),"remove watched destination")
+  let removalDeadline=Date().addingTimeInterval(5)
+  while !watched.allSatisfy({reported.contains(ObjectIdentifier($0))}) && Date()<removalDeadline {
+   _ = RunLoop.main.run(mode:.default,before:Date().addingTimeInterval(0.01))
+  }
+  tracePrecondition(Set(watched.map(ObjectIdentifier.init))==reported,"destination removal reached \(reported.count) owners; expected exactly the 2 open ones")
+  for owner in watched {try owner.close()}
   // Physical ownership is checked after the native protocol is pinned: g7/ch2
   // collides with SMF group0/ch2 on MIDI1, but g7/ch3 remains independent.
   func hybrid(_ channel:Int)throws->HybridMidiTransport {
@@ -163,20 +183,20 @@ import CoreMIDI
  await writeFile(join(directory,'Probe.swift'),main)
  const originalOutput=await readFile(new URL('UmpOutput.swift',import.meta.url),'utf8')
  let tracedOutput=originalOutput
- for(const [from,to] of [['MIDISendEventList(', 'traceSend('],['MIDIPortDispose(', 'tracePortDispose('],['MIDIClientDispose(', 'traceClientDispose('],['MIDIObjectGetIntegerProperty(', 'traceIntegerProperty(']]) {
+ for(const [from,to] of [['MIDISendEventList(', 'traceSend('],['MIDIObjectGetIntegerProperty(', 'traceIntegerProperty(']]) {
   assert.ok(tracedOutput.includes(from),`Missing diagnostic API edge ${from}`)
   tracedOutput=tracedOutput.replaceAll(from,to)
  }
  const sourceEdge='        let payload = try wire == .midi1 ? umpMidi1Words(words) : words'
  assert.equal(tracedOutput.split(sourceEdge).length,2)
  tracedOutput=tracedOutput.replace(sourceEdge,'        wireTrace.record(.source,UInt32(wire.rawValue),packets:[words])\n'+sourceEdge)
- for(const edge of ['        closed = true','        try silence()']) {
+ for(const edge of ['        guard !closed else { return }','        try silence()']) {
   assert.equal(tracedOutput.split(edge).length,2)
-  const state='wireTrace.record(.owner,port,client,owner:WireOwnerState(held:held.values.reduce(0,+),pedals:pedals.count,exclusive:exclusive.count,closed:closed))'
+  const state='wireTrace.record(.owner,port,owner:WireOwnerState(held:held.values.reduce(0,+),pedals:pedals.count,exclusive:exclusive.count,closed:closed))'
   tracedOutput=tracedOutput.replace(edge,edge+'\n        '+state)
  }
  await writeFile(join(directory,'Output.swift'),tracedOutput+String.raw`
-enum WireTraceKind:String,Codable {case source,send,sendResult,portDispose,portDisposed,clientDispose,clientDisposed,callbackEntry,receive,owner}
+enum WireTraceKind:String,Codable {case source,send,sendResult,callbackEntry,receive,owner}
 struct WireOwnerState:Encodable {let held:Int,pedals:Int,exclusive:Int;let closed:Bool}
 struct WireTraceRow:Encodable {
  let serial:Int,host:UInt64,kind:WireTraceKind,first:UInt32,second:UInt32,status:Int32?,packets:[[UInt32]],owner:WireOwnerState?
@@ -222,14 +242,6 @@ func traceSend(_ port:MIDIPortRef,_ destination:MIDIEndpointRef,_ list:UnsafePoi
  wireTrace.record(.send,port,destination,packets:rows)
  let status=MIDISendEventList(port,destination,list)
  wireTrace.record(.sendResult,port,destination,status:status);return status
-}
-@discardableResult func tracePortDispose(_ port:MIDIPortRef)->OSStatus {
- wireTrace.record(.portDispose,port);let status=MIDIPortDispose(port)
- wireTrace.record(.portDisposed,port,status:status);return status
-}
-@discardableResult func traceClientDispose(_ client:MIDIClientRef)->OSStatus {
- wireTrace.record(.clientDispose,client);let status=MIDIClientDispose(client)
- wireTrace.record(.clientDisposed,client,status:status);return status
 }
 `)
  const names=['MidiTransport','UmpTransport','UmpOutput','UmpState','UmpLiveInput','UmpRegions','UmpLoopTransport','HybridMidiTransport','CaptureAudioClock','SourceAudioClock','WaveLoopClock','PulseAudioClock','PulseLoopClock']

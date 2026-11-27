@@ -80,7 +80,9 @@ and exact setup/duration. Only after the parent verifies those against the
 admitted plan does it send Start. Cancelling before that admission sends no
 source messages. Source times remain rational until their absolute deadlines
 are rounded up once; metadata and sequence time are added before rounding.
-Stop/close waits for the child and releases its notes, pedals, port and client.
+Stop/close waits for the child and releases its notes and pedals. The child keeps
+its MIDI output port and client open until it exits, so that cleanup still arrives
+(#45224).
 
 Profile setup needing MIDI-CI negotiation and embedded JR clocks are explicit
 playback refusals. Native Clip looping, local audio synthesis, arrangement

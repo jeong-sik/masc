@@ -33,7 +33,9 @@ import CoreMIDI
   clock=first-1;owner.tick();precondition(owner.index==0 && owner.output.held.isEmpty,"never send one nanosecond early")
   clock=first;owner.tick();precondition(owner.index==1 && owner.output.held.values.reduce(0,+)==1,"retain exact first native deadline")
   clock=last;owner.tick();precondition(owner.index==2 && owner.output.held.isEmpty,"adjacent native deadlines cannot collapse in Double")
-  owner.finish(reason:"probe-stop");precondition(owner.output.client==0 && owner.output.port==0 && owner.timer==nil)
+  owner.finish(reason:"probe-stop");precondition(owner.output.closed && owner.output.ownership.units.isEmpty && owner.timer==nil)
+  // The closed output refuses later sends; the process port stays open (#45224).
+  requireFailure {try owner.output.transmit(messages[0].words,source:owner.output.bindings[0].source)}
 
   clock=0
   let pending=try MidiClipTransport(plan:plan(100,[MidiClipPlaybackPlan.Event(id:"8",section:.sequence,tick:"0",words:[0x43941100,0xffff0000],nanoseconds:exact(0))]))
@@ -42,11 +44,11 @@ import CoreMIDI
 
   let empty=try MidiClipTransport(plan:plan(0,[]));empty.now={0};try empty.prepare()
   var states:[String]=[];empty.onState={states.append($0["kind"] as! String)}
-  try empty.start();precondition(states==["playing","stopped"] && empty.output.client==0 && empty.terminalFailure==nil)
+  try empty.start();precondition(states==["playing","stopped"] && empty.output.closed && empty.output.ownership.units.isEmpty && empty.terminalFailure==nil)
 
   clock=UInt64.max-1
   let overflow=try MidiClipTransport(plan:plan(last+10,messages));overflow.now={clock};try overflow.prepare();try overflow.start()
-  precondition(overflow.state == .stopped && overflow.terminalFailure != nil && overflow.output.client==0,"host deadline overflow must retire resources")
+  precondition(overflow.state == .stopped && overflow.terminalFailure != nil && overflow.output.closed && overflow.output.ownership.units.isEmpty,"host deadline overflow must retire resources")
 
   requireFailure {_ = try MidiClipTransport(plan:plan(last+10,Array(messages.reversed())))}
   let duplicate=[messages[0],messages[0]];requireFailure {_ = try MidiClipTransport(plan:plan(last+10,duplicate))}

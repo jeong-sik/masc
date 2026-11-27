@@ -131,6 +131,53 @@ type task = Capability_vocab.task =
   | Image_generation
   | Video_generation
 
+type media_carrier = Capability_vocab.media_carrier =
+  | Inline_base64
+  | Remote_url
+  | Provider_file_id
+  | Provider_file_uri
+[@@deriving show, eq]
+
+type tool_result_media_mode = Capability_vocab.tool_result_media_mode =
+  | Tool_media_unsupported
+  | Inline_in_tool_result
+  | Native_function_response_parts
+  | Hoisted_user_followup
+[@@deriving show, eq]
+
+type vision_input_contract =
+  | No_vision_input
+  | Native_vision_input of
+      { carriers : media_carrier list
+      ; tool_results : tool_result_media_mode
+      ; modality_priority : Modality.priority
+      }
+[@@deriving show, eq]
+
+type images_api_dialect = Capability_vocab.images_api_dialect =
+  | Openai_images_v1
+  | Zai_images_v4
+  | Gemini_imagen_predict
+[@@deriving show, eq]
+
+type image_output_contract = Capability_vocab.image_output_contract =
+  | No_image_output
+  | In_turn_gemini_modalities
+  | In_turn_openai_responses_tool
+  | In_turn_openai_chat_modalities
+  | In_turn_codex_item
+  | In_turn_acp_chunk
+  | Endpoint_images_api of images_api_dialect
+[@@deriving show, eq]
+
+type media_capabilities =
+  { vision_input : vision_input_contract
+  ; document_input : media_carrier list
+  ; audio_input : media_carrier list
+  ; image_output : image_output_contract
+  }
+[@@deriving show, eq]
+
 (** Structured-output tier, projected from the two capability booleans below by
     {!structured_output_support}. The request-admission decision reads this typed
     view rather than provider identity. See {!Capability_vocab.structured_output_support}. *)
@@ -243,6 +290,8 @@ type capabilities =
     (** Block ordering applied to multimodal user messages just before
         serialization. [Visual_first] for Gemma 4 family.
         @since 0.193.0 *)
+  ; (* ── Output modalities ─────────────────────────────── *)
+    image_output : image_output_contract
   ; (* ── Inference task ────────────────────────────────── *)
     task : task option
     (** Inference task declared by the model catalog entry (transcription,
@@ -310,6 +359,7 @@ let default_capabilities =
   ; supports_video_input = false
   ; supports_document_input = false
   ; modality_priority = Modality.Preserve_input_order
+  ; image_output = No_image_output
   ; task = None
   ; supports_native_streaming = false
   ; supports_system_prompt = true
@@ -353,6 +403,104 @@ let structured_output_support (caps : capabilities) : structured_output_support 
 
 let with_declared_image_input value capabilities =
   { capabilities with supports_image_input = value; declared_image_input = Some value }
+;;
+
+let image_output_contract_to_string = Capability_vocab.image_output_contract_to_string
+let image_output_contract_of_string = Capability_vocab.image_output_contract_of_string
+let images_api_dialect_to_string = Capability_vocab.images_api_dialect_to_string
+let images_api_dialect_of_string = Capability_vocab.images_api_dialect_of_string
+
+let supports_image_output (caps : capabilities) : bool =
+  match caps.image_output with
+  | No_image_output -> false
+  | In_turn_gemini_modalities
+  | In_turn_openai_responses_tool
+  | In_turn_openai_chat_modalities
+  | In_turn_codex_item
+  | In_turn_acp_chunk
+  | Endpoint_images_api _ -> true
+;;
+
+let supports_image_input_of_media (media : media_capabilities) : bool =
+  match media.vision_input with
+  | No_vision_input -> false
+  | Native_vision_input _ -> true
+;;
+
+let supports_image_output_of_media (media : media_capabilities) : bool =
+  match media.image_output with
+  | No_image_output -> false
+  | In_turn_gemini_modalities
+  | In_turn_openai_responses_tool
+  | In_turn_openai_chat_modalities
+  | In_turn_codex_item
+  | In_turn_acp_chunk
+  | Endpoint_images_api _ -> true
+;;
+
+let media_capabilities_of_capabilities ?wire ?(responses_api = false) (caps : capabilities)
+  : media_capabilities
+  =
+  let image_carriers =
+    match wire with
+    | Some (Provider_kind.Anthropic | Provider_kind.Kimi | Provider_kind.OpenAI_compat | Provider_kind.Glm) ->
+      [ Inline_base64; Remote_url; Provider_file_id ]
+    | Some Provider_kind.Gemini -> [ Inline_base64; Provider_file_uri ]
+    | Some Provider_kind.Ollama | None -> [ Inline_base64 ]
+  in
+  let tool_results =
+    match wire with
+    | Some (Provider_kind.Anthropic | Provider_kind.Kimi | Provider_kind.Ollama) ->
+      Inline_in_tool_result
+    | Some Provider_kind.OpenAI_compat ->
+      if responses_api then Inline_in_tool_result else Hoisted_user_followup
+    | Some Provider_kind.Glm -> Hoisted_user_followup
+    | Some Provider_kind.Gemini ->
+      if caps.supports_function_response_parts
+      then Native_function_response_parts
+      else Hoisted_user_followup
+    | None ->
+      if caps.supports_function_response_parts
+      then Native_function_response_parts
+      else Inline_in_tool_result
+  in
+  let vision_input =
+    if caps.supports_image_input
+    then
+      Native_vision_input
+        { carriers = image_carriers
+        ; tool_results
+        ; modality_priority = caps.modality_priority
+        }
+    else No_vision_input
+  in
+  let document_input =
+    if not caps.supports_document_input
+    then []
+    else (
+      match wire with
+      | Some (Provider_kind.Anthropic | Provider_kind.Kimi) ->
+        [ Inline_base64; Remote_url; Provider_file_id ]
+      | Some Provider_kind.OpenAI_compat ->
+        if responses_api
+        then [ Inline_base64; Remote_url; Provider_file_id ]
+        else [ Inline_base64; Provider_file_id ]
+      | Some Provider_kind.Glm -> [ Inline_base64; Provider_file_id ]
+      | Some Provider_kind.Gemini -> [ Inline_base64; Provider_file_uri ]
+      | Some Provider_kind.Ollama -> []
+      | None -> [ Inline_base64 ])
+  in
+  let audio_input =
+    if not caps.supports_audio_input
+    then []
+    else (
+      match wire with
+      | Some Provider_kind.Gemini -> [ Inline_base64; Provider_file_uri ]
+      | Some (Provider_kind.OpenAI_compat | Provider_kind.Glm) -> [ Inline_base64 ]
+      | Some (Provider_kind.Anthropic | Provider_kind.Kimi | Provider_kind.Ollama) -> []
+      | None -> [ Inline_base64 ])
+  in
+  { vision_input; document_input; audio_input; image_output = caps.image_output }
 ;;
 
 (* The numeric preset values below are load-bearing, not decorative.

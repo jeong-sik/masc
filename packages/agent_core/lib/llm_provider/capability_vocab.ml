@@ -160,6 +160,36 @@ type task =
   | Image_generation
   | Video_generation
 
+type media_carrier =
+  | Inline_base64
+  | Remote_url
+  | Provider_file_id
+  | Provider_file_uri
+[@@deriving show, eq]
+
+type tool_result_media_mode =
+  | Tool_media_unsupported
+  | Inline_in_tool_result
+  | Native_function_response_parts
+  | Hoisted_user_followup
+[@@deriving show, eq]
+
+type images_api_dialect =
+  | Openai_images_v1
+  | Zai_images_v4
+  | Gemini_imagen_predict
+[@@deriving show, eq]
+
+type image_output_contract =
+  | No_image_output
+  | In_turn_gemini_modalities
+  | In_turn_openai_responses_tool
+  | In_turn_openai_chat_modalities
+  | In_turn_codex_item
+  | In_turn_acp_chunk
+  | Endpoint_images_api of images_api_dialect
+[@@deriving show, eq]
+
 let normalize raw = String.lowercase_ascii (String.trim raw)
 
 (** Anthropic Messages API thinking-control policy.  This is model catalog
@@ -524,6 +554,7 @@ let capability_fields =
   ; "supports_video_input"
   ; "supports_document_input"
   ; "modality_priority"
+  ; "image_output"
   ; "supports_native_streaming"
   ; "supports_system_prompt"
   ; "supports_assistant_prefill"
@@ -847,4 +878,123 @@ let%test "prompt_cache_wire round-trips through to_string and of_string" =
     (fun (_raw, wire) ->
        prompt_cache_wire_of_string (prompt_cache_wire_to_string wire) = Some wire)
     prompt_cache_wire_table
+;;
+
+let media_carrier_table =
+  [ "inline_base64", Inline_base64
+  ; "remote_url", Remote_url
+  ; "provider_file_id", Provider_file_id
+  ; "provider_file_uri", Provider_file_uri
+  ]
+;;
+
+let media_carrier_values = List.map fst media_carrier_table
+
+let media_carrier_of_string raw =
+  match normalize raw with
+  | "" -> None
+  | normalized -> List.assoc_opt normalized media_carrier_table
+;;
+
+let media_carrier_to_string = function
+  | Inline_base64 -> "inline_base64"
+  | Remote_url -> "remote_url"
+  | Provider_file_id -> "provider_file_id"
+  | Provider_file_uri -> "provider_file_uri"
+;;
+
+let tool_result_media_mode_table =
+  [ "unsupported", Tool_media_unsupported
+  ; "inline_in_tool_result", Inline_in_tool_result
+  ; "native_function_response_parts", Native_function_response_parts
+  ; "hoisted_user_followup", Hoisted_user_followup
+  ]
+;;
+
+let tool_result_media_mode_values = List.map fst tool_result_media_mode_table
+
+let tool_result_media_mode_of_string raw =
+  match normalize raw with
+  | "" -> None
+  | normalized -> List.assoc_opt normalized tool_result_media_mode_table
+;;
+
+let tool_result_media_mode_to_string = function
+  | Tool_media_unsupported -> "unsupported"
+  | Inline_in_tool_result -> "inline_in_tool_result"
+  | Native_function_response_parts -> "native_function_response_parts"
+  | Hoisted_user_followup -> "hoisted_user_followup"
+;;
+
+let images_api_dialect_table =
+  [ "openai_images_v1", Openai_images_v1
+  ; "zai_images_v4", Zai_images_v4
+  ; "gemini_imagen_predict", Gemini_imagen_predict
+  ]
+;;
+
+let images_api_dialect_values = List.map fst images_api_dialect_table
+
+let images_api_dialect_of_string raw =
+  match normalize raw with
+  | "" -> None
+  | normalized -> List.assoc_opt normalized images_api_dialect_table
+;;
+
+let images_api_dialect_to_string = function
+  | Openai_images_v1 -> "openai_images_v1"
+  | Zai_images_v4 -> "zai_images_v4"
+  | Gemini_imagen_predict -> "gemini_imagen_predict"
+;;
+
+let image_output_contract_table =
+  [ "none", No_image_output
+  ; "in_turn_gemini_modalities", In_turn_gemini_modalities
+  ; "in_turn_openai_responses_tool", In_turn_openai_responses_tool
+  ; "in_turn_openai_chat_modalities", In_turn_openai_chat_modalities
+  ; "in_turn_codex_item", In_turn_codex_item
+  ; "in_turn_acp_chunk", In_turn_acp_chunk
+  ; "openai_images_v1", Endpoint_images_api Openai_images_v1
+  ; "zai_images_v4", Endpoint_images_api Zai_images_v4
+  ; "gemini_imagen_predict", Endpoint_images_api Gemini_imagen_predict
+  ]
+;;
+
+let image_output_contract_values = List.map fst image_output_contract_table
+
+let image_output_contract_of_string raw =
+  match normalize raw with
+  | "" -> None
+  | normalized -> List.assoc_opt normalized image_output_contract_table
+;;
+
+let image_output_contract_to_string = function
+  | No_image_output -> "none"
+  | In_turn_gemini_modalities -> "in_turn_gemini_modalities"
+  | In_turn_openai_responses_tool -> "in_turn_openai_responses_tool"
+  | In_turn_openai_chat_modalities -> "in_turn_openai_chat_modalities"
+  | In_turn_codex_item -> "in_turn_codex_item"
+  | In_turn_acp_chunk -> "in_turn_acp_chunk"
+  | Endpoint_images_api dialect -> images_api_dialect_to_string dialect
+;;
+
+let%test "media_carrier round-trips through to_string and of_string" =
+  List.for_all
+    (fun (_raw, carrier) ->
+       media_carrier_of_string (media_carrier_to_string carrier) = Some carrier)
+    media_carrier_table
+;;
+
+let%test "tool_result_media_mode round-trips through to_string and of_string" =
+  List.for_all
+    (fun (_raw, mode) ->
+       tool_result_media_mode_of_string (tool_result_media_mode_to_string mode) = Some mode)
+    tool_result_media_mode_table
+;;
+
+let%test "image_output_contract round-trips through to_string and of_string" =
+  List.for_all
+    (fun (_raw, contract) ->
+       image_output_contract_of_string (image_output_contract_to_string contract) = Some contract)
+    image_output_contract_table
 ;;

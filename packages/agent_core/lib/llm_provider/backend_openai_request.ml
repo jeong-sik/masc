@@ -737,6 +737,35 @@ let build_request_assoc_artifact
       | _ :: _ -> ("provider", `Assoc provider_fields) :: body)
     else body
   in
+  let body =
+    match config.output_media, caps.Capabilities.image_output with
+    | Some opts, Capabilities.In_turn_openai_chat_modalities ->
+      let body =
+        ("modalities", `List [ `String "image"; `String "text" ]) :: body
+      in
+      let image_config =
+        (match opts.aspect_ratio with
+         | Some ar when not (Api_common.string_is_blank ar) ->
+           [ "aspect_ratio", `String (String.trim ar) ]
+         | Some _ | None -> [])
+        @
+        match opts.size with
+        | Some sz when not (Api_common.string_is_blank sz) ->
+          [ "image_size", `String (String.trim sz) ]
+        | Some _ | None -> []
+      in
+      (match image_config with
+       | [] -> body
+       | fields -> ("image_config", `Assoc fields) :: body)
+    | ( Some _
+      , ( Capabilities.No_image_output
+        | Capabilities.In_turn_gemini_modalities
+        | Capabilities.In_turn_openai_responses_tool
+        | Capabilities.In_turn_codex_item
+        | Capabilities.In_turn_acp_chunk
+        | Capabilities.Endpoint_images_api _ ) )
+    | None, _ -> body
+  in
   Request_artifact_internal.create ~payload:(`Assoc body) ~output_token_receipt
 ;;
 

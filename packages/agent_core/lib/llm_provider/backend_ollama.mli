@@ -34,6 +34,17 @@ val build_request_artifact
   -> unit
   -> request_artifact
 
+(** {!build_request_artifact} returning refusals (unsupported media carriers,
+    missing capabilities, invalid reasoning effort or [num_ctx]) as typed
+    [Error] values rather than raising [Invalid_argument]. *)
+val build_request_artifact_result
+  :  ?stream:bool
+  -> config:Provider_config.t
+  -> messages:Types.message list
+  -> ?tools:Yojson.Safe.t list
+  -> unit
+  -> (request_artifact, string) result
+
 val build_request
   :  ?stream:bool
   -> config:Provider_config.t

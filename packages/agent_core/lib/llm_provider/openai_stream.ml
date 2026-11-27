@@ -105,6 +105,18 @@ let project_openai_chunk ?tx (state : openai_stream_state) (chunk : openai_chunk
    | Some empty_text ->
      if state.preserve_inline_content then state.inline_raw_rev <- empty_text :: state.inline_raw_rev
    | None -> ());
+  (* OpenRouter/OpenAI-compatible image outputs carried on [delta.images] or
+     image_url content parts emit a complete closed image block per image. *)
+  List.iter
+    (fun (media_type, source) ->
+       let index = state.next_block_index in
+       state.next_block_index <- index + 1;
+       emit
+         (ContentBlockStart
+            { index; content_type = "image"; tool_id = None; tool_name = None });
+       emit (ContentBlockDelta { index; delta = MediaDelta { media_type; source } });
+       emit (ContentBlockStop { index }))
+    chunk.delta_images;
   (* Tool call deltas are one state transaction with the rest of this chunk.
      A late identity/index conflict rolls back every earlier sibling and
      discards locally buffered events before the caller can observe them. *)
@@ -376,6 +388,7 @@ let%test
         ; mk "b" "run_shell" {|{"argv":["git"]}|}
         ; mk "c" "read_file" {|{"file_path":"x"}|}
         ]
+    ; delta_images = []
     ; finish_reason = None
     ; chunk_usage = None
     ; chunk_timings = None
@@ -416,6 +429,7 @@ let[@warning "-32"] test_content_chunk ?(finish_reason = None) content =
   ; delta_reasoning = None
   ; delta_reasoning_details = None
   ; delta_tool_calls = []
+  ; delta_images = []
   ; finish_reason
   ; chunk_usage = None
   ; chunk_timings = None
@@ -510,6 +524,7 @@ let%test "openai_chunk_to_events: id-less continuation fragment stays in its cal
     ; delta_reasoning = None
     ; delta_reasoning_details = None
     ; delta_tool_calls = []
+    ; delta_images = []
     ; finish_reason = None
     ; chunk_usage = None
     ; chunk_timings = None
@@ -564,6 +579,7 @@ let%test
     ; delta_reasoning = None
     ; delta_reasoning_details = None
     ; delta_tool_calls = []
+    ; delta_images = []
     ; finish_reason = None
     ; chunk_usage = None
     ; chunk_timings = None
@@ -657,6 +673,7 @@ let%test "openai_chunk_to_events: id-less continuation on ambiguous index fails 
     ; delta_reasoning = None
     ; delta_reasoning_details = None
     ; delta_tool_calls = []
+    ; delta_images = []
     ; finish_reason = None
     ; chunk_usage = None
     ; chunk_timings = None

@@ -47,6 +47,9 @@ type model_entry =
   ; supports_video_input : bool option
   ; supports_document_input : bool option
   ; modality_priority : string option
+  ; image_output : Capability_vocab.image_output_contract option
+    (** Closed image generation output contract declared by this catalog entry.
+        Parsed fail-closed against {!Capability_vocab.image_output_contract_values}. *)
   ; task : Capability_vocab.task option
     (** Catalog-declared inference task for non-chat models (transcription,
         speech, image/video generation). Parsed fail-closed against

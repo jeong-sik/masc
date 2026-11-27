@@ -190,19 +190,49 @@ let responses_ensure_tool_block state emit ~output_index ~tool_id ~tool_name =
 
 let responses_assert_output_kind state emit output_index incoming =
     let effective = match Hashtbl.find_opt state.responses_output_kinds output_index, incoming with
-      | None, (Response_replay.Message _ | Reasoning | Function_call as kind) -> Some kind
+      | None, (Response_replay.Message _ | Reasoning | Function_call | Image_generation as kind) -> Some kind
       | Some (Response_replay.Message previous), Response_replay.Message phase ->
         if phase=Response_replay.Absent then Some (Response_replay.Message previous)
         else if previous=Response_replay.Absent || previous=phase then Some incoming
         else None
       | Some Response_replay.Reasoning, Response_replay.Reasoning
-      | Some Response_replay.Function_call, Response_replay.Function_call -> Some incoming
-      | Some Response_replay.Reasoning, (Response_replay.Message _ | Function_call)
-      | Some Response_replay.Function_call, (Response_replay.Message _ | Reasoning)
-      | Some (Response_replay.Message _), (Reasoning | Function_call) -> None in
+      | Some Response_replay.Function_call, Response_replay.Function_call
+      | Some Response_replay.Image_generation, Response_replay.Image_generation -> Some incoming
+      | Some Response_replay.Reasoning, (Response_replay.Message _ | Function_call | Image_generation)
+      | Some Response_replay.Function_call, (Response_replay.Message _ | Reasoning | Image_generation)
+      | Some Response_replay.Image_generation, (Response_replay.Message _ | Reasoning | Function_call)
+      | Some (Response_replay.Message _), (Reasoning | Function_call | Image_generation) -> None in
     match effective with
     | Some kind -> Hashtbl.replace state.responses_output_kinds output_index kind; Some kind
     | None -> emit(SSEParseFailed{raw="";reason="responses_replay:conflicting_item_kind_or_phase"});None
+;;
+
+(* Finalize an [image_generation_call] output item once per [output_index].
+   Repeated delivery (e.g. [image_generation_call.completed] followed by
+   [output_item.done] and [response.completed]) must not emit a second
+   [MediaDelta] on the same block, which would concatenate two complete images
+   into invalid base64. *)
+let responses_emit_image_block state emit ~output_index ~media_type ~b64 =
+  match responses_assert_output_kind state emit output_index Response_replay.Image_generation with
+  | None -> ()
+  | Some kind ->
+    let index =
+      match Hashtbl.find_opt state.responses_image_blocks output_index with
+      | Some existing -> existing
+      | None ->
+        let index = responses_fresh_block state in
+        Hashtbl.replace state.responses_image_blocks output_index index;
+        Hashtbl.remove state.responses_pending_images output_index;
+        emit
+          (ContentBlockStart
+             { index; content_type = "image"; tool_id = None; tool_name = None });
+        emit
+          (ContentBlockDelta
+             { index; delta = MediaDelta { media_type; source = Base64 b64 } });
+        emit (ContentBlockStop { index });
+        index
+    in
+    Hashtbl.replace state.responses_output_groups output_index (kind, [ index ])
 ;;
 
 (* The operator-facing error string is built from a failure record's [raw] and
@@ -419,6 +449,25 @@ let responses_capture_output_item ?(drop_function_call=false) state emit ~output
             Option.iter (fun index ->
               emit(ContentBlockDelta{index;delta=InputJsonSnapshot call.arguments})) index;
             capture kind (Option.to_list index)))
+  | Some "image_generation_call" ->
+    let payload_res =
+      match responses_member_string_opt "result" item with
+      | Some data when not (Api_common.string_is_blank data) ->
+        let format_hint = responses_member_string_opt "output_format" item in
+        (match Api_common.resolve_image_output_media_type ?format_hint ~base64_data:data () with
+         | Ok media_type -> Ok (Some (media_type, data))
+         | Error reason -> Error reason)
+      | Some _ | None -> Ok (Hashtbl.find_opt state.responses_pending_images output_index)
+    in
+    (match payload_res with
+     | Error reason ->
+       emit (SSEParseFailed { raw = ""; reason = "responses_image_generation:" ^ reason })
+     | Ok (Some (media_type, b64)) ->
+       responses_emit_image_block state emit ~output_index ~media_type ~b64
+     | Ok None ->
+       (match Hashtbl.find_opt state.responses_image_blocks output_index with
+        | Some index -> capture Response_replay.Image_generation [ index ]
+        | None -> ()))
   | Some "custom_tool_call" ->
     (* Preserve only an already assembled legacy stream block. This codec has
        no custom-input admission contract and cannot synthesize one here. *)
@@ -426,6 +475,19 @@ let responses_capture_output_item ?(drop_function_call=false) state emit ~output
      | Some (Tool_index_single index) -> capture Response_replay.Function_call [index]
      | Some (Tool_index_ambiguous _) | None -> ())
   | Some _ | None -> ()
+;;
+
+let responses_flush_pending_images state emit =
+  let pending =
+    Hashtbl.fold (fun output_index payload acc -> (output_index, payload) :: acc)
+      state.responses_pending_images []
+    |> List.sort (fun (l, _) (r, _) -> Int.compare l r)
+  in
+  List.iter
+    (fun (output_index, (media_type, b64)) ->
+       if not (Hashtbl.mem state.responses_image_blocks output_index)
+       then responses_emit_image_block state emit ~output_index ~media_type ~b64)
+    pending
 ;;
 
 let responses_capture_terminal_outputs state emit response =
@@ -444,6 +506,7 @@ let responses_capture_terminal_outputs state emit response =
      |> List.iter (fun (output_index,item) ->
        responses_capture_output_item ~drop_function_call state emit ~output_index item)
    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> ());
+  responses_flush_pending_images state emit;
   let explicit_output=match response |> member "output" with `List _->true
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> false in
   if Hashtbl.length state.responses_output_groups > 0
@@ -618,7 +681,53 @@ let responses_sse_to_events (state : openai_stream_state) event_type data_str
               ; report = Types.Provider_stated
               ; raw = data_str
               })
+       | "response.image_generation_call.partial_image" ->
+         let output_index = responses_member_int_default "output_index" json in
+         if responses_accept_output_identity state emit output_index
+              (responses_member_string_opt "item_id" json)
+         then (
+           match responses_member_string_opt "partial_image_b64" json with
+           | Some b64 when not (Api_common.string_is_blank b64) ->
+             let format_hint = responses_member_string_opt "output_format" json in
+             (match
+                Api_common.resolve_image_output_media_type ?format_hint ~base64_data:b64 ()
+              with
+              | Ok media_type ->
+                Hashtbl.replace state.responses_pending_images output_index (media_type, b64)
+              | Error reason ->
+                emit
+                  (SSEParseFailed
+                     { raw = data_str; reason = "responses_image_generation:" ^ reason }))
+           | Some _ | None -> ())
+       | "response.image_generation_call.completed" ->
+         let output_index = responses_member_int_default "output_index" json in
+         if responses_accept_output_identity state emit output_index
+              (responses_member_string_opt "item_id" json)
+         then (
+           let direct_b64 =
+             match responses_member_string_opt "result" json with
+             | Some s when not (Api_common.string_is_blank s) -> Some s
+             | Some _ | None ->
+               (match responses_member_string_opt "image_base64" json with
+                | Some s when not (Api_common.string_is_blank s) -> Some s
+                | Some _ | None -> None)
+           in
+           match direct_b64 with
+           | Some b64 ->
+             let format_hint = responses_member_string_opt "output_format" json in
+             (match
+                Api_common.resolve_image_output_media_type ?format_hint ~base64_data:b64 ()
+              with
+              | Ok media_type ->
+                responses_emit_image_block state emit ~output_index ~media_type ~b64
+              | Error reason ->
+                emit
+                  (SSEParseFailed
+                     { raw = data_str; reason = "responses_image_generation:" ^ reason }))
+           | None -> ())
        | "response.in_progress"
+       | "response.image_generation_call.in_progress"
+       | "response.image_generation_call.generating"
        | "response.content_part.added"
        | "response.content_part.done"
        | "response.function_call_arguments.done"

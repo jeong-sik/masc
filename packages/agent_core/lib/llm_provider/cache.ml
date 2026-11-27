@@ -53,6 +53,7 @@ let request_fingerprint
                      ; tool_choice
                      ; disable_parallel_tool_use
                      ; response_format
+                     ; output_media
                      ; cache_system_prompt
                      ; system_prompt_cache_prefix
                      ; cache_extended_ttl
@@ -156,6 +157,16 @@ let request_fingerprint
       ; "tool_choice", opt_json Types.tool_choice_to_json tool_choice
       ; "disable_parallel_tool_use", `Bool disable_parallel_tool_use
       ; "response_format", Types.response_format_to_json response_format
+      ; ( "output_media"
+        , opt_json
+            (fun (o : Provider_config.image_generation_options) ->
+              `Assoc
+                [ "aspect_ratio", opt_json (fun s -> `String s) o.aspect_ratio
+                ; "size", opt_json (fun s -> `String s) o.size
+                ; "quality", opt_json (fun s -> `String s) o.quality
+                ; "count", opt_json (fun n -> `Int n) o.count
+                ])
+            output_media )
       ; "cache_system_prompt", `Bool cache_system_prompt
       ; ( "system_prompt_cache_prefix"
         , (* The hint changes the wire only when it splits the Anthropic

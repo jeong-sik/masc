@@ -145,6 +145,40 @@ type task =
   | Image_generation
   | Video_generation
 
+(** Wire carrier a provider accepts for inbound media (images, documents, audio). *)
+type media_carrier =
+  | Inline_base64
+  | Remote_url
+  | Provider_file_id
+  | Provider_file_uri
+[@@deriving show, eq]
+
+(** How media blocks returned inside a tool result travel to a provider wire. *)
+type tool_result_media_mode =
+  | Tool_media_unsupported
+  | Inline_in_tool_result
+  | Native_function_response_parts
+  | Hoisted_user_followup
+[@@deriving show, eq]
+
+(** Dedicated standalone image-generation HTTP API dialect for non-chat models. *)
+type images_api_dialect =
+  | Openai_images_v1
+  | Zai_images_v4
+  | Gemini_imagen_predict
+[@@deriving show, eq]
+
+(** Closed contract declaring whether and how a model/runtime produces images. *)
+type image_output_contract =
+  | No_image_output
+  | In_turn_gemini_modalities
+  | In_turn_openai_responses_tool
+  | In_turn_openai_chat_modalities
+  | In_turn_codex_item
+  | In_turn_acp_chunk
+  | Endpoint_images_api of images_api_dialect
+[@@deriving show, eq]
+
 type anthropic_thinking_control =
   | Adaptive_default
   | Adaptive_disabled_through_high
@@ -252,3 +286,19 @@ val cache_session_wire_to_string : cache_session_wire -> string
 val prompt_cache_wire_values : string list
 val prompt_cache_wire_of_string : string -> prompt_cache_wire option
 val prompt_cache_wire_to_string : prompt_cache_wire -> string
+
+val media_carrier_values : string list
+val media_carrier_of_string : string -> media_carrier option
+val media_carrier_to_string : media_carrier -> string
+
+val tool_result_media_mode_values : string list
+val tool_result_media_mode_of_string : string -> tool_result_media_mode option
+val tool_result_media_mode_to_string : tool_result_media_mode -> string
+
+val images_api_dialect_values : string list
+val images_api_dialect_of_string : string -> images_api_dialect option
+val images_api_dialect_to_string : images_api_dialect -> string
+
+val image_output_contract_values : string list
+val image_output_contract_of_string : string -> image_output_contract option
+val image_output_contract_to_string : image_output_contract -> string

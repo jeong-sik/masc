@@ -38,6 +38,7 @@ type model_entry =
   ; supports_video_input : bool option
   ; supports_document_input : bool option
   ; modality_priority : string option
+  ; image_output : Capability_vocab.image_output_contract option
   ; task : Capability_vocab.task option
   ; supported_models : string list option
   ; supports_native_streaming : bool option
@@ -171,6 +172,7 @@ let with_model_overrides catalog declarations =
     ; supports_video_input = entry.supports_video_input
     ; supports_document_input = entry.supports_document_input
     ; modality_priority = entry.modality_priority
+    ; image_output = entry.image_output
     ; task = (match previous with Some row -> row.task | None -> None)
     ; supported_models = entry.supported_models
     ; supports_native_streaming = entry.supports_native_streaming
@@ -473,6 +475,7 @@ let known_entry_keys =
   ; "supports_video_input"
   ; "supports_document_input"
   ; "modality_priority"
+  ; "image_output"
   ; "task"
   ; "supported_models"
   ; "supports_native_streaming"
@@ -662,6 +665,21 @@ let parse_entry entry_toml =
       ~allowed:Capability_vocab.modality_priority_values
       entry_toml
   in
+  let* image_output =
+    let* raw =
+      canonical_string_opt
+        ~entry_id
+        "image_output"
+        ~allowed:Capability_vocab.image_output_contract_values
+        entry_toml
+    in
+    match raw with
+    | None -> Ok None
+    | Some value ->
+      (match Capability_vocab.image_output_contract_of_string value with
+       | Some contract -> Ok (Some contract)
+       | None -> Error (Printf.sprintf "model entry %S has invalid image_output %S" entry_id value))
+  in
   let* task = task_opt ~entry_id "task" entry_toml in
   let* supported_models =
     exact_non_empty_string_list_opt ~entry_id "supported_models" entry_toml
@@ -798,6 +816,7 @@ let parse_entry entry_toml =
     ; supports_video_input
     ; supports_document_input
     ; modality_priority
+    ; image_output
     ; task
     ; supported_models
     ; supports_native_streaming

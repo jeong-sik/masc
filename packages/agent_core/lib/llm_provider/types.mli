@@ -758,7 +758,7 @@ end
 module Response_replay : sig
   type phase = Absent | Null | Commentary | Final_answer
   [@@deriving show, yojson]
-  type kind = Message of phase | Reasoning | Function_call
+  type kind = Message of phase | Reasoning | Function_call | Image_generation
   [@@deriving show, yojson]
   type group = { kind : kind; content_count : int }
   [@@deriving show, yojson]

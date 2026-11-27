@@ -148,6 +148,22 @@ let responses_truncation_of_string raw =
   | _ -> None
 ;;
 
+type image_generation_options =
+  { aspect_ratio : string option
+  ; size : string option
+  ; quality : string option
+  ; count : int option
+  }
+[@@deriving show, eq]
+
+let default_image_generation_options =
+  { aspect_ratio = None
+  ; size = None
+  ; quality = None
+  ; count = None
+  }
+;;
+
 type t =
   { kind : provider_kind
   ; provider_id : string option
@@ -185,6 +201,7 @@ type t =
   ; tool_choice : Types.tool_choice option
   ; disable_parallel_tool_use : bool
   ; response_format : Types.response_format
+  ; output_media : image_generation_options option
   ; cache_system_prompt : bool
   ; system_prompt_cache_prefix : string option
   ; cache_extended_ttl : bool
@@ -237,6 +254,7 @@ let make
       ?tool_choice
       ?(disable_parallel_tool_use = false)
       ?(response_format = Types.Off)
+      ?output_media
       ?(cache_system_prompt = false)
       ?system_prompt_cache_prefix
       ?(cache_extended_ttl = false)
@@ -306,6 +324,7 @@ let make
   ; tool_choice
   ; disable_parallel_tool_use
   ; response_format
+  ; output_media
   ; cache_system_prompt
   ; system_prompt_cache_prefix
   ; cache_extended_ttl
@@ -990,6 +1009,14 @@ let validate_request_path (config : t) =
         "OpenAI Responses API request_path requires provider kind OpenAI_compat; other \
          provider kinds use their own wire formats.")
   else Ok ()
+;;
+
+let media_capabilities (config : t) : Capabilities.media_capabilities =
+  let caps, _source = resolve_request_capabilities config in
+  Capabilities.media_capabilities_of_capabilities
+    ~wire:config.kind
+    ~responses_api:(request_path_targets_responses_api config.request_path)
+    caps
 ;;
 
 (* Structured-output tier admission (agent-core boundary / masc#25550 audit finding P4).

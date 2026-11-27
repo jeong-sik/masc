@@ -34,6 +34,7 @@ type entry =
         visual_first, plus the catalog's hyphenated aliases), validated
         against {!Capability_vocab.modality_priority_values}. Parsed + applied
         in [Capabilities.apply_catalog_entry]. *)
+  ; image_output : Capability_vocab.image_output_contract option
   ; supports_native_streaming : bool option
   ; supports_system_prompt : bool option
   ; supports_assistant_prefill : bool option
@@ -332,6 +333,7 @@ let known_entry_keys =
   ; "supports_video_input"
   ; "supports_document_input"
   ; "modality_priority"
+  ; "image_output"
   ; "supports_native_streaming"
   ; "supports_system_prompt"
   ; "supports_assistant_prefill"
@@ -553,6 +555,20 @@ let parse_entry json =
       ~allowed:Capability_vocab.modality_priority_values
       json
   in
+  let* image_output =
+    let* raw =
+      canonical_choice
+        "image_output"
+        ~allowed:Capability_vocab.image_output_contract_values
+        json
+    in
+    match raw with
+    | None -> Ok None
+    | Some value ->
+      (match Capability_vocab.image_output_contract_of_string value with
+       | Some contract -> Ok (Some contract)
+       | None -> Error ("invalid image_output: " ^ value))
+  in
   let* emits_usage_tokens = member_bool "emits_usage_tokens" json in
   let* supported_models = exact_non_empty_string_list "supported_models" json in
   Ok
@@ -581,6 +597,7 @@ let parse_entry json =
     ; supports_video_input
     ; supports_document_input
     ; modality_priority
+    ; image_output
     ; supports_native_streaming
     ; supports_system_prompt
     ; supports_assistant_prefill

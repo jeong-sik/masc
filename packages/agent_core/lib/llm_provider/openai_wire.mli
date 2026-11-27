@@ -49,6 +49,9 @@ type openai_chunk =
   ; delta_reasoning : string option
   ; delta_reasoning_details : openai_reasoning_details_delta option
   ; delta_tool_calls : openai_tool_call_delta list
+  ; delta_images : (string * media_source) list
+    (** Streamed image outputs carried on OpenRouter/OpenAI-compatible
+        [delta.images] arrays or [image_url] content parts. *)
   ; finish_reason : string option
   ; chunk_usage : delta_usage option
   ; chunk_timings : inference_timings option

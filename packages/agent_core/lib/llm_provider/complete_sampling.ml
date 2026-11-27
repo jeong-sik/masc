@@ -45,6 +45,10 @@ let gemini_url ~(config : Provider_config.t) ~stream =
   if stream then base ^ "?alt=sse" else base
 ;;
 
+let gemini_predict_url ~(config : Provider_config.t) =
+  gemini_model_url (gemini_target ~config) "predict"
+;;
+
 (* --- gemini_url tests ---
 
    [gemini_url] reads [base_url] and [model_id] only, so each test takes the

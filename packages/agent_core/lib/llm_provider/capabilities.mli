@@ -126,6 +126,53 @@ type task = Capability_vocab.task =
   | Image_generation
   | Video_generation
 
+type media_carrier = Capability_vocab.media_carrier =
+  | Inline_base64
+  | Remote_url
+  | Provider_file_id
+  | Provider_file_uri
+[@@deriving show, eq]
+
+type tool_result_media_mode = Capability_vocab.tool_result_media_mode =
+  | Tool_media_unsupported
+  | Inline_in_tool_result
+  | Native_function_response_parts
+  | Hoisted_user_followup
+[@@deriving show, eq]
+
+type vision_input_contract = Capability_profile.vision_input_contract =
+  | No_vision_input
+  | Native_vision_input of
+      { carriers : media_carrier list
+      ; tool_results : tool_result_media_mode
+      ; modality_priority : Modality.priority
+      }
+[@@deriving show, eq]
+
+type images_api_dialect = Capability_vocab.images_api_dialect =
+  | Openai_images_v1
+  | Zai_images_v4
+  | Gemini_imagen_predict
+[@@deriving show, eq]
+
+type image_output_contract = Capability_vocab.image_output_contract =
+  | No_image_output
+  | In_turn_gemini_modalities
+  | In_turn_openai_responses_tool
+  | In_turn_openai_chat_modalities
+  | In_turn_codex_item
+  | In_turn_acp_chunk
+  | Endpoint_images_api of images_api_dialect
+[@@deriving show, eq]
+
+type media_capabilities = Capability_profile.media_capabilities =
+  { vision_input : vision_input_contract
+  ; document_input : media_carrier list
+  ; audio_input : media_carrier list
+  ; image_output : image_output_contract
+  }
+[@@deriving show, eq]
+
 (** Structured-output tier a resolved capability advertises, projected from the
     two capability booleans by {!structured_output_support}. The request-admission
     decision reads this typed view rather than provider identity. *)
@@ -229,6 +276,8 @@ type capabilities = Capability_profile.capabilities =
         consults this at admission so a document is never re-labelled as
         another modality (agent-core boundary). *)
   ; modality_priority : Modality.priority
+  ; (* Output modalities *)
+    image_output : image_output_contract
   ; (* Inference task *)
     task : task option
     (** Inference task declared by the model catalog entry (transcription,
@@ -270,6 +319,21 @@ type capabilities = Capability_profile.capabilities =
   }
 
 val default_capabilities : capabilities
+
+val supports_image_output : capabilities -> bool
+val supports_image_input_of_media : media_capabilities -> bool
+val supports_image_output_of_media : media_capabilities -> bool
+
+val media_capabilities_of_capabilities
+  :  ?wire:Provider_kind.t
+  -> ?responses_api:bool
+  -> capabilities
+  -> media_capabilities
+
+val image_output_contract_to_string : image_output_contract -> string
+val image_output_contract_of_string : string -> image_output_contract option
+val images_api_dialect_to_string : images_api_dialect -> string
+val images_api_dialect_of_string : string -> images_api_dialect option
 
 (** Structured-output tier a resolved capability record advertises. Total
     projection of [supports_structured_output] and [supports_response_format_json]:

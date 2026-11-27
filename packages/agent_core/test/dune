@@ -790,3 +790,9 @@
  (name test_red_team_wire_security)
  (modules test_red_team_wire_security)
  (libraries agent_core_test_deps agent_core agent_core_base llm_provider alcotest yojson http))
+
+(test
+ (name test_bidirectional_multimodal)
+ (modules test_bidirectional_multimodal)
+ (libraries agent_core_test_deps agent_core llm_provider alcotest yojson base64 eio_main)
+ (deps ../models.toml))

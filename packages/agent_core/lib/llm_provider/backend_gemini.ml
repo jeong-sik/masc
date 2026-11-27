@@ -318,11 +318,26 @@ let gemini_tool_signatures_of_blocks blocks =
 
 (* ── Content block -> Gemini part ───────────────────── *)
 
-let inline_data_part ~block ~media_type source =
-  let data = Api_common.base64_media_payload ~backend:"gemini" ~block source in
-  Some
-    (`Assoc
-        [ "inlineData", `Assoc [ "mimeType", `String media_type; "data", `String data ] ])
+let media_part_result ~block ~media_type = function
+  | Base64 data ->
+    Ok
+      (`Assoc
+          [ "inlineData", `Assoc [ "mimeType", `String media_type; "data", `String data ] ])
+  | Url uri ->
+    let trimmed = String.trim uri in
+    if trimmed = ""
+    then Error (Printf.sprintf "gemini %s fileData fileUri must not be blank" block)
+    else
+      Ok
+        (`Assoc
+            [ ( "fileData"
+              , `Assoc [ "mimeType", `String media_type; "fileUri", `String trimmed ] )
+            ])
+  | File_id _ ->
+    Error
+      (Printf.sprintf
+         "gemini does not support %s media source kind file_id; use base64 or fileData URI (url)"
+         block)
 ;;
 
 let media_content_block_of_inline_data = function
@@ -403,11 +418,41 @@ let function_response_payload ~supports_function_response_parts ~content ~outcom
       raise (Gemini_api_error
         "Gemini function response media parts are not declared for this model");
     let display_name = fresh_name () in
-    let data = Api_common.base64_media_payload ~backend:"gemini"
-      ~block:kind source in
-    parts := `Assoc ["inlineData", `Assoc
-      ["mimeType", `String media_type; "data", `String data;
-       "displayName", `String display_name]] :: !parts;
+    let part =
+      match source with
+      | Base64 data ->
+        `Assoc
+          [ ( "inlineData"
+            , `Assoc
+                [ "mimeType", `String media_type
+                ; "data", `String data
+                ; "displayName", `String display_name
+                ] )
+          ]
+      | Url uri ->
+        let trimmed = String.trim uri in
+        if trimmed = ""
+        then
+          raise
+            (Gemini_api_error
+               (Printf.sprintf "gemini %s fileData fileUri must not be blank" kind))
+        else
+          `Assoc
+            [ ( "fileData"
+              , `Assoc
+                  [ "mimeType", `String media_type
+                  ; "fileUri", `String trimmed
+                  ; "displayName", `String display_name
+                  ] )
+            ]
+      | File_id _ ->
+        raise
+          (Gemini_api_error
+             (Printf.sprintf
+                "gemini does not support %s media source kind file_id; use base64 or fileData URI (url)"
+                kind))
+    in
+    parts := part :: !parts;
     `Assoc ["type", `String kind; "media_type", `String media_type;
             "source", `Assoc ["$ref", `String display_name]]
   in
@@ -457,11 +502,17 @@ let part_of_content_block ~supports_function_response_parts tool_signatures
       (`Assoc [ "thought", `Bool true; "text", `String (Utf8_sanitize.sanitize content) ])
   | ReasoningDetails _ -> None
   | Image { media_type; source } ->
-    inline_data_part ~block:"image" ~media_type source
+    (match media_part_result ~block:"image" ~media_type source with
+     | Ok part -> Some part
+     | Error reason -> raise (Gemini_api_error reason))
   | Audio { media_type; source } ->
-    inline_data_part ~block:"audio" ~media_type source
+    (match media_part_result ~block:"audio" ~media_type source with
+     | Ok part -> Some part
+     | Error reason -> raise (Gemini_api_error reason))
   | Document { media_type; source } ->
-    inline_data_part ~block:"document" ~media_type source
+    (match media_part_result ~block:"document" ~media_type source with
+     | Ok part -> Some part
+     | Error reason -> raise (Gemini_api_error reason))
   | ToolReference _ -> None
   | ToolUse { id; name; input } ->
     let fields =
@@ -717,7 +768,11 @@ let contents_of_messages ~supports_function_response_parts (messages : message l
   List.rev !contents, system_instruction
 ;;
 
-(* ── Tool schema -> Gemini functionDeclarations ─────── *)
+let contents_of_messages_result ~supports_function_response_parts (messages : message list) =
+  try Ok (contents_of_messages ~supports_function_response_parts messages) with
+  | Gemini_api_error reason -> Error reason
+  | Invalid_argument reason -> Error reason
+;;
 
 (* Tool input schemas are JSON Schema (additionalProperties,
    exclusiveMinimum, ...). The [parameters] field takes only Gemini's OpenAPI
@@ -925,40 +980,46 @@ let project_messages_for_wire
     Ok projected_messages
 ;;
 
+type build_refusal =
+  | Config_refusal of string
+  | History_refusal of string
+
+let refusal_message = function
+  | Config_refusal reason | History_refusal reason -> reason
+;;
+
 let extract_cacheable_prefix_result
       ~(config : Provider_config.t)
       ~(messages : message list)
       ?(tools : Yojson.Safe.t list = [])
       ()
   =
-  try
-    match
-      project_messages_for_wire
-        ~observe:false
-        ~stream:false
-        ~tools_present:(tools <> [])
-        ~config
-        messages
-    with
-    | Error _ as err -> err
-    | Ok projected_messages ->
-      let _contents, msg_system =
-        contents_of_messages
-          ~supports_function_response_parts:
-            (capabilities_of_config config).supports_function_response_parts
-          projected_messages
-      in
-      let system_instruction = merge_system_instruction ~config msg_system in
-      let tools_json = tools_json_of_list_pure tools in
-      let tool_config_json =
-        match tools_json with
-        | None -> None
-        | Some _ -> tool_config_json_of_choice config.tool_choice
-      in
-      Ok { system_instruction; tools_json; tool_config_json }
+  match
+    project_messages_for_wire
+      ~observe:false
+      ~stream:false
+      ~tools_present:(tools <> [])
+      ~config
+      messages
   with
-  | Invalid_argument reason -> Error reason
-  | Gemini_api_error reason -> Error reason
+  | Error _ as err -> err
+  | Ok projected_messages ->
+    (match
+       contents_of_messages_result
+         ~supports_function_response_parts:
+           (capabilities_of_config config).supports_function_response_parts
+         projected_messages
+     with
+     | Error _ as err -> err
+     | Ok (_contents, msg_system) ->
+       let system_instruction = merge_system_instruction ~config msg_system in
+       let tools_json = tools_json_of_list_pure tools in
+       let tool_config_json =
+         match tools_json with
+         | None -> None
+         | Some _ -> tool_config_json_of_choice config.tool_choice
+       in
+       Ok { system_instruction; tools_json; tool_config_json })
 ;;
 
 let extract_cacheable_prefix ~config ~messages ?tools () =
@@ -967,19 +1028,23 @@ let extract_cacheable_prefix ~config ~messages ?tools () =
   | Error reason -> invalid_arg reason
 ;;
 
-let build_request_artifact
+let build_request_artifact_typed
       ?(stream = false)
       ?(cached_content : string option)
       ~(config : Provider_config.t)
       ~(messages : message list)
       ?(tools : Yojson.Safe.t list = [])
       ()
+  : (request_artifact, build_refusal) result
   =
   ignore stream;
   (* Gemini streaming is URL-based, not body-based *)
-  (match Provider_config.validate_reasoning_effort_request config with
-   | Ok () -> ()
-   | Error reason -> invalid_arg ("Backend_gemini.build_request: " ^ reason));
+  let open Result.Syntax in
+  let* () =
+    Provider_config.validate_reasoning_effort_request config
+    |> Result.map_error (fun reason ->
+         Config_refusal ("Backend_gemini.build_request: " ^ reason))
+  in
   let output_token_receipt =
     Backend_openai_request.output_token_receipt
       ~envelope:
@@ -987,22 +1052,21 @@ let build_request_artifact
            Provider_http_codec.gemini_generate_content)
       config
   in
-  let projected_messages =
-    match
-      project_messages_for_wire
-        ~observe:true
-        ~stream
-        ~tools_present:(tools <> [])
-        ~config
-        messages
-    with
-    | Error reason -> invalid_arg reason
-    | Ok projected_messages -> projected_messages
+  let* projected_messages =
+    project_messages_for_wire
+      ~observe:true
+      ~stream
+      ~tools_present:(tools <> [])
+      ~config
+      messages
+    |> Result.map_error (fun reason -> Config_refusal reason)
   in
-  let contents, system_instruction =
-    contents_of_messages
-      ~supports_function_response_parts:(capabilities_of_config config).supports_function_response_parts
+  let* contents, system_instruction =
+    contents_of_messages_result
+      ~supports_function_response_parts:
+        (capabilities_of_config config).supports_function_response_parts
       projected_messages
+    |> Result.map_error (fun reason -> History_refusal reason)
   in
   (* Prepend system_prompt from config if present *)
   let system_instruction = merge_system_instruction ~config system_instruction in
@@ -1068,14 +1132,19 @@ let build_request_artifact
      Backend_openai_request.warn_capability_drop ~model_id:config.model_id ~field:"top_k"
    | None -> ());
   (* Seed — Gemini API supports seed in generationConfig *)
-  (match caps.supports_seed, config.seed with
-   | true, Some seed -> gen_config := ("seed", `Int seed) :: !gen_config
-   | false, Some _ ->
-     invalid_arg
-       (Printf.sprintf
-          "Backend_gemini.build_request: model %S does not support seed"
-          config.model_id)
-   | true, None | false, None -> ());
+  let* () =
+    match caps.supports_seed, config.seed with
+    | true, Some seed ->
+      gen_config := ("seed", `Int seed) :: !gen_config;
+      Ok ()
+    | false, Some _ ->
+      Error
+        (Config_refusal
+           (Printf.sprintf
+              "Backend_gemini.build_request: model %S does not support seed"
+              config.model_id))
+    | true, None | false, None -> Ok ()
+  in
   (match thinking_config_of_config config with
    | Some thinking_config ->
      gen_config := ("thinkingConfig", thinking_config) :: !gen_config
@@ -1092,6 +1161,51 @@ let build_request_artifact
    | Some text ->
      gen_config := ("responseFormat", `Assoc [ "text", text ]) :: !gen_config
    | None -> ());
+  let emit_image_output =
+    match config.output_media, caps.Capabilities.image_output with
+    | Some _, _ -> true
+    | None, Capabilities.In_turn_gemini_modalities -> true
+    | ( None
+      , ( Capabilities.No_image_output
+        | Capabilities.In_turn_openai_responses_tool
+        | Capabilities.In_turn_openai_chat_modalities
+        | Capabilities.In_turn_codex_item
+        | Capabilities.In_turn_acp_chunk
+        | Capabilities.Endpoint_images_api _ ) ) -> false
+  in
+  let* () =
+    if not emit_image_output
+    then Ok ()
+    else (
+      gen_config
+      := ("responseModalities", `List [ `String "TEXT"; `String "IMAGE" ]) :: !gen_config;
+      match config.output_media with
+      | None -> Ok ()
+      | Some opts ->
+        let image_config = ref [] in
+        (match opts.aspect_ratio with
+         | Some ar when not (Api_common.string_is_blank ar) ->
+           image_config := ("aspectRatio", `String (String.trim ar)) :: !image_config
+         | Some _ | None -> ());
+        (match opts.size with
+         | Some sz when not (Api_common.string_is_blank sz) ->
+           image_config := ("imageSize", `String (String.trim sz)) :: !image_config
+         | Some _ | None -> ());
+        (match !image_config with
+         | [] -> ()
+         | fields -> gen_config := ("imageConfig", `Assoc (List.rev fields)) :: !gen_config);
+        (match opts.count with
+         | Some n when n >= 1 ->
+           gen_config := ("candidateCount", `Int n) :: !gen_config;
+           Ok ()
+         | Some n ->
+           Error
+             (Config_refusal
+                (Printf.sprintf
+                   "Backend_gemini.build_request: output_media.count must be positive, got %d"
+                   n))
+         | None -> Ok ()))
+  in
   let body = ("generationConfig", `Assoc !gen_config) :: body in
   (* Tools and toolConfig: omitted when carried by explicit cachedContent, and
      toolConfig is never emitted when [tools] is empty (Gemini REST API rejects
@@ -1108,27 +1222,32 @@ let build_request_artifact
           | Some tc -> ("toolConfig", tc) :: body
           | None -> body))
   in
-  Request_artifact_internal.create
-    ~payload:(Yojson.Safe.to_string (`Assoc body))
-    ~output_token_receipt
+  Ok
+    (Request_artifact_internal.create
+       ~payload:(Yojson.Safe.to_string (`Assoc body))
+       ~output_token_receipt)
+;;
+
+(* Canonical typed builder: every config and history refusal returns [Error]
+   directly without exception round-tripping. *)
+let build_request_artifact_result ?stream ?cached_content ~config ~messages ?tools () =
+  build_request_artifact_typed ?stream ?cached_content ~config ~messages ?tools ()
+  |> Result.map_error refusal_message
+;;
+
+(* Legacy raising wrapper retained for existing callers/tests; preserves
+   [Invalid_argument] for config refusals and [Gemini_api_error] for history
+   lowering refusals. *)
+let build_request_artifact ?stream ?cached_content ~config ~messages ?tools () =
+  match build_request_artifact_typed ?stream ?cached_content ~config ~messages ?tools () with
+  | Ok artifact -> artifact
+  | Error (Config_refusal reason) -> invalid_arg reason
+  | Error (History_refusal reason) -> raise (Gemini_api_error reason)
 ;;
 
 let build_request ?stream ?cached_content ~config ~messages ?tools () =
   build_request_artifact ?stream ?cached_content ~config ~messages ?tools ()
   |> request_payload
-;;
-
-(* The serializer refuses a request in two ways: [invalid_arg] for a config
-   it cannot express, and [Gemini_api_error] for a history it cannot lower
-   (a reordered thoughtSignature carrier, a malformed inlineData). Both are
-   local refusals of this request, decided before anything is sent. A
-   stranded carrier with no adjacent signable part is dropped with a warning
-   instead of refused, so a reducer-stranded history stays dispatchable. *)
-let build_request_artifact_result ?stream ?cached_content ~config ~messages ?tools () =
-  match build_request_artifact ?stream ?cached_content ~config ~messages ?tools () with
-  | artifact -> Ok artifact
-  | exception Invalid_argument reason -> Error reason
-  | exception Gemini_api_error reason -> Error reason
 ;;
 
 (* ── Parse response ─────────────────────────────────── *)

@@ -3,6 +3,7 @@ open Types
 type priority =
   | Preserve_input_order
   | Visual_first
+[@@deriving show, eq]
 
 let reorder priority (blocks : content_block list) : content_block list =
   match priority with

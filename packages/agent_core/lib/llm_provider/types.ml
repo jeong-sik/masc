@@ -1123,7 +1123,7 @@ module Response_replay = struct
   type phase = Absent | Null | Commentary | Final_answer
   [@@deriving show, yojson]
 
-  type kind = Message of phase | Reasoning | Function_call
+  type kind = Message of phase | Reasoning | Function_call | Image_generation
   [@@deriving show, yojson]
 
   type group = { kind : kind; content_count : int }
@@ -1151,11 +1151,15 @@ module Response_replay = struct
   ;;
 
   let content_matches kind = function
-    | Text _ -> (match kind with Message _ -> true | Reasoning | Function_call -> false)
+    | Text _ ->
+      (match kind with Message _ -> true | Reasoning | Function_call | Image_generation -> false)
     | Thinking _ | ReasoningDetails _ | RedactedThinking _ ->
-      (match kind with Reasoning -> true | Message _ | Function_call -> false)
-    | ToolUse _ -> (match kind with Function_call -> true | Message _ | Reasoning -> false)
-    | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ -> false
+      (match kind with Reasoning -> true | Message _ | Function_call | Image_generation -> false)
+    | ToolUse _ ->
+      (match kind with Function_call -> true | Message _ | Reasoning | Image_generation -> false)
+    | Image _ ->
+      (match kind with Image_generation -> true | Message _ | Reasoning | Function_call -> false)
+    | ToolReference _ | ToolResult _ | Document _ | Audio _ -> false
   ;;
 
   let partition ~content groups =
@@ -1172,7 +1176,7 @@ module Response_replay = struct
         else Error "responses_replay:content_partition_long"
       | {kind; content_count} :: rest ->
         if content_count < 0 then Error "responses_replay:negative_content_count"
-        else if (match kind with Message _ -> false | Reasoning | Function_call -> content_count <> 1)
+        else if (match kind with Message _ -> false | Reasoning | Function_call | Image_generation -> content_count <> 1)
         then Error "responses_replay:non_message_cardinality"
         else match take kind content_count [] blocks with
           | Error _ as error -> error
@@ -1214,8 +1218,8 @@ module Response_replay = struct
           | Ok (count, remaining) ->
             let acc = match group.kind with
               | Message _ -> {group with content_count = count} :: acc
-              | Reasoning | Function_call when count = 0 -> acc
-              | Reasoning | Function_call -> {group with content_count = count} :: acc
+              | (Reasoning | Function_call | Image_generation) when count = 0 -> acc
+              | Reasoning | Function_call | Image_generation -> {group with content_count = count} :: acc
             in
             counts boundary remaining acc rest
     in

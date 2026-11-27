@@ -970,6 +970,88 @@ let make_https_result ?tls_config () : (tls_peer -> _ -> _, https_init_error) re
         | Peer_ip ip -> Tls_eio.client_of_flow tls_config ~ip flow)
 ;;
 
+let image_mime_of_format_opt fmt =
+  match String.lowercase_ascii (String.trim fmt) with
+  | "png" | "image/png" -> Some "image/png"
+  | "jpeg" | "jpg" | "image/jpeg" -> Some "image/jpeg"
+  | "webp" | "image/webp" -> Some "image/webp"
+  | "gif" | "image/gif" -> Some "image/gif"
+  | _ -> None
+;;
+
+let sniff_image_mime_of_bytes bytes =
+  let len = String.length bytes in
+  if len >= 8 && String.sub bytes 0 8 = "\x89PNG\r\n\x1a\n"
+  then Some "image/png"
+  else if len >= 3 && bytes.[0] = '\xff' && bytes.[1] = '\xd8' && bytes.[2] = '\xff'
+  then Some "image/jpeg"
+  else if len >= 12 && String.sub bytes 0 4 = "RIFF" && String.sub bytes 8 4 = "WEBP"
+  then Some "image/webp"
+  else if len >= 6 && (String.sub bytes 0 6 = "GIF87a" || String.sub bytes 0 6 = "GIF89a")
+  then Some "image/gif"
+  else None
+;;
+
+let sniff_image_mime_of_base64 b64 =
+  (* 16 base64 characters decode to 12 raw bytes, covering PNG (8B), JPEG (3B),
+     WebP (12B), and GIF (6B) magic headers without copying the full image. *)
+  let buf = Buffer.create 16 in
+  let len = String.length b64 in
+  let rec collect i =
+    if i >= len || Buffer.length buf >= 16
+    then ()
+    else (
+      match b64.[i] with
+      | ' ' | '\t' | '\r' | '\n' -> collect (i + 1)
+      | c ->
+        Buffer.add_char buf c;
+        collect (i + 1))
+  in
+  collect 0;
+  let prefix = Buffer.contents buf in
+  let usable = String.length prefix / 4 * 4 in
+  if usable < 4
+  then None
+  else (
+    match Base64.decode ~pad:false (String.sub prefix 0 usable) with
+    | Ok decoded -> sniff_image_mime_of_bytes decoded
+    | Error _ -> None)
+;;
+
+let resolve_image_output_media_type ?format_hint ?base64_data () =
+  let sniffed = Option.bind base64_data sniff_image_mime_of_base64 in
+  match format_hint with
+  | Some raw when not (string_is_blank raw) ->
+    (match image_mime_of_format_opt raw with
+     | Some mime -> Ok mime
+     | None ->
+       (match sniffed with
+        | Some mime -> Ok mime
+        | None ->
+          Error (Printf.sprintf "unsupported_image_output_format:%s" (String.trim raw))))
+  | Some _ | None ->
+    (match sniffed with
+     | Some mime -> Ok mime
+     | None -> Ok "image/png")
+;;
+
+let infer_image_mime_of_url url =
+  let lower = String.lowercase_ascii (String.trim url) in
+  let strip_from sep s =
+    match String.index_opt s sep with
+    | Some i -> String.sub s 0 i
+    | None -> s
+  in
+  let path = lower |> strip_from '#' |> strip_from '?' in
+  if String.ends_with ~suffix:".jpg" path || String.ends_with ~suffix:".jpeg" path
+  then "image/jpeg"
+  else if String.ends_with ~suffix:".webp" path
+  then "image/webp"
+  else if String.ends_with ~suffix:".gif" path
+  then "image/gif"
+  else "image/png"
+;;
+
 let%test "fresh_tool_use_id fits within 40-char OpenAI bound and stays unique" =
   let a = fresh_tool_use_id () in
   let b = fresh_tool_use_id () in

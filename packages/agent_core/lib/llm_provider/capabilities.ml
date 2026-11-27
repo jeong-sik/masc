@@ -153,6 +153,7 @@ type declarative_capability_overrides =
   ; supports_video_input : bool option
   ; supports_document_input : bool option
   ; modality_priority : string option
+  ; image_output : Capability_vocab.image_output_contract option
   ; task : Capability_vocab.task option
   ; supports_native_streaming : bool option
   ; supports_system_prompt : bool option
@@ -309,6 +310,8 @@ let apply_declarative_capability_overrides ?(base=default_capabilities) override
             warn_unknown_capability_value ~field:"modality_priority" s;
             base.modality_priority)
        | None -> base.modality_priority)
+  ; image_output =
+      Option.value overrides.image_output ~default:base.image_output
   ; task =
       (* Already typed at the catalog parse boundary; no string re-parse. *)
       (match overrides.task with
@@ -444,6 +447,7 @@ let overrides_of_catalog_entry (entry : Model_catalog.model_entry) =
   ; supports_video_input = entry.supports_video_input
   ; supports_document_input = entry.supports_document_input
   ; modality_priority = entry.modality_priority
+  ; image_output = entry.image_output
   ; task = entry.task
   ; supports_native_streaming = entry.supports_native_streaming
   ; supports_system_prompt = entry.supports_system_prompt

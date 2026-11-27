@@ -168,6 +168,10 @@ val media_content_block_of_inline_data
     Undeclared document/audio tool media must be projected before this codec.
     The existing labelled image followup remains available when native parts
     are not declared. *)
+val contents_of_messages_result :
+  supports_function_response_parts:bool ->
+  Types.message list -> (Yojson.Safe.t list * Yojson.Safe.t option, string) result
+
 val contents_of_messages :
   supports_function_response_parts:bool ->
   Types.message list -> Yojson.Safe.t list * Yojson.Safe.t option

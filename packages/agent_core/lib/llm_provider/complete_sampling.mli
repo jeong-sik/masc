@@ -20,3 +20,7 @@ val gemini_count_tokens_url : gemini_target -> string
 (** Construct the Gemini generateContent or streamGenerateContent URL.
     Credentials are sent in headers. *)
 val gemini_url : config:Provider_config.t -> stream:bool -> string
+
+(** Construct the Imagen [:predict] endpoint URL:
+    [base_url/models/model_id:predict]. *)
+val gemini_predict_url : config:Provider_config.t -> string

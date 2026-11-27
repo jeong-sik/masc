@@ -81,4 +81,5 @@
   ; local SQLite file plus osascript rather than a socket, so this library
   ; reads chat.db and spawns a child directly.
   sqlite3
+  masc.sqlite_file
   masc_process))

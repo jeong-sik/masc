@@ -115,18 +115,6 @@ let expect_done db statement ~operation =
   then Ok ()
   else Error (sqlite_error db operation rc)
 
-let single_text db ~operation sql =
-  with_statement db ~operation sql (fun statement ->
-    let rc = Sqlite3.step statement in
-    if rc <> Sqlite3.Rc.ROW
-    then Error (sqlite_error db operation rc)
-    else
-      let value = Sqlite3.column_text statement 0 in
-      let rc = Sqlite3.step statement in
-      if rc = Sqlite3.Rc.DONE
-      then Ok value
-      else Error (sqlite_error db (operation ^ " completion") rc))
-
 let single_int db ~operation sql =
   with_statement db ~operation sql (fun statement ->
     let rc = Sqlite3.step statement in
@@ -202,13 +190,15 @@ let apply_tuning_pragmas db =
        ignore (exec db ~operation sql : (unit, string) result))
     tuning_pragmas_sql
 
+(* The writer sets this journal and the series readers open with it. *)
+let sqlite_journal = Sqlite_file.Wal
+
+(* HIGH-RISK-UNREVIEWED: the journal mode decides how the series readers open
+   this file (#36195). *)
 let configure db =
-  let* journal_mode =
-    single_text db ~operation:"set WAL journal mode" "PRAGMA journal_mode=WAL"
-  in
-  if not (String.equal (String.lowercase_ascii journal_mode) "wal")
-  then Error "SQLite refused journal_mode=WAL"
-  else
+  match Sqlite_file.set_journal db sqlite_journal with
+  | Error error -> Error (Sqlite_file.journal_error_to_string error)
+  | Ok () ->
     let* () =
       exec db ~operation:"set NORMAL synchronous" "PRAGMA synchronous=NORMAL"
     in
@@ -806,18 +796,19 @@ let return_ro_handle ~path handle =
 (* The series is read on a connection of its own. A scan over a month of rows
    then neither holds [store_lock] nor makes [insert] wait, and WAL mode lets
    the reader run beside the writer. Reusing warm read-only handles per file
-   inode avoids cold SQLite page-cache / schema re-parses on every request. *)
+   inode avoids cold SQLite page-cache / schema re-parses on every request.
+   HIGH-RISK-UNREVIEWED: every handle opens through Sqlite_file.open_reader
+   with the journal the writer sets (#36195). *)
 let with_read_only_db ~path f =
   match stat_dev_ino path with
   | None ->
-    (match Sqlite3.db_open ~mode:`READONLY path with
-     | exception Sqlite3.Error detail -> Error ("open read-only database: " ^ detail)
-     | db ->
+    (match Sqlite_file.open_reader (Sqlite_file.Owned sqlite_journal) path with
+     | Error detail -> Error ("open read-only database: " ^ detail)
+     | Ok db ->
        Fun.protect
          ~finally:(fun () -> ignore (close_db db : bool))
          (fun () ->
            try
-             let* () = exec db ~operation:"set busy timeout" busy_timeout_sql in
              apply_tuning_pragmas db;
              f db
            with Sqlite3.Error detail -> Error ("SQLite read: " ^ detail)))
@@ -826,18 +817,11 @@ let with_read_only_db ~path f =
       match checkout_ro_handle ~path ~dev ~ino with
       | Some h -> Ok h
       | None ->
-        (match Sqlite3.db_open ~mode:`READONLY path with
-         | exception Sqlite3.Error detail -> Error ("open read-only database: " ^ detail)
-         | db ->
-           (match
-              let* () = exec db ~operation:"set busy timeout" busy_timeout_sql in
-              apply_tuning_pragmas db;
-              Ok { ro_dev = dev; ro_ino = ino; ro_db = db }
-            with
-            | Ok _ as ok -> ok
-            | Error _ as err ->
-              ignore (close_db db : bool);
-              err
+        (match Sqlite_file.open_reader (Sqlite_file.Owned sqlite_journal) path with
+         | Error detail -> Error ("open read-only database: " ^ detail)
+         | Ok db ->
+           (match apply_tuning_pragmas db with
+            | () -> Ok { ro_dev = dev; ro_ino = ino; ro_db = db }
             | exception Sqlite3.Error detail ->
               ignore (close_db db : bool);
               Error ("SQLite read: " ^ detail)

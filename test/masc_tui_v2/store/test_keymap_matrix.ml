@@ -6495,7 +6495,8 @@ let test_wave2_100pct_menu_reachability_matrix () =
   Alcotest.(check bool) "404 marks turn_transcript absent for turn_ref" true
     (Option.equal String.equal ks_a.absent_transcript_ref (Some "trace#1"));
 
-  (* 5e. Unbind_connector sends real channel_id from configured_bindings *)
+  (* 5e. Unbind_connector asks on the first U and sends the real channel_id from
+     configured_bindings on the second *)
   let m_conn =
     {
       base with
@@ -6503,7 +6504,14 @@ let test_wave2_100pct_menu_reachability_matrix () =
       runtime = Runtime_store.set_tab Nav.Runtime_connectors base.runtime;
     }
   in
-  let _, unbind_cmds = step m_conn (char_key ~shift:true "U") in
+  let m_conn_asked, unbind_ask_cmds = step m_conn (char_key ~shift:true "U") in
+  Alcotest.(check bool) "first U on a connector sends no unbind" false
+    (has_cmd
+       (function
+         | Cmd.Http_post { req = Cmd.Post_connector_unbind _; _ } -> true
+         | _ -> false)
+       unbind_ask_cmds);
+  let _, unbind_cmds = step m_conn_asked (char_key ~shift:true "U") in
   Alcotest.(check bool) "Unbind_connector sends real configured_bindings channel_id"
     true
     (List.exists
@@ -6518,6 +6526,89 @@ let test_wave2_100pct_menu_reachability_matrix () =
              true
          | _ -> false)
        unbind_cmds);
+
+  (* 5e-2. The second U sends only while the window is open, and only for the
+     binding the first U asked about: the request and the stored arm say so. *)
+  let u_at ns m =
+    Update.step ~now:(Clock.Mono.of_ns ns) m
+      (Msg.Key_event (char_key ~shift:true "U"))
+  in
+  let sends_any_unbind cmds =
+    has_cmd
+      (function
+        | Cmd.Http_post { req = Cmd.Post_connector_unbind _; _ } -> true
+        | _ -> false)
+      cmds
+  in
+  let sends_unbind_naming expected cmds =
+    has_cmd
+      (function
+        | Cmd.Http_post
+            {
+              req =
+                Cmd.Post_connector_unbind
+                  {
+                    connector = "slack-eng";
+                    channel_id = "C01ENG";
+                    keeper_name = sent;
+                  };
+              _;
+            } ->
+            Option.equal String.equal sent expected
+        | _ -> false)
+      cmds
+  in
+  let rebound_to keeper_name (m : Model.t) =
+    let rows =
+      List.map
+        (fun (row : Wire_runtime.connector_row) ->
+          if String.equal row.Wire_runtime.connector_id "slack-eng" then
+            {
+              row with
+              Wire_runtime.configured_bindings =
+                [ { Wire_runtime.channel_id = "C01ENG"; keeper_name } ];
+            }
+          else row)
+        (Runtime_store.filtered_connectors m.Model.runtime)
+    in
+    {
+      m with
+      Model.runtime =
+        Runtime_store.apply_connectors ~observed_at:t0 rows m.Model.runtime;
+    }
+  in
+  Alcotest.(check bool) "first U stores the arm" true
+    (Option.is_some m_conn_asked.Model.unbind_armed);
+  (* [step] pressed the first U at t0, 1 s on this clock. *)
+  let m_in_window, in_window_cmds = u_at 3_400_000_000L m_conn_asked in
+  Alcotest.(check bool) "second U 2.4 s later unbinds the Keeper the row names"
+    true
+    (sends_unbind_naming (Some "alpha") in_window_cmds);
+  Alcotest.(check bool) "the sent unbind clears the arm" true
+    (Option.is_none m_in_window.Model.unbind_armed);
+  let m_late, late_cmds = u_at 3_500_000_000L m_conn_asked in
+  Alcotest.(check bool) "second U 2.5 s later sends no unbind" false
+    (sends_any_unbind late_cmds);
+  Alcotest.(check bool) "second U 2.5 s later arms again" true
+    (Option.is_some m_late.Model.unbind_armed);
+  let m_rebound = rebound_to "beta" m_conn_asked in
+  let m_rebound_asked, rebound_ask_cmds =
+    step m_rebound (char_key ~shift:true "U")
+  in
+  Alcotest.(check bool)
+    "second U sends no unbind when the channel went to another Keeper" false
+    (sends_any_unbind rebound_ask_cmds);
+  Alcotest.(check bool) "that second U arms for the new Keeper" true
+    (Option.is_some m_rebound_asked.Model.unbind_armed);
+  let _, rebound_cmds = step m_rebound_asked (char_key ~shift:true "U") in
+  Alcotest.(check bool) "third U unbinds the new Keeper" true
+    (sends_unbind_naming (Some "beta") rebound_cmds);
+  let m_unnamed_asked, _ =
+    step (rebound_to "" m_conn) (char_key ~shift:true "U")
+  in
+  let _, unnamed_cmds = step m_unnamed_asked (char_key ~shift:true "U") in
+  Alcotest.(check bool) "a binding with no Keeper name unbinds with none" true
+    (sends_unbind_naming None unnamed_cmds);
 
   (* 5f. Harness_overrule dive callsites refuse empty modal when no 64-hex verdict is linked,
      and reject 63-hex & task IDs while accepting exact 64-hex *)
@@ -9012,6 +9103,23 @@ let test_part2_keymap_consistency_spatial_overlays_and_safe_space () =
          | Cmd.Http_post { req = Cmd.Post_oauth_identity_switch _; _ } -> true
          | _ -> false)
        cmds_id_ent);
+  (* U disconnects the provider on the second press, not the first *)
+  let is_oauth_disconnect = function
+    | Cmd.Http_post
+        {
+          req = Cmd.Post_oauth_disconnect { keeper = "alpha"; provider = "openai" };
+          _;
+        } ->
+        true
+    | _ -> false
+  in
+  let m_id_asked, cmds_id_u1 = step m_id_dive (char_key ~shift:true "U") in
+  Alcotest.(check bool) "Keeper_identity first U sends no OAuth disconnect" false
+    (has_cmd is_oauth_disconnect cmds_id_u1);
+  let _, cmds_id_u2 = step m_id_asked (char_key ~shift:true "U") in
+  Alcotest.(check bool) "Keeper_identity second U sends Post_oauth_disconnect"
+    true
+    (has_cmd is_oauth_disconnect cmds_id_u2);
 
   (* Embedded Split Keepers pane_index=1 Keeper_identity: Space=0 POSTs, a/Enter=switch *)
   let selected_name =

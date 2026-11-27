@@ -901,7 +901,7 @@ let bindings : binding list =
         ~footer_priority:0 (bare_char 'u');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Unbind_connector ~key_display:"U"
-        ~hint_label:(Say.make ~ko:"연결 해제" ~en:"Unbind")
+        ~hint_label:(Say.make ~ko:"연결 해제(2회)" ~en:"Unbind (2x)")
         ~help_desc:(Say.make ~ko:"커넥터 채널 바인딩 해제 / OAuth 공급자 연결 해제" ~en:"Unbind selected connector channel / Disconnect OAuth provider")
         ~footer_priority:0 (bare_char 'U');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions

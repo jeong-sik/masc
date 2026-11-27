@@ -74,17 +74,19 @@ val save_agent_core_if_absent :
   Agent_core.Checkpoint.t ->
   checkpoint_installation
 
-(** [close_open_turn_if_source ~session_dir known closing] installs
-    [closing] ({!Agent_core.Checkpoint_objects.close_open_turn} of
-    [known]'s head) while the canonical file still holds [known]'s head
-    content, under the same lock and source check as
-    [save_agent_core_if_source]. The installed ref is the source's: closing
-    keeps the turn count and content digest. The published summary keeps
+(** [close_open_turn_if_source ~session_dir ~session_id known closing]
+    installs [closing] ({!Agent_core.Checkpoint_objects.close_open_turn} of
+    [known]'s head) over the canonical of [session_id] while that file still
+    holds [known]'s head content, under the same lock and source check as
+    [save_agent_core_if_source]. Closing keeps the turn count and content
+    digest, so the installed ref is the source's. The published summary keeps
     [known]'s knowledge of the head's objects, since only the open messages
-    were read. A head whose session id or ref does not form comes back
-    [Not_installed] with [Source_unavailable]. *)
+    were read. A [known] head naming another session comes back
+    [Not_installed] with [Source_unavailable (Ref_session_mismatch _)], a
+    closing head naming another session with [Candidate_session_mismatch]. *)
 val close_open_turn_if_source :
   session_dir:string ->
+  session_id:string ->
   Keeper_checkpoint_store_canonical.known_canonical ->
   Agent_core.Checkpoint_objects.closing ->
   checkpoint_installation

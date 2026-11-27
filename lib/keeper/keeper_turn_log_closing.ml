@@ -35,15 +35,17 @@ let close_open (place : Keeper_turn_log_recorder.place) =
        | Decode.Objects_invalid _ ) as error) -> Not_closed (Head_unread error)
   | Ok (Some known) ->
     (match
-       Objects.close_open_turn
-         ~read_object:(Keeper_checkpoint_object_store.read ~session_dir:place.session_dir)
-         known.known_head
+       Decode.offload_checkpoint_cpu (fun () ->
+         Objects.close_open_turn
+           ~read_object:(Keeper_checkpoint_object_store.read ~session_dir:place.session_dir)
+           known.known_head)
      with
      | Error error -> Not_closed (Open_turn_unread error)
      | Ok None -> Nothing_open
      | Ok (Some closing) ->
        (match
-          Checkpoint.close_open_turn_if_source ~session_dir:place.session_dir known closing
+          Checkpoint.close_open_turn_if_source ~session_dir:place.session_dir
+            ~session_id:place.session_id known closing
         with
         | Checkpoint.Installed (_ : Checkpoint.installed_checkpoint) ->
           Closed_open { messages = List.length known.known_head.history.open_messages }

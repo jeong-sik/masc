@@ -749,9 +749,11 @@ val save_agent_core_if_absent :
     [save_agent_core_if_source]. Closing keeps the turn count and content
     digest, so the installed ref is the source's. The published summary keeps
     [known]'s knowledge of the head's objects, since only the open messages
-    were read. *)
+    were read. Both heads must name [session_id], the session whose canonical
+    is replaced; a head naming another session is refused. *)
 val close_open_turn_if_source :
   session_dir:string ->
+  session_id:string ->
   Keeper_checkpoint_store_canonical.known_canonical ->
   Agent_core.Checkpoint_objects.closing ->
   checkpoint_installation

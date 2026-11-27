@@ -289,31 +289,76 @@ let save_agent_core_if_absent ~session_dir ~boundary candidate =
          plan.head)
 ;;
 
-(* The canonical [known] describes, with its open turn closed from the open
-   messages' objects alone ({!Objects.close_open_turn}), installed while the
-   file still holds [known]'s head. Closing keeps the turn count and the
-   content digest, so the installed ref is the source's. Only the open
-   messages were read, so the summary keeps what [known] knew of the other
-   objects: a head only parsed stays unchecked, and the next save looks for
-   absent objects as it would have. *)
-let close_open_turn_if_source ~session_dir (known : known_canonical) (closing : Objects.closing) =
-  let source_ref =
-    match Keeper_id.Trace_id.of_string known.known_session_id with
-    | Error reason -> Error (Session_id_invalid reason)
-    | Ok trace_id ->
-      Keeper_checkpoint_ref.of_persisted
-        ~trace_id
-        ~turn_count:known.known_turn_count
-        ~sha256:(Objects.head_content_digest known.known_head :> string)
-      |> Result.map_error (fun error -> Ref_create_failed error)
+let trace_of_head (head : Objects.head) =
+  Keeper_id.Trace_id.of_string head.header.session_id
+  |> Result.map_error (fun reason -> Session_id_invalid reason)
+;;
+
+let ref_of_head trace_id (head : Objects.head) =
+  Keeper_checkpoint_ref.of_persisted
+    ~trace_id
+    ~turn_count:head.header.turn_count
+    ~sha256:(Objects.head_content_digest head :> string)
+  |> Result.map_error (fun error -> Ref_create_failed error)
+;;
+
+(* [closing] installed over the canonical of [session_id] while that file
+   still holds [known]'s head content. Both heads must name [session_id]:
+   the canonical path is built from it, and a head copied under another
+   session's name is refused as the source check refuses it. Closing keeps
+   the turn count and the content digest, so the candidate ref, read from
+   the closing head, is the source ref. Only the open messages were read, so
+   the summary keeps what [known] knew of the other objects: a head only
+   parsed stays unchecked, and the next save looks for absent objects as it
+   would have. *)
+let close_open_turn_if_source
+    ~session_dir
+    ~session_id
+    (known : known_canonical)
+    (closing : Objects.closing)
+  =
+  let ( let* ) = Result.bind in
+  let refs =
+    let* expected =
+      Keeper_id.Trace_id.of_string session_id
+      |> Result.map_error (fun reason ->
+        Source_unavailable (Ref_identity_invalid (Session_id_invalid reason)))
+    in
+    let* source_trace =
+      trace_of_head known.known_head
+      |> Result.map_error (fun error -> Source_unavailable (Ref_identity_invalid error))
+    in
+    let* () =
+      if Keeper_id.Trace_id.equal source_trace expected
+      then Ok ()
+      else Error (Source_unavailable (Ref_session_mismatch { expected; actual = source_trace }))
+    in
+    let* candidate_trace =
+      trace_of_head closing.closing_head
+      |> Result.map_error (fun error -> Candidate_identity_invalid error)
+    in
+    let* () =
+      if Keeper_id.Trace_id.equal candidate_trace expected
+      then Ok ()
+      else Error (Candidate_session_mismatch { expected; candidate = candidate_trace })
+    in
+    let* source_ref =
+      ref_of_head expected known.known_head
+      |> Result.map_error (fun error -> Source_unavailable (Ref_identity_invalid error))
+    in
+    let* candidate_ref =
+      ref_of_head expected closing.closing_head
+      |> Result.map_error (fun error -> Candidate_identity_invalid error)
+    in
+    Ok (source_ref, candidate_ref)
   in
-  match source_ref with
-  | Error error -> not_installed (Source_unavailable (Ref_identity_invalid error))
-  | Ok source_ref ->
+  match refs with
+  | Error cause -> not_installed cause
+  | Ok (source_ref, candidate_ref) ->
     install_plan_if_source
       ~require_absent:false ~with_checkpoint_cas_lock ~write_checkpoint_bytes
       ~on_checkpoint_commit_observer:(fun (_ : Keeper_checkpoint_ref.t) -> ())
-      ~session_dir ~expected_source_ref:source_ref ~candidate_ref:source_ref
+      ~session_dir ~expected_source_ref:source_ref ~candidate_ref
       ~summary_objects:known.known_objects ~objects:closing.closing_objects
       ~head_bytes:closing.closing_head_bytes closing.closing_head
 ;;

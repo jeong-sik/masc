@@ -291,8 +291,9 @@ val find_last
 (** {1 Closing the open turn} *)
 
 (** What closing a head's open turn writes: [closing_objects] first, in
-    order, then [closing_head_bytes] in place of the head. *)
-type closing =
+    order, then [closing_head_bytes] in place of the head. Only
+    {!close_open_turn} makes one, so the bytes are [closing_head]'s. *)
+type closing = private
   { closing_objects : (digest * string) list
   ; closing_head_bytes : string
   ; closing_head : head

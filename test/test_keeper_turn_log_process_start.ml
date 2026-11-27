@@ -447,6 +447,12 @@ let left_open (place : Recorder.place) =
   save place ~boundary:Objects.Turn_continues ~turn_count:2 (turn_one @ [ message User "a asks 2" ])
 ;;
 
+let place_left_open config name =
+  let place = persisted_keeper config name in
+  left_open place;
+  place
+;;
+
 (* The step reads the head and the open messages' objects, not the history
    closed before them. Turn 1's bundle is gone: a closing that loaded the
    history would stop on it, and this one closes the open message. The hole
@@ -496,6 +502,40 @@ let test_closing_keeps_the_rest_unchecked =
     ((known place).known_objects = Keeper_checkpoint_store_summary.Objects_unchecked)
 ;;
 
+(* A head copied under another session's name, with the open message's
+   object beside it. The canonical path is built from the session, so the
+   head that names another session is refused as the source check refuses
+   it, and neither head changes. *)
+let test_closing_refuses_a_head_of_another_session =
+  with_workspace
+  @@ fun config ->
+  let owner = place_left_open config "head-owner" in
+  let other = persisted_keeper config "head-copier" in
+  let owner_head = (known owner).known_head in
+  Fs_compat.save_file (canonical_path other) (Fs_compat.load_file (canonical_path owner));
+  Unix.chmod (canonical_path other) 0o600;
+  List.iter
+    (fun digest ->
+       let target = Keeper_checkpoint_object_store.path ~session_dir:other.session_dir digest in
+       let shard = Filename.dirname target in
+       List.iter
+         (fun dir -> if not (Sys.file_exists dir) then Unix.mkdir dir 0o700)
+         [ Filename.dirname shard; shard ];
+       Fs_compat.save_file target
+         (Fs_compat.load_file (Keeper_checkpoint_object_store.path ~session_dir:owner.session_dir digest));
+       Unix.chmod target 0o600)
+    owner_head.history.open_messages;
+  (match Keeper_turn_log_closing.close_open other with
+   | Not_closed
+       (Save_not_installed
+          (Keeper_checkpoint_store.Source_unavailable (Keeper_checkpoint_store.Ref_session_mismatch _)))
+     -> ()
+   | Nothing_open | Closed_open _ | Not_closed _ ->
+     fail "a head naming another session is refused as another session's");
+  check int "the copied head is still open" 1 (open_messages other);
+  check int "the owner's head is still open" 1 (open_messages owner)
+;;
+
 let () =
   run "keeper_turn_log_process_start"
     [ ( "process start"
@@ -508,6 +548,8 @@ let () =
         ; test_case "a closing save that fails" `Quick test_a_closing_save_that_fails
         ; test_case "closing reads only the open turn" `Quick test_closing_reads_only_the_open_turn
         ; test_case "closing keeps the rest unchecked" `Quick test_closing_keeps_the_rest_unchecked
+        ; test_case "closing refuses a head of another session" `Quick
+            test_closing_refuses_a_head_of_another_session
         ; test_case "a log that cannot be read" `Quick test_a_log_that_cannot_be_read
         ; test_case "a Keeper with no metadata" `Quick test_a_keeper_with_no_metadata
         ] )

@@ -400,9 +400,9 @@ let test_each_tree_location_has_its_own_budget () =
 ;;
 
 (* The per-call git timeout is the one the caller passes, not a number written
-   into the probe. Each git here answers after 3 s with empty output; under a
-   0.2 s timeout every call is cut off, so the row reads as unread instead of
-   as an empty answer. *)
+   into the probe. Each git here answers a URL after 3 s; under a 0.2 s
+   timeout every call is cut off, so the origin and the head read as unread
+   instead of as that URL. *)
 let test_probe_git_calls_take_the_timeout_they_are_given () =
   let root = Filename.temp_dir "masc-probe-timeout-" "" in
   let tree = Filename.concat root "tree" in
@@ -414,7 +414,10 @@ let test_probe_git_calls_take_the_timeout_they_are_given () =
       List.iter (fun dir -> Unix.mkdir dir 0o700)
         [ tree; Filename.concat tree "repo"; Filename.concat tree "repo/.git"; bin ];
       let git = Filename.concat bin "git" in
-      Out_channel.with_open_text git (fun ch -> output_string ch "#!/bin/sh\nexec sleep 3\n");
+      (* One process, so the timeout's kill reaches the sleeping git itself. *)
+      Out_channel.with_open_text git (fun ch ->
+        output_string ch
+          "#!/bin/sh\nexec python3 -c 'import time; time.sleep(3); print(\"https://example.invalid/repo.git\")'\n");
       Unix.chmod git 0o755;
       let command = Printf.sprintf "cd %s && PATH=%s:$PATH python3 -c %s '[]' %d %d %d inspect %g > %s"
         (Filename.quote tree) (Filename.quote bin)

@@ -982,11 +982,50 @@ let draw_line grid ~(rect : Rect.t) ?(osc8 = true) (line : rendered_line) =
     line.spans;
   Option.iter (Cell_grid.register_document_image_part grid ~rect) line.image_part
 
+let link_first_lines lines =
+  let _, firsts =
+    List.fold_left
+      (fun (index, firsts) (line : rendered_line) ->
+        let firsts =
+          List.fold_left
+            (fun firsts (span : styled_span) ->
+              match span.hyperlink with
+              | Some uri
+                when not
+                       (List.exists
+                          (fun (seen, _) -> String.equal seen uri)
+                          firsts) ->
+                  (uri, index) :: firsts
+              | Some _ | None -> firsts)
+            firsts line.spans
+        in
+        (index + 1, firsts))
+      (0, []) lines
+  in
+  List.rev firsts
+
+let reverse_link uri (line : rendered_line) =
+  {
+    line with
+    spans =
+      List.map
+        (fun (span : styled_span) ->
+          if Option.equal String.equal span.hyperlink (Some uri) then
+            { span with style = Style.add_attr Attr.reverse span.style }
+          else span)
+        line.spans;
+  }
+
 let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ?(osc8 = true) ?(scroll = 0)
-    raw =
+    ?selected_link raw =
   if Rect.is_empty rect then 0
   else
     let lines = render_lines ~theme ~width:rect.w ~osc8 raw in
+    let lines =
+      match selected_link with
+      | Some uri -> List.map (reverse_link uri) lines
+      | None -> lines
+    in
     let total = List.length lines in
     let max_start = Int.max 0 (total - rect.h) in
     let start = Int.max 0 (Int.min max_start scroll) in

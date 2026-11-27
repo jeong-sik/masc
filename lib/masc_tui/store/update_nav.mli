@@ -153,6 +153,18 @@ val jump_to_goal :
 val jump_to_task :
   ?zoomed:bool -> ?return_from:Model.t -> Model.t -> string -> Model.t * Cmd.t list
 val knowledge_detail_max_scroll : Model.t -> int
+
+val step_wiki_link :
+  now:Clock.Mono.t -> delta:int -> Model.t -> Model.t * Cmd.t list
+(** Select the next ([delta > 0]) or previous body link of the shown wiki page
+    that goes to an existing page, scrolling it into view. *)
+
+val wiki_link_back_ready : Model.t -> bool
+(** The Wiki page card is active and its page was reached by a body link. *)
+
+val wiki_link_back : Model.t -> Model.t * Cmd.t list
+(** Return to the page the shown wiki page was reached from by a body link,
+    with that page's scroll and link. *)
 val pop_workspace_return : Model.t -> (Model.t * Cmd.t list) option
 val navigate_menu_target :
   ?keep_sidebar_focus:bool -> Model.t -> Nav.menu_target -> Model.t * Cmd.t list

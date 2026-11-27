@@ -5295,6 +5295,8 @@ and execute_action ~now (m : Model.t) action =
                           }
                         in
                         (next, View_fetches.fetches_for_current_view next)
+                      else if Update_nav.wiki_link_back_ready m then
+                        Update_nav.wiki_link_back m
                       else if Model.is_zoomed_active m then
                         (Update_nav.unzoom_view m, [])
                       else if
@@ -7790,6 +7792,8 @@ and execute_action ~now (m : Model.t) action =
                         in
                         ({ m with knowledge }, [])
                     | None -> (m, []))
+                | Nav.Knowledge when Model.is_wiki_detail_active m ->
+                    Update_nav.step_wiki_link ~now ~delta m
                 | Nav.Knowledge
                   when Nav.equal_knowledge_tab m.knowledge.active_tab
                          Nav.Knowledge_artifacts ->

@@ -52,14 +52,20 @@ val alphatex_code_blocks : string -> string list
     language tag is [alphatex] or [atex] (case-insensitive), in document
     reading order. Shares the exact {!Cmarkit} parser and fence classification
     used by {!render_lines}. *)
+val link_first_lines : rendered_line list -> (string * int) list
+(** Each distinct link target in [lines], with the index of the first line it
+    is on, in reading order. *)
+
 val draw :
   Cell_grid.t ->
   rect:Rect.t ->
   theme:Theme.t ->
   ?osc8:bool ->
   ?scroll:int ->
+  ?selected_link:string ->
   string ->
   int
 (** Render Markdown directly onto [Cell_grid.t], interning OSC 8 hyperlinks in
-    the grid's frame-local link table when [osc8] is [true]. Returns total
-    rendered line count. *)
+    the grid's frame-local link table when [osc8] is [true]. Spans linking to
+    [selected_link] are drawn in reverse video. Returns total rendered line
+    count. *)

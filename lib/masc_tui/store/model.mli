@@ -569,6 +569,9 @@ val active_focus_label : t -> Say.t
 val is_board_detail_active : t -> bool
 (** [true] when no overlay or dive is open and [3 Knowledge > Board] has
     detail focus ([pane_index >= 1] or zoomed). *)
+
+val is_wiki_detail_active : t -> bool
+(** The Wiki page card has focus or is zoomed, with no overlay or inspector. *)
 val is_artifact_doc_search_active : t -> bool
 (** [true] when no overlay or dive is open and [3 Knowledge > Artifacts] has
     detail focus ([pane_index >= 1] or zoomed), routing [/], [n], and [N] to

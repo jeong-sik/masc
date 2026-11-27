@@ -2618,6 +2618,51 @@ let test_card_legacy_rule_label () =
     "ordinary line returns None" None
     (Card.legacy_rule_label "plain text line")
 
+let test_markdown_link_first_lines_and_selected_link () =
+  let theme = Theme.default in
+  let source =
+    "See [B](page-b.md) and [site](https://example.com).\n\n\
+     Again [Bee](page-b.md), then [C](page-c.md)."
+  in
+  let lines = Markdown.render_lines ~theme ~width:120 ~osc8:true source in
+  let firsts = Markdown.link_first_lines lines in
+  Alcotest.(check (list string)) "each link target once, in reading order"
+    [ "page-b.md"; "https://example.com"; "page-c.md" ]
+    (List.map fst firsts);
+  let links_on index =
+    match List.nth_opt lines index with
+    | Some (line : Markdown.rendered_line) ->
+        List.filter_map (fun (span : Markdown.styled_span) -> span.hyperlink) line.spans
+    | None -> []
+  in
+  List.iter
+    (fun (uri, index) ->
+      Alcotest.(check bool) (uri ^ " is on its line") true
+        (List.mem uri (links_on index));
+      Alcotest.(check bool) (uri ^ " is on no earlier line") false
+        (List.exists (fun earlier -> List.mem uri (links_on earlier))
+           (List.init index Fun.id)))
+    firsts;
+  let reversed_cells ?selected_link () =
+    let grid = Cell_grid.create ~cols:120 ~rows:6 in
+    let rect = Rect.make ~x:0 ~y:0 ~w:120 ~h:6 in
+    ignore (Markdown.draw grid ~rect ~theme ?selected_link source);
+    List.init 6 (fun y ->
+        List.init 120 (fun x ->
+            Attr.has (Cell_grid.get grid ~x ~y).style.attrs Attr.reverse))
+    |> List.concat
+    |> List.filter Fun.id
+    |> List.length
+  in
+  Alcotest.(check int) "no selected link draws nothing reversed" 0
+    (reversed_cells ());
+  Alcotest.(check int) "every label linking to the selected target is reversed"
+    (String.length "B" + String.length "Bee")
+    (reversed_cells ~selected_link:"page-b.md" ());
+  Alcotest.(check int) "only that target's labels are reversed"
+    (String.length "C")
+    (reversed_cells ~selected_link:"page-c.md" ())
+
 let () =
   Alcotest.run "masc_tui_keymap_ui"
     [
@@ -2679,6 +2724,8 @@ let () =
             `Quick test_markdown_inline_mermaid_blocks;
           Alcotest.test_case "Markdown O(N) parse_inline on 10k unmatched delimiters"
             `Quick test_markdown_parse_inline_linear_unmatched_delimiters;
+          Alcotest.test_case "Markdown link targets by first line and the selected link"
+            `Quick test_markdown_link_first_lines_and_selected_link;
           Alcotest.test_case "Wave 2: Html_doc strips script/style/hidden, aligns tables & search highlights"
             `Quick test_wave2_html_doc_renderer;
         ] );

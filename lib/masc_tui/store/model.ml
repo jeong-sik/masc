@@ -2131,6 +2131,13 @@ let is_board_detail_active m =
   && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_board
   && (m.nav.pane_index >= 1 || (is_zoomed_active m))
 
+let is_wiki_detail_active m =
+  Option.is_none m.nav.overlay
+  && Option.is_none (active_inspector m)
+  && Nav.equal_workspace m.nav.workspace Nav.Knowledge
+  && Nav.equal_knowledge_tab m.knowledge.active_tab Nav.Knowledge_wiki
+  && (m.nav.pane_index >= 1 || is_zoomed_active m)
+
 let is_artifact_doc_search_active m =
   Option.is_none m.nav.overlay
   && Option.is_none (active_inspector m)

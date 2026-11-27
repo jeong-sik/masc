@@ -1166,8 +1166,9 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
          ~hotkey:
            (Say.resolve lang
               (if zoomed then
-                 Say.make ~ko:"[e] 편집 · [Ctrl+E] $EDITOR · [z/Esc] 확대 해제"
-                   ~en:"[e] Edit · [Ctrl+E] $EDITOR · [z/Esc] Unzoom"
+                 Say.make
+                   ~ko:"[</>] 링크 · [e] 편집 · [Ctrl+E] $EDITOR · [z/Esc] 확대 해제"
+                   ~en:"[</>] Links · [e] Edit · [Ctrl+E] $EDITOR · [z/Esc] Unzoom"
                else
                  Say.make
                    ~ko:"[Enter/z] 확대 · [e] 편집 · [^E] $EDITOR"
@@ -1185,8 +1186,40 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
               | [] -> ""
               | ts -> " · #" ^ String.concat " #" ts
             in
+            (* A selected link the page no longer has, or whose target the
+               index no longer lists, is neither drawn nor followed. *)
+            let link_target =
+              Option.bind (Knowledge_store.selected_wiki_link ~slug:d.slug k)
+                (fun link ->
+                  List.find_map
+                    (fun (raw, target) ->
+                      if String.equal raw link then Some (link, target)
+                      else None)
+                    (Knowledge_store.wiki_page_links k d))
+            in
+            let selected_link = Option.map fst link_target in
+            (* While a body link is selected, the subtitle says where Enter
+               goes: the target page and its summary from the index. *)
             let sub =
-              Printf.sprintf "%s · @%s%s" d.slug d.frontmatter.author tags
+              match link_target with
+              | Some (_, target) ->
+                  let summary =
+                    Option.bind (Observed.to_option k.wiki_index)
+                      (fun (idx : Wire_knowledge.wiki_index) ->
+                        List.find_map
+                          (fun (p : Wire_knowledge.wiki_page_summary) ->
+                            if String.equal p.slug target
+                               && not (String.equal p.summary "")
+                            then Some p.summary
+                            else None)
+                          idx.pages)
+                  in
+                  Printf.sprintf "%s %s%s"
+                    (Glyph.to_utf8 Glyph.External_arrow)
+                    target
+                    (Option.fold ~none:"" ~some:(fun s -> " · " ^ s) summary)
+              | None ->
+                  Printf.sprintf "%s · @%s%s" d.slug d.frontmatter.author tags
             in
             let total_md_lines =
               let pw =
@@ -1252,7 +1285,7 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
                 if not (Rect.is_empty prose_rect) then
                   ignore
                     (Markdown.draw grid ~rect:prose_rect ~theme ~osc8:true
-                       ~scroll d.body_markdown);
+                       ~scroll ?selected_link d.body_markdown);
                 if not (Rect.is_empty rail_rect) then begin
                   let ry = ref rail_rect.y and rbot = Rect.bottom rail_rect in
                   let headings = extract_markdown_headings d.body_markdown in
@@ -1390,7 +1423,7 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
                   in
                   ignore
                     (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true ~scroll
-                       d.body_markdown)
+                       ?selected_link d.body_markdown)
               end
             end
         | None -> (

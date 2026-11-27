@@ -3986,6 +3986,7 @@ type enter_plan =
       trace_section : Keeper_context_store.trace_section option;
     }
   | Enter_jump_knowledge_thread of string
+  | Enter_follow_wiki_link of { link : string; target : string }
   | Enter_jump_goal of string
   | Enter_jump_task of string
   | Enter_pin_memory_diff of {
@@ -4152,6 +4153,7 @@ let keeper_enter_action ~name ~tab (m : Model.t) =
   | Enter_toggle_zoom
   | Enter_jump_keeper _
   | Enter_jump_knowledge_thread _
+  | Enter_follow_wiki_link _
   | Enter_jump_goal _
   | Enter_jump_task _
   | Enter_pin_memory_diff _
@@ -4168,6 +4170,23 @@ let keeper_enter_action ~name ~tab (m : Model.t) =
   | Enter_code_open_file _
   | Enter_code_jump_match _ ->
       (m, [])
+
+(* The page the selected body link of the shown wiki page goes to, when the
+   server resolved that link to an existing page. *)
+let wiki_selected_link_target (k : Knowledge_store.t) =
+  match Knowledge_store.selected_wiki_page k with
+  | None -> None
+  | Some sel -> (
+      match
+        ( Knowledge_store.selected_wiki_link ~slug:sel.slug k,
+          Observed.to_option (Knowledge_store.wiki_page_for ~slug:sel.slug k) )
+      with
+      | Some link, Some detail ->
+          List.find_map
+            (fun (raw, target) ->
+              if String.equal raw link then Some (link, target) else None)
+            (Knowledge_store.wiki_page_links k detail)
+      | (Some _ | None), _ -> None)
 
 let enter_plan (m : Model.t) : enter_plan =
   (* Never push duplicate or cross-workspace dives when already inside a dive,
@@ -4323,7 +4342,11 @@ let enter_plan (m : Model.t) : enter_plan =
               then Enter_toggle_zoom
               else Enter_noop
           | Nav.Knowledge_wiki ->
-              if m.nav.pane_index >= 1 || Model.is_zoomed_active m then Enter_noop
+              if m.nav.pane_index >= 1 || Model.is_zoomed_active m then begin
+                match wiki_selected_link_target m.knowledge with
+                | Some (link, target) -> Enter_follow_wiki_link { link; target }
+                | None -> Enter_noop
+              end
               else if
                 Option.is_some (Knowledge_store.selected_wiki_page m.knowledge)
               then Enter_toggle_zoom
@@ -4698,6 +4721,19 @@ let toggle_zoom_view (m : Model.t) : Model.t * bool * Cmd.t list =
     in
     (next, true, View_fetches.fetches_for_current_view next)
 
+let follow_wiki_link ~link ~target (m : Model.t) =
+  match Knowledge_store.selected_wiki_page m.knowledge with
+  | None -> (m, [])
+  | Some sel -> (
+      match
+        Knowledge_store.follow_wiki_link ~from:sel.slug ~link ~target
+          m.knowledge
+      with
+      | Some knowledge ->
+          let next = { m with knowledge } in
+          (next, View_fetches.fetches_for_current_view next)
+      | None -> (m, []))
+
 let dive_selected (m : Model.t) =
   match enter_plan m with
   | Enter_noop -> (m, [])
@@ -4708,6 +4744,7 @@ let dive_selected (m : Model.t) =
       jump_to_keeper ?tab ?trace_section m name
   | Enter_jump_knowledge_thread post_id ->
       jump_to_knowledge_thread ~return_from:m m post_id
+  | Enter_follow_wiki_link { link; target } -> follow_wiki_link ~link ~target m
   | Enter_jump_goal goal_id ->
       jump_to_goal ~zoomed:true ~return_from:m m goal_id
   | Enter_jump_task task_id ->
@@ -4940,6 +4977,7 @@ let enter_hint (m : Model.t) =
     | Enter_toggle_zoom
     | Enter_jump_keeper _
     | Enter_jump_knowledge_thread _
+    | Enter_follow_wiki_link _
     | Enter_jump_goal _
     | Enter_jump_task _
     | Enter_pin_memory_diff _
@@ -7757,6 +7795,35 @@ let queue_context_max_scroll (m : Model.t) tab =
   in
   max 0 (total_rows - body_h)
 
+(* Width and height of the Markdown body in the wiki card [rect], as
+   [Screen_knowledge.draw_wiki_preview] lays out a loaded page. *)
+let wiki_preview_markdown_size ~bp ~show_inline_rail ~(rect : Rect.t) =
+  let inner = ui_card_inner rect in
+  let band_h = if inner.h >= 7 then 2 else 1 in
+  let below =
+    Rect.make ~x:inner.x ~y:(inner.y + band_h) ~w:inner.w
+      ~h:(max 0 (inner.h - band_h))
+  in
+  if Rect.is_empty inner || Rect.is_empty below then None
+  else
+    let show_toc_rail =
+      show_inline_rail
+      && Masc_tui_ui.Layout.equal_breakpoint bp Masc_tui_ui.Layout.Wide
+      && below.w >= 68
+      && below.h >= 8
+    in
+    if show_toc_rail then
+      let toc_w = 22 in
+      let prose_w = max 20 (below.w - toc_w - 1) in
+      let prose_rect =
+        Rect.make ~x:below.x ~y:below.y ~w:prose_w ~h:below.h
+        |> ui_pad_content ~bp ~pad_y:1
+      in
+      Some (prose_rect.w, prose_rect.h)
+    else
+      let content = ui_pad_content ~bp below in
+      Some (content.w, max 0 (content.h - 2))
+
 let wiki_preview_max_scroll ~bp ~theme ~show_inline_rail ~(rect : Rect.t)
     (k : Knowledge_store.t) =
   let inner = ui_card_inner rect in
@@ -7769,34 +7836,11 @@ let wiki_preview_max_scroll ~bp ~theme ~show_inline_rail ~(rect : Rect.t)
       | None -> None
     in
     match page_detail with
-    | Some d ->
-        let band_h = if inner.h >= 7 then 2 else 1 in
-        let below =
-          Rect.make ~x:inner.x ~y:(inner.y + band_h) ~w:inner.w
-            ~h:(max 0 (inner.h - band_h))
-        in
-        if Rect.is_empty below then 0
-        else
-          let show_toc_rail =
-            show_inline_rail
-            && Masc_tui_ui.Layout.equal_breakpoint bp Masc_tui_ui.Layout.Wide
-            && below.w >= 68
-            && below.h >= 8
-          in
-          if show_toc_rail then
-            let toc_w = 22 in
-            let prose_w = max 20 (below.w - toc_w - 1) in
-            let prose_rect =
-              Rect.make ~x:below.x ~y:below.y ~w:prose_w ~h:below.h
-              |> ui_pad_content ~bp ~pad_y:1
-            in
-            markdown_max_scroll ~theme ~width:prose_rect.w ~height:prose_rect.h
-              d.body_markdown
-          else
-            let content = ui_pad_content ~bp below in
-            let md_h = max 0 (content.h - 2) in
-            markdown_max_scroll ~theme ~width:content.w ~height:md_h
-              d.body_markdown
+    | Some d -> (
+        match wiki_preview_markdown_size ~bp ~show_inline_rail ~rect with
+        | Some (width, height) ->
+            markdown_max_scroll ~theme ~width ~height d.body_markdown
+        | None -> 0)
     | None -> (
         match sel_summary with
         | Some s ->
@@ -9077,6 +9121,30 @@ let memory_right_pane_max_scroll ~bp ~(rect : Rect.t)
         let avail_h = max 1 (bottom - !y) in
         max 0 (Knowledge_store.memory_diff_line_count k - avail_h)
 
+(* The card the wiki page is drawn in and whether it may show the inline
+   TOC rail, for the zoomed and split layouts of [Screen_knowledge]. *)
+let wiki_preview_frame (m : Model.t) =
+  let bp = ui_bp m in
+  let br = ui_body_rect m in
+  let body_after_bar =
+    match
+      Masc_tui_ui.Layout.split_v br
+        [ Masc_tui_ui.Layout.Fixed 1; Masc_tui_ui.Layout.Flex 1 ]
+    with
+    | [ _; b ] -> b
+    | _ -> br
+  in
+  if Model.is_zoomed_active m then
+    ( fst
+        (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+           ~left_ratio:0.66 ~top_ratio:0.68 bp body_after_bar),
+      false )
+  else
+    ( snd
+        (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
+           ~left_ratio:0.38 ~top_ratio:0.48 bp body_after_bar),
+      true )
+
 let knowledge_detail_max_scroll (m : Model.t) =
   let bp = ui_bp m in
   let br = ui_body_rect m in
@@ -9170,21 +9238,8 @@ let knowledge_detail_max_scroll (m : Model.t) =
               let eff_h = if has_indicator then rem - 1 else rem in
               max 0 (total_lines - max 1 eff_h))
   | Nav.Knowledge_wiki ->
-      if zoomed then
-        let main_rect, _ =
-          Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
-            ~left_ratio:0.66 ~top_ratio:0.68 bp body_after_bar
-        in
-        wiki_preview_max_scroll ~bp ~theme ~show_inline_rail:false
-          ~rect:main_rect k
-      else
-        let right_rect =
-          snd
-            (Masc_tui_ui.Layout.adaptive_split_2 ~stack_on_compact:true
-               ~left_ratio:0.38 ~top_ratio:0.48 bp body_after_bar)
-        in
-        wiki_preview_max_scroll ~bp ~theme ~show_inline_rail:true
-          ~rect:right_rect k
+      let rect, show_inline_rail = wiki_preview_frame m in
+      wiki_preview_max_scroll ~bp ~theme ~show_inline_rail ~rect k
   | Nav.Knowledge_artifacts -> (
       match Knowledge_store.selected_artifact k with
       | None -> 0
@@ -9275,6 +9330,102 @@ let knowledge_detail_max_scroll (m : Model.t) =
               List.length (knowledge_memory_subview_lines ~width:inner.w k)
             in
             max 0 (total - max 1 inner.h))
+
+(* Selects the next or previous body link to an existing wiki page, in the
+   order the rendered page shows them. With no link selected, it starts from
+   the links in view. The scroll moves only when the link is out of view. *)
+let step_wiki_link ~now ~delta (m : Model.t) =
+  let k = m.knowledge in
+  let page =
+    Option.bind (Knowledge_store.selected_wiki_page k)
+      (fun (sel : Wire_knowledge.wiki_page_summary) ->
+        Option.map
+          (fun detail -> (sel.slug, detail))
+          (Observed.to_option (Knowledge_store.wiki_page_for ~slug:sel.slug k)))
+  in
+  let rect, show_inline_rail = wiki_preview_frame m in
+  match
+    (page, wiki_preview_markdown_size ~bp:(ui_bp m) ~show_inline_rail ~rect)
+  with
+  | Some (slug, (detail : Wire_knowledge.wiki_page_detail)), Some (width, height)
+    ->
+      let theme = Theme.of_preset m.theme_preset in
+      let lines =
+        Masc_tui_ui.Markdown.render_lines ~theme ~width detail.body_markdown
+      in
+      let page_links = Knowledge_store.wiki_page_links k detail in
+      let links =
+        Masc_tui_ui.Markdown.link_first_lines lines
+        |> List.filter (fun (uri, _) ->
+               List.exists (fun (raw, _) -> String.equal raw uri) page_links)
+        |> Array.of_list
+      in
+      let count = Array.length links in
+      if count = 0 then
+        ( Model.with_toast ~now ~level:Model.Toast_info
+            (Say.make ~ko:"이 쪽에는 다른 위키 쪽으로 가는 링크가 없어요"
+               ~en:"No links to other wiki pages on this page")
+            m,
+          [] )
+      else
+        let max_scroll = Int.max 0 (List.length lines - height) in
+        let scroll = Int.min max_scroll k.detail_scroll_offset in
+        let current =
+          Option.bind (Knowledge_store.selected_wiki_link ~slug k) (fun uri ->
+              Array.find_index (fun (seen, _) -> String.equal seen uri) links)
+        in
+        let index =
+          match current with
+          | Some i -> Int.max 0 (Int.min (count - 1) (i + delta))
+          | None when delta > 0 ->
+              Option.value ~default:0
+                (Array.find_index (fun (_, line) -> line >= scroll) links)
+          | None ->
+              let rec last_in_view i =
+                if i < 0 then count - 1
+                else if snd links.(i) < scroll + height then i
+                else last_in_view (i - 1)
+              in
+              last_in_view (count - 1)
+        in
+        let uri, line = links.(index) in
+        let detail_scroll_offset =
+          if line >= scroll && line < scroll + height then scroll
+          else Int.min max_scroll line
+        in
+        let knowledge =
+          {
+            (Knowledge_store.select_wiki_link ~slug (Some uri) k) with
+            detail_scroll_offset;
+          }
+        in
+        ({ m with knowledge }, [])
+  | (Some _ | None), (Some _ | None) -> (m, [])
+
+let wiki_link_back_knowledge (m : Model.t) =
+  if not (Model.is_wiki_detail_active m) then None
+  else
+    Option.bind (Knowledge_store.selected_wiki_page m.knowledge)
+      (fun (sel : Wire_knowledge.wiki_page_summary) ->
+        Knowledge_store.wiki_link_back ~slug:sel.slug m.knowledge)
+
+let wiki_link_back_ready m = Option.is_some (wiki_link_back_knowledge m)
+
+(* The restored scroll is clamped: the card may have been resized since. *)
+let wiki_link_back (m : Model.t) =
+  match wiki_link_back_knowledge m with
+  | Some knowledge ->
+      let next = { m with knowledge } in
+      let detail_scroll_offset =
+        Int.min
+          (knowledge_detail_max_scroll next)
+          knowledge.detail_scroll_offset
+      in
+      let next =
+        { next with knowledge = { knowledge with detail_scroll_offset } }
+      in
+      (next, View_fetches.fetches_for_current_view next)
+  | None -> (m, [])
 
 let work_detail_max_scroll (m : Model.t) =
   let bp = ui_bp m in

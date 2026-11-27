@@ -38,7 +38,7 @@ let poll ~base_path ~caller request_id : load_result =
                     this worker. Only the exclusive startup recovery boundary
                     may convert disk-only non-terminal state to [Lost]. *)
                  Found entry
-               | Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_dependencies _ -> Found entry))
+               | Done _ | Lost _ | Cancelled _ | Persistence_failed _ -> Found entry))
          | Located_absent -> Absent
          | Located_unreadable reason -> Unreadable reason
          | Located_rejected rejection -> Rejected rejection))
@@ -106,7 +106,7 @@ let queued_proof_of_record ~caller ~location ~local (entry : entry) =
   | Some rejection -> Error (Canonical_queued_access_rejected rejection)
   | None ->
     match entry.status with
-    | Running | Cancelling _ | Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_dependencies _ ->
+    | Running | Cancelling _ | Done _ | Lost _ | Cancelled _ | Persistence_failed _ ->
       Error (Canonical_queued_not_queued entry.status)
     | Queued ->
       match location with
@@ -117,7 +117,7 @@ let queued_proof_of_record ~caller ~location ~local (entry : entry) =
         | Some local ->
           match local.status with
           | Running | Cancelling _ -> Error (Canonical_queued_runtime_nonqueued local.status)
-          | Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_dependencies _ ->
+          | Done _ | Lost _ | Cancelled _ | Persistence_failed _ ->
             Error (Canonical_queued_publication_ambiguous local.status)
           | Queued ->
             if same_entry_record local entry then Ok { queued_entry = entry }
@@ -159,7 +159,7 @@ let list_for_keeper ~base_path ~caller ?keeper_name () :
            then acc
            else
              match entry.status, keeper_name with
-             | (Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_dependencies _), _ -> acc
+             | (Done _ | Lost _ | Cancelled _ | Persistence_failed _), _ -> acc
              | (Queued | Running | Cancelling _), Some name
                when not (String.equal entry.keeper_name name) -> acc
              | (Queued | Running | Cancelling _), (Some _ | None) -> entry :: acc)

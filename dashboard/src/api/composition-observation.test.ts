@@ -9,7 +9,6 @@ import { asyncRequestSourceKey, fetchAsyncRequestStatus, fetchOriginalToolResult
 const encoder = new TextEncoder()
 const hash = (content: string | Uint8Array) => bytesToHex(sha256(typeof content === 'string' ? encoder.encode(content) : content))
 const runId = '019ffc2b-0a41-7ba2-bf58-598e0e7f711b'
-const reference = { identity: { source_id: 'workspace', package_id: 'child', name: 'child' }, content_revision: 'a'.repeat(64) }
 
 function page(content: Uint8Array, offset: number, next: number, patch = {}) {
   return { keeper: 'observer', execution_id: 'exec-exact', state: 'page', source_id: 'c'.repeat(64),
@@ -101,13 +100,10 @@ describe('exact async status transport', () => {
   }
   const active = () => ({ ...identity, request_context: null, status: 'running', submitted_at: 1,
     elapsed_sec: 1, continuation: { kind: 'not_composition' } })
-  const dependency = { kind: 'owned_job', job_id: runId }
 
-  it.each(['queued', 'running', 'cancelling', 'waiting_for_dependencies', 'lost', 'cancelled', 'persistence_failed'])('accepts the producer %s phase with its actual physical boundary', async phase => {
+  it.each(['queued', 'running', 'cancelling', 'lost', 'cancelled', 'persistence_failed'])('accepts the producer %s phase with its actual physical boundary', async phase => {
     const request: Record<string, unknown> = { ...active(), status: phase }
-    if (phase === 'waiting_for_dependencies') Object.assign(request,
-      { completed_at: 2, dependencies: [dependency], worker_released: true, result: {} })
-    else if (phase !== 'queued' && phase !== 'running') {
+    if (phase !== 'queued' && phase !== 'running') {
       request.ok = false; request.result = { reason: 'original physical outcome' }
       if (phase !== 'cancelling') request.completed_at = 2
     }
@@ -119,8 +115,6 @@ describe('exact async status transport', () => {
     ['error reports true', { status: 'error', ok: true }],
     ['active carries completion', { status: 'running' }],
     ['nonboolean outcome', { ok: 'true' }],
-    ['dependencies outside wait', { dependencies: [dependency] }],
-    ['worker release outside wait', { worker_released: true }],
   ])('rejects an impossible physical record: %s', async (_label, patch) => {
     await expect(lookup({ ...status().request, ...patch })).rejects.toThrow()
   })
@@ -133,30 +127,6 @@ describe('exact async status transport', () => {
 
   it.each([{ ok: true }, { result: {} }, { completed_at: 2 }])('rejects a nonterminal completed boundary %j', async patch => {
     await expect(lookup({ ...active(), ...patch })).rejects.toThrow()
-  })
-
-  it.each([
-    ['empty', []], ['unknown', [{ kind: 'guessed' }]],
-    ['bad job identity', [{ kind: 'owned_job', job_id: 'not-a-job-id' }]],
-    ['duplicate', [dependency, dependency]],
-    ['extra fields', [{ ...dependency, guessed: true }]],
-    ['missing binding fields', [{ kind: 'composition_result', binding: { composition_run_id: runId } }]],
-  ])('rejects %s physical dependencies', async (_label, dependencies) => {
-    await expect(lookup({ ...active(), status: 'waiting_for_dependencies', completed_at: 2,
-      result: {}, worker_released: true, dependencies })).rejects.toThrow()
-  })
-
-  it.each([{ worker_released: false }, { ok: false }, { result: undefined }, { dependencies: undefined }])('rejects contradictory dependency wait %j', async patch => {
-    await expect(lookup({ ...active(), status: 'waiting_for_dependencies', completed_at: 2,
-      result: {}, worker_released: true, dependencies: [dependency], ...patch })).rejects.toThrow()
-  })
-
-  it('decodes the canonical exact composition-result dependency', async () => {
-    const binding = { request_id: 'child-request', composition_run_id: runId, skill_reference: reference,
-      composition_tool: 'skill__review', parent_tool_use_id: 'original-parent', source_turn: 4, source_task_id: 'task-A' }
-    const value = await lookup({ ...active(), status: 'waiting_for_dependencies', completed_at: 2,
-      result: {}, worker_released: true, dependencies: [{ kind: 'composition_result', binding }] })
-    expect(value.status === 'observed' && value.request.dependencies).toEqual([{ kind: 'composition_result', binding }])
   })
 
   const logical = () => ({ ...status().request, request_context: { composition_run_id: runId, source_task_id: 'task-A' },

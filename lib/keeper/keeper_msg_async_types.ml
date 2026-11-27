@@ -20,11 +20,6 @@ type request_status =
       { attempted_status : persistence_target
       ; reason : string
       }
-  | Waiting_for_dependencies of
-      { dependencies : Keeper_composition_dependency.t list
-      ; body : string
-      ; data : Yojson.Safe.t option
-      }
   | Done of
       { ok : bool
       ; body : string

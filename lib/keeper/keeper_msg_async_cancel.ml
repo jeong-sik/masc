@@ -127,7 +127,7 @@ let cancel_with_ops ops ~base_path ~caller request_id : cancel_result =
                                   }))))
                  in
                  (match entry.status with
-                  | Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_dependencies _ ->
+                  | Done _ | Lost _ | Cancelled _ | Persistence_failed _ ->
                     `Result (Cancel_already_terminal entry.status)
                   | Cancelling _ ->
                     (* The operator's next explicit cancel call is the retry

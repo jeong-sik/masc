@@ -257,7 +257,7 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
               | Some { status = Cancelling _; _ } -> `Operator_cancelled
               | Some
                   ({ status =
-                       (Done _ | Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_dependencies _)
+                       (Done _ | Lost _ | Cancelled _ | Persistence_failed _)
                    ; _
                    } as entry) ->
                 `Already_settled entry
@@ -277,9 +277,7 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
           match outcome with
           | Worker_interrupted {reason} -> Lost {reason}
           | Worker_finished result ->
-              Done {ok=tool_result_success result;body=tool_result_body result;data=result_data result}
-          | Worker_waiting {dependencies;result} ->
-              Waiting_for_dependencies {dependencies;body=tool_result_body result;data=result_data result})
+              Done {ok=tool_result_success result;body=tool_result_body result;data=result_data result})
       with
       | CancelledByOperator ->
         Fun.protect

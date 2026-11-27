@@ -8,7 +8,7 @@ open Keeper_msg_async_store
 let status_after_worker_absence ~reason = function
   | Cancelling {reason;cancelled_by} -> Cancelled {reason;cancelled_by}
   | Queued | Running -> Lost {reason}
-  | (Lost _ | Cancelled _ | Persistence_failed _ | Waiting_for_dependencies _ | Done _) as terminal -> terminal
+  | (Lost _ | Cancelled _ | Persistence_failed _ | Done _) as terminal -> terminal
 
 let settle_unowned_record_after_recovery ?source_path (entry : entry) =
   let reason =
@@ -226,7 +226,7 @@ let recover_record_path ~base_path ~request_id path report =
          match settle_unowned_record_after_recovery ~source_path:path entry with
          | Ok settled ->
            (match settled.status with
-            | Cancelled _ | Done _ | Persistence_failed _ | Waiting_for_dependencies _ ->
+            | Cancelled _ | Done _ | Persistence_failed _ ->
               { report with finalized = report.finalized + 1 }
             | Lost _ -> { report with lost = report.lost + 1 }
             | Queued | Running | Cancelling _ ->

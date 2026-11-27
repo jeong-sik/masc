@@ -11,8 +11,7 @@
     [Reconciliation_required]. A failing [on_accepted] marks the request
     [Persistence_failed], and a worker that cannot start marks it [Lost].
     The worker marks the request [Running], runs [f] and writes the outcome:
-    [Done] for a finished result, [Lost] for an interrupted worker and
-    [Waiting_for_dependencies] for a result that waits on dependencies. A
+    [Done] for a finished result and [Lost] for an interrupted worker. A
     cancelled worker calls [on_worker_aborted] before its status is written,
     and [on_worker_settled] is called with each settlement.
     [submit_worker_with_request_id] takes a function that returns a

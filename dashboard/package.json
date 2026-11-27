@@ -13,6 +13,7 @@
     "build:report": "BUNDLE_REPORT=1 vite build",
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
+    "check:unreached": "node scripts/check-unreached-modules.mjs",
     "preview": "vite preview",
     "test": "vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1",
     "test:serial": "pnpm test",

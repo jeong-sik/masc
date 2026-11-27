@@ -426,17 +426,21 @@ let handle_subscribe ~runtime_authority (bytes : string) : string Grpc_eio.Strea
      wall-clock millisecond: simultaneous roots may subscribe as one agent. *)
   let sub_id = Printf.sprintf "grpc-subscribe-%d"
       (Atomic.fetch_and_add subscription_id_sequence 1) in
-  let cleanup_subscriber ?exn () =
+  let release_stream_accounting ?exn () =
     if Atomic.compare_and_set stream_closed false true
     then (
-      Sse.unsubscribe_external sub_id;
       Atomic.decr active_subscribe_streams;
       Transport_metrics.set_grpc_subscribers (Atomic.get active_subscribe_streams);
       Option.iter
         (fun err ->
            Log.Misc.warn "gRPC subscriber %s failed: %s" sub_id (Printexc.to_string err))
         exn;
-      Log.Misc.info "gRPC subscriber %s cleaned up" sub_id)
+      Log.Misc.info "gRPC subscriber %s cleaned up" sub_id;
+      true)
+    else false
+  in
+  let cleanup_subscriber ?exn () =
+    if release_stream_accounting ?exn () then Sse.unsubscribe_external sub_id
   in
   (* Send initial event confirming subscription *)
   let init_event =
@@ -446,11 +450,11 @@ let handle_subscribe ~runtime_authority (bytes : string) : string Grpc_eio.Strea
       ; source_agent = "server"
       ; timestamp_ms = now_ms ()
       ; payload_json =
-          Printf.sprintf
-            {|{"agent_name":"%s","event_types":%s}|}
-            req.agent_name
-            (Yojson.Safe.to_string
-               (`List (List.map (fun s -> `String s) req.event_types)))
+          Yojson.Safe.to_string
+            (`Assoc
+               [ "agent_name", `String req.agent_name
+               ; "event_types", `List (List.map (fun s -> `String s) req.event_types)
+               ])
       }
   in
   let init_bytes = T.Event.to_bytes init_event in
@@ -477,7 +481,15 @@ let handle_subscribe ~runtime_authority (bytes : string) : string Grpc_eio.Strea
   Sse.subscribe_external ~runtime_authority
     ~id:sub_id
     ~is_alive:(fun () ->
-      (not (Atomic.get stream_closed)) && not (Grpc_eio.Stream.is_closed stream))
+      if Atomic.get stream_closed
+      then false
+      else if Grpc_eio.Stream.is_closed stream
+      then (
+        (* Sse removes dead entries directly without calling [~callback]; release
+           local stream accounting here without re-entering Sse locks. *)
+        ignore (release_stream_accounting () : bool);
+        false)
+      else true)
     ~callback:(fun (ev : Sse.external_event) ->
       let sse_event = ev.Sse.ext_frame in
       if Atomic.get stream_closed || Grpc_eio.Stream.is_closed stream
@@ -508,7 +520,8 @@ let handle_subscribe ~runtime_authority (bytes : string) : string Grpc_eio.Strea
         try
           let event_bytes = T.Event.to_bytes event in
           Transport_metrics.inc_grpc_bytes_sent ~bytes:(String.length event_bytes);
-          Grpc_eio.Stream.add stream event_bytes
+          Grpc_eio.Stream.add stream event_bytes;
+          Transport_metrics.inc_grpc_events_delivered ()
         with
         | Eio.Cancel.Cancelled _ as e ->
           cleanup_subscriber ();

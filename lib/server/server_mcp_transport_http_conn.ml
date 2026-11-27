@@ -230,10 +230,8 @@ let reap_stale_guards_at ~now =
 let reap_stale_guards () = reap_stale_guards_at ~now:(Time_compat.now ())
 
 let close_all_sse_connections () =
-  let infos =
-    SMap.fold (fun _k v acc -> v :: acc) (Atomic.get sse_conn_by_session) []
-  in
-  Atomic.set sse_conn_by_session SMap.empty;
+  let snapshot = Atomic.exchange sse_conn_by_session SMap.empty in
+  let infos = SMap.fold (fun _k v acc -> v :: acc) snapshot [] in
   Atomic.set sse_connect_guards Guard_map.empty;
   List.iter close_sse_conn infos;
   Log.Server.info "MASC MCP: Closed %d SSE connections"

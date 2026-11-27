@@ -384,8 +384,9 @@ let start ~sw ~clock ~config:raw_config ~compute ~on_result =
              notify_failure config failure;
              log_refresh_failure ~config ~consecutive_failures ~current_interval
                ~dt failure
-       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-         if should_reraise_cancel exn then raise exn;
+       with
+       | Eio.Cancel.Cancelled _ as exn when should_reraise_cancel exn -> raise exn
+       | exn ->
          let dt = Time_compat.now () -. t0 in
          let failure = Raised exn in
          notify_failure config failure;

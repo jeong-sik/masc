@@ -73,6 +73,15 @@ val remember_mcp_profile :
 module For_testing : sig
   val profile_count : unit -> int
   (** Count profile entries, including entries without an initialized session. *)
+
+  val load_sessions_from_file_with_hook :
+    after_begin_restore:(unit -> unit) -> base_path:string -> unit -> unit
+  (** Run {!load_sessions_from_file}, invoking [after_begin_restore] right after
+      [begin_restore] marks the path pending and before host I/O starts. *)
+
+  val set_profile_seen_at : string -> float -> unit
+  (** Override the recorded observation timestamp for an existing profile entry
+      so grace-window pruning can be tested deterministically. *)
 end
 
 val forget_mcp_session : string -> unit

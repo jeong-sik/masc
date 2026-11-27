@@ -842,11 +842,12 @@ remote_endpoint = "fixture"
         { v = Exec_ssh_protocol.newest; exit = Some 0; signal = None
         ; timed_out = false; shim_error = None; observed_syscalls = [] } in
     (* The fake ssh answers every request with the same file. A request
-       reaches ssh on stdin as a frame that carries the read's command, so the
-       script reads that frame and also writes which read the reader asked
-       for, one line per call. A test can then count the reads of one file. *)
+       reaches ssh on stdin as a frame whose arguments are base64. The script
+       reads that frame, decodes the command and writes which read the reader
+       asked for, one line per call. A test can then count the reads of one
+       file. *)
     let reads_log = Filename.concat base "ssh-reads.log" in
-    let script = "#!/bin/sh\nlen=$(dd bs=1 count=8 2>/dev/null | od -An -tu1 | awk 'NR==1 {print $5*16777216 + $6*65536 + $7*256 + $8; exit}')\nframe=$(dd bs=1 count=$len 2>/dev/null)\ncase \"$frame\" in *'exec cat'*) echo whole;; *'head -c'*) echo prefix;; *) echo other;; esac >> "
+    let script = "#!/bin/sh\nlen=$(dd bs=1 count=8 2>/dev/null | od -An -tu1 | awk 'NR==1 {print $5*16777216 + $6*65536 + $7*256 + $8; exit}')\nframe=$(dd bs=1 count=$len 2>/dev/null)\ncommand=$(printf '%s' \"$frame\" | sed -E 's/^.*\"argv\":\\[\"[^\"]*\",\"[^\"]*\",\"([^\"]*)\".*$/\\1/' | base64 -d 2>/dev/null)\ncase \"$command\" in *'exec cat'*) echo whole;; *'head -c'*) echo prefix;; *) echo other;; esac >> "
         ^ Filename.quote reads_log ^ "\ncat >/dev/null 2>/dev/null &\ncat "
         ^ Filename.quote endpoint_file ^ "\nprintf '%s' "
         ^ Filename.quote trailer ^ " >&2\nexit 0\n" in
@@ -867,14 +868,18 @@ remote_endpoint = "fixture"
     let body = item |> member "body" |> to_string in
     Alcotest.(check string) "endpoint image body survives snapshot" png
       (read_file (Filename.concat (Workspace.masc_dir config) body));
-    (* The reads the reader sent since [since]. *)
+    (* The reads the reader sent since [since]. A read of one file also asks
+       the endpoint for its workspace root; that reads no file and is left
+       out. *)
     let reads_since since =
       let lines =
         if Sys.file_exists reads_log
         then String.split_on_char '\n' (read_file reads_log)
         else []
       in
-      List.filteri (fun index line -> index >= since && line <> "") lines
+      List.filteri
+        (fun index line -> index >= since && line <> "" && line <> "other")
+        lines
     in
     write_file endpoint_file (png ^ String.make Store.verification_evidence_max_bytes 'x');
     let since = List.length (reads_since 0) in

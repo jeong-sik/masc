@@ -214,7 +214,7 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
       Masc_test_deps.write_sandbox_image_catalog ~base_path:base_dir
         [ "base", Masc_test_deps.live_sandbox_image_tag ];
       ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
-      (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+      (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None config with
        | Ok _ -> ()
        | Error error ->
          Alcotest.fail (Keeper_owner_registry.install_error_to_string error));
@@ -389,7 +389,7 @@ let test_keeper_row_from_the_owner_is_the_row_from_the_file () =
       Masc_test_deps.write_sandbox_image_catalog ~base_path:base_dir
         [ "base", Masc_test_deps.live_sandbox_image_tag ];
       ignore (Workspace.bind_session config ~agent_name:"owner" ~capabilities:[] ());
-      (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+      (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None config with
        | Ok _ -> ()
        | Error error ->
          Alcotest.fail (Keeper_owner_registry.install_error_to_string error));

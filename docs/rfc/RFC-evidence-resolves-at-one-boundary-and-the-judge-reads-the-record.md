@@ -1,6 +1,6 @@
 # RFC evidence-resolves-at-one-boundary: 인용한 증거는 경계 하나에서 풀리고 판정은 그 기록만 읽는다
 
-상태: 제안 (2026-11-26). 측정과 지난 작업의 지도는 이슈 #54918 에 있다. 설계는 새 문맥의 Opus 와 세 턴 반박과 초안 검토를 거쳐 정했다. 구현 PR: #54965(합계 상한에 밀린 artifact 를 기록에서 읽는다), #54981(긴 웹 페이지의 저장본을 리더로 읽고 검색한다).
+상태: 제안 (2026-11-26). 측정과 지난 작업의 지도는 이슈 #54918 에 있다. 설계는 새 문맥의 Opus 와 세 턴 반박과 초안 검토를 거쳐 정했다. 구현 PR: #54965(합계 상한에 밀린 artifact 를 기록에서 읽는다), #54981(긴 웹 페이지의 저장본을 리더로 읽고 검색한다). 2층의 설계는 2026-11-27 에 D8 로 더했다.
 
 ## 0. 요약
 
@@ -9,6 +9,7 @@
 - 읽기 실패의 주인이 제출자면 제출을 거절한다. 하네스 몫이면 모델을 부르지 않고 다시 읽고, 끝내 안 읽히면 운영자 목록에 싣는다. 판정자는 읽지 못한 참조를 보지 않는다.
 - 참조의 경로 형태를 지운다. `artifact:` 는 하네스가 만든 sha256 만 받는다.
 - 첫 층은 상한에 밀린 artifact 를 기록에서 읽게 하는 것이다. lookup 표면은 문법이 live 조회를 다 덮인 뒤 5층에서 지운다.
+- 둘째 층은 텍스트 artifact 의 잘림을 지우는 것이다. 내용 상한을 넘는 텍스트는 통째로 blob 으로 두고 리더로 읽는다(D8). 천장을 넘는 파일은 읽기 전에 `too_large` 로 기록한다.
 - Goal 판정은 7층과 별도 결정까지 두 층으로 남는다(§3.6).
 
 ## 1. 지금 값으로는 안 되는 이유
@@ -138,7 +139,7 @@ val owner_of_reason : unreadable -> owner
 - 판정자의 입력은 Task, 계약, 기록이다. 판정자의 도구는 기록 리더 하나다. #35536 의 sha 고정 페이지 읽기(`lib/verification_collaboration_evidence.ml:54-93`)를 blob 본문으로 넓히고 검색을 더한다. 리더는 읽은 범위를 typed 로 돌려주고 판정 행에 `evidence_reads` 로 남는다. 5층 전까지는 live 조회도 같이 센다(`lib/task/anti_rationalization.ml:822-832`).
 - 5층에서 지운다. Task 검토의 `Read_file`·`Search_files`·`Web_fetch`, `root_layout`(`lib/verification_authority_tools.ml:341-369`), 권한 binding(752-833), `config/prompts/verification.md` 의 lookup 절 세 개와 posture 절 두 개, 12행과 14행의 조회 규정. 36행의 「확인할 수 없는 요구 항목이 남았을 때」 는 남는다. 계약 항목에 인용이 없는 경우가 그 경우다.
 - L2d(#51801) 의 권한 절반은 필요 없어진다. 되돌리는 것이 아니다. 다음 시도는 같은 질문을 조회 권한이 아니라 기록을 기준으로 묻는다.
-- 미디어 검사(pdf·presentation·mp4)는 live 샌드박스 대신 blob 본문에서 읽는다. 이미지는 이미 그렇다(`lib/workspace/workspace_verification_store.ml:290-321`). Task 조회 표면의 호출자는 하나다(`lib/completion_authority_agent.ml:1128`).
+- 미디어 검사(pdf·presentation·mp4)는 live 샌드박스 대신 blob 본문에서 읽는다. 이미지는 오늘 blob 저장소가 아니라 요청별 `.masc/evidence/<id>/<n>.bin` 에서 읽힌다(`lib/workspace/workspace_verification_store.ml:290-321`). 그 본문을 blob 저장소로 옮기는 일은 5층에서 D4 대로 한다. Task 조회 표면의 호출자는 하나다(`lib/completion_authority_agent.ml:1128`).
 - 2026-10-06 규약 중 CI 로그를 Board 글에 옮겨 적는 부분은 D2 의 `gh:` 가 대신한다.
 
 ### D5. 참조는 하네스가 만든다
@@ -162,6 +163,22 @@ val owner_of_reason : unreadable -> owner
 - 로그와 artifact 는 302 로 간다. `Location` 의 host 를 허용 목록으로 걸러 Authorization 없이 다시 읽는다.
 - 첫 버전은 공개 저장소만 읽는다. 등록만으로는 안 된다. `wkbl` 은 등록된 비공개 저장소다(task-3780·3817·3909 의 404). 공개 여부는 등록 항목에 적히지 않는다. resolver 가 인증 없이 저장소 메타를 한 번 읽어 정한다. 비공개 저장소의 `gh:` 인용은 `Not_public` 로 제출에서 거절된다. 그 저장소의 Keeper 는 `board:` 를 쓴다. 항목에 `visibility` 를 두되 첫 버전에는 `Public` 만 있다.
 - 기록에 `{ reader; token_digest; fetched_at; http_status; sha256 }` 를 남긴다. resolver 에 총 시간 상한을 두고 넘으면 `Timeout` 이다.
+
+### D8. 텍스트 본문은 blob 이고 잘림이 없다
+
+2층의 설계다. D1 의 「본문은 blob 하나다. 잘림이란 상태가 없다」 를 지금의 영속 모양에 적용한다. 2026-11-27 에 새 문맥의 Opus 와 토론해 정했다. 근거는 코드에서 읽은 것이다. 빌드하지 않았다.
+
+- **두 생성자.** `truncated` 와 20만 바이트 접두어를 지운다. 내용 상한 이하의 텍스트는 지금처럼 `Evidence_artifact {reference; content; bytes}` 로 내용을 함께 적는다. 그 위는 `Evidence_artifact_body {reference; bytes; sha256; mime}` 으로 sha256 과 크기만 적는다. `content : string option` 은 한 생성자 안의 두 상태라 `truncated` 와 같은 병이다. 컴파일러가 가르는 곳을 찾게 한다.
+- **저장소는 `Tool_blob_store` 다.** `put_durable` 은 원자 쓰기에 fsync 가 있고 해시를 한 번 계산하고 내용 주소로 중복을 없앤다(`lib/tool_blob_store/tool_blob_store.mli:119-133`). 요청별 `.masc/evidence/<id>/` 는 비원자 쓰기에 범위 리더가 없고 읽을 때마다 전체를 해시한다. 셋째 저장소는 GC 주인을 하나 더 만든다. 3층의 `artifact:sha256:<hex>` 가 같은 저장소를 보므로 저장소는 다시 바뀌지 않는다.
+- **붙잡기는 참조를 영속하는 변경 안에서 함께 간다.** sweep 는 scope 가 분류한 저장소의 정확한 marker 만 산 참조로 센다(`lib/tool_blob_store/tool_blob_maintenance.mli:3-5`, 31-33). `.masc/verifications` 는 오늘 scope 어디에도 없다(`lib/server/server_tool_blob_scope.ml`). 요청 기록 디렉터리를 분류에 넣고 몸 항목에 `{"_blob":{sha256;bytes;mime;preview}}` 를 함께 적는다. blob 만 넣고 분류를 빠뜨리면, 「분류 안 된 것이 하나라도 있으면 아무것도 지우지 않는다」 는 조건(`lib/tool_blob_store/tool_blob_sweep.ml:643-648`)이 열리는 날 기록이 가리키는 blob 이 지워진다. D1 의 `Read` 모양이 오면 그 sha256 도 sweep 가 세도록 같은 변경에서 옮긴다.
+- **천장은 읽기 전에 가른다.** `load_owned_regular_file` 은 파일을 통째로 한 문자열로 읽는다. 오늘 2GB 텍스트 로그는 2GiB 를 읽고 UTF-8 로 훑은 뒤 20만 바이트만 남긴다. 천장+1 바이트만 읽는 `load_owned_regular_file_prefix`(`lib/fs_compat/fs_compat.mli:258-266`)로 바꾼다. 넘으면 `Evidence_artifact_unreadable {reason = Too_large {bytes; cap}}` 다. 사유 이름은 D3 의 것과 같다. 새 사유 생성자는 더하기라 옛 기록은 그대로 읽힌다.
+- **천장은 64 MiB 다.** `Verification_pdf_inspection.max_source_bytes` 와 값은 같지만 이름과 이유가 따로다. 그 상수는 미디어 확대의 것이다. 64 MiB 는 16 KiB 페이지로 4,096쪽이라 검색을 함께 내주지 않으면 「읽을 수 있다」 는 표식만 된다.
+- **리더는 Keeper 리더의 요청을 받는다.** 몸의 쪽과 검색은 `Keeper_artifact_read.handle` 이 돌린다. #54981 이 긴 웹 페이지에 이미 그렇게 한다. 모델이 넘긴 sha256 이 이 제출의 몸 항목에 기록된 것과 다르면 거절한다. `page_source` 로 몸을 자르지 않는다. 그것은 호출마다 전체를 직렬화하고 해시한다(`lib/verification_collaboration_evidence.ml:54-57`).
+- **쪽의 불변식.** 참조 R 의 쪽은 R 의 기록된 sha256 과 전체 digest 가 일치했던 하나의 owned descriptor 에서 읽은 바이트, 또는 그때 검증된 snapshot 과 같은 snapshot 의 descriptor 에서 읽은 바이트의 부분문자열이다. `Tool_blob_store.fetch_range` 가 그 기계다. 첫 읽기에서 전체 digest 를 스트리밍으로 확인하고 snapshot 이 변하지 않으면 범위만 읽는다(`lib/tool_blob_store/tool_blob_store.mli:213-225`). 표면에 문자열을 두지 않는다. 같은 inode·크기·mtime 안에서 바뀐 몸은 쪽이 못 잡는다. Keeper 리더가 이미 받는 틈이다.
+- **판정자 입력.** 내용 항목은 지금처럼 합계 예산 안에 싣는다. 몸 항목은 `content_omitted` 와 페이지 안내로 싣는다. 리더는 몸 항목이 있거나 밀린 내용 항목이 있을 때 제공된다.
+- **지우는 것.** `truncated`, `truncated_snapshot_items`, `warn_oversized_evidence`(`lib/verification_protocol.ml:106-124`), 「read ranges of the actual file」 문구, `submission_receipt` 와 생산자 영수증의 `artifact_truncated` 진단(`lib/task/tool_task.ml`), posture 의 「잘리지 않은」 문구.
+- **같은 배포에 넣는 것.** TUI 의 증거 복호화는 모르는 종류를 만나면 묶음 전체를 실패시킨다(`lib/masc_tui/protocol/wire_work.ml` 의 `Verif_ev_artifact`, `lib/json_field/json_decode_fields.ml:215-223`). 새 생성자를 모르는 TUI 는 요청 하나 때문에 탭이 깨진다. 운영자 내려받기·대시보드도 같은 배포다.
+- **범위 밖.** D1 의 끝상태는 모든 본문이 blob 이다. 작은 텍스트와 `Evidence_collaboration` 의 내용을 지금 옮기면 청소의 정확성에 한 번에 묶인다. 바이너리 몸은 오늘 `.masc/evidence/<id>/<n>.bin` 에 있고 5층에서 옮긴다.
 
 ## 3. 고르지 않은 길
 
@@ -203,9 +220,9 @@ RFC-0224(2026-07-13) 는 같은 모양의 체크리스트를 「빠뜨림은 기
 
 | 층 | 더하는 것 | 지우는 것 | 재는 것 |
 |---|---|---|---|
-| 1 기록 리더 | 합계 상한에 밀린 artifact 를 기록에서 읽는다. 긴 웹 페이지의 저장본을 리더로 읽고 검색한다. 판정자 표면 자기의 `masc_web_fetch` 가 돌려준 sha256 만 읽는다. 판정 사건의 `evidence_reads`(기록 읽기와 live 조회). 지금은 도구 관측이 64건만 남는 실행 기록에만 있다 | 「read ranges of the actual file」 문구(`lib/workspace/workspace_verification_snapshot.ml:308-329`) | 읽은 페이지가 판정 사건에 남은 판정의 비율 |
-| 2 `truncated` 삭제 | 텍스트 본문을 통째로 blob 으로 두고 리더로 읽는다 | `truncated`, `warn_oversized_evidence`(`lib/verification_protocol.ml:106-124`), posture 절 | 잘림 사유 거절 9건, 잘린 항목을 가진 승인 19건 |
-| 3 sha256 참조 | `artifact:sha256:` 와 export 결과의 참조, `masc_evidence_put`, 기록의 blob 붙잡기 | checkout 접두어 안내 | 경로 사유 거절. #27552 |
+| 1 기록 리더 | 합계 상한에 밀린 artifact 를 기록에서 읽는다. 긴 웹 페이지의 저장본을 리더로 읽고 검색한다. 판정자 표면 자기의 `masc_web_fetch` 가 돌려준 sha256 만 읽는다. 판정 사건의 `evidence_reads`(기록 읽기와 live 조회). 지금은 도구 관측이 64건만 남는 실행 기록에만 있다 | 없음 | 읽은 페이지가 판정 사건에 남은 판정의 비율 |
+| 2 `truncated` 삭제 | 텍스트 본문을 통째로 blob 으로 두고 리더로 읽는다(D8). 요청 기록 디렉터리의 scope 분류, 읽기 전 천장과 `Too_large` | `truncated`, `warn_oversized_evidence`(`lib/verification_protocol.ml:106-124`), 「read ranges of the actual file」 문구, posture 의 「잘리지 않은」 문구 | 잘림 사유 거절 9건, 잘린 항목을 가진 승인 19건 |
+| 3 sha256 참조 | `artifact:sha256:` 와 export 결과의 참조, `masc_evidence_put` | checkout 접두어 안내 | 경로 사유 거절. #27552 |
 | 4 경계 하나 | resolver 하나, `Unreadable(reason)`, `Submitter` 거절, Harness 보류와 운영자 목록, `gh:`(공개 저장소) | 정책 다섯을 하나로. #38583 의 meta 거절. `evidence_capture` 진단(`lib/task/tool_task.ml:268`). 「note 로 감싸라」 두 곳을 `gh:` 안내로 | 제출에서 거절한 건수(사유별). 운영자 목록에 오른 Harness 멈춤. 문법이 덮지 않은 live 조회 건수 |
 | 5 lookup 표면 삭제 | 문법을 재어 넓힌다. 미디어 검사를 blob 본문으로 | `Read_file`·`Search_files`·`Web_fetch`·`root_layout`·권한 binding, 경로 형태와 root 계산 모임, lookup 절 | 지우기 전 2주간의 live 조회 성공 건수 가운데 문법이 덮지 않는 것 0건 |
 | 6 거절 처분 | 판정 행의 처분과 책임자. 세션 미답변 거절의 projection | `still_unroutable` 과 그 종류 | Keeper 아닌 생산자 거절의 응답률 1/9 |
@@ -213,6 +230,8 @@ RFC-0224(2026-07-13) 는 같은 모양의 체크리스트를 「빠뜨림은 기
 
 - 판정자의 웹 fetch 는 절반이 넘게 긴 페이지를 만난다. 11-26 12:15Z 실행 기록 사본의 끝난 판정 64건에서 272번 중 142번이 `maxChars` 를 넘어 머리·꼬리 창으로 돌아왔고, 표식이 가리키는 `keeper_artifact_read(sha256, offset)` 는 판정자 표면에 없었다. 판정자는 `maxChars` 를 2천~3만 자로 부른다.
 - 1층의 `evidence_reads` 는 실행 저널에서 투영한다. 실행 기록의 도구 관측은 판정을 돌리는 process 의 메모리에서 온다(`lib/completion_authority_agent.ml` 의 `tools`), 그래서 다른 process 가 이어받은 판정에는 비어 있다. 판정을 세우는 코드는 이미 저널을 읽는다(`lib/keeper/verifier_review_execution.ml` 의 `read_call`). 거절 사건에는 `reason` 만 실리므로 자리를 새로 만들어야 한다.
+- 2층은 blob 저장·scope 분류·`Too_large`·`truncated` 삭제를 한 PR 로 한다. 저장소를 두 번 짓지 않기 위해서다. lib 약 16파일, 시험 약 8파일이다.
+- 2층도 영속 모양의 hard cut 이다. `truncated` 필드가 있는 옛 항목은 decode 되지 않아 `Evidence_unavailable` 로 읽힌다. 2026-11-27 에 `.masc/verifications` 에 요청 기록이 4,079개 있다. 끝난 기록의 증거는 typed reader 로 더는 안 읽히고 운영자 내려받기와 TUI 증거 탭이 사용할 수 없음으로 그린다. 배포 전에 awaiting 큐가 0 인지 본다. 기다리던 Task 의 기록이 옛 모양이면 `prepare_review` 가 에러를 돌려주어 판정이 시작되지 않는다(`lib/completion_authority_agent.ml` 의 `prepare_review`).
 - 3층이 4층보다 먼저여야 한다. 아니면 지금 live 조회가 구해 주는 잘못된 경로(승인 제출의 `artifact_unreadable` 6개)가 거절로 바뀐다.
 - 5층은 경로 형태와 영속 모양의 hard cut 이다. 옛 경로 형태의 참조를 내는 제출은 `Invalid_reference` 로 거절된다. 옛 모양의 reader 를 만들지 않는다. 옛 요청 기록의 증거는 `Evidence_unavailable` 로 읽힌다(D1). 배포 전에 판정을 기다리던 요청을 비운다.
 - 4층과 함께 `docs/RELIABLE-CHANGE-ROADMAP.md` 의 경계 suite 문구 셋(`missing-artifact`, `producer-root-missing-mcp`, `producer-artifact-unreadable`)을 D3 대로 고친다.
@@ -225,7 +244,8 @@ RFC-0224(2026-07-13) 는 같은 모양의 체크리스트를 「빠뜨림은 기
 - CI 실행 로그를 Board 글에 옮겨 적지 않아도 된다. 실행 URL 을 `gh:` 로 낸다. 비공개 저장소의 실행은 아직 `board:` 로 낸다.
 - 하네스 사유로 판정이 멈춘 제출이 운영자 목록에 보인다.
 - Keeper 가 아닌 생산자는 다음 접속 때 자기 작업의 거절을 본다.
-- 5층 배포 뒤 옛 요청 기록의 증거는 사용할 수 없음으로 보인다. 판정은 새 모양으로 다시 제출된 것만 본다.
+- 2층 배포 뒤 텍스트 artifact 는 잘리지 않는다. 천장을 넘는 파일은 제출 영수증에 `too_large` 로 크기와 천장이 적혀 온다.
+- 2층과 5층 배포 뒤 옛 요청 기록의 증거는 사용할 수 없음으로 보인다. 판정은 새 모양으로 다시 제출된 것만 본다.
 
 ## 6. 운영자가 정한 것
 
@@ -237,6 +257,11 @@ RFC-0224(2026-07-13) 는 같은 모양의 체크리스트를 「빠뜨림은 기
 - #29001 의 기제를 다시 여는지는 「2 -> 중요하고 ROI 높으면 하고」 에 맡겨졌다. 하는 것으로 판단했다. 근거는 §1.1 의 승인 12건이고 비용은 인증 reader 와 capture 코드를 재사용하는 것이다.
 - 비공개 저장소는 「3 -> 이건 내가 판단이 잘 안서」 다. 첫 버전은 공개 저장소만 읽고 비공개 저장소의 증거가 필요해질 때 다시 묻는다.
 - 「4 -> sha256 이면 현재는 충분한가? 음 export 되도록해야지...」. `artifact:` 를 sha256 으로 두고 export 가 되게 한다. Keeper 와 MCP 세션 둘 다이다. sha256 은 내용의 식별자다. export 한 blob 에는 실행 provenance 가 없고 기록에 남는 것은 누가 언제 넣었는가까지다. CI 실행의 provenance 는 `gh:` 의 run 참조에 있다.
+
+2026-11-27:
+
+- 2층의 기본값을 추천대로 가라고 답했다. blob 저장·scope 분류·`Too_large`·`truncated` 삭제를 한 PR 로 한다. 텍스트 천장은 64 MiB 다. 내용 상한 이하의 텍스트는 내용 그대로 둔다.
+- 1층의 저장본 리더(#54981)는 새 권한 경계라 사람에게 보고한 뒤 Ready 로 올렸다.
 
 그대로인 것: RFC-0222 의 LLM 판정, RFC-0279, #25911, #24332, PR #28995 의 결합 사유. RFC-0222·RFC-0279·RFC-0224 는 2026-08-08 커밋 `eeb3d68853595` 로 지워졌고 `git show eeb3d68853595^:docs/rfc/<이름>` 으로 읽는다.
 
@@ -260,6 +285,7 @@ RFC-0224(2026-07-13) 는 같은 모양의 체크리스트를 「빠뜨림은 기
 - 서버 시험. `Submitter` 소유가 섞이면 요청이 만들어지지 않고 검증 요청 행이 없다. `Harness` 소유만 있으면 요청이 만들어지고 모델이 불리지 않는다. 다 읽히면 질문이 고정되고 판정으로 간다.
 - 서버 시험. 판정 커밋이 처분을 같은 쓰기로 적는다.
 - 서버 시험. 옛 모양의 요청 기록 하나가 `Evidence_unavailable` 로 읽히고 Task 검사 화면이 그렇게 그리는지 본다.
+- 서버 시험(2층). 천장을 넘는 텍스트는 크기와 천장이 적힌 unreadable 로 기록되고 천장+1 바이트 넘게 읽지 않는다. 내용 상한과 천장 사이의 텍스트는 blob 바이트가 파일과 같고 기록에 내용이 없다. 몸의 쪽을 이어 붙이면 blob 바이트와 같고 기록에 없는 sha256 은 거절된다. 요청 기록이 가리키는 blob 은 touch 없는 reclaim 에서 살고 기록을 지우면 후보가 된다.
 - 5층 뒤에 `rg` 로 지운 이름이 `docs`·`CHANGELOG` 밖에서 0건인지 본다.
 
 ## 9. 확인하지 못한 것
@@ -272,3 +298,6 @@ RFC-0224(2026-07-13) 는 같은 모양의 체크리스트를 「빠뜨림은 기
 - 실행 기록 파일는 끝난 판정 64건만 남는다. 승인 39건 중 12건은 11-26 오전 실측의 값이고 원본은 굴러갔다. 12:15Z 의 사본은 64건(승인 38, 로그인 벽 11)이다. 1층에서 판정 사건에 읽은 기록을 싣기 전까지는 재실측이 같은 수를 재지 못한다.
 - 거절 분류는 LLM 이 쓴 사유 원문을 읽은 것이다(±5건). 실제와 대조한 것은 1건이다.
 - live 조회의 긴 꼬리(contents·branches·variables·issues) 가운데 어느 것이 계약 판정에 꼭 필요한지. run 의 artifact 본문도 그렇다. 5층 전에 잰다.
+- 2층의 비용은 구조에서 나온 것이지 측정하지 않았다. 64 MiB 본문의 capture 시간과 sweep 의 삭제 건수는 배포 뒤 잰다.
+- 운영자 내려받기는 몸을 base64 로 JSON 문자열 하나에 싣는다. 64 MiB 본문은 응답 하나가 약 85 MiB 다. 상한을 정하지 않았다.
+- live sweep 디렉터리에 `scan-opened` 만 있고 삭제 후보 파일이 없는 이유. 서버 로그를 읽지 않았다.

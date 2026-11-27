@@ -1226,13 +1226,24 @@ let read_batch_member_inputs db =
       in read [])
 ;;
 
+(* The inspection opens the file read-write and sets query_only; it never
+   opens it READONLY. The Owner writes this file from the same process, and
+   with the macOS system SQLite (/usr/lib/libsqlite3, 3.54.0, built with
+   ENABLE_SETLK_TIMEOUT) a READONLY connection that took the file's shared
+   lock first makes the Owner's RESERVED lock fail with EBADF. The Owner then
+   sees SQLITE_IOERR_LOCK (3850) on BEGIN IMMEDIATE and fences its chat
+   (#36195). A read-write connection in the same place lets the lock through,
+   and query_only refuses any write this connection would make. *)
 let inspect_file ~path inspect =
   let inspect_existing () =
-    match Sqlite3.db_open ~mode:`READONLY path with
+    match Sqlite3.db_open ~mode:`NO_CREATE path with
     | exception Sqlite3.Error detail -> Error (Store_unavailable detail)
     | db ->
       let result =
-        try inspect db with
+        try
+          let* () = exec db ~operation:"set query-only inspection" "PRAGMA query_only=1" in
+          inspect db
+        with
         | Sqlite3.Error detail -> Error (Store_unavailable detail)
       in
       if close_db db then result

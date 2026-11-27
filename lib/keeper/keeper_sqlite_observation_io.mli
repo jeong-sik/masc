@@ -24,7 +24,8 @@ val with_database : label:string -> before_open:(unit -> (unit, 'e) result) ->
   (Sqlite3.db -> ('a, 'e) result) -> ('a, 'e) result
 (** Runs blocking database work in a systhread, closes its exact handle, retains
     cleanup separately from the returned result and does not swallow cancellation.
-    Caller supplies pre-open/path/scope validation, run inside the same systhread. No leaf-open continuity claim. *)
+    Caller supplies pre-open/path/scope validation, run inside the same systhread. No leaf-open continuity claim.
+    [create:false] opens the existing file read-write with [PRAGMA query_only=1], not READONLY (#36195). *)
 val commit : error:(operation:string -> detail:string -> 'e) ->
   unconfirmed:(string -> 'e) -> show_error:('e -> string) ->
   commit:(Sqlite3.db -> Sqlite3.Rc.t) -> Sqlite3.db -> (unit, 'e) result

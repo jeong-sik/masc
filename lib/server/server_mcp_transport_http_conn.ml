@@ -206,20 +206,6 @@ let stop_sse_session session_id =
 let stop_sse_session_preserve_guard session_id =
   stop_sse_session_impl ~clear_guard:false session_id
 
-(* The session is stopped as [stop_sse_session] does, and a
-   typed Evict + Close event pair goes out on the bus topic. *)
-let stop_sse_session_evict session_id
-    ~(reason : Session_lifecycle_event.evict_reason) =
-  stop_sse_session session_id;
-  Session_lifecycle_event.publish
-    (Session_lifecycle_event.Evict
-       { transport = Session_lifecycle_event.SSE; session_id; reason });
-  Session_lifecycle_event.publish
-    (Session_lifecycle_event.Close
-       { transport = Session_lifecycle_event.SSE;
-         session_id;
-         reason = Session_lifecycle_event.Evicted reason })
-
 let is_active_sse_session session_id =
   SMap.mem session_id (Atomic.get sse_conn_by_session)
 

@@ -113,17 +113,6 @@ val stop_sse_session : string -> unit
 val stop_sse_conn_if_current : sse_conn_info -> unit
 (** Close this connection without removing a successor that reused its session. *)
 
-val stop_sse_session_evict :
-  string -> reason:Session_lifecycle_event.evict_reason -> unit
-(** [stop_sse_session_evict session_id ~reason] is
-    {!stop_sse_session} plus a typed
-    {!Session_lifecycle_event.Evict}/{!Session_lifecycle_event.Close}
-    pair published on the bus topic.
-
-    No [event: evicted] frame reaches the client: [Sse.register] runs
-    the evicted client's [on_disconnect] first, which already stopped
-    its connection (#48870). *)
-
 val stop_sse_session_preserve_guard : string -> unit
 (** [stop_sse_session_preserve_guard session_id] removes the
     registry entry but **preserves** the connect-rate guard

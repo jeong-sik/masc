@@ -276,12 +276,10 @@ let shutdown_entries =
   [
     entry ~default:"(none)" "MASC_SHUTDOWN_CLEANUP_TIMEOUT"
       "Cleanup timeout during shutdown (seconds)";
-    entry ~default:"(none)" "MASC_SHUTDOWN_DRAIN_TIMEOUT"
-      "Drain timeout during shutdown (seconds)";
     entry ~default:"(none)" "MASC_SHUTDOWN_FORCE_TIMEOUT"
       "Force exit timeout during shutdown (seconds)";
     entry ~default:"(none)" "MASC_SHUTDOWN_NOTIFY_DELAY"
-      "Notify delay before shutdown drain (seconds)";
+      "Delay between the SSE shutdown notice and the cleanup hooks (seconds)";
   ]
 
 let sse_entries =

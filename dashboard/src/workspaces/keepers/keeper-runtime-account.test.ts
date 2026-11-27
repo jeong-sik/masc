@@ -11,7 +11,7 @@ import { authSession, resetAuthStateForTests } from '../../core/auth'
 import { resetObserverStateForTests } from '../../core/observer'
 import { resetPortraitCacheForTests } from '../../lib/portrait-cache'
 import { resetShellStateForTests } from '../../shell/shell-state'
-import { loadSetupInventory, runtimeAccountEmail } from '../runtime/setup-inventory-read'
+import { loadSetupInventory, runtimeAccountEmail, SETUP_INVENTORY_KEY } from '../runtime/setup-inventory-read'
 import type { SetupInventoryPayload } from '../runtime/types'
 import { KeeperHeader } from './keeper-header'
 import { KeeperRoster } from './keeper-roster'
@@ -83,11 +83,11 @@ function keeper(name: string, runtimeId: string): KeeperRosterItem {
   }
 }
 
-function stubInventoryFetch() {
+function stubInventoryFetch(inventoryWire: unknown = INVENTORY_WIRE) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input)
     if (url.startsWith('/api/v1/setup/inventory')) {
-      return new Response(JSON.stringify(INVENTORY_WIRE), {
+      return new Response(JSON.stringify(inventoryWire), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       })
@@ -174,6 +174,42 @@ describe('Keeper runtime account', () => {
     expect(rosterRowText(items, 'gamma')).not.toContain('@')
     expect(headerRuntimeRow(alpha)).toBe(`${READ_RUNTIME} · ${EMAIL}`)
     expect(headerRuntimeRow(beta)).toBe(UNREAD_RUNTIME)
+  })
+
+  it('refuses a read row without an email and a state the server does not send', async () => {
+    const withRows = (rows: readonly unknown[]) => ({ ...INVENTORY_WIRE, account_emails: rows })
+    for (const row of [
+      { integration_id: 'claude_code_ac22e641', state: 'read' },
+      { integration_id: 'claude_code_ac22e641', state: 'read', email: ' ' },
+      { integration_id: 'claude_code_ac22e641', state: 'signed_in', email: EMAIL },
+    ]) {
+      resourceCache.clearAll()
+      stubInventoryFetch(withRows([row]))
+      const read = await loadSetupInventory('mount')
+      expect(read.kind).toBe('failed')
+      const text = rosterRowText([keeper('alpha', READ_RUNTIME)], 'alpha')
+      expect(text).toContain(READ_RUNTIME)
+      expect(text).not.toContain(EMAIL)
+    }
+  })
+
+  it('hides a read email from a session that lost Admin after the read', async () => {
+    stubInventoryFetch()
+    const alpha = keeper('alpha', READ_RUNTIME)
+    await loadSetupInventory('mount')
+    expect(rosterRowText([alpha], 'alpha')).toContain(EMAIL)
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      canTokenAdmin: false,
+      authMethods: { google: false, github: false, dev_token: false },
+      workspaceId: 'default',
+    }
+    // The cached read is still there; only the session decides it is not shown.
+    expect(resourceCache.peek(SETUP_INVENTORY_KEY)?.kind).toBe('value')
+    expect(rosterRowText([alpha], 'alpha')).not.toContain(EMAIL)
+    expect(headerRuntimeRow(alpha)).toBe(READ_RUNTIME)
   })
 
   it('does not read the inventory for a multi-account session', async () => {

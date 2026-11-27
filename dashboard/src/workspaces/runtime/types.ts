@@ -7,6 +7,7 @@ import {
   expectOptionalArrayField,
   expectOptionalRecordArrayField,
   expectOptionalStringArrayField,
+  expectRequiredStringField,
   expectWireRecord,
   isJsonRecord,
 } from '../../lib/wire-decode'
@@ -936,11 +937,30 @@ export function decodeRuntimeProbePayload(raw: unknown): RuntimeProbePayload {
   }
 }
 
+// A row names an email only when the server read one, so a read row without
+// a non-blank email, or a state the server does not send, refuses the read.
+function decodeSetupAccountEmail(row: Record<string, unknown>, ctx: string): SetupAccountEmail {
+  const integration_id = expectRequiredStringField(row, 'integration_id', ctx)
+  const state = expectRequiredStringField(row, 'state', ctx)
+  switch (state) {
+    case 'read': {
+      const email = expectRequiredStringField(row, 'email', ctx)
+      if (email.trim() === '') throw new Error(`${ctx}: account_emails "email" 이 비었습니다 (${integration_id}).`)
+      return { integration_id, state, email, plan: expectOptionalStringArrayField(row, 'plan', ctx) }
+    }
+    case 'not_read':
+      return { integration_id, state, cause: expectRequiredStringField(row, 'cause', ctx) }
+    default:
+      throw new Error(`${ctx}: account_emails "state" 는 read 또는 not_read 입니다 (${state} 수신).`)
+  }
+}
+
 export function decodeSetupInventoryPayload(raw: unknown): SetupInventoryPayload {
   const ctx = 'GET /api/v1/setup/inventory'
   const rec = expectWireRecord(raw, ctx)
   const integrations = expectOptionalRecordArrayField<SetupIntegration>(rec, 'integrations', ctx)
-  const account_emails = expectOptionalRecordArrayField<SetupAccountEmail>(rec, 'account_emails', ctx)
+  const account_emails = expectOptionalRecordArrayField<Record<string, unknown>>(rec, 'account_emails', ctx)
+    .map((row) => decodeSetupAccountEmail(row, ctx))
   return { ...(rec as unknown as SetupInventoryPayload), integrations, account_emails }
 }
 

@@ -9,7 +9,7 @@
  * reports (`account_emails`), so one read names the account of a runtime.
  */
 
-import { authSession } from '../../core/auth'
+import { authSession, type AuthSession } from '../../core/auth'
 import { apiGet } from '../../core/transport'
 import {
   observedAbsent,
@@ -22,11 +22,16 @@ import { decodeSetupInventoryPayload, type SetupInventoryPayload } from './types
 
 export const SETUP_INVENTORY_KEY = 'runtime:setup-inventory'
 
-/** The route needs Admin, and a multi-account session has no setup inventory. */
+const NEEDS_SINGLE_USER_ADMIN = 'setup_inventory_needs_single_user_admin'
+
+// The route needs Admin, and a multi-account session has no setup inventory.
+function canReadSetupInventory(session: AuthSession): boolean {
+  return session.kind === 'single_user_local' && !isAdminLockedForSession('admin', session)
+}
+
 export function loadSetupInventory(reason: FetchReason): Promise<Observed<SetupInventoryPayload>> {
-  const session = authSession.peek()
-  if (session.kind !== 'single_user_local' || isAdminLockedForSession('admin', session)) {
-    return Promise.resolve(observedAbsent('setup_inventory_needs_single_user_admin'))
+  if (!canReadSetupInventory(authSession.peek())) {
+    return Promise.resolve(observedAbsent(NEEDS_SINGLE_USER_ADMIN))
   }
   return resourceCache.fetch<SetupInventoryPayload>(
     SETUP_INVENTORY_KEY,
@@ -38,7 +43,9 @@ export function loadSetupInventory(reason: FetchReason): Promise<Observed<SetupI
   )
 }
 
+/** An email is personal data: a session that lost Admin after the read sees none. */
 export function readSetupInventory(): Observed<SetupInventoryPayload> {
+  if (!canReadSetupInventory(authSession.value)) return observedAbsent(NEEDS_SINGLE_USER_ADMIN)
   return resourceCache.observe<SetupInventoryPayload>(SETUP_INVENTORY_KEY).value
 }
 

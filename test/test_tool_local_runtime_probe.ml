@@ -743,9 +743,166 @@ let test_dispatch_forwards_well_formed_verify_arguments_to_authorization () =
     (Yojson.Safe.to_string complete)
     (Yojson.Safe.to_string (List.hd !calls))
 
+let test_validate_ollama_server_url_accepts_valid_targets () =
+  List.iter
+    (fun (raw, expected) ->
+      match Masc.Tool_local_runtime_probe.validate_ollama_server_url raw with
+      | Ok normalized -> check string raw expected normalized
+      | Error err -> failf "expected %S to be valid, got error: %s" raw err)
+    [ ("http://127.0.0.1:11434", "http://127.0.0.1:11434")
+    ; (" http://localhost:11434/// ", "http://localhost:11434")
+    ; ("http://[::1]:11434", "http://[::1]:11434")
+    ; ("http://192.168.1.50:11434", "http://192.168.1.50:11434")
+    ; ("https://ollama-01.internal:11434", "https://ollama-01.internal:11434")
+    ; ("http://gpu1.local.:11434", "http://gpu1.local.:11434")
+    ]
+
+let test_validate_ollama_server_url_rejects_ssrf_and_numeric_bypasses () =
+  List.iter
+    (fun raw ->
+      match Masc.Tool_local_runtime_probe.validate_ollama_server_url raw with
+      | Error _ -> ()
+      | Ok accepted -> failf "expected %S to be rejected, got Ok %S" raw accepted)
+    [ (* Non-canonical numeric/hex/octal/shorthand IPv4 bypasses for 169.254.169.254 *)
+      "http://2852039166/"
+    ; "http://0xa9fea9fe/"
+    ; "http://0xA9FEA9FE/"
+    ; "http://0251.0376.0251.0376/"
+    ; "http://169.254.43518/"
+    ; "http://0xa9.0xfe.0xa9.0xfe/"
+    ; "http://127.1/"
+    ; "http://0/"
+    ; "http://0x0/"
+    ; (* Canonical link-local, unspecified, NAT64, IPv4-mapped, IMDS, metadata *)
+      "http://169.254.169.254/"
+    ; "http://169.254.169.254./"
+    ; "http://169.254.169.254../"
+    ; "http://0.0.0.0:11434/"
+    ; "http://0.1.2.3:11434/"
+    ; "http://[::ffff:169.254.169.254]/"
+    ; "http://[64:ff9b::169.254.169.254]/"
+    ; "http://[fe80::1]/"
+    ; "http://[fe80::1%25eth0]/"
+    ; "http://[fd00:ec2::254]/"
+    ; "http://[::]/"
+    ; "http://metadata.google.internal/"
+    ; "http://metadata.goog/"
+    ; (* Percent-encoded authority, non-HTTP schemes, userinfo, query, fragment, traversal *)
+      "http://%31%36%39.254.169.254/"
+    ; "file:///etc/passwd"
+    ; "gopher://127.0.0.1:11434/"
+    ; "http://user:pass@127.0.0.1:11434"
+    ; "http://127.0.0.1:11434?a=1"
+    ; "http://127.0.0.1:11434#frag"
+    ; "http://127.0.0.1:11434/../secret"
+    ]
+
+let test_dispatch_rejects_disallowed_server_url_before_authorization () =
+  let authorization_calls = ref 0 in
+  let authorize_external_effect ~operation:_ ~input:_ ~continue:_ =
+    incr authorization_calls;
+    fail "disallowed server_url must not reach authorization"
+  in
+  let context : Masc.Tool_local_runtime_core.context =
+    { config = Masc.Workspace.default_config "/tmp"
+    ; agent_name = "probe-ssrf-test"
+    ; authorize_external_effect = Some authorize_external_effect
+    }
+  in
+  List.iter
+    (fun url ->
+      match
+        Masc.Tool_local_runtime.dispatch context
+          ~name:"masc_runtime_ollama_probe"
+          ~args:(`Assoc [ ("server_url", `String url) ])
+      with
+      | None -> fail "Ollama probe handler was not selected"
+      | Some result ->
+          check bool (url ^ " failed") true (Tool_result.is_failed result);
+          check bool (url ^ " is a typed workflow rejection") true
+            (Tool_result.failure_class result = Some Tool_result.Workflow_rejection))
+    [ "http://2852039166/"
+    ; "http://0xa9fea9fe/"
+    ; "http://0251.0376.0251.0376/"
+    ; "http://169.254.43518/"
+    ; "file:///etc/passwd"
+    ];
+  check int "authorization was not invoked" 0 !authorization_calls
+
+let test_ollama_resolution_pinning_rejects_disallowed_dns_and_pins_curl () =
+  let module P = Masc.Tool_local_runtime_probe.For_testing in
+  let module H = Masc.Tool_local_runtime_http in
+  let ip raw = Ipaddr.of_string_exn raw in
+  (* IP literal skips resolver and returns Ok None. *)
+  let resolver_called = ref false in
+  (match
+     P.pin_ollama_resolution
+       ~resolve:(fun ~host:_ ~port:_ -> resolver_called := true; Ok [ ip "127.0.0.1" ])
+       "http://127.0.0.1:11434"
+   with
+   | Ok None -> check bool "resolver skipped for IP literal" false !resolver_called
+   | Ok (Some _) -> fail "unexpected pinned resolution for IP literal"
+   | Error err -> fail ("unexpected error for IP literal: " ^ err));
+  (* Any disallowed resolved IP causes rejection. *)
+  List.iter
+    (fun (label, ips) ->
+      match
+        P.pin_ollama_resolution
+          ~resolve:(fun ~host:_ ~port:_ -> Ok ips)
+          "http://rebind.local:11434"
+      with
+      | Error _ -> ()
+      | Ok _ -> failf "expected DNS result (%s) to be rejected" label)
+    [ ("link-local v4", [ ip "169.254.169.254" ])
+    ; ("mixed allowed and link-local", [ ip "127.0.0.1"; ip "169.254.169.254" ])
+    ; ("link-local v6", [ ip "fe80::1" ])
+    ; ("aws imds v6", [ ip "fd00:ec2::254" ])
+    ; ("v4-mapped link-local", [ ip "::ffff:169.254.169.254" ])
+    ; ("nat64 link-local", [ ip "64:ff9b::169.254.169.254" ])
+    ; ("unspecified v4", [ ip "0.0.0.0" ])
+    ; ("empty resolution", [])
+    ];
+  (* Allowed DNS resolution pins curl --resolve and disables proxies. *)
+  match
+    P.pin_ollama_resolution
+      ~resolve:(fun ~host:_ ~port:_ -> Ok [ ip "127.0.0.1"; ip "::1" ])
+      "http://ollama.local:11434"
+  with
+  | Error err -> fail ("expected valid resolution to pin: " ^ err)
+  | Ok None -> fail "expected pinned resolution for hostname"
+  | Ok (Some pinned) ->
+      let argv =
+        H.curl_post_json_argv_for_test ~timeout_sec:5 ~pinned_resolution:pinned
+          ~url:"http://ollama.local:11434/api/generate" ()
+      in
+      let rec values flag = function
+        | name :: value :: rest when String.equal name flag ->
+            value :: values flag rest
+        | _ :: rest -> values flag rest
+        | [] -> []
+      in
+      check (list string) "proto restricted" [ "=http,https" ] (values "--proto" argv);
+      check (list string) "proto-redir restricted" [ "=http,https" ]
+        (values "--proto-redir" argv);
+      check (list string) "noproxy set when pinned" [ "*" ] (values "--noproxy" argv);
+      check (list string) "resolve pins admitted addresses"
+        [ "ollama.local:11434:127.0.0.1,[::1]" ]
+        (values "--resolve" argv)
+
 let () =
   run "tool_local_runtime_probe"
     [
+      ( "url_validation",
+        [
+          test_case "accepts valid local and LAN Ollama URLs" `Quick
+            test_validate_ollama_server_url_accepts_valid_targets;
+          test_case "rejects SSRF and non-canonical numeric/hex/octal/shorthand hosts" `Quick
+            test_validate_ollama_server_url_rejects_ssrf_and_numeric_bypasses;
+          test_case "dispatch rejects disallowed server_url before authorization" `Quick
+            test_dispatch_rejects_disallowed_server_url_before_authorization;
+          test_case "resolution pinning rejects disallowed DNS and pins curl" `Quick
+            test_ollama_resolution_pinning_rejects_disallowed_dns_and_pins_curl;
+        ] );
       ( "ps",
         [
           test_case "extracts loaded models" `Quick

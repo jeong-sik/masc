@@ -29,37 +29,67 @@ def inspect(source, environment):
     active_relations = {prefix + kind for prefix in (office_ns, strict_ns)
                         for kind in ("oleObject", "package", "control", "vbaProject")}
     active_content_types = {
-        "application/vnd.ms-office.vbaProject", "application/vnd.ms-office.activeX",
-        "application/vnd.ms-office.activeX+xml",
-        "application/vnd.openxmlformats-officedocument.oleObject",
-        "application/vnd.ms-powerpoint.presentation.macroEnabled.main+xml",
+        "application/vnd.ms-office.vbaproject",
+        "application/vnd.ms-office.activex",
+        "application/vnd.ms-office.activex+xml",
+        "application/vnd.openxmlformats-officedocument.oleobject",
+        "application/vnd.ms-powerpoint.presentation.macroenabled.main+xml",
         "image/svg+xml",
     }
+    max_member_bytes = 16 * 1024 * 1024
+    max_total_bytes = 128 * 1024 * 1024
     hyperlink_targets = {}
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         entries = archive.infolist()
-        # Input safety limits apply before any decompression (including CRC checks).
-        if len(entries) > 4096 or sum(entry.file_size for entry in entries) > 128 * 1024 * 1024:
+        # Input safety limits apply both on header metadata and on actual streamed bytes.
+        if len(entries) > 4096 or sum(entry.file_size for entry in entries) > max_total_bytes:
             raise PolicyError("package expansion exceeds inspection limits")
         for entry in entries:
-            if entry.file_size > 16 * 1024 * 1024 or entry.file_size > max(1, entry.compress_size) * 1000:
+            if entry.file_size > max_member_bytes or entry.file_size > max(1, entry.compress_size) * 1000:
                 raise PolicyError("package member expansion exceeds inspection limits")
         names = [entry.filename for entry in entries]
-        if len(names) != len(set(names)):
+        if len(names) != len({name.lower() for name in names}):
             raise ValueError("duplicate package member names")
-        corrupt = archive.testzip()
-        if corrupt is not None:
-            raise ValueError("invalid package member checksum: " + corrupt)
-        for name in names:
-            if name.endswith("/"):
+        total_decompressed = 0
+        for entry in entries:
+            name = entry.filename
+            lower_name = name.lower()
+            if lower_name.endswith("/"):
                 continue
-            if name.endswith(".svg"):
+            if lower_name.endswith(".svg"):
                 raise PolicyError("SVG resources require separate external-resource inspection")
-            if not (name.endswith(".xml") or name.endswith(".rels")):
+            is_xml = lower_name.endswith(".xml")
+            is_rels = lower_name.endswith(".rels")
+            keep_bytes = is_xml or is_rels
+            chunks = [] if keep_bytes else None
+            member_bytes = 0
+            ratio_limit = max(1, entry.compress_size) * 1000
+            try:
+                with archive.open(entry, "r") as stream:
+                    while True:
+                        chunk = stream.read(65536)
+                        if not chunk:
+                            break
+                        member_bytes += len(chunk)
+                        total_decompressed += len(chunk)
+                        if (
+                            member_bytes > max_member_bytes
+                            or member_bytes > ratio_limit
+                            or total_decompressed > max_total_bytes
+                        ):
+                            raise PolicyError("package member expansion exceeds inspection limits")
+                        if chunks is not None:
+                            chunks.append(chunk)
+            except zipfile.BadZipFile as error:
+                raise ValueError("invalid package member checksum: " + name) from error
+            if member_bytes != entry.file_size:
+                raise ValueError("invalid package member size: " + name)
+            if not keep_bytes:
                 continue
+            member_data = b"".join(chunks)
             parser = etree.XMLParser(resolve_entities=False, load_dtd=False, no_network=True)
             try:
-                document = etree.parse(io.BytesIO(archive.read(name)), parser)
+                document = etree.parse(io.BytesIO(member_data), parser)
             except etree.XMLSyntaxError as error:
                 raise ValueError("invalid package XML: " + name + ": " + str(error)) from error
             if document.docinfo.doctype:
@@ -67,14 +97,17 @@ def inspect(source, environment):
             for node in document.iter():
                 if not isinstance(node.tag, str):
                     continue
-                if node.get("ContentType") in active_content_types:
-                    raise PolicyError("active or externally loading package content is unsupported: " + name)
+                content_type = node.get("ContentType")
+                if content_type is not None:
+                    normalized_ct = content_type.split(";", 1)[0].strip().lower()
+                    if normalized_ct in active_content_types:
+                        raise PolicyError("active or externally loading package content is unsupported: " + name)
                 # SVG and VML can address resources directly, without an OPC relationship.
                 if node.get("{http://www.w3.org/1999/xlink}href") is not None:
                     raise PolicyError("direct XML resource links are unsupported: " + name)
                 if node.tag == "{urn:schemas-microsoft-com:vml}imagedata" and node.get("src") is not None:
                     raise PolicyError("direct VML image sources are unsupported: " + name)
-            if not name.endswith(".rels"):
+            if not is_rels:
                 continue
             if document.getroot().tag != "{" + relation_ns + "}Relationships":
                 raise ValueError("invalid relationship document: " + name)
@@ -89,15 +122,15 @@ def inspect(source, environment):
                     raise ValueError("incomplete package relationship: " + name)
                 if kind in active_relations:
                     raise PolicyError("embedded active documents are not inspected: " + name)
-                mode = relationship.get("TargetMode", "Internal")
+                mode = relationship.get("TargetMode", "Internal").strip().lower()
                 if kind in hyperlinks:
                     source_part = posixpath.join(posixpath.dirname(posixpath.dirname(name)), posixpath.basename(name)[:-5])
                     hyperlink_targets.setdefault(source_part, []).append(target)
-                if mode == "External":
+                if mode == "external":
                     if kind in hyperlinks:
                         continue
                     raise PolicyError("external loading relationship is unsupported: " + name + " (" + kind + ")")
-                if mode != "Internal":
+                if mode != "internal":
                     raise ValueError("unknown relationship target mode: " + name)
                 decoded = urllib.parse.unquote(target)
                 uri = urllib.parse.urlsplit(decoded)

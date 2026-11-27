@@ -14,7 +14,7 @@
 
 let is_token_char ch =
   match ch with
-  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' | '.' | '+' | '/' | '=' -> true
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' | '.' | '+' | '/' | '=' | '~' -> true
   | _ -> false
 ;;
 
@@ -278,6 +278,31 @@ let is_cookie_header prefix =
   String.equal lower "cookie:" || String.equal lower "set-cookie:"
 ;;
 
+let is_bearer_prefix prefix =
+  let lower = String.lowercase_ascii prefix in
+  String.equal lower "bearer " || String.equal lower "bearer\t"
+;;
+
+let is_header_name_char = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' -> true
+  | _ -> false
+;;
+
+let preceded_by_auth_header s index =
+  let rec skip_back i =
+    if i > 0 && is_hspace s.[i - 1] then skip_back (i - 1) else i
+  in
+  let end_pos = skip_back index in
+  let ends_with_ci header =
+    let hlen = String.length header in
+    let start = end_pos - hlen in
+    start >= 0
+    && (start = 0 || not (is_header_name_char s.[start - 1]))
+    && prefix_matches_ci s start header 0
+  in
+  ends_with_ci "authorization:" || ends_with_ci "proxy-authorization:"
+;;
+
 let known_http_auth_schemes =
   [ "bearer"
   ; "basic"
@@ -330,6 +355,7 @@ let redact_prefixes s prefixes =
       let after_prefix = index + String.length prefix in
       let is_auth = is_auth_scheme_header prefix in
       let is_cookie = is_cookie_header prefix in
+      let is_bearer_auth = is_bearer_prefix prefix && preceded_by_auth_header s index in
       let token_pos =
         if String.ends_with ~suffix:":" prefix
         then (
@@ -350,7 +376,7 @@ let redact_prefixes s prefixes =
         else after_prefix
       in
       let token_stop =
-        if is_auth || is_cookie
+        if is_auth || is_cookie || is_bearer_auth
         then
           header_value_end
             s

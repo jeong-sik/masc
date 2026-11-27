@@ -144,6 +144,15 @@ let test_case_insensitive_and_extended_credential_prefixes () =
   check string "Authorization Bearer with tab redacted"
     "Authorization: Bearer\t[REDACTED]"
     (redact "Authorization: Bearer\tSECRET_TAB");
+  check string "Authorization Bearer with colon tail redacts full header value"
+    "Authorization: Bearer [REDACTED]"
+    (redact "Authorization: Bearer v1:super_secret_token");
+  check string "Authorization Bearer with RFC 6750 tilde tail redacts full header value"
+    "Authorization: Bearer [REDACTED]"
+    (redact "Authorization: Bearer abc~SECRET_TAIL");
+  check string "bare Bearer with RFC 6750 tilde redacts full token"
+    "Bearer [REDACTED]"
+    (redact "Bearer abc~SECRET_TAIL");
   check string "bare lowercase bearer with tab redacted"
     "bearer\t[REDACTED]"
     (redact "bearer\tSECRET_TAB_BARE");

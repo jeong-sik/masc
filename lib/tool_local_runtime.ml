@@ -181,7 +181,14 @@ let runtime_ollama_probe_args args : (ollama_probe_args, string) result =
     runtime_ollama_probe_bounded_field args ~name:"ps_timeout_sec" ~default:2
       ~validate:Tool_local_runtime_probe.validate_ps_timeout_sec
   in
-  let* server_url = runtime_text_field args ~name:"server_url" in
+  let* server_url =
+    match runtime_text_field args ~name:"server_url" with
+    | Error _ as err -> err
+    | Ok None -> Ok None
+    | Ok (Some raw) ->
+        let* validated = Tool_local_runtime_probe.validate_ollama_server_url raw in
+        Ok (Some validated)
+  in
   let* model = runtime_text_field args ~name:"model" in
   let* prompt = runtime_text_field args ~name:"prompt" in
   let* keep_alive = runtime_text_field args ~name:"keep_alive" in

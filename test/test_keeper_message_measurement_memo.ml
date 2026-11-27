@@ -127,6 +127,24 @@ let an_entry_two_walks_skipped_makes_room () =
   Alcotest.(check int) "the dropped entry is measured again" 4 !encoded
 ;;
 
+(* One walk past the bound: the first message fills the table, and every
+   later one is measured, answered, and not kept. *)
+let one_walk_past_the_bound_answers_every_message () =
+  let message index = tool_message ~id:(Printf.sprintf "f%d" index) large_body in
+  let indices = [ 0; 1; 2; 3 ] in
+  let encoder, encoded = counting_encoder ~max_retained_bytes:(history_bytes (message 0)) in
+  let keeper_name = "memo-one-walk" in
+  let measure = Memo.measurer ~keeper_name encoder in
+  let answers = List.map (fun index -> measure (message index)) indices in
+  Alcotest.(check (list int))
+    "every size"
+    (List.map (fun index -> history_bytes (message index)) indices)
+    answers;
+  Alcotest.(check int) "each encoded" (List.length indices) !encoded;
+  ignore (walk ~keeper_name encoder (message 0) : int);
+  Alcotest.(check int) "the first one was kept" (List.length indices) !encoded
+;;
+
 let () =
   Alcotest.run "keeper_message_measurement_memo"
     [ ( "walks"
@@ -142,6 +160,8 @@ let () =
             a_message_past_the_bound_is_measured_every_walk
         ; Alcotest.test_case "an entry two walks skipped makes room" `Quick
             an_entry_two_walks_skipped_makes_room
+        ; Alcotest.test_case "one walk past the bound answers every message" `Quick
+            one_walk_past_the_bound_answers_every_message
         ] )
     ]
 ;;

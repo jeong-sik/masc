@@ -34,11 +34,11 @@ val encoder :
     [make] is called once per walk; the measurer it returns may keep state,
     such as a buffer, for that walk alone.
 
-    A table counts each entry by the bytes it measured, which is never less
-    than the text its key holds: an encoder escapes, it does not compress.
-    When a new entry would pass [max_retained_bytes], the table first drops
-    the entries that neither this walk nor the walk before asked for. If it is
-    still full, the message is measured and not kept. A walk visits the
+    A table counts each entry by the bytes its encoder measured, not by the
+    heap its key holds. When a new entry would pass [max_retained_bytes], the
+    table first drops the entries that neither this walk nor the walk before
+    asked for. If it is still full, the message is measured and not kept. A
+    walk visits the
     history in the same order every time, so evicting the least recently used
     entry instead would miss every lookup once the history outgrew the
     table. *)

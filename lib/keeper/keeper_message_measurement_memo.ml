@@ -9,11 +9,13 @@ type entry =
   ; mutable last_walk : int
   }
 
+(* [swept_walk] is the newest walk that swept the table for room. *)
 type table =
   { lock : Mutex.t
   ; entries : entry Table.t
   ; mutable retained_bytes : int
   ; mutable walks : int
+  ; mutable swept_walk : int
   }
 
 type encoder =
@@ -49,6 +51,7 @@ let table_of ~keeper_name encoder =
         ; entries = Table.create 1024
         ; retained_bytes = 0
         ; walks = 0
+        ; swept_walk = 0
         }
       in
       Hashtbl.replace tables key table;
@@ -70,12 +73,21 @@ let drop_unasked table ~walk =
 ;;
 
 (* Called with the table locked. Another walk of the same Keeper may have
-   kept the message since this walk looked. *)
+   kept the message since this walk looked.
+
+   A walk sweeps at most once. An entry only ever gains walks, so after this
+   walk's sweep every entry left was asked for by this walk or the one before,
+   and a second sweep would scan the whole table to drop nothing. Without the
+   guard, a history larger than the bound would scan the table once per
+   message the walk could not keep. *)
 let admit table ~max_retained_bytes ~walk message bytes =
   match Table.find_opt table.entries message with
   | Some entry -> entry.last_walk <- Int.max entry.last_walk walk
   | None ->
-    if table.retained_bytes + bytes > max_retained_bytes then drop_unasked table ~walk;
+    if table.retained_bytes + bytes > max_retained_bytes && table.swept_walk < walk
+    then (
+      table.swept_walk <- walk;
+      drop_unasked table ~walk);
     if table.retained_bytes + bytes <= max_retained_bytes
     then (
       Table.add table.entries message { bytes; key = message; last_walk = walk };

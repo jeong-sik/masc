@@ -4303,13 +4303,16 @@ let test_http_429_preserves_unknown_scope_and_fallback () =
         (backpressure_order ["shared_a.test_model"; "shared_b.test_model"; "other.test_model"])))
 ;;
 
+(* A 429 that named no wait is a rest MASC chose: it orders the walk and
+   takes no candidate out of it (RFC-provider-path-rest 6.1, K4). A wait the
+   provider stated is the tests further down. *)
 let test_rate_limit_order_never_excludes_and_success_clears () =
   with_runtime_config runtime_toml_quota_lane (fun () ->
     let ids = ["shared_a.test_model"; "shared_b.test_model"] in
     List.iter (fun id ->
       let runtime = Option.get (Runtime.get_runtime_by_id id) in
       Runtime_candidate_backpressure.note_rate_limit ~candidate:runtime.candidate_backpressure
-        ~retry_after:(Some 300.)) ids;
+        ~retry_after:None) ids;
     Alcotest.(check (list string)) "all observed candidates remain in declared order"
       ids (backpressure_order ids);
     let attempts = ref [] in
@@ -4324,8 +4327,9 @@ let test_rate_limit_order_never_excludes_and_success_clears () =
            else Ok ()) None)
       (backpressure_order ids) in
     (match result with Ok () -> () | Error _ -> Alcotest.fail "all-demoted fallback was blocked");
-    Alcotest.(check (list string)) "Retry-After is ordering, not admission" ids !attempts;
-    Alcotest.(check bool) "success clears even an unexpired hint" true
+    Alcotest.(check (list string)) "a rest without a stated time is ordering, not admission"
+      ids !attempts;
+    Alcotest.(check bool) "success clears the mark" true
       (Option.is_none (observed_candidate "shared_b.test_model"));
     match observed_candidate "shared_a.test_model" with
     | Some
@@ -6597,7 +6601,10 @@ let test_deferred_quota_order_is_frozen_before_predispatch () =
            ]
            (Driver.resumed_walk_ids ordered)))
 
-let test_deferred_dispatch_preserves_predispatch_quota_order () =
+(* The endpoints a walk resuming a suffix frozen before [note_after_freeze]
+   dispatches to, in order. The provider transform stops the walk at its
+   first dispatch. *)
+let dispatches_of_a_frozen_suffix ~note_after_freeze =
   with_runtime_config runtime_toml_quota_lane (fun () ->
     Runtime_quota_window.reset_for_testing ();
     Fun.protect
@@ -6617,12 +6624,8 @@ let test_deferred_dispatch_preserves_predispatch_quota_order () =
              ~now:(Unix.gettimeofday ())
              hint
          in
-         let shared_scope =
-           Option.get (Runtime.quota_scope_of_runtime_id "shared_a.test_model")
-         in
-         Runtime_quota_window.note_exhausted ~source:Runtime_quota_window.Provider_quota_refused
-           ~scope:shared_scope
-           ~resets_at:(Unix.gettimeofday () +. 300.0);
+         note_after_freeze
+           ~scope:(Option.get (Runtime.quota_scope_of_runtime_id "shared_a.test_model"));
          Eio_main.run
          @@ fun env ->
          Eio.Switch.run
@@ -6657,10 +6660,31 @@ let test_deferred_dispatch_preserves_predispatch_quota_order () =
               (Agent_core.Error.to_string error)
           | Error _ -> ()
           | Ok _ -> Alcotest.fail "test provider transform unexpectedly succeeded");
-         Alcotest.(check (list string))
-           "dispatch keeps the runtime frozen before pre-dispatch"
-           [ "http://127.0.0.1:1" ]
-           (List.rev !transformed_urls)))
+         List.rev !transformed_urls))
+
+(* An undated observation is a rest MASC chose. Noted after the suffix was
+   frozen, it does not move the walk off the runtime the request was shaped
+   for. *)
+let test_deferred_dispatch_preserves_predispatch_quota_order () =
+  Alcotest.(check (list string))
+    "dispatch keeps the runtime frozen before pre-dispatch"
+    [ "http://127.0.0.1:1" ]
+    (dispatches_of_a_frozen_suffix ~note_after_freeze:(fun ~scope ->
+       Runtime_quota_window.note_observed_exhausted
+         ~source:Runtime_quota_window.Provider_quota_refused ~scope))
+
+(* RFC-provider-path-rest 6.1, K1: a reset the provider stated after the
+   suffix was frozen is read when the walk calls. Both candidates of the
+   resting account stay uncalled and the first call goes to the candidate
+   that can be called, as it would after the head's refusal. *)
+let test_deferred_dispatch_leaves_a_stated_reset_uncalled () =
+  Alcotest.(check (list string))
+    "the first call goes past the candidates inside the stated reset"
+    [ "http://127.0.0.1:3" ]
+    (dispatches_of_a_frozen_suffix ~note_after_freeze:(fun ~scope ->
+       Runtime_quota_window.note_exhausted
+         ~source:Runtime_quota_window.Provider_quota_refused ~scope
+         ~resets_at:(Unix.gettimeofday () +. 300.0)))
 
 (* Three accounts, each its own quota scope, declared [A; C; B]. *)
 let runtime_toml_three_account_lane =
@@ -7330,6 +7354,274 @@ let is_provider_context_overflow error =
   match E.declared_lane_failure_of_error error with
   | E.Provider_context_overflow -> true
   | E.Declared_runtime_lane_exhausted -> false
+
+(* RFC-provider-path-rest 6.1. A time the provider stated -- a quota reset or
+   a usable Retry-After -- is a time the walk does not call the candidate
+   before (K1). The candidate stays in the walk and is treated as one that
+   was called and refused, without the call (K2). A walk left with only such
+   candidates ends on the candidate that just failed (K5). *)
+let with_quota_lane_rests_reset f =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests f)
+;;
+
+let shared_quota_scope () =
+  Option.get (Runtime.quota_scope_of_runtime_id "shared_a.test_model")
+;;
+
+(* [shared_a] and [shared_b] share the credential, so one stated reset holds
+   both. *)
+let note_shared_reset_ahead () =
+  Runtime_quota_window.note_exhausted
+    ~source:Runtime_quota_window.Provider_quota_refused
+    ~scope:(shared_quota_scope ())
+    ~resets_at:(Unix.gettimeofday () +. 300.0)
+;;
+
+let shared_account_refusal provider =
+  Agent_core.Error.Provider
+    (Llm_provider.Error.HardQuota
+       { provider; retry_after = Some 300.0; detail = "account quota exhausted" })
+;;
+
+let unexpected_candidate id = Alcotest.failf "unexpected candidate %s" id
+
+(* The candidates the walk called, in order, and what the walk returned. *)
+let recorded_walk ?allow_retry ?retry_deferral outcomes ids =
+  let attempts = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~walk_owner:(Driver.Fleet_keeper_turn test_fleet_turn)
+      ?allow_retry
+      ?retry_deferral
+      ~runtime_id:"quota_lane"
+      ~runtime_id_of:Fun.id
+      ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+      ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
+        attempts := !attempts @ [ runtime_id ];
+        attempt_without_effect (outcomes runtime_id) None)
+      ids
+  in
+  !attempts, result
+;;
+
+let test_a_walk_leaves_a_candidate_uncalled_before_its_stated_reset () =
+  with_quota_lane_rests_reset (fun () ->
+    note_shared_reset_ahead ();
+    let attempts, result =
+      recorded_walk
+        (function
+          | "other.test_model" -> Ok ()
+          | id -> unexpected_candidate id)
+        [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ]
+    in
+    (match result with
+     | Ok () -> ()
+     | Error error ->
+       Alcotest.failf "the candidate that can be called did not serve: %s"
+         (Agent_core.Error.to_string error));
+    Alcotest.(check (list string)) "neither candidate of the resting account is called"
+      [ "other.test_model" ] attempts;
+    Alcotest.(check bool) "an answer elsewhere leaves the stated reset in place" true
+      (Option.is_some
+         (Runtime_quota_window.active_until ~scope:(shared_quota_scope ())
+            ~now:(Unix.gettimeofday ()))))
+;;
+
+let test_a_walk_calls_a_candidate_once_its_stated_reset_has_passed () =
+  with_quota_lane_rests_reset (fun () ->
+    Runtime_quota_window.note_exhausted
+      ~source:Runtime_quota_window.Provider_quota_refused
+      ~scope:(shared_quota_scope ())
+      ~resets_at:(Unix.gettimeofday () -. 1.0);
+    let attempts, result =
+      recorded_walk
+        (function
+          | "shared_a.test_model" -> Ok ()
+          | id -> unexpected_candidate id)
+        [ "shared_a.test_model"; "other.test_model" ]
+    in
+    (match result with
+     | Ok () -> ()
+     | Error error ->
+       Alcotest.failf "the head did not serve: %s" (Agent_core.Error.to_string error));
+    Alcotest.(check (list string)) "the head is called after its reset"
+      [ "shared_a.test_model" ] attempts)
+;;
+
+(* The same rule for a Retry-After a 429 carried, which rests the candidate
+   alone. The walk calls the other candidate first, and when that one fails
+   nothing is left to call. *)
+let test_a_walk_leaves_a_candidate_uncalled_inside_its_stated_retry_after () =
+  with_quota_lane_rests_reset (fun () ->
+    Runtime_candidate_backpressure.note_rate_limit
+      ~candidate:(quota_lane_candidate "shared_a.test_model") ~retry_after:(Some 300.);
+    let attempts, result =
+      recorded_walk
+        (function
+          | "shared_b.test_model" ->
+            Error (retryable_network_error "shared_b dropped the connection")
+          | id -> unexpected_candidate id)
+        [ "shared_a.test_model"; "shared_b.test_model" ]
+    in
+    Alcotest.(check (list string)) "only the candidate outside a stated wait is called"
+      [ "shared_b.test_model" ] attempts;
+    match result with
+    | Error (Agent_core.Error.Api (Agent_core.Retry.NetworkError _)) -> ()
+    | Error error ->
+      Alcotest.failf "the walk ended on another error: %s" (Agent_core.Error.to_string error)
+    | Ok () -> Alcotest.fail "no candidate answered")
+;;
+
+(* shared_a's refusal dates the account shared_b also uses, while the walk
+   runs. When other then fails, the walk has no candidate it can call and
+   ends on that failure. Before, it called shared_b into the same refusal. *)
+let test_a_walk_ends_on_the_last_candidate_it_can_call () =
+  with_quota_lane_rests_reset (fun () ->
+    let attempts, result =
+      recorded_walk
+        (function
+          | "shared_a.test_model" -> Error (shared_account_refusal "shared_a")
+          | "other.test_model" -> Error (retryable_network_error "other dropped the connection")
+          | id -> unexpected_candidate id)
+        [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ]
+    in
+    Alcotest.(check (list string)) "the sibling the refusal dated is not called"
+      [ "shared_a.test_model"; "other.test_model" ] attempts;
+    match result with
+    | Error (Agent_core.Error.Api (Agent_core.Retry.NetworkError _)) -> ()
+    | Error error ->
+      Alcotest.failf "the walk ended on another error: %s" (Agent_core.Error.to_string error)
+    | Ok () -> Alcotest.fail "no candidate answered")
+;;
+
+(* The turn's outcome follows the candidate the walk called. Before, the walk
+   went on to the sibling inside its stated reset, heard the dated refusal
+   again, and the turn ended as a rest that waited on the rate-limited
+   candidate: 157 of the 157 rested cycles in the 2026-11-21..27 log. The walk
+   now ends on the rate limit, and a rate limit is a failure, not a rest
+   (RFC-provider-path-rest 6.1, K5). *)
+let test_a_walk_that_ends_on_a_rate_limit_is_a_failure_though_a_sibling_waits () =
+  with_quota_lane_rests_reset (fun () ->
+    note_shared_reset_ahead ();
+    let attempts, result =
+      recorded_walk
+        (function
+          | "other.test_model" ->
+            Error
+              (Agent_core.Error.Api
+                 (Agent_core.Retry.RateLimited { retry_after = None; message = "rate limited" }))
+          | id -> unexpected_candidate id)
+        [ "other.test_model"; "shared_a.test_model"; "shared_b.test_model" ]
+    in
+    Alcotest.(check (list string)) "the candidates inside the stated reset are not called"
+      [ "other.test_model" ] attempts;
+    match result with
+    | Error (Agent_core.Error.Api (Agent_core.Retry.RateLimited _) as error) ->
+      let route =
+        Keeper_runtime_failure_route.route_of_error
+          ~boundary:Keeper_runtime_failure_route.Agent_core_execution
+          error
+      in
+      Alcotest.(check bool) "the turn that ends on the rate limit does not rest" true
+        (Option.is_none
+           (Driver.provider_rest_of_failure
+              ~now:(Unix.gettimeofday ()) ~route ~assignment_id:"quota_lane" None))
+    | Error error ->
+      Alcotest.failf "the walk ended on another error: %s" (Agent_core.Error.to_string error)
+    | Ok () -> Alcotest.fail "no candidate answered")
+;;
+
+let test_an_overflow_outranks_the_failure_a_shortened_walk_ends_on () =
+  with_quota_lane_rests_reset (fun () ->
+    let attempts, result =
+      recorded_walk
+        (function
+          | "other.test_model" -> Error (context_overflow_error "prompt exceeds context window")
+          | "shared_a.test_model" -> Error (shared_account_refusal "shared_a")
+          | id -> unexpected_candidate id)
+        [ "other.test_model"; "shared_a.test_model"; "shared_b.test_model" ]
+    in
+    Alcotest.(check (list string)) "the walk ends where nothing is left to call"
+      [ "other.test_model"; "shared_a.test_model" ] attempts;
+    match result with
+    | Error error ->
+      Alcotest.(check bool) "the overflow represents the lane" true
+        (is_provider_context_overflow error)
+    | Ok () -> Alcotest.fail "no candidate answered")
+;;
+
+(* A failure the walk may not retry in this turn is not K5's: the input is
+   handed to the candidates the walk did not reach, though they wait. *)
+let test_a_walk_that_cannot_retry_still_hands_its_suffix_to_waiting_candidates () =
+  with_quota_lane_rests_reset (fun () ->
+    note_shared_reset_ahead ();
+    let deferred = ref [] in
+    let attempts, (_ : (unit, Agent_core.Error.t) result) =
+      recorded_walk
+        ~allow_retry:(fun ~runtime_id:_ ~attempt:_ _ -> false)
+        ~retry_deferral:(collecting_deferral Driver.Restart_cycle deferred)
+        (function
+          | "other.test_model" ->
+            Error (retryable_network_error "other failed after a checkpoint")
+          | id -> unexpected_candidate id)
+        [ "other.test_model"; "shared_a.test_model"; "shared_b.test_model" ]
+    in
+    Alcotest.(check (list string)) "only the candidate that can be called is called"
+      [ "other.test_model" ] attempts;
+    Alcotest.(check (list (list string))) "the candidates not reached receive the input"
+      [ [ "shared_a.test_model"; "shared_b.test_model" ] ]
+      (List.map Driver.deferred_runtime_ids !deferred))
+;;
+
+(* Not yet K3: a walk with no candidate outside a stated wait still calls its
+   head, once. The refusal leaves the other candidate uncalled. *)
+let test_a_walk_whose_every_candidate_waits_calls_its_head_once () =
+  with_quota_lane_rests_reset (fun () ->
+    note_shared_reset_ahead ();
+    let attempts, result =
+      recorded_walk
+        (function
+          | "shared_a.test_model" -> Error (shared_account_refusal "shared_a")
+          | id -> unexpected_candidate id)
+        [ "shared_a.test_model"; "shared_b.test_model" ]
+    in
+    Alcotest.(check (list string)) "the head is called and its sibling is not"
+      [ "shared_a.test_model" ] attempts;
+    match result with
+    | Error (Agent_core.Error.Provider (Llm_provider.Error.HardQuota _)) -> ()
+    | Error error ->
+      Alcotest.failf "the walk ended on another error: %s" (Agent_core.Error.to_string error)
+    | Ok () -> Alcotest.fail "no candidate answered")
+;;
+
+(* The account slot waits its turn when the walk has nowhere else to go, and
+   gives up at once when it has. A sibling inside a stated wait is nowhere to
+   go. *)
+let test_a_waiting_candidate_is_not_a_remaining_candidate () =
+  with_quota_lane_rests_reset (fun () ->
+    let seen_by_the_head () =
+      let observed = ref [] in
+      let (_ : (unit, Agent_core.Error.t) result) =
+        Driver.For_testing.attempt_runtime_candidates
+          ~walk_owner:(Driver.Fleet_keeper_turn test_fleet_turn)
+          ~runtime_id:"quota_lane"
+          ~runtime_id_of:Fun.id
+          ~on_attempt_context:(fun ~has_remaining_candidates ->
+            observed := has_remaining_candidates :: !observed)
+          ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+          ~run_attempt:(fun ~idx:_ ~runtime_id:_ _ -> attempt_without_effect (Ok ()) None)
+          [ "other.test_model"; "shared_a.test_model" ]
+      in
+      List.rev !observed
+    in
+    Alcotest.(check (list bool)) "a sibling the walk can go on to is a remaining candidate"
+      [ true ] (seen_by_the_head ());
+    note_shared_reset_ahead ();
+    Alcotest.(check (list bool)) "a sibling inside its stated wait is not"
+      [ false ] (seen_by_the_head ()))
+;;
 
 let serving_constraint () =
   Llm_provider.Serving_constraint.make
@@ -9218,8 +9510,26 @@ let () =
             "actual HTTP 429 preserves unknown scope and disjoint fallback"
             `Quick
             test_http_429_preserves_unknown_scope_and_fallback;
-          Alcotest.test_case "rate limit never excludes and success clears" `Quick
-            test_rate_limit_order_never_excludes_and_success_clears;
+          Alcotest.test_case "a rate limit without a stated wait never excludes and success clears"
+            `Quick test_rate_limit_order_never_excludes_and_success_clears;
+          Alcotest.test_case "a walk leaves a candidate uncalled before its stated reset" `Quick
+            test_a_walk_leaves_a_candidate_uncalled_before_its_stated_reset;
+          Alcotest.test_case "a walk calls a candidate once its stated reset has passed" `Quick
+            test_a_walk_calls_a_candidate_once_its_stated_reset_has_passed;
+          Alcotest.test_case "a walk leaves a candidate uncalled inside its stated Retry-After"
+            `Quick test_a_walk_leaves_a_candidate_uncalled_inside_its_stated_retry_after;
+          Alcotest.test_case "a walk ends on the last candidate it can call" `Quick
+            test_a_walk_ends_on_the_last_candidate_it_can_call;
+          Alcotest.test_case "a walk that ends on a rate limit is a failure though a sibling waits"
+            `Quick test_a_walk_that_ends_on_a_rate_limit_is_a_failure_though_a_sibling_waits;
+          Alcotest.test_case "an overflow outranks the failure a shortened walk ends on" `Quick
+            test_an_overflow_outranks_the_failure_a_shortened_walk_ends_on;
+          Alcotest.test_case "a walk that cannot retry still hands its suffix to waiting candidates"
+            `Quick test_a_walk_that_cannot_retry_still_hands_its_suffix_to_waiting_candidates;
+          Alcotest.test_case "a walk whose every candidate waits calls its head once" `Quick
+            test_a_walk_whose_every_candidate_waits_calls_its_head_once;
+          Alcotest.test_case "a waiting candidate is not a remaining candidate" `Quick
+            test_a_waiting_candidate_is_not_a_remaining_candidate;
           Alcotest.test_case "failed attempts demote until the candidate answers" `Quick
             test_failed_attempts_demote_until_the_candidate_answers;
           Alcotest.test_case "a 529 head is demoted and the walk moves on (#38061)" `Quick
@@ -9335,6 +9645,10 @@ let () =
             "deferred dispatch preserves pre-dispatch quota order"
             `Quick
             test_deferred_dispatch_preserves_predispatch_quota_order;
+          Alcotest.test_case
+            "deferred dispatch leaves a stated reset uncalled"
+            `Quick
+            test_deferred_dispatch_leaves_a_stated_reset_uncalled;
           Alcotest.test_case
             "a resumed walk goes on past the hint to the failed runtime last"
             `Quick

@@ -3,9 +3,11 @@
     A coarse HTTP 429 / provider rate limit names no credential scope, so it
     is held by the attempted runtime alone and read as ordering evidence by
     the lane walk: a candidate under backpressure
-    is demoted behind its lane siblings, never excluded. An Exact-output walk
-    also holds a candidate inside its own usable Retry-After, a time the
-    provider stated, and returns it as held (RFC-exact-lane-waits-for-a-stated-reset). A server error,
+    is demoted behind its lane siblings, never excluded. A usable Retry-After
+    is a time the provider stated, and a walk does not call the candidate
+    inside it: an Exact-output walk returns it as held
+    (RFC-exact-lane-waits-for-a-stated-reset), and a Keeper walk leaves it
+    uncalled while a sibling can be called (RFC-provider-path-rest 6.1). A server error,
     provider capacity refusal, network failure or timeout is held the same way until the candidate
     answers. A connection that did not open sent nothing and is not held
     (RFC-one-slot-fault-judgment-for-every-walk §3.6). The observation cell lives on the materialized

@@ -158,9 +158,10 @@ let settle_accepted_official_client_results ~pending_result_receipts result =
 ;;
 
 (* The order [resumed_runtime_lane] fixed for the walk that resumes a hint,
-   read before pre-dispatch shaping so the request is shaped for the runtime
-   the walk dispatches first. A hint a walk recorded, or one restored from
-   disk, is [Not_resumed]. *)
+   read before pre-dispatch shaping so the request is shaped for the head of
+   that order. The walk calls that head first unless it is inside a wait its
+   provider stated (K1). A hint a walk recorded, or one restored from disk, is
+   [Not_resumed]. *)
 type resumed_order =
   | Not_resumed
   | Resumed of
@@ -1208,6 +1209,24 @@ let attempt_runtime_candidates
       dispatchable
     @ undispatchable
   in
+  (* RFC-provider-path-rest 6.1 (K1): the walk does not call a candidate
+     before the time its provider stated. The stores are read when the walk
+     decides whom to call next, because a failure of this walk may have just
+     dated a scope a later candidate shares. A rest MASC chose states no
+     time and only orders (K4). Left: callable now. Right: waiting, with the
+     stated time. Both keep the order they came in. *)
+  let split_by_stated_wait candidates =
+    let now = Unix.gettimeofday () in
+    List.partition_map
+      (fun candidate ->
+         match
+           Runtime_candidate_standing.stated_until
+             ~now ~quota_scope_of ~candidate_backpressure_of candidate
+         with
+         | None -> Either.Left candidate
+         | Some until -> Either.Right (candidate, until))
+      candidates
+  in
   (* Every error the walk returns from a candidate passes through here, so
      the caller learns which candidate produced the lane's error. *)
   let dispatched_seen = ref false in
@@ -1235,7 +1254,11 @@ let attempt_runtime_candidates
     | candidate :: rest -> attempt ~observed_overflow ~untried idx candidate rest
   and attempt ~observed_overflow ~untried idx candidate rest =
     let is_last = rest = [] in
+    (* A candidate inside a stated wait is not one the walk can go on to
+       (K2): counted as remaining, it would make this attempt give up a busy
+       account at once for a sibling the walk then does not call. *)
     let has_remaining_candidates =
+      let callable_rest, (_ : (_ * float) list) = split_by_stated_wait rest in
       List.exists
         (fun remaining ->
            candidate_dispatchable remaining
@@ -1243,7 +1266,7 @@ let attempt_runtime_candidates
            match member_of remaining with
            | Untried -> true
            | Retry_of_tried | Failed_last -> false)
-        rest
+        callable_rest
     in
     on_attempt_context ~has_remaining_candidates;
     let untried =
@@ -1552,8 +1575,13 @@ let attempt_runtime_candidates
            Printexc.raise_with_backtrace cancelled backtrace
        in
        (* Stable demotion retains every declared candidate, including when
-          all are observed unavailable. Neither hint causes a wait or gate. *)
-       let rest = demote_rest rest in
+          all are observed unavailable; a rest MASC chose only orders. A
+          candidate still inside the time its provider stated also stays in
+          the walk, behind the ones that can be called, so a suffix can
+          still be handed to it, but the walk does not call it (K1). The
+          split is read here, after this failure was recorded. *)
+       let callable_rest, waiting_rest = split_by_stated_wait (demote_rest rest) in
+       let rest = callable_rest @ List.map fst waiting_rest in
        let continuation = attempt_continuation ~dispatch error in
        let request_retry_admitted = match continuation with
          | Runtime_attempt_dispatch.Next_may_dispatch -> true
@@ -1704,23 +1732,50 @@ let attempt_runtime_candidates
              }
          | None -> ()
        in
+       (* The lane has no candidate left to call: an overflow seen anywhere
+          in the rotation outranks this candidate's error so the failure
+          route and blocker report the deterministic capacity bound. Cascade
+          telemetry already published each candidate's own error. *)
+       let end_on_this_candidate () =
+         match observed_overflow with
+         | Some overflow -> lane_terminal overflow
+         | None ->
+           defer_to_the_failed_path ();
+           lane_terminal (this_candidate error)
+       in
        if not request_retry_admitted
        then lane_terminal (this_candidate error)
        else if not effect_retry_admitted
        then lane_terminal (this_candidate terminal_error)
        else if retry_admitted && error_is_retryable
-       then loop ~observed_overflow ~untried (idx + 1) rest
-       else if is_last
        then (
-         (* Lane fully exhausted: an overflow seen anywhere in the rotation
-            outranks the last candidate's error so the failure route and
-            blocker report the deterministic capacity bound. Cascade
-            telemetry already published each candidate's own error. *)
-         match observed_overflow with
-         | Some overflow -> lane_terminal overflow
-         | None ->
-           defer_to_the_failed_path ();
-           lane_terminal (this_candidate error))
+         match callable_rest, waiting_rest with
+         | _ :: _, _ | [], [] -> loop ~observed_overflow ~untried (idx + 1) rest
+         | [], (_ :: _ as waiting) ->
+           (* K5: every candidate left is inside a stated wait, so this
+              candidate ends the walk as its last candidate would. [is_last]
+              keeps meaning that the walk has no candidate after this one;
+              widening it would take this branch ahead of the suffix
+              hand-over below. *)
+           let earliest =
+             List.fold_left
+               (fun earliest (_, until) -> Float.min earliest until)
+               Float.infinity
+               waiting
+           in
+           Log.Keeper.info
+             "runtime lane %S ends on %s: the %d candidate(s) left wait for the \
+              time their provider stated (earliest %.0f): %s"
+             runtime_id
+             attempt_runtime_id
+             (List.length waiting)
+             earliest
+             (String.concat
+                ","
+                (List.map (fun (candidate, _) -> runtime_id_of candidate) waiting));
+           end_on_this_candidate ())
+       else if is_last
+       then end_on_this_candidate ()
        else (
          (* The walk stops before the end of its lane. It hands the input to
             the candidates its hint left untried that it has not reached, in
@@ -1758,6 +1813,15 @@ let attempt_runtime_candidates
             defer_to_the_failed_path ()
           | false, (Untried_attempted | No_untried_attempted), _ -> ());
          lane_terminal (this_candidate terminal_error)))
+  in
+  (* K1 at the walk's first call: a candidate inside a stated wait goes
+     behind the ones that can be called. A walk whose every candidate waits
+     is left as it is and calls its head once; ending it without a call
+     needs a typed rest of its own (RFC-provider-path-rest 6.1, K3). *)
+  let candidates =
+    match split_by_stated_wait candidates with
+    | [], _ | _, [] -> candidates
+    | (_ :: _ as callable), (_ :: _ as waiting) -> callable @ List.map fst waiting
   in
   loop ~observed_overflow:None ~untried:No_untried_attempted 0 candidates
 
@@ -2855,12 +2919,16 @@ let run_named
      operators can route through explicit failover groups. The order is the
      declaration's; a resting or exhausted candidate is demoted behind its
      siblings, never remembered as a preference. *)
-  (* Quota/backpressure demotion is ordering only — a demoted candidate is still
-     attempted when the lane has nothing else (RFC-0370 §3.3). Apply it while
-     selecting a fresh lane walk. A resumed walk was already ordered before
-     pre-dispatch shaping ([resumed_runtime_lane]), so re-reading wall-clock
-     quota state here could make the actual provider differ from the runtime
-     used to shape the request. *)
+  (* Quota/backpressure demotion is ordering only — a candidate demoted by a
+     rest MASC chose is still attempted when the lane has nothing else
+     (RFC-0370 §3.3). Apply it while selecting a fresh lane walk. A resumed
+     walk was already ordered before pre-dispatch shaping
+     ([resumed_runtime_lane]), so re-ordering it here by wall-clock quota
+     state could make the actual provider differ from the runtime used to
+     shape the request. The walk itself still leaves a candidate uncalled
+     before the time its provider stated ([attempt_runtime_candidates], K1):
+     a time stated after the order was fixed moves the first call to the next
+     candidate, as that candidate's refusal would have. *)
   let pre_tool_rejects =
     match pre_tool_rejects with
     | Some rejects -> rejects

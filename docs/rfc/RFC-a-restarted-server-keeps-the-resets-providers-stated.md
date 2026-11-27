@@ -40,7 +40,7 @@ RFC-a-restarted-server-reads-the-stored-usage-reports 는 사용량 창을 되�
 - `Runtime_quota_window` 는 scope 별로 `Until resets_at`(provider 가 말한 시각) 또는 `Observed`(시각 없는 거절·읽기, masc 가 정한 상한까지)를 메모리에 갖는다. 모듈 주석이 적는다: 「재시작은 표를 잊고, 다음 거절이 다시 가르친다.」
 - `note_exhausted` 를 부르는 곳은 여섯이다: 거절(`Runtime_candidate_standing.observe` 의 `Hard_quota { resets_at = Some _ }`), 사용량 보고(`rest_scope`), 사용량 읽기(`runtime_provider_usage_read.ml`), Muse 사용량(`runtime_muse_usage.ml` 두 곳), lane Add-on sampling.
 - `note_succeeded` 는 `Observed` 만 지운다. `Until` 은 성공 한 번으로 지워지지 않고 그 시각이 지나야 사라진다.
-- Keeper walk 에서 이 표는 순서 선호다. 미뤄진 후보도 남은 후보가 없으면 부른다. exact lane 은 `Until` 인 후보를 그 시각 전에 부르지 않는다(RFC-exact-lane-waits-for-a-stated-reset).
+- Keeper walk 에서 시각 없는 쉼은 순서 선호다. 그렇게 미뤄진 후보는 남은 후보가 없으면 부른다. provider 가 말한 시각(`Until`)은 Keeper walk 도 지킨다(RFC-provider-path-rest 6.1 K1·K5). 부를 수 있는 다른 후보가 있으면 그 후보를 부르지 않고, 남은 후보가 모두 기다리면 방금 실패한 후보에서 끝난다. 모든 후보가 처음부터 기다리는 walk 는 아직 머리를 한 번 부른다(K3). exact lane 은 `Until` 인 후보를 그 시각 전에 부르지 않는다(RFC-exact-lane-waits-for-a-stated-reset).
 
 ### 1.3 실측
 
@@ -66,8 +66,8 @@ R1~R3 이 지키는 것: 재시작 직후의 표에서 `Until` 인 scope 의 집
 
 - **시각 없는 거절을 남기기.** R2.
 - **인증 거절·호출 제한(429)을 남기기.** 다른 표(`Runtime_credential_refusal`, `Runtime_candidate_backpressure`)이고 scope 의 한도 사실이 아니다.
-- **재시작과 무관한 반복 거절.** 1.3 의 2,113번 중 대부분은 표가 살아 있는 동안 났다. Keeper walk 는 쉬는 후보도 남은 후보가 없으면 부른다. 후보가 하나뿐인 Keeper 는 풀리는 시각 전에도 매 턴 거절당한다. 원인이 그것인지는 확인하지 않았다. 따로 조사할 일이다.
-- **Keeper 를 막기.** 표의 뜻은 그대로다. Keeper walk 에서는 순서 선호다.
+- **재시작과 무관한 반복 거절.** 1.3 의 2,113번 중 대부분은 표가 살아 있는 동안 났다. 그때 Keeper walk 는 말한 시각이 남은 후보도 남은 후보가 없으면 불렀다. 후보가 하나뿐인 Keeper 는 풀리는 시각 전에도 매 턴 거절당했다. 2,113번의 원인이 그것인지는 확인하지 않았다. 같은 현상은 RFC-provider-path-rest 6.1 이 따로 쟀고 K1·K5 로 고쳤다.
+- **Keeper 를 막기.** 이 RFC 는 표의 뜻을 바꾸지 않는다. Keeper walk 가 말한 시각 전에 부르지 않는 규칙은 RFC-provider-path-rest 6.1 에 있다.
 - **목록 화면 바꾸기.** 행은 지금도 `quota_exhausted` 와 `quota_resets_at` 을 싣는다. 값이 재시작 직후부터 채워질 뿐이다.
 
 ## 4. 대가

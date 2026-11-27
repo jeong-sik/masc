@@ -20,11 +20,22 @@ import {
   AttachmentGallery,
   ATTACHMENT_INPUT_ACCEPT,
   DEFAULT_MAX_ATTACHMENT_BYTES,
+  DEFAULT_MAX_VIDEO_BYTES,
   readyAttachmentsOf,
   resolveAttachmentMimeType,
   validateAttachmentFile,
   type ComposerAttachmentItem,
 } from './index'
+
+// Minimal valid SMF Format 0 MIDI bytes (middle C, 120 BPM).
+const MINIMAL_MIDI_BYTES = new Uint8Array([
+  0x4d, 0x54, 0x68, 0x64, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00, 0x01, 0x01, 0xe0,
+  0x4d, 0x54, 0x72, 0x6b, 0x00, 0x00, 0x00, 0x13,
+  0x00, 0xff, 0x51, 0x03, 0x07, 0xa1, 0x20,
+  0x00, 0x90, 0x3c, 0x64,
+  0x83, 0x60, 0x80, 0x3c, 0x00,
+  0x00, 0xff, 0x2f, 0x00,
+])
 
 const PNG_BYTES = Uint8Array.from(
   atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lXcAAAAASUVORK5CYII='),
@@ -74,6 +85,9 @@ describe('attachment validation & boundary decoders', () => {
       'audio/midi',
       'audio/mp4',
       'audio/webm',
+      'video/mp4',
+      'video/webm',
+      'video/quicktime',
     ]
     for (const mime of exactServerMimes) {
       expect(validateAttachmentFile({ name: `sample.${mime.split('/')[1]}`, type: mime, size: 1024 })).toBeNull()
@@ -81,7 +95,23 @@ describe('attachment validation & boundary decoders', () => {
     expect(validateAttachmentFile({ name: 'fallback.webp', type: '', size: 100 })).toBeNull()
     expect(validateAttachmentFile({ name: 'voice.m4a', type: '', size: 100 })).toBeNull()
     expect(validateAttachmentFile({ name: 'clip.webm', type: '', size: 100 })).toBeNull()
+    expect(validateAttachmentFile({ name: 'demo.mp4', type: '', size: 100 })).toBeNull()
+    expect(validateAttachmentFile({ name: 'clip.mov', type: '', size: 100 })).toBeNull()
+    expect(validateAttachmentFile({ name: 'song.mid', type: '', size: 100 })).toBeNull()
+    expect(validateAttachmentFile({ name: 'song.midi', type: '', size: 100 })).toBeNull()
+    expect(validateAttachmentFile({ name: 'note.wav', type: '', size: 100 })).toBeNull()
+
+    // MIME alias normalization
+    expect(resolveAttachmentMimeType({ name: 'song.mid', type: 'audio/x-midi' })).toBe('audio/midi')
+    expect(resolveAttachmentMimeType({ name: 'song.mid', type: 'audio/mid' })).toBe('audio/midi')
+    expect(resolveAttachmentMimeType({ name: 'voice.wav', type: 'audio/x-wav' })).toBe('audio/wav')
+    expect(resolveAttachmentMimeType({ name: 'voice.wav', type: 'audio/wave' })).toBe('audio/wav')
+    expect(resolveAttachmentMimeType({ name: 'clip.m4v', type: 'video/x-m4v' })).toBe('video/mp4')
     expect(resolveAttachmentMimeType({ name: 'renamed.png', type: 'application/x-msdownload' })).toBe('application/x-msdownload')
+
+    // Video allows up to 50 MiB while non-video caps at 20 MiB
+    expect(validateAttachmentFile({ name: 'demo.mp4', type: 'video/mp4', size: 30 * 1024 * 1024 })).toBeNull()
+    expect(validateAttachmentFile({ name: 'huge.mp4', type: 'video/mp4', size: DEFAULT_MAX_VIDEO_BYTES + 1 })).toContain('초과')
 
     expect(validateAttachmentFile({ name: 'xss.svg', type: 'image/svg+xml', size: 100 })).toContain('보안상')
     expect(validateAttachmentFile({ name: 'page.html', type: 'text/html', size: 100 })).toContain('보안상')
@@ -290,7 +320,7 @@ describe('<WorkspaceChatImage>, <AttachmentGallery>, and Markdown hydration', ()
     })
   })
 
-  it('renders audio player card and document download card in <AttachmentGallery>', async () => {
+  it('auto-loads WAV audio player card and renders document download card in <AttachmentGallery>', async () => {
     vi.stubGlobal('IntersectionObserver', undefined)
     const fetchMock = vi.fn<typeof fetch>(async () =>
       new Response(new Uint8Array([1, 2, 3, 4]), { status: 200, headers: { 'Content-Type': 'audio/wav' } }),
@@ -327,16 +357,89 @@ describe('<WorkspaceChatImage>, <AttachmentGallery>, and Markdown hydration', ()
       <${AttachmentGallery} attachments=${[audioAtt, docAtt]} workspaceEpoch=${currentSessionEpoch()} />
     `)
 
-    expect(view.getByTestId('attachment-audio-card')).toBeTruthy()
+    const audioCard = view.getByTestId('attachment-audio-card')
+    expect(audioCard).toBeTruthy()
+    expect(audioCard.textContent).toContain('WAV')
     expect(view.getByTestId('attachment-document-card')).toBeTruthy()
     expect(view.getByText('spec.pdf')).toBeTruthy()
 
-    fireEvent.click(view.getByRole('button', { name: '재생 불러오기' }))
+    // Auto-loads immediately without needing an extra click
     await waitFor(() => {
       const audioEl = view.container.querySelector('audio')
       expect(audioEl).not.toBeNull()
       expect(audioEl?.getAttribute('src')).toBe('blob:mock-audio')
     })
+  })
+
+  it('renders MIDI attachments with <MidiScorePlayer> (never <audio>) and Video attachments with <video controls> + lightbox', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined)
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.includes(ATT_ID_A)) {
+        return new Response(MINIMAL_MIDI_BYTES, { status: 200, headers: { 'Content-Type': 'audio/midi' } })
+      }
+      if (url.includes('format=png')) {
+        return new Response(PNG_BYTES, { status: 200, headers: { 'Content-Type': 'image/png' } })
+      }
+      return new Response(new Uint8Array([0, 0, 0, 0x18, 0x66, 0x74, 0x79, 0x70]), {
+        status: 200,
+        headers: { 'Content-Type': 'video/mp4' },
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    let blobSeq = 0
+    const createObjectURL = vi.fn(() => `blob:mock-media-${++blobSeq}`)
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL, revokeObjectURL }))
+
+    const midiAtt = makeAttachmentRef({
+      id: ATT_ID_A,
+      attachment_id: ATT_ID_A,
+      url: ATT_URL_A,
+      kind: 'audio',
+      mime_type: 'audio/midi',
+      filename: 'theme.mid',
+      bytes: MINIMAL_MIDI_BYTES.byteLength,
+      width: null,
+      height: null,
+    })
+    const videoAtt = makeAttachmentRef({
+      id: ATT_ID_B,
+      attachment_id: ATT_ID_B,
+      url: ATT_URL_B,
+      kind: 'video',
+      mime_type: 'video/mp4',
+      filename: 'capture.mp4',
+      bytes: 120_000,
+      width: 1280,
+      height: 720,
+    })
+
+    const view = render(html`
+      <${AttachmentGallery} attachments=${[midiAtt, videoAtt]} workspaceEpoch=${currentSessionEpoch()} />
+    `)
+
+    // MIDI uses MidiScorePlayer, NEVER native <audio>
+    const midiCard = view.getByTestId('attachment-midi-card')
+    expect(midiCard.querySelector('audio')).toBeNull()
+    await waitFor(() => {
+      expect(midiCard.querySelector('[data-testid="midi-player"]')).not.toBeNull()
+    }, { timeout: 10000 })
+
+    // Video uses <video controls> with poster and opens zoom modal
+    const videoCard = view.getByTestId('attachment-video-card')
+    expect(videoCard.textContent).toContain('MP4')
+    expect(videoCard.textContent).toContain('1280×720')
+    await waitFor(() => {
+      const videoEl = videoCard.querySelector('video')
+      expect(videoEl).not.toBeNull()
+      expect(videoEl?.getAttribute('src')).toMatch(/^blob:mock-media-/)
+    })
+
+    fireEvent.click(view.getByRole('button', { name: 'capture.mp4 크게 보기' }))
+    const dialog = document.querySelector('[role="dialog"][aria-modal="true"]')
+    expect(dialog).not.toBeNull()
+    expect(dialog?.querySelector('video')).not.toBeNull()
   })
 
   it('hydrates same-origin /api/v1/attachments/* images inside MarkdownContent under Bearer auth', async () => {

@@ -1,3 +1,4 @@
+import type { KeeperChatHistoryAttachment } from './api/schemas/keeper-chat-history'
 import { reconcileTranscriptBindings } from './keeper-tool-observations'
 import { reconcileKeeperResponseStates, keeperResponseIsRunning, ownerFromUnknown, sameKeeperResponseOwner, type KeeperResponseOwner } from './lib/keeper-response-state'
 import { signal } from '@preact/signals'
@@ -322,22 +323,45 @@ export function normalizeAudioClip(raw: unknown): KeeperConversationAudioClip | 
 }
 
 /** Normalize one persisted attachment row (keeper_chat_store snake_case
- *  mime_type, open `type` string) into the camelCase KeeperConversationAttachment
- *  the chat UI renders. Drops rows missing id/data — a card with no payload is
- *  not renderable. `type` is narrowed to image/file (the renderer's union). */
+ *  mime_type or Attachment_store ref with `kind: 'image' | 'audio' | 'video' | 'document'`)
+ *  into the camelCase KeeperConversationAttachment the chat UI renders. Drops
+ *  rows missing id or payload (`data`/`url`). */
 function normalizeAttachment(raw: unknown): KeeperByteAttachment | null {
   if (!isRecord(raw)) return null
-  const id = asString(raw.id)
-  const data = asString(raw.data)
+  const id = asString(raw.id) ?? asString(raw.attachment_id)
+  const data = asString(raw.data) ?? asString(raw.url)
   if (!id || !data) return null
-  return {
+  const mimeType = asString(raw.mime_type) ?? asString(raw.mimeType) ?? ''
+  const lowerMime = mimeType.toLowerCase()
+  const rawKind = asString(raw.kind)
+  const rawType = asString(raw.type)
+  const mediaKind: KeeperByteAttachment['mediaKind'] =
+    rawKind === 'image' || rawKind === 'audio' || rawKind === 'video' || rawKind === 'document'
+      ? rawKind
+      : lowerMime.startsWith('image/')
+        ? 'image'
+        : lowerMime.startsWith('video/')
+          ? 'video'
+          : lowerMime.startsWith('audio/')
+            ? 'audio'
+            : undefined
+  const type: KeeperByteAttachment['type'] =
+    rawType === 'image' || mediaKind === 'image'
+      ? 'image'
+      : rawType === 'video' || mediaKind === 'video'
+        ? 'video'
+        : rawType === 'audio' || mediaKind === 'audio'
+          ? 'audio'
+          : 'file'
+  return withoutUndefined({
     id,
-    type: asString(raw.type) === 'image' ? 'image' : 'file',
-    name: asString(raw.name) ?? '',
-    size: asNumber(raw.size) ?? 0,
-    mimeType: asString(raw.mime_type) ?? asString(raw.mimeType) ?? '',
+    type,
+    mediaKind,
+    name: asString(raw.name) ?? asString(raw.filename) ?? '',
+    size: asNumber(raw.size) ?? asNumber(raw.bytes) ?? 0,
+    mimeType,
     data,
-  }
+  })
 }
 
 function normalizeAttachments(raw: unknown): KeeperByteAttachment[] | undefined {
@@ -610,6 +634,38 @@ function normalizeBlocks(raw: unknown, role: KeeperConversationRole): ChatBlock[
               mimeType: asString(item.mimeType) ?? undefined,
             })
           : null
+      }
+      if (t === 'chart') {
+        const title = asString(item.title)
+        if (!title || !Array.isArray(item.series) || item.series.length === 0) return null
+        const series: Array<{ label: string; color?: string; values: number[] }> = []
+        for (const s of item.series) {
+          if (!isRecord(s)) continue
+          const label = asString(s.label)
+          const values = normalizeNumberArray(s.values)
+          if (!label || !values || values.length === 0) continue
+          series.push(withoutUndefined({
+            label,
+            color: asString(s.color) ?? undefined,
+            values,
+          }))
+        }
+        if (series.length === 0) return null
+        const rawChartType = (asString(item.chartType) ?? asString(item.chart_type) ?? asString(item.type) ?? asString(item.kind))?.toLowerCase()
+        const chartType: 'line' | 'bar' | 'area' | 'pie' | undefined =
+          rawChartType === 'line' || rawChartType === 'bar' || rawChartType === 'area' || rawChartType === 'pie'
+            ? rawChartType
+            : undefined
+        return withoutUndefined({
+          t: 'chart' as const,
+          chartType,
+          title,
+          series,
+          labels: asStrictStringArray(item.labels) ?? undefined,
+          xLabel: asString(item.xLabel) ?? undefined,
+          yLabel: asString(item.yLabel) ?? undefined,
+          yMax: asNumber(item.yMax) ?? undefined,
+        })
       }
       if (t === 'attach') {
         const name = asString(item.name)
@@ -1815,16 +1871,9 @@ interface RestChatHistoryMessage {
   delivery_provenance?: KeeperChatDeliveryProvenance | null
   delivery_provenance_status?: KeeperChatDeliveryProvenanceDecode['status']
   audio?: unknown
-  // Persisted upload rows (snake_case from keeper_chat_store) — normalized to
-  // KeeperConversationAttachment at consume time so reload keeps the cards.
-  attachments?: ReadonlyArray<{
-    id: string
-    type: string
-    name: string
-    size: number
-    mime_type: string
-    data: string
-  }>
+  // Persisted upload rows (snake_case from keeper_chat_store or Attachment_store refs) —
+  // normalized to KeeperConversationAttachment at consume time so reload keeps the cards.
+  attachments?: ReadonlyArray<KeeperChatHistoryAttachment>
   // Typed durable Gate approval/replay status projected by keeper_chat_store.
   approval_lifecycle?: unknown
   // backend-parsed rich chat blocks. When present the dashboard

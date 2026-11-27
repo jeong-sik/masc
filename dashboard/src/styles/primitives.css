@@ -750,11 +750,6 @@
   max-inline-size: 100%;
   block-size: auto;
 }
-.rich-code-score:has(svg) {
-  color-scheme: light;
-  background: white;
-  border-radius: var(--radius-sm);
-}
 .markdown-content pre:has(> :is(.language-tab, .language-guitar-tab, .language-tablature)) {
   white-space: pre;
   overflow-wrap: normal;

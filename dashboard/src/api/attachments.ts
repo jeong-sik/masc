@@ -34,7 +34,7 @@ import {
 import { parseUrl } from '../lib/parse-url'
 import { err, ok, type Result } from '../lib/result'
 
-export type AttachmentKind = 'image' | 'audio' | 'document'
+export type AttachmentKind = 'image' | 'audio' | 'video' | 'document'
 
 export type AttachmentOrigin =
   | 'user_upload'
@@ -83,12 +83,13 @@ function asPositiveInt(v: unknown): number | null {
 }
 
 export function inferAttachmentKind(mimeType: string | null | undefined, declaredKind?: unknown): AttachmentKind {
-  if (declaredKind === 'image' || declaredKind === 'audio' || declaredKind === 'document') {
+  if (declaredKind === 'image' || declaredKind === 'audio' || declaredKind === 'video' || declaredKind === 'document') {
     return declaredKind
   }
   const normalized = (mimeType ?? '').toLowerCase().split(';', 1)[0]?.trim() ?? ''
   if (normalized.startsWith('image/')) return 'image'
   if (normalized.startsWith('audio/')) return 'audio'
+  if (normalized.startsWith('video/')) return 'video'
   return 'document'
 }
 
@@ -408,6 +409,7 @@ export async function uploadAttachment(
 
 export interface FetchAttachmentBlobOptions {
   readonly maxPx?: number | null
+  readonly format?: string | null
   readonly download?: boolean
   readonly signal?: AbortSignal
   readonly maxBytes?: number
@@ -465,6 +467,7 @@ export async function fetchAttachmentBlob(
   const queryParams: Record<string, string | number | undefined> = {}
   if (isWorkspaceAttachmentPath(path)) {
     if (typeof opts.maxPx === 'number' && opts.maxPx > 0) queryParams.max_px = Math.trunc(opts.maxPx)
+    if (opts.format) queryParams.format = opts.format
     if (opts.download) queryParams.download = 1
   } else if (opts.download) {
     queryParams.download = 1
@@ -546,6 +549,9 @@ function defaultFilenameForMime(id: string, mimeType: string): string {
     'audio/midi': 'mid',
     'audio/mp4': 'm4a',
     'audio/webm': 'webm',
+    'video/mp4': 'mp4',
+    'video/webm': 'webm',
+    'video/quicktime': 'mov',
   }
   const ext = extMap[mimeType.toLowerCase()] ?? 'bin'
   return `${shortId}.${ext}`

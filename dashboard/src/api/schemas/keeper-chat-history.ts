@@ -37,16 +37,25 @@ import type {
   KeeperChatDeliveryProvenanceDecode,
 } from '../../keeper-delivery-provenance'
 
-// Attachment row shape that Keeper_chat_store.to_json_array emits:
-// snake_case mime_type and an open `type` string. Normalized to
-// the camelCase KeeperConversationAttachment at the consume boundary.
+// Attachment row shape emitted by Keeper_chat_store / Attachment_store:
+// accepts both legacy byte rows (`id`, `type`, `name`, `size`, `mime_type`, `data`)
+// and Attachment_store refs carrying typed `kind` (`image` | `audio` | `video` | `document`),
+// `url`, `filename`, and `bytes`. Normalized to camelCase at the consume boundary.
 export const KeeperChatHistoryAttachmentSchema = object({
   id: string(),
-  type: string(),
-  name: string(),
-  size: number(),
+  attachment_id: optional(string()),
+  type: optional(string()),
+  kind: optional(union([literal('image'), literal('audio'), literal('video'), literal('document')])),
+  name: optional(string()),
+  filename: optional(nullable(string())),
+  size: optional(number()),
+  bytes: optional(number()),
   mime_type: string(),
-  data: string(),
+  data: optional(string()),
+  url: optional(string()),
+  width: optional(nullable(number())),
+  height: optional(nullable(number())),
+  origin: optional(string()),
 })
 
 export const SurfaceRefSchema = object({
@@ -160,7 +169,25 @@ export const KeeperChatBlockSchema = union([
     src: optional(string()),
   }),
   object({
+    t: literal('chart'),
+    type: optional(string()),
+    chart_type: optional(string()),
+    chartType: optional(string()),
+    kind: optional(string()),
+    title: string(),
+    series: array(object({
+      label: string(),
+      color: optional(string()),
+      values: array(number()),
+    })),
+    labels: optional(array(string())),
+    xLabel: optional(string()),
+    yLabel: optional(string()),
+    yMax: optional(number()),
+  }),
+  object({
     t: literal('attach'),
+    id: optional(string()),
     name: string(),
     dims: optional(string()),
     src: optional(string()),
@@ -317,6 +344,8 @@ export const KeeperChatHistoryMessageSchema = object({
   stream_contract: optional(KeeperChatHistoryStreamContractSchema),
   autonomous_turn: optional(KeeperAutonomousTurnSchema),
 })
+
+export type KeeperChatHistoryAttachment = InferOutput<typeof KeeperChatHistoryAttachmentSchema>
 
 type RawKeeperChatHistoryMessage = InferOutput<typeof KeeperChatHistoryMessageSchema>
 

@@ -2053,3 +2053,81 @@ describe('foldToolRowsIntoCanonical', () => {
     expect(keeperThreads.value.echo).toBe(before)
   })
 })
+
+describe('chatHistoryEntriesFromRest chart blocks and video attachments', () => {
+  it('normalizes server-emitted chart blocks (type/chart_type -> chartType) and preserves video attachments', () => {
+    const entries = chatHistoryEntriesFromRest('sangsu', [
+      {
+        id: 'msg-chart-video-1',
+        role: 'assistant',
+        content: 'Here is the chart and clip.',
+        ts: 1_712_000_123,
+        blocks: [
+          {
+            t: 'chart',
+            type: 'bar',
+            chart_type: 'bar',
+            title: 'Turn Latency',
+            series: [{ label: 'API', color: '#3b82f6', values: [12, 24.5, 19] }],
+            labels: ['Mon', 'Tue', 'Wed'],
+            xLabel: 'Day',
+            yLabel: 'ms',
+            yMax: 40,
+          },
+          {
+            t: 'attach',
+            id: 'att_video_1',
+            name: 'clip.mp4',
+            src: '/api/v1/attachments/att_video_1',
+            mimeType: 'video/mp4',
+            kind: 'video',
+          },
+        ],
+        attachments: [
+          {
+            id: 'att_video_1',
+            kind: 'video',
+            filename: 'clip.mp4',
+            bytes: 204800,
+            mime_type: 'video/mp4',
+            url: '/api/v1/attachments/att_video_1',
+          },
+        ],
+      },
+    ])
+
+    expect(entries).toHaveLength(1)
+    const entry = requiredFixture(entries[0])
+    expect(entry.blocks).toEqual([
+      {
+        t: 'chart',
+        chartType: 'bar',
+        title: 'Turn Latency',
+        series: [{ label: 'API', color: '#3b82f6', values: [12, 24.5, 19] }],
+        labels: ['Mon', 'Tue', 'Wed'],
+        xLabel: 'Day',
+        yLabel: 'ms',
+        yMax: 40,
+      },
+      {
+        t: 'attach',
+        id: 'att_video_1',
+        name: 'clip.mp4',
+        src: '/api/v1/attachments/att_video_1',
+        mimeType: 'video/mp4',
+        kind: 'video',
+      },
+    ])
+    expect(entry.attachments).toEqual([
+      {
+        id: 'att_video_1',
+        type: 'video',
+        mediaKind: 'video',
+        name: 'clip.mp4',
+        size: 204800,
+        mimeType: 'video/mp4',
+        data: '/api/v1/attachments/att_video_1',
+      },
+    ])
+  })
+})

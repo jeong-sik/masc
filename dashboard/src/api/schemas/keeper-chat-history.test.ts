@@ -499,4 +499,51 @@ describe('safeParseKeeperChatHistoryMessage', () => {
     expect(out).toBeNull()
   })
 
+  it('accepts server-emitted chart blocks (type / chart_type / labels / yLabel / yMax), attach id, and video attachments', () => {
+    const chartBlock = {
+      t: 'chart',
+      type: 'bar',
+      chart_type: 'bar',
+      title: 'Latency',
+      series: [{ label: 'P95', color: '#3b82f6', values: [12.5, 24, 18.2] }],
+      labels: ['T1', 'T2', 'T3'],
+      xLabel: 'Window',
+      yLabel: 'ms',
+      yMax: 50,
+    }
+    const attachBlock = {
+      t: 'attach',
+      id: 'att_abc123',
+      name: 'demo.mp4',
+      src: '/api/v1/attachments/att_abc123',
+      mimeType: 'video/mp4',
+      kind: 'video',
+    }
+    const out = safeParseKeeperChatHistoryMessage(
+      validMessage({
+        role: 'assistant',
+        blocks: [chartBlock, attachBlock],
+        attachments: [
+          {
+            id: 'att_abc123',
+            attachment_id: 'att_abc123',
+            kind: 'video',
+            filename: 'demo.mp4',
+            bytes: 102400,
+            mime_type: 'video/mp4',
+            url: '/api/v1/attachments/att_abc123',
+          },
+        ],
+      }),
+    )
+    expect(out).not.toBeNull()
+    expect(out?.blocks).toEqual([chartBlock, attachBlock])
+    expect(out?.attachments?.[0]).toMatchObject({
+      id: 'att_abc123',
+      kind: 'video',
+      mime_type: 'video/mp4',
+      url: '/api/v1/attachments/att_abc123',
+    })
+  })
+
 })

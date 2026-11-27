@@ -18,8 +18,8 @@ import {
 import { randomUuid } from '../../lib/uuid'
 import {
   ATTACHMENT_INPUT_ACCEPT,
-  DEFAULT_MAX_ATTACHMENT_BYTES,
   MAX_COMPOSER_ATTACHMENTS,
+  audioFormatBadge,
   classifyAttachmentKind,
   createLocalPreviewUrl,
   extractTransferFiles,
@@ -28,6 +28,7 @@ import {
   resolveAttachmentMimeType,
   revokeLocalPreviewUrl,
   validateAttachmentFile,
+  videoFormatBadge,
 } from './validation'
 
 export interface ComposerAttachmentItem {
@@ -89,7 +90,7 @@ export function AttachmentComposer({
   onChange,
   disabled = false,
   maxItems = MAX_COMPOSER_ATTACHMENTS,
-  maxBytes = DEFAULT_MAX_ATTACHMENT_BYTES,
+  maxBytes,
   accept = ATTACHMENT_INPUT_ACCEPT,
   showTrigger = true,
   triggerLabel = '첨부',
@@ -344,7 +345,7 @@ export function AttachmentComposer({
     >
       ${dragOver && html`
         <div class="att-drop-overlay" role="status" data-testid="attachment-drop-overlay">
-          여기에 이미지 · PDF · 오디오 파일을 놓아 첨부하세요
+          여기에 이미지 · 비디오 · 오디오 · MIDI · PDF 파일을 놓아 첨부하세요
         </div>
       `}
 
@@ -354,6 +355,13 @@ export function AttachmentComposer({
             const dims = item.width && item.height ? `${item.width}×${item.height}` : null
             const size = formatAttachmentBytes(item.bytes)
             const metaLine = [dims, size].filter(Boolean).join(' · ')
+            const kindBadge = item.kind === 'audio'
+              ? audioFormatBadge(item.mimeType, item.filename)
+              : item.kind === 'video'
+                ? videoFormatBadge(item.mimeType, item.filename)
+                : item.mimeType === 'application/pdf'
+                  ? 'PDF'
+                  : 'FILE'
             return html`
               <div
                 key=${item.localId}
@@ -365,7 +373,7 @@ export function AttachmentComposer({
               >
                 ${item.kind === 'image' && item.previewUrl
                   ? html`<img class="att-chip-thumb" src=${item.previewUrl} alt=${item.filename} />`
-                  : html`<span class="att-chip-icon mono" aria-hidden="true">${item.kind === 'audio' ? 'AUDIO' : item.mimeType === 'application/pdf' ? 'PDF' : 'FILE'}</span>`}
+                  : html`<span class="att-chip-icon mono" aria-hidden="true">${kindBadge}</span>`}
                 <div class="att-chip-body">
                   <div class="att-chip-name" title=${item.filename}>${item.filename}</div>
                   <div class="att-chip-meta mono">

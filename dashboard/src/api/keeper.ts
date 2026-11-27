@@ -425,7 +425,7 @@ function isTerminalKeeperStreamEvent(event: KeeperChatStreamEvent): boolean {
 
 export interface StreamAttachment {
   id: string
-  type: 'image' | 'file'
+  type: 'image' | 'file' | 'audio' | 'video'
   name: string
   size: number
   mimeType: string

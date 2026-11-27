@@ -145,7 +145,15 @@ export function KeeperScheduleList({ keeperName }: { keeperName: string }) {
       return html`<${Note} tone="warn">예약을 읽지 못했어요: ${data.reason}<//>`
     }
     const requests = byNextWake(data.data.requests)
-    if (requests.length === 0) return html`<${Note}>이 Keeper 를 깨우는 예약이 없어요.<//>`
+    const refreshError = error === null
+      ? null
+      : html`<${Note} tone="warn">마지막 새로고침 실패: ${error}<//>`
+    if (requests.length === 0) {
+      return html`
+        <${Note}>이 Keeper 를 깨우는 예약이 없어요.<//>
+        ${refreshError}
+      `
+    }
     return html`
       <ul class="m-0 flex list-none flex-col gap-0.5 p-0" data-testid="keeper-schedule-list">
         ${requests.map(request => html`<${ScheduleRow} key=${request.schedule_id} request=${request} nowMs=${nowMs} />`)}
@@ -153,7 +161,7 @@ export function KeeperScheduleList({ keeperName }: { keeperName: string }) {
       ${data.page.truncated
         ? html`<${Note}>앞 ${data.page.visibleCount}개만 읽었어요. 나머지는 예약 화면에서 봐요.<//>`
         : null}
-      ${error === null ? null : html`<${Note} tone="warn">마지막 새로고침 실패: ${error}<//>`}
+      ${refreshError}
     `
   })()
 

@@ -214,4 +214,20 @@ describe('KeeperScheduleList', () => {
     expect(container.textContent).toContain('예약을 읽지 못했어요: corrupt ledger')
     expect(rowIds()).toEqual([])
   })
+
+  it('shows the refresh failure alongside the empty state when a re-read fails after an empty page', async () => {
+    await draw(page([]), 'alpha')
+    expect(container.textContent).toContain('이 Keeper 를 깨우는 예약이 없어요.')
+    expect(container.textContent).not.toContain('마지막 새로고침 실패:')
+
+    fetchSchedules.mockRejectedValueOnce(new Error('503 service unavailable'))
+    await act(async () => { publishDashboardObservationChange({ topic: 'scheduled_automation' }) })
+    await flushUi()
+
+    expect(fetchSchedules).toHaveBeenCalledTimes(2)
+    expect(state()).toBe('available')
+    expect(container.textContent).toContain('이 Keeper 를 깨우는 예약이 없어요.')
+    expect(container.textContent).toContain('마지막 새로고침 실패: 503 service unavailable')
+    expect(rowIds()).toEqual([])
+  })
 })

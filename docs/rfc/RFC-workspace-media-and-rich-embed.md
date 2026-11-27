@@ -24,7 +24,7 @@ This RFC establishes one unified contract across OCaml server, Wiki/Artifact dom
 2. **Strict closed MIME types and magic-byte verification**: closed `raster_mime` (`Image_png | Image_jpeg | Image_gif | Image_webp`) and `media_mime` sum types with real magic-byte sniffing, zero `.bin`/`Other` silent fallback, pure OCaml image dimension parsing, and explicit rejection of `image/svg+xml` (`415 svg_not_allowed`).
 3. **Upload and immutable-cache HTTP API with multi-account parity**: raw-binary `POST /api/v1/media` (`CanAdmin` / `Admin_only` + CSRF) and hardened `GET /api/v1/media/<sha256>` (`CanReadState` / `Workspace_read`) moved out of `server_routes_http_routes_voice.ml` into a dedicated media route module plus `server_account_dashboard_bridge.ml`, serving `ETag`, `304 Not Modified`, `Cache-Control: private, max-age=31536000, immutable`, `X-Content-Type-Options: nosniff`, and `Content-Security-Policy: default-src 'none'; sandbox`.
 4. **Unified typed embed grammar**: Obsidian-style `![[media:<sha256>|caption]]`, `![[wiki:<slug>|label]]` (plus shorthand `![[<slug>|label]]`), `![[artifact:<id>|label]]`, and Markdown `![alt](/api/v1/media/<sha256>)`, parsed into closed sum types in `Wiki_link`, validated purely in `Wiki_lint`, projected in `GET /api/v1/wiki/:slug` and `GET /api/v1/published-artifacts/:id` without breaking strict TUI decoders, and supported in Keeper authoring tools without raw base64 payloads.
-5. **Reference-aware media GC (`no_wall_clock_death`)**: remove blind 24-hour `mtime` deletion from persist paths, classify `.masc/media` and `.masc/media_sweep` in `Server_tool_blob_scope.workspace` so `Tool_blob_sweep` never stalls as `unclassified`, and reclaim unreferenced media only via two-pass fail-closed scanning across Chat, Wiki, Published Artifacts, and Board.
+5. **Reference-aware media GC (`no_wall_clock_death`)**: remove blind 24-hour `mtime` deletion from persist paths, classify `.masc/media` in `Server_tool_blob_scope.workspace` so `Tool_blob_sweep` never stalls as `unclassified`, and require any deletion sweeper to run two-pass fail-closed scanning across all durable workspace roots (Chat, Keeper WALs, Multi-account homes, Wiki, Published Artifact bodies, Board posts & comments, Tasks, and Goals).
 6. **High-performance Dashboard runtime and authoring UX**: replace per-mount `FileReader.readAsDataURL` with an epoch-fenced, byte-bounded LRU `URL.createObjectURL` cache (`workspace-media-cache.ts`), eliminate 401 image floods in `MarkdownContent`, hydrate `/api/v1/media/<sha256>` inside `<iframe sandbox="" srcDoc>` HTML artifacts via inert `DOMParser` without relaxing `sandbox=""`, and add paste/drop/button upload, split live preview, and a Quick Embed Picker to Wiki and `RichComposer`.
 
 ## 1. Current State and Concrete Defects (`a8a00684072d1`)
@@ -142,7 +142,8 @@ Media routes move out of `lib/server/server_routes_http_routes_voice.ml` into a 
   - Multi-account (`server_account_dashboard_bridge.ml`): `tier: Admin_only` (browser session cookie + `x-masc-csrf-token`, `credentials: 'same-origin'`).
   - Rationale: matches `PUT /api/v1/wiki/:slug` and `POST /api/v1/artifacts` (`CanAdmin` / `Admin_only`), keeping workspace write authority unified without introducing an unreviewed privilege tier in `server_account_dashboard_bridge.ml`.
 - **Body size & truncation guard**:
-  - Read via bounded reader (`Http.Request.read_body_async_with_limit` / `Server_login_http.with_body ~max_bytes`) against `Env_config_keeper.KeeperGeneratedMedia.max_bytes ()` (default 10 MiB, operator ceiling 50 MiB), independent of `MASC_MAX_BODY_BYTES`.
+  - Both single-user (`Server_routes_http_routes_media`) and multi-account (`Server_account_dashboard_bridge`) **must** read the body via `Http.Request.read_body_async_with_limit` through one shared JSON upload handler against `Env_config_keeper.KeeperGeneratedMedia.max_bytes ()` (default 10 MiB, operator ceiling 50 MiB), independent of `MASC_MAX_BODY_BYTES`.
+  - **Do not** use `Server_login_http.with_body` (`lib/server/server_login_http.ml:123-134`), which answers `Too_large` and `Internal` with `text/plain` instead of structured `Cache-Control: no-store` JSON.
   - When `Content-Length` is present and `received <> declared`, refuse with `400 truncated_upload`.
 - **Success Response (`201 Created`)**:
   - Headers: `Content-Type: application/json; charset=utf-8`, `Cache-Control: no-store`, `Server_auth.admitted_cors_headers request`.
@@ -182,15 +183,15 @@ Media routes move out of `lib/server/server_routes_http_routes_voice.ml` into a 
   1. Missing or non-64-lowercase-hex token -> `400 Bad Request` (`code: "invalid_token"`).
   2. Resolve file under `<base_path>/.masc/media/` via `file_path_of_token`; absent -> `404 Not Found` (`code: "not_found"`).
   3. Check `Fs_compat.file_size path`; exceeding `max_bytes ()` -> `413 Payload Too Large` (`code: "media_too_large"`, `max_bytes`, `size_bytes`).
-  4. Check `Http.Response.request_holds_tag ~etag:sha256 request` **before** loading file bytes from disk. If matched, answer `304 Not Modified` (`Http.Response.not_modified ~headers`) with empty body.
+  4. Check `Http.Response.request_holds_tag ~etag:sha256 request` **before** loading file bytes from disk. If matched, answer `304 Not Modified` via `Http.Response.not_modified ~headers` (`lib/http_server_eio.ml:400`) with empty body. **Do not** use `Http.Response.bytes_not_modified` (`lib/http_server_eio.ml:407-412`), which drops `scoped_headers()` (workspace receipt), CORS, `Vary`, `CSP`, and `X-Content-Type-Options`.
   5. Otherwise load bytes and answer `200 OK` (`Http.Response.bytes ~content_type ~headers`).
 - **Response Headers (present on both `200 OK` and `304 Not Modified`)**:
   - `ETag: "<sha256>"` (strong validator)
   - `Cache-Control: private, max-age=31536000, immutable` (`private` is mandatory because reads are auth-gated)
   - `X-Content-Type-Options: nosniff`
   - `Content-Security-Policy: default-src 'none'; sandbox`
-  - `Content-Disposition: inline; filename="<sha256>.<ext>"` (for `Raster _` and `Audio_*`) or `attachment; filename="<sha256>.<ext>"` (for `Application_pdf`)
-  - `Vary: Origin, Authorization, Cookie` merged into a single `Vary` header alongside the non-`vary` headers from `Server_auth.admitted_cors_headers request` (fail-closed on multi-`Origin`, preserving `test_artifacts_endpoint.ml` CORS invariants without duplicate `Vary` headers).
+  - `Content-Disposition`: `inline; filename="<sha256>.<ext>"` for `Raster _`, `Audio_mpeg`, `Audio_wav`, `Audio_ogg`, and `Audio_midi`; `attachment; filename="<sha256>.<ext>"` for `Application_pdf`.
+  - `Vary: Origin, Authorization, Cookie`: filter `"vary"` out of `Server_auth.admitted_cors_headers request` (`lib/server/server_auth.ml:850,859-865`) and emit **one** merged `("vary", "Origin, Authorization, Cookie")` header (fail-closed on multi-`Origin`, no duplicate `Vary` headers; update `test/test_artifacts_endpoint.ml:389` assertion accordingly).
 
 ### 4.3 Security Boundary for `shared=true` Published Artifacts
 
@@ -258,6 +259,7 @@ val extract_embeds : string -> embed list
     - `Invalid_embed of { page : string; line : int; kind : string; raw : string }` (`"invalid_embed"`)
     - `Unsupported_embed of { page : string; line : int; scheme : string; raw : string }` (`"unsupported_embed"`)
   - `Wiki_lint.run` stays 100% pure by accepting optional predicates `?media_exists:(string -> bool)` and `?artifact_exists:(string -> bool)`. Callers at the I/O edge (`Server_dashboard_http_wiki`, `Tool_wiki.handle_lint`) supply `fun token -> Option.is_some (Keeper_chat_media_store.file_path_of_token ~base_dir:base_path ~token)` and artifact store existence checks.
+  - **TUI lint wire compatibility (`lib/masc_tui/protocol/wire_knowledge.ml:803-828`)**: every new embed finding must emit non-blank `"subject"` (the page slug), `"page"`, `"line"`, and `"target"` (sha256, slug, artifact ID, or raw string) in **both** `Server_dashboard_http_wiki.finding_to_json` and `Wiki_lint_report.finding_to_json`.
   - Update `lib/wiki_lint_report.ml` and `config/tools/masc_wiki_lint.toml` in lockstep with `Wiki_lint.all_kinds` so exhaustive pattern matches and `test_enum_mirror_sync` pass.
 
 ### 5.3 `GET /api/v1/wiki/:slug` Additive Wire Contract
@@ -304,22 +306,26 @@ Inside `V2Envelope.data`, keep all existing fields untouched and add:
 
 ### 6.1 Fixing `Server_tool_blob_scope.ml`
 
-- Classify `<base_path>/.masc/media` (`media_subdir = "media"`) as `excluded M.Other_media_store` in `Server_tool_blob_scope.workspace`.
-- Classify `<base_path>/.masc/media_sweep` (the workspace media sweeper's candidate snapshot directory) as `excluded M.Sweep_record`.
+- Classify `<base_path>/.masc/media` (`"media"`) as `excluded M.Other_media_store` in `Server_tool_blob_scope.workspace`.
+- **No phantom exclusions (`legacy_residue`)**: do **not** add a `.masc/media_sweep` entry to `Server_tool_blob_scope.workspace` unless a real sweeper module that creates and owns `.masc/media_sweep` lands in the same change.
 - Keep `Config_dir_resolver.wiki_dirname` as `no_reference` for `Tool_blob_store`, because wiki `.md` files reference `/api/v1/media/<sha256>`, not `[masc:blob ...]` markers; `Tool_blob_maintenance` only parses JSON/JSONL/blob markers and would fail on raw Markdown if `wiki` were marked `Tree`.
 
 ### 6.2 Eliminating Wall-Clock Media Death
 
-- Delete `cleanup_old_files_in_dir` from `Keeper_chat_media_store.persist_result`. Persisting a new image must never evict existing media by `mtime` or directory-size FIFO. `Env_config_keeper.KeeperGeneratedMedia.max_bytes ()` remains the authoritative per-file upload/serve ceiling; retiring the obsolete `retention_seconds` / `dir_max_bytes` env vars (`lib/config/env_config_keeper.ml:538-573`, `lib/config/keeper_runtime_setting_registry.ml:671-681`) follows per `legacy_residue` / `env_var_sprawl` once no callers remain.
-- Replace with a two-pass reference-aware media sweeper (`Observe_only | Delete_previous_candidates`), mirroring `Tool_blob_maintenance`:
-  1. **Live Reference Roots** (every root must be read completely; any unreadable or unparseable root aborts deletion fail-closed):
-     - **Keeper Chat & Canonical Turn Stores**: `<base_path>/.masc/chat/` and `<base_path>/.masc/keepers/` (JSON/JSONL media URL blocks and canonical turn WAL references to `/api/v1/media/<64-hex>`).
+- Delete `cleanup_old_files_in_dir` from `Keeper_chat_media_store.persist_result`. Persisting a new image must never evict existing media by `mtime` or directory-size FIFO.
+- `Env_config_keeper.KeeperGeneratedMedia.max_bytes ()` remains the authoritative per-file upload and serve ceiling. Because `lib/config/env_config_keeper.{ml,mli}` and `lib/config/keeper_runtime_setting_registry.ml` sit outside Layer 2's strict file boundary, retiring the now-unused `MASC_KEEPER_GENERATED_MEDIA_RETENTION_SEC` and `MASC_KEEPER_GENERATED_MEDIA_DIR_MAX_BYTES` definitions (and their config/registry tests) is tracked as a dedicated follow-up cleanup PR per `legacy_residue` and `env_var_sprawl`.
+- Any future or integrated two-pass reference-aware media sweeper (`Observe_only | Delete_previous_candidates`, mirroring `Tool_blob_maintenance`) **must** satisfy both invariants before enabling `Delete_previous_candidates`:
+  1. **Complete Durable Reference Roots** (every root must be read completely; any unreadable or undecodable root aborts deletion fail-closed and deletes nothing):
+     - **Keeper Chat & Runtime Stores**: `<base_path>/.masc/chat/`, `<base_path>/.masc/keepers/`, and `<base_path>/.masc/messages/`.
+     - **Keeper Config SQLite WALs**: `<config_keepers>/*` compaction and canonical turn databases (`lib/server/server_tool_blob_scope.ml:268-283`).
+     - **Multi-Account Homes**: `<base_path>/.masc/accounts/` (`Runtime_account_home_layout.accounts_dir`).
      - **Wiki Pages**: `<base_path>/.masc/wiki/*.md` via `Wiki_link.extract_embeds` (`Media_embed`).
-     - **Published Artifacts**: `<base_path>/.masc/published_artifacts/*.json` via `Published_artifact_store.referenced_media_tokens` (all revisions).
-     - **Board Posts & Comments**: `<base_path>/.masc/board_posts.jsonl` (scanning Markdown bodies for `/api/v1/media/<64-hex>` and `![[media:<64-hex>]]`).
+     - **Published Artifacts**: `<base_path>/.masc/published_artifacts/*.json` with every revision body resolved from `Tool_blob_store` via `Published_artifact_store.referenced_media_tokens` (metadata JSON alone carries only `Tool_output.artifact_ref`, not body text).
+     - **Board Posts & Comments**: `<base_path>/.masc/board_posts.jsonl` and `<base_path>/.masc/board_comments.jsonl` (`lib/board/board_paths.ml:25-26`).
+     - **Tasks & Goals**: `<base_path>/.masc/tasks/` (`lib/workspace/workspace_utils_paths_backend.ml:46`, written by `RichComposer` via `task-create-form.ts`) and `<base_path>/.masc/goals.json` (`Goal_store.goals_filename`).
   2. **Two-Pass Reclamation**:
-     - `Observe_only` writes the set of currently unreferenced `<sha256>` tokens to `<base_path>/.masc/media_sweep/candidates.json` and deletes nothing.
-     - `Delete_previous_candidates` deletes only tokens present in the previous candidate snapshot that remain unreferenced in the fresh complete scan, preventing TOCTOU deletion of an image uploaded just before its Wiki page or Artifact save commits.
+     - `Observe_only` writes the set of currently unreferenced `<sha256>` tokens to `<base_path>/.masc/media_sweep/candidates.json` (adding `"media_sweep"` to `Server_tool_blob_scope.workspace` as `Sweep_record` in the same PR that implements the sweeper) and deletes nothing.
+     - `Delete_previous_candidates` deletes only tokens present in the previous candidate snapshot that remain unreferenced in the fresh complete scan, preventing TOCTOU deletion of an image uploaded just before its Wiki page, Artifact, Comment, or Task save commits.
 
 ## 7. Dashboard Runtime, Safe `sandbox=""` Hydration & Authoring UX
 
@@ -340,10 +346,12 @@ Inside `V2Envelope.data`, keep all existing fields untouched and add:
 
 ### 7.2 Unified `MarkdownContent` (`dashboard/src/components/common/markdown-renderer.ts`)
 
-- **XSS defenses preserved**: keep `FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form']` and `ALLOW_DATA_ATTR: false`. Explicitly allowlist only our controlled slot attributes (`data-masc-media-src`, `data-masc-media-alt`, `data-masc-embed-kind`, `data-masc-embed-target`, `data-masc-embed-label`) in DOMPurify config — zero post-sanitize innerHTML regex rewriting.
-- **Zero-401 media slot hydration**:
-  - In the `marked` `image` renderer, when `isWorkspaceMediaPath(href)` matches, emit `<span class="masc-media-slot" data-masc-media-src="/api/v1/media/<sha256>" data-masc-media-alt="...">` instead of a bare `<img src="/api/v1/media/...">`. No unauthenticated browser fetch ever fires.
-  - In `useEffect`, an `IntersectionObserver` (`rootMargin: '200px'`) hydrates visible slots via `workspace-media-cache.ts` (`acquireObjectUrl`), renders `<img decoding="async">` with skeleton placeholder, click-to-zoom lightbox (`ChatPreviewModal`), and retry button on failure, and calls `release()` on cleanup.
+- **XSS defenses preserved**: keep `FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form']` and set `ALLOW_DATA_ATTR: false` in **both** `renderMarkdown` and `renderMarkdownDocument` (`dashboard/src/components/common/markdown-renderer.ts:34-47,100-103`, verified by unit test). Explicitly allowlist only our controlled slot attributes (`data-masc-media-src`, `data-masc-media-alt`, `data-masc-embed-kind`, `data-masc-embed-target`, `data-masc-embed-label`) in DOMPurify config — zero post-sanitize innerHTML regex rewriting.
+- **Zero-401 media slot hydration (Markdown AND raw HTML `<img>`)**:
+  - In the `marked` `image` renderer, when `isWorkspaceMediaPath(href)` matches, emit `<span class="masc-media-slot" data-masc-media-src="/api/v1/media/<sha256>" data-masc-media-alt="...">` instead of a bare `<img src="/api/v1/media/...">`.
+  - Inside the inert `<template>` post-sanitize normalizer, rewrite any surviving raw HTML `<img src="/api/v1/media/<64-hex>">` (which bypasses `marked`'s `renderer.image`) into the identical `<span class="masc-media-slot" ...>` before `dangerouslySetInnerHTML` mounts it. No unauthenticated browser fetch ever fires.
+  - In `useEffect`, strictly re-validate every DOM attribute value read from a slot or embed (`isWorkspaceMediaPath`, wiki slug `^[a-z0-9]+(?:-[a-z0-9]+)*$`, artifact ID `^artifact-[0-9a-f]{32}$`) before fetching or linking so raw HTML containing allowlisted `data-masc-*` attributes cannot smuggle arbitrary paths or schemes.
+  - An `IntersectionObserver` (`rootMargin: '200px'`) hydrates visible slots via `workspace-media-cache.ts` (`acquireObjectUrl`), renders `<img decoding="async">` with skeleton placeholder, click-to-zoom lightbox (`ChatPreviewModal`), and retry button on failure, and calls `release()` on cleanup.
 - **Typed `mascEmbed` Marked extension**:
   - Parses `![[media:<sha256>|caption]]`, `![[wiki:<slug>|label]]`, `![[<slug>|label]]`, and `![[artifact:<id>|label]]` prior to sanitization (skipping code fences and code spans).
   - `media` embeds render through the same authenticated `masc-media-slot` hydrator.
@@ -355,11 +363,12 @@ Inside `V2Envelope.data`, keep all existing fields untouched and add:
 
 - **Invariant**: `<iframe sandbox="" srcDoc={hydratedHtml}>` in `artifacts-tab.ts` (and upgraded `artifacts-surface.ts`) must never add `allow-scripts`, `allow-same-origin`, `allow-forms`, or `allow-popups`.
 - **Hydration flow**:
-  1. Parse `doc.content` using `new DOMParser().parseFromString(html, 'text/html')` (inert document: scripts never execute, external resources never fetch).
-  2. Collect unique `img[src]` values passing `isWorkspaceMediaPath(src)` up to hard safety bounds: **32 unique workspace images** and **32 MiB cumulative inlined bytes** per artifact.
-  3. Resolve each path via `workspace-media-cache.ts` `acquireDataUrl(path, { epoch, signal })` under a per-selection `AbortController` + `sessionEpoch` fence.
-  4. Rewrite matched `img` `src` attributes to verified raster `data:` URIs (leaving failed or over-budget images safely unhydrated with descriptive fallback `alt` text).
-  5. Serialize `<!DOCTYPE html>\n${parsed.documentElement.outerHTML}` into `srcDoc`.
+  1. Whenever `doc.content` references `/api/v1/media/`, **gate `<iframe sandbox="" srcDoc={...}>` rendering** (display a loading placeholder instead of mounting raw `doc.content`) until async hydration resolves, preventing an immediate opaque-origin 401 flash on first mount.
+  2. Parse `doc.content` using `new DOMParser().parseFromString(html, 'text/html')` (inert document: scripts never execute, external resources never fetch).
+  3. Match `img[src]` elements using raw `el.getAttribute('src')?.trim()` (never resolved `el.src`) passing `isWorkspaceMediaPath(rawSrc)`, bounded at **32 unique workspace images** and **32 MiB cumulative inlined bytes** per artifact.
+  4. Resolve each unique path via `workspace-media-cache.ts` `acquireDataUrl(path, { epoch, signal })` under a per-selection `AbortController` + `sessionEpoch` fence.
+  5. Rewrite matched `img` `src` attributes to verified raster `data:` URIs (leaving failed or over-budget images safely unhydrated with descriptive fallback `alt` text).
+  6. Preserve `<!DOCTYPE html>` explicitly when serializing `DOMParser` output (`<!DOCTYPE html>\n${parsed.documentElement.outerHTML}`) so HTML5 artifacts stay in standards mode rather than quirks mode.
 - **`artifacts-surface.ts` disposition**: `components/work.ts:43` still dynamically imports `artifacts-surface.ts` (referenced by `work.test.ts` and `section-nav-reachability.test.ts`), and `components/work.ts` sits outside this stack's file boundary. Therefore Layer 4 upgrades `artifacts-surface.ts` to strict `sandbox=""` + shared hydration rather than breaking `tsc`; retiring dead `components/work.ts` + `artifacts-surface.ts` is deferred to a dedicated cleanup PR.
 
 ### 7.4 Authoring Productivity UX (`workspace-media-upload.ts`, `wiki-tab.ts`, `rich-composer.ts`)
@@ -382,11 +391,11 @@ All changes land as one linear 5-layer Native GitHub Stack off `main` (`gh stack
 | Layer | Branch | Owner | Owned Files | Verification Gate |
 |---|---|---|---|---|
 | L1 | `rfc/workspace-media-and-rich-embed` | `@masc-media-arch` | `docs/rfc/RFC-workspace-media-and-rich-embed.md` | `python3 scripts/rfc-generate-index.py --check`, adversarial RFC audit |
-| L2 | `feat/workspace-media-core` | `@masc-media-server` | `lib/keeper/keeper_chat_media_store.{ml,mli}`, callers (`keeper_chat_agent_core_stream_bridge.ml`, `keeper_stream_media_accum.ml`), `lib/server/server_routes_http_routes_media.{ml,mli}`, `lib/server/server_routes_http_routes_voice.ml`, `lib/server/server_routes_http.ml`, `lib/server/server_account_dashboard_bridge.ml`, media unit/endpoint tests (including updating `test_artifacts_endpoint.ml` router wiring and RIFF/WAVE fixture bytes) | PR `changes` + `type-check` (`dune build @check`), consumer trace, `@masc-verifier` audit |
+| L2 | `feat/workspace-media-core` | `@masc-media-server` | `lib/keeper/keeper_chat_media_store.{ml,mli}`, callers (`keeper_chat_agent_core_stream_bridge.ml`, `keeper_stream_media_accum.ml`), `lib/server/server_routes_http_routes_media.{ml,mli}`, `lib/server/server_routes_http_routes_voice.ml`, `lib/server/server_routes_http.ml`, `lib/server/server_account_dashboard_bridge.ml`, media unit/endpoint tests (including updating `test/test_artifacts_endpoint.ml:328,333,369,377,389` for new router, valid RIFF/WAVE bytes, and merged `Vary`) | PR `changes` + `type-check` (`dune build @check`), consumer trace, `@masc-verifier` audit |
 | L3 | `feat/wiki-artifact-embed-core` | `@masc-wiki-core` | `lib/wiki_link.{ml,mli}`, `lib/wiki_graph.{ml,mli}`, `lib/wiki_lint.{ml,mli}`, `lib/wiki_lint_report.ml`, `lib/server/server_dashboard_http_wiki.{ml,mli}`, `lib/published_artifact.{ml,mli}`, `lib/published_artifact_store.{ml,mli}`, `lib/server/server_routes_http_routes_published_artifacts.{ml,mli}`, `lib/server/server_tool_blob_scope.ml`, workspace media GC module, `lib/tool_wiki.{ml,mli}`, `lib/tool_schemas/tool_schemas_wiki.ml`, `lib/keeper/keeper_artifact_publish.{ml,mli}`, `config/tools/masc_wiki_*.toml`, `config/tools/keeper_artifact_publish.toml`, focused OCaml tests | PR `changes` + `type-check`, `test_enum_mirror_sync` consistency, consumer trace, `@masc-verifier` audit |
 | L4 | `feat/dashboard-rich-embed-runtime` | `@masc-embed-ui` | `dashboard/src/lib/workspace-media-cache.ts` (+ tests), `dashboard/src/lib/keeper-media.ts`, `dashboard/src/components/chat/workspace-image.ts` (+ tests), `dashboard/src/components/common/markdown-renderer.ts` (+ tests + `markdown-embeds.css`), `dashboard/src/components/common/rich-code-preview.ts`, `dashboard/src/workspaces/knowledge/artifacts-tab.ts` (+ tests), `dashboard/src/components/published-artifacts/artifacts-surface.ts` | `pnpm --dir dashboard typecheck`, focused `vitest run`, memory/revoke/sandbox audit |
 | L5 | `feat/dashboard-wiki-media-ux` | `@masc-editor-ux` | `dashboard/src/lib/workspace-media-upload.ts` (+ tests), `dashboard/src/workspaces/knowledge/wiki-tab.ts` (+ tests), `dashboard/src/workspaces/knowledge/wiki-embed-picker.ts`, `dashboard/src/workspaces/knowledge/wiki-editor.css`, `dashboard/src/components/common/rich-composer.ts` (+ tests) | `pnpm --dir dashboard typecheck`, focused `vitest run`, `@masc-verifier` audit |
 
 Cross-layer symbol stability guarantees:
-- Layer 2 preserves `Keeper_chat_media_store.valid_token` and `Keeper_chat_media_store.file_path_of_token` signatures so Layer 3 compiles cleanly both standalone off `origin/main` and stacked on Layer 2.
+- Layer 2 preserves `Keeper_chat_media_store.valid_token` and `Keeper_chat_media_store.file_path_of_token` signatures and exposes `val media_subdir : string` (`"media"`). Because `media_subdir` is not exposed in `.mli` on `origin/main` yet, Layer 3 uses a local `media_subdir = "media"` binding in `Server_tool_blob_scope.ml` while branched off `origin/main` (switching to `Keeper_chat_media_store.media_subdir` once stacked atop Layer 2) so both standalone and stacked builds pass `dune build @check`.
 - Layer 4 preserves `keeper-media.ts` exports (`isWorkspaceMediaPath`, `isWorkspaceRasterMime`) and `MarkdownContent`'s existing prop signature so Layer 5 compiles cleanly both standalone and stacked on Layer 4.

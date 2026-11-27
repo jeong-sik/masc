@@ -308,10 +308,21 @@ let evidence_artifact_reader ~config ~(meta : keeper_meta) () =
              Error
                (Store.Evidence_read_error
                   (Printf.sprintf "sandbox_backend_read: %s: %s" worker detail)) in
-           (* Bounded before the guest's bytes travel: at most one byte past
-              the text ceiling is asked for. A text file over it is [Too_large]
-              and nothing more of it crosses. A binary file keeps the whole
-              read, as the host read does. *)
+           (* A binary file is read whole and once, as the host read does: the
+              ceiling is asked of text only. For text, at most one byte past
+              the ceiling travels. A text file over it is [Too_large] and
+              nothing more of it crosses. *)
+           let read_complete () =
+             match
+               Keeper_sandbox_read_backend.read_complete_file ~config ~meta
+                 ~host_path:relative ~timeout_sec:30 ()
+             with
+             | Error reason -> backend_error reason
+             | Ok content -> Store.payload_of_complete_bytes ~path:relative content
+           in
+           if Store.is_binary_artifact_path relative
+           then read_complete ()
+           else
            match
              Keeper_sandbox_read_backend.read_raw_prefix ~config ~meta
                ~host_path:relative
@@ -321,20 +332,11 @@ let evidence_artifact_reader ~config ~(meta : keeper_meta) () =
            | Error reason ->
              backend_error (Keeper_sandbox_read_backend.read_error_to_string reason)
            | Ok prefix when String.length prefix > Store.text_artifact_max_bytes ->
-             if Store.is_binary_artifact_path relative
-             then
-               (match
-                  Keeper_sandbox_read_backend.read_complete_file ~config ~meta
-                    ~host_path:relative ~timeout_sec:30. ()
-                with
-                | Error reason -> backend_error reason
-                | Ok content -> Store.payload_of_complete_bytes ~path:relative content)
-             else
-               Error
-                 (Store.Too_large
-                    { cap = Store.text_artifact_max_bytes
-                    ; at_least = String.length prefix
-                    })
+             Error
+               (Store.Too_large
+                  { cap = Store.text_artifact_max_bytes
+                  ; at_least = String.length prefix
+                  })
            | Ok content -> Store.payload_of_complete_bytes ~path:relative content)
 
   | Keeper_types_profile_sandbox.Shared_mount -> None

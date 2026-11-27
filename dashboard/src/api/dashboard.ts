@@ -327,9 +327,6 @@ export type {
   DashboardRuntimeProviderProbe,
   DashboardRuntimeProbePayload,
   DashboardRuntimeProbeResponse,
-  PromptSource,
-  DashboardPromptItem,
-  DashboardRuntimePromptAsset,
 } from './dashboard-tools-prompts'
 export {
   fetchToolMetricsSeries,
@@ -337,9 +334,6 @@ export {
   fetchDashboardFullHealth,
   fetchDashboardTools,
   fetchKeeperWaitingInventory,
-  fetchDashboardPrompts,
-  savePromptOverride,
-  clearPromptOverride,
 } from './dashboard-tools-prompts'
 
 export type {

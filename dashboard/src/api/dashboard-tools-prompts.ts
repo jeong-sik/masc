@@ -1,8 +1,8 @@
-// MASC Dashboard — Tool metrics / runtime probe / tools inventory / prompts.
+// MASC Dashboard — Tool metrics / runtime probe / tools inventory / waiting inventory.
 // Extracted from dashboard.ts (domain split). Public symbols re-exported
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
-import { get, getWithResponse, post, type AbortableRequestOptions } from './core'
+import { get, getWithResponse, type AbortableRequestOptions } from './core'
 import { isObserverInstance, OBSERVER_INSTANCE_HEADER, ObserverScopeError } from '../lib/observer-protocol'
 import { ensureDevToken } from './dev-token'
 import type { TelemetryFreshnessMetadata } from './dashboard-shared'
@@ -12,7 +12,6 @@ import type {
   ScheduleQueueProjectionStatus,
   ScheduleReactionProjectionStatus,
 } from './schedule-projection-status'
-import type { PromptAuthoringIssue } from './schemas/prompt-authoring'
 import {
   parseToolMetricsSeriesResponse,
   seriesAnswerMismatch,
@@ -1015,71 +1014,4 @@ export async function fetchKeeperWaitingInventory(
     },
   )
   return normalizeKeeperWaitingInventory(data)
-}
-
-// --- Prompts (override management) ---
-
-export type PromptSource = 'override' | 'file' | 'missing'
-
-export interface DashboardPromptItem {
-  key: string
-  authoring_issues: readonly PromptAuthoringIssue[]
-  category: string
-  description: string
-  current: string
-  effective: string
-  file_value: string | null
-  override_value: string | null
-  file_path: string | null
-  /** Where the effective text came from. The server resolves this once, from
-   *  the override and the file, and sends the answer. It also sends the two
-   *  booleans that resolution consumed; modelling them here gave the panel a
-   *  second way to spell the same decision, and it used both. */
-  source: PromptSource
-  char_count: number
-  required_file: boolean
-  template_variables: string[]
-}
-
-export interface DashboardRuntimePromptAsset {
-  path: string
-  file_path: string
-  value: string
-  file_exists: boolean
-  char_count: number
-}
-
-interface DashboardPromptsResponse {
-  prompts: DashboardPromptItem[]
-  runtime_assets?: DashboardRuntimePromptAsset[]
-}
-
-interface PromptMutationResponse {
-  curator_refresh?: { status: 'queued' | 'no_owner' } | { status: 'unavailable'; detail: string } | null
-  ok: boolean
-  message?: string
-  key?: string
-  source?: PromptSource
-  effective?: string
-  error?: string
-}
-
-export async function fetchDashboardPrompts(): Promise<DashboardPromptsResponse> {
-  const response = await get<DashboardPromptsResponse>('/api/v1/prompts')
-  const { parsePromptAuthoringIssues } = await import('./schemas/prompt-authoring')
-  return {
-    ...response,
-    prompts: response.prompts.map(prompt => ({
-      ...prompt,
-      authoring_issues: parsePromptAuthoringIssues(prompt.authoring_issues),
-    })),
-  }
-}
-
-export function savePromptOverride(key: string, value: string): Promise<PromptMutationResponse> {
-  return post('/api/v1/prompts', { action: 'set', key, value })
-}
-
-export function clearPromptOverride(key: string): Promise<PromptMutationResponse> {
-  return post('/api/v1/prompts', { action: 'clear', key })
 }

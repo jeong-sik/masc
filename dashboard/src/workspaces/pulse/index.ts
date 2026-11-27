@@ -650,8 +650,8 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
                 ? (attentionErrors.length > 0
                     ? html`<div class="pulse-empty">일부 소스 조회 실패로 대기열을 확정할 수 없습니다</div>`
                     : attentionUnchecked.length > 0
-                      ? html`<div class="pulse-empty">확인된 Keeper 오류는 없으나 미확인 대기열이 있어 비어 있음으로 확정할 수 없습니다</div>`
-                      : html`<div class="pulse-empty">대기 중인 승인·질문·오류 없음</div>`)
+                      ? html`<div class="pulse-empty">도구 승인·Keeper 질문·Keeper 오류에서 확인된 대기 항목은 없습니다. 미확인 소스가 있어 이 범위의 대기열이 비었는지는 확인할 수 없습니다. Goal 완료 확인과 채널 Gate는 포함하지 않습니다.</div>`
+                      : html`<div class="pulse-empty">도구 승인·Keeper 질문·Keeper 오류 없음. Goal 완료 확인과 채널 Gate는 포함하지 않습니다.</div>`)
                 : html`
                   <div class="pulse-attn-list">
                     ${attentionItems.slice(0, 10).map((item) => html`

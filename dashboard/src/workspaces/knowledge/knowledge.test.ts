@@ -724,6 +724,10 @@ describe('workspaces/knowledge', () => {
       ok: true,
       value: { action: 'skip_item', target: { kind: 'head_item', turn_log: 'log-1', line: 42, store: 'ordinary', at: 0 } },
     })
+    expect(buildMemoryRecoveryPayload({ action: 'skip_item', turnLog: 'log-1', line: 42, store: 'ordinary' }).ok).toBe(false)
+    expect(buildMemoryRecoveryPayload({ action: 'skip_item', turnLog: 'log-1', line: 42, at: 0 }).ok).toBe(false)
+    expect(buildMemoryRecoveryPayload({ action: 'skip_item', turnLog: '', line: 0 }).ok).toBe(false)
+    expect(buildMemoryRecoveryPayload({ action: 'skip_line', offset: Number.NaN }).ok).toBe(false)
     expect(buildMemoryRecoveryPayload({ action: 'skip_line', offset: 128 })).toEqual({
       ok: true,
       value: { action: 'skip_line', offset: 128 },

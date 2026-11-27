@@ -1,3 +1,4 @@
+import { buildMemoryRecoveryPayload } from '../../lib/memory-recovery'
 /**
  * On-demand Debug Companion pane (`⌘.`)
  * with 4 tabs:
@@ -56,7 +57,6 @@ import type {
   KeeperMemoryFactsData,
   KeeperMemoryJournalData,
   KeeperToolCallsData,
-  MemoryActPayload,
   ProviderInputData,
   RawTraceTurnItem,
 } from './types'
@@ -471,25 +471,18 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
     const targetKeeper = keeperName
     const startEpoch = currentSessionEpoch()
     setMemActStatus(null)
-    let payload: MemoryActPayload
-    if (memActKind === 'resume') {
-      payload = { action: 'resume' }
-    } else if (memActKind === 'adopt') {
-      payload = { action: 'adopt', observed: memActObserved.trim() }
-    } else if (memActKind === 'restart_reading') {
-      payload = { action: 'restart_reading', observed: memActObserved.trim() }
-    } else if (memActKind === 'skip_line') {
-      payload = { action: 'skip_line', offset: Math.max(0, Number.parseInt(memActOffset, 10) || 0) }
-    } else {
-      payload = {
-        action: 'skip_item',
-        target: {
-          kind: 'unreadable_unit',
-          turn_log: memActObserved.trim(),
-          line: Math.max(0, Number.parseInt(memActOffset, 10) || 0),
-        },
-      }
+    const parsedPayload = buildMemoryRecoveryPayload({
+      action: memActKind,
+      observed: memActObserved,
+      turnLog: memActObserved,
+      line: memActOffset.trim() === '' ? undefined : Number(memActOffset),
+      offset: memActOffset.trim() === '' ? undefined : Number(memActOffset),
+    })
+    if (!parsedPayload.ok) {
+      setMemActStatus(`오류: ${parsedPayload.error}`)
+      return
     }
+    const payload = parsedPayload.value
     const res = await postKeeperMemoryAct(targetKeeper, payload)
     if (!mountedRef.current || activeKeeperRef.current !== targetKeeper || !isEpochCurrent(startEpoch)) return
     if (!res.ok) {

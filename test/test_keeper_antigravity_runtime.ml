@@ -504,18 +504,13 @@ let test_keeper_projects_mcp_tool_and_settles () =
                          (observation.usage_scope
                           = Runtime_usage_scope.Conversation_cumulative)
                      | None -> fail "Antigravity runtime observation is missing");
-                    (* The exact event order below is not hand-guessed: the MCP
-                       tool_use block comes from the fixture's own HTTP call to
-                       this process's MCP server (synchronous, inside the
-                       python heredoc), while the native tool_use block comes
-                       from parsing the CLI's step_update stdout lines -- two
-                       different channels whose relative interleaving under Eio
-                       is not a contract either channel promises. The WP1
-                       completion trigger only asks for typed counts (native
-                       tool count 1, MASC/MCP tool count 1, unknown-origin
-                       count 0), not a byte-exact transcript, so that is what
-                       is checked here instead of one brittle exhaustive
-                       pattern match. *)
+                    (* The MCP tool_use block comes from the fixture's own HTTP
+                       call to this process's MCP server (synchronous, inside
+                       the python heredoc). The CLI's step_update stdout lines
+                       report the same call as a [call_mcp_tool] step, which
+                       opens no block of its own (#39360). Typed counts, not a
+                       byte-exact transcript, are checked: native 0, MASC/MCP 1,
+                       unknown-origin 0. *)
                     (match List.rev !stream_events with
                      | Agent_core.Types.MessageStart
                          { id = "conversation-antigravity-fixture:ordinal:1"
@@ -543,7 +538,7 @@ let test_keeper_projects_mcp_tool_and_settles () =
                             count_of Runtime_native_tools.stream_content_type
                           in
                           let mcp_count = count_of "tool_use" in
-                          check int "native tool count" 1 native_count;
+                          check int "the MASC call opens no native block" 0 native_count;
                           check
                             bool
                             "MCP wrapper is not a second Skill action"

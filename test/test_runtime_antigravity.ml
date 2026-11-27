@@ -880,6 +880,57 @@ let test_repeated_active_native_step_keeps_one_chat_occurrence () =
     ["DONE"; "ERROR"]
 ;;
 
+(* #39360: agy reports a call to a MASC tool as a [call_mcp_tool] step. The
+   MASC tool path already opened that call's tool_use block, so the step
+   opens no native block and no native chat row. A built-in view_file step
+   still opens both. *)
+let test_mcp_wrapper_step_opens_no_native_block () =
+  let events = ref [] in
+  with_fixture
+    [init ();
+     step ~index:3 ~state:"ACTIVE" ~step_type:"tool" ~tool_name:"call_mcp_tool" ();
+     step ~index:3 ~state:"DONE" ~step_type:"tool" ~tool_name:"call_mcp_tool" ();
+     step ~index:4 ~state:"ACTIVE" ~step_type:"tool" ~tool_name:"view_file" ();
+     step ~index:4 ~state:"DONE" ~step_type:"tool" ~tool_name:"view_file" ();
+     result ()]
+    (fun path ->
+      match run_fixture ~on_stream_event:(fun event -> events := event :: !events) path with
+      | Error error -> fail (Runtime_antigravity.error_to_string error)
+      | Ok _ ->
+          let runtime_events = List.rev !events in
+          check bool "the runtime still reports the wrapper step" true
+            (List.exists (function
+               | Runtime_antigravity.Native_tool_started
+                   {origin=Runtime_native_tools.Mcp_wrapper; tool_name=Some "call_mcp_tool"; _} -> true
+               | _ -> false) runtime_events);
+          let fixture = Native_tool_outcome_fixture.create () in
+          let projected = Keeper_antigravity_runtime.For_testing.project_stream
+            ~on_event:(Native_tool_outcome_fixture.on_event fixture)
+            ~on_native_tool_completion:(Native_tool_outcome_fixture.on_completion fixture)
+            runtime_events in
+          check (list (option string)) "only the built-in step opens a native block"
+            [Some "view_file"]
+            (List.filter_map (function
+               | Agent_core.Types.ContentBlockStart {content_type; tool_name; _}
+                 when String.equal content_type Runtime_native_tools.stream_content_type -> Some tool_name
+               | _ -> None) projected);
+          let rec stops_only_opened opened = function
+            | [] -> true
+            | Agent_core.Types.ContentBlockStart {index; _} :: rest
+            | Agent_core.Types.ContentBlockDelta {index; _} :: rest ->
+                stops_only_opened (index :: opened) rest
+            | Agent_core.Types.ContentBlockStop {index} :: rest ->
+                List.mem index opened && stops_only_opened opened rest
+            | _ :: rest -> stops_only_opened opened rest in
+          check bool "no stop for a block that never opened" true (stops_only_opened [] projected);
+          check (list (option string)) "one native chat row, for view_file" [Some "view_file"]
+            (List.filter_map (function
+               | Keeper_chat_events.Native_tool_start tool -> Some tool.tool_call_name
+               | _ -> None) (Native_tool_outcome_fixture.events fixture));
+          Native_tool_outcome_fixture.check fixture
+            ~expected:[{Runtime_native_tools.outcome=Completion_reported; exit_code=None}])
+;;
+
 let test_successful_official_client_turn () =
   with_fixture
     [ init ()
@@ -2598,6 +2649,8 @@ let () =
             test_stream_events_preserve_exact_native_tool_steps
         ; test_case "repeated native active step retains one chat occurrence" `Quick
             test_repeated_active_native_step_keeps_one_chat_occurrence
+        ; test_case "MCP wrapper step opens no native block" `Quick
+            test_mcp_wrapper_step_opens_no_native_block
         ; test_case
             "resume identity and argv"
             `Quick

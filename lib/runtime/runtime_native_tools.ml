@@ -223,6 +223,12 @@ let observe_exact_action ~official_turn ~observe observation =
     (exact_action observation)
 ;;
 
+let opens_native_block (observation : observation) =
+  match observation.origin with
+  | Built_in -> true
+  | Mcp_wrapper -> false
+;;
+
 let call_id observation =
   match observation.identity with
   | Some (Call_id call_id) -> Some call_id

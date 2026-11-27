@@ -608,24 +608,29 @@ let stream_projection ?on_native_tool_completion ~keeper_name ~raw_trace_run ~tu
               ~raw_trace_run
               ~phase:`Started
               observation;
-            let index =
-              match Option.bind observation.identity (Hashtbl.find_opt native_tool_indexes) with
-              | Some index -> index
-              | None ->
-                  let index = !next_tool_index in
-                  incr next_tool_index;
-                  Option.iter
-                    (fun identity -> Hashtbl.add native_tool_indexes identity index)
-                    observation.identity;
-                  index
-            in
-            emit
-              (Agent_core.Types.ContentBlockStart
-                 { index
-                 ; content_type = Runtime_native_tools.stream_content_type
-                 ; tool_id = Runtime_native_tools.call_id observation
-                 ; tool_name = observation.tool_name
-                 })
+            (* A MASC tool call already has its tool_use block from
+               [on_tool_started]. Its [call_mcp_tool] step registers no
+               index, so its end below finds no block (#39360). *)
+            if Runtime_native_tools.opens_native_block observation then begin
+              let index =
+                match Option.bind observation.identity (Hashtbl.find_opt native_tool_indexes) with
+                | Some index -> index
+                | None ->
+                    let index = !next_tool_index in
+                    incr next_tool_index;
+                    Option.iter
+                      (fun identity -> Hashtbl.add native_tool_indexes identity index)
+                      observation.identity;
+                    index
+              in
+              emit
+                (Agent_core.Types.ContentBlockStart
+                   { index
+                   ; content_type = Runtime_native_tools.stream_content_type
+                   ; tool_id = Runtime_native_tools.call_id observation
+                   ; tool_name = observation.tool_name
+                   })
+            end
           | Runtime_antigravity.Native_tool_finished {observation; completion} ->
             (match observation.origin with
              | Runtime_native_tools.Built_in -> observe_effect_unavailable ()

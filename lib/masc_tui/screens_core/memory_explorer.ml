@@ -1080,7 +1080,10 @@ let build_diff_visual_rows ~theme ~bg ~lang ~now_unix ~wrap_w ~selected_idx
           let ts =
             match String.index_opt e.recorded_at 'T' with
             | Some i when i + 9 <= String.length e.recorded_at ->
-                String.sub e.recorded_at (i + 1) 8
+                let tail =
+                  String.sub e.recorded_at (i + 1) (String.length e.recorded_at - i - 1)
+                in
+                String.sub tail 0 (Text_util.clamp_utf8_cursor tail 8)
             | Some _ | None -> e.recorded_at
           in
           let line =
@@ -1105,7 +1108,10 @@ let build_diff_visual_rows ~theme ~bg ~lang ~now_unix ~wrap_w ~selected_idx
           let ts =
             match String.index_opt u.recorded_at 'T' with
             | Some i when i + 9 <= String.length u.recorded_at ->
-                String.sub u.recorded_at (i + 1) 8
+                let tail =
+                  String.sub u.recorded_at (i + 1) (String.length u.recorded_at - i - 1)
+                in
+                String.sub tail 0 (Text_util.clamp_utf8_cursor tail 8)
             | Some _ | None -> u.recorded_at
           in
           let hdr =
@@ -1149,7 +1155,10 @@ let build_diff_visual_rows ~theme ~bg ~lang ~now_unix ~wrap_w ~selected_idx
           let ts =
             match String.index_opt r.recorded_at 'T' with
             | Some i when i + 9 <= String.length r.recorded_at ->
-                String.sub r.recorded_at (i + 1) 8
+                let tail =
+                  String.sub r.recorded_at (i + 1) (String.length r.recorded_at - i - 1)
+                in
+                String.sub tail 0 (Text_util.clamp_utf8_cursor tail 8)
             | Some _ | None -> r.recorded_at
           in
           let line =

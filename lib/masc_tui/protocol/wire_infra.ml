@@ -1274,7 +1274,7 @@ let decode_workspace_tree_node json =
     | Ok (Some s) -> s
     | Ok None | Error _ -> Filename.basename path
   in
-  let depth = int_or_zero_infra json "depth" in
+  let depth = Int.max 0 (int_or_zero_infra json "depth") in
   let parent =
     match optional_string_field json "parent" with
     | Ok (Some s) -> s

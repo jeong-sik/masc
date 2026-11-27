@@ -1606,7 +1606,7 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                     let probe_obs = Probe.current_observation () in
                     let theme = Theme.of_preset !model.theme_preset in
                     let desired_document =
-                      Document_graphics.prepare document_graphics ~sw ~now:now_after
+                      Document_graphics.prepare document_graphics ~sw:work_sw ~now:now_after
                         ~base_path:cli.base_path
                         ~endpoint:(Cmd_executor.current_endpoint executor)
                         ~fetch_retained:(fun endpoint ~path ~max_body_bytes ->

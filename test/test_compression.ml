@@ -175,6 +175,67 @@ let test_prepared_snapshot_roundtrips () =
   Alcotest.(check (option string)) "no false gzip header" None
     (List.assoc_opt "content-encoding" headers)
 
+let test_prepared_lazy_gzip () =
+  let prepared = Http_response_payload.prepare sample_json in
+  Alcotest.(check bool) "gzip is uncomputed right after prepare" true
+    (Option.is_none (Atomic.get prepared.gzip));
+  ignore (Http_response_payload.select_prepared ~accept_encoding:(Some "zstd, gzip") prepared);
+  ignore (Http_response_payload.select_prepared ~accept_encoding:None prepared);
+  Alcotest.(check bool) "zstd and identity selections do not force gzip" true
+    (Option.is_none (Atomic.get prepared.gzip));
+  let expected_body, expected_headers =
+    Http_response_payload.compress_body ~accept_encoding:(Some "gzip") sample_json
+  in
+  let body, headers =
+    Http_response_payload.select_prepared ~accept_encoding:(Some "gzip") prepared
+  in
+  Alcotest.(check bool) "gzip is memoized after first gzip selection" true
+    (Option.is_some (Atomic.get prepared.gzip));
+  Alcotest.(check string) "lazy gzip bytes match eager compress_body" expected_body body;
+  Alcotest.(check (list (pair string string))) "lazy gzip headers match eager compress_body"
+    expected_headers headers;
+  (match gunzip body with
+   | Ok decoded -> Alcotest.(check string) "lazy gzip roundtrips" sample_json decoded
+   | Error message -> Alcotest.fail message);
+  let again, again_headers =
+    Http_response_payload.select_prepared ~accept_encoding:(Some "gzip") prepared
+  in
+  Alcotest.(check bool) "repeated gzip selection reuses exact string pointer" true
+    (body == again);
+  Alcotest.(check bool) "repeated gzip selection reuses exact header list pointer" true
+    (headers == again_headers);
+  (* Concurrent first-touch gzip readers converge onto one winning physical string. *)
+  let shared = Http_response_payload.prepare sample_json in
+  let ready = Atomic.make 0 in
+  let go = Atomic.make false in
+  let worker () =
+    ignore (Atomic.fetch_and_add ready 1);
+    while not (Atomic.get go) do Domain.cpu_relax () done;
+    fst (Http_response_payload.select_prepared ~accept_encoding:(Some "gzip") shared)
+  in
+  let d1 = Domain.spawn worker in
+  let d2 = Domain.spawn worker in
+  while Atomic.get ready < 2 do Domain.cpu_relax () done;
+  Atomic.set go true;
+  let b1 = Domain.join d1 in
+  let b2 = Domain.join d2 in
+  Alcotest.(check bool) "concurrent gzip readers share one physical string" true (b1 == b2);
+  Alcotest.(check string) "concurrent gzip bytes match" expected_body b1;
+  (* Small payload (< min_size) is pre-populated as identity at prepare time. *)
+  let tiny = Http_response_payload.prepare "{}" in
+  Alcotest.(check bool) "small payload pre-populates gzip slot as identity" true
+    (Option.is_some (Atomic.get tiny.gzip));
+  let tiny_body, tiny_headers =
+    Http_response_payload.select_prepared ~accept_encoding:(Some "gzip") tiny
+  in
+  let tiny_again, _ =
+    Http_response_payload.select_prepared ~accept_encoding:(Some "gzip") tiny
+  in
+  Alcotest.(check bool) "small payload returns identity string directly" true
+    (tiny_body == tiny.identity && tiny_body == tiny_again);
+  Alcotest.(check (option string)) "small payload has no content-encoding" None
+    (List.assoc_opt "content-encoding" tiny_headers)
+
 (* Observational codec profile, not a timing gate or production fixture.
    Alternating level order reduces systematic warm-up/order bias. Sys.time
    measures process CPU consumed during encode; decode and checks are outside. *)
@@ -217,6 +278,7 @@ let gzip_tests = [
   "negotiation table", `Quick, test_negotiation_table;
   "identity still varies", `Quick, test_negotiation_always_varies;
   "prepared snapshots roundtrip and reuse bytes", `Quick, test_prepared_snapshot_roundtrips;
+  "prepared snapshots compute gzip lazily and memoize atomically", `Quick, test_prepared_lazy_gzip;
 ]
 
 (* ===== Test Entry Point ===== *)

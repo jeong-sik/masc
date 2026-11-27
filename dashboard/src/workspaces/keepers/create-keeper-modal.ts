@@ -24,10 +24,19 @@ export function CreateKeeperModal(props: CreateKeeperModalProps) {
   const [draftValues, setDraftValues] = useState<Record<string, string>>({})
   const [preview, setPreview] = useState<ConfigPatchResult | null>(null)
   const [busy, setBusy] = useState(false)
+  const busyRef = useRef(false)
+  const mountedRef = useRef(true)
   const modalRef = useRef<HTMLDivElement>(null)
   const nameInputRef = useRef<HTMLInputElement>(null)
   const onCloseRef = useRef(props.onClose)
   onCloseRef.current = props.onClose
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   useFocusScope({
     containerRef: modalRef,
@@ -89,27 +98,38 @@ export function CreateKeeperModal(props: CreateKeeperModalProps) {
   }
 
   const runPatch = async (dryRun: boolean) => {
+    if (busyRef.current) return
     const trimmed = keeperName.trim()
     if (!trimmed) {
       setError('Keeper 이름(소문자/숫자/하이픈)을 입력하세요.')
       return
     }
+    busyRef.current = true
     setBusy(true)
     setError(null)
-    const res = await postConfigPatchApi({
-      target: 'keeper_create',
-      keeperName: trimmed,
-      dryRun,
-      changes: buildChanges(),
-    })
-    setBusy(false)
-    if (!res.ok) {
-      setError(res.error.message)
-      return
-    }
-    setPreview(res.value)
-    if (!dryRun && res.value.applied) {
-      props.onCreated(trimmed)
+    try {
+      const res = await postConfigPatchApi({
+        target: 'keeper_create',
+        keeperName: trimmed,
+        dryRun,
+        changes: buildChanges(),
+      })
+      if (!mountedRef.current) return
+      if (!res.ok) {
+        setError(res.error.message)
+        return
+      }
+      setPreview(res.value)
+      if (!dryRun && res.value.applied) {
+        props.onCreated(trimmed)
+      }
+    } catch (err) {
+      if (mountedRef.current) {
+        setError(err instanceof Error ? err.message : String(err))
+      }
+    } finally {
+      busyRef.current = false
+      if (mountedRef.current) setBusy(false)
     }
   }
 

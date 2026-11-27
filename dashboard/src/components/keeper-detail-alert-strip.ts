@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { KeeperRuntimeWalkObservation } from './keeper-runtime-walk-observation'
-import { signal } from '@preact/signals'
+import { useSignal } from '@preact/signals'
 import { ActionButton } from './common/button'
 import {
   keeperActivityDisplay,
@@ -227,11 +227,12 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     : activity.ageSeconds != null
       ? html`${activity.label} ${formatDuration(activity.ageSeconds)} 전`
       : null
+  const directiveLoading = useSignal(false)
   if (!needsAttention && !hasActivitySignal && !hasRuntimeIdentitySignal && !hasExecutionEvidenceSignal) return null
 
   const actionVisibility = keeperActionVisibility(keeper)
-  const directiveLoading = signal(false)
   const handleDirective = async (action: 'pause' | 'resume' | 'wakeup') => {
+    if (directiveLoading.peek()) return
     directiveLoading.value = true
     try {
       const res =

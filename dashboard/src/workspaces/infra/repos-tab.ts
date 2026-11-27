@@ -77,9 +77,15 @@ export function ReposTab(props: WorkspaceViewProps) {
 
   const repos = reposObs.kind === 'value' ? reposObs.data : NO_REPOS
   const selectedRepo = repos.find((repo) => repo.id === selectedRepoId) ?? firstByName(repos)
+  const refreshingRef = useRef(false)
+  const syncingRef = useRef<Set<string>>(new Set())
   // The default is pinned once it is shown, so a repository that later sorts
   // ahead of it does not take the detail away.
-  if (selectedRepo !== null && selectedRepo.id !== selectedRepoId) setSelectedRepoId(selectedRepo.id)
+  useEffect(() => {
+    if (selectedRepo !== null && selectedRepo.id !== selectedRepoId) {
+      setSelectedRepoId(selectedRepo.id)
+    }
+  }, [selectedRepo, selectedRepoId])
 
   // The loaders send nothing for a session that may not read.
   useEffect(() => {
@@ -108,13 +114,19 @@ export function ReposTab(props: WorkspaceViewProps) {
   }, [followingClone])
 
   const refreshAll = async () => {
+    if (refreshingRef.current) return
+    refreshingRef.current = true
     setRefreshing(true)
-    await Promise.all([
-      loadRepos('manual'),
-      loadPulls('manual'),
-      ...(selectedRepo !== null ? [loadGit(selectedRepo.id, 'manual'), loadActivity(selectedRepo.id, 'manual')] : []),
-    ])
-    setRefreshing(false)
+    try {
+      await Promise.all([
+        loadRepos('manual'),
+        loadPulls('manual'),
+        ...(selectedRepo !== null ? [loadGit(selectedRepo.id, 'manual'), loadActivity(selectedRepo.id, 'manual')] : []),
+      ])
+    } finally {
+      refreshingRef.current = false
+      if (mountedRef.current) setRefreshing(false)
+    }
   }
 
   const handleAdded = async (name: string) => {
@@ -129,46 +141,53 @@ export function ReposTab(props: WorkspaceViewProps) {
   }
 
   const handleSync = async (repo: InfraRepository) => {
-    if (!canAdminRepos(authSession.peek())) return
+    if (!canAdminRepos(authSession.peek()) || syncingRef.current.has(repo.id)) return
     const startEpoch = currentSessionEpoch()
+    syncingRef.current.add(repo.id)
     setSyncing((prev) => new Set(prev).add(repo.id))
-    const res = await apiMutate(
-      'POST',
-      `/api/v1/repositories/${encodeURIComponent(repo.id)}/sync`,
-      {},
-      { decode: (raw: unknown) => decodeRepositoryAdvance(raw, repo.id) },
-    )
-    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
-    const atSec = Date.now() / MS_PER_SECOND
-    // A sync that did what was asked says so in a toast and leaves the page as
-    // it is. One that left the working tree alone, or failed, stays beside the
-    // repository until its next sync answers.
-    let done: string | null = null
-    let unfinished: Fact | null = null
-    if (!res.ok) {
-      unfinished = { text: `동기화 실패: ${res.error.message}`, tone: 'bad' }
-    } else {
-      const summary = repositoryAdvanceSummary(res.value)
-      if (summary.tone === 'success') done = `${repo.name} 동기화 완료. ${summary.message}`
-      else unfinished = { text: summary.message, tone: 'warn' }
+    try {
+      const res = await apiMutate(
+        'POST',
+        `/api/v1/repositories/${encodeURIComponent(repo.id)}/sync`,
+        {},
+        { decode: (raw: unknown) => decodeRepositoryAdvance(raw, repo.id) },
+      )
+      if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
+      const atSec = Date.now() / MS_PER_SECOND
+      // A sync that did what was asked says so in a toast and leaves the page as
+      // it is. One that left the working tree alone, or failed, stays beside the
+      // repository until its next sync answers.
+      let done: string | null = null
+      let unfinished: Fact | null = null
+      if (!res.ok) {
+        unfinished = { text: `동기화 실패: ${res.error.message}`, tone: 'bad' }
+      } else {
+        const summary = repositoryAdvanceSummary(res.value)
+        if (summary.tone === 'success') done = `${repo.name} 동기화 완료. ${summary.message}`
+        else unfinished = { text: summary.message, tone: 'warn' }
+      }
+      // The row is read before the result shows, so the result and the status
+      // the sync left behind appear together.
+      await loadRepos('manual')
+      if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
+      setUnfinishedSyncs(({ [repo.id]: _previous, ...rest }) => (
+        unfinished === null ? rest : { ...rest, [repo.id]: { fact: unfinished, atSec } }
+      ))
+      if (done !== null) pushShellToast(done, 'success')
+      // What was read about the clone before the sync is out of date, whether or
+      // not this repository is the one on screen.
+      resourceCache.invalidateKey(gitKey(repo.id))
+      resourceCache.invalidateKey(activityKey(repo.id))
+    } finally {
+      syncingRef.current.delete(repo.id)
+      if (mountedRef.current) {
+        setSyncing((prev) => {
+          const next = new Set(prev)
+          next.delete(repo.id)
+          return next
+        })
+      }
     }
-    // The row is read before the result shows, so the result and the status
-    // the sync left behind appear together.
-    await loadRepos('manual')
-    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
-    setSyncing((prev) => {
-      const next = new Set(prev)
-      next.delete(repo.id)
-      return next
-    })
-    setUnfinishedSyncs(({ [repo.id]: _previous, ...rest }) => (
-      unfinished === null ? rest : { ...rest, [repo.id]: { fact: unfinished, atSec } }
-    ))
-    if (done !== null) pushShellToast(done, 'success')
-    // What was read about the clone before the sync is out of date, whether or
-    // not this repository is the one on screen.
-    resourceCache.invalidateKey(gitKey(repo.id))
-    resourceCache.invalidateKey(activityKey(repo.id))
   }
 
   const readKeys = [

@@ -145,16 +145,24 @@ export function LaneInventoryPanel() {
   const [selected, setSelected] = useState<{ id: string; target: LaneNavigationTarget } | null>(null)
   const request = useRef<AbortController | null>(null)
   const mounted = useRef(true)
+  const verifyingRef = useRef(false)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const details = useRef<HTMLDivElement | null>(null)
   const snapshot = received?.authority === authority ? received.value : null
   async function verifyWorkspace() {
+    if (verifyingRef.current) return
     const requested = executionWorkspaceAuthority.peek()
+    verifyingRef.current = true
     setVerifying(true); setError(null)
     try { await refreshExecution({ force: true }) }
     catch (failure) {
-      if (executionWorkspaceAuthority.peek() === requested) setError(String(failure))
-    } finally { setVerifying(false) }
+      if (mounted.current && executionWorkspaceAuthority.peek() === requested) {
+        setError(String(failure))
+      }
+    } finally {
+      verifyingRef.current = false
+      if (mounted.current) setVerifying(false)
+    }
   }
   async function refresh() {
     if (!mounted.current) return

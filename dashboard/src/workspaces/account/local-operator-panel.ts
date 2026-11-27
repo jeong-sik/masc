@@ -9,7 +9,7 @@
 
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
-import { useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import {
   activeWorkspaceId,
   registerWorkspaceTargets,
@@ -43,13 +43,25 @@ export function LocalOperatorPanel({
   const targets = workspaceTargets.value
   const activeWs = activeWorkspaceId.value
   const epoch = sessionEpoch.value
+  const verifyingRef = useRef(false)
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   const handleApplyToken = async (event: Event) => {
     event.preventDefault()
+    if (verifyingRef.current) return
+    verifyingRef.current = true
     setTokenError(null)
     setVerifying(true)
     try {
       const result = await verifyAndApplySingleUserToken(tokenInput)
+      if (!mountedRef.current) return
       if (result.ok) {
         setTokenInput('')
         pushShellToast('Local Operator 인증이 확인되었습니다.', 'success')
@@ -59,7 +71,8 @@ export function LocalOperatorPanel({
         pushShellToast(`인증 실패: ${result.error}`, 'error')
       }
     } finally {
-      setVerifying(false)
+      verifyingRef.current = false
+      if (mountedRef.current) setVerifying(false)
     }
   }
 
@@ -95,7 +108,12 @@ export function LocalOperatorPanel({
       }
     }
     const slug = label.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-|-$/g, '') || `ws-${Date.now()}`
-    const id = targets.some((t) => t.id === slug) ? `${slug}-${targets.length + 1}` : slug
+    let id = slug
+    let suffix = targets.length + 1
+    while (targets.some((t) => t.id === id)) {
+      id = `${slug}-${suffix}`
+      suffix += 1
+    }
     registerWorkspaceTargets([
       ...targets,
       { id, label, ...(normalizedBaseUrl ? { baseUrl: normalizedBaseUrl } : {}) },

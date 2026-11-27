@@ -221,6 +221,20 @@ function sanitizeHtml(raw: string): string {
   return purifyHtml(raw)
 }
 
+function safeExternalUrl(raw?: string): string | null {
+  const trimmed = raw?.trim()
+  if (!trimmed) return null
+  try {
+    const parsed = new URL(trimmed)
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      return trimmed
+    }
+    return null
+  } catch {
+    return null
+  }
+}
+
 function ArtifactPreview({ item }: { item: ArtifactItem }): VNode {
   switch (item.kind) {
     case 'image':
@@ -239,20 +253,32 @@ function ArtifactPreview({ item }: { item: ArtifactItem }): VNode {
           dangerouslySetInnerHTML=${{ __html: item.source ? sanitizeHtml(item.source) : '' }}
         />
       `
-    case 'link':
+    case 'link': {
+      const href = safeExternalUrl(item.url)
+      if (!href) {
+        return html`
+          <div class="chat-artifact-preview" data-artifact-preview="link">
+            <span class="chat-artifact-preview-link">
+              <span>${item.name}</span>
+              <span class="chat-artifact-preview-link-meta">${item.url ?? ''}</span>
+            </span>
+          </div>
+        `
+      }
       return html`
         <div class="chat-artifact-preview" data-artifact-preview="link">
           <a
             class="chat-artifact-preview-link"
-            href=${item.url}
+            href=${href}
             target="_blank"
             rel="noopener noreferrer"
           >
             <span>${item.name}</span>
-            <span class="chat-artifact-preview-link-meta">${item.url}</span>
+            <span class="chat-artifact-preview-link-meta">${href}</span>
           </a>
         </div>
       `
+    }
     case 'attachment':
       if (item.mimeType?.startsWith('image/') && item.src) {
         return html`
@@ -266,10 +292,16 @@ function ArtifactPreview({ item }: { item: ArtifactItem }): VNode {
           <pre class="chat-artifact-preview-text">${item.name}</pre>
         </div>
       `
-    default:
+    case 'code':
       return html`
         <div class="chat-artifact-preview" data-artifact-preview="code">
           <pre class="chat-artifact-preview-text"><code dangerouslySetInnerHTML=${{ __html: item.source ? sanitizeHtml(item.source) : '' }} /></pre>
+        </div>
+      `
+    default:
+      return html`
+        <div class="chat-artifact-preview" data-artifact-preview="code">
+          <pre class="chat-artifact-preview-text"><code>${item.source ?? ''}</code></pre>
         </div>
       `
   }
@@ -279,11 +311,14 @@ function ArtifactCard({ item }: { item: ArtifactItem }): VNode {
   const [open, setOpen] = useState(false)
   const [copying, setCopying] = useState(false)
   const canDownload = hasDownloadPayload(item)
-  const canOpen = item.kind === 'link' ? !!item.url : true
+  const safeLinkHref = item.kind === 'link' ? safeExternalUrl(item.url) : null
+  const canOpen = item.kind === 'link' ? safeLinkHref !== null : true
 
   const handleOpen = () => {
-    if (item.kind === 'link' && item.url) {
-      window.open(item.url, '_blank', 'noopener,noreferrer')
+    if (item.kind === 'link') {
+      if (safeLinkHref) {
+        window.open(safeLinkHref, '_blank', 'noopener,noreferrer')
+      }
       return
     }
     setOpen((o) => !o)

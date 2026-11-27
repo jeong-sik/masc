@@ -167,9 +167,11 @@ export function RepoAddForm(props: { readonly onAdded: (name: string) => void })
     }
   }, [])
 
+  const busyRef = useRef(false)
+
   const submit = async (ev: Event) => {
     ev.preventDefault()
-    if (!canAdminRepos(authSession.peek())) return
+    if (busyRef.current || !canAdminRepos(authSession.peek())) return
     const repoName = name.trim()
     const repoUrl = url.trim()
     // `required` lets a field of spaces through.
@@ -178,22 +180,27 @@ export function RepoAddForm(props: { readonly onAdded: (name: string) => void })
       return
     }
     const startEpoch = currentSessionEpoch()
+    busyRef.current = true
     setBusy(true)
     setError(null)
-    const res = await apiMutate<unknown>('POST', '/api/v1/repositories', {
-      name: repoName,
-      url: repoUrl,
-      default_branch: branch.trim() || 'main',
-      auto_sync: true,
-      sync_interval: NEW_REPO_SYNC_INTERVAL_S,
-    })
-    if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
-    setBusy(false)
-    if (!res.ok) {
-      setError(`저장소 등록 실패: ${res.error.message}`)
-      return
+    try {
+      const res = await apiMutate<unknown>('POST', '/api/v1/repositories', {
+        name: repoName,
+        url: repoUrl,
+        default_branch: branch.trim() || 'main',
+        auto_sync: true,
+        sync_interval: NEW_REPO_SYNC_INTERVAL_S,
+      })
+      if (!mountedRef.current || !isEpochCurrent(startEpoch)) return
+      if (!res.ok) {
+        setError(`저장소 등록 실패: ${res.error.message}`)
+        return
+      }
+      props.onAdded(repoName)
+    } finally {
+      busyRef.current = false
+      if (mountedRef.current) setBusy(false)
     }
-    props.onAdded(repoName)
   }
 
   const field = (label: string, placeholder: string, value: string, set: (next: string) => void, required: boolean) => html`
@@ -204,6 +211,7 @@ export function RepoAddForm(props: { readonly onAdded: (name: string) => void })
         placeholder=${placeholder}
         value=${value}
         required=${required}
+        disabled=${busy}
         onInput=${(e: Event) => set((e.target as HTMLInputElement).value)}
       />
     </label>

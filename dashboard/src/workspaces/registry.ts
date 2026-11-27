@@ -144,13 +144,15 @@ export function preloadWorkspace(id: WorkspaceId): void {
 export function getWorkspaceComponent(id: WorkspaceId): WorkspaceComponent {
   let cached = lazyCache.get(id)
   if (!cached) {
-    cached = lazy(async () => {
+    const component = lazy(async () => {
       try {
         return await loadWorkspaceOnce(id)
       } catch (error) {
+        if (lazyCache.get(id) === component) lazyCache.delete(id)
         throw new WorkspaceLoadError(error)
       }
     }) as unknown as WorkspaceComponent
+    cached = component
     lazyCache.set(id, cached)
   }
   return cached

@@ -279,7 +279,7 @@ export function createKeepers({ send, leave }: KeepersDeps): KeepersModel {
     const now = view.peek()
     session = next
     if (now.kind !== 'waiting' && now.forUser === next.userId) return Promise.resolve()
-    if (next.userId !== person) {
+    if (next.userId !== person || left) {
       person = next.userId
       round += 1
       left = false

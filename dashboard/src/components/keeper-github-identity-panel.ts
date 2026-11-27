@@ -70,16 +70,23 @@ export function KeeperGithubIdentityPanel({
   }
 
   useEffect(() => {
+    abortRef.current?.abort()
+    abortRef.current = null
+    setLoginOpen(false)
+    setLoginRunning(false)
+    setOutput('')
     void refresh()
     return () => {
       refreshAbortRef.current?.abort()
       abortRef.current?.abort()
+      abortRef.current = null
     }
   }, [keeperName])
 
   const urls = useMemo(() => extractUrls(output), [output])
 
   const startLogin = async () => {
+    if (loginRunning) return
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
@@ -92,6 +99,7 @@ export function KeeperGithubIdentityPanel({
         observation?.hostname ?? 'github.com',
         scopes,
         event => {
+          if (abortRef.current !== controller || controller.signal.aborted) return
           if (event.event === 'output') {
             setOutput(current => current + event.text)
           } else if (event.event === 'complete') {
@@ -103,13 +111,15 @@ export function KeeperGithubIdentityPanel({
         controller.signal,
       )
     } catch (error) {
-      if (!controller.signal.aborted) {
+      if (!controller.signal.aborted && abortRef.current === controller) {
         const message = error instanceof Error ? error.message : String(error)
         setOutput(current => `${current}\n${message}\n`)
       }
     } finally {
-      if (abortRef.current === controller) abortRef.current = null
-      setLoginRunning(false)
+      if (abortRef.current === controller) {
+        abortRef.current = null
+        setLoginRunning(false)
+      }
     }
   }
 
@@ -126,7 +136,7 @@ export function KeeperGithubIdentityPanel({
         <h3>GitHub CLI 계정</h3>
         <div class="ml-auto flex gap-2">
           <button type="button" onClick=${() => void refresh()} class="kcf-btn ghost">새로고침</button>
-          <button type="button" onClick=${() => void startLogin()} class="kcf-btn save">GitHub 로그인</button>
+          <button type="button" disabled=${loginRunning} onClick=${() => void startLogin()} class="kcf-btn save">GitHub 로그인</button>
         </div>
       </div>
       <p class="kcf-sec-desc">Keeper 전용으로 저장된 GitHub CLI 계정과 호스트에 투영된 자격 증명을 GitHub API로 각각 확인합니다.</p>

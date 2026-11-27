@@ -396,6 +396,7 @@ export function SkillSourceEditor({ reference, onPublished, onMutation, observat
                         type="button"
                         disabled=${busy.value !== null || reloadRequired.value}
                         onClick=${async () => {
+                          if (busy.peek() !== null || reloadRequired.peek()) return
                           if (observationCurrent && !observationCurrent()) return
                           const requestedReference = loaded.value?.reference
                           if (!requestedReference) return
@@ -438,6 +439,14 @@ export function SkillSourceEditor({ reference, onPublished, onMutation, observat
                         data-testid="skill-source-save"
                         disabled=${busy.value !== null || !previewIsCurrent || reloadRequired.value}
                         onClick=${async () => {
+                          if (
+                            busy.peek() !== null
+                            || reloadRequired.peek()
+                            || preview.peek() === null
+                            || previewedSource.peek() !== draft.peek()
+                          ) {
+                            return
+                          }
                           if (observationCurrent && !observationCurrent()) return
                           const requestedReference = loaded.value?.reference
                           if (!requestedReference) return

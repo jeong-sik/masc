@@ -50,7 +50,7 @@ Slack's `[slack].trigger_policy` and its `slack.trigger_policy` param work the
 same way, through the same shared resolution (`Connector_trigger_policy`).
 
 Channel→keeper bindings: `Channel_gate_discord_state.bind` / `unbind` write to
-`.gate/runtime/discord/bindings.json` (overridable via
+`.masc/connectors/discord/bindings.json` (overridable via
 `MASC_DISCORD_BINDING_STORE_PATH`). The dashboard mutates bindings through the
 HTTP routes `/api/v1/gate/connector/bind?name=discord` and
 `/api/v1/gate/connector/unbind?name=discord`, which remain functional.
@@ -92,11 +92,11 @@ this connector needs is a permission grant rather than a credential.
 | `MASC_IMESSAGE_REPLY_MODE` | no (default `self-chat`) | `self-chat` or `source-chat`. An unrecognised value is a configuration error and the gateway does not start; it is never coerced to the default. A typo that quietly routed replies elsewhere would only be visible to whoever wrongly received them. |
 | `MASC_IMESSAGE_SELF_CHAT_GUID` | no | The note-to-self chat to answer in. Left unset, the connector resolves it from chat.db and keeps looking on every poll, because that conversation may not exist yet when the server boots. |
 | `MASC_IMESSAGE_POLL_INTERVAL_SEC` | no (default `2`) | Accepted range 0.5–300 seconds. Unparseable or out of range is a configuration error, not a silent fallback to the default. |
-| `MASC_IMESSAGE_CURSOR_PATH` | no | Default `.gate/runtime/imessage/cursor.json` under the base path. Holds the last delivered `message.ROWID`. A cursor file that cannot be read stops startup rather than restarting from zero, which would redeliver every message Messages.app has ever stored. |
+| `MASC_IMESSAGE_CURSOR_PATH` | no | Default `.masc/connectors/imessage/cursor.json` under the base path. Holds the last delivered `message.ROWID`. A cursor file that cannot be read stops startup rather than restarting from zero, which would redeliver every message Messages.app has ever stored. |
 | `MASC_IMESSAGE_CHAT_DB_PATH` | no | Default `$HOME/Library/Messages/chat.db`. Exists so tests can read a fixture. |
 
 Bindings work like every other connector:
-`.gate/runtime/imessage/bindings.json` (overridable via
+`.masc/connectors/imessage/bindings.json` (overridable via
 `MASC_IMESSAGE_BINDING_STORE_PATH`), mutated through
 `/api/v1/gate/connector/bind?name=imessage` and the matching `unbind`.
 
@@ -165,7 +165,7 @@ the resolved `runtime.toml` is the only configured plane. Closed sum:
 `mention_only`, `mention_or_thread`, `user_only:<slack_user_id>`, or `all`.
 
 Channel→keeper bindings: `Channel_gate_slack_state.bind` / `unbind` write to
-`.gate/runtime/slack/bindings.json` (overridable via
+`.masc/connectors/slack/bindings.json` (overridable via
 `MASC_SLACK_BINDING_STORE_PATH`), mutated through
 `/api/v1/gate/connector/bind?name=slack` and `/unbind?name=slack`.
 
@@ -185,8 +185,8 @@ Modules: `lib/server/server_telegram_in_process_gateway.ml`,
 | Setting | Resolution | Default |
 |---|---|---|
 | Bot credential | `TELEGRAM_BOT_TOKEN` | required |
-| Bindings | `TELEGRAM_BINDING_STORE_PATH`, then `MASC_TELEGRAM_BINDING_STORE_PATH` | `.gate/runtime/telegram/bindings.json` |
-| Binding audit | `TELEGRAM_BINDING_AUDIT_PATH`, then `MASC_TELEGRAM_BINDING_AUDIT_PATH` | `.gate/runtime/telegram/binding_audit.jsonl` |
+| Bindings | `TELEGRAM_BINDING_STORE_PATH`, then `MASC_TELEGRAM_BINDING_STORE_PATH` | `.masc/connectors/telegram/bindings.json` |
+| Binding audit | `TELEGRAM_BINDING_AUDIT_PATH`, then `MASC_TELEGRAM_BINDING_AUDIT_PATH` | `.masc/connectors/telegram/binding_audit.jsonl` |
 
 1. Obtain a bot token from [@BotFather](https://t.me/BotFather).
 2. Set `TELEGRAM_BOT_TOKEN` in the server environment or runtime.toml and restart
@@ -195,7 +195,7 @@ Modules: `lib/server/server_telegram_in_process_gateway.ml`,
    can be negative. Unreadable binding state refuses acknowledgment.
 
 The authenticated bot ID owns its cursor under
-`<base-path>/.gate/runtime/telegram/<bot-id>/cursor.json`. The cursor advances
+`<base-path>/.masc/connectors/telegram/<bot-id>/cursor.json`. The cursor advances
 only after durable Keeper acceptance or an explicit ignored-message decision.
 The native continuation retains chat, forum/direct-message topic, reply and
 user coordinates. Terminal delivery renders the exact persisted assistant turn

@@ -486,6 +486,213 @@ describe('workspaces/runtime', () => {
     expect(onNavigate).toHaveBeenCalledWith('/settings?key=providers.openai')
   })
 
+  it('QuotasTab supports intuitive labels, filter/sort/search, 24h call stats, cutoff elapsed display, and detail inspect drawer', async () => {
+    const nowSec = Math.floor(Date.now() / 1000)
+    const scopes: ProviderUsageScope[] = [
+      {
+        scope: 'provider:claude_sub',
+        scope_id: 'scope-claude',
+        providers: [{ id: 'claude_sub', display_name: 'Claude Sub' }],
+        state: 'reported',
+        windows: [{
+          limit_id: null,
+          window: { kind: 'five_hour' },
+          utilization: { unit: 'fraction', value: 1.0 },
+          resets_at: nowSec + 10_800, // 3h left -> started 2h ago
+          observed_at: nowSec - 1080, // observed spent 18m ago -> 1h 42m elapsed
+          source: 'claude_code.rate_limit_event',
+          role: 'gates_model_calls',
+        }],
+      },
+      {
+        scope: 'provider:codex_b',
+        scope_id: 'scope-codex',
+        providers: [{ id: 'codex_b', display_name: 'Codex Account B' }],
+        state: 'reported',
+        windows: [{
+          limit_id: null,
+          window: { kind: 'seven_day' },
+          utilization: { unit: 'percent', value: 20 },
+          resets_at: nowSec + 5 * 86_400,
+          observed_at: nowSec - 60,
+          source: 'codex.account_rate_limits_read',
+          role: 'gates_model_calls',
+        }],
+      },
+      {
+        scope: 'provider:vibe_acp',
+        scope_id: 'scope-vibe',
+        providers: [{ id: 'vibe_acp', display_name: 'Mistral Vibe' }],
+        state: 'not_reported_since_start',
+        windows: [],
+      },
+    ]
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.startsWith('/api/v1/runtime/resolved')) {
+        return jsonResponse({
+          config_path: 'runtime.toml',
+          default_route: 'pool-a',
+          default_runtime: null,
+          runtimes: [
+            {
+              id: 'claude_sub.sonnet',
+              provider: 'Claude Sub',
+              provider_id: 'claude_sub',
+              model: 'sonnet',
+              effective_max_context: 200_000,
+              max_context_source: 'capability',
+              max_output_tokens: null,
+              is_local: false,
+              is_default: false,
+              quota_rest: { cause: 'usage_read', reset_stated: true, until: nowSec + 10_800 },
+            },
+            {
+              id: 'codex_b.gpt',
+              provider: 'Codex Account B',
+              provider_id: 'codex_b',
+              model: 'gpt',
+              effective_max_context: 200_000,
+              max_context_source: 'capability',
+              max_output_tokens: null,
+              is_local: false,
+              is_default: false,
+              quota_rest: null,
+            },
+          ],
+          lanes: [{ id: 'pool-a', declared: true, runtime_ids: ['claude_sub.sonnet', 'codex_b.gpt'] }],
+          assignments: [{ keeper: 'wkbl-data', assignment_source: 'explicit', resolved: { kind: 'lane', id: 'pool-a' } }],
+          provider_usage_windows: scopes,
+        })
+      }
+      if (url.startsWith('/api/v1/dashboard/provider-usage-history')) {
+        return jsonResponse({
+          days: 7,
+          generated_at: nowSec,
+          sampling: 'latest_provider_report_per_utc_day',
+          unreadable_reports: 0,
+          reported_no_windows: [],
+          points: [
+            {
+              scope_id: 'scope-claude',
+              source: 'claude_code.rate_limit_event',
+              kind: 'five_hour',
+              limit_id: null,
+              observed_at: nowSec - 1080,
+              resets_at: nowSec + 10_800,
+              unit: 'fraction',
+              value: 1.0,
+            },
+          ],
+        })
+      }
+      if (url.startsWith('/api/v1/runtime/metrics')) {
+        return jsonResponse({
+          history: {
+            state: 'ready',
+            window_minutes: 1440,
+            observed_at: nowSec,
+            attributed_entries: 55,
+            unattributed_entries: 0,
+            runtimes: [
+              {
+                runtime_id: 'claude_sub.sonnet',
+                entry_count: 35,
+                success_count: 32,
+                error_count: 3,
+                total_tool_calls: 40,
+                total_input_tokens: 150_000,
+                total_output_tokens: 12_000,
+                total_cache_read_tokens: 110_000,
+                total_cost_usd: 0,
+                p50_latency_ms: 950,
+                p95_latency_ms: 2100,
+              },
+              {
+                runtime_id: 'codex_b.gpt',
+                entry_count: 20,
+                success_count: 20,
+                error_count: 0,
+                total_tool_calls: 15,
+                total_input_tokens: 80_000,
+                total_output_tokens: 6_000,
+                total_cache_read_tokens: 40_000,
+                total_cost_usd: 0,
+                p50_latency_ms: 1100,
+                p95_latency_ms: 2400,
+              },
+            ],
+          },
+          specifications: [],
+        })
+      }
+      if (url.startsWith('/api/v1/setup/inventory')) {
+        return jsonResponse({ integrations: [] })
+      }
+      return jsonResponse({})
+    }) as typeof fetch
+
+    const onInspect = vi.fn()
+    render(
+      html`<${RuntimeWorkspace} subroute="quotas" onNavigate=${vi.fn()} onInspect=${onInspect} />`,
+      container,
+    )
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="quota-scope-controls"]')).not.toBeNull()
+      expect(container.querySelector('[data-testid="quota-scope-card-claude_sub"]')?.textContent).toContain('24h 호출 35회')
+    })
+
+    // Replaces confusing Tier 1/2/3 labels with intuitive Korean section names
+    expect(container.querySelector('[data-testid="quota-tier-1"]')!.textContent).toContain('주의 필요')
+    expect(container.querySelector('[data-testid="quota-tier-1"]')!.textContent).not.toContain('Tier 1')
+    expect(container.querySelector('[data-testid="quota-tier-2"]')!.textContent).toContain('정상 활성 구독')
+    expect(container.querySelector('[data-testid="quota-tier-3"]')!.textContent).toContain('사용량 미보고')
+
+    // Shows cutoff elapsed duration and 24h call count on card
+    const claudeCard = container.querySelector('[data-testid="quota-scope-card-claude_sub"]')!
+    expect(claudeCard.textContent).toContain('창 시작 후 1시간 42분 시점에 마지막 소진 관측')
+    expect(claudeCard.textContent).toContain('24h 호출 35회 · 오류 3')
+    expect(claudeCard.textContent).toContain('최근 7일 소진 1일')
+
+    // Filter to healthy_sub -> shows only Codex Account B in unified list
+    const healthyBtn = container.querySelector('[data-testid="quota-filter-healthy_sub"]') as HTMLButtonElement
+    healthyBtn.click()
+    await flushUi(10)
+    const filteredList = container.querySelector('[data-testid="quota-filtered-list"]')!
+    expect(filteredList.textContent).toContain('Codex Account B')
+    expect(filteredList.textContent).not.toContain('Claude Sub')
+
+    // Reset filter and sort by util_asc -> Codex (20%) appears before Claude (100%)
+    const resetBtn = container.querySelector('[data-testid="quota-controls-reset"]') as HTMLButtonElement
+    resetBtn.click()
+    await flushUi(10)
+    const sortSelect = container.querySelector('[data-testid="quota-sort-select"]') as HTMLSelectElement
+    sortSelect.value = 'util_asc'
+    sortSelect.dispatchEvent(new Event('change', { bubbles: true }))
+    await flushUi(10)
+    const cardIds = Array.from(container.querySelectorAll('[data-testid^="quota-scope-card-"]')).map((el) => el.getAttribute('data-testid'))
+    expect(cardIds).toEqual([
+      'quota-scope-card-codex_b',
+      'quota-scope-card-claude_sub',
+      'quota-scope-card-vibe_acp',
+    ])
+
+    // Click 상세 보기 -> opens inspect drawer with cutoff timing, 24h stats, history, and affected keepers
+    const detailBtn = container.querySelector('[data-testid="quota-detail-btn-claude_sub"]') as HTMLButtonElement
+    detailBtn.click()
+    expect(onInspect).toHaveBeenCalledTimes(1)
+    const inspectArg = onInspect.mock.calls[0]![0]
+    expect(inspectArg.title).toContain('Claude Sub')
+    const drawerHost = document.createElement('div')
+    render(inspectArg.render(), drawerHost)
+    expect(drawerHost.textContent).toContain('창 시작 후 1시간 42분 시점에 마지막 소진 관측')
+    expect(drawerHost.textContent).toContain('claude_sub.sonnet')
+    expect(drawerHost.textContent).toContain('wkbl-data')
+    expect(drawerHost.textContent).toContain('pool-a')
+  })
+
   it.each([
     { subroute: 'tools', unbridgedPrefix: '/api/v1/tool-metrics/series', bridgedPrefix: '/api/v1/dashboard/tools', badge: 'tools-stream-badge' },
     { subroute: 'efficiency', unbridgedPrefix: '/api/v1/models/metrics', bridgedPrefix: '/api/v1/dashboard/cache-stats', badge: 'efficiency-stream-badge' },

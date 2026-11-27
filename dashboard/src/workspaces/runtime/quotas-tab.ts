@@ -1,9 +1,9 @@
 /**
  * Runtime L1 Tab 1: Quotas & Rate Limits
  *
- * - 3-Tier Quota Partition matching TUI #6:
- *   Tier 1: Exhausted / Credits / 429 Resting -> Tier 2: Active Subscriptions ($0 Sub honesty)
- *   -> Tier 3: Collapsed Unreported (? Unreported honesty).
+ * - 3-Group Quota View (Attention / Active Subscriptions / Unreported) with
+ *   filter, sort, search, 24h call stats (/api/v1/runtime/metrics), window
+ *   burn / cutoff elapsed analysis, and inspect drawer detail view.
  * - UPlotChart Provider Usage History & 429 Cooldown Band:
  *   GET /api/v1/dashboard/provider-usage-history?days=<timeWindowProviderDays> (strictly 1|7|14)
  *   explicitly handling HTTP 200 { state: "unavailable", reason } per #36.
@@ -63,15 +63,25 @@ import {
 import { RuntimeLivenessPanel } from './runtime-liveness-panel'
 import { loadSetupInventory, SETUP_INVENTORY_KEY } from './setup-inventory-read'
 import {
-  classifyQuotaScope,
+  countQuotaFilters,
+  decodeRuntimeMetrics24h,
+  enrichQuotaScopes,
+  filterAndSortQuotaScopes,
+  formatDurationKo,
+  utilizationToPct,
+  type EnrichedQuotaScope,
+  type QuotaScopeFilter,
+  type QuotaScopeSort,
+  type RuntimeMetrics24hSnapshot,
+} from './quota-scope-view'
+import {
   decodeMultiAccountIntegrations,
   decodeMultiAccountProviderAccounts,
+  formatCompactNumber,
   formatResetCountdown,
   formatUnixTime,
   loadProviderUsageHistory,
   loadRuntimeResolved,
-  maxUtilizationPct,
-  partitionQuotaScopes,
   quotaRestOfScope,
   resolveRuntimeMediaCapabilities,
   restingProviderIds,
@@ -82,7 +92,6 @@ import {
   type MultiAccountProviderAccountsResponse,
   type ProviderUsageHistoryPoint,
   type ProviderUsageHistoryResponse,
-  type ProviderUsageScope,
   type RuntimeQuotaRest,
   type RuntimeResolvedPayload,
   type SetupAccountEmail,
@@ -177,24 +186,13 @@ interface CredentialFormState {
   readonly mode: 'api_key' | 'oauth'
 }
 
-function scopeDisplayName(scope: ProviderUsageScope): string {
-  if (scope.providers.length > 0) {
-    return scope.providers.map((p) => p.display_name || p.id).join(' · ')
-  }
-  return scope.scope_id || scope.scope
-}
-
 /** The account line under a provider: its login email and the plan labels
  *  the client reports, or why the login file was not read. */
 export function accountLine(row: SetupAccountEmail | undefined): string | null {
   return formatAccountEmailEntry(row)
 }
 
-function primaryProviderId(scope: ProviderUsageScope): string {
-  return scope.providers[0]?.id ?? scope.scope_id ?? scope.scope
-}
-
-function costBadgeStyle(kind: ReturnType<typeof classifyQuotaScope>['kind']) {
+function costBadgeStyle(kind: EnrichedQuotaScope['classification']['kind']) {
   switch (kind) {
     case 'exhausted_zero':
       return { background: 'var(--err-soft)', border: '1px solid var(--err-border)', color: 'var(--err-fg)' }
@@ -204,6 +202,31 @@ function costBadgeStyle(kind: ReturnType<typeof classifyQuotaScope>['kind']) {
       return { background: 'var(--info-soft)', border: '1px solid var(--info-border)', color: 'var(--info-fg)' }
     case 'unreported':
       return { background: 'var(--idle-soft)', border: '1px solid var(--idle-border)', color: 'var(--fg-3)' }
+  }
+}
+
+const QUOTA_SORT_OPTIONS: readonly { readonly value: QuotaScopeSort; readonly label: string }[] = [
+  { value: 'default', label: '상태 그룹순 (기본)' },
+  { value: 'util_desc', label: '사용률 높은순' },
+  { value: 'util_asc', label: '여유 많은순 (사용률 낮은순)' },
+  { value: 'reset_soon', label: '리셋 임박순' },
+  { value: 'calls_desc', label: '24시간 호출 많은순' },
+  { value: 'name', label: '이름순' },
+]
+
+function historyPointValueLabel(pt: ProviderUsageHistoryPoint): string {
+  const u = pt.utilization
+  switch (u.unit) {
+    case 'fraction':
+      return `${Math.min(100, Math.max(0, u.value * 100)).toFixed(1)}%`
+    case 'percent':
+      return `${Math.min(100, Math.max(0, u.value)).toFixed(0)}%`
+    case 'usd':
+      return u.limit !== null ? `$${u.value.toFixed(2)} / $${u.limit.toFixed(2)}` : `$${u.value.toFixed(2)}`
+    case 'credit_balance':
+      return `${u.remaining.toFixed(2)} ${u.currency}`
+    case 'credit_unlimited':
+      return '무제한 구독'
   }
 }
 
@@ -226,11 +249,15 @@ export function QuotasTab(props: WorkspaceViewProps) {
   const resolvedObs = resourceCache.observe<RuntimeResolvedPayload>('runtime:resolved').value
   const historyKey = `runtime:provider-usage-history:${providerDays}`
   const historyObs = resourceCache.observe<ProviderUsageHistoryResponse>(historyKey).value
+  const runtimeMetricsObs = resourceCache.observe<RuntimeMetrics24hSnapshot>('runtime:metrics:24h').value
   const inventoryKey = isMultiAccountSignedIn ? 'runtime:auth-provider-accounts' : SETUP_INVENTORY_KEY
   const inventoryObs = resourceCache.observe<SetupInventoryPayload | MultiAccountProviderAccountsResponse>(inventoryKey).value
   const personIntegObs = resourceCache.observe<MultiAccountIntegrationsResponse>('runtime:auth-integrations').value
 
   const [tier3Expanded, setTier3Expanded] = useState(false)
+  const [scopeFilter, setScopeFilter] = useState<QuotaScopeFilter>('all')
+  const [scopeSort, setScopeSort] = useState<QuotaScopeSort>('default')
+  const [scopeQuery, setScopeQuery] = useState('')
   const [pausedPanelPref, setPausedPanelPref] = useState<boolean | null>(null)
   const [inventoryOpen, setInventoryOpen] = useState(false)
   const [pausedSortBy, setPausedSortBy] = useState<QuotaRestSortKey>('release')
@@ -305,7 +332,17 @@ export function QuotasTab(props: WorkspaceViewProps) {
         ),
       )
     } else if (singleLocal && !isAdminLockedForSession('admin', curSession)) {
-      jobs.push(loadSetupInventory(reason))
+      jobs.push(
+        loadSetupInventory(reason),
+        resourceCache.fetch<RuntimeMetrics24hSnapshot>(
+          'runtime:metrics:24h',
+          (signal) => apiGet<RuntimeMetrics24hSnapshot>('/api/v1/runtime/metrics', {
+            signal,
+            decode: decodeRuntimeMetrics24h,
+          }),
+          { ttlMs: 30_000, topics: ['runtime_metrics', 'model_metrics', 'telemetry'], reason },
+        ),
+      )
       rawConfigAbortRef.current?.abort()
       const ctrl = new AbortController()
       rawConfigAbortRef.current = ctrl
@@ -339,6 +376,7 @@ export function QuotasTab(props: WorkspaceViewProps) {
     const watchedTopics = new Set([
       'runtime',
       'runtime_resolved',
+      'runtime_metrics',
       'provider_usage',
       'provider_standing',
       'quota',
@@ -405,11 +443,6 @@ export function QuotasTab(props: WorkspaceViewProps) {
     [resolvedData, nowUnix],
   )
 
-  const partitioned = useMemo(
-    () => partitionQuotaScopes(resolvedData?.provider_usage_windows ?? [], restingProviders, nowUnix),
-    [resolvedData, restingProviders, nowUnix],
-  )
-
   const accountEmails = useMemo(
     () => new Map<string, SetupAccountEmail>(
       inventoryObs.kind === 'value' && 'account_emails' in inventoryObs.data && Array.isArray(inventoryObs.data.account_emails)
@@ -418,6 +451,45 @@ export function QuotasTab(props: WorkspaceViewProps) {
     ),
     [inventoryObs],
   )
+
+  const metrics24hData: RuntimeMetrics24hSnapshot | null =
+    runtimeMetricsObs.kind === 'value' ? runtimeMetricsObs.data : null
+  const historyData: ProviderUsageHistoryResponse | null =
+    historyObs.kind === 'value' ? historyObs.data : null
+
+  const enrichedScopes = useMemo(
+    () => enrichQuotaScopes({
+      scopes: resolvedData?.provider_usage_windows ?? [],
+      restingProviders,
+      accountEmails,
+      runtimes: resolvedData?.runtimes ?? [],
+      lanes: resolvedData?.lanes ?? [],
+      assignments: resolvedData?.assignments ?? [],
+      metrics24h: metrics24hData,
+      history: historyData,
+      nowUnix,
+    }),
+    [resolvedData, restingProviders, accountEmails, metrics24hData, historyData, nowUnix],
+  )
+
+  const filterCounts = useMemo(() => countQuotaFilters(enrichedScopes), [enrichedScopes])
+
+  const groupedScopes = useMemo(() => ({
+    attention: enrichedScopes.filter((i) => i.group === 'attention'),
+    healthySub: enrichedScopes.filter((i) => i.group === 'healthy_sub'),
+    unreported: enrichedScopes.filter((i) => i.group === 'unreported'),
+  }), [enrichedScopes])
+
+  const filteredSortedScopes = useMemo(
+    () => filterAndSortQuotaScopes(enrichedScopes, {
+      filter: scopeFilter,
+      sort: scopeSort,
+      query: scopeQuery,
+    }),
+    [enrichedScopes, scopeFilter, scopeSort, scopeQuery],
+  )
+
+  const hasActiveScopeControl = scopeFilter !== 'all' || scopeSort !== 'default' || scopeQuery.trim().length > 0
 
   const integrations: readonly SetupIntegration[] = useMemo(
     () => (inventoryObs.kind === 'value' && 'integrations' in inventoryObs.data && Array.isArray(inventoryObs.data.integrations)
@@ -888,14 +960,255 @@ export function QuotasTab(props: WorkspaceViewProps) {
     void loadAll('manual')
   }
 
-  const renderScopeCard = (scope: ProviderUsageScope, idx: number) => {
-    const cls = classifyQuotaScope(scope, nowUnix)
-    const pct = maxUtilizationPct(scope, nowUnix)
-    const pid = primaryProviderId(scope)
-    const name = scopeDisplayName(scope)
-    const accounts = scope.providers
-      .map((p) => accountLine(accountEmails.get(p.id)))
-      .filter((line): line is string => line !== null)
+  const openScopeDetail = (item: EnrichedQuotaScope) => {
+    const { scope, classification, calls24h, windowBurns, history, impact } = item
+    const providerIds = new Set(scope.providers.map((p) => p.id))
+    const scopeRuntimes = (resolvedData?.runtimes ?? []).filter((rt) => providerIds.has(rt.provider_id))
+    const badgeStyle = costBadgeStyle(classification.kind)
+
+    props.onInspect({
+      title: `할당량 상세 · ${item.displayName}`,
+      subtitle: `${scope.scope} · ${classification.badge}`,
+      kind: 'quota_scope_detail',
+      data: {
+        scope: scope.scope,
+        scope_id: scope.scope_id ?? null,
+        classification,
+        calls24h,
+        windowBurns,
+        history,
+        impact,
+      },
+      render: () => html`
+        <div data-testid="quota-scope-detail" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }}>
+          <section class="wka-card" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+            <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+              <div>
+                <div style=${{ fontWeight: 600, fontSize: 'var(--fs-14)', color: 'var(--fg-1)' }}>${item.displayName}</div>
+                <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${scope.scope}</div>
+              </div>
+              <span
+                class="mono tnum"
+                style=${{
+                  ...badgeStyle,
+                  padding: 'var(--sp-0) var(--sp-2)',
+                  borderRadius: 'var(--radius-pill)',
+                  fontSize: 'var(--fs-11)',
+                  fontWeight: 600,
+                }}
+              >
+                ${classification.badge}
+              </span>
+            </div>
+            ${item.accountLines.length > 0 && html`
+              <div style=${{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                ${item.accountLines.map((line) => html`
+                  <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>${line}</div>
+                `)}
+              </div>
+            `}
+            ${scopeRuntimes.some((rt) => rt.quota_rest !== null || rt.rate_limited) && html`
+              <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)', paddingTop: 'var(--sp-1)', borderTop: '1px solid var(--line-1)' }}>
+                <div style=${{ fontSize: 'var(--fs-11)', fontWeight: 600, color: 'var(--err-fg)' }}>현재 휴식·제한 런타임</div>
+                ${scopeRuntimes.filter((rt) => rt.quota_rest !== null || rt.rate_limited).map((rt) => {
+                  const rest = rt.quota_rest
+                  const rel = rest ? formatReleaseSummary(rest.until, rest.reset_stated, nowUnix) : null
+                  return html`
+                    <div key=${rt.id} class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)', display: 'flex', justifyContent: 'space-between', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                      <span>${rt.id}</span>
+                      <span>
+                        ${rest
+                          ? `${quotaRestCauseMeta(rest.cause).shortLabel} · ${rel?.countdown ?? '미정'}${rel?.localTime ? ` (${rel.localTime})` : ''}`
+                          : '429 속도 제한'}
+                      </span>
+                    </div>
+                  `
+                })}
+              </div>
+            `}
+          </section>
+
+          <section class="wka-card" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+            <h4 style=${{ margin: 0, fontSize: 'var(--fs-13)', color: 'var(--fg-1)' }}>창별 소진 · 지속 시간 분석 (마지막 소진 관측 기준)</h4>
+            ${windowBurns.length === 0
+              ? html`<div class="dtable-absent">보고된 할당량 창이 없습니다.</div>`
+              : html`
+                  <div style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+                    ${windowBurns.map((burn, bIdx) => html`
+                      <div
+                        key=${`${burn.label}-${burn.limitId ?? bIdx}`}
+                        style=${{
+                          padding: 'var(--sp-2)',
+                          borderRadius: 'var(--radius-sm)',
+                          background: 'var(--bg-2)',
+                          border: `1px solid ${burn.spent ? 'var(--err-border)' : 'var(--line-1)'}`,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '4px',
+                        }}
+                      >
+                        <div style=${{ display: 'flex', justifyContent: 'space-between', gap: 'var(--sp-2)', flexWrap: 'wrap', fontSize: 'var(--fs-12)' }}>
+                          <span class="mono" style=${{ fontWeight: 600 }}>
+                            ${burn.label}${burn.limitId ? ` (${burn.limitId})` : ''}
+                          </span>
+                          <span class="mono tnum" style=${{ color: burn.spent ? 'var(--err-fg)' : 'var(--fg-2)', fontWeight: 600 }}>
+                            ${burn.utilizationPct !== null ? `${burn.utilizationPct.toFixed(1)}%` : '미보고'} · 리셋 ${formatResetCountdown(burn.resetsAtSec, nowUnix)}
+                          </span>
+                        </div>
+                        ${burn.spent && burn.elapsedSinceStartSec !== null
+                          ? html`
+                              <div class="mono tnum" style=${{ fontSize: 'var(--fs-12)', color: 'var(--err-fg)', fontWeight: 600 }}>
+                                ⏱ 창 시작 후 ${formatDurationKo(burn.elapsedSinceStartSec)} 시점에 마지막 소진 관측
+                              </div>
+                            `
+                          : burn.elapsedSinceStartSec !== null
+                            ? html`
+                                <div class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-2)' }}>
+                                  창 경과 ${formatDurationKo(burn.elapsedSinceStartSec)}${burn.projectedTotalSec !== null
+                                    ? ` · 현재 페이스 기준 약 ${formatDurationKo(burn.projectedTotalSec)} 지속 예상`
+                                    : ''}
+                                </div>
+                              `
+                            : html`
+                                <div class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
+                                  창 길이 또는 리셋 시각 미보고 — 소진 경과 계산 불가
+                                </div>
+                              `}
+                        <div class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)', display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                          ${burn.windowStartSec !== null && html`<span>추정 시작 ${formatUnixTime(burn.windowStartSec)}</span>`}
+                          <span>마지막 관측 ${formatUnixTime(burn.observedAtSec)}</span>
+                          <span>출처 ${burn.source}</span>
+                        </div>
+                      </div>
+                    `)}
+                    <div style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
+                      ※ 소진 경과는 창 추정 시작 시각(리셋 시각 − 창 길이)부터 마지막 소진 관측 시각 기준입니다.
+                    </div>
+                  </div>
+                `}
+          </section>
+
+          <section class="wka-card" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+            <h4 style=${{ margin: 0, fontSize: 'var(--fs-13)', color: 'var(--fg-1)' }}>최근 24시간 호출 · 토큰 통계</h4>
+            ${calls24h === null
+              ? html`<div class="dtable-absent">24시간 런타임 호출 통계를 읽지 못했습니다 (단일 사용자 관리자 세션에서 제공).</div>`
+              : html`
+                  <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 'var(--sp-2)' }}>
+                    <div style=${{ padding: 'var(--sp-2)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-2)' }}>
+                      <div style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>24h 호출</div>
+                      <div class="mono tnum" style=${{ fontSize: 'var(--fs-14)', fontWeight: 600 }}>${calls24h.calls}회</div>
+                    </div>
+                    <div style=${{ padding: 'var(--sp-2)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-2)' }}>
+                      <div style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>성공 / 오류</div>
+                      <div class="mono tnum" style=${{ fontSize: 'var(--fs-14)', fontWeight: 600, color: calls24h.errors > 0 ? 'var(--err-fg)' : 'var(--ok-fg)' }}>
+                        ${calls24h.success} / ${calls24h.errors}
+                      </div>
+                    </div>
+                    <div style=${{ padding: 'var(--sp-2)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-2)' }}>
+                      <div style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>툴 호출</div>
+                      <div class="mono tnum" style=${{ fontSize: 'var(--fs-14)', fontWeight: 600 }}>${calls24h.toolCalls}회</div>
+                    </div>
+                    <div style=${{ padding: 'var(--sp-2)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-2)' }}>
+                      <div style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>입력 / 출력 토큰</div>
+                      <div class="mono tnum" style=${{ fontSize: 'var(--fs-12)', fontWeight: 600 }}>
+                        ${calls24h.inputTokens !== null ? formatCompactNumber(calls24h.inputTokens) : '미보고'} / ${calls24h.outputTokens !== null ? formatCompactNumber(calls24h.outputTokens) : '미보고'}
+                      </div>
+                    </div>
+                  </div>
+                  ${calls24h.runtimes.length > 0 && html`
+                    <div style=${{ overflowX: 'auto' }}>
+                      <table class="dtable" style=${{ width: '100%', fontSize: 'var(--fs-11)' }}>
+                        <thead>
+                          <tr>
+                            <th>런타임</th>
+                            <th>호출</th>
+                            <th>성공/오류</th>
+                            <th>p50 / p95</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${calls24h.runtimes.map((rt) => html`
+                            <tr key=${rt.runtime_id}>
+                              <td class="mono">${rt.runtime_id}</td>
+                              <td class="mono tnum">${rt.entry_count}</td>
+                              <td class="mono tnum">${rt.success_count} / ${rt.error_count}</td>
+                              <td class="mono tnum">
+                                ${rt.p50_latency_ms !== null ? `${Math.round(rt.p50_latency_ms)}ms` : '—'} / ${rt.p95_latency_ms !== null ? `${Math.round(rt.p95_latency_ms)}ms` : '—'}
+                              </td>
+                            </tr>
+                          `)}
+                        </tbody>
+                      </table>
+                    </div>
+                  `}
+                `}
+          </section>
+
+          <section class="wka-card" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+            <h4 style=${{ margin: 0, fontSize: 'var(--fs-13)', color: 'var(--fg-1)' }}>
+              최근 이력 통계${history ? ` (${history.days}일)` : ''}
+            </h4>
+            ${history === null || history.points.length === 0
+              ? html`<div class="dtable-absent">선택 기간 내 이 스코프의 저장된 사용량 이력이 없습니다.</div>`
+              : html`
+                  <div class="mono tnum" style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-2)', display: 'flex', gap: 'var(--sp-3)', flexWrap: 'wrap' }}>
+                    <span>관측 일수 ${history.observedDays}일</span>
+                    <span style=${{ color: history.exhaustedDays > 0 ? 'var(--err-fg)' : 'var(--ok-fg)', fontWeight: 600 }}>
+                      소진 일수 ${history.exhaustedDays}일
+                    </span>
+                    ${history.peakPct !== null && html`<span>최고 사용률 ${history.peakPct.toFixed(1)}%</span>`}
+                  </div>
+                  <div style=${{ overflowX: 'auto' }}>
+                    <table class="dtable" style=${{ width: '100%', fontSize: 'var(--fs-11)' }}>
+                      <thead>
+                        <tr>
+                          <th>관측 시각</th>
+                          <th>창</th>
+                          <th>사용량</th>
+                          <th>리셋</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${history.points.slice(0, 14).map((pt, pIdx) => {
+                          const ptPct = utilizationToPct(pt.utilization)
+                          return html`
+                            <tr key=${`${pt.observed_at}-${pt.kind}-${pt.limit_id ?? pIdx}`}>
+                              <td class="mono tnum">${formatUnixTime(pt.observed_at)}</td>
+                              <td class="mono">${pt.kind}${pt.limit_id ? ` (${pt.limit_id})` : ''}</td>
+                              <td class="mono tnum" style=${{ color: ptPct !== null && ptPct >= 100 ? 'var(--err-fg)' : 'var(--fg-1)' }}>
+                                ${historyPointValueLabel(pt)}
+                              </td>
+                              <td class="mono tnum">${pt.resets_at ? formatUnixTime(pt.resets_at) : '—'}</td>
+                            </tr>
+                          `
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                `}
+          </section>
+
+          <section class="wka-card" style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}>
+            <h4 style=${{ margin: 0, fontSize: 'var(--fs-13)', color: 'var(--fg-1)' }}>연결된 레인 · Keeper</h4>
+            <div style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-2)', display: 'flex', flexDirection: 'column', gap: 'var(--sp-1)' }}>
+              <div>
+                <span style=${{ color: 'var(--fg-3)' }}>레인 (${impact.laneIds.length}): </span>
+                <span class="mono">${impact.laneIds.length > 0 ? impact.laneIds.join(', ') : '없음'}</span>
+              </div>
+              <div>
+                <span style=${{ color: 'var(--fg-3)' }}>Keeper (${impact.keepers.length}): </span>
+                <span class="mono">${impact.keepers.length > 0 ? impact.keepers.join(', ') : '직접 연결 없음'}</span>
+              </div>
+            </div>
+          </section>
+        </div>
+      `,
+    })
+  }
+
+  const renderScopeCard = (item: EnrichedQuotaScope) => {
+    const { scope, classification: cls, maxPct: pct, primaryProviderId: pid, displayName: name, accountLines: accounts } = item
+
     const scopeProviderIds = new Set(scope.providers.map((p) => p.id))
     let scopeVision = false
     let scopeImageGen = false
@@ -914,11 +1227,13 @@ export function QuotasTab(props: WorkspaceViewProps) {
     // read drops it, so the card does not call it paused.
     const rest = quotaRestOfScope(scope, resolvedData?.runtimes ?? [])
     const restMeta = rest !== null && rest.until * 1000 > Date.now() ? quotaRestCauseMeta(rest.cause) : null
+    const cutoffBurn = item.primaryCutoffBurn
 
     return html`
       <article
-        key=${`${scope.scope}-${idx}`}
+        key=${item.key}
         class="wka-card"
+        data-testid=${`quota-scope-card-${pid}`}
         style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)', minWidth: 0 }}
       >
         <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
@@ -1001,11 +1316,68 @@ export function QuotasTab(props: WorkspaceViewProps) {
               </div>
             `}
 
+        ${(cutoffBurn !== null || item.calls24h !== null || (item.history !== null && item.history.observedDays > 0)) && html`
+          <div style=${{ display: 'flex', flexWrap: 'wrap', gap: 'var(--sp-1)', fontSize: 'var(--fs-11)' }}>
+            ${cutoffBurn !== null && cutoffBurn.elapsedSinceStartSec !== null && html`
+              <span
+                class="mono tnum"
+                title=${`창 시작 추정 시각(${cutoffBurn.windowStartSec ? formatUnixTime(cutoffBurn.windowStartSec) : '—'}) → 마지막 소진 관측(${formatUnixTime(cutoffBurn.observedAtSec)}) 기준`}
+                style=${{
+                  padding: '2px 6px',
+                  borderRadius: 'var(--radius-sm)',
+                  background: 'var(--err-soft)',
+                  border: '1px solid var(--err-border)',
+                  color: 'var(--err-fg)',
+                  fontWeight: 600,
+                }}
+              >
+                ⏱ ${cutoffBurn.label} 창 · 창 시작 후 ${formatDurationKo(cutoffBurn.elapsedSinceStartSec)} 시점에 마지막 소진 관측
+              </span>
+            `}
+            ${item.calls24h !== null && html`
+              <span
+                class="mono tnum"
+                style=${{
+                  padding: '2px 6px',
+                  borderRadius: 'var(--radius-sm)',
+                  background: 'var(--bg-2)',
+                  border: '1px solid var(--line-1)',
+                  color: 'var(--fg-2)',
+                }}
+              >
+                24h 호출 ${item.calls24h.calls}회${item.calls24h.errors > 0 ? ` · 오류 ${item.calls24h.errors}` : ''}
+              </span>
+            `}
+            ${item.history !== null && item.history.observedDays > 0 && html`
+              <span
+                class="mono tnum"
+                style=${{
+                  padding: '2px 6px',
+                  borderRadius: 'var(--radius-sm)',
+                  background: 'var(--bg-2)',
+                  border: '1px solid var(--line-1)',
+                  color: item.history.exhaustedDays > 0 ? 'var(--warn-fg)' : 'var(--fg-3)',
+                }}
+              >
+                최근 ${item.history.days}일 소진 ${item.history.exhaustedDays}일${item.history.peakPct !== null ? ` · 최고 ${item.history.peakPct.toFixed(0)}%` : ''}
+              </span>
+            `}
+          </div>
+        `}
+
         <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-2)', paddingTop: 'var(--sp-1)', borderTop: '1px solid var(--line-1)', flexWrap: 'wrap' }}>
           <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
             최대 사용률: ${pct !== null ? `${pct.toFixed(1)}%` : '미보고'}
           </span>
-          <div style=${{ display: 'flex', gap: 'var(--sp-1)' }}>
+          <div style=${{ display: 'flex', gap: 'var(--sp-1)', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              class="btn-ghost"
+              data-testid=${`quota-detail-btn-${pid}`}
+              onClick=${() => openScopeDetail(item)}
+            >
+              상세 보기
+            </button>
             ${canManageProviders && html`
               <button
                 type="button"
@@ -1154,30 +1526,60 @@ export function QuotasTab(props: WorkspaceViewProps) {
       `}
 
       <section class="ov-kpis" aria-label="할당량 요약">
-        <div class="ov-kpi">
-          <div class="ov-kpi-k">Tier 1 소진 / 크레딧 / 429</div>
-          <div class=${`ov-kpi-v ${resolvedObs.kind === 'failed' ? 'bad' : resolvedObs.kind === 'value' ? (partitioned.tier1ExhaustedOrCredits.length > 0 ? 'bad' : 'ok') : ''}`}>
+        <button
+          type="button"
+          class="ov-kpi"
+          data-testid="kpi-quota-attention"
+          onClick=${() => setScopeFilter((cur) => (cur === 'attention' ? 'all' : 'attention'))}
+          style=${{
+            textAlign: 'left',
+            cursor: 'pointer',
+            borderColor: scopeFilter === 'attention' ? 'var(--err-border)' : undefined,
+          }}
+        >
+          <div class="ov-kpi-k">주의 필요 · 소진 / 크레딧 / 429</div>
+          <div class=${`ov-kpi-v ${resolvedObs.kind === 'failed' ? 'bad' : resolvedObs.kind === 'value' ? (groupedScopes.attention.length > 0 ? 'bad' : 'ok') : ''}`}>
             ${resolvedObs.kind === 'value'
-              ? partitioned.tier1ExhaustedOrCredits.length
+              ? groupedScopes.attention.length
               : formatObserved(resolvedObs)}
           </div>
-        </div>
-        <div class="ov-kpi">
-          <div class="ov-kpi-k">Tier 2 활성 구독 ($0 Sub)</div>
+        </button>
+        <button
+          type="button"
+          class="ov-kpi"
+          data-testid="kpi-quota-healthy"
+          onClick=${() => setScopeFilter((cur) => (cur === 'healthy_sub' ? 'all' : 'healthy_sub'))}
+          style=${{
+            textAlign: 'left',
+            cursor: 'pointer',
+            borderColor: scopeFilter === 'healthy_sub' ? 'var(--ok-border)' : undefined,
+          }}
+        >
+          <div class="ov-kpi-k">정상 활성 구독 ($0 Sub)</div>
           <div class=${`ov-kpi-v ${resolvedObs.kind === 'failed' ? 'bad' : resolvedObs.kind === 'value' ? 'ok' : ''}`}>
             ${resolvedObs.kind === 'value'
-              ? partitioned.tier2ActiveSubscriptions.length
+              ? groupedScopes.healthySub.length
               : formatObserved(resolvedObs)}
           </div>
-        </div>
-        <div class="ov-kpi">
-          <div class="ov-kpi-k">Tier 3 미보고 (? Unreported)</div>
+        </button>
+        <button
+          type="button"
+          class="ov-kpi"
+          data-testid="kpi-quota-unreported"
+          onClick=${() => setScopeFilter((cur) => (cur === 'unreported' ? 'all' : 'unreported'))}
+          style=${{
+            textAlign: 'left',
+            cursor: 'pointer',
+            borderColor: scopeFilter === 'unreported' ? 'var(--line-2)' : undefined,
+          }}
+        >
+          <div class="ov-kpi-k">사용량 미보고 (? Unreported)</div>
           <div class=${`ov-kpi-v ${resolvedObs.kind === 'failed' ? 'bad' : ''}`}>
             ${resolvedObs.kind === 'value'
-              ? partitioned.tier3Unreported.length
+              ? groupedScopes.unreported.length
               : formatObserved(resolvedObs)}
           </div>
-        </div>
+        </button>
         <div class="ov-kpi" data-testid="kpi-paused-runtimes">
           <div class="ov-kpi-k">
             ${pausedSummary.blockedCount > pausedSummary.restingCount
@@ -1493,8 +1895,8 @@ export function QuotasTab(props: WorkspaceViewProps) {
         `}
       </section>
 
-      <!-- 3-Tier Quota Partition -->
-      <section style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }} aria-label="3계층 할당량 파티션">
+      <!-- Quota Scope Filter / Sort / Search & Grouped Cards -->
+      <section style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-3)' }} aria-label="제공자별 할당량 현황">
         ${resolvedObs.kind === 'loading' && html`
           <div class="wka-card dtable-absent">런타임 할당량 불러오는 중…</div>
         `}
@@ -1506,50 +1908,153 @@ export function QuotasTab(props: WorkspaceViewProps) {
           <div class="wka-card dtable-absent">보고된 제공자 할당량 스코프가 없습니다.</div>
         `}
 
-        ${partitioned.tier1ExhaustedOrCredits.length > 0 && html`
-          <div data-testid="quota-tier-1">
-            <h2 style=${{ margin: '0 0 var(--sp-2)', fontSize: 'var(--fs-13)', color: 'var(--err-fg)' }}>
-              Tier 1 · 소진 / 크레딧 잔액 / 고사용률 (${partitioned.tier1ExhaustedOrCredits.length})
-            </h2>
-            <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--sp-3)' }}>
-              ${partitioned.tier1ExhaustedOrCredits.map(renderScopeCard)}
+        ${resolvedObs.kind === 'value' && totalScopes > 0 && html`
+          <div
+            class="wka-card"
+            data-testid="quota-scope-controls"
+            style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-2)', flexWrap: 'wrap', padding: 'var(--sp-2) var(--sp-3)' }}
+          >
+            <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-1)', flexWrap: 'wrap' }} role="group" aria-label="할당량 상태 필터">
+              ${([
+                { id: 'all', label: `전체 (${filterCounts.all})` },
+                { id: 'attention', label: `주의 필요 (${filterCounts.attention})` },
+                { id: 'healthy_sub', label: `정상 구독 (${filterCounts.healthy_sub})` },
+                { id: 'resting', label: `429·휴식 (${filterCounts.resting})` },
+                { id: 'unreported', label: `미보고 (${filterCounts.unreported})` },
+              ] as const).map((pill) => {
+                const active = scopeFilter === pill.id
+                return html`
+                  <button
+                    key=${pill.id}
+                    type="button"
+                    class=${active ? 'btn-primary' : 'btn-ghost'}
+                    data-testid=${`quota-filter-${pill.id}`}
+                    aria-pressed=${active}
+                    style=${{ padding: '4px 10px', fontSize: 'var(--fs-11)' }}
+                    onClick=${() => setScopeFilter(pill.id)}
+                  >
+                    ${pill.label}
+                  </button>
+                `
+              })}
             </div>
-          </div>
-        `}
 
-        ${partitioned.tier2ActiveSubscriptions.length > 0 && html`
-          <div data-testid="quota-tier-2">
-            <h2 style=${{ margin: '0 0 var(--sp-2)', fontSize: 'var(--fs-13)', color: 'var(--ok-fg)' }}>
-              Tier 2 · 활성 구독 ($0 Sub · ${partitioned.tier2ActiveSubscriptions.length})
-            </h2>
-            <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--sp-3)' }}>
-              ${partitioned.tier2ActiveSubscriptions.map(renderScopeCard)}
-            </div>
-          </div>
-        `}
-
-        ${partitioned.tier3Unreported.length > 0 && html`
-          <div data-testid="quota-tier-3">
-            <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--sp-2)' }}>
-              <h2 style=${{ margin: 0, fontSize: 'var(--fs-13)', color: 'var(--fg-3)' }}>
-                Tier 3 · 미보고 (? Unreported · ${partitioned.tier3Unreported.length})
-              </h2>
-              <button
-                type="button"
-                class="btn-ghost"
-                aria-expanded=${tier3Expanded}
-                onClick=${() => setTier3Expanded((v) => !v)}
+            <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+              <input
+                type="search"
+                data-testid="quota-search-input"
+                aria-label="제공자 또는 계정 검색"
+                placeholder="제공자·계정·Keeper 검색…"
+                value=${scopeQuery}
+                onInput=${(e: Event) => setScopeQuery((e.target as HTMLInputElement).value)}
+                style=${{
+                  padding: '4px 8px',
+                  fontSize: 'var(--fs-11)',
+                  background: 'var(--input-bg)',
+                  border: '1px solid var(--input-border)',
+                  borderRadius: 'var(--radius-sm)',
+                  color: 'var(--fg-1)',
+                  minWidth: '170px',
+                }}
+              />
+              <select
+                data-testid="quota-sort-select"
+                aria-label="할당량 정렬"
+                value=${scopeSort}
+                onChange=${(e: Event) => setScopeSort((e.target as HTMLSelectElement).value as QuotaScopeSort)}
+                style=${{
+                  padding: '4px 8px',
+                  fontSize: 'var(--fs-11)',
+                  background: 'var(--input-bg)',
+                  border: '1px solid var(--input-border)',
+                  borderRadius: 'var(--radius-sm)',
+                  color: 'var(--fg-1)',
+                }}
               >
-                ${tier3Expanded ? '미보고 접기' : `미보고 ${partitioned.tier3Unreported.length}개 펼치기`}
-              </button>
+                ${QUOTA_SORT_OPTIONS.map((opt) => html`
+                  <option key=${opt.value} value=${opt.value}>${opt.label}</option>
+                `)}
+              </select>
+              ${hasActiveScopeControl && html`
+                <button
+                  type="button"
+                  class="btn-ghost"
+                  data-testid="quota-controls-reset"
+                  style=${{ padding: '4px 8px', fontSize: 'var(--fs-11)' }}
+                  onClick=${() => {
+                    setScopeFilter('all')
+                    setScopeSort('default')
+                    setScopeQuery('')
+                  }}
+                >
+                  초기화
+                </button>
+              `}
             </div>
-            ${tier3Expanded && html`
-              <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--sp-3)' }}>
-                ${partitioned.tier3Unreported.map(renderScopeCard)}
-              </div>
-            `}
           </div>
         `}
+
+        ${hasActiveScopeControl
+          ? html`
+              <div data-testid="quota-filtered-list">
+                <div class="mono tnum" style=${{ fontSize: 'var(--fs-12)', color: 'var(--fg-3)', marginBottom: 'var(--sp-2)' }}>
+                  ${filteredSortedScopes.length} / ${totalScopes}개 표시
+                </div>
+                ${filteredSortedScopes.length === 0
+                  ? html`<div class="wka-card dtable-absent">조건에 맞는 제공자 할당량 스코프가 없습니다.</div>`
+                  : html`
+                      <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--sp-3)' }}>
+                        ${filteredSortedScopes.map(renderScopeCard)}
+                      </div>
+                    `}
+              </div>
+            `
+          : html`
+              ${groupedScopes.attention.length > 0 && html`
+                <div data-testid="quota-tier-1">
+                  <h2 style=${{ margin: '0 0 var(--sp-2)', fontSize: 'var(--fs-13)', color: 'var(--err-fg)' }}>
+                    주의 필요 · 소진 / 크레딧 잔액 / 고사용률 (${groupedScopes.attention.length})
+                  </h2>
+                  <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--sp-3)' }}>
+                    ${groupedScopes.attention.map(renderScopeCard)}
+                  </div>
+                </div>
+              `}
+
+              ${groupedScopes.healthySub.length > 0 && html`
+                <div data-testid="quota-tier-2">
+                  <h2 style=${{ margin: '0 0 var(--sp-2)', fontSize: 'var(--fs-13)', color: 'var(--ok-fg)' }}>
+                    정상 활성 구독 ($0 Sub · ${groupedScopes.healthySub.length})
+                  </h2>
+                  <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--sp-3)' }}>
+                    ${groupedScopes.healthySub.map(renderScopeCard)}
+                  </div>
+                </div>
+              `}
+
+              ${groupedScopes.unreported.length > 0 && html`
+                <div data-testid="quota-tier-3">
+                  <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--sp-2)' }}>
+                    <h2 style=${{ margin: 0, fontSize: 'var(--fs-13)', color: 'var(--fg-3)' }}>
+                      사용량 미보고 (? Unreported · ${groupedScopes.unreported.length})
+                    </h2>
+                    <button
+                      type="button"
+                      class="btn-ghost"
+                      aria-expanded=${tier3Expanded}
+                      onClick=${() => setTier3Expanded((v) => !v)}
+                    >
+                      ${tier3Expanded ? '미보고 접기' : `미보고 ${groupedScopes.unreported.length}개 펼치기`}
+                    </button>
+                  </div>
+                  ${tier3Expanded && html`
+                    <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--sp-3)' }}>
+                      ${groupedScopes.unreported.map(renderScopeCard)}
+                    </div>
+                  `}
+                </div>
+              `}
+            `}
       </section>
 
       <!-- Inline Credential Form & CLI OAuth Receipt -->

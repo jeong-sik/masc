@@ -748,11 +748,17 @@ type keeper_banner_row = {
   text : string;
 }
 
+val keeper_failing_since : name:string -> t -> float option
+(** When the keeper started failing (unix seconds), from the roster
+    diagnostics' [failing_since]. [None] when the field is absent and while the
+    keeper is paused or its health is not failing, degraded or recovering. *)
+
 val keeper_diagnostic_banner : name:string -> t -> keeper_banner_row list
 (** Pure SSOT diagnostic banner lines for a keeper (active blockers, failures on
-    unhealthy keepers, runnable path rest, waiting inventory, actionable
-    disposition). Benign server values (["pass"], ["direct_message"]) are
-    suppressed so healthy keepers render zero banner rows. *)
+    unhealthy keepers with how long they have been failing, runnable path rest,
+    waiting inventory, actionable disposition). Benign server values (["pass"],
+    ["direct_message"]) are suppressed so healthy keepers render zero banner
+    rows. *)
 
 val keeper_hero_height :
   embedded:bool -> tab:Nav.keeper_tab -> has_keeper:bool -> inner_h:int -> int

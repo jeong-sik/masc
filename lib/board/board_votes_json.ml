@@ -38,12 +38,15 @@ let replace_loaded_comments store comments =
   Hashtbl.reset store.comment_rows;
   Hashtbl.clear store.comments_by_post;
   List.iter (fun (comment : comment) ->
-    let id = Comment_id.to_string comment.id in
-    Hashtbl.replace store.comments id comment;
+    Hashtbl.replace store.comments (Comment_id.to_string comment.id) comment) comments;
+  (* Build [comments_by_post] from the deduplicated [store.comments] table in
+     O(N) rather than scanning each post's existing id list with [List.mem]
+     (O(K^2) per post under the store mutex, >2M comparisons on live data). *)
+  Hashtbl.iter (fun id (comment : comment) ->
     let post_id = Post_id.to_string comment.post_id in
     let ids = match Hashtbl.find_opt store.comments_by_post post_id with
       | Some ids -> ids | None -> [] in
-    if not (List.mem id ids) then Hashtbl.replace store.comments_by_post post_id (id :: ids)) comments;
+    Hashtbl.replace store.comments_by_post post_id (id :: ids)) store.comments;
   store.karma_cache <- None
 
 let merge_loaded_comments store comments =

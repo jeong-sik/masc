@@ -603,6 +603,83 @@ let test_a_vote_does_not_move_updated_at_back () =
     Alcotest.(check (float 0.)) "updated_at stays at the edit" edited_at voted.updated_at
 ;;
 
+let test_reload_deduplicates_comments_and_skips_blank_lines () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let _dir = fresh_test_base_path () in
+  let store =
+    Masc_board_handlers.Board_core.create_store ~base_path:(Env_config_core.base_path ()) ()
+  in
+  load_sources store;
+  let post =
+    match
+      Masc_board_handlers.Board_core.create_post store ~lookup:nobody_declared
+        ~author:"fixture-author" ~content:"post with duplicate comment rows"
+        ~post_kind:Board.Human_post ()
+    with
+    | Ok post -> post
+    | Error error ->
+      Alcotest.failf "create_post failed: %s" (Board.Post_publication_failure.to_string error)
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let add_comment content =
+    match
+      Masc_board_handlers.Board_core.add_comment ~reader:Masc_board_handlers.Board_access.Operator
+        store ~lookup:nobody_declared ~post_id ~author:"fixture-author" ~content ()
+    with
+    | Ok comment -> comment
+    | Error error -> Alcotest.failf "add_comment failed: %s" (Board.show_board_error error)
+  in
+  let c1 = add_comment "first comment" in
+  let c2 = add_comment "second comment" in
+  let c1_updated = { c1 with content = "first comment updated" } in
+  let posts_path = Board.persist_path store in
+  let comments_path = Board.comments_path store in
+  Out_channel.with_open_bin posts_path (fun out ->
+    output_string out "  \t\r\n";
+    output_string out (Yojson.Safe.to_string (Masc_board_handlers.Board_core.post_to_yojson post) ^ "\n");
+    output_string out "\n");
+  Out_channel.with_open_bin comments_path (fun out ->
+    output_string out "  \t\012\r\n";
+    output_string out (Yojson.Safe.to_string (Masc_board_handlers.Board_core.comment_to_yojson c1) ^ "\n");
+    output_string out "   \n";
+    output_string out (Yojson.Safe.to_string (Masc_board_handlers.Board_core.comment_to_yojson c2) ^ "\n");
+    output_string out (Yojson.Safe.to_string (Masc_board_handlers.Board_core.comment_to_yojson c1_updated) ^ "\n"));
+  let reloaded =
+    Masc_board_handlers.Board_core.create_store ~base_path:(Env_config_core.base_path ()) ()
+  in
+  (match Masc_board_handlers.Board_votes_json.load_persisted_posts reloaded with
+   | Ok 1 -> ()
+   | Ok n -> Alcotest.failf "expected Ok 1 post, got Ok %d" n
+   | Error (path, exn) ->
+     Alcotest.failf "load_persisted_posts failed: %s (%s)" path (Printexc.to_string exn));
+  (match Masc_board_handlers.Board_votes_json.load_persisted_comments reloaded with
+   | Ok 3 -> ()
+   | Ok n -> Alcotest.failf "expected Ok 3 comment rows, got Ok %d" n
+   | Error (path, exn) ->
+     Alcotest.failf "load_persisted_comments failed: %s (%s)" path (Printexc.to_string exn));
+  Alcotest.(check int) "deduplicated comments table holds 2 entries"
+    2 (Hashtbl.length reloaded.comments);
+  let indexed_ids =
+    match Hashtbl.find_opt reloaded.comments_by_post post_id with
+    | Some ids -> List.sort String.compare ids
+    | None -> []
+  in
+  let c1_id = Board.Comment_id.to_string c1.id in
+  let c2_id = Board.Comment_id.to_string c2.id in
+  Alcotest.(check (list string)) "comments_by_post holds exact unique ids"
+    (List.sort String.compare [ c1_id; c2_id ]) indexed_ids;
+  (match Hashtbl.find_opt reloaded.comments c1_id with
+   | Some c ->
+     Alcotest.(check string) "latest duplicate comment row wins"
+       "first comment updated" c.content
+   | None -> Alcotest.fail "first comment missing after reload");
+  (match Hashtbl.find_opt reloaded.comments c2_id with
+   | Some c ->
+     Alcotest.(check string) "second comment preserved" "second comment" c.content
+   | None -> Alcotest.fail "second comment missing after reload")
+;;
+
 let () =
   Random.self_init ();
   Alcotest.run
@@ -634,6 +711,10 @@ let () =
             "a vote does not move updated_at back"
             `Quick
             test_a_vote_does_not_move_updated_at_back
+        ; Alcotest.test_case
+            "reload deduplicates comments and skips blank lines"
+            `Quick
+            test_reload_deduplicates_comments_and_skips_blank_lines
         ] )
     ]
 ;;

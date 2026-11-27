@@ -64,10 +64,15 @@ let is_whitespace = function
   | ' ' | '\012' | '\n' | '\r' | '\t' -> true
   | _ -> false
 
-let rec slice_has_content s idx stop =
+let rec slice_has_content_unchecked s idx stop =
   idx < stop
   && (not (is_whitespace (String.unsafe_get s idx))
-      || slice_has_content s (idx + 1) stop)
+      || slice_has_content_unchecked s (idx + 1) stop)
+
+let slice_has_content s ~start ~stop =
+  if start < 0 || stop > String.length s then
+    invalid_arg "Board_posts_rows.slice_has_content";
+  slice_has_content_unchecked s start stop
 
 let is_canonical_slice bytes ~start ~stop ~has_newline =
   has_newline
@@ -94,7 +99,7 @@ let iter_lines_with_offsets bytes f =
   loop 1 0
 
 let decode ~line text =
-  if not (slice_has_content text 0 (String.length text)) then Blank
+  if not (slice_has_content text ~start:0 ~stop:(String.length text)) then Blank
   else
     match Yojson.Safe.from_string text with
     | json ->
@@ -145,7 +150,7 @@ let parse_snapshot_index bytes =
   let exception Bad_row in
   (try
      iter_lines_with_offsets bytes (fun ~line_number ~start ~stop ~has_newline ->
-       if slice_has_content bytes start stop then begin
+       if slice_has_content bytes ~start ~stop then begin
          let text = String.sub bytes start (stop - start) in
          match decode ~line:line_number text with
          | Blank -> ()

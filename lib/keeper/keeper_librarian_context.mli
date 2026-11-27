@@ -31,7 +31,6 @@ type input =
   ; execution_basis : string option
   }
 val version : snapshot -> version
-val current_references : snapshot -> string list
 val empty : input
 val source_of_event : Keeper_event_queue_state.pending_selection -> source
 val stimulus_of_source : source -> (Keeper_event_queue.stimulus, string) result option

@@ -125,6 +125,43 @@ module For_testing : sig
     :  Runtime_acp_client.usage
     -> Runtime_observation.request_context option
 
+  (** The count a session's next prompt compares its first count with.
+      [Count_lost] is a session kept across a Gate pause whose stopped prompt
+      left no count. *)
+  type context_baseline =
+    | No_count
+    | Counted of int
+    | Count_lost
+
+  (** What a turn's settlement knows about the host compacting the session.
+      [No_prompt_compaction] is a stopped turn whose prompt did not return its
+      compaction: the host stopped it first, or it returned an error. [Session_count_lost] is a prompt that saw no fall but started
+      without a count to compare its first count with. *)
+  type compaction_reading =
+    | Prompt_compaction of Runtime_acp_client.context_compaction
+    | No_prompt_compaction
+    | Session_count_lost
+
+  val prior_context_used : context_baseline -> int option
+
+  (** A completed prompt that reports no count leaves [before]. *)
+  val baseline_after_completed : before:context_baseline -> int option -> context_baseline
+
+  (** The baseline of a session kept after its prompt was stopped. *)
+  val baseline_after_stopped : int option -> context_baseline
+
+  val compaction_reading
+    :  baseline_at_start:context_baseline
+    -> Runtime_acp_client.context_compaction option
+    -> compaction_reading
+
+  (** Whether a turn's settlement clears held_context. *)
+  val settlement_clears_held
+    :  keeper_name:string
+    -> session_id:string
+    -> compaction_reading
+    -> bool
+
   val stop_reason_of_acp_stop_reason
     :  Runtime_acp_client.stop_reason
     -> Agent_core.Types.stop_reason

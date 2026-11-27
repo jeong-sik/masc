@@ -2,7 +2,9 @@
    [agents/main/wire.jsonl]: the [metadata] record that opens the file, and the
    three records of one automatic compaction, with the fields they carried on
    2026-11-27. The summary text of [context.apply_compaction] is replaced,
-   because the reader reads only [type]. *)
+   because the reader reads only [type]. The reader counts
+   [full_compaction.begin] and [context.apply_compaction], so one whole
+   compaction is two records. *)
 
 open Alcotest
 module Log = Runtime_kimi_session_log
@@ -199,9 +201,9 @@ let test_counts_the_compactions_after_the_mark () =
     let mark = mark_of home in
     check_compactions "nothing written since the mark" 0 mark;
     append_file path (text_of (prompt_record :: compaction_records));
-    check_compactions "one compaction since the mark" 1 mark;
+    check_compactions "one compaction's begin and apply records" 2 mark;
     append_file path (text_of compaction_records);
-    check_compactions "two compactions since the mark" 2 mark)
+    check_compactions "two compactions' records since the mark" 4 mark)
 ;;
 
 let test_a_record_still_being_written_is_left_out () =
@@ -209,8 +211,8 @@ let test_a_record_still_being_written_is_left_out () =
     let path = record_path home ~workspace ~id:session_id in
     write_file path (text_of [ metadata_record ~version:"1.5"; binding_record ]);
     let mark = mark_of home in
-    let apply = List.nth compaction_records 1 in
-    append_file path apply;
+    let began = List.nth compaction_records 0 in
+    append_file path began;
     check_compactions "a record without its newline" 0 mark;
     append_file path "\n";
     check_compactions "the same record once it ends" 1 mark)
@@ -219,13 +221,13 @@ let test_a_record_still_being_written_is_left_out () =
 let test_a_record_cut_by_the_mark_is_earlier_activity () =
   with_home (fun home ->
     let path = record_path home ~workspace ~id:session_id in
-    let apply = List.nth compaction_records 1 in
-    let half = String.length apply / 2 in
-    write_file path (text_of [ metadata_record ~version:"1.5" ] ^ String.sub apply 0 half);
+    let began = List.nth compaction_records 0 in
+    let half = String.length began / 2 in
+    write_file path (text_of [ metadata_record ~version:"1.5" ] ^ String.sub began 0 half);
     let mark = mark_of home in
-    append_file path (String.sub apply half (String.length apply - half) ^ "\n");
+    append_file path (String.sub began half (String.length began - half) ^ "\n");
     check_compactions "the rest of a record begun before the mark" 0 mark;
-    append_file path (text_of [ apply ]);
+    append_file path (text_of [ began ]);
     check_compactions "a whole record after it" 1 mark)
 ;;
 
@@ -237,15 +239,38 @@ let test_the_next_count_starts_where_this_one_stopped () =
     write_file path (text_of [ metadata_record ~version:"1.5"; binding_record ]);
     let mark = mark_of home in
     append_file path (text_of compaction_records);
-    let apply = List.nth compaction_records 1 in
-    append_file path apply;
+    let began = List.nth compaction_records 0 in
+    append_file path began;
     let second = next_of mark in
-    check_compactions "the first count" 1 mark;
+    check_compactions "the first count" 2 mark;
     check_compactions "nothing whole since the first count" 0 second;
     append_file path "\n";
     let third = next_of second in
     check_compactions "the record that ended after the first count" 1 second;
     check_compactions "nothing since the second count" 0 third)
+;;
+
+(* With [compaction_trigger_ratio] below the block ratio, Kimi Code runs the
+   compaction after a step without waiting for it, so the apply and complete
+   records can land after the prompt's response. The prompt that started the
+   compaction counts it; the next prompt does not count it again. *)
+let test_a_compaction_counts_where_it_began () =
+  with_home (fun home ->
+    let path = record_path home ~workspace ~id:session_id in
+    write_file path (text_of [ metadata_record ~version:"1.5"; binding_record ]);
+    let mark = mark_of home in
+    let began, rest =
+      match compaction_records with
+      | began :: rest -> began, rest
+      | [] -> fail "no compaction records"
+    in
+    append_file path (text_of [ prompt_record; began ]);
+    let next = next_of mark in
+    check_compactions "the prompt that began the compaction" 1 mark;
+    append_file path (text_of (rest @ [ prompt_record ]));
+    (* The apply landed after the response. The compaction may summarize the
+       next prompt's input too, so that prompt counts it as well. *)
+    check_compactions "the apply after the response counts for the next prompt" 1 next)
 ;;
 
 let test_unreadable_slices () =
@@ -602,6 +627,10 @@ let () =
             "the next count starts where this one stopped"
             `Quick
             test_the_next_count_starts_where_this_one_stopped
+        ; test_case
+            "a compaction counts where it began and where it was applied"
+            `Quick
+            test_a_compaction_counts_where_it_began
         ; test_case "slices that cannot be read" `Quick test_unreadable_slices
         ; test_case "how the prompt ended" `Quick test_reads_how_the_prompt_ended
         ] )

@@ -159,9 +159,9 @@ type compaction_record =
   | Compaction_in_kimi_session_record
       (** [kimi acp] sends one count per prompt, after its response, so a
           prompt that compacted and then grew past the previous prompt's count
-          shows no drop. Its session record holds one
-          [context.apply_compaction] record per compaction, which {!prompt}
-          reads ({!Runtime_kimi_session_log}). *)
+          shows no drop. Its session record holds a [full_compaction.begin]
+          and a [context.apply_compaction] record per compaction, which
+          {!prompt} reads ({!Runtime_kimi_session_log}). *)
 
 type mcp_identifier_syntax =
   | Mcp_call_wrapper
@@ -582,7 +582,8 @@ type context_compaction =
           that left less than [prior_context_used]. Over ACP, a counted
           [usage_update.used] lower than the one before it, the first compared
           with [prior_context_used]. A Kimi Code prompt also says so when its
-          session record gained a [context.apply_compaction] record. *)
+          session record gained a [full_compaction.begin] or a
+          [context.apply_compaction] record. *)
   | Compaction_unknown of compaction_unknown
       (** The record that would say it could not be read. *)
 

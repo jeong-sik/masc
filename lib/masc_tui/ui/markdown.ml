@@ -603,6 +603,25 @@ let alphatex_code_blocks raw =
   in
   Folder.fold_doc (Folder.make ~block ()) [] doc |> List.rev
 
+type heading = { level : int; text : string }
+
+let headings raw =
+  let module Folder = Cmarkit.Folder in
+  let doc = Cmarkit.Doc.of_string ~strict:false ~locs:false raw in
+  (* Block.t is extensible, so the cases other than a heading fold as usual
+     and reach the headings nested in quotes and lists. *)
+  let block _folder acc = function
+    | Block.Heading (heading, _) ->
+        let text =
+          Inline.to_plain_text ~break_on_soft:false (Block.Heading.inline heading)
+          |> List.map (String.concat "")
+          |> String.concat " " |> String.trim
+        in
+        Folder.ret ({ level = Block.Heading.level heading; text } :: acc)
+    | _ -> Folder.default
+  in
+  Folder.fold_doc (Folder.make ~block ()) [] doc |> List.rev
+
 let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw =
   let bg = base_style.bg in
   let muted_style = Typography.whisper ~bg ~italic:false theme in

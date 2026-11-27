@@ -26,6 +26,7 @@ import {
 } from '../../core'
 import { currentRoute, isAdminLockedForSession } from '../../routes/router'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
+import { RefreshButton } from '../../components/primitives/refresh-button'
 import {
   fetchConfigSchemaApi,
   postConfigPatchApi,
@@ -155,8 +156,8 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
   }, [])
 
   const loadSchema = (reason: 'mount' | 'manual' = 'mount') => {
-    if (isAdminLockedForSession('admin', authSession.peek())) return
-    void resourceCache.fetch<ConfigSchemaData>(
+    if (isAdminLockedForSession('admin', authSession.peek())) return Promise.resolve()
+    return resourceCache.fetch<ConfigSchemaData>(
       schemaCacheKey,
       (signal) => fetchConfigSchemaApi(target, signal),
       { ttlMs: 15_000, topics: ['config'], reason },
@@ -170,7 +171,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
     setCasConflict(null)
     setErrorBanner(null)
     setBusy(null)
-    if (!adminLocked) loadSchema('mount')
+    if (!adminLocked) void loadSchema('mount')
   }, [target, epoch, adminLocked])
 
   const schemaData = schemaObs.kind === 'value' ? schemaObs.data : null
@@ -289,14 +290,14 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
     setApplyResult(res.value)
     setPreview(null)
     setStaged({})
-    loadSchema('manual')
+    void loadSchema('manual')
   }
 
   const handleReloadAfterConflict = () => {
     setCasConflict(null)
     setPreview(null)
     setErrorBanner(null)
-    loadSchema('manual')
+    void loadSchema('manual')
   }
 
   const handleExportWorldConfig = async () => {
@@ -701,7 +702,7 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
               ? `검색 결과: "${searchQuery.trim()}" (${visibleFields.length})`
               : `${activeCategory?.title ?? 'Settings'} (${visibleFields.length})`}
           </h3>
-          <button type="button" class="btn-ghost" onClick=${() => loadSchema('manual')}>스키마 새로고침</button>
+          <${RefreshButton} label="스키마 새로고침" onRefresh=${() => loadSchema('manual')} />
         </div>
 
         ${schemaObs.kind === 'loading' && html`<div class="dtable-absent">설정 스키마 불러오는 중…</div>`}

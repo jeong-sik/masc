@@ -23,6 +23,7 @@ import { EQUIPMENT_IDS, type KeeperEquipment } from '../../lib/keeper-portrait'
 import { useAuthenticatedPortrait } from '../../lib/portrait-cache'
 import { kSigil } from '../../components/keeper-badge'
 import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
+import { RefreshButton } from '../../components/primitives/refresh-button'
 import {
   buildPortraitPreviewUrl,
   fetchKeeperCandleLedgerApi,
@@ -175,9 +176,7 @@ export function KeeperPortraitCandleTab(props: KeeperPortraitCandleTabProps) {
     <div class="kp-scroll-pane" data-keeper-tab="portrait-candle">
       <div class="kp-card-head">
         <h3>Portrait & Candle · ${keeper.name}</h3>
-        <button type="button" class="btn-ghost" disabled=${loading} onClick=${() => void loadAll()}>
-          새로고침
-        </button>
+        <${RefreshButton} reading=${loading} onRefresh=${() => loadAll()} />
       </div>
 
       <div class="kp-notice" data-tone="info" role="note">

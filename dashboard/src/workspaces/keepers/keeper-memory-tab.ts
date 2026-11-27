@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { InlineSpinner } from '../../components/common/inline-spinner'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { DataTable, type DataTableColumn } from '../../components/primitives/data-table'
+import { RefreshButton } from '../../components/primitives/refresh-button'
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
 import { activeWorkspaceId, authSession, currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { isAdminLockedForSession } from '../../routes/router'
@@ -132,11 +133,9 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
   const actRequest = useRef<AbortController | null>(null)
   const retractRequest = useRef<AbortController | null>(null)
 
-  const loadAll = () => {
-    void factsRead.refresh()
-    void internalsRead.refresh()
-    void journalRead.refresh()
-  }
+  // The three reads start together. The promise ends when all have ended: the
+  // refresh button waits on it.
+  const loadAll = () => Promise.all([factsRead.refresh(), internalsRead.refresh(), journalRead.refresh()])
 
   useEffect(() => () => {
     actRequest.current?.abort()
@@ -268,7 +267,7 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
     }
     setActFeedback(null)
     pushShellToast(`${payload.action} 적용 완료`, 'success')
-    loadAll()
+    void loadAll()
   }
 
   const handleRetract = async () => {
@@ -303,7 +302,7 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
       receipt.outcome === 'retracted' ? 'success' : 'info',
     )
     setRetractId(current => current.trim() === id ? '' : current)
-    loadAll()
+    void loadAll()
   }
 
   const revision = factsRead.received && facts?.ordinary.state === 'present'
@@ -323,9 +322,7 @@ function KeeperMemoryView(props: KeeperMemoryTabProps) {
             value=${search}
             onInput=${(e: Event) => setSearch((e.currentTarget as HTMLInputElement).value)}
           />
-          <button type="button" class="btn-ghost" onClick=${loadAll}>
-            새로고침
-          </button>
+          <${RefreshButton} onRefresh=${loadAll} />
         </div>
       </div>
 

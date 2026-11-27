@@ -22,6 +22,7 @@ import {
 import { isAdminLockedForSession } from '../../routes/router'
 import { UnifiedDiffView } from '../../components/common/unified-diff'
 import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives/uplot-chart'
+import { RefreshButton } from '../../components/primitives/refresh-button'
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import type { TurnRecordEntry, TurnRecordsResponse } from '../../api/dashboard-turn-records'
@@ -584,7 +585,9 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
           <div class="kp-card">
             <div class="kp-card-head">
               <h3>Turn Gantt Waterfall (${turnRecords.length})</h3>
-              <button type="button" class="btn-ghost" disabled=${!canTokenReadDebug && !canAdminDebug} onClick=${() => void loadTrace()}>갱신</button>
+              ${canTokenReadDebug || canAdminDebug
+                ? html`<${RefreshButton} onRefresh=${loadTrace} />`
+                : html`<button type="button" class="btn-ghost" disabled>새로고침</button>`}
             </div>
             ${!canTokenReadDebug
               ? html`<div class="kp-empty" data-testid="companion-turn-records-token-locked" role="status">턴 기록 조회는 토큰 인증 싱글유저 세션 전용입니다.</div>`
@@ -857,7 +860,7 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
           <div class="kp-card">
             <div class="kp-card-head">
               <h3>Memory Facts Summary</h3>
-              <button type="button" class="btn-ghost" onClick=${() => void loadMemory()}>갱신</button>
+              <${RefreshButton} onRefresh=${loadMemory} />
             </div>
             ${!memFacts
               ? (memError

@@ -950,8 +950,9 @@
 }
 
 .kp-live-dot {
-  inline-size: 12px;
-  block-size: 12px;
+  --live-dot-size: 12px;
+  inline-size: var(--live-dot-size);
+  block-size: var(--live-dot-size);
   border: 2px solid var(--brass-border);
   border-top-color: var(--brass-1);
   border-radius: var(--radius-circle);
@@ -983,6 +984,22 @@
   font-size: var(--fs-12);
   color: var(--fg-2);
 }
+
+/* The mark stays beside the sentence it marks: a sentence too long for the
+   row breaks inside itself and does not drop under the mark. */
+.kp-turn-progress-active {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+/* In the middle of the sentence's first line, however many lines it takes. */
+.kp-turn-progress-active > .kp-live-dot {
+  margin-block-start: calc((1lh - var(--live-dot-size)) / 2);
+}
+
+/* One sentence: what is open and for how long, then the turn and for how long. */
+.kp-turn-progress-line { min-width: 0; }
 
 .kp-turn-progress-active strong { color: var(--brass-1); }
 .kp-turn-progress-active[data-tone="bad"] strong { color: var(--err-fg); }

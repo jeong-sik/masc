@@ -986,6 +986,67 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     expect(receipt()).toBe(new Date(atUnix * 1000).toISOString())
   })
 
+  it('says what a running turn has open in one sentence above the composer, and for how long', async () => {
+    const keeper = makeRosterKeeper()
+    let observer!: ReadableStreamDefaultController<Uint8Array>
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input) === '/mcp?sse_kind=observer') {
+        return new Response(new ReadableStream({ start: (controller) => { observer = controller } }),
+          { headers: { 'Content-Type': 'text/event-stream' } })
+      }
+      return Response.json({ operations: [], messages: [], rows: [], keepers: [] })
+    }))
+    const stream = startObserverStream({ autoReconnect: false })
+    await waitFor(() => expect(observerConnected.value).toBe(true))
+    const read = observedValue(new Map(), Date.now() - 1000)
+    const view = render(html`<${KeeperChatTab} keeper=${keeper} onInspect=${vi.fn()} onMutated=${vi.fn()} turnSnapshot=${read} />`)
+    const now = Date.now() / 1000
+    const send = (preview: object) => observer.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({
+      type: 'keeper_turn_preview_changed', name: keeper.name, observation: { owner_key: 'A', preview },
+    })}\n\n`))
+    const sentence = () => view.container.querySelector('.kp-turn-progress-active')?.textContent?.replace(/\s+/g, ' ').trim()
+    const timers = () => [...view.container.querySelectorAll('.kp-turn-progress-active [role="timer"]')].map((timer) => timer.getAttribute('title'))
+
+    send({ revision: 1, status_text: 'rt · tool running: Execute · tool called: Read', activity: 'tool', last_tool: 'Execute',
+      updated_at_unix: now, open_activities: [
+        { kind: 'tool', tool_use_id: 'b', name: 'Read', stage: 'requested', started_at_unix: now - 2, since_unix: now - 2, cohort: null, reach: null },
+        { kind: 'tool', tool_use_id: 'a', name: 'Execute', stage: 'executing', started_at_unix: now - 9, since_unix: now - 8, cohort: null, reach: 'sandbox' },
+      ] })
+    // The call that runs is named, with how long it has run; the rows below say each call.
+    await waitFor(() => expect(sentence()).toMatch(/^Working · Execute 외 1건 · 실행 중 · [78]s · Keeper 턴$/))
+    expect(timers()).toEqual(['이 상태로 지난 시간'])
+    expect([...view.container.querySelectorAll('.kp-open-work-phrase')].map((row) => row.textContent)).toEqual([
+      'Read · 호출 준비', 'Execute · 실행 중',
+    ])
+
+    // A server from before the list: the activity's word, and no time for a state it did not date.
+    send({ revision: 2, status_text: 'rt · tool', activity: 'tool', last_tool: 'Grep', updated_at_unix: now })
+    await waitFor(() => expect(sentence()).toBe('Working · 도구 실행 중 · Keeper 턴'))
+    expect(timers()).toEqual([])
+
+    // Nothing open between two steps: the activity's word again.
+    send({ revision: 3, status_text: 'rt · waiting', activity: 'waiting', last_tool: 'Grep', updated_at_unix: now, open_activities: [] })
+    await waitFor(() => expect(sentence()).toBe('Working · 응답 대기 중 · Keeper 턴'))
+
+    send({ revision: 4, status_text: 'rt · receiving reasoning', activity: 'streaming', last_tool: 'Grep', updated_at_unix: now,
+      open_activities: [{ kind: 'response', channel: 'thinking', started_at_unix: now - 4, since_unix: now - 3 }] })
+    await waitFor(() => expect(sentence()).toMatch(/^Working · 추론 중 · [34]s · Keeper 턴$/))
+
+    // An attempt that failed: its list is not what happens now.
+    send({ revision: 5, status_text: 'rt · provider attempt failed', activity: 'failed', last_tool: 'Grep', updated_at_unix: now,
+      open_activities: [{ kind: 'response', channel: 'thinking', started_at_unix: now - 4, since_unix: now - 3 }] })
+    await waitFor(() => expect(sentence()).toBe('시도 실패 · Keeper 턴'))
+
+    // Once the stream is gone the turn is a last observation: what was open stays, how long does not.
+    send({ revision: 6, status_text: 'rt · receiving reasoning', activity: 'streaming', last_tool: 'Grep', updated_at_unix: now,
+      open_activities: [{ kind: 'response', channel: 'thinking', started_at_unix: now - 4, since_unix: now - 3 }] })
+    await waitFor(() => expect(sentence()).toMatch(/^Working · 추론 중/))
+    observer.close()
+    await stream
+    await waitFor(() => expect(sentence()).toBe('마지막 확인 · 추론 중 · Keeper 턴'))
+    expect(timers()).toEqual([])
+  })
+
   it('invalidates in-flight earlier-page prepend and resets pagination when reconnect observes an authoritative empty history', async () => {
     const keeper = makeRosterKeeper()
     let observer: ReadableStreamDefaultController<Uint8Array> | undefined

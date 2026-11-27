@@ -235,13 +235,13 @@ let test_raw_observation_preserves_reserved_exceptions () =
   check bool "Sys.Break propagates" true raises_sys_break;
   List.iter (fun control ->
     let keeper_name = "raw-observer-driver-control" in
-    let labels = ["keeper",keeper_name;"source","official_client_raw";"stage","context_submission"] in
+    let labels = ["keeper",keeper_name;"source","official_client_raw";"stage","run_start"] in
     let failures () = Otel_metric_store.metric_value_or_zero
       Keeper_metrics.(to_string TraceEmitFailures) ~labels () in
     let before = failures () in
     let propagated =
       try
-        ignore (Host.observe_raw_trace ~keeper_name ~stage:Host.Context_submission
+        ignore (Host.observe_raw_trace ~keeper_name ~stage:Host.Run_start
           (fun () -> raise control));
         false
       with exn -> exn == control

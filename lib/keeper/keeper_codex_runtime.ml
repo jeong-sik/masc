@@ -1316,13 +1316,12 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
         | Runtime_codex_app_server.Start -> None
         | Runtime_codex_app_server.Resume _ -> Some previously_held) in
     let system_receipt = system_plan.full_receipt in
-    let prompt, held_context, prompt_projection =
+    let prompt, held_context =
       match thread_mode with
       | Runtime_codex_app_server.Start ->
-        let projection = Host.start_prompt prepared prompt in
-        Keeper_context_submission_link.text projection,
+        Keeper_context_submission_link.text (Host.start_prompt prepared prompt),
         Host.start_held_context ~turn_observation:prepared.turn_observation
-          ?composed_context prepared.messages, projection
+          ?composed_context prepared.messages
       | Runtime_codex_app_server.Resume { thread_id } ->
         let goal =
           Keeper_turn_bridge.prepend_resume_handoff
@@ -1338,7 +1337,7 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
           ~turn_observation:prepared.turn_observation ?composed_context
           ~system_observations_in_developer:system_plan.observations_in_developer
           ~held:previously_held prepared.messages in
-        delivery.prompt, delivery.held_context, delivery.context_projection
+        delivery.prompt, delivery.held_context
     in
     let held_context = Keeper_codex_system_context.with_carried_context system_plan held_context in
     let context_frontier = { context_frontier with held_context } in
@@ -1834,21 +1833,9 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
                ~session_id:thread_id
                ~updated_at:(Time_compat.now ())))
          ~on_context_submission:(fun observation ->
-           (match observation.Runtime_codex_app_server.method_ with
-            | Thread_start | Thread_resume -> thread_request_transmitted := true
-            | Thread_inject_items | Turn_start | Dynamic_tool_response -> ());
-           let logical_context_bindings = Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-             match observation.Runtime_codex_app_server.method_ with
-             | Thread_start | Thread_resume -> Keeper_context_submission_link.binding_to_json
-                 ~slot:Developer_instructions composed_developer_instructions observation.write
-             | Turn_start -> Keeper_context_submission_link.binding_to_json
-                 ~slot:(Turn_text (List.length images)) prompt_projection observation.write
-             | Thread_inject_items -> `Assoc ["status", `String "out_of_scope_injected_context"]
-             | Dynamic_tool_response -> `Assoc ["status", `String "out_of_scope_tool_result"]) in
-           Host.record_context_submission ~keeper_name ~raw_trace_run
-             ~runtime_profile:runtime_id ~client_turn_ordinal:turn_count
-             ~submission:(Runtime_codex_app_server.context_submission_to_json observation)
-             ~logical_context_bindings ())
+           match observation.Runtime_codex_app_server.method_ with
+           | Thread_start | Thread_resume -> thread_request_transmitted := true
+           | Thread_inject_items | Turn_start | Dynamic_tool_response -> ())
          ~on_prompt_sent:report_transmitted_input
          ~on_turn_starting:(fun ~thread_id ->
            update_session "turn-starting transition" (fun expected ->

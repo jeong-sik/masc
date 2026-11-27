@@ -1541,10 +1541,6 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
                             ~session_id:conversation_id
                             ~updated_at:(Time_compat.now ())))
                       ~on_prompt_sent:report_transmitted_input
-                      ~on_context_submission:(fun write ->
-                        Host.record_context_submission ~keeper_name ~raw_trace_run
-                          ~runtime_profile:runtime_id ~client_turn_ordinal:turn_count
-                          ~submission:(Runtime_antigravity.context_submission_to_json write) ())
                       ~on_terminal_received:close_delivery_frontier
                       ~on_stream_event:stream.on_runtime_event
                       client_config

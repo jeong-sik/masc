@@ -517,35 +517,11 @@ type context_submission_method =
     the frame; the method is never re-read from the serialized JSON. A
     [Dynamic_tool_response] answers the app-server's [item/tool/call] with the
     tool's content items. Control traffic (initialize, account and model reads,
-    notifications, refusals, elicitation cancels) is not observed. *)
+    notifications, refusals, elicitation cancels) is not reported. *)
 
 val context_submission_method_label : context_submission_method -> string
 (** The JSON-RPC method of a request, or for [Dynamic_tool_response] the
     method of the app-server request it answers. *)
-
-type context_frame_id =
-  | Request_id of int
-  | Answered_request_id of Yojson.Safe.t
-(** A request MASC numbers itself, or the app-server's request id that a
-    response echoes, kept as the JSON value the server sent. *)
-
-val context_frame_id_to_json : context_frame_id -> Yojson.Safe.t
-
-type context_submission = private
-  { method_ : context_submission_method
-  ; request_id : context_frame_id
-  ; thread_id : string option
-  ; write : Runtime_official_client_write.t
-        (** The compact JSON written before the LF. Start and resume select
-            [Developer_instructions] and [Dynamic_tools]; inject_items selects
-            each [Injected_item]; turn/start selects each [Turn_text]. A
-            [Dynamic_tool_response] selects no slot: its content items are
-            counted in [Unattributed_carrier]. *)
-  }
-
-val context_submission_to_json : context_submission -> Yojson.Safe.t
-(** Content-free proof of a complete JSON-plus-newline write to Codex stdin.
-    This is neither server acceptance nor the provider's complete model input. *)
 
 val decode_image_generation_item_for_tests : Yojson.Safe.t -> media_output option
 (** Pure decoder for a Codex [imageGeneration] item (exposed for unit tests). *)
@@ -573,13 +549,10 @@ val run_turn :
      a temporary context replacement or an idempotent delivery API. Callers
      own retry/reconciliation and must not infer token savings from IPC bytes.
      Empty by default; Keeper production projection is unchanged. *)
-  ?on_context_submission:(context_submission -> unit) ->
-  (* Observes every [context_submission_method] frame after
-      both payload and newline were written. Non-reserved observer exceptions,
-      including a timeout the observer raises itself, are reported as
-      unavailable measurement, never retried as a failed write. The turn
-      continues, so a completed turn write retains its dispatch fence.
-      Cancellation propagates. *)
+  ?on_context_submission:(context_submission_method -> unit) ->
+  (* Called with the method of every context-bearing frame after both payload
+      and newline were written, outside the write deadline. A written
+      turn/start sets the dispatch fence before this callback runs. *)
   ?on_prompt_sent:(unit -> unit) ->
   (* Called after the complete turn-input message is written to the CLI.
       This is transport evidence, not provider acceptance. Never called for

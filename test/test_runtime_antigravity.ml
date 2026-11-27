@@ -230,7 +230,6 @@ let run_fixture
     ?home_dir
     ?on_conversation_ready
     ?on_prompt_sent
-    ?on_context_submission
     ?on_terminal_received
     ?on_spawned
     ?before_spawn
@@ -256,7 +255,6 @@ let run_fixture
       ?home_dir
       ?on_conversation_ready
       ?on_prompt_sent
-      ?on_context_submission
       ?on_terminal_received
       ?on_spawned
       ?before_spawn
@@ -1001,31 +999,15 @@ let test_large_prompt_streams_over_stdin () =
   let captured = Filename.temp_file "antigravity-prompt-" ".txt" in
   Fun.protect ~finally:(fun () -> Sys.remove captured) (fun () ->
     let sent = ref 0 in
-    let receipts = ref [] in
     with_fixture ~capture_prompt:captured [ init (); result () ] (fun path ->
-      match
-        run_fixture ~prompt ~on_prompt_sent:(fun () -> incr sent)
-          ~on_context_submission:(fun write -> receipts := (write, !sent) :: !receipts) path
-      with
+      match run_fixture ~prompt ~on_prompt_sent:(fun () -> incr sent) path with
       | Error error -> fail (Runtime_antigravity.error_to_string error)
       | Ok turn ->
         check string "response" "MASC_ANTIGRAVITY_OK\n" turn.text;
         check int "turn count" 1 turn.num_turns;
         check int "one complete prompt transmission" 1 !sent;
         let received = In_channel.with_open_bin captured In_channel.input_all in
-        check string "client received exact complete prompt" prompt received;
-        match !receipts with
-        | [ ((write : Runtime_official_client_write.t), sent_before) ] ->
-          check int "the receipt comes before the transmission report" 0 sent_before;
-          check int "receipt counts the bytes the client received"
-            (String.length received) write.bytes;
-          check string "receipt hashes the bytes the client received"
-            Agent_core_sha256.(digest_string received |> to_hex) write.sha256;
-          check bool "the whole write is the one slot" true
-            (Option.is_some
-               (Runtime_official_client_write.matching_fragment write
-                  ~slot:Whole_write prompt))
-        | receipts -> failf "expected one receipt, got %d" (List.length receipts)))
+        check string "client received exact complete prompt" prompt received))
 ;;
 
 let test_spawn_observer_receives_the_actual_child_pid () =
@@ -1116,8 +1098,7 @@ let test_incomplete_prompt_is_not_reported () =
        it, so a successful spawn cannot imply a complete prompt write. *)
     let result = run_fixture ~prompt:(largest_whole_prompt ())
       ~on_spawned:(fun ~pid:_ -> incr spawned)
-      ~on_prompt_sent:(fun () -> incr sent)
-      ~on_context_submission:(fun _ -> incr sent) path in
+      ~on_prompt_sent:(fun () -> incr sent) path in
     check int "write failure occurs after real spawn" 1 !spawned;
     check bool "incomplete input does not complete a turn" true (Result.is_error result);
     check int "partial write does not report transmission" 0 !sent)
@@ -1133,7 +1114,6 @@ let test_a_cli_that_answers_without_reading_the_prompt_does_not_hold_the_turn ()
   Fun.protect ~finally:(fun () -> Sys.remove journal) @@ fun () ->
   let frames = [ init (); result () ] in
   let sent = ref 0 in
-  let receipts = ref 0 in
   with_fixture ~stdin:Leave_unread ~capture_stdout:journal ~exit_delay_s:5.0 frames (fun path ->
     match
       run_fixture
@@ -1141,7 +1121,6 @@ let test_a_cli_that_answers_without_reading_the_prompt_does_not_hold_the_turn ()
         ~admission_timeout_s:1.5
         ~timeout_s:5.0
         ~on_prompt_sent:(fun () -> incr sent)
-        ~on_context_submission:(fun _ -> incr receipts)
         path
     with
     | Error (Runtime_antigravity.Timeout { seconds; _ }) ->
@@ -1149,7 +1128,6 @@ let test_a_cli_that_answers_without_reading_the_prompt_does_not_hold_the_turn ()
         (String.concat "\n" frames ^ "\n")
         (In_channel.with_open_bin journal In_channel.input_all);
       check int "the unread prompt never completed transmission" 0 !sent;
-      check int "the unread prompt has no complete-write receipt" 0 !receipts;
       check (float 0.001) "the window is the lane's admission window" 1.5 seconds
     | Error error ->
       fail

@@ -715,24 +715,9 @@ let context_submission_method_label = function
   | Dynamic_tool_response -> "item/tool/call"
 ;;
 
-(* A request MASC numbers itself, or the app-server's request id that a
-   response echoes. The echoed id stays the JSON value the server sent. *)
-type context_frame_id =
-  | Request_id of int
-  | Answered_request_id of Yojson.Safe.t
-
-let context_frame_id_to_json = function
-  | Request_id id -> `Int id
-  | Answered_request_id id -> id
-;;
-
 type outbound_frame =
   | Control
-  | Context of
-      { method_ : context_submission_method
-      ; id : context_frame_id
-      ; thread_id : string option
-      }
+  | Context of context_submission_method
 
 type io =
   { send : ?on_response_sent:(unit -> unit) -> outbound_frame -> Yojson.Safe.t -> unit
@@ -741,7 +726,7 @@ type io =
   }
 
 (* Requests that carry model context. The wire method comes from the
-   constructor, so a frame and its observation cannot name different methods. *)
+   constructor, so a frame and its callback cannot name different methods. *)
 type context_request = Start_thread | Resume_thread | Inject_items | Start_turn
 
 let context_request_method = function
@@ -755,10 +740,10 @@ let send_control_request io ~id ~method_ ~params =
   io.send Control (`Assoc [ "id", `Int id; "method", `String method_; "params", params ])
 ;;
 
-let send_context_request io request ~id ~thread_id ~params =
+let send_context_request io request ~id ~params =
   let method_ = context_request_method request in
   io.send
-    (Context { method_; id = Request_id id; thread_id })
+    (Context method_)
     (`Assoc
        [ "id", `Int id
        ; "method", `String (context_submission_method_label method_)
@@ -824,7 +809,7 @@ let find_dynamic_tool tools name =
   List.find_opt (fun (tool : dynamic_tool) -> String.equal tool.name name) tools
 ;;
 
-let send_dynamic_tool_response io ~thread_id ~id (result : dynamic_tool_result) =
+let send_dynamic_tool_response io ~id (result : dynamic_tool_result) =
   let success, content_items =
     match Runtime_official_client_tool.codex_content_items
       ~content:result.content ~content_blocks:result.content_blocks with
@@ -836,8 +821,7 @@ let send_dynamic_tool_response io ~thread_id ~id (result : dynamic_tool_result) 
   in
   io.send
     ?on_response_sent:(Runtime_official_client_tool.response_observer Codex result)
-    (Context
-       { method_ = Dynamic_tool_response; id = Answered_request_id id; thread_id = Some thread_id })
+    (Context Dynamic_tool_response)
     (`Assoc
        [ "id", id
        ; "result", `Assoc
@@ -865,7 +849,7 @@ let handle_dynamic_tool_call io ~tools ~terminal_tools_closed ~thread_id ~turn_i
     (* A terminal tool already completed in this turn. Refuse the call
        without admitting another host effect, so the completed result stays
        the turn's terminal outcome. *)
-    send_dynamic_tool_response io ~thread_id ~id
+    send_dynamic_tool_response io ~id
       { success = false; content = "A terminal tool already completed. No further tools are admitted in this turn. Preserve its result and finish with your progress reply.";
         content_blocks = None; abort_turn = None; on_response_sent = None };
     Ok ())
@@ -895,7 +879,7 @@ let handle_dynamic_tool_call io ~tools ~terminal_tools_closed ~thread_id ~turn_i
       in
       incr tool_call_count;
       emit_stream_event on_stream_event (Dynamic_tool_finished { call_id });
-      send_dynamic_tool_response io ~thread_id ~id result;
+      send_dynamic_tool_response io ~id result;
       (match result.abort_turn with
        | None -> Ok ()
        | Some stop -> Error (Stopped_by_host stop))
@@ -2056,13 +2040,13 @@ let with_turn_dispatch io ~terminal_tools_closed
             Eio.Fiber.yield ();
             List.iter Eio.Promise.await predecessors;
             let response = ref None in
-            (* Only the consumer writes stdin and its context receipts. The
+            (* Only the consumer writes stdin. The
                worker retains the exact response until that consumer can
                decide whether the vendor turn still exists. *)
             let tool_io = { io with send = (fun ?on_response_sent frame json -> response := Some (frame, json, on_response_sent)) } in
             let outcome =
               if !vendor_closed && tool.call_effect arguments = Agent_core.Tool.Effect_possible then begin
-                send_dynamic_tool_response tool_io ~thread_id ~id
+                send_dynamic_tool_response tool_io ~id
                   {success = false; content = "The vendor turn ended before this call started. No execution was attempted. Reassess the request in the next turn.";
                    content_blocks = None; abort_turn = None; on_response_sent = None};
                 Ok ()
@@ -2843,11 +2827,7 @@ let run_protocol io (config : config) ~on_undelivered_tool_result ~on_tool_respo
       , true )
   in
   let thread_method = context_submission_method_label (context_request_method thread_request) in
-  send_context_request io thread_request ~id:3
-    ~thread_id:(match thread with
-      | Ephemeral | Persistent Start -> None
-      | Persistent (Resume { thread_id }) -> Some thread_id)
-    ~params:(`Assoc thread_fields);
+  send_context_request io thread_request ~id:3 ~params:(`Assoc thread_fields);
   let* thread_reply = await_response io ~id:3 ~method_:thread_method in
   let* thread_id, model = parse_thread_response ~stage:thread_method thread_reply in
   let* () =
@@ -2885,7 +2865,7 @@ let run_protocol io (config : config) ~on_undelivered_tool_result ~on_tool_respo
     match messages_to_inject with
     | [] -> Ok next_request_id
     | messages ->
-      send_context_request io Inject_items ~id:next_request_id ~thread_id:(Some thread_id)
+      send_context_request io Inject_items ~id:next_request_id
         ~params:
           (`Assoc
              [ "threadId", `String thread_id
@@ -2901,7 +2881,7 @@ let run_protocol io (config : config) ~on_undelivered_tool_result ~on_tool_respo
   in
   let* () =
     try
-      send_context_request io Start_turn ~id:turn_request_id ~thread_id:(Some thread_id)
+      send_context_request io Start_turn ~id:turn_request_id
         ~params:
           (`Assoc
              ([ "threadId", `String thread_id
@@ -3148,55 +3128,6 @@ let client_argv (config : config) =
   @ account_apps_overrides
 ;;
 
-module Write = Runtime_official_client_write
-
-type context_submission =
-  { method_ : context_submission_method
-  ; request_id : context_frame_id
-  ; thread_id : string option
-  ; write : Write.t
-  }
-
-(* Which values of a frame are context slots. Start and resume carry the
-   developer instructions and the dynamic tools; inject_items carries each
-   history item; turn/start carries the input texts. A tool
-   response selects nothing: its content items are counted in the carrier. *)
-let context_selection = function
-  | Thread_start | Thread_resume ->
-    Write.Fields
-      [ "params"
-      , Fields
-          [ "developerInstructions", Select Developer_instructions
-          ; "dynamicTools", Select Dynamic_tools
-          ] ]
-  | Thread_inject_items ->
-    Fields [ "params", Fields [ "items", Elements (fun index _ -> Select (Injected_item index)) ] ]
-  | Turn_start -> Fields [ "params", Fields [ "input", Write.turn_input ] ]
-  | Dynamic_tool_response -> Carry
-;;
-
-let context_submission_to_json observation =
-  let frame = match observation.request_id with
-    | Request_id _ -> "request" | Answered_request_id _ -> "response" in
-  `Assoc ["schema",`String "masc.codex-context-submission.v4";
-    "phase",`String "stdin_write_completed";"frame",`String frame;
-    "method",`String (context_submission_method_label observation.method_);
-    "request_id",context_frame_id_to_json observation.request_id;
-    "thread_id",(match observation.thread_id with None -> `Null | Some id -> `String id);
-    "write",Write.to_json observation.write;
-    "logical_memory_partition",`String "unknown";
-    "server_acceptance",`String "not_observed_by_this_event";
-    "remote_history",`String "unknown"]
-;;
-
-let context_submission frame json payload =
-  match frame with
-  | Control -> None
-  | Context { method_; id; thread_id } ->
-    Some {method_;request_id=id;thread_id;
-      write=Write.json_line (context_selection method_) json payload}
-;;
-
 let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd ~account config run =
   let* environment = client_environment ?isolated_home:config.isolated_home account in
   let environment = Runtime_child_environment.set config.git_author_environment environment in
@@ -3218,13 +3149,13 @@ let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd 
     let reader = Eio.Buf_read.of_flow ~max_size:max_wire_line_bytes stdout_r in
     let receive_phase = ref Awaiting_admission in
     let send ?on_response_sent frame json =
-      let observation = with_idle_timeout clock
+      with_idle_timeout clock
         config.admission_timeout_s
         (fun () ->
           (* Encoding and its worker queue wait share the write's admission
              bound. Await the immutable payload before the
              owner writes, preserving protocol order and callback ownership. *)
-          let payload, observation =
+          let payload =
             Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
               let payload = Yojson.Safe.to_string json in
               (* The child decodes stdin as UTF-8 and exits on an invalid sequence,
@@ -3238,25 +3169,16 @@ let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd 
                      (match invalid_utf8_field json with
                       | Some field -> field
                       | None -> "<unknown>"));
-              payload, context_submission frame json payload)
+              payload)
           in
           Eio.Flow.copy_string payload stdin_w;
-          Eio.Flow.copy_string "\n" stdin_w;
-          observation)
-      in
+          Eio.Flow.copy_string "\n" stdin_w);
       Runtime_official_client_tool.notify_response_sent on_response_sent;
-      (* Persistence is outside the write deadline. A completed frame must not
-         become an input-write failure because its observer is slow. A deadline
-         the observer raises itself ([Eio.Time.Timeout] from its own
-         [with_timeout_exn], or an [Idle_timeout]) is that observer giving up:
-         the frame is already outside this process, so the turn continues and a
-         written turn/start keeps its dispatch fence. An enclosing deadline
-         reaches this code as [Eio.Cancel.Cancelled], which still propagates. *)
-      Option.iter (fun observation ->
-        Write.report
-          ~label:(Printf.sprintf "Codex request_id=%s"
-            (Yojson.Safe.to_string (context_frame_id_to_json observation.request_id)))
-          on_context_submission observation) observation
+      (* Outside the write deadline: a completed frame must not become an
+         input-write failure because the callback is slow. *)
+      match frame with
+      | Control -> ()
+      | Context method_ -> on_context_submission method_
     in
     let receive () =
       try
@@ -3489,10 +3411,10 @@ let run_turn ?(dynamic_tools = []) ?(on_undelivered_tool_result = fun _ -> Error
      proof of server acceptance. Set it before any post-write observer; the
      separate [on_turn_started] callback witnesses the server's acceptance. *)
   let turn_accepted = ref false in
-  let on_context_submission observation =
-    (match observation.method_ with Turn_start -> turn_accepted := true
+  let on_context_submission method_ =
+    (match method_ with Turn_start -> turn_accepted := true
      | Thread_start | Thread_resume | Thread_inject_items | Dynamic_tool_response -> ());
-    on_context_submission observation in
+    on_context_submission method_ in
   let on_turn_started ~thread_id ~turn_id =
     turn_accepted := true;
     on_turn_started ~thread_id ~turn_id

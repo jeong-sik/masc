@@ -91,6 +91,8 @@ type route_access =
   | Single_user_token_admin_only
   | Own_provider_manage
   | Multi_account_own_provider
+  | Multi_account_own_keeper
+  | Keepers_workspace_access
   | Own_keeper_sandbox_read
   | Memory_diff_read of { keeper_scoped : bool }
   | Machine_play
@@ -367,12 +369,15 @@ let decide_single_user ~auth_enabled ~require_token ~token_valid ~role
   in
   match req with
   | Always_public | Single_user_shell_probe -> Allowed
-  | Multi_account_whoami_probe | Multi_account_own_provider ->
+  | Multi_account_whoami_probe
+  | Multi_account_own_provider
+  | Multi_account_own_keeper ->
       Denied Multi_account_only_in_single_user
   | Workspace_read
   | Single_user_read
   | Single_user_write
   | Su_read_ma_admin
+  | Keepers_workspace_access
   | Own_keeper_sandbox_read
   | Memory_diff_read _ ->
       if has_worker_or_admin then Allowed else Denied Requires_worker_or_admin
@@ -417,7 +422,10 @@ let decide_multi_account ~(principal : principal) ~role
       | Admin, Service_credential -> Denied Requires_admin
       | (Worker | Player), (Session | Pat | Service_credential) ->
           Denied Requires_admin)
-  | Own_provider_manage | Multi_account_own_provider -> (
+  | Own_provider_manage
+  | Multi_account_own_provider
+  | Multi_account_own_keeper
+  | Keepers_workspace_access -> (
       match (principal.kind, has_worker_or_admin) with
       | Human, true -> Allowed
       | Service, (true | false) -> Denied Service_cannot_manage_own_provider
@@ -446,12 +454,17 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_token_admin_only
       | Own_provider_manage
       | Multi_account_own_provider
+      | Multi_account_own_keeper
+      | Keepers_workspace_access
       | Own_keeper_sandbox_read
       | Memory_diff_read _
       | Machine_play ) ) ->
       Denied Probing_auth
   | Probing_single_user _, Single_user_shell_probe -> Allowed
-  | Probing_single_user _, (Multi_account_whoami_probe | Multi_account_own_provider) ->
+  | ( Probing_single_user _
+    , ( Multi_account_whoami_probe
+      | Multi_account_own_provider
+      | Multi_account_own_keeper ) ) ->
       Denied Multi_account_only_in_single_user
   | ( Probing_single_user _
     , ( Workspace_read
@@ -463,6 +476,7 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
+      | Keepers_workspace_access
       | Own_keeper_sandbox_read
       | Memory_diff_read _
       | Machine_play ) ) ->
@@ -480,13 +494,18 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_token_admin_only
       | Own_provider_manage
       | Multi_account_own_provider
+      | Multi_account_own_keeper
+      | Keepers_workspace_access
       | Own_keeper_sandbox_read
       | Memory_diff_read _
       | Machine_play ) ) ->
       Denied Probing_auth
   | Single_user_auth_required { reason; _ }, Single_user_shell_probe ->
       Denied (Auth_required reason)
-  | Single_user_auth_required _, (Multi_account_whoami_probe | Multi_account_own_provider) ->
+  | ( Single_user_auth_required _
+    , ( Multi_account_whoami_probe
+      | Multi_account_own_provider
+      | Multi_account_own_keeper ) ) ->
       Denied Multi_account_only_in_single_user
   | ( Single_user_auth_required { reason; _ }
     , ( Workspace_read
@@ -498,6 +517,7 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_role_admin
       | Single_user_token_admin_only
       | Own_provider_manage
+      | Keepers_workspace_access
       | Own_keeper_sandbox_read
       | Memory_diff_read _
       | Machine_play ) ) ->
@@ -515,6 +535,8 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_token_admin_only
       | Own_provider_manage
       | Multi_account_own_provider
+      | Multi_account_own_keeper
+      | Keepers_workspace_access
       | Own_keeper_sandbox_read
       | Memory_diff_read _
       | Machine_play ) ) ->
@@ -532,6 +554,8 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_token_admin_only
       | Own_provider_manage
       | Multi_account_own_provider
+      | Multi_account_own_keeper
+      | Keepers_workspace_access
       | Own_keeper_sandbox_read
       | Memory_diff_read _
       | Machine_play ) ) ->
@@ -550,6 +574,8 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_token_admin_only
       | Own_provider_manage
       | Multi_account_own_provider
+      | Multi_account_own_keeper
+      | Keepers_workspace_access
       | Own_keeper_sandbox_read
       | Memory_diff_read _
       | Machine_play ) ) ->
@@ -568,6 +594,8 @@ let decide (session : auth_session) (req : route_access) : access_verdict =
       | Single_user_token_admin_only
       | Own_provider_manage
       | Multi_account_own_provider
+      | Multi_account_own_keeper
+      | Keepers_workspace_access
       | Own_keeper_sandbox_read
       | Memory_diff_read _
       | Machine_play ) ) ->
@@ -593,6 +621,8 @@ let tracked_capabilities =
     Single_user_token_admin_only;
     Own_provider_manage;
     Multi_account_own_provider;
+    Multi_account_own_keeper;
+    Keepers_workspace_access;
     Own_keeper_sandbox_read;
     Memory_diff_read { keeper_scoped = true };
     Machine_play;
@@ -777,9 +807,11 @@ let route_access_rank = function
   | Single_user_token_admin_only -> 10
   | Own_provider_manage -> 11
   | Multi_account_own_provider -> 12
-  | Own_keeper_sandbox_read -> 13
-  | Memory_diff_read _ -> 14
-  | Machine_play -> 15
+  | Multi_account_own_keeper -> 13
+  | Keepers_workspace_access -> 14
+  | Own_keeper_sandbox_read -> 15
+  | Memory_diff_read _ -> 16
+  | Machine_play -> 17
 
 let equal_route_access a b =
   if not (Int.equal (route_access_rank a) (route_access_rank b)) then false
@@ -798,6 +830,8 @@ let equal_route_access a b =
     | Single_user_token_admin_only, Single_user_token_admin_only
     | Own_provider_manage, Own_provider_manage
     | Multi_account_own_provider, Multi_account_own_provider
+    | Multi_account_own_keeper, Multi_account_own_keeper
+    | Keepers_workspace_access, Keepers_workspace_access
     | Own_keeper_sandbox_read, Own_keeper_sandbox_read
     | Machine_play, Machine_play ->
         true
@@ -816,6 +850,8 @@ let equal_route_access a b =
         | Single_user_token_admin_only
         | Own_provider_manage
         | Multi_account_own_provider
+        | Multi_account_own_keeper
+        | Keepers_workspace_access
         | Own_keeper_sandbox_read
         | Memory_diff_read _
         | Machine_play )
@@ -832,6 +868,8 @@ let equal_route_access a b =
         | Single_user_token_admin_only
         | Own_provider_manage
         | Multi_account_own_provider
+        | Multi_account_own_keeper
+        | Keepers_workspace_access
         | Own_keeper_sandbox_read
         | Memory_diff_read _
         | Machine_play ) ) ->
@@ -1238,6 +1276,7 @@ type capability_matrix = {
   can_token_read : bool;
   can_token_admin : bool;
   can_manage_own_provider : bool;
+  can_manage_own_keeper : bool;
 }
 
 type capability_row = {
@@ -1256,6 +1295,7 @@ let capability_matrix_of_session session =
     can_token_read = is_allowed session Single_user_token_read;
     can_token_admin = is_allowed session Single_user_token_admin_only;
     can_manage_own_provider = is_allowed session Own_provider_manage;
+    can_manage_own_keeper = is_allowed session Multi_account_own_keeper;
   }
 
 let capability_rows_of_session session =
@@ -1275,6 +1315,8 @@ let capability_rows_of_session session =
       Single_user_token_admin_only;
     mk "can_manage_own_provider" ~ko:"개인 프로바이더 관리"
       ~en:"Manage own provider" Own_provider_manage;
+    mk "can_manage_own_keeper" ~ko:"개인 키퍼 관리"
+      ~en:"Manage own keeper" Multi_account_own_keeper;
   ]
 
 let short_deny_reason_say = function

@@ -7,6 +7,8 @@ let route_access_of_get_request : Cmd.get_request -> Rbac.route_access =
   | Cmd.Get_auth_whoami -> Rbac.Multi_account_whoami_probe
   | Cmd.Get_auth_provider_accounts | Cmd.Get_auth_integrations ->
       Rbac.Multi_account_own_provider
+  | Cmd.Get_auth_keepers | Cmd.Get_auth_keeper_conversation _ ->
+      Rbac.Multi_account_own_keeper
   | Cmd.Get_dashboard_shell -> Rbac.Single_user_shell_probe
   (* Bridged Workspace_read (SU Public_read/CanReadState + MA Workspace_read) *)
   | Cmd.Get_planning
@@ -166,6 +168,12 @@ let route_access_of_post_request : Cmd.post_request -> Rbac.route_access =
   | Cmd.Post_ma_setup_account_key _
   | Cmd.Post_setup_account_verify _ ->
       Rbac.Multi_account_own_provider
+  (* Multi-Account personal keeper routes (404 in Single_user) *)
+  | Cmd.Post_auth_keeper_create _
+  | Cmd.Post_auth_keeper_assign _
+  | Cmd.Post_auth_keeper_conversation_start _
+  | Cmd.Post_auth_keeper_turn _ ->
+      Rbac.Multi_account_own_keeper
   (* Single-user read-only POST queries (CanReadState; 404 in MA) *)
   | Cmd.Post_browser_tabs _
   | Cmd.Post_browser_scene _
@@ -273,6 +281,7 @@ let route_access_of_delete_request : Cmd.delete_request -> Rbac.route_access =
   function
   | Cmd.Delete_skill_editor _ -> Rbac.Single_user_token_admin_only
   | Cmd.Delete_ma_setup_account_key _ -> Rbac.Multi_account_own_provider
+  | Cmd.Delete_auth_keeper_conversation _ -> Rbac.Multi_account_own_keeper
 
 let route_access_of_stream_post_request :
     Cmd.stream_post_request -> Rbac.route_access = function
@@ -290,7 +299,7 @@ let route_access_of_stream_id : Subscriptions.stream_id -> Rbac.route_access =
 
 let route_access_of_workspace : Nav.workspace -> Rbac.route_access = function
   | Nav.Pulse | Nav.Work | Nav.Knowledge | Nav.Runtime -> Rbac.Workspace_read
-  | Nav.Keepers -> Rbac.Single_user_read
+  | Nav.Keepers -> Rbac.Keepers_workspace_access
   | Nav.Infra -> Rbac.Su_read_ma_admin
 
 let route_access_of_work_tab : Nav.work_tab -> Rbac.route_access = function
@@ -359,6 +368,10 @@ let route_access_of_inline_action : Nav.inline_action_kind -> Rbac.route_access
   | Nav.Ma_provider_key_remove_confirm _
   | Nav.Ma_provider_verify_form _ ->
       Rbac.Multi_account_own_provider
+  | Nav.Ma_keeper_create_form
+  | Nav.Ma_keeper_assign_form _
+  | Nav.Ma_keeper_turn_form _ ->
+      Rbac.Multi_account_own_keeper
   | Nav.Prompt_override_form _ | Nav.Runtime_param_set_form _ ->
       Rbac.Single_user_role_admin
   | Nav.Gate_reject _
@@ -405,7 +418,7 @@ let route_access_of_menu_target : Nav.menu_target -> Rbac.route_access =
   | Nav.Menu_pulse -> Rbac.Workspace_read
   | Nav.Menu_work tab -> route_access_of_work_tab tab
   | Nav.Menu_knowledge tab -> route_access_of_knowledge_tab tab
-  | Nav.Menu_keepers -> Rbac.Single_user_read
+  | Nav.Menu_keepers -> Rbac.Keepers_workspace_access
   | Nav.Menu_keeper_tab tab -> route_access_of_keeper_tab tab
   | Nav.Menu_runtime tab -> route_access_of_runtime_tab tab
   | Nav.Menu_infra tab -> route_access_of_infra_tab tab
@@ -419,7 +432,7 @@ let route_access_of_slash_command_id : Slash.command_id -> Rbac.route_access =
   | Slash.Cmd_pulse | Slash.Cmd_work | Slash.Cmd_knowledge | Slash.Cmd_runtime
     ->
       Rbac.Workspace_read
-  | Slash.Cmd_keepers
+  | Slash.Cmd_keepers -> Rbac.Keepers_workspace_access
   | Slash.Cmd_keeper
   | Slash.Cmd_jump
   | Slash.Cmd_queue
@@ -794,7 +807,10 @@ let create_new_access (m : Model.t) : Rbac.route_access =
               | Nav.Runtime_fusion ->
                   Rbac.Single_user_token_admin_only)
           | Nav.Infra -> Rbac.Single_user_token_admin_only
-          | Nav.Keepers -> Rbac.Bridged_token_admin))
+          | Nav.Keepers ->
+              if Rbac.is_multi_account m.auth_session then
+                Rbac.Multi_account_own_keeper
+              else Rbac.Bridged_token_admin))
 
 let context_primary_action_access (m : Model.t) : Rbac.route_access =
   match Model.active_inspector m with
@@ -1020,6 +1036,11 @@ let delete_selected_access (m : Model.t) : Rbac.route_access =
     if Nav.equal_workspace m.nav.workspace Nav.Keepers then
       Rbac.Single_user_read
     else Rbac.Workspace_read
+  else if
+    Option.is_none (Model.active_inspector m)
+    && Nav.equal_workspace m.nav.workspace Nav.Keepers
+    && Rbac.is_multi_account m.auth_session
+  then Rbac.Multi_account_own_keeper
   else if Model.is_keeper_config_active m then Rbac.Bridged_token_admin
   else Rbac.Single_user_token_admin_only
 
@@ -1449,6 +1470,7 @@ let rec is_cmd_allowed session = function
       true
   | Cmd.Sync_streams _
   | Cmd.Set_bearer_token _
+  | Cmd.Reset_bearer_token_to_default
   | Cmd.Update_workspace_guard _
   | Cmd.Copy_clipboard _
   | Cmd.Render_memory_diagram _
@@ -1481,6 +1503,7 @@ let rec filter_cmd session = function
     | Cmd.Open_dos_screen _
     | Cmd.Voice_cmd _
     | Cmd.Set_bearer_token _
+    | Cmd.Reset_bearer_token_to_default
     | Cmd.Update_workspace_guard _
     | Cmd.Copy_clipboard _
     | Cmd.Render_memory_diagram _
@@ -1506,6 +1529,9 @@ let active_view_verdict (m : Model.t) =
           | Nav.Pulse -> Rbac.Allowed
           | Nav.Work -> decide_work_tab session m.work.active_tab
           | Nav.Knowledge -> decide_knowledge_tab session m.knowledge.active_tab
-          | Nav.Keepers -> decide_keeper_tab session m.fleet.keeper_dive_tab
+          | Nav.Keepers ->
+              if Rbac.is_multi_account session then
+                Rbac.decide session Rbac.Multi_account_own_keeper
+              else decide_keeper_tab session m.fleet.keeper_dive_tab
           | Nav.Runtime -> decide_runtime_tab session m.runtime.active_tab
           | Nav.Infra -> decide_infra_tab session m.infra.active_tab))

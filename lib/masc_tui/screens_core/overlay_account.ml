@@ -153,10 +153,14 @@ let render grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t) =
         Say.resolve lang
           (Say.make ~ko:"[Enter] 적용 · [Ctrl+U] 지우기 · [Esc] 취소"
              ~en:"[Enter] Apply · [Ctrl+U] Wipe · [Esc] Cancel")
+      else if model.account.clear_token_armed then
+        Say.resolve lang
+          (Say.make ~ko:"[c] 토큰 해제 확정 · [Esc] 취소"
+             ~en:"[c] Confirm clear · [Esc] Cancel")
       else
         Say.resolve lang
-          (Say.make ~ko:"[t] 토큰 · [c] 해제 · [r] 재확인 · [Esc] 닫기"
-             ~en:"[t] Token · [c] Clear · [r] Recheck · [Esc] Close")
+          (Say.make ~ko:"[t] 토큰 · [c] 해제 · [f] 파일/환경 · [r] 재확인 · [Esc] 닫기"
+             ~en:"[t] Token · [c] Clear · [f] File/Env · [r] Recheck · [Esc] Close")
     in
     let inner =
       Card.draw ~cache grid ~rect:modal_r ~theme
@@ -237,6 +241,18 @@ let render grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t) =
             (put_kv grid ~clip:body_clip ~x:content_x ~y:!y ~key_st:struct_st
                ~val_st:whisper_st ~key:"Token"
                (token_source_label ~lang model.account.token_source));
+          next_line ()
+        end;
+        if model.account.clear_token_armed && line_ok () then begin
+          let warn_txt =
+            Say.resolve lang
+              (Say.make
+                 ~ko:"토큰 해제 확인: 한 번 더 [c]를 누르면 토큰 해제 · [Esc] 취소"
+                 ~en:"Press [c] again to clear token, [Esc] to cancel")
+          in
+          ignore
+            (put_clipped grid ~clip:body_clip ~x:content_x ~y:!y ~style:warn_st
+               warn_txt);
           next_line ()
         end
       end;
@@ -403,10 +419,13 @@ let render grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t) =
                      ~style:whisper_st "Integrations: loading...");
                 next_line ()
             | Observed.Failed { reason; _ } ->
+                let clean =
+                  Chat_transcript.scrub_secrets_in_text reason
+                  |> Text_util.sanitize_single_line
+                in
                 ignore
                   (put_clipped grid ~clip:body_clip ~x:content_x ~y:!y
-                     ~style:warn_st
-                     ("Integrations error: " ^ Text_util.sanitize_single_line reason));
+                     ~style:warn_st ("Integrations error: " ^ clean));
                 next_line ()
             | Observed.Unreported | Observed.Absent ->
                 ignore
@@ -479,7 +498,12 @@ let render grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t) =
               in
               let tail =
                 match v.failure with
-                | Some f -> Printf.sprintf " · %s: %s" f.code f.message
+                | Some f ->
+                    let clean_msg =
+                      Chat_transcript.scrub_secrets_in_text f.message
+                      |> Text_util.sanitize_single_line
+                    in
+                    Printf.sprintf " · %s: %s" f.code clean_msg
                 | None -> (
                     match resp.runtime with
                     | Some rt ->
@@ -506,11 +530,13 @@ let render grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t) =
                      ~style:whisper_st "Provider accounts: loading...");
                 next_line ()
             | Observed.Failed { reason; _ } ->
+                let clean =
+                  Chat_transcript.scrub_secrets_in_text reason
+                  |> Text_util.sanitize_single_line
+                in
                 ignore
                   (put_clipped grid ~clip:body_clip ~x:content_x ~y:!y
-                     ~style:warn_st
-                     ("Provider accounts error: "
-                     ^ Text_util.sanitize_single_line reason));
+                     ~style:warn_st ("Provider accounts error: " ^ clean));
                 next_line ()
             | Observed.Unreported | Observed.Absent ->
                 ignore
@@ -570,25 +596,36 @@ let render grid ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t) =
               (Say.make
                  ~ko:"[Enter] 토큰 적용  ·  [Ctrl+U] 지우기  ·  [Esc] 입력 취소 (붙여넣기 지원)"
                  ~en:"[Enter] Apply token  ·  [Ctrl+U] Wipe  ·  [Esc] Cancel (paste supported)")
+          else if model.account.clear_token_armed then
+            Say.resolve lang
+              (Say.make
+                 ~ko:"토큰 해제 대기 중: [c] 다시 눌러 확정  ·  [Esc] 취소"
+                 ~en:"Clear token armed: press [c] again to confirm  ·  [Esc] cancel")
           else if Rbac.is_allowed session Rbac.Multi_account_own_provider then
             let login_extra =
               if Option.is_some (Runtime_store.active_setup_login_id model.runtime)
               then " · [e] Input · [L] Poll · [x] Cancel"
               else ""
             in
+            let keeper_extra =
+              if Rbac.is_allowed session Rbac.Multi_account_own_keeper then
+                Say.resolve lang
+                  (Say.make ~ko:" · [p] 개인 키퍼" ~en:" · [p] Keepers")
+              else ""
+            in
             Say.resolve lang
               (Say.make
                  ~ko:
-                   ("[t] 토큰 · [c] 해제 · [l] 로그인 · [K] 키 추가 · [u] 키 교체 · [d] 키 삭제 · [v] 검증 · [r] 새로고침"
-                   ^ login_extra)
+                   ("[t] 토큰 · [c] 해제 · [f] 파일/환경 · [l] 로그인 · [K] 키 추가 · [u] 키 교체 · [d] 키 삭제 · [v] 검증 · [r] 새로고침"
+                   ^ keeper_extra ^ login_extra)
                  ~en:
-                   ("[t] Token · [c] Clear · [l] Login · [K] Add Key · [u] Rotate Key · [d] Remove Key · [v] Verify · [r] Refresh"
-                   ^ login_extra))
+                   ("[t] Token · [c] Clear · [f] File/Env · [l] Login · [K] Add Key · [u] Rotate Key · [d] Remove Key · [v] Verify · [r] Refresh"
+                   ^ keeper_extra ^ login_extra))
           else
             Say.resolve lang
               (Say.make
-                 ~ko:"[t] 토큰 설정/교체  ·  [c] 토큰 해제  ·  [r] 세션 재확인  ·  [?] 도움말  ·  [Esc] 닫기"
-                 ~en:"[t] Set/Rotate Token  ·  [c] Clear Token  ·  [r] Recheck Session  ·  [?] Help  ·  [Esc] Close")
+                 ~ko:"[t] 토큰 설정/교체  ·  [c] 토큰 해제  ·  [f] 파일/환경  ·  [r] 세션 재확인  ·  [?] 도움말  ·  [Esc] 닫기"
+                 ~en:"[t] Set/Rotate Token  ·  [c] Clear Token  ·  [f] File/Env  ·  [r] Recheck Session  ·  [?] Help  ·  [Esc] Close")
         in
         ignore (put_clipped grid ~clip:f_clip ~x:content_x ~y:fy ~style:acc_st bar)
       end

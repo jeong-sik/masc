@@ -147,6 +147,15 @@ type route_access =
           requires [Manage_own_provider] (active Human Admin or Worker, Session
           or PAT; Service denied) in multi-account and returns 404 in
           single-user. *)
+  | Multi_account_own_keeper
+      (** Multi-account-only personal keeper route ([/api/v1/auth/keepers*]):
+          requires [Manage_own_keeper] (active Human Admin or Worker, Session
+          or PAT; Service denied) in multi-account and returns 404 in
+          single-user. *)
+  | Keepers_workspace_access
+      (** Dual-mode [Nav.Keepers] workspace gate: [Single_user_read] in
+          single-user (Admin or Worker) and [Multi_account_own_keeper] in
+          multi-account (active Human Admin or Worker; Service denied). *)
   | Own_keeper_sandbox_read
       (** [GET /api/v1/infra/sandboxes/:keeper]: [Public_read] in single-user,
           ownership-checked bridged read for authenticated Admin/Worker in
@@ -292,6 +301,7 @@ type capability_matrix = {
   can_token_read : bool;
   can_token_admin : bool;
   can_manage_own_provider : bool;
+  can_manage_own_keeper : bool;
 }
 
 type capability_row = {

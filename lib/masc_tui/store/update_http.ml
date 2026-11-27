@@ -360,9 +360,18 @@ let purge_disallowed_state ~(session : Rbac.auth_session) (m : Model.t) :
       }
   in
   let account =
-    let a0 = Account_store.close_token_editor m.account in
+    let a0 =
+      m.account
+      |> Account_store.close_token_editor
+      |> Account_store.disarm_clear_token
+    in
     if Rbac.is_allowed session Rbac.Multi_account_own_provider then a0
     else Account_store.purge_own_provider_data a0
+  in
+  let personal_keepers =
+    if Rbac.is_allowed session Rbac.Multi_account_own_keeper then
+      m.personal_keepers
+    else Personal_keepers_store.purge m.personal_keepers
   in
   let next =
     {
@@ -377,6 +386,7 @@ let purge_disallowed_state ~(session : Rbac.auth_session) (m : Model.t) :
       knowledge;
       work;
       account;
+      personal_keepers;
     }
   in
   if Rbac.can_single_user_token_admin session then next
@@ -430,7 +440,8 @@ let purge_session_scoped_state (m : Model.t) : Model.t =
     Account_store.purge_own_provider_data
       (Account_store.close_token_editor m.account)
   in
-  { m with fleet; work; knowledge; account }
+  let personal_keepers = Personal_keepers_store.purge m.personal_keepers in
+  { m with fleet; work; knowledge; account; personal_keepers }
 
 let apply_runtime_token_swap ~now ~(token : string option) (m : Model.t) =
   let next_epoch = Epoch.next m.epoch in
@@ -467,6 +478,7 @@ let apply_runtime_token_swap ~now ~(token : string option) (m : Model.t) =
       last_auth_recheck_mono = None;
       server_identity;
       account;
+      personal_keepers = Personal_keepers_store.purge m.personal_keepers;
       infra = Infra_store.forget_log_cursor m.infra;
     }
     |> purge_session_scoped_state
@@ -477,6 +489,51 @@ let apply_runtime_token_swap ~now ~(token : string option) (m : Model.t) =
   let cmds =
     [
       Cmd.Set_bearer_token token;
+      Cmd.Update_workspace_guard { instance_id = None; workspace_sha256 = None };
+      Cmd.Sync_streams { epoch = next_epoch; streams = [] };
+      Cmd.Http_get { epoch = next_epoch; req = Cmd.Get_health };
+    ]
+  in
+  (next, cmds)
+
+let revert_runtime_token_to_default ~now (m : Model.t) =
+  let next_epoch = Epoch.next m.epoch in
+  let account =
+    m.account
+    |> Account_store.mark_token_startup_default
+    |> Account_store.purge_own_provider_data
+  in
+  let server_identity =
+    {
+      m.server_identity with
+      workspace = None;
+      observer_instance_id = None;
+      mismatch_state = Model.Mismatch_none;
+    }
+  in
+  let toast_msg =
+    Say.make ~ko:"기본 파일/환경 토큰 복원됨 · 세션 재확인 중"
+      ~en:"Reverted to file/env token · re-checking session"
+  in
+  let next =
+    {
+      m with
+      epoch = next_epoch;
+      auth_session = Rbac.Probing_health;
+      last_auth_recheck_mono = None;
+      server_identity;
+      account;
+      personal_keepers = Personal_keepers_store.purge m.personal_keepers;
+      infra = Infra_store.forget_log_cursor m.infra;
+    }
+    |> purge_session_scoped_state
+    |> purge_disallowed_state ~session:Rbac.Probing_health
+    |> Model.mark_all_domains_stale
+    |> Model.with_toast ~now ~level:Model.Toast_info toast_msg
+  in
+  let cmds =
+    [
+      Cmd.Reset_bearer_token_to_default;
       Cmd.Update_workspace_guard { instance_id = None; workspace_sha256 = None };
       Cmd.Sync_streams { epoch = next_epoch; streams = [] };
       Cmd.Http_get { epoch = next_epoch; req = Cmd.Get_health };
@@ -526,6 +583,12 @@ let apply_auth_session_transition ~now ~(next_session : Rbac.auth_session)
         epoch = next_epoch;
         auth_session = next_session;
         last_auth_recheck_mono = Some now;
+        account =
+          (if changed then Account_store.purge_own_provider_data m.account
+           else m.account);
+        personal_keepers =
+          (if changed then Personal_keepers_store.purge m.personal_keepers
+           else m.personal_keepers);
       }
     in
     let base =
@@ -632,9 +695,30 @@ let record_http_incident ~now ~source ~context err (m : Model.t) =
 
 (* A decision POST that failed leaves its attention item actionable again,
    records an incident, and toasts the failure. *)
+let api_error_other_code = function
+  | Msg.Http_error { api_error = Some err; _ } -> (
+      match err.Wire_common.code with
+      | Wire_common.Other_code code -> Some code
+      | Wire_common.Invalid_param
+      | Wire_common.Unauthorized
+      | Wire_common.Not_found
+      | Wire_common.Sandbox_telemetry_missing
+      | Wire_common.Conflict_cas
+      | Wire_common.Workspace_mismatch
+      | Wire_common.Validation_failed
+      | Wire_common.Store_unavailable ->
+          None)
+  | Msg.Http_error { api_error = None; _ }
+  | Msg.Transport _
+  | Msg.Workspace_mismatch _
+  | Msg.Decode_error _ ->
+      None
+
 let handle_ma_own_provider_forbidden ~now ~source ~context ~toast err
     (m : Model.t) =
-  let detail = Msg.http_error_detail err in
+  let detail =
+    Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
+  in
   let summary =
     Say.concat ~sep:": " [ context; Msg.http_error_summary err ]
   in
@@ -646,6 +730,30 @@ let handle_ma_own_provider_forbidden ~now ~source ~context ~toast err
     Account_store.mark_own_provider_forbidden ~at:now ~reason:detail m.account
   in
   let m1 = { m with incidents; account } in
+  let next =
+    match toast with
+    | Some (level, msg) -> Model.with_toast ~now ~level msg m1
+    | None -> m1
+  in
+  (next, [])
+
+let handle_ma_own_keeper_forbidden ~now ~source ~context ~toast err
+    (m : Model.t) =
+  let detail =
+    Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
+  in
+  let summary =
+    Say.concat ~sep:": " [ context; Msg.http_error_summary err ]
+  in
+  let incidents, _ =
+    Incidents.push ~occurred_at_unix:m.freshness.last_wall_unix ~source
+      ~summary ~detail ~status:Health.Resolved m.incidents
+  in
+  let personal_keepers =
+    Personal_keepers_store.mark_own_keeper_forbidden ~at:now ~reason:detail
+      m.personal_keepers
+  in
+  let m1 = { m with incidents; personal_keepers } in
   let next =
     match toast with
     | Some (level, msg) -> Model.with_toast ~now ~level msg m1
@@ -1050,12 +1158,17 @@ let apply_http_reply ~now (m : Model.t) reply =
   | Msg.Reply_auth_provider_accounts (Error err) ->
       err_reply
         ~fail:(fun m' ->
+          let reason =
+            Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
+          in
           {
             m' with
             account =
               {
                 m'.account with
-                provider_accounts = failed_slot err m'.account.provider_accounts;
+                provider_accounts =
+                  Observed.failed ~at:now ~reason
+                    ~retryable:(Msg.http_error_retryable err);
               };
           })
         ~source:(Health.Source_runtime "provider_accounts")
@@ -1075,12 +1188,17 @@ let apply_http_reply ~now (m : Model.t) reply =
   | Msg.Reply_auth_integrations (Error err) ->
       err_reply
         ~fail:(fun m' ->
+          let reason =
+            Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
+          in
           {
             m' with
             account =
               {
                 m'.account with
-                integrations = failed_slot err m'.account.integrations;
+                integrations =
+                  Observed.failed ~at:now ~reason
+                    ~retryable:(Msg.http_error_retryable err);
               };
           })
         ~source:(Health.Source_runtime "integrations")
@@ -1171,9 +1289,15 @@ let apply_http_reply ~now (m : Model.t) reply =
                ~en:("Register API key: " ^ integration_id))
           err m
       in
+      let refresh_cmds =
+        match err with
+        | Msg.Decode_error _ ->
+            [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_auth_provider_accounts } ]
+        | Msg.Transport _ | Msg.Workspace_mismatch _ | Msg.Http_error _ -> []
+      in
       ( Model.with_toast ~now ~level:Model.Toast_error
           (Msg.http_error_summary err) next
-      , cmds )
+      , cmds @ refresh_cmds )
   | Msg.Reply_ma_setup_account_key_replace { provider_account_id; result = Ok resp } ->
       let toast =
         if resp.old_keys_removed then
@@ -1213,9 +1337,15 @@ let apply_http_reply ~now (m : Model.t) reply =
                ~en:("Rotate API key: " ^ provider_account_id))
           err m
       in
+      let refresh_cmds =
+        match err with
+        | Msg.Decode_error _ ->
+            [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_auth_provider_accounts } ]
+        | Msg.Transport _ | Msg.Workspace_mismatch _ | Msg.Http_error _ -> []
+      in
       ( Model.with_toast ~now ~level:Model.Toast_error
           (Msg.http_error_summary err) next
-      , cmds )
+      , cmds @ refresh_cmds )
   | Msg.Reply_ma_setup_account_key_remove { provider_account_id; result = Ok resp } ->
       let _ = provider_account_id in
       let next =
@@ -1249,9 +1379,577 @@ let apply_http_reply ~now (m : Model.t) reply =
                ~en:("Remove API key: " ^ provider_account_id))
           err m
       in
+      let refresh_cmds =
+        match err with
+        | Msg.Decode_error _ ->
+            [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_auth_provider_accounts } ]
+        | Msg.Transport _ | Msg.Workspace_mismatch _ | Msg.Http_error _ -> []
+      in
       ( Model.with_toast ~now ~level:Model.Toast_error
           (Msg.http_error_summary err) next
-      , cmds )
+      , cmds @ refresh_cmds )
+  | Msg.Reply_auth_keepers (Ok rows) ->
+      let personal_keepers =
+        Personal_keepers_store.apply_keepers ~observed_at:now rows
+          m.personal_keepers
+      in
+      let next = { m with personal_keepers } in
+      let follow_cmds =
+        if
+          Rbac.is_multi_account next.auth_session
+          && Nav.equal_workspace next.nav.workspace Nav.Keepers
+          && Option.is_none next.nav.overlay
+        then View_fetches.fetches_for_current_view next
+        else []
+      in
+      (next, follow_cmds)
+  | Msg.Reply_auth_keepers
+      (Error (Msg.Http_error { status = 403; _ } as err)) ->
+      handle_ma_own_keeper_forbidden ~now
+        ~source:(Health.Source_runtime "personal_keepers")
+        ~context:(Say.make ~ko:"개인 키퍼 목록 조회" ~en:"Personal keepers fetch")
+        ~toast:
+          (Some
+             ( Model.Toast_warning
+             , Say.make
+                 ~ko:"개인 키퍼 관리 권한 부족 (HTTP 403) — manage_own_keeper 스코프가 필요합니다"
+                 ~en:"Personal keeper access denied (HTTP 403) — PAT lacks manage_own_keeper scope"
+             ))
+        err m
+  | Msg.Reply_auth_keepers (Error err) ->
+      err_reply
+        ~fail:(fun m' ->
+          let reason =
+            Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
+          in
+          {
+            m' with
+            personal_keepers =
+              {
+                m'.personal_keepers with
+                keepers =
+                  Observed.failed ~at:now ~reason
+                    ~retryable:(Msg.http_error_retryable err);
+              };
+          })
+        ~source:(Health.Source_runtime "personal_keepers")
+        ~ko:"개인 키퍼 목록 조회" ~en:"Personal keepers fetch" err
+  | Msg.Reply_auth_keeper_create { keeper_id = _; result = Ok made } ->
+      let toast =
+        match made.record with
+        | Wire_personal_keepers.Record_made ->
+            Say.make
+              ~ko:("개인 키퍼 생성됨: " ^ made.keeper_id)
+              ~en:("Personal keeper created: " ^ made.keeper_id)
+        | Wire_personal_keepers.Record_existing ->
+            Say.make
+              ~ko:("이미 존재하는 개인 키퍼: " ^ made.keeper_id)
+              ~en:("Personal keeper already exists: " ^ made.keeper_id)
+      in
+      let personal_keepers =
+        Personal_keepers_store.select_keeper_by_id made.keeper_id
+          m.personal_keepers
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_success toast
+          { m with personal_keepers }
+      , [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_auth_keepers } ] )
+  | Msg.Reply_auth_keeper_create
+      { keeper_id; result = Error (Msg.Http_error { status = 403; _ } as err) } ->
+      handle_ma_own_keeper_forbidden ~now
+        ~source:(Health.Source_runtime "personal_keepers")
+        ~context:
+          (Say.make
+             ~ko:("개인 키퍼 생성: " ^ keeper_id)
+             ~en:("Create personal keeper: " ^ keeper_id))
+        ~toast:(Some (Model.Toast_error, Msg.http_error_summary err))
+        err m
+  | Msg.Reply_auth_keeper_create { keeper_id; result = Error err } ->
+      let next, cmds =
+        record_http_incident ~now
+          ~source:(Health.Source_runtime "personal_keepers")
+          ~context:
+            (Say.make
+               ~ko:("개인 키퍼 생성: " ^ keeper_id)
+               ~en:("Create personal keeper: " ^ keeper_id))
+          err m
+      in
+      let refresh_cmds =
+        match err with
+        | Msg.Decode_error _ ->
+            [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_auth_keepers } ]
+        | Msg.Transport _ | Msg.Workspace_mismatch _ | Msg.Http_error _ -> []
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds @ refresh_cmds )
+  | Msg.Reply_auth_keeper_assign
+      { keeper_id = _; runtime_id = _; result = Ok assigned } ->
+      let toast =
+        match assigned.record with
+        | Wire_personal_keepers.Record_assigned ->
+            Say.make
+              ~ko:
+                (Printf.sprintf "런타임 배정됨: %s -> %s" assigned.keeper_id
+                   assigned.runtime_id)
+              ~en:
+                (Printf.sprintf "Runtime assigned: %s -> %s" assigned.keeper_id
+                   assigned.runtime_id)
+        | Wire_personal_keepers.Record_assign_existing ->
+            Say.make
+              ~ko:
+                (Printf.sprintf "이미 배정된 런타임: %s -> %s" assigned.keeper_id
+                   assigned.runtime_id)
+              ~en:
+                (Printf.sprintf "Runtime already assigned: %s -> %s"
+                   assigned.keeper_id assigned.runtime_id)
+      in
+      let personal_keepers =
+        Personal_keepers_store.set_requested_conversation None m.personal_keepers
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_success toast
+          { m with personal_keepers }
+      , [
+          Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_auth_keepers };
+          Cmd.Http_get
+            {
+              epoch = m.epoch;
+              req =
+                Cmd.Get_auth_keeper_conversation
+                  { keeper_id = assigned.keeper_id; conversation_id = None };
+            };
+        ] )
+  | Msg.Reply_auth_keeper_assign
+      { keeper_id; runtime_id = _; result = Error (Msg.Http_error { status = 403; _ } as err) } ->
+      handle_ma_own_keeper_forbidden ~now
+        ~source:(Health.Source_runtime "personal_keepers")
+        ~context:
+          (Say.make
+             ~ko:("런타임 배정: " ^ keeper_id)
+             ~en:("Assign runtime: " ^ keeper_id))
+        ~toast:(Some (Model.Toast_error, Msg.http_error_summary err))
+        err m
+  | Msg.Reply_auth_keeper_assign
+      { keeper_id; runtime_id = _; result = Error err } ->
+      let next, cmds =
+        record_http_incident ~now
+          ~source:(Health.Source_runtime "personal_keepers")
+          ~context:
+            (Say.make
+               ~ko:("런타임 배정: " ^ keeper_id)
+               ~en:("Assign runtime: " ^ keeper_id))
+          err m
+      in
+      let refresh_cmds =
+        match err with
+        | Msg.Decode_error _ ->
+            [ Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_auth_keepers } ]
+        | Msg.Transport _ | Msg.Workspace_mismatch _ | Msg.Http_error _ -> []
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds @ refresh_cmds )
+  | Msg.Reply_auth_keeper_conversation
+      { keeper_id; conversation_id = _; result = Ok snap } ->
+      let personal_keepers =
+        Personal_keepers_store.apply_conversation ~observed_at:now ~keeper_id
+          snap m.personal_keepers
+      in
+      ({ m with personal_keepers }, [])
+  | Msg.Reply_auth_keeper_conversation
+      { keeper_id; conversation_id = _; result = Error (Msg.Http_error { status = 403; _ } as err) } ->
+      if Observed.is_value m.personal_keepers.keepers then
+        let detail =
+          Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
+        in
+        let summary =
+          Say.concat ~sep:": "
+            [
+              Say.make
+                ~ko:("개인 키퍼 대화 조회: " ^ keeper_id)
+                ~en:("Personal conversation fetch: " ^ keeper_id);
+              Msg.http_error_summary err;
+            ]
+        in
+        let incidents, _ =
+          Incidents.push ~occurred_at_unix:m.freshness.last_wall_unix
+            ~source:(Health.Source_runtime "personal_keepers") ~summary ~detail
+            ~status:Health.Resolved m.incidents
+        in
+        let personal_keepers =
+          Personal_keepers_store.mark_conversation_forbidden ~at:now
+            ~reason:detail m.personal_keepers
+        in
+        ( Model.with_toast ~now ~level:Model.Toast_warning
+            (Say.make
+               ~ko:"대화 조회 권한 부족 (HTTP 403) — read_state 및 manage_own_keeper 스코프 필요"
+               ~en:"Conversation read denied (HTTP 403) — requires read_state and manage_own_keeper")
+            { m with incidents; personal_keepers }
+        , [] )
+      else
+        handle_ma_own_keeper_forbidden ~now
+          ~source:(Health.Source_runtime "personal_keepers")
+          ~context:
+            (Say.make
+               ~ko:("개인 키퍼 대화 조회: " ^ keeper_id)
+               ~en:("Personal conversation fetch: " ^ keeper_id))
+          ~toast:None err m
+  | Msg.Reply_auth_keeper_conversation
+      { keeper_id; conversation_id = _; result = Error err } ->
+      err_reply
+        ~fail:(fun m' ->
+          let reason =
+            Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
+          in
+          {
+            m' with
+            personal_keepers =
+              {
+                m'.personal_keepers with
+                conversation =
+                  Observed.failed ~at:now ~reason
+                    ~retryable:(Msg.http_error_retryable err);
+              };
+          })
+        ~source:(Health.Source_runtime "personal_keepers")
+        ~ko:("개인 키퍼 대화 조회: " ^ keeper_id)
+        ~en:("Personal conversation fetch: " ^ keeper_id)
+        err
+  | Msg.Reply_auth_keeper_conversation_start
+      { keeper_id = _; result = Ok started } ->
+      let personal_keepers =
+        Personal_keepers_store.set_requested_conversation None m.personal_keepers
+      in
+      let next =
+        Model.with_toast ~now ~level:Model.Toast_success
+          (Say.make
+             ~ko:("새 대화 시작됨: " ^ started.conversation_id)
+             ~en:("Started new conversation: " ^ started.conversation_id))
+          { m with personal_keepers }
+      in
+      ( next
+      , [
+          Cmd.Http_get
+            {
+              epoch = m.epoch;
+              req =
+                Cmd.Get_auth_keeper_conversation
+                  { keeper_id = started.keeper_id; conversation_id = None };
+            };
+        ] )
+  | Msg.Reply_auth_keeper_conversation_start
+      { keeper_id; result = Error (Msg.Http_error { status = 403; _ } as err) } ->
+      handle_ma_own_keeper_forbidden ~now
+        ~source:(Health.Source_runtime "personal_keepers")
+        ~context:
+          (Say.make
+             ~ko:("새 대화 시작: " ^ keeper_id)
+             ~en:("Start new conversation: " ^ keeper_id))
+        ~toast:(Some (Model.Toast_error, Msg.http_error_summary err))
+        err m
+  | Msg.Reply_auth_keeper_conversation_start { keeper_id; result = Error err } ->
+      let next, cmds =
+        record_http_incident ~now
+          ~source:(Health.Source_runtime "personal_keepers")
+          ~context:
+            (Say.make
+               ~ko:("새 대화 시작: " ^ keeper_id)
+               ~en:("Start new conversation: " ^ keeper_id))
+          err m
+      in
+      let refresh_cmds =
+        match err with
+        | Msg.Decode_error _ ->
+            [
+              Cmd.Http_get
+                {
+                  epoch = m.epoch;
+                  req =
+                    Cmd.Get_auth_keeper_conversation
+                      { keeper_id; conversation_id = None };
+                };
+            ]
+        | Msg.Transport _ | Msg.Workspace_mismatch _ | Msg.Http_error _ -> []
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds @ refresh_cmds )
+  | Msg.Reply_auth_keeper_turn { keeper_id; message; result = Ok ans } ->
+      let personal_keepers =
+        Personal_keepers_store.finish_turn_ok ~keeper_id ~message ans
+          m.personal_keepers
+      in
+      let level, toast, refresh_cmds =
+        match ans.recording with
+        | Wire_personal_keepers.Turn_recorded { conversation_id; continued } ->
+            let mode = if continued then "continued" else "new" in
+            ( Model.Toast_success
+            , Say.make
+                ~ko:
+                  (Printf.sprintf "응답 완료 (%s · %s)" ans.model conversation_id)
+                ~en:
+                  (Printf.sprintf "Turn answered (%s · %s · %s)" ans.model
+                     conversation_id mode)
+            , [
+                Cmd.Http_get
+                  {
+                    epoch = m.epoch;
+                    req =
+                      Cmd.Get_auth_keeper_conversation
+                        { keeper_id; conversation_id = None };
+                  };
+              ] )
+        | Wire_personal_keepers.Turn_ephemeral ->
+            ( Model.Toast_warning
+            , Say.make
+                ~ko:
+                  (Printf.sprintf
+                     "응답 수신됨 (%s · 기록되지 않음 / 일시 응답)" ans.model)
+                ~en:
+                  (Printf.sprintf
+                     "Answer received (%s · unrecorded / ephemeral)" ans.model)
+            , [] )
+      in
+      ( Model.with_toast ~now ~level toast { m with personal_keepers }
+      , refresh_cmds )
+  | Msg.Reply_auth_keeper_turn
+      { keeper_id; message = _; result = Error (Msg.Http_error { status = 403; _ } as err) } ->
+      let detail =
+        Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
+      in
+      let personal_keepers =
+        Personal_keepers_store.finish_turn_error ~keeper_id ~reason:detail
+          m.personal_keepers
+      in
+      let m1 = { m with personal_keepers } in
+      (match api_error_other_code err with
+      | Some ("turn_refused" | "native_tools_refused") ->
+          let next, cmds =
+            record_http_incident ~now
+              ~source:(Health.Source_runtime "personal_keepers")
+              ~context:
+                (Say.make
+                   ~ko:("개인 키퍼 턴 전송: " ^ keeper_id)
+                   ~en:("Personal keeper turn: " ^ keeper_id))
+              err m1
+          in
+          ( Model.with_toast ~now ~level:Model.Toast_error
+              (Msg.http_error_summary err) next
+          , cmds )
+      | Some _ | None ->
+          handle_ma_own_keeper_forbidden ~now
+            ~source:(Health.Source_runtime "personal_keepers")
+            ~context:
+              (Say.make
+                 ~ko:("개인 키퍼 턴 전송: " ^ keeper_id)
+                 ~en:("Personal keeper turn: " ^ keeper_id))
+            ~toast:(Some (Model.Toast_error, Msg.http_error_summary err))
+            err m1)
+  | Msg.Reply_auth_keeper_turn { keeper_id; message = _; result = Error err } ->
+      let detail =
+        Chat_transcript.scrub_secrets_in_text (Msg.http_error_detail err)
+      in
+      let personal_keepers =
+        Personal_keepers_store.finish_turn_error ~keeper_id ~reason:detail
+          m.personal_keepers
+      in
+      let next, cmds =
+        record_http_incident ~now
+          ~source:(Health.Source_runtime "personal_keepers")
+          ~context:
+            (Say.make
+               ~ko:("개인 키퍼 턴 전송: " ^ keeper_id)
+               ~en:("Personal keeper turn: " ^ keeper_id))
+          err { m with personal_keepers }
+      in
+      let should_reload_conv =
+        match err with
+        | Msg.Decode_error _ -> true
+        | Msg.Http_error { status; _ }
+          when status >= 500
+               || Option.equal String.equal (api_error_other_code err)
+                    (Some "answer_unrecorded") ->
+            true
+        | Msg.Http_error _ | Msg.Transport _ | Msg.Workspace_mismatch _ -> false
+      in
+      let refresh_cmds =
+        if should_reload_conv then
+          [
+            Cmd.Http_get
+              {
+                epoch = m.epoch;
+                req =
+                  Cmd.Get_auth_keeper_conversation
+                    { keeper_id; conversation_id = None };
+              };
+          ]
+        else []
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds @ refresh_cmds )
+  | Msg.Reply_auth_keeper_conversation_delete
+      { keeper_id; conversation_id = _; result = Ok del } ->
+      let vendor_say =
+        Wire_personal_keepers.vendor_copy_outcome_say del.vendor_copy
+      in
+      let notice =
+        Printf.sprintf "%s · %s" del.conversation_id
+          (Say.resolve m.lang vendor_say)
+      in
+      let personal_keepers =
+        m.personal_keepers
+        |> Personal_keepers_store.disarm_delete
+        |> Personal_keepers_store.set_delete_notice (Some notice)
+        |> Personal_keepers_store.set_requested_conversation None
+      in
+      let level =
+        match del.vendor_copy with
+        | Wire_personal_keepers.Vendor_copy_may_remain -> Model.Toast_warning
+        | Wire_personal_keepers.Vendor_copy_removed
+        | Wire_personal_keepers.Vendor_copy_none ->
+            Model.Toast_success
+      in
+      let toast =
+        Say.make
+          ~ko:
+            (Printf.sprintf "대화 삭제됨 (%s) · %s" del.conversation_id
+               (Say.resolve Say.Lang_ko vendor_say))
+          ~en:
+            (Printf.sprintf "Conversation deleted (%s) · %s" del.conversation_id
+               (Say.resolve Say.Lang_en vendor_say))
+      in
+      ( Model.with_toast ~now ~level toast { m with personal_keepers }
+      , [
+          Cmd.Http_get
+            {
+              epoch = m.epoch;
+              req =
+                Cmd.Get_auth_keeper_conversation
+                  { keeper_id; conversation_id = None };
+            };
+        ] )
+  | Msg.Reply_auth_keeper_conversation_delete
+      {
+        keeper_id;
+        conversation_id;
+        result = Error (Msg.Http_error { status = 503; _ } as err);
+      }
+    when Option.equal String.equal (api_error_other_code err)
+           (Some "conversation_not_deleted") ->
+      let notice =
+        Say.resolve m.lang
+          (Say.make
+             ~ko:
+               (Printf.sprintf
+                  "삭제 실패 (%s · 503 conversation_not_deleted) · [d]로 재시도 가능"
+                  conversation_id)
+             ~en:
+               (Printf.sprintf
+                  "Deletion failed (%s · 503 conversation_not_deleted) · press [d] to retry"
+                  conversation_id))
+      in
+      let personal_keepers =
+        m.personal_keepers
+        |> Personal_keepers_store.disarm_delete
+        |> Personal_keepers_store.set_delete_notice (Some notice)
+        |> Personal_keepers_store.set_requested_conversation None
+      in
+      let next, cmds =
+        record_http_incident ~now
+          ~source:(Health.Source_runtime "personal_keepers")
+          ~context:
+            (Say.make
+               ~ko:("대화 삭제 실패: " ^ conversation_id)
+               ~en:("Conversation delete failed: " ^ conversation_id))
+          err { m with personal_keepers }
+      in
+      (* CRITICAL: reload WITHOUT conversation_id because a deletion-failed
+         conversation returns 404 when queried directly by conversation_id. *)
+      let reload_cmd =
+        Cmd.Http_get
+          {
+            epoch = m.epoch;
+            req =
+              Cmd.Get_auth_keeper_conversation
+                { keeper_id; conversation_id = None };
+          }
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_warning
+          (Say.make
+             ~ko:
+               (Printf.sprintf
+                  "대화 삭제 실패 (%s): 서버에서 삭제를 완료하지 못했습니다 — 목록 재조회 중"
+                  conversation_id)
+             ~en:
+               (Printf.sprintf
+                  "Conversation deletion failed (%s): reloading keeper conversations"
+                  conversation_id))
+          next
+      , cmds @ [ reload_cmd ] )
+  | Msg.Reply_auth_keeper_conversation_delete
+      {
+        keeper_id = _;
+        conversation_id;
+        result = Error (Msg.Http_error { status = 403; _ } as err);
+      } ->
+      let personal_keepers =
+        Personal_keepers_store.disarm_delete m.personal_keepers
+      in
+      let m1 = { m with personal_keepers } in
+      (match api_error_other_code err with
+      | Some "deletion_refused" ->
+          let next, cmds =
+            record_http_incident ~now
+              ~source:(Health.Source_runtime "personal_keepers")
+              ~context:
+                (Say.make
+                   ~ko:("대화 삭제 거부: " ^ conversation_id)
+                   ~en:("Conversation delete refused: " ^ conversation_id))
+              err m1
+          in
+          ( Model.with_toast ~now ~level:Model.Toast_error
+              (Msg.http_error_summary err) next
+          , cmds )
+      | Some _ | None ->
+          handle_ma_own_keeper_forbidden ~now
+            ~source:(Health.Source_runtime "personal_keepers")
+            ~context:
+              (Say.make
+                 ~ko:("대화 삭제: " ^ conversation_id)
+                 ~en:("Delete conversation: " ^ conversation_id))
+            ~toast:(Some (Model.Toast_error, Msg.http_error_summary err))
+            err m1)
+  | Msg.Reply_auth_keeper_conversation_delete
+      { keeper_id; conversation_id; result = Error err } ->
+      let personal_keepers =
+        Personal_keepers_store.disarm_delete m.personal_keepers
+      in
+      let next, cmds =
+        record_http_incident ~now
+          ~source:(Health.Source_runtime "personal_keepers")
+          ~context:
+            (Say.make
+               ~ko:("대화 삭제: " ^ conversation_id)
+               ~en:("Delete conversation: " ^ conversation_id))
+          err { m with personal_keepers }
+      in
+      let refresh_cmds =
+        match err with
+        | Msg.Decode_error _ ->
+            [
+              Cmd.Http_get
+                {
+                  epoch = m.epoch;
+                  req =
+                    Cmd.Get_auth_keeper_conversation
+                      { keeper_id; conversation_id = None };
+                };
+            ]
+        | Msg.Transport _ | Msg.Workspace_mismatch _ | Msg.Http_error _ -> []
+      in
+      ( Model.with_toast ~now ~level:Model.Toast_error
+          (Msg.http_error_summary err) next
+      , cmds @ refresh_cmds )
   | Msg.Reply_setup_login_cancel { login_id; result = Ok () } ->
       let m1 = close_setup_login_input ~login_id m in
       let runtime = Runtime_store.mark_setup_login_input_ready false m1.runtime in
@@ -2444,6 +3142,9 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Ma_provider_key_replace_form _
         | Nav.Ma_provider_key_remove_confirm _
         | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
         | Nav.Code_finder_form
         | Nav.Code_search_form
         | Nav.Github_token_form _
@@ -2568,6 +3269,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Code_finder_form
             | Nav.Code_search_form
             | Nav.Github_token_form _
@@ -2696,6 +3400,9 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Ma_provider_key_replace_form _
         | Nav.Ma_provider_key_remove_confirm _
         | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
@@ -2851,6 +3558,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -3839,6 +4549,9 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Ma_provider_key_replace_form _
         | Nav.Ma_provider_key_remove_confirm _
         | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
@@ -3940,6 +4653,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -4037,6 +4753,9 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Ma_provider_key_replace_form _
                 | Nav.Ma_provider_key_remove_confirm _
                 | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -4147,6 +4866,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -4261,6 +4983,9 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Ma_provider_key_replace_form _
                 | Nav.Ma_provider_key_remove_confirm _
                 | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -4388,6 +5113,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -4900,6 +5628,9 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Ma_provider_key_replace_form _
         | Nav.Ma_provider_key_remove_confirm _
         | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
@@ -5039,6 +5770,9 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Ma_provider_key_replace_form _
         | Nav.Ma_provider_key_remove_confirm _
         | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
@@ -5636,6 +6370,9 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Nav.Ma_provider_key_replace_form _
         | Nav.Ma_provider_key_remove_confirm _
         | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
         | Nav.Board_comment _
         | Nav.Github_token_form _
         | Nav.Code_finder_form
@@ -5763,6 +6500,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -6100,6 +6840,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -6167,6 +6910,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -6228,6 +6974,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -6280,6 +7029,9 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Ma_provider_key_replace_form _
              | Nav.Ma_provider_key_remove_confirm _
              | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
              | Nav.Board_comment _
              | Nav.Github_token_form _
              | Nav.Code_finder_form
@@ -6407,6 +7159,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -6474,6 +7229,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -6535,6 +7293,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -6587,6 +7348,9 @@ let apply_http_reply ~now (m : Model.t) reply =
              | Nav.Ma_provider_key_replace_form _
              | Nav.Ma_provider_key_remove_confirm _
              | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
              | Nav.Board_comment _
              | Nav.Github_token_form _
              | Nav.Code_finder_form
@@ -8356,6 +9120,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -8487,6 +9254,7 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Cmd.Open_terminal_program _
                 | Cmd.Start_local_server
                 | Cmd.Set_bearer_token _
+                | Cmd.Reset_bearer_token_to_default
                 | Cmd.Restart_tui
                 | Cmd.Quit _ ->
                     false)
@@ -8536,6 +9304,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -8703,6 +9474,9 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Ma_provider_key_replace_form _
                 | Nav.Ma_provider_key_remove_confirm _
                 | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -8793,6 +9567,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -9026,6 +9803,9 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Ma_provider_key_replace_form _
                 | Nav.Ma_provider_key_remove_confirm _
                 | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -9109,6 +9889,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -9207,6 +9990,9 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Ma_provider_key_replace_form _
                 | Nav.Ma_provider_key_remove_confirm _
                 | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -9297,6 +10083,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -9693,6 +10482,9 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Ma_provider_key_replace_form _
                 | Nav.Ma_provider_key_remove_confirm _
                 | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -9798,6 +10590,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -9963,6 +10758,9 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Ma_provider_key_replace_form _
                 | Nav.Ma_provider_key_remove_confirm _
                 | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -10054,6 +10852,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -10130,6 +10931,9 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Ma_provider_key_replace_form _
                 | Nav.Ma_provider_key_remove_confirm _
                 | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -10217,6 +11021,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -10448,6 +11255,9 @@ let apply_http_reply ~now (m : Model.t) reply =
                 | Nav.Ma_provider_key_replace_form _
                 | Nav.Ma_provider_key_remove_confirm _
                 | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -10522,6 +11332,9 @@ let apply_http_reply ~now (m : Model.t) reply =
               | Nav.Ma_provider_key_replace_form _
               | Nav.Ma_provider_key_remove_confirm _
               | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
               | Nav.Board_comment _
               | Nav.Github_token_form _
               | Nav.Code_finder_form
@@ -10607,6 +11420,9 @@ let apply_http_reply ~now (m : Model.t) reply =
             | Nav.Ma_provider_key_replace_form _
             | Nav.Ma_provider_key_remove_confirm _
             | Nav.Ma_provider_verify_form _
+            | Nav.Ma_keeper_create_form
+            | Nav.Ma_keeper_assign_form _
+            | Nav.Ma_keeper_turn_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form

@@ -301,7 +301,7 @@ let find_render_cmd cmds =
       | Cmd.Http_delete _
       | Cmd.Http_post_stream _
       | Cmd.Sync_streams _
-      | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _
+      | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
       | Cmd.Cancel_memory_diagram
@@ -327,7 +327,7 @@ let has_cancel_diagram_cmd cmds =
       | Cmd.Http_delete _
       | Cmd.Http_post_stream _
       | Cmd.Sync_streams _
-      | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _
+      | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
       | Cmd.Render_memory_diagram _
@@ -513,7 +513,7 @@ let test_store_diagram_keybindings_and_scope_safety () =
         | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
-        | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _
+        | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Render_memory_diagram _
         | Cmd.Cancel_memory_diagram
@@ -1223,7 +1223,7 @@ let test_visibility_enter_refresh_and_resize () =
         | Cmd.Http_delete _
         | Cmd.Http_post_stream _
         | Cmd.Sync_streams _
-        | Cmd.Set_bearer_token _ | Cmd.Update_workspace_guard _
+        | Cmd.Set_bearer_token _ | Cmd.Reset_bearer_token_to_default | Cmd.Update_workspace_guard _
         | Cmd.Voice_cmd _
         | Cmd.Render_memory_diagram _
         | Cmd.Cancel_memory_diagram

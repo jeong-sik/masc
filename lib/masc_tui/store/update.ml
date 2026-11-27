@@ -16,6 +16,7 @@ let has_explicit_sync_streams cmds =
       | Cmd.Http_delete _
       | Cmd.Http_post_stream _
       | Cmd.Set_bearer_token _
+      | Cmd.Reset_bearer_token_to_default
       | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _

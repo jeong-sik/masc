@@ -39,6 +39,14 @@ val apply_runtime_token_swap :
     SSE streams, update [Cmd_executor]'s bearer token, clear workspace guard,
     and trigger a fresh [/health] handshake without restarting the TUI. *)
 
+val revert_runtime_token_to_default :
+  now:Clock.Mono.t ->
+  Model.t ->
+  Model.t * Cmd.t list
+(** Clear any runtime bearer override and reload the default file/env token
+    ([$MASC_TOKEN] / [.masc/auth/admin.token]) with a fresh epoch bump,
+    disallowed/personal state purge, SSE drain, and [/health] re-probe. *)
+
 val apply_auth_session_transition :
   now:Clock.Mono.t ->
   next_session:Rbac.auth_session ->

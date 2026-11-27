@@ -47,7 +47,9 @@ let sandbox_detail_fetch ?keeper (m : Model.t) =
     | None -> (
         match m.nav.workspace with
         | Nav.Keepers
-          when Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_work_sandbox ->
+          when (not (Rbac.is_multi_account m.auth_session))
+               && Nav.equal_keeper_tab m.fleet.keeper_dive_tab
+                    Nav.Keeper_work_sandbox ->
             Option.map
               (fun (k : Wire_fleet.keeper_summary) -> k.name)
               (Fleet_store.selected_keeper_summary m.fleet)
@@ -954,23 +956,87 @@ let fetches_for_workspace ~force (m : Model.t) =
                   }))
           @ keeper_scoped_reqs)
   | Nav.Keepers ->
-      let embedded_dive_reqs =
-        match Model.selected_keeper_name m with
-        | Some name ->
-            fetches_for_keeper_tab ~force ~name
-              ~tab:m.fleet.keeper_dive_tab m
-        | None -> []
-      in
-      ([]
-      |> add_if (needs_fetch ~force m.fleet.keepers) Cmd.Get_keepers_roster
-      |> add_if (needs_fetch ~force m.fleet.turns) Cmd.Get_keeper_turns
-      |> add_if (needs_fetch ~force m.infra.sandboxes) Cmd.Get_sandboxes
-      |> add_keeper_costs ~force m
-      (* The list's next-due column reads the active schedules. *)
-      |> add_if
-           (needs_fetch ~force m.work.schedules)
-           (Cmd.Get_schedules { cursor = None }))
-      @ embedded_dive_reqs
+      if Rbac.is_multi_account m.auth_session then
+        let pk = m.personal_keepers in
+        let keepers_allowed =
+          Rbac.is_allowed m.auth_session Rbac.Multi_account_own_keeper
+        in
+        let keepers_req =
+          if
+            keepers_allowed
+            && (force || Option.is_none pk.own_keeper_forbidden)
+            && needs_fetch ~force pk.keepers
+          then [ Cmd.Get_auth_keepers ]
+          else []
+        in
+        let provider_req =
+          if
+            Rbac.is_allowed m.auth_session Rbac.Multi_account_own_provider
+            && (force || Option.is_none m.account.own_provider_forbidden)
+            && needs_fetch ~force m.account.provider_accounts
+          then [ Cmd.Get_auth_provider_accounts ]
+          else []
+        in
+        let conv_req =
+          if
+            (not keepers_allowed)
+            || ((not force)
+                && (Option.is_some pk.own_keeper_forbidden
+                    || Option.is_some pk.conversation_forbidden))
+          then []
+          else
+            match Personal_keepers_store.selected_keeper_id pk with
+            | None -> []
+            | Some keeper_id ->
+                let req_cid = pk.requested_conversation_id in
+                let already_fresh =
+                  (not force)
+                  &&
+                  match pk.conversation with
+                  | Observed.Value { data = k, snap; stale = false; _ } ->
+                      String.equal k keeper_id
+                      &&
+                      (match req_cid with
+                      | None ->
+                          Option.equal String.equal snap.conversation_id
+                            snap.current_conversation_id
+                      | Some wanted ->
+                          Option.equal String.equal snap.conversation_id
+                            (Some wanted))
+                  | Observed.Failed { retryable = false; _ } -> true
+                  | Observed.Loading _
+                  | Observed.Value { stale = true; _ }
+                  | Observed.Absent
+                  | Observed.Unreported
+                  | Observed.Failed { retryable = true; _ } ->
+                      false
+                in
+                if already_fresh then []
+                else
+                  [
+                    Cmd.Get_auth_keeper_conversation
+                      { keeper_id; conversation_id = req_cid };
+                  ]
+        in
+        keepers_req @ provider_req @ conv_req
+      else
+        let embedded_dive_reqs =
+          match Model.selected_keeper_name m with
+          | Some name ->
+              fetches_for_keeper_tab ~force ~name
+                ~tab:m.fleet.keeper_dive_tab m
+          | None -> []
+        in
+        ([]
+        |> add_if (needs_fetch ~force m.fleet.keepers) Cmd.Get_keepers_roster
+        |> add_if (needs_fetch ~force m.fleet.turns) Cmd.Get_keeper_turns
+        |> add_if (needs_fetch ~force m.infra.sandboxes) Cmd.Get_sandboxes
+        |> add_keeper_costs ~force m
+        (* The list's next-due column reads the active schedules. *)
+        |> add_if
+             (needs_fetch ~force m.work.schedules)
+             (Cmd.Get_schedules { cursor = None }))
+        @ embedded_dive_reqs
   | Nav.Runtime -> (
       match m.runtime.active_tab with
       | Nav.Runtime_quotas_credits ->
@@ -1621,7 +1687,8 @@ let chat_tab_shown ~keeper (m : Model.t) =
   match Model.active_inspector m with
   | Some _ -> false
   | None ->
-      Nav.equal_workspace m.nav.workspace Nav.Keepers
+      (not (Rbac.is_multi_account m.auth_session))
+      && Nav.equal_workspace m.nav.workspace Nav.Keepers
       && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
       && Option.equal String.equal (Model.selected_keeper_name m) (Some keeper)
 
@@ -1638,7 +1705,8 @@ let active_chat_keeper (m : Model.t) =
   | Some _ -> None
   | None ->
       if
-        Nav.equal_workspace m.nav.workspace Nav.Keepers
+        (not (Rbac.is_multi_account m.auth_session))
+        && Nav.equal_workspace m.nav.workspace Nav.Keepers
         && Nav.equal_keeper_tab m.fleet.keeper_dive_tab Nav.Keeper_chat
       then Model.selected_keeper_name m
       else None

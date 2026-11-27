@@ -945,6 +945,17 @@ let render_sub_tab_bar grid ~(rect : Rect.t) ~(theme : Theme.t)
              in
              draw_tab_list tabs
          | Nav.Keepers -> (
+             if Rbac.is_multi_account model.auth_session then
+               let verdict =
+                 Rbac.decide model.auth_session Rbac.Multi_account_own_keeper
+               in
+               let lbl =
+                 mark_tab_lock verdict
+                   (Say.resolve lang
+                      (Say.make ~ko:"개인 키퍼" ~en:"Personal Keepers"))
+               in
+               draw_tab_list [ (lbl, true) ]
+             else
              (* Sync sub-tab bar with what '['/']' actually control:
                 when Preview (pane 1 / zoomed) owns focus and a keeper is
                 selected, show the selected keeper's inner preview tabs instead
@@ -1249,10 +1260,14 @@ let footer_right_status_hint ~(model : Model.t) =
           Say.resolve lang
             (Say.make ~ko:"Enter 적용 · Ctrl+U 지우기 · Esc 취소"
                ~en:"Enter apply · Ctrl+U wipe · Esc cancel")
+        else if model.account.clear_token_armed then
+          Say.resolve lang
+            (Say.make ~ko:"c 해제 확정 · Esc 취소"
+               ~en:"c confirm clear · Esc cancel")
         else
           Say.resolve lang
-            (Say.make ~ko:"t 토큰 · c 해제 · r 재확인 · Esc 닫기"
-               ~en:"t token · c clear · r recheck · Esc close")
+            (Say.make ~ko:"t 토큰 · c 해제 · f 파일/환경 · r 재확인 · Esc 닫기"
+               ~en:"t token · c clear · f file/env · r recheck · Esc close")
     | Some Nav.Incidents ->
         Say.resolve lang
           (Say.make ~ko:"Ch 3 과거 이력 · 실시간 상태 무관"
@@ -1262,10 +1277,14 @@ let footer_right_status_hint ~(model : Model.t) =
           Say.resolve lang
             (Say.make ~ko:"Enter 적용 · Ctrl+U 지우기 · Esc 취소"
                ~en:"Enter apply · Ctrl+U wipe · Esc cancel")
+        else if model.account.clear_token_armed then
+          Say.resolve lang
+            (Say.make ~ko:"c 해제 확정 · Esc 취소"
+               ~en:"c confirm clear · Esc cancel")
         else
           Say.resolve lang
-            (Say.make ~ko:"t 토큰 · c 해제 · r 재시도 · Ctrl+Q 종료"
-               ~en:"t token · c clear · r retry · Ctrl+Q quit")
+            (Say.make ~ko:"t 토큰 · c 해제 · f 파일/환경 · r 재시도 · Ctrl+Q 종료"
+               ~en:"t token · c clear · f file/env · r retry · Ctrl+Q quit")
     | Some (Nav.System_gate Nav.Server_offline) ->
         Say.resolve lang
           (Say.make ~ko:"s 시작 · r 재시도 · Ctrl+Q 종료"
@@ -1451,10 +1470,17 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               mk "Esc" "취소" "Cancel" Keymap.Pop_back_or_close;
               mk "Ctrl+Q" "종료" "Quit" Keymap.Quit_app;
             ]
+          else if model.account.clear_token_armed then
+            [
+              mk "c" "해제 확정" "Confirm Clear" Keymap.Open_account;
+              mk "Esc" "취소" "Cancel" Keymap.Pop_back_or_close;
+              mk "Ctrl+Q" "종료" "Quit" Keymap.Quit_app;
+            ]
           else
             [
               mk "t" "토큰 입력" "Set Token" Keymap.Open_account;
               mk "c" "토큰 해제" "Clear Token" Keymap.Open_account;
+              mk "f" "파일/환경" "File/Env" Keymap.Open_account;
               mk "r" "재시도" "Retry" Keymap.Refresh;
               mk "Ctrl+Q" "종료" "Quit" Keymap.Quit_app;
             ]
@@ -1465,22 +1491,33 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               mk "Ctrl+U" "지우기" "Wipe" Keymap.Composer_kill_word;
               mk "Esc" "취소" "Cancel" Keymap.Pop_back_or_close;
             ]
+          else if model.account.clear_token_armed then
+            [
+              mk "c" "해제 확정" "Confirm Clear" Keymap.Open_account;
+              mk "Esc" "취소" "Cancel" Keymap.Pop_back_or_close;
+            ]
           else
             let ma_hints =
+              (if
+                 Rbac.is_allowed model.auth_session
+                   Rbac.Multi_account_own_provider
+               then
+                 [
+                   mk "l" "로그인" "Login" Keymap.Account_login;
+                   mk "K" "키 추가" "Add Key" Keymap.Open_account;
+                   mk "v" "검증" "Verify" Keymap.Open_account;
+                 ]
+               else [])
+              @
               if
-                Rbac.is_allowed model.auth_session
-                  Rbac.Multi_account_own_provider
-              then
-                [
-                  mk "l" "로그인" "Login" Keymap.Account_login;
-                  mk "K" "키 추가" "Add Key" Keymap.Open_account;
-                  mk "v" "검증" "Verify" Keymap.Open_account;
-                ]
+                Rbac.is_allowed model.auth_session Rbac.Multi_account_own_keeper
+              then [ mk "p" "개인 키퍼" "Keepers" Keymap.Open_account ]
               else []
             in
             [
               mk "t" "토큰" "Token" Keymap.Open_account;
               mk "c" "해제" "Clear" Keymap.Open_account;
+              mk "f" "파일/환경" "File/Env" Keymap.Open_account;
               mk "r" "재확인" "Recheck" Keymap.Refresh;
             ]
             @ ma_hints
@@ -1693,6 +1730,7 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
           || Model.has_active_memory_reading model
           || Option.is_some model.knowledge.armed_vote
           || Option.is_some model.keeper_stop_armed
+          || Option.is_some model.personal_keepers.delete_armed_conv_id
           || Option.is_some model.quit_armed_at
           || Option.is_some model.knowledge.pending_wiki_edit_slug
           || (Option.is_none (Model.active_inspector model)
@@ -1820,6 +1858,8 @@ let render_footer grid ~(rect : Rect.t) ~(theme : Theme.t) ~(model : Model.t)
               | Rbac.Own_provider_manage
               | Rbac.Own_keeper_sandbox_read
               | Rbac.Multi_account_own_provider
+              | Rbac.Multi_account_own_keeper
+              | Rbac.Keepers_workspace_access
               | Rbac.Memory_diff_read _
               | Rbac.Machine_play ->
                   false))

@@ -25,6 +25,7 @@ type token_editor = {
 type t = {
   token_source : token_source;
   token_editor : token_editor;
+  clear_token_armed : bool;
   provider_accounts : Wire_account.provider_accounts_snapshot Observed.t;
   integrations : Wire_account.person_integrations_snapshot Observed.t;
   own_provider_forbidden : string option;
@@ -52,6 +53,9 @@ val backspace_token_text : t -> t
 val set_token_editor_error : string -> t -> t
 val mark_token_runtime_set : t -> t
 val mark_token_runtime_cleared : t -> t
+val mark_token_startup_default : t -> t
+val arm_clear_token : t -> t
+val disarm_clear_token : t -> t
 
 (** {1 Multi-Account Own-Provider State} *)
 
@@ -78,6 +82,8 @@ val selected_provider_account : t -> Wire_account.provider_account option
 
 val runtimes_for_account :
   provider_account_id:string -> t -> Wire_account.provider_runtime list
+
+val all_runtimes : t -> Wire_account.provider_runtime list
 
 val integration_by_id :
   integration_id:string -> t -> Wire_account.person_integration option

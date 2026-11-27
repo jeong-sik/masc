@@ -189,6 +189,9 @@ type inline_action_kind =
       provider_account_id : string;
       integration_id : string;
     }
+  | Ma_keeper_create_form
+  | Ma_keeper_assign_form of { keeper_id : string }
+  | Ma_keeper_turn_form of { keeper_id : string }
 
 type system_gate_kind =
   | Micro_viewport

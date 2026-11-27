@@ -1879,9 +1879,35 @@ let open_inline_modal (m : Model.t) kind =
             modal.fields
         in
         { modal with fields }
+    | Nav.Ma_keeper_assign_form { keeper_id } ->
+        let default_runtime =
+          let current =
+            Personal_keepers_store.keepers_list m.personal_keepers
+            |> List.find_map (fun (k : Wire_personal_keepers.personal_keeper) ->
+                   if String.equal k.keeper_id keeper_id then k.runtime_id
+                   else None)
+          in
+          match current with
+          | Some rt -> rt
+          | None -> (
+              match Account_store.all_runtimes m.account with
+              | first :: _ -> first.runtime_id
+              | [] -> "")
+        in
+        let fields =
+          List.map
+            (fun (f : Model.modal_form_field) ->
+              if String.equal f.key "ma_runtime_id" then
+                { f with value = default_runtime }
+              else f)
+            modal.fields
+        in
+        { modal with fields }
     | Nav.Ma_provider_login_form
     | Nav.Ma_provider_key_replace_form _
     | Nav.Ma_provider_key_remove_confirm _
+    | Nav.Ma_keeper_create_form
+    | Nav.Ma_keeper_turn_form _
     | Nav.Btw_query
     | Nav.Gate_reject _
     | Nav.Verification_reject _
@@ -6924,21 +6950,24 @@ let submit_inline_modal ~now (m : Model.t) =
                 String.trim
                   (Model.modal_field_value ~key:"ma_login_integration" modal)
               in
-              ( close_with_inflight_toast
-                  ~msg:
-                    (Say.make
-                       ~ko:("다중 계정 CLI 로그인 시작 중: " ^ integration_id)
-                       ~en:("Starting Multi-Account CLI login for " ^ integration_id))
-                  m
-              , [
-                  Cmd.Http_post
-                    {
-                      epoch = m.epoch;
-                      req =
-                        Cmd.Post_setup_login_start
-                          { integration_id; account_ref = None };
-                    };
-                ] )
+              if String.equal integration_id "" then
+                set_modal_error "Integration ID is required"
+              else
+                ( close_with_inflight_toast
+                    ~msg:
+                      (Say.make
+                         ~ko:("다중 계정 CLI 로그인 시작 중: " ^ integration_id)
+                         ~en:("Starting Multi-Account CLI login for " ^ integration_id))
+                    m
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req =
+                          Cmd.Post_setup_login_start
+                            { integration_id; account_ref = None };
+                      };
+                  ] )
           | Nav.Ma_provider_key_add_form ->
               let integration_id =
                 String.trim
@@ -6947,39 +6976,47 @@ let submit_inline_modal ~now (m : Model.t) =
               let key =
                 String.trim (Model.modal_field_value ~key:"ma_key_secret" modal)
               in
-              (* Security: close immediately and never echo/log API key. *)
-              ( close_with_inflight_toast
-                  ~msg:
-                    (Say.make
-                       ~ko:("개인 API 키 계정 등록 중: " ^ integration_id)
-                       ~en:("Registering personal API key for " ^ integration_id))
-                  m
-              , [
-                  Cmd.Http_post
-                    {
-                      epoch = m.epoch;
-                      req = Cmd.Post_ma_setup_account_key { integration_id; key };
-                    };
-                ] )
+              if String.equal integration_id "" then
+                set_modal_error "Integration ID is required"
+              else if String.equal key "" then
+                set_modal_error "API key is required"
+              else
+                (* Security: close immediately and never echo/log API key. *)
+                ( close_with_inflight_toast
+                    ~msg:
+                      (Say.make
+                         ~ko:("개인 API 키 계정 등록 중: " ^ integration_id)
+                         ~en:("Registering personal API key for " ^ integration_id))
+                    m
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req = Cmd.Post_ma_setup_account_key { integration_id; key };
+                      };
+                  ] )
           | Nav.Ma_provider_key_replace_form { provider_account_id; _ } ->
               let key =
                 String.trim (Model.modal_field_value ~key:"ma_key_secret" modal)
               in
-              (* Security: close immediately and never echo/log API key. *)
-              ( close_with_inflight_toast
-                  ~msg:
-                    (Say.make
-                       ~ko:("개인 API 키 교체 중: " ^ provider_account_id)
-                       ~en:("Rotating personal API key for " ^ provider_account_id))
-                  m
-              , [
-                  Cmd.Http_put
-                    {
-                      epoch = m.epoch;
-                      req =
-                        Cmd.Put_ma_setup_account_key { provider_account_id; key };
-                    };
-                ] )
+              if String.equal key "" then
+                set_modal_error "API key is required"
+              else
+                (* Security: close immediately and never echo/log API key. *)
+                ( close_with_inflight_toast
+                    ~msg:
+                      (Say.make
+                         ~ko:("개인 API 키 교체 중: " ^ provider_account_id)
+                         ~en:("Rotating personal API key for " ^ provider_account_id))
+                    m
+                , [
+                    Cmd.Http_put
+                      {
+                        epoch = m.epoch;
+                        req =
+                          Cmd.Put_ma_setup_account_key { provider_account_id; key };
+                      };
+                  ] )
           | Nav.Ma_provider_key_remove_confirm { provider_account_id; _ } ->
               let typed =
                 String.trim
@@ -7010,25 +7047,109 @@ let submit_inline_modal ~now (m : Model.t) =
                 String.trim
                   (Model.modal_field_value ~key:"ma_verify_model" modal)
               in
-              ( close_with_inflight_toast
-                  ~msg:
-                    (Say.make
-                       ~ko:
-                         (Printf.sprintf "프로바이더 검증 요청 중 (%s · %s)..."
-                            provider_account_id model)
-                       ~en:
-                         (Printf.sprintf "Verifying provider account (%s · %s)..."
-                            provider_account_id model))
-                  m
-              , [
-                  Cmd.Http_post
-                    {
-                      epoch = m.epoch;
-                      req =
-                        Cmd.Post_setup_account_verify
-                          { provider_account_id; model };
-                    };
-                ] ) ))
+              if String.equal model "" then
+                set_modal_error "Model name is required"
+              else
+                ( close_with_inflight_toast
+                    ~msg:
+                      (Say.make
+                         ~ko:
+                           (Printf.sprintf "프로바이더 검증 요청 중 (%s · %s)..."
+                              provider_account_id model)
+                         ~en:
+                           (Printf.sprintf "Verifying provider account (%s · %s)..."
+                              provider_account_id model))
+                    m
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req =
+                          Cmd.Post_setup_account_verify
+                            { provider_account_id; model };
+                      };
+                  ] )
+          | Nav.Ma_keeper_create_form -> (
+              let raw_id = Model.modal_field_value ~key:"ma_keeper_id" modal in
+              match Wire_personal_keepers.validate_keeper_id raw_id with
+              | Error reason -> set_modal_error reason
+              | Ok keeper_id ->
+                  ( close_with_inflight_toast
+                      ~msg:
+                        (Say.make
+                           ~ko:("개인 키퍼 생성 중: " ^ keeper_id)
+                           ~en:("Creating personal keeper: " ^ keeper_id))
+                      m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req = Cmd.Post_auth_keeper_create { keeper_id };
+                        };
+                    ] ))
+          | Nav.Ma_keeper_assign_form { keeper_id } -> (
+              let raw_rt = Model.modal_field_value ~key:"ma_runtime_id" modal in
+              match
+                Wire_personal_keepers.validate_authz_id ~field:"runtime_id"
+                  raw_rt
+              with
+              | Error reason -> set_modal_error reason
+              | Ok runtime_id ->
+                  ( close_with_inflight_toast
+                      ~msg:
+                        (Say.make
+                           ~ko:
+                             (Printf.sprintf "런타임 배정 중: %s -> %s" keeper_id
+                                runtime_id)
+                           ~en:
+                             (Printf.sprintf "Assigning runtime: %s -> %s"
+                                keeper_id runtime_id))
+                      m
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req =
+                            Cmd.Post_auth_keeper_assign
+                              { keeper_id; runtime_id };
+                        };
+                    ] ))
+          | Nav.Ma_keeper_turn_form { keeper_id } -> (
+              let raw_msg =
+                Model.modal_field_raw_value ~key:"ma_turn_message" modal
+              in
+              match Wire_personal_keepers.validate_turn_message raw_msg with
+              | Error Wire_personal_keepers.Message_blank ->
+                  set_modal_error "Message cannot be empty"
+              | Error
+                  (Wire_personal_keepers.Message_too_long { bytes; max_bytes }) ->
+                  set_modal_error
+                    (Printf.sprintf
+                       "Message is too long (%d bytes; max %d bytes)" bytes
+                       max_bytes)
+              | Ok message ->
+                  let preview =
+                    let s = Text_util.sanitize_single_line message in
+                    if String.length s > 60 then String.sub s 0 60 ^ "..."
+                    else s
+                  in
+                  let personal_keepers =
+                    Personal_keepers_store.start_turn_in_flight ~keeper_id
+                      ~preview m.personal_keepers
+                  in
+                  ( close_with_inflight_toast
+                      ~msg:
+                        (Say.make
+                           ~ko:("개인 키퍼에 전송 중: " ^ keeper_id)
+                           ~en:("Sending turn to personal keeper: " ^ keeper_id))
+                      { m with personal_keepers }
+                  , [
+                      Cmd.Http_post
+                        {
+                          epoch = m.epoch;
+                          req = Cmd.Post_auth_keeper_turn { keeper_id; message };
+                        };
+                    ] )) ))
 
 let move_delta = function
   | Keymap.Up -> -1
@@ -12190,6 +12311,9 @@ let apply_move (m : Model.t) dir =
                   | Nav.Ma_provider_key_replace_form _
                   | Nav.Ma_provider_key_remove_confirm _
                   | Nav.Ma_provider_verify_form _
+                  | Nav.Ma_keeper_create_form
+                  | Nav.Ma_keeper_assign_form _
+                  | Nav.Ma_keeper_turn_form _
                   | Nav.Board_comment _
                   | Nav.Github_token_form _
                   | Nav.Code_finder_form
@@ -12259,6 +12383,9 @@ let apply_move (m : Model.t) dir =
               | Nav.Ma_provider_key_replace_form _
               | Nav.Ma_provider_key_remove_confirm _
               | Nav.Ma_provider_verify_form _
+              | Nav.Ma_keeper_create_form
+              | Nav.Ma_keeper_assign_form _
+              | Nav.Ma_keeper_turn_form _
               | Nav.Board_comment _
               | Nav.Github_token_form _
               | Nav.Code_finder_form

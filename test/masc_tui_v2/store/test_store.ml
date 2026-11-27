@@ -24567,10 +24567,18 @@ let test_wiki_body_link_follow_and_back () =
   let link text slug exists raw : Wire_knowledge.wiki_outgoing_link =
     { text; target = Wire_knowledge.Link_page { slug; exists }; raw; line = 1 }
   in
+  (* The links sit below a screenful of text; page-locked exists on disk but
+     the index does not list it (an unreadable page). *)
+  let filler =
+    String.concat "\n\n" (List.init 60 (fun i -> Printf.sprintf "Line %d." i))
+  in
   let page_a =
-    page "page-a" "See [B](page-b.md) and [gone](page-gone.md)."
+    page "page-a"
+      (filler
+     ^ "\n\nSee [B](page-b.md), [locked](page-locked.md) and [gone](page-gone.md).")
       [
         link "B" "page-b" true "page-b.md";
+        link "locked" "page-locked" true "page-locked.md";
         link "gone" "page-gone" false "page-gone.md";
       ]
   in
@@ -24654,8 +24662,10 @@ let test_wiki_body_link_follow_and_back () =
   let m1, _ = step m_wiki (char_key ">") in
   Alcotest.(check (option string)) "> selects the link to the existing page"
     (Some "page-b.md") (link_of m1 "page-a");
+  Alcotest.(check bool) "> scrolls the link into view" true
+    (m1.knowledge.detail_scroll_offset > 0);
   let m2, _ = step m1 (char_key ">") in
-  Alcotest.(check (option string)) "a link to a missing page is not selectable"
+  Alcotest.(check (option string)) "links to missing or unlisted pages are not selectable"
     (Some "page-b.md") (link_of m2 "page-a");
   let m3, _ = step m2 (key Keymap.Input.Enter) in
   Alcotest.(check (option string)) "Enter opens the linked page" (Some "page-b")
@@ -24664,11 +24674,26 @@ let test_wiki_body_link_follow_and_back () =
     (Model.is_zoomed_active m3);
   Alcotest.(check (option string)) "the opened page has no link selected" None
     (link_of m3 "page-b");
+  Alcotest.(check bool) "the opened page has a way back" true
+    (Option.is_some (Knowledge_store.wiki_link_back ~slug:"page-b" m3.knowledge));
+  let m_jumped, _ = Update_nav.jump_to_knowledge_wiki ~zoomed:true m3 "page-b" in
+  Alcotest.(check bool) "a jump to the page forgets the way back" false
+    (Update_nav.wiki_link_back_ready m_jumped);
+  let moved_back =
+    Knowledge_store.move_selection ~delta:1
+      (Knowledge_store.move_selection ~delta:(-1) m3.knowledge)
+  in
+  Alcotest.(check (option string)) "the list returns to the opened page" (Some "page-b")
+    (shown { m3 with knowledge = moved_back });
+  Alcotest.(check bool) "moving the list selection forgets the way back" true
+    (Option.is_none (Knowledge_store.wiki_link_back ~slug:"page-b" moved_back));
   let m4, _ = step m3 (key Keymap.Input.Escape) in
   Alcotest.(check (option string)) "Esc returns to the page the link was followed from"
     (Some "page-a") (shown m4);
   Alcotest.(check (option string)) "with the followed link selected again"
     (Some "page-b.md") (link_of m4 "page-a");
+  Alcotest.(check int) "and the scroll it was left at"
+    m2.knowledge.detail_scroll_offset m4.knowledge.detail_scroll_offset;
   Alcotest.(check bool) "and still zoomed" true (Model.is_zoomed_active m4);
   let m5, _ = step m4 (key Keymap.Input.Escape) in
   Alcotest.(check bool) "with no trail left, Esc unzooms as before" false

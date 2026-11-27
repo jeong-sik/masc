@@ -151,5 +151,21 @@ try {
   const outside = structuredClone(plan); outside.duration = 0.4
   await refused(outside)
   cases++
+
+  // A region entered while a note still sounds under an earlier program renders
+  // it under its attack patch, then returns to the current program. A note
+  // attacked before any program change has an unknown patch and is refused.
+  const patched = structuredClone(independent)
+  patched.sources[0].events = [wire(0, [0xc0, 1]), wire(0, [0x90, 60, 90]), wire(0.05, [0xc0, 2]), wire(0.4, [0x80, 60, 40])]
+  patched.regions[0].sourceStart = 0.1
+  patched.regions[0].periodNanoseconds.numerator = '400000000'
+  const repatched = await prepare(patched)
+  assert.deepEqual(repatched.rows[0].map(event => event.bytes), [[0xc0, 2], [0xc0, 1], [0x90, 60, 90], [0xc0, 2], [0x80, 60, 40]])
+  assert.deepEqual(repatched.rows[0].slice(0, 4).map(event => event.seconds), [0, 0, 0, 0])
+  assert.ok(Math.abs(repatched.rows[0][4].seconds - 0.3) < 1e-12)
+  const unknownPatch = structuredClone(patched)
+  unknownPatch.sources[0].events = [wire(0, [0x90, 60, 90]), wire(0.05, [0xc0, 2]), wire(0.4, [0x80, 60, 40])]
+  await refused(unknownPatch)
+  cases++
   console.log(JSON.stringify({ passed: cases, failed: 0, scope: 'actual native VST region projection; no plug-in or device opened' }))
 } finally { await rm(root, { recursive: true, force: true }) }

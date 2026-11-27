@@ -339,6 +339,44 @@ let test_otlp_json_histogram_exports_zero_datapoint_before_observe () =
   check int "no attributes" 0 (List.length attrs)
 ;;
 
+let test_otlp_json_histogram_exports_sorted_bounds_and_non_cumulative_buckets () =
+  let m = Metrics.create () in
+  let h = Metrics.histogram m ~name:"gen_ai.client.latency" ~buckets:[ 5.0; 1.0 ] in
+  Metrics.observe h 0.5;
+  Metrics.observe h 2.0;
+  Metrics.observe h 10.0;
+  let json = Metrics.to_otlp_json m in
+  let open Yojson.Safe.Util in
+  let metrics =
+    json
+    |> member "resourceMetrics"
+    |> to_list
+    |> List.hd
+    |> member "scopeMetrics"
+    |> to_list
+    |> List.hd
+    |> member "metrics"
+    |> to_list
+  in
+  let metric =
+    List.find
+      (fun metric -> metric |> member "name" |> to_string = "gen_ai.client.latency")
+      metrics
+  in
+  let data_point =
+    metric |> member "histogram" |> member "dataPoints" |> to_list |> List.hd
+  in
+  let bounds =
+    data_point |> member "explicitBounds" |> to_list |> List.map to_float
+  in
+  let counts =
+    data_point |> member "bucketCounts" |> to_list |> List.map to_string
+  in
+  check (list (float 0.000001)) "sorted explicitBounds" [ 1.0; 5.0 ] bounds;
+  check (list string) "non-cumulative bucketCounts" [ "1"; "1"; "1" ] counts;
+  check string "total count" "3" (data_point |> member "count" |> to_string)
+;;
+
 let () =
   run
     "Metrics"
@@ -384,6 +422,11 @@ let () =
             "histogram OTLP export preserves zero datapoint"
             `Quick
             (with_eio test_otlp_json_histogram_exports_zero_datapoint_before_observe)
+        ; test_case
+            "histogram OTLP export emits sorted bounds and non-cumulative buckets"
+            `Quick
+            (with_eio
+               test_otlp_json_histogram_exports_sorted_bounds_and_non_cumulative_buckets)
         ] )
     ; ( "registration"
       , [ test_case

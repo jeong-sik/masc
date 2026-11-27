@@ -720,6 +720,24 @@ let find_and_execute_tool_with_index
          None)
     | true, None -> None
   in
+  let tool_completed_published = ref false in
+  let publish_tool_completed_once ~on_exn output =
+    if not !tool_completed_published then (
+      match publish_event_bus, event_bus with
+      | false, _ | true, None -> ()
+      | true, Some bus ->
+        tool_completed_published := true;
+        (try
+           Event_bus.publish
+             bus
+             (Event_bus.mk_event
+                ?correlation_id
+                ?run_id
+                ?caused_by:tool_called_run_id
+                (ToolCompleted { invocation; agent_name; tool_name = name; output }))
+         with
+         | exn -> on_exn exn))
+  in
   let dispatch =
     match tool_opt with
     | Some tool ->
@@ -810,40 +828,60 @@ let find_and_execute_tool_with_index
                    ; Log.S ("tool_use_id", id)
                    ; Log.S ("failure", deferred_failure_summary failure)
                    ]);
-               match publish_event_bus, event_bus with
-               | true, Some bus ->
-                 let cancelled_output : Types.tool_result =
-                   Error
-                     { Types.message = Printexc.to_string cancelled
-                     ; recoverable = false
-                     ; error_class = None
-                     }
-                 in
-                 (try
-                    Event_bus.publish
-                      bus
-                      (Event_bus.mk_event
-                         ?correlation_id
-                         ?run_id
-                         ?caused_by:tool_called_run_id
-                         (ToolCompleted
-                            { invocation
-                            ; agent_name
-                            ; tool_name = name
-                            ; output = cancelled_output
-                            }))
-                  with
-                  | exn ->
-                    Llm_provider.Reserved_exn.reraise_if_reserved exn;
-                    Log.error
-                      _log
-                      "cancelled tool ToolCompleted publish failed"
-                      [ Log.S ("tool", name)
-                      ; Log.S ("tool_use_id", id)
-                      ; Log.S ("error", Printexc.to_string exn)
-                      ])
-               | false, _ | true, None -> ());
+               publish_tool_completed_once
+                 ~on_exn:(fun exn ->
+                   Llm_provider.Reserved_exn.reraise_if_reserved exn;
+                   Log.error
+                     _log
+                     "cancelled tool ToolCompleted publish failed"
+                     [ Log.S ("tool", name)
+                     ; Log.S ("tool_use_id", id)
+                     ; Log.S ("error", Printexc.to_string exn)
+                     ])
+                 (Error
+                    { Types.message = Printexc.to_string cancelled
+                    ; recoverable = false
+                    ; error_class = None
+                    }));
              Printexc.raise_with_backtrace cancelled backtrace
+           | exception exn ->
+             (* Terminal tool handlers re-raise non-reserved exceptions out of
+                [execute_handler]. Emit both the failure hook and a matching
+                [ToolCompleted] event so the event bus never leaks an unpaired
+                [ToolCalled]. *)
+             let backtrace = Printexc.get_raw_backtrace () in
+             Llm_provider.Reserved_exn.reraise_if_reserved exn;
+             let duration_ms = (Unix.gettimeofday () -. t0) *. 1000.0 in
+             Eio.Cancel.protect (fun () ->
+               emit_post_tool_use_failure
+                 ~input:exact_input
+                 ~stage:Hooks.Execution
+                 ~duration_ms
+                 (Printexc.to_string exn)
+               |> Option.iter (fun failure ->
+                 Log.error
+                   _log
+                   "failed tool failure hook failed"
+                   [ Log.S ("tool", name)
+                   ; Log.S ("tool_use_id", id)
+                   ; Log.S ("failure", deferred_failure_summary failure)
+                   ]);
+               publish_tool_completed_once
+                 ~on_exn:(fun pub_exn ->
+                   Llm_provider.Reserved_exn.reraise_if_reserved pub_exn;
+                   Log.error
+                     _log
+                     "failed tool ToolCompleted publish failed"
+                     [ Log.S ("tool", name)
+                     ; Log.S ("tool_use_id", id)
+                     ; Log.S ("error", Printexc.to_string pub_exn)
+                     ])
+                 (Error
+                    { Types.message = Printexc.to_string exn
+                    ; recoverable = false
+                    ; error_class = Some Types.Unknown
+                    }));
+             Printexc.raise_with_backtrace exn backtrace
          in
          let duration_ms = (Unix.gettimeofday () -. t0) *. 1000.0 in
          let result_bytes =
@@ -959,32 +997,39 @@ let find_and_execute_tool_with_index
       ; deferred_failure = None
       }
   in
+  let completed_output =
+    Types.tool_result_of_outcome
+      ?content_blocks:dispatch.result.content_blocks
+      ~content:dispatch.result.content
+      dispatch.result.outcome
+  in
   (* ToolCompleted event *)
   defer_observer (fun () ->
-    match publish_event_bus, event_bus with
-    | false, _ -> ()
-    | true, Some bus ->
-      let output_content = dispatch.result.content in
-      let output =
-        Types.tool_result_of_outcome ?content_blocks:dispatch.result.content_blocks ~content:output_content dispatch.result.outcome
-      in
-      (try
-         Event_bus.publish
-           bus
-           (Event_bus.mk_event
-              ?correlation_id
-              ?run_id
-              ?caused_by:tool_called_run_id
-              (ToolCompleted { invocation; agent_name; tool_name = name; output }))
-       with
-       | exception_ ->
-         let backtrace = Printexc.get_raw_backtrace () in
-         record_deferred_exception exception_ backtrace)
-    | true, None -> ());
+    publish_tool_completed_once
+      ~on_exn:(fun exception_ ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        record_deferred_exception exception_ backtrace)
+      completed_output);
   { result = dispatch.result
   ; finish_observers =
       (fun () ->
-        List.rev !post_effect_observers |> List.iter (fun observe -> observe ());
+        Fun.protect
+          ~finally:(fun () ->
+            if not !tool_completed_published then
+              Eio.Cancel.protect (fun () ->
+                publish_tool_completed_once
+                  ~on_exn:(fun pub_exn ->
+                    Llm_provider.Reserved_exn.reraise_if_reserved pub_exn;
+                    Log.error
+                      _log
+                      "unwind ToolCompleted publish failed"
+                      [ Log.S ("tool", name)
+                      ; Log.S ("tool_use_id", id)
+                      ; Log.S ("error", Printexc.to_string pub_exn)
+                      ])
+                  completed_output))
+          (fun () ->
+            List.rev !post_effect_observers |> List.iter (fun observe -> observe ()));
         { dispatch with deferred_failure = !first_deferred_failure })
   }
 ;;
@@ -1140,7 +1185,7 @@ let execute_scheduled_tool
       started_observed := true
     | None -> ()
   in
-  let notify_cancelled_finished ~tool_name cancelled =
+  let notify_aborted_finished ~tool_name ~message =
     if !started_observed && not !finished_observed then (
       finished_observed := true;
       match on_tool_execution_finished with
@@ -1151,14 +1196,14 @@ let execute_scheduled_tool
             callback
               ~invocation
               ~tool_name
-              ~content:(Printexc.to_string cancelled)
+              ~content:message
               ~is_error:true
           with
           | exn ->
             Llm_provider.Reserved_exn.reraise_if_reserved exn;
             Log.error
               _log
-              "cancelled tool finished observer failed"
+              "aborted tool finished observer failed"
               [ Log.S ("tool", tool_name)
               ; Log.S ("tool_use_id", id)
               ; Log.S ("error", Printexc.to_string exn)
@@ -1204,11 +1249,11 @@ let execute_scheduled_tool
       | None -> ());
     dispatch
   in
-  let started_observed = ref false in
+  let durable_started_requested = ref false in
   let observe_started_once ~tool_name ~input =
-    if not !started_observed
+    if not !durable_started_requested
     then (
-      started_observed := true;
+      durable_started_requested := true;
       observe_before_completion (fun () -> observe_started ~tool_name ~input))
   in
   let execute_durable durable_invocation =
@@ -1233,19 +1278,28 @@ let execute_scheduled_tool
       with
       | Eio.Cancel.Cancelled _ as cancelled ->
         let backtrace = Printexc.get_raw_backtrace () in
-        notify_cancelled_finished ~tool_name:name cancelled;
+        notify_aborted_finished ~tool_name:name ~message:(Printexc.to_string cancelled);
         Eio.Cancel.protect (fun () ->
           Execution_context.settle_tool_observers invocation);
         Printexc.raise_with_backtrace cancelled backtrace
+      | exn ->
+        let backtrace = Printexc.get_raw_backtrace () in
+        Llm_provider.Reserved_exn.reraise_if_reserved exn;
+        notify_aborted_finished ~tool_name:name ~message:(Printexc.to_string exn);
+        Eio.Cancel.protect (fun () ->
+          Execution_context.settle_tool_observers invocation);
+        Printexc.raise_with_backtrace exn backtrace
     in
     match phased with
     | Error error ->
       (* The effect may already have returned, but without an atomic settlement
          there is no result authority to expose to the transcript. *)
+      let detail = Execution_agent_scope.error_to_string error in
+      notify_aborted_finished ~tool_name:name ~message:detail;
+      Eio.Cancel.protect (fun () ->
+        Execution_context.settle_tool_observers invocation);
       completed_dispatch := None;
-      record_failure
-        (Durability_failure
-           { invocation; detail = Execution_agent_scope.error_to_string error });
+      record_failure (Durability_failure { invocation; detail });
       raise Abort_tool_dispatch
     | Ok (Execution_agent_scope.Executed (result, _, _))
     | Ok (Execution_agent_scope.Replayed result) ->
@@ -1360,8 +1414,17 @@ let execute_scheduled_tool
               with
               | Eio.Cancel.Cancelled _ as cancelled ->
                 let backtrace = Printexc.get_raw_backtrace () in
-                notify_cancelled_finished ~tool_name:name cancelled;
-                Printexc.raise_with_backtrace cancelled backtrace)
+                notify_aborted_finished
+                  ~tool_name:name
+                  ~message:(Printexc.to_string cancelled);
+                Printexc.raise_with_backtrace cancelled backtrace
+              | exn ->
+                let backtrace = Printexc.get_raw_backtrace () in
+                Llm_provider.Reserved_exn.reraise_if_reserved exn;
+                notify_aborted_finished
+                  ~tool_name:name
+                  ~message:(Printexc.to_string exn);
+                Printexc.raise_with_backtrace exn backtrace)
           in
           completed_dispatch := Some dispatch;
           outcome ()

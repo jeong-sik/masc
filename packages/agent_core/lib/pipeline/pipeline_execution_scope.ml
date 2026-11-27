@@ -199,9 +199,7 @@ let settled_invocations boundary =
 let settled_response boundary =
   match boundary with
   | Closed_turn {provider;_} | Open_turn {provider;_} ->
-    Execution_agent_scope.provider_response provider
-    |> Result.map (fun snapshot -> snapshot.Execution_provider_response_snapshot.response)
-    |> Result.map_error core_error
+    Execution_agent_scope.provider_response provider |> Result.map_error core_error
 ;;
 
 let close_success (t : t) =

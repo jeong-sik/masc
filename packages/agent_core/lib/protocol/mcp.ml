@@ -69,8 +69,9 @@ module Channel = struct
         | Some handler ->
           let guarded_handler params =
             try handler params with
-            | Eio.Cancel.Cancelled _ as exn -> raise exn
-            | exn -> Error (Printexc.to_string exn) in
+            | exn ->
+              Llm_provider.Reserved_exn.reraise_if_reserved exn;
+              Error (Printexc.to_string exn) in
           Sdk_client.on_sampling guarded_handler client in
       Ok client
 
@@ -121,6 +122,11 @@ let text_of_tool_result (r : Sdk_types.tool_result) =
   |> String.concat "\n"
 ;;
 
+let close_quiet flow =
+  try Eio.Flow.close flow with
+  | Eio.Io _ | Unix.Unix_error _ | Sys_error _ -> ()
+;;
+
 (** Connect to an MCP server by spawning a subprocess via Eio.
     [sw] controls the process lifetime.  [mgr] spawns the child.
     [command] is the executable path, [args] are command-line arguments.
@@ -132,29 +138,59 @@ let connect ~sw ~(mgr : _ Eio.Process.mgr) ~command ~args ?env ?cwd
   | Ok () ->
   try
     let r_child_stdin, w_child_stdin = Eio_unix.pipe sw in
-    let r_child_stdout, w_child_stdout = Eio_unix.pipe sw in
+    let r_child_stdout, w_child_stdout =
+      try Eio_unix.pipe sw with
+      | exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        close_quiet r_child_stdin;
+        close_quiet w_child_stdin;
+        Printexc.raise_with_backtrace exn bt
+    in
     let proc =
-      Eio.Process.spawn
-        ~sw
-        mgr
-        ~stdin:(r_child_stdin :> Eio.Flow.source_ty Eio.Resource.t)
-        ~stdout:(w_child_stdout :> Eio.Flow.sink_ty Eio.Resource.t)
-        ?stderr
-        ?env
-        ?cwd
-        (command :: args)
+      try
+        Eio.Process.spawn
+          ~sw
+          mgr
+          ~stdin:(r_child_stdin :> Eio.Flow.source_ty Eio.Resource.t)
+          ~stdout:(w_child_stdout :> Eio.Flow.sink_ty Eio.Resource.t)
+          ?stderr
+          ?env
+          ?cwd
+          (command :: args)
+      with
+      | exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        close_quiet r_child_stdin;
+        close_quiet w_child_stdin;
+        close_quiet r_child_stdout;
+        close_quiet w_child_stdout;
+        Printexc.raise_with_backtrace exn bt
     in
     Eio.Flow.close r_child_stdin;
     Eio.Flow.close w_child_stdout;
+    let close_parent_pipes () =
+      close_quiet r_child_stdout;
+      close_quiet w_child_stdin
+    in
     let kill () =
       try Eio.Process.signal proc Sys.sigterm with
       | Unix.Unix_error _ | Eio.Io _ | Sys_error _ -> ()
     in
-    (match Channel.create
-        ~input:(r_child_stdout :> Eio.Flow.source_ty Eio.Resource.t)
-        ~output:(w_child_stdin :> Eio.Flow.sink_ty Eio.Resource.t)
-        ?max_response_bytes ?sampling_handler () with
+    (match
+       try
+         Channel.create
+           ~input:(r_child_stdout :> Eio.Flow.source_ty Eio.Resource.t)
+           ~output:(w_child_stdin :> Eio.Flow.sink_ty Eio.Resource.t)
+           ?max_response_bytes ?sampling_handler ()
+       with
+       | exn ->
+         let bt = Printexc.get_raw_backtrace () in
+         close_parent_pipes ();
+         kill ();
+         Printexc.raise_with_backtrace exn bt
+     with
      | Error detail ->
+       close_parent_pipes ();
        kill ();
        Error (Error.Mcp (ServerStartFailed { command; detail }))
      | Ok channel ->

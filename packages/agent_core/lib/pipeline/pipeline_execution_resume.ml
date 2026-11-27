@@ -95,7 +95,16 @@ type settled_replay =
       { tool_uses : Llm_provider.Types.content_block Nonempty.t
       ; tool_results : Llm_provider.Types.content_block list
       }
+  | Replay_all_admission_refused of Types.message
   | Replay_terminal of Types.message
+
+let has_refused_admission (admission : Execution_provider_response_snapshot.admission) =
+  admission.unavailable_names <> [] || admission.unreadable <> []
+;;
+
+let response_has_no_tool_use (response : Types.api_response) =
+  tool_use_ids response.content = []
+;;
 
 type settled_tool_authority =
   | All_pre_tool_use_blocked
@@ -139,7 +148,11 @@ let last_assistant_message messages =
    a terminal turn (final assistant response, no pending tool calls) completes the
    run. A tool turn whose recovered results do not match its restored ToolUse
    checkpoint stays an error (fail-closed on inconsistent topology). *)
-let classify_settled agent ~(response : Types.api_response) =
+let classify_settled
+      agent
+      ~(response : Types.api_response)
+      ~(admission : Execution_provider_response_snapshot.admission)
+  =
   let* kind = response_kind response in
   match kind with
   | Terminal_response ->
@@ -152,6 +165,14 @@ let classify_settled agent ~(response : Types.api_response) =
              message"))
   | Tool_response ->
     (match last_tool_turn agent.Agent_types.state.messages with
+     | None when response_has_no_tool_use response && has_refused_admission admission ->
+       (match last_assistant_message agent.Agent_types.state.messages with
+        | Some message -> Ok (Replay_all_admission_refused message)
+        | None ->
+          Error
+            (Error.Internal
+               "durable execution resume settled admission-refused tool turn has no \
+                restored assistant message"))
      | None ->
        Error
          (Error.Agent
@@ -231,8 +252,10 @@ let validate_terminal_checkpoint
    Failed. [tools_settled] is the completed-tool-turn outcome; [terminal] wraps
    the reconstructed final assistant response. *)
 let run_settled agent boundary ~turn ~all_pre_tool_use_blocked ~tools_settled ~terminal =
-  let* response = Pipeline_execution_scope.settled_response boundary in
-  let* replay = classify_settled agent ~response in
+  let* { Execution_provider_response_snapshot.response; admission } =
+    Pipeline_execution_scope.settled_response boundary
+  in
+  let* replay = classify_settled agent ~response ~admission in
   match replay with
   | Replay_tools_settled { tool_uses; tool_results } ->
     let* () =
@@ -249,6 +272,11 @@ let run_settled agent boundary ~turn ~all_pre_tool_use_blocked ~tools_settled ~t
     in
     let+ () = Pipeline_execution_scope.finalize_settled boundary in
     outcome
+  | Replay_all_admission_refused message ->
+    let* invocations = Pipeline_execution_scope.settled_invocations boundary in
+    let* () = validate_terminal_checkpoint agent ~response message invocations in
+    let+ () = Pipeline_execution_scope.finalize_settled boundary in
+    all_pre_tool_use_blocked
   | Replay_terminal message ->
     let* invocations = Pipeline_execution_scope.settled_invocations boundary in
     let* () = validate_terminal_checkpoint agent ~response message invocations in
@@ -383,6 +411,17 @@ let run
     | Tool_response ->
       (match last_tool_turn agent.Agent_types.state.messages with
        | Some restored -> restore_tool_turn restored
+       | None when response_has_no_tool_use response && has_refused_admission admission ->
+         (match last_assistant_message agent.Agent_types.state.messages with
+          | None ->
+            Error
+              (Error.Internal
+                 "durable execution resume admission-refused tool turn has no restored \
+                  assistant message")
+          | Some message ->
+            let* invocations = Pipeline_execution_scope.invocations execution in
+            let* () = validate_terminal_checkpoint agent ~response message invocations in
+            Ok all_pre_tool_use_blocked)
        | None ->
          Error
            (Error.Agent

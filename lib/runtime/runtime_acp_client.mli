@@ -148,6 +148,21 @@ type usage_channel =
           prompt, and [replayed_context_used] after a load or resume, are the
           newest request's counted input plus output from the journal. *)
 
+(** Where {!prompt} sees that the host compacted its own session. *)
+type compaction_record =
+  | Compaction_in_usage
+      (** The prompt's usage shows it: a counted [usage_update.used] lower
+          than the one before it, or for [Usage_in_muse_session_journal] the
+          journal's compaction records. Antigravity and Mistral Vibe send a
+          count after each model request, so a compaction shows as a drop
+          within the prompt. *)
+  | Compaction_in_kimi_session_record
+      (** [kimi acp] sends one count per prompt, after its response, so a
+          prompt that compacted and then grew past the previous prompt's count
+          shows no drop. Its session record holds one
+          [context.apply_compaction] record per compaction, which {!prompt}
+          reads ({!Runtime_kimi_session_log}). *)
+
 type mcp_identifier_syntax =
   | Mcp_call_wrapper
       (** Structured [call_mcp_tool] wrapper carrying [ServerName]/[ToolName]
@@ -210,6 +225,7 @@ type driver_profile =
   ; input_accounting : input_accounting
   ; output_accounting : output_accounting
   ; usage_channel : usage_channel
+  ; compaction_record : compaction_record
   ; supports_skills_dir_flag : bool
   ; mode_for_native_none : string
   ; mode_for_native_read : string
@@ -549,6 +565,27 @@ type usage_source =
           not be read. [usage] holds what the host sent over ACP, which for
           the Muse host is no token count at all. *)
 
+(** Why {!prompt} cannot tell whether the host compacted its session. *)
+type compaction_unknown =
+  | Muse_journal_unreadable of Runtime_muse_session_log.error
+  | Kimi_session_record_unreadable of Runtime_kimi_session_log.error
+
+val compaction_unknown_to_string : compaction_unknown -> string
+
+(** Whether the host shrank the session during the prompt, so that it no
+    longer holds what was sent before as it was sent. *)
+type context_compaction =
+  | Not_compacted
+  | Compacted
+      (** A Muse prompt says so in its journal: a
+          [context_compaction_installed] record of its runs, or a last request
+          that left less than [prior_context_used]. Over ACP, a counted
+          [usage_update.used] lower than the one before it, the first compared
+          with [prior_context_used]. A Kimi Code prompt also says so when its
+          session record gained a [context.apply_compaction] record. *)
+  | Compaction_unknown of compaction_unknown
+      (** The record that would say it could not be read. *)
+
 type prompt_result =
   { session_id : string
   ; stop_reason : stop_reason
@@ -562,14 +599,7 @@ type prompt_result =
   ; thought : string
   ; usage : usage
   ; usage_source : usage_source
-  ; context_compacted : bool
-    (** The host shrank the session during the prompt, so the session no
-        longer holds what was sent before as it was sent. A Muse prompt says
-        so in its journal: a [context_compaction_installed] record of its
-        runs, or a last request that left less than [prior_context_used].
-        Over ACP, a counted [usage_update.used] lower than the one before it,
-        the first compared with [prior_context_used]. [false] when the
-        prompt's counts could not be read. *)
+  ; context_compaction : context_compaction
   ; tool_calls_observed : int
   ; wall_duration_s : float
   }
@@ -827,7 +857,7 @@ val prompt
     request ([initialize], [session/new], [session/load], [session/resume],
     [session/set_*]) has a silence deadline either. [prior_context_used] is
     the session's last counted occupancy before this prompt; it decides
-    [context_compacted] for the prompt's first count. *)
+    [context_compaction] for the prompt's first count. *)
 
 val cancel : t -> session_id:string -> unit
 (** Send a best-effort [session/cancel] notification for [session_id]. *)

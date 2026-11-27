@@ -140,6 +140,10 @@ type usage_channel =
   | Usage_over_acp
   | Usage_in_muse_session_journal
 
+type compaction_record =
+  | Compaction_in_usage
+  | Compaction_in_kimi_session_record
+
 type mcp_identifier_syntax =
   | Mcp_call_wrapper
   | Mcp_paren_wrapper
@@ -174,6 +178,7 @@ type driver_profile =
   ; input_accounting : input_accounting
   ; output_accounting : output_accounting
   ; usage_channel : usage_channel
+  ; compaction_record : compaction_record
   ; supports_skills_dir_flag : bool
   ; mode_for_native_none : string
   ; mode_for_native_read : string
@@ -216,6 +221,7 @@ let profile_of_driver = function
     ; input_accounting = Exclusive_of_cached
     ; output_accounting = Inclusive_of_thought
     ; usage_channel = Usage_over_acp
+    ; compaction_record = Compaction_in_usage
     ; supports_skills_dir_flag = false
     ; mode_for_native_none = "default"
     ; mode_for_native_read = "default"
@@ -245,6 +251,7 @@ let profile_of_driver = function
     ; input_accounting = Inclusive_of_cached
     ; output_accounting = Inclusive_of_thought
     ; usage_channel = Usage_over_acp
+    ; compaction_record = Compaction_in_kimi_session_record
     ; supports_skills_dir_flag = true
     ; mode_for_native_none = "default"
     ; mode_for_native_read = "plan"
@@ -284,6 +291,7 @@ let profile_of_driver = function
     ; input_accounting = Inclusive_of_cached
     ; output_accounting = Inclusive_of_thought
     ; usage_channel = Usage_over_acp
+    ; compaction_record = Compaction_in_usage
     ; supports_skills_dir_flag = false
     ; mode_for_native_none = "ask"
     ; mode_for_native_read = "ask"
@@ -371,6 +379,7 @@ let profile_of_driver = function
     ; input_accounting = Inclusive_of_cached
     ; output_accounting = Inclusive_of_thought
     ; usage_channel = Usage_in_muse_session_journal
+    ; compaction_record = Compaction_in_usage
     ; supports_skills_dir_flag = false
     (* Modes advertised by session/new: allowAll, promptUnmatched, onRequest
        (default), denyUnmatched. Pinning "onRequest" on every session keeps a
@@ -810,6 +819,33 @@ type usage_source =
   | Usage_from_muse_journal of Runtime_muse_session_log.turn
   | Usage_unreadable of Runtime_muse_session_log.error
 
+type compaction_unknown =
+  | Muse_journal_unreadable of Runtime_muse_session_log.error
+  | Kimi_session_record_unreadable of Runtime_kimi_session_log.error
+
+let compaction_unknown_to_string = function
+  | Muse_journal_unreadable err ->
+    "Muse journal: " ^ Runtime_muse_session_log.error_to_string err
+  | Kimi_session_record_unreadable err ->
+    "Kimi Code session record: " ^ Runtime_kimi_session_log.error_to_string err
+;;
+
+type context_compaction =
+  | Not_compacted
+  | Compacted
+  | Compaction_unknown of compaction_unknown
+
+(* A compaction either record shows wins: the session lost what was sent.
+   Otherwise a record that could not be read leaves it unknown. *)
+let either_compaction a b =
+  match a, b with
+  | Compacted, (Not_compacted | Compacted | Compaction_unknown _)
+  | (Not_compacted | Compaction_unknown _), Compacted -> Compacted
+  | (Compaction_unknown _ as unknown), (Not_compacted | Compaction_unknown _)
+  | Not_compacted, (Compaction_unknown _ as unknown) -> unknown
+  | Not_compacted, Not_compacted -> Not_compacted
+;;
+
 type prompt_result =
   { session_id : string
   ; stop_reason : stop_reason
@@ -818,7 +854,7 @@ type prompt_result =
   ; thought : string
   ; usage : usage
   ; usage_source : usage_source
-  ; context_compacted : bool
+  ; context_compaction : context_compaction
   ; tool_calls_observed : int
   ; wall_duration_s : float
   }
@@ -2584,6 +2620,13 @@ type usage_journal =
   | Muse_usage_journal of
       (Runtime_muse_session_log.root, Runtime_muse_session_log.error) result
 
+(* Where a host that counts usage too rarely to show its compactions records
+   them, resolved once from the environment the host was started with. *)
+type compaction_journal =
+  | No_compaction_journal
+  | Kimi_compaction_journal of
+      (Runtime_kimi_session_log.root, Runtime_kimi_session_log.error) result
+
 type activity_mark =
   { seen : agent_activity
   ; seen_at_ns : int64
@@ -2597,6 +2640,7 @@ type t =
   ; mcp_server_name : string option
   ; mcp_server_isolation : mcp_server_isolation
   ; usage_journal : usage_journal
+  ; compaction_journal : compaction_journal
   ; mutable stderr_secrets : string list
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; signal_term : unit -> unit
@@ -3438,6 +3482,12 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
       | Usage_in_muse_session_journal ->
         Muse_usage_journal (Runtime_muse_session_log.root_of_environment env)
     in
+    let compaction_journal =
+      match profile.compaction_record with
+      | Compaction_in_usage -> No_compaction_journal
+      | Compaction_in_kimi_session_record ->
+        Kimi_compaction_journal (Runtime_kimi_session_log.root_of_environment env)
+    in
     let resolved_cli_path =
       Runtime_official_cli_install.spawn_path
         (install_client_of_driver config.driver)
@@ -3535,6 +3585,7 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
                   ; mcp_server_name
                   ; mcp_server_isolation
                   ; usage_journal
+                  ; compaction_journal
                   ; stderr_secrets
                   ; clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t)
                   ; signal_term
@@ -4483,6 +4534,15 @@ let prompt
         (let* root = root in
          Runtime_muse_session_log.mark root ~session_id)
   in
+  (* The same for a host that records its compactions in its own file. *)
+  let compaction_mark =
+    match t.compaction_journal with
+    | No_compaction_journal -> None
+    | Kimi_compaction_journal root ->
+      Some
+        (let* root = root in
+         Runtime_kimi_session_log.mark root ~session_id)
+  in
   let result =
     Fun.protect ~finally:clear_active_turn (fun () ->
       try rpc_call_with_wait t ~method_name:"session/prompt" ~params ~decoder ~wait:wait_prompt with
@@ -4512,16 +4572,32 @@ let prompt
     (* A Muse prompt's [used] frames are the host's estimate, so its journal
        says whether it compacted: each [context_compaction_installed] record,
        and the count its last request left against the session's last count. *)
-    let context_compacted =
+    let compacted_if fell = if fell then Compacted else Not_compacted in
+    let usage_compaction =
       match usage_source with
       | Usage_from_acp ->
-        occupancy_fell ~prior_context_used (List.rev !context_readings)
+        compacted_if (occupancy_fell ~prior_context_used (List.rev !context_readings))
       | Usage_from_muse_journal turn ->
-        turn.Runtime_muse_session_log.compactions > 0
-        || occupancy_fell
-             ~prior_context_used
-             (List.filter (fun used -> used > 0) (Option.to_list usage.context_used))
-      | Usage_unreadable _ -> false
+        compacted_if
+          (turn.Runtime_muse_session_log.compactions > 0
+           || occupancy_fell
+                ~prior_context_used
+                (List.filter (fun used -> used > 0) (Option.to_list usage.context_used)))
+      | Usage_unreadable err -> Compaction_unknown (Muse_journal_unreadable err)
+    in
+    (* Kimi Code counts the session once, after the response, so a compaction
+       the prompt then grew past shows only in the host's session record. *)
+    let context_compaction =
+      match compaction_mark with
+      | None -> usage_compaction
+      | Some marked ->
+        let recorded =
+          match Result.bind marked Runtime_kimi_session_log.compactions with
+          | Ok 0 -> Not_compacted
+          | Ok _ -> Compacted
+          | Error err -> Compaction_unknown (Kimi_session_record_unreadable err)
+        in
+        either_compaction usage_compaction recorded
     in
     Ok
       { session_id
@@ -4531,7 +4607,7 @@ let prompt
       ; thought = Buffer.contents thought_buf
       ; usage
       ; usage_source
-      ; context_compacted
+      ; context_compaction
       ; tool_calls_observed = !tool_calls
       ; wall_duration_s = Float.max 0.0 (Time_compat.now () -. started_at)
       }

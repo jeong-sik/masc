@@ -342,15 +342,22 @@ let load_scope ~store ~scope =
         | _ -> Error "invalid original request record") |> unavailable in
       let* () = if String.equal name (Lane_addon_store.digest request_id ^ ".json") then Ok ()
         else Error (Store_unavailable "original request filename does not match its ID") in
-      let* record = decode ~scope ~request_id json |> unavailable in
+      let* record = decode_record ~scope ~request_id json |> unavailable in
       let* request =
-        request_of_body ~request_digest:record.Record.request_digest body |> unavailable
+        match body with
+        | None -> Error (Store_unavailable "original request body named by its record is missing")
+        | Some bytes -> check_body ~request_digest:record.Record.request_digest bytes |> unavailable
       in
       restore (with_request record request :: found) rest
   in
   match rows with
   | None -> Ok []
-  | Some rows -> restore [] rows
+  | Some rows ->
+      (* Decoding every record and checking every body is CPU work in
+         proportion to the scope, so one job of the CPU pool does all of it, as
+         [discover] does for the listing. A fiber that did it itself would keep
+         the other fibers of its domain waiting. *)
+      Domain_pool_ref.submit_cpu_or_inline ~name:decode_job (fun () -> restore [] rows)
 module Observed_requests = Map.Make (String)
 type observed_request = { binding:verified_body; request:Yojson.Safe.t }
 type scope_observation = {

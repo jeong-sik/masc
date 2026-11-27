@@ -700,6 +700,33 @@ let test_named_commits_name_an_unreadable_record_and_answer_the_others () =
          ^ string_of_int (List.length unreadable) ^ " unreadable"));
   expect_named store ["other"] ["target"] ["target"; "other"]
 
+(* The attempts of a verification are read by name until a name holds nothing.
+   If the first attempt's record ever went away while the child stayed, the
+   named lookup would answer nothing for that verification: the child would
+   wait for a whole-scope read, which still lists it, and a fresh attempt
+   stays refused. Nothing in this tree moves a live attempt today. The test
+   pins what a gap would cost. *)
+let test_named_commits_stop_at_a_gap_and_a_whole_scope_read_still_lists_the_child () =
+  with_workspace @@ fun base_path ->
+  let store = tmp_store base_path in
+  ignore (refused_first ~store ~verification_id:"vrf-gapped");
+  assert (next_with ~lookup:(fun () -> Ok current_lookup) store "vrf-gapped" = Ok 1);
+  let child = loaded_or_fail (O.load ~store ~verification_id:"vrf-gapped" ~attempt:1) in
+  judged ~store ~verification_id:"vrf-gapped" ~attempt:1 child;
+  expect_named store ["vrf-gapped"] [] ["vrf-gapped"];
+  let first = fixture_get (O.attempt_request_id ~verification_id:"vrf-gapped" ~attempt:0) in
+  let record_path =
+    Filename.concat (Store.root store)
+      (Filename.concat "tool-request-owners" (Filename.concat (Store.digest O.scope) (Store.digest first ^ ".json")))
+  in
+  Sys.remove record_path;
+  expect_named store [] [] ["vrf-gapped"];
+  (match O.retained_commits ~store ~selection:O.All_verifications ~installation_id:"i" ~package_id:"p" with
+   | Ok [retained] -> assert (V.attempt (O.original retained) = 1)
+   | Ok _ -> failwith "the whole-scope read must list the child and only the child"
+   | Error err -> failwith ("the whole-scope read did not list the child: " ^ string_of_load_error err));
+  expect_next_scope_error (selected_next store "vrf-gapped")
+
 let () =
   test_before_dispatch_refusal_opens_the_next_attempt_with_current_lookup ();
   test_unreadable_before_dispatch_refusal_opens_nothing ();
@@ -724,5 +751,6 @@ let () =
   test_named_commits_answer_beside_a_record_the_scope_cannot_verify ();
   test_named_commits_read_past_a_refused_attempt ();
   test_named_commits_name_an_unreadable_record_and_answer_the_others ();
+  test_named_commits_stop_at_a_gap_and_a_whole_scope_read_still_lists_the_child ();
   test_retained_commits_check_each_record_they_read ();
   print_endline "test_verifier_review_owner: all tests passed"

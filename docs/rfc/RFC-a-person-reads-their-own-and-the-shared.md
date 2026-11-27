@@ -95,7 +95,7 @@ related: ["a-persons-keeper-runs-on-the-engine", "board-has-one-writer-and-one-l
 - 「단일 사용자의 자격」은 MCP OAuth, play 초대, 개발용 token 처럼 단일 사용자의 자격을 만들거나 쓰는 경로다.
 - 177개 경로의 기록에 주인 칸이 있다. 값은 Keeper 이름이거나 token 에 붙은 agent 이름이다. 다계정의 사람을 적는 칸은 없다.
 - 예외가 하나 있다. `POST /api/v1/gate/message` 는 요청 몸에서 받은 채널 사용자 id 를 적는다.
-- 읽기를 보는 이로 거르는 곳은 둘이다. Board 의 읽기 규칙(`lib/board/board_access.ml:16-26`)과 호출자마다 나뉜 artifact app data(`lib/artifact_app_data_store.ml:18`)다.
+- 읽기를 보는 이로 거르는 곳은 하나다. Board 의 읽기 규칙(`lib/board/board_access.ml:16-26`)이다.
 - 쓰기에서 호출자를 저장된 이름과 견주는 곳은 여섯이다. 여섯 모두 agent 이름 글자를 견준다.
   - run-next(`lib/server/server_routes_http_keeper_control.ml:394-395`)
   - 일정 바꾸기(`lib/tool_schedule.ml:842-846`)

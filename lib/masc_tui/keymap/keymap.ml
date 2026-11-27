@@ -878,16 +878,16 @@ let bindings : binding list =
         ~hint_label:(Say.make ~ko:"이전 항목/이력" ~en:"Prev Item")
         ~help_desc:
           (Say.make
-             ~ko:"이전 항목·이력·리비전 (턴 / 키퍼 / 섹션 / 댓글 / 산출물 리비전 / 코드 변경 검토 파일)"
-             ~en:"Step older/previous item (turn / keeper / section / comment / artifact rev / Code review file)")
+             ~ko:"이전 항목·이력·리비전 (턴 / 키퍼 / 섹션 / 댓글 / 산출물 리비전 / 코드 변경 검토 파일 / 위키 본문 링크)"
+             ~en:"Step older/previous item (turn / keeper / section / comment / artifact rev / Code review file / wiki body link)")
         ~footer_priority:0 (bare_char '<');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_navigation
         ~action:(Step_context_item Next) ~key_display:">"
         ~hint_label:(Say.make ~ko:"다음 항목/이력" ~en:"Next Item")
         ~help_desc:
           (Say.make
-             ~ko:"다음 항목·이력·리비전 (턴 / 키퍼 / 섹션 / 댓글 / 산출물 리비전 / 코드 변경 검토 파일)"
-             ~en:"Step newer/next item (turn / keeper / section / comment / artifact rev / Code review file)")
+             ~ko:"다음 항목·이력·리비전 (턴 / 키퍼 / 섹션 / 댓글 / 산출물 리비전 / 코드 변경 검토 파일 / 위키 본문 링크)"
+             ~en:"Step newer/next item (turn / keeper / section / comment / artifact rev / Code review file / wiki body link)")
         ~footer_priority:0 (bare_char '>');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_actions
         ~action:Launch_fusion ~key_display:"f"

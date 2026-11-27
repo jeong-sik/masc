@@ -361,7 +361,10 @@ Four 1st-class sub-tabs (`[` / `]`, and Left Navigation Sidebar `b`):
    `e` opens inline Markdown edit modal; `Ctrl+E` opens in `$EDITOR`; `y`
    copies Markdown body; `o` opens the first `http(s)` URL). A save toasts the
    revision it wrote, as a warning when the journal or index write failed, and
-   the page is read again.
+   the page is read again. With the page card focused or zoomed, `<`/`>`
+   selects a body link to another existing page (reversed, with the target's
+   summary under the title), `Enter` opens it, and `Esc` returns to the page
+   and link it was followed from.
 3. **Artifacts**: dedicated 1st-class tab for live published artifacts
    (`GET /api/v1/published-artifacts` + on-demand detail). Structured HTML DOM
    rendering (`Html_doc`: strips `<script>`/`<style>`/`hidden`/`aria-hidden`,

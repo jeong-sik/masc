@@ -3709,7 +3709,21 @@ let test_keeper_dive_schedules_say_when_pages_are_left () =
     (contains_sub ~needle:"Schedules (1)" whole
      && not (contains_sub ~needle:"More pages not read" whole));
   Alcotest.(check bool) "every page read and none: no schedule" true
-    (contains_sub ~needle:"No scheduled jobs" (draw [] None))
+    (contains_sub ~needle:"No scheduled jobs" (draw [] None));
+  let not_read =
+    grid_all_text
+      (render_to_grid ~cols:140 ~rows:40
+         (Screen_keepers.render_dive ~name:keeper ~tab:Nav.Keeper_work_sandbox
+            ~model:
+              {
+                base with
+                freshness = { base.freshness with last_wall_unix = now_unix };
+                work = { base.work with schedules = Observed.unreported };
+              }))
+  in
+  Alcotest.(check bool) "a list not read yet says so, not no schedule" true
+    (contains_sub ~needle:"Schedules not read yet" not_read
+     && not (contains_sub ~needle:"No scheduled jobs" not_read))
 
 let test_wave2_keeper_context_tool_calls_and_schedules () =
   let m0 = make_populated_model ~cols:140 ~rows:40 ~lang:Say.Lang_en in

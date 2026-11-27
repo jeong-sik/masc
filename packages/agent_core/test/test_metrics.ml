@@ -207,7 +207,7 @@ let test_register_rejects_normalized_collision_counter_counter () =
    | _ -> fail "expected Invalid_argument on counter-counter normalized collision");
   (* Rejected registration must not poison the instance mutex. *)
   Metrics.incr c 2;
-  check int "usable after counter collision" 2 (Metrics.counter_value c)
+  check int "usable after counter collision" 2 (Metrics.counter_value c ())
 ;;
 
 let test_register_rejects_normalized_collision_counter_histogram () =
@@ -218,7 +218,7 @@ let test_register_rejects_normalized_collision_counter_histogram () =
    | _ -> fail "expected Invalid_argument on counter-histogram normalized collision");
   (* Rejected registration must not poison the instance mutex. *)
   Metrics.incr c 3;
-  check int "usable after counter-histogram collision" 3 (Metrics.counter_value c)
+  check int "usable after counter-histogram collision" 3 (Metrics.counter_value c ())
 ;;
 
 let test_register_same_name_same_kind_is_idempotent () =

@@ -66,30 +66,42 @@ type private_provenance =
    without explicit public-board clearance — or any unresolvable premise ID —
    is refused. *)
 let inspect_private_provenance ~is_public_board_post ~fact_by_id source_ids =
-  let rec walk visited unresolved = function
-    | [] -> if unresolved then Unresolved_premise else Clean
+  let rec walk visited unresolved private_board = function
+    | [] ->
+      if unresolved
+      then Unresolved_premise
+      else (
+        match private_board with
+        | Some board_src -> Private_board board_src
+        | None -> Clean)
     | id :: rest ->
       if Ids.mem id visited
-      then walk visited unresolved rest
+      then walk visited unresolved private_board rest
       else (
         let visited = Ids.add id visited in
         match By_id.find_opt id fact_by_id with
-        | None -> walk visited true rest
+        | None -> walk visited true private_board rest
         | Some (fact : fact) ->
           (match fact.basis with
-           | Observed Transcript -> walk visited unresolved rest
+           | Observed Transcript -> walk visited unresolved private_board rest
            | Observed (Personal _) -> Private_personal
            | Observed (Board { post_id; _ } as board_src) ->
              if is_public_board_post post_id
-             then walk visited unresolved rest
-             else Private_board board_src
+             then walk visited unresolved private_board rest
+             else (
+               let private_board =
+                 match private_board with
+                 | Some _ -> private_board
+                 | None -> Some board_src
+               in
+               walk visited unresolved private_board rest)
            | Derived derivations ->
              let premise_ids =
                List.concat_map (fun (d : derivation) -> d.premise_ids) derivations
              in
-             walk visited unresolved (premise_ids @ rest)))
+             walk visited unresolved private_board (premise_ids @ rest)))
   in
-  walk Ids.empty false source_ids
+  walk Ids.empty false None source_ids
 ;;
 
 let has_private_provenance ~is_public_board_post ~fact_by_id source_ids =
@@ -301,13 +313,13 @@ let screen
           has_private_provenance ~is_public_board_post ~fact_by_id:by_id premise_ids
       in
       let* preserved_fact =
-        if basis_already_private
-        then Ok fact
-        else (
-          match inspect_private_provenance ~is_public_board_post ~fact_by_id:by_id mutating_named with
-          | Clean -> Ok fact
-          | Private_board board_src -> Ok { fact with basis = Observed board_src }
-          | Private_personal | Unresolved_premise -> Error Effects.Promotion_refused)
+        match inspect_private_provenance ~is_public_board_post ~fact_by_id:by_id mutating_named with
+        | Private_personal | Unresolved_premise -> Error Effects.Promotion_refused
+        | Clean -> Ok fact
+        | Private_board board_src ->
+          if basis_already_private
+          then Ok fact
+          else Ok { fact with basis = Observed board_src }
       in
       Ok (Some (New_claim (memory_id_of_claim preserved_fact.claim, preserved_fact, offsets)), None)
     | Synthesize { claim; category; rule_id; from_units; _ } ->

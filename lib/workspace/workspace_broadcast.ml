@@ -957,6 +957,40 @@ let broadcast_with_mention ?trace_context ?request_id ?on_committed ~fleet_deliv
        | Immediate_fleet -> Fanout_finished
        | Deferred_fleet | Deferred_passive_fleet -> Fanout_not_started) })
 
+let find_broadcast_message ~request_id config ~from_agent ~content =
+  ensure_initialized config;
+  let audience = Fleet_conversation in
+  let open Result.Syntax in
+  let* () = match current_request_id_of_filename (request_id ^ ".json") with
+    | Some _ -> Ok ()
+    | None -> Error (Broadcast_policy_rejected "invalid Broadcast request identity") in
+  let lookup () =
+    let* names = authoritative_directory_names config (messages_dir config)
+      |> Result.map_error (fun detail -> Broadcast_dependency_unavailable detail) in
+    let suffix = "_" ^ request_id ^ committed_message_suffix in
+    match List.filter (fun name -> Filename.check_suffix name suffix) names with
+    | [] -> Ok None
+    | [name] ->
+        let* message = match read_committed_message config (Filename.concat (messages_dir config) name) with
+          | Ok (Some message) -> Ok message
+          | Ok None -> Error (Broadcast_dependency_unavailable "committed Broadcast row disappeared")
+          | Error (Committed_message_unavailable detail | Committed_message_corrupt detail) ->
+              Error (Broadcast_dependency_unavailable detail) in
+        if not (String.equal message.request_id request_id
+          && String.equal message.from_agent from_agent
+          && String.equal message.content content
+          && message_kind_of_string message.msg_type = Some Msg_broadcast) then
+          Error (Broadcast_policy_rejected "Broadcast request identity already names different content")
+        else
+          let delivery = delivery_of_message ~audience message in
+          let mention_delivery = match message.mention_delivery with
+            | Mention_passive -> Passive | Mention_pending -> Pending
+            | Mention_accepted -> Already_accepted
+            | Mention_rejected -> Rejected Invalid_request in
+          Ok (Some (message, {delivery with mention_delivery}))
+    | _ -> Error (Broadcast_dependency_unavailable "multiple committed messages share one request identity") in
+  lookup ()
+
 let broadcast_internal ?trace_context ?request_id ?on_committed ?(fleet_delivery=Immediate_fleet) ?(msg_type = Msg_broadcast) ?task_cache_signal
       ~audience config ~from_agent ~content =
   ensure_initialized config;
@@ -982,8 +1016,35 @@ let broadcast_internal ?trace_context ?request_id ?on_committed ?(fleet_delivery
         ~pre_extract_mention
         ~deferred_by_predecessor
     in
+    let check_existing_outbox req_id =
+      match read_committed_message config (mention_outbox_file config req_id) with
+      | Ok None -> Ok None
+      | Error (Committed_message_unavailable detail | Committed_message_corrupt detail) ->
+        Error (Broadcast_dependency_unavailable detail)
+      | Ok (Some outbox_msg) ->
+        if not (String.equal outbox_msg.request_id req_id
+          && String.equal outbox_msg.from_agent from_agent
+          && String.equal outbox_msg.content content
+          && message_kind_of_string outbox_msg.msg_type = Some msg_type) then
+          Error (Broadcast_policy_rejected "Broadcast request identity already names different content")
+        else
+          Ok (Some { (delivery_of_message ~audience outbox_msg) with
+            mention_delivery = Deferred Workspace_status_unavailable;
+            fanout_state = Fanout_not_started })
+    in
     (match pre_extract_mention with
-     | None -> run None
+     | None ->
+       (match request_id with
+        | None -> run None
+        | Some req_id ->
+          (match check_existing_outbox req_id with
+           | Error _ as err -> err
+           | Ok (Some deferred_delivery) ->
+             (match fleet_delivery with
+              | Deferred_passive_fleet ->
+                Error (Broadcast_policy_rejected "passive Broadcast identity names a non-passive row")
+              | Immediate_fleet | Deferred_fleet -> Ok deferred_delivery)
+           | Ok None -> run None))
      | Some target ->
        Cross_context_mutex.with_lock mention_delivery_mutex (fun () ->
          let deferred_by_predecessor =
@@ -999,7 +1060,25 @@ let broadcast_internal ?trace_context ?request_id ?on_committed ?(fleet_delivery
              then Some Predecessor_pending
              else None
          in
-         run deferred_by_predecessor))
+         match request_id with
+         | None -> run deferred_by_predecessor
+         | Some req_id ->
+           (match find_broadcast_message ~request_id:req_id config ~from_agent ~content with
+            | Error _ as err -> err
+            | Ok (Some (message, delivery)) ->
+              Option.iter (fun notify -> notify ()) on_committed;
+              (match fleet_delivery with
+               | Deferred_fleet | Deferred_passive_fleet ->
+                 Ok { delivery with fanout_state = Fanout_not_started }
+               | Immediate_fleet ->
+                 Ok { delivery with
+                   mention_delivery = deliver_committed_mention ~audience config message;
+                   fanout_state = Fanout_finished })
+            | Ok None ->
+              (match check_existing_outbox req_id with
+               | Error _ as err -> err
+               | Ok (Some deferred_delivery) -> Ok deferred_delivery
+               | Ok None -> run deferred_by_predecessor))))
 
 let broadcast ?trace_context ?msg_type ?task_cache_signal ~audience config ~from_agent ~content =
   broadcast_internal ?trace_context ?msg_type ?task_cache_signal ~audience config ~from_agent ~content
@@ -1058,40 +1137,6 @@ let await_exact_request request_id operation =
 let validate_deferred_fleet_content content = match Board_addressing.routing_target content with
   | Some _ -> Error (Broadcast_policy_rejected "deferred Fleet publication cannot carry a mention")
   | None -> Ok ()
-
-let find_broadcast_message ~request_id config ~from_agent ~content =
-  ensure_initialized config;
-  let audience = Fleet_conversation in
-  let open Result.Syntax in
-  let* () = match current_request_id_of_filename (request_id ^ ".json") with
-    | Some _ -> Ok ()
-    | None -> Error (Broadcast_policy_rejected "invalid Broadcast request identity") in
-  let lookup () =
-    let* names = authoritative_directory_names config (messages_dir config)
-      |> Result.map_error (fun detail -> Broadcast_dependency_unavailable detail) in
-    let suffix = "_" ^ request_id ^ committed_message_suffix in
-    match List.filter (fun name -> Filename.check_suffix name suffix) names with
-    | [] -> Ok None
-    | [name] ->
-        let* message = match read_committed_message config (Filename.concat (messages_dir config) name) with
-          | Ok (Some message) -> Ok message
-          | Ok None -> Error (Broadcast_dependency_unavailable "committed Broadcast row disappeared")
-          | Error (Committed_message_unavailable detail | Committed_message_corrupt detail) ->
-              Error (Broadcast_dependency_unavailable detail) in
-        if not (String.equal message.request_id request_id
-          && String.equal message.from_agent from_agent
-          && String.equal message.content content
-          && message_kind_of_string message.msg_type = Some Msg_broadcast) then
-          Error (Broadcast_policy_rejected "Broadcast request identity already names different content")
-        else
-          let delivery = delivery_of_message ~audience message in
-          let mention_delivery = match message.mention_delivery with
-            | Mention_passive -> Passive | Mention_pending -> Pending
-            | Mention_accepted -> Already_accepted
-            | Mention_rejected -> Rejected Invalid_request in
-          Ok (Some (message, {delivery with mention_delivery}))
-    | _ -> Error (Broadcast_dependency_unavailable "multiple committed messages share one request identity") in
-  lookup ()
 
 let find_broadcast ~request_id config ~from_agent ~content =
   Result.map (Option.map snd) (find_broadcast_message ~request_id config ~from_agent ~content)

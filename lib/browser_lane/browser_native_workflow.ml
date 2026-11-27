@@ -83,11 +83,17 @@ let finite_number = function
   | `Null|`Bool _|`Intlit _|`Float _|`String _|`List _|`Assoc _ -> None
 let number name fields = let* value=required name fields in
   Option.to_result ~none:(name ^ " must be a finite number") (finite_number value)
+let has_forbidden_url_chars text =
+  not (String.equal text (String.trim text))
+  || String.exists (fun ch -> let code = Char.code ch in code < 0x20 || code = 0x7f) text
 let url text =
-  let uri = Uri.of_string text in
-  match Uri.scheme uri, Uri.host uri with
-  | Some ("http" | "https"), Some host when host <> "" -> Ok text
-  | (None | Some _), (None | Some _) -> Error "workflow navigation requires an absolute HTTP(S) URL"
+  if has_forbidden_url_chars text then
+    Error "workflow navigation requires an absolute HTTP(S) URL"
+  else
+    let uri = Uri.of_string text in
+    match Uri.scheme uri, Uri.host uri with
+    | Some ("http" | "https"), Some host when host <> "" -> Ok text
+    | (None | Some _), (None | Some _) -> Error "workflow navigation requires an absolute HTTP(S) URL"
 let element_state = function
   | "attached" -> Ok Attached | "detached" -> Ok Detached | "visible" -> Ok Visible | "hidden" -> Ok Hidden
   | _ -> Error "unknown native element state"
@@ -300,8 +306,14 @@ let step_of_json value =
     | "fetch" ->
       let* _=arguments ["url"] in
       let* raw=string_field "url" fields in
-      let* url=match Uri.scheme (Uri.of_string raw) with None -> Ok raw
-        | Some _ -> url raw in
+      let* url =
+        if has_forbidden_url_chars raw then
+          Error "workflow fetch URL must not contain control characters or surrounding whitespace"
+        else
+          match Uri.scheme (Uri.of_string raw) with
+          | None -> Ok raw
+          | Some _ -> url raw
+      in
       Ok (Fetch url)
     | "download.cancel" ->
       let* _=arguments ["downloadId"] in let* id=text "downloadId" fields in

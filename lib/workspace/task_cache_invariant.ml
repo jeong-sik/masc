@@ -172,7 +172,12 @@ let clear_stale_agent_task_if_matching
       | Error detail -> Unreadable detail
       | Ok None -> Missing
       | Ok (Some agent) when agent.current_task = Some task_id ->
-        let updated = { agent with status = Masc_domain.Active; current_task = None } in
+        let status =
+          match agent.status with
+          | Masc_domain.Inactive -> Masc_domain.Inactive
+          | Masc_domain.Active | Masc_domain.Busy | Masc_domain.Listening -> Masc_domain.Active
+        in
+        let updated = { agent with status; current_task = None } in
         (Atomic.get before_cache_write) path;
         (match Workspace_agent_record.write_commit_result config path
                   ~previous:(Some agent) updated with

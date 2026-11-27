@@ -353,7 +353,18 @@ let inline_rows ~(theme : Theme.t) ~defs ~osc8 ~(base : Style.t) inline =
     | Inline.Ext_strikethrough (struck, _) ->
         render (Style.add_attr Attr.strike style) link
           (Inline.Strikethrough.inline struck)
-    | Inline.Code_span (code, _) -> emit (code_style style) link (Inline.Code_span.code code)
+    | Inline.Code_span (code, _) ->
+        let text = Inline.Code_span.code code in
+        let span_style =
+          match Code_lexer.css_color_literal text with
+          | Some rgb ->
+              (* Inline code previews a color only when its whole text is one
+                 CSS color literal, the rule GitHub uses for colors in backticks. *)
+              Style.with_attrs style.attrs
+                (Code_lexer.style_of_token ~theme ~bg:style.bg (Code_lexer.Color_literal rgb))
+          | None -> code_style style
+        in
+        emit span_style link text
     | Inline.Ext_math_span (math, _) ->
         let delimiter = if Inline.Math_span.display math then "$$" else "$" in
         emit (code_style style) link (delimiter ^ Inline.Math_span.tex math ^ delimiter)

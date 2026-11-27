@@ -230,7 +230,8 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ?language ?(scroll = 0)
                      | Code_lexer.Json_punctuation
                      | Code_lexer.Diff_added
                      | Code_lexer.Diff_removed
-                     | Code_lexer.Diff_hunk ->
+                     | Code_lexer.Diff_hunk
+                     | Code_lexer.Color_literal _ ->
                          seg)
             in
             ignore

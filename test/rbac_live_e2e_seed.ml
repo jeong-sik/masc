@@ -11,8 +11,9 @@
       embedded runtime.toml, two admitted Admins (admin1, admin2), one admitted
       Worker (worker1) with a seeded personal ollama_cloud key account and
       runtime, real browser sessions (__Host-masc_session cookies + CSRF
-      tokens), scoped PATs (admin PAT, worker provider PAT, worker read-only
-      PAT), and a Service credential.
+      tokens), scoped PATs (admin PAT, worker full-personal PAT with
+      read_state/invoke_model/use_tool/manage_own_provider/manage_own_keeper,
+      worker read-only PAT with read_state only), and a Service credential.
 
    Writes the fixture manifest to [<root>/manifest.json] with mode 0600 and
    prints only that path on stdout so raw credentials never enter logs. *)
@@ -280,7 +281,13 @@ let seed_ma ~root =
       zone
       ~user_id:worker1
       ~pat_id:"pat-e2e-worker-provider"
-      ~effects:[ Effect.Read_state; Effect.Manage_own_provider; Effect.Manage_own_keeper ]
+      ~effects:
+        [ Effect.Read_state
+        ; Effect.Invoke_model
+        ; Effect.Use_tool
+        ; Effect.Manage_own_provider
+        ; Effect.Manage_own_keeper
+        ]
   in
   let worker_pat_readonly =
     issue_pat

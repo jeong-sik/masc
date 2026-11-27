@@ -124,7 +124,6 @@ let await ?base_path ?(on_timed_out = Fun.id) t ~clock ~on_registered ~keeper_na
         t.waiters <- t.waiters @ [ { key; entry; resolve } ];
         displaced)
   in
-  Keeper_tool_approval_broadcast.waits_changed ~keeper_name;
   (* A second wait on the same id means the id is not naming one call. The
      first waiter is told so rather than left to time out, and never shares the
      new one's answer: that would approve a call its operator never saw. *)
@@ -164,6 +163,7 @@ let await ?base_path ?(on_timed_out = Fun.id) t ~clock ~on_registered ~keeper_na
      the change where they take the wait out; a timeout and a turn that ends
      while waiting are announced once [remove_self] has run. *)
   match Fun.protect ~finally:remove_self (fun () ->
+      Keeper_tool_approval_broadcast.waits_changed ~keeper_name;
       on_registered ();
       match
         Watched_work.run

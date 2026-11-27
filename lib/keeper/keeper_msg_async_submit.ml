@@ -246,6 +246,18 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
          set_status_protected above: at these catch sites the ambient switch
          may still be tearing down, so an unprotected call could itself be
          cancelled before the callback runs. *)
+      let rec contains_operator_cancel = function
+        | CancelledByOperator -> true
+        | Eio.Cancel.Cancelled inner -> contains_operator_cancel inner
+        | Fun.Finally_raised inner -> contains_operator_cancel inner
+        | Eio.Exn.Multiple members ->
+          List.exists (fun (inner, _bt) -> contains_operator_cancel inner) members
+        | _ -> false
+      in
+      let is_runtime_cancel = function
+        | Eio.Cancel.Cancelled _ -> true
+        | _ -> Eio.Fiber.is_cancelled ()
+      in
       let result =
         try
           Eio.Switch.run (fun req_sw ->
@@ -279,7 +291,7 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
           | Worker_finished result ->
               Done {ok=tool_result_success result;body=tool_result_body result;data=result_data result})
       with
-      | CancelledByOperator ->
+      | exn when contains_operator_cancel exn ->
         Fun.protect
           ~finally:(fun () -> clear_active_switch key)
           (fun () ->
@@ -290,6 +302,7 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
                  ; reason = operator_cancel_reason
                  })
             |> Option.iter notify_settled);
+        Eio.Fiber.check ();
         operator_cancelled_status ()
       | Worker_preempted reason ->
         Fun.protect
@@ -309,13 +322,17 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
              ; origin = Transition_commit
              });
         entry.status
-      | Eio.Cancel.Cancelled _ as e ->
+      | (Out_of_memory | Stack_overflow | Sys.Break) as exn ->
+        clear_active_switch key;
+        raise exn
+      | exn when is_runtime_cancel exn ->
         (* [notify_aborted] observes callback exceptions without letting one
            request fail the server root switch. The switch-table release must
            still be exception-safe because cancellation cleanup below can be
            interrupted by unrelated bookkeeping failures.
            [clear_active_switch] protects mutex acquisition as well as the
            table removal from ambient cancellation; it performs no storage I/O. *)
+        let backtrace = Printexc.get_raw_backtrace () in
         Fun.protect
           ~finally:(fun () -> clear_active_switch key)
           (fun () ->
@@ -327,10 +344,8 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
                      "keeper_msg worker was cancelled by runtime before terminal result"
                  })
             |> Option.iter notify_settled);
-        raise e
-      | (Out_of_memory | Stack_overflow | Sys.Break) as exn ->
-        clear_active_switch key;
-        raise exn
+        Eio.Fiber.check ();
+        Printexc.raise_with_backtrace exn backtrace
       | exn ->
         Done
           { ok = false

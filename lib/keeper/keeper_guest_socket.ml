@@ -486,7 +486,9 @@ let with_stdio ~net ~clock ~expected ~socket ~connect_budget_sec ~budget_sec ~fr
     match run () with
     | result ->
       (match !primary with
-       | None | Some (Eio.Cancel.Cancelled _, _) -> result
+       | None | Some (Eio.Cancel.Cancelled _, _) ->
+         Eio.Fiber.check ();
+         result
        | Some (primary, backtrace) -> Printexc.raise_with_backtrace primary backtrace)
     | exception exn ->
       let backtrace = Printexc.get_raw_backtrace () in
@@ -497,6 +499,11 @@ let with_stdio ~net ~clock ~expected ~socket ~connect_budget_sec ~budget_sec ~fr
               (Printexc.to_string exn) with
            | () -> () | exception _reporter_failure -> ());
         Printexc.raise_with_backtrace primary primary_backtrace
-      | None, Some error -> Error (Transport_failed error)
+      | None, Some error ->
+        (match exn with
+         | Eio.Cancel.Cancelled _ -> Printexc.raise_with_backtrace exn backtrace
+         | _ ->
+           Eio.Fiber.check ();
+           Error (Transport_failed error))
       | None, None -> Printexc.raise_with_backtrace exn backtrace
 ;;

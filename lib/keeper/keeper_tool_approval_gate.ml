@@ -84,7 +84,21 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
           (* [take] has already spent the decision. Publishing can fail, but
              that never restores it or acknowledges an uncertain consume.
              A journaled Deliver records intent, not tool-effect completion. *)
-          publish requested;
+          (try publish requested with
+           | Eio.Cancel.Cancelled _ as exn ->
+             let backtrace = Printexc.get_raw_backtrace () in
+             Eio.Cancel.protect (fun () ->
+               publish
+                 (Keeper_chat_events.Tool_approval_settled
+                    { tool_call_id; approval_id; outcome = "cancelled" }));
+             Printexc.raise_with_backtrace exn backtrace
+           | exn ->
+             let backtrace = Printexc.get_raw_backtrace () in
+             Eio.Cancel.protect (fun () ->
+               publish
+                 (Keeper_chat_events.Tool_approval_settled
+                    { tool_call_id; approval_id; outcome = "failed" }));
+             Printexc.raise_with_backtrace exn backtrace);
           ( (match remembered with
              | Registry.Approve -> Agent_core.Hooks.Approved
              | Registry.Deny -> Agent_core.Hooks.Denied)
@@ -110,8 +124,8 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
                     ~tool_name:request.tool_name ~args:request.input ())
                 registry ~clock
                 ~on_registered:(fun () ->
-                  publish requested;
-                  published_requested := true)
+                  published_requested := true;
+                  publish requested)
                 ~keeper_name ~tool_call_id ~approval_id
                 ~tool_name:request.tool_name
                 ~args ~question ~because
@@ -147,10 +161,12 @@ let create ~registry ~late_approvals ~publish ~redact_text ~clock ~base_path
           | Registry.Displaced -> (Agent_core.Hooks.Denied, "displaced"))
     in
     (* Sent on every path, including the ones where nobody answered, so a pane
-       showing the prompt stops showing it. *)
-    publish
-      (Keeper_chat_events.Tool_approval_settled
-         { tool_call_id; approval_id; outcome = label });
+       showing the prompt stops showing it. Protect from ambient cancellation
+       so a cancellation racing with settlement cannot orphan the open prompt. *)
+    Eio.Cancel.protect (fun () ->
+      publish
+        (Keeper_chat_events.Tool_approval_settled
+           { tool_call_id; approval_id; outcome = label }));
     decision
   in
   { pre_tool_use; tool_approval;

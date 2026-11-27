@@ -56,7 +56,11 @@ the register, that is still the initial value and the same patch returns. If
 playback has sent a bank select for it since, the device holds that later bank,
 and seek/resume reports an error before replay instead of guessing the initial
 bank. This holds with or without a sounding note. A later bank select that
-playback has not reached yet does not cause the error.
+playback has not reached yet does not cause the error. Entering an arrangement
+region and each copy of a rendered VST region reconstruct the same way and
+refuse on the same condition. A Program Change exactly at a region's start is
+not reconstructed: it plays with the region's events, so a repeated copy still
+sends it under the bank an earlier copy left.
 
 Opaque SysEx/system effects, device-specific NRPN data, Hold 2, high-resolution
 velocity-prefix state, unsupported/incomplete RPN state and channel-mode changes

@@ -396,6 +396,7 @@ for (messages, expected) in unknownPatches {
     owner.receive("{\"kind\":\"pause\"}"); precondition(owner.state == .paused)
     reviewWire = []; owner.receive("{\"kind\":\"resume\"}")
     precondition(owner.state == .stopped && reviewExit == 1 && reviewWire.isEmpty, "unexpected replay: \(reviewWire.map(\.1))")
+    precondition(owner.terminalFailure as? UnknownPatch == expected, "transport refusal \(String(describing: owner.terminalFailure)) for \(messages)")
 }
 // A bank register unset at the current Program Change resumes as before when
 // playback has not set it since: the device still holds its initial value. A
@@ -423,7 +424,7 @@ for (played, replay): (UInt64, [[UInt8]]?) in [(200_000_000, [[0xc0,1],[0xb0,0,5
     let owner = try wire(laterBank); owner.tick()
     reviewWire = []; owner.receive("{\"kind\":\"seek\",\"seconds\":0.8}")
     if let replay { precondition(owner.state == .playing && reviewExit == nil && reviewWire.map(\.1) == [[0x80,60,0]] + replay, "unexpected seek replay: \(reviewWire.map(\.1))") }
-    else { precondition(owner.state == .stopped && reviewExit == 1 && reviewWire.map(\.1) == [[0x80,60,0]], "unexpected seek refusal: \(reviewWire.map(\.1))") }
+    else { precondition(owner.state == .stopped && reviewExit == 1 && reviewWire.map(\.1) == [[0x80,60,0]] && owner.terminalFailure as? UnknownPatch == .currentInitialBank(.msb), "unexpected seek refusal: \(reviewWire.map(\.1))") }
 }
 // Model-level reconstructions that keep succeeding. C0 01, 90 3C 64, B0 00 05
 // is no longer here: it refuses above, as the current program's unknown bank.

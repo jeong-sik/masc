@@ -132,9 +132,15 @@ ACP 만의 크기 계산을 따로 두지 않는다. Agent Core 레인이 이미
     - Muse Code 는 압축할 때 사용자 메시지를 줄이지 않는다. 사용자 메시지만으로 hard 지점에 닿으면 후보를 버리고(`unfit_install_floor`) 한도를 넘긴 채 요청을 보낸다. 이 경우는 턴 끝 롤오버가 맡는다.
     - 압축한 뒤에도 그 턴의 작업이 한도에 다 안 들어가면 Muse Code 는 같은 턴에서 압축을 되풀이한다. 위 실측은 시스템 프롬프트 약 22,500 과 파일 약 45,000 이 한도 60,000 을 넘어, 한 턴에 압축 13번, 모델 호출 55번이 났다.
     - Kimi Code 의 압축 시점은 운영자가 kimi 설정 파일의 `max_input_size` 로 정할 수 있다. 그 kimi home 을 쓰는 모든 프로세스에 걸린다. 레인마다 따로 두려면 레인별 `KIMI_CODE_HOME` 과 재로그인이 들고, 운영자는 그대로 두기로 했다(2026-11-26).
-  - 턴 도중 압축 감지(#54911): ACP client 가 prompt 결과에 `context_compacted` 를 돌려준다.
+  - 턴 도중 압축 감지(#54911): ACP client 가 prompt 결과에 `context_compaction` 을 돌려준다. 값은 `Not_compacted`, `Compacted`, `Compaction_unknown` 셋이다.
     - Muse Code 는 journal 의 `context_compaction_installed` 기록으로 판단한다.
     - 다른 호스트는 prompt 도중 `usage_update.used` 가 바로 앞 값보다 작아진 것으로 판단한다. 첫 값은 세션의 마지막 값과 비교한다. 0 은 비교에서 뺀다.
+    - Kimi Code 2.7.3 은 `usage_update` 를 prompt 마다 한 번, 응답 직후에만 보낸다. 압축한 뒤 같은 턴에서 직전 턴 끝 값보다 커지면 값 비교로는 놓친다.
+      - 2026-11-27 01:51 KST 에 실제로 놓쳤다. uncle 세션이 압축했는데 02:07 정산이 held_context 34건을 그대로 뒀다.
+      - 그래서 kimi 는 세션 기록도 읽는다. 위치는 `<KIMI_CODE_HOME, 없으면 ~/.kimi-code>/sessions/<작업 폴더>/<세션 id>/agents/main/wire.jsonl` 이다.
+      - prompt 를 보내기 전 파일 길이를 재 두고, 끝난 뒤 그 뒤에 쓰인 `context.apply_compaction` 기록을 센다.
+      - 첫 줄 `metadata` 의 `protocol_version` 이 확인한 1.5 가 아니면 읽지 않는다.
+    - 기록을 못 읽으면 `Compaction_unknown` 이다. 세션이 요약만 들고 있을 수 있으니 정산은 압축으로 보고 World State 를 다시 보낸다. 경고 로그에 이유가 남는다. Muse journal 을 못 읽을 때도 같다.
     - Mistral Vibe 실측(2026-11-26, medium-3.5, 압축 값 50,000): 한 턴에 파일 여덟 개를 읽어 `used` 가 8,829 에서 70,944 가 됐다. 그 턴 안에서는 압축하지 않았다. 다음 prompt 를 시작할 때 「Compacting context」 tool_call 을 보내고 `used` 를 0, 그다음 8,939 로 알렸다. 0 을 뺀 값이 70,944 에서 8,939 로 줄어 감지된다.
     - 그 전에는 턴 끝 값끼리만 비교해서 턴 안에서 압축한 뒤 다시 커지면 놓쳤다. 로컬 Muse journal 의 압축 83건 중 `mid_turn` 이 25건, `pre_turn` 이 19건이다.
 - 에이전트 창과 운영자 한도: 세션을 열 때 에이전트가 알리는 `usage_update.size` 보다 운영자 한도가 크면 typed 설정 오류로 그 후보를 쓰지 않는다. 운영자 한도가 에이전트 창 안에 있으면, 3.3 의 말없이 잘라 읽기는 masc 가 보낸 범위에서는 생기지 않는다.

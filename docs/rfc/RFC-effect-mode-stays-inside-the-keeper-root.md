@@ -228,6 +228,15 @@ RFC-0422 의 주제는 judge 를 건너뛸 관측 증명이었다. Effect 를 �
 3. **ABI 6 의 범위 제한을 같이 걸지.** ABI 6 은 범위 제한 둘을 준다. 도메인 밖 프로세스에 보내는 신호와 abstract unix socket 연결을 막는다. ABI 6 미만 커널에서는 걸지 못한다.
 4. **Landlock 없는 호스트에 Keeper 하나만 둔 endpoint.** 이웃이 없어도 D5 는 거절한다. 예외를 두면 「이 endpoint 는 혼자다」라는 선언을 다시 믿어야 한다.
 5. **거절 영수증의 갈래 이름.** 지금 Landlock 실패는 `Refused_write` 로 온다. Effect 상자는 읽기도 막으므로 이름이 맞지 않는다. 새 갈래를 둘지 2층에서 정한다.
+6. **서버 `allowed_paths` 와 shim `write_roots` 를 어떻게 이을지(#38895).** 선언 루트는 지금 두 군데에 따로 적힌다.
+   - 서버: `runtime.toml` endpoint 의 `allowed_paths` 다. 경로 문자열로 판정한다(`keeper_sandbox_remote_lane.ml` `extra_root_match`). 운영 endpoint 하나가 `["/masc-shared/wkbl"]` 을 쓴다.
+   - shim: D2 의 `write_roots=` 다. 커널이 판정한다.
+   - 둘이 맞는지 보는 곳이 없다. `allowed_paths` 에만 있는 루트는 서버가 통과시키고 커널이 거절한다.
+   - 후보는 셋이다.
+     - 서버가 probe 로 받은 `write_roots` 를 읽고, 두 목록이 다르면 endpoint 점검이 보여 준다.
+     - 서버가 요청에 쓰기 루트를 실어 보낸다. shim 은 자기 목록 안의 것만 받는다.
+     - `allowed_paths` 를 지우고 shim 설정을 하나뿐인 원본으로 둔다.
+   - 선언 루트 자체가 링크인 경우도 남는다. D3 은 Keeper root 와 겹치는지만 본다.
 
 ## 8. 하지 않는 것
 

@@ -126,7 +126,15 @@ type ssh_endpoint = {
 type t =
   | Host
   | Docker of { image : string; runner : runner; pipeline_runner : pipeline_runner option }
-  | Micro_vm of { image : string; runner : runner; pipeline_runner : pipeline_runner option }
+  | Micro_vm of
+      { image : string
+      ; workspace_root : string
+      (* This Keeper's directory in the guest. Execute runs and reports its
+         cwd here, so a command may name paths under it; the path check
+         compares it lexically. *)
+      ; runner : runner
+      ; pipeline_runner : pipeline_runner option
+      }
   | Ssh of { endpoint : ssh_endpoint; runner : runner; pipeline_runner : pipeline_runner option }
   | Delegated of { caller : runner }
 
@@ -134,8 +142,8 @@ let host () : t = Host
 
 let docker ~image ~runner ?pipeline_runner () : t = Docker { image; runner; pipeline_runner }
 
-let micro_vm ~image ~runner ?pipeline_runner () : t =
-  Micro_vm { image; runner; pipeline_runner }
+let micro_vm ~image ~workspace_root ~runner ?pipeline_runner () : t =
+  Micro_vm { image; workspace_root; runner; pipeline_runner }
 
 let ssh ~endpoint ~runner ?pipeline_runner () : t =
   Ssh { endpoint; runner; pipeline_runner }

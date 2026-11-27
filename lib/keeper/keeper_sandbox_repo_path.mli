@@ -24,7 +24,8 @@ val execution_location_json :
     [playground_root] for playground scopes and [null] when the cwd is outside
     the playground. Docker host-only absolute paths are projected into the
     mounted sandbox namespace or returned as [null]; paths of a tree the
-    endpoint owns use its resolved namespace for SSH. [remote_workspace_root]
-    comes from the actual dispatch target; [None] on SSH means unresolved and
+    endpoint owns use the namespace the command runs in: the SSH endpoint's
+    or the microVM guest's Keeper root. [remote_workspace_root] comes from
+    the actual dispatch target; [None] on SSH or microVM means unresolved and
     yields null paths rather than invented host coordinates. Relative argv
     paths resolve against the effective cwd. *)

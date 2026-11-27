@@ -749,31 +749,67 @@ let test_docker_shaped_exec_refuses_a_microvm_keeper () =
        ~stages:[ { Masc.Keeper_turn_sandbox_runtime.command_argv = [ "true" ]; cwd = None } ])
 ;;
 
-(* What the keeper is shown: its host root is the bookkeeping bundle, not a
-   guest path, and the execution location repeats that bundle -- the remote
-   lane owns the guest spelling. *)
-let test_echoes_name_the_host_bundle () =
-  let base = temp_dir "microvm_echo_bundle_" in
+(* What the keeper is shown: the host keeps its bookkeeping bundle for its
+   own use, and the execution location names the guest's Keeper root, where
+   the command runs, so the keeper's next command can reuse the name. *)
+let test_execution_location_names_the_guest_root () =
+  let base = temp_dir "microvm_guest_root_" in
   let config = Masc.Workspace.default_config base in
-  let meta = microvm_meta ~name:"vm-echo-bundle" in
+  let keeper = "vm-guest-root" in
+  let meta = microvm_meta ~name:keeper in
   let host_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
-  Alcotest.(check string) "host root is the bundle, not playground/microvm"
-    (Filename.concat base ".masc/playground/vm-echo-bundle/")
+  Alcotest.(check string) "host root stays the bookkeeping bundle"
+    (Filename.concat base ".masc/playground/vm-guest-root/")
     host_root;
   let sandbox = Masc.Keeper_sandbox.of_meta ~config ~meta in
   Alcotest.(check bool) "no container root for a tree the guest owns" true
     (Option.is_none sandbox.container_root);
-  let location =
-    Masc.Keeper_sandbox_repo_path.execution_location_json ~remote_workspace_root:None
-      ~config ~meta ~args:(`Assoc []) ~cwd:host_root
+  let guest_root = M.keeper_work_root ~keeper_name:keeper in
+  Alcotest.(check string) "the guest root is the keeper's directory on the work volume"
+    "/masc-work/vm-guest-root" guest_root;
+  let location ~remote_workspace_root cwd =
+    Masc.Keeper_sandbox_repo_path.execution_location_json ~remote_workspace_root
+      ~config ~meta ~args:(`Assoc []) ~cwd
   in
-  (match Yojson.Safe.Util.member "cwd" location with
-   | `String cwd ->
-     Alcotest.(check bool) "execution location is not a guest path" false
-       (String.starts_with ~prefix:"/home/keeper/" cwd);
-     Alcotest.(check bool) "execution location names the bundle" true
-       (Astring.String.is_infix ~affix:".masc/playground/vm-echo-bundle" cwd)
-   | _ -> Alcotest.fail "execution location has no cwd")
+  let text name json = Yojson.Safe.Util.(member name json |> to_string) in
+  let at_root = location ~remote_workspace_root:(Some guest_root) host_root in
+  Alcotest.(check string) "cwd names the guest root" guest_root (text "cwd" at_root);
+  Alcotest.(check string) "playground root names the guest root" guest_root
+    (text "playground_root" at_root);
+  Alcotest.(check string) "the guest root is the playground root" "playground_root"
+    (text "scope" at_root);
+  let in_repo =
+    location ~remote_workspace_root:(Some guest_root)
+      (Filename.concat host_root "repos/masc/lib")
+  in
+  Alcotest.(check string) "a checkout cwd names the guest path"
+    "/masc-work/vm-guest-root/repos/masc/lib" (text "cwd" in_repo);
+  Alcotest.(check string) "the checkout root names the guest path"
+    "/masc-work/vm-guest-root/repos/masc" (text "repo_root" in_repo);
+  Alcotest.(check string) "a checkout subpath keeps its scope" "repo_subpath"
+    (text "scope" in_repo);
+  let unresolved = location ~remote_workspace_root:None host_root in
+  Alcotest.(check bool) "an unresolved guest root names no host path" true
+    (Yojson.Safe.Util.member "cwd" unresolved = `Null);
+  Alcotest.(check string) "an unresolved guest root says so"
+    "microvm_namespace_unresolved" (text "reason" unresolved);
+  (* The keeper reuses the cwd it was shown. The host reads it back as the
+     bundle path, which the remote lane maps into the guest. *)
+  let normalize = Masc.Keeper_alerting_path.normalize_path_for_check_stripped in
+  (match
+     Masc.Keeper_tool_execute_path.resolve_tool_execute_cwd
+       ~remote_workspace_root:(Some guest_root) ~config ~meta ~write_enabled:false
+       ~args:(`Assoc [ "cwd", `String "/masc-work/vm-guest-root/repos/masc" ])
+   with
+   | Ok cwd ->
+     Alcotest.(check string) "the shown guest cwd resolves to the host bundle"
+       (normalize (Filename.concat host_root "repos/masc")) (normalize cwd)
+   | Error error -> Alcotest.failf "the shown guest cwd was refused: %s" error);
+  Alcotest.(check bool) "a sibling keeper's guest cwd stays refused" true
+    (Result.is_error
+       (Masc.Keeper_tool_execute_path.resolve_tool_execute_cwd
+          ~remote_workspace_root:(Some guest_root) ~config ~meta ~write_enabled:false
+          ~args:(`Assoc [ "cwd", `String "/masc-work/vm-other" ])))
 ;;
 
 let test_turn_start_argv_shape () =
@@ -6581,8 +6617,8 @@ let () =
             test_guest_target_refuses_a_profile_mismatch
         ; Alcotest.test_case "docker-shaped exec refuses a microvm keeper" `Quick
             test_docker_shaped_exec_refuses_a_microvm_keeper
-        ; Alcotest.test_case "echoes name the host bundle" `Quick
-            test_echoes_name_the_host_bundle
+        ; Alcotest.test_case "execution location names the guest root" `Quick
+            test_execution_location_names_the_guest_root
         ; Alcotest.test_case "turn start argv shape" `Quick
             test_turn_start_argv_shape
         ; Alcotest.test_case "inspect state parser" `Quick

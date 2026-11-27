@@ -114,7 +114,16 @@ type ssh_endpoint = {
 type t =
   | Host
   | Docker of { image : string; runner : runner; pipeline_runner : pipeline_runner option }
-  | Micro_vm of { image : string; runner : runner; pipeline_runner : pipeline_runner option }
+  | Micro_vm of
+      { image : string
+      ; workspace_root : string
+          (** This Keeper's directory in the guest. Execute runs and reports
+              its cwd here, so a command may name paths under it; the path
+              check compares it lexically, never through the host
+              filesystem. *)
+      ; runner : runner
+      ; pipeline_runner : pipeline_runner option
+      }
   | Ssh of { endpoint : ssh_endpoint; runner : runner; pipeline_runner : pipeline_runner option }
   | Delegated of { caller : runner }
       (** A stage that is not a process at all: the [caller] decides what
@@ -138,8 +147,15 @@ val docker : image:string -> runner:runner -> ?pipeline_runner:pipeline_runner -
 
 (** Build an Apple Container microVM target. The runner owns guest startup and
     command execution; keeping this distinct from [Docker] prevents policy and
-    telemetry consumers from reporting the wrong backend. *)
-val micro_vm : image:string -> runner:runner -> ?pipeline_runner:pipeline_runner -> unit -> t
+    telemetry consumers from reporting the wrong backend. [workspace_root] is
+    the Keeper's own directory in the guest. *)
+val micro_vm :
+  image:string ->
+  workspace_root:string ->
+  runner:runner ->
+  ?pipeline_runner:pipeline_runner ->
+  unit ->
+  t
 
 (** Build an SSH target.  As with {!docker}, the caller (the keeper layer)
     supplies the runner closure over its own SSH runtime; [lib/exec] only

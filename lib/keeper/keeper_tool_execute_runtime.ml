@@ -386,9 +386,14 @@ let handle_tool_execute_typed
       ~class_:Tool_result.Dependency_unavailable
       ~effect_disposition:Tool_result.Proven_pre_effect (error_json detail)
   | Ok endpoint ->
-  let remote_workspace_root = Option.map (fun (endpoint : Exec_ssh_endpoint.t) ->
-    Keeper_sandbox_remote.keeper_root ~remote_root:endpoint.remote_root
-      ~keeper_name:meta.name) endpoint in
+  (* The Keeper's root where the command runs: on the ssh endpoint or in the
+     microVM guest. Execute reports its cwd in that namespace. *)
+  let remote_workspace_root = match meta.sandbox_profile with
+    | Remote_ssh -> Option.map (fun (endpoint : Exec_ssh_endpoint.t) ->
+        Keeper_sandbox_remote.keeper_root ~remote_root:endpoint.remote_root
+          ~keeper_name:meta.name) endpoint
+    | Micro_vm -> Some (Keeper_sandbox_microvm.keeper_work_root ~keeper_name:meta.name)
+    | Docker -> None in
   match
     Keeper_tool_execute_path.resolve_tool_execute_cwd_typed
       ~remote_workspace_root
@@ -620,7 +625,11 @@ let handle_tool_execute_typed
              exist. *)
           match dispatch_sandbox with
           | Masc_exec.Sandbox_target.Host
-          | Docker _ | Micro_vm _ -> model_location_fields
+          | Docker _ -> model_location_fields
+          | Micro_vm { workspace_root; _ } ->
+            model_execute_location_fields
+              ~remote_workspace_root:(Some workspace_root)
+              ~config ~meta ~args ~cwd
           | Ssh { endpoint; _ } ->
             model_execute_location_fields
               ~remote_workspace_root:(Some endpoint.workspace_root)

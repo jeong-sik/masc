@@ -1142,7 +1142,8 @@ let () =
   let targets =
     [ Sandbox_target.host ()
     ; Sandbox_target.docker ~image:"fixture" ~runner ~pipeline_runner ()
-    ; Sandbox_target.micro_vm ~image:"fixture" ~runner ~pipeline_runner ()
+    ; Sandbox_target.micro_vm ~image:"fixture" ~workspace_root:"/fixture/keeper" ~runner
+        ~pipeline_runner ()
     ; Sandbox_target.ssh ~endpoint ~runner ~pipeline_runner ()
     ; Sandbox_target.delegated ~caller:runner () ]
   in

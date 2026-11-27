@@ -275,8 +275,10 @@ let guest_target
         ( Masc_exec.Sandbox_target.docker ~image ~runner ~pipeline_runner ()
         , fun () -> No_box docker_has_no_box )
       | Micro_vm_guest ->
+        let workspace_root = Keeper_sandbox_microvm.keeper_work_root ~keeper_name:meta.name in
         ( Masc_exec.Sandbox_target.micro_vm
             ~image
+            ~workspace_root
             ~runner:(microvm_runner ?on_receipt ~runtime ~timeout_sec ())
             ()
         , fun () ->
@@ -293,7 +295,7 @@ let guest_target
                    ~run:Keeper_types_profile_sandbox.Observe
                    ~timeout_sec
                    ~target_of_runner:(fun runner ->
-                     Masc_exec.Sandbox_target.micro_vm ~image ~runner ())
+                     Masc_exec.Sandbox_target.micro_vm ~image ~workspace_root ~runner ())
                    endpoint) )
     in
     Ok

@@ -13,9 +13,10 @@ val project_input :
   remote_workspace_root:string ->
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
   string -> string
-(** Convert an SSH workspace path to internal containment coordinates. Relative
-    and declared external paths retain their existing interpretation. The root
-    must come from the same captured endpoint the operation will execute on. *)
+(** Convert an SSH endpoint or microVM guest workspace path to internal
+    containment coordinates. Relative and declared external paths retain
+    their existing interpretation. The root must come from the same captured
+    endpoint the operation will execute on. *)
 
 val project_file_args :
   remote_workspace_root:string -> config:Workspace.config ->

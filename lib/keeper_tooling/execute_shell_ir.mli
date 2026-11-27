@@ -41,11 +41,12 @@ val validate_paths :
     When [requires_existing_dir] is false (or omitted and [sandbox] is an
     endpoint-owned target such as [Micro_vm] or [Ssh]), [cwd] is validated for
     lexical boundary containment without requiring the directory to physically
-    exist on the host. When [sandbox] is an [Ssh] target, a path within the
-    Keeper's own root on the endpoint ([workspace_root], where the command
-    runs) or within one of the endpoint's [allowed_paths] is also accepted;
-    every other target (and an omitted [sandbox]) keeps the default workdir
-    + [/tmp] boundary. *)
+    exist on the host. When [sandbox] is a [Micro_vm] or [Ssh] target, a path
+    within the Keeper's own root in the guest or on the endpoint
+    ([workspace_root], where the command runs) is also accepted, and for
+    [Ssh] so is a path within one of the endpoint's [allowed_paths]; every
+    other target (and an omitted [sandbox]) keeps the default workdir +
+    [/tmp] boundary. *)
 
 val dispatch :
   ?allow_pipes:bool ->

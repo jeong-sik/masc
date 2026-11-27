@@ -29,8 +29,8 @@ describe("normalizeStatusSection", () => {
   })
 
   it("falls back to the monitoring default section", () => {
-    expect(normalizeStatusSection("memory-subsystems")).toBe("agents")
-    expect(normalizeStatusSection("unknown")).toBe("agents")
-    expect(normalizeStatusSection(undefined)).toBe("agents")
+    expect(normalizeStatusSection("memory-subsystems")).toBe("runtime")
+    expect(normalizeStatusSection("unknown")).toBe("runtime")
+    expect(normalizeStatusSection(undefined)).toBe("runtime")
   })
 })

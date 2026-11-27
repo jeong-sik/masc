@@ -14,6 +14,7 @@ import { Status } from './status'
 import { navigate } from '../router'
 import { hydrateExecutionSnapshot, invalidateExecutionSnapshotGeneration } from '../store'
 import { resetLaneDeclarationSessionsForTesting } from '../lib/lane-declaration-sessions'
+vi.mock('./runtime-panel', () => ({ RuntimePanel: () => html`<p>Fixture runtime route</p>` }))
 let epochSequence = 0
 let epoch = ''
 let generation = 0
@@ -160,8 +161,8 @@ describe('Lane declaration editing through the status surface', () => {
     fireEvent.input(screen.getByLabelText('File name'), { target: { value: 'new-file.toml' } })
     const newDraft = '# retained new file\n' + original
     fireEvent.input(source(screen), { target: { value: newDraft } })
-    act(() => navigate('monitoring', { section: 'agents' }))
-    await screen.findByText('Fixture agents route')
+    act(() => navigate('monitoring', { section: 'runtime' }))
+    await screen.findByText('Fixture runtime route')
     expect(screen.queryByLabelText('TOML source')).toBeNull()
     const leave = new Event('beforeunload', { cancelable: true })
     window.dispatchEvent(leave)
@@ -183,8 +184,8 @@ describe('Lane declaration editing through the status surface', () => {
     const screen = render(html`<${Status} />`)
     fireEvent.click(await screen.findByRole('button', { name: `Edit TOML ${path}` }))
     await screen.findByText('Reading original TOML…')
-    act(() => navigate('monitoring', { section: 'agents' }))
-    await screen.findByText('Fixture agents route')
+    act(() => navigate('monitoring', { section: 'runtime' }))
+    await screen.findByText('Fixture runtime route')
     await act(async () => { finish(document); await Promise.resolve() })
     act(() => navigate('monitoring', { section: 'lane-addons' }))
     await waitFor(() => expect(source(screen).value).toBe(original))
@@ -202,8 +203,8 @@ describe('Lane declaration editing through the status surface', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save TOML' }))
     await screen.findByRole('button', { name: 'Saving TOML…' })
     fireEvent.input(source(screen), { target: { value: newer } })
-    act(() => navigate('monitoring', { section: 'agents' }))
-    await screen.findByText('Fixture agents route')
+    act(() => navigate('monitoring', { section: 'runtime' }))
+    await screen.findByText('Fixture runtime route')
     await act(async () => { finish(receipt(submitted)); await Promise.resolve() })
     act(() => navigate('monitoring', { section: 'lane-addons' }))
     await screen.findByText(/Your newer draft edits are not saved/)

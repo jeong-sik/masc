@@ -31,6 +31,30 @@ val deliver :
     queue commit rechecks under the owner lock, with the same bound, and
     honors the existing lifecycle intake fence. *)
 
+type answer_failure =
+  | Answer_refused of Keeper_ask_store.answer_failure
+      (** The ask store refused or could not confirm the answer, as
+          {!Keeper_ask_store.answer} reports it. *)
+  | Keeper_intake_held of Keeper_shutdown_types.Operation_id.t
+      (** This shutdown operation holds the Keeper's intake. Nothing was
+          written and the ask stays open. *)
+  | Keeper_queue_unavailable of string
+      (** The Keeper's queue owner did not resolve or its lock raised. Nothing
+          was appended to the ask log. *)
+
+val answer :
+  base_path:string -> keeper_name:string -> ask_id:string ->
+  submissions:(string * Keeper_ask.response) list ->
+  responder:Keeper_ask.responder -> now:float ->
+  (Keeper_ask.answer list, answer_failure) result
+(** Record an operator's answer and tell the Keeper. Inside the Keeper's
+    intake fence and queue owner lock, the ask is validated, its
+    [keeper-ask:<ask_id>] pointer is committed with strict durability, and
+    then [Answered] is appended. An answer therefore never exists without its
+    pointer. An ask already answered admits no pointer, so a consumed answer
+    is not delivered again. After [Ok] the live wake hint is sent; a Keeper
+    that is not running reads the pointer when it starts. *)
+
 type tool_action = {
   execution_id : string;
   physical_execution_id : string;

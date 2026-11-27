@@ -25,6 +25,8 @@ type answer_failure =
   | Already_withdrawn of { reason : string; withdrawn_at : float }
   | Rejected of Keeper_ask.invalid_answer list
   | Store_failed of string
+  | Admission_failed of string
+      (** [admit] refused the validated ask; nothing was appended. *)
   | Answer_recorded_unconfirmed of { detail : string }
       (** The answer append committed, but its canonical first-winner read
           did not confirm this submission. Never report it as an absent write
@@ -82,6 +84,7 @@ val record_ask : base_path:string -> Keeper_ask.ask -> (unit, string) result
     suspends its lane nor blocks its turn. *)
 
 val answer :
+  admit:(Keeper_ask.ask -> (unit, string) result) ->
   base_path:string ->
   keeper_name:string ->
   ask_id:string ->
@@ -91,8 +94,12 @@ val answer :
   (Keeper_ask.answer list, answer_failure) result
 (** Validates [submissions] against the recorded ask and appends [Answered].
     Rejects before writing when the ask is unknown, already resolved, or the
-    submissions do not satisfy it. A successful append is reread from the
-    canonical store before acknowledging the requested outcome. *)
+    submissions do not satisfy it. [admit] then runs with the recorded ask,
+    before the append; its [Error] is [Admission_failed] and nothing is
+    appended. The answer route admits the Keeper's queue pointer there
+    ({!Keeper_ask_answer_wake.answer}). A successful append is reread from the
+    canonical store before acknowledging the requested outcome; a withdrawal
+    that landed first is [Already_withdrawn]. *)
 
 val withdraw :
   base_path:string ->
@@ -133,6 +140,7 @@ val open_ask_count : base_path:string -> keeper_name:string -> int
 module For_testing : sig
   val answer_with_interleaving :
     before_append:(unit -> unit) -> after_append:(unit -> unit) ->
+    admit:(Keeper_ask.ask -> (unit, string) result) ->
     base_path:string -> keeper_name:string -> ask_id:string ->
     submissions:(string * Keeper_ask.response) list ->
     responder:Keeper_ask.responder -> now:float ->

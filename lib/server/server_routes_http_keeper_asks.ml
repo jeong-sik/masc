@@ -6,26 +6,25 @@ module Stream = Server_routes_http_keeper_stream
 (* POST /api/v1/keepers/ask-answer
 
    The operator answers a Keeper's question from whichever surface they happen
-   to be at. Two surfaces can submit for the same ask at once and nothing here
-   locks the log: the fold settles on first write, so this responds with what
-   actually landed rather than echoing what this caller sent. A second
-   submission gets the answer that won, not a bare rejection -- the surface
+   to be at. Two surfaces can submit for the same ask at once. Answers for one
+   Keeper are recorded inside that Keeper's queue owner lock
+   ([Keeper_ask_answer_wake.answer]), so the second submission reads the first
+   answer and gets it back as a conflict, not a bare rejection: the surface
    showing it has to be able to say what was chosen. *)
 let ask_answer_failure_status = function
   | Keeper_ask_store.Ask_not_found _ -> `Not_found
   | Keeper_ask_store.Already_answered _ | Keeper_ask_store.Already_withdrawn _ -> `Conflict
   | Keeper_ask_store.Rejected _ -> `Bad_request
-  | Keeper_ask_store.Store_failed _ | Keeper_ask_store.Answer_recorded_unconfirmed _ -> `Internal_server_error
+  | Keeper_ask_store.Store_failed _ | Keeper_ask_store.Admission_failed _
+  | Keeper_ask_store.Answer_recorded_unconfirmed _ -> `Internal_server_error
 
-let ask_already_answered_response ~ask_id ~answers ~answered_at ~delivered =
+let ask_already_answered_response ~ask_id ~answers ~answered_at =
   (`Conflict,
    `Assoc
-     [ "error", `String (if delivered then "ask already answered" else
-         "ask already answered; delivery is pending automatic recovery")
+     [ "error", `String "ask already answered"
      ; "state", `String "answered"
      ; "ask_id", `String ask_id
      ; "recorded", `Bool true
-     ; "delivered", `Bool delivered
      ; "answered_at", `Float answered_at
      ; "answered_question_ids", `List (List.map
          (fun (answer : Keeper_ask.answer) -> `String answer.question_id) answers) ])
@@ -34,55 +33,50 @@ let ask_answer_failure_json ~ask_id failure =
   let detail = Keeper_ask_store.answer_failure_to_string failure in
   match failure with
   | Keeper_ask_store.Already_answered { answers; answered_at; _ } ->
-      snd (ask_already_answered_response ~ask_id ~answers ~answered_at ~delivered:false)
+      snd (ask_already_answered_response ~ask_id ~answers ~answered_at)
   | Keeper_ask_store.Answer_recorded_unconfirmed _ ->
-      `Assoc [ "error", `String (detail ^ "; delivery awaits automatic recovery")
+      `Assoc [ "error", `String (detail ^ "; reload the question to see what was recorded")
              ; "state", `String "recording_unconfirmed"
              ; "ask_id", `String ask_id
-             ; "recorded", `Bool true
-             ; "delivered", `Bool false ]
+             ; "recorded", `Bool true ]
   | Keeper_ask_store.Ask_not_found _
   | Keeper_ask_store.Already_withdrawn _
   | Keeper_ask_store.Rejected _
-  | Keeper_ask_store.Store_failed _ ->
+  | Keeper_ask_store.Store_failed _
+  | Keeper_ask_store.Admission_failed _ ->
       `Assoc [ ("error", `String detail) ]
 
-(* The wake that closes the loop between a human answering and the Keeper that
-   asked. The stimulus carries the ask_id only; the answer stays in
-   [Keeper_ask_store] and the turn reads it there. The continuation the Keeper
-   recorded when it asked rides along so a woken Keeper replies where the
-   question came from rather than wherever its own state last left it. *)
-(* What the route says once an answer is recorded. Recording it and telling the
-   Keeper are one act: a 2xx when only the first half happened leaves the
-   operator believing a decision landed while the Keeper waits on it forever.
-   Split out so the choice can be read and tested on its own. *)
-let ask_answer_response ~ask_id ~actor ~answer_count ~open_remaining ~delivered =
-  let body =
-    [
-      ("recorded", `Bool true);
-      ("ask_id", `String ask_id);
-      ("actor", `String actor);
-      ("answer_count", `Int answer_count);
-      ("delivered", `Bool delivered);
-      ("open_remaining", `Int open_remaining);
-    ]
-  in
-  if delivered then (`OK, `Assoc body)
-  else
-    ( `Internal_server_error,
-      `Assoc
-        (( "error",
-           `String
-             "answer recorded; delivery to the keeper is pending automatic recovery" )
-        :: body) )
+let ask_answer_refusal_response ~ask_id = function
+  | Keeper_ask_answer_wake.Answer_refused failure ->
+      ask_answer_failure_status failure, ask_answer_failure_json ~ask_id failure
+  | Keeper_ask_answer_wake.Keeper_intake_held operation_id ->
+      (`Service_unavailable,
+       `Assoc
+         [ "error", `String ("the Keeper is shutting down; the answer was not recorded: "
+                             ^ Keeper_registry_event_queue.shutdown_reserved_detail operation_id)
+         ; "state", `String "keeper_shutting_down"
+         ; "ask_id", `String ask_id
+         ; "recorded", `Bool false ])
+  | Keeper_ask_answer_wake.Keeper_queue_unavailable detail ->
+      (`Internal_server_error,
+       `Assoc
+         [ "error", `String ("the Keeper's queue is unavailable; the answer was not recorded: " ^ detail)
+         ; "ask_id", `String ask_id
+         ; "recorded", `Bool false ])
 
-let wake_keeper_for_answered_ask ~base_path ~keeper_name ~ask_id =
-  match Keeper_ask_answer_wake.deliver ~base_path ~keeper_name ~ask_id with
-  | Ok (Keeper_ask_answer_wake.Enqueued | Already_pending | Already_delivered) -> true
-  | Error error ->
-      Log.Server.error "ask answer delivery retained (keeper=%s ask_id=%s): %s"
-        keeper_name ask_id (Keeper_ask_answer_wake.error_to_string error);
-      false
+(* The answer and the Keeper's pointer to it are committed together, so a
+   recorded answer always has its pointer in the Keeper's queue. The pointer
+   carries the ask_id only; the answer stays in [Keeper_ask_store] and the
+   turn reads it there, with the continuation the Keeper recorded when it
+   asked. *)
+let ask_answer_response ~ask_id ~actor ~answer_count ~open_remaining =
+  (`OK,
+   `Assoc
+     [ ("recorded", `Bool true);
+       ("ask_id", `String ask_id);
+       ("actor", `String actor);
+       ("answer_count", `Int answer_count);
+       ("open_remaining", `Int open_remaining) ])
 
 let handle_keeper_ask_answer ~actor state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
@@ -123,42 +117,21 @@ let handle_keeper_ask_answer ~actor state request reqd =
             in
             let now = Time_compat.now () in
             match
-              Keeper_ask_store.answer ~base_path ~keeper_name ~ask_id ~submissions ~responder
-                ~now
+              Keeper_ask_answer_wake.answer ~base_path ~keeper_name ~ask_id ~submissions
+                ~responder ~now
             with
             | Error failure ->
+                let status, body = ask_answer_refusal_response ~ask_id failure in
                 Log.Keeper.info "keeper_ask_answer: keeper=%s ask_id=%s actor=%s refused=%s"
-                  keeper_name ask_id actor
-                  (Keeper_ask_store.answer_failure_to_string failure);
-                let status, body = match failure with
-                  | Keeper_ask_store.Already_answered { answers; answered_at; _ } ->
-                      let delivered = wake_keeper_for_answered_ask ~base_path ~keeper_name ~ask_id in
-                      ask_already_answered_response ~ask_id ~answers ~answered_at ~delivered
-                  | Keeper_ask_store.Ask_not_found _
-                  | Keeper_ask_store.Already_withdrawn _
-                  | Keeper_ask_store.Rejected _
-                  | Keeper_ask_store.Store_failed _
-                  | Keeper_ask_store.Answer_recorded_unconfirmed _ ->
-                      ask_answer_failure_status failure, ask_answer_failure_json ~ask_id failure in
+                  keeper_name ask_id actor (Yojson.Safe.to_string body);
                 respond_json_value_with_cors ~status request reqd body
             | Ok answers ->
                 Log.Keeper.info "keeper_ask_answer: keeper=%s ask_id=%s actor=%s answers=%d"
                   keeper_name ask_id actor (List.length answers);
-                (* The answer is durable now; the Keeper that asked still has
-                   no idea. Without this wake it is written down where only a
-                   screen reads it and the asker has to remember to go and
-                   look, which is why no Keeper had ever asked. *)
-                let delivered =
-                  wake_keeper_for_answered_ask ~base_path ~keeper_name ~ask_id
-                in
-                Log.Keeper.info
-                  "keeper_ask_answer: keeper=%s ask_id=%s actor=%s answers=%d delivered=%b"
-                  keeper_name ask_id actor (List.length answers) delivered;
                 let status, body =
                   ask_answer_response ~ask_id ~actor ~answer_count:(List.length answers)
                     ~open_remaining:
                       (Keeper_ask_store.open_ask_count ~base_path ~keeper_name)
-                    ~delivered
                 in
                 respond_json_value_with_cors ~status request reqd body)
 

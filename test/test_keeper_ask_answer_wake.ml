@@ -256,33 +256,18 @@ let test_the_row_is_not_a_board_post () =
 (* Recording the answer and telling the Keeper are one act, so the route cannot
    report success when only the first half happened. An operator who reads 200
    stops thinking about it while the Keeper waits forever. *)
-let test_an_undelivered_answer_is_not_reported_as_success () =
+let test_a_recorded_answer_is_a_success () =
   let status, body =
     Server_routes_http_keeper_asks.ask_answer_response ~ask_id:"ask-1"
-      ~actor:"test-operator" ~answer_count:1 ~open_remaining:0 ~delivered:false
-  in
-  check bool "not a success" true (status = `Internal_server_error);
-  (match body with
-   | `Assoc fields ->
-     check bool "says the keeper was not told" true
-       (List.assoc_opt "delivered" fields = Some (`Bool false));
-     check bool "and says so in words" true (List.mem_assoc "error" fields)
-   | _ -> fail "the body is not an object")
-;;
-
-let test_a_delivered_answer_is_a_success () =
-  let status, body =
-    Server_routes_http_keeper_asks.ask_answer_response ~ask_id:"ask-1"
-      ~actor:"test-operator" ~answer_count:1 ~open_remaining:0 ~delivered:true
+      ~actor:"test-operator" ~answer_count:1 ~open_remaining:0
   in
   check bool "success" true (status = `OK);
   (match body with
    | `Assoc fields ->
-     check bool "delivered" true
-       (List.assoc_opt "delivered" fields = Some (`Bool true));
+     check bool "recorded" true (List.assoc_opt "recorded" fields = Some (`Bool true));
+     check bool "no separate delivery claim" false (List.mem_assoc "delivered" fields);
      check bool "nothing to explain" false (List.mem_assoc "error" fields)
    | _ -> fail "the body is not an object")
-
 ;;
 
 module Wake = Keeper_ask_answer_wake
@@ -355,7 +340,7 @@ let test_ask_producer_keeps_frozen_source_through_answer () =
     (Some "explicit-related-task") ask.task_id;
   check (option string) "original source includes trace and absolute Keeper turn"
     (Some "producer-trace#17") (Option.map Ids.Turn_ref.to_string ask.source_turn_ref);
-  Keeper_ask_store.answer ~base_path ~keeper_name:"alpha" ~ask_id
+  Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name:"alpha" ~ask_id
     ~submissions:["q1",Keeper_ask.Wrote "keep original action"] ~responder ~now:200.
     |> Result.get_ok |> ignore;
   (match read_original () with
@@ -398,15 +383,23 @@ let test_ask_producer_keeps_frozen_source_through_answer () =
     (Result.is_error (Keeper_ask.event_of_json malformed))
 ;;
 
-let persist_answer ~base_path ~keeper_name ~ask_id ?task_id ?(answered_at = 200.) () =
+let record_open_ask ~base_path ~keeper_name ~ask_id ?task_id () =
   let continuation = Keeper_continuation_channel.dashboard ~thread_id:"original-ask-thread" |> Result.get_ok in
   let ask = Keeper_ask.ask ~ask_id ~keeper_name
       ~questions:[ question ~id:"q1" ~header:"deploy" ~choices:[ choice ~id:"c1" ~label:"yes" ] ]
       ~context:"original task" ?task_id ~continuation ~asked_at:100. () |> Result.get_ok in
   (match Keeper_ask_store.record_ask ~base_path ask with
    | Ok () -> () | Error error -> fail error);
-  (match Keeper_ask_store.answer ~base_path ~keeper_name ~ask_id
-      ~submissions:[ "q1", Keeper_ask.Chose { choice_ids = [ "c1" ] } ] ~responder ~now:answered_at with
+  ask
+;;
+
+let deploy_answer = [ "q1", Keeper_ask.Chose { choice_ids = [ "c1" ] } ]
+
+(* An answer written straight to the ask log, with no queue pointer. *)
+let persist_answer ~base_path ~keeper_name ~ask_id ?task_id ?(answered_at = 200.) () =
+  let ask = record_open_ask ~base_path ~keeper_name ~ask_id ?task_id () in
+  (match Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name ~ask_id
+      ~submissions:deploy_answer ~responder ~now:answered_at with
    | Ok _ -> () | Error error -> fail (Keeper_ask_store.answer_failure_to_string error));
   ask
 ;;
@@ -464,6 +457,114 @@ let terminalize_answer ~base_path ~keeper_name source =
   | Error error -> fail error
 ;;
 
+let refusal_text = function
+  | Wake.Answer_refused failure -> Keeper_ask_store.answer_failure_to_string failure
+  | Wake.Keeper_intake_held _ -> "a shutdown holds the Keeper's intake"
+  | Wake.Keeper_queue_unavailable detail -> "queue unavailable: " ^ detail
+;;
+
+let answer_as_the_route ~base_path ~keeper_name ~ask_id ~now =
+  Wake.answer ~base_path ~keeper_name ~ask_id ~submissions:deploy_answer ~responder ~now
+;;
+
+let queue_snapshot_path ~base_path ~keeper_name =
+  Filename.concat
+    (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
+    Keeper_event_queue_persistence.snapshot_filename
+;;
+
+let test_an_answer_commits_its_pointer_with_it () =
+  with_persistence @@ fun config ensure_keeper ->
+  let base_path = config.Workspace.base_path in
+  ensure_keeper "alpha";
+  let ask = record_open_ask ~base_path ~keeper_name:"alpha" ~ask_id:"admitted-answer" () in
+  (match answer_as_the_route ~base_path ~keeper_name:"alpha" ~ask_id:ask.ask_id ~now:200. with
+   | Ok _ -> ()
+   | Error failure -> fail (refusal_text failure));
+  (match pending_asks ~base_path ~keeper_name:"alpha" with
+   | [ source, payload ] ->
+     check string "the pointer is keyed by the question" ("keeper-ask:" ^ ask.ask_id) source.post_id;
+     check string "the pointer names the ask" ask.ask_id payload.Keeper_event_queue.ask_id;
+     check bool "the pointer keeps the ask's continuation" true
+       (Keeper_continuation_channel.same_conversation payload.channel ask.continuation)
+   | _ -> fail "the recorded answer has no single pointer");
+  match Keeper_ask_store.settled ~base_path ~keeper_name:"alpha" ~ask_id:ask.ask_id with
+  | Some (Keeper_ask.Answered_by { answered_at; _ }) ->
+    check (float 0.) "the answer is recorded" 200. answered_at
+  | Some (Keeper_ask.Open | Keeper_ask.Withdrawn_because _) | None ->
+    fail "the answer was not recorded"
+;;
+
+let test_a_shutdown_hold_records_no_answer () =
+  with_persistence @@ fun config ensure_keeper ->
+  let base_path = config.Workspace.base_path in
+  ensure_keeper "alpha";
+  let ask = record_open_ask ~base_path ~keeper_name:"alpha" ~ask_id:"held-answer" () in
+  let operation_id = Keeper_shutdown_types.Operation_id.generate () in
+  ignore (Keeper_shutdown_intake_fence.begin_shutdown ~base_path ~keeper_name:"alpha" ~operation_id);
+  Fun.protect ~finally:(fun () ->
+      ignore (Keeper_shutdown_intake_fence.rollback_shutdown ~base_path ~keeper_name:"alpha" ~operation_id))
+    (fun () ->
+      match answer_as_the_route ~base_path ~keeper_name:"alpha" ~ask_id:ask.ask_id ~now:200. with
+      | Error (Wake.Keeper_intake_held held_by as failure) ->
+        check bool "the refusal names the shutdown that holds the intake" true
+          (Keeper_shutdown_types.Operation_id.equal operation_id held_by);
+        let status, body =
+          Server_routes_http_keeper_asks.ask_answer_refusal_response ~ask_id:ask.ask_id failure in
+        let open Yojson.Safe.Util in
+        check bool "the route answers HTTP503" true (status = `Service_unavailable);
+        check string "the route names the shutdown state" "keeper_shutting_down"
+          (body |> member "state" |> to_string);
+        check bool "the route says nothing was recorded" false (body |> member "recorded" |> to_bool)
+      | Error failure -> fail (refusal_text failure)
+      | Ok _ -> fail "an answer was recorded while a shutdown held the intake");
+  check int "the question stays open" 1 (Keeper_ask_store.open_ask_count ~base_path ~keeper_name:"alpha");
+  check int "no pointer was admitted" 0 (List.length (pending_asks ~base_path ~keeper_name:"alpha"))
+;;
+
+let test_a_queue_failure_records_no_answer () =
+  with_persistence @@ fun config ensure_keeper ->
+  let base_path = config.Workspace.base_path in
+  ensure_keeper "alpha";
+  let ask = record_open_ask ~base_path ~keeper_name:"alpha" ~ask_id:"unqueued-answer" () in
+  let queue_path = queue_snapshot_path ~base_path ~keeper_name:"alpha" in
+  Fs_compat.mkdir_p (Filename.dirname queue_path);
+  Fs_compat.save_file queue_path "invalid queue snapshot";
+  (match answer_as_the_route ~base_path ~keeper_name:"alpha" ~ask_id:ask.ask_id ~now:200. with
+   | Error (Wake.Answer_refused (Keeper_ask_store.Admission_failed _)) -> ()
+   | Error failure -> fail (refusal_text failure)
+   | Ok _ -> fail "an answer was recorded without its pointer");
+  check int "the question stays open" 1 (Keeper_ask_store.open_ask_count ~base_path ~keeper_name:"alpha");
+  Unix.unlink queue_path;
+  (match answer_as_the_route ~base_path ~keeper_name:"alpha" ~ask_id:ask.ask_id ~now:210. with
+   | Ok _ -> ()
+   | Error failure -> fail (refusal_text failure));
+  check int "the operator's retry admits one pointer" 1
+    (List.length (pending_asks ~base_path ~keeper_name:"alpha"))
+;;
+
+let test_a_consumed_answer_admits_no_second_pointer () =
+  with_persistence @@ fun config ensure_keeper ->
+  let base_path = config.Workspace.base_path in
+  ensure_keeper "alpha";
+  let ask = record_open_ask ~base_path ~keeper_name:"alpha" ~ask_id:"consumed-answer" () in
+  (match answer_as_the_route ~base_path ~keeper_name:"alpha" ~ask_id:ask.ask_id ~now:200. with
+   | Ok _ -> ()
+   | Error failure -> fail (refusal_text failure));
+  let source = match pending_asks ~base_path ~keeper_name:"alpha" with
+    | [ source, _ ] -> source
+    | _ -> fail "the recorded answer has no single pointer" in
+  terminalize_answer ~base_path ~keeper_name:"alpha" source;
+  check int "the pointer was consumed" 0 (List.length (pending_asks ~base_path ~keeper_name:"alpha"));
+  (match answer_as_the_route ~base_path ~keeper_name:"alpha" ~ask_id:ask.ask_id ~now:400. with
+   | Error (Wake.Answer_refused (Keeper_ask_store.Already_answered { answered_at; _ })) ->
+     check (float 0.) "the first answer stands" 200. answered_at
+   | Error failure -> fail (refusal_text failure)
+   | Ok _ -> fail "a second answer was recorded");
+  check int "a consumed answer is not delivered again" 0
+    (List.length (pending_asks ~base_path ~keeper_name:"alpha"))
+;;
+
 let test_original_question_input_uses_canonical_store_and_keeps_unlinked_state () =
   with_persistence @@ fun config ensure_keeper ->
   let base_path = config.Workspace.base_path and keeper_name = "alpha" in
@@ -487,13 +588,13 @@ let test_original_question_input_uses_canonical_store_and_keeps_unlinked_state (
       ~asked_at:100. () |> Result.get_ok in
   Keeper_ask_store.record_ask ~base_path ask |> Result.get_ok;
   let text = "CANONICAL_WRITTEN_ANSWER\nquote=\"원문\"\\tail" in
-  Keeper_ask_store.answer ~base_path ~keeper_name ~ask_id:ask.ask_id
+  Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name ~ask_id:ask.ask_id
     ~submissions:[written.question_id,Keeper_ask.Wrote text;
       skipped.question_id,Keeper_ask.Skipped;
       multi.question_id,Keeper_ask.Chose {choice_ids=["other-choice";"choice-original"]}]
     ~responder ~now:200. |> Result.get_ok |> ignore;
   check bool "late losing answer is refused" true
-    (Result.is_error (Keeper_ask_store.answer ~base_path ~keeper_name ~ask_id:ask.ask_id
+    (Result.is_error (Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name ~ask_id:ask.ask_id
       ~submissions:[written.question_id,Keeper_ask.Wrote "LOSING_ANSWER"] ~responder ~now:201.));
   let current = Keeper_id.Task_id.of_string "task-900" |> Result.get_ok in
   let current_meta = {meta with current_task_id=Some current} in
@@ -562,13 +663,6 @@ let test_recorded_answer_recovers_once_on_original_continuation () =
    | Error (Wake.Queue_storage_failed _) -> ()
    | Error error -> fail (Wake.error_to_string error)
    | Ok _ -> fail "failed queue storage acknowledged answer delivery");
-  let status, receipt = Server_routes_http_keeper_asks.ask_answer_response
-      ~ask_id:ask.ask_id ~actor:"operator" ~answer_count:1 ~open_remaining:0 ~delivered:false in
-  check bool "recorded but undelivered remains HTTP500" true (status = `Internal_server_error);
-  check bool "receipt preserves the recorded answer" true
-    Yojson.Safe.Util.(receipt |> member "recorded" |> to_bool);
-  check string "receipt correlates to the exact ask" ask.ask_id
-    Yojson.Safe.Util.(receipt |> member "ask_id" |> to_string);
   Unix.unlink queue_path;
   let deferred_hint_logs_since since_seq =
     let expected = Printf.sprintf "answer wake durably pending; live hint deferred ask_id=%s" ask.ask_id in
@@ -1085,16 +1179,15 @@ let test_canonical_owner_survives_a_nonidentity_filename () =
 let test_already_answered_receipt_keeps_the_conflict () =
   let ask = ask_with [ question ~id:"q1" ~header:"deploy" ~choices:[ choice ~id:"c1" ~label:"yes" ] ] in
   let answers = answers_for ask [ "q1", Keeper_ask.Chose { choice_ids = [ "c1" ] } ] in
-  List.iter (fun delivered ->
-    let status, body = Server_routes_http_keeper_asks.ask_already_answered_response
-        ~ask_id:ask.ask_id ~answers ~answered_at:200. ~delivered in
-    check bool "canonical answer remains HTTP409" true (status = `Conflict);
-    let open Yojson.Safe.Util in
-    check string "receipt uses exact ask id" ask.ask_id (body |> member "ask_id" |> to_string);
-    check bool "canonical answer is recorded" true (body |> member "recorded" |> to_bool);
-    check bool "delivery is explicit" delivered (body |> member "delivered" |> to_bool);
-    check string "canonical state is answered" "answered" (body |> member "state" |> to_string);
-    check bool "no requesting losing actor is called winner" true (member "actor" body = `Null)) [ true; false ]
+  let status, body = Server_routes_http_keeper_asks.ask_already_answered_response
+      ~ask_id:ask.ask_id ~answers ~answered_at:200. in
+  check bool "canonical answer remains HTTP409" true (status = `Conflict);
+  let open Yojson.Safe.Util in
+  check string "receipt uses exact ask id" ask.ask_id (body |> member "ask_id" |> to_string);
+  check bool "canonical answer is recorded" true (body |> member "recorded" |> to_bool);
+  check bool "no separate delivery claim" true (member "delivered" body = `Null);
+  check string "canonical state is answered" "answered" (body |> member "state" |> to_string);
+  check bool "no requesting losing actor is called winner" true (member "actor" body = `Null)
 ;;
 
 let test_followup_publishes_sources_before_join () =
@@ -1479,10 +1572,16 @@ let () =
         ; test_case "the wake survives the queue" `Quick test_the_wake_survives_the_queue
         ; test_case "the wake is keyed by the question" `Quick
             test_the_wake_is_keyed_by_the_question
-        ; test_case "an undelivered answer is not reported as success" `Quick
-            test_an_undelivered_answer_is_not_reported_as_success
-        ; test_case "a delivered answer is a success" `Quick
-            test_a_delivered_answer_is_a_success
+        ; test_case "a recorded answer is a success" `Quick
+            test_a_recorded_answer_is_a_success
+        ; test_case "an answer commits its pointer with it" `Quick
+            test_an_answer_commits_its_pointer_with_it
+        ; test_case "a shutdown hold records no answer" `Quick
+            test_a_shutdown_hold_records_no_answer
+        ; test_case "a queue failure records no answer" `Quick
+            test_a_queue_failure_records_no_answer
+        ; test_case "a consumed answer admits no second pointer" `Quick
+            test_a_consumed_answer_admits_no_second_pointer
         ; test_case "recorded answer recovers once on original continuation" `Quick
             test_recorded_answer_recovers_once_on_original_continuation
         ; test_case "answers wait while their Keeper has no meta file" `Quick

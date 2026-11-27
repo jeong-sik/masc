@@ -693,7 +693,7 @@ let test_unavailable_ask_survives_other_completed_work ~failure () =
     let responder : Keeper_ask.responder =
       { surface = Surface_ref.Dashboard { session_id = None }
       ; actor_id = Some "fixture-operator"; display_name = Some "Fixture operator" } in
-    (match Keeper_ask_store.answer ~base_path ~keeper_name ~ask_id:ask.ask_id
+    (match Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name ~ask_id:ask.ask_id
         ~submissions:["notes", Keeper_ask.Wrote "original canonical answer"]
         ~responder ~now:200. with
      | Ok _ -> () | Error error -> fail (Keeper_ask_store.answer_failure_to_string error));
@@ -812,7 +812,7 @@ let test_unavailable_ask_survives_other_completed_work ~failure () =
         let readable_ask = make_ask "readable-answer" in
         (match Keeper_ask_store.record_ask ~base_path readable_ask with
          | Ok () -> () | Error detail -> fail detail);
-        (match Keeper_ask_store.answer ~base_path ~keeper_name ~ask_id:readable_ask.ask_id
+        (match Keeper_ask_store.answer ~admit:(fun _ -> Ok ()) ~base_path ~keeper_name ~ask_id:readable_ask.ask_id
             ~submissions:["notes", Keeper_ask.Wrote "independently readable answer"]
             ~responder ~now:203. with
          | Ok _ -> () | Error error -> fail (Keeper_ask_store.answer_failure_to_string error));

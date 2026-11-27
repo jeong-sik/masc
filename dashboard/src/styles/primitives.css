@@ -723,17 +723,31 @@
   padding: 0;
   background: transparent;
 }
+/* Cells wrap between words only (Korean between eojeol). A table whose words
+   do not fit scrolls sideways in its box instead of breaking them; measured
+   on the 55 workspace wiki tables at 560px, words broken across lines went
+   from 126 to 25 and one table scrolls. */
+.markdown-content .markdown-table-scroll {
+  max-inline-size: 100%;
+  overflow-x: auto;
+  margin: var(--sp-2) 0;
+}
 .markdown-content table {
   width: 100%;
   border-collapse: collapse;
   margin: var(--sp-2) 0;
   font-size: var(--fs-12);
 }
+.markdown-content .markdown-table-scroll > table {
+  margin: 0;
+}
 .markdown-content th,
 .markdown-content td {
   padding: var(--sp-1) var(--sp-2);
   border: 1px solid var(--line-1);
   text-align: left;
+  overflow-wrap: normal;
+  word-break: keep-all;
 }
 .markdown-content a {
   color: var(--info-fg);

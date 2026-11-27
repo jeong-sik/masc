@@ -26,6 +26,11 @@ const documentRenderer = {
     if (!href || href.startsWith('#')) return rendered
     return rendered.replace(/^<a /, '<a target="_blank" rel="noopener noreferrer" ')
   },
+  // A box that scrolls sideways when the table's words do not fit, so cells
+  // wrap only between words. The table itself keeps its display and semantics.
+  table(this: Renderer, token: Tokens.Table) {
+    return `<div class="markdown-table-scroll">${Renderer.prototype.table.call(this, token)}</div>`
+  },
 }
 
 const renderer = documentRenderer

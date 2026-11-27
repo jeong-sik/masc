@@ -114,6 +114,15 @@ describe('MarkdownContent', () => {
     expect(container.querySelectorAll('td').length).toBe(2)
   })
 
+  it('puts each table in a box that scrolls sideways, in chat and in documents', () => {
+    for (const document of [false, true]) {
+      const container = window.document.createElement('div')
+      render(h(MarkdownContent, { text: '| a | b |\n|---|---|\n| 1 | 2 |', document }), container)
+      const table = container.querySelector('table')
+      expect(table?.parentElement?.classList.contains('markdown-table-scroll')).toBe(true)
+    }
+  })
+
   it('sanitizes script tags', () => {
     const container = document.createElement('div')
     render(h(MarkdownContent, { text: '<script>alert(1)</script>' }), container)

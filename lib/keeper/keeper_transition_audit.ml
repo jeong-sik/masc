@@ -32,33 +32,31 @@ type completed_turn_ring =
 
 let completed_turn_rings : (string, completed_turn_ring) Hashtbl.t = Hashtbl.create 16
 
-(* Serializes both find→create→replace ring caches.  OCaml 5 domains preempt
-   without suspension points, so pool-domain fibers can interleave here and
-   mint two rings for one name, dropping the loser's records from the shared
-   view — the "non-yielding single-domain" assumption in the header comment
-   only holds within one domain. *)
-let rings_mutex = Eio.Mutex.create ()
+(* Serializes all ring table lookups, ring mutations, snapshots, and resets
+   across domains. Ring operations are pure and non-yielding, so a plain
+   [Stdlib.Mutex] prevents cross-domain races on [Hashtbl]/[pos]/[count]
+   without failing outside an Eio context or risking Eio mutex poisoning. *)
+let rings_mutex = Stdlib.Mutex.create ()
+let with_rings_lock f = Stdlib.Mutex.protect rings_mutex f
 
-let get_or_create_ring name =
-  Eio_guard.with_mutex rings_mutex (fun () ->
-    match Hashtbl.find_opt rings name with
-    | Some r -> r
-    | None ->
-      let r : ring = { buf = Array.make ring_capacity None; pos = 0; count = 0 } in
-      Hashtbl.replace rings name r;
-      r)
+let get_or_create_ring_locked name =
+  match Hashtbl.find_opt rings name with
+  | Some r -> r
+  | None ->
+    let r : ring = { buf = Array.make ring_capacity None; pos = 0; count = 0 } in
+    Hashtbl.replace rings name r;
+    r
 ;;
 
-let get_or_create_completed_turn_ring name =
-  Eio_guard.with_mutex rings_mutex (fun () ->
-    match Hashtbl.find_opt completed_turn_rings name with
-    | Some r -> r
-    | None ->
-      let r : completed_turn_ring =
-        { buf = Array.make ring_capacity None; pos = 0; count = 0 }
-      in
-      Hashtbl.replace completed_turn_rings name r;
-      r)
+let get_or_create_completed_turn_ring_locked name =
+  match Hashtbl.find_opt completed_turn_rings name with
+  | Some r -> r
+  | None ->
+    let r : completed_turn_ring =
+      { buf = Array.make ring_capacity None; pos = 0; count = 0 }
+    in
+    Hashtbl.replace completed_turn_rings name r;
+    r
 ;;
 
 (* ================================================================ *)
@@ -335,31 +333,33 @@ let append_turn_fsm_transition_to_default_store
 ;;
 
 let record_transition ~keeper_name (rec_ : transition_record) =
-  let ring = get_or_create_ring keeper_name in
-  ring.buf.(ring.pos) <- Some rec_;
-  ring.pos <- (ring.pos + 1) mod ring_capacity;
-  ring.count <- ring.count + 1;
+  with_rings_lock (fun () ->
+    let ring = get_or_create_ring_locked keeper_name in
+    ring.buf.(ring.pos) <- Some rec_;
+    ring.pos <- (ring.pos + 1) mod ring_capacity;
+    ring.count <- ring.count + 1);
   match sink_path () with
   | Some _ -> append_to_sink ~keeper_name rec_
   | None -> append_to_default_store ~keeper_name rec_
 ;;
 
 let recent_transitions ~keeper_name ~limit : transition_record list =
-  match Hashtbl.find_opt rings keeper_name with
-  | None -> []
-  | Some ring ->
-    let n = min limit (min ring.count ring_capacity) in
-    let result = ref [] in
-    for i = 0 to n - 1 do
-      let idx = (ring.pos - 1 - i + ring_capacity) mod ring_capacity in
-      match ring.buf.(idx) with
-      | Some r -> result := r :: !result
-      | None -> ()
-    done;
-    (* [i = 0] is the newest slot and [::] prepends, so the accumulator ends up
-       oldest-first. Reverse it to honour the newest-first contract in the .mli,
-       which [recent_completed_turns] below already keeps. *)
-    List.rev !result
+  with_rings_lock (fun () ->
+    match Hashtbl.find_opt rings keeper_name with
+    | None -> []
+    | Some ring ->
+      let n = min limit (min ring.count ring_capacity) in
+      let result = ref [] in
+      for i = 0 to n - 1 do
+        let idx = (ring.pos - 1 - i + ring_capacity) mod ring_capacity in
+        match ring.buf.(idx) with
+        | Some r -> result := r :: !result
+        | None -> ()
+      done;
+      (* [i = 0] is the newest slot and [::] prepends, so the accumulator ends up
+         oldest-first. Reverse it to honour the newest-first contract in the .mli,
+         which [recent_completed_turns] below already keeps. *)
+      List.rev !result)
 ;;
 
 let recent_transitions_json ~keeper_name ~limit : Yojson.Safe.t =
@@ -396,10 +396,11 @@ let recent_transitions_json ~keeper_name ~limit : Yojson.Safe.t =
 ;;
 
 let record_completed_turn ~keeper_name (rec_ : completed_turn_record) =
-  let ring = get_or_create_completed_turn_ring keeper_name in
-  ring.buf.(ring.pos) <- Some rec_;
-  ring.pos <- (ring.pos + 1) mod ring_capacity;
-  ring.count <- ring.count + 1;
+  with_rings_lock (fun () ->
+    let ring = get_or_create_completed_turn_ring_locked keeper_name in
+    ring.buf.(ring.pos) <- Some rec_;
+    ring.pos <- (ring.pos + 1) mod ring_capacity;
+    ring.count <- ring.count + 1);
   match sink_path () with
   | None -> append_completed_turn_to_default_store ~keeper_name rec_
   | Some path ->
@@ -460,26 +461,31 @@ let recent_completed_turns_from_store ~keeper_name ~limit =
 ;;
 
 let recent_completed_turns ~keeper_name ~limit : completed_turn_record list =
-  match Hashtbl.find_opt completed_turn_rings keeper_name with
-  | None -> recent_completed_turns_from_store ~keeper_name ~limit
-  | Some ring ->
-    let n = min limit (min ring.count ring_capacity) in
-    let result = ref [] in
-    for i = 0 to n - 1 do
-      let idx = (ring.pos - 1 - i + ring_capacity) mod ring_capacity in
-      match ring.buf.(idx) with
-      | Some r -> result := !result @ [ r ]
-      | None -> ()
-    done;
-    (match !result with
-     | [] -> recent_completed_turns_from_store ~keeper_name ~limit
-     | turns -> turns)
+  let cached =
+    with_rings_lock (fun () ->
+      match Hashtbl.find_opt completed_turn_rings keeper_name with
+      | None -> []
+      | Some ring ->
+        let n = min limit (min ring.count ring_capacity) in
+        let result = ref [] in
+        for i = 0 to n - 1 do
+          let idx = (ring.pos - 1 - i + ring_capacity) mod ring_capacity in
+          match ring.buf.(idx) with
+          | Some r -> result := r :: !result
+          | None -> ()
+        done;
+        List.rev !result)
+  in
+  match cached with
+  | [] -> recent_completed_turns_from_store ~keeper_name ~limit
+  | turns -> turns
 ;;
 
 module For_testing = struct
   let reset_state () =
-    Hashtbl.clear rings;
-    Hashtbl.clear completed_turn_rings;
+    with_rings_lock (fun () ->
+      Hashtbl.clear rings;
+      Hashtbl.clear completed_turn_rings);
     with_append_queue_lock (fun () -> Stdlib.Queue.clear append_queue);
     Atomic.set async_append_active false;
     Atomic.set append_queue_dropped 0;

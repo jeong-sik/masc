@@ -254,11 +254,15 @@ let with_statement db ~operation sql f =
   match prepare db ~operation sql with
   | Error _ as error -> error
   | Ok stmt ->
-    let result =
-      try f stmt with
-      | Sqlite3.Error detail -> Error (Store_unavailable (operation ^ ": " ^ detail))
-    in
-    finalize db stmt result
+    (match f stmt with
+     | result -> finalize db stmt result
+     | exception Sqlite3.Error detail ->
+       finalize db stmt (Error (Store_unavailable (operation ^ ": " ^ detail)))
+     | exception exn ->
+       let backtrace = Printexc.get_raw_backtrace () in
+       (try ignore (Sqlite3.finalize stmt : Sqlite3.Rc.t) with
+        | Sqlite3.Error _ -> ());
+       Printexc.raise_with_backtrace exn backtrace)
 ;;
 
 let bind db stmt ~operation index data =

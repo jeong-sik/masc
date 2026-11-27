@@ -73,25 +73,12 @@ val refused_for_binding_rest : failure -> bool
     [false]. *)
 
 val refused_for_input_size : failure -> bool
-(** [true] only when the client refused because the prompt exceeded the model's
-    context window: Claude [Context_window_exceeded], Codex
-    [Context_window_exceeded], Antigravity [Context_window_exceeded], or an
-    ACP context-overflow RPC error. *)
-
-type input_size_refusal =
-  | Input_over_limit of
-      { estimated_tokens : int
-      ; limit_tokens : int
-      }
-
-val check_input_size
-  :  estimated_tokens:int
-  -> overflow:Runtime.overflow_behavior
-  -> (unit, input_size_refusal) result
-(** Guard caller-bounded runtimes before calling a provider that truncates
-    silently on overflow. Returns [Error (Input_over_limit _)] when
-    [overflow] is [Runtime.Caller_bounded { max_input_tokens }] and
-    [estimated_tokens > max_input_tokens]. *)
+(** [true] only when the client refused for the prompt's size: the prompt
+    exceeded the model's context window (Claude [Context_window_exceeded],
+    Codex [Context_window_exceeded], Antigravity [Context_window_exceeded], or
+    an ACP context-overflow RPC error), or the client refused before sending a
+    message longer than its host keeps whole (Antigravity or ACP
+    [Message_over_client_limit], #41906). *)
 
 type refused_slot =
   { slot : string

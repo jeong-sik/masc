@@ -212,6 +212,28 @@ type compaction_point_channel =
           [AGY_CLI_AUTO_COMPACT_OVERRIDE] reaches its interactive client but
           not [agy acp]. *)
 
+(** How much of one prompt message a host keeps whole. *)
+type message_limit =
+  | Keeps_messages_through of { max_bytes : int }
+      (** The host keeps a message of [max_bytes] bytes or fewer whole and
+          cuts a larger one without refusing it. *)
+  | Message_limit_not_measured
+      (** No cut was measured. MASC sends the message as it is. *)
+
+type message_over_limit =
+  { message_bytes : int
+  ; max_bytes : int
+  }
+
+val antigravity_message_max_bytes : int
+(** 191,579: the largest message, in bytes, that agy keeps whole through
+    [agy acp] or the CLI. agy keeps the first 192,000 bytes of the user step
+    it builds around one message (15 bytes before it, up to 405 after it on
+    the CLI) and replaces the rest with a notice, with no refusal. Measured on
+    agy's stored steps: 192,161 bytes long (192,000 and a 161-byte notice) on
+    2026-11-25 over [agy acp], and 1,492 of 1,557 Keeper CLI steps cut at byte
+    192,000 on 2026-11-27 (#41906). *)
+
 type driver_profile =
   { driver : driver
   ; default_command : string
@@ -235,9 +257,21 @@ type driver_profile =
       (** ACP config option id that carries reasoning effort. [None] when the
           client takes effort only as a process setting ([muse acp]). *)
   ; compaction_point : compaction_point_channel
+  ; message_limit : message_limit
+      (** [Keeps_messages_through antigravity_message_max_bytes] for
+          Antigravity, [Message_limit_not_measured] for the others. *)
   }
 
 val profile_of_driver : driver -> driver_profile
+
+val check_message_bytes
+  :  driver
+  -> message_bytes:int
+  -> (unit, message_over_limit) result
+(** [Error] when the driver's {!message_limit} is
+    [Keeps_messages_through { max_bytes }] and [message_bytes > max_bytes]:
+    the host would cut the message. The Antigravity CLI driver
+    ([Runtime_antigravity]) calls it with [Antigravity] too. *)
 
 val bridge_server_name : driver -> owner:string -> string
 (** The name the bridge of [owner] gives its MCP server in the host's session:
@@ -689,6 +723,10 @@ type error =
           limit, with [end_turn] and no message; the cause is only in its
           record. *)
   | Client_closed
+  | Message_over_client_limit of message_over_limit
+      (** {!validate_prompt_blocks} refused the message before it was sent:
+          the host would cut it ({!check_message_bytes}). Nothing reached the
+          host, and the account is not at fault. *)
 
 val error_to_string : error -> string
 
@@ -721,14 +759,20 @@ val image_input_unsupported_detail : driver -> string
 (** Canonical refusal detail when an ACP server advertises
     [agentCapabilities.promptCapabilities.image = false]. *)
 
+val prompt_text_bytes : prompt_block list -> int
+(** The bytes of the [Text_block]s: the size {!validate_prompt_blocks} checks
+    against the driver's {!message_limit}. *)
+
 val validate_prompt_blocks
   :  driver:driver
   -> capabilities:agent_capabilities
   -> prompt_block list
   -> (unit, error) result
-(** Gate [Image_block] emission on [capabilities.image_prompt] and validate
-    image media types and base64 payloads via
-    {!Runtime_official_client_tool.validate_image_inputs} before sending JSON-RPC. *)
+(** Before sending JSON-RPC: refuse with {!Message_over_client_limit} when
+    the bytes of the [Text_block]s are over the driver's {!message_limit}.
+    Then gate [Image_block] emission on [capabilities.image_prompt] and
+    validate image media types and base64 payloads via
+    {!Runtime_official_client_tool.validate_image_inputs}. *)
 
 (** {1 Persistent client handle} *)
 

@@ -462,6 +462,8 @@ let samples =
   ; at antigravity "Unhandled_exception" (Antigravity.Unhandled_exception "")
   ; at antigravity "Child_fd_ceiling_exceeded" (Antigravity.Child_fd_ceiling_exceeded { count = None; ceiling = 0 })
   ; at antigravity "Timeout" (Antigravity.Timeout (Runtime_timeout_payload.of_seconds 0.))
+  ; at antigravity "Message_over_client_limit"
+      (Antigravity.Message_over_client_limit { message_bytes = 1; max_bytes = 0 })
   ; plain "the ask's own fold" "a declared slot with no visit" (Visit.Unanswered Not_visited)
   ; plain "Exact_lane_walk.walk" "an HTTP slot passed as Held" (Visit.Unanswered (Http Held))
   ; plain "Exact_lane_walk.walk" "a CLI slot passed as Seats_full" (Visit.Unanswered (Cli Cli_seats_full))

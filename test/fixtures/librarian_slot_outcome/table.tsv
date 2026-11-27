@@ -180,3 +180,4 @@ runtime_antigravity.mli	error	Process_exited	-	Silent Lost	the client died
 runtime_antigravity.mli	error	Unhandled_exception	-	Silent Lost	a host-side exception
 runtime_antigravity.mli	error	Child_fd_ceiling_exceeded	-	Silent Unavailable	masc failed the child for file-table safety; the workspace needs an operator
 runtime_antigravity.mli	error	Timeout	-	Silent Lost	the client went silent
+runtime_antigravity.mli	error	Message_over_client_limit	-	Refused (Sized Input_too_large)	counted before the CLI started: agy would cut a message this long

@@ -1215,25 +1215,7 @@ let test_partition_cli_slots_preserves_refused_slots_and_muse_output_schema () =
      |> Option.map Yojson.Safe.to_string)
 ;;
 
-let test_input_size_guard_and_refusal_classification () =
-  (match
-     Cli_oneshot.check_input_size
-       ~estimated_tokens:50_000
-       ~overflow:(Runtime.Caller_bounded { max_input_tokens = 32_768 })
-   with
-   | Error
-       (Cli_oneshot.Input_over_limit
-          { estimated_tokens; limit_tokens }) ->
-     check int "estimated_tokens" 50_000 estimated_tokens;
-     check int "limit_tokens" 32_768 limit_tokens
-   | Ok () -> fail "oversize caller-bounded input must be refused");
-  (match
-     Cli_oneshot.check_input_size
-       ~estimated_tokens:16_000
-       ~overflow:(Runtime.Caller_bounded { max_input_tokens = 32_768 })
-   with
-   | Ok () -> ()
-   | Error _ -> fail "in-bounds caller-bounded input must be accepted");
+let test_input_size_refusal_classification () =
   let claude_ctx_failure =
     Cli_oneshot.Execution_failed
       { runtime_id = "claude_code.sonnet"
@@ -1277,6 +1259,70 @@ let test_input_size_guard_and_refusal_classification () =
     "Invalid_json_output is not refused_for_input_size"
     false
     (Cli_oneshot.refused_for_input_size non_size_failure)
+;;
+
+(* #41906: agy keeps the first 192,000 bytes of the step around one message
+   and drops the rest without refusing. Both Antigravity drivers refuse such a
+   message before sending it. The refusal is about the message, not the
+   account: the walk goes on to the next slot, the slot is not rested, and
+   the size is the lane's to read. *)
+let test_a_message_the_client_would_cut_moves_the_walk_on_without_a_rest () =
+  let over : Runtime_acp_client.message_over_limit =
+    { message_bytes = Runtime_acp_client.antigravity_message_max_bytes + 1
+    ; max_bytes = Runtime_acp_client.antigravity_message_max_bytes
+    }
+  in
+  let agy_over = Masc.Fusion_official_client.Antigravity_failure
+      (Runtime_antigravity.Message_over_client_limit over)
+  in
+  let acp_over = Masc.Fusion_official_client.Acp_failure
+      (Runtime_acp_client.Message_over_client_limit over)
+  in
+  List.iter
+    (fun (label, cause) ->
+       let failure = Cli_oneshot.Execution_failed { runtime_id = "agy.gemini"; cause } in
+       check bool (label ^ " does not rest the slot") false
+         (Cli_oneshot.refused_for_binding_rest failure);
+       check bool (label ^ " is a refusal for the prompt's size") true
+         (Cli_oneshot.refused_for_input_size failure))
+    [ "CLI", agy_over; "ACP", acp_over ];
+  let now = Time_compat.now () in
+  check bool "the CLI refusal leaves no standing" true
+    (Option.is_none
+       (Masc.Fusion_official_client.For_testing.antigravity_standing_of_error ~now
+          (Runtime_antigravity.Message_over_client_limit over)));
+  check bool "the ACP refusal leaves no standing" true
+    (Option.is_none
+       (Masc.Fusion_official_client.For_testing.acp_standing_of_error ~now
+          (Runtime_acp_client.Message_over_client_limit over)));
+  with_runtime (fun () ->
+    let calls = ref 0 in
+    let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
+      incr calls;
+      Error agy_over
+    in
+    match
+      Cli_oneshot.walk ~validate:Result.ok ~on_failure:ignore
+        ~runner
+        ~base_dir:"/tmp"
+        ~cli_slots:[ official_client_runtime; "nope.not-configured" ]
+        ~system_prompt:""
+        ~requirement
+        ~prompt:"Judge this."
+        ()
+    with
+    | Ok _ -> fail "a refused message produced an answer"
+    | Error
+        [ Cli_oneshot.Execution_failed { runtime_id; cause }
+        ; Cli_oneshot.Unknown_runtime { runtime_id = next_id }
+        ] ->
+      check string "the refusing slot" official_client_runtime runtime_id;
+      check bool "the refusal is kept" true (cause = agy_over);
+      check string "the walk reached the next slot" "nope.not-configured" next_id;
+      check int "the runner ran once" 1 !calls
+    | Error failures ->
+      failf "expected the refusal then the next slot, got %s"
+        (String.concat "; " (List.map Cli_oneshot.failure_to_string failures)))
 ;;
 
 let test_codex_session_budget_and_acp_antigravity_quota_refusal () =
@@ -1387,9 +1433,13 @@ let () =
             `Quick
             test_partition_cli_slots_preserves_refused_slots_and_muse_output_schema
         ; test_case
-            "input-size guard and refusal classification"
+            "input-size refusal classification"
             `Quick
-            test_input_size_guard_and_refusal_classification
+            test_input_size_refusal_classification
+        ; test_case
+            "a message the client would cut moves the walk on without a rest"
+            `Quick
+            test_a_message_the_client_would_cut_moves_the_walk_on_without_a_rest
         ; test_case
             "a lane whose only slot is held calls no runner"
             `Quick

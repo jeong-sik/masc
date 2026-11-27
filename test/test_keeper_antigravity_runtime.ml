@@ -426,11 +426,15 @@ let test_keeper_projects_mcp_tool_and_settles () =
         ; metadata = []
         }
       in
+      (* Seventy messages, the whole range a trace with no completed turn
+         carries. Each is 2 KiB so the framed prompt (about 160 KB) stays under
+         [Runtime_acp_client.antigravity_message_max_bytes]: a larger one is
+         refused before the CLI starts (#41906). *)
       let large_history =
         List.init 70 (fun index ->
           let marker = Printf.sprintf "history-%02d" index in
           { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = User
-          ; content = [ Text (marker ^ ":" ^ String.make 4096 'x') ]
+          ; content = [ Text (marker ^ ":" ^ String.make 2048 'x') ]
           ; name = None
           ; tool_call_id = None
           ; metadata = []
@@ -2381,6 +2385,43 @@ let test_child_fd_ceiling_reports_and_recovers () =
     true
 ;;
 
+(* #41906: agy keeps the first 192,000 bytes of the step it builds around one
+   message and drops the rest without refusing. [Runtime_antigravity] refuses
+   such a prompt before the CLI starts ([test_runtime_antigravity]). The Keeper
+   turn reads the refusal as this binding's admission: the lane moves to the
+   next candidate, nothing was dispatched, no account rests, and no shorter
+   retry goes to the same candidate. *)
+let test_a_message_agy_would_cut_rotates_the_lane_without_rest () =
+  let module Route = Keeper_runtime_failure_route in
+  let max_bytes = Runtime_acp_client.antigravity_message_max_bytes in
+  let over : Runtime_acp_client.message_over_limit =
+    { message_bytes = max_bytes + 1; max_bytes }
+  in
+  let error = Runtime_antigravity.Message_over_client_limit over in
+  let core = Keeper_antigravity_runtime.For_testing.runtime_error_to_core_error error in
+  (match core with
+   | Agent_core.Error.Api
+       (Llm_provider.Retry.InvalidRequest { reason = Llm_provider.Retry.Attempt_rejected; message }) ->
+     check string "the message names the refusal" (Runtime_antigravity.error_to_string error) message
+   | other -> fail ("expected Attempt_rejected, got " ^ Agent_core.Error.to_string other));
+  check bool "the lane walk moves to the next candidate" true
+    (Keeper_turn_driver.For_testing.lane_should_retry
+       ~is_last:false ~allow_retry:true ~allow_accept_no_progress_retry:true core);
+  check string "the walk records no dispatch" "rejected_before_dispatch"
+    (Keeper_attempt_dispatch.to_string
+       (Keeper_turn_driver.For_testing.official_client_dispatch
+          ~provider_config_transform:None (Error core)));
+  check bool "the route rotates for this binding's admission" true
+    (Route.route_of_error ~boundary:Route.Agent_core_execution core
+     = Route.Rotate_now { rotate = Route.Admission });
+  check bool "no hard quota" false (Route.core_error_is_hard_quota core);
+  check bool "not a size refusal: no shorter retry on the same candidate" false
+    (Keeper_turn_driver_try_provider.is_size_refusal core);
+  check bool "the claim is released before dispatch" true
+    (Keeper_antigravity_runtime.For_testing.recovery_failure_of_runtime_error error
+     = Keeper_official_client_session_store.Pre_dispatch_failed)
+;;
+
 (* A run that ended on a refusal is the provider's reported failure with its
    own name, and it recovers like the empty SUCCESS it sits beside. *)
 let test_actions_denied_reports_and_recovers () =
@@ -3881,6 +3922,10 @@ let () =
             "child fd ceiling reports and recovers without blind retry"
             `Quick
             test_child_fd_ceiling_reports_and_recovers
+          ; test_case
+            "a message agy would cut rotates the lane without rest"
+            `Quick
+            test_a_message_agy_would_cut_rotates_the_lane_without_rest
           ; test_case
             "a refusal-ended run reports and recovers as provider rejected"
             `Quick

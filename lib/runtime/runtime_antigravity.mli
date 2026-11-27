@@ -267,6 +267,11 @@ type error =
           sample itself hit EMFILE/ENFILE on a live child: system pressure,
           refused closed rather than risk ENFILE. *)
   | Timeout of Runtime_timeout_payload.t
+  | Message_over_client_limit of Runtime_acp_client.message_over_limit
+      (** {!validate_turn} refused the prompt before the CLI started: agy
+          would cut a message this long
+          ({!Runtime_acp_client.check_message_bytes}). Nothing was sent, and
+          the account is not at fault. *)
 
 val error_to_string : error -> string
 
@@ -287,6 +292,9 @@ val validate_turn :
   config ->
   prompt:string ->
   (unit, error) result
+(** The checks {!run_turn} makes before it starts the CLI: [Invalid_config]
+    for a bad configuration, then {!Message_over_client_limit} for a [prompt]
+    longer than {!Runtime_acp_client.antigravity_message_max_bytes}. *)
 
 val context_submission_to_json : Runtime_official_client_write.t -> Yojson.Safe.t
 (** Content-free proof that the prompt was written to the client's stdin and

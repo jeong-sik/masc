@@ -560,7 +560,8 @@ let official_failure_can_advance : Fusion_official_client.failure -> bool = func
       | Runtime_acp_client.Protocol_error _
       | Runtime_acp_client.Timeout _
       | Runtime_acp_client.Process_exited _
-      | Runtime_acp_client.Client_closed ) -> true
+      | Runtime_acp_client.Client_closed
+      | Runtime_acp_client.Message_over_client_limit _ ) -> true
   | Acp_failure
       ( Runtime_acp_client.Rpc_error { refusal; _ }
       | Runtime_acp_client.Host_turn_failed { refusal; _ } ) -> Option.is_some refusal
@@ -648,7 +649,8 @@ let official_failure_effect : Fusion_official_client.failure -> Tool_result.fail
   | Acp_failure
       ( Runtime_acp_client.Invalid_config _
       | Runtime_acp_client.Spawn_refused _
-      | Runtime_acp_client.Preparation_failed _ ) -> Proven_pre_effect
+      | Runtime_acp_client.Preparation_failed _
+      | Runtime_acp_client.Message_over_client_limit _ ) -> Proven_pre_effect
   | Missing_reply | Antigravity_failure _
   | Acp_failure
       ( Runtime_acp_client.Protocol_error _
@@ -1091,7 +1093,8 @@ let execution_of_vision_outcome = function
           | Runtime_acp_client.Preparation_failed _
           | Runtime_acp_client.Protocol_error _ | Runtime_acp_client.Rpc_error _
           | Runtime_acp_client.Host_turn_failed _ | Runtime_acp_client.Process_exited _
-          | Runtime_acp_client.Client_closed )
+          | Runtime_acp_client.Client_closed
+          | Runtime_acp_client.Message_over_client_limit _ )
       | Codex_failure
           ( Invalid_config _ | Spawn_refused _ | Reasoning_effort_admission_failed _
           | Account_read_failed _

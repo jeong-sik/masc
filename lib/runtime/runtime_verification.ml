@@ -699,7 +699,8 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ?fs ~cwd ~cwd_path ~timeout_s ~ac
                  | Runtime_acp_client.Rpc_error _
                  | Runtime_acp_client.Host_turn_failed _
                  | Runtime_acp_client.Process_exited _
-                 | Runtime_acp_client.Client_closed ) as err ->
+                 | Runtime_acp_client.Client_closed
+                 | Runtime_acp_client.Message_over_client_limit _ ) as err ->
                  Error (Provider_rejected (Runtime_acp_client.error_to_string err))
              in
              match Runtime_acp_client.create_isolated_workspace ~sw:acp_sw ~prefix:"verify" () with
@@ -867,7 +868,8 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ?fs ~cwd ~cwd_path ~timeout_s ~ac
               | Runtime_antigravity.Actions_denied _
               | Runtime_antigravity.Process_exited _
               | Runtime_antigravity.Child_fd_ceiling_exceeded _
-              | Runtime_antigravity.Unhandled_exception _ ) as err)) ->
+              | Runtime_antigravity.Unhandled_exception _
+              | Runtime_antigravity.Message_over_client_limit _ ) as err)) ->
            Error (Provider_rejected (Runtime_antigravity.error_to_string err))))
       | Runtime_execution.Agent_core sealed ->
         (match authorize_api ~account_request sealed with

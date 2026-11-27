@@ -4537,6 +4537,84 @@ let test_acp_v1_image_negotiation_and_validation () =
           [ Runtime_acp_client.Image_block { mime_type = "image/png"; base64_data = "!!!not-base64!!!" } ]))
 ;;
 
+(* #41906: agy keeps the first 192,000 bytes of the step it builds around one
+   message and drops the rest without refusing. The Antigravity driver refuses
+   such a message before [session/prompt]; the drivers whose cut nobody
+   measured send it. The Keeper turn reads the refusal as this binding's
+   admission: the lane moves to the next candidate, nothing was dispatched,
+   no account rests, and the claim is released before dispatch. *)
+let test_a_message_agy_would_cut_is_refused_before_prompt () =
+  let max_bytes = Runtime_acp_client.antigravity_message_max_bytes in
+  let caps : Runtime_acp_client.agent_capabilities =
+    { load_session = false
+    ; resume_session = false
+    ; close_session = false
+    ; additional_directories = false
+    ; image_prompt = true
+    ; embedded_context = false
+    ; mcp_http = false
+    ; antigravity_system_prompt_append = true
+    ; antigravity_tier = None
+    }
+  in
+  let validate driver blocks =
+    Runtime_acp_client.validate_prompt_blocks ~driver ~capabilities:caps blocks
+  in
+  let text n = Runtime_acp_client.Text_block (String.make n 'x') in
+  (match (Runtime_acp_client.profile_of_driver Runtime_acp_client.Antigravity).message_limit with
+   | Runtime_acp_client.Keeps_messages_through { max_bytes = limit } ->
+     check int "Antigravity keeps the measured limit" max_bytes limit
+   | Runtime_acp_client.Message_limit_not_measured ->
+     fail "Antigravity must declare its measured message limit");
+  List.iter
+    (fun driver ->
+       check bool
+         (Runtime_acp_client.driver_to_string driver ^ " declares no measured limit")
+         true
+         ((Runtime_acp_client.profile_of_driver driver).message_limit
+          = Runtime_acp_client.Message_limit_not_measured))
+    [ Runtime_acp_client.Kimi_code; Runtime_acp_client.Mistral_vibe; Runtime_acp_client.Muse_code ];
+  check bool "a message at the limit is sent" true
+    (Result.is_ok (validate Runtime_acp_client.Antigravity [ text max_bytes ]));
+  (match validate Runtime_acp_client.Antigravity [ text (max_bytes + 1) ] with
+   | Error (Runtime_acp_client.Message_over_client_limit { message_bytes; max_bytes = limit }) ->
+     check int "the message's bytes" (max_bytes + 1) message_bytes;
+     check int "the limit" max_bytes limit
+   | Error err -> failf "expected Message_over_client_limit, got %s" (Runtime_acp_client.error_to_string err)
+   | Ok () -> fail "a message agy would cut passed");
+  check bool "text blocks of one prompt count together" true
+    (match validate Runtime_acp_client.Antigravity [ text max_bytes; text 1 ] with
+     | Error (Runtime_acp_client.Message_over_client_limit _) -> true
+     | Error _ | Ok () -> false);
+  check bool "a driver with no measured cut sends the same message" true
+    (Result.is_ok (validate Runtime_acp_client.Kimi_code [ text (max_bytes + 1) ]));
+  let over : Runtime_acp_client.message_over_limit =
+    { message_bytes = max_bytes + 1; max_bytes }
+  in
+  let err = Runtime_acp_client.Message_over_client_limit over in
+  let core = Keeper_acp_runtime.For_testing.acp_error_to_core_error err in
+  (match core with
+   | Agent_core.Error.Api
+       (Llm_provider.Retry.InvalidRequest { reason = Llm_provider.Retry.Attempt_rejected; _ }) -> ()
+   | other -> fail ("expected Attempt_rejected, got " ^ Agent_core.Error.to_string other));
+  check bool "the lane walk moves to the next candidate" true
+    (Keeper_turn_driver.For_testing.lane_should_retry
+       ~is_last:false ~allow_retry:true ~allow_accept_no_progress_retry:true core);
+  check string "the walk records no dispatch" "rejected_before_dispatch"
+    (Keeper_attempt_dispatch.to_string
+       (Keeper_turn_driver.For_testing.official_client_dispatch
+          ~provider_config_transform:None (Error core)));
+  check bool "the route rotates for this binding's admission" true
+    (Keeper_runtime_failure_route.route_of_error
+       ~boundary:Keeper_runtime_failure_route.Agent_core_execution core
+     = Keeper_runtime_failure_route.Rotate_now
+         { rotate = Keeper_runtime_failure_route.Admission });
+  check bool "no hard quota" false (Keeper_runtime_failure_route.core_error_is_hard_quota core);
+  check bool "the claim is released before dispatch" true
+    (Keeper_acp_runtime.For_testing.recovery_failure_of_acp_error err
+     = Keeper_official_client_session_store.Pre_dispatch_failed)
+;;
+
 let test_antigravity_acp_mcp_permission_and_call_mcp_tool () =
   let mcp_only =
     Runtime_acp_client.Allow_masc_mcp_only
@@ -7224,6 +7302,8 @@ let () =
             test_host_recorded_failure_is_a_provider_error
         ; test_case "ACP v1 image negotiation & pre-RPC validation" `Quick
             test_acp_v1_image_negotiation_and_validation
+        ; test_case "a message agy would cut is refused before session/prompt" `Quick
+            test_a_message_agy_would_cut_is_refused_before_prompt
         ] )
     ; ( "mcp_bridge"
       , [ test_case "pinned tools advertised before turn_slot is bound" `Quick

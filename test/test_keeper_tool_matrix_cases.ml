@@ -194,13 +194,9 @@ let make_fixture
   ignore (Masc.Keeper_registry.For_testing.register ~base_path "tool-matrix" meta);
   (* The Memory tools write through the Keeper's Memory writer. *)
   Masc_test_deps.ensure_memory_writer ~sw ~config meta.name;
-  (* The matrix runs the full AGENT_CORE handler path, so it must also hand
-     the bundle what a real turn hands it: a turn-context cell. Without one
-     the call arrives with [turn_ref = None] and shared-draft editing --
-     the only matrix tool that requires its owning Keeper turn -- fails the
-     case as an unclassified [Runtime_failure] instead of exercising the
-     handler. The cell mirrors [test_keeper_artifact_draft_bundle]: any
-     [keeper_turn_id] works, what matters is that one exists. *)
+  (* The matrix runs the full AGENT_CORE handler path, so it also hands the
+     bundle what a real turn hands it: a turn-context cell. Any
+     [keeper_turn_id] works; what matters is that one exists. *)
   let turn_ctx_cell = Masc.Keeper_tool_call_log.create_turn_ctx_cell () in
   Masc.Keeper_tool_call_log.set_turn_context ~cell:turn_ctx_cell
     ~agent_name:meta.name ~turn:0 ~keeper_turn_id:1 ();

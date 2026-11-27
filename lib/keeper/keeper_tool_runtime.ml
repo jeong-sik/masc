@@ -21,7 +21,6 @@ type context =
       Keeper_publication_recovery_availability.turn_context
   ; ctx_work : Keeper_types.working_context
   ; turn_sandbox_factory : Keeper_sandbox_factory.t option
-  ; artifact_draft_scope : Keeper_artifact_draft_scope.t option
   ; sw : Eio.Switch.t option
   ; clock : float Eio.Time.clock_ty Eio.Resource.t option
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option
@@ -350,11 +349,7 @@ let handle_in_process ctx descriptor args =
              ~descriptors:(Keeper_tool_descriptor.all_descriptors ())
              ~draft_context:None ~config:ctx.config ~args)
   | Tool_artifact_draft ->
-    Some (match ctx.artifact_draft_scope, ctx.turn_ref with
-      | Some scope, Some turn_ref -> Keeper_artifact_draft.handle ~scope ~base_path:ctx.config.base_path
-          ~keeper:ctx.meta.name ~turn_ref ~args ()
-      | _ -> Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure
-          ~effect_disposition:Tool_result.Proven_pre_effect "Shared draft editing requires its owning Keeper turn.")
+    Some (Keeper_artifact_draft.handle ~base_path:ctx.config.base_path ~keeper:ctx.meta.name ~args ())
   | Tool_artifact_publish ->
     Some (Keeper_artifact_publish.handle ~base_path:ctx.config.base_path
       ~author:ctx.meta.name ~args)

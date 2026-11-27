@@ -27,7 +27,7 @@ let scenario () =
         mcp_session_id = None; continuation_channel = None; gate_context = None;
         turn_ref = Some frozen; gate_grant = None; tool_use_id = None; trace_id = None;
         source_context = None; owned_job_replay = None; execution_scope = None; result_projection = None;
-        artifact_draft_scope = None; capability_authority = Runtime.Compatibility_meta }
+        capability_authority = Runtime.Compatibility_meta }
     in
     let descriptor = match Runtime.descriptor_for_internal "keeper_surface_post" with
       | Some descriptor -> descriptor | None -> fail "surface post descriptor missing" in

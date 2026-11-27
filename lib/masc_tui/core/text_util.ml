@@ -4,6 +4,10 @@ let clamp_index len idx =
   else if idx >= len then len - 1
   else idx
 
+let[@inline] lower_ascii_code c =
+  let code = Char.code c in
+  if code >= 65 && code <= 90 then code + 32 else code
+
 let contains_ci ~needle haystack =
   let n_len = String.length needle in
   if n_len = 0 then true
@@ -11,12 +15,22 @@ let contains_ci ~needle haystack =
     let h_len = String.length haystack in
     if n_len > h_len then false
     else
-      let n_low = String.lowercase_ascii needle in
-      let h_low = String.lowercase_ascii haystack in
       let limit = h_len - n_len in
+      let first_n = lower_ascii_code (String.unsafe_get needle 0) in
+      let rec match_at i j =
+        if j >= n_len then true
+        else if
+          lower_ascii_code (String.unsafe_get haystack (i + j))
+          = lower_ascii_code (String.unsafe_get needle j)
+        then match_at i (j + 1)
+        else false
+      in
       let rec scan i =
         if i > limit then false
-        else if String.equal (String.sub h_low i n_len) n_low then true
+        else if
+          lower_ascii_code (String.unsafe_get haystack i) = first_n
+          && match_at i 1
+        then true
         else scan (i + 1)
       in
       scan 0
@@ -53,29 +67,43 @@ let sanitize_single_line s =
   let len = String.length s in
   if len = 0 then ""
   else
-    let buf = Buffer.create len in
-    let prev_space = ref false in
-    let i = ref 0 in
-    while !i < len do
-      let c = s.[!i] in
-      let code = Char.code c in
-      if code = 0x1B then i := skip_ansi_escape s len !i
-      else begin
-        if Char.equal c '\n' || Char.equal c '\r' || Char.equal c '\t' then begin
-          if not !prev_space then begin
-            Buffer.add_char buf ' ';
-            prev_space := true
+    let rec is_clean i prev_space =
+      if i >= len then true
+      else
+        let c = String.unsafe_get s i in
+        let code = Char.code c in
+        if code < 32 || code = 0x7F then false
+        else if Char.equal c ' ' then
+          if prev_space || i = 0 || i = len - 1 then false
+          else is_clean (i + 1) true
+        else is_clean (i + 1) false
+    in
+    if is_clean 0 false then s
+    else begin
+      let buf = Buffer.create len in
+      let prev_space = ref false in
+      let i = ref 0 in
+      while !i < len do
+        let c = String.unsafe_get s !i in
+        let code = Char.code c in
+        if code = 0x1B then i := skip_ansi_escape s len !i
+        else begin
+          if Char.equal c '\n' || Char.equal c '\r' || Char.equal c '\t' then begin
+            if not !prev_space then begin
+              Buffer.add_char buf ' ';
+              prev_space := true
+            end
           end
+          else if code >= 32 && code <> 0x7F then begin
+            let is_sp = Char.equal c ' ' in
+            if not (is_sp && !prev_space) then Buffer.add_char buf c;
+            prev_space := is_sp
+          end;
+          incr i
         end
-        else if code >= 32 && code <> 0x7F then begin
-          let is_sp = Char.equal c ' ' in
-          if not (is_sp && !prev_space) then Buffer.add_char buf c;
-          prev_space := is_sp
-        end;
-        incr i
-      end
-    done;
-    String.trim (Buffer.contents buf)
+      done;
+      String.trim (Buffer.contents buf)
+    end
 
 let short_hash ?(len = 8) s =
   let trimmed = String.trim s in

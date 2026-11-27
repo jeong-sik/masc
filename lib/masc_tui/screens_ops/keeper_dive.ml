@@ -868,6 +868,7 @@ module History_rows = struct
     layout : history_layout;
     messages : Wire_fleet.chat_message list;
     rows : transcript_row list;
+    rows_arr : transcript_row array;
     mutable last_used : int;
   }
 
@@ -911,23 +912,48 @@ module History_rows = struct
       evictions = t.evictions;
     }
 
-  (* Compared with [=]: a field added to [history_layout] is then compared
-     too, where an equality written by hand could leave it out. *)
-  let rows t ~layout ~messages =
+  (* Physical equality short-circuits unchanged lists/maps in O(1) on every
+     frame; structural [=] fallback guarantees value equality when inputs are
+     rebuilt across frames. *)
+  let equal_history_layout (a : history_layout) (b : history_layout) =
+    a == b
+    || (Int.equal a.width b.width
+        && Int.equal a.tz_offset_sec b.tz_offset_sec
+        && Int.equal a.retained_image_height b.retained_image_height
+        && Theme.equal_preset a.theme_preset b.theme_preset
+        && a.lang = b.lang
+        && a.origin_mode = b.origin_mode
+        && a.tools_mode = b.tools_mode
+        && a.thinking_mode = b.thinking_mode
+        && (a.keeper_name == b.keeper_name
+            || String.equal a.keeper_name b.keeper_name)
+        && (a.runtimes == b.runtimes || a.runtimes = b.runtimes)
+        && (a.cut_replies == b.cut_replies || a.cut_replies = b.cut_replies)
+        && (a.tool_result == b.tool_result || a.tool_result = b.tool_result)
+        && (a.tool_results == b.tool_results || a.tool_results = b.tool_results)
+        && (a.tool_result_inflight == b.tool_result_inflight
+            || a.tool_result_inflight = b.tool_result_inflight)
+        && (a.tool_result_page_errors == b.tool_result_page_errors
+            || a.tool_result_page_errors = b.tool_result_page_errors))
+
+  let lookup_entry t ~layout ~messages =
     t.tick <- t.tick + 1;
     match
       List.find_opt
-        (fun e -> e.layout = layout && e.messages = messages)
+        (fun e ->
+          equal_history_layout e.layout layout
+          && (e.messages == messages || e.messages = messages))
         t.entries
     with
     | Some e ->
         e.last_used <- t.tick;
         t.hits <- t.hits + 1;
-        e.rows
+        e
     | None ->
         t.misses <- t.misses + 1;
         let rows = build_history_rows ~layout messages in
-        let fresh = { layout; messages; rows; last_used = t.tick } in
+        let rows_arr = Array.of_list rows in
+        let fresh = { layout; messages; rows; rows_arr; last_used = t.tick } in
         (* A keeper has one slot. Its rows change with every message, so a
            miss replaces what was kept for it. A keeper that was not kept
            takes a slot, and drops the keeper drawn longest ago when every
@@ -951,7 +977,10 @@ module History_rows = struct
             fresh :: List.filter (fun e -> e.last_used <> oldest) others;
           t.evictions <- t.evictions + 1
         end;
-        rows
+        fresh
+
+  let rows t ~layout ~messages = (lookup_entry t ~layout ~messages).rows
+  let rows_array t ~layout ~messages = (lookup_entry t ~layout ~messages).rows_arr
 end
 
 let build_stream_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper_name ~width
@@ -1445,12 +1474,11 @@ let build_active_turn_rows ~(theme : Theme.t) ~(model : Model.t) ~keeper ~width
     in
     (hdr_row :: progress_rows) @ tail_rows
 
-let draw_transcript_rows grid ~(rect : Rect.t) ~(theme : Theme.t)
-    ~(model : Model.t) ~pad_x ~scroll rows =
-  if Rect.is_empty rect then ()
+let draw_transcript_rows_arr grid ~(rect : Rect.t) ~(theme : Theme.t)
+    ~(model : Model.t) ~pad_x ~scroll (arr : transcript_row array) =
+  let total = Array.length arr in
+  if Rect.is_empty rect || total = 0 then ()
   else
-    let total = List.length rows in
-    let arr = Array.of_list rows in
     let max_scroll = Int.max 0 (total - rect.h) in
     let clamped_scroll = Int.max 0 (Int.min max_scroll scroll) in
     let show_follow_cue = clamped_scroll > 0 && rect.h >= 2 in
@@ -1460,16 +1488,19 @@ let draw_transcript_rows grid ~(rect : Rect.t) ~(theme : Theme.t)
     let content = Card.pad_inner ~pad_x rect in
     let col_w = content.w in
     let col_x = content.x in
+    let base_bg = Color.of_rgb theme.surface_1 in
+    let base_pri_st = Typography.primary ~bg:base_bg theme in
+    if visible > 0 then
+      Cell_grid.fill_rect ~clip:rect grid
+        ~rect:(Rect.make ~x:rect.x ~y:rect.y ~w:rect.w ~h:visible)
+        ~style:base_pri_st ();
     for i = 0 to visible - 1 do
-      let r = arr.(start + i) in
+      let r = Array.unsafe_get arr (start + i) in
       let py = rect.y + i in
-      let full_row = Rect.make ~x:rect.x ~y:py ~w:rect.w ~h:1 in
       let col_rect = Rect.make ~x:col_x ~y:py ~w:col_w ~h:1 in
-      let base_bg = Color.of_rgb theme.surface_1 in
-      let body_bg = Color.of_rgb r.bg_rgb in
-      Cell_grid.fill_rect ~clip:rect grid ~rect:full_row
-        ~style:(Typography.primary ~bg:base_bg theme) ();
-      if r.full_bleed_bg && r.bg_rgb <> theme.surface_1 then
+      let is_custom_bg = r.bg_rgb <> theme.surface_1 in
+      let body_bg = if is_custom_bg then Color.of_rgb r.bg_rgb else base_bg in
+      if r.full_bleed_bg && is_custom_bg then
         Cell_grid.fill_rect ~clip:col_rect grid ~rect:col_rect
           ~style:(Typography.primary ~bg:body_bg theme) ();
       let cx = ref col_x in
@@ -1492,7 +1523,7 @@ let draw_transcript_rows grid ~(rect : Rect.t) ~(theme : Theme.t)
         in
         cx := !cx + adv
       end;
-      if (not r.full_bleed_bg) && r.bg_rgb <> theme.surface_1 && !cx < right_edge
+      if (not r.full_bleed_bg) && is_custom_bg && !cx < right_edge
       then begin
         let b_rect = Rect.make ~x:!cx ~y:py ~w:(right_edge - !cx) ~h:1 in
         Cell_grid.fill_rect ~clip:col_rect grid ~rect:b_rect
@@ -1516,7 +1547,7 @@ let draw_transcript_rows grid ~(rect : Rect.t) ~(theme : Theme.t)
           if !cx < span_limit && String.length sp.text > 0 then begin
             (* Preserve Markdown's explicit fenced-code (surface_0) & inline-code (surface_2) bgs! *)
             let st =
-              if Color.equal sp.style.bg (Color.of_rgb theme.surface_1) then
+              if is_custom_bg && Color.equal sp.style.bg base_bg then
                 Style.with_bg body_bg sp.style
               else sp.style
             in
@@ -1817,15 +1848,17 @@ let render_chat_tab ?history_rows grid ~(rect : Rect.t) ~(theme : Theme.t)
       | None -> Observed.unreported
     in
     let sections = Chat_transcript.project_transcript ~model ~keeper:name in
-    let all_rows =
+    let build_multi_sections () =
       let _, rev_rows =
         List.fold_left
           (fun (first, acc) sec ->
             let sec_rows =
               match sec with
-              | Chat_transcript.Section_history msgs -> history_section_rows msgs
+              | Chat_transcript.Section_history msgs ->
+                  history_section_rows msgs
               | Chat_transcript.Section_active_turn turn ->
-                  build_active_turn_rows ~theme ~model ~keeper:name ~width:prose_w turn
+                  build_active_turn_rows ~theme ~model ~keeper:name
+                    ~width:prose_w turn
               | Chat_transcript.Section_pending items ->
                   build_pending_tx_rows ~theme ~model ~width:prose_w items
               | Chat_transcript.Section_stream sp ->
@@ -1841,15 +1874,32 @@ let render_chat_tab ?history_rows grid ~(rect : Rect.t) ~(theme : Theme.t)
               (false, List.rev_append with_sep acc))
           (true, []) sections
       in
-      List.rev rev_rows
+      Array.of_list (List.rev rev_rows)
     in
-    if all_rows = [] then
+    let all_rows_arr =
+      match sections with
+      | [ sec ] -> (
+          match sec with
+          | Chat_transcript.Section_history msgs -> (
+              let layout =
+                history_layout_of ~model ~keeper_name:name ~width:prose_w
+              in
+              match history_rows with
+              | Some kept -> History_rows.rows_array kept ~layout ~messages:msgs
+              | None -> Array.of_list (build_history_rows ~layout msgs))
+          | Chat_transcript.Section_active_turn _
+          | Chat_transcript.Section_pending _
+          | Chat_transcript.Section_stream _ ->
+              build_multi_sections ())
+      | [] | _ :: _ :: _ -> build_multi_sections ()
+    in
+    let total_r = Array.length all_rows_arr in
+    if total_r = 0 then
       render_empty_chat_context grid ~rect:body_rect ~theme ~model ~name
         ~hist_obs keeper_opt
     else begin
-      draw_transcript_rows grid ~rect:body_rect ~theme ~model ~pad_x
-        ~scroll:model.fleet.chat_scroll_offset all_rows;
-      let total_r = List.length all_rows in
+      draw_transcript_rows_arr grid ~rect:body_rect ~theme ~model ~pad_x
+        ~scroll:model.fleet.chat_scroll_offset all_rows_arr;
       let max_s = Int.max 0 (total_r - body_rect.h) in
       let clamped_s = Int.max 0 (Int.min max_s model.fleet.chat_scroll_offset) in
       if clamped_s > 0 && body_rect.h >= 2 then begin

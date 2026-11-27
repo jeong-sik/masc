@@ -198,13 +198,26 @@ let spans_width =
 module Inline = Cmarkit.Inline
 module Block = Cmarkit.Block
 
-let bare_url text index =
-  let has_prefix prefix =
-    let n = String.length prefix in
-    index + n <= String.length text
-    && String.equal (String.sub text index n) prefix
+let[@inline] starts_at_exact text index prefix =
+  let plen = String.length prefix in
+  index + plen <= String.length text
+  &&
+  let rec loop k =
+    k >= plen
+    || (Char.equal (String.unsafe_get text (index + k)) (String.unsafe_get prefix k)
+        && loop (k + 1))
   in
-  has_prefix "https://" || has_prefix "http://" || has_prefix "file://"
+  loop 0
+
+let bare_url text index =
+  if index >= String.length text then false
+  else
+    match String.unsafe_get text index with
+    | 'h' ->
+        starts_at_exact text index "https://"
+        || starts_at_exact text index "http://"
+    | 'f' -> starts_at_exact text index "file://"
+    | _ -> false
 
 let bare_url_end text start =
   let rec scan index parens =
@@ -229,7 +242,15 @@ let bare_url_end text start =
 let has_scheme ~name target =
   let length = String.length name in
   String.length target >= length
-  && String.equal (String.lowercase_ascii (String.sub target 0 length)) name
+  &&
+  let rec loop k =
+    k >= length
+    || (Char.equal
+          (Char.lowercase_ascii (String.unsafe_get target k))
+          (String.unsafe_get name k)
+        && loop (k + 1))
+  in
+  loop 0
 
 let safe_target target =
   not (String.equal target "")
@@ -641,8 +662,18 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
   in
   let draw_rule layout requested_width =
     let prefix = prefix layout in
-    let count = Int.min requested_width (width - spans_width prefix) in
-    let rule = String.concat "" (List.init count (fun _ -> Glyph.to_utf8 Glyph.Box_h)) in
+    let count = Int.max 0 (Int.min requested_width (width - spans_width prefix)) in
+    let rule =
+      if count = 0 then ""
+      else
+        let seg = Glyph.to_utf8 Glyph.Box_h in
+        let slen = String.length seg in
+        let b = Bytes.create (count * slen) in
+        for i = 0 to count - 1 do
+          Bytes.blit_string seg 0 b (i * slen) slen
+        done;
+        Bytes.unsafe_to_string b
+    in
     push_lines [ { spans = prefix @ [ span hairline_style rule ]; image_part = None } ]
   in
   let draw_code layout code =
@@ -865,11 +896,36 @@ let render_document ~(theme : Theme.t) ~width ~osc8 ~(base_style : Style.t) raw 
   | [] -> [ { spans = []; image_part = None } ]
   | rows -> List.rev rows
 
+module Md_cache_key = struct
+  type t = {
+    theme : Theme.t;
+    base_style : Style.t;
+    width : int;
+    osc8 : bool;
+    raw : string;
+  }
+
+  let equal a b =
+    Int.equal a.width b.width
+    && Bool.equal a.osc8 b.osc8
+    && (a.theme == b.theme || a.theme = b.theme)
+    && Style.equal a.base_style b.base_style
+    && (a.raw == b.raw || String.equal a.raw b.raw)
+
+  let hash k =
+    let h = Hashtbl.hash k.raw in
+    let h = (h * 31) lxor k.width in
+    let h = (h * 31) lxor (if k.osc8 then 1 else 0) in
+    let h = (h * 31) lxor (Hashtbl.hash k.theme.preset) in
+    let h = (h * 31) lxor k.theme.surface_0 lxor k.theme.text_primary in
+    (h * 31) lxor (Hashtbl.hash k.base_style)
+end
+
+module Md_cache_tbl = Hashtbl.Make (Md_cache_key)
+
 let md_render_cache_mu = Stdlib.Mutex.create ()
-let md_render_cache :
-    (Theme.t * Style.t * int * bool * string, rendered_line list)
-    Hashtbl.t =
-  Hashtbl.create 128
+let md_render_cache : rendered_line list Md_cache_tbl.t =
+  Md_cache_tbl.create 128
 
 let md_render_cache_bytes = ref 0
 let max_md_render_cache_entries = 256
@@ -889,25 +945,25 @@ let render_lines ~(theme : Theme.t) ~width ?(osc8 = true) ?base_style raw =
   if raw_bytes > max_md_render_cache_entry_bytes then
     render_lines_uncached ~theme ~width ~osc8 ~base_style raw
   else
-    let key = (theme, base_style, width, osc8, raw) in
+    let key = { Md_cache_key.theme; base_style; width; osc8; raw } in
     match
       Stdlib.Mutex.protect md_render_cache_mu (fun () ->
-          Hashtbl.find_opt md_render_cache key)
+          Md_cache_tbl.find_opt md_render_cache key)
     with
     | Some hit -> hit
     | None ->
         let rendered = render_lines_uncached ~theme ~width ~osc8 ~base_style raw in
         Stdlib.Mutex.protect md_render_cache_mu (fun () ->
             if
-              Hashtbl.length md_render_cache >= max_md_render_cache_entries
+              Md_cache_tbl.length md_render_cache >= max_md_render_cache_entries
               || !md_render_cache_bytes + raw_bytes > max_md_render_cache_total_bytes
             then begin
-              Hashtbl.clear md_render_cache;
+              Md_cache_tbl.clear md_render_cache;
               md_render_cache_bytes := 0
             end;
-            if not (Hashtbl.mem md_render_cache key) then
+            if not (Md_cache_tbl.mem md_render_cache key) then
               md_render_cache_bytes := !md_render_cache_bytes + raw_bytes;
-            Hashtbl.replace md_render_cache key rendered);
+            Md_cache_tbl.replace md_render_cache key rendered);
         rendered
 
 let draw_line grid ~(rect : Rect.t) ?(osc8 = true) (line : rendered_line) =
@@ -932,16 +988,27 @@ let draw grid ~(rect : Rect.t) ~(theme : Theme.t) ?(osc8 = true) ?(scroll = 0)
   else
     let lines = render_lines ~theme ~width:rect.w ~osc8 raw in
     let total = List.length lines in
-    let arr = Array.of_list lines in
     let max_start = Int.max 0 (total - rect.h) in
     let start = Int.max 0 (Int.min max_start scroll) in
     let visible = Int.min rect.h (total - start) in
-    let bg = Color.of_rgb theme.surface_1 in
-    let clear_style = Typography.primary ~bg theme in
-    for i = 0 to visible - 1 do
-      let py = rect.y + i in
-      let row_rect = Rect.make ~x:rect.x ~y:py ~w:rect.w ~h:1 in
-      Cell_grid.fill_rect ~clip:rect grid ~rect:row_rect ~style:clear_style ();
-      draw_line grid ~rect:row_rect ~osc8 arr.(start + i)
-    done;
+    if visible > 0 then begin
+      let bg = Color.of_rgb theme.surface_1 in
+      let clear_style = Typography.primary ~bg theme in
+      let fill_rect = Rect.make ~x:rect.x ~y:rect.y ~w:rect.w ~h:visible in
+      Cell_grid.fill_rect ~clip:rect grid ~rect:fill_rect ~style:clear_style ();
+      let rec drop k xs =
+        if k <= 0 then xs
+        else match xs with [] -> [] | _ :: rest -> drop (k - 1) rest
+      in
+      let rec paint i = function
+        | [] -> ()
+        | line :: rest ->
+            if i < visible then begin
+              let row_rect = Rect.make ~x:rect.x ~y:(rect.y + i) ~w:rect.w ~h:1 in
+              draw_line grid ~rect:row_rect ~osc8 line;
+              paint (i + 1) rest
+            end
+      in
+      paint 0 (drop start lines)
+    end;
     total

@@ -548,34 +548,40 @@ let log_level_rank = function
 
 let visible_logs t =
   let q = String.trim t.filter_query in
-  List.filter
-    (fun (e : Wire_infra.system_log_entry) ->
-      let level_ok =
-        match t.log_level_filter with
-        | None -> true
-        | Some min_level -> log_level_rank e.level >= log_level_rank min_level
-      in
-      let keeper_ok =
-        match t.log_keeper_filter with
-        | None -> true
-        | Some want -> (
+  if
+    Option.is_none t.log_level_filter
+    && Option.is_none t.log_keeper_filter
+    && String.equal q ""
+  then t.logs
+  else
+    List.filter
+      (fun (e : Wire_infra.system_log_entry) ->
+        let level_ok =
+          match t.log_level_filter with
+          | None -> true
+          | Some min_level -> log_level_rank e.level >= log_level_rank min_level
+        in
+        let keeper_ok =
+          match t.log_keeper_filter with
+          | None -> true
+          | Some want -> (
+              match e.keeper with
+              | Some k -> String.equal k want
+              | None -> false)
+        in
+        let query_ok =
+          if String.equal q "" then true
+          else
+            contains_ci ~needle:q e.message
+            || contains_ci ~needle:q e.module_name
+            || contains_ci ~needle:q e.source
+            ||
             match e.keeper with
-            | Some k -> String.equal k want
-            | None -> false)
-      in
-      let query_ok =
-        if String.equal q "" then true
-        else
-          contains_ci ~needle:q e.message
-          || contains_ci ~needle:q e.module_name
-          || contains_ci ~needle:q e.source
-          ||
-          match e.keeper with
-          | Some k -> contains_ci ~needle:q k
-          | None -> false
-      in
-      level_ok && keeper_ok && query_ok)
-    t.logs
+            | Some k -> contains_ci ~needle:q k
+            | None -> false
+        in
+        level_ok && keeper_ok && query_ok)
+      t.logs
 
 let activity_kind_str = function
   | Activity_tool_call -> "TOOL"
@@ -585,29 +591,32 @@ let activity_kind_str = function
 
 let visible_activity_events t =
   let q = String.trim t.filter_query in
-  List.filter
-    (fun (ev : activity_row) ->
-      let keeper_ok =
-        match t.log_keeper_filter with
-        | None -> true
-        | Some want -> (
-            match ev.keeper with
-            | Some k -> String.equal k want
-            | None -> false)
-      in
-      let query_ok =
-        if String.equal q "" then true
-        else
-          contains_ci ~needle:q ev.summary
-          || contains_ci ~needle:q (activity_kind_str ev.kind)
-          || (match ev.keeper with Some k -> contains_ci ~needle:q k | None -> false)
-          ||
-          match ev.detail with
-          | Some d -> contains_ci ~needle:q d
-          | None -> false
-      in
-      keeper_ok && query_ok)
+  if Option.is_none t.log_keeper_filter && String.equal q "" then
     t.activity_events
+  else
+    List.filter
+      (fun (ev : activity_row) ->
+        let keeper_ok =
+          match t.log_keeper_filter with
+          | None -> true
+          | Some want -> (
+              match ev.keeper with
+              | Some k -> String.equal k want
+              | None -> false)
+        in
+        let query_ok =
+          if String.equal q "" then true
+          else
+            contains_ci ~needle:q ev.summary
+            || contains_ci ~needle:q (activity_kind_str ev.kind)
+            || (match ev.keeper with Some k -> contains_ci ~needle:q k | None -> false)
+            ||
+            match ev.detail with
+            | Some d -> contains_ci ~needle:q d
+            | None -> false
+        in
+        keeper_ok && query_ok)
+      t.activity_events
 
 let entry_timestamp_unix = function
   | Entry_log e -> (
@@ -623,17 +632,27 @@ let visible_timeline t =
   | Source_events ->
       List.map (fun ev -> Entry_event ev) (visible_activity_events t)
   | Source_all ->
-      let logs = List.map (fun e -> Entry_log e) (visible_logs t) in
-      let events =
-        List.map (fun ev -> Entry_event ev) (visible_activity_events t)
-      in
-      if events = [] then logs
-      else if logs = [] then events
+      let vlogs = visible_logs t in
+      let vevents = visible_activity_events t in
+      if vevents = [] then List.map (fun e -> Entry_log e) vlogs
+      else if vlogs = [] then List.map (fun ev -> Entry_event ev) vevents
       else
-        List.stable_sort
-          (fun a b ->
-            Float.compare (entry_timestamp_unix b) (entry_timestamp_unix a))
-          (logs @ events)
+        let tagged =
+          List.rev_append
+            (List.rev_map
+               (fun e ->
+                 let entry = Entry_log e in
+                 (entry_timestamp_unix entry, entry))
+               vlogs)
+            (List.map
+               (fun ev ->
+                 let entry = Entry_event ev in
+                 (entry_timestamp_unix entry, entry))
+               vevents)
+        in
+        tagged
+        |> List.stable_sort (fun (ta, _) (tb, _) -> Float.compare tb ta)
+        |> List.map snd
 
 let same_timeline_entry a b =
   match a, b with
@@ -705,7 +724,35 @@ let apply_log_frame ({ reset; entries } : Wire_infra.system_log_frame) t =
       |> List.take max_logs
     in
     { t with logs = bounded; logs_loaded = true; last_log_seq = max_seq_of bounded }
-  else List.fold_left (fun acc entry -> append_log entry acc) t (List.rev entries)
+  else
+    match entries with
+    | [] -> t
+    | [ single ] -> append_log single t
+    | _ ->
+        let seen = Hashtbl.create (List.length t.logs + List.length entries) in
+        List.iter
+          (fun (e : Wire_infra.system_log_entry) -> Hashtbl.replace seen e.seq ())
+          t.logs;
+        let logs, last_log_seq, added =
+          List.fold_left
+            (fun (acc_logs, acc_seq, acc_added)
+                 (entry : Wire_infra.system_log_entry) ->
+              let next_seq =
+                match acc_seq with
+                | None -> Some entry.seq
+                | Some prev -> Some (max prev entry.seq)
+              in
+              if Hashtbl.mem seen entry.seq then (acc_logs, next_seq, acc_added)
+              else begin
+                Hashtbl.add seen entry.seq ();
+                (entry :: acc_logs, next_seq, true)
+              end)
+            (t.logs, t.last_log_seq, false)
+            (List.rev entries)
+        in
+        let logs = if added then List.take max_logs logs else logs in
+        let next = { t with logs; logs_loaded = true; last_log_seq } in
+        if added then anchor_timeline_selection ~prev_t:t next else next
 
 let push_activity row t =
   let next =

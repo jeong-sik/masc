@@ -884,25 +884,39 @@ let pulse_window_bounds ~now_unix =
 
 let aligned_24h_slot_counts ~now_unix { slots; known_since = _ } =
   let window_start, current_slot = pulse_window_bounds ~now_unix in
-  let by_start = Hashtbl.create (List.length slots) in
+  let counts = Array.make pulse_window_slots_24h 0 in
   List.iter
     (fun (s : turn_slot) ->
       if s.starts_at >= window_start && s.starts_at <= current_slot then
-        Hashtbl.replace by_start s.starts_at (s.ok + s.failed))
+        let delta = s.starts_at - window_start in
+        if delta mod turn_slot_seconds = 0 then
+          let idx = delta / turn_slot_seconds in
+          if idx >= 0 && idx < pulse_window_slots_24h then
+            Array.unsafe_set counts idx (s.ok + s.failed))
     slots;
-  Array.init pulse_window_slots_24h (fun i ->
-      match
-        Hashtbl.find_opt by_start (window_start + (i * turn_slot_seconds))
-      with
-      | Some n -> n
-      | None -> 0)
+  counts
 
 let sparkline_24h_of_pulse ~now_unix pulse =
   Array.to_list
     (Array.map Float.of_int (aligned_24h_slot_counts ~now_unix pulse))
 
-let turns_24h_of_pulse ~now_unix pulse =
-  Array.fold_left ( + ) 0 (aligned_24h_slot_counts ~now_unix pulse)
+let turns_24h_of_pulse ~now_unix ({ slots; known_since = _ } as pulse) =
+  let window_start, current_slot = pulse_window_bounds ~now_unix in
+  let rec loop prev_start total = function
+    | [] -> Some total
+    | (s : turn_slot) :: rest ->
+        if s.starts_at >= window_start && s.starts_at <= current_slot then
+          let delta = s.starts_at - window_start in
+          if delta mod turn_slot_seconds = 0 then
+            if s.starts_at > prev_start then
+              loop s.starts_at (total + s.ok + s.failed) rest
+            else None
+          else loop prev_start total rest
+        else loop prev_start total rest
+  in
+  match loop min_int 0 slots with
+  | Some total -> total
+  | None -> Array.fold_left ( + ) 0 (aligned_24h_slot_counts ~now_unix pulse)
 
 let turn_outcome_breakdown_24h ~now_unix { slots; known_since = _ } =
   let window_start, current_slot = pulse_window_bounds ~now_unix in
@@ -913,33 +927,8 @@ let turn_outcome_breakdown_24h ~now_unix { slots; known_since = _ } =
       else (ok_n, rest_n, fail_n))
     (0, 0, 0) slots
 
-let aggregate_company_sparkline ~now_unix ~pulse_tbl
-    (members : keeper_summary list) =
-  let member_sparks =
-    List.filter_map
-      (fun (k : keeper_summary) ->
-        match Hashtbl.find_opt pulse_tbl k.name with
-        | Some pulse -> Some (sparkline_24h_of_pulse ~now_unix pulse)
-        | None -> None)
-      members
-  in
-  match member_sparks with
-  | [] -> []
-  | _ :: _ ->
-      let out = Array.make pulse_window_slots_24h 0.0 in
-      List.iter
-        (fun spark ->
-          List.iteri
-            (fun i v ->
-              if i < pulse_window_slots_24h && Float.is_finite v && v > 0.0 then
-                out.(i) <- out.(i) +. v)
-            spark)
-        member_sparks;
-      Array.to_list out
-
-let group_by_company ?(attention = []) ?(sandbox_profiles = [])
-    ?(keeper_costs_24h = []) ?now_unix ?(turn_pulses = []) keepers =
-  let prefix_counts = Hashtbl.create 16 in
+let build_company_resolver (keepers : keeper_summary list) =
+  let prefix_counts = ref None in
   List.iter
     (fun (k : keeper_summary) ->
       match classify_company_single ~group:k.group k.name with
@@ -947,49 +936,96 @@ let group_by_company ?(attention = []) ?(sandbox_profiles = [])
       | None -> (
           match prefix_before_dash k.name with
           | Some p ->
-              let prev =
-                match Hashtbl.find_opt prefix_counts p with
-                | Some c -> c
-                | None -> 0
+              let tbl =
+                match !prefix_counts with
+                | Some t -> t
+                | None ->
+                    let t = Hashtbl.create 16 in
+                    prefix_counts := Some t;
+                    t
               in
-              Hashtbl.replace prefix_counts p (prev + 1)
+              let prev =
+                match Hashtbl.find_opt tbl p with Some c -> c | None -> 0
+              in
+              Hashtbl.replace tbl p (prev + 1)
           | None -> ()))
     keepers;
-  let resolve_company (k : keeper_summary) =
+  fun (k : keeper_summary) ->
     match classify_company_single ~group:k.group k.name with
     | Some c -> c
     | None -> (
-        match prefix_before_dash k.name with
-        | Some p -> (
-            match Hashtbl.find_opt prefix_counts p with
+        match (!prefix_counts, prefix_before_dash k.name) with
+        | Some tbl, Some p -> (
+            match Hashtbl.find_opt tbl p with
             | Some c when c >= 2 -> p
             | Some _ | None -> "Other")
-        | None -> "Other")
+        | _, _ -> "Other")
+
+let count_companies (keepers : keeper_summary list) =
+  match keepers with
+  | [] -> 0
+  | _ ->
+      let resolve_company = build_company_resolver keepers in
+      let seen : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+      List.iter
+        (fun (k : keeper_summary) ->
+          let comp = resolve_company k in
+          if not (Hashtbl.mem seen comp) then Hashtbl.add seen comp ())
+        keepers;
+      Hashtbl.length seen
+
+let group_by_company ?(attention = []) ?(sandbox_profiles = [])
+    ?(keeper_costs_24h = []) ?now_unix ?(turn_pulses = []) keepers =
+  let resolve_company = build_company_resolver keepers in
+  let profile_tbl =
+    if sandbox_profiles = [] then None
+    else begin
+      let tbl = Hashtbl.create (max 8 (List.length sandbox_profiles)) in
+      List.iter (fun (n, p) -> Hashtbl.replace tbl n p) sandbox_profiles;
+      Some tbl
+    end
   in
-  let profile_tbl = Hashtbl.create (max 8 (List.length sandbox_profiles)) in
-  List.iter (fun (n, p) -> Hashtbl.replace profile_tbl n p) sandbox_profiles;
-  let cost_tbl = Hashtbl.create (max 8 (List.length keeper_costs_24h)) in
-  List.iter (fun (n, c) -> Hashtbl.replace cost_tbl n c) keeper_costs_24h;
-  let pulse_tbl = Hashtbl.create (max 8 (List.length turn_pulses)) in
-  List.iter (fun (n, p) -> Hashtbl.replace pulse_tbl n p) turn_pulses;
+  let cost_tbl =
+    if keeper_costs_24h = [] then None
+    else begin
+      let tbl = Hashtbl.create (max 8 (List.length keeper_costs_24h)) in
+      List.iter (fun (n, c) -> Hashtbl.replace tbl n c) keeper_costs_24h;
+      Some tbl
+    end
+  in
+  let pulse_tbl =
+    if turn_pulses = [] || Option.is_none now_unix then None
+    else begin
+      let tbl = Hashtbl.create (max 8 (List.length turn_pulses)) in
+      List.iter (fun (n, p) -> Hashtbl.replace tbl n p) turn_pulses;
+      Some tbl
+    end
+  in
+  let attn_tbl =
+    if attention = [] then None
+    else begin
+      let tbl = Hashtbl.create (max 8 (List.length attention)) in
+      List.iter
+        (fun (item : attention_item) ->
+          match item.keeper with
+          | Some kn ->
+              let prev = Option.value ~default:0 (Hashtbl.find_opt tbl kn) in
+              Hashtbl.replace tbl kn (prev + 1)
+          | None -> ())
+        attention;
+      Some tbl
+    end
+  in
   let buckets : (string, keeper_summary list) Hashtbl.t = Hashtbl.create 16 in
   List.iter
     (fun (k : keeper_summary) ->
       let comp = resolve_company k in
-      let k' = { k with company = comp } in
+      let k' = if String.equal k.company comp then k else { k with company = comp } in
       let prev =
         match Hashtbl.find_opt buckets comp with Some l -> l | None -> []
       in
       Hashtbl.replace buckets comp (k' :: prev))
     keepers;
-  let attn_for_keeper name =
-    List.fold_left
-      (fun acc (item : attention_item) ->
-        match item.keeper with
-        | Some kn when String.equal kn name -> acc + 1
-        | Some _ | None -> acc)
-      0 attention
-  in
   let groups =
     Hashtbl.fold
       (fun company rev_members acc ->
@@ -1009,6 +1045,7 @@ let group_by_company ?(attention = []) ?(sandbox_profiles = [])
         let docker_count = ref 0 in
         let turns_24h = ref 0 in
         let cost_24h_usd = ref 0.0 in
+        let spark_sums = ref None in
         List.iter
           (fun (k : keeper_summary) ->
             (match k.health with
@@ -1026,26 +1063,54 @@ let group_by_company ?(attention = []) ?(sandbox_profiles = [])
                 incr running_count
             | Keeper_idle ->
                 if k.keepalive_running then incr running_count);
-            attention_count := !attention_count + attn_for_keeper k.name;
-            (match Hashtbl.find_opt profile_tbl k.name with
-            | Some Profile_microvm -> incr microvm_count
-            | Some Profile_remote_ssh -> incr ssh_count
-            | Some Profile_docker -> incr docker_count
-            | Some (Profile_other _) | None -> ());
-            (match now_unix, Hashtbl.find_opt pulse_tbl k.name with
-            | Some now, Some pulse ->
-                turns_24h := !turns_24h + turns_24h_of_pulse ~now_unix:now pulse
+            (match attn_tbl with
+            | None -> ()
+            | Some tbl -> (
+                match Hashtbl.find_opt tbl k.name with
+                | Some n -> attention_count := !attention_count + n
+                | None -> ()));
+            (match profile_tbl with
+            | None -> ()
+            | Some tbl -> (
+                match Hashtbl.find_opt tbl k.name with
+                | Some Profile_microvm -> incr microvm_count
+                | Some Profile_remote_ssh -> incr ssh_count
+                | Some Profile_docker -> incr docker_count
+                | Some (Profile_other _) | None -> ()));
+            (match (now_unix, pulse_tbl) with
+            | Some now, Some tbl -> (
+                match Hashtbl.find_opt tbl k.name with
+                | Some pulse ->
+                    let counts = aligned_24h_slot_counts ~now_unix:now pulse in
+                    let out =
+                      match !spark_sums with
+                      | Some arr -> arr
+                      | None ->
+                          let arr = Array.make pulse_window_slots_24h 0.0 in
+                          spark_sums := Some arr;
+                          arr
+                    in
+                    let member_turns = ref 0 in
+                    for i = 0 to pulse_window_slots_24h - 1 do
+                      let n = Array.unsafe_get counts i in
+                      member_turns := !member_turns + n;
+                      if n > 0 then
+                        Array.unsafe_set out i
+                          (Array.unsafe_get out i +. Float.of_int n)
+                    done;
+                    turns_24h := !turns_24h + !member_turns
+                | None -> ())
             | Some _, None | None, (Some _ | None) -> ());
-            let k_cost =
-              match Hashtbl.find_opt cost_tbl k.name with
-              | Some c -> c
-              | None -> 0.0
-            in
-            cost_24h_usd := !cost_24h_usd +. k_cost)
+            (match cost_tbl with
+            | None -> ()
+            | Some tbl -> (
+                match Hashtbl.find_opt tbl k.name with
+                | Some c -> cost_24h_usd := !cost_24h_usd +. c
+                | None -> ())))
           members;
         let sparkline_24h =
-          match now_unix with
-          | Some now -> aggregate_company_sparkline ~now_unix:now ~pulse_tbl members
+          match !spark_sums with
+          | Some arr -> Array.to_list arr
           | None -> []
         in
         {
@@ -1721,22 +1786,67 @@ let decode_execution_keeper_enrichments json =
   let* _, body = unwrap_v2_or_raw json in
   let* candle_summary = decode_candle_observation_opt body in
   let* items = optional_list_field body "keepers" in
+  let nonblank_str_opt = function
+    | `String s ->
+        let trimmed = String.trim s in
+        if String.equal trimmed "" then None else Some trimmed
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ ->
+        None
+  in
+  let nonneg_int_opt = function
+    | `Int n when n >= 0 -> Some n
+    | `Intlit raw -> (
+        match int_of_string_opt raw with
+        | Some n when n >= 0 -> Some n
+        | Some _ | None -> None)
+    | `Null | `Bool _ | `Int _ | `Float _ | `String _ | `Assoc _ | `List _ ->
+        None
+  in
   let enrichments =
     List.filter_map
-      (fun item ->
-        match optional_nonblank_string item "name" with
-        | Ok (Some keeper_name) ->
-            let sandbox_profile = extract_sandbox_profile_opt item in
-            let total_turns =
-              match optional_int_field item "total_turns" with
-              | Ok (Some n) when n >= 0 -> Some n
-              | Ok (Some _) | Ok None | Error _ -> (
-                  match optional_int_field item "turn_count" with
-                  | Ok (Some n) when n >= 0 -> Some n
-                  | Ok (Some _) | Ok None | Error _ -> None)
-            in
-            Some { keeper_name; sandbox_profile; total_turns }
-        | Ok None | Error _ -> None)
+      (function
+        | `Assoc fields -> (
+            let f_name = ref None in
+            let f_sandbox = ref None in
+            let f_meta = ref None in
+            let f_total_turns = ref None in
+            let f_turn_count = ref None in
+            List.iter
+              (fun (k, v) ->
+                match k with
+                | "name" -> if Option.is_none !f_name then f_name := Some v
+                | "sandbox_profile" ->
+                    if Option.is_none !f_sandbox then f_sandbox := Some v
+                | "meta" -> if Option.is_none !f_meta then f_meta := Some v
+                | "total_turns" ->
+                    if Option.is_none !f_total_turns then
+                      f_total_turns := Some v
+                | "turn_count" ->
+                    if Option.is_none !f_turn_count then f_turn_count := Some v
+                | _ -> ())
+              fields;
+            match Option.bind !f_name nonblank_str_opt with
+            | None -> None
+            | Some keeper_name ->
+                let sandbox_profile =
+                  match Option.bind !f_sandbox nonblank_str_opt with
+                  | Some s -> Some (sandbox_profile_of_string s)
+                  | None -> (
+                      match !f_meta with
+                      | Some (`Assoc _ as meta) -> (
+                          match optional_nonblank_string meta "sandbox_profile" with
+                          | Ok (Some s) -> Some (sandbox_profile_of_string s)
+                          | Ok None | Error _ -> None)
+                      | Some _ | None -> None)
+                in
+                let total_turns =
+                  match Option.bind !f_total_turns nonneg_int_opt with
+                  | Some _ as n -> n
+                  | None -> Option.bind !f_turn_count nonneg_int_opt
+                in
+                Some { keeper_name; sandbox_profile; total_turns })
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+            None)
       items
   in
   Ok (enrichments, candle_summary)

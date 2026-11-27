@@ -115,6 +115,11 @@ val put_ascii :
 val put_braille :
   ?clip:Masc_tui_core.Rect.t -> t -> x:int -> y:int -> style:Style.t -> int -> unit
 
+val put_uchar_w1 :
+  ?clip:Masc_tui_core.Rect.t -> t -> x:int -> y:int -> style:Style.t -> int -> unit
+(** Write a single width-1 Unicode scalar codepoint ([0x20..0x10FFFF]) with zero
+    string or cell allocation. *)
+
 val put_glyph :
   ?clip:Masc_tui_core.Rect.t ->
   t ->
@@ -154,3 +159,30 @@ val dim_rect :
 (** Recolor existing cells inside [rect] to muted [fg]/[bg] as a backdrop scrim
     before painting a floating modal or popup, preserving cell glyphs without
     bright foreground bleed-through. *)
+
+(** Read-only access to the packed SoA cell buffers for the differential
+    {!Presenter}. Each cell occupies two unboxed 64-bit immediates:
+    - [glyphs.(idx)]: [0]=Empty, [1]=Continuation, [0x21..0x7E]=Ascii,
+      [0x100..0x1FF]=Braille mask, [(w lsl 24) lor cp]=single-scalar Utf8 of
+      width [w] in [{1, 2}], [(w lsl 24) lor 0x20_0000]=multi-scalar Utf8 stored
+      in [extra_utf8_at].
+    - [styles.(idx)]: [fg] (bits 0..25), [bg] (bits 26..51), [attrs]
+      (bits 52..56), [has_link] (bit 57). *)
+module Raw : sig
+  type int_buf = (int, Bigarray.int_elt, Bigarray.c_layout) Bigarray.Array1.t
+
+  val glyphs : t -> int_buf
+  val styles : t -> int_buf
+  val row_has_wide : t -> bool array
+  val has_extra_utf8 : t -> bool
+  val has_links : t -> bool
+  val extra_utf8_at : t -> int -> string
+  val link_id_at : t -> int -> int
+
+  val glyph_empty : int
+  val glyph_continuation : int
+  val glyph_extra_flag : int
+  val glyph_wide_min : int
+  val style_has_link_bit : int
+  val style_el0_forbidden_mask : int
+end

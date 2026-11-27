@@ -23,9 +23,7 @@ let contains_ci = Text_util.contains_ci
 let put_line ?clip grid ~x ~y ~max_w ~style text =
   if max_w <= 0 then 0
   else
-    let clean =
-      String.map (function '\n' | '\r' | '\t' -> ' ' | c -> c) text
-    in
+    let clean = Text_util.sanitize_single_line text in
     let fitted = Grapheme.truncate_to_width ~max_width:max_w clean in
     let line_clip =
       match clip with

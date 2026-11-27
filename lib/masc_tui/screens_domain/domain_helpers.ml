@@ -454,7 +454,16 @@ let format_local_hhmmss ~tz_offset_sec ts =
       let h = day_s / 3600 in
       let m = (day_s mod 3600) / 60 in
       let s = day_s mod 60 in
-      Printf.sprintf "%02d:%02d:%02d" h m s
+      let b = Bytes.create 8 in
+      Bytes.unsafe_set b 0 (Char.unsafe_chr (48 + (h / 10)));
+      Bytes.unsafe_set b 1 (Char.unsafe_chr (48 + (h mod 10)));
+      Bytes.unsafe_set b 2 ':';
+      Bytes.unsafe_set b 3 (Char.unsafe_chr (48 + (m / 10)));
+      Bytes.unsafe_set b 4 (Char.unsafe_chr (48 + (m mod 10)));
+      Bytes.unsafe_set b 5 ':';
+      Bytes.unsafe_set b 6 (Char.unsafe_chr (48 + (s / 10)));
+      Bytes.unsafe_set b 7 (Char.unsafe_chr (48 + (s mod 10)));
+      Bytes.unsafe_to_string b
 
 let format_local_datetime ~tz_offset_sec ts =
   match Wire_common.parse_rfc3339_unix ts with

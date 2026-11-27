@@ -471,7 +471,7 @@ let group_succession_chains (posts : Wire_knowledge.board_post list) :
     succession_group list =
   let order = ref [] in
   let tbl : (string, Wire_knowledge.board_post list) Hashtbl.t =
-    Hashtbl.create 32
+    Hashtbl.create (Int.max 16 (List.length posts))
   in
   List.iter
     (fun (p : Wire_knowledge.board_post) ->
@@ -485,13 +485,29 @@ let group_succession_chains (posts : Wire_knowledge.board_post list) :
       | None ->
           order := key :: !order;
           Hashtbl.add tbl key [ p ]
-      | Some prev -> Hashtbl.replace tbl key (prev @ [ p ]))
+      | Some prev -> Hashtbl.replace tbl key (p :: prev))
     posts;
   List.rev !order
   |> List.filter_map (fun key ->
          match Hashtbl.find_opt tbl key with
          | None | Some [] -> None
-         | Some (first :: _ as members) ->
+         | Some [ single ] ->
+             let chain_count =
+               match single.chain_depth with
+               | Some d when d > 1 -> d
+               | Some _ | None -> 1
+             in
+             Some
+               {
+                 chain_root_id = single.succession_chain_root_id;
+                 lead = single;
+                 members = [ single ];
+                 chain_count;
+                 unique_keepers = 1;
+               }
+         | Some rev_members ->
+             let members = List.rev rev_members in
+             let first = List.hd members in
              let lead =
                List.fold_left
                  (fun (best : Wire_knowledge.board_post)
@@ -549,12 +565,12 @@ let cluster_wiki_pages (pages : Wire_knowledge.wiki_page_summary list) :
       | None ->
           order := topic :: !order;
           Hashtbl.add tbl topic [ p ]
-      | Some prev -> Hashtbl.replace tbl topic (prev @ [ p ]))
+      | Some prev -> Hashtbl.replace tbl topic (p :: prev))
     pages;
   List.rev !order
   |> List.filter_map (fun topic ->
          match Hashtbl.find_opt tbl topic with
-         | Some xs -> Some (topic, xs)
+         | Some rev_xs -> Some (topic, List.rev rev_xs)
          | None -> None)
 
 let is_succession_chain_expanded ~root_id t =

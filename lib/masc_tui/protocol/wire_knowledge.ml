@@ -184,26 +184,74 @@ type board_feed = {
 }
 
 let post_kind_of_string raw =
-  match String.lowercase_ascii (String.trim raw) with
+  match raw with
   | "direct" | "human" | "human_post" -> Some Human_post
   | "automation" | "automation_post" -> Some Automation_post
   | "system" | "system_post" -> Some System_post
-  | _ -> None
+  | _ -> (
+      match String.lowercase_ascii (String.trim raw) with
+      | "direct" | "human" | "human_post" -> Some Human_post
+      | "automation" | "automation_post" -> Some Automation_post
+      | "system" | "system_post" -> Some System_post
+      | _ -> None)
 
 let post_visibility_of_string raw =
-  match String.lowercase_ascii (String.trim raw) with
+  match raw with
   | "public" -> Some Vis_public
   | "unlisted" -> Some Vis_unlisted
   | "internal" -> Some Vis_internal
   | "direct" -> Some Vis_direct
-  | _ -> None
+  | _ -> (
+      match String.lowercase_ascii (String.trim raw) with
+      | "public" -> Some Vis_public
+      | "unlisted" -> Some Vis_unlisted
+      | "internal" -> Some Vis_internal
+      | "direct" -> Some Vis_direct
+      | _ -> None)
+
+let[@inline] is_trim_ws = function
+  | ' ' | '\t' | '\n' | '\r' | '\012' -> true
+  | _ -> false
+
+let[@inline] starts_at_ci_lower raw offset prefix =
+  let plen = String.length prefix in
+  offset + plen <= String.length raw
+  &&
+  let rec loop k =
+    k >= plen
+    || (let c = Char.code (String.unsafe_get raw (offset + k)) in
+        let lc = if c >= 65 && c <= 90 then c + 32 else c in
+        lc = Char.code (String.unsafe_get prefix k) && loop (k + 1))
+  in
+  loop 0
+
+let[@inline] equal_trimmed_ci_lower raw target =
+  let len = String.length raw in
+  let rec skip_l i =
+    if i < len && is_trim_ws (String.unsafe_get raw i) then skip_l (i + 1) else i
+  in
+  let rec skip_r i start =
+    if i > start && is_trim_ws (String.unsafe_get raw (i - 1)) then skip_r (i - 1) start
+    else i
+  in
+  let start = skip_l 0 in
+  let stop = skip_r len start in
+  stop - start = String.length target && starts_at_ci_lower raw start target
 
 let has_noise_prefix (raw : string) =
-  let s = String.lowercase_ascii (String.trim raw) in
-  String.starts_with ~prefix:"verify:" s
-  || String.starts_with ~prefix:"[verify]" s
-  || String.starts_with ~prefix:"approved task" s
-  || String.starts_with ~prefix:"rejected task" s
+  let len = String.length raw in
+  let rec skip_l i =
+    if i < len && is_trim_ws (String.unsafe_get raw i) then skip_l (i + 1) else i
+  in
+  let i = skip_l 0 in
+  if i >= len then false
+  else
+    match String.unsafe_get raw i with
+    | 'v' | 'V' -> starts_at_ci_lower raw i "verify:"
+    | '[' -> starts_at_ci_lower raw i "[verify]"
+    | 'a' | 'A' -> starts_at_ci_lower raw i "approved task"
+    | 'r' | 'R' -> starts_at_ci_lower raw i "rejected task"
+    | _ -> false
 
 let is_signal_board_post ~post_kind ~hearth ~title ~body =
   let is_system =
@@ -213,7 +261,7 @@ let is_signal_board_post ~post_kind ~hearth ~title ~body =
   in
   let is_verification_hearth =
     match hearth with
-    | Some h -> String.equal (String.lowercase_ascii (String.trim h)) "verification"
+    | Some h -> equal_trimmed_ci_lower h "verification"
     | None -> false
   in
   (not is_system)
@@ -221,61 +269,274 @@ let is_signal_board_post ~post_kind ~hearth ~title ~body =
   && (not (has_noise_prefix title))
   && not (has_noise_prefix body)
 
+exception Board_decode_err of string
+
+let[@inline] fail_board = function
+  | Ok v -> v
+  | Error msg -> raise (Board_decode_err msg)
+
+let[@inline] board_trim_fast s =
+  let len = String.length s in
+  if len = 0 then ""
+  else if
+    (not (is_trim_ws (String.unsafe_get s 0)))
+    && not (is_trim_ws (String.unsafe_get s (len - 1)))
+  then s
+  else String.trim s
+
+let[@inline] board_req_str key = function
+  | Some (`String s) -> s
+  | None | Some `Null -> fail_board (missing_field key)
+  | Some bad -> fail_board (field_type_error key "a string" bad)
+
+let[@inline] board_req_nonblank key opt =
+  let raw = board_req_str key opt in
+  let trimmed = board_trim_fast raw in
+  if String.equal trimmed "" then
+    raise (Board_decode_err (Printf.sprintf "field %S must not be blank" key))
+  else trimmed
+
+let[@inline] board_opt_nonblank key = function
+  | None | Some `Null -> None
+  | Some (`String s) ->
+      let trimmed = board_trim_fast s in
+      if String.equal trimmed "" then None else Some trimmed
+  | Some bad -> fail_board (field_type_error key "a string or null" bad)
+
+let[@inline] board_req_int key = function
+  | Some (`Int i) -> i
+  | Some (`Intlit raw) -> (
+      match int_of_string_opt raw with
+      | Some i -> i
+      | None ->
+          raise
+            (Board_decode_err (Printf.sprintf "field '%s' has invalid int %S" key raw)))
+  | None | Some `Null -> fail_board (missing_field key)
+  | Some bad -> fail_board (field_type_error key "an int" bad)
+
+let[@inline] board_int_or key ~default = function
+  | None | Some `Null -> default
+  | Some _ as opt -> board_req_int key opt
+
+let[@inline] board_opt_int key json = function
+  | None | Some `Null -> None
+  | Some (`Int i) -> Some i
+  | Some _ -> fail_board (optional_int_field json key)
+
+let[@inline] board_req_ts key = function
+  | Some (`Float f) when Float.is_finite f -> f
+  | Some (`Int i) -> Float.of_int i
+  | Some (`String s) -> fail_board (parse_rfc3339_unix s)
+  | None -> fail_board (missing_field key)
+  | Some bad ->
+      fail_board (field_type_error key "a unix timestamp or RFC3339 string" bad)
+
+let[@inline] board_opt_ts key = function
+  | None | Some `Null -> None
+  | Some (`Float f) when Float.is_finite f -> Some f
+  | Some (`Int i) -> Some (Float.of_int i)
+  | Some (`String s) ->
+      let trimmed = board_trim_fast s in
+      if String.equal trimmed "" then None
+      else Some (fail_board (parse_rfc3339_unix s))
+  | Some bad ->
+      fail_board
+        (field_type_error key "a unix timestamp, RFC3339 string, or null" bad)
+
 let decode_board_post ~observed_at json =
-  let* id = required_nonblank_string json "id" in
-  let* title = required_string_field json "title" in
-  let* body =
-    if has_field json "body" then required_string_field json "body"
-    else required_string_field json "content"
-  in
-  let* author = required_nonblank_string json "author" in
-  let* hearth = optional_nonblank_string json "hearth" in
-  let* post_kind =
-    decode_optional_enum ~field:"post_kind" post_kind_of_string json
-  in
-  let* visibility =
-    decode_optional_enum ~field:"visibility" post_visibility_of_string json
-  in
-  let* created_at_unix =
-    if has_field json "created_at_unix" then
-      decode_timestamp_unix json "created_at_unix"
-    else decode_timestamp_unix json "created_at"
-  in
-  let* updated_at_unix = decode_optional_timestamp_unix json "updated_at" in
-  let* score =
-    if has_field json "votes" then required_int_field json "votes"
-    else int_field_or json "score" ~default:0
-  in
-  let* comment_count = int_field_or json "comment_count" ~default:0 in
-  let* author_karma = observed_int ~observed_at json "author_karma" in
-  let* succession_chain_root_id =
-    optional_nonblank_string json "succession_chain_root_id"
-  in
-  let* chain_depth = optional_int_field json "chain_depth" in
-  let* is_signal =
-    if has_field json "is_signal" then required_bool_field json "is_signal"
-    else Ok (is_signal_board_post ~post_kind ~hearth ~title ~body)
-  in
-  let* pinned = decode_bool_field_or json "pinned" ~default:false in
-  Ok
-    {
-      id;
-      title;
-      body;
-      author;
-      hearth;
-      post_kind;
-      visibility;
-      created_at_unix;
-      updated_at_unix;
-      score;
-      comment_count;
-      author_karma;
-      succession_chain_root_id;
-      chain_depth;
-      is_signal;
-      pinned;
-    }
+  match json with
+  | `Assoc fields -> (
+      let f_id = ref None in
+      let f_title = ref None in
+      let f_body = ref None in
+      let f_content = ref None in
+      let f_author = ref None in
+      let f_hearth = ref None in
+      let f_post_kind = ref None in
+      let f_visibility = ref None in
+      let f_created_at_unix = ref None in
+      let f_created_at = ref None in
+      let f_updated_at = ref None in
+      let f_votes = ref None in
+      let f_score = ref None in
+      let f_comment_count = ref None in
+      let f_author_karma = ref None in
+      let f_chain_root = ref None in
+      let f_chain_depth = ref None in
+      let f_is_signal = ref None in
+      let f_pinned = ref None in
+      let[@inline] set_once r v =
+        if Option.is_none !r then r := Some v
+      in
+      List.iter
+        (fun (k, v) ->
+          match k with
+          | "id" -> set_once f_id v
+          | "title" -> set_once f_title v
+          | "body" -> set_once f_body v
+          | "content" -> set_once f_content v
+          | "author" -> set_once f_author v
+          | "hearth" -> set_once f_hearth v
+          | "post_kind" -> set_once f_post_kind v
+          | "visibility" -> set_once f_visibility v
+          | "created_at_unix" -> set_once f_created_at_unix v
+          | "created_at" -> set_once f_created_at v
+          | "updated_at" -> set_once f_updated_at v
+          | "votes" -> set_once f_votes v
+          | "score" -> set_once f_score v
+          | "comment_count" -> set_once f_comment_count v
+          | "author_karma" -> set_once f_author_karma v
+          | "succession_chain_root_id" -> set_once f_chain_root v
+          | "chain_depth" -> set_once f_chain_depth v
+          | "is_signal" -> set_once f_is_signal v
+          | "pinned" -> set_once f_pinned v
+          | _ -> ())
+        fields;
+      try
+        let id = board_req_nonblank "id" !f_id in
+        let title = board_req_str "title" !f_title in
+        let body =
+          match !f_body with
+          | Some _ -> board_req_str "body" !f_body
+          | None -> board_req_str "content" !f_content
+        in
+        let author = board_req_nonblank "author" !f_author in
+        let hearth = board_opt_nonblank "hearth" !f_hearth in
+        let post_kind =
+          match board_opt_nonblank "post_kind" !f_post_kind with
+          | None -> None
+          | Some word -> (
+              match post_kind_of_string word with
+              | Some v -> Some v
+              | None ->
+                  raise
+                    (Board_decode_err
+                       (Printf.sprintf "unknown post_kind value %S" word)))
+        in
+        let visibility =
+          match board_opt_nonblank "visibility" !f_visibility with
+          | None -> None
+          | Some word -> (
+              match post_visibility_of_string word with
+              | Some v -> Some v
+              | None ->
+                  raise
+                    (Board_decode_err
+                       (Printf.sprintf "unknown visibility value %S" word)))
+        in
+        let created_at_unix =
+          match !f_created_at_unix with
+          | Some _ -> board_req_ts "created_at_unix" !f_created_at_unix
+          | None -> board_req_ts "created_at" !f_created_at
+        in
+        let updated_at_unix = board_opt_ts "updated_at" !f_updated_at in
+        let score =
+          match !f_votes with
+          | Some _ -> board_req_int "votes" !f_votes
+          | None -> board_int_or "score" ~default:0 !f_score
+        in
+        let comment_count =
+          board_int_or "comment_count" ~default:0 !f_comment_count
+        in
+        let author_karma =
+          match !f_author_karma with
+          | None -> Observed.unreported
+          | Some `Null -> Observed.absent
+          | Some (`Int i) -> Observed.value ~observed_at i
+          | Some bad -> fail_board (field_type_error "author_karma" "an integer" bad)
+        in
+        let succession_chain_root_id =
+          board_opt_nonblank "succession_chain_root_id" !f_chain_root
+        in
+        let chain_depth = board_opt_int "chain_depth" json !f_chain_depth in
+        let is_signal =
+          match !f_is_signal with
+          | Some (`Bool b) -> b
+          | Some _ -> fail_board (required_bool_field json "is_signal")
+          | None -> is_signal_board_post ~post_kind ~hearth ~title ~body
+        in
+        let pinned =
+          match !f_pinned with
+          | None | Some `Null -> false
+          | Some (`Bool b) -> b
+          | Some _ ->
+              fail_board (decode_bool_field_or json "pinned" ~default:false)
+        in
+        Ok
+          {
+            id;
+            title;
+            body;
+            author;
+            hearth;
+            post_kind;
+            visibility;
+            created_at_unix;
+            updated_at_unix;
+            score;
+            comment_count;
+            author_karma;
+            succession_chain_root_id;
+            chain_depth;
+            is_signal;
+            pinned;
+          }
+      with Board_decode_err msg -> Error msg)
+  | _ ->
+      let* id = required_nonblank_string json "id" in
+      let* title = required_string_field json "title" in
+      let* body =
+        if has_field json "body" then required_string_field json "body"
+        else required_string_field json "content"
+      in
+      let* author = required_nonblank_string json "author" in
+      let* hearth = optional_nonblank_string json "hearth" in
+      let* post_kind =
+        decode_optional_enum ~field:"post_kind" post_kind_of_string json
+      in
+      let* visibility =
+        decode_optional_enum ~field:"visibility" post_visibility_of_string json
+      in
+      let* created_at_unix =
+        if has_field json "created_at_unix" then
+          decode_timestamp_unix json "created_at_unix"
+        else decode_timestamp_unix json "created_at"
+      in
+      let* updated_at_unix = decode_optional_timestamp_unix json "updated_at" in
+      let* score =
+        if has_field json "votes" then required_int_field json "votes"
+        else int_field_or json "score" ~default:0
+      in
+      let* comment_count = int_field_or json "comment_count" ~default:0 in
+      let* author_karma = observed_int ~observed_at json "author_karma" in
+      let* succession_chain_root_id =
+        optional_nonblank_string json "succession_chain_root_id"
+      in
+      let* chain_depth = optional_int_field json "chain_depth" in
+      let* is_signal =
+        if has_field json "is_signal" then required_bool_field json "is_signal"
+        else Ok (is_signal_board_post ~post_kind ~hearth ~title ~body)
+      in
+      let* pinned = decode_bool_field_or json "pinned" ~default:false in
+      Ok
+        {
+          id;
+          title;
+          body;
+          author;
+          hearth;
+          post_kind;
+          visibility;
+          created_at_unix;
+          updated_at_unix;
+          score;
+          comment_count;
+          author_karma;
+          succession_chain_root_id;
+          chain_depth;
+          is_signal;
+          pinned;
+        }
 
 let decode_board_comment json =
   let* id = required_nonblank_string json "id" in

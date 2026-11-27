@@ -58,22 +58,36 @@ let keeper_row_status ~has_attention ?path_rest (k : Wire_fleet.keeper_summary) 
         | None -> Ops_common.keeper_live_status ~has_attention:false k)
 
 let count_fleet ~(model : Model.t) (ks : Wire_fleet.keeper_summary list) =
-  let attn_n, non_attn =
-    List.fold_left
-      (fun (a, rest) (k : Wire_fleet.keeper_summary) ->
-        if Ops_common.keeper_has_attention model.attention k.name then
-          (a + 1, rest)
-        else (a, k :: rest))
-      (0, []) ks
-  in
-  let hc = Fleet_store.fleet_health_counts non_attn in
+  let has_any_attn = Attention.count model.attention > 0 in
+  let attn = ref 0
+  and working = ref 0
+  and healthy = ref 0
+  and failing = ref 0
+  and paused_idle = ref 0
+  and offline = ref 0 in
+  List.iter
+    (fun (k : Wire_fleet.keeper_summary) ->
+      if has_any_attn && Ops_common.keeper_has_attention model.attention k.name
+      then incr attn
+      else
+        match k.health with
+        | Wire_fleet.Keeper_working
+        | Wire_fleet.Keeper_degraded
+        | Wire_fleet.Keeper_recovering
+        | Wire_fleet.Keeper_booting ->
+            incr working
+        | Wire_fleet.Keeper_healthy -> incr healthy
+        | Wire_fleet.Keeper_failing -> incr failing
+        | Wire_fleet.Keeper_paused | Wire_fleet.Keeper_idle -> incr paused_idle
+        | Wire_fleet.Keeper_offline -> incr offline)
+    ks;
   {
-    attn = attn_n;
-    working = hc.working + hc.degraded;
-    healthy = hc.healthy;
-    failing = hc.failing;
-    paused_idle = hc.paused;
-    offline = hc.offline;
+    attn = !attn;
+    working = !working;
+    healthy = !healthy;
+    failing = !failing;
+    paused_idle = !paused_idle;
+    offline = !offline;
   }
 
 let company_groups_for_model ~(model : Model.t) =
@@ -439,12 +453,15 @@ let format_fleet_counts (c : fleet_counts) =
 let format_company_infra_mix (grp : Wire_fleet.company_group) =
   let parts = ref [] in
   if grp.docker_count > 0 then
-    parts := Printf.sprintf "%ddkr" grp.docker_count :: !parts;
+    parts := (Int.to_string grp.docker_count ^ "dkr") :: !parts;
   if grp.ssh_count > 0 then
-    parts := Printf.sprintf "%dssh" grp.ssh_count :: !parts;
+    parts := (Int.to_string grp.ssh_count ^ "ssh") :: !parts;
   if grp.microvm_count > 0 then
-    parts := Printf.sprintf "%dvm" grp.microvm_count :: !parts;
-  String.concat " " !parts
+    parts := (Int.to_string grp.microvm_count ^ "vm") :: !parts;
+  match !parts with
+  | [] -> ""
+  | [ a ] -> a
+  | xs -> String.concat " " xs
 
 let company_group_header_row ~(model : Model.t) ~(theme : Theme.t) ~collapsed
     (grp : Wire_fleet.company_group) : Table.row =
@@ -504,7 +521,7 @@ let draw_semantic_fleet_counts grid ~clip ~x ~y ~(theme : Theme.t) ~bg
     (fun idx (g, n, tok) ->
       if !cx < Rect.right clip then begin
         if idx > 0 then incr cx;
-        let s = Printf.sprintf "%s%d" (Glyph.to_utf8 g) n in
+        let s = Glyph.to_utf8 g ^ Int.to_string n in
         let adv =
           Ops_common.put_line ~clip grid ~x:!cx ~y
             ~max_w:(Int.max 0 (Rect.right clip - !cx))
@@ -517,14 +534,22 @@ let draw_semantic_fleet_counts grid ~clip ~x ~y ~(theme : Theme.t) ~bg
   !cx - x
 
 (* Left Company/Group Fleet Tree rail (~36% width) used in Wide/Standard split *)
-let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
+let render_narrow_company_rail ?precomputed_groups ?precomputed_ks
+    ?precomputed_selected_name grid ~(rect : Rect.t) ~(theme : Theme.t)
     ~(model : Model.t) =
   let selected_name =
-    match Fleet_store.selected_keeper_summary model.fleet with
-    | Some k -> Some k.name
-    | None -> None
+    match precomputed_selected_name with
+    | Some sn -> sn
+    | None -> (
+        match Fleet_store.selected_keeper_summary model.fleet with
+        | Some k -> Some k.name
+        | None -> None)
   in
-  let groups = company_groups_for_model ~model in
+  let groups =
+    match precomputed_groups with
+    | Some g -> g
+    | None -> company_groups_for_model ~model
+  in
   let flat_rows =
     match model.fleet.fleet_mode with
     | Nav.Fleet_companies ->
@@ -539,22 +564,20 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
             else hdr :: List.map (fun k -> `Keeper k) g.keepers)
           groups
     | Nav.Fleet_attention | Nav.Fleet_pulse_wall ->
-        List.map (fun k -> `Keeper k) (Fleet_store.filtered_keepers model.fleet)
+        let ks =
+          match precomputed_ks with
+          | Some xs -> xs
+          | None -> Fleet_store.filtered_keepers model.fleet
+        in
+        List.map (fun k -> `Keeper k) ks
   in
-  let total = List.length flat_rows in
+  let arr = Array.of_list flat_rows in
+  let total = Array.length arr in
   if total = 0 then
     Ops_common.draw_observed_empty grid ~rect ~theme ~lang:model.lang
       model.fleet.keepers
       ~empty_msg:(Say.make ~ko:"표시할 키퍼가 없습니다" ~en:"No keepers match filter")
   else
-    let has_any_spark =
-      List.exists
-        (function
-          | `Keeper (k : Wire_fleet.keeper_summary) ->
-              Option.is_some (Fleet_store.turn_pulse model.fleet k.name)
-          | `Company _ -> false)
-        flat_rows
-    in
     let rail_context_fill (k : Wire_fleet.keeper_summary) =
       match Observed.to_option k.context with
       | Some reading -> (
@@ -565,33 +588,49 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
               None)
       | None -> None
     in
-    let has_any_ctx =
-      List.exists
-        (function
-          | `Keeper (k : Wire_fleet.keeper_summary) ->
-              Option.is_some (rail_context_fill k)
-          | `Company _ -> false)
-        flat_rows
-    in
+    let has_any_spark_r = ref false in
+    let has_any_ctx_r = ref false in
+    let trail_col_w_r = ref 0 in
+    let sel_row_idx_r = ref None in
+    let has_any_incidents = Incidents.active_count model.incidents > 0 in
+    let rec_glyph_w = Grapheme.display_width (Glyph.to_utf8 Glyph.Recovered) in
+    for i = 0 to total - 1 do
+      match Array.unsafe_get arr i with
+      | `Company (grp, collapsed) ->
+          if
+            collapsed
+            && Option.is_none !sel_row_idx_r
+            && Option.equal String.equal model.fleet.selected_collapsed_company
+                 (Some grp.company)
+          then sel_row_idx_r := Some i
+      | `Keeper k ->
+          if
+            Option.is_none !sel_row_idx_r
+            && Option.is_none model.fleet.selected_collapsed_company
+            &&
+            match selected_name with
+            | Some sn -> String.equal k.name sn
+            | None -> false
+          then sel_row_idx_r := Some i;
+          if
+            (not !has_any_spark_r)
+            && Option.is_some (Fleet_store.turn_pulse model.fleet k.name)
+          then has_any_spark_r := true;
+          if (not !has_any_ctx_r) && Option.is_some (rail_context_fill k) then
+            has_any_ctx_r := true;
+          if has_any_incidents then
+            let n = Ops_common.keeper_incident_count model.incidents k.name in
+            if n > 0 then
+              let w = rec_glyph_w + String.length (Int.to_string n) in
+              if w > !trail_col_w_r then trail_col_w_r := w
+    done;
+    let has_any_spark = !has_any_spark_r in
+    let has_any_ctx = !has_any_ctx_r in
     let has_any_infra =
       Observed.is_value model.infra.sandboxes
       || not (Fleet_store.String_map.is_empty model.fleet.sandbox_profiles)
     in
-    let trail_col_w =
-      List.fold_left
-        (fun acc row ->
-          match row with
-          | `Keeper (k : Wire_fleet.keeper_summary) ->
-              let n = Ops_common.keeper_incident_count model.incidents k.name in
-              if n > 0 then
-                let s =
-                  Printf.sprintf "%s%d" (Glyph.to_utf8 Glyph.Recovered) n
-                in
-                Int.max acc (Grapheme.display_width s)
-              else acc
-          | `Company _ -> acc)
-        0 flat_rows
-    in
+    let trail_col_w = !trail_col_w_r in
     let spark_w = if has_any_spark && rect.w >= 40 then 5 else 0 in
     let ctx_w = if has_any_ctx && rect.w >= 34 then 8 else 0 in
     let infra_w = if has_any_infra && rect.w >= 26 then 4 else 0 in
@@ -641,43 +680,77 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
     end;
     let body_y = rect.y + header_h in
     let body_h = Int.max 0 (rect.h - header_h) in
-    let arr = Array.of_list flat_rows in
-    let sel_row_idx =
-      let rec find i =
-        if i >= total then None
-        else
-          match arr.(i), model.fleet.selected_collapsed_company, selected_name with
-          | `Company (grp, true), Some sc, _ when String.equal grp.company sc ->
-              Some i
-          | `Keeper k, None, Some sn when String.equal k.name sn -> Some i
-          | _ -> find (i + 1)
-      in
-      find 0
-    in
+    let sel_row_idx = !sel_row_idx_r in
     let start, _ =
       Table.compute_viewport ~total_rows:total ~viewport_rows:body_h
         ~scroll:model.fleet.scroll_offset ~selected:sel_row_idx
     in
     let visible = Int.min body_h (total - start) in
+    let rail_focused = Model.pane_focused model 0 in
+    let s1_bg = Color.of_rgb theme.surface_1 in
+    let s2_bg = Color.of_rgb theme.surface_2 in
+    let s1_pri_st = Typography.primary ~bg:s1_bg theme in
+    let s1_struct_st = Typography.structure ~bg:s1_bg theme in
+    let s1_whisper_ni_st = Typography.whisper ~bg:s1_bg ~italic:false theme in
+    let s1_st_ok_b = Typography.status ~bg:s1_bg ~bold:true theme Theme.Status_ok in
+    let s1_st_act_b = Typography.status ~bg:s1_bg ~bold:true theme Theme.Status_active in
+    let s1_st_attn_b = Typography.status ~bg:s1_bg ~bold:true theme Theme.Status_attention in
+    let s1_st_crit_b = Typography.status ~bg:s1_bg ~bold:true theme Theme.Status_critical in
+    let s1_st_ai_b = Typography.status ~bg:s1_bg ~bold:true theme Theme.Status_ai in
+    let s1_st_hist_b = Typography.status ~bg:s1_bg ~bold:true theme Theme.Status_historical in
+    let s1_status_bold = function
+      | Theme.Status_ok -> s1_st_ok_b
+      | Theme.Status_active -> s1_st_act_b
+      | Theme.Status_attention -> s1_st_attn_b
+      | Theme.Status_critical -> s1_st_crit_b
+      | Theme.Status_ai -> s1_st_ai_b
+      | Theme.Status_historical -> s1_st_hist_b
+    in
+    let s1_st_ok = Typography.status ~bg:s1_bg theme Theme.Status_ok in
+    let s1_st_act = Typography.status ~bg:s1_bg theme Theme.Status_active in
+    let s1_st_attn = Typography.status ~bg:s1_bg theme Theme.Status_attention in
+    let s1_st_crit = Typography.status ~bg:s1_bg theme Theme.Status_critical in
+    let s1_st_ai = Typography.status ~bg:s1_bg theme Theme.Status_ai in
+    let s1_st_hist = Typography.status ~bg:s1_bg theme Theme.Status_historical in
+    let s1_status_plain = function
+      | Theme.Status_ok -> s1_st_ok
+      | Theme.Status_active -> s1_st_act
+      | Theme.Status_attention -> s1_st_attn
+      | Theme.Status_critical -> s1_st_crit
+      | Theme.Status_ai -> s1_st_ai
+      | Theme.Status_historical -> s1_st_hist
+    in
+    let has_any_attn = Attention.count model.attention > 0 in
+    let s2_struct_st = Typography.structure ~bg:s2_bg theme in
+    let s2_struct_bold_st = Typography.structure ~bg:s2_bg ~bold:true theme in
+    let s2_accent_bold_st = Typography.accent ~bg:s2_bg ~bold:true theme in
+    let s2_whisper_st = Typography.whisper ~bg:s2_bg theme in
+    let reserved_right =
+      1
+      + (if trail_col_w > 0 then trail_col_w + 1 else 0)
+      + (if spark_w > 0 then spark_w + 1 else 0)
+      + (if ctx_w > 0 then ctx_w + 1 else 0)
+      + (if infra_w > 0 then infra_w + 1 else 0)
+    in
+    let name_x = rect.x + 4 in
+    let name_w = Int.max 6 (rect.w - 4 - reserved_right) in
     for i = 0 to visible - 1 do
       let idx = start + i in
       let py = body_y + i in
       let row_rect = Rect.make ~x:rect.x ~y:py ~w:rect.w ~h:1 in
-      match arr.(idx) with
+      match Array.unsafe_get arr idx with
       | `Company (grp, collapsed) ->
           let is_sel_company =
             collapsed
             && Option.equal String.equal model.fleet.selected_collapsed_company
                  (Some grp.company)
           in
-          let rail_focused = Model.pane_focused model 0 in
+          let use_sel_bg = is_sel_company && rail_focused in
           let bg =
-            if is_sel_company && rail_focused then
-              Color.of_rgb theme.selection_bg
-            else Color.of_rgb theme.surface_2
+            if use_sel_bg then Color.of_rgb theme.selection_bg else s2_bg
           in
           Cell_grid.fill_rect ~clip:rect grid ~rect:row_rect
-            ~style:(Typography.structure ~bg theme) ();
+            ~style:(if use_sel_bg then Typography.structure ~bg theme else s2_struct_st) ();
           if is_sel_company && rect.w >= 1 then begin
             let rail_color =
               if rail_focused then theme.accent else theme.border_inactive
@@ -703,14 +776,13 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
               match grp.turns_24h > 0, grp.cost_24h_usd > 0.005 with
               | true, true ->
                   Printf.sprintf "%dt $%.1f" grp.turns_24h grp.cost_24h_usd
-              | true, false -> Printf.sprintf "%dt" grp.turns_24h
+              | true, false -> Int.to_string grp.turns_24h ^ "t"
               | false, true -> Printf.sprintf "$%.2f" grp.cost_24h_usd
               | false, false -> ""
             in
-            let parts =
-              List.filter (fun s -> String.length s > 0) [ infra; turns_cost ]
-            in
-            String.concat " " parts
+            if String.length infra = 0 then turns_cost
+            else if String.length turns_cost = 0 then infra
+            else infra ^ " " ^ turns_cost
           in
           let extra_w = Grapheme.display_width extra_meta in
           let show_extra = extra_w > 0 && rect.w >= counts_w + extra_w + 22 in
@@ -720,19 +792,22 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
           let max_left = Int.max 8 (rect.w - right_total_w - 4) in
           let adv_arr =
             Ops_common.put_line ~clip:row_rect grid ~x:(rect.x + 1) ~y:py
-              ~max_w:2 ~style:(Typography.accent ~bg ~bold:true theme)
+              ~max_w:2
+              ~style:
+                (if use_sel_bg then Typography.accent ~bg ~bold:true theme
+                 else s2_accent_bold_st)
               (arrow ^ " ")
           in
           let label_st =
-            if is_sel_company && rail_focused then Typography.anchor ~bg theme
-            else Typography.structure ~bg ~bold:true theme
+            if use_sel_bg then Typography.anchor ~bg theme
+            else s2_struct_bold_st
           in
           ignore
             (Ops_common.put_line ~clip:row_rect grid
                ~x:(rect.x + 1 + adv_arr) ~y:py
                ~max_w:(Int.max 6 (max_left - adv_arr))
                ~style:label_st
-               (Printf.sprintf "%s (%d)" grp.company (List.length grp.keepers)));
+               (grp.company ^ " (" ^ Int.to_string (List.length grp.keepers) ^ ")"));
           let rx = ref (Rect.right row_rect - 1) in
           if counts_w > 0 && rect.w > counts_w + 12 then begin
             rx := !rx - counts_w;
@@ -745,7 +820,8 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
             rx := !rx - extra_w;
             ignore
               (Ops_common.put_line ~clip:row_rect grid ~x:!rx ~y:py
-                 ~max_w:extra_w ~style:(Typography.whisper ~bg theme)
+                 ~max_w:extra_w
+                 ~style:(if use_sel_bg then Typography.whisper ~bg theme else s2_whisper_st)
                  extra_meta)
           end
       | `Keeper k ->
@@ -756,64 +832,67 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
             | Some sn -> String.equal k.name sn
             | None -> false
           in
-          let rail_focused = Model.pane_focused model 0 in
-          let bg_rgb =
-            if is_sel && rail_focused then theme.selection_bg
-            else if is_sel then theme.surface_2
-            else theme.surface_1
+          let bg, base_st, struct_st, whisper_ni_st =
+            if is_sel then begin
+              let bg =
+                if rail_focused then Color.of_rgb theme.selection_bg else s2_bg
+              in
+              let base_st =
+                if rail_focused then Typography.anchor ~bg theme
+                else Typography.primary ~bg theme
+              in
+              Cell_grid.fill_rect ~clip:rect grid ~rect:row_rect ~style:base_st ();
+              let rail_color =
+                if rail_focused then theme.accent else theme.border_inactive
+              in
+              Card.draw_left_rail ~bg ~color:rail_color grid ~x:rect.x ~y:py
+                ~h:1 ~theme;
+              ( bg,
+                base_st,
+                Typography.structure ~bg theme,
+                Typography.whisper ~bg ~italic:false theme )
+            end
+            else (s1_bg, s1_pri_st, s1_struct_st, s1_whisper_ni_st)
           in
-          let bg = Color.of_rgb bg_rgb in
-          let base_st =
-            if is_sel && rail_focused then Typography.anchor ~bg theme
-            else if is_sel then Typography.primary ~bg theme
-            else Typography.primary ~bg theme
+          let has_attn =
+            has_any_attn && Ops_common.keeper_has_attention model.attention k.name
           in
-          Cell_grid.fill_rect ~clip:rect grid ~rect:row_rect ~style:base_st ();
-          let has_attn = Ops_common.keeper_has_attention model.attention k.name in
           let path_rest = Fleet_store.path_rest_for ~keeper:k model.fleet in
           let glyph, tone, _ =
             keeper_row_status ~has_attention:has_attn ?path_rest k
           in
-          (* Calm v2.5 selection: Left_rail (▎) in accent Bold when focused,
-             muted border_inactive when focus moved to Preview/Composer. *)
-          if is_sel then begin
-            let rail_color =
-              if rail_focused then theme.accent else theme.border_inactive
-            in
-            Card.draw_left_rail ~bg ~color:rail_color grid ~x:rect.x ~y:py
-              ~h:1 ~theme
-          end;
+          let glyph_st =
+            if is_sel then Typography.status ~bg ~bold:true theme tone
+            else s1_status_bold tone
+          in
           Cell_grid.put_glyph ~clip:row_rect grid ~x:(rect.x + 2) ~y:py
-            ~style:(Typography.status ~bg ~bold:true theme tone)
-            glyph;
-          let trail_n = Ops_common.keeper_incident_count model.incidents k.name in
+            ~style:glyph_st glyph;
           let trail_str =
-            if trail_n > 0 then
-              Printf.sprintf "%s%d" (Glyph.to_utf8 Glyph.Recovered) trail_n
+            if trail_col_w > 0 then
+              let trail_n =
+                Ops_common.keeper_incident_count model.incidents k.name
+              in
+              if trail_n > 0 then
+                Glyph.to_utf8 Glyph.Recovered ^ Int.to_string trail_n
+              else ""
             else ""
           in
-          let trail_w = Grapheme.display_width trail_str in
-          let reserved_right =
-            1
-            + (if trail_col_w > 0 then trail_col_w + 1 else 0)
-            + (if spark_w > 0 then spark_w + 1 else 0)
-            + (if ctx_w > 0 then ctx_w + 1 else 0)
-            + (if infra_w > 0 then infra_w + 1 else 0)
-          in
-          let name_x = rect.x + 4 in
-          let name_w = Int.max 6 (rect.w - 4 - reserved_right) in
           ignore
-            (Ops_common.put_line ~clip:row_rect grid ~x:name_x ~y:py
-               ~max_w:name_w ~style:base_st k.name);
+            (Cell_grid.put_text ~clip:row_rect grid ~x:name_x ~y:py
+               ~style:base_st
+               (Grapheme.truncate_to_width ~max_width:name_w
+                  (Text_util.sanitize_single_line k.name)));
           let rx = ref (Rect.right row_rect - 1) in
           if trail_col_w > 0 then begin
             rx := !rx - trail_col_w;
-            if trail_w > 0 then
+            if String.length trail_str > 0 then
               ignore
-                (Ops_common.put_line ~clip:row_rect grid ~x:!rx ~y:py
-                   ~max_w:trail_col_w
-                   ~style:(Typography.status ~bg theme Theme.Status_historical)
-                   trail_str);
+                (Cell_grid.put_text ~clip:row_rect grid ~x:!rx ~y:py
+                   ~style:
+                     (if is_sel then
+                        Typography.status ~bg theme Theme.Status_historical
+                      else s1_st_hist)
+                   (Grapheme.truncate_to_width ~max_width:trail_col_w trail_str));
             rx := !rx - 1
           end;
           if spark_w > 0 then begin
@@ -844,32 +923,39 @@ let render_narrow_company_rail grid ~(rect : Rect.t) ~(theme : Theme.t)
                      ~ratio);
                 let pct_s = Fleet_store.context_fill_label ~estimated ratio in
                 ignore
-                  (Ops_common.put_line ~clip:row_rect grid
-                     ~x:(!rx + bar_w + 1) ~y:py
-                     ~max_w:(ctx_w - bar_w - 1)
-                     ~style:(Typography.structure ~bg theme)
-                     pct_s)
+                  (Cell_grid.put_text ~clip:row_rect grid
+                     ~x:(!rx + bar_w + 1) ~y:py ~style:struct_st
+                     (Grapheme.truncate_to_width
+                        ~max_width:(ctx_w - bar_w - 1) pct_s))
             | None ->
                 ignore
-                  (Ops_common.put_line ~clip:row_rect grid
-                     ~x:(!rx + ctx_w - 1) ~y:py ~max_w:1
-                     ~style:(Typography.whisper ~bg ~italic:false theme)
+                  (Cell_grid.put_text ~clip:row_rect grid
+                     ~x:(!rx + ctx_w - 1) ~y:py ~style:whisper_ni_st
                      (Glyph.to_utf8 Glyph.Missing_absent)));
             rx := !rx - 1
           end;
           if infra_w > 0 then begin
             rx := !rx - infra_w;
             let itag, itone = Ops_common.keeper_sandbox_tag ~model k.name in
+            let ist =
+              if is_sel then Typography.status ~bg theme itone
+              else s1_status_plain itone
+            in
             ignore
-              (Ops_common.put_line ~clip:row_rect grid ~x:!rx ~y:py
-                 ~max_w:infra_w ~style:(Typography.status ~bg theme itone) itag)
+              (Cell_grid.put_text ~clip:row_rect grid ~x:!rx ~y:py ~style:ist
+                 (Grapheme.truncate_to_width ~max_width:infra_w itag))
           end
     done;
     (* Fill spare bottom space cleanly with Fleet Summary & Infra/Turns Rollup *)
     let used_rows = header_h + visible in
     let spare_y = rect.y + used_rows in
     if spare_y < Rect.bottom rect then begin
-      let counts = count_fleet ~model (Fleet_store.filtered_keepers model.fleet) in
+      let ks_for_counts =
+        match precomputed_ks with
+        | Some xs -> xs
+        | None -> Fleet_store.filtered_keepers model.fleet
+      in
+      let counts = count_fleet ~model ks_for_counts in
       let bg = Color.of_rgb theme.surface_1 in
       Card.draw_hairline ~pad_x:1 ~bg grid ~rect ~y:spare_y ~theme;
       if spare_y + 1 < Rect.bottom rect then begin
@@ -1190,7 +1276,6 @@ let render_with_history_rows
           ~theme ~model ~title:(Nav.workspace_label Nav.Keepers) ~reason
     | Rbac.Allowed ->
     let bp = Ops_common.layout_bp model in
-    let all_ks = Fleet_store.filtered_keepers model.fleet in
     let selected_keeper_name_opt = Model.selected_keeper_name model in
     let open_memory_diagram_for_selected =
       Nav.equal_keeper_tab model.fleet.keeper_dive_tab Nav.Keeper_memory
@@ -1226,20 +1311,38 @@ let render_with_history_rows
         Layout.split_h_bp bp rect [ Layout.Fixed left_w; Layout.Flex 1 ]
       with
       | [ left_rect; right_rect ] ->
-          let counts = count_fleet ~model all_ks in
           let groups = company_groups_for_model ~model in
+          let all_ks =
+            match model.fleet.fleet_mode with
+            | Nav.Fleet_companies ->
+                let uncollapsed =
+                  List.concat_map
+                    (fun (g : Wire_fleet.company_group) ->
+                      if
+                        Fleet_store.String_set.mem g.company
+                          model.fleet.collapsed_companies
+                      then []
+                      else g.keepers)
+                    groups
+                in
+                if uncollapsed <> [] then uncollapsed
+                else List.concat_map (fun (g : Wire_fleet.company_group) -> g.keepers) groups
+            | Nav.Fleet_attention | Nav.Fleet_pulse_wall ->
+                Fleet_store.filtered_keepers model.fleet
+          in
+          let counts = count_fleet ~model all_ks in
           let stale_roster = Observed.is_stale model.fleet.keepers in
           let roster_spec : Card.spec =
             {
               (Card.default_spec
                  ~title:
-                   (Printf.sprintf "%d %s" (List.length all_ks)
-                      (Ops_common.say model ~ko:"키퍼 플릿" ~en:"Keepers Fleet")))
+                   (Int.to_string (List.length all_ks) ^ " "
+                    ^ Ops_common.say model ~ko:"키퍼 플릿" ~en:"Keepers Fleet"))
               with
               subtitle =
                 Some
-                  (Printf.sprintf "%d %s" (List.length groups)
-                     (Ops_common.say model ~ko:"조직" ~en:"companies"));
+                  (Int.to_string (List.length groups) ^ " "
+                   ^ Ops_common.say model ~ko:"조직" ~en:"companies");
               badge =
                 (if stale_roster then
                    Some
@@ -1332,7 +1435,10 @@ let render_with_history_rows
             split_unreadable_area ~model left_inner
           in
           if not (Rect.is_empty rail_rect) then
-            render_narrow_company_rail grid ~rect:rail_rect ~theme ~model;
+            render_narrow_company_rail ~precomputed_groups:groups
+              ~precomputed_ks:all_ks
+              ~precomputed_selected_name:selected_keeper_name_opt grid
+              ~rect:rail_rect ~theme ~model;
           draw_unreadable_keepers grid ~rect:unreadable_rect ~theme ~model;
           (match selected_keeper_name_opt with
           | Some name ->
@@ -1354,6 +1460,7 @@ let render_with_history_rows
                      ~en:"Select a keeper from the fleet roster"))
       | _ -> ()
     else
+      let all_ks = Fleet_store.filtered_keepers model.fleet in
       let hc = Fleet_store.fleet_health_counts all_ks in
       let counts = count_fleet ~model all_ks in
       let stale_roster = Observed.is_stale model.fleet.keepers in

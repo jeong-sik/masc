@@ -279,6 +279,7 @@ val total_turns_24h : now_unix:float -> t -> int option
     across keepers in the fleet with turn pulse data, or [None] when no keeper
     has pulse data yet. *)
 val find_keeper : name:string -> t -> Wire_fleet.keeper_summary option
+val company_count : t -> int
 val selected_keeper_summary : t -> Wire_fleet.keeper_summary option
 val selected_company_keeper : t -> Wire_fleet.keeper_summary option
 (** Resolve the selected keeper across {!company_groups} regardless of

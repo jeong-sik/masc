@@ -77,15 +77,31 @@ type cache_key = {
   k_unicode : bool;
 }
 
-let equal_cache_key a b =
-  Int.equal a.k_width b.k_width
-  && Bool.equal a.k_unicode b.k_unicode
-  && String.equal a.k_title b.k_title
-  && String.equal a.k_subtitle b.k_subtitle
-  && String.equal a.k_badge_prefix b.k_badge_prefix
-  && String.equal a.k_badge_text b.k_badge_text
-  && String.equal a.k_hotkey b.k_hotkey
-  && String.equal a.k_footer b.k_footer
+let opt_str_equal s = function
+  | Some v -> String.equal s v
+  | None -> String.equal s ""
+
+let matches_spec_key ~width (spec : spec) (k : cache_key) =
+  Int.equal k.k_width width
+  && Bool.equal k.k_unicode spec.unicode_borders
+  && String.equal k.k_title spec.title
+  && opt_str_equal k.k_subtitle spec.subtitle
+  && opt_str_equal k.k_hotkey spec.hotkey
+  && opt_str_equal k.k_footer spec.footer_hint
+  &&
+  match spec.badge with
+  | None -> String.equal k.k_badge_text "" && String.equal k.k_badge_prefix ""
+  | Some b -> (
+      String.equal k.k_badge_text b.text
+      &&
+      match b.glyph with
+      | None -> String.equal k.k_badge_prefix ""
+      | Some g ->
+          let pfx =
+            if spec.unicode_borders then Glyph.to_utf8 g
+            else Glyph.to_ascii_fallback g
+          in
+          String.equal k.k_badge_prefix pfx)
 
 module Cache = struct
   type entry = {
@@ -139,15 +155,21 @@ module Cache = struct
       evictions = t.evictions;
     }
 
-  let find_or_build t key build =
+  let find_or_build_spec t ~width ~(spec : spec) ~make_key ~build =
     t.tick <- t.tick + 1;
-    match List.find_opt (fun e -> equal_cache_key e.key key) t.entries with
+    let rec scan = function
+      | [] -> None
+      | e :: rest ->
+          if matches_spec_key ~width spec e.key then Some e else scan rest
+    in
+    match scan t.entries with
     | Some e ->
         e.last_used <- t.tick;
         t.hits <- t.hits + 1;
         e.geom
     | None ->
         t.misses <- t.misses + 1;
+        let key = make_key () in
         let geom = build () in
         let fresh = { key; geom; last_used = t.tick } in
         if List.length t.entries >= t.capacity then begin
@@ -297,6 +319,17 @@ let put_border_glyph grid ~clip ~x ~y ~style ~unicode g =
       Cell_grid.put_ascii ~clip grid ~x ~y ~style s.[0]
     else ignore (Cell_grid.put_text ~clip grid ~x ~y ~style s)
 
+let border_cell_glyph ~unicode g =
+  let s = if unicode then Glyph.to_utf8 g else Glyph.to_ascii_fallback g in
+  if String.length s = 1 then Cell_grid.Ascii (String.unsafe_get s 0)
+  else Cell_grid.Utf8 s
+
+let fill_border_h grid ~clip ~x ~y ~w ~style ~unicode g =
+  if w > 0 then
+    Cell_grid.fill_rect ~clip grid
+      ~rect:(Rect.make ~x ~y ~w ~h:1)
+      ~style ~glyph:(border_cell_glyph ~unicode g) ()
+
 let draw ?cache grid ~(rect : Rect.t) ~(theme : Theme.t) (spec : spec) =
   if rect.w < 2 || rect.h < 2 then Rect.empty
   else
@@ -309,25 +342,26 @@ let draw ?cache grid ~(rect : Rect.t) ~(theme : Theme.t) (spec : spec) =
     let fill_style = Style.make ~fg:(Color.of_rgb theme.text_primary) ~bg () in
     Cell_grid.fill_rect grid ~rect ~style:fill_style ();
     let unicode = spec.unicode_borders in
-    let key =
-      {
-        k_width = rect.w;
-        k_title = spec.title;
-        k_subtitle = (match spec.subtitle with Some s -> s | None -> "");
-        k_badge_prefix =
-          (match spec.badge with
-           | Some { glyph = Some g; _ } -> glyph_str ~unicode g
-           | Some { glyph = None; _ } | None -> "");
-        k_badge_text =
-          (match spec.badge with Some b -> b.text | None -> "");
-        k_hotkey = (match spec.hotkey with Some h -> h | None -> "");
-        k_footer = (match spec.footer_hint with Some f -> f | None -> "");
-        k_unicode = unicode;
-      }
-    in
     let geom =
       match cache with
-      | Some c -> Cache.find_or_build c key (fun () -> build_geometry ~width:rect.w spec)
+      | Some c ->
+          Cache.find_or_build_spec c ~width:rect.w ~spec
+            ~make_key:(fun () ->
+              {
+                k_width = rect.w;
+                k_title = spec.title;
+                k_subtitle = (match spec.subtitle with Some s -> s | None -> "");
+                k_badge_prefix =
+                  (match spec.badge with
+                   | Some { glyph = Some g; _ } -> glyph_str ~unicode g
+                   | Some { glyph = None; _ } | None -> "");
+                k_badge_text =
+                  (match spec.badge with Some b -> b.text | None -> "");
+                k_hotkey = (match spec.hotkey with Some h -> h | None -> "");
+                k_footer = (match spec.footer_hint with Some f -> f | None -> "");
+                k_unicode = unicode;
+              })
+            ~build:(fun () -> build_geometry ~width:rect.w spec)
       | None -> build_geometry ~width:rect.w spec
     in
     let right_x = Rect.right rect - 1 in
@@ -357,18 +391,23 @@ let draw ?cache grid ~(rect : Rect.t) ~(theme : Theme.t) (spec : spec) =
       ~unicode g_bl;
     put_border_glyph grid ~clip:rect ~x:right_x ~y:bottom_y ~style:border_style
       ~unicode g_br;
-    for x = rect.x + 1 to right_x - 1 do
-      put_border_glyph grid ~clip:rect ~x ~y:rect.y ~style:border_style
-        ~unicode g_h;
-      put_border_glyph grid ~clip:rect ~x ~y:bottom_y ~style:border_style
-        ~unicode g_h
-    done;
-    for y = rect.y + 1 to bottom_y - 1 do
-      put_border_glyph grid ~clip:rect ~x:rect.x ~y ~style:border_style
-        ~unicode g_v;
-      put_border_glyph grid ~clip:rect ~x:right_x ~y ~style:border_style
-        ~unicode g_v
-    done;
+    let horiz_w = right_x - rect.x - 1 in
+    if horiz_w > 0 then begin
+      fill_border_h grid ~clip:rect ~x:(rect.x + 1) ~y:rect.y ~w:horiz_w
+        ~style:border_style ~unicode g_h;
+      fill_border_h grid ~clip:rect ~x:(rect.x + 1) ~y:bottom_y ~w:horiz_w
+        ~style:border_style ~unicode g_h
+    end;
+    let vert_h = bottom_y - rect.y - 1 in
+    if vert_h > 0 then begin
+      let vg = border_cell_glyph ~unicode g_v in
+      Cell_grid.fill_rect ~clip:rect grid
+        ~rect:(Rect.make ~x:rect.x ~y:(rect.y + 1) ~w:1 ~h:vert_h)
+        ~style:border_style ~glyph:vg ();
+      Cell_grid.fill_rect ~clip:rect grid
+        ~rect:(Rect.make ~x:right_x ~y:(rect.y + 1) ~w:1 ~h:vert_h)
+        ~style:border_style ~glyph:vg ()
+    end;
     (* Embed left title + subtitle into top border. Focused cards lead with an
        accent Focus_caret chevron and bright anchor title; unfocused cards recede
        to muted structure text so active focus is unmistakable at a glance. *)
@@ -488,25 +527,23 @@ let draw_hairline ?(pad_x = 0) ?label ?(focused = true) ?(unicode = true) ?bg
       let ellipsis = if unicode then "…" else "." in
       match label with
       | None ->
-          for x = x0 to x0 + w - 1 do
-            put_border_glyph grid ~clip ~x ~y ~style:subtle_style ~unicode
-              Glyph.Box_h
-          done
+          fill_border_h grid ~clip ~x:x0 ~y ~w ~style:subtle_style ~unicode
+            Glyph.Box_h
       | Some raw ->
           let lbl = String.trim raw in
           if String.length lbl = 0 then
-            for x = x0 to x0 + w - 1 do
-              put_border_glyph grid ~clip ~x ~y ~style:subtle_style ~unicode
-                Glyph.Box_h
-            done
-          else if w < 6 then
+            fill_border_h grid ~clip ~x:x0 ~y ~w ~style:subtle_style ~unicode
+              Glyph.Box_h
+          else if w < 6 then begin
             let adv =
               Cell_grid.put_text ~clip grid ~x:x0 ~y ~style:lbl_style
                 (Grapheme.truncate_to_width ~max_width:w ~ellipsis lbl)
             in
-            for x = x0 + adv to x0 + w - 1 do
-              Cell_grid.put_ascii ~clip grid ~x ~y ~style:labeled_line_style ' '
-            done
+            if adv < w then
+              Cell_grid.fill_rect ~clip grid
+                ~rect:(Rect.make ~x:(x0 + adv) ~y ~w:(w - adv) ~h:1)
+                ~style:labeled_line_style ()
+          end
           else
             let marker =
               if focused then
@@ -535,10 +572,9 @@ let draw_hairline ?(pad_x = 0) ?label ?(focused = true) ?(unicode = true) ?bg
             if gap_x < x0 + w then begin
               Cell_grid.put_ascii ~clip grid ~x:gap_x ~y
                 ~style:labeled_line_style ' ';
-              for x = gap_x + 1 to x0 + w - 1 do
-                put_border_glyph grid ~clip ~x ~y ~style:labeled_line_style
-                  ~unicode Glyph.Box_h
-              done
+              let rem_w = x0 + w - (gap_x + 1) in
+              fill_border_h grid ~clip ~x:(gap_x + 1) ~y ~w:rem_w
+                ~style:labeled_line_style ~unicode Glyph.Box_h
             end
 
 let legacy_rule_label s =

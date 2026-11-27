@@ -2290,9 +2290,32 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
   let inf = model.infra in
   let vis_logs = Infra_store.visible_logs inf in
   let vis_events = Infra_store.visible_activity_events inf in
-  let vis_timeline = Infra_store.visible_timeline inf in
-  let events_n = List.length vis_events in
-  let logs_n = List.length vis_logs in
+  let events_n =
+    if vis_events = [] then 0 else List.length vis_events
+  in
+  let timeline_source, logs_n =
+    match inf.source_filter with
+    | Infra_store.Source_logs ->
+        let arr = Array.of_list vis_logs in
+        (`Logs arr, Array.length arr)
+    | Infra_store.Source_events ->
+        (`Events (Array.of_list vis_events), List.length vis_logs)
+    | Infra_store.Source_all ->
+        if events_n = 0 then
+          let arr = Array.of_list vis_logs in
+          (`Logs arr, Array.length arr)
+        else if vis_logs = [] then
+          (`Events (Array.of_list vis_events), 0)
+        else
+          ( `Mixed (Array.of_list (Infra_store.visible_timeline inf)),
+            List.length vis_logs )
+  in
+  let timeline_len =
+    match timeline_source with
+    | `Logs arr -> Array.length arr
+    | `Events arr -> Array.length arr
+    | `Mixed arr -> Array.length arr
+  in
   let bar_rect, body_rect =
     match Layout.split_v rect [ Layout.Fixed 1; Layout.Flex 1 ] with
     | [ a; b ] -> (a, b)
@@ -2404,27 +2427,28 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
       [
         {
           H.label =
-            Printf.sprintf "%s (%d)"
-              (Say.resolve lang (Say.make ~ko:"전체" ~en:"All"))
-              (events_n + logs_n);
+            (match lang with Say.Lang_ko -> "전체 (" | Say.Lang_en -> "All (")
+            ^ Int.to_string (events_n + logs_n) ^ ")";
           active = src_is_all;
           tone = Some Theme.Status_active;
           glyph = Some Glyph.Live_healthy;
         };
         {
           H.label =
-            Printf.sprintf "%s (%d)"
-              (Say.resolve lang (Say.make ~ko:"서버 로그" ~en:"Server Logs"))
-              logs_n;
+            (match lang with
+             | Say.Lang_ko -> "서버 로그 ("
+             | Say.Lang_en -> "Server Logs (")
+            ^ Int.to_string logs_n ^ ")";
           active = src_is_logs;
           tone = Some Theme.Status_ok;
           glyph = None;
         };
         {
           H.label =
-            Printf.sprintf "%s (%d)"
-              (Say.resolve lang (Say.make ~ko:"MASC 이벤트" ~en:"MASC Events"))
-              events_n;
+            (match lang with
+             | Say.Lang_ko -> "MASC 이벤트 ("
+             | Say.Lang_en -> "MASC Events (")
+            ^ Int.to_string events_n ^ ")";
           active = src_is_events;
           tone = Some Theme.Status_ai;
           glyph = None;
@@ -2467,9 +2491,10 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
     @ [
         {
           H.label =
-            Printf.sprintf "[a] %s (%d)"
-              (Say.resolve lang (Say.make ~ko:"활동" ~en:"Acting"))
-              (List.length acting_list);
+            (match lang with
+             | Say.Lang_ko -> "[a] 활동 ("
+             | Say.Lang_en -> "[a] Acting (")
+            ^ Int.to_string (List.length acting_list) ^ ")";
           active = inf.acting_rail_open;
           tone =
             Some
@@ -2518,7 +2543,7 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
             (Say.make ~ko:"실시간 활동 · 시스템 로그" ~en:"Activity & System Logs")))
   in
   if not (Rect.is_empty stream_inner) then begin
-    if vis_timeline = [] then
+    if timeline_len = 0 then
       H.draw_empty_notice ~grid ~rect:(H.pad_content ~bp stream_inner) ~theme
         (if inf.logs_loaded || inf.activity_events <> [] then
            Say.resolve lang
@@ -2587,106 +2612,110 @@ let render_activity_logs ~(model : Model.t) ~cache ~(rect : Rect.t)
           };
         ]
       in
-      let rows =
-        List.mapi
-          (fun idx entry ->
-            match entry with
-            | Infra_store.Entry_log e ->
-                let lvl_txt, lvl_tone = log_level_badge e.level in
-                let keeper_txt =
-                  match e.keeper with
-                  | Some k when not (String.equal (String.trim k) "") -> k
-                  | Some _ | None -> Glyph.to_utf8 Glyph.Missing_absent
-                in
-                let comp_txt =
-                  if not (String.equal (String.trim e.module_name) "") then
-                    e.module_name
-                  else e.source
-                in
-                {
-                  Table.id = Printf.sprintf "log:%d" e.seq;
-                  cells =
-                    [
-                      ( "time"
-                      , Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
-                          ~attrs:Attr.italic
-                          (H.format_local_hhmmss
-                             ~tz_offset_sec:model.tz_offset_sec e.ts) );
-                      ( "src"
-                      , Table.Badge
-                          {
-                            glyph = None;
-                            text = "LOG";
-                            tone = Theme.Status_historical;
-                          } );
-                      ( "lvl"
-                      , Table.Badge
-                          { glyph = None; text = lvl_txt; tone = lvl_tone } );
-                      ( "comp"
-                      , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
-                          comp_txt );
-                      ( "keeper"
-                      , Table.text_cell ~fg:(Color.of_rgb theme.accent)
-                          keeper_txt );
-                      ( "summary"
-                      , Table.text_cell (H.sanitize_single_line e.message) );
-                    ];
-                }
-            | Infra_store.Entry_event ev ->
-                let kind_lbl = activity_kind_label ev.kind in
-                let kind_tone =
-                  match ev.kind with
-                  | Infra_store.Activity_stream_gap -> Theme.Status_attention
-                  | Infra_store.Activity_tool_call
-                  | Infra_store.Activity_turn_complete
-                  | Infra_store.Activity_agent_core ->
-                      Theme.Status_active
-                in
-                let keeper_txt =
-                  match ev.keeper with
-                  | Some k when not (String.equal (String.trim k) "") -> k
-                  | Some _ | None -> Glyph.to_utf8 Glyph.Missing_absent
-                in
-                let ts_str =
-                  if Float.is_finite ev.at_unix && ev.at_unix > 0.0 then
-                    H.format_local_hhmmss ~tz_offset_sec:model.tz_offset_sec
-                      (Wire_common.format_unix_rfc3339 ev.at_unix)
-                  else Glyph.to_utf8 Glyph.Missing_absent
-                in
-                {
-                  Table.id = Printf.sprintf "evt:%d" idx;
-                  cells =
-                    [
-                      ( "time"
-                      , Table.text_cell ~fg:(Color.of_rgb theme.text_muted)
-                          ~attrs:Attr.italic ts_str );
-                      ( "src"
-                      , Table.Badge
-                          { glyph = None; text = "EVT"; tone = Theme.Status_ai } );
-                      ( "lvl"
-                      , Table.Badge
-                          { glyph = None; text = kind_lbl; tone = kind_tone } );
-                      ( "comp"
-                      , Table.text_cell ~fg:(Color.of_rgb theme.text_secondary)
-                          "observer" );
-                      ( "keeper"
-                      , Table.text_cell ~fg:(Color.of_rgb theme.accent)
-                          keeper_txt );
-                      ( "summary"
-                      , Table.text_cell (H.sanitize_single_line ev.summary) );
-                    ];
-                })
-          vis_timeline
+      let muted_fg = Color.of_rgb theme.text_muted in
+      let sec_fg = Color.of_rgb theme.text_secondary in
+      let acc_fg = Color.of_rgb theme.accent in
+      let absent_glyph = Glyph.to_utf8 Glyph.Missing_absent in
+      let log_src_cell =
+        Table.Badge
+          { glyph = None; text = "LOG"; tone = Theme.Status_historical }
       in
-      let sel = H.clamp_index (List.length vis_timeline) inf.selected_index in
+      let evt_src_cell =
+        Table.Badge { glyph = None; text = "EVT"; tone = Theme.Status_ai }
+      in
+      let obs_comp_cell = Table.text_cell ~fg:sec_fg "observer" in
+      let format_log_row (e : Wire_infra.system_log_entry) =
+        let lvl_txt, lvl_tone = log_level_badge e.level in
+        let keeper_txt =
+          match e.keeper with
+          | Some k when not (String.equal (String.trim k) "") -> k
+          | Some _ | None -> absent_glyph
+        in
+        let comp_txt =
+          if not (String.equal (String.trim e.module_name) "") then
+            e.module_name
+          else e.source
+        in
+        {
+          Table.id = "log:" ^ Int.to_string e.seq;
+          cells =
+            [
+              ( "time"
+              , Table.text_cell ~fg:muted_fg ~attrs:Attr.italic
+                  (H.format_local_hhmmss ~tz_offset_sec:model.tz_offset_sec e.ts)
+              );
+              ("src", log_src_cell);
+              ( "lvl"
+              , Table.Badge { glyph = None; text = lvl_txt; tone = lvl_tone } );
+              ("comp", Table.text_cell ~fg:sec_fg comp_txt);
+              ("keeper", Table.text_cell ~fg:acc_fg keeper_txt);
+              ("summary", Table.text_cell (H.sanitize_single_line e.message));
+            ];
+        }
+      in
+      let format_event_row idx (ev : Infra_store.activity_row) =
+        let kind_lbl = activity_kind_label ev.kind in
+        let kind_tone =
+          match ev.kind with
+          | Infra_store.Activity_stream_gap -> Theme.Status_attention
+          | Infra_store.Activity_tool_call
+          | Infra_store.Activity_turn_complete
+          | Infra_store.Activity_agent_core ->
+              Theme.Status_active
+        in
+        let keeper_txt =
+          match ev.keeper with
+          | Some k when not (String.equal (String.trim k) "") -> k
+          | Some _ | None -> absent_glyph
+        in
+        let ts_str =
+          if Float.is_finite ev.at_unix && ev.at_unix > 0.0 then
+            H.format_local_hhmmss ~tz_offset_sec:model.tz_offset_sec
+              (Wire_common.format_unix_rfc3339 ev.at_unix)
+          else absent_glyph
+        in
+        {
+          Table.id = "evt:" ^ Int.to_string idx;
+          cells =
+            [
+              ("time", Table.text_cell ~fg:muted_fg ~attrs:Attr.italic ts_str);
+              ("src", evt_src_cell);
+              ( "lvl"
+              , Table.Badge
+                  { glyph = None; text = kind_lbl; tone = kind_tone } );
+              ("comp", obs_comp_cell);
+              ("keeper", Table.text_cell ~fg:acc_fg keeper_txt);
+              ("summary", Table.text_cell (H.sanitize_single_line ev.summary));
+            ];
+        }
+      in
+      let row_at idx =
+        match timeline_source with
+        | `Logs arr -> format_log_row (Array.unsafe_get arr idx)
+        | `Events arr -> format_event_row idx (Array.unsafe_get arr idx)
+        | `Mixed arr -> (
+            match Array.unsafe_get arr idx with
+            | Infra_store.Entry_log e -> format_log_row e
+            | Infra_store.Entry_event ev -> format_event_row idx ev)
+      in
+      let sel = H.clamp_index timeline_len inf.selected_index in
       ignore
-        (Table.draw grid ~rect:stream_inner ~theme ~caps:H.default_caps ~lang
-           ~col_gap:(Layout.table_col_gap bp) ~scroll:inf.scroll_offset
-           ~selected:sel ~focused:(Model.pane_focused model 0) ~columns rows)
+        (Table.draw_virtual grid ~rect:stream_inner ~theme ~caps:H.default_caps
+           ~lang ~col_gap:(Layout.table_col_gap bp) ~scroll:inf.scroll_offset
+           ~selected:sel ~focused:(Model.pane_focused model 0) ~columns
+           ~total_rows:timeline_len row_at)
     end
   end;
   (* Right: Structured K/V Detail Card for both Server Logs and MASC Events *)
-  let sel_entry = Infra_store.selected_timeline_entry inf in
+  let sel_entry =
+    if timeline_len = 0 then None
+    else
+      let idx = H.clamp_index timeline_len inf.selected_index in
+      match timeline_source with
+      | `Logs arr -> Some (Infra_store.Entry_log (Array.unsafe_get arr idx))
+      | `Events arr -> Some (Infra_store.Entry_event (Array.unsafe_get arr idx))
+      | `Mixed arr -> Some (Array.unsafe_get arr idx)
+  in
   let det_subtitle =
     match sel_entry with
     | Some (Infra_store.Entry_log e) -> Some ("LOG #" ^ string_of_int e.seq)

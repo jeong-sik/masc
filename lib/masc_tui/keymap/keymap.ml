@@ -1313,8 +1313,68 @@ let collisions () =
 let footer_separator = " · "
 let footer_separator_width = Grapheme.display_width footer_separator
 
-let hint_width (h : footer_hint) =
-  Grapheme.display_width h.key_display + 1 + Grapheme.display_width h.label
+type precomputed_footer_entry = {
+  pf_action : action;
+  pf_priority : int;
+  pf_hint_ko : footer_hint;
+  pf_w_ko : int;
+  pf_hint_en : footer_hint;
+  pf_w_en : int;
+}
+
+let precompute_scope_footer_entries target_scope =
+  List.filter_map
+    (fun (b : binding) ->
+      if equal_scope b.scope target_scope && b.footer_priority > 0 then
+        let key_w = Grapheme.display_width b.key_display in
+        let label_ko = Say.resolve Say.Lang_ko b.hint_label in
+        let label_en = Say.resolve Say.Lang_en b.hint_label in
+        let pf_hint_ko =
+          {
+            key_display = b.key_display;
+            label = label_ko;
+            action = b.action;
+            priority = b.footer_priority;
+          }
+        in
+        let pf_hint_en =
+          {
+            key_display = b.key_display;
+            label = label_en;
+            action = b.action;
+            priority = b.footer_priority;
+          }
+        in
+        Some
+          {
+            pf_action = b.action;
+            pf_priority = b.footer_priority;
+            pf_hint_ko;
+            pf_w_ko = key_w + 1 + Grapheme.display_width label_ko;
+            pf_hint_en;
+            pf_w_en = key_w + 1 + Grapheme.display_width label_en;
+          }
+      else None)
+    bindings
+
+let footer_entries_global = precompute_scope_footer_entries Global
+let footer_entries_unfocused = precompute_scope_footer_entries Unfocused_nav
+let footer_entries_screen_context = precompute_scope_footer_entries Screen_context
+let footer_entries_ask_choice = precompute_scope_footer_entries Ask_choice_focused
+let footer_entries_approval_focused = precompute_scope_footer_entries Approval_strip_focused
+let footer_entries_approval_chords = precompute_scope_footer_entries Approval_strip_chords
+let footer_entries_composer = precompute_scope_footer_entries Composer_focused
+let footer_entries_overlay = precompute_scope_footer_entries Overlay_focused
+
+let footer_entries_for_scope = function
+  | Global -> footer_entries_global
+  | Unfocused_nav -> footer_entries_unfocused
+  | Screen_context -> footer_entries_screen_context
+  | Ask_choice_focused -> footer_entries_ask_choice
+  | Approval_strip_focused -> footer_entries_approval_focused
+  | Approval_strip_chords -> footer_entries_approval_chords
+  | Composer_focused -> footer_entries_composer
+  | Overlay_focused -> footer_entries_overlay
 
 let footer_hints ~scope_chain ~max_width ~lang =
   if max_width <= 0 then []
@@ -1324,33 +1384,28 @@ let footer_hints ~scope_chain ~max_width ~lang =
     List.iter
       (fun scope ->
         List.iter
-          (fun (b : binding) ->
-            if equal_scope b.scope scope && b.footer_priority > 0 then
-              if not (List.exists (equal_action b.action) !seen_actions) then begin
-                seen_actions := b.action :: !seen_actions;
-                candidates :=
-                  {
-                    key_display = b.key_display;
-                    label = Say.resolve lang b.hint_label;
-                    action = b.action;
-                    priority = b.footer_priority;
-                  }
-                  :: !candidates
-              end)
-          bindings)
+          (fun (e : precomputed_footer_entry) ->
+            if not (List.exists (equal_action e.pf_action) !seen_actions) then begin
+              seen_actions := e.pf_action :: !seen_actions;
+              candidates := e :: !candidates
+            end)
+          (footer_entries_for_scope scope))
       scope_chain;
     let sorted =
       List.stable_sort
-        (fun (a : footer_hint) (b : footer_hint) ->
-          Int.compare a.priority b.priority)
+        (fun (a : precomputed_footer_entry) (b : precomputed_footer_entry) ->
+          Int.compare a.pf_priority b.pf_priority)
         (List.rev !candidates)
     in
+    let is_ko = Say.equal_lang lang Say.Lang_ko in
     let rec pack acc used = function
       | [] -> List.rev acc
-      | hint :: rest ->
-          let w = hint_width hint in
+      | e :: rest ->
+          let w = if is_ko then e.pf_w_ko else e.pf_w_en in
           let needed = if acc = [] then w else footer_separator_width + w in
-          if used + needed <= max_width then pack (hint :: acc) (used + needed) rest
+          if used + needed <= max_width then
+            let hint = if is_ko then e.pf_hint_ko else e.pf_hint_en in
+            pack (hint :: acc) (used + needed) rest
           else List.rev acc
     in
     pack [] 0 sorted

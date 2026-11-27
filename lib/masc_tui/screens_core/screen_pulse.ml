@@ -6,6 +6,27 @@ open Masc_tui_store
 
 let caps = Presenter.default_capabilities
 
+let small_int_lut = Array.init 100 Int.to_string
+
+let[@inline] int_s n =
+  if n >= 0 && n < 100 then Array.unsafe_get small_int_lut n
+  else Int.to_string n
+
+let small_pad2_lut =
+  Array.init 100 (fun n ->
+      if n < 10 then Int.to_string n ^ " " else Int.to_string n)
+
+let[@inline] int_pad2_s n =
+  if n >= 0 && n < 100 then Array.unsafe_get small_pad2_lut n
+  else Int.to_string n
+
+let buckets_hdr_str =
+  Glyph.to_utf8 Glyph.Action_required ^ "  " ^ Glyph.to_utf8 Glyph.Live_working
+  ^ "  " ^ Glyph.to_utf8 Glyph.Live_healthy ^ "  "
+  ^ Glyph.to_utf8 Glyph.Live_failing
+
+let sep_dot_space = Glyph.to_utf8 Glyph.Separator_dot ^ " "
+
 (* ---------- Shared Pulse Selectors & Formatters ---------- *)
 
 let attention_items_for_grouping (m : Model.t) =
@@ -116,20 +137,25 @@ let top_contributors_summary (m : Model.t) =
       let score (k : Wire_fleet.keeper_summary) =
         match Observed.to_option k.total_turns with Some n -> n | None -> 0
       in
-      let sorted =
-        List.sort (fun a b -> Int.compare (score b) (score a)) ks
-      in
-      let rec take n acc = function
-        | _ when n <= 0 -> List.rev acc
-        | [] -> List.rev acc
+      let rec top3 b1 b2 b3 = function
+        | [] -> (b1, b2, b3)
         | (k : Wire_fleet.keeper_summary) :: rest ->
             let s = score k in
-            let item =
-              if s > 0 then Printf.sprintf "%s(%d)" k.name s else k.name
+            let better b =
+              match b with None -> true | Some (_, bs) -> s > bs
             in
-            take (n - 1) (item :: acc) rest
+            if better b1 then top3 (Some (k.name, s)) b1 b2 rest
+            else if better b2 then top3 b1 (Some (k.name, s)) b2 rest
+            else if better b3 then top3 b1 b2 (Some (k.name, s)) rest
+            else top3 b1 b2 b3 rest
       in
-      String.concat ", " (take 3 [] sorted)
+      let b1, b2, b3 = top3 None None None ks in
+      let fmt = function
+        | None -> None
+        | Some (name, s) ->
+            Some (if s > 0 then name ^ "(" ^ int_s s ^ ")" else name)
+      in
+      String.concat ", " (List.filter_map fmt [ b1; b2; b3 ])
 
 let format_observed_marker ~lang (obs : _ Observed.t) =
   match obs with
@@ -194,8 +220,12 @@ let put_left_right grid ~(clip : Rect.t) ~y ~left_text ~left_style ~right_text
       else 0
     in
     if rw > 0 then begin
-      let fit_r = Grapheme.truncate_to_width ~max_width:rw right_text in
-      let fw = Grapheme.display_width fit_r in
+      let fit_r, fw =
+        if nat_r <= rw then (right_text, nat_r)
+        else
+          let f = Grapheme.truncate_to_width ~max_width:rw right_text in
+          (f, Grapheme.display_width f)
+      in
       let rx = Rect.right clip - fw in
       if rx >= clip.x + adv + 1 then
         ignore (Cell_grid.put_text ~clip grid ~x:rx ~y ~style:right_style fit_r)
@@ -210,14 +240,15 @@ let verification_outcome_counts (scorecard : Wire_fleet.daily_scorecard) =
   | (None, _ | Some _, None) -> None
 
 let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
-    ~(model : Model.t) ~(groups : Wire_fleet.company_group list) ~bp =
+    ~(model : Model.t) ~(groups : Wire_fleet.company_group list)
+    ~(hero : Model.pulse_hero_metrics) ~(sc : Wire_fleet.daily_scorecard) ~bp =
   if Rect.is_empty rect then ()
   else
     let lang = model.lang in
     let bg = Color.of_rgb theme.surface_1 in
-    let hero = Model.pulse_hero_metrics model in
-    let sc = Model.effective_scorecard model in
-    let task_counts = Work_store.effective_task_counts model.work in
+    let task_counts =
+      lazy (Work_store.effective_task_counts model.work)
+    in
     let verification_counts = verification_outcome_counts sc in
     let anchor_st = Typography.anchor ~bg theme in
     let pri_st = Typography.primary ~bg theme in
@@ -246,18 +277,22 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
     in
     let infra_mix =
       if fleet_vm + fleet_ssh + fleet_dk > 0 then
-        let base = Printf.sprintf "%dvm · %dssh" fleet_vm fleet_ssh in
-        Some (if fleet_dk > 0 then Printf.sprintf "%s · %ddk" base fleet_dk else base)
+        let base = int_s fleet_vm ^ "vm · " ^ int_s fleet_ssh ^ "ssh" in
+        Some (if fleet_dk > 0 then base ^ " · " ^ int_s fleet_dk ^ "dk" else base)
       else
         match heap_summary model with
         | Some h ->
-            Some (Say.resolve lang (Say.make ~ko:("힙 " ^ h) ~en:("Heap " ^ h)))
+            Some
+              (match lang with
+               | Say.Lang_ko -> "힙 " ^ h
+               | Say.Lang_en -> "Heap " ^ h)
         | None -> (
             match Observed.to_option company_count with
             | Some n ->
-                Some (Say.resolve lang
-                  (Say.make ~ko:(Printf.sprintf "%d 조직" n)
-                     ~en:(Printf.sprintf "%d cos" n)))
+                Some
+                  (match lang with
+                   | Say.Lang_ko -> int_s n ^ " 조직"
+                   | Say.Lang_en -> int_s n ^ " cos")
             | None -> None)
     in
     let roster_ks =
@@ -280,30 +315,24 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
     let fleet_count =
       if Observed.is_value model.fleet.fleet_reading
          || Observed.is_value model.fleet.keepers
-      then Printf.sprintf "%d/%d" hero_active_k hero_total_k
+      then int_s hero_active_k ^ "/" ^ int_s hero_total_k
       else format_observed_marker ~lang model.fleet.keepers
     in
     let turns_str =
+      let fmt_turns n =
+        let v = Format_val.format_value Format_val.Count (float_of_int n) in
+        match lang with
+        | Say.Lang_ko -> v ^ " 턴"
+        | Say.Lang_en -> v ^ " turns"
+      in
       match Observed.to_option hero.turns_24h with
-      | Some n ->
-          Say.resolve lang
-            (Say.make
-               ~ko:(Printf.sprintf "%s 턴"
-                      (Format_val.format_value Format_val.Count (float_of_int n)))
-               ~en:(Printf.sprintf "%s turns"
-                      (Format_val.format_value Format_val.Count (float_of_int n))))
+      | Some n -> fmt_turns n
       | None -> (
           match
             Fleet_store.total_turns_24h ~now_unix:model.freshness.last_wall_unix
               model.fleet
           with
-          | Some n ->
-              Say.resolve lang
-                (Say.make
-                   ~ko:(Printf.sprintf "%s 턴"
-                          (Format_val.format_value Format_val.Count (float_of_int n)))
-                   ~en:(Printf.sprintf "%s turns"
-                          (Format_val.format_value Format_val.Count (float_of_int n))))
+          | Some n -> fmt_turns n
           | None ->
               let slot_n =
                 match Observed.to_option model.runtime.runtime_resolved with
@@ -313,10 +342,9 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
                     | Some sh -> sh.counts.total_runtimes
                     | None -> 0)
               in
-              Say.resolve lang
-                (Say.make
-                   ~ko:(Printf.sprintf "슬롯 %d" slot_n)
-                   ~en:(Printf.sprintf "%d slots" slot_n)))
+              match lang with
+              | Say.Lang_ko -> "슬롯 " ^ int_s slot_n
+              | Say.Lang_en -> int_s slot_n ^ " slots")
     in
     let crit_st = Typography.status ~bg ~bold:true theme Theme.Status_critical in
     let cache_pct_opt = Observed.to_option hero.cache_hit_pct in
@@ -368,31 +396,28 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
           Observed.to_option hero.p95_latency_ms )
       with
       | Some c, Some ms ->
-          ( Printf.sprintf "%s · p95 %s"
-              (Format_val.format_value Format_val.Count (float_of_int c))
-              (Format_val.format_value Format_val.Milliseconds ms),
+          ( Format_val.format_value Format_val.Count (float_of_int c)
+            ^ " · p95 "
+            ^ Format_val.format_value Format_val.Milliseconds ms,
             struct_st )
       | Some c, None ->
-          ( Say.resolve lang
-              (Say.make
-                 ~ko:(Printf.sprintf "%s 호출"
-                        (Format_val.format_value Format_val.Count (float_of_int c)))
-                 ~en:(Printf.sprintf "%s calls"
-                        (Format_val.format_value Format_val.Count (float_of_int c)))),
+          let v = Format_val.format_value Format_val.Count (float_of_int c) in
+          ( (match lang with
+             | Say.Lang_ko -> v ^ " 호출"
+             | Say.Lang_en -> v ^ " calls"),
             struct_st )
       | None, Some ms ->
-          ( Printf.sprintf "p95 %s"
-              (Format_val.format_value Format_val.Milliseconds ms),
+          ( "p95 " ^ Format_val.format_value Format_val.Milliseconds ms,
             struct_st )
       | None, None -> (
           match Observed.to_option model.runtime.runtime_probe with
           | Some pr ->
-              ( Say.resolve lang
-                  (Say.make
-                     ~ko:(Printf.sprintf "%d/%d 슬롯" pr.reachable_count
-                            pr.runtimes_count)
-                     ~en:(Printf.sprintf "%d/%d slots" pr.reachable_count
-                            pr.runtimes_count)),
+              let ratio_s =
+                int_s pr.reachable_count ^ "/" ^ int_s pr.runtimes_count
+              in
+              ( (match lang with
+                 | Say.Lang_ko -> ratio_s ^ " 슬롯"
+                 | Say.Lang_en -> ratio_s ^ " slots"),
                 struct_st )
           | None ->
               ( Format_val.format_observed Format_val.Count
@@ -403,33 +428,45 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
     let done_lbl, done_st, done_compact_lbl =
       match Observed.to_option hero.tasks_done_24h with
       | Some n ->
-          ( Say.resolve lang
-              (Say.make
-                 ~ko:(Printf.sprintf "%d 완료" n)
-                 ~en:(Printf.sprintf "%d done" n)),
-            anchor_st,
-            Say.resolve lang
-              (Say.make
-                 ~ko:(Printf.sprintf "%d완료" n)
-                 ~en:(Printf.sprintf "%d done" n)) )
+          let ns = int_s n in
+          let lbl =
+            match lang with
+            | Say.Lang_ko -> ns ^ " 완료"
+            | Say.Lang_en -> ns ^ " done"
+          in
+          let clbl =
+            if not (compact || rect.h <= 3) then lbl
+            else
+              match lang with
+              | Say.Lang_ko -> ns ^ "완료"
+              | Say.Lang_en -> ns ^ " done"
+          in
+          (lbl, anchor_st, clbl)
       | None -> (
           let total_opt =
             match Observed.to_option hero.tasks_done_total with
             | Some _ as v -> v
             | None -> (
-                match task_counts with Some c -> Some c.done_total | None -> None)
+                match Lazy.force task_counts with
+                | Some c -> Some c.done_total
+                | None -> None)
           in
           match total_opt with
           | Some n ->
-              ( Say.resolve lang
-                  (Say.make
-                     ~ko:(Printf.sprintf "누적 %d" n)
-                     ~en:(Printf.sprintf "Total %d" n)),
-                anchor_st,
-                Say.resolve lang
-                  (Say.make
-                     ~ko:(Printf.sprintf "누적 %d" n)
-                     ~en:(Printf.sprintf "Tot %d" n)) )
+              let ns = int_s n in
+              let lbl =
+                match lang with
+                | Say.Lang_ko -> "누적 " ^ ns
+                | Say.Lang_en -> "Total " ^ ns
+              in
+              let clbl =
+                if not (compact || rect.h <= 3) then lbl
+                else
+                  match lang with
+                  | Say.Lang_ko -> "누적 " ^ ns
+                  | Say.Lang_en -> "Tot " ^ ns
+              in
+              (lbl, anchor_st, clbl)
           | None ->
               let m =
                 Format_val.format_observed Format_val.Count
@@ -442,7 +479,9 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
       match Observed.to_option hero.tasks_in_progress with
       | Some _ as v -> v
       | None -> (
-          match task_counts with Some c -> Some c.in_progress | None -> None)
+          match Lazy.force task_counts with
+          | Some c -> Some c.in_progress
+          | None -> None)
     in
     let ver_ratio_opt =
       match verification_counts with
@@ -453,10 +492,12 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
     let ver_badge_str, ver_badge_st =
       match ver_ratio_opt with
       | Some ratio ->
-          ( Say.resolve lang
-              (Say.make ~ko:(Printf.sprintf "24h 검증 %.0f%%" (ratio *. 100.0))
-                 ~en:(Printf.sprintf "24h verify %.0f%%" (ratio *. 100.0)))
-          , if ratio >= 0.8 then ok_st else attn_st )
+          let pct_i = int_of_float (Float.round (ratio *. 100.0)) in
+          let pct_s = int_s pct_i ^ "%" in
+          ( (match lang with
+             | Say.Lang_ko -> "24h 검증 " ^ pct_s
+             | Say.Lang_en -> "24h verify " ^ pct_s),
+            if ratio >= 0.8 then ok_st else attn_st )
       | None when Option.is_some verification_counts ->
           (Say.resolve lang (Say.make ~ko:"24h 판정 0건" ~en:"0 verdicts in 24h"), whisper_st)
       | None -> (format_observed_marker ~lang sc.verifications_passed_24h, whisper_st)
@@ -469,50 +510,54 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
       match model.knowledge.world_memory with
       | Observed.Value { data = wm; _ } ->
           let main =
-            Say.resolve lang
-              (Say.make
-                 ~ko:(Printf.sprintf "%d 주장 · %d 사실" wm.claims_count wm.facts_count)
-                 ~en:(Printf.sprintf "%d claims · %d facts" wm.claims_count wm.facts_count))
+            match lang with
+            | Say.Lang_ko ->
+                int_s wm.claims_count ^ " 주장 · " ^ int_s wm.facts_count ^ " 사실"
+            | Say.Lang_en ->
+                int_s wm.claims_count ^ " claims · " ^ int_s wm.facts_count ^ " facts"
           in
           let conf_s, conf_st =
             if wm.conflicts_count > 0 then
-              ( Say.resolve lang
-                  (Say.make
-                     ~ko:(Printf.sprintf "%s %d 충돌"
-                            (Glyph.to_utf8 Glyph.Action_required)
-                            wm.conflicts_count)
-                     ~en:(Printf.sprintf "%s %d conflicts"
-                            (Glyph.to_utf8 Glyph.Action_required)
-                            wm.conflicts_count)),
+              ( (match lang with
+                 | Say.Lang_ko ->
+                     Glyph.to_utf8 Glyph.Action_required ^ " "
+                     ^ int_s wm.conflicts_count ^ " 충돌"
+                 | Say.Lang_en ->
+                     Glyph.to_utf8 Glyph.Action_required ^ " "
+                     ^ int_s wm.conflicts_count ^ " conflicts"),
                 attn_st )
             else
-              ( Say.resolve lang
-                  (Say.make
-                     ~ko:(Printf.sprintf "%s 0 충돌" (Glyph.to_utf8 Glyph.Live_healthy))
-                     ~en:(Printf.sprintf "%s 0 conflicts" (Glyph.to_utf8 Glyph.Live_healthy))),
+              ( (match lang with
+                 | Say.Lang_ko ->
+                     Glyph.to_utf8 Glyph.Live_healthy ^ " 0 충돌"
+                 | Say.Lang_en ->
+                     Glyph.to_utf8 Glyph.Live_healthy ^ " 0 conflicts"),
                 ok_st )
           in
           (main, anchor_st, conf_s, conf_st)
       | Observed.Failed { reason; _ } ->
-          ( Printf.sprintf "%s %s" (Glyph.to_utf8 Glyph.Live_failing)
-              (Say.resolve lang (Say.make ~ko:"기억 조회 실패" ~en:"Memory failed")),
+          ( Glyph.to_utf8 Glyph.Live_failing ^ " "
+            ^ (match lang with
+               | Say.Lang_ko -> "기억 조회 실패"
+               | Say.Lang_en -> "Memory failed"),
             crit_st,
             reason,
             crit_st )
       | Observed.Loading _ ->
           let wiki_s =
             match Observed.to_option model.knowledge.wiki_index with
-            | Some wi -> Printf.sprintf "Wiki %dp" wi.pages_total
+            | Some wi -> "Wiki " ^ int_s wi.pages_total ^ "p"
             | None ->
-                Printf.sprintf "%s %s"
-                  (Glyph.to_utf8 Glyph.Transport_reconnecting)
-                  (Say.resolve lang (Say.make ~ko:"기억 동기화" ~en:"Memory sync"))
+                Glyph.to_utf8 Glyph.Transport_reconnecting ^ " "
+                ^ (match lang with
+                   | Say.Lang_ko -> "기억 동기화"
+                   | Say.Lang_en -> "Memory sync")
           in
           (wiki_s, anchor_st, "", whisper_st)
       | Observed.Unreported | Observed.Absent ->
           let wiki_s =
             match Observed.to_option model.knowledge.wiki_index with
-            | Some wi -> Printf.sprintf "Wiki %dp" wi.pages_total
+            | Some wi -> "Wiki " ^ int_s wi.pages_total ^ "p"
             | None ->
                 Say.resolve lang
                   (Say.make ~ko:"기억 미보고" ~en:"Memory unreported")
@@ -613,9 +658,8 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
               (* KPI 1: Fleet & Infra *)
               let status_badge, status_st =
                 if failing_total > 0 then
-                  ( Printf.sprintf "%s %d" (Glyph.to_utf8 Glyph.Live_failing)
-                      failing_total,
-                    Typography.status ~bg ~bold:true theme Theme.Status_critical )
+                  ( Glyph.to_utf8 Glyph.Live_failing ^ " " ^ int_s failing_total,
+                    crit_st )
                 else
                   match company_count with
                   | Observed.Value { data = n; stale; _ } ->
@@ -624,9 +668,9 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
                         else Glyph.Live_healthy, ok_st
                       in
                       let icon = Glyph.to_utf8 glyph in
-                      ( Say.resolve lang
-                          (Say.make ~ko:(Printf.sprintf "%s %d조직" icon n)
-                             ~en:(Printf.sprintf "%s %d cos" icon n)),
+                      ( (match lang with
+                         | Say.Lang_ko -> icon ^ " " ^ int_s n ^ "조직"
+                         | Say.Lang_en -> icon ^ " " ^ int_s n ^ " cos"),
                         style )
                   | Observed.Failed _ ->
                       ( Say.resolve lang
@@ -732,10 +776,9 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
           | 2 ->
               (* KPI 3: Tasks & Verification *)
               let goal_chip =
-                Say.resolve lang
-                  (Say.make
-                     ~ko:(Printf.sprintf "%d 목표" hero.active_goals_count)
-                     ~en:(Printf.sprintf "%d goals" hero.active_goals_count))
+                match lang with
+                | Say.Lang_ko -> int_s hero.active_goals_count ^ " 목표"
+                | Say.Lang_en -> int_s hero.active_goals_count ^ " goals"
               in
               put_left_right grid ~clip:r0 ~y:r0.y
                 ~left_text:
@@ -751,10 +794,9 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
                     match in_prog_opt with
                     | Some n ->
                         Some
-                          (Say.resolve lang
-                             (Say.make
-                                ~ko:(Printf.sprintf "%d 진행" n)
-                                ~en:(Printf.sprintf "%d wip" n)))
+                          (match lang with
+                           | Say.Lang_ko -> int_s n ^ " 진행"
+                           | Say.Lang_en -> int_s n ^ " wip")
                     | None -> None
                   in
                   let chk_part =
@@ -762,14 +804,16 @@ let render_kpi_hero_band grid ~(rect : Rect.t) ~(theme : Theme.t)
                     | Some (passed, rejected) ->
                         let total = passed + rejected in
                         Some
-                          (Say.resolve lang
-                             (Say.make
-                                ~ko:(Printf.sprintf "%d 검증" total)
-                                ~en:(Printf.sprintf "%d chk" total)))
+                          (match lang with
+                           | Say.Lang_ko -> int_s total ^ " 검증"
+                           | Say.Lang_en -> int_s total ^ " chk")
                     | None -> None
                   in
-                  String.concat Typography.sep_dot
-                    (List.filter_map Fun.id [ wip_part; chk_part ])
+                  match wip_part, chk_part with
+                  | Some a, Some b -> a ^ Typography.sep_dot ^ b
+                  | Some a, None -> a
+                  | None, Some b -> b
+                  | None, None -> ""
                 in
                 let w_w = Int.min (r2.w * 2 / 3) (Grapheme.display_width wip_txt) in
                 let bar_w = Int.max 0 (Int.min 10 (r2.w - w_w - 2)) in
@@ -1172,71 +1216,85 @@ let render_attention_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
 
 (* ---------- Panel B: Autonomous Companies (0 ungrouped, sparklines, infra & spend) ---------- *)
 
-let company_infra_tag ~(model : Model.t) (g : Wire_fleet.company_group) =
+let build_sandbox_sets (model : Model.t) =
+  match Observed.to_option model.infra.sandboxes with
+  | None -> None
+  | Some sb ->
+      let vm_tbl : (string, unit) Hashtbl.t =
+        Hashtbl.create (Int.max 8 (List.length sb.microvm_guests))
+      in
+      List.iter
+        (fun (x : Wire_infra.microvm_guest) -> Hashtbl.replace vm_tbl x.keeper ())
+        sb.microvm_guests;
+      let ssh_tbl : (string, unit) Hashtbl.t = Hashtbl.create 16 in
+      List.iter
+        (fun (p : Wire_infra.ssh_pool) ->
+          List.iter
+            (fun (s : Wire_infra.ssh_keeper_session) ->
+              Hashtbl.replace ssh_tbl s.keeper ())
+            p.keeper_sessions)
+        sb.ssh_pools;
+      List.iter
+        (fun (u : Wire_infra.ssh_unbound_keeper) ->
+          Hashtbl.replace ssh_tbl u.keeper ())
+        sb.ssh_unbound_keepers;
+      Some (vm_tbl, ssh_tbl)
+
+let company_infra_tag ~sandbox_sets (g : Wire_fleet.company_group) =
   let vm_n, ssh_n, dk_n = (g.microvm_count, g.ssh_count, g.docker_count) in
   if vm_n + ssh_n + dk_n > 0 then
-    if vm_n > 0 && ssh_n > 0 then Printf.sprintf "%dvm·%dssh" vm_n ssh_n
-    else if vm_n > 0 then Printf.sprintf "%dvm" vm_n
-    else if ssh_n > 0 then Printf.sprintf "%dssh" ssh_n
-    else Printf.sprintf "%ddk" dk_n
+    if vm_n > 0 && ssh_n > 0 then int_s vm_n ^ "vm·" ^ int_s ssh_n ^ "ssh"
+    else if vm_n > 0 then int_s vm_n ^ "vm"
+    else if ssh_n > 0 then int_s ssh_n ^ "ssh"
+    else int_s dk_n ^ "dk"
   else
-    match Observed.to_option model.infra.sandboxes with
+    match Lazy.force sandbox_sets with
     | None -> ""
-    | Some sb ->
-        let vm_set =
-          List.map (fun (x : Wire_infra.microvm_guest) -> x.keeper)
-            sb.microvm_guests
-        in
-        let ssh_set =
-          List.concat_map
-            (fun (p : Wire_infra.ssh_pool) ->
-              List.map (fun (s : Wire_infra.ssh_keeper_session) -> s.keeper)
-                p.keeper_sessions)
-            sb.ssh_pools
-          @ List.map (fun (u : Wire_infra.ssh_unbound_keeper) -> u.keeper)
-              sb.ssh_unbound_keepers
-        in
-        let v, s =
-          List.fold_left
-            (fun (v, s) (k : Wire_fleet.keeper_summary) ->
-              let v' =
-                if List.exists (String.equal k.name) vm_set then v + 1 else v
-              in
-              let s' =
-                if List.exists (String.equal k.name) ssh_set then s + 1 else s
-              in
-              (v', s'))
-            (0, 0) g.keepers
-        in
-        if v > 0 && s > 0 then Printf.sprintf "%dvm·%dssh" v s
-        else if v > 0 then Printf.sprintf "%dvm" v
-        else if s > 0 then Printf.sprintf "%dssh" s
+    | Some (vm_tbl, ssh_tbl) ->
+        let v = ref 0 and s = ref 0 in
+        List.iter
+          (fun (k : Wire_fleet.keeper_summary) ->
+            if Hashtbl.mem vm_tbl k.name then incr v;
+            if Hashtbl.mem ssh_tbl k.name then incr s)
+          g.keepers;
+        if !v > 0 && !s > 0 then int_s !v ^ "vm·" ^ int_s !s ^ "ssh"
+        else if !v > 0 then int_s !v ^ "vm"
+        else if !s > 0 then int_s !s ^ "ssh"
         else ""
 
-let company_spend_or_turns ~(model : Model.t) (g : Wire_fleet.company_group) =
+let build_done_tasks_by_assignee (model : Model.t) =
+  let tbl : (string, int) Hashtbl.t = Hashtbl.create 32 in
+  List.iter
+    (fun (t : Wire_work.task) ->
+      match t.status with
+      | Wire_work.Done { assignee; _ } ->
+          let prev = match Hashtbl.find_opt tbl assignee with Some n -> n | None -> 0 in
+          Hashtbl.replace tbl assignee (prev + 1)
+      | Wire_work.Todo
+      | Wire_work.Claimed _
+      | Wire_work.InProgress _
+      | Wire_work.AwaitingVerification _
+      | Wire_work.Cancelled _ ->
+          ())
+    (Work_store.tasks model.work);
+  tbl
+
+let company_spend_or_turns ~done_by_assignee (g : Wire_fleet.company_group) =
   if g.cost_24h_usd > 0.005 then
     Format_val.format_value Format_val.Usd g.cost_24h_usd
   else if g.turns_24h > 0 then
-    Printf.sprintf "%st"
-      (Format_val.format_value Format_val.Count (float_of_int g.turns_24h))
+    Format_val.format_value Format_val.Count (float_of_int g.turns_24h) ^ "t"
   else
-    let names = List.map (fun (k : Wire_fleet.keeper_summary) -> k.name) g.keepers in
-    let has_keeper name = List.exists (String.equal name) names in
+    let tbl = Lazy.force done_by_assignee in
     let done_tasks =
       List.fold_left
-        (fun acc (t : Wire_work.task) ->
-          match t.status with
-          | Wire_work.Done { assignee; _ } when has_keeper assignee -> acc + 1
-          | Wire_work.Todo
-          | Wire_work.Claimed _
-          | Wire_work.InProgress _
-          | Wire_work.AwaitingVerification _
-          | Wire_work.Done _
-          | Wire_work.Cancelled _ ->
-              acc)
-        0 (Work_store.tasks model.work)
+        (fun acc (k : Wire_fleet.keeper_summary) ->
+          match Hashtbl.find_opt tbl k.name with
+          | Some n -> acc + n
+          | None -> acc)
+        0 g.keepers
     in
-    if done_tasks > 0 then Printf.sprintf "+%dt" done_tasks
+    if done_tasks > 0 then "+" ^ int_s done_tasks ^ "t"
     else
       let total_t =
         List.fold_left
@@ -1247,8 +1305,7 @@ let company_spend_or_turns ~(model : Model.t) (g : Wire_fleet.company_group) =
           0 g.keepers
       in
       if total_t > 0 then
-        Printf.sprintf "%st"
-          (Format_val.format_value Format_val.Count (float_of_int total_t))
+        Format_val.format_value Format_val.Count (float_of_int total_t) ^ "t"
       else Glyph.to_utf8 Glyph.Missing_absent
 
 let live_failing_keepers_of_groups (groups : Wire_fleet.company_group list) =
@@ -1280,12 +1337,12 @@ let resting_keepers_of_groups ~(fleet : Fleet_store.t)
         g.keepers)
     groups
 
-let companies_panel_height ~(model : Model.t)
-    (groups : Wire_fleet.company_group list) ~bp =
+let companies_panel_height ~(model : Model.t) ~live_failing_keepers
+    ~resting_keepers (groups : Wire_fleet.company_group list) ~bp =
   let n = Int.max 1 (List.length groups) in
   let has_fail_banner =
-    live_failing_keepers_of_groups groups <> []
-    || resting_keepers_of_groups ~fleet:model.fleet groups <> []
+    live_failing_keepers <> []
+    || resting_keepers <> []
     || model.fleet.unreadable_keepers <> []
   in
   let fail_rows = if has_fail_banner then 1 else 0 in
@@ -1300,7 +1357,8 @@ let companies_panel_height ~(model : Model.t)
         ~max_h:(12 + fail_rows) ()
 
 let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
-    ~(model : Model.t) ~(groups : Wire_fleet.company_group list) ~bp =
+    ~(model : Model.t) ~(groups : Wire_fleet.company_group list)
+    ~live_failing_keepers ~resting_keepers ~bp =
   if Rect.is_empty rect then ()
   else
     let lang = model.lang in
@@ -1314,27 +1372,32 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
       | Observed.Value _ ->
           let organizations = List.length groups in
           let label =
-            Say.make
-              ~ko:(Printf.sprintf "%d개 자율 조직" organizations)
-              ~en:(Printf.sprintf "%d Autonomous Companies" organizations)
+            match lang with
+            | Say.Lang_ko -> int_s organizations ^ "개 자율 조직"
+            | Say.Lang_en -> int_s organizations ^ " Autonomous Companies"
           in
           let keepers =
-            Say.resolve lang
-              (Say.make ~ko:(Printf.sprintf "%d 키퍼" total_keepers)
-                 ~en:(Printf.sprintf "%d Keepers" total_keepers))
+            match lang with
+            | Say.Lang_ko -> int_s total_keepers ^ " 키퍼"
+            | Say.Lang_en -> int_s total_keepers ^ " Keepers"
           in
           let spend = Runtime_store.spend_24h_breakdown model.runtime in
           let subtitle =
             match spend.system_unattributed_usd with
             | None -> keepers
             | Some usd ->
-                let system = Say.resolve lang (Say.make ~ko:"시스템" ~en:"Sys") in
-                Printf.sprintf "%s · %s %s" keepers system
-                  (Format_val.format_value Format_val.Usd usd)
+                let system =
+                  match lang with Say.Lang_ko -> "시스템" | Say.Lang_en -> "Sys"
+                in
+                keepers ^ " · " ^ system ^ " "
+                ^ Format_val.format_value Format_val.Usd usd
           in
           (label, Some subtitle)
       | Observed.Loading _ | Observed.Failed _ | Observed.Absent | Observed.Unreported ->
-          (Say.make ~ko:"자율 조직" ~en:"Autonomous Companies", None)
+          ( (match lang with
+             | Say.Lang_ko -> "자율 조직"
+             | Say.Lang_en -> "Autonomous Companies"),
+            None )
     in
     let hotkey =
       Say.resolve lang
@@ -1358,7 +1421,7 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
         Some
           {
             Card.glyph = Some Glyph.Warning_triangle;
-            text = Printf.sprintf "%d/%d" total_keepers tot;
+            text = int_s total_keepers ^ "/" ^ int_s tot;
             tone = Some Theme.Status_attention;
           }
       else None
@@ -1366,7 +1429,7 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     let inner =
       Card.draw ~cache grid ~rect ~theme
         {
-          (Card.default_spec ~title:(Say.resolve lang title)) with
+          (Card.default_spec ~title) with
           subtitle;
           badge = comp_badge;
           hotkey = Some hotkey;
@@ -1437,10 +1500,6 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 (Cell_grid.put_text ~clip:inner grid ~x:(inner.x + pad_x)
                    ~y:inner.y ~style:whisper_st msg)
           else
-            let live_failing_keepers = live_failing_keepers_of_groups groups in
-            let resting_keepers =
-              resting_keepers_of_groups ~fleet:model.fleet groups
-            in
             let unreadable_count = List.length model.fleet.unreadable_keepers in
             let show_fail_footer =
               (live_failing_keepers <> [] || resting_keepers <> []
@@ -1498,12 +1557,7 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               if buckets_w > 0 then begin
                 ignore
                   (Cell_grid.put_text ~clip:hdr_r grid ~x:!hx ~y:inner.y
-                     ~style:hdr_st
-                     (Printf.sprintf "%s  %s  %s  %s"
-                        (Glyph.to_utf8 Glyph.Action_required)
-                        (Glyph.to_utf8 Glyph.Live_working)
-                        (Glyph.to_utf8 Glyph.Live_healthy)
-                        (Glyph.to_utf8 Glyph.Live_failing)));
+                     ~style:hdr_st buckets_hdr_str);
                 hx := !hx + buckets_w + 2
               end;
               if show_spark then begin
@@ -1536,15 +1590,15 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
             let total_groups = Array.length groups_arr in
             let sel_group_idx =
               let by_selected_keeper =
-                match Fleet_store.selected_company_keeper model.fleet with
+                match model.fleet.selected_keeper with
                 | None -> None
-                | Some k ->
+                | Some name ->
                     let rec find i =
                       if i >= total_groups then None
                       else if
                         List.exists
                           (fun (m : Wire_fleet.keeper_summary) ->
-                            String.equal m.name k.name)
+                            String.equal m.name name)
                           groups_arr.(i).keepers
                       then Some i
                       else find (i + 1)
@@ -1559,6 +1613,8 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                     Int.max 0
                       (Int.min (total_groups - 1) model.fleet.selected_index)
             in
+            let sandbox_sets = lazy (build_sandbox_sets model) in
+            let done_by_assignee = lazy (build_done_tasks_by_assignee model) in
             let viewport_rows = Int.max 0 (table_h - hdr_rows) in
             let start_group, _ =
               Table.compute_viewport ~total_rows:total_groups ~viewport_rows
@@ -1579,6 +1635,21 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               Color.of_rgb (Theme.status_color theme Theme.Status_critical)
             in
             let mut_fg = Color.of_rgb theme.text_muted in
+            let base_pri_st = Typography.primary ~bg theme in
+            let base_struct_st = Typography.structure ~bg theme in
+            let base_whisper_ni_st = Typography.whisper ~bg ~italic:false theme in
+            let base_ok_st = Typography.status ~bg theme Theme.Status_ok in
+            let base_attn_bold_st =
+              Style.make ~fg:attn_fg ~bg ~attrs:Attr.bold ()
+            in
+            let base_work_bold_st =
+              Style.make ~fg:work_fg ~bg ~attrs:Attr.bold ()
+            in
+            let base_ok_bold_st = Style.make ~fg:ok_fg ~bg ~attrs:Attr.bold () in
+            let base_crit_bold_st =
+              Style.make ~fg:crit_fg ~bg ~attrs:Attr.bold ()
+            in
+            let base_mut_st = Style.make ~fg:mut_fg ~bg () in
             for i = 0 to max_rows - 1 do
               let idx = start_group + i in
               let g = groups_arr.(idx) in
@@ -1586,66 +1657,86 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               let row_r = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
               let is_row_selected = Int.equal idx sel_group_idx in
               let is_sel = pane_focused && is_row_selected in
-              let rbg =
-                Color.of_rgb
-                  (if is_sel then theme.selection_bg
-                   else if is_row_selected then theme.surface_2
-                   else theme.surface_1)
+              let rbg, name_st, struct_st, row_whisper_st, row_whisper_ni_st,
+                  row_ok_st, row_attn_st, row_pri_st, row_mut_st,
+                  row_b_attn_st, row_b_work_st, row_b_ok_st, row_b_crit_st =
+                if is_sel || is_row_selected then begin
+                  let rbg =
+                    Color.of_rgb
+                      (if is_sel then theme.selection_bg else theme.surface_2)
+                  in
+                  let pri = Typography.primary ~bg:rbg theme in
+                  Cell_grid.fill_rect ~clip:inner grid ~rect:row_r ~style:pri ();
+                  if is_sel then
+                    Cell_grid.put_glyph ~clip:row_r grid ~x:inner.x ~y:py
+                      ~style:(Typography.accent ~bg:rbg ~bold:true theme)
+                      Glyph.Left_rail
+                  else
+                    Cell_grid.put_glyph ~clip:row_r grid ~x:inner.x ~y:py
+                      ~style:
+                        (Style.make ~fg:(Color.of_rgb theme.border_inactive)
+                           ~bg:rbg ())
+                      Glyph.Left_rail;
+                  ( rbg,
+                    (if is_sel then Typography.anchor ~bg:rbg theme else pri),
+                    Typography.structure ~bg:rbg theme,
+                    Typography.whisper ~bg:rbg theme,
+                    Typography.whisper ~bg:rbg ~italic:false theme,
+                    Typography.status ~bg:rbg theme Theme.Status_ok,
+                    Typography.status ~bg:rbg ~bold:true theme
+                      Theme.Status_attention,
+                    pri,
+                    Style.make ~fg:mut_fg ~bg:rbg (),
+                    Style.make ~fg:attn_fg ~bg:rbg ~attrs:Attr.bold (),
+                    Style.make ~fg:work_fg ~bg:rbg ~attrs:Attr.bold (),
+                    Style.make ~fg:ok_fg ~bg:rbg ~attrs:Attr.bold (),
+                    Style.make ~fg:crit_fg ~bg:rbg ~attrs:Attr.bold () )
+                end
+                else
+                  ( bg,
+                    base_pri_st,
+                    base_struct_st,
+                    whisper_st,
+                    base_whisper_ni_st,
+                    base_ok_st,
+                    base_attn_bold_st,
+                    base_pri_st,
+                    base_mut_st,
+                    base_attn_bold_st,
+                    base_work_bold_st,
+                    base_ok_bold_st,
+                    base_crit_bold_st )
               in
-              Cell_grid.fill_rect ~clip:inner grid ~rect:row_r
-                ~style:(Typography.primary ~bg:rbg theme) ();
-              if is_sel then
-                Cell_grid.put_glyph ~clip:row_r grid ~x:inner.x ~y:py
-                  ~style:(Typography.accent ~bg:rbg ~bold:true theme)
-                  Glyph.Left_rail
-              else if is_row_selected then
-                Cell_grid.put_glyph ~clip:row_r grid ~x:inner.x ~y:py
-                  ~style:
-                    (Style.make ~fg:(Color.of_rgb theme.border_inactive) ~bg:rbg
-                       ())
-                  Glyph.Left_rail;
               let x = ref (inner.x + left_gutter) in
-              let name_st =
-                if is_sel then Typography.anchor ~bg:rbg theme
-                else Typography.primary ~bg:rbg theme
-              in
               ignore
                 (Cell_grid.put_text ~clip:row_r grid ~x:!x ~y:py ~style:name_st
                    (Grapheme.truncate_to_width ~max_width:name_w g.company));
               x := !x + name_w + 1;
               let hc = Fleet_store.fleet_health_counts g.keepers in
-              let act_s = Printf.sprintf "%d/%d" hc.active hc.total in
+              let act_s = int_s hc.active ^ "/" ^ int_s hc.total in
               let act_st =
-                if hc.failing > 0 then
-                  Typography.status ~bg:rbg ~bold:true theme
-                    Theme.Status_attention
-                else if hc.active > 0 then
-                  Typography.status ~bg:rbg theme Theme.Status_ok
-                else Typography.whisper ~bg:rbg ~italic:false theme
+                if hc.failing > 0 then row_attn_st
+                else if hc.active > 0 then row_ok_st
+                else row_whisper_ni_st
               in
               ignore
                 (Cell_grid.put_text ~clip:row_r grid ~x:!x ~y:py ~style:act_st
                    (Grapheme.truncate_to_width ~max_width:act_w act_s));
               x := !x + act_w + 1;
               if buckets_w > 0 then begin
-                let put_count n fg =
-                  let s =
-                    if n > 0 then Printf.sprintf "%-2d" n
-                    else Glyph.to_utf8 Glyph.Separator_dot ^ " "
-                  in
-                  let st =
-                    Style.make ~fg:(if n > 0 then fg else mut_fg) ~bg:rbg
-                      ~attrs:(if n > 0 then Attr.bold else Attr.none)
-                      ()
+                let put_count n bold_st =
+                  let s, st =
+                    if n > 0 then (int_pad2_s n, bold_st)
+                    else (sep_dot_space, row_mut_st)
                   in
                   ignore
                     (Cell_grid.put_text ~clip:row_r grid ~x:!x ~y:py ~style:st s);
                   x := !x + 3
                 in
-                put_count g.attention_count attn_fg;
-                put_count (hc.working + hc.degraded) work_fg;
-                put_count hc.healthy ok_fg;
-                put_count hc.failing crit_fg;
+                put_count g.attention_count row_b_attn_st;
+                put_count (hc.working + hc.degraded) row_b_work_st;
+                put_count hc.healthy row_b_ok_st;
+                put_count hc.failing row_b_crit_st;
                 x := !x + 2
               end;
               if show_spark then begin
@@ -1659,19 +1750,20 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                 else
                   ignore
                     (Cell_grid.put_text ~clip:row_r grid ~x:!x ~y:py
-                       ~style:(Typography.whisper ~bg:rbg theme)
+                       ~style:row_whisper_st
                        (Glyph.to_utf8 Glyph.Missing_absent));
                 x := !x + spark_w + 2
               end;
               if show_infra then begin
-                let tag = company_infra_tag ~model g in
-                ignore
-                  (Cell_grid.put_text ~clip:row_r grid ~x:!x ~y:py
-                     ~style:(Typography.structure ~bg:rbg theme)
-                     (Grapheme.truncate_to_width ~max_width:infra_w tag));
+                let tag = company_infra_tag ~sandbox_sets g in
+                if String.length tag > 0 then
+                  ignore
+                    (Cell_grid.put_text ~clip:row_r grid ~x:!x ~y:py
+                       ~style:struct_st
+                       (Grapheme.truncate_to_width ~max_width:infra_w tag));
                 x := !x + infra_w + 1
               end;
-              let out_txt = company_spend_or_turns ~model g in
+              let out_txt = company_spend_or_turns ~done_by_assignee g in
               let fit_out =
                 Grapheme.truncate_to_width ~max_width:out_w out_txt
               in
@@ -1679,10 +1771,7 @@ let render_companies_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
               let ox = Int.max !x (Rect.right inner - right_pad - ow) in
               ignore
                 (Cell_grid.put_text ~clip:row_r grid ~x:ox ~y:py
-                   ~style:
-                     (if g.cost_24h_usd > 0.005 then
-                        Typography.primary ~bg:rbg theme
-                      else Typography.structure ~bg:rbg theme)
+                   ~style:(if g.cost_24h_usd > 0.005 then row_pri_st else struct_st)
                    fit_out)
             done;
             if show_fail_footer then begin
@@ -1803,14 +1892,14 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
     in
     let badge =
       if goals <> [] && Option.is_none goals_notice then
+        let n_s = int_s (List.length goals) in
         Some
           {
             Card.glyph = None;
             text =
-              Say.resolve lang
-                (Say.make
-                   ~ko:(Printf.sprintf "%d 진행" (List.length goals))
-                   ~en:(Printf.sprintf "%d active" (List.length goals)));
+              (match lang with
+               | Say.Lang_ko -> n_s ^ " 진행"
+               | Say.Lang_en -> n_s ^ " active");
             tone = Some Theme.Status_active;
           }
       else None
@@ -1837,7 +1926,42 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
       let attn_st =
         Typography.status ~bg ~bold:true theme Theme.Status_attention
       in
-      let unlinked = Work_store.unlinked_task_count model.work in
+      let planning_fresh =
+        match model.work.planning with
+        | Observed.Value { stale = false; _ } -> true
+        | Observed.Value _ | Observed.Failed _ | Observed.Loading _
+        | Observed.Unreported | Observed.Absent -> false
+      in
+      let goal_completion_tbl =
+        if planning_fresh && goals <> [] then Some (Hashtbl.create 16) else None
+      in
+      let unlinked =
+        let acc = ref 0 in
+        List.iter
+          (fun (tk : Wire_work.task) ->
+            match tk.goal_link with
+            | Wire_work.Unlinked -> incr acc
+            | Wire_work.Linked gid -> (
+                match goal_completion_tbl with
+                | None -> ()
+                | Some tbl ->
+                    let is_done =
+                      match tk.status with
+                      | Wire_work.Done _ -> 1
+                      | Wire_work.Todo
+                      | Wire_work.Claimed _
+                      | Wire_work.InProgress _
+                      | Wire_work.AwaitingVerification _
+                      | Wire_work.Cancelled _ -> 0
+                    in
+                    (match Hashtbl.find_opt tbl gid with
+                     | Some (d, tot) ->
+                         d := !d + is_done;
+                         incr tot
+                     | None -> Hashtbl.add tbl gid (ref is_done, ref 1))))
+          (Work_store.tasks model.work);
+        !acc
+      in
       let unattrib = candle_unattributed_count model in
       let top_c = top_contributors_summary model in
       let top_line =
@@ -1905,58 +2029,85 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
               Int.max 0
                 (Int.min (n_goals - vis_goals) (sel_goal_idx - vis_goals + 1))
           in
+          let base_pri_st = Typography.primary ~bg theme in
+          let base_anchor_st = Typography.anchor ~bg theme in
+          let base_ok_bold_st =
+            Typography.status ~bg ~bold:true theme Theme.Status_ok
+          in
+          let base_act_bold_st =
+            Typography.status ~bg ~bold:true theme Theme.Status_active
+          in
           for i = start_goal_idx to n_goals - 1 do
             if !y < goals_bottom then begin
               let g = arr.(i) in
               let py = !y in
               let is_row_selected = Int.equal i sel_goal_idx in
               let is_sel = pane_focused && is_row_selected in
-              let rbg =
-                Color.of_rgb
-                  (if is_sel then theme.selection_bg
-                   else if is_row_selected then theme.surface_2
-                   else theme.surface_1)
+              let rbg, row_pri_st, row_anchor_st, row_struct_st,
+                  row_ok_st, row_act_st, row_attn_st =
+                if is_sel || is_row_selected then begin
+                  let rbg =
+                    Color.of_rgb
+                      (if is_sel then theme.selection_bg else theme.surface_2)
+                  in
+                  let pri = Typography.primary ~bg:rbg theme in
+                  let row_full = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
+                  Cell_grid.fill_rect ~clip:inner grid ~rect:row_full ~style:pri ();
+                  let rail_st =
+                    if is_sel then Typography.accent ~bg:rbg ~bold:true theme
+                    else
+                      Style.make ~fg:(Color.of_rgb theme.border_inactive)
+                        ~bg:rbg ()
+                  in
+                  Cell_grid.put_glyph ~clip:row_full grid ~x:inner.x ~y:py
+                    ~style:rail_st Glyph.Left_rail;
+                  ( rbg,
+                    pri,
+                    Typography.anchor ~bg:rbg theme,
+                    Typography.structure ~bg:rbg theme,
+                    Typography.status ~bg:rbg ~bold:true theme Theme.Status_ok,
+                    Typography.status ~bg:rbg ~bold:true theme Theme.Status_active,
+                    Typography.status ~bg:rbg ~bold:true theme
+                      Theme.Status_attention )
+                end
+                else
+                  ( bg,
+                    base_pri_st,
+                    base_anchor_st,
+                    struct_st,
+                    base_ok_bold_st,
+                    base_act_bold_st,
+                    attn_st )
               in
-              let row_full = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
-              if is_sel || is_row_selected then begin
-                Cell_grid.fill_rect ~clip:inner grid ~rect:row_full
-                  ~style:(Typography.primary ~bg:rbg theme) ();
-                let rail_st =
-                  if is_sel then Typography.accent ~bg:rbg ~bold:true theme
-                  else
-                    Style.make ~fg:(Color.of_rgb theme.border_inactive) ~bg:rbg
-                      ()
-                in
-                Cell_grid.put_glyph ~clip:row_full grid ~x:inner.x ~y:py
-                  ~style:rail_st Glyph.Left_rail
-              end;
               let row_r = Rect.make ~x:content.x ~y:py ~w:content.w ~h:1 in
               let phase_g, phase_st =
                 match g.phase with
                 | Wire_work.Awaiting_confirmation ->
-                    ( Glyph.Action_required,
-                      Typography.status ~bg:rbg ~bold:true theme
-                        Theme.Status_attention )
-                | Wire_work.Verifying ->
-                    ( Glyph.Live_working,
-                      Typography.status ~bg:rbg ~bold:true theme
-                        Theme.Status_active )
+                    (Glyph.Action_required, row_attn_st)
+                | Wire_work.Verifying -> (Glyph.Live_working, row_act_st)
                 | Wire_work.Executing
                 | Wire_work.Completed
                 | Wire_work.Dropped
                 | Wire_work.Paused _
                 | Wire_work.Blocked _ ->
-                    ( Glyph.Live_healthy,
-                      Typography.status ~bg:rbg ~bold:true theme Theme.Status_ok )
+                    (Glyph.Live_healthy, row_ok_st)
               in
-              let linked = Work_store.goal_linked_tasks ~goal_id:g.id model.work in
-              let completion = Work_store.linked_task_completion model.work linked in
+              let completion =
+                match goal_completion_tbl with
+                | None -> None
+                | Some tbl -> (
+                    match Hashtbl.find_opt tbl g.id with
+                    | Some (d, tot) when !tot > 0 -> Some (!d, !tot)
+                    | Some _ | None -> None)
+              in
               let cnt_txt =
                 match completion, g.phase with
-                | Some (done_count, total), _ ->
-                    Say.resolve lang
-                      (Say.make ~ko:(Printf.sprintf "표시 %d/%d" done_count total)
-                         ~en:(Printf.sprintf "%d/%d shown" done_count total))
+                | Some (done_count, total), _ -> (
+                    match lang with
+                    | Say.Lang_ko ->
+                        "표시 " ^ int_s done_count ^ "/" ^ int_s total
+                    | Say.Lang_en ->
+                        int_s done_count ^ "/" ^ int_s total ^ " shown")
                 | None, Wire_work.Awaiting_confirmation ->
                     Say.resolve lang (Say.make ~ko:"확정 대기" ~en:"confirm")
                 | None, Wire_work.Verifying ->
@@ -1973,7 +2124,7 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
               let p_adv =
                 Cell_grid.put_text ~clip:row_r grid ~x:content.x ~y:py
                   ~style:phase_st
-                  (Printf.sprintf "%s P%d " (Glyph.to_utf8 phase_g) g.priority)
+                  (Glyph.to_utf8 phase_g ^ " P" ^ int_s g.priority ^ " ")
               in
               let tx = content.x + p_adv in
               let right_x = Rect.right content - right_total_w in
@@ -1982,18 +2133,17 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
                 ignore
                   (Cell_grid.put_text ~clip:row_r grid ~x:tx ~y:py
                      ~style:
-                       (if is_sel then Typography.anchor ~bg:rbg theme
+                       (if is_sel then row_anchor_st
                         else
                           match g.phase with
-                          | Wire_work.Awaiting_confirmation ->
-                              Typography.anchor ~bg:rbg theme
+                          | Wire_work.Awaiting_confirmation -> row_anchor_st
                           | Wire_work.Executing
                           | Wire_work.Verifying
                           | Wire_work.Completed
                           | Wire_work.Dropped
                           | Wire_work.Paused _
                           | Wire_work.Blocked _ ->
-                              Typography.primary ~bg:rbg theme)
+                              row_pri_st)
                      (Grapheme.truncate_to_width ~max_width:title_w g.title));
               (match completion with
               | Some (done_count, total) when bar_w > 0 && right_x > tx ->
@@ -2007,7 +2157,7 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
               if cx > tx then
                 ignore
                   (Cell_grid.put_text ~clip:row_r grid ~x:cx ~y:py
-                     ~style:(Typography.structure ~bg:rbg theme) cnt_txt);
+                     ~style:row_struct_st cnt_txt);
               incr y;
               if show_measure && !y < goals_bottom && not (String.equal (String.trim g.measure) "") then begin
                 let mr = Rect.make ~x:(content.x + 2) ~y:!y ~w:(Int.max 0 (content.w - 2)) ~h:1 in
@@ -2037,19 +2187,17 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
           let parts =
             (if unlinked > 0 then
                [
-                 Say.resolve lang
-                   (Say.make
-                      ~ko:(Printf.sprintf "미연결 작업 %d건" unlinked)
-                      ~en:(Printf.sprintf "%d unlinked tasks" unlinked));
+                 (match lang with
+                  | Say.Lang_ko -> "미연결 작업 " ^ int_s unlinked ^ "건"
+                  | Say.Lang_en -> int_s unlinked ^ " unlinked tasks");
                ]
              else [])
             @
             if unattrib > 0 then
               [
-                Say.resolve lang
-                  (Say.make
-                     ~ko:(Printf.sprintf "%d 미귀속 캔들" unattrib)
-                     ~en:(Printf.sprintf "%d unattributed candle" unattrib));
+                (match lang with
+                 | Say.Lang_ko -> int_s unattrib ^ " 미귀속 캔들"
+                 | Say.Lang_en -> int_s unattrib ^ " unattributed candle");
               ]
             else []
           in
@@ -2070,13 +2218,48 @@ let render_goals_and_scorecard_panel grid ~cache ~(rect : Rect.t)
 
 (* ---------- Panel D: World Pulse (Signal-First Board + World Memory & Candle Footer) ---------- *)
 
-let one_line_excerpt s =
-  s
-  |> String.trim
-  |> String.map (function '\n' | '\r' | '\t' -> ' ' | c -> c)
+let[@inline] is_trim_ws = function
+  | ' ' | '\t' | '\n' | '\r' | '\012' -> true
+  | _ -> false
+
+let one_line_excerpt_bounded ~max_width s =
+  let len = String.length s in
+  let rec skip_l i =
+    if i < len && is_trim_ws (String.unsafe_get s i) then skip_l (i + 1) else i
+  in
+  let start = skip_l 0 in
+  if start >= len || max_width <= 0 then ""
+  else
+    let rec skip_r i =
+      if i > start && is_trim_ws (String.unsafe_get s (i - 1)) then
+        skip_r (i - 1)
+      else i
+    in
+    let stop = skip_r len in
+    let trimmed_len = stop - start in
+    let budget = (max_width + 4) * 6 in
+    let copy_len =
+      if trimmed_len <= budget then trimmed_len
+      else
+        let rec align k =
+          if k > 0 && (Char.code (String.unsafe_get s (start + k)) land 0xC0) = 0x80
+          then align (k - 1)
+          else k
+        in
+        align budget
+    in
+    let b = Bytes.create copy_len in
+    for i = 0 to copy_len - 1 do
+      let c = String.unsafe_get s (start + i) in
+      let c' =
+        match c with '\n' | '\r' | '\t' -> ' ' | _ -> c
+      in
+      Bytes.unsafe_set b i c'
+    done;
+    Bytes.unsafe_to_string b
 
 let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
-    ~(model : Model.t) ~bp =
+    ~(model : Model.t) ~(hero : Model.pulse_hero_metrics) ~bp =
   if Rect.is_empty rect then ()
   else
     let lang = model.lang in
@@ -2091,14 +2274,12 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
     in
     let badge : Card.badge =
       let n = List.length threads in
-      let badge_say =
-        Say.make
-          ~ko:(Printf.sprintf "인기순 · %d" n)
-          ~en:(Printf.sprintf "Hot · %d" n)
-      in
       {
         glyph = Some Glyph.Live_healthy;
-        text = Say.resolve lang badge_say;
+        text =
+          (match lang with
+           | Say.Lang_ko -> "인기순 · " ^ int_s n
+           | Say.Lang_en -> "Hot · " ^ int_s n);
         tone = Some Theme.Status_active;
       }
     in
@@ -2177,6 +2358,14 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                     (Int.min (total - vis_threads)
                        (sel_thread_idx - vis_threads + 1))
               in
+              let pill_struct_bold_st =
+                Typography.structure ~bg:pill_bg ~bold:true theme
+              in
+              let base_anchor_st = Typography.anchor ~bg theme in
+              let base_accent_bold_st = Typography.accent ~bg ~bold:true theme in
+              let base_whisper_ni_st =
+                Typography.whisper ~bg ~italic:false theme
+              in
               let rec draw_thread i =
                 if i >= total || !y >= thread_bottom then ()
                 else begin
@@ -2184,25 +2373,40 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   let py = !y in
                   let is_row_selected = Int.equal i sel_thread_idx in
                   let is_sel = pane_focused && is_row_selected in
-                  let rbg =
-                    Color.of_rgb
-                      (if is_sel then theme.selection_bg
-                       else if is_row_selected then theme.surface_2
-                       else theme.surface_1)
+                  let row_anchor_st, row_pri_st, row_struct_st, row_accent_st,
+                      row_whisper_st, row_whisper_ni_st =
+                    if is_sel || is_row_selected then begin
+                      let rbg =
+                        Color.of_rgb
+                          (if is_sel then theme.selection_bg else theme.surface_2)
+                      in
+                      let pri = Typography.primary ~bg:rbg theme in
+                      let row_full = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
+                      Cell_grid.fill_rect ~clip:inner grid ~rect:row_full
+                        ~style:pri ();
+                      let rail_st =
+                        if is_sel then Typography.accent ~bg:rbg ~bold:true theme
+                        else
+                          Style.make ~fg:(Color.of_rgb theme.border_inactive)
+                            ~bg:rbg ()
+                      in
+                      Cell_grid.put_glyph ~clip:row_full grid ~x:inner.x ~y:py
+                        ~style:rail_st Glyph.Left_rail;
+                      ( Typography.anchor ~bg:rbg theme,
+                        pri,
+                        Typography.structure ~bg:rbg theme,
+                        Typography.accent ~bg:rbg ~bold:true theme,
+                        Typography.whisper ~bg:rbg theme,
+                        Typography.whisper ~bg:rbg ~italic:false theme )
+                    end
+                    else
+                      ( base_anchor_st,
+                        pri_st,
+                        struct_st,
+                        base_accent_bold_st,
+                        whisper_st,
+                        base_whisper_ni_st )
                   in
-                  let row_full = Rect.make ~x:inner.x ~y:py ~w:inner.w ~h:1 in
-                  if is_sel || is_row_selected then begin
-                    Cell_grid.fill_rect ~clip:inner grid ~rect:row_full
-                      ~style:(Typography.primary ~bg:rbg theme) ();
-                    let rail_st =
-                      if is_sel then Typography.accent ~bg:rbg ~bold:true theme
-                      else
-                        Style.make ~fg:(Color.of_rgb theme.border_inactive)
-                          ~bg:rbg ()
-                    in
-                    Cell_grid.put_glyph ~clip:row_full grid ~x:inner.x ~y:py
-                      ~style:rail_st Glyph.Left_rail
-                  end;
                   let row_r = Rect.make ~x:content.x ~y:py ~w:content.w ~h:1 in
                   let x = ref content.x in
                   (* Subtle hearth pill *)
@@ -2213,8 +2417,7 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                        in
                        let h_adv =
                          Cell_grid.put_text ~clip:row_r grid ~x:!x ~y:py
-                           ~style:(Typography.structure ~bg:pill_bg ~bold:true theme)
-                           ht
+                           ~style:pill_struct_bold_st ht
                        in
                        x := !x + h_adv + 1
                    | Some _ | None -> ());
@@ -2223,8 +2426,7 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                    | Some d when d > 1 ->
                        let c_adv =
                          Cell_grid.put_text ~clip:row_r grid ~x:!x ~y:py
-                           ~style:(Typography.accent ~bg:rbg ~bold:true theme)
-                           (Printf.sprintf "[x%d] " d)
+                           ~style:row_accent_st ("[x" ^ int_s d ^ "] ")
                        in
                        x := !x + c_adv
                    | Some _ | None -> ());
@@ -2243,7 +2445,7 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                     | None -> ""
                   in
                   let reply_txt =
-                    if p.comment_count > 0 then Printf.sprintf "%dc" p.comment_count
+                    if p.comment_count > 0 then int_s p.comment_count ^ "c"
                     else ""
                   in
                   if rich_mode && py + 1 < thread_bottom then begin
@@ -2252,7 +2454,7 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                     if title_w > 3 then
                       ignore
                         (Cell_grid.put_text ~clip:row_r grid ~x:!x ~y:py
-                           ~style:(Typography.anchor ~bg:rbg theme)
+                           ~style:row_anchor_st
                            (Grapheme.truncate_to_width ~max_width:title_w p.title));
                     incr y;
                     (* Line 2: @author · excerpt ... reply_cnt · italic age *)
@@ -2268,24 +2470,20 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                              ~style:whisper_st age_txt)
                     end;
                     if not (String.equal reply_txt "") then begin
-                      let sep_s =
-                        if not (String.equal age_txt "") then Typography.sep_dot
-                        else ""
-                      in
-                      let rw = Grapheme.display_width reply_txt in
-                      let sw = Grapheme.display_width sep_s in
+                      let has_age = not (String.equal age_txt "") in
+                      let rw = String.length reply_txt in
+                      let sw = if has_age then 3 else 0 in
                       rx := !rx - sw - rw;
                       if !rx > content.x + 8 then begin
                         let a =
                           Cell_grid.put_text ~clip:row2 grid ~x:!rx ~y:py2
                             ~style:struct_st reply_txt
                         in
-                        if sw > 0 then
+                        if has_age then
                           ignore
                             (Cell_grid.put_text ~clip:row2 grid ~x:(!rx + a)
-                               ~y:py2
-                               ~style:(Typography.whisper ~bg ~italic:false theme)
-                               sep_s)
+                               ~y:py2 ~style:base_whisper_ni_st
+                               Typography.sep_dot)
                       end
                     end;
                     let left_limit = Int.max content.x (!rx - 2) in
@@ -2299,19 +2497,21 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                            author_s)
                     in
                     ax := !ax + a_adv;
-                    let excerpt = one_line_excerpt p.body in
                     let rem_w = left_limit - !ax - 3 in
-                    if rem_w > 6 && not (String.equal excerpt "") then begin
-                      let s_adv =
-                        Cell_grid.put_text ~clip:row2 grid ~x:!ax ~y:py2
-                          ~style:(Typography.whisper ~bg ~italic:false theme)
-                          Typography.sep_dot
-                      in
-                      ax := !ax + s_adv;
-                      ignore
-                        (Cell_grid.put_text ~clip:row2 grid ~x:!ax ~y:py2
-                           ~style:whisper_st
-                           (Grapheme.truncate_to_width ~max_width:rem_w excerpt))
+                    if rem_w > 6 then begin
+                      let excerpt = one_line_excerpt_bounded ~max_width:rem_w p.body in
+                      if not (String.equal excerpt "") then begin
+                        let s_adv =
+                          Cell_grid.put_text ~clip:row2 grid ~x:!ax ~y:py2
+                            ~style:base_whisper_ni_st
+                            Typography.sep_dot
+                        in
+                        ax := !ax + s_adv;
+                        ignore
+                          (Cell_grid.put_text ~clip:row2 grid ~x:!ax ~y:py2
+                             ~style:whisper_st
+                             (Grapheme.truncate_to_width ~max_width:rem_w excerpt))
+                      end
                     end;
                     incr y;
                     (* Subtle hairline divider between rich items when room allows *)
@@ -2324,7 +2524,7 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                   else begin
                     (* Compact single-line thread row *)
                     let meta_w =
-                      let rw = Grapheme.display_width reply_txt in
+                      let rw = String.length reply_txt in
                       let aw = Grapheme.display_width age_txt in
                       if rw > 0 && aw > 0 then rw + 3 + aw else rw + aw
                     in
@@ -2334,22 +2534,21 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                       ignore
                         (Cell_grid.put_text ~clip:row_r grid ~x:!x ~y:py
                            ~style:
-                             (if is_sel || i = 0 then
-                                Typography.anchor ~bg:rbg theme
-                              else Typography.primary ~bg:rbg theme)
+                             (if is_sel || i = 0 then row_anchor_st
+                              else row_pri_st)
                            (Grapheme.truncate_to_width ~max_width:title_w p.title));
                     if meta_w > 0 && right_x > !x then begin
                       let mx = ref right_x in
                       if not (String.equal reply_txt "") then begin
                         let a =
                           Cell_grid.put_text ~clip:row_r grid ~x:!mx ~y:py
-                            ~style:(Typography.structure ~bg:rbg theme) reply_txt
+                            ~style:row_struct_st reply_txt
                         in
                         mx := !mx + a;
                         if not (String.equal age_txt "") then
                           let s =
                             Cell_grid.put_text ~clip:row_r grid ~x:!mx ~y:py
-                              ~style:(Typography.whisper ~bg:rbg ~italic:false theme)
+                              ~style:row_whisper_ni_st
                               Typography.sep_dot
                           in
                           mx := !mx + s
@@ -2357,7 +2556,7 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                       if not (String.equal age_txt "") then
                         ignore
                           (Cell_grid.put_text ~clip:row_r grid ~x:!mx ~y:py
-                             ~style:(Typography.whisper ~bg:rbg theme) age_txt)
+                             ~style:row_whisper_st age_txt)
                     end;
                     incr y;
                     draw_thread (i + 1)
@@ -2374,7 +2573,6 @@ let render_world_pulse_panel grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
           grid ~rect:inner ~y:(mem_y - 1) ~theme;
       if mem_y >= content.y && mem_y < Rect.bottom content then begin
         let row1 = Rect.make ~x:content.x ~y:mem_y ~w:content.w ~h:1 in
-        let hero = Model.pulse_hero_metrics model in
         let unattrib = candle_unattributed_count model in
         match model.knowledge.world_memory with
         | Observed.Failed { reason; _ } ->
@@ -2537,6 +2735,13 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
         ~rows:(Cell_grid.rows grid)
     in
     let groups = company_groups_for_pulse model in
+    let sc = Model.effective_scorecard model in
+    let hero =
+      Model.pulse_hero_metrics_with ~company_count:(List.length groups)
+        ~scorecard:sc model
+    in
+    let live_failing_keepers = live_failing_keepers_of_groups groups in
+    let resting_keepers = resting_keepers_of_groups ~fleet:model.fleet groups in
     let gap_x = Layout.card_gap_x bp in
     let gap_y = Layout.card_gap_y bp in
     (* Pulse has no sub-tab bar: add a subtle 1-row top breathing cushion on
@@ -2553,7 +2758,7 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
       | Layout.Compact | Layout.Micro -> Int.min 3 work_r.h
     in
     let hero_r, below_hero = Rect.split_v work_r ~top_h:hero_h in
-    render_kpi_hero_band grid ~rect:hero_r ~theme ~model ~groups ~bp;
+    render_kpi_hero_band grid ~rect:hero_r ~theme ~model ~groups ~hero ~sc ~bp;
     let main_r =
       if gap_y > 0 && below_hero.h > gap_y + 4 then
         Rect.make ~x:below_hero.x ~y:(below_hero.y + gap_y) ~w:below_hero.w
@@ -2572,7 +2777,10 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                 attention_panel_height model
                   ~max_rows:(if Layout.equal_breakpoint bp Layout.Wide then 7 else 5)
               in
-              let comp_h = companies_panel_height ~model groups ~bp in
+              let comp_h =
+                companies_panel_height ~model ~live_failing_keepers
+                  ~resting_keepers groups ~bp
+              in
               let left_rows =
                 Layout.split_v ~gap:gap_y left_col
                   [
@@ -2591,16 +2799,19 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
                    render_attention_panel grid ~cache ~rect:attn_r ~theme ~model
                      ~bp;
                    render_companies_panel grid ~cache ~rect:comp_r ~theme ~model
-                     ~groups ~bp;
+                     ~groups ~live_failing_keepers ~resting_keepers ~bp;
                    render_goals_and_scorecard_panel grid ~cache ~rect:goals_r
                      ~theme ~model ~bp
                | _ -> ());
               render_world_pulse_panel grid ~cache ~rect:right_col ~theme ~model
-                ~bp
+                ~hero ~bp
           | _ -> ())
       | Layout.Compact | Layout.Micro -> (
           let attn_h = attention_panel_height model ~max_rows:4 in
-          let comp_h = companies_panel_height ~model groups ~bp in
+          let comp_h =
+            companies_panel_height ~model ~live_failing_keepers
+              ~resting_keepers groups ~bp
+          in
           let rows_r =
             Layout.split_v ~gap:0 main_r
               [
@@ -2614,8 +2825,9 @@ let render ~(model : Model.t) ~cache ~(rect : Rect.t) grid =
           | [ a_r; c_r; g_r; w_r ] ->
               render_attention_panel grid ~cache ~rect:a_r ~theme ~model ~bp;
               render_companies_panel grid ~cache ~rect:c_r ~theme ~model ~groups
-                ~bp;
+                ~live_failing_keepers ~resting_keepers ~bp;
               render_goals_and_scorecard_panel grid ~cache ~rect:g_r ~theme
                 ~model ~bp;
-              render_world_pulse_panel grid ~cache ~rect:w_r ~theme ~model ~bp
+              render_world_pulse_panel grid ~cache ~rect:w_r ~theme ~model ~hero
+                ~bp
           | _ -> ())

@@ -707,56 +707,59 @@ let leave_old_epoch ~now ~(before : Model.t) (after : Model.t) =
 (* The view planner only returns commands. Reserve its inventory read before the
    next UI event can plan the same generation or submit from the previous read.
    Explicit refreshes and post-command read-backs have already reserved theirs. *)
-let reserve_board_view_read ~now (m : Model.t) cmds =
+let reserve_board_view_read ~now (m : Model.t) flat_cmds =
   let recovery = m.knowledge.board_recovery in
-  match cmds, Board_recovery.viewed_keeper recovery with
+  match flat_cmds, Board_recovery.viewed_keeper recovery with
   | [], _ | _, None -> m
   | _ :: _, Some keeper ->
       let generation = (Board_recovery.entry ~keeper recovery).generation + 1 in
       let req = Cmd.Get_board_quarantines { keeper; generation } in
-      if List.mem (Cmd.Http_get { epoch = m.epoch; req }) (Cmd.flatten cmds) then
+      if List.mem (Cmd.Http_get { epoch = m.epoch; req }) flat_cmds then
         let board_recovery, _ = Board_recovery.read ~keeper ~now recovery in
         { m with knowledge = { m.knowledge with board_recovery } }
       else m
 
-let reserve_work_reads ~now (m : Model.t) cmds =
-  let start = function
-    | Observed.Value _ as read -> Observed.mark_stale read
-    | Observed.Loading _ as read -> read
-    | Observed.Unreported | Observed.Absent | Observed.Failed _ ->
-        Observed.loading ~since_ns:now
-  in
-  let reserve (work : Work_store.t) cmd =
-    (match cmd with
-    | Cmd.Http_get { epoch; req } when Epoch.equal epoch m.epoch ->
-        (match req with
-         | Cmd.Get_asks { keeper = None; include_resolved = false } ->
-             { work with asks = start work.asks }
-         | Cmd.Get_tool_approvals ->
-             { work with tool_approvals = start work.tool_approvals }
-         | Cmd.Get_gate_pending ->
-             { work with
-               gate_pending = start work.gate_pending;
-               gate_snapshot = start work.gate_snapshot }
-         | Cmd.Get_planning ->
-             { work with planning_goals = start (Work_store.goals_read work) }
-             |> Work_store.start_planning_tasks ~now
-         | Cmd.Get_verifications { view; generation; _ }
-           when view = work.verification_view
-                && generation = work.verification_generation + 1 ->
-             { work with
-               verifications = start work.verifications;
-               verification_generation = generation;
-             }
-         | _ -> work)
-    | _ -> work) [@warning "-4"]
-  in
-  let work = List.fold_left reserve m.work (Cmd.flatten cmds) in
-  if work == m.work then m else { m with work }
+let reserve_work_reads ~now (m : Model.t) flat_cmds =
+  match flat_cmds with
+  | [] -> m
+  | _ :: _ ->
+      let start = function
+        | Observed.Value _ as read -> Observed.mark_stale read
+        | Observed.Loading _ as read -> read
+        | Observed.Unreported | Observed.Absent | Observed.Failed _ ->
+            Observed.loading ~since_ns:now
+      in
+      let reserve (work : Work_store.t) cmd =
+        (match cmd with
+        | Cmd.Http_get { epoch; req } when Epoch.equal epoch m.epoch ->
+            (match req with
+             | Cmd.Get_asks { keeper = None; include_resolved = false } ->
+                 { work with asks = start work.asks }
+             | Cmd.Get_tool_approvals ->
+                 { work with tool_approvals = start work.tool_approvals }
+             | Cmd.Get_gate_pending ->
+                 { work with
+                   gate_pending = start work.gate_pending;
+                   gate_snapshot = start work.gate_snapshot }
+             | Cmd.Get_planning ->
+                 { work with planning_goals = start (Work_store.goals_read work) }
+                 |> Work_store.start_planning_tasks ~now
+             | Cmd.Get_verifications { view; generation; _ }
+               when view = work.verification_view
+                    && generation = work.verification_generation + 1 ->
+                 { work with
+                   verifications = start work.verifications;
+                   verification_generation = generation;
+                 }
+             | _ -> work)
+        | _ -> work) [@warning "-4"]
+      in
+      let work = List.fold_left reserve m.work flat_cmds in
+      if work == m.work then m else { m with work }
 
 (* The Keepers Work·Sandbox tab and the Infra Sandboxes tab each name one Keeper. *)
-let reserve_sandbox_view_reads ~now (m : Model.t) cmds =
-  match cmds with
+let reserve_sandbox_view_reads ~now (m : Model.t) flat_cmds =
+  match flat_cmds with
   | [] -> m
   | _ :: _ ->
       let workspace_keeper =
@@ -769,75 +772,84 @@ let reserve_sandbox_view_reads ~now (m : Model.t) cmds =
           Infra_store.selected_sandbox_keeper m.infra
         else None
       in
-      let emitted = Cmd.flatten cmds in
       let reserve infra = function
         | Some keeper when List.mem
-            (Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_keeper_sandbox { keeper } }) emitted ->
+            (Cmd.Http_get { epoch = m.epoch; req = Cmd.Get_keeper_sandbox { keeper } }) flat_cmds ->
             Infra_store.request_keeper_sandbox ~keeper ~now infra
         | Some _ | None -> infra
       in
       let infra = reserve m.infra workspace_keeper in
       if infra == m.infra then m else { m with infra }
 
-let reserve_workspace_file_read ~now (m : Model.t) cmds =
-  let code = m.infra.code in
-  let matches =
-    (function
-      | Cmd.Http_get { epoch; req = Cmd.Get_workspace_file { scope; path } } ->
-          Epoch.equal epoch m.epoch
-          && Wire_infra.equal_workspace_scope scope code.scope
-          && Option.equal String.equal (Some path) code.active_file_path
-      | _ -> false)
-    [@warning "-4"]
-  in
-  if List.exists matches (Cmd.flatten cmds) then
-    let open_file =
-      match Infra_store.open_file_for_current m.infra with
-      | Some _ -> Observed.mark_stale code.open_file
-      | None -> Observed.loading ~since_ns:now
-    in
-    { m with infra = { m.infra with code = { code with open_file } } }
-  else m
+let reserve_workspace_file_read ~now (m : Model.t) flat_cmds =
+  match flat_cmds with
+  | [] -> m
+  | _ :: _ ->
+      let code = m.infra.code in
+      let matches =
+        (function
+          | Cmd.Http_get { epoch; req = Cmd.Get_workspace_file { scope; path } } ->
+              Epoch.equal epoch m.epoch
+              && Wire_infra.equal_workspace_scope scope code.scope
+              && Option.equal String.equal (Some path) code.active_file_path
+          | _ -> false)
+        [@warning "-4"]
+      in
+      if List.exists matches flat_cmds then
+        let open_file =
+          match Infra_store.open_file_for_current m.infra with
+          | Some _ -> Observed.mark_stale code.open_file
+          | None -> Observed.loading ~since_ns:now
+        in
+        { m with infra = { m.infra with code = { code with open_file } } }
+      else m
 
 (* The File inspector reads the same route into its own slot. Reserving it
    shows loading and keeps the planner from sending the read twice. *)
-let reserve_file_peek_read ~now (m : Model.t) cmds =
-  let reserve infra =
-    (function
-      | Cmd.Http_get
-          { epoch; req = Cmd.Get_workspace_file { scope = Wire_infra.Ws_keeper keeper; path } }
-        when Epoch.equal epoch m.epoch ->
-          Infra_store.reserve_file_peek ~since_ns:now ~keeper ~path infra
-      | _ -> infra)
-    [@warning "-4"]
-  in
-  let infra = List.fold_left reserve m.infra (Cmd.flatten cmds) in
-  if infra == m.infra then m else { m with infra }
+let reserve_file_peek_read ~now (m : Model.t) flat_cmds =
+  match flat_cmds with
+  | [] -> m
+  | _ :: _ ->
+      let reserve infra =
+        (function
+          | Cmd.Http_get
+              { epoch; req = Cmd.Get_workspace_file { scope = Wire_infra.Ws_keeper keeper; path } }
+            when Epoch.equal epoch m.epoch ->
+              Infra_store.reserve_file_peek ~since_ns:now ~keeper ~path infra
+          | _ -> infra)
+        [@warning "-4"]
+      in
+      let infra = List.fold_left reserve m.infra flat_cmds in
+      if infra == m.infra then m else { m with infra }
 
-let reserve_account_reads ~now (m : Model.t) cmds =
-  let start = function
-    | Observed.Value _ as read -> Observed.mark_stale read
-    | Observed.Loading _ as read -> read
-    | Observed.Unreported | Observed.Absent | Observed.Failed _ ->
-        Observed.loading ~since_ns:now
-  in
-  let reserve (acct : Account_store.t) cmd =
-    (match cmd with
-    | Cmd.Http_get { epoch; req = Cmd.Get_auth_provider_accounts }
-      when Epoch.equal epoch m.epoch ->
-        { acct with provider_accounts = start acct.provider_accounts }
-    | Cmd.Http_get { epoch; req = Cmd.Get_auth_integrations }
-      when Epoch.equal epoch m.epoch ->
-        { acct with integrations = start acct.integrations }
-    | _ -> acct)
-    [@warning "-4"]
-  in
-  let account = List.fold_left reserve m.account (Cmd.flatten cmds) in
-  if account == m.account then m else { m with account }
+let reserve_account_reads ~now (m : Model.t) flat_cmds =
+  match flat_cmds with
+  | [] -> m
+  | _ :: _ ->
+      let start = function
+        | Observed.Value _ as read -> Observed.mark_stale read
+        | Observed.Loading _ as read -> read
+        | Observed.Unreported | Observed.Absent | Observed.Failed _ ->
+            Observed.loading ~since_ns:now
+      in
+      let reserve (acct : Account_store.t) cmd =
+        (match cmd with
+        | Cmd.Http_get { epoch; req = Cmd.Get_auth_provider_accounts }
+          when Epoch.equal epoch m.epoch ->
+            { acct with provider_accounts = start acct.provider_accounts }
+        | Cmd.Http_get { epoch; req = Cmd.Get_auth_integrations }
+          when Epoch.equal epoch m.epoch ->
+            { acct with integrations = start acct.integrations }
+        | _ -> acct)
+        [@warning "-4"]
+      in
+      let account = List.fold_left reserve m.account flat_cmds in
+      if account == m.account then m else { m with account }
 
 let step ~now m msg =
   let next0, cmds = step_raw ~now m msg in
-  let next0 = leave_old_epoch ~now ~before:m next0 in
+  let unchanged = next0 == m in
+  let next0 = if unchanged then next0 else leave_old_epoch ~now ~before:m next0 in
   let next0 =
     if Option.is_none next0.nav.overlay then
       let max_pane = Int.max 0 (Model.focusable_pane_count next0 - 1) in
@@ -857,31 +869,49 @@ let step ~now m msg =
         Model.disarm_keeper_stop next0
     | Some _ | None -> next0
   in
-  let view_stream_changed =
-    not
-      (Option.equal Subscriptions.equal_stream_kind
-         (Subscriptions.view_scoped_stream m)
-         (Subscriptions.view_scoped_stream next0))
-  in
   let next1 =
-    if view_stream_changed && Option.is_some next0.freshness.view_stream then
-      { next0 with freshness = { next0.freshness with view_stream = None } }
-    else next0
+    if next0 == m || Option.is_none next0.freshness.view_stream then next0
+    else
+      let view_stream_changed =
+        not
+          (Option.equal Subscriptions.equal_stream_kind
+             (Subscriptions.view_scoped_stream m)
+             (Subscriptions.view_scoped_stream next0))
+      in
+      if view_stream_changed then
+        { next0 with freshness = { next0.freshness with view_stream = None } }
+      else next0
   in
   let last_mono = Clock.Mono.max next1.freshness.last_mono now in
   let next =
     if Clock.Mono.equal last_mono next1.freshness.last_mono then next1
     else { next1 with freshness = { next1.freshness with last_mono } }
   in
-  let final_cmds =
-    cmds
-    |> reconcile_streams ~before:m ~after:next
-    |> reconcile_memory_diagram ~before:m ~after:next
-    |> Rbac_policy.filter_cmds next.auth_session
+  let raw_final_cmds =
+    if next1 == m then cmds
+    else
+      cmds
+      |> reconcile_streams ~before:m ~after:next
+      |> reconcile_memory_diagram ~before:m ~after:next
   in
-  let next = reserve_board_view_read ~now next final_cmds in
-  let next = reserve_sandbox_view_reads ~now next final_cmds in
-  let next = reserve_work_reads ~now next final_cmds in
-  let next = reserve_workspace_file_read ~now next final_cmds in
-  let next = reserve_account_reads ~now next final_cmds in
-  (reserve_file_peek_read ~now next final_cmds, final_cmds)
+  let final_cmds =
+    match raw_final_cmds with
+    | [] -> []
+    | _ -> Rbac_policy.filter_cmds next.auth_session raw_final_cmds
+  in
+  let flat_final =
+    match final_cmds with [] -> [] | _ -> Cmd.flatten final_cmds
+  in
+  let next =
+    match flat_final with
+    | [] -> next
+    | _ ->
+        next
+        |> (fun s -> reserve_board_view_read ~now s flat_final)
+        |> (fun s -> reserve_sandbox_view_reads ~now s flat_final)
+        |> (fun s -> reserve_work_reads ~now s flat_final)
+        |> (fun s -> reserve_workspace_file_read ~now s flat_final)
+        |> (fun s -> reserve_account_reads ~now s flat_final)
+        |> (fun s -> reserve_file_peek_read ~now s flat_final)
+  in
+  (next, final_cmds)

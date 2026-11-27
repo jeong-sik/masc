@@ -694,15 +694,25 @@ let goal_recency_key (g : Wire_work.goal) =
 
 let filtered_goals t =
   let q = String.trim t.filter_query in
+  let all_goals = goals t in
   let matched =
-    List.filter
-      (fun (g : Wire_work.goal) ->
-        goal_matches_phase t.goal_phase_filter g
-        && (String.equal q ""
-           || contains_ci ~needle:q g.title
-           || contains_ci ~needle:q g.id
-           || contains_ci ~needle:q g.measure))
-      (goals t)
+    if
+      (match t.goal_phase_filter with
+      | Goal_filter_all -> true
+      | Goal_filter_active | Goal_filter_verifying | Goal_filter_held
+      | Goal_filter_closed ->
+          false)
+      && String.equal q ""
+    then all_goals
+    else
+      List.filter
+        (fun (g : Wire_work.goal) ->
+          goal_matches_phase t.goal_phase_filter g
+          && (String.equal q ""
+             || contains_ci ~needle:q g.title
+             || contains_ci ~needle:q g.id
+             || contains_ci ~needle:q g.measure))
+        all_goals
   in
   match t.goal_sort_mode with
   | Goal_sort_default -> matched
@@ -713,14 +723,26 @@ let filtered_goals t =
           if c <> 0 then c else Int.compare a.priority b.priority)
         matched
   | Goal_sort_progress ->
+      let counts : (string, int ref * int ref) Hashtbl.t = Hashtbl.create 16 in
+      List.iter
+        (fun (tk : Wire_work.task) ->
+          match tk.goal_link with
+          | Wire_work.Unlinked -> ()
+          | Wire_work.Linked gid ->
+              let d = if task_is_done tk.status then 1 else 0 in
+              (match Hashtbl.find_opt counts gid with
+              | Some (done_r, tot_r) ->
+                  done_r := !done_r + d;
+                  incr tot_r
+              | None -> Hashtbl.add counts gid (ref d, ref 1)))
+        (tasks t);
       matched
       |> List.map (fun (goal : Wire_work.goal) ->
-             let linked = goal_linked_tasks ~goal_id:goal.id t in
              let score =
-               Option.map
-                 (fun (done_count, total) ->
-                   Float.of_int done_count /. Float.of_int total)
-                 (task_completion_counts linked)
+               match Hashtbl.find_opt counts goal.id with
+               | Some (done_r, tot_r) when !tot_r > 0 ->
+                   Some (Float.of_int !done_r /. Float.of_int !tot_r)
+               | Some _ | None -> None
              in
              goal, score)
       |> List.stable_sort
@@ -757,13 +779,23 @@ let task_matches_status filter (tk : Wire_work.task) =
 
 let filtered_tasks t =
   let q = String.trim t.filter_query in
-  List.filter
-    (fun (task : Wire_work.task) ->
-      task_matches_status t.task_status_filter task
-      && (String.equal q ""
-         || contains_ci ~needle:q task.title
-         || contains_ci ~needle:q task.id))
-    (tasks t)
+  let all_tasks = tasks t in
+  if
+    (match t.task_status_filter with
+    | Status_all -> true
+    | Status_active | Status_awaiting_verification | Status_todo
+    | Status_unlinked | Status_done ->
+        false)
+    && String.equal q ""
+  then all_tasks
+  else
+    List.filter
+      (fun (task : Wire_work.task) ->
+        task_matches_status t.task_status_filter task
+        && (String.equal q ""
+           || contains_ci ~needle:q task.title
+           || contains_ci ~needle:q task.id))
+      all_tasks
 
 let filtered_verifications t =
   let q = String.trim t.filter_query in

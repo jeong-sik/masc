@@ -1,5 +1,96 @@
 ## [Unreleased]
 
+## [0.83.8] - 2026-11-27
+
+### Added
+
+- `[runtime.lanes.<name>]` now accepts an optional `order = "fixed" | "spread_by_keeper"` key so Keepers sharing a failover lane start at deterministic per-Keeper cyclic rotations of `candidates` while preserving full failover and quota/backpressure demotion (#55132).
+- Add the runtime setting `keeper.checkpoint_save_min_interval_sec` (default `30.0`, range `[0.0, 600.0]`) to pace mid-turn `After_tool_results_appended` and message-appending `After_context_injection` checkpoint saves while always persisting turn-closing `finalize`, `After_assistant_collected` (including open `ToolUse` cycles for crash recovery), input-wait transitions, rejected-response drops, and flushing deferred tool rounds on error or cancellation (#55176).
+- Extend the live RBAC E2E smoke suite (`test/test_rbac_tui_pty_e2e.py`, `test/rbac_live_e2e_seed.ml`, `dashboard/e2e/rbac-live-smoke.mjs`) from 26 to 29 live cases covering Multi-Account Personal Keepers TUI PTY lifecycle (list, create, runtime assignment, conversation start, 2-step delete, zero `/api/v1/keepers*` 404s), read-only PAT HTTP 403 non-logout banner, Service principal Keepers `LOCKED` gating, HTTP `/api/v1/auth/keepers` PAT scope checks, and `#55063` 2-step `[c]` clear-token confirmation plus `[f]` file-token revert recovery (#55317).
+
+### Changed
+
+- The Keeper delegate tools (`masc_keeper_delegate`, `masc_keeper_delegate_status`, `masc_keeper_delegate_status_many`, `masc_keeper_delegate_cancel` and `masc_keeper_delegate_list`) take `target` as the receiving Keeper's name, as in `"target": "reviewer"`. A Keeper no longer restates a `kind` field whose only value was `"keeper"`. This is a hard cut: an external MCP client or script that still sends `{"kind": "keeper", "name": …}` is refused with `"target": wrong type`, and the refusal shows the string form to send. Stored state is unaffected (#55116).
+
+### Fixed
+
+- A refresh pressed while a read is still out now starts the read again; a request that never answers no longer holds every later press with it (#55009).
+- Work and Knowledge tabs: the refresh button says "읽는 중…" while its read is in flight and keeps its width (#55010).
+- Runtime and Infra tabs: the refresh button says "읽는 중…" while its read is in flight and keeps its width (#55011).
+- Keeper tabs and Settings: the refresh button says "읽는 중…" while its read is in flight and keeps its width (#55014).
+- The Librarian card in the dashboard Prompts tab lists its inputs without
+  `counterpart_observations`, which no runtime fills. The Keeper user manuals
+  drop the paragraph about a guard on that variable; the guard does not exist
+  (#55091).
+- Claude Code, Codex, Antigravity and ACP keepers: when the seed or the lane's own cut opens the request past where the Librarian has read, the request now carries the Librarian's working state in front, as the Agent Core lane does, so the keeper no longer starts a new session without the summary of what came before. The request still starts at the same place. When the working state would push out part of the conversation, it stays out and the existing "working state not carried" warning and counter say so (#55093).
+- A commit a Keeper makes through its official client (Claude Code, Codex,
+  Antigravity or ACP), including one from the client's own shell under
+  `native = "full"`, now carries the Keeper's name as git author and
+  committer, so the pull request list attributes it to that Keeper. It used
+  to carry the host's git name (#55095).
+- Lane Add-on attach and declaration save now require operator authority for host_process packages, project a minimal environment for host MCP workers, restrict non-operator snapshot_file sources to workspace realpaths, catch file-lock timeouts without poisoning action_mutex, and exec_shim seccomp filters now reject x86_64 x32 ABI syscalls (#55104).
+- Bash subset lexer no longer hides unquoted glob prefixes before quotes, sandboxed exec dispatch fails closed on unreadable or non-regular stdin redirects, exec_shim hardens scratch removal, request tracing, and framed non-blocking supervision, and egress proxy enforces cumulative header and upstream connect bounds (#55105).
+- Keep each ACP session's newest `usage_update` on the client, including frames that arrive after the `session/prompt` response, and drop it on `session/close`. Before a Keeper resumes its open session it reads that count and, past the rollover threshold, compacts the anchor and starts a fresh session from the handoff list. Kimi Code 2.7 sends the count after the response, so about half of its turns had settled with no count and armed no rollover; code-reviewer-father reached 842,748 tokens against a 400,000 lane limit (#55111).
+- Prevent keeper turn event-bus unsubscribe deadlocks, serialize parallel cycle-grant consumption with `Cross_context_mutex`, scope board-attention worker timers to watched work, and prevent dropped-fork leaks in auto-judge and librarian writers (#55112).
+- Harden AG-UI/Presence SSE session ownership, route fleet/metrics/play SSE handlers through `Server_sse_response.serve`, reject Discord operator replies on stopping switches, make SSE idle eviction and external subscriber reaping atomic/identity-checked, and eliminate `Eio.Mutex` poisoning across LSP/workspace/skill/play/lane/resume routes (#55114).
+- A cancelled agent run (an operator stop, an interrupt, or a run that lost a
+  race) is now recorded as `agent_cancelled` with the cancelling reason
+  instead of an `agent_failed` internal error, so `internal_error` rows again
+  mean a broken agent-core invariant. A timeout is still `agent_failed`, and
+  the cancellation still propagates as before (#55115).
+- A cancelled agent run refreshes the dashboard's telemetry and Keeper
+  runtime-trace views again, the same as any other run outcome; the server
+  now reads the new `agent_cancelled` event (#55117).
+- The TUI and the dashboard show a cancelled agent run as cancelled, with its
+  reason. The TUI records it under Activity without raising an incident, and
+  the dashboard adds a journal row without an error notification (#55119).
+- A `masc start` run from a terminal no longer stops whole when one Keeper
+  child reads that terminal. With a terminal, `masc start` starts the server
+  in a session of its own and stays to show its output; Ctrl-C, closing the
+  terminal or `kill` stop the server as before, and the command exits with
+  the server's code. The server's pid now differs from the command's, and its
+  output also lands in `.masc/logs/masc-server-<port>.log`. `masc restart`
+  starts its replacement without the terminal too. Without a terminal
+  nothing changes (#55120).
+- Guard Dashboard execution publication watermarks across reconnects/epochs, remove duplicate `fusion_run_status` fetches and guard out-of-order fusion refreshes, decrement `boardTotal` on post removal, fix `observationOnly` tool replay and `KEEPER_CHAT_OPERATION_ACCEPTED` state regressions in `keeper-stream.ts`, and abort stale waiting-inventory reads / stop infinite 401/403 observer retries (#55130).
+- A Keeper that reads a Skill resource file over 16 KiB with `keeper_skill` gets an artifact handle with a 4 KiB preview instead of a `too_large` refusal, the same way a long `SKILL.md` body already comes back. Resource files up to 1 MiB, the cap the Skill editor already applies to `SKILL.md`, are readable; a larger one is refused with its size and the cap. The game-guide reference route serves files up to the same 1 MiB. The dashboard and Keeper tool surface show the resource read bound as 1 MiB (#55131).
+- Preserve active `runtime.toml` previews/CAS applies across background SSE refreshes and abort competing exact-run inspections in Runtime Lanes, isolate Account tabs by `sessionEpoch` with per-row member busy tracking and abortable `whoami`, fail closed in `decodeToolApprovalsWire`, and route MCP `tools/list` through `parseMcpHttpResponse` with 401 dev-token refresh (#55134).
+- On the Claude Code and Antigravity runtimes, a Keeper's call to a MASC tool now shows as one tool row in the chat. It no longer also shows a built-in tool row (`mcp__masc__…` on Claude Code, `call_mcp_tool` on Antigravity) for the same call. Built-in tools such as Read still show their own row, and the raw trace still records the client's own step for the call (#55155).
+- **Dashboard**: isolated `Dashboard_briefing_sections` and text `Dashboard` Keeper listings by workspace `base_path`, fixed `Dashboard_cache` seed-tombstone revival and unconditional timeout-circuit resets, filtered recovered execution-receipt coverage gaps, deduplicated `tool_audit_at`, guarded `Unix.gmtime`/non-finite `duration_ms` in tool quality, and clamped/tagged workspace cache keys (#55159).
+- **Goal, Schedule, Wiki, Verification & Candle**: retried unrelated concurrent Candle writes during hold release, dropped permanent `Conflict` observations in `Goal_criterion_agent`, added immediate cancellation & cleanup to `Goal_verification_agent` retry fibers, retried `EEXIST` races in `Wiki_journal.append_log`, made `Verification.delete_request` atomically idempotent with `Unix.unlink`, and detected wedged in-flight schedule ticks as `stale` (#55160).
+- **llm_provider**: Enforce `body_timeout_s` across pre-header waits and align stream output-phase transitions, preserve whitespace tokens in OpenAI chunk-list streams, return typed parse errors for malformed OpenAI/Ollama/GLM/Anthropic sync payloads, and align Gemini sync parsing for empty-text tool calls, zero-arg `functionCall`, and `promptFeedback.blockReason` (#55178).
+- **fs_compat/core/otel/board**: Use `Unix.single_write_substring` in `Fd_write_all` writers, guard `Systhread_host` startup exceptions, resolve `Publication_recovery_access_lease` drain signal under mutex, serialize `Runtime_params.persist` without mutex poisoning, guard OTel metric store against non-finite/negative samples and missing zero buckets, and serialize `Board_sub_boards` reads against publication (#55207).
+- Avoid caching degraded `Memory` workspace backends, move verdict post-commit hooks out of `backlog.json.lock`, narrow task-create cancel protection with `with_file_lock_r`, and fsync `workspace_memory_log` WAL writes/truncation (#55211).
+- A Keeper's runtime line now names the account it runs on. The TUI Keeper detail and the preview beside the Keeper list, and the dashboard Keeper list row and header Runtime row, append the login email the setup inventory read for that runtime's provider, so runtimes on one login no longer read as different accounts by their hash. Without a read email the line is unchanged. The email needs a single-user admin session, like the setup inventory (#55212).
+- An Antigravity message that `agy` would cut is no longer sent. `agy` keeps only the first 192,000 bytes of one message and drops the rest while the turn still succeeds; on 11-19..27 it cut 1,492 of 1,557 Keeper CLI turns. The CLI driver now refuses a prompt over 191,579 bytes before it starts the process, and `agy acp` refuses before `session/prompt`. The lane moves to its next candidate, and the account is not rested. A Keeper whose message is that large skips its Antigravity candidates, and a lane with no other candidate ends the turn as a failure (#55219).
+- Preserve case on TUI slash command arguments, reset stale per-turn context and absent waiting-inventory slots, nonce addon request IDs per process, fix batch size badges, and prefer `sox`/`ffmpeg` when a voice input device is configured (#55223).
+- Respect `should_reraise_cancel` in `Proactive_refresh`, JSON-encode gRPC init payloads and reconcile subscriber accounting/metrics in `Masc_grpc_service`, roll back interrupted restores and prune orphan profiles in `Server_mcp_transport_http_session`, drain SSE connections with `Atomic.exchange` in `Server_mcp_transport_http_conn`, switch `Server_upgrade_preparation` to non-poisoning cancel-safe locks, and publish missing config seeds atomically via `rename_noreplace` in `Server_runtime_config_root_bootstrap` (#55252)
+- **Dashboard keeper panels, error states, logs, and portrait cache** — guard async keeper panel mutations against keeper switches and re-entrancy, pass `message` to `ErrorState` and `label` to `SectionCard`, eliminate redundant log signal subscriptions, surface model activation failures, and cache only terminal portrait fetch misses (#55255).
+- Pausing, resuming or seeking an imported MIDI performance on an external MIDI output, and rendering a VST region, no longer fail when a note that began before a Program Change is still sounding: the note is re-sent under the bank and program of its attack, then the channel's current patch returns. Only a note whose patch is unknown (attacked before the channel's first Program Change, or chosen under an initial bank the source later changed) still reports an error (#55269).
+- **HTTP/Ollama SSRF, OOXML preflight, and Bearer redaction** — restrict curl helpers to `http`/`https` with post-decompression size rejection, validate `masc_runtime_ollama_probe` `server_url` inputs (blocking link-local/IMDS/unspecified and non-canonical numeric/hex/octal/shorthand hosts, plus pinning resolved DNS addresses via `--resolve`), make OOXML preflight checks case-insensitive with streaming zip-bomb bounds, and scrub full `Authorization: Bearer` header tails including `~` and `:` (#55275).
+- Pausing, resuming or seeking an imported MIDI performance on an external MIDI output no longer re-sends a Program Change under a bank that playback sent after it. When that Program Change was selected before the source set a bank register, and playback has since sent that register, reconstruction reports an error before sending anything instead of guessing the device's initial bank. MIDI arrangement regions and rendered VST regions follow the same rule, including a Program Change exactly at a region's start: a repeat, a later region on the same channel or a loop pass that would re-send it is refused when the arrangement or render is prepared, before anything plays (#55289).
+- Enforce HTTP/HTTPS scheme, port, and newline validation in exact-output measurement transport and Http_client, bound HTTP response head buffering and 1xx interim counts, floor Http_client_cache eviction interval at 1 ns, bracket bare IPv6 Ollama hosts in Discovery, and reject line breaks in Agent_card URLs (#55302).
+- Guard JSON schema count-bound float-to-int overflow, match MCP SSE responses by request ID, isolate `Shutdown` notify/drain exceptions and clock elapsed time, omit `ETag`/`Cache-Control` on overridden `504` lazy JSON responses, continue upload grant cleanup on per-grant release errors, and harden browser ego URL/UTF-8 boundary checks (#55305).
+- Keep selected rows visible in grouped TUI scrolling, bind `Document_graphics.prepare` to `work_sw`, clamp negative workspace tree depths, tighten `--url`/`MASC_HOST` CLI validation, align `short_hash` and timestamp fallback slicing to UTF-8 boundaries, and handle `Filename.temp_file` `Sys_error` in clipboard image reads (#55306).
+- Harden the Playwright `attachNetworkAuditor` and `waitForApiIdle` helper to track non-SSE API requests deterministically across `request`/`response`/`requestfailed`, fail loudly on idle timeout with pending URLs, await idle inside `assertClean`, anchor fragile dashboard/TUI selectors, and prevent double-reap `ChildProcessError` in `TuiPtySession` (#55317).
+- Restrict artifact links to `http:`/`https:` and non-code fallbacks to plain text, hoist `useSignal` above early return in keeper alert strip, URL-encode board `postId`, rethrow aborts and clear committed resume intents, evict failed lazy workspace cache entries, reset account store state after sign-out/sign-in, and guard async UI mutations against reentrancy and stuck busy states (#55318).
+- Collapse `.`/`..` segments in `Fs_compat.realpath_lenient` nonexistent suffixes, deny `Off`-mode Keeper turns in `Authz_keeper_turn.decide`, hold duplicated `flock(2)` across Antigravity Keychain clear and rename, close `exec_tap` attached-header redaction and FD leaks, protect installer temp-dir cleanup under `Eio_guard.protect`, block IPv4-mapped multicast/broadcast microVM DNS addresses, harden `masc_acp_probe` skill reads, set `O_CLOEXEC` on atomic/base file writes, reject sequences nested in pipelines, retry `EINTR` in API key writes, and compare invite token digests with `Eqaf.equal` (#55319).
+
+### Performance
+
+- Keeper checkpoint saves now merge transcript validation and save planning into one `Domain_pool` job, write pre-encoded canonical head bytes directly without an extra CPU pool hop, batch rolling history archiving and pruning in a single systhread on `Turn_closes` only, and skip redundant context-only `After_context_injection` writes when messages are unchanged (#55176).
+- Speed up boot log restore and shared JSONL streaming by switching `Fs_compat.fold_jsonl_lines`/`fold_appended_lines` to 1 MiB chunks with cached canonical mutex keys and direct line slicing, decoding `Log.Ring.entry_of_json` in a single pass, deferring `classify_restored_diagnostic` to surviving ring tail entries, and backing `String_util` substring searches with `String.index_from_opt`/`rindex_from_opt` (#55301).
+- Build `comments_by_post` in O(N) on Board reload instead of O(K^2) `List.mem` scans under the store lock and avoid per-row `String.trim` allocations when decoding `board_comments.jsonl` and `board_posts.jsonl` (#55304).
+
+### Documentation
+
+- The Antigravity RFC now states that `agy` keeps only the first 192,000 bytes of one message and drops the rest without refusing, on both the CLI and `agy acp`. It designs a pre-send refusal for both Antigravity drivers that moves the lane to its next candidate without resting the account, adds the quota-refusal acceptance conditions of #41425, and leaves the rest unit (account or model group) open. The context-window RFC points to this exception (#55210).
+
+### Internal
+
+- Split pre-initialize Claude Code startup refusals into a dedicated `Runtime_claude_code.Startup_refused` constructor (with `error_kind = "startup_refused"`), consolidated `result` header parsing into a single pass, shared the transient org-config unavailability predicate between route classification and session recovery, and aligned the `Pre_dispatch_failed` docstring (#55110).
+- The alphatex native MIDI owners (phrase, source wire, captured UMP and VST render output) keep held keys, pedals and open SysEx in one `OwnershipLedger` that only its `transmit` changes, so the rule "own before the send, release only after it returns" no longer has a copy per path; emitted messages are unchanged (#55260).
+
 ## [0.83.7] - 2026-11-27
 
 ### Upgrade notes

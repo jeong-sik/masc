@@ -66,7 +66,9 @@ let with_store_transition_lock ~base_path ~request_id f =
             | Some current when current == lock ->
               Store_transition_table.remove store_transition_locks key
             | Some _ | None -> ())))
-    (fun () -> Eio.Mutex.use_rw ~protect:true lock.mutex f)
+    (fun () ->
+       Eio.Mutex.lock lock.mutex;
+       Fun.protect ~finally:(fun () -> Eio.Mutex.unlock lock.mutex) f)
 ;;
 
 type lane_observation =

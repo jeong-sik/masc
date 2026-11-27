@@ -50,7 +50,8 @@ module For_testing = struct
       Atomic.set replay_projection_errors SMap.empty;
       Atomic.set store_revisions SMap.empty;
       Atomic.set next_sequences SMap.empty;
-      Atomic.set durable_states SMap.empty)
+      Atomic.set durable_states SMap.empty;
+      reset_snapshot_generations ())
   ;;
 
   let install_persistence_with_after_load_hook ~base_path ~after_load =

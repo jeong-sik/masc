@@ -331,7 +331,7 @@ let restore_inventory_admission ~config inventory =
      | Ok blocked -> loop [] blocked inventory)
 ;;
 
-let worker_mu = Eio.Mutex.create ()
+let worker_mu = Stdlib.Mutex.create ()
 let active_workers : (string, unit) Hashtbl.t = Hashtbl.create 17
 
 let worker_key (operation : Keeper_shutdown_types.t) =
@@ -339,7 +339,7 @@ let worker_key (operation : Keeper_shutdown_types.t) =
 ;;
 
 let claim_worker (operation : Keeper_shutdown_types.t) =
-  Eio.Mutex.use_rw ~protect:true worker_mu (fun () ->
+  Stdlib.Mutex.protect worker_mu (fun () ->
     let key = worker_key operation in
     if Hashtbl.mem active_workers key
     then false
@@ -349,7 +349,7 @@ let claim_worker (operation : Keeper_shutdown_types.t) =
 ;;
 
 let release_worker (operation : Keeper_shutdown_types.t) =
-  Eio.Mutex.use_rw ~protect:true worker_mu (fun () ->
+  Stdlib.Mutex.protect worker_mu (fun () ->
     Hashtbl.remove active_workers (worker_key operation))
 ;;
 

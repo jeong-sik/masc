@@ -43,6 +43,7 @@ type durable_state =
   }
 
 let durable_states : durable_state SMap.t Atomic.t = Atomic.make SMap.empty
+let last_snapshot_generations : int SMap.t Atomic.t = Atomic.make SMap.empty
 let compaction_ratio = 2
 let first_generation = 1
 
@@ -53,7 +54,22 @@ type write_mode =
 
 let durable_state_for ~base_path = SMap.find_opt base_path (Atomic.get durable_states)
 
+let record_snapshot_generation ~base_path generation =
+  let current = Atomic.get last_snapshot_generations in
+  let next =
+    match SMap.find_opt base_path current with
+    | Some prev when prev >= generation -> prev
+    | Some _ | None -> generation
+  in
+  Atomic.set last_snapshot_generations (SMap.add base_path next current)
+;;
+
+let reset_snapshot_generations () =
+  Atomic.set last_snapshot_generations SMap.empty
+;;
+
 let set_durable_state ~base_path state =
+  record_snapshot_generation ~base_path state.snapshot_generation;
   Atomic.set durable_states (SMap.add base_path state (Atomic.get durable_states))
 ;;
 
@@ -62,9 +78,19 @@ let drop_durable_state ~base_path =
 ;;
 
 let next_generation ~base_path =
-  match durable_state_for ~base_path with
-  | Some state -> state.snapshot_generation + 1
-  | None -> first_generation
+  let from_durable =
+    match durable_state_for ~base_path with
+    | Some state -> Some state.snapshot_generation
+    | None -> None
+  in
+  let from_recorded =
+    SMap.find_opt base_path (Atomic.get last_snapshot_generations)
+  in
+  match from_durable, from_recorded with
+  | Some a, Some b -> max a b + 1
+  | Some a, None -> a + 1
+  | None, Some b -> b + 1
+  | None, None -> first_generation
 ;;
 
 (** Serialize one durable pending/delivery snapshot transition across both Eio

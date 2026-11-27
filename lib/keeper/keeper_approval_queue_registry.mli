@@ -69,6 +69,8 @@ type durable_state =
 
 val durable_states : durable_state Set_util.StringMap.t Atomic.t
 
+val last_snapshot_generations : int Set_util.StringMap.t Atomic.t
+
 val compaction_ratio : int
 
 val first_generation : int
@@ -83,6 +85,10 @@ val durable_state_for : base_path:string -> durable_state option
 val set_durable_state : base_path:string -> durable_state -> unit
 
 val drop_durable_state : base_path:string -> unit
+
+val record_snapshot_generation : base_path:string -> int -> unit
+
+val reset_snapshot_generations : unit -> unit
 
 val next_generation : base_path:string -> int
 

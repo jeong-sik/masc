@@ -31,7 +31,7 @@ import { JsonViewerCard } from './common/json-viewer'
 import { ExactRunSlotObservations } from './exact-slot-observations'
 import type { ExactLanePayloadAvailability } from '../api/dashboard-exact-lane-runs'
 import { formatDateTimeKo, relativeTime } from '../lib/format-time'
-import { hashForRoute } from '../router'
+import { hashForRoute, keeperHref } from '../router'
 import { keepers as keeperRosterSignal, shellRuntimeResolution } from '../store'
 import { useLaneNavigation, LaneNavigationNotice, clearLaneNavigation } from './lane-navigation'
 import type { LaneNavigationTarget } from '../lib/lane-navigation'
@@ -315,10 +315,6 @@ function EvidenceBadge({ kind }: { kind: 'raw' | 'typed' | 'excerpt' }) {
       ? 'border-[var(--color-danger)] text-[var(--color-danger)]'
       : 'border-[var(--color-accent)] text-[var(--color-accent)]'
   return html`<span class=${`inline-flex rounded border px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide ${style}`}>${kind}</span>`
-}
-
-function keeperHref(name: string): string {
-  return hashForRoute('monitoring', { section: 'agents', view: 'keepers', keeper: name })
 }
 
 function fusionHref(): string {

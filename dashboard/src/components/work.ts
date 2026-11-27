@@ -6,7 +6,7 @@ import { GoalProofStatus } from './goals/goal-proof'
 import { html } from 'htm/preact'
 import { lazy, Suspense } from 'preact/compat'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
-import { route, navigate } from '../router'
+import { route, navigate, navigateToKeeper } from '../router'
 import { tasks, keepers, executionTaskTotal, nextExecutionObservation, refreshExecution } from '../store'
 import { normalizeTask, normalizeTaskStatus } from '../store-normalizers'
 import { WORK_UNLINKED_GOAL_TITLE } from '../lib/work-copy'
@@ -190,10 +190,6 @@ function leadNameForGoal(goal: Goal): string | undefined {
     }
   }
   return topName
-}
-
-function openKeeperWorkspace(name: string): void {
-  navigate('monitoring', { section: 'agents', view: 'keepers', keeper: name })
 }
 
 // ── Progress aggregation ────────────────────────────────────────────────────
@@ -574,7 +570,7 @@ function GoalProjectionDossier({
                 type="button"
                 class="wk-dossier-link mono"
                 data-goal-detail-keeper=${name}
-                onClick=${() => openKeeperWorkspace(name)}
+                onClick=${() => navigateToKeeper(name)}
                 title=${`${name} 작업 공간 열기`}
               >${name}</button>
             `)}
@@ -673,7 +669,7 @@ function TaskRow({ task, onClaim }: { task: Task; onClaim: (id: string) => void 
               type="button"
               class=${`wk-task-kp${keeper ? '' : ' offline'}`}
               data-testid="job-keeper"
-              onClick=${(e: Event) => { e.stopPropagation(); openKeeperWorkspace(task.assignee!) }}
+              onClick=${(e: Event) => { e.stopPropagation(); navigateToKeeper(task.assignee!) }}
               title=${`${task.assignee} 대화 열기${keeper ? '' : ' (Offline)'}`}
             >
               <${KeeperBadge} id=${task.assignee} size="sm" variant="sigil" />
@@ -1026,7 +1022,7 @@ function KanbanCard({
               type="button"
               class=${`wk-kcard-kp${keeper ? '' : ' offline'}`}
               title=${`${task.assignee} 대화 열기${keeper ? '' : ' (Offline)'}`}
-              onClick=${(e: Event) => { e.stopPropagation(); openKeeperWorkspace(task.assignee!) }}
+              onClick=${(e: Event) => { e.stopPropagation(); navigateToKeeper(task.assignee!) }}
             >
               <${KeeperBadge} id=${task.assignee} size="sm" variant="sigil" />
             </button>
@@ -1822,7 +1818,7 @@ function WorkSurfaceV2() {
           goalSourceUnconfirmed=${goalSourceUnconfirmed}
           goalSourceError=${goalSourceError}
           onJump=${jumpToGoal}
-          onOpenKeeper=${openKeeperWorkspace}
+          onOpenKeeper=${navigateToKeeper}
         />
       `}
     </main>

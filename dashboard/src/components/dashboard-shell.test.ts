@@ -81,12 +81,12 @@ describe('ConnectionStatus', () => {
 })
 
 describe('isKeeperDetailDashboardRoute', () => {
-  it('detects monitor keeper detail drilldowns', () => {
+  it('does not treat a monitoring route as keeper detail, even with a keeper param', () => {
     expect(isKeeperDetailDashboardRoute({
       tab: 'monitoring',
-      params: { section: 'agents', keeper: 'sangsu' },
+      params: { section: 'runtime', keeper: 'sangsu' },
       postId: null,
-    })).toBe(true)
+    })).toBe(false)
   })
 
   it('treats the top-level keepers surface as an immersive keeper workspace', () => {
@@ -97,13 +97,6 @@ describe('isKeeperDetailDashboardRoute', () => {
     })).toBe(true)
   })
 
-  it('does not treat the fleet list as keeper detail', () => {
-    expect(isKeeperDetailDashboardRoute({
-      tab: 'monitoring',
-      params: { section: 'agents' },
-      postId: null,
-    })).toBe(false)
-  })
 })
 
 describe('dashboardHealthChips', () => {

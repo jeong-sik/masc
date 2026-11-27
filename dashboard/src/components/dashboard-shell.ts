@@ -34,6 +34,7 @@ import { LoadingState } from './common/feedback-state'
 import {
   DASHBOARD_NAV_ITEMS,
   currentSectionForRoute,
+  keeperRoute,
 } from '../config/navigation'
 import { ObservatoryFilterBar } from './common/observatory-filter-bar'
 import type { LucideIcon } from 'lucide-preact'
@@ -347,7 +348,7 @@ function chipRouteFor(key: string): DashboardHealthChipRoute | undefined {
     case 'no-keeper-rows':
       return { tab: 'monitoring', params: { section: 'fleet-health' } }
     case 'keeper-count-basis':
-      return { tab: 'monitoring', params: { section: 'agents', view: 'keepers' } }
+      return keeperRoute()
     default:
       return undefined
   }
@@ -822,13 +823,6 @@ function dashboardRouteBoundaryKey(routeState: RouteState): string {
     params.worker_run_id ? `worker=${params.worker_run_id}` : '',
   ]
 
-  if (routeState.tab === 'monitoring' && params.section === 'agents') {
-    parts.push(
-      params.agent ? `agent=${params.agent}` : '',
-      params.keeper ? `keeper=${params.keeper}` : '',
-    )
-  }
-
   return parts.filter(Boolean).join(':')
 }
 
@@ -964,11 +958,7 @@ function useSurfaceDocumentTitle(): void {
 }
 
 export function isKeeperDetailDashboardRoute(routeState: RouteState): boolean {
-  if (routeState.tab === 'keepers') return true
-  return routeState.tab === 'monitoring'
-    && routeState.params.section === 'agents'
-    && typeof routeState.params.keeper === 'string'
-    && routeState.params.keeper.trim() !== ''
+  return routeState.tab === 'keepers'
 }
 
 // Surfaces that render their own primary header (a bespoke per-surface title

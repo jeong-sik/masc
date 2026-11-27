@@ -1839,7 +1839,7 @@ describe('ApprovalsSurface', () => {
   })
 
   it('opens the keeper conversation from 대화에서 검토', async () => {
-    const { ApprovalsSurface, navigate } = await loadSurface([
+    const { ApprovalsSurface, router } = await loadSurface([
       queueItem({ id: 'appr-k', keeper_name: 'masc-improver' }),
     ])
 
@@ -1851,12 +1851,8 @@ describe('ApprovalsSurface', () => {
     reviewBtn?.click()
     await flushUi()
 
-    // routes to the keeper's detail page (which defaults to the conversation view)
-    expect(navigate).toHaveBeenCalledWith('monitoring', {
-      section: 'agents',
-      view: 'keepers',
-      keeper: 'masc-improver',
-    })
+    // opens the keeper's page in the keepers tab (which defaults to the conversation view)
+    expect(router.route.value).toMatchObject({ tab: 'keepers', params: { keeper: 'masc-improver' } })
   })
 
   it('renders nonblocking state separately from the clickable task link', async () => {

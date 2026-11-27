@@ -43,7 +43,7 @@ import {
   keeperResolvedApprovalDecisionLabel,
   type KeeperResolvedApprovalDecision,
 } from '../../lib/keeper-approval-decision'
-import { navigate, route } from '../../router'
+import { navigate, navigateToKeeper, route } from '../../router'
 import { AgentAvatar } from '../overview/agent-avatar'
 import { LoadingState } from '../common/feedback-state'
 import {
@@ -387,11 +387,6 @@ function approvalPhase(item: KeeperApprovalQueueItem): ApprovalPhaseView {
   return approvalPhaseView(item.phase)
 }
 
-// Open this keeper's workspace conversation (work.ts idiom).
-function openKeeperWorkspace(name: string): void {
-  navigate('monitoring', { section: 'agents', view: 'keepers', keeper: name })
-}
-
 // Render the HITL context-summary worker's Human briefing. `available`
 // carries the LLM-generated summary a Human reads before deciding;
 // `pending`/`failed` are surfaced (not hidden) so a stuck or errored summary is
@@ -653,7 +648,7 @@ function ApprovalCard({
               <button
                 type="button"
                 class="ap-klink"
-                onClick=${() => openKeeperWorkspace(item.keeper_name)}
+                onClick=${() => navigateToKeeper(item.keeper_name)}
                 title=${`${item.keeper_name} 대화 열기`}
               >${item.keeper_name}</button>
               ${item.task_id || item.goal_id
@@ -717,7 +712,7 @@ function ApprovalCard({
           <button
             type="button"
             class="ap-act ghost"
-            onClick=${() => openKeeperWorkspace(item.keeper_name)}
+            onClick=${() => navigateToKeeper(item.keeper_name)}
             title="맥락 보기"
             disabled=${anyBusy}
           >대화에서 검토 →</button>

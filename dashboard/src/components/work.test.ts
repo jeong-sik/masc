@@ -15,6 +15,7 @@ const routeSignal = signal<{
 })
 
 const navigateMock = vi.hoisted(() => vi.fn())
+const navigateToKeeperMock = vi.hoisted(() => vi.fn())
 const callMcpToolMock = vi.hoisted(() => vi.fn<(name: string, args: Record<string, unknown>) => Promise<string>>())
 const assignmentSourceMock = vi.hoisted(() => vi.fn())
 const refreshGoalTreeMock = vi.hoisted(() => vi.fn())
@@ -42,6 +43,7 @@ vi.mock('../router', async (importOriginal) => ({
   ...await importOriginal<typeof import('../router')>(),
   get route() { return routeSignal },
   navigate: navigateMock,
+  navigateToKeeper: navigateToKeeperMock,
 }))
 
 vi.mock('../store', () => ({
@@ -224,6 +226,7 @@ describe('Work', () => {
   afterEach(() => {
     cleanup()
     navigateMock.mockClear()
+    navigateToKeeperMock.mockClear()
     selectedTask.value = null
     showGoalCreate.value = false
     goalTreeData.value = null
@@ -769,7 +772,7 @@ describe('Work', () => {
       expect(keeperButton).toBeTruthy()
       fireEvent.click(keeperButton)
 
-      expect(navigateMock).toHaveBeenCalledWith('monitoring', { section: 'agents', view: 'keepers', keeper: 'sangsu' })
+      expect(navigateToKeeperMock).toHaveBeenCalledWith('sangsu')
     })
 
     it('surfaces claimable backlog tasks in a dedicated backlog section', () => {
@@ -2324,10 +2327,7 @@ describe('Work', () => {
         expect(link).not.toBeNull()
         fireEvent.click(link!)
 
-        expect(navigateMock).toHaveBeenCalledWith(
-          'monitoring',
-          { section: 'agents', view: 'keepers', keeper: 'rondo' },
-        )
+        expect(navigateToKeeperMock).toHaveBeenCalledWith('rondo')
       })
 
       it('expands the goal detail timeline events behind the toggle', () => {

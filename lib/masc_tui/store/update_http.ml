@@ -398,6 +398,40 @@ let clear_auth_gate_overlay = function
       ov
   | None -> None
 
+let purge_session_scoped_state (m : Model.t) : Model.t =
+  let fleet =
+    {
+      Fleet_store.empty with
+      fleet_mode = m.fleet.fleet_mode;
+      chat_origin_mode = m.fleet.chat_origin_mode;
+      chat_tools_mode = m.fleet.chat_tools_mode;
+      chat_thinking_mode = m.fleet.chat_thinking_mode;
+      chat_turn_details_expanded = m.fleet.chat_turn_details_expanded;
+      keeper_dive_tab = m.fleet.keeper_dive_tab;
+    }
+  in
+  let work =
+    {
+      Work_store.empty with
+      active_tab = m.work.active_tab;
+      inbox_subview = m.work.inbox_subview;
+      verification_dive_tab = m.work.verification_dive_tab;
+    }
+  in
+  let knowledge =
+    {
+      Knowledge_store.empty with
+      active_tab = m.knowledge.active_tab;
+      board_signal_only = m.knowledge.board_signal_only;
+      board_sort_by = m.knowledge.board_sort_by;
+    }
+  in
+  let account =
+    Account_store.purge_own_provider_data
+      (Account_store.close_token_editor m.account)
+  in
+  { m with fleet; work; knowledge; account }
+
 let apply_runtime_token_swap ~now ~(token : string option) (m : Model.t) =
   let next_epoch = Epoch.next m.epoch in
   let account =
@@ -435,6 +469,7 @@ let apply_runtime_token_swap ~now ~(token : string option) (m : Model.t) =
       account;
       infra = Infra_store.forget_log_cursor m.infra;
     }
+    |> purge_session_scoped_state
     |> purge_disallowed_state ~session:Rbac.Probing_health
     |> Model.mark_all_domains_stale
     |> Model.with_toast ~now ~level:Model.Toast_info toast_msg
@@ -465,6 +500,7 @@ let apply_auth_session_transition ~now ~(next_session : Rbac.auth_session)
         auth_session = next_session;
         last_auth_recheck_mono = Some now;
       }
+      |> purge_session_scoped_state
       |> purge_disallowed_state ~session:next_session
     in
     let nav =
@@ -484,13 +520,16 @@ let apply_auth_session_transition ~now ~(next_session : Rbac.auth_session)
     (next, [ Cmd.Sync_streams { epoch = next.epoch; streams = [] } ])
   else if demoted || changed then
     let next_epoch = Epoch.next m.epoch in
-    let base =
+    let base0 =
       {
         m with
         epoch = next_epoch;
         auth_session = next_session;
         last_auth_recheck_mono = Some now;
       }
+    in
+    let base =
+      (if changed then purge_session_scoped_state base0 else base0)
       |> purge_disallowed_state ~session:next_session
     in
     let overlay = clear_auth_gate_overlay base.nav.overlay in
@@ -5943,28 +5982,37 @@ let apply_http_reply ~now (m : Model.t) reply =
           config = Config_store.apply_schema_meta ~target meta m.config;
         }
       , [] )
-  | Msg.Reply_config_schema (Ok schema) ->
+  | Msg.Reply_config_schema { target = _; result = Ok schema } ->
       ( {
           m with
           config = Config_store.apply_schema ~observed_at:now schema m.config;
         }
       , [] )
-  | Msg.Reply_config_schema (Error err) ->
-      err_reply
-        ~fail:
-          (on_config (fun (x : Config_store.t) ->
-               { x with schema = failed_slot err x.schema }))
-        ~source:Health.Source_client_http ~ko:"설정 스키마 조회"
-        ~en:"Config schema fetch" err
-  | Msg.Reply_config_patch { dry_run; result = Ok resp } ->
-      let config = Config_store.apply_patch_response ~dry_run resp m.config in
+  | Msg.Reply_config_schema { target; result = Error err } ->
+      if Config_store.equal_config_target target m.config.target then
+        err_reply
+          ~fail:
+            (on_config (fun (x : Config_store.t) ->
+                 { x with schema = failed_slot err x.schema }))
+          ~source:Health.Source_client_http ~ko:"설정 스키마 조회"
+          ~en:"Config schema fetch" err
+      else (m, [])
+  | Msg.Reply_config_patch { target; dry_run; result = Ok resp } ->
+      let matches_current =
+        Config_store.equal_config_target target m.config.target
+      in
+      let config =
+        Config_store.apply_patch_response ~target ~dry_run resp m.config
+      in
       let next = { m with config } in
       if dry_run then
-        ( Model.with_toast ~now ~level:Model.Toast_info
-            (Say.make ~ko:"TOML 변경 미리보기 준비됨"
-               ~en:"TOML diff preview ready")
-            next
-        , [] )
+        if matches_current then
+          ( Model.with_toast ~now ~level:Model.Toast_info
+              (Say.make ~ko:"TOML 변경 미리보기 준비됨"
+                 ~en:"TOML diff preview ready")
+              next
+          , [] )
+        else (next, [])
       else
         let next =
           Model.with_toast ~now ~level:Model.Toast_success
@@ -5972,18 +6020,22 @@ let apply_http_reply ~now (m : Model.t) reply =
                ~en:"Configuration saved atomically")
             next
         in
-        ( next
-        , [
-            Cmd.Http_get
-              {
-                epoch = m.epoch;
-                req = Cmd.Get_config_schema next.config.target;
-              };
-          ] )
-  | Msg.Reply_config_patch { dry_run; result = Error err } ->
+        let refresh_cmds =
+          if matches_current then
+            [
+              Cmd.Http_get
+                {
+                  epoch = m.epoch;
+                  req = Cmd.Get_config_schema next.config.target;
+                };
+            ]
+          else []
+        in
+        (next, refresh_cmds)
+  | Msg.Reply_config_patch { target; dry_run; result = Error err } ->
       let config =
-        Config_store.apply_patch_error ~dry_run (Msg.http_error_detail err)
-          m.config
+        Config_store.apply_patch_error ~target ~dry_run
+          (Msg.http_error_detail err) m.config
       in
       let next, cmds =
         record_http_incident ~now ~source:Health.Source_client_http

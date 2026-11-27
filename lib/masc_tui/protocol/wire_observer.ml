@@ -239,7 +239,7 @@ let dataset_of_wire ~keeper name =
   | "candle_ledger" | "candle" -> Dataset_candle_ledger
   | "memory_diff" -> Dataset_memory_diff
   | "logs" -> Dataset_logs
-  | "health" -> Dataset_health
+  | "health" | "workspace_health" -> Dataset_health
   | "activity" -> Dataset_activity
   | "gate" -> Dataset_gate
   | "keepers" | "keeper_composite" -> Dataset_keepers
@@ -351,8 +351,21 @@ let decode_typed_event type_name json =
         Ok (Observation_changed payload)
     | "workspace_dataset_changed" | "tui_v2_dataset_changed" ->
         let* dataset_name = required_nonblank_string json "dataset" in
-        let* keeper = optional_nonblank_string json "keeper" in
-        Ok (Dataset_changed (dataset_of_wire ~keeper dataset_name))
+        if
+          String.equal
+            (String.lowercase_ascii (String.trim dataset_name))
+            "dashboard_observation"
+        then
+          let payload_json =
+            if has_field json "payload" then member "payload" json else json
+          in
+          let* payload =
+            Sse_event.dashboard_observation_changed_payload_of_json payload_json
+          in
+          Ok (Observation_changed payload)
+        else
+          let* keeper = optional_nonblank_string json "keeper" in
+          Ok (Dataset_changed (dataset_of_wire ~keeper dataset_name))
     | "keeper_heartbeat" ->
         let* keeper = required_nonblank_string json "name" in
         let* at_unix = required_finite_float json "ts_unix" in
@@ -516,9 +529,12 @@ let decode_typed_event type_name json =
     | "gate_connector_changed" ->
         let* connector = required_nonblank_string json "connector" in
         Ok (Gate_connector_changed { connector })
-    | "schedule_store_changed" | "scheduled_automation_changed" ->
+    | "schedule_store_changed"
+    | "schedule_store_invalidated"
+    | "scheduled_automation_changed" ->
         Ok Schedule_store_changed
-    | "pending_confirms_changed" -> Ok Pending_confirms_changed
+    | "pending_confirms_changed" | "operator_pending_confirm_invalidated" ->
+        Ok Pending_confirms_changed
     | "goal_projection_changed" -> Ok Goal_projection_changed
     | "runtime_config_changed" -> Ok Runtime_config_changed
     | "transport_health_snapshot" -> Ok Transport_health_snapshot

@@ -1210,9 +1210,13 @@ let clear_in_flight t =
   in
   { t with dry_run_preview; save_state }
 
-let apply_patch_response ~dry_run (resp : Wire_config.patch_response) t =
+let apply_patch_response ?target ~dry_run (resp : Wire_config.patch_response) t =
+  let req_target = Option.value target ~default:t.target in
+  let matches_current = equal_config_target req_target t.target in
   if dry_run then
-    { t with dry_run_preview = Dry_run_ready resp; dry_run_scroll_offset = 0 }
+    if matches_current then
+      { t with dry_run_preview = Dry_run_ready resp; dry_run_scroll_offset = 0 }
+    else t
   else
     let last_snapshot_id =
       match resp.snapshot_id with
@@ -1220,23 +1224,27 @@ let apply_patch_response ~dry_run (resp : Wire_config.patch_response) t =
       | None -> t.last_snapshot_id
     in
     let dirty_by_target =
-      List.filter (fun (tg, _) -> not (equal_config_target tg t.target))
+      List.filter (fun (tg, _) -> not (equal_config_target tg req_target))
         t.dirty_by_target
     in
-    {
-      t with
-      dirty_fields = String_map.empty;
-      dirty_by_target;
-      discard_confirm_armed = false;
-      dry_run_preview = Dry_run_idle;
-      dry_run_scroll_offset = 0;
-      save_state = Save_succeeded resp;
-      last_snapshot_id;
-      schema = Observed.mark_stale t.schema;
-    }
+    if matches_current then
+      {
+        t with
+        dirty_fields = String_map.empty;
+        dirty_by_target;
+        discard_confirm_armed = false;
+        dry_run_preview = Dry_run_idle;
+        dry_run_scroll_offset = 0;
+        save_state = Save_succeeded resp;
+        last_snapshot_id;
+        schema = Observed.mark_stale t.schema;
+      }
+    else { t with dirty_by_target; last_snapshot_id }
 
-let apply_patch_error ~dry_run reason t =
-  if dry_run then
+let apply_patch_error ?target ~dry_run reason t =
+  let req_target = Option.value target ~default:t.target in
+  if not (equal_config_target req_target t.target) then t
+  else if dry_run then
     { t with dry_run_preview = Dry_run_failed reason; dry_run_scroll_offset = 0 }
   else { t with save_state = Save_failed reason }
 

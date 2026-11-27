@@ -142,6 +142,7 @@ let test_force_refresh_with_cached_result_returns_stale_cached_payload () =
       let config = Workspace.default_config base_path in
       ignore (Workspace.init config ~agent_name:None);
       Briefing.seed_cache
+        ~base_path:config.base_path
         ~cached_at:(Unix.gettimeofday ())
         (`Assoc
           [
@@ -293,6 +294,61 @@ let test_briefing_without_an_incident_list_fails_the_render () =
   | Ok _ -> fail "a briefing with no incidents list rendered"
   | Error _ -> ()
 
+let test_cache_isolated_by_workspace_base_path () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_a = temp_dir () in
+  let base_b = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Briefing.reset_cache ();
+      cleanup_dir base_a;
+      cleanup_dir base_b)
+    (fun () ->
+      Briefing.reset_cache ();
+      let config_a = Workspace.default_config base_a in
+      let config_b = Workspace.default_config base_b in
+      ignore (Workspace.init config_a ~agent_name:None);
+      ignore (Workspace.init config_b ~agent_name:None);
+      Briefing.seed_cache
+        ~base_path:config_a.base_path
+        ~cached_at:(Unix.gettimeofday ())
+        (`Assoc
+          [
+            ("generated_at", `String "2026-03-11T00:00:00Z");
+            ("cached", `Bool false);
+            ("stale", `Bool false);
+            ("refreshing", `Bool false);
+            ("status", `String "ok");
+            ("summary", `String "workspace A secret briefing");
+            ("provenance", `String "narrative");
+            ("authoritative", `Bool false);
+            ("model", `String "deterministic");
+            ("ttl_sec", `Int 300);
+            ("criteria", `List []);
+            ("sections", `List []);
+            ("error", `Null);
+            ("last_error", `Null);
+          ]);
+      let json_a =
+        Dashboard_briefing_sections.json
+          ~config:config_a ~sw ~clock ~proc_mgr:None ()
+      in
+      let json_b =
+        Dashboard_briefing_sections.json
+          ~config:config_b ~sw ~clock ~proc_mgr:None ()
+      in
+      let open Yojson.Safe.Util in
+      check string "workspace A sees its cached briefing"
+        "workspace A secret briefing"
+        (json_a |> member "summary" |> to_string);
+      check bool "workspace B does not receive workspace A cache" false
+        (String.equal
+           (json_b |> member "summary" |> to_string)
+           "workspace A secret briefing"))
+
 let () =
   run "Dashboard Mission Briefing"
     [
@@ -304,6 +360,8 @@ let () =
             test_force_refresh_without_cache_returns_pending;
           test_case "force refresh with cache returns stale cached payload" `Quick
             test_force_refresh_with_cached_result_returns_stale_cached_payload;
+          test_case "cache is isolated by workspace base_path" `Quick
+            test_cache_isolated_by_workspace_base_path;
         ] );
       ( "normalization",
         [

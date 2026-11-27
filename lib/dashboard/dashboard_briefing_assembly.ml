@@ -8,7 +8,7 @@ let lane_pressure_ctx_ratio = 0.80
 
 include Dashboard_briefing_agents
 
-let keeper_tool_audit_json_fields config _registry_lookup keeper agent_name =
+let keeper_tool_audit_json_fields config keeper agent_name =
   let keeper_name =
     match member_assoc "name" keeper with
     | `String n ->
@@ -86,15 +86,16 @@ let keeper_tool_audit_json_fields config _registry_lookup keeper agent_name =
                 fallback_at,
                 member_assoc Keeper_status_metrics.tool_audit_read_field keeper ))
   in
-  [
-    ("latest_tool_names", Json_util.json_string_list latest_tool_names);
-    ( "latest_tool_call_count",
-      Json_util.option_to_yojson (fun value -> `Int value) latest_tool_call_count );
-    ("latest_action_source", Json_util.string_opt_to_json latest_action_source);
-    ("tool_audit_source", Json_util.string_opt_to_json tool_audit_source);
-    ("tool_audit_at", Json_util.string_opt_to_json tool_audit_at);
-    (Keeper_status_metrics.tool_audit_read_field, tool_audit_read);
-  ]
+  ( tool_audit_at,
+    [
+      ("latest_tool_names", Json_util.json_string_list latest_tool_names);
+      ( "latest_tool_call_count",
+        Json_util.option_to_yojson (fun value -> `Int value) latest_tool_call_count );
+      ("latest_action_source", Json_util.string_opt_to_json latest_action_source);
+      ("tool_audit_source", Json_util.string_opt_to_json tool_audit_source);
+      ("tool_audit_at", Json_util.string_opt_to_json tool_audit_at);
+      (Keeper_status_metrics.tool_audit_read_field, tool_audit_read);
+    ] )
 
 let action_identity action =
   String.concat "|"
@@ -126,10 +127,6 @@ let is_internal_action action =
     (string_field "target_type" action)
 
 let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t list) =
-  let all_entries = Keeper_registry.all ~base_path:config.base_path () in
-  let registry_lookup name =
-    List.find_opt (fun (e : Keeper_registry.registry_entry) -> String.equal e.name name) all_entries
-  in
   keepers
   |> List.filter_map (fun keeper ->
          let name = string_field "name" keeper in
@@ -216,15 +213,17 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                    | Some (KH_healthy | KH_failing | KH_offline)
                    | None -> 0)
            in
+           let audit_at, tool_audit_fields =
+             keeper_tool_audit_json_fields config keeper name
+           in
            Some
              {
                pressure_rank;
                last_seen_ts =
                  Dashboard_utils.parse_iso_opt
-                   (String_util.trim_nonempty
-                      (match String_util.trim_nonempty (string_field "tool_audit_at" keeper) with
-                      | Some value -> value
-                      | None -> string_field "updated_at" keeper))
+                   (match audit_at with
+                   | Some _ as value -> value
+                   | None -> String_util.trim_nonempty (string_field "updated_at" keeper))
                  |> Option.value ~default:0.0;
                json =
                  `Assoc
@@ -240,7 +239,6 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                       ("context_metrics_unavailable_reason", context_metrics_unavailable_reason);
                       ("last_turn_ago_s", member_assoc "last_turn_ago_s" keeper);
                       ("current_work", member_assoc "current_task_id" keeper);
-                      ("tool_audit_at", member_assoc "tool_audit_at" keeper);
                       ("activation_mode", member_assoc "activation_mode" keeper);
                       ("paused", member_assoc "paused" keeper);
                       (* The rank above is computed from [health], but the row it
@@ -259,7 +257,7 @@ let build_keeper_briefs (config : Workspace.config) (keepers : Yojson.Safe.t lis
                        Keeper_runtime.autoboot_exclusion_reason_opt_to_yojson
                          (Keeper_runtime.autoboot_exclusion_reason config name));
                     ]
-                    @ keeper_tool_audit_json_fields config registry_lookup keeper name);
+                    @ tool_audit_fields);
              })
   |> List.sort (fun left right ->
          let by_pressure = Int.compare right.pressure_rank left.pressure_rank in

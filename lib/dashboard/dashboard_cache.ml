@@ -731,9 +731,10 @@ let get_or_compute_eio : type closed.
       | Some (Ready entry) when entry.stale_until > now () ->
         let token = next_token () in
         (`Stale (entry, token), SMap.add key (Computing { token; started_at = now (); stale = Some entry; claim = None }) map)
-      | Some (Computing { stale = Some stale_value; _ }) ->
+      | Some (Computing { stale = Some stale_value; _ })
+        when stale_value.stale_until > now () ->
         (`Hit stale_value, map)
-      | Some (Computing { token; started_at; stale = None; claim }) ->
+      | Some (Computing { token; started_at; stale = (None | Some _); claim }) ->
         let waited =
           match watching_token with
           | Some t when t <> token -> 0.0
@@ -946,11 +947,15 @@ let get_or_compute_eio : type closed.
         atomic_update table (fun map ->
           match SMap.find_opt key map with
           | Some (Computing { token = c; stale = Some s; _ }) when c = token ->
-              let restored = {
-                s with
-                expires_at = ts;
-                stale_until = ts +. backoff_grace;
-              } in
+              let restored =
+                match origin_of_cached_value s.payload with
+                | Seeded when s.stale_until <= ts ->
+                  (* Keep an expired or failed seed tombstone occupied so re-seeding
+                     cannot plant it again, without reviving it for stale reads. *)
+                  { s with expires_at = ts; stale_until = ts }
+                | Seeded | Computed | Timeout ->
+                  { s with expires_at = ts; stale_until = ts +. backoff_grace }
+              in
               ((), SMap.add key (Ready restored) map)
           | Some (Computing { token = c; stale = None; _ }) when c = token ->
               ((), SMap.remove key map)
@@ -1318,15 +1323,18 @@ let seed_stale_if_missing key ~stale_for value =
        are busy. Prepare before publication, without queueing behind refreshes. *)
     let payload = Prepared (payload_of_json ~origin:Seeded value) in
     let ts = now () in
-    atomic_update table (fun map ->
-        match SMap.find_opt key map with
-        | Some _ -> ((), map)
-        | None ->
-            ((), SMap.add key
-              (Ready { payload; expires_at = ts; stale_until = ts +. stale_for })
-              map))
-  end;
-  clear_timeout_circuit key
+    let inserted =
+      atomic_update table (fun map ->
+          match SMap.find_opt key map with
+          | Some _ -> (false, map)
+          | None ->
+              let map = maybe_evict ~incoming_key:key map in
+              (true, SMap.add key
+                (Ready { payload; expires_at = ts; stale_until = ts +. stale_for })
+                map))
+    in
+    if inserted then clear_timeout_circuit key
+  end
 
 let seed_stale_from_if_missing key ~from ~stale_for =
   match peek_entry from with
@@ -1335,14 +1343,17 @@ let seed_stale_from_if_missing key ~from ~stale_for =
     (* The source's prepared bytes and entity tag travel with it: the seed
        is the same page, so it is neither serialized nor hashed again. *)
     let ts = now () in
-    atomic_update table (fun map ->
-        match SMap.find_opt key map with
-        | Some _ -> ((), map)
-        | None ->
-            ((), SMap.add key
-              (Ready { source with expires_at = ts; stale_until = ts +. stale_for })
-              map));
-    clear_timeout_circuit key
+    let inserted =
+      atomic_update table (fun map ->
+          match SMap.find_opt key map with
+          | Some _ -> (false, map)
+          | None ->
+              let map = maybe_evict ~incoming_key:key map in
+              (true, SMap.add key
+                (Ready { source with expires_at = ts; stale_until = ts +. stale_for })
+                map))
+    in
+    if inserted then clear_timeout_circuit key
 
 let invalidate key =
   atomic_update table (fun map -> ((), SMap.remove key map));

@@ -223,11 +223,19 @@ let compute_json ~config ?me ~limit () =
 let cache_ttl_sec = 5.0
 
 let json ~config ?me ~limit () =
+  let limit = clamp_limit limit in
+  let base_path = config.Workspace.base_path in
+  let me_key =
+    match me with
+    | None -> "none"
+    | Some actor -> Printf.sprintf "some:%d:%s" (String.length actor) actor
+  in
   let key =
     Printf.sprintf
-      "dashboard.workspace:%s;%s;%d"
-      config.Workspace.base_path
-      (Option.value ~default:"-" me)
+      "dashboard.workspace:%d:%s;%s;%d"
+      (String.length base_path)
+      base_path
+      me_key
       limit
   in
   Dashboard_cache.get_or_compute key ~ttl:cache_ttl_sec

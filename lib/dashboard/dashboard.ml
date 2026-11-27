@@ -404,8 +404,8 @@ let tool_failure_total () =
 
 (** Keepers section: real-time FSM phase from Keeper_registry.
     Reads registry snapshot each render — no dashboard-side cache. *)
-let keepers_section now : section =
-  let entries = Keeper_registry.all () in
+let keepers_section_for ?base_path now : section =
+  let entries = Keeper_registry.all ?base_path () in
   let sorted =
     List.sort (fun (a : Keeper_registry.registry_entry) b ->
       String.compare a.name b.name) entries
@@ -447,6 +447,8 @@ let keepers_section now : section =
         Printf.sprintf "Keepers (guard violations: %d, meta write errors: %d, tool errors: %d)" gv wm tf
   in
   { title; content; empty_msg = "(no keepers registered)" }
+
+let keepers_section now = keepers_section_for now
 
 (** Attention section: items requiring operator action *)
 let attention_section now ~operator_tasks (snapshots : workspace_snapshot list) : section =
@@ -495,7 +497,7 @@ let generate ?max_bytes (config : Workspace_utils.config) : string =
       [
         attention_section now ~operator_tasks snapshots;
         agents_grouped_section now all_agents;
-        keepers_section now;
+        keepers_section_for ~base_path:config.base_path now;
       ]
   in
   let after_tasks =
@@ -565,7 +567,7 @@ let generate_compact (config : Workspace_utils.config) : string =
     List.length all_agents - working_count - stuck_count - idle_count
   in
   (* Keeper phase summary *)
-  let keeper_entries = Keeper_registry.all () in
+  let keeper_entries = Keeper_registry.all ~base_path:config.base_path () in
   let keeper_by_phase phase =
     List_util.count_if
       (fun (e : Keeper_registry.registry_entry) -> (=) e.phase phase)

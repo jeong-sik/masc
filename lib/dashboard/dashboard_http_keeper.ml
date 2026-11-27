@@ -325,7 +325,12 @@ let execution_trust_dashboard_observation (config : Workspace.config) =
   let entry_count = count_execution_receipt_entries config keeper_names in
   let latest_ts = latest_receipt_ts_of_keeper_rows keepers in
   let coverage_gaps = execution_receipt_coverage_gaps config in
-  let coverage_gap = List.rev coverage_gaps |> List.find_opt (fun _ -> true) in
+  let active_coverage_gaps =
+    Dashboard_tool_source_freshness.active_coverage_gaps ~latest_ts coverage_gaps
+  in
+  let coverage_gap =
+    List.rev active_coverage_gaps |> List.find_opt (fun _ -> true)
+  in
   let next_deadline =
     Dashboard_tool_source_freshness.next_health_change_unix ~now ~exists
       ~entry_count ~latest_ts ~freshness_slo_s:execution_trust_freshness_slo_s
@@ -345,6 +350,7 @@ let execution_trust_dashboard_observation (config : Workspace.config) =
       ("total", `Int (List.length keepers));
       ("coverage_gaps", `List coverage_gaps);
       ("coverage_gap_count", `Int (List.length coverage_gaps));
+      ("active_coverage_gap_count", `Int (List.length active_coverage_gaps));
     ]
     @ Dashboard_tool_source_freshness.freshness_fields ~now latest_ts
     @ Dashboard_tool_source_freshness.health_fields

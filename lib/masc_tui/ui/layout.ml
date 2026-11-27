@@ -196,6 +196,60 @@ let allocate ~total ?(gap = 0) constraints =
       done;
       Array.to_list sizes
 
+type content_width = { min_content : int; max_content : int }
+
+let fit_content ~total ?(gap = 0) columns =
+  let n = List.length columns in
+  if n = 0 then []
+  else
+    let gap = Int.max 0 gap in
+    let budget = Int.max 0 (total - (gap * (n - 1))) in
+    let bounds =
+      Array.of_list
+        (List.map
+           (fun { min_content; max_content } ->
+             let lo = Int.max 0 min_content in
+             (lo, Int.max lo max_content))
+           columns)
+    in
+    let sum pick indices = List.fold_left (fun acc i -> acc + pick bounds.(i)) 0 indices in
+    let all = List.init n Fun.id in
+    if sum snd all <= budget then List.map snd (Array.to_list bounds)
+    else
+      (* A column that fits in an even share of the cells left keeps its
+         whole width, narrowest first. Keeping one can raise the share for the
+         rest, so repeat. While every column's longest word fits, a column is
+         kept only if the others' longest words still fit after it. *)
+      let words_fit = sum fst all <= budget in
+      let rec settle budget kept pending =
+        let share = budget / Int.max 1 (List.length pending) in
+        let keeps i =
+          let hi = snd bounds.(i) in
+          hi <= share
+          && ((not words_fit)
+             || sum fst (List.filter (fun j -> j <> i) pending) <= budget - hi)
+        in
+        let by_width = List.stable_sort (fun a b -> Int.compare (snd bounds.(a)) (snd bounds.(b))) pending in
+        match List.find_opt keeps by_width with
+        | None -> (budget, kept, pending)
+        | Some i ->
+            settle (budget - snd bounds.(i)) (i :: kept) (List.filter (fun j -> j <> i) pending)
+      in
+      let left, kept, wrapping = settle budget [] all in
+      let reserve =
+        if sum fst wrapping <= left then fst
+        else
+          let share = left / Int.max 1 (List.length wrapping) in
+          fun (lo, _) -> Int.min lo share
+      in
+      allocate ~total ~gap
+        (List.init n (fun i ->
+             let ((_, hi) as bound) = bounds.(i) in
+             if List.mem i kept then Fixed hi
+             else
+               let lo = reserve bound in
+               Min_max { min = lo; max = hi; weight = Int.max 1 (hi - lo) }))
+
 let split_h ?(gap = 0) (rect : Rect.t) constraints =
   let gap = Int.max 0 gap in
   let widths = allocate ~total:rect.w ~gap constraints in

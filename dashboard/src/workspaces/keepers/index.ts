@@ -50,6 +50,11 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
       }),
     }
   }, [listing, turns])
+  // The merged roster carries the listing's read time, so the running-turn
+  // rows' own read time and freshness travel beside it.
+  const turnsObservation = turns.kind === 'value'
+    ? { observedAt: turns.updatedAt, live: !turns.stale }
+    : null
   const [localSelectedName, setLocalSelectedName] = useState<string | null>(props.entityId ?? null)
   const rosterRead = useRef<ReturnType<typeof loadKeeperRoster> | null>(null)
   const activeTab: KeeperEntityTab = parseKeeperEntityTab(props.entityTab)
@@ -202,6 +207,7 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
     <div class="kp-root" data-workspace="keepers">
       <${KeeperRoster}
         roster=${roster}
+        turnsObservation=${turnsObservation}
         selectedKeeper=${activeKeeper?.name ?? null}
         onSelectKeeper=${handleSelectKeeper}
         onCreatedKeeper=${handleCreatedKeeper}

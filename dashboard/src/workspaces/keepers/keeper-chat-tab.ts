@@ -54,6 +54,7 @@ import {
   type StreamKeeperChatCallbacks,
   type readKeeperRosterSources,
 } from './keepers-api'
+import { KeeperTurnElapsed } from './turn-elapsed'
 import {
   dedupeHistoryToolRows,
   extractDelegateCardInfo,
@@ -146,23 +147,6 @@ const RING_CIRCUMFERENCE = 2 * Math.PI * 8.5
 const BOTTOM_STICKY_THRESHOLD_PX = 72
 const INITIAL_RENDER_WINDOW = 120
 const MAX_RENDER_WINDOW = 1000
-
-function KeeperTurnElapsed({ startedAt, observedAt, live }: {
-  readonly startedAt: number
-  readonly observedAt: number
-  readonly live: boolean
-}) {
-  const [now, setNow] = useState(Date.now)
-  useEffect(() => {
-    if (!live) return
-    setNow(Date.now())
-    const interval = window.setInterval(() => setNow(Date.now()), 1000)
-    return () => window.clearInterval(interval)
-  }, [live])
-  const elapsedAt = live ? Math.max(now, observedAt) : observedAt
-  const seconds = (elapsedAt - startedAt) / 1000
-  return html`<span class="kp-turn-elapsed" role="timer" aria-label="턴 경과 시간">${formatElapsedCompact(seconds)}</span>`
-}
 
 /** RFC open-tool-carries-cohort-and-reach D4: the turn's open work, one row
  *  each, with how long it has been in its current stage. */

@@ -4,6 +4,7 @@
 
 import { html } from 'htm/preact'
 import { isWaitingUnavailable } from './turn-context'
+import { KeeperTurnElapsed } from './turn-elapsed'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { useFocusScope } from '../../../design-system/headless-preact/use-focus-scope'
@@ -32,8 +33,15 @@ import type {
   RosterMode,
 } from './types'
 
+/** When the running-turn rows were read and whether that read is fresh. */
+export interface KeeperTurnsObservation {
+  readonly observedAt: number
+  readonly live: boolean
+}
+
 export interface KeeperRosterProps {
   readonly roster: Observed<readonly KeeperRosterItem[]>
+  readonly turnsObservation: KeeperTurnsObservation | null
   readonly selectedKeeper: string | null
   readonly onSelectKeeper: (name: string) => void
   readonly onCreatedKeeper: (name: string) => void
@@ -55,6 +63,7 @@ function healthDotTone(k: KeeperRosterItem): 'ok' | 'warn' | 'bad' | 'brass' | '
 }
 
 export function KeeperRoster(props: KeeperRosterProps) {
+  const turnsObservation = props.turnsObservation
   const adminLocked = isAdminLockedForSession('admin', authSession.value)
   const [mode, setMode] = useState<RosterMode>('companies')
   const [query, setQuery] = useState('')
@@ -200,7 +209,12 @@ export function KeeperRoster(props: KeeperRosterProps) {
                       <span class="kp-roster-info">
                         <span class="kp-roster-name">${k.name}</span>
                         <span class="kp-roster-sub" title=${subLine}>
-                          ${subLine}
+                          ${turnsObservation && k.active_turn && k.active_turn.started_at_unix > 0 && html`
+                            <${KeeperTurnElapsed}
+                              startedAt=${k.active_turn.started_at_unix * 1000}
+                              observedAt=${turnsObservation.observedAt}
+                              live=${turnsObservation.live}
+                            />${' · '}`}${subLine}
                         </span>
                       </span>
                       <span class="kp-roster-right">

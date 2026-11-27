@@ -95,6 +95,10 @@ module For_testing : sig
   val probe_script : string
   (** The Python the endpoint runs, so a test can run it on a real tree. *)
 
+  val probe_mode_argv_index : int
+  (** Zero-based index of the mode argument (["inspect"] or ["layout"]) in the
+      full [python3 -c ...] [argv] passed to the endpoint shim. *)
+
   val budgets : timeout_sec:float -> budgets
   (** The budgets a probe run with [timeout_sec] uses. *)
 end

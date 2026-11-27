@@ -41,6 +41,36 @@ let test_exact_input_identities () =
        "new_phase", `String (Keeper_state_machine.phase_to_string Keeper_state_machine.Paused); "ts_unix", `Float 1.0])))
 ;;
 
+(* #38608: the row the bridge writes for a cancelled run is read like every
+   other run outcome. Before, a cancellation only ever arrived as an
+   agent_failed internal error. *)
+let test_cancelled_run_row_is_an_input () =
+  let row =
+    Masc.Keeper_event_bridge.native_event_to_json
+      (Agent_core.Event_bus.mk_event
+         (Agent_core.Event_bus.AgentCancelled
+            { agent_name = "piano"; task_id = "run-1"; reason = Exit; elapsed = 0.5 }))
+    |> Option.get
+  in
+  check bool "the bridge row decodes as a cancelled run" true
+    (Input.of_event (event row)
+     = Some (Input.Agent_core { keeper = Some "piano"; change = Input.Cancelled }));
+  let without_reason =
+    match row with
+    | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) ->
+              match key, value with
+              | "payload", `Assoc payload -> key, `Assoc (List.remove_assoc "reason" payload)
+              | _ -> key, value)
+           fields)
+    | other -> other
+  in
+  check bool "a row without its reason is not an input" true
+    (Option.is_none (Input.of_event (event without_reason)))
+;;
+
 let test_outputs_are_not_inputs () =
   let outputs =
     [ `Assoc ["type", `String "execution_snapshot"; "execution_invalidated", `Bool false]
@@ -403,6 +433,7 @@ let () =
   run "server observation inputs"
     [ "wire", [ test_case "exact scoped identities" `Quick test_exact_input_identities
               ; test_case "outputs are excluded" `Quick test_outputs_are_not_inputs
+              ; test_case "a cancelled run row is an input" `Quick test_cancelled_run_row_is_an_input
               ; test_case "notification envelopes are exact" `Quick test_notification_envelopes_are_exact ]
     ; "execution sources", [ test_case "message identity and delivery are typed" `Quick test_message_input_is_typed
                             ; test_case "actual heartbeat scope and release" `Quick test_agent_heartbeat_reaches_only_its_workspace ]

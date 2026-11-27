@@ -157,6 +157,13 @@ export type AgentFailedPayload = {
   error_detail: JsonValue;
 }
 
+export type AgentCancelledPayload = {
+  agent_name: string;
+  task_id: string;
+  reason: string;
+  elapsed_s: number;
+}
+
 export function writeDashboardObservationTopic(x: DashboardObservationTopic, context: any = x): any {
   switch (x.kind) {
     case 'Logs':
@@ -604,6 +611,24 @@ export function readAgentFailedPayload(x: any, context: any = x): AgentFailedPay
     error_code: _atd_read_required_field('AgentFailedPayload', 'error_code', _atd_read_string, x['error_code'], x),
     error_retryable: _atd_read_required_field('AgentFailedPayload', 'error_retryable', _atd_read_bool, x['error_retryable'], x),
     error_detail: _atd_read_required_field('AgentFailedPayload', 'error_detail', readJsonValue, x['error_detail'], x),
+  };
+}
+
+export function writeAgentCancelledPayload(x: AgentCancelledPayload, context: any = x): any {
+  return {
+    'agent_name': _atd_write_required_field('AgentCancelledPayload', 'agent_name', _atd_write_string, x.agent_name, x),
+    'task_id': _atd_write_required_field('AgentCancelledPayload', 'task_id', _atd_write_string, x.task_id, x),
+    'reason': _atd_write_required_field('AgentCancelledPayload', 'reason', _atd_write_string, x.reason, x),
+    'elapsed_s': _atd_write_required_field('AgentCancelledPayload', 'elapsed_s', _atd_write_float, x.elapsed_s, x),
+  };
+}
+
+export function readAgentCancelledPayload(x: any, context: any = x): AgentCancelledPayload {
+  return {
+    agent_name: _atd_read_required_field('AgentCancelledPayload', 'agent_name', _atd_read_string, x['agent_name'], x),
+    task_id: _atd_read_required_field('AgentCancelledPayload', 'task_id', _atd_read_string, x['task_id'], x),
+    reason: _atd_read_required_field('AgentCancelledPayload', 'reason', _atd_read_string, x['reason'], x),
+    elapsed_s: _atd_read_required_field('AgentCancelledPayload', 'elapsed_s', _atd_read_float, x['elapsed_s'], x),
   };
 }
 

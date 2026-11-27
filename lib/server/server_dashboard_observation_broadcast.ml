@@ -46,7 +46,7 @@ let observations = function
   | Board_attention _ | Transport_state | Operator_judgment _ | Tool_host_attention -> []
   | Board -> []
   | Agent_core { keeper = name; change =
-      Started | Completed | Failed | Yielded | Input_required | Tool_called
+      Started | Completed | Failed | Cancelled | Yielded | Input_required | Tool_called
       | Tool_completed | Turn_completed } ->
       workspace [`Telemetry]
       @ (match name with Some name -> keeper name [`Keeper_runtime_trace] | None -> [])

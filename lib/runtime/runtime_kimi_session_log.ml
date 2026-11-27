@@ -255,7 +255,7 @@ type turn_end =
 
 type record =
   | Prompt_started
-  | Context_compacted
+  | Compaction_began
   | Turn_ended of turn_end
   | Other_event
 
@@ -290,7 +290,7 @@ let decode_record ~byte_offset line =
   | json ->
     (match string_field "type" json with
      | Some "turn.prompt" -> Ok Prompt_started
-     | Some "context.apply_compaction" -> Ok Context_compacted
+     | Some "full_compaction.begin" -> Ok Compaction_began
      | Some "turn.ended" ->
        let* turn_end = decode_turn_end ~byte_offset json in
        Ok (Turn_ended turn_end)
@@ -327,7 +327,7 @@ let read_prompt m =
               prompt starts with no ending, so an earlier prompt's ending is
               never read as this one's. *)
            | Prompt_started -> Ok { acc with turn_end = None }
-           | Context_compacted -> Ok { acc with compactions = acc.compactions + 1 }
+           | Compaction_began -> Ok { acc with compactions = acc.compactions + 1 }
            | Turn_ended turn_end -> Ok { acc with turn_end = Some turn_end }
            | Other_event -> Ok acc))
       (Ok { compactions = 0; turn_end = None })

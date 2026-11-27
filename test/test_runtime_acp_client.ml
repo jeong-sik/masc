@@ -2131,6 +2131,28 @@ let read_file_text path =
   In_channel.with_open_text path In_channel.input_all
 ;;
 
+(* A settlement clears held_context when the host compacted the session or
+   masc cannot rule it out, whether the turn completed or the host stopped it.
+   A stopped turn whose prompt never returned has no count at all. *)
+let test_settlement_clears_held_context () =
+  let clears compaction =
+    Keeper_acp_runtime.For_testing.settlement_clears_held
+      ~keeper_name:"settlement-test"
+      ~session_id:"session-settlement-test"
+      compaction
+  in
+  check bool "no compaction keeps what the session holds" false
+    (clears (Some Runtime_acp_client.Not_compacted));
+  check bool "a compaction clears it" true (clears (Some Runtime_acp_client.Compacted));
+  check bool "a compaction masc could not rule out clears it" true
+    (clears
+       (Some
+          (Runtime_acp_client.Compaction_unknown
+             (Runtime_acp_client.Kimi_session_record_unreadable
+                Runtime_kimi_session_log.Home_unavailable))));
+  check bool "a prompt stopped before it returned clears it" true (clears None)
+;;
+
 let test_acp_80_pct_rollover_marker_and_overflow_classification () =
   let limit tokens =
     Result.get_ok
@@ -6615,6 +6637,8 @@ let () =
     ; ( "rollover_and_vibe310"
       , [ test_case "80% hysteresis rollover, durable marker & ContextOverflow classification" `Quick
             test_acp_80_pct_rollover_marker_and_overflow_classification
+        ; test_case "a settlement clears held context after a compaction" `Quick
+            test_settlement_clears_held_context
         ; test_case "Vibe 3.1.0 configOptions clamping & permission hardening" `Quick
             test_vibe_310_config_options_and_permission_hardening
         ; test_case "ACP overflow shrink handoff single-epoch & Vibe operator login prep/finish" `Quick

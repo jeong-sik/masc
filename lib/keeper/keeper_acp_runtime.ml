@@ -516,6 +516,31 @@ let held_context_of_usage (u : Acp.usage) : Runtime_observation.request_context 
     (effective_context_used u)
 ;;
 
+(* Whether a turn's settlement clears held_context, so the next turn sends the
+   whole World State again: the host compacted the session during the turn, or
+   masc cannot rule it out. [None] is a turn the host stopped before its prompt
+   returned. The prompt's compaction count was never taken, and the client that
+   holds the place to count from is evicted with the stopped turn. *)
+let settlement_clears_held ~keeper_name ~session_id = function
+  | Some Acp.Not_compacted -> false
+  | Some Acp.Compacted -> true
+  | Some (Acp.Compaction_unknown unknown) ->
+    Log.Keeper.warn
+      ~keeper_name
+      "ACP session %s may have compacted; the next turn sends the whole World State \
+       again: %s"
+      session_id
+      (Acp.compaction_unknown_to_string unknown);
+    true
+  | None ->
+    Log.Keeper.warn
+      ~keeper_name
+      "ACP session %s stopped before its prompt returned and may have compacted; the \
+       next turn sends the whole World State again"
+      session_id;
+    true
+;;
+
 let process_config_sha256
       ~(native_posture : Runtime_native_tools.posture)
       ~(skills_dirs : string list)
@@ -3249,6 +3274,9 @@ let run_without_lifecycle
       in
       let host_stop_ref = ref None in
       let cancel_settled = ref false in
+      (* A host stop discards the prompt's result; its compaction still decides
+         what the settlement holds. *)
+      let prompt_compaction = ref None in
       let is_gate_pause = function
         | Runtime_official_client_tool.Terminal_tool_boundary
             { outcome = Runtime_official_client_tool.Durable_stimulus_deferred; _ } -> true
@@ -3277,8 +3305,10 @@ let run_without_lifecycle
                     ()
                 in
                 (match res with
-                 | Ok _ | Error (Acp.Rpc_error _ | Acp.Host_turn_failed _) ->
+                 | Ok prompt_res ->
+                   prompt_compaction := Some prompt_res.Acp.context_compaction;
                    cancel_settled := true
+                 | Error (Acp.Rpc_error _ | Acp.Host_turn_failed _) -> cancel_settled := true
                  | Error
                      ( Acp.Invalid_config _
                      | Acp.Spawn_refused _
@@ -3319,7 +3349,14 @@ let run_without_lifecycle
           && Acp.is_alive entry.client
         in
         if not preserve_for_gate_continuation then evict_or_close ();
-        Ok (`Stopped (session_id, effective_model, resumed, stop, stream.observed_tool_calls ()))
+        Ok
+          (`Stopped
+              ( session_id
+              , effective_model
+              , resumed
+              , stop
+              , !prompt_compaction
+              , stream.observed_tool_calls () ))
       | `Runtime (Ok prompt_res) ->
         let final_usage = api_usage_of_acp_usage ~driver:config.driver prompt_res.usage in
         let stream_usage = if usage_is_nonzero final_usage then Some final_usage else None in
@@ -3334,17 +3371,10 @@ let run_without_lifecycle
            hold the host's summary instead of what was sent, and sending the
            whole World State again is what keeps the next turn whole. *)
         let compacted =
-          match prompt_res.Acp.context_compaction with
-          | Acp.Not_compacted -> false
-          | Acp.Compacted -> true
-          | Acp.Compaction_unknown unknown ->
-            Log.Keeper.warn
-              ~keeper_name
-              "ACP session %s may have compacted; the next turn sends the whole World \
-               State again: %s"
-              prompt_res.Acp.session_id
-              (Acp.compaction_unknown_to_string unknown);
-            true
+          settlement_clears_held
+            ~keeper_name
+            ~session_id:prompt_res.Acp.session_id
+            (Some prompt_res.Acp.context_compaction)
         in
         let rollover =
           rollover_of_usage
@@ -3579,7 +3609,10 @@ let run_without_lifecycle
     try
       match run_client () with
       | Error err -> Error err
-      | Ok (`Stopped (session_id, effective_model, resumed, stop, acp_tool_calls_json)) ->
+      | Ok
+          (`Stopped
+              (session_id, effective_model, resumed, stop, prompt_compaction, acp_tool_calls_json))
+        ->
         let turn_id = provider_turn_identity ~session_id ~turn_count in
         let* () =
           update_session "host-stop turn identity" (fun expected ->
@@ -3620,8 +3653,23 @@ let run_without_lifecycle
               result.response
         in
         recovery_failure := Session_store.State_persistence_failed;
+        (* The same rule as a completed turn: a compaction the stopped prompt
+           saw, or one masc cannot rule out, clears held_context. *)
+        let compacted =
+          settlement_clears_held ~keeper_name ~session_id prompt_compaction
+        in
         let* settled =
-          (if Option.is_some claim_plan.previous_settlement && not resumed
+          (if compacted
+           then
+             Session_store.settle_holding
+               ~held_context:[]
+               ~base_path
+               ~keeper_name
+               ~expected:!session_state
+               ~session_id
+               ~turn_id
+               ~updated_at:(Time_compat.now ())
+           else if Option.is_some claim_plan.previous_settlement && not resumed
            then
              Session_store.settle_holding
                ~held_context:
@@ -4186,6 +4234,7 @@ module For_testing = struct
   let usage_is_nonzero = usage_is_nonzero
   let effective_context_used = effective_context_used
   let held_context_of_usage = held_context_of_usage
+  let settlement_clears_held = settlement_clears_held
   let stop_reason_of_acp_stop_reason = stop_reason_of_acp_stop_reason
   let effective_context_limit_tokens = effective_context_limit_tokens
   let rollover_of_usage ~context_used ~context_size ~input_limit ~threshold =

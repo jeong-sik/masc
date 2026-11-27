@@ -14,13 +14,19 @@
     [<home>/sessions/<workspace directory>/<session id>/agents/main/wire.jsonl]:
     one JSON record per line, appended in order. The first record is a
     [metadata] record carrying the format's [protocol_version]. Each compaction
-    writes a [context.apply_compaction] record when the summary replaces the
-    context, between its [full_compaction.begin] and [full_compaction.complete]
-    records. A prompt's compactions are the [context.apply_compaction] records
-    the file gained between {!mark}, taken before [session/prompt] is sent, and
-    {!compactions}, taken after it returns. The mark {!compactions} returns
-    lets the next prompt count from there, so a prompt that failed or was
-    cancelled before its count leaves its records to the next one.
+    writes [full_compaction.begin] when it starts, [context.apply_compaction]
+    when the summary replaces the context, and [full_compaction.complete].
+    A prompt's compactions are the [full_compaction.begin] records the file
+    gained between {!mark}, taken before [session/prompt] is sent, and
+    {!compactions}, taken after it returns. The start is counted, not the
+    apply: with a [compaction_trigger_ratio] below the block ratio the host
+    runs the compaction after a step without waiting for it, so the apply can
+    land after the prompt's response, and the next prompt would already have
+    gone out as a delta to a summary. A compaction that starts and then fails
+    counts too, and costs one extra send of the whole World State. The mark
+    {!compactions} returns lets the next prompt count from there, so a prompt
+    that failed or was cancelled before its count leaves its records to the
+    next one.
 
     The format is the host's own and has no published schema. This module
     requires the [protocol_version] it was checked against and reports
@@ -107,7 +113,7 @@ type turn_end =
       }
 
 type prompt_record =
-  { compactions : int  (** [context.apply_compaction] records. *)
+  { compactions : int  (** [full_compaction.begin] records. *)
   ; turn_end : turn_end option
       (** The [turn.ended] record of the last prompt that started after the
           mark ([turn.prompt]); [None] when the host wrote none for it. *)

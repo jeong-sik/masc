@@ -138,10 +138,12 @@ ACP 만의 크기 계산을 따로 두지 않는다. Agent Core 레인이 이미
     - Kimi Code 2.7.3 은 `usage_update` 를 prompt 마다 한 번, 응답 직후에만 보낸다. 압축한 뒤 같은 턴에서 직전 턴 끝 값보다 커지면 값 비교로는 놓친다.
       - 2026-11-27 01:51 KST 에 실제로 놓쳤다. uncle 세션이 압축했는데 02:07 정산이 held_context 34건을 그대로 뒀다.
       - 그래서 kimi 는 세션 기록도 읽는다. 위치는 `<KIMI_CODE_HOME, 없으면 ~/.kimi-code>/sessions/<작업 폴더>/<세션 id>/agents/main/wire.jsonl` 이다.
-      - prompt 를 보내기 전 파일 길이를 재 두고, 끝난 뒤 그 뒤에 쓰인 `context.apply_compaction` 기록을 센다.
+      - prompt 를 보내기 전 파일 길이를 재 두고, 끝난 뒤 그 뒤에 쓰인 `full_compaction.begin` 기록을 센다.
+      - 압축이 끝난 기록(`context.apply_compaction`)이 아니라 시작한 기록을 센다. kimi 설정의 `compaction_trigger_ratio` 가 0.85 보다 작으면 kimi 는 압축을 기다리지 않고 턴을 끝낸다. 그러면 끝난 기록이 응답 뒤에 써질 수 있다. 시작했다가 실패한 압축도 세지만, 그 비용은 World State 를 한 번 더 보내는 것뿐이다.
       - 같은 세션의 다음 prompt 는 직전에 센 곳에서 이어 센다. 실패하거나 취소된 prompt 동안 생긴 압축도 다음 prompt 에서 센다.
       - 첫 줄 `metadata` 의 `protocol_version` 이 확인한 1.5 가 아니면 읽지 않는다.
     - 기록을 못 읽으면 `Compaction_unknown` 이다. 세션이 요약만 들고 있을 수 있으니 정산은 압축으로 보고 World State 를 다시 보낸다. 경고 로그에 이유가 남는다. Muse journal 을 못 읽을 때도 같다.
+    - 호스트가 턴을 멈춘 경우(`Terminal_tool_boundary`)도 정산은 같은 규칙을 따른다. 멈추기 전에 prompt 가 돌아왔으면 그 결과로 판단한다. 돌아오지 않았으면 압축을 셀 수 없으므로 압축으로 보고 World State 를 다시 보낸다. 2026-11-25~27 kimi Keeper 턴 287번 중 취소로 끝난 턴은 21번이다.
     - Mistral Vibe 실측(2026-11-26, medium-3.5, 압축 값 50,000): 한 턴에 파일 여덟 개를 읽어 `used` 가 8,829 에서 70,944 가 됐다. 그 턴 안에서는 압축하지 않았다. 다음 prompt 를 시작할 때 「Compacting context」 tool_call 을 보내고 `used` 를 0, 그다음 8,939 로 알렸다. 0 을 뺀 값이 70,944 에서 8,939 로 줄어 감지된다.
     - 그 전에는 턴 끝 값끼리만 비교해서 턴 안에서 압축한 뒤 다시 커지면 놓쳤다. 로컬 Muse journal 의 압축 83건 중 `mid_turn` 이 25건, `pre_turn` 이 19건이다.
 - 에이전트 창과 운영자 한도: 세션을 열 때 에이전트가 알리는 `usage_update.size` 보다 운영자 한도가 크면 typed 설정 오류로 그 후보를 쓰지 않는다. 운영자 한도가 에이전트 창 안에 있으면, 3.3 의 말없이 잘라 읽기는 masc 가 보낸 범위에서는 생기지 않는다.

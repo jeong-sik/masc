@@ -125,6 +125,14 @@ module For_testing : sig
     :  Runtime_acp_client.usage
     -> Runtime_observation.request_context option
 
+  (** Whether a turn's settlement clears held_context. [None] is a turn the
+      host stopped before its prompt returned, which may have compacted. *)
+  val settlement_clears_held
+    :  keeper_name:string
+    -> session_id:string
+    -> Runtime_acp_client.context_compaction option
+    -> bool
+
   val stop_reason_of_acp_stop_reason
     :  Runtime_acp_client.stop_reason
     -> Agent_core.Types.stop_reason

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effect } from '@preact/signals'
-import { err, ok } from '../lib/result'
+import { err, ok, type Result } from '../lib/result'
 import { bumpSessionEpoch, resetAuthStateForTests } from './auth'
+import type { ApiError } from './transport'
 import {
   ResourceCache,
   formatObserved,
@@ -74,6 +75,35 @@ describe('core/resource-cache & Observed<T>', () => {
     const manual = await cache.fetch('keepers', loader, { ttlMs: 10_000, reason: 'manual' })
     expect(calls).toBe(2)
     expect(manual.kind === 'value' && manual.data.total).toBe(2)
+  })
+
+  it('starts a manual read over instead of joining the read in flight, and drops the answer of the one it replaced', async () => {
+    const signals: AbortSignal[] = []
+    const answers: Array<(total: number) => void> = []
+    const loader = vi.fn((signal: AbortSignal) => {
+      signals.push(signal)
+      return new Promise<Result<{ total: number } | null, ApiError>>((resolve) => {
+        answers.push((total) => resolve(ok({ total })))
+      })
+    })
+
+    // The first read never answers on its own.
+    const first = cache.fetch('keepers', loader, { reason: 'mount' })
+    const second = cache.fetch('keepers', loader, { reason: 'manual' })
+    expect(loader).toHaveBeenCalledTimes(2)
+    expect(signals[0]?.aborted).toBe(true)
+    expect(signals[1]?.aborted).toBe(false)
+
+    answers[1]?.(2)
+    const fresh = await second
+    expect(fresh.kind === 'value' && fresh.data.total).toBe(2)
+
+    // The replaced request answers late: the newer value stays.
+    answers[0]?.(1)
+    const late = await first
+    expect(late.kind === 'value' && late.data.total).toBe(2)
+    const kept = cache.peek<{ total: number }>('keepers')
+    expect(kept?.kind === 'value' && kept.data.total).toBe(2)
   })
 
   it('marks topic subscribers stale lazily on invalidateTopic and clears all entries on sessionEpoch bump', async () => {

@@ -32,6 +32,7 @@ import {
 } from '../../core/time-window'
 import { currentSessionEpoch, sessionEpoch } from '../../core/auth'
 import { KeeperBadge } from '../../components/keeper-badge'
+import { RefreshButton } from '../../components/primitives/refresh-button'
 import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives/uplot-chart'
 import type { WorkspaceViewProps } from '../types'
 import { loadPulseBundle, PULSE_OBSERVER_TOPICS, readPulseBundle } from './pulse-data'
@@ -189,7 +190,6 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
   const epoch = sessionEpoch.value
   const bundle = readPulseBundle(win)
   const [observedAtSec, setObservedAtSec] = useState<number>(() => Math.floor(Date.now() / 1000))
-  const [refreshing, setRefreshing] = useState(false)
   const [openSparklines, setOpenSparklines] = useState<ReadonlySet<string>>(() => new Set())
   const mountedRef = useRef(true)
 
@@ -203,15 +203,10 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
   const refresh = useCallback(async (reason: 'mount' | 'route' | 'sse' | 'manual') => {
     const startEpoch = currentSessionEpoch()
     const refreshWindow = timeWindow.peek()
-    if (reason === 'manual') setRefreshing(true)
-    try {
-      await loadPulseBundle(refreshWindow, reason)
-      if (!mountedRef.current || currentSessionEpoch() !== startEpoch || timeWindow.peek() !== refreshWindow) return
-      setObservedAtSec(Math.floor(Date.now() / 1000))
-      markViewSynced()
-    } finally {
-      if (reason === 'manual' && mountedRef.current) setRefreshing(false)
-    }
+    await loadPulseBundle(refreshWindow, reason)
+    if (!mountedRef.current || currentSessionEpoch() !== startEpoch || timeWindow.peek() !== refreshWindow) return
+    setObservedAtSec(Math.floor(Date.now() / 1000))
+    markViewSynced()
   }, [])
 
   useEffect(() => {
@@ -378,14 +373,7 @@ export function PulseWorkspace(props: WorkspaceViewProps) {
           <h1>Fleet Pulse</h1>
         </div>
         <div class="pulse-header-meta">
-          <button
-            type="button"
-            class="btn-ghost"
-            disabled=${refreshing}
-            onClick=${() => void refresh('manual')}
-          >
-            ${refreshing ? '갱신 중…' : '새로고침'}
-          </button>
+          <${RefreshButton} onRefresh=${() => refresh('manual')} />
         </div>
       </header>
 

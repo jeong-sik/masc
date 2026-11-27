@@ -595,6 +595,30 @@
   line-height: 1.25;
 }
 
+/* Refresh button: two hidden pseudo-elements hold the resting and the in-flight
+   label, so the button is as wide as the wider one in both states and the
+   toolbar holds still while a read runs. */
+.refresh-btn {
+  flex-direction: column;
+  gap: 0;
+  white-space: nowrap;
+}
+.refresh-btn::before,
+.refresh-btn::after {
+  height: 0;
+  overflow: hidden;
+  visibility: hidden;
+}
+.refresh-btn::before {
+  content: attr(data-label);
+}
+.refresh-btn::after {
+  content: attr(data-busy-label);
+}
+.refresh-btn[aria-busy="true"] {
+  cursor: progress;
+}
+
 .img-out {
   margin: var(--sp-2) 0;
   display: flex;

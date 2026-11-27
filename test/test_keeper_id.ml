@@ -45,6 +45,74 @@ let test_keeper_name_is_bounded () =
   expect_invalid Keeper_name.of_string "a name past NAME_MAX" (String.make 255 'a')
 ;;
 
+let contains ~sub text =
+  let n = String.length sub and m = String.length text in
+  let rec at i = i + n <= m && (String.equal (String.sub text i n) sub || at (i + 1)) in
+  at 0
+;;
+
+(* #36487: a capital letter is refused, not lowered. The refusal names the
+   field, the byte and the fix, and the operator-facing message of
+   [Keeper_config] carries the same reason. *)
+let test_keeper_name_refuses_capitals () =
+  List.iter
+    (fun (value, byte) ->
+       match Keeper_name.of_string value with
+       | Ok _ -> failf "capital letter accepted in %S" value
+       | Error reason ->
+         List.iter
+           (fun sub ->
+              check bool (Printf.sprintf "%S refusal says %S (%s)" value sub reason) true
+                (contains ~sub reason))
+           [ "keeper_name"; "lowercase"; Printf.sprintf "byte %d" byte ];
+         check bool (value ^ " refused by validate_name") false
+           (Masc.Keeper_config.validate_name value);
+         check bool (value ^ " operator message says lowercase") true
+           (contains ~sub:"lowercase" (Masc.Keeper_config.invalid_name_error value)))
+    [ "Foo", 0; "fOO", 1; "YUNA", 0; "owner.With.dots", 6; "TOOL_USAGE", 0 ]
+;;
+
+let test_keeper_name_accepts_lowercase () =
+  List.iter
+    (fun value ->
+       expect_valid Keeper_name.of_string Keeper_name.to_string "lowercase name" value;
+       check bool (value ^ " accepted by validate_name") true
+         (Masc.Keeper_config.validate_name value))
+    [ "foo"; "yuna"; "masc-pro-builder"; "owner.with.internal.dots"; "k_1-2.3" ]
+;;
+
+(* [Foo] and [foo] are one directory on APFS as installed, one container
+   name and one Board key. Of the spellings that differ only in case, the
+   name type admits exactly one, so the two cannot both exist. *)
+let test_case_variants_cannot_coexist () =
+  let accepted spellings =
+    List.filter (fun value -> Result.is_ok (Keeper_name.of_string value)) spellings
+  in
+  check (list string) "one spelling of foo" [ "foo" ] (accepted [ "Foo"; "foo"; "FOO"; "fOo" ]);
+  check (list string) "one spelling of yuna" [ "yuna" ] (accepted [ "Yuna"; "YUNA"; "yuna" ])
+;;
+
+(* #53072: the Librarian minted the owner through
+   [Keeper_identity.Keeper_id.of_string], which lowers, and refused the owner
+   when the minted id differed from the name it was given. That check, and
+   the input speaker decode that does the same, holds for every name the
+   type accepts. *)
+let test_owner_check_holds_for_every_valid_name () =
+  List.iter
+    (fun value ->
+       match Keeper_name.of_string value with
+       | Error reason -> failf "fixture %S is not a Keeper name: %s" value reason
+       | Ok name ->
+         let raw = Keeper_name.to_string name in
+         (match Masc.Keeper_identity.Keeper_id.of_string raw with
+          | Some id ->
+            check string (raw ^ " owner id is the name") raw
+              (Masc.Keeper_identity.Keeper_id.to_string id)
+          | None -> failf "Keeper name %S minted no owner id" raw))
+    [ "yuna"; "foo"; "masc-pro-builder"; "owner.with.internal.dots"; "k_1-2.3" ];
+  expect_invalid Keeper_name.of_string "the #53072 name" "Yuna"
+;;
+
 let test_trace_id_keeps_bounded_non_dotted_grammar () =
   expect_valid Trace_id.of_string Trace_id.to_string "trace id" "trace-01";
   expect_invalid Trace_id.of_string "dotted trace id" "trace.with.dot";
@@ -120,6 +188,14 @@ let () =
             test_keeper_name_portable_grammar
         ; test_case "bounded as a filesystem component" `Quick
             test_keeper_name_is_bounded
+        ; test_case "a capital letter is refused" `Quick
+            test_keeper_name_refuses_capitals
+        ; test_case "a lowercase name is accepted" `Quick
+            test_keeper_name_accepts_lowercase
+        ; test_case "names differing only in case cannot coexist" `Quick
+            test_case_variants_cannot_coexist
+        ; test_case "the Librarian owner check holds for a valid name" `Quick
+            test_owner_check_holds_for_every_valid_name
         ] );
       ( "Trace_id",
         [ test_case

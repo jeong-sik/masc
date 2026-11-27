@@ -18,9 +18,11 @@ val generate_trace_id : ?now:float -> unit -> string
 module Keeper_id : sig
   type t = private string
   (** Canonical form: trimmed and case-folded. A keeper's id is its
-      keeper_name; every other author (humans, external bots) mints a
-      comparable id from its own name the same way. No alias or nickname
-      recovery happens here. *)
+      keeper_name, which the registry's [Keeper_id.Keeper_name] already holds
+      in lower case, so minting it here returns it unchanged. The fold is for
+      every other author (humans, external bots) and for names written in
+      text ([@Alice]), which mint a comparable id from their own spelling. No
+      alias or nickname recovery happens here. *)
 
   val of_string : string -> t option
   (** [None] iff the input is whitespace-only. *)

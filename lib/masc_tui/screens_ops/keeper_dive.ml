@@ -3161,7 +3161,7 @@ let numbered_of_patch_response (resp : Wire_config.patch_response) =
     numbered_rows_of_hunk_lines ~old_start:1 ~new_start:1 raw_lines
 
 let build_keeper_form_state ~(model : Model.t) ~name ~target_matches
-    ~suppress_local_diff (keeper_opt : Wire_fleet.keeper_summary option) =
+    ~suppress_local_diff =
   let cfg = model.config in
   let schema_loaded_for_target =
     match Observed.to_option cfg.schema with
@@ -3238,41 +3238,10 @@ let build_keeper_form_state ~(model : Model.t) ~name ~target_matches
           { base with value = current_val })
         schema_fields
     else
-      match keeper_opt with
-      | Some k ->
-          [
-            Form.make_field ~key:"keeper.group"
-              ~label:(Say.make ~ko:"소속 회사 / 그룹" ~en:"Company / Group")
-              ~provenance:(Form.Prov_keeper_toml name)
-              ~reload_scope:Form.Next_turn ~read_only:true
-              (Form.Text_val
-                 (match k.group with
-                  | Some group -> group
-                  | None -> "ungrouped"));
-            Form.make_field ~key:"keeper.runtime_id"
-              ~label:(Say.make ~ko:"런타임 캐스케이드" ~en:"Runtime Cascade")
-              ~provenance:(Form.Prov_keeper_toml name)
-              ~reload_scope:Form.Next_turn ~read_only:true
-              (Form.Text_val (Ops_common.human_runtime_label ~model k));
-            Form.make_field ~key:"keeper.activation"
-              ~label:(Say.make ~ko:"활성화 모드" ~en:"Activation Mode")
-              ~provenance:(Form.Prov_keeper_toml name)
-              ~reload_scope:Form.Hot_reload ~read_only:true
-              (Form.Text_val
-                 (Say.resolve model.lang
-                    (Ops_common.activation_label k.activation_mode)));
-            Form.make_field ~key:"keeper.paused"
-              ~label:(Say.make ~ko:"일시 정지" ~en:"Paused")
-              ~provenance:(Form.Prov_keeper_toml name)
-              ~reload_scope:Form.Hot_reload ~read_only:true
-              (Form.Bool_val k.paused);
-            Form.make_field ~key:"keeper.secrets"
-              ~label:(Say.make ~ko:"시크릿 (마스킹)" ~en:"Secrets (masked)")
-              ~provenance:(Form.Prov_env "ENV")
-              ~reload_scope:Form.Restart_required ~read_only:true
-              (Form.secret_val ~revealed:false "configured");
-          ]
-      | None -> []
+      (* Until the schema of this Keeper is read there is nothing to fill a
+         form with. The tab then draws the state of that read, so a read that
+         failed is said instead of a form made up from the roster. *)
+      []
   in
   (* Single-SSOT filtering already applied by Config_store.keeper_visible_fields:
      pass filter = "" to Form.create so no duplicate Form.filter pass occurs. *)
@@ -3292,7 +3261,7 @@ let build_keeper_form_state ~(model : Model.t) ~name ~target_matches
   , schema_loaded_for_target )
 
 let render_config_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
-    ~(model : Model.t) ~name keeper_opt =
+    ~(model : Model.t) ~name =
   if Rect.is_empty rect then ()
   else
     let bg = Color.of_rgb theme.surface_1 in
@@ -3369,7 +3338,7 @@ let render_config_tab grid ~(rect : Rect.t) ~(theme : Theme.t)
     in
     let form_st, schema_loaded_for_target =
       build_keeper_form_state ~model ~name ~target_matches
-        ~suppress_local_diff:(diff_h >= 2) keeper_opt
+        ~suppress_local_diff:(diff_h >= 2)
     in
     let section_header : Form.section_header =
       {
@@ -4401,6 +4370,5 @@ let render_tabs_body ?history_rows ~embedded ~name ~tab ~(model : Model.t) ~cach
             render_work_sandbox_tab grid ~rect:content_rect ~theme ~model ~name
         | Nav.Keeper_config ->
             render_config_tab grid ~rect:content_rect ~theme ~model ~name
-              keeper_opt
         | Nav.Keeper_identity ->
             render_identity_tab grid ~rect:content_rect ~theme ~model ~name

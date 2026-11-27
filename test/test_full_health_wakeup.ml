@@ -215,7 +215,7 @@ let test_owner_metadata_wakes_fleet_subscriber () =
           let config = Masc.Mcp_server.workspace_config state in
           ignore (Workspace_core.init config ~agent_name:(Some "test"));
           (match Owners.install_from_store ~sw ~operation_runner:None
-             ~on_turn_slot_released:None config with
+             config with
            | Ok 0 -> ()
            | Ok _ -> fail "expected an empty owner inventory"
            | Error error -> fail (Owners.install_error_to_string error));

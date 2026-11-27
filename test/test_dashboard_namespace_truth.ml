@@ -128,7 +128,6 @@ let create_keeper env sw state name =
      Lib.Keeper_owner_registry.install_from_store
        ~sw
        ~operation_runner:None
-       ~on_turn_slot_released:None
        workspace_scope.config
    with
    | Ok _ -> ()

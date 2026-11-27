@@ -161,7 +161,7 @@ let test_actual_deferred_worker_lifecycle () =
       "trace_id",`String "actual-deferred-addon-trace"]) |> get in
     Keeper_meta_store.replace_snapshot config meta |> get;
     (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None
-      ~on_turn_slot_released:None config with
+      config with
      | Ok count -> check int "loader has one real current metadata owner" 1 count
      | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
     let package = Lane_addon_manifest.load ~path:"../addons/candle-appraiser/lane.toml"

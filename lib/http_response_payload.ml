@@ -204,22 +204,45 @@ let compress_body_on_cpu ?(compress = true) ~accept_encoding body =
         Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
           compress_encoded_body encoding body)
 
-(* Immutable representations of one published response. Preparation belongs
-   on the producer's CPU worker; selection on a request never compresses. *)
+(* Prepared representations of one published response. Identity and zstd (fast
+   C binding) are prepared eagerly on the producer; pure-OCaml gzip is computed
+   lazily and atomically memoized on the first [Prefer_gzip] selection so
+   snapshots served only to zstd/identity clients avoid gzip CPU and Bigarray
+   allocations. *)
 type prepared = {
   identity : string;
   zstd : string * (string * string) list;
-  gzip : string * (string * string) list;
+  gzip : (string * (string * string) list) option Atomic.t;
 }
 
 let prepare body =
+  let gzip_initial =
+    if String.length body < Compression_codec.min_size then
+      Some (body, [ vary_accept_encoding ])
+    else
+      None
+  in
   { identity = body;
-    zstd = compress_body ~accept_encoding:(Some "zstd") body;
-    gzip = compress_body ~accept_encoding:(Some "gzip") body;
+    zstd = compress_encoded_body Prefer_zstd body;
+    gzip = Atomic.make gzip_initial;
   }
 
 let select_prepared ~accept_encoding prepared =
   match negotiate_encoding accept_encoding with
   | Prefer_zstd -> prepared.zstd
-  | Prefer_gzip -> prepared.gzip
+  | Prefer_gzip -> (
+      match Atomic.get prepared.gzip with
+      | Some pair -> pair
+      | None ->
+          let pair =
+            Domain_pool_ref.submit_cpu_or_inline
+              ~name:"Http_response_payload.select_prepared_gzip"
+              (fun () -> compress_encoded_body Prefer_gzip prepared.identity)
+          in
+          if Atomic.compare_and_set prepared.gzip None (Some pair) then
+            pair
+          else
+            match Atomic.get prepared.gzip with
+            | Some existing -> existing
+            | None -> pair)
   | Identity_only -> prepared.identity, [ vary_accept_encoding ]

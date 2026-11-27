@@ -26,12 +26,6 @@ const nativeKey = {
   operation_id: 'kmsg-4',
   continuation_id: 'thread-4',
 }
-const goalNotificationKey = {
-  kind: 'goal_notification',
-  goal_id: 'goal-1',
-  owner: 'rondo',
-  event: 'overdue',
-}
 const autonomousKey = { kind: 'autonomous_turn', turn_ref: 'trace-fixture#7' } as const
 const approvalInputs = [
   { approval_id: 'approval-a', input_fingerprint: 'a'.repeat(64) },
@@ -67,7 +61,6 @@ describe('keeper chat delivery provenance', () => {
     [autonomousKey, inputBinding],
     [autonomousKey, { kind: 'tool_call', execution_id: 'exec-a', ordinal: 0 }],
     [autonomousKey, { kind: 'tool_delivery', ordinal: 1 }],
-    [goalNotificationKey, { kind: 'terminal_result' }],
   ])('decodes every backend delivery-key variant with its transcript slot', (deliveryKey, slot) => {
     const decoded = decodeKeeperChatDeliveryProvenance(deliveryKey, slot)
     expect(decoded.status).toBe('valid')
@@ -104,7 +97,6 @@ describe('keeper chat delivery provenance', () => {
     }],
     [{ ...checkpointKey, trace_id: 'trace.3' }, { kind: 'accepted_user' }],
     [{ kind: 'operation_native', operation_id: 'kmsg-4' }, { kind: 'accepted_user' }],
-    [{ ...goalNotificationKey, owner: ' \t' }, { kind: 'accepted_user' }],
     [{ ...autonomousKey, turn_ref: 'trace-fixture' }, inputBinding],
     [{ ...autonomousKey, turn_ref: '#7' }, inputBinding],
     [{ ...autonomousKey, turn_ref: 'trace-fixture#07' }, inputBinding],
@@ -190,11 +182,9 @@ describe('keeper chat delivery provenance', () => {
     }
     const checkpoint = decode(checkpointKey)
     const native = decode(nativeKey)
-    const goal = decode(goalNotificationKey)
     expect(sameDeliveryProvenance(checkpoint, decode({ ...checkpointKey }))).toBe(true)
     expect(sameDeliveryProvenance(checkpoint, decode({ ...checkpointKey, turn_count: 5 }))).toBe(false)
     expect(sameDeliveryProvenance(native, decode({ ...nativeKey, continuation_id: 'thread-5' }))).toBe(false)
-    expect(sameDeliveryProvenance(goal, decode({ ...goalNotificationKey, event: 'refuted' }))).toBe(false)
     expect(sameDeliveryProvenance(checkpoint, decode({ kind: 'operation', operation_id: 'kmsg-3' }))).toBe(false)
   })
 

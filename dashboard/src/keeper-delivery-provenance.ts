@@ -17,12 +17,6 @@ export type KeeperChatDeliveryKey =
   | { readonly kind: 'connector_message'; readonly event_id: string }
   | { readonly kind: 'approval_lifecycle'; readonly approval_id: string }
   | { readonly kind: 'autonomous_turn'; readonly turn_ref: string }
-  | {
-      readonly kind: 'goal_notification'
-      readonly goal_id: string
-      readonly owner: string
-      readonly event: string
-    }
 
 export interface KeeperApprovalInputBinding {
   readonly approval_id: string
@@ -98,11 +92,6 @@ export function sameDeliveryKey(left: KeeperChatDeliveryKey, right: KeeperChatDe
       return right.kind === 'approval_lifecycle' && left.approval_id === right.approval_id
     case 'autonomous_turn':
       return right.kind === 'autonomous_turn' && left.turn_ref === right.turn_ref
-    case 'goal_notification':
-      return right.kind === 'goal_notification'
-        && left.goal_id === right.goal_id
-        && left.owner === right.owner
-        && left.event === right.event
   }
 }
 
@@ -158,9 +147,6 @@ export function isOperationDeliveryProvenance(
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9_.-]+$/
 const TRACE_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/
 const SHA256_PATTERN = /^[0-9a-f]{64}$/
-// The goal_notification decoder refuses a field that OCaml's String.trim
-// empties, and String.trim strips only these five characters.
-const GOAL_FIELD_PATTERN = /[^ \f\n\r\t]/
 
 function plainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -178,10 +164,6 @@ function keeperRequestId(value: unknown): value is string {
 
 function nonNegativeSafeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
-}
-
-function goalNotificationField(value: unknown): value is string {
-  return typeof value === 'string' && GOAL_FIELD_PATTERN.test(value)
 }
 
 // The backend publishes Ids.Turn_ref.to_string's final '#' and decimal
@@ -231,10 +213,6 @@ function decodeDeliveryKey(raw: unknown): KeeperChatDeliveryKey | null {
     case 'autonomous_turn':
       return hasExactKeys(raw, ['kind', 'turn_ref']) && canonicalTurnRef(raw.turn_ref)
         ? { kind: 'autonomous_turn', turn_ref: raw.turn_ref } : null
-    case 'goal_notification':
-      return hasExactKeys(raw, ['kind', 'goal_id', 'owner', 'event'])
-        && goalNotificationField(raw.goal_id) && goalNotificationField(raw.owner) && goalNotificationField(raw.event)
-        ? { kind: 'goal_notification', goal_id: raw.goal_id, owner: raw.owner, event: raw.event } : null
     default:
       return null
   }

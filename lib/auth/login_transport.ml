@@ -11,11 +11,22 @@ let max_answer_bytes = 64 * 1024
 
 (* An https URL with a host and no query or fragment: the rule for a
    provider endpoint and for the redirect URI of a client. *)
+let has_control_or_space s =
+  String.exists (fun ch -> let code = Char.code ch in code <= 0x20 || code = 0x7f) s
+;;
+
 let is_https_url url =
-  let uri = Uri.of_string url in
-  match Uri.scheme uri, Uri.host uri, Uri.query uri, Uri.fragment uri with
-  | Some "https", Some host, [], None when String.length host > 0 -> true
-  | _ -> false
+  if String.equal url "" || has_control_or_space url then false
+  else
+    let uri = Uri.of_string url in
+    let valid_port =
+      match Uri.port uri with
+      | None -> true
+      | Some p -> p >= 1 && p <= 65535
+    in
+    match Uri.scheme uri, Uri.host uri, Uri.userinfo uri, Uri.query uri, Uri.fragment uri with
+    | Some "https", Some host, None, [], None when String.length host > 0 && valid_port -> true
+    | _ -> false
 ;;
 
 let is_unreserved = function

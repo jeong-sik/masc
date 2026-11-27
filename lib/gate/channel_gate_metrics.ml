@@ -178,11 +178,37 @@ let make_acc ~last_outcome =
     binding_order = Queue.create ();
   }
 
+let max_tracked_channels = 64
+let max_channel_key_bytes = 64
+
 let table : (string, stats_acc) Hashtbl.t = Hashtbl.create 16
+let channel_order : string Queue.t = Queue.create ()
 let mu = Eio.Mutex.create ()
 let start_time = Unix.gettimeofday ()
 let recent_events : gate_event Queue.t = Queue.create ()
 let next_event_seq = ref 0
+
+let clamp_utf8_bytes ~max_bytes s =
+  if String.length s <= max_bytes then s
+  else
+    let rec walk i =
+      if i <= 0 then 0
+      else if Char.code s.[i] land 0xc0 = 0x80 then walk (i - 1)
+      else i
+    in
+    String.sub s 0 (walk max_bytes)
+
+let store_channel channel_key acc =
+  if not (Hashtbl.mem table channel_key) then begin
+    if Hashtbl.length table >= max_tracked_channels
+       && not (Queue.is_empty channel_order)
+    then begin
+      let evicted = Queue.take channel_order in
+      Hashtbl.remove table evicted
+    end;
+    Queue.add channel_key channel_order
+  end;
+  Hashtbl.replace table channel_key acc
 
 (* A channel or binding is created by the attempt that first names it, so it
    starts out holding that attempt's outcome; there is no "no attempt yet"
@@ -268,7 +294,7 @@ let record_attempt ~channel ~workspace_id ~keeper ~duration_ms outcome =
       let trimmed_channel = String.trim channel in
       let channel_key =
         if trimmed_channel = "" then "unknown"
-        else String.lowercase_ascii trimmed_channel
+        else clamp_utf8_bytes ~max_bytes:max_channel_key_bytes (String.lowercase_ascii trimmed_channel)
       in
       (* [acc] and [binding] are values now, so every step below rebinds them
          and the two tables are written once at the end. The nested [bindings]
@@ -352,7 +378,7 @@ let record_attempt ~channel ~workspace_id ~keeper ~duration_ms outcome =
        | Some binding when trimmed_workspace <> "" ->
            store_binding acc trimmed_workspace binding
        | Some _ | None -> ());
-      Hashtbl.replace table channel_key acc;
+      store_channel channel_key acc;
       append_event ~channel:channel_key ~workspace_id:trimmed_workspace ~keeper:trimmed_keeper
         ~duration_ms outcome ~timestamp:now)
 

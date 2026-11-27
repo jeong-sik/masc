@@ -1130,11 +1130,22 @@ let rec apply_dispatch t ~seq ~event_name ~payload =
       no_op t
 
 let handle_dispatch t (frame : frame) =
-  let t' = { t with last_seq = frame.s } in
+  let last_seq =
+    match frame.s with
+    | Some _ as seq -> seq
+    | None -> t.last_seq
+  in
+  let state =
+    match t.state with
+    | Connected { session_id; _ } -> Connected { session_id; last_seq }
+    | (Disconnected | Awaiting_hello | Identifying | Resuming
+      | Reconnect_pending _ | Failed _) as s -> s
+  in
+  let t' = { t with last_seq; state } in
   match frame.t with
   | None -> log_warn t' "dispatch frame missing 't' (event name)"
   | Some event_name ->
-      apply_dispatch t' ~seq:frame.s ~event_name ~payload:frame.d
+      apply_dispatch t' ~seq:last_seq ~event_name ~payload:frame.d
 
 let handle_server_heartbeat_demand t =
   ( t
@@ -1162,7 +1173,13 @@ let make_reconnect_pending t ~now_mono ~delay_ms ~resumable ~resume_context =
    connection states have no session yet, so we fall back to [None]. *)
 let capture_resume_context t =
   match t.state with
-  | Connected { session_id; last_seq } -> Some (session_id, last_seq)
+  | Connected { session_id; last_seq } ->
+      let seq =
+        match last_seq with
+        | Some _ -> last_seq
+        | None -> t.last_seq
+      in
+      Some (session_id, seq)
   | Resuming -> t.resume_context  (* preserve in-flight resume context *)
   | Disconnected | Awaiting_hello | Identifying
   | Reconnect_pending _ | Failed _ -> None
@@ -1339,7 +1356,10 @@ let handle_op_reconnect t ~now_mono =
           ~resume_context
       in
       ( t'
-      , [ Close_wss { code = 1000; reason = "server requested reconnect" }
+      , [ Close_wss
+            { code = (if resumable then 4000 else 1000)
+            ; reason = "server requested reconnect"
+            }
         ; Schedule_backoff { delay_ms }
         ; Log
             { level = `Info
@@ -1382,7 +1402,10 @@ let handle_op_invalid_session t ~now_mono (frame : frame) =
         ; reconnect_attempts = attempts_next
         ; resume_context
         }
-      , [ Close_wss { code = 1000; reason = "invalid session" }
+      , [ Close_wss
+            { code = (if resumable then 4000 else 1000)
+            ; reason = "invalid session"
+            }
         ; Schedule_backoff { delay_ms }
         ; Log
             { level = `Warn

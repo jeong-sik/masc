@@ -190,6 +190,18 @@ let ack_effect (env : envelope) =
   match env.envelope_id with Some id -> [ Send_ack { envelope_id = id } ] | None -> []
 ;;
 
+let enter_reconnect_pending t ~now_mono ~reason =
+  let delay = next_backoff_ms t.reconnect_attempts in
+  let backoff_until_mono = now_mono +. (float_of_int delay /. 1000.0) in
+  let t =
+    { t with
+      state = Reconnect_pending { backoff_until_mono; reason }
+    ; reconnect_attempts = t.reconnect_attempts + 1
+    }
+  in
+  (t, delay)
+;;
+
 let step t ~now_mono input =
   let log lvl msg = [ Log { level = lvl; message = msg } ] in
   match (t.state, input) with
@@ -199,16 +211,10 @@ let step t ~now_mono input =
   | Awaiting_hello, Apps_connections_open_succeeded { url } ->
     (t, [ Open_wss { url } ])
   | Awaiting_hello, Apps_connections_open_failed { reason } ->
-    let delay = next_backoff_ms t.reconnect_attempts in
-    let t =
-      { t with
-        state = Reconnect_pending { backoff_until_mono = now_mono; reason }
-      ; reconnect_attempts = t.reconnect_attempts + 1
-      }
-    in
+    let t, delay = enter_reconnect_pending t ~now_mono ~reason in
     (t, Schedule_backoff { delay_ms = delay } :: log `Warn ("apps.connections.open failed: " ^ reason))
   | Awaiting_hello, Envelope_received { kind = Hello_env; _ } ->
-    ({ t with state = Connected }, log `Info "slack socket mode connected")
+    ({ t with state = Connected; reconnect_attempts = 0 }, log `Info "slack socket mode connected")
   | Connected, Envelope_received ({ kind = Events_api_env; event; envelope_id; _ } as env) ->
     let ack = ack_effect env in
     let emit =
@@ -239,24 +245,12 @@ let step t ~now_mono input =
     (* A mid-stream hello is unexpected; ack it and log, do not change state. *)
     (t, ack_effect env @ log `Warn "unexpected hello envelope while connected")
   | Connected, Envelope_received ({ kind = Disconnect_env { reason }; envelope_id; _ } as env) ->
-    let delay = next_backoff_ms t.reconnect_attempts in
-    let t =
-      { t with
-        state = Reconnect_pending { backoff_until_mono = now_mono; reason }
-      ; reconnect_attempts = t.reconnect_attempts + 1
-      }
-    in
+    let t, delay = enter_reconnect_pending t ~now_mono ~reason in
     ( t
     , ack_effect env @ [ Close_wss; Schedule_backoff { delay_ms = delay } ]
       @ log `Info ("slack disconnect envelope: " ^ reason) )
   | Connected, Envelope_received ({ kind = Reconnect_env; envelope_id; _ } as env) ->
-    let delay = next_backoff_ms t.reconnect_attempts in
-    let t =
-      { t with
-        state = Reconnect_pending { backoff_until_mono = now_mono; reason = "reconnect envelope" }
-      ; reconnect_attempts = t.reconnect_attempts + 1
-      }
-    in
+    let t, delay = enter_reconnect_pending t ~now_mono ~reason:"reconnect envelope" in
     (t, ack_effect env @ [ Close_wss; Schedule_backoff { delay_ms = delay } ])
   | Connected, Envelope_received ({ kind = Ignored_env _; envelope_id } as env) ->
     (* Envelope type we don't surface (slash_commands, interactive): ack only. *)
@@ -264,22 +258,10 @@ let step t ~now_mono input =
   | (Disconnected | Awaiting_hello | Connected | Reconnect_pending _), Envelope_parse_error msg ->
     (t, log `Warn ("envelope parse error: " ^ msg))
   | Connected, Wss_closed { reason } ->
-    let delay = next_backoff_ms t.reconnect_attempts in
-    let t =
-      { t with
-        state = Reconnect_pending { backoff_until_mono = now_mono; reason }
-      ; reconnect_attempts = t.reconnect_attempts + 1
-      }
-    in
+    let t, delay = enter_reconnect_pending t ~now_mono ~reason in
     (t, [ Schedule_backoff { delay_ms = delay } ] @ log `Info ("wss closed: " ^ reason))
   | Awaiting_hello, Wss_closed { reason } ->
-    let delay = next_backoff_ms t.reconnect_attempts in
-    let t =
-      { t with
-        state = Reconnect_pending { backoff_until_mono = now_mono; reason }
-      ; reconnect_attempts = t.reconnect_attempts + 1
-      }
-    in
+    let t, delay = enter_reconnect_pending t ~now_mono ~reason in
     (t, [ Schedule_backoff { delay_ms = delay } ] @ log `Warn ("wss closed before hello: " ^ reason))
   | Reconnect_pending _, Backoff_elapsed ->
     let t = { t with state = Awaiting_hello } in

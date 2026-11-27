@@ -475,6 +475,13 @@ type engine_keeper_admission =
   | Unknown_person_keeper
   | Authz_uncertain
 
+let principal_active_and_unheld state user_id =
+  Ps.is_active state.Authz_state.principals user_id
+  && Authz_state.revocation state
+       (Authz_records.Subject.Principal (Authz_types.Principal.Human user_id))
+     = Authz_records.Revocation_state.Not_pending
+;;
+
 let engine_keeper_admission engine_name =
   match Atomic.get state with
   | Unpublished | Published (Single_user (_ : Authz_boot_mode_read.single_user)) ->
@@ -487,7 +494,7 @@ let engine_keeper_admission engine_name =
        (match Authz_keeper_state.find_by_engine_name authz_state.Authz_state.keepers engine_name with
         | None -> Unknown_person_keeper
         | Some (owner, keeper_id, keeper) ->
-          if Ps.is_active authz_state.Authz_state.principals owner
+          if principal_active_and_unheld authz_state owner
           then
             Active_person_keeper
               { owner
@@ -507,7 +514,7 @@ let active_authz_keeper_names () =
        let authz_state = (trusted :> Authz_zone.snapshot).Authz_zone.state in
        Authz_keeper_state.all authz_state.Authz_state.keepers
        |> List.filter_map (fun (owner, (_ : Authz_types.Keeper_id.t), (keeper : Authz_keeper_state.keeper)) ->
-            if Ps.is_active authz_state.Authz_state.principals owner
+            if principal_active_and_unheld authz_state owner
             then Some (Authz_types.Engine_name.to_string keeper.engine_name)
             else None)
        |> List.sort_uniq String.compare)
@@ -520,8 +527,8 @@ let multi_account ~zone ~base_path ~now request claim =
   | Operator_call -> Error No_operator
   | Own_account { user_id; provider_account_id } ->
     on_trusted (fun (_ : Authz_zone.trusted) state ->
-      match Ps.find state.Authz_state.principals user_id with
-      | Some { Ps.status = Ps.Active; _ } ->
+      if principal_active_and_unheld state user_id
+      then (
         let ( let* ) = Result.bind in
         let* runtime_root = person_root ~base_path state user_id in
         let* () = own_home ~runtime_root provider_account_id claim in
@@ -535,8 +542,8 @@ let multi_account ~zone ~base_path ~now request claim =
             (Authz_provider_account.availability state ~user_id provider_account_id)
         in
         (* The key is checked once the account is known to be theirs. *)
-        own_key ~runtime_root state provider_account_id claim
-      | Some { Ps.status = Ps.Disabled; _ } | None -> Error (Not_active user_id))
+        own_key ~runtime_root state provider_account_id claim)
+      else Error (Not_active user_id))
   | Operator_keeper_turn { keeper_name; runtime_id = _ } -> Error (No_operator_keeper keeper_name)
   | Keeper_turn { owner; keeper_id; channel; stored_scope; pat; runtime_id } ->
     on_trusted (fun trusted state ->
@@ -765,8 +772,8 @@ let authorize_person request (person : _ person_sealed) =
        Error (No_operator_keeper keeper_name)
      | Own_account { user_id; provider_account_id } ->
        on_trusted zone (fun (_ : Authz_zone.trusted) state ->
-         match Ps.find state.Authz_state.principals user_id with
-         | Some { Ps.status = Ps.Active; _ } ->
+         if principal_active_and_unheld state user_id
+         then (
            let ( let* ) = Result.bind in
            let* runtime_root = person_root ~base_path state user_id in
            let* expected_home = person_expected_home ~runtime_root provider_account_id person in
@@ -775,20 +782,20 @@ let authorize_person request (person : _ person_sealed) =
                (fun reason -> Account_unavailable { provider_account_id; reason })
                (Authz_provider_account.availability state ~user_id provider_account_id)
            in
-           (match
-              Authz_provider_account_state.find
-                state.Authz_state.provider_accounts
-                provider_account_id
-            with
-            | None -> Error (Not_the_account_home provider_account_id)
-            | Some { Authz_provider_account_state.kind; owner = _ } ->
-              capture_person_account
-                ~runtime_root
-                ~expected_home
-                ~provider_account_id
-                ~kind
-                person)
-         | Some { Ps.status = Ps.Disabled; _ } | None -> Error (Not_active user_id))
+           match
+             Authz_provider_account_state.find
+               state.Authz_state.provider_accounts
+               provider_account_id
+           with
+           | None -> Error (Not_the_account_home provider_account_id)
+           | Some { Authz_provider_account_state.kind; owner = _ } ->
+             capture_person_account
+               ~runtime_root
+               ~expected_home
+               ~provider_account_id
+               ~kind
+               person)
+         else Error (Not_active user_id))
      | Keeper_turn { owner; keeper_id; channel; stored_scope; pat; runtime_id } ->
        on_trusted zone (fun trusted state ->
          let ( let* ) = Result.bind in
@@ -925,15 +932,15 @@ let authorize_person_api_multi ~zone ~base_path ~now ~provider_account_id reques
     then Error (Not_the_account_key requested_id)
     else
       on_trusted zone (fun (_ : Authz_zone.trusted) state ->
-        match Ps.find state.Authz_state.principals user_id with
-        | Some { Ps.status = Ps.Active; _ } ->
+        if principal_active_and_unheld state user_id
+        then (
           let* () =
             Result.map_error
               (fun reason -> Account_unavailable { provider_account_id; reason })
               (Authz_provider_account.availability state ~user_id provider_account_id)
           in
-          read_person_api_key ~base_path state ~owner:user_id provider_account_id
-        | Some { Ps.status = Ps.Disabled; _ } | None -> Error (Not_active user_id))
+          read_person_api_key ~base_path state ~owner:user_id provider_account_id)
+        else Error (Not_active user_id))
   | Keeper_turn { owner; keeper_id; channel; stored_scope; pat; runtime_id } ->
     on_trusted zone (fun trusted state ->
       let* turn = decided_turn trusted ~owner ~keeper_id ~channel ~stored_scope ~pat ~runtime_id ~now in

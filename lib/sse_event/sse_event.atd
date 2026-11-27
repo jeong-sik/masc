@@ -149,3 +149,14 @@ type agent_failed_payload = {
   error_retryable: bool;
   error_detail: json_value;
 }
+
+(* A run cancelled from outside before it produced a result. [reason] is the
+   rendered cancelling exception, for a person reading the row; no reader
+   branches on it. A timeout is not a cancellation: it arrives as
+   agent_failed. *)
+type agent_cancelled_payload = {
+  agent_name: string;
+  task_id: string;
+  reason: string;
+  elapsed_s: float;
+}

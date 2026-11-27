@@ -38,6 +38,7 @@ type agent_core_change =
   | Started
   | Completed
   | Failed
+  | Cancelled
   | Yielded
   | Input_required
   | Tool_called

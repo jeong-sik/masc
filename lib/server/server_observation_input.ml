@@ -11,7 +11,7 @@ type store_change =
 type gate_change = Approvals | Rules | Mode | External_mode | Installation_asks of string
 
 type agent_core_change =
-  | Started | Completed | Failed | Yielded | Input_required | Tool_called
+  | Started | Completed | Failed | Cancelled | Yielded | Input_required | Tool_called
   | Tool_completed | Turn_completed
 
 type t =
@@ -214,6 +214,8 @@ let of_fields fields =
       agent_core fields "agent_completed" Completed (valid_payload Sse_event.Json.agent_completed_payload_of_string)
   | "agent_core:agent_failed" ->
       agent_core fields "agent_failed" Failed (valid_payload Sse_event.Json.agent_failed_payload_of_string)
+  | "agent_core:agent_cancelled" ->
+      agent_core fields "agent_cancelled" Cancelled (valid_payload Sse_event.Json.agent_cancelled_payload_of_string)
   | "agent_core:agent_yielded" ->
       agent_core fields "agent_yielded" Yielded (valid_payload Sse_event.Json.agent_yielded_payload_of_string)
   | "agent_core:agent_input_required" ->

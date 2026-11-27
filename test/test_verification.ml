@@ -1916,7 +1916,10 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
            | None -> Alcotest.fail "reviewer did not read an artifact from the record");
           (match !captured_body_read with
            | Some (Tool_result.Completed _ as result) ->
-             let page = Tool_result.message result |> Yojson.Safe.from_string in
+             (* The review wraps every lookup in its observation envelope. *)
+             let page =
+               Tool_result.data result |> member "lookup_result" |> to_string
+               |> Yojson.Safe.from_string in
              Alcotest.(check int) "a stored body is read by its recorded size"
                (String.length stored_text) (member "total_bytes" page |> to_int);
              Alcotest.(check bool) "the first page starts the stored text" true

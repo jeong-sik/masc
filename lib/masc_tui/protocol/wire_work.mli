@@ -725,7 +725,11 @@ type verification_evidence_item =
       reference : string;
       content : string;
       bytes : int;
-      truncated : bool;
+    }
+  | Verif_ev_stored_body of {
+      reference : string;
+      bytes : int;
+      sha256 : string;
     }
   | Verif_ev_binary of {
       reference : string;

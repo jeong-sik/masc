@@ -409,8 +409,9 @@ let test_lane_addon_records_keep_embedded_tool_blobs_live () =
 (* A verification request record names the text bodies it stored whole by the
    blob store's own normalized reference, and the record directory is in the
    sweep's scope. A body a record still names is live; a body no record names
-   is a candidate. The item is written by the store's serializer, so the pin
-   holds for the shape requests really carry. *)
+   is a candidate in both scans and so becomes deletable. The item is written
+   by the store's serializer, so the pin holds for the shape requests really
+   carry. *)
 let test_request_records_keep_stored_text_bodies_live () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -440,7 +441,7 @@ let test_request_records_keep_stored_text_bodies_live () =
       Alcotest.(check (list string)) "still fully classified" [] second.unclassified;
       Alcotest.(check int) "the record's body is live" 1 second.live_digests;
       Alcotest.(check int) "only the orphan stays a candidate" 1 second.candidates;
-      Alcotest.(check int) "no retained blob is deletable" 0 second.deletable)
+      Alcotest.(check int) "only the orphan becomes deletable" 1 second.deletable)
 
 let test_lane_addon_raw_evidence_keeps_tool_blobs_live () =
   with_temp_dir (fun base_path ->

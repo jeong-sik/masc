@@ -203,6 +203,30 @@ let test_run_list_answers_what_its_schema_declares () =
   require_failed (call config "masc_run_list" [ "limit", `Int (maximum + 1) ]);
   require_failed (call config "masc_run_list" [ "limit", `Int (minimum - 1) ])
 
+let test_traversal_task_id_is_rejected () =
+  with_workspace @@ fun config ->
+  let bad_ids = [ "../escaped"; "../../etc"; "sub/task"; ".hidden" ] in
+  List.iter
+    (fun bad_id ->
+       require_failure Tool_result.Workflow_rejection Tool_result.Proven_pre_effect
+         (call config "masc_run_init" [ "task_id", `String bad_id ]);
+       require_failure Tool_result.Workflow_rejection Tool_result.Proven_pre_effect
+         (call config "masc_run_plan" [ "task_id", `String bad_id; "plan", `String "p" ]);
+       require_failure Tool_result.Workflow_rejection Tool_result.Proven_pre_effect
+         (call config "masc_run_get" [ "task_id", `String bad_id ]);
+       (match Masc.Run_eio.init config ~task_id:bad_id ~agent_name:None with
+        | Error _ -> ()
+        | Ok _ -> fail ("Run_eio.init accepted invalid task_id: " ^ bad_id));
+       (match Masc.Run_eio.update_plan config ~task_id:bad_id ~content:"p" with
+        | Error (Masc.Run_eio.Invalid_task_id _) -> ()
+        | Ok _ | Error _ -> fail ("Run_eio.update_plan did not return Invalid_task_id for: " ^ bad_id));
+       (match Masc.Run_eio.get config ~task_id:bad_id with
+        | Error _ -> ()
+        | Ok _ -> fail ("Run_eio.get accepted invalid task_id: " ^ bad_id)))
+    bad_ids;
+  check bool "escaped directory was not created" false
+    (Sys.file_exists (Filename.concat (Masc.Workspace.masc_dir config) "escaped"))
+
 let () = run "Run tool workflow" [ "plan", [
   test_case "missing init then successful plan readback" `Quick test_initialize_after_missing_plan;
   test_case "invalid stored record remains a runtime failure" `Quick test_invalid_record_is_not_a_missing_precondition;
@@ -210,6 +234,7 @@ let () = run "Run tool workflow" [ "plan", [
   test_case "metadata init failure is not success" `Quick test_init_metadata_failure_is_not_success;
   test_case "metadata plan failure preserves partial effect" `Quick test_plan_metadata_failure_preserves_partial_effect;
   test_case "memory commit survives metadata mirror failure" `Quick test_memory_commit_survives_metadata_mirror_failure;
+  test_case "traversal task_id rejected before filesystem access" `Quick test_traversal_task_id_is_rejected;
 ]; "list", [
   test_case "answers what its schema declares" `Quick test_run_list_answers_what_its_schema_declares;
 ] ]

@@ -699,6 +699,7 @@ let run t tool ~args =
   | (Keeper_producer _ | Workspace_producer), Web_fetch ->
     let result =
       Tool_misc_web_fetch.handle
+        ~base_path:t.config.Workspace.base_path
         ~tool_name:(tool_name Web_fetch)
         ~start_time:(Tool_timing.start ())
         args

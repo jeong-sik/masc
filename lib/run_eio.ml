@@ -18,11 +18,14 @@ type run_record = {
 }
 
 type error =
+  | Invalid_task_id of { task_id : string; detail : string }
   | Missing_run of { task_id : string; path : string }
   | Invalid_run of { task_id : string; path : string }
   | Storage_failure of string
 
 let error_to_string = function
+  | Invalid_task_id { task_id; detail } ->
+    Printf.sprintf "Invalid task_id %S: %s" task_id detail
   | Missing_run { task_id; path } ->
     Printf.sprintf
       "No execution run record exists yet for task %s (expected run.json at %s)."
@@ -33,6 +36,11 @@ let error_to_string = function
        run_record_of_json returned None; check schema drift or truncated write"
       path task_id
   | Storage_failure detail -> detail
+
+let validate_task_id task_id : (string, error) result =
+  match Validation.Task_id.validate task_id with
+  | Ok validated -> Ok (Validation.Task_id.to_string validated)
+  | Error detail -> Error (Invalid_task_id { task_id; detail })
 
 let run_record_to_json (r : run_record) : Yojson.Safe.t =
   `Assoc [
@@ -114,24 +122,31 @@ let write_text_file path content =
   Fs_compat.save_file path content
 
 let write_run config (run : run_record) =
-  let path = run_json_path config run.task_id in
-  match write_json_commit_result config path (run_record_to_json run) with
-  | Error detail -> Error (Storage_failure detail)
-  | Ok { mirror_error } ->
-    Option.iter
-      (fun detail -> Log.Misc.warn "run metadata committed; %s" detail)
-      mirror_error;
-    Ok ()
+  match validate_task_id run.task_id with
+  | Error _ as err -> err
+  | Ok task_id ->
+    let run = { run with task_id } in
+    let path = run_json_path config task_id in
+    match write_json_commit_result config path (run_record_to_json run) with
+    | Error detail -> Error (Storage_failure detail)
+    | Ok { mirror_error } ->
+      Option.iter
+        (fun detail -> Log.Misc.warn "run metadata committed; %s" detail)
+        mirror_error;
+      Ok ()
 
 let read_run config task_id : (run_record, error) result =
-  let path = run_json_path config task_id in
-  if not (path_exists config path) then
-    Error (Missing_run { task_id; path })
-  else
-    match run_record_of_json (read_json config path) with
-    | Some r -> Ok r
-    | None ->
-      Error (Invalid_run { task_id; path })
+  match validate_task_id task_id with
+  | Error _ as err -> err
+  | Ok task_id ->
+    let path = run_json_path config task_id in
+    if not (path_exists config path) then
+      Error (Missing_run { task_id; path })
+    else
+      match run_record_of_json (read_json config path) with
+      | Some r -> Ok r
+      | None ->
+        Error (Invalid_run { task_id; path })
 
 (* Every writer of [run.json] runs inside this lock: the two that replace the
    record ([init], the bootstrap in [get]) and the one that rewrites its plan
@@ -166,8 +181,11 @@ let locked_run_result config ~task_id f : (run_record, string) result =
 
 (** Initialize run for task *)
 let init config ~task_id ~agent_name : (run_record, string) result =
-  locked_run_result config ~task_id (fun () ->
-    create_run_locked config ~task_id ~agent_name)
+  match validate_task_id task_id with
+  | Error err -> Error (error_to_string err)
+  | Ok task_id ->
+    locked_run_result config ~task_id (fun () ->
+      create_run_locked config ~task_id ~agent_name)
 
 (** Update plan.
 
@@ -181,43 +199,49 @@ let init config ~task_id ~agent_name : (run_record, string) result =
     lock — writing the mirror and the [run.json] record inside the
     same critical section keeps them consistent. *)
 let update_plan config ~task_id ~content : (run_record, error) result =
-  try
-    with_run_lock config ~task_id (fun () ->
-      match read_run config task_id with
-      | Error e -> Error e
-      | Ok run ->
-          let updated = { run with plan = content; updated_at = Masc_domain.now_iso () } in
-          let path = plan_path config task_id in
-          write_text_file path content;
-          write_run config updated |> Result.map (fun () -> updated))
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | e -> Error (Storage_failure (Printexc.to_string e))
+  match validate_task_id task_id with
+  | Error _ as err -> err
+  | Ok task_id ->
+    (try
+       with_run_lock config ~task_id (fun () ->
+         match read_run config task_id with
+         | Error e -> Error e
+         | Ok run ->
+             let updated = { run with plan = content; updated_at = Masc_domain.now_iso () } in
+             let path = plan_path config task_id in
+             write_text_file path content;
+             write_run config updated |> Result.map (fun () -> updated))
+     with
+     | Eio.Cancel.Cancelled _ as e -> raise e
+     | e -> Error (Storage_failure (Printexc.to_string e)))
 
 (** Get run details. Missing runs are bootstrapped so resume/read paths do
     not block autonomous keeper turns before any explicit masc_run_init call. *)
 let get ?agent_name config ~task_id : (Yojson.Safe.t, string) result =
-  (* The existence check and the creation share one critical section, so a run
-     another caller creates and plans in between is read, not replaced. *)
-  let read_or_create_run () =
-    locked_run_result config ~task_id (fun () ->
-      if path_exists config (run_json_path config task_id) then
-        read_run config task_id
-      else
-        create_run_locked config ~task_id ~agent_name)
-  in
-  match read_or_create_run () with
-  | Error e -> Error e
-  | Ok run ->
-    let plan_content =
-      let text = read_text_file (plan_path config task_id) in
-      if text = "" then run.plan else text
+  match validate_task_id task_id with
+  | Error err -> Error (error_to_string err)
+  | Ok task_id ->
+    (* The existence check and the creation share one critical section, so a run
+       another caller creates and plans in between is read, not replaced. *)
+    let read_or_create_run () =
+      locked_run_result config ~task_id (fun () ->
+        if path_exists config (run_json_path config task_id) then
+          read_run config task_id
+        else
+          create_run_locked config ~task_id ~agent_name)
     in
-    let json = `Assoc [
-      ("run", run_record_to_json run);
-      ("plan", `String plan_content);
-    ] in
-    Ok json
+    match read_or_create_run () with
+    | Error e -> Error e
+    | Ok run ->
+      let plan_content =
+        let text = read_text_file (plan_path config task_id) in
+        if text = "" then run.plan else text
+      in
+      let json = `Assoc [
+        ("run", run_record_to_json run);
+        ("plan", `String plan_content);
+      ] in
+      Ok json
 
 (* Most recently updated first. A timestamp that does not parse sorts after
    every one that does, so the run still shows and the order stays total. Equal

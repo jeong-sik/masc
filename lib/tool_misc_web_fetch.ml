@@ -363,10 +363,17 @@ let web_artifact_index_append ~dir ~sha256 ~source_url ~title ~bytes
 
 let artifacts_dirname = "artifacts"
 
-let offload_full_text ~source_url ~title ~fetched_at_unix text =
-  match Env_config_core.base_path () with
-  | exception Env_config_core.Config_error message -> Error message
-  | base ->
+let resolve_base_path = function
+  | Some base when String.trim base <> "" -> Ok base
+  | Some _ | None ->
+    (match Env_config_core.base_path () with
+     | exception Env_config_core.Config_error message -> Error message
+     | base -> Ok base)
+
+let offload_full_text ?base_path ~source_url ~title ~fetched_at_unix text =
+  match resolve_base_path base_path with
+  | Error message -> Error message
+  | Ok base ->
       let dir =
         List.fold_left
           Filename.concat
@@ -485,7 +492,7 @@ let outline_block text =
       in
       Some (String.concat "\n" (header :: rows))
 
-let truncate_text ~max_chars ~source_url ~title ~fetched_at_unix text =
+let truncate_text ?base_path ~max_chars ~source_url ~title ~fetched_at_unix text =
   let total = String.length text in
   if total <= max_chars then text, false, None
   else
@@ -506,7 +513,7 @@ let truncate_text ~max_chars ~source_url ~title ~fetched_at_unix text =
     in
     let head = String.sub text 0 head_cut in
     let tail = String.sub text tail_start (total - tail_start) in
-    let offloaded = offload_full_text ~source_url ~title ~fetched_at_unix text in
+    let offloaded = offload_full_text ?base_path ~source_url ~title ~fetched_at_unix text in
     let marker =
       match offloaded with
       | Ok (sha256, index) -> (
@@ -574,12 +581,39 @@ let cache_lookup key now =
     in
     publish_pruned_snapshot ())
 
+let max_cache_entries = 256
+
 let cache_store key response now =
   let ttl = cache_ttl_sec () in
   if Stdlib.Float.compare ttl 0.0 > 0
   then
     Atomic_util.update cache_entries (fun current ->
-      Cache_by_key.add key { response; expires_at = now +. ttl } current)
+      let pruned =
+        Cache_by_key.filter
+          (fun _ entry -> Stdlib.Float.compare entry.expires_at now > 0)
+          current
+      in
+      let trimmed =
+        if (not (Cache_by_key.mem key pruned))
+           && Cache_by_key.cardinal pruned >= max_cache_entries
+        then
+          match
+            Cache_by_key.fold
+              (fun k entry acc ->
+                 match acc with
+                 | None -> Some (k, entry.expires_at)
+                 | Some (_, min_exp)
+                   when Stdlib.Float.compare entry.expires_at min_exp < 0 ->
+                   Some (k, entry.expires_at)
+                 | Some _ -> acc)
+              pruned
+              None
+          with
+          | Some (oldest_key, _) -> Cache_by_key.remove oldest_key pruned
+          | None -> pruned
+        else pruned
+      in
+      Cache_by_key.add key { response; expires_at = now +. ttl } trimmed)
 
 (* Typed fetch-failure variant. Each arm carries
    the data needed to render an operator-facing message AND a
@@ -791,7 +825,7 @@ let with_http_get_for_test http_get f =
     f
 
 (** Main fetch implementation *)
-let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars ~fetched_at_unix =
+let fetch_impl ~base_path ~url ~timeout_sec ~extract_mode ~max_chars ~fetched_at_unix =
   let headers =
     [
       ( "User-Agent",
@@ -834,7 +868,7 @@ let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars ~fetched_at_unix =
                   , render_payload ~extract_mode ~content_kind response.body ))
               in
               let text, truncated, full_text_sha256 =
-                truncate_text ~max_chars ~source_url:response.final_url ~title
+                truncate_text ?base_path ~max_chars ~source_url:response.final_url ~title
                   ~fetched_at_unix rendered
               in
               Ok
@@ -862,8 +896,8 @@ let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars ~fetched_at_unix =
    variant carries its own [fetch_failure_class], assigned at the
    call site that constructs it. Avoids string-based classification. *)
 
-let handle ~tool_name ~start_time args : Tool_result.result =
-  let url = get_string args "url" "" in
+let handle ?base_path ~tool_name ~start_time args : Tool_result.result =
+  let url = String.trim (get_string args "url" "") in
   let timeout = max 1 (min 60 (get_int args "timeout" default_timeout_sec)) in
   let max_chars = max 1 (min max_chars_cap (get_int args "maxChars" default_max_chars)) in
   let extract_mode_raw =
@@ -890,15 +924,20 @@ let handle ~tool_name ~start_time args : Tool_result.result =
         Tool_result.make_ok ~tool_name ~start_time ~data ()
       in
       let now = Unix.gettimeofday () in
+      let cache_scope =
+        match resolve_base_path base_path with
+        | Ok base -> base
+        | Error _ -> ""
+      in
       let key =
         String.concat
           "|"
-          [ url; Int.to_string timeout; extract_mode_label; Int.to_string max_chars ]
+          [ cache_scope; url; Int.to_string timeout; extract_mode_label; Int.to_string max_chars ]
       in
       match cache_lookup key now with
       | Some cached -> ok_from_data cached
       | None ->
-        (match fetch_impl ~url ~timeout_sec:timeout ~extract_mode ~max_chars
+        (match fetch_impl ~base_path ~url ~timeout_sec:timeout ~extract_mode ~max_chars
                  ~fetched_at_unix:(Tool_timing.started_at start_time) with
                     | Ok
                         ( response

@@ -400,7 +400,11 @@ let handle_web_search_with_outcome
   @@ fun () ->
   let tool_name = "masc_web_search" in
   let start_time = Tool_timing.start () in
-  Tool_misc_web_enrichment.handle ~tool_name ~start_time args
+  Tool_misc_web_enrichment.handle
+    ~base_path:config.Workspace_utils.base_path
+    ~tool_name
+    ~start_time
+    args
   |> Keeper_tool_execution.of_tool_result
 ;;
 
@@ -425,6 +429,7 @@ let handle_web_fetch_with_outcome
     ~call_summary:(network_read_call_summary (Replay_web_fetch args))
   @@ fun () ->
   Tool_misc_web_fetch.handle
+    ~base_path:config.Workspace_utils.base_path
     ~tool_name:"masc_web_fetch"
     ~start_time:(Tool_timing.start ())
     args

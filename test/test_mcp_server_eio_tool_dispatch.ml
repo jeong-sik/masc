@@ -57,6 +57,11 @@ let test_execute_tool_help_tool () =
       ~arguments:(`Assoc [ ("tool_name", `String "masc_status") ])
   in
   Alcotest.(check bool) "tool help call succeeds" true (Tool_result.is_success result);
+  (match result with
+   | Tool_result.Completed { tool_name; _ } ->
+     Alcotest.(check string) "tool_result retains masc_tool_help name" "masc_tool_help" tool_name
+   | Tool_result.Deferred _ | Tool_result.Failed _ ->
+     Alcotest.fail "expected completed masc_tool_help result");
   let json = extract_json_from_text ((Tool_result.message result)) in
   Alcotest.(check string) "help tool echoes name" "masc_status"
     Yojson.Safe.Util.(json |> member "name" |> to_string);

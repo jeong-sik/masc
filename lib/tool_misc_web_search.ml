@@ -919,12 +919,39 @@ let cache_lookup key now =
     in
     publish_pruned_snapshot ())
 
+let max_cache_entries = 256
+
 let cache_store key answer now =
   let ttl = Env_config.Tools.web_search_cache_ttl_sec () in
   if Stdlib.Float.compare ttl 0.0 > 0
   then
     Atomic_util.update cache_entries (fun current ->
-      Cache_by_key.add key { answer; expires_at = now +. ttl } current)
+      let pruned =
+        Cache_by_key.filter
+          (fun _ entry -> Stdlib.Float.compare entry.expires_at now > 0)
+          current
+      in
+      let trimmed =
+        if (not (Cache_by_key.mem key pruned))
+           && Cache_by_key.cardinal pruned >= max_cache_entries
+        then
+          match
+            Cache_by_key.fold
+              (fun k entry acc ->
+                 match acc with
+                 | None -> Some (k, entry.expires_at)
+                 | Some (_, min_exp)
+                   when Stdlib.Float.compare entry.expires_at min_exp < 0 ->
+                   Some (k, entry.expires_at)
+                 | Some _ -> acc)
+              pruned
+              None
+          with
+          | Some (oldest_key, _) -> Cache_by_key.remove oldest_key pruned
+          | None -> pruned
+        else pruned
+      in
+      Cache_by_key.add key { answer; expires_at = now +. ttl } trimmed)
 
 (* Rendered when the provider chain is empty — the operator-facing
    remedy travels with the failure instead of a bare symptom. Shared

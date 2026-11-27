@@ -174,8 +174,8 @@ let handle_tool_help ~schemas ~tool_name ~start_time _ctx args : Tool_result.res
   if String.equal raw_name "" then
     workflow_err ~tool_name ~start_time "tool_name is required"
   else
-    let tool_name = strip_mcp_prefix raw_name in
-    match Tool_help_registry.find_entry schemas tool_name with
+    let target_name = strip_mcp_prefix raw_name in
+    match Tool_help_registry.find_entry schemas target_name with
     | None ->
         workflow_err ~tool_name ~start_time
           (Printf.sprintf "unknown tool: %s" raw_name)
@@ -189,11 +189,19 @@ let handle_tool_help ~schemas ~tool_name ~start_time _ctx args : Tool_result.res
 (* PR-1b.8 / PR-1b.9 web_* handlers are already typed at the source.
    With dispatch lifting internally now, these wrappers can pass
    the typed result straight through. *)
-let handle_web_search ~tool_name ~start_time _ctx args : Tool_result.result =
-  Tool_misc_web_enrichment.handle ~tool_name ~start_time args
+let handle_web_search ~tool_name ~start_time ctx args : Tool_result.result =
+  Tool_misc_web_enrichment.handle
+    ~base_path:ctx.config.Workspace_utils.base_path
+    ~tool_name
+    ~start_time
+    args
 
-let handle_web_fetch ~tool_name ~start_time _ctx args : Tool_result.result =
-  Tool_misc_web_fetch.handle ~tool_name ~start_time args
+let handle_web_fetch ~tool_name ~start_time ctx args : Tool_result.result =
+  Tool_misc_web_fetch.handle
+    ~base_path:ctx.config.Workspace_utils.base_path
+    ~tool_name
+    ~start_time
+    args
 
 (* ================================================================ *)
 (* Public re-exports from sub-modules                               *)

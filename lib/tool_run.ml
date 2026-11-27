@@ -25,14 +25,30 @@ let task_id_required ~tool_name ~start_time : Tool_result.result =
   Tool_result.make_err
     ~tool_name
     ~class_:Tool_result.Workflow_rejection
+    ~effect_disposition:Tool_result.Proven_pre_effect
     ~start_time
     "task_id is required"
 
-let handle_run_init ~tool_name ~start_time ctx args : Tool_result.result =
+let validated_task_id ~tool_name ~start_time args : (string, Tool_result.result) result =
   let task_id = get_string args "task_id" "" in
   if String.equal task_id "" then
-    task_id_required ~tool_name ~start_time
+    Error (task_id_required ~tool_name ~start_time)
   else
+    match Validation.Task_id.validate task_id with
+    | Ok validated -> Ok (Validation.Task_id.to_string validated)
+    | Error detail ->
+      Error
+        (Tool_result.make_err
+           ~tool_name
+           ~class_:Tool_result.Workflow_rejection
+           ~effect_disposition:Tool_result.Proven_pre_effect
+           ~start_time
+           (Printf.sprintf "Invalid task_id: %s" detail))
+
+let handle_run_init ~tool_name ~start_time ctx args : Tool_result.result =
+  match validated_task_id ~tool_name ~start_time args with
+  | Error err -> err
+  | Ok task_id ->
     let agent = get_string_opt args "agent_name" in
     match Run_eio.init ctx.config ~task_id ~agent_name:agent with
   | Ok run ->
@@ -45,10 +61,9 @@ let handle_run_init ~tool_name ~start_time ctx args : Tool_result.result =
         (Printf.sprintf "Failed to init run: %s" e)
 
 let handle_run_plan ~tool_name ~start_time ctx args : Tool_result.result =
-  let task_id = get_string args "task_id" "" in
-  if String.equal task_id "" then
-    task_id_required ~tool_name ~start_time
-  else
+  match validated_task_id ~tool_name ~start_time args with
+  | Error err -> err
+  | Ok task_id ->
     let plan = get_string args "plan" "" in
     match Run_eio.update_plan ctx.config ~task_id ~content:plan with
   | Ok run ->
@@ -56,6 +71,9 @@ let handle_run_plan ~tool_name ~start_time ctx args : Tool_result.result =
   | Error e ->
       let class_, effect_disposition, message =
         match e with
+        | Run_eio.Invalid_task_id _ ->
+          Tool_result.Workflow_rejection, Tool_result.Proven_pre_effect,
+          Run_eio.error_to_string e
         | Run_eio.Missing_run _ ->
           Tool_result.Workflow_rejection, Tool_result.Proven_pre_effect,
           Run_eio.error_to_string e
@@ -75,10 +93,9 @@ let handle_run_plan ~tool_name ~start_time ctx args : Tool_result.result =
         (Printf.sprintf "Failed to update run plan: %s" message)
 
 let handle_run_get ~tool_name ~start_time ctx args : Tool_result.result =
-  let task_id = get_string args "task_id" "" in
-  if String.equal task_id "" then
-    task_id_required ~tool_name ~start_time
-  else
+  match validated_task_id ~tool_name ~start_time args with
+  | Error err -> err
+  | Ok task_id ->
     match Run_eio.get ?agent_name:ctx.agent_name ctx.config ~task_id with
     | Ok json -> Tool_result.make_ok ~tool_name ~start_time ~data:json ()
     | Error e ->

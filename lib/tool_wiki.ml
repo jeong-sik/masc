@@ -189,10 +189,13 @@ type cached_frontmatter = {
   mtime : float;
   size : int;
   parsed : (frontmatter, frontmatter_error) result;
+  last_accessed : int;
 }
 
+let max_frontmatter_cache_entries = 1024
 let frontmatter_cache_mutex = Stdlib.Mutex.create ()
 let frontmatter_cache : (string, cached_frontmatter) Hashtbl.t = Hashtbl.create 64
+let frontmatter_cache_clock = ref 0
 
 let invalidate_frontmatter_cache path =
   Stdlib.Mutex.protect frontmatter_cache_mutex (fun () ->
@@ -215,6 +218,11 @@ let read_frontmatter_cached path =
       Stdlib.Mutex.protect frontmatter_cache_mutex (fun () ->
         match Hashtbl.find_opt frontmatter_cache path with
         | Some entry when Float.equal entry.mtime mtime && entry.size = size ->
+          incr frontmatter_cache_clock;
+          Hashtbl.replace
+            frontmatter_cache
+            path
+            { entry with last_accessed = !frontmatter_cache_clock };
           Some entry.parsed
         | Some _ | None -> None)
     in
@@ -257,7 +265,27 @@ let read_frontmatter_cached path =
                 && size = st2.Unix.st_size
              then
                Stdlib.Mutex.protect frontmatter_cache_mutex (fun () ->
-                 Hashtbl.replace frontmatter_cache path { mtime; size; parsed })
+                 incr frontmatter_cache_clock;
+                 let last_accessed = !frontmatter_cache_clock in
+                 if (not (Hashtbl.mem frontmatter_cache path))
+                    && Hashtbl.length frontmatter_cache >= max_frontmatter_cache_entries
+                 then (
+                   let oldest =
+                     Hashtbl.fold
+                       (fun k entry acc ->
+                          match acc with
+                          | None -> Some (k, entry.last_accessed)
+                          | Some (_, min_seq) when entry.last_accessed < min_seq ->
+                            Some (k, entry.last_accessed)
+                          | Some _ -> acc)
+                       frontmatter_cache
+                       None
+                   in
+                   Option.iter (fun (k, _) -> Hashtbl.remove frontmatter_cache k) oldest);
+                 Hashtbl.replace
+                   frontmatter_cache
+                   path
+                   { mtime; size; parsed; last_accessed })
            | exception Unix.Unix_error _ -> ());
           Some parsed))
 

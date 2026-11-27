@@ -419,43 +419,76 @@ let test_response_with_headers_refuses_what_is_not_a_response () =
   check bool "empty" true (split "" = None)
 
 let test_curl_post_response_argv_includes_headers_and_one_content_type () =
+  let headers =
+    [ ("Authorization", "Bearer " ^ "k"); ("Accept", "application/json, text/event-stream") ]
+  in
+  let body_json = "{\"a\":1}" in
   let argv =
     Masc.Tool_local_runtime_http.curl_post_json_response_argv_for_test ~timeout_sec:7
-      ~headers:[ ("Authorization", "Bearer k"); ("Accept", "application/json, text/event-stream") ]
-      ~url:"https://example.invalid/mcp" ~body_json:"{\"a\":1}" ()
+      ~headers ~url:"https://example.invalid/mcp" ~body_json ()
+  in
+  let config =
+    Masc.Tool_local_runtime_http.curl_post_json_config_for_test ~headers ~body_json
   in
   check string "argv0" "curl" (List.hd argv);
   check string "-q first so ~/.curlrc is not read" "-q" (List.nth argv 1);
+  check bool "-g disables URL globbing" true (List.mem "-g" argv);
+  check bool "reads config from stdin" true
+    (List.exists2 (fun a b -> String.equal a "-K" && String.equal b "-")
+       (List.filteri (fun i _ -> i < List.length argv - 1) argv) (List.tl argv));
   check bool "response headers are asked for" true (List.mem "-i" argv);
   (* Through an HTTPS proxy curl would print the CONNECT block first. *)
   check bool "no proxy CONNECT block in the output" true
     (List.mem "--suppress-connect-headers" argv);
   check bool "no write-out: the status line carries the status" false (List.mem "-w" argv);
-  check int "one content type" 1
-    (List.length (List.filter (fun a -> String.equal a "Content-Type: application/json") argv));
-  check bool "body passed with -d" true
-    (List.exists2 (fun a b -> String.equal a "-d" && String.equal b "{\"a\":1}")
+  check bool "headers stay out of argv" false (List.mem "-H" argv);
+  check bool "credentials stay out of argv" false
+    (List.exists (fun a -> String_util.contains_substring a "Authorization") argv);
+  check bool "body stays out of argv" false (List.mem "-d" argv);
+  check bool "-- precedes url" true
+    (List.exists2
+       (fun a b -> String.equal a "--" && String.equal b "https://example.invalid/mcp")
        (List.filteri (fun i _ -> i < List.length argv - 1) argv) (List.tl argv));
-  check string "url last" "https://example.invalid/mcp" (List.nth argv (List.length argv - 1))
+  check string "url last" "https://example.invalid/mcp" (List.nth argv (List.length argv - 1));
+  let config_lines = String.split_on_char '\n' config in
+  check int "one content type in stdin config" 1
+    (List.length
+       (List.filter
+          (fun line -> String.equal line "header = \"Content-Type: application/json\"")
+          config_lines));
+  check bool "auth header in stdin config" true
+    (List.mem ("header = \"Authorization: Bearer " ^ "k\"") config_lines);
+  check bool "body passed via data-raw in stdin config" true
+    (List.mem "data-raw = \"{\\\"a\\\":1}\"" config_lines)
 
 let test_curl_get_argv_keeps_curl_as_executable_with_headers () =
+  let headers =
+    [
+      ("User-Agent", "Mozilla/5.0 (compatible; MASC-FetchWeb/1.0)");
+      ("Accept-Language", "en-US,en;q=0.8");
+    ]
+  in
   let argv =
     Masc.Tool_local_runtime_http.curl_get_argv_for_test
       ~timeout_sec:30
-      ~headers:
-        [
-          ("User-Agent", "Mozilla/5.0 (compatible; MASC-FetchWeb/1.0)");
-          ("Accept-Language", "en-US,en;q=0.8");
-        ]
+      ~headers
       ~follow_redirects:true
       ~max_redirects:3
       ~compressed:true
       ~max_response_bytes:2_000_000
       "https://example.com/page"
   in
+  let config = Masc.Tool_local_runtime_http.curl_get_config_for_test ~headers in
   check string "argv0 remains curl" "curl" (List.hd argv);
   check string "-q disables ~/.curlrc and must come first" "-q" (List.nth argv 1);
-  check bool "header arg present" true (List.mem "-H" argv);
+  check bool "-g disables URL globbing" true (List.mem "-g" argv);
+  check bool "headers passed via stdin config, not -H in argv" false (List.mem "-H" argv);
+  check bool "-K - present when headers supplied" true (List.mem "-K" argv);
+  check bool "stdin config carries header lines" true
+    (match config with
+     | Some text -> String_util.contains_substring text "header = \"Accept-Language: en-US,en;q=0.8\""
+     | None -> false);
+  check bool "-- precedes url" true (List.mem "--" argv);
   check bool "redirect arg present" true (List.mem "--location" argv);
   check bool "compression arg present" true (List.mem "--compressed" argv);
   check bool "body cap arg present" true (List.mem "--max-filesize" argv);

@@ -249,7 +249,8 @@ let log_tail path =
     List.filteri (fun index _ -> index >= drop) lines
 
 (* What a readiness answer that is not the replacement's 200 says, so the wait
-   shows why it goes on. [None] while nothing listens yet. *)
+   shows why it goes on. [None] while nothing listens yet. A starting server
+   names its boot step, so a slow start shows what it is doing. *)
 let string_field name body =
   match json_field name body with
   | Some (`String value) -> Some value
@@ -258,7 +259,11 @@ let describe_answer = function
   | Error (_ : string) -> None
   | Ok (status, body) ->
     (match string_field "phase" body, string_field "error" body with
-     | Some phase, (_ : string option) -> Some ("starting: " ^ phase)
+     | Some phase, (_ : string option) ->
+       Some
+         (match string_field "step" body with
+          | Some step -> Printf.sprintf "starting: %s (%s)" phase step
+          | None -> "starting: " ^ phase)
      | None, Some error -> Some (Printf.sprintf "answered %d: %s" status error)
      | None, None -> Some (Printf.sprintf "answered %d" status))
 

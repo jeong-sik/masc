@@ -997,24 +997,7 @@ let run_best_effort
                          Log.Keeper.warn
                            ~keeper_name:keeper_id
                            "working context reference publication failed: %s"
-                           detail);
-                      let covered = Keeper_librarian_context.current_references working in
-                      let prior =
-                        match inp.working_context.previous with
-                        | None -> []
-                        | Some previous -> Keeper_librarian_context.current_references previous
-                      in
-                      let made_progress =
-                        List.exists (fun reference -> not (List.mem reference prior)) covered
-                      in
-                      let remaining =
-                        List.exists
-                          (fun (source : Keeper_librarian_context.source) ->
-                             not (List.mem source.reference covered))
-                          inp.working_context.sources
-                      in
-                      if made_progress && remaining
-                      then Keeper_working_context_signal.changed ~base_path ~keeper_name:keeper_id
+                           detail)
                     | Error detail ->
                       context_write := Write_failed detail;
                       Log.Keeper.warn

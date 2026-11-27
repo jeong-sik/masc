@@ -126,6 +126,23 @@ type wiki_edit_base = {
   tags : string list;
 }
 
+type wiki_trail_stop = {
+  stop_page : string;
+  stop_scroll : int;
+  stop_link : string option;
+}
+(** A page left by following one of its body links: where it was scrolled to
+    and which link was followed. *)
+
+type wiki_reading = {
+  reading_page : string;
+  selected_link : string option;
+      (** The selected body link, as written in the Markdown. *)
+  trail : wiki_trail_stop list;
+      (** Pages left by following body links to reach [reading_page], newest
+          first. *)
+}
+
 type vote_target =
   | Vote_post of string
   | Vote_comment of { post_id : string; comment_id : string }
@@ -180,6 +197,8 @@ type t = {
   pending_wiki_jump_slug : string option;
       (** A wiki jump whose slug the loaded index did not list yet. The next
           {!apply_wiki_index} selects it; moving the selection forgets it. *)
+  wiki_reading : wiki_reading option;
+      (** Applies only while [reading_page] is the selected wiki page. *)
   artifacts : Wire_knowledge.artifact_entry list Observed.t;
   artifact_list_generation : int;
   active_artifact_detail : Wire_knowledge.published_artifact_detail Observed.t;
@@ -635,6 +654,29 @@ val select_post_by_id :
     [active_thread] loading. *)
 val select_wiki_slug : slug:string -> t -> t
 (** Select [slug] on [Knowledge_wiki], clearing [filter_query] if hidden. *)
+
+val mark_index_stale_for_pending_wiki_jump : t -> t
+(** After {!select_wiki_slug}: when the index did not list the slug yet, mark
+    a fresh index stale so it is read again and the next one selects it. *)
+
+val wiki_page_links : Wire_knowledge.wiki_page_detail -> (string * string) list
+(** Body links the server resolved to an existing page, as (target as
+    written, page slug). The target as written is the hyperlink the Markdown
+    renderer gives the link. *)
+
+val selected_wiki_link : slug:string -> t -> string option
+(** The selected body link of wiki page [slug]. *)
+
+val select_wiki_link : slug:string -> string option -> t -> t
+(** Select a body link of wiki page [slug], keeping the page's trail. *)
+
+val follow_wiki_link : from:string -> link:string -> target:string -> t -> t
+(** Select page [target], recording [from], its scroll and [link] on the
+    trail. *)
+
+val wiki_link_back : slug:string -> t -> t option
+(** Return to the page last left by following a body link from the trail of
+    page [slug], with its scroll and link; [None] when the trail is empty. *)
 val select_artifact_by_id : id_or_sha:string -> t -> t
 (** Select [id_or_sha] on [Knowledge_artifacts], clearing [filter_query] if
     hidden and resetting in-document search state. *)

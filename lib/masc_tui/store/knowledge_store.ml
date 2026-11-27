@@ -137,6 +137,18 @@ type wiki_edit_base = {
   tags : string list;
 }
 
+type wiki_trail_stop = {
+  stop_page : string;
+  stop_scroll : int;
+  stop_link : string option;
+}
+
+type wiki_reading = {
+  reading_page : string;
+  selected_link : string option;
+  trail : wiki_trail_stop list;
+}
+
 type vote_target =
   | Vote_post of string
   | Vote_comment of { post_id : string; comment_id : string }
@@ -186,6 +198,7 @@ type t = {
   wiki_edit_base : wiki_edit_base option;
   pending_wiki_edit_slug : string option;
   pending_wiki_jump_slug : string option;
+  wiki_reading : wiki_reading option;
   artifacts : Wire_knowledge.artifact_entry list Observed.t;
   artifact_list_generation : int;
   active_artifact_detail : Wire_knowledge.published_artifact_detail Observed.t;
@@ -269,6 +282,7 @@ let empty =
     wiki_edit_base = None;
     pending_wiki_edit_slug = None;
     pending_wiki_jump_slug = None;
+    wiki_reading = None;
     artifacts = Observed.unreported;
     artifact_list_generation = 0;
     active_artifact_detail = Observed.absent;
@@ -2100,6 +2114,90 @@ let select_wiki_slug ~slug t =
     detail_scroll_offset = 0;
     pending_wiki_jump_slug;
   }
+
+let mark_index_stale_for_pending_wiki_jump t =
+  match (t.pending_wiki_jump_slug, t.wiki_index) with
+  | Some _, Observed.Value { stale = false; _ } ->
+      { t with wiki_index = Observed.mark_stale t.wiki_index }
+  | ( Some _
+    , ( Observed.Loading _
+      | Observed.Value { stale = true; _ }
+      | Observed.Absent
+      | Observed.Unreported
+      | Observed.Failed _ ) )
+  | None, _ ->
+      t
+
+let wiki_page_links (detail : Wire_knowledge.wiki_page_detail) =
+  List.filter_map
+    (fun (link : Wire_knowledge.wiki_outgoing_link) ->
+      match link.target with
+      | Wire_knowledge.Link_page { slug; exists = true } -> Some (link.raw, slug)
+      | Wire_knowledge.Link_page { exists = false; _ }
+      | Wire_knowledge.Link_own_file _
+      | Wire_knowledge.Link_external _
+      | Wire_knowledge.Link_invalid_name _
+      | Wire_knowledge.Link_unsupported _ ->
+          None)
+    detail.outgoing_links
+
+let wiki_reading_for ~slug t =
+  match t.wiki_reading with
+  | Some reading when String.equal reading.reading_page slug -> Some reading
+  | Some _ | None -> None
+
+let selected_wiki_link ~slug t =
+  Option.bind (wiki_reading_for ~slug t) (fun reading -> reading.selected_link)
+
+let wiki_trail ~slug t =
+  match wiki_reading_for ~slug t with
+  | Some reading -> reading.trail
+  | None -> []
+
+let select_wiki_link ~slug link t =
+  let trail = wiki_trail ~slug t in
+  {
+    t with
+    wiki_reading = Some { reading_page = slug; selected_link = link; trail };
+  }
+
+let follow_wiki_link ~from ~link ~target t =
+  let stop =
+    {
+      stop_page = from;
+      stop_scroll = t.detail_scroll_offset;
+      stop_link = Some link;
+    }
+  in
+  let trail = stop :: wiki_trail ~slug:from t in
+  let next =
+    select_wiki_slug ~slug:target t |> mark_index_stale_for_pending_wiki_jump
+  in
+  {
+    next with
+    wiki_reading = Some { reading_page = target; selected_link = None; trail };
+  }
+
+let wiki_link_back ~slug t =
+  match wiki_trail ~slug t with
+  | [] -> None
+  | stop :: trail ->
+      let next =
+        select_wiki_slug ~slug:stop.stop_page t
+        |> mark_index_stale_for_pending_wiki_jump
+      in
+      Some
+        {
+          next with
+          detail_scroll_offset = stop.stop_scroll;
+          wiki_reading =
+            Some
+              {
+                reading_page = stop.stop_page;
+                selected_link = stop.stop_link;
+                trail;
+              };
+        }
 
 let select_artifact_by_id ~id_or_sha t =
   let base0 = set_tab Nav.Knowledge_artifacts t in

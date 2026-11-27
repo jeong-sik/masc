@@ -567,6 +567,9 @@ val active_focus_label : t -> Say.t
 (** Concise human-readable indicator of the currently focused surface/pane for
     the footer focus pill (e.g. ["1/2 Fleet"], ["COMPOSER"], ["FILTER"]). *)
 val is_board_detail_active : t -> bool
+
+val is_wiki_detail_active : t -> bool
+(** The Wiki page card has focus or is zoomed, with no overlay or inspector. *)
 (** [true] when no overlay or dive is open and [3 Knowledge > Board] has
     detail focus ([pane_index >= 1] or zoomed). *)
 val is_artifact_doc_search_active : t -> bool

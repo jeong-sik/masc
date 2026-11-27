@@ -1164,14 +1164,20 @@ let test_encoded_pixel_snapshot () =
                 ~body:{|{"frames":2,"pixel_response":"retained"}|}
             in
             check bool "real guest tick succeeds" true (status = `OK);
+            Printf.printf "DEBUG first_tick frame=%d rev=%s kind=%s " (current_frame_number ()) (match List.assoc_opt "revision" (pixels_object first_tick) with Some v -> Yojson.Safe.to_string v | None -> "?") (match List.assoc_opt "kind" (pixels_object first_tick) with Some v -> Yojson.Safe.to_string v | None -> "?");
+            print_newline ();
             assert_pixels_kind "inline" first_tick;
             let _, same_pixels =
               Route.tick_response ~config ~body:(retained_request ~frames:2 first_tick)
             in
+            Printf.printf "DEBUG same_pixels frame=%d rev=%s kind=%s " (current_frame_number ()) (match List.assoc_opt "revision" (pixels_object same_pixels) with Some v -> Yojson.Safe.to_string v | None -> "?") (match List.assoc_opt "kind" (pixels_object same_pixels) with Some v -> Yojson.Safe.to_string v | None -> "?");
+            print_newline ();
             assert_pixels_kind "retained" same_pixels;
             let _, changed_pixels =
               Route.tick_response ~config ~body:(retained_request same_pixels)
             in
+            Printf.printf "DEBUG changed_pixels frame=%d rev=%s kind=%s " (current_frame_number ()) (match List.assoc_opt "revision" (pixels_object changed_pixels) with Some v -> Yojson.Safe.to_string v | None -> "?") (match List.assoc_opt "kind" (pixels_object changed_pixels) with Some v -> Yojson.Safe.to_string v | None -> "?");
+            print_newline ();
             assert_pixels_kind "inline" changed_pixels;
             let pixel_fields = pixels_object changed_pixels in
             let rgb =

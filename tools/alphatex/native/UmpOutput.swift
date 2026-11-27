@@ -129,8 +129,24 @@ final class UmpOutput {
     // Keys include physical endpoint, group, channel, message dialect and note.
     // Retain uncertain acquisitions/releases until a successful cleanup send.
     struct Key: Hashable { let source: String; let prefix: UInt32; let number: UInt32 }
-    var held: [Key: Int] = [:], pedals = Set<Key>()
-    var exclusive = Set<Key>()
+    // A note and a pedal controller may share a number on one channel.
+    enum Owned: Hashable { case note(Key), pedal(Key), exclusive(Key) }
+    private(set) var ownership = OwnershipLedger<Owned>()
+    var held: [Key: Int] {
+        var value: [Key: Int] = [:]
+        for (owned, count) in ownership.units { if case .note(let key) = owned { value[key] = count } }
+        return value
+    }
+    var pedals: Set<Key> {
+        var value = Set<Key>()
+        for owned in ownership.units.keys { if case .pedal(let key) = owned { value.insert(key) } }
+        return value
+    }
+    var exclusive: Set<Key> {
+        var value = Set<Key>()
+        for owned in ownership.units.keys { if case .exclusive(let key) = owned { value.insert(key) } }
+        return value
+    }
     init(bindings: [UmpBinding], compatibleEvents: [UmpEvent]? = nil, metadata: UmpMetadataState = .opaque) {
         self.bindings = bindings; self.compatibleEvents = compatibleEvents; self.metadata = metadata
     }
@@ -190,25 +206,33 @@ final class UmpOutput {
     }
     func apply(_ event: UmpEvent) throws {
         footprint.observe(UmpMessage(event, metadata: metadata))
-        let word = event.words[0], type = word >> 28, status = (word >> 20) & 15, number = (word >> 8) & 127
-        let key = Key(source: event.source, prefix: word & 0xff0f0000, number: number)
+        try transmit(event.words, source: event.source)
+    }
+    // Every send, including cleanup, records its ownership change here.
+    func transmit(_ words: [UInt32], source: String) throws {
+        let word = words[0], type = word >> 28, status = (word >> 20) & 15, number = (word >> 8) & 127
+        let key = Key(source: source, prefix: word & 0xff0f0000, number: number)
         let channel = type == 2 || type == 4
         let on = channel && status == 9 && (type == 4 || word & 127 != 0)
         let off = channel && (status == 8 || type == 2 && status == 9 && word & 127 == 0)
         let pedal = channel && status == 11 && [64,66,69].contains(number)
-        let pedalOn = pedal && (type == 4 ? event.words[1] >= 0x80000000 : word & 127 >= 64)
+        let pedalOn = pedal && (type == 4 ? words[1] >= 0x80000000 : word & 127 >= 64)
         let sysex = type == 3 || type == 5 && status <= 3
-        let sxKey = Key(source: event.source, prefix: word & 0xff000000, number: type == 5 ? (word >> 8) & 255 : 0)
-        if on { held[key, default: 0] += 1 }
-        if pedalOn { pedals.insert(key) }
-        if sysex && status == 1 { exclusive.insert(sxKey) }
-        try send(event.words, source: event.source)
-        if off, let count = held[key] { if count > 1 { held[key] = count - 1 } else { held.removeValue(forKey: key) } }
-        if pedal && !pedalOn { pedals.remove(key) }
-        if sysex && [0,3].contains(status) { exclusive.remove(sxKey) }
+        let sxKey = Key(source: source, prefix: word & 0xff000000, number: type == 5 ? (word >> 8) & 255 : 0)
+        var change = OwnershipLedger<Owned>.Change()
+        if on { change.acquire = [.note(key)] }
+        if pedalOn { change.latch.append(.pedal(key)) }
+        if sysex && status == 1 { change.latch.append(.exclusive(sxKey)) }
+        if off { change.release.append(.note(key)) }
+        if pedal && !pedalOn { change.release.append(.pedal(key)) }
+        if sysex && [0,3].contains(status) { change.release.append(.exclusive(sxKey)) }
         if channel && status == 11 && [120,123].contains(number) {
-            held = held.filter { !($0.key.source == key.source && $0.key.prefix == key.prefix) }
+            change.releaseAll = { owned in
+                guard case .note(let note) = owned else { return false }
+                return note.source == key.source && note.prefix == key.prefix
+            }
         }
+        try ownership.transmit(change) { try send(words, source: source) }
     }
     // Drain one already-active copy when its callback crosses a boundary. Raw
     // releases for acquired instances retain their velocities/attributes. Notes
@@ -225,7 +249,7 @@ final class UmpOutput {
             case .off:
                 guard var queue = voices[key], !queue.isEmpty else { continue }
                 let acquired = queue.removeFirst(); voices[key] = queue
-                if acquired, (held[key] ?? 0) > 0 { try apply(event) }
+                if acquired, ownership.units[.note(key)] != nil { try apply(event) }
             case .kill, .release:
                 try apply(event)
                 voices = voices.filter { !($0.key.source == key.source && $0.key.prefix == key.prefix) }
@@ -236,24 +260,21 @@ final class UmpOutput {
     func silence(in scope: Set<UmpChannel>? = nil) throws {
         func owns(_ key: Key) -> Bool { scope == nil || scope!.contains(UmpChannel(source: key.source, channel: key.prefix & 0x0f0f0000)) }
         var failure: Error?
+        // transmit releases each unit only after its release send succeeds.
         for key in exclusive where owns(key) {
             let words: [UInt32] = key.prefix >> 28 == 3 ? [key.prefix | 0x00300000, 0]
                 : [key.prefix | 0x00300000 | key.number << 8, 0, 0, 0]
-            do { try send(words, source: key.source); exclusive.remove(key) } catch { failure = failure ?? error }
+            do { try transmit(words, source: key.source) } catch { failure = failure ?? error }
         }
         for (key, count) in held where owns(key) {
             for _ in 0..<count {
                 let words: [UInt32] = key.prefix >> 28 == 4 ? [key.prefix | 0x00800000 | key.number << 8, 0] : [key.prefix | 0x00800000 | key.number << 8]
-                do {
-                    try send(words, source: key.source)
-                    let remaining = (held[key] ?? 1) - 1
-                    if remaining > 0 { held[key] = remaining } else { held.removeValue(forKey: key) }
-                } catch { failure = failure ?? error; break }
+                do { try transmit(words, source: key.source) } catch { failure = failure ?? error; break }
             }
         }
         for key in pedals where owns(key) {
             let words: [UInt32] = key.prefix >> 28 == 4 ? [key.prefix | 0x00b00000 | key.number << 8, 0] : [key.prefix | 0x00b00000 | key.number << 8]
-            do { try send(words, source: key.source); pedals.remove(key) } catch { failure = failure ?? error }
+            do { try transmit(words, source: key.source) } catch { failure = failure ?? error }
         }
         if let failure { throw failure }
     }

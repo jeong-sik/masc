@@ -56,7 +56,7 @@ func checkPinnedDestination(_ selected: Destination) throws {
         guard offline == 0 else { throw MidiFailure("selected MIDI destination is offline") }
     }
 }
-struct Event: Decodable, Equatable {
+struct Event: Decodable, Hashable {
     enum Kind: String, Decodable { case program, control, on, off }
     let kind: Kind
     let seconds: Double
@@ -137,6 +137,98 @@ struct WireState {
     }
     func complete() throws {
         guard !exclusive, pending.isEmpty else { throw MidiFailure("source ends inside a MIDI wire message") }
+    }
+}
+// The one send-ownership rule of every MIDI output owner: phrase notes, source
+// wire messages, captured UMP and the VST render stream. A failed send cannot
+// prove that the endpoint missed a Note On, pedal-on or SysEx start, so those
+// are owned before the send. A failed release cannot prove that the endpoint
+// received it, so releases apply only after the send returns.
+// Cleanup sends one release per owned unit through the same transmit: a failed
+// release stays owned for the next cleanup and a sent one is never repeated.
+// Owners read `units`; only `transmit` changes it.
+struct OwnershipLedger<Key: Hashable> {
+    struct Change {
+        // Before the send: one more unit of each `acquire` key (a Note On), and
+        // one unit of each `latch` key however often it repeats (a pedal-on or
+        // an open SysEx).
+        var acquire: [Key] = [], latch: [Key] = []
+        // After the send returns: one unit of each `release` key, then every
+        // unit of the keys `releaseAll` matches (a channel-mode or reset message).
+        var release: [Key] = []
+        var releaseAll: ((Key) -> Bool)? = nil
+    }
+    private(set) var units: [Key: Int] = [:]
+    mutating func transmit(_ change: Change, _ send: () throws -> Void) rethrows {
+        for key in change.acquire { units[key, default: 0] += 1 }
+        for key in change.latch { units[key] = 1 }
+        try send()
+        for key in change.release { if let count = units[key] { units[key] = count > 1 ? count - 1 : nil } }
+        if let releaseAll = change.releaseAll { units = units.filter { !releaseAll($0.key) } }
+    }
+}
+// What a source port owns on its endpoint: an open SysEx, a channel/pitch key
+// pressed by Note On (counted), or a hold pedal (64, 66, 69) pressed on a channel.
+enum SourceOwned: Hashable {
+    case exclusive(port: Int)
+    case note(port: Int, key: UInt16)
+    case pedal(port: Int, key: UInt16)
+    var port: Int {
+        switch self { case .exclusive(let port), .note(let port, _), .pedal(let port, _): return port }
+    }
+    static func change(sending bytes: [UInt8], port: Int) -> OwnershipLedger<SourceOwned>.Change {
+        var change = OwnershipLedger<SourceOwned>.Change()
+        guard let status = bytes.first else { return change }
+        let channel = UInt16(status & 15), type = status & 0xf0
+        let key = bytes.count == 3 ? channel << 8 | UInt16(bytes[1]) : 0
+        if bytes.count == 3 && type == 0x90 && bytes[2] > 0 { change.acquire = [.note(port: port, key: key)] }
+        else if bytes.count == 3 && type == 0xb0 && [64, 66, 69].contains(bytes[1]) && bytes[2] >= 64 { change.latch = [.pedal(port: port, key: key)] }
+        if status == 0xf0 { change.latch.append(.exclusive(port: port)) }
+        if status == 0xff {
+            // System Reset releases every key and pedal of this port.
+            change.releaseAll = { owned in owned.port == port && owned != .exclusive(port: port) }
+        } else if bytes.count == 3 && (type == 0x80 || type == 0x90 && bytes[2] == 0) {
+            change.release = [.note(port: port, key: key)]
+        } else if bytes.count == 3 && type == 0xb0 {
+            let controller = bytes[1]
+            if [64, 66, 69].contains(controller) && bytes[2] < 64 { change.release = [.pedal(port: port, key: key)] }
+            if controller == 121 {
+                change.releaseAll = { owned in
+                    guard case .pedal(port, let pedal) = owned else { return false }
+                    return pedal >> 8 == channel
+                }
+            }
+            if [120, 123, 124, 125, 126, 127].contains(controller) {
+                change.releaseAll = { owned in
+                    guard case .note(port, let note) = owned else { return false }
+                    return note >> 8 == channel
+                }
+            }
+        }
+        if bytes.contains(0xf7) { change.release.append(.exclusive(port: port)) }
+        return change
+    }
+}
+extension OwnershipLedger where Key == SourceOwned {
+    // One release per owned unit of a port: the open SysEx terminator, then
+    // Note Offs by channel/pitch, then pedal releases. `addresses` (port << 8 |
+    // channel) narrows the keys and pedals; the SysEx terminator is port-wide.
+    func releases(port: Int, in addresses: Set<Int>? = nil) -> [[UInt8]] {
+        func inScope(_ key: UInt16) -> Bool { addresses?.contains(port << 8 | Int(key >> 8)) ?? true }
+        var exclusive = false, notes: [(key: UInt16, count: Int)] = [], pedals: [UInt16] = []
+        for (owned, count) in units {
+            switch owned {
+            case .exclusive(let owner): if owner == port { exclusive = true }
+            case .note(let owner, let key): if owner == port && inScope(key) { notes.append((key, count)) }
+            case .pedal(let owner, let key): if owner == port && inScope(key) { pedals.append(key) }
+            }
+        }
+        var messages: [[UInt8]] = exclusive ? [[0xf7]] : []
+        for note in notes.sorted(by: { $0.key < $1.key }) {
+            for _ in 0..<note.count { messages.append([0x80 | UInt8(note.key >> 8), UInt8(note.key & 127), 0]) }
+        }
+        for key in pedals.sorted() { messages.append([0xb0 | UInt8(key >> 8), UInt8(key & 127), 0]) }
+        return messages
     }
 }
 // Reconstruction re-sends original messages in their original order, but only
@@ -825,13 +917,15 @@ final class MidiTransport {
     var timer: DispatchSourceTimer?
     var signals: [DispatchSourceSignal] = []
     var anchor: UInt64 = 0, offset = 0.0, index = 0
-    var held: [UInt16: Event] = [:]
+    // Phrase keys are owned per scheduled Note On, so reconciliation can tell
+    // a sounding event from a later one that starts the same channel/pitch.
+    private(set) var phraseOwnership = OwnershipLedger<Event>()
+    var held: [UInt16: Event] { Dictionary(phraseOwnership.units.keys.map { ($0.key, $0) }) { first, _ in first } }
     var maximumLateness = 0.0
     var sourceDestinations: [Int: Destination] = [:], wireStates: [Int: WireState] = [:]
     var sourceModel = SourceChase()
     var regionCursors: [MidiRegionCursor] = []
-    var sourceExclusive = Set<Int>()
-    var sourceHeld: [Int: [UInt16: Int]] = [:], sourcePedals: [Int: Set<UInt16>] = [:]
+    private(set) var sourceOwnership = OwnershipLedger<SourceOwned>()
 
     convenience init(path: String, uid: String, loop: Bool) throws {
         let timeline = try JSONDecoder().decode(Timeline.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
@@ -961,75 +1055,41 @@ final class MidiTransport {
     }
     func sourceSend(_ bytes: [UInt8], port sourcePort: Int) throws {
         guard let destination = sourceDestinations[sourcePort] else { throw MidiFailure("source MIDI port is not prepared") }
-        // Acquire ownership before sending: a failed OSStatus cannot prove
-        // that the endpoint did not receive a note or pedal-on. Release it
-        // only after success, so failure cleanup retries uncertain releases.
-        if let status = bytes.first {
-            let channel = UInt16(status & 15), type = status & 0xf0
-            if bytes.count == 3 && type == 0x90 && bytes[2] > 0 {
-                let key = channel << 8 | UInt16(bytes[1]), count = sourceHeld[sourcePort]?[key] ?? 0
-                sourceHeld[sourcePort, default: [:]][key] = count + 1
-            } else if bytes.count == 3 && type == 0xb0 && [64, 66, 69].contains(bytes[1]) && bytes[2] >= 64 {
-                sourcePedals[sourcePort, default: []].insert(channel << 8 | UInt16(bytes[1]))
-            }
-        }
-        if bytes.first == 0xf0 { sourceExclusive.insert(sourcePort) }
-        try sendWire(bytes, to: destination)
-        if let status = bytes.first {
-            let channel = UInt16(status & 15), type = status & 0xf0
-            if status == 0xff { sourceHeld[sourcePort] = [:]; sourcePedals[sourcePort] = [] }
-            else if bytes.count == 3 && (type == 0x80 || type == 0x90 && bytes[2] == 0) {
-                let key = channel << 8 | UInt16(bytes[1]), count = sourceHeld[sourcePort]?[key] ?? 0
-                sourceHeld[sourcePort, default: [:]][key] = max(0, count - 1)
-            } else if bytes.count == 3 && type == 0xb0 {
-                let controller = bytes[1], key = channel << 8 | UInt16(controller)
-                if [64, 66, 69].contains(controller) && bytes[2] < 64 { sourcePedals[sourcePort]?.remove(key) }
-                if controller == 121 { sourcePedals[sourcePort] = (sourcePedals[sourcePort] ?? []).filter { $0 >> 8 != channel } }
-                if [120, 123, 124, 125, 126, 127].contains(controller) {
-                    sourceHeld[sourcePort] = (sourceHeld[sourcePort] ?? [:]).filter { $0.key >> 8 != channel }
-                }
-            }
-        }
-        if bytes.contains(0xf7) { sourceExclusive.remove(sourcePort) }
+        try sourceOwnership.transmit(SourceOwned.change(sending: bytes, port: sourcePort)) { try sendWire(bytes, to: destination) }
     }
     func sourceSilence(addresses: Set<Int>? = nil) throws {
         var failure: Error?
-        for binding in timeline.bindings {
-            guard sourceDestinations[binding.port] != nil else { continue }
-            var messages: [[UInt8]] = []
-            if sourceExclusive.contains(binding.port) { messages.append([0xf7]) }
-            for (key, count) in (sourceHeld[binding.port] ?? [:]).sorted(by: { $0.key < $1.key }) where addresses == nil || addresses!.contains(binding.port << 8 | Int(key >> 8)) {
-                for _ in 0..<count { messages.append([0x80 | UInt8(key >> 8), UInt8(key & 127), 0]) }
+        for binding in timeline.bindings where sourceDestinations[binding.port] != nil {
+            for bytes in sourceOwnership.releases(port: binding.port, in: addresses) {
+                do { try sourceSend(bytes, port: binding.port) } catch { failure = failure ?? error }
             }
-            for key in (sourcePedals[binding.port] ?? []).sorted() where addresses == nil || addresses!.contains(binding.port << 8 | Int(key >> 8)) {
-                messages.append([0xb0 | UInt8(key >> 8), UInt8(key & 127), 0])
-            }
-            // sourceSend retains uncertain ownership on failure and releases only
-            // successfully sent note-offs, pedal-offs and exclusive terminators.
-            for bytes in messages { do { try sourceSend(bytes, port: binding.port) } catch { failure = failure ?? error } }
         }
         if let failure { throw failure }
         if let addresses { for address in addresses { cycleAcquired.removeValue(forKey: address) } }
         else { cycleAcquired.removeAll() }
     }
     func apply(_ event: Event) throws {
-        // A failed send cannot prove the destination missed the Note On, so the
-        // key is owned before sending. It is released only after a sent Note Off.
-        // Every caller funnels a throw to finish(), which silences held and
-        // stops the transport, so a key whose send failed never meets a later
-        // reconcile.
-        if event.kind == .on { held[event.key] = event }
-        try send(event.bytes())
-        if event.kind == .off { held.removeValue(forKey: event.key) }
+        // Every caller funnels a throw to finish(), which silences owned keys
+        // and stops the transport, so a key whose send failed never meets a
+        // later reconcile.
+        var change = OwnershipLedger<Event>.Change()
+        switch event.kind {
+        case .on: change.acquire = [event]
+        case .off: change.release = phraseOwnership.units.keys.filter { $0.key == event.key }
+        case .program, .control: break
+        }
+        try phraseOwnership.transmit(change) { try send(event.bytes()) }
+    }
+    func release(_ sounding: Event) throws {
+        var change = OwnershipLedger<Event>.Change()
+        change.release = [sounding]
+        try phraseOwnership.transmit(change) { try send([0x80 | sounding.channel, sounding.pitch!, 0]) }
     }
     func silence() throws {
         if timeline.source { try sourceSilence(); return }
         var failure: Error?
-        for event in held.values.sorted(by: { $0.key < $1.key }) {
-            do {
-                try send([0x80 | event.channel, event.pitch!, 0])
-                held.removeValue(forKey: event.key)
-            } catch { failure = failure ?? error }
+        for (event, count) in phraseOwnership.units.sorted(by: { $0.key.key < $1.key.key }) {
+            for _ in 0..<count { do { try release(event) } catch { failure = failure ?? error } }
         }
         if let failure { throw failure }
     }
@@ -1076,11 +1136,8 @@ final class MidiTransport {
         }
         for event in programs.values.sorted(by: { $0.channel < $1.channel }) { try apply(event) }
         for event in controls.values.sorted(by: { $0.key < $1.key }) { try apply(event) }
-        for event in held.values.sorted(by: { $0.key < $1.key }) where notes[event.key] != event {
-            try send([0x80 | event.channel, event.pitch!, 0])
-            held.removeValue(forKey: event.key)
-        }
-        for event in notes.values.sorted(by: { $0.key < $1.key }) where held[event.key] != event { try apply(event) }
+        for event in phraseOwnership.units.keys.sorted(by: { $0.key < $1.key }) where notes[event.key] != event { try release(event) }
+        for event in notes.values.sorted(by: { $0.key < $1.key }) where phraseOwnership.units[event] == nil { try apply(event) }
     }
     func nextRegionAction() -> MidiRegionAction? {
         var selected: MidiRegionAction?
@@ -1206,7 +1263,7 @@ final class MidiTransport {
                             try applyCycleEvent(event, origin: regionCursors[index].index, attackAllowed: !expired)
                         } else {
                             sourceModel.observe(event.bytes, port: event.port)
-                            if !loop || (attack ? !expired : !release || (sourceHeld[event.port]?[key] ?? 0) > 0) {
+                            if !loop || (attack ? !expired : !release || sourceOwnership.units[.note(port: event.port, key: key)] != nil) {
                                 try sourceSend(event.bytes, port: event.port)
                             }
                         }
@@ -1263,7 +1320,7 @@ final class MidiTransport {
                         try applyCycleEvent(event, origin: regionCursors[action.region].index, attackAllowed: send)
                     } else {
                         sourceModel.observe(event.bytes, port: event.port)
-                        if cut != nil { send = attack ? action.seconds >= (observedAt ?? seconds) : !release || (sourceHeld[event.port]?[key] ?? 0) > 0 }
+                        if cut != nil { send = attack ? action.seconds >= (observedAt ?? seconds) : !release || sourceOwnership.units[.note(port: event.port, key: key)] != nil }
                         if send { try sourceSend(event.bytes, port: event.port) }
                     }
                 }

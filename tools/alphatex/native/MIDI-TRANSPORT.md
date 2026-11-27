@@ -55,9 +55,13 @@ Stop, stdin EOF, signals and failures cancel the timer, release owned held keys,
 dispose the output port/client and exit. Unavailable devices or failed sends
 produce an explicit error and nonzero exit; a removed physical device cannot
 receive cleanup note-offs. A stopped acknowledgement is not process closure.
-A key is owned before its Note On is sent, because a failed send can still
-reach the instrument. A note-off that fails keeps its key owned, so the final
-cleanup sends it again; successful note-offs are not repeated.
+Phrase, source wire, captured UMP and VST render output keep send ownership in
+one `OwnershipLedger`; only its `transmit` changes ownership. A Note On, pedal-on
+or SysEx start is owned before it is sent, because a failed send can still
+reach the instrument. A Note Off, pedal release, SysEx end, channel-mode or
+reset message releases ownership only after its send returns. A failed release
+keeps its key owned, so the final cleanup sends it again; successful releases
+are not repeated.
 The JS wrapper retains the owned process until its pipes and process close.
 
 The runtime reads the entire event timeline; limits are the JSON/memory and

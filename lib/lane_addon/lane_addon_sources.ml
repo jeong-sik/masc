@@ -282,14 +282,47 @@ let authorized_fusion_run ~access ~run_id =
       Ok run
 let fusion_owner ~access ~run_id =
   Result.map (fun run -> run.Fusion_run_registry.keeper) (authorized_fusion_run ~access ~run_id)
-let authorize ~access binding =
+let snapshot_outside_workspace = "snapshot_file path must name a file inside the workspace"
+
+let resolve_snapshot_in_workspace ~workspace path =
+  let absolute =
+    if Filename.is_relative path then Filename.concat workspace path else path
+  in
+  match Unix.realpath workspace, Unix.realpath absolute with
+  | root, resolved when Exec_policy_paths.is_within_dir ~dir:root resolved -> Some resolved
+  | _ -> None
+  | exception Unix.Unix_error _ -> None
+
+let workspace_root_of_store store =
+  let root = Lane_addon_store.root store in
+  let masc_dir = Filename.dirname root in
+  if String.equal (Filename.basename root) Lane_addon_store.name_in_masc_dir
+     && String.equal (Filename.basename masc_dir) ".masc"
+  then Some (Filename.dirname masc_dir)
+  else None
+
+let authorize_snapshot_path ?workspace ~access path =
+  match access with
+  | Operator_configuration -> Ok path
+  | Keeper _ | Unauthenticated -> (
+      match workspace with
+      | None -> Error "snapshot_file source requires operator configuration"
+      | Some root -> (
+          match resolve_snapshot_in_workspace ~workspace:root path with
+          | Some resolved -> Ok resolved
+          | None -> Error snapshot_outside_workspace))
+
+let authorize ?workspace ~access binding =
   let* sources = parse binding in
   List.fold_left (fun checked -> function
     | Fusion_run {run_id;_} ->
         let* () = checked in
         (match access with Operator_configuration -> Ok ()
          | Keeper _ | Unauthenticated -> Result.map (fun _ -> ()) (authorized_fusion_run ~access ~run_id))
-    | Snapshot_file _ | Msx_capture _ | Dos_capture _ | Lane_output _ | Browser_document _ -> checked)
+    | Snapshot_file {path;_} ->
+        let* () = checked in
+        Result.map (fun _ -> ()) (authorize_snapshot_path ?workspace ~access path)
+    | Msx_capture _ | Dos_capture _ | Lane_output _ | Browser_document _ -> checked)
     (Ok ()) sources
 let fusion_run ~access ~store ~max_bytes ~id ~run_id =
       let* run = authorized_fusion_run ~access ~run_id in
@@ -367,8 +400,11 @@ let unique_snapshot_keys json =
     | `List values :: rest -> walk (List.rev_append values rest)
     | _ :: rest -> walk rest in
   walk [json]
-let snapshot_file ~store ~max_bytes ~id path =
-  let* bytes = Systhread_host.run ~label:"addon-source-file-read" (fun () -> read_bounded ~max_bytes path) in
+let snapshot_file ~access ~store ~max_bytes ~id path =
+  let workspace = workspace_root_of_store store in
+  let* bytes = Systhread_host.run ~label:"addon-source-file-read" (fun () ->
+    let* resolved = authorize_snapshot_path ?workspace ~access path in
+    read_bounded ~max_bytes resolved) in
   try
     let json = Yojson.Safe.from_string bytes in
     let* () = unique_snapshot_keys json in
@@ -549,7 +585,7 @@ let acquire ~access ~store ~(package : Lane_addon_types.package) ~resolve_machin
   let capture ~max_bytes source =
     let result = match source with
       | Fusion_run {id;run_id} -> fusion_run ~access ~store ~max_bytes ~id ~run_id
-      | Snapshot_file {id;path} -> snapshot_file ~store ~max_bytes ~id path
+      | Snapshot_file {id;path} -> snapshot_file ~access ~store ~max_bytes ~id path
       | Msx_capture {id} -> machine_capture ~store ~resolve_machine_output ~machine:Machine_lane.Msx ~id
       | Dos_capture {id} -> machine_capture ~store ~resolve_machine_output ~machine:Machine_lane.Dos ~id
       | Lane_output {id;installation_id;output_id} ->

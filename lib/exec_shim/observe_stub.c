@@ -136,7 +136,9 @@ struct shim_sock_fprog {
 };
 #define BPF_LD_W_ABS 0x20
 #define BPF_JMP_JEQ_K 0x15
+#define BPF_JMP_JGE_K 0x35
 #define BPF_RET_K 0x06
+#define SHIM_X32_SYSCALL_BIT 0x40000000U
 #define SECCOMP_RET_KILL_PROCESS 0x80000000U
 #define SECCOMP_RET_ERRNO 0x00050000U
 #define SECCOMP_RET_ALLOW 0x7fff0000U
@@ -306,6 +308,11 @@ static int deny_sockets(void)
     { BPF_JMP_JEQ_K, 1, 0, SHIM_AUDIT_ARCH },
     { BPF_RET_K, 0, 0, SECCOMP_RET_KILL_PROCESS },
     { BPF_LD_W_ABS, 0, 0, 0 },
+#if defined(__x86_64__)
+    /* Reject x32 ABI syscalls: they share AUDIT_ARCH_X86_64 with __X32_SYSCALL_BIT set. */
+    { BPF_JMP_JGE_K, 0, 1, SHIM_X32_SYSCALL_BIT },
+    { BPF_RET_K, 0, 0, SECCOMP_RET_KILL_PROCESS },
+#endif
     { BPF_JMP_JEQ_K, 4, 0, (uint32_t) SYS_socket },
     { BPF_JMP_JEQ_K, 3, 0, (uint32_t) SYS_io_uring_setup },
     { BPF_JMP_JEQ_K, 2, 0, (uint32_t) SYS_io_uring_enter },
@@ -433,6 +440,11 @@ static int install_observe_sockets(int sock)
     { BPF_JMP_JEQ_K, 1, 0, SHIM_AUDIT_ARCH },
     { BPF_RET_K, 0, 0, SECCOMP_RET_KILL_PROCESS },
     { BPF_LD_W_ABS, 0, 0, 0 },
+#if defined(__x86_64__)
+    /* Reject x32 ABI syscalls: they share AUDIT_ARCH_X86_64 with __X32_SYSCALL_BIT set. */
+    { BPF_JMP_JGE_K, 0, 1, SHIM_X32_SYSCALL_BIT },
+    { BPF_RET_K, 0, 0, SECCOMP_RET_KILL_PROCESS },
+#endif
     { BPF_JMP_JEQ_K, 4, 0, (uint32_t) SYS_socket },
     { BPF_JMP_JEQ_K, 3, 0, (uint32_t) SYS_io_uring_setup },
     { BPF_JMP_JEQ_K, 2, 0, (uint32_t) SYS_io_uring_enter },

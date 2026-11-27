@@ -27,6 +27,7 @@ import { ErrorCounterBadge, BuildIdentityBadge } from '../dashboard-shell'
 import { AuthStatus } from '../auth-status'
 import { TransportBeacon } from '../transport-beacon'
 import { FLEET_KEEPER_FILTERS } from '../../lib/fleet-keeper-filter'
+import { rosterFilterPref, type RosterFilter } from '../keeper-workspace/keeper-roster-prefs'
 import {
   dashboardFullHealth,
   subscribeDashboardFullHealthRefresh,
@@ -109,8 +110,11 @@ interface AttentionRow {
   lbl: string
   detail?: string
   sev: 'bad' | 'warn'
-  nav: 'approvals' | 'monitoring' | 'connectors'
+  nav: 'approvals' | 'monitoring' | 'connectors' | 'keepers'
   params?: Record<string, string>
+  // Set on the keepers roster before opening it: the roster's attention
+  // filter holds both the flagged and the crashed Keepers these rows count.
+  rosterFilter?: RosterFilter
 }
 
 export function AttentionIndicatorV2() {
@@ -176,8 +180,8 @@ export function AttentionIndicatorV2() {
     })
   }
   if (a.approvals !== null && a.approvals > 0) rows.push({ k: 'approvals', n: a.approvals, lbl: '승인 대기', sev: 'bad', nav: 'approvals' })
-  if (a.keepers > 0) rows.push({ k: 'keepers', n: a.keepers, lbl: FLEET_KEEPER_FILTERS.attention.label, sev: 'warn', nav: 'monitoring', params: { section: 'agents', view: 'keepers', filter: 'attention' } })
-  if (a.failures > 0) rows.push({ k: 'failures', n: a.failures, lbl: FLEET_KEEPER_FILTERS.failures.label, sev: 'bad', nav: 'monitoring', params: { section: 'agents', view: 'keepers', filter: 'failures' } })
+  if (a.keepers > 0) rows.push({ k: 'keepers', n: a.keepers, lbl: FLEET_KEEPER_FILTERS.attention.label, sev: 'warn', nav: 'keepers', rosterFilter: 'att' })
+  if (a.failures > 0) rows.push({ k: 'failures', n: a.failures, lbl: FLEET_KEEPER_FILTERS.failures.label, sev: 'bad', nav: 'keepers', rosterFilter: 'att' })
   if (a.health.state === 'attention') {
     rows.push(...a.health.issues.map(issue => ({
       k: issue.kind,
@@ -254,7 +258,11 @@ export function AttentionIndicatorV2() {
                     tabIndex=${-1}
                     class="attn-row"
                     title=${r.detail}
-                    onClick=${() => { setOpen(false); navigate(r.nav, r.params) }}
+                    onClick=${() => {
+                      setOpen(false)
+                      if (r.rosterFilter) rosterFilterPref.value = r.rosterFilter
+                      navigate(r.nav, r.params)
+                    }}
                   >
                     <span class=${`dot2 ${r.sev}`}></span>
                     <span class="attn-row-lbl">${r.lbl}</span>

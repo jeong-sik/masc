@@ -8,7 +8,8 @@ import { waitFor } from '@testing-library/preact'
 
 import { agents, executionLoaded, keepers } from '../../store'
 import { acceptedExecutionWorkspace } from '../../execution-workspace-authority'
-import { navigate } from '../../router'
+import { navigate, route } from '../../router'
+import { rosterFilterPref } from '../keeper-workspace/keeper-roster-prefs'
 import { gateResource } from '../gate-signals'
 import { dashboardFullHealthResource } from '../dashboard-full-health-state'
 import { AttentionIndicatorV2 } from './top-bar-v2'
@@ -65,6 +66,7 @@ describe('AttentionIndicatorV2 backend health', () => {
     gateResource.reset()
     dashboardFullHealthResource.reset()
     acceptedExecutionWorkspace.value = null
+    rosterFilterPref.value = 'all'
     vi.unstubAllGlobals()
   })
 
@@ -178,5 +180,30 @@ describe('AttentionIndicatorV2 backend health', () => {
     await act(async () => { items[1]?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })
     expect(trigger.getAttribute('aria-expanded')).toBe('false')
     expect(document.activeElement).toBe(trigger)
+  })
+
+  it.each([
+    ['주의 Keeper'],
+    ['실패한 Keeper'],
+  ])('opens the keepers roster filtered to attention from the %s row', async (label) => {
+    keepers.value = [
+      { name: 'needs-input', status: 'running', needs_attention: true },
+      { name: 'failed-keeper', status: 'offline', lifecycle_phase: 'Crashed' },
+    ]
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
+      JSON.stringify(healthResponse(false, 'ok')),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    )))
+    await act(async () => { render(html`<${AttentionIndicatorV2} />`, container) })
+    await act(async () => { container.querySelector<HTMLButtonElement>('.attn-wrap >button')!.click() })
+    const row = Array.from(container.querySelectorAll<HTMLButtonElement>('.attn-row'))
+      .find(item => item.textContent?.includes(label))
+    expect(row).toBeDefined()
+
+    await act(async () => { row!.click() })
+
+    expect(route.value.tab).toBe('keepers')
+    expect(route.value.params).toEqual({})
+    expect(rosterFilterPref.value).toBe('att')
   })
 })

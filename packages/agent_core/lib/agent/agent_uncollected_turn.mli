@@ -1,5 +1,5 @@
-(** Close, at restart settlement, a run cut while its provider attempt was open
-    and before the host collected the response.
+(** Close a run whose writer exited while its provider attempt was open and
+    before the host collected the response.
 
     The journal allows one provider attempt per turn, so such a turn cannot be
     resumed: the attempt may already have reached the provider. Resuming it

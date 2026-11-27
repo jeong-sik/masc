@@ -292,6 +292,74 @@ let call_checkpoint binding (config : Runtime_agent.config) agent_ref =
 
 type terminal_checkpoint_source = Agent_snapshot | Retained_input_owner
 
+(* What one dispatch does with the Owner's native call. *)
+type dispatch =
+  | Open_call of Native.state
+      (* A new call; its Bind replaces this observed state. *)
+  | Reopen_call of resumed * Agent.execution_resume
+      (* The Active call's own execution scope. *)
+
+(* How a claim continues an Active call it restored. *)
+type active_continuation =
+  | Same_call of Agent.execution_resume
+  | Replaced_after of Native.state
+      (* This preparation closed the call; the state is its Retire receipt. *)
+
+(* Retire's abort can commit before its writer close fails, so an error is
+   followed by one read of the journal. [load] found no terminal for this
+   Active call and its writer has exited, so a terminal read here is the one
+   this retire wrote. *)
+let retire_uncollected ~runtime binding (call : Native.t) ~agent_name =
+  let* dir = execution_dir binding call.call_id in
+  match Agent.retire_uncollected_turn ~runtime ~dir call.locator ~agent_name
+      ~checkpoint_turn_count:call.checkpoint.Keeper_checkpoint_ref.turn_count with
+  | Ok Agent.Not_uncollected -> Ok None
+  | Ok (Agent.Retired evidence) -> Ok (Some evidence.disposition)
+  | Error error ->
+    let detail = Agent.uncollected_turn_error_to_string error in
+    (match inspect_terminal binding call with
+     | Ok (Some terminal) -> Ok (Some terminal.disposition)
+     | Ok None -> Error ("uncollected native turn was not retired: " ^ detail)
+     | Error read ->
+       Error (Printf.sprintf
+         "uncollected native turn was not retired (%s) and its journal is unreadable: %s"
+         detail read))
+
+(* A call whose writer exited can hold a turn cut before its provider response
+   was collected. One run allows one provider attempt per turn, so that run
+   cannot continue the turn: it is closed here and a new call starts from the
+   checkpoint the call retained before the request (RFC
+   uncollected-provider-turn-is-not-resumed 4.2, RFC
+   restart-resumes-running-chat-operations 4.4). A call this process may still
+   write is never closed: it resumes as before, and a cut turn still fails. *)
+let continue_active ~runtime binding (resumed : resumed) =
+  let call = resumed.call in
+  (* Restart settlement knows which calls only exited processes wrote. A
+     call a claim in this process has bound answers [Writer_unproven]. *)
+  let* writer = Owner.native_call_writer ~base_path:binding.base_path
+      ~keeper_name:binding.keeper_name ~call_id:call.call_id |> owner in
+  match writer with
+  | Keeper_owner.Writer_unproven ->
+    Ok (Same_call (Agent.Resume_writer_exit_unproven call.locator))
+  | Keeper_owner.Writer_exited ->
+    let* retired = retire_uncollected ~runtime binding call
+        ~agent_name:resumed.checkpoint.agent_name in
+    (match retired with
+     | None -> Ok (Same_call (Agent.Resume_after_writer_exit call.locator))
+     | Some disposition ->
+       let* () = Owner.terminal_direct_native_call ~base_path:binding.base_path
+           ~keeper_name:binding.keeper_name ~operation_id:binding.operation_id
+           ~execution_digest:binding.execution_digest ~call_id:call.call_id
+           ~disposition |> owner in
+       let* closed = Native.transition (Native.Active call)
+           (Native.Terminal {call_id=call.call_id; disposition}) in
+       (* Recovery comes from the whole tree: an unsettled Tool attempt
+          elsewhere in the run keeps its effect unknown. *)
+       (match disposition with
+        | {Agent.recovery=Retire; _} -> Ok (Replaced_after closed)
+        | {Agent.recovery=Operator_repair_required Effect_outcome_unknown; _} ->
+          Error "retired native call has an unknown tool effect requiring reconciliation"))
+
 let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_ref
     ?retired_history_cut () =
   let* runtime = match Runtime_agent_execution_runtime.get () with
@@ -343,20 +411,20 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
       ~source:input_source
     |> Result.map_error Keeper_input_checkpoint_producer.error_to_string in
   let input_producer = ref input_producer in
-  let* resume = match resumed with
-    | None -> Ok None
+  let* dispatch, input = match resumed with
+    | None -> Ok (Open_call observed, input)
     | Some resumed ->
-      (* Restart settlement knows which calls only exited processes wrote. A
-         call a claim in this process has bound answers [Writer_unproven]. *)
-      let* writer = Owner.native_call_writer ~base_path:binding.base_path
-          ~keeper_name:binding.keeper_name ~call_id:resumed.call.call_id |> owner in
-      Ok (Some (match writer with
-        | Keeper_owner.Writer_exited -> Agent.Resume_after_writer_exit resumed.call.locator
-        | Keeper_owner.Writer_unproven ->
-          Agent.Resume_writer_exit_unproven resumed.call.locator)) in
-  let call_id, api, initial_call = match resumed with
-    | Some resumed -> resumed.call.call_id, resumed.call.api, Some resumed.call
-    | None ->
+      let* continuation = continue_active ~runtime binding resumed in
+      Ok (match continuation with
+        | Same_call resume -> Reopen_call (resumed, resume), input
+        (* The new call opens from the retained checkpoint as it is. *)
+        | Replaced_after closed -> Open_call closed, Continue_from_checkpoint) in
+  let resume = match dispatch with
+    | Reopen_call (_, resume) -> Some resume
+    | Open_call _ -> None in
+  let call_id, api, initial_call = match dispatch with
+    | Reopen_call (resumed, _) -> resumed.call.call_id, resumed.call.api, Some resumed.call
+    | Open_call _ ->
       let api = match input with
         | Continue_from_checkpoint -> Native.Continue_from_checkpoint
         | New_input _ ->
@@ -365,10 +433,14 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
             | None -> config.initial_messages in
           Native.New_input {seed_message_count=List.length messages} in
       Random_id.uuid_v7 (), api, None in
+  (* The state this dispatch's Bind replaces. *)
+  let bound_over = match dispatch with
+    | Open_call predecessor -> predecessor
+    | Reopen_call _ -> observed in
   let* dir = execution_dir binding call_id in
-  let* () = match resumed with
-    | Some _ -> Ok ()
-    | None ->
+  let* () = match dispatch with
+    | Reopen_call _ -> Ok ()
+    | Open_call _ ->
       (try Eio.Path.mkdirs ~exists_ok:false ~perm:0o700 dir; Ok () with
        | Eio.Io _ as exn -> Error (Format.asprintf "%a" Eio.Exn.pp exn)) in
   let current_call = ref initial_call in
@@ -385,11 +457,11 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
       current_call := Some next;
       Ok () in
   let on_scope_ready locator =
-    let* call = match resumed with
-      | Some resumed -> Ok resumed.call
-      | None ->
+    let* call = match dispatch with
+      | Reopen_call (resumed, _) -> Ok resumed.call
+      | Open_call predecessor ->
         let* seed = call_checkpoint binding config agent_ref in
-        let* () = match observed with
+        let* () = match predecessor with
           | Native.Terminal_unacknowledged (previous, ({Agent.recovery=Retire; _} as disposition)) ->
             let* settled = load_checkpoint binding previous.checkpoint in
             let* terminal = retired_evidence binding previous disposition in
@@ -416,14 +488,14 @@ let prepare ~binding ~runtime_id ~config ~agent_core_checkpoint ~input ~agent_re
     let* ()=match retired_history_cut with
       | None -> Owner.bind_direct_native_call ~base_path:binding.base_path
           ~keeper_name:binding.keeper_name ~operation_id:binding.operation_id
-          ~execution_digest:binding.execution_digest ~observed ~call |> owner
+          ~execution_digest:binding.execution_digest ~observed:bound_over ~call |> owner
       | Some cut ->
         let* seed=Checkpoint.load_retained_exact_snapshot ~session_dir:binding.session_dir
             ~reference:call.seed_checkpoint
           |> Result.map_error (fun _ -> "exact next native seed is unavailable") in
         let* producer=Keeper_input_checkpoint_producer.bind_retired_input_cut !input_producer
             ~cut:cut.proof ~seed ~operation_id:binding.operation_id
-            ~execution_digest:binding.execution_digest ~observed ~call
+            ~execution_digest:binding.execution_digest ~observed:bound_over ~call
           |> Result.map_error Keeper_input_checkpoint_producer.error_to_string in
         input_producer:=producer; Ok () in
     current_call := Some call;

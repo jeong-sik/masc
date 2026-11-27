@@ -364,10 +364,12 @@ val retire_uncollected_turn
   -> agent_name:string
   -> checkpoint_turn_count:int
   -> (uncollected_turn_retirement, uncollected_turn_error) result
-(** Close, at restart settlement, a run whose writer is gone while one provider
-    attempt is open and before the host collected its response. A run allows
-    one provider attempt per turn, so the same run cannot continue that turn.
-    The host continues the work from the checkpoint it saved before the call.
+(** Close a run whose writer has exited while one provider attempt is open
+    and before the host collected its response. The host calls this when it
+    next prepares that run's work, not while it settles the restart. A run
+    allows one provider attempt per turn, so the same run cannot continue that
+    turn. The host continues the work from the checkpoint it saved before the
+    call.
 
     [checkpoint_turn_count] is the turn count of the newest checkpoint the host
     saved for this run. The run is [Retired] when its single open turn has

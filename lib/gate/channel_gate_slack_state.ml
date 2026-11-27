@@ -20,23 +20,24 @@ let connector_id = Gate_connector_announce.slack
 let display_name = "Slack"
 let channel = "slack"
 
-let default_binding_store_path = ".gate/runtime/slack/bindings.json"
-let default_binding_audit_path = ".gate/runtime/slack/binding_audit.jsonl"
-
 (* Slack has no Discord-style guilds; the bot token authorizes per-workspace.
    Path resolvers read an env override, else fall back to the default. *)
-let slack_path ~env_var ~default () =
+let slack_path ~env_var ~filename () =
   match Env_config_core.raw_value_opt env_var |> Env_config_core.trim_opt with
   | Some path -> Env_config_core.resolve_against_base_path path
-  | None -> Env_config_core.resolve_against_base_path default
+  | None ->
+    Filename.concat
+      (Common.connector_state_dir_of_base
+         ~base_path:(Env_config_core.base_path ()) Common.Connector_slack)
+      filename
 
 let binding_store_path () =
   slack_path ~env_var:"MASC_SLACK_BINDING_STORE_PATH"
-    ~default:default_binding_store_path ()
+    ~filename:Common.connector_bindings_filename ()
 
 let binding_audit_path () =
   slack_path ~env_var:"MASC_SLACK_BINDING_AUDIT_PATH"
-    ~default:default_binding_audit_path ()
+    ~filename:Common.connector_binding_audit_filename ()
 
 (* Slack has no guild concept, so audit events omit guild_id. *)
 let binding_store =

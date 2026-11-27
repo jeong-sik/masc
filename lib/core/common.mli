@@ -79,6 +79,29 @@ val keepers_runtime_dir_of_base : base_path:string -> string
     Low-level SSOT that avoids the Workspace dependency cycle
     [Workspace.keepers_runtime_dir] would impose. *)
 
+(** A channel connector whose in-process gateway keeps files of its own:
+    channel bindings, the binding audit and poll cursors. *)
+type connector_state =
+  | Connector_discord
+  | Connector_imessage
+  | Connector_slack
+  | Connector_telegram
+
+val connector_state_dir_of_base : base_path:string -> connector_state -> string
+(** [<base_path>/.masc/connectors/<kind>], where [<kind>] is [discord],
+    [imessage], [slack] or [telegram]. The default directory of every file the
+    connector's gateway writes. A path the operator sets through the
+    connector's own environment or runtime.toml override does not pass through
+    here. *)
+
+val connector_bindings_filename : string
+(** The channel→Keeper binding store in {!connector_state_dir_of_base}:
+    ["bindings.json"]. *)
+
+val connector_binding_audit_filename : string
+(** The binding audit log in {!connector_state_dir_of_base}:
+    ["binding_audit.jsonl"]. *)
+
 type keeper_runtime_store =
   | Keeper_tool_usage
   | Keeper_runtime_manifests

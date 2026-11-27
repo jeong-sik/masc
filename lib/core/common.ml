@@ -105,6 +105,31 @@ let masc_dir_from_base_path ~base_path =
 let keepers_runtime_dir_of_base ~base_path =
   Filename.concat (masc_dir_from_base_path ~base_path) keepers_runtime_dirname
 
+(* Connector state lives under the runtime root like every other store the
+   server writes. The workspace file routes already hide [.masc], and a
+   container that keeps [.masc] on a volume keeps the bindings with it. *)
+let connectors_dirname = "connectors"
+
+type connector_state =
+  | Connector_discord
+  | Connector_imessage
+  | Connector_slack
+  | Connector_telegram
+
+let connector_state_dirname = function
+  | Connector_discord -> "discord"
+  | Connector_imessage -> "imessage"
+  | Connector_slack -> "slack"
+  | Connector_telegram -> "telegram"
+
+let connector_state_dir_of_base ~base_path connector =
+  Filename.concat
+    (Filename.concat (masc_dir_from_base_path ~base_path) connectors_dirname)
+    (connector_state_dirname connector)
+
+let connector_bindings_filename = "bindings.json"
+let connector_binding_audit_filename = "binding_audit.jsonl"
+
 type keeper_runtime_store =
   | Keeper_tool_usage
   | Keeper_runtime_manifests

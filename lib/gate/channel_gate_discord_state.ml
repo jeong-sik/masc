@@ -11,32 +11,33 @@ let display_name = "Discord"
 let channel = "discord"
 
 
-let default_binding_store_path = ".gate/runtime/discord/bindings.json"
-let default_binding_audit_path = ".gate/runtime/discord/binding_audit.jsonl"
-
 (* [raw_value_opt] rather than [Sys.getenv_opt]: it falls back to the
    boot-time config overrides, so a path declared in runtime.toml is seen the
    way every other MASC setting is (#21972 P2-1). *)
-let configured_write_path env_name ~default =
+let configured_write_path env_name ~filename =
   match Env_config_core.raw_value_opt env_name |> Env_config_core.trim_opt with
   | Some raw -> Env_config_core.resolve_against_base_path raw
-  | None -> Env_config_core.resolve_against_base_path default
+  | None ->
+    Filename.concat
+      (Common.connector_state_dir_of_base
+         ~base_path:(Env_config_core.base_path ()) Common.Connector_discord)
+      filename
 
 let binding_store_path () =
   configured_write_path "MASC_DISCORD_BINDING_STORE_PATH"
-    ~default:default_binding_store_path
+    ~filename:Common.connector_bindings_filename
 
 let binding_store_read_path () =
   configured_write_path "MASC_DISCORD_BINDING_STORE_PATH"
-    ~default:default_binding_store_path
+    ~filename:Common.connector_bindings_filename
 
 let binding_audit_path () =
   configured_write_path "MASC_DISCORD_BINDING_AUDIT_PATH"
-    ~default:default_binding_audit_path
+    ~filename:Common.connector_binding_audit_filename
 
 let binding_audit_read_path () =
   configured_write_path "MASC_DISCORD_BINDING_AUDIT_PATH"
-    ~default:default_binding_audit_path
+    ~filename:Common.connector_binding_audit_filename
 
 (* [Include_empty], not [Omit]: the audit wire shape carries a [guild_id]
    key for Discord rows and the dashboard reads that shape. Nothing resolves

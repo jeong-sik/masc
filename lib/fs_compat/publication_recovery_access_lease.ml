@@ -80,11 +80,6 @@ let run_with_cleanup ~cleanup body =
     raise (Invariant_violation Cleanup_body_outcome_lost)
 ;;
 
-let signal_drained t =
-  if not (Eio.Promise.try_resolve t.resolve_drained ())
-  then raise (Invariant_violation Drain_signal_already_resolved)
-;;
-
 let borrow t =
   Eio.Mutex.use_rw ~protect:true t.mutex (fun () ->
     match t.phase with
@@ -116,7 +111,9 @@ let release t =
           if t.in_flight = 0
           then (
             t.phase <- Closed;
-            Release_and_signal)
+            if Eio.Promise.try_resolve t.resolve_drained ()
+            then Released
+            else Release_invariant Drain_signal_already_resolved)
           else Released
         | Closed ->
           Release_invariant
@@ -124,7 +121,6 @@ let release t =
   in
   match decision with
   | Released -> ()
-  | Release_and_signal -> signal_drained t
   | Release_invariant invariant -> raise (Invariant_violation invariant)
 ;;
 
@@ -136,7 +132,9 @@ let close_and_drain t =
         Close_invariant Borrow_count_underflow
       | Open when t.in_flight = 0 ->
         t.phase <- Closed;
-        Close_and_signal
+        if Eio.Promise.try_resolve t.resolve_drained ()
+        then Already_drained
+        else Close_invariant Drain_signal_already_resolved
       | Open ->
         t.phase <- Closing;
         Await_drain
@@ -148,7 +146,6 @@ let close_and_drain t =
       | Closed -> Already_drained)
   in
   match decision with
-  | Close_and_signal -> signal_drained t
   | Await_drain -> Eio.Promise.await t.drained
   | Already_drained ->
     (match Eio.Promise.peek t.drained with

@@ -190,33 +190,39 @@ let histogram_bound_label bound =
 ;;
 
 let inc_counter name ?(labels = []) ?(delta = 1.0) () =
-  best_effort (fun () ->
-    let key = metric_key name labels in
-    with_lock (fun () ->
-      Series.write
-        key
-        ~make:(fun () -> { name; help = name; metric_type = Counter; value = delta; labels })
-        ~change:(fun m -> m.value <- m.value +. delta)))
+  if Float.is_finite delta && delta >= 0.0
+  then
+    best_effort (fun () ->
+      let key = metric_key name labels in
+      with_lock (fun () ->
+        Series.write
+          key
+          ~make:(fun () -> { name; help = name; metric_type = Counter; value = delta; labels })
+          ~change:(fun m -> m.value <- m.value +. delta)))
 ;;
 
 let set_gauge name ?(labels = []) value =
-  best_effort (fun () ->
-    let key = metric_key name labels in
-    with_lock (fun () ->
-      Series.write
-        key
-        ~make:(fun () -> { name; help = name; metric_type = Gauge; value; labels })
-        ~change:(fun m -> m.value <- value)))
+  if Float.is_finite value
+  then
+    best_effort (fun () ->
+      let key = metric_key name labels in
+      with_lock (fun () ->
+        Series.write
+          key
+          ~make:(fun () -> { name; help = name; metric_type = Gauge; value; labels })
+          ~change:(fun m -> m.value <- value)))
 ;;
 
 let inc_gauge name ?(labels = []) ?(delta = 1.0) () =
-  best_effort (fun () ->
-    let key = metric_key name labels in
-    with_lock (fun () ->
-      Series.write
-        key
-        ~make:(fun () -> { name; help = name; metric_type = Gauge; value = delta; labels })
-        ~change:(fun m -> m.value <- m.value +. delta)))
+  if Float.is_finite delta
+  then
+    best_effort (fun () ->
+      let key = metric_key name labels in
+      with_lock (fun () ->
+        Series.write
+          key
+          ~make:(fun () -> { name; help = name; metric_type = Gauge; value = delta; labels })
+          ~change:(fun m -> m.value <- m.value +. delta)))
 ;;
 
 let dec_gauge name ?(labels = []) ?(delta = 1.0) () =
@@ -253,31 +259,32 @@ let snapshot_named name =
 ;;
 
 let observe_histogram name ?(labels = []) value =
-  best_effort (fun () ->
-    let key = metric_key name labels in
-    let count_name = histogram_count_name name in
-    let count_key = metric_key count_name labels in
-    with_lock (fun () ->
-      Series.write
-        key
-        ~make:(fun () -> { name; help = name; metric_type = Histogram; value; labels })
-        ~change:(fun m -> m.value <- m.value +. value);
-      Series.write
-        count_key
-        ~make:(fun () ->
-          { name = count_name
-          ; help = name ^ " observation count"
-          ; metric_type = Counter
-          ; value = 1.0
-          ; labels
-          })
-        ~change:(fun m -> m.value <- m.value +. 1.0);
-      (match Hashtbl.find_opt histogram_buckets name with
-       | Some bounds ->
-         List.iter
-           (fun bound ->
-              if value <= bound
-              then (
+  if Float.is_finite value
+  then
+    best_effort (fun () ->
+      let key = metric_key name labels in
+      let count_name = histogram_count_name name in
+      let count_key = metric_key count_name labels in
+      with_lock (fun () ->
+        Series.write
+          key
+          ~make:(fun () -> { name; help = name; metric_type = Histogram; value; labels })
+          ~change:(fun m -> m.value <- m.value +. value);
+        Series.write
+          count_key
+          ~make:(fun () ->
+            { name = count_name
+            ; help = name ^ " observation count"
+            ; metric_type = Counter
+            ; value = 1.0
+            ; labels
+            })
+          ~change:(fun m -> m.value <- m.value +. 1.0);
+        (match Hashtbl.find_opt histogram_buckets name with
+         | Some bounds ->
+           List.iter
+             (fun bound ->
+                let hit = value <= bound in
                 let le = histogram_bound_label bound in
                 let bucket_labels = ("le", le) :: labels in
                 let bucket_key = metric_key (name ^ "_bucket") bucket_labels in
@@ -287,22 +294,22 @@ let observe_histogram name ?(labels = []) value =
                     { name = name ^ "_bucket"
                     ; help = name ^ " bucket"
                     ; metric_type = Counter
-                    ; value = 1.0
+                    ; value = if hit then 1.0 else 0.0
                     ; labels = bucket_labels
                     })
-                  ~change:(fun m -> m.value <- m.value +. 1.0)))
-           bounds;
-         let inf_labels = ("le", "+Inf") :: labels in
-         let inf_key = metric_key (name ^ "_bucket") inf_labels in
-         Series.write
-           inf_key
-           ~make:(fun () ->
-             { name = name ^ "_bucket"
-             ; help = name ^ " bucket"
-             ; metric_type = Counter
-             ; value = 1.0
-             ; labels = inf_labels
-             })
-           ~change:(fun m -> m.value <- m.value +. 1.0)
-       | None -> ())))
+                  ~change:(fun m -> if hit then m.value <- m.value +. 1.0))
+             bounds;
+           let inf_labels = ("le", "+Inf") :: labels in
+           let inf_key = metric_key (name ^ "_bucket") inf_labels in
+           Series.write
+             inf_key
+             ~make:(fun () ->
+               { name = name ^ "_bucket"
+               ; help = name ^ " bucket"
+               ; metric_type = Counter
+               ; value = 1.0
+               ; labels = inf_labels
+               })
+             ~change:(fun m -> m.value <- m.value +. 1.0)
+         | None -> ())))
 ;;

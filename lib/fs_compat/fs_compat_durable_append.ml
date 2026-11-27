@@ -306,7 +306,10 @@ let append_fd_observed ~io ~fd content =
 ;;
 
 let capability_append_unix_io =
-  { write_substring = Unix.write_substring; fsync = Unix.fsync }
+  (* [Unix.single_write_substring] performs one [write(2)] per call so
+     [Fd_write_all.run] advances [bytes_written] after every chunk instead of
+     losing partial progress inside OCaml's 64 KiB [Unix.write_substring] loop. *)
+  { write_substring = Unix.single_write_substring; fsync = Unix.fsync }
 ;;
 
 type append_target_observation =

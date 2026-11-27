@@ -301,6 +301,11 @@ let screen
        | [] | _ :: _ :: _ -> Error Effects.Source_outside_question)
     | Merge { into = fact; _ } | Revise { into = fact; _ } ->
       let* offsets = units fact.from_units in
+      let basis_is_personal =
+        match fact.basis with
+        | Observed (Personal _) -> true
+        | Observed (Board _ | Transcript) | Derived _ -> false
+      in
       let basis_already_private =
         match fact.basis with
         | Observed (Board { post_id; _ }) -> not (is_public_board_post post_id)
@@ -314,7 +319,14 @@ let screen
       in
       let* preserved_fact =
         match inspect_private_provenance ~is_public_board_post ~fact_by_id:by_id mutating_named with
-        | Private_personal | Unresolved_premise -> Error Effects.Promotion_refused
+        | Unresolved_premise -> Error Effects.Promotion_refused
+        | Private_personal ->
+          (* Combining personal sources into a basis that is already Personal
+             does not lower confidentiality; downgrading into Board/Transcript
+             or Derived is refused to prevent provenance laundering. *)
+          if basis_is_personal
+          then Ok fact
+          else Error Effects.Promotion_refused
         | Clean -> Ok fact
         | Private_board board_src ->
           if basis_already_private

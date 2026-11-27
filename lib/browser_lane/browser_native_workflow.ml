@@ -307,12 +307,12 @@ let step_of_json value =
       let* _=arguments ["url"] in
       let* raw=string_field "url" fields in
       let* url =
-        if has_forbidden_url_chars raw then
-          Error "workflow fetch URL must not contain control characters or surrounding whitespace"
-        else
-          match Uri.scheme (Uri.of_string raw) with
-          | None -> Ok raw
-          | Some _ -> url raw
+        match Uri.scheme (Uri.of_string raw) with
+        | None ->
+          if has_forbidden_url_chars raw then
+            Error "workflow fetch URL must not contain control characters or surrounding whitespace"
+          else Ok raw
+        | Some _ -> url raw
       in
       Ok (Fetch url)
     | "download.cancel" ->

@@ -143,6 +143,13 @@ let test_balance_duplicate_refused () =
 let test_balance_money_refusals () =
   let before = funded_state () in
   (match
+     Candle_balance.gift before ~at ~from_keeper:"alpha" ~to_keeper:"alpha" ~amount_milli:10
+       ~reason:"self-gift"
+   with
+   | Ok _ -> fail "self-gift was accepted"
+   | Error (Candle_balance.Invalid_gift _) -> ()
+   | Error error -> fail ("wrong refusal: " ^ Candle_balance.error_to_string error));
+  (match
      Candle_balance.gift before ~at ~from_keeper:"alpha" ~to_keeper:"beta" ~amount_milli:0
        ~reason:"thanks"
    with

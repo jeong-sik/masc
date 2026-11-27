@@ -894,6 +894,23 @@ let native_window_workflow () =
         refused "popup windows remain bound to original Host source"
           (R.decode ~windows:(Some context) request (obj (("pages",pages)::List.remove_assoc "pages" fields))))) cases)
 
+let url_control_chars_rejected () =
+  let check_bad label steps =
+    refused label (W.of_json (obj (base steps)))
+  in
+  check_bad "goto rejects CRLF control characters"
+    [ step "goto" [ "url", str "https://example.test/ok\r\nX-Injected: 1" ] ];
+  check_bad "goto rejects DEL control character"
+    [ step "goto" [ "url", str "https://example.test/ok\x7f" ] ];
+  check_bad "goto rejects surrounding whitespace"
+    [ step "goto" [ "url", str " https://example.test/ok " ] ];
+  check_bad "relative fetch rejects LF control character"
+    [ step "fetch" [ "url", str "/api/data\nnext" ] ];
+  check_bad "relative fetch rejects surrounding whitespace"
+    [ step "fetch" [ "url", str " /api/data " ] ];
+  check_bad "absolute fetch rejects CRLF control character"
+    [ step "fetch" [ "url", str "https://example.test/api\r\n" ] ]
+
 let () = if Array.length Sys.argv=2 && Sys.argv.(1)="--receipt-contract" then
     print_endline (Yojson.Safe.to_string Rel.receipt_contract)
   else if Array.length Sys.argv=3 && Sys.argv.(1)="--proof" then proof Sys.argv.(2)
@@ -905,6 +922,7 @@ let () = if Array.length Sys.argv=2 && Sys.argv.(1)="--receipt-contract" then
   test_case "native methods preserve values" `Quick roundtrip;
   test_case "Download cancellation binds identity and exact effect progress" `Quick download_cancel;
   test_case "URL matcher forms preserve native syntax and reject ambiguous input" `Quick url_matchers;
+  test_case "URL control characters and surrounding whitespace are rejected" `Quick url_control_chars_rejected;
   test_case "invalid methods and fields are refused" `Quick strict_inputs;
   test_case "validation identifies the exact workflow or step fields before execution" `Quick validation_diagnostics;
   test_case "snapshot completes the exact requested sequence" `Quick complete;

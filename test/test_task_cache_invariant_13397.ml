@@ -73,6 +73,68 @@ let test_typed_fresh_status_unavailable () =
     | TCI.Absent -> fail "missing backlog was collapsed into task absence"
     | TCI.Found _ -> fail "missing backlog unexpectedly returned a task")
 
+let test_clear_stale_agent_task_preserves_inactive () =
+  with_temp_config (fun config ->
+    ignore (Masc.Workspace.init config ~agent_name:None);
+    let write_agent ~name ~status =
+      let path = Filename.concat (Masc.Workspace.agents_dir config) (name ^ ".json") in
+      let agent : T.agent =
+        { id = None
+        ; name
+        ; agent_type = "test"
+        ; status
+        ; capabilities = []
+        ; current_task = Some "task-001"
+        ; session_bound_at = now
+        ; last_seen = now
+        ; meta = None
+        }
+      in
+      Workspace_agent_record.write config path ~previous:None agent;
+      path
+    in
+    let read_agent path =
+      match T.agent_of_yojson (Yojson.Safe.from_file path) with
+      | Ok agent -> agent
+      | Error detail -> failf "failed to decode agent record: %s" detail
+    in
+    let inactive_path = write_agent ~name:"dormant-agent" ~status:T.Inactive in
+    let busy_path = write_agent ~name:"working-agent" ~status:T.Busy in
+    (match
+       TCI.clear_stale_agent_task_if_matching
+         config
+         ~cause:TCI.Desync
+         ~agent_name:"dormant-agent"
+         ~task_id:"task-001"
+         ~status_label:"done"
+         ~module_name:"test"
+     with
+     | TCI.Matches -> ()
+     | TCI.Mismatch | TCI.Missing | TCI.Unreadable _ ->
+       fail "expected dormant-agent stale task clear to match");
+    let inactive_after = read_agent inactive_path in
+    check bool "Inactive agent stays Inactive after stale task clear" true
+      (inactive_after.status = T.Inactive);
+    check (option string) "Inactive agent current_task cleared" None
+      inactive_after.current_task;
+    (match
+       TCI.clear_stale_agent_task_if_matching
+         config
+         ~cause:TCI.Desync
+         ~agent_name:"working-agent"
+         ~task_id:"task-001"
+         ~status_label:"done"
+         ~module_name:"test"
+     with
+     | TCI.Matches -> ()
+     | TCI.Mismatch | TCI.Missing | TCI.Unreadable _ ->
+       fail "expected working-agent stale task clear to match");
+    let busy_after = read_agent busy_path in
+    check bool "Busy agent becomes Active after stale task clear" true
+      (busy_after.status = T.Active);
+    check (option string) "Busy agent current_task cleared" None
+      busy_after.current_task)
+
 (* ============================================================ *)
 (* Test runner                                                  *)
 (* ============================================================ *)
@@ -84,5 +146,9 @@ let () =
             test_typed_fresh_status_missing
         ; test_case "typed lookup preserves backlog failure" `Quick
             test_typed_fresh_status_unavailable
+        ] )
+    ; ( "clear_stale_agent_task_if_matching"
+      , [ test_case "clearing stale task preserves Inactive status" `Quick
+            test_clear_stale_agent_task_preserves_inactive
         ] )
     ]

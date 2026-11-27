@@ -991,6 +991,23 @@ let find_broadcast_message ~request_id config ~from_agent ~content =
     | _ -> Error (Broadcast_dependency_unavailable "multiple committed messages share one request identity") in
   lookup ()
 
+let find_mention_outbox_message ~request_id config ~from_agent ~content =
+  let audience = Fleet_conversation in
+  match read_committed_message config (mention_outbox_file config request_id) with
+  | Ok None -> Ok None
+  | Error (Committed_message_unavailable detail | Committed_message_corrupt detail) ->
+    Error (Broadcast_dependency_unavailable detail)
+  | Ok (Some outbox_msg) ->
+    if not (String.equal outbox_msg.request_id request_id
+      && String.equal outbox_msg.from_agent from_agent
+      && String.equal outbox_msg.content content
+      && message_kind_of_string outbox_msg.msg_type = Some Msg_broadcast) then
+      Error (Broadcast_policy_rejected "Broadcast request identity already names different content")
+    else
+      Ok (Some { (delivery_of_message ~audience outbox_msg) with
+        mention_delivery = Deferred Workspace_status_unavailable;
+        fanout_state = Fanout_not_started })
+
 let broadcast_internal ?trace_context ?request_id ?on_committed ?(fleet_delivery=Immediate_fleet) ?(msg_type = Msg_broadcast) ?task_cache_signal
       ~audience config ~from_agent ~content =
   ensure_initialized config;
@@ -1016,35 +1033,8 @@ let broadcast_internal ?trace_context ?request_id ?on_committed ?(fleet_delivery
         ~pre_extract_mention
         ~deferred_by_predecessor
     in
-    let check_existing_outbox req_id =
-      match read_committed_message config (mention_outbox_file config req_id) with
-      | Ok None -> Ok None
-      | Error (Committed_message_unavailable detail | Committed_message_corrupt detail) ->
-        Error (Broadcast_dependency_unavailable detail)
-      | Ok (Some outbox_msg) ->
-        if not (String.equal outbox_msg.request_id req_id
-          && String.equal outbox_msg.from_agent from_agent
-          && String.equal outbox_msg.content content
-          && message_kind_of_string outbox_msg.msg_type = Some msg_type) then
-          Error (Broadcast_policy_rejected "Broadcast request identity already names different content")
-        else
-          Ok (Some { (delivery_of_message ~audience outbox_msg) with
-            mention_delivery = Deferred Workspace_status_unavailable;
-            fanout_state = Fanout_not_started })
-    in
     (match pre_extract_mention with
-     | None ->
-       (match request_id with
-        | None -> run None
-        | Some req_id ->
-          (match check_existing_outbox req_id with
-           | Error _ as err -> err
-           | Ok (Some deferred_delivery) ->
-             (match fleet_delivery with
-              | Deferred_passive_fleet ->
-                Error (Broadcast_policy_rejected "passive Broadcast identity names a non-passive row")
-              | Immediate_fleet | Deferred_fleet -> Ok deferred_delivery)
-           | Ok None -> run None))
+     | None -> run None
      | Some target ->
        Cross_context_mutex.with_lock mention_delivery_mutex (fun () ->
          let deferred_by_predecessor =
@@ -1060,25 +1050,7 @@ let broadcast_internal ?trace_context ?request_id ?on_committed ?(fleet_delivery
              then Some Predecessor_pending
              else None
          in
-         match request_id with
-         | None -> run deferred_by_predecessor
-         | Some req_id ->
-           (match find_broadcast_message ~request_id:req_id config ~from_agent ~content with
-            | Error _ as err -> err
-            | Ok (Some (message, delivery)) ->
-              Option.iter (fun notify -> notify ()) on_committed;
-              (match fleet_delivery with
-               | Deferred_fleet | Deferred_passive_fleet ->
-                 Ok { delivery with fanout_state = Fanout_not_started }
-               | Immediate_fleet ->
-                 Ok { delivery with
-                   mention_delivery = deliver_committed_mention ~audience config message;
-                   fanout_state = Fanout_finished })
-            | Ok None ->
-              (match check_existing_outbox req_id with
-               | Error _ as err -> err
-               | Ok (Some deferred_delivery) -> Ok deferred_delivery
-               | Ok None -> run deferred_by_predecessor))))
+         run deferred_by_predecessor))
 
 let broadcast ?trace_context ?msg_type ?task_cache_signal ~audience config ~from_agent ~content =
   broadcast_internal ?trace_context ?msg_type ?task_cache_signal ~audience config ~from_agent ~content
@@ -1141,6 +1113,10 @@ let validate_deferred_fleet_content content = match Board_addressing.routing_tar
 let find_broadcast ~request_id config ~from_agent ~content =
   Result.map (Option.map snd) (find_broadcast_message ~request_id config ~from_agent ~content)
 
+type broadcast_lookup =
+  | Committed_broadcast of message * broadcast_delivery
+  | Deferred_outbox of broadcast_delivery
+
 let broadcast_once ?(fleet_delivery=Immediate_fleet) ~request_id config ~from_agent ~content =
   let audience = Fleet_conversation in
   let open Result.Syntax in
@@ -1149,15 +1125,22 @@ let broadcast_once ?(fleet_delivery=Immediate_fleet) ~request_id config ~from_ag
     | Immediate_fleet | Deferred_passive_fleet -> Ok () in
   let lookup () =
     let* found = find_broadcast_message ~request_id config ~from_agent ~content in
-    match fleet_delivery with
-    | Immediate_fleet | Deferred_fleet -> Ok found
-    | Deferred_passive_fleet ->
-        match found with
-        | None -> Ok None
-        | Some (message, _) ->
-            if message.mention <> None || message.mention_delivery <> Mention_passive then
-              Error (Broadcast_policy_rejected "passive Broadcast identity names a non-passive row")
-            else Ok found in
+    match found with
+    | Some (message, delivery) ->
+        (match fleet_delivery with
+         | Immediate_fleet | Deferred_fleet -> Ok (Some (Committed_broadcast (message, delivery)))
+         | Deferred_passive_fleet ->
+             if message.mention <> None || message.mention_delivery <> Mention_passive then
+               Error (Broadcast_policy_rejected "passive Broadcast identity names a non-passive row")
+             else Ok (Some (Committed_broadcast (message, delivery))))
+    | None ->
+        let* outbox = find_mention_outbox_message ~request_id config ~from_agent ~content in
+        (match outbox, fleet_delivery with
+         | None, (Immediate_fleet | Deferred_fleet | Deferred_passive_fleet) -> Ok None
+         | Some _, Deferred_passive_fleet ->
+             Error (Broadcast_policy_rejected "passive Broadcast identity names a non-passive row")
+         | Some deferred_delivery, (Immediate_fleet | Deferred_fleet) ->
+             Ok (Some (Deferred_outbox deferred_delivery))) in
   let replay message delivery =
     (* Each Keeper's transcript projects by the persisted request ID. Replaying
        fills recipients missed by cancellation/restart and deduplicates those
@@ -1175,7 +1158,8 @@ let broadcast_once ?(fleet_delivery=Immediate_fleet) ~request_id config ~from_ag
   let rec send () =
     let* existing = lookup () in
     match existing with
-    | Some (message, delivery) ->
+    | Some (Deferred_outbox delivery) -> Ok delivery
+    | Some (Committed_broadcast (message, delivery)) ->
         (match fleet_delivery with
          | Deferred_fleet | Deferred_passive_fleet -> Ok {delivery with fanout_state=Fanout_not_started}
          | Immediate_fleet -> match admit_exact_request key with
@@ -1193,7 +1177,8 @@ let broadcast_once ?(fleet_delivery=Immediate_fleet) ~request_id config ~from_ag
                 admission. Read again before creating any authoritative row. *)
              let* existing = lookup () in
              match existing with
-             | Some (message, delivery) ->
+             | Some (Deferred_outbox delivery) -> Ok delivery
+             | Some (Committed_broadcast (message, delivery)) ->
                  signal_exact_request operation Row_visible;
                  replay message delivery
              | None -> broadcast_internal ~request_id ~fleet_delivery ~audience

@@ -105,6 +105,8 @@ let rec issue ~at schema output =
       match explicit_type with
       | Some (`String t) -> matches_single_type t output
       | Some (`List types) ->
+        (* An array type with no string entries is malformed JSON Schema (reject);
+           unknown string type names remain forward-compatible via matches_single_type. *)
         (match List.filter_map (function `String t -> Some t | _ -> None) types with
          | [] -> false
          | names -> List.exists (fun t -> matches_single_type t output) names)

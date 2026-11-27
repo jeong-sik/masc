@@ -761,7 +761,118 @@ let test_promote_to_world_security_boundaries () =
     (List.length res_missing.effects.promotions);
   check refusals "missing-premise Promote_to_world reported as Promotion_refused"
     [ 0, "promotion refused", None ]
-    (not_applied res_missing)
+    (not_applied res_missing);
+  (* 7. Merge/Revise personal provenance rules:
+        (a) merging Personal + private Board into a Board basis is refused;
+        (b) merging/revising Personal into an already-Personal basis is permitted;
+        (c) unresolved premise + private Board is refused (unresolved takes precedence). *)
+  let personal_obs =
+    let scope_json =
+      `Assoc
+        [ ( "account"
+          , `Assoc
+              [ "kind", `String "discord_user"
+              ; "user_id", `String "900000000000000001"
+              ; "version", `Int 1
+              ] )
+        ; ( "destination"
+          , `Assoc
+              [ "channel_id", `String "900000000000000002"
+              ; "guild_id", `Null
+              ; "kind", `String "discord"
+              ] )
+        ]
+    in
+    let scope =
+      match Masc.Connector_memory_scope.of_json scope_json with
+      | Ok s -> s
+      | Error err -> fail ("invalid personal scope fixture: " ^ err)
+    in
+    match Types.personal_observation ~scope ~message_ids:[ "900000000000000003" ] with
+    | Some obs -> obs
+    | None -> fail "invalid personal observation fixture"
+  in
+  let personal_fact : Types.fact =
+    { claim = "personal dm preference"
+    ; category = Types.Fact
+    ; first_seen = 100.0
+    ; last_seen = 100.0
+    ; origin = { kind = Types.Injected; trace_id = "t-personal" }
+    ; basis = Types.Observed (Types.Personal personal_obs)
+    }
+  in
+  let mixed_facts = [ private_board_fact; personal_fact; derived_with_missing_premise ] in
+  let mixed_shown = shown_of mixed_facts in
+  (* (a) Personal + private Board merged into Board basis -> refused *)
+  let res_personal_into_board =
+    Plan.of_answer ~shown:mixed_shown ~facts:mixed_facts ~removed_since:[] ~at
+      ~trace_id:"merge-personal-board"
+      { question = asked
+      ; ops =
+          [ Answer.Merge
+              { refs = [ "m1"; "m2" ]
+              ; into =
+                  { claim = "laundered personal into board"
+                  ; category = Types.Fact
+                  ; basis = Types.Observed (Types.Board board_ref)
+                  ; from_units = []
+                  }
+              }
+          ]
+      ; working_state = Answer.Keep
+      }
+  in
+  check refusals "merging Personal into Board basis is refused"
+    [ 0, "promotion refused", None ]
+    (not_applied res_personal_into_board);
+  (* (b) Personal revised into already-Personal basis -> permitted *)
+  let res_personal_into_personal =
+    Plan.of_answer ~shown:mixed_shown ~facts:mixed_facts ~removed_since:[] ~at
+      ~trace_id:"revise-personal-personal"
+      { question = asked
+      ; ops =
+          [ Answer.Revise
+              { ref_ = "m2"
+              ; into =
+                  { claim = "refined personal dm preference"
+                  ; category = Types.Fact
+                  ; basis = Types.Observed (Types.Personal personal_obs)
+                  ; from_units = []
+                  }
+              }
+          ]
+      ; working_state = Answer.Keep
+      }
+  in
+  check refusals "revising Personal into Personal basis is permitted"
+    []
+    (not_applied res_personal_into_personal);
+  check bool "refined personal claim is present" true
+    (List.exists
+       (fun (f : Types.fact) -> String.equal f.claim "refined personal dm preference")
+       res_personal_into_personal.facts);
+  (* (c) Unresolved premise + private Board merged into private Board basis -> refused *)
+  let res_unresolved_and_board =
+    Plan.of_answer ~shown:mixed_shown ~facts:mixed_facts ~removed_since:[] ~at
+      ~trace_id:"merge-unresolved-board"
+      { question = asked
+      ; ops =
+          [ Answer.Merge
+              { refs = [ "m1"; "m3" ]
+              ; into =
+                  { claim = "merged unresolved and board"
+                  ; category = Types.Fact
+                  ; basis = Types.Observed (Types.Board board_ref)
+                  ; from_units = []
+                  }
+              }
+          ]
+      ; working_state = Answer.Keep
+      }
+  in
+  check refusals "unresolved premise takes precedence over private Board"
+    [ 0, "promotion refused", None ]
+    (not_applied res_unresolved_and_board)
 ;;
 
 let () =

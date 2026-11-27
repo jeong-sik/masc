@@ -193,7 +193,13 @@ let image_source_of_url_string raw =
     | None ->
       if String.starts_with ~prefix:"http://" trimmed
          || String.starts_with ~prefix:"https://" trimmed
-      then Some (Api_common.infer_image_mime_of_url trimmed, Url trimmed)
+      then (
+        let media_type =
+          Option.value
+            (Api_common.infer_image_mime_of_url_opt trimmed)
+            ~default:Api_common.unknown_media_type
+        in
+        Some (media_type, Url trimmed))
       else None)
 ;;
 
@@ -216,12 +222,16 @@ let image_source_of_openai_image_item = function
      | None ->
        (match List.assoc_opt "b64_json" fields with
         | Some (`String b64) when not (Api_common.string_is_blank b64) ->
+          let trimmed_b64 = String.trim b64 in
           let media_type =
             match List.assoc_opt "mime_type" fields with
             | Some (`String m) when not (Api_common.string_is_blank m) -> String.trim m
-            | _ -> "image/png"
+            | _ ->
+              Option.value
+                (Api_common.sniff_image_mime_of_base64 trimmed_b64)
+                ~default:Api_common.unknown_media_type
           in
-          Some (media_type, Base64 (String.trim b64))
+          Some (media_type, Base64 trimmed_b64)
         | _ -> None))
   | `String raw -> image_source_of_url_string raw
   | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None

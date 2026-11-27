@@ -6,11 +6,14 @@
     generalizes the voice-clip token/serve pattern
     ([/api/v1/voice/audio/<token>]) to an arbitrary [media_type].
 
-    Files live under [<masc_dir>/media/] as [<token>.<ext>], where [token] is a
-    deterministic SHA-256 hex locator derived from the media type and raw payload.
-    Served by [GET /api/v1/media/<token>] behind normal read auth. Retention is
-    enforced opportunistically on persist via [KeeperGeneratedMedia] age and
-    directory-size caps; the voice-clip TTL sweep only owns [<masc_dir>/audio]. *)
+    Generated media is stored durably in {!Attachment_store} under
+    [<masc_dir>/attachments/] and surfaced via canonical
+    [/api/v1/attachments/att_<sha256>] URLs (with read compatibility on
+    [/api/v1/media/<token>]). Non-allowlisted model-generated formats (e.g.
+    FLAC, AAC, PCM, video) are preserved via {!Attachment_store.put_opaque} as
+    downloadable evidence rather than dropped. Unreferenced blobs are reclaimed
+    by {!Tool_blob_sweep.sweep_attachments} (wired into {!Tool_blob_sweep.reclaim});
+    the voice-clip TTL sweep only owns [<masc_dir>/audio]. *)
 
 let media_subdir = "media"
 
@@ -55,6 +58,9 @@ let known_media =
   ; { media_type = "audio/ogg"; ext = "ogg"; content_type = "audio/ogg"; category = Audio }
   ; { media_type = "audio/midi"; ext = "mid"; content_type = "audio/midi"; category = Midi }
   ; { media_type = "audio/x-midi"; ext = "mid"; content_type = "audio/midi"; category = Midi }
+  ; { media_type = "audio/mp4"; ext = "m4a"; content_type = "audio/mp4"; category = Audio }
+  ; { media_type = "audio/m4a"; ext = "m4a"; content_type = "audio/mp4"; category = Audio }
+  ; { media_type = "audio/webm"; ext = "webm"; content_type = "audio/webm"; category = Audio }
   ; { media_type = "application/pdf"; ext = "pdf"; content_type = "application/pdf"; category = Document }
   ]
 
@@ -172,10 +178,21 @@ let put_attachment_meta ~base_dir ~media_type ~data =
        bytes labeled image/png), trust magic-byte sniffing instead of dropping
        the generated media. *)
     put_with ()
+  | Error (Attachment_store.Unsupported_or_unknown_format _) ->
+    (* Preserve non-allowlisted model-generated media (e.g. FLAC, AAC, PCM,
+       video) opaquely so generated evidence is never dropped; HTTP serves
+       opaque binaries strictly with [Content-Disposition: attachment]. *)
+    Attachment_store.put_opaque
+      ~max_bytes:(max_raw_bytes ())
+      ?declared_mime
+      ~origin:Attachment_store.Model_generated
+      ~created_by:"keeper"
+      ~retention:Attachment_store.Durable
+      store
+      ~bytes:data
   | Error
       (( Attachment_store.Empty_payload
        | Attachment_store.Payload_too_large _
-       | Attachment_store.Unsupported_or_unknown_format _
        | Attachment_store.Forbidden_mime _
        | Attachment_store.Invalid_keeper_name _
        | Attachment_store.Store_io_failed _ ) as err) -> Error err

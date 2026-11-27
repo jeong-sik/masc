@@ -272,7 +272,7 @@ let append_user_message ~base_dir ~keeper_name ~(content : string)
     let redaction = redaction_for ~base_dir ~keeper_name in
     let content = Keeper_secret_redaction.redact_text redaction content in
     let attachments = List.map (redact_attachment redaction) attachments in
-    let persisted_attachments = List.map (persisted_attachment ~base_dir) attachments in
+    let persisted_attachments = List.map (persisted_attachment ~redaction ~base_dir) attachments in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let line =
@@ -337,7 +337,7 @@ let append_user_message_once
     let redaction = redaction_for ~base_dir ~keeper_name in
     let content = Keeper_secret_redaction.redact_text redaction content in
     let attachments = List.map (redact_attachment redaction) attachments in
-    let persisted_attachments = List.map (persisted_attachment ~base_dir) attachments in
+    let persisted_attachments = List.map (persisted_attachment ~redaction ~base_dir) attachments in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let row_id = mint_message_id ~ts in

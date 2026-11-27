@@ -37,11 +37,20 @@ val default_ephemeral_max_entries : int
 val default_ephemeral_max_bytes : int
 (** Default maximum total ephemeral bytes retained per keeper (20 MiB). *)
 
+val thumb_px_buckets : int list
+(** Fixed quantized pixel buckets for [?max_px=] ([160; 320; 640; 1280]).
+    Requested [max_px] values snap upward to the nearest bucket and cap at
+    [max_thumb_px] to bound [thumbs/] disk usage. *)
+
 val min_thumb_px : int
-(** Minimum clamped pixel bound for [?max_px=] (32). *)
+(** Smallest quantized pixel bucket for [?max_px=] (160). *)
 
 val max_thumb_px : int
-(** Maximum clamped pixel bound for [?max_px=] (2048). *)
+(** Largest quantized pixel bucket for [?max_px=] (1280). *)
+
+val quantize_thumb_px : int -> int
+(** Snap a positive requested [max_px] upward into {!thumb_px_buckets},
+    capped at {!max_thumb_px}. *)
 
 type origin =
   | User_upload
@@ -76,6 +85,8 @@ type supported_mime =
   | Audio_wav
   | Audio_ogg
   | Audio_midi
+  | Audio_mp4
+  | Audio_webm
 
 val mime_to_string : supported_mime -> string
 val media_kind_of_mime : supported_mime -> media_kind
@@ -178,6 +189,13 @@ val meta_to_wire_json : meta -> Yojson.Safe.t
     [id], [attachment_id], [sha256], [url], [mime_type], [kind], [bytes],
     [width], [height], [filename], [origin], [created_at_unix], [retention]. *)
 
+val is_opaque_binary : meta -> bool
+(** [true] iff [meta] is an internal opaque binary persisted via {!put_opaque}
+    ([mime_type = "application/octet-stream"]). HTTP responses MUST serve opaque
+    binaries strictly with [Content-Type: application/octet-stream],
+    [Content-Disposition: attachment], [X-Content-Type-Options: nosniff], and
+    sandbox CSP — never inline. *)
+
 val put :
   ?max_bytes:int ->
   ?ephemeral_max_entries:int ->
@@ -196,6 +214,25 @@ val put :
     Re-uploading existing bytes with [Durable] promotes an [Ephemeral] record to
     [Durable]; an existing [Durable] record is never downgraded. *)
 
+val put_opaque :
+  ?max_bytes:int ->
+  ?ephemeral_max_entries:int ->
+  ?ephemeral_max_bytes:int ->
+  ?now:float ->
+  ?declared_mime:string ->
+  ?filename:string ->
+  origin:origin ->
+  created_by:string ->
+  retention:retention ->
+  t ->
+  bytes:string ->
+  (meta, put_error) result
+(** Persist internal generated/captured binary media (e.g. FLAC/AAC/PCM/video)
+    whose format is outside {!supported_mime} as downloadable
+    [application/octet-stream] evidence ([kind = Document]).
+    Strictly rejects [origin = User_upload] and active HTML/SVG/JS payloads.
+    Public HTTP uploads MUST call {!put}, never {!put_opaque}. *)
+
 val get_meta : t -> id:string -> (meta option, get_error) result
 (** Read verified metadata sidecar for canonical [att_<64hex>] id. *)
 
@@ -210,7 +247,13 @@ val get_bytes_by_sha256 : t -> sha256:string -> (string option, get_error) resul
 (** Read raw bytes for bare 64-hex [sha256] (for [History.Stored] and
     [/api/v1/media/<sha256>] lookups) with ownership and integrity checks. *)
 
+type blocking_runner = { run_blocking : 'a. (unit -> 'a) -> 'a }
+(** Optional offload wrapper for blocking filesystem I/O in
+    {!get_image_derivative} (e.g. [Eio_unix.run_in_systhread]), while keeping
+    [Process_eio] subprocess execution directly on the caller's Eio fiber. *)
+
 val get_image_derivative :
+  ?blocking:blocking_runner ->
   ?max_px:int ->
   target_format:target_format ->
   t ->
@@ -218,21 +261,40 @@ val get_image_derivative :
   raw_bytes:string ->
   (string * string, derivative_error) result
 (** Produce or retrieve a cached image derivative [(out_mime, out_bytes)] under
-    [thumbs/<aa>/] for [?max_px=] (clamped to [min_thumb_px..max_thumb_px])
+    [thumbs/<aa>/] for [?max_px=] (quantized via {!quantize_thumb_px})
     and/or [?format=png]. Rejects non-image attachments with {!Not_an_image}. *)
 
 val promote_to_durable : t -> id:string -> (meta option, get_error) result
 (** Atomically promote an [Ephemeral] attachment to [Durable]. Returns [Ok None]
     if absent. *)
 
+val has_ephemeral_pin : t -> keeper:string -> sha256:string -> bool
+(** [true] iff [keeper] currently holds an owned regular ephemeral pin for
+    the validated 64-hex [sha256] under [ephemeral/<keeper>/<sha256>]. *)
+
+val can_keeper_read :
+  t -> keeper:string -> id_or_sha256:string -> (bool, get_error) result
+(** [Ok true] iff the attachment exists and is either [Durable] or currently
+    pinned as ephemeral by [keeper] (even if another keeper originally wrote
+    the shared blob and later evicted its own pin). [Ok false] when absent
+    or ephemeral without a pin owned by [keeper]. *)
+
 val list_ephemeral : t -> keeper:string -> (meta list, string) result
 (** List currently pinned ephemeral attachments for [keeper], newest first. *)
 
-val list_all_ephemeral_pins : t -> Set_util.StringSet.t
-(** Union of all 64-hex digests currently pinned under [ephemeral/*/]. *)
+val list_all_ephemeral_pins : t -> (Set_util.StringSet.t, string) result
+(** Union of all 64-hex digests currently pinned under [ephemeral/*/].
+    Returns [Ok empty] only when [ephemeral/] does not exist ([ENOENT]).
+    Fails closed with [Error _] on any directory or stat read failure. *)
 
 val list_all_blobs : t -> (string list, string) result
-(** List all valid 64-hex digests present under [blobs/00..ff]. *)
+(** List all valid 64-hex digests present under [blobs/00..ff].
+    Fails closed with [Error _] on any directory or stat read failure. *)
+
+val blob_last_modified_at : t -> sha256:string -> (float option, string) result
+(** Latest filesystem mtime across the regular blob and metadata sidecar files
+    ([Ok None] when both are absent; [Error _] on invalid digest, non-regular
+    entry, or stat failure). Used by GC grace-period gating. *)
 
 val delete_unreferenced : t -> sha256:string -> (bool, string) result
 (** Delete the blob, metadata sidecar, and cached thumbnails for [sha256].

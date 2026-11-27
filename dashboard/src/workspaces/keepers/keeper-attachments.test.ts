@@ -349,4 +349,66 @@ describe('Keeper Chat upload-first request body, history decoding, and live KEEP
     expect(view.container.querySelector(`[data-attachment-id="${ATT_USER.attachment_id}"]`)).not.toBeNull()
     expect(view.container.querySelector(`[data-attachment-id="${ATT_GEN.attachment_id}"]`)).not.toBeNull()
   })
+
+  it('blocks KeeperChatTab submit when a draft attachment failed to upload and preserves the failed chip', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined)
+    let chatPostCount = 0
+    const mockFetch = vi.fn<typeof fetch>(async (input, init) => {
+      const url = new URL(String(input), window.location.origin)
+      if (url.pathname === '/api/v1/attachments' && init?.method === 'POST') {
+        return new Response(JSON.stringify({ ok: false, error: 'upload failed' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.pathname === '/api/v1/keepers/chat/stream' && init?.method === 'POST') {
+        chatPostCount += 1
+        return new Response('', { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      }
+      if (url.pathname.includes('/chat/history/page')) {
+        return new Response(JSON.stringify({ messages: [], has_more: false, next_cursor: null }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url.pathname.includes('/chat/operations')) {
+        return new Response(JSON.stringify({ schema: 'masc.keeper_chat_operations_page.v1', operations: [], next_cursor: null }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({ rows: [] }), { headers: { 'Content-Type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', mockFetch)
+
+    const view = render(html`<${KeeperChatTab} keeper=${makeKeeper()} onInspect=${vi.fn()} onMutated=${vi.fn()} />`)
+
+    const pasted = new File([PNG_BYTES], 'broken.png', { type: 'image/png' })
+    fireEvent.paste(view.getByTestId('attachment-composer'), {
+      clipboardData: {
+        items: [{ kind: 'file', getAsFile: () => pasted }],
+        files: [pasted],
+      },
+    })
+
+    await waitFor(() => {
+      expect(view.getByTestId('attachment-chip').getAttribute('data-status')).toBe('error')
+    })
+
+    const textarea = view.getByLabelText('Keeper 채팅 입력') as HTMLTextAreaElement
+    fireEvent.input(textarea, { target: { value: '실패한 첨부와 함께 전송 시도' } })
+
+    const queueBtn = view.getByRole('button', { name: 'Queue ↵' }) as HTMLButtonElement
+    const steerBtn = view.getByRole('button', { name: 'Steer ⌘↵' }) as HTMLButtonElement
+    expect(queueBtn.disabled).toBe(true)
+    expect(steerBtn.disabled).toBe(true)
+    expect(view.getByTestId('attachment-error-blocker').textContent).toContain('재시도하거나 제거')
+
+    // Pressing Enter must also block submit without clearing the failed chip
+    fireEvent.keyDown(textarea, { key: 'Enter' })
+    await waitFor(() => {
+      expect(view.container.textContent).toContain('업로드에 실패한 첨부 파일을 재시도하거나 제거한 뒤 전송하세요.')
+    })
+    expect(chatPostCount).toBe(0)
+    expect(view.getByTestId('attachment-chip').getAttribute('data-status')).toBe('error')
+    expect(textarea.value).toBe('실패한 첨부와 함께 전송 시도')
+  })
 })

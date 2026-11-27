@@ -126,6 +126,8 @@ let paeth a b c =
   else if pb <= pc then b
   else c
 
+exception Inflate_limit_exceeded
+
 let inflate_bounded ~max_output compressed =
   let input = De.bigstring_create De.io_buffer_size in
   let output = De.bigstring_create De.io_buffer_size in
@@ -133,7 +135,6 @@ let inflate_bounded ~max_output compressed =
   let out_buf = Buffer.create (Int.min max_output 65536) in
   let pos = ref 0 in
   let clen = String.length compressed in
-  let overflow = ref false in
   let refill buf =
     let avail = clen - !pos in
     let take = Int.min (Bigstringaf.length buf) avail in
@@ -145,14 +146,15 @@ let inflate_bounded ~max_output compressed =
     take
   in
   let flush buf len =
-    if Buffer.length out_buf + len > max_output then overflow := true
+    if Buffer.length out_buf + len > max_output then
+      raise Inflate_limit_exceeded
     else Buffer.add_string out_buf (Bigstringaf.substring buf ~off:0 ~len)
   in
   match Zl.Higher.uncompress ~allocate ~refill ~flush input output with
-  | Ok () ->
-      if !overflow then Error "PNG IDAT exceeds expected decompressed size"
-      else Ok (Buffer.contents out_buf)
+  | Ok () -> Ok (Buffer.contents out_buf)
   | Error (`Msg msg) -> Error ("PNG zlib inflate failed: " ^ msg)
+  | exception Inflate_limit_exceeded ->
+      Error "PNG IDAT exceeds expected decompressed size"
 
 let unfilter_scanlines ~height ~row_bytes ~bpp raw =
   let expected = height * (1 + row_bytes) in
@@ -272,27 +274,32 @@ let decode_rgba ?(max_pixels = default_max_pixels) bytes =
           Error "unsupported PNG compression or filter method"
         else if !interlace <> 0 then
           Error "interlaced PNG is not supported"
-        else if not (!bit_depth = 8 || !bit_depth = 16) then
-          Error (Printf.sprintf "unsupported PNG bit depth %d" !bit_depth)
         else
+          let bd = !bit_depth in
           let channels_res =
-            match !color_type with
-            | 0 -> Ok 1
-            | 2 -> Ok 3
-            | 3 ->
-                if !bit_depth <> 8 then
-                  Error "indexed PNG requires 8-bit depth"
-                else Ok 1
-            | 4 -> Ok 2
-            | 6 -> Ok 4
-            | other -> Error (Printf.sprintf "unsupported PNG color type %d" other)
+            match !color_type, bd with
+            | 0, (1 | 2 | 4 | 8 | 16) -> Ok 1
+            | 2, (8 | 16) -> Ok 3
+            | 3, (1 | 2 | 4 | 8) -> Ok 1
+            | 4, (8 | 16) -> Ok 2
+            | 6, (8 | 16) -> Ok 4
+            | (0 | 2 | 3 | 4 | 6), _ ->
+                Error
+                  (Printf.sprintf
+                     "unsupported PNG bit depth %d for color type %d" bd
+                     !color_type)
+            | other, _ ->
+                Error (Printf.sprintf "unsupported PNG color type %d" other)
           in
           match channels_res with
           | Error _ as err -> err
           | Ok channels -> (
-              let bytes_per_sample = !bit_depth / 8 in
-              let bpp = channels * bytes_per_sample in
-              let row_bytes = width * bpp in
+              let bits_per_pixel = channels * bd in
+              let bpp = Int.max 1 ((bits_per_pixel + 7) / 8) in
+              let row_bytes =
+                if bits_per_pixel >= 8 then width * (bits_per_pixel / 8)
+                else ((width * bits_per_pixel) + 7) / 8
+              in
               let expected_inflated = height * (1 + row_bytes) in
               match
                 inflate_bounded ~max_output:(expected_inflated + 1024)
@@ -312,6 +319,22 @@ let decode_rgba ?(max_pixels = default_max_pixels) bytes =
                         Bytes.set rgba (o + 3) (Char.chr a)
                       in
                       let get_s off = Char.code (Bytes.get scanlines off) in
+                      let read_packed_sample ~row_off ~x =
+                        match bd with
+                        | 1 ->
+                            (get_s (row_off + (x lsr 3)) lsr (7 - (x land 7)))
+                            land 0x01
+                        | 2 ->
+                            (get_s (row_off + (x lsr 2))
+                             lsr (6 - ((x land 3) lsl 1)))
+                            land 0x03
+                        | 4 ->
+                            (get_s (row_off + (x lsr 1))
+                             lsr (4 - ((x land 1) lsl 2)))
+                            land 0x0F
+                        | _ -> get_s (row_off + x)
+                      in
+                      let bytes_per_sample = Int.max 1 (bd / 8) in
                       let total_px = width * height in
                       let ok =
                         match !color_type with
@@ -334,9 +357,40 @@ let decode_rgba ?(max_pixels = default_max_pixels) bytes =
                             done;
                             Ok ()
                         | 0 ->
-                            for i = 0 to total_px - 1 do
-                              let v = get_s (i * bpp) in
-                              set_px i v v v 255
+                            let trns_gray =
+                              match !trns with
+                              | Some ts when String.length ts >= 2 ->
+                                  Some (u16_be ts 0)
+                              | Some _ | None -> None
+                            in
+                            for y = 0 to height - 1 do
+                              let row_off = y * row_bytes in
+                              let row_px = y * width in
+                              for x = 0 to width - 1 do
+                                let raw_sample, gray8 =
+                                  if bd = 16 then
+                                    let o = row_off + (x * 2) in
+                                    let hi = get_s o in
+                                    let lo = get_s (o + 1) in
+                                    ((hi lsl 8) lor lo, hi)
+                                  else
+                                    let s = read_packed_sample ~row_off ~x in
+                                    let g8 =
+                                      match bd with
+                                      | 1 -> if s = 0 then 0 else 255
+                                      | 2 -> s * 85
+                                      | 4 -> (s lsl 4) lor s
+                                      | _ -> s
+                                    in
+                                    (s, g8)
+                                in
+                                let a =
+                                  match trns_gray with
+                                  | Some tg when tg = raw_sample -> 0
+                                  | Some _ | None -> 255
+                                in
+                                set_px (row_px + x) gray8 gray8 gray8 a
+                              done
                             done;
                             Ok ()
                         | 4 ->
@@ -353,21 +407,25 @@ let decode_rgba ?(max_pixels = default_max_pixels) bytes =
                             | Some plte ->
                                 let plte_entries = String.length plte / 3 in
                                 let trns_s = !trns in
-                                for i = 0 to total_px - 1 do
-                                  let idx = get_s i in
-                                  if idx < plte_entries then
-                                    let po = idx * 3 in
-                                    let r = Char.code plte.[po] in
-                                    let g = Char.code plte.[po + 1] in
-                                    let b = Char.code plte.[po + 2] in
-                                    let a =
-                                      match trns_s with
-                                      | Some ts when idx < String.length ts ->
-                                          Char.code ts.[idx]
-                                      | Some _ | None -> 255
-                                    in
-                                    set_px i r g b a
-                                  else set_px i 0 0 0 255
+                                for y = 0 to height - 1 do
+                                  let row_off = y * row_bytes in
+                                  let row_px = y * width in
+                                  for x = 0 to width - 1 do
+                                    let idx = read_packed_sample ~row_off ~x in
+                                    if idx < plte_entries then
+                                      let po = idx * 3 in
+                                      let r = Char.code plte.[po] in
+                                      let g = Char.code plte.[po + 1] in
+                                      let b = Char.code plte.[po + 2] in
+                                      let a =
+                                        match trns_s with
+                                        | Some ts when idx < String.length ts ->
+                                            Char.code ts.[idx]
+                                        | Some _ | None -> 255
+                                      in
+                                      set_px (row_px + x) r g b a
+                                    else set_px (row_px + x) 0 0 0 255
+                                  done
                                 done;
                                 Ok ())
                         | _ -> Error "unsupported PNG color type"

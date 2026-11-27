@@ -190,11 +190,17 @@ let test_selection () = with_fixture "malformed" @@ fun ~root:_ ~load ~run ~exec
    | V.Vo_invalid_structured_response _ -> () | _ -> fail "explicit selection unexpectedly succeeded");
   check bool "explicit runtime never falls back" false (Sys.file_exists fallback_capture);
   (match run () with
+   | V.Vo_invalid_structured_response _ -> ()
+   | _ -> fail "strict [runtime.media].vision_reader pin unexpectedly fell back");
+  check bool "strict vision_reader pin never spills over to fallback" false
+    (Sys.file_exists fallback_capture);
+  load ();
+  (match run () with
    | V.Vo_ok reading -> check string "auto-discovered fallback succeeds" "fallback.vision" reading.runtime_id
-   | _ -> fail "invalid output did not advance to fallback")
+   | _ -> fail "invalid output did not advance to auto-discovered fallback")
 
 let test_transport_failure mode = with_fixture mode @@ fun ~root:_ ~load ~run ~execute ~capture ~fallback_capture ->
-  load ~vision_reader:"official.vision" ();
+  load ();
   let outcome = run () in
   (match mode, outcome with
    | "no-account", V.Vo_ok reading ->
@@ -242,11 +248,11 @@ let test_reasoning_metadata_refusal mode =
        [`String "turn/start"; `String "thread/inject_items"]) rows);
   check bool "single candidate never invokes another account" false
     (Sys.file_exists fallback_capture);
-  load ~reasoning_effort ~include_fallback:true ~vision_reader:"official.vision" ();
+  load ~reasoning_effort ~include_fallback:true ();
   (match run () with
-   | V.Vo_ok reading -> check string "declared fallback survives metadata refusal"
+   | V.Vo_ok reading -> check string "auto-discovered fallback survives metadata refusal"
        "fallback.vision" reading.runtime_id
-   | _ -> fail "effort metadata refusal did not advance to the declared fallback");
+   | _ -> fail "effort metadata refusal did not advance to the auto-discovered fallback");
   let params = request "turn/start" (records fallback_capture) |> member "params" in
   check string "fallback negotiates its own effort ladder" "high"
     (member "effort" params |> Yojson.Safe.Util.to_string);
@@ -286,8 +292,6 @@ supports-image-input = true
 max-concurrent = 2
 [runtime]
 default = "claude.vision"
-[runtime.media]
-vision_reader = "claude.vision"
 [runtime.exact_output_lanes.verifier_exact]
 slots = []
 cli_slots = ["fallback.vision"]

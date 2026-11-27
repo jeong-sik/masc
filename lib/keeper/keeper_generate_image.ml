@@ -9,9 +9,10 @@ type endpoint_generate_fn =
   config:Llm_provider.Provider_config.t ->
   dialect:Llm_provider.Capabilities.images_api_dialect ->
   request ->
-  (Llm_provider.Image_gen.generated_image list, Llm_provider.Http_client.http_error) result
+  (Llm_provider.Image_gen.generation_result, Llm_provider.Http_client.http_error) result
 
 type remote_fetch_fn =
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   max_bytes:int ->
   string ->
@@ -120,47 +121,110 @@ let sibling_provider_config
   ; response_format = Llm_provider.Types.Off
   }
 
-let is_private_or_loopback_host host =
-  let h = String.lowercase_ascii (String.trim host) in
-  String.equal h ""
-  || String.equal h "localhost"
-  || String.ends_with ~suffix:".localhost" h
-  || String.ends_with ~suffix:".local" h
-  || String.equal h "::1"
-  || String.equal h "[::1]"
-  || String.equal h "0.0.0.0"
-  || String.starts_with ~prefix:"127." h
-  || String.starts_with ~prefix:"10." h
-  || String.starts_with ~prefix:"169.254." h
-  || String.starts_with ~prefix:"192.168." h
-  || String.starts_with ~prefix:"fc" h
-  || String.starts_with ~prefix:"fd" h
-  || (String.starts_with ~prefix:"172." h
-      &&
-      match String.split_on_char '.' h with
-      | _ :: second :: _ ->
-        (match int_of_string_opt second with
-         | Some n -> n >= 16 && n <= 31
-         | None -> false)
-      | _ -> false)
+let max_error_body_chars = 512
+let max_remote_redirects = 5
+
+let strip_ipv6_brackets s =
+  let len = String.length s in
+  if len >= 2 && Char.equal s.[0] '[' && Char.equal s.[len - 1] ']'
+  then String.sub s 1 (len - 2)
+  else s
+
+let strip_trailing_dot s =
+  let len = String.length s in
+  if len > 0 && Char.equal s.[len - 1] '.'
+  then String.sub s 0 (len - 1)
+  else s
 
 let validate_remote_download_url url =
   let uri = Uri.of_string (String.trim url) in
-  match Uri.scheme uri, Uri.host uri with
-  | Some "https", Some host when not (is_private_or_loopback_host host) ->
+  match Option.map String.lowercase_ascii (Uri.scheme uri), Uri.host uri with
+  | Some "https", Some raw_host ->
     if Option.is_some (Uri.userinfo uri)
     then Error "remote image URL must not contain credentials"
-    else Ok ()
-  | Some scheme, _ when not (String.equal scheme "https") ->
+    else (
+      let host =
+        raw_host
+        |> String.trim
+        |> strip_ipv6_brackets
+        |> strip_trailing_dot
+        |> String.lowercase_ascii
+      in
+      if String.equal host ""
+         || String.equal host "localhost"
+         || String.ends_with ~suffix:".localhost" host
+         || String.ends_with ~suffix:".local" host
+      then Error "remote image URL has a missing or disallowed host"
+      else (
+        match Ipaddr.of_string host with
+        | Ok ip ->
+          (match Outbound_address.ip_refusal ip with
+           | Some refusal ->
+             Error
+               (Printf.sprintf
+                  "remote image URL host is disallowed (%s)"
+                  (Outbound_address.refusal_to_string refusal))
+           | None -> Ok ())
+        | Error _ -> Ok ()))
+  | Some scheme, _ ->
     Error (Printf.sprintf "remote image URL must use https (got %s)" scheme)
-  | _ -> Error "remote image URL has a missing or disallowed host"
+  | None, _ -> Error "remote image URL must use https"
 
-let default_fetch_remote_url ~clock ~max_bytes url =
-  let* () = validate_remote_download_url url in
-  match Masc_http_client.get_sync ~clock ~max_body_bytes:max_bytes ~url ~headers:[] () with
-  | Ok (code, bytes) when code >= 200 && code < 300 -> Ok bytes
-  | Ok (code, _) -> Error (Printf.sprintf "remote image download returned HTTP %d" code)
-  | Error err -> Error (Printf.sprintf "remote image download failed: %s" err)
+let is_redirect_status code =
+  code = 301 || code = 302 || code = 303 || code = 307 || code = 308
+
+let header_ci headers name =
+  let target = String.lowercase_ascii name in
+  List.find_map
+    (fun (k, v) ->
+       if String.equal (String.lowercase_ascii k) target then Some v else None)
+    headers
+
+let default_fetch_remote_url ~net ~clock ~max_bytes initial_url =
+  let timeout_sec = Keeper_runtime_resolved.provider_call_deadline_sec () in
+  let rec follow ~remaining_redirects current_url =
+    let* () = validate_remote_download_url current_url in
+    let current_uri = Uri.of_string (String.trim current_url) in
+    match Outbound_address.resolve_allowed_host ~net current_uri with
+    | Error refusal ->
+      Error
+        (Printf.sprintf
+           "remote image download refused host: %s"
+           (Outbound_address.host_refusal_to_string refusal))
+    | Ok resolved_addresses ->
+      (match
+         Masc_http_client.get_response_sync
+           ~clock
+           ~timeout_sec
+           ~max_body_bytes:max_bytes
+           ~resolved_addresses
+           ~url:current_url
+           ~headers:[]
+           ()
+       with
+       | Error err -> Error (Printf.sprintf "remote image download failed: %s" err)
+       | Ok (resp : Masc_http_client.response) when resp.status >= 200 && resp.status < 300 ->
+         Ok resp.body
+       | Ok resp when is_redirect_status resp.status ->
+         if remaining_redirects <= 0
+         then Error "remote image download exceeded maximum redirects"
+         else (
+           match header_ci resp.headers "location" with
+           | Some loc when String.trim loc <> "" ->
+             let next_url =
+               Uri.resolve "" current_uri (Uri.of_string (String.trim loc))
+               |> Uri.to_string
+             in
+             follow ~remaining_redirects:(remaining_redirects - 1) next_url
+           | Some _ | None ->
+             Error
+               (Printf.sprintf
+                  "remote image download redirect HTTP %d missing Location header"
+                  resp.status))
+       | Ok resp ->
+         Error (Printf.sprintf "remote image download returned HTTP %d" resp.status))
+  in
+  follow ~remaining_redirects:max_remote_redirects initial_url
 
 let failed ~failure_class code detail =
   let payload =
@@ -180,18 +244,28 @@ let image_options_of_request (req : request) : Llm_provider.Provider_config.imag
   ; count = req.count
   }
 
+let compact_base64 raw =
+  let buf = Buffer.create (String.length raw) in
+  String.iter
+    (function
+      | ' ' | '\t' | '\r' | '\n' -> ()
+      | c -> Buffer.add_char buf c)
+    raw;
+  Buffer.contents buf
+
 let extracted_images_of_api_response (resp : Agent_core.Types.api_response)
   : (Llm_provider.Image_gen.generated_image list, string) result
   =
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
     | Llm_provider.Types.Image { media_type; source } :: rest ->
+      let mime_type = Llm_provider.Api_common.declared_media_type_opt media_type in
       (match source with
        | Llm_provider.Types.Base64 b64 ->
-         (match Base64.decode b64 with
+         (match Base64.decode ~pad:false (compact_base64 b64) with
           | Ok data_bytes ->
             let item : Llm_provider.Image_gen.generated_image =
-              { mime_type = media_type
+              { mime_type
               ; data_bytes = Some data_bytes
               ; remote_url = None
               ; revised_prompt = None
@@ -201,7 +275,7 @@ let extracted_images_of_api_response (resp : Agent_core.Types.api_response)
           | Error (`Msg msg) -> Error ("invalid base64 image in model response: " ^ msg))
        | Llm_provider.Types.Url url ->
          let item : Llm_provider.Image_gen.generated_image =
-           { mime_type = media_type
+           { mime_type
            ; data_bytes = None
            ; remote_url = Some url
            ; revised_prompt = None
@@ -226,33 +300,150 @@ let extracted_images_of_api_response (resp : Agent_core.Types.api_response)
   then Error "provider completed without returning any image"
   else Ok images
 
+let sanitize_error_snippet raw =
+  let len = String.length raw in
+  let buf = Buffer.create (min len max_error_body_chars) in
+  let rec loop idx prev_space =
+    if idx >= len
+    then false
+    else if Buffer.length buf >= max_error_body_chars
+    then true
+    else (
+      let c = raw.[idx] in
+      let code = Char.code c in
+      if code < 32 || code = 127 || Char.equal c ' '
+      then (
+        if (not prev_space) && Buffer.length buf > 0 then Buffer.add_char buf ' ';
+        loop (idx + 1) true)
+      else (
+        Buffer.add_char buf c;
+        loop (idx + 1) false))
+  in
+  let truncated = loop 0 false in
+  let text = String.trim (Buffer.contents buf) in
+  if truncated && text <> "" then text ^ "..." else text
+
 let format_http_error (err : Llm_provider.Http_client.http_error) =
   match err with
-  | Llm_provider.Http_client.HttpError { code; _ } ->
-    Printf.sprintf "HTTP %d" code
+  | Llm_provider.Http_client.HttpError { code; body; _ } ->
+    (match body with
+     | Llm_provider.Http_client.Not_received_in_window ->
+       Printf.sprintf "HTTP %d (response body not received)" code
+     | Llm_provider.Http_client.Received raw ->
+       let snippet = sanitize_error_snippet raw in
+       if String.equal snippet ""
+       then Printf.sprintf "HTTP %d" code
+       else Printf.sprintf "HTTP %d: %s" code snippet)
   | Llm_provider.Http_client.NetworkError { message; _ } ->
-    "network error: " ^ message
+    "network error: " ^ sanitize_error_snippet message
   | Llm_provider.Http_client.Connect_failed { message; _ } ->
-    "connection failed: " ^ message
+    "connection failed: " ^ sanitize_error_snippet message
   | Llm_provider.Http_client.TimeoutError { message; _ } ->
-    "timeout: " ^ message
+    "timeout: " ^ sanitize_error_snippet message
   | Llm_provider.Http_client.AcceptRejected { reason } ->
-    "request rejected: " ^ reason
+    "request rejected: " ^ sanitize_error_snippet reason
   | Llm_provider.Http_client.ProviderTerminal { message; _ } ->
-    "provider terminal: " ^ message
+    "provider terminal: " ^ sanitize_error_snippet message
   | Llm_provider.Http_client.ProviderFailure { message; _ } ->
-    "provider failure: " ^ message
+    "provider failure: " ^ sanitize_error_snippet message
+
+type target_failure_kind =
+  | Pre_dispatch_failover
+  | Terminal_no_failover of Tool_result.tool_failure_class
+
+type target_error =
+  { kind : target_failure_kind
+  ; detail : string
+  }
+
+let pre_dispatch_error detail = { kind = Pre_dispatch_failover; detail }
+
+let terminal_error ~failure_class detail =
+  { kind = Terminal_no_failover failure_class; detail }
+
+(* Paid image generation is side-effecting: only advance to another candidate
+   when the failure is guaranteed to have occurred before the provider accepted
+   and billed the request. Post-dispatch errors (timeouts, 400/422, 500/504,
+   connection resets, response-body-too-large, parse errors) fail closed. *)
+let classify_http_error (err : Llm_provider.Http_client.http_error) : target_failure_kind =
+  match err with
+  | Llm_provider.Http_client.Connect_failed _ -> Pre_dispatch_failover
+  | Llm_provider.Http_client.NetworkError { kind; _ } ->
+    (match kind with
+     | Llm_provider.Http_client.Connection_refused
+     | Llm_provider.Http_client.Dns_failure
+     | Llm_provider.Http_client.Unreachable
+     | Llm_provider.Http_client.Tls_error
+     | Llm_provider.Http_client.Local_resource_exhaustion -> Pre_dispatch_failover
+     | Llm_provider.Http_client.Timeout
+     | Llm_provider.Http_client.Connection_reset
+     | Llm_provider.Http_client.End_of_file
+     | Llm_provider.Http_client.Unknown ->
+       Terminal_no_failover Tool_result.Dependency_unavailable)
+  | Llm_provider.Http_client.HttpError { code; _ } ->
+    (match code with
+     | 401 | 403 | 429 | 503 -> Pre_dispatch_failover
+     | 400 | 404 | 422 -> Terminal_no_failover Tool_result.Policy_rejection
+     | _ -> Terminal_no_failover Tool_result.Dependency_unavailable)
+  | Llm_provider.Http_client.TimeoutError _ ->
+    Terminal_no_failover Tool_result.Dependency_unavailable
+  | Llm_provider.Http_client.AcceptRejected _ ->
+    Terminal_no_failover Tool_result.Policy_rejection
+  | Llm_provider.Http_client.ProviderTerminal _ ->
+    Terminal_no_failover Tool_result.Runtime_failure
+  | Llm_provider.Http_client.ProviderFailure { kind; _ } ->
+    (match kind with
+     | Llm_provider.Http_client.Capacity_exhausted _
+     | Llm_provider.Http_client.Hard_quota _
+     | Llm_provider.Http_client.Cli_startup_failed _ -> Pre_dispatch_failover
+     | Llm_provider.Http_client.Capability_mismatch _
+     | Llm_provider.Http_client.Cli_policy_invalid _ ->
+       Terminal_no_failover Tool_result.Policy_rejection
+     | Llm_provider.Http_client.Response_body_too_large _
+     | Llm_provider.Http_client.Provider_parse_error _
+     | Llm_provider.Http_client.Provider_wire_error _
+     | Llm_provider.Http_client.Provider_reported_error _
+     | Llm_provider.Http_client.Provider_interrupted
+     | Llm_provider.Http_client.Empty_completion _
+     | Llm_provider.Http_client.Context_overflow _
+     | Llm_provider.Http_client.Unknown_provider_failure _ ->
+       Terminal_no_failover Tool_result.Runtime_failure)
+
+let classify_official_failure (failure : Fusion_official_client.failure)
+  : target_failure_kind
+  =
+  match failure with
+  | Fusion_official_client.Setup_failure _
+  | Fusion_official_client.Claude_admission_failure _ -> Pre_dispatch_failover
+  | Fusion_official_client.Missing_reply
+  | Fusion_official_client.Codex_failure _
+  | Fusion_official_client.Claude_failure _
+  | Fusion_official_client.Antigravity_failure _
+  | Fusion_official_client.Acp_failure _ ->
+    Terminal_no_failover Tool_result.Runtime_failure
 
 let unseal_agent_core (runtime : Runtime_instance.t) =
   match runtime.Runtime_instance.execution with
   | Runtime_execution.Agent_core sealed ->
     Runtime_account_access.authorize_api sealed
-    |> Result.map_error Runtime_account_access.refusal_to_string
+    |> Result.map_error (fun r ->
+      pre_dispatch_error (Runtime_account_access.refusal_to_string r))
   | Runtime_execution.Claude_code _
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Antigravity_cli _
   | Runtime_execution.Acp _ ->
-    Error (Printf.sprintf "runtime %s is not an HTTP Agent_core runtime" runtime.id)
+    Error
+      (pre_dispatch_error
+         (Printf.sprintf "runtime %s is not an HTTP Agent_core runtime" runtime.id))
+
+let check_negative_prompt_supported ~target_label ~unsupported =
+  if List.mem "negative_prompt" unsupported
+  then
+    Error
+      (terminal_error
+         ~failure_class:Tool_result.Policy_rejection
+         (Printf.sprintf "%s does not support negative_prompt" target_label))
+  else Ok ()
 
 let run_single_target
     ~base_dir
@@ -263,25 +454,42 @@ let run_single_target
     ?complete_in_turn
     (req : request)
     (target : Runtime_agent.image_generator_target)
-  : (Llm_provider.Image_gen.generated_image list, string) result
+  : (Llm_provider.Image_gen.generation_result, target_error) result
   =
+  let target_label = Runtime_agent.image_generator_target_label target in
+  let timeout_s = Keeper_runtime_resolved.provider_call_deadline_sec () in
   let call_endpoint ~config ~dialect =
+    let unsupported = Llm_provider.Image_gen.unsupported_options ~dialect req in
+    let* () = check_negative_prompt_supported ~target_label ~unsupported in
     let fn =
       match generate_endpoint with
       | Some f -> f
       | None ->
         fun ~sw ~net ~clock ~config ~dialect req ->
-          Llm_provider.Image_gen.generate ~sw ~net ~clock ~config ~dialect req
+          Llm_provider.Image_gen.generate
+            ~timeout_s
+            ~sw
+            ~net
+            ~clock
+            ~config
+            ~dialect
+            req
     in
-    fn ~sw ~net ~clock ~config ~dialect req
-    |> Result.map_error format_http_error
+    match fn ~sw ~net ~clock ~config ~dialect req with
+    | Ok res ->
+      let ignored_options =
+        if res.ignored_options <> [] then res.ignored_options else unsupported
+      in
+      Ok { res with ignored_options }
+    | Error err ->
+      Error { kind = classify_http_error err; detail = format_http_error err }
   in
-  let call_in_turn ~config =
-    let prompt_text =
-      match req.negative_prompt with
-      | Some neg when String.trim neg <> "" ->
-        Printf.sprintf "%s\n\nAvoid: %s" req.prompt neg
-      | Some _ | None -> req.prompt
+  let call_in_turn ~config ~contract =
+    let ignored_options =
+      Llm_provider.Image_gen.unsupported_options_for_contract ~contract req
+    in
+    let* () =
+      check_negative_prompt_supported ~target_label ~unsupported:ignored_options
     in
     let config =
       { config with
@@ -294,7 +502,7 @@ let run_single_target
     let messages =
       [ Llm_provider.Types.make_message
           ~role:Llm_provider.Types.User
-          [ Llm_provider.Types.text_block prompt_text ]
+          [ Llm_provider.Types.text_block req.prompt ]
       ]
     in
     match
@@ -307,8 +515,13 @@ let run_single_target
         ~messages
         ()
     with
-    | Error err -> Error (format_http_error err)
-    | Ok resp -> extracted_images_of_api_response resp
+    | Error err ->
+      Error { kind = classify_http_error err; detail = format_http_error err }
+    | Ok resp ->
+      (match extracted_images_of_api_response resp with
+       | Ok images -> Ok { Llm_provider.Image_gen.images; ignored_options }
+       | Error detail ->
+         Error (terminal_error ~failure_class:Tool_result.Runtime_failure detail))
   in
   match target with
   | Runtime_agent.Runtime_images_endpoint { runtime; dialect } ->
@@ -322,15 +535,28 @@ let run_single_target
     in
     call_endpoint ~config ~dialect
   | Runtime_agent.Derived_sibling_in_turn
-      { source_runtime; model_id; provider_id; contract = _; _ } ->
+      { source_runtime; model_id; provider_id; contract; _ } ->
     let* base = unseal_agent_core source_runtime in
     let config = sibling_provider_config base ~model_id ~provider_id () in
-    call_in_turn ~config
+    call_in_turn ~config ~contract
   | Runtime_agent.Runtime_in_turn { runtime; contract } ->
     (match runtime.Runtime_instance.execution, contract with
-     | Runtime_execution.Agent_core _, _ ->
+     | _, Llm_provider.Capabilities.Endpoint_images_api dialect ->
        let* config = unseal_agent_core runtime in
-       call_in_turn ~config
+       call_endpoint ~config ~dialect
+     | _, Llm_provider.Capabilities.No_image_output ->
+       Error
+         (terminal_error
+            ~failure_class:Tool_result.Policy_rejection
+            (Printf.sprintf "runtime %s does not support image generation" runtime.id))
+     | ( Runtime_execution.Agent_core _
+       , ( Llm_provider.Capabilities.In_turn_gemini_modalities
+         | Llm_provider.Capabilities.In_turn_openai_responses_tool
+         | Llm_provider.Capabilities.In_turn_openai_chat_modalities
+         | Llm_provider.Capabilities.In_turn_codex_item
+         | Llm_provider.Capabilities.In_turn_acp_chunk ) ) ->
+       let* config = unseal_agent_core runtime in
+       call_in_turn ~config ~contract
      | ( ( Runtime_execution.Codex_app_server _
          | Runtime_execution.Acp _
          | Runtime_execution.Claude_code _
@@ -340,37 +566,47 @@ let run_single_target
          | Llm_provider.Capabilities.In_turn_openai_responses_tool
          | Llm_provider.Capabilities.In_turn_openai_chat_modalities
          | Llm_provider.Capabilities.In_turn_gemini_modalities ) ) ->
+       let ignored_options =
+         Llm_provider.Image_gen.unsupported_options_for_contract ~contract req
+       in
+       let* () =
+         check_negative_prompt_supported ~target_label ~unsupported:ignored_options
+       in
        (match
           Fusion_official_client.run_with_images
             ~images:[]
             ~base_dir
             ~runtime
             ~system_prompt:"Generate the requested image."
+            ~timeout_s
             ~prompt:req.prompt
             ()
         with
         | Error failure ->
           Error
-            (Fusion_official_client.failure_detail ~runtime_id:runtime.id failure)
+            { kind = classify_official_failure failure
+            ; detail = Fusion_official_client.failure_detail ~runtime_id:runtime.id failure
+            }
         | Ok resp ->
           if resp.media_outputs = []
-          then Error (Printf.sprintf "runtime %s completed without generating an image" runtime.id)
+          then
+            Error
+              (terminal_error
+                 ~failure_class:Tool_result.Runtime_failure
+                 (Printf.sprintf "runtime %s completed without generating an image" runtime.id))
           else
-            Ok
-              (List.map
-                 (fun (m : Fusion_official_client.media_output) ->
-                    ({ mime_type = m.mime_type
-                     ; data_bytes = Some m.data_bytes
-                     ; remote_url = None
-                     ; revised_prompt = None
-                     }
-                     : Llm_provider.Image_gen.generated_image))
-                 resp.media_outputs))
-     | _, Llm_provider.Capabilities.Endpoint_images_api dialect ->
-       let* config = unseal_agent_core runtime in
-       call_endpoint ~config ~dialect
-     | _, Llm_provider.Capabilities.No_image_output ->
-       Error (Printf.sprintf "runtime %s does not support image generation" runtime.id))
+            let images =
+              List.map
+                (fun (m : Fusion_official_client.media_output) ->
+                   ({ mime_type = Llm_provider.Api_common.declared_media_type_opt m.mime_type
+                    ; data_bytes = Some m.data_bytes
+                    ; remote_url = None
+                    ; revised_prompt = None
+                    }
+                    : Llm_provider.Image_gen.generated_image))
+                resp.media_outputs
+            in
+            Ok { Llm_provider.Image_gen.images; ignored_options }))
 
 let resolve_base_path ?base_path () =
   match base_path with
@@ -382,45 +618,79 @@ let resolve_base_path ?base_path () =
 let persist_generated_images
     ~store
     ~keeper_name
+    ~net
     ~clock
     ~fetch_remote_url
     (images : Llm_provider.Image_gen.generated_image list)
-  : ((Attachment_store.meta * string * string option) list, string) result
+  : (Attachment_store.meta * string * string option) list * string list
   =
   let max_bytes = Attachment_store.max_bytes () in
-  let rec loop idx acc = function
-    | [] -> Ok (List.rev acc)
+  let rec loop idx persisted_rev errors_rev = function
+    | [] -> List.rev persisted_rev, List.rev errors_rev
     | (img : Llm_provider.Image_gen.generated_image) :: rest ->
-      let* raw_bytes =
+      let raw_res =
         match img.data_bytes, img.remote_url with
         | Some bytes, _ -> Ok bytes
-        | None, Some url -> fetch_remote_url ~clock ~max_bytes url
+        | None, Some url -> fetch_remote_url ~net ~clock ~max_bytes url
         | None, None -> Error "generated image entry contained neither bytes nor URL"
       in
-      let declared_mime =
-        let m = String.trim img.mime_type in
-        if String.equal m "" then None else Some m
-      in
-      let ext =
-        match Attachment_store.sniff_mime raw_bytes with
-        | Some supported -> Attachment_store.extension_of_mime supported
-        | None -> ".png"
-      in
-      let filename = Printf.sprintf "generated-%d%s" idx ext in
-      let* meta =
-        Attachment_store.put
-          ?declared_mime
-          ~filename
-          ~origin:Attachment_store.Model_generated
-          ~created_by:keeper_name
-          ~retention:Attachment_store.Durable
-          store
-          ~bytes:raw_bytes
-        |> Result.map_error Attachment_store.put_error_to_string
-      in
-      loop (idx + 1) ((meta, raw_bytes, img.revised_prompt) :: acc) rest
+      (match raw_res with
+       | Error err ->
+         let msg = Printf.sprintf "image #%d: %s" idx err in
+         loop (idx + 1) persisted_rev (msg :: errors_rev) rest
+       | Ok raw_bytes ->
+         let declared_mime =
+           Option.bind img.mime_type Llm_provider.Api_common.declared_media_type_opt
+         in
+         let ext =
+           match Attachment_store.sniff_mime raw_bytes with
+           | Some supported -> Attachment_store.extension_of_mime supported
+           | None -> ".png"
+         in
+         let filename = Printf.sprintf "generated-%d%s" idx ext in
+         let put_once declared_mime =
+           Attachment_store.put
+             ?declared_mime
+             ~filename
+             ~origin:Attachment_store.Model_generated
+             ~created_by:keeper_name
+             ~retention:Attachment_store.Durable
+             store
+             ~bytes:raw_bytes
+         in
+         let stored =
+           match put_once declared_mime with
+           | Ok meta -> Ok meta
+           | Error (Attachment_store.Mime_mismatch _) when Option.is_some declared_mime ->
+             (* Provider declared a stale/inaccurate MIME header for valid bytes;
+                retry with magic-byte sniffing instead of dropping a paid image. *)
+             put_once None
+           | Error
+               ( Attachment_store.Mime_mismatch _
+               | Attachment_store.Empty_payload
+               | Attachment_store.Payload_too_large _
+               | Attachment_store.Unsupported_or_unknown_format _
+               | Attachment_store.Forbidden_mime _
+               | Attachment_store.Invalid_keeper_name _
+               | Attachment_store.Store_io_failed _ ) as err -> err
+         in
+         (match stored with
+          | Ok meta ->
+            loop
+              (idx + 1)
+              ((meta, raw_bytes, img.revised_prompt) :: persisted_rev)
+              errors_rev
+              rest
+          | Error err ->
+            let msg =
+              Printf.sprintf
+                "image #%d: %s"
+                idx
+                (Attachment_store.put_error_to_string err)
+            in
+            loop (idx + 1) persisted_rev (msg :: errors_rev) rest))
   in
-  loop 1 [] images
+  loop 1 [] [] images
 
 let handle_with_outcome
     ?base_path
@@ -492,29 +762,46 @@ let handle_with_outcome
                    req
                    target
                with
-               | Error err ->
+               | Error { kind = Pre_dispatch_failover; detail } ->
                  Log.Keeper.warn
-                   "keeper_generate_image candidate failed keeper=%s target=%s: %s"
+                   "keeper_generate_image pre-dispatch candidate failure keeper=%s target=%s: %s"
                    meta.name
                    label
-                   err;
-                 walk (Some (Printf.sprintf "%s: %s" label err)) rest
-               | Ok generated ->
+                   detail;
+                 walk (Some (Printf.sprintf "%s: %s" label detail)) rest
+               | Error { kind = Terminal_no_failover failure_class; detail } ->
+                 Log.Keeper.warn
+                   "keeper_generate_image terminal failure (no failover) keeper=%s target=%s: %s"
+                   meta.name
+                   label
+                   detail;
+                 failed
+                   ~failure_class
+                   "image_generation_failed"
+                   (Printf.sprintf "%s: %s" label detail)
+               | Ok { Llm_provider.Image_gen.images; ignored_options } ->
                  let store = Attachment_store.create ~base_path:resolved_base in
-                 (match
-                    persist_generated_images
-                      ~store
-                      ~keeper_name:meta.name
-                      ~clock
-                      ~fetch_remote_url
-                      generated
-                  with
-                  | Error detail ->
+                 let persisted, persist_errors =
+                   persist_generated_images
+                     ~store
+                     ~keeper_name:meta.name
+                     ~net
+                     ~clock
+                     ~fetch_remote_url
+                     images
+                 in
+                 (match persisted with
+                  | [] ->
+                    let detail =
+                      if persist_errors = []
+                      then "provider returned no persistable images"
+                      else String.concat "; " persist_errors
+                    in
                     failed
                       ~failure_class:Tool_result.Runtime_failure
                       "attachment_store_failed"
                       detail
-                  | Ok persisted ->
+                  | _ ->
                     let image_json_items =
                       List.map
                         (fun ((att : Attachment_store.meta), _bytes, revised_prompt) ->
@@ -543,6 +830,20 @@ let handle_with_outcome
                         ]
                       | [] -> []
                     in
+                    let ignored_fields =
+                      match ignored_options with
+                      | [] -> []
+                      | opts ->
+                        [ "ignored_options", `List (List.map (fun s -> `String s) opts) ]
+                    in
+                    let partial_fields =
+                      match persist_errors with
+                      | [] -> []
+                      | errs ->
+                        [ "partial", `Bool true
+                        ; "errors", `List (List.map (fun e -> `String e) errs)
+                        ]
+                    in
                     let data =
                       `Assoc
                         ([ "ok", `Bool true
@@ -551,7 +852,9 @@ let handle_with_outcome
                          ; "images", `List image_json_items
                          ; "attachments", `List attachment_refs
                          ]
-                         @ primary_fields)
+                         @ primary_fields
+                         @ ignored_fields
+                         @ partial_fields)
                     in
                     let image_blocks =
                       List.map

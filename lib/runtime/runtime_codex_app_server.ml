@@ -1271,8 +1271,22 @@ let decode_codex_image_payload ?declared_mime raw =
           mime_opt, payload
       else None, trimmed
     in
-    match Base64.decode ~pad:false (String.trim b64) with
-    | Error _ -> None
+    let compact =
+      let buf = Buffer.create (String.length b64) in
+      String.iter
+        (fun c ->
+           match c with
+           | ' ' | '\t' | '\n' | '\r' -> ()
+           | _ -> Buffer.add_char buf c)
+        b64;
+      Buffer.contents buf
+    in
+    match Base64.decode ~pad:false compact with
+    | Error (`Msg msg) ->
+      Log.Runtime_agent.warn
+        "codex app-server: ignoring imageGeneration item with invalid base64 payload: %s"
+        msg;
+      None
     | Ok data_bytes when String.length data_bytes = 0 -> None
     | Ok data_bytes ->
       let mime_type =
@@ -1287,7 +1301,7 @@ let decode_codex_image_payload ?declared_mime raw =
       Some (mime_type, data_bytes)
 ;;
 
-let decode_image_generation_item (item : Yojson.Safe.t) : media_output option =
+let decode_image_generation_item ?(fallback_idx = 0) (item : Yojson.Safe.t) : media_output option =
   match item with
   | `Assoc fields ->
     (match List.assoc_opt "type" fields with
@@ -1295,7 +1309,7 @@ let decode_image_generation_item (item : Yojson.Safe.t) : media_output option =
        let item_id =
          match List.assoc_opt "id" fields with
          | Some (`String s) when String.trim s <> "" -> String.trim s
-         | _ -> "image_generation"
+         | _ -> Printf.sprintf "image_generation_%d" fallback_idx
        in
        let declared_mime =
          match
@@ -1339,7 +1353,7 @@ let decode_image_generation_item (item : Yojson.Safe.t) : media_output option =
   | _ -> None
 ;;
 
-let decode_image_generation_item_for_tests = decode_image_generation_item
+let decode_image_generation_item_for_tests item = decode_image_generation_item item
 
 (* An item the app-server executes outside the model stream: it opens with
    [item/started], may write nothing while it runs, and closes with
@@ -1617,6 +1631,7 @@ type streamed_texts =
          is not read as the reply. *)
   ; mutable assistant_message_completed : bool
   ; seen_media_item_ids : (string, unit) Hashtbl.t
+  ; mutable next_synth_media_idx : int
   ; mutable media_outputs_rev : media_output list
   }
 
@@ -1700,10 +1715,22 @@ let terminal_result ~thread_id ~turn_id ~seen_final ~seen_fallback ~streamed_tex
         let* items = required_member stage "items" turn_fields in
         (match items with
          | `List item_list ->
+           let synth_idx = ref 0 in
            List.iter
              (fun item ->
-                match decode_image_generation_item item with
-                | Some media -> record_media_output ~on_stream_event streamed_texts media
+                let has_explicit_id =
+                  match item with
+                  | `Assoc fields ->
+                    (match List.assoc_opt "id" fields with
+                     | Some (`String s) when String.trim s <> "" -> true
+                     | _ -> false)
+                  | _ -> false
+                in
+                let fallback_idx = !synth_idx in
+                match decode_image_generation_item ~fallback_idx item with
+                | Some media ->
+                  if not has_explicit_id then incr synth_idx;
+                  record_media_output ~on_stream_event streamed_texts media
                 | None -> ())
              item_list
          | _ -> ());
@@ -2434,9 +2461,21 @@ let rec await_turn_terminal io ~terminal_tools_closed ~tools ~tool_call_count ~t
      | Compaction_item -> emit_stream_event on_stream_event Compaction_observed; Ok ()
      | Reasoning_item -> complete_reasoning_item ~stage ~on_stream_event streamed_texts item
      | Image_generation_item ->
-       Option.iter
-         (record_media_output ~on_stream_event streamed_texts)
-         (decode_image_generation_item item);
+       let has_explicit_id =
+         match item with
+         | `Assoc fields ->
+           (match List.assoc_opt "id" fields with
+            | Some (`String s) when String.trim s <> "" -> true
+            | _ -> false)
+         | _ -> false
+       in
+       let fallback_idx = streamed_texts.next_synth_media_idx in
+       (match decode_image_generation_item ~fallback_idx item with
+        | Some media ->
+          if not has_explicit_id
+          then streamed_texts.next_synth_media_idx <- fallback_idx + 1;
+          record_media_output ~on_stream_event streamed_texts media
+        | None -> ());
        Ok ()
      | Command_execution | File_change | Mcp_tool_call | Sleep | Model_item
      | Dynamic_tool_item | Unclassified_item _ -> Ok () in
@@ -2929,6 +2968,7 @@ let run_protocol io (config : config) ~on_undelivered_tool_result ~on_tool_respo
     ; unfinished_messages = []
     ; assistant_message_completed = false
     ; seen_media_item_ids = Hashtbl.create 4
+    ; next_synth_media_idx = 0
     ; media_outputs_rev = []
     }
   in

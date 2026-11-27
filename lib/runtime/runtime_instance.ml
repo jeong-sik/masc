@@ -224,24 +224,35 @@ let normalized_official_model_candidates (raw : string) : string list =
 ;;
 
 let lookup_official_catalog_caps
-    ~(providers : (Llm_provider.Provider_kind.t option * string) list)
+    ~(providers : (Llm_provider.Provider_kind.t * string) list)
     (model_name : string)
   : Llm_provider.Capabilities.capabilities option
   =
   let candidates = normalized_official_model_candidates model_name in
-  let from_provider =
+  (* Match only concrete [Model_row] entries from scoped provider catalogs;
+     a [Provider_preset] fallback describes the wire family rather than this
+     specific model and must neither masquerade as a catalogued model nor
+     shadow an exact [for_model_id] row (e.g. a non-vision model routed over
+     an ACP driver whose provider preset supports vision). *)
+  let from_provider_row =
     List.find_map
       (fun (wire, provider_id) ->
          List.find_map
            (fun model_id ->
-              Llm_provider.Capabilities.for_provider_model_id
-                ~wire
-                ~provider:(Llm_provider.Model_catalog.Declared_provider provider_id)
-                ~model_id)
+              let policy =
+                Llm_provider.Capabilities.resolve_request_policy
+                  ~wire
+                  ~provider:(Llm_provider.Model_catalog.Declared_provider provider_id)
+                  ~model_id
+              in
+              match Llm_provider.Capabilities.request_policy_catalog_answer policy with
+              | Llm_provider.Capabilities.Model_row caps -> Some caps
+              | Llm_provider.Capabilities.Provider_preset _
+              | Llm_provider.Capabilities.No_catalog_answer -> None)
            candidates)
       providers
   in
-  match from_provider with
+  match from_provider_row with
   | Some _ as hit -> hit
   | None -> List.find_map Llm_provider.Capabilities.for_model_id candidates
 ;;
@@ -336,7 +347,7 @@ let resolve_media_capabilities
   | Runtime_execution.Claude_code _ ->
     let catalog =
       lookup_official_catalog_caps
-        ~providers:[ Some Llm_provider.Provider_kind.Anthropic, "anthropic" ]
+        ~providers:[ Llm_provider.Provider_kind.Anthropic, "anthropic" ]
         model.api_name
     in
     let base_image_input =
@@ -354,8 +365,8 @@ let resolve_media_capabilities
     let catalog =
       lookup_official_catalog_caps
         ~providers:
-          [ Some Llm_provider.Provider_kind.OpenAI_compat, "openai-responses"
-          ; Some Llm_provider.Provider_kind.OpenAI_compat, "openai"
+          [ Llm_provider.Provider_kind.OpenAI_compat, "openai-responses"
+          ; Llm_provider.Provider_kind.OpenAI_compat, "openai"
           ]
         model.api_name
     in
@@ -379,27 +390,39 @@ let resolve_media_capabilities
     let providers =
       match acp.driver with
       | Runtime_acp_client.Antigravity ->
-        [ Some Llm_provider.Provider_kind.Gemini, "gemini"
-        ; Some Llm_provider.Provider_kind.Anthropic, "anthropic"
+        [ Llm_provider.Provider_kind.Gemini, "gemini"
+        ; Llm_provider.Provider_kind.Anthropic, "anthropic"
         ]
       | Runtime_acp_client.Kimi_code ->
-        [ Some Llm_provider.Provider_kind.Kimi, "kimi_coding"
-        ; Some Llm_provider.Provider_kind.Kimi, "kimi"
+        [ Llm_provider.Provider_kind.Kimi, "kimi_coding"
+        ; Llm_provider.Provider_kind.Kimi, "kimi"
         ]
       | Runtime_acp_client.Mistral_vibe ->
-        [ Some Llm_provider.Provider_kind.OpenAI_compat, "mistral" ]
+        [ Llm_provider.Provider_kind.OpenAI_compat, "mistral" ]
       | Runtime_acp_client.Muse_code ->
-        [ Some Llm_provider.Provider_kind.OpenAI_compat, "opencode_go"
-        ; Some Llm_provider.Provider_kind.Anthropic, "anthropic"
+        [ Llm_provider.Provider_kind.OpenAI_compat, "opencode_go"
+        ; Llm_provider.Provider_kind.Anthropic, "anthropic"
         ]
     in
     let catalog = lookup_official_catalog_caps ~providers model.api_name in
-    let base_image_input =
-      match catalog with
-      | Some c -> c.supports_image_input
-      | None -> true
+    let live_probe =
+      Runtime_acp_client.observed_image_prompt
+        ~driver:acp.driver
+        ~cli_path:acp.cli_path
     in
-    let accepts_image = Option.value declared_image_input ~default:base_image_input in
+    (* Live ACP CLI [promptCapabilities.image] describes the CLI transport, not
+       every backend model behind it: [Some false] downgrades any model, while
+       [Some true] only fills uncatalogued models ([catalog = None]) and NEVER
+       overrides a catalogued model's [supports_image_input = false] or an
+       explicit TOML [supports-image-input = false]. *)
+    let accepts_image =
+      match declared_image_input, catalog, live_probe with
+      | Some false, _, _ -> false
+      | _, _, Some false -> false
+      | Some true, _, (None | Some true) -> true
+      | None, Some c, (None | Some true) -> c.supports_image_input
+      | None, None, (None | Some true) -> true
+    in
     let base_image_output =
       match catalog with
       | Some c when supports_image_output c -> In_turn_acp_chunk
@@ -419,35 +442,10 @@ let resolve_media_capabilities
 ;;
 
 let effective_media_capabilities (rt : t) : Llm_provider.Capabilities.media_capabilities =
-  let base =
-    resolve_media_capabilities
-      ~has_catalog_model_row:rt.has_catalog_model_row
-      ~model:rt.model
-      ~execution:rt.execution
-  in
-  match rt.execution with
-  | Runtime_execution.Acp acp ->
-    (match
-       Runtime_acp_client.observed_image_prompt
-         ~driver:acp.driver
-         ~cli_path:acp.cli_path
-     with
-     | None -> base
-     | Some false ->
-       { base with vision_input = Llm_provider.Capabilities.No_vision_input }
-     | Some true ->
-       let explicitly_disabled =
-         match rt.model.capabilities with
-         | Some { supports_image_input = Some false; _ } -> true
-         | Some _ | None -> false
-       in
-       if explicitly_disabled
-       then base
-       else { base with vision_input = official_native_vision_input })
-  | Runtime_execution.Agent_core _
-  | Runtime_execution.Codex_app_server _
-  | Runtime_execution.Claude_code _
-  | Runtime_execution.Antigravity_cli _ -> base
+  resolve_media_capabilities
+    ~has_catalog_model_row:rt.has_catalog_model_row
+    ~model:rt.model
+    ~execution:rt.execution
 ;;
 
 let materialize_binding_with

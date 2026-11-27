@@ -85,6 +85,15 @@ type image_generation_options =
 
 val default_image_generation_options : image_generation_options
 
+(** List the option names inside [opts] (e.g. ["aspect_ratio"], ["size"],
+    ["quality"], ["count"]) that have no wire representation under [contract]
+    and would otherwise be ignored. Pure and exhaustive on
+    {!Capabilities.image_output_contract}. *)
+val unsupported_image_generation_options
+  :  contract:Capabilities.image_output_contract
+  -> image_generation_options
+  -> string list
+
 type t =
   { kind : provider_kind
   ; provider_id : string option

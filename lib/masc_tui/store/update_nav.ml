@@ -538,7 +538,7 @@ let apply_popup_completion (cand : popup_candidate) (m : Model.t) : Model.t =
              Enter routes to the mentioned keeper instead of the previous one. *)
           let d0 =
             if String.equal (String.trim suffix) "" then
-              Drafts.clear_current_draft m.drafts
+              Drafts.clear_current_draft_text m.drafts
             else m.drafts
           in
           d0
@@ -5409,31 +5409,44 @@ let submit_inline_modal ~now (m : Model.t) =
                     { epoch = m.epoch; req = Cmd.Post_repo_add { url; branch } };
                 ] )
           | Nav.Board_new_post ->
-              let title = Model.modal_field_value ~key:"title" modal in
-              let body = Model.modal_field_value ~key:"body" modal in
-              let hearth_raw = Model.modal_field_value ~key:"hearth" modal in
-              let hearth =
-                if String.equal hearth_raw "" then None else Some hearth_raw
-              in
-              let attachment_ids =
-                List.map
-                  (fun (a : Wire_attachment.t) -> a.attachment_id)
-                  m.drafts.board_attachments
-              in
-              let m1 =
-                mark_submitting
-                  { m with drafts = Drafts.clear_board_attachments m.drafts }
-              in
-              ( m1
-              , [
-                  Cmd.Http_post
-                    {
-                      epoch = m.epoch;
-                      req =
-                        Cmd.Post_board_create
-                          { title; body; hearth; attachment_ids };
-                    };
-                ] )
+              if m.drafts.board_uploading_count > 0 then
+                let notice =
+                  Say.make
+                    ~ko:"첨부 파일 업로드가 완료될 때까지 기다려주세요…"
+                    ~en:"Waiting for attachment upload to finish..."
+                in
+                let m_blocked =
+                  {
+                    m with
+                    inline_modal =
+                      Some
+                        { modal with error = Some (Say.resolve m.lang notice) };
+                  }
+                  |> Model.with_toast ~now ~level:Model.Toast_warning notice
+                in
+                (m_blocked, [])
+              else
+                let title = Model.modal_field_value ~key:"title" modal in
+                let body = Model.modal_field_value ~key:"body" modal in
+                let hearth_raw = Model.modal_field_value ~key:"hearth" modal in
+                let hearth =
+                  if String.equal hearth_raw "" then None else Some hearth_raw
+                in
+                let attachment_ids =
+                  List.map
+                    (fun (a : Wire_attachment.t) -> a.attachment_id)
+                    m.drafts.board_attachments
+                in
+                ( mark_submitting m
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req =
+                          Cmd.Post_board_create
+                            { title; body; hearth; attachment_ids };
+                      };
+                  ] )
           | Nav.Board_goal_proposal -> (
               let title = Model.modal_field_value ~key:"proposal_title" modal in
               let measure =

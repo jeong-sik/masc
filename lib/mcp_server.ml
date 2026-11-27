@@ -312,9 +312,21 @@ let living_memory_resource_templates : mcp_resource_template list =
       ()
   ]
 
+let attachment_resource_templates : mcp_resource_template list =
+  [ make_resource_template
+      ~uri_template:"masc://attachments/{id}"
+      ~name:"Attachment"
+      ~title:"Attachment Binary Resource"
+      ~description:
+        "Read an attachment binary blob (BlobResourceContents) by canonical att_<64hex> identifier"
+      ~mime_type:"application/octet-stream"
+      ()
+  ]
+
 let resource_templates : mcp_resource_template list =
   List.map resource_template_of_entry Mcp_surface_toml.resource_templates
   @ living_memory_resource_templates
+  @ attachment_resource_templates
 
 (** Parse a masc:// resource URI into (resource_id, Uri.t) *)
 let parse_masc_resource_uri uri_str =

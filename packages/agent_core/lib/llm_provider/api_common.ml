@@ -11,6 +11,9 @@ let api_version = "2023-06-01"
     Used for LLM API responses, MCP HTTP, and agent registry. *)
 let max_response_body = 10 * 1024 * 1024
 
+(** Maximum HTTP response body size (64 MiB) for image-generation payloads. *)
+let max_image_response_body = 64 * 1024 * 1024
+
 (** Process-scoped entropy for AGENT_CORE-allocated tool-use identities.
 
     The identity must not depend on model-generated names or arguments: those
@@ -1035,7 +1038,16 @@ let resolve_image_output_media_type ?format_hint ?base64_data () =
      | None -> Ok "image/png")
 ;;
 
-let infer_image_mime_of_url url =
+let unknown_media_type = "application/octet-stream"
+
+let declared_media_type_opt media_type =
+  let trimmed = String.trim media_type in
+  if trimmed = "" || String.equal (String.lowercase_ascii trimmed) unknown_media_type
+  then None
+  else Some trimmed
+;;
+
+let infer_image_mime_of_url_opt url =
   let lower = String.lowercase_ascii (String.trim url) in
   let strip_from sep s =
     match String.index_opt s sep with
@@ -1044,12 +1056,14 @@ let infer_image_mime_of_url url =
   in
   let path = lower |> strip_from '#' |> strip_from '?' in
   if String.ends_with ~suffix:".jpg" path || String.ends_with ~suffix:".jpeg" path
-  then "image/jpeg"
+  then Some "image/jpeg"
   else if String.ends_with ~suffix:".webp" path
-  then "image/webp"
+  then Some "image/webp"
   else if String.ends_with ~suffix:".gif" path
-  then "image/gif"
-  else "image/png"
+  then Some "image/gif"
+  else if String.ends_with ~suffix:".png" path
+  then Some "image/png"
+  else None
 ;;
 
 let%test "fresh_tool_use_id fits within 40-char OpenAI bound and stays unique" =

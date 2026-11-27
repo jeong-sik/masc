@@ -262,14 +262,22 @@ type mouse_selection_state =
     wheel, resize, or new press clears it. The settled text copy is
     performed by the app shell once (see [copied]). *)
 
+type inspector_fetched_image = {
+  url : string;
+  png_bytes : string;
+  dims : (int * int) option;
+  decoded_rgba : (Masc_tui_term.Png_decode.rgba_image, string) result;
+      (** Cached decoded RGBA pixels for half-block rendering (computed once
+          when image bytes arrive, never re-decoded during render). *)
+}
+
 type image_inspector_state = {
   images : Wire_fleet.retained_image list;
   index : int;
   zoom : float;
   pan_x : float;
   pan_y : float;
-  fetched : (string * string * (int * int) option) Observed.t;
-      (** [(url, png_bytes, pixel_dims)] for the currently selected image. *)
+  fetched : inspector_fetched_image Observed.t;
 }
 
 type t = {

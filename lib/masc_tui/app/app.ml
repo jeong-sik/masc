@@ -215,7 +215,8 @@ let desired_inspector_graphic ~(probe : Probe.observation) ~term_program
           then None
           else
             match Observed.to_option st.fetched with
-            | Some (url, png_bytes, dims_opt) when String.length png_bytes > 0 ->
+            | Some { Model.url; png_bytes; dims = dims_opt; _ }
+              when String.length png_bytes > 0 ->
                 let img_px =
                   match dims_opt with
                   | Some (w, h) when w > 0 && h > 0 -> Some (w, h)
@@ -1375,7 +1376,8 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                ()
            in
            let executor =
-             Cmd_executor.create ~sw:work_sw ~io ~worker ~clock ~cli ~bus ~editor_handoff
+             Cmd_executor.create ~sw:work_sw ~io ~worker ~clock ~cli ~bus
+               ~in_tmux ~term_program ~editor_handoff
                ~on_editor_ready:(fun () -> Wake_bell.ring bell Wake_bell.Ui_bus)
                ~on_quit ~on_restart ()
            in

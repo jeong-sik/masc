@@ -973,5 +973,10 @@ type t =
   | Inspector_image_fetched of {
       epoch : Epoch.t;
       url : string;
-      result : (string * (int * int) option, string) result;
+      result :
+        ( string
+          * (int * int) option
+          * (Masc_tui_term.Png_decode.rgba_image, string) result option
+        , string )
+        result;
     }

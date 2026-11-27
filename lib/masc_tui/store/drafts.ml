@@ -503,8 +503,25 @@ let move_cursor_line dir t =
       { d with cursor })
     t
 
-let clear_current_draft t =
-  with_current_draft (fun d -> { d with text = ""; cursor = 0; attachments = [] }) t
+let clear_current_draft_text t =
+  with_current_draft (fun d -> { d with text = ""; cursor = 0 }) t
+
+let clear_current_draft_all t =
+  with_current_draft
+    (fun d -> { d with text = ""; cursor = 0; attachments = [] })
+    t
+
+let set_keeper_draft_slot ~keeper ~text ~cursor ~attachments ~uploading_count t =
+  with_keeper_draft ~reset_popup:true ~keeper
+    (fun d ->
+      {
+        d with
+        text;
+        cursor = clamp_cursor text cursor;
+        attachments;
+        uploading_count = Int.max 0 uploading_count;
+      })
+    t
 
 let set_preferred_mode preferred_mode t =
   with_current_draft ~reset_popup:false (fun d -> { d with preferred_mode }) t
@@ -645,7 +662,8 @@ let append_bounded_tx msg txs =
 
 let enqueue_submission ~now ~keeper ~mode t =
   let d = draft_for ~keeper t in
-  if String.equal (String.trim d.text) "" && d.attachments = [] then None
+  if d.uploading_count > 0 then None
+  else if String.equal (String.trim d.text) "" && d.attachments = [] then None
   else
     let request_id = fresh_request_id "chat" t.next_request_seq in
     let next_seq =

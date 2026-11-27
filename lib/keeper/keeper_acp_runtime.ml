@@ -1372,6 +1372,7 @@ let make_stream_projection
     Hashtbl.create 8
   in
   let closed_native_tool_ids : (string, unit) Hashtbl.t = Hashtbl.create 8 in
+  let seen_streamed_tool_media : (string, unit) Hashtbl.t = Hashtbl.create 4 in
   let anonymous_native_blocks : (int * Runtime_native_tools.observation) list ref = ref [] in
   let emit_queue : Agent_core.Types.sse_event Queue.t = Queue.create () in
   let emit_draining = ref false in
@@ -1829,33 +1830,45 @@ let make_stream_projection
       in
       List.iter
         (fun (media : Acp.media_output) ->
-           agent_message_is_arriving (fun native_stops ->
-             let prefix =
-               ensure_message_started_locked ()
-               @ close_open_thought_locked ()
-               @ close_open_text_locked ()
-             in
-             let idx = alloc_index_locked () in
-             native_stops
-             @ prefix
-             @ [ Agent_core.Types.ContentBlockStart
-                   { index = idx
-                   ; content_type = "image"
-                   ; tool_id = None
-                   ; tool_name = None
-                   }
-               ; Agent_core.Types.ContentBlockDelta
-                   { index = idx
-                   ; delta =
-                       Agent_core.Types.MediaDelta
-                         { media_type = media.mime_type
-                         ; source =
-                             Llm_provider.Types.Base64
-                               (Base64.encode_string media.data_bytes)
-                         }
-                   }
-               ; Agent_core.Types.ContentBlockStop { index = idx }
-               ]))
+           let dedupe_key =
+             Printf.sprintf "%s\000%s\000%s" tool_call_id media.mime_type media.data_bytes
+           in
+           let is_new =
+             Stdlib.Mutex.protect stream_mu (fun () ->
+               if Hashtbl.mem seen_streamed_tool_media dedupe_key
+               then false
+               else (
+                 Hashtbl.add seen_streamed_tool_media dedupe_key ();
+                 true))
+           in
+           if is_new then (
+             agent_message_is_arriving (fun native_stops ->
+               let prefix =
+                 ensure_message_started_locked ()
+                 @ close_open_thought_locked ()
+                 @ close_open_text_locked ()
+               in
+               let idx = alloc_index_locked () in
+               native_stops
+               @ prefix
+               @ [ Agent_core.Types.ContentBlockStart
+                     { index = idx
+                     ; content_type = "image"
+                     ; tool_id = None
+                     ; tool_name = None
+                     }
+                 ; Agent_core.Types.ContentBlockDelta
+                     { index = idx
+                     ; delta =
+                         Agent_core.Types.MediaDelta
+                           { media_type = media.mime_type
+                           ; source =
+                               Llm_provider.Types.Base64
+                                 (Base64.encode_string media.data_bytes)
+                           }
+                     }
+                 ; Agent_core.Types.ContentBlockStop { index = idx }
+                 ])))
         media_outputs;
       (match status with
        | None -> ()

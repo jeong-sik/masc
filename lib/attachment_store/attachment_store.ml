@@ -7,9 +7,25 @@ let url_prefix = "/api/v1/attachments/"
 let default_max_bytes = 20 * 1024 * 1024
 let default_ephemeral_max_entries = 500
 let default_ephemeral_max_bytes = 20 * 1024 * 1024
-let min_thumb_px = 32
-let max_thumb_px = 2048
+let thumb_px_buckets = [ 160; 320; 640; 1280 ]
+let min_thumb_px = 160
+let max_thumb_px = 1280
 let transform_timeout_sec = 10.0
+
+(* Serialize metadata read-modify-write, durable promotions, ephemeral pin
+   pruning, and unreferenced deletions across concurrent systhreads/domains.
+   Never held across Process_eio subprocess calls. *)
+let store_mu = Stdlib.Mutex.create ()
+let with_store_lock f = Stdlib.Mutex.protect store_mu f
+
+let quantize_thumb_px px =
+  let rec find = function
+    | [] -> max_thumb_px
+    | [ last ] -> last
+    | bucket :: rest -> if px <= bucket then bucket else find rest
+  in
+  find thumb_px_buckets
+;;
 
 let max_bytes () =
   match Sys.getenv_opt "MASC_ATTACHMENT_MAX_BYTES" with
@@ -80,6 +96,8 @@ type supported_mime =
   | Audio_wav
   | Audio_ogg
   | Audio_midi
+  | Audio_mp4
+  | Audio_webm
 
 let mime_to_string = function
   | Image_png -> "image/png"
@@ -91,11 +109,13 @@ let mime_to_string = function
   | Audio_wav -> "audio/wav"
   | Audio_ogg -> "audio/ogg"
   | Audio_midi -> "audio/midi"
+  | Audio_mp4 -> "audio/mp4"
+  | Audio_webm -> "audio/webm"
 ;;
 
 let media_kind_of_mime = function
   | Image_png | Image_jpeg | Image_webp | Image_gif -> Image
-  | Audio_mpeg | Audio_wav | Audio_ogg | Audio_midi -> Audio
+  | Audio_mpeg | Audio_wav | Audio_ogg | Audio_midi | Audio_mp4 | Audio_webm -> Audio
   | Application_pdf -> Document
 ;;
 
@@ -109,6 +129,8 @@ let extension_of_mime = function
   | Audio_wav -> ".wav"
   | Audio_ogg -> ".ogg"
   | Audio_midi -> ".mid"
+  | Audio_mp4 -> ".m4a"
+  | Audio_webm -> ".webm"
 ;;
 
 let supported_mime_of_normalized = function
@@ -121,6 +143,8 @@ let supported_mime_of_normalized = function
   | "audio/wav" | "audio/x-wav" | "audio/wave" -> Some Audio_wav
   | "audio/ogg" -> Some Audio_ogg
   | "audio/midi" | "audio/x-midi" | "audio/mid" -> Some Audio_midi
+  | "audio/mp4" | "audio/x-m4a" | "audio/m4a" -> Some Audio_mp4
+  | "audio/webm" -> Some Audio_webm
   | _ -> None
 ;;
 
@@ -196,6 +220,123 @@ let is_mpeg_audio_frame_sync bytes =
     && sample_rate_idx <> 0x03)
 ;;
 
+let contains_sub_in_range ~needle ~haystack ~start ~stop =
+  let nlen = String.length needle in
+  let limit = min stop (String.length haystack) in
+  if nlen = 0 || start < 0 || start + nlen > limit
+  then false
+  else (
+    let rec loop i =
+      if i + nlen > limit
+      then false
+      else (
+        let rec eq j =
+          if j >= nlen
+          then true
+          else if haystack.[i + j] = needle.[j]
+          then eq (j + 1)
+          else false
+        in
+        if eq 0 then true else loop (i + 1))
+    in
+    loop start)
+;;
+
+let mp4_has_video_handler_in_range bytes ~start ~stop =
+  let limit = min stop (String.length bytes) in
+  let rec loop i =
+    if i + 16 > limit
+    then false
+    else if bytes.[i] = 'h'
+            && bytes.[i + 1] = 'd'
+            && bytes.[i + 2] = 'l'
+            && bytes.[i + 3] = 'r'
+            && bytes.[i + 12] = 'v'
+            && bytes.[i + 13] = 'i'
+            && bytes.[i + 14] = 'd'
+            && bytes.[i + 15] = 'e'
+    then true
+    else loop (i + 1)
+  in
+  loop (max 0 start)
+;;
+
+let is_audio_mp4 bytes =
+  let len = String.length bytes in
+  if len < 12 || String.sub bytes 4 4 <> "ftyp"
+  then false
+  else (
+    let box_size =
+      (Char.code bytes.[0] lsl 24)
+      lor (Char.code bytes.[1] lsl 16)
+      lor (Char.code bytes.[2] lsl 8)
+      lor Char.code bytes.[3]
+    in
+    if box_size < 12 || box_size > len || box_size mod 4 <> 0
+    then false
+    else (
+      let is_audio_brand = function
+        | "M4A " | "M4B " | "mp42" | "isom" | "dash" -> true
+        | _ -> false
+      in
+      let is_video_brand = function
+        | "M4V " | "m4v " | "qt  " | "3gp4" | "3gp5" | "3gp6" | "3g2a"
+        | "avc1" | "hev1" | "hvc1" -> true
+        | _ -> false
+      in
+      let major = String.sub bytes 8 4 in
+      let compat_limit = min box_size 128 in
+      let rec scan_brands off has_audio has_video =
+        if off + 4 > compat_limit
+        then has_audio, has_video
+        else (
+          let brand = String.sub bytes off 4 in
+          scan_brands
+            (off + 4)
+            (has_audio || is_audio_brand brand)
+            (has_video || is_video_brand brand))
+      in
+      let has_audio, has_video =
+        scan_brands 16 (is_audio_brand major) (is_video_brand major)
+      in
+      if (not has_audio) || has_video
+      then false
+      else (
+        let has_vide_track =
+          if len <= 512 * 1024
+          then mp4_has_video_handler_in_range bytes ~start:0 ~stop:len
+          else
+            mp4_has_video_handler_in_range bytes ~start:0 ~stop:(256 * 1024)
+            || mp4_has_video_handler_in_range
+                 bytes
+                 ~start:(len - (256 * 1024))
+                 ~stop:len
+        in
+        not has_vide_track)))
+;;
+
+let is_audio_webm bytes =
+  let len = String.length bytes in
+  if len < 16 || not (String.starts_with ~prefix:"\x1a\x45\xdf\xa3" bytes)
+  then false
+  else (
+    let header_stop = min len 128 in
+    let has_webm_doctype =
+      contains_sub_in_range ~needle:"\x42\x82\x84webm" ~haystack:bytes ~start:4 ~stop:header_stop
+    in
+    if not has_webm_doctype
+    then false
+    else (
+      let scan_stop = min len 65536 in
+      let has_video =
+        contains_sub_in_range ~needle:"V_VP8" ~haystack:bytes ~start:4 ~stop:scan_stop
+        || contains_sub_in_range ~needle:"V_VP9" ~haystack:bytes ~start:4 ~stop:scan_stop
+        || contains_sub_in_range ~needle:"V_AV1" ~haystack:bytes ~start:4 ~stop:scan_stop
+        || contains_sub_in_range ~needle:"\x83\x81\x01" ~haystack:bytes ~start:4 ~stop:scan_stop
+      in
+      not has_video))
+;;
+
 let sniff_mime bytes =
   let len = String.length bytes in
   let starts prefix = String.starts_with ~prefix bytes in
@@ -215,6 +356,10 @@ let sniff_mime bytes =
   then Some Audio_ogg
   else if len >= 4 && starts "MThd"
   then Some Audio_midi
+  else if is_audio_mp4 bytes
+  then Some Audio_mp4
+  else if is_audio_webm bytes
+  then Some Audio_webm
   else if (len >= 3 && starts "ID3") || is_mpeg_audio_frame_sync bytes
   then Some Audio_mpeg
   else None
@@ -322,8 +467,8 @@ let detect_image_dimensions bytes =
   | Some Image_jpeg -> jpeg_walk bytes 2
   | Some Image_gif -> gif_dimensions bytes
   | Some Image_webp -> webp_dimensions bytes
-  | Some (Application_pdf | Audio_mpeg | Audio_wav | Audio_ogg | Audio_midi) | None ->
-    None
+  | Some (Application_pdf | Audio_mpeg | Audio_wav | Audio_ogg | Audio_midi | Audio_mp4 | Audio_webm)
+  | None -> None
 ;;
 
 type meta =
@@ -497,20 +642,40 @@ let sanitize_filename raw =
       else trimmed
     in
     let buf = Buffer.create (min 180 (String.length base)) in
-    String.iter
-      (fun c ->
-         if Buffer.length buf < 180
-         then (
-           let code = Char.code c in
-           if code >= 0x20
+    let base_len = String.length base in
+    let rec copy_utf8 i =
+      if i >= base_len
+      then ()
+      else (
+        let dec = String.get_utf_8_uchar base i in
+        let dlen = Uchar.utf_decode_length dec in
+        if not (Uchar.utf_decode_is_valid dec)
+        then copy_utf8 (i + max 1 dlen)
+        else (
+          let u = Uchar.utf_decode_uchar dec in
+          let code = Uchar.to_int u in
+          let allowed =
+            if code < 0x80
+            then (
+              let c = Char.chr code in
+              code >= 0x20
               && code <> 0x7f
               && c <> '"'
               && c <> '\''
               && c <> ';'
               && c <> '/'
-              && c <> '\\'
-           then Buffer.add_char buf c))
-      base;
+              && c <> '\\')
+            else true
+          in
+          if not allowed
+          then copy_utf8 (i + dlen)
+          else if Buffer.length buf + dlen <= 180
+          then (
+            Buffer.add_utf_8_uchar buf u;
+            copy_utf8 (i + dlen))
+          else ()))
+    in
+    copy_utf8 0;
     let cleaned = String.trim (Buffer.contents buf) in
     if String.equal cleaned "" || String.equal cleaned "." || String.equal cleaned ".."
     then None
@@ -792,7 +957,7 @@ let remove_thumbs_for_sha256 t sha256 =
     | Sys_error _ | Unix.Unix_error _ -> ())
 ;;
 
-let delete_unreferenced t ~sha256 =
+let delete_unreferenced_unlocked t ~sha256 =
   if not (is_valid_sha256 sha256)
   then Error (Printf.sprintf "invalid sha256: %S" sha256)
   else (
@@ -808,6 +973,10 @@ let delete_unreferenced t ~sha256 =
     | Unix.Unix_error (code, fn, arg) ->
       Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
     | Sys_error msg -> Error msg)
+;;
+
+let delete_unreferenced t ~sha256 =
+  with_store_lock (fun () -> delete_unreferenced_unlocked t ~sha256)
 ;;
 
 let pin_payload ~bytes ~pinned_at =
@@ -835,7 +1004,34 @@ let read_pin_info t path =
   | Ok None | Error _ -> None
 ;;
 
-let is_pinned_elsewhere t ~excluding_keeper sha256 =
+let has_ephemeral_pin_unlocked t ~keeper ~sha256 =
+  if not (is_valid_keeper_name keeper && is_valid_sha256 sha256)
+  then false
+  else (
+    let pin_path = ephemeral_pin_path t ~keeper sha256 in
+    match Fs_compat.load_owned_regular_file ~ownership_root:t.base_path pin_path with
+    | Ok (Some _) -> true
+    | Ok None | Error _ -> false)
+;;
+
+let has_ephemeral_pin t ~keeper ~sha256 =
+  with_store_lock (fun () -> has_ephemeral_pin_unlocked t ~keeper ~sha256)
+;;
+
+let can_keeper_read t ~keeper ~id_or_sha256 =
+  match parse_id_or_sha256 id_or_sha256 with
+  | Error _ -> Error (Invalid_id id_or_sha256)
+  | Ok sha256 ->
+    with_store_lock (fun () ->
+      match read_meta_by_validated_sha256 t ~id:(id_prefix ^ sha256) sha256 with
+      | Error _ as err -> err
+      | Ok None -> Ok false
+      | Ok (Some { retention = Durable; _ }) -> Ok true
+      | Ok (Some { retention = Ephemeral _; _ }) ->
+        Ok (has_ephemeral_pin_unlocked t ~keeper ~sha256))
+;;
+
+let is_pinned_elsewhere_unlocked t ~excluding_keeper sha256 =
   let root = ephemeral_root t in
   if not (Sys.file_exists root)
   then false
@@ -845,14 +1041,13 @@ let is_pinned_elsewhere t ~excluding_keeper sha256 =
       Array.exists
         (fun keeper ->
            (not (String.equal keeper excluding_keeper))
-           && is_valid_keeper_name keeper
-           && Sys.file_exists (ephemeral_pin_path t ~keeper sha256))
+           && has_ephemeral_pin_unlocked t ~keeper ~sha256)
         entries
     with
     | Sys_error _ | Unix.Unix_error _ -> false)
 ;;
 
-let prune_ephemeral_keeper
+let prune_ephemeral_keeper_unlocked
       t
       ~keeper
       ~max_entries
@@ -915,8 +1110,10 @@ let prune_ephemeral_keeper
              | Ok (Some { retention = Durable; _ }) -> true
              | Ok (Some { retention = Ephemeral _; _ }) | Ok None | Error _ -> false
            in
-           if (not is_durable) && not (is_pinned_elsewhere t ~excluding_keeper:keeper sha256)
-           then ignore (delete_unreferenced t ~sha256)))
+           if
+             (not is_durable)
+             && not (is_pinned_elsewhere_unlocked t ~excluding_keeper:keeper sha256)
+           then ignore (delete_unreferenced_unlocked t ~sha256)))
       sorted)
 ;;
 
@@ -945,40 +1142,39 @@ let validate_mime ~declared_mime ~bytes =
              Error (Mime_mismatch { declared; sniffed = mime_to_string sniffed }))))
 ;;
 
-let put
-      ?max_bytes:max_bytes_opt
-      ?(ephemeral_max_entries = default_ephemeral_max_entries)
-      ?(ephemeral_max_bytes = default_ephemeral_max_bytes)
-      ?(now = Unix.gettimeofday ())
-      ?declared_mime
-      ?filename
+let opaque_binary_mime = "application/octet-stream"
+
+let is_opaque_binary (meta : meta) =
+  String.equal meta.mime_type opaque_binary_mime
+;;
+
+let persist_verified
+      ~ephemeral_max_entries
+      ~ephemeral_max_bytes
+      ~now
+      ~mime_type
+      ~kind
+      ~width
+      ~height
+      ~filename
       ~origin
       ~created_by
       ~retention
       t
       ~bytes
+      ~sha256
   =
   let open Result.Syntax in
-  let limit = Option.value max_bytes_opt ~default:(max_bytes ()) in
   let actual = String.length bytes in
-  if actual = 0
-  then Error Empty_payload
-  else if actual > limit
-  then Error (Payload_too_large { actual; maximum = limit })
-  else
-    let* () =
-      match retention with
-      | Durable -> Ok ()
-      | Ephemeral { keeper } ->
-        if is_valid_keeper_name keeper
-        then Ok ()
-        else Error (Invalid_keeper_name keeper)
-    in
-    let* sniffed = validate_mime ~declared_mime ~bytes in
-    let sha256 = Agent_core_sha256.to_hex (Agent_core_sha256.digest_string bytes) in
-    let id = id_prefix ^ sha256 in
-    let bpath = blob_path t sha256 in
-    let mpath = meta_path t sha256 in
+  let id = id_prefix ^ sha256 in
+  let bpath = blob_path t sha256 in
+  let mpath = meta_path t sha256 in
+  let clean_filename = Option.bind filename sanitize_filename in
+  let clean_created_by =
+    let s = String.trim created_by in
+    if String.equal s "" then "unknown" else s
+  in
+  with_store_lock (fun () ->
     let* () =
       ensure_owned_dir t (Filename.dirname bpath)
       |> Result.map_error (fun e -> Store_io_failed e)
@@ -989,12 +1185,14 @@ let put
     in
     (* Write raw blob first so metadata never points to an absent blob.
        Verify ownership and content digest on any pre-existing blob: reuse only
-       when an owned regular file already matches [sha256], atomically repair
-       an owned regular file whose bytes are corrupt/truncated, and fail closed
-       on symlink/ownership/I/O errors. *)
+       when an owned regular file already matches [sha256] (touching its mtime
+       to reset GC grace), atomically repair an owned regular file whose bytes
+       are corrupt/truncated, and fail closed on symlink/ownership/I/O errors. *)
     let* () =
       match Fs_compat.sha256_owned_regular_file ~ownership_root:t.base_path bpath with
-      | Ok (Some actual_sha) when String.equal actual_sha sha256 -> Ok ()
+      | Ok (Some actual_sha) when String.equal actual_sha sha256 ->
+        (try Unix.utimes bpath now now with Unix.Unix_error _ -> ());
+        Ok ()
       | Ok (Some _) ->
         remove_thumbs_for_sha256 t sha256;
         Fs_compat.save_file_atomic_strict bpath bytes
@@ -1004,16 +1202,6 @@ let put
         |> Result.map_error (fun e -> Store_io_failed e)
       | Error err ->
         Error (Store_io_failed (Fs_compat.owned_regular_file_read_error_to_string err))
-    in
-    let width, height =
-      match detect_image_dimensions bytes with
-      | Some (w, h) -> Some w, Some h
-      | None -> None, None
-    in
-    let clean_filename = Option.bind filename sanitize_filename in
-    let clean_created_by =
-      let s = String.trim created_by in
-      if String.equal s "" then "unknown" else s
     in
     let* existing_meta =
       match read_meta_by_validated_sha256 t ~id sha256 with
@@ -1027,8 +1215,8 @@ let put
       | None ->
         ( { id
           ; sha256
-          ; mime_type = mime_to_string sniffed
-          ; kind = media_kind_of_mime sniffed
+          ; mime_type
+          ; kind
           ; bytes = actual
           ; width
           ; height
@@ -1078,7 +1266,7 @@ let put
           Fs_compat.save_file_atomic_strict pin_path (pin_payload ~bytes:actual ~pinned_at:now)
           |> Result.map_error (fun e -> Store_io_failed e)
         in
-        prune_ephemeral_keeper
+        prune_ephemeral_keeper_unlocked
           t
           ~keeper
           ~max_entries:ephemeral_max_entries
@@ -1086,7 +1274,144 @@ let put
           ~just_pinned_sha256:sha256;
         Ok ()
     in
-    Ok final_meta
+    Ok final_meta)
+;;
+
+let put
+      ?max_bytes:max_bytes_opt
+      ?(ephemeral_max_entries = default_ephemeral_max_entries)
+      ?(ephemeral_max_bytes = default_ephemeral_max_bytes)
+      ?(now = Unix.gettimeofday ())
+      ?declared_mime
+      ?filename
+      ~origin
+      ~created_by
+      ~retention
+      t
+      ~bytes
+  =
+  let open Result.Syntax in
+  let limit = Option.value max_bytes_opt ~default:(max_bytes ()) in
+  let actual = String.length bytes in
+  if actual = 0
+  then Error Empty_payload
+  else if actual > limit
+  then Error (Payload_too_large { actual; maximum = limit })
+  else
+    let* () =
+      match retention with
+      | Durable -> Ok ()
+      | Ephemeral { keeper } ->
+        if is_valid_keeper_name keeper
+        then Ok ()
+        else Error (Invalid_keeper_name keeper)
+    in
+    let* sniffed = validate_mime ~declared_mime ~bytes in
+    let sha256 = Agent_core_sha256.to_hex (Agent_core_sha256.digest_string bytes) in
+    let width, height =
+      match detect_image_dimensions bytes with
+      | Some (w, h) -> Some w, Some h
+      | None -> None, None
+    in
+    persist_verified
+      ~ephemeral_max_entries
+      ~ephemeral_max_bytes
+      ~now
+      ~mime_type:(mime_to_string sniffed)
+      ~kind:(media_kind_of_mime sniffed)
+      ~width
+      ~height
+      ~filename
+      ~origin
+      ~created_by
+      ~retention
+      t
+      ~bytes
+      ~sha256
+;;
+
+let put_opaque
+      ?max_bytes:max_bytes_opt
+      ?(ephemeral_max_entries = default_ephemeral_max_entries)
+      ?(ephemeral_max_bytes = default_ephemeral_max_bytes)
+      ?(now = Unix.gettimeofday ())
+      ?declared_mime
+      ?filename
+      ~origin
+      ~created_by
+      ~retention
+      t
+      ~bytes
+  =
+  let open Result.Syntax in
+  let limit = Option.value max_bytes_opt ~default:(max_bytes ()) in
+  let actual = String.length bytes in
+  let normalized_declared =
+    Option.bind declared_mime (fun raw ->
+      let n = normalize_mime_header raw in
+      if String.equal n "" then None else Some n)
+  in
+  if actual = 0
+  then Error Empty_payload
+  else if actual > limit
+  then Error (Payload_too_large { actual; maximum = limit })
+  else if origin = User_upload
+  then Error (Unsupported_or_unknown_format { declared_mime = normalized_declared })
+  else
+    let* () =
+      match retention with
+      | Durable -> Ok ()
+      | Ephemeral { keeper } ->
+        if is_valid_keeper_name keeper
+        then Ok ()
+        else Error (Invalid_keeper_name keeper)
+    in
+    let* () =
+      match normalized_declared with
+      | Some d when is_forbidden_declared_mime d -> Error (Forbidden_mime d)
+      | Some _ | None ->
+        (match looks_like_forbidden_active_content bytes with
+         | Some forbidden -> Error (Forbidden_mime forbidden)
+         | None -> Ok ())
+    in
+    let mime_type, kind, (width, height) =
+      match sniff_mime bytes with
+      | Some known ->
+        let agrees =
+          match normalized_declared with
+          | None | Some "application/octet-stream" -> true
+          | Some declared ->
+            (match supported_mime_of_normalized declared with
+             | Some d -> d = known
+             | None -> false)
+        in
+        if agrees
+        then (
+          let dims =
+            match detect_image_dimensions bytes with
+            | Some (w, h) -> Some w, Some h
+            | None -> None, None
+          in
+          mime_to_string known, media_kind_of_mime known, dims)
+        else opaque_binary_mime, Document, (None, None)
+      | None -> opaque_binary_mime, Document, (None, None)
+    in
+    let sha256 = Agent_core_sha256.to_hex (Agent_core_sha256.digest_string bytes) in
+    persist_verified
+      ~ephemeral_max_entries
+      ~ephemeral_max_bytes
+      ~now
+      ~mime_type
+      ~kind
+      ~width
+      ~height
+      ~filename
+      ~origin
+      ~created_by
+      ~retention
+      t
+      ~bytes
+      ~sha256
 ;;
 
 let promote_to_durable t ~id =
@@ -1096,19 +1421,20 @@ let promote_to_durable t ~id =
     | Ok s -> Ok s
     | Error _ -> Error (Invalid_id id)
   in
-  let* meta_opt = read_meta_by_validated_sha256 t ~id sha256 in
-  match meta_opt with
-  | None -> Ok None
-  | Some m ->
-    (match m.retention with
-     | Durable -> Ok (Some m)
-     | Ephemeral _ ->
-       let promoted = { m with retention = Durable } in
-       let mpath = meta_path t sha256 in
-       let payload = Yojson.Safe.to_string (meta_to_sidecar_json promoted) in
-       (match Fs_compat.save_file_atomic_strict mpath payload with
-        | Ok () -> Ok (Some promoted)
-        | Error detail -> Error (Read_failed ("promote write failed: " ^ detail))))
+  with_store_lock (fun () ->
+    let* meta_opt = read_meta_by_validated_sha256 t ~id sha256 in
+    match meta_opt with
+    | None -> Ok None
+    | Some m ->
+      (match m.retention with
+       | Durable -> Ok (Some m)
+       | Ephemeral _ ->
+         let promoted = { m with retention = Durable } in
+         let mpath = meta_path t sha256 in
+         let payload = Yojson.Safe.to_string (meta_to_sidecar_json promoted) in
+         (match Fs_compat.save_file_atomic_strict mpath payload with
+          | Ok () -> Ok (Some promoted)
+          | Error detail -> Error (Read_failed ("promote write failed: " ^ detail)))))
 ;;
 
 let list_ephemeral t ~keeper =
@@ -1154,80 +1480,146 @@ let list_ephemeral t ~keeper =
 ;;
 
 let list_all_ephemeral_pins t =
+  let open Result.Syntax in
   let root = ephemeral_root t in
-  if not (Sys.file_exists root)
-  then String_set.empty
-  else (
-    try
-      Array.fold_left
-        (fun acc keeper ->
-           if not (is_valid_keeper_name keeper)
-           then acc
-           else (
-             let dir = Filename.concat root keeper in
-             match Unix.lstat dir with
-             | { Unix.st_kind = Unix.S_DIR; _ } ->
-               (try
-                  Array.fold_left
-                    (fun acc name ->
-                       if is_valid_sha256 name then String_set.add name acc else acc)
-                    acc
-                    (Sys.readdir dir)
-                with
-                | Sys_error _ | Unix.Unix_error _ -> acc)
-             | { Unix.st_kind =
-                   Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
-               ; _
-               }
-             | exception Unix.Unix_error _ -> acc))
-        String_set.empty
-        (Sys.readdir root)
-    with
-    | Sys_error _ | Unix.Unix_error _ -> String_set.empty)
+  match Unix.lstat root with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok String_set.empty
+  | exception Unix.Unix_error (code, fn, arg) ->
+    Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+  | { Unix.st_kind =
+        Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
+    ; _
+    } ->
+    Error (Printf.sprintf "ephemeral root %s is not a directory" root)
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    let* keepers =
+      try Ok (Sys.readdir root |> Array.to_list) with
+      | Sys_error msg -> Error (Printf.sprintf "readdir(%s): %s" root msg)
+      | Unix.Unix_error (code, fn, arg) ->
+        Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+    in
+    List.fold_left
+      (fun acc_res keeper ->
+         let* acc = acc_res in
+         if not (is_valid_keeper_name keeper)
+         then Ok acc
+         else (
+           let dir = Filename.concat root keeper in
+           match Unix.lstat dir with
+           | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok acc
+           | exception Unix.Unix_error (code, fn, arg) ->
+             Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+           | { Unix.st_kind = Unix.S_DIR; _ } ->
+             let* entries =
+               try Ok (Sys.readdir dir |> Array.to_list) with
+               | Sys_error msg -> Error (Printf.sprintf "readdir(%s): %s" dir msg)
+               | Unix.Unix_error (code, fn, arg) ->
+                 Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+             in
+             Ok
+               (List.fold_left
+                  (fun set name ->
+                     if is_valid_sha256 name then String_set.add name set else set)
+                  acc
+                  entries)
+           | { Unix.st_kind =
+                 Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
+             ; _
+             } ->
+             Error (Printf.sprintf "ephemeral entry %s is not a directory" dir)))
+      (Ok String_set.empty)
+      keepers
 ;;
 
 let list_all_blobs t =
+  let open Result.Syntax in
   let root = blobs_root t in
-  if not (Sys.file_exists root)
-  then Ok []
+  match Unix.lstat root with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+  | exception Unix.Unix_error (code, fn, arg) ->
+    Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+  | { Unix.st_kind =
+        Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
+    ; _
+    } ->
+    Error (Printf.sprintf "blobs root %s is not a directory" root)
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    let* shards =
+      try Ok (Sys.readdir root |> Array.to_list |> List.sort String.compare) with
+      | Sys_error msg -> Error (Printf.sprintf "readdir(%s): %s" root msg)
+      | Unix.Unix_error (code, fn, arg) ->
+        Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+    in
+    let* rev_digests =
+      List.fold_left
+        (fun acc_res shard ->
+           let* acc = acc_res in
+           if String.length shard <> 2 || not (String.for_all is_lower_hex_char shard)
+           then Ok acc
+           else (
+             let sdir = Filename.concat root shard in
+             match Unix.lstat sdir with
+             | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok acc
+             | exception Unix.Unix_error (code, fn, arg) ->
+               Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+             | { Unix.st_kind = Unix.S_DIR; _ } ->
+               let* names =
+                 try Ok (Sys.readdir sdir |> Array.to_list |> List.sort String.compare) with
+                 | Sys_error msg -> Error (Printf.sprintf "readdir(%s): %s" sdir msg)
+                 | Unix.Unix_error (code, fn, arg) ->
+                   Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+               in
+               Ok
+                 (List.fold_left
+                    (fun acc name ->
+                       if is_valid_sha256 name && String.starts_with ~prefix:shard name
+                       then name :: acc
+                       else acc)
+                    acc
+                    names)
+             | { Unix.st_kind =
+                   Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
+               ; _
+               } ->
+               Error (Printf.sprintf "blob shard %s is not a directory" sdir)))
+        (Ok [])
+        shards
+    in
+    Ok (List.rev rev_digests)
+;;
+
+let regular_file_mtime path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+  | exception Unix.Unix_error (code, fn, arg) ->
+    Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+  | { Unix.st_kind = Unix.S_REG; st_mtime; _ } -> Ok (Some st_mtime)
+  | { Unix.st_kind =
+        Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
+    ; _
+    } ->
+    Error (Printf.sprintf "attachment entry %s is not a regular file" path)
+;;
+
+let blob_last_modified_at t ~sha256 =
+  let open Result.Syntax in
+  if not (is_valid_sha256 sha256)
+  then Error (Printf.sprintf "invalid sha256: %S" sha256)
   else (
-    try
-      let shards = Sys.readdir root |> Array.to_list |> List.sort String.compare in
-      let digests =
-        List.fold_left
-          (fun acc shard ->
-             if String.length shard <> 2 || not (String.for_all is_lower_hex_char shard)
-             then acc
-             else (
-               let sdir = Filename.concat root shard in
-               match Unix.lstat sdir with
-               | { Unix.st_kind = Unix.S_DIR; _ } ->
-                 let names =
-                   Sys.readdir sdir |> Array.to_list |> List.sort String.compare
-                 in
-                 List.fold_left
-                   (fun acc name ->
-                      if is_valid_sha256 name && String.starts_with ~prefix:shard name
-                      then name :: acc
-                      else acc)
-                   acc
-                   names
-               | { Unix.st_kind =
-                     Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
-                 ; _
-                 }
-               | exception Unix.Unix_error _ -> acc))
-          []
-          shards
-      in
-      Ok (List.rev digests)
-    with
-    | Sys_error msg -> Error msg
-    | Unix.Unix_error (code, fn, arg) ->
-      Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code)))
+    let* bm = regular_file_mtime (blob_path t sha256) in
+    let* mm = regular_file_mtime (meta_path t sha256) in
+    match bm, mm with
+    | None, None -> Ok None
+    | Some a, None -> Ok (Some a)
+    | None, Some b -> Ok (Some b)
+    | Some a, Some b -> Ok (Some (Float.max a b)))
 ;;
 
 (* --- Image derivative generation (downscale / PNG transcode + thumbs cache) --- *)
+
+type blocking_runner = { run_blocking : 'a. (unit -> 'a) -> 'a }
+
+let inline_blocking = { run_blocking = (fun f -> f ()) }
 
 let read_file_binary path =
   let ic = open_in_bin path in
@@ -1236,14 +1628,6 @@ let read_file_binary path =
     (fun () ->
       let len = in_channel_length ic in
       really_input_string ic len)
-;;
-
-let clamp_thumb_px px =
-  if px < min_thumb_px
-  then min_thumb_px
-  else if px > max_thumb_px
-  then max_thumb_px
-  else px
 ;;
 
 type raster_mime =
@@ -1274,7 +1658,7 @@ let sips_format_name = function
   | R_webp -> "png" (* macOS sips cannot write WebP; emit PNG *)
 ;;
 
-let run_transform_argv ~in_file ~out_file ~max_px ~src_raster ~out_raster =
+let run_transform_argv ~blocking ~in_file ~out_file ~max_px ~src_raster ~out_raster =
   let sips_argv =
     let fmt =
       if src_raster <> out_raster || src_raster = R_webp
@@ -1305,7 +1689,11 @@ let run_transform_argv ~in_file ~out_file ~max_px ~src_raster ~out_raster =
   let rec try_plans errors = function
     | [] -> Error (String.concat "; " (List.rev errors))
     | argv :: rest ->
-      (try remove_file_if_exists out_file with Unix.Unix_error _ -> ());
+      blocking.run_blocking (fun () ->
+        try remove_file_if_exists out_file with Unix.Unix_error _ -> ());
+      (* Subprocess invocation runs directly on the caller's Eio fiber so
+         [Process_eio] can enter [Eio.Switch.run] once [Process_eio.init] is
+         active without raising [Effect.Unhandled] in a systhread. *)
       (match
          Process_eio.run_argv_with_status_split_or_refusal
            ~timeout_sec:transform_timeout_sec
@@ -1321,45 +1709,49 @@ let run_transform_argv ~in_file ~out_file ~max_px ~src_raster ~out_raster =
          try_plans (msg :: errors) rest
        | Ok (status, _stdout, stderr) ->
          (match Process_eio.exit_reason_of_status status with
-          | Process_eio.Completed 0
-            when Sys.file_exists out_file
-                 &&
-                 (match Fs_compat.file_size out_file with
-                  | Some sz -> sz > 0
-                  | None -> false) ->
-            let out_bytes = read_file_binary out_file in
-            let expected_mime = supported_mime_of_raster out_raster in
-            (match sniff_mime out_bytes with
-             | Some actual_mime when actual_mime = expected_mime ->
-               let dims_ok =
-                 match max_px, detect_image_dimensions out_bytes with
-                 | None, _ -> true
-                 | Some bound, Some (w, h) -> max w h <= bound
-                 | Some _, None -> false
-               in
-               if dims_ok
-               then Ok (mime_to_string actual_mime, out_bytes)
-               else (
-                 let msg =
-                   Printf.sprintf
-                     "%s output dimensions exceeded max_px or were unreadable"
-                     (List.hd argv)
-                 in
-                 try_plans (msg :: errors) rest)
-             | Some actual_mime ->
-               let msg =
-                 Printf.sprintf
-                   "%s wrote %s instead of %s"
-                   (List.hd argv)
-                   (mime_to_string actual_mime)
-                   (mime_to_string expected_mime)
-               in
-               try_plans (msg :: errors) rest
-             | None ->
-               let msg =
-                 Printf.sprintf "%s wrote unrecognized image output" (List.hd argv)
-               in
-               try_plans (msg :: errors) rest)
+          | Process_eio.Completed 0 ->
+            let read_and_validate =
+              blocking.run_blocking (fun () ->
+                if Sys.file_exists out_file
+                   &&
+                   (match Fs_compat.file_size out_file with
+                    | Some sz -> sz > 0
+                    | None -> false)
+                then (
+                  let out_bytes = read_file_binary out_file in
+                  let expected_mime = supported_mime_of_raster out_raster in
+                  match sniff_mime out_bytes with
+                  | Some actual_mime when actual_mime = expected_mime ->
+                    let dims_ok =
+                      match max_px, detect_image_dimensions out_bytes with
+                      | None, _ -> true
+                      | Some bound, Some (w, h) -> max w h <= bound
+                      | Some _, None -> false
+                    in
+                    if dims_ok
+                    then Ok (mime_to_string actual_mime, out_bytes)
+                    else
+                      Error
+                        (Printf.sprintf
+                           "%s output dimensions exceeded max_px or were unreadable"
+                           (List.hd argv))
+                  | Some actual_mime ->
+                    Error
+                      (Printf.sprintf
+                         "%s wrote %s instead of %s"
+                         (List.hd argv)
+                         (mime_to_string actual_mime)
+                         (mime_to_string expected_mime))
+                  | None ->
+                    Error (Printf.sprintf "%s wrote unrecognized image output" (List.hd argv)))
+                else
+                  Error
+                    (Printf.sprintf "%s exited 0 without writing output (%s)"
+                       (List.hd argv) (String.trim stderr)))
+            in
+            (match read_and_validate with
+             | Ok _ as ok -> ok
+             | Error msg -> try_plans (msg :: errors) rest)
           | Process_eio.Completed code ->
             let msg =
               Printf.sprintf "%s exited %d (%s)" (List.hd argv) code (String.trim stderr)
@@ -1379,26 +1771,33 @@ let run_transform_argv ~in_file ~out_file ~max_px ~src_raster ~out_raster =
   try_plans [] plans
 ;;
 
-let get_image_derivative ?max_px ~target_format t ~(meta : meta) ~raw_bytes =
+let get_image_derivative
+      ?(blocking = inline_blocking)
+      ?max_px
+      ~target_format
+      t
+      ~(meta : meta)
+      ~raw_bytes
+  =
   match meta.kind, raster_mime_of_string meta.mime_type with
   | (Audio | Document), _ | Image, None -> Error (Not_an_image meta.mime_type)
   | Image, Some src_raster ->
     (match max_px with
      | Some px when px <= 0 -> Error (Invalid_max_px px)
      | Some _ | None ->
-       let clamped_px = Option.map clamp_thumb_px max_px in
+       let quantized_px = Option.map quantize_thumb_px max_px in
        let out_raster =
          match target_format, src_raster with
          | Force_png, _ -> R_png
          | Native_format, R_webp ->
            (* Keep WebP when no resize needed; when resized via sips, output is PNG *)
-           (match clamped_px with
+           (match quantized_px with
             | None -> R_webp
             | Some _ -> R_png)
          | Native_format, (R_png | R_jpeg | R_gif as r) -> r
        in
        let dims_within_bound =
-         match clamped_px, meta.width, meta.height with
+         match quantized_px, meta.width, meta.height with
          | None, _, _ -> true
          | Some bound, Some w, Some h -> max w h <= bound
          | Some _, None, _ | Some _, _, None -> false
@@ -1409,61 +1808,74 @@ let get_image_derivative ?max_px ~target_format t ~(meta : meta) ~raw_bytes =
          let out_mime_supported = supported_mime_of_raster out_raster in
          let out_ext = extension_of_mime out_mime_supported in
          let variant_key =
-           match clamped_px with
+           match quantized_px with
            | Some px -> string_of_int px
            | None -> "orig"
          in
          let cache_path = thumb_path t ~sha256:meta.sha256 ~variant_key ~ext:out_ext in
          let generate () =
            let src_ext = extension_of_mime (supported_mime_of_raster src_raster) in
-           let in_file, in_oc =
-             Filename.open_temp_file ~mode:[ Open_binary ] "masc_att_in_" src_ext
+           let in_file, out_file =
+             blocking.run_blocking (fun () ->
+               let in_file, in_oc =
+                 Filename.open_temp_file ~mode:[ Open_binary ] "masc_att_in_" src_ext
+               in
+               Fun.protect
+                 ~finally:(fun () -> close_out_noerr in_oc)
+                 (fun () -> output_string in_oc raw_bytes);
+               let out_file = Filename.temp_file "masc_att_out_" out_ext in
+               in_file, out_file)
            in
-           let out_file = Filename.temp_file "masc_att_out_" out_ext in
            let res =
              Fun.protect
                ~finally:(fun () ->
-                 close_out_noerr in_oc;
-                 (try Sys.remove in_file with Sys_error _ | Unix.Unix_error _ -> ());
-                 (try Sys.remove out_file with Sys_error _ | Unix.Unix_error _ -> ()))
+                 blocking.run_blocking (fun () ->
+                   (try Sys.remove in_file with Sys_error _ | Unix.Unix_error _ -> ());
+                   (try Sys.remove out_file with Sys_error _ | Unix.Unix_error _ -> ())))
                (fun () ->
-                 output_string in_oc raw_bytes;
-                 close_out_noerr in_oc;
                  run_transform_argv
+                   ~blocking
                    ~in_file
                    ~out_file
-                   ~max_px:clamped_px
+                   ~max_px:quantized_px
                    ~src_raster
                    ~out_raster)
            in
            match res with
            | Error detail -> Error (Transform_failed detail)
            | Ok (actual_mime, out_bytes) ->
-             (match ensure_owned_dir t (Filename.dirname cache_path) with
-              | Ok () -> ignore (Fs_compat.save_file_atomic_strict cache_path out_bytes)
-              | Error _ -> ());
+             blocking.run_blocking (fun () ->
+               match ensure_owned_dir t (Filename.dirname cache_path) with
+               | Ok () -> ignore (Fs_compat.save_file_atomic_strict cache_path out_bytes)
+               | Error _ -> ());
              Ok (actual_mime, out_bytes)
          in
-         match Fs_compat.load_owned_regular_file ~ownership_root:t.base_path cache_path with
-         | Ok (Some cached) ->
-           (match sniff_mime cached with
-            | Some m when m = out_mime_supported ->
-              let dims_ok =
-                match clamped_px, detect_image_dimensions cached with
-                | None, _ -> true
-                | Some bound, Some (w, h) -> max w h <= bound
-                | Some _, None -> false
-              in
-              if dims_ok
-              then Ok (mime_to_string m, cached)
-              else (
-                (try remove_file_if_exists cache_path with Unix.Unix_error _ -> ());
-                generate ())
-            | Some _ | None ->
-              (* Corrupt or wrong-format cache file is removed and regenerated cleanly. *)
-              (try remove_file_if_exists cache_path with Unix.Unix_error _ -> ());
-              generate ())
-         | Ok None | Error _ -> generate ()))
+         let cached_hit =
+           blocking.run_blocking (fun () ->
+             match Fs_compat.load_owned_regular_file ~ownership_root:t.base_path cache_path with
+             | Ok (Some cached) ->
+               (match sniff_mime cached with
+                | Some m when m = out_mime_supported ->
+                  let dims_ok =
+                    match quantized_px, detect_image_dimensions cached with
+                    | None, _ -> true
+                    | Some bound, Some (w, h) -> max w h <= bound
+                    | Some _, None -> false
+                  in
+                  if dims_ok
+                  then Some (mime_to_string m, cached)
+                  else (
+                    (try remove_file_if_exists cache_path with Unix.Unix_error _ -> ());
+                    None)
+                | Some _ | None ->
+                  (* Corrupt or wrong-format cache file is removed and regenerated cleanly. *)
+                  (try remove_file_if_exists cache_path with Unix.Unix_error _ -> ());
+                  None)
+             | Ok None | Error _ -> None)
+         in
+         match cached_hit with
+         | Some hit -> Ok hit
+         | None -> generate ()))
 ;;
 
 (* --- Reachability scanning (att_<64hex> extractor) --- *)

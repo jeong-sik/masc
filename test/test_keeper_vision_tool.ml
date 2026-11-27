@@ -515,11 +515,11 @@ let with_temp_runtime_toml content f =
       f ())
 
 (* The browser fixture attaches its workers under its own runtime.toml, a
-   codex-only config with no media_failover, and restores the caller's
-   runtime state when it returns. A test that reads pixels through the vision
-   reader inside that body re-establishes its vision runtime first: under the
-   fixture's config the vision candidate set is empty, so the reader answers
-   no image-capable runtime instead of calling the provider. *)
+   codex-only config with no vision-capable HTTP fallback, and restores the
+   caller's runtime state when it returns. A test that reads pixels through
+   the vision reader inside that body re-establishes its vision runtime first:
+   under the fixture's config the vision candidate set is empty, so the reader
+   answers no image-capable runtime instead of calling the provider. *)
 let reinit_vision_runtime_from_stack () =
   match !runtime_config_stack with
   | path :: _ -> init_runtime_or_fail path
@@ -529,9 +529,6 @@ let vision_failover_runtime_toml =
   {|
 [runtime]
 default = "p1.vision-a"
-
-[runtime.media]
-vision_reader = "p1.vision-a"
 
 [providers.p1]
 protocol = "ollama-http"
@@ -2271,8 +2268,6 @@ let vision_output_limit_runtime_toml =
   {|
 [runtime]
 default = "p1.vision-a"
-[runtime.media]
-vision_reader = "p1.vision-a"
 [providers.p1]
 protocol = "openai-compatible-http"
 endpoint = "https://p1.example/v1"

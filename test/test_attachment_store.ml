@@ -91,6 +91,14 @@ let minimal_midi = "MThd\x00\x00\x00\x06\x00\x01\x00\x01\x00\x60"
 let minimal_mp3_id3 = "ID3\x03\x00\x00\x00\x00\x00\x00frame"
 let minimal_mp3_sync = "\xff\xfb\x90\x00audio-frame"
 let utf16le_bom_spaces = "\xff\xfe \x00h\x00i\x00"
+let minimal_m4a = "\x00\x00\x00\x18ftypM4A \x00\x00\x00\x00M4A isom"
+let minimal_mp4_isom_audio = "\x00\x00\x00\x14ftypisom\x00\x00\x02\x00isom\x00\x00\x00\x18hdlr\x00\x00\x00\x00\x00\x00\x00\x00soun"
+let minimal_m4v_video = "\x00\x00\x00\x18ftypM4V \x00\x00\x00\x00M4V isom"
+let minimal_mp4_isom_with_vide = "\x00\x00\x00\x14ftypisom\x00\x00\x02\x00isom\x00\x00\x00\x18hdlr\x00\x00\x00\x00\x00\x00\x00\x00vide"
+let minimal_audio_webm = "\x1a\x45\xdf\xa3\x9f\x42\x86\x81\x01\x42\x82\x84webm\x83\x81\x02A_OPUS"
+let minimal_video_webm_vp9 = "\x1a\x45\xdf\xa3\x9f\x42\x86\x81\x01\x42\x82\x84webmV_VP9"
+let minimal_video_webm_track = "\x1a\x45\xdf\xa3\x9f\x42\x86\x81\x01\x42\x82\x84webm\x83\x81\x01"
+let minimal_flac = "fLaC\x00\x00\x00\x22opaque-flac-payload"
 
 (* Complete valid 1x1 GIF89a image decodable by sips/magick. *)
 let valid_1x1_gif =
@@ -143,6 +151,34 @@ let test_magic_sniffing_and_dimensions () =
     (Some "audio/mpeg")
     (Option.map A.mime_to_string (A.sniff_mime minimal_mp3_sync));
   Alcotest.(check (option string))
+    "sniff m4a audio/mp4"
+    (Some "audio/mp4")
+    (Option.map A.mime_to_string (A.sniff_mime minimal_m4a));
+  Alcotest.(check (option string))
+    "sniff isom audio-only mp4"
+    (Some "audio/mp4")
+    (Option.map A.mime_to_string (A.sniff_mime minimal_mp4_isom_audio));
+  Alcotest.(check (option string))
+    "reject M4V video"
+    None
+    (Option.map A.mime_to_string (A.sniff_mime minimal_m4v_video));
+  Alcotest.(check (option string))
+    "reject isom MP4 containing vide hdlr track"
+    None
+    (Option.map A.mime_to_string (A.sniff_mime minimal_mp4_isom_with_vide));
+  Alcotest.(check (option string))
+    "sniff audio/webm"
+    (Some "audio/webm")
+    (Option.map A.mime_to_string (A.sniff_mime minimal_audio_webm));
+  Alcotest.(check (option string))
+    "reject video/webm V_VP9"
+    None
+    (Option.map A.mime_to_string (A.sniff_mime minimal_video_webm_vp9));
+  Alcotest.(check (option string))
+    "reject video/webm TrackType video"
+    None
+    (Option.map A.mime_to_string (A.sniff_mime minimal_video_webm_track));
+  Alcotest.(check (option string))
     "reject unknown bytes"
     None
     (Option.map A.mime_to_string (A.sniff_mime "plain text hello"));
@@ -150,6 +186,14 @@ let test_magic_sniffing_and_dimensions () =
     "reject utf-16le bom as audio/mpeg"
     None
     (Option.map A.mime_to_string (A.sniff_mime utf16le_bom_spaces));
+  (* UTF-8 codepoint boundary truncation in sanitize_filename *)
+  let long_korean = "a" ^ String.concat "" (List.init 70 (fun _ -> "가")) in
+  (match A.sanitize_filename long_korean with
+   | None -> Alcotest.fail "expected sanitized UTF-8 filename"
+   | Some s ->
+     Alcotest.(check bool) "truncated <= 180 bytes" true (String.length s <= 180);
+     Alcotest.(check int) "1 ASCII + 59 * 3-byte Korean = 178 bytes" 178 (String.length s);
+     Alcotest.(check bool) "truncated filename is valid UTF-8" true (String.is_valid_utf_8 s));
   Alcotest.(check (option (pair int int)))
     "png dims"
     (Some (13, 7))
@@ -422,7 +466,128 @@ let test_ephemeral_lru_and_promotion () =
     | Ok listed ->
       let ids = List.map (fun (m : A.meta) -> m.id) listed in
       Alcotest.(check (list string)) "newest 2 ephemeral pins remain" [ m4.id; m3.id ] ids
-    | Error err -> Alcotest.fail err)
+    | Error err -> Alcotest.fail err);
+  (* Multi-keeper identical ephemeral capture: both keepers pin same bytes;
+     even after first keeper's pin is evicted, second keeper can still read. *)
+  with_temp_base_path (fun base_path ->
+    let store = A.create ~base_path in
+    let shared = make_png ~width:6 ~height:6 ~seed:55 in
+    let ma =
+      A.put
+        ~ephemeral_max_entries:1
+        ~now:100.0
+        ~origin:A.Tool_capture
+        ~created_by:"keeper:alpha"
+        ~retention:(A.Ephemeral { keeper = "alpha" })
+        store
+        ~bytes:shared
+      |> Result.get_ok
+    in
+    let mb =
+      A.put
+        ~ephemeral_max_entries:2
+        ~now:110.0
+        ~origin:A.Tool_capture
+        ~created_by:"keeper:beta"
+        ~retention:(A.Ephemeral { keeper = "beta" })
+        store
+        ~bytes:shared
+      |> Result.get_ok
+    in
+    Alcotest.(check string) "same id across keepers" ma.id mb.id;
+    Alcotest.(check bool) "alpha has pin" true (A.has_ephemeral_pin store ~keeper:"alpha" ~sha256:ma.sha256);
+    Alcotest.(check bool) "beta has pin" true (A.has_ephemeral_pin store ~keeper:"beta" ~sha256:ma.sha256);
+    Alcotest.(check bool) "gamma has no pin" false (A.has_ephemeral_pin store ~keeper:"gamma" ~sha256:ma.sha256);
+    Alcotest.(check bool) "alpha can read" true (A.can_keeper_read store ~keeper:"alpha" ~id_or_sha256:ma.id |> Result.get_ok);
+    Alcotest.(check bool) "beta can read" true (A.can_keeper_read store ~keeper:"beta" ~id_or_sha256:ma.id |> Result.get_ok);
+    Alcotest.(check bool) "gamma cannot read" false (A.can_keeper_read store ~keeper:"gamma" ~id_or_sha256:ma.id |> Result.get_ok);
+    (* Evict alpha's pin by inserting another frame into alpha (max_entries=1) *)
+    let other = make_png ~width:6 ~height:6 ~seed:56 in
+    ignore
+      (A.put
+         ~ephemeral_max_entries:1
+         ~now:200.0
+         ~origin:A.Tool_capture
+         ~created_by:"keeper:alpha"
+         ~retention:(A.Ephemeral { keeper = "alpha" })
+         store
+         ~bytes:other
+       |> Result.get_ok);
+    Alcotest.(check bool) "alpha pin evicted" false (A.has_ephemeral_pin store ~keeper:"alpha" ~sha256:ma.sha256);
+    Alcotest.(check bool) "alpha can no longer read" false (A.can_keeper_read store ~keeper:"alpha" ~id_or_sha256:ma.id |> Result.get_ok);
+    Alcotest.(check bool) "beta pin survives alpha eviction" true (A.has_ephemeral_pin store ~keeper:"beta" ~sha256:ma.sha256);
+    Alcotest.(check bool) "beta can still read after alpha eviction" true (A.can_keeper_read store ~keeper:"beta" ~id_or_sha256:ma.id |> Result.get_ok);
+    (match A.get_bytes store ~id:ma.id with
+     | Ok (Some b) -> Alcotest.(check string) "shared blob survives alpha eviction" shared b
+     | Ok None -> Alcotest.fail "shared blob wrongly deleted while beta still pins it"
+     | Error err -> Alcotest.fail (A.get_error_to_string err)))
+;;
+
+let test_put_opaque_and_fail_closed_pins () =
+  with_temp_base_path (fun base_path ->
+    let store = A.create ~base_path in
+    (* Model-generated unknown format (FLAC) preserved as opaque binary *)
+    let meta =
+      match
+        A.put_opaque
+          ~declared_mime:"audio/flac"
+          ~filename:"synth.flac"
+          ~origin:A.Model_generated
+          ~created_by:"keeper:music"
+          ~retention:A.Durable
+          store
+          ~bytes:minimal_flac
+      with
+      | Ok m -> m
+      | Error err -> Alcotest.fail (A.put_error_to_string err)
+    in
+    Alcotest.(check string) "opaque mime is octet-stream" "application/octet-stream" meta.mime_type;
+    Alcotest.(check string) "opaque kind is document" "document" (A.media_kind_to_string meta.kind);
+    Alcotest.(check bool) "is_opaque_binary true" true (A.is_opaque_binary meta);
+    (match A.get_bytes store ~id:meta.id with
+     | Ok (Some loaded) -> Alcotest.(check string) "opaque raw bytes round-trip" minimal_flac loaded
+     | Ok None -> Alcotest.fail "missing opaque bytes"
+     | Error err -> Alcotest.fail (A.get_error_to_string err));
+    (* User_upload is rejected by put_opaque *)
+    (match
+       A.put_opaque
+         ~origin:A.User_upload
+         ~created_by:"user"
+         ~retention:A.Durable
+         store
+         ~bytes:minimal_flac
+     with
+     | Error (A.Unsupported_or_unknown_format _) -> ()
+     | Ok _ | Error _ -> Alcotest.fail "put_opaque must reject User_upload");
+    (* Active SVG/HTML is still rejected by put_opaque *)
+    (match
+       A.put_opaque
+         ~origin:A.Model_generated
+         ~created_by:"keeper"
+         ~retention:A.Durable
+         store
+         ~bytes:"<svg onload='alert(1)'></svg>"
+     with
+     | Error (A.Forbidden_mime "image/svg+xml") -> ()
+     | Ok _ | Error _ -> Alcotest.fail "put_opaque must reject active SVG");
+    (* Fail-closed list_all_ephemeral_pins when an ephemeral dir is unreadable *)
+    let png = make_png ~width:4 ~height:4 ~seed:88 in
+    ignore
+      (A.put
+         ~origin:A.Tool_capture
+         ~created_by:"keeper:locked"
+         ~retention:(A.Ephemeral { keeper = "locked" })
+         store
+         ~bytes:png
+       |> Result.get_ok);
+    let locked_dir = Filename.concat (Filename.concat (A.root_dir store) "ephemeral") "locked" in
+    Unix.chmod locked_dir 0o000;
+    Fun.protect
+      ~finally:(fun () -> try Unix.chmod locked_dir 0o755 with Unix.Unix_error _ -> ())
+      (fun () ->
+         match A.list_all_ephemeral_pins store with
+         | Error _ -> ()
+         | Ok _ -> Alcotest.fail "list_all_ephemeral_pins must fail closed on unreadable dir"))
 ;;
 
 let test_extract_att_ids () =
@@ -471,8 +636,15 @@ let test_derivatives () =
      with
      | Error (A.Not_an_image "application/pdf") -> ()
      | Ok _ | Error _ -> Alcotest.fail "expected Not_an_image on PDF");
-    (* 64x64 PNG downscaled to 32px *)
-    let png64 = make_png ~width:64 ~height:64 ~seed:99 in
+    (* Quantization buckets [160; 320; 640; 1280] *)
+    Alcotest.(check int) "quantize 32 -> 160" 160 (A.quantize_thumb_px 32);
+    Alcotest.(check int) "quantize 160 -> 160" 160 (A.quantize_thumb_px 160);
+    Alcotest.(check int) "quantize 161 -> 320" 320 (A.quantize_thumb_px 161);
+    Alcotest.(check int) "quantize 400 -> 640" 640 (A.quantize_thumb_px 400);
+    Alcotest.(check int) "quantize 1000 -> 1280" 1280 (A.quantize_thumb_px 1000);
+    Alcotest.(check int) "quantize 5000 -> 1280" 1280 (A.quantize_thumb_px 5000);
+    (* 240x180 PNG downscaled with max_px=32 snaps to 160px bucket *)
+    let png240 = make_png ~width:240 ~height:180 ~seed:99 in
     let png_meta =
       match
         A.put
@@ -480,7 +652,7 @@ let test_derivatives () =
           ~created_by:"u"
           ~retention:A.Durable
           store
-          ~bytes:png64
+          ~bytes:png240
       with
       | Ok m -> m
       | Error err -> Alcotest.fail (A.put_error_to_string err)
@@ -491,26 +663,26 @@ let test_derivatives () =
          ~target_format:A.Force_png
          store
          ~meta:png_meta
-         ~raw_bytes:png64
+         ~raw_bytes:png240
      with
      | Ok (mime, bytes) ->
        Alcotest.(check string) "png identity mime" "image/png" mime;
-       Alcotest.(check string) "png identity bytes" png64 bytes
+       Alcotest.(check string) "png identity bytes" png240 bytes
      | Error err -> Alcotest.fail (A.derivative_error_to_string err));
-    (* Downscale to 32px & verify cached thumb exists *)
+    (* Downscale with max_px=32 -> quantized to 160px bucket & cached at _160.png *)
     match
       A.get_image_derivative
         ~max_px:32
         ~target_format:A.Force_png
         store
         ~meta:png_meta
-        ~raw_bytes:png64
+        ~raw_bytes:png240
     with
     | Ok (mime, scaled) ->
       Alcotest.(check string) "scaled mime" "image/png" mime;
       (match A.detect_image_dimensions scaled with
        | Some (w, h) ->
-         Alcotest.(check bool) "scaled <= 32" true (max w h <= 32 && min w h > 0)
+         Alcotest.(check bool) "scaled <= 160" true (max w h <= 160 && min w h > 0)
        | None -> Alcotest.fail "scaled PNG missing readable dimensions");
       (* A corrupt cached derivative is replaced, not served or refused. *)
       let cache_path =
@@ -518,9 +690,9 @@ let test_derivatives () =
           (Filename.concat
              (Filename.concat (A.root_dir store) "thumbs")
              (String.sub png_meta.sha256 0 2))
-          (png_meta.sha256 ^ "_32.png")
+          (png_meta.sha256 ^ "_160.png")
       in
-      Alcotest.(check bool) "derivative was cached" true (Sys.file_exists cache_path);
+      Alcotest.(check bool) "derivative was cached under quantized _160.png" true (Sys.file_exists cache_path);
       let oc = open_out_bin cache_path in
       output_string oc "not an image";
       close_out oc;
@@ -530,7 +702,7 @@ let test_derivatives () =
            ~target_format:A.Force_png
            store
            ~meta:png_meta
-           ~raw_bytes:png64
+           ~raw_bytes:png240
        with
        | Ok (mime2, regenerated) ->
          Alcotest.(check string) "regenerated mime" "image/png" mime2;
@@ -551,7 +723,7 @@ let test_derivatives () =
            ~target_format:A.Force_png
            store
            ~meta:png_meta
-           ~raw_bytes:png64
+           ~raw_bytes:png240
        with
        | Ok (mime3, regen_png) ->
          Alcotest.(check string) "wrong-format cache replaced with png" "image/png" mime3;
@@ -597,7 +769,8 @@ let () =
       , [ Alcotest.test_case "magic sniffing and raster dimensions" `Quick test_magic_sniffing_and_dimensions
         ; Alcotest.test_case "security rejections (SVG/HTML/spoof/size/empty)" `Quick test_security_rejections
         ; Alcotest.test_case "put dedup wire JSON and integrity verification" `Quick test_put_dedup_wire_json_and_integrity
-        ; Alcotest.test_case "ephemeral LRU pruning and durable promotion" `Quick test_ephemeral_lru_and_promotion
+        ; Alcotest.test_case "ephemeral LRU pruning, multi-keeper pins, and promotion" `Quick test_ephemeral_lru_and_promotion
+        ; Alcotest.test_case "put_opaque binary preservation and fail-closed pin scan" `Quick test_put_opaque_and_fail_closed_pins
         ; Alcotest.test_case "extract_att_ids boundary scanning" `Quick test_extract_att_ids
         ; Alcotest.test_case "image derivatives and non-image refusal" `Quick test_derivatives
         ] )

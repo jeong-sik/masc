@@ -343,12 +343,36 @@ let test_http_auth_and_upload_variants () =
       "attachment disposition"
       (Some "attachment; filename=\"hero.png\"")
       (List.assoc_opt "content-disposition" hdrs_dl);
-    (* ?max_px=32 downscaled thumbnail *)
+    (* ?max_px=32 and ?max_px=100 on 240x180 PNG quantize to 160px bucket *)
+    let png240 = make_png ~width:240 ~height:180 ~seed:6 in
+    let st_240, _, body_240 =
+      dispatch_raw
+        ~router
+        ~meth:"POST"
+        ~path:"/api/v1/attachments"
+        ~token:worker
+        ~headers:
+          [ "Content-Type", "image/png"
+          ; "X-Origin", "model_generated"
+          ; "X-Retention", "ephemeral"
+          ; "X-Keeper", "victim-keeper"
+          ]
+        ~body:png240
+        ()
+      |> split_response
+    in
+    Alcotest.(check int) "240px upload 201" 201 st_240;
+    let data_240 = Yojson.Safe.from_string body_240 |> member "data" in
+    let id_240 = data_240 |> member "id" |> to_string in
+    let sha_240 = data_240 |> member "sha256" |> to_string in
+    (* Public HTTP upload MUST ignore untrusted X-Origin/X-Retention/X-Keeper *)
+    Alcotest.(check string) "public upload forces user_upload origin" "user_upload" (data_240 |> member "origin" |> to_string);
+    Alcotest.(check string) "public upload forces durable retention" "durable" (data_240 |> member "retention" |> to_string);
     let st_thumb, hdrs_thumb, body_thumb =
       dispatch_raw
         ~router
         ~meth:"GET"
-        ~path:("/api/v1/attachments/" ^ id ^ "?max_px=32")
+        ~path:("/api/v1/attachments/" ^ id_240 ^ "?max_px=32")
         ~token:worker
         ~body:""
         ()
@@ -356,9 +380,28 @@ let test_http_auth_and_upload_variants () =
     in
     Alcotest.(check int) "max_px=32 200" 200 st_thumb;
     Alcotest.(check (option string)) "thumb mime" (Some "image/png") (List.assoc_opt "content-type" hdrs_thumb);
+    Alcotest.(check (option string))
+      "max_px=32 ETag quantized to max160"
+      (Some ("\"" ^ sha_240 ^ "-max160\""))
+      (List.assoc_opt "etag" hdrs_thumb);
     (match Att.detect_image_dimensions body_thumb with
-     | Some (w, h) -> Alcotest.(check bool) "thumb <= 32px" true (max w h <= 32)
+     | Some (w, h) -> Alcotest.(check bool) "thumb <= 160px" true (max w h <= 160 && min w h > 0)
      | None -> Alcotest.fail "thumb PNG unreadable");
+    let st_thumb2, hdrs_thumb2, _ =
+      dispatch_raw
+        ~router
+        ~meth:"GET"
+        ~path:("/api/v1/attachments/" ^ id_240 ^ "?max_px=100")
+        ~token:worker
+        ~body:""
+        ()
+      |> split_response
+    in
+    Alcotest.(check int) "max_px=100 200" 200 st_thumb2;
+    Alcotest.(check (option string))
+      "max_px=100 shares quantized max160 ETag"
+      (Some ("\"" ^ sha_240 ^ "-max160\""))
+      (List.assoc_opt "etag" hdrs_thumb2);
     (* /meta *)
     let st_meta, _, body_meta =
       dispatch_raw
@@ -605,7 +648,7 @@ let test_derivatives_with_process_eio_init () =
              true
              (Process_eio.is_initialized ());
            let open Yojson.Safe.Util in
-           let png64 = make_png ~width:64 ~height:48 ~seed:77 in
+           let png240 = make_png ~width:240 ~height:180 ~seed:77 in
            let st_up, _, body_up =
              dispatch_in_eio
                ~router
@@ -613,7 +656,7 @@ let test_derivatives_with_process_eio_init () =
                ~path:"/api/v1/attachments"
                ~token:worker
                ~headers:[ "Content-Type", "image/png" ]
-               ~body:png64
+               ~body:png240
                ()
              |> split_response
            in
@@ -638,7 +681,7 @@ let test_derivatives_with_process_eio_init () =
              (List.assoc_opt "content-type" hdrs_thumb);
            (match Att.detect_image_dimensions body_thumb with
             | Some (w, h) ->
-              Alcotest.(check bool) "thumb <= 32px" true (max w h <= 32 && min w h > 0)
+              Alcotest.(check bool) "thumb <= 160px" true (max w h <= 160 && min w h > 0)
             | None -> Alcotest.fail "thumb PNG unreadable under Process_eio");
            let st_gif_up, _, body_gif_up =
              dispatch_in_eio
@@ -691,6 +734,93 @@ let test_derivatives_with_process_eio_init () =
              (Att.sniff_mime body_media_png = Some Att.Image_png))))
 ;;
 
+let test_opaque_serve_and_ephemeral_scope () =
+  with_router (fun ~base_path ~state:_ ~router ~worker ~player:_ ->
+    let store = Att.create ~base_path in
+    let admin = create_token_exn base_path ~agent_name:"ops-admin" ~role:Masc_domain.Admin in
+    let keeper_b = create_token_exn base_path ~agent_name:"keeper-b" ~role:Masc_domain.Worker in
+    (* 1. Opaque generated binary (FLAC) MUST always serve as octet-stream attachment, never inline *)
+    let flac = "fLaC\x00\x00\x00\x22opaque-http-payload" in
+    let opaque_meta =
+      Att.put_opaque
+        ~declared_mime:"audio/flac"
+        ~filename:"clip.flac"
+        ~origin:Att.Model_generated
+        ~created_by:"keeper:music"
+        ~retention:Att.Durable
+        store
+        ~bytes:flac
+      |> Result.get_ok
+    in
+    let st_op, hdrs_op, body_op =
+      dispatch_raw
+        ~router
+        ~meth:"GET"
+        ~path:("/api/v1/attachments/" ^ opaque_meta.id)
+        ~token:worker
+        ~body:""
+        ()
+      |> split_response
+    in
+    Alcotest.(check int) "opaque GET 200" 200 st_op;
+    Alcotest.(check string) "opaque raw bytes match" flac body_op;
+    Alcotest.(check (option string))
+      "opaque forced application/octet-stream"
+      (Some "application/octet-stream")
+      (List.assoc_opt "content-type" hdrs_op);
+    Alcotest.(check (option string))
+      "opaque forced Content-Disposition attachment (never inline)"
+      (Some "attachment; filename=\"clip.flac\"")
+      (List.assoc_opt "content-disposition" hdrs_op);
+    Alcotest.(check (option string)) "opaque nosniff" (Some "nosniff") (List.assoc_opt "x-content-type-options" hdrs_op);
+    Alcotest.(check (option string)) "opaque sandbox csp" (Some "default-src 'none'; sandbox") (List.assoc_opt "content-security-policy" hdrs_op);
+    (* 2. Ephemeral attachment scope: owning keeper & admin allowed; sibling non-admin 403 *)
+    let frame = make_png ~width:16 ~height:16 ~seed:205 in
+    let eph_meta =
+      Att.put
+        ~origin:Att.Tool_capture
+        ~created_by:"keeper:chat-worker"
+        ~retention:(Att.Ephemeral { keeper = "chat-worker" })
+        store
+        ~bytes:frame
+      |> Result.get_ok
+    in
+    let st_owner, _, _ =
+      dispatch_raw ~router ~meth:"GET" ~path:("/api/v1/attachments/" ^ eph_meta.id) ~token:worker ~body:"" ()
+      |> split_response
+    in
+    Alcotest.(check int) "owning keeper reads own ephemeral 200" 200 st_owner;
+    let st_other, _, _ =
+      dispatch_raw ~router ~meth:"GET" ~path:("/api/v1/attachments/" ^ eph_meta.id) ~token:keeper_b ~body:"" ()
+      |> split_response
+    in
+    Alcotest.(check int) "sibling keeper refused ephemeral 403" 403 st_other;
+    let st_other_meta, _, _ =
+      dispatch_raw ~router ~meth:"GET" ~path:("/api/v1/attachments/" ^ eph_meta.id ^ "/meta") ~token:keeper_b ~body:"" ()
+      |> split_response
+    in
+    Alcotest.(check int) "sibling keeper refused ephemeral /meta 403" 403 st_other_meta;
+    let st_admin, _, _ =
+      dispatch_raw ~router ~meth:"GET" ~path:("/api/v1/attachments/" ^ eph_meta.id) ~token:admin ~body:"" ()
+      |> split_response
+    in
+    Alcotest.(check int) "admin reads ephemeral 200" 200 st_admin;
+    (* Once keeper-b also pins identical frame, keeper-b is permitted *)
+    ignore
+      (Att.put
+         ~origin:Att.Tool_capture
+         ~created_by:"keeper:keeper-b"
+         ~retention:(Att.Ephemeral { keeper = "keeper-b" })
+         store
+         ~bytes:frame
+       |> Result.get_ok);
+    let st_other_after, _, _ =
+      dispatch_raw ~router ~meth:"GET" ~path:("/api/v1/attachments/" ^ eph_meta.id) ~token:keeper_b ~body:"" ()
+      |> split_response
+    in
+    Alcotest.(check int) "keeper-b permitted after pinning identical bytes 200" 200 st_other_after)
+;;
+
 let test_gc_scope_non_halt_and_reachability () =
   with_temp_base_path (fun base_path ->
     let store = Att.create ~base_path in
@@ -735,38 +865,124 @@ let test_gc_scope_non_halt_and_reachability () =
        let names = List.map Tool_blob_maintenance.unclassified_entry_to_string entries in
        Alcotest.(check (list string)) "no unclassified entries with attachments/ + media/" [] names
      | Error err -> Alcotest.fail (Tool_blob_maintenance.error_to_string err));
-    (* Tool_blob_sweep.observe also reports unclassified = [] *)
+    (* Tool_blob_sweep.observe also reports unclassified = [] and deletes nothing *)
     (match Tool_blob_sweep.observe ~base_path ~scope:Server_tool_blob_scope.scope with
      | Ok report ->
        Alcotest.(check (list string)) "sweep observe unclassified empty" [] report.unclassified
      | Error err -> Alcotest.fail (Tool_blob_sweep.error_to_string err));
     (* Attachment reachability scan *)
-    match
-      Tool_blob_sweep.scan_attachment_reachability ~base_path ~scope:Server_tool_blob_scope.scope
-    with
-    | Error err -> Alcotest.fail err
-    | Ok reach ->
-      Alcotest.(check int) "total attachment blobs" 3 reach.total_blobs;
-      Alcotest.(check bool)
-        "chat-referenced blob is live"
-        true
-        (Set_util.StringSet.mem m_chat.sha256 reach.live_sha256s);
-      Alcotest.(check bool)
-        "ephemeral-pinned blob is live"
-        true
-        (Set_util.StringSet.mem m_eph.sha256 reach.live_sha256s);
-      Alcotest.(check bool)
-        "orphan blob is unreferenced"
-        true
-        (Set_util.StringSet.mem m_orphan.sha256 reach.unreferenced_sha256s);
-      Alcotest.(check bool)
-        "chat-referenced blob not unreferenced"
-        false
-        (Set_util.StringSet.mem m_chat.sha256 reach.unreferenced_sha256s))
+    (match
+       Tool_blob_sweep.scan_attachment_reachability ~base_path ~scope:Server_tool_blob_scope.scope
+     with
+     | Error err -> Alcotest.fail err
+     | Ok reach ->
+       Alcotest.(check int) "total attachment blobs" 3 reach.total_blobs;
+       Alcotest.(check bool)
+         "chat-referenced blob is live"
+         true
+         (Set_util.StringSet.mem m_chat.sha256 reach.live_sha256s);
+       Alcotest.(check bool)
+         "ephemeral-pinned blob is live"
+         true
+         (Set_util.StringSet.mem m_eph.sha256 reach.live_sha256s);
+       Alcotest.(check bool)
+         "orphan blob is unreferenced"
+         true
+         (Set_util.StringSet.mem m_orphan.sha256 reach.unreferenced_sha256s);
+       Alcotest.(check bool)
+         "chat-referenced blob not unreferenced"
+         false
+         (Set_util.StringSet.mem m_chat.sha256 reach.unreferenced_sha256s));
+    (* Grace period retains fresh unreferenced blob *)
+    (match
+       Tool_blob_sweep.sweep_attachments
+         ~min_age_seconds:3600.0
+         ~base_path
+         ~scope:Server_tool_blob_scope.scope
+         ()
+     with
+     | Error err -> Alcotest.fail err
+     | Ok rep ->
+       Alcotest.(check int) "fresh orphan not deleted" 0 rep.deleted;
+       Alcotest.(check int) "fresh orphan retained within grace" 1 rep.retained_within_grace);
+    (* Age m_orphan past grace period and sweep via sweep_attachments *)
+    let age_blob sha256 =
+      let shard = String.sub sha256 0 2 in
+      let old_ts = Unix.gettimeofday () -. 7200.0 in
+      let bpath = Filename.concat (Filename.concat (Filename.concat (Att.root_dir store) "blobs") shard) sha256 in
+      let mpath = Filename.concat (Filename.concat (Filename.concat (Att.root_dir store) "meta") shard) (sha256 ^ ".json") in
+      Unix.utimes bpath old_ts old_ts;
+      Unix.utimes mpath old_ts old_ts
+    in
+    age_blob m_orphan.sha256;
+    (match
+       Tool_blob_sweep.sweep_attachments
+         ~min_age_seconds:3600.0
+         ~base_path
+         ~scope:Server_tool_blob_scope.scope
+         ()
+     with
+     | Error err -> Alcotest.fail err
+     | Ok rep ->
+       Alcotest.(check int) "aged orphan deleted" 1 rep.deleted;
+       Alcotest.(check bool) "not blocked" false rep.blocked_by_unclassified);
+    Alcotest.(check bool) "orphan removed" true (Att.get_bytes store ~id:m_orphan.id = Ok None);
+    Alcotest.(check bool) "referenced chat blob survived" true (Att.get_bytes store ~id:m_chat.id = Ok (Some p_chat));
+    Alcotest.(check bool) "ephemeral-pinned blob survived" true (Att.get_bytes store ~id:m_eph.id = Ok (Some p_eph));
+    (* Tool_blob_sweep.reclaim also runs attachment sweep automatically *)
+    let p_orphan2 = make_png ~width:8 ~height:8 ~seed:4 in
+    let m_orphan2 =
+      Att.put ~origin:Att.User_upload ~created_by:"op" ~retention:Att.Durable store ~bytes:p_orphan2
+      |> Result.get_ok
+    in
+    age_blob m_orphan2.sha256;
+    (match
+       Tool_blob_sweep.reclaim
+         ~min_age_seconds:3600.0
+         ~base_path
+         ~scope:Server_tool_blob_scope.scope
+         ()
+     with
+     | Error err -> Alcotest.fail (Tool_blob_sweep.error_to_string err)
+     | Ok _ ->
+       Alcotest.(check bool) "reclaim deleted aged orphan2" true (Att.get_bytes store ~id:m_orphan2.id = Ok None);
+       Alcotest.(check bool) "reclaim preserved m_chat" true (Att.get_bytes store ~id:m_chat.id = Ok (Some p_chat)));
+    (* Fail-closed: unreadable consumer dir aborts sweep and deletes nothing *)
+    let p_orphan3 = make_png ~width:8 ~height:8 ~seed:5 in
+    let m_orphan3 =
+      Att.put ~origin:Att.User_upload ~created_by:"op" ~retention:Att.Durable store ~bytes:p_orphan3
+      |> Result.get_ok
+    in
+    age_blob m_orphan3.sha256;
+    Unix.chmod chat_dir 0o000;
+    Fun.protect
+      ~finally:(fun () -> try Unix.chmod chat_dir 0o755 with Unix.Unix_error _ -> ())
+      (fun () ->
+         match
+           Tool_blob_sweep.sweep_attachments
+             ~min_age_seconds:0.0
+             ~base_path
+             ~scope:Server_tool_blob_scope.scope
+             ()
+         with
+         | Error _ -> ()
+         | Ok _ -> Alcotest.fail "sweep_attachments must fail closed on unreadable consumer dir");
+    Alcotest.(check bool)
+      "orphan3 survived fail-closed unreadable dir"
+      true
+      (Att.get_bytes store ~id:m_orphan3.id = Ok (Some p_orphan3)))
 ;;
 
 let test_mcp_attachment_resource () =
   with_router (fun ~base_path ~state ~router:_ ~worker:_ ~player:_ ->
+    (* Template discovery: masc://attachments/{id} advertised in resource_templates *)
+    Alcotest.(check bool)
+      "masc://attachments/{id} registered in Mcp_server.resource_templates"
+      true
+      (List.exists
+         (fun (t : Masc.Mcp_server.mcp_resource_template) ->
+            String.equal t.uri_template "masc://attachments/{id}")
+         Masc.Mcp_server.resource_templates);
     let store = Att.create ~base_path in
     let png = make_png ~width:10 ~height:10 ~seed:42 in
     let meta =
@@ -789,6 +1005,69 @@ let test_mcp_attachment_resource () =
     Alcotest.(check string) "mimeType" "image/png" (item |> member "mimeType" |> to_string);
     let blob_b64 = item |> member "blob" |> to_string in
     Alcotest.(check string) "decoded blob matches raw PNG" png (Base64.decode_exn blob_b64);
+    (* Ephemeral attachment MCP caller scope enforcement *)
+    let eph_png = make_png ~width:10 ~height:10 ~seed:43 in
+    let eph_meta =
+      Att.put
+        ~origin:Att.Tool_capture
+        ~created_by:"keeper:alpha"
+        ~retention:(Att.Ephemeral { keeper = "alpha" })
+        store
+        ~bytes:eph_png
+      |> Result.get_ok
+    in
+    let eph_uri = "masc://attachments/" ^ eph_meta.id in
+    let dummy_reader = Masc_board_handlers.Board_access.named "alpha" in
+    let eph_admin =
+      Eio_main.run (fun _env ->
+        Masc.Mcp_server_eio_resource.handle_read_resource_eio
+          ~caller:Masc.Mcp_server_eio_resource.Operator_admin
+          state
+          (`Int 10)
+          (Some (`Assoc [ "uri", `String eph_uri ])))
+    in
+    Alcotest.(check int)
+      "MCP Operator_admin reads ephemeral"
+      1
+      (eph_admin |> member "result" |> member "contents" |> to_list |> List.length);
+    let eph_owner =
+      Eio_main.run (fun _env ->
+        Masc.Mcp_server_eio_resource.handle_read_resource_eio
+          ~caller:(Masc.Mcp_server_eio_resource.Authenticated_reader
+                     { agent_name = "alpha"; board_reader = dummy_reader })
+          state
+          (`Int 11)
+          (Some (`Assoc [ "uri", `String eph_uri ])))
+    in
+    Alcotest.(check int)
+      "MCP owning keeper reads ephemeral"
+      1
+      (eph_owner |> member "result" |> member "contents" |> to_list |> List.length);
+    let eph_other =
+      Eio_main.run (fun _env ->
+        Masc.Mcp_server_eio_resource.handle_read_resource_eio
+          ~caller:(Masc.Mcp_server_eio_resource.Authenticated_reader
+                     { agent_name = "beta"; board_reader = Masc_board_handlers.Board_access.named "beta" })
+          state
+          (`Int 12)
+          (Some (`Assoc [ "uri", `String eph_uri ])))
+    in
+    Alcotest.(check int)
+      "MCP sibling keeper denied ephemeral (-32007 Insufficient_scope)"
+      (-32007)
+      (eph_other |> member "error" |> member "code" |> to_int);
+    let eph_anon =
+      Eio_main.run (fun _env ->
+        Masc.Mcp_server_eio_resource.handle_read_resource_eio
+          ~caller:Masc.Mcp_server_eio_resource.Anonymous_reader
+          state
+          (`Int 13)
+          (Some (`Assoc [ "uri", `String eph_uri ])))
+    in
+    Alcotest.(check bool)
+      "MCP anonymous denied ephemeral"
+      true
+      (eph_anon |> member "error" <> `Null);
     (* Invalid attachment id -> JSON-RPC Invalid_params (-32602) *)
     let bad_resp =
       Eio_main.run (fun _env ->
@@ -821,8 +1100,9 @@ let () =
     [ ( "http, gc scope, and mcp resource"
       , [ Alcotest.test_case "HTTP upload/get/head/304/download/thumb/meta/media-delegation" `Quick test_http_auth_and_upload_variants
         ; Alcotest.test_case "HTTP ?max_px and ?format=png with Process_eio.init active" `Quick test_derivatives_with_process_eio_init
-        ; Alcotest.test_case "GC scope non-halt and attachment reachability scan" `Quick test_gc_scope_non_halt_and_reachability
-        ; Alcotest.test_case "MCP masc://attachments/<id> BlobResourceContents" `Quick test_mcp_attachment_resource
+        ; Alcotest.test_case "HTTP opaque attachment download-only and ephemeral keeper scope" `Quick test_opaque_serve_and_ephemeral_scope
+        ; Alcotest.test_case "GC scope non-halt, reachability, and fail-closed sweep" `Quick test_gc_scope_non_halt_and_reachability
+        ; Alcotest.test_case "MCP masc://attachments/{id} template, BlobResourceContents, and ephemeral scope" `Quick test_mcp_attachment_resource
         ] )
     ]
 ;;

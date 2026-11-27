@@ -740,6 +740,14 @@ let build_request_assoc_artifact
   let body =
     match config.output_media, caps.Capabilities.image_output with
     | Some opts, Capabilities.In_turn_openai_chat_modalities ->
+      List.iter
+        (fun field ->
+           warn_capability_drop
+             ~model_id:config.model_id
+             ~field:("output_media." ^ field))
+        (Provider_config.unsupported_image_generation_options
+           ~contract:Capabilities.In_turn_openai_chat_modalities
+           opts);
       let body =
         ("modalities", `List [ `String "image"; `String "text" ]) :: body
       in

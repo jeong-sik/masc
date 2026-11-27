@@ -759,7 +759,7 @@ let test_compact_composer_and_drafts () =
   Alcotest.(check string) "draft survived Pulse -> Work -> Keepers" "hi"
     (Drafts.draft_for ~keeper:"alpha" m7.drafts).text;
   (* Clear draft -> folds again on Keepers fleet list *)
-  let m8 = { m7 with drafts = Drafts.clear_current_draft m7.drafts } in
+  let m8 = { m7 with drafts = Drafts.clear_current_draft_all m7.drafts } in
   Alcotest.(check bool) "cleared draft folds on Keepers roster" true
     (Model.equal_composer_mode (Model.composer_mode m8) Model.Auto_folded_pill);
   (* Active voice keeps composer visible *)

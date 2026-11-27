@@ -239,6 +239,44 @@ let test_persist_runs_opportunistic_media_cleanup () =
     | Ok None -> Alcotest.fail "fresh media missing"
     | Error err -> Alcotest.fail (Attachment_store.get_error_to_string err))
 
+let test_persist_preserves_opaque_non_allowlisted_media () =
+  with_temp_base (fun base_dir ->
+    let flac = "fLaC\x00\x00\x00\x22opaque-flac-audio-bytes" in
+    let flac_token, flac_url =
+      persist_ok ~base_dir ~media_type:"audio/flac" ~data:flac
+    in
+    Alcotest.(check string) "opaque flac canonical url" (expected_url flac) flac_url;
+    let unknown = "\x01\x02\x03custom-model-binary-output" in
+    let unk_token, unk_url =
+      persist_ok ~base_dir ~media_type:"application/x-unknown" ~data:unknown
+    in
+    Alcotest.(check string) "opaque unknown canonical url" (expected_url unknown) unk_url;
+    let store = Attachment_store.create ~base_path:base_dir in
+    List.iter
+      (fun (label, token, expected) ->
+         (match Attachment_store.get_meta store ~id:("att_" ^ token) with
+          | Ok (Some meta) ->
+            Alcotest.(check bool) (label ^ " stored as opaque binary") true
+              (Attachment_store.is_opaque_binary meta);
+            Alcotest.(check string) (label ^ " mime is application/octet-stream")
+              "application/octet-stream" meta.mime_type;
+            Alcotest.(check string) (label ^ " origin is model_generated")
+              "model_generated" (Attachment_store.origin_to_string meta.origin)
+          | Ok None -> Alcotest.fail (label ^ " meta missing")
+          | Error err -> Alcotest.fail (Attachment_store.get_error_to_string err));
+         match Attachment_store.get_bytes_by_sha256 store ~sha256:token with
+         | Ok (Some stored) ->
+           Alcotest.(check string) (label ^ " exact bytes round-trip") expected stored
+         | Ok None -> Alcotest.fail (label ^ " bytes missing")
+         | Error err -> Alcotest.fail (Attachment_store.get_error_to_string err))
+      [ "flac", flac_token, flac; "unknown", unk_token, unknown ];
+    Alcotest.(check string) "audio/mp4 ext" "m4a" (M.ext_of_media_type "audio/mp4");
+    Alcotest.(check string) "audio/webm ext" "webm" (M.ext_of_media_type "audio/webm");
+    Alcotest.(check media_category_testable) "audio/mp4 is Audio" M.Audio
+      (M.category_of_media_type "audio/mp4");
+    Alcotest.(check media_category_testable) "audio/webm is Audio" M.Audio
+      (M.category_of_media_type "audio/webm"))
+
 let test_unsupported_source_type_rejected () =
   with_temp_base (fun base_dir ->
     match
@@ -284,6 +322,10 @@ let () =
             "persist runs opportunistic media cleanup"
             `Quick
             test_persist_runs_opportunistic_media_cleanup
+        ; Alcotest.test_case
+            "opaque non-allowlisted generated media preserved via Attachment_store.put_opaque"
+            `Quick
+            test_persist_preserves_opaque_non_allowlisted_media
         ; Alcotest.test_case
             "unsupported source rejected"
             `Quick

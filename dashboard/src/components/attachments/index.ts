@@ -1,5 +1,6 @@
 export {
   AttachmentComposer,
+  hasFailedAttachments,
   hasUploadingAttachments,
   readyAttachmentsOf,
   revokeComposerPreviews,

@@ -231,13 +231,20 @@ type mouse_selection_state =
   | Dragging of { anchor : cell_pos; cursor : cell_pos }
   | Settled of { anchor : cell_pos; cursor : cell_pos; copied : bool }
 
+type inspector_fetched_image = {
+  url : string;
+  png_bytes : string;
+  dims : (int * int) option;
+  decoded_rgba : (Masc_tui_term.Png_decode.rgba_image, string) result;
+}
+
 type image_inspector_state = {
   images : Wire_fleet.retained_image list;
   index : int;
   zoom : float;
   pan_x : float;
   pan_y : float;
-  fetched : (string * string * (int * int) option) Observed.t;
+  fetched : inspector_fetched_image Observed.t;
 }
 
 type t = {

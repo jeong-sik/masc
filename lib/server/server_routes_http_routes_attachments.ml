@@ -111,6 +111,8 @@ let content_disposition_of ~download ~(meta : Attachment_store.meta) =
     | "audio/wav" -> ".wav"
     | "audio/ogg" -> ".ogg"
     | "audio/midi" -> ".mid"
+    | "audio/mp4" -> ".m4a"
+    | "audio/webm" -> ".webm"
     | _ -> ".bin"
   in
   let fallback_name = meta.id ^ ext in
@@ -134,9 +136,6 @@ type multipart_file =
   { data : string
   ; filename : string option
   ; content_type : string option
-  ; retention_field : string option
-  ; keeper_field : string option
-  ; origin_field : string option
   }
 
 let unquote_param value =
@@ -293,9 +292,6 @@ let parse_multipart ~boundary body =
      | Error _ as err -> err
      | Ok parts ->
        let file_part = ref None in
-       let retention_field = ref None in
-       let keeper_field = ref None in
-       let origin_field = ref None in
        let explicit_filename = ref None in
        List.iter
          (fun raw_part ->
@@ -313,9 +309,6 @@ let parse_multipart ~boundary body =
                     let ct = List.assoc_opt "content-type" hdrs in
                     file_part := Some (part_body, fname_opt, ct)
                   | Some "filename" -> explicit_filename := Some (String.trim part_body)
-                  | Some "retention" -> retention_field := Some (String.trim part_body)
-                  | Some "keeper" -> keeper_field := Some (String.trim part_body)
-                  | Some "origin" -> origin_field := Some (String.trim part_body)
                   | Some _ | None -> ())))
          parts;
        (match !file_part with
@@ -326,36 +319,7 @@ let parse_multipart ~boundary body =
             | Some f when not (String.equal f "") -> Some f
             | Some _ | None -> fname_opt
           in
-          Ok
-            { data
-            ; filename
-            ; content_type
-            ; retention_field = !retention_field
-            ; keeper_field = !keeper_field
-            ; origin_field = !origin_field
-            }))
-;;
-
-let parse_retention ~retention_raw ~keeper_raw =
-  match Option.map (fun s -> String.lowercase_ascii (String.trim s)) retention_raw with
-  | None | Some "" | Some "durable" -> Ok Attachment_store.Durable
-  | Some "ephemeral" ->
-    (match Option.map String.trim keeper_raw with
-     | Some keeper when not (String.equal keeper "") ->
-       Ok (Attachment_store.Ephemeral { keeper })
-     | Some _ | None ->
-       Error "ephemeral retention requires a non-empty X-Keeper header or keeper field")
-  | Some other ->
-    Error (Printf.sprintf "invalid retention %S (expected durable or ephemeral)" other)
-;;
-
-let parse_origin ~origin_raw =
-  match Option.map String.trim origin_raw with
-  | None | Some "" -> Ok Attachment_store.User_upload
-  | Some raw ->
-    (match Attachment_store.origin_of_string raw with
-     | Some o -> Ok o
-     | None -> Error (Printf.sprintf "invalid origin %S" raw))
+          Ok { data; filename; content_type }))
 ;;
 
 let respond_err ~status ~code ~message ?(extra = []) request reqd =
@@ -434,70 +398,43 @@ let handle_upload state request reqd =
                     , mf.content_type
                     , (match mf.filename with
                        | Some _ as f -> f
-                       | None -> header_filename ())
-                    , (match mf.retention_field with
-                       | Some _ as r -> r
-                       | None -> Http.Request.header request "x-retention")
-                    , (match mf.keeper_field with
-                       | Some _ as k -> k
-                       | None -> Http.Request.header request "x-keeper")
-                    , (match mf.origin_field with
-                       | Some _ as o -> o
-                       | None -> Http.Request.header request "x-origin") ))
+                       | None -> header_filename ()) ))
                  (parse_multipart ~boundary raw_body)
-             | None ->
-               Ok
-                 ( raw_body
-                 , Some ct
-                 , header_filename ()
-                 , Http.Request.header request "x-retention"
-                 , Http.Request.header request "x-keeper"
-                 , Http.Request.header request "x-origin" ))
-          | None ->
-            Ok
-              ( raw_body
-              , None
-              , header_filename ()
-              , Http.Request.header request "x-retention"
-              , Http.Request.header request "x-keeper"
-              , Http.Request.header request "x-origin" )
+             | None -> Ok (raw_body, Some ct, header_filename ()))
+          | None -> Ok (raw_body, None, header_filename ())
         in
         (match extracted with
          | Error msg ->
            respond_err ~status:`Bad_request ~code:"invalid_multipart" ~message:msg request reqd
-         | Ok (bytes, declared_mime, filename, retention_raw, keeper_raw, origin_raw) ->
-           (match
-              parse_retention ~retention_raw ~keeper_raw, parse_origin ~origin_raw
-            with
-            | Error msg, _ | _, Error msg ->
-              respond_err ~status:`Bad_request ~code:"invalid_params" ~message:msg request reqd
-            | Ok retention, Ok origin ->
-              let result =
-                Eio_unix.run_in_systhread (fun () ->
-                  let store = Attachment_store.create ~base_path in
-                  Attachment_store.put
-                    ~max_bytes:max_attachment
-                    ?declared_mime
-                    ?filename
-                    ~origin
-                    ~created_by
-                    ~retention
-                    store
-                    ~bytes)
-              in
-              (match result with
-               | Ok meta ->
-                 respond_json_value_with_cors
-                   ~status:`Created
-                   request
-                   reqd
-                   (`Assoc
-                      [ "ok", `Bool true
-                      ; "data", Attachment_store.meta_to_wire_json meta
-                      ])
-               | Error err ->
-                 let status, code, message, extra = put_error_http err in
-                 respond_err ~status ~code ~message ~extra request reqd))))
+         | Ok (bytes, declared_mime, filename) ->
+           (* Public HTTP uploads ALWAYS enforce [User_upload] + [Durable],
+              ignoring any untrusted client origin/retention/keeper headers. *)
+           let result =
+             Eio_unix.run_in_systhread (fun () ->
+               let store = Attachment_store.create ~base_path in
+               Attachment_store.put
+                 ~max_bytes:max_attachment
+                 ?declared_mime
+                 ?filename
+                 ~origin:Attachment_store.User_upload
+                 ~created_by
+                 ~retention:Attachment_store.Durable
+                 store
+                 ~bytes)
+           in
+           (match result with
+            | Ok meta ->
+              respond_json_value_with_cors
+                ~status:`Created
+                request
+                reqd
+                (`Assoc
+                   [ "ok", `Bool true
+                   ; "data", Attachment_store.meta_to_wire_json meta
+                   ])
+            | Error err ->
+              let status, code, message, extra = put_error_http err in
+              respond_err ~status ~code ~message ~extra request reqd)))
     ~on_error:(function
       | Http.Request.Too_large maximum ->
         respond_err
@@ -544,10 +481,7 @@ let parse_fetch_query (request : Httpun.Request.t) =
     | Some raw ->
       (match int_of_string_opt (String.trim raw) with
        | Some n when n > 0 ->
-         let clamped =
-           max Attachment_store.min_thumb_px (min Attachment_store.max_thumb_px n)
-         in
-         Ok (Some clamped)
+         Ok (Some (Attachment_store.quantize_thumb_px n))
        | Some _ | None ->
          Error (Printf.sprintf "invalid max_px %S (expected positive integer)" raw))
   in
@@ -585,72 +519,110 @@ let respond_get_error request reqd err =
       reqd
 ;;
 
-let serve_loaded_meta ~store ~(meta : Attachment_store.meta) ~query request reqd =
-  let etag = etag_for_query ~meta query in
-  if Http.Response.request_holds_tag ~etag request
-  then Http.Response.not_modified ~headers:(not_modified_headers ~etag request) reqd
+let authorize_http_read_meta ~base_path ~store ~(meta : Attachment_store.meta) request =
+  match meta.retention with
+  | Attachment_store.Durable -> true
+  | Attachment_store.Ephemeral _ ->
+    Eio_unix.run_in_systhread (fun () ->
+      let auth_cfg = Auth.load_auth_config base_path in
+      let token = Server_auth.auth_token_from_request request in
+      let internal_keeper_agent = Http.Request.header request "x-masc-keeper-name" in
+      match Auth.admit_request base_path ~auth_cfg ~token ~internal_keeper_agent with
+      | Ok Auth.Auth_off | Ok Auth.Anonymous -> true
+      | Ok (Auth.Bearer { role = Masc_domain.Admin; _ }) -> true
+      | Ok (Auth.Bearer { agent_name; role = Masc_domain.Worker | Masc_domain.Player; _ }) ->
+        Attachment_store.has_ephemeral_pin store ~keeper:agent_name ~sha256:meta.sha256
+      | Error _ -> false)
+;;
+
+let respond_forbidden_ephemeral request reqd =
+  respond_err
+    ~status:`Forbidden
+    ~code:"forbidden_ephemeral_scope"
+    ~message:"ephemeral attachment belongs to another keeper"
+    request
+    reqd
+;;
+
+let systhread_blocking : Attachment_store.blocking_runner =
+  { Attachment_store.run_blocking = (fun f -> Eio_unix.run_in_systhread f) }
+;;
+
+let serve_loaded_meta ~base_path ~store ~(meta : Attachment_store.meta) ~query request reqd =
+  if not (authorize_http_read_meta ~base_path ~store ~meta request)
+  then respond_forbidden_ephemeral request reqd
   else (
-    let disposition = content_disposition_of ~download:query.download ~meta in
-    let headers = attachment_security_headers ~etag ~disposition request in
-    let raw_res =
-      Eio_unix.run_in_systhread (fun () ->
-        Attachment_store.get_bytes_by_sha256 store ~sha256:meta.sha256)
-    in
-    match raw_res with
-    | Error err -> respond_get_error request reqd err
-    | Ok None ->
-      respond_err
-        ~status:`Not_found
-        ~code:"not_found"
-        ~message:"attachment blob not found"
-        request
-        reqd
-    | Ok (Some raw_bytes) ->
-      (match query.target_format, query.max_px with
-       | Attachment_store.Native_format, None ->
-         Http.Response.bytes ~content_type:meta.mime_type ~headers raw_bytes reqd
-       | (Attachment_store.Force_png as target_format), max_px
-       | (Attachment_store.Native_format as target_format), (Some _ as max_px) ->
-         (* Run directly on the Eio fiber: [get_image_derivative] invokes
-            [Process_eio.run_argv_with_status_split_or_refusal], which calls
-            [Eio.Switch.run] once [Process_eio.init] is active and would raise
-            [Effect.Unhandled] inside [Eio_unix.run_in_systhread]. *)
-         let deriv_res =
-           Attachment_store.get_image_derivative
-             ?max_px
-             ~target_format
-             store
-             ~meta
-             ~raw_bytes
-         in
-         (match deriv_res with
-          | Ok (out_mime, out_bytes) ->
-            Http.Response.bytes ~content_type:out_mime ~headers out_bytes reqd
-          | Error (Attachment_store.Not_an_image _ as err) ->
-            respond_err
-              ~status:(`Code 422)
-              ~code:"not_an_image"
-              ~message:(Attachment_store.derivative_error_to_string err)
-              request
-              reqd
-          | Error (Attachment_store.Invalid_max_px _ as err) ->
-            respond_err
-              ~status:`Bad_request
-              ~code:"invalid_max_px"
-              ~message:(Attachment_store.derivative_error_to_string err)
-              request
-              reqd
-          | Error (Attachment_store.Transform_failed _ as err) ->
-            Log.Misc.error
-              "attachment transform failed id=%s: %s"
-              meta.id
-              (Attachment_store.derivative_error_to_string err);
-            respond_err
-              ~status:`Internal_server_error
-              ~code:"transform_failed"
-              ~message:"image transform failed"
-              request
-              reqd)))
+    let etag = etag_for_query ~meta query in
+    if Http.Response.request_holds_tag ~etag request
+    then Http.Response.not_modified ~headers:(not_modified_headers ~etag request) reqd
+    else (
+      let opaque = Attachment_store.is_opaque_binary meta in
+      let force_download = query.download || opaque in
+      let disposition = content_disposition_of ~download:force_download ~meta in
+      let headers = attachment_security_headers ~etag ~disposition request in
+      let raw_res =
+        Eio_unix.run_in_systhread (fun () ->
+          Attachment_store.get_bytes_by_sha256 store ~sha256:meta.sha256)
+      in
+      match raw_res with
+      | Error err -> respond_get_error request reqd err
+      | Ok None ->
+        respond_err
+          ~status:`Not_found
+          ~code:"not_found"
+          ~message:"attachment blob not found"
+          request
+          reqd
+      | Ok (Some raw_bytes) ->
+        (match query.target_format, query.max_px with
+         | Attachment_store.Native_format, None ->
+           let content_type =
+             if opaque then "application/octet-stream" else meta.mime_type
+           in
+           Http.Response.bytes ~content_type ~headers raw_bytes reqd
+         | (Attachment_store.Force_png as target_format), max_px
+         | (Attachment_store.Native_format as target_format), (Some _ as max_px) ->
+           (* Disk I/O (cache checks, temp files, thumb save) is offloaded via
+              [systhread_blocking], while [Process_eio] runs directly on this
+              Eio fiber so [Eio.Switch.run] succeeds once [Process_eio.init] is
+              active. *)
+           let deriv_res =
+             Attachment_store.get_image_derivative
+               ~blocking:systhread_blocking
+               ?max_px
+               ~target_format
+               store
+               ~meta
+               ~raw_bytes
+           in
+           (match deriv_res with
+            | Ok (out_mime, out_bytes) ->
+              Http.Response.bytes ~content_type:out_mime ~headers out_bytes reqd
+            | Error (Attachment_store.Not_an_image _ as err) ->
+              respond_err
+                ~status:(`Code 422)
+                ~code:"not_an_image"
+                ~message:(Attachment_store.derivative_error_to_string err)
+                request
+                reqd
+            | Error (Attachment_store.Invalid_max_px _ as err) ->
+              respond_err
+                ~status:`Bad_request
+                ~code:"invalid_max_px"
+                ~message:(Attachment_store.derivative_error_to_string err)
+                request
+                reqd
+            | Error (Attachment_store.Transform_failed _ as err) ->
+              Log.Misc.error
+                "attachment transform failed id=%s: %s"
+                meta.id
+                (Attachment_store.derivative_error_to_string err);
+              respond_err
+                ~status:`Internal_server_error
+                ~code:"transform_failed"
+                ~message:"image transform failed"
+                request
+                reqd))))
 ;;
 
 let serve_attachment_by_sha256 ~base_path ~sha256 request reqd =
@@ -670,7 +642,7 @@ let serve_attachment_by_sha256 ~base_path ~sha256 request reqd =
        respond_err ~status:`Bad_request ~code:"invalid_query" ~message:msg request reqd;
        true
      | Ok query ->
-       serve_loaded_meta ~store ~meta ~query request reqd;
+       serve_loaded_meta ~base_path ~store ~meta ~query request reqd;
        true)
 ;;
 
@@ -692,11 +664,10 @@ let handle_get_subpath state request reqd =
         | Error msg ->
           respond_err ~status:`Bad_request ~code:"invalid_id" ~message:msg request reqd
         | Ok sha256 ->
+          let store = Attachment_store.create ~base_path in
           let meta_res =
             Eio_unix.run_in_systhread (fun () ->
-              Attachment_store.get_meta_by_sha256
-                (Attachment_store.create ~base_path)
-                ~sha256)
+              Attachment_store.get_meta_by_sha256 store ~sha256)
           in
           (match meta_res with
            | Error err -> respond_get_error request reqd err
@@ -708,14 +679,17 @@ let handle_get_subpath state request reqd =
                request
                reqd
            | Ok (Some meta) ->
-             respond_json_value_with_cors
-               ~status:`OK
-               request
-               reqd
-               (`Assoc
-                  [ "ok", `Bool true
-                  ; "data", Attachment_store.meta_to_wire_json meta
-                  ])))
+             if not (authorize_http_read_meta ~base_path ~store ~meta request)
+             then respond_forbidden_ephemeral request reqd
+             else
+               respond_json_value_with_cors
+                 ~status:`OK
+                 request
+                 reqd
+                 (`Assoc
+                    [ "ok", `Bool true
+                    ; "data", Attachment_store.meta_to_wire_json meta
+                    ])))
      | [ raw_id ] ->
        (match Attachment_store.parse_id raw_id with
         | Error msg ->
@@ -740,7 +714,7 @@ let handle_get_subpath state request reqd =
                   request
                   reqd
               | Ok (Some meta) ->
-                serve_loaded_meta ~store ~meta ~query request reqd)))
+                serve_loaded_meta ~base_path ~store ~meta ~query request reqd)))
      | _ ->
        respond_err
          ~status:`Not_found

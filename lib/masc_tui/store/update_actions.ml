@@ -3785,10 +3785,12 @@ let rec execute_slash ~now (m : Model.t) cmd =
   | Slash.Tools None -> apply_slash_tools ~now None m
   | Slash.Tools (Some mode) -> apply_slash_tools ~now (Some mode) m
   | Slash.Clear ->
+      let cur_draft = Drafts.current_draft m.drafts in
       let draft_was_empty =
-        String.equal (String.trim (Drafts.current_draft m.drafts).text) ""
+        String.equal (String.trim cur_draft.text) ""
+        && cur_draft.attachments = []
       in
-      let drafts = Drafts.clear_current_draft m.drafts in
+      let drafts = Drafts.clear_current_draft_all m.drafts in
       let fleet = Fleet_store.reset_chat_scroll m.fleet in
       let base = { m with drafts; fleet } in
       let (cleared, cmds), msg =
@@ -3911,7 +3913,7 @@ and submit_slash_text ~now (m : Model.t) trimmed =
         {
           m with
           drafts =
-            m.drafts |> Drafts.clear_current_draft |> Drafts.set_focus false;
+            m.drafts |> Drafts.clear_current_draft_text |> Drafts.set_focus false;
         }
       in
       execute_slash ~now m_cleared parsed
@@ -4023,7 +4025,10 @@ and submit_composer ~now ~mode (m : Model.t) =
       | Some cand -> (Update_nav.apply_popup_completion cand m, [])
       | None -> (m, []))
   | Update_nav.Composer_popup_none -> (
-      if String.equal trimmed "" && draft.attachments = [] then (m, [])
+      if
+        String.equal trimmed "" && draft.attachments = []
+        && draft.uploading_count <= 0
+      then (m, [])
       else if (not (String.equal trimmed "")) && Char.equal trimmed.[0] '/' then
         submit_slash_text ~now m trimmed
       else (
@@ -4060,7 +4065,7 @@ and submit_composer ~now ~mode (m : Model.t) =
         | Some (mentioned_keeper, "") ->
             let drafts =
               m.drafts
-              |> Drafts.clear_current_draft
+              |> Drafts.clear_current_draft_text
               |> Drafts.set_active_keeper mentioned_keeper
             in
             ( Model.with_toast ~now ~level:Model.Toast_info
@@ -4069,51 +4074,75 @@ and submit_composer ~now ~mode (m : Model.t) =
                    ~en:("Target keeper switched to @" ^ mentioned_keeper))
                 { m with drafts }
             , [] )
+        | (Some _ | None) when draft.uploading_count > 0 ->
+            ( Model.with_toast ~now ~level:Model.Toast_warning
+                (Say.make
+                   ~ko:"첨부 파일 업로드가 완료될 때까지 기다려주세요…"
+                   ~en:"Waiting for attachment upload to finish...")
+                m
+            , [] )
         | Some (mentioned_keeper, rest) -> (
-            (* [@keeper msg] sends [rest] through the mentioned Keeper's
-               composer slot. That slot may already hold an unsent draft the
-               operator typed earlier; the submission consumes the slot, so
-               the earlier draft is put back once [rest] has left. The earlier
-               draft is read after the current slot is cleared, so mentioning
-               the Keeper whose composer holds the text does not bring the
-               sent text back. *)
-            let drafts_cleared = Drafts.clear_current_draft m.drafts in
+            (* [@keeper msg] sends [rest] along with the current composer's
+               draft attachments through the mentioned Keeper's slot. The target
+               slot may already hold an unsent draft (text and/or attachments)
+               typed earlier; temporarily swap in [rest] + sender's attachments,
+               and restore the target Keeper's prior draft untouched once [rest]
+               is consumed. *)
+            let src_key = Drafts.target_keeper_key m.drafts in
+            let src_attachments = draft.attachments in
+            let drafts_cleared = Drafts.clear_current_draft_all m.drafts in
             let prior =
               Drafts.draft_for ~keeper:mentioned_keeper drafts_cleared
             in
             let drafts_switched =
               drafts_cleared
               |> Drafts.set_active_keeper mentioned_keeper
-              |> Drafts.set_current_text rest
+              |> Drafts.set_keeper_draft_slot ~keeper:mentioned_keeper
+                   ~text:rest ~cursor:(String.length rest)
+                   ~attachments:src_attachments ~uploading_count:0
             in
             let sent, cmds =
               submit_composer ~now ~mode { m with drafts = drafts_switched }
             in
-            let consumed =
-              String.equal
-                (Drafts.draft_for ~keeper:mentioned_keeper sent.drafts).text ""
+            let sent_target =
+              Drafts.draft_for ~keeper:mentioned_keeper sent.drafts
             in
-            match (String.equal prior.text "", consumed) with
-            | true, (true | false) | false, false -> (sent, cmds)
-            | false, true ->
-                let restore_into_current drafts =
-                  Drafts.set_current_text_and_cursor ~text:prior.text
-                    ~cursor:prior.cursor drafts
-                in
+            let consumed =
+              String.equal sent_target.text ""
+              && sent_target.attachments = []
+            in
+            let has_prior =
+              (not (String.equal prior.text ""))
+              || prior.attachments <> []
+              || prior.uploading_count > 0
+            in
+            if consumed then
+              if not has_prior then (sent, cmds)
+              else
                 let drafts =
-                  match sent.drafts.Drafts.active_keeper with
-                  | Some target when not (String.equal target mentioned_keeper)
-                    ->
-                      (* A nested [@a @b msg] moved the target on to [b]: the
-                         earlier draft goes back into [a]'s own slot and [b]
-                         stays the target. *)
-                      sent.drafts
-                      |> Drafts.set_active_keeper mentioned_keeper
-                      |> restore_into_current
-                      |> Drafts.set_active_keeper target
-                  | Some _ | None -> restore_into_current sent.drafts
+                  Drafts.set_keeper_draft_slot ~keeper:mentioned_keeper
+                    ~text:prior.text ~cursor:prior.cursor
+                    ~attachments:prior.attachments
+                    ~uploading_count:prior.uploading_count sent.drafts
                 in
-                ({ sent with drafts }, cmds))
+                ({ sent with drafts }, cmds)
+            else
+              let restored =
+                sent.drafts
+                |> Drafts.set_keeper_draft_slot ~keeper:mentioned_keeper
+                     ~text:prior.text ~cursor:prior.cursor
+                     ~attachments:prior.attachments
+                     ~uploading_count:prior.uploading_count
+                |> Drafts.set_keeper_draft_slot ~keeper:src_key ~text:draft.text
+                     ~cursor:draft.cursor ~attachments:src_attachments
+                     ~uploading_count:draft.uploading_count
+              in
+              let drafts =
+                match m.drafts.Drafts.active_keeper with
+                | Some k -> Drafts.set_active_keeper k restored
+                | None -> { restored with Drafts.active_keeper = None }
+              in
+              ({ sent with drafts }, cmds))
         | None ->
         match Update_nav.resolve_target_keeper m with
         | None ->
@@ -4126,6 +4155,14 @@ and submit_composer ~now ~mode (m : Model.t) =
                 opened
             , cmds )
         | Some keeper -> (
+            if (Drafts.draft_for ~keeper m.drafts).uploading_count > 0 then
+              ( Model.with_toast ~now ~level:Model.Toast_warning
+                  (Say.make
+                     ~ko:"첨부 파일 업로드가 완료될 때까지 기다려주세요…"
+                     ~en:"Waiting for attachment upload to finish...")
+                  m
+              , [] )
+            else
             let keeper_is_busy =
               Option.is_some (Fleet_store.active_turn_for ~keeper m.fleet)
               || Fleet_store.has_active_chat_stream ~keeper m.fleet
@@ -5270,9 +5307,10 @@ and execute_action ~now (m : Model.t) action =
             | Update_nav.Composer_popup_slash _
               when String.equal (String.trim (Drafts.current_draft m.drafts).text) "/" ->
                 (* Single Esc escapes a bare '/' slash-command peek cleanly:
-                   clears the lone '/' and returns focus to workspace nav. *)
+                   clears the lone '/' while preserving any draft attachments
+                   and returns focus to workspace nav. *)
                 let drafts =
-                  m.drafts |> Drafts.clear_current_draft |> Drafts.set_focus false
+                  m.drafts |> Drafts.clear_current_draft_text |> Drafts.set_focus false
                 in
                 ({ m with drafts }, [])
             | Update_nav.Composer_popup_slash _

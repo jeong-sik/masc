@@ -1630,16 +1630,40 @@ let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
                        , Attachment_store.get_error_to_string err )
                    | Ok None -> Ok None
                    | Ok (Some meta) ->
-                     (match Attachment_store.get_bytes_by_sha256 store ~sha256 with
-                      | Error err ->
-                        Error
-                          ( Mcp_error_code.Internal_error
-                          , Attachment_store.get_error_to_string err )
-                      | Ok None -> Ok None
-                      | Ok (Some bytes) ->
-                        Ok
-                          (Some
-                             (`Blob (meta.mime_type, Base64.encode_string bytes))))))
+                     let allowed =
+                       match meta.retention with
+                       | Attachment_store.Durable -> Ok ()
+                       | Attachment_store.Ephemeral _ ->
+                         (match caller with
+                          | Operator_admin -> Ok ()
+                          | Anonymous_reader ->
+                            Error
+                              ( Mcp_error_code.Auth_error
+                              , "Ephemeral attachment resource requires authentication" )
+                          | Authenticated_reader { agent_name; _ } ->
+                            if Attachment_store.has_ephemeral_pin store ~keeper:agent_name ~sha256
+                            then Ok ()
+                            else
+                              Error
+                                ( Mcp_error_code.Insufficient_scope
+                                , "Ephemeral attachment resource requires admin permission or matching keeper pin" ))
+                     in
+                     (match allowed with
+                      | Error _ as err -> err
+                      | Ok () ->
+                        (match Attachment_store.get_bytes_by_sha256 store ~sha256 with
+                         | Error err ->
+                           Error
+                             ( Mcp_error_code.Internal_error
+                             , Attachment_store.get_error_to_string err )
+                         | Ok None -> Ok None
+                         | Ok (Some bytes) ->
+                           let mime_type =
+                             if Attachment_store.is_opaque_binary meta
+                             then "application/octet-stream"
+                             else meta.mime_type
+                           in
+                           Ok (Some (`Blob (mime_type, Base64.encode_string bytes)))))))
           | Unknown _ -> Ok None
         in
 

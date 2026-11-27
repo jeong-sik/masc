@@ -7143,9 +7143,24 @@ let apply_http_reply ~now (m : Model.t) reply =
         | Msg.Ack_close_modal_and_refresh ->
             m.config
       in
+      let clear_board_atts =
+        Option.equal Nav.equal_inline_action_kind for_modal
+          (Some Nav.Board_new_post)
+        &&
+        match m.inline_modal with
+        | Some modal
+          when Nav.equal_inline_action_kind modal.kind Nav.Board_goal_proposal
+          ->
+            false
+        | Some _ | None -> true
+      in
+      let drafts =
+        if clear_board_atts then Drafts.clear_board_attachments m.drafts
+        else m.drafts
+      in
       let next =
         Model.with_toast ~now ~level:Model.Toast_success label
-          { m with nav; inline_modal; config }
+          { m with nav; inline_modal; config; drafts }
       in
       let cmds =
         if should_refresh then

@@ -19,9 +19,10 @@ type endpoint_generate_fn =
   config:Llm_provider.Provider_config.t ->
   dialect:Llm_provider.Capabilities.images_api_dialect ->
   request ->
-  (Llm_provider.Image_gen.generated_image list, Llm_provider.Http_client.http_error) result
+  (Llm_provider.Image_gen.generation_result, Llm_provider.Http_client.http_error) result
 
 type remote_fetch_fn =
+  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   max_bytes:int ->
   string ->

@@ -1610,9 +1610,6 @@ let test_concurrent_execution_opt_ins_are_exact () =
     (* Revalidate write-during-read is source-store file-lock serialized;
        appends ride the per-path mutex. *)
     ; "keeper_context_status"
-    (* Generates an image over net and writes verified bytes to the
-       content-addressed Attachment_store, idempotent by hash. *)
-    ; "keeper_generate_image"
     (* Reads one file or stored image; the only write keeps the verified bytes
        in the content-addressed vision store, which names a file by the hash of
        its bytes, replaces it atomically and is not pruned on this path. *)

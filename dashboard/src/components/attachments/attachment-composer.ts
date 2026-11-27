@@ -58,6 +58,10 @@ export function hasUploadingAttachments(items: readonly ComposerAttachmentItem[]
   return items.some((item) => item.status === 'uploading')
 }
 
+export function hasFailedAttachments(items: readonly ComposerAttachmentItem[]): boolean {
+  return items.some((item) => item.status === 'error')
+}
+
 export function revokeComposerPreviews(items: readonly ComposerAttachmentItem[]): void {
   for (const item of items) {
     revokeLocalPreviewUrl(item.previewUrl)
@@ -101,16 +105,28 @@ export function AttachmentComposer({
   const mountedRef = useRef(true)
   const itemsRef = useRef(items)
   itemsRef.current = items
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
   const controllersRef = useRef<Map<string, AbortController>>(new Map())
 
   useEffect(() => {
     mountedRef.current = true
     return () => {
       mountedRef.current = false
+      const abortedIds = new Set(controllersRef.current.keys())
       for (const ctrl of controllersRef.current.values()) {
         ctrl.abort('unmounted')
       }
       controllersRef.current.clear()
+      if (abortedIds.size > 0) {
+        onChangeRef.current((prev) =>
+          prev.map((cur) =>
+            abortedIds.has(cur.localId) && cur.status === 'uploading'
+              ? { ...cur, status: 'error', progress: 0, error: '업로드가 중단되었습니다. 다시 시도하거나 제거하세요.' }
+              : cur,
+          ),
+        )
+      }
     }
   }, [])
 
@@ -381,6 +397,12 @@ export function AttachmentComposer({
               </div>
             `
           })}
+        </div>
+      `}
+
+      ${hasFailedAttachments(items) && html`
+        <div class="ap-error" role="alert" data-testid="attachment-error-blocker">
+          업로드에 실패한 첨부 파일을 재시도하거나 제거한 뒤 전송하세요.
         </div>
       `}
 

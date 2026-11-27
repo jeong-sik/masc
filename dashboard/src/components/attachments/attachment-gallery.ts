@@ -87,8 +87,10 @@ function WorkspaceAudioAttachment({
             disabled=${downloading}
             onClick=${async () => {
               setDownloading(true)
+              setError(null)
               try {
-                await downloadAttachment(attachment)
+                const res = await downloadAttachment(attachment)
+                if (!res.ok) setError(res.error.message)
               } finally {
                 setDownloading(false)
               }

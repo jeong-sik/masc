@@ -2103,7 +2103,11 @@ let decode_image_payload ~declared_mime raw_data : (string * string) option =
       Buffer.contents buf
     in
     match Base64.decode compact with
-    | Error _ -> None
+    | Error (`Msg msg) ->
+      Log.Runtime_agent.warn
+        "acp: ignoring image chunk with invalid base64 payload: %s"
+        msg;
+      None
     | Ok data_bytes ->
       if String.length data_bytes = 0
       then None
@@ -2156,6 +2160,35 @@ let rec extract_acp_image_blocks ?message_id ?tool_call_id (json : Yojson.Safe.t
        in
        from_content
      | _ -> [])
+;;
+
+let is_acp_image_generation_tool_name raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "image_generation"
+  | "generate_image"
+  | "image_gen"
+  | "create_image"
+  | "dall_e"
+  | "imagen" -> true
+  | _ -> false
+;;
+
+let acp_tool_identity_emits_generated_media = function
+  | Mcp_tool _ | Managed_mcp_schema_read _ -> false
+  | Native_tool { name = Some name; _ } -> is_acp_image_generation_tool_name name
+  | Native_tool { name = None; _ } -> false
+;;
+
+let dedupe_media_outputs (items : media_output list) : media_output list =
+  let seen = Hashtbl.create 4 in
+  List.filter
+    (fun (m : media_output) ->
+       let key = m.mime_type ^ "\000" ^ m.data_bytes in
+       if Hashtbl.mem seen key then false
+       else (
+         Hashtbl.add seen key ();
+         true))
+    items
 ;;
 
 let parse_session_update_with ~driver ?managed_schema_root ?mcp_server_name ?merged_wire params =
@@ -2215,24 +2248,32 @@ let parse_session_update_with ~driver ?managed_schema_root ?mcp_server_name ?mer
     let title = json_string_opt "title" update in
     let status = Option.map parse_tool_status (json_string_opt "status" update) in
     let raw_output = json_field "rawOutput" update in
-    let media_outputs =
-      let tc_id = if tool_call_id = "" then None else Some tool_call_id in
-      let from_content =
-        match json_field "content" update with
-        | Some c -> extract_acp_image_blocks ?tool_call_id:tc_id c
-        | None -> []
-      in
-      let from_raw_output =
-        match raw_output with
-        | Some r -> extract_acp_image_blocks ?tool_call_id:tc_id r
-        | None -> []
-      in
-      from_content @ from_raw_output
-    in
     let identity =
       if tool_call_wire_has_identity_fields wire
       then Some (classify_tool_call ~driver ?managed_schema_root ?mcp_server_name wire)
       else None
+    in
+    (* Only collect generated images from native image-generation tools; never
+       collect echoed images from MCP tools (e.g. keeper_image_read) or file/screen
+       read tools, and prefer [content] over [rawOutput] without duplicating both. *)
+    let media_outputs =
+      match identity with
+      | Some id when acp_tool_identity_emits_generated_media id ->
+        let tc_id = if tool_call_id = "" then None else Some tool_call_id in
+        let from_content =
+          match json_field "content" update with
+          | Some c -> extract_acp_image_blocks ?tool_call_id:tc_id c
+          | None -> []
+        in
+        let raw_items =
+          if from_content <> [] then from_content
+          else
+            match raw_output with
+            | Some r -> extract_acp_image_blocks ?tool_call_id:tc_id r
+            | None -> []
+        in
+        dedupe_media_outputs raw_items
+      | Some _ | None -> []
     in
     Some
       (Tool_call_updated
@@ -3345,6 +3386,7 @@ let dispatch_incoming_message t msg =
            ( Usage_updated _
            | Text_delta _
            | Thought_delta _
+           | Media_output _
            | Tool_call_started _
            | Tool_call_updated _
            | Mode_updated _
@@ -4770,7 +4812,9 @@ let prompt
   let final_message_buf = Buffer.create 1024 in
   let final_message_id = ref None in
   let thought_buf = Buffer.create 512 in
-  let media_outputs_rev = ref [] in
+  let agent_media_rev = ref [] in
+  let tool_media_by_id : (string, media_output list) Hashtbl.t = Hashtbl.create 4 in
+  let tool_media_order_rev = ref [] in
   let tool_calls = ref 0 in
   let last_context_used = ref None in
   let last_context_size = ref None in
@@ -4794,11 +4838,17 @@ let prompt
           final_message_id := Some id
         | Some _ | None -> ());
        append_bounded final_message_buf text
-     | Media_output media -> media_outputs_rev := media :: !media_outputs_rev
+     | Media_output media -> agent_media_rev := media :: !agent_media_rev
      | Thought_delta s -> append_bounded thought_buf s
      | Tool_call_started _ -> incr tool_calls
-     | Tool_call_updated { media_outputs; _ } ->
-       List.iter (fun media -> media_outputs_rev := media :: !media_outputs_rev) media_outputs
+     | Tool_call_updated { tool_call_id; media_outputs; _ } ->
+       if media_outputs <> [] then (
+         if String.trim tool_call_id = "" then
+           List.iter (fun media -> agent_media_rev := media :: !agent_media_rev) media_outputs
+         else (
+           if not (Hashtbl.mem tool_media_by_id tool_call_id) then
+             tool_media_order_rev := tool_call_id :: !tool_media_order_rev;
+           Hashtbl.replace tool_media_by_id tool_call_id media_outputs))
      | Mode_updated _ | Config_options_updated _ -> ()
      | Usage_updated
          { used
@@ -5008,7 +5058,13 @@ let prompt
       ; text = Buffer.contents text_buf
       ; final_message = Buffer.contents final_message_buf
       ; thought = Buffer.contents thought_buf
-      ; media_outputs = List.rev !media_outputs_rev
+      ; media_outputs =
+          (let tool_media =
+             List.rev !tool_media_order_rev
+             |> List.concat_map (fun id ->
+               Option.value (Hashtbl.find_opt tool_media_by_id id) ~default:[])
+           in
+           dedupe_media_outputs (List.rev !agent_media_rev @ tool_media))
       ; usage
       ; usage_source
       ; context_compaction

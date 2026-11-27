@@ -222,7 +222,6 @@ let responses_emit_image_block state emit ~output_index ~media_type ~b64 =
       | None ->
         let index = responses_fresh_block state in
         Hashtbl.replace state.responses_image_blocks output_index index;
-        Hashtbl.remove state.responses_pending_images output_index;
         emit
           (ContentBlockStart
              { index; content_type = "image"; tool_id = None; tool_name = None });
@@ -450,24 +449,34 @@ let responses_capture_output_item ?(drop_function_call=false) state emit ~output
               emit(ContentBlockDelta{index;delta=InputJsonSnapshot call.arguments})) index;
             capture kind (Option.to_list index)))
   | Some "image_generation_call" ->
-    let payload_res =
-      match responses_member_string_opt "result" item with
-      | Some data when not (Api_common.string_is_blank data) ->
-        let format_hint = responses_member_string_opt "output_format" item in
-        (match Api_common.resolve_image_output_media_type ?format_hint ~base64_data:data () with
-         | Ok media_type -> Ok (Some (media_type, data))
-         | Error reason -> Error reason)
-      | Some _ | None -> Ok (Hashtbl.find_opt state.responses_pending_images output_index)
+    let item_incomplete =
+      drop_function_call
+      ||
+      match responses_member_string_opt "status" item with
+      | Some ("incomplete" | "in_progress" | "generating" | "failed") -> true
+      | Some _ | None -> false
     in
-    (match payload_res with
-     | Error reason ->
-       emit (SSEParseFailed { raw = ""; reason = "responses_image_generation:" ^ reason })
-     | Ok (Some (media_type, b64)) ->
-       responses_emit_image_block state emit ~output_index ~media_type ~b64
-     | Ok None ->
-       (match Hashtbl.find_opt state.responses_image_blocks output_index with
-        | Some index -> capture Response_replay.Image_generation [ index ]
-        | None -> ()))
+    if item_incomplete
+    then ()
+    else (
+      let payload_res =
+        match responses_member_string_opt "result" item with
+        | Some data when not (Api_common.string_is_blank data) ->
+          let format_hint = responses_member_string_opt "output_format" item in
+          (match Api_common.resolve_image_output_media_type ?format_hint ~base64_data:data () with
+           | Ok media_type -> Ok (Some (media_type, data))
+           | Error reason -> Error reason)
+        | Some _ | None -> Ok None
+      in
+      match payload_res with
+      | Error reason ->
+        emit (SSEParseFailed { raw = ""; reason = "responses_image_generation:" ^ reason })
+      | Ok (Some (media_type, b64)) ->
+        responses_emit_image_block state emit ~output_index ~media_type ~b64
+      | Ok None ->
+        (match Hashtbl.find_opt state.responses_image_blocks output_index with
+         | Some index -> capture Response_replay.Image_generation [ index ]
+         | None -> ()))
   | Some "custom_tool_call" ->
     (* Preserve only an already assembled legacy stream block. This codec has
        no custom-input admission contract and cannot synthesize one here. *)
@@ -475,19 +484,6 @@ let responses_capture_output_item ?(drop_function_call=false) state emit ~output
      | Some (Tool_index_single index) -> capture Response_replay.Function_call [index]
      | Some (Tool_index_ambiguous _) | None -> ())
   | Some _ | None -> ()
-;;
-
-let responses_flush_pending_images state emit =
-  let pending =
-    Hashtbl.fold (fun output_index payload acc -> (output_index, payload) :: acc)
-      state.responses_pending_images []
-    |> List.sort (fun (l, _) (r, _) -> Int.compare l r)
-  in
-  List.iter
-    (fun (output_index, (media_type, b64)) ->
-       if not (Hashtbl.mem state.responses_image_blocks output_index)
-       then responses_emit_image_block state emit ~output_index ~media_type ~b64)
-    pending
 ;;
 
 let responses_capture_terminal_outputs state emit response =
@@ -506,7 +502,6 @@ let responses_capture_terminal_outputs state emit response =
      |> List.iter (fun (output_index,item) ->
        responses_capture_output_item ~drop_function_call state emit ~output_index item)
    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> ());
-  responses_flush_pending_images state emit;
   let explicit_output=match response |> member "output" with `List _->true
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> false in
   if Hashtbl.length state.responses_output_groups > 0
@@ -682,6 +677,9 @@ let responses_sse_to_events (state : openai_stream_state) event_type data_str
               ; raw = data_str
               })
        | "response.image_generation_call.partial_image" ->
+         (* Partial previews are never promoted into final [Image] content
+            blocks (especially on [response.incomplete]); still validate item
+            identity and explicit [output_format] fail-closed. *)
          let output_index = responses_member_int_default "output_index" json in
          if responses_accept_output_identity state emit output_index
               (responses_member_string_opt "item_id" json)
@@ -692,8 +690,7 @@ let responses_sse_to_events (state : openai_stream_state) event_type data_str
              (match
                 Api_common.resolve_image_output_media_type ?format_hint ~base64_data:b64 ()
               with
-              | Ok media_type ->
-                Hashtbl.replace state.responses_pending_images output_index (media_type, b64)
+              | Ok _ -> ()
               | Error reason ->
                 emit
                   (SSEParseFailed

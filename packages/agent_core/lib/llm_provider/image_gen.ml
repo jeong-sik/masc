@@ -32,17 +32,84 @@ let make_request
   }
 ;;
 
+let max_response_bytes = Api_common.max_image_response_body
+
 type generated_image =
-  { mime_type : string
+  { mime_type : string option
   ; data_bytes : string option
   ; remote_url : string option
   ; revised_prompt : string option
   }
 [@@deriving show, eq]
 
+type generation_result =
+  { images : generated_image list
+  ; ignored_options : string list
+  }
+[@@deriving show, eq]
+
 let non_blank_opt = function
   | Some s when not (Api_common.string_is_blank s) -> Some (String.trim s)
   | Some _ | None -> None
+;;
+
+let unsupported_options ~(dialect : Capabilities.images_api_dialect) (req : request) =
+  let has_str opt = Option.is_some (non_blank_opt opt) in
+  (* Single-image endpoints inherently satisfy count=1 without loss; >1 cannot be honored. *)
+  let has_multi_count =
+    match req.count with
+    | Some n when n > 1 -> true
+    | Some _ | None -> false
+  in
+  let add cond name acc = if cond then name :: acc else acc in
+  let rev =
+    match dialect with
+    | Capabilities.Openai_images_v1 ->
+      []
+      |> add (has_str req.aspect_ratio) "aspect_ratio"
+      |> add (has_str req.negative_prompt) "negative_prompt"
+    | Capabilities.Zai_images_v4 ->
+      []
+      |> add (has_str req.aspect_ratio) "aspect_ratio"
+      |> add has_multi_count "count"
+      |> add (has_str req.output_format) "output_format"
+      |> add (has_str req.negative_prompt) "negative_prompt"
+    | Capabilities.Gemini_imagen_predict ->
+      [] |> add (has_str req.quality) "quality"
+  in
+  List.rev rev
+;;
+
+let unsupported_options_for_contract
+      ~(contract : Capabilities.image_output_contract)
+      (req : request)
+  =
+  match contract with
+  | Capabilities.Endpoint_images_api dialect -> unsupported_options ~dialect req
+  | Capabilities.In_turn_gemini_modalities
+  | Capabilities.In_turn_openai_responses_tool
+  | Capabilities.In_turn_openai_chat_modalities
+  | Capabilities.In_turn_codex_item
+  | Capabilities.In_turn_acp_chunk
+  | Capabilities.No_image_output ->
+    let opts : Provider_config.image_generation_options =
+      { aspect_ratio = req.aspect_ratio
+      ; size = req.size
+      ; quality = req.quality
+      ; count = req.count
+      }
+    in
+    let base = Provider_config.unsupported_image_generation_options ~contract opts in
+    let extra =
+      (match non_blank_opt req.output_format with
+       | Some _ -> [ "output_format" ]
+       | None -> [])
+      @
+      match non_blank_opt req.negative_prompt with
+      | Some _ -> [ "negative_prompt" ]
+      | None -> []
+    in
+    base @ extra
 ;;
 
 let strip_trailing_slash s =
@@ -107,8 +174,6 @@ let dialect_of_config (config : Provider_config.t) =
 ;;
 
 let mime_type_of_format_hint = Api_common.image_mime_of_format_opt
-let sniff_mime_type_of_bytes = Api_common.sniff_image_mime_of_bytes
-let infer_mime_type_of_url = Api_common.infer_image_mime_of_url
 
 let decode_base64_payload raw =
   let buf = Buffer.create (String.length raw) in
@@ -126,15 +191,40 @@ let decode_base64_payload raw =
     | Error (`Msg msg) -> Error ("invalid base64 image payload: " ^ msg))
 ;;
 
-let validate_request (req : request) =
+let validate_request ~(dialect : Capabilities.images_api_dialect) (req : request) =
   let prompt = String.trim req.prompt in
   if prompt = ""
   then Error "image generation prompt must not be blank"
   else (
-    match req.count with
-    | Some n when n <= 0 ->
-      Error (Printf.sprintf "image generation count must be positive, got %d" n)
-    | Some _ | None -> Ok prompt)
+    let* () =
+      match req.count with
+      | Some n when n <= 0 ->
+        Error (Printf.sprintf "image generation count must be positive, got %d" n)
+      | Some _ | None -> Ok ()
+    in
+    let* () =
+      match non_blank_opt req.output_format with
+      | None -> Ok ()
+      | Some fmt ->
+        (match mime_type_of_format_hint fmt with
+         | Some _ -> Ok ()
+         | None ->
+           Error
+             (Printf.sprintf
+                "unsupported image output_format %S (expected png, jpeg, webp, or gif)"
+                fmt))
+    in
+    let* () =
+      match dialect, non_blank_opt req.negative_prompt with
+      | Capabilities.Gemini_imagen_predict, _ -> Ok ()
+      | (Capabilities.Openai_images_v1 | Capabilities.Zai_images_v4), None -> Ok ()
+      | ((Capabilities.Openai_images_v1 | Capabilities.Zai_images_v4) as d), Some _ ->
+        Error
+          (Printf.sprintf
+             "%s does not support negative_prompt"
+             (Capabilities.images_api_dialect_to_string d))
+    in
+    Ok prompt)
 ;;
 
 let build_request_body
@@ -142,7 +232,7 @@ let build_request_body
       ~(config : Provider_config.t)
       (req : request)
   =
-  let* prompt = validate_request req in
+  let* prompt = validate_request ~dialect req in
   if Api_common.string_is_blank config.model_id
   then Error "image generation model_id must not be blank"
   else (
@@ -254,22 +344,17 @@ let parse_openai_or_zai_data ~dialect_label json =
                dialect_label
                index)
         else (
+          (* Record [Some m] only when the provider explicitly declared the
+             MIME/format; leave [None] when undeclared so downstream storage
+             (Attachment_store) can sniff magic bytes without false mismatch
+             errors. *)
           let mime_type =
             match item_mime_field with
-            | Some m -> m
+            | Some _ as m -> m
             | None ->
               (match item_format with
-               | Some m -> m
-               | None ->
-                 (match top_format with
-                  | Some m -> m
-                  | None ->
-                    (match Option.bind data_bytes sniff_mime_type_of_bytes with
-                     | Some m -> m
-                     | None ->
-                       (match remote_url with
-                        | Some url -> infer_mime_type_of_url url
-                        | None -> "image/png"))))
+               | Some _ as m -> m
+               | None -> top_format)
           in
           let image = { mime_type; data_bytes; remote_url; revised_prompt } in
           loop (index + 1) (image :: acc) rest)
@@ -305,8 +390,11 @@ let parse_gemini_imagen_predictions json =
         in
         let mime_type =
           match member_string_opt "mimeType" item with
-          | Some m -> m
-          | None -> Option.value (sniff_mime_type_of_bytes bytes) ~default:"image/png"
+          | Some m ->
+            (match mime_type_of_format_hint m with
+             | Some canonical -> Some canonical
+             | None -> Some m)
+          | None -> None
         in
         let revised_prompt = member_string_opt "prompt" item in
         let image =
@@ -334,6 +422,7 @@ let parse_response ~(dialect : Capabilities.images_api_dialect) (body : string) 
 let generate
       ?cache
       ?timeout_s
+      ?(max_response_bytes = max_response_bytes)
       ~sw
       ~net
       ~clock
@@ -344,6 +433,7 @@ let generate
   match build_request_body ~dialect ~config req with
   | Error reason -> Error (Http_client.AcceptRejected { reason })
   | Ok body ->
+    let ignored_options = unsupported_options ~dialect req in
     let url = request_url ~dialect ~config in
     let effective_headers = Provider_config.effective_request_headers config in
     let parser_name = "image_gen:" ^ Capabilities.images_api_dialect_to_string dialect in
@@ -357,6 +447,7 @@ let generate
              ?cache
              ~clock
              ?timeout_s
+             ~max_response_bytes
              ~sw
              ~net
              ~url
@@ -377,7 +468,7 @@ let generate
                   })
          | Ok resp when Http_client.is_success_status resp.status ->
            (match parse_response ~dialect resp.body with
-            | Ok images -> Ok images
+            | Ok images -> Ok { images; ignored_options }
             | Error message ->
               Error
                 (Http_client.ProviderFailure

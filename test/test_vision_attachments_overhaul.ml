@@ -383,17 +383,29 @@ let test_generate_image_validation_and_ssrf_guard () =
 
   check bool "public HTTPS download URL allowed" true
     (Result.is_ok (Keeper_generate_image.validate_remote_download_url "https://cdn.example.com/out.png"));
+  (* Regression: public hostnames starting with "fd" or "fc" must NOT be
+     false-positively blocked as IPv6 ULA literals. *)
+  check bool "public hostname starting with fd allowed" true
+    (Result.is_ok (Keeper_generate_image.validate_remote_download_url "https://fd.example.com/out.png"));
+  check bool "public hostname starting with fc allowed" true
+    (Result.is_ok (Keeper_generate_image.validate_remote_download_url "https://fc-assets.example.com/out.png"));
   List.iter
     (fun url ->
        check bool ("SSRF blocked: " ^ url) true
          (Result.is_error (Keeper_generate_image.validate_remote_download_url url)))
     [ "http://cdn.example.com/out.png"
     ; "file:///etc/passwd"
+    ; "https://user:pass@cdn.example.com/out.png"
     ; "https://127.0.0.1/img.png"
     ; "https://localhost/img.png"
+    ; "https://localhost./img.png"
     ; "https://169.254.169.254/latest/meta-data"
     ; "https://10.0.0.5/internal.png"
     ; "https://192.168.1.10/img.png"
+    ; "https://100.64.0.1/cgnat.png"
+    ; "https://[fd00::1]/ula.png"
+    ; "https://[fc00::1]/ula.png"
+    ; "https://[::ffff:127.0.0.1]/mapped-loopback.png"
     ]
 
 let test_generate_image_candidates_and_execution () =
@@ -464,12 +476,15 @@ supports-image-input = true
   in
   let generate_endpoint ~sw:_ ~net:_ ~clock:_ ~config:_ ~dialect:_ _req =
     Ok
-      [ { Llm_provider.Image_gen.mime_type = "image/png"
-        ; data_bytes = Some sample_png
-        ; remote_url = None
-        ; revised_prompt = Some "a crisp red lighthouse"
-        }
-      ]
+      { Llm_provider.Image_gen.images =
+          [ { Llm_provider.Image_gen.mime_type = Some "image/png"
+            ; data_bytes = Some sample_png
+            ; remote_url = None
+            ; revised_prompt = Some "a crisp red lighthouse"
+            }
+          ]
+      ; ignored_options = []
+      }
   in
   let exec =
     Keeper_generate_image.handle_with_outcome
@@ -987,6 +1002,469 @@ let test_board_attachments_roundtrip_and_dashboard_projection () =
     check string "dashboard comment attachment_id" uploaded.id (json_string "attachment_id" att)
   | other -> failf "expected 1 dashboard comment attachment, got %s" (Yojson.Safe.to_string other)
 
+(* 7. Review-Fix Regressions: Catalog Capability Floor, Strict Vision Pin,
+   Multi-Keeper Ephemeral Pin Isolation, ACP Tool-Update Media Filtering,
+   Generate-Image Failover/Partial/Options/Write-Policy, Codex/URI Hardening *)
+
+let test_catalog_false_not_overridden_by_acp_probe () =
+  let toml =
+    {|
+[runtime]
+default = "acp_text.text_model"
+
+[providers.acp_text]
+protocol = "acp"
+driver = "kimi_code"
+command = "/fake/bin/acp-catalog-false-probe"
+is-non-interactive = true
+
+[models.text_model]
+api-name = "glm-5"
+max-context = 128000
+
+[acp_text.text_model]
+|}
+  in
+  let _, runtimes = parse_and_materialize_all toml in
+  let rt = find_runtime runtimes "acp_text.text_model" in
+  let catalog_caps =
+    Llm_provider.Capabilities.for_model_id "glm-5"
+  in
+  check (option bool) "catalog declares glm-5 non-vision" (Some false)
+    (Option.map (fun (c : Llm_provider.Capabilities.capabilities) -> c.supports_image_input) catalog_caps);
+  Runtime_acp_client.record_observed_image_prompt
+    ~driver:Runtime_acp_client.Kimi_code
+    ~cli_path:"/fake/bin/acp-catalog-false-probe"
+    true;
+  check bool "live ACP probe=true must NOT override catalog supports_image_input=false"
+    false (Runtime_agent.runtime_accepts_image_input ~runtime:rt)
+
+let test_vision_reader_strict_pin_and_exact_uri_host_derivation () =
+  let toml =
+    {|
+[runtime]
+default = "proxy_openai.chat"
+
+[providers.proxy_openai]
+protocol = "openai-compatible-http"
+endpoint = "https://my-openai-proxy.internal/v1"
+[providers.proxy_openai.credentials]
+type = "inline"
+value = "fixture-proxy-key"
+
+[providers.xyz_ai]
+protocol = "openai-compatible-http"
+endpoint = "https://xyz.ai/v1"
+[providers.xyz_ai.credentials]
+type = "inline"
+value = "fixture-xyz-key"
+
+[providers.real_zai]
+protocol = "openai-compatible-http"
+endpoint = "https://api.z.ai/api/paas/v4"
+[providers.real_zai.credentials]
+type = "inline"
+value = "fixture-zai-key"
+
+[models.chat]
+api-name = "gpt-4o"
+max-context = 128000
+[models.chat.capabilities]
+supports-image-input = true
+
+[proxy_openai.chat]
+[xyz_ai.chat]
+[real_zai.chat]
+|}
+  in
+  let _, runtimes = parse_and_materialize_all toml in
+  let ids = List.map (fun (rt : Runtime_instance.t) -> rt.id) in
+  (* Strict pin: explicit vision_reader returns ONLY that runtime *)
+  let pinned =
+    Runtime_agent.vision_reader_candidates_of
+      ~runtimes
+      ~media:{ Runtime_schema.vision_reader = Some "real_zai.chat"; image_generator = None }
+      ()
+  in
+  check (list string) "explicit vision_reader strictly pins to one runtime"
+    [ "real_zai.chat" ] (ids pinned);
+  (* Exact URI host derivation: xyz.ai and my-openai-proxy.internal must NOT derive siblings *)
+  let targets =
+    Runtime_agent.image_generator_candidates_of
+      ~runtimes
+      ~media:Runtime_schema.empty_media_overrides
+      ()
+  in
+  let labels = List.map Runtime_agent.image_generator_target_label targets in
+  check bool "api.z.ai derives glm-image sibling" true
+    (List.exists (fun l -> String_util.contains_substring l "glm-image") labels);
+  check bool "my-openai-proxy.internal does NOT derive OpenAI sibling" false
+    (List.exists (fun l -> String_util.contains_substring l "proxy_openai") labels);
+  check bool "xyz.ai does NOT derive Z.AI sibling" false
+    (List.exists (fun l -> String_util.contains_substring l "xyz_ai") labels)
+
+let test_multi_keeper_identical_ephemeral_capture_isolation () =
+  with_temp_dir "multi-keeper-ephem-" @@ fun base_dir ->
+  let png_shared = sample_png ^ "shared-frame-bytes" in
+  let png_other = sample_png ^ "keeper-a-newer-frame" in
+  let handle_a =
+    match Keeper_vision_tool.store_frame ~base_path:base_dir ~keeper_name:"keeper-a" png_shared with
+    | Ok h -> h
+    | Error err -> fail err
+  in
+  let handle_b =
+    match Keeper_vision_tool.store_frame ~base_path:base_dir ~keeper_name:"keeper-b" png_shared with
+    | Ok h -> h
+    | Error err -> fail err
+  in
+  let sha = Multimodal.Vision_artifact_store.to_string handle_a in
+  check string "identical frame bytes share content-addressed handle"
+    sha (Multimodal.Vision_artifact_store.to_string handle_b);
+  let store = Attachment_store.create ~base_path:base_dir in
+  (* Evict keeper-a's ephemeral pin by capping keeper-a at 1 entry with a newer frame *)
+  (match
+     Attachment_store.put
+       ~ephemeral_max_entries:1
+       ~origin:Attachment_store.Tool_capture
+       ~created_by:"keeper-a"
+       ~retention:(Attachment_store.Ephemeral { keeper = "keeper-a" })
+       store
+       ~bytes:png_other
+   with
+   | Ok _ -> ()
+   | Error err -> fail (Attachment_store.put_error_to_string err));
+  check bool "keeper-a pin evicted" false
+    (Attachment_store.has_ephemeral_pin store ~keeper:"keeper-a" ~sha256:sha);
+  check bool "keeper-b pin still held" true
+    (Attachment_store.has_ephemeral_pin store ~keeper:"keeper-b" ~sha256:sha);
+  let dir_a = Keeper_vision_tool.vision_store_dir ~base_path:base_dir ~keeper_name:"keeper-a" () in
+  let dir_b = Keeper_vision_tool.vision_store_dir ~base_path:base_dir ~keeper_name:"keeper-b" () in
+  let dir_c = Keeper_vision_tool.vision_store_dir ~base_path:base_dir ~keeper_name:"keeper-c" () in
+  (match Keeper_vision_tool.load_artifact ~dir:dir_b handle_b with
+   | Ok loaded -> check string "keeper-b reads shared ephemeral frame after keeper-a eviction" png_shared loaded
+   | Error _ -> fail "keeper-b must still read its pinned ephemeral capture");
+  check bool "keeper-a denied after its own pin eviction" true
+    (Result.is_error (Keeper_vision_tool.load_artifact ~dir:dir_a handle_a));
+  check bool "unpinned keeper-c denied" true
+    (Result.is_error (Keeper_vision_tool.load_artifact ~dir:dir_c handle_b))
+
+let test_acp_tool_call_update_media_filtering_and_dedup () =
+  let b64 = Base64.encode_string sample_png in
+  let image_block =
+    `Assoc [ "type", `String "image"; "mimeType", `String "image/png"; "data", `String b64 ]
+  in
+  (* 1. MCP tool (keeper_image_read) echoing ImageContent must NOT emit media_outputs *)
+  let mcp_read_update =
+    `Assoc
+      [ "sessionUpdate", `String "tool_call_update"
+      ; "toolCallId", `String "tc-read-1"
+      ; "title", `String "keeper_image_read"
+      ; "kind", `String "read"
+      ; "status", `String "completed"
+      ; "content", `List [ image_block ]
+      ]
+  in
+  (match
+     Runtime_acp_client.For_testing.parse_session_update
+       ~driver:Runtime_acp_client.Antigravity mcp_read_update
+   with
+   | Some (Runtime_acp_client.Tool_call_updated { media_outputs; _ }) ->
+     check int "MCP keeper_image_read tool_call_update emits 0 media_outputs"
+       0 (List.length media_outputs)
+   | _ -> fail "expected Tool_call_updated for MCP read");
+
+  (* 2. Native generate_image carrying both content and rawOutput emits exactly 1 deduped image *)
+  let gen_update =
+    `Assoc
+      [ "sessionUpdate", `String "tool_call_update"
+      ; "toolCallId", `String "tc-gen-1"
+      ; "title", `String "generate_image"
+      ; "kind", `String "other"
+      ; "status", `String "completed"
+      ; "content", `List [ image_block ]
+      ; "rawOutput", `Assoc [ "content", `List [ image_block ] ]
+      ]
+  in
+  let parsed_media =
+    match
+      Runtime_acp_client.For_testing.parse_session_update
+        ~driver:Runtime_acp_client.Antigravity gen_update
+    with
+    | Some (Runtime_acp_client.Tool_call_updated { media_outputs; _ }) ->
+      check int "native generate_image deduplicates content + rawOutput to 1 image"
+        1 (List.length media_outputs);
+      media_outputs
+    | _ -> fail "expected Tool_call_updated for generate_image"
+  in
+  (* 3. Stream projection deduplicates repeated Tool_call_updated frames for the same tool_call_id *)
+  let emitted_media = ref 0 in
+  let on_acp_event, _, _, _, _ =
+    Keeper_acp_runtime.For_testing.project_stream_for_testing
+      ~on_event:(function
+        | Agent_core.Types.ContentBlockDelta { delta = Agent_core.Types.MediaDelta _; _ } ->
+          incr emitted_media
+        | _ -> ())
+      ~driver:Runtime_acp_client.Antigravity
+      ~mcp_server_name:"masc"
+      ~model:"fixture"
+      ~session_id:"sess-media-dedupe"
+      ~turn_count:1
+      ~native_posture:Runtime_native_tools.Native_read
+      ~allowed_tool_names:[]
+      ()
+  in
+  let ev =
+    Runtime_acp_client.Tool_call_updated
+      { tool_call_id = "tc-gen-1"
+      ; title = Some "generate_image"
+      ; kind = None
+      ; status = None
+      ; raw_input = None
+      ; raw_output = None
+      ; identity = Some (Runtime_acp_client.Native_tool { name = Some "generate_image"; kind = None; locations = [] })
+      ; media_outputs = parsed_media
+      }
+  in
+  on_acp_event ev;
+  on_acp_event ev;
+  check int "repeated identical Tool_call_updated media emits exactly 1 MediaDelta"
+    1 !emitted_media
+
+let test_generate_image_failover_partial_options_and_write_policy () =
+  (* Write policy & catalog authority *)
+  (match Keeper_tool_descriptor.find_id "keeper.vision.generate_image" with
+   | Some desc ->
+     check (option bool) "keeper_generate_image is NOT read-only (fences retries)"
+       (Some false) (Keeper_tool_descriptor.readonly_static_hint desc)
+   | None -> fail "keeper_generate_image descriptor missing");
+  let cat = Tool_catalog.metadata "keeper_generate_image" in
+  check bool "Tool_catalog grants keeper_generate_image write permission (CanBroadcast)"
+    true (cat.required_permission = Masc_domain.CanBroadcast);
+  check bool "Tool_catalog does not mark keeper_generate_image read-only"
+    true (cat.readonly <> Some true);
+
+  let toml =
+    {|
+[runtime]
+default = "p1.img"
+
+[providers.p1]
+protocol = "openai-compatible-http"
+endpoint = "https://api.openai.com/v1"
+[providers.p1.credentials]
+type = "inline"
+value = "fixture-key-1"
+
+[providers.p2]
+protocol = "openai-compatible-http"
+endpoint = "https://api.openai.com/v1"
+[providers.p2.credentials]
+type = "inline"
+value = "fixture-key-2"
+
+[models.img]
+api-name = "gpt-image-1"
+max-context = 32000
+[models.img.capabilities]
+supports-image-output = true
+
+[p1.img]
+[p2.img]
+|}
+  in
+  let _, runtimes = parse_and_materialize_all toml in
+  let rt1 = find_runtime runtimes "p1.img" in
+  let rt2 = find_runtime runtimes "p2.img" in
+  let t1 =
+    Runtime_agent.Runtime_images_endpoint
+      { runtime = rt1; dialect = Llm_provider.Capabilities.Openai_images_v1 }
+  in
+  let t2 =
+    Runtime_agent.Runtime_images_endpoint
+      { runtime = rt2; dialect = Llm_provider.Capabilities.Openai_images_v1 }
+  in
+  let meta =
+    match Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String "painter" ]) with
+    | Ok m -> m
+    | Error err -> fail err
+  in
+  with_temp_dir "gen-review-" @@ fun base_dir ->
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let run ?fetch_remote_url ~generate_endpoint ~args () =
+    Keeper_generate_image.handle_with_outcome
+      ~base_path:base_dir
+      ~candidates:[ t1; t2 ]
+      ~generate_endpoint
+      ?fetch_remote_url
+      ~sw
+      ~clock:(Eio.Stdenv.clock env)
+      ~net:(Eio.Stdenv.net env)
+      ~meta
+      ~args
+      ()
+  in
+  (* 1. Pre-dispatch 429 fails over from t1 to t2 and succeeds + reports ignored_options *)
+  let calls = ref 0 in
+  let exec_429 =
+    run
+      ~generate_endpoint:(fun ~sw:_ ~net:_ ~clock:_ ~config:_ ~dialect:_ _req ->
+        incr calls;
+        if !calls = 1
+        then
+          Error
+            (Llm_provider.Http_client.HttpError
+               { code = 429
+               ; body = Llm_provider.Http_client.Received "rate limited"
+               ; retry_after_header = None
+               })
+        else
+          Ok
+            { Llm_provider.Image_gen.images =
+                [ { Llm_provider.Image_gen.mime_type = None
+                  ; data_bytes = Some sample_png
+                  ; remote_url = None
+                  ; revised_prompt = None
+                  }
+                ]
+            ; ignored_options = [ "aspect_ratio" ]
+            })
+      ~args:(`Assoc [ "prompt", `String "sun"; "aspect_ratio", `String "16:9" ])
+      ()
+  in
+  check int "429 failed over to second candidate" 2 !calls;
+  check bool "429 failover succeeded" true
+    (match exec_429.disposition with Tool_result.Completed _ -> true | _ -> false);
+  let body_429 = Yojson.Safe.from_string exec_429.raw_output in
+  check bool "ignored_options surfaced in result JSON" true
+    (json_member "ignored_options" body_429 = `List [ `String "aspect_ratio" ]);
+
+  (* 2. Terminal 400 does NOT fail over and preserves bounded refusal body *)
+  let calls_400 = ref 0 in
+  let exec_400 =
+    run
+      ~generate_endpoint:(fun ~sw:_ ~net:_ ~clock:_ ~config:_ ~dialect:_ _req ->
+        incr calls_400;
+        Error
+          (Llm_provider.Http_client.HttpError
+             { code = 400
+             ; body = Llm_provider.Http_client.Received "safety_system: prompt rejected"
+             ; retry_after_header = None
+             }))
+      ~args:(`Assoc [ "prompt", `String "blocked" ])
+      ()
+  in
+  check int "HTTP 400 must NOT fail over to second candidate" 1 !calls_400;
+  check bool "HTTP 400 returns Failed" true
+    (match exec_400.disposition with Tool_result.Failed _ -> true | _ -> false);
+  check bool "HTTP 400 preserves provider refusal body" true
+    (String_util.contains_substring exec_400.raw_output "safety_system: prompt rejected");
+
+  (* 3. Timeout and Response_body_too_large do NOT fail over *)
+  let calls_to = ref 0 in
+  let exec_to =
+    run
+      ~generate_endpoint:(fun ~sw:_ ~net:_ ~clock:_ ~config:_ ~dialect:_ _req ->
+        incr calls_to;
+        Error
+          (Llm_provider.Http_client.TimeoutError
+             { message = "deadline exceeded"; phase = Llm_provider.Http_client.Wall_clock }))
+      ~args:(`Assoc [ "prompt", `String "slow" ])
+      ()
+  in
+  check int "TimeoutError must NOT fail over" 1 !calls_to;
+  check bool "TimeoutError returns Failed" true
+    (match exec_to.disposition with Tool_result.Failed _ -> true | _ -> false);
+
+  let calls_big = ref 0 in
+  let exec_big =
+    run
+      ~generate_endpoint:(fun ~sw:_ ~net:_ ~clock:_ ~config:_ ~dialect:_ _req ->
+        incr calls_big;
+        Error
+          (Llm_provider.Http_client.ProviderFailure
+             { kind = Llm_provider.Http_client.Response_body_too_large { limit_bytes = 1024 }
+             ; message = "too large"
+             }))
+      ~args:(`Assoc [ "prompt", `String "huge" ])
+      ()
+  in
+  check int "Response_body_too_large must NOT fail over" 1 !calls_big;
+  check bool "Response_body_too_large returns Failed" true
+    (match exec_big.disposition with Tool_result.Failed _ -> true | _ -> false);
+
+  (* 4. Unsupported negative_prompt fails closed before calling provider *)
+  let calls_neg = ref 0 in
+  let exec_neg =
+    run
+      ~generate_endpoint:(fun ~sw:_ ~net:_ ~clock:_ ~config:_ ~dialect:_ _req ->
+        incr calls_neg;
+        Error (Llm_provider.Http_client.AcceptRejected { reason = "should not reach" }))
+      ~args:(`Assoc [ "prompt", `String "cat"; "negative_prompt", `String "blurry" ])
+      ()
+  in
+  check int "unsupported negative_prompt rejected before HTTP call" 0 !calls_neg;
+  check bool "negative_prompt returns Policy_rejection failure" true
+    (match exec_neg.disposition with
+     | Tool_result.Failed Tool_result.Policy_rejection -> true
+     | _ -> false);
+
+  (* 5. Partial persistence + mismatched MIME retry + remote URL download *)
+  let exec_partial =
+    run
+      ~fetch_remote_url:(fun ~net:_ ~clock:_ ~max_bytes:_ url ->
+        if String.equal url "https://cdn.example.com/ok.png"
+        then Ok sample_png
+        else Error "remote download HTTP 404")
+      ~generate_endpoint:(fun ~sw:_ ~net:_ ~clock:_ ~config:_ ~dialect:_ _req ->
+        Ok
+          { Llm_provider.Image_gen.images =
+              [ { Llm_provider.Image_gen.mime_type = Some "image/jpeg" (* mismatched on PNG bytes *)
+                ; data_bytes = None
+                ; remote_url = Some "https://cdn.example.com/ok.png"
+                ; revised_prompt = Some "clean sky"
+                }
+              ; { Llm_provider.Image_gen.mime_type = None
+                ; data_bytes = None
+                ; remote_url = Some "https://cdn.example.com/missing.png"
+                ; revised_prompt = None
+                }
+              ]
+          ; ignored_options = []
+          })
+      ~args:(`Assoc [ "prompt", `String "two skies"; "count", `Int 2 ])
+      ()
+  in
+  check bool "partial persistence succeeds without orphaning first image" true
+    (match exec_partial.disposition with Tool_result.Completed _ -> true | _ -> false);
+  let body_partial = Yojson.Safe.from_string exec_partial.raw_output in
+  check int "partial result count = 1" 1 (json_int "count" body_partial);
+  check bool "partial flag is true" true (json_member "partial" body_partial = `Bool true);
+  (match json_member "errors" body_partial with
+   | `List [ `String err ] ->
+     check bool "partial error identifies image #2" true
+       (String_util.contains_substring err "image #2")
+   | other -> failf "expected 1 partial error, got %s" (Yojson.Safe.to_string other))
+
+let test_codex_wrapped_base64_and_synthetic_id () =
+  let b64 = Base64.encode_string sample_png in
+  let mid = String.length b64 / 2 in
+  let wrapped_b64 =
+    String.sub b64 0 mid ^ "\r\n  " ^ String.sub b64 mid (String.length b64 - mid)
+  in
+  let item =
+    `Assoc
+      [ "type", `String "imageGeneration"
+      ; "result", `String wrapped_b64
+      ]
+  in
+  match Runtime_codex_app_server.decode_image_generation_item_for_tests item with
+  | Some out ->
+    check string "missing Codex id gets deterministic indexed synthetic id"
+      "image_generation_0" out.item_id;
+    check string "whitespace-wrapped base64 decoded cleanly" sample_png out.data_bytes
+  | None -> fail "expected wrapped-base64 Codex imageGeneration item to decode"
+
 let () =
   run "vision_attachments_overhaul"
     [ ( "capabilities"
@@ -994,22 +1472,34 @@ let () =
             test_unified_capability_derivation_and_acp_probe
         ; test_case "media_failover hard-cut refused" `Quick
             test_media_failover_hard_cut_refused
+        ; test_case "catalog supports_image_input=false never overridden by ACP probe" `Quick
+            test_catalog_false_not_overridden_by_acp_probe
+        ; test_case "strict vision_reader pin and exact URI host sibling derivation" `Quick
+            test_vision_reader_strict_pin_and_exact_uri_host_derivation
         ] )
     ; ( "vision_routing"
       , [ test_case "natural vision routing and PreToolUse tool gating" `Quick
             test_natural_vision_routing_and_tool_gating
         ; test_case "checkpoint preserves canonical images without eviction" `Quick
             test_checkpoint_preserves_images_without_eviction
+        ; test_case "multi-keeper identical ephemeral capture isolation" `Quick
+            test_multi_keeper_identical_ephemeral_capture_isolation
         ] )
     ; ( "image_generation"
       , [ test_case "parse_args validation and SSRF URL guard" `Quick
             test_generate_image_validation_and_ssrf_guard
         ; test_case "candidate discovery and mocked endpoint/in-turn execution" `Quick
             test_generate_image_candidates_and_execution
+        ; test_case "failover classification, partial persistence, options, and write policy" `Quick
+            test_generate_image_failover_partial_options_and_write_policy
         ] )
     ; ( "official_clients"
       , [ test_case "Codex imageGeneration and ACP image chunk decoding" `Quick
             test_codex_and_acp_image_output_decoders
+        ; test_case "ACP tool_call_update media filtering and deduplication" `Quick
+            test_acp_tool_call_update_media_filtering_and_dedup
+        ; test_case "Codex whitespace-wrapped base64 and indexed synthetic id" `Quick
+            test_codex_wrapped_base64_and_synthetic_id
         ] )
     ; ( "attachments"
       , [ test_case "upload-first ingress, KEEPER_ATTACHMENT AG-UI, non-mangling store & history"

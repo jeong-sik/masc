@@ -200,20 +200,13 @@ let load_artifact ~dir handle =
         | None -> Ok None
         | Some base_path ->
           let store = Attachment_store.create ~base_path in
-          let permitted =
-            match keeper_name_of_vision_store_dir dir with
-            | None -> true
-            | Some caller ->
-              (match Attachment_store.get_meta_by_sha256 store ~sha256 with
-               | Ok (Some meta) ->
-                 (match meta.retention with
-                  | Attachment_store.Durable -> true
-                  | Attachment_store.Ephemeral { keeper } ->
-                    String.equal caller keeper)
-               | Ok None | Error _ -> true)
-          in
-          if not permitted then Ok None
-          else Attachment_store.get_bytes_by_sha256 store ~sha256
+          (match keeper_name_of_vision_store_dir dir with
+           | None -> Attachment_store.get_bytes_by_sha256 store ~sha256
+           | Some caller ->
+             (match Attachment_store.can_keeper_read store ~keeper:caller ~id_or_sha256:sha256 with
+              | Ok true -> Attachment_store.get_bytes_by_sha256 store ~sha256
+              | Ok false -> Ok None
+              | Error err -> Error err))
       in
       (match from_attachment_store with
        | Ok (Some bytes) -> Ok bytes

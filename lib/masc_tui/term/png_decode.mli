@@ -1,8 +1,9 @@
 (** Pure-OCaml raster image dimension parser (PNG, JPEG, WebP, GIF) and
-    8-bit/16-bit non-interlaced PNG RGBA decoder using [decompress.zl].
+    non-interlaced PNG RGBA decoder using [decompress.zl].
 
     Zero external binaries, zero filesystem I/O, strict pixel-count cap before
-    output buffer allocation. *)
+    output buffer allocation, and immediate abort when zlib output exceeds the
+    expected scanline byte budget. *)
 
 type rgba_image = {
   width : int;
@@ -20,6 +21,7 @@ val image_dimensions : string -> (int * int) option
 
 val decode_rgba :
   ?max_pixels:int -> string -> (rgba_image, string) result
-(** Decode a non-interlaced PNG (color types 0 Grayscale, 2 RGB, 3 Indexed +
-    optional tRNS, 4 Gray+Alpha, 6 RGBA; bit depths 8 and 16; all 5 PNG
-    scanline filters) into straight 8-bit RGBA pixels. *)
+(** Decode a non-interlaced PNG (color types 0 Grayscale [1/2/4/8/16-bit +
+    optional tRNS], 2 RGB [8/16-bit], 3 Indexed [1/2/4/8-bit + optional tRNS],
+    4 Gray+Alpha [8/16-bit], 6 RGBA [8/16-bit]; all 5 PNG scanline filters)
+    into straight 8-bit RGBA pixels. *)

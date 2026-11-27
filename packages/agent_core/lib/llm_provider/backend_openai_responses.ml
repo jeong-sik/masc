@@ -768,6 +768,14 @@ let build_request_artifact
   let image_gen_tools =
     match config.output_media, caps.Capabilities.image_output with
     | Some opts, Capabilities.In_turn_openai_responses_tool ->
+      List.iter
+        (fun field ->
+           Backend_openai_request.warn_capability_drop
+             ~model_id:config.model_id
+             ~field:("output_media." ^ field))
+        (Provider_config.unsupported_image_generation_options
+           ~contract:Capabilities.In_turn_openai_responses_tool
+           opts);
       let fields = [ "type", `String "image_generation" ] in
       let fields =
         match opts.size with

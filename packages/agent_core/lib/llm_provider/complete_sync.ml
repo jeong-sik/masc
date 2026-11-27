@@ -768,12 +768,20 @@ let complete_http
                  accepted the request and never answered held a sync call for as
                  long as the socket stayed open unless the caller declared a body
                  deadline as well. *)
+              let max_response_bytes =
+                let caps, _ = Provider_config.resolve_request_capabilities config in
+                if Option.is_some config.output_media
+                   || Capabilities.supports_image_output caps
+                then Api_common.max_image_response_body
+                else Api_common.max_response_body
+              in
               let post_sync_call () =
                 with_request_metadata ~body:body_str @@ fun () ->
                 Http_client.dispatch_sync_request
                   ?cache:connection_cache
                   ?clock
                   ?connect_timeout_s:config.connect_timeout_s
+                  ~max_response_bytes
                   ~net
                   request
                   ()

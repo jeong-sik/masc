@@ -74,7 +74,6 @@ type openai_stream_state =
   ; responses_output_kinds : (int, Response_replay.kind) Hashtbl.t
   ; responses_output_groups : (int, Response_replay.kind * int list) Hashtbl.t
   ; responses_image_blocks : (int, int) Hashtbl.t
-  ; responses_pending_images : (int, string * string) Hashtbl.t
     (** Responses-only native identities. Chat's transactional projection never
         reads or mutates these tables. *)
   ; mutable next_block_index : int

@@ -1,9 +1,11 @@
 (** Impure shell of the [analyze_image] keeper tool.
 
-    Loads an image artifact (raw bytes) from {!Multimodal.Vision_artifact_store},
-    base64-encodes it into a one-shot [text; image] message, sub-calls
-    configured vision runtimes in media-failover order, and classifies the reply
-    via {!Multimodal.Vision_analyze}. The image is read only inside this sub-call;
+    Loads an image artifact (raw bytes) from {!Attachment_store} (with
+    read-only fallback to legacy {!Multimodal.Vision_artifact_store}),
+    base64-encodes it into a one-shot [text; image] message, sub-calls the
+    configured vision reader (strictly pinned when [[runtime.media].vision_reader]
+    is set; auto-discovered from configured vision-capable runtimes when omitted),
+    and classifies the reply via {!Multimodal.Vision_analyze}. The image is read only inside this sub-call;
     it never enters the keeper's own
     conversation. Every failure path is a typed JSON error — never a silent empty
     success.
@@ -69,8 +71,9 @@ val sniff_image_media_type : string -> (string, string) result
 
 val vision_runtime_ids : now:float -> string list
 (** Ordered image-capable runtime ids the handler may call at [now]:
-    resolved from optional [\[runtime.media\].vision_reader] followed by
-    configured vision-capable runtimes, with shared quota and candidate
+    strictly pinned to [\[runtime.media\].vision_reader] when set, or
+    auto-discovered from configured vision-capable runtimes when omitted,
+    with shared quota and candidate
     rate-limit rest that states no time moved behind the rest in the same
     relative order. A runtime whose provider stated a time not to call it
     before (a quota reset, a usable Retry-After) is held and absent until that

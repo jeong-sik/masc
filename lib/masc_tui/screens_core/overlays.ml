@@ -5499,18 +5499,19 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                           (Option.value img.attachment_id ~default:img.media_path)
                     in
                     let dims_s =
-                      match st.fetched with
-                      | Observed.Value { data = _, _, Some (w, h); _ } ->
+                      match img.width, img.height with
+                      | Some w, Some h when w > 0 && h > 0 ->
                           Printf.sprintf "%dx%d" w h
-                      | Observed.Value { data = _, _, None; _ }
-                      | Observed.Loading _
-                      | Observed.Failed _
-                      | Observed.Absent
-                      | Observed.Unreported -> (
-                          match img.width, img.height with
-                          | Some w, Some h when w > 0 && h > 0 ->
+                      | Some _, (Some _ | None) | None, (Some _ | None) -> (
+                          match st.fetched with
+                          | Observed.Value
+                              { data = { dims = Some (w, h); _ }; _ } ->
                               Printf.sprintf "%dx%d" w h
-                          | Some _, (Some _ | None) | None, (Some _ | None) ->
+                          | Observed.Value { data = { dims = None; _ }; _ }
+                          | Observed.Loading _
+                          | Observed.Failed _
+                          | Observed.Absent
+                          | Observed.Unreported ->
                               "")
                     in
                     let bytes_s =
@@ -5569,8 +5570,8 @@ let render_system_gate grid ~cache ~(rect : Rect.t) ~(theme : Theme.t)
                             (Say.resolve lang
                                (Say.make ~ko:"[r] 이미지 불러오기"
                                   ~en:"[r] Load image"))))
-                | Observed.Value { data = _, png_bytes, dims; _ } -> (
-                    match Png_decode.decode_rgba png_bytes with
+                | Observed.Value { data = { dims; decoded_rgba; _ }; _ } -> (
+                    match decoded_rgba with
                     | Ok img ->
                         let vw =
                           Model.inspector_viewport_window

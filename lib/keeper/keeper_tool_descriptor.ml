@@ -2941,8 +2941,11 @@ let internal_descriptors : t list =
       ~name:Keeper_runtime_schemas_toml.keeper_generate_image.name
       ~description:Keeper_runtime_schemas_toml.keeper_generate_image.description
       ~input_schema:Keeper_runtime_schemas_toml.keeper_generate_image.input_schema
-      ~ordinary_execution_mode:Concurrent
-      ~policy:(read_only_in_process_policy ())
+      (* Serial + write policy: invokes external paid image-generation APIs and
+         persists durable attachments into [Attachment_store], so retries must
+         be fenced ([Effect_possible]). *)
+      ~ordinary_execution_mode:Serial
+      ~policy:(write_in_process_policy ())
       ~handler:Tool_generate_image
       ()
     (* ── voice cluster (3 tools) ──────────────────────────────── *)

@@ -1086,11 +1086,20 @@ let complete_stream_http
                          in
                          continue_unless_failed ())
                        ()
-                   | (Provider_http_codec.Anthropic_messages | Provider_http_codec.Openai_chat | Provider_http_codec.Openai_responses | Provider_http_codec.Gemini_generate_content | Provider_http_codec.Glm_chat) as _non_ollama_kind -> Http_client.read_sse
+                   | (Provider_http_codec.Anthropic_messages | Provider_http_codec.Openai_chat | Provider_http_codec.Openai_responses | Provider_http_codec.Gemini_generate_content | Provider_http_codec.Glm_chat) as _non_ollama_kind ->
+                     let max_event_bytes =
+                       let caps, _ = Provider_config.resolve_request_capabilities config in
+                       if Option.is_some config.output_media
+                          || Capabilities.supports_image_output caps
+                       then Api_common.max_image_response_body
+                       else Api_common.max_response_body
+                     in
+                     Http_client.read_sse
                        ?clock
                        ?idle_timeout:stream_idle_timeout_s
                        ?first_event_timeout:first_event_timeout_s
                        ?body_timeout:body_timeout_s
+                       ~max_event_bytes
                        ~reader
                        ~on_bodiless_body:(fun body ->
                          (* A 200 the transport accepted as SSE whose body is a

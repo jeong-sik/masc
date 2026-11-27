@@ -55,10 +55,39 @@ let attachment_of_meta ~(fallback_name : string) (meta : Attachment_store.meta) 
   ; height = meta.height
   }
 
-let persisted_attachment ~base_dir (att : attachment) =
-  (* Persist raw binary payloads in [Attachment_store] (never base64 in
+let persist_as_tool_blob ~base_dir ?redaction ~mime ~raw_payload ~width ~height (att : attachment) =
+  let trimmed = String.trim raw_payload in
+  if String.equal trimmed "" then { att with data = ""; width; height }
+  else
+    match Tool_output.decode_from_agent_core raw_payload with
+    | Tool_output.Decoded _ -> { att with width; height }
+    | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+      let redacted =
+        match redaction with
+        | Some r -> Keeper_secret_redaction.redact_text r raw_payload
+        | None -> raw_payload
+      in
+      let reference =
+        Tool_blob_store.put_durable
+          (Tool_blob_store.create ~base_path:base_dir)
+          ~bytes:redacted
+          ~mime
+        |> fun reference -> Tool_output.with_preview reference "attachment payload"
+      in
+      let data = Tool_output.encode_for_agent_core (Tool_output.Stored reference) in
+      { att with
+        size = if att.size > 0 then att.size else String.length redacted
+      ; data
+      ; width
+      ; height
+      }
+
+let persisted_attachment ?redaction ~base_dir (att : attachment) =
+  (* Persist supported binary payloads in [Attachment_store] (never base64 in
      [Tool_blob_store]) and replace [att.data] with the canonical attachment
-     URL [/api/v1/attachments/att_<64hex>]. *)
+     URL [/api/v1/attachments/att_<64hex>]. Textual / unsupported attachments
+     (e.g. .txt/.md/.csv/.json) and non-base64 payloads are redacted and stored
+     durably in [Tool_blob_store] so zero text originals are lost. *)
   let store = Attachment_store.create ~base_path:base_dir in
   let existing_id =
     match Attachment_store.parse_id (String.trim att.id) with
@@ -84,10 +113,20 @@ let persisted_attachment ~base_dir (att : attachment) =
         String.sub trimmed (comma + 1) (String.length trimmed - comma - 1)
       | _ -> trimmed
     in
+    let fallback_mime =
+      let m = String.trim att.mime_type in
+      if String.equal m "" then "text/plain" else m
+    in
     match Base64.decode payload with
     | Error _ ->
-      (* Non-base64 legacy marker: never dump raw data into Tool_blob_store. *)
-      { att with data = "" }
+      persist_as_tool_blob
+        ~base_dir
+        ?redaction
+        ~mime:fallback_mime
+        ~raw_payload:att.data
+        ~width:att.width
+        ~height:att.height
+        att
     | Ok bytes ->
       let declared_mime =
         let m = String.trim att.mime_type in
@@ -136,20 +175,19 @@ let persisted_attachment ~base_dir (att : attachment) =
            | Attachment_store.Forbidden_mime _
            | Attachment_store.Mime_mismatch _
            | Attachment_store.Invalid_keeper_name _ ) ->
-         (* Textual documents (e.g. text/plain, text/markdown) are projected to
-            UTF-8 text at model ingress rather than stored as binary blobs; keep
-            dimensions/size metadata without writing base64 to Tool_blob_store. *)
          let width, height =
            match Keeper_image_dimensions.image_dimensions bytes with
            | Some (w, h) -> Some w, Some h
            | None -> att.width, att.height
          in
-         { att with
-           size = if att.size > 0 then att.size else String.length bytes
-         ; data = ""
-         ; width
-         ; height
-         })
+         persist_as_tool_blob
+           ~base_dir
+           ?redaction
+           ~mime:fallback_mime
+           ~raw_payload:bytes
+           ~width
+           ~height
+           att)
 
 let redact_tool_call redaction tc =
   { tc with args = Keeper_secret_redaction.redact_text redaction tc.args }

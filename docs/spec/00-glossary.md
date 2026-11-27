@@ -482,7 +482,7 @@ status: reference
   가리킨다. 상태 줄의 `running N/M`에서 M은 부팅할 Keeper 수여서 일시정지된 Keeper는
   들어가지 않는다. Keeper 목록은 Keepers에서, 각 Keeper의 최근 활동과 도구 호출은
   System 아래 Activity의 `Recent` 탭(`/activity fleet`)에서 확인한다. 이미지를 대신
-  읽는 런타임 목록(`[runtime].media_failover`)은 Keeper가 아니므로 vision runtimes라고 부른다.
+  읽는 런타임 후보(`[runtime.media].vision_reader` 또는 설정된 vision 가능 런타임에서 자동 파생)는 Keeper가 아니므로 vision runtimes라고 부른다.
 
 **Keeper Census (키퍼 명부 조사)**
 : 워크스페이스의 Keeper 이름을 `.masc/keepers/` 안의 영속 JSON 메타데이터에서 열거하는 기본 목록 읽기
@@ -1657,13 +1657,15 @@ status: reference
   process-local 관측). Board Attention Candidate와 다른 뜻이다.
   → [Runtime.t](../../lib/runtime/runtime.mli)
 
-**media_failover**
-: vision 도구가 이미지를 읽을 때 호출하는 runtime의 순서(`[runtime].media_failover`,
-  "vision runtimes"). 이미지를 받지 못하는 runtime을 대신해 읽는 경우까지 포함한다.
-  Keeper turn은 여기로 보내지 않고, turn의 이미지 재라우팅은 자기 lane 안에 머문다.
-  Keeper turn이 실패했을 때 다음 runtime을 고르는 **Runtime Candidate Order**와는 다른
-  장치다.
-  → [Runtime.media_failover](../../lib/runtime/runtime.mli) · [keeper_vision_tool](../../lib/keeper/keeper_vision_tool.mli)
+**[runtime.media] (미디어 오버라이드)**
+: 텍스트 전용 런타임이 이미지를 대신 읽을 때(`vision_reader`)와 이미지를 생성할 때(`image_generator`)
+  선택하는 선택적 오버라이드 표(`[runtime.media]`).
+  두 키 모두 생략할 수 있으며, 생략하면 설정된 런타임의 모델 카탈로그·전송 계약에서
+  vision 가능 런타임과 이미지 생성 대상을 자동으로 찾는다.
+  `vision_reader`를 명시하면 의도하지 않은 유료 공급자로 넘치지 않도록 해당 런타임으로
+  엄격하게 고정한다. Keeper turn 자체는 여기로 보내지 않고, turn의 이미지 재라우팅은 자기 lane 안에 머문다.
+  Keeper turn이 실패했을 때 다음 runtime을 고르는 **Runtime Candidate Order**와는 다른 장치다.
+  → [Runtime.media_overrides](../../lib/runtime/runtime.mli) · [Runtime_agent.vision_reader_candidates_of](../../lib/runtime/runtime_agent.mli) · [keeper_vision_tool](../../lib/keeper/keeper_vision_tool.mli)
 
 **Lane**
 : 모델이 도는 exact-output 작업을 위한 고정 실행 경로. 여섯
@@ -1750,7 +1752,7 @@ status: reference
   Dashboard Settings는 선언된 후보 순서를 편집하며, 저장 전에 읽은 source revision이
   바뀌었으면 충돌로 거절해 새 순서를 덮어쓰지 않는다. 빈 후보 목록은 lane 제거와
   다른 편집이므로 거절되고, lane 제거는 별도 동작이다.
-  `[runtime].media_failover`(vision runtimes, 이미지를 읽는 런타임 목록)와
+  `[runtime.media].vision_reader`(또는 자동 파생되는 vision runtimes)와
   exact-output lane의 slot 우선순위 failover(`docs/spec/05-keeper-agent.md`의
   "8.x Keeper별 exact-output lane 우선순위")는
   런타임 후보 순서와 별개 축이다. 다만 후보 나열이 별개여도 rate-limit 증거 셀은

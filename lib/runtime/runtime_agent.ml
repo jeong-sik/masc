@@ -875,38 +875,34 @@ let vision_reader_candidates_of
          (not excluded) && runtime_accepts_image_input ~runtime:rt)
       runtimes
   in
-  let pinned =
-    match media.Runtime_schema.vision_reader with
-    | Some id -> List.filter (fun (rt : Runtime_instance.t) -> String.equal rt.id id) capable
-    | None -> []
-  in
-  let rest =
-    List.filter
-      (fun (rt : Runtime_instance.t) ->
-         not (List.exists (fun (p : Runtime_instance.t) -> String.equal p.id rt.id) pinned))
-      capable
-  in
-  let tier (rt : Runtime_instance.t) =
-    let health_rank = if runtime_is_healthy_for_media ~now rt then 0 else 1 in
-    let transport_rank = if is_http_agent_core rt then 0 else 1 in
-    let default_rank = if rt.binding.is_default then 0 else 1 in
-    health_rank, transport_rank, default_rank
-  in
-  let indexed = List.mapi (fun idx rt -> idx, tier rt, rt) rest in
-  let sorted_rest =
-    List.sort
-      (fun (i1, t1, _) (i2, t2, _) ->
-         let c = compare t1 t2 in
-         if c <> 0 then c else Int.compare i1 i2)
-      indexed
-    |> List.map (fun (_, _, rt) -> rt)
-  in
-  let rec dedupe seen = function
-    | [] -> []
-    | (rt : Runtime_instance.t) :: tl ->
-      if List.mem rt.id seen then dedupe seen tl else rt :: dedupe (rt.id :: seen) tl
-  in
-  dedupe [] (pinned @ sorted_rest)
+  match media.Runtime_schema.vision_reader with
+  | Some id ->
+    (* When [runtime.media].vision_reader is explicitly configured, pin
+       fallback strictly to that configured runtime so delegated vision never
+       silently spills over to unchosen paid providers. *)
+    List.filter (fun (rt : Runtime_instance.t) -> String.equal rt.id id) capable
+  | None ->
+    let tier (rt : Runtime_instance.t) =
+      let health_rank = if runtime_is_healthy_for_media ~now rt then 0 else 1 in
+      let transport_rank = if is_http_agent_core rt then 0 else 1 in
+      let default_rank = if rt.binding.is_default then 0 else 1 in
+      health_rank, transport_rank, default_rank
+    in
+    let indexed = List.mapi (fun idx rt -> idx, tier rt, rt) capable in
+    let sorted =
+      List.sort
+        (fun (i1, t1, _) (i2, t2, _) ->
+           let c = compare t1 t2 in
+           if c <> 0 then c else Int.compare i1 i2)
+        indexed
+      |> List.map (fun (_, _, rt) -> rt)
+    in
+    let rec dedupe seen = function
+      | [] -> []
+      | (rt : Runtime_instance.t) :: tl ->
+        if List.mem rt.id seen then dedupe seen tl else rt :: dedupe (rt.id :: seen) tl
+    in
+    dedupe [] sorted
 ;;
 
 let vision_reader_candidates ?exclude_id () =
@@ -959,10 +955,9 @@ let direct_image_target_of_runtime (rt : Runtime_instance.t) : image_generator_t
     Some (Runtime_in_turn { runtime = rt; contract })
 ;;
 
-let contains_ci ~needle haystack =
-  let h = String.lowercase_ascii haystack in
-  let n = String.lowercase_ascii needle in
-  String_util.contains_substring h n
+let normalized_uri_host base_url =
+  Uri.host (Uri.of_string (String.trim base_url))
+  |> Option.map String.lowercase_ascii
 ;;
 
 let derived_sibling_image_targets_of_runtime (rt : Runtime_instance.t)
@@ -1009,42 +1004,37 @@ let derived_sibling_image_targets_of_runtime (rt : Runtime_instance.t)
                }
            ]
          | Llm_provider.Provider_kind.OpenAI_compat ->
-           if contains_ci ~needle:"openrouter" pid
-              || contains_ci ~needle:"openrouter.ai" cfg.base_url
-           then
-             [ Derived_sibling_in_turn
-                 { source_runtime = rt
-                 ; model_id = "google/gemini-2.5-flash-image"
-                 ; provider_id = "openrouter-image"
-                 ; contract = Llm_provider.Capabilities.In_turn_openai_chat_modalities
-                 ; label = pid ^ ".google/gemini-2.5-flash-image"
-                 }
-             ]
-           else if contains_ci ~needle:"openai" pid
-                   || contains_ci ~needle:"api.openai.com" cfg.base_url
-           then
-             [ Derived_sibling_images_endpoint
-                 { source_runtime = rt
-                 ; model_id = "gpt-image-1"
-                 ; provider_id = "openai-image"
-                 ; request_path = "/images/generations"
-                 ; dialect = Llm_provider.Capabilities.Openai_images_v1
-                 ; label = pid ^ ".gpt-image-1"
-                 }
-             ]
-           else if contains_ci ~needle:"z.ai" cfg.base_url
-                   || contains_ci ~needle:"bigmodel.cn" cfg.base_url
-           then
-             [ Derived_sibling_images_endpoint
-                 { source_runtime = rt
-                 ; model_id = "glm-image"
-                 ; provider_id = "zai-image"
-                 ; request_path = "/images/generations"
-                 ; dialect = Llm_provider.Capabilities.Zai_images_v4
-                 ; label = pid ^ ".glm-image"
-                 }
-             ]
-           else []
+           (match normalized_uri_host cfg.base_url with
+            | Some "openrouter.ai" ->
+              [ Derived_sibling_in_turn
+                  { source_runtime = rt
+                  ; model_id = "google/gemini-2.5-flash-image"
+                  ; provider_id = "openrouter-image"
+                  ; contract = Llm_provider.Capabilities.In_turn_openai_chat_modalities
+                  ; label = pid ^ ".google/gemini-2.5-flash-image"
+                  }
+              ]
+            | Some "api.openai.com" ->
+              [ Derived_sibling_images_endpoint
+                  { source_runtime = rt
+                  ; model_id = "gpt-image-1"
+                  ; provider_id = "openai-image"
+                  ; request_path = "/images/generations"
+                  ; dialect = Llm_provider.Capabilities.Openai_images_v1
+                  ; label = pid ^ ".gpt-image-1"
+                  }
+              ]
+            | Some ("api.z.ai" | "open.bigmodel.cn") ->
+              [ Derived_sibling_images_endpoint
+                  { source_runtime = rt
+                  ; model_id = "glm-image"
+                  ; provider_id = "zai-image"
+                  ; request_path = "/images/generations"
+                  ; dialect = Llm_provider.Capabilities.Zai_images_v4
+                  ; label = pid ^ ".glm-image"
+                  }
+              ]
+            | Some _ | None -> [])
          | Llm_provider.Provider_kind.Anthropic
          | Llm_provider.Provider_kind.Kimi
          | Llm_provider.Provider_kind.Ollama -> [])

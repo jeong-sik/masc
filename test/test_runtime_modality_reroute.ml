@@ -801,8 +801,8 @@ supports-image-input = true
       { Runtime_schema.vision_reader = Some "fixture.c"; image_generator = None }
     in
     check (list string)
-      "explicit vision_reader comes first, followed by remaining capable runtimes"
-      [ "fixture.c"; "fixture.a"; "fixture.b" ]
+      "explicit vision_reader strictly pins to that configured runtime"
+      [ "fixture.c" ]
       (ids
          (Runtime_agent.vision_reader_candidates_of ~runtimes ~media:with_override ()));
     check (list string)

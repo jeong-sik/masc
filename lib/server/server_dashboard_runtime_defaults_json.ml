@@ -126,7 +126,8 @@ let current ~generated_at_iso () : Yojson.Safe.t =
 type cached_prepared =
   { snap_default : Runtime_instance.t option
   ; snap_runtimes : Runtime_instance.t list
-  ; snap_media_failover : string list
+  ; snap_media : Runtime_schema.media_overrides
+  ; snap_media_caps : (bool * bool) list
   ; snap_config_path : string option
   ; prepared : Server_cached_read_http.prepared_http
   }
@@ -134,20 +135,36 @@ type cached_prepared =
 let prepared_cache_mu = Stdlib.Mutex.create ()
 let prepared_cache : cached_prepared option ref = ref None
 
+let effective_caps_signature (runtimes : Runtime_instance.t list) =
+  List.map
+    (fun rt ->
+       let media_caps = Runtime_instance.effective_media_capabilities rt in
+       ( Llm_provider.Capabilities.supports_image_input_of_media media_caps
+       , Llm_provider.Capabilities.supports_image_output_of_media media_caps ))
+    runtimes
+;;
+
 let snapshot_matches (cached : cached_prepared)
-    (snap : Runtime.dashboard_runtime_defaults_snapshot) =
+    (snap : Runtime.dashboard_runtime_defaults_snapshot)
+    (media_caps : (bool * bool) list) =
   Option.equal ( == ) cached.snap_default snap.default_runtime
   && cached.snap_runtimes == snap.runtimes
-  && cached.snap_media_failover == snap.media_failover
+  && Runtime_schema.equal_media_overrides cached.snap_media snap.media
+  && List.equal
+       (fun (a1, b1) (a2, b2) -> Bool.equal a1 a2 && Bool.equal b1 b2)
+       cached.snap_media_caps
+       media_caps
   && Option.equal String.equal cached.snap_config_path snap.config_path
 ;;
 
 let current_prepared () : Server_cached_read_http.prepared_http =
   let snap = Runtime.dashboard_runtime_defaults_snapshot () in
+  let media_caps = effective_caps_signature snap.runtimes in
   let hit =
     Stdlib.Mutex.protect prepared_cache_mu (fun () ->
       match !prepared_cache with
-      | Some cached when snapshot_matches cached snap -> Some cached.prepared
+      | Some cached when snapshot_matches cached snap media_caps ->
+        Some cached.prepared
       | Some _ | None -> None)
   in
   match hit with
@@ -162,7 +179,8 @@ let current_prepared () : Server_cached_read_http.prepared_http =
         Some
           { snap_default = snap.default_runtime
           ; snap_runtimes = snap.runtimes
-          ; snap_media_failover = snap.media_failover
+          ; snap_media = snap.media
+          ; snap_media_caps = media_caps
           ; snap_config_path = snap.config_path
           ; prepared
           });

@@ -608,20 +608,27 @@ let step_raw ~now (m : Model.t) = function
         in
         (match result with
         | Ok att ->
-            let drafts =
+            let accepted, drafts =
               match target with
               | Cmd.Upload_for_keeper keeper ->
-                  Drafts.add_attachment ~keeper att drafts0
-              | Cmd.Upload_for_board ->
-                  Drafts.add_board_attachment att drafts0
+                  (true, Drafts.add_attachment ~keeper att drafts0)
+              | Cmd.Upload_for_board -> (
+                  match m.inline_modal with
+                  | Some modal
+                    when Nav.equal_inline_action_kind modal.kind
+                           Nav.Board_new_post ->
+                      (true, Drafts.add_board_attachment att drafts0)
+                  | Some _ | None -> (false, drafts0))
             in
-            let chip = Wire_attachment.format_chip att in
             let next =
-              { m with drafts }
-              |> Model.with_toast ~now ~level:Model.Toast_success
-                   (Say.make
-                      ~ko:(Printf.sprintf "첨부 완료 %s" chip)
-                      ~en:(Printf.sprintf "Attached %s" chip))
+              if accepted then
+                let chip = Wire_attachment.format_chip att in
+                { m with drafts }
+                |> Model.with_toast ~now ~level:Model.Toast_success
+                     (Say.make
+                        ~ko:(Printf.sprintf "첨부 완료 %s" chip)
+                        ~en:(Printf.sprintf "Attached %s" chip))
+              else { m with drafts }
             in
             (next, [])
         | Error reason ->
@@ -649,7 +656,7 @@ let step_raw ~now (m : Model.t) = function
             | Some img when String.equal img.media_path url ->
                 let fetched =
                   match result with
-                  | Ok (bytes, dims) ->
+                  | Ok (png_bytes, dims, decoded_opt) ->
                       let resolved_dims =
                         match dims with
                         | Some d -> Some d
@@ -658,8 +665,18 @@ let step_raw ~now (m : Model.t) = function
                             | Some w, Some h when w > 0 && h > 0 -> Some (w, h)
                             | _ -> None)
                       in
+                      let decoded_rgba =
+                        match decoded_opt with
+                        | Some decoded -> decoded
+                        | None -> Masc_tui_term.Png_decode.decode_rgba png_bytes
+                      in
                       Observed.value ~observed_at:now
-                        (url, bytes, resolved_dims)
+                        {
+                          Model.url;
+                          png_bytes;
+                          dims = resolved_dims;
+                          decoded_rgba;
+                        }
                   | Error reason ->
                       Observed.failed ~reason ~retryable:true ~at:now
                 in

@@ -418,7 +418,18 @@ assignments. Unknown keys are load errors.
 | Key | Meaning |
 | --- | --- |
 | `default` | the runtime binding id used when nothing more specific applies. May name a lane or a runtime — lanes resolve first, and a lane name enters on the lane's head (`lib/runtime/runtime.ml`) |
-| `media_failover` | ordered binding ids for media work |
+
+### `[runtime.media]` — optional media overrides
+
+Both keys are optional. Vision reading and image generation capabilities are
+derived automatically from each configured binding's model catalog row,
+transport contract, live ACP probe, and explicit `[models.<id>.capabilities]`
+overrides. (`[runtime].media_failover` was removed and is rejected at load.)
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `vision_reader` | runtime binding id | optional explicit vision fallback binding for text-only runtimes (`keeper_analyze_image` and text-only attempt projection). When explicitly set, delegated vision fallback is **strictly pinned** to this binding so calls never spill over to unchosen paid providers. When omitted, MASC auto-discovers configured healthy vision-capable runtimes. |
+| `image_generator` | runtime binding id | optional preferred image-generation binding for `keeper_generate_image`. When omitted, MASC resolves from the active runtime, other configured image-output bindings, and sibling image endpoints on configured OpenAI, Gemini, Z.AI, and OpenRouter providers. |
 
 ## 6. `[runtime.lanes.<name>]` — keeper lanes
 

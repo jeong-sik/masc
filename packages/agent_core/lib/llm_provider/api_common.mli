@@ -6,6 +6,10 @@
 val api_version : string
 val max_response_body : int
 
+(** Maximum HTTP response body size (64 MiB) for image-generation endpoints and
+    in-turn image-output responses that carry multi-image base64 JSON payloads. *)
+val max_image_response_body : int
+
 (** Allocate an opaque, process-unique tool-use identity.
 
     Use this only when the provider does not supply an identity.  The result is
@@ -243,9 +247,21 @@ val resolve_image_output_media_type
   -> unit
   -> (string, string) result
 
-(** Infer an image MIME type from the path extension of an HTTP(S) URL (ignoring
-    query strings and fragments), defaulting to ["image/png"] when absent. *)
-val infer_image_mime_of_url : string -> string
+(** Non-empty RFC media-type sentinel (["application/octet-stream"]) used when
+    a wire carrier requires a non-blank [media_type] string (such as
+    {!Types.Image}) but the provider omitted an explicit MIME declaration. *)
+val unknown_media_type : string
+
+(** Return [Some trimmed] when [media_type] is non-blank and not
+    {!unknown_media_type}, otherwise [None]. Lets downstream stores treat
+    unknown media types as undeclared so magic-byte sniffing decides without
+    false mismatch errors. *)
+val declared_media_type_opt : string -> string option
+
+(** Infer an image MIME type from an explicit file extension on an HTTP(S) URL
+    path (ignoring query strings and fragments). Returns [None] when the URL
+    has no recognized image extension instead of guessing ["image/png"]. *)
+val infer_image_mime_of_url_opt : string -> string option
 
 (** {2 TLS} *)
 

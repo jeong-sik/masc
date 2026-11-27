@@ -43,7 +43,7 @@ let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
       List.map (redact_attachment redaction) user_attachments
     in
     let persisted_user_attachments =
-      List.map (persisted_attachment ~base_dir) user_attachments
+      List.map (persisted_attachment ~redaction ~base_dir) user_attachments
     in
     let tool_calls = List.map (redact_tool_call redaction) tool_calls in
     let assistant_content =
@@ -106,7 +106,7 @@ let append_user_and_tool_calls_result ~base_dir ~keeper_name ~(user_content : st
     let redaction = redaction_for ~base_dir ~keeper_name in
     let user_content = Keeper_secret_redaction.redact_text redaction user_content in
     let user_attachments = List.map (redact_attachment redaction) user_attachments in
-    let persisted_user_attachments = List.map (persisted_attachment ~base_dir) user_attachments in
+    let persisted_user_attachments = List.map (persisted_attachment ~redaction ~base_dir) user_attachments in
     let tool_calls = List.map (redact_tool_call redaction) tool_calls in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in

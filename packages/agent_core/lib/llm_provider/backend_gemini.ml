@@ -1182,6 +1182,14 @@ let build_request_artifact_typed
       match config.output_media with
       | None -> Ok ()
       | Some opts ->
+        List.iter
+          (fun field ->
+             Backend_openai_request.warn_capability_drop
+               ~model_id:config.model_id
+               ~field:("output_media." ^ field))
+          (Provider_config.unsupported_image_generation_options
+             ~contract:Capabilities.In_turn_gemini_modalities
+             opts);
         let image_config = ref [] in
         (match opts.aspect_ratio with
          | Some ar when not (Api_common.string_is_blank ar) ->

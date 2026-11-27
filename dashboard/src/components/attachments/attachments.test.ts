@@ -61,11 +61,26 @@ afterEach(() => {
 })
 
 describe('attachment validation & boundary decoders', () => {
-  it('validates allowed image/pdf/audio types and rejects SVG, HTML, empty, and oversized files', () => {
-    expect(validateAttachmentFile({ name: 'a.png', type: 'image/png', size: 1024 })).toBeNull()
-    expect(validateAttachmentFile({ name: 'doc.pdf', type: 'application/pdf', size: 2048 })).toBeNull()
-    expect(validateAttachmentFile({ name: 'clip.wav', type: 'audio/wav', size: 512 })).toBeNull()
+  it('validates allowed image/pdf/audio types matching exact server sniff_mime set and rejects SVG, HTML, empty, and oversized files', () => {
+    const exactServerMimes = [
+      'image/png',
+      'image/jpeg',
+      'image/webp',
+      'image/gif',
+      'application/pdf',
+      'audio/mpeg',
+      'audio/wav',
+      'audio/ogg',
+      'audio/midi',
+      'audio/mp4',
+      'audio/webm',
+    ]
+    for (const mime of exactServerMimes) {
+      expect(validateAttachmentFile({ name: `sample.${mime.split('/')[1]}`, type: mime, size: 1024 })).toBeNull()
+    }
     expect(validateAttachmentFile({ name: 'fallback.webp', type: '', size: 100 })).toBeNull()
+    expect(validateAttachmentFile({ name: 'voice.m4a', type: '', size: 100 })).toBeNull()
+    expect(validateAttachmentFile({ name: 'clip.webm', type: '', size: 100 })).toBeNull()
     expect(resolveAttachmentMimeType({ name: 'renamed.png', type: 'application/x-msdownload' })).toBe('application/x-msdownload')
 
     expect(validateAttachmentFile({ name: 'xss.svg', type: 'image/svg+xml', size: 100 })).toContain('보안상')
@@ -344,5 +359,62 @@ describe('<WorkspaceChatImage>, <AttachmentGallery>, and Markdown hydration', ()
     const [url, init] = fetchMock.mock.calls[0]!
     expect(String(url)).toBe(`${window.location.origin}${ATT_URL_A}?max_px=640`)
     expect((init?.headers as Record<string, string>)?.Authorization).toBe('Bearer md-bearer-tok')
+  })
+
+  it('surfaces download failure errors on both lightbox and audio attachment cards', async () => {
+    vi.stubGlobal('IntersectionObserver', undefined)
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input), window.location.origin)
+      if (url.searchParams.get('download') === '1') {
+        return new Response('download forbidden', { status: 403 })
+      }
+      return new Response(PNG_BYTES, { status: 200, headers: { 'Content-Type': 'image/png' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const imgAtt = makeAttachmentRef()
+    const audioAtt = makeAttachmentRef({
+      id: ATT_ID_B,
+      attachment_id: ATT_ID_B,
+      url: ATT_URL_B,
+      kind: 'audio',
+      mime_type: 'audio/mp4',
+      filename: 'note.m4a',
+      width: null,
+      height: null,
+    })
+
+    const view = render(html`
+      <${AttachmentGallery} attachments=${[imgAtt, audioAtt]} workspaceEpoch=${currentSessionEpoch()} />
+    `)
+
+    // 1. Lightbox image download failure surfaces alert inside preview modal
+    await view.findByRole('img', { name: 'screenshot.png' })
+    fireEvent.click(view.getByRole('button', { name: 'screenshot.png 크게 보기' }))
+    const dialog = document.querySelector('[role="dialog"][aria-modal="true"]') as HTMLElement
+    expect(dialog).not.toBeNull()
+    const lightboxDownloadBtn = Array.from(dialog.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === '다운로드',
+    ) as HTMLButtonElement
+    fireEvent.click(lightboxDownloadBtn)
+
+    await waitFor(() => {
+      const errBanner = dialog.querySelector('[data-testid="lightbox-download-error"]')
+      expect(errBanner?.getAttribute('role')).toBe('alert')
+      expect(errBanner?.textContent).toContain('403')
+    })
+
+    // 2. Audio card download failure surfaces alert on the audio card
+    const audioCard = view.getByTestId('attachment-audio-card')
+    const audioDownloadBtn = Array.from(audioCard.querySelectorAll('button')).find(
+      (b) => b.textContent?.trim() === '다운로드',
+    ) as HTMLButtonElement
+    fireEvent.click(audioDownloadBtn)
+
+    await waitFor(() => {
+      const audioAlert = audioCard.querySelector('[role="alert"]')
+      expect(audioAlert).not.toBeNull()
+      expect(audioAlert?.textContent).toContain('403')
+    })
   })
 })

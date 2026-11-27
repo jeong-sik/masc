@@ -899,7 +899,7 @@ let test_openai_responses_image_generation_sync_and_stream () =
        check string "stream final b64 not corrupted by partial" png_header_b64 data
      | _ -> fail "expected single finalized Image from Responses stream");
 
-  (* Streaming incomplete fallback: partial_image flushed once when response.incomplete fires *)
+  (* Streaming incomplete: partial_image preview must NOT be flushed as a completed final image *)
   let st2 = S.create_openai_stream_state ~provider:"openai-responses" ~model:"gpt-6-sol" () in
   let acc2 = Acc.create_stream_acc () in
   let feed2 event_type payload =
@@ -914,15 +914,16 @@ let test_openai_responses_image_generation_sync_and_stream () =
        (Yojson.Safe.to_string (`String jpeg_header_b64)));
   feed2
     "response.incomplete"
-    {|{"type":"response.incomplete","response":{"id":"resp_s2","model":"gpt-6-sol","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}}|};
+    {|{"type":"response.incomplete","response":{"id":"resp_s2","model":"gpt-6-sol","status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[{"type":"image_generation_call","id":"ig_2","status":"incomplete"}]}}|};
   match Acc.finalize_stream_acc acc2 with
   | Error err -> fail ("responses incomplete stream finalize failed: " ^ stream_error_msg err)
   | Ok resp ->
-    match resp.content with
-    | [ Image { media_type; source = Base64 data } ] ->
-      check string "flushed partial mime" "image/jpeg" media_type;
-      check string "flushed partial b64" jpeg_header_b64 data
-    | _ -> fail "expected flushed partial Image on incomplete Responses stream"
+    check
+      int
+      "incomplete Responses stream emits zero final Image blocks"
+      0
+      (List.length
+         (List.filter (function Image _ -> true | _ -> false) resp.content))
 ;;
 
 (* ── 6. OpenAI Chat / OpenRouter bidirectional image generation ───────── *)
@@ -981,7 +982,8 @@ let test_openrouter_chat_image_generation_sync_and_stream () =
             "content": null,
             "images": [
               {"type": "image_url", "image_url": {"url": %s}},
-              {"type": "image_url", "image_url": {"url": "https://cdn.example.com/out.webp"}}
+              {"type": "image_url", "image_url": {"url": "https://cdn.example.com/out.webp"}},
+              {"type": "image_url", "image_url": {"url": "https://cdn.example.com/asset/99?sig=1"}}
             ]
           }
         }]
@@ -995,12 +997,16 @@ let test_openrouter_chat_image_generation_sync_and_stream () =
      match resp.content with
      | [ Image { media_type = m1; source = Base64 d1 }
        ; Image { media_type = m2; source = Url u2 }
+       ; Image { media_type = m3; source = Url u3 }
        ] ->
        check string "sync data uri mime" "image/png" m1;
        check string "sync data uri b64" png_header_b64 d1;
        check string "sync remote url mime" "image/webp" m2;
-       check string "sync remote url" "https://cdn.example.com/out.webp" u2
-     | _ -> fail "expected two Images from OpenRouter sync parse");
+       check string "sync remote url" "https://cdn.example.com/out.webp" u2;
+       check string "extensionless url uses unknown sentinel not png" Api_common.unknown_media_type m3;
+       check (option string) "extensionless url declared_media_type_opt is None" None (Api_common.declared_media_type_opt m3);
+       check string "sync extensionless url" "https://cdn.example.com/asset/99?sig=1" u3
+     | _ -> fail "expected three Images from OpenRouter sync parse");
 
   (* Streaming parse of delta.images[] *)
   let st =
@@ -1201,10 +1207,16 @@ let test_image_gen_dialects_pure () =
     "https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict"
     (Image_gen.request_url ~dialect:Cap.Gemini_imagen_predict ~config:imagen_cfg);
   check
-    string
-    "infer_image_mime_of_url strips query and fragment"
-    "image/webp"
-    (Api_common.infer_image_mime_of_url "https://cdn.example.com/pic.WEBP?sig=1#top");
+    (option string)
+    "infer_image_mime_of_url_opt strips query and fragment"
+    (Some "image/webp")
+    (Api_common.infer_image_mime_of_url_opt "https://cdn.example.com/pic.WEBP?sig=1#top");
+  check
+    (option string)
+    "infer_image_mime_of_url_opt returns None for extensionless URL"
+    None
+    (Api_common.infer_image_mime_of_url_opt "https://cdn.example.com/asset/42?token=abc");
+  check int "image_gen max_response_bytes is 64 MiB" (64 * 1024 * 1024) Image_gen.max_response_bytes;
 
   (* Validation failures *)
   check
@@ -1225,9 +1237,36 @@ let test_image_gen_dialects_pure () =
           ~dialect:Cap.Openai_images_v1
           ~config:openai_cfg
           (Image_gen.make_request ~count:0 "cat")));
+  check
+    bool
+    "unrecognized output_format rejected"
+    true
+    (Result.is_error
+       (Image_gen.build_request_body
+          ~dialect:Cap.Gemini_imagen_predict
+          ~config:imagen_cfg
+          (Image_gen.make_request ~output_format:"bmp" "cat")));
+  check
+    bool
+    "negative_prompt rejected on openai_images_v1"
+    true
+    (Result.is_error
+       (Image_gen.build_request_body
+          ~dialect:Cap.Openai_images_v1
+          ~config:openai_cfg
+          (Image_gen.make_request ~negative_prompt:"no text" "cat")));
+  check
+    bool
+    "negative_prompt rejected on zai_images_v4"
+    true
+    (Result.is_error
+       (Image_gen.build_request_body
+          ~dialect:Cap.Zai_images_v4
+          ~config:zai_cfg
+          (Image_gen.make_request ~negative_prompt:"no watermark" "cat")));
 
-  (* Request body serialization across all 3 dialects *)
-  let req =
+  (* unsupported_options & unsupported_options_for_contract *)
+  let full_req =
     Image_gen.make_request
       ~aspect_ratio:"16:9"
       ~size:"1024x1024"
@@ -1237,8 +1276,54 @@ let test_image_gen_dialects_pure () =
       ~negative_prompt:"blurry"
       "a calm lighthouse"
   in
+  check
+    (list string)
+    "openai_images_v1 unsupported options"
+    [ "aspect_ratio"; "negative_prompt" ]
+    (Image_gen.unsupported_options ~dialect:Cap.Openai_images_v1 full_req);
+  check
+    (list string)
+    "zai_images_v4 unsupported options"
+    [ "aspect_ratio"; "count"; "output_format"; "negative_prompt" ]
+    (Image_gen.unsupported_options ~dialect:Cap.Zai_images_v4 full_req);
+  check
+    (list string)
+    "gemini_imagen_predict unsupported options"
+    [ "quality" ]
+    (Image_gen.unsupported_options ~dialect:Cap.Gemini_imagen_predict full_req);
+  check
+    (list string)
+    "in_turn_gemini_modalities unsupported options"
+    [ "quality"; "output_format"; "negative_prompt" ]
+    (Image_gen.unsupported_options_for_contract
+       ~contract:Cap.In_turn_gemini_modalities
+       full_req);
+  check
+    (list string)
+    "in_turn_openai_responses_tool unsupported options"
+    [ "aspect_ratio"; "count"; "output_format"; "negative_prompt" ]
+    (Image_gen.unsupported_options_for_contract
+       ~contract:Cap.In_turn_openai_responses_tool
+       full_req);
+  check
+    (list string)
+    "in_turn_openai_chat_modalities unsupported options"
+    [ "quality"; "count"; "output_format"; "negative_prompt" ]
+    (Image_gen.unsupported_options_for_contract
+       ~contract:Cap.In_turn_openai_chat_modalities
+       full_req);
+  check
+    (list string)
+    "zai count=1 is not flagged as unsupported"
+    []
+    (Image_gen.unsupported_options
+       ~dialect:Cap.Zai_images_v4
+       (Image_gen.make_request ~size:"1024x1024" ~quality:"hd" ~count:1 "cat"));
+
+  (* Request body serialization across all 3 dialects (no negative_prompt on OpenAI/ZAI) *)
+  let no_neg_req = { full_req with negative_prompt = None } in
   let open Yojson.Safe.Util in
-  (match Image_gen.build_request_body ~dialect:Cap.Openai_images_v1 ~config:openai_cfg req with
+  (match Image_gen.build_request_body ~dialect:Cap.Openai_images_v1 ~config:openai_cfg no_neg_req with
    | Error msg -> fail msg
    | Ok body ->
      let j = Yojson.Safe.from_string body in
@@ -1248,7 +1333,7 @@ let test_image_gen_dialects_pure () =
      check int "openai n" 2 (j |> member "n" |> to_int);
      check string "openai output_format" "png" (j |> member "output_format" |> to_string));
 
-  (match Image_gen.build_request_body ~dialect:Cap.Zai_images_v4 ~config:zai_cfg req with
+  (match Image_gen.build_request_body ~dialect:Cap.Zai_images_v4 ~config:zai_cfg no_neg_req with
    | Error msg -> fail msg
    | Ok body ->
      let j = Yojson.Safe.from_string body in
@@ -1256,7 +1341,7 @@ let test_image_gen_dialects_pure () =
      check string "zai size" "1024x1024" (j |> member "size" |> to_string);
      check string "zai quality" "hd" (j |> member "quality" |> to_string));
 
-  (match Image_gen.build_request_body ~dialect:Cap.Gemini_imagen_predict ~config:imagen_cfg req with
+  (match Image_gen.build_request_body ~dialect:Cap.Gemini_imagen_predict ~config:imagen_cfg full_req with
    | Error msg -> fail msg
    | Ok body ->
      let j = Yojson.Safe.from_string body in
@@ -1272,44 +1357,48 @@ let test_image_gen_dialects_pure () =
        "image/png"
        (params |> member "outputOptions" |> member "mimeType" |> to_string));
 
-  (* Response decoding across all 3 dialects *)
+  (* Response decoding across all 3 dialects: mime_type = Some ONLY when declared *)
   let openai_resp =
     Printf.sprintf
-      {|{"created":1700000000,"data":[{"b64_json":%s,"revised_prompt":"a glowing lighthouse"},{"url":"https://img.example.com/2.jpg"}]}|}
+      {|{"created":1700000000,"data":[{"b64_json":%s,"revised_prompt":"a glowing lighthouse"},{"url":"https://img.example.com/asset/2"},{"b64_json":%s,"output_format":"webp"}]}|}
       (Yojson.Safe.to_string (`String png_header_b64))
+      (Yojson.Safe.to_string (`String webp_header_b64))
   in
   (match Image_gen.parse_response ~dialect:Cap.Openai_images_v1 openai_resp with
    | Error msg -> fail ("openai parse failed: " ^ msg)
-   | Ok [ img1; img2 ] ->
-     check string "sniffed png mime" "image/png" img1.mime_type;
+   | Ok [ img1; img2; img3 ] ->
+     check (option string) "undeclared b64_json mime is None" None img1.mime_type;
      check (option string) "decoded png bytes" (Some png_header_bytes) img1.data_bytes;
      check (option string) "revised_prompt" (Some "a glowing lighthouse") img1.revised_prompt;
-     check string "url mime" "image/jpeg" img2.mime_type;
-     check (option string) "remote_url" (Some "https://img.example.com/2.jpg") img2.remote_url
-   | Ok _ -> fail "expected 2 images from OpenAI Images API");
+     check (option string) "extensionless url mime is None" None img2.mime_type;
+     check (option string) "remote_url" (Some "https://img.example.com/asset/2") img2.remote_url;
+     check (option string) "declared output_format webp" (Some "image/webp") img3.mime_type
+   | Ok _ -> fail "expected 3 images from OpenAI Images API");
 
   let zai_resp =
-    {|{"created":1700000000,"data":[{"url":"https://z.ai/img/out.png"}]}|}
+    {|{"created":1700000000,"data":[{"url":"https://z.ai/img/out"}]}|}
   in
   (match Image_gen.parse_response ~dialect:Cap.Zai_images_v4 zai_resp with
    | Error msg -> fail ("zai parse failed: " ^ msg)
    | Ok [ img ] ->
-     check string "zai url mime" "image/png" img.mime_type;
-     check (option string) "zai remote_url" (Some "https://z.ai/img/out.png") img.remote_url
+     check (option string) "zai undeclared url mime is None" None img.mime_type;
+     check (option string) "zai remote_url" (Some "https://z.ai/img/out") img.remote_url
    | Ok _ -> fail "expected 1 image from ZAI Images API");
 
   let imagen_resp =
     Printf.sprintf
-      {|{"predictions":[{"bytesBase64Encoded":%s,"prompt":"refined prompt"}]}|}
+      {|{"predictions":[{"bytesBase64Encoded":%s,"prompt":"refined prompt"},{"bytesBase64Encoded":%s,"mimeType":"image/jpeg"}]}|}
+      (Yojson.Safe.to_string (`String jpeg_header_b64))
       (Yojson.Safe.to_string (`String jpeg_header_b64))
   in
   (match Image_gen.parse_response ~dialect:Cap.Gemini_imagen_predict imagen_resp with
    | Error msg -> fail ("imagen parse failed: " ^ msg)
-   | Ok [ img ] ->
-     check string "imagen sniffed jpeg mime" "image/jpeg" img.mime_type;
-     check (option string) "imagen decoded bytes" (Some jpeg_header_bytes) img.data_bytes;
-     check (option string) "imagen prompt" (Some "refined prompt") img.revised_prompt
-   | Ok _ -> fail "expected 1 image from Imagen predict");
+   | Ok [ img1; img2 ] ->
+     check (option string) "imagen undeclared mimeType is None" None img1.mime_type;
+     check (option string) "imagen decoded bytes" (Some jpeg_header_bytes) img1.data_bytes;
+     check (option string) "imagen prompt" (Some "refined prompt") img1.revised_prompt;
+     check (option string) "imagen declared mimeType" (Some "image/jpeg") img2.mime_type
+   | Ok _ -> fail "expected 2 images from Imagen predict");
 
   (* Error envelopes & malformed base64 fail closed *)
   check
@@ -1381,8 +1470,17 @@ let test_image_gen_http_loopback () =
     | "/v1/images/generations" ->
       let resp =
         Printf.sprintf
-          {|{"data":[{"b64_json":%s,"revised_prompt":"loopback ok"}]}|}
+          {|{"output_format":"png","data":[{"b64_json":%s,"revised_prompt":"loopback ok"}]}|}
           (Yojson.Safe.to_string (`String png_header_b64))
+      in
+      Cohttp_eio.Server.respond_string ~status:`OK ~body:resp ()
+    | "/v1/images/large" ->
+      (* >10 MiB JSON payload exceeding Api_common.max_response_body (10 MiB)
+         to prove Image_gen.generate uses the 64 MiB cap end-to-end. *)
+      let large_raw = png_header_bytes ^ String.make (8 * 1024 * 1024) '\x00' in
+      let large_b64 = Base64.encode_exn large_raw in
+      let resp =
+        Printf.sprintf {|{"data":[{"b64_json":"%s"}]}|} large_b64
       in
       Cohttp_eio.Server.respond_string ~status:`OK ~body:resp ()
     | "/v1beta/models/imagen-4.0-generate-001:predict" ->
@@ -1413,14 +1511,62 @@ let test_image_gen_http_loopback () =
          ~clock
          ~config:openai_cfg
          ~dialect:Cap.Openai_images_v1
-         (Image_gen.make_request "a red star")
+         (Image_gen.make_request ~aspect_ratio:"16:9" "a red star")
      with
      | Error err -> fail ("openai loopback failed: " ^ http_error_msg err)
-     | Ok [ img ] ->
-       check string "http openai mime" "image/png" img.mime_type;
+     | Ok { images = [ img ]; ignored_options } ->
+       check (option string) "http openai mime" (Some "image/png") img.mime_type;
        check (option string) "http openai bytes" (Some png_header_bytes) img.data_bytes;
-       check (option string) "http openai revised" (Some "loopback ok") img.revised_prompt
+       check (option string) "http openai revised" (Some "loopback ok") img.revised_prompt;
+       check (list string) "ignored aspect_ratio reported" [ "aspect_ratio" ] ignored_options
      | Ok _ -> fail "expected 1 image from openai loopback");
+
+    (* Large (>10 MiB JSON) payload succeeds under default 64 MiB Image_gen cap,
+       and fails closed when caller sets a tighter ~max_response_bytes cap. *)
+    let large_cfg = { openai_cfg with request_path = "/v1/images/large" } in
+    (match
+       Image_gen.generate
+         ~sw
+         ~net
+         ~clock
+         ~config:large_cfg
+         ~dialect:Cap.Openai_images_v1
+         (Image_gen.make_request "high-res image")
+     with
+     | Error err -> fail ("large (>10 MiB) image_gen failed: " ^ http_error_msg err)
+     | Ok { images = [ img ]; ignored_options } ->
+       check (option string) "large undeclared mime is None" None img.mime_type;
+       check (list string) "no ignored options" [] ignored_options;
+       let decoded_len = Option.fold ~none:0 ~some:String.length img.data_bytes in
+       check bool "decoded > 8 MiB payload" true (decoded_len > 8 * 1024 * 1024)
+     | Ok _ -> fail "expected 1 large image");
+    (match
+       Image_gen.generate
+         ~max_response_bytes:1024
+         ~sw
+         ~net
+         ~clock
+         ~config:large_cfg
+         ~dialect:Cap.Openai_images_v1
+         (Image_gen.make_request "too big for 1 KiB cap")
+     with
+     | Error (Http_client.ProviderFailure { kind = Response_body_too_large { limit_bytes = 1024 }; _ }) ->
+       ()
+     | Error err -> fail ("expected Response_body_too_large(1024), got: " ^ http_error_msg err)
+     | Ok _ -> fail "expected tight max_response_bytes cap to reject >10 MiB body");
+    (match
+       Image_gen.generate
+         ~max_response_bytes:0
+         ~sw
+         ~net
+         ~clock
+         ~config:openai_cfg
+         ~dialect:Cap.Openai_images_v1
+         (Image_gen.make_request "invalid cap")
+     with
+     | Error (Http_client.AcceptRejected _) -> ()
+     | Error err -> fail ("expected AcceptRejected for 0 cap, got: " ^ http_error_msg err)
+     | Ok _ -> fail "expected 0 max_response_bytes to be rejected");
 
     let imagen_cfg =
       PC.make
@@ -1442,14 +1588,17 @@ let test_image_gen_http_loopback () =
         (Image_gen.make_request ~aspect_ratio:"1:1" "a blue square")
     with
     | Error err -> fail ("imagen loopback failed: " ^ http_error_msg err)
-    | Ok [ img ] ->
-      check string "http imagen mime" "image/webp" img.mime_type;
+    | Ok { images = [ img ]; ignored_options } ->
+      check (option string) "http imagen mime" (Some "image/webp") img.mime_type;
       check (option string) "http imagen bytes" (Some webp_header_bytes) img.data_bytes;
+      check (list string) "imagen no ignored options" [] ignored_options;
       check
-        (list string)
+        bool
         "both endpoints hit"
-        [ "/v1beta/models/imagen-4.0-generate-001:predict"; "/v1/images/generations" ]
-        !seen_paths
+        true
+        (List.mem "/v1beta/models/imagen-4.0-generate-001:predict" !seen_paths
+         && List.mem "/v1/images/generations" !seen_paths
+         && List.mem "/v1/images/large" !seen_paths)
     | Ok _ -> fail "expected 1 image from imagen loopback")
 ;;
 

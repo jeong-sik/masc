@@ -531,6 +531,8 @@ type t = {
   skill_read_in_flight : string option Atomic.t;
   sse_hub : Sse_hub.t;
   voice_runner : Voice_runner.t;
+  in_tmux : bool;
+  term_program : string option;
   editor_handoff : editor_handoff;
   pending_editor : (unit -> unit) option Atomic.t;
   wiki_editor_gen : int Atomic.t;
@@ -708,9 +710,39 @@ let publish_hub_event ~worker ~bus ~epoch ev =
   in
   publish_hub_messages bus msgs
 
+let inspector_halfblock_max_px = 1280
+
+let inspector_fetch_path ~(probe : Probe.observation) ~term_program ~in_tmux
+    ~format_png url =
+  if not (Wire_attachment.is_attachment_path url) then url
+  else
+    let eff_tp = if in_tmux then None else term_program in
+    match
+      Graphics.protocol_of_probe ~graphics:probe.graphics ~term_program:eff_tp
+    with
+    | Graphics.Unsupported_protocol ->
+        Wire_attachment.attachment_render_path ~format:"png"
+          ~max_px:inspector_halfblock_max_px url
+    | Graphics.Kitty_protocol | Graphics.ITerm2_protocol ->
+        if format_png then
+          Wire_attachment.attachment_render_path ~format:"png" url
+        else url
+
+let detect_in_tmux () =
+  match Sys.getenv_opt "TMUX" with
+  | Some s -> not (String.equal (String.trim s) "")
+  | None -> false
+
 let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
+    ?in_tmux ?term_program
     ?(editor_handoff = noop_editor_handoff) ?(on_editor_ready = fun () -> ())
     ~on_quit ~on_restart () =
+  let in_tmux = match in_tmux with Some b -> b | None -> detect_in_tmux () in
+  let term_program =
+    match term_program with
+    | Some tp -> tp
+    | None -> Graphics.effective_term_program ~getenv:Sys.getenv_opt
+  in
   Eio.Switch.check sw;
   let clock = (clock :> float Eio.Time.clock_ty Eio.Resource.t) in
   let explicit_bearer_override =
@@ -780,6 +812,8 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
     skill_read_in_flight;
     sse_hub;
     voice_runner;
+    in_tmux;
+    term_program;
     editor_handoff;
     pending_editor;
     wiki_editor_gen;
@@ -5416,10 +5450,10 @@ let rec execute t = function
   | Cmd.Fetch_inspector_image { epoch; url; format_png } ->
       fork_safe t (fun () ->
           let ep = current_endpoint t in
+          let probe = Probe.current_observation () in
           let fetch_path =
-            if format_png && Wire_attachment.is_attachment_path url then
-              Wire_attachment.attachment_render_path ~format:"png" url
-            else url
+            inspector_fetch_path ~probe ~term_program:t.term_program
+              ~in_tmux:t.in_tmux ~format_png url
           in
           let res =
             match
@@ -5429,7 +5463,8 @@ let rec execute t = function
             | Error err -> Error (Http_client.http_error_to_string err)
             | Ok bytes ->
                 let dims = Png_decode.image_dimensions bytes in
-                Ok (bytes, dims)
+                let decoded = Some (Png_decode.decode_rgba bytes) in
+                Ok (bytes, dims, decoded)
           in
           Ui_bus.publish_stream_receipt t.bus
             (Msg.Inspector_image_fetched { epoch; url; result = res }))

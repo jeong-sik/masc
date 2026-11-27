@@ -132,7 +132,25 @@ val move_cursor : [ `Left | `Right | `Home | `End ] -> t -> t
 val move_cursor_vertical : [ `Up | `Down ] -> t -> t
 val move_cursor_word : [ `Left | `Right ] -> t -> t
 val move_cursor_line : [ `Start | `End ] -> t -> t
-val clear_current_draft : t -> t
+val clear_current_draft_text : t -> t
+(** Clear only the active keeper's draft text and cursor, preserving draft
+    attachments and [uploading_count]. Use for slash-command dispatch, bare
+    [@mention] target switching, and popup completion. *)
+val clear_current_draft_all : t -> t
+(** Clear the active keeper's draft text, cursor, and draft attachments
+    (preserving [uploading_count] so in-flight uploads remain tracked). Use
+    only for explicit [/clear] or full draft consumption. *)
+val set_keeper_draft_slot :
+  keeper:string ->
+  text:string ->
+  cursor:int ->
+  attachments:Wire_attachment.t list ->
+  uploading_count:int ->
+  t ->
+  t
+(** Atomically set a keeper's draft text, cursor, attachments, and upload count
+    while preserving [preferred_mode]. Used by [@keeper msg] routing to move
+    sender attachments without losing the target keeper's existing draft. *)
 val set_preferred_mode : delivery_mode -> t -> t
 
 val add_attachment : keeper:string -> Wire_attachment.t -> t -> t

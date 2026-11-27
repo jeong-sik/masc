@@ -164,6 +164,52 @@ let default_image_generation_options =
   }
 ;;
 
+let unsupported_image_generation_options
+      ~(contract : Capabilities.image_output_contract)
+      (opts : image_generation_options)
+  =
+  let has_str = function
+    | Some s -> not (Api_common.string_is_blank s)
+    | None -> false
+  in
+  let has_multi_count =
+    match opts.count with
+    | Some n when n > 1 -> true
+    | Some _ | None -> false
+  in
+  let add cond name acc = if cond then name :: acc else acc in
+  let unsupported_rev =
+    match contract with
+    | Capabilities.In_turn_gemini_modalities ->
+      [] |> add (has_str opts.quality) "quality"
+    | Capabilities.In_turn_openai_responses_tool ->
+      []
+      |> add (has_str opts.aspect_ratio) "aspect_ratio"
+      |> add has_multi_count "count"
+    | Capabilities.In_turn_openai_chat_modalities ->
+      []
+      |> add (has_str opts.quality) "quality"
+      |> add has_multi_count "count"
+    | Capabilities.Endpoint_images_api Capabilities.Openai_images_v1 ->
+      [] |> add (has_str opts.aspect_ratio) "aspect_ratio"
+    | Capabilities.Endpoint_images_api Capabilities.Zai_images_v4 ->
+      []
+      |> add (has_str opts.aspect_ratio) "aspect_ratio"
+      |> add has_multi_count "count"
+    | Capabilities.Endpoint_images_api Capabilities.Gemini_imagen_predict ->
+      [] |> add (has_str opts.quality) "quality"
+    | Capabilities.In_turn_codex_item
+    | Capabilities.In_turn_acp_chunk
+    | Capabilities.No_image_output ->
+      []
+      |> add (has_str opts.aspect_ratio) "aspect_ratio"
+      |> add (has_str opts.size) "size"
+      |> add (has_str opts.quality) "quality"
+      |> add has_multi_count "count"
+  in
+  List.rev unsupported_rev
+;;
+
 type t =
   { kind : provider_kind
   ; provider_id : string option

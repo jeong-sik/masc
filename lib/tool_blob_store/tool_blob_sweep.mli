@@ -154,9 +154,39 @@ val scan_attachment_reachability :
   base_path:string ->
   scope:Tool_blob_maintenance.scope ->
   (attachment_reachability, string) result
-(** Read-only reachability scan for {!Attachment_store}: walks every in-scope
-    durable store named by [scope] (including [keeper_chat/*.jsonl],
+(** Read-only fail-closed reachability scan for {!Attachment_store}: walks every
+    in-scope durable store named by [scope] (including [keeper_chat/*.jsonl],
     [board_posts.jsonl], [keepers/], etc.), config keeper files, and active
     ephemeral pins under [<base>/.masc/attachments/ephemeral/] for canonical
     [att_<64hex>] references, then computes live and unreferenced digests
-    against [<base>/.masc/attachments/blobs/]. Deletes nothing. *)
+    against [<base>/.masc/attachments/blobs/]. Fails closed with [Error _] on
+    any unreadable directory, consumer file, ephemeral pin dir, or blob shard.
+    Deletes nothing. *)
+
+type attachment_sweep_report =
+  { total_blobs : int
+  ; live_blobs : int
+  ; unreferenced_blobs : int
+  ; deleted : int
+  ; retained_within_grace : int
+  ; delete_failures : int
+  ; blocked_by_unclassified : bool
+  }
+
+val sweep_attachments :
+  ?min_age_seconds:float ->
+  ?now:float ->
+  base_path:string ->
+  scope:Tool_blob_maintenance.scope ->
+  unit ->
+  (attachment_sweep_report, string) result
+(** Reclaim verified unreferenced {!Attachment_store} blobs older than
+    [min_age_seconds] (default 24 hours). Also invoked from {!reclaim} when no
+    unclassified entries exist.
+    Fail-closed guarantees:
+    - Aborts with [Error _] (deleting nothing) if any consumer file/directory,
+      [ephemeral/] directory, or [blobs/] shard cannot be read.
+    - Refuses to delete ([blocked_by_unclassified = true], [deleted = 0]) when
+      {!Tool_blob_maintenance.unclassified_entries} is non-empty.
+    - Retains blobs whose latest blob/sidecar mtime is within [min_age_seconds]
+      of [now] and re-verifies ephemeral pins immediately before unlinking. *)

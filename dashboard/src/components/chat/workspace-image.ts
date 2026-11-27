@@ -88,6 +88,7 @@ export function WorkspaceChatImage({
   const [actualSize, setActualSize] = useState(false)
   const [naturalDims, setNaturalDims] = useState<{ readonly width: number; readonly height: number } | null>(null)
   const [downloading, setDownloading] = useState(false)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
   const [copiedKey, setCopiedKey] = useState<'id' | 'url' | null>(null)
 
   const isCanonicalAttachment = isWorkspaceAttachmentPath(path)
@@ -185,13 +186,15 @@ export function WorkspaceChatImage({
   const handleDownload = async () => {
     if (downloading) return
     setDownloading(true)
+    setDownloadError(null)
     try {
-      await downloadAttachment({
+      const res = await downloadAttachment({
         url: path,
         id: attachmentId,
         mime_type: mimeLabel ?? 'image/png',
         filename: attachment?.filename ?? null,
       })
+      if (!res.ok) setDownloadError(res.error.message)
     } finally {
       setDownloading(false)
     }
@@ -216,6 +219,7 @@ export function WorkspaceChatImage({
           aria-label=${`${displayName} 크게 보기`}
           onClick=${() => {
             setActualSize(false)
+            setDownloadError(null)
             setZoomed(true)
           }}
           onKeyDown=${(e: KeyboardEvent) => {
@@ -223,6 +227,7 @@ export function WorkspaceChatImage({
             if (e.key === 'Enter' || e.key === ' ') {
               e.preventDefault()
               setActualSize(false)
+              setDownloadError(null)
               setZoomed(true)
             }
           }}
@@ -310,6 +315,9 @@ export function WorkspaceChatImage({
               ? 'max-w-none rounded-[var(--r-1)]'
               : 'max-h-[75vh] max-w-full rounded-[var(--r-1)] object-contain'}
           />
+          ${downloadError && html`
+            <div class="ap-error mt-2" role="alert" data-testid="lightbox-download-error">${downloadError}</div>
+          `}
         <//>
       `}
     </figure>

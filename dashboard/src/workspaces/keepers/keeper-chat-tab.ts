@@ -18,6 +18,7 @@ import { KeeperWaitingStrip } from './keeper-waiting-strip'
 import {
   AttachmentComposer,
   AttachmentGallery,
+  hasFailedAttachments,
   hasUploadingAttachments,
   readyAttachmentsOf,
   revokeComposerPreviews,
@@ -2134,6 +2135,10 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
       setHistoryError('첨부 파일 업로드가 완료된 뒤 전송하세요.')
       return
     }
+    if (hasFailedAttachments(composerAttachmentsRef.current)) {
+      setHistoryError('업로드에 실패한 첨부 파일을 재시도하거나 제거한 뒤 전송하세요.')
+      return
+    }
     const trimmed = draftRef.current.trim()
     const readyAttachments = readyAttachmentsOf(composerAttachmentsRef.current)
     if (!trimmed && readyAttachments.length === 0) return
@@ -3662,7 +3667,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               <button
                 type="button"
                 class="btn-ghost"
-                disabled=${followUpSubmitting || hasUploadingAttachments(composerAttachments)}
+                disabled=${followUpSubmitting || hasUploadingAttachments(composerAttachments) || hasFailedAttachments(composerAttachments)}
                 onClick=${() => void submitMessage('queue')}
               >
                 Queue ↵
@@ -3670,7 +3675,7 @@ export function KeeperChatTab(props: KeeperChatTabProps) {
               <button
                 type="button"
                 class="btn-primary"
-                disabled=${followUpSubmitting || hasUploadingAttachments(composerAttachments)}
+                disabled=${followUpSubmitting || hasUploadingAttachments(composerAttachments) || hasFailedAttachments(composerAttachments)}
                 onClick=${() => void submitMessage('steer')}
               >
                 Steer ⌘↵

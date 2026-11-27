@@ -243,6 +243,24 @@ val noop_editor_handoff : editor_handoff
 
 type t
 
+val inspector_halfblock_max_px : int
+(** Maximum dimension ([1280]px, matching the server's quantized derivative
+    bucket) requested when fetching an Image Inspector preview on non-Kitty /
+    non-iTerm2 terminals so large Retina screenshots stay cleanly under
+    {!Png_decode.default_max_pixels}. *)
+
+val inspector_fetch_path :
+  probe:Masc_tui_term.Probe.observation ->
+  term_program:string option ->
+  in_tmux:bool ->
+  format_png:bool ->
+  string ->
+  string
+(** Resolve the HTTP fetch path for {!Cmd.Fetch_inspector_image}:
+    - Halfblock / unsupported terminals: [?format=png&max_px=1280]
+    - Kitty / iTerm2 terminals: [?format=png] when [format_png] is [true]
+    - Non-attachment URLs are returned unchanged. *)
+
 val create :
   sw:Eio.Switch.t ->
   io:Io_domain.t ->
@@ -252,6 +270,8 @@ val create :
   bus:bus ->
   ?bearer_token:string option ->
   ?voice_backend:Voice_runner.backend ->
+  ?in_tmux:bool ->
+  ?term_program:string option ->
   ?editor_handoff:editor_handoff ->
   ?on_editor_ready:(unit -> unit) ->
   on_quit:(Exit_reason.t -> unit) ->

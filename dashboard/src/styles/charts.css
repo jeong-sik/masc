@@ -30,6 +30,11 @@
   min-width: 0;
 }
 
+/* From here down stands in for uPlot's own stylesheet (uplot/dist/uPlot.min.css),
+   which the dashboard does not load. uPlot places its parts with inline offsets
+   and switches them with the u-off class. The rules of its stylesheet that give
+   those an effect (position: absolute on each part, the u-off ones) each have a
+   counterpart here. The legend's layout is the dashboard's own. */
 .uplot,
 .uplot *,
 .uplot *::before,
@@ -57,6 +62,22 @@
 
 .u-under {
   overflow: hidden;
+}
+
+/* uPlot places each axis box itself, over the canvas. Left in the flow the
+   boxes hang out under the chart and take the clicks meant for the legend. */
+.u-axis {
+  position: absolute;
+}
+
+/* What uPlot switches off: the axis of a hidden series, and the crosshair with
+   its points while the pointer is off the chart. */
+.u-axis.u-off,
+.u-select.u-off,
+.u-cursor-x.u-off,
+.u-cursor-y.u-off,
+.u-cursor-pt.u-off {
+  display: none;
 }
 
 .uplot canvas {
@@ -103,21 +124,54 @@
   pointer-events: none;
 }
 
+/* uPlot builds the legend as a table: a tbody of rows, each a th (marker and
+   label) and a td (value). The rows wrap as the tbody's flex items. */
 .u-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2) var(--sp-3);
+  display: block;
   margin-top: var(--sp-2);
   font-size: var(--fs-11);
   font-variant-numeric: tabular-nums slashed-zero;
   color: var(--fg-3);
 }
 
+.u-legend > tbody {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-4);
+}
+
+/* A value sits a space after its label, and closer to it than to the next series. */
 .u-legend .u-series {
   display: inline-flex;
   align-items: center;
+  gap: var(--sp-2);
+}
+
+.u-legend .u-series > * {
+  padding: 0;
+}
+
+.u-legend .u-series > th {
+  display: inline-flex;
+  align-items: center;
   gap: var(--sp-1);
+  font-weight: inherit;
+}
+
+/* A click on a series' marker or label hides it. The time's takes none, nor
+   does a value. The label also takes focus, and Enter or Space does the same. */
+.u-legend .u-series:not(:first-child) > th {
   cursor: pointer;
+}
+
+.u-legend .u-label:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* The time has no line to mark. */
+.u-legend .u-series:first-child .u-marker {
+  display: none;
 }
 
 .u-legend .u-off {

@@ -13,6 +13,17 @@ import type { ComponentChildren } from 'preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import type uPlot from 'uplot'
 import { getUPlotSync, publishCrosshair } from '../../core/time-window'
+import {
+  LEGEND_TIME_LABEL,
+  LEGEND_TIME_STAMP,
+  legendPointIndex,
+  legendText,
+  legendValueColumns,
+  makeLegendTogglesReachable,
+  pointerOnAny,
+  reflectLegendToggle,
+  reserveLegendValueWidths,
+} from './uplot-legend'
 
 export interface UPlotSeriesSpec {
   readonly label: string
@@ -150,9 +161,30 @@ export function UPlotChart(props: UPlotChartProps) {
           ? undefined
           : (getUPlotSync(UPlotCtor) as uPlot.SyncPubSub)
 
+        const specs = seriesRef.current
+        const stamp = UPlotCtor.fmtDate(LEGEND_TIME_STAMP)
+        const timeText = (seconds: number): string => stamp(new Date(Math.round(seconds * 1000)))
+        const valueText = (specIdx: number, raw: number): string => {
+          if (formatterRef.current) return formatterRef.current(specIdx, raw)
+          const formatted = Number.isInteger(raw) ? String(raw) : raw.toFixed(2)
+          const unit = specs[specIdx]?.unit
+          return unit ? `${formatted} ${unit}` : formatted
+        }
+        const textAt = (plot: uPlot, seriesIdx: number, pointIdx: number | null): string =>
+          legendText(plot.data, seriesIdx, pointIdx, timeText, valueText)
+        // The charts that share this one's crosshair, itself among them.
+        const pointerOnGroup = (plot: uPlot): boolean =>
+          pointerOnAny((sync ? sync.plots : [plot]).map((each) => each.cursor))
+        const legendValue = (plot: uPlot, _raw: number, seriesIdx: number, crosshairIdx: number | null): string =>
+          textAt(plot, seriesIdx, legendPointIndex(crosshairIdx, pointerOnGroup(plot), plot.data[0].length))
+        const reserveLegend = (plot: uPlot): void => reserveLegendValueWidths(
+          plot.root,
+          legendValueColumns(plot.series.length, plot.data[0].length, (seriesIdx, pointIdx) => textAt(plot, seriesIdx, pointIdx)),
+        )
+
         const seriesDefs: uPlot.Series[] = [
-          {},
-          ...seriesRef.current.map((spec, idx) => {
+          { label: LEGEND_TIME_LABEL, value: legendValue },
+          ...specs.map((spec, idx) => {
             const stroke = palette.resolveColor(spec.colorToken, idx)
             return {
               label: spec.label,
@@ -161,12 +193,7 @@ export function UPlotChart(props: UPlotChartProps) {
               dash: spec.dash,
               show: spec.show ?? true,
               fill: spec.fillAlpha ? withAlpha(stroke, spec.fillAlpha) : undefined,
-              value: (_self: uPlot, raw: number) => {
-                if (raw == null || Number.isNaN(raw)) return '없음'
-                if (formatterRef.current) return formatterRef.current(idx, raw)
-                const formatted = Number.isInteger(raw) ? String(raw) : raw.toFixed(2)
-                return spec.unit ? `${formatted} ${spec.unit}` : formatted
-              },
+              value: legendValue,
             } satisfies uPlot.Series
           }),
         ]
@@ -198,6 +225,8 @@ export function UPlotChart(props: UPlotChartProps) {
             },
           ],
           hooks: {
+            setData: [reserveLegend],
+            setSeries: [reflectLegendToggle],
             setCursor: [
               (u) => {
                 const idx = u.cursor.idx
@@ -211,6 +240,7 @@ export function UPlotChart(props: UPlotChartProps) {
         mountRef.current.innerHTML = ''
         const plot = new UPlotCtor(opts, dataRef.current, mountRef.current)
         plotRef.current = plot
+        makeLegendTogglesReachable(plot)
         setLoadError(null)
 
         if (typeof ResizeObserver !== 'undefined') {

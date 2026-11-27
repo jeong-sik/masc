@@ -163,7 +163,7 @@ let write_all_and_close (fd : Unix.file_descr) (content : string) : unit =
 
 let save_file_unix (path : string) (content : string) : unit =
   let fd =
-    Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC ] save_file_mode
+    Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC; Unix.O_CLOEXEC ] save_file_mode
   in
   write_all_and_close fd content
 ;;

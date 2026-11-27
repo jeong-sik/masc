@@ -46,18 +46,25 @@ let lifecycle_stage_fields = function
 
 type mode =
   | Off
-  | On of { writer : string -> unit }
+  | On of { writer : string -> unit; close : unit -> unit }
 
 let state : mode Atomic.t = Atomic.make Off
+
+let close_mode = function
+  | Off -> ()
+  | On { close; _ } -> close ()
 
 let enabled () =
   match Atomic.get state with
   | Off -> false
   | On _ -> true
 
-let enable ~writer = Atomic.set state (On { writer })
+let enable_owned ~writer ~close =
+  close_mode (Atomic.exchange state (On { writer; close }))
 
-let disable () = Atomic.set state Off
+let enable ~writer = enable_owned ~writer ~close:(fun () -> ())
+
+let disable () = close_mode (Atomic.exchange state Off)
 
 (* ── JSON escape ─────────────────────────────────────────────── *)
 
@@ -221,13 +228,9 @@ let redact_header_arg arg =
     let name = String.sub arg 0 colon in
     if List.mem (String.lowercase_ascii (String.trim name)) descriptive_headers
     then redact_arg arg
-    else (
-      let by_shape = redact_arg arg in
-      (* A shape the rules already know keeps the spelling they produce:
-         "Bearer [REDACTED]" says which scheme without saying the token, and
-         that is worth keeping for whoever reads the corpus. Only a value they
-         left untouched -- the case this arm exists for -- is blanked whole. *)
-      if not (String.equal by_shape arg) then by_shape else name ^ ": [REDACTED]")
+    else if is_auth_bearer_header arg
+    then name ^ ": Bearer [REDACTED]"
+    else name ^ ": [REDACTED]"
 ;;
 
 let redact_argv argv =
@@ -235,6 +238,13 @@ let redact_argv argv =
     | [] -> []
     | flag :: value :: rest when List.mem flag header_flags ->
       flag :: redact_header_arg value :: loop rest
+    | arg :: rest when String.starts_with ~prefix:"--header=" arg ->
+      let value = String.sub arg 9 (String.length arg - 9) in
+      ("--header=" ^ redact_header_arg value) :: loop rest
+    | arg :: rest
+      when String.length arg > 2 && String.starts_with ~prefix:"-H" arg ->
+      let value = String.sub arg 2 (String.length arg - 2) in
+      ("-H" ^ redact_header_arg value) :: loop rest
     | arg :: rest -> redact_arg arg :: loop rest
   in
   loop argv
@@ -265,7 +275,7 @@ type extra_field =
 let write_line ~kind ~argv ?env ?cwd (extras : extra_field list) =
   match Atomic.get state with
   | Off -> ()
-  | On { writer } ->
+  | On { writer; _ } ->
       let buf = Buffer.create 256 in
       Buffer.add_string buf "{\"ts\":";
       add_json_string buf (now_iso8601 ());
@@ -343,16 +353,29 @@ let install_from_env () =
       (match result with
        | Ok fd ->
            let mu = Mutex.create () in
+           let closed = ref false in
            let rec write_all fd buf off remaining =
              if remaining <= 0 then ()
              else match Unix.write_substring fd buf off remaining with
                | 0 -> raise (Unix.Unix_error (Unix.EIO, "write_substring", ""))
                | n -> write_all fd buf (off + n) (remaining - n)
+               | exception Unix.Unix_error (Unix.EINTR, _, _) ->
+                   write_all fd buf off remaining
            in
            let writer line =
-             Mutex.protect mu (fun () -> let len = String.length line in write_all fd line 0 len)
+             Eio_guard.run_in_systhread ~label:"exec-tap-write" (fun () ->
+               Mutex.protect mu (fun () ->
+                 if not !closed then
+                   let len = String.length line in
+                   write_all fd line 0 len))
            in
-           enable ~writer;
+           let close () =
+             Mutex.protect mu (fun () ->
+               if not !closed then (
+                 closed := true;
+                 try Unix.close fd with Unix.Unix_error _ -> ()))
+           in
+           enable_owned ~writer ~close;
            Log.Exec_tap.info "exec_tap enabled: %s" out_path
        | Error msg ->
            Log.Exec_tap.warn "exec_tap disabled: cannot open %s: %s" out_path msg)

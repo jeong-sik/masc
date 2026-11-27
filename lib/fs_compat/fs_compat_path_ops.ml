@@ -227,29 +227,74 @@ let realpath (path : string) : string =
 ;;
 
 let realpath_lenient (path : string) : string =
+  let rec collect_suffix p acc =
+    let parent = Filename.dirname p in
+    if parent = p
+    then
+      (* Reached filesystem root without a successful realpath. *)
+      p, acc
+    else (
+      match
+        try Some (realpath p) with
+        | Unix.Unix_error _ -> None
+      with
+      | Some resolved -> resolved, acc
+      | None -> collect_suffix parent (Filename.basename p :: acc))
+  in
+  let normalize_with_base resolved_base suffix_parts =
+    let is_abs =
+      String.length resolved_base > 0 && Char.equal resolved_base.[0] '/'
+    in
+    let base_rev =
+      String.split_on_char '/' resolved_base
+      |> List.filter (fun seg -> not (String.equal seg ""))
+      |> List.rev
+    in
+    let base_len = List.length base_rev in
+    let popped_into_base = ref false in
+    let final_rev =
+      List.fold_left
+        (fun (stack, depth) seg ->
+           match seg with
+           | "" | "." -> stack, depth
+           | ".." ->
+             (match stack with
+              | [] -> if is_abs then [], 0 else [ ".." ], 1
+              | top :: rest when not (String.equal top "..") ->
+                let next_depth = depth - 1 in
+                if next_depth < base_len then popped_into_base := true;
+                rest, next_depth
+              | _ :: _ -> ".." :: stack, depth + 1)
+           | _ -> seg :: stack, depth + 1)
+        (base_rev, base_len)
+        suffix_parts
+      |> fst
+    in
+    let collapsed =
+      match is_abs, List.rev final_rev with
+      | true, [] -> "/"
+      | true, segs -> "/" ^ String.concat "/" segs
+      | false, [] -> "."
+      | false, segs -> String.concat "/" segs
+    in
+    collapsed, !popped_into_base
+  in
   try realpath path with
   | Unix.Unix_error _ ->
     (* Walk up the directory tree until we find an ancestor that exists and
-       can be resolved via realpath, then reconstruct the suffix.
-       This handles symlinks (e.g., /tmp -> /private/tmp on macOS) even when
-       intermediate directories do not exist on disk.
-       Tail-recursive to avoid stack overflow on deep untrusted paths. *)
-    let rec collect_suffix p acc =
-      let parent = Filename.dirname p in
-      if parent = p
-      then
-        (* Reached filesystem root without a successful realpath. *)
-        p, acc
-      else (
-        match
-          try Some (realpath p) with
-          | Unix.Unix_error _ -> None
-        with
-        | Some resolved -> resolved, acc
-        | None -> collect_suffix parent (Filename.basename p :: acc))
-    in
+       can be resolved via realpath, then collapse "."/".." segments so
+       nonexistent suffixes cannot bypass prefix-based containment checks.
+       If ".." climbed into [resolved_base], run one final realpath pass on
+       the collapsed path to resolve symlinks in the new ancestor branch. *)
     let resolved_base, suffix_parts = collect_suffix path [] in
-    List.fold_left Filename.concat resolved_base suffix_parts
+    let collapsed, popped_into_base = normalize_with_base resolved_base suffix_parts in
+    if not popped_into_base
+    then collapsed
+    else (
+      try realpath collapsed with
+      | Unix.Unix_error _ ->
+        let resolved_base2, suffix_parts2 = collect_suffix collapsed [] in
+        List.fold_left Filename.concat resolved_base2 suffix_parts2)
 ;;
 
 (** Create directory recursively if not exists.

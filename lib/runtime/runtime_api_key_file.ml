@@ -169,7 +169,11 @@ let write_all descriptor text =
   let length = String.length text in
   let rec from offset =
     if offset < length
-    then from (offset + Unix.single_write_substring descriptor text offset (length - offset))
+    then (
+      match Unix.single_write_substring descriptor text offset (length - offset) with
+      | 0 -> raise (Unix.Unix_error (Unix.EIO, "single_write_substring", ""))
+      | written -> from (offset + written)
+      | exception Unix.Unix_error (Unix.EINTR, _, _) -> from offset)
   in
   from 0
 ;;

@@ -43,7 +43,7 @@ module Token_digest = struct
   ;;
 
   let to_hex t = t
-  let equal = String.equal
+  let equal = Eqaf.equal
 end
 
 type t =

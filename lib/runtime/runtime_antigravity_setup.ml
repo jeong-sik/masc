@@ -98,8 +98,12 @@ let stage_private_text_file path content =
       output_string oc content;
       flush oc;
       Unix.fsync fd;
-      close_out oc;
-      Ok staged
+      let lock_fd = Unix.dup ~cloexec:true fd in
+      (try close_out oc with
+       | (Sys_error _ | Unix.Unix_error _) as exn ->
+         (try Unix.close lock_fd with Unix.Unix_error _ -> ());
+         raise exn);
+      Ok (staged, lock_fd)
     with
     | Sys_error _ | Unix.Unix_error _ ->
       close_out_noerr oc;
@@ -114,11 +118,12 @@ let import_with ~read_keychain ~clear_keychain ~source_home home =
      destroy the live keychain item, while a keychain clear failure still
      leaves the existing destination fallback file untouched. *)
   let oauth_path = Runtime_antigravity_home.oauth_path home in
-  let* staged = stage_private_text_file oauth_path contents in
+  let* staged, lock_fd = stage_private_text_file oauth_path contents in
   let published = ref false in
   Fun.protect
     ~finally:(fun () ->
-      if not !published then (try Unix.unlink staged with Unix.Unix_error _ -> ()))
+      if not !published then (try Unix.unlink staged with Unix.Unix_error _ -> ());
+      (try Unix.close lock_fd with Unix.Unix_error _ -> ()))
     (fun () ->
       let destination_keychain = keychain_path (home_dir home) in
       let* destination_exists = keychain_present destination_keychain in

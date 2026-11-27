@@ -133,7 +133,10 @@ let decide
   =
   let state = (trusted :> Authz_zone.snapshot).Authz_zone.state in
   let* workspace_id =
-    Option.to_result ~none:Not_bootstrapped (Authz_mode_state.workspace state.mode)
+    match state.mode with
+    | Authz_mode_state.Multi_account workspace_id -> Ok workspace_id
+    | Authz_mode_state.Not_bootstrapped -> Error Not_bootstrapped
+    | Authz_mode_state.Off (_ : Workspace_id.t) -> Error (Denied D.Authorization_uncertain)
   in
   let* keeper =
     Option.to_result ~none:(Keeper_not_made keeper_id) (Ks.find state.keepers ~owner keeper_id)

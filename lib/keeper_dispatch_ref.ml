@@ -10,9 +10,22 @@ type external_effect_authorizer =
   continue:(unit -> Tool_result.result option) ->
   Tool_result.result option
 
+(* HIGH-RISK-UNREVIEWED: see the signature in [keeper_dispatch_ref.mli]. The
+   type is abstract there, so a caller-supplied string cannot become one. *)
+module Turn_caller = struct
+  type t = { keeper_name : string }
+
+  let of_running_turn (meta : Keeper_meta_contract.keeper_meta) =
+    { keeper_name = meta.Keeper_meta_contract.name }
+  ;;
+
+  let keeper_name t = t.keeper_name
+  let sender t = Keeper_identity.Keeper_id.of_string t.keeper_name
+end
+
 let dispatch
   : (config:Workspace.config
-     -> agent_name:string
+     -> caller:Turn_caller.t
      -> publication_recovery_provider:
           Keeper_publication_recovery_availability.provider
      -> ?sw:Eio.Switch.t
@@ -27,7 +40,7 @@ let dispatch
      -> Tool_result.result option)
       ref
   =
-  ref (fun ~config:_ ~agent_name:_ ~publication_recovery_provider:_ ?sw:_ ?clock:_ ?proc_mgr:_ ?net:_ ?mcp_session_id:_ ?authorize_external_effect:_ ~name ~args:_ () ->
+  ref (fun ~config:_ ~caller:_ ~publication_recovery_provider:_ ?sw:_ ?clock:_ ?proc_mgr:_ ?net:_ ?mcp_session_id:_ ?authorize_external_effect:_ ~name ~args:_ () ->
     failwith
       (Printf.sprintf
          "keeper_dispatch_ref: dispatch called for tool %S before boot registration — \

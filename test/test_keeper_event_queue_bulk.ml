@@ -204,7 +204,6 @@ let test_dormant_keeper_queue_is_cancelled () =
            Keeper_owner_registry.install_from_store
              ~sw
              ~operation_runner:None
-             ~on_turn_slot_released:None
              config
          with
          | Ok _ -> ()
@@ -275,7 +274,6 @@ let test_census_read_failure_is_an_error () =
          Keeper_owner_registry.install_from_store
            ~sw
            ~operation_runner:None
-           ~on_turn_slot_released:None
            config
        with
        | Ok 0 -> ()

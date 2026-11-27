@@ -28,7 +28,7 @@ let with_workspace f = Eio_main.run @@ fun env ->
     check bool "fixture database closed" true (Sqlite3.db_close db);
     f config)
 let with_inventory ?(operation_runner=None) config f = Eio.Switch.run @@ fun sw ->
-  ignore (Registry.install_from_store ~sw ~operation_runner ~on_turn_slot_released:None config
+  ignore (Registry.install_from_store ~sw ~operation_runner config
     |> ok Registry.install_error_to_string);
   f ()
 let under_intake config f = match Keeper_shutdown_intake_fence.run_durable_intake_if_open
@@ -62,7 +62,7 @@ let create config intake_token seed meta =
   | Some committed -> committed
   | None -> fail "creation did not publish metadata"
 let run_input config meta checkpoint session =
-  match Registry.run_autonomous_if_idle ~base_path:config.Workspace.base_path ~keeper_name:"imp" (fun () ->
+  match Registry.run_autonomous_turn ~input:(fun () -> Keeper_owner.No_autonomous_input) ~base_path:config.Workspace.base_path ~keeper_name:"imp" (fun () ->
     let producer = Keeper_input_checkpoint_producer.prepare ~base_path:config.base_path ~keeper_name:"imp"
       ~session_dir:session.Keeper_types.session_dir ~trace_id:meta.Keeper_meta_contract.runtime.trace_id
       ~source:(Some checkpoint) |> ok Keeper_input_checkpoint_producer.error_to_string in

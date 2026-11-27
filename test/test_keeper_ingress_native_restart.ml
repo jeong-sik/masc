@@ -418,7 +418,7 @@ is-default = true
   let runner : Owner.operation_runner = {ready=(fun ~keeper_name:_ -> true);execute;
     on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id:_ ~operations:_ ~execution ->
       Eio.Promise.resolve resolve_completed execution)} in
-  Registry.install_from_store ~sw ~operation_runner:(Some runner) ~on_turn_slot_released:None config
+  Registry.install_from_store ~sw ~operation_runner:(Some runner) config
     |> require "install real Owner" |> ignore;
   Keeper_direct_native_continuation.complete_restart_settlements
     ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path:root

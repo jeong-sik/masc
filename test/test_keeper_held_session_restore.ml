@@ -102,7 +102,7 @@ let test_keeper_boots_while_real_restore_is_held () =
       Keeper_owner_registry.install_from_store ~sw
         ~operation_runner:
           (Some (Server_routes_http_keeper_stream.operation_runner ~state ~clock:env#clock))
-        ~on_turn_slot_released:None config
+        config
       |> require_ok Keeper_owner_registry.install_error_to_string
       |> ignore;
       ignore

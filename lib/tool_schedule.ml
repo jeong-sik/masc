@@ -412,11 +412,12 @@ let stamped_kind : Schedule_payload_projection.known_kind -> string = function
 (* Each kind has its own tools, and a tool takes its kind's fields directly.
    Two earlier shapes failed on the caller's side. An envelope of kind, schema
    version and body had two thirds of its calls rejected on shape. One tool
-   that took the fields of either kind then offered every caller both sets:
-   its one-of rule refused a fifth of the create and update calls, half of
-   them for a Lane field sent next to keeper_name and message, and the retries that
-   dropped the wrong set stored Lane actions for installations named "tmp"
-   and "x" (RFC operator-quiz §4.7). [result_delivery] is absent on purpose: it
+   that took the fields of either kind then offered every caller both sets.
+   In two episodes (2026-10-30..11-01 and 2026-11-20..22) callers filled the set
+   they did not need with placeholders, the one-of rule refused them in
+   chains of up to 29 calls, and the retries that dropped the wrong set
+   stored 93 Lane actions for installations named "tmp" and "x" (RFC
+   operator-quiz §4.7). [result_delivery] is absent on purpose: it
    is stamped from the creating turn's continuation and a supplied one is not
    honoured. *)
 let keeper_wake_payload_from_args args =

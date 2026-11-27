@@ -268,7 +268,7 @@ function wakeTargetTitle(request: DashboardScheduledAutomationRequest): string {
     : '예약자 (payload 가 깨울 keeper 를 이름 짓지 않음)'
 }
 
-function summaryText(request: DashboardScheduledAutomationRequest): string {
+export function summaryText(request: DashboardScheduledAutomationRequest): string {
   return request.payload_summary?.trim() || schedPayloadSpec(request.payload_kind).lbl
 }
 

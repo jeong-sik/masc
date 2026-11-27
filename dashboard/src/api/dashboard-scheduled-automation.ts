@@ -401,6 +401,32 @@ export async function fetchDashboardScheduledAutomation(
   return projection
 }
 
+/** The schedule target a keeper wake carries (Schedule_payload_projection
+ *  keeper_wake_target): the Keeper name behind this prefix. */
+const KEEPER_WAKE_TARGET_PREFIX = 'keeper:'
+
+/** One Keeper's schedules: the page narrowed to keeper wakes whose target is
+ *  that Keeper, ended ones included, up to the server's selected-page limit.
+ *  Its counts are that Keeper's. */
+export async function fetchKeeperScheduledAutomation(
+  keeperName: string,
+  opts?: AbortableRequestOptions,
+): Promise<DashboardScheduledAutomationProjection> {
+  const target = `${KEEPER_WAKE_TARGET_PREFIX}${keeperName}`
+  const query = new URLSearchParams({ payload_target: target })
+  const raw = await readSchedulePayload(`/api/v1/dashboard/scheduled-automation?${query}`, opts?.signal)
+  const projection = normalizeScheduledAutomation(raw)
+  // A server that does not narrow by target answers with the fleet page.
+  // Drawn as this Keeper's, it would list other Keepers' schedules.
+  if (projection.state === 'available' && asRecord(raw)?.payload_target_selector !== target) {
+    return {
+      state: 'unavailable',
+      reason: 'the server answered with another schedule page than the one asked for',
+    }
+  }
+  return projection
+}
+
 export async function fetchDashboardScheduledAutomationLookup(
   scheduleId: string,
   opts?: AbortableRequestOptions,

@@ -40,6 +40,7 @@ import { KeeperRuntimeModelEditor } from './keeper-runtime-model-editor'
 import { KeeperConditionsDivergent } from './keeper-conditions-divergent'
 import { KeeperActivitySummary } from './keeper-detail-activity-summary'
 import { KeeperCadence } from './keeper-detail-cadence'
+import { KeeperScheduleList } from './keeper-schedule-list'
 import { currentDashboardActor } from '../api'
 import type { Keeper } from '../types'
 import type { KeeperCompositeSnapshot, KeeperRuntimeTraceResponse } from '../api/keeper'
@@ -153,6 +154,7 @@ export function KeeperDetailBody({
 
       <${KeeperActivitySummary} keeper=${keeper} />
       <${KeeperCadence} keeper=${keeper} />
+      <${KeeperScheduleList} key=${keeper.name} keeperName=${keeper.name} />
         <//>
 
         <${KeeperDetailSection}

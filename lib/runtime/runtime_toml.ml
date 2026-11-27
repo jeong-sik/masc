@@ -238,8 +238,9 @@ let parse_lane ~(id : string) (tbl : Otoml.t)
   in
   match unknown_key_errors, candidate_ids_result, order_result with
   | [], Ok [], Ok _ -> Error (error path "lane must have at least one candidate")
-  | [], Ok candidate_ids, Ok order -> Ok { Runtime_schema.id; candidate_ids; order }
-  | _, _, _ ->
+  | [], Ok (_ :: _ as candidate_ids), Ok order ->
+    Ok { Runtime_schema.id; candidate_ids; order }
+  | ([] | _ :: _), (Ok _ | Error _), (Ok _ | Error _) ->
     let candidate_errors =
       match candidate_ids_result with
       | Error e -> e

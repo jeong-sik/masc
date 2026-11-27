@@ -62,7 +62,7 @@ let spread_offset ~keeper_name ~count =
 
 let ordered_candidates_for ?keeper_name t =
   match t.order, keeper_name, t.candidates with
-  | Fixed, _, candidates | Spread_by_keeper, None, candidates -> candidates
+  | Fixed, (None | Some _), candidates | Spread_by_keeper, None, candidates -> candidates
   | Spread_by_keeper, Some _, ([] | [ _ ] as candidates) -> candidates
   | Spread_by_keeper, Some name, (_ :: _ :: _ as candidates) ->
     let trimmed = String.trim name in

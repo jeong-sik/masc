@@ -12,7 +12,8 @@
     that was not installed, and [installation_of_lock_observation] does the
     same for a lock that was not acquired and adds a failed release to the
     function's result as an auxiliary failure. [write_checkpoint_bytes]
-    writes a head durably and atomically.
+    writes a head durably and atomically. [close_open_turn_if_source]
+    installs a head whose open turn was closed from its message objects.
     [Keeper_checkpoint_store] includes this module. *)
 
 open Keeper_checkpoint_store_installation
@@ -71,4 +72,19 @@ val save_agent_core_if_absent :
   session_dir:string ->
   boundary:Agent_core.Checkpoint_objects.boundary ->
   Agent_core.Checkpoint.t ->
+  checkpoint_installation
+
+(** [close_open_turn_if_source ~session_dir known closing] installs
+    [closing] ({!Agent_core.Checkpoint_objects.close_open_turn} of
+    [known]'s head) while the canonical file still holds [known]'s head
+    content, under the same lock and source check as
+    [save_agent_core_if_source]. The installed ref is the source's: closing
+    keeps the turn count and content digest. The published summary keeps
+    [known]'s knowledge of the head's objects, since only the open messages
+    were read. A head whose session id or ref does not form comes back
+    [Not_installed] with [Source_unavailable]. *)
+val close_open_turn_if_source :
+  session_dir:string ->
+  Keeper_checkpoint_store_canonical.known_canonical ->
+  Agent_core.Checkpoint_objects.closing ->
   checkpoint_installation

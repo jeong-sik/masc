@@ -287,3 +287,27 @@ val find_last
   -> head
   -> (Types.message -> 'a option)
   -> ('a option, load_error) result
+
+(** {1 Closing the open turn} *)
+
+(** What closing a head's open turn writes: [closing_objects] first, in
+    order, then [closing_head_bytes] in place of the head. *)
+type closing =
+  { closing_objects : (digest * string) list
+  ; closing_head_bytes : string
+  ; closing_head : head
+  }
+
+(** [close_open_turn ~read_object head] closes [head]'s open messages as one
+    turn, as {!plan_save} with [Turn_closes] does for the checkpoint [head]
+    names when every object of [head] is stored: one bundle of the open
+    messages' bytes, then closed turns past {!turns_per_segment} - 1 become a
+    new segment. Only the open messages are read, each checked against its
+    digest. No closed turn, segment or header object is read, and no message
+    is decoded, so the cost follows the open turn, not the history. The closed
+    head names the same content ({!head_content_digest}) as [head]. [None]
+    when [head] has no open message. [read_object] is as for {!load}. *)
+val close_open_turn
+  :  read_object:(digest -> (string option, string) result)
+  -> head
+  -> (closing option, load_error) result

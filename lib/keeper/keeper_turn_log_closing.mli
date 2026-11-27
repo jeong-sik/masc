@@ -9,7 +9,9 @@
 
 type not_closed =
   | Head_unread of Keeper_checkpoint_store_decode.checkpoint_load_error
-  | History_unread of Keeper_checkpoint_store.Saved_history.ref_error
+  | Open_turn_unread of Agent_core.Checkpoint_objects.load_error
+  (** An open message's object is missing, unreadable or not the bytes its
+      digest names. *)
   | Save_not_installed of Keeper_checkpoint_store.checkpoint_cas_error
 
 type t =
@@ -22,9 +24,11 @@ type t =
   | Not_closed of not_closed
 
 (** The save a turn's end makes: the messages are the ones the head already
-    holds, and [Turn_closes] writes the open ones as one bundle. The head is
-    read first because it is small; the whole history is read only when it
-    holds open messages. *)
+    holds, and the open ones become one bundle, as a [Turn_closes] save
+    writes them ({!Agent_core.Checkpoint_objects.close_open_turn}). Only the
+    head and the open messages' objects are read; the closed history is
+    neither read nor decoded, so the cost follows the open turn. The head is
+    installed only while the canonical still holds the head that was read. *)
 val close_open : Keeper_turn_log_recorder.place -> t
 
 val not_closed_to_string : not_closed -> string

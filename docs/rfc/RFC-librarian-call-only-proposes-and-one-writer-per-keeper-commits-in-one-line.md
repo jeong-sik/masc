@@ -283,7 +283,8 @@ type turn_line =
 - head 를 줄이는 함수가 닫은 것은 `Reset` 줄의 `closed_before` 에 든다. 지우기와 recovering purge 가 버리는 메시지는 열려 있던 것까지 그 줄에 이름이 있다.
 - 프로세스 시작 단계는 이 저장이 실패해도 그대로 간다. 줄은 쓰고, 남은 것은 다음 턴의 닫는 저장이 닫는다.
 - head 를 줄이는 함수는 이 저장이 실패하면 줄을 쓰지 않고 거절한다. head 변경도 같은 저장소에 쓰는 일이라 어차피 실패한다.
-- 값은 저장 한 번이다. 이력을 한 번 읽고 bundle 하나와 head 를 쓴다.
+- 값은 저장 한 번이다. head 와 열린 메시지의 객체만 읽고, bundle 하나와 head 를 쓴다. 닫힌 턴이 64개가 되면 segment 하나를 더 쓴다. 닫힌 이력은 읽지도 decode 하지도 않는다(`Checkpoint_objects.close_open_turn`). 그래서 값은 열린 턴의 크기를 따르고, 이력의 크기와는 상관없다.
+  - 11-27 18:26 기동에서는 이력을 통째로 읽고 다시 썼다. Keeper 하나(객체 28~80MB)에 13~17초씩 걸렸고, Keeper 마다 차례로 돌았다. 그래서 ready 전 단계가 160초를 넘겼고, 서버는 시작 watchdog(240초)에 걸려 종료됐다.
 - 지금 boot 의 꼬리 복구는 마지막 tool 요청이 결과를 기다릴 때만 죽은 턴의 메시지를 닫는다(`keeper_transcript_tail_recovery.mli:14-15`). 그 밖에는 열린 채 남아 다음 턴의 `own` 에 든다. 지우기와 recovering purge 는 그것을 이름 없이 버린다.
 
 reset 줄의 `after` 는 앞 줄의 `after` 에서, 그 경로가 바꾼 저장소의 값만 지금 값으로 바꾼 것이다.

@@ -391,22 +391,22 @@ let encoded_entry message =
    message's bytes on a line of its own. Compact JSON has no raw newline, so the
    file reads as JSON lines; a reader checks each slice against the header
    without encoding anything again. *)
-let bundle_bytes entries =
+let bundle_bytes_of_objects (objects : (digest * string) list) =
   let header =
     `Assoc
       [ ( "messages"
         , `List
             (List.map
-               (fun entry ->
-                  `Assoc
-                    [ "sha256", `String entry.digest
-                    ; "bytes", `Int (String.length entry.bytes)
-                    ])
-               entries) )
+               (fun (digest, bytes) ->
+                  `Assoc [ "sha256", `String digest; "bytes", `Int (String.length bytes) ])
+               objects) )
       ]
   in
-  String.concat "\n" (Yojson.Safe.to_string header :: List.map (fun entry -> entry.bytes) entries)
-  ^ "\n"
+  String.concat "\n" (Yojson.Safe.to_string header :: List.map snd objects) ^ "\n"
+;;
+
+let bundle_bytes entries =
+  bundle_bytes_of_objects (List.map (fun entry -> entry.digest, entry.bytes) entries)
 ;;
 
 (* ── Saving ─────────────────────────────────────────────── *)
@@ -1229,4 +1229,42 @@ let load_read_only ~read_object head =
   load_with ~read_object head ~decode_bundle:bundle_messages
     ~decode_open:(fun ~digest bytes -> let+ message = decode_message ~digest bytes in digest, message)
     ~entry_digest:fst ~finish_loaded:(List.rev_map (fun ((_, message), _) -> message))
+;;
+
+(* ── Closing the open turn ──────────────────────────────── *)
+
+type closing =
+  { closing_objects : (digest * string) list
+  ; closing_head_bytes : string
+  ; closing_head : head
+  }
+
+(* A bundle holds each message's written bytes, and an open message's object
+   is those bytes, so the open turn closes from its objects alone. The chain
+   through the messages stays, so the content digest does too. *)
+let close_open_turn ~read_object head =
+  match head.history.open_messages with
+  | [] -> Ok None
+  | open_messages ->
+    let* rev_objects =
+      List.fold_left
+        (fun acc digest ->
+           let* rev_objects = acc in
+           let+ bytes = read_checked ~read_object digest in
+           (digest, bytes) :: rev_objects)
+        (Ok []) open_messages
+    in
+    let bytes = bundle_bytes_of_objects (List.rev rev_objects) in
+    let bundle = digest_of_bytes bytes in
+    let closed =
+      { bundle; messages = List.length open_messages; chain = history_chain head.history }
+    in
+    let segment, turns, segments = pack head.history.segment (head.history.turns @ [ closed ]) [] in
+    let head = { head with history = { segment; turns; open_messages = [] } } in
+    Ok
+      (Some
+         { closing_objects = segments @ [ bundle, bytes ]
+         ; closing_head_bytes = Yojson.Safe.to_string (head_json head)
+         ; closing_head = head
+         })
 ;;

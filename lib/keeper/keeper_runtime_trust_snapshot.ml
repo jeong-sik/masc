@@ -807,14 +807,27 @@ let summary_json_of_raw ~(meta : keeper_meta) (raw : raw_observations) =
        ; ("latest_causal_event", latest_causal_event)
        ])
 
-let effective_meta_for_trust ~(config : Workspace.config) (meta : keeper_meta) =
-  match Keeper_meta_contract.effective_meta_result ~base_path:config.base_path meta with
-  | Ok effective -> effective
-  | Error _ -> meta
+let effective_meta_for_trust
+    ~(profile_snapshot : Keeper_types_profile.keeper_profile_snapshot option)
+    ~(config : Workspace.config)
+    (meta : keeper_meta)
+  =
+  match profile_snapshot with
+  | Some snapshot ->
+    (match Keeper_types_profile.snapshot_profile_defaults snapshot meta.name with
+     | Ok defaults ->
+       (match Keeper_meta_contract.effective_meta_of_profile_defaults defaults meta with
+        | Ok effective -> effective
+        | Error _ -> meta)
+     | Error _ -> meta)
+  | None ->
+    (match Keeper_meta_contract.effective_meta_result ~base_path:config.base_path meta with
+     | Ok effective -> effective
+     | Error _ -> meta)
 ;;
 
-let summary_observation ~(config : Workspace.config) ~(meta : keeper_meta) =
-  let meta = effective_meta_for_trust ~config meta in
+let summary_observation_inner ~profile_snapshot ~(config : Workspace.config) ~(meta : keeper_meta) =
+  let meta = effective_meta_for_trust ~profile_snapshot ~config meta in
   let raw = collect_summary_raw ~config ~meta in
   let completeness = match raw.pending_approval_projection.error with
     | None -> Dashboard_projection_read.Complete
@@ -823,7 +836,19 @@ let summary_observation ~(config : Workspace.config) ~(meta : keeper_meta) =
    next_deadline_unix = None; completeness}
 ;;
 
+let summary_observation ~config ~meta =
+  summary_observation_inner ~profile_snapshot:None ~config ~meta
+;;
+
+let summary_observation_with_profile_snapshot ~profile_snapshot ~config ~meta =
+  summary_observation_inner ~profile_snapshot:(Some profile_snapshot) ~config ~meta
+;;
+
 let summary_json ~config ~meta = (summary_observation ~config ~meta).json
+;;
+
+let summary_json_with_profile_snapshot ~profile_snapshot ~config ~meta =
+  (summary_observation_with_profile_snapshot ~profile_snapshot ~config ~meta).json
 ;;
 
 let causal_timeline_json ~observed_at_unix ~recent_tool_call_rows
@@ -1075,7 +1100,7 @@ let snapshot_json_inner_with_pending_reader
        base_path:string ->
        (Yojson.Safe.t list, Keeper_approval_queue_result.storage_error) result)
     ~(config : Workspace.config) ~(meta : keeper_meta) =
-  let meta = effective_meta_for_trust ~config meta in
+  let meta = effective_meta_for_trust ~profile_snapshot:None ~config meta in
   collect_raw_snapshot_with_pending_reader ~read_pending ~config ~meta
   |> snapshot_json_of_raw ~meta
 ;;

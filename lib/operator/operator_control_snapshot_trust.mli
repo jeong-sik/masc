@@ -26,3 +26,12 @@ val keeper_runtime_trust_observation :
   Dashboard_projection_read.observation
 (** Observation for Keeper rows under [read_policy]; timed-out cache reads
     yield [`Null] and [Partial]. *)
+
+val keeper_runtime_trust_observation_with_profile_snapshot :
+  profile_snapshot:Keeper_types_profile.keeper_profile_snapshot ->
+  read_policy:Dashboard_projection_read.t ->
+  config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+  Dashboard_projection_read.observation
+(** Like {!keeper_runtime_trust_observation}, reusing a pre-loaded
+    [profile_snapshot] to avoid per-keeper TOML reads on disk.
+    Precondition: [profile_snapshot] was read from [config.base_path]. *)

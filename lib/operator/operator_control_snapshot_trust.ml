@@ -42,17 +42,38 @@ type read =
   | Read of Yojson.Safe.t
   | Timed_out of string
 
-let compact_keeper_runtime_trust_observation ~config ~meta =
-  let observation = Keeper_runtime_trust_snapshot.summary_observation ~config ~meta in
+let compact_keeper_runtime_trust_observation_inner ~profile_snapshot ~config ~meta =
+  let observation =
+    match profile_snapshot with
+    | Some profile_snapshot ->
+      Keeper_runtime_trust_snapshot.summary_observation_with_profile_snapshot
+        ~profile_snapshot
+        ~config
+        ~meta
+    | None -> Keeper_runtime_trust_snapshot.summary_observation ~config ~meta
+  in
   {observation with json = project_compact_runtime_trust observation.json}
 ;;
 
-let read_compact_keeper_runtime_trust
+let compact_keeper_runtime_trust_observation ~config ~meta =
+  compact_keeper_runtime_trust_observation_inner ~profile_snapshot:None ~config ~meta
+;;
+
+let read_compact_keeper_runtime_trust_inner
+      ~profile_snapshot
       ~read_policy
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
   =
-  let read () = Keeper_runtime_trust_snapshot.summary_json ~config ~meta in
+  let read () =
+    match profile_snapshot with
+    | Some profile_snapshot ->
+      Keeper_runtime_trust_snapshot.summary_json_with_profile_snapshot
+        ~profile_snapshot
+        ~config
+        ~meta
+    | None -> Keeper_runtime_trust_snapshot.summary_json ~config ~meta
+  in
   let runtime_trust =
     match read_policy with
     | Dashboard_projection_read.Current -> read ()
@@ -60,7 +81,9 @@ let read_compact_keeper_runtime_trust
       Dashboard_cache.get_or_compute
         (compact_runtime_trust_cache_key ~config ~meta)
         ~ttl:compact_runtime_trust_cache_ttl_sec
-        (Pool_work.cpu ~name:__FUNCTION__ read)
+        (Pool_work.cpu
+           ~name:"Operator_control_snapshot_trust.read_compact_keeper_runtime_trust"
+           read)
   in
   if Dashboard_cache.is_timeout_envelope runtime_trust
   then
@@ -73,13 +96,19 @@ let read_compact_keeper_runtime_trust
   else Read (project_compact_runtime_trust runtime_trust)
 ;;
 
-let keeper_runtime_trust_observation ~read_policy ~config ~meta =
+let read_compact_keeper_runtime_trust ~read_policy ~config ~meta =
+  read_compact_keeper_runtime_trust_inner ~profile_snapshot:None ~read_policy ~config ~meta
+;;
+
+let keeper_runtime_trust_observation_inner ~profile_snapshot ~read_policy ~config ~meta =
   try
     match read_policy with
     | Dashboard_projection_read.Current ->
-      compact_keeper_runtime_trust_observation ~config ~meta
+      compact_keeper_runtime_trust_observation_inner ~profile_snapshot ~config ~meta
     | Reuse ->
-      (match read_compact_keeper_runtime_trust ~read_policy ~config ~meta with
+      (match
+         read_compact_keeper_runtime_trust_inner ~profile_snapshot ~read_policy ~config ~meta
+       with
        | Read json ->
          { Dashboard_projection_read.json
          ; next_deadline_unix = None
@@ -102,4 +131,16 @@ let keeper_runtime_trust_observation ~read_policy ~config ~meta =
     ; next_deadline_unix = None
     ; completeness = Partial detail
     }
+;;
+
+let keeper_runtime_trust_observation ~read_policy ~config ~meta =
+  keeper_runtime_trust_observation_inner ~profile_snapshot:None ~read_policy ~config ~meta
+;;
+
+let keeper_runtime_trust_observation_with_profile_snapshot ~profile_snapshot ~read_policy ~config ~meta =
+  keeper_runtime_trust_observation_inner
+    ~profile_snapshot:(Some profile_snapshot)
+    ~read_policy
+    ~config
+    ~meta
 ;;

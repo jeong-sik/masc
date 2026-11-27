@@ -95,7 +95,7 @@ let with_keeper_slot ~sem ~name f =
 ;;
 
 let keeper_runtime_trust_observation =
-  Operator_control_snapshot_trust.keeper_runtime_trust_observation
+  Operator_control_snapshot_trust.keeper_runtime_trust_observation_with_profile_snapshot
 
 let earlier_deadline left right = match left, right with
   | None, deadline | deadline, None -> deadline
@@ -250,7 +250,9 @@ let keepers_json
                     let diagnostic = diagnostic_observation.json in
                     let runtime_trust_observation =
                       let t_trust = Time_compat.now () in
-                      let result = keeper_runtime_trust_observation ~read_policy ~config ~meta in
+                      let result =
+                        keeper_runtime_trust_observation ~profile_snapshot ~read_policy ~config ~meta
+                      in
                       dt_trust := Time_compat.now () -. t_trust;
                       result
                     in
@@ -385,7 +387,9 @@ let keepers_json
                     in
                     let runtime_trust_observation =
                       let t_trust = Time_compat.now () in
-                      let result = keeper_runtime_trust_observation ~read_policy ~config ~meta in
+                      let result =
+                        keeper_runtime_trust_observation ~profile_snapshot ~read_policy ~config ~meta
+                      in
                       dt_trust := Time_compat.now () -. t_trust;
                       result
                     in

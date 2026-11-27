@@ -4,12 +4,28 @@ val snapshot_json :
 val summary_json :
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
 
+val summary_json_with_profile_snapshot :
+  profile_snapshot:Keeper_types_profile.keeper_profile_snapshot ->
+  config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
+(** Like {!summary_json}, resolving effective profile defaults from
+    [profile_snapshot] instead of re-reading TOML files from disk.
+    Precondition: [profile_snapshot] was read from [config.base_path]. *)
+
 val summary_observation :
   config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
   Dashboard_projection_read.observation
 (** One actual uncached summary read. Pending approval storage unavailability
     remains typed [Partial] beside the readable trust fields; other read
     exceptions propagate. Display-only causal ages create no timer. *)
+
+val summary_observation_with_profile_snapshot :
+  profile_snapshot:Keeper_types_profile.keeper_profile_snapshot ->
+  config:Workspace.config -> meta:Keeper_meta_contract.keeper_meta ->
+  Dashboard_projection_read.observation
+(** Like {!summary_observation}, resolving effective profile defaults from
+    the caller's pre-loaded [profile_snapshot] instead of re-reading TOML
+    files from disk. Precondition: [profile_snapshot] was read from
+    [config.base_path]. *)
 
 val latest_decision_result :
   config:Workspace.config -> keeper_name:string ->

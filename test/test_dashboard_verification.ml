@@ -565,9 +565,13 @@ let test_requests_json_projects_every_snapshot_item_kind () =
           `Assoc [
             ("kind", `String "artifact_body");
             ("reference", `String "artifact:repos/demo/build.log");
-            ("blob", `Assoc [("sha256",
-              `String "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
-              ("bytes", `Int 300000); ("mime", `String "text/plain"); ("preview", `String "")]);
+            ("blob", `Assoc [
+              ("_blob", `Assoc [
+                ("sha256",
+                 `String "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+                ("bytes", `Int 300000);
+                ("mime", `String "text/plain");
+                ("preview", `String "")])]);
           ];
           `Assoc [
             ("kind", `String "artifact_unreadable");

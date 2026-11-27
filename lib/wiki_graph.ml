@@ -101,15 +101,6 @@ let embeds_of t name =
   | None -> []
 ;;
 
-let all_media_refs t =
-  String_map.fold
-    (fun _ ({ embeds; _ } : page_facts) acc ->
-       Wiki_link.media_refs_of_embeds embeds @ acc)
-    t.pages
-    []
-  |> List.sort_uniq String.compare
-;;
-
 let sources_of t name =
   Option.map (fun ({ sources; _ } : page_facts) -> sources) (String_map.find_opt name t.pages)
 ;;

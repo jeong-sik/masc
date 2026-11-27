@@ -38,10 +38,6 @@ val embeds_of : t -> string -> Wiki_link.embed list
 (** The typed embeds of one readable page, in reading order. [[]] for a page
     that is not readable or not there. *)
 
-val all_media_refs : t -> string list
-(** Sorted, deduplicated workspace media SHA-256 digests referenced by
-    {!Wiki_link.Media_embed} across every readable page. *)
-
 val sources_of : t -> string -> Wiki_sources.t option
 (** [None] for a page that is not readable or not there. *)
 

@@ -315,50 +315,6 @@ let extract_wiki_media_refs body =
     (Wiki_link.media_refs_of_embeds (Wiki_link.extract_embeds body)
      @ Published_artifact.extract_media_refs Published_artifact.Markdown body)
 
-(* Fail-closed media reference collector for workspace media GC. Unlike
-   [list_pages] (which skips symlinks or oversized files for interactive UI),
-   any unreadable, symlinked, or oversized page returns [Error] so a media
-   sweeper never treats an unreadable wiki page as having zero references. *)
-let referenced_media_tokens ~base_path =
-  match verify_wiki_root_is_regular_dir ~base_path with
-  | Error msg -> Error msg
-  | Ok `Missing -> Ok []
-  | Ok `Present ->
-    let dir = wiki_root ~base_path in
-    let entries =
-      try Ok (Sys.readdir dir |> Array.to_list |> List.sort String.compare) with
-      | Sys_error detail -> Error detail
-      | Unix.Unix_error (error, operation, _) ->
-        Error (Printf.sprintf "%s: %s" operation (Unix.error_message error))
-    in
-    let open Result.Syntax in
-    let* entries = entries in
-    let page_files =
-      List.filter
-        (fun f -> Filename.check_suffix f ".md" && not (Wiki_journal.is_own_file f))
-        entries
-    in
-    let* collected =
-      List.fold_left
-        (fun acc filename ->
-           let* tokens = acc in
-           let full = Filename.concat dir filename in
-           match load_regular_page full with
-           | Error detail ->
-             Error (Printf.sprintf "wiki page %s could not be read: %s" filename detail)
-           | Ok raw ->
-             let body_for_embeds =
-               match parse_frontmatter raw with
-               | Ok _ -> page_body raw
-               | Error _ -> raw
-             in
-             let refs = extract_wiki_media_refs body_for_embeds in
-             Ok (refs @ tokens))
-        (Ok [])
-        page_files
-    in
-    Ok (List.sort_uniq String.compare collected)
-
 (* Handlers in this module return typed
    [Tool_result.result]. Boundary back to [Tool_result.result option] in
    [dispatch] below via [lift]. Two input-rejection helpers
@@ -1025,6 +981,7 @@ let handle_lint ~tool_name ~start_time ctx args : Tool_result.result =
        in
        let artifact_exists id =
          Published_artifact_store.exists ~base_path:ctx.base_path ~id
+         |> Result.map_error Published_artifact_store.error_message
        in
        let findings =
          Wiki_lint.run ~media_exists ~artifact_exists (Wiki_graph.of_nodes nodes) ~log

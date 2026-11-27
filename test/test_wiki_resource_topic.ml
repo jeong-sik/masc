@@ -673,19 +673,13 @@ let test_symlinked_wiki_root_and_log_append_are_rejected () =
          (In_channel.with_open_text outside_target In_channel.input_all))
 ;;
 
-let test_referenced_media_tokens_and_embed_tool_feedback () =
+let test_embed_tool_feedback_and_lint () =
   let dir = test_dir () in
-  let outside = test_dir () in
   Fun.protect
-    ~finally:(fun () ->
-      rm_rf dir;
-      rm_rf outside)
+    ~finally:(fun () -> rm_rf dir)
     (fun () ->
        Eio_main.run @@ fun env ->
        Fs_compat.set_fs (Eio.Stdenv.fs env);
-       (match Lib.Tool_wiki.referenced_media_tokens ~base_path:dir with
-        | Ok tokens -> check (list string) "missing wiki yields empty refs" [] tokens
-        | Error msg -> fail ("missing wiki should not error: " ^ msg));
        let png =
          "\137PNG\r\n\026\n\000\000\000\rIHDR\000\000\000\001\000\000\000\001\008\002\000\000\000\144wS\222"
        in
@@ -700,7 +694,7 @@ let test_referenced_media_tokens_and_embed_tool_feedback () =
        let ctx : Lib.Tool_wiki.context = { base_path = dir; agent_name = "alice" } in
        let body =
          Printf.sprintf
-           "![Live](%s)\n![[media:%s|Absent]]\n<img src=\"/api/v1/media/%s\" />\n## Sources\n- repo:jeong-sik/masc:lib/tool_wiki.ml\n"
+           "![Live](%s)\n![[media: %s |Absent]]\n<img src=\"/api/v1/media/%s\" />\n## Sources\n- repo:jeong-sik/masc:lib/tool_wiki.ml\n"
            live_url missing_sha raw_html_sha
        in
        let created =
@@ -721,14 +715,22 @@ let test_referenced_media_tokens_and_embed_tool_feedback () =
        check bool "create succeeded" true (Tool_result.is_success created);
        check bool "create warns about missing media" true
          (String_util.contains_substring (Tool_result.message created) missing_sha);
+       check bool "create warns about raw html missing media" true
+         (String_util.contains_substring (Tool_result.message created) raw_html_sha);
        check bool "create attaches media_refs metadata" true
          (Option.is_some (Tool_result.metadata created));
-       let expected = List.sort String.compare [ live_sha; missing_sha; raw_html_sha ] in
-       (match Lib.Tool_wiki.referenced_media_tokens ~base_path:dir with
-        | Ok tokens ->
-          check (list string) "GC collector finds Markdown, Obsidian, and raw HTML wiki media refs"
-            expected tokens
-        | Error msg -> fail ("referenced_media_tokens failed: " ^ msg));
+       let expected_meta =
+         match Tool_result.metadata created with
+         | Some (`Assoc fields) -> List.assoc_opt "media_refs" fields
+         | _ -> None
+       in
+       check bool "create metadata carries all three media refs" true
+         (expected_meta
+          = Some
+              (`List
+                 (List.map
+                    (fun s -> `String s)
+                    (List.sort String.compare [ live_sha; missing_sha; raw_html_sha ]))));
        let lint_res =
          match Lib.Tool_wiki.dispatch ctx ~name:"masc_wiki_lint" ~args:(`Assoc []) with
          | Some r -> r
@@ -736,15 +738,7 @@ let test_referenced_media_tokens_and_embed_tool_feedback () =
        in
        check bool "lint succeeded" true (Tool_result.is_success lint_res);
        check bool "lint reports broken_media_embed" true
-         (String_util.contains_substring (Tool_result.message lint_res) "broken_media_embed");
-       (* A symlinked .md page inside .masc/wiki must fail closed for GC. *)
-       let outside_md = Filename.concat outside "escape.md" in
-       write outside_md "escaped";
-       let link_path = Filename.concat (Lib.Tool_wiki.wiki_root ~base_path:dir) "symlinked.md" in
-       Unix.symlink outside_md link_path;
-       match Lib.Tool_wiki.referenced_media_tokens ~base_path:dir with
-       | Error _ -> ()
-       | Ok _ -> fail "symlinked wiki page must fail closed in referenced_media_tokens")
+         (String_util.contains_substring (Tool_result.message lint_res) "broken_media_embed"))
 ;;
 
 let () =
@@ -795,7 +789,7 @@ let () =
         ; test_case
             "wiki media_refs GC collector and embed tool feedback"
             `Quick
-            test_referenced_media_tokens_and_embed_tool_feedback
+            test_embed_tool_feedback_and_lint
         ] )
     ; ( "listing"
       , [ test_case

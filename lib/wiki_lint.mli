@@ -96,17 +96,18 @@ val subject : finding -> string
 
 val run :
   ?media_exists:(string -> bool) ->
-  ?artifact_exists:(string -> bool) ->
+  ?artifact_exists:(string -> (bool, string) result) ->
   Wiki_graph.t ->
   log:Wiki_log.t ->
   finding list
 (** Every finding, sorted by subject, then line, then kind. The log is the
     one {!Wiki_log} read of the same directory; {!Wiki_log.empty} is what a
     wiki with no [log.md] gives. When [media_exists] or [artifact_exists] is
-    supplied, {!Wiki_link.Media_embed} and {!Wiki_link.Artifact_embed} targets
-    whose predicate returns [false] emit {!Broken_media_embed} and
-    {!Broken_artifact_embed} respectively; omitted predicates skip external
-    existence checks while still reporting {!Broken_wiki_embed},
+    supplied, {!Wiki_link.Media_embed} targets whose predicate returns [false]
+    emit {!Broken_media_embed} and {!Wiki_link.Artifact_embed} targets whose
+    predicate returns [Ok false] emit {!Broken_artifact_embed} (store read
+    errors [Error _] are not misreported as broken); omitted predicates skip
+    external existence checks while still reporting {!Broken_wiki_embed},
     {!Invalid_embed}, and {!Unsupported_embed}. *)
 
 val log_hole_suppressed : Wiki_log.t -> bool

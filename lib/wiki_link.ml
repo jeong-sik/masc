@@ -37,45 +37,6 @@ let classify raw =
   else Unsupported "not_markdown"
 ;;
 
-(* A code span is a run of backticks, its content, and a run of the same
-   length. Its bytes become spaces so a link shape inside it is not seen.
-   An unmatched run is left alone. *)
-let blank_code_spans line =
-  let length = String.length line in
-  let bytes = Bytes.of_string line in
-  let run_end from =
-    let stop = ref from in
-    while !stop < length && Char.equal line.[!stop] '`' do
-      incr stop
-    done;
-    !stop
-  in
-  let rec closing ~run from =
-    if from >= length
-    then None
-    else if Char.equal line.[from] '`'
-    then (
-      let stop = run_end from in
-      if stop - from = run then Some stop else closing ~run stop)
-    else closing ~run (from + 1)
-  in
-  let rec scan index =
-    if index < length
-    then
-      if Char.equal line.[index] '`'
-      then (
-        let stop = run_end index in
-        match closing ~run:(stop - index) stop with
-        | Some close ->
-          Bytes.fill bytes index (close - index) ' ';
-          scan close
-        | None -> scan stop)
-      else scan (index + 1)
-  in
-  scan 0;
-  Bytes.to_string bytes
-;;
-
 (* The index of the [\]] that closes the [\[] at [from], counting nesting. *)
 let closing_bracket text from =
   let length = String.length text in
@@ -168,58 +129,7 @@ let scan_line ~line_no text found =
   go 0 found
 ;;
 
-(* A fence opens with three or more backticks or tildes after at most three
-   spaces, and closes with at least as many of the same character and
-   nothing else on the line. *)
-let fence_of_line line =
-  let length = String.length line in
-  let rec indent index = if index < length && index < 3 && Char.equal line.[index] ' ' then indent (index + 1) else index in
-  let start = indent 0 in
-  if start >= length
-  then None
-  else (
-    let mark = line.[start] in
-    if not (Char.equal mark '`' || Char.equal mark '~')
-    then None
-    else (
-      let stop = ref start in
-      while !stop < length && Char.equal line.[!stop] mark do
-        incr stop
-      done;
-      let count = !stop - start in
-      if count >= 3
-      then Some (mark, count, String.trim (String.sub line !stop (length - !stop)))
-      else None))
-;;
-
-let fold_unquoted_lines scan body =
-  let lines = String.split_on_char '\n' body in
-  let strip_cr line =
-    let length = String.length line in
-    if length > 0 && Char.equal line.[length - 1] '\r'
-    then String.sub line 0 (length - 1)
-    else line
-  in
-  let _, _, found =
-    List.fold_left
-      (fun (fence, line_no, found) raw_line ->
-         let line = strip_cr raw_line in
-         match fence, fence_of_line line with
-         | None, Some (mark, count, _info) -> Some (mark, count), line_no + 1, found
-         | None, None ->
-           None, line_no + 1, scan ~line_no (blank_code_spans line) found
-         | Some (mark, count), Some (closing_mark, closing_count, rest)
-           when Char.equal mark closing_mark
-                && closing_count >= count
-                && String.equal rest "" -> None, line_no + 1, found
-         | Some open_fence, (Some _ | None) -> Some open_fence, line_no + 1, found)
-      (None, 1, [])
-      lines
-  in
-  List.rev found
-;;
-
-let extract body = fold_unquoted_lines scan_line body
+let extract body = Media_ref_scan.fold_unquoted_lines scan_line body
 
 type embed_syntax =
   | Obsidian_embed
@@ -262,7 +172,7 @@ let embed_syntax_to_string = function
   | Markdown_media -> "markdown_media"
 ;;
 
-let is_valid_media_token token = Result.is_ok (Tool_output.validate_sha256 token)
+let is_valid_media_token = Media_ref_scan.is_valid_media_token
 
 let classify_wiki_embed raw =
   match Wiki_page_name.validate_page_name raw with
@@ -276,13 +186,10 @@ let classify_wiki_embed raw =
 ;;
 
 let classify_obsidian_embed raw_target =
-  match String.index_opt raw_target ':' with
-  | None -> classify_wiki_embed raw_target
-  | Some colon ->
-    let scheme = String.sub raw_target 0 colon in
-    let payload =
-      String.sub raw_target (colon + 1) (String.length raw_target - colon - 1)
-    in
+  let target = String.trim raw_target in
+  match Media_ref_scan.split_obsidian_scheme_payload target with
+  | `Bare bare -> classify_wiki_embed bare
+  | `Qualified (scheme, payload) ->
     (match scheme with
      | "media" ->
        if is_valid_media_token payload
@@ -296,17 +203,7 @@ let classify_obsidian_embed raw_target =
      | other -> Unsupported_embed { scheme = other; raw = payload })
 ;;
 
-let split_obsidian_inner inner =
-  match String.index_opt inner '|' with
-  | None -> inner, None
-  | Some bar ->
-    let raw_target = String.sub inner 0 bar in
-    let raw_label =
-      String.sub inner (bar + 1) (String.length inner - bar - 1) |> String.trim
-    in
-    let label = if String.equal raw_label "" then None else Some raw_label in
-    raw_target, label
-;;
+let split_obsidian_inner = Media_ref_scan.split_obsidian_inner
 
 let scan_embeds_line ~line_no text found =
   let length = String.length text in
@@ -378,7 +275,7 @@ let scan_embeds_line ~line_no text found =
   go 0 found
 ;;
 
-let extract_embeds body = fold_unquoted_lines scan_embeds_line body
+let extract_embeds body = Media_ref_scan.fold_unquoted_lines scan_embeds_line body
 
 let media_refs_of_embeds embeds =
   List.filter_map

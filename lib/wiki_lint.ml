@@ -219,9 +219,10 @@ let embed_findings ~media_exists ~artifact_exists graph page =
          (match artifact_exists with
           | None -> None
           | Some check ->
-            if check id
-            then None
-            else Some (Broken_artifact_embed { page; line = embed.line; target = embed.raw }))
+            (match check id with
+             | Ok true | Error _ -> None
+             | Ok false ->
+               Some (Broken_artifact_embed { page; line = embed.line; target = embed.raw })))
        | Wiki_link.Invalid_embed { kind = embed_kind; raw = _ } ->
          Some (Invalid_embed { page; line = embed.line; embed_kind; target = embed.raw })
        | Wiki_link.Unsupported_embed { scheme; raw = _ } ->

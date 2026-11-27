@@ -611,14 +611,25 @@ let test_embed_lint_findings_and_report_fields () =
     ]
   in
   let graph = G.of_nodes nodes in
-  check (list string) "all_media_refs sorted" [ live_sha; dead_sha ] (G.all_media_refs graph);
   let findings =
     Lint.run
       ~media_exists:(String.equal live_sha)
-      ~artifact_exists:(String.equal live_art)
+      ~artifact_exists:(fun id -> Ok (String.equal live_art id))
       graph
       ~log:no_log
   in
+  (* Store read error for artifact_exists must not be misreported as broken_artifact_embed. *)
+  let findings_on_store_err =
+    Lint.run
+      ~media_exists:(String.equal live_sha)
+      ~artifact_exists:(fun _ -> Error "disk read failed")
+      graph
+      ~log:no_log
+  in
+  check bool "artifact store read error does not emit broken_artifact_embed" false
+    (List.exists
+       (function Lint.Broken_artifact_embed _ -> true | _ -> false)
+       findings_on_store_err);
   check (list string) "embed findings"
     [ Printf.sprintf "broken_media_embed alpha:2 /api/v1/media/%s" dead_sha
     ; "broken_wiki_embed alpha:3 ![[wiki:missing-page]]"

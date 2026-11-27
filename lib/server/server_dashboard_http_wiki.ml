@@ -235,7 +235,10 @@ let media_exists_in ~base_path token =
   Option.is_some (Keeper_chat_media_store.file_path_of_token ~base_dir:base_path ~token)
 ;;
 
-let artifact_exists_in ~base_path id = Published_artifact_store.exists ~base_path ~id
+let artifact_exists_in ~base_path id =
+  Published_artifact_store.exists ~base_path ~id
+  |> Result.map_error Published_artifact_store.error_message
+;;
 
 let finding_to_json finding =
   let base =
@@ -328,7 +331,13 @@ let embed_to_json ~graph ~media_exists ~artifact_exists (embed : Wiki_link.embed
     match embed.target with
     | Wiki_link.Media_embed sha256 -> "media", sha256, Some (media_exists sha256), []
     | Wiki_link.Wiki_embed slug -> "wiki", slug, Some (Wiki_graph.file_exists graph slug), []
-    | Wiki_link.Artifact_embed id -> "artifact", id, Some (artifact_exists id), []
+    | Wiki_link.Artifact_embed id ->
+      let exists_opt =
+        match artifact_exists id with
+        | Ok present -> Some present
+        | Error _ -> None
+      in
+      "artifact", id, exists_opt, []
     | Wiki_link.Invalid_embed { kind; raw } ->
       "invalid", raw, Some false, [ "embed_kind", `String (Wiki_link.embed_kind_to_string kind) ]
     | Wiki_link.Unsupported_embed { scheme; raw } ->

@@ -241,7 +241,18 @@ let test_embed_odd_inputs_do_not_raise () =
     [ "invalid:media:" ]
     (List.map
        (fun (e : L.embed) -> embed_target_to_string e.target)
-       (L.extract_embeds "![](/api/v1/media/)"))
+       (L.extract_embeds "![](/api/v1/media/)"));
+  let sample_art = "artifact-0123456789abcdef0123456789abcdef" in
+  check
+    (list string)
+    "obsidian scheme and target whitespace trimmed identically to dashboard"
+    [ "media:" ^ sample_sha_a; "wiki:architecture"; "artifact:" ^ sample_art ]
+    (List.map
+       (fun (e : L.embed) -> embed_target_to_string e.target)
+       (L.extract_embeds
+          (Printf.sprintf
+             "![[ media : %s | trimmed ]] ![[ wiki : architecture ]] ![[ artifact : %s ]]"
+             sample_sha_a sample_art)))
 ;;
 
 let () =

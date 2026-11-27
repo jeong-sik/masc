@@ -855,11 +855,12 @@ let test_extract_media_refs_markdown_and_html () =
   let sha1 = String.make 64 '1' in
   let sha2 = String.make 64 '2' in
   let sha3 = String.make 64 '3' in
+  let sha4 = String.make 64 '4' in
   let upper = String.make 64 'A' in
   let md =
     String.concat "\n"
       [ Printf.sprintf "![one](/api/v1/media/%s)" sha2
-      ; Printf.sprintf "![[media:%s|caption]]" sha1
+      ; Printf.sprintf "![[ media : %s | caption ]]" sha1
       ; Printf.sprintf "`![code](/api/v1/media/%s)`" sha3
       ; "```"
       ; Printf.sprintf "![[media:%s]]" sha3
@@ -875,19 +876,18 @@ let test_extract_media_refs_markdown_and_html () =
   let html =
     Printf.sprintf
       "<!doctype html><html><head><style>.bg{background:url('/api/v1/media/%s')}</style>\
+       <!-- <script> commented-out script tag with /api/v1/media/%s -->\
        <SCRIPT type=\"text/javascript\">const fake = \"/api/v1/media/%s\";</SCRIPT></head>\
        <body><img src=\"/api/v1/media/%s\"><img src='/api/v1/media/%s'>\
        <img src=/api/v1/media/%s><img src=\"https://other.example/api/v1/media/%s\">\
        <img src=\"/api/v1/media/%s0\"></body></html>"
-      sha3 sha3 sha2 sha1 sha2 sha3 sha3
+      sha4 sha3 sha3 sha2 sha1 sha2 sha3 sha3
   in
-  Alcotest.(check (list string)) "html media refs skip script/style and stay sorted/deduped"
-    [ sha1; sha2 ] (A.extract_media_refs A.Html html)
+  Alcotest.(check (list string)) "html media refs preserve style url(), skip comments/script, and survive commented script tags"
+    [ sha1; sha2; sha4 ] (A.extract_media_refs A.Html html)
 
-let test_referenced_media_tokens_and_http_projection () = with_base (fun base_path ->
+let test_exists_and_http_projection () = with_base (fun base_path ->
   let module Routes = Server_routes_http_routes_published_artifacts in
-  Alcotest.(check (list string)) "absent store has no media refs" []
-    (S.referenced_media_tokens ~base_path |> store_ok);
   let live_token, live_url =
     match Masc.Keeper_chat_media_store.persist_result
             ~base_dir:base_path ~media_type:"image/png" ~data:sample_png_bytes with
@@ -906,16 +906,15 @@ let test_referenced_media_tokens_and_http_projection () = with_base (fun base_pa
     (`List [ `String missing_token ])
     (json_member "missing_media_refs" pub_data);
   let id = pub_data |> json_member "artifact" |> json_member "id" |> json_string in
-  Alcotest.(check bool) "exists true for published artifact" true (S.exists ~base_path ~id);
-  Alcotest.(check bool) "exists false for missing artifact" false
-    (S.exists ~base_path ~id:("artifact-" ^ String.make 32 '0'));
-  Alcotest.(check bool) "exists false for invalid id" false (S.exists ~base_path ~id:"bad");
+  Alcotest.(check bool) "exists Ok true for published artifact" true
+    (S.exists ~base_path ~id |> store_ok);
+  Alcotest.(check bool) "exists Ok false for missing artifact" false
+    (S.exists ~base_path ~id:("artifact-" ^ String.make 32 '0') |> store_ok);
+  Alcotest.(check bool) "exists Ok false for invalid id" false
+    (S.exists ~base_path ~id:"bad" |> store_ok);
   let html_token = String.make 64 'c' in
   let html = Printf.sprintf "<!doctype html><html><body><img src=\"/api/v1/media/%s\"></body></html>" html_token in
   ignore (publish ~base_path (request ~id ~expected_revision:1 ~format:"html" html));
-  let all_refs = S.referenced_media_tokens ~base_path |> store_ok in
-  Alcotest.(check (list string)) "GC collector unions all revisions across formats"
-    (List.sort String.compare [ live_token; missing_token; html_token ]) all_refs;
   let req = Httpun.Request.create `GET ("/api/v1/published-artifacts/" ^ id) in
   (match Routes.read ~base_path ~actor:(Some "admin") ~request:req with
    | Routes.Response { Routes.status = `OK; json } ->
@@ -923,9 +922,9 @@ let test_referenced_media_tokens_and_http_projection () = with_base (fun base_pa
        (`List [ `String html_token ])
        (json_member "media_refs" json)
    | Routes.Private | Routes.Response _ -> Alcotest.fail "HTTP read of HTML artifact failed");
-  (* Corrupt metadata must fail closed for referenced_media_tokens. *)
+  (* Corrupt metadata must return Error Unavailable rather than Ok false. *)
   Fs_compat.save_file (metadata_path base_path id) "{corrupt";
-  check_unavailable (S.referenced_media_tokens ~base_path))
+  check_unavailable (S.exists ~base_path ~id))
 
 let test_wiki_http_embeds_media_refs_and_lint () = with_base (fun base_path ->
   let config = Masc.Workspace.default_config base_path in
@@ -1014,7 +1013,7 @@ let () = Eio_main.run (fun _ ->
       Alcotest.test_case "unsafe directory is unavailable, not empty" `Quick test_unsafe_directory;
       Alcotest.test_case "metadata symlink is unavailable" `Quick test_metadata_symlink;
       Alcotest.test_case "extract media refs from Markdown and HTML" `Quick test_extract_media_refs_markdown_and_html;
-      Alcotest.test_case "GC collector and HTTP/Keeper media refs projection" `Quick test_referenced_media_tokens_and_http_projection;
+      Alcotest.test_case "Artifact exists error fidelity and HTTP/Keeper media refs projection" `Quick test_exists_and_http_projection;
       Alcotest.test_case "Wiki HTTP embeds, media_refs, backlinks and embed lint" `Quick test_wiki_http_embeds_media_refs_and_lint];
      "external sharing", [
       Alcotest.test_case "publication and sharing notify their readers" `Quick test_publication_and_sharing_notify;

@@ -12348,6 +12348,47 @@ let test_media_viewer_follows_artifact_dive_target () =
              String.equal id art_dive.id
          | _ -> false)
        (Cmd.flatten cmds_share));
+  (* Historical revision detail takes precedence over latest list metadata for [H] and [e]. *)
+  let art_hist : Wire_knowledge.artifact_entry =
+    {
+      art_dive with
+      revision = 1;
+      title = "Historical Title";
+      body = { art_dive.body with sha256 = "rev1-sha256-historical" };
+    }
+  in
+  let hist_detail : Wire_knowledge.published_artifact_detail =
+    { dive_detail with artifact = art_hist; content = "<h1>Rev1</h1>" }
+  in
+  let m_hist =
+    {
+      m_with_ws with
+      knowledge =
+        Knowledge_store.apply_artifact_detail ~observed_at:t1 hist_detail
+          m_with_ws.knowledge;
+    }
+  in
+  let _, cmds_hist_hash =
+    Update_actions.execute_action ~now:t1 m_hist Keymap.Copy_hash
+  in
+  Alcotest.(check bool) "Copy_hash uses historical revision sha256 from active detail"
+    true
+    (List.exists
+       (function
+         | Cmd.Copy_clipboard s -> String.equal s "rev1-sha256-historical"
+         | _ -> false)
+       (Cmd.flatten cmds_hist_hash));
+  let _, cmds_hist_export =
+    Update_actions.execute_action ~now:t1 m_hist Keymap.Edit_or_export
+  in
+  Alcotest.(check bool) "Edit_or_export uses historical revision metadata from active detail"
+    true
+    (List.exists
+       (function
+         | Cmd.Export_artifact { revision = Some 1; filename_stem; _ } ->
+             String.equal filename_stem "Historical Title"
+         | _ -> false)
+       (Cmd.flatten cmds_hist_export));
   (* Filtered-empty list leaves focused_artifact = None and emits 0 cmds. *)
   let m_filtered_empty =
     {

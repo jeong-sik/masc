@@ -1879,7 +1879,267 @@ let test_action_hotkey_modal_palette_and_slash_gating () =
     (Rbac_policy.can_run_keymap_action_in_model m_worker_code
        Keymap.Launch_fusion
      && Rbac_policy.can_run_keymap_action_in_model m_worker_code
-          Keymap.Probe_sandbox)
+          Keymap.Probe_sandbox);
+
+  (* R5-PR6: [x] Entity_reject_or_cancel on Runtime_addons_browser & Tools_prompts_presets *)
+  let m_worker_addons =
+    let base =
+      Model.initial ~auth_session:Rbac.single_user_local_worker ~cols:140
+        ~rows:40 ()
+    in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Runtime; pane_index = 0 };
+      runtime =
+        {
+          base.runtime with
+          active_tab = Nav.Runtime_addons_browser;
+          addon_catalog_mode = false;
+        };
+    }
+  in
+  Alcotest.(check bool) "SU Worker can run [x] & [d] on Runtime_addons_browser"
+    true
+    (Rbac_policy.can_run_keymap_action_in_model m_worker_addons
+       Keymap.Entity_reject_or_cancel
+     && Rbac_policy.can_run_keymap_action_in_model m_worker_addons
+          Keymap.Delete_selected);
+  let m_ma_addons = { m_worker_addons with auth_session = ma_human_admin_session } in
+  Alcotest.(check bool) "MA Admin denied [x] & [d] on Runtime_addons_browser"
+    false
+    (Rbac_policy.can_run_keymap_action_in_model m_ma_addons
+       Keymap.Entity_reject_or_cancel
+     || Rbac_policy.can_run_keymap_action_in_model m_ma_addons
+          Keymap.Delete_selected);
+
+  let sample_prompt : Wire_runtime.prompt_item =
+    {
+      key = "keeper.base";
+      category = "keeper";
+      operator_surface = "prompts";
+      description = "Base";
+      effective = "eff";
+      file_value = Some "file";
+      override_value = Some "ovr";
+      file_path = None;
+      source = "override";
+      has_override = true;
+      override_default_moved = false;
+      char_count = 3;
+      template_variables = [];
+    }
+  in
+  let sample_preset : Wire_runtime.preset_manifest =
+    {
+      name = "ops-preset";
+      description = "Ops";
+      created_at = "2026-11-27T00:00:00Z";
+      override_count = 1;
+      override_keys = [ "keeper.base" ];
+      keepers = [];
+      assignment_count = 0;
+      lane_count = 0;
+    }
+  in
+  let sample_param : Wire_runtime.runtime_param_item =
+    {
+      key = "turn_timeout_s";
+      current = `Int 60;
+      default = `Int 30;
+      has_override = true;
+      description = Some "timeout";
+      value_type = Some "int";
+      choices = [];
+    }
+  in
+  let make_pp_model ~auth_session ~section =
+    let base = Model.initial ~auth_session ~cols:140 ~rows:40 () in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Runtime };
+      runtime =
+        {
+          base.runtime with
+          active_tab = Nav.Runtime_tools_usage;
+          tools_subview = Runtime_store.Tools_prompts_presets;
+          pp_section = section;
+          pp_selected_index = 0;
+          prompts_catalog =
+            Observed.value ~observed_at:t0
+              { Wire_runtime.prompts = [ sample_prompt ]; held_back = [] };
+          presets_listing =
+            Observed.value ~observed_at:t0
+              { Wire_runtime.presets = [ sample_preset ]; unreadable = [] };
+          runtime_params =
+            Observed.value ~observed_at:t0
+              { Wire_runtime.parameters = [ sample_param ] };
+        };
+    }
+  in
+  let m_opt_prompts =
+    make_pp_model ~auth_session:su_optional_token_admin
+      ~section:Runtime_store.Sec_prompts
+  in
+  let m_worker_prompts =
+    make_pp_model ~auth_session:Rbac.single_user_local_worker
+      ~section:Runtime_store.Sec_prompts
+  in
+  Alcotest.(check bool) "SU optional-token Admin allowed [x] on Sec_prompts (Single_user_role_admin)"
+    true
+    (Rbac_policy.can_run_keymap_action_in_model m_opt_prompts
+       Keymap.Entity_reject_or_cancel);
+  Alcotest.(check bool) "SU Worker denied [x] on Sec_prompts" false
+    (Rbac_policy.can_run_keymap_action_in_model m_worker_prompts
+       Keymap.Entity_reject_or_cancel);
+  let _, worker_prompt_cmds =
+    Update_actions.execute_action ~now:t0 m_worker_prompts
+      Keymap.Entity_reject_or_cancel
+  in
+  Alcotest.(check int) "SU Worker [x] on Sec_prompts emits 0 cmds" 0
+    (List.length (Cmd.flatten worker_prompt_cmds));
+  let m_opt_presets =
+    make_pp_model ~auth_session:su_optional_token_admin
+      ~section:Runtime_store.Sec_presets
+  in
+  let m_tok_presets =
+    make_pp_model ~auth_session:su_token_admin
+      ~section:Runtime_store.Sec_presets
+  in
+  Alcotest.(check bool) "SU optional-token Admin denied [x] on Sec_presets (Single_user_token_admin_only)"
+    false
+    (Rbac_policy.can_run_keymap_action_in_model m_opt_presets
+       Keymap.Entity_reject_or_cancel);
+  Alcotest.(check bool) "SU token Admin allowed [x] on Sec_presets" true
+    (Rbac_policy.can_run_keymap_action_in_model m_tok_presets
+       Keymap.Entity_reject_or_cancel);
+  let _, opt_preset_cmds =
+    Update_actions.execute_action ~now:t0 m_opt_presets
+      Keymap.Entity_reject_or_cancel
+  in
+  Alcotest.(check int) "SU optional-token Admin [x] on Sec_presets emits 0 cmds"
+    0
+    (List.length (Cmd.flatten opt_preset_cmds));
+  let m_opt_params =
+    make_pp_model ~auth_session:su_optional_token_admin
+      ~section:Runtime_store.Sec_params
+  in
+  let m_worker_params =
+    make_pp_model ~auth_session:Rbac.single_user_local_worker
+      ~section:Runtime_store.Sec_params
+  in
+  Alcotest.(check bool) "SU optional-token Admin allowed [x] on Sec_params" true
+    (Rbac_policy.can_run_keymap_action_in_model m_opt_params
+       Keymap.Entity_reject_or_cancel);
+  let _, worker_param_cmds =
+    Update_actions.execute_action ~now:t0 m_worker_params
+      Keymap.Entity_reject_or_cancel
+  in
+  Alcotest.(check int) "SU Worker [x] on Sec_params emits 0 cmds" 0
+    (List.length (Cmd.flatten worker_param_cmds));
+
+  (* R5-PR6: [d] Delete_selected context-aware RBAC *)
+  Alcotest.(check bool) "MA Worker PAT allowed [d] (Diff view) on Knowledge_memory"
+    true
+    (Rbac_policy.can_run_keymap_action_in_model m_ma_mem_diff
+       Keymap.Delete_selected);
+  let m_ma_keeper_cfg =
+    let base =
+      Model.initial ~auth_session:ma_human_admin_session ~cols:140 ~rows:40 ()
+    in
+    {
+      base with
+      nav = { base.nav with workspace = Nav.Keepers };
+      fleet = { base.fleet with keeper_dive_tab = Nav.Keeper_config };
+    }
+  in
+  Alcotest.(check bool) "MA Admin Session allowed [d] (dry-run) on Keeper_config"
+    true
+    (Rbac_policy.can_run_keymap_action_in_model m_ma_keeper_cfg
+       Keymap.Delete_selected);
+  let m_ma_pat_keeper_cfg =
+    { m_ma_keeper_cfg with auth_session = ma_human_admin_pat }
+  in
+  Alcotest.(check bool) "MA Admin PAT denied [d] on Keeper_config" false
+    (Rbac_policy.can_run_keymap_action_in_model m_ma_pat_keeper_cfg
+       Keymap.Delete_selected);
+
+  (* R5-PR6: Verification Dive tabs surface RBAC denial, Failed, and Absent truthfully *)
+  let sample_verif : Wire_work.verification_request =
+    {
+      request_id = "verif-r5";
+      task_id = "task-r5";
+      task_title = "Check RBAC";
+      submitted_by = "alpha";
+      created_at_unix = None;
+      completion_contract = [];
+      required_artifacts = [];
+      submitted_evidence = [];
+      evidence_projection_error = None;
+      review_observation = None;
+    }
+  in
+  let m_verif_worker =
+    let base =
+      Model.initial ~auth_session:Rbac.single_user_local_worker ~lang:Say.Lang_en
+        ~cols:140 ~rows:40 ()
+    in
+    {
+      base with
+      work =
+        {
+          base.work with
+          verification_dive_tab = Work_store.Verif_tab_evidence;
+          verification_summary =
+            Observed.failed ~reason:"HTTP 500" ~retryable:true ~at:t0;
+          verification_specs = Observed.Absent;
+        };
+    }
+  in
+  let ev_lines =
+    Update_nav.verification_dive_tab_lines ~width:80 m_verif_worker sample_verif
+  in
+  Alcotest.(check bool) "Verif_tab_evidence shows Access denied for SU Worker (not infinite loading)"
+    true
+    (List.exists
+       (fun (l : Update_nav.styled_line) ->
+         contains_ci ~needle:"Access denied" l.text)
+       ev_lines);
+  let sum_lines =
+    Update_nav.verification_dive_tab_lines ~width:80
+      {
+        m_verif_worker with
+        work =
+          {
+            m_verif_worker.work with
+            verification_dive_tab = Work_store.Verif_tab_summary;
+          };
+      }
+      sample_verif
+  in
+  Alcotest.(check bool) "Verif_tab_summary renders Observed.Failed error" true
+    (List.exists
+       (fun (l : Update_nav.styled_line) ->
+         l.tone = Update_nav.Line_error
+         && contains_ci ~needle:"HTTP 500" l.text)
+       sum_lines);
+  let spec_lines =
+    Update_nav.verification_dive_tab_lines ~width:80
+      {
+        m_verif_worker with
+        work =
+          {
+            m_verif_worker.work with
+            verification_dive_tab = Work_store.Verif_tab_specs;
+          };
+      }
+      sample_verif
+  in
+  Alcotest.(check bool) "Verif_tab_specs renders Observed.Absent warning" true
+    (List.exists
+       (fun (l : Update_nav.styled_line) ->
+         l.tone = Update_nav.Line_warn
+         && contains_ci ~needle:"404" l.text)
+       spec_lines)
 
 (* 5. Truthful chrome, badges, lock markers, footer/help filtering & locked screens *)
 let test_chrome_footer_help_and_locked_screens () =

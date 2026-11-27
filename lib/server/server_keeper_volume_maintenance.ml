@@ -7,23 +7,112 @@ module Watch = Keeper_volume_filesystem_watch
 let hearth = "sandbox"
 let notice_kind = "keeper_volume_filesystem_damage"
 
-let inspect ~volume =
+let run_volume_cli_json ~label argv =
   let timeout_sec = Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Io () in
-  match
-    Process_eio.run_argv_with_status_split
-      ~timeout_sec
-      (Keeper_sandbox_microvm.apple_volume_inspect_argv ~volume_name:volume)
-  with
+  match Process_eio.run_argv_with_status_split ~timeout_sec argv with
   | Unix.WEXITED 0, stdout, _ ->
     (match Yojson.Safe.from_string stdout with
      | json -> Ok json
-     | exception Yojson.Json_error detail -> Error ("volume inspect printed invalid JSON: " ^ detail))
+     | exception Yojson.Json_error detail ->
+       Error (Printf.sprintf "%s printed invalid JSON: %s" label detail))
   | ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status), _, stderr ->
     Error
       (Printf.sprintf
          "%s: %s"
          (Keeper_sandbox_exec_failure.status_label status)
          (String.trim stderr))
+;;
+
+let inspect ~volume =
+  run_volume_cli_json
+    ~label:"volume inspect"
+    (Keeper_sandbox_microvm.apple_volume_inspect_argv ~volume_name:volume)
+;;
+
+let list_volumes () =
+  run_volume_cli_json
+    ~label:"volume list"
+    (Keeper_sandbox_microvm.apple_volume_list_argv ())
+;;
+
+type volume_list_snapshot =
+  | Listed of { by_name : (string, Yojson.Safe.t list) Hashtbl.t; complete : bool }
+  | List_failed of string
+  | List_non_array of Yojson.Safe.t
+
+let unique_field key fields =
+  match List.filter (fun (k, _) -> String.equal k key) fields with
+  | [ (_, value) ] -> Some value
+  | [] | _ :: _ :: _ -> None
+;;
+
+let has_key key fields = List.exists (fun (k, _) -> String.equal k key) fields
+
+let entry_volume_name = function
+  | `Assoc fields ->
+    (match unique_field "configuration" fields with
+     | Some (`Assoc configuration) ->
+       (match unique_field "name" configuration with
+        | Some (`String name) when String.trim name <> "" ->
+          if not (has_key "id" fields)
+          then Some name
+          else (
+            match unique_field "id" fields with
+            | Some (`String id) when String.equal id name -> Some name
+            | Some _ | None -> None)
+        | Some _ | None -> None)
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
+let index_volume_list = function
+  | `List entries ->
+    let by_name = Hashtbl.create (Int.max 16 (List.length entries)) in
+    let complete = ref true in
+    List.iter
+      (fun entry ->
+         match entry_volume_name entry with
+         | Some name ->
+           let prev = Option.value ~default:[] (Hashtbl.find_opt by_name name) in
+           Hashtbl.replace by_name name (entry :: prev)
+         | None -> complete := false)
+      entries;
+    Listed { by_name; complete = !complete }
+  | other -> List_non_array other
+;;
+
+(* [container volume list --format json] returns the same entry shape as
+   [container volume inspect NAME] for every volume on the host in one CLI call.
+   Sampling lazily per sweep avoids N sequential subprocess spawns on boot and
+   repeated failing inspect calls on every pulse for absent keeper volumes,
+   while staying zero-subprocess on steady-state pulses when every volume's
+   image source is already cached in [Watch.latest]. *)
+let inspect_from_list ~list_volumes ~fallback_inspect =
+  let snapshot = ref None in
+  let load () =
+    match !snapshot with
+    | Some cached -> cached
+    | None ->
+      let loaded =
+        match list_volumes () with
+        | Ok json -> index_volume_list json
+        | Error detail -> List_failed detail
+      in
+      snapshot := Some loaded;
+      loaded
+  in
+  fun ~volume ->
+    match load () with
+    | List_failed detail -> Error detail
+    | List_non_array json -> Ok json
+    | Listed { by_name; complete } ->
+      if not complete
+      then fallback_inspect ~volume
+      else (
+        match Hashtbl.find_opt by_name volume with
+        | Some [ entry ] -> Ok (`List [ entry ])
+        | Some ((_ :: _ :: _) as entries) -> Ok (`List (List.rev entries))
+        | Some [] | None -> Error (Printf.sprintf "volume not found: %s" volume))
 ;;
 
 let read_image ~path = Eio_unix.run_in_systhread (fun () -> Fs.read_image ~path)
@@ -278,7 +367,8 @@ let start ~sw ~clock ~config =
     ~on_error:(Server_bootstrap_loops_fiber.log_server_fiber_crash "keeper_volume_filesystem")
     (fun () ->
        let rec tick () =
-         sweep ~notices ~now:Time_compat.now ~inspect ~read_image ~post ~warn_uncertain
+         let batch_inspect = inspect_from_list ~list_volumes ~fallback_inspect:inspect in
+         sweep ~notices ~now:Time_compat.now ~inspect:batch_inspect ~read_image ~post ~warn_uncertain
            ~volumes:(workspace_volumes ~config);
          Eio.Time.sleep clock Env_config_runtime_services.Timeouts.maintenance_pulse_interval_sec;
          tick ()

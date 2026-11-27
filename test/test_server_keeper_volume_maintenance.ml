@@ -5,19 +5,19 @@ module Fs = Keeper_volume_filesystem
 module Watch = Keeper_volume_filesystem_watch
 module Sweep = Server_keeper_volume_maintenance
 
-let inspect_json ~volume =
-  `List
-    [ `Assoc
-        [ "id", `String volume
-        ; ( "configuration"
-          , `Assoc
-              [ "name", `String volume
-              ; "format", `String "ext4"
-              ; "source", `String ("/images/" ^ volume ^ ".img")
-              ] )
-        ]
+let volume_entry ~volume =
+  `Assoc
+    [ "id", `String volume
+    ; ( "configuration"
+      , `Assoc
+          [ "name", `String volume
+          ; "format", `String "ext4"
+          ; "source", `String ("/images/" ^ volume ^ ".img")
+          ] )
     ]
 ;;
+
+let inspect_json ~volume = `List [ volume_entry ~volume ]
 
 let inspect ~volume = Ok (inspect_json ~volume)
 let damaged = Fs.Errors_recorded { count = 1; first = None; last = None }
@@ -162,6 +162,199 @@ let test_host_maintenance_loops_per_account_shape () =
     (List.length (loops ~multi_account:false))
 ;;
 
+let test_inspect_from_list_batches_and_handles_missing_and_fallback () =
+  let list_calls = ref 0 in
+  let fallback_calls = ref 0 in
+  let batch =
+    Sweep.inspect_from_list
+      ~list_volumes:(fun () ->
+        incr list_calls;
+        Ok (`List [ volume_entry ~volume:"vol-a"; volume_entry ~volume:"vol-b" ]))
+      ~fallback_inspect:(fun ~volume:_ ->
+        incr fallback_calls;
+        Error "unexpected fallback")
+  in
+  check int "lazy list_volumes not called before first inspect" 0 !list_calls;
+  (match batch ~volume:"vol-a" with
+   | Ok json ->
+     (match Fs.image_of_inspect json with
+      | Ok image -> check string "vol-a image source" "/images/vol-a.img" image.source
+      | Error err -> fail (Fs.inspect_failure_to_string err))
+   | Error detail -> fail detail);
+  (match batch ~volume:"vol-b" with
+   | Ok json ->
+     (match Fs.image_of_inspect json with
+      | Ok image -> check string "vol-b image source" "/images/vol-b.img" image.source
+      | Error err -> fail (Fs.inspect_failure_to_string err))
+   | Error detail -> fail detail);
+  (match batch ~volume:"vol-missing" with
+   | Error detail -> check string "missing volume error" "volume not found: vol-missing" detail
+   | Ok _ -> fail "expected missing volume error");
+  check int "single list_volumes call across 3 inspects" 1 !list_calls;
+  check int "zero fallback calls for complete listing" 0 !fallback_calls;
+  (* Empty listing proves absence without fallback. *)
+  let empty_fallback = ref 0 in
+  let empty_batch =
+    Sweep.inspect_from_list
+      ~list_volumes:(fun () -> Ok (`List []))
+      ~fallback_inspect:(fun ~volume:_ ->
+        incr empty_fallback;
+        Error "unexpected")
+  in
+  (match empty_batch ~volume:"vol-absent" with
+   | Error detail -> check string "empty list missing error" "volume not found: vol-absent" detail
+   | Ok _ -> fail "expected missing error on empty list");
+  check int "zero fallback on empty list" 0 !empty_fallback;
+  (* Incomplete or corrupt listings (nameless entry, duplicate keys, id/name
+     mismatch) fall back cleanly rather than hiding volumes. *)
+  let check_falls_back label entries =
+    let fb = ref 0 in
+    let b =
+      Sweep.inspect_from_list
+        ~list_volumes:(fun () -> Ok (`List entries))
+        ~fallback_inspect:(fun ~volume ->
+          incr fb;
+          Ok (inspect_json ~volume))
+    in
+    (match b ~volume:"vol-a" with
+     | Ok _ -> ()
+     | Error detail -> fail (label ^ ": " ^ detail));
+    check int (label ^ " uses fallback") 1 !fb
+  in
+  check_falls_back "nameless entry"
+    [ volume_entry ~volume:"vol-a"; `Assoc [ "id", `String "nameless" ] ];
+  check_falls_back "duplicate name key"
+    [ `Assoc
+        [ "id", `String "vol-a"
+        ; ( "configuration"
+          , `Assoc
+              [ "name", `String "vol-a"
+              ; "name", `String "vol-b"
+              ; "format", `String "ext4"
+              ; "source", `String "/images/vol-a.img"
+              ] )
+        ]
+    ];
+  check_falls_back "duplicate configuration key"
+    [ `Assoc
+        [ "configuration", `Assoc [ "name", `String "vol-a"; "format", `String "ext4"; "source", `String "/a.img" ]
+        ; "configuration", `Assoc [ "name", `String "vol-b"; "format", `String "ext4"; "source", `String "/b.img" ]
+        ]
+    ];
+  check_falls_back "id and configuration.name mismatch"
+    [ `Assoc
+        [ "id", `String "vol-b"
+        ; ( "configuration"
+          , `Assoc
+              [ "name", `String "vol-a"
+              ; "format", `String "ext4"
+              ; "source", `String "/images/vol-a.img"
+              ] )
+        ]
+    ];
+  (* Duplicate entries across array items propagate to [image_of_inspect] as [Entries]. *)
+  let dup_batch =
+    Sweep.inspect_from_list
+      ~list_volumes:(fun () ->
+        Ok (`List [ volume_entry ~volume:"vol-dup"; volume_entry ~volume:"vol-dup" ]))
+      ~fallback_inspect:(fun ~volume:_ -> fail "unexpected fallback on duplicate")
+  in
+  (match dup_batch ~volume:"vol-dup" with
+   | Ok json ->
+     (match Fs.image_of_inspect json with
+      | Error (Fs.Entries { count = 2 }) -> ()
+      | Error err -> fail ("unexpected error: " ^ Fs.inspect_failure_to_string err)
+      | Ok _ -> fail "expected duplicate entry rejection")
+   | Error detail -> fail detail);
+  (* Non-array JSON caches once and yields [Not_an_array] without fallback. *)
+  let non_array_calls = ref 0 in
+  let non_array_fb = ref 0 in
+  let non_array_batch =
+    Sweep.inspect_from_list
+      ~list_volumes:(fun () -> incr non_array_calls; Ok (`Assoc []))
+      ~fallback_inspect:(fun ~volume:_ -> incr non_array_fb; Error "unexpected")
+  in
+  List.iter
+    (fun volume ->
+       match non_array_batch ~volume with
+       | Ok json ->
+         (match Fs.image_of_inspect json with
+          | Error Fs.Not_an_array -> ()
+          | Error err -> fail ("unexpected error: " ^ Fs.inspect_failure_to_string err)
+          | Ok _ -> fail "expected Not_an_array")
+       | Error detail -> fail detail)
+    [ "v1"; "v2" ];
+  check int "non-array list called once" 1 !non_array_calls;
+  check int "non-array zero fallbacks" 0 !non_array_fb;
+  (* Listing failure propagates once without triggering N fallback calls. *)
+  let failed_list_calls = ref 0 in
+  let failed_fallback_calls = ref 0 in
+  let failed_batch =
+    Sweep.inspect_from_list
+      ~list_volumes:(fun () ->
+        incr failed_list_calls;
+        Error "exit=1: daemon unavailable")
+      ~fallback_inspect:(fun ~volume:_ ->
+        incr failed_fallback_calls;
+        Error "fallback")
+  in
+  List.iter
+    (fun volume ->
+       match failed_batch ~volume with
+       | Error detail -> check string "cached list failure" "exit=1: daemon unavailable" detail
+       | Ok _ -> fail "expected list failure")
+    [ "vol-1"; "vol-2" ];
+  check int "list_volumes called once on failure" 1 !failed_list_calls;
+  check int "zero fallback calls on list failure" 0 !failed_fallback_calls;
+  (* Cancellation escapes without poisoning the snapshot cache. *)
+  let cancel_calls = ref 0 in
+  let cancel_batch =
+    Sweep.inspect_from_list
+      ~list_volumes:(fun () ->
+        incr cancel_calls;
+        if !cancel_calls = 1
+        then raise (Eio.Cancel.Cancelled (Failure "cancelled"))
+        else Ok (`List [ volume_entry ~volume:"vol-after-cancel" ]))
+      ~fallback_inspect:(fun ~volume:_ -> Error "unexpected")
+  in
+  (match cancel_batch ~volume:"vol-after-cancel" with
+   | exception Eio.Cancel.Cancelled _ -> ()
+   | Ok _ | Error _ -> fail "expected Cancelled to propagate");
+  (match cancel_batch ~volume:"vol-after-cancel" with
+   | Ok _ -> ()
+   | Error detail -> fail ("retry after cancel failed: " ^ detail));
+  check int "list_volumes retried after cancellation" 2 !cancel_calls;
+  (* Steady-state second sweep uses Watch.latest cache and calls list_volumes 0 times. *)
+  let notices = Sweep.create_notice_ledger () in
+  let steady_list_calls = ref 0 in
+  let steady_vols =
+    [ "keeper", { Watch.name = "batch-steady-work"; kind = Watch.Work }
+    ; "keeper", { Watch.name = "batch-steady-build"; kind = Watch.Build }
+    ]
+  in
+  let run_pulse () =
+    let batch_inspect =
+      Sweep.inspect_from_list
+        ~list_volumes:(fun () ->
+          incr steady_list_calls;
+          Ok (`List [ volume_entry ~volume:"batch-steady-work"; volume_entry ~volume:"batch-steady-build" ]))
+        ~fallback_inspect:(fun ~volume:_ -> Error "unexpected")
+    in
+    Sweep.sweep
+      ~notices
+      ~now:(fun () -> 0.)
+      ~inspect:batch_inspect
+      ~read_image:(fun ~path:_ -> Ok Fs.Clean)
+      ~post:(fun ~keeper_name:_ ~volume:_ ~content:_ ~meta_json:_ -> Ok ())
+      ~warn_uncertain:(fun ~keeper_name:_ ~volume:_ ~observed_at:_ ~detail:_ -> ())
+      ~volumes:(fun () -> steady_vols)
+  in
+  run_pulse ();
+  check int "first pulse calls list_volumes once for both volumes" 1 !steady_list_calls;
+  run_pulse ();
+  check int "steady-state second pulse spawns zero list_volumes calls" 1 !steady_list_calls
+;;
+
 let () =
   run
     "server_keeper_volume_maintenance"
@@ -176,6 +369,8 @@ let () =
             test_failed_post_does_not_stop_other_volumes
         ; test_case "a multi-account host starts the workspace scoped loops" `Quick
             test_host_maintenance_loops_per_account_shape
+        ; test_case "inspect_from_list batches lookups and handles missing or incomplete listings" `Quick
+            test_inspect_from_list_batches_and_handles_missing_and_fallback
         ] )
     ]
 ;;

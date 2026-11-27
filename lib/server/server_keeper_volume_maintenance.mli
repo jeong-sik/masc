@@ -8,6 +8,21 @@ type notice_ledger
 
 val create_notice_ledger : unit -> notice_ledger
 
+val inspect_from_list :
+  list_volumes:(unit -> (Yojson.Safe.t, string) result) ->
+  fallback_inspect:(volume:string -> (Yojson.Safe.t, string) result) ->
+  volume:string ->
+  (Yojson.Safe.t, string) result
+(** Build a single-fiber per-sweep [inspect] function backed by one lazy
+    [container volume list --format json] snapshot. The returned closure is
+    not synchronized across concurrent fibers. When every listed entry carries
+    a unique non-blank [configuration.name] (and, if present, a matching unique
+    [id]), present volumes return their single-element inspect array and absent
+    volumes return [Error "volume not found: <name>"] without spawning
+    per-volume subprocesses. An incomplete or ambiguous listing falls back to
+    [fallback_inspect]. A listing [Error] or non-array JSON payload is cached
+    for the sweep without falling back; [Eio.Cancel.Cancelled] is not cached. *)
+
 val sweep :
   notices:notice_ledger ->
   now:(unit -> float) ->

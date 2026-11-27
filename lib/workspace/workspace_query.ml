@@ -179,6 +179,7 @@ type query_file_stat_stamp =
   { qfs_dev : int
   ; qfs_ino : int
   ; qfs_size : int
+  ; qfs_nlink : int
   ; qfs_mtime : float
   ; qfs_ctime : float
   ; qfs_perm : int
@@ -190,27 +191,45 @@ let equal_query_file_stat_stamp a b =
   a.qfs_dev = b.qfs_dev
   && a.qfs_ino = b.qfs_ino
   && a.qfs_size = b.qfs_size
+  && a.qfs_nlink = b.qfs_nlink
   && Float.equal a.qfs_mtime b.qfs_mtime
   && Float.equal a.qfs_ctime b.qfs_ctime
   && a.qfs_perm = b.qfs_perm
   && a.qfs_uid = b.qfs_uid
   && a.qfs_gid = b.qfs_gid
 
+let stamp_of_unix_stats (stat : Unix.stats) =
+  { qfs_dev = stat.st_dev
+  ; qfs_ino = stat.st_ino
+  ; qfs_size = stat.st_size
+  ; qfs_nlink = stat.st_nlink
+  ; qfs_mtime = stat.st_mtime
+  ; qfs_ctime = stat.st_ctime
+  ; qfs_perm = stat.st_perm
+  ; qfs_uid = stat.st_uid
+  ; qfs_gid = stat.st_gid
+  }
+
 let query_stat_regular_opt path =
   match Unix.lstat path with
-  | stat when stat.Unix.st_kind = Unix.S_REG ->
-    Some
-      { qfs_dev = stat.st_dev
-      ; qfs_ino = stat.st_ino
-      ; qfs_size = stat.st_size
-      ; qfs_mtime = stat.st_mtime
-      ; qfs_ctime = stat.st_ctime
-      ; qfs_perm = stat.st_perm
-      ; qfs_uid = stat.st_uid
-      ; qfs_gid = stat.st_gid
-      }
+  | stat when stat.Unix.st_kind = Unix.S_REG -> Some (stamp_of_unix_stats stat)
   | _ -> None
   | exception Unix.Unix_error _ -> None
+
+type dir_stat_observation =
+  | Dir_present of query_file_stat_stamp
+  | Dir_missing
+  | Dir_non_directory_or_error
+
+let observe_dir_stat path =
+  match Unix.lstat path with
+  | stat when stat.Unix.st_kind = Unix.S_DIR ->
+    Dir_present (stamp_of_unix_stats stat)
+  | _ -> Dir_non_directory_or_error
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
+    Dir_missing
+  | exception Unix.Unix_error _ ->
+    Dir_non_directory_or_error
 
 let query_stat_is_settled ~now stamp =
   now -. stamp.qfs_mtime > 0.05 && now -. stamp.qfs_ctime > 0.05
@@ -224,6 +243,74 @@ let message_file_cache_mu = Stdlib.Mutex.create ()
 let message_file_cache : (string, query_file_stat_stamp * Masc_domain.message) Hashtbl.t =
   Hashtbl.create 256
 let message_file_cache_max = 1024
+
+type cached_message_dir =
+  { cmd_stamp : query_file_stat_stamp
+  ; cmd_entries : (int * string) array
+  ; mutable cmd_last_used : int
+  }
+
+let message_dir_cache_mu = Stdlib.Mutex.create ()
+let message_dir_cache : (string, cached_message_dir) Hashtbl.t =
+  Hashtbl.create 16
+let message_dir_cache_max = 64
+let message_dir_cache_clock = ref 0
+let message_dir_cache_hits = Atomic.make 0
+let message_dir_cache_misses = Atomic.make 0
+
+let clear_message_dir_cache () =
+  Stdlib.Mutex.protect message_dir_cache_mu (fun () ->
+    Hashtbl.clear message_dir_cache)
+
+let message_dir_cache_stats () =
+  let count =
+    Stdlib.Mutex.protect message_dir_cache_mu (fun () ->
+      Hashtbl.length message_dir_cache)
+  in
+  Atomic.get message_dir_cache_hits, Atomic.get message_dir_cache_misses, count
+
+let evict_message_dir_cache path =
+  Stdlib.Mutex.protect message_dir_cache_mu (fun () ->
+    Hashtbl.remove message_dir_cache path)
+
+let lookup_message_dir_cache path stamp =
+  Stdlib.Mutex.protect message_dir_cache_mu (fun () ->
+    match Hashtbl.find_opt message_dir_cache path with
+    | Some entry when equal_query_file_stat_stamp entry.cmd_stamp stamp ->
+      incr message_dir_cache_clock;
+      entry.cmd_last_used <- !message_dir_cache_clock;
+      Some entry.cmd_entries
+    | Some _ ->
+      Hashtbl.remove message_dir_cache path;
+      None
+    | None -> None)
+
+let store_message_dir_cache path stamp entries =
+  Stdlib.Mutex.protect message_dir_cache_mu (fun () ->
+    if Hashtbl.length message_dir_cache >= message_dir_cache_max
+       && not (Hashtbl.mem message_dir_cache path)
+    then begin
+      let oldest_key = ref None in
+      let oldest_used = ref max_int in
+      Hashtbl.iter
+        (fun k (v : cached_message_dir) ->
+           if v.cmd_last_used < !oldest_used then begin
+             oldest_used := v.cmd_last_used;
+             oldest_key := Some k
+           end)
+        message_dir_cache;
+      match !oldest_key with
+      | Some k -> Hashtbl.remove message_dir_cache k
+      | None -> ()
+    end;
+    incr message_dir_cache_clock;
+    Hashtbl.replace
+      message_dir_cache
+      path
+      { cmd_stamp = stamp
+      ; cmd_entries = entries
+      ; cmd_last_used = !message_dir_cache_clock
+      })
 
 let is_filesystem_backend config =
   match config.Workspace_utils.backend with
@@ -506,39 +593,55 @@ let is_valid_filename name =
     c = '_' || c = '-' || c = '.'
   ) name
 
+let compare_message_entry_newest_first (seq_a, name_a) (seq_b, name_b) =
+  let cmp = Int.compare seq_b seq_a in
+  if cmp <> 0 then cmp else String.compare name_b name_a
+
+let select_recent_message_entries_insert ~limit kept_count min_kept_seq min_kept_name acc candidate =
+  let rec insert_and_trim prefix remaining_slots ((seq, name) as item) = function
+    | [] ->
+      if remaining_slots > 0 then begin
+        min_kept_seq := seq;
+        min_kept_name := name;
+        List.rev_append prefix [ item ]
+      end else
+        List.rev prefix
+    | ((existing_seq, existing_name) as existing) :: rest ->
+      if compare_message_entry_newest_first item existing <= 0 then
+        let rec take_tail acc_tail slots = function
+          | [] ->
+            (match acc_tail with
+             | (last_seq, last_name) :: _ ->
+               min_kept_seq := last_seq;
+               min_kept_name := last_name
+             | [] -> ());
+            List.rev acc_tail
+          | _ when slots <= 0 ->
+            (match acc_tail with
+             | (last_seq, last_name) :: _ ->
+               min_kept_seq := last_seq;
+               min_kept_name := last_name
+             | [] -> ());
+            List.rev acc_tail
+          | entry :: tl -> take_tail (entry :: acc_tail) (slots - 1) tl
+        in
+        take_tail (item :: prefix) (remaining_slots - 1) (existing :: rest)
+      else if remaining_slots <= 1 then begin
+        min_kept_seq := existing_seq;
+        min_kept_name := existing_name;
+        List.rev_append prefix [ existing ]
+      end else
+        insert_and_trim (existing :: prefix) (remaining_slots - 1) item rest
+  in
+  if !kept_count < limit then incr kept_count;
+  insert_and_trim [] limit candidate acc
+
 let select_recent_message_names ~since_seq ~limit names =
   if limit <= 0 then []
   else
     let kept_count = ref 0 in
     let min_kept_seq = ref min_int in
-    let rec insert_and_trim prefix remaining_slots (seq, name) = function
-      | [] ->
-        if remaining_slots > 0 then begin
-          min_kept_seq := seq;
-          List.rev_append prefix [ (seq, name) ]
-        end else
-          List.rev prefix
-      | ((existing_seq, _) as existing) :: rest ->
-        if seq >= existing_seq then
-          let rec take_tail acc slots = function
-            | [] ->
-              (match acc with
-               | (last_seq, _) :: _ -> min_kept_seq := last_seq
-               | [] -> ());
-              List.rev acc
-            | _ when slots <= 0 ->
-              (match acc with
-               | (last_seq, _) :: _ -> min_kept_seq := last_seq
-               | [] -> ());
-              List.rev acc
-            | item :: tl -> take_tail (item :: acc) (slots - 1) tl
-          in
-          take_tail ((seq, name) :: prefix) (remaining_slots - 1) (existing :: rest)
-        else if remaining_slots <= 1 then
-          List.rev_append prefix [ existing ]
-        else
-          insert_and_trim (existing :: prefix) (remaining_slots - 1) (seq, name) rest
-    in
+    let min_kept_name = ref "" in
     let yield_meter = Eio_guard.create_yield_meter () in
     let top =
       List.fold_left
@@ -547,28 +650,182 @@ let select_recent_message_names ~since_seq ~limit names =
           match message_seq_of_filename name with
           | None -> acc
           | Some seq when seq <= since_seq -> acc
-          | Some seq when !kept_count >= limit && seq < !min_kept_seq -> acc
+          | Some seq
+            when !kept_count >= limit
+                 && compare_message_entry_newest_first
+                      (seq, name)
+                      (!min_kept_seq, !min_kept_name)
+                    > 0 -> acc
           | Some seq ->
-            if !kept_count < limit then incr kept_count;
-            insert_and_trim [] limit (seq, name) acc)
+            select_recent_message_entries_insert
+              ~limit kept_count min_kept_seq min_kept_name acc (seq, name))
         []
         names
     in
     List.map snd top
 
-let select_all_message_names ~since_seq names =
-  names
-  |> List.filter_map (fun name ->
-       match message_seq_of_filename name with
-       | Some seq when seq > since_seq -> Some (seq, name)
-       | Some _ | None -> None)
-  |> List.sort (fun (seq_a, name_a) (seq_b, name_b) ->
-       let cmp = Int.compare seq_a seq_b in
-       if cmp <> 0 then cmp else String.compare name_a name_b)
-  |> List.map snd
+let select_recent_message_entries_from_array ~since_seq ~limit (raw_names : string array) =
+  if limit <= 0 then []
+  else
+    let kept_count = ref 0 in
+    let min_kept_seq = ref min_int in
+    let min_kept_name = ref "" in
+    let yield_meter = Eio_guard.create_yield_meter () in
+    let acc = ref [] in
+    let n = Array.length raw_names in
+    for i = 0 to n - 1 do
+      Eio_guard.yield_step yield_meter;
+      let name = Array.unsafe_get raw_names i in
+      if is_valid_filename name then
+        match message_seq_of_filename name with
+        | None -> ()
+        | Some seq when seq <= since_seq -> ()
+        | Some seq
+          when !kept_count >= limit
+               && compare_message_entry_newest_first
+                    (seq, name)
+                    (!min_kept_seq, !min_kept_name)
+                  > 0 -> ()
+        | Some seq ->
+          acc :=
+            select_recent_message_entries_insert
+              ~limit kept_count min_kept_seq min_kept_name !acc (seq, name)
+    done;
+    !acc
 
-let select_all_message_names_newest_first ~since_seq names =
-  select_all_message_names ~since_seq names |> List.rev
+let build_sorted_message_entries (raw_names : string array) : (int * string) array =
+  let n = Array.length raw_names in
+  if n = 0 then [||]
+  else
+    let yield_meter = Eio_guard.create_yield_meter () in
+    let count = ref 0 in
+    let acc = ref [] in
+    for i = 0 to n - 1 do
+      Eio_guard.yield_step yield_meter;
+      let name = Array.unsafe_get raw_names i in
+      if is_valid_filename name then
+        match message_seq_of_filename name with
+        | Some seq ->
+          incr count;
+          acc := (seq, name) :: !acc
+        | None -> ()
+    done;
+    let len = !count in
+    if len = 0 then [||]
+    else begin
+      let entries = Array.make len (0, "") in
+      let rec fill idx = function
+        | [] -> ()
+        | pair :: rest ->
+          Array.unsafe_set entries idx pair;
+          fill (idx + 1) rest
+      in
+      fill 0 !acc;
+      Array.fast_sort compare_message_entry_newest_first entries;
+      entries
+    end
+
+let count_entries_above_since_seq (entries : (int * string) array) ~since_seq =
+  let len = Array.length entries in
+  if len = 0 || fst (Array.unsafe_get entries 0) <= since_seq then 0
+  else
+    let lo = ref 0 in
+    let hi = ref len in
+    while !lo < !hi do
+      let mid = !lo + ((!hi - !lo) lsr 1) in
+      if fst (Array.unsafe_get entries mid) > since_seq then
+        lo := mid + 1
+      else
+        hi := mid
+    done;
+    !lo
+
+type message_dir_entries =
+  | Dir_entries_missing
+  | Dir_entries_sorted of (int * string) array
+  | Dir_entries_uncached_raw of string array
+
+let readdir_or_evict msgs_path =
+  match Sys.readdir msgs_path with
+  | raw_names -> raw_names
+  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+  | exception exn ->
+    evict_message_dir_cache msgs_path;
+    raise exn
+
+let load_message_dir_entries msgs_path =
+  let now_before = Time_compat.now () in
+  match observe_dir_stat msgs_path with
+  | Dir_missing ->
+    evict_message_dir_cache msgs_path;
+    Dir_entries_missing
+  | Dir_non_directory_or_error ->
+    evict_message_dir_cache msgs_path;
+    if not (Sys.file_exists msgs_path) then Dir_entries_missing
+    else begin
+      Atomic.incr message_dir_cache_misses;
+      Dir_entries_uncached_raw (readdir_or_evict msgs_path)
+    end
+  | Dir_present before_stamp ->
+    if query_stat_is_settled ~now:now_before before_stamp then begin
+      match lookup_message_dir_cache msgs_path before_stamp with
+      | Some entries ->
+        Atomic.incr message_dir_cache_hits;
+        Dir_entries_sorted entries
+      | None ->
+        Atomic.incr message_dir_cache_misses;
+        let raw_names = readdir_or_evict msgs_path in
+        let after_obs = observe_dir_stat msgs_path in
+        let sorted = build_sorted_message_entries raw_names in
+        (match after_obs with
+         | Dir_present after_stamp
+           when equal_query_file_stat_stamp before_stamp after_stamp
+                && query_stat_is_settled ~now:(Time_compat.now ()) after_stamp ->
+           store_message_dir_cache msgs_path after_stamp sorted
+         | Dir_present _ | Dir_missing | Dir_non_directory_or_error ->
+           evict_message_dir_cache msgs_path);
+        Dir_entries_sorted sorted
+    end else begin
+      evict_message_dir_cache msgs_path;
+      Atomic.incr message_dir_cache_misses;
+      Dir_entries_uncached_raw (readdir_or_evict msgs_path)
+    end
+
+let read_cached_message config ~use_cache ~now path =
+  let cached =
+    if not use_cache then None
+    else
+      match query_stat_regular_opt path with
+      | Some stamp when query_stat_is_settled ~now stamp ->
+        Stdlib.Mutex.protect message_file_cache_mu (fun () ->
+          match Hashtbl.find_opt message_file_cache path with
+          | Some (cached_stamp, msg) when equal_query_file_stat_stamp cached_stamp stamp ->
+            Some msg
+          | Some _ | None -> None)
+      | Some _ | None -> None
+  in
+  match cached with
+  | Some msg -> Ok msg
+  | None ->
+    let now_before = if use_cache then Time_compat.now () else 0.0 in
+    let before = if use_cache then query_stat_regular_opt path else None in
+    let json = read_json config path in
+    (match message_of_yojson json with
+     | Ok msg ->
+       (if use_cache then
+          match before, query_stat_regular_opt path with
+          | Some s1, Some s2
+            when query_stat_is_settled ~now:now_before s1
+                 && equal_query_file_stat_stamp s1 s2
+                 && query_stat_is_settled ~now:(Time_compat.now ()) s2 ->
+            Stdlib.Mutex.protect message_file_cache_mu (fun () ->
+              if Hashtbl.length message_file_cache >= message_file_cache_max
+                 && not (Hashtbl.mem message_file_cache path)
+              then Hashtbl.clear message_file_cache;
+              Hashtbl.replace message_file_cache path (s2, msg))
+          | _ -> ());
+       Ok msg
+     | Error _ as err -> err)
 
 (** Read most-recent messages without parsing the entire history directory.
 
@@ -594,83 +851,102 @@ type message_scan =
   | Newest_window
   | Matching of (Masc_domain.message -> bool)
 
-let collect_recent_messages config ~msgs_path ~since_seq ~limit ~scan ~warn_label =
-  if not (Sys.file_exists msgs_path) then []
+let collect_from_sorted_entries config ~msgs_path ~since_seq ~limit ~scan ~warn_label entries =
+  let len = Array.length entries in
+  if limit <= 0 || len = 0 || fst (Array.unsafe_get entries 0) <= since_seq then []
   else
-    let names =
-      Sys.readdir msgs_path
-      |> Array.to_list
-      |> List.filter is_valid_filename
-      |> (match scan with
-          | Newest_window -> select_recent_message_names ~since_seq ~limit
-          | Matching _ -> select_all_message_names_newest_first ~since_seq)
-    in
-    let keep (msg : Masc_domain.message) =
-      match scan with
-      | Newest_window -> true
-      | Matching predicate -> predicate msg
-    in
     let use_cache = is_filesystem_backend config in
     let now = if use_cache then Time_compat.now () else 0.0 in
-    let read_cached_message path =
-      let cached =
-        if not use_cache then None
-        else
-          match query_stat_regular_opt path with
-          | Some stamp when query_stat_is_settled ~now stamp ->
-            Stdlib.Mutex.protect message_file_cache_mu (fun () ->
-              match Hashtbl.find_opt message_file_cache path with
-              | Some (cached_stamp, msg) when equal_query_file_stat_stamp cached_stamp stamp ->
-                Some msg
-              | Some _ | None -> None)
-          | Some _ | None -> None
-      in
-      match cached with
-      | Some msg -> Ok msg
-      | None ->
-        let now_before = if use_cache then Time_compat.now () else 0.0 in
-        let before = if use_cache then query_stat_regular_opt path else None in
-        let json = read_json config path in
-        (match message_of_yojson json with
-         | Ok msg ->
-           (if use_cache then
-              match before, query_stat_regular_opt path with
-              | Some s1, Some s2
-                when query_stat_is_settled ~now:now_before s1
-                     && equal_query_file_stat_stamp s1 s2
-                     && query_stat_is_settled ~now:(Time_compat.now ()) s2 ->
-                Stdlib.Mutex.protect message_file_cache_mu (fun () ->
-                  if Hashtbl.length message_file_cache >= message_file_cache_max
-                     && not (Hashtbl.mem message_file_cache path)
-                  then Hashtbl.clear message_file_cache;
-                  Hashtbl.replace message_file_cache path (s2, msg))
-              | _ -> ());
-           Ok msg
-         | Error _ as err -> err)
-    in
     let yield_meter = Eio_guard.create_yield_meter ~interval:16 () in
-    let rec loop remaining acc = function
-      | _ when remaining <= 0 -> List.rev acc
-      | [] -> List.rev acc
-      | name :: rest ->
-          Eio_guard.yield_step yield_meter;
-          match message_seq_of_filename name with
-          | Some seq when seq <= since_seq -> List.rev acc
-          | None -> loop remaining acc rest
-          | Some _ ->
+    match scan with
+    | Newest_window ->
+      let max_candidates = min len limit in
+      let rec loop idx acc =
+        if idx >= max_candidates then List.rev acc
+        else
+          let seq, name = Array.unsafe_get entries idx in
+          if seq <= since_seq then List.rev acc
+          else begin
+            Eio_guard.yield_step yield_meter;
             let path = Filename.concat msgs_path name in
-            match read_cached_message path with
-            | Ok msg when msg.seq > since_seq && keep msg ->
-                loop (remaining - 1) (msg :: acc) rest
-            | Ok _ | Error _ -> loop remaining acc rest
+            match read_cached_message config ~use_cache ~now path with
+            | Ok msg when msg.seq > since_seq -> loop (idx + 1) (msg :: acc)
+            | Ok _ | Error _ -> loop (idx + 1) acc
             | exception (Eio.Cancel.Cancelled _ as e) -> raise e
             | exception e ->
-                Log.legacy_traceln ~level:Log.Warn ~module_name:"Workspace"
-                  (Printf.sprintf "[WARN] Failed to read %s %s: %s" warn_label
-                     name (Printexc.to_string e));
-                loop remaining acc rest
-    in
-    loop limit [] names
+              Log.legacy_traceln ~level:Log.Warn ~module_name:"Workspace"
+                (Printf.sprintf "[WARN] Failed to read %s %s: %s" warn_label
+                   name (Printexc.to_string e));
+              loop (idx + 1) acc
+          end
+      in
+      loop 0 []
+    | Matching predicate ->
+      let rec loop idx remaining acc =
+        if remaining <= 0 || idx >= len then List.rev acc
+        else
+          let seq, name = Array.unsafe_get entries idx in
+          if seq <= since_seq then List.rev acc
+          else begin
+            Eio_guard.yield_step yield_meter;
+            let path = Filename.concat msgs_path name in
+            match read_cached_message config ~use_cache ~now path with
+            | Ok msg when msg.seq > since_seq && predicate msg ->
+              loop (idx + 1) (remaining - 1) (msg :: acc)
+            | Ok _ | Error _ -> loop (idx + 1) remaining acc
+            | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+            | exception e ->
+              Log.legacy_traceln ~level:Log.Warn ~module_name:"Workspace"
+                (Printf.sprintf "[WARN] Failed to read %s %s: %s" warn_label
+                   name (Printexc.to_string e));
+              loop (idx + 1) remaining acc
+          end
+      in
+      loop 0 limit []
+
+let collect_recent_messages config ~msgs_path ~since_seq ~limit ~scan ~warn_label =
+  match load_message_dir_entries msgs_path with
+  | Dir_entries_missing -> []
+  | Dir_entries_sorted entries ->
+    collect_from_sorted_entries
+      config ~msgs_path ~since_seq ~limit ~scan ~warn_label entries
+  | Dir_entries_uncached_raw raw_names ->
+    if limit <= 0 then []
+    else
+      (match scan with
+       | Newest_window ->
+         let candidates =
+           select_recent_message_entries_from_array ~since_seq ~limit raw_names
+         in
+         (match candidates with
+          | [] -> []
+          | _ ->
+            let use_cache = is_filesystem_backend config in
+            let now = if use_cache then Time_compat.now () else 0.0 in
+            let yield_meter = Eio_guard.create_yield_meter ~interval:16 () in
+            let rec loop acc = function
+              | [] -> List.rev acc
+              | (seq, name) :: rest ->
+                if seq <= since_seq then List.rev acc
+                else begin
+                  Eio_guard.yield_step yield_meter;
+                  let path = Filename.concat msgs_path name in
+                  match read_cached_message config ~use_cache ~now path with
+                  | Ok msg when msg.seq > since_seq -> loop (msg :: acc) rest
+                  | Ok _ | Error _ -> loop acc rest
+                  | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+                  | exception e ->
+                    Log.legacy_traceln ~level:Log.Warn ~module_name:"Workspace"
+                      (Printf.sprintf "[WARN] Failed to read %s %s: %s" warn_label
+                         name (Printexc.to_string e));
+                    loop acc rest
+                end
+            in
+            loop [] candidates)
+       | Matching _ ->
+         let entries = build_sorted_message_entries raw_names in
+         collect_from_sorted_entries
+           config ~msgs_path ~since_seq ~limit ~scan ~warn_label entries)
 
 (** Get raw message list (for dashboard).
     Returns [[]] when MASC is not initialized. *)
@@ -702,34 +978,38 @@ let get_all_messages_raw config ~since_seq =
   if not (is_initialized config) then []
   else
     let msgs_path = messages_dir config in
-    if not (Sys.file_exists msgs_path) then []
+    let entries =
+      match load_message_dir_entries msgs_path with
+      | Dir_entries_missing -> [||]
+      | Dir_entries_sorted entries -> entries
+      | Dir_entries_uncached_raw raw_names ->
+        build_sorted_message_entries raw_names
+    in
+    let count = count_entries_above_since_seq entries ~since_seq in
+    if count = 0 then []
     else
-      let names =
-        Sys.readdir msgs_path
-        |> Array.to_list
-        |> List.filter is_valid_filename
-        |> select_all_message_names ~since_seq
-      in
+      let use_cache = is_filesystem_backend config in
+      let now = if use_cache then Time_compat.now () else 0.0 in
       let yield_meter = Eio_guard.create_yield_meter ~interval:16 () in
-      let rec loop acc = function
-        | [] -> List.rev acc
-        | name :: rest ->
-            Eio_guard.yield_step yield_meter;
-            let path = Filename.concat msgs_path name in
-            match read_json config path with
-            | json ->
-                (match message_of_yojson json with
-                 | Ok msg when msg.seq > since_seq -> loop (msg :: acc) rest
-                 | Ok _ | Error _ -> loop acc rest)
-            | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-            | exception e ->
-                Log.legacy_traceln ~level:Log.Warn ~module_name:"Workspace"
-                  (Printf.sprintf
-                     "[WARN] Failed to read workspace message %s: %s"
-                     name (Printexc.to_string e));
-                loop acc rest
+      let rec loop idx acc =
+        if idx < 0 then List.rev acc
+        else begin
+          Eio_guard.yield_step yield_meter;
+          let _, name = Array.unsafe_get entries idx in
+          let path = Filename.concat msgs_path name in
+          match read_cached_message config ~use_cache ~now path with
+          | Ok msg when msg.seq > since_seq -> loop (idx - 1) (msg :: acc)
+          | Ok _ | Error _ -> loop (idx - 1) acc
+          | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+          | exception e ->
+            Log.legacy_traceln ~level:Log.Warn ~module_name:"Workspace"
+              (Printf.sprintf
+                 "[WARN] Failed to read workspace message %s: %s"
+                 name (Printexc.to_string e));
+            loop (idx - 1) acc
+        end
       in
-      loop [] names
+      loop (count - 1) []
 
 (** List tasks *)
 let list_tasks ?(include_done = false) ?(include_cancelled = false) ?status config =

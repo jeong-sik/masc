@@ -204,6 +204,20 @@ val get_messages : config -> since_seq:int -> limit:int -> string
     (alphanumeric, underscore, hyphen, dot). *)
 val is_valid_filename : string -> bool
 
+(** {1 Message Directory Cache} *)
+
+(** Clear the in-process settled-stat message directory listing cache. *)
+val clear_message_dir_cache : unit -> unit
+
+(** Return [(hits, misses, cached_dir_count)] for the settled-stat message
+    directory listing cache. *)
+val message_dir_cache_stats : unit -> int * int * int
+
+(** Pure newest-first filename selection helper (exposed for parity testing
+    against the settled-stat directory cache). *)
+val select_recent_message_names :
+  since_seq:int -> limit:int -> string list -> string list
+
 (** {1 Internal Helpers (used by sibling workspace modules)} *)
 
 (** How far back a message read walks. [Newest_window] stops at [limit] names

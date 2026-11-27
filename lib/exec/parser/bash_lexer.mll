@@ -99,7 +99,7 @@ let heredoc_tag = ['A'-'Z' 'a'-'z' '0'-'9' '_']+
    options inside the typed parser without accepting glob metachars in
    unquoted positions. *)
 let word_prefix_char = [^ ' ' '\t' '\n' '\r' '|' '<' '>' '&' ';' '(' ')'
-                          '\'' '"' '$' '`' '{' '}' '!']
+                          '\'' '"' '$' '`' '{' '}' '!' '*' '?' '\\']
 let word_prefix = word_prefix_char+
 
 (* Single-quote string: literal, no escape processing, no nested

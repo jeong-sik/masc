@@ -43,6 +43,8 @@ type event =
    that needs more than this is not a hostname, and the cap is what keeps a
    client from holding a fiber open by never sending the blank line. *)
 let request_head_max_bytes = 8 * 1024
+let request_head_max_headers = 128
+let upstream_connect_timeout_s = 15.0
 (* Every address the name resolves to, in the order the resolver gave them.
    Taking the first alone meant a host whose first record was unreachable --
    an IPv6 address on a host with no IPv6 route, a machine that is down in a
@@ -277,12 +279,20 @@ let handle_connection
       (fun () ->
          let reader = Eio.Buf_read.of_flow flow ~max_size:request_head_max_bytes in
          let request_line = Eio.Buf_read.line reader in
-         let rec consume_headers acc =
+         let initial_bytes = String.length request_line + 2 in
+         if initial_bytes > request_head_max_bytes
+         then raise Eio.Buf_read.Buffer_limit_exceeded;
+         let rec consume_headers ~bytes ~count acc =
            match Eio.Buf_read.line reader with
            | "" | "\r" -> List.rev acc
-           | header_line -> consume_headers (header_line :: acc)
+           | header_line ->
+             let next_bytes = bytes + String.length header_line + 2 in
+             let next_count = count + 1 in
+             if next_bytes > request_head_max_bytes || next_count > request_head_max_headers
+             then raise Eio.Buf_read.Buffer_limit_exceeded;
+             consume_headers ~bytes:next_bytes ~count:next_count (header_line :: acc)
          in
-         let headers = consume_headers [] in
+         let headers = consume_headers ~bytes:initial_bytes ~count:0 [] in
          Ok (request_line, headers, reader))
   in
   match read_request_head () with
@@ -322,7 +332,15 @@ let handle_connection
           (* Resolution happens here and nowhere earlier: the name the resolver
              is handed is the name the allowlist just admitted, so there is no
              second reading of the bytes to disagree with the first. *)
-          (match resolve_upstream ~net ~host ~port with
+          let resolved =
+            match
+              Eio.Time.with_timeout clock upstream_connect_timeout_s (fun () ->
+                Ok (resolve_upstream ~net ~host ~port))
+            with
+            | Ok res -> res
+            | Error `Timeout -> Error "upstream DNS resolution timed out"
+          in
+          (match resolved with
            | Error detail ->
              emit (Upstream_failed { host = host_text; port; detail });
              ignore_flow_error (fun () ->
@@ -351,7 +369,15 @@ let handle_connection
                        (Egress_proxy_decision.Refused refusal)))
               | None ->
                 Eio.Switch.run (fun upstream_sw ->
-                  match connect_first_reachable ~sw:upstream_sw ~net addresses with
+                  let connected =
+                    match
+                      Eio.Time.with_timeout clock upstream_connect_timeout_s (fun () ->
+                        Ok (connect_first_reachable ~sw:upstream_sw ~net addresses))
+                    with
+                    | Ok res -> res
+                    | Error `Timeout -> Error "upstream connect timed out"
+                  in
+                  match connected with
                   | Error detail ->
                     emit (Upstream_failed { host = host_text; port; detail });
                     ignore_flow_error (fun () ->

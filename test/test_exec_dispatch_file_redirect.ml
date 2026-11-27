@@ -403,12 +403,41 @@ let test_sandboxed_stage_writes_a_resolved_target () =
     Alcotest.(check string) "they are in the file" "from the container" (read_file out))
 ;;
 
+let test_sandboxed_missing_stdin_redirect_fails_closed () =
+  with_runtime (fun () ->
+    let missing = path "does-not-exist-stdin.txt" in
+    remove_if_present missing;
+    let ran = ref false in
+    let runner ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ =
+      ran := true;
+      E.Sandbox_target.Ran
+        { output_files = None; status = Unix.WEXITED 0; stdout = ""; stderr = "" }
+    in
+    let s =
+      simple
+        ~sandbox:(E.Sandbox_target.docker ~image:"redirect-image" ~runner ())
+        ~redirects:
+          [ E.Redirect_scope.File
+              { fd = 0; target = host_target missing; mode = E.Redirect_scope.Read }
+          ]
+        "cat"
+        []
+    in
+    let result = dispatch s in
+    Alcotest.(check bool) "runner was never invoked" false !ran;
+    Alcotest.(check bool) "failed closed with non-zero status" false (exited_zero result))
+;;
+
 let () =
   (try Sys.mkdir temp_dir 0o700 with Sys_error _ -> ());
   Alcotest.run
     "exec dispatch file redirect"
     [ ( "dispatch"
       , [ Alcotest.test_case
+            "sandboxed_missing_stdin_redirect_fails_closed"
+            `Quick
+            test_sandboxed_missing_stdin_redirect_fails_closed
+        ; Alcotest.test_case
             "sandboxed_stage_refuses_an_untranslated_target"
             `Quick
             test_sandboxed_stage_refuses_an_untranslated_target

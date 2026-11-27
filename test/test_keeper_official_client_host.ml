@@ -2427,7 +2427,7 @@ let test_a_start_seed_begins_at_the_librarian_position () =
   check bool "the front says so" true
     (match carried.Host.front with
      | Host.Covered_with_working_state { end_atom } -> end_atom = absorbed_end
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _ | Host.Past_librarian_point _
      | Host.Covered _ -> false);
   check string "and the log names it after the Agent Core lane's word"
     "covered_with_working_state"
@@ -2507,7 +2507,7 @@ let test_a_seed_without_a_librarian_position_is_unchanged () =
   check bool "the turn start, which is 0 with no completed turn" true
     (match carried.Host.front with
      | Host.Turn_start -> true
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start_unknown _ | Host.Past_refused_start _ | Host.Covered_with_working_state _
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start_unknown _ | Host.Past_refused_start _ | Host.Past_librarian_point _ | Host.Covered_with_working_state _
      | Host.Covered _ -> false)
 ;;
 
@@ -2553,7 +2553,7 @@ let is_past_refused_start (carried : Host.carried_start) =
   match carried.Host.front with
   | Host.Past_refused_start _ -> true
   | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _
-  | Host.Covered_with_working_state _ | Host.Covered _ -> false
+  | Host.Covered_with_working_state _ | Host.Covered _ | Host.Past_librarian_point _ -> false
 ;;
 
 let test_a_refused_seed_reopens_at_the_turn_boundary () =
@@ -2620,7 +2620,7 @@ let test_an_unknown_turn_start_is_reported_by_the_range_sent () =
   check bool "nothing else chose the start" true
     (match opened.Host.front with
      | Host.Turn_start_unknown _ -> true
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Past_refused_start _
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Past_refused_start _ | Host.Past_librarian_point _
      | Host.Covered_with_working_state _ | Host.Covered _ -> false);
   check int "composing the range says nothing" 0
     (warnings_for ~keeper_name:"alpha" ~since_seq:before_opening);
@@ -2636,7 +2636,7 @@ let test_an_unknown_turn_start_is_reported_by_the_range_sent () =
   check bool "the read end chose the start" true
     (match decided.Host.front with
      | Host.Covered_with_working_state _ -> true
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _ | Host.Past_librarian_point _
      | Host.Covered _ -> false);
   let before_librarian = latest_log_seq () in
   Host.warn_if_sent_on_unknown_start ~keeper_name:"alpha" decided.Host.front;
@@ -2663,20 +2663,149 @@ let test_a_fully_absorbed_history_still_carries_its_newest_atom () =
     (List.exists (String.equal "Build the patch.") (texts carried.Host.messages))
 ;;
 
+(* The read end and the opener of a range that opened past the read end. *)
+let past_librarian_point (carried : Host.carried_start) =
+  match carried.Host.front with
+  | Host.Past_librarian_point { end_atom; opened_at } -> Some (end_atom, opened_at)
+  | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _
+  | Host.Past_refused_start _ | Host.Covered_with_working_state _ | Host.Covered _ -> None
+;;
+
 (* The lane's own cut is later than what the Librarian read: the request must
-   not widen back to the Librarian's position. *)
+   not widen back to the Librarian's position. The working state still goes
+   in front of the cut's range (RFC-librarian-lifecycle §4.10, rule 4): it
+   covers the atoms before the read end, and the range holds none of them. *)
 let test_a_later_lane_cut_wins () =
   let carried =
     start_range
       ~librarian_front:(absorbed ())
       ~own_first_atom:(absorbed_end + 1)
-      start_seed_messages
+      refused_seed_messages
   in
   check int "the later position stands" (absorbed_end + 1) carried.Host.first_atom;
-  check bool "and the front is the lane's" true
-    (match carried.Host.front with
-     | Host.Lane_cut -> true
-     | _ -> false)
+  check bool "the lane's cut opened it past the read end" true
+    (match past_librarian_point carried with
+     | Some (end_atom, Host.Opened_at_lane_cut) -> end_atom = absorbed_end
+     | Some
+         ( _
+         , (Host.Opened_at_seed _ | Host.Opened_at_turn_start | Host.Opened_on_newest_atom _) )
+     | None -> false);
+  check string "and the log names both" "past_librarian_point:lane_cut"
+    (Host.carried_start_front_to_string carried.Host.front);
+  check bool "the working state is carried" true
+    (List.exists Runtime_model_input_tail_window.is_working_state carried.Host.messages);
+  check bool "the atom between the read end and the cut is not" false
+    (List.exists (String.equal "Now review it.") (texts carried.Host.messages))
+;;
+
+(* A seed the provider accepted on [refused_seed_messages] at [first_atom]. *)
+let accepted_seed_at first_atom ~runtime_id:_ =
+  let front =
+    match Runtime_model_input_tail_window.atom_opening_digest refused_seed_messages first_atom with
+    | Some digest -> Model_input_front.At_atom digest
+    | None -> fail "the fixture has no such atom"
+  in
+  let seed : Keeper_carried_front.seed =
+    { first_atom; front; source = Keeper_carried_front.Turn_record { turn = 6 } }
+  in
+  { Keeper_carried_front.no_seed_read with seed = Some seed }
+;;
+
+(* The seed sits on the newest atom, a User message, two past the read end. *)
+let seed_past_the_read_end = absorbed_end + 2
+
+(* #37824: the seed opens the range past the Librarian's read end, as before,
+   and the working state now goes in front of it, as on the Agent Core lane
+   (RFC-librarian-lifecycle §4.10, rules 2-4). The atoms between the read end
+   and the seed are in neither; the Librarian reads them next. *)
+let test_a_seed_past_the_read_end_carries_the_working_state () =
+  let carried =
+    start_range
+      ~librarian_front:(absorbed ())
+      ~carried_front_seed:(accepted_seed_at seed_past_the_read_end)
+      refused_seed_messages
+  in
+  check int "the seed's start stands" seed_past_the_read_end carried.Host.first_atom;
+  check bool "the seed opened it past the read end" true
+    (match past_librarian_point carried with
+     | Some (end_atom, Host.Opened_at_seed _) -> end_atom = absorbed_end
+     | Some
+         ( _
+         , (Host.Opened_at_lane_cut | Host.Opened_at_turn_start | Host.Opened_on_newest_atom _) )
+     | None -> false);
+  check string "and the log names both" "past_librarian_point:carried:turn_record#6"
+    (Host.carried_start_front_to_string carried.Host.front);
+  let carried_texts = texts carried.Host.messages in
+  check bool "the working state is carried" true
+    (List.exists Runtime_model_input_tail_window.is_working_state carried.Host.messages);
+  check bool "the seed's atom is sent" true
+    (List.exists (String.equal "Ship it.") carried_texts);
+  check bool "the atoms before the seed are not" false
+    (List.exists
+       (fun text -> String.equal "Now review it." text || String.equal "Reviewed." text)
+       carried_texts)
+;;
+
+(* A read end at or past the seed opens the range itself, unchanged by #37824:
+   the range starts at the read end with the working state in front. *)
+let test_a_read_end_at_or_past_the_seed_still_opens_the_range () =
+  List.iter
+    (fun seed_atom ->
+       let label = Printf.sprintf "seed at %d" seed_atom in
+       let carried =
+         start_range
+           ~librarian_front:(absorbed ())
+           ~carried_front_seed:(accepted_seed_at seed_atom)
+           refused_seed_messages
+       in
+       check int (label ^ ": the range opens at the read end") absorbed_end
+         carried.Host.first_atom;
+       check bool (label ^ ": the front is the read end's") true
+         (match carried.Host.front with
+          | Host.Covered_with_working_state { end_atom } -> end_atom = absorbed_end
+          | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _
+          | Host.Past_refused_start _ | Host.Covered _ | Host.Past_librarian_point _ -> false);
+       check bool (label ^ ": the atom after the read end goes") true
+         (List.exists (String.equal "Now review it.") (texts carried.Host.messages)))
+    [ absorbed_end - 1; absorbed_end ]
+;;
+
+(* A working state in front of a seed's range is left out when carrying it
+   would push out an atom the seed's range holds, as for a read end's own
+   range ([compose_librarian_range]). [compose] stands in for a lane window
+   that keeps the working state and drops the seed's one atom. *)
+let test_a_working_state_ahead_of_a_seed_that_displaces_an_atom_is_left_out () =
+  let range librarian_front =
+    start_range ~librarian_front ~carried_front_seed:(accepted_seed_at seed_past_the_read_end)
+      refused_seed_messages
+  in
+  let compose librarian_front =
+    let carried = range librarian_front in
+    let atoms = Host.carried_atoms carried in
+    match librarian_front with
+    | Choice.Covered { Choice.working_state = Some _; end_atom = _ } ->
+      Ok
+        { Host.carried
+        ; sent = List.filter Runtime_model_input_tail_window.is_working_state carried.Host.messages
+        ; atoms_kept = atoms - 1
+        }
+    | Choice.Covered { Choice.working_state = None; end_atom = _ } | Choice.No_read_end ->
+      Ok { Host.carried; sent = carried.Host.messages; atoms_kept = atoms }
+  in
+  check bool "with its working state, the seed's range opens past the read end" true
+    (Option.is_some (past_librarian_point (range (absorbed ()))));
+  let composed =
+    match
+      Host.compose_librarian_range ~keeper_name:"alpha" ~runtime_id:start_range_runtime ~compose
+        (absorbed ())
+    with
+    | Ok composed -> composed
+    | Error error -> fail (Agent_core.Error.to_string error)
+  in
+  check bool "the working state is left out" false
+    (List.exists Runtime_model_input_tail_window.is_working_state composed.Host.sent);
+  check int "the seed's atom goes" 1 composed.Host.atoms_kept;
+  check int "from the seed's start" seed_past_the_read_end composed.Host.carried.Host.first_atom
 ;;
 
 (* The turn start is where a request with no absorbed point begins, so it is
@@ -2695,7 +2824,7 @@ let test_a_librarian_position_behind_the_turn_start_still_wins () =
   check bool "and the front is the read end's" true
     (match carried.Host.front with
      | Host.Covered_with_working_state { end_atom } -> end_atom = absorbed_end
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _ | Host.Past_librarian_point _
      | Host.Covered _ -> false)
 ;;
 
@@ -2715,7 +2844,7 @@ let test_a_read_position_alone_starts_the_range_without_a_working_state () =
   check bool "the front says so" true
     (match carried.Host.front with
      | Host.Covered { end_atom = at } -> at = end_atom
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _ | Host.Past_librarian_point _
      | Host.Covered_with_working_state _ -> false);
   check string "and logs the Agent Core lane's word for it" "covered"
     (Host.carried_start_front_to_string carried.Host.front);
@@ -2730,8 +2859,8 @@ let test_a_read_position_alone_starts_the_range_without_a_working_state () =
        carried_texts)
 ;;
 
-(* A read end the lane's own cut has passed loses to the cut, with or
-   without its working state. *)
+(* A read end with no working state that the lane's own cut has passed loses
+   to the cut, and nothing goes in front of the cut's range. *)
 let test_a_read_position_behind_the_lane_cut_loses () =
   let carried =
     start_range
@@ -2743,7 +2872,7 @@ let test_a_read_position_behind_the_lane_cut_loses () =
   check bool "and the front is the lane's" true
     (match carried.Host.front with
      | Host.Lane_cut -> true
-     | Host.Carried_seed _ | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _
+     | Host.Carried_seed _ | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _ | Host.Past_librarian_point _
      | Host.Covered_with_working_state _ | Host.Covered _ -> false)
 ;;
 
@@ -4540,6 +4669,18 @@ let () =
             "a later lane cut wins"
             `Quick
             test_a_later_lane_cut_wins
+        ; test_case
+            "a seed past the read end carries the working state"
+            `Quick
+            test_a_seed_past_the_read_end_carries_the_working_state
+        ; test_case
+            "a read end at or past the seed still opens the range"
+            `Quick
+            test_a_read_end_at_or_past_the_seed_still_opens_the_range
+        ; test_case
+            "a working state ahead of a seed that displaces an atom is left out"
+            `Quick
+            test_a_working_state_ahead_of_a_seed_that_displaces_an_atom_is_left_out
         ; test_case
             "a Librarian position behind the turn start still wins"
             `Quick

@@ -476,6 +476,15 @@ val measure_message_bytes : Agent_core.Types.message -> int
     ({!encode_history_message}), which is what the range this module composes
     is reported in. *)
 
+(** What opens a range when the Memory writer's read end does not: the four
+    starts a lane takes on its own, the same four {!carried_start_front}
+    names when no working state goes. *)
+type range_opener =
+  | Opened_at_seed of Keeper_carried_front.source  (** {!Carried_seed}. *)
+  | Opened_at_lane_cut  (** {!Lane_cut}. *)
+  | Opened_at_turn_start  (** {!Turn_start}. *)
+  | Opened_on_newest_atom of { reason : string }  (** {!Turn_start_unknown}. *)
+
 (** Who named the front of a start seed. *)
 type carried_start_front =
   | Carried_seed of Keeper_carried_front.source
@@ -514,6 +523,17 @@ type carried_start_front =
           for the atoms before it, which are in the keeper's memory
           ([Keeper_carried_front.Covered] on the Agent Core lane).
           [first_atom] is that position clamped to the newest atom. *)
+  | Past_librarian_point of { end_atom : int; opened_at : range_opener }
+      (** The Memory writer read this history through [end_atom] and
+          committed a working state, but [opened_at] sits past that point:
+          the seed that holds, or the lane's own cut (with the turn start
+          when that is later still). The range starts where [opened_at] puts
+          it, and the working state goes in front of it, as the Agent Core
+          lane carries it ahead of
+          {!Keeper_turn_driver_try_provider.Past_librarian_point}
+          (RFC-librarian-lifecycle §4.10, rules 2-4). The atoms between
+          [end_atom] and the range are in neither; the Librarian reads them
+          next. *)
 
 type carried_start =
   { messages : Agent_core.Types.message list
@@ -577,20 +597,25 @@ val carried_start_range
 
     [librarian_front] is the turn's continuity, read once for every lane
     ({!Keeper_turn_driver_try_provider.read_keeper_continuity}): the writer's
-    read end with its working state ([Covered_with_working_state]), the read end
-    alone ([Covered]), or none. That read end wins when it is at or
-    past the seed that holds, or the lane's own cut when no seed holds, so a
-    writer that read less than the last request carried never moves the
-    range back. [turn_start] is not weighed against it: it is where a request
-    with no read end begins, so a read end behind it still names atoms
-    nothing else carries, and they go out. A read end alone carries nothing
-    for the atoms before it. The working state goes in front of the range,
-    as extra system context, exactly when a read end with one is the one
-    that wins: a read end the seed or the lane cut already passed stands for
-    atoms the range is carrying anyway, and summarising those would say twice
-    what the request already says. When it does win, the request grows by
-    those bytes, and they are pinned, so a lane that cuts the range to a
-    capacity has to be ready for a composition that does not fit it.
+    read end with its working state, the read end alone, or none. That read
+    end opens the range when it is at or past the seed that holds, or the
+    lane's own cut when no seed holds, so a writer that read less than the
+    last request carried never moves the range back. [turn_start] is not
+    weighed against it: it is where a request with no read end begins, so a
+    read end behind it still names atoms nothing else carries, and they go
+    out. A read end alone carries nothing for the atoms before it.
+
+    A working state goes in front of the range, as extra system context,
+    whether its read end opens the range ([Covered_with_working_state]) or
+    the seed or the lane cut opens it past that read end
+    ([Past_librarian_point]): it covers the atoms before the read end, and a
+    range that opens past the read end holds none of them
+    (RFC-librarian-lifecycle §4.10, rule 4). A range that opens past a
+    refused start ([Past_refused_start]) carries none: the refused-start
+    rules of §4.10 do not name a working state for that range.
+    The working state's bytes are pinned, so a
+    lane that cuts the range to a capacity has to be ready for a
+    composition that does not fit it ({!compose_librarian_range}).
 
     [own_first_atom] is the front the lane already chose for its own reason
     (Claude Code and Codex cut their seed to the capacity a typed overflow

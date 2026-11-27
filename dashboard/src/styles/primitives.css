@@ -210,8 +210,11 @@
   color: var(--fg-2);
 }
 
+/* A sentence that is read ("없음", "항목을 선택하세요", "불러오는 중…"), so the
+   caption colour: --fg-4 is the disabled step, 3.0:1 on --bg-1 in the dark
+   theme. */
 .dtable-absent {
-  color: var(--fg-4);
+  color: var(--fg-3);
   font-style: normal;
 }
 

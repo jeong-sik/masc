@@ -918,7 +918,7 @@
 .ap-rail-kbd {
   font-family: var(--font-mono);
   font-size: var(--fs-10);
-  color: var(--fg-4);
+  color: var(--fg-3);
   flex: none;
 }
 

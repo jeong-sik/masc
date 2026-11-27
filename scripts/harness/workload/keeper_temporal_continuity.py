@@ -434,7 +434,7 @@ class Capture:
             operation = self.call(
                 "masc_keeper_delegate_status",
                 {
-                    "target": {"kind": "keeper", "name": self.args.keeper},
+                    "target": self.args.keeper,
                     "operation_id": operation_id,
                 },
             )
@@ -608,7 +608,7 @@ def validate_source_capture(path: pathlib.Path, source: Json) -> None:
             calls.append((started_index, event_index, payload["name"], arguments, data))
             if payload["name"] == "masc_keeper_delegate_status" and arguments.get(
                 "target"
-            ) == {"kind": "keeper", "name": keeper}:
+            ) == keeper:
                 operations[
                     text(arguments.get("operation_id"), "source operation id")
                 ] = data
@@ -663,7 +663,7 @@ def validate_source_capture(path: pathlib.Path, source: Json) -> None:
                 operation = consume(
                     "masc_keeper_delegate_status",
                     {
-                        "target": {"kind": "keeper", "name": keeper},
+                        "target": keeper,
                         "operation_id": operation_id,
                     },
                 )

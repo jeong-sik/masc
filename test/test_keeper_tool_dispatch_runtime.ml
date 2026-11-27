@@ -4505,11 +4505,7 @@ let test_agent_core_handler_threads_eio_context_to_keeper_dispatch () =
           let result =
             handler
               (`Assoc
-                [ ( "target"
-                  , `Assoc
-                      [ "kind", `String "keeper"
-                      ; "name", `String "keeper-target"
-                      ] )
+                [ "target", `String "keeper-target"
                 ; "prompt", `String "hello"
                 ])
           in
@@ -7977,7 +7973,7 @@ let test_peer_artifact_materializes_exact_binary () =
       | Ok forwarded -> forwarded
       | Error result -> fail (Tool_result.message result) in
     let delegate_args artifact =
-      `Assoc ["target", `Assoc ["kind", `String "keeper"; "name", `String peer.name];
+      `Assoc ["target", `String peer.name;
               "prompt", `String "Reuse this PNG"; "artifacts", `List [artifact]] in
     let delegate_input = validate_input "masc_keeper_delegate" (delegate_args exported_json) in
     let open Yojson.Safe.Util in
@@ -8040,9 +8036,12 @@ let test_peer_delegate_schema_reaches_model_wires () =
     let properties = member "properties" expected in
     check string "artifact items are sha256 strings in the declared tool contract" "string"
       (properties |> member "artifacts" |> member "items" |> member "type" |> Yojson.Safe.Util.to_string);
-    check bool "target keeper kind constraint is declared" true
-      (properties |> member "target" |> member "properties" |> member "kind" |> member "enum"
-       = `List [`String "keeper"]);
+    (* [target] is the receiving Keeper's name, a JSON string with no fields. *)
+    let target_is_keeper_name schema =
+      let target = schema |> member "properties" |> member "target" in
+      member "type" target = `String "string" && member "properties" target = `Null in
+    check bool "target is declared as the Keeper name string" true
+      (target_is_keeper_name expected);
     let bundle = Masc.Keeper_tools_agent_core_bundle.For_testing.make_tool_bundle
         ~config ~meta ~publication_recovery ~ctx_snapshot:ctx_work () in
     Fun.protect ~finally:bundle.cleanup @@ fun () ->
@@ -8064,7 +8063,9 @@ let test_peer_delegate_schema_reaches_model_wires () =
     List.iter (fun (label, tool) ->
       let check_schema boundary observed =
         check bool (label ^ " retains full delegate schema at " ^ boundary) true
-          (Yojson.Safe.equal expected observed) in
+          (Yojson.Safe.equal expected observed);
+        check bool (label ^ " declares target as the Keeper name string at " ^ boundary) true
+          (target_is_keeper_name observed) in
       check_schema "Agent Core tool" (member "input_schema" (Agent_core.Tool.schema_to_json tool));
       let provider = Llm_provider.Provider_config.make
           ~kind:Llm_provider.Provider_config.OpenAI_compat ~model_id:"delegate-schema-fixture"

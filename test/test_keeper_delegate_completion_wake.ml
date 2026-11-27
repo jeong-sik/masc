@@ -310,7 +310,12 @@ let a_cut_reply_names_the_read_path () =
       true
       (contains "masc_keeper_delegate_status" note
        && contains long_op note
-       && contains delegate note))
+       && contains delegate note);
+    check
+      bool
+      "the note's read path names the target by Keeper name alone"
+      true
+      (contains (Printf.sprintf {|"target":"%s"|} delegate) note))
 ;;
 
 (* The re-negotiated task-2192 contract: the cut row keeps its head and its

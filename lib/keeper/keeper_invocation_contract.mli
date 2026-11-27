@@ -62,6 +62,7 @@ val request_of_json : Yojson.Safe.t -> (request, request_error) result
 val request_error_to_string : request_error -> string
 val target_name : request -> string
 val prompt : request -> string
+(** The wire [target] is the receiving Keeper's name as a JSON string. *)
 val target_of_json : Yojson.Safe.t -> (target, request_error) result
 val target_name_of_target : target -> string
 

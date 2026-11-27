@@ -5925,11 +5925,7 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
        ) else None in
        let args =
          `Assoc
-           [ "target",
-             `Assoc
-               [ "kind", `String "keeper"
-               ; "name", `String meta.name
-               ]
+           [ "target", `String meta.name
            ; "prompt", `String "inspect owner state"
            ]
        in
@@ -5944,7 +5940,7 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
         | Some _ ->
           let absent =
             `Assoc
-              [ "target", `Assoc [ "kind", `String "keeper"; "name", `String meta.name ]
+              [ "target", `String meta.name
               ; "prompt", `String "inspect owner state"
               ; "artifacts", `List [ `String (String.make 64 '0') ]
               ]
@@ -5973,7 +5969,7 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
             Out_channel.output_string channel "other bytes");
           let unreadable =
             `Assoc
-              [ "target", `Assoc [ "kind", `String "keeper"; "name", `String meta.name ]
+              [ "target", `String meta.name
               ; "prompt", `String "inspect owner state"
               ; "artifacts", `List [ Keeper_peer_artifact_ref.(to_json (of_blob damaged)) ]
               ]
@@ -6019,12 +6015,7 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
        check bool "agent retry returns existing operation" true
          Yojson.Safe.Util.(repeated_data |> member "existing" |> to_bool);
        let operation_id = operation_id operation_id_raw in
-       let target =
-         `Assoc
-           [ "kind", `String "keeper"
-           ; "name", `String meta.name
-           ]
-       in
+       let target = `String meta.name in
        let reference =
          `Assoc
            [ "target", target

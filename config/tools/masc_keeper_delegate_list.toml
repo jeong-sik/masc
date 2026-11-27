@@ -7,17 +7,6 @@ defer_loading = true
 
 [[params]]
 name = "target"
-type = "object"
-required = true
-additional_properties = false
-
-[[params.params]]
-name = "kind"
 type = "string"
 required = true
-enum = ["keeper"]
-
-[[params.params]]
-name = "name"
-type = "string"
-required = true
+description = "Name of the Keeper whose queued operations to list."

@@ -69,6 +69,76 @@ let test_confirm_rejects_expired_token () =
 let iso_in_minutes minutes =
   iso_of_unix (Unix.gettimeofday () +. (float_of_int minutes *. 60.0))
 
+(* A confirmed keeper_message reaches masc_keeper_delegate with the Keeper name
+   as [target], the shape the delegate decoder takes (#38590). The dispatch is
+   captured, so the test reads the exact arguments the operator path sends. *)
+let test_confirmed_keeper_message_delegates_by_keeper_name () =
+  Eio_main.run @@ fun env ->
+  Eio_guard.enable ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_dir)
+    (fun () ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let pending_dir = Filename.concat (Workspace.masc_dir config) "operator" in
+      Workspace_utils.mkdir_p pending_dir;
+      let path = Filename.concat pending_dir "pending_confirms.json" in
+      let oc = open_out path in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () ->
+          output_string oc
+            (Yojson.Safe.to_string
+               (`List
+                 [
+                   `Assoc
+                     [
+                       ("confirm_token", `String "keeper-message-token");
+                       ("trace_id", `String "ops_keeper_message");
+                       ("actor", `String "operator");
+                       ("action_type", `String "keeper_message");
+                       ( "target_type"
+                       , `String Operator_action_constants.keeper_target_type );
+                       ("target_id", `String "beta");
+                       ("payload", `Assoc [ ("message", `String "hello") ]);
+                       ("delegated_tool", `String "masc_keeper_delegate");
+                       ("created_at", `String (iso_in_minutes (-5)));
+                       ("expires_at", `String (iso_in_minutes 30));
+                     ];
+                 ])));
+      let dispatched = ref [] in
+      let capture ~name ~args =
+        dispatched := (name, args) :: !dispatched;
+        Some
+          (Tool_result.make_ok ~tool_name:name ~start_time:(Tool_timing.start ())
+             ~data:(`Assoc [ ("operation_id", `String "kmsg-test") ]) ())
+      in
+      let ctx =
+        { (operator_ctx env sw config "operator") with delegated_dispatch = Some capture }
+      in
+      (match
+         Operator_control.confirm_json ctx
+           (`Assoc [ ("confirm_token", `String "keeper-message-token") ])
+       with
+       | Ok _ -> ()
+       | Error err -> Alcotest.failf "keeper_message confirm failed: %s" err);
+      match !dispatched with
+      | [ (name, args) ] ->
+        Alcotest.(check string) "dispatches masc_keeper_delegate" "masc_keeper_delegate" name;
+        Alcotest.(check bool) "target is the Keeper name" true
+          (Yojson.Safe.Util.member "target" args = `String "beta");
+        (match Keeper_invocation_contract.request_of_json args with
+         | Ok request ->
+           Alcotest.(check string) "the delegate decoder reads the same Keeper" "beta"
+             (Keeper_invocation_contract.target_name request)
+         | Error err ->
+           Alcotest.failf "the delegate decoder refused the operator arguments: %s"
+             (Keeper_invocation_contract.request_error_to_string err))
+      | calls -> Alcotest.failf "expected one dispatch, got %d" (List.length calls))
+
 let contains_substring ~substring hay =
   let hay_len = String.length hay in
   let needle_len = String.length substring in

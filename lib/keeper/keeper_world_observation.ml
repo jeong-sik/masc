@@ -868,8 +868,7 @@ let pending_board_event_of_delegate_completion
             (`Assoc
                [ "tool", `String "masc_keeper_delegate_status"
                ; "arguments", `Assoc
-                   [ "target", `Assoc
-                       [ "kind", `String "keeper"; "name", `String dc.dc_keeper ]
+                   [ "target", `String dc.dc_keeper
                    ; "operation_id", `String dc.dc_operation_id
                    ] ]))
       in

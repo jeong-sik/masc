@@ -1,0 +1,7 @@
+(include_subdirs no)
+
+(library
+ (name sqlite_file)
+ (public_name masc.sqlite_file)
+ (wrapped false)
+ (libraries sqlite3))

@@ -71,9 +71,11 @@ val reader_of_publication : publication -> reader
 val path : reader -> string
 val read_hint : reader -> change_hint outcome
 (** Read-only/no creation. Returns typed missing, scope/schema/tail and I/O
-    failures with the existing cleanup contract. No stat cache or retry. *)
+    failures with the existing cleanup contract. Waits for a writer's lock as
+    [Sqlite_file.open_reader] does; no stat cache or other retry. *)
 val read : ?after:cursor -> reader -> snapshot outcome
-(** READONLY, never creates a missing store. Every row in one SQLite read
+(** Opens with [Sqlite_file.open_reader (Owned Delete)]: read-write with
+    [PRAGMA query_only=1], never creates a missing store. Every row in one SQLite read
     transaction is semantically validated before any selected rows are returned.
     [validation] names that exact fully audited snapshot, not later live state.
     No terminal row is not proof of task completion; no sequence gap is not proof

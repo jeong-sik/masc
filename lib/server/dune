@@ -105,6 +105,7 @@
   ws-direct-gluten
   bigstringaf
   sqlite3
+  masc.sqlite_file
   unix
   threads
   optint

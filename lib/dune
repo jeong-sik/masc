@@ -146,6 +146,7 @@
   uucp
   otoml
   sqlite3
+  masc.sqlite_file
   base64
   graphql
   graphql_parser

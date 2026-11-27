@@ -9,6 +9,7 @@ import {
   bumpSessionEpoch,
   setSingleUserToken,
 } from '../../core/auth'
+import { resourceCache } from '../../core/resource-cache'
 import {
   clearWorkspaceMediaCache,
   getWorkspaceMediaCacheStats,
@@ -526,6 +527,110 @@ describe('MarkdownContent workspace media & rich embeds', () => {
       const artCalls = fetchMock.mock.calls.filter(([u]) => String(u).includes('/api/v1/published-artifacts'))
       expect(wikiCalls).toHaveLength(1)
       expect(artCalls).toHaveLength(1)
+    } finally {
+      render(null, container)
+      container.remove()
+    }
+  })
+
+  it('refreshes embed metadata after resourceCache topic invalidation and after TTL expiry', async () => {
+    const artId = `artifact-${'f'.repeat(32)}`
+    let includeNewItems = false
+    let wikiRevision = 1
+    let nowMs = 1_700_000_000_000
+    vi.spyOn(Date, 'now').mockImplementation(() => nowMs)
+
+    const fetchMock = vi.fn<typeof globalThis.fetch>((input) => {
+      const url = String(input)
+      if (url.endsWith('/api/v1/wiki')) {
+        const pages = includeNewItems
+          ? [{ slug: 'brand-new-doc', title: 'Brand New Doc', summary: 'Freshly saved', revision: wikiRevision }]
+          : []
+        return Promise.resolve(new Response(JSON.stringify({
+          schema_version: 1,
+          instance_id: 'i',
+          generated_at_unix: 1,
+          data: { pages },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      }
+      if (url.endsWith('/api/v1/published-artifacts')) {
+        const artifacts = includeNewItems
+          ? [{ id: artId, title: 'Fresh Artifact', summary: 'Just published', format: 'markdown', revision: 1 }]
+          : []
+        return Promise.resolve(new Response(JSON.stringify({ artifacts }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }))
+      }
+      return Promise.resolve(new Response(null, { status: 404 }))
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    authSession.value = {
+      kind: 'single_user_local',
+      mode: 'single_user',
+      tokenPresent: true,
+      role: 'admin',
+      canTokenAdmin: true,
+      canTokenRead: true,
+      authMethods: DEFAULT_AUTH_METHODS,
+      workspaceId: 'default',
+    }
+    act(() => {
+      bumpSessionEpoch()
+    })
+
+    const container = document.createElement('div')
+    document.body.append(container)
+    try {
+      // 1. Initial render: both missing -> shows "문서 없음" / "아티팩트 없음"
+      act(() => {
+        render(h(MarkdownContent, {
+          document: true,
+          text: `![[wiki:brand-new-doc]]\n\n![[artifact:${artId}]]`,
+        }), container)
+      })
+      await waitFor(() => {
+        expect(container.querySelector('a.masc-embed-card--wiki')?.textContent).toContain('문서 없음')
+        expect(container.querySelector('a.masc-embed-card--artifact')?.textContent).toContain('아티팩트 없음')
+      })
+
+      // 2. Author saves new Wiki page (WikiTab calls resourceCache.invalidateTopic('wiki'))
+      //    and publishes new Artifact -> topic invalidation immediately refreshes on next render
+      includeNewItems = true
+      resourceCache.invalidateTopic('wiki')
+      resourceCache.invalidateTopic('artifacts')
+
+      act(() => {
+        render(null, container)
+        render(h(MarkdownContent, {
+          document: true,
+          text: `![[wiki:brand-new-doc]]\n\n![[artifact:${artId}]]`,
+        }), container)
+      })
+      await waitFor(() => {
+        const wikiCard = container.querySelector('a.masc-embed-card--wiki')
+        expect(wikiCard?.textContent).toContain('Brand New Doc')
+        expect(wikiCard?.textContent).toContain('rev 1')
+        expect(wikiCard?.textContent).not.toContain('문서 없음')
+        const artCard = container.querySelector('a.masc-embed-card--artifact')
+        expect(artCard?.textContent).toContain('Fresh Artifact')
+        expect(artCard?.textContent).not.toContain('아티팩트 없음')
+      })
+
+      // 3. Even without explicit topic invalidation, TTL expiry (>15s) refreshes updated revision
+      wikiRevision = 2
+      nowMs += 16_000
+      act(() => {
+        render(null, container)
+        render(h(MarkdownContent, {
+          document: true,
+          text: '![[wiki:brand-new-doc]]',
+        }), container)
+      })
+      await waitFor(() => {
+        expect(container.querySelector('a.masc-embed-card--wiki')?.textContent).toContain('rev 2')
+      })
     } finally {
       render(null, container)
       container.remove()

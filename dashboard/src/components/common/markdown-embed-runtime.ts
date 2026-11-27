@@ -10,14 +10,16 @@ import {
   canAccessMemberWorkspace,
   canUseSingleUserTokenAdmin,
   isEpochCurrent,
-  sessionEpoch,
 } from '../../core/auth'
+import { resourceCache } from '../../core/resource-cache'
 import { apiGet, apiGetV2 } from '../../core/transport'
 import {
   isValidPublishedArtifactId,
   isValidWikiSlug,
   isWorkspaceMediaPath,
 } from '../../lib/keeper-media'
+import { err, ok, type Result } from '../../lib/result'
+import type { ApiError } from '../../core/transport'
 import {
   acquireWorkspaceMediaObjectUrl,
   type WorkspaceMediaObjectUrlLease,
@@ -25,35 +27,20 @@ import {
 
 const MEDIA_OBSERVER_ROOT_MARGIN = '200px'
 const DEFAULT_MEDIA_ALT = '워크스페이스 이미지'
+const EMBED_INDEX_TTL_MS = 15_000
+const WIKI_EMBED_META_KEY = 'embed-meta:wiki'
+const ARTIFACT_EMBED_META_KEY = 'embed-meta:artifacts'
 
-// ── Optional Authenticated Embed Metadata Cache (Epoch-Scoped, Batched) ──
+// ── Optional Authenticated Embed Metadata Cache (resourceCache-backed) ──
 
 type EmbedMetadata =
   | { readonly status: 'found'; readonly title: string; readonly summary: string | null; readonly meta: string }
   | { readonly status: 'not_found' }
 
-interface IndexCacheSlot {
-  readonly epoch: number
-  readonly controller: AbortController
-  readonly promise: Promise<Map<string, EmbedMetadata> | null>
-}
-
-let wikiIndexCache: IndexCacheSlot | null = null
-let artifactIndexCache: IndexCacheSlot | null = null
-let embedMetaEpoch = sessionEpoch.peek()
-
 export function clearEmbedMetadataCache(): void {
-  wikiIndexCache?.controller.abort()
-  wikiIndexCache = null
-  artifactIndexCache?.controller.abort()
-  artifactIndexCache = null
+  resourceCache.invalidateKey(WIKI_EMBED_META_KEY)
+  resourceCache.invalidateKey(ARTIFACT_EMBED_META_KEY)
 }
-
-sessionEpoch.subscribe((next) => {
-  if (next === embedMetaEpoch) return
-  embedMetaEpoch = next
-  clearEmbedMetadataCache()
-})
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -65,99 +52,81 @@ function nonEmptyStr(v: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null
 }
 
-function getWikiIndexMetaMap(epoch: number): Promise<Map<string, EmbedMetadata> | null> {
-  if (wikiIndexCache && wikiIndexCache.epoch === epoch) {
-    return wikiIndexCache.promise
+function decodeError(message: string): ApiError {
+  return {
+    kind: 'decode',
+    status: 200,
+    code: 'decode',
+    message,
+    retryable: false,
   }
-  wikiIndexCache?.controller.abort()
-  const controller = new AbortController()
-  const promise = apiGetV2<unknown>('/api/v1/wiki', { signal: controller.signal })
-    .then((res) => {
-      if (controller.signal.aborted || !isEpochCurrent(epoch) || !res.ok || !isRecord(res.value)) {
-        if (wikiIndexCache?.controller === controller) wikiIndexCache = null
-        return null
-      }
-      const pages = Array.isArray(res.value.pages) ? res.value.pages : null
-      if (!pages) {
-        if (wikiIndexCache?.controller === controller) wikiIndexCache = null
-        return null
-      }
-      const map = new Map<string, EmbedMetadata>()
-      for (const row of pages) {
-        if (!isRecord(row)) continue
-        const slug = nonEmptyStr(row.slug)
-        if (!slug) continue
-        const title = nonEmptyStr(row.title) ?? slug
-        const summary = nonEmptyStr(row.summary)
-        const rev = typeof row.revision === 'number' && Number.isFinite(row.revision)
-          ? `rev ${row.revision}`
-          : null
-        const meta = rev ? `/knowledge/wiki/${slug} · ${rev}` : `/knowledge/wiki/${slug}`
-        map.set(slug, { status: 'found', title, summary, meta })
-      }
-      return map
-    })
-    .catch(() => {
-      if (wikiIndexCache?.controller === controller) wikiIndexCache = null
-      return null
-    })
-  wikiIndexCache = { epoch, controller, promise }
-  return promise
 }
 
-function getArtifactIndexMetaMap(epoch: number): Promise<Map<string, EmbedMetadata> | null> {
-  if (artifactIndexCache && artifactIndexCache.epoch === epoch) {
-    return artifactIndexCache.promise
+async function loadWikiIndexMetaMap(signal: AbortSignal): Promise<Result<Map<string, EmbedMetadata>, ApiError>> {
+  const res = await apiGetV2<unknown>('/api/v1/wiki', { signal })
+  if (!res.ok) return res
+  if (!isRecord(res.value) || !Array.isArray(res.value.pages)) {
+    return err(decodeError('Invalid GET /api/v1/wiki index payload'))
   }
-  artifactIndexCache?.controller.abort()
-  const controller = new AbortController()
-  const promise = apiGet<unknown>('/api/v1/published-artifacts', { signal: controller.signal })
-    .then((res) => {
-      if (controller.signal.aborted || !isEpochCurrent(epoch) || !res.ok || !isRecord(res.value)) {
-        if (artifactIndexCache?.controller === controller) artifactIndexCache = null
-        return null
-      }
-      const artifacts = Array.isArray(res.value.artifacts) ? res.value.artifacts : null
-      if (!artifacts) {
-        if (artifactIndexCache?.controller === controller) artifactIndexCache = null
-        return null
-      }
-      const map = new Map<string, EmbedMetadata>()
-      for (const row of artifacts) {
-        if (!isRecord(row)) continue
-        const id = nonEmptyStr(row.id)
-        if (!id) continue
-        const title = nonEmptyStr(row.title) ?? id
-        const summary = nonEmptyStr(row.summary)
-        const format = row.format === 'html' ? 'HTML' : 'MARKDOWN'
-        const rev = typeof row.revision === 'number' && Number.isFinite(row.revision)
-          ? `rev ${row.revision}`
-          : null
-        const meta = rev ? `${format} · ${rev}` : format
-        map.set(id, { status: 'found', title, summary, meta })
-      }
-      return map
-    })
-    .catch(() => {
-      if (artifactIndexCache?.controller === controller) artifactIndexCache = null
-      return null
-    })
-  artifactIndexCache = { epoch, controller, promise }
-  return promise
+  const map = new Map<string, EmbedMetadata>()
+  for (const row of res.value.pages) {
+    if (!isRecord(row)) continue
+    const slug = nonEmptyStr(row.slug)
+    if (!slug) continue
+    const title = nonEmptyStr(row.title) ?? slug
+    const summary = nonEmptyStr(row.summary)
+    const rev = typeof row.revision === 'number' && Number.isFinite(row.revision)
+      ? `rev ${row.revision}`
+      : null
+    const meta = rev ? `/knowledge/wiki/${slug} · ${rev}` : `/knowledge/wiki/${slug}`
+    map.set(slug, { status: 'found', title, summary, meta })
+  }
+  return ok(map)
+}
+
+async function loadArtifactIndexMetaMap(signal: AbortSignal): Promise<Result<Map<string, EmbedMetadata>, ApiError>> {
+  const res = await apiGet<unknown>('/api/v1/published-artifacts', { signal })
+  if (!res.ok) return res
+  if (!isRecord(res.value) || !Array.isArray(res.value.artifacts)) {
+    return err(decodeError('Invalid GET /api/v1/published-artifacts index payload'))
+  }
+  const map = new Map<string, EmbedMetadata>()
+  for (const row of res.value.artifacts) {
+    if (!isRecord(row)) continue
+    const id = nonEmptyStr(row.id)
+    if (!id) continue
+    const title = nonEmptyStr(row.title) ?? id
+    const summary = nonEmptyStr(row.summary)
+    const format = row.format === 'html' ? 'HTML' : 'MARKDOWN'
+    const rev = typeof row.revision === 'number' && Number.isFinite(row.revision)
+      ? `rev ${row.revision}`
+      : null
+    const meta = rev ? `${format} · ${rev}` : format
+    map.set(id, { status: 'found', title, summary, meta })
+  }
+  return ok(map)
 }
 
 async function fetchWikiEmbedMeta(slug: string, epoch: number, signal: AbortSignal): Promise<EmbedMetadata | null> {
-  if (!canAccessMemberWorkspace(authSession.peek())) return null
-  const map = await getWikiIndexMetaMap(epoch)
-  if (!map || signal.aborted || !isEpochCurrent(epoch)) return null
-  return map.get(slug) ?? { status: 'not_found' }
+  if (!canAccessMemberWorkspace(authSession.peek()) || !isEpochCurrent(epoch)) return null
+  const obs = await resourceCache.fetch<Map<string, EmbedMetadata>>(
+    WIKI_EMBED_META_KEY,
+    loadWikiIndexMetaMap,
+    { ttlMs: EMBED_INDEX_TTL_MS, topics: ['wiki', 'wiki_updated'], reason: 'mount' },
+  )
+  if (obs.kind !== 'value' || signal.aborted || !isEpochCurrent(epoch)) return null
+  return obs.data.get(slug) ?? { status: 'not_found' }
 }
 
 async function fetchArtifactEmbedMeta(id: string, epoch: number, signal: AbortSignal): Promise<EmbedMetadata | null> {
-  if (!canUseSingleUserTokenAdmin(authSession.peek())) return null
-  const map = await getArtifactIndexMetaMap(epoch)
-  if (!map || signal.aborted || !isEpochCurrent(epoch)) return null
-  return map.get(id) ?? { status: 'not_found' }
+  if (!canUseSingleUserTokenAdmin(authSession.peek()) || !isEpochCurrent(epoch)) return null
+  const obs = await resourceCache.fetch<Map<string, EmbedMetadata>>(
+    ARTIFACT_EMBED_META_KEY,
+    loadArtifactIndexMetaMap,
+    { ttlMs: EMBED_INDEX_TTL_MS, topics: ['artifacts', 'artifact_published'], reason: 'mount' },
+  )
+  if (obs.kind !== 'value' || signal.aborted || !isEpochCurrent(epoch)) return null
+  return obs.data.get(id) ?? { status: 'not_found' }
 }
 
 function applyEmbedMetadata(anchor: HTMLAnchorElement, kind: 'wiki' | 'artifact', meta: EmbedMetadata): void {
@@ -174,6 +143,7 @@ function applyEmbedMetadata(anchor: HTMLAnchorElement, kind: 'wiki' | 'artifact'
     return
   }
 
+  head.querySelector('.masc-embed-missing')?.remove()
   const customLabel = anchor.getAttribute('data-masc-embed-label')?.trim() ?? ''
   const titleEl = head.querySelector('.masc-embed-title')
   if (titleEl && !customLabel) {

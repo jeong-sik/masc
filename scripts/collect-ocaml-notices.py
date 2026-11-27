@@ -23,7 +23,9 @@ A linked package with no notice stops the collection unless NO_UPSTREAM_NOTICE
 names that exact version.
 
 The output is OUT/<package>/<path> and OUT/packages.json. The runtime
-packagers ship that directory as licenses/ocaml/ in masc-runtime-<platform>.
+packagers ship that directory as licenses/ocaml/ in masc-runtime-<platform>,
+and scripts/package-exec-shim-notices.py ships the exec shim's the same way in
+masc-exec-shim-licenses-linux-<arch>.tar.gz.
 
 Run it from the repository root, inside the opam environment that built the
 executables, after `dune build --release` of the same targets. Libraries built

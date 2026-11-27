@@ -12,7 +12,7 @@
 # compiler, dependency manifest and builder recipe so matching runs skip the opam step.
 #
 # Usage:
-#   scripts/remote-ssh/build-shim.sh [--arch amd64|arm64|all] [--out DIR]
+#   scripts/remote-ssh/build-shim.sh [--arch amd64|arm64|all] [--out DIR] [--notices]
 #   scripts/remote-ssh/build-shim.sh --arch amd64|arm64 --print-builder-config
 #     Print tag/compiler key-value lines without Docker or filesystem writes.
 #
@@ -20,16 +20,25 @@
 #   <out>/masc-exec-shim-linux-<arch>   (default out: dist/remote-ssh)
 #   A sha256 line per binary, and a hard failure if the result is not
 #   statically linked.
+#   With --notices, also <out>/masc-exec-shim-licenses-linux-<arch>.tar.gz:
+#   the license notices of what the binary links (masc#39934), the release
+#   asset scripts/package-exec-shim-notices.py describes. The release build
+#   asks for it; it needs network access, and a refused collection fails the
+#   build.
 set -euo pipefail
 
 ARCHES="amd64 arm64"
 OUT_DIR="dist/remote-ssh"
 PRINT_BUILDER_CONFIG=false
+NOTICES=false
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --print-builder-config)
       PRINT_BUILDER_CONFIG=true
+      ;;
+    --notices)
+      NOTICES=true
       ;;
     --arch)
       shift
@@ -106,6 +115,8 @@ prepare_builder() {
 build_one() {
   arch="$1"
   out="$repo_root/$OUT_DIR/masc-exec-shim-linux-$arch"
+  # A new binary leaves an earlier notice archive describing other bytes.
+  rm -f "$repo_root/$OUT_DIR/masc-exec-shim-licenses-linux-$arch.tar.gz"
   prepare_builder "$arch"
   echo "[build-shim] building $arch" >&2
   # OCAMLPARAM ccopt makes the final link fully static on musl; the repo's
@@ -132,6 +143,37 @@ build_one() {
   shasum -a 256 "$out"
 }
 
+# --notices (masc#39934): the notices are read in the builder that linked the
+# shim, from its opam switch and its musl, the way
+# scripts/build-linux-release.sh reads the runtime's in its own builder.
+# scripts/collect-ocaml-notices.py reads dune's release-profile link rule after
+# a release build of the same target, so that build runs here in a build
+# directory of its own; the shim installed above is not rebuilt. OPAMSWITCH
+# points the collector's own opam calls at the switch that linked the shim.
+collect_notices() {
+  arch="$1"
+  echo "[build-shim] collecting the $arch license notices" >&2
+  docker run --rm --platform "linux/$arch" \
+    -v "$repo_root:/src:ro" \
+    -v "$repo_root/$OUT_DIR:/out" \
+    -e OCAMLPARAM="_,ccopt=-static,ccopt=-no-pie" \
+    -e DUNE_BUILD_DIR=/tmp/shimnotices \
+    -e OPAMSWITCH=masc-shim \
+    -e SHIM_ARCH="$arch" \
+    "${identity_args[@]}" \
+    "$tag" \
+    sh -lc 'set -e
+      cd /src
+      opam exec -- dune build --release bin/masc_exec_shim.exe
+      opam exec -- python3 scripts/collect-ocaml-notices.py --out /tmp/shim-ocaml-notices bin/masc_exec_shim.exe
+      python3 scripts/package-exec-shim-notices.py package --arch "$SHIM_ARCH" \
+        --shim "/out/masc-exec-shim-linux-$SHIM_ARCH" --ocaml-notices /tmp/shim-ocaml-notices \
+        --output "/out/masc-exec-shim-licenses-linux-$SHIM_ARCH.tar.gz"'
+}
+
 for arch in $ARCHES; do
   build_one "$arch"
+  if [ "$NOTICES" = true ]; then
+    collect_notices "$arch"
+  fi
 done

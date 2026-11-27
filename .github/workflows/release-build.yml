@@ -91,6 +91,7 @@ jobs:
           "$installer_python" test/test_installer_uninstall.py
           "$installer_python" test/test_package_macos_runtime.py
           "$installer_python" scripts/tests/test_collect_ocaml_notices.py
+          "$installer_python" scripts/tests/test_package_exec_shim_notices.py
           "$installer_python" test/test_installer_dependencies.py
 
       # Linux builds inside a container (see the Build step), so only the
@@ -416,6 +417,9 @@ jobs:
       # probed once here: a shim that cannot answer --probe is not an asset.
       # It is built before the installer smoke so the smoke can stage it and
       # check that install.sh places it with its sha256 sidecar (B-2).
+      # --notices writes masc-exec-shim-licenses-linux-<arch>.tar.gz beside
+      # it: the notices of the OCaml packages and the musl it links
+      # (masc#39934). A refused collection fails this job.
       - name: Prepare static shim compiler
         if: matrix.shim-arch != ''
         uses: ./.github/actions/prepare-shim-builder
@@ -426,7 +430,7 @@ jobs:
         if: matrix.shim-arch != ''
         run: |
           chmod +x scripts/remote-ssh/build-shim.sh
-          scripts/remote-ssh/build-shim.sh --arch "${{ matrix.shim-arch }}" --out dist
+          scripts/remote-ssh/build-shim.sh --arch "${{ matrix.shim-arch }}" --out dist --notices
           shim="dist/masc-exec-shim-linux-${{ matrix.shim-arch }}"
           conf="$(mktemp)"
           printf 'remote_root=/tmp\n' > "$conf"
@@ -605,14 +609,20 @@ jobs:
             cp "dist/$asset" "release-assets/$asset"
           done
           # The exec shim (RFC-0427 B-1): one static Linux binary per guest
-          # architecture, named by the shim's own convention.
-          for shim in masc-exec-shim-linux-amd64 masc-exec-shim-linux-arm64; do
+          # architecture, named by the shim's own convention, and beside each
+          # the notices of what it links (masc#39934).
+          for shim in masc-exec-shim-linux-amd64 masc-exec-shim-linux-arm64 \
+            masc-exec-shim-licenses-linux-amd64.tar.gz masc-exec-shim-licenses-linux-arm64.tar.gz; do
             if [ ! -f "dist/$shim" ]; then
               echo "required release asset missing: $shim"
               exit 1
             fi
             cp "dist/$shim" "release-assets/$shim"
           done
+          # Each archive must hold every notice its packages.json lists, musl's
+          # COPYRIGHT, and nothing else, and name the sha256 of the shim
+          # published beside it.
+          python3 scripts/package-exec-shim-notices.py verify --dist release-assets
 
       - name: Generate release checksums
         run: |

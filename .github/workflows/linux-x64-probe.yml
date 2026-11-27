@@ -29,6 +29,11 @@ on:
         type: boolean
         default: false
 
+      exec_shim_notices:
+        description: Exec shim targets only. Also write its license notice archive as the release build does (the candidate's build-shim.sh must accept --notices)
+        type: boolean
+        default: false
+
 permissions:
   contents: read
 
@@ -40,6 +45,7 @@ jobs:
     env:
       SHIM_ARCH: ${{ inputs.target == 'exec-shim-linux-arm64' && 'arm64' || 'amd64' }}
       CANDIDATE_SHA: ${{ inputs.candidate_sha }}
+      SHIM_NOTICES: ${{ inputs.exec_shim_notices }}
     defaults:
       run:
         shell: bash
@@ -73,7 +79,11 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
           git diff --exit-code HEAD --
-          scripts/remote-ssh/build-shim.sh --arch "$SHIM_ARCH" --out dist/remote-ssh-probe
+          notices=()
+          if [ "$SHIM_NOTICES" = true ]; then
+            notices=(--notices)
+          fi
+          scripts/remote-ssh/build-shim.sh --arch "$SHIM_ARCH" --out dist/remote-ssh-probe "${notices[@]}"
           python3 probe-driver/scripts/remote-ssh/probe-shim-artifact.py \
             --shim "dist/remote-ssh-probe/masc-exec-shim-linux-$SHIM_ARCH" \
             --source-commit "$CANDIDATE_SHA" --arch "$SHIM_ARCH" \

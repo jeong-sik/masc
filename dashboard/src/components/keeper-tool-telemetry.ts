@@ -21,6 +21,7 @@ import { isKeeperToolActivityEvent, sseEventMatchesKeeper } from './keeper-sse-m
 // ── Types ─────────────────────────────────────────────
 
 interface TelemetryState extends TelemetryFreshnessMetadata {
+  keeperName: string
   tools: ToolStat[]
   timeline: HourlyBucket[]
   totalEntries: number
@@ -156,17 +157,13 @@ interface KeeperToolTelemetryProps {
 }
 
 export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
-  const resource = useManagedAsyncResource<TelemetryState>({
-    tools: [],
-    timeline: [],
-    totalEntries: 0,
-    windowHours: 24,
-  })
+  const resource = useManagedAsyncResource<TelemetryState | null>(null)
   const [query, setQuery] = useState('')
 
   const loadToolStats = useCallback(async (signal: AbortSignal): Promise<TelemetryState> => {
     const data: ToolStatsResponse = await fetchKeeperToolStats(keeperName, 24, { signal })
     return {
+      keeperName,
       source: data.source,
       producer: data.producer,
       durable_store: data.durable_store,
@@ -189,6 +186,7 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
   }, [keeperName])
 
   useEffect(() => {
+    resource.reset()
     void resource.load(loadToolStats)
     return () => {
       resource.cancel()
@@ -208,22 +206,21 @@ export function KeeperToolTelemetry({ keeperName }: KeeperToolTelemetryProps) {
   }, [keeperName, loadToolStats, resource])
 
   const asyncState = resource.state.value
-  const s = asyncState.data ?? {
-    tools: [],
-    timeline: [],
-    totalEntries: 0,
-    windowHours: 24,
-  }
+  const activeData =
+    asyncState.data?.keeperName === keeperName ? asyncState.data : null
 
   // Loading stays quiet only on initial load; keep retained data mounted during SSE refreshes.
-  if (asyncState.loading && !asyncState.data) return null
-  if (asyncState.error && !asyncState.data) {
+  if (asyncState.loading && !activeData) return null
+  if (asyncState.error && !activeData) {
     return html`<div class="text-xs text-[var(--color-status-err)] py-2 px-3 v2-monitoring-panel" role="alert">텔레메트리 로드 실패: ${asyncState.error}</div>`
   }
+  if (!activeData) return null
+  const s = activeData
 
   if (s.tools.length === 0) {
     return html`
       <div class="p-4 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-card/30 v2-monitoring-panel">
+        ${asyncState.error ? html`<div class="mb-2 text-2xs text-[var(--color-status-err)]" role="alert">텔레메트리 갱신 실패: ${asyncState.error}</div>` : null}
         <div class="text-xs text-[var(--color-fg-muted)]">도구 텔레메트리 데이터 없음</div>
         <${FreshnessLine} data=${s} />
       </div>

@@ -32,7 +32,6 @@ import type { AskChoice, AskQuestion, AskRow } from '../../lib/keeper-ask-wire'
 import {
   askConflict,
   askError,
-  askSubmitting,
   asksResource,
   closeAsk,
   draftForRow,
@@ -40,6 +39,7 @@ import {
   refreshKeeperAsks,
   selectAsk,
   submitAnswer,
+  submittingAskId,
   updateDraft,
 } from '../keeper-asks-store'
 
@@ -123,6 +123,7 @@ function Question({ row, question }: { row: AskRow; question: AskQuestion }) {
 
 function AskCard({ row }: { row: AskRow }) {
   const open = openAskId.value === row.askId
+  const submittingThis = submittingAskId.value === row.askId
   const draft = draftForRow(row)
   const state = readiness(draft, row)
   const missing = state.state === 'missing' ? state.questions.length : 0
@@ -145,10 +146,10 @@ function AskCard({ row }: { row: AskRow }) {
               <button
                 type="button"
                 class="ka-submit"
-                disabled=${askSubmitting.value || state.state !== 'ready'}
+                disabled=${submittingThis || state.state !== 'ready'}
                 onClick=${() => void submitAnswer(row)}
               >
-                ${askSubmitting.value ? '보내는 중…' : '답 보내기'}
+                ${submittingThis ? '보내는 중…' : '답 보내기'}
               </button>
               ${missing === 0 ? null : html`<span class="ka-missing">${missing}개 남음</span>`}
               <button type="button" class="ka-cancel" onClick=${closeAsk}>닫기</button>

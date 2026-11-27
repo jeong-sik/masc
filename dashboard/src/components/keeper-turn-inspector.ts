@@ -76,7 +76,12 @@ function FreshnessLine({ data }: { data: TelemetryFreshnessMetadata }) {
       <span class="font-mono ${sourceHealthClass(data.health)}">${data.health ?? 'unknown'}</span>
       <span class="mx-1" aria-hidden="true">·</span>
       <span>${freshnessText(data)}</span>
-      ${gap ? html`<span class="mx-1" aria-hidden="true">·</span><span>${gap}</span>` : null}
+      ${gap ? html`
+        <div class="mt-1 font-mono text-[var(--color-status-warn)]">${gap.summary}</div>
+        ${gap.details.length > 0 ? html`
+          <div class="mt-0.5 break-all font-mono text-[var(--color-fg-muted)]">${gap.details.join(' · ')}</div>
+        ` : null}
+      ` : null}
     </div>
   `
 }
@@ -276,6 +281,7 @@ export function KeeperMemoryOsRecallPanel({ keeperName }: { keeperName: string }
   const resource = useManagedAsyncResource<TurnRecordsResponse | null>(null)
 
   useEffect(() => {
+    resource.reset()
     void resource.load(async (signal) => {
       return await fetchKeeperTurnRecords(keeperName, 12, { signal })
     })
@@ -386,6 +392,7 @@ type TurnToolDetail = {
 }
 
 type TurnInspectorData = {
+  keeperName: string
   turns: TurnRecordsResponse
   toolCalls: ToolCallsResponse | null
   toolCallError: string | null
@@ -1260,6 +1267,7 @@ export function KeeperTurnInspector({
   const appliedInitialTurnKey = useRef<string | null>(null)
 
   useEffect(() => {
+    resource.reset()
     void resource.load(async (signal) => {
       const [turns, toolCalls] = await Promise.all([
         fetchKeeperTurnRecords(keeperName, 50, { signal }),
@@ -1268,20 +1276,30 @@ export function KeeperTurnInspector({
           error => ({ toolCalls: null, toolCallError: errorMessage(error) }),
         ),
       ])
-      return { turns, toolCalls: toolCalls.toolCalls, toolCallError: toolCalls.toolCallError }
+      return {
+        keeperName,
+        turns,
+        toolCalls: toolCalls.toolCalls,
+        toolCallError: toolCalls.toolCallError,
+      }
     })
     return () => {
       resource.cancel()
     }
   }, [keeperName, resource])
 
-  const response = resource.state.value.data?.turns
-  const toolEntries = resource.state.value.data?.toolCalls?.entries ?? []
-  const toolCallError = resource.state.value.data?.toolCallError ?? null
+  const dataForKeeper =
+    resource.state.value.data?.keeperName === keeperName
+      ? resource.state.value.data
+      : null
+  const response = dataForKeeper?.turns
+  const toolEntries = dataForKeeper?.toolCalls?.entries ?? []
+  const toolCallError = dataForKeeper?.toolCallError ?? null
   const rows = response?.entries ?? EMPTY_TURN_RECORD_ROWS
   // Server returns oldest-first; show newest first.
   const sorted = useMemo(() => [...rows].reverse(), [rows])
   const initialTurnRef = anchor.kind === 'ref' ? anchor.value : null
+  const initialTurnScopeKey = initialTurnRef ? `${keeperName}:${initialTurnRef}` : null
   const initialMatchedRow = useMemo(
     () => initialTurnRowForTurnRef(rows, initialTurnRef),
     [rows, initialTurnRef],
@@ -1296,16 +1314,17 @@ export function KeeperTurnInspector({
   useEffect(() => {
     if (
       anchor.kind !== 'ref'
+      || dataForKeeper === null
       || rows.length === 0
-      || appliedInitialTurnKey.current === initialTurnRef
+      || appliedInitialTurnKey.current === initialTurnScopeKey
     ) {
       return
     }
 
     setSelectedRow(initialMatchedRow)
     setInitialMatchState(initialMatchedRow ? 'matched' : 'missed')
-    appliedInitialTurnKey.current = initialTurnRef
-  }, [anchor.kind, initialTurnRef, initialMatchedRow, rows.length])
+    appliedInitialTurnKey.current = initialTurnScopeKey
+  }, [anchor.kind, dataForKeeper, initialTurnScopeKey, initialMatchedRow, rows.length])
 
   if (resource.state.value.loading) {
     return html`<${LoadingState}>턴 레코드 불러오는 중...<//>`

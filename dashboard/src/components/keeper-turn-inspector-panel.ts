@@ -9,7 +9,7 @@
 // put a sentence in front of the next turn.
 
 import { html } from 'htm/preact'
-import { useCallback, useEffect, useState } from 'preact/hooks'
+import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import {
   fetchKeeperLastPrompt,
   fetchKeeperOperatorNote,
@@ -311,6 +311,16 @@ function NoteEditor({ keeper }: { keeper: string }) {
   const [draft, setDraft] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const mountedRef = useRef(true)
+  const activeKeeperRef = useRef(keeper)
+
+  useEffect(() => {
+    mountedRef.current = true
+    activeKeeperRef.current = keeper
+    return () => {
+      mountedRef.current = false
+    }
+  }, [keeper])
 
   const load = useCallback((signal?: AbortSignal) => {
     setError(null)
@@ -330,6 +340,7 @@ function NoteEditor({ keeper }: { keeper: string }) {
     setNote(null)
     setAbsent(false)
     setDraft('')
+    setSaving(false)
     load(controller.signal)
     return () => controller.abort()
   }, [keeper, load])
@@ -338,20 +349,25 @@ function NoteEditor({ keeper }: { keeper: string }) {
   const overBudget = bytes > MAX_NOTE_BYTES
 
   const submit = useCallback(async () => {
+    const targetKeeper = keeper
     setSaving(true)
     setError(null)
     try {
-      const saved = await putKeeperOperatorNote(keeper, draft)
+      const saved = await putKeeperOperatorNote(targetKeeper, draft)
+      if (!mountedRef.current || activeKeeperRef.current !== targetKeeper) return
       setNote(saved)
       setAbsent(false)
       setDraft('')
     } catch (reason: unknown) {
+      if (!mountedRef.current || activeKeeperRef.current !== targetKeeper) return
       // The server rejects an oversized note rather than truncating it, and
       // its refusal carries the byte counts. Showing it verbatim beats a
       // generic failure for the one case an operator needs to act on.
       setError(reason instanceof Error ? reason.message : String(reason))
     } finally {
-      setSaving(false)
+      if (mountedRef.current && activeKeeperRef.current === targetKeeper) {
+        setSaving(false)
+      }
     }
   }, [keeper, draft])
 
@@ -457,9 +473,9 @@ export function KeeperTurnInspectorPanel({ keepers }: { keepers: readonly string
       </div>
       <${Muted}>${active.hint}<//>
 
-      ${tab === 'raw' ? html`<${RawTurns} keeper=${keeper} />` : null}
-      ${tab === 'prompt' ? html`<${KeeperPromptCapture} keeper=${keeper} />` : null}
-      ${tab === 'note' ? html`<${NoteEditor} keeper=${keeper} />` : null}
+      ${tab === 'raw' ? html`<${RawTurns} key=${keeper} keeper=${keeper} />` : null}
+      ${tab === 'prompt' ? html`<${KeeperPromptCapture} key=${keeper} keeper=${keeper} />` : null}
+      ${tab === 'note' ? html`<${NoteEditor} key=${keeper} keeper=${keeper} />` : null}
     </section>
   `
 }

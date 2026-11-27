@@ -1,7 +1,7 @@
 import { signal } from '@preact/signals'
 import { fetchKeeperConfig } from '../api/dashboard'
 import type { KeeperConfig } from '../types'
-import { createAsyncResource, loaded } from '../lib/async-state'
+import { createAsyncResource } from '../lib/async-state'
 
 export type KeeperConfigLoadStatus = 'idle' | 'loading' | 'loaded' | 'error' | 'other'
 
@@ -64,7 +64,7 @@ export function resetKeeperConfig(): void {
 
 export function applyKeeperConfigUpdate(name: string, updated: KeeperConfig): void {
   configKeeperName.value = name
-  configState.value = loaded(updated)
+  configResource.setLoaded(updated)
   for (const handler of updateHandlers) {
     handler(name, updated)
   }

@@ -23,6 +23,7 @@ export const asksResource = createManagedAsyncResource<AsksSnapshot>()
 export const openAskId = signal<string | null>(null)
 export const askDraft = signal<AskDraft | null>(null)
 export const askSubmitting = signal(false)
+export const submittingAskId = signal<string | null>(null)
 export const askError = signal<string | null>(null)
 /** Set when someone else answered first; cleared on the next selection. */
 export const askConflict = signal<string | null>(null)
@@ -57,39 +58,56 @@ export function draftForRow(row: AskRow): AskDraft {
 }
 
 export async function submitAnswer(row: AskRow): Promise<boolean> {
+  if (submittingAskId.value === row.askId) return false
   const draft = draftFor(askDraft.value, row)
   const state = readiness(draft, row)
   if (state.state === 'not-open') {
-    askError.value = '이미 답이 달린 질문입니다'
+    if (openAskId.value === row.askId) {
+      askError.value = '이미 답이 달린 질문입니다'
+    }
     return false
   }
   if (state.state === 'missing') {
     // Every gap at once, the way the domain reports them: fixing one and then
     // learning about the next is a round trip per mistake.
-    askError.value = `아직 답하지 않은 질문: ${state.questions.map((q) => q.header).join(', ')}`
+    if (openAskId.value === row.askId) {
+      askError.value = `아직 답하지 않은 질문: ${state.questions.map((q) => q.header).join(', ')}`
+    }
     return false
   }
+  submittingAskId.value = row.askId
   askSubmitting.value = true
-  askError.value = null
-  askConflict.value = null
+  if (openAskId.value === row.askId) {
+    askError.value = null
+    askConflict.value = null
+  }
   try {
     const accepted = await answerKeeperAsk(answerRequestBody(row, state.answers))
     if (accepted?.delivered === false) {
       askConflict.value = '답변이 기록되었습니다. Keeper 깨움 전달은 자동 복구 대기 중입니다.'
     }
-    closeAsk()
+    if (openAskId.value === row.askId) {
+      closeAsk()
+    }
     await refreshKeeperAsks()
     return true
   } catch (error) {
     if (error instanceof AskAnswerConflict) {
       askConflict.value = '다른 사람이 먼저 답했습니다. 새로 읽은 내용을 확인해 주세요.'
-      closeAsk()
+      if (openAskId.value === row.askId) {
+        closeAsk()
+      }
       await refreshKeeperAsks()
       return false
     }
-    askError.value = error instanceof Error ? error.message : String(error)
+    if (openAskId.value === row.askId) {
+      askError.value = error instanceof Error ? error.message : String(error)
+    }
     return false
   } finally {
-    askSubmitting.value = false
+    if (submittingAskId.value === row.askId) {
+      submittingAskId.value = null
+      askSubmitting.value = false
+    }
   }
 }

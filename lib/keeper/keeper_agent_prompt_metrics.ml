@@ -179,6 +179,9 @@ let remove_prompt_context ~outside_context_present ~prompt_context_present messa
        | Agent_core.Types.Historical_system_context
        | Recovery_instruction | Tool_result_followup | Agent_instruction ->
          walk seen_system seen_outside (message :: rev_retained) rest
+       | Agent_core.Types.Outside_context
+         when Runtime_model_input_tail_window.is_compaction_anchor message ->
+         walk seen_system seen_outside (message :: rev_retained) rest
        | Agent_core.Types.System_context ->
          if seen_system
          then Error Prompt_context_carrier_repeated

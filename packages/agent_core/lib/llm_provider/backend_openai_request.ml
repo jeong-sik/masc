@@ -263,8 +263,10 @@ let is_trailing_volatile_origin = function
 
 (* Split [messages] into [(prefix, trailing)] iff [messages] ends with a
    non-empty contiguous suffix of trailing volatile context messages
-   ([System_context] | [Outside_context]) AND neither origin appears anywhere
-   in [prefix]. *)
+   ([System_context] | [Outside_context]) AND no [System_context] appears
+   anywhere in [prefix]. Prefix-stable [Outside_context] anchors (such as a
+   compaction anchor at index 0) stay in [prefix] so explicit cache breakpoints
+   remain active after compaction. *)
 let split_strictly_trailing_system_context (messages : message list) =
   let rec peel_trailing acc = function
     | msg :: rest when is_trailing_volatile_origin msg.origin ->
@@ -275,7 +277,7 @@ let split_strictly_trailing_system_context (messages : message list) =
   match trailing with
   | [] -> None
   | _ :: _ ->
-    if List.exists (fun msg -> is_trailing_volatile_origin msg.origin) prefix
+    if List.exists (fun msg -> msg.origin = System_context) prefix
     then None
     else Some (prefix, trailing)
 ;;

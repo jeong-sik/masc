@@ -199,13 +199,28 @@ let prepare_turn
     let tools_json, visible_tool_names =
       prepare_tools ~tools ~deferred_tools ~defer_loading ()
     in
+    let trailing_volatile =
+      let rec peel acc = function
+        | (message : Llm_provider.Types.message) :: rest ->
+          (match message.origin with
+           | Llm_provider.Types.System_context | Llm_provider.Types.Outside_context ->
+             peel (message :: acc) rest
+           | Llm_provider.Types.Conversation
+           | Llm_provider.Types.Historical_system_context
+           | Llm_provider.Types.Recovery_instruction
+           | Llm_provider.Types.Tool_result_followup
+           | Llm_provider.Types.Agent_instruction -> acc)
+        | [] -> acc
+      in
+      peel [] (List.rev effective_messages)
+    in
     let collect_carrier ~expected ~origin ~error_detail =
       match expected with
       | None -> Ok None
       | Some _ ->
         (match List.filter (fun (message : Llm_provider.Types.message) ->
            message.origin = origin)
-           effective_messages with
+           trailing_volatile with
          | [] -> Ok None
          | [message] ->
            (* The carrier as transmitted re-enters history: Anthropic
@@ -244,7 +259,7 @@ let prepare_turn
             [ out_msg; sys_msg ]
           | _ :: rest -> in_transmission_order rest
         in
-        Ok (in_transmission_order effective_messages)
+        Ok (in_transmission_order trailing_volatile)
     in
     { effective_messages
     ; tools

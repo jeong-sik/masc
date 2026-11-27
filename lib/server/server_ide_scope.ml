@@ -15,12 +15,11 @@ let nonempty_query_param uri key =
   | None -> None
 ;;
 
-(* One wire key, one store. The scope carries the
-   canonical slug itself — the store directory name and the co-view
-   value — validated by the same acceptance the address mint applies.
-   The keeper-lane scope died with the orphan store it existed to
-   reach: keeper facts' durable record is the keeper tool_calls and
-   turn-records stores. *)
+(* One wire key. The scope carries the canonical slug itself — the
+   codebase address on the tool-call rows and the co-view value —
+   validated by the same acceptance the address mint applies. Keeper
+   facts' durable record is the keeper tool_calls and turn-records
+   stores. *)
 type ide_scope = Scope_codebase of { slug : string }
 
 let codebase_of_ide_scope (Scope_codebase { slug }) = slug

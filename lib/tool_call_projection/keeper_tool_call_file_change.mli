@@ -5,9 +5,8 @@
     after the turn ends. This module reads one of those rows and answers what
     changed — or says why it could not.
 
-    Nothing here consults [.masc-ide/]. That store keeps addressed code facts
-    for an IDE to overlay; this is a projection of the call log itself, which
-    is the only place the before/after text survives.
+    This is a projection of the call log itself, which is the only place the
+    before/after text survives.
 
     How far back the answer reaches is the log's retention window, not this
     module's: the server's prune pass removes the log's day files at the

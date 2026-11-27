@@ -94,10 +94,11 @@ type keeper_chat_stream_request = {
   channel_user_name : string;
   channel_workspace_id : string;
   sender_keeper : Keeper_identity.Keeper_id.t option;
-      (** The registered Keeper that sent this request, carried from the
-          durable operation source where the submitting tool matched the
-          Keeper registry. The HTTP body cannot set it: the parser always
-          yields [None]. *)
+      (** The Keeper whose own turn sent this request, carried from the
+          durable operation source. Only a Keeper's own turn submits one
+          ([Keeper_dispatch_ref.Turn_caller]); a caller over MCP or HTTP never
+          does, whatever name it gives. The HTTP body cannot set it: the
+          parser always yields [None]. *)
   attachments : Keeper_chat_store.attachment list;
   direct_message : Keeper_invocation_contract.direct_message;
   since_seq : Keeper_chat_event_log.replay_position;

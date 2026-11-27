@@ -16,6 +16,11 @@ type tool_result = Keeper_types_profile.tool_result
 
 val schemas : Masc_domain.tool_schema list
 
+(** Keeper tools for a caller outside a Keeper's own turn: an MCP client, an
+    HTTP route, the dashboard. [ctx.agent_name] names that caller, so a
+    masc_keeper_msg or masc_keeper_delegate it submits is never recorded as a
+    Keeper's and keeps the tool approval gate. A Keeper's own turn reaches
+    the same tools through [Keeper_dispatch_ref]. *)
 val dispatch :
   ?invocation_ref:Tool_invocation_ref.t ->
   _ context ->
@@ -25,7 +30,8 @@ val dispatch :
 
 (** Internal async-message entry point for adapters whose authenticated
     submission principal differs from the target turn's [ctx.agent_name].
-    [submitted_by] is trusted boundary context, never model input. *)
+    [submitted_by] is trusted boundary context, never model input. It names
+    the caller and never makes the message a Keeper's, as {!dispatch}. *)
 val dispatch_keeper_msg
   :  submitted_by:string
   -> ?continuation_channel:Keeper_continuation_channel.t

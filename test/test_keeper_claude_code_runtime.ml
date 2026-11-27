@@ -7462,6 +7462,76 @@ let test_resume_overflow_restart_is_a_fresh_start_by_address () =
       (List.length (Keeper_client_tool_outbox.receipt_ids (R.pending base_path))))
 ;;
 
+(* The Start that takes the place of a session refused for its size. That run
+   could not send again, so no hook switched its carrier and only the session
+   record tells the next run of the refusal: its first request carries the
+   address form (RFC retained-results-carrier-shrinks-to-an-address 5.5). *)
+let superseding_start_carries_the_address_form ~failure ~detail =
+  let module R = Retained_overflow in
+  let module Store = Keeper_official_client_session_store in
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    Masc_test_deps.declare_fixture_keeper ~base_path ~sandbox_profile:None R.keeper_name;
+    let now = Time_compat.now () in
+    R.store (fun () ->
+      let claimed =
+        R.get
+          (Store.claim ~base_path ~keeper_name:R.keeper_name ~expected:None
+             ~client_kind:Store.Claude_code ~owner_epoch:(Store.process_epoch ())
+             ~runtime_id:"claude.claude"
+             ~tool_surface_sha256:Agent_core_sha256.(to_hex (digest_string "refused-surface"))
+             ~updated_at:now)
+      in
+      match
+        Store.require_recovery ~base_path ~keeper_name:R.keeper_name ~expected:claimed
+          ~failure ~detail ~required_at:now
+      with
+      | Ok _ -> ()
+      | Error detail -> fail detail);
+    R.retain base_path;
+    let inline = R.inline base_path in
+    let sha256 = Agent_core_sha256.(to_hex (digest_string inline)) in
+    let system_marker = Filename.concat base_path "carrier-superseding-system" in
+    with_fixture ~system_marker
+      [Emit (assistant ~turn_id:"carrier-superseded" "SUPERSEDED");
+       Emit (result ~turn_id:"carrier-superseded" "SUPERSEDED")]
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"Continue after the refused session" () with
+        | Ok _ -> ()
+        | Error error -> fail (Agent_core.Error.to_string error));
+    let started = R.read system_marker in
+    check bool "the superseding Start carries no receipt inline" true (R.carries_none started);
+    check bool "the superseding Start names the blob of the inline text" true
+      (String_util.contains_substring started sha256);
+    check (option string) "the blob holds the inline text" (Some inline) (R.held base_path sha256);
+    check int "the completed Start acknowledges every loaded receipt" 0
+      (List.length (Keeper_client_tool_outbox.receipt_ids (R.pending base_path))))
+;;
+
+let test_a_start_superseding_a_fenced_size_refusal_carries_the_address_form () =
+  superseding_start_carries_the_address_form
+    ~failure:Keeper_official_client_session_store.(Input_rejected Effect_fenced)
+    ~detail:"the turn overflowed after a tool effect"
+;;
+
+(* A Gate continuation's resume refused as a context overflow is recorded
+   [Vendor_session_full], and the receipts in its resume prompt can be what
+   overflowed. *)
+let test_a_start_superseding_a_full_gate_session_carries_the_address_form () =
+  superseding_start_carries_the_address_form
+    ~failure:Keeper_official_client_session_store.(Vendor_session_full Activity_observed)
+    ~detail:"the Gate continuation's resume overflowed"
+;;
+
+(* A floor refusal came before any effect: its hook had run and had nothing
+   left to shorten. The run that takes its place starts from the anchor
+   alone, and the receipts the refused run kept still go by address. *)
+let test_a_start_superseding_a_floor_refusal_carries_the_address_form () =
+  superseding_start_carries_the_address_form
+    ~failure:Keeper_official_client_session_store.(Input_rejected Bootstrap_floor_exceeded)
+    ~detail:"the smallest request the run could send overflowed"
+;;
+
 (* A run that offers keeper_artifact_read names it in the address form. *)
 let test_address_form_names_the_offered_reader () =
   let module R = Retained_overflow in
@@ -8019,6 +8089,12 @@ let () =
            test_resume_overflow_restarts_with_the_address_form;
          test_case "the restart after a Resume overflow is a fresh Start by address" `Quick
            test_resume_overflow_restart_is_a_fresh_start_by_address;
+         test_case "a Start superseding a fenced size refusal carries the address form" `Quick
+           test_a_start_superseding_a_fenced_size_refusal_carries_the_address_form;
+         test_case "a Start superseding a full Gate session carries the address form" `Quick
+           test_a_start_superseding_a_full_gate_session_carries_the_address_form;
+         test_case "a Start superseding a floor refusal carries the address form" `Quick
+           test_a_start_superseding_a_floor_refusal_carries_the_address_form;
          test_case "the address form names the offered reader" `Quick
            test_address_form_names_the_offered_reader])
     ; ( "native action", [ test_case "partial content boundary identity" `Quick test_partial_content_boundaries_keep_message_and_channel_identity

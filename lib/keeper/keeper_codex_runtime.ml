@@ -1350,11 +1350,20 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
        a cancelled vendor cell enter both Start and Resume as acknowledged
        developer items, independently of the previous session's survival.
        Every attempt of the run carries the snapshot its first attempt
-       loaded, in the form the capacity-refusal hook left it, and
-       acknowledges that snapshot (RFC
-       retained-results-carrier-shrinks-to-an-address §5.1, §6.1). *)
+       loaded, in the form the run holds by then, and acknowledges that
+       snapshot (RFC retained-results-carrier-shrinks-to-an-address §5.1,
+       §6.1). The form is by address from the start when the run supersedes a
+       size rejection, and otherwise once the capacity-refusal hook switched
+       it. *)
     let* tool_outbox, retained_carrier =
-      Keeper_client_tool_outbox.run_carrier_load retained_results
+      Keeper_official_client_retained_results.load
+        ~keeper_name
+        ~superseded:
+          (Keeper_official_client_session_store.superseded_size_refusal
+             ~expected:stored_session
+             ~client_kind:Codex
+             ~runtime_id)
+        retained_results
       |> Result.map_error internal_error in
     (* Resume configuration seeds native compaction but does not update the
        current model request. The runtime ACKs the System plan's Developer

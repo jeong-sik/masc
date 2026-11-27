@@ -1722,6 +1722,50 @@ let test_codex_resume_overflow_restarts_with_the_address_form () =
     fail (Printf.sprintf "expected the refused and the restarted injection, saw %d"
       (List.length injected))
 
+(* A Start that takes the place of a session refused for its size carries the
+   address form in its first request: the fixture refuses the inline form, so
+   one thread and one injection show the switch came before any refusal (RFC
+   retained-results-carrier-shrinks-to-an-address 5.5). The record is the one
+   a Gate continuation's refused resume leaves ([recovery_failure_of_attempt]),
+   which the retained receipts that resume injected can cause. *)
+let test_a_codex_start_superseding_a_size_refusal_carries_the_address_form () =
+  with_fixture ~overflow_over_injected_bytes:carrier_window_bytes @@ fun ~run ~capture ~reports:_ ->
+  let module Store = Keeper_official_client_session_store in
+  let base_path = Filename.dirname capture and keeper_name = "context-fixture" in
+  let now = Time_compat.now () in
+  let claimed =
+    Store.claim ~base_path ~keeper_name ~expected:None ~client_kind:Store.Codex
+      ~owner_epoch:(Store.process_epoch ()) ~runtime_id:"codex.context"
+      ~tool_surface_sha256:Agent_core_sha256.(to_hex (digest_string "fenced-surface"))
+      ~updated_at:now
+    |> require in
+  let (_ : Store.t) =
+    Store.require_recovery ~base_path ~keeper_name ~expected:claimed
+      ~failure:(Store.Vendor_session_full Store.Activity_observed)
+      ~detail:"the continuation's resume overflowed after a tool effect" ~required_at:now
+    |> require in
+  retain_overflow_receipts ~base_path ~keeper_name;
+  let inline = inline_carrier ~base_path ~keeper_name in
+  let sha256 = Agent_core_sha256.(to_hex (digest_string inline)) in
+  successful (run ~instructions:"Keeper instructions" ~world:"world" ());
+  let rows = read_requests capture in
+  check int "the superseding Start is not refused" 1
+    (List.length (params_of "thread/start" rows));
+  match List.map Yojson.Safe.to_string (params_of "thread/inject_items" rows) with
+  | [started] ->
+    check bool "the superseding Start carries no receipt inline" true
+      (carries_no_receipt started);
+    check bool "the superseding Start names the blob of the inline text" true
+      (String_util.contains_substring started sha256);
+    check (option string) "the blob holds the inline text" (Some inline)
+      (held_blob ~base_path sha256);
+    check int "the completed Start acknowledges every loaded receipt" 0
+      (List.length (Keeper_client_tool_outbox.receipt_ids
+         (pending_receipts ~base_path ~keeper_name)))
+  | injected ->
+    fail (Printf.sprintf "expected the one injection of the superseding Start, saw %d"
+      (List.length injected))
+
 (* #210 #2: Codex must NOT commit a compaction anchor when Resume overflows and
    the fresh Start keeps 100% of offered history (dropped_atoms = 0), and MUST
    commit strictly over the evicted prefix when Start actually drops atoms. *)
@@ -2021,4 +2065,6 @@ let () =
     test_case "retained receipts go by address after an overflow" `Quick
       test_retained_receipts_go_by_address_after_a_codex_overflow;
     test_case "a resume overflow restarts with the address form" `Quick
-      test_codex_resume_overflow_restarts_with_the_address_form]]
+      test_codex_resume_overflow_restarts_with_the_address_form;
+    test_case "a Start superseding a size refusal carries the address form" `Quick
+      test_a_codex_start_superseding_a_size_refusal_carries_the_address_form]]

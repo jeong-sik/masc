@@ -800,8 +800,8 @@ let context_message ~read_media snapshot =
 
 type form = Inline | By_address
 
-(* The address text is made once, by the hook step that switches the form,
-   after the blob it names is written. *)
+(* The address text is made once, by the step that switches the form, after
+   the blob it names is written. *)
 type carried =
   | Carried_inline
   | Carried_by_address of string list

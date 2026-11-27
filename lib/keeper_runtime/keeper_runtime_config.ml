@@ -116,9 +116,14 @@ let resolve_overrides
   in
   (List.length applied, applied)
 
+module String_map = Map.Make (String)
+
 (* Store the parsed boot document independently of any env override. Compare
-   numeric settings by value, not by the spelling chosen for display. *)
-let toml_shadow : (string, Keeper_toml_loader.toml_value) Hashtbl.t = Hashtbl.create 16
+   numeric settings by value, not by the spelling chosen for display. Published
+   atomically so concurrent readers on other OCaml 5 domains never race with a
+   reloading [load_and_apply_document]. *)
+let toml_shadow : Keeper_toml_loader.toml_value String_map.t Atomic.t =
+  Atomic.make String_map.empty
 
 let current_schema_version = 1
 let schema_version_key = "keeper_settings.schema_version"
@@ -460,7 +465,7 @@ let application_status doc (row : Keeper_runtime_setting_registry.setting) =
   match configured_value doc row, effective_source row with
   | Some _, Config_boot_overrides.Env -> "preempted_by_env"
   | Some _, Config_boot_overrides.Boot_override ->
-    (match Hashtbl.find_opt toml_shadow row.env_name, configured_toml_value doc row with
+    (match String_map.find_opt row.env_name (Atomic.get toml_shadow), configured_toml_value doc row with
      | Some applied, Some configured when same_setting_value row applied configured -> "applied"
      | Some _, Some _ | Some _, None | None, Some _ | None, None -> "pending_restart")
   | Some _, Config_boot_overrides.Default ->
@@ -672,18 +677,21 @@ let load_and_apply_document ~base_path =
              in
              Config_boot_overrides.set_typed_batch typed_pairs;
              let count = List.length typed_pairs in
-             Hashtbl.clear toml_shadow;
-             List.iter
-               (fun (toml_key, env_name) ->
-                  (* Populate shadow registry for every known key that has a
-                     TOML value, regardless of whether env preempts it. *)
-                  match List.assoc_opt toml_key doc with
-                  | None -> ()
-                  | Some v ->
-                    (match value_to_string v with
-                     | None -> ()
-                     | Some _ -> Hashtbl.replace toml_shadow env_name v))
-               key_to_env;
+             let next_shadow =
+               List.fold_left
+                 (fun acc (toml_key, env_name) ->
+                    (* Populate shadow registry for every known key that has a
+                       TOML value, regardless of whether env preempts it. *)
+                    match List.assoc_opt toml_key doc with
+                    | None -> acc
+                    | Some v ->
+                      (match value_to_string v with
+                       | None -> acc
+                       | Some _ -> String_map.add env_name v acc))
+                 String_map.empty
+                 key_to_env
+             in
+             Atomic.set toml_shadow next_shadow;
              Atomic.set last_applied_at (Some (Time_compat.now ()));
              Ok count))
 

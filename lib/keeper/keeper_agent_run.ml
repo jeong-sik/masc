@@ -2469,7 +2469,12 @@ let run_turn
              | reference ->
                Some
                  (Tool_output.encode_for_agent_core
-                    (Tool_output.Stored reference)))
+                    (Tool_output.Stored reference))
+             | exception (Sys_error _ | Unix.Unix_error _ | Eio.Io _ as exn) ->
+               Log.Keeper.warn ~keeper_name:meta.name
+                 "tool surface blob omitted from turn record: %s"
+                 (Printexc.to_string exn);
+               None)
         in
         let input_components =
           match Request_evidence.attribution !request_evidence_ref with

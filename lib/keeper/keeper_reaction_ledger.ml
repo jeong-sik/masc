@@ -1121,9 +1121,12 @@ type delivery_evidence_file =
   { cursor : Dated_jsonl.append_cursor
   ; read_through_bytes : int
   ; file_evidence : delivery_evidence
+  ; last_accessed : int
   }
 
+let max_delivery_evidence_files = 256
 let delivery_evidence_files : (string, delivery_evidence_file) Hashtbl.t = Hashtbl.create 64
+let delivery_evidence_files_clock = ref 0
 let delivery_evidence_files_mu = Stdlib.Mutex.create ()
 
 let delivery_evidence_scan_store_label = "reaction_ledger_delivery"
@@ -1147,7 +1150,27 @@ let read_delivery_evidence_file ~keeper_name path =
       ~labels:[ ("store", delivery_evidence_scan_store_label) ]
       ~delta:(Float.of_int (max 0 (read_through_bytes - scanned_from)))
       ();
-    Hashtbl.replace delivery_evidence_files path { cursor; read_through_bytes; file_evidence };
+    incr delivery_evidence_files_clock;
+    let last_accessed = !delivery_evidence_files_clock in
+    if (not (Hashtbl.mem delivery_evidence_files path))
+       && Hashtbl.length delivery_evidence_files >= max_delivery_evidence_files
+    then (
+      let oldest =
+        Hashtbl.fold
+          (fun k entry acc ->
+             match acc with
+             | None -> Some (k, entry.last_accessed)
+             | Some (_, min_seq) when entry.last_accessed < min_seq ->
+               Some (k, entry.last_accessed)
+             | Some _ -> acc)
+          delivery_evidence_files
+          None
+      in
+      Option.iter (fun (k, _) -> Hashtbl.remove delivery_evidence_files k) oldest);
+    Hashtbl.replace
+      delivery_evidence_files
+      path
+      { cursor; read_through_bytes; file_evidence; last_accessed };
     Ok file_evidence
   in
   let from_start () =

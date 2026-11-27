@@ -3034,6 +3034,7 @@ let start_impl
             let open Result.Syntax in
             let* () = recover_operation_availability t in
             revalidate_retry_waits () in
+          Eio.Promise.resolve resolve (Result.map (fun _ -> ()) response);
           (match response with
            | Error _ -> retry_cooling_observation ()
            | Ok changed ->
@@ -3042,10 +3043,20 @@ let start_impl
                | Some deadline -> deadline <= t.now ()
                | None -> false in
              (* Recovery can publish an already-claimable retry and remove its
-                expired deadline from the next-wake projection. *)
-             if changed || due || projection.has_claimable_queued then notify t Wake_operation_drain
+                expired deadline from the next-wake projection. Drain inline
+                instead of calling [notify t Wake_operation_drain], which
+                blocks inside this sole consumer loop under [Eio.Cancel.protect]
+                if the bounded mailbox is full. *)
+             if changed || due || projection.has_claimable_queued then (
+               let refresh =
+                 run_operation_command t ~label:"refresh Keeper operation readiness"
+                   (fun () -> Ok ())
+               in
+               start_child_if_needed state shutdown_operation_id;
+               match refresh with
+               | Ok _ -> rearm_cooling_retry_wake ()
+               | Error _ -> retry_cooling_observation ())
              else rearm_cooling_retry_wake ());
-          Eio.Promise.resolve resolve (Result.map (fun _ -> ()) response);
           loop state
         | Command (Wake_operation_drain, resolve) ->
           (* Retry deadlines change readiness without a store mutation. Publish

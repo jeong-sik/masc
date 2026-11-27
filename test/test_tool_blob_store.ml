@@ -2243,6 +2243,126 @@ let test_maintenance_follows_typed_result_manifest () =
         (Some "manifest-owned child")
         (fetch_ok store ~sha256:child.sha256))
 
+(* A result that went to a model inline is stored as the envelope text, not
+   as the manifest's marker. The manifest the envelope names roots the same
+   graph the marker would. *)
+let test_maintenance_follows_inline_result_envelope () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let child =
+        B.put_durable store ~bytes:"child of an inline result" ~mime:"text/plain"
+      in
+      let structured_content =
+        `Assoc [ "output_artifact", O.normalized_artifact_ref_to_json child ]
+      in
+      let manifest =
+        B.put_durable
+          store
+          ~bytes:
+            (O.artifact_manifest_to_json ~content:"" ~structured_content
+             |> Yojson.Safe.to_string)
+          ~mime:O.artifact_manifest_mime
+      in
+      let envelope =
+        O.artifact_result_envelope_to_json
+          ~artifact_manifest:manifest
+          ~structured_content
+          ~content:"a diagnostic the projection kept"
+          ()
+        |> Yojson.Safe.to_string
+      in
+      (match O.decode_structured_reference envelope with
+       | O.Result_envelope_manifest reference ->
+         Alcotest.(check string)
+           "the envelope names its manifest"
+           manifest.sha256
+           reference.sha256
+       | O.No_structured_reference
+       | O.Invalid_structured_handle _
+       | O.Structured_handle _ ->
+         Alcotest.fail "the envelope text did not decode as an envelope");
+      let checkpoint =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "keepers/keeper-a/checkpoint.json"
+      in
+      Fs_compat.mkdir_p (Filename.dirname checkpoint);
+      Fs_compat.save_file
+        checkpoint
+        (Yojson.Safe.to_string (`Assoc [ "tool_result", `String envelope ]));
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int)
+        "the envelope roots manifest and child"
+        2
+        observed.live_references;
+      Alcotest.(check int) "the graph has no candidates" 0 observed.candidates_recorded;
+      let swept =
+        maintenance_ok ~base_path ~mode:M.Delete_previous_candidates
+      in
+      Alcotest.(check int) "the graph survives the second pass" 0 swept.deleted;
+      Alcotest.(check (option string))
+        "the child remains readable"
+        (Some "child of an inline result")
+        (fetch_ok store ~sha256:child.sha256))
+
+(* Only the exact envelope is read. An object with the same fields whose
+   manifest field names a blob of another mime roots nothing, and neither
+   does an envelope with one more field. *)
+let test_maintenance_reads_only_the_exact_inline_result_envelope () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let text =
+        B.put_durable store ~bytes:"a text blob, not a manifest" ~mime:"text/plain"
+      in
+      let manifest =
+        B.put_durable
+          store
+          ~bytes:
+            (O.artifact_manifest_to_json ~content:"" ~structured_content:(`Assoc [])
+             |> Yojson.Safe.to_string)
+          ~mime:O.artifact_manifest_mime
+      in
+      let names_a_text_blob =
+        O.artifact_result_envelope_to_json
+          ~artifact_manifest:text
+          ~structured_content:(`Assoc [])
+          ()
+        |> Yojson.Safe.to_string
+      in
+      let has_one_more_field =
+        match
+          O.artifact_result_envelope_to_json
+            ~artifact_manifest:manifest
+            ~structured_content:(`Assoc [])
+            ()
+        with
+        | `Assoc fields -> Yojson.Safe.to_string (`Assoc (fields @ [ "note", `String "x" ]))
+        | _ -> Alcotest.fail "the envelope is not an object"
+      in
+      List.iter
+        (fun (label, candidate) ->
+           match O.decode_structured_reference candidate with
+           | O.No_structured_reference -> ()
+           | O.Result_envelope_manifest _
+           | O.Invalid_structured_handle _
+           | O.Structured_handle _ -> Alcotest.failf "%s decoded as a reference" label)
+        [ "an object naming a text blob", names_a_text_blob
+        ; "an envelope with one more field", has_one_more_field
+        ];
+      let checkpoint =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          "keepers/keeper-a/checkpoint.json"
+      in
+      Fs_compat.mkdir_p (Filename.dirname checkpoint);
+      Fs_compat.save_file
+        checkpoint
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ "first", `String names_a_text_blob; "second", `String has_one_more_field ]));
+      let observed = maintenance_ok ~base_path ~mode:M.Observe_only in
+      Alcotest.(check int) "nothing is rooted" 0 observed.live_references)
+
 let test_maintenance_rejects_malformed_typed_result_manifest () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -2974,6 +3094,14 @@ let () =
             "maintenance follows typed result manifest"
             `Quick
             test_maintenance_follows_typed_result_manifest;
+          Alcotest.test_case
+            "inline result envelope roots its manifest and children"
+            `Quick
+            test_maintenance_follows_inline_result_envelope;
+          Alcotest.test_case
+            "only the exact inline result envelope is read"
+            `Quick
+            test_maintenance_reads_only_the_exact_inline_result_envelope;
           Alcotest.test_case
             "maintenance rejects malformed typed result manifest"
             `Quick

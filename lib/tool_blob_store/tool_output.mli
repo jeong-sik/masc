@@ -124,6 +124,33 @@ val artifact_manifest_of_json : Yojson.Safe.t -> artifact_manifest_decode
     derived only from [structured_content] using the normalized reference
     codec above. *)
 
+val artifact_result_envelope_to_json :
+  artifact_manifest:artifact_ref ->
+  structured_content:Yojson.Safe.t ->
+  ?content:string ->
+  unit ->
+  Yojson.Safe.t
+(** The inline form of a result that carries artifacts: the producer's
+    structured data, the manifest that owns its artifacts, and the message
+    when the projection keeps one. A result goes to a model in this form
+    instead of as the manifest's bare marker when its producer chose an
+    inline {!artifact_projection} and the text fits the lane's ceiling. *)
+
+type artifact_result_envelope_decode =
+  | Not_artifact_result_envelope
+  | Decoded_artifact_result_envelope of
+      { structured_content : Yojson.Safe.t
+      ; artifact_manifest : artifact_ref
+      ; content : string option
+      }
+
+val artifact_result_envelope_of_json : Yojson.Safe.t -> artifact_result_envelope_decode
+(** Decode exactly what {!artifact_result_envelope_to_json} writes: the
+    fields in that order, and a manifest reference whose mime is
+    {!artifact_manifest_mime}. Any other value is
+    [Not_artifact_result_envelope]; there is no invalid case, because an
+    object that only resembles an envelope names nothing this store owns. *)
+
 (** {1 Wire codec} *)
 
 type t = Stored of artifact_ref
@@ -215,6 +242,20 @@ val decode_from_agent_core : string -> decode_result
 val decode_structured_handle : string -> decode_result
 (** Strictly decode a JSON structured blob handle produced by
     {!encode_structured_handle}. *)
+
+(** What a durable string names when it is JSON: a structured handle, or the
+    manifest of an inline result envelope. *)
+type structured_reference =
+  | No_structured_reference
+  | Invalid_structured_handle of { detail : string }
+  | Structured_handle of artifact_ref
+  | Result_envelope_manifest of artifact_ref
+
+val decode_structured_reference : string -> structured_reference
+(** {!decode_structured_handle} and {!artifact_result_envelope_of_json} over
+    one parse of the string. The blob sweep asks this of every durable
+    string: a result that went to a model as an envelope is stored as that
+    text, and the manifest it names owns the result's artifacts. *)
 
 val decode_any_handle : string -> decode_result
 (** Decode either a typed JSON structured handle ({!decode_structured_handle})

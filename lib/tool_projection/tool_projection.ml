@@ -88,10 +88,11 @@ let artifact_manifest_reference result =
 
 let artifact_result_envelope ~reference ~structured_content ?content () =
   Yojson.Safe.to_string
-    (`Assoc
-      ([ "structured_content", structured_content
-       ; "artifact_manifest", Tool_output.normalized_artifact_ref_to_json reference ]
-       @ Option.to_list (Option.map (fun value -> "content", `String value) content)))
+    (Tool_output.artifact_result_envelope_to_json
+       ~artifact_manifest:reference
+       ~structured_content
+       ?content
+       ())
 ;;
 
 let attach_artifact_manifest ?(projection = Tool_output.Reference_only) ~base_path (result : Tool_result.result) =

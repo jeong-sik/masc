@@ -3097,10 +3097,13 @@ let test_invalid_elicitation_keeps_protocol_error () =
       change "requestedSchema" (`Assoc ["type", `String "array"; "properties", `Assoc []]) ]
 ;;
 
-let test_client_argv_carries_posture_and_sub_agent_overrides () =
-  List.iter (fun (native, context_window) ->
-    let argv_path = Filename.temp_file "codex-native-argv-" ".txt" in
-    Fun.protect ~finally:(fun () -> Sys.remove argv_path) (fun () ->
+(* Runs one fixture turn and returns its result with the argv the client was
+   started with. The fixture writes "$@" before it reads its first frame, so a
+   turn refused after the spawn still leaves the argv behind. *)
+let run_capturing_client_argv ?account_home ?isolated_home ?context_window ~native () =
+  let argv_path = Filename.temp_file "codex-native-argv-" ".txt" in
+  Fun.protect ~finally:(fun () -> Sys.remove argv_path) (fun () ->
+    let result =
       with_fixture [init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed]
         (fun path ->
           let original = In_channel.with_open_bin path In_channel.input_all in
@@ -3111,26 +3114,88 @@ let test_client_argv_carries_posture_and_sub_agent_overrides () =
                 ("printf '%s\\n' \"$@\" > " ^ shell_quote argv_path) :: rest)
             | _ -> fail "invalid fixture script" in
           Out_channel.with_open_bin path (fun output -> output_string output instrumented);
-          (match run_fixture ~native ?context_window path with
-           | Ok _ -> ()
-           | Error error -> fail (Runtime_codex_app_server.error_to_string error)));
-      let argv = In_channel.with_open_bin argv_path In_channel.input_lines in
-      let expected = ["app-server"; "--stdio"] @
-        (match context_window with
-         | None -> []
-         | Some tokens -> ["-c"; Printf.sprintf "model_context_window=%d" tokens]) @
-        (match native with
-         | Runtime_native_tools.Native_read ->
-           ["-c"; "features.shell_tool=false"; "-c"; "features.unified_exec=false"]
-         | Native_full -> []
-         | Native_none -> fail "none is not part of this fixture") @
-        ["-c"; "project_root_markers=[]"] @
-        (* The model catalog picks the version when only features.multi_agent
-           is off, so the switch that counts is [agents] enabled. *)
-        ["-c"; "agents.enabled=false"; "-c"; "features.multi_agent_v2=false"] in
-      check (list string) "same process receives the posture-scoped and sub-agent config overrides" expected argv))
+          run_fixture ?account_home ?isolated_home ~native ?context_window path) in
+    result, In_channel.with_open_bin argv_path In_channel.input_lines)
+;;
+
+(* Codex cannot turn its built-in tools off. A none posture is refused after
+   the client has started, so its argv is still the one this posture builds. *)
+let check_posture_admission native result =
+  match native, result with
+  | (Runtime_native_tools.Native_read | Runtime_native_tools.Native_full), Ok _ -> ()
+  | Runtime_native_tools.Native_none, Error (Runtime_codex_app_server.Invalid_config _) -> ()
+  | Runtime_native_tools.Native_none, Ok _ -> fail "Codex accepted a none posture"
+  | ( Runtime_native_tools.Native_read | Runtime_native_tools.Native_full
+    | Runtime_native_tools.Native_none ), Error error ->
+    fail (Runtime_codex_app_server.error_to_string error)
+;;
+
+let apps_override = "features.apps=false"
+
+(* How many times the argv turns the account's apps off: one "-c" followed by
+   the override. *)
+let apps_override_count argv =
+  let rec count total = function
+    | "-c" :: value :: rest when String.equal value apps_override -> count (total + 1) rest
+    | _ :: rest -> count total rest
+    | [] -> total in
+  count 0 argv
+;;
+
+let test_client_argv_carries_posture_and_sub_agent_overrides () =
+  List.iter (fun (native, context_window) ->
+    let result, argv = run_capturing_client_argv ~native ?context_window () in
+    check_posture_admission native result;
+    let expected = ["app-server"; "--stdio"] @
+      (match context_window with
+       | None -> []
+       | Some tokens -> ["-c"; Printf.sprintf "model_context_window=%d" tokens]) @
+      (match native with
+       | Runtime_native_tools.Native_read ->
+         ["-c"; "features.shell_tool=false"; "-c"; "features.unified_exec=false"]
+       | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> []) @
+      ["-c"; "project_root_markers=[]"] @
+      (* The model catalog picks the version when only features.multi_agent
+         is off, so the switch that counts is [agents] enabled. *)
+      ["-c"; "agents.enabled=false"; "-c"; "features.multi_agent_v2=false"] @
+      (* The ChatGPT account's connected apps stay closed whatever the
+         posture (#55228). *)
+      ["-c"; apps_override] in
+    check (list string) "same process receives the posture-scoped, sub-agent and account apps overrides" expected argv;
+    check int "account apps are turned off exactly once" 1 (apps_override_count argv))
     [Runtime_native_tools.Native_read, None;
-     Runtime_native_tools.Native_full, Some 872000]
+     Runtime_native_tools.Native_full, Some 872000;
+     Runtime_native_tools.Native_none, None]
+;;
+
+(* The readiness home writes its own feature list and repeats each key as a
+   "-c". Built by the same [prepare] the verification lane uses, it must not
+   add a second apps override, and its own overrides must still arrive. *)
+let test_readiness_home_turns_account_apps_off_once () =
+  let temp_dir prefix =
+    let path = Filename.temp_file prefix "" in
+    Sys.remove path;
+    Unix.mkdir path 0o700;
+    path in
+  let account_home = temp_dir "masc-codex-apps-account-" in
+  let directory = temp_dir "masc-codex-apps-readiness-" in
+  let isolated_home = match
+      Runtime_verification_codex_home.prepare ~source_home:account_home ~directory ()
+    with
+    | Ok home -> home
+    | Error detail -> fail detail in
+  Fun.protect ~finally:(fun () ->
+    Sys.remove (Filename.concat isolated_home "config.toml");
+    Unix.rmdir isolated_home; Unix.rmdir directory; Unix.rmdir account_home) (fun () ->
+    List.iter (fun native ->
+      let result, argv = run_capturing_client_argv ~account_home ~isolated_home ~native () in
+      check_posture_admission native result;
+      check bool "the readiness home's own overrides arrive" true
+        (List.mem "features.plugins=false" argv);
+      check int "account apps are turned off exactly once with a readiness home" 1
+        (apps_override_count argv))
+      [ Runtime_native_tools.Native_read; Runtime_native_tools.Native_full;
+        Runtime_native_tools.Native_none ])
 ;;
 
 (* A live keeper failed every turn on a context overflow the server reported,
@@ -9978,6 +10043,8 @@ let () =
             test_invalid_elicitation_keeps_protocol_error
         ; test_case "read posture disables native host shell; no posture allows sub-agents" `Quick
             test_client_argv_carries_posture_and_sub_agent_overrides
+        ; test_case "readiness home turns account apps off once" `Quick
+            test_readiness_home_turns_account_apps_off_once
         ; test_case "failed turn keeps typed error fields" `Quick
             test_failed_turn_keeps_typed_error_fields
         ; test_case "failed turn uses official context error enum" `Quick

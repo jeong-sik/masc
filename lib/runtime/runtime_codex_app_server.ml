@@ -2889,6 +2889,25 @@ let sub_agent_overrides =
 let project_root_overrides = [ "-c"; "project_root_markers=[]" ]
 ;;
 
+(* With the [apps] feature on, Codex adds a hosted MCP server named
+   [codex_apps]. On a ChatGPT login it carries every app connected to that
+   account (GitHub, Slack, ...), and their calls run on the account's own
+   connections. They reach neither MASC's tool gates nor the Keeper's GitHub
+   login ([keeper_github_identity]). [apps] is a stable feature that defaults
+   to on: codex-cli 0.172.0 `features list` prints `apps stable true` on an
+   empty CODEX_HOME, and `false` once this override is given. Keeper account
+   homes do not set it, so on 2026-11-25 a Keeper read GitHub through
+   [codex_apps] 135 times (#55228). Every client this module spawns
+   gets the override, so the readiness home leaves [apps] out of its own
+   feature list and the flag appears once.
+   Upstream (rust-v0.172.0): codex-rs/ext/mcp/src/lib.rs
+   (HostedPluginRuntimeExtension removes [codex_apps] when Feature::Apps is
+   off), codex-rs/features/src/lib.rs (Feature::Apps default_enabled true;
+   apps_enabled_for_auth), codex-rs/codex-mcp/src/mcp/mod.rs
+   (CODEX_APPS_MCP_SERVER_NAME). *)
+let account_apps_overrides = [ "-c"; "features.apps=false" ]
+;;
+
 (* A read posture keeps Codex's permissions read-only, but shell execution
    would still run in the host cwd rather than the Keeper's Docker sandbox.
    Supported app-server CLI overrides outrank inherited config. ShellTool=false
@@ -2911,6 +2930,11 @@ let client_argv (config : config) =
      | Runtime_native_tools.Native_full | Runtime_native_tools.Native_none -> [])
   @ project_root_overrides
   @ sub_agent_overrides
+  (* HIGH-RISK-UNREVIEWED: this closes a path to the GitHub and other app
+     connections of the ChatGPT account the client signed in with. It applies
+     to every posture and every home, isolated or not, and needs human review
+     (#55228). *)
+  @ account_apps_overrides
 ;;
 
 module Write = Runtime_official_client_write

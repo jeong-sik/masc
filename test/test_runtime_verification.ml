@@ -1398,7 +1398,11 @@ hooks = true
       (Otoml.find doc Otoml.get_string ["model_providers"; "custom"; "env_key"]);
     List.iter (fun key -> check bool (key ^ " disabled") false
       (Otoml.find doc Otoml.get_boolean ["features"; key]))
-      ["apps"; "plugins"; "hooks"; "multi_agent"; "shell_tool"; "unified_exec"]
+      ["plugins"; "hooks"; "multi_agent"; "shell_tool"; "unified_exec"];
+    (* The client argv turns apps off for every Codex client; the inherited
+       [apps = true] must not reach the private home either. *)
+    check bool "inherited apps setting not copied" true
+      (Otoml.find_opt doc Fun.id ["features"; "apps"] = None)
 ;;
 
 let test_google_adc_refresh_boundary () =

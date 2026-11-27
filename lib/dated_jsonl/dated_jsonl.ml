@@ -220,9 +220,10 @@ type cached_dir_listing =
   }
 
 let dir_cache_mu = Stdlib.Mutex.create ()
-let dir_cache : (string, cached_dir_listing) Hashtbl.t = Hashtbl.create 32
-let dir_cache_max = 128
+let dir_cache : (string, cached_dir_listing) Hashtbl.t = Hashtbl.create 128
+let dir_cache_max = 1024
 let dir_cache_clock = ref 0
+let dir_cache_strict_hits = Atomic.make 0
 let dir_stat_settle_window_sec = 0.05
 
 let clear_dir_cache () =
@@ -387,12 +388,12 @@ let list_day_files month_path =
     List.sort (fun left right -> compare_day_files right left) !acc)
 
 type directory_presence =
-  | Directory_present
+  | Directory_present of Unix.stats
   | Directory_missing
 
 let directory_presence_of_stat path (stat : Unix.stats) =
   match stat.st_kind with
-  | Unix.S_DIR -> Ok Directory_present
+  | Unix.S_DIR -> Ok (Directory_present stat)
   | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO
   | Unix.S_SOCK -> Error (Not_a_directory { path })
 ;;
@@ -420,20 +421,60 @@ let inspect_directory_result ~missing_is_empty path =
     else Error (Non_regular_file { path; kind = Symbolic_link })
 ;;
 
+(* Settled-stat caching for strict directory reads. Always inspects via
+   [Unix.lstat] first (never [Unix.stat]), so symlinks, non-directories,
+   missing paths, and I/O errors are never cached and never lose their typed
+   error identity. Cached entries live under key prefix ["r:"] in [dir_cache]
+   so [clear_dir_cache] / [directories_removed] clears them automatically. *)
 let list_directory_result ~missing_is_empty path =
-  let open Result.Syntax in
-  let* presence = inspect_directory_result ~missing_is_empty path in
-  match presence with
-  | Directory_missing -> Ok []
-  | Directory_present ->
-    (match Sys.readdir path with
-     | entries ->
-       Ok
-         (entries
-          |> Array.to_list
-          |> List.sort (fun left right -> String.compare right left))
-     | exception Sys_error detail ->
-       Error (Io_error { operation = List_directory; path; detail }))
+  let key = "r:" ^ path in
+  let now_before = Unix.gettimeofday () in
+  match inspect_directory_result ~missing_is_empty path with
+  | Error _ as err ->
+    dir_cache_remove key;
+    err
+  | Ok Directory_missing ->
+    dir_cache_remove key;
+    Ok []
+  | Ok (Directory_present st) ->
+    let settled_before = dir_stat_is_settled ~now:now_before st in
+    let hit =
+      if not settled_before then None
+      else
+        Stdlib.Mutex.protect dir_cache_mu (fun () ->
+          match Hashtbl.find_opt dir_cache key with
+          | Some cached when dir_stat_matches_cached st cached ->
+            incr dir_cache_clock;
+            cached.d_last_used <- !dir_cache_clock;
+            Some cached.d_entries
+          | Some _ | None -> None)
+    in
+    (match hit with
+     | Some entries ->
+       Atomic.incr dir_cache_strict_hits;
+       Ok entries
+     | None ->
+       (match Sys.readdir path with
+        | raw ->
+          let entries =
+            raw
+            |> Array.to_list
+            |> List.sort (fun left right -> String.compare right left)
+          in
+          if settled_before then begin
+            match Unix.lstat path with
+            | after
+              when after.Unix.st_kind = Unix.S_DIR
+                   && dir_stats_equal st after
+                   && dir_stat_is_settled ~now:(Unix.gettimeofday ()) after ->
+              dir_cache_store key after entries
+            | _ | (exception Unix.Unix_error _) -> dir_cache_remove key
+          end else
+            dir_cache_remove key;
+          Ok entries
+        | exception Sys_error detail ->
+          dir_cache_remove key;
+          Error (Io_error { operation = List_directory; path; detail })))
 ;;
 
 let validate_layout_entries ~parent ~expected ~is_valid entries =
@@ -2924,6 +2965,8 @@ module For_testing = struct
 
   let in_registry location =
     File_system_named.has_entry registry (Store.absolute_dir location)
+
+  let strict_dir_cache_hits () = Atomic.get dir_cache_strict_hits
 
   let after_row
         ?(base_dir = Filename.current_dir_name)

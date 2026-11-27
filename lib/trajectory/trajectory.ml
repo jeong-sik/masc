@@ -1181,6 +1181,90 @@ let read_all_lines ~(masc_root : string) ~(keeper_name : string) ~(trace_id : st
     |> trajectory_lines_of_jsonl_lines ~trace_id
     |> fun (lines, _skipped, _total) -> lines
 
+type cached_recent_lines =
+  { rl_dev : int
+  ; rl_ino : int
+  ; rl_size : int
+  ; rl_perm : int
+  ; rl_uid : int
+  ; rl_gid : int
+  ; rl_mtime : float
+  ; rl_ctime : float
+  ; rl_lines : trajectory_line list
+  ; rl_skipped : int
+  ; rl_total : int
+  ; mutable rl_last_used : int
+  }
+
+let recent_lines_cache_mu = Stdlib.Mutex.create ()
+let recent_lines_cache : (string * int, cached_recent_lines) Hashtbl.t = Hashtbl.create 64
+let recent_lines_cache_max = 128
+let recent_lines_cache_clock = ref 0
+let recent_lines_settle_window_sec = 0.05
+
+let recent_stat_is_settled ~now (st : Unix.stats) =
+  now -. st.Unix.st_mtime >= recent_lines_settle_window_sec
+  && now -. st.Unix.st_ctime >= recent_lines_settle_window_sec
+
+let recent_stats_equal (a : Unix.stats) (b : Unix.stats) =
+  a.Unix.st_dev = b.Unix.st_dev
+  && a.Unix.st_ino = b.Unix.st_ino
+  && a.Unix.st_size = b.Unix.st_size
+  && a.Unix.st_perm = b.Unix.st_perm
+  && a.Unix.st_uid = b.Unix.st_uid
+  && a.Unix.st_gid = b.Unix.st_gid
+  && Float.equal a.Unix.st_mtime b.Unix.st_mtime
+  && Float.equal a.Unix.st_ctime b.Unix.st_ctime
+
+let recent_stat_matches_cached (st : Unix.stats) (c : cached_recent_lines) =
+  c.rl_dev = st.Unix.st_dev
+  && c.rl_ino = st.Unix.st_ino
+  && c.rl_size = st.Unix.st_size
+  && c.rl_perm = st.Unix.st_perm
+  && c.rl_uid = st.Unix.st_uid
+  && c.rl_gid = st.Unix.st_gid
+  && Float.equal c.rl_mtime st.Unix.st_mtime
+  && Float.equal c.rl_ctime st.Unix.st_ctime
+
+let recent_lines_cache_remove key =
+  Stdlib.Mutex.protect recent_lines_cache_mu (fun () ->
+    Hashtbl.remove recent_lines_cache key)
+
+let recent_lines_cache_store key (st : Unix.stats) ~lines ~skipped ~total =
+  Stdlib.Mutex.protect recent_lines_cache_mu (fun () ->
+    incr recent_lines_cache_clock;
+    let entry =
+      { rl_dev = st.Unix.st_dev
+      ; rl_ino = st.Unix.st_ino
+      ; rl_size = st.Unix.st_size
+      ; rl_perm = st.Unix.st_perm
+      ; rl_uid = st.Unix.st_uid
+      ; rl_gid = st.Unix.st_gid
+      ; rl_mtime = st.Unix.st_mtime
+      ; rl_ctime = st.Unix.st_ctime
+      ; rl_lines = lines
+      ; rl_skipped = skipped
+      ; rl_total = total
+      ; rl_last_used = !recent_lines_cache_clock
+      }
+    in
+    Hashtbl.replace recent_lines_cache key entry;
+    while Hashtbl.length recent_lines_cache > recent_lines_cache_max do
+      let victim =
+        Hashtbl.fold
+          (fun k v best ->
+             match best with
+             | None -> Some (k, v)
+             | Some (_, bv) ->
+               if v.rl_last_used < bv.rl_last_used then Some (k, v) else best)
+          recent_lines_cache
+          None
+      in
+      match victim with
+      | None -> ()
+      | Some (k, _) -> Hashtbl.remove recent_lines_cache k
+    done)
+
 let read_recent_lines
       ~(masc_root : string)
       ~(keeper_name : string)
@@ -1189,6 +1273,49 @@ let read_recent_lines
   : trajectory_line list
   =
   let path = trajectory_path masc_root keeper_name trace_id in
-  Dated_jsonl.load_tail_lines path ~max_lines
-  |> trajectory_lines_of_jsonl_lines ~trace_id
-  |> fun (lines, _skipped, _total) -> lines
+  let key = (path, max_lines) in
+  let now_before = Unix.gettimeofday () in
+  let read_uncached () =
+    Dated_jsonl.load_tail_lines path ~max_lines
+    |> trajectory_lines_of_jsonl_lines ~trace_id
+  in
+  match Unix.stat path with
+  | exception Unix.Unix_error _ ->
+    recent_lines_cache_remove key;
+    let lines, _skipped, _total = read_uncached () in
+    lines
+  | st ->
+    if st.Unix.st_kind <> Unix.S_REG then begin
+      recent_lines_cache_remove key;
+      let lines, _skipped, _total = read_uncached () in
+      lines
+    end else
+      let settled_before = recent_stat_is_settled ~now:now_before st in
+      let hit =
+        if not settled_before then None
+        else
+          Stdlib.Mutex.protect recent_lines_cache_mu (fun () ->
+            match Hashtbl.find_opt recent_lines_cache key with
+            | Some cached when recent_stat_matches_cached st cached ->
+              incr recent_lines_cache_clock;
+              cached.rl_last_used <- !recent_lines_cache_clock;
+              Some (cached.rl_lines, cached.rl_skipped, cached.rl_total)
+            | Some _ | None -> None)
+      in
+      match hit with
+      | Some (lines, skipped, total) ->
+        log_trajectory_line_skips ~trace_id ~skipped ~total;
+        lines
+      | None ->
+        let lines, skipped, total = read_uncached () in
+        if settled_before then begin
+          match Unix.stat path with
+          | after
+            when after.Unix.st_kind = Unix.S_REG
+                 && recent_stats_equal st after
+                 && recent_stat_is_settled ~now:(Unix.gettimeofday ()) after ->
+            recent_lines_cache_store key after ~lines ~skipped ~total
+          | _ | (exception Unix.Unix_error _) -> recent_lines_cache_remove key
+        end else
+          recent_lines_cache_remove key;
+        lines

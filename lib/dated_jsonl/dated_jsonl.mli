@@ -724,6 +724,9 @@ module For_testing : sig
   val in_registry : Store.location -> bool
   (** Whether the registry holds an entry for the store. *)
 
+  val strict_dir_cache_hits : unit -> int
+  (** Cumulative settled-stat cache hits served by strict [list_directory_result]. *)
+
   val after_row :
     ?base_dir:string ->
     ?line:string ->

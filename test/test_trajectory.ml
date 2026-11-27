@@ -1002,6 +1002,49 @@ let test_persist_response_content_per_turn_withheld () =
            (row |> member "content_withheld" |> to_bool))
       lines)
 
+let test_read_recent_lines_settled_cache_hit_and_invalidation () =
+  with_tmpdir (fun dir ->
+    let keeper_name = "cache-keeper" in
+    let trace_id = "trace-settled-cache" in
+    let entry_row i =
+      mk_entry ~ts:(1000.0 +. float_of_int i)
+        (Printf.sprintf "tool_%d" i) (10 * i) "2026-11-28T00:00:00Z"
+    in
+    for i = 1 to 5 do
+      Trajectory.append_entry ~masc_root:dir ~keeper_name ~trace_id (entry_row i)
+    done;
+    write_raw_line ~masc_root:dir ~keeper_name ~trace_id "{malformed json";
+    Unix.sleepf 0.08;
+    let first =
+      Trajectory.read_recent_lines ~masc_root:dir ~keeper_name ~trace_id ~max_lines:10
+    in
+    Alcotest.(check int) "cold settled read decodes 5 valid lines" 5 (List.length first);
+    let second =
+      Trajectory.read_recent_lines ~masc_root:dir ~keeper_name ~trace_id ~max_lines:10
+    in
+    Alcotest.(check bool) "warm settled read returns cached list (physical equality)"
+      true (first == second);
+    let smaller =
+      Trajectory.read_recent_lines ~masc_root:dir ~keeper_name ~trace_id ~max_lines:3
+    in
+    (* Last 3 raw lines are entry 4, entry 5, and the malformed line -> 2 decoded. *)
+    Alcotest.(check int) "different max_lines uses separate cache key" 2
+      (List.length smaller);
+    (* Appending invalidates immediately even within the 50ms settle window. *)
+    Trajectory.append_entry ~masc_root:dir ~keeper_name ~trace_id (entry_row 6);
+    let after_append =
+      Trajectory.read_recent_lines ~masc_root:dir ~keeper_name ~trace_id ~max_lines:10
+    in
+    Alcotest.(check int) "append immediately observed" 6 (List.length after_append);
+    Alcotest.(check bool) "post-append list is freshly decoded" false
+      (first == after_append);
+    (* Deleting the file evicts the cache entry and returns empty. *)
+    Unix.unlink (Trajectory.trajectory_path dir keeper_name trace_id);
+    let after_unlink =
+      Trajectory.read_recent_lines ~masc_root:dir ~keeper_name ~trace_id ~max_lines:10
+    in
+    Alcotest.(check int) "removed file returns empty" 0 (List.length after_unlink))
+
 let () =
   Alcotest.run "Trajectory" [
     ("gate_decision", [
@@ -1083,6 +1126,8 @@ let () =
         test_read_recent_lines_skips_malformed_rows;
       Alcotest.test_case "summary row not counted as malformed" `Quick
         test_summary_row_not_counted_as_malformed;
+      Alcotest.test_case "read_recent_lines caches settled files and invalidates on append" `Quick
+        test_read_recent_lines_settled_cache_hit_and_invalidation;
     ]);
     ("keeper_trace", [
       Alcotest.test_case "dedupe_thinking_lines uses structural key" `Quick

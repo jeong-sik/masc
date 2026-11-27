@@ -106,7 +106,9 @@ let empty_registry_state () = {
 
 let create ?(config = default_rate_limit) () = {
   config;
-  mailbox = Eio.Stream.create max_registry_mailbox;
+  (* Capacity is enforced under [state_mutex] via [max_registry_mailbox] so
+     [Eio.Stream.add] never suspends while holding [state_mutex]. *)
+  mailbox = Eio.Stream.create max_int;
   state = ref (empty_registry_state ());
   state_mutex = Mutex.create ();
   loop_started = Atomic.make false;
@@ -192,9 +194,10 @@ let process_msg ~restore_scopes config state msg =
          gone away while an older directory snapshot was in flight. *)
       Restore_scopes.retire restore_scopes agent_name;
       let sessions' = AgentMap.remove agent_name state.sessions in
+      let rate_trackers' = AgentMap.remove agent_name state.rate_trackers in
       Log.Session.info "Session unregistered: %s (total: %d)"
         agent_name (AgentMap.cardinal sessions');
-      { state with sessions = sessions' }
+      { sessions = sessions'; rate_trackers = rate_trackers' }
 
   | Update_activity (agent_name, is_listening_opt, now) ->
       (match AgentMap.find_opt agent_name state.sessions with
@@ -314,10 +317,20 @@ let process_msg ~restore_scopes config state msg =
         | Some t -> t
         | None -> create_tracker now
       in
+      let tracker =
+        if now -. tracker.last_burst_reset > 60.0 then
+          { tracker with burst_used = 0; last_burst_reset = now }
+        else tracker
+      in
       let status_for_category category =
         let timestamps = get_timestamps tracker category in
         let recent = List.filter (fun t -> t > one_minute_ago) timestamps in
-        let limit = effective_limit config ~role ~category in
+        let base_limit = effective_limit config ~role ~category in
+        let limit =
+          if List.mem agent_name config.priority_agents
+          then int_of_float (float_of_int base_limit *. 1.5)
+          else base_limit
+        in
         let current = List.length recent in
         `Assoc [
           ("category", `String (rate_limit_category_to_string category));
@@ -330,7 +343,7 @@ let process_msg ~restore_scopes config state msg =
       let status = `Assoc [
         ("agent", `String agent_name);
         ("role", `String (agent_role_to_string role));
-        ("burst_remaining", `Int (config.burst_allowed - burst));
+        ("burst_remaining", `Int (max 0 (config.burst_allowed - burst)));
         ("categories", `List [
           status_for_category GeneralLimit;
           status_for_category BroadcastLimit;
@@ -366,14 +379,16 @@ let process_msg ~restore_scopes config state msg =
            Eio.Promise.resolve_ok p ();
            { state with sessions })
 
-let process_registry_msg registry msg =
-  Stdlib.Mutex.protect registry.state_mutex (fun () ->
-    registry.state := process_msg ~restore_scopes:registry.restore_scopes
-      registry.config !(registry.state) msg)
-
 let dispatch registry msg =
-  if Atomic.get registry.loop_started then Eio.Stream.add registry.mailbox msg
-  else process_registry_msg registry msg
+  Stdlib.Mutex.protect registry.state_mutex (fun () ->
+    if Atomic.get registry.loop_started
+       && Eio.Stream.length registry.mailbox < max_registry_mailbox
+    then
+      Eio.Stream.add registry.mailbox msg
+    else
+      registry.state :=
+        process_msg ~restore_scopes:registry.restore_scopes
+          registry.config !(registry.state) msg)
 
 (* Plain-promise variant for McpSessionStore, whose actor resolves bare values
    (not [('a, exn) result]). The registry actor uses [await_exn_if_needed] so
@@ -409,27 +424,26 @@ let resolve_msg_error msg =
 let start_loop registry ~sw =
   if Atomic.compare_and_set registry.loop_started false true then begin
     Eio.Switch.on_release sw (fun () ->
-      Atomic.set registry.loop_started false;
-      Restore_scopes.clear registry.restore_scopes;
-      let rec drain () =
-        match Eio.Stream.take_nonblocking registry.mailbox with
-        | None -> ()
-        | Some msg -> resolve_msg_error msg; drain ()
-      in
-      drain ()
+      Stdlib.Mutex.protect registry.state_mutex (fun () ->
+        Atomic.set registry.loop_started false;
+        Restore_scopes.clear registry.restore_scopes;
+        let rec drain () =
+          match Eio.Stream.take_nonblocking registry.mailbox with
+          | None -> ()
+          | Some msg -> resolve_msg_error msg; drain ()
+        in
+        drain ())
     );
     Eio.Fiber.fork_daemon ~sw (fun () ->
-      let rec loop state =
+      let rec loop () =
         let msg = Eio.Stream.take registry.mailbox in
-        let state' =
-          Stdlib.Mutex.protect registry.state_mutex (fun () ->
-            let state' = process_msg ~restore_scopes:registry.restore_scopes registry.config state msg in
-            registry.state := state';
-            state')
-        in
-        loop state'
+        Stdlib.Mutex.protect registry.state_mutex (fun () ->
+          registry.state :=
+            process_msg ~restore_scopes:registry.restore_scopes
+              registry.config !(registry.state) msg);
+        loop ()
       in
-      loop !(registry.state)
+      loop ()
     )
   end
 
@@ -608,7 +622,9 @@ module McpSessionStore = struct
      prevents heap exhaustion if the consumer fiber stalls. *)
   let max_mcp_session_mailbox = 10_000
 
-  let mailbox = Eio.Stream.create max_mcp_session_mailbox
+  (* Capacity is enforced under [state_mutex] via [max_mcp_session_mailbox] so
+     [Eio.Stream.add] never suspends while holding [state_mutex]. *)
+  let mailbox = Eio.Stream.create max_int
   let state = ref AgentMap.empty
   let state_mutex = Mutex.create ()
   let loop_started = Atomic.make false
@@ -688,13 +704,14 @@ module McpSessionStore = struct
         Eio.Promise.resolve p mem;
         if mem then AgentMap.remove id state else state
 
-  let process_store_msg msg =
-    Stdlib.Mutex.protect state_mutex (fun () ->
-      state := process_msg !state msg)
-
   let dispatch msg =
-    if Atomic.get loop_started then Eio.Stream.add mailbox msg
-    else process_store_msg msg
+    Stdlib.Mutex.protect state_mutex (fun () ->
+      if Atomic.get loop_started
+         && Eio.Stream.length mailbox < max_mcp_session_mailbox
+      then
+        Eio.Stream.add mailbox msg
+      else
+        state := process_msg !state msg)
 
   let start_loop ~sw =
     if Atomic.compare_and_set loop_started false true then begin
@@ -706,54 +723,51 @@ module McpSessionStore = struct
          results, so the drain answers with throwaway values that are not
          stored. *)
       Eio.Switch.on_release sw (fun () ->
-        Atomic.set loop_started false;
-        let rec drain () =
-          match Eio.Stream.take_nonblocking mailbox with
-          | None -> ()
-          | Some msg ->
-            (match msg with
-             | Generate_id u ->
-               Eio.Promise.resolve u (Random_id.prefixed ~prefix:"mcp_" ~bytes:16)
-             | Create (agent_name, now, u) ->
-               let session = {
-                 id = Random_id.prefixed ~prefix:"mcp_" ~bytes:16;
-                 created_at = now;
-                 last_activity = now;
-                 agent_name;
-                 metadata = [];
-                 request_count = 0;
-               } in
-               Eio.Promise.resolve u session
-             | Get (_, _, u) -> Eio.Promise.resolve u None
-             | Peek (_, u) -> Eio.Promise.resolve u None
-             | Get_or_create (_, agent_name, now, u) ->
-               let session = {
-                 id = Random_id.prefixed ~prefix:"mcp_" ~bytes:16;
-                 created_at = now;
-                 last_activity = now;
-                 agent_name;
-                 metadata = [];
-                 request_count = 0;
-               } in
-               Eio.Promise.resolve u session
-             | Cleanup_stale (_, _, u) -> Eio.Promise.resolve u 0
-             | List_all u -> Eio.Promise.resolve u []
-             | Remove (_, u) -> Eio.Promise.resolve u false);
-            drain ()
-        in
-        drain ());
-      Eio.Fiber.fork_daemon ~sw (fun () ->
-        let rec loop store_state =
-          let msg = Eio.Stream.take mailbox in
-          let state' =
-            Stdlib.Mutex.protect state_mutex (fun () ->
-              let state' = process_msg store_state msg in
-              state := state';
-              state')
+        Stdlib.Mutex.protect state_mutex (fun () ->
+          Atomic.set loop_started false;
+          let rec drain () =
+            match Eio.Stream.take_nonblocking mailbox with
+            | None -> ()
+            | Some msg ->
+              (match msg with
+               | Generate_id u ->
+                 Eio.Promise.resolve u (Random_id.prefixed ~prefix:"mcp_" ~bytes:16)
+               | Create (agent_name, now, u) ->
+                 let session = {
+                   id = Random_id.prefixed ~prefix:"mcp_" ~bytes:16;
+                   created_at = now;
+                   last_activity = now;
+                   agent_name;
+                   metadata = [];
+                   request_count = 0;
+                 } in
+                 Eio.Promise.resolve u session
+               | Get (_, _, u) -> Eio.Promise.resolve u None
+               | Peek (_, u) -> Eio.Promise.resolve u None
+               | Get_or_create (id, agent_name, now, u) ->
+                 let session = {
+                   id;
+                   created_at = now;
+                   last_activity = now;
+                   agent_name;
+                   metadata = [];
+                   request_count = 0;
+                 } in
+                 Eio.Promise.resolve u session
+               | Cleanup_stale (_, _, u) -> Eio.Promise.resolve u 0
+               | List_all u -> Eio.Promise.resolve u []
+               | Remove (_, u) -> Eio.Promise.resolve u false);
+              drain ()
           in
-          loop state'
+          drain ()));
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+        let rec loop () =
+          let msg = Eio.Stream.take mailbox in
+          Stdlib.Mutex.protect state_mutex (fun () ->
+            state := process_msg !state msg);
+          loop ()
         in
-        loop !state)
+        loop ())
     end
 
   let generate_id () =

@@ -818,44 +818,56 @@ let append_or_enqueue entry =
   if Atomic.get async_append_active then enqueue_append entry else append_to_store entry
 ;;
 
+let shutdown_hook_registered = Atomic.make false
+
 let start_flush_fiber ~sw ~clock =
-  Atomic.set async_append_active true;
-  Eio.Fiber.fork_daemon ~sw (fun () ->
-    Log.Misc.info
-      "keeper_tool_call_log: async flush fiber started (interval=%.1fs, capacity=%d)"
-      append_flush_interval_s
-      append_queue_capacity;
-    let rec loop () =
-      match Eio.Time.sleep clock append_flush_interval_s with
-      | exception Eio.Cancel.Cancelled _ -> `Stop_daemon
-      | () ->
-        (match drain_queued_appends () with
-         | _ -> ()
-         | exception Eio.Cancel.Cancelled _ -> ()
-         | exception exn ->
-           Log.Misc.warn
-             "keeper_tool_call_log: async flush iteration failed: %s"
-             (Printexc.to_string exn));
-        loop ()
-    in
-    loop ());
+  if Atomic.compare_and_set async_append_active false true then begin
+    Eio.Switch.on_release sw (fun () ->
+      Atomic.set async_append_active false;
+      Eio.Cancel.protect (fun () ->
+        try ignore (drain_queued_appends () : int)
+        with exn ->
+          Log.Misc.warn
+            "keeper_tool_call_log: switch release flush failed: %s"
+            (Printexc.to_string exn)));
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      Log.Misc.info
+        "keeper_tool_call_log: async flush fiber started (interval=%.1fs, capacity=%d)"
+        append_flush_interval_s
+        append_queue_capacity;
+      let rec loop () =
+        match Eio.Time.sleep clock append_flush_interval_s with
+        | exception Eio.Cancel.Cancelled _ -> `Stop_daemon
+        | () ->
+          (match drain_queued_appends () with
+           | _ -> loop ()
+           | exception Eio.Cancel.Cancelled _ -> `Stop_daemon
+           | exception exn ->
+             Log.Misc.warn
+               "keeper_tool_call_log: async flush iteration failed: %s"
+               (Printexc.to_string exn);
+             loop ())
+      in
+      loop ())
+  end;
   (* Cancellation during ordinary running no longer loses a row: the drain
      requeues before it re-raises, and the daemon comes back for it. This
      hook is the one place that still can. A cancel here re-raises, and the
      requeued entry is left in a queue that lives only in this process, which
      is on its way out. Closing that needs a durable queue, not another
      handler arm. *)
-  Shutdown.register ~name:"keeper_tool_call_log_flush" ~priority:24 (fun () ->
-    try
-      let n = drain_queued_appends () in
-      if n > 0
-      then Log.Misc.info "keeper_tool_call_log: shutdown flush wrote %d records" n
-    with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-      Log.Misc.warn
-        "keeper_tool_call_log: shutdown flush failed: %s"
-        (Printexc.to_string exn))
+  if Atomic.compare_and_set shutdown_hook_registered false true then
+    Shutdown.register ~name:"keeper_tool_call_log_flush" ~priority:24 (fun () ->
+      try
+        let n = drain_queued_appends () in
+        if n > 0
+        then Log.Misc.info "keeper_tool_call_log: shutdown flush wrote %d records" n
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+        Log.Misc.warn
+          "keeper_tool_call_log: shutdown flush failed: %s"
+          (Printexc.to_string exn))
 ;;
 
 (** [blob_aware_output_json safe_output] wraps a tool-output string for

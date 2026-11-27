@@ -250,16 +250,24 @@ let prepare_with ~sw ~capture ~confirm ~readiness ~access =
 (* HIGH-RISK-UNREVIEWED: the second request with the bearer, and the SIGTERM
    after it, go out only after the kernel names the prepared listener again
    ([authorize] asks it right before the bearer). *)
+(* Non-poisoning mutex acquisition so pre-mutation authorize/signal failures or
+   cancellation never permanently poison [owner.lock] and block [close]. *)
+let with_owner_lock owner f =
+  Eio.Mutex.lock owner.lock;
+  Fun.protect ~finally:(fun () -> Eio.Mutex.unlock owner.lock) f
 let request_termination owner =
-  Eio.Mutex.use_rw ~protect:true owner.lock (fun () ->
+  with_owner_lock owner (fun () ->
     match owner.phase with
     | Released -> Error Closed
     | Requested -> Error Already_requested
     | Prepared ->
       let* () = owner.authorize () in
       let* () = owner.signal () in owner.phase <- Requested; Ok ())
-let close owner = Eio.Mutex.use_rw ~protect:true owner.lock (fun () ->
-  if owner.phase <> Released then (owner.release (); owner.phase <- Released))
+let close owner =
+  Eio.Cancel.protect (fun () ->
+    with_owner_lock owner (fun () ->
+      if owner.phase <> Released then
+        Fun.protect ~finally:(fun () -> owner.phase <- Released) owner.release))
 (* The capture of the stop found nobody, or another process, where the kernel
    had named [listener]. What holds the workspace now is read for the
    refusal, so the operator is told the pid that left and what replaced it.

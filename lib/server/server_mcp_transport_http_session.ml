@@ -297,12 +297,24 @@ let rec refuse_restore path failure =
           (SMap.add path (Restore_refused failure) states)
       then failure else refuse_restore path failure
 
-let begin_restore path token =
+let rec begin_restore path token =
+  let states = Atomic.get persistence_by_path in
+  match SMap.find_opt path states with
+  | Some (Restore_refused _) as existing -> existing
+  | (None | Some Ready | Some (Restore_pending _)) as previous ->
+      if Atomic.compare_and_set persistence_by_path states
+          (SMap.add path (Restore_pending token) states)
+      then previous
+      else begin_restore path token
+
+let abort_restore path token ~previous =
   Atomic_util.update persistence_by_path (fun states ->
     match SMap.find_opt path states with
-    | Some (Restore_refused _) -> states
-    | None | Some Ready | Some (Restore_pending _) ->
-        SMap.add path (Restore_pending token) states)
+    | Some (Restore_pending owner) when owner == token ->
+        (match previous with
+         | Some prev -> SMap.add path prev states
+         | None -> SMap.remove path states)
+    | None | Some Ready | Some (Restore_refused _) | Some (Restore_pending _) -> states)
 
 let finish_restore path token =
   Atomic_util.update persistence_by_path (fun states ->
@@ -496,43 +508,52 @@ let load_sessions_from_file ~base_path () =
   let path = sessions_file_path ~base_path () in
   Eio_guard.check_if_ready ();
   let token = ref () in
-  begin_restore path token;
-  let restored = Eio_guard.run_in_systhread ~label:"mcp-session-load" (fun () ->
-    Stdlib.Mutex.protect persistence_mutex (fun () ->
-      let restored = read_sessions path in
-      (match restored with
-       | Unavailable failure -> ignore (refuse_restore path failure)
-       | Missing | Restored _ -> ());
-      restored)) in
-  Eio_guard.check_if_ready ();
-  match restored with
-  | Missing when owns_restore path token ->
-      finish_restore path token;
-      Log.Server.debug "session restore absent path=%S" path
-  | Unavailable failure ->
-      Log.Server.warn
-        "session restore %s path=%S; preserving original; new sessions remain memory-only until repair and restart"
-        (restore_failure_to_string failure) path
-  | Restored sessions when owns_restore path token ->
-      (* Owner activation publishes these maps without yielding after the
-         cancellation/ownership checks; an older suspended load cannot apply
-         after a newer load has claimed this path on the owner domain. *)
-      let patch = sessions.patch in
-      (* Every valid decoded row adds protocol/activity/start together. No
-         protocol rows therefore means no publishable patch; decoded_entries
-         remains diagnostic, never an admission or authority gate. *)
-      if not (SMap.is_empty patch.versions) then begin
-        Atomic_util.update session_registry (fun current ->
-          { versions=merge_restored patch.versions current.versions
-          ; profiles=merge_restored patch.profiles current.profiles
-          ; timestamps=merge_restored patch.timestamps current.timestamps
-          ; started=merge_restored patch.started current.started
-          ; transports=merge_restored patch.transports current.transports })
-      end;
-      finish_restore path token;
-      Log.Server.debug "session restore applied path=%S entries=%d" path sessions.decoded_entries
-  | Missing | Restored _ ->
-      Log.Server.warn "session restore superseded or previously refused path=%S" path
+  let previous = begin_restore path token in
+  let settled = ref false in
+  Fun.protect
+    ~finally:(fun () ->
+      if not !settled then abort_restore path token ~previous)
+    (fun () ->
+      let restored = Eio_guard.run_in_systhread ~label:"mcp-session-load" (fun () ->
+        Stdlib.Mutex.protect persistence_mutex (fun () ->
+          let restored = read_sessions path in
+          (match restored with
+           | Unavailable failure -> ignore (refuse_restore path failure)
+           | Missing | Restored _ -> ());
+          restored)) in
+      Eio_guard.check_if_ready ();
+      match restored with
+      | Missing when owns_restore path token ->
+          finish_restore path token;
+          settled := true;
+          Log.Server.debug "session restore absent path=%S" path
+      | Unavailable failure ->
+          settled := true;
+          Log.Server.warn
+            "session restore %s path=%S; preserving original; new sessions remain memory-only until repair and restart"
+            (restore_failure_to_string failure) path
+      | Restored sessions when owns_restore path token ->
+          (* Owner activation publishes these maps without yielding after the
+             cancellation/ownership checks; an older suspended load cannot apply
+             after a newer load has claimed this path on the owner domain. *)
+          let patch = sessions.patch in
+          (* Every valid decoded row adds protocol/activity/start together. No
+             protocol rows therefore means no publishable patch; decoded_entries
+             remains diagnostic, never an admission or authority gate. *)
+          if not (SMap.is_empty patch.versions) then begin
+            Atomic_util.update session_registry (fun current ->
+              { versions=merge_restored patch.versions current.versions
+              ; profiles=merge_restored patch.profiles current.profiles
+              ; timestamps=merge_restored patch.timestamps current.timestamps
+              ; started=merge_restored patch.started current.started
+              ; transports=merge_restored patch.transports current.transports })
+          end;
+          finish_restore path token;
+          settled := true;
+          Log.Server.debug "session restore applied path=%S entries=%d" path sessions.decoded_entries
+      | Missing | Restored _ ->
+          settled := true;
+          Log.Server.warn "session restore superseded or previously refused path=%S" path)
 
 (** Reap session entries whose session_id has no active SSE connection
     AND whose grace period has expired.
@@ -573,6 +594,15 @@ let reap_stale_sessions ~base_path ~is_active_session =
        session and resolved identity forever. *)
     List.iter forget_mcp_session stale
   end;
+  (* Prune orphaned uninitialized profile entries that never reached initialize
+     and have no active transport connection, preventing unbounded map growth. *)
+  Atomic_util.update session_registry (fun state ->
+    let profiles =
+      SMap.filter
+        (fun sid _ -> SMap.mem sid state.versions || is_active_session sid)
+        state.profiles
+    in
+    { state with profiles });
   if kept_by_grace > 0 then
     Log.Server.info "session grace: %d sessions kept (inactive but within %.0fs grace)"
       kept_by_grace grace_period_seconds;

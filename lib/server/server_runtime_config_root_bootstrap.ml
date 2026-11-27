@@ -51,12 +51,40 @@ let versioned_config_root_candidates () =
   |> List.filter Fs_compat.is_directory
 ;;
 
+(* Stage into a sibling temp file, fsync, and publish with [rename_noreplace]
+   so concurrent bootstraps or operator edits are never overwritten or observed
+   partially written. Returns [true] when published, [false] when an entry
+   already existed at [path]. *)
+let write_file_if_missing_atomic ~path content =
+  if Sys.file_exists path
+  then false
+  else (
+    Fs_compat.mkdir_p (Filename.dirname path);
+    let staged, channel =
+      Fs_compat.open_atomic_temp_file ~temp_dir:(Filename.dirname path) ()
+    in
+    Fun.protect
+      ~finally:(fun () ->
+        close_out_noerr channel;
+        try Unix.unlink staged with
+        | Unix.Unix_error _ -> ())
+      (fun () ->
+        let descriptor = Unix.descr_of_out_channel channel in
+        output_string channel content;
+        flush channel;
+        Unix.fsync descriptor;
+        close_out channel;
+        match Fs_compat.rename_noreplace staged path with
+        | () ->
+          ignore (Fs_compat.sync_file_and_parent_strict path : (unit, string) result);
+          true
+        | exception Unix.Unix_error (Unix.EEXIST, _, _) -> false))
+;;
+
 let copy_file_if_missing ~src ~dst =
   if Sys.file_exists dst
   then ()
-  else (
-    Fs_compat.mkdir_p (Filename.dirname dst);
-    Fs_compat.save_file dst (Fs_compat.load_file src))
+  else ignore (write_file_if_missing_atomic ~path:dst (Fs_compat.load_file src) : bool)
 ;;
 
 let existing_directory = Fs_compat.is_directory
@@ -83,9 +111,9 @@ let rec copy_missing_tree_count ~src ~dst =
            0)
   else if Sys.file_exists dst
   then 0
-  else (
-    copy_file_if_missing ~src ~dst;
-    1)
+  else if write_file_if_missing_atomic ~path:dst (Fs_compat.load_file src)
+  then 1
+  else 0
 ;;
 
 let rec copy_missing_tree ~src ~dst =
@@ -177,9 +205,9 @@ let write_missing_embedded ~dst rels =
          match Embedded_config.read rel with
          | None -> written
          | Some content ->
-           Fs_compat.mkdir_p (Filename.dirname target);
-           Fs_compat.save_file target content;
-           written + 1))
+           if write_file_if_missing_atomic ~path:target content
+           then written + 1
+           else written))
     0
     rels
 ;;
@@ -202,9 +230,9 @@ let write_missing_embedded_renamed ~dst pairs =
          match Embedded_config.read rel with
          | None -> written
          | Some content ->
-           Fs_compat.mkdir_p (Filename.dirname target);
-           Fs_compat.save_file target content;
-           written + 1))
+           if write_file_if_missing_atomic ~path:target content
+           then written + 1
+           else written))
     0
     pairs
 ;;

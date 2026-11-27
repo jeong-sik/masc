@@ -40,6 +40,31 @@ let in_roots roots target =
     | Some root -> below root target
     | None -> false) roots
 
+let deny_root_parts root =
+  if Filename.is_relative root then raise Invalid_input;
+  try Some (parts (Unix.realpath root))
+  with Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
+    let rec resolve_prefix path suffix =
+      let dir = Filename.dirname path in
+      let base = Filename.basename path in
+      if String.equal base "." || String.equal base ".." then raise Invalid_input;
+      let suffix =
+        if String.equal base "" || String.equal base "/" then suffix
+        else base :: suffix
+      in
+      if String.equal dir path then None
+      else
+        try Some (parts (Unix.realpath dir) @ suffix)
+        with Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) ->
+          resolve_prefix dir suffix
+    in
+    resolve_prefix root []
+
+let in_deny_roots roots target =
+  List.exists (fun root -> match deny_root_parts root with
+    | Some root -> below root target
+    | None -> false) roots
+
 let rec relative root path = match root, path with
   | [], rest -> Some rest
   | parent :: parents, child :: children when String.equal parent child -> relative parents children
@@ -81,7 +106,7 @@ let decide () =
     let path = string (field "Path" (field "args" call)) in
     let path = if Filename.is_relative path then Filename.concat cwd path else path in
     let target = Unix.realpath path |> parts in
-    if in_roots deny target then false
+    if in_deny_roots deny target then false
     else in_roots read target
       || current_generated_read ~brain ~conversation:(string (field "conversationId" event)) target
   | _ -> true

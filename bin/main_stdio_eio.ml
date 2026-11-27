@@ -206,13 +206,25 @@ let run_cmd cli_base_path =
        state);
   Fun.protect
     ~finally:(fun () ->
-      (try Board_dispatch.flush () with
-       | Eio.Cancel.Cancelled _ -> ()
-       | exn ->
-         Log.Misc.warn
-           "shutdown: board flush failed: %s"
-           (Printexc.to_string exn));
-      Shutdown_hooks.run_all ())
+      Eio.Cancel.protect (fun () ->
+        (try
+           Eio.Time.with_timeout_exn clock 2.0 (fun () -> Board_dispatch.flush ())
+         with
+         | Eio.Time.Timeout ->
+           Log.Misc.warn "shutdown: board flush timed out after 2.0s"
+         | exn ->
+           Log.Misc.warn
+             "shutdown: board flush failed: %s"
+             (Printexc.to_string exn));
+        (try
+           Eio.Time.with_timeout_exn clock 10.0 (fun () -> Shutdown_hooks.run_all ())
+         with
+         | Eio.Time.Timeout ->
+           Log.Misc.warn "shutdown: hooks timed out after 10.0s"
+         | exn ->
+           Log.Misc.warn
+             "shutdown: hooks failed: %s"
+             (Printexc.to_string exn))))
     (fun () -> Mcp_eio.run_stdio ?auth_token:stdio_auth_token ~sw ~env state)
 
 let cmd =

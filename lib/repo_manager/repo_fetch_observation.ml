@@ -40,7 +40,6 @@ let write ~common_dir observation =
   try
     let common_dir = Unix.realpath common_dir in
     let path = Filename.concat common_dir filename in
-    let temporary = Filename.temp_file ~temp_dir:common_dir ".masc-target-ref-" ".tmp" in
     let payload =
       Yojson.Safe.to_string
         (`Assoc
@@ -51,15 +50,7 @@ let write ~common_dir observation =
            ; "observed_at_unix", `Int observation.observed_at_unix
            ])
     in
-    Fun.protect
-      ~finally:(fun () -> if Sys.file_exists temporary then Sys.remove temporary)
-      (fun () ->
-         let output = open_out_bin temporary in
-         Fun.protect
-           ~finally:(fun () -> close_out_noerr output)
-           (fun () -> output_string output payload);
-         Unix.rename temporary path);
-    Ok ()
+    Fs_compat.save_file_atomic_strict path payload
   with
   | Sys_error message -> Error message
   | Unix.Unix_error (code, operation, path) ->

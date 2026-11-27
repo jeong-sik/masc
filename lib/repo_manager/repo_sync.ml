@@ -58,26 +58,51 @@ let advance_working_tree ~repository : advance_outcome =
               | Ok () -> Advanced { behind }
               | Error reason -> Fast_forward_refused { behind; reason })))
 
+let persist_sync_failure ~base_path repo_id reason =
+  try ignore (Repo_store.update_status ~base_path repo_id (Error reason))
+  with _ -> ()
+
 let sync_repository ~base_path repo : (advance_outcome, string) result =
   let local_path = Repo_store.local_path ~base_path repo in
   let repo_with_path = { repo with local_path } in
   let* () = Repo_store.update_status ~base_path repo.id Cloning in
   let sync_result =
-    if Sys.file_exists local_path then
-      Repo_git.fetch ~repository:repo_with_path
-    else
-      match Repo_git.clone ~repository:repo_with_path with
-      | Error msg -> Error msg
-      | Ok () -> Repo_git.fetch ~repository:repo_with_path
+    try
+      if Sys.file_exists local_path then
+        Repo_git.fetch ~repository:repo_with_path
+      else
+        match Repo_git.clone ~repository:repo_with_path with
+        | Stdlib.Error msg -> Stdlib.Error msg
+        | Stdlib.Ok () -> Repo_git.fetch ~repository:repo_with_path
+    with
+    | Eio.Cancel.Cancelled _ as exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        Eio.Cancel.protect (fun () ->
+          persist_sync_failure ~base_path repo.id "sync cancelled");
+        Printexc.raise_with_backtrace exn bt
+    | exn ->
+        Stdlib.Error (Printexc.to_string exn)
   in
   match sync_result with
-  | Error msg ->
+  | Stdlib.Error msg ->
       let* () = Repo_store.update_status ~base_path repo.id (Error msg) in
-      Error msg
-  | Ok _branches ->
-      let outcome = advance_working_tree ~repository:repo_with_path in
+      Stdlib.Error msg
+  | Stdlib.Ok _branches ->
+      let outcome =
+        try advance_working_tree ~repository:repo_with_path
+        with
+        | Eio.Cancel.Cancelled _ as exn ->
+            let bt = Printexc.get_raw_backtrace () in
+            Eio.Cancel.protect (fun () ->
+              persist_sync_failure ~base_path repo.id "sync cancelled");
+            Printexc.raise_with_backtrace exn bt
+        | exn ->
+            let bt = Printexc.get_raw_backtrace () in
+            persist_sync_failure ~base_path repo.id (Printexc.to_string exn);
+            Printexc.raise_with_backtrace exn bt
+      in
       let* () = Repo_store.update_status ~base_path repo.id Active in
-      Ok outcome
+      Stdlib.Ok outcome
 
 let should_sync repo ~now =
   if not repo.auto_sync then false

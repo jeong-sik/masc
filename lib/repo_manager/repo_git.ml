@@ -450,12 +450,18 @@ let ahead_behind
             "git rev-list --left-right --count returned something other than two tab-separated counts")
 
 let get_recent_commits ~repository ~branch ~limit =
-  match
-    run_git ~cwd:repository.local_path
-      ["log"; branch; "-n"; string_of_int limit; "--oneline"]
-  with
-  | Ok lines -> Ok lines
-  | Error msg -> Error msg
+  let open Result.Syntax in
+  let* () = validate_argument ~field:"branch" branch in
+  if limit < 0 then
+    Stdlib.Error "limit must be non-negative"
+  else
+    match
+      run_git ~cwd:repository.local_path ~env:read_only_git_env
+        ~timeout_sec:inspection_timeout_sec
+        ["--no-optional-locks"; "log"; "-n"; string_of_int limit; "--oneline"; branch; "--"]
+    with
+    | Stdlib.Ok lines -> Stdlib.Ok lines
+    | Stdlib.Error msg -> Stdlib.Error msg
 
 let status_summary ?(timeout_sec = inspection_timeout_sec) ~repository () =
   match

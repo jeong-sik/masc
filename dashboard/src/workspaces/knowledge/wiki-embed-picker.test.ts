@@ -254,4 +254,34 @@ describe('WikiEmbedPicker', () => {
     expect(container.querySelector('[role="list"]')).toBeNull()
     expect(await axe(container)).toHaveNoViolations()
   })
+
+  it('shows overflow indicator when more than 40 wiki pages match', async () => {
+    const manyPages: WikiPageSummary[] = Array.from({ length: 45 }, (_, idx) => ({
+      slug: `page-${String(idx + 1).padStart(2, '0')}`,
+      file: `page-${String(idx + 1).padStart(2, '0')}.md`,
+      title: `Page ${idx + 1}`,
+      summary: '',
+      source: 'observation',
+      author: 'librarian',
+      created: '2026-11-20T00:00:00Z',
+      updated: '2026-11-25T00:00:00Z',
+      revision: 1,
+      tags: [],
+      backlink_count: 0,
+      outgoing_link_count: 0,
+      sources_count: 0,
+      hearsay_count: 0,
+      sha256: 'a'.repeat(64),
+    }))
+    render(
+      html`<${WikiEmbedPicker} wikiPages=${manyPages} onInsertEmbed=${vi.fn()} />`,
+      container,
+    )
+    container.querySelector<HTMLButtonElement>('[data-testid="wiki-embed-picker-trigger"]')!.click()
+    await flushUi()
+
+    expect(container.querySelectorAll('[role="listitem"]').length).toBe(40)
+    const overflow = container.querySelector('[data-testid="wiki-embed-picker-overflow"]')
+    expect(overflow?.textContent).toContain('+5건 더 있음')
+  })
 })

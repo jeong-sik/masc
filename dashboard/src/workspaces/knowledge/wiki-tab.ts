@@ -25,15 +25,8 @@ import { PopoverMenu } from '../../components/primitives/popover-menu'
 import { RefreshButton } from '../../components/primitives/refresh-button'
 import { VirtualList } from '../../components/primitives/virtual-list'
 import { computeMarkdownLineDiff } from './wiki-diff'
-import {
-  WORKSPACE_MEDIA_ACCEPT,
-  dataTransferHasFiles,
-  deriveImageAltText,
-  extractUploadFilesFromDataTransfer,
-  formatUploadedImageMarkdown,
-  insertTextAtSelection,
-  uploadWorkspaceMedia,
-} from '../../lib/workspace-media-upload'
+import { useWorkspaceMediaComposer } from '../../lib/use-workspace-media-composer'
+import { WORKSPACE_MEDIA_ACCEPT } from '../../lib/workspace-media-upload'
 import {
   describeWireType,
   expectOptionalArrayField,
@@ -198,6 +191,8 @@ function decodeWikiPageData(raw: unknown): WikiPageData {
 type WikiLeftView = 'pages' | 'lint' | 'log'
 type WikiEditorViewMode = 'write' | 'split' | 'preview'
 
+const SPLIT_PREVIEW_DEBOUNCE_MS = 150
+
 interface CasConflictState {
   readonly serverPage: WikiPageData
   readonly localBody: string
@@ -246,33 +241,31 @@ export function WikiTab(props: WorkspaceViewProps) {
   const [saveFeedback, setSaveFeedback] = useState<{ kind: 'err'; message: string } | null>(null)
   const [casConflict, setCasConflict] = useState<CasConflictState | null>(null)
   const [editorViewMode, setEditorViewMode] = useState<WikiEditorViewMode>('split')
-  const [dragActive, setDragActive] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState<{ readonly current: number; readonly total: number } | null>(null)
-  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [previewBody, setPreviewBody] = useState('')
+  const [allWikiPages, setAllWikiPages] = useState<{
+    readonly epoch: number
+    readonly pages: readonly WikiPageSummary[]
+  } | null>(null)
   const submitSaveRef = useRef<() => Promise<void>>(async () => {})
   const savingRef = useRef(false)
   const saveAbortRef = useRef<AbortController | null>(null)
-  const uploadAbortRef = useRef<AbortController | null>(null)
-  const editorTextareaRef = useRef<HTMLTextAreaElement | null>(null)
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const dragDepthRef = useRef(0)
-  const selectionRef = useRef<{ start: number; end: number }>({ start: 0, end: 0 })
-  const pendingCursorRef = useRef<number | null>(null)
-  const editBodyRef = useRef(editBody)
-  editBodyRef.current = editBody
   const mountedRef = useRef(true)
   const indexSeqRef = useRef(0)
+  const allPagesSeqRef = useRef(0)
   const searchAbortRef = useRef<AbortController | null>(null)
   const preserveFeedbackSlugRef = useRef<string | null>(null)
 
-  const resetUploadUi = useCallback(() => {
-    uploadAbortRef.current?.abort()
-    uploadAbortRef.current = null
-    dragDepthRef.current = 0
-    setDragActive(false)
-    setUploadProgress(null)
-    setUploadError(null)
-  }, [])
+  const editorDraftKey = editing
+    ? (creatingNew ? 'wiki:new' : `wiki:edit:${editSlug}`)
+    : 'wiki:idle'
+
+  const mediaComposer = useWorkspaceMediaComposer({
+    value: editBody,
+    onChange: setEditBody,
+    draftKey: editorDraftKey,
+    disabled: adminLocked || saving,
+  })
+  const resetUploadUi = mediaComposer.reset
 
   useEffect(() => {
     mountedRef.current = true
@@ -280,7 +273,6 @@ export function WikiTab(props: WorkspaceViewProps) {
       mountedRef.current = false
       searchAbortRef.current?.abort()
       saveAbortRef.current?.abort()
-      uploadAbortRef.current?.abort()
     }
   }, [])
 
@@ -292,6 +284,18 @@ export function WikiTab(props: WorkspaceViewProps) {
       setCasConflict(null)
     }
   }, [adminLocked, editing, resetUploadUi])
+
+  useEffect(() => {
+    if (!editing || editorViewMode === 'write') return
+    if (editorViewMode === 'preview') {
+      setPreviewBody(editBody)
+      return
+    }
+    const timer = setTimeout(() => {
+      setPreviewBody(editBody)
+    }, SPLIT_PREVIEW_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [editing, editorViewMode, editBody])
 
   const loadIndex = useCallback(async (reason: 'mount' | 'manual' = 'mount') => {
     const seq = ++indexSeqRef.current
@@ -313,6 +317,9 @@ export function WikiTab(props: WorkspaceViewProps) {
     setLoading(false)
     if (obs.kind === 'value') {
       setWikiIndex(obs.data)
+      if (!tagFilter && !sourceFilter) {
+        setAllWikiPages({ epoch: startEpoch, pages: obs.data.pages })
+      }
       markViewSynced()
       setSelectedSlug((prev) => {
         const pages = obs.data.pages
@@ -329,6 +336,26 @@ export function WikiTab(props: WorkspaceViewProps) {
   useEffect(() => {
     void loadIndex('mount')
   }, [loadIndex])
+
+  useEffect(() => {
+    const epoch = currentSessionEpoch()
+    if (!editing || (!tagFilter && !sourceFilter)) return
+    if (allWikiPages && allWikiPages.epoch === epoch) return
+    const seq = ++allPagesSeqRef.current
+    void resourceCache.fetch<WikiIndexData>(
+      'kn:wiki:index:sort=updated',
+      (signal) => apiGetV2<WikiIndexData>('/api/v1/wiki?sort=updated', {
+        signal,
+        decode: decodeWikiIndexData,
+      }),
+      { ttlMs: 12_000, topics: ['wiki', 'wiki_updated'], reason: 'mount' },
+    ).then((obs) => {
+      if (!mountedRef.current || allPagesSeqRef.current !== seq || !isEpochCurrent(epoch)) return
+      if (obs.kind === 'value') {
+        setAllWikiPages({ epoch, pages: obs.data.pages })
+      }
+    })
+  }, [editing, tagFilter, sourceFilter, allWikiPages])
 
   const loadLint = useCallback((reason: 'mount' | 'manual') => {
     void resourceCache.fetch(
@@ -427,12 +454,11 @@ export function WikiTab(props: WorkspaceViewProps) {
     setEditSummary(page.frontmatter.summary)
     setEditSource(page.frontmatter.source)
     setEditTags(page.frontmatter.tags.join(', '))
-    editBodyRef.current = page.body_markdown
     setEditBody(page.body_markdown)
+    setPreviewBody(page.body_markdown)
     setEditNote('')
     setExpectedSha(page.sha256)
     setExpectedRev(page.frontmatter.revision)
-    selectionRef.current = { start: page.body_markdown.length, end: page.body_markdown.length }
   }
 
   const startNewPage = () => {
@@ -447,141 +473,19 @@ export function WikiTab(props: WorkspaceViewProps) {
     setEditSummary('')
     setEditSource('observation')
     setEditTags('')
-    editBodyRef.current = ''
     setEditBody('')
+    setPreviewBody('')
     setEditNote('create page')
     setExpectedSha(null)
     setExpectedRev(null)
-    selectionRef.current = { start: 0, end: 0 }
   }
-
-  const syncEditorSelection = useCallback(() => {
-    const el = editorTextareaRef.current
-    if (!el) return
-    selectionRef.current = {
-      start: el.selectionStart ?? el.value.length,
-      end: el.selectionEnd ?? el.value.length,
-    }
-  }, [])
-
-  useEffect(() => {
-    const pos = pendingCursorRef.current
-    if (pos === null) return
-    pendingCursorRef.current = null
-    const target = editorTextareaRef.current
-    if (target && mountedRef.current) {
-      target.focus()
-      target.setSelectionRange(pos, pos)
-    }
-  }, [editBody])
-
-  const insertSnippetAtCursor = useCallback((snippet: string) => {
-    const el = editorTextareaRef.current
-    const prev = editBodyRef.current
-    const start = el && typeof document !== 'undefined' && document.activeElement === el
-      ? (el.selectionStart ?? prev.length)
-      : Math.min(selectionRef.current.start, prev.length)
-    const end = el && typeof document !== 'undefined' && document.activeElement === el
-      ? (el.selectionEnd ?? start)
-      : Math.min(selectionRef.current.end, prev.length)
-    const inserted = insertTextAtSelection(prev, start, end, snippet)
-    editBodyRef.current = inserted.value
-    selectionRef.current = { start: inserted.cursor, end: inserted.cursor }
-    pendingCursorRef.current = inserted.cursor
-    setEditBody(inserted.value)
-  }, [])
-
-  const handleUploadFiles = useCallback(async (files: readonly File[]) => {
-    if (adminLocked || files.length === 0) return
-    if (uploadAbortRef.current !== null) {
-      pushShellToast('이미지 업로드가 진행 중입니다. 완료 후 다시 시도하세요.', 'info')
-      return
-    }
-    const startEpoch = currentSessionEpoch()
-    const ctrl = new AbortController()
-    uploadAbortRef.current = ctrl
-    setUploadError(null)
-    let uploadedCount = 0
-
-    try {
-      for (let i = 0; i < files.length; i += 1) {
-        const file = files[i]!
-        if (!mountedRef.current || ctrl.signal.aborted || !isEpochCurrent(startEpoch)) break
-        setUploadProgress({ current: i + 1, total: files.length })
-
-        const res = await uploadWorkspaceMedia(file, { signal: ctrl.signal })
-        if (!mountedRef.current || ctrl.signal.aborted || !isEpochCurrent(startEpoch)) break
-
-        if (res.ok) {
-          const prefix = uploadedCount > 0 ? '\n' : ''
-          const markdown = `${prefix}${formatUploadedImageMarkdown(res.value, deriveImageAltText(file.name))}`
-          insertSnippetAtCursor(markdown)
-          uploadedCount += 1
-        } else {
-          if (res.error.kind === 'aborted' || res.error.kind === 'epoch_stale') break
-          setUploadError(res.error.message)
-          pushShellToast(res.error.message, 'error')
-        }
-      }
-    } finally {
-      if (uploadAbortRef.current === ctrl) {
-        uploadAbortRef.current = null
-      }
-      if (mountedRef.current) {
-        setUploadProgress(null)
-      }
-      if (uploadedCount > 0 && mountedRef.current && !ctrl.signal.aborted && isEpochCurrent(startEpoch)) {
-        pushShellToast(
-          uploadedCount === 1
-            ? '이미지를 업로드해 본문에 삽입했습니다.'
-            : `이미지 ${uploadedCount}개를 업로드해 본문에 삽입했습니다.`,
-          'success',
-        )
-      }
-    }
-  }, [adminLocked, insertSnippetAtCursor])
-
-  const handleEditorPaste = useCallback((event: ClipboardEvent) => {
-    if (adminLocked) return
-    const files = extractUploadFilesFromDataTransfer(event.clipboardData, { imagesOnly: true })
-    if (files.length === 0) return
-    event.preventDefault()
-    void handleUploadFiles(files)
-  }, [adminLocked, handleUploadFiles])
-
-  const handleEditorDragEnter = useCallback((event: DragEvent) => {
-    if (adminLocked || !dataTransferHasFiles(event.dataTransfer)) return
-    event.preventDefault()
-    dragDepthRef.current += 1
-    setDragActive(true)
-  }, [adminLocked])
-
-  const handleEditorDragOver = useCallback((event: DragEvent) => {
-    if (adminLocked || !dataTransferHasFiles(event.dataTransfer)) return
-    event.preventDefault()
-    if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy'
-    setDragActive(true)
-  }, [adminLocked])
-
-  const handleEditorDragLeave = useCallback(() => {
-    if (dragDepthRef.current > 0) {
-      dragDepthRef.current -= 1
-      if (dragDepthRef.current === 0) setDragActive(false)
-    }
-  }, [])
-
-  const handleEditorDrop = useCallback((event: DragEvent) => {
-    dragDepthRef.current = 0
-    setDragActive(false)
-    if (adminLocked) return
-    const files = extractUploadFilesFromDataTransfer(event.dataTransfer, { imagesOnly: false })
-    if (files.length === 0) return
-    event.preventDefault()
-    void handleUploadFiles(files)
-  }, [adminLocked, handleUploadFiles])
 
   const submitSave = async (overrideCas?: { sha256: string; revision: number }) => {
     if (adminLocked || savingRef.current) return
+    if (mediaComposer.uploading) {
+      setSaveFeedback({ kind: 'err', message: '이미지 업로드가 끝난 뒤 저장할 수 있습니다.' })
+      return
+    }
     const targetSlug = editSlug.trim()
     if (!targetSlug || !editTitle.trim()) {
       setSaveFeedback({ kind: 'err', message: 'Slug와 페이지 제목을 모두 입력하세요.' })
@@ -662,6 +566,9 @@ export function WikiTab(props: WorkspaceViewProps) {
         'success',
       )
       resourceCache.invalidateTopic('wiki')
+      if (tagFilter || sourceFilter) {
+        setAllWikiPages(null)
+      }
       await loadIndex('manual')
       if (!mountedRef.current || !isEpochCurrent(startEpoch) || saveCtrl.signal.aborted) return
       pageAbortRef.current?.abort()
@@ -697,6 +604,10 @@ export function WikiTab(props: WorkspaceViewProps) {
   }, [casConflict])
 
   const displayedPages = wikiIndex ? wikiIndex.pages : []
+  const currentEpoch = currentSessionEpoch()
+  const pickerPages = allWikiPages && allWikiPages.epoch === currentEpoch
+    ? allWikiPages.pages
+    : displayedPages
 
   const masterPane = html`
     <div class="kn-pane-col">
@@ -1012,8 +923,13 @@ export function WikiTab(props: WorkspaceViewProps) {
               `}
             </div>
             <div class="kn-actions">
-              <button type="button" class="btn-primary" disabled=${saving} onClick=${() => void submitSave()}>
-                ${saving ? '저장 중…' : 'CAS 저장 (PUT)'}
+              <button
+                type="button"
+                class="btn-primary"
+                disabled=${saving || mediaComposer.uploading}
+                onClick=${() => void submitSave()}
+              >
+                ${saving ? '저장 중…' : mediaComposer.uploading ? '업로드 완료 대기…' : 'CAS 저장 (PUT)'}
               </button>
               <button
                 type="button"
@@ -1062,7 +978,7 @@ export function WikiTab(props: WorkspaceViewProps) {
                 <button
                   type="button"
                   class="kn-btn-warn"
-                  disabled=${saving}
+                  disabled=${saving || mediaComposer.uploading}
                   onClick=${() => {
                     setExpectedSha(casConflict.serverPage.sha256)
                     setExpectedRev(casConflict.serverPage.frontmatter.revision)
@@ -1157,7 +1073,10 @@ export function WikiTab(props: WorkspaceViewProps) {
                 class="kn-chip"
                 aria-selected=${editorViewMode === 'split' ? 'true' : 'false'}
                 data-testid="wiki-editor-mode-split"
-                onClick=${() => setEditorViewMode('split')}
+                onClick=${() => {
+                  setPreviewBody(editBody)
+                  setEditorViewMode('split')
+                }}
               >
                 분할
               </button>
@@ -1167,14 +1086,17 @@ export function WikiTab(props: WorkspaceViewProps) {
                 class="kn-chip"
                 aria-selected=${editorViewMode === 'preview' ? 'true' : 'false'}
                 data-testid="wiki-editor-mode-preview"
-                onClick=${() => setEditorViewMode('preview')}
+                onClick=${() => {
+                  setPreviewBody(editBody)
+                  setEditorViewMode('preview')
+                }}
               >
                 미리보기
               </button>
             </div>
             <div class="kn-editor-toolbar-group">
               <input
-                ref=${fileInputRef}
+                ref=${mediaComposer.fileInputRef}
                 type="file"
                 accept=${WORKSPACE_MEDIA_ACCEPT}
                 multiple
@@ -1182,47 +1104,42 @@ export function WikiTab(props: WorkspaceViewProps) {
                 tabIndex=${-1}
                 aria-hidden="true"
                 data-testid="wiki-editor-file-input"
-                onChange=${(e: Event) => {
-                  const input = e.target as HTMLInputElement
-                  const picked = input.files ? Array.from(input.files) : []
-                  input.value = ''
-                  if (picked.length > 0) void handleUploadFiles(picked)
-                }}
+                onChange=${mediaComposer.handleFileInputChange}
               />
               <button
                 type="button"
                 class="btn-ghost kn-btn-compact"
                 data-testid="wiki-editor-upload-btn"
-                disabled=${saving || uploadProgress !== null}
-                onClick=${() => fileInputRef.current?.click()}
+                disabled=${saving || mediaComposer.uploading}
+                onClick=${mediaComposer.openFilePicker}
               >
-                ${uploadProgress ? '업로드 중…' : '이미지 첨부'}
+                ${mediaComposer.uploading ? '업로드 중…' : '이미지 첨부'}
               </button>
               <${WikiEmbedPicker}
-                wikiPages=${displayedPages}
+                wikiPages=${pickerPages}
                 currentSlug=${creatingNew ? null : editSlug}
                 disabled=${saving}
-                onInsertEmbed=${insertSnippetAtCursor}
+                onInsertEmbed=${mediaComposer.insertSnippet}
               />
             </div>
           </div>
 
-          ${uploadProgress && html`
+          ${mediaComposer.uploadProgress && html`
             <div class="kn-notice kn-notice--info kn-section-head" role="status" aria-live="polite" data-testid="wiki-editor-upload-status">
-              <span>이미지 업로드 중… (${uploadProgress.current}/${uploadProgress.total})</span>
+              <span>이미지 업로드 중… (${mediaComposer.uploadProgress.current}/${mediaComposer.uploadProgress.total})</span>
               <button
                 type="button"
                 class="btn-ghost kn-btn-compact"
-                onClick=${() => uploadAbortRef.current?.abort()}
+                onClick=${mediaComposer.cancelUpload}
               >
                 업로드 취소
               </button>
             </div>
           `}
 
-          ${uploadError && html`
+          ${mediaComposer.uploadError && html`
             <div class="kn-notice kn-notice--err" role="alert" data-testid="wiki-editor-upload-error">
-              ${uploadError}
+              ${mediaComposer.uploadError}
             </div>
           `}
 
@@ -1235,29 +1152,25 @@ export function WikiTab(props: WorkspaceViewProps) {
               <div
                 class="kn-editor-dropzone"
                 data-testid="wiki-editor-dropzone"
-                data-drag-active=${dragActive ? 'true' : 'false'}
-                ondragenter=${handleEditorDragEnter}
-                ondragover=${handleEditorDragOver}
-                ondragleave=${handleEditorDragLeave}
-                ondrop=${handleEditorDrop}
+                data-drag-active=${mediaComposer.dragActive ? 'true' : 'false'}
+                ondragenter=${mediaComposer.handleDragEnter}
+                ondragover=${mediaComposer.handleDragOver}
+                ondragleave=${mediaComposer.handleDragLeave}
+                ondrop=${mediaComposer.handleDrop}
               >
                 <textarea
-                  ref=${editorTextareaRef}
+                  ref=${mediaComposer.textareaRef}
                   class="kn-textarea kn-textarea--editor"
                   value=${editBody}
                   onInput=${(e: Event) => {
                     const target = e.target as HTMLTextAreaElement
-                    selectionRef.current = {
-                      start: target.selectionStart ?? target.value.length,
-                      end: target.selectionEnd ?? target.value.length,
-                    }
-                    editBodyRef.current = target.value
+                    mediaComposer.syncSelection()
                     setEditBody(target.value)
                   }}
-                  onpaste=${handleEditorPaste}
-                  onSelect=${syncEditorSelection}
-                  onKeyUp=${syncEditorSelection}
-                  onClick=${syncEditorSelection}
+                  onpaste=${mediaComposer.handlePaste}
+                  onSelect=${mediaComposer.syncSelection}
+                  onKeyUp=${mediaComposer.syncSelection}
+                  onClick=${mediaComposer.syncSelection}
                   onKeyDown=${(e: KeyboardEvent) => {
                     if (e.isComposing || e.keyCode === 229) return
                     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !saving) {
@@ -1267,7 +1180,7 @@ export function WikiTab(props: WorkspaceViewProps) {
                   }}
                   aria-label="Markdown 본문 편집기"
                 />
-                ${dragActive && html`
+                ${mediaComposer.dragActive && html`
                   <div class="kn-editor-drop-overlay" data-testid="wiki-editor-drop-overlay">
                     이미지를 놓아 업로드 (PNG, JPEG, GIF, WebP)
                   </div>
@@ -1284,8 +1197,8 @@ export function WikiTab(props: WorkspaceViewProps) {
                   <span>실시간 미리보기</span>
                   <span class="mono">${editBody.length}자</span>
                 </div>
-                ${editBody.trim()
-                  ? html`<${MarkdownContent} text=${editBody} document />`
+                ${previewBody.trim()
+                  ? html`<${MarkdownContent} text=${previewBody} document />`
                   : html`<span class="dtable-absent">미리볼 본문을 입력하세요.</span>`}
               </article>
             `}

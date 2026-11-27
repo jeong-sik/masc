@@ -20,23 +20,13 @@ import {
   sessionEpoch,
 } from '../../core/auth'
 import { resourceCache } from '../../core/resource-cache'
-import { apiGet } from '../../core/transport'
-import { ok } from '../../lib/result'
 import { PopoverMenu } from '../../components/primitives'
-import {
-  asNonEmptyString,
-  decodePublishedArtifactItem,
-  isRecord,
-  type PublishedArtifactItem,
-  type WikiPageSummary,
-} from './types'
+import { fetchPublishedArtifactsList, type ArtifactListBundle } from './artifacts-tab'
+import type { PublishedArtifactItem, WikiPageSummary } from './types'
 
 type EmbedPickerTab = 'wiki' | 'artifact'
 
-interface ArtifactListBundle {
-  readonly artifacts: readonly PublishedArtifactItem[]
-  readonly diagnostics: readonly { readonly id: string; readonly error: string }[]
-}
+const MAX_PICKER_RESULTS = 40
 
 export interface WikiEmbedPickerProps {
   readonly wikiPages: readonly WikiPageSummary[]
@@ -100,29 +90,7 @@ export function WikiEmbedPicker({
     void resourceCache
       .fetch<ArtifactListBundle>(
         'kn:artifacts:list',
-        async (signal) => {
-          const res = await apiGet<unknown>('/api/v1/published-artifacts', { signal })
-          if (!res.ok) return res
-          const list: PublishedArtifactItem[] = []
-          const diagnostics: { id: string; error: string }[] = []
-          if (isRecord(res.value)) {
-            if (Array.isArray(res.value.artifacts)) {
-              for (const row of res.value.artifacts) {
-                const dec = decodePublishedArtifactItem(row)
-                if (dec) list.push(dec)
-              }
-            }
-            if (Array.isArray(res.value.diagnostics)) {
-              for (const d of res.value.diagnostics) {
-                if (!isRecord(d)) continue
-                const id = asNonEmptyString(d.id)
-                const errMsg = asNonEmptyString(d.error)
-                if (id && errMsg) diagnostics.push({ id, error: errMsg })
-              }
-            }
-          }
-          return ok({ artifacts: list, diagnostics })
-        },
+        fetchPublishedArtifactsList,
         { ttlMs: 15_000, topics: ['artifacts'], reason: 'mount' },
       )
       .then((obs) => {
@@ -140,9 +108,9 @@ export function WikiEmbedPicker({
     }
   }, [open, tab, canListArtifacts, epoch])
 
-  const filteredPages = useMemo(() => {
+  const matchedPages = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const list = wikiPages.filter((page) => {
+    return wikiPages.filter((page) => {
       if (!q) return true
       return (
         page.title.toLowerCase().includes(q)
@@ -150,12 +118,17 @@ export function WikiEmbedPicker({
         || page.tags.some((t) => t.toLowerCase().includes(q))
       )
     })
-    return list.slice(0, 40)
   }, [wikiPages, query])
 
-  const filteredArtifacts = useMemo(() => {
+  const filteredPages = useMemo(
+    () => matchedPages.slice(0, MAX_PICKER_RESULTS),
+    [matchedPages],
+  )
+  const hiddenPagesCount = Math.max(0, matchedPages.length - filteredPages.length)
+
+  const matchedArtifacts = useMemo(() => {
     const q = query.trim().toLowerCase()
-    const list = artifacts.filter((item) => {
+    return artifacts.filter((item) => {
       if (!q) return true
       return (
         item.title.toLowerCase().includes(q)
@@ -163,8 +136,13 @@ export function WikiEmbedPicker({
         || item.summary.toLowerCase().includes(q)
       )
     })
-    return list.slice(0, 40)
   }, [artifacts, query])
+
+  const filteredArtifacts = useMemo(
+    () => matchedArtifacts.slice(0, MAX_PICKER_RESULTS),
+    [matchedArtifacts],
+  )
+  const hiddenArtifactsCount = Math.max(0, matchedArtifacts.length - filteredArtifacts.length)
 
   const selectEmbed = (snippet: string) => {
     setOpen(false)
@@ -263,6 +241,11 @@ export function WikiEmbedPicker({
                       </button>
                     </div>
                   `)}
+                  ${hiddenPagesCount > 0 && html`
+                    <div class="kn-embed-picker-overflow" data-testid="wiki-embed-picker-overflow">
+                      +${hiddenPagesCount}건 더 있음 — 검색어로 좁혀주세요
+                    </div>
+                  `}
                 </div>
               `
           : !isSingleUser
@@ -301,6 +284,11 @@ export function WikiEmbedPicker({
                               </button>
                             </div>
                           `)}
+                          ${hiddenArtifactsCount > 0 && html`
+                            <div class="kn-embed-picker-overflow" data-testid="wiki-embed-picker-overflow">
+                              +${hiddenArtifactsCount}건 더 있음 — 검색어로 좁혀주세요
+                            </div>
+                          `}
                         </div>
                       `}
       `}

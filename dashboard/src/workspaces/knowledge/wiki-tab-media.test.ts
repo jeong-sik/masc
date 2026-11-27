@@ -87,52 +87,59 @@ function makeWikiMocks(uploadHandler?: (init?: RequestInit) => Promise<Response>
       })
     }
     if (url.startsWith('/api/v1/wiki?')) {
+      const parsed = new URL(url, 'http://localhost')
+      const tagParam = parsed.searchParams.get('tag')
+      const allPages = [
+        {
+          slug: 'arch-notes',
+          file: 'arch-notes.md',
+          title: 'Architecture Notes',
+          summary: 'Core notes',
+          source: 'observation',
+          author: 'librarian',
+          created: '2026-11-20T00:00:00Z',
+          updated: '2026-11-25T00:00:00Z',
+          revision: 1,
+          tags: ['core'],
+          backlink_count: 0,
+          outgoing_link_count: 0,
+          sources_count: 0,
+          hearsay_count: 0,
+          sha256: 'f'.repeat(64),
+        },
+        {
+          slug: 'media-guide',
+          file: 'media-guide.md',
+          title: 'Media Guide',
+          summary: 'How images work',
+          source: 'research',
+          author: 'sangsu',
+          created: '2026-11-21T00:00:00Z',
+          updated: '2026-11-26T00:00:00Z',
+          revision: 2,
+          tags: ['media'],
+          backlink_count: 0,
+          outgoing_link_count: 0,
+          sources_count: 0,
+          hearsay_count: 0,
+          sha256: 'b'.repeat(64),
+        },
+      ]
+      const filteredPages = tagParam ? allPages.filter((p) => p.tags.includes(tagParam)) : allPages
       return jsonResponse({
         schema_version: 1,
         instance_id: 'inst-1',
         generated_at_unix: 1732430000,
         data: {
-          pages_total: 2,
-          pages_readable: 2,
+          pages_total: filteredPages.length,
+          pages_readable: filteredPages.length,
           pages_unreadable: 0,
-          pages: [
-            {
-              slug: 'arch-notes',
-              file: 'arch-notes.md',
-              title: 'Architecture Notes',
-              summary: 'Core notes',
-              source: 'observation',
-              author: 'librarian',
-              created: '2026-11-20T00:00:00Z',
-              updated: '2026-11-25T00:00:00Z',
-              revision: 1,
-              tags: ['core'],
-              backlink_count: 0,
-              outgoing_link_count: 0,
-              sources_count: 0,
-              hearsay_count: 0,
-              sha256: 'f'.repeat(64),
-            },
-            {
-              slug: 'media-guide',
-              file: 'media-guide.md',
-              title: 'Media Guide',
-              summary: 'How images work',
-              source: 'research',
-              author: 'sangsu',
-              created: '2026-11-21T00:00:00Z',
-              updated: '2026-11-26T00:00:00Z',
-              revision: 2,
-              tags: ['media'],
-              backlink_count: 0,
-              outgoing_link_count: 0,
-              sources_count: 0,
-              hearsay_count: 0,
-              sha256: 'b'.repeat(64),
-            },
-          ],
+          pages: filteredPages,
           unreadable_pages: [],
-          tags: [{ tag: 'core', count: 1 }],
+          tags: [
+            { tag: 'core', count: 1 },
+            { tag: 'media', count: 1 },
+          ],
           sources: { observation: 1, research: 1 },
           lint: {
             total_findings: 0,
@@ -208,12 +215,13 @@ describe('WikiTab authoring productivity UX', () => {
     expect(preview).not.toBeNull()
     expect(preview.querySelector('h1')?.textContent).toBe('Intro')
 
-    // Live preview updates as text changes
+    // Live preview updates after split-mode debounce as text changes
     textarea.value = '## Updated Live Heading\n\n| A | B |\n| - | - |\n| 1 | 2 |'
     textarea.dispatchEvent(new Event('input', { bubbles: true }))
-    await flushUi(2)
-    expect(preview.querySelector('h2')?.textContent).toBe('Updated Live Heading')
-    expect(preview.querySelector('table')).not.toBeNull()
+    await vi.waitFor(() => {
+      expect(preview.querySelector('h2')?.textContent).toBe('Updated Live Heading')
+      expect(preview.querySelector('table')).not.toBeNull()
+    }, { timeout: 2000 })
 
     // Switch to write-only mode
     container.querySelector<HTMLButtonElement>('[data-testid="wiki-editor-mode-write"]')!.click()
@@ -388,5 +396,76 @@ describe('WikiTab authoring productivity UX', () => {
       expect(container.querySelector('[data-testid="wiki-editor-upload-status"]')).toBeNull()
     }, { timeout: 5000 })
     expect(container.querySelector('[data-testid="wiki-editor-upload-error"]')).toBeNull()
+  })
+
+  it('blocks CAS save button and Cmd+S while an image upload is in flight', async () => {
+    const fetchMock = makeWikiMocks((init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
+    }))
+    globalThis.fetch = fetchMock
+    await enterWikiEditor()
+
+    const dropzone = container.querySelector<HTMLElement>('[data-testid="wiki-editor-dropzone"]')!
+    const slowFile = new File([PNG_BYTES], 'pending.png', { type: 'image/png' })
+    const dropEvt = new Event('drop', { bubbles: true, cancelable: true })
+    Object.defineProperty(dropEvt, 'dataTransfer', { value: { types: ['Files'], files: [slowFile], items: [] } })
+    dropzone.dispatchEvent(dropEvt)
+
+    const saveBtn = await vi.waitFor(() => {
+      const btn = [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
+        b.textContent?.includes('업로드 완료 대기'),
+      )
+      expect(btn).toBeDefined()
+      return btn!
+    }, { timeout: 5000 })
+    expect(saveBtn.disabled).toBe(true)
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', metaKey: true, bubbles: true, cancelable: true }))
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('이미지 업로드가 끝난 뒤 저장할 수 있습니다.')
+    }, { timeout: 2000 })
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+  })
+
+  it('keeps unfiltered wiki pages in WikiEmbedPicker even when sidebar tag filter narrows the list', async () => {
+    globalThis.fetch = makeWikiMocks()
+    render(
+      html`<${WikiTab} subroute="wiki" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+      container,
+    )
+
+    // Filter sidebar to #core only (which hides media-guide from displayedPages)
+    const tagBtn = await vi.waitFor(() => {
+      const btn = container.querySelector<HTMLButtonElement>('[data-testid="wiki-tag-filter"]')
+      expect(btn).not.toBeNull()
+      return btn!
+    }, { timeout: 5000 })
+    tagBtn.click()
+    const coreOpt = await vi.waitFor(() => {
+      const opt = container.querySelector<HTMLButtonElement>('[data-testid="wiki-tag-core"]')
+      expect(opt).not.toBeNull()
+      return opt!
+    }, { timeout: 5000 })
+    coreOpt.click()
+
+    const editBtn = await vi.waitFor(() => {
+      const btn = [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
+        b.textContent?.includes('CAS 편집'),
+      )
+      expect(btn).toBeDefined()
+      return btn!
+    }, { timeout: 5000 })
+    editBtn.click()
+
+    const pickerTrigger = await vi.waitFor(() => {
+      const btn = container.querySelector<HTMLButtonElement>('[data-testid="wiki-embed-picker-trigger"]')
+      expect(btn).not.toBeNull()
+      return btn!
+    }, { timeout: 5000 })
+    pickerTrigger.click()
+
+    await vi.waitFor(() => {
+      expect(container.querySelector('[data-testid="wiki-embed-option-wiki-media-guide"]')).not.toBeNull()
+    }, { timeout: 5000 })
   })
 })

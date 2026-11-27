@@ -12,7 +12,10 @@
  */
 
 import { html } from 'htm/preact'
+import './wiki-editor.css'
 import { MarkdownContent } from '../../components/common/markdown-renderer'
+import { useWorkspaceMediaComposer } from '../../lib/use-workspace-media-composer'
+import { WORKSPACE_MEDIA_ACCEPT } from '../../lib/workspace-media-upload'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { authSession, canUseSingleUserTokenRead, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
 import {
@@ -305,6 +308,20 @@ export function BoardTab(props: WorkspaceViewProps) {
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState<{ kind: 'err'; message: string } | null>(null)
   const replyTextareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const newPostMedia = useWorkspaceMediaComposer({
+    value: newBody,
+    onChange: setNewBody,
+    draftKey: showCreate ? 'board:new-post' : 'board:new-post:closed',
+    disabled: busy || isMultiAccount,
+  })
+  const replyMedia = useWorkspaceMediaComposer({
+    value: replyText,
+    onChange: setReplyText,
+    draftKey: selectedPostId ? `board:reply:${selectedPostId}:${replyParentId ?? 'root'}` : 'board:reply:none',
+    disabled: busy || isMultiAccount,
+    textareaRef: replyTextareaRef,
+  })
   const commentsEndRef = useRef<HTMLDivElement>(null)
   const focusedCommentRef = useRef<HTMLDivElement>(null)
   const replyViewRef = useRef<{ postId: string; commentId: string | null; scroll: boolean } | null>(null)
@@ -795,6 +812,10 @@ export function BoardTab(props: WorkspaceViewProps) {
   const handleCreatePost = async (e: Event) => {
     e.preventDefault()
     if (authSession.peek().kind !== 'single_user_local') return
+    if (newPostMedia.uploading) {
+      setFeedback({ kind: 'err', message: '이미지 업로드가 끝난 뒤 게시할 수 있습니다.' })
+      return
+    }
     if (!newTitle.trim() || !newBody.trim()) {
       setFeedback({ kind: 'err', message: '제목과 본문을 모두 입력하세요.' })
       return
@@ -815,6 +836,7 @@ export function BoardTab(props: WorkspaceViewProps) {
       setFeedback({ kind: 'err', message: `게시글 작성 실패: ${res.error.message}` })
       return
     }
+    newPostMedia.reset()
     setNewTitle('')
     setNewBody('')
     setShowCreate(false)
@@ -827,6 +849,10 @@ export function BoardTab(props: WorkspaceViewProps) {
   const handleReply = async (e: Event) => {
     e.preventDefault()
     if (authSession.peek().kind !== 'single_user_local') return
+    if (replyMedia.uploading) {
+      setFeedback({ kind: 'err', message: '이미지 업로드가 끝난 뒤 댓글을 등록할 수 있습니다.' })
+      return
+    }
     const view = replyViewRef.current
     if (!activePost || view?.postId !== activePost.id || !replyText.trim()) return
     const startEpoch = currentSessionEpoch()
@@ -846,6 +872,7 @@ export function BoardTab(props: WorkspaceViewProps) {
       setFeedback({ kind: 'err', message: `댓글 작성 실패: ${res.error.message}` })
       return
     }
+    replyMedia.reset()
     setReplyText('')
     setReplyParentId(null)
     setFeedback(null)
@@ -1134,23 +1161,72 @@ export function BoardTab(props: WorkspaceViewProps) {
             value=${newHearth}
             onInput=${(e: Event) => setNewHearth((e.target as HTMLInputElement).value)}
           />
-          <textarea
-            class="kn-textarea"
-            required
-            placeholder="Markdown 본문… (⌘↵ 게시)"
-            value=${newBody}
-            onInput=${(e: Event) => setNewBody((e.target as HTMLTextAreaElement).value)}
-            onKeyDown=${(e: KeyboardEvent) => {
-              if (e.isComposing || e.keyCode === 229) return
-              if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !busy) {
-                e.preventDefault()
-                void handleCreatePost(e)
-              }
-            }}
-          />
+          <div
+            class="kn-editor-dropzone"
+            data-testid="board-post-dropzone"
+            data-drag-active=${newPostMedia.dragActive ? 'true' : 'false'}
+            ondragenter=${newPostMedia.handleDragEnter}
+            ondragover=${newPostMedia.handleDragOver}
+            ondragleave=${newPostMedia.handleDragLeave}
+            ondrop=${newPostMedia.handleDrop}
+          >
+            <textarea
+              ref=${newPostMedia.textareaRef}
+              class="kn-textarea"
+              required
+              placeholder="Markdown 본문… (이미지 붙여넣기·드롭 지원 · ⌘↵ 게시)"
+              value=${newBody}
+              onInput=${(e: Event) => {
+                newPostMedia.syncSelection()
+                setNewBody((e.target as HTMLTextAreaElement).value)
+              }}
+              onpaste=${newPostMedia.handlePaste}
+              onSelect=${newPostMedia.syncSelection}
+              onKeyUp=${newPostMedia.syncSelection}
+              onClick=${newPostMedia.syncSelection}
+              onKeyDown=${(e: KeyboardEvent) => {
+                if (e.isComposing || e.keyCode === 229) return
+                if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !busy && !newPostMedia.uploading) {
+                  e.preventDefault()
+                  void handleCreatePost(e)
+                }
+              }}
+            />
+            ${newPostMedia.dragActive && html`
+              <div class="kn-editor-drop-overlay">이미지를 놓아 업로드 (PNG, JPEG, GIF, WebP)</div>
+            `}
+          </div>
+          ${newPostMedia.uploadProgress && html`
+            <div class="kn-notice kn-notice--info kn-section-head" role="status" aria-live="polite" data-testid="board-post-upload-status">
+              <span>이미지 업로드 중… (${newPostMedia.uploadProgress.current}/${newPostMedia.uploadProgress.total})</span>
+              <button type="button" class="btn-ghost kn-btn-compact" onClick=${newPostMedia.cancelUpload}>업로드 취소</button>
+            </div>
+          `}
+          ${newPostMedia.uploadError && html`
+            <div class="kn-notice kn-notice--err" role="alert" data-testid="board-post-upload-error">${newPostMedia.uploadError}</div>
+          `}
           <div class="kn-actions">
-            <button type="submit" class="btn-primary" disabled=${busy}>게시</button>
-            <button type="button" class="btn-ghost" onClick=${() => setShowCreate(false)}>취소</button>
+            <input
+              ref=${newPostMedia.fileInputRef}
+              type="file"
+              accept=${WORKSPACE_MEDIA_ACCEPT}
+              multiple
+              class="kn-editor-file-input"
+              tabIndex=${-1}
+              aria-hidden="true"
+              onChange=${newPostMedia.handleFileInputChange}
+            />
+            <button
+              type="button"
+              class="btn-ghost kn-btn-compact"
+              data-testid="board-post-upload-btn"
+              disabled=${busy || newPostMedia.uploading}
+              onClick=${newPostMedia.openFilePicker}
+            >
+              ${newPostMedia.uploading ? '업로드 중…' : '이미지 첨부'}
+            </button>
+            <button type="submit" class="btn-primary" disabled=${busy || newPostMedia.uploading}>게시</button>
+            <button type="button" class="btn-ghost" onClick=${() => { newPostMedia.reset(); setShowCreate(false) }}>취소</button>
           </div>
         </form>
       `}
@@ -1412,22 +1488,70 @@ export function BoardTab(props: WorkspaceViewProps) {
                     </button>
                   </div>
                 `}
-                <textarea
-                  ref=${replyTextareaRef}
-                  class="kn-textarea kn-textarea--reply"
-                  placeholder="댓글을 작성하세요 (Markdown 지원 · ⌘↵ 등록)…"
-                  value=${replyText}
-                  onInput=${(e: Event) => setReplyText((e.target as HTMLTextAreaElement).value)}
-                  onKeyDown=${(e: KeyboardEvent) => {
-                    if (e.isComposing || e.keyCode === 229) return
-                    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !busy && replyText.trim()) {
-                      e.preventDefault()
-                      void handleReply(e)
-                    }
-                  }}
-                />
+                <div
+                  class="kn-editor-dropzone"
+                  data-testid="board-reply-dropzone"
+                  data-drag-active=${replyMedia.dragActive ? 'true' : 'false'}
+                  ondragenter=${replyMedia.handleDragEnter}
+                  ondragover=${replyMedia.handleDragOver}
+                  ondragleave=${replyMedia.handleDragLeave}
+                  ondrop=${replyMedia.handleDrop}
+                >
+                  <textarea
+                    ref=${replyMedia.textareaRef}
+                    class="kn-textarea kn-textarea--reply"
+                    placeholder="댓글을 작성하세요 (Markdown·이미지 붙여넣기/드롭 지원 · ⌘↵ 등록)…"
+                    value=${replyText}
+                    onInput=${(e: Event) => {
+                      replyMedia.syncSelection()
+                      setReplyText((e.target as HTMLTextAreaElement).value)
+                    }}
+                    onpaste=${replyMedia.handlePaste}
+                    onSelect=${replyMedia.syncSelection}
+                    onKeyUp=${replyMedia.syncSelection}
+                    onClick=${replyMedia.syncSelection}
+                    onKeyDown=${(e: KeyboardEvent) => {
+                      if (e.isComposing || e.keyCode === 229) return
+                      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !busy && !replyMedia.uploading && replyText.trim()) {
+                        e.preventDefault()
+                        void handleReply(e)
+                      }
+                    }}
+                  />
+                  ${replyMedia.dragActive && html`
+                    <div class="kn-editor-drop-overlay">이미지를 놓아 업로드 (PNG, JPEG, GIF, WebP)</div>
+                  `}
+                </div>
+                ${replyMedia.uploadProgress && html`
+                  <div class="kn-notice kn-notice--info kn-section-head" role="status" aria-live="polite" data-testid="board-reply-upload-status">
+                    <span>이미지 업로드 중… (${replyMedia.uploadProgress.current}/${replyMedia.uploadProgress.total})</span>
+                    <button type="button" class="btn-ghost kn-btn-compact" onClick=${replyMedia.cancelUpload}>업로드 취소</button>
+                  </div>
+                `}
+                ${replyMedia.uploadError && html`
+                  <div class="kn-notice kn-notice--err" role="alert" data-testid="board-reply-upload-error">${replyMedia.uploadError}</div>
+                `}
                 <div class="kn-actions">
-                  <button type="submit" class="btn-primary" disabled=${busy || !replyText.trim()}>
+                  <input
+                    ref=${replyMedia.fileInputRef}
+                    type="file"
+                    accept=${WORKSPACE_MEDIA_ACCEPT}
+                    multiple
+                    class="kn-editor-file-input"
+                    tabIndex=${-1}
+                    aria-hidden="true"
+                    onChange=${replyMedia.handleFileInputChange}
+                  />
+                  <button
+                    type="button"
+                    class="btn-ghost kn-btn-compact"
+                    data-testid="board-reply-upload-btn"
+                    disabled=${busy || replyMedia.uploading}
+                    onClick=${replyMedia.openFilePicker}
+                  >
+                    ${replyMedia.uploading ? '업로드 중…' : '이미지 첨부'}
+                  </button>
+                  <button type="submit" class="btn-primary" disabled=${busy || replyMedia.uploading || !replyText.trim()}>
                     댓글 등록
                   </button>
                 </div>

@@ -26,24 +26,22 @@ import {
   sessionEpoch,
   type AuthSession,
 } from '../core/auth'
-import { isWorkspaceMediaPath } from './keeper-media'
+import {
+  WORKSPACE_MEDIA_MAX_BYTES,
+  WORKSPACE_RASTER_MIMES,
+  isWorkspaceMediaPath,
+  isWorkspaceMediaSha256,
+  parseWorkspaceRasterMime,
+  type WorkspaceRasterMime,
+} from './keeper-media'
 import { err, ok, type Result } from './result'
 
-export type WorkspaceRasterMime = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp'
-
-export const WORKSPACE_RASTER_MIMES: readonly WorkspaceRasterMime[] = [
-  'image/png',
-  'image/jpeg',
-  'image/gif',
-  'image/webp',
-] as const
+export { WORKSPACE_MEDIA_MAX_BYTES, WORKSPACE_RASTER_MIMES, type WorkspaceRasterMime }
 
 export const WORKSPACE_MEDIA_ACCEPT = WORKSPACE_RASTER_MIMES.join(',')
 export const WORKSPACE_MEDIA_UPLOAD_PATH = '/api/v1/media'
-export const WORKSPACE_MEDIA_MAX_BYTES = 50 * 1024 * 1024
 
 const SNIFF_HEADER_BYTES = 256
-const SHA256_HEX_RE = /^[0-9a-f]{64}$/
 const SVG_FILE_EXT_RE = /\.svg$/i
 const IMAGE_FILE_EXT_RE = /\.(png|jpe?g|gif|webp|svg)$/i
 
@@ -223,21 +221,8 @@ export function sniffMediaBytes(bytes: Uint8Array): SniffedMediaKind {
  */
 export function parseDeclaredRasterMime(raw: string): WorkspaceRasterMime | 'svg' | null {
   const base = raw.split(';', 1)[0]?.trim().toLowerCase() ?? ''
-  switch (base) {
-    case 'image/png':
-      return 'image/png'
-    case 'image/jpeg':
-    case 'image/jpg':
-      return 'image/jpeg'
-    case 'image/gif':
-      return 'image/gif'
-    case 'image/webp':
-      return 'image/webp'
-    case 'image/svg+xml':
-      return 'svg'
-    default:
-      return null
-  }
+  if (base === 'image/svg+xml') return 'svg'
+  return parseWorkspaceRasterMime(raw)
 }
 
 export function canUploadWorkspaceMedia(session: AuthSession): boolean {
@@ -402,7 +387,7 @@ export function decodeUploadedMediaReceipt(
     })
   }
   const sha256 = typeof raw.sha256 === 'string' ? raw.sha256 : ''
-  if (!SHA256_HEX_RE.test(sha256)) {
+  if (!isWorkspaceMediaSha256(sha256)) {
     return err({
       kind: 'decode',
       status,

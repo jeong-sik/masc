@@ -3,7 +3,7 @@ rfc: "retained-results-carrier-shrinks-to-an-address"
 title: "남은 도구 결과 묶음은 크기 거절을 받으면 주소 꼴로 바꿔 같은 턴에서 다시 보낸다"
 status: Draft
 created: 2026-11-08
-updated: 2026-11-17
+updated: 2026-11-28
 author: claude
 supersedes: []
 superseded_by: null
@@ -29,7 +29,7 @@ Antigravity·Muse의 직접 context 경로에는 이 RFC의 주소 축소 재시
 - `Inline`: 지금 묶음이다. receipt를 전부 글로 싣는다.
 - `By_address`: receipt가 몇 개든 길이가 도구 종류와 개수의 자릿수로만 달라진다. 이미 돌아온 호출 수, 도구별 개수, 그리고 `Inline` 글을 담은 blob 하나의 주소를 싣는다.
 
-run(runtime 호출 하나. 한 후보에게 보내는 provider 시도 전부)은 `Inline`으로 시작한다. lane이 다른 후보로 넘어가면 새 run이 다시 `Inline`으로 시작한다. typed 크기 거절이 오면 이미 있는 재투영 hook `on_memory_capacity_refusal`이 묶음을 `By_address`로 한 번 바꾼다. `By_address` 글이 엄격히 짧을 때만 바꾼다. 그러면 같은 capacity로 다시 보낸다(§5.2). 그다음 거절은 지금처럼 history를 줄인다. 그 view와 floor에도 `By_address`가 실린다.
+run(runtime 호출 하나. 한 후보에게 보내는 provider 시도 전부)은 `Inline`으로 시작한다. lane이 다른 후보로 넘어가면 새 run이 다시 `Inline`으로 시작한다. 예외는 하나다. 크기 거절로 닫힌 세션을 대신하는 run은 `By_address`로 시작한다(§5.5). typed 크기 거절이 오면 이미 있는 재투영 hook `on_memory_capacity_refusal`이 묶음을 `By_address`로 한 번 바꾼다. `By_address` 글이 엄격히 짧을 때만 바꾼다. 그러면 같은 capacity로 다시 보낸다(§5.2). 그다음 거절은 지금처럼 history를 줄인다. 그 view와 floor에도 `By_address`가 실린다.
 
 줄이기 단계(walk), floor 계산, tail window, blob 정리, ACK 규칙은 바꾸지 않는다.
 
@@ -213,6 +213,30 @@ blob은 하나다. 바이트는 `Inline` 글 그대로다.
 - 같은 세션에서 다시 보내려면 실측이 먼저다. CLI가 거절된 resume prompt를 세션 기록에 남기지 않는지 봐야 한다. 이 RFC는 그 일을 하지 않는다.
 - 위 줄들의 주석은 「resume prompt는 어떤 capacity에서도 같다」고 말한다. 묶음 꼴이 바뀌면 이 말이 틀린다. 주석을 「history를 줄여도 같다」로 고친다.
 
+### 5.5 크기 거절로 닫힌 세션을 대신하는 run (2026-11-28)
+
+official client 세 runtime(Claude Code, Codex, Antigravity)은 세션 기록이 `Recovery_required { failure = Input_rejected _ }`이면 다음 턴에 그 세션을 버리고 fresh 세션을 연다(`Session_store.superseded_input_rejection`). 그 run은 묶음을 `By_address`로 시작한다.
+
+- 판정은 `Keeper_official_client_retained_results.load` 한 곳에 있다.
+  - `Superseding_effect_fenced`, `Superseding_bootstrap_floor_exceeded`: `run_carrier_load_by_address`를 부른다. load한 뒤, §5.1의 hook이 하는 꼴 바꾸기를 첫 요청 전에 한다.
+  - `Not_superseding_input_rejection`: 지금처럼 `Inline`으로 시작한다.
+- 바꾸는 조건과 실패는 hook과 같다. receipt가 없거나 `By_address` 글이 엄격히 짧지 않으면 `Inline`으로 남는다. blob 쓰기가 실패하면 `Error`다.
+- 새 durable 상태는 없다. 읽는 것은 session store가 이미 쓰는 recovery 기록이다.
+- 왜 필요한가
+  - 효과나 응답 뒤에 온 크기 거절(`Effect_fenced`)은 같은 run에서 다시 보내지 않는다. hook이 불리지 않으니 꼴이 바뀔 기회가 없다.
+  - Claude Code는 창이 큰 모델에서 큰 묶음을 받아들인 뒤 턴 안에서 무너진다. Start의 묶음은 system prompt에 실리고, client는 system prompt를 압축하지 못한다. client는 `Autocompact is thrashing`으로 끝내고, MASC는 이것을 `context_window_exceeded_after_observed_activity`로 받는다.
+  - 다음 턴은 그 세션을 대신한다. `Inline`으로 시작하면 같은 묶음에 실패한 턴이 더한 receipt까지 싣는다.
+- 잰 값 (운영 기록을 읽기만 했다. 2026-11-25 ~ 11-28)
+  - Claude Code fresh Start 3,106건 가운데 system prompt가 700 KB 이상인 것은 47건이다. 그중 38건이 `Effect_fenced`를 대신하는 Start였다.
+  - 700 KB 이상 Start 가운데 다음 cycle 결과와 짝지은 것은 35건이다. 30건이 `context_window_exceeded`로 실패했다. 200~400 KB 9건은 모두 끝났다.
+  - Keeper 하나는 11-27 10:31~13:05 UTC에 Start 11번을 997 KB에서 1,465 KB로 늘려 가며 보냈다.
+  - 세션 파일의 첫 요청 2,864건에서 system prompt 합은 216.9 MB이고, 그 가운데 `Inline` 묶음이 52.9 MB(24.4%)다.
+- 남는 것
+  - 첫 번째 넘침은 막지 않는다. 크기 거절 기록이 없는 run은 `Inline`으로 시작한다.
+  - 세션 기록의 client 종류와 runtime id가 이 run과 같을 때만 대신하는 run으로 본다(`superseded_input_rejection`). lane이 다른 runtime으로 넘어가면 그 run은 `Inline`으로 시작한다.
+  - 700 KB 이상 Start 47건 가운데 나머지 9건이 이 둘에 든다.
+  - Start가 system prompt에 싣는 것 가운데 턴마다 바뀌는 것(묶음, Librarian working state, memory recall)을 Resume처럼 prompt 앞에 두는 일은 이 RFC 범위 밖이다.
+
 ## 6. ACK와 reader
 
 ### 6.1 ACK
@@ -281,10 +305,9 @@ hook은 typed 크기 거절에만 불린다. 거절 문장을 읽어 크기 거�
 - 효과 뒤의 넘침은 막지 않는다.
   - `Inline` 묶음이 첫 요청에는 들어가도, 턴 안에서 도구 결과가 쌓이면 다음 요청이 넘칠 수 있다.
   - 효과나 응답이 나온 뒤라 같은 run에서 다시 보내지 않는다(`keeper_claude_code_runtime.ml:1537-1550`, `keeper_codex_runtime.ml:2114-2116`). hook도 불리지 않는다.
-  - `Input_rejected Effect_fenced`로 기록되고(`keeper_claude_code_runtime.ml:527-530`, `keeper_codex_runtime.ml:838-841`), `plan_claim`이 막는다. bounded-restart RFC §7대로 운영자가 풀어야 한다.
+  - `Input_rejected Effect_fenced`로 기록된다(`keeper_claude_code_runtime.ml:527-530`, `keeper_codex_runtime.ml:838-841`). 다음 턴이 그 세션을 대신해 fresh 세션을 연다(`Session_store.superseded_input_rejection`).
   - 이 RFC 전에도 있던 경로다. 다만 `Inline` 묶음이 그 턴의 여유를 줄인다.
-  - 풀린 뒤 다음 run도 `Inline`으로 시작한다. 그래서 첫 요청이 들어가는 동안은 되풀이될 수 있다.
-  - §11의 7(꼴 기억)이 효과 뒤 넘침에서도 배우게 하면, 다음 run을 `By_address`로 시작할 수 있다.
+  - 대신하는 run은 `By_address`로 시작한다(§5.5). 그 전에는 `Inline`으로 시작해서 같은 넘침을 되풀이했다.
 - Resume이 `Inline`으로 넘치면 vendor 세션을 버린다(§5.3). receipt가 남아 있는 동안 Resume 턴마다 되풀이될 수 있다.
 - Codex의 10,485,760자 초과 묶음과 agent_core의 문장만 있는 400에서는 꼴이 바뀌지 않는다(§7).
 - blob 쓰기가 실패하면 묶음 쪽은 `Error`를 돌려주고 `then_`을 부르지 않는다(§5.1).
@@ -354,6 +377,7 @@ TLC 1.8.0(로컬, `-workers 1`) 결과는 이렇다.
 7. **꼴을 run 사이에 기억하기**
    - 장점: receipt가 남아 있는 동안 run마다 한 번씩 거절받지 않는다. Resume이 vendor 세션을 버리는 일도 줄어든다. 효과 뒤 넘침(§9)에서도 배우게 하면, 운영자가 풀어 준 다음 run을 `By_address`로 시작할 수 있다.
    - 단점: 새 durable 상태(예: session store의 carried context 종류 하나 더)다. 없어도 durable truth는 손상되지 않는다. 거절이 실제로 얼마나 되풀이되는지 잰 뒤에 다시 본다.
+   - 2026-11-28: 크기 거절로 닫힌 세션을 대신하는 run에 한해 받아들였다(§5.5). session store의 recovery 기록을 읽으니 새 상태는 없다. 그 밖의 run은 여전히 꼴을 기억하지 않는다.
 8. **세션이 가진 해시로 Resume 꼴 정하기**
    - 내용: 세션이 지금 snapshot의 `By_address` 글의 sha256을 `Tool_result_receipts`로 이미 가지고 있으면(`held_context_for_resume`, `keeper_official_client_session_store.mli:427-431`) Resume을 `By_address`로 시작한다.
    - 장점: 저장된 값을 읽기만 한다. 닿으면 묶음을 다시 보내지 않고 vendor 세션을 지킨다.

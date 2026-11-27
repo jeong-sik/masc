@@ -17,6 +17,10 @@
  *   selects in place of the linked item is not opened for it. The reader's
  *   first click or key in a pane ends the wait, and so does an address that
  *   stops naming an item: the pane shown then is not taken from them.
+ *
+ * The focus stays with the pane it was in: it moves to the pane shown when
+ * its own is hidden, and to its own pane when the control that had it goes
+ * away, as a link in the detail does when it opens another item.
  */
 
 import { html } from 'htm/preact'
@@ -231,6 +235,24 @@ export function MasterDetail(props: MasterDetailProps) {
   useLayoutEffect(() => {
     followFocus(shownPane)
   }, [shownPane])
+
+  // A control that goes away while it has the focus, in a pane that stays
+  // shown: a control of the detail that selects another item was drawn for the
+  // item it leaves, and a row can leave its list. The focus stays in that
+  // pane, on the pane itself, where the next Tab finds its first control and
+  // the pane keeps the mark of the one in use. Left alone it falls to the
+  // page, and the keyboard starts over from the top of it. Checked after each
+  // render: the control may go in a later one than the click's, as when the
+  // screen first clears what it showed.
+  useLayoutEffect(() => {
+    const last = lastFocus.current
+    if (last === null || last.pane === null || last.left || last.control.isConnected) return
+    const active = document.activeElement
+    if (active !== null && active !== document.body && active.isConnected) return
+    const pane = last.pane === 'master' ? masterRef.current : detailRef.current
+    if (!pane || getComputedStyle(pane).visibility === 'hidden') return
+    pane.focus({ preventScroll: true })
+  })
 
   // And when its container is made narrow, with no render of this component.
   // A browser may have taken the focus off the hidden control by then.

@@ -9,7 +9,7 @@ vi.mock('../api/setup-login', () => ({ streamSetupLogin: vi.fn(), sendLoginInput
 vi.mock('../lib/model-setup-resume', () => ({ resumeSavedModelSetup: vi.fn(async () => ({ kind: 'active' })) }))
 const account = 'b'.repeat(64), previous = 'c'.repeat(64), id = 'a'.repeat(64)
 const model = { id: 'chosen', label: 'Selected Model', context: 32000, tools: true }
-const clients = [['codex', 'codex-app-server'], ['claude', 'claude-code'], ['antigravity', 'antigravity-cli'], ['muse', 'muse-serve']] as const
+const clients = [['codex', 'codex-app-server'], ['claude', 'claude-code'], ['antigravity', 'antigravity-cli'], ['acp', 'acp']] as const
 function inventory(integrationId: string, protocol: string) { return { source_revision: 'source', setup_revision: 'revision', runtimes: [],
   integrations: [{ id: integrationId, display_name: integrationId, protocol, setup_support: 'new_connection' }] } }
 function renderClient(integrationId: string, protocol: string) {

@@ -27,9 +27,6 @@ async function loadRuntimePanel() {
   vi.doMock('./verification-specs-panel', () => ({
     VerificationSpecsPanel: () => html`<div data-testid="verification-specs">VerificationSpecsPanel</div>`,
   }))
-  vi.doMock('./cost-dashboard', () => ({
-    CostDashboard: ({ view }: { view?: string }) => html`<div data-testid="cost-dashboard" data-view=${view ?? 'cost'}>CostDashboard</div>`,
-  }))
   vi.doMock('./common/filter-chips', () => ({
     FilterChips: ({ chips, value }: { chips: { key: string; label: string }[]; value: string }) => html`
       <div data-testid="filter-chips" data-value=${value}>
@@ -68,7 +65,6 @@ describe('RuntimePanel', () => {
     vi.doUnmock('./runtime-health-snapshot')
     vi.doUnmock('./runtime-toml-editor')
     vi.doUnmock('./verification-specs-panel')
-    vi.doUnmock('./cost-dashboard')
     vi.doUnmock('./common/filter-chips')
     vi.doUnmock('./common/route-link')
   })
@@ -176,15 +172,15 @@ describe('RuntimePanel', () => {
     expect(chips[5]?.textContent).toBe('형식검증')
   })
 
-  it('routes runtime diagnostic views through CostDashboard', async () => {
+  it('routes runtime diagnostic views through TelemetryPanel', async () => {
     route.value.params = { view: 'audit' }
     const { RuntimePanel } = await loadRuntimePanel()
     render(html`<${RuntimePanel} />`, container)
     await flushUi()
 
-    const costDashboard = container.querySelector('[data-testid="cost-dashboard"]')
-    expect(costDashboard).not.toBeNull()
-    expect(costDashboard?.getAttribute('data-view')).toBe('audit')
+    const telemetryPanel = container.querySelector('[data-testid="telemetry-panel"]')
+    expect(telemetryPanel).not.toBeNull()
+    expect(telemetryPanel?.getAttribute('data-view')).toBe('audit')
     expect(container.textContent).not.toContain('RuntimeMonitor')
   })
 

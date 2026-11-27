@@ -151,8 +151,8 @@ describe('media and artifact UX', () => {
     row.style.setProperty('content-visibility', 'auto')
     row.style.setProperty('contain', 'layout paint')
     const frame = row.querySelector<HTMLElement>('.chat-block-media-frame')!
-    const addListener = vi.spyOn(document, 'addEventListener')
-    const removeListener = vi.spyOn(document, 'removeEventListener')
+    const addListener = vi.spyOn(window, 'addEventListener')
+    const removeListener = vi.spyOn(window, 'removeEventListener')
 
     try {
       act(() => frame.click())
@@ -177,12 +177,11 @@ describe('media and artifact UX', () => {
       expect(document.querySelector('[role="dialog"]')).not.toBeNull()
       act(() => render(null, container))
       expect(document.querySelector('[role="dialog"]')).toBeNull()
-      const keydownHandlers = addListener.mock.calls
+      const keydownCalls = addListener.mock.calls
         .filter(([type]) => type === 'keydown')
-        .map(([, handler]) => handler)
-      expect(keydownHandlers.length).toBeGreaterThan(0)
-      for (const handler of keydownHandlers) {
-        expect(removeListener).toHaveBeenCalledWith('keydown', handler)
+      expect(keydownCalls.length).toBeGreaterThan(0)
+      for (const [, handler, options] of keydownCalls) {
+        expect(removeListener).toHaveBeenCalledWith('keydown', handler, options)
       }
     } finally {
       act(() => render(null, container))

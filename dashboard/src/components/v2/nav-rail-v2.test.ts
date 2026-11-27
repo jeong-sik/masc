@@ -60,7 +60,7 @@ describe('NavRailV2 schedule item', () => {
   })
 
   // Rail order + group breaks.
-  it('renders the prototype rail order including the 명령·Lab group', () => {
+  it('renders the canonical rail order and group dividers', () => {
     render(html`<${NavRailV2} />`, container)
 
     const rail = container.querySelector('.v2-nav')
@@ -73,11 +73,10 @@ describe('NavRailV2 schedule item', () => {
     expect(walk).toEqual([
       'brand',
       '개요', '|',
-      'Keepers', '레지스트리', 'Monitor', '|',
+      'Keepers', 'Monitor', '|',
       '작업', 'Gate', '예약', '|',
       '보드', 'Fusion', '로그', '|',
-      'IDE', '커넥터', '|',
-      '명령', 'Lab',
+      '커넥터',
       'spacer',
       '설정',
     ])

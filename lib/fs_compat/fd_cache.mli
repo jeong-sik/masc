@@ -39,8 +39,9 @@
     open then fails, the closed writer is opened again by its next
     append. An open in flight counts as one of the 32, so an open that
     waits takes one place from the cache for as long as it waits. The
-    check that a cached descriptor still identifies the file (two [stat]
-    calls) runs inside the lock.
+    check that a cached descriptor still identifies the file (one [stat]
+    call against the descriptor's immutable device and inode captured at
+    open) runs inside the lock.
     @raise Sys_error when the path cannot be examined or opened. The
     message starts with [path] as it was given. *)
 val with_writer : string -> (Fd_append_whole.target -> 'a) -> 'a

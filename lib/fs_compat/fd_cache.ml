@@ -2,6 +2,8 @@
 
 type cached_writer =
   { target : Fd_append_whole.target
+  ; dev : int
+  ; ino : int
   ; mutable last_used : float
   ; mutable active : int
   ; mutable close_on_release : bool
@@ -64,13 +66,8 @@ let rec evict_down_to_locked places =
 let sys_error path error = Sys_error (path ^ ": " ^ Unix.error_message error)
 
 let writer_matches_path path w =
-  match
-    let opened = Unix.fstat (Fd_append_whole.descriptor w.target) in
-    let current = Unix.stat path in
-    opened.Unix.st_dev = current.Unix.st_dev
-    && opened.Unix.st_ino = current.Unix.st_ino
-  with
-  | same -> same
+  match Unix.stat path with
+  | current -> w.dev = current.Unix.st_dev && w.ino = current.Unix.st_ino
   | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> false
   | exception Unix.Unix_error (error, _, _) -> raise (sys_error path error)
 ;;
@@ -102,7 +99,25 @@ let open_writer path =
     try Fd_append_whole.open_target path with
     | Unix.Unix_error (error, _, _) -> raise (sys_error path error)
   in
-  { target; last_used = 0.0; active = 0; close_on_release = false }
+  let opened =
+    try Unix.fstat (Fd_append_whole.descriptor target) with
+    | Unix.Unix_error (error, _, _) ->
+      (try Unix.close (Fd_append_whole.descriptor target) with
+       | Unix.Unix_error _ -> ());
+      raise (sys_error path error)
+    | exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      (try Unix.close (Fd_append_whole.descriptor target) with
+       | Unix.Unix_error _ -> ());
+      Printexc.raise_with_backtrace exn bt
+  in
+  { target
+  ; dev = opened.Unix.st_dev
+  ; ino = opened.Unix.st_ino
+  ; last_used = 0.0
+  ; active = 0
+  ; close_on_release = false
+  }
 ;;
 
 let lease path =

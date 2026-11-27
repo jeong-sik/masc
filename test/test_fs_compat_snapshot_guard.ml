@@ -322,6 +322,106 @@ let test_dependency_lock_entry_not_inspectable root =
      fail "uninspectable dependency lock entry was not an inner refusal");
   check string "refused append wrote nothing" expected.bytes (read target)
 
+(* Multi-chunk (>64 KiB, with unaligned non-multiple-of-8 length) streaming
+   snapshot verification: exact match succeeds, and a single-byte edit at the
+   start, across a chunk boundary in the middle, or in the final unaligned tail
+   is refused with [Transaction_content_changed], as is a mismatched expected
+   byte length. *)
+let make_multichunk_payload () =
+  (* 200_005 bytes: >3x 64 KiB chunks and 5-byte non-8-aligned tail. *)
+  let row = "{\"pad\":\"" ^ String.make 92 'x' ^ "\"}\n" in
+  let buf = Buffer.create 200_100 in
+  while Buffer.length buf < 199_990 do
+    Buffer.add_string buf row
+  done;
+  Buffer.add_string buf "{\"tail\":\"123\"}\n";
+  let payload = Buffer.contents buf in
+  (* Ensure non-multiple-of-8 length to exercise both 8-byte word and tail byte loops. *)
+  if String.length payload land 7 = 0
+  then payload ^ "{\"t\":1}\n"
+  else payload
+
+let write_in_place_same_length path content =
+  Out_channel.with_open_gen [Open_wronly; Open_binary] 0o600 path
+    (fun oc -> output_string oc content)
+
+let flip_byte s idx =
+  let b = Bytes.of_string s in
+  let c = Bytes.get b idx in
+  Bytes.set b idx (if Char.equal c 'Z' then 'Y' else 'Z');
+  Bytes.unsafe_to_string b
+
+let test_multichunk_streaming_verify_match_and_mismatches root =
+  let payload = make_multichunk_payload () in
+  let len = String.length payload in
+  check bool "payload spans multiple 64 KiB chunks" true (len > 196_608);
+  check bool "payload has non-zero 8-byte remainder" true (len land 7 <> 0);
+  let target = Filename.concat root "multichunk.jsonl" in
+  let child = Filename.concat root "child.jsonl" in
+  ignore (require_write (Fs.append_private_jsonl_durable_stable_result target payload));
+  let expected = snapshot target in
+  check int "snapshot length matches payload" len (String.length expected.bytes);
+  (* 1. Exact match passes guard *)
+  (match Fs.with_private_jsonl_snapshot_guard_result target ~expected ~f:(fun () -> 42) with
+   | Fs.Guard_executed { value = 42; cleanup_failures = [] } -> ()
+   | Fs.Guard_executed _ -> fail "multichunk exact match had unexpected result or cleanup"
+   | Fs.Guard_refused failure ->
+     fail (Fs.private_jsonl_transaction_error_to_string failure.guard_error));
+  (* 2. Length mismatch in expected.bytes fails closed in O(1) *)
+  let short_expected = { expected with bytes = String.sub expected.bytes 0 (len - 1) } in
+  require_guard_refusal target require_content_mismatch
+    (Fs.with_private_jsonl_snapshot_guard_result target ~expected:short_expected ~f:(record child));
+  check bool "length mismatch ran no child" false (Sys.file_exists child);
+  (match Fs.append_private_jsonl_durable_locked_at_snapshot_result
+           target ~expected:short_expected "{\"next\":1}\n" with
+   | Error err -> require_content_mismatch err
+   | Ok _ -> fail "length mismatch appended unexpectedly");
+  (* 3. Single-byte mutations at start (0), middle (>64 KiB), and end (unaligned tail) *)
+  let mismatch_offsets = [ ("start", 0); ("middle-chunk", 70_003); ("tail-end", len - 2) ] in
+  List.iter (fun (label, offset) ->
+    let mutated = flip_byte payload offset in
+    write_in_place_same_length target mutated;
+    check bool (label ^ ": cursor unchanged after same-length edit") true
+      (Fs.Private_jsonl_cursor.equal expected.cursor (snapshot target).cursor);
+    require_guard_refusal target require_content_mismatch
+      (Fs.with_private_jsonl_snapshot_guard_result target ~expected ~f:(record child));
+    check bool (label ^ ": guard refusal ran no child") false (Sys.file_exists child);
+    (match Fs.append_private_jsonl_durable_locked_at_snapshot_result
+             target ~expected "{\"next\":1}\n" with
+     | Error err -> require_content_mismatch err
+     | Ok _ -> fail (label ^ ": snapshot append accepted mutated bytes"));
+    (match Fs.rewrite_private_jsonl_durable_locked_at_snapshot_result
+             target ~expected "{\"rewritten\":1}\n" with
+     | Error err -> require_content_mismatch err
+     | Ok _ -> fail (label ^ ": snapshot rewrite accepted mutated bytes"));
+    (match Fs.purge_private_jsonl_durable_locked_at_snapshot_result target ~expected with
+     | Error err -> require_content_mismatch err
+     | Ok _ -> fail (label ^ ": snapshot purge accepted mutated bytes"));
+    (* Restore original payload for next offset *)
+    write_in_place_same_length target payload
+  ) mismatch_offsets;
+  (* 4. Exact match succeeds for append, rewrite, and purge at snapshot *)
+  let appended_row = "{\"appended\":true}\n" in
+  let cursor_after_append =
+    require_write
+      (Fs.append_private_jsonl_durable_locked_at_snapshot_result target ~expected appended_row)
+  in
+  let snap_after_append = { Fs.bytes = payload ^ appended_row; cursor = cursor_after_append } in
+  let rewritten = "{\"rewritten\":true}\n" in
+  let cursor_after_rewrite =
+    require_write
+      (Fs.rewrite_private_jsonl_durable_locked_at_snapshot_result
+         target ~expected:snap_after_append rewritten)
+  in
+  let snap_after_rewrite = { Fs.bytes = rewritten; cursor = cursor_after_rewrite } in
+  let cursor_after_purge =
+    require_write
+      (Fs.purge_private_jsonl_durable_locked_at_snapshot_result target ~expected:snap_after_rewrite)
+  in
+  check bool "purge at snapshot removes target" false (Sys.file_exists target);
+  check bool "purge returns Missing cursor" true
+    (Fs.Private_jsonl_cursor.is_missing cursor_after_purge)
+
 let () =
   Printexc.record_backtrace true;
   match Array.to_list Sys.argv with
@@ -331,6 +431,8 @@ let () =
     run "fs_compat_snapshot_guard" ["exact parent through child IO", [
       case "stale cursor refuses before child write" test_refused_cursor;
       case "same cursor changed bytes refuses before child write" test_refused_bytes;
+      case "multichunk (>64KiB) streaming verify match, start/mid/end & length mismatch"
+        test_multichunk_streaming_verify_match_and_mismatches;
       case "separate process writer excluded through child write" test_separate_process_excluded;
       case "known child survives reserved guard cleanup" test_known_child_cleanup;
       case "unknown child and reserved guard cleanup both survive" test_unknown_child_cleanup

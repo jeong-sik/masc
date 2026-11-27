@@ -140,6 +140,62 @@ let private_jsonl_read_exact fd ~from ~end_offset =
   |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure)
 ;;
 
+let private_jsonl_verify_chunk_bytes = 65_536
+
+let chunk_matches_expected
+    (buf : bytes) ~(expected_bytes : string) ~expected_offset ~len =
+  let word_limit = len - (len land 7) in
+  let i = ref 0 in
+  let matched = ref true in
+  while !matched && !i < word_limit do
+    let off = !i in
+    if Bytes.get_int64_ne buf off
+       <> String.get_int64_ne expected_bytes (expected_offset + off)
+    then matched := false
+    else i := off + 8
+  done;
+  while !matched && !i < len do
+    let off = !i in
+    if not (Char.equal (Bytes.get buf off)
+              (String.get expected_bytes (expected_offset + off)))
+    then matched := false
+    else i := off + 1
+  done;
+  !matched
+;;
+
+(* Compare [fd]'s bytes [0..end_offset) against [expected_bytes] using a single
+   bounded buffer so large JSONL files do not allocate a whole-file copy on the
+   major heap for snapshot CAS checks. *)
+let private_jsonl_verify_exact_bytes fd ~expected_bytes ~end_offset =
+  if String.length expected_bytes <> end_offset
+  then Ok false
+  else if end_offset = 0
+  then Ok true
+  else
+    private_jsonl_capture Read_transaction_data (fun () ->
+      (* See POSIX lseek: no exception confirms the requested absolute offset. *)
+      ignore (Unix.lseek fd 0 Unix.SEEK_SET : int);
+      let buf_len = Int.min private_jsonl_verify_chunk_bytes end_offset in
+      let buf = Bytes.create buf_len in
+      let rec loop file_offset =
+        if file_offset = end_offset
+        then true
+        else
+          let to_read = Int.min buf_len (end_offset - file_offset) in
+          match Unix.read fd buf 0 to_read with
+          | 0 -> raise End_of_file
+          | count ->
+            if chunk_matches_expected buf ~expected_bytes
+                 ~expected_offset:file_offset ~len:count
+            then loop (file_offset + count)
+            else false
+          | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop file_offset
+      in
+      loop 0)
+    |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure)
+;;
+
 (* Every participant must retain and use the same stable sibling lock. The
    snapshot binds both a physical replacement and a same-inode payload edit;
    POSIX unlink itself is not an atomic compare-and-unlink against rogue actors
@@ -166,8 +222,11 @@ let purge_private_jsonl_durable_locked_at_snapshot_with_io ~io path
         let* actual = private_jsonl_cursor_of_stats stats in
         let* () = if Private_jsonl_cursor.equal expected.cursor actual then Ok ()
           else Error (Cursor_mismatch {expected=expected.cursor;actual}) in
-        let* bytes = private_jsonl_read_exact fd ~from:0 ~end_offset:stats.Unix.st_size in
-        let* () = if String.equal expected.bytes bytes then Ok ()
+        let* matches =
+          private_jsonl_verify_exact_bytes fd
+            ~expected_bytes:expected.bytes ~end_offset:stats.Unix.st_size
+        in
+        let* () = if matches then Ok ()
           else Error (Transaction_content_changed {path}) in
         let* () = private_jsonl_validate_open_binding
             ~operation:Inspect_transaction_path ~path fd in
@@ -241,6 +300,51 @@ let read_private_jsonl_durable_locked_with_io ~io path ~after =
   let success snapshot = Snapshot_succeeded snapshot in
   with_private_jsonl_stable_lock ~io ~success path @@ fun ~dir:_ ~path ->
   read_private_jsonl_snapshot_locked ~io path ~after
+;;
+
+let verify_private_jsonl_snapshot_locked ~io path ~(expected : private_jsonl_snapshot) =
+  let open Result.Syntax in
+  let success () = Snapshot_succeeded expected in
+  let* opened = private_jsonl_open_existing ~close_fd:io.close_fd path [ Unix.O_RDONLY ] in
+  match opened with
+  | None ->
+    let actual = Private_jsonl_cursor.Missing in
+    if not (Private_jsonl_cursor.equal expected.cursor actual)
+    then Error (Cursor_mismatch { expected = expected.cursor; actual })
+    else if not (String.equal expected.bytes "")
+    then Error (Transaction_content_changed { path })
+    else Ok ()
+  | Some fd ->
+    private_jsonl_with_fd
+      ~close_operation:Close_transaction_data
+      ~close_fd:io.close_fd
+      ~success
+      fd
+      (fun () ->
+         let* stats =
+           private_jsonl_capture Inspect_transaction_data (fun () -> Unix.fstat fd)
+           |> Result.map_error (fun failure -> Private_jsonl_operation_failed failure)
+         in
+         let* actual = private_jsonl_cursor_of_stats stats in
+         let* () =
+           if Private_jsonl_cursor.equal expected.cursor actual
+           then Ok ()
+           else Error (Cursor_mismatch { expected = expected.cursor; actual })
+         in
+         let* () = private_jsonl_validate_complete_tail fd stats.Unix.st_size in
+         let* matches =
+           private_jsonl_verify_exact_bytes
+             fd
+             ~expected_bytes:expected.bytes
+             ~end_offset:stats.Unix.st_size
+         in
+         let* () =
+           if matches then Ok () else Error (Transaction_content_changed { path })
+         in
+         private_jsonl_validate_open_binding
+           ~operation:Inspect_transaction_path
+           ~path
+           fd)
 ;;
 
 let read_private_jsonl_durable_locked_result path ~after =
@@ -649,8 +753,11 @@ let append_private_jsonl_locked_with_io
            let* () = match precondition with
              | Append_without_precondition | Append_at_cursor _ -> Ok ()
              | Append_at_snapshot expected ->
-               let* bytes = private_jsonl_read_exact fd ~from:0 ~end_offset:stats.Unix.st_size in
-               if not (String.equal expected.bytes bytes)
+               let* matches =
+                 private_jsonl_verify_exact_bytes fd
+                   ~expected_bytes:expected.bytes ~end_offset:stats.Unix.st_size
+               in
+               if not matches
                then Error (Transaction_content_changed { path })
                else private_jsonl_validate_open_binding
                    ~operation:Inspect_transaction_path ~path fd in
@@ -812,8 +919,11 @@ let rewrite_private_jsonl_durable_locked_at_snapshot_with_io
         let* () = if Private_jsonl_cursor.equal expected.cursor actual then Ok ()
           else Error (Cursor_mismatch { expected = expected.cursor; actual }) in
         let* () = private_jsonl_validate_complete_tail fd stats.Unix.st_size in
-        let* bytes = private_jsonl_read_exact fd ~from:0 ~end_offset:stats.Unix.st_size in
-        let* () = if String.equal expected.bytes bytes then Ok () else Error (Transaction_content_changed { path }) in
+        let* matches =
+          private_jsonl_verify_exact_bytes fd
+            ~expected_bytes:expected.bytes ~end_offset:stats.Unix.st_size
+        in
+        let* () = if matches then Ok () else Error (Transaction_content_changed { path }) in
         let* () = private_jsonl_validate_open_binding ~operation:Inspect_transaction_path ~path fd in
         private_jsonl_replace_locked
           ?before_lock_stage

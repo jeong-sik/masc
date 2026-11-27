@@ -299,6 +299,34 @@ let test_replaced_path_reopens () =
   check (list string) "retired inode receives no new record" [ "1" ] (read_lines old)
 ;;
 
+let test_cached_inode_identity_reuses_and_reopens () =
+  Fs_compat_internal.Fd_cache.reset_for_testing ();
+  let dir = tmpdir "fd_cache_inode_identity" in
+  let path = Filename.concat dir "target.jsonl" in
+  let replacement = Filename.concat dir "replacement.jsonl" in
+  let fd_identity () =
+    Fs_compat_internal.Fd_cache.with_writer path (fun target ->
+      let st = Unix.fstat (Fs_compat_internal.Fd_append_whole.descriptor target) in
+      st.Unix.st_dev, st.Unix.st_ino)
+  in
+  let id1 = fd_identity () in
+  let id2 = fd_identity () in
+  check (pair int int) "cached hit reuses exact same (dev, ino)" id1 id2;
+  Out_channel.with_open_bin replacement (fun oc -> output_string oc "replaced\n");
+  let rep_st = Unix.stat replacement in
+  Unix.rename replacement path;
+  let id3 = fd_identity () in
+  check (pair int int) "rename to new inode reopens matching replacement (dev, ino)"
+    (rep_st.Unix.st_dev, rep_st.Unix.st_ino) id3;
+  check bool "replaced inode differs from original" false (id1 = id3);
+  Sys.remove path;
+  let id4 = fd_identity () in
+  let fresh_st = Unix.stat path in
+  check (pair int int) "unlink + reopen matches fresh file (dev, ino)"
+    (fresh_st.Unix.st_dev, fresh_st.Unix.st_ino) id4;
+  Fs_compat_internal.Fd_cache.reset_for_testing ()
+;;
+
 (* #52980. No byte of a failed append reaches the file later: not with the
    next append and not when the cached descriptor is closed. Before, the
    cached [out_channel] kept the unwritten bytes in its buffer and wrote them
@@ -1858,6 +1886,8 @@ let tests () =
     [ ( "fd_cache"
       , [ test_case "deleted path reopens" `Quick test_deleted_path_reopens
         ; test_case "replaced path reopens" `Quick test_replaced_path_reopens
+        ; test_case "cached (dev, ino) reuses fd and reopens on rename/unlink"
+            `Quick test_cached_inode_identity_reuses_and_reopens
         ; test_case
             "16 threads × 100 multibyte records (RFC-0108 §5.1 reproduction)"
             `Quick

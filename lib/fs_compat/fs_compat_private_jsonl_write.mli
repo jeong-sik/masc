@@ -50,6 +50,15 @@ val read_private_jsonl_snapshot_locked :
   (private_jsonl_snapshot, private_jsonl_transaction_error) result
 (** Filesystem worker only, under this path's already-held stable scope. *)
 
+val verify_private_jsonl_snapshot_locked :
+  io:private_jsonl_transaction_io_for_testing ->
+  string -> expected:private_jsonl_snapshot ->
+  (unit, private_jsonl_transaction_error) result
+(** Filesystem worker only, under this path's already-held stable scope.
+    Verifies cursor, complete tail, exact bytes (streaming with a bounded
+    buffer), and open path binding without materializing the full file on the
+    heap. The public [Fs_compat] interface does not expose this helper. *)
+
 val private_jsonl_last_complete_row_length : string -> int
 
 val recover_private_jsonl_durable_locked_result :

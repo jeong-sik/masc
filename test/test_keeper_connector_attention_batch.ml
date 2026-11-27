@@ -851,50 +851,7 @@ let test_unavailable_ask_survives_other_completed_work ~failure () =
         (Option.is_none restored.Intake.event_queue_intake_error);
       check (list string) "terminal ack does not resurrect the queue entry" []
         (pending_ids ());
-      assert_no_delivery ();
-      (* The canonical answer was never lost: answer recovery enqueues a fresh
-         pointer for the restored answer, and intake delivers it. Recovery
-         delivers only to a Keeper whose meta file is stored. *)
-      (match Keeper_meta_store.replace_snapshot (Workspace.default_config base_path) meta with
-       | Ok _ -> () | Error error -> fail error);
-      let report = match Keeper_ask_answer_wake.reconcile ~base_path with
-        | Ok report -> report
-        | Error error -> fail (Keeper_ask_store.read_error_to_string error) in
-      check int "answer recovery re-enqueues the restored answer" 1 report.enqueued;
-      check (list string) "fresh recovery pointer is pending" [stimulus.post_id]
-        (pending_ids ());
-      let recovered = intake () in
-      (match recovered.pending_board_events with
-       | [event] ->
-         check string "recovered canonical answer reaches model observation"
-           "notes: original canonical answer" (Option.get event.preview);
-         check string "recovered observation stays bound to the original Ask"
-           stimulus.post_id event.post_id
-       | _ -> fail "recovered canonical answer produced no single observation");
-      (* Recovery enqueued a fresh pointer whose arrived_at is the canonical
-         answer time, so its durable identity differs from the withdrawn
-         original's; evidence is checked on the fresh identity. *)
-      let fresh_stimulus_id =
-        match
-          List.find_opt
-            (fun (source : Q.stimulus) -> String.equal source.post_id stimulus.post_id)
-            (Keeper_heartbeat_source_batch.stimuli recovered.source_batch)
-        with
-        | Some source -> Keeper_reaction_ledger.stimulus_id_of_event_queue source
-        | None -> fail "fresh recovery pointer was not admitted" in
-      assert_no_delivery ();
-      complete recovered.source_batch;
-      check (list string) "recovered delivery acknowledges the fresh pointer" []
-        (pending_ids ());
-      match Keeper_reaction_ledger.event_queue_reaction_evidence_result ~base_path
-          ~keeper_name ~stimulus_id:fresh_stimulus_id with
-      | Ok (Keeper_reaction_ledger.Evidence_complete evidence) ->
-        check bool "recovered delivery records Turn_started" true evidence.turn_started_seen;
-        check bool "recovered delivery records exact ACK" true evidence.event_queue_ack_seen
-      | Ok (Keeper_reaction_ledger.Evidence_quarantined _) ->
-        fail "recovered fixture ledger is quarantined"
-      | Error error ->
-        fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
+      assert_no_delivery ()
     end else begin
       let restored = intake () in
       check bool "restored canonical read has no retry error" true
@@ -2067,13 +2024,13 @@ let () =
             (test_unavailable_ask_survives_other_completed_work ~failure:`Unreadable)
         ; test_case "malformed Ask stays pending through sibling completion and canonical restoration" `Quick
             (test_unavailable_ask_survives_other_completed_work ~failure:`Malformed)
-        ; test_case "missing Ask log is terminally acknowledged and canonically recoverable" `Quick
+        ; test_case "missing Ask log is terminally acknowledged and not re-enqueued" `Quick
             (test_unavailable_ask_survives_other_completed_work ~failure:`Missing_file)
-        ; test_case "missing Ask row is terminally acknowledged and canonically recoverable" `Quick
+        ; test_case "missing Ask row is terminally acknowledged and not re-enqueued" `Quick
             (test_unavailable_ask_survives_other_completed_work ~failure:`Missing_rows)
-        ; test_case "open Ask is terminally acknowledged and canonically recoverable" `Quick
+        ; test_case "open Ask is terminally acknowledged and not re-enqueued" `Quick
             (test_unavailable_ask_survives_other_completed_work ~failure:`Open)
-        ; test_case "withdrawn Ask is terminally acknowledged and canonically recoverable" `Quick
+        ; test_case "withdrawn Ask is terminally acknowledged and not re-enqueued" `Quick
             (test_unavailable_ask_survives_other_completed_work ~failure:`Withdrawn)
         ; test_case
             "admits a channel's whole backlog in arrival order, leaves other \

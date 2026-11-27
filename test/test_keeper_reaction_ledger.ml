@@ -2106,10 +2106,10 @@ let delivery_scanned_bytes () =
     ()
 ;;
 
-(* The ask answer recovery pass asks about every answered ask in turn
-   (#43299). Each answer used to read the keeper's whole ledger again, so a
-   pass cost the ledger's size times the number of asks. The ledger is read
-   once, whatever the number of sources asked about. *)
+(* A pass can ask about many sources in turn (#43299). Each source used to
+   read the keeper's whole ledger again, so a pass cost the ledger's size
+   times the number of sources. The ledger is read once, whatever the number
+   of sources asked about. *)
 let test_delivery_evidence_is_read_once_for_many_sources () =
   with_consumed_delivery_source @@ fun ~base_path ~keeper_name ~source ->
   let since = Unix.gettimeofday () -. 86400. in

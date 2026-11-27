@@ -857,10 +857,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     let reconcile_unread_tool_results () =
       Keeper_client_tool_outbox_wake.pulse ~sw unread_tool_results
     in
-    let ask_answers = Keeper_ask_answer_wake.create ~base_path:config.base_path () in
-    let reconcile_ask_answers () =
-      Keeper_ask_answer_wake.pulse ~sw ask_answers
-    in
     (* Every registered Keeper has its Memory writer, and the writer of a
        Keeper that left the registry is retired (RFC
        librarian-call-only-proposes §9.5). *)
@@ -888,7 +884,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       [ "goal_events", reconcile_goal_events
       ; "owned_job_completions", reconcile_owned_job_completions
       ; "unread_tool_results", reconcile_unread_tool_results
-      ; "ask_answers", reconcile_ask_answers
       ; ( "transition_outboxes"
         , fun () -> project_transition_outboxes Server_transition_outbox_recovery.Startup )
       ];
@@ -908,7 +903,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         ; "goal_events", reconcile_goal_events
         ; "owned_job_completions", reconcile_owned_job_completions
         ; "unread_tool_results", reconcile_unread_tool_results
-        ; "ask_answers", reconcile_ask_answers
         ; "memory_writers", pulse_memory_writers
         ];
       (try

@@ -283,7 +283,8 @@ type turn_line =
   - 완료된 턴만 run 의 닫는 저장에 닿는다. 이 걸음이 없으면 오류·취소·예외로 끝난 턴의 메시지가 열린 채 남는다. 끝자리가 그 앞에 서므로 다음 턴의 경계도 baseline 도 그 앞이고, 실패가 이어지면 턴마다 그만큼이 다음 요청에 쌓인다.
   - run 은 Agent Core 의 도중 저장이 설치되면 턴에 알린다(`Keeper_turn_log_turn.note_open_save`). 알리지 않은 턴의 끝은 head 를 그대로 둔다. 턴 앞에 놓인 입력(위)은 그 턴이 닫는 저장으로 닫을 것이다.
   - 도중 저장을 한 Agent Core 시도 뒤에 같은 턴이 다른 후보로 넘어가는 일은 없다. checkpoint 단계에 닿은 dispatch 는 그 run 안에서 다시 시도하지 않는다(`same_run_retry_allowed`). 그래서 이 걸음이 닫는 턴은 Agent Core 로 끝난 턴이고, 그 단위는 checkpoint 에서 읽는다(§5.3).
-  - checkpoint 에서 이어 가도록 넘긴 작업의 턴은 닫지 않는다(`note_resume_from_checkpoint`, RFC last-path-resumes-after-progress 3.1). 이어 가는 턴은 입력 뒤에 열리고 메시지를 더하지 않는다. 앞 턴이 입력을 닫으면 경계가 이력의 끝에 서서, 경계에서 시작하는 요청이 가장 새 atom 하나만 싣는다. 열린 채 두면 이어 가는 턴의 경계는 그 입력 앞이다. 오류를 돌려준 턴에만 해당한다. 예외나 취소로 끝난 턴은 이어 받는 쪽이 없어서 닫는다.
+  - 이 걸음은 주기를 다시 시작하는 lane 의 턴에만 있다(`Restart_cycle`). 그 lane 의 다음 턴은 새 입력으로 연다.
+  - 채팅 작업의 턴은 어떻게 끝났든 닫지 않는다(`note_resumable_operation`). 채팅 작업은 checkpoint 에서 이어 간다. 시간이 지나면 풀리는 실패 뒤에 넘겨지고(RFC last-path-resumes-after-progress 3.1), 프로세스가 멈출 때 돌던 작업은 다음 프로세스가 이어 받는다(RFC restart-resumes-running-chat-operations 4.3). 이어 가는 턴은 입력 뒤에 열리고 메시지를 더하지 않을 수 있다. 앞 턴이 입력을 닫으면 경계가 이력의 끝에 서서, 경계에서 시작하는 요청이 가장 새 atom 하나만 싣는다. 그래서 채팅 lane 에는 위의 쌓임이 그대로 남는다. 이어 가는 턴이 경계 아래의 자기 입력을 찾게 되면 이 턴도 닫을 수 있다(#55350).
   - 공식 클라이언트 턴이 거절한 도구 호출을 저장한 것(`Keeper_official_client_host.persist_pre_tool_rejects`)은 이 걸음이 닫지 않는다. 그 턴의 단위는 클라이언트 파일에서 읽는데, 줄 앞에서 닫으면 checkpoint 단위가 된다. 그 메시지는 다음 닫는 저장이 닫는다.
   - `Opened` 를 못 쓴 턴의 끝도 닫는다. 줄은 쓰지 않고, 닫힌 메시지는 다음 단위가 싣는다.
   - 이 저장이 실패해도 줄은 쓴다. 줄은 `Save_failed` 다(취소된 턴은 `Cancelled`). 카운터 `turn_log_open_close_failed` 가 오르고, 남은 것은 다음 닫는 저장이 닫는다.

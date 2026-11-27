@@ -19,7 +19,7 @@ type t =
   ; turn_ref : Ids.Turn_ref.t
   ; admitted : Writer.admitted
   ; saves : saves Atomic.t
-  ; resumes : bool Atomic.t
+  ; resumable : bool Atomic.t
   }
 
 let note_closing_save turn outcome = Atomic.set turn.saves (Closing_save outcome)
@@ -30,7 +30,7 @@ let note_open_save turn =
   ignore (Atomic.compare_and_set turn.saves Nothing_saved Left_open : bool)
 ;;
 
-let note_resume_from_checkpoint turn = Atomic.set turn.resumes true
+let note_resumable_operation turn = Atomic.set turn.resumable true
 
 type exit =
   | Returned_ok
@@ -199,7 +199,7 @@ let admit ~place ~turn_ref ~runtime ~task ~stimuli =
   ; turn_ref
   ; admitted
   ; saves = Atomic.make Nothing_saved
-  ; resumes = Atomic.make false
+  ; resumable = Atomic.make false
   }
 ;;
 
@@ -267,13 +267,6 @@ let write_end turn exit closing_save =
      | exception exn -> not_written (Printexc.to_string exn))
 ;;
 
-(* The caller stores a resume only for a run that returned its error, so a
-   turn that raised or was cancelled is resumed by no one. *)
-let left_for_its_resume turn = function
-  | Returned_error -> Atomic.get turn.resumes
-  | Returned_ok | Raised | Cancelled -> false
-;;
-
 (* Protected: a cancelled fiber cannot do file I/O, and the turn's end is
    written all the same. No exception leaves, a cancellation included: under
    the protection one can only come from inside the save or the write, and
@@ -282,10 +275,11 @@ let left_for_its_resume turn = function
 
    The save comes before the line, so the line names the messages as the
    turn's own. A turn that saved nothing leaves the head as it found it: what
-   is open there was put before a turn that has yet to close it. So does a
-   turn whose operation resumes from its checkpoint: the turn that resumes
-   opens after its input and adds none, so its request can only start before
-   that input while the input is open. *)
+   is open there was put before a turn that has yet to close it. So does the
+   turn of an operation that can resume from its checkpoint, whichever way it
+   ends: the turn that resumes opens after its input and may add no message,
+   and a request that starts at the turn boundary carries that input only
+   while it is open (#55350). *)
 let finish turn exit =
   Eio.Cancel.protect
   @@ fun () ->
@@ -293,7 +287,7 @@ let finish turn exit =
   | Nothing_saved -> write_end turn exit None
   | Closing_save outcome -> write_end turn exit (Some outcome)
   | Left_open ->
-    if left_for_its_resume turn exit
+    if Atomic.get turn.resumable
     then write_end turn exit None
     else write_end turn exit (close_what_the_turn_left_open turn exit)
 ;;

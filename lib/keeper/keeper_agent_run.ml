@@ -888,23 +888,15 @@ let run_turn
     ~succeeded:(fun (settlement : Keeper_agent_result.turn_settlement) ->
       Result.is_ok settlement.result)
   @@ fun turn_log ->
-  (* An operation handed on to resume from its checkpoint is not over: the
-     turn's end leaves what it saved open for the turn that resumes it. A
-     lane that restarts its cycle starts a new turn, so its turn is over. *)
-  let runtime_retry_deferral =
-    Option.map
-      (fun { Keeper_turn_driver.continuation; on_deferred } ->
-         { Keeper_turn_driver.continuation
-         ; on_deferred =
-             (fun hint ->
-                (match continuation with
-                 | Keeper_turn_driver.Resume_operation_checkpoint _ ->
-                   Keeper_turn_log_turn.note_resume_from_checkpoint turn_log
-                 | Keeper_turn_driver.Restart_cycle -> ());
-                on_deferred hint)
-         })
-      runtime_retry_deferral
-  in
+  (* A chat operation can resume from its checkpoint, so the turn's end
+     leaves what it saved open for the turn that resumes it. A lane that
+     restarts its cycle starts a new turn, so its turn's end closes. *)
+  (match runtime_retry_deferral with
+   | Some
+       { Keeper_turn_driver.continuation = Resume_operation_checkpoint _
+       ; on_deferred = _
+       } -> Keeper_turn_log_turn.note_resumable_operation turn_log
+   | Some { Keeper_turn_driver.continuation = Restart_cycle; on_deferred = _ } | None -> ());
   let turn_start = Mtime_clock.now () in
   let seq_ref = Atomic.make 0 in
   let runtime_manifest_context =

@@ -547,46 +547,46 @@ let test_an_end_leaves_open_what_the_turn_did_not_save =
     "started at 0\nopened 1 at 0\nclosed errored at 0, before [], own []" (log_text place)
 ;;
 
-(* The operation of a turn that saved and failed was handed on to resume from
-   its checkpoint. The turn's end leaves its messages open: the turn that
-   resumes adds no input, so they have to lie above its baseline. Its closing
-   save names them as its own. A turn that raises is resumed by no one, and
-   its end closes what it saved. *)
-let test_a_turn_left_for_its_resume =
+(* A chat operation can resume from its checkpoint, after a failure that
+   passes with time or in the process that starts next. The turn that resumes
+   opens after its input and may add no message, so whichever way such a turn
+   ends, its end leaves what it saved open. The closing save of the turn that
+   completes the operation names the messages as its own. *)
+let test_the_turn_of_an_operation_that_can_resume =
   in_workspace
   @@ fun place ->
   let history = ref [] in
   let (_ : (unit, string) result) =
     turn place 1 (fun turn ->
+      Turn.note_resumable_operation turn;
       history := open_save place turn 1 !history;
-      Turn.note_resume_from_checkpoint turn;
       Error "the provider failed")
   in
-  check int "what the turn saved is still open" 2 (open_messages place);
-  let (_ : (unit, string) result) =
-    turn place 2 (fun turn ->
-      history := !history @ turn_messages 2;
-      save place ~boundary:Objects.Turn_closes ~turn_count:2 !history;
-      Turn.note_closing_save turn Saved;
-      Ok ())
-  in
   (match
-     turn place 3 (fun turn ->
-       history := open_save place turn 3 !history;
-       Turn.note_resume_from_checkpoint turn;
+     turn place 2 (fun turn ->
+       Turn.note_resumable_operation turn;
+       history := open_save place turn 2 !history;
        raise Turn_broke)
    with
    | (_ : (unit, string) result) -> fail "the exception did not leave"
    | exception Turn_broke -> ());
-  check int "a turn that raised is not left for a resume" 0 (open_messages place);
-  check string "the turn that resumes names the messages, and the turn that raised names its own"
+  check int "what the turns saved is still open" 4 (open_messages place);
+  let (_ : (unit, string) result) =
+    turn place 3 (fun turn ->
+      Turn.note_resumable_operation turn;
+      history := !history @ turn_messages 3;
+      save place ~boundary:Objects.Turn_closes ~turn_count:3 !history;
+      Turn.note_closing_save turn Saved;
+      Ok ())
+  in
+  check string "the turn that completes names the messages as its own"
     "started at 0\n\
      opened 1 at 0\n\
      closed errored at 0, before [], own []\n\
      opened 2 at 0\n\
-     closed completed at 4, before [], own [0+4]\n\
-     opened 3 at 4\n\
-     closed errored at 6, before [], own [0+2]"
+     closed errored at 0, before [], own []\n\
+     opened 3 at 0\n\
+     closed completed at 6, before [], own [0+6]"
     (log_text place)
 ;;
 
@@ -772,7 +772,8 @@ let () =
             test_an_end_without_a_closing_save_closes_what_the_turn_saved
         ; test_case "an end leaves open what the turn did not save" `Quick
             test_an_end_leaves_open_what_the_turn_did_not_save
-        ; test_case "a turn left for its resume" `Quick test_a_turn_left_for_its_resume
+        ; test_case "the turn of an operation that can resume" `Quick
+            test_the_turn_of_an_operation_that_can_resume
         ; test_case "a save at the end that fails" `Quick test_a_save_at_the_end_that_fails
         ; test_case "a turn not in the log closes what it saved" `Quick
             test_a_turn_not_in_the_log_closes_what_it_saved

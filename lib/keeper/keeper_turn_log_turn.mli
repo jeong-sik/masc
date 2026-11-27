@@ -16,10 +16,10 @@
     them as the turn's own and the next turn's baseline lies after them.
 
     Three ends leave open messages where they are: a turn whose closing save
-    was stale or failed, a turn whose operation resumes from its checkpoint
-    ({!note_resume_from_checkpoint}), and a turn that said no save. The last
-    includes an official-client turn that stored the tool calls it rejected
-    ({!Keeper_official_client_host.persist_pre_tool_rejects}). *)
+    was stale or failed, the turn of an operation that can resume from its
+    checkpoint ({!note_resumable_operation}), and a turn that said no save.
+    The last includes an official-client turn that stored the tool calls it
+    rejected ({!Keeper_official_client_host.persist_pre_tool_rejects}). *)
 
 (** A turn taken up. It carries whether its [Opened] is in the log. *)
 type t
@@ -47,14 +47,17 @@ val note_closing_save : t -> closing_save -> unit
     there is not the turn's. *)
 val note_open_save : t -> unit
 
-(** Said by the turn when its operation was handed on to resume from its
-    checkpoint (RFC last-path-resumes-after-progress 3.1). If the turn then
-    returns its error, its end leaves what it saved open: the turn that
-    resumes opens after its input and adds no message of its own, so a
-    request that starts at the turn boundary carries that input only while
-    the input is open. A turn that raises or is cancelled is resumed by no
-    one, and its end closes as for any other turn. *)
-val note_resume_from_checkpoint : t -> unit
+(** Said by the turn of an operation that can resume from its checkpoint: a
+    chat operation, which is handed on after a failure that passes with time
+    (RFC last-path-resumes-after-progress 3.1) and picked up by the process
+    that starts next when this one stops (RFC
+    restart-resumes-running-chat-operations 4.3). Whichever way such a turn
+    ends, its end leaves what it saved open: the turn that resumes opens
+    after its input and may add no message, so a request that starts at the
+    turn boundary carries that input only while the input is open. A lane
+    that restarts its cycle starts a new turn with a new input and says
+    nothing here. *)
+val note_resumable_operation : t -> unit
 
 (** How the turn's body ended. *)
 type exit =

@@ -99,8 +99,8 @@ let test_a_scope_is_read_in_one_read_with_its_bodies () = with_store (fun root s
   Sys.remove stage;
   (* A scope with no directory is absent. *)
   Alcotest.(check bool) "no directory is absence" true (get (scope_rows ~scope:"no-such-scope" store ()) = None);
-  Alcotest.(check (list string)) "and load_scope reads nothing" []
-    (owned (Owner.load_scope ~store ~scope:"no-such-scope"));
+  Alcotest.(check int) "and load_scope reads nothing" 0
+    (List.length (owned (Owner.load_scope ~store ~scope:"no-such-scope")));
   (match Owner.load_scope ~store ~scope:" " with
    | Error (Owner.Invalid_identity "scope") -> ()
    | Ok _ -> Alcotest.fail "a blank scope read as a scope"

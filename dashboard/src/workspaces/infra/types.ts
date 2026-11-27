@@ -213,9 +213,13 @@ export interface TimelineEntry {
   readonly details: Readonly<Record<string, unknown>>
 }
 
+/** A unix-seconds stamp as "MM-DD HH:MM:SS" on the viewer's own clock, as the
+ *  rest of the dashboard shows times. */
 export function formatUnixTs(unixSec: number | null | undefined): string {
   if (typeof unixSec !== 'number' || !Number.isFinite(unixSec) || unixSec <= 0) return '없음'
-  return new Date(unixSec * 1000).toISOString().replace('T', ' ').slice(5, 19)
+  const at = new Date(unixSec * 1000)
+  const two = (part: number): string => String(part).padStart(2, '0')
+  return `${two(at.getMonth() + 1)}-${two(at.getDate())} ${two(at.getHours())}:${two(at.getMinutes())}:${two(at.getSeconds())}`
 }
 
 export function extractChangePath(location: unknown): string {

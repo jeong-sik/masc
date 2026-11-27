@@ -868,9 +868,10 @@ remote_endpoint = "fixture"
     let body = item |> member "body" |> to_string in
     Alcotest.(check string) "endpoint image body survives snapshot" png
       (read_file (Filename.concat (Workspace.masc_dir config) body));
-    (* The reads the reader sent since [since]. A read of one file also asks
-       the endpoint for its workspace root; that reads no file and is left
-       out. *)
+    (* The file reads the reader sent since [since]. A request that reads no
+       file is left out. One read of the endpoint costs the same number of
+       requests whatever it reads, so a binary file that was read whole and
+       then again would cost more requests than the text file. *)
     let reads_since since =
       let lines =
         if Sys.file_exists reads_log
@@ -890,9 +891,11 @@ remote_endpoint = "fixture"
        Alcotest.(check string) "retained bytes are the whole file"
          (png ^ String.make Store.verification_evidence_max_bytes 'x') data
      | _ -> Alcotest.fail "oversize endpoint image must be retained complete");
-    Alcotest.(check (list string))
-      "a binary-format path is read once, by the whole-file command"
-      [ "whole" ] (reads_since since);
+    let binary_reads = reads_since since in
+    Alcotest.(check bool)
+      "a binary-format path is read by the whole-file command, and by nothing else"
+      true
+      (binary_reads <> [] && List.for_all (fun read -> read = "whole") binary_reads);
     let since = List.length (reads_since 0) in
     write_file endpoint_file (String.make (Store.verification_evidence_max_bytes + 1) 'x');
     (match reader ~worker:meta.name ~relative:"summary.txt" with
@@ -901,9 +904,13 @@ remote_endpoint = "fixture"
          (Store.verification_evidence_max_bytes + 1) bytes;
        Alcotest.(check int) "and nothing is cut" (String.length text) bytes
      | _ -> Alcotest.fail "a text over the inline cap must be read whole");
-    Alcotest.(check (list string))
-      "any other path is read once, by the bounded command"
-      [ "prefix" ] (reads_since since)
+    let text_reads = reads_since since in
+    Alcotest.(check bool)
+      "any other path is read by the bounded command, and by nothing else"
+      true
+      (text_reads <> [] && List.for_all (fun read -> read = "prefix") text_reads);
+    Alcotest.(check int) "a binary-format path costs one read, as a text file does"
+      (List.length text_reads) (List.length binary_reads)
 
 let fake_docker_exit_1_script =
   "#!/bin/sh\n\

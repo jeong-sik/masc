@@ -1018,6 +1018,49 @@ struct MidiCycle {
     }
 }
 
+// Every MIDI output owner in this process sends through one CoreMIDI client and
+// one output port. They open on first use and are never disposed; process exit
+// releases them. CoreMIDI can drop a message still in flight when its port or
+// client is disposed, and both dispose calls return noErr. On macos-15 (#45224,
+// run 46019582665) disposing right after the last send lost a message in 61 of
+// 800 trials, disposing only the port in 51 of 800, keeping the port in 0 of 800.
+// A finished owner therefore leaves the port open and refuses its own sends.
+enum ProcessMidiOutput {
+    // Read and written on the main thread only.
+    nonisolated(unsafe) private static var opened: MIDIPortRef?
+    // The notify block runs on a thread CoreMIDI chooses; the lock guards the
+    // table and each listener moves to its owner's queue itself.
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var listeners: [ObjectIdentifier: () -> Void] = [:]
+    static func port() throws -> MIDIPortRef {
+        guard Thread.isMainThread else { throw MidiFailure("the process MIDI output opens on the main thread") }
+        if let opened { return opened }
+        var client = MIDIClientRef(), port = MIDIPortRef()
+        try checked(MIDIClientCreateWithBlock("MASC MIDI output" as CFString, &client, { _ in ProcessMidiOutput.destinationsChanged() }),
+                    "create MIDI output client")
+        do { try checked(MIDIOutputPortCreate(client, "MASC MIDI output" as CFString, &port), "create MIDI output port") }
+        catch {
+            // A client without a port has sent nothing, so releasing it loses nothing.
+            MIDIClientDispose(client); throw error
+        }
+        opened = port
+        return port
+    }
+    // Owners register while they hold destinations; each closure captures its
+    // owner weakly. A notification already handed to a listener can still run
+    // after `forget`, so each owner checks its own state.
+    static func listen(_ owner: AnyObject, _ changed: @escaping () -> Void) {
+        lock.lock(); listeners[ObjectIdentifier(owner)] = changed; lock.unlock()
+    }
+    static func forget(_ owner: AnyObject) {
+        lock.lock(); listeners.removeValue(forKey: ObjectIdentifier(owner)); lock.unlock()
+    }
+    private static func destinationsChanged() {
+        lock.lock(); let current = Array(listeners.values); lock.unlock()
+        for changed in current { changed() }
+    }
+}
+
 final class MidiTransport {
     enum State { case prepared, playing, paused, stopped }
     let timeline: Timeline
@@ -1038,7 +1081,7 @@ final class MidiTransport {
     var pendingRestore = false
     var destination: Destination?
     var prepared = false // admission and resources belong to queue
-    var client = MIDIClientRef(), port = MIDIPortRef()
+    var port = MIDIPortRef() // the process output while this owner sends; 0 before prepare and after finish
     var state = State.prepared
     var timer: DispatchSourceTimer?
     var signals: [DispatchSourceSignal] = []
@@ -1074,28 +1117,27 @@ final class MidiTransport {
         selectedUID = uid; self.loop = loop
         regionCursors = timeline.regions.map { _ in MidiRegionCursor() }
     }
-    // CoreMIDI's client is created on the main run loop. Transfer its ownership
-    // before admitting notifications; resource selection and mutation use queue.
+    // The process output opens on the main run loop. This owner listens before
+    // admission; destinationChanged ignores notifications until it is prepared.
+    // Resource selection and mutation use queue.
     func prepare() throws {
         guard Thread.isMainThread else { throw MidiFailure("MIDI preparation requires the main run loop") }
-        var createdClient = MIDIClientRef()
-        try checked(MIDIClientCreateWithBlock("MASC phrase output" as CFString, &createdClient, { [weak self] _ in
+        let output = try ProcessMidiOutput.port()
+        ProcessMidiOutput.listen(self) { [weak self] in
             self?.queue.async { [weak self] in self?.destinationChanged() }
-        }), "create MIDI client")
+        }
         func admit() throws {
-            client = createdClient
             do {
                 destination = try selectedDestination(uid: selectedUID)
                 for binding in timeline.bindings {
                     sourceDestinations[binding.port] = try selectedDestination(uid: binding.destination)
                     wireStates[binding.port] = WireState()
                 }
-                try checked(MIDIOutputPortCreate(client, "MASC phrase output" as CFString, &port), "create MIDI output port")
+                port = output
                 try checkDestination()
                 prepared = true
             } catch {
-                if port != 0 { MIDIPortDispose(port); port = 0 }
-                if client != 0 { MIDIClientDispose(client); client = 0 }
+                ProcessMidiOutput.forget(self); port = 0
                 destination = nil
                 throw error
             }
@@ -1124,6 +1166,7 @@ final class MidiTransport {
         try sendWire(bytes, to: destination)
     }
     func sendWire(_ bytes: [UInt8], to destination: Destination) throws {
+        guard port != 0 else { throw MidiFailure("MIDI output is not open for this transport") }
         if groupZeroUMP {
             guard let status = bytes.first, status >= 0x80, status < 0xf0,
                   bytes.count == ([0xc0, 0xd0].contains(status & 0xf0) ? 2 : 3), bytes.dropFirst().allSatisfy({ $0 < 128 }) else {
@@ -1660,8 +1703,8 @@ final class MidiTransport {
         var stopped = snapshot("stopped"), failure = error
         state = .stopped; timer?.cancel(); timer = nil
         do { try silence() } catch { failure = failure ?? error }
-        if port != 0 { MIDIPortDispose(port); port = 0 }
-        if client != 0 { MIDIClientDispose(client); client = 0 }
+        // The process output stays open, so the cleanup just sent still arrives.
+        ProcessMidiOutput.forget(self); port = 0
         signals.forEach { $0.cancel() }; signals.removeAll()
         stopped["reason"] = reason; stopped["success"] = failure == nil
         terminalFailure = failure

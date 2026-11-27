@@ -116,7 +116,7 @@ final class MidiClipTransport {
         output = UmpOutput(bindings: [UmpBinding(source: plan.source.documentSha256, destination: plan.destination)], metadata: .tempoAndMeter)
     }
     func prepare() throws {
-        guard Thread.isMainThread, state == .prepared, output.client == 0, !output.closed else { throw MidiFailure("Clip preparation requires one main owner") }
+        guard Thread.isMainThread, state == .prepared, output.port == 0, !output.closed else { throw MidiFailure("Clip preparation requires one main owner") }
         guard try umpNativeProtocol(plan.destination) == .midi2 else { throw MidiFailure("native MIDI2 Clip audition requires a MIDI 2.0 destination") }
         output.onFailure = { [weak self] error in self?.finish(reason: "destination-unavailable", error: error) }
         try output.prepare()

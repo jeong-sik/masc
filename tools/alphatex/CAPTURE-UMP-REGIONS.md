@@ -70,8 +70,10 @@ for the audio owner's common future epoch. Late callbacks reconcile the current
 phase instead of emitting skipped copies. The owner waits for every audio voice,
 MIDI completion and the arrangement horizon; an empty or silent tail remains live.
 Pause, seek, cancellation, endpoint loss and output errors preserve the same owned
-cleanup and process-drain boundaries. A final helper close disposes the shared
-port; an individual region boundary does not.
+cleanup and process-drain boundaries. A final helper close sends that cleanup and
+then refuses further sends; the process output port stays open until the helper
+exits, so the cleanup still arrives (#45224). An individual region boundary does
+not close the output.
 
 This follows the established distinction between [MIDI state chase at a new
 position](https://www.steinberg.help/r/cubase-elements/15.0/en/cubase_nuendo/topics/playback/playback_chase_c.html)

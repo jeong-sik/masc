@@ -118,10 +118,12 @@ struct UmpChannel: Hashable {
 }
 final class UmpOutput {
     let bindings: [UmpBinding]
+    // Set by close() after its cleanup sends. A closed output refuses every
+    // later send; the process output port stays open (ProcessMidiOutput).
     var closed = false
     var onFailure: ((Error) -> Void)?
     var footprint = UmpFootprint()
-    var client = MIDIClientRef(), port = MIDIPortRef()
+    var port = MIDIPortRef() // the process output once prepared; 0 before prepare and after a failed prepare
     var selected: [String: Destination] = [:]
     var nativeProtocols: [String: UmpNativeProtocol] = [:]
     let compatibleEvents: [UmpEvent]?
@@ -153,12 +155,13 @@ final class UmpOutput {
     func prepare() throws {
         guard Thread.isMainThread else { throw MidiFailure("UMP preparation requires the main lifecycle") }
         do {
-            try checked(MIDIClientCreateWithBlock("MASC captured UMP output" as CFString, &client, { [weak self] _ in
+            let output = try ProcessMidiOutput.port()
+            ProcessMidiOutput.listen(self) { [weak self] in
                 DispatchQueue.main.async { [weak self] in
                     guard let self, !self.closed else { return }
                     do { try self.checkDestinations() } catch { self.onFailure?(error) }
                 }
-            }), "create UMP output client")
+            }
             for binding in bindings { selected[binding.source] = try selectedDestination(uid: binding.destination) }
             var profiles: [String: UmpMidi1Profile] = [:]
             for event in compatibleEvents ?? [] {
@@ -174,10 +177,9 @@ final class UmpOutput {
                 nativeProtocols[binding.destination] = wire
             }
             try checkDestinations()
-            try checked(MIDIOutputPortCreate(client, "MASC captured UMP output" as CFString, &port), "create UMP output port")
+            port = output
         } catch {
-            if port != 0 { MIDIPortDispose(port); port = 0 }
-            if client != 0 { MIDIClientDispose(client); client = 0 }
+            ProcessMidiOutput.forget(self)
             selected.removeAll(); nativeProtocols.removeAll(); throw error
         }
     }
@@ -210,6 +212,7 @@ final class UmpOutput {
     }
     // Every send, including cleanup, records its ownership change here.
     func transmit(_ words: [UInt32], source: String) throws {
+        guard !closed else { throw MidiFailure("a closed UMP output refuses further sends") }
         let word = words[0], type = word >> 28, status = (word >> 20) & 15, number = (word >> 8) & 127
         let key = Key(source: source, prefix: word & 0xff0f0000, number: number)
         let channel = type == 2 || type == 4
@@ -292,13 +295,11 @@ final class UmpOutput {
             return ["port": port, "device": ["kind": "midi", "protocol": 2, "nativeProtocol": nativeProtocols[uid]!.rawValue, "id": uid, "name": destination.name]]
         }
     }
+    // Cleanup goes out while this owner is still open; only then does it stop
+    // sending. The process port stays open, so those releases still arrive.
     func close() throws {
         guard !closed else { return }
-        closed = true
-        defer {
-            if port != 0 { MIDIPortDispose(port); port = 0 }
-            if client != 0 { MIDIClientDispose(client); client = 0 }
-        }
+        defer { closed = true; ProcessMidiOutput.forget(self) }
         try silence()
     }
 }

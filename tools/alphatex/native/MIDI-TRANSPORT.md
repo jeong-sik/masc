@@ -51,8 +51,10 @@ device identity:
 {"kind":"playing","currentTime":0.5,"duration":2,"loop":false,"maximumLateness":0.001,"device":{"kind":"midi","id":"1234","name":"Instrument","protocol":1}}
 ```
 
-Stop, stdin EOF, signals and failures cancel the timer, release owned held keys,
-dispose the output port/client and exit. Unavailable devices or failed sends
+Stop, stdin EOF, signals and failures cancel the timer, release owned held keys
+and exit. The output port and client stay open until the process exits: CoreMIDI
+can drop a message still in flight when its port or client is disposed, and the
+dispose calls still return success (#45224). Unavailable devices or failed sends
 produce an explicit error and nonzero exit; a removed physical device cannot
 receive cleanup note-offs. A stopped acknowledgement is not process closure.
 Phrase, source wire, captured UMP and VST render output keep send ownership in
@@ -72,8 +74,11 @@ CoreMIDI contracts: [MIDISend](https://developer.apple.com/documentation/coremid
 The implementation uses the installed SDK's `CoreMIDI/MIDIServices.h` packet,
 port, notification and unique-ID contracts.
 
-The client is created on the main run loop. Destination selection, port ownership,
-notification admission and playback then belong to the serial transport queue.
+Every output owner in a process sends through one CoreMIDI client and output port
+(`ProcessMidiOutput`), opened on the main run loop at the first preparation and
+never disposed. A finished owner stops listening and refuses its own sends.
+Destination selection, notification admission and playback then belong to the
+serial transport queue.
 Notifications before preparation completes do not inspect partial resources;
 preparation and start each verify the selected endpoint.
 

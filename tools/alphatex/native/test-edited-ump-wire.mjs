@@ -63,6 +63,11 @@ import CoreMIDI
     _ = RunLoop.current.run(mode:.default,before:Date().addingTimeInterval(0.01))
    }
   }
+  // A closed output keeps the process port open (#45224) and refuses its own
+  // later sends. A refused probe never reaches the private destination.
+  func refusesSend(_ output:UmpOutput)->Bool {
+   do {try output.transmit([0x40903c00,0xffff0000],source:output.bindings[0].source);return false} catch {return true}
+  }
   func transport(_ tag:String)throws->UmpTransport {
    var bindings:[UmpBinding]=[]
    for source in original.timeline.bindings.map(\.source) {bindings.append(UmpBinding(source:source,destination:try endpoint(tag+source)))}
@@ -81,7 +86,7 @@ import CoreMIDI
   }
   try require(full.output.held.isEmpty && full.output.pedals.isEmpty,"original release messages did not settle owned state")
   full.finish(reason:"completed",error:nil,publish:false)
-  try require(full.timer == nil && full.output.closed && full.output.port == 0 && full.output.client == 0,"native resources did not retire")
+  try require(full.timer == nil && full.output.closed && full.output.ownership.units.isEmpty && refusesSend(full.output),"closed owner kept a timer or ownership, or accepted a send")
   print("EDITED_UMP_NATIVE_WIRE_PASS: exact Attribute3 pitch, velocity0/full16, edited per-note32 values, Note Index and original releases on two private native2 destinations")
 
   let cancelled=try transport("cancel/")
@@ -124,8 +129,8 @@ import CoreMIDI
    try require(sorted(messages)==sorted(cleanup),"cancel cleanup changed note indices or shared-channel state")
   }
   try require(cancelled.timer == nil && cancelled.output.held.isEmpty && cancelled.output.pedals.isEmpty
-    && cancelled.output.closed && cancelled.output.port == 0 && cancelled.output.client == 0,"cancel left an owned timer/key/port/client")
-  print("EDITED_UMP_NATIVE_CANCEL_PASS: real acquired-note/pedal releases observed; source timer, held state, output port and client retired")
+    && cancelled.output.closed && cancelled.output.ownership.units.isEmpty && refusesSend(cancelled.output),"cancel left an owned timer/key or an output that still sends")
+  print("EDITED_UMP_NATIVE_CANCEL_PASS: real acquired-note/pedal releases observed; source timer and held state retired, closed output refuses sends")
   try emit(["kind":"edited-ump-native-proof","protocol":2,"scope":"private CoreMIDI destinations",
    "clock":["origin":original.timeline.clock.origin,"numer":original.timeline.clock.numer,"denom":original.timeline.clock.denom],
    "receivedFull":Dictionary(uniqueKeysWithValues:original.expected.keys.map {($0,observed("full/"+$0))}),

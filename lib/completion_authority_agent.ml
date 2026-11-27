@@ -1522,18 +1522,32 @@ let process_task (runtime : runtime) (task : Masc_domain.task) ~assignee ~verifi
 (* The retained commits one scope recovers. A scope that names verifications
    reads only theirs, by name. That lookup is the recovery a wake goes on
    without when it cannot read, so it does not verify the whole scope first. A
-   scope that names nothing (boot, a failed backlog read) reads the scope
-   whole. A fresh attempt is allocated on neither: [next_attempt] reads the
-   scope. *)
+   named verification whose record cannot be read is logged here and left to
+   the next whole-scope sweep; the others recover. A scope that names nothing
+   (boot, a failed backlog read) reads the scope whole. A fresh attempt is
+   allocated on neither: [next_attempt] reads the scope. *)
 let pending_of_scope ~terminal_pending ~store ~scope ~installation_id ~package_id =
   match scope with
   | Whole_backlog ->
       Verifier_review_owner.pending_commits ~terminal_pending ~store
         ~selection:Verifier_review_owner.All_verifications ~installation_id ~package_id
   | Targets keys ->
-      Verifier_review_owner.named_commits ~terminal_pending ~store
-        ~verification_ids:(List.map (fun (key : review_key) -> key.verification_id) keys)
-        ~installation_id ~package_id
+      let kept, unreadable =
+        Verifier_review_owner.named_commits ~terminal_pending ~store
+          ~verification_ids:(List.map (fun (key : review_key) -> key.verification_id) keys)
+          ~installation_id ~package_id
+      in
+      let reason = function
+        | Verifier_review_owner.Not_found -> "no retained record"
+        | Verifier_review_owner.Load_store_unavailable detail
+        | Verifier_review_owner.Corrupt_original detail -> detail
+      in
+      List.iter
+        (fun (verification_id, error) ->
+           Log.Misc.error "retained commits of verification %s unavailable: %s"
+             verification_id (reason error))
+        unreadable;
+      Ok kept
 
 let recover_terminal_publications (runtime:runtime) ~registry ~scope =
   let module O=Verifier_review_owner in

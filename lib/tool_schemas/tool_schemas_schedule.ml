@@ -8,6 +8,15 @@ let cancel_tool = Tool_definition_embedded.schema "masc_schedule_cancel"
 let note_add_tool = Tool_definition_embedded.schema "masc_schedule_note_add"
 let notes_list_tool = Tool_definition_embedded.schema "masc_schedule_notes_list"
 
+(* A Lane action has its own pair of tools. One tool that took either a
+   Keeper wake or a Lane action offered every caller the fields of both, and
+   callers filled the ones they did not need with placeholders: over
+   2026-11-21..27, 408 of 2,079 create and update calls were refused on the
+   shape, and the Lane action schedules Keepers did get stored named
+   installations such as "tmp" and "x". *)
+let create_lane_act_tool = Tool_definition_embedded.schema "masc_schedule_lane_act_create"
+let update_lane_act_tool = Tool_definition_embedded.schema "masc_schedule_lane_act_update"
+
 type action =
   | Create_request
   | Update_request
@@ -16,6 +25,8 @@ type action =
   | Cancel_request
   | Add_note
   | List_notes
+  | Create_lane_act_request
+  | Update_lane_act_request
 [@@deriving enumerate]
 
 type definition =
@@ -42,6 +53,18 @@ let definition_for = function
     definition ~action:Add_note ~id:"note_add" ~schema:note_add_tool ~read_only:false
   | List_notes ->
     definition ~action:List_notes ~id:"notes_list" ~schema:notes_list_tool ~read_only:true
+  | Create_lane_act_request ->
+    definition
+      ~action:Create_lane_act_request
+      ~id:"lane_act_create"
+      ~schema:create_lane_act_tool
+      ~read_only:false
+  | Update_lane_act_request ->
+    definition
+      ~action:Update_lane_act_request
+      ~id:"lane_act_update"
+      ~schema:update_lane_act_tool
+      ~read_only:false
 ;;
 
 let definitions : definition list = List.map definition_for all_of_action

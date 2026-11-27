@@ -2274,6 +2274,8 @@ let masc_schedule_descriptor (definition : Tool_schemas_schedule.definition) =
     | Tool_schemas_schedule.List_notes -> Concurrent
     | Tool_schemas_schedule.Create_request
     | Tool_schemas_schedule.Update_request
+    | Tool_schemas_schedule.Create_lane_act_request
+    | Tool_schemas_schedule.Update_lane_act_request
     | Tool_schemas_schedule.Cancel_request
     | Tool_schemas_schedule.Add_note -> Serial
   in

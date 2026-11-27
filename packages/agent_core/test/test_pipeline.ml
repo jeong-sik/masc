@@ -800,6 +800,7 @@ let test_provider_turn_identity_is_shared_across_multiturn_tool_loop () =
             | AgentYielded _
             | AgentInputRequired _
             | AgentFailed _
+            | AgentCancelled _
             | HandoffRequested _
             | HandoffCompleted _
             | ElicitationCompleted _
@@ -2486,7 +2487,7 @@ let test_durable_turn_bus_uses_canonical_facts
             match event.Event_bus.payload with
             | TurnReady _ when !first -> first := false; failwith "accepted ready without acknowledgement"
             | TurnStarted _ | TurnReady _ | TurnCompleted _ | InferenceTelemetry _
-            | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+            | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _ | AgentCancelled _
             | ToolCalled _ | ToolCompleted _ | HandoffRequested _ | HandoffCompleted _
             | ElicitationCompleted _ | ToolApprovalCompleted _ | Custom _ -> ()) scope in
           observer.register ~run_id:(Internal_scope.scope_locator_run_id
@@ -2508,7 +2509,7 @@ let test_durable_turn_bus_uses_canonical_facts
   let deliveries = (!during_dispatch @ Event_bus.drain subscription) |> List.filter (fun (event:Event_bus.event) ->
     match event.payload with
     | TurnStarted _ | TurnReady _ | TurnCompleted _ | InferenceTelemetry _ -> true
-    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _ | AgentCancelled _
     | ToolCalled _ | ToolCompleted _ | HandoffRequested _ | HandoffCompleted _
     | ElicitationCompleted _ | ToolApprovalCompleted _ | Custom _ -> false) in
   Alcotest.(check int) "only unacknowledged source delivery repeats"
@@ -2616,7 +2617,7 @@ let test_nested_execution_stores_use_their_own_bus_observers () =
   Alcotest.(check int) "separate child provider once" 1 !child_calls;
   let turn_observations events = List.filter (fun event -> match event.Event_bus.payload with
     | TurnStarted _ | TurnReady _ | TurnCompleted _ | InferenceTelemetry _ -> true
-    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _ | AgentCancelled _
     | ToolCalled _ | ToolCompleted _ | HandoffRequested _ | HandoffCompleted _
     | ElicitationCompleted _ | ToolApprovalCompleted _ | Custom _ -> false) events in
   List.iter (fun (dir, locator, subscription) ->
@@ -2703,7 +2704,7 @@ let test_durable_tool_bus_uses_canonical_facts
             | ToolCalled _ when !first ->
               first:=false;raise (Failure "accepted delivery without acknowledgement")
             | ToolCalled _ | ToolCompleted _
-            | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+            | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _ | AgentCancelled _
             | TurnStarted _ | TurnReady _ | TurnCompleted _ | InferenceTelemetry _
             | HandoffRequested _ | HandoffCompleted _ | ElicitationCompleted _
             | ToolApprovalCompleted _ | Custom _ -> ()) scope in
@@ -2764,7 +2765,7 @@ let test_durable_tool_bus_uses_canonical_facts
   List.iter (fun (observation:Event_bus.event)->
     let is_called=match observation.payload with
       | ToolCalled _->true |ToolCompleted _->false
-      | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+      | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _ | AgentCancelled _
       | TurnStarted _ | TurnReady _ | TurnCompleted _ | HandoffRequested _ | HandoffCompleted _
       | ElicitationCompleted _ | ToolApprovalCompleted _ | InferenceTelemetry _ | Custom _ ->
         Alcotest.fail "non-tool observation escaped filter" in
@@ -3222,6 +3223,7 @@ let test_agent_run_uses_durable_tool_authority () =
            | AgentYielded _
            | AgentInputRequired _
            | AgentFailed _
+           | AgentCancelled _
            | TurnStarted _
            | TurnReady _
            | TurnCompleted _
@@ -6147,7 +6149,7 @@ let test_nested_tool_observation_audiences audience ~concurrent () =
   let root_events=Event_bus.drain root_sub and child_events=Event_bus.drain child_sub in
   let agent_name (event:Event_bus.event)=match event.payload with
     | ToolCalled {agent_name;_} | ToolCompleted {agent_name;_}->agent_name
-    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _ | AgentCancelled _
     | TurnStarted _ | TurnReady _ | TurnCompleted _ | HandoffRequested _ | HandoffCompleted _
     | ElicitationCompleted _ | ToolApprovalCompleted _ | InferenceTelemetry _ | Custom _ ->
       Alcotest.fail "non-tool event escaped audience filter" in
@@ -6184,7 +6186,7 @@ let test_nested_tool_observation_audiences audience ~concurrent () =
       (List.exists (fun (source:Agent.Execution_projection.tool_observation)->source.event=event) page.observations)) delivered;
   let canonical event = match event.Event_bus.payload with
     | TurnStarted _ | TurnReady _ | TurnCompleted _ | InferenceTelemetry _ | ToolCalled _ | ToolCompleted _ -> true
-    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _ | AgentCancelled _
     | HandoffRequested _ | HandoffCompleted _ | ElicitationCompleted _ | ToolApprovalCompleted _ | Custom _ -> false in
   let name event = match event.Event_bus.payload with
     | TurnStarted {agent_name;_} | TurnReady {agent_name;_} | TurnCompleted {agent_name;_}
@@ -6332,7 +6334,7 @@ let test_durable_cancelled_tool_emits_paired_bus_and_finished_observer () =
          | ToolCompleted { output = Error _; _ } -> called, completed_err + 1
          | ToolCompleted { output = Ok _; _ }
          | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _
-         | AgentFailed _ | TurnStarted _ | TurnReady _ | TurnCompleted _
+         | AgentFailed _ | AgentCancelled _ | TurnStarted _ | TurnReady _ | TurnCompleted _
          | HandoffRequested _ | HandoffCompleted _ | ElicitationCompleted _
          | ToolApprovalCompleted _ | InferenceTelemetry _ | Custom _ ->
            called, completed_err)

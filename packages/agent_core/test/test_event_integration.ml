@@ -1,6 +1,6 @@
 (** Integration tests for Event_bus run/handoff lifecycle variants:
-    AgentStarted, AgentCompleted, AgentFailed, HandoffRequested, and
-    HandoffCompleted.
+    AgentStarted, AgentCompleted, AgentFailed, AgentCancelled,
+    HandoffRequested, and HandoffCompleted.
 
     These verify that [lib/agent/agent.ml] ([run], [run_with_handoffs])
     publishes the surface end-to-end — not just that the variants
@@ -224,7 +224,9 @@ let count_name kind names =
 ;;
 
 let terminal_count names =
-  count_name "agent_completed" names + count_name "agent_failed" names
+  count_name "agent_completed" names
+  + count_name "agent_failed" names
+  + count_name "agent_cancelled" names
 ;;
 
 let run_agent_once ~sw env ~base_url bus =
@@ -360,9 +362,10 @@ let test_run_emits_only_failed_on_error () =
    observes [Eio.Cancel.Cancelled] from the inner pipeline.  Before the
    exception-arm fix in [lib/agent/agent_lifecycle_events.ml], that path
    skipped [publish_finished], leaving a dangling [AgentStarted] with no
-   [AgentFailed].  The wrapper now mirrors the
+   terminal event.  The wrapper now mirrors the
    [Agent_trace] exception-arm contract: publish a terminal event, then
-   re-raise. *)
+   re-raise.  The terminal event is [AgentCancelled] carrying the exception
+   the switch was failed with, not an [AgentFailed] internal error (#38608). *)
 
 let slow_handler _conn _req _body =
   (* Hold the connection so the agent is mid HTTP read when the sub-switch
@@ -420,9 +423,118 @@ let test_run_emits_terminal_on_switch_cancel () =
     let names = List.map event_kind events in
     check bool "agent_started emitted" true (List.mem "agent_started" names);
     check bool "agent_completed not emitted" false (List.mem "agent_completed" names);
-    check int "one agent_failed emitted" 1 (count_name "agent_failed" names);
+    check int "no agent_failed emitted" 0 (count_name "agent_failed" names);
+    check int "one agent_cancelled emitted" 1 (count_name "agent_cancelled" names);
     check int "one terminal outcome emitted" 1 (terminal_count names);
+    (match (find_kind "agent_cancelled" events).payload with
+     | Event_bus.AgentCancelled { reason = Exit; _ } -> ()
+     | Event_bus.AgentCancelled { reason; _ } ->
+       fail ("cancelled with an unexpected reason: " ^ Printexc.to_string reason)
+     | _ -> fail "expected AgentCancelled payload");
     Eio.Switch.fail sw Exit)
+;;
+
+(* ── D. with_run_lifecycle_events names a raised run's outcome ───── *)
+
+(* #38608: every cancellation reached [AgentFailed] as
+   [Internal "Unhandled exception: Cancelled: ..."], so an operator stop or a
+   lost race read as a broken agent-core invariant (1,597 of 1,974 live
+   [internal_error] rows, 11-06..11-27). These run the wrapper directly under
+   a real Eio cancellation, a real Eio timeout, and an ordinary exception. *)
+
+let lifecycle_bus () =
+  let bus = Event_bus.create () in
+  let config =
+    Event_bus.subscription_config ~capacity:16 ~overflow:Event_bus.Drop_newest
+    |> Result.get_ok
+  in
+  bus, Event_bus.subscribe ~config bus
+;;
+
+let run_lifecycle ~bus f =
+  Agent_lifecycle_events.with_run_lifecycle_events
+    ~event_bus:(Some bus)
+    ~agent_name:"lifecycle-agent"
+    ~raw_trace:None
+    ~current_run_id:(fun () -> None)
+    ~classify:(fun (_ : (unit, unit) result) ->
+      fail "a raised run has no result to classify")
+    f
+;;
+
+let test_cancellation_publishes_cancelled () =
+  Eio_main.run
+  @@ fun _env ->
+  let bus, sub = lifecycle_bus () in
+  let raised = ref None in
+  (try
+     Eio.Switch.run
+     @@ fun run_sw ->
+     Eio.Fiber.fork ~sw:run_sw (fun () ->
+       match run_lifecycle ~bus (fun () -> Eio.Fiber.await_cancel ()) with
+       | Ok () | Error () -> ()
+       | exception exn ->
+         raised := Some exn;
+         raise exn);
+     Eio.Fiber.yield ();
+     Eio.Switch.fail run_sw Exit
+   with
+   | Exit -> ());
+  (match !raised with
+   | Some (Eio.Cancel.Cancelled Exit) -> ()
+   | Some exn -> fail ("re-raised a different exception: " ^ Printexc.to_string exn)
+   | None -> fail "the cancellation was not re-raised");
+  let events = Event_bus.drain sub in
+  let names = List.map event_kind events in
+  check (list string) "started, then cancelled" [ "agent_started"; "agent_cancelled" ] names;
+  let started = find_kind "agent_started" events in
+  match find_kind "agent_cancelled" events with
+  | { Event_bus.payload = Event_bus.AgentCancelled { reason = Exit; agent_name; task_id; elapsed }; meta } ->
+    check string "agent_name" "lifecycle-agent" agent_name;
+    check string "task_id groups the run" started.meta.run_id task_id;
+    check bool "elapsed non-negative" true (elapsed >= 0.);
+    check (option string) "caused_by points at started" (Some started.meta.run_id) meta.caused_by
+  | { Event_bus.payload = Event_bus.AgentCancelled { reason; _ }; _ } ->
+    fail ("cancelled with an unexpected reason: " ^ Printexc.to_string reason)
+  | _ -> fail "expected AgentCancelled payload"
+;;
+
+let test_timeout_stays_failed () =
+  Eio_main.run
+  @@ fun env ->
+  let bus, sub = lifecycle_bus () in
+  (match
+     Eio.Time.with_timeout_exn env#clock 0.01 (fun () ->
+       run_lifecycle ~bus (fun () -> Eio.Fiber.await_cancel ()))
+   with
+   | Ok () | Error () -> fail "the timed-out run returned"
+   | exception Eio.Time.Timeout -> ());
+  let events = Event_bus.drain sub in
+  let names = List.map event_kind events in
+  check (list string) "started, then failed" [ "agent_started"; "agent_failed" ] names;
+  match (find_kind "agent_failed" events).payload with
+  | Event_bus.AgentFailed { error = Error.Api (Retry.Timeout _); _ } -> ()
+  | Event_bus.AgentFailed { error; _ } ->
+    fail ("expected Api Timeout, got " ^ Error.to_string error)
+  | _ -> fail "expected AgentFailed payload"
+;;
+
+let test_unhandled_exception_stays_internal () =
+  Eio_main.run
+  @@ fun _env ->
+  let bus, sub = lifecycle_bus () in
+  (match run_lifecycle ~bus (fun () -> failwith "boom") with
+   | Ok () | Error () -> fail "the raising run returned"
+   | exception Failure message -> check string "re-raised unchanged" "boom" message);
+  let events = Event_bus.drain sub in
+  let names = List.map event_kind events in
+  check (list string) "started, then failed" [ "agent_started"; "agent_failed" ] names;
+  match (find_kind "agent_failed" events).payload with
+  | Event_bus.AgentFailed { error = Error.Internal message; _ } ->
+    check string "internal wording" "Unhandled exception: Failure(\"boom\")" message
+  | Event_bus.AgentFailed { error; _ } ->
+    fail ("expected Internal, got " ^ Error.to_string error)
+  | _ -> fail "expected AgentFailed payload"
 ;;
 
 (* ── Entry point ─────────────────────────────────────────────────── *)
@@ -451,6 +563,17 @@ let () =
             "Agent.run emits terminal on switch cancel"
             `Quick
             test_run_emits_terminal_on_switch_cancel
+        ] )
+    ; ( "raised_run_outcome"
+      , [ test_case
+            "an Eio cancellation publishes AgentCancelled"
+            `Quick
+            test_cancellation_publishes_cancelled
+        ; test_case "a timeout stays AgentFailed Api Timeout" `Quick test_timeout_stays_failed
+        ; test_case
+            "an unhandled exception stays AgentFailed Internal"
+            `Quick
+            test_unhandled_exception_stays_internal
         ] )
     ]
 ;;

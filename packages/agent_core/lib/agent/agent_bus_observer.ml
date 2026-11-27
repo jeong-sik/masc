@@ -20,7 +20,7 @@ let create ~publish scope =
       Option.fold ~none:false ~some:(fun occurrence->Occurrence_set.mem occurrence !settled)
         (Tool_contract.Invocation.occurrence invocation)
     | ToolCalled _ | TurnStarted _ | TurnReady _ | TurnCompleted _ | InferenceTelemetry _ -> true
-    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _ | AgentCancelled _
     | HandoffRequested _ | HandoffCompleted _
     | ElicitationCompleted _ | ToolApprovalCompleted _ | Custom _ -> false in
   (* One start cursor for this live subscription, never reset by child entry.

@@ -1031,7 +1031,7 @@ let read_tool_observations t ?run ~after ?through ~limit () =
   let observations = List.filter (fun (observation:bus_observation) ->
     match observation.event.payload with
     | ToolCalled _ | ToolCompleted _ -> true
-    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _ | AgentCancelled _
     | TurnStarted _ | TurnReady _ | TurnCompleted _ | HandoffRequested _ | HandoffCompleted _
     | ElicitationCompleted _ | ToolApprovalCompleted _ | InferenceTelemetry _ | Custom _ -> false)
     page.observations in

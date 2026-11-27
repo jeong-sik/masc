@@ -453,6 +453,34 @@ let test_terminal_agent_failure_projection_redacts_detail () =
           }))
 ;;
 
+(* #38608: a cancelled run is written as its own row. Before, the bridge
+   only ever saw [AgentFailed (Internal "Unhandled exception: Cancelled: ...")]
+   for it, and the row read as an agent-core internal error. *)
+let test_cancelled_run_keeps_its_own_wire_type () =
+  let cancelled =
+    Bridge.native_event_to_json
+      (mk_event
+         ~event_id:"event-agent-cancelled-1"
+         (Agent_core.Event_bus.AgentCancelled
+            { agent_name = "keeper-cancel"
+            ; task_id = "run-cancel"
+            ; reason = Exit
+            ; elapsed = 1.5
+            }))
+    |> Option.get
+  in
+  check (option string) "cancel wire kind" (Some "agent_cancelled")
+    (string_of_field (member "event_type" cancelled));
+  check (option string) "producer event identity" (Some "event-agent-cancelled-1")
+    (string_of_field (member "event_id" cancelled));
+  check (option string) "agent attribution" (Some "keeper-cancel")
+    (string_of_field (member "agent_name" cancelled));
+  check (option string) "reason is the rendered cancelling exception"
+    (Some (Printexc.to_string Exit))
+    (string_of_field (payload_member "reason" cancelled));
+  check bool "no failure classification on the row" true
+    (payload_member "error_code" cancelled = None)
+
 let test_agent_failed_keeps_canonical_envelope_and_typed_error () =
   let agent_name = "agent_core-r1" in
   let task_id = "task-failed-1" in
@@ -876,7 +904,7 @@ let run_real_tool_bridge ~durable inspect =
     (Join.peek ~invocation:source);
   let completed (event:Core.Event_bus.event)=match event.payload with
     | ToolCompleted _->true |ToolCalled _->false
-    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+    | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _ | AgentCancelled _
     | TurnStarted _ | TurnReady _ | TurnCompleted _ | HandoffRequested _ | HandoffCompleted _
     | ElicitationCompleted _ | ToolApprovalCompleted _ | InferenceTelemetry _ | Custom _->false in
   let early=List.exists completed !during_hook in
@@ -935,6 +963,8 @@ let () =
             test_empty_tool_use_id_omitted_from_payload
         ; test_case "non-terminal outcomes keep distinct wire types" `Quick
             test_non_terminal_agent_outcomes_keep_distinct_wire_types
+        ; test_case "a cancelled run keeps its own wire type" `Quick
+            test_cancelled_run_keeps_its_own_wire_type
         ; test_case "agent_failed keeps canonical envelope" `Quick
             test_agent_failed_keeps_canonical_envelope_and_typed_error
         ; test_case "publish to bridge preserves producer identity" `Quick

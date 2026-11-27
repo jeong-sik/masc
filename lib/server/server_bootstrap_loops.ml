@@ -1401,6 +1401,7 @@ let handle_keeper_lifecycle_event ~refresh (evt : Agent_core.Event_bus.event) =
   | Agent_core.Event_bus.AgentYielded _
   | Agent_core.Event_bus.AgentInputRequired _
   | Agent_core.Event_bus.AgentFailed _
+  | Agent_core.Event_bus.AgentCancelled _
   | Agent_core.Event_bus.ToolCalled _
   | Agent_core.Event_bus.ToolCompleted _
   | Agent_core.Event_bus.TurnStarted _

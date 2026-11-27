@@ -164,6 +164,7 @@ let trace_event actor (event : Agent_core.Event_bus.event) =
   | Agent_core.Event_bus.AgentYielded _
   | Agent_core.Event_bus.AgentInputRequired _
   | Agent_core.Event_bus.AgentFailed _
+  | Agent_core.Event_bus.AgentCancelled _
   | Agent_core.Event_bus.TurnStarted _
   | Agent_core.Event_bus.TurnReady _
   | Agent_core.Event_bus.TurnCompleted _

@@ -89,6 +89,14 @@ let emit_native_event_log (evt : Agent_core.Event_bus.event) (json : Yojson.Safe
          task_id
          turn
          elapsed)
+  | Agent_core.Event_bus.AgentCancelled { agent_name; task_id; reason; elapsed } ->
+    log ~keeper_name:agent_name
+      (Printf.sprintf
+         "agent cancelled agent=%s task_id=%s elapsed_s=%.3f reason=%s"
+         agent_name
+         task_id
+         elapsed
+         (Printexc.to_string reason))
   | Agent_core.Event_bus.AgentInputRequired { agent_name; task_id; request; _ } ->
     log ~keeper_name:agent_name
       (Printf.sprintf
@@ -338,6 +346,19 @@ let native_event_to_json (evt : Agent_core.Event_bus.event) : Yojson.Safe.t opti
     in
     Some
       (wrap ~event_type:"agent_failed" ~payload ~agent_name ~task_id ())
+  | Agent_core.Event_bus.AgentCancelled { agent_name; task_id; reason; elapsed } ->
+    (* [reason] is the rendered cancelling exception, for a person reading the
+       row. No reader branches on it. *)
+    let payload =
+      `Assoc
+        [ "agent_name", `String agent_name
+        ; "task_id", `String task_id
+        ; "reason", `String (Printexc.to_string reason)
+        ; "elapsed_s", `Float elapsed
+        ]
+    in
+    Some
+      (wrap ~event_type:"agent_cancelled" ~payload ~agent_name ~task_id ())
   | Agent_core.Event_bus.ToolCalled { invocation; agent_name; tool_name; _ } ->
     (* Admission precedes the keeper result row. The completion payload adds
        the product execution association after post-effect observers finish. *)
@@ -852,7 +873,8 @@ let start_impl ~before_prepare ~interval_s ~sw ~clock ~(config : Workspace.confi
                    | None -> Lane_addon_sources.Tool_completed)
              | Agent_core.Event_bus.AgentStarted _ | Agent_core.Event_bus.AgentCompleted _
              | Agent_core.Event_bus.AgentYielded _ | Agent_core.Event_bus.AgentInputRequired _
-             | Agent_core.Event_bus.AgentFailed _ | Agent_core.Event_bus.ToolCalled _
+             | Agent_core.Event_bus.AgentFailed _ | Agent_core.Event_bus.AgentCancelled _
+             | Agent_core.Event_bus.ToolCalled _
              | Agent_core.Event_bus.TurnStarted _ | Agent_core.Event_bus.TurnReady _
              | Agent_core.Event_bus.TurnCompleted _ | Agent_core.Event_bus.HandoffRequested _
              | Agent_core.Event_bus.HandoffCompleted _ | Agent_core.Event_bus.ElicitationCompleted _

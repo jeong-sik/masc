@@ -885,7 +885,7 @@ let test_reserved_publication_replays_after_unlock interrupt =
       match event.Event_bus.payload with
       | ToolCalled _ when !first -> first := false; !interrupt_publication ()
       | ToolCalled _ | ToolCompleted _
-      | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _
+      | AgentStarted _ | AgentCompleted _ | AgentYielded _ | AgentInputRequired _ | AgentFailed _ | AgentCancelled _
       | TurnStarted _ | TurnReady _ | TurnCompleted _ | InferenceTelemetry _
       | HandoffRequested _ | HandoffCompleted _ | ElicitationCompleted _
       | ToolApprovalCompleted _ | Custom _ -> ()) scope in

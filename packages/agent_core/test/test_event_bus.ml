@@ -385,6 +385,9 @@ let test_payload_kind_label_set_is_stable () =
           ; elapsed = 0.0
           }
       , "agent_failed" )
+    ; ( Event_bus.AgentCancelled
+          { agent_name = ""; task_id = ""; reason = Exit; elapsed = 0.0 }
+      , "agent_cancelled" )
     ; ( Event_bus.InferenceTelemetry
           { agent_name = ""
           ; turn = 0

@@ -197,8 +197,8 @@ let run ~operation ~base_path ~keeper_name ~keeper_names ~args =
        there is no clawback, so a mistyped or hallucinated target would strand
        the gift forever. The roster is the same source the invite flow checks
        against (Play_invite over Play_seat.keeper_names); the transfer keys
-       the wallet by the roster's own spelling, so a keeper gifting "minsu"
-       to the roster keeper "Minsu" lands in Minsu's wallet. *)
+       the wallet by the roster's name, so a keeper gifting "Minsu" to the
+       roster keeper "minsu" lands in minsu's wallet. *)
     let* keepers =
       match keeper_names with
       | Ok keepers -> Ok keepers

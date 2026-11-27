@@ -209,18 +209,13 @@ let is_keeper_name ~keepers (name : Name.t) = is_keeper_name_string ~keepers nam
 (* A gift target is a wallet key, not a credential file name, so it must
    match a roster name exactly apart from case: the balance fold opens a
    wallet for a spelling no keeper holds, and the gift would sit in it
-   forever. Returns the roster's own spelling, which is the wallet key the
-   fold reads, or [None] when no name matches or the case-fold is
-   ambiguous. *)
+   forever. A Keeper name is lowercase ([Keeper_id.Keeper_name]), so the
+   target is lowered and compared with the roster as it is. Returns the
+   roster's name, which is the wallet key the fold reads, or [None] when no
+   name matches. *)
 let resolve_keeper_name ~keepers name =
   let folded = String.lowercase_ascii name in
-  match
-    List.filter
-      (fun keeper -> String.equal (String.lowercase_ascii keeper) folded)
-      keepers
-  with
-  | [ keeper ] -> Some keeper
-  | _ -> None
+  List.find_opt (String.equal folded) keepers
 
 let issue ~base_path ~public_base_url ~keeper_names ~name ~hours =
   let open Result.Syntax in

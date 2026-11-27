@@ -89,10 +89,10 @@ val is_keeper_name_string : keepers:string list -> string -> bool
     are not invite names. *)
 
 val resolve_keeper_name : keepers:string list -> string -> string option
-(** The roster spelling for a gift target: the single roster name equal to
-    the input up to case, which is the wallet key the Candle balance fold
-    reads. [None] when no roster name matches (an unknown target) or when
-    several do (the case-fold is ambiguous, so refuse rather than pick one).
+(** The roster name for a gift target: the roster name equal to the input
+    in lower case, which is the wallet key the Candle balance fold reads. A
+    Keeper name holds no capital letter, so at most one roster name matches.
+    [None] when no roster name matches (an unknown target).
     Unlike {!is_keeper_name_string}, which compares credential file names,
     this compares wallet names: exact apart from case. *)
 

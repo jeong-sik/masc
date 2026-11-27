@@ -406,6 +406,42 @@ let test_lane_addon_records_keep_embedded_tool_blobs_live () =
       Alcotest.(check int) "new owners remove every previous candidate" 0 second.candidates;
       Alcotest.(check int) "no retained blob is deletable" 0 second.deletable)
 
+(* A verification request record names the text bodies it stored whole by the
+   blob store's own normalized reference, and the record directory is in the
+   sweep's scope. A body a record still names is live; a body no record names
+   is a candidate. The item is written by the store's serializer, so the pin
+   holds for the shape requests really carry. *)
+let test_request_records_keep_stored_text_bodies_live () =
+  with_temp_dir (fun base_path ->
+      let store = B.create ~base_path in
+      let records =
+        Filename.concat
+          (Common.masc_dir_from_base_path ~base_path)
+          Workspace_verification_store.verifications_dirname in
+      let kept = put store "a long report kept by its request record" in
+      let orphan = put store "a long report whose request record is gone" in
+      List.iter (fun reference -> set_mtime store reference (long_ago ())) [ kept; orphan ];
+      forget_marks ();
+      let first = observe_ok ~base_path in
+      Alcotest.(check (list string)) "the record directory is classified" []
+        first.unclassified;
+      Alcotest.(check int) "no record names a body yet" 0 first.live_digests;
+      Alcotest.(check int) "both bodies are candidates" 2 first.candidates;
+      let item =
+        Workspace_verification_store.submitted_evidence_item_to_yojson
+          (Workspace_verification_store.Evidence_artifact_body
+             { reference = "artifact:report.txt"; blob = kept }) in
+      Fs_compat.mkdir_p records;
+      Fs_compat.save_file (Filename.concat records "vrf-1.json")
+        (Yojson.Safe.to_string
+           (`Assoc
+             [ "output", `Assoc [ "submitted_evidence", `List [ item ] ] ]));
+      let second = observe_ok ~base_path in
+      Alcotest.(check (list string)) "still fully classified" [] second.unclassified;
+      Alcotest.(check int) "the record's body is live" 1 second.live_digests;
+      Alcotest.(check int) "only the orphan stays a candidate" 1 second.candidates;
+      Alcotest.(check int) "no retained blob is deletable" 0 second.deletable)
+
 let test_lane_addon_raw_evidence_keeps_tool_blobs_live () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -1122,6 +1158,8 @@ let () =
             test_official_clients_leaves_sweep_classified
         ; Alcotest.test_case "lane-addon records keep embedded tool blobs live" `Quick
             test_lane_addon_records_keep_embedded_tool_blobs_live
+        ; Alcotest.test_case "request records keep stored text bodies live" `Quick
+            test_request_records_keep_stored_text_bodies_live
         ; Alcotest.test_case "lane-addon raw evidence keeps tool blobs live" `Quick
             test_lane_addon_raw_evidence_keeps_tool_blobs_live
         ] )

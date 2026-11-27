@@ -2002,6 +2002,27 @@ let facet_synthesis_fact_id ~scope ~facet =
   "wf_syn_" ^ String.sub hash 0 16
 ;;
 
+(* A ledger written by v0.78.0 or earlier keeps its rows under
+   [legacy_newline_fact_id_of_claim]. When the current ID has no row, the
+   promotion continues that legacy row instead of inserting the same fact a
+   second time under a new ID. The legacy key is ambiguous across the newline
+   delimiter, so a legacy row counts only when its stored (scope, claim) is
+   exactly the incoming pair; any other legacy row is a different fact and
+   the promotion writes under the current ID. *)
+let resolve_promotion_fact_on_db db ~scope ~claim =
+  let fact_id = fact_id_of_claim ~scope ~claim in
+  let* current = get_fact_on_db db ~fact_id in
+  match current with
+  | Some _ -> Ok (fact_id, current)
+  | None ->
+    let legacy_fact_id = legacy_newline_fact_id_of_claim ~scope ~claim in
+    let* legacy = get_fact_on_db db ~fact_id:legacy_fact_id in
+    (match legacy with
+     | Some prev when String.equal prev.scope scope && String.equal prev.claim claim ->
+       Ok (legacy_fact_id, legacy)
+     | Some _ | None -> Ok (fact_id, None))
+;;
+
 let apply_promotion_batch ~base_path ~now ~keeper_id (promotions : Librarian_lifecycle.world_promotion list) =
   if List.length promotions > max_promotion_batch_size
   then
@@ -2038,8 +2059,7 @@ let apply_promotion_batch ~base_path ~now ~keeper_id (promotions : Librarian_lif
                 let* claim =
                   validate_claim redacted_claim |> Result.map_error (fun e -> Invalid_state e)
                 in
-                let fact_id = fact_id_of_claim ~scope ~claim in
-                let* existing_opt = get_fact_on_db db ~fact_id in
+                let* fact_id, existing_opt = resolve_promotion_fact_on_db db ~scope ~claim in
                 (match existing_opt with
                  | Some prev when not (is_active_lifecycle prev.lifecycle) ->
                    (* Terminal facts (Superseded | Molted) are immutable and never

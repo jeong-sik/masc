@@ -1222,6 +1222,108 @@ let test_world_memory_red_team_security_hardening () =
     seq_after_sync_1 seq_after_sync_2
 ;;
 
+(* task-3978: a ledger written by v0.78.0 or earlier keeps rows under the
+   newline-delimited fact ID. Promoting the same (scope, claim) on the current
+   build continues that row instead of inserting a duplicate under the JSON ID. *)
+let test_world_memory_legacy_fact_id_continuation () =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  let pool = Domain_pool.create ~sw ~domain_count:2 (Eio.Stdenv.domain_mgr env) in
+  Domain_pool_ref.set pool;
+  Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
+  with_temp_dir @@ fun root ->
+  let seed_legacy_row ~now ~fact_id ~scope ~claim ~keeper_id =
+    match
+      WM_store.upsert_fact ~base_path:root ~now ~actor:keeper_id ~fact_id ~claim
+        ~category:Types.Fact ~facets:[ "legacy_id" ] ~scope
+        ~provenance:(Proposed_by { keeper_id; source_fact_ids = [] })
+        ~lifecycle:Working
+    with
+    | Ok _ -> ()
+    | Error err -> fail (WM_store.error_to_string err)
+  in
+  let promo ~scope ~claim : Masc.Librarian_lifecycle.world_promotion =
+    { source_fact_ids = []; scope; claim; category = Types.Fact; facets = [ "legacy_id" ] }
+  in
+  let get fact_id =
+    match WM_store.get_fact ~base_path:root ~fact_id with
+    | Ok v -> v
+    | Error err -> fail (WM_store.error_to_string err)
+  in
+  let rows_with_claim claim =
+    match WM_store.list_facts ~include_inactive:true ~base_path:root () with
+    | Ok fs -> List.filter (fun (f : WM_types.world_fact) -> String.equal f.claim claim) fs
+    | Error err -> fail (WM_store.error_to_string err)
+  in
+  (* 1. A legacy row is continued, not duplicated. *)
+  let scope = "workspace" in
+  let claim = "Legacy ledger rows keep their v0.78.0 fact id" in
+  let legacy_id = WM_types.legacy_newline_fact_id_of_claim ~scope ~claim in
+  let current_id = WM_types.fact_id_of_claim ~scope ~claim in
+  check bool "legacy and current IDs differ for the same pair" false
+    (String.equal legacy_id current_id);
+  seed_legacy_row ~now:300.0 ~fact_id:legacy_id ~scope ~claim ~keeper_id:"keeper-alpha";
+  (match
+     WM_curator.process_promotions_sync ~base_path:root ~now:301.0 ~keeper_id:"keeper-beta"
+       [ promo ~scope ~claim ]
+   with
+   | Ok _ -> ()
+   | Error err -> fail (WM_store.error_to_string err));
+  (match rows_with_claim claim with
+   | [ only ] ->
+     check string "promotion continues the legacy row" legacy_id only.fact_id;
+     check bool "second Keeper's promotion reaches Canonical on the legacy row" true
+       (only.lifecycle = WM_types.Canonical)
+   | rows -> failf "expected exactly one row for the claim, got %d" (List.length rows));
+  check bool "nothing is written under the current ID" true (Option.is_none (get current_id));
+  (* 2. A legacy-keyed row holding a different (scope, claim) is another fact. *)
+  let other_claim = "A different fact stored under the probed legacy key" in
+  let probe_claim = "Promotion whose legacy key holds a foreign row" in
+  let probe_legacy_id = WM_types.legacy_newline_fact_id_of_claim ~scope ~claim:probe_claim in
+  seed_legacy_row ~now:302.0 ~fact_id:probe_legacy_id ~scope ~claim:other_claim
+    ~keeper_id:"keeper-alpha";
+  (match
+     WM_curator.process_promotions_sync ~base_path:root ~now:303.0 ~keeper_id:"keeper-beta"
+       [ promo ~scope ~claim:probe_claim ]
+   with
+   | Ok _ -> ()
+   | Error err -> fail (WM_store.error_to_string err));
+  (match rows_with_claim probe_claim with
+   | [ only ] ->
+     check string "foreign legacy row is ignored; the fact uses the current ID"
+       (WM_types.fact_id_of_claim ~scope ~claim:probe_claim) only.fact_id
+   | rows -> failf "expected exactly one row for the probe claim, got %d" (List.length rows));
+  (match get probe_legacy_id with
+   | Some f -> check string "foreign legacy row is left untouched" other_claim f.claim
+   | None -> fail "foreign legacy row disappeared");
+  (* 3. Private-scope ownership still applies before the legacy lookup. *)
+  let private_scope = "keeper:keeper-alpha" in
+  let private_claim = "Alpha's private legacy note" in
+  let private_legacy_id =
+    WM_types.legacy_newline_fact_id_of_claim ~scope:private_scope ~claim:private_claim
+  in
+  seed_legacy_row ~now:304.0 ~fact_id:private_legacy_id ~scope:private_scope
+    ~claim:private_claim ~keeper_id:"keeper-alpha";
+  check bool "another Keeper cannot promote into a private scope with a legacy row" true
+    (Result.is_error
+       (WM_curator.process_promotions_sync ~base_path:root ~now:305.0 ~keeper_id:"keeper-beta"
+          [ promo ~scope:private_scope ~claim:private_claim ]));
+  (match
+     WM_curator.process_promotions_sync ~base_path:root ~now:306.0 ~keeper_id:"keeper-alpha"
+       [ promo ~scope:private_scope ~claim:private_claim ]
+   with
+   | Ok _ -> ()
+   | Error err -> fail (WM_store.error_to_string err));
+  (match rows_with_claim private_claim with
+   | [ only ] -> check string "owner continues its private legacy row" private_legacy_id only.fact_id
+   | rows -> failf "expected exactly one private row, got %d" (List.length rows));
+  (* 4. The claim byte limit still rejects before any lookup. *)
+  check bool "oversize claim is still refused" true
+    (Result.is_error
+       (WM_curator.process_promotions_sync ~base_path:root ~now:307.0 ~keeper_id:"keeper-beta"
+          [ promo ~scope ~claim:(String.make (WM_types.max_claim_bytes + 1) 'x') ]))
+;;
+
 let () =
   run "stack_c_living_memory_circulation"
     [ ( "e2e"
@@ -1231,6 +1333,8 @@ let () =
             test_stack_c_tool_blob_scope_classification
         ; test_case "World Memory red-team security hardening (P0-3/P0-4/P1-8/P1-9/P1-10)" `Quick
             test_world_memory_red_team_security_hardening
+        ; test_case "v0.78.0 legacy fact id rows are continued, not duplicated (task-3978)" `Quick
+            test_world_memory_legacy_fact_id_continuation
         ] )
     ]
 ;;

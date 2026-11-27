@@ -61,22 +61,8 @@ export class FetchScheduler {
    * follow-up fetch triggered by drainPending(). Returns a promise that
    * resolves only after the urgent follow-up (if any) has completed.
    */
-  async requestNowAndWait(): Promise<void> {
-    if (!this.inflight) {
-      // No inflight — requestNow starts a fetch immediately.
-      this.requestNow()
-      if (this.inflight) await this.inflight
-      return
-    }
-    // Inflight exists — requestNow sets urgent flag; wait for current fetch,
-    // then wait for the follow-up triggered by drainPending.
-    const current = this.inflight
-    this.requestNow()
-    await current
-    // drainPending may have started a new fetch; if so, wait for it.
-    if (this.inflight && this.inflight !== current) {
-      await this.inflight
-    }
+  requestNowAndWait(): Promise<void> {
+    return this.requestNow()
   }
 
   /**

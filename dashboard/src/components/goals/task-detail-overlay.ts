@@ -423,6 +423,7 @@ function HandoffSection({ task }: { task: Task }) {
 // -- Main overlay ---------------------------------------------------
 
 export function TaskDetailOverlay() {
+  const closeButtonRef = useRef<HTMLButtonElement>(null)
   const task = selectedTask.value
   const details = taskDetailsState.value
   if (!task) return null
@@ -430,7 +431,6 @@ export function TaskDetailOverlay() {
     && task.detail_level !== 'summary' && hasActivityTab(task)
   const showingActivity = activeTab.value === 'activity' && activityAvailable
 
-  const closeButtonRef = useRef<HTMLButtonElement>(null)
   const titleId = `task-detail-title-${task.id}`
   const p = effectiveTaskPriority(task)
   const keeper = findKeeper(task.assignee)

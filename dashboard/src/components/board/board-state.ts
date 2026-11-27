@@ -524,7 +524,9 @@ export async function loadOlderPostComments(postId: string) {
 }
 
 export async function submitComment(postId: string, parentId?: string) {
-  const text = commentDraft(postId).text.trim()
+  const draft = commentDraft(postId)
+  if (draft.submitting) return
+  const text = draft.text.trim()
   if (!text) return
   changeCommentDraft(postId, { submitting: true })
   try {

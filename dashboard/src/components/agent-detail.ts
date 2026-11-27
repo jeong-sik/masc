@@ -157,7 +157,12 @@ function renderTaskHistories(
 export function AgentDetailOverlay() {
   const agentName = selectedAgentName.value
   if (!agentName) return null
+  return html`<${AgentDetailOverlayBody} key=${agentName} agentName=${agentName} />`
+}
+
+function AgentDetailOverlayBody({ agentName }: { agentName: string }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null)
+  const purgeInFlightRef = useRef(false)
 
   const agent = selectedAgent()
   const keeper = findKeeper(agentName)
@@ -198,33 +203,41 @@ export function AgentDetailOverlay() {
   const titleId = `agent-detail-title-${agentName}`
 
   const handlePurge = () => {
+    if (purgeInFlightRef.current) return
+    purgeInFlightRef.current = true
     void (async () => {
-      const targetLabel = keeper ? `${displayName} 키퍼` : displayName
-      const confirmed = await requestConfirm({
-        title: '에이전트 완전 삭제',
-        message: keeper
-          ? `${targetLabel}의 안전한 삭제 작업을 접수합니다.\n현재 작업이 정리된 뒤 세션, 인증, metrics와 Keeper 설정이 삭제됩니다.`
-          : `${targetLabel}를 완전 삭제합니다.\n런타임 상태, 인증, metrics가 제거됩니다.`,
-        tone: 'danger',
-        confirmText: keeper ? '삭제 작업 접수' : '완전 삭제',
-      })
-      if (!confirmed) return
-      purgePending.value = true
       try {
-        const result = await purgeAgent(keeper?.name ?? agentName)
-        closeAgentDetail()
-        invalidateDashboardCache()
-        await refreshDashboard({ force: true })
-        showToast(
-          result.target_kind === 'keeper'
-            ? `${displayName} 삭제 작업 접수됨 (${result.operation_id})`
-            : `${agentName} 삭제됨`,
-          'success',
-        )
-      } catch (err) {
-        showToast(err instanceof Error ? err.message : '에이전트 삭제 실패', 'error')
+        const targetLabel = keeper ? `${displayName} 키퍼` : displayName
+        const confirmed = await requestConfirm({
+          title: '에이전트 완전 삭제',
+          message: keeper
+            ? `${targetLabel}의 안전한 삭제 작업을 접수합니다.\n현재 작업이 정리된 뒤 세션, 인증, metrics와 Keeper 설정이 삭제됩니다.`
+            : `${targetLabel}를 완전 삭제합니다.\n런타임 상태, 인증, metrics가 제거됩니다.`,
+          tone: 'danger',
+          confirmText: keeper ? '삭제 작업 접수' : '완전 삭제',
+        })
+        if (!confirmed) return
+        purgePending.value = true
+        try {
+          const result = await purgeAgent(keeper?.name ?? agentName)
+          if (selectedAgentName.peek() === agentName) {
+            closeAgentDetail()
+          }
+          invalidateDashboardCache()
+          await refreshDashboard({ force: true })
+          showToast(
+            result.target_kind === 'keeper'
+              ? `${displayName} 삭제 작업 접수됨 (${result.operation_id})`
+              : `${agentName} 삭제됨`,
+            'success',
+          )
+        } catch (err) {
+          showToast(err instanceof Error ? err.message : '에이전트 삭제 실패', 'error')
+        } finally {
+          purgePending.value = false
+        }
       } finally {
-        purgePending.value = false
+        purgeInFlightRef.current = false
       }
     })()
   }

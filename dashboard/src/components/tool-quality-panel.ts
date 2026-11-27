@@ -228,10 +228,10 @@ export function pickAxisLabelIndices(n: number): number[] {
 }
 
 function TrendSparkline({ points }: { points: HourlyPoint[] }) {
-  if (points.length < 2) return null
   // Hover state is component-local and ephemeral — useState (not signal) so
   // it lives with the mount and is dropped on unmount without manual cleanup.
   const [activeIdx, setActiveIdx] = useState<number | null>(null)
+  if (points.length < 2) return null
 
   const W = 200, H = 40, pad = 2
   const n = points.length

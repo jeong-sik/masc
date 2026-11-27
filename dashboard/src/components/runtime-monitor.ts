@@ -1067,38 +1067,32 @@ export function RuntimeMonitor() {
                     </div>
                     <div class="flex gap-2 items-center">
                       ${metric.coverage_status
-                        ? html`<${StatusChip}
-                            label=${coverageStatusLabel(metric.coverage_status) ?? metric.coverage_status}
-                            tone=${metricCoverageTone(metric)}
-                          />`
+                        ? html`<${StatusChip} tone=${metricCoverageTone(metric)}>
+                            ${coverageStatusLabel(metric.coverage_status) ?? metric.coverage_status}
+                          <//>`
                         : null}
-                      <${StatusChip}
-                        label=${`${fmtSuccessRate(metric)}`}
-                        tone=${modelMetricTone(metric)}
-                      />
+                      <${StatusChip} tone=${modelMetricTone(metric)}>
+                        ${fmtSuccessRate(metric)}
+                      <//>
                       ${metric.avg_tok_per_sec != null
-                        ? html`<${StatusChip}
-                            label=${`${formatNumber(metric.avg_tok_per_sec, 1)} tok/s wall`}
-                            tone=${'ok'}
-                          />`
+                        ? html`<${StatusChip} tone=${'ok'}>
+                            ${`${formatNumber(metric.avg_tok_per_sec, 1)} tok/s wall`}
+                          <//>`
                         : null}
                       ${metric.prompt_avg_tok_per_sec != null
-                        ? html`<${StatusChip}
-                            label=${`${formatNumber(metric.prompt_avg_tok_per_sec, 1)} tok/s prefill`}
-                            tone=${'ok'}
-                          />`
+                        ? html`<${StatusChip} tone=${'ok'}>
+                            ${`${formatNumber(metric.prompt_avg_tok_per_sec, 1)} tok/s prefill`}
+                          <//>`
                         : null}
                       ${metric.hw_decode_avg_tok_per_sec != null
-                        ? html`<${StatusChip}
-                            label=${`${formatNumber(metric.hw_decode_avg_tok_per_sec, 1)} tok/s hw`}
-                            tone=${'ok'}
-                          />`
+                        ? html`<${StatusChip} tone=${'ok'}>
+                            ${`${formatNumber(metric.hw_decode_avg_tok_per_sec, 1)} tok/s hw`}
+                          <//>`
                         : null}
                       ${metric.thinking_fraction != null
-                        ? html`<${StatusChip}
-                            label=${`think ${formatNumber((metric.thinking_fraction ?? 0) * 100, 0)}%`}
-                            tone=${(metric.thinking_fraction ?? 0) > 0.5 ? 'warn' : 'ok'}
-                          />`
+                        ? html`<${StatusChip} tone=${(metric.thinking_fraction ?? 0) > 0.5 ? 'warn' : 'ok'}>
+                            ${`think ${formatNumber((metric.thinking_fraction ?? 0) * 100, 0)}%`}
+                          <//>`
                         : null}
                     </div>
                   </div>

@@ -216,10 +216,9 @@ export function GateMonitor() {
                 label="최장 대기"
                 value=${fmtSec(data.approval_queue.oldest_pending_sec)}
               />
-              <${StatusChip}
-                label=${data.approval_queue.depth === 0 ? '없음' : `${data.approval_queue.depth}건 대기`}
-                tone="info"
-              />
+              <${StatusChip} tone="info">
+                ${data.approval_queue.depth === 0 ? '없음' : `${data.approval_queue.depth}건 대기`}
+              <//>
             </div>
           </div>
         ` : approvalQueueState && approvalQueueState.state !== 'ready' ? html`
@@ -247,11 +246,15 @@ export function GateMonitor() {
             onInput=${(e: Event) => { query.value = (e.target as HTMLInputElement).value }}
             class="min-w-40 max-w-60 !bg-[var(--color-bg-page)] !px-2 !py-1 !text-xs"
           />
-          ${allRejections.length === 0
-            ? html`<${EmptyState} message="선택한 시간 범위에 tool rejection이 없습니다." compact />`
-            : isFiltering && visibleRejections.length === 0
-              ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-muted)]">필터 결과 없음 (${allRejections.length} items)</div>`
-              : html`
+          ${current.error
+            ? html`<div class="py-4 text-center text-2xs text-[var(--color-danger-fg)]" role="alert">도구 거부 현황을 불러오지 못했습니다.</div>`
+            : !data
+              ? null
+              : allRejections.length === 0
+                ? html`<${EmptyState} message="선택한 시간 범위에 tool rejection이 없습니다." compact />`
+                : isFiltering && visibleRejections.length === 0
+                  ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-muted)]">필터 결과 없음 (${allRejections.length} items)</div>`
+                  : html`
                 <div class="overflow-x-auto">
                   <table class="v2-monitoring-table w-full text-xs" aria-label="도구 거부 현황">
                     <thead>

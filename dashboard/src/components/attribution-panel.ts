@@ -287,8 +287,16 @@ export function AttributionPanel() {
     }
   }, [filterGate.value])
 
+  // Gate filter runs server-side (see fetchAttributionRecent above), so
+  // `recent.value` is already gate-filtered. Text filter composes on top.
+  const gateFiltered = recent.value
+  const visibleEvents = useMemo(
+    () => filterAttributionEvents(gateFiltered, query.value),
+    [gateFiltered, query.value],
+  )
+
   if (loading.value && !summary.value) {
-    return html`<${LoadingState} message="attribution 로딩 중…" />`
+    return html`<${LoadingState}>attribution 로딩 중…<//>`
   }
   if (error.value && !summary.value) {
     return html`<${ErrorState} message=${error.value} />`
@@ -298,13 +306,6 @@ export function AttributionPanel() {
   for (const g of summary.value?.gates ?? []) byGate.set(g.gate, g)
   const visibleGates = gatesToRender(KNOWN_GATES, byGate.keys())
 
-  // Gate filter runs server-side (see fetchAttributionRecent above), so
-  // `recent.value` is already gate-filtered. Text filter composes on top.
-  const gateFiltered = recent.value
-  const visibleEvents = useMemo(
-    () => filterAttributionEvents(gateFiltered, query.value),
-    [gateFiltered, query.value],
-  )
   const isFiltering = query.value.trim() !== ''
 
   const selected = selectedEventIdx.value !== null

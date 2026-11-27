@@ -27,7 +27,6 @@ exception Install_failed of install_error
 val install_from_store
   :  sw:Eio.Switch.t
   -> operation_runner:Keeper_owner.operation_runner option
-  -> on_turn_slot_released:(keeper_name:string -> unit) option
   -> Workspace.config
   -> (int, install_error) result
 (** Load each valid persisted Keeper independently and start exactly one owner
@@ -92,12 +91,14 @@ val wake_operation_drain
   -> (unit, command_error) result
 (** Notify one Owner that its operation runner dependency is ready. *)
 
-val run_autonomous_if_idle
+val run_autonomous_turn
   :  base_path:string
   -> keeper_name:string
+  -> input:(unit -> Keeper_owner.autonomous_input)
   -> (unit -> 'a)
   -> ([ `Ran of 'a | `Busy of Keeper_owner.autonomous_block | `Interrupted ], command_error) result
-(** Submit one autonomous turn attempt to the Keeper's Owner mailbox. *)
+(** Offer one autonomous turn to the Keeper's Owner
+    ({!Keeper_owner.run_autonomous_turn}). *)
 
 val run_maintenance_if_idle
   :  ?defer_to_chat:bool

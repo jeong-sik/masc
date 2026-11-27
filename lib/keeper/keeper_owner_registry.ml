@@ -39,7 +39,6 @@ type pool =
   ; owner_handles : Keeper_owner.t list Atomic.t
   ; stopping : bool Atomic.t
   ; operation_runner : Keeper_owner.operation_runner option
-  ; on_turn_slot_released : (keeper_name:string -> unit) option
   ; mutable restart_journal_reader : restart_journal_reader option
   ; prior_writers : Keeper_owner.prior_writers
   }
@@ -310,8 +309,6 @@ let start_owner pool ~keeper_name ~initial_meta =
          (* NDT-OK: wall time is injected once at the Owner persistence boundary. *)
          ~now:Unix.gettimeofday
          ~operation_runner:pool.operation_runner
-         ~on_turn_slot_released:
-           (Option.map (fun notify () -> notify ~keeper_name) pool.on_turn_slot_released)
          ~keeper_name
          ~initial_meta
      with
@@ -613,7 +610,7 @@ let ensure_empty_in_pool pool keeper_name =
   ensure_owner_in_pool pool ~keeper_name ~initial_meta:None
 ;;
 
-let install_from_store ~sw ~operation_runner ~on_turn_slot_released config =
+let install_from_store ~sw ~operation_runner config =
   let base_path = pool_key config.Workspace.base_path in
   match load_all config with
   | Error _ as error -> error
@@ -641,7 +638,6 @@ let install_from_store ~sw ~operation_runner ~on_turn_slot_released config =
             ; owner_handles = Atomic.make []
             ; stopping = Atomic.make false
             ; operation_runner
-            ; on_turn_slot_released
             ; restart_journal_reader = None
             ; prior_writers
             }
@@ -1016,11 +1012,11 @@ let await_idle_after_shutdown ~base_path ~keeper_name =
        Ok ())
 ;;
 
-let run_autonomous_if_idle ~base_path ~keeper_name run =
+let run_autonomous_turn ~base_path ~keeper_name ~input run =
   match get ~base_path ~keeper_name with
   | Error error -> Error (Command_lookup_failed error)
   | Ok owner ->
-    Keeper_owner.run_autonomous_if_idle owner run
+    Keeper_owner.run_autonomous_turn owner ~input run
     |> Result.map_error (fun error -> Command_rejected error)
 ;;
 

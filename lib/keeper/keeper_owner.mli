@@ -126,12 +126,18 @@ type turn_in_flight =
     over 2026-08-10..12 on the live fleet: 162,813 turn-phase transitions and
     0 violations.
 
-    The exclusion is an invariant; the *order* in which contending lanes get
-    the freed slot is not specified here and is not fair today — a queued chat
-    operation is offered the slot synchronously when a turn ends, and the
-    autonomous lane is woken only when the slot is still unclaimed after that
-    ([on_turn_slot_released] of {!start}). An admission policy that orders
-    them must keep the invariant above, not merely the counter. *)
+    The exclusion is an invariant, and so is the order in which the two lines
+    that contend for a freed slot get it. The chat line and the autonomous
+    line alternate: when both have a turn to start, the slot goes to the line
+    that did not take the last turn. The Owner holds both lines' turns — the
+    chat executor of {!operation_runner} and a parked
+    {!run_autonomous_turn} offer — and starts the chosen one itself. A
+    running turn is never ended for the other line, an autonomous turn that
+    admits no row still counts as that line's turn, and a maintenance run
+    belongs to neither line. Which line went last lives in Owner memory and
+    is not stored; a restarted Owner owes neither line a turn. An admission
+    policy that changes this order must keep the invariant above, not merely
+    the counter. *)
 
 (** Wire spelling of a {!turn_lane} ("autonomous" / "chat_operation" /
     "maintenance"). Every projection that serializes a lane reads this one
@@ -268,7 +274,6 @@ val start
   -> session_root:string
   -> now:(unit -> float)
   -> operation_runner:operation_runner option
-  -> on_turn_slot_released:(unit -> unit) option
   -> keeper_name:string
   -> initial_meta:Keeper_meta_contract.keeper_meta option
   -> (t, error) result
@@ -282,7 +287,6 @@ val start_supervised
   -> session_root:string
   -> now:(unit -> float)
   -> operation_runner:operation_runner option
-  -> on_turn_slot_released:(unit -> unit) option
   -> keeper_name:string
   -> initial_meta:Keeper_meta_contract.keeper_meta option
   -> (t, error) result
@@ -295,36 +299,7 @@ val start_supervised
     Active calls inherited from another process remain Running until
     {!complete_restart_settlement} reads their journals with the application
     runtime. The composition must complete that step before starting Keeper
-    loops. These rows are not initial failed-operation projections.
-
-    [on_turn_slot_released] fires when a turn ends, the slot is still unclaimed
-    after queued chat has been offered it, and the autonomous lane has been
-    refused the slot since the last notification. The
-    signal therefore means "the lane that lost the slot can start now", not "a
-    turn ended".
-
-    All three conditions are load-bearing. Dropping the third one is what
-    {!Keeper_registry.Turn_slot_released} did on 2026-08-12: a keeper woken by
-    the release starts its next turn at once, so every turn end scheduled the
-    next turn and the keepalive cadence stopped governing. Measured on the live
-    fleet across the restart that carried it: turn starts went from 114.9/hour
-    to 1523.5/hour, and the median interval between keepalive cycles fell from
-    313s to 10s — the turn duration, not the configured cadence.
-
-    It exists because the two lanes learn about a free slot by opposite means.
-    A chat producer notifies the Owner through {!wake_operation_drain} — "the
-    Owner never polls", as the {!operation_runner} contract says — while the
-    autonomous lane has no such channel and rediscovers the slot only on its
-    next keepalive cadence. What that costs, measured over 2026-08-12: all 50
-    autonomous deferrals named a chat holder, one held the slot 16.3 minutes
-    across 5 consecutive cycles, and the keeper carrying the most chat traffic
-    lost 18.6% of its autonomous cycles.
-
-    The callback runs on the Owner fiber. It must not block, and an exception
-    it raises is contained rather than propagated — a lost wake degrades to the
-    listener's own cadence. This does not change admission order: the chat lane
-    receives the freed slot first while it has claimable work. The autonomous
-    lane retains its release notification until no chat claims the slot. *)
+    loops. These rows are not initial failed-operation projections. *)
 
 val projection : t -> Keeper_owner_reducer.projection
 (** Lock-free immutable snapshot. *)
@@ -370,18 +345,38 @@ val autonomous_block_kind : autonomous_block -> string
 val autonomous_block_to_string : autonomous_block -> string
 val autonomous_block_to_yojson : autonomous_block -> Yojson.Safe.t
 
-val run_autonomous_if_idle
+type autonomous_input =
+  | Autonomous_input_waiting
+  | No_autonomous_input
+(** What the autonomous line has waiting when the Owner chooses the next turn. *)
+
+val run_autonomous_turn
   :  t
+  -> input:(unit -> autonomous_input)
   -> (unit -> 'a)
   -> ([ `Ran of 'a | `Busy of autonomous_block | `Interrupted ], error) result
-(** Mailbox-linearized autonomous admission. The callback runs in the Owner's
-    child switch, while the actor remains responsive. An already-started child
-    returns [`Busy] without consuming turn input. A Queued chat whose runner is
-    not ready does not block autonomous admission. Owner-directed cancellation
-    returns [Error Owner_stopping]; its private child-stop signal never escapes
-    this boundary. An operator interrupt of the running turn
-    ({!interrupt_turn}) returns [`Interrupted]: the child switch was failed
-    with that exception, so the callback's own return value is not available. *)
+(** Offer one autonomous turn to the Owner. The callback runs in the Owner's
+    child switch, while the actor remains responsive.
+
+    A free slot starts the turn at once, unless a queued chat contends for it
+    and the chat line is owed the turn (see {!turn_in_flight}). When another
+    turn holds the slot, the Owner keeps the offer while [input] says the
+    autonomous line has something waiting, and starts it when that line's
+    turn comes; the call returns when that turn ends. While [input] says
+    nothing waits, the offer returns [`Busy] without consuming turn input.
+
+    [input] runs on the Owner fiber each time the Owner chooses. It reads the
+    autonomous line's own stores and must not wait on another fiber; an
+    exception from it is logged and counts as waiting. A cancelled caller
+    leaves and withdraws a kept offer.
+
+    A Queued chat whose runner is not ready does not block autonomous
+    admission. A shutdown reservation, paused admission or a stopping Owner
+    answers a kept offer when it arrives. Owner-directed cancellation returns
+    [Error Owner_stopping]; its private child-stop signal never escapes this
+    boundary. An operator interrupt of the running turn ({!interrupt_turn})
+    returns [`Interrupted]: the child switch was failed with that exception,
+    so the callback's own return value is not available. *)
 
 val run_maintenance_if_idle
   :  ?defer_to_chat:bool

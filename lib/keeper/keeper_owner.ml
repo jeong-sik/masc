@@ -97,6 +97,16 @@ type autonomous_block =
   | Admission_paused
   | Shutdown_requested of Keeper_shutdown_types.Operation_id.t
 
+type autonomous_input =
+  | Autonomous_input_waiting
+  | No_autonomous_input
+
+(* The two lines that share the slot. A maintenance run takes the slot only
+   when it is free and belongs to neither line. *)
+type slot_line =
+  | Chat_line
+  | Autonomous_line
+
 type shutdown_reservation =
   { operation_id : Keeper_shutdown_types.Operation_id.t
   ; in_flight : turn_in_flight option
@@ -383,9 +393,15 @@ type _ command =
         (Agent_core.Agent.execution_terminal_disposition option, string) result) ->
       (Chat_operation.t list, error) result command
   | Wake_operation_drain : (unit, error) result command
-  | Run_if_idle :
-      { lane : turn_lane
-      ; defer_to_chat : bool
+  | Offer_autonomous_turn :
+      { offer : int
+      ; input : unit -> autonomous_input
+      ; run : unit -> 'a
+      }
+      -> ('a autonomous_response, error) result command
+  | Withdraw_autonomous_turn : int -> (unit, error) result command
+  | Run_maintenance_if_idle :
+      { defer_to_chat : bool
       ; run : unit -> 'a
       }
       -> ('a autonomous_response, error) result command
@@ -409,6 +425,19 @@ type _ command =
 
 type packed_command =
   | Command : 'response command * 'response Eio.Promise.u -> packed_command
+
+(* An autonomous turn offered while its line could not take the slot. The
+   Owner holds the turn itself, so it starts the turn when the line's turn
+   comes without asking the offering fiber for anything. [input] reads what
+   the autonomous line has waiting at the moment the Owner chooses. *)
+type parked_autonomous_turn =
+  | Parked_autonomous_turn :
+      { offer : int
+      ; input : unit -> autonomous_input
+      ; run : unit -> 'a
+      ; resolve : ('a autonomous_response, error) result Eio.Promise.u
+      }
+      -> parked_autonomous_turn
 
 (* Declared in Keeper_owner_signals so the runtime adapters can match it
    without depending on this module; see #28012. *)
@@ -496,20 +525,13 @@ type t =
   ; child_cancel : child_cancel option Atomic.t
   ; stopping_waiters : ((unit, error) result Eio.Promise.u) list ref
   ; shutdown_idle_waiters : ((unit, error) result Eio.Promise.u) list ref
-  ; on_turn_slot_released : (unit -> unit) option
   ; operation_runner : operation_runner option
         (* Kept on [t] for the rows that store recovery fails outside any
            child: their failure reaches the transcript, the journal and a
            waiting stream through the same hook as a child's. *)
-  ; autonomous_lost_slot : bool ref
-        (* Set when the autonomous lane asked for the slot and was refused,
-           cleared when the release notification is delivered. Without it the
-           notification fires after every turn, and since a woken keeper starts
-           its next turn immediately, each turn's end schedules the next one:
-           the keepalive cadence stops governing and turn rate rises to one per
-           turn duration. Only a lane that actually lost the slot needs telling
-           that it is free. Owner-fiber-local; every reader and writer below
-           runs in the command loop. *)
+  ; autonomous_offers : int Atomic.t
+        (* Names each autonomous offer, so the fiber that made one can
+           withdraw exactly that offer when it is cancelled. *)
   ; pending_restart_calls : Chat_operation_store.restart_native_call list ref
   ; inherited_calls : Call_id_set.t ref
         (* Calls Active in the store when this Owner started, before it claimed
@@ -630,32 +652,6 @@ let publish_shutdown_operation_id t next =
     notify_state_change_observer ~keeper_name:t.keeper_name)
 ;;
 
-(* The freed slot is offered to a queued chat operation first (the caller runs
-   [start_child_if_needed] immediately before this). Notifying only when it is
-   still unclaimed makes the signal mean "a turn can start now" rather than "a
-   turn ended": a listener woken by the latter would find the slot taken and
-   defer again, which is the cycle this notification exists to end.
-
-   The callback runs on the Owner fiber, so an exception from it would take
-   down the actor that every producer depends on. Contain it; a lost wake
-   degrades to the listener's own cadence, which is the behaviour before this
-   notification existed. *)
-let notify_turn_slot_released t =
-  match t.on_turn_slot_released with
-  | None -> ()
-  | Some notify ->
-    if Option.is_none (Atomic.get t.turn_in_flight) && !(t.autonomous_lost_slot)
-    then (
-      t.autonomous_lost_slot := false;
-      Cancel_safe.observe
-        ~on_exn:(fun exn ->
-          Log.Keeper.routine
-            ~keeper_name:t.keeper_name
-            "turn slot release listener raised: %s"
-            (Printexc.to_string exn))
-        notify)
-;;
-
 let turn_lane_to_string = function
   | Autonomous -> "autonomous"
   | Chat_operation -> "chat_operation"
@@ -724,8 +720,9 @@ let enqueue_unless_closed mailbox command ~closed =
 
    [Possibly_when_the_child_finishes]: the step may park the resolver until the
    running child finishes. [Await_idle_after_shutdown] and [Begin_stopping] wait
-   for an active child; [Run_if_idle] answers with the turn it admitted, when
-   that turn ends. *)
+   for an active child; [Run_maintenance_if_idle] answers with the turn it
+   admitted, when that turn ends; [Offer_autonomous_turn] can also wait for the
+   turn that holds the slot to end before its own turn starts. *)
 type answer =
   | In_its_drain_step
   | Possibly_when_the_child_finishes
@@ -771,7 +768,9 @@ let answer : type response. response command -> answer = function
   | Claim_next_operation -> In_its_drain_step
   | Succeed_running_operation _ -> In_its_drain_step
   | Observe_runtime_retry_waits | Wake_operation_drain | Complete_restart_settlement _ -> In_its_drain_step
-  | Run_if_idle _ -> Possibly_when_the_child_finishes
+  | Offer_autonomous_turn _ -> Possibly_when_the_child_finishes
+  | Withdraw_autonomous_turn _ -> In_its_drain_step
+  | Run_maintenance_if_idle _ -> Possibly_when_the_child_finishes
   | Begin_shutdown _ -> In_its_drain_step
   | Rollback_shutdown _ -> In_its_drain_step
   | Restore_shutdown _ -> In_its_drain_step
@@ -1391,7 +1390,7 @@ let run_operation_command t ~label f =
    that says only that the handle is shut.
 
    These reads run while the fence is up -- unlike a child, which
-   [start_child_if_needed] holds back -- so they are the ones that reach it.
+   [start_next_turn] holds back -- so they are the ones that reach it.
    The recorded fault is returned instead, and the handle is left alone; the
    command path reopens it under its own guard. *)
 let run_operation_read t ~label f =
@@ -1488,7 +1487,6 @@ let start_impl
       ~session_root
       ~now
       ~operation_runner
-      ~on_turn_slot_released
       ~keeper_name
       ~initial_meta
   =
@@ -1564,10 +1562,9 @@ let start_impl
     ; meta_write_unsettled = Atomic.make false
     ; operation_error = ref None
     ; child_cancel = Atomic.make None
-    ; autonomous_lost_slot = ref false
+    ; autonomous_offers = Atomic.make 0
     ; stopping_waiters = ref []
     ; shutdown_idle_waiters = ref []
-    ; on_turn_slot_released
     ; operation_runner
     ; pending_restart_calls = ref pending_restart_calls
     ; inherited_calls =
@@ -1962,12 +1959,20 @@ let start_impl
           | Native_call_closed_without_disposition ->
             fail_running_operation ~operation_id ~kind ~detail ~outcome_ref))
     in
-    let rec start_child_if_needed state shutdown_operation_id =
-      (* No child starts while one of these holds. The cheap checks come
-         first and [||] stops at the first that holds. *)
-      let gates_closed state shutdown_operation_id runner =
-        Option.is_some (Atomic.get t.turn_in_flight)
-        || Option.is_some shutdown_operation_id
+    (* Owner-fiber-local, like every value below that only the command loop
+       reads and writes. [parked_autonomous] is the autonomous turn the Owner
+       holds until that line's turn comes. [last_line] is the line the last
+       turn went to. It comes from this process's own starts and is not
+       stored: a restarted Owner starts with no line owed a turn, and no
+       durable record depends on which line went last. *)
+    let parked_autonomous : parked_autonomous_turn option ref = ref None in
+    let last_line : slot_line option ref = ref None in
+    (* The chat line's runner, when that line has a turn to start. No chat
+       child starts while one of these holds. The cheap checks come first and
+       [||] stops at the first that holds. A free slot is the caller's check. *)
+    let startable_chat_runner state shutdown_operation_id =
+      let gates_closed runner =
+        Option.is_some shutdown_operation_id
         || (Keeper_owner_reducer.projection state).stopping
         || not (turn_admission_open state)
         || Option.is_some !(t.operation_error)
@@ -1975,15 +1980,18 @@ let start_impl
         || not (runner.ready ~keeper_name:t.keeper_name)
       in
       match operation_runner with
-      | None -> ()
-      | Some runner when gates_closed state shutdown_operation_id runner -> ()
+      | None -> None
+      | Some runner when gates_closed runner -> None
       | Some runner ->
         let inventory = Atomic.get t.operation_projection in
-        (* Direct input takes a released slot. *)
         if
           inventory.has_claimable_queued
           && Option.is_none inventory.running_operation_id
-        then (
+        then Some runner
+        else None
+    in
+    let start_chat_child runner =
+          last_line := Some Chat_line;
           let interrupt_token = Keeper_interrupt_token.fresh () in
           let observation = Keeper_turn_preview_owner.create_turn_observation () in
           publish_turn_in_flight
@@ -2083,7 +2091,136 @@ let start_impl
               (Child_finished
                  (Operation_child_finished
                     { claimed_operation_id = !claimed_operation_id; execution; ended }))
-          ))
+          )
+    in
+    (* Start a turn the Owner holds in its own child: an autonomous turn, or a
+       maintenance run. [resolve] hears the turn's outcome when it ends. *)
+    let start_owned_turn ~lane ~run ~resolve =
+                     (* The Owner keeps its slot until the turn settles. The
+                        next turn starts after this one ends. *)
+                     let interrupt_token = Keeper_interrupt_token.fresh () in
+                     let observation = Keeper_turn_preview_owner.create_turn_observation () in
+                     publish_turn_in_flight
+                       t
+                       (Some { lane; started_at = t.now ()
+                             ; interrupt_token });
+                     Eio.Fiber.fork ~sw:keeper_sw (fun () ->
+                       Keeper_turn_preview_owner.with_owner ~interrupt_token ~observation @@ fun () ->
+                       let outcome =
+                         try
+                           Ok
+                             (Eio.Switch.run (fun child_sw ->
+                                Atomic.set t.child_cancel
+                                  (Some
+                                     { stop =
+                                         (fun () ->
+                                            Eio.Switch.fail child_sw Stop_active_child)
+                                     ; interrupt =
+                                         (fun () ->
+                                            Eio.Switch.fail child_sw
+                                              Keeper_registry_types.Operator_interrupt)
+                                     });
+                                run ()))
+                         with
+                         (* Two different cancellations land here and both
+                            belong in [outcome] rather than on the stack.
+
+                            An operator interrupt fails [child_sw] from
+                            above, so it is the child's own result;
+                            [run_autonomous_turn] re-raises it at the
+                            bottom of this file with this backtrace, in the
+                            fiber that asked for the turn.
+
+                            An ambient cancellation reaches this fiber
+                            because [sw] is the server root switch
+                            ([keeper_owner_registry.ml] passes [pool.sw],
+                            which is the switch [bin/main_eio.ml] fails on
+                            shutdown). Raising here would escape the
+                            [Fiber.fork ~sw] body, and eio hands that to
+                            [Switch.fail sw] -- so one cancelled turn would
+                            turn a clean shutdown into an error exit. It
+                            would also skip the [child_cancel] reset, the
+                            [notify] below and [resolve], leaving whoever
+                            awaits the promise parked forever. *)
+                         | exn -> Error (exn, Printexc.get_raw_backtrace ()) (* cancel-guard-ok: carried out as a value and re-raised in the requesting fiber; raising here fails the root switch *)
+                       in
+                       Atomic.set t.child_cancel None;
+                       notify
+                         t
+                         (Child_finished
+                            (Autonomous_child_finished { outcome; resolve })))
+    in
+    (* What the autonomous line has waiting, read when the Owner chooses. The
+       reader belongs to the line that offered the turn and reads that line's
+       own stores; it never waits on another fiber. It runs on this fiber, so
+       a reader that raises is contained here: the Owner cannot show that
+       nothing waits, so the turn counts as waiting and its own intake meets
+       the failure. *)
+    let read_autonomous_input (Parked_autonomous_turn { input; _ }) =
+      Cancel_safe.protect
+        ~on_exn:(fun exn ->
+          Log.Keeper.warn
+            ~keeper_name:t.keeper_name
+            "autonomous input reader raised; the offered turn counts as waiting: %s"
+            (Printexc.to_string exn);
+          Autonomous_input_waiting)
+        input
+    in
+    (* Why an autonomous turn cannot start now, in the order an offer is
+       refused: a shutdown reservation, closed admission, then a stopping
+       Owner. *)
+    let autonomous_refusal state shutdown_operation_id =
+      match shutdown_operation_id with
+      | Some operation_id -> Some (Ok (Shutdown_requested operation_id))
+      | None when not (turn_admission_open state) -> Some (Ok Admission_paused)
+      | None ->
+        (match reject_if_stopping state (fun () -> Ok ()) with
+         | Error error -> Some (Error error)
+         | Ok () -> None)
+    in
+    let answer_autonomous (Parked_autonomous_turn { resolve; _ }) answer =
+      parked_autonomous := None;
+      Eio.Promise.resolve resolve (Result.map (fun block -> Autonomous_busy block) answer)
+    in
+    let start_parked_autonomous (Parked_autonomous_turn { run; resolve; _ }) =
+      parked_autonomous := None;
+      last_line := Some Autonomous_line;
+      start_owned_turn ~lane:Autonomous ~run ~resolve
+    in
+    let rec start_next_turn state shutdown_operation_id =
+      (* A parked turn that can no longer start hears why instead of waiting. *)
+      (match !parked_autonomous with
+       | None -> ()
+       | Some parked ->
+         Option.iter (answer_autonomous parked) (autonomous_refusal state shutdown_operation_id));
+      (* A free slot goes to the line that did not take the last turn when that
+         line has a turn to start, and to the other line otherwise (RFC
+         a-keeper-takes-every-waiting-message-in-one-turn 4.1-3). Whose turn it
+         is follows from [last_line] alone: no clock, weight or priority
+         enters. A running turn is never ended for the other line, and an
+         autonomous turn that admits no row still counts as that line's
+         turn. *)
+      match Atomic.get t.turn_in_flight with
+      | Some _ -> ()
+      | None ->
+        (match startable_chat_runner state shutdown_operation_id, !parked_autonomous with
+         | None, None -> ()
+         | Some runner, None -> start_chat_child runner
+         | None, Some parked -> start_parked_autonomous parked
+         | Some runner, Some parked ->
+           (match read_autonomous_input parked, !last_line with
+            | Autonomous_input_waiting, Some Chat_line -> start_parked_autonomous parked
+            | Autonomous_input_waiting, (Some Autonomous_line | None) ->
+              (* The parked turn keeps waiting for the next free slot, which
+                 goes to it because this one goes to chat. *)
+              start_chat_child runner
+            | No_autonomous_input, (Some Chat_line | Some Autonomous_line | None) ->
+              (* Nothing waits on the autonomous line, so its offer does not
+                 contend. It hears that the slot is busy, as an offer that
+                 finds a held slot with nothing waiting does, and its lane
+                 offers again on its own cadence. *)
+              start_chat_child runner;
+              answer_autonomous parked (Ok (Turn_busy (Atomic.get t.turn_in_flight)))))
     and loop state =
         (* Every command that can raise the fence returns here, so a fence up
            now has a recovery wake armed before the mailbox waits again; no
@@ -2256,7 +2393,7 @@ let start_impl
             (match response with
              | Ok _ ->
                Eio.Promise.resolve resolve response;
-               start_child_if_needed state shutdown_operation_id;
+               start_next_turn state shutdown_operation_id;
                loop state
              | Error _ ->
                (* No child owns this handle. Match failed initial startup:
@@ -2338,7 +2475,7 @@ let start_impl
                    Eio.Promise.resolve
                      resolve
                    (Ok (Keeper_owner_reducer.projection state).meta);
-                   start_child_if_needed state shutdown_operation_id;
+                   start_next_turn state shutdown_operation_id;
                    loop state))))
         | Command (Exact_operation operation_id, resolve) ->
           let response =
@@ -2401,7 +2538,7 @@ let start_impl
                 ~operation_id ~expected_revision ~execution_digest)
             |> Result.map fst) in
           Eio.Promise.resolve resolve response;
-          (match response with Ok _ -> start_child_if_needed state shutdown_operation_id | Error _ -> ());
+          (match response with Ok _ -> start_next_turn state shutdown_operation_id | Error _ -> ());
           loop state
         | Command (Direct_checkpoint operation_id, resolve) ->
           let response = run_operation_read t ~label:"read direct cooperative checkpoint" (fun () ->
@@ -2695,7 +2832,7 @@ let start_impl
           (* A task whose last pending receipt arrived is claimable now. Any
              other outcome changed nothing, so no claim is newly possible. *)
           (match response with
-           | Ok Chat_operation_store.Receipt_resolved -> start_child_if_needed state shutdown_operation_id
+           | Ok Chat_operation_store.Receipt_resolved -> start_next_turn state shutdown_operation_id
            | Ok (Chat_operation_store.Receipt_already_arrived | Chat_operation_store.Receipt_without_owner)
            | Error _ -> ());
           loop state
@@ -2729,7 +2866,7 @@ let start_impl
                  |> Result.map fst) in
           Eio.Promise.resolve resolve response;
           (match response with
-           | Ok Chat_operation_store.Receipt_resolved -> start_child_if_needed state shutdown_operation_id
+           | Ok Chat_operation_store.Receipt_resolved -> start_next_turn state shutdown_operation_id
            | Ok (Chat_operation_store.Receipt_already_arrived | Chat_operation_store.Receipt_without_owner)
            | Error _ -> ());
           loop state
@@ -2822,7 +2959,7 @@ let start_impl
             Chat_operation_store.resolve_direct_gate t.operation_store ~now:(t.now ())
               ~operation_id ~resolution) |> Result.map fst in
           Eio.Promise.resolve resolve response;
-          start_child_if_needed state shutdown_operation_id;
+          start_next_turn state shutdown_operation_id;
           loop state
         | Command (Resume_direct_gate {operation_id; waiting; resolution}, resolve) ->
           let response = run_operation_command t ~label:"resume direct Gate operation" (fun () ->
@@ -2896,7 +3033,7 @@ let start_impl
            | Ok () ->
              let signalled, interrupt_error = signal_exact observed in
              Eio.Promise.resolve resolve (Ok (Run_next_applied { signalled; interrupt_error }));
-             start_child_if_needed state shutdown_operation_id;
+             start_next_turn state shutdown_operation_id;
              loop state)
         | Command (Submit_operation { operation_id; source; input }, resolve) ->
           let response =
@@ -2921,7 +3058,7 @@ let start_impl
                   Ok { operation; existing; queued_count = projection.queued_count }))
           in
           Eio.Promise.resolve resolve response;
-          start_child_if_needed state shutdown_operation_id;
+          start_next_turn state shutdown_operation_id;
           loop state
         | Command (Submit_interactive_operation {operation_id; source; input; intent}, resolve) ->
           let current = String.equal intent.control_token (chat_control_token t) in
@@ -2943,7 +3080,7 @@ let start_impl
                else signal_exact intent.target in
              let receipt = {outcome; chat_control_token = chat_control_token t; signalled; resumed = false; interrupt_error} in
              Eio.Promise.resolve resolve (Ok (acceptance, receipt));
-             start_child_if_needed state shutdown_operation_id;
+             start_next_turn state shutdown_operation_id;
              loop state)
         | Command (List_queued_operations { after_sequence; limit }, resolve) ->
           let response =
@@ -3052,7 +3189,7 @@ let start_impl
                  run_operation_command t ~label:"refresh Keeper operation readiness"
                    (fun () -> Ok ())
                in
-               start_child_if_needed state shutdown_operation_id;
+               start_next_turn state shutdown_operation_id;
                match refresh with
                | Ok _ -> rearm_cooling_retry_wake ()
                | Error _ -> retry_cooling_observation ())
@@ -3071,7 +3208,7 @@ let start_impl
             |> Result.map (fun _ -> ())
           in
           Eio.Promise.resolve resolve response;
-          start_child_if_needed state shutdown_operation_id;
+          start_next_turn state shutdown_operation_id;
           (* The wake that just fired may have been the earliest of several
              cooling retries; arm the next one only after a fresh projection.
              A failed refresh must not re-arm an expired cached deadline. *)
@@ -3086,6 +3223,8 @@ let start_impl
              Eio.Promise.resolve
                resolve
                (Ok (Shutdown_reserved (shutdown_reservation t operation_id)));
+             (* A parked autonomous turn hears the reservation now. *)
+             start_next_turn state (Some operation_id);
              loop state
            | Some existing ->
              Eio.Promise.resolve
@@ -3103,7 +3242,7 @@ let start_impl
              when Keeper_shutdown_types.Operation_id.equal existing operation_id ->
              publish_shutdown_operation_id t None;
              Eio.Promise.resolve resolve (Ok Shutdown_rolled_back);
-             start_child_if_needed state None;
+             start_next_turn state None;
              loop state
            | Some existing ->
              Eio.Promise.resolve resolve (Ok (Shutdown_reserved_by_other existing));
@@ -3113,6 +3252,7 @@ let start_impl
            | None ->
              publish_shutdown_operation_id t (Some operation_id);
              Eio.Promise.resolve resolve (Ok Shutdown_restored);
+             start_next_turn state (Some operation_id);
              loop state
            | Some existing
              when Keeper_shutdown_types.Operation_id.equal existing operation_id ->
@@ -3141,8 +3281,9 @@ let start_impl
           in
           publish_shutdown_operation_id t next_shutdown_operation_id;
           Eio.Promise.resolve resolve (Ok result);
-          if Option.is_none next_shutdown_operation_id
-          then start_child_if_needed state None;
+          (* Without a reservation the next turn may start; with one, only a
+             parked autonomous turn hears it. *)
+          start_next_turn state next_shutdown_operation_id;
           loop state
         | Command (Await_idle_after_shutdown, resolve) ->
           if Option.is_some (Atomic.get t.turn_in_flight)
@@ -3152,16 +3293,48 @@ let start_impl
           else (
             Eio.Promise.resolve resolve (Ok ());
             loop state)
-        | Command (Run_if_idle { lane; defer_to_chat; run }, resolve) ->
+        | Command (Offer_autonomous_turn { offer; input; run }, resolve) ->
+          (match autonomous_refusal state shutdown_operation_id, !parked_autonomous with
+           | Some answer, (Some _ | None) ->
+             Eio.Promise.resolve resolve (Result.map (fun block -> Autonomous_busy block) answer)
+           | None, Some _ ->
+             (* One heartbeat lane offers for a Keeper, and it waits for its
+                offer's answer before it offers again. A second offer while one
+                is parked is answered busy rather than queued behind it. *)
+             Eio.Promise.resolve resolve
+               (Ok (Autonomous_busy (Turn_busy (Atomic.get t.turn_in_flight))))
+           | None, None ->
+             parked_autonomous := Some (Parked_autonomous_turn { offer; input; run; resolve });
+             start_next_turn state shutdown_operation_id;
+             (* Still parked means another turn holds the slot. The offer waits
+                for the next free slot only while its line has something
+                waiting; otherwise it hears that the slot is busy, as before. *)
+             (match !parked_autonomous with
+              | Some (Parked_autonomous_turn { offer = parked_offer; _ } as current)
+                when Int.equal parked_offer offer ->
+                (match read_autonomous_input current with
+                 | Autonomous_input_waiting -> ()
+                 | No_autonomous_input ->
+                   answer_autonomous current (Ok (Turn_busy (Atomic.get t.turn_in_flight))))
+              | Some _ | None -> ()));
+          loop state
+        | Command (Withdraw_autonomous_turn offer, resolve) ->
+          (* The offering fiber was cancelled and no longer waits for an
+             answer, so its parked turn must not start. A turn that already
+             started keeps running, as any turn whose requester left does. *)
+          (match !parked_autonomous with
+           | Some (Parked_autonomous_turn { offer = parked_offer; _ })
+             when Int.equal parked_offer offer ->
+             parked_autonomous := None
+           | Some _ | None -> ());
+          Eio.Promise.resolve resolve (Ok ());
+          loop state
+        | Command (Run_maintenance_if_idle { defer_to_chat; run }, resolve) ->
           (match shutdown_operation_id with
            | Some operation_id ->
              Eio.Promise.resolve
                resolve
                (Ok (Autonomous_busy (Shutdown_requested operation_id)))
-           | None when (match lane with
-               | Autonomous | Chat_operation -> not (turn_admission_open state)
-               | Maintenance -> false) ->
-             Eio.Promise.resolve resolve (Ok (Autonomous_busy Admission_paused))
            | None ->
              (match reject_if_stopping state (fun () -> Ok ()) with
               | Error error ->
@@ -3169,78 +3342,17 @@ let start_impl
               | Ok () ->
                 (match Atomic.get t.turn_in_flight with
                  | Some in_flight ->
-                   (match lane with
-                    | Autonomous ->
-                      t.autonomous_lost_slot := true
-                    | Chat_operation | Maintenance -> ());
                    Eio.Promise.resolve
                      resolve
                      (Ok (Autonomous_busy (Turn_busy (Some in_flight))))
-                 | None ->
-                   let run_admitted_turn () =
-                     (* The Owner keeps its slot until the turn settles. A
-                        queued chat starts after the turn ends. *)
-                     let interrupt_token = Keeper_interrupt_token.fresh () in
-                     let observation = Keeper_turn_preview_owner.create_turn_observation () in
-                     publish_turn_in_flight
-                       t
-                       (Some { lane; started_at = t.now ()
-                             ; interrupt_token });
-                     Eio.Fiber.fork ~sw:keeper_sw (fun () ->
-                       Keeper_turn_preview_owner.with_owner ~interrupt_token ~observation @@ fun () ->
-                       let outcome =
-                         try
-                           Ok
-                             (Eio.Switch.run (fun child_sw ->
-                                Atomic.set t.child_cancel
-                                  (Some
-                                     { stop =
-                                         (fun () ->
-                                            Eio.Switch.fail child_sw Stop_active_child)
-                                     ; interrupt =
-                                         (fun () ->
-                                            Eio.Switch.fail child_sw
-                                              Keeper_registry_types.Operator_interrupt)
-                                     });
-                                run ()))
-                         with
-                         (* Two different cancellations land here and both
-                            belong in [outcome] rather than on the stack.
-
-                            An operator interrupt fails [child_sw] from
-                            above, so it is the child's own result;
-                            [run_autonomous_if_idle] re-raises it at the
-                            bottom of this file with this backtrace, in the
-                            fiber that asked for the turn.
-
-                            An ambient cancellation reaches this fiber
-                            because [sw] is the server root switch
-                            ([keeper_owner_registry.ml] passes [pool.sw],
-                            which is the switch [bin/main_eio.ml] fails on
-                            shutdown). Raising here would escape the
-                            [Fiber.fork ~sw] body, and eio hands that to
-                            [Switch.fail sw] -- so one cancelled turn would
-                            turn a clean shutdown into an error exit. It
-                            would also skip the [child_cancel] reset, the
-                            [notify] below and [resolve], leaving whoever
-                            awaits the promise parked forever. *)
-                         | exn -> Error (exn, Printexc.get_raw_backtrace ()) (* cancel-guard-ok: carried out as a value and re-raised in the requesting fiber; raising here fails the root switch *)
-                       in
-                       Atomic.set t.child_cancel None;
-                       notify
-                         t
-                         (Child_finished
-                            (Autonomous_child_finished { outcome; resolve })))
-                   in
-                   (match lane with
-                    | Maintenance when defer_to_chat ->
-                      ignore (recover_operation_availability t : (unit, error) result);
-                      let inventory = Atomic.get t.operation_projection in
-                      if inventory.store_unavailable || inventory.queued_count > 0
-                         || Option.is_some inventory.running_operation_id then
-                        Eio.Promise.resolve resolve (Ok (Autonomous_busy (Turn_busy None)))
-                      else run_admitted_turn ()
-                    | Chat_operation | Maintenance | Autonomous -> run_admitted_turn ()))));
+                 | None when defer_to_chat ->
+                   ignore (recover_operation_availability t : (unit, error) result);
+                   let inventory = Atomic.get t.operation_projection in
+                   if inventory.store_unavailable || inventory.queued_count > 0
+                      || Option.is_some inventory.running_operation_id then
+                     Eio.Promise.resolve resolve (Ok (Autonomous_busy (Turn_busy None)))
+                   else start_owned_turn ~lane:Maintenance ~run ~resolve
+                 | None -> start_owned_turn ~lane:Maintenance ~run ~resolve)));
           loop state
         | Command (Child_finished completion, resolve) ->
           let result =
@@ -3308,8 +3420,7 @@ let start_impl
           List.iter
             (fun waiter -> Eio.Promise.resolve waiter result)
             shutdown_idle_waiters;
-          start_child_if_needed state shutdown_operation_id;
-          notify_turn_slot_released t;
+          start_next_turn state shutdown_operation_id;
           loop state
         | Command (Begin_stopping, resolve) ->
           let transition = Keeper_owner_reducer.begin_stopping state in
@@ -3318,6 +3429,8 @@ let start_impl
              Eio.Promise.resolve resolve (Error error);
              loop state
            | Ok state ->
+             (* A parked autonomous turn hears that the Owner is stopping. *)
+             start_next_turn state shutdown_operation_id;
              if Option.is_some (Atomic.get t.turn_in_flight)
              then (
                t.stopping_waiters := resolve :: !(t.stopping_waiters);
@@ -3333,7 +3446,7 @@ let start_impl
        while [start] runs, so the removal belongs to this fiber rather than to
        [start], and it never waits for a session lock. *)
     release_committed_checkpoints ~keeper_name ~session_root t.operation_store;
-    start_child_if_needed initial_state None;
+    start_next_turn initial_state None;
     (* The defer-time wake died with the previous process; re-arm it inside
        this Keeper's bulkhead switch. *)
     rearm_cooling_retry_wake ();
@@ -3408,7 +3521,6 @@ let start
       ~session_root
       ~now
       ~operation_runner
-      ~on_turn_slot_released
       ~keeper_name
       ~initial_meta
   =
@@ -3421,7 +3533,6 @@ let start
     ~session_root
     ~now
     ~operation_runner
-    ~on_turn_slot_released
     ~keeper_name
     ~initial_meta
 ;;
@@ -3435,7 +3546,6 @@ let start_supervised
       ~session_root
       ~now
       ~operation_runner
-      ~on_turn_slot_released
       ~keeper_name
       ~initial_meta
   =
@@ -3448,7 +3558,6 @@ let start_supervised
     ~session_root
     ~now
     ~operation_runner
-    ~on_turn_slot_released
     ~keeper_name
     ~initial_meta
 ;;
@@ -3575,9 +3684,15 @@ let succeed_running_operation t ~operation_id ~outcome_ref =
   request t (Succeed_running_operation { operation_id; outcome_ref })
 ;;
 
-let run_autonomous_if_idle t run =
-  match request t (Run_if_idle
-      { lane = Autonomous; defer_to_chat = false; run }) with
+let run_autonomous_turn t ~input run =
+  let offer = Atomic.fetch_and_add t.autonomous_offers 1 in
+  match request t (Offer_autonomous_turn { offer; input; run }) with
+  | exception (Eio.Cancel.Cancelled _ as exn) ->
+    (* The offer may still be parked. Withdraw it so the Owner does not start
+       a turn nobody waits for; the handover itself is protected. *)
+    let backtrace = Printexc.get_raw_backtrace () in
+    notify t (Withdraw_autonomous_turn offer);
+    Printexc.raise_with_backtrace exn backtrace
   | Error _ as error -> error
   | Ok (Autonomous_ran value) -> Ok (`Ran value)
   | Ok (Autonomous_busy block) -> Ok (`Busy block)
@@ -3611,8 +3726,7 @@ let run_autonomous_if_idle t run =
 (* Maintenance is not interruptible ([Interrupt_maintenance_running]), so an
    operator interrupt reaching this lane is not a translated outcome. *)
 let run_maintenance_if_idle ?(defer_to_chat = false) t run =
-  match request t (Run_if_idle
-      { lane = Maintenance; defer_to_chat; run }) with
+  match request t (Run_maintenance_if_idle { defer_to_chat; run }) with
   | Error _ as error -> error
   | Ok (Autonomous_ran value) -> Ok (`Ran value)
   | Ok (Autonomous_busy block) -> Ok (`Busy block)

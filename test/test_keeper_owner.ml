@@ -156,7 +156,6 @@ let start_owner_with_executor_ready
          (fun execute ->
             Owner.{ ready = operation_ready; execute; on_execution_settled })
          operation_executor)
-    ~on_turn_slot_released:None
     ~keeper_name
     ~initial_meta
 ;;
@@ -199,6 +198,10 @@ let operation_id value =
 
 let operation_source = `Assoc [ "kind", `String "dashboard" ]
 let operation_input text = `Assoc [ "message", `String text ]
+
+(* The autonomous line with nothing waiting: an offer that meets a held slot
+   is answered busy at once. *)
+let nothing_waiting () = Owner.No_autonomous_input
 
 let with_state_change_observer observer f =
   Owner.install_state_change_observer observer;
@@ -787,7 +790,7 @@ let test_memory_health_hears_a_new_trace_or_meta () =
       (Owner.start ~base_path ~sw
          ~store:{ Owner.replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
          ~operation_store_path:path ~session_root:(Filename.concat base_path "traces")
-         ~now:(fun () -> 42.0) ~operation_runner:None ~on_turn_slot_released:None
+         ~now:(fun () -> 42.0) ~operation_runner:None
          ~keeper_name:"heard" ~initial_meta:None)
   in
   let current () = Option.get (Owner.projection owner).meta in
@@ -1042,7 +1045,7 @@ let test_stopping_cancels_and_joins_autonomous_child () =
   in
   Eio.Fiber.fork ~sw (fun () ->
     let result =
-      Owner.run_autonomous_if_idle owner (fun () ->
+      Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () ->
         Eio.Promise.resolve resolve_child_started ();
         Eio.Promise.await never)
     in
@@ -1076,138 +1079,6 @@ let test_stopping_cancels_and_joins_autonomous_child () =
 
    The test states the blocked lane, not just the fact of blocking, because the
    holder's identity is what a fairness change would alter. *)
-(* The release signal states availability, not completion. A listener woken by
-   "a turn ended" would find the slot already taken whenever a chat operation
-   was queued behind it, defer, and wait out its own cadence again — the exact
-   loop the notification exists to end. So the Owner fires it only after the
-   queued chat operation, if any, has been offered the slot and declined to
-   exist. Both directions are asserted here; only the negative one can tell the
-   two meanings apart. *)
-let test_turn_slot_release_signals_availability () =
-  Eio_main.run @@ fun _env ->
-  Eio.Switch.run @@ fun sw ->
-  let released = ref 0 in
-  let path = Filename.temp_file "keeper-owner-slot-release-" ".sqlite3" in
-  Unix.unlink path;
-  Eio.Switch.on_release sw (fun () ->
-    if Sys.file_exists path then Unix.unlink path);
-  let chat_started, resolve_chat_started = Eio.Promise.create () in
-  let release_chat, resolve_release_chat = Eio.Promise.create () in
-  let execute ~sw:_ ~keeper_name:_ ~claim =
-    (match claim () with
-     | Error error -> fail (Owner.error_to_string error)
-     | Ok None -> fail "chat runner did not find its FIFO head"
-     | Ok (Some _) -> ());
-    Eio.Promise.resolve resolve_chat_started ();
-    Eio.Promise.await release_chat;
-    Owner.Operation_succeeded { outcome_ref = "turn:slot-release" }
-  in
-  let owner =
-    owner_ok
-      (Owner.start ~base_path:(Filename.dirname path)
-         ~sw
-         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-         ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
-         ~now:(fun () -> 42.0)
-         ~operation_runner:
-           (Some
-              Owner.
-                { ready = (fun ~keeper_name:_ -> true)
-                ; execute
-                ; on_execution_settled = noop_execution_settled
-                })
-         ~on_turn_slot_released:(Some (fun () -> incr released))
-         ~keeper_name:"slot-release"
-         ~initial_meta:(Some (make_meta "slot-release")))
-  in
-  let autonomous_started, resolve_autonomous_started = Eio.Promise.create () in
-  let release_autonomous, resolve_release_autonomous = Eio.Promise.create () in
-  let autonomous_result = Eio.Stream.create 1 in
-  Eio.Fiber.fork ~sw (fun () ->
-    Eio.Stream.add
-      autonomous_result
-      (Owner.run_autonomous_if_idle owner (fun () ->
-         Eio.Promise.resolve resolve_autonomous_started ();
-         Eio.Promise.await release_autonomous)));
-  Eio.Promise.await autonomous_started;
-  (* Queue the chat operation while the slot is held, so releasing it produces
-     the contested handoff: [Child_finished] frees the slot and offers it to the
-     queued operation in the same step. *)
-  ignore
-    (owner_ok
-       (Owner.submit_operation
-          owner
-          ~operation_id:(operation_id "kmsg-slot-release")
-          ~source:operation_source
-          ~input:(operation_input "queued behind autonomous")));
-  check int "a held slot signals nothing" 0 !released;
-  Eio.Promise.resolve resolve_release_autonomous ();
-  ignore (Eio.Stream.take autonomous_result);
-  Eio.Promise.await chat_started;
-  (* The chat operation took the slot in that handoff, so no turn can start and
-     no availability is owed. A signal here would mean "a turn ended", and its
-     listener would wake only to be told the slot is busy. *)
-  check
-    int
-    "a handoff claimed by chat owes no availability signal"
-    0
-    !released;
-  (* Only a lane that asked and was refused is owed the signal. Nothing has
-     been refused yet, so make the autonomous lane lose the slot to the chat
-     turn now holding it. *)
-  (match Owner.run_autonomous_if_idle owner (fun () -> ()) with
-   | Ok (`Busy (Owner.Turn_busy _)) -> ()
-   | Ok (`Busy other) ->
-     fail ("autonomous lost the slot for the wrong reason: "
-           ^ Owner.autonomous_block_to_string other)
-   | Ok (`Ran ()) -> fail "autonomous ran while the chat lane held the slot"
-   | Ok `Interrupted -> fail "nothing interrupted the refused autonomous lane"
-   | Error error -> fail (Owner.error_to_string error));
-  Eio.Promise.resolve resolve_release_chat ();
-  ignore (await_terminal owner (operation_id "kmsg-slot-release") 1_000);
-  check int "the slot left unclaimed signals the refused lane once" 1 !released
-;;
-
-(* Regression guard for the wake storm of 2026-08-12: the notification used to
-   fire on every turn end, and a woken keeper starts its next turn at once, so
-   each turn scheduled the next one and the fleet ran 13x its measured turn
-   rate. A turn that nobody was waiting behind owes no signal. *)
-let test_uncontested_turn_end_signals_nothing () =
-  Eio_main.run @@ fun _env ->
-  Eio.Switch.run @@ fun sw ->
-  let released = ref 0 in
-  let path = Filename.temp_file "keeper-owner-uncontested-" ".sqlite3" in
-  Unix.unlink path;
-  Eio.Switch.on_release sw (fun () ->
-    if Sys.file_exists path then Unix.unlink path);
-  let owner =
-    owner_ok
-      (Owner.start ~base_path:(Filename.dirname path)
-         ~sw
-         ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
-         ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
-         ~now:(fun () -> 42.0)
-         ~operation_runner:None
-         ~on_turn_slot_released:(Some (fun () -> incr released))
-         ~keeper_name:"uncontested"
-         ~initial_meta:(Some (make_meta "uncontested")))
-  in
-  List.iter
-    (fun turn ->
-      match Owner.run_autonomous_if_idle owner (fun () -> ()) with
-      | Ok (`Ran ()) -> ()
-      | Ok `Interrupted -> fail (Printf.sprintf "turn %d was reported interrupted" turn)
-      | Ok (`Busy block) ->
-        fail
-          (Printf.sprintf
-             "turn %d found the slot busy on an idle owner: %s"
-             turn
-             (Owner.autonomous_block_to_string block))
-      | Error error -> fail (Owner.error_to_string error))
-    [ 1; 2; 3 ];
-  check int "an uncontested turn end signals nothing" 0 !released
-;;
-
 let test_chat_lane_holder_blocks_autonomous_admission () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -1245,7 +1116,7 @@ let test_chat_lane_holder_blocks_autonomous_admission () =
    | Some { lane = _; _ } -> fail "chat operation did not take the turn lane"
    | None -> fail "no turn in flight while the chat runner was executing");
   (match
-     Owner.run_autonomous_if_idle owner (fun () ->
+     Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () ->
        fail "autonomous child ran while a chat operation held the turn")
    with
    | Ok (`Busy (Owner.Turn_busy (Some { lane = Owner.Chat_operation; _ }))) -> ()
@@ -1292,7 +1163,7 @@ let test_operation_waiting_event_is_scoped_to_owner_workspace () =
               ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
               ~operation_store_path:(Filename.concat base_path "operations.sqlite3")
               ~session_root:(Filename.concat base_path "traces")
-              ~now:(fun () -> 42.0) ~operation_runner:None ~on_turn_slot_released:None
+              ~now:(fun () -> 42.0) ~operation_runner:None
               ~keeper_name ~initial_meta:(Some (make_meta keeper_name))
             |> owner_ok in
           ignore (owner_ok (Owner.submit_operation owner
@@ -1645,7 +1516,7 @@ let start_owner_in ~sw ~base_path ~store (meta : Keeper_meta_contract.keeper_met
   Owner.start ~sw ~base_path ~store
     ~operation_store_path:(Filename.concat base_path (meta.name ^ ".sqlite3"))
     ~session_root:(Filename.concat base_path "traces")
-    ~now:(fun () -> 42.0) ~operation_runner:None ~on_turn_slot_released:None
+    ~now:(fun () -> 42.0) ~operation_runner:None
     ~keeper_name:meta.name ~initial_meta:(Some meta)
   |> owner_ok
 ;;
@@ -1916,7 +1787,7 @@ let test_health_state_change_observer_tracks_owner_projections () =
          (owner_ok
             (Owner.succeed_running_operation owner ~operation_id ~outcome_ref:"turn:health"));
        check int "terminal projection notifies once" 3 !notifications;
-       let turn_result = Owner.run_autonomous_if_idle owner (fun () -> ()) in
+       let turn_result = Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () -> ()) in
        (match turn_result with
         | Ok (`Ran ()) -> ()
         | Ok `Interrupted -> fail "the turn was reported interrupted"
@@ -2035,7 +1906,7 @@ let test_gate_wait_releases_owner_without_repeated_children () =
   let projection = Owner.operation_projection owner in
   check int "approval wait remains queued" 1 projection.queued_count;
   check bool "approval wait cannot request a yield" false projection.has_claimable_queued;
-  (match owner_ok (Owner.run_autonomous_if_idle owner (fun () -> "independent work")) with
+  (match owner_ok (Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () -> "independent work")) with
    | `Ran value -> check string "waiting released Owner" "independent work" value
    | `Interrupted -> fail "nothing interrupted the independent work"
    | `Busy _ -> fail "Gate waiting retained Owner slot");
@@ -2081,7 +1952,7 @@ let test_an_interrupt_ends_a_turn_waiting_on_its_own_owner () =
          (fun () ->
             turn
             := Some
-                 (Owner.run_autonomous_if_idle owner (fun () ->
+                 (Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () ->
                     Eio.Promise.resolve wait_started ();
                     ignore (Owner.await_idle_after_shutdown owner))))
          (fun () ->
@@ -2131,7 +2002,7 @@ let test_a_cancelled_caller_leaves_a_stop_that_waits_for_the_child () =
   let turn_done, resolve_turn_done = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
     ignore
-      (Owner.run_autonomous_if_idle owner (fun () ->
+      (Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () ->
          Eio.Promise.resolve resolve_child_started ();
          (* The stop fails the child switch; only the case ends this child. *)
          Eio.Cancel.protect (fun () -> Eio.Promise.await release_child)));
@@ -2191,7 +2062,7 @@ let test_cooling_retry_readiness_refreshes_on_wake () =
   check bool "cooling input is not ready" false cooling.has_claimable_queued;
   check bool "cooling input cannot be claimed" true
     (Option.is_none (Owner.claim_next_operation owner |> owner_ok));
-  (match Owner.run_autonomous_if_idle owner (fun () ->
+  (match Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () ->
        Owner.wake_operation_drain owner |> owner_ok;
        check bool "early wake does not request a yield" false
          (Owner.operation_projection owner).has_claimable_queued;
@@ -2892,7 +2763,7 @@ let await_slot_released ~clock owner =
 
 (* The autonomous lane's counterpart of [test_operator_interrupt_settles_as_typed_cancel]. The Owner
    interrupts by failing the child switch, so [Switch.run] raises after the
-   body returns; before the translation in [run_autonomous_if_idle] that
+   body returns; before the translation in [run_autonomous_turn] that
    exception reached the keepalive fiber and the registry recorded a crash. *)
 let test_autonomous_operator_interrupt_is_a_typed_outcome () =
   Eio_main.run @@ fun _env ->
@@ -2909,7 +2780,7 @@ let test_autonomous_operator_interrupt_is_a_typed_outcome () =
   in
   Eio.Fiber.fork ~sw (fun () ->
     let result =
-      Owner.run_autonomous_if_idle owner (fun () ->
+      Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () ->
         Eio.Promise.resolve resolve_child_started ();
         (* Mirrors the keepalive cycle: the body sees the interrupt at a
            cancellation point and returns normally anyway. *)
@@ -2929,7 +2800,7 @@ let test_autonomous_operator_interrupt_is_a_typed_outcome () =
    | Error error -> fail ("interrupt surfaced as an error: " ^ Owner.error_to_string error));
   check bool "the interrupt releases the turn slot" true
     (Option.is_none (Owner.turn_in_flight owner));
-  (match Owner.run_autonomous_if_idle owner (fun () -> 42) with
+  (match Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () -> 42) with
    | Ok (`Ran 42) -> ()
    | Ok (`Ran _) | Ok `Interrupted | Ok (`Busy _) | Error _ ->
      fail "the Owner did not admit the next autonomous turn")
@@ -2993,7 +2864,7 @@ let test_chat_interrupt_cancels_the_turn_and_the_queue_continues () =
   (* Only an operator's explicit pause closes admission. *)
   ignore (owner_ok (Owner.apply_meta owner
     (Pause { reason = Keeper_latched_reason.Operator_paused { operator_actor = Grpc_directive }; updated_at = "manual" })));
-  (match Owner.run_autonomous_if_idle owner (fun () -> fail "paused autonomy ran") with
+  (match Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () -> fail "paused autonomy ran") with
    | Ok (`Busy Owner.Admission_paused) -> () | _ -> fail "autonomy bypassed the operator pause");
   ignore (owner_ok (Owner.submit_operation owner
     ~operation_id:fifth ~source:operation_source ~input:(operation_input "wait")));
@@ -3164,7 +3035,6 @@ let test_chat_interrupt_during_settle_has_nothing_to_cancel () =
     ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
     ~now:(fun () -> 42.0)
     ~operation_runner:(Some runner)
-    ~on_turn_slot_released:None
     ~initial_meta:(Some (make_meta "settle-stop"))) in
   let only = operation_id "settle-only" in
   ignore (owner_ok (Owner.submit_operation owner
@@ -3694,7 +3564,7 @@ let test_startup_requeues_exact_native_call () =
     let owner = Owner.start ~base_path:(Filename.dirname path) ~sw
       ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
       ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces") ~now:(fun () -> 20.) ~operation_runner:None
-      ~on_turn_slot_released:None ~keeper_name:"native-restart"
+      ~keeper_name:"native-restart"
       ~initial_meta:(Some (make_meta "native-restart")) |> owner_ok in
     check int "witnessed native operation not interrupted" 0 (List.length (Owner.failed_operations_at_start owner));
     let writer label expected =
@@ -3769,7 +3639,7 @@ let test_startup_settlement_with_unproven_writers_keeps_calls_unproven () =
     let owner = Owner.start ~base_path:(Filename.dirname path) ~sw
       ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
       ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
-      ~now:(fun () -> 20.) ~operation_runner:None ~on_turn_slot_released:None
+      ~now:(fun () -> 20.) ~operation_runner:None
       ~keeper_name:"native-restart-unproven"
       ~initial_meta:(Some (make_meta "native-restart-unproven")) |> owner_ok in
     check int "the call is requeued, not interrupted" 0
@@ -3823,7 +3693,7 @@ let start_restart_owner ~sw ~path ~name =
   Owner.start ~base_path:(Filename.dirname path) ~sw
     ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
     ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
-    ~now:(fun () -> 20.) ~operation_runner:None ~on_turn_slot_released:None
+    ~now:(fun () -> 20.) ~operation_runner:None
     ~keeper_name:name ~initial_meta:(Some (make_meta name)) |> owner_ok
 ;;
 
@@ -3998,7 +3868,7 @@ let test_a_failed_claim_closes_the_inherited_call_and_the_next_operation_runs ()
       ~now:(fun () -> 20.)
       ~operation_runner:(Some Owner.{ ready = (fun ~keeper_name:_ -> !ready); execute
                                     ; on_execution_settled = noop_execution_settled })
-      ~on_turn_slot_released:None ~keeper_name:"failed-claim"
+      ~keeper_name:"failed-claim"
       ~initial_meta:(Some (make_meta "failed-claim")) |> owner_ok in
   owner_cell := Some owner;
   check int "nothing was Running, so nothing is interrupted" 0
@@ -4061,7 +3931,7 @@ let test_operation_id_interrupt_leaves_an_autonomous_slot_holder_alone () =
   let autonomous_result = Eio.Stream.create 1 in
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Stream.add autonomous_result
-      (Owner.run_autonomous_if_idle owner (fun () ->
+      (Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () ->
          Eio.Promise.resolve resolve_autonomous_started ();
          try Eio.Promise.await release_autonomous; `Completed with
          | exn when Keeper_registry_types.is_operator_interrupt exn -> `Cancelled)));
@@ -4170,7 +4040,6 @@ let test_startup_interrupts_running_without_requeue () =
               ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
               ~now:(fun () -> 20.0)
               ~operation_runner:None
-           ~on_turn_slot_released:None
               ~keeper_name:"interrupted-restart"
               ~initial_meta:(Some (make_meta "interrupted-restart")))
        in
@@ -4309,7 +4178,6 @@ let test_registry_start_leaves_a_failure_row_for_a_restart_interrupted_request (
           Owner_registry.install_from_store
             ~sw
             ~operation_runner:None
-            ~on_turn_slot_released:None
             config
         with
         | Ok count -> check int "one owner installed" 1 count
@@ -4429,7 +4297,6 @@ let test_registry_start_preserves_failure_without_an_undecodable_route () =
              Owner_registry.install_from_store
                ~sw
                ~operation_runner:None
-               ~on_turn_slot_released:None
                config
            with
            | Ok count -> check int "one owner installed" 1 count
@@ -4503,7 +4370,7 @@ let test_registry_replays_all_failed_facts_without_erasing_output () =
   Unix.mkdir blocked_path 0o700;
   let start () = Eio.Switch.run @@ fun sw ->
     Owner_registry.install_from_store ~sw ~operation_runner:None
-      ~on_turn_slot_released:None config
+      config
     |> Result.map_error Owner_registry.install_error_to_string |> Result.get_ok |> ignore in
   let rows_for operation slot =
     Keeper_chat_store.load ~base_dir:base_path ~keeper_name
@@ -4651,7 +4518,6 @@ let test_registry_start_ends_every_batch_member_journal_after_a_restart () =
           Owner_registry.install_from_store
             ~sw
             ~operation_runner:None
-            ~on_turn_slot_released:None
             config
         with
         | Ok count -> check int "one owner installed" 1 count
@@ -4724,7 +4590,6 @@ let test_startup_queued_waits_for_runner_readiness () =
                      ; execute
                      ; on_execution_settled = noop_execution_settled
                      })
-              ~on_turn_slot_released:None
               ~keeper_name:"ready-after-registration"
               ~initial_meta:(Some (make_meta "ready-after-registration")))
        in
@@ -4774,7 +4639,6 @@ let test_a_read_under_a_failed_reopen_keeps_the_cause () =
          ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
          ~now:(fun () -> 42.0)
          ~operation_runner:None
-         ~on_turn_slot_released:None
          ~keeper_name:"reopen-failure"
          ~initial_meta:(Some (make_meta "reopen-failure")))
   in
@@ -4941,14 +4805,14 @@ let test_idle_wake_recovers_store_and_answers_queued_chat () =
   check int "healthy wake does not rerun a terminal operation" 1 (List.length !executed)
 ;;
 
-let with_recovery_store ~sw ~keeper_name ~runner ~on_turn_slot_released f =
+let with_recovery_store ~sw ~keeper_name ~runner f =
   let path = Filename.temp_file "keeper-owner-recovery-" ".sqlite3" in
   Unix.unlink path;
   Eio.Switch.on_release sw (fun () -> if Sys.file_exists path then Unix.unlink path);
   let owner = owner_ok (Owner.start ~base_path:(Filename.dirname path) ~sw
     ~store:{replace=(fun _ -> Ok ()); remove=(fun _ -> Ok ())}
     ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces") ~now:(fun () -> 42.)
-    ~operation_runner:runner ~on_turn_slot_released ~keeper_name
+    ~operation_runner:runner ~keeper_name
     ~initial_meta:(Some (make_meta keeper_name))) in
   f owner path
 ;;
@@ -4957,7 +4821,7 @@ let test_recovery_keeps_integrity_failure_fenced () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
   with_recovery_store ~sw ~keeper_name:"recovery-integrity" ~runner:None
-    ~on_turn_slot_released:None (fun owner path ->
+    (fun owner path ->
       inject_operation_failure owner (operation_id "kmsg-integrity-rollback");
       let db = Sqlite3.db_open ~mode:`NO_CREATE path in
       Eio.Switch.on_release sw (fun () -> ignore (Sqlite3.db_close db : bool));
@@ -5005,7 +4869,7 @@ let test_owner_lifts_an_availability_fence_without_a_command () =
     ~clock:(clock :> float Eio.Time.clock_ty Eio.Resource.t)
     ~mono_clock:env#mono_clock @@ fun () ->
   let keeper_name = "self-recovery" in
-  with_recovery_store ~sw ~keeper_name ~runner:None ~on_turn_slot_released:None
+  with_recovery_store ~sw ~keeper_name ~runner:None
     (fun owner path ->
       let subscriber = Printf.sprintf "owner-self-recovery-%d" (Unix.getpid ()) in
       let heard = ref 0 in
@@ -5053,8 +4917,7 @@ let test_owner_lifts_an_availability_fence_without_a_command () =
 
 (* The Owner clears its child slot in the same mailbox turn that settles the
    child, so an empty slot is the observable end of the child even when that
-   settlement was refused by a fenced store. [on_turn_slot_released] cannot be
-   used for this: it fires only after the autonomous lane lost the slot. *)
+   settlement was refused by a fenced store. *)
 let rec await_child_slot_empty owner remaining =
   if remaining = 0
   then fail "child slot did not empty"
@@ -5089,7 +4952,6 @@ let test_recovery_settles_an_orphaned_child_row_without_replay () =
     settled := (claimed_operation_id, execution) :: !settled in
   with_recovery_store ~sw ~keeper_name:"recovery-active"
     ~runner:(Some Owner.{ready=(fun ~keeper_name:_ -> true); execute; on_execution_settled})
-    ~on_turn_slot_released:None
     (fun owner _path ->
       let original = operation_id "kmsg-recovery-active" in
       ignore (owner_ok (Owner.submit_operation owner ~operation_id:original
@@ -5159,7 +5021,6 @@ let test_recovery_closes_an_active_native_call_instead_of_running_it () =
     settled := (claimed_operation_id, execution) :: !settled in
   with_recovery_store ~sw ~keeper_name:"recovery-native-call"
     ~runner:(Some Owner.{ready=(fun ~keeper_name:_ -> true); execute; on_execution_settled})
-    ~on_turn_slot_released:None
     (fun owner _path ->
       owner_ref := Some owner;
       let original = operation_id "kmsg-recovery-native-call" in
@@ -5211,12 +5072,11 @@ let test_availability_recovers_under_an_autonomous_child () =
   let started, resolve_started = Eio.Promise.create () in
   let release, resolve_release = Eio.Promise.create () in
   with_recovery_store ~sw ~keeper_name:"recovery-autonomous" ~runner:None
-    ~on_turn_slot_released:None
     (fun owner _path ->
       let autonomous_result = Eio.Stream.create 1 in
       Eio.Fiber.fork ~sw (fun () ->
         let result =
-          Owner.run_autonomous_if_idle owner (fun () ->
+          Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () ->
             Eio.Promise.resolve resolve_started ();
             Eio.Promise.await release)
         in
@@ -5329,7 +5189,7 @@ let test_owner_linearizes_autonomous_and_chat_children () =
   let autonomous_result = Eio.Stream.create 1 in
   Eio.Fiber.fork ~sw (fun () ->
     let result =
-      Owner.run_autonomous_if_idle owner (fun () ->
+      Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () ->
         Eio.Promise.resolve resolve_autonomous_started ();
         Eio.Promise.await release_autonomous;
         42)
@@ -5355,7 +5215,7 @@ let test_owner_linearizes_autonomous_and_chat_children () =
      fail
        ("chat operation started beside autonomous child: "
         ^ Chat_operation.state_to_string state));
-  (match Owner.run_autonomous_if_idle owner (fun () -> fail "busy child ran") with
+  (match Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () -> fail "busy child ran") with
    | Ok (`Busy (Owner.Turn_busy (Some { lane = Owner.Autonomous; _ }))) -> ()
    | Ok (`Busy _) -> fail "busy result projected the wrong lane"
    | Ok (`Ran _) -> fail "Owner admitted two autonomous children"
@@ -5409,7 +5269,7 @@ let test_unready_chat_queue_does_not_block_autonomous () =
           ~operation_id
           ~source:operation_source
           ~input:(operation_input "remain queued")));
-  (match Owner.run_autonomous_if_idle owner (fun () -> 7) with
+  (match Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () -> 7) with
    | Ok (`Ran value) -> check int "autonomous callback ran" 7 value
    | Ok `Interrupted -> fail "nothing interrupted the autonomous callback"
    | Ok (`Busy block) ->
@@ -5443,7 +5303,7 @@ let test_owner_shutdown_linearizes_and_awaits_child () =
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Stream.add
       child_result
-      (Owner.run_autonomous_if_idle owner (fun () ->
+      (Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () ->
          Eio.Promise.resolve resolve_child_started ();
          Eio.Promise.await release_child)));
   Eio.Promise.await child_started;
@@ -5591,11 +5451,11 @@ let test_autonomous_children_of_distinct_owners_do_not_cross_block () =
   let second = start "turn-owner-second" in
   Eio.Fiber.fork ~sw (fun () ->
     ignore
-      (Owner.run_autonomous_if_idle first (fun () ->
+      (Owner.run_autonomous_turn first ~input:nothing_waiting (fun () ->
          Eio.Promise.resolve resolve_first_started ();
          Eio.Promise.await release_first)));
   Eio.Promise.await first_started;
-  (match Owner.run_autonomous_if_idle second (fun () -> 7) with
+  (match Owner.run_autonomous_turn second ~input:nothing_waiting (fun () -> 7) with
    | Ok (`Ran 7) -> ()
    | Ok (`Ran value) -> failf "wrong second Owner result: %d" value
    | Ok `Interrupted -> fail "nothing interrupted the second Keeper's autonomous child"
@@ -5674,7 +5534,6 @@ let test_same_process_recreate_reopens_purged_operation_store () =
               ~session_root:(Filename.concat (Filename.dirname operation_store_path) "traces")
               ~now:(fun () -> 42.0)
               ~operation_runner:None
-              ~on_turn_slot_released:None
               ~keeper_name
               ~initial_meta:(Some meta))
        in
@@ -5725,7 +5584,7 @@ let test_turn_number_survives_an_owner_restart_without_commit () =
         | Error detail -> fail ("failed to seed owner meta: " ^ detail));
        let with_owner f =
          Eio.Switch.run @@ fun sw ->
-         (match Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+         (match Owner_registry.install_from_store ~sw ~operation_runner:None config with
           | Ok _ -> ()
           | Error error -> fail (Owner_registry.install_error_to_string error));
          f ()
@@ -5768,7 +5627,7 @@ let test_turn_allocation_types_an_absent_keeper () =
        Eio.Switch.run @@ fun sw ->
        (match
           Owner_registry.install_from_store
-            ~sw ~operation_runner:None ~on_turn_slot_released:None config
+            ~sw ~operation_runner:None config
         with
         | Ok _ -> ()
         | Error error -> fail (Owner_registry.install_error_to_string error));
@@ -5800,7 +5659,7 @@ let test_root_inventory_loads_and_extends_exactly_once () =
        (match Keeper_meta_store.replace_snapshot config first with
         | Ok () -> ()
         | Error detail -> fail ("failed to seed owner meta: " ^ detail));
-       (match Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+       (match Owner_registry.install_from_store ~sw ~operation_runner:None config with
         | Ok count -> check int "strict startup owner count" 1 count
         | Error error -> fail (Owner_registry.install_error_to_string error));
        let loaded =
@@ -5894,7 +5753,7 @@ let test_agent_delegate_submits_owner_operation_without_waiting ?(with_artifact=
             ~base_path
             meta.name
             meta);
-       Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config
+       Owner_registry.install_from_store ~sw ~operation_runner:None config
        |> Result.get_ok
        |> ignore;
        let ctx : _ Keeper_tool_surface.context =
@@ -6402,7 +6261,7 @@ let test_connector_submit_uses_owner_operation_idempotency () =
        (match Keeper_meta_store.replace_snapshot config meta with
         | Ok () -> ()
         | Error detail -> fail detail);
-       (match Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+       (match Owner_registry.install_from_store ~sw ~operation_runner:None config with
         | Ok 1 -> ()
         | Ok count -> failf "unexpected owner count %d" count
         | Error error -> fail (Owner_registry.install_error_to_string error));
@@ -6494,7 +6353,6 @@ let test_gate_dispatch_accepts_external_speaker_as_durable_operation () =
           Owner_registry.install_from_store
             ~sw
             ~operation_runner:None
-            ~on_turn_slot_released:None
             config
         with
         | Ok 1 -> ()
@@ -6577,7 +6435,7 @@ let test_telegram_poll_receipt_is_persisted_owner_operation () =
     ignore(Workspace.init config ~agent_name:(Some "telegram-owner-test"));
     let meta=make_meta "telegram-owner" in
     (match Keeper_meta_store.replace_snapshot config meta with Ok () -> () | Error detail -> fail detail);
-    (match Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+    (match Owner_registry.install_from_store ~sw ~operation_runner:None config with
      | Ok 1 -> () | Ok _ -> fail "owner count" | Error error -> fail(Owner_registry.install_error_to_string error));
     let post ~url ~body =
       match Filename.basename(Uri.path(Uri.of_string url)) with
@@ -6658,7 +6516,7 @@ let test_telegram_claim_pins_owner_across_cursor_failure () =
             dispatches:=keeper_name::!dispatches;
             dispatch ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name ~idempotency_key ~metadata ~content)
         update in
-    let install sw=match Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+    let install sw=match Owner_registry.install_from_store ~sw ~operation_runner:None config with
       | Ok 2->() | Ok _->fail "two owners expected" | Error error->fail(Owner_registry.install_error_to_string error) in
     let count keeper_name=
       let path=Keeper_chat_operation_store.path_for_keeper
@@ -6735,7 +6593,7 @@ let test_root_inventory_isolates_invalid_owner_snapshots () =
        Yojson.Safe.to_file
          (Filename.concat keepers_dir "inventory-path-name.json")
          (Keeper_meta_json.meta_to_json (make_meta "inventory-payload-name"));
-       (match Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+       (match Owner_registry.install_from_store ~sw ~operation_runner:None config with
         | Ok count -> check int "only valid owner starts" 1 count
         | Error error -> fail (Owner_registry.install_error_to_string error));
        (match Owner_registry.get ~base_path ~keeper_name:valid.name with
@@ -6853,7 +6711,7 @@ let test_root_inventory_reads_undecodable_meta_as_absent_and_boot_rematerializes
        let baseline = latest_log_seq () in
        Eio.Switch.run @@ fun sw ->
        Masc_test_deps.with_server_root_switch ~sw @@ fun () ->
-       (match Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+       (match Owner_registry.install_from_store ~sw ~operation_runner:None config with
         | Ok count -> check int "an undecodable meta installs no owner" 0 count
         | Error error -> fail (Owner_registry.install_error_to_string error));
        (match Owner_registry.get ~base_path ~keeper_name:name with
@@ -7096,7 +6954,7 @@ let test_registry_reads_owner_atomic_projection () =
        ignore (Workspace.init config ~agent_name:(Some "owner-projection-test"));
        let initial = make_meta "atomic-projection" in
        Keeper_meta_store.replace_snapshot config initial |> Result.get_ok;
-       Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config
+       Owner_registry.install_from_store ~sw ~operation_runner:None config
        |> Result.get_ok
        |> ignore;
        let stale_entry =
@@ -7139,7 +6997,7 @@ let test_lifecycle_reservation_remains_owner_admission_authority () =
        (match Keeper_meta_store.replace_snapshot config meta with
         | Ok () -> ()
         | Error detail -> fail ("failed to seed reserved owner meta: " ^ detail));
-       (match Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+       (match Owner_registry.install_from_store ~sw ~operation_runner:None config with
         | Ok count -> check int "reserved owner count" 1 count
         | Error error -> fail (Owner_registry.install_error_to_string error));
        let token =
@@ -7190,7 +7048,7 @@ let test_create_waits_for_lifecycle_admission_before_installing_owner () =
        Eio.Switch.run @@ fun sw ->
        let config = Workspace.default_config base_path in
        ignore (Workspace.init config ~agent_name:(Some "owner-create-reservation-test"));
-       (match Owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+       (match Owner_registry.install_from_store ~sw ~operation_runner:None config with
         | Ok count -> check int "empty owner inventory" 0 count
         | Error error -> fail (Owner_registry.install_error_to_string error));
        let meta = make_meta "create-reserved" in
@@ -7228,11 +7086,224 @@ let test_create_waits_for_lifecycle_admission_before_installing_owner () =
          (Owner_registry.For_testing.installed_owner_count ~base_path))
 ;;
 
+(* A chat runner for the alternation tests. Each claimed operation records
+   itself in [order], reports its id on [started] and runs until [release]
+   hands it a value. *)
+let blocking_chat_runner ~order ~started ~release ~sw:_ ~keeper_name:_ ~claim =
+  let operation = Option.get (owner_ok (claim ())) in
+  let id = Chat_operation.Operation_id.to_string operation.Chat_operation.operation_id in
+  order := ("chat:" ^ id) :: !order;
+  Eio.Stream.add started id;
+  Eio.Stream.take release;
+  Owner.Operation_succeeded { outcome_ref = "turn:" ^ id }
+;;
+
+(* An autonomous line with input waiting. Its first read resolves [reached]:
+   the Owner reads it once it holds an offer behind a busy slot. *)
+let input_waiting_after reached =
+  let first = ref true in
+  fun () ->
+    if !first
+    then (
+      first := false;
+      Eio.Promise.resolve reached ());
+    Owner.Autonomous_input_waiting
+;;
+
+let within ~clock label f =
+  try Eio.Time.with_timeout_exn clock fixture_start_deadline_s f with
+  | Eio.Time.Timeout -> fail (label ^ " did not happen within the fixture deadline")
+;;
+
+let expect_autonomous_ran label = function
+  | Ok (`Ran ()) -> ()
+  | Ok (`Busy block) -> fail (label ^ " was sent away: " ^ Owner.autonomous_block_to_string block)
+  | Ok `Interrupted -> fail (label ^ " was reported interrupted")
+  | Error error -> fail (label ^ " failed: " ^ Owner.error_to_string error)
+;;
+
+let start_alternation_owner ~sw ~order ~started ~release name =
+  owner_ok
+    (start_owner_with_executor
+       ~sw
+       ~store:{ replace = (fun _ -> Ok ()); remove = (fun _ -> Ok ()) }
+       ~operation_executor:(Some (blocking_chat_runner ~order ~started ~release))
+       ~keeper_name:name
+       ~initial_meta:(Some (make_meta name))
+       ())
+;;
+
+let submit_message owner id =
+  ignore
+    (owner_ok
+       (Owner.submit_operation
+          owner
+          ~operation_id:(operation_id id)
+          ~source:operation_source
+          ~input:(operation_input id)))
+;;
+
+(* #46120. A freed slot went to chat first, so an autonomous turn with input
+   waited behind every message that arrived while a chat turn ran; over
+   2026-11-20..27, 101 of 8,106 reservations waited more than 30 minutes.
+   The lines now alternate: an autonomous turn offered while a chat turn
+   holds the slot stays with the Owner and takes the slot when that turn
+   ends, ahead of a message queued in the meantime. *)
+let test_waiting_autonomous_turn_takes_the_slot_after_one_chat_turn () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let order = ref [] in
+  let started = Eio.Stream.create 4 and release = Eio.Stream.create 4 in
+  let owner = start_alternation_owner ~sw ~order ~started ~release "slot-alternation" in
+  submit_message owner "kmsg-first";
+  check string "the first message takes the free slot" "kmsg-first" (next_started ~clock started);
+  let reached, resolve_reached = Eio.Promise.create () in
+  let autonomous = Eio.Stream.create 1 in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Stream.add
+      autonomous
+      (Owner.run_autonomous_turn owner ~input:(input_waiting_after resolve_reached) (fun () ->
+         order := "autonomous" :: !order)));
+  within ~clock "the autonomous offer reaching the Owner" (fun () -> Eio.Promise.await reached);
+  submit_message owner "kmsg-second";
+  Eio.Stream.add release ();
+  expect_autonomous_ran
+    "the waiting autonomous turn"
+    (within ~clock "the waiting autonomous turn" (fun () -> Eio.Stream.take autonomous));
+  check string "the queued message runs after the autonomous turn" "kmsg-second"
+    (next_started ~clock started);
+  Eio.Stream.add release ();
+  ignore (await_terminal owner (operation_id "kmsg-second") 1_000);
+  check (list string) "the lines alternate"
+    [ "chat:kmsg-first"; "autonomous"; "chat:kmsg-second" ]
+    (List.rev !order)
+;;
+
+(* An autonomous turn that admits nothing is still its line's turn, and a
+   maintenance run belongs to neither line. After one autonomous turn and a
+   maintenance run, a message and an autonomous offer that both wait get the
+   slot chat first. *)
+let test_autonomous_turn_that_admits_nothing_is_still_its_lines_turn () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let order = ref [] in
+  let started = Eio.Stream.create 4 and release = Eio.Stream.create 4 in
+  let owner = start_alternation_owner ~sw ~order ~started ~release "slot-empty-turn" in
+  expect_autonomous_ran
+    "the autonomous turn with nothing to admit"
+    (Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () ->
+       order := "autonomous:empty" :: !order));
+  let maintenance_started, resolve_maintenance_started = Eio.Promise.create () in
+  let release_maintenance, resolve_release_maintenance = Eio.Promise.create () in
+  let maintenance = Eio.Stream.create 1 in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Stream.add
+      maintenance
+      (Owner.run_maintenance_if_idle owner (fun () ->
+         Eio.Promise.resolve resolve_maintenance_started ();
+         Eio.Promise.await release_maintenance)));
+  within ~clock "the maintenance run" (fun () -> Eio.Promise.await maintenance_started);
+  submit_message owner "kmsg-after-maintenance";
+  let reached, resolve_reached = Eio.Promise.create () in
+  let autonomous = Eio.Stream.create 1 in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Stream.add
+      autonomous
+      (Owner.run_autonomous_turn owner ~input:(input_waiting_after resolve_reached) (fun () ->
+         order := "autonomous:second" :: !order)));
+  within ~clock "the autonomous offer reaching the Owner" (fun () -> Eio.Promise.await reached);
+  Eio.Promise.resolve resolve_release_maintenance ();
+  (match within ~clock "the maintenance result" (fun () -> Eio.Stream.take maintenance) with
+   | Ok (`Ran ()) -> ()
+   | Ok (`Busy block) -> fail ("maintenance was sent away: " ^ Owner.autonomous_block_to_string block)
+   | Error error -> fail (Owner.error_to_string error));
+  check string "the message takes the slot after the autonomous line's turn"
+    "kmsg-after-maintenance" (next_started ~clock started);
+  Eio.Stream.add release ();
+  expect_autonomous_ran
+    "the second autonomous turn"
+    (within ~clock "the second autonomous turn" (fun () -> Eio.Stream.take autonomous));
+  check (list string) "neither line takes two turns in a row"
+    [ "autonomous:empty"; "chat:kmsg-after-maintenance"; "autonomous:second" ]
+    (List.rev !order)
+;;
+
+(* The Owner holds a waiting offer, so it also answers it: a shutdown
+   reservation reaches the offer at once instead of after the running turn. *)
+let test_held_autonomous_offer_hears_a_shutdown_reservation () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let order = ref [] in
+  let started = Eio.Stream.create 4 and release = Eio.Stream.create 4 in
+  let owner = start_alternation_owner ~sw ~order ~started ~release "slot-shutdown" in
+  submit_message owner "kmsg-held";
+  ignore (next_started ~clock started);
+  let reached, resolve_reached = Eio.Promise.create () in
+  let autonomous = Eio.Stream.create 1 in
+  Eio.Fiber.fork ~sw (fun () ->
+    Eio.Stream.add
+      autonomous
+      (Owner.run_autonomous_turn owner ~input:(input_waiting_after resolve_reached) (fun () ->
+         fail "an autonomous turn started under a shutdown reservation")));
+  within ~clock "the autonomous offer reaching the Owner" (fun () -> Eio.Promise.await reached);
+  let shutdown_id = Keeper_shutdown_types.Operation_id.generate () in
+  ignore (owner_ok (Owner.begin_shutdown owner ~operation_id:shutdown_id));
+  (match within ~clock "the offer's answer" (fun () -> Eio.Stream.take autonomous) with
+   | Ok (`Busy (Owner.Shutdown_requested reserved)) ->
+     check bool "the offer names the reservation" true
+       (Keeper_shutdown_types.Operation_id.equal reserved shutdown_id)
+   | Ok (`Busy block) -> fail ("the offer heard the wrong block: " ^ Owner.autonomous_block_to_string block)
+   | Ok (`Ran ()) -> fail "the offer ran under a shutdown reservation"
+   | Ok `Interrupted -> fail "nothing interrupted the offer"
+   | Error error -> fail (Owner.error_to_string error));
+  (match Owner.turn_in_flight owner with
+   | Some { lane = Owner.Chat_operation; _ } -> ()
+   | Some _ | None -> fail "the reservation ended the running chat turn");
+  Eio.Stream.add release ()
+;;
+
+(* A cancelled caller withdraws its offer: the Owner does not start a turn
+   that nobody waits for, and the slot goes to the next message. *)
+let test_cancelled_autonomous_offer_never_starts () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let order = ref [] in
+  let started = Eio.Stream.create 4 and release = Eio.Stream.create 4 in
+  let owner = start_alternation_owner ~sw ~order ~started ~release "slot-withdrawn" in
+  submit_message owner "kmsg-first";
+  ignore (next_started ~clock started);
+  let reached, resolve_reached = Eio.Promise.create () in
+  (try
+     Eio.Switch.run (fun offer_sw ->
+       Eio.Fiber.fork ~sw:offer_sw (fun () ->
+         ignore
+           (Owner.run_autonomous_turn owner ~input:(input_waiting_after resolve_reached) (fun () ->
+              order := "autonomous" :: !order)));
+       within ~clock "the autonomous offer reaching the Owner" (fun () -> Eio.Promise.await reached);
+       Eio.Switch.fail offer_sw Exit)
+   with
+   | Exit -> ());
+  submit_message owner "kmsg-second";
+  Eio.Stream.add release ();
+  check string "the next message takes the slot" "kmsg-second" (next_started ~clock started);
+  Eio.Stream.add release ();
+  ignore (await_terminal owner (operation_id "kmsg-second") 1_000);
+  check (list string) "the withdrawn turn never ran"
+    [ "chat:kmsg-first"; "chat:kmsg-second" ]
+    (List.rev !order)
+;;
+
 (* A waiting user message must keep its place when the keepalive observes
-   the same busy chat repeatedly. The live failure recorded four such
-   observations, then gave the released slot to fresh Board work. The
-   assertions below concern execution order and the saved wake, not a bound
-   on how many observations a lane may make. *)
+   the same busy chat repeatedly with nothing of its own waiting. The live
+   failure recorded four such observations, then gave the released slot to
+   fresh Board work. The assertions below concern execution order, not a
+   bound on how many observations a lane may make. An autonomous line with
+   input waiting takes one turn between messages instead
+   ([test_waiting_autonomous_turn_takes_the_slot_after_one_chat_turn]). *)
 let test_pending_chat_survives_repeated_autonomous_observations () =
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun sw ->
@@ -7242,7 +7313,7 @@ let test_pending_chat_survives_repeated_autonomous_observations () =
   let next_started, resolve_next_started = Eio.Promise.create () in
   let release_first, resolve_first = Eio.Promise.create () in
   let release_next, resolve_next = Eio.Promise.create () in
-  let executed = ref [] and released = ref 0 in
+  let executed = ref [] in
   let execute ~sw:_ ~keeper_name:_ ~claim =
     let operation = Option.get (owner_ok (claim ())) in
     let id = operation.Chat_operation.operation_id in
@@ -7268,13 +7339,12 @@ let test_pending_chat_survives_repeated_autonomous_observations () =
     ~operation_runner:(Some Owner.
       { ready = (fun ~keeper_name:_ -> true); execute
       ; on_execution_settled = noop_execution_settled })
-    ~on_turn_slot_released:(Some (fun () -> incr released))
     ~keeper_name:"chat-handoff"
     ~initial_meta:(Some (make_meta "chat-handoff"))) in
   let submit operation_id = ignore (owner_ok (Owner.submit_operation owner
     ~operation_id ~source:operation_source ~input:(operation_input "answer me"))) in
   let observe_busy () =
-    match Owner.run_autonomous_if_idle owner (fun () ->
+    match Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () ->
       fail "autonomous work passed a claimable user message") with
     | Ok (`Busy (Owner.Turn_busy (Some { lane = Owner.Chat_operation; _ }))) -> ()
     | Ok (`Busy other) -> fail (Owner.autonomous_block_to_string other)
@@ -7297,11 +7367,9 @@ let test_pending_chat_survives_repeated_autonomous_observations () =
     [ Chat_operation.Operation_id.to_string first
     ; Chat_operation.Operation_id.to_string next ]
     (List.rev !executed);
-  check int "no free-slot wake while the next message owns it" 0 !released;
   Eio.Promise.resolve resolve_next ();
   ignore (await_terminal owner next 1_000);
-  check int "the refused autonomous lane keeps its release wake" 1 !released;
-  match Owner.run_autonomous_if_idle owner (fun () -> "continued") with
+  match Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () -> "continued") with
   | Ok (`Ran value) -> check string "autonomous work resumes" "continued" value
   | Ok (`Busy other) -> fail (Owner.autonomous_block_to_string other)
   | Ok `Interrupted -> fail "nothing interrupted the resumed autonomous work"
@@ -7326,7 +7394,7 @@ let test_input_writer_is_bound_to_child_and_predecessor () =
   let release, release_child = Eio.Promise.create () in
   let finished, finish = Eio.Promise.create () in
   Eio.Fiber.fork ~sw (fun () ->
-    let result = Owner.run_autonomous_if_idle owner (fun () ->
+    let result = Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () ->
       Eio.Promise.resolve start ();
       Eio.Promise.await release) in
     Eio.Promise.resolve finish result);
@@ -7338,7 +7406,7 @@ let test_input_writer_is_bound_to_child_and_predecessor () =
    | Ok (`Ran ()) -> ()
    | Ok (`Busy _ | `Interrupted) | Error _ -> fail "isolated child did not finish");
   let leaked = ref None in
-  (match Owner.run_autonomous_if_idle owner (fun () ->
+  (match Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () ->
      let writer = Owner.begin_input_checkpoint owner ~trace_id |> owner_ok in
      let stale = Owner.begin_input_checkpoint owner ~trace_id |> owner_ok in
      let writer = Owner.advance_autonomous_input_checkpoint owner ~writer ~checkpoint:(checkpoint "wait") |> owner_ok in
@@ -7354,7 +7422,7 @@ let test_input_writer_is_bound_to_child_and_predecessor () =
   let writer = Option.get !leaked in
   refused "outside caller reused a former child"
     (Owner.advance_autonomous_input_checkpoint owner ~writer ~checkpoint:(checkpoint "after child"));
-  (match Owner.run_autonomous_if_idle owner (fun () ->
+  (match Owner.run_autonomous_turn owner ~input:nothing_waiting (fun () ->
      refused "new child borrowed an old token"
        (Owner.advance_autonomous_input_checkpoint owner ~writer ~checkpoint:(checkpoint "new child"));
      let current = Owner.begin_input_checkpoint owner ~trace_id |> owner_ok in
@@ -7475,7 +7543,6 @@ let test_owner_preparation_wait_and_explicit_retry ?(generic_failure=false)
       ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
       ~now:(fun () -> 42.) ~keeper_name:"preparation-owner"
       ~initial_meta:(Some (make_meta "preparation-owner"))
-      ~on_turn_slot_released:None
       ~operation_runner:(Some Owner.{ready=(fun ~keeper_name:_ -> true);execute;
         on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id ~operations:_ ~execution:_ ->
           match claimed_operation_id with
@@ -7609,7 +7676,6 @@ let test_owner_receipt_wait_holds_the_claim_until_the_receipt_arrives () =
       ~operation_store_path:path ~session_root:(Filename.concat (Filename.dirname path) "traces")
       ~now:(fun () -> 42.) ~keeper_name:"receipt-wait-owner"
       ~initial_meta:(Some (make_meta "receipt-wait-owner"))
-      ~on_turn_slot_released:None
       ~operation_runner:(Some Owner.{ready=(fun ~keeper_name:_ -> true);execute;
         on_execution_settled=(fun ~keeper_name:_ ~claimed_operation_id ~operations:_ ~execution:_ ->
           match claimed_operation_id with
@@ -7672,7 +7738,6 @@ let test_per_keeper_bulkhead_isolates_uncaught_fault () =
            ~session_root:(Filename.concat temp_dir "traces")
            ~now:(fun () -> 42.0)
            ~operation_runner:None
-           ~on_turn_slot_released:None
            ~keeper_name:"faulty-keeper"
            ~initial_meta:(Some (make_meta "faulty-keeper")))
     in
@@ -7688,7 +7753,6 @@ let test_per_keeper_bulkhead_isolates_uncaught_fault () =
            ~session_root:(Filename.concat temp_dir "traces")
            ~now:(fun () -> 42.0)
            ~operation_runner:None
-           ~on_turn_slot_released:None
            ~keeper_name:"sibling-keeper"
            ~initial_meta:(Some (make_meta "sibling-keeper")))
     in
@@ -7732,7 +7796,6 @@ let test_registry_quarantine_fences_faulted_owner_and_blocks_reentry () =
        Owner_registry.install_from_store
          ~sw
          ~operation_runner:None
-         ~on_turn_slot_released:None
          config
      with
      | Ok count -> check int "both owners installed" 2 count
@@ -7817,7 +7880,6 @@ let test_registry_startup_failure_never_poisons_mutex_and_unavailable_recovers (
            Owner_registry.install_from_store
              ~sw
              ~operation_runner:None
-             ~on_turn_slot_released:None
              config
          with
          | Ok count -> check int "two healthy owners installed" 2 count
@@ -7952,7 +8014,7 @@ let test_registry_startup_failure_never_poisons_mutex_and_unavailable_recovers (
          | Some ghost ->
            check bool "started owner marked stopping after record_failed_operations exn" true
              (Owner.projection ghost).Keeper_owner_reducer.stopping;
-           (match Owner.run_autonomous_if_idle ghost (fun () -> ()) with
+           (match Owner.run_autonomous_turn ghost ~input:nothing_waiting (fun () -> ()) with
             | Error Owner.Owner_stopping -> ()
             | Error err ->
               fail ("expected Owner_stopping after record_failed_operations exn, got "
@@ -7987,7 +8049,7 @@ let test_registry_startup_failure_never_poisons_mutex_and_unavailable_recovers (
          | Some ghost ->
            check bool "started owner marked stopping after record_failed_operations cancel" true
              (Owner.projection ghost).Keeper_owner_reducer.stopping;
-           (match Owner.run_autonomous_if_idle ghost (fun () -> ()) with
+           (match Owner.run_autonomous_turn ghost ~input:nothing_waiting (fun () -> ()) with
             | Error Owner.Owner_stopping -> ()
             | Error err ->
               fail ("expected Owner_stopping after record_failed_operations cancel, got "
@@ -8119,13 +8181,21 @@ let () =
             `Quick
             test_pending_chat_survives_repeated_autonomous_observations
         ; test_case
-            "turn slot release signals availability"
+            "waiting autonomous turn takes the slot after one chat turn"
             `Quick
-            test_turn_slot_release_signals_availability
+            test_waiting_autonomous_turn_takes_the_slot_after_one_chat_turn
         ; test_case
-            "uncontested turn end signals nothing"
+            "autonomous turn that admits nothing is still its line's turn"
             `Quick
-            test_uncontested_turn_end_signals_nothing
+            test_autonomous_turn_that_admits_nothing_is_still_its_lines_turn
+        ; test_case
+            "held autonomous offer hears a shutdown reservation"
+            `Quick
+            test_held_autonomous_offer_hears_a_shutdown_reservation
+        ; test_case
+            "cancelled autonomous offer never starts"
+            `Quick
+            test_cancelled_autonomous_offer_never_starts
         ; test_case
             "operation lifecycle is durable and projected"
             `Quick

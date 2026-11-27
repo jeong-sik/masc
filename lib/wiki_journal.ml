@@ -64,16 +64,20 @@ let append_log ~wiki_root line =
     | exception Unix.Unix_error (error, operation, _) ->
       Error (Printf.sprintf "%s: %s" operation (Unix.error_message error))
   in
-  let open_log_fd path =
+  let max_open_attempts = 4 in
+  let rec open_log_fd ~attempts path =
     match Unix.lstat path with
     | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
-      (* Atomic O_CREAT | O_EXCL never follows a symlink. *)
+      (* Atomic O_CREAT | O_EXCL never follows a symlink. Retry when a concurrent
+         writer creates log.md between lstat and openfile. *)
       (try
          Ok
            (Unix.openfile path
               [ Unix.O_WRONLY; Unix.O_APPEND; Unix.O_CREAT; Unix.O_EXCL; Unix.O_CLOEXEC ]
               0o644)
        with
+       | Unix.Unix_error (Unix.EEXIST, _, _) when attempts > 1 ->
+         open_log_fd ~attempts:(attempts - 1) path
        | Unix.Unix_error (error, operation, _) ->
          Error (Printf.sprintf "%s: %s" operation (Unix.error_message error)))
     | exception Unix.Unix_error (error, operation, _) ->
@@ -100,6 +104,8 @@ let append_log ~wiki_root line =
            Error "log.md changed or is not a regular file")
          else Ok fd
        with
+       | Unix.Unix_error (Unix.ENOENT, _, _) when attempts > 1 ->
+         open_log_fd ~attempts:(attempts - 1) path
        | Unix.Unix_error (error, operation, _) ->
          Error (Printf.sprintf "%s: %s" operation (Unix.error_message error)))
   in
@@ -107,7 +113,7 @@ let append_log ~wiki_root line =
   | Error _ as err -> err
   | Ok () ->
     let path = Filename.concat wiki_root log_file in
-    (match open_log_fd path with
+    (match open_log_fd ~attempts:max_open_attempts path with
      | Error _ as err -> err
      | Ok fd ->
        let oc =

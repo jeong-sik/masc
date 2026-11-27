@@ -60,15 +60,34 @@ let rec forget config saved =
     if not (Atomic.compare_and_set observed current (Observations.remove key current)) then forget config saved
   | None | Some _ -> ()
 let flush_observation config saved =
-  let* () = match saved.observation with
+  match
+    match saved.observation with
     | Reply receipt -> R.retain_reply config saved.record receipt |> Result.map (fun _ -> ())
-    | Unknown {original; detail; tools} -> R.retain_unknown config saved.record original ~detail ~tools in
-  forget config saved;
-  Ok ()
+    | Unknown {original; detail; tools} -> R.retain_unknown config saved.record original ~detail ~tools
+  with
+  | Ok () ->
+    forget config saved;
+    Ok ()
+  | Error (R.Conflict detail as err) ->
+    (* A conflict means the durable ledger already moved past this request;
+       retaining it forever would wedge reconciliation and future collections. *)
+    Log.Misc.warn "goal criterion review dropping obsolete observation request_id=%s: %s"
+      saved.record.R.request_id detail;
+    forget config saved;
+    Error err
+  | Error ((R.Store_unavailable _ | R.Goal_unavailable _) as err) ->
+    Error err
+
 let flush_observed config =
-  Observations.fold (fun (base_path, _) saved state ->
-    let* () = state in
-    if String.equal base_path config.Workspace_utils.base_path then flush_observation config saved else Ok ())
+  Observations.fold (fun (base_path, _) saved first_transient ->
+    if not (String.equal base_path config.Workspace_utils.base_path) then first_transient
+    else
+      match flush_observation config saved with
+      | Ok () | Error (R.Conflict _) -> first_transient
+      | Error ((R.Store_unavailable _ | R.Goal_unavailable _) as err) ->
+        (match first_transient with
+         | Ok () -> Error err
+         | Error _ as existing -> existing))
     (Atomic.get observed) (Ok ())
 
 let process ?(sw=None) config ~goal_id =

@@ -234,10 +234,12 @@ let delete_request base_path req_id =
   try
     let path = request_path base_path req_id in
     let removed =
-      if Sys.file_exists path then (
-        forgetting_after ~base_path path (fun () -> Sys.remove path);
-        true)
-      else (forget_listed path; false)
+      forgetting_after ~base_path path (fun () ->
+        try
+          Unix.unlink path;
+          true
+        with
+        | Unix.Unix_error (Unix.ENOENT, _, _) -> false)
     in
     if removed then Workspace_dataset_event.announce ~base_path Workspace_dataset_event.Verification_requests;
     Ok ()

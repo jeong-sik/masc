@@ -339,7 +339,7 @@ let with_bundle_tools
          (* Load receipts read the current Task from the same Owner projection
             as a running Keeper, rather than from the frozen bundle metadata. *)
          (match Keeper_owner_registry.install_from_store
-                  ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+                  ~sw ~operation_runner:None config with
           | Ok 0 -> ()
           | Ok count -> failf "expected an empty Keeper inventory, got %d owners" count
           | Error error -> fail (Keeper_owner_registry.install_error_to_string error));

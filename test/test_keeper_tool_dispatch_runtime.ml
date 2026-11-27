@@ -206,7 +206,6 @@ let create_keeper_meta_exn ~sw ~config (meta : Masc.Keeper_meta_contract.keeper_
      Masc.Keeper_owner_registry.install_from_store
        ~sw
        ~operation_runner:None
-       ~on_turn_slot_released:None
        config
    with
    | Ok _ -> ()

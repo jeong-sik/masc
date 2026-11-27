@@ -111,7 +111,6 @@ let install_owner_inventory_exn ~sw config =
     Keeper_owner_registry.install_from_store
       ~sw
       ~operation_runner:None
-      ~on_turn_slot_released:None
       config
   with
   | Ok _ -> ()
@@ -1160,7 +1159,6 @@ let test_supervise_keepalive_wakes_ready_operation_drain () =
           Masc.Keeper_owner_registry.install_from_store
             ~sw
             ~operation_runner:(Some operation_runner)
-            ~on_turn_slot_released:None
             config
         with
         | Ok 1 -> ()
@@ -1237,7 +1235,7 @@ let test_supervise_keepalive_wakes_ready_operation_drain () =
          (Chat_operation.Operation_id.to_string claimed_operation_id);
        check int "supervisor wake starts exactly one operation child" 1 !execution_count;
        (match
-          Masc.Keeper_owner_registry.run_autonomous_if_idle
+          Masc.Keeper_owner_registry.run_autonomous_turn ~input:(fun () -> Masc.Keeper_owner.No_autonomous_input)
             ~base_path:config.base_path
             ~keeper_name:name
             (fun () -> ())

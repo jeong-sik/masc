@@ -425,7 +425,7 @@ let test_interrupted_owner_without_subscriber_replays_failure () =
     ~now:(fun () -> 42.)
     ~operation_runner:(Some Owner.{ ready = (fun ~keeper_name:_ -> true);
       execute; on_execution_settled })
-    ~on_turn_slot_released:None ~keeper_name ~initial_meta:(Some meta)) in
+    ~keeper_name ~initial_meta:(Some meta)) in
   ignore (owner_ok (Owner.submit_operation owner ~operation_id
     ~source:(operation_source keeper_name)
     ~input:(`Assoc [ "message", `String "answer me" ])));
@@ -510,7 +510,7 @@ let test_registry_shutdown_projects_every_claimed_batch_member () =
       ~claimed_operation_id ~operations ~execution in
   Registry.install_from_store ~sw
     ~operation_runner:(Some Owner.{ready=(fun ~keeper_name:_ -> true);
-      execute; on_execution_settled}) ~on_turn_slot_released:None config
+      execute; on_execution_settled}) config
   |> Result.map_error Registry.install_error_to_string |> Result.get_ok |> ignore;
   let owner = Registry.get ~base_path ~keeper_name
     |> Result.map_error Registry.lookup_error_to_string |> Result.get_ok in

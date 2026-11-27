@@ -211,7 +211,6 @@ let test_installed_keeper_rides_as_an_idle_row () =
          Keeper_owner_registry.install_from_store
            ~sw
            ~operation_runner:None
-           ~on_turn_slot_released:None
            config
        with
        | Ok count -> Alcotest.(check int) "installed owner count" 1 count
@@ -282,7 +281,7 @@ let test_waiting_read_errors_stay_public () =
      | Ok () -> ()
      | Error err -> Alcotest.failf "persist keeper meta: %s" err);
     (match Keeper_owner_registry.install_from_store
-       ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+       ~sw ~operation_runner:None config with
      | Ok count -> Alcotest.(check int) "installed owner count" 1 count
      | Error error -> Alcotest.fail (Keeper_owner_registry.install_error_to_string error));
     let response = error_response () in
@@ -346,7 +345,7 @@ let test_owned_turn_survives_bound_read_refusal_and_recovery () =
       (match Keeper_meta_store.replace_snapshot config meta with
        | Ok () -> () | Error detail -> Alcotest.fail detail);
       (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None
-          ~on_turn_slot_released:None config with
+          config with
        | Ok _ -> () | Error error -> Alcotest.fail (Keeper_owner_registry.install_error_to_string error));
       match Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name:name with
       | Ok owner -> owner | Error error -> Alcotest.fail (Keeper_owner_registry.lookup_error_to_string error) in
@@ -459,7 +458,7 @@ let test_run_next_ownership_and_started_boundary () =
       (`Assoc ["name",`String name;"trace_id",`String "trace-priority-route";"activation_mode",`String "manual"]) with
       | Ok meta -> meta | Error detail -> Alcotest.fail detail in
     (match Keeper_meta_store.replace_snapshot config meta with Ok () -> () | Error e -> Alcotest.fail e);
-    (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None config with
+    (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None config with
      | Ok _ -> () | Error e -> Alcotest.fail (Keeper_owner_registry.install_error_to_string e));
     let operation_id raw = match Keeper_chat_operation.Operation_id.of_string raw with
       | Ok id -> id | Error e -> Alcotest.fail e in

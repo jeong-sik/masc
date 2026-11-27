@@ -1001,27 +1001,30 @@ let pending_stimulus_remains ~ctx ~keeper_name =
    counts as waiting: the turn's own intake then meets the failure and
    records it. *)
 let autonomous_input ~(ctx : _ context) ~keeper_name ~wake ~pending_board_events () =
-  match (wake : Keeper_world_observation.cycle_wake), pending_board_events with
-  | (Keeper_world_observation.Periodic_tick | Keeper_world_observation.Deferred_runtime_lane _), _
-  | Keeper_world_observation.Attention_wake, _ :: _ ->
+  match (wake : Keeper_world_observation.cycle_wake) with
+  | Keeper_world_observation.Periodic_tick
+  | Keeper_world_observation.Deferred_runtime_lane _ ->
     Keeper_owner.Autonomous_input_waiting
-  | Keeper_world_observation.Attention_wake, [] ->
-    let base_path = ctx.config.base_path in
-    (match
-       Keeper_registry_event_queue.peek_when_result
-         ~base_path
-         keeper_name
-         ~now:(Time_compat.now ())
-         ~ready:(Stimulus_intake.stimulus_ready_for_intake ~base_path)
-     with
-     | Ok (Some _) -> Keeper_owner.Autonomous_input_waiting
-     | Ok None -> Keeper_owner.No_autonomous_input
-     | Error detail ->
-       Log.Keeper.warn
-         ~keeper_name
-         "event queue peek for the turn slot failed; the autonomous line counts as waiting: %s"
-         detail;
-       Keeper_owner.Autonomous_input_waiting)
+  | Keeper_world_observation.Attention_wake ->
+    (match pending_board_events with
+     | _ :: _ -> Keeper_owner.Autonomous_input_waiting
+     | [] ->
+       let base_path = ctx.config.base_path in
+       (match
+          Keeper_registry_event_queue.peek_when_result
+            ~base_path
+            keeper_name
+            ~now:(Time_compat.now ())
+            ~ready:(Stimulus_intake.stimulus_ready_for_intake ~base_path)
+        with
+        | Ok (Some _) -> Keeper_owner.Autonomous_input_waiting
+        | Ok None -> Keeper_owner.No_autonomous_input
+        | Error detail ->
+          Log.Keeper.warn
+            ~keeper_name
+            "event queue peek for the turn slot failed; the autonomous line counts as waiting: %s"
+            detail;
+          Keeper_owner.Autonomous_input_waiting))
 ;;
 
 (* The meta an autonomous turn starts from. The Owner can hold the offer while

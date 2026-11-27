@@ -3316,7 +3316,7 @@ let start_impl
                  | Autonomous_input_waiting -> ()
                  | No_autonomous_input ->
                    answer_autonomous current (Ok (Turn_busy (Atomic.get t.turn_in_flight))))
-              | Some _ | None -> ()));
+              | Some (Parked_autonomous_turn _) | None -> ()));
           loop state
         | Command (Withdraw_autonomous_turn offer, resolve) ->
           (* The offering fiber was cancelled and no longer waits for an
@@ -3326,7 +3326,7 @@ let start_impl
            | Some (Parked_autonomous_turn { offer = parked_offer; _ })
              when Int.equal parked_offer offer ->
              parked_autonomous := None
-           | Some _ | None -> ());
+           | Some (Parked_autonomous_turn _) | None -> ());
           Eio.Promise.resolve resolve (Ok ());
           loop state
         | Command (Run_maintenance_if_idle { defer_to_chat; run }, resolve) ->

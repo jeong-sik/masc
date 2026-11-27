@@ -98,7 +98,11 @@ val prepare :
   agent_ref:Agent_core.Agent.t option ref -> ?retired_history_cut:retired_history_cut ->
   unit -> (prepared, string) result
 (** Call immediately before each actual native Agent API invocation. Active
-    scopes restore their exact seed/input and checkpoint. A known Retire
+    scopes restore their exact seed/input and checkpoint. When the Owner proves
+    that an Active call's writer exited and its open turn was cut before the
+    provider response was collected, the call is closed with
+    [Agent.retire_uncollected_turn] and its receipt recorded; a new call then
+    continues from the closed call's retained checkpoint, unchanged. A known Retire
     receipt is atomically replaced only when the next scope publishes its
     locator; unknown effects cannot be replaced. The host must select the
     saved runtime before preparing a recovered call. Recovery validates its

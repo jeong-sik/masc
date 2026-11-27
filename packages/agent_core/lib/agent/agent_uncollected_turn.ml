@@ -21,7 +21,7 @@ let ( let* ) = Result.bind
 
 (* Kept in the journal's terminal for whoever reads the tree; nothing parses it. *)
 let cancelled_reason =
-  "restart settlement closed a turn cut before its provider response was collected"
+  "the host closed a turn its exited writer cut before the provider response was collected"
 ;;
 
 (* A topology the resume functions refuse (a finished root, several open turns,

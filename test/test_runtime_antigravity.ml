@@ -239,6 +239,7 @@ let run_fixture
     ?admission_timeout_s
     ?(no_turn_deadline = false)
     ?(prompt = "Return the fixture marker")
+    ?(git_author_environment = [])
     path
   =
   Eio_main.run (fun env ->
@@ -247,6 +248,7 @@ let run_fixture
         cli_path = path
       ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
       ; timeout_s = if no_turn_deadline then None else Some timeout_s
+      ; git_author_environment
       }
     in
     Runtime_antigravity.run_turn ~host:(antigravity_host ())
@@ -336,6 +338,36 @@ let test_a_restated_mismatch_still_fails () =
             in
             found 0)
        | Error error -> fail (Runtime_antigravity.error_to_string error))
+;;
+
+(* A Keeper's turn names the Keeper as author and committer of the commits
+   the CLI makes, over the names the server inherited (#38259). *)
+let test_keeper_names_the_git_author_of_the_turn () =
+  let keeper =
+    match Keeper_id.Keeper_name.of_string "keeper-a" with
+    | Ok keeper -> keeper
+    | Error detail -> failwith detail
+  in
+  Masc_test_deps.with_process_env "GIT_AUTHOR_NAME" (Some "operator") (fun () ->
+    Masc_test_deps.with_process_env "GIT_COMMITTER_NAME" (Some "operator") (fun () ->
+      with_fixture [ init (); result () ] (fun fixture ->
+        let wrapper = Filename.temp_file "masc-antigravity-git-author-" ".sh" in
+        Fun.protect ~finally:(fun () -> Sys.remove wrapper) (fun () ->
+          let output = open_out_bin wrapper in
+          output_string output "#!/bin/sh\nset -eu\n";
+          output_string output "[ \"${GIT_AUTHOR_NAME-}\" = keeper-a ] || exit 73\n";
+          output_string output "[ \"${GIT_COMMITTER_NAME-}\" = keeper-a ] || exit 74\n";
+          output_string output ("exec " ^ shell_quote fixture ^ " \"$@\"\n");
+          close_out output;
+          Unix.chmod wrapper 0o700;
+          match
+            run_fixture
+              ~git_author_environment:
+                (Keeper_official_client_host.git_author_environment keeper)
+              wrapper
+          with
+          | Ok _ -> ()
+          | Error error -> fail (Runtime_antigravity.error_to_string error)))))
 ;;
 
 let test_stream_events_preserve_available_wire_data () =
@@ -2615,6 +2647,8 @@ let () =
             "stream preserves available wire data"
             `Quick
             test_stream_events_preserve_available_wire_data
+        ; test_case "Keeper names the git author of the turn" `Quick
+            test_keeper_names_the_git_author_of_the_turn
         ; test_case
             "answer pieces reach the reader once"
             `Quick

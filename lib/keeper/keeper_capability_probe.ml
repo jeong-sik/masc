@@ -512,6 +512,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
     (* One fresh short session that ends before any compaction point: the
        declared window changes nothing the probe measures. *)
     ; autocompact_window = None
+    ; git_author_environment = []
                }
              in
              let reasoning_effort =
@@ -565,6 +566,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
     (* A probe asks whether the client answers at all; it has no domain schema
        to hold the answer to. *)
     ; output_schema = None
+    ; git_author_environment = []
                }
              in
              let reasoning_effort =
@@ -746,6 +748,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
     (* A capability probe asks what the client can do; it has no domain schema
        to hold an answer to. *)
     ; output_schema = None
+    ; git_author_environment = []
                      }
                    in
                    let started = now () in

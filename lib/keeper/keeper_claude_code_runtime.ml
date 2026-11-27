@@ -1091,6 +1091,11 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
          ~field:"eio_clock"
          "Claude Code runtime requires the initialized Eio clock")
   | Some env, Some clock ->
+    let* git_author_environment =
+      Keeper_id.Keeper_name.of_string keeper_name
+      |> Result.map Host.git_author_environment
+      |> Result.map_error (config_error ~field:"keeper_name")
+    in
     let hooks =
       match hooks with
       | Some hooks -> hooks
@@ -1334,6 +1339,7 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
            downstream parses its text against a domain schema. *)
       ; output_schema = None
       ; autocompact_window
+      ; git_author_environment
       }
     in
     let terminal_error = ref None in

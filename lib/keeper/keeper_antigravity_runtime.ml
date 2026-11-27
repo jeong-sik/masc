@@ -749,6 +749,11 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
          ~field:"eio_clock"
          "Antigravity runtime requires the initialized Eio clock")
   | Some env, Some clock ->
+    let* git_author_environment =
+      Keeper_id.Keeper_name.of_string keeper_name
+      |> Result.map Host.git_author_environment
+      |> Result.map_error (config_error ~field:"keeper_name")
+    in
     let hooks = Option.value hooks ~default:Agent_core.Hooks.empty in
     (* The MCP server can answer a call before init opens the message; its
        receipt waits with its held block. *)
@@ -1185,6 +1190,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
       (* A keeper turn is a conversation, not a schema contract: nothing
          downstream parses its text against a domain schema. *)
       ; output_schema = None
+      ; git_author_environment
       }
     in
     let* () =

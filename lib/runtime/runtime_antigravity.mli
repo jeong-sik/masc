@@ -47,6 +47,12 @@ type config =
         that passed; the narrated response beside it can still hold a draft the
         schema rejects, so this adapter reports the structured value as the
         turn's text when the field is present. *)
+  ; git_author_environment : (string * string) list
+    (** Set on the turn's CLI over {!official_client_environment}
+        ({!Runtime_child_environment.set}): the names its git commits carry.
+        A Keeper's turn gives the Keeper's names
+        ([Keeper_official_client_host.git_author_environment]). [[]] leaves
+        the CLI the git identity it inherits. *)
   }
 
 val structured_output_instruction : schema:Yojson.Safe.t -> string

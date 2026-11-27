@@ -32,6 +32,7 @@ type config =
   ; admission_timeout_s : float
   ; timeout_s : float option
   ; output_schema : Yojson.Safe.t option
+  ; git_author_environment : (string * string) list
   }
 
 let default_timeout_s = Runtime_timeout_budget.codex_default_turn_timeout_s
@@ -60,6 +61,7 @@ let default_config () =
   ; admission_timeout_s = default_admission_timeout_s
   ; timeout_s = Some default_timeout_s
   ; output_schema = None
+  ; git_author_environment = []
   }
 ;;
 
@@ -2964,6 +2966,7 @@ let context_submission frame json payload =
 
 let with_spawned_client ?(on_context_submission = fun _ -> ()) ~mgr ~clock ~cwd ~account config run =
   let* environment = client_environment ?isolated_home:config.isolated_home account in
+  let environment = Runtime_child_environment.set config.git_author_environment environment in
   Eio.Switch.run (fun sw ->
     let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
     match

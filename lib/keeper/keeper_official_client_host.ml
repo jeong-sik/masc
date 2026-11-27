@@ -2,6 +2,11 @@ open Result.Syntax
 
 let internal_error detail = Agent_core.Error.Internal detail
 
+let git_author_environment keeper =
+  Exec_ssh_protocol.keeper_git_author_env
+    ~keeper_name:(Keeper_id.Keeper_name.to_string keeper)
+;;
+
 type terminal_boundary_outcome = Runtime_official_client_tool.terminal_boundary_outcome =
   | Terminal_completed
   | Durable_stimulus_deferred

@@ -83,6 +83,12 @@ type config =
         declaration sits. [None] leaves the client's own point: about 967K
         tokens for a 1M-window model. Only a short one-off session (a probe)
         passes [None]. *)
+  ; git_author_environment : (string * string) list
+    (** Set on the turn's client over the environment it inherits
+        ({!Runtime_child_environment.set}): the names its git commits carry.
+        A Keeper's turn gives the Keeper's names
+        ([Keeper_official_client_host.git_author_environment]). [[]] leaves
+        the client the git identity it inherits. *)
   }
 
 val default_timeout_s : float

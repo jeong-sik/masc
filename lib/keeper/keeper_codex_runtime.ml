@@ -1054,6 +1054,11 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
          ~field:"eio_clock"
          "Codex app-server runtime requires the initialized Eio clock")
   | Some env, Some clock ->
+    let* git_author_environment =
+      Keeper_id.Keeper_name.of_string keeper_name
+      |> Result.map Host.git_author_environment
+      |> Result.map_error (config_error ~field:"keeper_name")
+    in
     let receipts =
       Option.map (fun notify -> Keeper_official_client_tool_receipts.create ~delivery:Keeper_official_client_tool_receipts.Immediate ~notify) on_tool_execution
     in
@@ -1369,6 +1374,7 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
       (* A keeper turn is a conversation, not a schema contract: nothing
          downstream parses its text against a domain schema. *)
       ; output_schema = None
+      ; git_author_environment
       }
     in
     let* (host_dynamic_tools, _) =

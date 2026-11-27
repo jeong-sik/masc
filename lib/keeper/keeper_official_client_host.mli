@@ -13,6 +13,15 @@ val internal_error : string -> Agent_core.Error.t
 (** Build the [Internal] error for a failure that is neither configuration nor
     provider behaviour. *)
 
+val git_author_environment : Keeper_id.Keeper_name.t -> (string * string) list
+(** [GIT_AUTHOR_NAME] and [GIT_COMMITTER_NAME] set to the Keeper's name: the
+    entries a sandboxed Keeper command gets
+    ({!Exec_ssh_protocol.keeper_git_author_env}), and like those, no email.
+    Every adapter puts them in its client's config, and the client's spawn
+    sets them over the environment it inherits. A client given
+    [native = "full"] runs git in its own shell on the host, outside any
+    sandbox, so its commits name the Keeper only through these. *)
+
 type turn_observation
 (** The Completion Authority and Goals Awaiting Proof blocks an official turn
     takes out of its context carrier: an event, and a

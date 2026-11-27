@@ -549,6 +549,7 @@ type config =
   ; oauth_source : string option
   ; dangerously_skip_permissions : bool
   ; agent_compaction : agent_compaction option
+  ; git_author_environment : (string * string) list
   }
 
 let default_config ~driver ~cwd =
@@ -563,6 +564,7 @@ let default_config ~driver ~cwd =
   ; oauth_source = None
   ; dangerously_skip_permissions = false
   ; agent_compaction = None
+  ; git_author_environment = []
   }
 ;;
 
@@ -2265,12 +2267,14 @@ let posture_environment ?mcp_server ~driver posture =
 ;;
 
 (* The environment [start] spawns the host with. *)
-let host_environment ~base_env ~driver ~extra_strip_env ?mcp_server native_posture =
+let host_environment ~base_env ~driver ~extra_strip_env ~git_author_environment ?mcp_server
+    native_posture =
   let posture =
     posture_environment ?mcp_server ~driver native_posture
     |> List.map (fun (key, value) -> key ^ "=" ^ value)
   in
   Array.append (build_environment ~base_env ~driver ~extra_strip_env) (Array.of_list posture)
+  |> Runtime_child_environment.set git_author_environment
 ;;
 
 let write_private_file_0600 path content =
@@ -3549,6 +3553,7 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
         ~base_env:(Unix.environment ())
         ~driver:config.driver
         ~extra_strip_env:config.strip_env
+        ~git_author_environment:config.git_author_environment
         ?mcp_server
         native_posture
     in

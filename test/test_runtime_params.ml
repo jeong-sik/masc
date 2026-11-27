@@ -781,6 +781,46 @@ let () =
       (Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained)
   in
 
+  let checkpoint_interval_default = 30.0 in
+  let checkpoint_interval_smallest = 0.0 in
+  let checkpoint_interval_largest = 600.0 in
+
+  let test_checkpoint_save_min_interval_default_and_bounds () =
+    Fun.protect
+      ~finally:(fun () ->
+        Runtime_params.clear Runtime_settings.keeper_checkpoint_save_min_interval_sec)
+    @@ fun () ->
+    Alcotest.(check (float 0.001)) "default mid-turn checkpoint save interval"
+      checkpoint_interval_default
+      (Runtime_params.get Runtime_settings.keeper_checkpoint_save_min_interval_sec);
+    let refuses sec =
+      match
+        Runtime_params.set Runtime_settings.keeper_checkpoint_save_min_interval_sec sec
+      with
+      | Error _ -> ()
+      | Ok () ->
+        Runtime_params.clear Runtime_settings.keeper_checkpoint_save_min_interval_sec;
+        Alcotest.fail (Printf.sprintf "%g was accepted as a checkpoint interval" sec)
+    in
+    let accepts sec =
+      match
+        Runtime_params.set Runtime_settings.keeper_checkpoint_save_min_interval_sec sec
+      with
+      | Ok () ->
+        Alcotest.(check (float 0.001)) "reads back what was set" sec
+          (Runtime_params.get Runtime_settings.keeper_checkpoint_save_min_interval_sec)
+      | Error detail -> Alcotest.fail detail
+    in
+    refuses (-0.1);
+    refuses (checkpoint_interval_largest +. 0.1);
+    accepts checkpoint_interval_smallest;
+    accepts checkpoint_interval_largest;
+    Runtime_params.clear Runtime_settings.keeper_checkpoint_save_min_interval_sec;
+    Alcotest.(check (float 0.001)) "clearing puts the default back"
+      checkpoint_interval_default
+      (Runtime_params.get Runtime_settings.keeper_checkpoint_save_min_interval_sec)
+  in
+
   let test_crash_persistence_enqueue_read () =
     with_eio_guard @@ fun () ->
     let tmp_dir = Filename.temp_dir "masc_crash_" "" in
@@ -894,6 +934,8 @@ let () =
             test_schedule_retention_default_and_bounds;
           Alcotest.test_case "checkpoint history default and bounds" `Quick
             test_checkpoint_history_default_and_bounds;
+          Alcotest.test_case "checkpoint save min interval default and bounds" `Quick
+            test_checkpoint_save_min_interval_default_and_bounds;
         ] );
       ( "crash_persistence",
         [

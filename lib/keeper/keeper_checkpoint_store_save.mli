@@ -25,12 +25,12 @@ type save_lineage =
 val write_canonical_durably :
   ownership_root:string ->
   string ->
-  (unit -> string list) -> (Unix.stats, Keeper_fs.durable_write_error) result
+  string -> (Unix.stats, Keeper_fs.durable_write_error) result
 
 val save_agent_core_classified_typed :
   write_canonical:(ownership_root:string ->
                    string ->
-                   (unit -> string list) ->
+                   string ->
                    (Unix.stats, Keeper_fs.durable_write_error) result) ->
   save_lineage:save_lineage ->
   payload_writer:Checkpoint_payload_writer.t ->

@@ -478,7 +478,7 @@ let save_bytes_durable_atomic_observed_with
   |> observe_durable_write_success ~on_durable_commit
 ;;
 
-let save_bytes_durable_atomic_with
+let save_bytes_durable_atomic_stats_with
       ~before_stage
       ?before_directory_fsync
       ?ownership_root
@@ -495,6 +495,23 @@ let save_bytes_durable_atomic_with
       path
       [ bytes ])
   |> check_durable_write_completion
+;;
+
+let save_bytes_durable_atomic_with
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      bytes
+  =
+  save_bytes_durable_atomic_stats_with
+    ~before_stage
+    ?before_directory_fsync
+    ?ownership_root
+    ?temp_dir
+    path
+    bytes
   |> Result.map (fun (_ : Unix.stats) -> ())
 ;;
 
@@ -555,6 +572,15 @@ let save_json_durable_atomic_with
 
 let save_bytes_durable_atomic ?ownership_root ?temp_dir path bytes =
   save_bytes_durable_atomic_with
+    ~before_stage:(fun _ -> ())
+    ?ownership_root
+    ?temp_dir
+    path
+    bytes
+;;
+
+let save_bytes_durable_atomic_stats ?ownership_root ?temp_dir path bytes =
+  save_bytes_durable_atomic_stats_with
     ~before_stage:(fun _ -> ())
     ?ownership_root
     ?temp_dir
@@ -702,6 +728,23 @@ module For_testing = struct
         bytes
     =
     save_bytes_durable_atomic_with
+      ~before_stage
+      ?before_directory_fsync
+      ?ownership_root
+      ?temp_dir
+      path
+      bytes
+  ;;
+
+  let save_bytes_durable_atomic_stats
+        ~before_stage
+        ?before_directory_fsync
+        ?ownership_root
+        ?temp_dir
+        path
+        bytes
+    =
+    save_bytes_durable_atomic_stats_with
       ~before_stage
       ?before_directory_fsync
       ?ownership_root

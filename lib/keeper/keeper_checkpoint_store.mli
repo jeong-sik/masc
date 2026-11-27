@@ -82,8 +82,10 @@ type save_agent_core_outcome =
     is observed best effort. [canonical_bytes] is the size of the file the save
     wrote, from that file's descriptor.
 
-    [history_retained] is how many past checkpoints to leave beside the
-    canonical one; zero writes no history at all. The caller reads it from
+    [history_retained] is how many past turn checkpoints to leave beside the
+    canonical one; rolling snapshots are archived on [Turn_closes] saves only
+    (mid-turn [Turn_continues] saves leave existing history snapshots
+    untouched), and zero writes no history at all. The caller reads it from
     [Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained]
     and passes it in. The store never reads the setting itself: a failing
     read there would stop the best-effort history prune without saying so.

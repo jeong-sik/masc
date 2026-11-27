@@ -260,6 +260,317 @@ let test_transcript_is_validated_on_the_pool () =
   check int "the refusal came from one pool job" 1 (pool_jobs_named suffix - jobs_before)
 ;;
 
+let test_valid_save_runs_a_single_pool_job () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  Domain_pool_ref.set pool;
+  Fun.protect ~finally:Domain_pool_ref.clear_for_tests @@ fun () ->
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "single-pool-job-save" in
+  let keeper_name = "single-pool-job-keeper" in
+  let cpu_suffix = "offload_checkpoint_cpu" in
+  let head_encode_suffix = "save_encoded_durable_atomic_from_with" in
+  let history_list_suffix = "list_agent_core_history_files" in
+  let save ~turn_count ~created_at ~marker =
+    let ckpt =
+      { (make_checkpoint ~session_id:sid ~turn_count ~marker) with created_at }
+    in
+    match
+      Keeper_checkpoint_store.save_agent_core_for_keeper
+        ~keeper_name
+        ~session_dir
+        ~history_retained:2
+        ~boundary:Agent_core.Checkpoint_objects.Turn_closes
+        ckpt
+    with
+    | Ok (Keeper_checkpoint_store.Saved _) -> ()
+    | Ok (Keeper_checkpoint_store.Stale_noop _) -> fail "unexpected stale noop"
+    | Error detail -> fail ("save failed: " ^ detail)
+  in
+  (* Warm the canonical summary first, then measure a steady-state save. *)
+  save ~turn_count:1 ~created_at:1000.0 ~marker:"seed";
+  let cpu_before = pool_jobs_named cpu_suffix in
+  let head_encode_before = pool_jobs_named head_encode_suffix in
+  let history_list_before = pool_jobs_named history_list_suffix in
+  save ~turn_count:2 ~created_at:1001.0 ~marker:"second";
+  check int "validate and plan_save share one CPU pool job"
+    1 (pool_jobs_named cpu_suffix - cpu_before);
+  check int "pre-encoded head bytes submit no extra CPU pool job"
+    0 (pool_jobs_named head_encode_suffix - head_encode_before);
+  check int "history archive and prune submit no Domain_pool IO job"
+    0 (pool_jobs_named history_list_suffix - history_list_before)
+;;
+
+let test_mid_turn_turn_continues_does_not_churn_history_snapshots () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "history-turn-closes-only" in
+  let make ~turn_count ~created_at ~marker =
+    { (make_checkpoint ~session_id:sid ~turn_count ~marker) with created_at }
+  in
+  let save ~boundary ckpt =
+    match
+      Keeper_checkpoint_store.save_agent_core_classified
+        ~session_dir ~history_retained:2 ~boundary ckpt
+    with
+    | Ok (Keeper_checkpoint_store.Saved _) -> ()
+    | Ok (Keeper_checkpoint_store.Stale_noop _) -> fail "unexpected stale noop"
+    | Error detail -> fail ("save failed: " ^ detail)
+  in
+  let closed_1 = make ~turn_count:1 ~created_at:1001.0 ~marker:"turn-1" in
+  let closed_2 = make ~turn_count:2 ~created_at:1002.0 ~marker:"turn-2" in
+  save ~boundary:Agent_core.Checkpoint_objects.Turn_closes closed_1;
+  save ~boundary:Agent_core.Checkpoint_objects.Turn_closes closed_2;
+  let expected_before =
+    [ Keeper_checkpoint_store.agent_core_history_snapshot_id_of_checkpoint closed_2
+    ; Keeper_checkpoint_store.agent_core_history_snapshot_id_of_checkpoint closed_1
+    ]
+  in
+  check (list string) "closed turns are archived"
+    expected_before
+    (Keeper_checkpoint_store.list_agent_core_history_files ~session_dir);
+  (* Mid-turn saves advance the canonical file without churning rolling turn snapshots. *)
+  save ~boundary:Agent_core.Checkpoint_objects.Turn_continues
+    (make ~turn_count:3 ~created_at:1003.0 ~marker:"mid-1");
+  save ~boundary:Agent_core.Checkpoint_objects.Turn_continues
+    (make ~turn_count:3 ~created_at:1004.0 ~marker:"mid-2");
+  save ~boundary:Agent_core.Checkpoint_objects.Turn_continues
+    (make ~turn_count:3 ~created_at:1005.0 ~marker:"mid-3");
+  check (list string) "Turn_continues saves leave closed-turn snapshots intact"
+    expected_before
+    (Keeper_checkpoint_store.list_agent_core_history_files ~session_dir)
+;;
+
+let test_structurally_invalid_still_beats_stale_watermark () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  let session_dir = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir session_dir) @@ fun () ->
+  let sid = "structural-beats-stale" in
+  save_ok ~session_dir (make_checkpoint ~session_id:sid ~turn_count:5 ~marker:"valid-5")
+    "seed turn 5";
+  let invalid_stale =
+    { (checkpoint_with_orphan_tool_result ~session_id:sid) with turn_count = 1 }
+  in
+  match
+    Keeper_checkpoint_store.save_agent_core_classified
+      ~boundary:Agent_core.Checkpoint_objects.Turn_closes
+      ~history_retained:0
+      ~session_dir
+      invalid_stale
+  with
+  | Error message ->
+    check bool "refusal still names structural contract" true
+      (String_util.contains_substring message "structurally invalid")
+  | Ok (Keeper_checkpoint_store.Stale_noop _) ->
+    fail "structurally invalid checkpoint was silently treated as Stale_noop"
+  | Ok (Keeper_checkpoint_store.Saved _) ->
+    fail "structurally invalid checkpoint was saved"
+;;
+
+let test_checkpoint_cadence_policy () =
+  let module Cadence = Masc.Keeper_checkpoint_cadence in
+  let make_msgs messages =
+    { (make_checkpoint ~session_id:"cadence-sess" ~turn_count:1 ~marker:"seed") with
+      Agent_core.Checkpoint.messages
+    }
+  in
+  let user_msg = Agent_core.Types.user_msg "go" in
+  let assistant_tool_use : Agent_core.Types.message =
+    { origin = Llm_provider.Types.Conversation
+    ; role = Agent_core.Types.Assistant
+    ; content =
+        [ Agent_core.Types.ToolUse
+            { id = "tu-1"; name = "Read"; input = `Assoc [] }
+        ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  let tool_result_msg : Agent_core.Types.message =
+    { origin = Llm_provider.Types.Conversation
+    ; role = Agent_core.Types.Tool
+    ; content =
+        [ Agent_core.Types.ToolResult
+            { tool_use_id = "tu-1"
+            ; content = "ok"
+            ; outcome = Agent_core.Types.Tool_succeeded
+            ; json = None
+            ; content_blocks = None
+            }
+        ]
+    ; name = None
+    ; tool_call_id = Some "tu-1"
+    ; metadata = []
+    }
+  in
+  let assistant_final : Agent_core.Types.message =
+    { origin = Llm_provider.Types.Conversation
+    ; role = Agent_core.Types.Assistant
+    ; content = [ Agent_core.Types.Text "done" ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  (* 1. Even with min_interval_sec = 0.0, context-only After_context_injection
+        with physically unchanged messages is skipped, while extra_messages persists. *)
+  let eager = Cadence.create () in
+  let msgs_tool_use = [ user_msg; assistant_tool_use ] in
+  let cp_tool_use = make_msgs msgs_tool_use in
+  Cadence.observe_assistant_stop_reason eager ~stop_reason:Llm_provider.Types.StopToolUse;
+  check bool "eager mode persists pre-tool assistant" true
+    (Cadence.decide eager ~stage:Agent_core.Agent.After_assistant_collected
+       ~checkpoint:cp_tool_use ~now_s:1.0 ~min_interval_sec:0.0 = Cadence.Persist);
+  Cadence.record_persisted eager ~stage:Agent_core.Agent.After_assistant_collected
+    ~checkpoint:cp_tool_use ~now_s:1.0;
+  let msgs_results = msgs_tool_use @ [ tool_result_msg ] in
+  let cp_results = make_msgs msgs_results in
+  check bool "eager mode persists tool results" true
+    (Cadence.decide eager ~stage:Agent_core.Agent.After_tool_results_appended
+       ~checkpoint:cp_results ~now_s:2.0 ~min_interval_sec:0.0 = Cadence.Persist);
+  Cadence.record_persisted eager ~stage:Agent_core.Agent.After_tool_results_appended
+    ~checkpoint:cp_results ~now_s:2.0;
+  let cp_ctx_same_msgs = make_msgs msgs_results in
+  check bool "context-only injection with unchanged messages is skipped even at 0s" true
+    (Cadence.decide eager ~stage:Agent_core.Agent.After_context_injection
+       ~checkpoint:cp_ctx_same_msgs ~now_s:2.001 ~min_interval_sec:0.0
+     = Cadence.Skip Cadence.Context_only_after_persisted_messages);
+  let cp_ctx_extra_msgs = make_msgs (msgs_results @ [ Agent_core.Types.user_msg "injected" ]) in
+  check bool "context injection with extra messages persists at 0s" true
+    (Cadence.decide eager ~stage:Agent_core.Agent.After_context_injection
+       ~checkpoint:cp_ctx_extra_msgs ~now_s:2.002 ~min_interval_sec:0.0 = Cadence.Persist);
+  (* 2. With min_interval_sec = 30.0:
+        - After_assistant_collected ALWAYS persists (including StopToolUse +
+          pending ToolUse, both initially and within the 30s interval) so an
+          open tool cycle is durable on disk before tools execute, and does not
+          consume the After_tool_results_appended pacing budget.
+        - First tool result persists, rapid rounds skip and retain the latest
+          checkpoint for error-path flush, context-only injection right after a
+          skipped tool round does not cross the threshold, persisting a next
+          round's After_assistant_collected supersedes any deferred tool-result
+          slot, extra_messages paces under min_interval_sec, and MaxTokens /
+          rejected drop reset pacing. *)
+  let paced = Cadence.create () in
+  check bool "unobserved stop_reason with ToolUse persists" true
+    (Cadence.decide paced ~stage:Agent_core.Agent.After_assistant_collected
+       ~checkpoint:cp_tool_use ~now_s:4.0 ~min_interval_sec:30.0 = Cadence.Persist);
+  Cadence.observe_assistant_stop_reason paced ~stop_reason:Llm_provider.Types.MaxTokens;
+  check bool "MaxTokens carrying a truncated ToolUse block persists" true
+    (Cadence.decide paced ~stage:Agent_core.Agent.After_assistant_collected
+       ~checkpoint:cp_tool_use ~now_s:4.5 ~min_interval_sec:30.0 = Cadence.Persist);
+  Cadence.observe_assistant_stop_reason paced ~stop_reason:Llm_provider.Types.StopToolUse;
+  check bool "StopToolUse + pending ToolUse never defers even under min_interval_sec > 0" true
+    (Cadence.decide paced ~stage:Agent_core.Agent.After_assistant_collected
+       ~checkpoint:cp_tool_use ~now_s:5.0 ~min_interval_sec:30.0 = Cadence.Persist);
+  Cadence.record_persisted paced ~stage:Agent_core.Agent.After_assistant_collected
+    ~checkpoint:cp_tool_use ~now_s:5.0;
+  check bool "first tool results save persists immediately after pre-tool assistant save" true
+    (Cadence.decide paced ~stage:Agent_core.Agent.After_tool_results_appended
+       ~checkpoint:cp_results ~now_s:6.0 ~min_interval_sec:30.0 = Cadence.Persist);
+  Cadence.record_persisted paced ~stage:Agent_core.Agent.After_tool_results_appended
+    ~checkpoint:cp_results ~now_s:6.0;
+  let round2_tool_use_msgs = msgs_results @ [ assistant_tool_use ] in
+  let cp_round2_tool_use = make_msgs round2_tool_use_msgs in
+  Cadence.observe_assistant_stop_reason paced ~stop_reason:Llm_provider.Types.StopToolUse;
+  check bool "rapid second StopToolUse + pending ToolUse still persists within min_interval_sec" true
+    (Cadence.decide paced ~stage:Agent_core.Agent.After_assistant_collected
+       ~checkpoint:cp_round2_tool_use ~now_s:10.0 ~min_interval_sec:30.0 = Cadence.Persist);
+  Cadence.record_persisted paced ~stage:Agent_core.Agent.After_assistant_collected
+    ~checkpoint:cp_round2_tool_use ~now_s:10.0;
+  let round2_msgs = round2_tool_use_msgs @ [ tool_result_msg ] in
+  let cp_round2_results = make_msgs round2_msgs in
+  (match
+     Cadence.decide paced ~stage:Agent_core.Agent.After_tool_results_appended
+       ~checkpoint:cp_round2_results ~now_s:35.999 ~min_interval_sec:30.0
+   with
+   | Cadence.Skip (Cadence.Within_min_interval { elapsed_sec; min_interval_sec }) ->
+     check (float 0.01) "elapsed is ~29.999s (assistant save did not reset pacing clock)"
+       29.999 elapsed_sec;
+     check (float 0.001) "min interval is 30s" 30.0 min_interval_sec
+   | Cadence.Persist | Cadence.Skip _ ->
+     fail "expected Within_min_interval skip for rapid second tool round");
+  (* Context-only injection crossing 36.001s right after skipped tool results must
+     not steal the pacing clock without advancing tool_result_save_count. *)
+  let cp_round2_ctx = make_msgs round2_msgs in
+  check bool "context-only injection after skipped tool results does not cross threshold" true
+    (Cadence.decide paced ~stage:Agent_core.Agent.After_context_injection
+       ~checkpoint:cp_round2_ctx ~now_s:36.001 ~min_interval_sec:30.0
+     = Cadence.Skip Cadence.Context_only_after_skipped_tool_results);
+  (* Deferred checkpoint is retained with After_tool_results_appended for error flush. *)
+  (match Cadence.take_deferred paced with
+   | Some (Agent_core.Agent.After_tool_results_appended, deferred_cp) ->
+     check bool "deferred checkpoint carries refreshed context snapshot" true
+       (deferred_cp == cp_round2_ctx)
+   | Some _ | None -> fail "expected deferred After_tool_results_appended checkpoint");
+  check bool "take_deferred clears the pending slot" true
+    (Cadence.take_deferred paced = None);
+  (* When a skipped tool-results checkpoint is still pending, persisting the
+     next round's After_assistant_collected (which includes those tool results)
+     supersedes and clears the pending deferred slot. *)
+  (match
+     Cadence.decide paced ~stage:Agent_core.Agent.After_tool_results_appended
+       ~checkpoint:cp_round2_results ~now_s:35.5 ~min_interval_sec:30.0
+   with
+   | Cadence.Skip (Cadence.Within_min_interval _) -> ()
+   | Cadence.Persist | Cadence.Skip _ ->
+     fail "expected Within_min_interval before next assistant round");
+  let cp_round3_tool_use = make_msgs (round2_msgs @ [ assistant_tool_use ]) in
+  Cadence.observe_assistant_stop_reason paced ~stop_reason:Llm_provider.Types.StopToolUse;
+  check bool "next round After_assistant_collected persists right after skipped tool results" true
+    (Cadence.decide paced ~stage:Agent_core.Agent.After_assistant_collected
+       ~checkpoint:cp_round3_tool_use ~now_s:35.8 ~min_interval_sec:30.0 = Cadence.Persist);
+  Cadence.record_persisted paced ~stage:Agent_core.Agent.After_assistant_collected
+    ~checkpoint:cp_round3_tool_use ~now_s:35.8;
+  check bool "persisting next round assistant supersedes pending deferred tool results" true
+    (Cadence.take_deferred paced = None);
+  check bool "tool results persist once min_interval_sec has elapsed" true
+    (Cadence.decide paced ~stage:Agent_core.Agent.After_tool_results_appended
+       ~checkpoint:cp_round2_results ~now_s:36.0 ~min_interval_sec:30.0 = Cadence.Persist);
+  Cadence.record_persisted paced ~stage:Agent_core.Agent.After_tool_results_appended
+    ~checkpoint:cp_round2_results ~now_s:36.0;
+  (* extra_messages under min_interval_sec > 0 is paced and recorded for flush. *)
+  (match
+     Cadence.decide paced ~stage:Agent_core.Agent.After_context_injection
+       ~checkpoint:cp_ctx_extra_msgs ~now_s:36.5 ~min_interval_sec:30.0
+   with
+   | Cadence.Skip (Cadence.Within_min_interval _) -> ()
+   | Cadence.Persist | Cadence.Skip _ ->
+     fail "expected extra_messages context injection within interval to be paced");
+  check bool "deferred extra_messages checkpoint is queued" true
+    (Option.is_some (Cadence.take_deferred paced));
+  (* Non-StopToolUse stop_reason (e.g. MaxTokens -> Retry_without_thinking) resets pacing. *)
+  let cp_terminal = make_msgs (msgs_results @ [ assistant_final ]) in
+  Cadence.observe_assistant_stop_reason paced ~stop_reason:Llm_provider.Types.MaxTokens;
+  check bool "terminal non-tool assistant response always persists" true
+    (Cadence.decide paced ~stage:Agent_core.Agent.After_assistant_collected
+       ~checkpoint:cp_terminal ~now_s:37.0 ~min_interval_sec:30.0 = Cadence.Persist);
+  Cadence.record_persisted paced ~stage:Agent_core.Agent.After_assistant_collected
+    ~checkpoint:cp_terminal ~now_s:37.0;
+  check bool "Retry_without_thinking after MaxTokens gets a fresh pacing budget" true
+    (Cadence.decide paced ~stage:Agent_core.Agent.After_tool_results_appended
+       ~checkpoint:cp_round2_results ~now_s:37.5 ~min_interval_sec:30.0 = Cadence.Persist);
+  Cadence.record_persisted paced ~stage:Agent_core.Agent.After_tool_results_appended
+    ~checkpoint:cp_round2_results ~now_s:37.5;
+  check bool "input wait transition always persists" true
+    (Cadence.decide paced ~stage:Agent_core.Agent.After_input_wait_changed
+       ~checkpoint:cp_terminal ~now_s:38.0 ~min_interval_sec:30.0 = Cadence.Persist);
+  check bool "rejected response drop always persists" true
+    (Cadence.decide paced ~stage:Agent_core.Agent.After_rejected_response_dropped
+       ~checkpoint:cp_results ~now_s:38.5 ~min_interval_sec:30.0 = Cadence.Persist);
+  Cadence.record_persisted paced ~stage:Agent_core.Agent.After_rejected_response_dropped
+    ~checkpoint:cp_results ~now_s:38.5;
+  check bool "retry after dropped response resets pacing budget" true
+    (Cadence.decide paced ~stage:Agent_core.Agent.After_tool_results_appended
+       ~checkpoint:cp_round2_results ~now_s:39.0 ~min_interval_sec:30.0 = Cadence.Persist)
+;;
+
 let test_structurally_invalid_checkpoint_is_refused_at_the_store () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -3682,6 +3993,14 @@ let () =
             test_structurally_invalid_checkpoint_is_refused_at_the_store;
           test_case "the transcript is validated on the pool" `Quick
             test_transcript_is_validated_on_the_pool;
+          test_case "a valid steady-state save uses one pool job" `Quick
+            test_valid_save_runs_a_single_pool_job;
+          test_case "mid-turn Turn_continues saves do not churn history snapshots" `Quick
+            test_mid_turn_turn_continues_does_not_churn_history_snapshots;
+          test_case "structurally invalid still beats stale watermark" `Quick
+            test_structurally_invalid_still_beats_stale_watermark;
+          test_case "mid-turn checkpoint cadence policy" `Quick
+            test_checkpoint_cadence_policy;
           test_case "a valid checkpoint still saves" `Quick
             test_valid_checkpoint_still_saves;
           test_case "stage saves sharing the store's encoding memo write canonical bytes" `Quick

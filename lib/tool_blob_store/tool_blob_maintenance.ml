@@ -831,6 +831,82 @@ let sqlite_companions_absent path =
     ]
 ;;
 
+(* Where a verification request record keeps a blob reference. The server
+   writes the record, but most of it is the producer's text: the references
+   they named, the criteria, notes, inline artifact content. The store writes
+   a blob reference in exactly one place, the member [blob] of an item the
+   submission stored whole, so only that is read. A string elsewhere in the
+   record that begins like a marker is text, and a reference-shaped object
+   elsewhere in the record names nothing. *)
+let request_record_bodies json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "output" fields with
+     | None -> Ok []
+     | Some (`Assoc output) ->
+       (match List.assoc_opt "submitted_evidence" output with
+        | None -> Ok []
+        | Some (`List items) ->
+          List.fold_left
+            (fun bodies item ->
+               Result.bind bodies (fun bodies ->
+                   match item with
+                   | `Assoc item_fields
+                     when List.assoc_opt "kind" item_fields = Some (`String "artifact_body") ->
+                     (match List.assoc_opt "blob" item_fields with
+                      | Some blob -> Ok (blob :: bodies)
+                      | None -> Error "a stored body item holds no reference")
+                   | `Assoc _ | `List _ | `Null | `Bool _ | `Int _ | `Intlit _
+                   | `Float _ | `String _ ->
+                     Ok bodies))
+            (Ok []) items
+          |> Result.map List.rev
+        | Some _ -> Error "submitted_evidence is not a list")
+     | Some _ -> Error "output is not an object")
+  | `List _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ ->
+    Error "request record is not an object"
+;;
+
+let references_in_request_record ~ownership_root path =
+  match Fs_compat.load_owned_regular_file ~ownership_root path with
+  | Error error ->
+    Error
+      (Durable_source_read_failed
+         { path
+         ; reason = Fs_compat.owned_regular_file_read_error_to_string error
+         })
+  | Ok None ->
+    Error
+      (Durable_source_read_failed
+         { path; reason = "durable source disappeared during scan" })
+  | Ok (Some payload) ->
+    let parsed =
+      try Ok (Yojson.Safe.from_string payload)
+      with Yojson.Json_error detail ->
+        Error (Durable_source_parse_failed { path; line = 1; detail }) in
+    Result.bind
+      (Result.bind parsed (fun json ->
+           match request_record_bodies json with
+           | Ok bodies -> Ok bodies
+           | Error detail -> Error (Durable_source_parse_failed { path; line = 1; detail })))
+      (List.fold_left
+         (fun references blob ->
+            Result.bind references (fun references ->
+                match Tool_output.normalized_artifact_ref_of_json blob with
+                | Tool_output.Decoded_normalized_artifact_ref reference ->
+                  Ok (Live_reference_set.add (Artifact reference) references)
+                | Tool_output.Invalid_normalized_artifact_ref { detail } ->
+                  Error (Malformed_structured_artifact_reference { path; line = 1; detail })
+                | Tool_output.Not_normalized_artifact_ref ->
+                  Error
+                    (Malformed_structured_artifact_reference
+                       { path
+                       ; line = 1
+                       ; detail = "a stored body item does not hold a blob reference"
+                       })))
+         (Ok Live_reference_set.empty))
+;;
+
 let references_in_chat_operation_store ~mode ~ownership_root path =
   match Fs_compat.load_owned_regular_file ~ownership_root path with
   | Error error ->
@@ -955,6 +1031,7 @@ type source =
   | Tree
   | Payload_tree
   | File
+  | Request_records
 
 type classification =
   | In_scope of source
@@ -1001,6 +1078,9 @@ type scope =
 type consumer_source =
   | Tree_source of string (* scanned recursively; an absent root holds no references *)
   | Payload_tree_source of string
+  | Request_records_source of string
+      (* Verification request records. Only the reference of a stored body is
+         read; the producer's text around it is not a reference source. *)
   | Optional_file of string (* a single file; absent means no references *)
 
 let rec sources_of ~dir entries =
@@ -1008,6 +1088,8 @@ let rec sources_of ~dir entries =
     (function
       | Store { name; classification = In_scope Tree } -> [ Tree_source (Filename.concat dir name) ]
       | Store { name; classification = In_scope Payload_tree } -> [ Payload_tree_source (Filename.concat dir name) ]
+      | Store { name; classification = In_scope Request_records } ->
+        [ Request_records_source (Filename.concat dir name) ]
       | Store { name; classification = In_scope File } -> [ Optional_file (Filename.concat dir name) ]
       | Store { classification = Excluded _; name = _ }
       | Keeper_files _
@@ -1023,7 +1105,10 @@ let workspace_sources scope ~workspace_masc_dir =
 
 let consumer_paths scope ~base_path =
   workspace_sources scope ~workspace_masc_dir:(Common.masc_dir_from_base_path ~base_path)
-  |> List.map (function Tree_source path | Payload_tree_source path | Optional_file path -> path)
+  |> List.map
+       (function
+         | Tree_source path | Payload_tree_source path | Request_records_source path
+         | Optional_file path -> path)
 ;;
 
 type place =
@@ -1349,6 +1434,7 @@ let scan_live_references ~mode ~base_path ~scope =
   let scan_source references = function
     | Tree_source root -> scan_directory (references_in_file ~mode) root references
     | Payload_tree_source root -> scan_directory (references_in_payload_file ~mode) root references
+    | Request_records_source root -> scan_directory references_in_request_record root references
     | Optional_file path ->
       (match Unix.lstat path with
        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok references

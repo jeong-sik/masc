@@ -170,6 +170,13 @@ type source =
           other payloads are scanned as text for exact tool blob markers.
           Malformed recognized references still stop the scan. *)
   | File  (** The entry is one file; absent, it holds nothing. *)
+  | Request_records
+      (** Verification request records. The server writes them and they hold
+          the producer's text, so a string in them is never read as a marker.
+          The only reference read is the [blob] member of an [artifact_body]
+          item under [output.submitted_evidence], which is the one place the
+          evidence store writes a reference. A body item without a well
+          formed reference stops the scan. *)
 
 type classification =
   | In_scope of source

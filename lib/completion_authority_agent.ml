@@ -324,7 +324,11 @@ let evidence_posture_of_snapshot
       items
       |> List.filter (function
            | Workspace_verification_store.Evidence_artifact _ -> true
-           | Workspace_verification_store.Evidence_artifact_body _ -> true
+           | Workspace_verification_store.Evidence_artifact_body _ ->
+             (* Counted on its recorded reference, as a binary item is on its
+                filed body. Whether the bytes are still there is the reader's
+                answer, not the record's. *)
+             true
            | Workspace_verification_store.Evidence_collaboration _
            | Workspace_verification_store.Evidence_artifact_binary _ ->
              (* A binary item is judgeable on its own terms: the hash, the

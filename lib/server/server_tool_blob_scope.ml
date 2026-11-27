@@ -2,6 +2,8 @@ module M = Tool_blob_maintenance
 module Board = Masc_board_handlers.Board_paths
 
 let tree name = M.Store { name; classification = M.In_scope M.Tree }
+let request_records name =
+  M.Store { name; classification = M.In_scope M.Request_records }
 let payload_tree name = M.Store { name; classification = M.In_scope M.Payload_tree }
 let file name = M.Store { name; classification = M.In_scope M.File }
 let excluded reason name = M.Store { name; classification = M.Excluded reason }
@@ -148,8 +150,9 @@ let workspace =
     ; no_reference Goal_verification_run_registry.storage_filename
       (* A request record names the text bodies it stored whole by their
          content address. The sweep counts those references: a body no record
-         names any more becomes a candidate. *)
-    ; tree Workspace_verification_store.verifications_dirname
+         names any more becomes a candidate. The record also carries the
+         producer's text, which is not read as markers. *)
+    ; request_records Workspace_verification_store.verifications_dirname
       (* Binary evidence bodies are files of the request directory. They
          reference no blob. *)
     ; no_reference Workspace_verification_store.evidence_body_directory

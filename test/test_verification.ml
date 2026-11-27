@@ -3385,6 +3385,17 @@ let test_submitted_evidence_stores_a_large_text_whole () =
 (* The ceiling is applied before the read. A text file over it is not read:
    the item is unreadable, names the ceiling and the size, and no body is
    stored for it. *)
+(* A text file of an exact size, written in mebibytes so the ceiling can be
+   reached without one large string literal. *)
+let write_text_of_size path bytes =
+  let out = open_out_bin path in
+  let mebibyte = String.make (1024 * 1024) 'z' in
+  for _ = 1 to bytes / String.length mebibyte do
+    output_string out mebibyte
+  done;
+  output_string out (String.make (bytes mod String.length mebibyte) 'z');
+  close_out out
+
 let test_submitted_evidence_refuses_a_text_over_the_ceiling () =
   with_eio_temp_dir (fun base_path ->
     let artifact_dir =
@@ -3393,13 +3404,7 @@ let test_submitted_evidence_refuses_a_text_over_the_ceiling () =
     let artifact_path = Filename.concat artifact_dir "huge-artifact.txt" in
     let ceiling = VS.text_artifact_max_bytes in
     let size = ceiling + 1 in
-    let out = open_out_bin artifact_path in
-    let mebibyte = String.make (1024 * 1024) 'z' in
-    for _ = 1 to ceiling / String.length mebibyte do
-      output_string out mebibyte
-    done;
-    output_string out "!";
-    close_out out;
+    write_text_of_size artifact_path size;
     let request_id = "vrf-over-ceiling" in
     ignore (create_evidence_request ~base_path ~request_id ~artifact_path);
     match inspect_evidence ~base_path ~request_id () with
@@ -3603,6 +3608,66 @@ let test_transport_projection_bounds_the_evidence_total () =
         withheld
     | VS.Evidence_unavailable _ -> Alcotest.fail "evidence must be available")
 ;;
+
+(* The ceiling itself is under it: a text of exactly that many bytes is
+   stored whole, not refused. *)
+let test_submitted_evidence_stores_a_text_at_the_ceiling () =
+  with_eio_temp_dir (fun base_path ->
+    let artifact_dir =
+      Filename.concat base_path ".masc/playground/docker/omega" in
+    Fs_compat.mkdir_p artifact_dir;
+    let artifact_path = Filename.concat artifact_dir "limit-artifact.txt" in
+    let ceiling = VS.text_artifact_max_bytes in
+    write_text_of_size artifact_path ceiling;
+    let request_id = "vrf-at-ceiling" in
+    ignore (create_evidence_request ~base_path ~request_id ~artifact_path);
+    match inspect_evidence ~base_path ~request_id () with
+    | VS.Evidence_available { items = VS.Evidence_artifact_body { blob; _ } :: _; _ } ->
+      Alcotest.(check int) "a text of exactly the ceiling is stored whole" ceiling
+        blob.Tool_output.bytes
+    | _ -> Alcotest.fail "expected a text at the ceiling to be stored whole")
+
+(* The persisted shape is a hard cut. An artifact item written by the previous
+   build carries a truncation flag; it no longer decodes, so its evidence
+   reads as unavailable instead of as something it is not. *)
+let test_submitted_evidence_rejects_the_old_truncated_artifact () =
+  with_eio_temp_dir (fun base_path ->
+    let request_id = "vrf-old-truncated-artifact" in
+    let content = "artifact body" in
+    let snapshot =
+      `List
+        [ `Assoc
+            [ "kind", `String "artifact"
+            ; "reference", `String "artifact:artifacts/current.txt"
+            ; "content", `String content
+            ; "bytes", `Int (String.length content)
+            ; "truncated", `Bool false
+            ]
+        ]
+    in
+    (match
+       V.create_request
+         ~base_path
+         ~request_id
+         ~task_id:"task-001"
+         ~output:(`Assoc [ "submitted_evidence", snapshot ])
+         ~criteria:[ "inspect artifact" ]
+         ~worker:"omega"
+         ()
+     with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.fail detail);
+    match inspect_evidence ~base_path ~request_id () with
+    | VS.Evidence_unavailable { reason = VS.Evidence_snapshot_invalid detail; _ } ->
+      Alcotest.(check bool)
+        "the old field is named"
+        true
+        (Astring.String.is_infix ~affix:"truncated" detail)
+    | VS.Evidence_unavailable { reason; _ } ->
+      Alcotest.failf
+        "wrong rejection: %s"
+        (VS.evidence_access_failure_to_string ~request_id reason)
+    | VS.Evidence_available _ -> Alcotest.fail "an old artifact item was accepted")
 
 (* #29615: a text too large for the record must not travel to the judge as a
    prefix or as a whole. It is stored in the blob store at submission; the
@@ -5045,6 +5110,8 @@ let () =
         test_submitted_evidence_stores_a_large_text_whole;
       Alcotest.test_case "submitted evidence refuses a text over the ceiling" `Quick
         test_submitted_evidence_refuses_a_text_over_the_ceiling;
+      Alcotest.test_case "submitted evidence stores a text at the ceiling" `Quick
+        test_submitted_evidence_stores_a_text_at_the_ceiling;
       Alcotest.test_case "transport projection omits a stored body" `Quick
         test_transport_projection_omits_a_stored_body;
       Alcotest.test_case "transport projection bounds the evidence total" `Quick
@@ -5053,6 +5120,8 @@ let () =
         test_transport_projection_keeps_the_most_items_it_can;
       Alcotest.test_case "submitted evidence rejects unknown artifact field" `Quick
         test_submitted_evidence_rejects_unknown_artifact_field;
+      Alcotest.test_case "submitted evidence rejects the old truncation flag" `Quick
+        test_submitted_evidence_rejects_the_old_truncated_artifact;
       Alcotest.test_case "submitted evidence rejects malformed UTF-8" `Quick
         test_submitted_evidence_rejects_malformed_utf8;
       Alcotest.test_case "submitted evidence rejects symlink and FIFO" `Quick

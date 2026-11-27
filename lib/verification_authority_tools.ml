@@ -618,8 +618,9 @@ type artifact_read =
 let submitted_form_members = [ "reference"; "cursor" ]
 
 let neither_form =
-  "pass reference for a submitted text artifact, or sha256 for the full text a \
-   masc_web_fetch of this review stored"
+  "pass reference for a submitted text artifact, or sha256 for a stored text: \
+   the full text a masc_web_fetch of this review stored, or an artifact this \
+   submission stored whole"
 ;;
 
 let artifact_read_of_args = function
@@ -629,8 +630,8 @@ let artifact_read_of_args = function
       if List.exists (fun name -> List.mem name submitted_form_members) names
       then
         Error
-          "pass either reference (a submitted text artifact) or sha256 (the full \
-           text a masc_web_fetch stored), not both"
+          "pass either reference (a submitted text artifact) or sha256 (a stored \
+           text), not both"
       else
         (match List.assoc_opt "sha256" fields with
          | Some (`String sha256) -> Ok (Stored_page { sha256 })
@@ -642,7 +643,7 @@ let artifact_read_of_args = function
        | Some (`String _) ->
          Error
            "a submitted artifact continues with cursor. offset, max_bytes and \
-            contains read a stored page and need its sha256"
+            contains read a stored text and need its sha256"
        | Some _ -> Error "reference is a string"
        | None -> Error neither_form)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) ->

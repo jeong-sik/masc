@@ -411,7 +411,9 @@ let test_lane_addon_records_keep_embedded_tool_blobs_live () =
    sweep's scope. A body a record still names is live; a body no record names
    is a candidate in both scans and so becomes deletable. The item is written
    by the store's serializer, so the pin holds for the shape requests really
-   carry. *)
+   carry. The rest of the record is the producer's text: a string that begins
+   like a marker and a reference-shaped object outside the evidence list are
+   read as neither. *)
 let test_request_records_keep_stored_text_bodies_live () =
   with_temp_dir (fun base_path ->
       let store = B.create ~base_path in
@@ -434,11 +436,44 @@ let test_request_records_keep_stored_text_bodies_live () =
         Workspace_verification_store.submitted_evidence_item_to_yojson
           (Workspace_verification_store.Evidence_artifact_body
              { reference = "artifact:report.txt"; blob = kept }) in
+      let marker_like = "[masc:blob sha256=abc] text that begins like a marker" in
+      let stray =
+        `Assoc
+          [ "_blob",
+            `Assoc
+              [ "sha256", `String orphan.sha256
+              ; "bytes", `Int orphan.bytes
+              ; "mime", `String "text/plain"
+              ; "preview", `String ""
+              ] ]
+      in
       Fs_compat.mkdir_p records;
       Fs_compat.save_file (Filename.concat records "vrf-1.json")
         (Yojson.Safe.to_string
            (`Assoc
-             [ "output", `Assoc [ "submitted_evidence", `List [ item ] ] ]));
+             [ "id", `String "vrf-1"
+             ; "task_id", `String "task-1"
+             ; "worker", `String "keeper"
+             ; "created_at", `Float 1.0
+             ; "criteria", `List [ `String marker_like ]
+             ; "output",
+               `Assoc
+                 [ "evidence_refs", `List [ `String ("note:" ^ marker_like) ]
+                 ; "task_title", `String marker_like
+                 ; "submitted_evidence",
+                   `List
+                     [ `Assoc [ "kind", `String "note"; "content", `String marker_like ]
+                     ; `Assoc
+                         [ "kind", `String "artifact"
+                         ; "reference", `String "artifact:log.txt"
+                         ; "content", `String marker_like
+                         ; "bytes", `Int (String.length marker_like)
+                         ]
+                     ; item
+                     ]
+                 ; "stray", stray
+                 ]
+             ] ));
       let second = observe_ok ~base_path in
       Alcotest.(check (list string)) "still fully classified" [] second.unclassified;
       Alcotest.(check int) "the record's body is live" 1 second.live_digests;

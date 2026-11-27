@@ -2241,9 +2241,17 @@ let decode_verification_evidence_item json =
               | Ok None | Error _ -> "unreadable"
             in
             let d =
-              match optional_nonblank_string r "detail" with
-              | Ok v -> v
-              | Error _ -> None
+              (* A text over the read ceiling names its size and the ceiling
+                 as numbers; the view shows them as one sentence. *)
+              match c with
+              | "too_large" when int_or_0 r "cap" > 0 ->
+                Some
+                  (Printf.sprintf "at least %d bytes, ceiling %d bytes"
+                     (int_or_0 r "at_least") (int_or_0 r "cap"))
+              | _ ->
+                (match optional_nonblank_string r "detail" with
+                 | Ok v -> v
+                 | Error _ -> None)
             in
             (c, d)
         | Ok None | Error _ -> ("unreadable", None)

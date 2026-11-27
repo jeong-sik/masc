@@ -188,13 +188,19 @@ let rgb_of_payload payload =
     | _ -> None
   else None
 
+let is_ascii_digits s =
+  String.length s > 0 && String.for_all (fun c -> c >= '0' && c <= '9') s
+
 let parse_response body =
+  let parse_payload slot payload =
+    Palette_response { slot; color = rgb_of_payload payload }
+  in
   let parse slot prefix =
     let payload =
       String.sub body (String.length prefix)
         (String.length body - String.length prefix)
     in
-    Palette_response { slot; color = rgb_of_payload payload }
+    parse_payload slot payload
   in
   if String.starts_with ~prefix:"10;" body then parse Foreground "10;"
   else if String.starts_with ~prefix:"11;" body then parse Background "11;"
@@ -207,10 +213,16 @@ let parse_response body =
         | None -> Not_palette_response
         | Some second -> (
             let index_text = String.sub rest 0 second in
-            match int_of_string_opt index_text with
-            | Some idx when idx >= 0 && idx < ansi_slot_count ->
-                parse (Ansi idx) (Printf.sprintf "4;%d;" idx)
-            | Some _ | None -> Not_palette_response))
+            if not (is_ascii_digits index_text) then Not_palette_response
+            else
+              match int_of_string_opt index_text with
+              | Some idx when idx >= 0 && idx < ansi_slot_count ->
+                  let payload =
+                    String.sub rest (second + 1)
+                      (String.length rest - second - 1)
+                  in
+                  parse_payload (Ansi idx) payload
+              | Some _ | None -> Not_palette_response))
   else Not_palette_response
 
 let of_responses ~foreground ~background ~ansi =

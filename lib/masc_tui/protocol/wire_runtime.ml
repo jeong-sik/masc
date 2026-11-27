@@ -7499,7 +7499,10 @@ let decode_browser_op_receipt json =
         match data_json with
         | Some d ->
             let s = Yojson.Safe.to_string d in
-            if String.length s > 180 then String.sub s 0 180 ^ "…" else s
+            if String.length s > 180 then
+              let cut = Masc_tui_core.Text_util.clamp_utf8_cursor s 180 in
+              String.sub s 0 cut ^ "…"
+            else s
         | None -> if ok then "ok" else "failed")
   in
   Ok { ok; summary; data_json; error }

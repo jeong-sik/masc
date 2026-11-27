@@ -2,7 +2,7 @@
 
 import { html } from 'htm/preact'
 import type { JSX } from 'preact'
-import { useEffect, useMemo, useRef } from 'preact/hooks'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'preact/hooks'
 import { enhanceRichCode } from './rich-code-preview'
 import { Marked, Renderer, type Tokens } from 'marked'
 import { sanitizeHtml } from '../../lib/dompurify'
@@ -212,13 +212,18 @@ export function MarkdownContent({
     if (!element) return undefined
     const restoreImages = htmlStr.includes('<img ') ? linkUnloadedImages(element) : undefined
     const restoreFences = !streaming && htmlStr.includes('language-') ? enhanceRichCode(element) : undefined
-    const restoreLinks = linkRewrites && htmlStr.includes('<a') ? rewriteLinks(element, linkRewrites) : undefined
     return () => {
       restoreImages?.()
       restoreFences?.()
-      restoreLinks?.()
     }
-  }, [htmlStr, streaming, linkRewrites])
+  }, [htmlStr, streaming])
+  // Apart from the enhancers, so a new rewrite map does not rebuild diagrams;
+  // before paint, so no click reaches a link that is not rewritten yet.
+  useLayoutEffect(() => {
+    const element = root.current
+    if (!element || !linkRewrites || !htmlStr.includes('<a')) return undefined
+    return rewriteLinks(element, linkRewrites)
+  }, [htmlStr, linkRewrites])
 
   const classes = ['markdown-content', className].filter(Boolean).join(' ')
   return html`

@@ -21,6 +21,7 @@ import { apiGetV2, apiMutateV2 } from '../../core/transport'
 import { KeeperBadge } from '../../components/keeper-badge'
 import { MasterDetail, PopoverMenu, VirtualList } from '../../components/primitives'
 import {
+  describeWireType,
   expectOptionalArrayField,
   expectOptionalRecordArrayField,
   expectOptionalRecordField,
@@ -30,9 +31,10 @@ import {
   expectRequiredStringField,
   expectWireRecord,
 } from '../../lib/wire-decode'
-import { isAdminLockedForSession, resolveRoute } from '../../routes/router'
+import { isAdminLockedForSession, navigate, resolveRoute } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
 import {
+  WIKI_LINK_KINDS,
   WIKI_SOURCES,
   computeMarkdownLineDiff,
   formatRelativeTime,
@@ -41,7 +43,9 @@ import {
   type WikiLintData,
   type WikiLintFinding,
   type WikiLogData,
+  type WikiLinkKind,
   type WikiLogEntry,
+  type WikiOutgoingLink,
   type WikiPageData,
   type WikiPageSummary,
   type WikiPutRespData,
@@ -125,6 +129,27 @@ function decodeWikiSearchData(raw: unknown): WikiSearchData {
   }
 }
 
+function isWikiLinkKind(value: string): value is WikiLinkKind {
+  return (WIKI_LINK_KINDS as readonly string[]).includes(value)
+}
+
+function decodeWikiOutgoingLink(rec: Record<string, unknown>, ctx: string): WikiOutgoingLink {
+  const kind = expectRequiredStringField(rec, 'kind', ctx)
+  if (!isWikiLinkKind(kind)) throw new Error(`${ctx}: "kind" 필드의 링크 종류 "${kind}" 를 모릅니다.`)
+  const exists = rec.exists
+  if (exists !== null && typeof exists !== 'boolean') {
+    throw new Error(`${ctx}: "exists" 필드는 boolean 이나 null 이어야 합니다 (${describeWireType(exists)} 수신).`)
+  }
+  return {
+    text: expectRequiredStringField(rec, 'text', ctx),
+    kind,
+    target: expectRequiredStringField(rec, 'target', ctx),
+    raw: expectRequiredStringField(rec, 'raw', ctx),
+    line: expectRequiredNumberField(rec, 'line', ctx),
+    exists,
+  }
+}
+
 function decodeWikiPageData(raw: unknown): WikiPageData {
   const ctx = 'GET /api/v1/wiki/:slug'
   const rec = expectWireRecord(raw, ctx)
@@ -136,7 +161,8 @@ function decodeWikiPageData(raw: unknown): WikiPageData {
   const revision = expectRequiredNumberField(fmRec, 'revision', `${ctx} frontmatter`)
   const tags = expectOptionalStringArrayField(fmRec, 'tags', `${ctx} frontmatter`)
   const backlinks = expectOptionalStringArrayField(rec, 'backlinks', ctx)
-  const outgoing_links = expectOptionalRecordArrayField<WikiPageData['outgoing_links'][number]>(rec, 'outgoing_links', ctx)
+  const outgoing_links = expectOptionalRecordArrayField<Record<string, unknown>>(rec, 'outgoing_links', ctx)
+    .map((link, i) => decodeWikiOutgoingLink(link, `${ctx} outgoing_links[${i}]`))
   const lint_findings = expectOptionalRecordArrayField<WikiLintFinding>(rec, 'lint_findings', ctx)
   return {
     ...(rec as unknown as WikiPageData),
@@ -782,13 +808,19 @@ export function WikiTab(props: WorkspaceViewProps) {
     }
     return { rewrites, slugByHref }
   }, [pageDetail, wikiIndex])
-  // Picking a page from the list does not change the route, so the route can
-  // already name the linked page; selecting it here opens the page either way.
+  // Picking a page from the list does not change the route, so the history
+  // entry being left may name no page or another page. A plain click first
+  // makes that entry name the page on screen, then pushes the linked page, so
+  // Back returns to the page the link was followed from.
   const openBodyPageLink = (event: MouseEvent) => {
     if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
     const anchor = event.target instanceof Element ? event.target.closest('a[href]') : null
     const slug = anchor ? bodyPageLinks.slugByHref.get(anchor.getAttribute('href') ?? '') : undefined
-    if (slug) setSelectedSlug(slug)
+    if (!slug) return
+    event.preventDefault()
+    if (selectedSlug) navigate(`/knowledge/wiki/${encodeURIComponent(selectedSlug)}`, { replace: true })
+    navigate(`/knowledge/wiki/${encodeURIComponent(slug)}`)
+    setSelectedSlug(slug)
   }
   // A selected page with nothing read of it and no error is one being read:
   // from the first render, before the effect that reads it has run.

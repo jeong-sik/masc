@@ -38,14 +38,11 @@ let serve ?(scope_is_current = fun () -> true) ?scope_replaced ?request
       Server_sse_response.close response;
       Closed)
   in
-  (* [sw] lives as long as the server, so a failure of this one stream,
-     subscribing included, is logged here instead of failing it. *)
-  Eio.Fiber.fork ~sw (fun () ->
-    match
+  (* Route through [Server_sse_response.serve] so a shutting-down [sw] closes
+     [response] instead of leaving an unclosed streaming HTTP body behind. *)
+  Server_sse_response.serve ~sw response (fun () ->
+    let outcome =
       Eio.Switch.run (fun stream_sw ->
-        Server_bootstrap_http.with_cleanups_on_release
-          ~sw:stream_sw
-          [ (fun () -> Server_sse_response.close response) ];
         let queue = Server_sse_pump.Queue.create ~max_queued_events in
         (* Nothing between subscribing and registering the removal can be
            cancelled, so a cancelled stream cannot leave its subscription
@@ -64,17 +61,15 @@ let serve ?(scope_is_current = fun () -> true) ?scope_replaced ?request
           Eio.Fiber.first
             (fun () -> Eio.Promise.await replaced; `Scope_replaced)
             (fun () -> `Ended (pump ())))
-    with
+    in
+    match outcome with
     (* [Server_sse_response.send] logs a stalled frame with the request path. *)
     | `Scope_replaced
     | `Ended (Server_sse_pump.Client_gone | Server_sse_pump.Stalled | Server_sse_pump.Finished) -> ()
     | `Ended Server_sse_pump.Source_stopped ->
       Log.Server.warn
         "Fleet stream closed: the client was %d events behind"
-        max_queued_events
-    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-    | exception exn ->
-      Log.Server.warn "Fleet stream failed: %s" (Printexc.to_string exn))
+        max_queued_events)
 ;;
 
 let add_routes ~sw ~clock router =

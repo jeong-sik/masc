@@ -15,4 +15,4 @@ let request ~base_path =
   match Atomic.get owner with
   | None -> Error Owner_not_ready
   | Some active when active.base_path <> base_path -> Error Workspace_mismatch
-  | Some active -> Eio.Mutex.use_rw ~protect:true active.lock active.resume
+  | Some active -> Eio.Mutex.use_ro active.lock active.resume

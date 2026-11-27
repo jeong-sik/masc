@@ -540,7 +540,7 @@ let with_path_lock path f =
   let lock = Keeper_fs.acquire_path_lock path in
   Fun.protect
     ~finally:(fun () -> Keeper_fs.release_path_lock path lock)
-    (fun () -> Eio.Mutex.use_rw ~protect:true (Keeper_fs.path_lock_mutex lock) f)
+    (fun () -> Eio.Mutex.use_ro (Keeper_fs.path_lock_mutex lock) f)
 ;;
 
 let published_snapshot = function

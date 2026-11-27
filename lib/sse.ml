@@ -927,16 +927,17 @@ let external_subscriber_count () =
 let external_subscriber_count_with_prefix prefix =
   current_external_subscriber_count_with_prefix prefix
 
-let remove_external_subscribers ids =
+let remove_external_subscribers dead_subs =
   Lockfree_atomic.update_with_commit external_subscribers (fun state ->
     let removed_ids, next_subscribers =
       List.fold_left
-        (fun (removed, acc) id ->
-          if SMap.mem id acc then
-            (id :: removed, SMap.remove id acc)
-          else
+        (fun (removed, acc) (sub : external_subscriber) ->
+          match SMap.find_opt sub.sub_id acc with
+          | Some current when current == sub ->
+            (sub.sub_id :: removed, SMap.remove sub.sub_id acc)
+          | Some _ | None ->
             (removed, acc))
-        ([], state.subscribers) ids
+        ([], state.subscribers) dead_subs
     in
     match removed_ids with
     | [] ->
@@ -1023,7 +1024,7 @@ let notify_external_subscribers ~target event =
       (fun _ (sub : external_subscriber) ->
         try
           if not (sub.is_alive ())
-          then dead := sub.sub_id :: !dead
+          then dead := sub :: !dead
           else if external_matches_target target sub
                   && visibility_permitted None visibility
           then sub.callback event
@@ -1066,7 +1067,7 @@ let reap_dead_external_subscribers () =
   let dead = ref [] in
   SMap.iter (fun _ (sub : external_subscriber) ->
     if not (sub.is_alive ()) then
-      dead := sub.sub_id :: !dead
+      dead := sub :: !dead
   ) subscribers;
   let removed_ids =
     if !dead <> [] then begin
@@ -1441,19 +1442,44 @@ let close_all_clients () =
     Returns list of evicted session_ids so caller can clean up writers. *)
 let cleanup_stale ?(max_age_s=1800.0) () =
   let now = Time_compat.now () in
-  let stale =
-    SMap.fold (fun sid c acc ->
-      let last_seen = Atomic.get c.last_seen_at in
-      if now -. last_seen > max_age_s then (sid, last_seen) :: acc else acc
-    ) (Atomic.get clients).entries []
+  let evicted =
+    Lockfree_atomic.update_with_commit clients (fun state ->
+      let stale, next_entries, next_inventory, removed_count =
+        SMap.fold
+          (fun sid c (stale_acc, entries_acc, inv_acc, count_acc) ->
+            let last_seen = Atomic.get c.last_seen_at in
+            if now -. last_seen > max_age_s then
+              ( (sid, c, last_seen) :: stale_acc
+              , SMap.remove sid entries_acc
+              , Sse_queue_inventory.remove inv_acc ~session_id:sid ~client_id:c.id
+              , count_acc + 1 )
+            else
+              (stale_acc, entries_acc, inv_acc, count_acc))
+          state.entries
+          ([], state.entries, state.queue_inventory, 0)
+      in
+      if removed_count = 0 then
+        { next_state = state; result = [] }
+      else
+        { next_state =
+            { entries = next_entries
+            ; count = state.count - removed_count
+            ; queue_inventory = next_inventory
+            }
+        ; result = stale
+        })
   in
-  (* Remove under lock, one by one *)
-  List.iter (fun (sid, last_seen) ->
-    Log.Server.info "idle evict: %s (idle %.0fs)" sid (now -. last_seen);
-    Transport_metrics.inc_sse_idle_evicted ();
-    unregister sid
-  ) stale;
-  List.map fst stale
+  if evicted <> [] then begin
+    sync_transport_snapshot ();
+    Transport_metrics.record_sse_lifecycle_change ();
+    List.iter
+      (fun (sid, client, last_seen) ->
+        Log.Server.info "idle evict: %s (idle %.0fs)" sid (now -. last_seen);
+        Transport_metrics.inc_sse_idle_evicted ();
+        invoke_disconnect_hook_for sid client)
+      evicted
+  end;
+  List.map (fun (sid, _, _) -> sid) evicted
 
 let () =
   Dashboard_agent_core_bridge.set_broadcast_hook (fun json ->

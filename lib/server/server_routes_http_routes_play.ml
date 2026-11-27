@@ -262,7 +262,7 @@ end
 (* Serialize invite routes. Auth's credential transaction owns the name-file
    check and publication, also excluding credential writers outside these routes. *)
 let invites_lock = Eio.Mutex.create ()
-let one_at_a_time f = Eio.Mutex.use_rw ~protect:true invites_lock f
+let one_at_a_time f = Eio.Mutex.use_ro invites_lock f
 
 let add_routes router =
   router

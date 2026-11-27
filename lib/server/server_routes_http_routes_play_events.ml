@@ -109,8 +109,8 @@ let serve ~state ~name ~request ~reqd ~sw ~clock ~machine ~presence (credential 
         (Http_server_eio.Response.scoped_headers () @
          ["content-type", "text/event-stream"; "cache-control", "private, no-store";
           "connection", "close"; "x-accel-buffering", "no"])) `OK) in
-  Eio.Fiber.fork ~sw (fun () ->
-    match Eio.Switch.run (fun connection ->
+  Server_sse_response.serve ~sw response (fun () ->
+    Eio.Switch.run (fun connection ->
       let stopped, stop = Eio.Promise.create () in
       let joined = ref false in
       let role = credential.Masc_domain.role in
@@ -123,7 +123,6 @@ let serve ~state ~name ~request ~reqd ~sw ~clock ~machine ~presence (credential 
       Eio.Switch.on_release connection (fun () ->
         Sse.unsubscribe_external id;
         ignore (Eio.Promise.try_resolve stop ());
-        Server_sse_response.close response;
         disconnect ());
       let sync_presence () = match presence with
         | None -> true
@@ -209,10 +208,7 @@ let serve ~state ~name ~request ~reqd ~sw ~clock ~machine ~presence (credential 
           (fun () -> Eio.Promise.await (Mcp_server.workspace_scope_replaced scope))));
       (* The spectator is a child of this switch. Stop it before waiting for
          children; on_release alone runs too late on an ordinary disconnect. *)
-      ignore (Eio.Promise.try_resolve stop ())) with
-    | () -> ()
-    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-    | exception exn -> Log.Server.warn "Play observation ended: %s" (Printexc.exn_slot_name exn))
+      ignore (Eio.Promise.try_resolve stop ())))
 
 let add_routes router =
   router |> Server_route.get (Server_route.Token_permission Masc_domain.CanPlayMachine) path

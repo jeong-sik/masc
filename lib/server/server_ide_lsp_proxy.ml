@@ -780,7 +780,7 @@ let ensure_lsp_process cs lang_id =
   then Error "connection closed"
   else
     let spawn_mutex = spawn_lock_for cs lang_id in
-    Eio.Mutex.use_rw ~protect:true spawn_mutex (fun () ->
+    Eio.Mutex.use_ro spawn_mutex (fun () ->
       if Atomic.get cs.disconnected
       then Error "connection closed"
       else
@@ -801,53 +801,66 @@ let ensure_lsp_process cs lang_id =
          Log.Server.warn "LSP spawn failed for %s: %s" lang_id msg;
          Error msg
        | Ok proc ->
-         Lsp_message_router.start_response_reader
-           ~sw:cs.sw
-           cs.router
-           proc
-           ~on_exit:(Some (fun ~reason -> note_process_exit cs proc ~reason))
-           ~on_notification:(fun ~client_id:_ ~method_ params ->
-             send_client_notification cs method_ params);
-         let init_params = language_server_initialize_params ~workspace_root in
-         let promise =
-           Lsp_message_router.send_request
-             cs.router
-             proc
-             ~method_:(lsp_method_to_string Initialize)
-             ~params:init_params
-             ~client_id:(-1)
+         let init_outcome =
+           try
+             Lsp_message_router.start_response_reader
+               ~sw:cs.sw
+               cs.router
+               proc
+               ~on_exit:(Some (fun ~reason -> note_process_exit cs proc ~reason))
+               ~on_notification:(fun ~client_id:_ ~method_ params ->
+                 send_client_notification cs method_ params);
+             let init_params = language_server_initialize_params ~workspace_root in
+             let promise =
+               Lsp_message_router.send_request
+                 cs.router
+                 proc
+                 ~method_:(lsp_method_to_string Initialize)
+                 ~params:init_params
+                 ~client_id:(-1)
+             in
+             let init_result =
+               await_initialize_under_deadline
+                 ~clock:cs.clock
+                 ~timeout_sec:Lsp_proxy_limits.initialize_timeout_sec
+                 ~lang_id
+                 promise
+             in
+             (match init_result with
+              | Ok (Ok _) ->
+                Lsp_message_router.send_notification
+                  cs.router
+                  proc
+                  ~method_:(lsp_method_to_string Initialized)
+                  ~params:(`Assoc []);
+                if Atomic.get cs.disconnected
+                then Error "connection closed"
+                else Ok ()
+              | Ok (Error msg) ->
+                Log.Server.warn "LSP initialize failed for %s: %s" lang_id msg;
+                Error msg
+              | Error msg ->
+                Log.Server.warn "LSP initialize timeout for %s" lang_id;
+                Error msg)
+           with
+           | Eio.Cancel.Cancelled _ as exn ->
+             let bt = Printexc.get_raw_backtrace () in
+             Eio.Cancel.protect (fun () -> Lsp_process_manager.shutdown proc);
+             Printexc.raise_with_backtrace exn bt
+           | exn ->
+             let msg = Printexc.to_string exn in
+             Log.Server.warn "LSP initialize failed for %s: %s" lang_id msg;
+             Error msg
          in
-         let init_result =
-           await_initialize_under_deadline
-             ~clock:cs.clock
-             ~timeout_sec:Lsp_proxy_limits.initialize_timeout_sec
-             ~lang_id
-             promise
-         in
-         (match init_result with
-          | Ok (Ok _) ->
-            Lsp_message_router.send_notification
-              cs.router
-              proc
-              ~method_:(lsp_method_to_string Initialized)
-              ~params:(`Assoc []);
-            if Atomic.get cs.disconnected
-            then (
-              Lsp_process_manager.shutdown proc;
-              Error "connection closed")
-            else (
-              add_process cs lang_id proc;
-              set_health cs ~lang_id Connected;
-              Log.Server.info "LSP server ready: %s" lang_id;
-              Ok proc)
-          | Ok (Error msg) ->
-            Log.Server.warn "LSP initialize failed for %s: %s" lang_id msg;
-            Lsp_process_manager.shutdown proc;
-            Error msg
+         (match init_outcome with
           | Error msg ->
-            Log.Server.warn "LSP initialize timeout for %s" lang_id;
-            Lsp_process_manager.shutdown proc;
-            Error msg)))
+            Eio.Cancel.protect (fun () -> Lsp_process_manager.shutdown proc);
+            Error msg
+          | Ok () ->
+            add_process cs lang_id proc;
+            set_health cs ~lang_id Connected;
+            Log.Server.info "LSP server ready: %s" lang_id;
+            Ok proc)))
 ;;
 
 (** Forward a request to LSP process, await response, relay to client. *)

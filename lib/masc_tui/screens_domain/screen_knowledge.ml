@@ -583,6 +583,7 @@ let render_board ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t)
   let all_posts =
     match Observed.to_option k.board with Some f -> f.posts | None -> []
   in
+  let filtered = Knowledge_store.filtered_posts k in
   let server_filtered_out =
     match k.board_feed_meta with
     | Some meta -> Int.max 0 meta.filtered_out_count

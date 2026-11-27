@@ -1781,7 +1781,10 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                       (Document_graphics.mask_fallback ~bg_rgb:theme.surface_0 grid
                          ~style:(Typography.primary ~bg:(Color.of_rgb theme.surface_0) theme))
                       desired_document;
-                    let document_pre =
+                    let {
+                          Document_graphics.escape_bytes = document_pre;
+                          invalidate_screen = document_invalidate;
+                        } =
                       Document_graphics.before_present document_graphics
                         ~in_tmux desired_document
                     in
@@ -1810,6 +1813,7 @@ let run ~(cli : Cli_args.config) ~(render_frame : render_frame) () =
                     active_inspector_graphic := remaining_insp;
                     let invalidate_for_graphic =
                       invalidate_for_graphic || insp_invalidate
+                      || document_invalidate
                     in
                     let pre_bytes = pre_bytes ^ insp_pre ^ document_pre in
                     if not (String.equal pre_bytes "") then begin

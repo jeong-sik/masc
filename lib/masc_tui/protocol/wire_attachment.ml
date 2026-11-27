@@ -127,6 +127,8 @@ let extension_of_mime mime =
   | "audio/wav" | "audio/x-wav" -> ".wav"
   | "audio/ogg" -> ".ogg"
   | "audio/midi" | "audio/x-midi" -> ".mid"
+  | "audio/mp4" | "audio/x-m4a" -> ".m4a"
+  | "audio/webm" -> ".webm"
   | _ -> ".bin"
 
 let extension_mime_opt filename =
@@ -141,6 +143,8 @@ let extension_mime_opt filename =
   | ".wav" -> Some "audio/wav"
   | ".ogg" | ".oga" -> Some "audio/ogg"
   | ".mid" | ".midi" -> Some "audio/midi"
+  | ".m4a" -> Some "audio/mp4"
+  | ".weba" | ".webm" -> Some "audio/webm"
   | _ -> None
 
 let has_supported_media_extension path =
@@ -151,6 +155,132 @@ let starts_with_at ~offset ~prefix s =
   offset >= 0 && offset + plen <= String.length s
   && String.sub s offset plen = prefix
 
+let contains_sub_in_range ~needle ~haystack ~start ~stop =
+  let nlen = String.length needle in
+  let limit = Int.min stop (String.length haystack) in
+  if nlen = 0 || start < 0 || start + nlen > limit then false
+  else
+    let rec loop i =
+      if i + nlen > limit then false
+      else
+        let rec eq j =
+          if j >= nlen then true
+          else if Char.equal haystack.[i + j] needle.[j] then eq (j + 1)
+          else false
+        in
+        if eq 0 then true else loop (i + 1)
+    in
+    loop start
+
+let mp4_has_video_handler_in_range bytes ~start ~stop =
+  let limit = Int.min stop (String.length bytes) in
+  let rec loop i =
+    if i + 16 > limit then false
+    else if
+      bytes.[i] = 'h'
+      && bytes.[i + 1] = 'd'
+      && bytes.[i + 2] = 'l'
+      && bytes.[i + 3] = 'r'
+      && bytes.[i + 12] = 'v'
+      && bytes.[i + 13] = 'i'
+      && bytes.[i + 14] = 'd'
+      && bytes.[i + 15] = 'e'
+    then true
+    else loop (i + 1)
+  in
+  loop (Int.max 0 start)
+
+let is_ftyp_container bytes =
+  String.length bytes >= 12 && starts_with_at ~offset:4 ~prefix:"ftyp" bytes
+
+let is_audio_mp4 bytes =
+  let len = String.length bytes in
+  if not (is_ftyp_container bytes) then false
+  else
+    let box_size =
+      (Char.code bytes.[0] lsl 24)
+      lor (Char.code bytes.[1] lsl 16)
+      lor (Char.code bytes.[2] lsl 8)
+      lor Char.code bytes.[3]
+    in
+    if box_size < 12 || box_size > len || box_size mod 4 <> 0 then false
+    else
+      let is_audio_brand = function
+        | "M4A " | "M4B " | "mp42" | "isom" | "dash" -> true
+        | _ -> false
+      in
+      let is_video_brand = function
+        | "M4V " | "m4v " | "qt  " | "3gp4" | "3gp5" | "3gp6" | "3g2a"
+        | "avc1" | "hev1" | "hvc1" ->
+            true
+        | _ -> false
+      in
+      let major = String.sub bytes 8 4 in
+      let compat_limit = Int.min box_size 128 in
+      let rec scan_brands off has_audio has_video =
+        if off + 4 > compat_limit then (has_audio, has_video)
+        else
+          let brand = String.sub bytes off 4 in
+          scan_brands (off + 4)
+            (has_audio || is_audio_brand brand)
+            (has_video || is_video_brand brand)
+      in
+      let has_audio, has_video =
+        scan_brands 16 (is_audio_brand major) (is_video_brand major)
+      in
+      if (not has_audio) || has_video then false
+      else
+        let has_vide_track =
+          if len <= 512 * 1024 then
+            mp4_has_video_handler_in_range bytes ~start:0 ~stop:len
+          else
+            mp4_has_video_handler_in_range bytes ~start:0 ~stop:(256 * 1024)
+            || mp4_has_video_handler_in_range bytes
+                 ~start:(len - (256 * 1024))
+                 ~stop:len
+        in
+        not has_vide_track
+
+let is_ebml_webm_container bytes =
+  let len = String.length bytes in
+  len >= 16
+  && starts_with_at ~offset:0 ~prefix:"\x1a\x45\xdf\xa3" bytes
+  && contains_sub_in_range ~needle:"\x42\x82\x84webm" ~haystack:bytes ~start:4
+       ~stop:(Int.min len 128)
+
+let is_audio_webm bytes =
+  if not (is_ebml_webm_container bytes) then false
+  else
+    let scan_stop = Int.min (String.length bytes) 65536 in
+    let has_video =
+      contains_sub_in_range ~needle:"V_VP8" ~haystack:bytes ~start:4
+        ~stop:scan_stop
+      || contains_sub_in_range ~needle:"V_VP9" ~haystack:bytes ~start:4
+           ~stop:scan_stop
+      || contains_sub_in_range ~needle:"V_AV1" ~haystack:bytes ~start:4
+           ~stop:scan_stop
+      || contains_sub_in_range ~needle:"\x83\x81\x01" ~haystack:bytes ~start:4
+           ~stop:scan_stop
+    in
+    not has_video
+
+let is_mpeg_audio_frame_sync bytes =
+  if String.length bytes < 4 then false
+  else
+    let b0 = Char.code bytes.[0] in
+    let b1 = Char.code bytes.[1] in
+    let b2 = Char.code bytes.[2] in
+    let version = (b1 lsr 3) land 0x03 in
+    let layer = (b1 lsr 1) land 0x03 in
+    let bitrate_idx = (b2 lsr 4) land 0x0F in
+    let sample_rate_idx = (b2 lsr 2) land 0x03 in
+    b0 = 0xFF
+    && (b1 land 0xE0) = 0xE0
+    && version <> 0x01
+    && layer <> 0x00
+    && bitrate_idx <> 0x0F
+    && sample_rate_idx <> 0x03
+
 let looks_like_forbidden_markup bytes =
   let len = Int.min 512 (String.length bytes) in
   let prefix = String.lowercase_ascii (String.trim (String.sub bytes 0 len)) in
@@ -158,6 +288,10 @@ let looks_like_forbidden_markup bytes =
   || String.starts_with ~prefix:"<?xml" prefix
   || String.starts_with ~prefix:"<!doctype html" prefix
   || String.starts_with ~prefix:"<html" prefix
+
+let looks_like_video_container bytes =
+  (is_ftyp_container bytes && not (is_audio_mp4 bytes))
+  || (is_ebml_webm_container bytes && not (is_audio_webm bytes))
 
 let sniff_magic bytes =
   let len = String.length bytes in
@@ -191,16 +325,19 @@ let sniff_magic bytes =
     Some "audio/ogg"
   else if len >= 4 && starts_with_at ~offset:0 ~prefix:"MThd" bytes then
     Some "audio/midi"
-  else if
-    (len >= 3 && starts_with_at ~offset:0 ~prefix:"ID3" bytes)
-    || (len >= 2
-        && Char.code bytes.[0] = 0xFF
-        && (Char.code bytes.[1] land 0xE0) = 0xE0)
+  else if is_audio_mp4 bytes then Some "audio/mp4"
+  else if is_audio_webm bytes then Some "audio/webm"
+  else if (len >= 3 && starts_with_at ~offset:0 ~prefix:"ID3" bytes)
+          || is_mpeg_audio_frame_sync bytes
   then Some "audio/mpeg"
   else None
 
 let sniff_mime ?filename bytes =
-  if String.length bytes = 0 || looks_like_forbidden_markup bytes then None
+  if
+    String.length bytes = 0
+    || looks_like_forbidden_markup bytes
+    || looks_like_video_container bytes
+  then None
   else
     match sniff_magic bytes with
     | Some _ as m -> m

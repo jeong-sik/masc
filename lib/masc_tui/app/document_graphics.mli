@@ -38,7 +38,14 @@ val mask_fallback :
   placement ->
   unit
 
+type before_present_effect = {
+  escape_bytes : string;
+  invalidate_screen : bool;
+      (** [true] when any iTerm2 inline placement was removed or moved, so the
+          caller must invalidate the presenter to clear stale OSC 1337 cells. *)
+}
+
 val cancel_pending : t -> unit
 val clear : t -> in_tmux:bool -> string
-val before_present : t -> in_tmux:bool -> placement list -> string
+val before_present : t -> in_tmux:bool -> placement list -> before_present_effect
 val after_present : t -> in_tmux:bool -> full_repaint:bool -> placement list -> string

@@ -112,6 +112,12 @@ let is_kitty_placement p =
   | Raw_raster { mode = Mode_iterm2 | Mode_halfblock; _ } | Halfblock_raster _ ->
       false
 
+let is_iterm2_placement p =
+  match p.raster with
+  | Raw_raster { mode = Mode_iterm2; _ } -> true
+  | Raw_raster { mode = Mode_kitty | Mode_halfblock; _ } | Halfblock_raster _ ->
+      false
+
 let delete_placements ~in_tmux placements =
   placements
   |> List.filter is_kitty_placement
@@ -475,12 +481,20 @@ let mask_fallback ?(bg_rgb = 0x111111) grid ~style p =
       Halfblock.draw_rgba ~bg_rgb grid ~rect:p.rect rgba
   | Raw_raster _ -> ()
 
+type before_present_effect = {
+  escape_bytes : string;
+  invalidate_screen : bool;
+}
+
 let before_present t ~in_tmux desired =
   let retained, removed =
     List.partition (fun p -> List.exists (same_placement p) desired) t.active
   in
   t.active <- retained;
-  delete_placements ~in_tmux removed
+  {
+    escape_bytes = delete_placements ~in_tmux removed;
+    invalidate_screen = List.exists is_iterm2_placement removed;
+  }
 
 let after_present t ~in_tmux ~full_repaint desired =
   let previous = t.active in

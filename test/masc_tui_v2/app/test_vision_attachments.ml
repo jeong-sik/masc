@@ -96,6 +96,37 @@ let test_wire_attachment_sniff_and_paths () =
     (Wire_attachment.sniff_mime "RIFF\024\000\000\000WEBPVP8 ");
   check (option string) "sniff PDF magic" (Some "application/pdf")
     (Wire_attachment.sniff_mime "%PDF-1.7\n");
+  check (option string) "sniff MP3 ID3 magic" (Some "audio/mpeg")
+    (Wire_attachment.sniff_mime "ID3\003\000\000\000");
+  check (option string) "sniff MP3 MPEG frame sync" (Some "audio/mpeg")
+    (Wire_attachment.sniff_mime "\255\251\144\000");
+  check (option string) "sniff WAV magic" (Some "audio/wav")
+    (Wire_attachment.sniff_mime "RIFF\036\000\000\000WAVEfmt ");
+  check (option string) "sniff OGG magic" (Some "audio/ogg")
+    (Wire_attachment.sniff_mime "OggS\000\002");
+  check (option string) "sniff MIDI magic" (Some "audio/midi")
+    (Wire_attachment.sniff_mime "MThd\000\000\000\006");
+  let audio_m4a = "\000\000\000\020ftypM4A \000\000\000\000isom" in
+  check (option string) "sniff audio/mp4 (M4A) magic" (Some "audio/mp4")
+    (Wire_attachment.sniff_mime audio_m4a);
+  let audio_webm = "\x1a\x45\xdf\xa3\x9f\x42\x82\x84webm\x00\x00\x00\x00" in
+  check (option string) "sniff audio/webm (EBML) magic" (Some "audio/webm")
+    (Wire_attachment.sniff_mime audio_webm);
+  (* Reject video containers even when given audio filenames *)
+  let video_m4v = "\000\000\000\020ftypM4V \000\000\000\000isom" in
+  check (option string) "reject video MP4 M4V brand" None
+    (Wire_attachment.sniff_mime ~filename:"fake.m4a" video_m4v);
+  let video_mp4_hdlr =
+    "\000\000\000\020ftypisom\000\000\000\000mp42" ^ "hdlr\000\000\000\000\000\000\000\000vide"
+  in
+  check (option string) "reject MP4 with hdlr vide track" None
+    (Wire_attachment.sniff_mime ~filename:"fake.m4a" video_mp4_hdlr);
+  let video_webm_vp9 = audio_webm ^ "V_VP9\x00\x00" in
+  check (option string) "reject video WebM (V_VP9)" None
+    (Wire_attachment.sniff_mime ~filename:"fake.webm" video_webm_vp9);
+  let video_webm_track = audio_webm ^ "\x83\x81\x01\x00" in
+  check (option string) "reject video WebM (TrackType=video)" None
+    (Wire_attachment.sniff_mime ~filename:"fake.webm" video_webm_track);
   check (option string) "reject SVG extension" None
     (Wire_attachment.sniff_mime ~filename:"evil.svg" "<svg></svg>");
   check (option string) "reject HTML extension" None
@@ -551,6 +582,14 @@ let test_document_graphics_all_protocols () =
   in
   check bool "Kitty emits APC f=100 sequence" true
     (contains_sub ~needle:"\x1b_Gf=100" ~haystack:kitty_out);
+  (* Kitty removal emits APC delete without unnecessary full screen invalidate *)
+  let kitty_rm =
+    Document_graphics.before_present kitty_doc ~in_tmux:false []
+  in
+  check bool "Kitty removal emits APC delete sequence" true
+    (contains_sub ~needle:"\x1b_Ga=d,d=I," ~haystack:kitty_rm.escape_bytes);
+  check bool "Kitty-only removal does not set invalidate_screen" false
+    kitty_rm.invalidate_screen;
 
   (* 7a-2. Kitty requests ?format=png when mime_type=None on both /attachments/ and /media/ *)
   let media_path = "/api/v1/media/" ^ String.make 64 'd' in
@@ -616,6 +655,54 @@ let test_document_graphics_all_protocols () =
   in
   check bool "iTerm2 emits OSC 1337 inline image" true
     (contains_sub ~needle:"\x1b]1337;File=inline=1;" ~haystack:it2_out);
+  (* iTerm2 unchanged placement does NOT trigger invalidate_screen *)
+  let it2_same =
+    Document_graphics.before_present it2_doc ~in_tmux:false it2_pl
+  in
+  check bool "iTerm2 unchanged placement has invalidate_screen=false" false
+    it2_same.invalidate_screen;
+  check string "iTerm2 unchanged placement emits 0 escape bytes" ""
+    it2_same.escape_bytes;
+  (* iTerm2 moved placement (y shifted 0 -> 1) triggers invalidate_screen=true *)
+  let g_it2_moved = Cell_grid.create ~cols:20 ~rows:4 in
+  let moved_rows =
+    {
+      Cell_grid.source =
+        Cell_grid.Retained_image
+          { path = jpg_path; mime_type = Some "image/jpeg" };
+      count = 2;
+    }
+  in
+  for i = 0 to 1 do
+    Cell_grid.register_document_image_part g_it2_moved
+      ~rect:(Rect.make ~x:0 ~y:(i + 1) ~w:20 ~h:1)
+      { Cell_grid.rows = moved_rows; index = i; left_inset = 0 }
+  done;
+  let it2_moved_pl =
+    Document_graphics.prepare it2_doc ~sw ~now:t0 ~base_path:"" ~endpoint
+      ~fetch_retained:(fun _ ~path:_ ~max_body_bytes:_ -> Ok png)
+      ~on_ready:(fun () -> ())
+      ~term_program:(Some "iTerm.app") ~in_tmux:false
+      ~probe:Probe.empty_observation ~theme:Theme.default g_it2_moved
+  in
+  let it2_move_eff =
+    Document_graphics.before_present it2_doc ~in_tmux:false it2_moved_pl
+  in
+  check bool "iTerm2 moved placement triggers invalidate_screen=true" true
+    it2_move_eff.invalidate_screen;
+  check string "iTerm2 moved placement emits no Kitty delete bytes" ""
+    it2_move_eff.escape_bytes;
+  ignore
+    (Document_graphics.after_present it2_doc ~in_tmux:false ~full_repaint:true
+       it2_moved_pl);
+  (* iTerm2 removed placement triggers invalidate_screen=true *)
+  let it2_rm_eff =
+    Document_graphics.before_present it2_doc ~in_tmux:false []
+  in
+  check bool "iTerm2 removed placement triggers invalidate_screen=true" true
+    it2_rm_eff.invalidate_screen;
+  check string "iTerm2 removed placement emits no Kitty delete bytes" ""
+    it2_rm_eff.escape_bytes;
 
   (* 7c. Standard/non-graphics terminal requests ?format=png&max_px=160 and paints half-blocks *)
   let hb_doc = Document_graphics.create () in

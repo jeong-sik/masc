@@ -20,6 +20,16 @@ type previous =
       }
   | Compared_with_previous of previous_comparison
 
+type attachment_sweep_report =
+  { total_blobs : int
+  ; live_blobs : int
+  ; unreferenced_blobs : int
+  ; deleted : int
+  ; retained_within_grace : int
+  ; delete_failures : int
+  ; blocked_by_unclassified : bool
+  }
+
 type report =
   { scan_started_at : float
   ; scan_seconds : float
@@ -36,6 +46,7 @@ type report =
   ; malformed_warnings : Tool_blob_maintenance.malformed_reference_warning list
   ; previous : previous
   ; touches : Tool_blob_store.touch_counts
+  ; attachment_sweep : (attachment_sweep_report, string) result option
   }
 
 type error =
@@ -92,11 +103,25 @@ let report_to_string report =
         previous.now_live.read_only
         previous.now_live.untouched
   in
+  let attachment_suffix =
+    match report.attachment_sweep with
+    | None -> ""
+    | Some (Ok att) ->
+      Printf.sprintf
+        " attachments_total=%d attachments_deleted=%d attachments_retained_grace=%d \
+         attachments_delete_failures=%d attachments_blocked_unclassified=%b"
+        att.total_blobs
+        att.deleted
+        att.retained_within_grace
+        att.delete_failures
+        att.blocked_by_unclassified
+    | Some (Error detail) -> Printf.sprintf " attachments_sweep_error=%S" detail
+  in
   Printf.sprintf
     "scan_seconds=%.1f live_digests=%d blobs=%d candidates=%d deletable=%d \
      deletable_bytes=%d deleted=%d deleted_bytes=%d delete_failures=%d \
      unstatable=%d unclassified=%d malformed_warnings=%d %s touched_current=%d \
-     touched_previous=%d touched_current_evicted=%b touched_previous_evicted=%b"
+     touched_previous=%d touched_current_evicted=%b touched_previous_evicted=%b%s"
     report.scan_seconds
     report.live_digests
     report.blobs
@@ -114,6 +139,7 @@ let report_to_string report =
     report.touches.previous_addresses
     report.touches.current_evicted
     report.touches.previous_evicted
+    attachment_suffix
 ;;
 
 let maintenance_dir ~base_path =
@@ -721,6 +747,7 @@ let scan_internal ~reclaim_mode ~min_age_seconds ~base_path ~scope =
     ; malformed_warnings
     ; previous = comparison
     ; touches = touch_counts
+    ; attachment_sweep = None
     }
 ;;
 
@@ -817,16 +844,6 @@ let scan_attachment_reachability ~base_path ~scope =
     }
 ;;
 
-type attachment_sweep_report =
-  { total_blobs : int
-  ; live_blobs : int
-  ; unreferenced_blobs : int
-  ; deleted : int
-  ; retained_within_grace : int
-  ; delete_failures : int
-  ; blocked_by_unclassified : bool
-  }
-
 let sweep_attachments
       ?(min_age_seconds = Masc_time_constants.day)
       ?(now = Unix.gettimeofday ())
@@ -911,14 +928,30 @@ let reclaim ?(min_age_seconds = Masc_time_constants.day) ~base_path ~scope () =
   match scan_internal ~reclaim_mode:true ~min_age_seconds:min_age ~base_path ~scope with
   | Error _ as err -> err
   | Ok report ->
-    if report.unclassified = []
-    then
-      ignore
-        (sweep_attachments
-           ~min_age_seconds:min_age
-           ~now:report.scan_started_at
-           ~base_path
-           ~scope
-           ());
-    Ok report
+    if report.unclassified <> []
+    then Ok report
+    else (
+      let att_res =
+        sweep_attachments
+          ~min_age_seconds:min_age
+          ~now:report.scan_started_at
+          ~base_path
+          ~scope
+          ()
+      in
+      (match att_res with
+       | Error detail ->
+         Printf.eprintf
+           "tool blob sweep: attachment sweep failed fail-closed (0 attachments deleted): %s\n%!"
+           detail
+       | Ok att when att.blocked_by_unclassified ->
+         Printf.eprintf
+           "tool blob sweep: attachment sweep blocked by unclassified entries (0 attachments deleted)\n%!"
+       | Ok att when att.delete_failures > 0 ->
+         Printf.eprintf
+           "tool blob sweep: attachment sweep reported %d delete failure(s) (deleted=%d)\n%!"
+           att.delete_failures
+           att.deleted
+       | Ok _ -> ());
+      Ok { report with attachment_sweep = Some att_res })
 ;;

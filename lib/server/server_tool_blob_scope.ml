@@ -91,6 +91,7 @@ let workspace =
     ; tree Artifact_project_source_store.dirname
     ; tree Artifact_project_build_store.dirname
     ; file (Board.persisted_filename Board.Posts)
+    ; file (Board.persisted_filename Board.Comments)
     ; lane_addons
     ; excluded M.Blob_store Tool_blob_store.dirname
     ; excluded M.Sweep_record Tool_blob_maintenance.dirname

@@ -825,10 +825,15 @@ let test_gc_scope_non_halt_and_reachability () =
   with_temp_base_path (fun base_path ->
     let store = Att.create ~base_path in
     let p_chat = make_png ~width:8 ~height:8 ~seed:1 in
+    let p_comment = make_png ~width:8 ~height:8 ~seed:11 in
     let p_eph = make_png ~width:8 ~height:8 ~seed:2 in
     let p_orphan = make_png ~width:8 ~height:8 ~seed:3 in
     let m_chat =
       Att.put ~origin:Att.User_upload ~created_by:"op" ~retention:Att.Durable store ~bytes:p_chat
+      |> Result.get_ok
+    in
+    let m_comment =
+      Att.put ~origin:Att.User_upload ~created_by:"op" ~retention:Att.Durable store ~bytes:p_comment
       |> Result.get_ok
     in
     let m_eph =
@@ -845,30 +850,40 @@ let test_gc_scope_non_halt_and_reachability () =
       |> Result.get_ok
     in
     (* Also create legacy .masc/media/ directory to verify it never halts GC *)
-    let legacy_media_dir =
-      Filename.concat (Common.masc_dir_from_base_path ~base_path) Att.legacy_media_dirname
-    in
+    let masc_dir = Common.masc_dir_from_base_path ~base_path in
+    let legacy_media_dir = Filename.concat masc_dir Att.legacy_media_dirname in
     Fs_compat.mkdir_p legacy_media_dir;
     (* Reference m_chat inside keeper_chat/k1.jsonl *)
-    let chat_dir =
-      Filename.concat (Common.masc_dir_from_base_path ~base_path) Masc.Keeper_chat_store.chat_dirname
-    in
+    let chat_dir = Filename.concat masc_dir Masc.Keeper_chat_store.chat_dirname in
     Fs_compat.mkdir_p chat_dir;
     Fs_compat.save_file
       (Filename.concat chat_dir "k1.jsonl")
       (Printf.sprintf "{\"role\":\"user\",\"attachments\":[{\"attachment_id\":\"%s\"}]}\n" m_chat.id);
-    (* Scope check: ZERO unclassified entries! *)
+    (* Reference m_comment inside board_comments.jsonl to verify classification & reachability *)
+    let comments_file =
+      Filename.concat
+        masc_dir
+        (Masc_board_handlers.Board_paths.persisted_filename Masc_board_handlers.Board_paths.Comments)
+    in
+    Fs_compat.save_file
+      comments_file
+      (Printf.sprintf "{\"id\":\"c1\",\"post_id\":\"p1\",\"body\":\"see %s\"}\n" m_comment.id);
+    (* Scope check: ZERO unclassified entries (including board_comments.jsonl)! *)
     (match
        Tool_blob_maintenance.unclassified_entries ~base_path Server_tool_blob_scope.scope
      with
      | Ok entries ->
        let names = List.map Tool_blob_maintenance.unclassified_entry_to_string entries in
-       Alcotest.(check (list string)) "no unclassified entries with attachments/ + media/" [] names
+       Alcotest.(check (list string))
+         "no unclassified entries with attachments/, media/, and board_comments.jsonl"
+         []
+         names
      | Error err -> Alcotest.fail (Tool_blob_maintenance.error_to_string err));
     (* Tool_blob_sweep.observe also reports unclassified = [] and deletes nothing *)
     (match Tool_blob_sweep.observe ~base_path ~scope:Server_tool_blob_scope.scope with
      | Ok report ->
-       Alcotest.(check (list string)) "sweep observe unclassified empty" [] report.unclassified
+       Alcotest.(check (list string)) "sweep observe unclassified empty" [] report.unclassified;
+       Alcotest.(check bool) "observe attachment_sweep is None" true (report.attachment_sweep = None)
      | Error err -> Alcotest.fail (Tool_blob_sweep.error_to_string err));
     (* Attachment reachability scan *)
     (match
@@ -876,11 +891,15 @@ let test_gc_scope_non_halt_and_reachability () =
      with
      | Error err -> Alcotest.fail err
      | Ok reach ->
-       Alcotest.(check int) "total attachment blobs" 3 reach.total_blobs;
+       Alcotest.(check int) "total attachment blobs" 4 reach.total_blobs;
        Alcotest.(check bool)
          "chat-referenced blob is live"
          true
          (Set_util.StringSet.mem m_chat.sha256 reach.live_sha256s);
+       Alcotest.(check bool)
+         "board_comments.jsonl-referenced blob is live"
+         true
+         (Set_util.StringSet.mem m_comment.sha256 reach.live_sha256s);
        Alcotest.(check bool)
          "ephemeral-pinned blob is live"
          true
@@ -905,7 +924,7 @@ let test_gc_scope_non_halt_and_reachability () =
      | Ok rep ->
        Alcotest.(check int) "fresh orphan not deleted" 0 rep.deleted;
        Alcotest.(check int) "fresh orphan retained within grace" 1 rep.retained_within_grace);
-    (* Age m_orphan past grace period and sweep via sweep_attachments *)
+    (* Age m_orphan and m_comment past grace period; sweep deletes only m_orphan *)
     let age_blob sha256 =
       let shard = String.sub sha256 0 2 in
       let old_ts = Unix.gettimeofday () -. 7200.0 in
@@ -915,6 +934,7 @@ let test_gc_scope_non_halt_and_reachability () =
       Unix.utimes mpath old_ts old_ts
     in
     age_blob m_orphan.sha256;
+    age_blob m_comment.sha256;
     (match
        Tool_blob_sweep.sweep_attachments
          ~min_age_seconds:3600.0
@@ -928,8 +948,9 @@ let test_gc_scope_non_halt_and_reachability () =
        Alcotest.(check bool) "not blocked" false rep.blocked_by_unclassified);
     Alcotest.(check bool) "orphan removed" true (Att.get_bytes store ~id:m_orphan.id = Ok None);
     Alcotest.(check bool) "referenced chat blob survived" true (Att.get_bytes store ~id:m_chat.id = Ok (Some p_chat));
+    Alcotest.(check bool) "board_comments.jsonl blob survived" true (Att.get_bytes store ~id:m_comment.id = Ok (Some p_comment));
     Alcotest.(check bool) "ephemeral-pinned blob survived" true (Att.get_bytes store ~id:m_eph.id = Ok (Some p_eph));
-    (* Tool_blob_sweep.reclaim also runs attachment sweep automatically *)
+    (* Tool_blob_sweep.reclaim runs attachment sweep and surfaces outcome in report.attachment_sweep *)
     let p_orphan2 = make_png ~width:8 ~height:8 ~seed:4 in
     let m_orphan2 =
       Att.put ~origin:Att.User_upload ~created_by:"op" ~retention:Att.Durable store ~bytes:p_orphan2
@@ -944,16 +965,44 @@ let test_gc_scope_non_halt_and_reachability () =
          ()
      with
      | Error err -> Alcotest.fail (Tool_blob_sweep.error_to_string err)
-     | Ok _ ->
+     | Ok rep ->
+       (match rep.attachment_sweep with
+        | Some (Ok att) -> Alcotest.(check int) "reclaim report surfaces attachments deleted=1" 1 att.deleted
+        | Some (Error err) -> Alcotest.fail ("unexpected attachment_sweep error: " ^ err)
+        | None -> Alcotest.fail "expected reclaim report.attachment_sweep = Some _");
        Alcotest.(check bool) "reclaim deleted aged orphan2" true (Att.get_bytes store ~id:m_orphan2.id = Ok None);
-       Alcotest.(check bool) "reclaim preserved m_chat" true (Att.get_bytes store ~id:m_chat.id = Ok (Some p_chat)));
-    (* Fail-closed: unreadable consumer dir aborts sweep and deletes nothing *)
+       Alcotest.(check bool) "reclaim preserved m_chat" true (Att.get_bytes store ~id:m_chat.id = Ok (Some p_chat));
+       Alcotest.(check bool) "reclaim preserved m_comment" true (Att.get_bytes store ~id:m_comment.id = Ok (Some p_comment)));
+    (* Fail-closed: unreadable ephemeral dir surfaces Error in reclaim.attachment_sweep and deletes 0 *)
     let p_orphan3 = make_png ~width:8 ~height:8 ~seed:5 in
     let m_orphan3 =
       Att.put ~origin:Att.User_upload ~created_by:"op" ~retention:Att.Durable store ~bytes:p_orphan3
       |> Result.get_ok
     in
     age_blob m_orphan3.sha256;
+    let eph_k1_dir = Filename.concat (Filename.concat (Att.root_dir store) "ephemeral") "k1" in
+    Unix.chmod eph_k1_dir 0o000;
+    Fun.protect
+      ~finally:(fun () -> try Unix.chmod eph_k1_dir 0o700 with Unix.Unix_error _ -> ())
+      (fun () ->
+         match
+           Tool_blob_sweep.reclaim
+             ~min_age_seconds:0.0
+             ~base_path
+             ~scope:Server_tool_blob_scope.scope
+             ()
+         with
+         | Error err -> Alcotest.fail (Tool_blob_sweep.error_to_string err)
+         | Ok rep ->
+           (match rep.attachment_sweep with
+            | Some (Error _) -> ()
+            | Some (Ok _) | None ->
+              Alcotest.fail "reclaim must surface Error in report.attachment_sweep when ephemeral dir is unreadable"));
+    Alcotest.(check bool)
+      "orphan3 survived fail-closed unreadable ephemeral dir"
+      true
+      (Att.get_bytes store ~id:m_orphan3.id = Ok (Some p_orphan3));
+    (* Fail-closed: unreadable consumer dir aborts sweep_attachments and deletes nothing *)
     Unix.chmod chat_dir 0o000;
     Fun.protect
       ~finally:(fun () -> try Unix.chmod chat_dir 0o755 with Unix.Unix_error _ -> ())

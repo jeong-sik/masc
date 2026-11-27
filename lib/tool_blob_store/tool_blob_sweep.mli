@@ -54,6 +54,16 @@ type previous =
           next scan. *)
   | Compared_with_previous of previous_comparison
 
+type attachment_sweep_report =
+  { total_blobs : int
+  ; live_blobs : int
+  ; unreferenced_blobs : int
+  ; deleted : int
+  ; retained_within_grace : int
+  ; delete_failures : int
+  ; blocked_by_unclassified : bool
+  }
+
 type report =
   { scan_started_at : float
   ; scan_seconds : float
@@ -77,6 +87,9 @@ type report =
           keeps [deletable] at 0 and prevents deletion fail-closed. *)
   ; previous : previous
   ; touches : Tool_blob_store.touch_counts
+  ; attachment_sweep : (attachment_sweep_report, string) result option
+      (** Outcome of {!sweep_attachments} during {!reclaim} when [unclassified]
+          is empty; [None] on {!observe} or when blocked by unclassified entries. *)
   }
 
 type error =
@@ -156,22 +169,13 @@ val scan_attachment_reachability :
   (attachment_reachability, string) result
 (** Read-only fail-closed reachability scan for {!Attachment_store}: walks every
     in-scope durable store named by [scope] (including [keeper_chat/*.jsonl],
-    [board_posts.jsonl], [keepers/], etc.), config keeper files, and active
-    ephemeral pins under [<base>/.masc/attachments/ephemeral/] for canonical
-    [att_<64hex>] references, then computes live and unreferenced digests
-    against [<base>/.masc/attachments/blobs/]. Fails closed with [Error _] on
-    any unreadable directory, consumer file, ephemeral pin dir, or blob shard.
+    [board_posts.jsonl], [board_comments.jsonl], [keepers/], etc.), config
+    keeper files, and active ephemeral pins under
+    [<base>/.masc/attachments/ephemeral/] for canonical [att_<64hex>]
+    references, then computes live and unreferenced digests against
+    [<base>/.masc/attachments/blobs/]. Fails closed with [Error _] on any
+    unreadable directory, consumer file, ephemeral pin dir, or blob shard.
     Deletes nothing. *)
-
-type attachment_sweep_report =
-  { total_blobs : int
-  ; live_blobs : int
-  ; unreferenced_blobs : int
-  ; deleted : int
-  ; retained_within_grace : int
-  ; delete_failures : int
-  ; blocked_by_unclassified : bool
-  }
 
 val sweep_attachments :
   ?min_age_seconds:float ->

@@ -520,6 +520,94 @@ let test_ephemeral_lru_and_promotion () =
     (match A.get_bytes store ~id:ma.id with
      | Ok (Some b) -> Alcotest.(check string) "shared blob survives alpha eviction" shared b
      | Ok None -> Alcotest.fail "shared blob wrongly deleted while beta still pins it"
+     | Error err -> Alcotest.fail (A.get_error_to_string err)));
+  (* Fail-closed ephemeral prune (a): corrupt/unreadable meta must NOT delete blob *)
+  with_temp_base_path (fun base_path ->
+    let store = A.create ~base_path in
+    let p1 = make_png ~width:6 ~height:6 ~seed:61 in
+    let p2 = make_png ~width:6 ~height:6 ~seed:62 in
+    let m1 =
+      A.put
+        ~ephemeral_max_entries:1
+        ~now:100.0
+        ~origin:A.Tool_capture
+        ~created_by:"keeper:alpha"
+        ~retention:(A.Ephemeral { keeper = "alpha" })
+        store
+        ~bytes:p1
+      |> Result.get_ok
+    in
+    let shard = String.sub m1.sha256 0 2 in
+    let mpath =
+      Filename.concat
+        (Filename.concat (Filename.concat (A.root_dir store) "meta") shard)
+        (m1.sha256 ^ ".json")
+    in
+    let oc = open_out_bin mpath in
+    output_string oc "{corrupt meta json";
+    close_out oc;
+    ignore
+      (A.put
+         ~ephemeral_max_entries:1
+         ~now:200.0
+         ~origin:A.Tool_capture
+         ~created_by:"keeper:alpha"
+         ~retention:(A.Ephemeral { keeper = "alpha" })
+         store
+         ~bytes:p2
+       |> Result.get_ok);
+    Alcotest.(check bool) "alpha pin evicted on corrupt meta" false (A.has_ephemeral_pin store ~keeper:"alpha" ~sha256:m1.sha256);
+    (match A.get_bytes store ~id:m1.id with
+     | Ok (Some b) -> Alcotest.(check string) "blob preserved fail-closed when meta is corrupt" p1 b
+     | Ok None -> Alcotest.fail "blob was wrongly deleted despite corrupt metadata"
+     | Error err -> Alcotest.fail (A.get_error_to_string err)));
+  (* Fail-closed ephemeral prune (b): unreadable sibling keeper dir must NOT delete blob *)
+  with_temp_base_path (fun base_path ->
+    let store = A.create ~base_path in
+    let p1 = make_png ~width:6 ~height:6 ~seed:71 in
+    let p2 = make_png ~width:6 ~height:6 ~seed:72 in
+    let p_beta = make_png ~width:6 ~height:6 ~seed:73 in
+    let m1 =
+      A.put
+        ~ephemeral_max_entries:1
+        ~now:100.0
+        ~origin:A.Tool_capture
+        ~created_by:"keeper:alpha"
+        ~retention:(A.Ephemeral { keeper = "alpha" })
+        store
+        ~bytes:p1
+      |> Result.get_ok
+    in
+    ignore
+      (A.put
+         ~ephemeral_max_entries:2
+         ~now:105.0
+         ~origin:A.Tool_capture
+         ~created_by:"keeper:beta"
+         ~retention:(A.Ephemeral { keeper = "beta" })
+         store
+         ~bytes:p_beta
+       |> Result.get_ok);
+    let beta_dir = Filename.concat (Filename.concat (A.root_dir store) "ephemeral") "beta" in
+    Unix.chmod beta_dir 0o000;
+    Fun.protect
+      ~finally:(fun () -> try Unix.chmod beta_dir 0o700 with Unix.Unix_error _ -> ())
+      (fun () ->
+         ignore
+           (A.put
+              ~ephemeral_max_entries:1
+              ~now:200.0
+              ~origin:A.Tool_capture
+              ~created_by:"keeper:alpha"
+              ~retention:(A.Ephemeral { keeper = "alpha" })
+              store
+              ~bytes:p2
+            |> Result.get_ok));
+    Alcotest.(check bool) "alpha pin evicted while sibling dir unreadable" false (A.has_ephemeral_pin store ~keeper:"alpha" ~sha256:m1.sha256);
+    (match A.get_bytes store ~id:m1.id with
+     | Ok (Some b) ->
+       Alcotest.(check string) "blob preserved fail-closed when sibling keeper dir is unreadable" p1 b
+     | Ok None -> Alcotest.fail "blob was wrongly deleted when sibling keeper dir was unreadable"
      | Error err -> Alcotest.fail (A.get_error_to_string err)))
 ;;
 

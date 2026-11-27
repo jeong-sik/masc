@@ -1004,14 +1004,32 @@ let read_pin_info t path =
   | Ok None | Error _ -> None
 ;;
 
-let has_ephemeral_pin_unlocked t ~keeper ~sha256 =
+let check_ephemeral_pin_unlocked t ~keeper ~sha256 =
   if not (is_valid_keeper_name keeper && is_valid_sha256 sha256)
-  then false
+  then Ok false
   else (
-    let pin_path = ephemeral_pin_path t ~keeper sha256 in
-    match Fs_compat.load_owned_regular_file ~ownership_root:t.base_path pin_path with
-    | Ok (Some _) -> true
-    | Ok None | Error _ -> false)
+    let keeper_dir = ephemeral_keeper_dir t keeper in
+    match Unix.lstat keeper_dir with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+    | exception Unix.Unix_error (code, fn, arg) ->
+      Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+      let pin_path = ephemeral_pin_path t ~keeper sha256 in
+      (match Fs_compat.load_owned_regular_file ~ownership_root:t.base_path pin_path with
+       | Ok (Some _) -> Ok true
+       | Ok None -> Ok false
+       | Error err -> Error (Fs_compat.owned_regular_file_read_error_to_string err))
+    | { Unix.st_kind =
+          Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
+      ; _
+      } ->
+      Error (Printf.sprintf "ephemeral entry %s is not a directory" keeper_dir))
+;;
+
+let has_ephemeral_pin_unlocked t ~keeper ~sha256 =
+  match check_ephemeral_pin_unlocked t ~keeper ~sha256 with
+  | Ok present -> present
+  | Error _ -> false
 ;;
 
 let has_ephemeral_pin t ~keeper ~sha256 =
@@ -1033,18 +1051,36 @@ let can_keeper_read t ~keeper ~id_or_sha256 =
 
 let is_pinned_elsewhere_unlocked t ~excluding_keeper sha256 =
   let root = ephemeral_root t in
-  if not (Sys.file_exists root)
-  then false
-  else (
-    try
-      let entries = Sys.readdir root in
-      Array.exists
-        (fun keeper ->
-           (not (String.equal keeper excluding_keeper))
-           && has_ephemeral_pin_unlocked t ~keeper ~sha256)
-        entries
-    with
-    | Sys_error _ | Unix.Unix_error _ -> false)
+  match Unix.lstat root with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+  | exception Unix.Unix_error (code, fn, arg) ->
+    Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+  | { Unix.st_kind =
+        Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
+    ; _
+    } ->
+    Error (Printf.sprintf "ephemeral root %s is not a directory" root)
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    (match Sys.readdir root with
+     | exception Sys_error msg -> Error (Printf.sprintf "readdir(%s): %s" root msg)
+     | exception Unix.Unix_error (code, fn, arg) ->
+       Error (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message code))
+     | entries ->
+       let len = Array.length entries in
+       let rec scan i =
+         if i >= len
+         then Ok false
+         else (
+           let keeper = entries.(i) in
+           if String.equal keeper excluding_keeper || not (is_valid_keeper_name keeper)
+           then scan (i + 1)
+           else (
+             match check_ephemeral_pin_unlocked t ~keeper ~sha256 with
+             | Ok true -> Ok true
+             | Ok false -> scan (i + 1)
+             | Error _ as err -> err))
+       in
+       scan 0)
 ;;
 
 let prune_ephemeral_keeper_unlocked
@@ -1103,17 +1139,39 @@ let prune_ephemeral_keeper_unlocked
            (try remove_file_if_exists path with Unix.Unix_error _ -> ());
            decr total_count;
            total_bytes := max 0 (!total_bytes - bytes);
-           (* Only remove underlying blob/meta if retention is NOT Durable and
-              no other keeper pins it. *)
-           let is_durable =
+           (* Fail closed: delete the underlying blob ONLY when metadata is
+              readable as non-Durable (or absent) AND sibling ephemeral pin
+              inspection succeeds with [Ok false]. Any metadata or sibling
+              directory read failure preserves the blob intact. *)
+           let safe_to_delete =
              match get_meta_by_sha256 t ~sha256 with
-             | Ok (Some { retention = Durable; _ }) -> true
-             | Ok (Some { retention = Ephemeral _; _ }) | Ok None | Error _ -> false
+             | Ok (Some { retention = Durable; _ }) -> false
+             | Error err ->
+               Printf.eprintf
+                 "masc.attachment_store: skipping ephemeral blob deletion for %s: meta unreadable (%s)\n%!"
+                 sha256
+                 (get_error_to_string err);
+               false
+             | Ok (Some { retention = Ephemeral _; _ }) | Ok None ->
+               (match is_pinned_elsewhere_unlocked t ~excluding_keeper:keeper sha256 with
+                | Ok true -> false
+                | Ok false -> true
+                | Error detail ->
+                  Printf.eprintf
+                    "masc.attachment_store: skipping ephemeral blob deletion for %s: sibling pin check failed (%s)\n%!"
+                    sha256
+                    detail;
+                  false)
            in
-           if
-             (not is_durable)
-             && not (is_pinned_elsewhere_unlocked t ~excluding_keeper:keeper sha256)
-           then ignore (delete_unreferenced_unlocked t ~sha256)))
+           if safe_to_delete
+           then (
+             match delete_unreferenced_unlocked t ~sha256 with
+             | Ok _ -> ()
+             | Error detail ->
+               Printf.eprintf
+                 "masc.attachment_store: failed deleting unreferenced ephemeral blob %s: %s\n%!"
+                 sha256
+                 detail)))
       sorted)
 ;;
 

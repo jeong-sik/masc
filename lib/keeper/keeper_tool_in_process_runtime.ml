@@ -2528,7 +2528,7 @@ let handle_analyze_image_with_outcome ?complete ?config ?turn_sandbox_factory
                 (match result.disposition, result.data with
                  | Tool_result.Completed (), Some (`Assoc output) ->
                      Keeper_tool_execution.success_data
-                       (`Assoc (("artifact", `String handle) :: ("source_path", `String path) :: output))
+                       (`Assoc (("artifact", `String handle) :: ("source_path", `String path) :: List.remove_assoc "artifact" output))
                  | Tool_result.Completed (), (None | Some _) ->
                      Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure
                        "Vision result omitted its structured success data."

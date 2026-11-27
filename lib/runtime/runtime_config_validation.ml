@@ -15,10 +15,9 @@ let find_declared_lane (lanes : Runtime_lane.t list) (id : string) =
 ;;
 
 (* Each [runtime] reference is validated under its field's admission contract:
-   - [Runtime_only] requires a declared runtime id. media_failover is on it:
-     its entries name runtimes that can read an image, and the order of that
-     list is the whole walk. verifier_exact slots are on it: judgement admits
-     each slot as a direct runtime and dispatches that id alone. No lane
+   - [Runtime_only] requires a declared runtime id. [runtime.media] overrides
+     ([vision_reader], [image_generator]) and [verifier_exact] slots are on it:
+     each slot names a direct runtime and dispatches that id alone. No lane
      expands underneath either.
    - [Lane_then_runtime] admits a declared lane name or a runtime id. Keeper
      assignments and route ids are on it, so validation judges the same target
@@ -90,15 +89,19 @@ let assignment_references (assignments : (string * string) list) =
     assignments
 ;;
 
-let media_failover_references (media_failover : string list) =
-  List.map
-    (fun id ->
-      { site = "[runtime].media_failover"
-      ; shape = List_entry
-      ; id
-      ; domain = Runtime_only
-      })
-    media_failover
+let media_override_references (media : Runtime_schema.media_overrides) =
+  let of_opt key = function
+    | None -> []
+    | Some id ->
+      [ { site = "[runtime.media]." ^ key
+        ; shape = Scalar
+        ; id
+        ; domain = Runtime_only
+        }
+      ]
+  in
+  of_opt "vision_reader" media.vision_reader
+  @ of_opt "image_generator" media.image_generator
 ;;
 
 (* [runtime.lanes.<id>] candidate ids must resolve to configured runtimes.

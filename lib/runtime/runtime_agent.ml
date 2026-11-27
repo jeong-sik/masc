@@ -711,56 +711,80 @@ let validate_content_blocks_for_run_against_capabilities
     ~goal_blocks
 
 let apply_runtime_model_input_capabilities
-    ?(inherit_catalog_image = false)
     (caps : Llm_provider.Capabilities.capabilities)
     (model_caps : Runtime_schema.model_capabilities) =
-  (* Explicit runtime.toml declarations always take precedence (both [Some true]
-     and [Some false]). When [supports-image-input] / [supports-multimodal-inputs]
-     are omitted ([None]), an HTTP [Agent_core] binding backed by an exact
-     catalog [Model_row] inherits that row's declared image/multimodal support
-     so catalog vision models are not silently blinded when runtime.toml omits
-     a redundant capabilities block. Uncatalogued endpoints, provider-wide
-     presets, and official clients remain fail-closed ([false]) on absence. *)
-  let declared field = Option.value field ~default:false in
-  let image_or_multimodal field ~catalog_value =
-    match field with
-    | Some value -> value
-    | None -> if inherit_catalog_image then catalog_value else false
+  (* Explicit runtime.toml declarations override base capabilities; omitted
+     fields ([None]) inherit the base capability rather than zeroing it. *)
+  let opt field default = Option.value field ~default in
+  let supports_image_input = opt model_caps.supports_image_input caps.supports_image_input in
+  let supports_multimodal_inputs =
+    match model_caps.supports_multimodal_inputs with
+    | Some v -> v
+    | None -> caps.supports_multimodal_inputs || supports_image_input
+  in
+  let supports_document_input =
+    match model_caps.supports_document_input with
+    | Some v -> caps.supports_document_input && v
+    | None -> caps.supports_document_input
+  in
+  let image_output =
+    match model_caps.supports_image_output with
+    | Some false -> Llm_provider.Capabilities.No_image_output
+    | Some true ->
+      if Llm_provider.Capabilities.supports_image_output caps
+      then caps.image_output
+      else Llm_provider.Capabilities.In_turn_openai_chat_modalities
+    | None -> caps.image_output
   in
   { caps with
-    supports_multimodal_inputs =
-      image_or_multimodal
-        model_caps.supports_multimodal_inputs
-        ~catalog_value:caps.supports_multimodal_inputs;
-    supports_image_input =
-      image_or_multimodal
-        model_caps.supports_image_input
-        ~catalog_value:caps.supports_image_input;
-    supports_audio_input = declared model_caps.supports_audio_input;
-    supports_video_input = declared model_caps.supports_video_input;
-    (* The adapter freezes the document declaration with the wire's floor.
-       Reapplying TOML here must not re-enable an unrepresentable document. *)
-    supports_document_input =
-      caps.supports_document_input && declared model_caps.supports_document_input;
+    supports_multimodal_inputs
+  ; supports_image_input
+  ; supports_audio_input = opt model_caps.supports_audio_input caps.supports_audio_input
+  ; supports_video_input = opt model_caps.supports_video_input caps.supports_video_input
+  ; supports_document_input
+  ; image_output
   }
 
-(* A model declaration cannot make its host transport carry a media block.
-   The official-client adapters accept text plus inline images for Codex,
-   Claude, and ACP clients (e.g. Mistral Vibe 3.1.0, Kimi Code, Antigravity ACP)
-   when the model declares image support, and text only for legacy
-   antigravity-cli (Keeper_official_client_host). *)
-let apply_execution_input_capabilities execution
-    (caps : Llm_provider.Capabilities.capabilities) =
-  match execution with
-  | Runtime_execution.Agent_core _ -> caps
+let input_capabilities_with_runtime
+    (caps : Llm_provider.Capabilities.capabilities)
+    (runtime : Runtime_instance.t) =
+  let media = Runtime_instance.effective_media_capabilities runtime in
+  let supports_image_input = Llm_provider.Capabilities.supports_image_input_of_media media in
+  let supports_document_input = not (List.is_empty media.document_input) in
+  let supports_audio_input = not (List.is_empty media.audio_input) in
+  let model_caps =
+    Option.value
+      runtime.model.capabilities
+      ~default:Runtime_schema.model_capabilities_default
+  in
+  match runtime.execution with
+  | Runtime_execution.Agent_core _ ->
+    let supports_multimodal_inputs =
+      match model_caps.supports_multimodal_inputs with
+      | Some v -> v
+      | None -> caps.supports_multimodal_inputs || supports_image_input
+    in
+    let supports_video_input =
+      Option.value model_caps.supports_video_input ~default:caps.supports_video_input
+    in
+    { caps with
+      supports_multimodal_inputs
+    ; supports_image_input
+    ; supports_document_input
+    ; supports_audio_input
+    ; supports_video_input
+    ; image_output = media.image_output
+    }
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Claude_code _
   | Runtime_execution.Acp _ ->
     { caps with
-      supports_multimodal_inputs = false
+      supports_multimodal_inputs = supports_image_input
+    ; supports_image_input
     ; supports_audio_input = false
     ; supports_video_input = false
     ; supports_document_input = false
+    ; image_output = media.image_output
     }
   | Runtime_execution.Antigravity_cli _ ->
     { caps with
@@ -769,23 +793,8 @@ let apply_execution_input_capabilities execution
     ; supports_audio_input = false
     ; supports_video_input = false
     ; supports_document_input = false
+    ; image_output = Llm_provider.Capabilities.No_image_output
     }
-
-let input_capabilities_with_runtime caps (runtime : Runtime_instance.t) =
-  let model_caps =
-    Option.value
-      runtime.model.capabilities
-      ~default:Runtime_schema.model_capabilities_default in
-  let inherit_catalog_image =
-    match runtime.Runtime_instance.execution with
-    | Runtime_execution.Agent_core _ -> runtime.Runtime_instance.has_catalog_model_row
-    | Runtime_execution.Codex_app_server _
-    | Runtime_execution.Claude_code _
-    | Runtime_execution.Antigravity_cli _
-    | Runtime_execution.Acp _ -> false
-  in
-  apply_runtime_model_input_capabilities ~inherit_catalog_image caps model_caps
-  |> apply_execution_input_capabilities runtime.execution
 
 let input_capabilities_for_config (config : config) =
   let caps = provider_caps_of_config config.provider_cfg in
@@ -796,10 +805,8 @@ let input_capabilities_for_config (config : config) =
   | None -> caps
   | Some runtime -> input_capabilities_with_runtime caps runtime
 
-(* Effective input capabilities of a materialized runtime (RFC-0265 reroute
-   candidate scoring). Same composition as [input_capabilities_for_config]:
-   provider caps overlaid with the model's declared media capabilities, then
-   constrained by the concrete execution transport. *)
+(* Effective input capabilities of a materialized runtime derived from the
+   single typed {!Runtime_instance.effective_media_capabilities} authority. *)
 let input_capabilities_of_runtime (rt : Runtime_instance.t) =
   let provider_caps =
     match rt.Runtime_instance.execution with
@@ -813,38 +820,320 @@ let input_capabilities_of_runtime (rt : Runtime_instance.t) =
   in
   input_capabilities_with_runtime provider_caps rt
 
-(* Tool-result media admission uses the materialized dispatch snapshot, so a
-   concurrent configuration replacement cannot change the active client's
-   capabilities between selection and host construction. *)
 let runtime_accepts_image_input ~(runtime : Runtime_instance.t) =
-  (input_capabilities_of_runtime runtime).Llm_provider.Capabilities.supports_image_input
+  Llm_provider.Capabilities.supports_image_input_of_media
+    (Runtime_instance.effective_media_capabilities runtime)
 ;;
 
-(* The vision runtimes: [runtime.media_failover] resolved against the
-   configured runtimes in declared order. Ids are unique, first occurrence
-   wins; an id that resolves to nothing is skipped. The vision tool and the
-   image readings made for a runtime that cannot take the image call these.
-   A keeper turn never dispatches to them: its image reroute stays inside its
-   own lane. No capability or execution filter here: the vision tool admits
-   by modality and execution itself. *)
-let media_candidates_of ~(runtimes : Runtime_instance.t list)
-    ~(media_failover : string list) : Runtime_instance.t list =
-  let by_id id =
-    List.find_opt
-      (fun (runtime : Runtime_instance.t) -> String.equal runtime.Runtime_instance.id id)
+let runtime_supports_image_output ~(runtime : Runtime_instance.t) =
+  Llm_provider.Capabilities.supports_image_output_of_media
+    (Runtime_instance.effective_media_capabilities runtime)
+;;
+
+let runtime_is_healthy_for_media ~now (rt : Runtime_instance.t) =
+  let scope = Runtime_instance.quota_scope_of_runtime rt in
+  let quota_spent = Option.is_some (Runtime_quota_window.spent ~scope ~now) in
+  let cred_refused = Option.is_some (Runtime_credential_refusal.refused_at ~scope) in
+  let rate_limited =
+    let obs =
+      Runtime_candidate_backpressure.candidate_backpressure
+        ~now
+        ~candidate:rt.candidate_backpressure
+    in
+    match obs with
+    | Some { Runtime_candidate_backpressure.rate_limit = Some _; _ } -> true
+    | Some { Runtime_candidate_backpressure.rate_limit = None; _ } | None -> false
+  in
+  not (quota_spent || cred_refused || rate_limited)
+;;
+
+let is_http_agent_core (rt : Runtime_instance.t) =
+  match rt.execution with
+  | Runtime_execution.Agent_core _ -> true
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Claude_code _
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Acp _ -> false
+;;
+
+let vision_reader_candidates_of
+    ~(runtimes : Runtime_instance.t list)
+    ~(media : Runtime_schema.media_overrides)
+    ?exclude_id
+    ()
+  : Runtime_instance.t list
+  =
+  let now = Unix.gettimeofday () in
+  let capable =
+    List.filter
+      (fun (rt : Runtime_instance.t) ->
+         let excluded =
+           match exclude_id with
+           | Some id -> String.equal rt.id id
+           | None -> false
+         in
+         (not excluded) && runtime_accepts_image_input ~runtime:rt)
       runtimes
+  in
+  let pinned =
+    match media.Runtime_schema.vision_reader with
+    | Some id -> List.filter (fun (rt : Runtime_instance.t) -> String.equal rt.id id) capable
+    | None -> []
+  in
+  let rest =
+    List.filter
+      (fun (rt : Runtime_instance.t) ->
+         not (List.exists (fun (p : Runtime_instance.t) -> String.equal p.id rt.id) pinned))
+      capable
+  in
+  let tier (rt : Runtime_instance.t) =
+    let health_rank = if runtime_is_healthy_for_media ~now rt then 0 else 1 in
+    let transport_rank = if is_http_agent_core rt then 0 else 1 in
+    let default_rank = if rt.binding.is_default then 0 else 1 in
+    health_rank, transport_rank, default_rank
+  in
+  let indexed = List.mapi (fun idx rt -> idx, tier rt, rt) rest in
+  let sorted_rest =
+    List.sort
+      (fun (i1, t1, _) (i2, t2, _) ->
+         let c = compare t1 t2 in
+         if c <> 0 then c else Int.compare i1 i2)
+      indexed
+    |> List.map (fun (_, _, rt) -> rt)
   in
   let rec dedupe seen = function
     | [] -> []
-    | (runtime : Runtime_instance.t) :: rest ->
-      if List.mem runtime.Runtime_instance.id seen then dedupe seen rest
-      else runtime :: dedupe (runtime.Runtime_instance.id :: seen) rest
+    | (rt : Runtime_instance.t) :: tl ->
+      if List.mem rt.id seen then dedupe seen tl else rt :: dedupe (rt.id :: seen) tl
   in
-  dedupe [] (List.filter_map by_id media_failover)
+  dedupe [] (pinned @ sorted_rest)
+;;
 
-let media_candidates () =
-  let runtimes, media_failover = Runtime.runtimes_and_media_failover () in
-  media_candidates_of ~runtimes ~media_failover
+let vision_reader_candidates ?exclude_id () =
+  let runtimes, media = Runtime.runtimes_and_media () in
+  vision_reader_candidates_of ~runtimes ~media ?exclude_id ()
+;;
+
+type image_generator_target =
+  | Runtime_in_turn of
+      { runtime : Runtime_instance.t
+      ; contract : Llm_provider.Capabilities.image_output_contract
+      }
+  | Runtime_images_endpoint of
+      { runtime : Runtime_instance.t
+      ; dialect : Llm_provider.Capabilities.images_api_dialect
+      }
+  | Derived_sibling_images_endpoint of
+      { source_runtime : Runtime_instance.t
+      ; model_id : string
+      ; provider_id : string
+      ; request_path : string
+      ; dialect : Llm_provider.Capabilities.images_api_dialect
+      ; label : string
+      }
+  | Derived_sibling_in_turn of
+      { source_runtime : Runtime_instance.t
+      ; model_id : string
+      ; provider_id : string
+      ; contract : Llm_provider.Capabilities.image_output_contract
+      ; label : string
+      }
+
+let image_generator_target_label = function
+  | Runtime_in_turn { runtime; _ }
+  | Runtime_images_endpoint { runtime; _ } -> runtime.id
+  | Derived_sibling_images_endpoint { label; _ }
+  | Derived_sibling_in_turn { label; _ } -> label
+;;
+
+let direct_image_target_of_runtime (rt : Runtime_instance.t) : image_generator_target option =
+  match (Runtime_instance.effective_media_capabilities rt).image_output with
+  | Llm_provider.Capabilities.No_image_output -> None
+  | Llm_provider.Capabilities.Endpoint_images_api dialect ->
+    Some (Runtime_images_endpoint { runtime = rt; dialect })
+  | ( Llm_provider.Capabilities.In_turn_gemini_modalities
+    | Llm_provider.Capabilities.In_turn_openai_responses_tool
+    | Llm_provider.Capabilities.In_turn_openai_chat_modalities
+    | Llm_provider.Capabilities.In_turn_codex_item
+    | Llm_provider.Capabilities.In_turn_acp_chunk ) as contract ->
+    Some (Runtime_in_turn { runtime = rt; contract })
+;;
+
+let contains_ci ~needle haystack =
+  let h = String.lowercase_ascii haystack in
+  let n = String.lowercase_ascii needle in
+  String_util.contains_substring h n
+;;
+
+let derived_sibling_image_targets_of_runtime (rt : Runtime_instance.t)
+  : image_generator_target list
+  =
+  match rt.execution with
+  | Runtime_execution.Agent_core sealed ->
+    if Runtime_instance.is_local_runtime rt then []
+    else
+      let cfg = Runtime_account_access.api_declaration sealed in
+      let pid = rt.provider.id in
+      let has_cred =
+        Option.is_some rt.provider.credentials
+        || rt.provider.api_format = Runtime_schema.Vertex_gemini_api
+      in
+      if not has_cred then []
+      else
+        (match cfg.kind with
+         | Llm_provider.Provider_kind.Gemini ->
+           [ Derived_sibling_in_turn
+               { source_runtime = rt
+               ; model_id = "gemini-2.5-flash-image"
+               ; provider_id = "gemini-image"
+               ; contract = Llm_provider.Capabilities.In_turn_gemini_modalities
+               ; label = pid ^ ".gemini-2.5-flash-image"
+               }
+           ; Derived_sibling_images_endpoint
+               { source_runtime = rt
+               ; model_id = "imagen-3.0-generate-002"
+               ; provider_id = "gemini-image"
+               ; request_path = ""
+               ; dialect = Llm_provider.Capabilities.Gemini_imagen_predict
+               ; label = pid ^ ".imagen-3.0-generate-002"
+               }
+           ]
+         | Llm_provider.Provider_kind.Glm ->
+           [ Derived_sibling_images_endpoint
+               { source_runtime = rt
+               ; model_id = "glm-image"
+               ; provider_id = "zai-image"
+               ; request_path = "/images/generations"
+               ; dialect = Llm_provider.Capabilities.Zai_images_v4
+               ; label = pid ^ ".glm-image"
+               }
+           ]
+         | Llm_provider.Provider_kind.OpenAI_compat ->
+           if contains_ci ~needle:"openrouter" pid
+              || contains_ci ~needle:"openrouter.ai" cfg.base_url
+           then
+             [ Derived_sibling_in_turn
+                 { source_runtime = rt
+                 ; model_id = "google/gemini-2.5-flash-image"
+                 ; provider_id = "openrouter-image"
+                 ; contract = Llm_provider.Capabilities.In_turn_openai_chat_modalities
+                 ; label = pid ^ ".google/gemini-2.5-flash-image"
+                 }
+             ]
+           else if contains_ci ~needle:"openai" pid
+                   || contains_ci ~needle:"api.openai.com" cfg.base_url
+           then
+             [ Derived_sibling_images_endpoint
+                 { source_runtime = rt
+                 ; model_id = "gpt-image-1"
+                 ; provider_id = "openai-image"
+                 ; request_path = "/images/generations"
+                 ; dialect = Llm_provider.Capabilities.Openai_images_v1
+                 ; label = pid ^ ".gpt-image-1"
+                 }
+             ]
+           else if contains_ci ~needle:"z.ai" cfg.base_url
+                   || contains_ci ~needle:"bigmodel.cn" cfg.base_url
+           then
+             [ Derived_sibling_images_endpoint
+                 { source_runtime = rt
+                 ; model_id = "glm-image"
+                 ; provider_id = "zai-image"
+                 ; request_path = "/images/generations"
+                 ; dialect = Llm_provider.Capabilities.Zai_images_v4
+                 ; label = pid ^ ".glm-image"
+                 }
+             ]
+           else []
+         | Llm_provider.Provider_kind.Anthropic
+         | Llm_provider.Provider_kind.Kimi
+         | Llm_provider.Provider_kind.Ollama -> [])
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Claude_code _
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Acp _ -> []
+;;
+
+let dedupe_image_targets targets =
+  let rec loop seen = function
+    | [] -> []
+    | target :: rest ->
+      let lbl = image_generator_target_label target in
+      if List.mem lbl seen then loop seen rest else target :: loop (lbl :: seen) rest
+  in
+  loop [] targets
+;;
+
+let image_generator_candidates_of
+    ~(runtimes : Runtime_instance.t list)
+    ~(media : Runtime_schema.media_overrides)
+    ?active_runtime
+    ?requested_runtime_id
+    ()
+  : image_generator_target list
+  =
+  let now = Unix.gettimeofday () in
+  let find_rt id =
+    List.find_opt (fun (rt : Runtime_instance.t) -> String.equal rt.id id) runtimes
+  in
+  match requested_runtime_id with
+  | Some raw when String.trim raw <> "" ->
+    let req_id = String.trim raw in
+    (match find_rt req_id with
+     | Some rt ->
+       (match direct_image_target_of_runtime rt with
+        | Some t -> [ t ]
+        | None -> derived_sibling_image_targets_of_runtime rt)
+     | None ->
+       (* Also match a derived sibling label such as "openai.gpt-image-1". *)
+       runtimes
+       |> List.concat_map derived_sibling_image_targets_of_runtime
+       |> List.filter (fun t -> String.equal (image_generator_target_label t) req_id)
+       |> dedupe_image_targets)
+  | Some _ | None ->
+    let active_direct =
+      Option.bind active_runtime direct_image_target_of_runtime |> Option.to_list
+    in
+    let pinned_direct =
+      Option.bind media.Runtime_schema.image_generator find_rt
+      |> Option.to_list
+      |> List.filter_map direct_image_target_of_runtime
+    in
+    let healthy_direct, demoted_direct =
+      runtimes
+      |> List.filter_map (fun rt ->
+           Option.map (fun target -> rt, target) (direct_image_target_of_runtime rt))
+      |> List.partition (fun (rt, _) -> runtime_is_healthy_for_media ~now rt)
+    in
+    let sort_http_first pairs =
+      let http, cli = List.partition (fun (rt, _) -> is_http_agent_core rt) pairs in
+      List.map snd http @ List.map snd cli
+    in
+    let active_siblings =
+      Option.map derived_sibling_image_targets_of_runtime active_runtime
+      |> Option.value ~default:[]
+    in
+    let healthy_siblings, demoted_siblings =
+      let healthy_rts, demoted_rts =
+        List.partition (runtime_is_healthy_for_media ~now) runtimes
+      in
+      ( List.concat_map derived_sibling_image_targets_of_runtime healthy_rts
+      , List.concat_map derived_sibling_image_targets_of_runtime demoted_rts )
+    in
+    dedupe_image_targets
+      (active_direct
+       @ pinned_direct
+       @ sort_http_first healthy_direct
+       @ active_siblings
+       @ healthy_siblings
+       @ sort_http_first demoted_direct
+       @ demoted_siblings)
+;;
+
+let image_generator_candidates ?active_runtime ?requested_runtime_id () =
+  let runtimes, media = Runtime.runtimes_and_media () in
+  image_generator_candidates_of ~runtimes ~media ?active_runtime ?requested_runtime_id ()
+;;
 
 (* An image turn walks the candidates that take the image, in the
    order the candidate set gives them. A text-only candidate is not part of
@@ -1043,8 +1332,7 @@ module For_testing = struct
     validate_content_blocks_for_run_against_capabilities_with_checkpoint
   let validate_content_blocks_against_capabilities =
     validate_content_blocks_against_capabilities
-  let apply_runtime_model_input_capabilities caps model_caps =
-    apply_runtime_model_input_capabilities ~inherit_catalog_image:false caps model_caps
+  let apply_runtime_model_input_capabilities = apply_runtime_model_input_capabilities
   let select_agent_result = select_agent_result
   let stop_reason_of_cooperative_yield = stop_reason_of_cooperative_yield
 end

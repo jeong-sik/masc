@@ -224,6 +224,7 @@ val create_post :
   ?hearth:string ->
   ?thread_id:string ->
   ?origin:Board.post_origin ->
+  ?attachment_ids:string list ->
   unit ->
   (Board.post, Board.Post_publication_failure.t) Result.t
 
@@ -239,6 +240,7 @@ val create_post_with_unresolved :
   ?hearth:string ->
   ?thread_id:string ->
   ?origin:Board.post_origin ->
+  ?attachment_ids:string list ->
   unit ->
   (Board.post_creation, Board.Post_publication_failure.t) Result.t
 (** The canonical creation receipt includes the resolved audience and names
@@ -409,6 +411,7 @@ val add_comment :
   content:string ->
   ?parent_id:string ->
   ?ttl_hours:int ->
+  ?attachment_ids:string list ->
   unit ->
   (Board.comment, Board.board_error) Result.t
 
@@ -419,6 +422,7 @@ val add_comment_with_unresolved :
   content:string ->
   ?parent_id:string ->
   ?ttl_hours:int ->
+  ?attachment_ids:string list ->
   unit ->
   (Board.comment * string list, Board.board_error) Result.t
 (** {!add_comment} that also returns the undeclared names, as

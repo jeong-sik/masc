@@ -16,15 +16,19 @@ let with_env key value f =
       Unix.putenv key value;
       f ())
 
-let expected_token ~media_type data =
-  Agent_core_sha256.(
-    digest_string (String.lowercase_ascii (String.trim media_type) ^ "\000" ^ data)
-    |> to_hex)
+let png_bytes tag = "\x89PNG\r\n\x1a\n" ^ tag
+let mp3_bytes tag = "ID3\x03\x00\x00\x00" ^ tag
+
+let expected_token data =
+  Agent_core_sha256.(digest_string data |> to_hex)
+
+let expected_url data =
+  "/api/v1/attachments/att_" ^ expected_token data
 
 let test_image_media_persisted_as_block () =
   let open Agent_core.Types in
   let accum = A.create () in
-  let raw_media = "raw image bytes" in
+  let raw_media = png_bytes "raw image bytes" in
   let encoded_media = Base64.encode_string raw_media in
   (* One base64 media block, then its stop. *)
   List.iter
@@ -44,8 +48,8 @@ let test_image_media_persisted_as_block () =
   | [ Blocks.Image { src; cap = None; _ } ] ->
     check
       string
-      "image block src is the persisted media URL for the concatenated payload"
-      ("/api/v1/media/" ^ expected_token ~media_type:"image/png" raw_media)
+      "image block src is the persisted attachment URL for the concatenated payload"
+      (expected_url raw_media)
       src
   | _ -> fail "expected exactly one Image block for image media"
 
@@ -62,7 +66,7 @@ let test_audio_media_as_voice_block () =
             MediaDelta
               {
                 media_type = "audio/mpeg";
-                source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "audio bytes");
+                source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string (mp3_bytes "audio bytes"));
               };
         };
       ContentBlockStop { index = 0 };
@@ -82,11 +86,11 @@ let test_runtime_attempt_discards_unfinished_media () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "stale")
+             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string (png_bytes "stale"))
              }
        });
   A.start_runtime_attempt accum;
-  let fresh = "fresh" in
+  let fresh = png_bytes "fresh" in
   A.on_event accum
     (ContentBlockDelta
        { index = 0
@@ -101,7 +105,7 @@ let test_runtime_attempt_discards_unfinished_media () =
   match A.to_chat_blocks ~base_dir accum with
   | [ Blocks.Image { src; _ } ] ->
     check string "fallback media excludes failed-attempt chunks"
-      ("/api/v1/media/" ^ expected_token ~media_type:"image/png" fresh)
+      (expected_url fresh)
       src
   | _ -> fail "expected only the fallback attempt image"
 ;;
@@ -119,7 +123,7 @@ let test_timeout_discards_unfinished_media () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "timed out")
+             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string (png_bytes "timed out"))
              }
        });
   A.on_event accum (Timeout "idle timeout after 120.0s");
@@ -135,7 +139,7 @@ let test_open_media_finalized_on_message_stop () =
      blocks use their protocol indexes as the terminal-order tie-breaker. *)
   let open Agent_core.Types in
   let accum = A.create () in
-  let raw_media = "z" in
+  let raw_media = png_bytes "z" in
   List.iter
     (A.on_event accum)
     [ ContentBlockDelta
@@ -143,7 +147,7 @@ let test_open_media_finalized_on_message_stop () =
           delta =
             MediaDelta
               { media_type = "audio/mpeg";
-                source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "audio")
+                source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string (mp3_bytes "audio"))
               }
         }
     ; ContentBlockDelta
@@ -162,20 +166,22 @@ let test_open_media_finalized_on_message_stop () =
       check
         string
         "message stop finalizes open media in block-index order"
-        ("/api/v1/media/" ^ expected_token ~media_type:"image/png" raw_media)
+        (expected_url raw_media)
         src
   | _ -> fail "expected Image then Voice blocks finalized at message stop"
 
 let test_stop_reason_finalizes_media_until_next_exact_scope () =
   let open Agent_core.Types in
   let accum = A.create () in
+  let first_raw = png_bytes "first" in
+  let second_raw = png_bytes "second" in
   A.on_event ~stream_scope:0 accum
     (ContentBlockDelta
        { index = 0
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "first")
+             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string first_raw)
              }
        });
   A.on_event ~stream_scope:0 accum
@@ -186,7 +192,7 @@ let test_stop_reason_finalizes_media_until_next_exact_scope () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "late")
+             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string (png_bytes "late"))
              }
        });
   A.on_event ~stream_scope:1 accum
@@ -195,7 +201,7 @@ let test_stop_reason_finalizes_media_until_next_exact_scope () =
        ; delta =
            MediaDelta
              { media_type = "image/png"
-             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "second")
+             ; source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string second_raw)
              }
        });
   A.on_event ~stream_scope:1 accum (ContentBlockStop { index = 0 });
@@ -203,10 +209,10 @@ let test_stop_reason_finalizes_media_until_next_exact_scope () =
   match A.to_chat_blocks ~base_dir accum with
   | [ Blocks.Image { src = first; _ }; Blocks.Image { src = second; _ } ] ->
     check string "terminal media excludes late bytes"
-      ("/api/v1/media/" ^ expected_token ~media_type:"image/png" "first")
+      (expected_url first_raw)
       first;
     check string "new exact scope may reuse the index"
-      ("/api/v1/media/" ^ expected_token ~media_type:"image/png" "second")
+      (expected_url second_raw)
       second
   | _ -> fail "expected one finalized image per exact stream scope"
 ;;
@@ -243,7 +249,7 @@ let test_tool_block_media_not_persisted () =
 let test_metadata_drift_preserves_first_media_block () =
   let open Agent_core.Types in
   let accum = A.create () in
-  let raw_media = "first media" in
+  let raw_media = png_bytes "first media" in
   List.iter
     (A.on_event accum)
     [
@@ -264,7 +270,7 @@ let test_metadata_drift_preserves_first_media_block () =
             MediaDelta
               {
                 media_type = "audio/mpeg";
-                source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "drift");
+                source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string (mp3_bytes "drift"));
               };
         };
       ContentBlockStop { index = 0 };
@@ -275,7 +281,7 @@ let test_metadata_drift_preserves_first_media_block () =
       check
         string
         "metadata drift keeps first media block"
-        ("/api/v1/media/" ^ expected_token ~media_type:"image/png" raw_media)
+        (expected_url raw_media)
         src
   | _ -> fail "expected metadata drift to preserve the first image media block"
 
@@ -293,7 +299,7 @@ let media_chunk_deltas ~index ~media_type chunks =
 let test_many_media_chunks_join_in_order () =
   let open Agent_core.Types in
   let accum = A.create () in
-  let raw_media = String.init 768 (fun i -> Char.chr (i * 7 mod 256)) in
+  let raw_media = png_bytes (String.init 760 (fun i -> Char.chr (i * 7 mod 256))) in
   let chunks = equal_chunks ~width:4 (Base64.encode_string raw_media) in
   check int "the payload arrives in many chunks" 256 (List.length chunks);
   List.iter (A.on_event accum)
@@ -304,7 +310,7 @@ let test_many_media_chunks_join_in_order () =
   match A.to_chat_blocks ~base_dir accum with
   | [ Blocks.Image { src; cap = None; _ } ] ->
       check string "the persisted media is every chunk in arrival order"
-        ("/api/v1/media/" ^ expected_token ~media_type:"image/png" raw_media)
+        (expected_url raw_media)
         src
   | _ -> fail "expected one Image block joined from every chunk"
 
@@ -333,7 +339,7 @@ let test_last_media_chunk_over_the_cap_drops_the_block () =
 let test_carrier_change_keeps_first_media_block () =
   let open Agent_core.Types in
   let accum = A.create () in
-  let raw_media = "first carrier" in
+  let raw_media = png_bytes "first carrier" in
   List.iter (A.on_event accum)
     (media_chunk_deltas ~index:0 ~media_type:"image/png"
        [ Agent_core.Llm_provider.Types.Base64 (Base64.encode_string raw_media); Agent_core.Llm_provider.Types.Url "https://example.invalid/drift.png" ]
@@ -342,7 +348,7 @@ let test_carrier_change_keeps_first_media_block () =
   match A.to_chat_blocks ~base_dir accum with
   | [ Blocks.Image { src; cap = None; _ } ] ->
       check string "a chunk under another carrier is not joined"
-        ("/api/v1/media/" ^ expected_token ~media_type:"image/png" raw_media)
+        (expected_url raw_media)
         src
   | _ -> fail "expected a carrier change to keep the first image media block"
 
@@ -421,7 +427,7 @@ let test_media_persist_failure_surfaces_as_placeholder () =
   | _ -> fail "expected one placeholder for a generated-media persist failure"
 
 let test_dropped_and_persisted_media_keep_stream_order () =
-  with_env "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" "4" (fun () ->
+  with_env "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" "16" (fun () ->
     let open Agent_core.Types in
     let accum = A.create () in
     let oversized =
@@ -443,7 +449,7 @@ let test_dropped_and_persisted_media_keep_stream_order () =
             delta =
               MediaDelta
                 { media_type = "image/png";
-                  source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string "x")
+                  source = Agent_core.Llm_provider.Types.Base64 (Base64.encode_string (png_bytes "x"))
                 }
           }
       ; ContentBlockStop { index = 1 }
@@ -461,7 +467,6 @@ let test_failed_request_reloads_completed_media_across_attempts () =
   with_env "MASC_KEEPER_GENERATED_MEDIA_RETENTION_SEC" "86400" @@ fun () ->
   let open Agent_core.Types in
   let module Tool = Masc.Keeper_stream_tool_accum in
-  let module Media = Masc.Keeper_chat_media_store in
   let module Store = Masc.Keeper_chat_store in
   let module Delivery = Keeper_chat_delivery_identity in
   let require label = function
@@ -515,9 +520,9 @@ let test_failed_request_reloads_completed_media_across_attempts () =
           ; String.sub encoded split (String.length encoded - split)
           ]
       in
-      let raw_a = "\000completed-A\255" in
-      let raw_b = "\000unfinished-B\255" in
-      let raw_c = "\000completed-C\255" in
+      let raw_a = png_bytes "\000completed-A\255" in
+      let raw_b = png_bytes "\000unfinished-B\255" in
+      let raw_c = png_bytes "\000completed-C\255" in
       let prelude =
         MessageStart { id = "reused-provider-message"; model = "media-fixture"; usage = None }
       in
@@ -541,22 +546,24 @@ let test_failed_request_reloads_completed_media_across_attempts () =
           | Blocks.Image { src; cap = None; _ } -> src
           | _ -> fail "expected completed image blocks without captions")
       in
-      let token raw = expected_token ~media_type raw in
       let expected_sources =
-        List.map (fun raw -> "/api/v1/media/" ^ token raw) [ raw_a; raw_c ]
+        List.map expected_url [ raw_a; raw_c ]
       in
       check (list string) "completed A/C remain ordered without terminal duplicates"
         expected_sources (image_sources blocks);
+      let att_store = Attachment_store.create ~base_path:base_dir in
       List.iter
         (fun (label, raw) ->
-          match Media.file_path_of_token ~base_dir ~token:(token raw) with
-          | None -> failf "%s media file is absent" label
-          | Some path ->
-              check string (label ^ " file contains the decoded bytes") raw
-                (In_channel.with_open_bin path In_channel.input_all))
+          match Attachment_store.get_bytes_by_sha256 att_store ~sha256:(expected_token raw) with
+          | Ok (Some stored) ->
+              check string (label ^ " attachment contains the decoded bytes") raw stored
+          | Ok None -> failf "%s attachment is absent" label
+          | Error err -> fail (Attachment_store.get_error_to_string err))
         [ "A", raw_a; "C", raw_c ];
-      check (option string) "unfinished B never becomes a media file" None
-        (Media.file_path_of_token ~base_dir ~token:(token raw_b));
+      check (option string) "unfinished B never becomes an attachment" None
+        (match Attachment_store.get_bytes_by_sha256 att_store ~sha256:(expected_token raw_b) with
+         | Ok opt -> opt
+         | Error err -> fail (Attachment_store.get_error_to_string err));
       let keeper_name = "media-failure-reload" in
       let operation_id =
         Delivery.Request_id.of_string "media-failure-operation"

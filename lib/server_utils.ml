@@ -259,7 +259,27 @@ let board_reaction_fields = function
                Board.board_reaction_emojis) )
       ]
 
-let board_comment_dashboard_json ?current_vote
+let board_attachments_fields ?base_path (attachment_ids : string list) =
+  match attachment_ids with
+  | [] -> []
+  | ids ->
+    let bp =
+      match base_path with
+      | Some bp -> bp
+      | None -> Env_config_core.base_path ()
+    in
+    let store = Attachment_store.create ~base_path:bp in
+    let resolved =
+      List.filter_map
+        (fun id ->
+           match Attachment_store.get_meta store ~id with
+           | Ok (Some meta) -> Some (Attachment_store.meta_to_wire_json meta)
+           | Ok None | Error _ -> None)
+        ids
+    in
+    if resolved = [] then [] else [ ("attachments", `List resolved) ]
+
+let board_comment_dashboard_json ?base_path ?current_vote
     ?reactions (c : Board.comment) : Yojson.Safe.t =
   let author = Board.Agent_id.to_string c.author in
   match Board.comment_to_yojson c with
@@ -267,11 +287,12 @@ let board_comment_dashboard_json ?current_vote
       `Assoc
         (fields
          @ [ ("author_identity", board_actor_identity_json author) ]
+         @ board_attachments_fields ?base_path c.attachment_ids
          @ board_vote_state_fields current_vote
          @ board_reaction_fields reactions)
   | other -> other
 
-let board_post_dashboard_json ?current_vote
+let board_post_dashboard_json ?base_path ?current_vote
     ?reactions ~author_karma (p : Board.post) : Yojson.Safe.t =
   let author = Board.Agent_id.to_string p.author in
   let base_fields =
@@ -304,6 +325,7 @@ let board_post_dashboard_json ?current_vote
           ("hearth_count", `Int (match p.hearth with Some _ -> 1 | None -> 0));
           ("author_identity", board_actor_identity_json author);
         ]
+      @ board_attachments_fields ?base_path p.attachment_ids
       @ board_vote_state_fields current_vote
       @ board_reaction_fields reactions )
 

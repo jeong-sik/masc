@@ -159,11 +159,20 @@ type turn_usage =
 
 val frame_usage_of_breakdowns : last:token_usage -> thread_total:token_usage -> frame_usage
 
+type media_output =
+  { item_id : string
+  ; mime_type : string
+  ; data_bytes : string
+  ; revised_prompt : string option
+  }
+
 type turn_result =
   { thread_id : string
   ; turn_id : string
   ; model : string
   ; text : string
+  ; media_outputs : media_output list
+    (** Decoded image payloads emitted by [imageGeneration] items during the turn. *)
   ; dynamic_tool_calls : int
   ; subscription : subscription
   ; user_agent : string option
@@ -254,6 +263,8 @@ type stream_event =
           part. Completed items contribute only the suffix not already streamed. *)
   | Text_completed of { item_id : string option; source : text_completion_source }
   | Thinking_completed of { item_id : string; part : reasoning_part }
+  | Media_output of media_output
+      (** Decoded image payload emitted when a Codex [imageGeneration] item completes. *)
       (** The matching model item/part completed, after its final missing
           suffix. [Adopted_anonymous_content] means the runtime reconciled an
           unnamed prefix against the completed item's text. Only that source
@@ -535,6 +546,9 @@ type context_submission = private
 val context_submission_to_json : context_submission -> Yojson.Safe.t
 (** Content-free proof of a complete JSON-plus-newline write to Codex stdin.
     This is neither server acceptance nor the provider's complete model input. *)
+
+val decode_image_generation_item_for_tests : Yojson.Safe.t -> media_output option
+(** Pure decoder for a Codex [imageGeneration] item (exposed for unit tests). *)
 
 val run_turn :
   ?dynamic_tools:dynamic_tool list ->

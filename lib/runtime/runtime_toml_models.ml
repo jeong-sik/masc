@@ -106,6 +106,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
     ; "supports-named-tool-choice"
     ; "supports-parallel-tool-calls"
     ; "supports-image-input"
+    ; "supports-image-output"
     ; "supports-document-input"
     ; "supports-audio-input"
     ; "supports-video-input"
@@ -282,6 +283,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
   let* supports_named_tool_choice = b "supports-named-tool-choice" in
   let* supports_parallel_tool_calls = b "supports-parallel-tool-calls" in
   let* supports_image_input = b "supports-image-input" in
+  let* supports_image_output = b "supports-image-output" in
   let* supports_document_input = b "supports-document-input" in
   let* supports_audio_input = b "supports-audio-input" in
   let* supports_video_input = b "supports-video-input" in
@@ -310,6 +312,7 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
     ; anthropic_thinking_control
     ; reasoning_streaming_format
     ; supports_image_input
+    ; supports_image_output
     ; supports_document_input
     ; supports_audio_input
     ; supports_video_input

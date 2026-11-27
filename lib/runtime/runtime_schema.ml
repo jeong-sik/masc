@@ -308,6 +308,7 @@ type model_capabilities =
   ; anthropic_thinking_control : anthropic_thinking_control option
   ; reasoning_streaming_format : reasoning_streaming_format option
   ; supports_image_input : bool option
+  ; supports_image_output : bool option
   ; supports_document_input : bool option
   ; supports_audio_input : bool option
   ; supports_video_input : bool option
@@ -336,6 +337,7 @@ let model_capabilities_default =
   ; anthropic_thinking_control = None
   ; reasoning_streaming_format = None
   ; supports_image_input = None
+  ; supports_image_output = None
   ; supports_document_input = None
   ; supports_audio_input = None
   ; supports_video_input = None
@@ -717,6 +719,18 @@ type media_reader_decl =
   }
 [@@deriving show, eq]
 
+type media_overrides =
+  { vision_reader : string option
+  ; image_generator : string option
+  }
+[@@deriving show, eq]
+
+let empty_media_overrides =
+  { vision_reader = None
+  ; image_generator = None
+  }
+;;
+
 type config =
   { providers : provider list
   ; models : model_spec list
@@ -732,13 +746,9 @@ type config =
         load ({!Runtime.load_list}), mirroring [\[runtime\].default] validation. The
         id is an opaque binding key here — only the AGENT_CORE adapter parses it into
         provider/model/spec. *)
-  ; media_failover : string list
-    (** [\[runtime\].media_failover] — the vision runtimes: ordered runtime ids
-        the vision tool calls, including the image readings made for a runtime
-        that cannot take the image. A keeper turn never dispatches to them; its
-        image reroute stays inside its lane. [[]] = no vision runtimes. Each id must
-        resolve to a configured runtime (rejected at load like
-        [\[runtime\].default]). *)
+  ; media : media_overrides
+    (** Optional [\[runtime.media\]] overrides ([vision_reader], [image_generator]).
+        Each present id must resolve to a configured runtime at load. *)
   ; media_readers : media_reader_decl list
   ; lane_decls : lane_decl list
     (** [\[runtime.lanes.<id>\]] — ordered failover candidate lists.

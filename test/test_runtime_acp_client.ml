@@ -5833,6 +5833,7 @@ let test_layer4_stream_projection_sse_framing_native_tools_and_zero_usage () =
        ; status = Some Runtime_acp_client.Tool_completed
        ; raw_input = None
        ; raw_output = None
+       ; media_outputs = []
        ; identity = None
        });
   let final_api_usage : Agent_core.Types.api_usage =
@@ -5934,6 +5935,7 @@ let test_anonymous_native_tool_oneshot_closes_and_empty_id_mcp_does_not_steal ()
        ; status = Some Runtime_acp_client.Tool_completed
        ; raw_input = None
        ; raw_output = None
+       ; media_outputs = []
        ; identity =
            Some
              (Runtime_acp_client.Mcp_tool
@@ -5949,6 +5951,7 @@ let test_anonymous_native_tool_oneshot_closes_and_empty_id_mcp_does_not_steal ()
        ; status = Some Runtime_acp_client.Tool_failed
        ; raw_input = None
        ; raw_output = None
+       ; media_outputs = []
        ; identity = None
        });
   check int "empty-id MCP and None updates leave open anonymous native blocks untouched" 0
@@ -6347,6 +6350,7 @@ for line in sys.stdin:
        ; status = Some Runtime_acp_client.Tool_in_progress
        ; raw_input = None
        ; raw_output = None
+       ; media_outputs = []
        ; identity =
            Some
              (Runtime_acp_client.Native_tool
@@ -6400,6 +6404,7 @@ for line in sys.stdin:
        ; status = Some Runtime_acp_client.Tool_completed
        ; raw_input = None
        ; raw_output = None
+       ; media_outputs = []
        ; identity = Some pinned_mcp_id
        });
   on_acp_none
@@ -6425,6 +6430,7 @@ for line in sys.stdin:
        ; status = Some Runtime_acp_client.Tool_completed
        ; raw_input = Some (`Assoc [ "path", `String "/etc/passwd" ])
        ; raw_output = None
+       ; media_outputs = []
        ; identity =
            Some
              (Runtime_acp_client.Native_tool
@@ -6451,6 +6457,7 @@ for line in sys.stdin:
        ; status = Some Runtime_acp_client.Tool_completed
        ; raw_input = Some (`Assoc [ "path", `String "/etc/passwd" ])
        ; raw_output = None
+       ; media_outputs = []
        ; identity =
            Some
              (Runtime_acp_client.Native_tool
@@ -6470,6 +6477,7 @@ for line in sys.stdin:
        ; status = Some Runtime_acp_client.Tool_completed
        ; raw_input = None
        ; raw_output = None
+       ; media_outputs = []
        ; identity = None
        });
   check int "uncorrelated identity=None Tool_call_updated fails closed on effect fence"

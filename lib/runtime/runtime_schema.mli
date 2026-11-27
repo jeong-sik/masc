@@ -308,9 +308,12 @@ type model_capabilities =
   ; reasoning_streaming_format : reasoning_streaming_format option
       (** Exact streaming side-channel for this transport binding. *)
   ; supports_image_input : bool option
+  ; supports_image_output : bool option
+      (** Optional explicit image-generation output override ([supports-image-output]).
+          [None] inherits from the model catalog / transport contract. *)
   ; supports_document_input : bool option
-      (** Native document input. [None] withholds document input, as for other
-          media declarations. The selected transport must also represent it. *)
+      (** Native document input. [None] inherits from the model catalog when the
+          selected transport supports it. *)
   ; supports_audio_input : bool option
   ; supports_video_input : bool option
   ; supports_multimodal_inputs : bool option
@@ -646,6 +649,17 @@ type media_reader_decl =
   }
 [@@deriving show, eq]
 
+(** Optional [\[runtime.media\]] fallback overrides. Both fields are optional:
+    when omitted, vision reading and image generation derive automatically from
+    configured runtimes and their model/transport capabilities. *)
+type media_overrides =
+  { vision_reader : string option
+  ; image_generator : string option
+  }
+[@@deriving show, eq]
+
+val empty_media_overrides : media_overrides
+
 type config =
   { providers : provider list
   ; models : model_spec list
@@ -657,13 +671,9 @@ type config =
         keeper absent from this table routes to the default runtime; an
         assignment to an unknown id is rejected at load. The id is an opaque
         binding key (only the AGENT_CORE adapter parses it into provider/model/spec). *)
-  ; media_failover : string list
-    (** [\[runtime\].media_failover] — the vision runtimes: ordered runtime ids
-        the vision tool calls, including the image readings made for a runtime
-        that cannot take the image. A keeper turn never dispatches to them; its
-        image reroute stays inside its lane. [[]] = no vision runtimes. Each id must
-        resolve to a configured runtime (rejected at load like
-        [\[runtime\].default]). *)
+  ; media : media_overrides
+    (** Optional [\[runtime.media\]] overrides ([vision_reader], [image_generator]).
+        Each present id must resolve to a configured runtime at load. *)
   ; media_readers : media_reader_decl list
     (** [\[\[media_readers\]\]] — complete declarations in source order.
         Absence and an explicit empty list both mean no declared readers. *)

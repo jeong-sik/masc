@@ -44,6 +44,7 @@ let of_event (event : Keeper_chat_events.keeper_chat_event) =
   | Tool_result_ready _
   | Tool_transcript_committed _
   | Link_block _
+  | Attachment_emitted _
   | Image_block _
   | Status_block _
   | Audio_block _

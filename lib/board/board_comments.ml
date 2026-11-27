@@ -133,6 +133,7 @@ let add_comment_with_audience
       ~content
       ?parent_id
       ?(ttl_hours = Limits.default_ttl_hours)
+      ?(attachment_ids = [])
       ()
   : (comment_creation, board_error) Result.t
   =
@@ -203,6 +204,7 @@ let add_comment_with_audience
                           *. Masc_time_constants.hour))
                ; votes_up = 0
                ; votes_down = 0
+               ; attachment_ids
                }))))
     in
     (match staged with
@@ -292,7 +294,7 @@ let add_comment_with_audience
              error)))
 ;;
 
-let add_comment store ~reader ~lookup ~post_id ~author ~content ?parent_id ?ttl_hours () =
+let add_comment store ~reader ~lookup ~post_id ~author ~content ?parent_id ?ttl_hours ?attachment_ids () =
   add_comment_with_audience
     store
     ~reader
@@ -302,6 +304,7 @@ let add_comment store ~reader ~lookup ~post_id ~author ~content ?parent_id ?ttl_
     ~content
     ?parent_id
     ?ttl_hours
+    ?attachment_ids
     ()
   |> Result.map (fun creation -> creation.comment)
 ;;

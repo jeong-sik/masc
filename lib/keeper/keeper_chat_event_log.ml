@@ -358,6 +358,15 @@ let keeper_chat_event_to_json event =
       ([ "url", `String url; "title", `String title ]
        @ json_opt "description" (Option.map (fun value -> `String value) description)
        @ json_opt "image" (Option.map (fun value -> `String value) image))
+  | Attachment_emitted { attachment_id; role; tool_call_id; caption } ->
+    type_tag
+      "attachment_emitted"
+      ([ "attachment_id", `String attachment_id
+       ; "url", `String (Attachment_store.url_of_id attachment_id)
+       ; "role", `String (Keeper_chat_events.attachment_role_to_string role)
+       ]
+       @ json_opt "tool_call_id" (Option.map (fun value -> `String value) tool_call_id)
+       @ json_opt "caption" (Option.map (fun value -> `String value) caption))
   | Image_block { url; caption } ->
     type_tag
       "image_block"
@@ -681,6 +690,22 @@ let keeper_chat_event_of_json json =
            ; description = json |> member "description" |> to_string_option
            ; image = json |> member "image" |> to_string_option
            })
+    | "attachment_emitted" ->
+      let attachment_id = json |> member "attachment_id" |> to_string in
+      let role_raw = json |> member "role" |> to_string in
+      let* role =
+        match Keeper_chat_events.attachment_role_of_string role_raw with
+        | Some role -> Ok role
+        | None ->
+          Error (Printf.sprintf "attachment_emitted: unknown role %S" role_raw)
+      in
+      Ok
+        (Attachment_emitted
+           { attachment_id
+           ; role
+           ; tool_call_id = json |> member "tool_call_id" |> to_string_option
+           ; caption = json |> member "caption" |> to_string_option
+           })
     | "image_block" ->
       Ok
         (Image_block
@@ -950,6 +975,7 @@ let event_floats_are_finite = function
   | Tool_result_ready _
   | Tool_transcript_committed _
   | Link_block _
+  | Attachment_emitted _
   | Image_block _
   | Status_block _
   | Audio_block _

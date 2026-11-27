@@ -515,18 +515,19 @@ let test_attachment_blob_failure_does_not_commit_chat () =
     Unix.mkdir base_dir 0o700;
     let masc_root = Common.masc_dir_from_base_path ~base_path:base_dir in
     Unix.mkdir masc_root 0o700;
-    let blocker = open_out (Filename.concat masc_root "tool_blobs") in
+    let blocker = open_out (Filename.concat masc_root "attachments") in
     close_out blocker;
     let request_id =
       match Keeper_chat_delivery_identity.Request_id.of_string "blocked-image-request" with
       | Ok id -> id
       | Error detail -> Alcotest.fail detail
     in
+    let png_b64 = Base64.encode_string "\x89PNG\r\n\x1a\nblocked-png" in
     let result = K.append_user_message_once ~base_dir ~keeper_name:"blocked-image"
         ~delivery_key:(Keeper_chat_delivery_identity.Operation request_id)
         ~content:"look"
         ~attachments:[{K.id="blocked-att"; att_type="image"; name="image.png";
-          size=3; mime_type="image/png"; data="UE5H"; width=None; height=None}] () in
+          size=19; mime_type="image/png"; data=png_b64; width=None; height=None}] () in
     Alcotest.(check bool) "unretained attachment cannot be committed" true (Result.is_error result);
     Alcotest.(check int) "no chat row points at missing bytes" 0
       (List.length (K.load ~base_dir ~keeper_name:"blocked-image")))
@@ -564,23 +565,19 @@ let test_attachment_dimensions_survive_the_reference_swap () =
              (Some 2) att.K.width;
            Alcotest.(check (option int)) "height measured at the swap"
              (Some 1) att.K.height;
-           (match Tool_output.decode_from_agent_core att.K.data with
-            | Tool_output.Decoded reference ->
-                Alcotest.(check (result (option string) string))
-                  "retained payload round trips through the blob store"
-                  (Ok (Some (Base64.encode_string png)))
-                  (Tool_blob_store.fetch (Tool_blob_store.create ~base_path:base_dir)
-                     ~sha256:reference.sha256
-                   |> Result.map_error Tool_blob_store.fetch_error_to_string);
-                Alcotest.(check string) "no inline image in marker preview"
-                  "attachment payload" reference.preview;
-                (match Tool_blob_maintenance.run ~scope:Server_tool_blob_scope.scope ~base_path:base_dir ~mode:Tool_blob_maintenance.Observe_only with
-                 | Error error -> Alcotest.fail (Tool_blob_maintenance.error_to_string error)
-                 | Ok report ->
-                     Alcotest.(check int) "chat attachment is a live blob consumer" 1 report.live_references;
-                     Alcotest.(check int) "sent payload is not a deletion candidate" 0 report.candidates_recorded)
-            | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
-                Alcotest.fail "image has no valid durable payload reference");
+           (match Attachment_store.parse_id att.K.id with
+            | Ok sha256 ->
+                Alcotest.(check string) "attachment data is canonical URL"
+                  (Attachment_store.url_of_id att.K.id) att.K.data;
+                let store = Attachment_store.create ~base_path:base_dir in
+                (match Attachment_store.get_bytes_by_sha256 store ~sha256 with
+                 | Ok (Some stored) ->
+                     Alcotest.(check string) "retained payload round trips through Attachment_store"
+                       png stored
+                 | Ok None -> Alcotest.fail "stored attachment missing"
+                 | Error err -> Alcotest.fail (Attachment_store.get_error_to_string err))
+            | Error detail ->
+                Alcotest.failf "image has no canonical Attachment_store id: %s" detail);
            (* The dashboard row exposes the same size without re-measuring:
               the reference cannot be decoded again. *)
            (match K.to_json_array [ user ] with

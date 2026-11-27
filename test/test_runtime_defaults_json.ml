@@ -13,15 +13,19 @@ let test_build_resolved_serializes_defaults_and_routing () =
           ; model = "gpt-4o"
           ; max_context = 128000
           ; is_default = true
+          ; supports_image_input = true
+          ; supports_image_output = false
           }
         ; { id = "anthropic.sonnet"
           ; provider = "Anthropic"
           ; model = "claude-sonnet-4"
           ; max_context = 200000
           ; is_default = false
+          ; supports_image_input = true
+          ; supports_image_output = false
           }
         ]
-    ; media_failover = [ "openai.gpt-4o" ]
+    ; media = { vision_reader = Some "openai.gpt-4o"; image_generator = None }
     ; config_path = Some "/cfg/runtime.toml"
     }
   in
@@ -54,7 +58,7 @@ let test_build_uninitialized_emits_null_not_fabricated_default () =
     ; default_model = None
     ; default_max_context = None
     ; runtimes = []
-    ; media_failover = []
+    ; media = Runtime_schema.empty_media_overrides
     ; config_path = None
     }
   in

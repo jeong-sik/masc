@@ -167,7 +167,7 @@ let handle_filesystem ?prepared_read ?prepared_edit ?prepared_write ctx descript
   | Tool_masc_wiki_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_lane_addon _
-  | Tool_analyze_image | Tool_read_image -> None
+  | Tool_analyze_image | Tool_read_image | Tool_generate_image -> None
 ;;
 
 (* Shell IR mechanics live under the Execute owner; Grep workspace operations
@@ -274,7 +274,7 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
   | Tool_masc_wiki_dispatch
   | Tool_masc_local_runtime_dispatch
   | Tool_lane_addon _
-  | Tool_analyze_image | Tool_read_image -> None
+  | Tool_analyze_image | Tool_read_image | Tool_generate_image -> None
 ;;
 
 let handle_in_process ctx descriptor args =
@@ -663,6 +663,22 @@ let handle_in_process ctx descriptor args =
          ?turn_sandbox_factory:ctx.turn_sandbox_factory
          ?tool_use_id:ctx.tool_use_id
          ?trace_id:ctx.trace_id
+         ?sw:ctx.sw
+         ?clock:ctx.clock
+         ?net:ctx.net
+         ~meta:ctx.meta
+         ~args
+         ())
+  | Tool_generate_image ->
+    let active_runtime =
+      Option.bind
+        (Keeper_meta_contract.runtime_route_of_keeper_name ctx.meta.name)
+        Runtime.get_runtime_by_id
+    in
+    Some
+      (Keeper_generate_image.handle_with_outcome
+         ~base_path:ctx.config.base_path
+         ?active_runtime
          ?sw:ctx.sw
          ?clock:ctx.clock
          ?net:ctx.net

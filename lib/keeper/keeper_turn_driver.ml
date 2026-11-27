@@ -1816,8 +1816,8 @@ let dedupe_runtimes_preserve_order runtimes =
   loop [] [] runtimes
 
 (* A live lane reroutes an image turn over its own candidates only. The lane is
-   the whole list of runtimes this keeper may call; [runtime.media_failover] is
-   the vision tool's fleet and never a turn's dispatch target. When no lane
+   the whole list of runtimes this keeper may call; standalone vision-reader
+   candidates are the vision tool's fleet and never a turn's dispatch target. When no lane
    candidate takes the image, the decision is [No_capable_runtime] and the
    per-attempt projection turns the image into a reading for the runtime that
    runs the turn. The set is held in the same quota and backpressure order the
@@ -3057,7 +3057,7 @@ let run_named
      tried (or the non-vision candidate currently executing). Excluding every
      declared lane candidate up front wrongly suppressed unattempted vision
      candidates sitting later in the lane tail when a non-vision head needed
-     mid-turn [media_failover]. Track only actually attempted runtime IDs (plus
+     mid-turn vision delegation. Track only actually attempted runtime IDs (plus
      the current candidate) and build the attempt's projector against that
      prefix. *)
   let attempted_runtime_ids = ref [] in
@@ -4240,6 +4240,23 @@ let run_named
         Error err, None, Keeper_provider_attempt_effect.No_effect_observed,
         Keeper_attempt_dispatch.Rejected_before_dispatch
       | Ok provider_config ->
+        let provider_config =
+          match provider_config.Llm_provider.Provider_config.output_media with
+          | Some _ -> provider_config
+          | None ->
+            (match (Runtime_instance.effective_media_capabilities runtime).image_output with
+             | Llm_provider.Capabilities.In_turn_openai_chat_modalities
+             | Llm_provider.Capabilities.In_turn_gemini_modalities ->
+               { provider_config with
+                 output_media =
+                   Some Llm_provider.Provider_config.default_image_generation_options
+               }
+             | Llm_provider.Capabilities.No_image_output
+             | Llm_provider.Capabilities.In_turn_openai_responses_tool
+             | Llm_provider.Capabilities.In_turn_codex_item
+             | Llm_provider.Capabilities.In_turn_acp_chunk
+             | Llm_provider.Capabilities.Endpoint_images_api _ -> provider_config)
+        in
         let provider_config =
           match output_contract with
           | Provider_default -> provider_config

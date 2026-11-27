@@ -499,8 +499,25 @@ let adapter_loop_with_transport ?reply_to_message_id ~events ~post_message
     | Model_content_activity _
     | Agent_core_content_block_stop _
     | (Agent_core_thinking_delta _ | Agent_core_thinking_snapshot _)
-    | Agent_core_thinking_signature_delta _
-    | Agent_core_media_delta _ -> continue ()
+    | Agent_core_thinking_signature_delta _ -> continue ()
+    | Agent_core_media_delta { media_type; media_ref; _ } ->
+        (match Keeper_chat_media_store.category_of_media_type media_type with
+         | Keeper_chat_media_store.Image ->
+           let url =
+             if String.starts_with ~prefix:"/" media_ref
+             then
+               match base_url with
+               | Some base when String.trim base <> "" ->
+                 String.trim base ^ media_ref
+               | Some _ | None -> media_ref
+             else media_ref
+           in
+           send_rich_embed (Discord_rest_client.image_embed ~url ~caption:None)
+         | Keeper_chat_media_store.Audio
+         | Keeper_chat_media_store.Midi
+         | Keeper_chat_media_store.Document
+         | Keeper_chat_media_store.Other -> ());
+        continue ()
     | Agent_core_stream_protocol_error error ->
         ignore
           (send_reply
@@ -530,6 +547,8 @@ let adapter_loop_with_transport ?reply_to_message_id ~events ~post_message
     | Tool_context_block _ -> continue ()
     | Link_block { url; title; description; image } ->
         send_rich_embed (Discord_rest_client.link_embed ~url ~title ~description ~image);
+        continue ()
+    | Attachment_emitted _ ->
         continue ()
     | Image_block { url; caption } ->
         send_rich_embed (Discord_rest_client.image_embed ~url ~caption);

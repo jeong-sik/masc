@@ -162,7 +162,7 @@ let warn_catalog_absent_keeper_assignments _resolver_snapshot = ()
    the deployment preflight only asks whether it could. *)
 let exact_output_catalog_for_lanes ~config_path lanes =
   require_explicit_mandatory_exact_output_lanes ~config_path lanes;
-  let runtimes, (_ : string list) = Runtime.runtimes_and_media_failover () in
+  let runtimes = Runtime.get_runtimes () in
   match Runtime.exact_output_resolver_catalog ~exact_output_lane_decls:lanes runtimes with
   | Ok catalog -> lanes, catalog, runtimes
   | Error refusal ->

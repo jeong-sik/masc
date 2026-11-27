@@ -935,6 +935,7 @@ let create_post_with_audience_internal
   ?hearth
   ?thread_id
   ?origin
+  ?(attachment_ids = [])
   ()
   : (post_creation, Post_publication_failure.t) Result.t
   =
@@ -1024,6 +1025,7 @@ let create_post_with_audience_internal
                 ; thread_id
                 ; origin
                 ; closed = None
+                ; attachment_ids
                 })
       in
       match staged with
@@ -1081,14 +1083,14 @@ let create_post_with_audience_internal
 ;;
 
 let create_post_with_audience store ~lookup ~author ~content ?title ?body
-      ~post_kind ?meta_json ?visibility ?ttl_hours ?hearth ?thread_id ?origin () =
+      ~post_kind ?meta_json ?visibility ?ttl_hours ?hearth ?thread_id ?origin ?attachment_ids () =
   create_post_with_audience_internal ~defer_settlement:false store ~lookup ~author
     ~content ?title ?body ~post_kind ?meta_json ?visibility ?ttl_hours ?hearth
-    ?thread_id ?origin ()
+    ?thread_id ?origin ?attachment_ids ()
 ;;
 
 let create_post store ~lookup ~author ~content ?title ?body ~post_kind ?meta_json
-      ?visibility ?ttl_hours ?hearth ?thread_id ?origin ()
+      ?visibility ?ttl_hours ?hearth ?thread_id ?origin ?attachment_ids ()
   =
   create_post_with_audience
     store
@@ -1104,6 +1106,7 @@ let create_post store ~lookup ~author ~content ?title ?body ~post_kind ?meta_jso
     ?hearth
     ?thread_id
     ?origin
+    ?attachment_ids
     ()
   |> Result.map (fun creation -> creation.post)
 ;;

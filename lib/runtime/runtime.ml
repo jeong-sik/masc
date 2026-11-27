@@ -373,7 +373,7 @@ let missing_reference_error
     ~(default_drop : dropped_runtime_route option)
     ~(unavailable_assignments : unavailable_runtime_assignment list)
     ~(dropped_routes : dropped_runtime_route list)
-    ~(dropped_media_failover : string list)
+    ~(dropped_media_overrides : (string * string) list)
     ~(dropped_lane_candidates : dropped_runtime_lane list)
     ~(dropped_lanes : dropped_runtime_lane list)
   =
@@ -381,13 +381,10 @@ let missing_reference_error
     List.concat
       [ List.map unavailable_assignment_label unavailable_assignments
       ; List.map dropped_route_label dropped_routes
-      ; (match dropped_media_failover with
-         | [] -> []
-         | runtime_ids ->
-           [ Printf.sprintf
-               "[runtime].media_failover=[%s]"
-               (String.concat ", " (List.map (Printf.sprintf "%S") runtime_ids))
-           ])
+      ; List.map
+          (fun (key, runtime_id) ->
+             Printf.sprintf "[runtime.media].%s=%S" key runtime_id)
+          dropped_media_overrides
       ; List.map
           (dropped_lane_label ("[" ^ lanes_table ^ "].candidates"))
           dropped_lane_candidates
@@ -429,7 +426,7 @@ type materialized_config =
   ; default_runtime : t
   ; default_route : string
   ; keeper_assignments : (string * string) list
-  ; media_failover : string list
+  ; media : Runtime_schema.media_overrides
   ; lanes : Runtime_lane.t list
   ; lsp_servers : (string * (string * string list)) list
   ; typesafeai : Runtime_schema.typesafeai
@@ -453,7 +450,7 @@ let degrade_loaded_for_missing_catalog
   let { runtimes
       ; default_runtime = configured_default
       ; keeper_assignments = assignments
-      ; media_failover
+      ; media
       ; lanes
       ; _
       } = loaded in
@@ -523,20 +520,21 @@ let degrade_loaded_for_missing_catalog
     [ default_drop ]
     |> List.filter_map Fun.id
   in
-  let kept_media_failover_rev, dropped_media_failover_rev =
-    List.fold_left
-      (fun (kept, dropped) runtime_id ->
-         if is_missing runtime_id
-         then kept, runtime_id :: dropped
-         else runtime_id :: kept, dropped)
-      ([], [])
-      media_failover
+  let check_media_slot key = function
+    | Some runtime_id when is_missing runtime_id -> None, [ key, runtime_id ]
+    | other -> other, []
   in
-  let kept_media_failover = List.rev kept_media_failover_rev
-  and dropped_media_failover = List.rev dropped_media_failover_rev in
+  let kept_vision_reader, dropped_vr = check_media_slot "vision_reader" media.vision_reader in
+  let kept_image_generator, dropped_ig =
+    check_media_slot "image_generator" media.image_generator
+  in
+  let kept_media : Runtime_schema.media_overrides =
+    { vision_reader = kept_vision_reader; image_generator = kept_image_generator }
+  in
+  let dropped_media_overrides = dropped_vr @ dropped_ig in
   let has_routing_references =
     (not (List.is_empty dropped_routes))
-    || (not (List.is_empty dropped_media_failover))
+    || (not (List.is_empty dropped_media_overrides))
     || (not (List.is_empty dropped_lane_candidates))
     || not (List.is_empty dropped_lanes)
   in
@@ -555,7 +553,7 @@ let degrade_loaded_for_missing_catalog
          ~default_drop
          ~unavailable_assignments
          ~dropped_routes
-         ~dropped_media_failover
+         ~dropped_media_overrides
          ~dropped_lane_candidates
          ~dropped_lanes)
   | _ ->
@@ -569,7 +567,7 @@ let degrade_loaded_for_missing_catalog
     Ok
       ( { loaded with
           runtimes = active_runtimes
-        ; media_failover = kept_media_failover
+        ; media = kept_media
         ; lanes = kept_lanes
         }
       , degradation )
@@ -644,7 +642,7 @@ let materialize_config
   in
   let* () =
     validate_runtime_references ~dropped_bindings runtimes lanes
-      (media_failover_references cfg.media_failover)
+      (media_override_references cfg.media)
   in
   let active_exact_output_lanes =
     List.filter (fun (lane : Runtime_schema.exact_output_lane_decl) -> lane.enabled)
@@ -715,7 +713,7 @@ let materialize_config
     ; default_runtime = rt
     ; default_route
     ; keeper_assignments = assignments
-    ; media_failover = cfg.media_failover
+    ; media = cfg.media
     ; lanes
     ; lsp_servers = cfg.lsp_servers
     ; typesafeai = cfg.typesafeai
@@ -761,7 +759,7 @@ let load_list ~config_path =
          ( loaded.runtimes
          , loaded.default_runtime
          , loaded.keeper_assignments
-         , loaded.media_failover
+         , loaded.media
          , loaded.lanes ))
 ;;
 
@@ -784,8 +782,7 @@ type loaded_state =
            by, and [default_runtime] is the runtime that route enters on. *)
   ; runtimes : t list
   ; keeper_assignments : (string * string) list
-  ; media_failover : string list
-  ; declared_media_failover : string list
+  ; media : Runtime_schema.media_overrides
   ; lanes : Runtime_lane.t list
   ; browser : Browser_configuration.t option
   ; machines : Machine_configuration.t option
@@ -807,8 +804,7 @@ let empty_loaded_state : loaded_state =
   ; default_route = None
   ; runtimes = []
   ; keeper_assignments = []
-  ; media_failover = []
-  ; declared_media_failover = []
+  ; media = Runtime_schema.empty_media_overrides
   ; lanes = []
   ; browser = None
   ; machines = None
@@ -1087,7 +1083,6 @@ let lookup_or_build_person_runtime ~zone ~base_path (state : loaded_state) (id :
 
 let set_loaded
     ?startup_degradation
-    ?declared_media_failover
     ~config_path
     ~(exact_output_lane_decls : Runtime_schema.exact_output_lane_decl list)
     (loaded : materialized_config) =
@@ -1099,11 +1094,6 @@ let set_loaded
   let preserve_candidate = preserve_candidate previous in
   let runtimes = List.map preserve_candidate loaded.runtimes in
   let rt = preserve_candidate loaded.default_runtime in
-  let declared_media_failover =
-    match declared_media_failover with
-    | Some declared -> declared
-    | None -> loaded.media_failover
-  in
   (* Before the runtimes are published, so a request on a new runtime is
      admitted under the account allowance it was configured with. *)
   Llm_provider.Provider_admission.publish loaded.admission_allowances;
@@ -1115,8 +1105,7 @@ let set_loaded
     ; default_route = Some loaded.default_route
     ; runtimes
     ; keeper_assignments = loaded.keeper_assignments
-    ; media_failover = loaded.media_failover
-    ; declared_media_failover
+    ; media = loaded.media
     ; lanes = loaded.lanes
     ; browser = Some loaded.browser
     ; machines = Some loaded.machines
@@ -1372,11 +1361,6 @@ let init_default_strict ~config_path =
    same catalog exclusion so a save cannot reactivate an unavailable route. *)
 let prepare_degraded_loaded ~config_path
     ((loaded : materialized_config), exact_output_lane_decls) =
-  (* [\[runtime\].media_failover] as the file declares it, read before the
-     catalog exclusion below drops what it could not resolve. The surface
-     needs both: the admitted list it draws, and what was dropped, which is
-     what stops the route being written back from a list missing them. *)
-  let declared_media_failover = loaded.media_failover in
   let* loaded, startup_degradation =
     match missing_runtime_model_capabilities ~config_path loaded.runtimes with
     | None -> Ok (loaded, None)
@@ -1392,8 +1376,7 @@ let prepare_degraded_loaded ~config_path
   Ok
     ( loaded
     , exact_output_lane_decls
-    , startup_degradation
-    , declared_media_failover )
+    , startup_degradation )
 ;;
 
 let initialize_degraded_loaded ~config_path parsed =
@@ -1402,13 +1385,12 @@ let initialize_degraded_loaded ~config_path parsed =
       (fun failure -> Runtime_config_error (to_diagnostic_text ~config_path failure))
       parsed
   in
-  let* (loaded : materialized_config), exact_output_lane_decls, startup_degradation, declared_media_failover =
+  let* (loaded : materialized_config), exact_output_lane_decls, startup_degradation =
     prepare_degraded_loaded ~config_path parsed
     |> Result.map_error (fun msg -> Runtime_config_error msg)
   in
   set_loaded
     ?startup_degradation
-    ~declared_media_failover
     ~config_path
     ~exact_output_lane_decls
     loaded;
@@ -1504,11 +1486,11 @@ let get_default_route () =
     | None -> default_runtime_id_or_fail ()
 ;;
 
-let runtimes_and_media_failover () =
+let runtimes_and_media () =
   let state = runtime_state () in
   if is_multi_account ()
-  then [], []
-  else state.runtimes, state.media_failover
+  then [], Runtime_schema.empty_media_overrides
+  else state.runtimes, state.media
 ;;
 
 (* Keeper-to-runtime assignment is sourced from [[runtime.assignments]] in
@@ -1540,7 +1522,7 @@ let keeper_assignments () =
 type dashboard_runtime_defaults_snapshot =
   { default_runtime : t option
   ; runtimes : t list
-  ; media_failover : string list
+  ; media : Runtime_schema.media_overrides
   ; config_path : string option
   }
 
@@ -1550,13 +1532,13 @@ let dashboard_runtime_defaults_snapshot () =
   then
     { default_runtime = None
     ; runtimes = []
-    ; media_failover = []
+    ; media = Runtime_schema.empty_media_overrides
     ; config_path = state.config_path
     }
   else
     { default_runtime = state.default_runtime
     ; runtimes = state.runtimes
-    ; media_failover = state.media_failover
+    ; media = state.media
     ; config_path = state.config_path
     }
 ;;
@@ -1816,10 +1798,7 @@ let verifier_exact_lane_readiness () =
     | _ :: _, _ | _, _ :: _ -> Ok lane.slot_rejections)
 ;;
 
-(* [runtime].media_failover: the vision runtimes. Reads the Atomic ref set
-   by [init_default]. *)
-let media_failover () = (runtime_state ()).media_failover
-let declared_media_failover () = (runtime_state ()).declared_media_failover
+let media_overrides () = (runtime_state ()).media
 
 (* [runtime.lanes.<id>] ordered failover candidate lists. Reads the Atomic ref
    set by [init_default]. *)
@@ -1897,8 +1876,7 @@ type dashboard_runtime_resolved_snapshot =
   ; rs_runtimes : t list
   ; rs_assignments : (string * string) list
   ; rs_lanes : Runtime_lane.t list
-  ; rs_media_failover : string list
-  ; rs_declared_media_failover : string list
+  ; rs_media : Runtime_schema.media_overrides
   ; rs_config_path : string option
   ; rs_resolve_assignment : string ->
       [ `Lane of Runtime_lane.t | `Unavailable of missing_catalog_model | `Missing ]
@@ -1913,8 +1891,7 @@ let dashboard_runtime_resolved_snapshot () =
     ; rs_runtimes = []
     ; rs_assignments = []
     ; rs_lanes = []
-    ; rs_media_failover = []
-    ; rs_declared_media_failover = []
+    ; rs_media = Runtime_schema.empty_media_overrides
     ; rs_config_path = state.config_path
     ; rs_resolve_assignment = resolve_assignment_in state
     }
@@ -1924,8 +1901,7 @@ let dashboard_runtime_resolved_snapshot () =
     ; rs_runtimes = state.runtimes
     ; rs_assignments = state.keeper_assignments
     ; rs_lanes = state.lanes
-    ; rs_media_failover = state.media_failover
-    ; rs_declared_media_failover = state.declared_media_failover
+    ; rs_media = state.media
     ; rs_config_path = state.config_path
     ; rs_resolve_assignment = resolve_assignment_in state
     }
@@ -2352,7 +2328,7 @@ let validate_fusion_change ~config_path content =
    [Route_unavailable] rather than [Unknown_route]. The payloads are the ones
    a run records. *)
 let fusion_seat_failure
-    ((loaded : materialized_config), _, startup_degradation, _)
+    ((loaded : materialized_config), _, startup_degradation)
     route
   : Fusion_types.judge_failure option
   =
@@ -2472,7 +2448,7 @@ let validate_fusion_seats ~config_path ~validated content =
    [load_list_internal], and a broken [fusion] must not stop every Keeper turn
    with it; Fusion reports its own section per call. *)
 let exact_slot_body_deadline_gaps_of_validated
-    ((loaded : materialized_config), exact_output_lane_decls, _, _)
+    ((loaded : materialized_config), exact_output_lane_decls, _)
   =
   exact_slot_body_deadline_gaps_of
     ~target_source:(exact_output_target_source ())
@@ -2903,7 +2879,7 @@ let on_disk_text_rebuilds_exact_output_registry ~config_path =
   | Ok text ->
     (match parse_and_validate_config_text ~config_path text with
      | Error (_ : string) -> false
-     | Ok ((loaded : materialized_config), lanes, _, _) ->
+     | Ok ((loaded : materialized_config), lanes, _) ->
        Result.is_ok (prepare_exact_output_replacement ~runtimes:loaded.runtimes ~lanes))
 ;;
 
@@ -3112,7 +3088,7 @@ let commit_config_text_locked_attempt
     content
   =
   let observation = config_observation ~path content in
-  let* (loaded : materialized_config), exact_output_lanes, startup_degradation, declared_media_failover =
+  let* (loaded : materialized_config), exact_output_lanes, startup_degradation =
     validate_save_text ~config_path:path content
     |> Result.map_error (fun detail -> Config_commit_refused detail)
   in
@@ -3128,7 +3104,6 @@ let commit_config_text_locked_attempt
     note_config_text_visible ();
     set_loaded
       ?startup_degradation
-      ~declared_media_failover
       ~config_path:path
       ~exact_output_lane_decls:exact_output_lanes
       loaded
@@ -3321,7 +3296,7 @@ let edit_config_text_if_changed ?runtime_config_path edit =
 
 let validate_config_text ?runtime_config_path content =
   let* path = runtime_config_path_result ?runtime_config_path () in
-  let* (loaded : materialized_config), exact_output_lanes, _degradation, _declared_media_failover =
+  let* (loaded : materialized_config), exact_output_lanes, _degradation =
     validate_save_text ~config_path:path content
   in
   (* The commit's registry decision, without the write, so a preview cannot
@@ -3718,29 +3693,6 @@ let set_runtime_scalar ?runtime_config_path ~key ~runtime_id () =
   Ok (attach_lock_warnings locked.warnings receipt)
 ;;
 
-let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
-  let key = String.trim key in
-  let runtime_ids = List.map String.trim runtime_ids in
-  if String.equal key ""
-  then Error "runtime key must not be empty"
-  else if contains_newline key
-  then Error "runtime key must not contain newlines"
-  else if List.exists (String.equal "") runtime_ids
-  then Error "runtime_ids must not contain empty entries"
-  else if List.exists contains_newline runtime_ids
-  then Error "runtime_ids must not contain newlines"
-  else (
-    let* path = runtime_config_path_result ?runtime_config_path () in
-    let* locked =
-      with_runtime_config_write_lock path (fun () ->
-        let* content = load_file_result path in
-        let next = update_runtime_string_array_text content ~key ~values:runtime_ids in
-        commit_runtime_config_text ~path next)
-    in
-    let* receipt = locked.value in
-    Ok (attach_lock_warnings locked.warnings receipt))
-;;
-
 let runtime_default_text ~runtime_id content =
   runtime_scalar_text ~key:"default" ~runtime_id:(Some runtime_id) content
 ;;
@@ -3934,10 +3886,6 @@ let set_first_run_runtime ?runtime_config_path ?fallback_runtime_ids ?bind_imp ~
   Ok (attach_lock_warnings locked.warnings receipt)
 ;;
 
-let set_runtime_media_failover ?runtime_config_path ~runtime_ids () =
-  set_runtime_string_array ?runtime_config_path ~key:"media_failover" ~runtime_ids ()
-;;
-
 (* Input preparation precedes path/lock effects. Declaration decisions use the
    same fresh text and parsed config under the writer lock, and the commit
    validates the whole edited file before writing it. *)
@@ -4017,18 +3965,6 @@ let remove_runtime_lane_if_revision ?runtime_config_path ~expected_source_revisi
     (fun ~content config ->
       Lane_edit.plan ~content config edit
       |> Result.map_error Lane_edit.error_to_string)
-;;
-
-let set_runtime_media_failover_if_revision ?runtime_config_path ~expected_source_revision ~runtime_ids () =
-  let runtime_ids = List.map String.trim runtime_ids in
-  if List.exists (String.equal "") runtime_ids then
-    Error (Lane_set_invalid "runtime_ids must not contain empty entries")
-  else if List.exists contains_newline runtime_ids then
-    Error (Lane_set_invalid "runtime_ids must not contain newlines")
-  else
-    edit_runtime_lane_source ?runtime_config_path ~expected_source_revision
-      (fun ~content _ ->
-        Ok (update_runtime_string_array_text content ~key:"media_failover" ~values:runtime_ids))
 ;;
 
 let create_runtime_lane ?runtime_config_path ~lane_id ~runtime_ids () =

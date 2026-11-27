@@ -244,7 +244,7 @@ let test_unchanged_save_shares_pressure_cell () =
   check int "full replacement catalog cannot inherit runtime cells" 0
     (List.length (Runtime.exact_output_runtime_observations
       ~origin:(Runtime.Replacement_catalog_targets { path = "fixture" })
-      (fst (Runtime.runtimes_and_media_failover ()))))
+      (Runtime.get_runtimes ())))
 
 let test_rebound_account_observation env ~rate_limited () =
   let module Exact = Agent_core.Exact_output in

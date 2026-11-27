@@ -58,12 +58,22 @@ for line in sys.stdin:
   Unix.chmod command 0o700;
   command, capture
 
-let runtime_config ~reasoning_effort ~command ~fallback ~media = Printf.sprintf {|
+let runtime_config ~reasoning_effort ~command ~fallback ?(include_fallback = true)
+    ?(vision_input = true) ?vision_reader () =
+  let media_section =
+    match vision_reader with
+    | None -> ""
+    | Some id -> Printf.sprintf "[runtime.media]\nvision_reader = %S\n" id
+  in
+  let fallback_section =
+    if include_fallback then
+      Printf.sprintf
+        "[providers.fallback]\nprotocol = \"codex-app-server\"\ncommand = %S\nis-non-interactive = true\n[fallback.vision]\nmax-concurrent = 2\n"
+        fallback
+    else ""
+  in
+  Printf.sprintf {|
 [providers.official]
-protocol = "codex-app-server"
-command = %S
-is-non-interactive = true
-[providers.fallback]
 protocol = "codex-app-server"
 command = %S
 is-non-interactive = true
@@ -73,18 +83,17 @@ max-context = 400000
 tools-support = true
 %s
 [models.vision.capabilities]
-supports-image-input = true
+supports-image-input = %b
 [official.vision]
 max-concurrent = 2
-[fallback.vision]
-max-concurrent = 2
+%s
 [runtime]
 default = "official.vision"
-media_failover = %s
+%s
 [runtime.exact_output_lanes.verifier_exact]
 slots = []
 cli_slots = ["official.vision"]
-|} command fallback reasoning_effort media
+|} command reasoning_effort vision_input fallback_section media_section
 
 let with_fixture mode test =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
@@ -112,9 +121,12 @@ let with_fixture mode test =
     Fs_compat.remove_tree root);
   let command, capture = fixture root ~mode in
   let fallback, fallback_capture = fixture root ~mode:"valid" in
-  let load ?(reasoning_effort = "") media =
+  let load ?(reasoning_effort = "") ?(include_fallback = true) ?(vision_input = true)
+      ?vision_reader () =
     let config_path = Filename.concat root "runtime.toml" in
-    write config_path (runtime_config ~reasoning_effort ~command ~fallback ~media);
+    write config_path
+      (runtime_config ~reasoning_effort ~command ~fallback ~include_fallback
+         ~vision_input ?vision_reader ());
     match Runtime.init_default ~config_path with
     | Ok () -> () | Error detail -> fail detail in
   let run ?runtime_id () = V.run_vision ~base_path:root ?runtime_id
@@ -136,7 +148,7 @@ let records path = In_channel.with_open_bin path In_channel.input_lines
 let request name rows = List.find (fun row -> member "method" row = `String name) rows
 
 let test_response mode = with_fixture mode @@ fun ~root:_ ~load ~run ~execute:_ ~capture ~fallback_capture:_ ->
-  load "[\"official.vision\"]";
+  load ~include_fallback:false ~vision_reader:"official.vision" ();
   (match mode, run () with
    | "valid", V.Vo_ok reading ->
      check string "validated text" "A red pixel." reading.text;
@@ -170,19 +182,19 @@ let test_response mode = with_fixture mode @@ fun ~root:_ ~load ~run ~execute:_ 
     (schema |> member "properties" |> member "text" |> member "type" |> Yojson.Safe.Util.to_string)
 
 let test_selection () = with_fixture "malformed" @@ fun ~root:_ ~load ~run ~execute:_ ~capture ~fallback_capture ->
-  load "[]";
-  (match run () with V.Vo_no_runtime _ -> () | _ -> fail "verifier CLI slot leaked into media candidates");
-  check bool "no undeclared dispatch" false (Sys.file_exists capture);
-  load "[\"official.vision\", \"fallback.vision\"]";
+  load ~vision_input:false ();
+  (match run () with V.Vo_no_runtime _ -> () | _ -> fail "non-vision runtime leaked into vision candidates");
+  check bool "no non-vision dispatch" false (Sys.file_exists capture);
+  load ~vision_reader:"official.vision" ();
   (match run ~runtime_id:"official.vision" () with
    | V.Vo_invalid_structured_response _ -> () | _ -> fail "explicit selection unexpectedly succeeded");
   check bool "explicit runtime never falls back" false (Sys.file_exists fallback_capture);
   (match run () with
-   | V.Vo_ok reading -> check string "declared fallback succeeds" "fallback.vision" reading.runtime_id
-   | _ -> fail "invalid output did not advance to declared fallback")
+   | V.Vo_ok reading -> check string "auto-discovered fallback succeeds" "fallback.vision" reading.runtime_id
+   | _ -> fail "invalid output did not advance to fallback")
 
 let test_transport_failure mode = with_fixture mode @@ fun ~root:_ ~load ~run ~execute ~capture ~fallback_capture ->
-  load "[\"official.vision\", \"fallback.vision\"]";
+  load ~vision_reader:"official.vision" ();
   let outcome = run () in
   (match mode, outcome with
    | "no-account", V.Vo_ok reading ->
@@ -216,7 +228,7 @@ let test_transport_failure mode = with_fixture mode @@ fun ~root:_ ~load ~run ~e
 let test_reasoning_metadata_refusal mode =
   with_fixture mode @@ fun ~root:_ ~load ~run ~execute ~capture ~fallback_capture ->
   let reasoning_effort = "reasoning-effort = \"ultra\"" in
-  load ~reasoning_effort "[\"official.vision\"]";
+  load ~reasoning_effort ~include_fallback:false ~vision_reader:"official.vision" ();
   let execution = execute () in
   check bool "metadata refusal is proven before any effect" true
     (execution.failure_effect_disposition = Tool_result.Proven_pre_effect);
@@ -230,7 +242,7 @@ let test_reasoning_metadata_refusal mode =
        [`String "turn/start"; `String "thread/inject_items"]) rows);
   check bool "single candidate never invokes another account" false
     (Sys.file_exists fallback_capture);
-  load ~reasoning_effort "[\"official.vision\", \"fallback.vision\"]";
+  load ~reasoning_effort ~include_fallback:true ~vision_reader:"official.vision" ();
   (match run () with
    | V.Vo_ok reading -> check string "declared fallback survives metadata refusal"
        "fallback.vision" reading.runtime_id
@@ -254,14 +266,32 @@ print('{}', flush=True)
 |} capture);
   Unix.chmod command 0o700;
   let fallback = Filename.concat root "valid-codex" in
-  let config_text = runtime_config ~reasoning_effort:"" ~command:fallback ~fallback
-      ~media:"[\"claude.vision\", \"fallback.vision\"]" ^ Printf.sprintf {|
+  let config_text = Printf.sprintf {|
 [providers.claude]
 protocol = "claude-code"
 command = %S
 is-non-interactive = true
+[providers.fallback]
+protocol = "codex-app-server"
+command = %S
+is-non-interactive = true
+[models.vision]
+api-name = "vision-request-model"
+max-context = 400000
+tools-support = true
+[models.vision.capabilities]
+supports-image-input = true
 [claude.vision]
-|} command in
+[fallback.vision]
+max-concurrent = 2
+[runtime]
+default = "claude.vision"
+[runtime.media]
+vision_reader = "claude.vision"
+[runtime.exact_output_lanes.verifier_exact]
+slots = []
+cli_slots = ["fallback.vision"]
+|} command fallback in
   let config_path = Filename.concat root "runtime.toml" in
   write config_path config_text;
   (match Runtime.init_default ~config_path with Ok () -> () | Error detail -> fail detail);
@@ -278,19 +308,21 @@ is-non-interactive = true
 
 let test_frame_store_in_pool () =
   with_fixture "valid" @@
-  fun ~root:_ ~load:_ ~run:_ ~execute:_ ~capture:_ ~fallback_capture:_ ->
+  fun ~root ~load:_ ~run:_ ~execute:_ ~capture:_ ~fallback_capture:_ ->
   let bytes = Base64.decode_exn png in
   let handle =
     match V.store_frame ~keeper_name:"vision-fixture" bytes with
     | Ok handle -> handle
     | Error detail -> fail detail
   in
-  let path =
-    Filename.concat (V.frames_dir ~keeper_name:"vision-fixture" ())
-      (Multimodal.Vision_artifact_store.to_string handle)
-  in
-  check bool "frame stored from Eio fiber through installed pool" true
-    (Sys.file_exists path)
+  let store = Attachment_store.create ~base_path:root in
+  let sha256 = Multimodal.Vision_artifact_store.to_string handle in
+  match Attachment_store.get_bytes_by_sha256 store ~sha256 with
+  | Ok (Some stored) ->
+    check string "frame stored in Attachment_store from Eio fiber through installed pool"
+      bytes stored
+  | Ok None -> fail "stored frame missing from Attachment_store"
+  | Error err -> fail (Attachment_store.get_error_to_string err)
 
 let test_cancelled_frame_store_does_not_start () =
   with_fixture "valid" @@

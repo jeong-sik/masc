@@ -495,7 +495,7 @@ let codex_stream_callback ?on_native_tool_progress ?on_native_tool_completion ?r
           record_usage_windows ~quota_scope report
         | Runtime_codex_app_server.Usage_reported { thread_id; turn_id; model; frame } ->
           report_usage ~thread_id ~turn_id ~model frame
-        | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _ | Dynamic_tool_finished _ | Tool_delivery_closed _
+        | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Media_output _ | Dynamic_tool_started _ | Dynamic_tool_finished _ | Tool_delivery_closed _
         | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Elicitation_cancelled _
         | Compaction_observed | Turn_finished _ -> ())
   | _ ->
@@ -574,6 +574,28 @@ let codex_stream_callback ?on_native_tool_progress ?on_native_tool_completion ?r
           if key = None then Hashtbl.remove text_indexes None
         | Runtime_codex_app_server.Thinking_completed {item_id; part} ->
           Option.iter stop_content (Hashtbl.find_opt thinking_indexes (item_id, part))
+        | Runtime_codex_app_server.Media_output media ->
+          let index = !next_tool_index in
+          incr next_tool_index;
+          emit
+            (Agent_core.Types.ContentBlockStart
+               { index
+               ; content_type = "image"
+               ; tool_id = None
+               ; tool_name = None
+               });
+          emit
+            (Agent_core.Types.ContentBlockDelta
+               { index
+               ; delta =
+                   Agent_core.Types.MediaDelta
+                     { media_type = media.mime_type
+                     ; source =
+                         Llm_provider.Types.Base64
+                           (Base64.encode_string media.data_bytes)
+                     }
+               });
+          emit (Agent_core.Types.ContentBlockStop { index })
         | Runtime_codex_app_server.Dynamic_tool_started
             { call_id; tool_name; arguments } ->
           Keeper_official_client_text_stream.tool_row text_stream;
@@ -1738,7 +1760,7 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
               | Runtime_codex_app_server.Counted { last = Context_estimate _; _ }
               | Context_window_filled _ -> settled_held_context := [ system_receipt ]
               | Counted { last = Request_usage _; _ } -> ())
-           | Native_tool_progress _ | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Dynamic_tool_started _
+           | Native_tool_progress _ | Turn_started _ | Text_delta _ | Thinking_delta _ | Text_completed _ | Thinking_completed _ | Media_output _ | Dynamic_tool_started _
            | Dynamic_tool_finished _ | Elicitation_cancelled _
            | Usage_windows_reported _ | Turn_finished _ -> ());
           Option.iter (fun observe -> observe event) observe_stream
@@ -1978,12 +2000,28 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
            , Some (request_context_of_last_usage last) )
          | Some Runtime_codex_app_server.Thread_count_replaced | None -> None, None, None
        in
+       let media_blocks =
+         List.map
+           (fun (media : Runtime_codex_app_server.media_output) ->
+              Agent_core.Types.Image
+                { media_type = media.mime_type
+                ; source =
+                    Llm_provider.Types.Base64
+                      (Base64.encode_string media.data_bytes)
+                })
+           turn.media_outputs
+       in
+       let text_blocks =
+         if String.equal turn.text "" && media_blocks <> []
+         then []
+         else [ Agent_core.Types.Text turn.text ]
+       in
        let response =
          { Agent_core.Types.id = turn.turn_id
          ; model = turn.model
          ; unreadable_tool_uses = []
          ; stop_reason = EndTurn
-         ; content = [ Text turn.text ]
+         ; content = text_blocks @ media_blocks
          ; usage = spend
          ; telemetry =
              Some

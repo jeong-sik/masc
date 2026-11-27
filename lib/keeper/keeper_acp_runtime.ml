@@ -1713,6 +1713,35 @@ let make_stream_projection
           @ [ Agent_core.Types.ContentBlockDelta
                 { index = idx; delta = Agent_core.Types.ThinkingDelta delta }
             ])
+    | Acp.Media_output media ->
+      observe_activity ();
+      agent_message_is_arriving (fun native_stops ->
+          let prefix =
+            ensure_message_started_locked ()
+            @ close_open_thought_locked ()
+            @ close_open_text_locked ()
+          in
+          let idx = alloc_index_locked () in
+          native_stops
+          @ prefix
+          @ [ Agent_core.Types.ContentBlockStart
+                { index = idx
+                ; content_type = "image"
+                ; tool_id = None
+                ; tool_name = None
+                }
+            ; Agent_core.Types.ContentBlockDelta
+                { index = idx
+                ; delta =
+                    Agent_core.Types.MediaDelta
+                      { media_type = media.mime_type
+                      ; source =
+                          Llm_provider.Types.Base64
+                            (Base64.encode_string media.data_bytes)
+                      }
+                }
+            ; Agent_core.Types.ContentBlockStop { index = idx }
+            ])
     | Acp.Usage_updated
         { prompt_tokens
         ; completion_tokens
@@ -1771,7 +1800,7 @@ let make_stream_projection
        | Some completion ->
          finish_native_tool ?anonymous_idx ~tool_call_id completion)
     | Acp.Tool_call_updated
-        { tool_call_id; title; kind = _; status; raw_input; raw_output = _; identity } ->
+        { tool_call_id; title; kind = _; status; raw_input; raw_output = _; media_outputs; identity } ->
       observe_activity ();
       (match identity with
        | Some id ->
@@ -1798,6 +1827,36 @@ let make_stream_projection
           record_native_tool_started ~tool_call_id ~title:fallback_title ~name ~raw_input
         | Some (Acp.Mcp_tool _ | Acp.Managed_mcp_schema_read _) | None -> None
       in
+      List.iter
+        (fun (media : Acp.media_output) ->
+           agent_message_is_arriving (fun native_stops ->
+             let prefix =
+               ensure_message_started_locked ()
+               @ close_open_thought_locked ()
+               @ close_open_text_locked ()
+             in
+             let idx = alloc_index_locked () in
+             native_stops
+             @ prefix
+             @ [ Agent_core.Types.ContentBlockStart
+                   { index = idx
+                   ; content_type = "image"
+                   ; tool_id = None
+                   ; tool_name = None
+                   }
+               ; Agent_core.Types.ContentBlockDelta
+                   { index = idx
+                   ; delta =
+                       Agent_core.Types.MediaDelta
+                         { media_type = media.mime_type
+                         ; source =
+                             Llm_provider.Types.Base64
+                               (Base64.encode_string media.data_bytes)
+                         }
+                   }
+               ; Agent_core.Types.ContentBlockStop { index = idx }
+               ]))
+        media_outputs;
       (match status with
        | None -> ()
        | Some st ->
@@ -3385,6 +3444,7 @@ let run_without_lifecycle
            | None -> ())
         | Acp.Text_delta _
         | Acp.Thought_delta _
+        | Acp.Media_output _
         | Acp.Tool_call_started _
         | Acp.Tool_call_updated _
         | Acp.Usage_updated _
@@ -3963,6 +4023,22 @@ let run_without_lifecycle
              ; vendor_total_tokens = Some prompt_res.usage.total_tokens
              }
          | Some _ | None -> ());
+        let media_blocks =
+          List.map
+            (fun (media : Acp.media_output) ->
+               Agent_core.Types.Image
+                 { media_type = media.mime_type
+                 ; source =
+                     Llm_provider.Types.Base64
+                       (Base64.encode_string media.data_bytes)
+                 })
+            prompt_res.media_outputs
+        in
+        let text_blocks =
+          if String.equal prompt_res.text "" && media_blocks <> []
+          then []
+          else [ Agent_core.Types.Text prompt_res.text ]
+        in
         let content =
           (if String.trim prompt_res.thought <> ""
            then
@@ -3970,7 +4046,8 @@ let run_without_lifecycle
                  { signature = None; content = prompt_res.thought }
              ]
            else [])
-          @ [ Agent_core.Types.Text prompt_res.text ]
+          @ text_blocks
+          @ media_blocks
         in
         let response : Agent_core.Types.api_response =
           { id = turn_id

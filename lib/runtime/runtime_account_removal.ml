@@ -12,7 +12,10 @@ type change =
       { lane : string
       ; runtime : string
       }
-  | Vision_runtime of string
+  | Media_override of
+      { key : string
+      ; runtime : string
+      }
   | Assignment of
       { keeper : string
       ; runtime : string
@@ -189,7 +192,15 @@ let remove text ~id =
       Error (Exact_lane_emptied (S.exact_lane_key lane.owner))
     | None -> Ok ()
   in
-  let vision_gone = List.filter is_runtime config.media_failover in
+  let media_gone =
+    (match config.media.vision_reader with
+     | Some r when is_runtime r -> [ "vision_reader", r ]
+     | Some _ | None -> [])
+    @
+    (match config.media.image_generator with
+     | Some r when is_runtime r -> [ "image_generator", r ]
+     | Some _ | None -> [])
+  in
   let assignments = List.filter (fun (_, r) -> routes_here r) config.keeper_assignments in
   (* Only explicit bindings have source tables to remove. A model-set's
      bindings disappear with its provider, while its shared declaration and
@@ -248,10 +259,20 @@ let remove text ~id =
       exact_lanes
   in
   let* edited =
-    if vision_gone = [] then Ok edited
+    if media_gone = [] then Ok edited
+    else if List.mem [ "runtime"; "media" ] (table_paths edited)
+    then
+      Ok
+        (List.fold_left
+           (fun text (key, _) ->
+              E.edit_table_scalar text ~path:"runtime.media" ~key ~value:None)
+           edited
+           media_gone)
     else
-      edit_list edited ~table:[ "runtime" ] ~key:"media_failover"
-        ~values:(others config.media_failover) ~what:"[runtime].media_failover"
+      Error
+        (Unsupported_layout
+           "[runtime.media] is not written as its own [runtime.media] table, so it cannot be \
+            edited here; edit it with the editor")
   in
   let edited =
     List.fold_left
@@ -271,19 +292,30 @@ let remove text ~id =
         (fun ((lane : S.exact_output_lane_decl), _, _, gone) ->
            List.map (fun runtime -> Exact_lane_slot { lane = S.exact_lane_key lane.owner; runtime }) gone)
         exact_lanes
-    @ List.map (fun runtime -> Vision_runtime runtime) vision_gone
+    @ List.map (fun (key, runtime) -> Media_override { key; runtime }) media_gone
     @ List.map (fun (keeper, runtime) -> Assignment { keeper; runtime }) assignments
   in
   let* after = Result.map_error (fun errors -> Rejected errors) (Runtime_toml.parse_string edited) in
   (* What the text says now has to be the original less exactly [changes]. A
      key the line editor did not reach -- an assignment written inline, a
-     vision list written as a dotted key -- shows up here rather than in a
+     media override written as a dotted key -- shows up here rather than in a
      saved file. *)
   let expected_lane (lane : S.lane_decl) =
     { lane with candidate_ids = others lane.candidate_ids }
   in
   let expected_exact (lane : S.exact_output_lane_decl) =
     { lane with slot_ids = others lane.slot_ids; cli_slot_ids = others lane.cli_slot_ids }
+  in
+  let expected_media : S.media_overrides =
+    { vision_reader =
+        (match config.media.vision_reader with
+         | Some r when is_runtime r -> None
+         | other -> other)
+    ; image_generator =
+        (match config.media.image_generator with
+         | Some r when is_runtime r -> None
+         | other -> other)
+    }
   in
   let kept_assignments = List.filter (fun (_, r) -> not (routes_here r)) config.keeper_assignments in
   let as_expected =
@@ -298,7 +330,7 @@ let remove text ~id =
          S.equal_exact_output_lane_decl
          (List.map expected_exact config.exact_output_lane_decls)
          after.exact_output_lane_decls
-    && after.media_failover = others config.media_failover
+    && S.equal_media_overrides after.media expected_media
     && after.keeper_assignments = kept_assignments
   in
   if as_expected

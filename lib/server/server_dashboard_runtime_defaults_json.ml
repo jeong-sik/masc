@@ -23,6 +23,8 @@ type runtime_entry =
   ; model : string
   ; max_context : int
   ; is_default : bool
+  ; supports_image_input : bool
+  ; supports_image_output : bool
   }
 
 type resolved =
@@ -30,7 +32,7 @@ type resolved =
   ; default_model : string option
   ; default_max_context : int option
   ; runtimes : runtime_entry list
-  ; media_failover : string list
+  ; media : Runtime_schema.media_overrides
   ; config_path : string option
   }
 
@@ -51,10 +53,27 @@ let runtime_entry_json (e : runtime_entry) : Yojson.Safe.t =
     ; "model", `String e.model
     ; "max_context", `Int e.max_context
     ; "is_default", `Bool e.is_default
+    ; "supports_image_input", `Bool e.supports_image_input
+    ; "supports_image_output", `Bool e.supports_image_output
+    ; ( "capabilities"
+      , `Assoc
+          [ "supports_image_input", `Bool e.supports_image_input
+          ; "supports_image_output", `Bool e.supports_image_output
+          ; "vision_input", `Bool e.supports_image_input
+          ; "image_output", `Bool e.supports_image_output
+          ] )
+    ]
+;;
+
+let media_overrides_json (media : Runtime_schema.media_overrides) : Yojson.Safe.t =
+  `Assoc
+    [ "vision_reader", string_opt_json media.vision_reader
+    ; "image_generator", string_opt_json media.image_generator
     ]
 ;;
 
 let build ~generated_at_iso (r : resolved) : Yojson.Safe.t =
+  let media_json = media_overrides_json r.media in
   `Assoc
     [ "generated_at_iso", `String generated_at_iso
     ; "dashboard_surface", `String "/api/v1/dashboard/runtime-defaults"
@@ -64,10 +83,8 @@ let build ~generated_at_iso (r : resolved) : Yojson.Safe.t =
     ; "default_model", string_opt_json r.default_model
     ; "default_max_context", int_opt_json r.default_max_context
     ; "runtimes", `List (List.map runtime_entry_json r.runtimes)
-    ; ( "model_routing"
-      , `Assoc
-          [ "media_failover", `List (List.map (fun s -> `String s) r.media_failover)
-          ] )
+    ; "media", media_json
+    ; "model_routing", `Assoc [ "media", media_json ]
     ]
 ;;
 
@@ -75,11 +92,16 @@ let resolved_of_snapshot
     (snapshot : Runtime.dashboard_runtime_defaults_snapshot) : resolved =
   let default = snapshot.default_runtime in
   let entry (rt : Runtime_instance.t) : runtime_entry =
+    let media_caps = Runtime_instance.effective_media_capabilities rt in
     { id = rt.id
     ; provider = rt.provider.display_name
     ; model = rt.model.api_name
     ; max_context = Runtime_instance.max_context_of_runtime rt
     ; is_default = rt.binding.is_default
+    ; supports_image_input =
+        Llm_provider.Capabilities.supports_image_input_of_media media_caps
+    ; supports_image_output =
+        Llm_provider.Capabilities.supports_image_output_of_media media_caps
     }
   in
   { default_runtime_id = Option.map (fun (rt : Runtime_instance.t) -> rt.id) default
@@ -87,7 +109,7 @@ let resolved_of_snapshot
   ; default_max_context =
       Option.map Runtime_instance.max_context_of_runtime default
   ; runtimes = List.map entry snapshot.runtimes
-  ; media_failover = snapshot.media_failover
+  ; media = snapshot.media
   ; config_path = snapshot.config_path
   }
 ;;

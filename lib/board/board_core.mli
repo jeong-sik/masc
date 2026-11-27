@@ -351,6 +351,7 @@ val create_post
   -> ?hearth:string
   -> ?thread_id:string
   -> ?origin:post_origin
+  -> ?attachment_ids:string list
   -> unit
   -> (post, Post_publication_failure.t) Result.t
 
@@ -390,6 +391,7 @@ val create_post_with_audience
   -> ?hearth:string
   -> ?thread_id:string
   -> ?origin:post_origin
+  -> ?attachment_ids:string list
   -> unit
   -> (post_creation, Post_publication_failure.t) Result.t
 (** Create a post only after its routing audience has been validated, and
@@ -481,6 +483,7 @@ val add_comment
   -> content:string
   -> ?parent_id:string
   -> ?ttl_hours:int
+  -> ?attachment_ids:string list
   -> unit
   -> (comment, board_error) Result.t
 
@@ -493,6 +496,7 @@ val add_comment_with_audience
   -> content:string
   -> ?parent_id:string
   -> ?ttl_hours:int
+  -> ?attachment_ids:string list
   -> unit
   -> (comment_creation, board_error) Result.t
 (** Validate and freeze comment routing before the Board mutation, returning

@@ -542,6 +542,7 @@ let explicit_metadata : (string * metadata) list =
        needed it while an operator could still call it. *)
     ("keeper_analyze_image", keeper_shard_read);
     ("keeper_image_read", keeper_shard_read);
+    ("keeper_generate_image", keeper_shard_read);
     (* The browser host tools are the browser surface for MCP callers too;
        a browser Add-on's own export is called only by this host. *)
     ("masc_browser_tabs", public_keeper_shard_read);

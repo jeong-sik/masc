@@ -177,8 +177,146 @@ let chat_stream_contract_json ~trace_lookup_available ~trace_block
                 @ stream_delivery_receipt_field "no_delivery_receipt"
                 @ base_fields)))
 
-let message_to_json ?(omit_stream_contract = false) ~trace_lookup_available
+let att_id_of_attachment (att : attachment) =
+  let id_trimmed = String.trim att.id in
+  if Result.is_ok (Attachment_store.parse_id id_trimmed)
+  then Some id_trimmed
+  else
+    let data = String.trim att.data in
+    let prefix = Attachment_store.url_prefix in
+    let plen = String.length prefix in
+    if String.starts_with ~prefix data
+    then
+      let rest = String.sub data plen (String.length data - plen) in
+      let raw_id =
+        match String.index_opt rest '?' with
+        | Some idx -> String.sub rest 0 idx
+        | None -> rest
+      in
+      if Result.is_ok (Attachment_store.parse_id raw_id) then Some raw_id else None
+    else None
+
+let attachment_json_of_meta (meta : Attachment_store.meta) : Yojson.Safe.t =
+  let url = Attachment_store.url_of_id meta.id in
+  let kind = Attachment_store.media_kind_to_string meta.kind in
+  let name = Option.value meta.filename ~default:meta.id in
+  let base_fields =
+    match Attachment_store.meta_to_wire_json meta with
+    | `Assoc fields -> fields
+    | _ -> []
+  in
+  `Assoc
+    (base_fields
+     @ [ "type", `String kind
+       ; "name", `String name
+       ; "size", `Int meta.bytes
+       ; "data", `String url
+       ])
+
+let attachment_json ?base_dir (att : attachment) : Yojson.Safe.t =
+  match base_dir, att_id_of_attachment att with
+  | Some bp, Some att_id ->
+    (match Attachment_store.get_meta (Attachment_store.create ~base_path:bp) ~id:att_id with
+     | Ok (Some meta) -> attachment_json_of_meta meta
+     | Ok None | Error _ ->
+       let url = Attachment_store.url_of_id att_id in
+       let kind =
+         let t = String.lowercase_ascii (String.trim att.att_type) in
+         if t = "image" || t = "audio" || t = "document" then t
+         else if String.starts_with ~prefix:"image/" (String.lowercase_ascii att.mime_type) then "image"
+         else if String.starts_with ~prefix:"audio/" (String.lowercase_ascii att.mime_type) then "audio"
+         else "document"
+       in
+       `Assoc
+         ([ "id", `String att_id
+          ; "attachment_id", `String att_id
+          ; "url", `String url
+          ; "type", `String att.att_type
+          ; "kind", `String kind
+          ; "name", `String att.name
+          ; "filename", (if String.trim att.name = "" then `Null else `String att.name)
+          ; "size", `Int att.size
+          ; "bytes", `Int att.size
+          ; "mime_type", `String att.mime_type
+          ; "data", `String url
+          ]
+          @ (match att.width, att.height with
+             | Some width, Some height ->
+               [ "width", `Int width; "height", `Int height ]
+             | _ -> [])))
+  | None, Some att_id ->
+    let url = Attachment_store.url_of_id att_id in
+    `Assoc
+      ([ "id", `String att_id
+       ; "attachment_id", `String att_id
+       ; "url", `String url
+       ; "type", `String att.att_type
+       ; "kind", `String (if att.att_type = "" then "document" else att.att_type)
+       ; "name", `String att.name
+       ; "filename", (if String.trim att.name = "" then `Null else `String att.name)
+       ; "size", `Int att.size
+       ; "bytes", `Int att.size
+       ; "mime_type", `String att.mime_type
+       ; "data", `String att.data
+       ]
+       @ (match att.width, att.height with
+          | Some width, Some height -> [ "width", `Int width; "height", `Int height ]
+          | _ -> []))
+  | _, None ->
+    `Assoc
+      ([ "id", `String att.id
+       ; "type", `String att.att_type
+       ; "name", `String att.name
+       ; "size", `Int att.size
+       ; "mime_type", `String att.mime_type
+       ; "data", `String att.data
+       ]
+       @ (match att.width, att.height with
+          | Some width, Some height -> [ "width", `Int width; "height", `Int height ]
+          | _ -> []))
+
+let inferred_attachment_ids_from_row ~(blocks : chat_block list) (m : chat_message) =
+  let from_blocks =
+    match blocks with
+    | [] -> []
+    | bs ->
+      Attachment_store.extract_att_ids
+        (Yojson.Safe.to_string (Keeper_chat_blocks.blocks_to_yojson bs))
+  in
+  let from_content =
+    match m.role with
+    | Role.Tool | Role.Assistant -> Attachment_store.extract_att_ids m.content
+    | Role.User | Role.System | Role.Request_failure -> []
+  in
+  let seen = Hashtbl.create 8 in
+  List.filter
+    (fun id ->
+       if Hashtbl.mem seen id then false
+       else (Hashtbl.add seen id (); true))
+    (from_blocks @ from_content)
+
+let message_to_json ?base_dir ?(omit_stream_contract = false) ~trace_lookup_available
     ~trace_block (m : chat_message) : Yojson.Safe.t =
+  let effective_blocks = blocks_with_trace_block ~trace_block m in
+  let explicit_atts = Option.value m.attachments ~default:[] in
+  let explicit_att_ids =
+    List.filter_map att_id_of_attachment explicit_atts
+  in
+  let derived_atts =
+    match base_dir with
+    | None -> []
+    | Some bp ->
+      let store = Attachment_store.create ~base_path:bp in
+      inferred_attachment_ids_from_row ~blocks:effective_blocks m
+      |> List.filter (fun id -> not (List.exists (String.equal id) explicit_att_ids))
+      |> List.filter_map (fun id ->
+           match Attachment_store.get_meta store ~id with
+           | Ok (Some meta) -> Some (attachment_json_of_meta meta)
+           | Ok None | Error _ -> None)
+  in
+  let all_att_json =
+    List.map (attachment_json ?base_dir) explicit_atts @ derived_atts
+  in
   `Assoc
     ([ ("id", `String m.id);
        ("role", `String (Role.to_label m.role));
@@ -196,26 +334,9 @@ let message_to_json ?(omit_stream_contract = false) ~trace_lookup_available
        @ Json_util.string_field_if_present "external_message_id" m.external_message_id
        @ Json_util.string_field_if_present "workspace_id" m.workspace_id
        @ speaker_fields m.speaker
-       @ (match m.attachments with
-          | None | Some [] -> []
-          | Some atts ->
-              (* History carries dimensions and a small blob marker;
-                 image payloads are fetched only when requested. *)
-              let att_json = List.map (fun (att : attachment) ->
-                `Assoc ([
-                  ("id", `String att.id);
-                  ("type", `String att.att_type);
-                  ("name", `String att.name);
-                  ("size", `Int att.size);
-                  ("mime_type", `String att.mime_type);
-                  ("data", `String att.data);
-                ]
-                @ (match (att.width, att.height) with
-                   | Some width, Some height ->
-                     [ ("width", `Int width); ("height", `Int height) ]
-                   | _ -> []))
-              ) atts in
-              [("attachments", `List att_json)])
+       @ (match all_att_json with
+          | [] -> []
+          | att_json -> [ ("attachments", `List att_json) ])
        @ audio_fields m.audio
        @ (if omit_stream_contract then [] else
           [ ("stream_contract",
@@ -223,7 +344,7 @@ let message_to_json ?(omit_stream_contract = false) ~trace_lookup_available
                ~trace_lookup_available
                ~trace_block m )
           ])
-       @ blocks_fields_of_list (blocks_with_trace_block ~trace_block m)
+       @ blocks_fields_of_list effective_blocks
        @ Json_util.string_field_if_present "turn_ref"
            (Option.map Ids.Turn_ref.to_string m.turn_ref)
        @ (match m.role, m.failure_kind with

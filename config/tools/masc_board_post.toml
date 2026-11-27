@@ -61,6 +61,15 @@ type = "string"
 description = "Optional file name shown beside the attachment and used for its download. Not empty, one line, no path separators, at most 255 bytes."
 
 [[params]]
+name = "attachment_ids"
+type = "array"
+description = "Optional list of canonical attachment IDs (att_<64hex>) from the unified attachment store. Each attachment is validated and promoted to durable retention."
+
+[params.items]
+type = "string"
+pattern = "^att_[0-9a-f]{64}$"
+
+[[params]]
 name = "sources"
 type = "array"
 description = """
@@ -218,6 +227,15 @@ description = "Existing artifact content hash; omit when url is set"
 name = "name"
 type = "string"
 description = "Optional file name shown beside the attachment and used for its download. Not empty, one line, no path separators, at most 255 bytes."
+
+[[keeper_projection.params]]
+name = "attachment_ids"
+type = "array"
+description = "Optional list of canonical attachment IDs (att_<64hex>) from the unified attachment store."
+
+[keeper_projection.params.items]
+type = "string"
+pattern = "^att_[0-9a-f]{64}$"
 
 [[keeper_projection.params]]
 name = "sources"

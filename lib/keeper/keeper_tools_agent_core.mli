@@ -75,13 +75,21 @@ type listing_placement =
 
 type image_admission = Image_input_admitted | Image_input_unavailable
 
-val descriptor_admitted : image_admission -> Keeper_tool_descriptor.t -> bool
+val descriptor_admitted :
+  ?image_generation_admitted:bool ->
+  image_admission ->
+  Keeper_tool_descriptor.t ->
+  bool
 (** One typed descriptor rule for constructing and independently checking a
-    candidate's model surface. Only the native image reader requires admitted
-    image input; delegated analysis retains its existing availability. *)
+    candidate's model surface:
+    - [Tool_read_image] requires [Image_input_admitted];
+    - [Tool_analyze_image] is admitted only on [Image_input_unavailable];
+    - [Tool_generate_image] requires [image_generation_admitted = true] (defaults
+      to [true] for callers checking image input admission alone). *)
 
 type model_tool_surface = private
   { image_admission : image_admission
+  ; image_generation_admitted : bool
   ; tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
   ; on_demand_tool_names : string list
@@ -89,7 +97,8 @@ type model_tool_surface = private
   ; listing : listing_placement
   }
 (** One selected materialized runtime's model view. The admission is captured
-    from [Runtime_agent.runtime_accepts_image_input], without rereading a
+    from [Runtime_agent.runtime_accepts_image_input] and
+    [Runtime_agent.image_generator_candidates], without rereading a
     mutable runtime table. Handler, sandbox and effect state stay bundle-owned. *)
 
 val assemble_model_tool_surface :
@@ -100,6 +109,9 @@ val assemble_model_tool_surface :
   result_bounds:(string * int) list ->
   listing:listing_placement ->
   model_tool_surface
+
+val with_image_generation_admitted :
+  bool -> model_tool_surface -> model_tool_surface
 (** Internal bundle projection data assembly. This constructor grants no tool
     authority and is not an operator policy setting. The bundle supplies its
     already captured admission and the views selected under that same value.

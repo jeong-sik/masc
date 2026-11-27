@@ -215,9 +215,9 @@ let () =
               expect_error "rename-from-default"
                 ~message:{|"default" names another route, not a lane|}
                 {|{"lane":"default","action":"rename","to":"primary"}|};
-              expect_error "rename-to-media-failover"
-                ~message:{|"media_failover" names another route, not a lane|}
-                {|{"lane":"runpod_mtp.qwen","action":"rename","to":"media_failover"}|})
+              expect_error "rename-to-default"
+                ~message:{|"default" names another route, not a lane|}
+                {|{"lane":"runpod_mtp.qwen","action":"rename","to":"default"}|})
         ; Alcotest.test_case "drop names one slot of an exact lane" `Quick
             (fun () ->
               check_case "drop"

@@ -289,6 +289,7 @@ let test_sweep_drains_a_post_larger_than_two_comment_batches () =
       ; expires_at = 0.0
       ; votes_up = 0
       ; votes_down = 0
+      ; attachment_ids = []
       }
     in
     let comment_key = Comment_id.to_string comment.id in

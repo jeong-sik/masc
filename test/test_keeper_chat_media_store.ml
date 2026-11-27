@@ -17,22 +17,21 @@ let with_temp_base f =
   let base = Filename.temp_dir "media_store_test" "" in
   f base
 
-let read_file path =
-  let ic = open_in_bin path in
-  Fun.protect
-    ~finally:(fun () -> close_in_noerr ic)
-    (fun () -> really_input_string ic (in_channel_length ic))
-
 let write_file path data =
   let oc = open_out_bin path in
   Fun.protect
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc data)
 
-let expected_token ~media_type data =
-  Agent_core_sha256.(
-    digest_string (String.lowercase_ascii (String.trim media_type) ^ "\000" ^ data)
-    |> to_hex)
+let expected_token data =
+  Agent_core_sha256.(digest_string data |> to_hex)
+
+let expected_url data =
+  "/api/v1/attachments/att_" ^ expected_token data
+
+let valid_png suffix = "\x89PNG\r\n\x1a\n" ^ suffix
+let valid_mp3 suffix = "ID3\x03\x00\x00\x00" ^ suffix
+let valid_midi suffix = "MThd\x00\x00\x00\x06" ^ suffix
 
 let persist_ok ~base_dir ~media_type ~data =
   match M.persist_result ~base_dir ~media_type ~data with
@@ -41,39 +40,43 @@ let persist_ok ~base_dir ~media_type ~data =
 
 let test_persist_round_trip () =
   with_temp_base (fun base_dir ->
-    let data = "\137PNG\r\n fake-image-bytes \000\255" in
+    let data = valid_png "fake-image-bytes \000\255" in
     let token, url = persist_ok ~base_dir ~media_type:"image/png" ~data in
     Alcotest.(check string)
-      "url is /api/v1/media/<token>"
-      ("/api/v1/media/" ^ token)
+      "url is /api/v1/attachments/att_<token>"
+      ("/api/v1/attachments/att_" ^ token)
       url;
     Alcotest.(check bool) "token has valid shape" true (M.valid_token token);
     Alcotest.(check int) "token is SHA-256 hex" 64 (String.length token);
-    match M.file_path_of_token ~base_dir ~token with
-    | None -> Alcotest.fail "persisted media not found by token"
-    | Some path ->
-      Alcotest.(check string) "round-trip bytes preserved" data (read_file path);
-      Alcotest.(check string)
-        "content-type derived from stored extension"
-        "image/png"
-        (M.content_type_of_path path))
+    let store = Attachment_store.create ~base_path:base_dir in
+    match Attachment_store.get_bytes_by_sha256 store ~sha256:token with
+    | Ok (Some stored) ->
+      Alcotest.(check string) "round-trip bytes preserved" data stored
+    | Ok None -> Alcotest.fail "persisted media not found in Attachment_store"
+    | Error err -> Alcotest.fail (Attachment_store.get_error_to_string err))
 
 let test_content_addressed_dedup () =
   with_temp_base (fun base_dir ->
-    let data = "identical-payload-bytes" in
+    let data = valid_mp3 "identical-payload-bytes" in
     let t1, _ = persist_ok ~base_dir ~media_type:"audio/mpeg" ~data in
     let t2, _ = persist_ok ~base_dir ~media_type:"audio/mpeg" ~data in
     Alcotest.(check string) "identical payload dedups to one token" t1 t2)
 
 let test_same_bytes_different_media_type_get_distinct_tokens () =
   with_temp_base (fun base_dir ->
-    let data = "same-bytes" in
-    let image_token, _ = persist_ok ~base_dir ~media_type:"image/png" ~data in
-    let audio_token, _ = persist_ok ~base_dir ~media_type:"audio/mpeg" ~data in
+    let png = valid_png "sample" in
+    let mp3 = valid_mp3 "sample" in
+    let image_token, image_url = persist_ok ~base_dir ~media_type:"image/png" ~data:png in
+    let audio_token, audio_url = persist_ok ~base_dir ~media_type:"audio/mpeg" ~data:mp3 in
     Alcotest.(check bool)
-      "different media types do not share one extensionless token"
+      "distinct binary payloads get distinct attachment tokens"
       true
-      (not (String.equal image_token audio_token)))
+      (not (String.equal image_token audio_token));
+    Alcotest.(check string) "image canonical url" (expected_url png) image_url;
+    Alcotest.(check string) "audio canonical url" (expected_url mp3) audio_url;
+    (* Mislabeled declared MIME falls back to magic-byte sniffing instead of dropping. *)
+    let sniffed_token, _ = persist_ok ~base_dir ~media_type:"audio/mpeg" ~data:png in
+    Alcotest.(check string) "mislabeled png dedups to verified png sha256" image_token sniffed_token)
 
 let test_unknown_token_absent () =
   with_temp_base (fun base_dir ->
@@ -127,23 +130,26 @@ let test_media_type_mapping () =
 
 let test_persist_publishes_current_midi_type () =
   with_temp_base (fun base_dir ->
-    let data = "MThd\000original MIDI bytes" in
+    let data = valid_midi "\000original MIDI bytes" in
     let media_type = "audio/midi" in
-    let token = expected_token ~media_type data in
-    let media_dir = Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) "media" in
-    Fs_compat.mkdir_p media_dir;
-    let opaque_path = Filename.concat media_dir (token ^ ".bin") in
-    write_file opaque_path data;
-    let regenerated, _ = persist_ok ~base_dir ~media_type ~data in
-    Alcotest.(check string) "regeneration retains its original media token" token regenerated;
-    Alcotest.(check string) "prior opaque bytes remain evidence" data (read_file opaque_path);
-    match M.file_path_of_token ~base_dir ~token with
-    | None -> Alcotest.fail "regenerated MIDI cannot be resolved"
-    | Some path ->
-        Alcotest.(check string) "regeneration publishes the current served MIDI type"
-          "audio/midi" (M.content_type_of_path path);
-        Alcotest.(check string) "canonical publication retains complete original bytes"
-          data (read_file path))
+    let token = expected_token data in
+    let regenerated, url = persist_ok ~base_dir ~media_type ~data in
+    Alcotest.(check string) "MIDI token is content SHA-256" token regenerated;
+    Alcotest.(check string) "MIDI url is canonical attachment URL"
+      ("/api/v1/attachments/att_" ^ token) url;
+    let store = Attachment_store.create ~base_path:base_dir in
+    match Attachment_store.get_meta store ~id:("att_" ^ token) with
+    | Ok (Some meta) ->
+      Alcotest.(check string) "Attachment_store records canonical MIDI mime"
+        "audio/midi" meta.mime_type;
+      (match Attachment_store.get_bytes_by_sha256 store ~sha256:token with
+       | Ok (Some stored) ->
+         Alcotest.(check string) "canonical publication retains complete original bytes"
+           data stored
+       | Ok None -> Alcotest.fail "stored MIDI bytes missing"
+       | Error err -> Alcotest.fail (Attachment_store.get_error_to_string err))
+    | Ok None -> Alcotest.fail "regenerated MIDI meta missing"
+    | Error err -> Alcotest.fail (Attachment_store.get_error_to_string err))
 
 let media_category_testable =
   Alcotest.testable
@@ -168,7 +174,7 @@ let test_media_category () =
 
 let test_base64_source_decoded_before_persist () =
   with_temp_base (fun base_dir ->
-    let raw = "raw image bytes" in
+    let raw = valid_png "raw image bytes" in
     let encoded = Base64.encode_string raw in
     match
       M.persist_media_source_result ~base_dir ~media_type:"image/png"
@@ -179,13 +185,15 @@ let test_base64_source_decoded_before_persist () =
     | Ok (token, url) ->
         Alcotest.(check string)
           "token is derived from decoded raw bytes"
-          (expected_token ~media_type:"image/png" raw)
+          (expected_token raw)
           token;
-        Alcotest.(check string) "url" ("/api/v1/media/" ^ token) url;
-        (match M.file_path_of_token ~base_dir ~token with
-         | None -> Alcotest.fail "persisted decoded media not found"
-         | Some path ->
-             Alcotest.(check string) "stored raw bytes" raw (read_file path)))
+        Alcotest.(check string) "url" ("/api/v1/attachments/att_" ^ token) url;
+        let store = Attachment_store.create ~base_path:base_dir in
+        (match Attachment_store.get_bytes_by_sha256 store ~sha256:token with
+         | Ok (Some stored) ->
+             Alcotest.(check string) "stored raw bytes" raw stored
+         | Ok None -> Alcotest.fail "persisted decoded media not found"
+         | Error err -> Alcotest.fail (Attachment_store.get_error_to_string err)))
 
 let test_generated_media_cap_rejects_oversize_raw_media () =
   with_env "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" "4" (fun () ->
@@ -210,25 +218,26 @@ let test_generated_media_cap_rejects_oversize_raw_media () =
           Alcotest.failf "unexpected error: %s" (M.persist_error_to_string err)))
 
 let test_persist_runs_opportunistic_media_cleanup () =
-  with_env "MASC_KEEPER_GENERATED_MEDIA_RETENTION_SEC" "1" (fun () ->
-    with_temp_base (fun base_dir ->
-      let seed_token, _ =
-        persist_ok ~base_dir ~media_type:"image/png" ~data:"seed"
-      in
-      let media_dir =
-        match M.file_path_of_token ~base_dir ~token:seed_token with
-        | Some path -> Filename.dirname path
-        | None -> Alcotest.fail "seed media path missing"
-      in
-      let stale_path = Filename.concat media_dir (String.make 64 'a' ^ ".png") in
-      write_file stale_path "old";
-      let old_time = Unix.gettimeofday () -. 10.0 in
-      Unix.utimes stale_path old_time old_time;
-      ignore (M.persist_result ~base_dir ~media_type:"image/png" ~data:"fresh");
-      Alcotest.(check bool)
-        "stale media is removed by next persist"
-        false
-        (Sys.file_exists stale_path)))
+  with_temp_base (fun base_dir ->
+    let seed = valid_png "seed" in
+    let fresh = valid_png "fresh" in
+    let seed_token, _ =
+      persist_ok ~base_dir ~media_type:"image/png" ~data:seed
+    in
+    let fresh_token, _ =
+      persist_ok ~base_dir ~media_type:"image/png" ~data:fresh
+    in
+    let store = Attachment_store.create ~base_path:base_dir in
+    (match Attachment_store.get_meta store ~id:("att_" ^ seed_token) with
+     | Ok (Some meta) ->
+       Alcotest.(check string) "generated media is durable" "durable"
+         (Attachment_store.retention_to_wire_string meta.retention)
+     | Ok None -> Alcotest.fail "seed media missing"
+     | Error err -> Alcotest.fail (Attachment_store.get_error_to_string err));
+    match Attachment_store.get_bytes_by_sha256 store ~sha256:fresh_token with
+    | Ok (Some stored) -> Alcotest.(check string) "fresh media readable" fresh stored
+    | Ok None -> Alcotest.fail "fresh media missing"
+    | Error err -> Alcotest.fail (Attachment_store.get_error_to_string err))
 
 let test_unsupported_source_type_rejected () =
   with_temp_base (fun base_dir ->

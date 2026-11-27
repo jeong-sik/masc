@@ -654,9 +654,8 @@ let input_of_json json =
     Keeper_multimodal_input.parse_attachments
       (`Assoc [ "attachments", List.assoc "attachments" fields ])
   in
-  let* () =
-    Keeper_multimodal_input.validate_attachment_references ~attachments
-      user_blocks
+  let user_blocks =
+    Keeper_multimodal_input.normalize_user_blocks ~attachments user_blocks
   in
   Ok { message; user_blocks; turn_instructions; surface_context; attachments }
 ;;

@@ -2,7 +2,6 @@
 
 type runtime_route_lane =
   | Runtime_default
-  | Runtime_media_failover
   | Runtime_named_lane of string
       (** A name {!Runtime.resolve_assignment} knows: a declared
           [\[runtime.lanes."<id>"\]] lane, whose name is the operator's own,
@@ -18,7 +17,6 @@ let exact_route_prefix = "exact/"
 
 let runtime_route_lane_to_string = function
   | Runtime_default -> "default"
-  | Runtime_media_failover -> "media_failover"
   | Runtime_named_lane lane_id -> lane_id
   | Runtime_exact_lane lane -> exact_route_prefix ^ Standalone_lane.to_id lane
 
@@ -27,13 +25,11 @@ let runtime_route_lane_to_string = function
    conversation-lane space, whether or not a lane of that name exists yet. *)
 type route_name_space =
   | Default_route
-  | Media_failover_route
   | Exact_route of string
   | Lane_route
 
 let route_name_space = function
   | "default" -> Default_route
-  | "media_failover" -> Media_failover_route
   | lane when String.starts_with ~prefix:exact_route_prefix lane ->
     let prefix_length = String.length exact_route_prefix in
     Exact_route (String.sub lane prefix_length (String.length lane - prefix_length))
@@ -49,7 +45,6 @@ let route_name_space = function
 let parse_runtime_route_lane lane =
   match route_name_space lane with
   | Default_route -> Ok Runtime_default
-  | Media_failover_route -> Ok Runtime_media_failover
   | Exact_route name ->
     (match Standalone_lane.of_id name with
      | Some exact -> Ok (Runtime_exact_lane exact)
@@ -75,7 +70,6 @@ type runtime_route_body =
   | Runtime_route_runtime_id of runtime_route_lane * string option
   | Runtime_route_runtime_ids of runtime_route_lane * string list
   | Runtime_route_named_lane_set_if_revision of string * string list * string
-  | Runtime_route_media_failover_set_if_revision of string list * string
   | Runtime_route_lane_created of string * string list
   | Runtime_route_lane_removed of string * string option
   | Runtime_route_lane_renamed of string * string
@@ -177,13 +171,6 @@ let parse_set_route_body json lane =
            | Ok (Some revision) ->
              Ok (Runtime_route_named_lane_set_if_revision (lane_id, runtime_ids, revision))
            | Error _ as err -> err))
-     | Runtime_media_failover ->
-       let open Result.Syntax in
-       let* runtime_ids = required_string_array_field json "runtime_ids" in
-       let* revision = expected_source_revision json in
-       (match revision with
-        | Some revision -> Ok (Runtime_route_media_failover_set_if_revision (runtime_ids, revision))
-        | None -> Ok (Runtime_route_runtime_ids (parsed_lane, runtime_ids)))
      | Runtime_exact_lane _ ->
        (match required_string_array_field json "runtime_ids" with
         | Error _ as err -> err
@@ -202,7 +189,7 @@ let parse_set_route_body json lane =
 let lane_name_of_new_name name =
   match route_name_space name with
   | Lane_route -> Ok name
-  | Default_route | Media_failover_route | Exact_route _ ->
+  | Default_route | Exact_route _ ->
     Error (Printf.sprintf "%S names another route, not a lane" name)
 
 let parse_create_route_body json lane =
@@ -225,7 +212,7 @@ let parse_rename_route_body json lane =
        (match lane_name_of_new_name new_lane_id with
         | Error _ as err -> err
         | Ok new_lane_id -> Ok (Runtime_route_lane_renamed (lane_id, new_lane_id))))
-  | Ok (Runtime_default | Runtime_media_failover | Runtime_exact_lane _) ->
+  | Ok (Runtime_default | Runtime_exact_lane _) ->
     Error (Printf.sprintf "%S names another route, not a lane" lane)
   | Error _ as err -> err
 
@@ -234,7 +221,7 @@ let parse_remove_route_body json lane =
   | Ok (Runtime_named_lane lane_id) ->
     expected_source_revision json
     |> Result.map (fun revision -> Runtime_route_lane_removed (lane_id, revision))
-  | Ok (Runtime_default | Runtime_media_failover | Runtime_exact_lane _) ->
+  | Ok (Runtime_default | Runtime_exact_lane _) ->
     Error (Printf.sprintf "%S names another route, not a lane" lane)
   | Error _ as err -> err
 
@@ -248,7 +235,7 @@ let parse_exact_slot_route_body json lane ~build ~verb =
     (match required_string_field json "runtime_id" with
      | Error _ as err -> err
      | Ok runtime_id -> build exact runtime_id)
-  | Ok (Runtime_default | Runtime_media_failover | Runtime_named_lane _) ->
+  | Ok (Runtime_default | Runtime_named_lane _) ->
     Error
       (Printf.sprintf
          "%S is not an exact-output lane; %s acts on a slot of exact/<name>"
@@ -272,7 +259,7 @@ let parse_append_route_body json lane =
     (match required_string_field json "runtime_id" with
      | Error _ as err -> err
      | Ok runtime_id -> Ok (Runtime_route_exact_slot_appended (exact, runtime_id)))
-  | Ok (Runtime_default | Runtime_media_failover | Runtime_named_lane _) ->
+  | Ok (Runtime_default | Runtime_named_lane _) ->
     Error (Printf.sprintf "%S is not an exact-output lane; append adds a slot to exact/<name>" lane)
   | Error _ as err -> err
 

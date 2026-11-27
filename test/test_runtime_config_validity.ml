@@ -2879,7 +2879,7 @@ let test_runtime_toml_allows_runtime_profile_tables () =
     check int "profile tables are not provider bindings" 1
       (List.length cfg.Runtime_schema.bindings)
 
-let test_runtime_toml_rejects_wrong_type_media_failover () =
+let test_runtime_toml_rejects_removed_media_failover () =
   let content =
     "[providers.local]\n\
      protocol = \"openai-compatible-http\"\n\
@@ -2893,10 +2893,10 @@ let test_runtime_toml_rejects_wrong_type_media_failover () =
      \n\
      [runtime]\n\
      default = \"local.sample\"\n\
-     media_failover = \"local.sample\"\n"
+     media_failover = [\"local.sample\"]\n"
   in
   match Runtime_toml.parse_string content with
-  | Ok _ -> failf "wrong-type [runtime].media_failover should fail parse"
+  | Ok _ -> failf "removed [runtime].media_failover should fail parse"
   | Error errs ->
     let rendered =
       errs
@@ -2906,12 +2906,10 @@ let test_runtime_toml_rejects_wrong_type_media_failover () =
     in
     check bool "error mentions runtime.media_failover" true
       (String_util.contains_substring rendered "runtime.media_failover");
-    check bool "error explains media_failover type" true
-      (String_util.contains_substring
-         rendered
-         "media_failover must be an array of string runtime ids")
+    check bool "error explains hard cut and replacement" true
+      (String_util.contains_substring rendered "media_failover was removed")
 
-let test_runtime_toml_preserves_explicit_empty_media_failover () =
+let test_runtime_toml_parses_optional_media_table () =
   let content =
     "[providers.local]\n\
      protocol = \"openai-compatible-http\"\n\
@@ -2925,7 +2923,9 @@ let test_runtime_toml_preserves_explicit_empty_media_failover () =
      \n\
      [runtime]\n\
      default = \"local.sample\"\n\
-     media_failover = []\n"
+     \n\
+     [runtime.media]\n\
+     vision_reader = \"local.sample\"\n"
   in
   match Runtime_toml.parse_string content with
   | Error errs ->
@@ -2935,8 +2935,12 @@ let test_runtime_toml_preserves_explicit_empty_media_failover () =
         Printf.sprintf "%s: %s" err.path err.message)
       |> String.concat "\n"
     in
-    failf "runtime TOML should parse explicit empty media_failover:\n%s" rendered
-  | Ok cfg -> check (list string) "media_failover" [] cfg.Runtime_schema.media_failover
+    failf "runtime TOML should parse [runtime.media]:\n%s" rendered
+  | Ok cfg ->
+    check (option string) "vision_reader" (Some "local.sample")
+      cfg.Runtime_schema.media.vision_reader;
+    check (option string) "image_generator" None
+      cfg.Runtime_schema.media.image_generator
 
 (** The runtime singletons were migrated from plain [ref]s to [Atomic.t] so
     that reads from worker domains on OCaml 5 see published writes.  This test
@@ -5104,7 +5108,7 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; bindings = []
     ; default_runtime_id = None
     ; keeper_assignments = []
-    ; media_failover = []
+    ; media = Runtime_schema.empty_media_overrides
     ; lane_decls = []
     ; exact_output_lane_decls = []
     ; exec_ssh_endpoints = []
@@ -5218,35 +5222,29 @@ let test_every_routing_field_names_itself_in_its_diagnostic () =
     (String_util.contains_substring assignment "[runtime.assignments].keeper_a = \"local.typo\"");
   let media =
     load_error_of_runtime_toml
-      ~what:"a media_failover entry naming an unknown runtime"
-      (routing_reference_base ^ "media_failover = [\"local.typo\"]\n")
+      ~what:"a [runtime.media].vision_reader naming an unknown runtime"
+      (routing_reference_base ^ "\n[runtime.media]\nvision_reader = \"local.typo\"\n")
   in
-  (* A list field renders as an entry rather than an equality: [runtime]
-     .media_failover = "local.typo" would tell the operator the list equals one id. *)
-  check bool "media_failover diagnostic names an entry, not an equality" true
-    (String_util.contains_substring media "[runtime].media_failover entry \"local.typo\"")
+  check bool "media override diagnostic names the field" true
+    (String_util.contains_substring media "[runtime.media].vision_reader = \"local.typo\"")
 
 let test_routing_reference_domains_stay_distinct () =
   let lane = "\n[runtime.lanes.safe]\ncandidates = [\"local.good\"]\n" in
-  (* An assignment names a declared lane or a runtime: the
-     assignment consumer resolves the lane through [resolve_assignment], so a
-     lane target loads. Media_failover stays runtime-only — its consumers
-     (Keeper_vision_tool) resolve entries among runtimes alone. *)
   with_temp_runtime_toml
     (routing_reference_base ^ lane ^ "\n[runtime.assignments]\nkeeper_a = \"safe\"\n")
     (fun path ->
        match load_list_text ~config_path:path with
        | Error msg -> failf "an assignment naming a lane must load: %s" msg
-       | Ok (_runtimes, _default, assignments, _media_failover, _lanes) ->
+       | Ok (_runtimes, _default, assignments, _media, _lanes) ->
          check (option string) "assignment keeps its lane target" (Some "safe")
            (List.assoc_opt "keeper_a" assignments));
   let media =
     load_error_of_runtime_toml
-      ~what:"a media_failover entry naming a lane"
-      (routing_reference_base ^ "media_failover = [\"safe\"]\n" ^ lane)
+      ~what:"a [runtime.media].vision_reader naming a lane"
+      (routing_reference_base ^ lane ^ "\n[runtime.media]\nvision_reader = \"safe\"\n")
   in
-  check bool "media_failover refuses a lane id" true
-    (String_util.contains_substring media "[runtime].media_failover entry \"safe\"")
+  check bool "media override refuses a lane id" true
+    (String_util.contains_substring media "[runtime.media].vision_reader = \"safe\"")
 
 let test_strict_init_rejects_assigned_runtime_absent_from_agent_core_catalog () =
   let catalog =
@@ -5581,7 +5579,9 @@ let test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes () =
      \n\
      [runtime]\n\
      default = \"ollama.good\"\n\
-     media_failover = [\"ollama.missing\", \"ollama.good\"]\n\
+     \n\
+     [runtime.media]\n\
+     vision_reader = \"ollama.missing\"\n\
      \n\
      [runtime.assignments]\n\
      keeper_a = \"ollama.missing\"\n\
@@ -5607,8 +5607,8 @@ let test_server_degraded_init_rejects_uncatalogued_lane_and_media_routes () =
        | Error (Runtime.Runtime_config_error msg) ->
          check bool "diagnostic names keeper assignment" true
            (String_util.contains_substring msg "[runtime.assignments].keeper_a");
-         check bool "diagnostic names media failover" true
-           (String_util.contains_substring msg "[runtime].media_failover");
+         check bool "diagnostic names media override" true
+           (String_util.contains_substring msg "[runtime.media].vision_reader");
          check bool "diagnostic names lane candidates" true
            (String_util.contains_substring msg "[runtime.lanes].candidates.safe");
          check bool "diagnostic rejects fallback erasure" true
@@ -5643,7 +5643,9 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
      \n\
      [runtime]\n\
      default = \"ollama.good\"\n\
-     media_failover = [\"ollama.good\"]\n\
+     \n\
+     [runtime.media]\n\
+     vision_reader = \"ollama.good\"\n\
      \n\
      [runtime.assignments]\n\
      keeper_b = \"ollama.good\"\n\
@@ -5678,9 +5680,9 @@ let test_server_degraded_init_disables_unreferenced_uncatalogued_runtimes () =
          check (option string) "catalog-known assignment preserved"
            (Some "ollama.good")
            (Runtime.runtime_id_for_keeper "keeper_b");
-         check (list string) "media failover keeps known ids only"
-           [ "ollama.good" ]
-           (Runtime.media_failover ());
+         check (option string) "media override keeps known vision_reader"
+           (Some "ollama.good")
+           (Runtime.media_overrides ()).vision_reader;
          (match
             List.find_opt
               (fun (lane : Runtime_lane.t) -> String.equal lane.id "safe")
@@ -8291,10 +8293,10 @@ let () =
             test_runtime_toml_rejects_unknown_runtime_key;
           test_case "runtime table allows profile tables" `Quick
             test_runtime_toml_allows_runtime_profile_tables;
-          test_case "runtime table rejects wrong-type media_failover" `Quick
-            test_runtime_toml_rejects_wrong_type_media_failover;
-          test_case "runtime table preserves empty media_failover" `Quick
-            test_runtime_toml_preserves_explicit_empty_media_failover;
+          test_case "runtime table rejects removed media_failover" `Quick
+            test_runtime_toml_rejects_removed_media_failover;
+          test_case "runtime table parses optional [runtime.media]" `Quick
+            test_runtime_toml_parses_optional_media_table;
           test_case
             "runtime capability gate uses provider-qualified AGENT_CORE catalog rows"
             `Quick test_runtime_capability_gate_uses_provider_qualified_catalog;

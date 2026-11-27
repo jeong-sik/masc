@@ -20,7 +20,7 @@ let string_of_drop_reason = function
     Runtime_adapter.catalog_provider_refusal_text ~provider_id ~catalog_provider refusal
 ;;
 (* A list entry renders as "field entry \"id\"" and a scalar as "field = \"id\"".
-   Keeping both is not cosmetic: [runtime].media_failover = "x" would tell the
+   Keeping both is not cosmetic: rendering a list field with "=" would tell the
    operator a list field equals one id. The variance is in rendering the site,
    never in deciding it. *)
 type reference_shape =

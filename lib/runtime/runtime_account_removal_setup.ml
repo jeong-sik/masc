@@ -55,7 +55,8 @@ let change_json = function
     `Assoc [ "kind", `String "lane_candidate"; "lane", `String lane; "runtime", `String runtime ]
   | R.Exact_lane_slot { lane; runtime } ->
     `Assoc [ "kind", `String "exact_lane_slot"; "lane", `String lane; "runtime", `String runtime ]
-  | R.Vision_runtime runtime -> `Assoc [ "kind", `String "vision_runtime"; "runtime", `String runtime ]
+  | R.Media_override { key; runtime } ->
+    `Assoc [ "kind", `String "media_override"; "key", `String key; "runtime", `String runtime ]
   | R.Assignment { keeper; runtime } ->
     `Assoc [ "kind", `String "assignment"; "keeper", `String keeper; "runtime", `String runtime ]
 ;;

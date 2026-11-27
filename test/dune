@@ -369,6 +369,7 @@
 (include stanzas/test_server_dashboard_http_keeper_get_route.inc)
 
 (include stanzas/test_sse_queue_inventory.inc)
+(include stanzas/test_vision_attachments_overhaul.inc)
 
 (test
  (name test_server_standalone_lane_projection)
@@ -2454,6 +2455,7 @@
  (libraries
   alcotest
   masc
+  masc.attachment_store
   masc_server
   masc.agent_core
   masc.fs_compat
@@ -5586,3 +5588,7 @@
 (include stanzas/test_stack_e_cross_runtime_circulation.inc)
 
 (include stanzas/rbac_live_e2e_seed.inc)
+
+(include stanzas/test_attachment_store.inc)
+
+(include stanzas/test_attachments_http_and_gc.inc)

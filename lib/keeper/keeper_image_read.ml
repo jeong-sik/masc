@@ -7,8 +7,10 @@ open Result.Syntax
 let source_of_args = function
   | `Assoc [ ("path", `String path) ] when String.trim path <> "" -> Ok (Path path)
   | `Assoc [ ("artifact", `String handle) ] when String.trim handle <> "" ->
-      Ok (Artifact (Store.of_string handle))
-  | _ -> Error "Provide exactly one non-empty string: path or artifact."
+      Ok (Artifact (Store.of_string (String.trim handle)))
+  | `Assoc [ ("attachment_id", `String handle) ] when String.trim handle <> "" ->
+      Ok (Artifact (Store.of_string (String.trim handle)))
+  | _ -> Error "Provide exactly one non-empty string: path or artifact (att_<sha256> or 64-hex hash)."
 
 let handle ?turn_sandbox_factory ~config ~(meta : Keeper_meta_contract.keeper_meta)
     ~args () =
@@ -57,8 +59,8 @@ let handle ?turn_sandbox_factory ~config ~(meta : Keeper_meta_contract.keeper_me
               Error (Tool_result.Policy_rejection, "invalid_image", "Image dimensions must be positive.")
           | dimensions -> Ok dimensions
         in
-        (* Keep a frame's verified bytes before reporting a successful read:
-           rotating browser frames must not invalidate this conversation. *)
+        (* Persist verified bytes as a durable attachment in Attachment_store so
+           rotating ephemeral captures never invalidate this conversation. *)
         let* artifact = Keeper_vision_tool.store_kept ~base_path:config.Workspace.base_path ~keeper_name:meta.name bytes
           |> Result.map_error (fun detail -> Tool_result.Runtime_failure, "artifact_store_failed", detail) in
         Ok (bytes, media_type, dimensions, Store.to_string artifact)
@@ -66,10 +68,17 @@ let handle ?turn_sandbox_factory ~config ~(meta : Keeper_meta_contract.keeper_me
       match prepared with
       | Error (class_, code, detail) -> failed class_ code detail
       | Ok (bytes, media_type, dimensions, artifact) ->
+          let sha256 = Agent_core_sha256.(digest_string bytes |> to_hex) in
+          let attachment_id = Attachment_store.id_prefix ^ sha256 in
+          let url = Attachment_store.url_of_id attachment_id in
           let data = `Assoc
-            ([ "ok", `Bool true; "artifact", `String artifact
-             ; "sha256", `String Agent_core_sha256.(digest_string bytes |> to_hex)
-             ; "media_type", `String media_type; "bytes", `Int (String.length bytes)
+            ([ "ok", `Bool true
+             ; "attachment_id", `String attachment_id
+             ; "url", `String url
+             ; "artifact", `String artifact
+             ; "sha256", `String sha256
+             ; "media_type", `String media_type
+             ; "bytes", `Int (String.length bytes)
              ; "visual_input", `Bool true ]
              @ (match dimensions with
                 | Some (width, height) -> ["width", `Int width; "height", `Int height]
@@ -87,6 +96,10 @@ let admission_hook ~accepts_image_input = function
     when not accepts_image_input ->
       Agent_core.Hooks.Block
         "The selected runtime does not declare image input support. Use keeper_analyze_image for a delegated text reading. No pixels were read or sent."
+  | Agent_core.Hooks.PreToolUse { tool_name = "keeper_analyze_image"; _ }
+    when accepts_image_input ->
+      Agent_core.Hooks.Block
+        "The selected runtime natively supports vision input. Inspect images directly with keeper_image_read instead of delegating to keeper_analyze_image."
   | Agent_core.Hooks.PreToolUse _
   | Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _
   | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.AfterRestoredTurn _ | Agent_core.Hooks.PostToolUse _

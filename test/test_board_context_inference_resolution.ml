@@ -76,6 +76,7 @@ let make_post ~id ~author =
     thread_id = None;
     origin = None;
     closed = None;
+    attachment_ids = [];
   }
 
 let check_bad_request label expected = function

@@ -10,6 +10,8 @@ type runtime_entry =
   ; model : string
   ; max_context : int
   ; is_default : bool
+  ; supports_image_input : bool
+  ; supports_image_output : bool
   }
 
 type resolved =
@@ -17,7 +19,7 @@ type resolved =
   ; default_model : string option
   ; default_max_context : int option
   ; runtimes : runtime_entry list
-  ; media_failover : string list
+  ; media : Runtime_schema.media_overrides
   ; config_path : string option
   }
 

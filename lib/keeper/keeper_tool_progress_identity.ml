@@ -157,7 +157,8 @@ let memory_identity ~tool_name ~input ~evidence =
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_masc_wiki_dispatch)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch)
   | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_analyze_image)
-  | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_read_image) ->
+  | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_read_image)
+  | Keeper_tool_answer.Keeper_handler (Keeper_tool_descriptor.Tool_generate_image) ->
     None
 ;;
 

@@ -25,6 +25,7 @@ type t =
   ; has_catalog_model_row : bool
     (** [true] only when an exact catalog [Model_row] answered for this
         HTTP [Agent_core] binding at materialization. *)
+  ; media_capabilities : Llm_provider.Capabilities.media_capabilities
   }
 
 type dispatch_credential_error =
@@ -165,6 +166,290 @@ let quota_scope_of_materialized
    [models.qwen3."6-35b-uncensored"], and nothing reported the runtime's absence.
    Deciding fatality by matching the reason string would be the same defect one
    layer up, so the vocabulary is closed and {!Runtime.load_list} matches it. *)
+let official_native_vision_input =
+  Llm_provider.Capabilities.Native_vision_input
+    { carriers = [ Llm_provider.Capabilities.Inline_base64 ]
+    ; tool_results = Llm_provider.Capabilities.Inline_in_tool_result
+    ; modality_priority = Llm_provider.Modality.Preserve_input_order
+    }
+;;
+
+let strip_prefix_opt ~prefix s =
+  if String.starts_with ~prefix s
+  then Some (String.sub s (String.length prefix) (String.length s - String.length prefix))
+  else None
+;;
+
+let strip_suffix_opt ~suffix s =
+  if String.ends_with ~suffix s && String.length s > String.length suffix
+  then Some (String.sub s 0 (String.length s - String.length suffix))
+  else None
+;;
+
+let normalized_official_model_candidates (raw : string) : string list =
+  let trimmed = String.trim raw in
+  if trimmed = "" then []
+  else
+    let add_unique acc s =
+      let s = String.trim s in
+      if s = "" || List.exists (String.equal s) acc then acc else acc @ [ s ]
+    in
+    let prefixes =
+      [ "kimi-code/"; "google/"; "anthropic/"; "openai/"; "mistral/"; "opencode_go/" ]
+    in
+    let suffixes =
+      [ "-thinking"; "-highspeed"; "-xhigh"; "-high"; "-medium"; "-low"; "-max"; "-256k" ]
+    in
+    let base_forms =
+      List.fold_left
+        (fun acc prefix ->
+           match strip_prefix_opt ~prefix trimmed with
+           | Some stripped -> add_unique acc stripped
+           | None -> acc)
+        [ trimmed ]
+        prefixes
+    in
+    let strip_all_suffixes form =
+      let rec loop acc cur =
+        match List.find_map (fun suffix -> strip_suffix_opt ~suffix cur) suffixes with
+        | Some next -> loop (add_unique acc next) next
+        | None -> acc
+      in
+      loop [ form ] form
+    in
+    List.fold_left
+      (fun acc form -> List.fold_left add_unique acc (strip_all_suffixes form))
+      []
+      base_forms
+;;
+
+let lookup_official_catalog_caps
+    ~(providers : (Llm_provider.Provider_kind.t option * string) list)
+    (model_name : string)
+  : Llm_provider.Capabilities.capabilities option
+  =
+  let candidates = normalized_official_model_candidates model_name in
+  let from_provider =
+    List.find_map
+      (fun (wire, provider_id) ->
+         List.find_map
+           (fun model_id ->
+              Llm_provider.Capabilities.for_provider_model_id
+                ~wire
+                ~provider:(Llm_provider.Model_catalog.Declared_provider provider_id)
+                ~model_id)
+           candidates)
+      providers
+  in
+  match from_provider with
+  | Some _ as hit -> hit
+  | None -> List.find_map Llm_provider.Capabilities.for_model_id candidates
+;;
+
+let resolve_media_capabilities
+    ~(has_catalog_model_row : bool)
+    ~(model : model_spec)
+    ~(execution : Runtime_execution.t)
+  : Llm_provider.Capabilities.media_capabilities
+  =
+  let open Llm_provider.Capabilities in
+  let declared_caps = model.capabilities in
+  let declared_image_input =
+    Option.bind declared_caps (fun c -> c.Runtime_schema.supports_image_input)
+  in
+  let declared_image_output =
+    Option.bind declared_caps (fun c -> c.Runtime_schema.supports_image_output)
+  in
+  let declared_document_input =
+    Option.bind declared_caps (fun c -> c.Runtime_schema.supports_document_input)
+  in
+  let declared_audio_input =
+    Option.bind declared_caps (fun c -> c.Runtime_schema.supports_audio_input)
+  in
+  match execution with
+  | Runtime_execution.Agent_core sealed ->
+    let cfg = Runtime_account_access.api_declaration sealed in
+    let caps, _ = Llm_provider.Provider_config.resolve_request_capabilities cfg in
+    let responses_api =
+      Llm_provider.Provider_config.request_path_targets_responses_api cfg.request_path
+    in
+    let base_caps =
+      (* Catalogued models inherit their catalog row's image/audio/output flags
+         unless explicitly overridden in TOML; uncatalogued (rowless) models stay
+         fail-closed unless explicitly declared in [models.<id>.capabilities]. *)
+      let supports_image_input =
+        match declared_image_input with
+        | Some v -> v
+        | None -> has_catalog_model_row && caps.supports_image_input
+      in
+      let supports_document_input =
+        match cfg.kind with
+        | Llm_provider.Provider_kind.Ollama -> false
+        | Llm_provider.Provider_kind.Anthropic
+        | Llm_provider.Provider_kind.Kimi
+        | Llm_provider.Provider_kind.OpenAI_compat
+        | Llm_provider.Provider_kind.Gemini
+        | Llm_provider.Provider_kind.Glm ->
+          Option.value declared_document_input ~default:false
+      in
+      let supports_audio_input =
+        match declared_audio_input with
+        | Some v -> v
+        | None -> has_catalog_model_row && caps.supports_audio_input
+      in
+      { caps with
+        supports_image_input
+      ; supports_document_input
+      ; supports_audio_input
+      }
+    in
+    let media = media_capabilities_of_capabilities ~wire:cfg.kind ~responses_api base_caps in
+    let image_output =
+      match declared_image_output with
+      | Some false -> No_image_output
+      | Some true ->
+        if supports_image_output_of_media media then
+          if responses_api && media.image_output = In_turn_openai_chat_modalities
+          then In_turn_openai_responses_tool
+          else media.image_output
+        else (
+          match cfg.kind with
+          | Llm_provider.Provider_kind.Gemini -> In_turn_gemini_modalities
+          | Llm_provider.Provider_kind.OpenAI_compat ->
+            if responses_api then In_turn_openai_responses_tool
+            else In_turn_openai_chat_modalities
+          | Llm_provider.Provider_kind.Glm -> Endpoint_images_api Zai_images_v4
+          | Llm_provider.Provider_kind.Anthropic
+          | Llm_provider.Provider_kind.Kimi
+          | Llm_provider.Provider_kind.Ollama -> No_image_output)
+      | None ->
+        if has_catalog_model_row then media.image_output else No_image_output
+    in
+    { media with image_output }
+  | Runtime_execution.Antigravity_cli _ ->
+    (* Legacy antigravity-cli transport is strictly text-only regardless of TOML. *)
+    { vision_input = No_vision_input
+    ; document_input = []
+    ; audio_input = []
+    ; image_output = No_image_output
+    }
+  | Runtime_execution.Claude_code _ ->
+    let catalog =
+      lookup_official_catalog_caps
+        ~providers:[ Some Llm_provider.Provider_kind.Anthropic, "anthropic" ]
+        model.api_name
+    in
+    let base_image_input =
+      match catalog with
+      | Some c -> c.supports_image_input
+      | None -> true
+    in
+    let accepts_image = Option.value declared_image_input ~default:base_image_input in
+    { vision_input = if accepts_image then official_native_vision_input else No_vision_input
+    ; document_input = []
+    ; audio_input = []
+    ; image_output = No_image_output
+    }
+  | Runtime_execution.Codex_app_server _ ->
+    let catalog =
+      lookup_official_catalog_caps
+        ~providers:
+          [ Some Llm_provider.Provider_kind.OpenAI_compat, "openai-responses"
+          ; Some Llm_provider.Provider_kind.OpenAI_compat, "openai"
+          ]
+        model.api_name
+    in
+    let base_image_input =
+      match catalog with
+      | Some c -> c.supports_image_input
+      | None -> true
+    in
+    let accepts_image = Option.value declared_image_input ~default:base_image_input in
+    let image_output =
+      match declared_image_output with
+      | Some false -> No_image_output
+      | Some true | None -> In_turn_codex_item
+    in
+    { vision_input = if accepts_image then official_native_vision_input else No_vision_input
+    ; document_input = []
+    ; audio_input = []
+    ; image_output
+    }
+  | Runtime_execution.Acp acp ->
+    let providers =
+      match acp.driver with
+      | Runtime_acp_client.Antigravity ->
+        [ Some Llm_provider.Provider_kind.Gemini, "gemini"
+        ; Some Llm_provider.Provider_kind.Anthropic, "anthropic"
+        ]
+      | Runtime_acp_client.Kimi_code ->
+        [ Some Llm_provider.Provider_kind.Kimi, "kimi_coding"
+        ; Some Llm_provider.Provider_kind.Kimi, "kimi"
+        ]
+      | Runtime_acp_client.Mistral_vibe ->
+        [ Some Llm_provider.Provider_kind.OpenAI_compat, "mistral" ]
+      | Runtime_acp_client.Muse_code ->
+        [ Some Llm_provider.Provider_kind.OpenAI_compat, "opencode_go"
+        ; Some Llm_provider.Provider_kind.Anthropic, "anthropic"
+        ]
+    in
+    let catalog = lookup_official_catalog_caps ~providers model.api_name in
+    let base_image_input =
+      match catalog with
+      | Some c -> c.supports_image_input
+      | None -> true
+    in
+    let accepts_image = Option.value declared_image_input ~default:base_image_input in
+    let base_image_output =
+      match catalog with
+      | Some c when supports_image_output c -> In_turn_acp_chunk
+      | Some _ | None -> No_image_output
+    in
+    let image_output =
+      match declared_image_output with
+      | Some false -> No_image_output
+      | Some true -> In_turn_acp_chunk
+      | None -> base_image_output
+    in
+    { vision_input = if accepts_image then official_native_vision_input else No_vision_input
+    ; document_input = []
+    ; audio_input = []
+    ; image_output
+    }
+;;
+
+let effective_media_capabilities (rt : t) : Llm_provider.Capabilities.media_capabilities =
+  let base =
+    resolve_media_capabilities
+      ~has_catalog_model_row:rt.has_catalog_model_row
+      ~model:rt.model
+      ~execution:rt.execution
+  in
+  match rt.execution with
+  | Runtime_execution.Acp acp ->
+    (match
+       Runtime_acp_client.observed_image_prompt
+         ~driver:acp.driver
+         ~cli_path:acp.cli_path
+     with
+     | None -> base
+     | Some false ->
+       { base with vision_input = Llm_provider.Capabilities.No_vision_input }
+     | Some true ->
+       let explicitly_disabled =
+         match rt.model.capabilities with
+         | Some { supports_image_input = Some false; _ } -> true
+         | Some _ | None -> false
+       in
+       if explicitly_disabled
+       then base
+       else { base with vision_input = official_native_vision_input })
+  | Runtime_execution.Agent_core _
+  | Runtime_execution.Codex_app_server _
+  | Runtime_execution.Claude_code _
+  | Runtime_execution.Antigravity_cli _ -> base
+;;
+
 let materialize_binding_with
     ~materialize_execution
     ~construction
@@ -192,6 +477,12 @@ let materialize_binding_with
            | Some _ as effort -> { model with reasoning_effort = effort }
            | None -> model
          in
+         let media_capabilities =
+           resolve_media_capabilities
+             ~has_catalog_model_row:selected.has_catalog_model_row
+             ~model
+             ~execution
+         in
          Result.map (fun quota_scope ->
            { id = id_of_binding b
            ; provider
@@ -213,6 +504,7 @@ let materialize_binding_with
                Runtime_candidate_backpressure.create_candidate ~binding)
            ; quota_scope
            ; has_catalog_model_row = selected.has_catalog_model_row
+           ; media_capabilities
            })
            (quota_scope_of_materialized ~provider ~execution ~credential_admission)
          |> Result.map_error (fun reason -> Execution_unbuildable reason)

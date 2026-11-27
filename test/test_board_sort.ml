@@ -37,6 +37,7 @@ let make_post ~id ~created_at ~votes_up ~votes_down ~reply_count () : Board.post
   ; thread_id = None
   ; origin = None
   ; closed = None
+  ; attachment_ids = []
   }
 
 (* Regression for the pre-Board_sort formula ((net + reply_count * 2) /

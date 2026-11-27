@@ -24,7 +24,7 @@ let to_json_array ?base_dir ?trace_block_by_turn_ref
        (fun (m : chat_message) ->
           let trace_block = trace_block_for_turn ~trace_block_by_turn_ref m in
           let audio = resolve_audio_expiry ~base_dir m.audio in
-          Keeper_chat_projection.message_to_json ~omit_stream_contract
+          Keeper_chat_projection.message_to_json ?base_dir ~omit_stream_contract
             ~trace_lookup_available:(Option.is_some trace_block_by_turn_ref)
             ~trace_block { m with audio })
        messages)

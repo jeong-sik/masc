@@ -339,21 +339,19 @@ val load_list :
   -> ( t list
        * t
        * (string * string) list
-       * string list
+       * Runtime_schema.media_overrides
        * Runtime_lane.t list
      , load_failure )
      result
 (** [load_list ~config_path] parses runtime.toml into [(runtimes, default,
-    keeper_assignments, media_failover, lanes)].
+    keeper_assignments, media_overrides, lanes)].
     Fails ([Error]) if
     [\[runtime\].default] is missing / unresolved, if any
     [\[runtime.assignments\]] target names neither a declared lane nor a
     configured runtime, if any
-    [\[runtime\].media_failover] entry does not resolve, or if any
+    [\[runtime.media\]] override does not resolve, or if any
     [\[runtime.lanes.<id>\]] candidate does not resolve (mirrors default
-    validation — no silent fallback for a typo'd id). [keeper_assignments] is the
-    keeper→lane-name-or-runtime-id list; [media_failover] names the vision runtimes;
-    [lanes] is the ordered failover candidate lists. *)
+    validation — no silent fallback for a typo'd id). *)
 
 (** The runtimes of a typed configuration, materialized and validated as
     {!load_list} does those of a file. Nothing is published: the global
@@ -590,11 +588,9 @@ val exact_slot_body_deadline_gaps : unit -> exact_slot_body_deadline_gap list
 (** The exact slots the loaded file declares on a provider without
     [exact-body-timeout-s], computed when the file was loaded. Boot does not
     refuse the file for them; the exact-output registry leaves them out. *)
-val runtimes_and_media_failover : unit -> t list * string list
-(** Atomically consistent snapshot of configured runtimes plus
-    [\[runtime\].media_failover]. Use when both values drive one routing
-    decision, so a runtime config refresh cannot interleave between two
-    separate reads. *)
+val runtimes_and_media : unit -> t list * Runtime_schema.media_overrides
+(** Atomically consistent snapshot of configured runtimes plus optional
+    [\[runtime.media\]] overrides. *)
 
 val runtime_id_for_keeper : string -> string option
 (** [runtime_id_for_keeper keeper_name] is the route [keeper_name] is assigned.
@@ -624,8 +620,7 @@ type dashboard_runtime_resolved_snapshot =
   ; rs_runtimes : t list
   ; rs_assignments : (string * string) list
   ; rs_lanes : Runtime_lane.t list
-  ; rs_media_failover : string list
-  ; rs_declared_media_failover : string list
+  ; rs_media : Runtime_schema.media_overrides
   ; rs_config_path : string option
   ; rs_resolve_assignment : string ->
       [ `Lane of Runtime_lane.t | `Unavailable of missing_catalog_model | `Missing ]
@@ -647,7 +642,7 @@ val same_keeper_dispatch :
 type dashboard_runtime_defaults_snapshot =
   { default_runtime : t option
   ; runtimes : t list
-  ; media_failover : string list
+  ; media : Runtime_schema.media_overrides
   ; config_path : string option
   }
 
@@ -766,17 +761,10 @@ val verifier_exact_slot_admission : candidate_kind:Types_core.verifier_slot_kind
     candidate check does not revoke an already acquired review when activity
     changes. Explicit single-runtime overrides remain independent of lane activity. *)
 
-val media_failover : unit -> string list
-(** [\[runtime\].media_failover] — the vision runtimes: ordered runtime ids the
-    vision tool calls, including the image readings made for a runtime that
-    cannot take the image. A keeper turn never dispatches to them; its image
-    reroute stays inside its lane. [[]] = no vision runtimes. Every entry is
-    validated at load so each resolves to a configured runtime. *)
-
-val declared_media_failover : unit -> string list
-(** [\[runtime\].media_failover] in file order before runtime admission. This
-    preserves entries excluded from the active fleet so an operator surface
-    can edit the declaration without silently erasing them. *)
+val media_overrides : unit -> Runtime_schema.media_overrides
+(** Optional [\[runtime.media\]] overrides ([vision_reader], [image_generator]).
+    When unset, vision reading and image generation derive automatically from
+    configured runtimes' capabilities. *)
 
 val lanes : unit -> Runtime_lane.t list
 (** [\[runtime.lanes.<id>\]] ordered failover candidate lists. Each lane carries
@@ -1092,23 +1080,6 @@ val set_first_run_runtime :
     Other Keeper assignments are always preserved. Intended
     for an explicit first-install setup action, since existing lane choices
     are replaced. Validation failures leave the configuration unchanged. *)
-
-val set_runtime_media_failover :
-  ?runtime_config_path:string ->
-  runtime_ids:string list ->
-  unit ->
-  (config_commit_receipt, string) result
-(** Persist [\[runtime\]].media_failover through the runtime.toml SSOT writer,
-    validate the resulting config, atomically write it, and refresh the
-    in-process runtime cache. The list order is preserved. *)
-
-val set_runtime_media_failover_if_revision :
-  ?runtime_config_path:string ->
-  expected_source_revision:string ->
-  runtime_ids:string list ->
-  unit ->
-  (config_commit_receipt, lane_set_error) result
-(** Set media failover order with the same source revision check as a named lane. *)
 
 val set_runtime_lane_candidates :
   ?runtime_config_path:string ->

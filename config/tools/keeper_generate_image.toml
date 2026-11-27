@@ -1,0 +1,53 @@
+defer_loading = true
+name = "keeper_generate_image"
+description = """
+Generate one or more images from a text prompt using the active runtime or \
+an available image-generation backend (including auto-derived sibling provider \
+image endpoints). Persists every generated image to the unified attachment store, \
+returns attachment_id and url, and attaches the image pixels natively. Offered \
+only when at least one image-generation target is available."""
+additional_properties = false
+
+[[params]]
+name = "prompt"
+type = "string"
+required = true
+description = "Detailed visual description of the image to generate."
+
+[[params]]
+name = "aspect_ratio"
+type = "string"
+description = "Optional aspect ratio such as \"1:1\", \"16:9\", \"9:16\", \"4:3\", or \"3:4\"."
+
+[[params]]
+name = "size"
+type = "string"
+description = "Optional pixel dimensions such as \"1024x1024\", \"1536x1024\", or \"1024x1536\"."
+
+[[params]]
+name = "quality"
+type = "string"
+description = "Optional quality preset such as \"low\", \"medium\", \"high\", or \"auto\"."
+
+[[params]]
+name = "count"
+type = "integer"
+minimum = 1
+maximum = 4
+description = "Number of images to generate (1 to 4; defaults to provider default)."
+
+[[params]]
+name = "output_format"
+type = "string"
+enum = ["png", "jpeg", "webp"]
+description = "Optional output image format: png, jpeg, or webp."
+
+[[params]]
+name = "negative_prompt"
+type = "string"
+description = "Optional elements to avoid (honored by dialects that support it, e.g. Imagen)."
+
+[[params]]
+name = "runtime_id"
+type = "string"
+description = "Optional configured runtime identifier to use instead of automatic selection."

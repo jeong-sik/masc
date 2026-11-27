@@ -419,7 +419,7 @@ let test_parse_keeper_chat_stream_request_rejects_unknown_user_block_type () =
   | Ok _ -> fail "expected unknown user block type to be rejected"
   | Error err ->
       check string "validation message"
-        {|unsupported user_blocks type "tool_result": expected text, image, document, or audio|}
+        {|unsupported user_blocks type "tool_result": expected text, image, document, audio, or attachment|}
         err
 
 (* #32984: two attachments sharing an id both parse, but a user_blocks
@@ -436,19 +436,21 @@ let test_parse_keeper_chat_stream_request_rejects_duplicate_attachment_id () =
       check bool "duplicated id is named" true
         (string_contains err {|"att-img"|})
 
-(* #32845: attachments are a byte store; only user_blocks media blocks
-   referencing an attachment_id reach AGENT_CORE. An attachment nothing
-   references must be rejected instead of silently dropped. *)
+(* Attachments not explicitly referenced in user_blocks are synthesized as
+   trailing media blocks so callers never lose uploaded attachments or hit
+   HTTP 400 when omitting redundant user_blocks wrappers. *)
 let test_parse_keeper_chat_stream_request_rejects_orphan_attachment () =
   let body =
     {|{"request_id":"kmsg-orphan","name":"luna","message":"look at this","attachments":[{"id":"att-img","type":"image","name":"screen.png","size":1024,"mime_type":"image/png","data":"data:image/png;base64,YWJjMTIz"}]}|}
   in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
-  | Ok _ -> fail "expected an unreferenced attachment to be rejected"
-  | Error err ->
-      check string "validation message"
-        {|attachments not referenced by user_blocks: "att-img"; every attachment must be referenced by a user_blocks media block such as {"type":"image","attachment_id":"att-img"}|}
-        err
+  | Error err -> fail ("expected unreferenced attachment to synthesize media block: " ^ err)
+  | Ok payload -> (
+      match payload.user_blocks with
+      | [ Server_routes_http_keeper_stream.User_image (Attached media) ] ->
+          check string "synthesized attachment id" "att-img" media.attachment_id;
+          check string "synthesized mime type" "image/png" media.mime_type
+      | _ -> fail "expected one synthesized image user block")
 
 let test_parse_keeper_chat_stream_request_rejects_orphan_attachment_with_empty_user_blocks
     () =
@@ -456,20 +458,27 @@ let test_parse_keeper_chat_stream_request_rejects_orphan_attachment_with_empty_u
     {|{"request_id":"kmsg-orphan-empty","name":"luna","message":"look at this","attachments":[{"id":"att-img","type":"image","name":"screen.png","size":1024,"mime_type":"image/png","data":"data:image/png;base64,YWJjMTIz"}],"user_blocks":[{"type":"text","text":"look at this"}]}|}
   in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
-  | Ok _ -> fail "expected an attachment not referenced by user_blocks to be rejected"
-  | Error err ->
-      check bool "orphan id is named" true (string_contains err {|"att-img"|})
+  | Error err -> fail ("expected unreferenced attachment alongside text block to synthesize: " ^ err)
+  | Ok payload -> (
+      match payload.user_blocks with
+      | [ Server_routes_http_keeper_stream.User_text "look at this"
+        ; Server_routes_http_keeper_stream.User_image (Attached media) ] ->
+          check string "synthesized attachment id" "att-img" media.attachment_id
+      | _ -> fail "expected text block followed by synthesized image block")
 
 let test_parse_keeper_chat_stream_request_names_every_orphan_attachment () =
   let body =
-    {|{"request_id":"kmsg-orphans","name":"luna","message":"hello","attachments":[{"id":"att-one","type":"image","name":"one.png","size":1,"mime_type":"image/png","data":"abc"},{"id":"att-two","type":"image","name":"two.png","size":1,"mime_type":"image/png","data":"def"}],"user_blocks":[{"type":"image","attachment_id":"att-two","name":"two.png","mime_type":"image/png","size":1}]}|}
+    {|{"request_id":"kmsg-orphans","name":"luna","message":"hello","attachments":[{"id":"att-one","type":"image","name":"one.png","size":1,"mime_type":"image/png","data":"YWJj"},{"id":"att-two","type":"image","name":"two.png","size":1,"mime_type":"image/png","data":"ZGVm"}],"user_blocks":[{"type":"image","attachment_id":"att-two","name":"two.png","mime_type":"image/png","size":1}]}|}
   in
   match Server_routes_http_keeper_stream.parse_keeper_chat_stream_request ~media_store:test_media_store body with
-  | Ok _ -> fail "expected the unreferenced attachment to be rejected"
-  | Error err ->
-      check bool "orphan id is named" true (string_contains err {|"att-one"|});
-      check bool "referenced id is not named" false
-        (string_contains err "att-two")
+  | Error err -> fail ("expected missing attachment to be appended without duplicating referenced one: " ^ err)
+  | Ok payload -> (
+      match payload.user_blocks with
+      | [ Server_routes_http_keeper_stream.User_image (Attached first)
+        ; Server_routes_http_keeper_stream.User_image (Attached second) ] ->
+          check string "explicitly referenced block stays first" "att-two" first.attachment_id;
+          check string "unreferenced attachment synthesized after" "att-one" second.attachment_id
+      | _ -> fail "expected two image blocks in order [att-two; att-one]")
 
 let test_parse_keeper_chat_stream_request_accepts_duplicate_attachment_reference () =
   let body =
@@ -511,9 +520,12 @@ let test_keeper_chat_operation_input_rejects_orphan_attachment () =
       ~user_blocks:[] ~turn_instructions:None ~surface_context:None ~attachments
   in
   match Keeper_chat_operation_payload.input_of_json input with
-  | Ok _ -> fail "expected an orphan attachment in a stored input to be rejected"
-  | Error err ->
-      check bool "orphan id is named" true (string_contains err {|"att-img"|})
+  | Error err -> fail ("expected stored operation input to synthesize media block: " ^ err)
+  | Ok decoded -> (
+      match decoded.user_blocks with
+      | [ Keeper_multimodal_input.User_image (Attached media) ] ->
+          check string "synthesized operation attachment id" "att-img" media.attachment_id
+      | _ -> fail "expected one synthesized image block in operation payload")
 
 let test_keeper_chat_operation_input_accepts_referenced_attachment () =
   let attachments =
@@ -2624,10 +2636,10 @@ let test_keeper_stream_bridge_terminal_text_state_is_message_scoped () =
 
 let test_keeper_stream_bridge_preserves_typed_media_source () =
   let open Agent_core.Types in
-  let raw_media = "raw image bytes" in
+  let raw_media = "\x89PNG\r\n\x1a\nraw image bytes" in
   let encoded_media = Base64.encode_string raw_media in
   (* Media chunks are accumulated and surfaced as a single
-     [Agent_core_media_delta] carrying the persisted media URL at the block stop, not a
+     [Agent_core_media_delta] carrying the persisted attachment URL at the block stop, not a
      per-chunk byte count. A lone [MediaDelta] therefore emits nothing until its
      [ContentBlockStop] closes the block. *)
   let events =
@@ -2652,8 +2664,8 @@ let test_keeper_stream_bridge_preserves_typed_media_source () =
       ]
   in
   let expected_ref =
-    "/api/v1/media/"
-    ^ Agent_core_sha256.(digest_string ("image/png\000" ^ raw_media) |> to_hex)
+    "/api/v1/attachments/att_"
+    ^ Agent_core_sha256.(digest_string raw_media |> to_hex)
   in
   match events with
   | [
@@ -2856,12 +2868,12 @@ let bridge_media_refs events =
     events
 
 let persisted_png_ref raw =
-  "/api/v1/media/"
-  ^ Agent_core_sha256.(digest_string ("image/png\000" ^ raw) |> to_hex)
+  "/api/v1/attachments/att_"
+  ^ Agent_core_sha256.(digest_string raw |> to_hex)
 
 let test_keeper_stream_bridge_joins_many_media_chunks_in_order () =
   let open Agent_core.Types in
-  let raw_media = String.init 768 (fun i -> Char.chr (i * 7 mod 256)) in
+  let raw_media = "\x89PNG\r\n\x1a\n" ^ String.init 760 (fun i -> Char.chr (i * 7 mod 256)) in
   let encoded = Base64.encode_string raw_media in
   let chunks = List.init (String.length encoded / 4) (fun i -> Llm_provider.Types.Base64 (String.sub encoded (i * 4) 4)) in
   let events =
@@ -2903,7 +2915,7 @@ let test_keeper_stream_bridge_rejects_last_media_chunk_over_the_cap () =
 
 let test_keeper_stream_bridge_rejects_media_carrier_change () =
   let open Agent_core.Types in
-  let raw_media = "first carrier" in
+  let raw_media = "\x89PNG\r\n\x1a\nfirst carrier" in
   let events =
     translate_agent_core_stream_events
       (bridge_media_deltas ~index:0
@@ -3504,22 +3516,22 @@ let test_keeper_stream_bridge_preserves_ndjson_provider_error () =
       check int "NDJSON provider error raw bytes" (String.length raw) actual_bytes
   | _ -> fail "expected NDJSON provider error to remain one typed protocol error"
 
-let check_attachment_payload_reference ~base_dir ~raw_media data =
-  match Tool_output.decode_from_agent_core data with
-  | Tool_output.Decoded reference ->
-      check int "reference retains payload byte count"
-        (String.length raw_media) reference.bytes;
-      check string "reference preview omits raw media"
-        "attachment payload" reference.preview;
-      check (result (option string) string)
-        "persisted reference retrieves exact attachment payload"
-        (Ok (Some raw_media))
-        (Tool_blob_store.fetch (Tool_blob_store.create ~base_path:base_dir)
-           ~sha256:reference.sha256
-         |> Result.map_error Tool_blob_store.fetch_error_to_string)
-  | Tool_output.Not_marker -> fail "persisted attachment has no blob reference"
-  | Tool_output.Invalid_marker { detail } ->
-      failf "persisted attachment has invalid blob reference: %s" detail
+let check_attachment_payload_reference ~base_dir ~raw_bytes (att : K.attachment) =
+  match Attachment_store.parse_id att.K.id with
+  | Ok sha256 ->
+      check string "persisted attachment data is canonical URL"
+        (Attachment_store.url_of_id att.K.id) att.K.data;
+      check int "attachment retains raw byte count"
+        (String.length raw_bytes) att.K.size;
+      let store = Attachment_store.create ~base_path:base_dir in
+      (match Attachment_store.get_bytes_by_sha256 store ~sha256 with
+       | Ok (Some stored) ->
+           check string "Attachment_store retrieves exact raw bytes" raw_bytes stored
+       | Ok None -> fail "persisted attachment bytes missing from Attachment_store"
+       | Error err -> fail (Attachment_store.get_error_to_string err))
+  | Error detail ->
+      failf "persisted attachment has non-canonical Attachment_store id %S: %s"
+        att.K.id detail
 
 let test_keeper_chat_history_persists_attachment_refs_not_raw_media () =
   let base_dir = temp_base_path "gate-keeper-media-history" in
@@ -3527,7 +3539,8 @@ let test_keeper_chat_history_persists_attachment_refs_not_raw_media () =
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
       let keeper_name = "multimodal-history-keeper" in
-      let raw_media = "data:image/png;base64,SECRET_RAW_MEDIA" in
+      let raw_bytes = "\x89PNG\r\n\x1a\nSECRET_RAW_MEDIA" in
+      let raw_media = "data:image/png;base64," ^ Base64.encode_string raw_bytes in
       K.append_turn ~base_dir ~keeper_name
         ~user_content:"describe this"
         ~user_attachments:
@@ -3536,7 +3549,7 @@ let test_keeper_chat_history_persists_attachment_refs_not_raw_media () =
               K.id = "att-img";
               att_type = "image";
               name = "screen.png";
-              size = 1024;
+              size = String.length raw_bytes;
               mime_type = "image/png";
               data = raw_media;
             width = None;
@@ -3559,8 +3572,7 @@ let test_keeper_chat_history_persists_attachment_refs_not_raw_media () =
       | user :: _ -> (
           match user.K.attachments with
           | Some [ att ] ->
-              check string "loaded attachment identity" "att-img" att.K.id;
-              check_attachment_payload_reference ~base_dir ~raw_media att.K.data
+              check_attachment_payload_reference ~base_dir ~raw_bytes att
           | _ -> fail "expected one persisted attachment")
       | [] -> fail "expected persisted chat messages")
 
@@ -3570,7 +3582,8 @@ let test_keeper_chat_user_only_persists_attachment_refs_not_raw_media () =
     ~finally:(fun () -> try remove_tree base_dir with _ -> ())
     (fun () ->
       let keeper_name = "multimodal-user-only-history-keeper" in
-      let raw_media = "data:image/png;base64,SECRET_RAW_MEDIA" in
+      let raw_bytes = "\x89PNG\r\n\x1a\nSECRET_RAW_MEDIA" in
+      let raw_media = "data:image/png;base64," ^ Base64.encode_string raw_bytes in
       K.append_user_message ~base_dir ~keeper_name
         ~content:"inspect this"
         ~attachments:
@@ -3579,7 +3592,7 @@ let test_keeper_chat_user_only_persists_attachment_refs_not_raw_media () =
               K.id = "att-img";
               att_type = "image";
               name = "screen.png";
-              size = 1024;
+              size = String.length raw_bytes;
               mime_type = "image/png";
               data = raw_media;
             width = None;
@@ -3601,8 +3614,7 @@ let test_keeper_chat_user_only_persists_attachment_refs_not_raw_media () =
       | [ user ] -> (
           match user.K.attachments with
           | Some [ att ] ->
-              check string "loaded user-only attachment identity" "att-img" att.K.id;
-              check_attachment_payload_reference ~base_dir ~raw_media att.K.data
+              check_attachment_payload_reference ~base_dir ~raw_bytes att
           | _ -> fail "expected one persisted user-only attachment")
       | _ -> fail "expected one persisted user message")
 

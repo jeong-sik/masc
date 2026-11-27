@@ -1460,11 +1460,13 @@ let runtime_default_runtime_id () =
 
 let effective_capabilities_json (rt : Runtime_instance.t) =
   let effective_input = Runtime_agent.input_capabilities_of_runtime rt in
+  let supports_image_output = Runtime_agent.runtime_supports_image_output ~runtime:rt in
   let official_capability_fields () =
     [ "supports_tools", `Bool (Runtime_tool_support.declares_tools rt)
     ; "supports_native_streaming", `Bool rt.model.streaming
     ; "supports_multimodal_inputs", `Bool effective_input.supports_multimodal_inputs
     ; "supports_image_input", `Bool effective_input.supports_image_input
+    ; "supports_image_output", `Bool supports_image_output
     ; "supports_document_input", `Bool effective_input.supports_document_input
     ; "supports_audio_input", `Bool effective_input.supports_audio_input
     ; "supports_video_input", `Bool effective_input.supports_video_input
@@ -1545,6 +1547,7 @@ let effective_capabilities_json (rt : Runtime_instance.t) =
       ; "supports_structured_output", `Bool caps.supports_structured_output
       ; "supports_multimodal_inputs", `Bool effective_input.supports_multimodal_inputs
       ; "supports_image_input", `Bool effective_input.supports_image_input
+      ; "supports_image_output", `Bool supports_image_output
       ; "supports_document_input", `Bool caps.supports_document_input
       ; "supports_audio_input", `Bool caps.supports_audio_input
       ; "supports_video_input", `Bool caps.supports_video_input
@@ -1711,6 +1714,7 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime_instance.t) =
     ; "supports_parallel_tool_calls", Json_util.bool_opt_to_json caps.supports_parallel_tool_calls
     ; "supports_multimodal_inputs", `Bool effective_input.supports_multimodal_inputs
     ; "supports_image_input", `Bool effective_input.supports_image_input
+    ; "supports_image_output", `Bool (Runtime_agent.runtime_supports_image_output ~runtime:rt)
       ; "supports_document_input", Json_util.bool_opt_to_json caps.supports_document_input
     ; "supports_audio_input", Json_util.bool_opt_to_json caps.supports_audio_input
     ; "supports_video_input", Json_util.bool_opt_to_json caps.supports_video_input

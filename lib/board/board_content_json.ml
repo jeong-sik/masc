@@ -89,6 +89,11 @@ let post_to_yojson (p : post) : Yojson.Safe.t =
     | None -> []
   in
   let tail =
+    match p.attachment_ids with
+    | [] -> tail
+    | ids -> ("attachment_ids", `List (List.map (fun id -> `String id) ids)) :: tail
+  in
+  let tail =
     match post_classification_reason p with
     | Some reason -> ("classification_reason", `String reason) :: tail
     | None -> tail
@@ -149,6 +154,9 @@ let comment_to_yojson (c : comment) : Yojson.Safe.t =
      ; "votes_up", `Int c.votes_up
      ; "votes_down", `Int c.votes_down
      ]
+     @ (match c.attachment_ids with
+        | [] -> []
+        | ids -> [ "attachment_ids", `List (List.map (fun id -> `String id) ids) ])
      @
      match c.audience with
      | Some audience -> [ "audience", audience_to_yojson audience ]
@@ -209,6 +217,7 @@ let post_field_names =
   ; "closed"
   ; "classification_reason"
   ; "meta"
+  ; "attachment_ids"
   ]
 ;;
 
@@ -223,6 +232,7 @@ let comment_field_names =
   ; "expires_at"
   ; "votes_up"
   ; "votes_down"
+  ; "attachment_ids"
   ]
 ;;
 
@@ -267,6 +277,22 @@ let optional_meta fields =
   match List.assoc_opt "meta" fields with
   | None -> Ok None
   | Some (`Assoc _ as meta) -> Ok (Some meta)
+  | Some _ -> Error ()
+;;
+
+let optional_attachment_ids fields =
+  match List.assoc_opt "attachment_ids" fields with
+  | None -> Ok []
+  | Some (`List items) ->
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | `String raw :: rest ->
+        let trimmed = String.trim raw in
+        if String.equal trimmed "" then Error ()
+        else loop (trimmed :: acc) rest
+      | _ :: _ -> Error ()
+    in
+    loop [] items
   | Some _ -> Error ()
 ;;
 
@@ -407,7 +433,8 @@ let post_of_yojson (json : Yojson.Safe.t) : post decoded =
        , optional_meta fields
        , origin
        , closed
-       , audience )
+       , audience
+       , optional_attachment_ids fields )
      with
      | ( Some id_str
        , Some author_str
@@ -429,7 +456,8 @@ let post_of_yojson (json : Yojson.Safe.t) : post decoded =
        , Ok meta_json
        , Ok origin
        , Ok closed
-       , Ok audience ) when Float.is_finite content_updated_at ->
+       , Ok audience
+       , Ok attachment_ids ) when Float.is_finite content_updated_at ->
     let post_kind_opt =
       post_kind_of_string post_kind_raw
     in
@@ -466,6 +494,7 @@ let post_of_yojson (json : Yojson.Safe.t) : post decoded =
           ; thread_id
           ; origin
           ; closed
+          ; attachment_ids
           }
         in
         if Option.equal
@@ -493,6 +522,7 @@ let post_of_yojson (json : Yojson.Safe.t) : post decoded =
        , (Some _ | None)
        , (Some _ | None)
        , (Some _ | None)
+       , (Ok _ | Error _)
        , (Ok _ | Error _)
        , (Ok _ | Error _)
        , (Ok _ | Error _)
@@ -527,7 +557,8 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment decoded =
        , required_int fields "votes_up"
        , required_int fields "votes_down"
        , parent_id
-       , audience )
+       , audience
+       , optional_attachment_ids fields )
      with
      | ( Some id_str
        , Some post_id_str
@@ -538,7 +569,8 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment decoded =
        , Some votes_up
        , Some votes_down
        , Ok parent_id
-       , Ok audience ) ->
+       , Ok audience
+       , Ok attachment_ids ) ->
        let author = agent_id author_str in
        let value = match
           ( Comment_id.of_string id_str
@@ -557,6 +589,7 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment decoded =
             ; expires_at
             ; votes_up
             ; votes_down
+            ; attachment_ids
             }
           | (Ok _ | Error _), (Ok _ | Error _), (Some _ | None) -> None
        in
@@ -569,6 +602,7 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment decoded =
        , (Some _ | None)
        , (Some _ | None)
        , (Some _ | None)
+       , (Ok _ | Error _)
        , (Ok _ | Error _)
        , (Ok _ | Error _) ) -> { value = None; diagnostics = audience_diagnostics })
   | _ -> quiet None

@@ -218,7 +218,7 @@ let test_frozen_runtime_media_survives_registry_replacement () =
         if expected && index=0 then `OK,{|{"id":"read-image","model":"frozen-image-model","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"image-read","type":"function","function":{"name":"keeper_image_read","arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}|}
         else `OK,Exact_output_fixture.openai_response (`String "accepted"))) in
     let catalog_text=String.concat "" (List.map (fun provider -> Printf.sprintf
-      "[[models]]\nmodel_id=\"frozen-image-model\"\nprovider_name=%S\nbase=\"openai_chat\"\nmax_context_tokens=200000\nmax_output_tokens=128\nsupports_tools=true\nsupports_native_streaming=false\n"
+      "[[models]]\nmodel_id=\"frozen-image-model\"\nprovider_name=%S\nbase=\"openai_chat\"\nmax_context_tokens=200000\nmax_output_tokens=128\nsupports_tools=true\nsupports_native_streaming=false\nsupports_image_input=false\n"
       provider) ["image";"standby"]) in
     (match Llm_provider.Model_catalog.of_toml_string ~source:label catalog_text with
      | Ok models ->
@@ -227,7 +227,7 @@ let test_frozen_runtime_media_survives_registry_replacement () =
      | Error error -> fail error);
     let path=Filename.concat root "runtime.toml" in
     let config_text image present =
-      Printf.sprintf "[runtime]\ndefault=%S\nmedia_failover=[]\n"
+      Printf.sprintf "[runtime]\ndefault=%S\n"
         (if present then "image.sample" else "standby.sample")
       ^ (if present then Printf.sprintf
           "[providers.image]\nprotocol=\"openai-compatible-http\"\nendpoint=%S\n" server.base_url else "")
@@ -254,8 +254,10 @@ let test_frozen_runtime_media_survives_registry_replacement () =
         ~tools ~agent_core_tools:tools ~on_demand_tool_names:[] ~result_bounds:[]
         ~listing:Keeper_tools_agent_core.No_listing in
     let provider_config_transform (provider:Llm_provider.Provider_config.t) =
-      check bool "catalogued provider config does not carry the runtime media declarations" true
-        (Option.is_none provider.model_capabilities_override);
+      check bool "catalogued provider config reflects frozen media override" expected
+        (match provider.model_capabilities_override with
+         | Some c -> c.supports_image_input
+         | None -> false);
       reload replacement present;
       let provider={provider with temperature=Some 0.3125;max_tokens=Some 31;
         response_format=Agent_core.Types.JsonMode} in

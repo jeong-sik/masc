@@ -799,11 +799,37 @@ type tool_call_status =
   | Tool_failed
   | Tool_other_status of string
 
+type media_output =
+  { mime_type : string
+  ; data_bytes : string
+  ; message_id : string option
+  ; tool_call_id : string option
+  }
+
+let observed_image_prompt_mu = Stdlib.Mutex.create ()
+let observed_image_prompt_tbl : (driver * string, bool) Hashtbl.t = Hashtbl.create 8
+
+let record_observed_image_prompt ~driver ~cli_path supported =
+  Stdlib.Mutex.protect observed_image_prompt_mu (fun () ->
+    Hashtbl.replace observed_image_prompt_tbl (driver, String.trim cli_path) supported)
+;;
+
+let observed_image_prompt ~driver ~cli_path =
+  Stdlib.Mutex.protect observed_image_prompt_mu (fun () ->
+    Hashtbl.find_opt observed_image_prompt_tbl (driver, String.trim cli_path))
+;;
+
+let clear_observed_capabilities_for_tests () =
+  Stdlib.Mutex.protect observed_image_prompt_mu (fun () ->
+    Hashtbl.clear observed_image_prompt_tbl)
+;;
+
 type stream_event =
   | Text_delta of
       { text : string
       ; message_id : string option
       }
+  | Media_output of media_output
   | Thought_delta of string
   | Tool_call_started of
       { tool_call_id : string
@@ -821,6 +847,7 @@ type stream_event =
       ; raw_input : Yojson.Safe.t option
       ; raw_output : Yojson.Safe.t option
       ; identity : tool_call_identity option
+      ; media_outputs : media_output list
       }
   | Usage_updated of
       { used : int option
@@ -893,6 +920,7 @@ type prompt_result =
   ; text : string
   ; final_message : string
   ; thought : string
+  ; media_outputs : media_output list
   ; usage : usage
   ; usage_source : usage_source
   ; context_compaction : context_compaction
@@ -907,6 +935,7 @@ type prompt_result =
 type agent_activity =
   | Request_sent of string
   | Agent_message
+  | Agent_media_output
   | Agent_thought
   | Agent_tool_call_started of
       { title : string
@@ -942,6 +971,7 @@ let agent_activity_to_string = function
   | Request_sent method_name ->
     Printf.sprintf "nothing since MASC sent %s" method_name
   | Agent_message -> "the agent sent answer text"
+  | Agent_media_output -> "the agent sent an image"
   | Agent_thought -> "the agent sent thinking text"
   | Agent_tool_call_started { title; status } ->
     Printf.sprintf
@@ -2022,6 +2052,112 @@ let tool_call_wire_has_identity_fields (w : tool_call_wire) =
   || w.locations <> []
 ;;
 
+let sniff_image_mime_opt (bytes : string) : string option =
+  let len = String.length bytes in
+  if len >= 8
+     && bytes.[0] = '\x89' && bytes.[1] = 'P' && bytes.[2] = 'N' && bytes.[3] = 'G'
+     && bytes.[4] = '\r' && bytes.[5] = '\n' && bytes.[6] = '\x1a' && bytes.[7] = '\n'
+  then Some "image/png"
+  else if len >= 3 && bytes.[0] = '\xff' && bytes.[1] = '\xd8' && bytes.[2] = '\xff'
+  then Some "image/jpeg"
+  else if len >= 12
+          && String.sub bytes 0 4 = "RIFF"
+          && String.sub bytes 8 4 = "WEBP"
+  then Some "image/webp"
+  else if len >= 6
+          && (String.sub bytes 0 6 = "GIF87a" || String.sub bytes 0 6 = "GIF89a")
+  then Some "image/gif"
+  else None
+;;
+
+let decode_image_payload ~declared_mime raw_data : (string * string) option =
+  let trimmed = String.trim raw_data in
+  if trimmed = "" then None
+  else (
+    let data_uri_mime, b64 =
+      if String.starts_with ~prefix:"data:" trimmed
+      then (
+        match String.index_opt trimmed ',' with
+        | Some comma ->
+          let header = String.sub trimmed 5 (comma - 5) in
+          let mime =
+            match String.index_opt header ';' with
+            | Some semi -> String.trim (String.sub header 0 semi)
+            | None -> String.trim header
+          in
+          let payload =
+            String.sub trimmed (comma + 1) (String.length trimmed - comma - 1)
+          in
+          (if mime = "" then None else Some mime), payload
+        | None -> None, trimmed)
+      else None, trimmed
+    in
+    let compact =
+      let buf = Buffer.create (String.length b64) in
+      String.iter
+        (fun c ->
+           match c with
+           | ' ' | '\t' | '\n' | '\r' -> ()
+           | _ -> Buffer.add_char buf c)
+        b64;
+      Buffer.contents buf
+    in
+    match Base64.decode compact with
+    | Error _ -> None
+    | Ok data_bytes ->
+      if String.length data_bytes = 0
+      then None
+      else (
+        let mime_type =
+          match sniff_image_mime_opt data_bytes, data_uri_mime, declared_mime with
+          | Some sniffed, _, _ -> sniffed
+          | None, Some m, _ -> m
+          | None, None, Some m when String.trim m <> "" -> String.trim m
+          | None, None, _ -> "image/png"
+        in
+        Some (mime_type, data_bytes)))
+;;
+
+let parse_acp_image_block ?message_id ?tool_call_id (block : Yojson.Safe.t) : media_output option =
+  match json_string_opt "type" block with
+  | Some "image" ->
+    let declared_mime =
+      match json_string_opt "mimeType" block with
+      | Some _ as m -> m
+      | None ->
+        (match json_string_opt "mime_type" block with
+         | Some _ as m -> m
+         | None -> json_string_opt "mediaType" block)
+    in
+    let raw_data =
+      match json_string_opt "data" block with
+      | Some _ as d -> d
+      | None -> json_string_opt "image" block
+    in
+    Option.bind raw_data (fun raw ->
+      Option.map
+        (fun (mime_type, data_bytes) ->
+           { mime_type; data_bytes; message_id; tool_call_id })
+        (decode_image_payload ~declared_mime raw))
+  | _ -> None
+;;
+
+let rec extract_acp_image_blocks ?message_id ?tool_call_id (json : Yojson.Safe.t) : media_output list =
+  match parse_acp_image_block ?message_id ?tool_call_id json with
+  | Some img -> [ img ]
+  | None ->
+    (match json with
+     | `List items -> List.concat_map (extract_acp_image_blocks ?message_id ?tool_call_id) items
+     | `Assoc _ ->
+       let from_content =
+         match json_field "content" json with
+         | Some c -> extract_acp_image_blocks ?message_id ?tool_call_id c
+         | None -> []
+       in
+       from_content
+     | _ -> [])
+;;
+
 let parse_session_update_with ~driver ?managed_schema_root ?mcp_server_name ?merged_wire params =
   let update =
     match json_field "update" params with
@@ -2030,13 +2166,24 @@ let parse_session_update_with ~driver ?managed_schema_root ?mcp_server_name ?mer
   in
   match json_string_opt "sessionUpdate" update with
   | Some "agent_message_chunk" ->
-    let text =
-      match json_field "content" update with
-      | Some content -> json_string_opt "text" content
-      | None -> json_string_opt "text" update
-    in
     let message_id = json_string_opt "messageId" update in
-    Option.map (fun text -> Text_delta { text; message_id }) text
+    let image_opt =
+      match json_field "content" update with
+      | Some content ->
+        (match extract_acp_image_blocks ?message_id content with
+         | img :: _ -> Some (Media_output img)
+         | [] -> None)
+      | None -> None
+    in
+    (match image_opt with
+     | Some _ as media -> media
+     | None ->
+       let text =
+         match json_field "content" update with
+         | Some content -> json_string_opt "text" content
+         | None -> json_string_opt "text" update
+       in
+       Option.map (fun text -> Text_delta { text; message_id }) text)
   | Some "agent_thought_chunk" ->
     let text =
       match json_field "content" update with
@@ -2068,6 +2215,20 @@ let parse_session_update_with ~driver ?managed_schema_root ?mcp_server_name ?mer
     let title = json_string_opt "title" update in
     let status = Option.map parse_tool_status (json_string_opt "status" update) in
     let raw_output = json_field "rawOutput" update in
+    let media_outputs =
+      let tc_id = if tool_call_id = "" then None else Some tool_call_id in
+      let from_content =
+        match json_field "content" update with
+        | Some c -> extract_acp_image_blocks ?tool_call_id:tc_id c
+        | None -> []
+      in
+      let from_raw_output =
+        match raw_output with
+        | Some r -> extract_acp_image_blocks ?tool_call_id:tc_id r
+        | None -> []
+      in
+      from_content @ from_raw_output
+    in
     let identity =
       if tool_call_wire_has_identity_fields wire
       then Some (classify_tool_call ~driver ?managed_schema_root ?mcp_server_name wire)
@@ -2082,6 +2243,7 @@ let parse_session_update_with ~driver ?managed_schema_root ?mcp_server_name ?mer
          ; raw_input = wire.raw_input
          ; raw_output
          ; identity
+         ; media_outputs
          })
   | Some "usage_update" ->
     let nonneg_opt = Option.map nonneg in
@@ -3017,6 +3179,7 @@ let record_turn_tool_call_wire (turn : active_turn_hooks) (incoming : tool_call_
 
 let agent_activity_of_update ~update_kind = function
   | Some (Text_delta _) -> Agent_message
+  | Some (Media_output _) -> Agent_media_output
   | Some (Thought_delta _) -> Agent_thought
   | Some (Tool_call_started { title; status; _ }) -> Agent_tool_call_started { title; status }
   | Some (Tool_call_updated { title; status; _ }) -> Agent_tool_call_updated { title; status }
@@ -3195,6 +3358,7 @@ let dispatch_incoming_message t msg =
      | Some
          ( Text_delta _
          | Thought_delta _
+         | Media_output _
          | Tool_call_started _
          | Tool_call_updated _
          | Usage_updated _
@@ -3924,6 +4088,7 @@ let start ~sw ~proc_mgr ~clock ?fs ~(config : config) ?mcp_server ?native_postur
       in
       t.capabilities <- caps;
       t.init_latency_ms <- init_ms;
+      record_observed_image_prompt ~driver:config.driver ~cli_path:config.cli_path caps.image_prompt;
       Ok t)
 ;;
 
@@ -4235,6 +4400,7 @@ let apply_session_options
                   Atomic.set observed_config_options (Some opts)
                 | Text_delta _
                 | Thought_delta _
+                | Media_output _
                 | Tool_call_started _
                 | Tool_call_updated _
                 | Usage_updated _
@@ -4449,6 +4615,7 @@ let attach_existing_session
       (match size with Some _ as s -> Atomic.set replayed_size s | None -> ())
     | Text_delta _
     | Thought_delta _
+    | Media_output _
     | Tool_call_started _
     | Tool_call_updated _
     | Config_options_updated [] -> ()
@@ -4603,6 +4770,7 @@ let prompt
   let final_message_buf = Buffer.create 1024 in
   let final_message_id = ref None in
   let thought_buf = Buffer.create 512 in
+  let media_outputs_rev = ref [] in
   let tool_calls = ref 0 in
   let last_context_used = ref None in
   let last_context_size = ref None in
@@ -4626,9 +4794,12 @@ let prompt
           final_message_id := Some id
         | Some _ | None -> ());
        append_bounded final_message_buf text
+     | Media_output media -> media_outputs_rev := media :: !media_outputs_rev
      | Thought_delta s -> append_bounded thought_buf s
      | Tool_call_started _ -> incr tool_calls
-     | Tool_call_updated _ | Mode_updated _ | Config_options_updated _ -> ()
+     | Tool_call_updated { media_outputs; _ } ->
+       List.iter (fun media -> media_outputs_rev := media :: !media_outputs_rev) media_outputs
+     | Mode_updated _ | Config_options_updated _ -> ()
      | Usage_updated
          { used
          ; size
@@ -4837,6 +5008,7 @@ let prompt
       ; text = Buffer.contents text_buf
       ; final_message = Buffer.contents final_message_buf
       ; thought = Buffer.contents thought_buf
+      ; media_outputs = List.rev !media_outputs_rev
       ; usage
       ; usage_source
       ; context_compaction
@@ -4860,6 +5032,7 @@ module For_testing = struct
   let parse_session_info = parse_session_info
   let resolve_model_option_value = resolve_model_option_value
   let resolve_effort_option_value = resolve_effort_option_value
+  let parse_capabilities = parse_capabilities
   let parse_session_update = parse_session_update
   let parse_prompt_usage = parse_prompt_usage
   let parse_stop_reason = parse_stop_reason

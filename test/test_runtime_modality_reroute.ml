@@ -766,10 +766,9 @@ supports-multimodal-inputs = true
     check bool "native image declaration remains effective" true native_caps.supports_image_input;
     check bool "native audio declaration remains effective" true native_caps.supports_audio_input)
 
-(* The vision runtimes are [runtime.media_failover] resolved in declared
-   order: ids that resolve to nothing are skipped and a repeated id counts
-   once. [fixture.b] is declared and image-capable but not listed, so it is not
-   among them. *)
+(* Vision reader candidates prioritize the explicit [runtime.media].vision_reader
+   override when set, then auto-discover every configured Native_vision_input
+   runtime in order without duplicates. *)
 let test_media_candidates_are_the_vision_runtimes () =
   let fixture =
     {|[runtime]
@@ -798,17 +797,20 @@ supports-image-input = true
     let vision id = { native with Runtime_instance.id } in
     let ids = List.map (fun (runtime : Runtime_instance.t) -> runtime.Runtime_instance.id) in
     let runtimes = [ vision "fixture.a"; vision "fixture.b"; vision "fixture.c" ] in
+    let with_override =
+      { Runtime_schema.vision_reader = Some "fixture.c"; image_generator = None }
+    in
     check (list string)
-      "declared order; an unresolved id is skipped; a repeat counts once"
-      [ "fixture.c"; "fixture.a" ]
+      "explicit vision_reader comes first, followed by remaining capable runtimes"
+      [ "fixture.c"; "fixture.a"; "fixture.b" ]
       (ids
-         (Runtime_agent.media_candidates_of ~runtimes
-            ~media_failover:
-              [ "fixture.c"; "fixture.missing"; "fixture.a"; "fixture.c" ]));
+         (Runtime_agent.vision_reader_candidates_of ~runtimes ~media:with_override ()));
     check (list string)
-      "no media_failover: no vision runtimes"
-      []
-      (ids (Runtime_agent.media_candidates_of ~runtimes ~media_failover:[])))
+      "no media override: auto-discovers capable vision runtimes"
+      [ "fixture.a"; "fixture.b"; "fixture.c" ]
+      (ids
+         (Runtime_agent.vision_reader_candidates_of
+            ~runtimes ~media:Runtime_schema.empty_media_overrides ())))
 
 (* The media walk keeps only the candidates that take every
    modality the run requires, in candidate order; a text run has no walk. *)

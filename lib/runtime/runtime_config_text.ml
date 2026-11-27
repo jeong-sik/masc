@@ -315,7 +315,7 @@ let remove_runtime_assignment_text content ~keeper_name =
 (* A place in runtime.toml that names a lane. [resolve_assignment] reads a lane
    before a runtime of the same id, and each of these is resolved that way: a
    keeper's route is its assignment or, without one, the default, and a Fusion
-   run resolves each seat when it reaches it. [\[runtime\].media_failover] and
+   run resolves each seat when it reaches it. [\[runtime.media\]] overrides and
    [verifier_exact] slots name runtimes only and never reach a lane, so they
    are not here. *)
 type route_reference =

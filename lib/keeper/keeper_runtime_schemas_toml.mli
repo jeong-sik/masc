@@ -16,6 +16,7 @@ val skill_validate : Masc_domain.tool_schema
 val skill_publish : Masc_domain.tool_schema
 val keeper_analyze_image : Masc_domain.tool_schema
 val keeper_image_read : Masc_domain.tool_schema
+val keeper_generate_image : Masc_domain.tool_schema
 
 (* Provider Files tools. *)
 val file_upload : Masc_domain.tool_schema

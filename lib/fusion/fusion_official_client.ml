@@ -198,7 +198,17 @@ type image_input = Runtime_official_client_tool.image_input =
   { media_type : string
   ; base64_data : string
   }
-type response = { text : string; model : string; usage : Fusion_types.usage }
+type media_output =
+  { mime_type : string
+  ; data_bytes : string
+  }
+
+type response =
+  { text : string
+  ; model : string
+  ; usage : Fusion_types.usage
+  ; media_outputs : media_output list
+  }
 type failure =
   | Missing_reply
   | Setup_failure of string
@@ -704,7 +714,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
             ~prompt
             ~images
         with
-        | Ok (result : Runtime_claude_code.turn_result) -> succeeded { text = result.text; model = result.model; usage = optional_usage claude_usage result.usage.turn_total }
+        | Ok (result : Runtime_claude_code.turn_result) -> succeeded { text = result.text; model = result.model; usage = optional_usage claude_usage result.usage.turn_total; media_outputs = [] }
         | Error error -> claude_failed ~admission:false error)))
   | Runtime_execution.Codex_app_server execution ->
     (* HIGH-RISK-UNREVIEWED: a panelist is a call of the operator, so its
@@ -736,6 +746,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          | Runtime_codex_app_server.Compaction_observed | Runtime_codex_app_server.Turn_started _
          | Runtime_codex_app_server.Text_delta _ | Runtime_codex_app_server.Thinking_delta _
          | Runtime_codex_app_server.Text_completed _ | Runtime_codex_app_server.Thinking_completed _
+         | Runtime_codex_app_server.Media_output _
          | Runtime_codex_app_server.Dynamic_tool_started _
          | Runtime_codex_app_server.Dynamic_tool_finished _
          | Runtime_codex_app_server.Tool_delivery_closed _
@@ -746,9 +757,16 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          | Runtime_codex_app_server.Usage_windows_reported _
          | Runtime_codex_app_server.Turn_finished _ | Usage_reported {frame=Counted _; _ } -> ())
        ~mgr ~clock ~cwd ~account config ~prompt ~images with
-     | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded { text = result.text; model = result.model; usage = (match result.usage with
+     | Ok (result : Runtime_codex_app_server.turn_result) ->
+       let media_outputs =
+         List.map
+           (fun (m : Runtime_codex_app_server.media_output) ->
+              { mime_type = m.mime_type; data_bytes = m.data_bytes })
+           result.media_outputs
+       in
+       succeeded { text = result.text; model = result.model; usage = (match result.usage with
          | Some Runtime_codex_app_server.Thread_count_replaced -> !observed_usage
-         | (Some (Runtime_codex_app_server.Thread_count _) | None) as usage -> optional_usage codex_usage usage) }
+         | (Some (Runtime_codex_app_server.Thread_count _) | None) as usage -> optional_usage codex_usage usage); media_outputs }
      | Error error -> codex_failed error))
   | Runtime_execution.Antigravity_cli _ when not (List.is_empty images) ->
     Error (Setup_failure "Antigravity transport does not support image input")
@@ -797,7 +815,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          | Runtime_antigravity.Native_tool_finished _ | Runtime_antigravity.Turn_finished _ -> ())
        ~home_dir:(Runtime_antigravity_home.home_dir home)
        ~mgr ~clock ~cwd:Eio.Path.(Eio.Stdenv.fs env / native_cwd) config ~prompt with
-     | Ok (result : Runtime_antigravity.turn_result) -> succeeded { text = result.text; model = result.model; usage = antigravity_usage result.usage }
+     | Ok (result : Runtime_antigravity.turn_result) -> succeeded { text = result.text; model = result.model; usage = antigravity_usage result.usage; media_outputs = [] }
      | Error error -> antigravity_failed error)
   | Runtime_execution.Acp execution ->
     let acp_failed err =
@@ -946,7 +964,13 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
                       in
                       (* The panel answer is the last message; what the host said
                          before a tool call is not part of it. *)
-                      succeeded { text = res.final_message; model = observed_model; usage }))))
+                      let media_outputs =
+                        List.map
+                          (fun (m : Runtime_acp_client.media_output) ->
+                             { mime_type = m.mime_type; data_bytes = m.data_bytes })
+                          res.media_outputs
+                      in
+                      succeeded { text = res.final_message; model = observed_model; usage; media_outputs }))))
 ;;
 
 let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema ~prompt () =

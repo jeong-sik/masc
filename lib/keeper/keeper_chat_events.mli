@@ -26,6 +26,14 @@ type text_response = Ag_ui.text_response =
 
 type role = User | Assistant
 
+type attachment_role =
+  | Attachment_user
+  | Attachment_tool
+  | Attachment_assistant
+
+val attachment_role_to_string : attachment_role -> string
+val attachment_role_of_string : string -> attachment_role option
+
 type stream_protocol_error_kind =
   | Tool_start_duplicate_index
   | Tool_start_missing_identity
@@ -266,6 +274,17 @@ type keeper_chat_event =
       ; description : string option
       ; image : string option
       }
+  | Attachment_emitted of
+      { attachment_id : string
+      ; role : attachment_role
+      ; tool_call_id : string option
+      ; caption : string option
+      }
+      (** A persisted canonical attachment ([att_<64hex>]) emitted onto the live
+          turn stream (user upload at turn start, tool-returned attachment on
+          tool completion, or assistant-emitted attachment). Projected to
+          AG-UI [CUSTOM:KEEPER_ATTACHMENT] and journaled as
+          ["attachment_emitted"]. *)
   | Image_block of { url : string; caption : string option }
   | Status_block of Keeper_chat_blocks.status_block
       (** Typed control status for channel adapters. It is rendered as channel

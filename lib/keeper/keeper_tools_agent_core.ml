@@ -36,13 +36,81 @@ type listing_placement =
 
 type image_admission = Image_input_admitted | Image_input_unavailable
 
-let descriptor_admitted admission (descriptor : Keeper_tool_descriptor.t) =
-  match admission with
-  | Image_input_admitted -> true
-  | Image_input_unavailable -> descriptor.runtime_handler <> Keeper_tool_descriptor.Tool_read_image
+let descriptor_admitted ?(image_generation_admitted = true) admission (descriptor : Keeper_tool_descriptor.t) =
+  match descriptor.runtime_handler with
+  | Keeper_tool_descriptor.Tool_read_image ->
+    (match admission with
+     | Image_input_admitted -> true
+     | Image_input_unavailable -> false)
+  | Keeper_tool_descriptor.Tool_analyze_image ->
+    (match admission with
+     | Image_input_admitted -> false
+     | Image_input_unavailable -> true)
+  | Keeper_tool_descriptor.Tool_generate_image ->
+    image_generation_admitted
+  | Keeper_tool_descriptor.Tool_lane_addon _
+  | Keeper_tool_descriptor.Tool_execute
+  | Keeper_tool_descriptor.Tool_search_files
+  | Keeper_tool_descriptor.Tool_read_file
+  | Keeper_tool_descriptor.Tool_edit_file
+  | Keeper_tool_descriptor.Tool_write_file
+  | Keeper_tool_descriptor.Tool_lane_status
+  | Keeper_tool_descriptor.Tool_tools_list
+  | Keeper_tool_descriptor.Tool_capability_search
+  | Keeper_tool_descriptor.Tool_context_status
+  | Keeper_tool_descriptor.Tool_peer_artifact
+  | Keeper_tool_descriptor.Tool_artifact_read
+  | Keeper_tool_descriptor.Tool_skill_validate
+  | Keeper_tool_descriptor.Tool_artifact_draft
+  | Keeper_tool_descriptor.Tool_artifact_publish
+  | Keeper_tool_descriptor.Tool_skill_publish
+  | Keeper_tool_descriptor.Tool_workspace_memory_read
+  | Keeper_tool_descriptor.Tool_memory_search
+  | Keeper_tool_descriptor.Tool_memory_select
+  | Keeper_tool_descriptor.Tool_memory_retract
+  | Keeper_tool_descriptor.Tool_memory_write
+  | Keeper_tool_descriptor.Tool_constitution_write
+  | Keeper_tool_descriptor.Tool_constitution_read
+  | Keeper_tool_descriptor.Tool_constitution_remove
+  | Keeper_tool_descriptor.Tool_wiki_search
+  | Keeper_tool_descriptor.Tool_wiki_read
+  | Keeper_tool_descriptor.Tool_surface_read
+  | Keeper_tool_descriptor.Tool_surface_post
+  | Keeper_tool_descriptor.Tool_ide_annotate
+  | Keeper_tool_descriptor.Tool_voice_dispatch
+  | Keeper_tool_descriptor.Tool_task_dispatch
+  | Keeper_tool_descriptor.Tool_board_dispatch
+  | Keeper_tool_descriptor.Tool_masc_task_dispatch
+  | Keeper_tool_descriptor.Tool_masc_plan_dispatch
+  | Keeper_tool_descriptor.Tool_masc_run_dispatch
+  | Keeper_tool_descriptor.Tool_masc_agent_dispatch
+  | Keeper_tool_descriptor.Tool_masc_workspace_dispatch
+  | Keeper_tool_descriptor.Tool_masc_misc_dispatch
+  | Keeper_tool_descriptor.Tool_web_search
+  | Keeper_tool_descriptor.Tool_web_fetch
+  | Keeper_tool_descriptor.Tool_browser_tabs
+  | Keeper_tool_descriptor.Tool_browser_read
+  | Keeper_tool_descriptor.Tool_browser_session
+  | Keeper_tool_descriptor.Tool_browser_goto
+  | Keeper_tool_descriptor.Tool_browser_act
+  | Keeper_tool_descriptor.Tool_browser_interact
+  | Keeper_tool_descriptor.Tool_masc_agent_timeline_dispatch
+  | Keeper_tool_descriptor.Tool_masc_schedule_dispatch
+  | Keeper_tool_descriptor.Tool_keeper_job_dispatch
+  | Keeper_tool_descriptor.Tool_receipt_wait
+  | Keeper_tool_descriptor.Tool_keeper_composition_result_dispatch
+  | Keeper_tool_descriptor.Tool_keeper_code_query_dispatch
+  | Keeper_tool_descriptor.Tool_masc_keeper_dispatch
+  | Keeper_tool_descriptor.Tool_masc_fusion_dispatch
+  | Keeper_tool_descriptor.Tool_masc_fusion_status
+  | Keeper_tool_descriptor.Tool_masc_fusion_decision
+  | Keeper_tool_descriptor.Tool_masc_file_dispatch
+  | Keeper_tool_descriptor.Tool_masc_wiki_dispatch
+  | Keeper_tool_descriptor.Tool_masc_local_runtime_dispatch -> true
 
 type model_tool_surface =
   { image_admission : image_admission
+  ; image_generation_admitted : bool
   ; tools : Agent_core.Tool.t list
   ; agent_core_tools : Agent_core.Tool.t list
   ; on_demand_tool_names : string list
@@ -52,7 +120,10 @@ type model_tool_surface =
 
 let assemble_model_tool_surface ~image_admission ~tools ~agent_core_tools
     ~on_demand_tool_names ~result_bounds ~listing : model_tool_surface =
-  { image_admission; tools; agent_core_tools; on_demand_tool_names; result_bounds; listing }
+  { image_admission; image_generation_admitted = true; tools; agent_core_tools; on_demand_tool_names; result_bounds; listing }
+
+let with_image_generation_admitted image_generation_admitted surface =
+  { surface with image_generation_admitted }
 
 type model_tool_projection =
   runtime:Runtime_instance.t -> carried:Agent_core.Tool.t list -> model_tool_surface

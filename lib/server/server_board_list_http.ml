@@ -392,6 +392,7 @@ let payload ?config ~reader ~reaction_actor request
               let current_vote = board_current_vote_for_post ~reader ~voter ~post_id in
               let reactions = reactions_for (Board.Reaction_post, post_id) in
               board_post_dashboard_json
+                ?base_path
                 ?reactions
                 ?current_vote
                 ~author_karma:(get_karma author) p

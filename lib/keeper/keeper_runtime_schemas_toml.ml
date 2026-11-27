@@ -32,6 +32,7 @@ let skill_validate = schema_of_name "keeper_skill_validate"
 let skill_publish = schema_of_name "keeper_skill_publish"
 let keeper_analyze_image = schema_of_name "keeper_analyze_image"
 let keeper_image_read = schema_of_name "keeper_image_read"
+let keeper_generate_image = schema_of_name "keeper_generate_image"
 (* Provider Files tools. *)
 let file_upload = schema_of_name "masc_file_upload"
 let file_delete = schema_of_name "masc_file_delete"
@@ -54,5 +55,6 @@ let schemas =
   ; file_list
   ; keeper_analyze_image
   ; keeper_image_read
+  ; keeper_generate_image
   ]
 

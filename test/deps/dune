@@ -32,6 +32,7 @@
   (re_export masc.agent_core)
   (re_export masc.agent_core.base)
   (re_export masc.agent_core.llm_provider)
+  (re_export masc.attachment_store)
   (re_export alcotest)
   (re_export astring)
   (re_export base64)

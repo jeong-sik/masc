@@ -624,7 +624,7 @@ let test_listing_and_refusal_share_the_gap_predicate () =
     match
       List.find_opt
         (fun (r : Runtime_instance.t) -> String.equal r.id id)
-        (fst (Runtime.runtimes_and_media_failover ()))
+        (Runtime.get_runtimes ())
     with
     | Some r -> r
     | None -> Alcotest.failf "runtime %s is not loaded" id

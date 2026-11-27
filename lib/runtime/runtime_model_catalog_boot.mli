@@ -58,7 +58,7 @@ val load_standalone_list :
   -> ( Runtime_instance.t list
        * Runtime_instance.t
        * (string * string) list
-       * string list
+       * Runtime_schema.media_overrides
        * Runtime_lane.t list
      , string )
      result

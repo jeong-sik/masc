@@ -22,7 +22,7 @@ val remove_egress_allow_text : string -> keeper_name:string -> string
 (** runtime.toml text without [keeper_name]'s egress table. The keeper then
     has no allowlist, which admits nothing rather than everything. Pure. *)
 
-(** A place in runtime.toml that can name a lane. [\[runtime\].media_failover]
+(** A place in runtime.toml that can name a lane. [\[runtime.media\]] overrides
     and [verifier_exact] slots name runtimes only and are not here. *)
 type route_reference =
   | Keeper_assignment of string  (** [\[runtime.assignments\].<keeper>] *)

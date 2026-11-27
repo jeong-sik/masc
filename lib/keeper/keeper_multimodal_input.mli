@@ -31,33 +31,48 @@ type user_input_block =
   | User_image of user_image_source
   | User_document of user_media_block
   | User_audio of user_media_block
+  | User_attachment of user_media_block
 
 val attachments_to_yojson : Keeper_chat_store.attachment list -> Yojson.Safe.t
 
 val parse_attachments :
   Yojson.Safe.t -> (Keeper_chat_store.attachment list, string) result
-(** Parse optional [attachments] from a request object. Duplicate or undeclared
-    fields, wrong types, missing [id]/[data], and a duplicated [id] are request
-    errors.  A duplicate id would parse twice while a user_blocks reference
-    reaches only the first entry, silently shadowing the other. *)
+(** Parse optional [attachments] from a request object. Accepts both upload-first
+    canonical [att_<64hex>] references (where [data] may be omitted) and legacy
+    inline base64 attachments. *)
 
 val user_blocks_to_yojson : user_input_block list -> Yojson.Safe.t
 
 val parse_user_blocks : Yojson.Safe.t -> (user_input_block list, string) result
-(** Parse the optional [user_blocks] request field. Duplicate or undeclared
-    fields, unknown block types, and malformed media refs are request errors.
-    An image block names exactly one carrier — [attachment_id] (bytes),
-    [url] (http/https only), or [file_id] — and zero or several at once are
-    request errors. Nonblank text blocks retain their original whitespace. *)
+(** Parse the optional [user_blocks] request field. Accepts [text], [image],
+    [document], [audio], and upload-first [attachment] blocks carrying
+    [attachment_id]. *)
+
+val normalize_user_blocks :
+  attachments:Keeper_chat_store.attachment list ->
+  user_input_block list ->
+  user_input_block list
+(** Auto-synthesize trailing media blocks for any [attachments] entry not
+    already referenced in [user_blocks], preventing silent drops and HTTP 400
+    rejections when a client supplies [attachments] without matching
+    [user_blocks]. *)
+
+val hydrate_attachments :
+  base_path:string ->
+  attachments:Keeper_chat_store.attachment list ->
+  user_input_block list ->
+  (Keeper_chat_store.attachment list, string) result
+(** Resolve any upload-first [att_<64hex>] ids referenced in [user_blocks] or
+    [attachments] against {!Attachment_store}, promoting them to [Durable] and
+    filling canonical metadata so persisted chat history rows carry complete
+    [attachments] arrays without inline base64. *)
 
 val validate_attachment_references :
   attachments:Keeper_chat_store.attachment list ->
   user_input_block list ->
   (unit, string) result
 (** Fail closed when an [attachments] entry is not referenced by any
-    [user_blocks] media block.  Attachments are a byte store; an unreferenced
-    attachment never reaches AGENT_CORE and would otherwise be silently
-    dropped.  Referencing the same attachment more than once is allowed. *)
+    [user_blocks] media block. *)
 
 val fallback_message :
   attachments:Keeper_chat_store.attachment list -> user_input_block list -> string
@@ -75,6 +90,7 @@ type input_error =
 val input_error_to_string : input_error -> string
 
 val to_agent_core_blocks :
+  ?base_path:string ->
   media_store:Agent_core.History.media_store ->
   attachments:Keeper_chat_store.attachment list ->
   user_input_block list ->

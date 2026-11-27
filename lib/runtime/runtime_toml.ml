@@ -78,12 +78,12 @@ let parse_keeper_assignments (toml : Otoml.t)
 
 type runtime_section =
   { default_runtime_id : string option
-  ; media_failover : string list
+  ; media : Runtime_schema.media_overrides
   }
 
 let empty_runtime_section =
   { default_runtime_id = None
-  ; media_failover = []
+  ; media = Runtime_schema.empty_media_overrides
   }
 ;;
 
@@ -95,22 +95,26 @@ let parse_runtime_string_leaf ~path ~key value =
   | Otoml.TomlTable _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _ -> Error (error path (key ^ " must be a string runtime id"))
 ;;
 
-let parse_runtime_media_failover ~path value =
-  (* Ordered runtime ids for modality-gated reroute. A genuine type
-     mismatch (a scalar where an ordered array is required — a bare string cannot
-     mean a list) is surfaced as a load [Error], consistent with the sibling
-     string leaves ({!parse_runtime_string_leaf}), instead of silently degrading
-     to [] (the repo's Unknown→Permissive anti-pattern). An explicit empty array
-     [] is preserved as the intentional derive-from-declared-caps signal; id typos
-     in a well-typed array are still caught loudly by
-     {!Runtime_config_validation.validate_runtime_references}, which now judges every [runtime]
-     field that names a routing target. *)
-  try Ok (Otoml.get_array Otoml.get_string value) with
-  | Otoml.Type_error msg ->
-    Error
-      (error
-         path
-         (Printf.sprintf "media_failover must be an array of string runtime ids; got %s" msg))
+let parse_runtime_media_table ~path tbl
+  : (Runtime_schema.media_overrides, parse_error list) result
+  =
+  let allowed_keys = [ "vision_reader"; "image_generator" ] in
+  match tbl with
+  | Otoml.TomlTable entries | Otoml.TomlInlineTable entries ->
+    let unknown = unknown_table_keys ~path ~expected:allowed_keys entries in
+    let vision_reader_res = exact_non_empty_string_opt_field ~path tbl "vision_reader" in
+    let image_generator_res = exact_non_empty_string_opt_field ~path tbl "image_generator" in
+    (match unknown, vision_reader_res, image_generator_res with
+     | [], Ok vision_reader, Ok image_generator ->
+       Ok { Runtime_schema.vision_reader; image_generator }
+     | (_ :: _ as unknown_errs), Ok _, Ok _ -> Error unknown_errs
+     | unknown_errs, Error e1, Ok _ -> Error (unknown_errs @ e1)
+     | unknown_errs, Ok _, Error e2 -> Error (unknown_errs @ e2)
+     | unknown_errs, Error e1, Error e2 -> Error (unknown_errs @ e1 @ e2))
+  | Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+  | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+  | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ->
+    Error (error path "[runtime.media] must be a TOML table with optional vision_reader and image_generator keys")
 ;;
 
 let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list) result =
@@ -127,8 +131,17 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
                 { section with default_runtime_id = Some default_runtime_id }, errs
               | Error e -> section, errs @ e)
            | "media_failover" ->
-             (match parse_runtime_media_failover ~path:(Ns.(key Runtime) ^ ".media_failover") value with
-              | Ok media_failover -> { section with media_failover }, errs
+             ( section
+             , errs
+               @ error
+                   (Ns.(key Runtime) ^ ".media_failover")
+                   "media_failover was removed: vision and image generation capabilities \
+                    are derived automatically from each runtime's model and transport. \
+                    Remove media_failover from [runtime]; use optional [runtime.media] \
+                    (vision_reader / image_generator) only to pin a non-default fallback runtime." )
+           | "media" ->
+             (match parse_runtime_media_table ~path:(Ns.(key Runtime) ^ ".media") value with
+              | Ok media -> { section with media }, errs
               | Error e -> section, errs @ e)
            | "assignments" ->
              (* Parsed by [parse_keeper_assignments], including table-shape
@@ -152,7 +165,7 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
                    (Ns.(path Runtime) key)
                    (Printf.sprintf
                       "unknown [runtime] key %S; expected default, \
-                       media_failover, [runtime.lanes], \
+                       [runtime.media], [runtime.lanes], \
                        [runtime.exact_output_lanes], [runtime.addon_exact_lanes], \
                        [runtime.assignments], or a table-valued [runtime.<profile>]"
                       key) )
@@ -1131,7 +1144,7 @@ let parse_table ~home (toml : Otoml.t) : (Runtime_schema.config, parse_error lis
       ; bindings
       ; default_runtime_id = runtime_section.default_runtime_id
       ; keeper_assignments
-      ; media_failover = runtime_section.media_failover
+      ; media = runtime_section.media
       ; media_readers
       ; lane_decls
       ; exact_output_lane_decls

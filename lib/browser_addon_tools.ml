@@ -251,7 +251,15 @@ let project ~base_path ~keeper_name ~started request (receipt:Host.receipt) =
         | None -> Browser_surface.capture_from ~binding:receipt.binding ~tab_id ~started receipt.data
         | Some options -> Browser_surface.native_capture_from ~binding:receipt.binding ~tab_id ~started ~options receipt.data in
       match keeper_name,capture with
-      | Some keeper_name,_ -> data (Browser_screenshot.persist ?native_options:options ~base_path ~keeper_name capture)
+      | Some keeper_name, `Assoc fields ->
+          let* persisted = Browser_screenshot.persist ?native_options:options ~base_path ~keeper_name capture in
+          (match List.assoc_opt "data" fields with
+           | Some (`String image) ->
+               Ok (persisted,
+                 Some [Llm_provider.Types.Text (Yojson.Safe.to_string persisted);
+                   Llm_provider.Types.Image {media_type="image/png"; source=Llm_provider.Types.Base64 image}])
+           | Some _ | None -> Ok (persisted, None))
+      | Some keeper_name, _ -> data (Browser_screenshot.persist ?native_options:options ~base_path ~keeper_name capture)
       (* A caller with no Keeper workspace gets the checked PNG back as an image
          block of this result, and the observation fields without its bytes.
          The content repeats the observation as text before the image, so a

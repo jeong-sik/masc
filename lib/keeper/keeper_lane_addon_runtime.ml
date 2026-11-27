@@ -27,10 +27,52 @@ let content_block (content : Mcp_protocol.Mcp_types.tool_content) =
    [data] keeps each media block's type, MIME type and size and drops its
    bytes. A failed result has no [content_blocks]; the DOS and MSX workers
    attach images to successful replies only. *)
-let data_of_worker_result (result : Mcp_protocol.Mcp_types.tool_result) =
+let persist_media_block ~base_path ~keeper_name ~mime_type ~data =
+  match Base64.decode data with
+  | Error (`Msg _) -> None
+  | Ok bytes ->
+    let store = Attachment_store.create ~base_path in
+    (match
+       Attachment_store.put
+         ~declared_mime:mime_type
+         ~origin:Attachment_store.Tool_capture
+         ~created_by:keeper_name
+         ~retention:(Attachment_store.Ephemeral { keeper = keeper_name })
+         store
+         ~bytes
+     with
+     | Ok meta -> Some meta
+     | Error err ->
+       Log.Keeper.warn
+         "Lane add-on media persistence skipped keeper=%s: %s"
+         keeper_name
+         (Attachment_store.put_error_to_string err);
+       None)
+
+let data_of_worker_result_with_store ?persist_media (result : Mcp_protocol.Mcp_types.tool_result) =
+  let persisted_metas = ref [] in
   let media ~type_ ~mime_type ~data =
-    `Assoc [ "type", `String type_; "mimeType", `String mime_type
-           ; "base64_chars", `Int (String.length data) ] in
+    let extra =
+      match persist_media with
+      | None -> []
+      | Some persist ->
+        (match persist ~mime_type ~data with
+         | None -> []
+         | Some (meta : Attachment_store.meta) ->
+           persisted_metas := meta :: !persisted_metas;
+           [ "attachment_id", `String meta.id
+           ; "url", `String (Attachment_store.url_of_id meta.id)
+           ; "artifact", `String meta.sha256
+           ; "bytes", `Int meta.bytes
+           ])
+    in
+    `Assoc
+      ([ "type", `String type_
+       ; "mimeType", `String mime_type
+       ; "base64_chars", `Int (String.length data)
+       ]
+       @ extra)
+  in
   let block (content : Mcp_protocol.Mcp_types.tool_content) =
     match content with
     | ImageContent { type_; data; mime_type; _ } -> media ~type_ ~mime_type ~data
@@ -39,10 +81,22 @@ let data_of_worker_result (result : Mcp_protocol.Mcp_types.tool_result) =
         Mcp_protocol.Mcp_types.tool_content_to_yojson content in
   match Mcp_protocol.Mcp_types.tool_result_to_yojson result with
   | `Assoc fields ->
-      `Assoc (List.map (function
-        | "content", _ -> "content", `List (List.map block result.content)
-        | field -> field) fields)
+      let updated =
+        List.map (function
+          | "content", _ -> "content", `List (List.map block result.content)
+          | field -> field) fields
+      in
+      let attachment_fields =
+        match List.rev !persisted_metas with
+        | [] -> []
+        | metas ->
+          [ "attachments", `List (List.map Attachment_store.meta_to_wire_json metas) ]
+      in
+      `Assoc (updated @ attachment_fields)
   | json -> json
+
+let data_of_worker_result (result : Mcp_protocol.Mcp_types.tool_result) =
+  data_of_worker_result_with_store result
 
 let call ~config ~keeper_name ~(export : Lane_addon_tool_export.t) ~arguments =
   let start_time = Tool_timing.start () in
@@ -63,7 +117,13 @@ let call ~config ~keeper_name ~(export : Lane_addon_tool_export.t) ~arguments =
     | Error (Lane_addon_runtime.Outcome_unknown message) ->
         Tool_result.make_err ~tool_name ~start_time ~class_:Tool_result.Runtime_failure message
     | Ok result ->
-        let data = data_of_worker_result result in
+        let persist_media =
+          match result.is_error with
+          | Some true -> None
+          | None | Some false ->
+            Some (persist_media_block ~base_path:config.Workspace.base_path ~keeper_name)
+        in
+        let data = data_of_worker_result_with_store ?persist_media result in
         match result.is_error with
         | Some true ->
             let class_, effect_disposition = Lane_addon_tool_result.failure result in

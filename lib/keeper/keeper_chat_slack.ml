@@ -779,9 +779,26 @@ let adapter_loop_with_transport
     | Model_content_activity _
     | Agent_core_content_block_stop _
     | (Agent_core_thinking_delta _ | Agent_core_thinking_snapshot _)
-    | Agent_core_thinking_signature_delta _
-    | Agent_core_media_delta _ ->
+    | Agent_core_thinking_signature_delta _ ->
         continue ()
+    | Agent_core_media_delta { media_type; media_ref; _ } ->
+        (match Keeper_chat_media_store.category_of_media_type media_type with
+         | Keeper_chat_media_store.Image ->
+           let url =
+             if String.starts_with ~prefix:"/" media_ref
+             then
+               match base_url with
+               | Some base when String.trim base <> "" ->
+                 String.trim base ^ media_ref
+               | Some _ | None -> media_ref
+             else media_ref
+           in
+           let block = image_block_json ~url ~caption:None in
+           continue ~acc_blocks:(add_block acc_blocks block) ()
+         | Keeper_chat_media_store.Audio
+         | Keeper_chat_media_store.Midi
+         | Keeper_chat_media_store.Document
+         | Keeper_chat_media_store.Other -> continue ())
     | Agent_core_stream_protocol_error error ->
         (* This is an interim diagnostic, not the terminal queued-message
            delivery receipt. Reporting it through [on_send_result] could let a
@@ -822,6 +839,8 @@ let adapter_loop_with_transport
     | Link_block { url; title; description; image = _ } ->
         let block = link_block_json ~url ~title ~description in
         continue ~acc_blocks:(add_block acc_blocks block) ()
+    | Attachment_emitted _ ->
+        continue ()
     | Image_block { url; caption } ->
         let block = image_block_json ~url ~caption in
         continue ~acc_blocks:(add_block acc_blocks block) ()

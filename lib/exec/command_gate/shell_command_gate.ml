@@ -264,7 +264,7 @@ let rec structural_refusal (ir : SI.t) =
          (s.SI.args @ List.map snd s.SI.env))
   | SI.Pipeline stages ->
     if List.exists
-         (function SI.Pipeline _ -> true | SI.Simple _ | SI.Sequence _ -> false)
+         (function SI.Pipeline _ | SI.Sequence _ -> true | SI.Simple _ -> false)
          stages
     then Some (`Too_complex Unsupported_nested_pipeline)
     else if List.compare_length_with stages 2 < 0

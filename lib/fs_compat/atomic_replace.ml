@@ -6,7 +6,7 @@
    its best-effort handling. This is not a hardware/power-loss
    persistence claim and does not use Darwin F_FULLFSYNC. *)
 let fsync_path_with ~allow_unsupported path =
-  let fd = Unix.openfile path [ Unix.O_RDONLY ] 0 in
+  let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 in
   Stdlib.Fun.protect
     ~finally:(fun () ->
       try Unix.close fd with
@@ -271,12 +271,22 @@ let save_file_atomic_strict_staged ~save_file path content =
 ;;
 
 let write_temp_channel ~write path =
-  let channel = Stdlib.open_out_bin path in
+  let fd =
+    Unix.openfile path [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_TRUNC; Unix.O_CLOEXEC ] 0o666
+  in
+  let channel =
+    try Unix.out_channel_of_descr fd with
+    | exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      (try Unix.close fd with Unix.Unix_error _ -> ());
+      Printexc.raise_with_backtrace exn backtrace
+  in
   (* fun-protect-finally-ok: runs inside [blocking_syscalls], outside Eio;
      closing the stdlib channel performs no fiber operation. *)
   Fun.protect
     ~finally:(fun () -> Stdlib.close_out_noerr channel)
     (fun () ->
+       Stdlib.set_binary_mode_out channel true;
        write channel;
        (* A failed flush/close is a failed staged write, before the rename. *)
        Stdlib.close_out channel)

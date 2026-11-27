@@ -53,6 +53,21 @@ type driver_report =
 
 let now_ms () = int_of_float (Unix.gettimeofday () *. 1000.0)
 
+let utf8_prefix_bytes ~max_bytes text =
+  let len = String.length text in
+  if len <= max_bytes then text
+  else
+    let rec advance pos =
+      if pos >= len then len
+      else
+        let dec = String.get_utf_8_uchar text pos in
+        let step = Uchar.utf_decode_length dec in
+        if step <= 0 || pos + step > max_bytes then pos
+        else advance (pos + step)
+    in
+    String.sub text 0 (advance 0)
+;;
+
 let truncate_preview text =
   let trimmed = String.trim text in
   let single_line =
@@ -60,7 +75,7 @@ let truncate_preview text =
   in
   if String.length single_line <= max_preview_chars
   then single_line
-  else String.sub single_line 0 max_preview_chars ^ "..."
+  else utf8_prefix_bytes ~max_bytes:max_preview_chars single_line ^ "..."
 ;;
 
 let contains_case_insensitive ~needle haystack =
@@ -85,13 +100,35 @@ let contains_case_insensitive ~needle haystack =
 
 let read_file_prefix ~max_chars path =
   try
-    In_channel.with_open_text path (fun ic ->
-      let content = In_channel.input_all ic in
-      if String.length content <= max_chars
-      then Ok content
-      else Ok (String.sub content 0 max_chars ^ "\n...[truncated]"))
+    let fd = Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0 in
+    Fun.protect
+      ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
+      (fun () ->
+         let st = Unix.fstat fd in
+         if st.Unix.st_kind <> Unix.S_REG
+         then Error "not a regular file"
+         else (
+           let limit = Int.max 0 max_chars + 1 in
+           let buf = Buffer.create (Int.min limit 4096) in
+           let chunk = Bytes.create (Int.min limit 4096) in
+           let rec read_loop remaining =
+             if remaining <= 0 then ()
+             else
+               match Unix.read fd chunk 0 (Int.min remaining (Bytes.length chunk)) with
+               | 0 -> ()
+               | n ->
+                 Buffer.add_subbytes buf chunk 0 n;
+                 read_loop (remaining - n)
+               | exception Unix.Unix_error (Unix.EINTR, _, _) -> read_loop remaining
+           in
+           read_loop limit;
+           let content = Buffer.contents buf in
+           if String.length content <= max_chars
+           then Ok content
+           else Ok (utf8_prefix_bytes ~max_bytes:max_chars content ^ "\n...[truncated]")))
   with
   | Sys_error msg -> Error msg
+  | Unix.Unix_error (err, fn, _) -> Error (Printf.sprintf "%s: %s" fn (Unix.error_message err))
 ;;
 
 let list_skills ~skills_root =
@@ -223,20 +260,34 @@ let probe_one_driver ~env ~cwd ~timeout_s ~model_override ~posture (driver : Run
           let skill_name =
             Option.value (json_string_field "skill_name" arguments) ~default:target_skill_name
           in
-          let skill_path =
-            Filename.concat (Filename.concat skills_root skill_name) "SKILL.md"
+          let safe_skill_name =
+            skill_name <> ""
+            && skill_name <> "."
+            && skill_name <> ".."
+            && not (String.exists (fun c -> c = '/' || c = '\\' || c = '\x00') skill_name)
+            && List.mem skill_name (list_skills ~skills_root)
           in
-          (match read_file_prefix ~max_chars:max_skill_read_chars skill_path with
-           | Ok body ->
-             { Runtime_official_client_mcp.success = true
-             ; content = body
-             ; content_blocks = None
-             }
-           | Error msg ->
-             { Runtime_official_client_mcp.success = false
-             ; content = "Failed to read skill: " ^ msg
-             ; content_blocks = None
-             })
+          if not safe_skill_name
+          then
+            { Runtime_official_client_mcp.success = false
+            ; content = "Failed to read skill: invalid or unknown skill name"
+            ; content_blocks = None
+            }
+          else (
+            let skill_path =
+              Filename.concat (Filename.concat skills_root skill_name) "SKILL.md"
+            in
+            match read_file_prefix ~max_chars:max_skill_read_chars skill_path with
+            | Ok body ->
+              { Runtime_official_client_mcp.success = true
+              ; content = body
+              ; content_blocks = None
+              }
+            | Error msg ->
+              { Runtime_official_client_mcp.success = false
+              ; content = "Failed to read skill: " ^ msg
+              ; content_blocks = None
+              })
         | other ->
           { Runtime_official_client_mcp.success = false
           ; content = "Unknown action: " ^ other

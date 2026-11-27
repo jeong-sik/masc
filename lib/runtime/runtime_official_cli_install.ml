@@ -118,7 +118,11 @@ let install ~run client =
   let open Result.Syntax in
   try
     let directory = Filename.temp_dir "masc-official-client-install-" "" in
-    Fun.protect ~finally:(fun () -> Fs_compat.remove_tree directory) (fun () ->
+    Eio_guard.protect
+      ~finally:(fun () ->
+        try Fs_compat.remove_tree directory with
+        | Sys_error _ | Unix.Unix_error _ -> ())
+      (fun () ->
       let url, shell = script client in
       let path = Filename.concat directory "install.sh" in
       let* () = run ["curl"; "--fail"; "--show-error"; "--location";

@@ -114,18 +114,24 @@ module Runtime = struct
      "this network" (RFC 1122 3.2.1.3): Ipaddr calls only 0.0.0.0 itself
      unspecified. *)
   let host_only_refusal address =
-    if Ipaddr.is_multicast address
+    let normalized =
+      match Ipaddr.to_v4 address with
+      | Some v4 -> Ipaddr.V4 v4
+      | None -> address
+    in
+    if Ipaddr.is_multicast normalized
     then Some Multicast
     else (
-      match address with
+      match normalized with
       | Ipaddr.V4 v4 when Char.code (Ipaddr.V4.to_octets v4).[0] = 0 -> Some Unspecified
+      | Ipaddr.V4 v4 when Ipaddr.V4.compare v4 Ipaddr.V4.broadcast = 0 -> Some Link_local
       | Ipaddr.V6 v6
         when
           let octets = Ipaddr.V6.to_octets v6 in
           Char.code octets.[0] = 0xfe && Char.code octets.[1] land 0xc0 = 0x80 ->
         Some Link_local
       | Ipaddr.V4 _ | Ipaddr.V6 _ ->
-        (match Ipaddr.scope address with
+        (match Ipaddr.scope normalized with
          | Ipaddr.Point -> Some Unspecified
          | Ipaddr.Interface -> Some Loopback
          | Ipaddr.Link -> Some Link_local

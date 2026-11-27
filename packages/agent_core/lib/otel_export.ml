@@ -157,7 +157,7 @@ let endpoint_for_signal endpoint signal_path =
   Uri.to_string (Uri.with_path uri path)
 ;;
 
-let post_otlp ~sw ~clock ~client ~config ~endpoint body =
+let post_otlp ~clock ~client ~config ~endpoint body =
   let uri = Uri.of_string endpoint in
   let base_headers =
     Cohttp.Header.of_list ([ "content-type", "application/json" ] @ config.headers)
@@ -165,19 +165,24 @@ let post_otlp ~sw ~clock ~client ~config ~endpoint body =
   let body_s = Cohttp_eio.Body.of_string body in
   (* A collector answer that arrived as the window closed is the answer. The
      batch retries on an error, so a 2xx dropped here would send the same
-     spans or metrics again. *)
+     spans or metrics again. Each request gets its own [Eio.Switch.run] so
+     sockets and forked request-writer fibers close on return, error, or
+     timeout instead of leaking onto or failing the daemon's outer switch. *)
   try
     match
       Llm_provider.Under_deadline.run clock config.timeout_sec (fun () ->
-        let resp, resp_body =
-          Cohttp_eio.Client.post ~sw ~headers:base_headers ~body:body_s client uri
-        in
-        let status = Cohttp.Response.status resp in
-        let code = Cohttp.Code.code_of_status status in
-        let _ =
-          Eio.Buf_read.of_flow ~max_size:(1024 * 64) resp_body |> Eio.Buf_read.take_all
-        in
-        if code >= 200 && code < 300 then Ok () else Error (Printf.sprintf "HTTP %d" code))
+        Eio.Switch.run (fun req_sw ->
+          let resp, resp_body =
+            Cohttp_eio.Client.post ~sw:req_sw ~headers:base_headers ~body:body_s client uri
+          in
+          let status = Cohttp.Response.status resp in
+          let code = Cohttp.Code.code_of_status status in
+          let _ =
+            Eio.Buf_read.of_flow ~max_size:(1024 * 64) resp_body |> Eio.Buf_read.take_all
+          in
+          if code >= 200 && code < 300
+          then Ok ()
+          else Error (Printf.sprintf "HTTP %d" code)))
     with
     | Ok result -> result
     | Error `Timeout -> Error (Printf.sprintf "timeout after %.1fs" config.timeout_sec)
@@ -188,12 +193,12 @@ let post_otlp ~sw ~clock ~client ~config ~endpoint body =
 
 (* ── Batch + retry logic ────────────────────────────────────── *)
 
-let export_batch ~sw ~clock ~client ~config ~service_name spans =
+let export_batch ~clock ~client ~config ~service_name spans =
   let body = build_otlp_body ~service_name spans in
   let endpoint = endpoint_for_signal config.endpoint "/v1/traces" in
   let rec attempt n =
     try
-      match post_otlp ~sw ~clock ~client ~config ~endpoint body with
+      match post_otlp ~clock ~client ~config ~endpoint body with
       | Ok () -> Ok (List.length spans)
       | Error _ when n < config.max_retries ->
         let delay = Float.pow 2.0 (Float.of_int n) *. 0.5 in
@@ -206,12 +211,12 @@ let export_batch ~sw ~clock ~client ~config ~service_name spans =
   attempt 0
 ;;
 
-let export_metrics ~sw ~clock ~client ~config ~service_name metrics =
+let export_metrics ~clock ~client ~config ~service_name metrics =
   let body = build_otlp_metrics_body ~service_name metrics in
   let endpoint = endpoint_for_signal config.endpoint "/v1/metrics" in
   let rec attempt n =
     try
-      match post_otlp ~sw ~clock ~client ~config ~endpoint body with
+      match post_otlp ~clock ~client ~config ~endpoint body with
       | Ok () -> Ok (List.length metrics)
       | Error _ when n < config.max_retries ->
         let delay = Float.pow 2.0 (Float.of_int n) *. 0.5 in
@@ -241,7 +246,7 @@ let rec split_batches max_size acc = function
     split_batches max_size (batch :: acc) rest
 ;;
 
-let flush_to_collector ~sw ~clock ~net ~config instance =
+let flush_to_collector ~sw:_ ~clock ~net ~config instance =
   (* Telemetry is flushed from the tracer upfront. If export fails, data is
      dropped (not re-queued). Callers should treat [Partial_failure] and
      [Failed] as permanent telemetry loss for the affected batches. *)
@@ -260,14 +265,14 @@ let flush_to_collector ~sw ~clock ~net ~config instance =
     let last_error = ref "" in
     List.iter
       (fun batch ->
-         match export_batch ~sw ~clock ~client ~config ~service_name batch with
+         match export_batch ~clock ~client ~config ~service_name batch with
          | Ok count -> exported_spans := !exported_spans + count
          | Error reason -> last_error := reason)
       batches;
     (match metrics with
      | [] -> ()
      | _ ->
-       (match export_metrics ~sw ~clock ~client ~config ~service_name metrics with
+       (match export_metrics ~clock ~client ~config ~service_name metrics with
         | Ok count -> exported_metrics := !exported_metrics + count
         | Error reason -> last_error := reason));
     let total = span_total + metric_total in

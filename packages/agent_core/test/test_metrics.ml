@@ -174,9 +174,13 @@ let test_register_rejects_duplicate_bucket_bounds () =
      check). The emit path used to silently dedupe via
      [List.sort_uniq]; that was a telemetry-as-fix workaround. *)
   let m = Metrics.create () in
-  match Metrics.histogram m ~name:"dup.bounds" ~buckets:[ 1.0; 1.0; 2.0 ] with
-  | exception Invalid_argument _ -> ()
-  | _ -> fail "expected Invalid_argument on duplicate bucket bounds"
+  (match Metrics.histogram m ~name:"dup.bounds" ~buckets:[ 1.0; 1.0; 2.0 ] with
+   | exception Invalid_argument _ -> ()
+   | _ -> fail "expected Invalid_argument on duplicate bucket bounds");
+  (* Rejected registration must not poison the instance mutex. *)
+  let c = Metrics.counter m ~name:"after.dup" ~unit_:"1" in
+  Metrics.incr c 1;
+  check int "usable after duplicate bucket rejection" 1 (Metrics.counter_value c ())
 ;;
 
 let test_prometheus_text_histogram_exports_zero_series_on_create_and_reset () =
@@ -197,18 +201,24 @@ let test_prometheus_text_histogram_exports_zero_series_on_create_and_reset () =
 
 let test_register_rejects_normalized_collision_counter_counter () =
   let m = Metrics.create () in
-  let _ = Metrics.counter m ~name:"foo.bar" ~unit_:"1" in
-  match Metrics.counter m ~name:"foo_bar" ~unit_:"1" with
-  | exception Invalid_argument _ -> ()
-  | _ -> fail "expected Invalid_argument on counter-counter normalized collision"
+  let c = Metrics.counter m ~name:"foo.bar" ~unit_:"1" in
+  (match Metrics.counter m ~name:"foo_bar" ~unit_:"1" with
+   | exception Invalid_argument _ -> ()
+   | _ -> fail "expected Invalid_argument on counter-counter normalized collision");
+  (* Rejected registration must not poison the instance mutex. *)
+  Metrics.incr c 2;
+  check int "usable after counter collision" 2 (Metrics.counter_value c ())
 ;;
 
 let test_register_rejects_normalized_collision_counter_histogram () =
   let m = Metrics.create () in
-  let _ = Metrics.counter m ~name:"shared.name" ~unit_:"1" in
-  match Metrics.histogram m ~name:"shared_name" ~buckets:[ 1.0 ] with
-  | exception Invalid_argument _ -> ()
-  | _ -> fail "expected Invalid_argument on counter-histogram normalized collision"
+  let c = Metrics.counter m ~name:"shared.name" ~unit_:"1" in
+  (match Metrics.histogram m ~name:"shared_name" ~buckets:[ 1.0 ] with
+   | exception Invalid_argument _ -> ()
+   | _ -> fail "expected Invalid_argument on counter-histogram normalized collision");
+  (* Rejected registration must not poison the instance mutex. *)
+  Metrics.incr c 3;
+  check int "usable after counter-histogram collision" 3 (Metrics.counter_value c ())
 ;;
 
 let test_register_same_name_same_kind_is_idempotent () =

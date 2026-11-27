@@ -11,8 +11,10 @@ let create ~publish scope =
   let mutex=Eio.Mutex.create () in
   let audiences=ref Run_map.empty in
   let settled=ref Occurrence_set.empty in
-  let settled_observers occurrence = Eio.Mutex.use_rw ~protect:true mutex (fun () ->
-    settled:=Occurrence_set.add occurrence !settled) in
+  let settled_observers occurrence =
+    Eio.Cancel.protect (fun () ->
+      Eio.Mutex.use_rw ~protect:true mutex (fun () ->
+        settled:=Occurrence_set.add occurrence !settled)) in
   let ready (event:Event_bus.event) = match event.payload with
     | ToolCompleted {invocation;_} ->
       Option.fold ~none:false ~some:(fun occurrence->Occurrence_set.mem occurrence !settled)

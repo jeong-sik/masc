@@ -696,11 +696,12 @@ let run t tool ~args =
     collaboration_read Verification_collaboration_evidence.read_task
   | (Keeper_producer _ | Workspace_producer), Artifact_source ->
     (* HIGH-RISK-UNREVIEWED: what a review may read from the workspace's blob
-       store. Only a sha256 this surface's own masc_web_fetch answered with is
-       admitted. A sha256 quoted in submitted evidence, a prompt or a Board
-       post names no readable text here: the blob store also holds every
-       Keeper's stored tool results, and a verdict's reason travels back to
-       the producer. *)
+       store. Two kinds of sha256 are admitted: one this surface's own
+       masc_web_fetch answered with, and one the submission's record holds for
+       a text it stored whole. Both name bytes the review was handed. A sha256
+       merely quoted in a note, a prompt or a Board post names no readable
+       text here: the blob store also holds every Keeper's stored tool
+       results, and a verdict's reason travels back to the producer. *)
     (match artifact_read_of_args args with
      | Error message ->
        Error (Collaboration_error (Verification_collaboration_evidence.Invalid_request message))
@@ -714,9 +715,10 @@ let run t tool ~args =
        Error
          (Collaboration_error
             (Verification_collaboration_evidence.Access_denied
-               "this review's masc_web_fetch did not store that text. A stored \
-                page is read by the full_text_sha256 its own fetch returned; \
-                fetch the URL again to obtain one")))
+               "no stored text of this review has that sha256. A stored text is \
+                read by the full_text_sha256 a masc_web_fetch of this review \
+                returned, or by the sha256 an evidence item of this submission \
+                names; a hash quoted in a note or a post is not one")))
   | (Keeper_producer _ | Workspace_producer), Web_fetch ->
     let result =
       Tool_misc_web_fetch.handle

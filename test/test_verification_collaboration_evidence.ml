@@ -631,11 +631,18 @@ let test_withheld_artifact_is_read_from_the_record () = with_fixture (fun config
   denied surface name (artifact_args "artifact:oversize.txt") "verification_source_unavailable";
   denied surface name (artifact_args "artifact:missing.txt") "verification_source_access_denied";
   denied surface name (artifact_args "note:run attached") "verification_source_access_denied";
-  (* A stored page is read only through a fetch of this review. The gate is
-     exercised with a real fetch in the authority tools tests; here no fetch
-     answered, so any sha256 names no readable text. *)
-  denied surface name (`Assoc ["sha256", `String (String.make 64 '0')])
+  (* A stored text is read only by a sha256 the submission recorded or a
+     fetch of this review answered with. The fixture's body is admitted and
+     reaches the blob store reader, which finds no bytes for it here. A hash
+     named nowhere is refused before that reader. *)
+  denied surface name (`Assoc ["sha256", `String (String.make 64 '1')])
     "verification_source_access_denied";
+  (match call surface name (`Assoc ["sha256", `String (String.make 64 '0')]) with
+   | Tool_result.Completed _ as result ->
+     check bool "a recorded body reaches the blob store reader" true
+       (String_util.contains_substring (Tool_result.message result) "artifact_not_found")
+   | result ->
+     failf "a body the submission recorded was refused: %s" (Tool_result.message result));
   invalid_input surface name (`Assoc ["reference", `String ""]);
   (* The submitted form continues with cursor. The Keeper reader's paging
      members belong to the sha256 form. *)

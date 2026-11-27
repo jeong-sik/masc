@@ -2192,14 +2192,14 @@ let decode_verification_evidence_item json =
       Ok (Verif_ev_artifact { reference; content; bytes })
   | "artifact_body" ->
       let* reference = required_nonblank_string json "reference" in
+      (* The item keeps the blob store's own reference under [blob]. *)
       let bytes, sha256 =
-        match optional_object_field json "_blob" with
-        | Ok (Some blob) ->
-            ( int_or_0 blob "bytes"
-            , (match optional_string_field blob "sha256" with
-              | Ok (Some s) -> s
-              | Ok None | Error _ -> "") )
-        | Ok None | Error _ -> (0, "")
+        match optional_object_field json "blob" with
+        | Ok (Some ( `Assoc [ ("_blob", `Assoc fields) ] )) ->
+            (match List.assoc_opt "bytes" fields, List.assoc_opt "sha256" fields with
+             | Some (`Int bytes), Some (`String sha256) -> bytes, sha256
+             | _ -> (0, ""))
+        | Ok (Some _ | None) | Error _ -> (0, "")
       in
       Ok (Verif_ev_stored_body { reference; bytes; sha256 })
   | "artifact_binary" ->

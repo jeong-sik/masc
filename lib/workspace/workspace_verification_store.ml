@@ -167,9 +167,11 @@ let read_host_artifact ~ownership_root path =
   with
   | Error error -> Error (failure error)
   | Ok None -> Error Evidence_missing
-  | Ok (Some { Fs_compat.truncated = false; content; _ }) ->
-    payload_of_complete_bytes ~path content
-  | Ok (Some { Fs_compat.truncated = true; file_size; _ }) ->
+  | Ok (Some { content; file_size; _ })
+    when String.length content > text_artifact_max_bytes ->
+    (* One byte past the ceiling came back, so the file is over it. The
+       length decides, as it does for the sandbox reader: a file of exactly
+       the ceiling is under it and one byte more is not. *)
     if is_binary_artifact_path path
     then
       (match Fs_compat.load_owned_regular_file ~ownership_root path with
@@ -177,6 +179,7 @@ let read_host_artifact ~ownership_root path =
        | Ok None -> Error Evidence_missing
        | Ok (Some content) -> payload_of_complete_bytes ~path content)
     else Error (Too_large { cap = text_artifact_max_bytes; at_least = file_size })
+  | Ok (Some { content; _ }) -> payload_of_complete_bytes ~path content
 
 let artifact_reference_prefix = "artifact:"
 

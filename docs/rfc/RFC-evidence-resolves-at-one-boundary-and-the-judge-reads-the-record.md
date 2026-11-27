@@ -232,6 +232,8 @@ RFC-0224(2026-07-13) 는 같은 모양의 체크리스트를 「빠뜨림은 기
 - 1층의 `evidence_reads` 는 실행 저널에서 투영한다. 실행 기록의 도구 관측은 판정을 돌리는 process 의 메모리에서 온다(`lib/completion_authority_agent.ml` 의 `tools`), 그래서 다른 process 가 이어받은 판정에는 비어 있다. 판정을 세우는 코드는 이미 저널을 읽는다(`lib/keeper/verifier_review_execution.ml` 의 `read_call`). 거절 사건에는 `reason` 만 실리므로 자리를 새로 만들어야 한다.
 - 2층은 blob 저장·scope 분류·`Too_large`·`truncated` 삭제를 한 PR 로 한다. 저장소를 두 번 짓지 않기 위해서다. lib 약 16파일, 시험 약 8파일이다.
 - 2층도 영속 모양의 hard cut 이다. `truncated` 필드가 있는 옛 항목은 decode 되지 않아 `Evidence_unavailable` 로 읽힌다. 2026-11-27 에 `.masc/verifications` 에 요청 기록이 4,079개 있다. 끝난 기록의 증거는 typed reader 로 더는 안 읽히고 운영자 내려받기와 TUI 증거 탭이 사용할 수 없음으로 그린다. 배포 전에 awaiting 큐가 0 인지 본다. 기다리던 Task 의 기록이 옛 모양이면 `prepare_review` 가 에러를 돌려주어 판정이 시작되지 않는다(`lib/completion_authority_agent.ml` 의 `prepare_review`).
+- 분류에는 부수효과가 있다. 요청 기록 디렉터리와 증거 본문 디렉터리는 오늘 미분류였고, 미분류가 하나라도 있으면 sweep 는 아무것도 지우지 않는다. 둘을 분류에 넣으면 다른 미분류가 없는 workspace 에서 삭제 조건이 처음으로 열린다. 배포 뒤 첫 scan 의 `unclassified` 와 `deletable` 을 읽는다. 삭제는 하루 간격의 온전한 scan 두 번이 지나야 한다.
+- 요청 기록에는 생산자가 쓴 문자열이 있다(내용, note, 제출 출력). sweep 는 `[masc:blob sha256=` 로 시작하는 문자열을 marker 로 읽고 정확하지 않으면 멈춘다. 그런 문자열이 든 기록이 있으면 그 기록이 지워질 때까지 sweep 는 삭제하지 않는다. 닫히는 방향이다.
 - 3층이 4층보다 먼저여야 한다. 아니면 지금 live 조회가 구해 주는 잘못된 경로(승인 제출의 `artifact_unreadable` 6개)가 거절로 바뀐다.
 - 5층은 경로 형태와 영속 모양의 hard cut 이다. 옛 경로 형태의 참조를 내는 제출은 `Invalid_reference` 로 거절된다. 옛 모양의 reader 를 만들지 않는다. 옛 요청 기록의 증거는 `Evidence_unavailable` 로 읽힌다(D1). 배포 전에 판정을 기다리던 요청을 비운다.
 - 4층과 함께 `docs/RELIABLE-CHANGE-ROADMAP.md` 의 경계 suite 문구 셋(`missing-artifact`, `producer-root-missing-mcp`, `producer-artifact-unreadable`)을 D3 대로 고친다.

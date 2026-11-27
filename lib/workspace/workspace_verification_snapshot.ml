@@ -162,10 +162,9 @@ let submitted_evidence_item_fields = function
   | Evidence_artifact_body { reference; blob } ->
     [ "kind", `String "artifact_body"
     ; "reference", `String reference
+    ; ( "blob"
+      , Tool_output.normalized_artifact_ref_to_json blob )
     ]
-    (* The sweep reads the reference in the blob store's own spelling, so the
-       codec that writes it elsewhere writes it here too. *)
-    @ Yojson.Safe.Util.to_assoc (Tool_output.normalized_artifact_ref_to_json blob)
   | Evidence_invalid_reference ->
     [ "kind", `String "artifact_unreadable"
     ; "reason", `Assoc [ "code", `String invalid_reference_code ]
@@ -569,12 +568,16 @@ let submitted_evidence_item_of_yojson = function
        let* () =
          Json_util.reject_unknown_fields
            ~surface:"submitted evidence stored body"
-           ~allowed:[ "kind"; "reference"; "_blob" ]
+           ~allowed:[ "kind"; "reference"; "blob" ]
            fields
        in
        let* reference = string_field "reference" in
+       (* The reference is the blob store's own wrapper, nested under one
+          member: the sweep's codec reads a [_blob] object that stands alone,
+          and a reference spelled beside other members counts as a malformed
+          legacy wrapper. *)
        let* blob =
-         match List.assoc_opt "_blob" fields with
+         match List.assoc_opt "blob" fields with
          | Some json ->
            (match Tool_output.normalized_artifact_ref_of_json json with
             | Tool_output.Decoded_normalized_artifact_ref blob -> Ok blob

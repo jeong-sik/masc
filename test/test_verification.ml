@@ -3646,13 +3646,20 @@ let test_transport_projection_omits_a_stored_body () =
     | Error detail -> Alcotest.fail detail);
     match inspect_evidence ~base_path ~request_id () with
     | VS.Evidence_available _ as access ->
+      let open Yojson.Safe.Util in
+      let persisted_item reference =
+        VS.submitted_evidence_access_to_yojson access
+        |> member "items" |> to_list
+        |> List.find (fun item -> member "reference" item = `String reference) in
       Alcotest.(check bool)
         "persistence serializer carries no content for a stored body"
         true
-        (not
-           (String_util.contains_substring
-              (Yojson.Safe.to_string (VS.submitted_evidence_access_to_yojson access))
-              (String.make 1_000 'x')));
+        (member "content" (persisted_item "artifact:large-proof.json") = `Null);
+      Alcotest.(check int)
+        "the record names the whole size under the blob store's reference"
+        (String.length large)
+        (persisted_item "artifact:large-proof.json"
+         |> member "blob" |> member "_blob" |> member "bytes" |> to_int);
       let transport =
         Yojson.Safe.to_string
           (VS.submitted_evidence_access_transport_to_yojson access)
@@ -3689,7 +3696,7 @@ let test_transport_projection_omits_a_stored_body () =
         "a stored body is its own kind"
         "artifact_body"
         (match List.assoc_opt "kind" large_item with
-         | `String kind -> kind
+         | Some (`String kind) -> kind
          | _ -> "other");
       Alcotest.(check bool)
         "a stored body carries no content key"

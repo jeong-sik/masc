@@ -5692,7 +5692,10 @@ let test_wave3_live_wire_codecs () =
                   "access": "available",
                   "items": [
                     { "kind": "note", "content": "All tests green" },
-                    { "kind": "artifact", "reference": "report.md", "content": "# OK", "bytes": 4, "truncated": false },
+                    { "kind": "artifact", "reference": "report.md", "content": "# OK", "bytes": 4 },
+                    { "kind": "artifact_body", "reference": "long.log",
+                      "blob": { "_blob": { "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                                     "bytes": 300000, "mime": "text/plain", "preview": "head" } } },
                     { "kind": "artifact_unreadable", "reference": "missing.bin", "reason": { "code": "not_found", "detail": "deleted" } }
                   ]
                 }
@@ -5700,7 +5703,20 @@ let test_wave3_live_wire_codecs () =
             }|}))
   in
   Alcotest.(check bool) "verif evidence available" true vev.available;
-  Alcotest.(check int) "3 evidence items" 3 (List.length vev.items);
+  Alcotest.(check int) "4 evidence items" 4 (List.length vev.items);
+  (* A text too large for the record travels as the blob store's own
+     reference under [blob]. The decoder keeps its reference, size and
+     digest, and the inline artifact no longer carries a truncation flag. *)
+  (match vev.items with
+   | [ Wire_work.Verif_ev_note _
+     ; Wire_work.Verif_ev_artifact
+         { reference = "report.md"; content = "# OK"; bytes = 4 }
+     ; Wire_work.Verif_ev_stored_body
+         { reference = "long.log"; bytes = 300000
+         ; sha256 =
+             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+     ; Wire_work.Verif_ev_unreadable _ ] -> ()
+   | items -> Alcotest.failf "unexpected verification evidence items: %d" (List.length items));
   let vsum =
     expect_ok "decode_verification_summary"
       (Wire_work.decode_verification_summary

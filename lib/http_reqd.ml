@@ -88,6 +88,29 @@ type t =
 let connection_switch : Eio.Switch.t Eio.Fiber.key = Eio.Fiber.create_key ()
 let with_connection_switch sw f = Eio.Fiber.with_binding connection_switch sw f
 
+let callback_context_key : ((unit -> unit) -> unit) Eio.Fiber.key =
+  Eio.Fiber.create_key ()
+;;
+
+let current_callback_context () =
+  match Fs_compat.execution_context () with
+  | Fs_compat.Eio_fiber -> Eio.Fiber.get callback_context_key
+  | Fs_compat.Non_eio -> None
+;;
+
+let with_callback_context wrap f =
+  let outer = current_callback_context () in
+  let rec combined inner =
+    let run_wrapped () =
+      Eio.Fiber.with_binding callback_context_key combined inner
+    in
+    match outer with
+    | None -> wrap run_wrapped
+    | Some outer_wrap -> outer_wrap (fun () -> wrap run_wrapped)
+  in
+  Eio.Fiber.with_binding callback_context_key combined f
+;;
+
 let of_gluten (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) =
   let reqd = gluten_reqd.Gluten.Reqd.reqd in
   Http1
@@ -735,6 +758,13 @@ let read_body_h2 reqd ~ledger ~stream_end ~max_bytes ~on_body ~on_error =
 ;;
 
 let read_body t ~max_bytes ~on_body ~on_error =
+  let on_body, on_error =
+    match current_callback_context () with
+    | None -> on_body, on_error
+    | Some wrap ->
+      ( (fun body -> wrap (fun () -> on_body body))
+      , fun err -> wrap (fun () -> on_error err) )
+  in
   match t with
   | Http1 http1 ->
     read_body_h1

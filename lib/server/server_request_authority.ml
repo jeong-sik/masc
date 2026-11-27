@@ -558,7 +558,10 @@ let serialized_origin_matches_authority
 
 let current_key : authority Eio.Fiber.key = Eio.Fiber.create_key ()
 
-let with_current authority f = Eio.Fiber.with_binding current_key authority f
+let with_current authority f =
+  let bind inner = Eio.Fiber.with_binding current_key authority inner in
+  bind (fun () -> Http_reqd.with_callback_context bind f)
+;;
 let current () = Eio.Fiber.get current_key
 
 let current_exn () =

@@ -51,6 +51,13 @@ val with_connection_switch : Eio.Switch.t -> (unit -> 'a) -> 'a
     connection, with [sw] as that connection's scope. {!of_gluten} called
     inside reads it; httpun itself gives a request no scope. *)
 
+val with_callback_context : ((unit -> unit) -> unit) -> (unit -> 'a) -> 'a
+(** [with_callback_context wrap f] binds [wrap] on the current Eio fiber so
+    deferred {!read_body} callbacks ([on_body] and [on_error]) invoked after
+    [f] returns still execute inside [wrap], across HTTP/1.1, HTTP/2, and
+    relayed handler domains. Nested calls compose outer-to-inner so inner
+    bindings shadow outer ones. *)
+
 val of_httpun : Httpun.Reqd.t -> t
 (** A handle over a bare httpun descriptor, without an upgrade capability:
     in-memory connections in tests, fixtures. *)

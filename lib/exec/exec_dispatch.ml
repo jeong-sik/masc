@@ -504,6 +504,65 @@ let sandbox_pipeline_specs stages =
   in
   loop None None [] stages
 
+let max_sandbox_stdin_bytes = 16 * 1024 * 1024
+
+let read_sandbox_stdin_file ~path =
+  if String.equal path "/dev/null"
+  then Ok ""
+  else
+    try
+      let fd =
+        Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0
+      in
+      Fun.protect
+        ~finally:(fun () ->
+          try Unix.close fd with
+          | Unix.Unix_error _ -> ())
+        (fun () ->
+          let stat = Unix.fstat fd in
+          match stat.Unix.st_kind with
+          | Unix.S_REG ->
+            if stat.Unix.st_size > max_sandbox_stdin_bytes
+            then
+              Error
+                (Printf.sprintf
+                   "stdin redirect %s exceeds %d-byte limit"
+                   path
+                   max_sandbox_stdin_bytes)
+            else (
+              let buf = Buffer.create (min stat.Unix.st_size 65536) in
+              let chunk = Bytes.create 16384 in
+              let rec loop total =
+                match Unix.read fd chunk 0 (Bytes.length chunk) with
+                | 0 -> Ok (Buffer.contents buf)
+                | n ->
+                  let next_total = total + n in
+                  if next_total > max_sandbox_stdin_bytes
+                  then
+                    Error
+                      (Printf.sprintf
+                         "stdin redirect %s exceeds %d-byte limit"
+                         path
+                         max_sandbox_stdin_bytes)
+                  else (
+                    Buffer.add_subbytes buf chunk 0 n;
+                    loop next_total)
+                | exception Unix.Unix_error (Unix.EINTR, _, _) -> loop total
+              in
+              loop 0)
+          | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK ->
+            Error (Printf.sprintf "stdin redirect %s must be a regular file" path))
+    with
+    | Unix.Unix_error (err, call, _) ->
+      Error
+        (Printf.sprintf
+           "cannot open stdin redirect %s (%s: %s)"
+           path
+           call
+           (Unix.error_message err))
+    | Sys_error msg -> Error (Printf.sprintf "cannot open stdin redirect %s: %s" path msg)
+;;
+
 let rec dispatch_simple_with_timeout ?base_host_env ?stdin_content ?on_output_chunk
     ~(timeout : Invocation_timeout.t) (s : Shell_ir.simple) =
   if Shell_ir.has_variable_expansion (Shell_ir.Simple s) then
@@ -548,21 +607,19 @@ let rec dispatch_simple_with_timeout ?base_host_env ?stdin_content ?on_output_ch
          | Ssh { runner; _ }
          | Delegated { caller = runner } ->
            (* stdin from a file is read here and handed to the runner as
-              bytes, for the same reason: the runner takes a string. *)
+              bytes, for the same reason: the runner takes a string. Failure
+              to read the redirect fails closed before spawning the runner. *)
            let stdin_for_runner =
              match attachments.stdin_from with
              | Process_eio.Read_from { path } ->
-               (try
-                  let ic = open_in_bin path in
-                  Some
-                    (Fun.protect
-                       ~finally:(fun () -> close_in ic)
-                       (fun () -> really_input_string ic (in_channel_length ic)))
-                with Sys_error _ -> None)
-             | Process_eio.From_string content -> Some content
-             | Process_eio.Plumbed -> stdin_content
+               Result.map (fun content -> Some content) (read_sandbox_stdin_file ~path)
+             | Process_eio.From_string content -> Ok (Some content)
+             | Process_eio.Plumbed -> Ok stdin_content
            in
-           (match
+           (match stdin_for_runner with
+            | Error message -> unsupported_redirect_result message
+            | Ok stdin_for_runner ->
+            match
               runner
                 ~on_stdout_chunk:None
                 ~on_stderr_chunk:None

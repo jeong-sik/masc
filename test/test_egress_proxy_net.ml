@@ -681,10 +681,27 @@ let test_proxy_auth_blocks_unauthenticated_and_admits_matching_token () =
      | _ -> false)
 ;;
 
+let test_excessive_header_lines_are_rejected_as_unreadable () =
+  let many_headers = List.init 140 (fun i -> Printf.sprintf "X-Pad-%d: a" i) in
+  let _status, events =
+    one_request
+      ~allow:[ "example.com" ]
+      ~headers:many_headers
+      ~line:"CONNECT example.com:443 HTTP/1.1"
+      ()
+  in
+  check bool "excessive headers fail closed as Unreadable" true
+    (match events with
+     | [ { Egress_proxy_net.outcome = Egress_proxy_net.Unreadable _; _ } ] -> true
+     | _ -> false)
+;;
+
 let () =
   run "egress_proxy_net"
     [ ( "refusals"
-      , [ test_case "a refused request gets 403 and no tunnel" `Quick
+      , [ test_case "excessive header lines are rejected as unreadable" `Quick
+            test_excessive_header_lines_are_rejected_as_unreadable
+        ; test_case "a refused request gets 403 and no tunnel" `Quick
             test_a_refused_request_gets_403_and_no_tunnel
         ; test_case "a malformed line is refused without a tunnel" `Quick
             test_a_malformed_line_is_refused_without_a_tunnel

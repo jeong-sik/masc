@@ -629,48 +629,83 @@ let make_scratch ~root =
 let rec remove_tree path =
   match Unix.lstat path with
   | { Unix.st_kind = Unix.S_DIR; _ } ->
-    Array.iter (fun name -> remove_tree (Filename.concat path name)) (Sys.readdir path);
+    (try Unix.chmod path 0o700 with Unix.Unix_error _ -> ());
+    (match Sys.readdir path with
+     | entries -> Array.iter (fun name -> remove_tree (Filename.concat path name)) entries
+     | exception (Sys_error _ | Unix.Unix_error _) -> ());
     (try Unix.rmdir path with Unix.Unix_error _ -> ())
   | { Unix.st_kind = Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK; _ } ->
     (try Unix.unlink path with Unix.Unix_error _ -> ())
-  | exception Unix.Unix_error _ -> ()
+  | exception (Unix.Unix_error _ | Sys_error _) -> ()
 
-(* Diagnostic trace: one line per request on the guest's tmpfs, so the
-   mode a request was framed with and the plan it actually got are readable
-   from the host after the fact. Best-effort by construction -- a trace that
-   could fail a dispatch would measure the trace, not the box. Capped so a
-   guest whose tmpfs hosts the trace can never be filled by it. *)
-let request_trace_path = "/tmp/masc-shim-requests.log"
-
+(* Diagnostic trace: one line per request in a per-uid 0700 directory on tmpfs,
+   so the mode a request was framed with and the plan it actually got are
+   readable without exposing a world-writable /tmp race or FIFO hang. *)
 let request_trace_byte_cap = 4 * 1024 * 1024
+
+let request_trace_path () =
+  let euid = Unix.geteuid () in
+  let dir = Filename.concat (Filename.get_temp_dir_name ()) (Printf.sprintf "masc-shim-%d" euid) in
+  let is_owned_dir st =
+    match st.Unix.st_kind with
+    | Unix.S_DIR -> st.Unix.st_uid = euid
+    | Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK -> false
+  in
+  let dir_ok =
+    match Unix.lstat dir with
+    | st -> is_owned_dir st
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+      (match Unix.mkdir dir 0o700 with
+       | () -> true
+       | exception Unix.Unix_error (Unix.EEXIST, _, _) ->
+         (match Unix.lstat dir with
+          | st -> is_owned_dir st
+          | exception Unix.Unix_error _ -> false)
+       | exception Unix.Unix_error _ -> false)
+    | exception Unix.Unix_error _ -> false
+  in
+  if dir_ok then Some (Filename.concat dir "requests.log") else None
 
 let trace_request ~mode ~plan argv =
   try
-    (* An absent trace has size zero, not an exception -- otherwise the
-       guard would swallow the very first write. *)
-    let size =
-      match Unix.stat request_trace_path with
-      | { Unix.st_size; _ } -> st_size
-      | exception Unix.Unix_error _ -> 0
-    in
-    if size <= request_trace_byte_cap then begin
-      let fd =
-        Unix.openfile request_trace_path
-          [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND ]
-          0o644
+    match request_trace_path () with
+    | None -> ()
+    | Some trace_path ->
+      let euid = Unix.geteuid () in
+      let is_owned_reg st =
+        match st.Unix.st_kind with
+        | Unix.S_REG -> st.Unix.st_uid = euid && st.Unix.st_size <= request_trace_byte_cap
+        | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK -> false
       in
-      let line =
-        Printf.sprintf "%d v=%s mode=%s plan=%s argv0=%s\n"
-          (int_of_float (Unix.time ()))
-          (string_of_int Exec_ssh_protocol.protocol_version ^ Shim_build_id.suffix)
-          (Exec_ssh_protocol.mode_to_string mode) plan
-          (match argv with arg0 :: _ -> arg0 | [] -> "-")
+      let safe_to_open =
+        match Unix.lstat trace_path with
+        | st -> is_owned_reg st
+        | exception Unix.Unix_error (Unix.ENOENT, _, _) -> true
+        | exception Unix.Unix_error _ -> false
       in
-      (* fire-and-forget: a short write only shortens one trace line *)
-      ignore (Unix.write_substring fd line 0 (String.length line));
-      Unix.close fd
-    end
-  with Unix.Unix_error _ -> ()
+      if safe_to_open then begin
+        let fd =
+          Unix.openfile trace_path
+            [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_APPEND; Unix.O_NONBLOCK; Unix.O_CLOEXEC ]
+            0o600
+        in
+        Fun.protect
+          ~finally:(fun () ->
+            try Unix.close fd with
+            | Unix.Unix_error _ -> ())
+          (fun () ->
+            if is_owned_reg (Unix.fstat fd) then begin
+              let line =
+                Printf.sprintf "%d v=%s mode=%s plan=%s argv0=%s\n"
+                  (int_of_float (Unix.time ()))
+                  (string_of_int Exec_ssh_protocol.protocol_version ^ Shim_build_id.suffix)
+                  (Exec_ssh_protocol.mode_to_string mode) plan
+                  (match argv with arg0 :: _ -> arg0 | [] -> "-")
+              in
+              ignore (Unix.write_substring fd line 0 (String.length line))
+            end)
+      end
+  with Unix.Unix_error _ | Sys_error _ -> ()
 ;;
 
 let scratch_env ~scratch env =
@@ -900,216 +935,8 @@ let read_child_boundary fd =
   in
   child_boundary_of_ack (Bytes.sub_string bytes 0 (read 0))
 
-(* Every instant in this loop is an interval's endpoint -- the timeout, the
-   SIGKILL grace, the post-reap drain -- and none is reported as a time. So
-   they are read off a clock no correction moves; see [Shim_clock]. *)
-let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
-    ~listener_fd ~timeout_sec =
-  let observe_active = ref (listener_fd <> Unix.stdin) in
-  let observed = ref [] in
-  let deadline = Shim_clock.elapsed_seconds () +. timeout_sec in
-  let payload_off = ref 0 in
-  let payload_len = String.length stdin_payload in
-  let stdin_open = ref (payload_len > 0) in
-  if payload_len = 0 then Unix.close stdin_w;
-  let out_open = ref true and err_open = ref true in
-  let chan_eof = ref false in
-  let out_dead = ref false and err_dead = ref false in
-  let status = ref None in
-  let timed_out = ref false in
-  let kill_started = ref false in
-  let kill_remaining = ref [] in
-  let grace_until = ref None in
-  let reaped_at = ref None in
-  (* After the payload is reaped, pipes are drained until EOF, bounded by
-     this grace so an escaped daemon (double-fork + setsid defeats pgid
-     kills by design) holding the pipes open cannot hang the shim. *)
-  let send_to_pgid sig_ =
-    try Unix.kill (-pid) sig_ with
-    | Unix.Unix_error _ -> () in
-  (* Interpret the kill-policy decision list: signal actions run
-     immediately, [Wait_grace] blocks further steps until it expires. *)
-  let rec step_kill now =
-    match !kill_remaining with
-    | Sigterm_pgid :: tl ->
-      send_to_pgid Sys.sigterm;
-      kill_remaining := tl;
-      step_kill now
-    | Sigkill_pgid :: tl ->
-      send_to_pgid Sys.sigkill;
-      kill_remaining := tl;
-      step_kill now
-    | Wait_grace g :: _ ->
-      (match !grace_until with
-       | None -> grace_until := Some (now +. g)
-       | Some t when now >= t ->
-         grace_until := None;
-         kill_remaining := List.tl !kill_remaining;
-         step_kill now
-       | Some _ -> ())
-    | [] -> () in
-  let start_kill trigger =
-    if !status = None && not !kill_started
-    then (
-      kill_started := true;
-      kill_remaining := kill_policy trigger;
-      step_kill (Shim_clock.elapsed_seconds ())) in
-  let poll_child () =
-    match !status with
-    | Some _ -> ()
-    | None ->
-      (match Unix.waitpid [ Unix.WNOHANG ] pid with
-       | 0, _ -> ()
-       | _, st ->
-         status := Some st;
-         reaped_at := Some (Shim_clock.elapsed_seconds ())) in
-  (* Forward drained child output to our own stdout/stderr.  If the peer
-     went away (EPIPE) keep draining so the child cannot block on a full
-     pipe, drop the bytes, and apply the channel-EOF kill policy. *)
-  let forward ~dst_dead dst_fd data =
-    if data <> "" && not !dst_dead
-    then
-      try write_all dst_fd data 0 (String.length data) with
-      | Unix.Unix_error (Unix.EPIPE, _, _) ->
-        dst_dead := true;
-        start_kill On_eof in
-  (* Drain available bytes from [pipe_fd]; returns [false] on EOF (pipe
-     closed here so the fd is never reused under us). *)
-  let pump ~dst_dead pipe_fd dst_fd =
-    let buf = Buffer.create 65536 in
-    match drain_fd pipe_fd buf with
-    | Drain_again -> true
-    | Drain_bytes _ ->
-      forward ~dst_dead dst_fd (Buffer.contents buf);
-      true
-    | Drain_eof ->
-      Unix.close pipe_fd;
-      false in
-  while !status = None || !out_open || !err_open do
-    let now = Shim_clock.elapsed_seconds () in
-    if !status = None && (not !kill_started) && now >= deadline
-    then (
-      (* Only attribute [timed_out] when the deadline is what started the
-         kill; a deadline expiring during an in-flight EOF-cancel kill must
-         not rewrite the cause. *)
-      timed_out := true;
-      start_kill On_timeout);
-    step_kill now;
-    poll_child ();
-    (* Drain grace after reap: close any pipes an escaped daemon keeps
-       open so the loop is guaranteed to terminate. *)
-    (match !reaped_at with
-     | Some t when now -. t > Shim_stream.drain_grace_sec ->
-       if !out_open
-       then (
-         (try Unix.close stdout_r with
-          | Unix.Unix_error _ -> ());
-         out_open := false);
-       if !err_open
-       then (
-         (try Unix.close stderr_r with
-          | Unix.Unix_error _ -> ());
-         err_open := false)
-     | _ -> ());
-    let readfds =
-      (if !out_open then [ stdout_r ] else [])
-      @ (if !err_open then [ stderr_r ] else [])
-      @ (if !observe_active then [ listener_fd ] else [])
-      @ if !chan_eof then [] else [ Unix.stdin ] in
-    let writefds = if !stdin_open then [ stdin_w ] else [] in
-    let select_timeout =
-      let quantum = Shim_stream.lifecycle_poll_sec in
-      (* Deadline counts only before it fires; after [timed_out] is set the
-         past deadline must not clamp the sleep to 0 (busy spin). *)
-      let t =
-        match !status, !timed_out with
-        | None, false -> min quantum (max 0.0 (deadline -. now))
-        | _ -> quantum in
-      match !grace_until with
-      | Some g -> min t (max 0.0 (g -. now))
-      | None -> t in
-    let rec select_retry () =
-      try Unix.select readfds writefds [] select_timeout with
-      | Unix.Unix_error (Unix.EINTR, _, _) -> select_retry () in
-    let (rdy_r, rdy_w, _) = select_retry () in
-    if !out_open && List.memq stdout_r rdy_r
-    then out_open := pump ~dst_dead:out_dead stdout_r Unix.stdout;
-    if !err_open && List.memq stderr_r rdy_r
-    then err_open := pump ~dst_dead:err_dead stderr_r Unix.stderr;
-    (* This is the listener's sole receiver. One readiness-backed receive
-       per iteration: RECV can block on an empty queue despite O_NONBLOCK.
-       A withdrawn notification or interruption leaves observation active;
-       the next select also services input, output, cancellation and timeout. *)
-    if !observe_active && List.memq listener_fd rdy_r
-    then (
-      match drain_one listener_fd with
-      | -2 -> ()
-      | -1 -> observe_active := false; Unix.close listener_fd
-      | syscall_no -> observed := syscall_no :: !observed
-    );
-    if (not !chan_eof) && List.memq Unix.stdin rdy_r
-    then (
-      (* After the frame, stdin carries no more data; readability means
-         either junk bytes (discarded) or EOF (channel closed = cancel). *)
-      let junk = Bytes.create 4096 in
-      match Unix.read Unix.stdin junk 0 (Bytes.length junk) with
-      | 0 ->
-        chan_eof := true;
-        start_kill On_eof
-      | _ -> ()
-      | exception Unix.Unix_error (Unix.EINTR, _, _) -> ());
-    if !stdin_open && List.memq stdin_w rdy_w
-    then (
-      match
-        Unix.write stdin_w
-          (Bytes.unsafe_of_string stdin_payload)
-          !payload_off (payload_len - !payload_off)
-      with
-      | n ->
-        payload_off := !payload_off + n;
-        if !payload_off >= payload_len
-        then (
-          Unix.close stdin_w;
-          stdin_open := false)
-      | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK), _, _) -> ()
-      | exception Unix.Unix_error (Unix.EPIPE, _, _) ->
-        (* Child is not reading stdin (already exited or closed it). *)
-        (try Unix.close stdin_w with
-         | Unix.Unix_error _ -> ());
-        stdin_open := false);
-    (* Once the child is reaped, keep draining opportunistically: pipes hit
-       EOF only after every writer (including grandchildren) is gone. *)
-    if !status <> None
-    then (
-      if !out_open then out_open := pump ~dst_dead:out_dead stdout_r Unix.stdout;
-      if !err_open then err_open := pump ~dst_dead:err_dead stderr_r Unix.stderr)
-  done;
-  if !stdin_open
-  then (try Unix.close stdin_w with
-        | Unix.Unix_error _ -> ());
-  let st = match !status with
-    | Some st -> st
-    | None ->
-      (* Unreachable: the loop exits only after the child was reaped. *)
-      snd (Unix.waitpid [] pid) in
-  (* Reap leftover process-group members (grandchildren) per policy.  No
-     liveness recheck between reap and this SIGKILL: the pgid could only
-     have been recycled by a pid-space wraparound inside the drain window
-     — negligible on Linux, acknowledged. *)
-  List.iter
-    (function
-      | Sigterm_pgid -> send_to_pgid Sys.sigterm
-      | Sigkill_pgid -> send_to_pgid Sys.sigkill
-      | Wait_grace _ -> ())
-    (kill_policy On_child_exit);
-  (* task-1575 phase 3: the observed-attempts accumulator rides in the
-     trailer's own [observed_syscalls] field -- a type distinct from the
-     exit/signal/shim_error ack, not a side-channel stderr text line (the
-     shape a completion verdict rejected: vrf-75b5116cabdef13de98a595b19a8295d). *)
-  trailer_of_status ~v ~timed_out:!timed_out ~observed_syscalls:(List.rev !observed) st
-
 (* One fixed-size buffer per direction. A slow peer stops reads from that
-   direction; no string accumulator grows with a live interactive stream. *)
+   direction; no string accumulator grows with a live stream. *)
 module Stream_pending = struct
   type t = { bytes : bytes; mutable first : int; mutable past : int }
   let create () = { bytes = Bytes.create max_drain_bytes_per_pump; first = 0; past = 0 }
@@ -1140,6 +967,203 @@ module Stream_pending = struct
     t.first <- t.first + count;
     if empty t then clear t
 end
+
+(* Every instant in this loop is an interval's endpoint -- the timeout, the
+   SIGKILL grace, the post-reap drain -- and none is reported as a time. So
+   they are read off a clock no correction moves; see [Shim_clock]. *)
+let supervise ~v ~pid ~stdin_w ~stdout_r ~stderr_r ~stdin_payload
+    ~listener_fd ~timeout_sec =
+  let module Pending = Stream_pending in
+  let output = Pending.create () in
+  let errors = Pending.create () in
+  let observe_active = ref (listener_fd <> Unix.stdin) in
+  let observed = ref [] in
+  let deadline = Shim_clock.elapsed_seconds () +. timeout_sec in
+  let payload_off = ref 0 in
+  let payload_len = String.length stdin_payload in
+  let stdin_open = ref (payload_len > 0) in
+  if payload_len = 0 then (try Unix.close stdin_w with Unix.Unix_error _ -> ());
+  let out_open = ref true and err_open = ref true in
+  let chan_eof = ref false in
+  let out_dead = ref false and err_dead = ref false in
+  let status = ref None in
+  let timed_out = ref false in
+  let kill_started = ref false in
+  let kill_remaining = ref [] in
+  let grace_until = ref None in
+  let reaped_at = ref None in
+  let close_if_open flag fd =
+    if !flag then begin
+      flag := false;
+      try Unix.close fd with Unix.Unix_error _ -> ()
+    end
+  in
+  let send_to_pgid sig_ =
+    try Unix.kill (-pid) sig_ with
+    | Unix.Unix_error _ -> () in
+  let rec step_kill now =
+    match !kill_remaining with
+    | Sigterm_pgid :: tl ->
+      send_to_pgid Sys.sigterm;
+      kill_remaining := tl;
+      step_kill now
+    | Sigkill_pgid :: tl ->
+      send_to_pgid Sys.sigkill;
+      kill_remaining := tl;
+      step_kill now
+    | Wait_grace g :: tl ->
+      (match !grace_until with
+       | None -> grace_until := Some (now +. g)
+       | Some t when now >= t ->
+         grace_until := None;
+         kill_remaining := tl;
+         step_kill now
+       | Some _ -> ())
+    | [] -> () in
+  let start_kill trigger =
+    if !status = None && not !kill_started
+    then (
+      kill_started := true;
+      kill_remaining := kill_policy trigger;
+      step_kill (Shim_clock.elapsed_seconds ())) in
+  let poll_child () =
+    match !status with
+    | Some _ -> ()
+    | None ->
+      (match Unix.waitpid [ Unix.WNOHANG ] pid with
+       | 0, _ -> ()
+       | _, st ->
+         status := Some st;
+         reaped_at := Some (Shim_clock.elapsed_seconds ())
+       | exception Unix.Unix_error (Unix.EINTR, _, _) -> ()) in
+  let read_output fd open_ dead pending =
+    try
+      if !dead then begin
+        Pending.clear pending;
+        let count = Pending.read pending fd in
+        Pending.clear pending;
+        if count = 0 then close_if_open open_ fd
+      end else if Pending.read pending fd = 0 then close_if_open open_ fd
+    with Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _) -> ()
+  in
+  let write_output dst_fd dead pending =
+    try Pending.write pending dst_fd with
+    | Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _) -> ()
+    | Unix.Unix_error ((Unix.EPIPE | Unix.ECONNRESET), _, _) ->
+      dead := true;
+      Pending.clear pending;
+      start_kill On_eof
+  in
+  let unfinished () =
+    !status = None || !out_open || !err_open
+    || not (Pending.empty output) || not (Pending.empty errors)
+  in
+  let finish () =
+    List.iter
+      (function
+        | Sigterm_pgid -> send_to_pgid Sys.sigterm
+        | Sigkill_pgid -> send_to_pgid Sys.sigkill
+        | Wait_grace _ -> ())
+      (kill_policy On_child_exit);
+    (match !status with
+     | Some _ -> ()
+     | None ->
+       (try Unix.kill pid Sys.sigkill with Unix.Unix_error _ -> ());
+       let rec reap () =
+         match Unix.waitpid [] pid with
+         | _, st -> status := Some st
+         | exception Unix.Unix_error (Unix.EINTR, _, _) -> reap ()
+         | exception Unix.Unix_error (Unix.ECHILD, _, _) -> ()
+       in
+       reap ());
+    close_if_open stdin_open stdin_w;
+    close_if_open out_open stdout_r;
+    close_if_open err_open stderr_r
+  in
+  Fun.protect ~finally:finish (fun () ->
+    Shim_stream.with_nonblocking Unix.stdout (fun () ->
+    Shim_stream.with_nonblocking Unix.stderr (fun () ->
+    while unfinished () do
+      let now = Shim_clock.elapsed_seconds () in
+      if !status = None && (not !kill_started) && now >= deadline
+      then (
+        timed_out := true;
+        start_kill On_timeout);
+      step_kill now;
+      poll_child ();
+      (match !reaped_at with
+       | Some t when now -. t > Shim_stream.drain_grace_sec ->
+         close_if_open out_open stdout_r;
+         close_if_open err_open stderr_r;
+         Pending.clear output;
+         Pending.clear errors
+       | Some _ | None -> ());
+      if unfinished () then begin
+        let readfds =
+          (if !out_open && (!out_dead || Pending.space output > 0) then [ stdout_r ] else [])
+          @ (if !err_open && (!err_dead || Pending.space errors > 0) then [ stderr_r ] else [])
+          @ (if !observe_active then [ listener_fd ] else [])
+          @ if !chan_eof then [] else [ Unix.stdin ] in
+        let writefds =
+          (if !stdin_open then [ stdin_w ] else [])
+          @ (if not !out_dead && not (Pending.empty output) then [ Unix.stdout ] else [])
+          @ (if not !err_dead && not (Pending.empty errors) then [ Unix.stderr ] else []) in
+        let select_timeout =
+          let quantum = Shim_stream.lifecycle_poll_sec in
+          let t =
+            match !status, !timed_out with
+            | None, false -> min quantum (max 0.0 (deadline -. now))
+            | None, true | Some _, (false | true) -> quantum in
+          match !grace_until with
+          | Some g -> min t (max 0.0 (g -. now))
+          | None -> t in
+        let rec select_retry () =
+          try Unix.select readfds writefds [] select_timeout with
+          | Unix.Unix_error (Unix.EINTR, _, _) -> select_retry () in
+        let (rdy_r, rdy_w, _) = select_retry () in
+        if !out_open && List.memq stdout_r rdy_r
+        then read_output stdout_r out_open out_dead output;
+        if !err_open && List.memq stderr_r rdy_r
+        then read_output stderr_r err_open err_dead errors;
+        if !observe_active && List.memq listener_fd rdy_r
+        then (
+          match drain_one listener_fd with
+          | -2 -> ()
+          | -1 -> observe_active := false; Unix.close listener_fd
+          | syscall_no -> observed := syscall_no :: !observed);
+        if (not !chan_eof) && List.memq Unix.stdin rdy_r
+        then (
+          let junk = Bytes.create 4096 in
+          match Unix.read Unix.stdin junk 0 (Bytes.length junk) with
+          | 0 ->
+            chan_eof := true;
+            start_kill On_eof
+          | _ -> ()
+          | exception Unix.Unix_error (Unix.EINTR, _, _) -> ());
+        if !stdin_open && List.memq stdin_w rdy_w
+        then (
+          match
+            Unix.write stdin_w
+              (Bytes.unsafe_of_string stdin_payload)
+              !payload_off (payload_len - !payload_off)
+          with
+          | n ->
+            payload_off := !payload_off + n;
+            if !payload_off >= payload_len
+            then close_if_open stdin_open stdin_w
+          | exception Unix.Unix_error ((Unix.EAGAIN | Unix.EWOULDBLOCK | Unix.EINTR), _, _) -> ()
+          | exception Unix.Unix_error ((Unix.EPIPE | Unix.ECONNRESET), _, _) ->
+            close_if_open stdin_open stdin_w);
+        if not !out_dead && List.memq Unix.stdout rdy_w
+        then write_output Unix.stdout out_dead output;
+        if not !err_dead && List.memq Unix.stderr rdy_w
+        then write_output Unix.stderr err_dead errors
+      end
+    done;
+    let st = match !status with
+      | Some st -> st
+      | None -> snd (Unix.waitpid [] pid) in
+    trailer_of_status ~v ~timed_out:!timed_out ~observed_syscalls:(List.rev !observed) st)))
 
 type interactive_output_failure = Output_peer_closed | Output_drain_incomplete
 

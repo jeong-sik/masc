@@ -85,17 +85,33 @@ describe('Keeper waiting observer lifecycle', () => {
     expect(mocks.tokenChanged).toBeNull()
   })
 
-  it('distinguishes access refusal from a disconnected stream', async () => {
+  it('distinguishes access refusal from a disconnected stream and does not spin retries until credentials change', async () => {
     vi.useFakeTimers()
     const callbacks = { ready: vi.fn(), change: vi.fn(), unavailable: vi.fn() }
     const stop = startKeeperWaitingObserver(callbacks)
     try {
       mocks.observers[0]!.fail(new ObserverAccessError(403))
-      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(120_000)
       expect(callbacks.unavailable).toHaveBeenCalledWith('access_refused')
+      expect(mocks.observers).toHaveLength(1)
+      mocks.tokenChanged?.()
+      expect(mocks.observers).toHaveLength(2)
     } finally {
       stop.stop()
     }
+  })
+
+  it('does not schedule a retry timer if unavailable callback calls stop()', async () => {
+    vi.useFakeTimers()
+    let handle: ReturnType<typeof startKeeperWaitingObserver> | null = null
+    handle = startKeeperWaitingObserver({
+      ready: vi.fn(),
+      change: vi.fn(),
+      unavailable: () => { handle?.stop() },
+    })
+    mocks.observers[0]!.fail(new Error('network drop'))
+    await vi.advanceTimersByTimeAsync(120_000)
+    expect(mocks.observers).toHaveLength(1)
   })
 
   it('retires a mismatched observer and retries with backoff', async () => {

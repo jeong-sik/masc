@@ -26,13 +26,28 @@ export const keeperWaitingInventoryStates = signal<
   Record<string, KeeperWaitingInventoryState>
 >({})
 
+type InFlightRead = {
+  readonly promise: Promise<void>
+  readonly instance: string
+  readonly generation: number
+  readonly controller: AbortController
+}
+
 const subscriberCounts = new Map<string, number>()
-const inFlight = new Map<string, Promise<void>>()
+const inFlight = new Map<string, InFlightRead>()
 const pendingInvalidations = new Set<string>()
 let observer: ReturnType<typeof startKeeperWaitingObserver> | null = null
 let observerInstance: string | null = null
 let retainedObserverInstance: string | null = null
 let observerGeneration = 0
+
+function abortAllInFlight(): void {
+  for (const entry of inFlight.values()) {
+    entry.controller.abort()
+  }
+  inFlight.clear()
+  pendingInvalidations.clear()
+}
 
 function stateFor(keeperName: string): KeeperWaitingInventoryState {
   return keeperWaitingInventoryStates.value[keeperName] ?? EMPTY_STATE
@@ -62,23 +77,33 @@ export function keeperWaitingInventoryState(
 /** One keeper-scoped authoritative read. Concurrent consumers share the same
  * request; the last good projection remains visible while it refreshes. */
 export function refreshKeeperWaitingInventory(keeperName: string): Promise<void> {
-  const existing = inFlight.get(keeperName)
-  if (existing) return existing
   const instance = observerInstance
+  const generation = observerGeneration
+  const existing = inFlight.get(keeperName)
+  if (existing) {
+    if (existing.instance === instance && existing.generation === generation) {
+      return existing.promise
+    }
+    existing.controller.abort()
+    inFlight.delete(keeperName)
+  }
   if (!instance) {
     const previous = stateFor(keeperName)
-    setState(keeperName, { ...previous, observerCurrent: false, error: '실시간 대기 상태 연결을 확인할 수 없습니다.' })
+    setState(keeperName, { ...previous, loading: false, observerCurrent: false, error: '실시간 대기 상태 연결을 확인할 수 없습니다.' })
     return Promise.resolve()
   }
-  const generation = observerGeneration
 
+  const controller = new AbortController()
   const previous = stateFor(keeperName)
   setState(keeperName, { ...previous, loading: true, error: null, observerCurrent: false })
-  const request = fetchKeeperWaitingInventory(keeperName, instance)
+  let inFlightEntry: InFlightRead
+  const request = fetchKeeperWaitingInventory(keeperName, instance, { signal: controller.signal })
     .then(inventory => {
       if (observerInstance !== instance || observerGeneration !== generation) {
         const current = stateFor(keeperName)
-        setState(keeperName, { ...current, loading: false, observerCurrent: false })
+        if (!inFlight.has(keeperName)) {
+          setState(keeperName, { ...current, loading: false, observerCurrent: false })
+        }
         return
       }
       setState(keeperName, {
@@ -94,8 +119,10 @@ export function refreshKeeperWaitingInventory(keeperName: string): Promise<void>
     })
     .catch((cause: unknown) => {
       const current = stateFor(keeperName)
-      if (observerInstance !== instance || observerGeneration !== generation) {
-        setState(keeperName, { ...current, loading: false, observerCurrent: false })
+      if (observerInstance !== instance || observerGeneration !== generation || controller.signal.aborted) {
+        if (!inFlight.has(keeperName)) {
+          setState(keeperName, { ...current, loading: false, observerCurrent: false })
+        }
         return
       }
       if (cause instanceof ObserverScopeError || (cause instanceof ApiRequestError
@@ -114,7 +141,7 @@ export function refreshKeeperWaitingInventory(keeperName: string): Promise<void>
       })
     })
     .finally(() => {
-      if (inFlight.get(keeperName) !== request) return
+      if (inFlight.get(keeperName) !== inFlightEntry) return
       inFlight.delete(keeperName)
       if (
         pendingInvalidations.delete(keeperName)
@@ -123,7 +150,8 @@ export function refreshKeeperWaitingInventory(keeperName: string): Promise<void>
         void refreshKeeperWaitingInventory(keeperName)
       }
     })
-  inFlight.set(keeperName, request)
+  inFlightEntry = { promise: request, instance, generation, controller }
+  inFlight.set(keeperName, inFlightEntry)
   return request
 }
 
@@ -133,7 +161,8 @@ export function refreshKeeperWaitingInventory(keeperName: string): Promise<void>
 function invalidateKeeperWaitingInventory(keeperName: string): void {
   const previous = stateFor(keeperName)
   if (previous.observerCurrent) setState(keeperName, { ...previous, observerCurrent: false })
-  if (inFlight.has(keeperName)) {
+  const existing = inFlight.get(keeperName)
+  if (existing && existing.instance === observerInstance && existing.generation === observerGeneration) {
     pendingInvalidations.add(keeperName)
     return
   }
@@ -172,13 +201,14 @@ function startRecoveryListeners(): void {
     unavailable: reason => {
       observerInstance = null
       observerGeneration++
+      abortAllInFlight()
       if (reason === 'credentials_changed' || reason === 'access_refused' || reason === 'scope_changed') {
         retainedObserverInstance = null
         withdrawRetainedInventories()
       }
       for (const [keeperName] of subscriberCounts) {
         const previous = stateFor(keeperName)
-        setState(keeperName, { ...previous, observerCurrent: false, error: '실시간 대기 상태 연결이 끊겼습니다.' })
+        setState(keeperName, { ...previous, loading: false, observerCurrent: false, error: '실시간 대기 상태 연결이 끊겼습니다.' })
       }
     },
   })
@@ -192,6 +222,7 @@ function stopRecoveryListeners(): void {
   observerInstance = null
   retainedObserverInstance = null
   observerGeneration++
+  abortAllInFlight()
   withdrawRetainedInventories()
   window.removeEventListener('focus', refreshActiveKeepers)
   document.removeEventListener('visibilitychange', refreshActiveKeepers)

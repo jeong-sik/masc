@@ -10,9 +10,6 @@
 /** The legend's name for the time. */
 export const LEGEND_TIME_LABEL = '시각'
 
-/** uPlot's own stamp for a time series' legend value. */
-export const LEGEND_TIME_STAMP = '{YYYY}-{MM}-{DD} {h}:{mm}{aa}'
-
 /** What the legend says for a point that has no value. */
 export const LEGEND_NO_VALUE = '없음'
 

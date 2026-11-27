@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type uPlot from 'uplot'
 import { resetTimeWindowForTests } from '../../core/time-window'
 import { UPlotChart, type UPlotSeriesSpec } from './uplot-chart'
-import { LEGEND_NO_VALUE, LEGEND_TIME_LABEL, LEGEND_TIME_STAMP } from './uplot-legend'
+import { LEGEND_NO_VALUE, LEGEND_TIME_LABEL } from './uplot-legend'
+import { LEGEND_TIME_STAMP } from './uplot-time'
 
 const HOUR = 3600
 const T0 = 1_800_000_000
@@ -18,9 +19,15 @@ const lateData: uPlot.AlignedData = [[T0 + 6 * HOUR, T0 + 10 * HOUR], [1, 2], [7
 const wholeSeries: readonly UPlotSeriesSpec[] = [{ label: '사용률', unit: '%' }]
 const lateSeries: readonly UPlotSeriesSpec[] = [{ label: '요청' }, { label: '오류' }]
 
-/** A 2D context that draws nothing: uPlot only needs the width of a text back. */
+/** Every text uPlot asked a canvas to draw since the test began: the ticks of both axes. */
+let drawnTexts: string[] = []
+
+/** A 2D context that draws nothing: uPlot needs the width of a text back, and the test the texts. */
 function blankContext(): CanvasRenderingContext2D {
-  const held: Record<string | symbol, unknown> = { measureText: (text: string) => ({ width: text.length * 7 }) }
+  const held: Record<string | symbol, unknown> = {
+    measureText: (text: string) => ({ width: text.length * 7 }),
+    fillText: (text: string) => { drawnTexts.push(text) },
+  }
   return new Proxy(held, {
     get: (target, key) => target[key] ?? (() => undefined),
     set: (target, key, value) => {
@@ -84,6 +91,7 @@ describe('components/primitives uplot chart legend', () => {
     vi.stubGlobal('Path2D', BlankPath2D)
     vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => blankContext())
     resetTimeWindowForTests()
+    drawnTexts = []
     container = document.createElement('div')
     document.body.appendChild(container)
     const stamp = (await import('uplot')).default.fmtDate(LEGEND_TIME_STAMP)
@@ -104,11 +112,20 @@ describe('components/primitives uplot chart legend', () => {
     expect(legend(0)).toEqual({
       labels: [LEGEND_TIME_LABEL, '사용률'],
       values: [timeText(T0 + 10 * HOUR), '30 %'],
-      widths: [expect.stringMatching(/^1[78]ch$/), '4ch'],
+      widths: ['16ch', '4ch'],
     })
     // 오류 has no value at the latest time, and does not borrow the earlier one.
     expect(legend(1).values).toEqual([timeText(T0 + 10 * HOUR), '2', LEGEND_NO_VALUE])
-    expect(legend(1).widths).toEqual([expect.stringMatching(/^1[78]ch$/), '4ch', '4ch'])
+    expect(legend(1).widths).toEqual(['16ch', '4ch', '4ch'])
+  })
+
+  it('draws the ticks of the time axis on the 24-hour clock, the date year first', async () => {
+    renderCharts(wholeData)
+    await vi.waitFor(() => expect(drawnTexts.some((text) => /^\d\d:\d\d$/.test(text))).toBe(true))
+
+    // The first tick carries the date on its second line, as the legend writes it.
+    expect(drawnTexts.some((text) => /^\d{4}-\d\d-\d\d$/.test(text))).toBe(true)
+    expect(drawnTexts.filter((text) => /[ap]m$|\//.test(text))).toEqual([])
   })
 
   it('reads each chart\'s crosshair point, and none on a chart the pointed time comes before', async () => {
@@ -156,7 +173,7 @@ describe('components/primitives uplot chart legend', () => {
     expect(hidden(0)).toEqual([false, false])
     // A hidden series keeps its row, its label and the width of its value.
     expect(legend(1).labels).toEqual([LEGEND_TIME_LABEL, '요청', '오류'])
-    expect(legend(1).widths).toEqual([expect.stringMatching(/^1[78]ch$/), '4ch', '4ch'])
+    expect(legend(1).widths).toEqual(['16ch', '4ch', '4ch'])
 
     click(legendRow(1, 1).querySelector('th')!)
     click(legendRow(1, 2).querySelector('th')!)

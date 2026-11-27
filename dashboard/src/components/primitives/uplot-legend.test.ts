@@ -66,7 +66,7 @@ describe('components/primitives uplot legend', () => {
 
   it('counts a character from Hangul up as two columns and the rest as one', () => {
     expect(displayColumns('57.30 %')).toBe(7)
-    expect(displayColumns('2026-11-25 10:00pm')).toBe(18)
+    expect(displayColumns('2026-11-25 22:00')).toBe(16)
     expect(displayColumns(LEGEND_NO_VALUE)).toBe(4)
     expect(displayColumns('')).toBe(0)
     // A narrow symbol up there takes a column too many; one outside the BMP counts once.
@@ -76,14 +76,14 @@ describe('components/primitives uplot legend', () => {
 
   it('takes the widest text of each series over all points, and no less than the text for no value', () => {
     const texts = [
-      ['2026-11-25 7:00pm', '2026-11-25 10:00pm', '2026-11-26 12:00am'],
+      ['2026-11-25 19:00', '2026-11-25 22:00', '2026-11-26 00:00'],
       ['100 %', '57.30 %', '9 %'],
       ['1', '2', '3'],
     ]
 
     // The third series never has a gap, yet reads "없음" with the pointer on
     // another chart before its first point.
-    expect(legendValueColumns(3, 3, (seriesIdx, pointIdx) => texts[seriesIdx]![pointIdx]!)).toEqual([18, 7, 4])
+    expect(legendValueColumns(3, 3, (seriesIdx, pointIdx) => texts[seriesIdx]![pointIdx]!)).toEqual([16, 7, 4])
     expect(legendValueColumns(2, 0, () => 'unused')).toEqual([4, 4])
   })
 

@@ -15,7 +15,6 @@ import type uPlot from 'uplot'
 import { getUPlotSync, publishCrosshair } from '../../core/time-window'
 import {
   LEGEND_TIME_LABEL,
-  LEGEND_TIME_STAMP,
   legendPointIndex,
   legendText,
   legendValueColumns,
@@ -24,6 +23,7 @@ import {
   reflectLegendToggle,
   reserveLegendValueWidths,
 } from './uplot-legend'
+import { LEGEND_TIME_STAMP, TIME_AXIS_STAMPS } from './uplot-time'
 
 export interface UPlotSeriesSpec {
   readonly label: string
@@ -213,6 +213,7 @@ export function UPlotChart(props: UPlotChartProps) {
             {
               stroke: palette.fg,
               font: palette.font,
+              values: TIME_AXIS_STAMPS,
               grid: { show: true, stroke: palette.grid, width: 1 },
               ticks: { show: true, stroke: palette.axis, width: 1 },
             },

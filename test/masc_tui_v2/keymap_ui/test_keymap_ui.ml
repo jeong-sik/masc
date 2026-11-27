@@ -892,25 +892,23 @@ let test_markdown_embeds () =
       shown = Markdown.Embed_link { label = "A page"; uri = "a.md" };
     }
   in
+  (* Wrapping splits a span at its spaces, so text is read from the joined spans. *)
+  let joined spans =
+    String.concat "" (List.map (fun (span : Markdown.styled_span) -> span.text) spans)
+  in
   let in_text = spans [ page ] "see ![[wiki:a|A page]] here" in
-  (* Wrapping splits a span at its spaces, so the link's words are joined back. *)
   Alcotest.(check string) "a page embed is a link to that page" "A page"
-    (in_text
-    |> List.filter (fun (span : Markdown.styled_span) ->
-           Option.equal String.equal span.hyperlink (Some "a.md"))
-    |> List.map (fun (span : Markdown.styled_span) -> span.text)
-    |> String.concat "");
+    (joined
+       (List.filter
+          (fun (span : Markdown.styled_span) ->
+            Option.equal String.equal span.hyperlink (Some "a.md"))
+          in_text));
   Alcotest.(check bool) "the embed source is not shown" false
-    (List.exists
-       (fun (span : Markdown.styled_span) -> contains_sub ~needle:"![[" ~haystack:span.text)
-       in_text);
+    (contains_sub ~needle:"![[" ~haystack:(joined in_text));
   let in_code = spans [ page ] "`![[wiki:a|A page]]`" in
   Alcotest.(check bool) "an embed written in code stays code" true
     (List.for_all (fun (span : Markdown.styled_span) -> Option.is_none span.hyperlink) in_code
-    && List.exists
-         (fun (span : Markdown.styled_span) ->
-           contains_sub ~needle:"![[wiki:a|A page]]" ~haystack:span.text)
-         in_code);
+    && contains_sub ~needle:"![[wiki:a|A page]]" ~haystack:(joined in_code));
   let path = "/api/v1/media/" ^ String.make 64 'a' in
   let image ?(rows = 3) raw =
     {

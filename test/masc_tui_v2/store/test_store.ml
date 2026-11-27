@@ -31951,15 +31951,16 @@ let () =
                                       operation_id = "op-par";
                                       seq = Some 99;
                                       chunk =
-                                        Wire_fleet.Chunk_tool_end
-                                          {
-                                            operation_id = Some "op-par";
-                                            tool_use_id = "scope-1-block-1";
-                                            tool_name = Some "bash";
-                                            execution_id = None;
-                                            ok = Some true;
-                                            output_preview = Some "done";
-                                          };
+                                        Some
+                                          (Wire_fleet.Chunk_tool_end
+                                             {
+                                               operation_id = Some "op-par";
+                                               tool_use_id = "scope-1-block-1";
+                                               tool_name = Some "bash";
+                                               execution_id = None;
+                                               ok = Some true;
+                                               output_preview = Some "done";
+                                             });
                                     });
                            };
                      })

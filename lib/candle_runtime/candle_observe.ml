@@ -52,28 +52,6 @@ let event_may_affect_account_revision (event : Candle_event.t) =
   | Candle_event.Unattributed _
   | Candle_event.Payout_failed _ -> false
 
-let event_is_relevant_to_keeper ~keeper (event : Candle_event.t) =
-  match event.body with
-  | Candle_event.Half_life_set _ -> true
-  | Candle_event.Paid payment ->
-      List.exists
-        (fun (allocation : Candle_payment.allocation) ->
-           String.equal allocation.keeper keeper)
-        payment.allocations
-  | Candle_event.Purchased purchase -> String.equal purchase.keeper keeper
-  | Candle_event.Granted granted -> String.equal granted.keeper keeper
-  | Candle_event.Gifted gift ->
-      String.equal gift.from_keeper keeper || String.equal gift.to_keeper keeper
-  | Candle_event.Gifted_item gift ->
-      String.equal gift.from_keeper keeper || String.equal gift.to_keeper keeper
-  | Candle_event.Equipped choice -> String.equal choice.keeper keeper
-  | Candle_event.Snapshot _
-  | Candle_event.Payout_owed _
-  | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
-  | Candle_event.Candidate_window_held _ | Candle_event.Candidate_window_released _
-  | Candle_event.Unattributed _
-  | Candle_event.Payout_failed _ -> false
-
 type touched =
   | Every_keeper
   | Keepers of string list
@@ -108,65 +86,165 @@ let keepers_touched events =
   | Every_keeper -> Every_keeper
   | Keepers keepers -> Keepers (List.sort_uniq String.compare keepers)
 
+type cached_revision_table = {
+  rev_events : Candle_event.t list;
+  rev_policy : Candle_config.policy;
+  rev_balance : Candle_balance.t;
+  rev_total_supply_milli : Z.t;
+  rev_active_keepers : int;
+  rev_mu : Stdlib.Mutex.t;
+  rev_by_keeper : (string, string) Hashtbl.t;
+  rev_compute : keeper:string -> string;
+}
+
+let revision_table_cache_mu = Stdlib.Mutex.create ()
+let revision_table_cache : cached_revision_table list ref = ref []
+let revision_table_cache_max = 8
+let revision_per_keeper_cache_max = 512
+
+let lookup_memoized_revision (table : cached_revision_table) ~keeper =
+  match
+    Stdlib.Mutex.protect table.rev_mu (fun () ->
+      Hashtbl.find_opt table.rev_by_keeper keeper)
+  with
+  | Some digest -> digest
+  | None ->
+    let digest = table.rev_compute ~keeper in
+    Stdlib.Mutex.protect table.rev_mu (fun () ->
+      if Hashtbl.length table.rev_by_keeper >= revision_per_keeper_cache_max
+         && not (Hashtbl.mem table.rev_by_keeper keeper)
+      then Hashtbl.clear table.rev_by_keeper;
+      Hashtbl.replace table.rev_by_keeper keeper digest);
+    digest
+
 let ready_account_revision_reader ~events ~policy ~balance =
-  let encoded_events =
-    events
-    |> List.filter_map (fun event ->
-         if event_may_affect_account_revision event
-         then Some (event, Candle_event.to_yojson event)
-         else None)
-  in
-  let half_life = match policy.Candle_config.half_life with
-    | Candle_decay.Off -> `String "off"
-    | Candle_decay.Hours hours -> `Int hours in
-  let pricing_tail = match policy.Candle_config.pricing with
-    | Candle_config.Fixed -> []
-    | Candle_config.Supply_scaled p ->
-      [ `Assoc
-          [ "mode", `String "supply_scaled"
-          ; "target_per_keeper_milli", `Int p.target_per_keeper_milli
-          ; "min_permille", `Int p.min_permille
-          ; "max_permille", `Int p.max_permille
-          ; ( "rounding"
-            , `String
-                (match p.rounding with
-                 | Candle_math.Floor -> "down"
-                 | Candle_math.Ceil -> "up") )
-          ] ] in
   let min_active_balance_milli =
     Candle_config.min_active_balance_milli policy.Candle_config.pricing
   in
   let summary =
     Candle_balance.supply_summary ~min_active_balance_milli balance
   in
-  let catalog = Keeper_portrait_item.all |> List.map (fun item ->
-    let price =
-      match
-        Candle_config.effective_price
-          policy
-          ~total_supply_milli:summary.total_supply_milli
-          ~active_keepers:summary.active_keepers
-          item
-      with
-      | Candle_config.Unpriced -> `Null
-      | Candle_config.Priced amount -> `String (string_of_int amount)
+  let matches (entry : cached_revision_table) =
+    entry.rev_events == events
+    && Candle_balance.same_owned entry.rev_balance balance
+    && Z.equal entry.rev_total_supply_milli summary.total_supply_milli
+    && Int.equal entry.rev_active_keepers summary.active_keepers
+    && (entry.rev_policy == policy || entry.rev_policy = policy)
+  in
+  let cached =
+    Stdlib.Mutex.protect revision_table_cache_mu (fun () ->
+      List.find_opt matches !revision_table_cache)
+  in
+  match cached with
+  | Some table -> lookup_memoized_revision table
+  | None ->
+    let global_events_rev = ref [] in
+    let per_keeper_rev : (string, (int * Yojson.Safe.t) list) Hashtbl.t = Hashtbl.create 32 in
+    let idx = ref 0 in
+    List.iter
+      (fun event ->
+         if event_may_affect_account_revision event then begin
+           let i = !idx in
+           idx := i + 1;
+           let json = Candle_event.to_yojson event in
+           match event_touches event with
+           | Every_keeper -> global_events_rev := (i, json) :: !global_events_rev
+           | Keepers keepers ->
+             let rec add_unique seen = function
+               | [] -> ()
+               | keeper :: rest ->
+                 if List.mem keeper seen then add_unique seen rest
+                 else begin
+                   let prev = Option.value ~default:[] (Hashtbl.find_opt per_keeper_rev keeper) in
+                   Hashtbl.replace per_keeper_rev keeper ((i, json) :: prev);
+                   add_unique (keeper :: seen) rest
+                 end
+             in
+             add_unique [] keepers
+         end)
+      events;
+    let global_events = List.rev !global_events_rev in
+    let merge_indexed_rev a b =
+      let rec loop acc xs ys =
+        match xs, ys with
+        | [], rest | rest, [] -> List.rev_append acc (List.map snd rest)
+        | (ia, ja) :: xs', (ib, jb) :: ys' ->
+          if ia <= ib then loop (ja :: acc) xs' ys else loop (jb :: acc) xs ys'
+      in
+      loop [] a b
     in
-    `List [`String (Keeper_portrait_item.id item); price]) in
-  fun ~keeper ->
-    let facts =
-      List.filter_map
-        (fun (event, json) ->
-           if event_is_relevant_to_keeper ~keeper event then Some json else None)
-        encoded_events
+    let half_life = match policy.Candle_config.half_life with
+      | Candle_decay.Off -> `String "off"
+      | Candle_decay.Hours hours -> `Int hours in
+    let pricing_tail = match policy.Candle_config.pricing with
+      | Candle_config.Fixed -> []
+      | Candle_config.Supply_scaled p ->
+        [ `Assoc
+            [ "mode", `String "supply_scaled"
+            ; "target_per_keeper_milli", `Int p.target_per_keeper_milli
+            ; "min_permille", `Int p.min_permille
+            ; "max_permille", `Int p.max_permille
+            ; ( "rounding"
+              , `String
+                  (match p.rounding with
+                   | Candle_math.Floor -> "down"
+                   | Candle_math.Ceil -> "up") )
+            ] ] in
+    let catalog = Keeper_portrait_item.all |> List.map (fun item ->
+      let price =
+        match
+          Candle_config.effective_price
+            policy
+            ~total_supply_milli:summary.total_supply_milli
+            ~active_keepers:summary.active_keepers
+            item
+        with
+        | Candle_config.Unpriced -> `Null
+        | Candle_config.Priced amount -> `String (string_of_int amount)
+      in
+      `List [`String (Keeper_portrait_item.id item); price]) in
+    let rev_compute ~keeper =
+      let keeper_events =
+        match Hashtbl.find_opt per_keeper_rev keeper with
+        | None -> []
+        | Some rev -> List.rev rev
+      in
+      let facts =
+        match global_events, keeper_events with
+        | [], ks -> List.map snd ks
+        | gs, [] -> List.map snd gs
+        | gs, ks -> merge_indexed_rev gs ks
+      in
+      let owned =
+        Candle_balance.owned balance ~keeper
+        |> List.map (fun item -> `String (Keeper_portrait_item.id item))
+      in
+      let account =
+        `List ([ half_life; `List facts; `List owned; `List catalog ] @ pricing_tail)
+      in
+      Agent_core_sha256.(digest_string ("ready\000" ^ Yojson.Safe.to_string account) |> to_hex)
     in
-    let owned =
-      Candle_balance.owned balance ~keeper
-      |> List.map (fun item -> `String (Keeper_portrait_item.id item))
+    let table =
+      { rev_events = events
+      ; rev_policy = policy
+      ; rev_balance = balance
+      ; rev_total_supply_milli = summary.total_supply_milli
+      ; rev_active_keepers = summary.active_keepers
+      ; rev_mu = Stdlib.Mutex.create ()
+      ; rev_by_keeper = Hashtbl.create 32
+      ; rev_compute
+      }
     in
-    let account =
-      `List ([ half_life; `List facts; `List owned; `List catalog ] @ pricing_tail)
-    in
-    Agent_core_sha256.(digest_string ("ready\000" ^ Yojson.Safe.to_string account) |> to_hex)
+    Stdlib.Mutex.protect revision_table_cache_mu (fun () ->
+      let rec take n acc = function
+        | [] -> List.rev acc
+        | _ when n <= 0 -> List.rev acc
+        | entry :: rest ->
+          if matches entry then take n acc rest
+          else take (n - 1) (entry :: acc) rest
+      in
+      revision_table_cache := table :: take (revision_table_cache_max - 1) [] !revision_table_cache);
+    lookup_memoized_revision table
 
 let ready_account_revision ~events ~policy ~balance ~keeper =
   ready_account_revision_reader ~events ~policy ~balance ~keeper

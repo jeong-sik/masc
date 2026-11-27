@@ -118,14 +118,109 @@ let observe_state_doc ~defaults = function
   | Error error ->
     State_recovered { state = defaults (); fault = State_document_fault error }
 
+type state_file_stamp =
+  { sf_dev : int
+  ; sf_ino : int
+  ; sf_size : int
+  ; sf_mtime : float
+  ; sf_ctime : float
+  ; sf_perm : int
+  ; sf_uid : int
+  ; sf_gid : int
+  }
+
+let equal_state_file_stamp a b =
+  a.sf_dev = b.sf_dev
+  && a.sf_ino = b.sf_ino
+  && a.sf_size = b.sf_size
+  && Float.equal a.sf_mtime b.sf_mtime
+  && Float.equal a.sf_ctime b.sf_ctime
+  && a.sf_perm = b.sf_perm
+  && a.sf_uid = b.sf_uid
+  && a.sf_gid = b.sf_gid
+
+let stat_state_file_opt path =
+  match Unix.lstat path with
+  | stat when stat.Unix.st_kind = Unix.S_REG ->
+    Some
+      { sf_dev = stat.st_dev
+      ; sf_ino = stat.st_ino
+      ; sf_size = stat.st_size
+      ; sf_mtime = stat.st_mtime
+      ; sf_ctime = stat.st_ctime
+      ; sf_perm = stat.st_perm
+      ; sf_uid = stat.st_uid
+      ; sf_gid = stat.st_gid
+      }
+  | _ -> None
+  | exception Unix.Unix_error _ -> None
+
+let state_stamp_is_settled ~now stamp =
+  now -. stamp.sf_mtime > 0.05 && now -. stamp.sf_ctime > 0.05
+
+let state_cache_mu = Stdlib.Mutex.create ()
+let state_cache : (string, int * state_file_stamp * workspace_state) Hashtbl.t =
+  Hashtbl.create 8
+let state_cache_max = 64
+
+let invalidate_state_cache path =
+  note_workspace_state_written ();
+  Stdlib.Mutex.protect state_cache_mu (fun () -> Hashtbl.remove state_cache path)
+
+let observe_state_uncached config =
+  let path = state_path config in
+  observe_state_doc
+    ~defaults:(fun () -> Workspace_bootstrap.default_workspace_state config)
+    (read_json_doc config path)
+
 (* [state.json] is what [is_initialized] reads, so a read never creates it:
    a workspace without one gets the declared default, unwritten. A document
    that is there but does not decode is not rewritten either: the caller gets
    the recovered value together with the fault. *)
 let observe_state config =
-  observe_state_doc
-    ~defaults:(fun () -> Workspace_bootstrap.default_workspace_state config)
-    (read_json_doc config (state_path config))
+  let path = state_path config in
+  let use_cache =
+    match config.backend with
+    | FileSystem _ -> true
+    | Memory _ -> false
+  in
+  let gen_before = workspace_state_write_generation () in
+  let cached =
+    if not use_cache then None
+    else
+      let now = Time_compat.now () in
+      match stat_state_file_opt path with
+      | Some stamp when state_stamp_is_settled ~now stamp ->
+        Stdlib.Mutex.protect state_cache_mu (fun () ->
+          match Hashtbl.find_opt state_cache path with
+          | Some (cached_gen, s, state)
+            when cached_gen = gen_before && equal_state_file_stamp s stamp ->
+            Some state
+          | Some _ | None -> None)
+      | Some _ | None -> None
+  in
+  match cached with
+  | Some state -> State_decoded state
+  | None ->
+    let now_before = if use_cache then Time_compat.now () else 0.0 in
+    let before = if use_cache then stat_state_file_opt path else None in
+    let obs = observe_state_uncached config in
+    (match obs with
+     | State_decoded state when use_cache ->
+       (match before, stat_state_file_opt path with
+        | Some s1, Some s2
+          when state_stamp_is_settled ~now:now_before s1
+               && equal_state_file_stamp s1 s2
+               && state_stamp_is_settled ~now:(Time_compat.now ()) s2
+               && workspace_state_write_generation () = gen_before ->
+          Stdlib.Mutex.protect state_cache_mu (fun () ->
+            if Hashtbl.length state_cache >= state_cache_max
+               && not (Hashtbl.mem state_cache path)
+            then Hashtbl.clear state_cache;
+            Hashtbl.replace state_cache path (gen_before, s2, state))
+        | _ -> ())
+     | State_decoded _ | State_absent _ | State_recovered _ -> ());
+    obs
 
 let read_state config =
   match observe_state config with
@@ -141,8 +236,10 @@ let read_state config =
 (* ============================================ *)
 
 let write_state config state =
+  let path = state_path config in
   let json = workspace_state_to_yojson state in
-  write_json config (state_path config) json
+  write_json config path json;
+  invalidate_state_cache path
 
 let raw_snippet_max_bytes = 500
 
@@ -170,7 +267,7 @@ let state_to_overwrite = function
 
 let update_state config f =
   with_file_lock config (state_path config) (fun () ->
-    let state = state_to_overwrite (observe_state config) in
+    let state = state_to_overwrite (observe_state_uncached config) in
     let new_state = f state in
     write_state config new_state;
     new_state

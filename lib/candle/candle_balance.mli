@@ -80,6 +80,10 @@ val supply : t -> supply
     does not imply ownership. *)
 val owned : t -> keeper:string -> Keeper_portrait_item.t list
 
+val same_owned : t -> t -> bool
+(** Physical identity check on the immutable ownership map, which is fixed by
+    {!replay} and untouched by clock-only decay advances. *)
+
 (** Atomically add every allocation, or return an error without a partial
     result. A Goal can be credited only once. *)
 val credit : t -> at:Candle_time.t -> Candle_payment.t -> (t, error) result

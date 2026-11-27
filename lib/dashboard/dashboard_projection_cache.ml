@@ -116,7 +116,7 @@ let read_candle_for_response ~read =
   let request_sequence = Atomic.fetch_and_add candle_read_sequence 1 in
   request_sequence, read ()
 
-let project_keeper_observations ~request_sequence ~candle ~(config : Workspace_utils.config)
+let project_keeper_observations ~(request_sequence : int option) ~candle ~(config : Workspace_utils.config)
     snapshot =
   let equipment = Candle_observe.equipment candle in
   let account_revision = Candle_observe.account_revision_reader candle in
@@ -125,18 +125,31 @@ let project_keeper_observations ~request_sequence ~candle ~(config : Workspace_u
     match keeper_names_in_snapshot snapshot with
     | [] -> String_map.empty
     | names ->
-      let pairs =
-        Eio_guard.run_in_systhread
-          ~label:"dashboard-keeper-board-addresses"
-          (fun () ->
-            List.map
-              (fun keeper -> keeper, Keeper_board_address.read config keeper)
-              names)
+      let resolved, misses_rev =
+        List.fold_left
+          (fun (acc, misses) keeper ->
+             match Keeper_board_address.read_cached_opt config keeper with
+             | Some address -> String_map.add keeper address acc, misses
+             | None -> acc, keeper :: misses)
+          (String_map.empty, [])
+          names
       in
-      List.fold_left
-        (fun acc (keeper, address) -> String_map.add keeper address acc)
-        String_map.empty
-        pairs
+      (match misses_rev with
+       | [] -> resolved
+       | _ :: _ ->
+         let misses = List.rev misses_rev in
+         let pairs =
+           Eio_guard.run_in_systhread
+             ~label:"dashboard-keeper-board-addresses"
+             (fun () ->
+               List.map
+                 (fun keeper -> keeper, Keeper_board_address.read config keeper)
+                 misses)
+         in
+         List.fold_left
+           (fun acc (keeper, address) -> String_map.add keeper address acc)
+           resolved
+           pairs)
   in
   let set key value fields =
     if List.mem_assoc key fields then
@@ -176,41 +189,135 @@ let project_keeper_observations ~request_sequence ~candle ~(config : Workspace_u
       Hashtbl.add keeper_observations keeper fields;
       fields
   in
+  let row_matches_observation fields observation =
+    List.for_all
+      (fun (key, value) ->
+         match List.assoc_opt key fields with
+         | Some existing -> existing = value
+         | None -> false)
+      observation
+  in
+  let rows_already_match rows =
+    List.for_all
+      (function
+        | `Assoc rfields as json ->
+          let observation = observed_fields (Json_util.assoc_string_opt "name" json) in
+          row_matches_observation rfields observation
+        | _ -> true)
+      rows
+  in
   let row = function
     | `Assoc fields as json ->
       let observation = observed_fields (Json_util.assoc_string_opt "name" json) in
-      `Assoc (List.fold_left (fun fields (key, value) -> set key value fields) fields observation)
+      if row_matches_observation fields observation then json
+      else `Assoc (List.fold_left (fun fields (key, value) -> set key value fields) fields observation)
     | json -> json in
   let section fields = List.map (function
     | "items", `List rows -> "items", `List (List.map row rows)
     | field -> field) fields |> set "candle" summary in
   match snapshot with
   | `Assoc fields ->
-    let projected = List.map (function
-      | "keepers", `Assoc fields -> "keepers", `Assoc (section fields)
-      | ("keepers" | "keeper_briefs" | "continuity_briefs") as key, `List rows -> key, `List (List.map row rows)
-      | "operator_targets", `Assoc fields ->
-        "operator_targets", `Assoc (List.map (function
-          | "keepers", `List rows -> "keepers", `List (List.map row rows)
-          | field -> field) fields)
-      | field -> field) fields in
+    (* Populate [keeper_observations] first without reconstructing the entire
+       1+ MB snapshot so we can check if all projected fields already match
+       and return [snapshot] physically unchanged. *)
+    let pre_match_ok =
+      List.for_all
+        (function
+          | "keepers", `Assoc sfields ->
+            (match List.assoc_opt "candle" sfields with
+             | Some c when c = summary ->
+               (match List.assoc_opt "items" sfields with
+                | Some (`List rows) -> rows_already_match rows
+                | Some _ | None -> true)
+             | Some _ | None -> false)
+          | ("keepers" | "keeper_briefs" | "continuity_briefs"), `List rows ->
+            rows_already_match rows
+          | "operator_targets", `Assoc tfields ->
+            (match List.assoc_opt "keepers" tfields with
+             | Some (`List rows) -> rows_already_match rows
+             | Some _ | None -> true)
+          | _ -> true)
+        fields
+    in
+    (* Ensure all keepers in the snapshot are populated in [keeper_observations]
+       even if [pre_match_ok] short-circuited above. *)
+    if not pre_match_ok then begin
+      let note_row_obs = function
+        | `Assoc _ as r -> ignore (observed_fields (Json_util.assoc_string_opt "name" r))
+        | _ -> ()
+      in
+      List.iter
+        (function
+          | "keepers", `Assoc sfields ->
+            (match List.assoc_opt "items" sfields with
+             | Some (`List rows) -> List.iter note_row_obs rows
+             | Some _ | None -> ())
+          | ("keepers" | "keeper_briefs" | "continuity_briefs"), `List rows ->
+            List.iter note_row_obs rows
+          | "operator_targets", `Assoc tfields ->
+            (match List.assoc_opt "keepers" tfields with
+             | Some (`List rows) -> List.iter note_row_obs rows
+             | Some _ | None -> ())
+          | _ -> ())
+        fields
+    end;
     (* This ordering witness covers every fresh row observation, including
        addresses. Equal Candle state alone must not let a delayed response
-       restore an older alias after a newer configuration was displayed. *)
-    let observations = Hashtbl.to_seq keeper_observations |> List.of_seq
-      |> List.sort (fun (left, _) (right, _) -> Option.compare String.compare left right) in
-    let observation_sequence = candle_observation_sequence
-      ~base_path:config.base_path ~request_sequence (summary, observations) in
-    let projected = set "candle_observation_sequence" (`Int observation_sequence) projected in
-    (match List.assoc_opt "keepers" fields with
-     | Some (`Assoc _) -> `Assoc projected
-     | _ -> `Assoc (set "candle" summary projected))
+       restore an older alias after a newer configuration was displayed.
+       Gate roster reads omit the sequence field and pass [request_sequence = None]
+       so they do not perturb execution/briefing observation ordering. *)
+    let observation_sequence_opt =
+      match request_sequence with
+      | Some request_sequence ->
+        let observations = Hashtbl.to_seq keeper_observations |> List.of_seq
+          |> List.sort (fun (left, _) (right, _) -> Option.compare String.compare left right) in
+        Some (candle_observation_sequence
+          ~base_path:config.base_path ~request_sequence (summary, observations))
+      | None -> None
+    in
+    let top_candle_ok =
+      match List.assoc_opt "keepers" fields with
+      | Some (`Assoc _) -> true
+      | Some _ | None ->
+        (match List.assoc_opt "candle" fields with
+         | Some c -> c = summary
+         | None -> false)
+    in
+    let seq_ok =
+      match observation_sequence_opt with
+      | None -> true
+      | Some observation_sequence ->
+        (match List.assoc_opt "candle_observation_sequence" fields with
+         | Some (`Int s) -> s = observation_sequence
+         | Some _ | None -> false)
+    in
+    if pre_match_ok && top_candle_ok && seq_ok then
+      snapshot
+    else begin
+      let projected = List.map (function
+        | "keepers", `Assoc fields -> "keepers", `Assoc (section fields)
+        | ("keepers" | "keeper_briefs" | "continuity_briefs") as key, `List rows -> key, `List (List.map row rows)
+        | "operator_targets", `Assoc fields ->
+          "operator_targets", `Assoc (List.map (function
+            | "keepers", `List rows -> "keepers", `List (List.map row rows)
+            | field -> field) fields)
+        | field -> field) fields in
+      let projected =
+        match observation_sequence_opt with
+        | Some observation_sequence ->
+          set "candle_observation_sequence" (`Int observation_sequence) projected
+        | None -> projected
+      in
+      (match List.assoc_opt "keepers" fields with
+       | Some (`Assoc _) -> `Assoc projected
+       | _ -> `Assoc (set "candle" summary projected))
+    end
   | json -> json
 
 let with_current_keeper_observations_using ~read ~config snapshot =
   (* Execution and briefing read operator rows, not the Keeper HTTP roster. *)
   let request_sequence, candle = read_candle_for_response ~read in
-  project_keeper_observations ~request_sequence ~candle ~config snapshot
+  project_keeper_observations ~request_sequence:(Some request_sequence) ~candle ~config snapshot
 
 let with_current_keeper_observations ~(config : Workspace_utils.config) snapshot =
   with_current_keeper_observations_using
@@ -218,11 +325,8 @@ let with_current_keeper_observations ~(config : Workspace_utils.config) snapshot
     ~config snapshot
 
 let with_current_gate_keeper_observations ~(config : Workspace_utils.config) snapshot =
-  let request_sequence, candle =
-    read_candle_for_response
-      ~read:(fun () -> Candle_observe.read ~now:Time_compat.now ~base_path:config.base_path)
-  in
-  let project = project_keeper_observations ~request_sequence ~candle ~config in
+  let candle = Candle_observe.read ~now:Time_compat.now ~base_path:config.base_path in
+  let project = project_keeper_observations ~request_sequence:None ~candle ~config in
   (* The roster answer carries the fold's basis beside [candle], from the same
      ledger view, so a reader computes the balances and the supply at a later
      time without reading again. *)

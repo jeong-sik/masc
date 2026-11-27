@@ -89,7 +89,8 @@ let reconcile_message_seq config path =
            path
            (`Assoc
              (List.remove_assoc "message_seq" fields
-              @ [ "message_seq", `Int filed ]))
+              @ [ "message_seq", `Int filed ]));
+         note_workspace_state_written ()
        | Ok _ -> ())
     | _ -> ()
 ;;

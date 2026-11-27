@@ -290,20 +290,93 @@ let could_not_be_examined error =
    the config directory stopped being searchable. Only ENOENT is absence. [stat]
    follows a link, so a link to a file that is gone also ends in ENOENT. The
    link is there, and the operator wrote it, so that is not absence either. *)
+type config_file_stamp =
+  { st_dev : int
+  ; st_ino : int
+  ; st_size : int
+  ; st_mtime : float
+  ; st_ctime : float
+  ; st_perm : int
+  ; st_uid : int
+  ; st_gid : int
+  }
+
+let config_stamp_of_stats (st : Unix.stats) : config_file_stamp =
+  { st_dev = st.st_dev
+  ; st_ino = st.st_ino
+  ; st_size = st.st_size
+  ; st_mtime = st.st_mtime
+  ; st_ctime = st.st_ctime
+  ; st_perm = st.st_perm
+  ; st_uid = st.st_uid
+  ; st_gid = st.st_gid
+  }
+
+let config_stamp_equal (a : config_file_stamp) (b : config_file_stamp) =
+  a.st_dev = b.st_dev
+  && a.st_ino = b.st_ino
+  && a.st_size = b.st_size
+  && Float.equal a.st_mtime b.st_mtime
+  && Float.equal a.st_ctime b.st_ctime
+  && a.st_perm = b.st_perm
+  && a.st_uid = b.st_uid
+  && a.st_gid = b.st_gid
+
+let config_stamp_safe_to_cache (s : config_file_stamp) now =
+  now -. s.st_mtime >= 0.05 && now -. s.st_ctime >= 0.05
+
+let config_cache_mu = Stdlib.Mutex.create ()
+let config_cache : (string, config_file_stamp * t) Hashtbl.t = Hashtbl.create 8
+let config_cache_max = 64
+
 let load_file ~path =
   match Unix.stat path with
   | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+    Stdlib.Mutex.protect config_cache_mu (fun () -> Hashtbl.remove config_cache path);
     (match Unix.lstat path with
      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Off
      | exception Unix.Unix_error (error, _, _) -> could_not_be_examined error
      | (_ : Unix.stats) ->
        Disabled { reason = "candle.toml is a link to a file that does not exist" })
   | exception Unix.Unix_error (error, _, _) -> could_not_be_examined error
-  | { Unix.st_kind = Unix.S_REG; _ } ->
-    (match In_channel.with_open_bin path In_channel.input_all with
-     | text -> of_toml_string text
-     | exception Sys_error detail ->
-       Disabled { reason = Printf.sprintf "candle.toml could not be read: %s" detail })
+  | { Unix.st_kind = Unix.S_REG; _ } as st ->
+    let stamp = config_stamp_of_stats st in
+    let now = Unix.gettimeofday () in
+    let cached =
+      if config_stamp_safe_to_cache stamp now then
+        Stdlib.Mutex.protect config_cache_mu (fun () ->
+          match Hashtbl.find_opt config_cache path with
+          | Some (cached_stamp, value) when config_stamp_equal cached_stamp stamp ->
+            Some value
+          | Some _ | None -> None)
+      else None
+    in
+    (match cached with
+     | Some value -> value
+     | None ->
+       (match In_channel.with_open_bin path In_channel.input_all with
+        | text ->
+          let value = of_toml_string text in
+          (match Unix.stat path with
+           | { Unix.st_kind = Unix.S_REG; _ } as st2 ->
+             let stamp2 = config_stamp_of_stats st2 in
+             if config_stamp_safe_to_cache stamp now
+                && config_stamp_equal stamp stamp2
+                && config_stamp_safe_to_cache stamp2 (Unix.gettimeofday ())
+             then
+               Stdlib.Mutex.protect config_cache_mu (fun () ->
+                 if Hashtbl.length config_cache >= config_cache_max
+                    && not (Hashtbl.mem config_cache path)
+                 then Hashtbl.clear config_cache;
+                 Hashtbl.replace config_cache path (stamp2, value))
+           | { Unix.st_kind =
+                 Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
+             ; _
+             } -> ()
+           | exception Unix.Unix_error _ -> ());
+          value
+        | exception Sys_error detail ->
+          Disabled { reason = Printf.sprintf "candle.toml could not be read: %s" detail }))
   | { Unix.st_kind =
         Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
     ; _

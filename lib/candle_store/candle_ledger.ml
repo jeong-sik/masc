@@ -188,10 +188,34 @@ let snapshot_outcome ~path result =
     Snapshot_read value
 ;;
 
+let parsed_rows_cache_mu = Stdlib.Mutex.create ()
+let parsed_rows_cache : (string, string * Candle_event.t list) Hashtbl.t = Hashtbl.create 8
+let parsed_rows_cache_max = 16
+
+let parse_rows_cached ~path bytes =
+  let cached =
+    Stdlib.Mutex.protect parsed_rows_cache_mu (fun () ->
+      match Hashtbl.find_opt parsed_rows_cache path with
+      | Some (prev_bytes, events) when String.equal prev_bytes bytes -> Some events
+      | Some _ | None -> None)
+  in
+  match cached with
+  | Some events -> Ok events
+  | None ->
+    (match parse_rows ~path bytes with
+     | Ok events as ok ->
+       Stdlib.Mutex.protect parsed_rows_cache_mu (fun () ->
+         if Hashtbl.length parsed_rows_cache >= parsed_rows_cache_max then
+           Hashtbl.clear parsed_rows_cache;
+         Hashtbl.replace parsed_rows_cache path (bytes, events));
+       ok
+     | Error _ as err -> err)
+;;
+
 let view_of_snapshot ~path (snapshot : Fs_compat.private_jsonl_snapshot) =
   Result.map
     (fun events -> { events; cursor = snapshot.cursor })
-    (parse_rows ~path snapshot.bytes)
+    (parse_rows_cached ~path snapshot.bytes)
 ;;
 
 let view_of_outcome ~path = function

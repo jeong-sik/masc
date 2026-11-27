@@ -572,10 +572,14 @@ let write_state config state =
      in hand. *)
   let* content, reread =
     Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+      let raw_json = state_to_yojson state in
       let+ content, json =
-        Workspace_utils.encode_json_compact_with_value (state_to_yojson state)
+        Workspace_utils.encode_json_compact_with_value raw_json
       in
-      content, state_of_yojson json)
+      let reread =
+        if json == raw_json then Ok state else state_of_yojson json
+      in
+      content, reread)
     |> Result.map_error (fun msg -> Persistence_failed ("ledger encoding failed: " ^ msg))
   in
   let path = schedules_path config in

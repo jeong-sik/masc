@@ -6,6 +6,9 @@ val standard_cache_ttl_s : float
 val workspace_memory_inventory_cache_key : base_path:string -> string
 (** The inventory's read and commit invalidation share this exact cache key. *)
 
+val workspace_memory_ledger_cache_key : base_path:string -> string
+(** The ledger view's read and commit invalidation share this exact cache key. *)
+
 val deep_surface_cache_ttl_s : float
 val shell_surface_cache_ttl_s : float
 val freshness_slo_s : float

@@ -483,7 +483,10 @@ let with_execution_observer_instance ~owner json =
        | Some _ | None ->
            `Assoc (("observer_instance_id", `String instance_id)
              :: List.remove_assoc "observer_instance_id" fields))
-  | None, `Assoc fields -> `Assoc (List.remove_assoc "observer_instance_id" fields)
+  | None, `Assoc fields ->
+      if List.mem_assoc "observer_instance_id" fields then
+        `Assoc (List.remove_assoc "observer_instance_id" fields)
+      else json
   | (None | Some _), (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) -> json
 ;;
 
@@ -1682,7 +1685,12 @@ let execution_publication_of_request (request : execution_http_request) =
       !(owner.published))
 ;;
 
-let execution_cached_http_response ~owner ~observe ~(config : Workspace.config)
+type execution_cached_lookup =
+  | Cached_miss
+  | Cached_payload of Dashboard_cache.cached_payload
+  | Cached_observed_drift of { previous : execution_http_payload; json : Yojson.Safe.t }
+
+let execution_cached_http_lookup ~owner ~observe ~(config : Workspace.config)
       ~(parameters : execution_parameters) =
   let { actor; full_mode; force } = parameters in
   match actor, full_mode, force with
@@ -1695,22 +1703,30 @@ let execution_cached_http_response ~owner ~observe ~(config : Workspace.config)
         Some payload
       | Empty | Preparing _ | Ready _ -> None) in
     (match selected with
-     | None -> None
+     | None -> Cached_miss
      | Some payload ->
        let json = observe ~config payload.response_json in
        (* Observation performs I/O. A mutation or newer publication while it
           yields must take the fallback rather than returning detached data.
           Compare immutable JSON outside the short publication lock. *)
-       let response =
-         if json = payload.response_json
-         then Execution_payload (execution_payload_response payload)
-         else Execution_json json in
+       let outcome =
+         if json == payload.response_json || json = payload.response_json
+         then Cached_payload (execution_payload_response payload)
+         else Cached_observed_drift { previous = payload; json } in
        with_execution_publication_lock ~owner (fun () ->
          if execution_surface_has_fresh_success_unlocked ~owner ()
             && execution_http_source_matches ~owner ~config payload.source
-         then Some response
-         else None))
-  | _ -> None
+         then outcome
+         else Cached_miss))
+  | Some _, _, _ | None, true, _ | None, false, true -> Cached_miss
+;;
+
+let execution_cached_http_response ~owner ~observe ~(config : Workspace.config)
+      ~(parameters : execution_parameters) =
+  match execution_cached_http_lookup ~owner ~observe ~config ~parameters with
+  | Cached_miss -> None
+  | Cached_payload payload -> Some (Execution_payload payload)
+  | Cached_observed_drift { json; _ } -> Some (Execution_json json)
 ;;
 
 let dashboard_execution_cached_http_response context =
@@ -2053,7 +2069,45 @@ let dashboard_execution_http_response ~sw ~clock context =
   | Execution_json json -> Execution_json (refresh json)
   | Execution_payload payload ->
       let json = refresh payload.json in
-      if json = payload.json then response else Execution_json json
+      if json == payload.json || json = payload.json then response else Execution_json json
+;;
+
+let dashboard_execution_wire_response ~sw ~clock ~timing context =
+  let lookup =
+    Server_timing.measure timing Server_timing.Cache_lookup (fun () ->
+      execution_cached_http_lookup
+        ~owner:context.owner
+        ~observe:Dashboard_projection_cache.with_current_keeper_observations
+        ~config:context.config
+        ~parameters:context.parameters)
+  in
+  match lookup with
+  | Cached_payload payload -> Execution_payload payload
+  | Cached_observed_drift { previous; json } ->
+    if Dashboard_cache.is_timeout_envelope json then Execution_json json
+    else
+      Server_timing.measure timing Server_timing.Cache_compute (fun () ->
+        let etag, encoded =
+          Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+            let body = Yojson.Safe.to_string json in
+            Http_server_eio.Response.weak_etag_value body, Http_response_payload.prepare body)
+        in
+        let next_payload =
+          { source = previous.source; response_json = json; encoded; etag }
+        in
+        with_execution_publication_lock ~owner:context.owner (fun () ->
+          match !(context.owner.default_light_http) with
+          | Ready current
+            when current == previous
+                 && execution_http_source_matches
+                      ~owner:context.owner ~config:context.config previous.source
+                 && execution_surface_has_fresh_success_unlocked ~owner:context.owner () ->
+            context.owner.default_light_http := Ready next_payload
+          | Empty | Preparing _ | Ready _ -> ());
+        Execution_payload (execution_payload_response next_payload))
+  | Cached_miss ->
+    Server_timing.measure timing Server_timing.Cache_compute (fun () ->
+      dashboard_execution_http_response ~sw ~clock context)
 ;;
 
 let dashboard_execution_http_json ~state ~sw ~clock request =
@@ -2097,6 +2151,63 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
   attach_surface_envelope json
 ;;
 
+type cached_execution_trust_http = {
+  et_snapshot : Server_dashboard_http_cache.surface_snapshot;
+  et_prepared : Server_cached_read_http.prepared_http;
+}
+
+let execution_trust_http_cache_mu = Stdlib.Mutex.create ()
+let execution_trust_http_cache : (string, cached_execution_trust_http) Hashtbl.t =
+  Hashtbl.create 4
+let execution_trust_http_cache_max = 16
+
+let dashboard_execution_trust_http_prepared ~state ~sw ~clock request =
+  let scope = Mcp_server.workspace_scope state in
+  let cache = execution_trust_cache_for_scope ~state scope in
+  let scoped_cache_key = execution_trust_cache_key ^ ":"
+    ^ Mcp_server.Workspace_scope_epoch.to_string scope.epoch in
+  let snap = Server_dashboard_http_cache.snapshot cache in
+  let is_fresh_success (s : Server_dashboard_http_cache.surface_snapshot) =
+    match s.last_success_unix, s.last_error_unix with
+    | Some success_ts, Some error_ts -> not (error_ts > success_ts)
+    | Some _, None -> true
+    | None, _ -> false
+  in
+  if is_fresh_success snap then
+    let hit =
+      Stdlib.Mutex.protect execution_trust_http_cache_mu (fun () ->
+        match Hashtbl.find_opt execution_trust_http_cache scoped_cache_key with
+        | Some cached when cached.et_snapshot == snap -> Some cached.et_prepared
+        | Some _ | None -> None)
+    in
+    match hit with
+    | Some prepared -> prepared
+    | None ->
+      let json = dashboard_execution_trust_http_json ~state ~sw ~clock request in
+      let prepared = Server_cached_read_http.prepare_json json in
+      let after_snap = Server_dashboard_http_cache.snapshot cache in
+      if after_snap == snap then
+        Stdlib.Mutex.protect execution_trust_http_cache_mu (fun () ->
+          if Hashtbl.length execution_trust_http_cache >= execution_trust_http_cache_max
+             && not (Hashtbl.mem execution_trust_http_cache scoped_cache_key)
+          then Hashtbl.clear execution_trust_http_cache;
+          Hashtbl.replace execution_trust_http_cache scoped_cache_key
+            { et_snapshot = snap; et_prepared = prepared });
+      prepared
+  else
+    let json = dashboard_execution_trust_http_json ~state ~sw ~clock request in
+    let prepared = Server_cached_read_http.prepare_json json in
+    let after_snap = Server_dashboard_http_cache.snapshot cache in
+    if is_fresh_success after_snap then
+      Stdlib.Mutex.protect execution_trust_http_cache_mu (fun () ->
+        if Hashtbl.length execution_trust_http_cache >= execution_trust_http_cache_max
+           && not (Hashtbl.mem execution_trust_http_cache scoped_cache_key)
+        then Hashtbl.clear execution_trust_http_cache;
+        Hashtbl.replace execution_trust_http_cache scoped_cache_key
+          { et_snapshot = after_snap; et_prepared = prepared });
+    prepared
+;;
+
 let dashboard_transport_health_http_json ~state:_ =
   (* An explicit HTTP read observes current mirror/delivery costs too. Keep
      its formatting cell local: a manual sample must not overwrite or signal
@@ -2106,4 +2217,43 @@ let dashboard_transport_health_http_json ~state:_ =
   Server_dashboard_http_cache.mark_cached_surface_success response json;
   Server_dashboard_http_cache.cached_surface_json response
   |> with_transport_health_metadata ~source:"live_read"
+;;
+
+type cached_transport_health_http = {
+  th_raw : Yojson.Safe.t;
+  th_built_at : float;
+  th_prepared : Server_cached_read_http.prepared_http;
+}
+
+let transport_health_http_cache_mu = Stdlib.Mutex.create ()
+let transport_health_http_cache : cached_transport_health_http option ref = ref None
+let transport_health_http_coalesce_s = 2.0
+
+let dashboard_transport_health_http_prepared ~state:_ =
+  let raw = Transport_metrics.transport_health_json () in
+  let now = Unix.gettimeofday () in
+  let hit =
+    Stdlib.Mutex.protect transport_health_http_cache_mu (fun () ->
+      match !transport_health_http_cache with
+      | Some cached
+        when cached.th_raw = raw
+             && now -. cached.th_built_at >= 0.0
+             && now -. cached.th_built_at < transport_health_http_coalesce_s ->
+        Some cached.th_prepared
+      | Some _ | None -> None)
+  in
+  match hit with
+  | Some prepared -> prepared
+  | None ->
+    let response = Server_dashboard_http_cache.create_cached_surface raw in
+    Server_dashboard_http_cache.mark_cached_surface_success response raw;
+    let json =
+      Server_dashboard_http_cache.cached_surface_json response
+      |> with_transport_health_metadata ~source:"live_read"
+    in
+    let prepared = Server_cached_read_http.prepare_json json in
+    Stdlib.Mutex.protect transport_health_http_cache_mu (fun () ->
+      transport_health_http_cache :=
+        Some { th_raw = raw; th_built_at = now; th_prepared = prepared });
+    prepared
 ;;

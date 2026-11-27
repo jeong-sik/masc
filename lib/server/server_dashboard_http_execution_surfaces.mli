@@ -278,6 +278,21 @@ val dashboard_execution_http_response :
     Invalidated/superseded reads, forced refreshes and cache-generated timeout
     envelopes retain their JSON response. *)
 
+val dashboard_execution_wire_response :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  timing:Server_timing.t ->
+  execution_http_request ->
+  execution_http_response
+(** HTTP wire helper for [/api/v1/dashboard/execution]. Reuses the prepared
+    default snapshot payload when observations match; when authoritative
+    observations drifted on the same still-fresh snapshot, prepares compressed
+    HTTP encodings on the CPU pool, CAS-promotes [default_light_http] if the
+    previous payload is still installed and current, and returns
+    [Execution_payload] so subsequent reads hit the prepared path without
+    falling back to uncompressed JSON until the next full refresh. Falls
+    through to {!dashboard_execution_http_response} on cache miss. *)
+
 val dashboard_execution_http_json :
   state:Mcp_server.server_state ->
   sw:Eio.Switch.t ->
@@ -300,6 +315,16 @@ val dashboard_execution_trust_http_json :
 (** Renders the execution-trust dashboard surface
     (per-keeper rolled-up trust scores). *)
 
+val dashboard_execution_trust_http_prepared :
+  state:Mcp_server.server_state ->
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  Httpun.Request.t ->
+  Server_cached_read_http.prepared_http
+(** Pre-encoded HTTP payload + ETag for {!dashboard_execution_trust_http_json},
+    memoized while the underlying fresh surface snapshot stays physically
+    unchanged. Stale surfaces re-derive [stale_age_ms] on each read. *)
+
 val dashboard_transport_health_http_json :
   state:Mcp_server.server_state -> Yojson.Safe.t
 (** Returns the cached transport-health JSON with the
@@ -313,6 +338,13 @@ val dashboard_transport_health_http_json :
     payload after the surface had gone to an error state, with
     [stale_age_ms] frozen so the age stood still while the surface aged
     (#27652). *)
+
+val dashboard_transport_health_http_prepared :
+  state:Mcp_server.server_state -> Server_cached_read_http.prepared_http
+(** Pre-encoded HTTP payload + ETag for {!dashboard_transport_health_http_json}.
+    Always reads live {!Transport_metrics.transport_health_json} and only
+    reuses prepared bytes when the live metrics tree is unchanged within a
+    short coalescing window. *)
 
 (** {1 Lifecycle-event patchers}
 

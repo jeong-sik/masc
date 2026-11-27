@@ -26,3 +26,7 @@ val build : generated_at_iso:string -> resolved -> Yojson.Safe.t
 
 val current : generated_at_iso:string -> unit -> Yojson.Safe.t
 (** [build] applied to {!resolved_of_runtime}. *)
+
+val current_prepared : unit -> Server_cached_read_http.prepared_http
+(** Pre-encoded HTTP payload + ETag for {!current}, memoized while the
+    published runtime snapshot stays physically unchanged. *)

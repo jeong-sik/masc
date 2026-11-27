@@ -72,46 +72,69 @@ let slots_json ~owner ~current_http ~declared_http ~declared_cli ~runs =
        if not (Hashtbl.mem current_bindings slot_id) then
          Hashtbl.add current_bindings slot_id binding)
     current_http;
-  let latest ~attempt predicate observations =
-    let at (observation:Observation.t) =
-      if attempt then observation.started_at else
-        match observation.finished_at with Some _ as at -> at | None -> observation.started_at in
-    let anchor ((run:Exact_lane_run_registry.run),index,_) time = time,run.run_id,index in
-    List.fold_left (fun latest ((_,_,observation) as candidate) ->
-      match predicate observation,at observation with
-      | false,_ | true,None -> latest
-      | true,Some time -> (match latest with
-          | None -> Some (candidate,time)
-          | Some (previous,previous_time) ->
-            if Stdlib.compare (anchor candidate time) (anchor previous previous_time)>0
-            then Some (candidate,time) else latest)) None observations |> Option.map fst in
+  let compare_anchor
+      ((run_a : Exact_lane_run_registry.run), idx_a, _) time_a
+      ((run_b : Exact_lane_run_registry.run), idx_b, _) time_b =
+    let c = Float.compare time_a time_b in
+    if c <> 0 then c
+    else
+      let c = String.compare run_a.run_id run_b.run_id in
+      if c <> 0 then c
+      else Int.compare idx_a idx_b
+  in
+  let keep_latest current candidate time =
+    match current with
+    | None -> Some (candidate, time)
+    | Some (prev, prev_time) ->
+      if compare_anchor candidate time prev prev_time > 0
+      then Some (candidate, time)
+      else current
+  in
   let observed_json = function
     | None -> `Null
     | Some ((run:Exact_lane_run_registry.run),_,observation) ->
       `Assoc ["run_id",`String run.run_id;"observation",Observation.to_yojson observation] in
   `List (List.map (fun slot ->
     let kind = slot.kind and slot_id = slot.slot_id in
-    let history = List.rev slot.reversed_observations in
     let current_binding=match kind with
       | Official_client -> `Null
       | Http -> (match Hashtbl.find_opt current_bindings slot_id with
           | Some binding -> binding_json binding
           | None -> `Null) in
+    let last_obs = ref None in
+    let last_att = ref None in
+    let last_ok = ref None in
+    let last_fail = ref None in
+    let undated = ref [] in
+    (* Iterate in forward order by reversing once; compute all 5 projections in one pass. *)
+    List.iter
+      (fun ((_, _, (observation : Observation.t)) as candidate) ->
+         let obs_time =
+           match observation.finished_at with
+           | Some _ as at -> at
+           | None -> observation.started_at
+         in
+         (match obs_time with
+          | Some time -> last_obs := keep_latest !last_obs candidate time
+          | None -> ());
+         (match observation.started_at with
+          | Some time -> last_att := keep_latest !last_att candidate time
+          | None -> ());
+         (match observation.finished_at, observation.outcome with
+          | Some time, Accepted ->
+            last_ok := keep_latest !last_ok candidate time
+          | Some time, (Semantic_rejected | Admission_rejected _ | Execution_failed _ | Cli_failed _) ->
+            last_fail := keep_latest !last_fail candidate time
+          | Some _, Unresolved -> ()
+          | None, (Accepted | Semantic_rejected | Admission_rejected _ | Execution_failed _ | Cli_failed _) ->
+            undated := observed_json (Some candidate) :: !undated
+          | None, Unresolved -> ()))
+      (List.rev slot.reversed_observations);
     `Assoc ["slot_id",`String slot_id;"lane_key",`String lane_key;"transport",`String (transport_string kind);
       "declared",`Bool slot.declared;"current_binding",current_binding;
       "ordering_scope",`String "dated_only";
-      "last_observation",observed_json (latest ~attempt:false (fun _ -> true) history);
-      "last_attempt",observed_json (latest ~attempt:true (fun observation -> observation.Observation.started_at<>None) history);
-      "last_success",observed_json (latest ~attempt:false (fun observation -> observation.Observation.finished_at<>None &&
-        match observation.outcome with
-        | Accepted -> true
-        | Unresolved | Semantic_rejected | Admission_rejected _ | Execution_failed _ | Cli_failed _ -> false) history);
-      "last_failure",observed_json (latest ~attempt:false (fun observation -> observation.Observation.finished_at<>None &&
-        match observation.outcome with
-        | Semantic_rejected | Admission_rejected _ | Execution_failed _ | Cli_failed _ -> true
-        | Accepted | Unresolved -> false) history);
-      "undated_outcomes",`List (List.filter_map (fun ((_,_,(observation:Observation.t)) as value) ->
-        match observation.finished_at,observation.outcome with
-        | None,(Accepted | Semantic_rejected | Admission_rejected _ | Execution_failed _ | Cli_failed _) ->
-          Some (observed_json (Some value))
-        | Some _,_ | None,Unresolved -> None) history)]) (List.rev !reversed_slots))
+      "last_observation",observed_json (Option.map fst !last_obs);
+      "last_attempt",observed_json (Option.map fst !last_att);
+      "last_success",observed_json (Option.map fst !last_ok);
+      "last_failure",observed_json (Option.map fst !last_fail);
+      "undated_outcomes",`List (List.rev !undated)]) (List.rev !reversed_slots))

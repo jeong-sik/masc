@@ -175,29 +175,118 @@ let list_leaf_json_names config dir =
 
 let agents_persistence_surface = "workspace_agents"
 
+type query_file_stat_stamp =
+  { qfs_dev : int
+  ; qfs_ino : int
+  ; qfs_size : int
+  ; qfs_mtime : float
+  ; qfs_ctime : float
+  ; qfs_perm : int
+  ; qfs_uid : int
+  ; qfs_gid : int
+  }
+
+let equal_query_file_stat_stamp a b =
+  a.qfs_dev = b.qfs_dev
+  && a.qfs_ino = b.qfs_ino
+  && a.qfs_size = b.qfs_size
+  && Float.equal a.qfs_mtime b.qfs_mtime
+  && Float.equal a.qfs_ctime b.qfs_ctime
+  && a.qfs_perm = b.qfs_perm
+  && a.qfs_uid = b.qfs_uid
+  && a.qfs_gid = b.qfs_gid
+
+let query_stat_regular_opt path =
+  match Unix.lstat path with
+  | stat when stat.Unix.st_kind = Unix.S_REG ->
+    Some
+      { qfs_dev = stat.st_dev
+      ; qfs_ino = stat.st_ino
+      ; qfs_size = stat.st_size
+      ; qfs_mtime = stat.st_mtime
+      ; qfs_ctime = stat.st_ctime
+      ; qfs_perm = stat.st_perm
+      ; qfs_uid = stat.st_uid
+      ; qfs_gid = stat.st_gid
+      }
+  | _ -> None
+  | exception Unix.Unix_error _ -> None
+
+let query_stat_is_settled ~now stamp =
+  now -. stamp.qfs_mtime > 0.05 && now -. stamp.qfs_ctime > 0.05
+
+let agent_file_cache_mu = Stdlib.Mutex.create ()
+let agent_file_cache : (string, query_file_stat_stamp * Masc_domain.agent) Hashtbl.t =
+  Hashtbl.create 64
+let agent_file_cache_max = 512
+
+let message_file_cache_mu = Stdlib.Mutex.create ()
+let message_file_cache : (string, query_file_stat_stamp * Masc_domain.message) Hashtbl.t =
+  Hashtbl.create 256
+let message_file_cache_max = 1024
+
+let is_filesystem_backend config =
+  match config.Workspace_utils.backend with
+  | Workspace_utils.FileSystem _ -> true
+  | Workspace_utils.Memory _ -> false
+
 (* A file under [agents/] that does not decode is dropped from the listing
    and counted on [masc_persistence_read_drops_total]; nothing rewrites it.
    An open() that failed under fd pressure is not a loss and is
    logged without the data-integrity counter. *)
 let load_agents_from_dir config dir ~include_inactive =
+  let use_cache = is_filesystem_backend config in
+  let now = if use_cache then Time_compat.now () else 0.0 in
+  let idx = ref 0 in
   list_leaf_json_names config dir
   |> List.filter_map (fun name ->
-         Eio_guard.fair_yield ();
+         let cur = !idx in
+         idx := cur + 1;
+         if cur > 0 && cur land 63 = 0 then Eio_guard.fair_yield ();
          let path = Filename.concat dir name in
-         match read_agent_result config path with
-         | Ok agent when include_inactive || agent.status <> Masc_domain.Inactive ->
-             Some agent
-         | Ok _ -> None
-         | Error (Agent_fd_pressure exn) ->
-             Log.Workspace.warn "agent listing skipped %s under fd pressure: %s"
-               path (Printexc.to_string exn);
-             None
-         | Error (Agent_read_error detail) ->
-             Safe_ops.report_persistence_read_drop_counted
-               ~surface:agents_persistence_surface
-               ~reason:Read_drop_reason.Entry_load_error
-               ~path ~detail;
-             None)
+         let cached_agent =
+           if not use_cache then None
+           else
+             match query_stat_regular_opt path with
+             | Some stamp when query_stat_is_settled ~now stamp ->
+               Stdlib.Mutex.protect agent_file_cache_mu (fun () ->
+                 match Hashtbl.find_opt agent_file_cache path with
+                 | Some (cached_stamp, agent) when equal_query_file_stat_stamp cached_stamp stamp ->
+                   Some agent
+                 | Some _ | None -> None)
+             | Some _ | None -> None
+         in
+         match cached_agent with
+         | Some agent ->
+           if include_inactive || agent.status <> Masc_domain.Inactive then Some agent else None
+         | None ->
+           let now_before = if use_cache then Time_compat.now () else 0.0 in
+           let before = if use_cache then query_stat_regular_opt path else None in
+           (match read_agent_result config path with
+            | Ok agent ->
+              (if use_cache then
+                 match before, query_stat_regular_opt path with
+                 | Some s1, Some s2
+                   when query_stat_is_settled ~now:now_before s1
+                        && equal_query_file_stat_stamp s1 s2
+                        && query_stat_is_settled ~now:(Time_compat.now ()) s2 ->
+                   Stdlib.Mutex.protect agent_file_cache_mu (fun () ->
+                     if Hashtbl.length agent_file_cache >= agent_file_cache_max
+                        && not (Hashtbl.mem agent_file_cache path)
+                     then Hashtbl.clear agent_file_cache;
+                     Hashtbl.replace agent_file_cache path (s2, agent))
+                 | _ -> ());
+              if include_inactive || agent.status <> Masc_domain.Inactive then Some agent else None
+            | Error (Agent_fd_pressure exn) ->
+              Log.Workspace.warn "agent listing skipped %s under fd pressure: %s"
+                path (Printexc.to_string exn);
+              None
+            | Error (Agent_read_error detail) ->
+              Safe_ops.report_persistence_read_drop_counted
+                ~surface:agents_persistence_surface
+                ~reason:Read_drop_reason.Entry_load_error
+                ~path ~detail;
+              None))
 
 let state_backed_agent_type = "workspace-state"
 
@@ -420,28 +509,56 @@ let is_valid_filename name =
   ) name
 
 let select_recent_message_names ~since_seq ~limit names =
-  let insert_candidate acc name =
-    match message_seq_of_filename name with
-    | None -> acc
-    | Some seq when limit <= 0 || seq <= since_seq -> acc
-    | Some seq ->
-      let rec insert prefix = function
-        | [] -> List.rev_append prefix [ (seq, name) ]
-        | ((existing_seq, _) as existing) :: rest ->
-            if seq >= existing_seq then
-              List.rev_append prefix ((seq, name) :: existing :: rest)
-            else
-              insert (existing :: prefix) rest
-      in
-      insert [] acc |> List.take limit
-  in
-  names
-  |> List.fold_left
-       (fun acc name ->
-         Eio_guard.fair_yield ();
-         insert_candidate acc name)
-       []
-  |> List.map snd
+  if limit <= 0 then []
+  else
+    let kept_count = ref 0 in
+    let min_kept_seq = ref min_int in
+    let rec insert_and_trim prefix remaining_slots (seq, name) = function
+      | [] ->
+        if remaining_slots > 0 then begin
+          min_kept_seq := seq;
+          List.rev_append prefix [ (seq, name) ]
+        end else
+          List.rev prefix
+      | ((existing_seq, _) as existing) :: rest ->
+        if seq >= existing_seq then
+          let rec take_tail acc slots = function
+            | [] ->
+              (match acc with
+               | (last_seq, _) :: _ -> min_kept_seq := last_seq
+               | [] -> ());
+              List.rev acc
+            | _ when slots <= 0 ->
+              (match acc with
+               | (last_seq, _) :: _ -> min_kept_seq := last_seq
+               | [] -> ());
+              List.rev acc
+            | item :: tl -> take_tail (item :: acc) (slots - 1) tl
+          in
+          take_tail ((seq, name) :: prefix) (remaining_slots - 1) (existing :: rest)
+        else if remaining_slots <= 1 then
+          List.rev_append prefix [ existing ]
+        else
+          insert_and_trim (existing :: prefix) (remaining_slots - 1) (seq, name) rest
+    in
+    let idx = ref 0 in
+    let top =
+      List.fold_left
+        (fun acc name ->
+          let cur = !idx in
+          idx := cur + 1;
+          if cur > 0 && cur land 255 = 0 then Eio_guard.fair_yield ();
+          match message_seq_of_filename name with
+          | None -> acc
+          | Some seq when seq <= since_seq -> acc
+          | Some seq when !kept_count >= limit && seq < !min_kept_seq -> acc
+          | Some seq ->
+            if !kept_count < limit then incr kept_count;
+            insert_and_trim [] limit (seq, name) acc)
+        []
+        names
+    in
+    List.map snd top
 
 let select_all_message_names ~since_seq names =
   names
@@ -497,30 +614,66 @@ let collect_recent_messages config ~msgs_path ~since_seq ~limit ~scan ~warn_labe
       | Newest_window -> true
       | Matching predicate -> predicate msg
     in
-    let rec loop remaining acc = function
+    let use_cache = is_filesystem_backend config in
+    let now = if use_cache then Time_compat.now () else 0.0 in
+    let read_cached_message path =
+      let cached =
+        if not use_cache then None
+        else
+          match query_stat_regular_opt path with
+          | Some stamp when query_stat_is_settled ~now stamp ->
+            Stdlib.Mutex.protect message_file_cache_mu (fun () ->
+              match Hashtbl.find_opt message_file_cache path with
+              | Some (cached_stamp, msg) when equal_query_file_stat_stamp cached_stamp stamp ->
+                Some msg
+              | Some _ | None -> None)
+          | Some _ | None -> None
+      in
+      match cached with
+      | Some msg -> Ok msg
+      | None ->
+        let now_before = if use_cache then Time_compat.now () else 0.0 in
+        let before = if use_cache then query_stat_regular_opt path else None in
+        let json = read_json config path in
+        (match message_of_yojson json with
+         | Ok msg ->
+           (if use_cache then
+              match before, query_stat_regular_opt path with
+              | Some s1, Some s2
+                when query_stat_is_settled ~now:now_before s1
+                     && equal_query_file_stat_stamp s1 s2
+                     && query_stat_is_settled ~now:(Time_compat.now ()) s2 ->
+                Stdlib.Mutex.protect message_file_cache_mu (fun () ->
+                  if Hashtbl.length message_file_cache >= message_file_cache_max
+                     && not (Hashtbl.mem message_file_cache path)
+                  then Hashtbl.clear message_file_cache;
+                  Hashtbl.replace message_file_cache path (s2, msg))
+              | _ -> ());
+           Ok msg
+         | Error _ as err -> err)
+    in
+    let rec loop step remaining acc = function
       | _ when remaining <= 0 -> List.rev acc
       | [] -> List.rev acc
       | name :: rest ->
-          Eio_guard.fair_yield ();
+          if step > 0 && step land 63 = 0 then Eio_guard.fair_yield ();
           match message_seq_of_filename name with
           | Some seq when seq <= since_seq -> List.rev acc
-          | None -> loop remaining acc rest
+          | None -> loop (step + 1) remaining acc rest
           | Some _ ->
             let path = Filename.concat msgs_path name in
-            match read_json config path with
-            | json ->
-                (match message_of_yojson json with
-                 | Ok msg when msg.seq > since_seq && keep msg ->
-                     loop (remaining - 1) (msg :: acc) rest
-                 | Ok _ | Error _ -> loop remaining acc rest)
+            match read_cached_message path with
+            | Ok msg when msg.seq > since_seq && keep msg ->
+                loop (step + 1) (remaining - 1) (msg :: acc) rest
+            | Ok _ | Error _ -> loop (step + 1) remaining acc rest
             | exception (Eio.Cancel.Cancelled _ as e) -> raise e
             | exception e ->
                 Log.legacy_traceln ~level:Log.Warn ~module_name:"Workspace"
                   (Printf.sprintf "[WARN] Failed to read %s %s: %s" warn_label
                      name (Printexc.to_string e));
-                loop remaining acc rest
+                loop (step + 1) remaining acc rest
     in
-    loop limit [] names
+    loop 0 limit [] names
 
 (** Get raw message list (for dashboard).
     Returns [[]] when MASC is not initialized. *)

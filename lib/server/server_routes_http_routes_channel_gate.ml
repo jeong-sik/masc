@@ -458,25 +458,127 @@ let keeper_tool_response ~(config : Workspace.config) ~project ~sw ~clock state 
 
 let sandbox_read_work_kind = Pool_work.Io
 
+type gate_tool_worker_result =
+  | Gate_tool_prepared of Server_cached_read_http.prepared_http
+  | Gate_tool_error of Httpun.Status.t * string
+
+let compute_gate_tool_result ~config ~project ~kind ~sw ~clock state ~tool_name ~args =
+  Server_dashboard_http_runtime_support.run_dashboard_compute
+    ~mode:Server_dashboard_http_runtime_support.Offloaded_readonly
+    ~sw ~clock ~config ~kind ~name:__FUNCTION__
+    (fun ~config ~sw ->
+      let status, json =
+        keeper_tool_response ~config ~project ~sw ~clock state ~tool_name ~args
+      in
+      match status with
+      | `OK -> Gate_tool_prepared (Server_cached_read_http.prepare_json json)
+      | other -> Gate_tool_error (other, Yojson.Safe.to_string json))
+
+let respond_gate_tool_result request reqd = function
+  | Gate_tool_prepared prepared ->
+    Server_cached_read_http.respond_prepared
+      ~extra_headers:(admitted_cors_headers request) ~request reqd prepared
+  | Gate_tool_error (status, body) ->
+    Http.Response.json ~status ~compress:false ~request
+      ~extra_headers:(admitted_cors_headers request) body reqd
+
 let respond_keeper_tool_json ?config ?(project = Fun.id) ?(kind = Pool_work.Cpu)
     ~sw ~clock state request reqd ~tool_name ~args =
   let config = match config with
     | Some config -> config
     | None -> Mcp_server.workspace_config state in
-  (* Metadata, history, ledger projection and JSON encoding belong off the
+  (* Metadata, history, ledger projection and HTTP encoding belong off the
      HTTP scheduler; the sandbox read uses IO weight because it can wait for
-     runtime processes. The response stays on the request's own domain. *)
-  let status, body =
-    Server_dashboard_http_runtime_support.run_dashboard_compute
-      ~mode:Server_dashboard_http_runtime_support.Offloaded_readonly
-      ~sw ~clock ~config ~kind ~name:__FUNCTION__
-      (fun ~config ~sw ->
-        let status, json =
-          keeper_tool_response ~config ~project ~sw ~clock state ~tool_name ~args
-        in
-        status, Yojson.Safe.to_string json)
+     runtime processes. The response stays on the request's own domain without
+     a second CPU-pool compression hop. *)
+  let result =
+    compute_gate_tool_result ~config ~project ~kind ~sw ~clock state ~tool_name ~args
   in
-  respond_json_with_cors ~status request reqd body
+  respond_gate_tool_result request reqd result
+
+type gate_path_stamp = {
+  gp_dev : int;
+  gp_ino : int;
+  gp_size : int;
+  gp_mtime : float;
+  gp_ctime : float;
+}
+
+let equal_gate_path_stamp a b =
+  a.gp_dev = b.gp_dev
+  && a.gp_ino = b.gp_ino
+  && a.gp_size = b.gp_size
+  && Float.equal a.gp_mtime b.gp_mtime
+  && Float.equal a.gp_ctime b.gp_ctime
+
+let equal_opt_gate_stamp a b =
+  match a, b with
+  | None, None -> true
+  | Some x, Some y -> equal_gate_path_stamp x y
+  | Some _, None | None, Some _ -> false
+
+let stat_gate_path_opt path =
+  try
+    let st = Unix.stat path in
+    Some
+      { gp_dev = st.st_dev
+      ; gp_ino = st.st_ino
+      ; gp_size = st.st_size
+      ; gp_mtime = st.st_mtime
+      ; gp_ctime = st.st_ctime
+      }
+  with Unix.Unix_error _ | Sys_error _ -> None
+
+let gate_stamp_settled ~now = function
+  | None -> true
+  | Some st -> now -. st.gp_mtime >= 0.05 && now -. st.gp_ctime >= 0.05
+
+type gate_keepers_stamp = {
+  gk_toml_dir : gate_path_stamp option;
+  gk_meta_dir : gate_path_stamp option;
+  gk_candle_ledger : gate_path_stamp option;
+  gk_candle_config : gate_path_stamp option;
+  gk_snapshot_gen : int;
+  gk_registry_count : int;
+}
+
+let equal_gate_keepers_stamp a b =
+  equal_opt_gate_stamp a.gk_toml_dir b.gk_toml_dir
+  && equal_opt_gate_stamp a.gk_meta_dir b.gk_meta_dir
+  && equal_opt_gate_stamp a.gk_candle_ledger b.gk_candle_ledger
+  && equal_opt_gate_stamp a.gk_candle_config b.gk_candle_config
+  && a.gk_snapshot_gen = b.gk_snapshot_gen
+  && a.gk_registry_count = b.gk_registry_count
+
+let gate_keepers_stamp_settled ~now s =
+  gate_stamp_settled ~now s.gk_toml_dir
+  && gate_stamp_settled ~now s.gk_meta_dir
+  && gate_stamp_settled ~now s.gk_candle_ledger
+  && gate_stamp_settled ~now s.gk_candle_config
+
+let current_gate_keepers_stamp ~(config : Workspace.config) =
+  let base_path = config.base_path in
+  { gk_toml_dir =
+      stat_gate_path_opt (Config_dir_resolver.keepers_dir_for_base_path ~base_path)
+  ; gk_meta_dir = stat_gate_path_opt (Workspace.keepers_runtime_dir config)
+  ; gk_candle_ledger = stat_gate_path_opt (Candle_ledger.path ~base_path)
+  ; gk_candle_config =
+      stat_gate_path_opt (Config_dir_resolver.candle_toml_path_for_base_path ~base_path)
+  ; gk_snapshot_gen = Dashboard_projection_cache.snapshot_invalidation_generation ()
+  ; gk_registry_count = List.length (Keeper_registry.all ~base_path ())
+  }
+
+type cached_gate_keepers_http = {
+  cgk_stamp : gate_keepers_stamp;
+  cgk_built_at : float;
+  cgk_prepared : Server_cached_read_http.prepared_http;
+}
+
+let gate_keepers_http_cache_mu = Stdlib.Mutex.create ()
+let gate_keepers_http_cache : (string * int * bool * bool, cached_gate_keepers_http) Hashtbl.t =
+  Hashtbl.create 8
+let gate_keepers_http_cache_max = 16
+let gate_keepers_http_ttl_s = 2.0
 
 (* Upper bound on rows in one keeper-list response, and the default. One
    constant so the two cannot drift: before masc#29077 the default was 100
@@ -557,15 +659,63 @@ let handle_gate_keepers ~sw ~clock state request reqd =
          | None -> []
          | Some name -> [ ("name", `String (Keeper_id.Keeper_name.to_string name)) ])
   in
-  let project =
-    match authorize_token_bound_permission_request ~base_path:config.base_path
-      ~permission:Masc_domain.CanAdmin request with
-    | Ok _ -> Dashboard_projection_cache.with_current_gate_keeper_observations ~config
-    | Error _ -> Fun.id
+  let is_admin =
+    Result.is_ok
+      (authorize_token_bound_permission_request ~base_path:config.base_path
+         ~permission:Masc_domain.CanAdmin request)
   in
-  respond_keeper_tool_json ~config ~project
-    ~sw ~clock state request reqd
-    ~tool_name:"masc_keeper_list" ~args
+  let project =
+    if is_admin then Dashboard_projection_cache.with_current_gate_keeper_observations ~config
+    else Fun.id
+  in
+  if fresh || Option.is_some named then
+    respond_keeper_tool_json ~config ~project
+      ~sw ~clock state request reqd
+      ~tool_name:"masc_keeper_list" ~args
+  else
+    let key = config.base_path, limit, detailed, is_admin in
+    let now = Time_compat.now () in
+    let stamp_before = current_gate_keepers_stamp ~config in
+    let hit =
+      if gate_keepers_stamp_settled ~now stamp_before then
+        Stdlib.Mutex.protect gate_keepers_http_cache_mu (fun () ->
+          match Hashtbl.find_opt gate_keepers_http_cache key with
+          | Some cached
+            when equal_gate_keepers_stamp cached.cgk_stamp stamp_before
+                 && now -. cached.cgk_built_at >= 0.0
+                 && now -. cached.cgk_built_at < gate_keepers_http_ttl_s ->
+            Some cached.cgk_prepared
+          | Some _ | None -> None)
+      else None
+    in
+    match hit with
+    | Some prepared ->
+      Server_cached_read_http.respond_prepared
+        ~extra_headers:(admitted_cors_headers request) ~request reqd prepared
+    | None ->
+      let result =
+        compute_gate_tool_result ~config ~project ~kind:Pool_work.Cpu
+          ~sw ~clock state ~tool_name:"masc_keeper_list" ~args
+      in
+      (match result with
+       | Gate_tool_prepared prepared ->
+         let now_after = Time_compat.now () in
+         let stamp_after = current_gate_keepers_stamp ~config in
+         if gate_keepers_stamp_settled ~now stamp_before
+            && equal_gate_keepers_stamp stamp_before stamp_after
+            && gate_keepers_stamp_settled ~now:now_after stamp_after
+         then
+           Stdlib.Mutex.protect gate_keepers_http_cache_mu (fun () ->
+             if Hashtbl.length gate_keepers_http_cache >= gate_keepers_http_cache_max
+                && not (Hashtbl.mem gate_keepers_http_cache key)
+             then Hashtbl.clear gate_keepers_http_cache;
+             Hashtbl.replace gate_keepers_http_cache key
+               { cgk_stamp = stamp_after
+               ; cgk_built_at = now_after
+               ; cgk_prepared = prepared
+               })
+       | Gate_tool_error _ -> ());
+      respond_gate_tool_result request reqd result
 
 (** GET /api/v1/gate/keeper-status?name=<keeper>
 

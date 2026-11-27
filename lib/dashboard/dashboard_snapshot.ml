@@ -20,6 +20,20 @@ let make_tools_projection ~(config : Workspace.config) json =
     encoded = Http_response_payload.prepare raw }
 ;;
 
+type prepared_json = {
+  json : Yojson.Safe.t;
+  etag : string;
+  encoded : Http_response_payload.prepared;
+}
+
+let make_prepared_json json =
+  let raw = Yojson.Safe.to_string json in
+  { json
+  ; etag = Http_server_eio.Response.weak_etag_value raw
+  ; encoded = Http_response_payload.prepare raw
+  }
+;;
+
 type t = {
   generated_at : float;
   base_path : string;
@@ -34,7 +48,7 @@ type t = {
 type partial = {
   shell : (Yojson.Safe.t * Yojson.Safe.t) option;
   tools : tools_projection option;
-  telemetry : Yojson.Safe.t option;
+  telemetry : prepared_json option;
   latest : t option;
 }
 
@@ -45,6 +59,7 @@ type publisher = {
   state : partial Atomic.t;
 }
 type tools_update = { publisher : publisher; projection : tools_projection }
+type telemetry_update = { publisher : publisher; prepared : prepared_json }
 let active : publisher option Atomic.t = Atomic.make None
 
 let activate ~config ~is_current =
@@ -85,18 +100,20 @@ let shell_for_config config =
   Option.bind (publisher_for_config config) (fun publisher -> read_publisher publisher (fun state -> state.shell))
 let tools_for_config config =
   Option.bind (publisher_for_config config) (fun publisher -> read_publisher publisher (fun state -> state.tools))
-let telemetry_for_config config =
+let telemetry_prepared_for_config config =
   Option.bind (publisher_for_config config) (fun publisher -> read_publisher publisher (fun state -> state.telemetry))
+let telemetry_for_config config =
+  Option.map (fun (p : prepared_json) -> p.json) (telemetry_prepared_for_config config)
 
 let update publisher change =
   let generated_at = Unix.gettimeofday () in
   Lockfree_atomic.update publisher.state (fun previous ->
     let next = change previous in
     match next.shell, next.tools, next.telemetry with
-    | Some (shell, shell_light), Some tools, Some telemetry_summary ->
+    | Some (shell, shell_light), Some tools, Some telemetry_prepared ->
       {next with latest = Some { generated_at; base_path = publisher.config.base_path;
         workspace_path = publisher.config.workspace_path; masc_root = publisher.masc_root;
-        shell; shell_light; tools; telemetry_summary }}
+        shell; shell_light; tools; telemetry_summary = telemetry_prepared.json }}
     | (None, _, _) | (_, None, _) | (_, _, None) -> next)
 ;;
 
@@ -112,8 +129,16 @@ let publish_tools {publisher; projection = tools} =
   update publisher (fun state -> {state with tools = Some tools})
 ;;
 
+let prepare_telemetry publisher json =
+  {publisher; prepared = make_prepared_json json}
+;;
+
+let publish_telemetry_prepared {publisher; prepared} =
+  update publisher (fun state -> {state with telemetry = Some prepared})
+;;
+
 let publish_telemetry publisher json =
-  update publisher (fun state -> {state with telemetry = Some json})
+  publish_telemetry_prepared (prepare_telemetry publisher json)
 ;;
 
 let should_reuse_projection ~now ~ttl ~refreshed_at =
@@ -168,11 +193,29 @@ let refresh_activity_events ~(config : Workspace.config) ~now ~ttl
 let public_activity_cache = make_activity_events_cache ()
 let public_activity_mutex = Cross_context_mutex.create ()
 
+let public_activity_events_cached_opt (config : Workspace.config) =
+  let started_at = Unix.gettimeofday () in
+  match Atomic.get public_activity_cache with
+  | Some entry
+    when should_reuse_projection
+           ~now:started_at
+           ~ttl:10.0
+           ~refreshed_at:entry.refreshed_at
+         && String.equal entry.base_path config.base_path
+         && String.equal entry.workspace_path config.workspace_path
+         && Board_activity_access.is_current entry.public_parents ->
+    Some entry.value
+  | Some _ | None -> None
+;;
+
 let public_activity_events config =
-  Cross_context_mutex.with_lock public_activity_mutex (fun () ->
-    refresh_activity_events ~config ~now:Unix.gettimeofday ~ttl:10.0
-      ~cache:public_activity_cache (fun ~keep ->
-        Activity_graph.recent_json_response config ~raw_limit:1000 ~keep ()))
+  match public_activity_events_cached_opt config with
+  | Some value -> value
+  | None ->
+    Cross_context_mutex.with_lock public_activity_mutex (fun () ->
+      refresh_activity_events ~config ~now:Unix.gettimeofday ~ttl:10.0
+        ~cache:public_activity_cache (fun ~keep ->
+          Activity_graph.recent_json_response config ~raw_limit:1000 ~keep ()))
 ;;
 
 let invalidate_public_activity_events ~base_path =
@@ -192,7 +235,7 @@ let publish_for_test (snapshot : t) =
     workspace_path = snapshot.workspace_path } in
   let publisher = activate ~config ~is_current:(fun () -> true) in
   Atomic.set publisher.state {shell = Some (snapshot.shell, snapshot.shell_light);
-    tools = Some snapshot.tools; telemetry = Some snapshot.telemetry_summary;
+    tools = Some snapshot.tools; telemetry = Some (make_prepared_json snapshot.telemetry_summary);
     latest = Some snapshot}
 ;;
 

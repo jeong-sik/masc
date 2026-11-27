@@ -26,3 +26,13 @@ val read_result :
     releases only that refresh's exact ownership. A cancelled switch cannot
     reserve new work; an evicted refresh cannot restore or overwrite its key.
     [now] supplies boundary time without changing process-wide configuration. *)
+
+val read_prepared :
+  now:(unit -> float) -> sync_first:bool -> sw:Eio.Switch.t ->
+  cache:t -> key:string -> placeholder:Yojson.Safe.t ->
+  compute:(unit -> (Yojson.Safe.t, string) result) ->
+  Server_cached_read_http.prepared_http
+(** Pre-encoded HTTP payload + ETag variant of {!read_result}. Reuses prepared
+    representations across fresh/stale reads while the underlying cached JSON
+    remains physically identical, avoiding per-request serialization and CPU
+    pool compression. *)

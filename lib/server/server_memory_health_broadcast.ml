@@ -30,6 +30,8 @@ let install ~sw ~mono_clock ~(config : Workspace.config) =
   let world_changed () =
     Dashboard_cache.invalidate
       (Server_dashboard_http_core_cache.workspace_memory_inventory_cache_key ~base_path);
+    Dashboard_cache.invalidate
+      (Server_dashboard_http_core_cache.workspace_memory_ledger_cache_key ~base_path);
     enqueue Workspace_dataset_event.World_memory
   in
   (* The row goes first: the fleet answer is computed from the rows, and a

@@ -282,10 +282,12 @@ let board_post_dashboard_json ?current_vote
   let fields =
     base_fields
     |> List.remove_assoc "title"
+    |> List.remove_assoc "body"
     |> List.remove_assoc "votes"
     |> List.remove_assoc "comment_count"
     |> List.remove_assoc "created_at_iso"
     |> List.remove_assoc "updated_at_iso"
+    |> List.remove_assoc "hearth"
     |> List.remove_assoc "hearth_count"
   in
   let score = p.votes_up - p.votes_down in

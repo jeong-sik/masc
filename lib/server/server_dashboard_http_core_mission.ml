@@ -102,15 +102,20 @@ let start ~state ~sw ~clock ~mono_clock =
       ~next_deadline:(fun _ -> Owner.next_deadline_unix owner))
 
 let attest_instance context = function
-  | `Assoc fields -> `Assoc (("observer_instance_id", `String (Server_observer_scope.instance_id context.scope))
-      :: List.remove_assoc "observer_instance_id" fields)
+  | `Assoc fields as json ->
+    let instance_id = Server_observer_scope.instance_id context.scope in
+    (match List.assoc_opt "observer_instance_id" fields with
+     | Some (`String existing) when String.equal existing instance_id -> json
+     | Some _ | None ->
+       `Assoc (("observer_instance_id", `String instance_id)
+         :: List.remove_assoc "observer_instance_id" fields))
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as json -> json
 
 let default_json ~sw ~clock context =
   let owner = context.owner in
   let cached () =
     if Owner.has_terminal_answer owner
-    then Some (Owner.publication owner).json else None in
+    then Some (Owner.snapshot_json_unobserved owner) else None in
   match cached () with
   | Some json -> json
   | None ->
@@ -139,20 +144,154 @@ let default_json ~sw ~clock context =
         | Some current -> current
         | None -> attest_instance context json
 
-let json ~sw ~clock context =
-  let result = match context.actor with
-    | None -> default_json ~sw ~clock context
-    | Some actor ->
-        let key = "briefing:actor:" ^ Yojson.Safe.to_string (`List [
-          `String (Owner.cache_identity context.owner); `String actor]) in
+let actor_briefing_latest_key_mu = Stdlib.Mutex.create ()
+let actor_briefing_latest_key : (string * string, string) Hashtbl.t = Hashtbl.create 16
+let actor_briefing_latest_key_max = 128
+
+let replace_actor_briefing_latest_key scope_actor key =
+  Stdlib.Mutex.protect actor_briefing_latest_key_mu (fun () ->
+    if Hashtbl.length actor_briefing_latest_key >= actor_briefing_latest_key_max
+       && not (Hashtbl.mem actor_briefing_latest_key scope_actor)
+    then Hashtbl.clear actor_briefing_latest_key;
+    Hashtbl.replace actor_briefing_latest_key scope_actor key)
+
+let raw_json ~sw ~clock context =
+  match context.actor with
+  | None -> default_json ~sw ~clock context
+  | Some actor ->
+      let scope_actor = Server_observer_scope.instance_id context.scope, actor in
+      let key = "briefing:actor:" ^ Yojson.Safe.to_string (`List [
+        `String (Owner.cache_identity context.owner); `String actor]) in
+      (match
+         Stdlib.Mutex.protect actor_briefing_latest_key_mu (fun () ->
+           Hashtbl.find_opt actor_briefing_latest_key scope_actor)
+       with
+       | Some previous when not (String.equal previous key) ->
+         Dashboard_cache.seed_stale_from_if_missing key ~from:previous
+           ~stale_for:Core_cache.deep_surface_cache_ttl_s
+       | Some _ | None -> ());
+      let json =
         Dashboard_cache.get_or_compute_with_timeout key
           ~ttl:Core_cache.deep_surface_cache_ttl_s ~clock
           ~timeout_sec:Core_cache.dashboard_briefing_timeout_s
           (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-            compute ~state:context.state ~scope:context.scope ~sw ~clock ~actor ()
-            |> Dashboard_projection_read.json_with_read_diagnostics)) in
-  result |> Dashboard_projection_cache.with_current_keeper_observations ~config:context.scope.config
+            let computed =
+              compute ~state:context.state ~scope:context.scope ~sw ~clock ~actor ()
+              |> Dashboard_projection_read.json_with_read_diagnostics
+            in
+            replace_actor_briefing_latest_key scope_actor key;
+            computed))
+      in
+      if not (Dashboard_cache.is_timeout_envelope json) then
+        Stdlib.Mutex.protect actor_briefing_latest_key_mu (fun () ->
+          if not (Hashtbl.mem actor_briefing_latest_key scope_actor) then begin
+            if Hashtbl.length actor_briefing_latest_key >= actor_briefing_latest_key_max then
+              Hashtbl.clear actor_briefing_latest_key;
+            Hashtbl.replace actor_briefing_latest_key scope_actor key
+          end);
+      json
+
+let json ~sw ~clock context =
+  raw_json ~sw ~clock context
+  |> Dashboard_projection_cache.with_current_keeper_observations ~config:context.scope.config
   |> attest_instance context
+
+type briefing_http_source =
+  | Mission_snapshot of Server_dashboard_http_cache.surface_snapshot
+  | Base_json of Yojson.Safe.t
+
+let equal_briefing_http_source a b =
+  match a, b with
+  | Mission_snapshot left, Mission_snapshot right -> left == right
+  | Base_json left, Base_json right -> left == right
+  | Mission_snapshot _, Base_json _ | Base_json _, Mission_snapshot _ -> false
+
+let snapshot_is_stale (s : Server_dashboard_http_cache.surface_snapshot) =
+  match s.last_success_unix, s.last_error_unix with
+  | Some success_ts, Some error_ts -> error_ts > success_ts
+  | Some _, None | None, (Some _ | None) -> false
+
+type cached_briefing_http = {
+  br_source : briefing_http_source;
+  br_observed_json : Yojson.Safe.t;
+  br_prepared : Server_cached_read_http.prepared_http;
+}
+
+let briefing_http_cache_mu = Stdlib.Mutex.create ()
+let briefing_http_cache : (string * string option, cached_briefing_http) Hashtbl.t =
+  Hashtbl.create 8
+let briefing_http_cache_max = 16
+
+let prepare_briefing_from_source ~key ~context ~cacheable ~source ~render_base =
+  let cached =
+    if cacheable then
+      Stdlib.Mutex.protect briefing_http_cache_mu (fun () ->
+        Hashtbl.find_opt briefing_http_cache key)
+    else None
+  in
+  let reused, observed =
+    match cached with
+    | Some entry when equal_briefing_http_source entry.br_source source ->
+      let observed =
+        entry.br_observed_json
+        |> Dashboard_projection_cache.with_current_keeper_observations
+             ~config:context.scope.config
+        |> attest_instance context
+      in
+      if observed == entry.br_observed_json
+      then Some entry.br_prepared, observed
+      else None, observed
+    | Some _ | None ->
+      let observed =
+        render_base ()
+        |> Dashboard_projection_cache.with_current_keeper_observations
+             ~config:context.scope.config
+        |> attest_instance context
+      in
+      None, observed
+  in
+  match reused with
+  | Some prepared -> prepared
+  | None ->
+    let prepared =
+      Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+        Server_cached_read_http.prepare_json observed)
+    in
+    if cacheable && not (Dashboard_cache.is_timeout_envelope observed) then
+      Stdlib.Mutex.protect briefing_http_cache_mu (fun () ->
+        if Hashtbl.length briefing_http_cache >= briefing_http_cache_max
+           && not (Hashtbl.mem briefing_http_cache key)
+        then Hashtbl.clear briefing_http_cache;
+        Hashtbl.replace briefing_http_cache key
+          { br_source = source
+          ; br_observed_json = observed
+          ; br_prepared = prepared
+          });
+    prepared
+
+let prepared ~sw ~clock context =
+  let key = Server_observer_scope.instance_id context.scope, context.actor in
+  match context.actor with
+  | None when Owner.has_terminal_answer context.owner ->
+    let snapshot = Owner.snapshot_unobserved context.owner in
+    let cacheable = not (snapshot_is_stale snapshot) in
+    prepare_briefing_from_source
+      ~key
+      ~context
+      ~cacheable
+      ~source:(Mission_snapshot snapshot)
+      ~render_base:(fun () ->
+        Server_dashboard_http_cache.surface_snapshot_json
+          ~now:(Unix.gettimeofday ()) snapshot)
+  | None | Some _ ->
+    Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
+      let base_json = raw_json ~sw ~clock context in
+      prepare_briefing_from_source
+        ~key
+        ~context
+        ~cacheable:true
+        ~source:(Base_json base_json)
+        ~render_base:(fun () -> base_json))
 
 let health_line ~sw ~clock context =
   default_json ~sw ~clock context

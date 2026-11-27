@@ -447,42 +447,18 @@ let dashboard_token_hash_prefix raw_credential =
     0
     dashboard_token_hash_prefix_length
 
-let dashboard_actor_resolution_for_request ~base_path request =
+type dashboard_actor_bearer_resolution =
+  | Authenticated_actor_bearer of string * Auth.resolved_bearer
+  | Anonymous_actor_hint_bearer of string option
+  | Rejected_credential_bearer of Auth_error_kind.dashboard_actor_fallback_outcome
+
+let dashboard_actor_bearer_resolution_for_request ~base_path request =
   match request_auth_credential_from_request request with
   | Parsed_credential token -> (
-      (* First 8 hex chars of the bearer token's SHA-256. Lets operators
-         correlate a token-mismatch rejection with the keeper credential
-         that holds the matching hash (see [auth.ml] credential
-         storage). The hash itself is one-way; the prefix alone is
-         insufficient to reconstruct the token but unique enough to
-         pinpoint a specific credential rotation event in production
-         logs (2026-04-27 incident: same hash prefix observed firing
-         twice in the same second, masking which keeper was affected). *)
-      let token_hash_prefix = dashboard_token_hash_prefix token in
-      match resolve_agent_name_for_auth_raw ~base_path request ~token:(Some token) with
-      | Ok (Some agent_name) -> Authenticated_actor agent_name
-      | Ok None ->
-          (* An explicit credential and an anonymous actor hint are distinct
-             trust states. Preserve the public-read availability contract by
-             returning a typed rejection that projects to the unparameterized
-             dashboard namespace; never turn the unauthenticated hint into an
-             authenticated actor. The historical metric/log key is retained so
-             existing alerts continue to surface stale credential churn. *)
-          let fb : Auth_error_kind.dashboard_actor_fallback =
-            { outcome = Auth_error_kind.Outcome_none; token_hash_prefix }
-          in
-          record_dashboard_actor_fallback fb;
-          Rejected_credential Auth_error_kind.Outcome_none
+      match identify_bearer ~base_path request ~token with
+      | Ok (agent_name, resolved) -> Authenticated_actor_bearer (agent_name, resolved)
       | Error err ->
-          (* The previous warn line elided the actual error string and the
-             request actor hint, leaving operators with a counter that only
-             told them *something* errored — not what.  Production logs
-             showed the warn firing 1–2 times/second with no diagnostic
-             surface, so the WARN was loud noise without root-cause
-             attribution.  Surface both the error class and the hint via
-             the typed [Auth_error_kind.Outcome_error] arm — the
-             [Token_mismatch] remediation tail is embedded in
-             [dashboard_actor_fallback_log_message]. *)
+          let token_hash_prefix = dashboard_token_hash_prefix token in
           let fb : Auth_error_kind.dashboard_actor_fallback =
             { outcome =
                 Auth_error_kind.Outcome_error
@@ -494,7 +470,7 @@ let dashboard_actor_resolution_for_request ~base_path request =
             }
           in
           record_dashboard_actor_fallback fb;
-          Rejected_credential fb.outcome)
+          Rejected_credential_bearer fb.outcome)
   | Malformed_credential raw_credential ->
       let err = malformed_request_credential_error () in
       let outcome =
@@ -508,8 +484,14 @@ let dashboard_actor_resolution_for_request ~base_path request =
         { outcome
         ; token_hash_prefix = dashboard_token_hash_prefix raw_credential
         };
-      Rejected_credential outcome
-  | Absent_credential -> Anonymous_actor_hint (request_actor_hint request)
+      Rejected_credential_bearer outcome
+  | Absent_credential -> Anonymous_actor_hint_bearer (request_actor_hint request)
+
+let dashboard_actor_resolution_for_request ~base_path request =
+  match dashboard_actor_bearer_resolution_for_request ~base_path request with
+  | Authenticated_actor_bearer (agent_name, _) -> Authenticated_actor agent_name
+  | Anonymous_actor_hint_bearer hint -> Anonymous_actor_hint hint
+  | Rejected_credential_bearer outcome -> Rejected_credential outcome
 
 let dashboard_actor_for_request ~base_path request =
   match dashboard_actor_resolution_for_request ~base_path request with

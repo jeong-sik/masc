@@ -213,6 +213,74 @@ end
    across the cache compute boundary to the route below. *)
 exception Tool_quality_log_unavailable of string
 exception Workspace_memory_inventory_unavailable of string
+exception Workspace_memory_ledger_unavailable of string
+
+module Shell_http_key = struct
+  type t = {
+    sh_light : bool;
+    sh_auth : Server_dashboard_http_core.shell_auth_summary;
+  }
+
+  let equal (a : t) (b : t) =
+    Bool.equal a.sh_light b.sh_light
+    && Server_dashboard_http_core.equal_shell_auth_summary a.sh_auth b.sh_auth
+
+  let hash (k : t) =
+    Hashtbl.hash (k.sh_light, Server_dashboard_http_core.hash_shell_auth_summary k.sh_auth)
+end
+
+module Shell_http_tbl = Hashtbl.Make (Shell_http_key)
+
+type cached_shell_http_entry = {
+  base_shell : Yojson.Safe.t;
+  etag : string;
+  encoded : Http_response_payload.prepared;
+}
+
+let shell_http_cache_mu = Stdlib.Mutex.create ()
+let shell_http_cache : cached_shell_http_entry Shell_http_tbl.t = Shell_http_tbl.create 16
+let shell_http_cache_max = 32
+
+let respond_shell_snapshot ~light ~timing ~config ~req reqd base_shell =
+  let auth_summary =
+    Server_dashboard_http_core.dashboard_shell_auth_summary ~request:req config
+  in
+  let key = { Shell_http_key.sh_light = light; sh_auth = auth_summary } in
+  let entry =
+    match
+      Stdlib.Mutex.protect shell_http_cache_mu (fun () ->
+        match Shell_http_tbl.find_opt shell_http_cache key with
+        | Some cached when cached.base_shell == base_shell -> Some cached
+        | Some _ | None -> None)
+    with
+    | Some cached -> cached
+    | None ->
+      let auth_json = Server_dashboard_http_core.shell_auth_summary_to_json auth_summary in
+      let full_json =
+        match base_shell with
+        | `Assoc fields -> `Assoc (("auth", auth_json) :: List.remove_assoc "auth" fields)
+        | other -> other
+      in
+      let raw = Yojson.Safe.to_string full_json in
+      let etag = Http.Response.weak_etag_value raw in
+      let encoded = Http_response_payload.prepare raw in
+      let built = { base_shell; etag; encoded } in
+      Stdlib.Mutex.protect shell_http_cache_mu (fun () ->
+        if Shell_http_tbl.length shell_http_cache >= shell_http_cache_max
+           && not (Shell_http_tbl.mem shell_http_cache key)
+        then Shell_http_tbl.clear shell_http_cache;
+        Shell_http_tbl.replace shell_http_cache key built);
+      built
+  in
+  let body, enc_headers =
+    Http_response_payload.select_prepared
+      ~accept_encoding:(Http_response_payload.accept_encoding_fields
+        (Httpun.Headers.get_multi req.headers "accept-encoding"))
+      entry.encoded
+  in
+  Http.Response.json_lazy ~compress:false ~request:req ~etag:entry.etag
+    ~extra_headers:(enc_headers @ Server_timing.extra_header timing)
+    (fun () -> body) reqd
 
 let add_routes ~sw ~clock router =
   router
@@ -232,16 +300,24 @@ let add_routes ~sw ~clock router =
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/shell" (fun state req reqd ->
          let light = Server_utils.bool_query_param req "light" ~default:false in
          let timing = Server_timing.create () in
-         (* wait-free read via
-            [Dashboard_snapshot.current ()] when the refresh fiber has
-            published; falls back to [dashboard_shell_http_json] for
-            light variant + first-request cold start. *)
-         let json =
-           Server_dashboard_snapshot_select.select_shell_json
-             ?clock:state.Mcp_server.clock ~request:req
-             ~timing ~light (Mcp_server.workspace_config state)
-         in
-         Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
+         let config = Mcp_server.workspace_config state in
+         (* Wait-free pre-encoded read via [Dashboard_snapshot.shell_for_config]
+            when the refresh fiber has published; falls back to
+            [select_shell_json] for first-request cold start. *)
+         match Dashboard_snapshot.shell_for_config config with
+         | Some (full, trimmed) ->
+           let base_shell =
+             Server_timing.measure timing (Server_timing.Custom "snapshot_read")
+               (fun () -> if light then trimmed else full)
+           in
+           respond_shell_snapshot ~light ~timing ~config ~req reqd base_shell
+         | None ->
+           let json =
+             Server_dashboard_snapshot_select.select_shell_json
+               ?clock:state.Mcp_server.clock ~request:req
+               ~timing ~light config
+           in
+           Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
        )
   (* read-only snapshot of the in-memory fusion run registry
      (in-progress + recently completed). The fusion panel fetches this on load and
@@ -481,11 +557,8 @@ let add_routes ~sw ~clock router =
      singletons (no credentials, no raw TOML), so a public read mirrors the
      other dashboard read surfaces. *)
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/runtime-defaults" (fun _state req reqd ->
-         let json =
-           Server_dashboard_runtime_defaults_json.current
-             ~generated_at_iso:(Masc_domain.now_iso ()) ()
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd)
+         let prepared = Server_dashboard_runtime_defaults_json.current_prepared () in
+         Server_cached_read_http.respond_prepared ~request:req reqd prepared)
   (* Single resolved-runtime document (bugs #14/#15/#36): effective
      max-context + source per runtime, configured lanes, and the full
      keeper fleet joined against [runtime.assignments] with the
@@ -636,19 +709,12 @@ let add_routes ~sw ~clock router =
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/execution" (fun state req reqd ->
          (* The producer prepares all encodings once per snapshot. Requests
             select bytes and validate the identity ETag without recompression. *)
-         let request = req in let timing = Server_timing.create () in
-         let context, cached =
-           Server_timing.measure timing Server_timing.Cache_lookup (fun () ->
-             let context = execution_http_request ~state request in
-             context, dashboard_execution_cached_http_response context)
-         in
-         let response = match cached with
-           | Some response -> response
-           | None -> Server_timing.measure timing Server_timing.Cache_compute
-               (fun () -> dashboard_execution_http_response ~sw ~clock context) in
+         let timing = Server_timing.create () in
+         let context = execution_http_request ~state req in
+         let response = dashboard_execution_wire_response ~sw ~clock ~timing context in
          (match response with
             | Execution_json json ->
-              Http.Response.json_value ~compress:false ~request:req
+              Http.Response.json_value_on_cpu ~compress:true ~request:req
                 ~extra_headers:(Server_timing.extra_header timing) json reqd
             | Execution_payload payload ->
               let body, headers = Dashboard_cache.select_http_representation
@@ -671,10 +737,10 @@ let add_routes ~sw ~clock router =
              Http.Response.json_value ~status:`Not_found ~request:req
                (`Assoc [ "error", `String "no execution projection has been announced yet" ]) reqd)
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/execution-trust" (fun state req reqd ->
-         let request = req in let json =
-           dashboard_execution_trust_http_json ~state ~sw ~clock request
+         let prepared =
+           dashboard_execution_trust_http_prepared ~state ~sw ~clock req
          in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         Server_cached_read_http.respond_prepared ~request:req reqd prepared
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/board" (fun state req reqd ->
          let config = Mcp_server.workspace_config state in
@@ -699,11 +765,23 @@ let add_routes ~sw ~clock router =
                    reqd))
   |> Server_route.get (Server_route.Permission Masc_domain.CanReadState) "/api/v1/dashboard/workspace-memory-ledger" (fun state req reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
-           let status, json = match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-             Workspace_memory_ledger_view.read ~base_path) with
-             | Ok json -> `OK, json
-             | Error detail -> `Service_unavailable, `Assoc ["error", `String detail] in
-           Http.Response.json_value ~status ~request:req json reqd)
+           let cache_key =
+             Server_dashboard_http_core_cache.workspace_memory_ledger_cache_key ~base_path
+           in
+           match
+             Dashboard_cache.get_or_compute_payload
+               ~preparation:Dashboard_cache.Http_encodings
+               cache_key
+               ~ttl:standard_cache_ttl_s
+               (Pool_work.io ~name:__FUNCTION__ (fun () ->
+                  match Workspace_memory_ledger_view.read ~base_path with
+                  | Ok json -> json
+                  | Error detail -> raise (Workspace_memory_ledger_unavailable detail)))
+           with
+           | payload -> Server_cached_read_http.respond ~request:req reqd payload
+           | exception Workspace_memory_ledger_unavailable detail ->
+             Http.Response.json_value ~status:`Service_unavailable ~request:req
+               (`Assoc [ "error", `String detail ]) reqd)
   |> Server_route.get (Server_route.Permission Masc_domain.CanReadState) "/api/v1/dashboard/workspace-memory-inventory" (fun state req reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            match Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
@@ -754,10 +832,10 @@ let add_routes ~sw ~clock router =
                      ~base_path ~keeper)))
              reqd)
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/runtime-observables" (fun _state req reqd ->
-         let json =
-           Server_dashboard_http_runtime_observables.runtime_observables_http_json ()
+         let prepared =
+           Server_dashboard_http_runtime_observables.runtime_observables_http_prepared ()
          in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         Server_cached_read_http.respond_prepared ~request:req reqd prepared
        )
   |> Server_routes_http_routes_keeper_gate.add_routes
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/schedule/prune" (fun state operator_name request reqd ->
@@ -1003,9 +1081,8 @@ let add_routes ~sw ~clock router =
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/briefing" (fun state req reqd ->
          let context = mission_http_request ~state req in
-         let json = Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
-             dashboard_briefing_for_request ~sw ~clock context) in
-         Http.Response.json_value_on_cpu ~request:req json reqd
+         let prepared = dashboard_briefing_http_prepared ~sw ~clock context in
+         Server_cached_read_http.respond_prepared ~request:req reqd prepared
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/health-line" (fun state req reqd ->
          let context = mission_http_request ~state req in
@@ -1043,12 +1120,15 @@ let add_routes ~sw ~clock router =
      shared live cache; an exact schedule_id lookup reads the same ledger and
      row encoder without adding a client-controlled cache key. *)
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/scheduled-automation" (fun state req reqd ->
-         let json =
-           Server_dashboard_http.dashboard_scheduled_automation_query_http_json
+         match
+           Server_dashboard_http.dashboard_scheduled_automation_query_http_response
              ~config:(Mcp_server.workspace_config state)
              req
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         with
+         | Server_dashboard_http.Scheduled_automation_payload payload ->
+           Server_cached_read_http.respond ~request:req reqd payload
+         | Server_dashboard_http.Scheduled_automation_json json ->
+           Http.Response.json_value ~compress:true ~request:req json reqd
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/briefing/sections" (fun state req reqd ->
          if Server_utils.bool_query_param req "force" ~default:false then
@@ -1107,7 +1187,9 @@ let add_routes ~sw ~clock router =
             payload with zero calls (audit F397). *)
          let payload =
            match
-             Dashboard_cache.get_or_compute_payload cache_key ~ttl:config_cache_ttl_s
+             Dashboard_cache.get_or_compute_payload
+               ~preparation:Dashboard_cache.Http_encodings
+               cache_key ~ttl:config_cache_ttl_s
                (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
                   match Dashboard_http_tool_quality.aggregate sampling with
                   | Ok json -> json
@@ -1141,15 +1223,11 @@ let add_routes ~sw ~clock router =
             let json = Server_diagnostics_heap_roots.report_json () in
             Http.Response.json_value ~compress:true ~request:req json reqd)
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/transport-health" (fun state req reqd ->
-         (* No route cache here. The producer is not a computation — it reads a
-            published cell and derives cache_state, stale_reason and
-            stale_age_ms from it. A second 30s cache in front of that served
-            the previous "fresh" payload after the inner surface had gone to an
-            error state, and froze stale_age_ms, so a client watching the age
-            saw it stand still while the surface aged (#27652). Every other
-            route cache on this router wraps an actual computation. *)
-         let json = dashboard_transport_health_http_json ~state in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         (* No route cache here. The producer reads live Transport_metrics on
+            every request and only reuses prepared bytes when the live metrics
+            tree is unchanged within a short coalescing window (#27652). *)
+         let prepared = dashboard_transport_health_http_prepared ~state in
+         Server_cached_read_http.respond_prepared ~request:req reqd prepared
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/clients" (fun state req reqd ->
          (* Everyone attached to this workspace in one reading: directory
@@ -1223,15 +1301,26 @@ let add_routes ~sw ~clock router =
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/telemetry/summary" (fun state req reqd ->
          let timing = Server_timing.create () in
          (* wait-free read via
-            [Dashboard_snapshot.current ()].telemetry_summary when the
+            [Dashboard_snapshot.telemetry_prepared_for_config] when the
             refresh fiber has published; falls back through the same
-            [Dashboard_cache] + [Telemetry_unified.summary_json] path
-            for cold start. *)
-         let json =
-           Server_dashboard_snapshot_select.select_telemetry_summary_json
+            [Telemetry_unified.summary_json] path for cold start. *)
+         let response =
+           Server_dashboard_snapshot_select.select_telemetry_summary_response
              ~timing (Mcp_server.workspace_config state)
          in
-         Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
+         let extra_headers = Server_timing.extra_header timing in
+         match response with
+         | Server_dashboard_snapshot_select.Telemetry_json json ->
+           Http.Response.json_value ~compress:true ~request:req ~extra_headers json reqd
+         | Server_dashboard_snapshot_select.Telemetry_prepared prepared ->
+           let body, headers =
+             Http_response_payload.select_prepared
+               ~accept_encoding:(Http_response_payload.accept_encoding_fields
+                 (Httpun.Headers.get_multi req.headers "accept-encoding"))
+               prepared.encoded
+           in
+           Http.Response.json_lazy ~compress:false ~request:req ~etag:prepared.etag
+             ~extra_headers:(headers @ extra_headers) (fun () -> body) reqd
        )
 
   (* ── Dashboard delete actions (extracted) ── *)

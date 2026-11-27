@@ -131,9 +131,19 @@ let fallback_cwd_from_env () =
      | Some home when not (Filename.is_relative home) -> home
      | _ -> Filename.get_temp_dir_name ())
 
+let pinned_working_dir : string option Atomic.t = Atomic.make None
+
+let pin_working_dir path =
+  let trimmed = String.trim path in
+  if trimmed = "" then Atomic.set pinned_working_dir None
+  else Atomic.set pinned_working_dir (Some trimmed)
+
 let current_working_dir () =
-  try Sys.getcwd () with
-  | Sys_error _ -> fallback_cwd_from_env ()
+  match Atomic.get pinned_working_dir with
+  | Some cwd -> cwd
+  | None ->
+    (try Sys.getcwd () with
+     | Sys_error _ -> fallback_cwd_from_env ())
 
 let base_path_or_cwd () =
   match (Host_config.from_env ()).base_path with
@@ -348,7 +358,8 @@ let rec resolve () =
       else resolve ()
 
 let reset () =
-  Atomic.set cached_resolution None
+  Atomic.set cached_resolution None;
+  Atomic.set pinned_working_dir None
 
 let prompts_dir () =
   (resolve ()).prompts.path
@@ -381,20 +392,28 @@ let inputs_for_base_path ~base_path =
 let resolve_for_base_path ~base_path =
   resolve_with (inputs_for_base_path ~base_path)
 
+let config_root_path_for_base_path ~base_path =
+  let base_path =
+    resolve_workspace_base_path ~cwd:(current_working_dir ()) base_path
+  in
+  match trim_opt (current_env_config_dir_opt ()) with
+  | Some raw -> absolute_path_from ~cwd:base_path raw
+  | None -> base_path_config_root ~cwd:base_path base_path
+
 let keepers_dir_for_base_path ~base_path =
-  (resolve_for_base_path ~base_path).keepers.path
+  Filename.concat (config_root_path_for_base_path ~base_path) "keepers"
 
 let prompts_dir_for_base_path ~base_path =
-  (resolve_for_base_path ~base_path).prompts.path
+  Filename.concat (config_root_path_for_base_path ~base_path) "prompts"
 
 let runtime_toml_path_for_base_path ~base_path =
   Filename.concat
-    (resolve_for_base_path ~base_path).config_root.path
+    (config_root_path_for_base_path ~base_path)
     runtime_toml_filename
 
 let candle_toml_path_for_base_path ~base_path =
   Filename.concat
-    (resolve_for_base_path ~base_path).config_root.path
+    (config_root_path_for_base_path ~base_path)
     candle_toml_filename
 
 let keeper_toml_suffix = ".toml"

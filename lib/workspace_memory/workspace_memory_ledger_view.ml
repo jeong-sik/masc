@@ -20,17 +20,26 @@ let current_facts ~base_path ledger =
   | Ok context ->
     Ok (context, (Ledger.reconcile ledger (Context.keepers context)).current_facts)
 
-let store_unavailable context = function
+let build_unavailable_table context =
+  let keepers = Context.keepers context in
+  let tbl = Hashtbl.create (max 16 (List.length keepers * 2)) in
+  List.iter
+    (fun (row : Context.keeper) ->
+       if not (Hashtbl.mem tbl row.keeper_id) then Hashtbl.add tbl row.keeper_id row)
+    keepers;
+  tbl
+
+let store_unavailable_in_table (tbl : (string, Context.keeper) Hashtbl.t) = function
   | Ledger.Ordinary { keeper_id; _ } ->
-    (match List.find_opt (fun (row : Context.keeper) -> row.keeper_id = keeper_id)
-       (Context.keepers context) with
-     | Some { ordinary = Context.Unavailable _; _ } -> true
-     | Some { ordinary = (Context.Missing | Context.Available _);_} | None -> false)
+    (match Hashtbl.find_opt tbl keeper_id with
+     | Some ({ ordinary = Context.Unavailable _; _ } : Context.keeper) -> true
+     | Some ({ ordinary = (Context.Missing | Context.Available _); _ } : Context.keeper)
+     | None -> false)
   | Ledger.Source_bound { keeper_id; _ } ->
-    (match List.find_opt (fun (row : Context.keeper) -> row.keeper_id = keeper_id)
-       (Context.keepers context) with
-     | Some { source_bound = Context.Unavailable _; _ } -> true
-     | Some { source_bound = (Context.Missing | Context.Available _);_} | None -> false)
+    (match Hashtbl.find_opt tbl keeper_id with
+     | Some ({ source_bound = Context.Unavailable _; _ } : Context.keeper) -> true
+     | Some ({ source_bound = (Context.Missing | Context.Available _); _ } : Context.keeper)
+     | None -> false)
 
 let read ~base_path =
   match Ledger.observe_curator ~base_path with
@@ -40,24 +49,28 @@ let read ~base_path =
     let* ledger = load_observed ~load:Ledger.load ~base_path
         ~ledger_sha256:descriptor.ledger_sha256 in
     let current = current_facts ~base_path ledger in
-    let current_by_ref =
+    let current_by_ref, unavailable_tbl =
       match current with
-      | Error _ -> Fact_map.empty
-      | Ok (_, rows) ->
-        List.fold_left
-          (fun acc (row : Ledger.pending_fact) ->
-             Fact_map.add row.fact row.claim acc)
-          Fact_map.empty rows
+      | Error _ -> Fact_map.empty, None
+      | Ok (context, rows) ->
+        let map =
+          List.fold_left
+            (fun acc (row : Ledger.pending_fact) ->
+               Fact_map.add row.fact row.claim acc)
+            Fact_map.empty rows
+        in
+        map, Some (build_unavailable_table context)
     in
+    let ledger_json = Ledger.to_json ledger in
     let facts =
-      Ledger.to_json ledger |> Yojson.Safe.Util.member "facts" |> Yojson.Safe.Util.to_list in
+      ledger_json |> Yojson.Safe.Util.member "facts" |> Yojson.Safe.Util.to_list in
     let enriched = List.map2 (fun (fact, _) json ->
       let observed = Fact_map.find_opt fact current_by_ref in
-      let source_state = match observed, current with
+      let source_state = match observed, unavailable_tbl with
         | Some _, _ -> "present"
-        | None, Error _ -> "unavailable"
-        | None, Ok (context, _) when store_unavailable context fact -> "unavailable"
-        | None, Ok _ -> "absent" in
+        | None, None -> "unavailable"
+        | None, Some tbl when store_unavailable_in_table tbl fact -> "unavailable"
+        | None, Some _ -> "absent" in
       match json with
       | `Assoc fields -> `Assoc (fields @
           ["current_claim", (match observed with None -> `Null | Some claim -> `String claim);
@@ -71,7 +84,7 @@ let read ~base_path =
       ; "source_resolution", (match current with
           | Ok _ -> `Assoc ["status", `String "available"]
           | Error detail -> `Assoc ["status", `String "unavailable"; "detail", `String detail])
-      ; "ledger", (match Ledger.to_json ledger with
+      ; "ledger", (match ledger_json with
           | `Assoc fields -> `Assoc (List.map (fun (key, value) ->
               if key = "facts" then key, `List enriched else key, value) fields)
           | json -> json) ])

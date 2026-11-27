@@ -12,6 +12,9 @@ let store config =
 
 let scope_id = Runtime_quota_window.scope_id
 
+let write_gen = Atomic.make 0
+let write_generation () = Atomic.get write_gen
+
 let install config =
   let journal = store config in
   Usage.set_record_observer (fun ~scope ~observed_at report ->
@@ -20,6 +23,7 @@ let install config =
       the append did. *)
     Fun.protect
       ~finally:(fun () ->
+        ignore (Atomic.fetch_and_add write_gen 1);
         Eio.Cancel.protect (fun () ->
           Workspace_dataset_event.announce ~base_path:config.Workspace.base_path
             Workspace_dataset_event.Provider_usage))
@@ -48,6 +52,8 @@ let failure_in_window ~now ~window =
   match Usage.record_observer_failure_at () with
   | Some at -> at >= window_start ~now ~window && at <= now
   | None -> false
+
+let has_failure_in_window = failure_in_window
 
 (* A stored line that cannot be read is logged with its place and counted in
    the answer, and the rest of the window is still read: one bad line is one

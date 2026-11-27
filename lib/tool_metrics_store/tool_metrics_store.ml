@@ -13,9 +13,20 @@ type summary = {
   latest_ts : float option;
 }
 
+type summary_cache = {
+  data_version : int;
+  mutable entry_count : int;
+  mutable latest_ts : float option;
+}
+
 type store = {
   masc_root : string;
   db : Sqlite3.db;
+  insert_event_stmt : Sqlite3.stmt;
+  insert_size_stmt : Sqlite3.stmt;
+  insert_class_stmt : Sqlite3.stmt;
+  insert_caller_stmt : Sqlite3.stmt;
+  mutable summary_cache : summary_cache option;
 }
 
 (* Serialises every use of [current_store], the open SQLite handle. Opening a
@@ -179,6 +190,17 @@ CREATE TABLE IF NOT EXISTS tool_metric_callers (
 
 let busy_timeout_ms = 5000
 let busy_timeout_sql = Printf.sprintf "PRAGMA busy_timeout=%d" busy_timeout_ms
+let tuning_pragmas_sql =
+  [ "set cache size", "PRAGMA cache_size=-65536"
+  ; "set mmap size", "PRAGMA mmap_size=268435456"
+  ; "set temp store", "PRAGMA temp_store=MEMORY"
+  ]
+
+let apply_tuning_pragmas db =
+  List.iter
+    (fun (operation, sql) ->
+       ignore (exec db ~operation sql : (unit, string) result))
+    tuning_pragmas_sql
 
 let configure db =
   let* journal_mode =
@@ -197,6 +219,7 @@ let configure db =
     then Error "SQLite synchronous mode is not NORMAL"
     else
       let* () = exec db ~operation:"set busy timeout" busy_timeout_sql in
+      apply_tuning_pragmas db;
       let* () = exec db ~operation:"create tool metric table" schema_sql in
       let* () =
         exec
@@ -223,11 +246,72 @@ let configure db =
           "CREATE INDEX IF NOT EXISTS tool_metric_callers_caller \
            ON tool_metric_callers(caller)"
       in
+      let* () =
+        exec
+          db
+          ~operation:"create tool metric timestamp index"
+          "CREATE INDEX IF NOT EXISTS tool_metric_events_ts \
+           ON tool_metric_events(ts)"
+      in
+      let* () =
+        exec
+          db
+          ~operation:"create tool metric tool-timestamp index"
+          "CREATE INDEX IF NOT EXISTS tool_metric_events_tool_ts \
+           ON tool_metric_events(tool_name, ts)"
+      in
       exec
         db
-        ~operation:"create tool metric timestamp index"
-        "CREATE INDEX IF NOT EXISTS tool_metric_events_ts \
-         ON tool_metric_events(ts)"
+        ~operation:"create tool metric disposition-timestamp index"
+        "CREATE INDEX IF NOT EXISTS tool_metric_events_disp_ts \
+         ON tool_metric_events(disposition, ts)"
+
+let finalize_quietly stmt =
+  try
+    ignore (Sqlite3.finalize stmt : Sqlite3.Rc.t);
+    ignore (Sys.opaque_identity stmt)
+  with Sqlite3.Error _ -> ()
+
+let prepare_store_statements db =
+  let* insert_event_stmt =
+    prepare db ~operation:"prepare insert tool metric"
+      "INSERT OR IGNORE INTO tool_metric_events \
+       (record_id, ts, tool_name, disposition, duration_ms) \
+       VALUES (?1, ?2, ?3, ?4, ?5)"
+  in
+  let* insert_size_stmt =
+    match
+      prepare db ~operation:"prepare insert tool metric result size"
+        "INSERT OR IGNORE INTO tool_metric_result_sizes (record_id, result_bytes) \
+         VALUES (?1, ?2)"
+    with
+    | Ok s -> Ok s
+    | Error _ as err -> finalize_quietly insert_event_stmt; err
+  in
+  let* insert_class_stmt =
+    match
+      prepare db ~operation:"prepare insert tool metric failure class"
+        "INSERT OR IGNORE INTO tool_metric_failure_classes \
+         (record_id, failure_class) VALUES (?1, ?2)"
+    with
+    | Ok s -> Ok s
+    | Error _ as err ->
+      finalize_quietly insert_size_stmt;
+      finalize_quietly insert_event_stmt;
+      err
+  in
+  match
+    prepare db ~operation:"prepare insert tool metric caller"
+      "INSERT OR IGNORE INTO tool_metric_callers (record_id, caller) \
+       VALUES (?1, ?2)"
+  with
+  | Ok insert_caller_stmt ->
+    Ok (insert_event_stmt, insert_size_stmt, insert_class_stmt, insert_caller_stmt)
+  | Error _ as err ->
+    finalize_quietly insert_class_stmt;
+    finalize_quietly insert_size_stmt;
+    finalize_quietly insert_event_stmt;
+    err
 
 let open_store ~masc_root =
   let path = database_path ~masc_root in
@@ -238,8 +322,22 @@ let open_store ~masc_root =
       ignore (close_db db : bool);
       Error error
     in
-    (match configure db with
-     | Ok () -> Ok { masc_root; db }
+    (match
+       let* () = configure db in
+       let* insert_event_stmt, insert_size_stmt, insert_class_stmt, insert_caller_stmt =
+         prepare_store_statements db
+       in
+       Ok
+         { masc_root
+         ; db
+         ; insert_event_stmt
+         ; insert_size_stmt
+         ; insert_class_stmt
+         ; insert_caller_stmt
+         ; summary_cache = None
+         }
+     with
+     | Ok store -> Ok store
      | Error error -> fail error
      | exception Sqlite3.Error detail -> fail ("configure database: " ^ detail)
      | exception Sys_error detail -> fail ("configure database: " ^ detail)
@@ -249,7 +347,10 @@ let open_store ~masc_root =
             "configure database: %s(%s): %s"
             operation
             argument
-            (Unix.error_message error)))
+            (Unix.error_message error))
+     | exception exn ->
+       ignore (close_db db : bool);
+       raise exn)
   with
   | Sqlite3.Error detail -> Error ("open database: " ^ detail)
   | Sys_error detail -> Error ("open database: " ^ detail)
@@ -261,12 +362,51 @@ let open_store ~masc_root =
          argument
          (Unix.error_message error))
 
+type ro_handle = {
+  ro_dev : int;
+  ro_ino : int;
+  ro_db : Sqlite3.db;
+}
+
+let ro_pool_mu = Stdlib.Mutex.create ()
+let ro_pool : (string, ro_handle list) Hashtbl.t = Hashtbl.create 4
+let ro_pool_max_per_path = 4
+let ro_pool_max_paths = 32
+
+let drain_ro_pool_for_path path =
+  let handles =
+    Stdlib.Mutex.protect ro_pool_mu (fun () ->
+      match Hashtbl.find_opt ro_pool path with
+      | None -> []
+      | Some hs ->
+        Hashtbl.remove ro_pool path;
+        hs)
+  in
+  List.iter (fun h -> ignore (close_db h.ro_db : bool)) handles
+
+let drain_ro_pool () =
+  let handles =
+    Stdlib.Mutex.protect ro_pool_mu (fun () ->
+      let acc =
+        Hashtbl.fold (fun _ hs acc -> List.rev_append hs acc) ro_pool []
+      in
+      Hashtbl.clear ro_pool;
+      acc)
+  in
+  List.iter (fun h -> ignore (close_db h.ro_db : bool)) handles
+
 let close_current_store_locked () =
   match !current_store with
   | None -> ()
   | Some store ->
+    let old_path = database_path ~masc_root:store.masc_root in
     current_store := None;
-    ignore (close_db store.db : bool)
+    finalize_quietly store.insert_caller_stmt;
+    finalize_quietly store.insert_class_stmt;
+    finalize_quietly store.insert_size_stmt;
+    finalize_quietly store.insert_event_stmt;
+    ignore (close_db store.db : bool);
+    drain_ro_pool_for_path old_path
 
 let get_or_open_locked ~masc_root =
   match !current_store with
@@ -296,6 +436,7 @@ let with_store ~masc_root f =
            (Unix.error_message error)))
 
 let reset_for_testing () =
+  drain_ro_pool ();
   Cross_context_mutex.with_lock store_lock close_current_store_locked
 
 (* Runs [f] between BEGIN and COMMIT on the connection [with_store] holds, so
@@ -317,106 +458,97 @@ let in_transaction db ~operation f =
     rollback ();
     raise exn
 
+let run_cached_insert db statement ~operation ~bind_operation values =
+  let reset () =
+    ignore (Sqlite3.reset statement : Sqlite3.Rc.t);
+    ignore (Sqlite3.clear_bindings statement : Sqlite3.Rc.t)
+  in
+  reset ();
+  Fun.protect ~finally:reset (fun () ->
+    let* () = bind_all db statement ~operation:bind_operation values in
+    expect_done db statement ~operation)
+
+let read_data_version db =
+  single_int db ~operation:"read SQLite data_version" "PRAGMA data_version"
+
 let insert ~masc_root ~result_bytes ~failure_class ?caller row =
   if result_bytes < 0
   then Error (Printf.sprintf "tool metric %s has a negative result size" row.record_id)
   else
     with_store ~masc_root (fun store ->
-      in_transaction store.db ~operation:"insert tool metric" (fun () ->
-        let* () =
-          with_statement
-            store.db
-            ~operation:"insert tool metric"
-            "INSERT OR IGNORE INTO tool_metric_events \
-             (record_id, ts, tool_name, disposition, duration_ms) \
-             VALUES (?1, ?2, ?3, ?4, ?5)"
-            (fun statement ->
-              let* () =
-                bind_all
-                  store.db
-                  statement
-                  ~operation:"bind tool metric row"
-                  [ Sqlite3.Data.TEXT row.record_id
-                  ; Sqlite3.Data.FLOAT row.ts
-                  ; Sqlite3.Data.TEXT row.tool_name
-                  ; Sqlite3.Data.TEXT row.disposition
-                  ; Sqlite3.Data.FLOAT row.duration_ms
-                  ]
-              in
-              expect_done store.db statement ~operation:"insert tool metric")
-        in
-        let* () =
-          with_statement
-            store.db
-            ~operation:"insert tool metric result size"
-            "INSERT OR IGNORE INTO tool_metric_result_sizes (record_id, result_bytes) \
-             VALUES (?1, ?2)"
-            (fun statement ->
-              let* () =
-                bind_all
-                  store.db
-                  statement
-                  ~operation:"bind tool metric result size"
-                  [ Sqlite3.Data.TEXT row.record_id
-                  ; Sqlite3.Data.INT (Int64.of_int result_bytes)
-                  ]
-              in
-              expect_done
-                store.db
-                statement
-                ~operation:"insert tool metric result size")
-        in
-        let* () =
-          match failure_class with
-          | None -> Ok ()
-          | Some failure_class ->
-            with_statement
+      let* inserted =
+        in_transaction store.db ~operation:"insert tool metric" (fun () ->
+          let* () =
+            run_cached_insert
               store.db
-              ~operation:"insert tool metric failure class"
-              "INSERT OR IGNORE INTO tool_metric_failure_classes \
-               (record_id, failure_class) VALUES (?1, ?2)"
-              (fun statement ->
-                let* () =
-                  bind_all
-                    store.db
-                    statement
-                    ~operation:"bind tool metric failure class"
-                    [ Sqlite3.Data.TEXT row.record_id
-                    ; Sqlite3.Data.TEXT
-                        (Tool_result.tool_failure_class_to_string failure_class)
-                    ]
-                in
-                expect_done
-                  store.db
-                  statement
-                  ~operation:"insert tool metric failure class")
-        in
-        match caller with
-        | None -> Ok ()
-        | Some caller ->
-          with_statement
-            store.db
-            ~operation:"insert tool metric caller"
-            "INSERT OR IGNORE INTO tool_metric_callers (record_id, caller) \
-             VALUES (?1, ?2)"
-            (fun statement ->
-              let* () =
-                bind_all
-                  store.db
-                  statement
-                  ~operation:"bind tool metric caller"
-                  [ Sqlite3.Data.TEXT row.record_id; Sqlite3.Data.TEXT caller ]
-              in
-              expect_done
+              store.insert_event_stmt
+              ~operation:"insert tool metric"
+              ~bind_operation:"bind tool metric row"
+              [ Sqlite3.Data.TEXT row.record_id
+              ; Sqlite3.Data.FLOAT row.ts
+              ; Sqlite3.Data.TEXT row.tool_name
+              ; Sqlite3.Data.TEXT row.disposition
+              ; Sqlite3.Data.FLOAT row.duration_ms
+              ]
+          in
+          let event_inserted = Sqlite3.changes store.db > 0 in
+          let* () =
+            run_cached_insert
+              store.db
+              store.insert_size_stmt
+              ~operation:"insert tool metric result size"
+              ~bind_operation:"bind tool metric result size"
+              [ Sqlite3.Data.TEXT row.record_id
+              ; Sqlite3.Data.INT (Int64.of_int result_bytes)
+              ]
+          in
+          let* () =
+            match failure_class with
+            | None -> Ok ()
+            | Some failure_class ->
+              run_cached_insert
                 store.db
-                statement
-                ~operation:"insert tool metric caller")))
+                store.insert_class_stmt
+                ~operation:"insert tool metric failure class"
+                ~bind_operation:"bind tool metric failure class"
+                [ Sqlite3.Data.TEXT row.record_id
+                ; Sqlite3.Data.TEXT
+                    (Tool_result.tool_failure_class_to_string failure_class)
+                ]
+          in
+          let* () =
+            match caller with
+            | None -> Ok ()
+            | Some caller ->
+              run_cached_insert
+                store.db
+                store.insert_caller_stmt
+                ~operation:"insert tool metric caller"
+                ~bind_operation:"bind tool metric caller"
+                [ Sqlite3.Data.TEXT row.record_id; Sqlite3.Data.TEXT caller ]
+          in
+          Ok event_inserted)
+      in
+      (if inserted then
+         match store.summary_cache with
+         | Some cached ->
+           (match read_data_version store.db with
+            | Ok dv when dv = cached.data_version ->
+              cached.entry_count <- cached.entry_count + 1;
+              cached.latest_ts <-
+                (match cached.latest_ts with
+                 | None -> Some row.ts
+                 | Some prev -> Some (Float.max prev row.ts))
+            | Ok _ | Error _ -> store.summary_cache <- None)
+         | None -> ());
+      Ok ())
 
 let prune ~masc_root ~retention_days =
   if retention_days <= 0
   then Ok 0
   else
     with_store ~masc_root (fun store ->
+      store.summary_cache <- None;
       let cutoff =
         Unix.gettimeofday ()
         -. (Float.of_int retention_days *. Masc_time_constants.day)
@@ -484,18 +616,28 @@ let iter_all ~masc_root ~f =
         in
         loop ()))
 
-let latest_ts db =
+let count_and_latest_ts db =
   with_statement
     db
-    ~operation:"read latest tool metric timestamp"
-    "SELECT MAX(ts) FROM tool_metric_events"
+    ~operation:"read tool metrics summary"
+    "SELECT COUNT(*), MAX(ts) FROM tool_metric_events"
     (fun statement ->
       let rc = Sqlite3.step statement in
       if rc <> Sqlite3.Rc.ROW
-      then Error (sqlite_error db "read latest tool metric timestamp" rc)
+      then Error (sqlite_error db "read tool metrics summary" rc)
       else
-        let value =
+        let count_res =
           match Sqlite3.column statement 0 with
+          | Sqlite3.Data.INT value -> Ok (Int64.to_int value)
+          | ( Sqlite3.Data.NONE
+            | Sqlite3.Data.NULL
+            | Sqlite3.Data.FLOAT _
+            | Sqlite3.Data.TEXT _
+            | Sqlite3.Data.BLOB _ ) as other ->
+            Error ("tool metrics count is not an integer: " ^ Sqlite3.Data.to_string_debug other)
+        in
+        let latest =
+          match Sqlite3.column statement 1 with
           | Sqlite3.Data.NULL -> None
           | Sqlite3.Data.FLOAT value -> Some value
           | Sqlite3.Data.INT value -> Some (Int64.to_float value)
@@ -503,10 +645,10 @@ let latest_ts db =
         in
         let rc = Sqlite3.step statement in
         if rc = Sqlite3.Rc.DONE
-        then Ok value
+        then Result.map (fun count -> count, latest) count_res
         else
           Error
-            (sqlite_error db "read latest tool metric timestamp completion" rc))
+            (sqlite_error db "read tool metrics summary completion" rc))
 
 let summary ~masc_root =
   let path = database_path ~masc_root in
@@ -514,14 +656,23 @@ let summary ~masc_root =
   then Ok { path; exists = false; entry_count = 0; latest_ts = None }
   else
     with_store ~masc_root (fun store ->
-      let* entry_count =
-        single_int
-          store.db
-          ~operation:"count tool metrics"
-          "SELECT COUNT(*) FROM tool_metric_events"
+      let dv_before = read_data_version store.db in
+      let hit =
+        match store.summary_cache, dv_before with
+        | Some cached, Ok dv when dv = cached.data_version -> Some cached
+        | Some _, (Ok _ | Error _) | None, (Ok _ | Error _) -> None
       in
-      let* latest_ts = latest_ts store.db in
-      Ok { path; exists = true; entry_count; latest_ts })
+      match hit with
+      | Some cached ->
+        Ok { path; exists = true; entry_count = cached.entry_count; latest_ts = cached.latest_ts }
+      | None ->
+        let* entry_count, latest_ts = count_and_latest_ts store.db in
+        (match dv_before, read_data_version store.db with
+         | Ok dv1, Ok dv2 when dv1 = dv2 ->
+           store.summary_cache <- Some { data_version = dv2; entry_count; latest_ts }
+         | Ok _, Ok _ | Ok _, Error _ | Error _, (Ok _ | Error _) ->
+           store.summary_cache <- None);
+        Ok { path; exists = true; entry_count; latest_ts })
 
 let caller_of_statement statement index =
   match Sqlite3.column statement index with
@@ -597,25 +748,119 @@ let read_recent ~masc_root ?since_ts ?until_ts ~n () =
   read_recent_with_caller ~masc_root ?since_ts ?until_ts ~n ()
   |> Result.map (List.map fst)
 
+let stat_dev_ino path =
+  match Unix.stat path with
+  | stat -> Some (stat.Unix.st_dev, stat.Unix.st_ino)
+  | exception Unix.Unix_error _ -> None
+
+let checkout_ro_handle ~path ~dev ~ino =
+  let rec take_matching stale = function
+    | [] -> None, stale
+    | h :: rest ->
+      if h.ro_dev = dev && h.ro_ino = ino then Some h, (List.rev_append stale rest)
+      else take_matching (h :: stale) rest
+  in
+  let found, to_close =
+    Stdlib.Mutex.protect ro_pool_mu (fun () ->
+      match Hashtbl.find_opt ro_pool path with
+      | None -> None, []
+      | Some hs ->
+        let found, remaining = take_matching [] hs in
+        let keep, close =
+          List.partition (fun h -> h.ro_dev = dev && h.ro_ino = ino) remaining
+        in
+        if keep = [] then Hashtbl.remove ro_pool path
+        else Hashtbl.replace ro_pool path keep;
+        found, close)
+  in
+  List.iter (fun h -> ignore (close_db h.ro_db : bool)) to_close;
+  found
+
+let return_ro_handle ~path handle =
+  let keep =
+    match stat_dev_ino path with
+    | Some (dev, ino) when dev = handle.ro_dev && ino = handle.ro_ino -> true
+    | Some _ | None -> false
+  in
+  if not keep then ignore (close_db handle.ro_db : bool)
+  else
+    let to_close =
+      Stdlib.Mutex.protect ro_pool_mu (fun () ->
+        let evicted =
+          if Hashtbl.length ro_pool >= ro_pool_max_paths && not (Hashtbl.mem ro_pool path) then begin
+            let acc = Hashtbl.fold (fun _ hs acc -> List.rev_append hs acc) ro_pool [] in
+            Hashtbl.clear ro_pool;
+            acc
+          end else []
+        in
+        let existing = Option.value ~default:[] (Hashtbl.find_opt ro_pool path) in
+        if List.length existing >= ro_pool_max_per_path then
+          handle :: evicted
+        else begin
+          Hashtbl.replace ro_pool path (handle :: existing);
+          evicted
+        end)
+    in
+    List.iter (fun h -> ignore (close_db h.ro_db : bool)) to_close
+
 (* The series is read on a connection of its own. A scan over a month of rows
    then neither holds [store_lock] nor makes [insert] wait, and WAL mode lets
-   the reader run beside the writer. *)
+   the reader run beside the writer. Reusing warm read-only handles per file
+   inode avoids cold SQLite page-cache / schema re-parses on every request. *)
 let with_read_only_db ~path f =
-  let run db =
-    let* () = exec db ~operation:"set busy timeout" busy_timeout_sql in
-    f db
-  in
-  match Sqlite3.db_open ~mode:`READONLY path with
-  | exception Sqlite3.Error detail -> Error ("open read-only database: " ^ detail)
-  | db ->
-    let result =
-      try run db with
-      | Sqlite3.Error detail -> Error ("SQLite read: " ^ detail)
+  match stat_dev_ino path with
+  | None ->
+    (match Sqlite3.db_open ~mode:`READONLY path with
+     | exception Sqlite3.Error detail -> Error ("open read-only database: " ^ detail)
+     | db ->
+       Fun.protect
+         ~finally:(fun () -> ignore (close_db db : bool))
+         (fun () ->
+           try
+             let* () = exec db ~operation:"set busy timeout" busy_timeout_sql in
+             apply_tuning_pragmas db;
+             f db
+           with Sqlite3.Error detail -> Error ("SQLite read: " ^ detail)))
+  | Some (dev, ino) ->
+    let handle_res =
+      match checkout_ro_handle ~path ~dev ~ino with
+      | Some h -> Ok h
+      | None ->
+        (match Sqlite3.db_open ~mode:`READONLY path with
+         | exception Sqlite3.Error detail -> Error ("open read-only database: " ^ detail)
+         | db ->
+           (match
+              let* () = exec db ~operation:"set busy timeout" busy_timeout_sql in
+              apply_tuning_pragmas db;
+              Ok { ro_dev = dev; ro_ino = ino; ro_db = db }
+            with
+            | Ok _ as ok -> ok
+            | Error _ as err ->
+              ignore (close_db db : bool);
+              err
+            | exception Sqlite3.Error detail ->
+              ignore (close_db db : bool);
+              Error ("SQLite read: " ^ detail)
+            | exception exn ->
+              ignore (close_db db : bool);
+              raise exn))
     in
-    let closed = close_db db in
-    (match result, closed with
-     | Ok _, false -> Error "close read-only database: SQLite kept the handle open"
-     | Ok _, true | Error _, (true | false) -> result)
+    match handle_res with
+    | Error _ as err -> err
+    | Ok handle ->
+      (match f handle.ro_db with
+       | Ok _ as ok ->
+         return_ro_handle ~path handle;
+         ok
+       | Error _ as err ->
+         ignore (close_db handle.ro_db : bool);
+         err
+       | exception Sqlite3.Error detail ->
+         ignore (close_db handle.ro_db : bool);
+         Error ("SQLite read: " ^ detail)
+       | exception exn ->
+         ignore (close_db handle.ro_db : bool);
+         raise exn)
 ;;
 
 (* Calls [f] for every row [statement] yields and returns how many rows it

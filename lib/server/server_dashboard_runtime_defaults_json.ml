@@ -100,3 +100,49 @@ let resolved_of_runtime () : resolved =
 let current ~generated_at_iso () : Yojson.Safe.t =
   build ~generated_at_iso (resolved_of_runtime ())
 ;;
+
+type cached_prepared =
+  { snap_default : Runtime_instance.t option
+  ; snap_runtimes : Runtime_instance.t list
+  ; snap_media_failover : string list
+  ; snap_config_path : string option
+  ; prepared : Server_cached_read_http.prepared_http
+  }
+
+let prepared_cache_mu = Stdlib.Mutex.create ()
+let prepared_cache : cached_prepared option ref = ref None
+
+let snapshot_matches (cached : cached_prepared)
+    (snap : Runtime.dashboard_runtime_defaults_snapshot) =
+  Option.equal ( == ) cached.snap_default snap.default_runtime
+  && cached.snap_runtimes == snap.runtimes
+  && cached.snap_media_failover == snap.media_failover
+  && Option.equal String.equal cached.snap_config_path snap.config_path
+;;
+
+let current_prepared () : Server_cached_read_http.prepared_http =
+  let snap = Runtime.dashboard_runtime_defaults_snapshot () in
+  let hit =
+    Stdlib.Mutex.protect prepared_cache_mu (fun () ->
+      match !prepared_cache with
+      | Some cached when snapshot_matches cached snap -> Some cached.prepared
+      | Some _ | None -> None)
+  in
+  match hit with
+  | Some prepared -> prepared
+  | None ->
+    let json =
+      build ~generated_at_iso:(Masc_domain.now_iso ()) (resolved_of_snapshot snap)
+    in
+    let prepared = Server_cached_read_http.prepare_json json in
+    Stdlib.Mutex.protect prepared_cache_mu (fun () ->
+      prepared_cache :=
+        Some
+          { snap_default = snap.default_runtime
+          ; snap_runtimes = snap.runtimes
+          ; snap_media_failover = snap.media_failover
+          ; snap_config_path = snap.config_path
+          ; prepared
+          });
+    prepared
+;;

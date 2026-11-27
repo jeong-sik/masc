@@ -89,7 +89,7 @@ module Response = struct
     | None -> ok_status ()
     | Some _ when status <> None && status <> Some `OK -> ok_status ()
     | Some recognizes ->
-        if String.length body > 8192 then ok_status ()
+        if String.length body = 0 || String.length body > 8192 || body.[0] <> '{' then ok_status ()
         else
           match Yojson.Safe.from_string body with
           | json when recognizes json -> `Gateway_timeout

@@ -82,6 +82,75 @@ let prompt_catalog_json () =
   | json -> json
 ;;
 
+let audit_http_cache_mu = Stdlib.Mutex.create ()
+
+type cached_audit_http = {
+  au_stamp : string option;
+  au_entries : Audit_log.audit_entry list;
+  au_prepared : Server_cached_read_http.prepared_http;
+}
+
+let audit_http_cache : (string * int, cached_audit_http) Hashtbl.t = Hashtbl.create 8
+let audit_http_cache_max = 16
+
+let rec audit_entries_phys_equal a b =
+  match a, b with
+  | [], [] -> true
+  | x :: xs, y :: ys -> x == y && audit_entries_phys_equal xs ys
+  | _ :: _, [] | [], _ :: _ -> false
+
+let store_audit_http_cache ~key entry =
+  Stdlib.Mutex.protect audit_http_cache_mu (fun () ->
+    if Hashtbl.length audit_http_cache >= audit_http_cache_max
+       && not (Hashtbl.mem audit_http_cache key)
+    then Hashtbl.clear audit_http_cache;
+    Hashtbl.replace audit_http_cache key entry)
+
+let unfiltered_audit_http_prepared ~config ~limit =
+  let key = config.Workspace.base_path, limit in
+  let stamp_before = Audit_log.settled_tail_stamp ~n:limit config in
+  let stamp_hit =
+    match stamp_before with
+    | Some s ->
+      Stdlib.Mutex.protect audit_http_cache_mu (fun () ->
+        match Hashtbl.find_opt audit_http_cache key with
+        | Some { au_stamp = Some cached_stamp; au_prepared; _ }
+          when String.equal cached_stamp s -> Some au_prepared
+        | Some _ | None -> None)
+    | None -> None
+  in
+  match stamp_hit with
+  | Some prepared -> prepared
+  | None ->
+    let entries =
+      Audit_log.read_entries_matching
+        ~n:limit
+        ~keep:(fun _ -> true)
+        config
+    in
+    let verified_stamp =
+      match stamp_before, Audit_log.settled_tail_stamp ~n:limit config with
+      | Some s1, Some s2 when String.equal s1 s2 -> Some s2
+      | Some _, Some _ | Some _, None | None, Some _ | None, None -> None
+    in
+    let reused =
+      Stdlib.Mutex.protect audit_http_cache_mu (fun () ->
+        match Hashtbl.find_opt audit_http_cache key with
+        | Some cached when audit_entries_phys_equal cached.au_entries entries ->
+          if not (Option.equal String.equal cached.au_stamp verified_stamp) then
+            Hashtbl.replace audit_http_cache key { cached with au_stamp = verified_stamp };
+          Some cached.au_prepared
+        | Some _ | None -> None)
+    in
+    match reused with
+    | Some prepared -> prepared
+    | None ->
+      let json = Audit_log.audit_events_response_json ~limit entries in
+      let prepared = Server_cached_read_http.prepare_json json in
+      store_audit_http_cache ~key
+        { au_stamp = verified_stamp; au_entries = entries; au_prepared = prepared };
+      prepared
+
 let activity_result_json ~ok ~message =
   `Assoc [ ("ok", `Bool ok); ("message", `String message) ]
 ;;
@@ -827,11 +896,72 @@ let respond_board_sub_boards reqd ~reader =
   | Error error -> Http.Response.json_value ~status:`Service_unavailable
       (`Assoc [("error", `String (Board_tool.board_error_to_string error))]) reqd
 
+let activity_events_http_cache_mu = Stdlib.Mutex.create ()
+type cached_activity_events_http = {
+  base_events : Yojson.Safe.t;
+  etag : string;
+  encoded : Http_response_payload.prepared;
+}
+let activity_events_http_cache : (int, cached_activity_events_http) Hashtbl.t = Hashtbl.create 8
+let activity_events_http_cache_max = 16
+
+let respond_activity_events ~state req reqd =
+  let kinds =
+    let split raw =
+      raw |> String.split_on_char ',' |> List.map String.trim |> List.filter (fun v -> v <> "")
+    in
+    let a = match query_param req "kinds" with Some r -> split r | None -> [] in
+    let b = match query_param req "kind" with Some r -> split r | None -> [] in
+    a @ b
+  in
+  let after_seq = int_query_param req "after_seq" ~default:0 |> max 0 in
+  let limit = int_query_param req "limit" ~default:200 |> Server_utils.clamp ~min_v:1 ~max_v:1000 in
+  if kinds = [] && after_seq = 0 then begin
+    let config = Mcp_server.workspace_config state in
+    let base_events =
+      match Dashboard_snapshot.public_activity_events_cached_opt config with
+      | Some cached -> cached
+      | None ->
+        Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+          Dashboard_snapshot.public_activity_events config)
+    in
+    let entry =
+      match
+        Stdlib.Mutex.protect activity_events_http_cache_mu (fun () ->
+          match Hashtbl.find_opt activity_events_http_cache limit with
+          | Some cached when cached.base_events == base_events -> Some cached
+          | Some _ | None -> None)
+      with
+      | Some cached -> cached
+      | None ->
+        let sliced = Server_activity_http.slice_default_events_to_limit base_events ~limit in
+        let raw = Yojson.Safe.to_string sliced in
+        let etag = Http.Response.weak_etag_value raw in
+        let encoded = Http_response_payload.prepare raw in
+        let built = { base_events; etag; encoded } in
+        Stdlib.Mutex.protect activity_events_http_cache_mu (fun () ->
+          if Hashtbl.length activity_events_http_cache >= activity_events_http_cache_max then
+            Hashtbl.clear activity_events_http_cache;
+          Hashtbl.replace activity_events_http_cache limit built);
+        built
+    in
+    let body, enc_headers =
+      Http_response_payload.select_prepared
+        ~accept_encoding:(Http_response_payload.accept_encoding_fields
+          (Httpun.Headers.get_multi req.headers "accept-encoding"))
+        entry.encoded
+    in
+    Http.Response.json_lazy ~compress:false ~request:req ~etag:entry.etag
+      ~extra_headers:enc_headers (fun () -> body) reqd
+  end else begin
+    let json = activity_events_http_json ~state req in
+    Http.Response.json_value ~compress:true ~request:req json reqd
+  end
+
 let add_routes ~sw ~clock router =
   router
   |> Server_route.get Server_route.Public_read "/api/v1/activity/events" (fun state req reqd ->
-         let json = activity_events_http_json ~state req in
-         Http.Response.json_value json reqd
+         respond_activity_events ~state req reqd
        )
   |> Server_route.get Server_route.Public_read "/api/v1/runtime/params" (fun _state _req reqd ->
          let params = Runtime_params.registry () in
@@ -889,27 +1019,39 @@ let add_routes ~sw ~clock router =
            query_param req "until"
            |> Fun.flip Option.bind (fun s -> float_of_string_opt (String.trim s))
          in
-         (* The filters decide the read, so [limit] counts entries the
-            caller asked for. Reading a multiple and filtering afterwards
-            only moved the write rate at which the answer came back short:
-            the store holds every agent's actions. *)
-         let matches =
-           Audit_log.audit_entry_matches ?actor:actor_filter ?kind:kind_filter
-             ?severity:severity_filter ?since:since_filter ?until:until_filter
+         let unfiltered =
+           Option.is_none actor_filter
+           && Option.is_none kind_filter
+           && Option.is_none severity_filter
+           && Option.is_none since_filter
+           && Option.is_none until_filter
          in
-         let all_entries =
-           Audit_log.read_entries_matching
-             ~n:limit
-             ?since:since_filter
-             ?until:until_filter
-             ~keep:matches
-             config
-         in
-         let json =
-           Audit_log.audit_events_response_json ~limit all_entries
-         in
-         Http.Response.json_value ~compress:true ~request:req
-           json reqd
+         if unfiltered then begin
+           let prepared = unfiltered_audit_http_prepared ~config ~limit in
+           Server_cached_read_http.respond_prepared ~request:req reqd prepared
+         end else begin
+           (* The filters decide the read, so [limit] counts entries the
+              caller asked for. Reading a multiple and filtering afterwards
+              only moved the write rate at which the answer came back short:
+              the store holds every agent's actions. *)
+           let matches =
+             Audit_log.audit_entry_matches ?actor:actor_filter ?kind:kind_filter
+               ?severity:severity_filter ?since:since_filter ?until:until_filter
+           in
+           let all_entries =
+             Audit_log.read_entries_matching
+               ~n:limit
+               ?since:since_filter
+               ?until:until_filter
+               ~keep:matches
+               config
+           in
+           let json =
+             Audit_log.audit_events_response_json ~limit all_entries
+           in
+           Http.Response.json_value_on_cpu ~compress:true ~request:req
+             json reqd
+         end
        )
 
   |> Server_route.get Server_route.Public_read "/api/v1/board" (fun state req reqd ->
@@ -921,12 +1063,7 @@ let add_routes ~sw ~clock router =
               let payload =
                 Server_board_list_http.payload ~reader ~config ~reaction_actor req
               in
-              let status =
-                if Dashboard_cache.is_timeout_envelope payload.json
-                then `Gateway_timeout else `OK
-              in
-              Http.Response.json_lazy ~status ~request:req ~etag:payload.etag
-                (fun () -> payload.raw_json) reqd
+              Server_cached_read_http.respond ~request:req reqd payload
        ))
 
   |> Server_route.get Server_route.Public_read "/api/v1/board/reactions/catalog" (fun _state _request reqd ->
@@ -1002,6 +1139,7 @@ let add_routes ~sw ~clock router =
          in
          let payload =
            Dashboard_cache.get_or_compute_payload
+             ~preparation:Dashboard_cache.Http_encodings
              cache_key
              ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
              (Pool_work.cpu ~name:__FUNCTION__ (fun () ->

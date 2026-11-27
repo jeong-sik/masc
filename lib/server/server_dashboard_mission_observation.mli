@@ -63,6 +63,15 @@ val next_deadline_unix : owner -> float option
 val subscribe_completed : owner -> (completion -> unit) -> (unit -> unit)
 (** Synchronous non-I/O callback. Consumers may enqueue bounded debt only. *)
 
+val snapshot_unobserved : owner -> Server_dashboard_http_cache.surface_snapshot
+(** Read the owner's current immutable cached Mission snapshot without rendering
+    diagnostics or running Keeper observations. *)
+
+val snapshot_json_unobserved : owner -> Yojson.Safe.t
+(** Read the owner's current cached Mission surface JSON without running
+    {!Dashboard_projection_cache.with_current_keeper_observations}, for callers
+    that apply current Keeper observations once at their own boundary. *)
+
 val publication : owner -> publication
 (** Assemble current Keeper observations outside the publication lock while
     retaining one immutable source cache observation and captured instance. *)

@@ -148,6 +148,12 @@ val is_initialized : config -> bool
     changes (init, reset, cleanup). *)
 val invalidate_initialized_cache : unit -> unit
 
+(** Monotonic counter bumped on every in-process write to [state.json]
+    (bootstrap reconcile, init seed, and [Workspace_state.write_state])
+    so stat-verified read caches drop any pre-write entry immediately. *)
+val workspace_state_write_generation : unit -> int
+val note_workspace_state_written : unit -> unit
+
 val agents_dirname : string
 (** The directory {!agents_dir} names below [<base>/.masc]. *)
 

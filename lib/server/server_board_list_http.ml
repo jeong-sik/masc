@@ -326,7 +326,9 @@ let payload ?config ~reader ~reaction_actor request
       limit offset (key_part voter) (key_part reaction_actor)
       signal_suffix
   in
-  Dashboard_cache.get_or_compute_payload cache_key
+  Dashboard_cache.get_or_compute_payload
+    ~preparation:Dashboard_cache.Http_encodings
+    cache_key
     ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
     (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
        let page =

@@ -1728,15 +1728,124 @@ let error_summary ~keeper_name error =
     ] }
 ;;
 
+type reaction_tail_stamp =
+  { rts_dir_dev : int
+  ; rts_dir_ino : int
+  ; rts_dir_mtime : float
+  ; rts_dir_ctime : float
+  ; rts_files : (string * int * int * int * float * float) list
+  }
+
+let reaction_tail_cache_mu = Stdlib.Mutex.create ()
+let reaction_tail_cache : (string * int, reaction_tail_stamp * Dated_jsonl.recent_entry list) Hashtbl.t =
+  Hashtbl.create 64
+let reaction_tail_cache_max = 256
+
+let reaction_tail_stamp_of_dir ~now base_dir =
+  let settled (st : Unix.stats) =
+    now -. st.st_mtime > 0.05 && now -. st.st_ctime > 0.05
+  in
+  try
+    match Unix.lstat base_dir with
+    | dir_st when dir_st.Unix.st_kind = Unix.S_DIR && settled dir_st ->
+      let months = Sys.readdir base_dir in
+      if Array.length months > 6 then None
+      else
+        let files_acc = ref [] in
+        let ok = ref true in
+        let total_files = ref 0 in
+        Array.iter
+          (fun m ->
+             if !ok then
+               let mpath = Filename.concat base_dir m in
+               match Unix.lstat mpath with
+               | mst when mst.Unix.st_kind = Unix.S_DIR && settled mst ->
+                 files_acc := (m, mst.st_dev, mst.st_ino, 0, mst.st_mtime, mst.st_ctime) :: !files_acc;
+                 let days = Sys.readdir mpath in
+                 Array.iter
+                   (fun d ->
+                      if !ok then begin
+                        incr total_files;
+                        if !total_files > 24 then ok := false
+                        else
+                          let dpath = Filename.concat mpath d in
+                          match Unix.lstat dpath with
+                          | dst when dst.Unix.st_kind = Unix.S_REG && settled dst ->
+                            files_acc :=
+                              (m ^ "/" ^ d, dst.st_dev, dst.st_ino, dst.st_size, dst.st_mtime, dst.st_ctime)
+                              :: !files_acc
+                          | _ -> ok := false
+                      end)
+                   days
+               | _ -> ok := false)
+          months;
+        if not !ok then None
+        else
+          let sorted =
+            List.sort (fun (a, _, _, _, _, _) (b, _, _, _, _, _) -> String.compare a b) !files_acc
+          in
+          Some
+            { rts_dir_dev = dir_st.st_dev
+            ; rts_dir_ino = dir_st.st_ino
+            ; rts_dir_mtime = dir_st.st_mtime
+            ; rts_dir_ctime = dir_st.st_ctime
+            ; rts_files = sorted
+            }
+    | _ -> None
+  with Unix.Unix_error _ | Sys_error _ -> None
+
+let equal_reaction_tail_stamp a b =
+  a.rts_dir_dev = b.rts_dir_dev
+  && a.rts_dir_ino = b.rts_dir_ino
+  && Float.equal a.rts_dir_mtime b.rts_dir_mtime
+  && Float.equal a.rts_dir_ctime b.rts_dir_ctime
+  && List.length a.rts_files = List.length b.rts_files
+  && List.for_all2
+       (fun (p1, d1, i1, s1, m1, c1) (p2, d2, i2, s2, m2, c2) ->
+          String.equal p1 p2
+          && d1 = d2
+          && i1 = i2
+          && s1 = s2
+          && Float.equal m1 m2
+          && Float.equal c1 c2)
+       a.rts_files
+       b.rts_files
+
+let read_recent_cached ~base_path ~keeper_name ~limit =
+  let store = store_for_base_path ~base_path ~keeper_name in
+  let base_dir = Dated_jsonl.base_dir store in
+  let now = Time_compat.now () in
+  let stamp_opt = reaction_tail_stamp_of_dir ~now base_dir in
+  let key = base_dir, limit in
+  match stamp_opt with
+  | Some stamp ->
+    (match
+       Stdlib.Mutex.protect reaction_tail_cache_mu (fun () ->
+         match Hashtbl.find_opt reaction_tail_cache key with
+         | Some (cached_stamp, rows) when equal_reaction_tail_stamp cached_stamp stamp ->
+           Some rows
+         | Some _ | None -> None)
+     with
+     | Some rows -> Ok rows
+     | None ->
+       (match Dated_jsonl.read_recent_result store limit with
+        | Ok rows as res ->
+          (match reaction_tail_stamp_of_dir ~now:(Time_compat.now ()) base_dir with
+           | Some after_stamp when equal_reaction_tail_stamp stamp after_stamp ->
+             Stdlib.Mutex.protect reaction_tail_cache_mu (fun () ->
+               if Hashtbl.length reaction_tail_cache >= reaction_tail_cache_max then
+                 Hashtbl.clear reaction_tail_cache;
+               Hashtbl.replace reaction_tail_cache key (stamp, rows))
+           | Some _ | None -> ());
+          res
+        | Error _ as err -> err))
+  | None -> Dated_jsonl.read_recent_result store limit
+
 (* The status travels with the JSON so the fleet roll-up can read it without
    parsing what this module just wrote. *)
 let summary_with_status ~base_path ~keeper_name ~pending_queue ~limit =
   try
-    match
-      Dated_jsonl.read_recent_result
-        (store_for_base_path ~base_path ~keeper_name)
-        limit
-    with
+    match read_recent_cached ~base_path ~keeper_name ~limit with
     | Ok rows -> summarize_rows ~keeper_name ~pending_queue rows
     | Error error ->
       error_summary

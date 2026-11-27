@@ -401,7 +401,7 @@ let authorize_tool config ~agent_name ~token ~tool_name : (unit, masc_error) res
     circular permission deadlock (BUG-025). *)
 let enable_auth config ~require_token ~agent_name : string * string option =
   let secret = init_workspace_secret config in
-  let cfg = load_auth_config config in
+  let cfg = load_auth_config_uncached config in
   save_auth_config config { cfg with enabled = true; require_token };
   let bootstrap_token =
     if agent_name <> ""
@@ -422,7 +422,7 @@ let enable_auth config ~require_token ~agent_name : string * string option =
 
 (** Disable authentication *)
 let disable_auth config =
-  let cfg = load_auth_config config in
+  let cfg = load_auth_config_uncached config in
   save_auth_config config { cfg with enabled = false };
   let file = initial_admin_file config in
   if Sys.file_exists file then Sys.remove file

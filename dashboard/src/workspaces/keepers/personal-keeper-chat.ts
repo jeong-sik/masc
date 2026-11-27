@@ -87,8 +87,13 @@ export function PersonalKeeperChatPanel(props: PersonalKeeperChatPanelProps) {
   const readAbortRef = useRef<AbortController | null>(null)
   const mutAbortRef = useRef<AbortController | null>(null)
   const sendingRef = useRef(false)
+  const latestExternalTickRef = useRef(externalRefreshTick)
+  const lastHandledTickRef = useRef(externalRefreshTick)
+  const selectedConversationIdRef = useRef<string | null>(selectedConversationId)
   activeKeeperRef.current = keeper.keeper_id
   sendingRef.current = sendingMessage !== null || startingConv || deletingId !== null
+  latestExternalTickRef.current = externalRefreshTick
+  selectedConversationIdRef.current = selectedConversationId
 
   useEffect(() => {
     mountedRef.current = true
@@ -130,6 +135,8 @@ export function PersonalKeeperChatPanel(props: PersonalKeeperChatPanelProps) {
   }, [keeper.keeper_id])
 
   useEffect(() => {
+    lastHandledTickRef.current = latestExternalTickRef.current
+    selectedConversationIdRef.current = null
     setSelectedConversationId(null)
     setConversation(null)
     setLoadError(null)
@@ -148,9 +155,11 @@ export function PersonalKeeperChatPanel(props: PersonalKeeperChatPanelProps) {
   }, [keeper.keeper_id, loadConversation])
 
   useEffect(() => {
-    if (externalRefreshTick === 0 || sendingRef.current) return
-    void loadConversation(selectedConversationId)
-  }, [externalRefreshTick, loadConversation, selectedConversationId])
+    if (externalRefreshTick === lastHandledTickRef.current) return
+    lastHandledTickRef.current = externalRefreshTick
+    if (sendingRef.current) return
+    void loadConversation(selectedConversationIdRef.current)
+  }, [externalRefreshTick, loadConversation])
 
   const busy = sendingMessage !== null || startingConv || deletingId !== null
   const isViewingHistorical =
@@ -163,6 +172,7 @@ export function PersonalKeeperChatPanel(props: PersonalKeeperChatPanelProps) {
       conversation && conv.conversation_id === conversation.current_conversation_id
         ? null
         : conv.conversation_id
+    selectedConversationIdRef.current = nextId
     setSelectedConversationId(nextId)
     setActionError(null)
     setEphemeralReply(null)
@@ -195,12 +205,14 @@ export function PersonalKeeperChatPanel(props: PersonalKeeperChatPanelProps) {
     }
     setStartingConv(false)
     if (!res.ok) {
-      if (res.error.kind !== 'aborted' && res.error.kind !== 'epoch_stale') {
-        setActionError(formatPersonalKeeperError(res.error, 'start'))
+      if (res.error.kind === 'aborted' || res.error.kind === 'epoch_stale') return
+      setActionError(formatPersonalKeeperError(res.error, 'start'))
+      if (res.error.kind !== 'unauthorized' && res.error.kind !== 'csrf_rejected') {
+        await loadConversation(selectedConversationIdRef.current)
       }
-      await loadConversation(selectedConversationId)
       return
     }
+    selectedConversationIdRef.current = null
     setSelectedConversationId(null)
     setEphemeralReply(null)
     pushShellToast('새 대화를 시작했습니다.', 'success')
@@ -229,14 +241,35 @@ export function PersonalKeeperChatPanel(props: PersonalKeeperChatPanelProps) {
     setDeletingId(null)
     setConfirmDeleteId(null)
     if (!res.ok) {
-      if (res.error.kind !== 'aborted' && res.error.kind !== 'epoch_stale') {
-        setActionError(formatPersonalKeeperError(res.error, 'delete'))
+      if (res.error.kind === 'aborted' || res.error.kind === 'epoch_stale') return
+      setActionError(formatPersonalKeeperError(res.error, 'delete'))
+      if (res.error.kind === 'unauthorized' || res.error.kind === 'csrf_rejected') {
+        return
       }
-      await loadConversation(selectedConversationId)
+      // Once a conversation enters Deletion_failed or Deleted on the server,
+      // GET ?conversation_id=<id> returns 404 (`server_preview_keeper_conversation.ml:120-124`).
+      // Fall back to the keeper's current view so the failed-deletion retry UI stays visible.
+      const viewingDeletedTarget = selectedConversationIdRef.current === conversationId
+      const targetMayBeUnavailable =
+        res.error.code === 'conversation_not_deleted'
+        || res.error.code === 'unknown_conversation'
+        || res.error.kind === 'server'
+        || res.error.kind === 'network'
+        || res.error.kind === 'decode'
+      if (viewingDeletedTarget && targetMayBeUnavailable) {
+        selectedConversationIdRef.current = null
+        setSelectedConversationId(null)
+        await loadConversation(null)
+      } else {
+        await loadConversation(selectedConversationIdRef.current)
+      }
       return
     }
-    const nextSelected = selectedConversationId === conversationId ? null : selectedConversationId
-    if (nextSelected !== selectedConversationId) {
+    const nextSelected = selectedConversationIdRef.current === conversationId
+      ? null
+      : selectedConversationIdRef.current
+    if (nextSelected !== selectedConversationIdRef.current) {
+      selectedConversationIdRef.current = nextSelected
       setSelectedConversationId(nextSelected)
     }
     pushShellToast(
@@ -283,13 +316,15 @@ export function PersonalKeeperChatPanel(props: PersonalKeeperChatPanelProps) {
     }
     setSendingMessage(null)
     if (!res.ok) {
-      if (res.error.kind !== 'aborted' && res.error.kind !== 'epoch_stale') {
-        setActionError(formatPersonalKeeperError(res.error, 'turn'))
+      if (res.error.kind === 'aborted' || res.error.kind === 'epoch_stale') return
+      setActionError(formatPersonalKeeperError(res.error, 'turn'))
+      if (res.error.kind !== 'unauthorized' && res.error.kind !== 'csrf_rejected') {
+        await loadConversation(null)
       }
-      await loadConversation(null)
       return
     }
     setDraft('')
+    selectedConversationIdRef.current = null
     setSelectedConversationId(null)
     if (res.value.recorded) {
       setEphemeralReply(null)
@@ -442,6 +477,7 @@ export function PersonalKeeperChatPanel(props: PersonalKeeperChatPanelProps) {
               type="button"
               class="btn-ghost kp-toggle-btn"
               onClick=${() => {
+                selectedConversationIdRef.current = null
                 setSelectedConversationId(null)
                 void loadConversation(null)
               }}
@@ -477,6 +513,7 @@ export function PersonalKeeperChatPanel(props: PersonalKeeperChatPanelProps) {
                         type="button"
                         class="btn-ghost"
                         onClick=${() => {
+                          selectedConversationIdRef.current = null
                           setSelectedConversationId(null)
                           void loadConversation(null)
                         }}

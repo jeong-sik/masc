@@ -780,4 +780,276 @@ describe('Multi-Account Personal Keepers UI flows (Worker & Admin)', () => {
     expect(view.container.textContent).not.toContain('alice-ephemeral')
     expect(view.container.textContent).not.toContain('One-shot ephemeral reply')
   })
+
+  it('keeps retry UI visible when DELETE on viewed historical conversation returns 503 conversation_not_deleted and skips follow-up GET on 401', async () => {
+    authSession.value = makeMaSession('worker')
+    let deletionFailed = false
+    const seenConvGets: string[] = []
+    let turnShouldReturn401 = false
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const method = (init?.method ?? 'GET').toUpperCase()
+
+      if (method === 'GET' && url === '/api/v1/auth/keepers') {
+        return jsonResponse({ keepers: [{ keeper_id: 'alpha', runtime_id: 'rt-claude-sonnet' }] })
+      }
+      if (method === 'GET' && url === '/api/v1/auth/provider-accounts') {
+        return jsonResponse(SAMPLE_PROVIDER_ACCOUNTS)
+      }
+      if (method === 'GET' && url.startsWith('/api/v1/auth/keepers/conversation?')) {
+        seenConvGets.push(url)
+        const params = new URLSearchParams(url.split('?')[1] ?? '')
+        const reqConvId = params.get('conversation_id')
+        // Mirrors server_preview_keeper_conversation.ml:120-124: Deletion_failed returns 404 when queried by id
+        if (reqConvId === 'conv-hist-1' && deletionFailed) {
+          return jsonResponse({ error: 'No conversation of this Keeper has this id.', code: 'unknown_conversation' }, 404)
+        }
+        return jsonResponse({
+          keeper_id: 'alpha',
+          current_conversation_id: 'conv-cur-2',
+          conversations: [
+            {
+              conversation_id: 'conv-hist-1',
+              provider_account_id: 'pa-claude-1',
+              started_at_ms: 1_700_000_000_000,
+              ...(deletionFailed ? { deletion: 'failed' } : {}),
+            },
+            {
+              conversation_id: 'conv-cur-2',
+              provider_account_id: 'pa-claude-1',
+              started_at_ms: 1_700_000_100_000,
+            },
+          ],
+          conversation_id: reqConvId ?? 'conv-cur-2',
+          turns: reqConvId === 'conv-hist-1'
+            ? [{
+                message: 'Old question',
+                asked_at_ms: 1_700_000_001_000,
+                outcome: 'answered',
+                text: 'Old answer',
+                model: 'claude-sonnet-4-6',
+                answered_at_ms: 1_700_000_002_000,
+              }]
+            : [{
+                message: 'Current question',
+                asked_at_ms: 1_700_000_101_000,
+                outcome: 'answered',
+                text: 'Current answer kept on 401',
+                model: 'claude-sonnet-4-6',
+                answered_at_ms: 1_700_000_102_000,
+              }],
+        })
+      }
+      if (method === 'DELETE' && url === '/api/v1/auth/keepers/conversation/conv-hist-1') {
+        deletionFailed = true
+        return jsonResponse({ error: 'Files could not all be removed.', code: 'conversation_not_deleted' }, 503)
+      }
+      if (method === 'POST' && url === '/api/v1/auth/keepers/turn' && turnShouldReturn401) {
+        return jsonResponse({ error: 'Session expired.' }, 401)
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`)
+    }))
+
+    const view = render(html`<${KeepersWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`)
+    await waitFor(() => {
+      expect(view.container.textContent).toContain('Current answer kept on 401')
+    })
+
+    // 1. Open historical conv-hist-1, then delete it and receive 503 conversation_not_deleted
+    fireEvent.click(view.container.querySelector('[data-conversation-id="conv-hist-1"] .kp-ma-conv-select')!)
+    await waitFor(() => {
+      expect(view.container.textContent).toContain('Old answer')
+    })
+    seenConvGets.length = 0
+
+    fireEvent.click(view.getByTestId('ma-delete-conv-conv-hist-1'))
+    fireEvent.click(view.getByTestId('ma-confirm-delete-conv-hist-1'))
+
+    await waitFor(() => {
+      expect(view.getByTestId('ma-turn-action-error').textContent).toContain('삭제 실패 상태')
+      expect(view.getByTestId('ma-delete-conv-conv-hist-1').textContent).toContain('삭제 재시도')
+    })
+    // Must re-read keeper's current view without conversation_id=conv-hist-1 (zero 404s)
+    expect(seenConvGets).toEqual(['/api/v1/auth/keepers/conversation?keeper_id=alpha'])
+    expect(view.queryByTestId('ma-conversation-error')).toBeNull()
+    expect(view.container.textContent).toContain('Current answer kept on 401')
+
+    // 2. When a mutation returns 401 unauthorized, skip follow-up GET so transcript is not wiped
+    turnShouldReturn401 = true
+    seenConvGets.length = 0
+    fireEvent.input(view.getByLabelText('개인 Keeper 메시지 입력'), { target: { value: 'Expired session msg' } })
+    fireEvent.click(view.getByTestId('ma-send-turn-btn'))
+    await waitFor(() => {
+      expect(view.getByTestId('ma-turn-action-error').textContent).toContain('세션이 만료')
+    })
+    expect(seenConvGets).toEqual([])
+    expect(view.container.textContent).toContain('Current answer kept on 401')
+  })
+
+  it('fires zero duplicate or aborted conversation GETs after an SSE refresh tick across historical, keeper, and tab switches', async () => {
+    authSession.value = makeMaSession('worker')
+    const convRequests: { url: string; aborted: boolean }[] = []
+
+    const encoder = new TextEncoder()
+    let sseController!: ReadableStreamDefaultController<Uint8Array>
+    const sseStream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        sseController = controller
+      },
+    })
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/v1/auth/events') {
+        return new Response(sseStream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      }
+      if (url === '/api/v1/auth/keepers') {
+        return jsonResponse({
+          keepers: [
+            { keeper_id: 'alpha', runtime_id: 'rt-claude-sonnet' },
+            { keeper_id: 'beta', runtime_id: 'rt-claude-sonnet' },
+          ],
+        })
+      }
+      if (url === '/api/v1/auth/provider-accounts') {
+        return jsonResponse(SAMPLE_PROVIDER_ACCOUNTS)
+      }
+      if (url.startsWith('/api/v1/auth/keepers/conversation?')) {
+        const entry = { url, aborted: false }
+        convRequests.push(entry)
+        init?.signal?.addEventListener('abort', () => { entry.aborted = true }, { once: true })
+        const params = new URLSearchParams(url.split('?')[1] ?? '')
+        const keeperId = params.get('keeper_id') ?? 'alpha'
+        const reqConvId = params.get('conversation_id')
+        return jsonResponse({
+          keeper_id: keeperId,
+          current_conversation_id: `cur-${keeperId}`,
+          conversations: [
+            { conversation_id: `old-${keeperId}`, provider_account_id: 'pa-claude-1', started_at_ms: 1_700_000_000_000 },
+            { conversation_id: `cur-${keeperId}`, provider_account_id: 'pa-claude-1', started_at_ms: 1_700_000_100_000 },
+          ],
+          conversation_id: reqConvId ?? `cur-${keeperId}`,
+          turns: [],
+        })
+      }
+      throw new Error(`Unexpected request: ${url}`)
+    }))
+
+    const streamPromise = startObserverStream({ autoReconnect: false })
+    const view = render(
+      html`<${KeepersWorkspace} subroute="detail" entityId="alpha" entityTab="chat" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+    )
+    await waitFor(() => {
+      expect(convRequests).toHaveLength(1)
+    })
+
+    // Trigger an SSE keeper_chat_appended tick (450ms debounce -> externalRefreshTick becomes 1)
+    act(() => {
+      sseController.enqueue(encoder.encode(
+        `data: ${JSON.stringify({ type: 'keeper_chat_appended', name: 'kp-alpha' })}\n\n`,
+      ))
+    })
+    await waitFor(() => {
+      expect(convRequests).toHaveLength(2)
+    }, { timeout: 2000 })
+
+    // 1. Click historical conversation after externalRefreshTick > 0 -> exactly 1 GET, 0 aborts
+    convRequests.length = 0
+    fireEvent.click(view.container.querySelector('[data-conversation-id="old-alpha"] .kp-ma-conv-select')!)
+    await waitFor(() => {
+      expect(view.getByTestId('ma-historical-banner')).toBeTruthy()
+    })
+    expect(convRequests).toEqual([{ url: '/api/v1/auth/keepers/conversation?keeper_id=alpha&conversation_id=old-alpha', aborted: false }])
+
+    // 2. Return to current conversation -> exactly 1 GET, 0 aborts
+    convRequests.length = 0
+    fireEvent.click(view.getByRole('button', { name: '현재 대화로 이동' }))
+    await waitFor(() => {
+      expect(view.queryByTestId('ma-historical-banner')).toBeNull()
+    })
+    expect(convRequests).toEqual([{ url: '/api/v1/auth/keepers/conversation?keeper_id=alpha', aborted: false }])
+
+    // 3. Switch to memory tab and back to chat -> fresh PersonalKeeperChatPanel fires exactly 1 GET, 0 aborts
+    convRequests.length = 0
+    view.rerender(
+      html`<${KeepersWorkspace} subroute="detail" entityId="alpha" entityTab="memory" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+    )
+    expect(view.getByTestId('ma-keeper-su-only-tab')).toBeTruthy()
+    expect(convRequests).toEqual([])
+
+    view.rerender(
+      html`<${KeepersWorkspace} subroute="detail" entityId="alpha" entityTab="chat" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+    )
+    await waitFor(() => {
+      expect(convRequests).toHaveLength(1)
+    })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(convRequests).toEqual([{ url: '/api/v1/auth/keepers/conversation?keeper_id=alpha', aborted: false }])
+
+    // 4. Switch to keeper beta -> exactly 1 GET, 0 aborts
+    convRequests.length = 0
+    view.rerender(
+      html`<${KeepersWorkspace} subroute="detail" entityId="beta" entityTab="chat" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`,
+    )
+    await waitFor(() => {
+      expect(convRequests).toHaveLength(1)
+    })
+    await new Promise((r) => setTimeout(r, 20))
+    expect(convRequests).toEqual([{ url: '/api/v1/auth/keepers/conversation?keeper_id=beta', aborted: false }])
+
+    try { sseController.close() } catch { /* stream closed */ }
+    await streamPromise.catch(() => {})
+  })
+
+  it('flags hidden/blocked assigned runtimes as warn (재연결 필요) and emits a single toast when create succeeds but initial assign fails', async () => {
+    authSession.value = makeMaSession('worker')
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      const method = (init?.method ?? 'GET').toUpperCase()
+      if (method === 'GET' && url === '/api/v1/auth/keepers') {
+        return jsonResponse({ keepers: [{ keeper_id: 'stale-rt-keeper', runtime_id: 'rt-removed-99' }] })
+      }
+      if (method === 'GET' && url === '/api/v1/auth/provider-accounts') {
+        return jsonResponse(SAMPLE_PROVIDER_ACCOUNTS)
+      }
+      if (method === 'GET' && url.startsWith('/api/v1/auth/keepers/conversation?')) {
+        return jsonResponse({
+          keeper_id: 'stale-rt-keeper',
+          current_conversation_id: null,
+          conversations: [],
+          conversation_id: null,
+          turns: [],
+        })
+      }
+      if (method === 'POST' && url === '/api/v1/auth/keepers') {
+        return jsonResponse({ keeper_id: 'fresh-bot', record: 'made' })
+      }
+      if (method === 'POST' && url === '/api/v1/auth/keepers/assign') {
+        return jsonResponse({ error: 'No Runtime of yours has this id.' }, 404)
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`)
+    }))
+
+    const view = render(html`<${KeepersWorkspace} subroute="" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`)
+    await waitFor(() => {
+      const pill = view.getByTestId('ma-keeper-runtime-pill')
+      expect(pill.getAttribute('data-tone')).toBe('warn')
+      expect(pill.textContent).toContain('재연결 필요')
+    })
+
+    // Create keeper succeeds, optional initial assign fails -> exactly 1 non-contradictory toast
+    fireEvent.click(view.getByTestId('ma-create-keeper-btn'))
+    fireEvent.input(view.getByLabelText('개인 Keeper 이름'), { target: { value: 'fresh-bot' } })
+    const modalRtSelect = view.getByLabelText('초기 연결 런타임') as HTMLSelectElement
+    modalRtSelect.value = 'rt-claude-sonnet'
+    fireEvent(modalRtSelect, new Event('change', { bubbles: true }))
+    fireEvent.click(view.getByTestId('ma-create-keeper-submit'))
+
+    await waitFor(() => {
+      expect(shellToasts.value).toHaveLength(1)
+    })
+    expect(shellToasts.value[0]?.tone).toBe('info')
+    expect(shellToasts.value[0]?.message).toContain('런타임 연결에 실패했습니다')
+  })
 })

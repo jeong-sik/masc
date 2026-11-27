@@ -333,6 +333,12 @@ export function PersonalKeepersWorkspace(props: PersonalKeepersWorkspaceProps) {
   const assignedRuntime = activeKeeper?.runtime_id
     ? runtimeById.get(activeKeeper.runtime_id) ?? null
     : null
+  const activeRuntimeUnavailable =
+    activeKeeper?.runtime_id !== null
+    && activeKeeper !== null
+    && providerData !== null
+    && providerError === null
+    && assignedRuntime === null
   const assignError =
     assignErrorState !== null && activeKeeper !== null && assignErrorState.keeperId === activeKeeper.keeper_id
       ? assignErrorState.message
@@ -446,11 +452,21 @@ export function PersonalKeepersWorkspace(props: PersonalKeepersWorkspaceProps) {
                     ${filteredKeepers.map((k) => {
                       const selected = activeKeeper?.keeper_id === k.keeper_id
                       const rt = k.runtime_id ? runtimeById.get(k.runtime_id) : null
+                      const runtimeUnavailable =
+                        k.runtime_id !== null && providerData !== null && providerError === null && rt === null
                       const subLine = k.runtime_id
-                        ? rt?.model
-                          ? `${k.runtime_id} · ${rt.model}`
-                          : k.runtime_id
+                        ? runtimeUnavailable
+                          ? `${k.runtime_id} · 재연결 필요`
+                          : rt?.model
+                            ? `${k.runtime_id} · ${rt.model}`
+                            : k.runtime_id
                         : '런타임 미지정'
+                      const runtimeTone = k.runtime_id && !runtimeUnavailable ? 'ok' : 'warn'
+                      const runtimeBadge = !k.runtime_id
+                        ? '미지정'
+                        : runtimeUnavailable
+                          ? '재연결 필요'
+                          : '연결됨'
                       return html`
                         <button
                           key=${k.keeper_id}
@@ -468,7 +484,7 @@ export function PersonalKeepersWorkspace(props: PersonalKeepersWorkspaceProps) {
                             </span>
                             <span
                               class="kp-status-dot"
-                              data-tone=${k.runtime_id ? 'ok' : 'warn'}
+                              data-tone=${runtimeTone}
                             />
                           </span>
                           <span class="kp-roster-info">
@@ -476,8 +492,8 @@ export function PersonalKeepersWorkspace(props: PersonalKeepersWorkspaceProps) {
                             <span class="kp-roster-sub" title=${subLine}>${subLine}</span>
                           </span>
                           <span class="kp-roster-right">
-                            <span class="kp-pill" data-tone=${k.runtime_id ? 'ok' : 'warn'}>
-                              ${k.runtime_id ? '연결됨' : '미지정'}
+                            <span class="kp-pill" data-tone=${runtimeTone}>
+                              ${runtimeBadge}
                             </span>
                           </span>
                         </button>
@@ -545,12 +561,14 @@ export function PersonalKeepersWorkspace(props: PersonalKeepersWorkspaceProps) {
                         <span class="kp-pill" data-tone="info">Personal Keeper</span>
                         <span
                           class="kp-pill"
-                          data-tone=${activeKeeper.runtime_id ? 'ok' : 'warn'}
+                          data-tone=${activeKeeper.runtime_id && !activeRuntimeUnavailable ? 'ok' : 'warn'}
                           data-testid="ma-keeper-runtime-pill"
                         >
-                          ${activeKeeper.runtime_id
-                            ? `Runtime: ${activeKeeper.runtime_id}`
-                            : '런타임 미지정'}
+                          ${!activeKeeper.runtime_id
+                            ? '런타임 미지정'
+                            : activeRuntimeUnavailable
+                              ? `Runtime: ${activeKeeper.runtime_id} (재연결 필요)`
+                              : `Runtime: ${activeKeeper.runtime_id}`}
                         </span>
                         ${assignedRuntime?.model && html`
                           <span class="kp-pill" data-tone="brass">${assignedRuntime.model}</span>
@@ -816,6 +834,7 @@ function CreatePersonalKeeperModal(props: CreatePersonalKeeperModalProps) {
     }
 
     // Only assign the chosen runtime when this request created the keeper freshly.
+    let assignFailureMessage: string | null = null
     if (madeRes.value.record === 'made' && runtimeId) {
       const assignRes = await assignPersonalKeeperRuntimeApi(madeRes.value.keeper_id, runtimeId, ctrl.signal)
       if (
@@ -827,20 +846,24 @@ function CreatePersonalKeeperModal(props: CreatePersonalKeeperModalProps) {
         return
       }
       if (!assignRes.ok && assignRes.error.kind !== 'aborted' && assignRes.error.kind !== 'epoch_stale') {
-        pushShellToast(
-          `Keeper는 생성되었지만 런타임 연결에 실패했습니다: ${formatPersonalKeeperError(assignRes.error, 'assign')}`,
-          'info',
-        )
+        assignFailureMessage = formatPersonalKeeperError(assignRes.error, 'assign')
       }
     }
 
     setBusy(false)
-    pushShellToast(
-      madeRes.value.record === 'existing'
-        ? `기존 개인 Keeper "${madeRes.value.keeper_id}"를 열었습니다.`
-        : `개인 Keeper "${madeRes.value.keeper_id}"를 생성했습니다.`,
-      'success',
-    )
+    if (assignFailureMessage !== null) {
+      pushShellToast(
+        `개인 Keeper "${madeRes.value.keeper_id}"를 생성했지만 런타임 연결에 실패했습니다: ${assignFailureMessage}`,
+        'info',
+      )
+    } else {
+      pushShellToast(
+        madeRes.value.record === 'existing'
+          ? `기존 개인 Keeper "${madeRes.value.keeper_id}"를 열었습니다.`
+          : `개인 Keeper "${madeRes.value.keeper_id}"를 생성했습니다.`,
+        'success',
+      )
+    }
     props.onCreated(madeRes.value.keeper_id)
   }
 

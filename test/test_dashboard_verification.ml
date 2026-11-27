@@ -89,7 +89,6 @@ let evidence_snapshot_item reference =
     ("reference", `String reference);
     ("content", `String "");
     ("bytes", `Int 0);
-    ("truncated", `Bool false);
   ]
 
 let create_pending_request_with_artifacts ~required_artifacts ~base_path ~task_id
@@ -486,7 +485,6 @@ let test_persisted_snapshot_errors_agree_across_consumers () =
         ("kind", `String "artifact");
         ("reference", `String "artifact:missing-bytes.txt");
         ("content", `String "captured body");
-        ("truncated", `Bool false);
       ]
     in
     let save note =
@@ -551,7 +549,6 @@ let test_requests_json_projects_every_snapshot_item_kind () =
             ("reference", `String "artifact:repos/demo/main.ml");
             ("content", `String "let () = ()");
             ("bytes", `Int 11);
-            ("truncated", `Bool false);
           ];
           `Assoc [
             ("kind", `String "note");

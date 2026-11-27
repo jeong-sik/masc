@@ -16,6 +16,11 @@ type evidence_read_failure =
   | Evidence_symbolic_link
   | Evidence_changed_during_read
   | Evidence_read_error of string
+  (* The source is over the ceiling a text artifact is read under. It was not
+     read past [cap] + 1 bytes: [at_least] is the size the reader could name,
+     the exact file size where the host could stat it and [cap] + 1 where a
+     sandbox reader only returned the bytes it was asked for. *)
+  | Too_large of { cap : int; at_least : int }
 
 type collaboration_kind = Board_source | Fusion_source | Task_source
 
@@ -26,7 +31,14 @@ type submitted_evidence_item =
       { reference : string
       ; content : string
       ; bytes : int
-      ; truncated : bool
+      (* Whole text up to the inline cap. There is no prefix-only state: a
+         larger text is [Evidence_artifact_body]. *)
+      }
+  | Evidence_artifact_body of
+      { reference : string
+      ; blob : Tool_output.artifact_ref
+      (* Text too large for the inline cap, stored whole in the content-addressed
+         blob store at submission. The reference is what the sweep counts. *)
       }
   | Evidence_invalid_reference
   | Evidence_artifact_unreadable of
@@ -74,11 +86,18 @@ let evidence_read_failure_code = function
   | Evidence_symbolic_link -> "symbolic_link"
   | Evidence_changed_during_read -> "changed_during_read"
   | Evidence_read_error _ -> "read_error"
+  | Too_large _ -> "too_large"
 
 let evidence_read_failure_to_yojson reason =
   match reason with
   | Evidence_read_error detail ->
     `Assoc [ "code", `String "read_error"; "detail", `String detail ]
+  | Too_large { cap; at_least } ->
+    `Assoc
+      [ "code", `String "too_large"
+      ; "cap", `Int cap
+      ; "at_least", `Int at_least
+      ]
   | ( Evidence_missing
     | Evidence_not_regular_file
     | Evidence_outside_worker_playground
@@ -99,6 +118,9 @@ let evidence_read_failure_of_yojson = function
      | [ "code", `String "changed_during_read" ] -> Ok Evidence_changed_during_read
      | [ "code", `String "read_error"; "detail", `String detail ] ->
        Ok (Evidence_read_error detail)
+     | [ "at_least", `Int at_least; "cap", `Int cap; "code", `String "too_large" ]
+       when cap >= 0 && at_least > cap ->
+       Ok (Too_large { cap; at_least })
      | _ -> Error "submitted evidence snapshot has an invalid unreadable reason")
   | _ -> Error "submitted evidence snapshot unreadable reason must be an object"
 
@@ -131,13 +153,19 @@ let submitted_evidence_item_fields = function
       "content", `String content; "sha256", `String sha256]
   | Evidence_note note ->
     [ "kind", `String "note"; "content", `String note ]
-  | Evidence_artifact { reference; content; bytes; truncated } ->
+  | Evidence_artifact { reference; content; bytes } ->
     [ "kind", `String "artifact"
     ; "reference", `String reference
     ; "content", `String content
     ; "bytes", `Int bytes
-    ; "truncated", `Bool truncated
     ]
+  | Evidence_artifact_body { reference; blob } ->
+    [ "kind", `String "artifact_body"
+    ; "reference", `String reference
+    ]
+    (* The sweep reads the reference in the blob store's own spelling, so the
+       codec that writes it elsewhere writes it here too. *)
+    @ Yojson.Safe.Util.to_assoc (Tool_output.normalized_artifact_ref_to_json blob)
   | Evidence_invalid_reference ->
     [ "kind", `String "artifact_unreadable"
     ; "reason", `Assoc [ "code", `String invalid_reference_code ]
@@ -199,11 +227,9 @@ let evidence_access_failure_to_string ~request_id = function
   | Request_scope_mismatch ->
     "verification request does not match the awaiting task and producer"
 
-(* Bounded snapshot cap for producer-owned evidence artifacts. Raised from
-   20_000 to 200_000 so contract artifacts in the observed 40-128KB range are
-   persisted in full (truncated=false) instead of being marked unusable by the
-   completion authority. The cap stays bounded to bound verifier memory and
-   backlog storage.
+(* The inline cap for one text artifact. Content up to this size is written
+   into the request record; a larger text is stored whole in the blob store
+   and the record keeps its content address. Nothing is cut.
 
    It is the Read ceiling, taken from the same value rather than written out
    again: the authority reads live through Read and the operator reviews the
@@ -226,47 +252,40 @@ let submitted_evidence_access_to_yojson = function
       ]
 ;;
 
-(* Judge-transport projection. The serializer above persists the truncated
-   prefix so the audit record keeps what was readable at submission time. The
-   review request must not carry it: the instructions already order the judge
-   to treat [truncated=true] as unavailable evidence, so transmitting the
-   prefix ships bytes the judgement cannot use — and one 22 MB artifact
-   (200 KB prefix, listed under two references) inflated the review turn past
-   every verifier_exact slot's input budget this way (#29615). The prefix
-   stays in the store; the judge receives the size, the fact, and how to read
-   the real file. *)
+(* Judge-transport projection. An inline artifact travels with its content; a
+   stored body travels as its size and content address. No text is ever sent
+   as a prefix: a prefix ships bytes the judgement cannot read in full, and one
+   22 MB artifact (200 KB prefix, listed under two references) inflated the
+   review turn past every verifier_exact slot's input budget that way
+   (#29615). *)
 let submitted_evidence_item_transport_to_yojson = function
   | Evidence_collaboration {reference; content; _} ->
     collaboration_metadata ~reference ~content
   | Evidence_note note ->
     `Assoc [ "kind", `String "note"; "content", `String note ]
-  | Evidence_artifact { reference; content; bytes; truncated } ->
-    if truncated
-    then
-      `Assoc
-        [ "kind", `String "artifact"
-        ; "reference", `String reference
-        ; "bytes", `Int bytes
-        ; "truncated", `Bool true
-        ; "content_omitted", `Bool true
-        ; ( "content_note"
-          , `String
-              (Printf.sprintf
-                 "file is %d bytes; only a %d-byte prefix fits the evidence \
-                  snapshot and that prefix is withheld from this request; \
-                  treat the item as unavailable and read ranges of the actual \
-                  file with the listed verification tools"
-                 bytes
-                 verification_evidence_max_bytes) )
-        ]
-    else
-      `Assoc
-        [ "kind", `String "artifact"
-        ; "reference", `String reference
-        ; "content", `String content
-        ; "bytes", `Int bytes
-        ; "truncated", `Bool false
-        ]
+  | Evidence_artifact { reference; content; bytes } ->
+    `Assoc
+      [ "kind", `String "artifact"
+      ; "reference", `String reference
+      ; "content", `String content
+      ; "bytes", `Int bytes
+      ]
+  | Evidence_artifact_body { reference; blob } ->
+    `Assoc
+      [ "kind", `String "artifact_body"
+      ; "reference", `String reference
+      ; "bytes", `Int blob.Tool_output.bytes
+      ; "sha256", `String blob.Tool_output.sha256
+      ; "content_omitted", `Bool true
+      ; ( "content_note"
+        , `String
+            (Printf.sprintf
+               "file is %d bytes, stored whole at submission; read it page by \
+                page or search it with keeper_artifact_read(sha256, offset), \
+                passing this sha256. It is the content captured at submission, \
+                not the producer's current file"
+               blob.Tool_output.bytes) )
+      ]
   | Evidence_invalid_reference ->
     `Assoc
       [ "kind", `String "artifact_unreadable"
@@ -293,7 +312,7 @@ let submitted_evidence_item_transport_to_yojson = function
 
 (* The per-item cap above bounds one artifact. Nothing bounded their sum, so a
    submission of many sub-cap artifacts still built a request no slot could
-   carry: 12 artifacts, every one [truncated=false], 204,834 bytes of content
+   carry: 12 artifacts, every one complete, 204,834 bytes of content
    in one measured bundle and 1,005,015 in the atom that stalled task-465
    (2026-08-25). #29615 closed the single-22MB-artifact shape; this closes the
    many-small-artifacts shape behind it.
@@ -309,12 +328,11 @@ let evidence_transport_max_bytes = verification_evidence_max_bytes
    is in the submitted record, so the note points the judge at the record
    reader. The producer's current file may differ from what was captured. *)
 let submitted_evidence_item_withheld_to_yojson = function
-  | Evidence_artifact { reference; content = _; bytes; truncated = _ } ->
+  | Evidence_artifact { reference; content = _; bytes } ->
     `Assoc
       [ "kind", `String "artifact"
       ; "reference", `String reference
       ; "bytes", `Int bytes
-      ; "truncated", `Bool false
       ; "content_omitted", `Bool true
       ; ( "content_note"
         , `String
@@ -329,11 +347,12 @@ let submitted_evidence_item_withheld_to_yojson = function
                evidence_transport_max_bytes) )
       ]
   | (Evidence_note _ | Evidence_invalid_reference | Evidence_artifact_unreadable _
+    | Evidence_artifact_body _
     | Evidence_artifact_binary _
     | Evidence_collaboration _) as item ->
-    (* Only a full-content artifact can be withheld for the aggregate budget;
-       the rest carry no content to withhold. A binary item is already
-       payload-free on the wire -- its bytes live in the evidence body. *)
+    (* Only an inline artifact can be withheld for the aggregate budget; the
+       rest carry no content on the wire. A stored body and a binary item are
+       already payload-free -- their bytes live outside the request. *)
     submitted_evidence_item_transport_to_yojson item
 ;;
 
@@ -359,11 +378,12 @@ let carried_artifact_indices items =
   let weighed =
     List.mapi (fun index item -> index, item) items
     |> List.filter_map (function
-         | index, Evidence_artifact { content; truncated = false; _ } ->
+         | index, Evidence_artifact { content; _ } ->
            Some (index, String.length content)
          | ( _
            , ( Evidence_note _
              | Evidence_artifact _
+             | Evidence_artifact_body _
              | Evidence_invalid_reference
              | Evidence_artifact_unreadable _
              | Evidence_artifact_binary _
@@ -394,12 +414,12 @@ let submitted_evidence_items_transport_to_yojson items =
   List.mapi
     (fun index item ->
       match item with
-      | Evidence_artifact { truncated = false; _ } ->
+      | Evidence_artifact _ ->
         if List.mem index carried
         then submitted_evidence_item_transport_to_yojson item
         else submitted_evidence_item_withheld_to_yojson item
       | Evidence_note _
-      | Evidence_artifact _
+      | Evidence_artifact_body _
       | Evidence_invalid_reference
       | Evidence_artifact_unreadable _
       | Evidence_artifact_binary _
@@ -427,12 +447,18 @@ let submitted_evidence_item_metadata_to_yojson = function
     collaboration_metadata ~reference ~content
   | Evidence_note note ->
     `Assoc [ "kind", `String "note"; "bytes", `Int (String.length note) ]
-  | Evidence_artifact { reference; bytes; truncated; _ } ->
+  | Evidence_artifact { reference; bytes; _ } ->
     `Assoc
       [ "kind", `String "artifact"
       ; "reference", `String reference
       ; "bytes", `Int bytes
-      ; "truncated", `Bool truncated
+      ]
+  | Evidence_artifact_body { reference; blob } ->
+    `Assoc
+      [ "kind", `String "artifact_body"
+      ; "reference", `String reference
+      ; "bytes", `Int blob.Tool_output.bytes
+      ; "sha256", `String blob.Tool_output.sha256
       ]
   | Evidence_invalid_reference ->
     `Assoc
@@ -523,7 +549,7 @@ let submitted_evidence_item_of_yojson = function
        let* () =
          Json_util.reject_unknown_fields
            ~surface:"submitted evidence artifact"
-           ~allowed:[ "kind"; "reference"; "content"; "bytes"; "truncated" ]
+           ~allowed:[ "kind"; "reference"; "content"; "bytes" ]
            fields
        in
        let* reference = string_field "reference" in
@@ -538,17 +564,31 @@ let submitted_evidence_item_of_yojson = function
                 (Json_util.excerpt value))
          | None -> Error "submitted evidence snapshot is missing bytes"
        in
-       let* truncated =
-         match List.assoc_opt "truncated" fields with
-         | Some (`Bool value) -> Ok value
-         | Some value ->
-           Error
-             (Printf.sprintf
-                "submitted evidence snapshot truncated must be a boolean, got %s"
-                (Json_util.excerpt value))
-         | None -> Error "submitted evidence snapshot is missing truncated"
+       Ok (Evidence_artifact { reference; content; bytes })
+     | Some (`String "artifact_body") ->
+       let open Result.Syntax in
+       let* () =
+         Json_util.reject_unknown_fields
+           ~surface:"submitted evidence stored body"
+           ~allowed:[ "kind"; "reference"; "_blob" ]
+           fields
        in
-       Ok (Evidence_artifact { reference; content; bytes; truncated })
+       let* reference = string_field "reference" in
+       let* blob =
+         match List.assoc_opt "_blob" fields with
+         | Some json ->
+           (match Tool_output.normalized_artifact_ref_of_json json with
+            | Tool_output.Decoded_normalized_artifact_ref blob -> Ok blob
+            | Tool_output.Not_normalized_artifact_ref ->
+              Error "submitted evidence stored body is not a blob reference"
+            | Tool_output.Invalid_normalized_artifact_ref { detail } ->
+              Error
+                (Printf.sprintf
+                   "submitted evidence stored body reference is invalid: %s"
+                   detail))
+         | None -> Error "submitted evidence stored body is missing its blob reference"
+       in
+       Ok (Evidence_artifact_body { reference; blob })
      | Some (`String "artifact_unreadable") ->
        let open Result.Syntax in
        let field_names =
@@ -710,22 +750,30 @@ let note_reference_prefix = "note:"
 (* Decode through this module's own snapshot decoder instead of re-reading the
    JSON fields. Both surfaces read the same persisted bytes, so they have to
    agree on which snapshots are well-formed: re-deriving the shape here let an
-   artifact item with a [reference] but missing or invalid [content]/[bytes]/
-   [truncated] render as an ordinary identity line while the authority-scoped
-   payload route rejected the very same item. Matching on the typed value makes
-   that divergence unrepresentable, and a new variant becomes a compile error
-   here rather than an [unknown kind] string at runtime. *)
+   artifact item with a [reference] but missing or invalid [content]/[bytes]
+   render as an ordinary identity line while the authority-scoped payload
+   route rejected the very same item. Matching on the typed value makes that
+   divergence unrepresentable, and a new variant becomes a compile error here
+   rather than an [unknown kind] string at runtime. *)
 let submitted_evidence_identity_line (item : Yojson.Safe.t) =
   match submitted_evidence_item_of_yojson item with
   | Error detail -> Error detail
   | Ok (Evidence_collaboration {reference; _}) -> Ok reference
   | Ok (Evidence_note note) -> Ok (note_reference_prefix ^ note)
   | Ok (Evidence_artifact { reference; _ }) -> Ok reference
+  | Ok (Evidence_artifact_body { reference; blob }) ->
+    Ok
+      (Printf.sprintf
+         "%s (stored whole: %s)"
+         reference
+         (String.sub blob.Tool_output.sha256 0 (min 12 (String.length blob.Tool_output.sha256))))
   | Ok Evidence_invalid_reference ->
     Ok (Printf.sprintf "(unreadable: %s)" invalid_reference_code)
   | Ok (Evidence_artifact_unreadable { reference; reason }) ->
     let diagnostic = match reason with
       | Evidence_read_error detail -> evidence_read_failure_code reason ^ ": " ^ detail
+      | Too_large { cap; at_least } ->
+        Printf.sprintf "too_large: at least %d bytes, ceiling %d" at_least cap
       | Evidence_missing | Evidence_not_regular_file
       | Evidence_outside_worker_playground | Evidence_invalid_utf8
       | Evidence_symbolic_link | Evidence_changed_during_read ->
@@ -757,27 +805,4 @@ let submitted_evidence_identity_lines (json : Yojson.Safe.t) =
       items
     |> Result.map List.rev
   | _ -> Error "submitted evidence must be an array"
-;;
-
-(* Decoded through this module's own snapshot decoder for the same reason as
-   the identity lines above: the typed value is the one truth about which
-   items are truncated, so a shape change is a compile error here rather than
-   a silently empty warning at the submit site. *)
-let truncated_snapshot_items (json : Yojson.Safe.t) : (string * int) list =
-  match json with
-  | `List items ->
-    List.filter_map
-      (fun item ->
-         match submitted_evidence_item_of_yojson item with
-         | Ok (Evidence_artifact { reference; bytes; truncated = true; _ }) ->
-           Some (reference, bytes)
-         | Ok (Evidence_artifact { truncated = false; _ }) -> None
-         | Ok (Evidence_collaboration _) -> None
-         | Ok (Evidence_note _) -> None
-         | Ok Evidence_invalid_reference -> None
-         | Ok (Evidence_artifact_unreadable _) -> None
-         | Ok (Evidence_artifact_binary _) -> None
-         | Error _ -> None)
-      items
-  | _ -> []
 ;;

@@ -39,7 +39,8 @@ val read_task : submitted_evidence:Workspace_verification_store.submitted_eviden
 
 val read_artifact : submitted_evidence:Workspace_verification_store.submitted_evidence_item list -> args:Yojson.Safe.t ->
   (Yojson.Safe.t, error) result
-(** [reference] must name one complete text artifact in this submission. The
+(** [reference] must name one inline text artifact in this submission. The
     read serves the content captured at submission and never the producer's
-    current file, and pages like the other sources. A truncated artifact stored
-    only a prefix and is refused: its rest is in the actual file. *)
+    current file, and pages like the other sources. An artifact the submission
+    stored whole in the blob store is refused with its content address: it is
+    read through the same tool by that address. *)

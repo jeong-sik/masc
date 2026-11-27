@@ -13,6 +13,15 @@ type evidence_read_failure = Workspace_verification_snapshot.evidence_read_failu
   | Evidence_symbolic_link
   | Evidence_changed_during_read
   | Evidence_read_error of string
+  | Too_large of
+      { cap : int
+      ; at_least : int
+      (** The source is over the ceiling a text artifact is read under. It was
+          not read past [cap] + 1 bytes: [at_least] is the size the reader
+          could name, the exact file size where the host could stat it and
+          [cap] + 1 where a sandbox reader only returned the bytes it was
+          asked for. *)
+      }
 
 type collaboration_kind = Board_source | Fusion_source | Task_source
 
@@ -23,7 +32,15 @@ type submitted_evidence_item = Workspace_verification_snapshot.submitted_evidenc
       { reference : string
       ; content : string
       ; bytes : int
-      ; truncated : bool
+      (** Whole text up to the inline cap. There is no prefix-only state: a
+          larger text is [Evidence_artifact_body]. *)
+      }
+  | Evidence_artifact_body of
+      { reference : string
+      ; blob : Tool_output.artifact_ref
+      (** Text too large for the inline cap, stored whole in the
+          content-addressed blob store at submission. The reference is what
+          the sweep counts. *)
       }
   | Evidence_invalid_reference
   | Evidence_artifact_unreadable of
@@ -66,20 +83,15 @@ val submitted_evidence_access_to_yojson :
 
 val submitted_evidence_access_transport_to_yojson :
   submitted_evidence_access -> Yojson.Safe.t
-(** Judge-transport projection of the snapshot: a [truncated=true] artifact
-    carries [content_omitted] and an explanatory [content_note] (file size,
-    snapshot cap, how to read ranges of the real file) instead of the prefix
-    content. {!submitted_evidence_access_to_yojson} remains the persistence
-    serializer and keeps the prefix for the audit record (#29615). *)
+(** Judge-transport projection of the snapshot. An inline artifact travels
+    with its content, or with [content_omitted] and a [content_note] when the
+    aggregate cap withholds it. A stored body travels as its size and content
+    address with [content_omitted]. No text is ever sent as a prefix
+    (#29615). {!submitted_evidence_access_to_yojson} is the persistence
+    serializer. *)
 
 val submitted_evidence_access_metadata_to_yojson :
   submitted_evidence_access -> Yojson.Safe.t
-
-val truncated_snapshot_items : Yojson.Safe.t -> (string * int) list
-(** [(reference, bytes)] for every truncated artifact in a persisted evidence
-    snapshot. Lets the submit path warn the producer at submission time
-    instead of leaving the "too large to read at once" fact discoverable only
-    after a review stalls. *)
 
 val evidence_read_failure_code : evidence_read_failure -> string
 (** Stable bounded code for diagnostics and metadata. *)
@@ -89,13 +101,20 @@ val evidence_read_failure_of_owned_read_failure :
   Fs_compat.owned_regular_file_read_failure -> evidence_read_failure
 
 val verification_evidence_max_bytes : int
-(** Byte cap on the snapshot taken of a producer-owned evidence artifact. The
-    artifact itself is not truncated; only the copy persisted in the
-    verification request is. The judge-transport projection omits that prefix
-    entirely for a truncated artifact. Exposed so a test states the truncation
-    property against this value instead of copying the number, which made the
-    constant unchangeable without editing an assertion that never described
-    the constant. *)
+(** The inline cap for one text artifact. Content up to this size is written
+    into the request record; a larger text is stored whole in the blob store
+    and the record keeps its content address. Nothing is cut. Exposed so a
+    test states the boundary against this value instead of copying the
+    number. *)
+
+val text_artifact_max_bytes : int
+(** The ceiling on one text artifact. A text file over it is not read: the
+    reader stops one byte past the ceiling and the item is unreadable with
+    {!Too_large}. Known binary formats are not under this ceiling; the store
+    adopts them whole. *)
+
+val is_binary_artifact_path : string -> bool
+(** Whether a reference names a format the store adopts as binary. *)
 
 val project_root_of_base_path : string -> string
 (** The project root a BasePath names, whether the caller passed the project
@@ -133,15 +152,15 @@ val valid_producer_relative_path : string -> bool
     here instead of copying it. *)
 
 type artifact_payload =
-  | Text_payload of string * int * bool
+  | Text_payload of { content : string; bytes : int }
   | Binary_payload of
       { data : string; bytes : int; sha256 : string; format : string }
 
 type artifact_read_result = (artifact_payload, evidence_read_failure) result
-(** One artifact's read: text as [(content, bytes, truncated)] — [bytes] may
-    exceed the content length when the read was capped — or binary as raw
-    bytes with their hash and format. A reader that cannot
-    answer returns the typed failure instead. *)
+(** One artifact's read: text as its whole [(content, bytes)], or binary as
+    raw bytes with their hash and format. A reader that cannot answer returns
+    the typed failure instead. An injected reader bounds its own read by
+    {!text_artifact_max_bytes} and answers [Too_large] past it. *)
 
 type utf8_scan =
   | Utf8_valid
@@ -228,10 +247,12 @@ val snapshot_submitted_evidence_json :
     The items for the references come first, then the [collaboration] items,
     already resolved by the caller.
     ["artifact:<relative-path>"] is rooted at the producer's declared sandbox;
-    ["note:<text>"] preserves non-file evidence explicitly. [bytes] reports the
-    source size, which exceeds the persisted [content] length when [truncated]
-    is set by the projection cap. Bare and absolute references are persisted as
-    a payload-free typed invalid-reference item. *)
+    ["note:<text>"] preserves non-file evidence explicitly. A text artifact
+    is captured whole: inline up to {!verification_evidence_max_bytes}, above
+    that as a body in the blob store. A text file over
+    {!text_artifact_max_bytes} is an unreadable item carrying [Too_large].
+    Bare and absolute references are persisted as a payload-free typed
+    invalid-reference item. *)
 
 
 val submitted_evidence_identity_lines :
@@ -251,10 +272,11 @@ val submission_receipt :
   base_path:string -> request_id:string -> task_id:string -> worker:string ->
   (Yojson.Safe.t, evidence_access_failure) result
 (** Capture diagnostics from one exact persisted submission. Verifies the
-    request id, Task and producer; returns unreadable references and truncation
-    metadata only, never artifact contents. Internal submission adapters call
+    request id, Task and producer; returns unreadable references only, never
+    artifact contents. Internal submission adapters call
     this before notifying the verifier, then publish it only after commit.
-    This does not reread the producer's files or decide submission acceptance. *)
+    This does not reread the producer's files or decide submission acceptance.
+    An unreadable item is listed with its reason, [Too_large] among them. *)
 
 val inspect_submitted_evidence_for_authority :
   base_path:string ->
@@ -271,6 +293,12 @@ val inspect_submitted_evidence_for_operator :
 (** A trusted CanAdmin boundary supplies the operator. Read the exact immutable
     request, including after Task settlement/archival; its id and Task must
     match. The recorded producer is not replaced by a current Task owner. *)
+val verifications_dirname : string
+(** Name of the directory under the masc directory that holds request
+    records. The sweep scope scans it for the content addresses records hold. *)
+val evidence_body_directory : string
+(** Name of the directory under the masc directory that holds binary evidence
+    bodies. They are files, not blob references. *)
 val verifications_dir : string -> string
 val request_path : string -> string -> string
 

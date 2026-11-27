@@ -146,6 +146,13 @@ let workspace =
     ; no_reference Goal_verification.verifications_filename
     ; no_reference Goal_delivery.notification_lock_key
     ; no_reference Goal_verification_run_registry.storage_filename
+      (* A request record names the text bodies it stored whole by their
+         content address. The sweep counts those references: a body no record
+         names any more becomes a candidate. *)
+    ; tree Workspace_verification_store.verifications_dirname
+      (* Binary evidence bodies are files of the request directory. They
+         reference no blob. *)
+    ; no_reference Workspace_verification_store.evidence_body_directory
     ; no_reference Verification_run_registry.storage_filename
     ; no_reference Exact_lane_run_registry.storage_filename
     ; no_reference Fusion_run_registry.storage_filename

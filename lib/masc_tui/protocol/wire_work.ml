@@ -2097,7 +2097,11 @@ type verification_evidence_item =
       reference : string;
       content : string;
       bytes : int;
-      truncated : bool;
+    }
+  | Verif_ev_stored_body of {
+      reference : string;
+      bytes : int;
+      sha256 : string;
     }
   | Verif_ev_binary of {
       reference : string;
@@ -2185,12 +2189,19 @@ let decode_verification_evidence_item json =
         | Ok None | Error _ -> ""
       in
       let bytes = int_or_0 json "bytes" in
-      let truncated =
-        match optional_bool_field json "truncated" with
-        | Ok (Some b) -> b
-        | Ok None | Error _ -> false
+      Ok (Verif_ev_artifact { reference; content; bytes })
+  | "artifact_body" ->
+      let* reference = required_nonblank_string json "reference" in
+      let bytes, sha256 =
+        match optional_object_field json "_blob" with
+        | Ok (Some blob) ->
+            ( int_or_0 blob "bytes"
+            , (match optional_string_field blob "sha256" with
+              | Ok (Some s) -> s
+              | Ok None | Error _ -> "") )
+        | Ok None | Error _ -> (0, "")
       in
-      Ok (Verif_ev_artifact { reference; content; bytes; truncated })
+      Ok (Verif_ev_stored_body { reference; bytes; sha256 })
   | "artifact_binary" ->
       let* reference = required_nonblank_string json "reference" in
       let bytes = int_or_0 json "bytes" in

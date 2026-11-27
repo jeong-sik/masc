@@ -9,7 +9,7 @@ let get = function Ok value -> value | Error detail -> Alcotest.fail detail
 let owner_result = function Ok value -> value | Error error -> Alcotest.fail (Owner.error_to_string error)
 let evidence = [Evidence.Evidence_note "The measurement belongs to this exact submission.";
   Evidence.Evidence_artifact {reference="artifact:measurement.json"; content="{\"value\":100}";
-    bytes=13; truncated=false}]
+    bytes=13}]
 
 let with_initialized_workspace f =
   let path = Filename.temp_dir "goal-original-" "" in

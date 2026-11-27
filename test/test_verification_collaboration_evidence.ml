@@ -537,7 +537,7 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config ->
     (continued |> member "representation" |> to_string))
 
 let artifact reference content =
-  Store.Evidence_artifact { reference; content; bytes = String.length content; truncated = false }
+  Store.Evidence_artifact { reference; content; bytes = String.length content }
 let artifact_args reference = `Assoc ["reference", `String reference]
 let offers surface name =
   List.exists (fun (schema : Types_core.tool_schema) -> schema.name = name) (VAT.schemas surface)
@@ -552,16 +552,22 @@ let test_withheld_artifact_is_read_from_the_record () = with_fixture (fun config
   let body =
     head ^ String.make (cap - String.length head - String.length tail) 'z' ^ tail in
   let reference = "artifact:evidence/complete.txt" in
-  let prefix =
-    Store.Evidence_artifact
-      { reference = "artifact:oversize.txt"; content = "PREFIX_ONLY_5d3a"; bytes = cap + 1; truncated = true } in
+  (* A text too large for the record: the item keeps a content address and no
+     content. *)
+  let stored =
+    match
+      Tool_output.make_artifact_ref ~sha256:(String.make 64 '0') ~bytes:(cap + 1) ~preview:""
+        ~mime:"text/plain"
+    with
+    | Ok blob -> Store.Evidence_artifact_body { reference = "artifact:oversize.txt"; blob }
+    | Error error -> fail (Tool_output.make_error_to_string error) in
   let items =
     [ artifact "artifact:small.txt" "SMALL_BODY_9a0f"
     ; artifact reference body
-    ; prefix
+    ; stored
     ; Store.Evidence_note "run attached" ] in
   (* The transport decides what a request carries, and no second rule does.
-     Here the truncated prefix and the complete artifact past the aggregate cap
+     Here the stored body and the complete artifact past the aggregate cap
      are both left out, in item order. *)
   let omitted_of_transport items =
     Store.submitted_evidence_access_transport_to_yojson
@@ -574,7 +580,7 @@ let test_withheld_artifact_is_read_from_the_record () = with_fixture (fun config
       then Some (member "reference" item |> to_string)
       else None)
   in
-  check (list string) "the transport omits the capped artifact and the truncated prefix"
+  check (list string) "the transport omits the capped artifact and the stored body"
     [ reference; "artifact:oversize.txt" ] (omitted_of_transport (restored items));
   let surface = VAT.create ~config ~producer:"producer" ~submitted_evidence:(restored items)
     |> require "request-bound surface" in

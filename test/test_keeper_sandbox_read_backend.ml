@@ -871,10 +871,11 @@ remote_endpoint = "fixture"
      | _ -> Alcotest.fail "oversize endpoint image must be retained complete");
     write_file endpoint_file (String.make (Store.verification_evidence_max_bytes + 1) 'x');
     (match reader ~worker:meta.name ~relative:"summary.txt" with
-     | Ok (Store.Text_payload (text, _, _)) ->
-       Alcotest.(check int) "existing text prefix behavior remains"
-         Store.verification_evidence_max_bytes (String.length text)
-     | _ -> Alcotest.fail "text prefix behavior changed")
+     | Ok (Store.Text_payload { Store.content = text; bytes }) ->
+       Alcotest.(check int) "a text over the inline cap is read whole"
+         (Store.verification_evidence_max_bytes + 1) bytes;
+       Alcotest.(check int) "and nothing is cut" (String.length text) bytes
+     | _ -> Alcotest.fail "a text over the inline cap must be read whole")
 
 let fake_docker_exit_1_script =
   "#!/bin/sh\n\

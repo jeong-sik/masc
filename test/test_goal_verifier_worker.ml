@@ -82,7 +82,7 @@ let submit_measurement config goal_id value =
   Out_channel.with_open_bin (Filename.concat shared_root measurement_path)
     (fun out -> output_string out content);
   let item = Workspace_verification_store.Evidence_artifact {
-    reference=measurement_reference; content; bytes=String.length content; truncated=false} in
+    reference=measurement_reference; content; bytes=String.length content} in
   ignore (stored (Goal_store.transact_goal config ~goal_id (fun goal ->
     Result.map (fun record -> goal, record) (Goal_verification.mark_proof_pending
       ~submitted_evidence:[item] config ~goal_id ~criterion:(Goal_store.criterion_of_goal goal)))))

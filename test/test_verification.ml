@@ -854,7 +854,6 @@ let test_system_llm_review_notes_are_metadata_only () =
               { reference = "artifact:proof.txt"
               ; content = "secret artifact content must not be duplicated"
               ; bytes = 42
-              ; truncated = true
               }
           ; VS.Evidence_artifact_unreadable
               { reference = "artifact:missing.txt"; reason = VS.Evidence_missing }
@@ -906,10 +905,6 @@ let test_system_llm_review_notes_are_metadata_only () =
     "artifact reference remains observable"
     true
     (String_util.contains_substring notes "artifact:proof.txt");
-  Alcotest.(check bool)
-    "truncation remains observable"
-    true
-    (String_util.contains_substring notes "truncated");
   Alcotest.(check bool)
     "verification creation time remains observable"
     true
@@ -1674,6 +1669,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           let captured_prompt = ref None in
           let captured_lookup = ref None in
           let captured_record_read = ref None in
+          let captured_body_read = ref None in
           (* Verdict notification precedes mark_completed; wait for the owned
              run to finish before inspecting its result or cleaning the store. *)
           Atomic.set Masc.Verification_run_registry.change_observer_fn (fun () ->
@@ -1715,19 +1711,19 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
               ~base_path:(VS.project_root_of_base_path base_path)
               ~agent_name:"snapshot-test-worker"
           in
-          let truncated_marker = "OMITTED_PREFIX_7d1e" in
+          let stored_marker = "STORED_WHOLE_7d1e" in
           let aggregate_marker = "OMITTED_COMPLETE_8f2a" in
           let collaboration_marker = "OMITTED_BOARD_9a3b" in
           let small_body = "ADMITTED_SMALL_BODY_6c4d" in
           let cap = VS.verification_evidence_max_bytes in
-          let truncated_body = truncated_marker ^ String.make cap 'x' in
+          let stored_text = stored_marker ^ String.make cap 'x' in
           let complete_body =
             aggregate_marker ^ String.make (cap - String.length aggregate_marker) 'y'
           in
           List.iter
             (fun (name, body) ->
               Fs_compat.save_file (Filename.concat producer_root name) body)
-            [ "oversize.txt", truncated_body
+            [ "oversize.txt", stored_text
             ; "complete.txt", complete_body
             ; "small.txt", small_body
             ];
@@ -1800,18 +1796,22 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
             match List.find_opt (function
               | VS.Evidence_artifact item -> String.equal item.reference reference
               | _ -> false) items with
-            | Some (VS.Evidence_artifact { content; bytes; truncated; _ }) ->
-              content, bytes, truncated
+            | Some (VS.Evidence_artifact { content; bytes; _ }) -> content, bytes
             | _ -> Alcotest.fail ("missing captured artifact: " ^ reference)
           in
-          let prefix, bytes, truncated = artifact "artifact:oversize.txt" in
-          Alcotest.(check bool) "stored artifact is truncated" true truncated;
-          Alcotest.(check int) "snapshot retains original source size"
-            (String.length truncated_body) bytes;
-          Alcotest.(check string) "stored prefix remains exact"
-            (String.sub truncated_body 0 cap) prefix;
-          let complete, _, truncated = artifact "artifact:complete.txt" in
-          Alcotest.(check bool) "aggregate-withheld artifact is complete" false truncated;
+          let stored_body reference =
+            match List.find_opt (function
+              | VS.Evidence_artifact_body item -> String.equal item.reference reference
+              | _ -> false) items with
+            | Some (VS.Evidence_artifact_body { blob; _ }) -> blob
+            | _ -> Alcotest.fail ("missing stored body: " ^ reference)
+          in
+          (* A text over the inline cap is not cut: the record keeps its
+             content address and the blob store holds every byte. *)
+          let oversize = stored_body "artifact:oversize.txt" in
+          Alcotest.(check int) "a text over the inline cap is stored whole"
+            (String.length stored_text) oversize.Tool_output.bytes;
+          let complete, _ = artifact "artifact:complete.txt" in
           Alcotest.(check string) "audit retains the complete artifact" complete_body complete;
           let open Yojson.Safe.Util in
           let transport = VS.submitted_evidence_access_transport_to_yojson access in
@@ -1874,6 +1874,11 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
                captured_record_read := Some
                  (lookup.dispatch ~name:"keeper_artifact_read"
                     ~args:(`Assoc [ "reference", `String "artifact:small.txt" ]));
+               (* A text over the inline cap is read by the content address the
+                  record keeps. *)
+               captured_body_read := Some
+                 (lookup.dispatch ~name:"keeper_artifact_read"
+                    ~args:(`Assoc [ "sha256", `String oversize.Tool_output.sha256 ]));
                Eio.Promise.resolve resolve_reviewer_called ();
                Ok { Masc.Task.Anti_rationalization.selected_runtime_id = "test-system-evaluator"
                   ; evaluator_execution = None; verdict = Some (Masc.Task.Anti_rationalization.Approve "") });
@@ -1909,6 +1914,15 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
                (member "content" source |> to_string)
            | Some result -> Alcotest.fail (Tool_result.message result)
            | None -> Alcotest.fail "reviewer did not read an artifact from the record");
+          (match !captured_body_read with
+           | Some (Tool_result.Completed _ as result) ->
+             let page = Tool_result.message result |> Yojson.Safe.from_string in
+             Alcotest.(check int) "a stored body is read by its recorded size"
+               (String.length stored_text) (member "total_bytes" page |> to_int);
+             Alcotest.(check bool) "the first page starts the stored text" true
+               (String.starts_with ~prefix:(member "content" page |> to_string) stored_text)
+           | Some result -> Alcotest.fail (Tool_result.message result)
+           | None -> Alcotest.fail "reviewer did not read a stored body");
           (match Masc.Verification_run_registry.get
              (Masc.Verification_run_registry.global ()) ~verification_id:request_id with
            | Some { status = Masc.Verification_run_registry.Completed _; _ } -> ()
@@ -1937,7 +1951,7 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
                Alcotest.(check bool) ("review keeps " ^ expected) true
                  (String_util.contains_substring prompt expected))
                (small_body :: "snapshot-evidence" :: "content_omitted" :: "artifact read tool"
-                :: "persisted gate artifact" :: evidence_refs));
+                :: "stored whole" :: "persisted gate artifact" :: evidence_refs));
           (match W.get_tasks_raw config with
           | [ { task_status = Masc_domain.Done _; _ } ] -> ()
           | [ task ] ->
@@ -1948,8 +1962,8 @@ let test_system_llm_agent_uses_persisted_request_contract_snapshot () =
           (* Check the real rendered boundary last: capture, immutable lookup,
              persistence and registry completion must already have succeeded. *)
           let prompt = Option.get !captured_prompt in
-          Alcotest.(check bool) "final reviewer prompt omits the captured truncated prefix"
-            false (String_util.contains_substring prompt truncated_marker);
+          Alcotest.(check bool) "final reviewer prompt omits the stored body"
+            false (String_util.contains_substring prompt stored_marker);
           Alcotest.(check bool) "final reviewer prompt omits aggregate-withheld full content"
             false (String_util.contains_substring prompt aggregate_marker);
           Alcotest.(check bool) "initial reviewer prompt leaves captured collaboration to lookup"
@@ -2991,7 +3005,7 @@ let test_submitted_evidence_inspection_is_authority_scoped_and_contained () =
      with
      | VS.Evidence_available
          { items =
-             VS.Evidence_artifact { content; truncated = false; _ }
+             VS.Evidence_artifact { content; _ }
              :: VS.Evidence_note "producer summary"
              :: []
          ; _
@@ -3311,7 +3325,6 @@ let test_submitted_evidence_rejects_unknown_artifact_field () =
             ; "reference", `String "artifact:artifacts/current.txt"
             ; "content", `String content
             ; "bytes", `Int (String.length content)
-            ; "truncated", `Bool false
             ; "unexpected_field", `String "not part of the current contract"
             ]
         ; `Assoc [ "kind", `String "note"; "content", `String "producer summary" ]
@@ -3341,45 +3354,66 @@ let test_submitted_evidence_rejects_unknown_artifact_field () =
         (VS.evidence_access_failure_to_string ~request_id reason)
     | VS.Evidence_available _ -> Alcotest.fail "unknown artifact field accepted")
 
-let test_submitted_evidence_inspection_is_bounded_and_utf8_safe () =
+let test_submitted_evidence_stores_a_large_text_whole () =
   with_eio_temp_dir (fun base_path ->
     let artifact_dir =
-      Filename.concat
-        base_path
-        ".masc/playground/docker/omega"
-    in
+      Filename.concat base_path ".masc/playground/docker/omega" in
     Fs_compat.mkdir_p artifact_dir;
     let artifact_path = Filename.concat artifact_dir "large-artifact.txt" in
-    (* One byte short of the cap, so the multibyte character that follows
-       straddles it and the scanner has to drop the partial codepoint.
-       Derived from the cap so raising the cap does not require editing an
-       assertion about UTF-8. *)
     let cap = VS.verification_evidence_max_bytes in
-    let ascii_prefix = String.make (cap - 1) 'a' in
-    let full_artifact = ascii_prefix ^ "한글" ^ String.make 250_000 'z' in
+    let full_artifact = String.make (cap - 1) 'a' ^ "한글" ^ String.make 250_000 'z' in
     Fs_compat.save_file artifact_path full_artifact;
     let request_id = "vrf-bounded-evidence" in
     ignore (create_evidence_request ~base_path ~request_id ~artifact_path);
-    match
-      inspect_evidence
-        ~base_path
-        ~request_id
-        ()
-    with
+    match inspect_evidence ~base_path ~request_id () with
+    | VS.Evidence_available { items = VS.Evidence_artifact_body { blob; _ } :: _; _ } ->
+      Alcotest.(check int) "full artifact byte count preserved"
+        (String.length full_artifact) blob.Tool_output.bytes;
+      Alcotest.(check string) "every byte is in the blob store" full_artifact
+        (match
+           Tool_blob_store.fetch (Tool_blob_store.create ~base_path)
+             ~sha256:blob.Tool_output.sha256
+         with
+        | Ok (Some body) -> body
+        | Ok None -> Alcotest.fail "stored body is absent from the blob store"
+        | Error error -> Alcotest.fail (Tool_blob_store.fetch_error_to_string error))
+    | _ -> Alcotest.fail "expected a text over the inline cap to be stored whole")
+
+(* The ceiling is applied before the read. A text file over it is not read:
+   the item is unreadable, names the ceiling and the size, and no body is
+   stored for it. *)
+let test_submitted_evidence_refuses_a_text_over_the_ceiling () =
+  with_eio_temp_dir (fun base_path ->
+    let artifact_dir =
+      Filename.concat base_path ".masc/playground/docker/omega" in
+    Fs_compat.mkdir_p artifact_dir;
+    let artifact_path = Filename.concat artifact_dir "huge-artifact.txt" in
+    let ceiling = VS.text_artifact_max_bytes in
+    let size = ceiling + 1 in
+    let out = open_out_bin artifact_path in
+    let mebibyte = String.make (1024 * 1024) 'z' in
+    for _ = 1 to ceiling / String.length mebibyte do
+      out_string out mebibyte 0 (String.length mebibyte)
+    done;
+    out_string out "!" 0 1;
+    close_out out;
+    let request_id = "vrf-over-ceiling" in
+    ignore (create_evidence_request ~base_path ~request_id ~artifact_path);
+    match inspect_evidence ~base_path ~request_id () with
     | VS.Evidence_available
         { items =
-            VS.Evidence_artifact
-              { content; bytes; truncated = true; _ }
+            VS.Evidence_artifact_unreadable
+              { reference; reason = VS.Too_large { cap; at_least } }
             :: _
         ; _
         } ->
-      Alcotest.(check int) "full artifact byte count preserved"
-        (String.length full_artifact) bytes;
-      Alcotest.(check int) "truncation stops before the partial codepoint" (cap - 1)
-        (String.length content);
-      Alcotest.(check string) "incomplete UTF-8 codepoint removed"
-        ascii_prefix content
-    | _ -> Alcotest.fail "expected bounded UTF-8-safe artifact projection")
+      Alcotest.(check int) "the ceiling is named" ceiling cap;
+      Alcotest.(check int) "the file size is named" size at_least;
+      Alcotest.(check string) "the reference stays with the unreadable item"
+        "artifact:huge-artifact.txt" reference;
+      Alcotest.(check (list string)) "nothing is stored for it" []
+        (Tool_blob_store.list_all (Tool_blob_store.create ~base_path))
+    | other -> Alcotest.failf "expected an unreadable over-ceiling text, got %d items" (match other with VS.Evidence_available { items; _ } -> List.length items | _ -> -1))
 
 (* Filling the budget in submission order let one large-but-under-cap artifact
    spend it all and push every later item to a link, so which evidence the
@@ -3469,9 +3503,9 @@ let test_transport_projection_keeps_the_most_items_it_can () =
 
 (* #29596: the per-item cap bounds one artifact, not their sum. A submission of
    many sub-cap artifacts still built a request no verifier_exact slot could
-   carry — 12 artifacts, every one [truncated=false], 1,005,015 bytes in the
+   carry — 12 complete artifacts, 1,005,015 bytes in the
    atom that stalled task-465 (2026-08-25). Each artifact here is far under the
-   cap and none is truncated; only their total crosses it. *)
+   inline cap on its own; only their total crosses it. *)
 let test_transport_projection_bounds_the_evidence_total () =
   with_eio_temp_dir (fun base_path ->
     let artifact_dir = Filename.concat base_path ".masc/playground/docker/omega" in
@@ -3513,11 +3547,11 @@ let test_transport_projection_bounds_the_evidence_total () =
       List.iter
         (fun item ->
           match item with
-          | VS.Evidence_artifact { truncated; _ } ->
-            Alcotest.(check bool) "no item is truncated on its own" false truncated
+          | VS.Evidence_artifact _ -> ()
           | VS.Evidence_note _ | VS.Evidence_invalid_reference
           | VS.Evidence_artifact_unreadable _ | VS.Evidence_artifact_binary _
-          | VS.Evidence_collaboration _ -> ())
+          | VS.Evidence_artifact_body _ | VS.Evidence_collaboration _ ->
+            Alcotest.fail "each artifact here is under the inline cap on its own")
         items;
       Alcotest.(check bool)
         "the stored snapshot carries every byte"
@@ -3567,13 +3601,12 @@ let test_transport_projection_bounds_the_evidence_total () =
     | VS.Evidence_unavailable _ -> Alcotest.fail "evidence must be available")
 ;;
 
-(* #29615: a truncated artifact's prefix must not travel to the judge. The
-   persistence serializer keeps it for the audit record; the transport
-   projection replaces it with the size, the fact, and how to read the real
-   file. The length guard is the regression: one over-cap artifact plus a
-   readable one must not push the review request toward any slot's input
-   budget. *)
-let test_transport_projection_omits_truncated_prefix () =
+(* #29615: a text too large for the record must not travel to the judge as a
+   prefix or as a whole. It is stored in the blob store at submission; the
+   record and the transport name its size and content address. The length
+   guard is the regression: one large artifact plus a readable one must not
+   push the review request toward any slot's input budget. *)
+let test_transport_projection_omits_a_stored_body () =
   with_eio_temp_dir (fun base_path ->
     let artifact_dir =
       Filename.concat base_path ".masc/playground/docker/omega"
@@ -3614,12 +3647,12 @@ let test_transport_projection_omits_truncated_prefix () =
     match inspect_evidence ~base_path ~request_id () with
     | VS.Evidence_available _ as access ->
       Alcotest.(check bool)
-        "persistence serializer still carries the truncated prefix"
+        "persistence serializer carries no content for a stored body"
         true
-        (String.length
-           (Yojson.Safe.to_string
-              (VS.submitted_evidence_access_to_yojson access))
-         > cap);
+        (not
+           (String_util.contains_substring
+              (Yojson.Safe.to_string (VS.submitted_evidence_access_to_yojson access))
+              (String.make 1_000 'x')));
       let transport =
         Yojson.Safe.to_string
           (VS.submitted_evidence_access_transport_to_yojson access)
@@ -3652,19 +3685,31 @@ let test_transport_projection_omits_truncated_prefix () =
         |> Option.get
       in
       let large_item = fields_of (by_reference "artifact:large-proof.json") in
+      Alcotest.(check string)
+        "a stored body is its own kind"
+        "artifact_body"
+        (match List.assoc_opt "kind" large_item with
+         | `String kind -> kind
+         | _ -> "other");
       Alcotest.(check bool)
-        "truncated artifact carries no content key"
+        "a stored body carries no content key"
         true
         (not (List.mem_assoc "content" large_item));
       Alcotest.(check bool)
-        "truncated artifact declares content_omitted"
+        "a stored body declares content_omitted"
         true
         (List.assoc_opt "content_omitted" large_item = Some (`Bool true));
+      Alcotest.(check bool)
+        "a stored body names its content address"
+        true
+        (match List.assoc_opt "sha256" large_item with
+         | Some (`String sha256) -> String.length sha256 = 64
+         | _ -> false);
       (match List.assoc_opt "bytes" large_item with
        | Some (`Int bytes) ->
          Alcotest.(check int) "transport keeps the full byte count"
            (String.length large) bytes
-       | _ -> Alcotest.fail "truncated artifact must keep its byte count");
+       | _ -> Alcotest.fail "a stored body must keep its byte count");
       (match List.assoc_opt "content_note" large_item with
        | Some (`String note) ->
          Alcotest.(check bool)
@@ -3674,10 +3719,10 @@ let test_transport_projection_omits_truncated_prefix () =
               ~affix:(string_of_int (String.length large))
               note);
          Alcotest.(check bool)
-           "note points at the verification tools"
+           "note points at the reader"
            true
-           (Astring.String.is_infix ~affix:"verification tools" note)
-       | _ -> Alcotest.fail "truncated artifact must explain the omission");
+           (Astring.String.is_infix ~affix:"keeper_artifact_read" note)
+       | _ -> Alcotest.fail "a stored body must explain the omission");
       let small_item = fields_of (by_reference "artifact:small-proof.txt") in
       Alcotest.(check string)
         "readable artifact still travels in full"
@@ -3691,39 +3736,6 @@ let test_transport_projection_omits_truncated_prefix () =
         (VS.evidence_access_failure_to_string
            ~request_id
            reason))
-
-let test_truncated_snapshot_items_names_only_truncated_artifacts () =
-  with_eio_temp_dir (fun base_path ->
-    let artifact_dir =
-      Filename.concat base_path ".masc/playground/docker/omega"
-    in
-    Fs_compat.mkdir_p artifact_dir;
-    write_keeper_profile
-      ~base_path
-      ~keeper_name:"omega"
-      ~sandbox_profile:"docker";
-    let cap = VS.verification_evidence_max_bytes in
-    let large = String.make (cap + 1_000) 'y' in
-    Fs_compat.save_file (Filename.concat artifact_dir "bulky.json") large;
-    Fs_compat.save_file
-      (Filename.concat artifact_dir "compact.json")
-      "{\"ok\":true}";
-    let evidence_snapshot =
-      VS.snapshot_submitted_evidence_json
-        ~base_path
-        ~worker:"omega"
-        [ "artifact:bulky.json"; "artifact:compact.json" ]
-    in
-    match VS.truncated_snapshot_items evidence_snapshot with
-    | [ (reference, bytes) ] ->
-      Alcotest.(check string)
-        "only the over-cap artifact is reported"
-        "artifact:bulky.json"
-        reference;
-      Alcotest.(check int) "reported size is the full file" (String.length large)
-        bytes
-    | other ->
-      Alcotest.failf "expected exactly one truncated item, got %d" (List.length other))
 
 let test_submitted_evidence_rejects_malformed_utf8 () =
   with_eio_temp_dir (fun base_path ->
@@ -4058,9 +4070,9 @@ let test_verification_evidence_decode_requires_both_keys () =
    The miss is now typed and travels to the judge, which holds Read/Grep on
    this root and a root_layout naming every checkout under it. *)
 (* The injected artifact read: where the producer's sandbox keeps the file,
-   the snapshot records what the reader answered -- content, bytes, truncated
-   on Ok, the typed reason on Error -- instead of reading the host bundle the
-   store can reach (#33745). *)
+   the snapshot records what the reader answered -- the whole text on Ok, the
+   typed reason on Error -- instead of reading the host bundle the store can
+   reach (#33745). *)
 let test_injected_artifact_read_answers_the_snapshot () =
   with_temp_dir (fun base_path ->
       let artifact_read =
@@ -4069,7 +4081,10 @@ let test_injected_artifact_read_answers_the_snapshot () =
              if
                String.equal worker "endpoint-worker"
                && String.equal relative "evidence.txt"
-             then Ok (VS.Text_payload ("captured-by-backend", 20, false))
+             then
+               Ok
+                 (VS.Text_payload
+                    { VS.content = "captured-by-backend"; VS.bytes = 20 })
              else Error (VS.Evidence_read_error "backend: not found"))
       in
       let json =
@@ -4094,8 +4109,8 @@ let test_injected_artifact_read_answers_the_snapshot () =
         (List.nth items 1 |> member "reason" |> member "code" |> to_string))
 
 (* An injected reader answers under the same text line the direct read
-   holds: binary bytes are typed invalid_utf8, and a truncated read may stop
-   mid-character exactly where the direct prefix can. *)
+   holds: bytes that are not valid UTF-8 are typed invalid_utf8, a codepoint
+   cut in the middle included. *)
 let test_an_injected_reader_answers_under_the_text_line () =
   with_temp_dir (fun base_path ->
       let artifact_read =
@@ -4105,9 +4120,11 @@ let test_an_injected_reader_answers_under_the_text_line () =
              if String.equal relative "logo.png" then
                (* a reader that hands non-text bytes to the text payload
                   still meets the store's own line *)
-               Ok (VS.Text_payload ("\xff\xd8\xff\xe0garbage", 12, false))
+               Ok
+                 (VS.Text_payload
+                    { VS.content = "\xff\xd8\xff\xe0garbage"; VS.bytes = 12 })
              else if String.equal relative "cut.txt" then
-               Ok (VS.Text_payload ("abc\xe2\x82", 5, true))
+               Ok (VS.Text_payload { VS.content = "abc\xe2\x82"; VS.bytes = 5 })
              else Error (VS.Evidence_read_error "backend: not found"))
       in
       let json =
@@ -4125,10 +4142,41 @@ let test_an_injected_reader_answers_under_the_text_line () =
       Alcotest.(check string) "with the text-line reason"
         "invalid_utf8"
         (List.nth items 0 |> member "reason" |> member "code" |> to_string);
-      Alcotest.(check string) "a truncated multibyte cut keeps the whole characters"
-        "abc" (List.nth items 1 |> member "content" |> to_string);
-      Alcotest.(check bool) "and stays marked truncated"
-        true (List.nth items 1 |> member "truncated" |> to_bool))
+      Alcotest.(check string) "a codepoint cut in the middle is refused too"
+        "artifact_unreadable"
+        (List.nth items 1 |> member "kind" |> to_string);
+      Alcotest.(check string) "with the text-line reason"
+        "invalid_utf8"
+        (List.nth items 1 |> member "reason" |> member "code" |> to_string))
+
+(* A reader that stopped at the text ceiling answers Too_large. The record
+   keeps the ceiling and the size it could name, and reads back the same. *)
+let test_an_injected_reader_answers_too_large () =
+  with_temp_dir (fun base_path ->
+      let artifact_read =
+        Some
+          (fun ~worker:_ ~relative:_ ->
+             Error (VS.Too_large { VS.cap = 100; VS.at_least = 101 }))
+      in
+      let json =
+        VS.snapshot_submitted_evidence_json
+          ?artifact_read
+          ~base_path
+          ~worker:"endpoint-worker"
+          [ "artifact:huge.log" ]
+      in
+      match json with
+      | `List [ item ] ->
+        (match VS.submitted_evidence_item_of_yojson item with
+         | Ok
+             (VS.Evidence_artifact_unreadable
+                { reference; reason = VS.Too_large { cap; at_least } }) ->
+           Alcotest.(check string) "the reference stays" "artifact:huge.log" reference;
+           Alcotest.(check int) "the ceiling is kept" 100 cap;
+           Alcotest.(check int) "the size is kept" 101 at_least
+         | Ok _ -> Alcotest.fail "an over-ceiling text must be unreadable"
+         | Error detail -> Alcotest.fail detail)
+      | _ -> Alcotest.fail "snapshot must hold one item")
 
 (* Endpoint-owned trees (microvm, remote-ssh) read through the backend;
    a shared-mount (Docker) tree keeps the store's direct host read. The
@@ -4738,7 +4786,6 @@ let test_unreadable_artifacts_reach_the_judge () =
         { reference = "artifact:proof.txt"
         ; content = "read from disk"
         ; bytes = 14
-        ; truncated = false
         }
     ; VS.Evidence_artifact_unreadable
         { reference = "artifact:missing.txt"; reason = VS.Evidence_missing }
@@ -4982,17 +5029,16 @@ let () =
         test_submit_snapshot_rejects_bare_and_absolute_references;
       Alcotest.test_case "submitted evidence rejects cross playground" `Quick
         test_submitted_evidence_inspection_rejects_cross_playground_path;
-      Alcotest.test_case "submitted evidence bounded UTF-8" `Quick
-        test_submitted_evidence_inspection_is_bounded_and_utf8_safe;
-      Alcotest.test_case "transport projection omits truncated prefix" `Quick
-        test_transport_projection_omits_truncated_prefix;
+      Alcotest.test_case "submitted evidence stores a large text whole" `Quick
+        test_submitted_evidence_stores_a_large_text_whole;
+      Alcotest.test_case "submitted evidence refuses a text over the ceiling" `Quick
+        test_submitted_evidence_refuses_a_text_over_the_ceiling;
+      Alcotest.test_case "transport projection omits a stored body" `Quick
+        test_transport_projection_omits_a_stored_body;
       Alcotest.test_case "transport projection bounds the evidence total" `Quick
         test_transport_projection_bounds_the_evidence_total;
       Alcotest.test_case "transport projection keeps the most items it can" `Quick
         test_transport_projection_keeps_the_most_items_it_can;
-      Alcotest.test_case "truncated snapshot items names over-cap artifacts"
-        `Quick
-        test_truncated_snapshot_items_names_only_truncated_artifacts;
       Alcotest.test_case "submitted evidence rejects unknown artifact field" `Quick
         test_submitted_evidence_rejects_unknown_artifact_field;
       Alcotest.test_case "submitted evidence rejects malformed UTF-8" `Quick
@@ -5025,6 +5071,8 @@ let () =
         test_submit_with_unreadable_producer_meta_refuses_artifacts;
       Alcotest.test_case "an injected reader answers under the text line" `Quick
         test_an_injected_reader_answers_under_the_text_line;
+      Alcotest.test_case "an injected reader answers too large" `Quick
+        test_an_injected_reader_answers_too_large;
       Alcotest.test_case "large binary snapshots retain complete immutable bytes" `Quick test_complete_large_binary_snapshots;
       Alcotest.test_case "a binary payload is adopted and filed" `Quick
         test_a_binary_payload_is_adopted_and_filed;

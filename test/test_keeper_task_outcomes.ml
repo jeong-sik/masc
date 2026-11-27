@@ -1240,7 +1240,7 @@ let test_done_receipt_is_bound_to_the_captured_request () =
       (fun config ~(task : Masc_domain.task) ~assignee ~verification_id ~claim:_ ->
         let open Workspace_verification_store in
         let items = [Evidence_artifact { reference = "artifact:repo/present";
-            content = "private artifact body"; bytes = 21; truncated = false };
+            content = "private artifact body"; bytes = 21 };
           Evidence_artifact_unreadable { reference = "artifact:evidence/missing";
             reason = Evidence_read_error ("No such file: " ^ verification_id) }] in
         match Masc.Verification.create_request ~base_path:config.base_path

@@ -191,7 +191,7 @@ let test_other_kinds_have_no_preview_and_json_is_the_persisted_json () =
     let others =
       [ Store.Evidence_note "tests green"
       ; Store.Evidence_artifact
-          { reference = "artifact:p.json"; content = "{}"; bytes = 2; truncated = false }
+          { reference = "artifact:p.json"; content = "{}"; bytes = 2 }
       ; Store.Evidence_invalid_reference
       ; Store.Evidence_artifact_unreadable
           { reference = "artifact:gone"; reason = Store.Evidence_missing }
@@ -309,7 +309,7 @@ let test_download_preserves_original_bytes () =
     let binary = filed_binary ~base_path ~request_id:"vr-download" ~index:1 ~format:"pdf" pdf in
     let text = "한글\r\nsecond line\r\n" in
     let items = [Store.Evidence_artifact {reference="artifact:report.txt";
-      content=text;bytes=String.length text;truncated=false};binary] in
+      content=text;bytes=String.length text};binary] in
     List.iteri (fun index expected ->
       match Operator.file_to_yojson ~base_path ~index (access items) with
       | Error detail -> Alcotest.fail detail
@@ -324,15 +324,57 @@ let test_download_preserves_original_bytes () =
         Alcotest.(check string) "original bytes" expected (Base64.decode_exn encoded))
       [text;pdf])
 
+(* An item whose bytes are not all there is never saved as a complete file: a
+   text record whose size disagrees with its content, a stored body the blob
+   store no longer holds, an unreadable item, and an index that names none. *)
 let test_download_refuses_missing_or_partial_items () =
   with_base_path (fun base_path ->
-    let artifact content bytes truncated = Store.Evidence_artifact {
-      reference="artifact:report.txt";content;bytes;truncated} in
-    let items=[artifact "prefix" 100 true;artifact "prefix" 100 false;
-      Store.Evidence_artifact_unreadable {reference="artifact:missing";reason=Store.Evidence_missing}] in
+    let absent =
+      match
+        Tool_output.make_artifact_ref ~sha256:(sha256_of "absent") ~bytes:6 ~preview:""
+          ~mime:"text/plain"
+      with
+      | Ok blob -> blob
+      | Error error -> Alcotest.fail (Tool_output.make_error_to_string error) in
+    let items =
+      [ Store.Evidence_artifact { reference = "artifact:short.txt"; content = "prefix"; bytes = 100 }
+      ; Store.Evidence_artifact_body { reference = "artifact:gone.txt"; blob = absent }
+      ; Store.Evidence_artifact_unreadable
+          { reference = "artifact:missing"; reason = Store.Evidence_missing } ] in
     List.iter (fun index ->
       match Operator.file_to_yojson ~base_path ~index (access items) with
       | Error _ -> () | Ok _ -> Alcotest.fail "incomplete evidence became a complete file") [-1;0;1;2;3])
+
+(* A text too large for the record was stored whole in the blob store. The
+   operator download serves the stored bytes while they match the recorded
+   size and digest, and nothing once they do not. *)
+let test_download_serves_a_stored_body_whole () =
+  with_base_path (fun base_path ->
+    let text = String.concat "\n" (List.init 3000 (fun n -> Printf.sprintf "line %04d of a long report" n)) in
+    let blob =
+      Tool_blob_store.put_durable (Tool_blob_store.create ~base_path) ~bytes:text ~mime:"text/plain" in
+    let serve blob =
+      Operator.file_to_yojson ~base_path ~index:0
+        (access [ Store.Evidence_artifact_body { reference = "artifact:report.txt"; blob } ]) in
+    (match serve blob with
+     | Error detail -> Alcotest.fail detail
+     | Ok result ->
+       let open Yojson.Safe.Util in
+       Alcotest.(check string) "the stored text comes back whole" text
+         (Base64.decode_exn (result |> member "body_base64" |> to_string));
+       Alcotest.(check string) "under its recorded digest" blob.Tool_output.sha256
+         (result |> member "sha256" |> to_string));
+    (* The same bytes recorded one byte longer no longer match. *)
+    let other =
+      match
+        Tool_output.make_artifact_ref ~sha256:blob.Tool_output.sha256
+          ~bytes:(blob.Tool_output.bytes + 1) ~preview:"" ~mime:"text/plain"
+      with
+      | Ok other -> other
+      | Error error -> Alcotest.fail (Tool_output.make_error_to_string error) in
+    (match serve other with
+     | Error _ -> ()
+     | Ok _ -> Alcotest.fail "a body that disagrees with its record was served"))
 
 let http_get_evidence ~router ?token target =
   let output=Buffer.create 1024 in
@@ -431,6 +473,7 @@ let () =
         Alcotest.test_case "actual HTTP permissions, identity and large binary download" `Quick test_actual_download_route_and_local_export;
         Alcotest.test_case "original text and non-image binary bytes round trip" `Quick test_download_preserves_original_bytes;
         Alcotest.test_case "partial and missing snapshots cannot be saved as complete files" `Quick test_download_refuses_missing_or_partial_items;
+        Alcotest.test_case "a stored body is served whole" `Quick test_download_serves_a_stored_body;
       ] )
     ; ( "preview"
       , [ Alcotest.test_case "an image under the ceiling is inline" `Quick

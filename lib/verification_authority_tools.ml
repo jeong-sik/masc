@@ -32,7 +32,8 @@ let source_tools submitted_evidence =
       (match Workspace_verification_store.collaboration_reference reference with
        | Some (Workspace_verification_store.Task_source, _) -> true
        | Some ((Workspace_verification_store.Board_source | Workspace_verification_store.Fusion_source), _) | None -> false)
-    | Evidence_note _ | Evidence_artifact _ | Evidence_invalid_reference
+    | Evidence_note _ | Evidence_artifact _ | Evidence_artifact_body _
+    | Evidence_invalid_reference
     | Evidence_artifact_unreadable _ | Evidence_artifact_binary _ -> false) submitted_evidence in
   [Board_source; Fusion_source]
   @ (if has_task_source then [Task_source] else [])
@@ -100,8 +101,9 @@ let submitted_artifact_property =
 ;;
 
 let stored_page_sha256_description =
-  "full_text_sha256 from the [TRUNCATED ...] marker of a masc_web_fetch result \
-   of this review. No other stored content is readable."
+  "sha256 of a stored text: the full_text_sha256 a masc_web_fetch result of \
+   this review named, or the sha256 of an artifact this submission stored \
+   whole. No other stored content is readable."
 ;;
 
 (* The Keeper description speaks of blob markers a review never sees. *)
@@ -493,7 +495,7 @@ let schema_of_tool (tool, (descriptor : Keeper_tool_descriptor.t)) : Types_core.
        | Task_source ->
          "Read exactly one Task frozen by an explicit task:<id> reference in this verification submission. Supply task_ids with that one id. Includes the canonical Task state, completion timestamp and notes plus primary backlog revision; no live listing, recovery snapshot or other Task is read. A Done row is committed state, not complete approval history or external acceptance. Large sources return source_json_page fragments; follow next_cursor to null and concatenate the exact JSON. Read-only."
        | Artifact_source ->
-         "Read one text artifact frozen in this verification submission by its exact reference, or page and search the full text of a long masc_web_fetch result of this review by the full_text_sha256 its [TRUNCATED ...] marker names. A stored text is readable only when a masc_web_fetch of this review returned its sha256. The submitted artifact serves the content captured at submission, never the producer's current file. Large sources return source_json_page content fragments under the bridge byte budget; follow next_cursor to null and concatenate content to recover the exact text. Read-only."
+         "Read one text artifact frozen in this verification submission by its exact reference, or page and search a stored text by sha256: the full text of a long masc_web_fetch result of this review (the full_text_sha256 its [TRUNCATED ...] marker names) or an artifact this submission stored whole (the sha256 its evidence line names). No other stored content is readable. A submitted artifact serves the content captured at submission, never the producer's current file. Large sources return source_json_page content fragments under the bridge byte budget; follow next_cursor to null and concatenate content to recover the exact text. Read-only."
        | Search_files | Web_fetch -> descriptor.description)
   ; input_schema = descriptor.input_schema
   }
@@ -585,6 +587,24 @@ let remember_stored_page stored_pages sha256 =
     then loop ()
   in
   loop ()
+;;
+
+(* The content addresses this submission recorded for text it stored whole.
+   They are readable like the hashes this surface's own fetch answered with:
+   both name bytes the review was handed, not a hash quoted at it. *)
+let submitted_body_sha256 submitted_evidence =
+  List.filter_map
+    (function
+      | (Workspace_verification_store.Evidence_artifact_body { blob; _ }
+         : Workspace_verification_store.submitted_evidence_item) ->
+        Some blob.Tool_output.sha256
+      | Workspace_verification_store.Evidence_collaboration _
+      | Workspace_verification_store.Evidence_note _
+      | Workspace_verification_store.Evidence_artifact _
+      | Workspace_verification_store.Evidence_invalid_reference
+      | Workspace_verification_store.Evidence_artifact_unreadable _
+      | Workspace_verification_store.Evidence_artifact_binary _ -> None)
+    submitted_evidence
 ;;
 
 (* What one call of the artifact reader asks for. The schema lists the members
@@ -686,7 +706,8 @@ let run t tool ~args =
        Error (Collaboration_error (Verification_collaboration_evidence.Invalid_request message))
      | Ok Submitted_artifact ->
        collaboration_read Verification_collaboration_evidence.read_artifact
-     | Ok (Stored_page { sha256 }) when List.mem sha256 (Atomic.get t.stored_pages) ->
+     | Ok (Stored_page { sha256 })
+       when List.mem sha256 (Atomic.get t.stored_pages @ submitted_body_sha256 t.submitted_evidence) ->
        Keeper_artifact_read.handle ~base_path:t.config.Workspace.base_path ~args
        |> execution_result
      | Ok (Stored_page _) ->

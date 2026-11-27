@@ -58,7 +58,7 @@ let request_digest_of = function
 let body_path store digest =
   Filename.concat (Store.root store)
     (Filename.concat "tool-request-bodies" (Filename.concat (Store.digest scope) (digest ^ ".json")))
-let scope_rows ?(scope=scope) ?digest_of store =
+let scope_rows ?(scope=scope) ?digest_of store () =
   Store.tool_request_scope_with_bodies store ~scope
     ~request_digest_of:(Option.value digest_of ~default:request_digest_of)
 let test_a_scope_is_read_in_one_read_with_its_bodies () = with_store (fun root store ->
@@ -98,7 +98,7 @@ let test_a_scope_is_read_in_one_read_with_its_bodies () = with_store (fun root s
    | None -> Alcotest.fail "a scope with a staged entry read as absent");
   Sys.remove stage;
   (* A scope with no directory is absent. *)
-  Alcotest.(check bool) "no directory is absence" true (get (scope_rows ~scope:"no-such-scope" store) = None);
+  Alcotest.(check bool) "no directory is absence" true (get (scope_rows ~scope:"no-such-scope" store ()) = None);
   Alcotest.(check (list string)) "and load_scope reads nothing" []
     (owned (Owner.load_scope ~store ~scope:"no-such-scope"));
   (* A record whose body is gone is neither an original nor absence. *)

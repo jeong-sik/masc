@@ -247,22 +247,38 @@ let artifact_result_envelope_to_json ~artifact_manifest ~structured_content ?con
 
 type artifact_result_envelope_decode =
   | Not_artifact_result_envelope
+  | Invalid_artifact_result_envelope of
+      { detail : string
+      ; artifact_manifest_fields : (string * Yojson.Safe.t) list
+      }
   | Decoded_artifact_result_envelope of
       { structured_content : Yojson.Safe.t
       ; artifact_manifest : artifact_ref
       ; content : string option
       }
 
+let artifact_result_envelope_names_no_manifest =
+  "result envelope artifact_manifest does not name a tool result manifest"
+;;
+
 let artifact_result_envelope_of_json json =
   let decoded ~structured_content ~artifact_manifest ~content =
-    match normalized_artifact_ref_of_json artifact_manifest with
-    | Decoded_normalized_artifact_ref reference
-      when String.equal reference.mime artifact_manifest_mime ->
-      Decoded_artifact_result_envelope
-        { structured_content; artifact_manifest = reference; content }
-    | Decoded_normalized_artifact_ref _
-    | Invalid_normalized_artifact_ref _
-    | Not_normalized_artifact_ref -> Not_artifact_result_envelope
+    match artifact_manifest with
+    | `Assoc artifact_manifest_fields ->
+      (match normalized_artifact_ref_of_json artifact_manifest with
+       | Decoded_normalized_artifact_ref reference
+         when String.equal reference.mime artifact_manifest_mime ->
+         Decoded_artifact_result_envelope
+           { structured_content; artifact_manifest = reference; content }
+       | Decoded_normalized_artifact_ref _ ->
+         Invalid_artifact_result_envelope
+           { detail = artifact_result_envelope_names_no_manifest
+           ; artifact_manifest_fields
+           }
+       | Invalid_normalized_artifact_ref { detail } ->
+         Invalid_artifact_result_envelope { detail; artifact_manifest_fields }
+       | Not_normalized_artifact_ref -> Not_artifact_result_envelope)
+    | _ -> Not_artifact_result_envelope
   in
   match json with
   | `Assoc [ "structured_content", structured_content; "artifact_manifest", artifact_manifest ]
@@ -348,6 +364,10 @@ type structured_reference =
   | Invalid_structured_handle of { detail : string }
   | Structured_handle of artifact_ref
   | Result_envelope_manifest of artifact_ref
+  | Invalid_result_envelope_manifest of
+      { detail : string
+      ; artifact_manifest_fields : (string * Yojson.Safe.t) list
+      }
 
 (* One parse answers both questions a durable string can be asked: is it a
    structured handle, and is it an inline result envelope. *)
@@ -365,14 +385,9 @@ let decode_structured_reference s =
          (match artifact_result_envelope_of_json json with
           | Decoded_artifact_result_envelope { artifact_manifest; _ } ->
             Result_envelope_manifest artifact_manifest
+          | Invalid_artifact_result_envelope { detail; artifact_manifest_fields } ->
+            Invalid_result_envelope_manifest { detail; artifact_manifest_fields }
           | Not_artifact_result_envelope -> No_structured_reference))
-;;
-
-let decode_structured_handle s =
-  match decode_structured_reference s with
-  | No_structured_reference | Result_envelope_manifest _ -> Not_marker
-  | Invalid_structured_handle { detail } -> Invalid_marker { detail }
-  | Structured_handle reference -> Decoded reference
 ;;
 
 (* Pure deterministic parser for the exact AGENT_CORE blob marker grammar:
@@ -546,8 +561,3 @@ let decode_from_agent_core s =
        with
        | Ok artifact_ref -> Decoded artifact_ref
        | Error err -> Invalid_marker { detail = make_error_to_string err })
-
-let decode_any_handle s =
-  match decode_structured_handle s with
-  | (Decoded _ | Invalid_marker _) as res -> res
-  | Not_marker -> decode_from_agent_core s

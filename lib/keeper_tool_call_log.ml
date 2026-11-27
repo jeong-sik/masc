@@ -1163,6 +1163,18 @@ let log_call
               @ Tool_output.normalized_artifact_refs_in_json (Tool_result.data result)
           | None -> []
         in
+        (* A result that went to the model inline is logged as its envelope
+           text, and [truncate_json_document] rewrites that text when it is
+           longer than [max_output_len]. The manifest is read from the text
+           before the cut, so the row names it whatever the length. *)
+        let output_manifest_refs =
+          match Tool_output.decode_structured_reference output_text with
+          | Tool_output.Result_envelope_manifest reference -> [ reference ]
+          | Tool_output.No_structured_reference
+          | Tool_output.Invalid_structured_handle _
+          | Tool_output.Structured_handle _
+          | Tool_output.Invalid_result_envelope_manifest _ -> []
+        in
         let refs =
           List.fold_left
             (fun (seen, acc) reference ->
@@ -1173,7 +1185,7 @@ let log_call
               then seen, acc
               else Set_util.StringSet.add key seen, (key, json) :: acc)
             (Set_util.StringSet.empty, [])
-            (artifact_refs @ typed_refs)
+            (artifact_refs @ output_manifest_refs @ typed_refs)
           |> snd
           |> List.sort (fun (k1, _) (k2, _) -> String.compare k1 k2)
           |> List.map snd

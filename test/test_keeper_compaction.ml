@@ -563,17 +563,16 @@ let test_tool_output_structured_handle_and_head_tail_preview () =
      fail "non-Scanf marker failed roundtrip");
   (* Structured JSON handle roundtrip *)
   let structured = Tool_output.encode_structured_handle stored in
-  (match Tool_output.decode_structured_handle structured with
-   | Tool_output.Decoded decoded ->
+  (match Tool_output.decode_structured_reference structured with
+   | Tool_output.Structured_handle decoded ->
      check string "structured sha256" ref_.sha256 decoded.sha256;
      check int "structured bytes" ref_.bytes decoded.bytes;
      check bool "structured preview retains tail" true (contains ~needle:tail_marker decoded.preview)
-   | Tool_output.Not_marker | Tool_output.Invalid_marker _ ->
+   | Tool_output.No_structured_reference
+   | Tool_output.Invalid_structured_handle _
+   | Tool_output.Result_envelope_manifest _
+   | Tool_output.Invalid_result_envelope_manifest _ ->
      fail "structured handle failed roundtrip");
-  (match Tool_output.decode_any_handle structured with
-   | Tool_output.Decoded decoded ->
-     check string "decode_any_handle reads structured" ref_.sha256 decoded.sha256
-   | _ -> fail "decode_any_handle missed structured handle");
   (* Invalid marker fails closed *)
   (match Tool_output.decode_from_agent_core "[masc:blob sha256=bad bytes=1 mime=text/plain preview=\"x\"]" with
    | Tool_output.Invalid_marker _ -> ()
@@ -1147,6 +1146,61 @@ let test_an_archived_blob_reference_stays_live () =
     check bool "the archived tool result's blob stays live" true
       (List.mem (`String marker) references)
   | Ok (Some _) | Ok None | Error _ -> fail "the archived blob reference was not reported"
+;;
+
+(* A result that went to a model inline is archived as its envelope text. The
+   manifest the envelope names must come back live: only the manifest lists
+   the result's artifacts. *)
+let test_an_archived_inline_result_keeps_its_manifest_live () =
+  with_temp_dir
+  @@ fun base_path ->
+  let store = Tool_blob_store.create ~base_path in
+  let structured_content = `Assoc [ "status", `String "ok" ] in
+  let manifest =
+    Tool_blob_store.put_durable
+      store
+      ~bytes:
+        (Tool_output.artifact_manifest_to_json ~content:"" ~structured_content
+         |> Yojson.Safe.to_string)
+      ~mime:Tool_output.artifact_manifest_mime
+  in
+  let envelope =
+    Tool_output.artifact_result_envelope_to_json
+      ~artifact_manifest:manifest
+      ~structured_content
+      ()
+    |> Yojson.Safe.to_string
+  in
+  let keepers_dir = Filename.concat base_path ".masc/keepers" in
+  Fs_compat.mkdir_p keepers_dir;
+  let id = "call-inline#1-run" in
+  let history =
+    let open Agent_core.Types in
+    [ message ~metadata:(stamped "inline#1") User [ Text "run it" ]
+    ; message Assistant [ ToolUse { id; name = "run"; input = `Assoc [] } ]
+    ; { (message
+           Tool
+           [ ToolResult
+               { tool_use_id = id
+               ; content = envelope
+               ; outcome = Tool_succeeded
+               ; json = None
+               ; content_blocks = None
+               }
+           ])
+        with
+        tool_call_id = Some id
+      }
+    ; message Assistant [ Text "ran it" ]
+    ]
+    @ agent_core_turn ~turn:"inline#2" ~prompt:"next" ~answer:"done" ()
+  in
+  ignore (committed (compact ~keepers_dir ~keeper_id:"inline" ~prefix:3 history));
+  match C.decode_live_blob_references_json (C.db_path ~keepers_dir ~keeper_id:"inline") with
+  | Ok (Some (`List references)) ->
+    check bool "the archived inline result's manifest stays live" true
+      (List.mem (Tool_output.normalized_artifact_ref_to_json manifest) references)
+  | Ok (Some _) | Ok None | Error _ -> fail "the archived inline result's manifest was not reported"
 ;;
 
 let test_per_keeper_token_is_redacted_under_config_keepers () =
@@ -2235,6 +2289,8 @@ let () =
             test_secrets_are_redacted_at_the_storage_boundary
         ; test_case "an archived blob reference stays live" `Quick
             test_an_archived_blob_reference_stays_live
+        ; test_case "an archived inline result keeps its manifest live" `Quick
+            test_an_archived_inline_result_keeps_its_manifest_live
         ; test_case "per-keeper token is redacted under config/keepers" `Quick
             test_per_keeper_token_is_redacted_under_config_keepers
         ; test_case "zero-byte database reads as empty" `Quick test_zero_byte_database_reads_as_empty

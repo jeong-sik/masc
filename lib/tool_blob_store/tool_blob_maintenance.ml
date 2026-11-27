@@ -310,6 +310,24 @@ let add_references
         manifest expansion reaches the result's artifacts from it. *)
      | Tool_output.Result_envelope_manifest reference ->
        Ok (Live_reference_set.add (Artifact reference) references)
+     (* The envelope's manifest field holds a [_blob] that does not decode.
+        It is handled as that object is handled when a record stores it
+        outside a string. *)
+     | Tool_output.Invalid_result_envelope_manifest { detail; artifact_manifest_fields } ->
+       (match mode with
+        | Strict_structured ->
+          Error (Malformed_structured_artifact_reference { path; line; detail })
+        | Resilient_structured callbacks ->
+          let references, fields_to_scan =
+            pin_malformed_blob_assoc
+              ~callbacks
+              ~path
+              ~line
+              ~detail
+              references
+              artifact_manifest_fields
+          in
+          scan_fields_resilient references fields_to_scan)
      | Tool_output.Invalid_structured_handle { detail } ->
        (match mode with
         | Strict_structured ->

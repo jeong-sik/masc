@@ -804,55 +804,6 @@ export async function fetchSkills(opts: GetOptions = {}): Promise<SkillsResponse
   return decodeSkillsResponse(raw)
 }
 
-function isLowerHexRevision(value: string): boolean {
-  if (value.length !== 64) return false
-  for (const character of value) {
-    if (!((character >= '0' && character <= '9') || (character >= 'a' && character <= 'f'))) {
-      return false
-    }
-  }
-  return true
-}
-
-function isPortableName(value: string): boolean {
-  return value !== '.' && value !== '..' && /^[A-Za-z0-9._-]+$/.test(value)
-}
-
-function isCanonicalSkillName(value: string): boolean {
-  const canonical = value.trim().normalize('NFKC')
-  const scalars = [...canonical]
-  return value === canonical
-    && scalars.length > 0
-    && scalars.length <= 64
-    && !canonical.startsWith('-')
-    && !canonical.endsWith('-')
-    && !canonical.includes('--')
-    && /^[\p{Alphabetic}\p{Number}-]+$/u.test(canonical)
-    && canonical.toLowerCase() === canonical
-}
-
-function skillReferenceIdentityIsValid(identity: SkillIdentity): boolean {
-  return isPortableName(identity.source_id)
-    && identity.package_id !== '.'
-    && identity.package_id !== '..'
-    && identity.package_id !== ''
-    && !identity.package_id.includes('/')
-    && !identity.package_id.includes('\\')
-    && !identity.package_id.includes('\0')
-}
-
-function skillIdentityIsValid(identity: SkillIdentity): boolean {
-  return skillReferenceIdentityIsValid(identity) && isCanonicalSkillName(identity.name)
-}
-
-export function decodeExactSkillReference(raw: unknown): SkillReference {
-  const reference = decodeWithSchema(SkillReferenceSchema, raw, 'invalid_response')
-  if (!skillIdentityIsValid(reference.identity) || !isLowerHexRevision(reference.content_revision)) {
-    contractError('invalid_response', 'invalid exact Skill reference')
-  }
-  return reference
-}
-
 export function decodeAsyncRequestObservation(raw: unknown): AsyncRequestObservation {
   const decoded = decodeWithSchema(
     AsyncRequestObservationSchema,

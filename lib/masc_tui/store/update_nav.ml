@@ -7974,7 +7974,8 @@ let queue_context_max_scroll (m : Model.t) tab =
   max 0 (total_rows - body_h)
 
 (* The Markdown area of the loaded page in the wiki card, where
-   [Screen_knowledge.draw_wiki_preview] draws it. *)
+   [Screen_knowledge.draw_wiki_preview] draws it; [None] when the title band
+   fills the card. *)
 let wiki_page_markdown_rect ~bp (frame : Wiki_card_layout.frame) =
   Wiki_card_layout.page bp ~inline_rail:frame.inline_rail
     (Masc_tui_ui.Card.inner_rect frame.preview)
@@ -7995,8 +7996,10 @@ let wiki_preview_max_scroll ~bp ~theme (frame : Wiki_card_layout.frame)
       markdown_max_scroll ~theme ~width:r.w ~height:r.h text
     in
     match page_detail with
-    | Some d ->
-        max_scroll_in (wiki_page_markdown_rect ~bp frame) d.body_markdown
+    | Some d -> (
+        match wiki_page_markdown_rect ~bp frame with
+        | Some r -> max_scroll_in r d.body_markdown
+        | None -> 0)
     | None -> (
         match sel_summary with
         | Some s ->
@@ -9478,9 +9481,10 @@ let step_wiki_link ~now ~delta (m : Model.t) =
           (fun detail -> (sel.slug, detail))
           (Observed.to_option (Knowledge_store.wiki_page_for ~slug:sel.slug k)))
   in
-  let markdown = wiki_page_markdown_rect ~bp:(ui_bp m) (wiki_preview_frame m) in
   let size =
-    if Rect.is_empty markdown then None else Some (markdown.w, markdown.h)
+    Option.map
+      (fun (r : Rect.t) -> (r.w, r.h))
+      (wiki_page_markdown_rect ~bp:(ui_bp m) (wiki_preview_frame m))
   in
   match (page, size) with
   | Some (slug, (detail : Wire_knowledge.wiki_page_detail)), Some (width, height)

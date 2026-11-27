@@ -41,9 +41,9 @@ val page : Layout.breakpoint -> inline_rail:bool -> Rect.t -> page
     when [inline_rail] is [true], the breakpoint is [Wide], and the area below
     the band is at least 68 columns by 8 rows. *)
 
-val page_markdown : page -> Rect.t
-(** The rectangle the page Markdown is drawn and scrolled in. Empty when the
-    page has no body area. *)
+val page_markdown : page -> Rect.t option
+(** The rectangle the page Markdown is drawn and scrolled in; [None] when the
+    band fills the card. On a very short card the rectangle has no rows. *)
 
 type summary = {
   heading : Rect.t;  (** Slug, author and update time. *)

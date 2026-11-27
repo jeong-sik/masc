@@ -1309,29 +1309,31 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
             let layout =
               Wiki_card_layout.page bp ~inline_rail:show_inline_rail inner
             in
-            let md_rect = Wiki_card_layout.page_markdown layout in
-            let total_md_lines =
-              List.length
-                (Markdown.render_lines ~width:(Int.max 1 md_rect.w) ~theme
-                   d.body_markdown)
-            in
-            let visible_lines = Int.max 1 md_rect.h in
             let right_meta =
               let base =
                 Printf.sprintf "%s · r%d" d.frontmatter.updated
                   d.frontmatter.revision
               in
-              if total_md_lines > visible_lines then
-                let cs =
-                  Int.min (Int.max 0 (total_md_lines - visible_lines))
-                    (Int.max 0 scroll)
+              match Wiki_card_layout.page_markdown layout with
+              | None -> base
+              | Some md_rect ->
+                let total_md_lines =
+                  List.length
+                    (Markdown.render_lines ~width:(Int.max 1 md_rect.w) ~theme
+                       d.body_markdown)
                 in
-                let ve = Int.min total_md_lines (cs + visible_lines) in
-                let rem = Int.max 0 (total_md_lines - ve) in
-                if rem > 0 then
-                  Printf.sprintf "%s · L%d-%d/%d ↓+%d" base (cs + 1) ve total_md_lines rem
-                else Printf.sprintf "%s · L%d-%d/%d" base (cs + 1) ve total_md_lines
-              else base
+                let visible_lines = Int.max 1 md_rect.h in
+                if total_md_lines > visible_lines then
+                  let cs =
+                    Int.min (Int.max 0 (total_md_lines - visible_lines))
+                      (Int.max 0 scroll)
+                  in
+                  let ve = Int.min total_md_lines (cs + visible_lines) in
+                  let rem = Int.max 0 (total_md_lines - ve) in
+                  if rem > 0 then
+                    Printf.sprintf "%s · L%d-%d/%d ↓+%d" base (cs + 1) ve total_md_lines rem
+                  else Printf.sprintf "%s · L%d-%d/%d" base (cs + 1) ve total_md_lines
+                else base
             in
             Card.draw_section_band ~pad_x grid ~rect:layout.band ~theme
               ~left_title:d.frontmatter.title ~right_meta

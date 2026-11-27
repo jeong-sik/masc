@@ -96,9 +96,9 @@ let page bp ~inline_rail (inner : Rect.t) =
   { band; body }
 
 let page_markdown = function
-  | { body = Some (Rail { prose; _ }); _ } -> prose
-  | { body = Some (Stacked { markdown; _ }); _ } -> markdown
-  | { body = None; _ } -> Rect.empty
+  | { body = Some (Rail { prose; _ }); _ } -> Some prose
+  | { body = Some (Stacked { markdown; _ }); _ } -> Some markdown
+  | { body = None; _ } -> None
 
 type summary = {
   heading : Rect.t;

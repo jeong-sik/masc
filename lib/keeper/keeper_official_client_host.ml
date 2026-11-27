@@ -253,6 +253,16 @@ let resolve_reasoning_effort ~enable_thinking ~reasoning_effort =
 let measure_message_bytes message = String.length (encode_history_message message)
 ;;
 
+(* What opens a range when the writer's read end does not: the four starts a
+   lane takes on its own. A read end behind them still sends its working
+   state ([Past_librarian_point]), so the range names its opener and the
+   read end separately. *)
+type range_opener =
+  | Opened_at_seed of Keeper_carried_front.source
+  | Opened_at_lane_cut
+  | Opened_at_turn_start
+  | Opened_on_newest_atom of { reason : string }
+
 type carried_start_front =
   | Carried_seed of Keeper_carried_front.source
       (** The seed named the front: the ledger of an Agent Core pair, the
@@ -282,6 +292,18 @@ type carried_start_front =
       (** The Memory writer read the history through [end_atom]; the range
           starts there, the atoms before it are in the keeper's memory, and
           nothing stands in for them. *)
+  | Past_librarian_point of { end_atom : int; opened_at : range_opener }
+      (** The Memory writer read the history through [end_atom] and
+          committed a working state, but [opened_at] is past that point, so
+          the range starts there and the working state goes in front of it
+          (RFC-librarian-lifecycle §4.10, rules 2-4). *)
+
+let front_of_opener = function
+  | Opened_at_seed source -> Carried_seed source
+  | Opened_at_lane_cut -> Lane_cut
+  | Opened_at_turn_start -> Turn_start
+  | Opened_on_newest_atom { reason } -> Turn_start_unknown { reason }
+;;
 
 type carried_start =
   { messages : Agent_core.Types.message list
@@ -298,7 +320,7 @@ let project_source source_projection messages =
   | None -> Ok messages
   | Some project -> project messages
 
-let carried_start_front_to_string = function
+let rec carried_start_front_to_string = function
   | Carried_seed source ->
     Printf.sprintf "carried:%s" (Keeper_carried_front.source_to_string source)
   | Lane_cut -> "lane_cut"
@@ -310,14 +332,21 @@ let carried_start_front_to_string = function
      search finds both. *)
   | Covered _ -> "covered"
   | Covered_with_working_state _ -> "covered_with_working_state"
+  (* [front_of_opener] never yields this constructor, so the recursion is
+     one step deep. *)
+  | Past_librarian_point { opened_at; end_atom = _ } ->
+    "past_librarian_point:" ^ carried_start_front_to_string (front_of_opener opened_at)
 ;;
 
 type carried_front_observer =
   carried_start_front -> transmitted_bytes:int -> sends_from:int -> unit
 
 let warn_if_sent_on_unknown_start ~keeper_name = function
-  | Turn_start_unknown { reason } ->
+  | Turn_start_unknown { reason }
+  | Past_librarian_point { opened_at = Opened_on_newest_atom { reason }; end_atom = _ } ->
     Keeper_carried_front.warn_range_opens_on_newest_atom ~keeper_name ~reason
+  | Past_librarian_point
+      { opened_at = Opened_at_seed _ | Opened_at_lane_cut | Opened_at_turn_start; end_atom = _ }
   | Carried_seed _ | Lane_cut | Turn_start | Past_refused_start _ | Covered_with_working_state _
   | Covered _ -> ()
 ;;
@@ -362,6 +391,12 @@ type range_plan =
   | Plain of int * carried_start_front
   | Absorbed_through of
       { first_atom : int
+      ; absorbed_through : int
+      ; working_state : string
+      }
+  | Opened_past_absorbed of
+      { first_atom : int
+      ; opened_at : range_opener
       ; absorbed_through : int
       ; working_state : string
       }
@@ -413,16 +448,16 @@ let carried_start_range_on_source
     match turn_start with
     | Keeper_carried_front.Turn_boundary { end_atom } ->
       let turn_start = Keeper_carried_front.clamp ~atom_count:history_atom_count end_atom in
-      if own_first_atom > turn_start then own_first_atom, Lane_cut
-      else turn_start, Turn_start
+      if own_first_atom > turn_start then own_first_atom, Opened_at_lane_cut
+      else turn_start, Opened_at_turn_start
     | Keeper_carried_front.Turn_boundary_unknown { reason } ->
       (* The lane's own cut is a position this lane reached; without one
          the range opens on the newest atom alone, not on the whole
          history under a boundary that was never read. *)
-      if own_first_atom > 0 then own_first_atom, Lane_cut
+      if own_first_atom > 0 then own_first_atom, Opened_at_lane_cut
       else
         ( Keeper_carried_front.newest_atom ~atom_count:history_atom_count
-        , Turn_start_unknown { reason } )
+        , Opened_on_newest_atom { reason } )
   in
   let accepted_front =
     match admitted_seed with
@@ -433,7 +468,7 @@ let carried_start_range_on_source
     Option.map
       (fun (seed : Keeper_carried_front.seed) ->
          Keeper_carried_front.clamp_seed ~atom_count:history_atom_count seed,
-         Carried_seed seed.source)
+         Opened_at_seed seed.source)
       accepted_front
   in
   let seed_or_lane =
@@ -441,12 +476,15 @@ let carried_start_range_on_source
     | Some held -> held
     | None -> seedless
   in
-  (* What a Librarian position has to reach to win: the seed that holds, else
-     the lane's own cut. The turn start is not weighed against it. It is where
-     a request with no absorbed point begins (RFC
+  (* What a Librarian position has to reach to open the range: the seed that
+     holds, else the lane's own cut. The turn start is not weighed against it.
+     It is where a request with no absorbed point begins (RFC
      keeper-context-window-in-tokens §13.4), so a Librarian position behind it
      still names atoms that nothing else carries or summarises, and they go
-     out. *)
+     out. A position behind the bar does not move the start, but its working
+     state still goes in front of the range (RFC-librarian-lifecycle §4.10,
+     rule 4): it covers the atoms before that position, and the range holds
+     none of them. *)
   let librarian_must_reach =
     match seed_held with
     | Some (first_atom, _) -> first_atom
@@ -530,37 +568,49 @@ let carried_start_range_on_source
              history_atom_count;
            Some (refused_first_atom, front)))
   in
+  let plain_seed_or_lane =
+    let first_atom, opened_at = seed_or_lane in
+    Plain (first_atom, front_of_opener opened_at)
+  in
   let plan =
     match past_refused_start, librarian_front with
     | Some (first_atom, front), _ -> Plain (first_atom, front)
     | ( None
       , Keeper_turn_driver_try_provider.Covered
-          { end_atom; working_state = Some working_state } )
-      when end_atom >= librarian_must_reach ->
-      (* Without an accepted empty boundary, keep the newest atom so a
-         working state alone cannot remove the turn being answered. A
-         provider-accepted empty range keeps its witnessed end instead: the
-         official client receives the current goal separately. *)
-      Absorbed_through
-        { first_atom = librarian_first_atom end_atom
-        ; absorbed_through = end_atom
-        ; working_state = Keeper_turn_driver_try_provider.working_state_text working_state
-        }
-    | None, Keeper_turn_driver_try_provider.Covered { end_atom; working_state = None }
-      when end_atom >= librarian_must_reach ->
-      (* The writer read through [end_atom] and committed no working state:
-         the atoms before it are in the keeper's memory and nothing stands
-         in for them, as on the Agent Core lane
-         ([Keeper_carried_front.Covered]). Keep the newest atom
-         unless an accepted empty boundary already permits omitting it. *)
-      Plain
-        ( librarian_first_atom end_atom
-        , Covered { end_atom } )
-    | ( None
-      , ( Keeper_turn_driver_try_provider.Covered _
-        | Keeper_turn_driver_try_provider.No_read_end ) ) ->
-      let first_atom, front = seed_or_lane in
-      Plain (first_atom, front)
+          { end_atom; working_state = Some working_state } ) ->
+      let working_state = Keeper_turn_driver_try_provider.working_state_text working_state in
+      if end_atom >= librarian_must_reach
+      then
+        (* Without an accepted empty boundary, keep the newest atom so a
+           working state alone cannot remove the turn being answered. A
+           provider-accepted empty range keeps its witnessed end instead: the
+           official client receives the current goal separately. *)
+        Absorbed_through
+          { first_atom = librarian_first_atom end_atom
+          ; absorbed_through = end_atom
+          ; working_state
+          }
+      else (
+        (* RFC-librarian-lifecycle §4.10, rules 2-4: the seed or the lane's
+           own cut opens the range past the read end, and the working state
+           still goes in front of it, as on the Agent Core lane
+           ([Keeper_turn_driver_try_provider.Past_librarian_point]). It
+           covers the atoms before the read end, which the range does not
+           hold. The atoms between the read end and the range are the gap
+           (rule 3), which the Librarian reads next. *)
+        let first_atom, opened_at = seed_or_lane in
+        Opened_past_absorbed { first_atom; opened_at; absorbed_through = end_atom; working_state })
+    | None, Keeper_turn_driver_try_provider.Covered { end_atom; working_state = None } ->
+      if end_atom >= librarian_must_reach
+      then
+        (* The writer read through [end_atom] and committed no working
+           state: the atoms before it are in the keeper's memory and nothing
+           stands in for them, as on the Agent Core lane
+           ([Keeper_carried_front.Covered]). Keep the newest atom unless an
+           accepted empty boundary already permits omitting it. *)
+        Plain (librarian_first_atom end_atom, Covered { end_atom })
+      else plain_seed_or_lane
+    | None, Keeper_turn_driver_try_provider.No_read_end -> plain_seed_or_lane
   in
   let carried_messages, first_atom, front =
     match plan with
@@ -571,6 +621,10 @@ let carried_start_range_on_source
       ( working_state_message working_state :: messages
       , first_atom
       , Covered_with_working_state { end_atom = absorbed_through } )
+    | Opened_past_absorbed { first_atom; opened_at; absorbed_through; working_state } ->
+      ( working_state_message working_state :: messages
+      , first_atom
+      , Past_librarian_point { end_atom = absorbed_through; opened_at } )
     | Plain (first_atom, front) -> messages, first_atom, front
   in
   (* The cut is the same for every front. The window's omission preamble
@@ -602,10 +656,13 @@ let carried_start_range_on_source
        librarian_end
        first_atom
    | Absorbed_through _
+   (* The seed or the cut opened past the read end: no atom it read goes
+      out again. *)
+   | Opened_past_absorbed _
    | Plain
        ( _
        , ( Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Past_refused_start _
-         | Covered_with_working_state _ | Covered _ ) ) -> ());
+         | Covered_with_working_state _ | Covered _ | Past_librarian_point _ ) ) -> ());
   Log.Keeper.info
     ~keeper_name
     "model input carried range runtime=%s origin=%s first_atom=%d atoms=%d/%d \
@@ -749,7 +806,7 @@ let working_state_left_out_detail = function
 
 let carries_working_state (windowed : windowed_range) =
   match windowed.carried.front with
-  | Covered_with_working_state _ -> true
+  | Covered_with_working_state _ | Past_librarian_point _ -> true
   | Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Past_refused_start _
   | Covered _ -> false
 ;;
@@ -776,9 +833,10 @@ let has_accepted_empty_range (carried : carried_start) =
    composed with it first; when that window kept every atom of the range, it
    goes. Otherwise the same position is composed alone
    ([Covered] at the read end: the atoms before it are in
-   the keeper's memory, and nothing stands in for them), and the working
-   state goes only if the window kept as many atoms with it as without it
-   and at least the newest one. An explicitly accepted empty range also
+   the keeper's memory, and nothing stands in for them; or the seed's or the
+   cut's range with nothing in front when they opened past the read end), and
+   the working state goes only if the window kept as many atoms with it as
+   without it and at least the newest one. An explicitly accepted empty range also
    keeps a fitting working state: its current goal is delivered separately.
 
    Leaving it out is not a refusal. The band where it does not fit is
@@ -797,9 +855,8 @@ let compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front =
     let with_state = compose librarian_front in
     (match with_state with
      | Ok windowed when not (carries_working_state windowed) ->
-       (* The read end did not win the range -- the seed or the lane's own
-          cut sat past it -- so nothing was pinned, and the position alone
-          would be this same range. *)
+       (* A refused start chose the range ([Past_refused_start]), so nothing
+          was pinned, and the position alone would be this same range. *)
        with_state
      | Ok windowed
        when windowed.atoms_kept = carried_atoms windowed.carried

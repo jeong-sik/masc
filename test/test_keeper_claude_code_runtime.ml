@@ -7016,8 +7016,10 @@ let test_a_range_the_ceiling_fits_goes_as_cut () =
   (match project () with
    | Error error -> fail (Agent_core.Error.to_string error)
    | Ok sent -> goes_as_cut "no read end" sent);
-  (* A read end behind the cut does not win the range: the same range goes,
-     and no working state is counted as left out. *)
+  (* A read end behind the cut does not move the range. Its working state is
+     offered in front of the cut's range (RFC-librarian-lifecycle §4.10,
+     rule 4), and a ceiling the range fits exactly has no room for it: the
+     same range goes, and the working state is counted as left out once. *)
   let before = working_state_not_carried ~reason:"displaces_atoms" in
   match
     project
@@ -7027,7 +7029,7 @@ let test_a_range_the_ceiling_fits_goes_as_cut () =
   | Error error -> fail (Agent_core.Error.to_string error)
   | Ok sent ->
     goes_as_cut "a read end behind the cut" sent;
-    check (float 0.) "and no working state is counted as left out" before
+    check (float 0.) "and the working state is counted as left out once" (before +. 1.)
       (working_state_not_carried ~reason:"displaces_atoms")
 ;;
 

@@ -714,7 +714,7 @@ RFC §4 가 S1 앞에 남긴 읽지 않은 것을 읽었다. "조사만 함"은 
 - 계정 서버는 `Eio_context` 의 environment 와 switch 를 직접 놓는다(`:340-341`). 주석은 단일 사용자 boot 가 owner state 에서 놓는 것을 이 서버가 만들지 않아서라고 적는다(`:336-339`). 엔진을 띄우면 둘이 같은 것을 놓는다. 조사만 함: 같은 switch 로 두 번 놓으면 stream 과 daemon 이 둘 남고 일은 한 번만 돈다(`lib/eio_context/eio_context.ml:99-138`).
 - 다계정 boot 는 계정 서버의 거절을 `[FATAL]` 로 남기고 `Config_error` 를 던진다(`server_runtime_bootstrap.ml:2356-2366`). 계정 서버에 넘기는 인자에는 runtime switch, store quarantine 수락, 입력 base path 가 없다(`:2359`). 엔진 조립은 셋을 받고(`bin/main_stdio_eio.ml:129-145`), 다계정 boot 는 셋을 인자로 갖고 있다(`server_runtime_bootstrap.ml:2344-2346`).
 - 계정 서버 시험은 실행 파일 하나다. 접근 값을 올리는 case 가 하나이고 멈추는 case 는 올리기 전에 멈춘다는 전제에 기댄다(`test/test_server_accounts.ml:397-400, 760-779`, `test/stanzas/test_server_accounts.inc:3-4`).
-- 단일 사용자 HTTP 서버는 같은 초기화를 fiber 에서 돌린다(`server_runtime_bootstrap.ml:1781`). 준비 전에 실패하면 `[FATAL]` 을 남기고 프로세스를 끝내고(`:1783-1792`), 준비 뒤의 실패는 degraded 로 남긴다(`:1793-1797`). 정해진 시간 안에 준비되지 않으면 시작 감시(watchdog)가 프로세스를 끝낸다(`:2160-2182`). serve 는 초기화를 기다리지 않는다(`:2184`). 조사만 함: 포트 알림은 serve 단계에 있다(`:2206`).
+- 단일 사용자 HTTP 서버는 같은 초기화를 fiber 에서 돌린다(`server_runtime_bootstrap.ml:1781`). 준비 전에 실패하면 `[FATAL]` 을 남기고 프로세스를 끝내고(`:1783-1792`), 준비 뒤의 실패는 degraded 로 남긴다(`:1793-1797`). 준비되기 전에 시작이 정해진 시간 동안 멈춰 있으면 시작 감시(watchdog)가 프로세스를 끝낸다(`:2160-2182`). serve 는 초기화를 기다리지 않는다(`:2184`). 조사만 함: 포트 알림은 serve 단계에 있다(`:2206`).
 - 단일 사용자 HTTP boot 는 Keeper 가 뜨기 전에 파일을 지우는 정리 셋을 돈다. 다계정이면 건너뛰고, 주석은 계정 서버가 Keeper 를 띄우지 않아서라고 적는다(`bin/main_eio.ml:312-323, 604`). 조사만 함: stdio 서버는 초기화 앞에서 inventory 를 돈다(`bin/main_stdio_eio.ml:106-124`).
 
 ### 20.2 Keeper loop 가 띄우는 것

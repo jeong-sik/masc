@@ -93,7 +93,7 @@ related: []
 ### 3.1 한 프로세스에 계정 서버와 엔진을 띄운다
 
 - 다계정 boot 는 `Server_accounts.run` 으로 간다. 계정 서버가 zone 을 열고 `Multi_account` 를 올린 뒤, 올린 접근 값을 부르는 쪽(`Server_runtime_bootstrap.run`)이 준 함수에 넘긴다. 그 함수가 엔진을 띄운다. 계정 서버가 엔진 boot 를 직접 부르면 두 모듈이 서로를 가리킨다(연구 기록 §19.2).
-- 엔진은 단일 사용자 서버가 하듯 띄운다(연구 기록 §20.1). 접근 값이 올라간 뒤 fiber 에서 초기화한다. 준비 전에 실패하거나 시작 감시의 시간 안에 준비되지 않으면 프로세스를 끝낸다. 계정 서버의 순서는 바꾸지 않는다. 로그인과 설정은 엔진을 기다리지 않는다. 준비 신호(`/health/ready`)는 엔진이 준비된 뒤에야 200 이다. 그래야 `masc restart` 가 곧 끝날 서버를 준비됐다고 적지 않는다(연구 기록 §22.1).
+- 엔진은 단일 사용자 서버가 하듯 띄운다(연구 기록 §20.1). 접근 값이 올라간 뒤 fiber 에서 초기화한다. 준비 전에 실패하거나, 준비되기 전에 시작이 시작 감시가 정한 시간 동안 멈춰 있으면 프로세스를 끝낸다. 계정 서버의 순서는 바꾸지 않는다. 로그인과 설정은 엔진을 기다리지 않는다. 준비 신호(`/health/ready`)는 엔진이 준비된 뒤에야 200 이다. 그래야 `masc restart` 가 곧 끝날 서버를 준비됐다고 적지 않는다(연구 기록 §22.1).
 - 띄우는 것은 네 단계와 시작 감시다. 네 단계는 owner state 초기화, 활성화, 준비 표시, 준비 뒤 lane 이다. stdio 서버도 이 넷을 띄우지만 시작 감시는 띄우지 않는다(연구 기록 §21.1). 시작 감시는 준비 표시까지만 시간을 잰다. 단일 사용자 서버의 보조 구성(`Server_auxiliary_startup.run_all`, 구성 22개) 가운데 엔진이 띄우는 것은 준비 뒤 lane 하나다. 엔진이 넷째 단계로 직접 띄운다. gateway, gRPC, WebSocket, refresh loop 들을 포함한 나머지 21개는 띄우지 않는다. server state 도 공개하지 않는다. 준비 뒤 lane 의 background maintenance 는 Dashboard snapshot source 의 worker 들과 runtime probe loop 를 띄운다(연구 기록 §22.1).
 - 판정을 지나는 호출은 host 의 자격으로 모델을 부르지 못한다. 다계정 판정이 운영자 요청과 host 의 API key provider 를 거절한다(연구 기록 §21.2). 판정을 지나지 않는 길은 §4 에 적는다.
 - 엔진을 띄우는 함수(`initialize_owner_state_blocking`)는 단일 사용자를 받지 않는다. 부르는 쪽이 접근 값을 먼저 올리고, 올린 접근 값(`Runtime_account_access.published`)을 넘긴다. 그 값은 올리는 함수만 만든다. 함수는 base path 를 거기서 꺼낸다. 부르는 쪽은 셋이 된다. 단일 사용자 서버, stdio 서버, 다계정 boot 다.

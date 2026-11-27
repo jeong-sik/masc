@@ -215,15 +215,15 @@ let with_the_process_of_a_server installation run =
   Server_session_switch.run (fun ~runtime_sw sw -> run ~env ~runtime_sw ~sw lease)
 ;;
 
-(* What the case waits for comes within the time the startup watchdog gives
-   the engine, or the case fails rather than waits on. *)
-let within_the_watchdog ~clock what promise =
+(* What the case waits for comes within the silence the startup watchdog
+   allows the engine, or the case fails rather than waits on. *)
+let within_the_stall_limit ~clock what promise =
   match
-    Eio.Time.with_timeout clock (Server_startup_state.watchdog_timeout_sec ()) (fun () ->
+    Eio.Time.with_timeout clock (Server_startup_state.stall_timeout_sec ()) (fun () ->
       Ok (Eio.Promise.await promise))
   with
   | Ok value -> value
-  | Error `Timeout -> Alcotest.failf "%s did not come within the startup watchdog" what
+  | Error `Timeout -> Alcotest.failf "%s did not come within the startup stall limit" what
 ;;
 
 (* ---- the engine that comes up ---- *)
@@ -277,7 +277,7 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
     | Ok () -> ()
     | Error refusal -> Alcotest.fail (Server_accounts.refusal_to_string refusal));
   let clock = Eio.Stdenv.clock env in
-  let access, engine = within_the_watchdog ~clock "the start of the engine" started in
+  let access, engine = within_the_stall_limit ~clock "the start of the engine" started in
   (match Runtime_account_access.published_access access with
    | Runtime_account_access.Multi_account { zone = _; base_path; now = _ } ->
      Alcotest.(check string) "the engine starts on the access of the installation" base base_path
@@ -290,7 +290,7 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
   (* A failure before readiness ends the process. The promise is resolved at
      readiness, before the lanes start, so a lane that failed by the time the
      case reads the phase shows as degraded below. *)
-  let state = within_the_watchdog ~clock "the state of the engine" engine in
+  let state = within_the_stall_limit ~clock "the state of the engine" engine in
   let startup = Server_startup_state.snapshot () in
   Alcotest.(check bool) "the engine is ready" true startup.Server_startup_state.state_ready;
   (match startup.Server_startup_state.phase with
@@ -344,7 +344,7 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
     (match Runtime_account_access.engine_keeper_admission "unknown-keeper" with
      | Runtime_account_access.Unknown_person_keeper -> true
      | _ -> false);
-  within_the_watchdog ~clock "the listener of the account server" listening;
+  within_the_stall_limit ~clock "the listener of the account server" listening;
   let net = Eio.Stdenv.net env in
   (* The probe of the account server waits for this engine, which is ready
      above. *)
@@ -509,10 +509,10 @@ let test_a_refused_store_ends_the_process () =
     (Keeper_memory_os_current.path_for_keepers_dir ~keepers_dir ~keeper_id:"refused")
     "not a memory snapshot";
   (* The startup watchdog of the child ends an engine that is not ready one
-     period after the engine starts, and the engine starts after the spawn.
-     The parent waits one period from before the spawn, so an end it sees
-     within the wait is not the watchdog's. *)
-  let deadline = Unix.gettimeofday () +. Server_startup_state.watchdog_timeout_sec () in
+     stall limit after the engine last reported progress, and the engine
+     starts after the spawn. The parent waits one stall limit from before the
+     spawn, so an end it sees within the wait is not the watchdog's. *)
+  let deadline = Unix.gettimeofday () +. Server_startup_state.stall_timeout_sec () in
   let pid =
     Unix.create_process
       Sys.executable_name

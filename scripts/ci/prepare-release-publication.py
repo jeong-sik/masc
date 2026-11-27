@@ -136,7 +136,8 @@ def validate_receipt(receipt, run, repo):
 
 def validate_distribution(directory, checkout):
     expected = {'install.sh', 'install-runtime-setup.py', 'SHA256SUMS',
-                'masc-exec-shim-linux-amd64', 'masc-exec-shim-linux-arm64'}
+                'masc-exec-shim-linux-amd64', 'masc-exec-shim-linux-arm64',
+                'masc-exec-shim-licenses-linux-amd64.tar.gz', 'masc-exec-shim-licenses-linux-arm64.tar.gz'}
     for arch in PLATFORMS:
         expected.update({f'masc-{arch}', f'masc-tui-{arch}',
                          f'masc-deployment-preflight-helper-{arch}',

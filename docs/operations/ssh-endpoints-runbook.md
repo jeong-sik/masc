@@ -63,7 +63,9 @@ Release installations include `masc-exec-ssh-bootstrap` beside `masc`.
 Use the installer and assets from the same release. The release also publishes
 `masc-exec-shim-linux-amd64` and `masc-exec-shim-linux-arm64`; download and verify
 the one matching the SSH endpoint's CPU against that release's `SHA256SUMS`,
-then pass its path explicitly with `--shim`. The endpoint's architecture can
+then pass its path explicitly with `--shim`. The license notices of the OCaml
+packages and the musl each shim links statically are in
+`masc-exec-shim-licenses-linux-<arch>.tar.gz` of the same release. The endpoint's architecture can
 differ from the operator machine's. The guest shim installed under
 `<base>/.masc/microvm/shim/` follows the operator's guest architecture, so do not
 assume it matches a different SSH host.

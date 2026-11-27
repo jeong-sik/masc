@@ -128,7 +128,9 @@ GitHub identity 스냅샷, 작업 볼륨(`masc-keeper-work-<keeper>` →
 shim 은 서버 릴리즈의 자산이고, 설치기가 놓는다. 릴리즈마다
 `masc-exec-shim-linux-arm64` 와 `masc-exec-shim-linux-amd64` 가 서버 바이너리
 옆에 올라오고, 릴리즈 워크플로가 같은 아키텍처의 러너에서 정적으로 빌드해
-`--probe` 까지 확인한 것이다. 게스트는 arm64 다.
+`--probe` 까지 확인한 것이다. 게스트는 arm64 다. shim 이 정적으로 링크한
+OCaml 패키지와 musl 의 라이선스 고지는 같은 릴리즈의
+`masc-exec-shim-licenses-linux-<arch>.tar.gz` 에 들어 있다.
 
 `scripts/install.sh` 가 서버 바이너리와 같은 태그의 shim 을
 `<base>/.masc/microvm/shim/masc-exec-shim` 에 놓고, 옆에 릴리즈 `SHA256SUMS` 의

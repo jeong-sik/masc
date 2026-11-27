@@ -103,6 +103,9 @@ includes binary checksums, both source identities, and an actual framed payload
 that loads `env_file`, alongside the version probe. This establishes candidate
 shim/config execution; SSH transport, bootstrap installation, Keeper behavior,
 release verification and production deployment remain separate evidence.
+With `exec_shim_notices` set, the probe also writes the shim's license notice
+archive (`masc-exec-shim-licenses-linux-<arch>.tar.gz`) the way the release build
+does; the candidate's `build-shim.sh` must accept `--notices`.
 
 `pr-check.yml` offers optional explicit `workflow_dispatch` source/config syntax
 and committed-credential checks. With `native-tui-source-sha`, it also offers an

@@ -1,5 +1,7 @@
 open Keeper_meta_contract
 
+exception Stream_recv_error of string
+
 let grpc_client_ref : Masc_grpc_client.t option Atomic.t = Atomic.make None
 let grpc_env_ref : Eio_unix.Stdenv.base option Atomic.t = Atomic.make None
 
@@ -56,10 +58,12 @@ let run_grpc_heartbeat_stream
              Keeper_metrics.(to_string HeartbeatFailures)
              ~labels:[ "keeper", agent_name; "site", "grpc_recv" ]
              ();
-           Log.Keeper.warn "gRPC heartbeat recv: %s" err
+           Log.Keeper.warn "gRPC heartbeat recv: %s" err;
+           raise (Stream_recv_error err)
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | End_of_file -> raise End_of_file
+       | Stream_recv_error _ as e -> raise e
        | exn ->
          Otel_metric_store.inc_counter
            Keeper_metrics.(to_string HeartbeatFailures)
@@ -74,6 +78,7 @@ let run_grpc_heartbeat_stream
              ~clock
              ~stop
              ~wakeup:no_wakeup
+             ~interrupt_when:(fun () -> Atomic.get close_ref)
              (fun () -> interval_sec)
            : Keeper_keepalive_signal.sleep_outcome);
         tick ()))
@@ -150,24 +155,37 @@ let run_grpc_heartbeat_fiber
         if Atomic.get stop || Atomic.get close_ref
         then ()
         else (
-          let send, recv, close_stream =
-            Masc_grpc_client.heartbeat_stream grpc_client ~sw ~env
-          in
-          let installed_close = Some close_stream in
-          Atomic.set active_stream_close installed_close;
           let stream_outcome =
             try
-              run_grpc_heartbeat_stream
-                ~stop
-                ~close_ref
-                ~clock
-                ~interval_sec
-                ~config
-                ~agent_name
-                ~session_id
-                send
-                recv;
-              `Completed
+              Eio.Switch.run (fun attempt_sw ->
+                let send, recv, close_stream =
+                  Masc_grpc_client.heartbeat_stream grpc_client ~sw:attempt_sw ~env
+                in
+                let installed_close = Some close_stream in
+                Atomic.set active_stream_close installed_close;
+                Fun.protect
+                  ~finally:(fun () ->
+                    if Atomic.compare_and_set active_stream_close installed_close None
+                    then
+                      report_close_error
+                        (Eio.Cancel.protect (fun () ->
+                           try
+                             close_stream ();
+                             Ok ()
+                           with
+                           | exn -> Error exn)))
+                  (fun () ->
+                    run_grpc_heartbeat_stream
+                      ~stop
+                      ~close_ref
+                      ~clock
+                      ~interval_sec
+                      ~config
+                      ~agent_name
+                      ~session_id
+                      send
+                      recv);
+                `Completed)
             with
             | Eio.Cancel.Cancelled _ as exn -> `Cancelled exn
             | End_of_file ->
@@ -177,21 +195,20 @@ let run_grpc_heartbeat_fiber
               log_grpc_heartbeat_stream_failure ~agent_name ~attempts (`Error exn);
               `Reconnect
           in
-          if Atomic.compare_and_set active_stream_close installed_close None
-          then
-            report_close_error
-              (Eio.Cancel.protect (fun () ->
-                 try
-                   close_stream ();
-                   Ok ()
-                 with
-                 | exn -> Error exn));
           (match stream_outcome with
            | `Cancelled exn -> raise exn
            | `Completed | `Reconnect -> ());
           if not (Atomic.get stop || Atomic.get close_ref)
           then (
-            Eio.Time.sleep clock reconnect_backoff_sec;
+            let no_wakeup = Atomic.make false in
+            ignore
+              (Keeper_keepalive_signal.interruptible_sleep
+                 ~clock
+                 ~stop
+                 ~wakeup:no_wakeup
+                 ~interrupt_when:(fun () -> Atomic.get close_ref)
+                 (fun () -> reconnect_backoff_sec)
+               : Keeper_keepalive_signal.sleep_outcome);
             connect_loop (attempts + 1)))
       in
       connect_loop 0);

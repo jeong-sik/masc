@@ -30,10 +30,13 @@ let peer t = Format.asprintf "%a" Eio.Net.Sockaddr.pp t.client_addr
    already reset or closed the connection (setsockopt(2): "The socket has
    been shut down"): nothing is kept for such a peer. *)
 let reset_on_close t =
-  Eio_unix.Fd.use_exn "setsockopt" t.fd (fun fd ->
-    match Unix.setsockopt_optint fd Unix.SO_LINGER (Some 0) with
-    | () -> ()
-    | exception Unix.Unix_error (Unix.EINVAL, _, _) -> ())
+  Eio_unix.Fd.use
+    ~if_closed:(fun () -> ())
+    t.fd
+    (fun fd ->
+       match Unix.setsockopt_optint fd Unix.SO_LINGER (Some 0) with
+       | () -> ()
+       | exception Unix.Unix_error (Unix.EINVAL, _, _) -> ())
 ;;
 
 (* Each direction is shut down by itself. A shutdown of both at once is one
@@ -180,7 +183,10 @@ module Socket = struct
       Eio.Flow.shutdown t.flow command
   ;;
 
-  let close t = Eio.Flow.close t.flow
+  let close t =
+    t.state <- Cut;
+    Eio.Flow.close t.flow
+  ;;
 end
 
 let handler = Eio.Net.Pi.stream_socket (module Socket)

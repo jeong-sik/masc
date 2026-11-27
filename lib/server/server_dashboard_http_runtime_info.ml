@@ -184,10 +184,15 @@ let clear_git_rev_parse_short_probe_hook_for_tests =
   Rev_parse_cache.clear_probe_hook_for_tests
 ;;
 
-let eio_switch_fork_unavailable = function
+let eio_switch_wrong_domain = function
   | Invalid_argument msg ->
     String_util.contains_substring msg "Switch accessed from wrong domain"
-    || String_util.contains_substring msg "Switch finished"
+  | _ -> false
+;;
+
+let eio_switch_finished = function
+  | Invalid_argument msg ->
+    String_util.contains_substring msg "Switch finished"
   | _ -> false
 ;;
 
@@ -219,11 +224,14 @@ let fork_background_refresh_or_cancel ~dir ~cancel_refresh run =
   then cancel_refresh dir
   else match Eio_context.get_switch_opt () with
   | None -> cancel_refresh dir
+  | Some sw when Option.is_some (Eio.Switch.get_error sw) -> cancel_refresh dir
   | Some sw ->
     (* No request waits on this refresh. *)
     (try Eio.Fiber.fork ~sw (fun () -> Pool_lane.with_background run) with
-     | exn when eio_switch_fork_unavailable exn ->
+     | exn when eio_switch_wrong_domain exn ->
        background_refresh_mark_domain_unavailable ();
+       cancel_refresh dir
+     | exn when eio_switch_finished exn ->
        cancel_refresh dir
      | exn ->
        cancel_refresh dir;
@@ -272,7 +280,9 @@ let git_rev_parse_short_refresh dir =
     Rev_parse_cache.finish_refresh dir value ~now:(Time_compat.now ());
     value
   with
-  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Eio.Cancel.Cancelled _ as e ->
+    Rev_parse_cache.cancel_refresh dir;
+    raise e
   | exn ->
     Rev_parse_cache.cancel_refresh dir;
     raise exn
@@ -427,7 +437,9 @@ let git_upstream_status_refresh dir =
     Upstream_status_cache.finish_refresh dir value ~now:(Time_compat.now ());
     value
   with
-  | Eio.Cancel.Cancelled _ as e -> raise e
+  | Eio.Cancel.Cancelled _ as e ->
+    Upstream_status_cache.cancel_refresh dir;
+    raise e
   | exn ->
     Upstream_status_cache.cancel_refresh dir;
     raise exn

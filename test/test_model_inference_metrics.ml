@@ -1512,6 +1512,75 @@ let test_buckets_single_bucket () =
     check string "model_id" "claude" m.mb_model_id;
     check int "one bucket (60min window, 60min bucket)" 1 (List.length m.mb_buckets))
 
+let test_cost_totals_require_complete_coverage () =
+  let dir = test_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir dir) (fun () ->
+    let path = make_keeper_dir dir "cost_coverage" in
+    let now = recent_hour_bucket_timestamp () in
+    let without_cost = function
+      | `Assoc fields ->
+        `Assoc (List.map (function
+          | "telemetry", `Assoc telemetry ->
+            "telemetry", `Assoc (List.remove_assoc "cost_usd" telemetry)
+          | field -> field) fields)
+      | other -> other
+    in
+    let without_cost_failed = function
+      | `Assoc fields ->
+        let fields =
+          List.map (function
+            | "telemetry", `Assoc telemetry ->
+              "telemetry", `Assoc
+                (List.map (function
+                   | "outcome", _ -> "outcome", `String "error"
+                   | field -> field)
+                   (List.remove_assoc "cost_usd" telemetry))
+            | field -> field) fields
+        in
+        `Assoc
+          (("provider_context",
+            provider_context_json ~runtime_id:"coverage"
+              ~answerer:(`Answered "coverage"))
+           :: fields)
+      | other -> other
+    in
+    let write entries = write_decisions path entries in
+    let stats () = compute ~base_path:dir ~window_minutes:60 |> fun agg -> List.hd agg.models in
+    let bucket () =
+      let models =
+        M.aggregate_buckets ~base_path:dir ~window_min:60 ~bucket_min:60 |> bucket_models
+      in
+      (List.hd models).mb_buckets |> List.hd
+    in
+    write [
+      success_entry ~model:"coverage" ~ts:now ~cost_usd:0.03 ();
+      success_entry ~model:"coverage" ~ts:(now -. 1.) () |> without_cost;
+    ];
+    check (option (float 0.001)) "model partial cost is unknown" None (stats ()).total_cost_usd;
+    check (option (float 0.001)) "bucket partial cost is unknown" None (bucket ()).b_total_cost_usd;
+    write [
+      success_entry ~model:"coverage (runtime)" ~ts:now ~cost_usd:0.03 ();
+      success_entry ~model:"coverage (runtime)" ~ts:(now -. 1.) () |> without_cost_failed;
+    ];
+    check (option (float 0.001)) "model total covers successful rows only" (Some 0.03)
+      (stats ()).total_cost_usd;
+    check (option (float 0.001)) "bucket is incomplete when failed cost is unreported" None
+      (bucket ()).b_total_cost_usd;
+    write [
+      success_entry ~model:"coverage" ~ts:now ~cost_usd:0.01 ();
+      success_entry ~model:"coverage" ~ts:(now -. 1.) ~cost_usd:0.02 ();
+    ];
+    check (option (float 0.001)) "complete model sum" (Some 0.03) (stats ()).total_cost_usd;
+    check (option (float 0.001)) "complete bucket sum" (Some 0.03) (bucket ()).b_total_cost_usd;
+    write [
+      success_entry ~model:"coverage" ~ts:now ~cost_usd:0. ();
+      success_entry ~model:"coverage" ~ts:(now -. 1.) ~cost_usd:0. ();
+    ];
+    check (option (float 0.)) "reported zero model total remains known" (Some 0.)
+      (stats ()).total_cost_usd;
+    check (option (float 0.)) "reported zero bucket total remains known" (Some 0.)
+      (bucket ()).b_total_cost_usd)
+
 let test_buckets_sparse () =
   let dir = test_dir () in
   let path = make_keeper_dir dir "sparse" in
@@ -1531,7 +1600,7 @@ let test_buckets_sparse () =
       true (List.length m.mb_buckets >= 2))
 
 let test_buckets_cache_hit_ratio_uses_inclusive_input () =
-  List.iter (fun (input_tokens, cache_read, expected) ->
+  List.iter (fun (input_tokens, cache_read, expected_ratio, expected_paired) ->
     let dir = test_dir () in
     let path = make_keeper_dir dir "cache_ratio" in
     write_decisions path [
@@ -1545,8 +1614,15 @@ let test_buckets_cache_hit_ratio_uses_inclusive_input () =
       in
       let bucket = (List.hd result).mb_buckets |> List.hd in
       check (option (float 0.001)) "cached input is part of reported input"
-        expected bucket.b_cache_hit_ratio))
-    [1000, 900, Some 0.9; 1000, 0, Some 0.0; 0, 0, None]
+        expected_ratio bucket.b_cache_hit_ratio;
+      let paired = Option.map (fun value ->
+        value.ci_input_tokens, value.ci_cache_read_tokens, value.ci_sample_count)
+        bucket.b_cached_input in
+      check (option (triple int int int)) "bucket retains paired totals"
+        expected_paired paired))
+    [ 1000, 900, Some 0.9, Some (1000, 900, 1)
+    ; 1000, 0, Some 0.0, Some (1000, 0, 1)
+    ; 0, 0, None, None ]
 
 let test_paired_cache_aggregate_excludes_missing_reports () =
   let dir = test_dir () in
@@ -1576,11 +1652,22 @@ let test_paired_cache_aggregate_excludes_missing_reports () =
        check int "paired input" 1000 paired.ci_input_tokens;
        check int "paired cache" 900 paired.ci_cache_read_tokens;
        check int "paired sample count" 1 paired.ci_sample_count);
+    (match (List.hd stats.buckets).b_cached_input with
+     | None -> fail "bucket paired report missing"
+     | Some paired ->
+       check int "bucket paired input" 1000 paired.ci_input_tokens;
+       check int "bucket paired cache" 900 paired.ci_cache_read_tokens;
+       check int "bucket paired sample count" 1 paired.ci_sample_count);
     let open Yojson.Safe.Util in
-    let paired_json = M.to_json aggregate |> member "models" |> to_list |> List.hd |> member "cached_input" in
+    let model_json = M.to_json aggregate |> member "models" |> to_list |> List.hd in
+    let paired_json = model_json |> member "cached_input" in
     check int "JSON paired input" 1000 (paired_json |> member "input_tokens" |> to_int);
     check int "JSON paired cache" 900 (paired_json |> member "cache_read_tokens" |> to_int);
-    check int "JSON sample coverage" 1 (paired_json |> member "sample_count" |> to_int))
+    check int "JSON sample coverage" 1 (paired_json |> member "sample_count" |> to_int);
+    let bucket_paired_json = model_json |> member "buckets" |> to_list |> List.hd |> member "cached_input" in
+    check int "JSON bucket paired input" 1000 (bucket_paired_json |> member "input_tokens" |> to_int);
+    check int "JSON bucket paired cache" 900 (bucket_paired_json |> member "cache_read_tokens" |> to_int);
+    check int "JSON bucket sample coverage" 1 (bucket_paired_json |> member "sample_count" |> to_int))
 
 let test_buckets_with_compute () =
   let dir = test_dir () in
@@ -2505,6 +2592,7 @@ let () =
     "buckets", [
       test_case "empty dir → no buckets" `Quick test_buckets_empty_dir;
       test_case "single bucket window" `Quick test_buckets_single_bucket;
+      test_case "cost totals require complete coverage" `Quick test_cost_totals_require_complete_coverage;
       test_case "sparse entries → distinct buckets" `Quick test_buckets_sparse;
       test_case "paired cache reports survive aggregation and JSON" `Quick test_paired_cache_aggregate_excludes_missing_reports;
       test_case "cache share of inclusive input" `Quick test_buckets_cache_hit_ratio_uses_inclusive_input;

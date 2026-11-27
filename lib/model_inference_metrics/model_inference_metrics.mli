@@ -37,6 +37,12 @@ type coverage_reason_count = Model_inference_metrics_entry.coverage_reason_count
   crc_count : int;
 }
 
+type cached_input = Model_inference_metrics_entry.cached_input = {
+  ci_input_tokens : int;
+  ci_cache_read_tokens : int;
+  ci_sample_count : int;
+}
+
 type bucket_metric = Model_inference_metrics_entry.bucket_metric = {
   b_ts_start : float;
     (** Unix seconds at the floor of the bucket (inclusive start). *)
@@ -48,11 +54,16 @@ type bucket_metric = Model_inference_metrics_entry.bucket_metric = {
   b_error_rate : float;
     (** error_count / entry_count; 0.0 when bucket is empty. *)
   b_total_cost_usd : float option;
+    (** Complete cost sum for every entry in the bucket; [None] if any cost
+        is unreported or the bucket has no entries. Explicit zero is known. *)
   b_cache_hit_ratio : float option;
     (** Sum of cache reads divided by inclusive input tokens from the same
         successful entries reporting both fields, with positive input and
         cache reads between zero and input. [None] when no such pair exists;
         [Some 0.0] when valid pairs report zero cache reads. *)
+  b_cached_input : cached_input option;
+    (** Paired totals from the same successful entries used by
+        [b_cache_hit_ratio]. *)
 }
 
 type model_bucketed = {
@@ -65,14 +76,6 @@ type latency_bucket = Model_inference_metrics_entry.latency_bucket = {
   lo_ms : int;
   hi_ms : int option;
   count : int;
-}
-
-(** Cache totals from the same successful calls with reported, valid input/cache pairs.
-    Cache reads are a subset of inclusive input tokens. *)
-type cached_input = Model_inference_metrics_entry.cached_input = {
-  ci_input_tokens : int;
-  ci_cache_read_tokens : int;
-  ci_sample_count : int;
 }
 
 (** See {!Model_inference_metrics_entry.coverage_status}. *)
@@ -123,6 +126,9 @@ type model_stats = {
   success_count : int;
   error_count : int;
   total_cost_usd : float option;
+    (** Complete cost sum across successful entries for the model; [None]
+        if any cost is unreported or there are no successful entries.
+        Explicit zero is known. *)
   avg_tool_calls_per_turn : float;
   total_tool_calls : int;
   top_tools : (string * int) list;
@@ -235,7 +241,7 @@ val compute_cost_latency_json :
         "latencyBuckets": [ { "lo", "hi", "n" } ],
         "p50":           number | null,
         "p95":           number | null,
-        "total_cost_usd": number,
+        "total_cost_usd": number | null,
         "window_minutes": number,
         "generated_at":  unix_seconds
       }

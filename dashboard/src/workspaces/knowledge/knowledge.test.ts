@@ -21,6 +21,7 @@ vi.mock('uplot', () => {
   }
   return { default: MockUPlot }
 })
+import { decodeWorkspaceInventoryFallback } from './types'
 import { authSession, resetAuthStateForTests } from '../../core/auth'
 import * as observer from '../../core/observer'
 import { resetObserverStateForTests } from '../../core/observer'
@@ -67,6 +68,14 @@ function setMultiAccountSessionForTest(): void {
 }
 
 describe('workspaces/knowledge', () => {
+  it('does not treat an unknown inventory status as missing', () => {
+    expect(decodeWorkspaceInventoryFallback({ status: 'missing' }).ok).toBe(true)
+    expect(decodeWorkspaceInventoryFallback({ status: 'available' }).ok).toBe(true)
+    for (const status of [undefined, 'unavailable', 'future']) {
+      expect(decodeWorkspaceInventoryFallback({ status }).ok).toBe(false)
+    }
+  })
+
   let container: HTMLDivElement
   const origFetch = globalThis.fetch
 

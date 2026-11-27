@@ -25,6 +25,13 @@ let public_runtime_lane_label model_key =
 
 (* ── JSON serialization ─────────────────────────────────── *)
 
+let cached_input_to_json = function
+  | None -> `Null
+  | Some paired -> `Assoc [
+      "input_tokens", `Int paired.ci_input_tokens;
+      "cache_read_tokens", `Int paired.ci_cache_read_tokens;
+      "sample_count", `Int paired.ci_sample_count]
+
 let bucket_metric_to_json (b : bucket_metric) : Yojson.Safe.t =
   `Assoc
     [ "ts_start", `Float b.b_ts_start
@@ -36,6 +43,7 @@ let bucket_metric_to_json (b : bucket_metric) : Yojson.Safe.t =
     ; "error_rate", `Float b.b_error_rate
     ; "total_cost_usd", Json_util.float_opt_to_json b.b_total_cost_usd
     ; "cache_hit_ratio", Json_util.float_opt_to_json b.b_cache_hit_ratio
+    ; "cached_input", cached_input_to_json b.b_cached_input
     ]
 ;;
 
@@ -77,12 +85,7 @@ let model_stats_to_json ?(model_label = public_runtime_label) (s : model_stats)
     ; "total_input_tokens", Json_util.int_opt_to_json s.total_input_tokens
     ; "total_output_tokens", Json_util.int_opt_to_json s.total_output_tokens
     ; "total_cache_read_tokens", Json_util.int_opt_to_json s.total_cache_read_tokens
-    ; "cached_input", (match s.cached_input with
-        | None -> `Null
-        | Some paired -> `Assoc [
-            "input_tokens", `Int paired.ci_input_tokens;
-            "cache_read_tokens", `Int paired.ci_cache_read_tokens;
-            "sample_count", `Int paired.ci_sample_count])
+    ; "cached_input", cached_input_to_json s.cached_input
     ; "total_cache_creation_tokens", Json_util.int_opt_to_json s.total_cache_creation_tokens
     ; "total_reasoning_tokens", Json_util.int_opt_to_json s.total_reasoning_tokens
     ; "usage_sample_count", `Int s.usage_sample_count

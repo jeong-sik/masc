@@ -25,6 +25,7 @@ import { UPlotChart, type UPlotSeriesSpec } from '../../components/primitives/up
 import { TargetLockedAction } from '../../components/primitives/target-locked-action'
 import { KeeperToolCallInspector } from './keeper-tool-call-inspector'
 import type { TurnRecordEntry, TurnRecordsResponse } from '../../api/dashboard-turn-records'
+import { USAGE_SCOPE_LABELS } from '../../components/common/turn-usage-scope'
 import { turnContextWindow } from '../../lib/turn-context-window'
 import {
   fetchConfigSchemaApi,
@@ -62,26 +63,42 @@ import type {
 } from './types'
 
 export interface PromptCacheSegments {
-  readonly cacheRead: number
-  readonly cacheCreate: number
-  readonly uncachedInput: number
-  readonly output: number
-  readonly total: number
+  readonly cacheRead: number | null
+  readonly cacheCreate: number | null
+  readonly uncachedInput: number | null
+  readonly output: number | null
+  readonly total: number | null
   readonly cacheHitPct: number | null
 }
 
 export function computePromptCacheSegments(record: TurnRecordEntry | null): PromptCacheSegments {
   if (!record) {
-    return { cacheRead: 0, cacheCreate: 0, uncachedInput: 0, output: 0, total: 0, cacheHitPct: null }
+    return { cacheRead: null, cacheCreate: null, uncachedInput: null, output: null, total: null, cacheHitPct: null }
   }
-  const cacheRead = Math.max(0, record.cache_read_input_tokens ?? 0)
-  const cacheCreate = Math.max(0, record.cache_creation_input_tokens ?? 0)
-  const rawInput = Math.max(0, record.input_tokens ?? 0)
-  const uncachedInput = Math.max(0, rawInput - cacheRead - cacheCreate)
-  const output = Math.max(0, record.output_tokens ?? 0)
-  const total = cacheRead + cacheCreate + uncachedInput + output
-  const inputDenom = cacheRead + cacheCreate + uncachedInput
-  const cacheHitPct = inputDenom > 0 ? Math.round((cacheRead / inputDenom) * 100) : null
+  const cacheRead = record.cache_read_input_tokens ?? null
+  const cacheCreate = record.cache_creation_input_tokens ?? null
+  const input = record.input_tokens ?? null
+  const output = record.output_tokens ?? null
+  // Input usage can be divided into cache read, cache creation and uncached
+  // tokens only when every operand was reported and the record is request scoped.
+  const uncachedInput = record.usage_scope === 'per_request'
+    && input !== null
+    && cacheRead !== null
+    && cacheCreate !== null
+    && input >= cacheRead + cacheCreate
+    ? input - cacheRead - cacheCreate
+    : null
+  const cacheHitPct = record.usage_scope === 'per_request'
+    && input !== null
+    && input > 0
+    && cacheRead !== null
+    && cacheCreate !== null
+    && input >= cacheRead + cacheCreate
+    ? Math.round((cacheRead / input) * 100)
+    : null
+  const total = cacheRead !== null && cacheCreate !== null && uncachedInput !== null && output !== null
+    ? cacheRead + cacheCreate + uncachedInput + output
+    : null
   return { cacheRead, cacheCreate, uncachedInput, output, total, cacheHitPct }
 }
 
@@ -526,11 +543,12 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
     setCfgDiff(res.value)
   }
 
-  const cacheW = cacheSegs.total > 0 ? cacheSegs.total : 1
-  const segReadW = (cacheSegs.cacheRead / cacheW) * 100
-  const segCreateW = (cacheSegs.cacheCreate / cacheW) * 100
-  const segUncachedW = (cacheSegs.uncachedInput / cacheW) * 100
-  const segOutputW = (cacheSegs.output / cacheW) * 100
+  const cacheBarKnown = cacheSegs.total !== null
+  const cacheW = cacheBarKnown && cacheSegs.total! > 0 ? cacheSegs.total! : 1
+  const segReadW = cacheBarKnown ? (cacheSegs.cacheRead! / cacheW) * 100 : 0
+  const segCreateW = cacheBarKnown ? (cacheSegs.cacheCreate! / cacheW) * 100 : 0
+  const segUncachedW = cacheBarKnown ? (cacheSegs.uncachedInput! / cacheW) * 100 : 0
+  const segOutputW = cacheBarKnown ? (cacheSegs.output! / cacheW) * 100 : 0
 
   return html`
     <aside class="kp-companion" aria-label="Debug Companion (⌘.)" data-companion-tab=${tab}>
@@ -696,33 +714,36 @@ export function KeeperDebugCompanion(props: KeeperDebugCompanionProps) {
                 <div class="kp-card">
                   <div class="kp-card-head">
                     <h3>Prompt Cache (4-Segment)</h3>
-                    <span class="kp-pill" data-tone="ok">
-                      Hit ${cacheSegs.cacheHitPct !== null ? `${cacheSegs.cacheHitPct}%` : '없음'}
+                    <span class="kp-pill" data-tone=${cacheSegs.cacheHitPct !== null ? 'ok' : 'muted'}>
+                      Hit ${cacheSegs.cacheHitPct !== null ? `${cacheSegs.cacheHitPct}%` : '미상'}
                     </span>
                   </div>
-                  <svg class="kp-svg-bar" viewBox="0 0 100 12" preserveAspectRatio="none" aria-label="프롬프트 캐시 4구간 막대">
+                  <div class="kp-roster-sub">사용량 범위: ${USAGE_SCOPE_LABELS[turnRecords[0]?.usage_scope ?? 'unavailable']}</div>
+                  ${cacheBarKnown
+                    ? html`<svg class="kp-svg-bar" viewBox="0 0 100 12" preserveAspectRatio="none" aria-label="프롬프트 캐시 4구간 막대">
                     <rect x="0" y="0" width="100" height="12" class="kp-seg-bg" />
                     <rect x="0" y="0" width=${segReadW} height="12" class="kp-seg-cache-read" />
                     <rect x=${segReadW} y="0" width=${segCreateW} height="12" class="kp-seg-cache-create" />
                     <rect x=${segReadW + segCreateW} y="0" width=${segUncachedW} height="12" class="kp-seg-uncached" />
                     <rect x=${segReadW + segCreateW + segUncachedW} y="0" width=${segOutputW} height="12" class="kp-seg-output" />
-                  </svg>
+                  </svg>`
+                    : html`<div class="kp-empty" role="status">4구간 막대에 필요한 요청별 사용량을 모두 보고하지 않았습니다.</div>`}
                   <div class="kp-grid-2">
                     <div class="kp-kv-box">
                       <span class="kp-kv-k">Cache Read</span>
-                      <span class="kp-kv-v">${cacheSegs.cacheRead.toLocaleString('en-US')}</span>
+                      <span class="kp-kv-v">${cacheSegs.cacheRead?.toLocaleString('en-US') ?? '미상'}</span>
                     </div>
                     <div class="kp-kv-box">
                       <span class="kp-kv-k">Cache Write</span>
-                      <span class="kp-kv-v">${cacheSegs.cacheCreate.toLocaleString('en-US')}</span>
+                      <span class="kp-kv-v">${cacheSegs.cacheCreate?.toLocaleString('en-US') ?? '미상'}</span>
                     </div>
                     <div class="kp-kv-box">
                       <span class="kp-kv-k">Uncached In</span>
-                      <span class="kp-kv-v">${cacheSegs.uncachedInput.toLocaleString('en-US')}</span>
+                      <span class="kp-kv-v">${cacheSegs.uncachedInput?.toLocaleString('en-US') ?? '미상'}</span>
                     </div>
                     <div class="kp-kv-box">
                       <span class="kp-kv-k">Output</span>
-                      <span class="kp-kv-v">${cacheSegs.output.toLocaleString('en-US')}</span>
+                      <span class="kp-kv-v">${cacheSegs.output?.toLocaleString('en-US') ?? '미상'}</span>
                     </div>
                   </div>
                 </div>

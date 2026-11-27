@@ -21,6 +21,7 @@ import {
 } from '../../core'
 import * as observer from '../../core/observer'
 import { RuntimeWorkspace, type WorkspaceInspectPayload } from './index'
+import { aggregateModelBuckets, cacheBucketCoverageLabel, modelCostCoverage, pairedCacheCoverage } from './efficiency-tab'
 import {
   formatLocalReleaseTime,
   formatReleaseSummary,
@@ -33,6 +34,7 @@ import {
 } from './quota-rest-groups'
 import {
   classifyQuotaScope,
+  decodeModelsMetricsPayload,
   formatIsoTime,
   formatResetCountdown,
   localUtcOffsetMin,
@@ -50,6 +52,178 @@ function jsonResponse(body: unknown, status = 200): Response {
     headers: { 'Content-Type': 'application/json' },
   })
 }
+
+describe('Models metrics cache-pair decoding', () => {
+  it('applies one paired-cache contract to model and bucket rows', () => {
+    const result = decodeModelsMetricsPayload({ models: [
+      {
+        model_id: 'lane-a',
+        cached_input: { input_tokens: 100, cache_read_tokens: 0, sample_count: 2 },
+        buckets: [
+          { ts_start: 1, cached_input: { input_tokens: 100, cache_read_tokens: 80, sample_count: 3 } },
+          { ts_start: 2, cached_input: { input_tokens: 10.5, cache_read_tokens: 5, sample_count: 1 } },
+          { ts_start: 3, cached_input: { input_tokens: 10, cache_read_tokens: 11, sample_count: 1 } },
+          { ts_start: 4, cached_input: { input_tokens: 10, cache_read_tokens: 5, sample_count: 0 } },
+          { ts_start: 5, cached_input: null },
+          { ts_start: 6 },
+        ],
+      },
+    ] })
+    const model = result.models[0]!
+    expect(model.cached_input).toEqual({ input_tokens: 100, cache_read_tokens: 0, sample_count: 2 })
+    expect(model.buckets.map(bucket => bucket.cached_input)).toEqual([
+      { input_tokens: 100, cache_read_tokens: 80, sample_count: 3 },
+      null,
+      null,
+      null,
+      null,
+      null,
+    ])
+  })
+})
+
+describe('Runtime Efficiency coverage aggregation', () => {
+  const bucket = (overrides: Record<string, unknown> = {}) => ({
+    ts_start: 100,
+    entry_count: 10,
+    success_count: 10,
+    error_count: 0,
+    p50_latency_ms: null,
+    p95_latency_ms: null,
+    error_rate: 0,
+    total_cost_usd: 1,
+    cache_hit_ratio: 0.5,
+    cached_input: { input_tokens: 100, cache_read_tokens: 50, sample_count: 1 },
+    ...overrides,
+  })
+  const model = (overrides: Record<string, unknown> = {}) => ({
+    model_id: 'lane-a',
+    entry_count: 10,
+    success_count: 10,
+    total_input_tokens: 1000,
+    total_cache_read_tokens: 900,
+    cached_input: { input_tokens: 100, cache_read_tokens: 90, sample_count: 1 },
+    total_cost_usd: 1,
+    buckets: [bucket()],
+    ...overrides,
+  })
+
+  it('uses paired cache telemetry only and reports sample coverage', () => {
+    const coverage = pairedCacheCoverage([
+      model(),
+      model({ model_id: 'lane-b', cached_input: null, total_input_tokens: 9000, total_cache_read_tokens: 0 }),
+    ] as never)
+    expect(coverage).toEqual({ hitPct: 90, reportedSamples: 1, expectedSamples: 20 })
+  })
+
+  it('combines paired bucket tokens and exposes partial cache coverage', () => {
+    const aggregate = aggregateModelBuckets({ models: [
+      model(),
+      model({ model_id: 'lane-b', buckets: [bucket({ cached_input: null, total_cost_usd: null })] }),
+    ] } as never)
+    expect(aggregate).toEqual([{
+      ts: 100,
+      entries: 20,
+      costUsd: null,
+      costCoverage: 'partial',
+      cacheHitPct: 50,
+      cacheReportedSamples: 1,
+      cacheExpectedSamples: 20,
+      cacheSource: 'paired',
+    }])
+  })
+
+  it('weights paired bucket cache rates by input tokens, not requests', () => {
+    const aggregate = aggregateModelBuckets({ models: [
+      model(),
+      model({ model_id: 'lane-b', buckets: [bucket({
+        cached_input: { input_tokens: 900, cache_read_tokens: 810, sample_count: 3 },
+        cache_hit_ratio: 0.99,
+      })] }),
+    ] } as never)
+    expect(aggregate[0]).toMatchObject({
+      cacheHitPct: 86,
+      cacheReportedSamples: 4,
+      cacheExpectedSamples: 20,
+      cacheSource: 'paired',
+    })
+  })
+
+  it('uses a single legacy bucket ratio but withholds multi-model legacy ratios', () => {
+    const single = aggregateModelBuckets({ models: [
+      model({ buckets: [bucket({ cached_input: null, cache_hit_ratio: 0.25 })] }),
+    ] } as never)
+    expect(single[0]).toMatchObject({ cacheHitPct: 25, cacheSource: 'legacy_single_model' })
+    expect(single[0]?.cacheReportedSamples).toBeNull()
+
+    const multiple = aggregateModelBuckets({ models: [
+      model({ buckets: [bucket({ cached_input: null })] }),
+      model({ model_id: 'lane-b', buckets: [bucket({ cached_input: null, cache_hit_ratio: 0.9 })] }),
+    ] } as never)
+    expect(multiple[0]?.cacheHitPct).toBeNull()
+    expect(multiple[0]?.cacheSource).toBe('unreported')
+  })
+
+  it('limits cache sample coverage text to intervals with paired reports', () => {
+    const buckets = aggregateModelBuckets({ models: [
+      model({ buckets: [
+        bucket({ ts_start: 100 }),
+        bucket({ ts_start: 200, cached_input: null, cache_hit_ratio: null }),
+      ] }),
+    ] } as never)
+    expect(buckets.map((row) => row.cacheSource)).toEqual(['paired', 'unreported'])
+    expect(cacheBucketCoverageLabel(buckets)).toBe('paired 보고가 있는 구간 내 1/10 샘플')
+  })
+
+  it('preserves explicit zero bucket cost and single-model paired cache rate', () => {
+    expect(aggregateModelBuckets({ models: [
+      model({ buckets: [bucket({
+        total_cost_usd: 0,
+        cache_hit_ratio: 0.25,
+        cached_input: { input_tokens: 100, cache_read_tokens: 25, sample_count: 1 },
+      })] }),
+    ] } as never)).toEqual([{
+      ts: 100,
+      entries: 10,
+      costUsd: 0,
+      costCoverage: 'reported',
+      cacheHitPct: 25,
+      cacheReportedSamples: 1,
+      cacheExpectedSamples: 10,
+      cacheSource: 'paired',
+    }])
+  })
+
+  it('keeps explicit zero cost without claiming wire-level completeness', () => {
+    expect(modelCostCoverage([model({ total_cost_usd: 0 })] as never)).toEqual({
+      reportedUsd: 0,
+      reportedSuccessModels: 1,
+      successModels: 1,
+      unknownSuccessModels: 0,
+      hasReported: true,
+    })
+    expect(modelCostCoverage([model({ total_cost_usd: 0 }), model({ model_id: 'lane-b', total_cost_usd: null })] as never)).toEqual({
+      reportedUsd: 0,
+      reportedSuccessModels: 1,
+      successModels: 2,
+      unknownSuccessModels: 0,
+      hasReported: true,
+    })
+  })
+
+  it('excludes error-only models and preserves unknown success scope', () => {
+    expect(modelCostCoverage([
+      model({ model_id: 'error-only', success_count: 0, total_cost_usd: 0.5 }),
+      model({ model_id: 'old-wire', success_count: null, total_cost_usd: 0.25 }),
+    ] as never)).toEqual({
+      reportedUsd: 0,
+      reportedSuccessModels: 0,
+      successModels: 0,
+      unknownSuccessModels: 1,
+      hasReported: false,
+    })
+  })
+})
 
 function pendingSseResponse(): Response {
   const stream = new ReadableStream<Uint8Array>({
@@ -385,15 +559,15 @@ describe('workspaces/runtime', () => {
             total_input_tokens: 10_000,
             total_output_tokens: 2_500,
             total_cache_read_tokens: 7_500,
-            cached_input: { input_tokens: 10_000, cache_read_tokens: 7_500, sample_count: 24 },
+            cached_input: { input_tokens: 10_000, cache_read_tokens: 7_500, sample_count: 23 },
             total_cache_creation_tokens: 500,
             success_count: 23,
             error_count: 1,
             total_cost_usd: 1.25,
             total_tool_calls: 15,
             buckets: [
-              { ts_start: 1_700_000_000, entry_count: 12, success_count: 12, error_count: 0, p50_latency_ms: 800, p95_latency_ms: 1200, error_rate: 0, total_cost_usd: 0.6, cache_hit_ratio: 0.75 },
-              { ts_start: 1_700_003_600, entry_count: 12, success_count: 11, error_count: 1, p50_latency_ms: 840, p95_latency_ms: 1400, error_rate: 0.08, total_cost_usd: 0.65, cache_hit_ratio: 0.78 },
+              { ts_start: 1_700_000_000, entry_count: 12, success_count: 12, error_count: 0, p50_latency_ms: 800, p95_latency_ms: 1200, error_rate: 0, total_cost_usd: 0.6, cache_hit_ratio: 0.75, cached_input: null },
+              { ts_start: 1_700_003_600, entry_count: 12, success_count: 11, error_count: 1, p50_latency_ms: 840, p95_latency_ms: 1400, error_rate: 0.08, total_cost_usd: 0.65, cache_hit_ratio: 0.78, cached_input: { input_tokens: 1000, cache_read_tokens: 780, sample_count: 3 } },
             ],
           }],
         })
@@ -463,6 +637,7 @@ describe('workspaces/runtime', () => {
     expect(container.querySelector('.uplot-grid-2x2')).not.toBeNull()
     expect(container.textContent).toContain('code-reviewer-sister')
     expect(container.textContent).toContain('미보고')
+    expect(container.querySelector('[data-testid="efficiency-cache-coverage"]')?.textContent).toContain('23/23 샘플')
 
     // Switch to 7d -> MUST release view-scoped SSE stream, stay snapshot-only, and NEVER request keeper-costs > 1440
     setTimeWindow('7d')

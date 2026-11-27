@@ -6,11 +6,13 @@
 
 type error =
   | Missing_chat_guid
+  | Invalid_chat_guid
   | Osascript_failed of { exit_code : int; stderr : string }
   | Osascript_timed_out of float
 
 let error_to_string = function
   | Missing_chat_guid -> "no chat guid to reply to"
+  | Invalid_chat_guid -> "invalid chat guid"
   | Osascript_failed { exit_code; stderr } ->
     Printf.sprintf "osascript exited %d: %s" exit_code (String.trim stderr)
   | Osascript_timed_out seconds ->
@@ -26,7 +28,18 @@ let script =
    end run"
 ;;
 
-let send_argv ~chat_guid ~text = [ "osascript"; "-e"; script; chat_guid; text ]
+let is_valid_chat_guid chat_guid =
+  String.length chat_guid > 0
+  && chat_guid.[0] <> '-'
+  && not
+       (String.exists
+          (fun c ->
+            let code = Char.code c in
+            code < 0x20 || code = 0x7f)
+          chat_guid)
+;;
+
+let send_argv ~chat_guid ~text = [ "osascript"; "-e"; script; "--"; chat_guid; text ]
 
 (* Messages.app blocks on the first-run Automation prompt, and that prompt is
    answered by a human at the console or not at all. Bounding the run keeps a
@@ -39,6 +52,7 @@ let timeout_exit_code = 124
 let send ?(timeout_sec = default_timeout_sec) ~chat_guid ~text () =
   let chat_guid = String.trim chat_guid in
   if String.equal chat_guid "" then Error Missing_chat_guid
+  else if not (is_valid_chat_guid chat_guid) then Error Invalid_chat_guid
   else (
     let argv = send_argv ~chat_guid ~text in
     match Process_eio.run_argv_with_status_split ~timeout_sec argv with

@@ -155,17 +155,53 @@ let resource_is_dynamic uri =
      || String.starts_with ~prefix:"masc://tool-help" lower)
 ;;
 
-let subscribe_resource_for_session ~session_id ~uri =
-  with_resource_subscription_lock (fun () ->
-    let uris =
+let max_subscription_uri_bytes = 512
+let max_subscriptions_per_session = 64
+let max_subscription_sessions = 512
+
+let validate_subscription_uri uri =
+  let trimmed = String.trim uri in
+  if String.equal trimmed "" then Error "Invalid params: uri must not be empty"
+  else if String.length trimmed > max_subscription_uri_bytes then
+    Error (Printf.sprintf "Invalid params: uri exceeds %d bytes" max_subscription_uri_bytes)
+  else if String.exists (fun c -> let code = Char.code c in code < 0x20 || code = 0x7f) trimmed then
+    Error "Invalid params: uri contains control characters"
+  else if not (String_util.contains_substring trimmed "://") then
+    Error "Invalid params: uri must include a scheme"
+  else Ok trimmed
+;;
+
+let try_subscribe_resource_for_session ~session_id ~uri =
+  match validate_subscription_uri uri with
+  | Error _ as err -> err
+  | Ok uri ->
+    with_resource_subscription_lock (fun () ->
       match Hashtbl.find_opt resource_subscriptions session_id with
-      | Some uris -> uris
+      | Some uris ->
+        if Hashtbl.mem uris uri then Ok ()
+        else if Hashtbl.length uris >= max_subscriptions_per_session then
+          Error
+            (Printf.sprintf
+               "Resource subscription limit (%d per session) exceeded"
+               max_subscriptions_per_session)
+        else (
+          Hashtbl.replace uris uri ();
+          Ok ())
       | None ->
-        let uris = Hashtbl.create 8 in
-        Hashtbl.replace resource_subscriptions session_id uris;
-        uris
-    in
-    Hashtbl.replace uris uri ())
+        if Hashtbl.length resource_subscriptions >= max_subscription_sessions then
+          Error
+            (Printf.sprintf
+               "Global resource subscription session limit (%d) exceeded"
+               max_subscription_sessions)
+        else (
+          let uris = Hashtbl.create 8 in
+          Hashtbl.replace uris uri ();
+          Hashtbl.replace resource_subscriptions session_id uris;
+          Ok ()))
+;;
+
+let subscribe_resource_for_session ~session_id ~uri =
+  ignore (try_subscribe_resource_for_session ~session_id ~uri)
 ;;
 
 let unsubscribe_resource_for_session ~session_id ~uri =
@@ -659,8 +695,9 @@ let handle_resources_subscribe_eio id ?mcp_session_id params =
   | Some session_id, Some (`Assoc _ as payload) ->
     (match Json_util.assoc_member_opt "uri" payload with
      | Some (`String uri) ->
-       subscribe_resource_for_session ~session_id ~uri;
-       make_response ~id (`Assoc [])
+       (match try_subscribe_resource_for_session ~session_id ~uri with
+        | Ok () -> make_response ~id (`Assoc [])
+        | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg)
      | _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: uri must be a string")
   | Some _, None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
   | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"

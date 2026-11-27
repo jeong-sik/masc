@@ -136,6 +136,10 @@ let pp_send_error fmt = function
   | Partial_delivery {sent_messages;cause} ->
     Format.fprintf fmt "telegram partial delivery [%s]: %a"
       (String.concat "," (List.map(fun (chat,id)->Printf.sprintf "%Ld/%d" chat id) sent_messages)) Api.pp_error cause
+let max_rate_limit_retries = 5
+let min_retry_after_sec = 1.0
+let max_retry_after_sec = 60.0
+
 let send_message ?post ~clock ~bot_user_id ~chat_id ~message_thread_id ~direct_messages_topic_id ~reply_to_message_id ~html ~messages () =
   let result =
     let* token=match Env_config_telegram.bot_token_opt () with Some token -> Ok token | None -> Error(Api.Invalid_request "TELEGRAM_BOT_TOKEN missing") in
@@ -149,13 +153,18 @@ let send_message ?post ~clock ~bot_user_id ~chat_id ~message_thread_id ~direct_m
   let rec send sent = function
     | [] -> Ok ()
     | text::rest ->
-      let rec attempt () = match Api.send_message ?post ~clock client ~chat_id
+      let rec attempt retries_left = match Api.send_message ?post ~clock client ~chat_id
           ?message_thread_id ?direct_messages_topic_id ?reply_to_message_id ~html ~text () with
-        | Error(Api.Api_error {retry_after=Some seconds;_}) -> Eio.Time.sleep clock (float_of_int seconds);attempt ()
+        | Error (Api.Api_error {retry_after=Some seconds;_} as error) ->
+          if retries_left <= 0 || float_of_int seconds > max_retry_after_sec then Error error
+          else (
+            let delay = Float.max min_retry_after_sec (float_of_int seconds) in
+            Eio.Time.sleep clock delay;
+            attempt (retries_left - 1))
         | Error ((Api.Invalid_request _ | Invalid_response _ | Transport_failed | Http_status _
                  | Api_error {retry_after=None;_}) as error) -> Error error
         | Ok message -> Ok message in
-      match attempt () with
+      match attempt max_rate_limit_retries with
       | Error cause -> failed sent cause
       | Ok delivered ->
         let sent=(delivered.chat_id,delivered.message_id)::sent in

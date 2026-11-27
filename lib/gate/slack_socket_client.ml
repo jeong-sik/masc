@@ -175,6 +175,7 @@ let run ~sw ~env ~bot_user_id ~app_token ~trigger_policy ~on_event ~on_ambient
     in
     let state = ref (Slack_gateway_state.create ~config) in
     let conn_ref : Discord_wss_connection.conn option ref = ref None in
+    let connect_gen = Atomic.make 0 in
     let input_mailbox = Eio.Stream.create 64 in
     let clock = Eio.Stdenv.clock env in
 
@@ -263,36 +264,37 @@ let run ~sw ~env ~bot_user_id ~app_token ~trigger_policy ~on_event ~on_ambient
               Eio.Stream.add input_mailbox
                 (Slack_gateway_state.Apps_connections_open_failed { reason }))
       | Slack_gateway_state.Open_wss { url } ->
+        let gen = Atomic.fetch_and_add connect_gen 1 + 1 in
         (match !conn_ref with
          | Some old_conn ->
-           (* Same defensive cleanup as Discord_gateway_client: the FSM may
-              emit Open_wss while a stale conn is still tracked (e.g. a
-              peer Close that bypassed our Close_wss path). [close] is
-              idempotent, so calling it on an already-closed conn is safe. *)
            log_effect `Warn
              "Open_wss while conn_ref still Some; force-closing stale connection";
            Discord_wss_connection.close old_conn;
            conn_ref := None
          | None -> ());
-        (match Discord_wss_connection.connect ~sw ~env ~url with
-         | conn ->
-           conn_ref := Some conn;
-           Discord_wss_connection.spawn conn (fun () -> reader_loop conn)
-         | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-         | exception exn ->
-           (* DNS / connect / TLS handshake failure: feed [Wss_closed] so
-              the FSM schedules a backoff reconnect rather than killing the
-              gateway. *)
-           let reason = Printexc.to_string exn in
-           log_effect `Warn
-             (Printf.sprintf "slack wss connect failed: %s" reason);
-           Eio.Stream.add input_mailbox
-             (Slack_gateway_state.Wss_closed
-                { reason = "wss connect failed: " ^ reason }))
+        (* Connect off the drive loop so slow DNS/TLS handshakes never stall
+           drive () and Wss_closed enqueueing cannot self-deadlock on a full
+           bounded input_mailbox. *)
+        Eio.Fiber.fork ~sw (fun () ->
+          match Discord_wss_connection.connect ~sw ~env ~url with
+          | conn ->
+            if Atomic.get connect_gen = gen then begin
+              conn_ref := Some conn;
+              Discord_wss_connection.spawn conn (fun () -> reader_loop conn)
+            end else
+              Discord_wss_connection.close conn
+          | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+          | exception exn ->
+            if Atomic.get connect_gen = gen then begin
+              let reason = Printexc.to_string exn in
+              log_effect `Warn
+                (Printf.sprintf "slack wss connect failed: %s" reason);
+              Eio.Stream.add input_mailbox
+                (Slack_gateway_state.Wss_closed
+                   { reason = "wss connect failed: " ^ reason })
+            end)
       | Slack_gateway_state.Close_wss ->
-        (* Resolves the inner session switch's close signal, cancelling every
-           fiber forked on it — including the reader (its blocking [read]
-           raises [Cancelled]). Idempotent. *)
+        ignore (Atomic.fetch_and_add connect_gen 1);
         (match !conn_ref with
          | Some c -> Discord_wss_connection.close c
          | None -> ());

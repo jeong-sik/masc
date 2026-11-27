@@ -841,12 +841,13 @@ remote_endpoint = "fixture"
     let trailer = Exec_ssh_protocol.render_trailer
         { v = Exec_ssh_protocol.newest; exit = Some 0; signal = None
         ; timed_out = false; shim_error = None; observed_syscalls = [] } in
-    (* The fake ssh answers every command with the same file. It also writes
-       which read the reader asked for, one line per call, so a test can count
-       the reads of one file. *)
+    (* The fake ssh answers every request with the same file. A request
+       reaches ssh on stdin as a frame that carries the read's command, so the
+       script also writes which read the reader asked for, one line per call.
+       A test can then count the reads of one file. *)
     let reads_log = Filename.concat base "ssh-reads.log" in
-    let script = "#!/bin/sh\nfor a in \"$@\"; do case \"$a\" in *'exec cat'*) echo whole;; *'head -c'*) echo prefix;; *) ;; esac; done >> "
-        ^ Filename.quote reads_log ^ "\ncat >/dev/null 2>/dev/null &\ncat "
+    let script = "#!/bin/sh\nframe=$(cat)\ncase \"$frame\" in *'exec cat'*) echo whole;; *'head -c'*) echo prefix;; *) echo other;; esac >> "
+        ^ Filename.quote reads_log ^ "\ncat "
         ^ Filename.quote endpoint_file ^ "\nprintf '%s' "
         ^ Filename.quote trailer ^ " >&2\nexit 0\n" in
     with_fake_ssh script @@ fun () ->

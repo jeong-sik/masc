@@ -22,10 +22,12 @@ type cycle_grant_entry =
 
 type cycle_grant_state =
   | Cycle_grant_available of cycle_grant_entry
-  | Cycle_grant_consuming of cycle_grant_entry
   | Cycle_grant_consumed
 
-type cycle_grant = cycle_grant_state Atomic.t
+type cycle_grant =
+  { mutex : Cross_context_mutex.t
+  ; state : cycle_grant_state Atomic.t
+  }
 
 type cycle_grant_take_result =
   | Cycle_grant_authorized of string * Keeper_approval.Audit.receipt
@@ -36,44 +38,41 @@ let cycle_grant_of_resolution (resolution : Keeper_event_queue.hitl_resolution) 
   match resolution.decision with
   | Keeper_event_queue.Hitl_approved ->
     Some
-      (Atomic.make
-         (Cycle_grant_available { approval_id = resolution.approval_id }))
+      { mutex = Cross_context_mutex.create ()
+      ; state =
+          Atomic.make
+            (Cycle_grant_available { approval_id = resolution.approval_id })
+      }
   | Keeper_event_queue.Hitl_rejected _ -> None
 ;;
 
-let rec take_matching_cycle_grant grant request =
-  match Atomic.get grant with
+let take_matching_cycle_grant grant request =
+  match Atomic.get grant.state with
   | Cycle_grant_consumed -> Cycle_grant_not_applicable
-  | Cycle_grant_consuming entry ->
-    Cycle_grant_temporarily_unavailable
-      ( entry.approval_id
-      , Approval_grant_consumption_in_progress entry.approval_id )
-  | Cycle_grant_available entry as current ->
-    let reserved = Cycle_grant_consuming entry in
-    if Atomic.compare_and_set grant current reserved
-    then (
-      match
-        Keeper_approval_queue.consume_approved_resolution
-        ~base_path:request.base_path
-        ~id:entry.approval_id
-        ~keeper_name:request.keeper_name
-        ~tool_name:request.operation
-        ~input:request.input
-      with
-      | Error error ->
-        Atomic.set grant current;
-        Cycle_grant_temporarily_unavailable
-          (entry.approval_id, Approval_grant_unavailable error)
-      | Ok Keeper_approval_queue_result.Consumption_not_matching ->
-        Atomic.set grant current;
-        Cycle_grant_not_applicable
-      | Ok Keeper_approval_queue_result.Consumption_already_committed ->
-        Atomic.set grant Cycle_grant_consumed;
-        Cycle_grant_not_applicable
-      | Ok (Keeper_approval_queue_result.Consumption_committed audit_receipt) ->
-        Atomic.set grant Cycle_grant_consumed;
-        Cycle_grant_authorized (entry.approval_id, audit_receipt))
-    else take_matching_cycle_grant grant request
+  | Cycle_grant_available _ ->
+    Cross_context_mutex.with_lock grant.mutex (fun () ->
+      match Atomic.get grant.state with
+      | Cycle_grant_consumed -> Cycle_grant_not_applicable
+      | Cycle_grant_available entry ->
+        (match
+           Keeper_approval_queue.consume_approved_resolution
+             ~base_path:request.base_path
+             ~id:entry.approval_id
+             ~keeper_name:request.keeper_name
+             ~tool_name:request.operation
+             ~input:request.input
+         with
+         | Error error ->
+           Cycle_grant_temporarily_unavailable
+             (entry.approval_id, Approval_grant_unavailable error)
+         | Ok Keeper_approval_queue_result.Consumption_not_matching ->
+           Cycle_grant_not_applicable
+         | Ok Keeper_approval_queue_result.Consumption_already_committed ->
+           Atomic.set grant.state Cycle_grant_consumed;
+           Cycle_grant_not_applicable
+         | Ok (Keeper_approval_queue_result.Consumption_committed audit_receipt) ->
+           Atomic.set grant.state Cycle_grant_consumed;
+           Cycle_grant_authorized (entry.approval_id, audit_receipt)))
 ;;
 
 let request_turn_id request =

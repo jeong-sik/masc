@@ -419,6 +419,26 @@ let test_concurrent_drains_preserve_tool_order_and_count () =
        check bool "no unmatched completion integrity error" true (EB.integrity_error t = None))
 ;;
 
+let test_background_drain_cancelled_switch_unsubscribe_does_not_deadlock () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let bus = Agent_core.Event_bus.create () in
+  let scope = Scope.create ~keeper_turn_id:99 in
+  let t = EB.create ~event_bus:bus ~keeper_name:"cancelled-sw" ~scope () in
+  let failed_sw = ref None in
+  (try
+     Eio.Switch.run (fun sw ->
+       failed_sw := Some sw;
+       raise Exit)
+   with
+   | Exit -> ());
+  let sw = Option.get !failed_sw in
+  Eio_context.with_turn_switch sw (fun () ->
+    EB.start_background_drain ~clock t;
+    EB.unsubscribe t);
+  check int "unsubscribe completed cleanly on cancelled switch" 0 (EB.pending_tool_count t)
+;;
+
 let () =
   Alcotest.run
     "keeper-unified-turn-event-bus"
@@ -451,6 +471,8 @@ let () =
     ; ( "background-drain"
       , [ test_case "continues across multiple polls" `Quick
             test_background_drain_continues_across_multiple_polls
+        ; test_case "cancelled switch unsubscribe does not deadlock" `Quick
+            test_background_drain_cancelled_switch_unsubscribe_does_not_deadlock
         ] )
     ]
 ;;

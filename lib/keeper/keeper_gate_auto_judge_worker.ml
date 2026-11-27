@@ -179,49 +179,59 @@ and spawn_claimed_auto_judge_entry_detached_with
        release_auto_judge entry;
        Error reason
      | Some sw ->
-       (try
-          Eio.Fiber.fork ~sw (fun () ->
-            match run_reserved_auto_judge_entry_with ~spawn_worker entry with
-            | Ok _ -> ()
-            | Error reason ->
-              Log.Keeper.error
-                ~keeper_name:entry.keeper_name
-                "Auto Judge detached worker start failed approval=%s: %s"
-                entry.id
-                reason);
-          Ok Started
-        with
-        | Eio.Cancel.Cancelled _ as exn ->
-          let backtrace = Printexc.get_raw_backtrace () in
-          let reason =
-            "Auto Judge detached worker launch was cancelled: "
-            ^ Printexc.to_string exn
-          in
-          Eio.Cancel.protect (fun () ->
-            ignore
-              (mark_pre_worker_unavailable
-                 entry
-                 ~reason_code:
-                   Keeper_approval_queue_rules_types
-                   .Summary_pre_worker_auto_judge_unavailable
-                 ~operator_detail:reason);
-            release_auto_judge entry);
-          Printexc.raise_with_backtrace exn backtrace
-        | exn ->
-          let reason =
-            "Auto Judge detached worker launch failed: " ^ Printexc.to_string exn
-          in
-          let reason =
-            mark_pre_worker_unavailable
-              entry
-              ~reason_code:
-                Keeper_approval_queue_rules_types
-                .Summary_pre_worker_auto_judge_unavailable
-              ~operator_detail:reason
-            |> durable_pre_worker_unavailable_error reason
-          in
-          release_auto_judge entry;
-          Error reason))
+       let fail_unlaunched reason =
+         let reason =
+           mark_pre_worker_unavailable
+             entry
+             ~reason_code:
+               Keeper_approval_queue_rules_types
+               .Summary_pre_worker_auto_judge_unavailable
+             ~operator_detail:reason
+           |> durable_pre_worker_unavailable_error reason
+         in
+         release_auto_judge entry;
+         Error reason
+       in
+       if Option.is_some (Eio.Switch.get_error sw)
+       then fail_unlaunched "Auto Judge unavailable: server root switch is stopping"
+       else (
+         let started = Atomic.make false in
+         try
+           Eio.Fiber.fork ~sw (fun () ->
+             Atomic.set started true;
+             match run_reserved_auto_judge_entry_with ~spawn_worker entry with
+             | Ok _ -> ()
+             | Error reason ->
+               Log.Keeper.error
+                 ~keeper_name:entry.keeper_name
+                 "Auto Judge detached worker start failed approval=%s: %s"
+                 entry.id
+                 reason);
+           if (not (Atomic.get started)) && Option.is_some (Eio.Switch.get_error sw)
+           then
+             fail_unlaunched
+               "Auto Judge detached worker dropped: server root switch turned off"
+           else Ok Started
+         with
+         | Eio.Cancel.Cancelled _ as exn ->
+           let backtrace = Printexc.get_raw_backtrace () in
+           let reason =
+             "Auto Judge detached worker launch was cancelled: "
+             ^ Printexc.to_string exn
+           in
+           Eio.Cancel.protect (fun () ->
+             ignore
+               (mark_pre_worker_unavailable
+                  entry
+                  ~reason_code:
+                    Keeper_approval_queue_rules_types
+                    .Summary_pre_worker_auto_judge_unavailable
+                  ~operator_detail:reason);
+             release_auto_judge entry);
+           Printexc.raise_with_backtrace exn backtrace
+         | exn ->
+           fail_unlaunched
+             ("Auto Judge detached worker launch failed: " ^ Printexc.to_string exn)))
 
 and spawn_claimed_auto_judge_entry entry =
   spawn_claimed_auto_judge_entry_detached_with

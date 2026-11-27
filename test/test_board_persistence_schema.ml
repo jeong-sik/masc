@@ -183,12 +183,112 @@ let test_audience_decoder_preserves_target_boundary () =
   let decoded = check_rejection_count "accepted targets emit no rejection" 0
       (fun () -> Masc_board_handlers.Board_audience.of_yojson
         (audience [`String "bob"; `String "alice"; `String "bob"])) in
-  match decoded with
-  | Some (Board.Targets targets) ->
-    Alcotest.(check (list string)) "accepted targets remain sorted and unique"
-      ["alice"; "bob"] (List.map Board.Agent_id.to_string targets)
-  | Some (Board.Broadcast | Board.Thread_participants | Board.Discoverable) | None ->
-    Alcotest.fail "valid target audience was not retained"
+  (match decoded with
+   | Some (Board.Targets targets) ->
+     Alcotest.(check (list string)) "accepted targets remain sorted and unique"
+       ["alice"; "bob"] (List.map Board.Agent_id.to_string targets)
+   | Some (Board.Broadcast | Board.Thread_participants | Board.Discoverable) | None ->
+     Alcotest.fail "valid target audience was not retained");
+  let reversed_targets =
+    `Assoc ["targets", `List [`String "carol"; `String "alice"]; "kind", `String "targets"] in
+  (match Masc_board_handlers.Board_audience.of_yojson reversed_targets with
+   | Some (Board.Targets targets) ->
+     Alcotest.(check (list string)) "reversed targets key order is accepted"
+       ["alice"; "carol"] (List.map Board.Agent_id.to_string targets)
+   | Some (Board.Broadcast | Board.Thread_participants | Board.Discoverable) | None ->
+     Alcotest.fail "reversed target audience key order was rejected");
+  let dup_kind =
+    `Assoc ["kind", `String "targets"; "kind", `String "targets";
+            "targets", `List [`String "bad/target"]] in
+  let decoded = check_rejection_count "duplicate audience key emits no target rejection" 0
+      (fun () -> Masc_board_handlers.Board_audience.of_yojson dup_kind) in
+  Alcotest.(check bool) "duplicate audience key is refused" true (Option.is_none decoded);
+  let extra_key =
+    `Assoc ["kind", `String "broadcast"; "extra", `Int 1] in
+  Alcotest.(check bool) "broadcast with unknown key is refused" true
+    (Option.is_none (Masc_board_handlers.Board_audience.of_yojson extra_key))
+;;
+
+let test_single_pass_duplicate_and_attachment_guards () =
+  let store = Masc_board_handlers.Board_core.create_store
+      ~base_path:(Env_config_core.base_path ()) () in
+  load_sources store;
+  let post = create_no_origin store ~content:"single pass guards" in
+  let canonical_post = Masc_board_handlers.Board_core.post_to_yojson post in
+  let bad_nested_post =
+    canonical_post
+    |> fun row ->
+    replace_key row "audience"
+      (`Assoc ["kind", `String "targets"; "targets", `List [`String "bad/target"]])
+    |> fun row ->
+    prepend_field row ("closed",
+      `Assoc ["closed_by", `String "bad/closer"; "closed_at", `Float 1.])
+    |> fun row ->
+    prepend_field row ("origin",
+      `Assoc ["source", `String "fusion"; "fusion_run_id", `String "r1";
+              "fusion_producer", `String "bad/producer"])
+  in
+  let decoded = check_rejection_count
+      "duplicate post key short-circuits before nested decoders" 0
+      (fun () -> decode (prepend_field bad_nested_post ("id", `String "dup"))) in
+  Alcotest.(check bool) "duplicate post key refuses row" true (Option.is_none decoded);
+  let decoded = check_rejection_count
+      "duplicate optional post key short-circuits before nested decoders" 0
+      (fun () ->
+         decode
+           (prepend_field
+              (prepend_field bad_nested_post ("hearth", `String "a"))
+              ("hearth", `String "b"))) in
+  Alcotest.(check bool) "duplicate optional post key refuses row" true (Option.is_none decoded);
+  let decoded = check_rejection_count
+      "duplicate key inside origin short-circuits before producer validation" 0
+      (fun () ->
+         decode
+           (prepend_field canonical_post ("origin",
+              `Assoc ["source", `String "fusion"; "source", `String "fusion";
+                      "fusion_run_id", `String "r1";
+                      "fusion_producer", `String "bad/producer"]))) in
+  Alcotest.(check bool) "duplicate origin key refuses row" true (Option.is_none decoded);
+  let decoded = check_rejection_count
+      "duplicate key inside close state short-circuits before closer validation" 0
+      (fun () ->
+         decode
+           (prepend_field canonical_post ("closed",
+              `Assoc ["closed_by", `String "bad/closer"; "closed_at", `Float 1.;
+                      "closed_at", `Float 2.]))) in
+  Alcotest.(check bool) "duplicate close key refuses row" true (Option.is_none decoded);
+  (match decode (prepend_field canonical_post ("attachment_ids", `List [`String " att-1 "; `String "att-2"])) with
+   | Some decoded_post ->
+     Alcotest.(check (list string)) "post attachment_ids trimmed in order"
+       ["att-1"; "att-2"] decoded_post.attachment_ids
+   | None -> Alcotest.fail "valid post attachment_ids was rejected");
+  Alcotest.(check bool) "blank post attachment_id rejected" true
+    (Option.is_none
+       (decode (prepend_field canonical_post ("attachment_ids", `List [`String "   "]))));
+  let comment = match Masc_board_handlers.Board_core.add_comment
+      ~reader:Masc_board_handlers.Board_access.Operator store ~lookup:nobody_declared
+      ~post_id:(Board.Post_id.to_string post.id) ~author:"reader"
+      ~content:"single pass comment" () with
+    | Ok comment -> comment
+    | Error error -> Alcotest.fail (Board.show_board_error error) in
+  let canonical_comment = Masc_board_handlers.Board_core.comment_to_yojson comment in
+  let decode_comment = Masc_board_handlers.Board_votes_json.comment_of_yojson in
+  let bad_audience_comment =
+    replace_key canonical_comment "audience"
+      (`Assoc ["kind", `String "targets"; "targets", `List [`String "bad/target"]])
+  in
+  let decoded = check_rejection_count
+      "duplicate null parent_id short-circuits before nested audience" 0
+      (fun () -> decode_comment (prepend_field bad_audience_comment ("parent_id", `Null))) in
+  Alcotest.(check bool) "duplicate null parent_id refuses comment" true (Option.is_none decoded);
+  (match decode_comment (prepend_field canonical_comment ("attachment_ids", `List [`String " c-att "])) with
+   | Some decoded_comment ->
+     Alcotest.(check (list string)) "comment attachment_ids trimmed"
+       ["c-att"] decoded_comment.attachment_ids
+   | None -> Alcotest.fail "valid comment attachment_ids was rejected");
+  Alcotest.(check bool) "non-list comment attachment_ids rejected" true
+    (Option.is_none
+       (decode_comment (prepend_field canonical_comment ("attachment_ids", `String "c-att"))))
 ;;
 
 let check_origin_producer_codec canonical =
@@ -681,6 +781,8 @@ let () =
             (with_eio test_comment_decoder_retains_nested_rejections)
         ; Alcotest.test_case "audience decoder preserves target validation" `Quick
             (with_eio test_audience_decoder_preserves_target_boundary)
+        ; Alcotest.test_case "single-pass decoders guard duplicate keys and attachments" `Quick
+            (with_eio test_single_pass_duplicate_and_attachment_guards)
         ; Alcotest.test_case "origin round trip" `Quick (with_eio test_codec_round_trip)
         ; Alcotest.test_case "absent origin -> None" `Quick (with_eio test_codec_absent_origin)
         ; Alcotest.test_case

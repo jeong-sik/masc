@@ -13,6 +13,15 @@ export const LEGEND_TIME_LABEL = '시각'
 /** What the legend says for a point that has no value. */
 export const LEGEND_NO_VALUE = '없음'
 
+const VALUE_NUMBER = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 2 })
+
+/** A series' value as the legend says it: thousands grouped, two decimals
+ *  at most and no zero closing them, then the series' unit. */
+export function legendValueText(raw: number, unit: string | undefined): string {
+  const number = VALUE_NUMBER.format(raw)
+  return unit ? `${number} ${unit}` : number
+}
+
 /** What uPlot keeps of the pointer for one chart: the offset from the left of
  *  its plotting area, negative off it, and the last mouse event the chart got
  *  itself. A chart that only follows another chart's crosshair has no event. */

@@ -339,6 +339,16 @@ type touch_counts =
 
 val touch_counts : touches -> touch_counts
 
+type touch_probe =
+  | Untouched
+  | Touched of touch
+  | Ledger_evicted
+(** Result of an O(1) point check against the live touch ledger. *)
+
+val probe_touch : sha256:string -> touch_probe
+(** Check whether [sha256] is present in either touch-ledger generation or
+    whether either generation overflowed, without snapshotting the ledger. *)
+
 type blob_status =
   | Present of
       { bytes : int

@@ -86,7 +86,7 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
 
   (* Dedup: if agent already has a session, update last_seen and return early *)
   let agent_file_dedup = Filename.concat (agents_dir config) (safe_filename nickname ^ ".json") in
-  let already_bound = Sys.file_exists agent_file_dedup in
+  let already_bound = path_exists config agent_file_dedup in
   if already_bound then begin
     (* The record is read and rewritten under its lock, as a heartbeat does,
        so neither overwrites the other's status. *)
@@ -232,7 +232,7 @@ let end_session config ~agent_name =
   let actual_name = resolve_agent_name config agent_name in
 
   let agent_file = Filename.concat (agents_dir config) (safe_filename actual_name ^ ".json") in
-  let in_fs = Sys.file_exists agent_file in
+  let in_fs = path_exists config agent_file in
   if in_fs then begin
     (* Mark agent as Inactive instead of deleting, so a future session can restore
        identity without orphan state. *)

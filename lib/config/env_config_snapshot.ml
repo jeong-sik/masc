@@ -150,8 +150,8 @@ let transport_entries =
        masc_ws_slice_fanout_skipped_total advances per skip. Set to false for \
        emergency rollback only.";
     Env_config_runtime.Transport.h2_snapshot_entry;
-    entry ~default:"240" "MASC_STARTUP_WATCHDOG_SEC"
-      "Startup watchdog timeout (seconds)";
+    entry ~default:"240" "MASC_STARTUP_STALL_SEC"
+      "Seconds without boot progress before the startup watchdog ends the process";
     Masc_grpc_transport.snapshot_entry;
     entry ~default:"32" "MASC_WS_MAX_INBOUND_DISPATCHES_PER_SESSION"
       "Maximum concurrent JSON-RPC request dispatch fibers admitted from one \

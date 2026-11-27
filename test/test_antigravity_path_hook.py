@@ -62,6 +62,25 @@ class NativeReadHook(unittest.TestCase):
     def test_secret_deny_wins_even_inside_workspace(self):
         self.assertEqual(self.read(self.secret / "token"), "deny")
 
+    def test_non_canonical_deny_root_still_denies(self):
+        trailing_cmd = COMMAND + [
+            "--cwd", str(self.workspace), "--brain", str(self.brain),
+            "--read-root", str(self.workspace), "--deny-root", str(self.secret) + "/",
+        ]
+        payload = json.dumps({
+            "toolCall": {"name": "read_file", "args": {"Path": str(self.secret / "token")}},
+            "conversationId": "current",
+        })
+        self.assertEqual(self.invoke(payload, command=trailing_cmd), "deny")
+
+        secret_alias = self.root / "secret-link"
+        secret_alias.symlink_to(self.secret)
+        symlink_cmd = COMMAND + [
+            "--cwd", str(self.workspace), "--brain", str(self.brain),
+            "--read-root", str(self.workspace), "--deny-root", str(secret_alias),
+        ]
+        self.assertEqual(self.invoke(payload, command=symlink_cmd), "deny")
+
     def test_only_current_generated_output_delegates(self):
         self.assertEqual(self.read(self.output), "allow")
         self.assertEqual(self.read(self.output, "other"), "deny")

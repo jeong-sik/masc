@@ -165,13 +165,16 @@ end = struct
   (* Static patterns hoisted to module load.  [Safe_path] is on every
      MCP tool argument-validation path, so the prior per-call form
      paid 4 [Re.compile] for every parameter check. *)
-  let traversal_re = Re.Pcre.re {|\.\./|} |> Re.compile
-
   let path_separator_re = Re.Pcre.re {|[/\\]|} |> Re.compile
 
   let dotdot_re = Re.Pcre.re {|\.\.|} |> Re.compile
 
   let unsafe_char_re = Re.Pcre.re {|[^a-zA-Z0-9_.\-]|} |> Re.compile
+
+  let has_parent_segment path =
+    String.split_on_char '/' path
+    |> List.concat_map (String.split_on_char '\\')
+    |> List.exists (fun seg -> String.equal seg "..")
 
   let validate_relative path =
     let reject reason =
@@ -180,11 +183,11 @@ end = struct
     in
     if String.length path = 0 then
       reject "path cannot be empty"
-    else if path.[0] = '/' then
+    else if String.contains path '\000' then
+      reject "path cannot contain NUL byte"
+    else if path.[0] = '/' || path.[0] = '\\' then
       reject "absolute paths not allowed"
-    else if String.starts_with path ~prefix:".." then
-      reject "path traversal not allowed"
-    else if Re.execp traversal_re path then
+    else if has_parent_segment path then
       reject "path traversal not allowed"
     else
       Ok path

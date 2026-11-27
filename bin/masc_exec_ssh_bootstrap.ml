@@ -169,14 +169,42 @@ let ensure_dir_0700 path =
          (Unix.error_message error))
 ;;
 
+let chmod_0600 path =
+  try
+    Unix.chmod path 0o600;
+    Ok ()
+  with
+  | Unix.Unix_error (error, operation, target) ->
+    Error
+      (Printf.sprintf "%s(%s): %s" operation target
+         (Unix.error_message error))
+;;
+
+let temp_counter = Atomic.make 0
+
 let write_atomic ~mode path content =
   let* () = ensure_dir (Filename.dirname path) in
-  let temp = Printf.sprintf "%s.tmp.%d" path (Unix.getpid ()) in
+  let rec open_unique attempts =
+    let seq = Atomic.fetch_and_add temp_counter 1 in
+    let temp = Printf.sprintf "%s.tmp.%d.%d" path (Unix.getpid ()) seq in
+    match Unix.openfile temp [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] mode with
+    | fd -> Ok (temp, fd)
+    | exception Unix.Unix_error (Unix.EEXIST, _, _) when attempts > 0 ->
+      open_unique (attempts - 1)
+    | exception Unix.Unix_error (error, operation, target) ->
+      Error
+        (Printf.sprintf "%s(%s): %s" operation target
+           (Unix.error_message error))
+  in
+  let* temp, fd = open_unique 64 in
   try
-    let fd =
-      Unix.openfile temp [ Unix.O_WRONLY; Unix.O_CREAT; Unix.O_EXCL ] mode
+    let oc =
+      try Unix.out_channel_of_descr fd
+      with exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        (try Unix.close fd with Unix.Unix_error _ -> ());
+        Printexc.raise_with_backtrace exn bt
     in
-    let oc = Unix.out_channel_of_descr fd in
     Fun.protect
       ~finally:(fun () -> close_out_noerr oc)
       (fun () ->
@@ -200,7 +228,13 @@ let write_atomic ~mode path content =
 let write_existing_private path content =
   try
     let fd = Unix.openfile path [ Unix.O_WRONLY; Unix.O_TRUNC ] 0o600 in
-    let oc = Unix.out_channel_of_descr fd in
+    let oc =
+      try Unix.out_channel_of_descr fd
+      with exn ->
+        let bt = Printexc.get_raw_backtrace () in
+        (try Unix.close fd with Unix.Unix_error _ -> ());
+        Printexc.raise_with_backtrace exn bt
+    in
     Fun.protect
       ~finally:(fun () -> close_out_noerr oc)
       (fun () ->
@@ -289,7 +323,7 @@ let ensure_keypair endpoint identity_file =
   then
     let* () = require_regular_file identity_file in
     let* () = require_regular_file public_file in
-    Unix.chmod identity_file 0o600;
+    let* () = chmod_0600 identity_file in
     Ok public_file
   else
     let* () = ensure_dir_0700 (Filename.dirname identity_file) in
@@ -299,7 +333,7 @@ let ensure_keypair endpoint identity_file =
         ; "masc:" ^ endpoint.Exec_ssh_endpoint.name; "-f"; identity_file
         ]
     in
-    Unix.chmod identity_file 0o600;
+    let* () = chmod_0600 identity_file in
     Ok public_file
 ;;
 

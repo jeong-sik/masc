@@ -115,12 +115,22 @@ let test_safe_path_valid () =
   ) cases
 
 let test_safe_path_absolute () =
-  match Validation.Safe_path.validate_relative "/etc/passwd" with
-  | Error _ -> ()
-  | Ok _ -> Alcotest.fail "Expected error for absolute path"
+  List.iter (fun s ->
+    match Validation.Safe_path.validate_relative s with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.fail (Printf.sprintf "Expected error for absolute path '%s'" s)
+  ) ["/etc/passwd"; "\\etc\\passwd"]
 
 let test_safe_path_traversal () =
-  let cases = ["../secret"; "foo/../../../etc/passwd"; ".."] in
+  let cases = [
+    "../secret";
+    "foo/../../../etc/passwd";
+    "..";
+    "foo/..";
+    "a/b/..";
+    "a\\..\\b";
+    "foo\000bar";
+  ] in
   List.iter (fun s ->
     match Validation.Safe_path.validate_relative s with
     | Error _ -> ()

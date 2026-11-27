@@ -1,0 +1,616 @@
+/* MASC Dashboard — User Preferences: OKLCH Theme Palettes, Accents, Typography Scale, Density & Prefs UI */
+
+:root {
+  --ui-scale: 1;
+  --density-scale: 1;
+  --chat-font-size: 14px;
+  --code-font-size: 12px;
+  --chat-measure: 78ch;
+}
+
+/* ── Concrete OKLCH Theme Presets ────────────────────────────────────── */
+/* Default `dark` ("Tempered Slate + Surgical Hearth") and `light` ("Warm Archival Paper")
+   are provided by tokens.generated.css. The presets below layer additional OKLCH palettes
+   while yielding to explicit `[data-contrast="high"]`. */
+
+:root[data-theme-preset="midnight"]:not([data-contrast="high"]) {
+  color-scheme: dark;
+  --bg-0: oklch(0.070 0.004 260);
+  --bg-1: oklch(0.105 0.005 260);
+  --bg-2: oklch(0.140 0.006 260);
+  --bg-3: oklch(0.178 0.007 260);
+  --bg-4: oklch(0.218 0.007 260);
+  --line-1: oklch(0.250 0.008 260);
+  --line-2: oklch(0.330 0.009 260);
+  --line-3: oklch(0.425 0.010 260);
+  --fg-1: oklch(0.955 0.006 250);
+  --fg-2: oklch(0.805 0.008 250);
+  --fg-3: oklch(0.655 0.008 250);
+  --fg-4: oklch(0.485 0.007 250);
+}
+
+:root[data-theme-preset="ash"]:not([data-contrast="high"]) {
+  color-scheme: dark;
+  --bg-0: oklch(0.195 0.009 245);
+  --bg-1: oklch(0.228 0.010 245);
+  --bg-2: oklch(0.260 0.011 245);
+  --bg-3: oklch(0.295 0.012 245);
+  --bg-4: oklch(0.332 0.012 245);
+  --line-1: oklch(0.355 0.012 245);
+  --line-2: oklch(0.430 0.013 245);
+  --line-3: oklch(0.520 0.014 245);
+  --fg-1: oklch(0.945 0.008 240);
+  --fg-2: oklch(0.815 0.010 240);
+  --fg-3: oklch(0.680 0.010 240);
+  --fg-4: oklch(0.540 0.009 240);
+}
+
+:root[data-theme-preset="paper-sepia"]:not([data-contrast="high"]) {
+  color-scheme: light;
+  --bg-0: oklch(0.955 0.020 82);
+  --bg-1: oklch(0.930 0.022 80);
+  --bg-2: oklch(0.900 0.024 78);
+  --bg-3: oklch(0.865 0.024 76);
+  --bg-4: oklch(0.825 0.024 75);
+  --line-1: oklch(0.810 0.024 78);
+  --line-2: oklch(0.720 0.026 76);
+  --line-3: oklch(0.620 0.026 74);
+  --fg-1: oklch(0.220 0.024 62);
+  --fg-2: oklch(0.345 0.022 64);
+  --fg-3: oklch(0.455 0.018 66);
+  --fg-4: oklch(0.530 0.016 68);
+  --cta-bg: oklch(0.240 0.026 60);
+  --cta-fg: oklch(0.960 0.018 82);
+  --cta-bg-hover: oklch(0.310 0.026 60);
+}
+
+/* ── OKLCH Accent Overrides ──────────────────────────────────────────── */
+
+:root[data-accent="steel"] {
+  --brass-1: oklch(0.740 0.125 242);
+  --brass-2: oklch(0.650 0.120 242);
+  --brass-3: oklch(0.535 0.105 242);
+  --focus: oklch(0.750 0.130 242);
+}
+
+:root[data-theme="light"][data-accent="steel"] {
+  --brass-1: oklch(0.450 0.135 242);
+  --brass-2: oklch(0.405 0.125 242);
+  --brass-3: oklch(0.355 0.110 242);
+  --focus: oklch(0.460 0.145 242);
+}
+
+:root[data-accent="jade"] {
+  --brass-1: oklch(0.750 0.135 155);
+  --brass-2: oklch(0.660 0.125 155);
+  --brass-3: oklch(0.545 0.110 155);
+  --focus: oklch(0.750 0.135 155);
+}
+
+:root[data-theme="light"][data-accent="jade"] {
+  --brass-1: oklch(0.430 0.130 155);
+  --brass-2: oklch(0.385 0.120 155);
+  --brass-3: oklch(0.340 0.105 155);
+  --focus: oklch(0.430 0.135 155);
+}
+
+:root[data-accent="rose"] {
+  --brass-1: oklch(0.735 0.145 14);
+  --brass-2: oklch(0.645 0.135 14);
+  --brass-3: oklch(0.535 0.115 14);
+  --focus: oklch(0.745 0.145 14);
+}
+
+:root[data-theme="light"][data-accent="rose"] {
+  --brass-1: oklch(0.470 0.155 14);
+  --brass-2: oklch(0.425 0.145 14);
+  --brass-3: oklch(0.370 0.125 14);
+  --focus: oklch(0.470 0.160 14);
+}
+
+:root[data-accent="iris"] {
+  --brass-1: oklch(0.735 0.140 292);
+  --brass-2: oklch(0.645 0.130 292);
+  --brass-3: oklch(0.535 0.115 292);
+  --focus: oklch(0.745 0.145 292);
+}
+
+:root[data-theme="light"][data-accent="iris"] {
+  --brass-1: oklch(0.460 0.150 292);
+  --brass-2: oklch(0.415 0.140 292);
+  --brass-3: oklch(0.365 0.120 292);
+  --focus: oklch(0.465 0.155 292);
+}
+
+:root[data-accent] {
+  --brass-soft: color-mix(in oklch, var(--brass-1) 14%, transparent);
+  --brass-border: color-mix(in oklch, var(--brass-1) 36%, transparent);
+  --brass-fg: var(--brass-1);
+  --color-accent-fg: var(--brass-1);
+  --color-accent-fg-dim: var(--brass-3);
+  --color-accent-brass: var(--brass-1);
+  --color-accent-soft: var(--brass-soft);
+  --accent-12: color-mix(in oklch, var(--brass-1) 12%, transparent);
+  --accent-20: color-mix(in oklch, var(--brass-1) 20%, transparent);
+  --accent-30: color-mix(in oklch, var(--brass-1) 30%, transparent);
+}
+
+/* ── Typography Scale & Density ──────────────────────────────────────── */
+
+:root[data-density] {
+  --fs-10: calc(10px * var(--ui-scale, 1));
+  --fs-11: calc(11px * var(--ui-scale, 1));
+  --fs-12: calc(12px * var(--ui-scale, 1));
+  --fs-13: calc(13px * var(--ui-scale, 1));
+  --fs-14: calc(14px * var(--ui-scale, 1));
+  --fs-16: calc(16px * var(--ui-scale, 1));
+  --fs-20: calc(20px * var(--ui-scale, 1));
+  --fs-28: calc(28px * var(--ui-scale, 1));
+  --font-size-3xs: var(--fs-10);
+  --font-size-2xs: var(--fs-11);
+  --font-size-xs: var(--fs-12);
+  --font-size-sm: var(--fs-13);
+  --font-size-base: var(--fs-14);
+  --font-size-md: calc(15px * var(--ui-scale, 1));
+  --font-size-lg: var(--fs-16);
+  --sp-1: calc(4px * var(--density-scale, 1));
+  --sp-2: calc(8px * var(--density-scale, 1));
+  --sp-3: calc(12px * var(--density-scale, 1));
+  --sp-4: calc(16px * var(--density-scale, 1));
+  --sp-5: calc(24px * var(--density-scale, 1));
+  --sp-6: calc(32px * var(--density-scale, 1));
+}
+
+/* ── Chat Typography, Measure & Compact Layout ───────────────────────── */
+
+.chat-bubble {
+  max-width: var(--chat-measure, 78ch);
+  font-size: var(--chat-font-size, 14px);
+}
+
+.chat-block-code,
+.chat-block-code pre,
+.chat-block-code code {
+  font-size: var(--code-font-size, 12px);
+}
+
+:root[data-chat-layout="compact"] .chat-transcript {
+  gap: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3);
+}
+
+:root[data-chat-layout="compact"] .chat-bubble {
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+}
+
+/* ── Explicit Reduce Motion ──────────────────────────────────────────── */
+
+:root[data-reduce-motion="on"] *,
+:root[data-reduce-motion="on"] *::before,
+:root[data-reduce-motion="on"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* ── Discord-Grade Preferences Panel UI ──────────────────────────────── */
+
+.up-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+}
+
+.up-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+
+.up-header-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.up-title {
+  margin: 0;
+  font-size: var(--fs-14);
+  font-weight: 600;
+  color: var(--fg-1);
+}
+
+.up-subtitle {
+  margin: 0;
+  font-size: var(--fs-11);
+  color: var(--fg-3);
+}
+
+.up-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.up-section-title {
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--fg-2);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+}
+
+.up-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: var(--sp-3);
+}
+
+.up-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--sp-2);
+}
+
+.up-theme-swatch {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-1);
+  background: var(--bg-1);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+
+.up-theme-swatch:hover {
+  border-color: var(--line-2);
+  background: var(--bg-2);
+}
+
+.up-theme-swatch.is-active {
+  border-color: var(--brass-1);
+  background: var(--brass-soft);
+}
+
+.up-swatch-preview {
+  height: 36px;
+  border-radius: var(--radius-sm);
+  border: 1px solid oklch(0.5 0 0 / 0.25);
+  padding: 5px 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  overflow: hidden;
+}
+
+.up-swatch-bar {
+  height: 5px;
+  border-radius: 999px;
+  width: 64%;
+  opacity: 0.9;
+}
+
+.up-swatch-bar--short {
+  width: 40%;
+  opacity: 0.55;
+}
+
+.up-swatch-label {
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--fg-1);
+  line-height: 1.25;
+}
+
+.up-swatch-desc {
+  font-size: var(--fs-10);
+  color: var(--fg-3);
+  line-height: 1.2;
+}
+
+.up-accent-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+.up-accent-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--line-1);
+  background: var(--bg-1);
+  font-size: var(--fs-12);
+  color: var(--fg-2);
+  cursor: pointer;
+  transition: border-color var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+}
+
+.up-accent-chip:hover {
+  border-color: var(--line-2);
+  color: var(--fg-1);
+}
+
+.up-accent-chip.is-active {
+  border-color: var(--brass-1);
+  background: var(--brass-soft);
+  color: var(--fg-1);
+  font-weight: 600;
+}
+
+.up-accent-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  flex: none;
+  border: 1px solid oklch(0 0 0 / 0.2);
+}
+
+.up-slider-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.up-slider-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-1);
+  background: var(--bg-1);
+}
+
+.up-slider-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-size: var(--fs-12);
+  color: var(--fg-2);
+}
+
+.up-slider-value {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  color: var(--brass-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.up-range {
+  width: 100%;
+  accent-color: var(--brass-1);
+  cursor: pointer;
+}
+
+/* ── Live Interactive Mini-Preview Card ──────────────────────────────── */
+
+.up-preview-card {
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  background: var(--bg-0);
+  padding: var(--sp-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.up-preview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  font-size: var(--fs-11);
+  color: var(--fg-3);
+}
+
+.up-preview-stream {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+.up-preview-stream[data-layout="compact"] {
+  gap: var(--sp-1);
+}
+
+.up-preview-msg {
+  display: flex;
+  gap: var(--sp-2);
+  align-items: flex-start;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  max-width: var(--chat-measure, 78ch);
+}
+
+.up-preview-stream[data-layout="compact"] .up-preview-msg {
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--radius-sm);
+}
+
+.up-preview-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  background: var(--brass-soft);
+  border: 1px solid var(--brass-border);
+  color: var(--brass-1);
+  font-size: var(--fs-11);
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.up-preview-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.up-preview-author {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-12);
+  font-weight: 600;
+  color: var(--fg-1);
+}
+
+.up-preview-text {
+  margin: 0;
+  color: var(--fg-2);
+  font-size: var(--chat-font-size, 14px);
+  line-height: 1.45;
+}
+
+.up-preview-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--brass-border);
+  background: var(--brass-soft);
+  color: var(--brass-1);
+  font-size: var(--fs-11);
+}
+
+.up-preview-code {
+  margin: 2px 0 0;
+  padding: var(--sp-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-1);
+  background: var(--bg-1);
+  color: var(--fg-1);
+  font-family: var(--font-mono);
+  font-size: var(--code-font-size, 12px);
+  overflow-x: auto;
+}
+
+/* ── Audio & Notification Rows ───────────────────────────────────────── */
+
+.up-toggle-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+
+.up-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-1);
+  background: var(--bg-1);
+}
+
+.up-toggle-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.up-toggle-label {
+  font-size: var(--fs-12);
+  font-weight: 500;
+  color: var(--fg-1);
+}
+
+.up-toggle-hint {
+  font-size: var(--fs-11);
+  color: var(--fg-3);
+}
+
+.up-cue-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: none;
+}
+
+.up-vu-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 1 1 auto;
+}
+
+.up-vu-meter {
+  flex: 1 1 auto;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-0);
+  border: 1px solid var(--line-1);
+  overflow: hidden;
+}
+
+.up-vu-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--ok), var(--brass-1), var(--err));
+  transition: width 60ms linear;
+}
+
+.up-device-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.up-select {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--input-border);
+  background: var(--input-bg);
+  color: var(--input-fg);
+  font-size: var(--fs-12);
+}
+
+.up-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--line-1);
+  background: var(--bg-1);
+}
+
+.up-tab {
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: transparent;
+  color: var(--fg-3);
+  font-size: var(--fs-12);
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.up-tab.is-active {
+  background: var(--bg-3);
+  color: var(--fg-1);
+  font-weight: 600;
+}

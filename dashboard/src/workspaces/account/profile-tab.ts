@@ -16,6 +16,8 @@ import {
 } from '../../core/auth'
 import { startObserverStream } from '../../core/observer'
 import { pushShellToast } from '../../shell/shell-state'
+import { AppearancePanel } from '../settings/appearance-panel'
+import { AudioPrefsPanel } from '../settings/audio-prefs-panel'
 import { fetchWhoami, postLogout, type WhoamiInfo } from './wire'
 
 type SignedInSession = Extract<AuthSession, { readonly kind: 'multi_account_signed_in' }>
@@ -28,6 +30,8 @@ export function ProfileSessionsTab({
   const [whoami, setWhoami] = useState<WhoamiInfo | null>(null)
   const [whoamiError, setWhoamiError] = useState<string | null>(null)
   const [signingOut, setSigningOut] = useState(false)
+  const [prefsTab, setPrefsTab] = useState<'appearance' | 'audio'>('appearance')
+  const [prefsOpen, setPrefsOpen] = useState(true)
   const targets = workspaceTargets.value
   const activeWs = activeWorkspaceId.value
   const epoch = sessionEpoch.value
@@ -138,6 +142,55 @@ export function ProfileSessionsTab({
             `
           })}
         </ul>
+      </section>
+
+      <section class="ap-card" data-testid="account-user-prefs">
+        <header class="ap-card-head">
+          <div>
+            <h2 class="ap-card-title">Personal Appearance & Audio Preferences</h2>
+            <p class="ap-card-sub">
+              Browser-local theme, font scale, layout density, audio devices, and sound cues — available to all roles.
+            </p>
+          </div>
+          <div style=${{ display: 'flex', alignItems: 'center', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+            ${prefsOpen && html`
+              <div class="up-tabs" role="tablist" aria-label="개인 환경설정 탭">
+                <button
+                  type="button"
+                  role="tab"
+                  class=${`up-tab${prefsTab === 'appearance' ? ' is-active' : ''}`}
+                  aria-selected=${prefsTab === 'appearance'}
+                  data-testid="prefs-tab-appearance"
+                  onClick=${() => setPrefsTab('appearance')}
+                >
+                  화면 & 테마
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  class=${`up-tab${prefsTab === 'audio' ? ' is-active' : ''}`}
+                  aria-selected=${prefsTab === 'audio'}
+                  data-testid="prefs-tab-audio"
+                  onClick=${() => setPrefsTab('audio')}
+                >
+                  오디오 & 알림
+                </button>
+              </div>
+            `}
+            <button
+              type="button"
+              class="btn-ghost"
+              aria-expanded=${prefsOpen}
+              onClick=${() => setPrefsOpen((v) => !v)}
+            >
+              ${prefsOpen ? '접기' : '펼치기'}
+            </button>
+          </div>
+        </header>
+
+        ${prefsOpen && (prefsTab === 'appearance'
+          ? html`<${AppearancePanel} />`
+          : html`<${AudioPrefsPanel} />`)}
       </section>
     </div>
   `

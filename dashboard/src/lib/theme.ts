@@ -14,6 +14,29 @@ export const CONTRAST_SEARCH_PARAM = 'contrast'
 
 export type ThemeId = 'dark' | 'light'
 export type ContrastId = 'normal' | 'high'
+export type ThemePresetId = 'system' | 'dark' | 'midnight' | 'ash' | 'light' | 'paper-sepia'
+export type ConcreteThemePresetId = Exclude<ThemePresetId, 'system'>
+
+const themeListeners = new Set<(theme: ThemeId) => void>()
+const contrastListeners = new Set<(contrast: ContrastId | null) => void>()
+
+export function onThemeApplied(listener: (theme: ThemeId) => void): () => void {
+  themeListeners.add(listener)
+  return () => {
+    themeListeners.delete(listener)
+  }
+}
+
+export function onContrastApplied(listener: (contrast: ContrastId | null) => void): () => void {
+  contrastListeners.add(listener)
+  return () => {
+    contrastListeners.delete(listener)
+  }
+}
+
+export function resolveBaseThemeForPreset(preset: ConcreteThemePresetId): ThemeId {
+  return preset === 'light' || preset === 'paper-sepia' ? 'light' : 'dark'
+}
 
 export function normalizeTheme(raw: string | null | undefined): ThemeId {
   const value = raw?.trim().toLowerCase() ?? ''
@@ -31,22 +54,30 @@ export function normalizeContrast(raw: string | null | undefined): ContrastId | 
 }
 
 export function applyTheme(theme: ThemeId): void {
-  if (typeof document === 'undefined') return
-  if (theme === 'light') {
-    document.documentElement.dataset.theme = 'light'
-  } else {
-    delete document.documentElement.dataset.theme
+  if (typeof document !== 'undefined') {
+    if (theme === 'light') {
+      document.documentElement.dataset.theme = 'light'
+    } else {
+      delete document.documentElement.dataset.theme
+    }
+  }
+  for (const listener of themeListeners) {
+    listener(theme)
   }
 }
 
 export function applyContrast(contrast: ContrastId | null): void {
-  if (typeof document === 'undefined') return
-  if (contrast === 'high') {
-    document.documentElement.dataset.contrast = 'high'
-  } else if (contrast === 'normal') {
-    document.documentElement.dataset.contrast = 'normal'
-  } else {
-    delete document.documentElement.dataset.contrast
+  if (typeof document !== 'undefined') {
+    if (contrast === 'high') {
+      document.documentElement.dataset.contrast = 'high'
+    } else if (contrast === 'normal') {
+      document.documentElement.dataset.contrast = 'normal'
+    } else {
+      delete document.documentElement.dataset.contrast
+    }
+  }
+  for (const listener of contrastListeners) {
+    listener(contrast)
   }
 }
 

@@ -478,7 +478,8 @@ describe('workspaces/infra', () => {
         })
       }
       if (url === '/api/v1/repositories/repo-masc/sync' && init?.method === 'POST') {
-        return jsonResponse({ ok: true })
+        // What the server answers: the row, and what the sync did to the working tree.
+        return jsonResponse({ id: 'repo-masc', status: 'active', branches: [], advance: { state: 'already_current' } })
       }
       if (url.startsWith('/api/v1/ide/repository-activity')) {
         return jsonResponse({ ok: true, data: { repo_id: 'repo-masc', window_hours: 24, incomplete: 0, unattributed: 0, changes: [] } })
@@ -487,27 +488,33 @@ describe('workspaces/infra', () => {
     }) as typeof fetch
 
     render(html`<${InfraWorkspace} subroute="repos" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
-    await flushUi(40)
+    const syncBtn = () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
+      b.textContent?.trim() === '동기화',
+    )
+    await vi.waitFor(() => {
+      expect(syncBtn()).toBeDefined()
+    })
+    const notices = () => [...container.querySelectorAll('.rp-detail .rp-notice')].map((n) => n.textContent)
+    const beforeSync = notices()
+    syncBtn()!.click()
 
-    const syncBtn = [...container.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
-      b.textContent?.includes('동기화'),
-    )!
-    syncBtn.click()
-    await flushUi(30)
-
-    expect(shellToasts.value.some((t) => t.tone === 'success' && t.message.includes('repo-masc 동기화 완료'))).toBe(true)
+    // The toast names the repository as the table does, and says what the sync did.
+    await vi.waitFor(() => {
+      expect(shellToasts.value.some((t) => t.tone === 'success' && t.message === 'masc 동기화 완료. 작업 트리가 이미 원격과 같습니다.')).toBe(true)
+    })
+    expect(notices()).toEqual(beforeSync)
   })
 
   it('reports repository access failure instead of an empty registration list', async () => {
     globalThis.fetch = vi.fn(async () => jsonResponse({ error: 'repository access denied' }, 403)) as typeof fetch
     render(html`<${InfraWorkspace} subroute="repos" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
-    await flushUi()
-
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('저장소 조회 실패')
+    await vi.waitFor(() => {
+      expect(container.querySelector('[role="alert"]')?.textContent).toContain('저장소 목록 조회 실패: repository access denied')
+    })
     expect(container.textContent).not.toContain('등록된 저장소가 없습니다.')
   })
 
-  it('fetches Repos and ALWAYS passes repo_id to /api/v1/ide/repository-activity (OkData), rendering diff & [⤢] inspect drawer', async () => {
+  it('fetches Repos and ALWAYS passes repo_id to /api/v1/ide/repository-activity (OkData), rendering diff & inspect drawer', async () => {
     const seenUrls: string[] = []
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
@@ -556,15 +563,22 @@ describe('workspaces/infra', () => {
       html`<${InfraWorkspace} subroute="repos" onNavigate=${vi.fn()} onInspect=${(p: WorkspaceInspectPayload) => inspected.push(p)} />`,
       container,
     )
-    await flushUi(50)
-
+    // The list, the selection and the activity read are three hops; wait for the last one.
+    const fileLine = () => container.querySelector<HTMLButtonElement>('.rp-file-toggle')
+    await vi.waitFor(() => {
+      expect(fileLine()?.textContent).toContain('example.ml')
+    })
     expect(seenUrls).toContain('/api/v1/ide/repository-activity?repo_id=repo-masc&window_hours=24')
-    expect(container.querySelector('[data-testid="infra-repos-tab"]')?.classList.contains('ov--split')).toBe(true)
-    expect(container.textContent).toContain('lib/example.ml')
-    expect(container.textContent).toContain('+let x = 2')
+    expect(fileLine()!.getAttribute('title')).toBe('lib/example.ml')
+    // A file is one closed line; its writes and their diffs open on request.
+    expect(container.textContent).not.toContain('+let x = 2')
+    fileLine()!.click()
+    await vi.waitFor(() => {
+      expect(container.textContent).toContain('+let x = 2')
+    })
 
     const inspectBtn = Array.from(container.querySelectorAll('button')).find((b) =>
-      b.textContent?.includes('[⤢] 전체 Diff'),
+      b.textContent?.includes('전체 Diff'),
     ) as HTMLButtonElement
     inspectBtn.click()
 
@@ -856,7 +870,7 @@ describe('workspaces/infra', () => {
     resourceCache.clearAll()
     render(html`<${InfraWorkspace} subroute="repos" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
     await flushUi(40)
-    expect(container.textContent).toContain('변경 0건')
+    expect(container.textContent).toContain('Keeper가 이 저장소에 쓴 파일이 없습니다')
   })
 
   it('surfaces explicit decode errors for malformed non-array Repos activity and Sandboxes payloads', async () => {
@@ -913,10 +927,10 @@ describe('workspaces/infra', () => {
 
     render(html`<${InfraWorkspace} subroute="repos" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
     await vi.waitFor(() => {
-      expect(container.textContent).toContain('변경 이력 조회 실패')
+      expect(container.textContent).toContain('Keeper가 쓴 파일 조회 실패')
       expect(container.textContent).toContain('changes')
     })
-    expect(container.textContent).not.toContain('변경 0건')
+    expect(container.textContent).not.toContain('쓴 파일이 없습니다')
 
     render(null, container)
     resourceCache.clearAll()
@@ -977,7 +991,7 @@ describe('workspaces/infra', () => {
       render(html`<${InfraWorkspace} subroute="repos" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
       await vi.waitFor(() => {
         const alert = container.querySelector('[role="alert"]')
-        expect(alert?.textContent).toContain('저장소 조회 실패')
+        expect(alert?.textContent).toContain('저장소 목록 조회 실패')
         expect(alert?.textContent).toContain('repositories[0]')
       })
     }
@@ -1013,7 +1027,8 @@ describe('workspaces/infra', () => {
     expect(container.querySelector('[data-testid="infra-repos-mode-notice"]')).not.toBeNull()
     expect(seenUrls).toEqual([])
 
-    // 2. Single-user Worker: Repos reads Public_read list while locking CanAdmin activity/add/sync;
+    // 2. Single-user Worker: Repos reads the Public_read list, pull requests and git status
+    //    while locking CanAdmin activity/add/sync;
     //    Logs (Public_read) & Sandboxes (CanReadState) remain readable while Probe/Settings stay locked;
     //    Multi-account Worker is locked out of Logs & Sandboxes (Admin_only bridge).
     authSession.value = {
@@ -1029,10 +1044,14 @@ describe('workspaces/infra', () => {
     resourceCache.clearAll()
     render(html`<${InfraWorkspace} subroute="repos" onNavigate=${vi.fn()} onInspect=${vi.fn()} />`, container)
     await vi.waitFor(() => {
-      expect(seenUrls).toContain('/api/v1/repositories')
+      expect(seenUrls).toContain('/api/v1/git/status?repo_id=repo-1')
       expect(container.querySelector('[data-testid="infra-repo-activity-admin-locked"]')).not.toBeNull()
     })
-    expect(seenUrls).toEqual(['/api/v1/repositories'])
+    expect([...new Set(seenUrls)].sort()).toEqual([
+      '/api/v1/git/status?repo_id=repo-1',
+      '/api/v1/repositories',
+      '/api/v1/repositories/pulls',
+    ])
     const actionBtns = [...container.querySelectorAll('button')].map((b) => b.textContent?.trim() ?? '')
     expect(actionBtns.some((t) => t.includes('저장소 추가') || t === '동기화')).toBe(false)
 

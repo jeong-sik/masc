@@ -88,8 +88,9 @@ let test_a_scope_is_read_in_one_read_with_its_bodies () = with_store (fun root s
   let originals = owned (Owner.load_scope ~store ~scope) in
   Alcotest.(check (list string)) "load_scope reads the same scope" sorted
     (List.map (fun (original : Owner.retained) -> original.request_id) originals);
-  Alcotest.check json "with each request" request (List.nth originals 0).request;
-  Alcotest.check json "with each request" other (List.nth originals 1).request;
+  let original_of id = List.find (fun (original : Owner.retained) -> original.request_id = id) originals in
+  Alcotest.check json "with each request" request (original_of "a").request;
+  Alcotest.check json "with each request" other (original_of "b").request;
   (* A staged entry is not a record. *)
   let stage = Filename.concat (directory root) ".atomic_incomplete.tmp" in
   save stage "incomplete unpublished bytes";

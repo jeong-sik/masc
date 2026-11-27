@@ -174,6 +174,8 @@ let activity_result_json_with_tool_result result =
 type schedule_write_tool =
   | Schedule_create
   | Schedule_update
+  | Schedule_lane_act_create
+  | Schedule_lane_act_update
 
 type schedule_write_schema_error =
   | Schedule_schema_not_registered of schedule_write_tool
@@ -181,6 +183,21 @@ type schedule_write_schema_error =
 let schedule_write_tool_name = function
   | Schedule_create -> "masc_schedule_create"
   | Schedule_update -> "masc_schedule_update"
+  | Schedule_lane_act_create -> "masc_schedule_lane_act_create"
+  | Schedule_lane_act_update -> "masc_schedule_lane_act_update"
+;;
+
+let schedule_write_handler = function
+  | Schedule_create -> Tool_schedule.handle_create
+  | Schedule_update -> Tool_schedule.handle_update
+  | Schedule_lane_act_create -> Tool_schedule.handle_lane_act_create
+  | Schedule_lane_act_update -> Tool_schedule.handle_lane_act_update
+;;
+
+(* A create answers 201 and a replacement 200. *)
+let schedule_write_success_status = function
+  | Schedule_create | Schedule_lane_act_create -> `Created
+  | Schedule_update | Schedule_lane_act_update -> `OK
 ;;
 
 let schedule_write_schema_error_message = function
@@ -219,7 +236,7 @@ let schedule_caller ~state ~agent_name request
 ;;
 
 let handle_schedule_write_request
-      ~update
+      ~tool:schedule_tool
       ~state
       ~agent_name
       ~request
@@ -243,7 +260,6 @@ let handle_schedule_write_request
       | Yojson.Json_error message ->
         Error (Bad_request_detail ("Invalid JSON: " ^ message))
     in
-    let schedule_tool = if update then Schedule_update else Schedule_create in
     let tool_name = schedule_write_tool_name schedule_tool in
     let* schema =
       schedule_write_schema schedule_tool
@@ -275,20 +291,12 @@ let handle_schedule_write_request
     in
     let start_time = Tool_timing.start () in
     let result =
-      if update
-      then
-        Tool_schedule.handle_update
-          ~tool_name ~start_time context args
-      else
-        Tool_schedule.handle_create
-          ~tool_name ~start_time context args
+      schedule_write_handler schedule_tool ~tool_name ~start_time context args
     in
     let ok = Tool_result.is_success result in
     let message = Tool_result.message result in
     let status =
-      if ok
-      then if update then `OK else `Created
-      else `Bad_request
+      if ok then schedule_write_success_status schedule_tool else `Bad_request
     in
     respond_json_value_with_cors ~status request reqd
       (activity_result_json ~ok ~message)
@@ -1486,11 +1494,22 @@ let add_routes ~sw ~clock router =
      refuses a form field that names someone else. *)
   |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_schedule_create" }) "/api/v1/tools/masc_schedule_create" (fun state agent_name request reqd ->
             Http.Request.read_body_async reqd
-              (handle_schedule_write_request ~update:false ~state ~agent_name
+              (handle_schedule_write_request ~tool:Schedule_create ~state ~agent_name
                  ~request reqd))
   |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_schedule_update" }) "/api/v1/tools/masc_schedule_update" (fun state agent_name request reqd ->
             Http.Request.read_body_async reqd
-              (handle_schedule_write_request ~update:true ~state ~agent_name
+              (handle_schedule_write_request ~tool:Schedule_update ~state ~agent_name
+                 ~request reqd))
+  (* The Lane action pair. This route is where an operator credential makes
+     the operator the schedule's creator; a Lane action scheduled through an
+     MCP or Keeper call is recorded under that caller. *)
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_schedule_lane_act_create" }) "/api/v1/tools/masc_schedule_lane_act_create" (fun state agent_name request reqd ->
+            Http.Request.read_body_async reqd
+              (handle_schedule_write_request ~tool:Schedule_lane_act_create ~state ~agent_name
+                 ~request reqd))
+  |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_schedule_lane_act_update" }) "/api/v1/tools/masc_schedule_lane_act_update" (fun state agent_name request reqd ->
+            Http.Request.read_body_async reqd
+              (handle_schedule_write_request ~tool:Schedule_lane_act_update ~state ~agent_name
                  ~request reqd))
   (* Schedule cancel from the terminal (#29684). The workspace tool owns the
      argument contract ([Tool_schedule.handle_cancel]: schedule_id, reason)

@@ -175,11 +175,21 @@ let port = Term.(ret (const (fun requested cli -> match resolve_connection_port 
   | Ok value -> `Ok (Workspace_connection.to_int value)
   | Error error -> `Error (false, Workspace_connection.error_message error)) $ run_base_path $ port_argument))
 
+(* The spellings of the [masc start] flags a terminal's supervisor hands on
+   to the server it starts (RFC-0470 §4.2). *)
+let accept_store_quarantine_flag = "accept-store-quarantine"
+let record_default_flag = "record-default"
+let wait_for_previous_owner_flag = "wait-for-previous-owner"
+let build_provenance_path_flag = "build-provenance-path"
+let build_provenance_sha256_flag = "build-provenance-sha256"
+let build_provenance_device_flag = "build-provenance-device"
+let build_provenance_inode_flag = "build-provenance-inode"
+
 let accept_store_quarantine =
   let doc =
     "Let boot move aside every keeper store this build cannot decode and start those keepers with empty stores. Without this flag boot refuses to start while such a store exists and prints each path with its rejection (RFC-0420). The deployment preflight never passes it: it refuses the same files before the executable is replaced or started."
   in
-  Arg.(value & flag & info ["accept-store-quarantine"] ~doc)
+  Arg.(value & flag & info [ accept_store_quarantine_flag ] ~doc)
 
 let record_default_arg =
   let doc =
@@ -187,7 +197,7 @@ let record_default_arg =
      XDG_CONFIG_HOME/masc/default-base-path, else ~/.config). Off by default: \
      a temporary server workspace must not overwrite the machine's default."
   in
-  Arg.(value & flag & info [ "record-default" ] ~doc)
+  Arg.(value & flag & info [ record_default_flag ] ~doc)
 
 (* What `masc start` does when another process holds this workspace. *)
 type previous_owner =
@@ -201,23 +211,23 @@ let previous_owner_arg =
      after it has asked the running server to stop."
   in
   Term.(const (function true -> Wait_for_previous_owner | false -> Refuse_previous_owner)
-    $ Arg.(value & flag & info [ "wait-for-previous-owner" ] ~doc))
+    $ Arg.(value & flag & info [ wait_for_previous_owner_flag ] ~doc))
 
 let build_provenance_path =
   let doc = "Absolute content-addressed executable provenance sidecar path" in
-  Arg.(value & opt (some string) None & info ["build-provenance-path"] ~docv:"PATH" ~doc)
+  Arg.(value & opt (some string) None & info [ build_provenance_path_flag ] ~docv:"PATH" ~doc)
 
 let build_provenance_sha256 =
   let doc = "Expected SHA-256 of --build-provenance-path" in
-  Arg.(value & opt (some string) None & info ["build-provenance-sha256"] ~docv:"SHA256" ~doc)
+  Arg.(value & opt (some string) None & info [ build_provenance_sha256_flag ] ~docv:"SHA256" ~doc)
 
 let build_provenance_device =
   let doc = "Expected device number of --build-provenance-path" in
-  Arg.(value & opt (some int) None & info ["build-provenance-device"] ~docv:"DEVICE" ~doc)
+  Arg.(value & opt (some int) None & info [ build_provenance_device_flag ] ~docv:"DEVICE" ~doc)
 
 let build_provenance_inode =
   let doc = "Expected inode number of --build-provenance-path" in
-  Arg.(value & opt (some int) None & info ["build-provenance-inode"] ~docv:"INODE" ~doc)
+  Arg.(value & opt (some int) None & info [ build_provenance_inode_flag ] ~docv:"INODE" ~doc)
 
 let login_json =
   let doc = "Emit machine-readable JSON instead of text output" in
@@ -1004,6 +1014,48 @@ let initialize_served_identity () =
   Installed_dashboard.initialize ~executable_path:identity.executable_path
     ~binary_commit:identity.binary_commit
 
+let long_flag name = "--" ^ name
+
+(* RFC-0470 §4.2 (#38700). A server that holds the terminal it was started
+   from stops whole once any of its children reads that terminal from the
+   background. So a start that has a terminal does not serve: it starts the
+   server in a session of its own and stays on the terminal, showing the
+   server's output and passing ^C and hangup on as SIGTERM. The workspace is
+   resolved here only to name it to the server, which takes it itself. *)
+let supervise_from_terminal ~host ~port ~base_path ~accept_store_quarantine
+      ~record_default ~previous_owner ~provenance_flags =
+  let workspace =
+    Server_base_path_guard.exit_on_no_workspace
+      (Server_base_path_guard.startup_root ~cli_base_path:base_path)
+  in
+  (* The server reads the root as --base-path, a flag. A root found from the
+     record was not written to the record again, so it still is not. *)
+  let record_default_flags =
+    match record_default, workspace.Workspace_root.source with
+    | true, (Workspace_root.Flag | Workspace_root.Environment | Workspace_root.Current_directory) ->
+      [ long_flag record_default_flag ]
+    | true, Workspace_root.Recorded _
+    | false, (Workspace_root.Flag | Workspace_root.Environment | Workspace_root.Current_directory
+             | Workspace_root.Recorded _) -> []
+  in
+  let flags =
+    (match previous_owner with
+     | Wait_for_previous_owner -> [ long_flag wait_for_previous_owner_flag ]
+     | Refuse_previous_owner -> [])
+    @ (if accept_store_quarantine then [ long_flag accept_store_quarantine_flag ] else [])
+    @ record_default_flags
+    @ provenance_flags
+  in
+  match
+    Masc_server_lifecycle.supervise ~masc_bin:Build_identity.resolved_executable_path ~flags
+      ~base_path:workspace.Workspace_root.root ~host ~port ~env:(Unix.environment ())
+      ~into:Unix.stdout ~notices:Unix.stderr
+  with
+  | Ok ended -> Masc_server_lifecycle.exit_code ended
+  | Error message ->
+    Printf.eprintf "masc start: the server could not be started: %s\n%!" message;
+    Cmd.Exit.some_error
+
 let run_cmd_exit host port base_path accept_store_quarantine provenance_path provenance_sha256 provenance_device provenance_inode record_default previous_owner =
   let serve ~bind_provenance =
     let prepare_identity () =
@@ -1015,10 +1067,25 @@ let run_cmd_exit host port base_path accept_store_quarantine provenance_path pro
       host port base_path accept_store_quarantine;
     Cmd.Exit.ok
   in
+  (* Decided before the workspace lease and the Eio runtime: only the server
+     takes either. *)
+  let serve_or_supervise ~provenance_flags ~bind_provenance =
+    match Masc_server_lifecycle.controlling_terminal () with
+    | Masc_server_lifecycle.No_controlling_terminal -> serve ~bind_provenance
+    | Masc_server_lifecycle.Controlling_terminal ->
+      supervise_from_terminal ~host ~port ~base_path ~accept_store_quarantine
+        ~record_default ~previous_owner ~provenance_flags
+  in
   match provenance_path, provenance_sha256, provenance_device, provenance_inode with
-  | None, None, None, None -> serve ~bind_provenance:(fun () -> Ok ())
+  | None, None, None, None -> serve_or_supervise ~provenance_flags:[] ~bind_provenance:(fun () -> Ok ())
   | Some path, Some sha256, Some device, Some inode ->
-    serve ~bind_provenance:(fun () ->
+    serve_or_supervise
+      ~provenance_flags:
+        [ long_flag build_provenance_path_flag; path
+        ; long_flag build_provenance_sha256_flag; sha256
+        ; long_flag build_provenance_device_flag; string_of_int device
+        ; long_flag build_provenance_inode_flag; string_of_int inode ]
+      ~bind_provenance:(fun () ->
       Build_identity.bind_executable_provenance ~path ~sha256 ~device ~inode
       |> Result.map_error (fun message ->
         (Printf.sprintf "invalid build provenance: %s" message, Cmd.Exit.some_error)))
@@ -1584,7 +1651,8 @@ let mcp_config_cmd =
      A source checkout builds `masc_tui.exe` under a different name and the
      container image ships no TUI at all, so both keep the server they had.
 
-   `masc start` always serves, whatever the terminal looks like. The rule itself
+   `masc start` always starts a server, whatever the terminal looks like; on
+   a terminal it stays as that server's supervisor (RFC-0470 §4.2). The rule itself
    lives in [Masc_front_door] so it runs under a test without a TTY; what stays
    here is the effects it reads and the handover it performs. *)
 let stdio_is_a_terminal () =
@@ -1645,7 +1713,9 @@ let start_cmd =
   let doc =
     "Start the MASC MCP server (HTTP/SSE). What `masc` with no subcommand does \
      everywhere except an interactive terminal, where the bare name opens the \
-     fleet TUI instead. Use this name whenever the server is what you want."
+     fleet TUI instead. Use this name whenever the server is what you want. \
+     Run from a terminal, it starts the server without that terminal and stays \
+     to show its output; Ctrl-C or closing the terminal stops the server."
   in
   let info = Cmd.info "start" ~doc in
   Cmd.v info

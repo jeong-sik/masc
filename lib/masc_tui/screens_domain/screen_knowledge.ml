@@ -1306,67 +1306,43 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
               | None ->
                   Printf.sprintf "%s · @%s%s" d.slug d.frontmatter.author tags
             in
-            let total_md_lines =
-              let pw =
-                let show_toc =
-                  show_inline_rail
-                  && Layout.equal_breakpoint bp Layout.Wide
-                  && inner.w >= 68
-                  && inner.h >= 10
-                in
-                let base_w = if show_toc then Int.max 20 (inner.w - 23) else inner.w in
-                Int.max 1 (base_w - (2 * pad_x))
-              in
-              List.length (Markdown.render_lines ~width:pw ~theme d.body_markdown)
+            let layout =
+              Wiki_card_layout.page bp ~inline_rail:show_inline_rail inner
             in
-            let band_h = if inner.h >= 7 then 2 else 1 in
-            let approx_vis = Int.max 1 (inner.h - band_h - 2) in
+            let md_rect = Wiki_card_layout.page_markdown layout in
+            let total_md_lines =
+              List.length
+                (Markdown.render_lines ~width:(Int.max 1 md_rect.w) ~theme
+                   d.body_markdown)
+            in
+            let visible_lines = Int.max 1 md_rect.h in
             let right_meta =
               let base =
                 Printf.sprintf "%s · r%d" d.frontmatter.updated
                   d.frontmatter.revision
               in
-              if total_md_lines > approx_vis then
+              if total_md_lines > visible_lines then
                 let cs =
-                  Int.min (Int.max 0 (total_md_lines - approx_vis))
+                  Int.min (Int.max 0 (total_md_lines - visible_lines))
                     (Int.max 0 scroll)
                 in
-                let ve = Int.min total_md_lines (cs + approx_vis) in
+                let ve = Int.min total_md_lines (cs + visible_lines) in
                 let rem = Int.max 0 (total_md_lines - ve) in
                 if rem > 0 then
                   Printf.sprintf "%s · L%d-%d/%d ↓+%d" base (cs + 1) ve total_md_lines rem
                 else Printf.sprintf "%s · L%d-%d/%d" base (cs + 1) ve total_md_lines
               else base
             in
-            Card.draw_section_band ~pad_x grid
-              ~rect:(Rect.make ~x:inner.x ~y:inner.y ~w:inner.w ~h:band_h)
-              ~theme ~left_title:d.frontmatter.title ~right_meta
-              ?subtitle:(if band_h >= 2 then Some sub else None)
+            Card.draw_section_band ~pad_x grid ~rect:layout.band ~theme
+              ~left_title:d.frontmatter.title ~right_meta
+              ?subtitle:(if layout.band.h >= 2 then Some sub else None)
               ();
-            let below =
-              Rect.make ~x:inner.x ~y:(inner.y + band_h) ~w:inner.w
-                ~h:(Int.max 0 (inner.h - band_h))
-            in
-            if not (Rect.is_empty below) then begin
-              let show_toc_rail =
-                show_inline_rail
-                && Layout.equal_breakpoint bp Layout.Wide
-                && below.w >= 68
-                && below.h >= 8
-              in
-              if show_toc_rail then begin
-                let toc_w = 22 in
-                let prose_w = Int.max 20 (below.w - toc_w - 1) in
-                let prose_rect =
-                  Rect.make ~x:below.x ~y:below.y ~w:prose_w ~h:below.h
-                  |> H.pad_content ~bp ~pad_y:1
-                in
-                let vline_x = below.x + prose_w in
-                Card.draw_v_hairline grid ~x:vline_x ~y:below.y ~h:below.h ~theme;
-                let rail_rect =
-                  Rect.make ~x:(vline_x + 1) ~y:below.y ~w:toc_w ~h:below.h
-                  |> Card.pad_inner ~pad_x:1 ~pad_y:1
-                in
+            (match layout.body with
+             | None -> ()
+             | Some
+                 (Wiki_card_layout.Rail
+                   { prose = prose_rect; rule; rail = rail_rect }) -> begin
+                Card.draw_v_hairline grid ~x:rule.x ~y:rule.y ~h:rule.h ~theme;
                 if not (Rect.is_empty prose_rect) then
                   ignore
                     (Markdown.draw grid ~rect:prose_rect ~theme ~osc8:true
@@ -1459,19 +1435,18 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
                   end
                 end
               end
-              else begin
-                let content = H.pad_content ~bp below in
-                let y = ref content.y and bottom = Rect.bottom content in
-                if !y < bottom then begin
+             | Some
+                 (Wiki_card_layout.Stacked { backlinks; rule; markdown }) -> begin
+                if not (Rect.is_empty backlinks) then begin
                   let bl_lbl =
                     Printf.sprintf "%s (%d): "
                       (Say.resolve lang (Say.make ~ko:"역링크" ~en:"Backlinks"))
                       (List.length d.backlinks)
                   in
-                  let x = ref content.x in
+                  let x = ref backlinks.x in
                   let adv =
-                    H.put_clipped ~grid ~clip:content ~x:!x ~y:!y
-                      ~max_w:content.w
+                    H.put_clipped ~grid ~clip:backlinks ~x:!x ~y:backlinks.y
+                      ~max_w:backlinks.w
                       ~style:(H.secondary_style ~theme ~attrs:Attr.bold ())
                       bl_lbl
                   in
@@ -1479,8 +1454,8 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
                   (match d.backlinks with
                    | [] ->
                        ignore
-                         (H.put_clipped ~grid ~clip:content ~x:!x ~y:!y
-                            ~max_w:(Rect.right content - !x)
+                         (H.put_clipped ~grid ~clip:backlinks ~x:!x ~y:backlinks.y
+                            ~max_w:(Rect.right backlinks - !x)
                             ~style:(H.whisper_style ~theme ())
                             (Say.resolve lang
                                (Say.make ~ko:"없음 (고아 후보)"
@@ -1488,10 +1463,10 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
                    | bls ->
                        List.iter
                          (fun bl ->
-                           let rem = Rect.right content - !x in
+                           let rem = Rect.right backlinks - !x in
                            if rem >= 4 then begin
                              let w =
-                               H.put_link ~grid ~clip:content ~x:!x ~y:!y
+                               H.put_link ~grid ~clip:backlinks ~x:!x ~y:backlinks.y
                                  ~max_w:rem ~style:(H.accent_style ~theme ())
                                  ~uri:("masc://wiki/" ^ bl)
                                  ("[[" ^ bl ^ "]]")
@@ -1499,66 +1474,49 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
                              x := !x + w + 1
                            end)
                          (H.safe_take 5 bls));
-                  incr y
                 end;
-                if !y < bottom then begin
-                  H.draw_divider ~grid ~rect:content ~y:!y ~theme ();
-                  incr y
-                end;
-                let md_h = Int.max 0 (bottom - !y) in
-                if md_h > 0 then
-                  let md_rect =
-                    Rect.make ~x:content.x ~y:!y ~w:content.w ~h:md_h
-                  in
+                if not (Rect.is_empty rule) then
+                  H.draw_divider ~grid ~rect:rule ~y:rule.y ~theme ();
+                if not (Rect.is_empty markdown) then
                   ignore
-                    (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true ~scroll
+                    (Markdown.draw grid ~rect:markdown ~theme ~osc8:true ~scroll
                        ?selected_link d.body_markdown)
-              end
-            end
+              end)
         | None -> (
             match sel_summary with
             | Some s ->
-                let content = H.pad_content ~bp inner in
-                let y = ref content.y and bottom = Rect.bottom content in
-                if !y < bottom then begin
+                let rows = Wiki_card_layout.summary bp inner in
+                let heading = rows.heading and counts = rows.counts in
+                if not (Rect.is_empty heading) then begin
                   let uri = "masc://wiki/" ^ s.slug in
                   let adv =
-                    H.put_link ~grid ~clip:content ~x:content.x ~y:!y
-                      ~max_w:content.w
+                    H.put_link ~grid ~clip:heading ~x:heading.x ~y:heading.y
+                      ~max_w:heading.w
                       ~style:(H.accent_style ~theme ~attrs:Attr.bold ())
                       ~uri s.slug
                   in
-                  let rem = content.w - adv - 2 in
+                  let rem = heading.w - adv - 2 in
                   if rem > 4 then
                     ignore
-                      (H.put_clipped ~grid ~clip:content
-                         ~x:(content.x + adv + 2) ~y:!y ~max_w:rem
+                      (H.put_clipped ~grid ~clip:heading
+                         ~x:(heading.x + adv + 2) ~y:heading.y ~max_w:rem
                          ~style:(H.whisper_style ~theme ())
-                         (Printf.sprintf "@%s · %s" s.author s.updated));
-                  incr y
+                         (Printf.sprintf "@%s · %s" s.author s.updated))
                 end;
-                if !y < bottom then begin
-                  H.put_kv ~grid ~clip:content ~x:content.x ~y:!y
-                    ~max_w:content.w ~theme
+                if not (Rect.is_empty counts) then
+                  H.put_kv ~grid ~clip:counts ~x:counts.x ~y:counts.y
+                    ~max_w:counts.w ~theme
                     ~key:(Say.resolve lang (Say.make ~ko:"링크" ~en:"Links"))
                     (Printf.sprintf "%s%d back · %d out · %d src · %d hearsay"
                        (Glyph.to_utf8 Glyph.External_arrow)
                        s.backlink_count s.outgoing_link_count s.sources_count
                        s.hearsay_count);
-                  incr y
-                end;
-                if !y < bottom then begin
-                  H.draw_divider ~grid ~rect:content ~y:!y ~theme ();
-                  incr y
-                end;
-                let md_h = Int.max 0 (bottom - !y) in
-                if md_h > 0 then
-                  let md_rect =
-                    Rect.make ~x:content.x ~y:!y ~w:content.w ~h:md_h
-                  in
+                if not (Rect.is_empty rows.rule) then
+                  H.draw_divider ~grid ~rect:rows.rule ~y:rows.rule.y ~theme ();
+                if not (Rect.is_empty rows.markdown) then
                   ignore
-                    (Markdown.draw grid ~rect:md_rect ~theme ~osc8:true ~scroll
-                       s.summary)
+                    (Markdown.draw grid ~rect:rows.markdown ~theme ~osc8:true
+                       ~scroll s.summary)
             | None ->
                 let content = H.pad_content ~bp inner in
                 H.draw_observed_placeholder ~grid ~rect:content ~theme ~lang
@@ -1742,11 +1700,10 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
               , idx.lint.orphans )
         | None -> None)
   in
-  let bar_rect, body_rect =
-    match Layout.split_v rect [ Layout.Fixed 1; Layout.Flex 1 ] with
-    | [ a; b ] -> (a, b)
-    | _ -> (Rect.empty, rect)
+  let frame =
+    Wiki_card_layout.frame ~zoomed:(Model.is_zoomed_active model) bp rect
   in
+  let bar_rect = frame.bar in
   let lint_hint_str =
     match lint_summary with
     | None ->
@@ -1786,11 +1743,8 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
     (H.draw_pills ~grid ~rect:bar_rect ~theme ~right_hint:lint_hint_str
        mode_pills);
   if Model.is_zoomed_active model then begin
-    let main_rect, side_rect =
-      Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.66
-        ~top_ratio:0.68 bp body_rect
-    in
-    draw_wiki_preview ~show_inline_rail:false ~zoomed:true
+    let main_rect = frame.preview and side_rect = frame.aside in
+    draw_wiki_preview ~show_inline_rail:frame.inline_rail ~zoomed:true
       ~scroll:k.detail_scroll_offset ~grid ~cache ~rect:main_rect ~theme ~bp
       ~lang ~k ~focused:(Model.body_has_focus model);
     let slug =
@@ -1802,10 +1756,7 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
       grid
   end
   else
-    let left_rect, right_rect =
-      Layout.adaptive_split_2 ~stack_on_compact:true ~left_ratio:0.38
-        ~top_ratio:0.48 bp body_rect
-    in
+    let left_rect = frame.aside and right_rect = frame.preview in
     let left_inner =
       Card.draw ~cache grid ~rect:left_rect ~theme
         (H.card_spec ~focused:(Model.pane_focused model 0)
@@ -2009,7 +1960,7 @@ let render_wiki ~(model : Model.t) ~cache ~(rect : Rect.t) ~(theme : Theme.t) ~b
           (H.safe_take (log_rows - 1) log_entries)
       end
     end;
-    draw_wiki_preview ~show_inline_rail:true ~zoomed:false
+    draw_wiki_preview ~show_inline_rail:frame.inline_rail ~zoomed:false
       ~scroll:k.detail_scroll_offset ~grid ~cache ~rect:right_rect ~theme ~bp
       ~lang ~k ~focused:(Model.pane_focused model 1)
 

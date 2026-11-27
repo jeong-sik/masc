@@ -1,1 +1,0 @@
-function n(e){const r=t=>typeof t=="string"&&t.trim().length>0?t.trim():null,o=t=>typeof t=="number"&&Number.isSafeInteger(t)&&t>=0?t:null;return{backlogError:r(e.backlog_error),backlogRecovery:r(e.backlog_recovery),unreadableTotal:o(e.unreadable_total),unresolvedTotal:o(e.awaiting_unresolved_total),total:o(e.total),truncated:e.truncated===!0}}export{n as d};

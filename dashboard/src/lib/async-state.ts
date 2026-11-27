@@ -55,6 +55,7 @@ export interface AsyncResource<T> {
   readonly state: Signal<AsyncState<T>>
   readError(): unknown | null
   load(fn: () => Promise<T>): Promise<void>
+  setLoaded(data: T): void
   reset(): void
 }
 
@@ -115,6 +116,13 @@ export function createAsyncResource<T>(): AsyncResource<T> {
         })
 
       return inflight
+    },
+
+    setLoaded(data: T): void {
+      ++generation
+      readFailure = null
+      state.value = loaded(data)
+      inflight = null
     },
 
     reset(): void {

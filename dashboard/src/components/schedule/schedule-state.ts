@@ -58,9 +58,10 @@ function createScheduleReader(
 
       const queued: Promise<void> = loadInFlight
         .catch(() => undefined)
-        .then(() => freshLoadQueued === queued ? load() : undefined)
-        .finally(() => {
-          if (freshLoadQueued === queued) freshLoadQueued = null
+        .then(() => {
+          if (freshLoadQueued !== queued) return undefined
+          freshLoadQueued = null
+          return load()
         })
       freshLoadQueued = queued
       return queued

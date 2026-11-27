@@ -64,6 +64,7 @@ export function KeeperSandboxLivePanel({ keeperName }: { keeperName: string }) {
 
   useEffect(() => {
     let cancelled = false
+    setState({ kind: 'loading' })
     const refresh = async (signal: AbortSignal) => {
       try {
         const value = await fetchKeeperSandboxLiveStatus(keeperName, { signal: signal })

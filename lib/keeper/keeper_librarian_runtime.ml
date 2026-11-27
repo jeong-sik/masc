@@ -373,18 +373,14 @@ type not_committed =
   ; message_descent : message_descent
   ; provider_input_refusals : Keeper_exact_input_refusal.t list
   ; detail : string
-  ; walk_shows_size : bool
-  ; smaller_range_meets_same_failure : bool
   }
 
 let not_committed_of_failure ~detail (evidence : Failure_evidence.t) =
   { detail
-  ; walk_shows_size = Failure_evidence.shows_range_size evidence
   ; message_descent = message_descent_of_failure evidence
   ; input_capacity_evidence = input_capacity_of_failure evidence
   ; input_capacity_only = Failure_evidence.input_capacity_only evidence
   ; provider_input_refusals = evidence.provider_input_refusals
-  ; smaller_range_meets_same_failure = evidence.size_independent_execution_failure
   }
 ;;
 
@@ -811,12 +807,10 @@ let run_best_effort
          let detail = "Librarian is off; pending input remains unconsumed" in
          on_not_committed
            { detail
-           ; walk_shows_size = false
            ; message_descent = No_descent_evidence
            ; input_capacity_evidence = No_input_capacity_refusal
            ; input_capacity_only = false
            ; provider_input_refusals = []
-           ; smaller_range_meets_same_failure = false
            };
          Log.Keeper.info ~keeper_name:keeper_id "%s" detail
        | Ok _
@@ -1080,12 +1074,10 @@ let run_best_effort
       in
       on_not_committed
         { detail
-        ; walk_shows_size = false
         ; message_descent = No_descent_evidence
         ; input_capacity_evidence = No_input_capacity_refusal
         ; input_capacity_only = false
         ; provider_input_refusals = []
-        ; smaller_range_meets_same_failure = false
         };
       record_failure
         ~keepers_dir
@@ -1103,12 +1095,10 @@ let run_best_effort
     Keeper_memory_health_input.written ~keepers_dir ~keeper_id;
     on_not_committed
       { detail = "librarian raised: " ^ Printexc.to_string exn
-      ; walk_shows_size = false
       ; message_descent = No_descent_evidence
       ; input_capacity_evidence = No_input_capacity_refusal
       ; input_capacity_only = false
       ; provider_input_refusals = []
-      ; smaller_range_meets_same_failure = false
       };
     record_failure
       ~keepers_dir

@@ -3,7 +3,7 @@ module Runtime = Keeper_librarian_runtime
 module Fixture = Exact_output_fixture
 module Runs = Exact_lane_run_registry
 
-let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ?same_failure ~base_path ~registry ~keeper_id ~first_overflow ~status ~expected () =
+let test_callback ?(cli_errors = []) ?expected_limit ~base_path ~registry ~keeper_id ~first_overflow ~status ~expected () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
   let net = env#net and clock = env#clock in
@@ -55,7 +55,7 @@ let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ?same_failure ~
     cli_calls := !cli_calls @ [runtime_id];
     Error (List.assoc runtime_id cli_errors) in
   let refused = ref 0 and committed = ref false and observed_limit = ref None in
-  let verdict = ref None and same = ref None and provider_refusals = ref [] in
+  let provider_refusals = ref [] in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
   Runtime.run_best_effort ~cli_runner
     ~on_cli_input_limit:(fun limit ->
@@ -63,31 +63,12 @@ let test_callback ?(cli_errors = []) ?expected_limit ?shows_size ?same_failure ~
       observed_limit := Some (limit.Keeper_lane_cli_oneshot.runtime_id, limit.capacity.max_chars))
     ~on_not_committed:(fun outcome ->
       provider_refusals := List.sort_uniq compare
-        (!provider_refusals @ outcome.Runtime.provider_input_refusals);
-      let shows_size = outcome.Runtime.walk_shows_size in
-      verdict := Some (match !verdict with None -> shows_size | Some earlier -> earlier || shows_size);
-      let met = outcome.Runtime.smaller_range_meets_same_failure in
-      same := Some (match !same with None -> met | Some earlier -> earlier || met))
+        (!provider_refusals @ outcome.Runtime.provider_input_refusals))
     ~on_context_committed:(fun _ -> committed := true)
     ~base_path ~keepers_dir ~keeper_id input;
   Alcotest.(check int) "only a CLI slot reports an input limit" expected !refused;
   Option.iter (fun expected -> Alcotest.(check (option (pair string int)))
     "limit retains the actual refusing runtime" (Some expected) !observed_limit) expected_limit;
-  (* The verdict the continuity pass reads to decide whether to read less. It
-     is taken from every failure of the walk, so the same set of causes
-     answers the same way in either order. *)
-  Option.iter
-    (fun shows_size ->
-       Alcotest.(check (option bool))
-         "the walk's size verdict" (Some shows_size) !verdict)
-    shows_size;
-  (* What a recursive splitter reads as a veto: the walk also met a failure a
-     smaller range meets the same way. *)
-  Option.iter
-    (fun met ->
-       Alcotest.(check (option bool))
-         "the walk also met a size-independent failure" (Some met) !same)
-    same_failure;
   Alcotest.(check (list string)) "CLI candidates ran in order"
     (List.map fst cli_errors) !cli_calls;
   Alcotest.(check int) "terminal provider really received the request" 1 !posts;
@@ -365,10 +346,9 @@ let () =
   let root = Option.value (Sys.getenv_opt "DUNE_SOURCEROOT") ~default:(Sys.getcwd ()) in
   Prompt_registry.set_markdown_dir (Filename.concat root "config/prompts");
   Prompt_defaults.init ();
-  let case ?same_failure name first_overflow status expected shows_size =
+  let case name first_overflow status expected =
     Alcotest.test_case name `Quick
-      (test_callback ~shows_size ?same_failure ~base_path ~registry ~keeper_id:name ~first_overflow ~status
-         ~expected) in
+      (test_callback ~base_path ~registry ~keeper_id:name ~first_overflow ~status ~expected) in
   let codex_error data = Fusion_official_client.Codex_failure
     (Runtime_codex_app_server.Rpc_error
       { method_ = "turn/start"; code = Some (-32602);
@@ -382,10 +362,10 @@ let () =
     "actual_chars", `Int 23; "max_chars", `Int 21])) in
   let generic = codex_error None in
   let quota = Fusion_official_client.Setup_failure "quota" in
-  let cli_case ?(first_overflow = false) ?expected_limit name cli_errors expected shows_size =
+  let cli_case ?(first_overflow = false) ?expected_limit name cli_errors expected =
     Alcotest.test_case name `Quick (fun () ->
       Fixture.with_official_client_runtimes @@ fun () ->
-      test_callback ~cli_errors ?expected_limit ~shows_size ~base_path ~registry ~keeper_id:name
+      test_callback ~cli_errors ?expected_limit ~base_path ~registry ~keeper_id:name
         ~first_overflow ~status:`Too_many_requests ~expected ()) in
   Alcotest.run "Librarian capacity callbacks"
     ["size verdict", [Alcotest.test_case "named input refusal is separate from descent evidence" `Quick
@@ -402,43 +382,36 @@ let () =
          test_disposition_size_verdict_table];
      "actual HTTP outcomes", [
       (* An API slot states its limit in provider prose, which this process
-         cannot read back into a number, so it reports none. The pass does
-         not need one: a size refusal is evidence enough to read less. *)
-      (* A body a provider refused for its size says so whether it came
-         first or last; a quota or an authorization refusal never does. The
-         four together are the order matrix: a verdict taken from the walk's
-         last cause alone would answer rows two and three differently. *)
-      (* The second verdict is what the admission worker reads before it
-         splits: size with a quota or an operator refusal in the same walk is
-         deferred whole, so the refusing provider is not asked once per part. *)
-      case ~same_failure:false "capacity-final" false `Request_entity_too_large 0 true;
-      case ~same_failure:true "quota-final" false `Too_many_requests 0 false;
-      case ~same_failure:true "capacity-then-quota" true `Too_many_requests 0 true;
-      case ~same_failure:true "capacity-then-auth" true `Unauthorized 0 true;
-      case ~same_failure:false "capacity-then-capacity" true `Request_entity_too_large 0 true;
-      (* An empty answer that ended its turn says nothing about size: a
-         smaller range meets the same provider (#37899). *)
-      case "empty-completion-final" false `OK 0 false];
+         cannot read back into a number, so it reports none. *)
+      (* A body a provider refused for its size is named whether it came
+         first or last; a quota or an authorization refusal never is. *)
+      case "capacity-final" false `Request_entity_too_large 0;
+      case "quota-final" false `Too_many_requests 0;
+      case "capacity-then-quota" true `Too_many_requests 0;
+      case "capacity-then-auth" true `Unauthorized 0;
+      case "capacity-then-capacity" true `Request_entity_too_large 0;
+      (* An empty answer that ended its turn names no input refusal (#37899). *)
+      case "empty-completion-final" false `OK 0];
     "HTTP to CLI outcomes", [
       (* Typed capacity survives later quota failures in either walk order. *)
-      cli_case "quota-then-cli-capacity" [Fixture.cli_primary_runtime, capacity] 1 true;
-      cli_case "quota-then-cli-generic-rpc" [Fixture.cli_primary_runtime, generic] 0 false;
+      cli_case "quota-then-cli-capacity" [Fixture.cli_primary_runtime, capacity] 1;
+      cli_case "quota-then-cli-generic-rpc" [Fixture.cli_primary_runtime, generic] 0;
       cli_case ~expected_limit:(Fixture.cli_primary_runtime, 17) "cli-capacity-then-quota"
-        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, quota] 1 true;
+        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, quota] 1;
       cli_case ~expected_limit:(Fixture.cli_primary_runtime, 17) "cli-capacity-then-generic-rpc"
-        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, generic] 1 true;
+        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, generic] 1;
       cli_case ~expected_limit:(Fixture.cli_secondary_runtime, 17) "cli-quota-then-capacity"
-        [Fixture.cli_primary_runtime, quota; Fixture.cli_secondary_runtime, capacity] 1 true;
+        [Fixture.cli_primary_runtime, quota; Fixture.cli_secondary_runtime, capacity] 1;
       cli_case ~expected_limit:(Fixture.cli_secondary_runtime, 21) "cli-two-capacities"
-        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, larger_capacity] 1 true;
+        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, larger_capacity] 1;
       cli_case ~expected_limit:(Fixture.cli_primary_runtime, 21) "cli-two-capacities-reversed"
-        [Fixture.cli_primary_runtime, larger_capacity; Fixture.cli_secondary_runtime, capacity] 1 true;
+        [Fixture.cli_primary_runtime, larger_capacity; Fixture.cli_secondary_runtime, capacity] 1;
       cli_case ~expected_limit:(Fixture.cli_primary_runtime, 17) "cli-equal-capacities-keep-first"
-        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, capacity] 1 true;
+        [Fixture.cli_primary_runtime, capacity; Fixture.cli_secondary_runtime, capacity] 1;
       cli_case ~expected_limit:(Fixture.cli_secondary_runtime, 17) "cli-equal-capacities-reversed"
-        [Fixture.cli_secondary_runtime, capacity; Fixture.cli_primary_runtime, capacity] 1 true;
+        [Fixture.cli_secondary_runtime, capacity; Fixture.cli_primary_runtime, capacity] 1;
       (* The API walk that sent the pass to the official client met a size
-         refusal. The client's own failure says nothing, and the verdict
-         still comes from the walk before it. *)
+         refusal. The client's own failure names none, and the refusal the
+         walk met before it survives. *)
       cli_case ~first_overflow:true "capacity-then-quota-then-cli-generic-rpc"
-        [Fixture.cli_primary_runtime, generic] 0 true]]
+        [Fixture.cli_primary_runtime, generic] 0]]

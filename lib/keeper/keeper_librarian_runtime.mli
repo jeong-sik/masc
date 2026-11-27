@@ -69,8 +69,6 @@ type not_committed =
   ; message_descent : message_descent
   ; provider_input_refusals : Keeper_exact_input_refusal.t list
   ; detail : string
-  ; walk_shows_size : bool
-  ; smaller_range_meets_same_failure : bool
   }
 
 val not_committed_of_failure : detail:string -> Keeper_exact_walk_failure.t -> not_committed

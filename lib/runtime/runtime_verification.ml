@@ -1087,39 +1087,38 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ?fs ~cwd ~cwd_path ~timeout_s ~ac
          | Error (Runtime_claude_code.Timeout _) -> Error (deadline_failure ())
          | Error
              (Runtime_claude_code.Turn_failed_with_observation
-                { api_error_status; api_error_cause; startup_failure_reason; detail; _ } as error) ->
+                { api_error_status; api_error_cause; detail; _ } as error) ->
            (* A 401 or 403 names the refusal by itself, whatever cause came
-              with it. A turn refused for a login past its time limit or an
-              organization-config sign-in refusal has a typed cause and no
-              HTTP status. Any other status keeps its own reading even when an
-              authentication diagnostic preceded it. *)
-           (match
-              ( claude_auth_status api_error_status
-              , api_error_status
-              , api_error_cause
-              , startup_failure_reason )
-            with
-            | Some status, (Some _ | None), (Some _ | None), (Some _ | None) ->
+              with it. A turn refused for a login past its time limit has a
+              typed cause and no HTTP status. Any other status keeps its own
+              reading even when an authentication diagnostic preceded it. *)
+           (match claude_auth_status api_error_status, api_error_status, api_error_cause with
+            | Some status, (Some _ | None), (Some _ | None) ->
               Error (claude_status_refusal ~account ~status detail)
-            | None, None, Some Runtime_claude_code.Authentication_failed, (Some _ | None) ->
+            | None, None, Some Runtime_claude_code.Authentication_failed ->
               Error (claude_auth_refusal ~account ~named:"authentication_failed" detail)
-            | ( None
-              , None
-              , (Some Runtime_claude_code.Other_api_error_cause | None)
-              , Some Runtime_claude_code.Org_config_refused ) ->
+            | None, Some _, Some Runtime_claude_code.Authentication_failed
+            | None, (Some _ | None), (Some Runtime_claude_code.Other_api_error_cause | None) ->
+              Error (Provider_rejected (Runtime_claude_code.error_to_string error)))
+         | Error (Runtime_claude_code.Startup_refused { reason; api_error_status; detail } as error) ->
+           (match claude_auth_status api_error_status, api_error_status, reason with
+            | ( Some status
+              , (Some _ | None)
+              , ( Runtime_claude_code.Org_config_required_unavailable
+                | Runtime_claude_code.Org_config_refused
+                | Runtime_claude_code.Other_startup_failure _ ) ) ->
+              Error (claude_status_refusal ~account ~status detail)
+            | None, None, Runtime_claude_code.Org_config_refused ->
               Error (claude_auth_refusal ~account ~named:"org_config_refused" detail)
-            | None, Some _, Some Runtime_claude_code.Authentication_failed, (Some _ | None)
             | ( None
               , Some _
-              , (Some Runtime_claude_code.Other_api_error_cause | None)
-              , (Some _ | None) )
+              , ( Runtime_claude_code.Org_config_required_unavailable
+                | Runtime_claude_code.Org_config_refused
+                | Runtime_claude_code.Other_startup_failure _ ) )
             | ( None
               , None
-              , (Some Runtime_claude_code.Other_api_error_cause | None)
-              , ( Some
-                    ( Runtime_claude_code.Org_config_required_unavailable
-                    | Runtime_claude_code.Other_startup_failure _ )
-                | None ) ) ->
+              , ( Runtime_claude_code.Org_config_required_unavailable
+                | Runtime_claude_code.Other_startup_failure _ ) ) ->
               Error (Provider_rejected (Runtime_claude_code.error_to_string error)))
          | Error (Runtime_claude_code.Quota_blocked { block; _ } as error) ->
            Error (claude_quota_failure block (Runtime_claude_code.error_to_string error))

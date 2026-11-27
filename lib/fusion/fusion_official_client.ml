@@ -258,6 +258,7 @@ let panel_failure ~runtime_id = function
        | Runtime_claude_code.Context_window_exceeded _
        | Runtime_claude_code.Turn_failed _
        | Runtime_claude_code.Turn_failed_with_observation _
+       | Runtime_claude_code.Startup_refused _
        | Runtime_claude_code.Stopped_by_host _
        | Runtime_claude_code.Quota_blocked _
        | Runtime_claude_code.Process_exited _
@@ -272,6 +273,7 @@ let panel_failure ~runtime_id = function
        | Runtime_claude_code.Context_window_exceeded _
        | Runtime_claude_code.Turn_failed _
        | Runtime_claude_code.Turn_failed_with_observation _
+       | Runtime_claude_code.Startup_refused _
        | Runtime_claude_code.Stopped_by_host _
        | Runtime_claude_code.Quota_blocked _
        | Runtime_claude_code.Process_exited _
@@ -584,7 +586,8 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
      | Runtime_claude_code.Unsupported_control_request _
      | Runtime_claude_code.Turn_transport_interrupted _
      | Runtime_claude_code.Context_window_exceeded _ | Runtime_claude_code.Turn_failed _
-     | Runtime_claude_code.Turn_failed_with_observation _ | Runtime_claude_code.Stopped_by_host _
+     | Runtime_claude_code.Turn_failed_with_observation _
+     | Runtime_claude_code.Startup_refused _ | Runtime_claude_code.Stopped_by_host _
      | Runtime_claude_code.Process_exited _ | Runtime_claude_code.Unhandled_exception _
      | Runtime_claude_code.Timeout _ -> ());
     Error (if admission then Claude_admission_failure error else Claude_failure error)

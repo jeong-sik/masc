@@ -165,6 +165,7 @@ let claude_error = function
   | Runtime_claude_code.Turn_transport_interrupted _
   | Runtime_claude_code.Turn_failed _
   | Runtime_claude_code.Turn_failed_with_observation _
+  | Runtime_claude_code.Startup_refused _
   | Runtime_claude_code.Stopped_by_host _
   | Runtime_claude_code.Quota_blocked _
   | Runtime_claude_code.Process_exited _

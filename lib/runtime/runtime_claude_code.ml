@@ -467,9 +467,13 @@ type error =
       { detail : string
       ; api_error_status : int option
       ; api_error_cause : api_error_cause option
-      ; startup_failure_reason : startup_failure_reason option
       ; tool_effect_attempted : bool
       ; response_emitted : bool
+      }
+  | Startup_refused of
+      { reason : startup_failure_reason
+      ; api_error_status : int option
+      ; detail : string
       }
   | Stopped_by_host of
       { stop : host_stop
@@ -519,6 +523,8 @@ let error_to_string = function
   | Turn_failed detail -> "Claude Code turn failed: " ^ detail
   | Turn_failed_with_observation { detail; _ } ->
     "Claude Code turn failed: " ^ detail
+  | Startup_refused { detail; _ } ->
+    "Claude Code startup refused: " ^ detail
   | Stopped_by_host { stop = Terminal_tool_boundary { tool_name; _ }; _ } ->
     Printf.sprintf "Claude Code stopped at terminal tool boundary: tool=%s" tool_name
   | Quota_blocked
@@ -559,6 +565,7 @@ let error_kind = function
   | Context_window_exceeded _ -> "context_window_exceeded"
   | Turn_failed _ -> "turn_failed"
   | Turn_failed_with_observation _ -> "turn_failed"
+  | Startup_refused _ -> "startup_refused"
   | Stopped_by_host _ -> "stopped_by_host"
   | Quota_blocked _ -> "quota_blocked"
   | Process_exited _ -> "process_exited"
@@ -733,7 +740,7 @@ let note_cut_document ~bytes = function
         ( Invalid_config _ | Spawn_refused _ | Subscription_required _
         | Unsupported_control_request _ | Turn_transport_interrupted _
         | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
-        | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+        | Startup_refused _ | Stopped_by_host _ | Quota_blocked _ | Process_exited _
         | Unhandled_exception _ | Timeout _ ) ) as result -> result
 
 (* HIGH-RISK-UNREVIEWED: puts what the CLI prints for an account -- its login
@@ -773,7 +780,7 @@ let probe_auth_status ~mgr ~cwd ~account config =
           ( Invalid_config _ | Spawn_refused _ | Subscription_required _
           | Unsupported_control_request _ | Turn_transport_interrupted _
           | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
-          | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+          | Startup_refused _ | Stopped_by_host _ | Quota_blocked _ | Process_exited _
           | Unhandled_exception _ | Timeout _ ) ),
       (None | Some _) -> false, result
   in
@@ -2173,35 +2180,58 @@ let result_turn_id ~expected_session_id fields =
   else required_string stage "uuid" fields
 ;;
 
+type result_header =
+  { subtype : string
+  ; is_error : bool
+  ; startup_failure_reason : startup_failure_reason option
+  }
+
+let parse_result_header fields =
+  let stage = "result message" in
+  let* subtype = required_string stage "subtype" fields in
+  let* is_error = required_bool stage "is_error" fields in
+  let* startup_failure_reason =
+    optional_string stage "startup_failure_reason" fields
+    |> Result.map (fun value ->
+      Option.map startup_failure_reason_of_wire (non_blank value))
+  in
+  Ok { subtype; is_error; startup_failure_reason }
+;;
+
 (* Claude Code 2.1.332 runs startup gates (org-config check, global config
    validation) before adopting [--resume] into its active session ID, and its
    startup-failure result helper only reads [--session-id] from argv. On a
    resumed launch, a pre-initialize startup failure frame
    ([subtype = "error_during_execution"], [is_error = true], and a non-blank
    [startup_failure_reason]) therefore carries the process's freshly minted
-   UUID rather than [expected_session_id] (measured 2026-11-27, #54540). Accept
-   that frame's UUID only under that exact contract; every other start-up
-   result frame -- any [Start] launch, any non-error or non-execution-error
-   result, or any frame without a non-blank [startup_failure_reason] -- still
-   fails closed on a session mismatch. *)
-let startup_result_turn_id ~session_mode ~expected_session_id fields =
+   UUID rather than [expected_session_id] (measured 2026-11-27, #54540).
+   Validate the header once here and pass it into [parse_result_body] so the
+   fields are not parsed twice; every other start-up result frame -- any
+   [Start] launch, any non-error or non-execution-error result, or any frame
+   without a non-blank [startup_failure_reason] -- still fails closed on a
+   session mismatch. *)
+let startup_result_identity ~session_mode ~expected_session_id fields =
   let stage = "result message" in
   let* session_id = required_string stage "session_id" fields in
   if session_id = expected_session_id
-  then required_string stage "uuid" fields
+  then
+    let* turn_id = required_string stage "uuid" fields in
+    let* header = parse_result_header fields in
+    Ok (turn_id, header)
   else
     match session_mode with
     | Start ->
       session_id_mismatch_error ~stage ~received:session_id ~expected:expected_session_id
     | Resume _ ->
-      let* subtype = required_string stage "subtype" fields in
-      let* is_error = required_bool stage "is_error" fields in
-      let* startup_failure_reason =
-        optional_string stage "startup_failure_reason" fields
-        |> Result.map non_blank
-      in
-      (match String.equal subtype "error_during_execution", is_error, startup_failure_reason with
-       | true, true, Some _ -> required_string stage "uuid" fields
+      let* header = parse_result_header fields in
+      (match
+         ( String.equal header.subtype "error_during_execution"
+         , header.is_error
+         , header.startup_failure_reason )
+       with
+       | true, true, Some _ ->
+         let* turn_id = required_string stage "uuid" fields in
+         Ok (turn_id, header)
        | false, (true | false), (Some _ | None)
        | true, false, (Some _ | None)
        | true, true, None ->
@@ -2294,28 +2324,22 @@ type result_phase =
   | Pre_initialize
   | Post_initialize
 
-let parse_result ~phase ~rate_limits ~api_error_cause ~tool_effect_attempted
-    ~response_emitted ~turn_id ~usage fields =
+let parse_result_body ~phase ~header ~rate_limits ~api_error_cause
+    ~tool_effect_attempted ~response_emitted ~turn_id ~usage fields =
   let stage = "result message" in
-  let* subtype = required_string stage "subtype" fields in
-  let* is_error = required_bool stage "is_error" fields in
-  let* api_error_status = optional_int stage "api_error_status" fields in
-  let* terminal_reason = optional_string stage "terminal_reason" fields in
-  let terminal_reason = Option.map terminal_reason_of_wire terminal_reason in
-  let* parsed_startup_failure_reason =
-    optional_string stage "startup_failure_reason" fields
-    |> Result.map (fun value ->
-      Option.map startup_failure_reason_of_wire (non_blank value))
-  in
+  let { subtype; is_error; startup_failure_reason } = header in
   (* Expose [startup_failure_reason] only before initialize completes so a
-     post-dispatch terminal frame can never masquerade as a pre-initialize
-     startup refusal, while still validating the field's JSON type in both
+     post-dispatch terminal frame can never produce [Startup_refused], while
+     [parse_result_header] still validates the field's JSON type in both
      phases. *)
   let startup_failure_reason =
     match phase with
-    | Pre_initialize -> parsed_startup_failure_reason
+    | Pre_initialize -> startup_failure_reason
     | Post_initialize -> None
   in
+  let* api_error_status = optional_int stage "api_error_status" fields in
+  let* terminal_reason = optional_string stage "terminal_reason" fields in
+  let terminal_reason = Option.map terminal_reason_of_wire terminal_reason in
   let* errors = optional_string_list stage "errors" fields in
   let result =
     match List.assoc_opt "result" fields with
@@ -2385,20 +2409,17 @@ let parse_result ~phase ~rate_limits ~api_error_cause ~tool_effect_attempted
     | Some (Other_terminal_reason _) | None -> false
   in
   (* A pre-initialize startup refusal carries [startup_failure_reason] and, on
-     [Resume], may arrive with a fresh process UUID. Keep it on the typed
-     [Turn_failed_with_observation] path before quota or context-overflow
-     promotion so it cannot trigger account quota cooldowns or shrink retries
-     while dropping [startup_failure_reason]. *)
+     [Resume], may arrive with a fresh process UUID. Emit [Startup_refused]
+     directly before quota or context-overflow promotion so it cannot trigger
+     account quota cooldowns or shrink retries and remains statically distinct
+     from post-initialize turn observations. *)
   match phase, is_error, startup_failure_reason with
-  | Pre_initialize, true, Some _ ->
+  | Pre_initialize, true, Some reason ->
     Error
-      (Turn_failed_with_observation
-         { detail = terminal_failure_detail ()
+      (Startup_refused
+         { reason
          ; api_error_status
-         ; api_error_cause
-         ; startup_failure_reason
-         ; tool_effect_attempted
-         ; response_emitted
+         ; detail = terminal_failure_detail ()
          })
   | Pre_initialize, true, None
   | Pre_initialize, false, (Some _ | None)
@@ -2433,7 +2454,6 @@ let parse_result ~phase ~rate_limits ~api_error_cause ~tool_effect_attempted
               { detail = terminal_failure_detail ()
               ; api_error_status
               ; api_error_cause
-              ; startup_failure_reason
               ; tool_effect_attempted
               ; response_emitted
               })
@@ -2501,10 +2521,13 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usag
       ~request_id
       ~on_stream_event
   | Frame_result ->
-    let* turn_id = startup_result_turn_id ~session_mode ~expected_session_id:session_id fields in
+    let* turn_id, header =
+      startup_result_identity ~session_mode ~expected_session_id:session_id fields
+    in
     (match
-       parse_result
+       parse_result_body
          ~phase:Pre_initialize
+         ~header
          ~rate_limits:Turn_rate_limits.empty
          ~api_error_cause:None
          ~tool_effect_attempted:false
@@ -2959,8 +2982,10 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
          usage.output_tokens
      | (Some _ | None), None -> ());
     let parsed_result =
-      parse_result
+      let* header = parse_result_header fields in
+      parse_result_body
         ~phase:Post_initialize
+        ~header
         ~rate_limits
         ~api_error_cause
         ~tool_effect_attempted:(!tool_call_count > 0 || !native_tool_attempted)
@@ -2975,7 +3000,8 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
           | Turn_failed _ | Turn_failed_with_observation _) -> Some Input_attribution.Provider_error
       | Error (Invalid_config _) | Error (Spawn_refused _) | Error (Protocol_error _)
       | Error (Subscription_required _) | Error (Unsupported_control_request _)
-      | Error (Turn_transport_interrupted _) | Error (Stopped_by_host _) | Error (Process_exited _)
+      | Error (Turn_transport_interrupted _) | Error (Startup_refused _)
+      | Error (Stopped_by_host _) | Error (Process_exited _)
       | Error (Unhandled_exception _) | Error (Timeout _) -> None in
     observe_input input_observer ~session_id:expected_session_id
       ~frame:(Input_attribution.Result {uuid=Some turn_id;outcome}) fields;
@@ -2987,7 +3013,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
         if !stream_started
         then emit_stream_event on_stream_event (Turn_finished { text = "" });
         Error error
-      | (Error (Context_window_exceeded { tool_effect_attempted = false; response_emitted = true;_}) | Error (Context_window_exceeded { tool_effect_attempted = true; response_emitted = _;_}) | Error (Invalid_config _ | (Spawn_refused _ | (Protocol_error _ | (Subscription_required _ | (Unsupported_control_request _ | (Turn_transport_interrupted _ | (Turn_failed _ | (Turn_failed_with_observation _ | (Stopped_by_host _ | (Quota_blocked _ | (Process_exited _ | (Unhandled_exception _ | Timeout _)))))))))))) | Ok _) as result -> result
+      | (Error (Context_window_exceeded { tool_effect_attempted = false; response_emitted = true;_}) | Error (Context_window_exceeded { tool_effect_attempted = true; response_emitted = _;_}) | Error (Invalid_config _ | (Spawn_refused _ | (Protocol_error _ | (Subscription_required _ | (Unsupported_control_request _ | (Turn_transport_interrupted _ | (Turn_failed _ | (Turn_failed_with_observation _ | (Startup_refused _ | (Stopped_by_host _ | (Quota_blocked _ | (Process_exited _ | (Unhandled_exception _ | Timeout _))))))))))))) | Ok _) as result -> result
     in
     let* () =
       invoke_state_callback ~stage:"turn started callback" (fun () ->
@@ -3799,7 +3825,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
        (( Invalid_config _ | Spawn_refused _ | Protocol_error _ | Subscription_required _
         | Unsupported_control_request _ | Turn_transport_interrupted _
         | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
-        | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+        | Startup_refused _ | Stopped_by_host _ | Quota_blocked _ | Process_exited _
         | Unhandled_exception _ | Timeout _ ) as error) ->
      (* The sibling branches above pass [error_to_string]; this one passed only
         the kind, so every failure that does not stop at a host boundary landed

@@ -1531,7 +1531,6 @@ let test_a_startup_failure_result_keeps_its_typed_reason () =
        (Runtime_claude_code.Turn_failed_with_observation
          { api_error_status = Some 401
          ; api_error_cause = None
-         ; startup_failure_reason = None
          ; tool_effect_attempted = false
          ; response_emitted = false
          ; detail
@@ -1545,7 +1544,6 @@ let test_a_startup_failure_result_keeps_its_typed_reason () =
       (Runtime_claude_code.Turn_failed_with_observation
         { api_error_status = None
         ; api_error_cause = None
-        ; startup_failure_reason = None
         ; tool_effect_attempted = false
         ; response_emitted = false
         ; detail
@@ -1560,14 +1558,15 @@ let test_resume_startup_failure_preserves_reason_and_errors () =
   let resume = Runtime_claude_code.Resume { session_id = "resumed-session-1" } in
   (match run_with_startup_frame ~session_mode:resume startup_org_config_unavailable_result with
    | Error
-       (Runtime_claude_code.Turn_failed_with_observation
-          { api_error_status = None
-          ; api_error_cause = None
-          ; startup_failure_reason = Some Runtime_claude_code.Org_config_required_unavailable
-          ; tool_effect_attempted = false
-          ; response_emitted = false
+       (Runtime_claude_code.Startup_refused
+          { reason = Runtime_claude_code.Org_config_required_unavailable
+          ; api_error_status = None
           ; detail
-          }) ->
+          } as error) ->
+     check bool "startup_refused prefix formatted" true
+       (Astring.String.is_prefix
+          ~affix:"Claude Code startup refused: "
+          (Runtime_claude_code.error_to_string error));
      check bool "startup_failure field recorded" true
        (Astring.String.is_infix
           ~affix:"startup_failure=org_config_required_unavailable"
@@ -1580,12 +1579,9 @@ let test_resume_startup_failure_preserves_reason_and_errors () =
    | Ok _ -> fail "a resumed start-up failure was reported as completion");
   (match run_with_startup_frame ~session_mode:resume startup_org_config_refused_result with
    | Error
-       (Runtime_claude_code.Turn_failed_with_observation
-          { api_error_status = None
-          ; api_error_cause = None
-          ; startup_failure_reason = Some Runtime_claude_code.Org_config_refused
-          ; tool_effect_attempted = false
-          ; response_emitted = false
+       (Runtime_claude_code.Startup_refused
+          { reason = Runtime_claude_code.Org_config_refused
+          ; api_error_status = None
           ; detail
           }) ->
      check bool "org_config_refused reason recorded" true
@@ -1600,13 +1596,9 @@ let test_resume_startup_failure_preserves_reason_and_errors () =
   in
   (match run_with_startup_frame ~session_mode:resume startup_other_reason with
    | Error
-       (Runtime_claude_code.Turn_failed_with_observation
-          { api_error_status = None
-          ; api_error_cause = None
-          ; startup_failure_reason =
-              Some (Runtime_claude_code.Other_startup_failure "config_file_invalid")
-          ; tool_effect_attempted = false
-          ; response_emitted = false
+       (Runtime_claude_code.Startup_refused
+          { reason = Runtime_claude_code.Other_startup_failure "config_file_invalid"
+          ; api_error_status = None
           ; detail
           }) ->
      check bool "other startup_failure recorded" true
@@ -1615,8 +1607,8 @@ let test_resume_startup_failure_preserves_reason_and_errors () =
        (Astring.String.is_infix ~affix:"Invalid settings.json" detail)
    | Error error -> fail (Runtime_claude_code.error_to_string error)
    | Ok _ -> fail "a resumed Other_startup_failure was reported as completion");
-  (* Pre-initialize startup refusals stay [Turn_failed_with_observation] even if
-     a frame also carries [api_error_status = 429] or [terminal_reason = "prompt_too_long"],
+  (* Pre-initialize startup refusals stay [Startup_refused] even if a frame
+     also carries [api_error_status = 429] or [terminal_reason = "prompt_too_long"],
      so a foreign-session startup refusal never triggers quota cooldowns or
      context-overflow shrink retries. *)
   let startup_with_429 =
@@ -1624,36 +1616,34 @@ let test_resume_startup_failure_preserves_reason_and_errors () =
   in
   (match run_with_startup_frame ~session_mode:resume startup_with_429 with
    | Error
-       (Runtime_claude_code.Turn_failed_with_observation
-          { api_error_status = Some 429
-          ; startup_failure_reason = Some Runtime_claude_code.Org_config_required_unavailable
-          ; _
+       (Runtime_claude_code.Startup_refused
+          { reason = Runtime_claude_code.Org_config_required_unavailable
+          ; api_error_status = Some 429
+          ; detail = _
           }) -> ()
-   | Error error -> fail ("expected Turn_failed_with_observation, got: " ^ Runtime_claude_code.error_to_string error)
+   | Error error -> fail ("expected Startup_refused, got: " ^ Runtime_claude_code.error_to_string error)
    | Ok _ -> fail "pre-initialize startup refusal with 429 completed");
   let startup_with_overflow =
     {|{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"fresh-startup-uuid","uuid":"startup-ovf-1","terminal_reason":"prompt_too_long","errors":["Org settings unavailable"],"startup_failure_reason":"org_config_required_unavailable"}|}
   in
   (match run_with_startup_frame ~session_mode:resume startup_with_overflow with
    | Error
-       (Runtime_claude_code.Turn_failed_with_observation
-          { api_error_status = None
-          ; startup_failure_reason = Some Runtime_claude_code.Org_config_required_unavailable
-          ; _
+       (Runtime_claude_code.Startup_refused
+          { reason = Runtime_claude_code.Org_config_required_unavailable
+          ; api_error_status = None
+          ; detail = _
           }) -> ()
-   | Error error -> fail ("expected Turn_failed_with_observation, got: " ^ Runtime_claude_code.error_to_string error)
+   | Error error -> fail ("expected Startup_refused, got: " ^ Runtime_claude_code.error_to_string error)
    | Ok _ -> fail "pre-initialize startup refusal with prompt_too_long completed");
   (* A regular error_during_execution frame with [errors] and no [result] also
      keeps its error sentence instead of dropping it, and post-initialize
-     frames never expose [startup_failure_reason]. *)
+     frames never produce [Startup_refused]. *)
   let turn_errors_only =
     {|{"type":"result","subtype":"error_during_execution","is_error":true,"session_id":"__SESSION__","uuid":"turn-err-1","errors":["first error","second error"],"startup_failure_reason":"org_config_required_unavailable"}|}
   in
   with_fixture [ Emit turn_errors_only ] (fun path ->
     match run_fixture path with
-    | Error
-        (Runtime_claude_code.Turn_failed_with_observation
-           { startup_failure_reason = None; detail; _ }) ->
+    | Error (Runtime_claude_code.Turn_failed_with_observation { detail; _ }) ->
       check bool "errors array joined into detail" true
         (Astring.String.is_infix ~affix:"first error; second error" detail);
       check bool "post-initialize startup_failure_reason omitted from detail" false
@@ -2425,7 +2415,6 @@ let test_api_diagnostic_preserves_terminal_error_detail () =
     | Error
         (Runtime_claude_code.Turn_failed_with_observation
            { detail; api_error_status = Some 400; api_error_cause = None
-           ; startup_failure_reason = None
            ; tool_effect_attempted = false; response_emitted = false }) ->
       check
         string

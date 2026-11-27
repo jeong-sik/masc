@@ -573,6 +573,7 @@ let official_failure_can_advance : Fusion_official_client.failure -> bool = func
   | Claude_admission_failure (Runtime_claude_code.Context_window_exceeded _)
   | Claude_admission_failure (Runtime_claude_code.Turn_failed _)
   | Claude_admission_failure (Runtime_claude_code.Turn_failed_with_observation _)
+  | Claude_admission_failure (Runtime_claude_code.Startup_refused _)
   | Claude_admission_failure (Runtime_claude_code.Stopped_by_host _)
   | Claude_admission_failure (Runtime_claude_code.Quota_blocked _)
   | Claude_admission_failure (Runtime_claude_code.Process_exited _)
@@ -599,7 +600,7 @@ let official_failure_can_advance : Fusion_official_client.failure -> bool = func
      | Timeout { turn_accepted = Some true; _ } -> false)
   | Claude_failure error ->
     (match error with
-     | Subscription_required _ | Spawn_refused _
+     | Subscription_required _ | Spawn_refused _ | Startup_refused _
      | Quota_blocked { tool_effect_attempted = false; response_emitted = false; _ }
      | Context_window_exceeded { tool_effect_attempted = false; response_emitted = false; _ }
      | Turn_failed_with_observation { tool_effect_attempted = false; response_emitted = false; _ } -> true
@@ -629,6 +630,7 @@ let official_failure_effect : Fusion_official_client.failure -> Tool_result.fail
   | Claude_admission_failure (Runtime_claude_code.Context_window_exceeded _)
   | Claude_admission_failure (Runtime_claude_code.Turn_failed _)
   | Claude_admission_failure (Runtime_claude_code.Turn_failed_with_observation _)
+  | Claude_admission_failure (Runtime_claude_code.Startup_refused _)
   | Claude_admission_failure (Runtime_claude_code.Stopped_by_host _)
   | Claude_admission_failure (Runtime_claude_code.Quota_blocked _)
   | Claude_admission_failure (Runtime_claude_code.Process_exited _)
@@ -639,7 +641,7 @@ let official_failure_effect : Fusion_official_client.failure -> Tool_result.fail
       | Account_read_failed _
       | Timeout { turn_accepted = (Some false | None); _ }
       | Context_window_exceeded { tool_effect_attempted = false; _ }) -> Proven_pre_effect
-  | Claude_failure (Invalid_config _ | Subscription_required _ | Spawn_refused _
+  | Claude_failure (Invalid_config _ | Subscription_required _ | Spawn_refused _ | Startup_refused _
       | Quota_blocked { tool_effect_attempted = false; response_emitted = false; _ }
       | Context_window_exceeded { tool_effect_attempted = false; response_emitted = false; _ }
       | Turn_failed_with_observation { tool_effect_attempted = false; response_emitted = false; _ }) -> Proven_pre_effect
@@ -1101,13 +1103,13 @@ let execution_of_vision_outcome = function
           ( Invalid_config _ | Spawn_refused _ | Protocol_error _
           | Unsupported_control_request _ | Turn_transport_interrupted _
           | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
-          | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+          | Startup_refused _ | Stopped_by_host _ | Quota_blocked _ | Process_exited _
           | Unhandled_exception _ )
       | Claude_admission_failure
           ( Invalid_config _ | Spawn_refused _ | Protocol_error _
           | Unsupported_control_request _ | Turn_transport_interrupted _
           | Context_window_exceeded _ | Turn_failed _ | Turn_failed_with_observation _
-          | Stopped_by_host _ | Quota_blocked _ | Process_exited _
+          | Startup_refused _ | Stopped_by_host _ | Quota_blocked _ | Process_exited _
           | Unhandled_exception _ ) ->
         Tool_result.Runtime_failure, "provider_error" in
     failed ~failure_class ~effect_disposition ~detail code

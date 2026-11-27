@@ -51,6 +51,7 @@ let claude_error_is_binding_rest : Runtime_claude_code.error -> bool = function
   | Runtime_claude_code.Context_window_exceeded _
   | Runtime_claude_code.Turn_failed _
   | Runtime_claude_code.Turn_failed_with_observation _
+  | Runtime_claude_code.Startup_refused _
   | Runtime_claude_code.Stopped_by_host _
   | Runtime_claude_code.Process_exited _
   | Runtime_claude_code.Unhandled_exception _
@@ -181,6 +182,7 @@ let claude_error_is_input_size : Runtime_claude_code.error -> bool = function
   | Runtime_claude_code.Turn_transport_interrupted _
   | Runtime_claude_code.Turn_failed _
   | Runtime_claude_code.Turn_failed_with_observation _
+  | Runtime_claude_code.Startup_refused _
   | Runtime_claude_code.Stopped_by_host _
   | Runtime_claude_code.Process_exited _
   | Runtime_claude_code.Unhandled_exception _

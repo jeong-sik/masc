@@ -58,7 +58,7 @@ let set_journal db journal =
   | stmt ->
     let reply =
       match Sqlite3.step stmt with
-      | Sqlite3.Rc.ROW -> Ok (Sqlite3.column_text stmt 0)
+      | rc when rc = Sqlite3.Rc.ROW -> Ok (Sqlite3.column_text stmt 0)
       | rc -> Error (failure db sql rc)
       | exception (Sqlite3.Error detail | Sqlite3.SqliteError detail) ->
         Error (sql ^ ": " ^ detail)

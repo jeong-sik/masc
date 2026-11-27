@@ -988,7 +988,6 @@ type t =
   { identity : int
   ; nodes : node list
   ; operands : (node * contract) Node_map.t
-  ; descriptors : (string * Keeper_tool_descriptor.t) list
   ; arguments : inline_arguments list
   ; branch_failure_policy : branch_failure_policy
   ; exports : export list
@@ -1445,7 +1444,6 @@ let create_compiled ~descriptors ?(arguments=[]) ?(branch_failure_policy = defau
                                     { identity = Atomic.fetch_and_add next_plan_identity 1
                                     ; nodes
                                     ; operands
-                                    ; descriptors
                                     ; arguments
                                     ; branch_failure_policy
                                     ; exports

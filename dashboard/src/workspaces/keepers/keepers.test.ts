@@ -378,6 +378,25 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
     vi.restoreAllMocks()
   })
 
+  // #55067: a turn that has waited 9.9 hours read the same as one that just
+  // began until the roster row carried its elapsed time.
+  it('shows a running turn\'s elapsed time on its roster row', () => {
+    const observedAt = 1_795_743_000_000
+    const keeper = makeRosterKeeper({
+      active_turn: { lane: 'proactive', started_at_unix: (observedAt - 35_602_000) / 1000 },
+    })
+    const row = (turnsObservation: { observedAt: number; live: boolean } | null) => {
+      const view = render(
+        html`<${KeeperRoster} roster=${observedValue([keeper])} turnsObservation=${turnsObservation} selectedKeeper=${null} onSelectKeeper=${vi.fn()} onCreatedKeeper=${vi.fn()} />`,
+      )
+      const text = view.container.querySelector('[data-keeper="code-reviewer-sister"]')?.textContent ?? ''
+      view.unmount()
+      return text
+    }
+    expect(row({ observedAt, live: false })).toContain('9h 53m')
+    expect(row(null)).not.toContain('9h 53m')
+  })
+
   it('renders an explicit Markdown preview in the tool inspector and preserves literal logs', async () => {
     const source = `[masc:blob sha256=${'a'.repeat(64)} bytes=64 mime=text/markdown preview="**Report**"]`
     const entry: KeeperToolCallEntry = {
@@ -3335,7 +3354,7 @@ describe('Keepers Workspace — Interactive DOM & API Flows', () => {
 
     // 2. KeeperRoster hides + Create Keeper button for non-admin worker
     const rosterView = render(
-      html`<${KeeperRoster} roster=${observedValue([makeRosterKeeper()])} selectedKeeper="code-reviewer-sister" onSelectKeeper=${vi.fn()} onCreatedKeeper=${vi.fn()} />`,
+      html`<${KeeperRoster} roster=${observedValue([makeRosterKeeper()])} turnsObservation=${null} selectedKeeper="code-reviewer-sister" onSelectKeeper=${vi.fn()} onCreatedKeeper=${vi.fn()} />`,
     )
     expect(rosterView.queryByRole('button', { name: /\+ Create Keeper|새 키퍼/ })).toBeNull()
     rosterView.unmount()

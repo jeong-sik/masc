@@ -148,7 +148,7 @@ let keeper_table_row ~(model : Model.t) ~(theme : Theme.t) ~indent_name
         (Glyph.to_utf8 Glyph.Separator_dot)
   in
   let name_display = if indent_name then company_indent ^ k.name else k.name in
-  let base_task_str = Ops_common.keeper_turn_summary ~lang:model.lang k in
+  let base_task_str = Ops_common.keeper_turn_summary ~model k in
   let is_runnable =
     (not k.paused)
     &&

@@ -1592,7 +1592,7 @@ let render_empty_chat_context grid ~(rect : Rect.t) ~(theme : Theme.t)
                 let tk =
                   match k.current_task_id with
                   | Some tid -> tid
-                  | None -> Ops_common.keeper_turn_summary ~lang:model.lang k
+                  | None -> Ops_common.keeper_turn_summary ~model k
                 in
                 let tr =
                   let s =
@@ -3544,7 +3544,7 @@ let draw_embedded_preview_header grid ~(rect : Rect.t) ~(theme : Theme.t)
   let pad_x = Ops_common.pad_x_for ~model rect in
   let sb_lbl, _ = Ops_common.keeper_sandbox_label ~model name in
   let rt_lbl = Ops_common.human_runtime_label ~model k in
-  let turn_lbl = Ops_common.keeper_turn_summary ~lang:model.lang k in
+  let turn_lbl = Ops_common.keeper_turn_summary ~model k in
   let age_s =
     match k.last_turn_at_unix with
     | Some ts ->

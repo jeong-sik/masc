@@ -308,14 +308,14 @@ let evidence_artifact_reader ~config ~(meta : keeper_meta) () =
              Error
                (Store.Evidence_read_error
                   (Printf.sprintf "sandbox_backend_read: %s: %s" worker detail)) in
-           (* A binary file is read whole and once, as the host read does: the
-              ceiling is asked of text only. For text, at most one byte past
-              the ceiling travels. A text file over it is [Too_large] and
-              nothing more of it crosses. *)
+           (* The path decides first, as it does in the host read. A file at a
+              binary-format path is read whole, once. Any other path asks for
+              at most one byte past the text ceiling; a file over it is
+              [Too_large] and nothing more of it crosses. *)
            let read_complete () =
              match
                Keeper_sandbox_read_backend.read_complete_file ~config ~meta
-                 ~host_path:relative ~timeout_sec:30 ()
+                 ~host_path:relative ~timeout_sec:30. ()
              with
              | Error reason -> backend_error reason
              | Ok content -> Store.payload_of_complete_bytes ~path:relative content

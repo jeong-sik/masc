@@ -841,7 +841,12 @@ remote_endpoint = "fixture"
     let trailer = Exec_ssh_protocol.render_trailer
         { v = Exec_ssh_protocol.newest; exit = Some 0; signal = None
         ; timed_out = false; shim_error = None; observed_syscalls = [] } in
-    let script = "#!/bin/sh\ncat >/dev/null 2>/dev/null &\ncat "
+    (* The fake ssh answers every command with the same file. It also writes
+       which read the reader asked for, one line per call, so a test can count
+       the reads of one file. *)
+    let reads_log = Filename.concat base "ssh-reads.log" in
+    let script = "#!/bin/sh\nfor a in \"$@\"; do case \"$a\" in *'exec cat'*) echo whole;; *'head -c'*) echo prefix;; *) ;; esac; done >> "
+        ^ Filename.quote reads_log ^ "\ncat >/dev/null 2>/dev/null &\ncat "
         ^ Filename.quote endpoint_file ^ "\nprintf '%s' "
         ^ Filename.quote trailer ^ " >&2\nexit 0\n" in
     with_fake_ssh script @@ fun () ->
@@ -861,7 +866,17 @@ remote_endpoint = "fixture"
     let body = item |> member "body" |> to_string in
     Alcotest.(check string) "endpoint image body survives snapshot" png
       (read_file (Filename.concat (Workspace.masc_dir config) body));
+    (* The reads the reader sent since [since]. *)
+    let reads_since since =
+      let lines =
+        if Sys.file_exists reads_log
+        then String.split_on_char '\n' (read_file reads_log)
+        else []
+      in
+      List.filteri (fun index line -> index >= since && line <> "") lines
+    in
     write_file endpoint_file (png ^ String.make Store.verification_evidence_max_bytes 'x');
+    let since = List.length (reads_since 0) in
     (match reader ~worker:meta.name ~relative:"render.PNG" with
      | Ok (Store.Binary_payload { data; bytes; _ }) ->
        Alcotest.(check int) "oversize endpoint image retained complete"
@@ -869,13 +884,20 @@ remote_endpoint = "fixture"
        Alcotest.(check string) "retained bytes are the whole file"
          (png ^ String.make Store.verification_evidence_max_bytes 'x') data
      | _ -> Alcotest.fail "oversize endpoint image must be retained complete");
+    Alcotest.(check (list string))
+      "a binary-format path is read once, by the whole-file command"
+      [ "whole" ] (reads_since since);
+    let since = List.length (reads_since 0) in
     write_file endpoint_file (String.make (Store.verification_evidence_max_bytes + 1) 'x');
     (match reader ~worker:meta.name ~relative:"summary.txt" with
      | Ok (Store.Text_payload { content = text; bytes }) ->
        Alcotest.(check int) "a text over the inline cap is read whole"
          (Store.verification_evidence_max_bytes + 1) bytes;
        Alcotest.(check int) "and nothing is cut" (String.length text) bytes
-     | _ -> Alcotest.fail "a text over the inline cap must be read whole")
+     | _ -> Alcotest.fail "a text over the inline cap must be read whole");
+    Alcotest.(check (list string))
+      "any other path is read once, by the bounded command"
+      [ "prefix" ] (reads_since since)
 
 let fake_docker_exit_1_script =
   "#!/bin/sh\n\

@@ -423,25 +423,6 @@ let test_create_refuses_a_recurring_receipt () =
     (Option.is_none (Schedule_store.get_schedule config ~schedule_id:"watched"))
 ;;
 
-let test_create_refuses_a_lane_action_with_a_run () =
-  with_config
-  @@ fun config ->
-  let result =
-    dispatch
-      config
-      ~name:create_name
-      [ "schedule_id", `String "lane-watched"
-      ; "due_at_unix", `Float future_due_at
-      ; "installation_id", `String "inst-1"
-      ; "action", `Assoc [ "kind", `String "compose" ]
-      ; "until_github_run", `String run_url
-      ]
-  in
-  check bool "refused" false (Tool_result.is_success result);
-  check bool "nothing stored" true
-    (Option.is_none (Schedule_store.get_schedule config ~schedule_id:"lane-watched"))
-;;
-
 (* --- Update --- *)
 
 let test_update_replaces_the_watch_with_what_it_is_given () =
@@ -605,26 +586,39 @@ let test_schemas_declare_the_param () =
     ]
 ;;
 
-let test_schemas_keep_the_param_out_of_a_lane_action () =
+(* A watch belongs to a Keeper wake. The Lane action tools do not offer it,
+   and the wake tools do not offer a Lane action's fields. *)
+let lane_action_fields extra =
+  [ "due_at_unix", `Float future_due_at
+  ; "installation_id", `String "inst-1"
+  ; "action", `Assoc [ "kind", `String "compose" ]
+  ]
+  @ extra
+;;
+
+let lane_action_tools =
+  [ "lane act create", Tool_schemas_schedule.Create_lane_act_request, []
+  ; ( "lane act update"
+    , Tool_schemas_schedule.Update_lane_act_request
+    , [ "schedule_id", `String "watched" ] )
+  ]
+;;
+
+let lane_action_schemas_refuse label watch =
   List.iter
-    (fun (label, action, extra) ->
-      let lane_action =
-        [ "due_at_unix", `Float future_due_at
-        ; "installation_id", `String "inst-1"
-        ; "action", `Assoc [ "kind", `String "compose" ]
-        ]
-        @ extra
-      in
-      (match validate action lane_action with
+    (fun (tool, action, extra) ->
+      (match validate action (lane_action_fields extra) with
        | Ok _ -> ()
        | Error rejection ->
-         failf "%s: a Lane action alone was refused: %s" label (Tool_result.message rejection));
-      match validate action (lane_action @ [ "until_github_run", `String run_url ]) with
-      | Ok _ -> failf "%s: a Lane action with until_github_run was accepted" label
+         failf "%s: a Lane action alone was refused: %s" tool (Tool_result.message rejection));
+      match validate action (lane_action_fields extra @ [ watch ]) with
+      | Ok _ -> failf "%s: a Lane action with %s was accepted" tool label
       | Error _ -> ())
-    [ "create", Tool_schemas_schedule.Create_request, []
-    ; "update", Tool_schemas_schedule.Update_request, [ "schedule_id", `String "watched" ]
-    ]
+    lane_action_tools
+;;
+
+let test_schemas_keep_the_param_out_of_a_lane_action () =
+  lane_action_schemas_refuse "until_github_run" ("until_github_run", `String run_url)
 ;;
 
 (* --- The payload contract --- *)
@@ -805,25 +799,6 @@ let test_commit_create_refuses_both_watches () =
     (Option.is_none (Schedule_store.get_schedule config ~schedule_id:"watched"))
 ;;
 
-let test_commit_create_refuses_a_lane_action_with_a_commit () =
-  with_config
-  @@ fun config ->
-  let result =
-    dispatch
-      config
-      ~name:create_name
-      [ "schedule_id", `String "lane-watched"
-      ; "due_at_unix", `Float future_due_at
-      ; "installation_id", `String "inst-1"
-      ; "action", `Assoc [ "kind", `String "compose" ]
-      ; "until_github_checks", `String commit_url
-      ]
-  in
-  check bool "refused" false (Tool_result.is_success result);
-  check bool "nothing stored" true
-    (Option.is_none (Schedule_store.get_schedule config ~schedule_id:"lane-watched"))
-;;
-
 let test_commit_update_replaces_the_watch_with_what_it_is_given () =
   with_config
   @@ fun config ->
@@ -900,20 +875,11 @@ let test_commit_schemas_declare_the_param_and_keep_it_out_of_a_lane_action () =
             @ extra)
        with
        | Ok _ -> ()
-       | Error rejection -> failf "%s: %s" label (Tool_result.message rejection));
-      let lane_action =
-        [ "due_at_unix", `Float future_due_at
-        ; "installation_id", `String "inst-1"
-        ; "action", `Assoc [ "kind", `String "compose" ]
-        ]
-        @ extra
-      in
-      match validate action (lane_action @ [ "until_github_checks", `String commit_url ]) with
-      | Ok _ -> failf "%s: a Lane action with until_github_checks was accepted" label
-      | Error _ -> ())
+       | Error rejection -> failf "%s: %s" label (Tool_result.message rejection)))
     [ "create", Tool_schemas_schedule.Create_request, []
     ; "update", Tool_schemas_schedule.Update_request, [ "schedule_id", `String "watched" ]
-    ]
+    ];
+  lane_action_schemas_refuse "until_github_checks" ("until_github_checks", `String commit_url)
 ;;
 
 let keeper_wake_payload_with fields =
@@ -1010,7 +976,6 @@ let () =
         ; test_case "refuses a receipt with urgency and an unknown delivery" `Quick test_create_refuses_a_receipt_with_urgency_and_an_unknown_delivery
         ; test_case "refuses a URL that names no run" `Quick test_create_refuses_a_url_that_names_no_run
         ; test_case "refuses a recurring schedule" `Quick test_create_refuses_a_recurring_schedule
-        ; test_case "refuses a Lane action with a run" `Quick test_create_refuses_a_lane_action_with_a_run
         ] )
     ; ( "update"
       , [ test_case
@@ -1049,7 +1014,6 @@ let () =
         ; test_case "create refuses a URL that is not a full commit" `Quick test_commit_create_refuses_a_url_that_is_not_a_full_commit
         ; test_case "create refuses a recurring schedule" `Quick test_commit_create_refuses_a_recurring_schedule
         ; test_case "create refuses both watches" `Quick test_commit_create_refuses_both_watches
-        ; test_case "create refuses a Lane action with a commit" `Quick test_commit_create_refuses_a_lane_action_with_a_commit
         ; test_case "update replaces the watch with what it is given" `Quick test_commit_update_replaces_the_watch_with_what_it_is_given
         ; test_case "update refuses a commit on a recurring schedule" `Quick test_commit_update_refuses_a_commit_on_a_recurring_schedule
         ; test_case "schemas declare the param and keep it out of a Lane action" `Quick test_commit_schemas_declare_the_param_and_keep_it_out_of_a_lane_action

@@ -12,7 +12,7 @@
  */
 
 import { html } from 'htm/preact'
-import { MarkdownContent } from '../../components/common/markdown-renderer'
+import { MarkdownContent, type LinkRewrite } from '../../components/common/markdown-renderer'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { authSession, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
 import { markViewSynced } from '../../core/observer'
@@ -30,7 +30,7 @@ import {
   expectRequiredStringField,
   expectWireRecord,
 } from '../../lib/wire-decode'
-import { isAdminLockedForSession } from '../../routes/router'
+import { isAdminLockedForSession, resolveRoute } from '../../routes/router'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   WIKI_SOURCES,
@@ -766,6 +766,30 @@ export function WikiTab(props: WorkspaceViewProps) {
     </div>
   `
 
+  // Body links the server resolved to an existing page point at that page's
+  // route: the server's `raw` is the target as written, which is also the
+  // rendered href because page names are [a-z0-9-] plus `.md`. The title
+  // shows the target page's summary on hover.
+  const bodyPageLinks = useMemo(() => {
+    const summaries = new Map((wikiIndex?.pages ?? []).map((page) => [page.slug, page.summary]))
+    const rewrites = new Map<string, LinkRewrite>()
+    const slugByHref = new Map<string, string>()
+    for (const link of pageDetail?.outgoing_links ?? []) {
+      if (link.kind !== 'page' || link.exists !== true) continue
+      const href = `#${resolveRoute(`/knowledge/wiki/${encodeURIComponent(link.target)}`).path}`
+      rewrites.set(link.raw, { href, title: summaries.get(link.target) || undefined })
+      slugByHref.set(href, link.target)
+    }
+    return { rewrites, slugByHref }
+  }, [pageDetail, wikiIndex])
+  // Picking a page from the list does not change the route, so the route can
+  // already name the linked page; selecting it here opens the page either way.
+  const openBodyPageLink = (event: MouseEvent) => {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+    const anchor = event.target instanceof Element ? event.target.closest('a[href]') : null
+    const slug = anchor ? bodyPageLinks.slugByHref.get(anchor.getAttribute('href') ?? '') : undefined
+    if (slug) setSelectedSlug(slug)
+  }
   // A selected page with nothing read of it and no error is one being read:
   // from the first render, before the effect that reads it has run.
   const pageLoading = selectedSlug !== null && !creatingNew && pageDetail === null && pageError === null
@@ -978,8 +1002,8 @@ export function WikiTab(props: WorkspaceViewProps) {
               </div>
             `}
 
-            <article class="kn-md-panel">
-              <${MarkdownContent} text=${pageDetail.body_markdown} document />
+            <article class="kn-md-panel" onClick=${openBodyPageLink}>
+              <${MarkdownContent} text=${pageDetail.body_markdown} document linkRewrites=${bodyPageLinks.rewrites} />
             </article>
 
             <details class="ap-disclosure" data-testid="wiki-links-disclosure">

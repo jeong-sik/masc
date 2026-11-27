@@ -163,12 +163,45 @@ function linkUnloadedImages(container: HTMLElement) {
   return () => cleanups.forEach(cleanup => cleanup())
 }
 
+/** Where a document link goes instead of its written target. */
+export type LinkRewrite = { readonly href: string; readonly title?: string }
+
+const REWRITTEN_ATTRS = ['href', 'target', 'rel', 'title'] as const
+
+function rewriteLinks(container: HTMLElement, rewrites: ReadonlyMap<string, LinkRewrite>) {
+  const restores: Array<() => void> = []
+  for (const anchor of container.querySelectorAll('a[href]')) {
+    const rewrite = rewrites.get(anchor.getAttribute('href') ?? '')
+    if (!rewrite) continue
+    const saved = REWRITTEN_ATTRS.map(name => [name, anchor.getAttribute(name)] as const)
+    anchor.setAttribute('href', rewrite.href)
+    anchor.removeAttribute('target')
+    anchor.removeAttribute('rel')
+    if (rewrite.title) anchor.setAttribute('title', rewrite.title)
+    restores.push(() => {
+      for (const [name, value] of saved) {
+        if (value === null) anchor.removeAttribute(name)
+        else anchor.setAttribute(name, value)
+      }
+    })
+  }
+  return () => restores.forEach(restore => restore())
+}
+
 export function MarkdownContent({
   text,
   class: className,
   document = false,
   streaming = false,
-}: { text: string; class?: string; document?: boolean; streaming?: boolean }) {
+  linkRewrites,
+}: {
+  text: string
+  class?: string
+  document?: boolean
+  streaming?: boolean
+  /** Links whose written target is a key open the value instead, in this tab. */
+  linkRewrites?: ReadonlyMap<string, LinkRewrite>
+}) {
   const root = useRef<HTMLDivElement>(null)
   const htmlStr = useMemo(
     () => (document ? renderMarkdownDocument : renderMarkdown)(text),
@@ -179,11 +212,13 @@ export function MarkdownContent({
     if (!element) return undefined
     const restoreImages = htmlStr.includes('<img ') ? linkUnloadedImages(element) : undefined
     const restoreFences = !streaming && htmlStr.includes('language-') ? enhanceRichCode(element) : undefined
+    const restoreLinks = linkRewrites && htmlStr.includes('<a') ? rewriteLinks(element, linkRewrites) : undefined
     return () => {
       restoreImages?.()
       restoreFences?.()
+      restoreLinks?.()
     }
-  }, [htmlStr, streaming])
+  }, [htmlStr, streaming, linkRewrites])
 
   const classes = ['markdown-content', className].filter(Boolean).join(' ')
   return html`

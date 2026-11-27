@@ -22,6 +22,7 @@ vi.mock('uplot', () => {
   return { default: MockUPlot }
 })
 import { authSession, bumpSessionEpoch, resetAuthStateForTests } from '../../core/auth'
+import { READ_LATE_AFTER_MS } from '../../core/late-read'
 import { resetObserverStateForTests } from '../../core/observer'
 import { resourceCache } from '../../core/resource-cache'
 import { resetPortraitCacheForTests } from '../../lib/portrait-cache'
@@ -117,6 +118,8 @@ describe('workspaces/work', () => {
   })
 
   afterEach(() => {
+    // A test that failed between its fake and real timers must not leave the next one on a stopped clock.
+    vi.useRealTimers()
     render(null, container)
     container.remove()
     globalThis.fetch = origFetch
@@ -1453,10 +1456,16 @@ describe('workspaces/work', () => {
 
     const refresh = [...container.querySelectorAll<HTMLButtonElement>('button')]
       .find((el) => el.textContent?.trim() === '새로고침')!
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     refresh.click()
+    // A re-read that is out says nothing until it has stayed out.
+    await vi.advanceTimersByTimeAsync(READ_LATE_AFTER_MS - 1)
+    expect(syncSlot()?.textContent?.trim()).toBe('')
+    await vi.advanceTimersByTimeAsync(1)
+    vi.useRealTimers()
     await flushUi()
 
-    // While tool-approvals revalidates, stale status stays inside the header slot (zero in-flow warn banner above VirtualList).
+    // While tool-approvals stays out, the status sits inside the header slot (zero in-flow warn banner above VirtualList).
     expect(syncSlot()?.textContent).toContain('도구 승인 · 마지막 조회 결과')
     expect(container.querySelectorAll('.wk-pane-col > .wk-notice--warn')).toHaveLength(0)
 
@@ -1539,15 +1548,22 @@ describe('workspaces/work', () => {
     // 1. Trigger manual revalidation -> goal list becomes stale while refetching.
     const refreshBtn = [...container.querySelectorAll<HTMLButtonElement>('button')]
       .find((b) => b.textContent?.trim() === '새로고침')!
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     refreshBtn.click()
-    await flushUi()
+    await vi.advanceTimersByTimeAsync(READ_LATE_AFTER_MS - 1)
 
-    // Evidence stays mounted without collapsing, Confirm disables, and status stays in header slot.
+    // Evidence stays mounted without collapsing and Confirm disables at once.
     expect(container.textContent).toContain('Persistent confirmation evidence body')
     expect(confirmBtn()?.disabled).toBe(true)
     expect(container.textContent).toContain('마지막 조회 증거')
     expect(container.querySelectorAll('.wk-pane-col > .wk-notice--warn')).toHaveLength(0)
+    // The list's own status waits until the re-read has stayed out, and then sits in the header slot.
+    expect(container.querySelector('.wk-pane-head .wk-status-pill--warn')).toBeNull()
+    await vi.advanceTimersByTimeAsync(1)
+    vi.useRealTimers()
+    await flushUi()
     expect(container.querySelector('.wk-pane-head .wk-status-pill--warn')?.textContent).toContain('마지막 조회')
+    expect(container.querySelectorAll('.wk-pane-col > .wk-notice--warn')).toHaveLength(0)
 
     // 2. Goal list resolves -> confirmation starts reloading while evidence stays mounted.
     resolveSecondGoals(jsonResponse(goalPayload))

@@ -26,6 +26,7 @@ import {
   subscribeObserverResync,
 } from '../../core/observer'
 import { currentRoute, isAdminLockedForSession } from '../../routes/router'
+import { useLateRead } from '../../core/late-read'
 import { resourceCache, type FetchReason, type Observed } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
 import { InlineSpinner } from '../../components/common/inline-spinner'
@@ -154,13 +155,15 @@ function sourceAlert(label: string, observation: Observed<unknown>) {
   }
 }
 
-function renderTaskSyncPill(sources: readonly { label: string; observation: Observed<unknown>; retained?: boolean }[]) {
+/** Each source's `late` is `useLateRead` of its observation. A retained
+ *  result is an earlier read whatever the cache says, so it is said at once. */
+function renderTaskSyncPill(sources: readonly { label: string; observation: Observed<unknown>; late: boolean; retained?: boolean }[]) {
   const loadingLabels: string[] = []
   const staleLabels: string[] = []
   for (const s of sources) {
     if (s.observation.kind === 'loading') {
       loadingLabels.push(s.label)
-    } else if (s.observation.kind === 'value' && (s.observation.stale || Boolean(s.retained))) {
+    } else if (s.observation.kind === 'value' && (s.late || Boolean(s.retained))) {
       staleLabels.push(s.label)
     }
   }
@@ -305,6 +308,9 @@ export function TasksTab(props: WorkspaceViewProps) {
   const planningObs = resourceCache.observe<PlanningTasks>(planningKey).value
   const executionObs = resourceCache.observe<ExecutionTasks>(executionKey).value
   const scheduleObs = resourceCache.observe<ScheduleProjection>(scheduleKey).value
+  const planningLate = useLateRead(planningObs)
+  const executionLate = useLateRead(executionObs)
+  const scheduleLate = useLateRead(scheduleObs)
 
   const planning = planningObs.kind === 'value' ? planningObs.data : null
   const execution = executionObs.kind === 'value' ? executionObs.data : null
@@ -808,10 +814,10 @@ export function TasksTab(props: WorkspaceViewProps) {
   ]
 
   const tasksSyncPill = isSchedulesView
-    ? renderTaskSyncPill([{ label: '예약 목록', observation: scheduleObs }])
+    ? renderTaskSyncPill([{ label: '예약 목록', observation: scheduleObs, late: scheduleLate }])
     : renderTaskSyncPill([
-        { label: '계획 목록', observation: planningObs },
-        { label: '실행 태스크', observation: executionObs, retained: execution?.retained },
+        { label: '계획 목록', observation: planningObs, late: planningLate },
+        { label: '실행 태스크', observation: executionObs, late: executionLate, retained: execution?.retained },
       ])
 
   const activeChipItem = chipItems.find((c) => c.id === chip) ?? chipItems[0]!

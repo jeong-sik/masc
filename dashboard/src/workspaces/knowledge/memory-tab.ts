@@ -20,6 +20,7 @@ import type uPlot from 'uplot'
 import { authSession, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { isAdminLockedForSession } from '../../routes/router'
 import { markViewSynced } from '../../core/observer'
+import { useLateRead } from '../../core/late-read'
 import { formatObserved, observedValue, resourceCache } from '../../core/resource-cache'
 import { timeWindow, type TimeWindow } from '../../core/time-window'
 import { apiGet, apiGetV2, apiMutate } from '../../core/transport'
@@ -133,6 +134,8 @@ export function MemoryTab(_props: WorkspaceViewProps) {
   const epoch = sessionEpoch.value
   const worldObs = resourceCache.observe<WorldMemoryViewModel>(WORLD_KEY).value
   const diffObs = resourceCache.observe<WorldDiffViewModel>(memoryDiffKey(activeWin)).value
+  const worldLate = useLateRead(worldObs)
+  const diffLate = useLateRead(diffObs)
   const world = worldObs.kind === 'value' ? worldObs.data : null
   const diffData = diffObs.kind === 'value' ? diffObs.data : null
   const [section, setSection] = useState<MemorySection>('claims')
@@ -365,8 +368,6 @@ export function MemoryTab(_props: WorkspaceViewProps) {
   const syncPill = (() => {
     const worldLoading = worldObs.kind === 'loading'
     const diffLoading = diffObs.kind === 'loading'
-    const worldStale = worldObs.kind === 'value' && worldObs.stale
-    const diffStale = diffObs.kind === 'value' && diffObs.stale
     const parts: string[] = []
     if (worldLoading && diffLoading) {
       parts.push('World Memory · Diff 불러오는 중…')
@@ -375,16 +376,16 @@ export function MemoryTab(_props: WorkspaceViewProps) {
     } else if (diffLoading) {
       parts.push(`${activeWin} 메모리 Diff 불러오는 중…`)
     }
-    if (worldStale && diffStale) {
+    if (worldLate && diffLate) {
       parts.push('마지막 조회')
-    } else if (worldStale) {
+    } else if (worldLate) {
       parts.push('World Memory · 마지막 조회')
-    } else if (diffStale) {
+    } else if (diffLate) {
       parts.push(`${activeWin} Diff · 마지막 조회`)
     }
     if (parts.length === 0) return null
     return {
-      tone: (worldStale || diffStale ? 'warn' : 'info') as 'warn' | 'info',
+      tone: (worldLate || diffLate ? 'warn' : 'info') as 'warn' | 'info',
       loading: worldLoading || diffLoading,
       text: parts.join(' · '),
     }

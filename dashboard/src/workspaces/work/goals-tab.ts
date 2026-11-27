@@ -17,6 +17,7 @@ import { GoalSourceUnavailableError, goalSourceUnavailable } from '../../api/das
 import { activeWorkspaceId, authSession, currentSessionEpoch, isEpochCurrent } from '../../core/auth'
 import { isAdminLockedForSession } from '../../routes/router'
 import { extractObserverTopics, markViewSynced, observerConnected, subscribeObserverFrames, subscribeObserverReconnect, subscribeObserverResync } from '../../core/observer'
+import { useLateRead } from '../../core/late-read'
 import { formatObserved, resourceCache, type FetchReason, type Observed } from '../../core/resource-cache'
 import { apiGet, apiMutate } from '../../core/transport'
 import { KeeperBadge } from '../../components/keeper-badge'
@@ -210,11 +211,12 @@ interface SyncPillState {
   readonly text: string
 }
 
-function readSyncPill(label: string, observation: Observed<unknown>): SyncPillState | null {
+/** `late` is `useLateRead` of the same observation. */
+function readSyncPill(label: string, observation: Observed<unknown>, late: boolean): SyncPillState | null {
   if (observation.kind === 'loading') {
     return { tone: 'info', text: `${label} 불러오는 중…` }
   }
-  if (observation.kind === 'value' && observation.stale) {
+  if (late) {
     return { tone: 'warn', text: `${label} · 마지막 조회` }
   }
   return null
@@ -266,6 +268,8 @@ export function GoalsTab(props: WorkspaceViewProps) {
   const canAdminGoal = isSingleUser && !isAdminLockedForSession('admin', session)
   const goalObservation = resourceCache.observe<GoalListRead>(goalListKey).value
   const verificationObservation = resourceCache.observe<VerificationListRead>(verificationListKey).value
+  const goalsLate = useLateRead(goalObservation)
+  const verificationsLate = useLateRead(verificationObservation)
   const goalRead = useLastRead(goalObservation)
   const verificationRead = useLastRead(verificationObservation)
   const goals = goalRead?.goals ?? emptyRows
@@ -703,8 +707,8 @@ export function GoalsTab(props: WorkspaceViewProps) {
     return `태스크 ${total}개 · 완료 ${done} · 검증 대기 ${awaiting} · 취소 ${cancelled} · 그 외 ${rest}`
   }, [selectedGoal])
 
-  const goalSyncPill = readSyncPill('목표 목록', goalObservation)
-  const verifSyncPill = !multiAccount ? readSyncPill('검증 목록', verificationObservation) : null
+  const goalSyncPill = readSyncPill('목표 목록', goalObservation, goalsLate)
+  const verifSyncPill = !multiAccount ? readSyncPill('검증 목록', verificationObservation, verificationsLate) : null
   const confirmationSyncPill: SyncPillState | null = !multiAccount && currentConfirmation !== null
     ? selectedConfirmationRead?.kind === 'loading'
       ? { tone: 'info', text: '증거 확인 중…' }

@@ -272,12 +272,13 @@ let test_probe_tells_a_missing_origin_from_a_configured_one () =
              "sh -c %s"
              (Filename.quote
                 (Printf.sprintf
-                   "cd %s && python3 -c %s %s 32 8192 %d inspect %g > %s"
+                   "cd %s && python3 -c %s %s 32 8192 %d inspect %g %d > %s"
                    (Filename.quote tree)
                    (Filename.quote R.For_testing.probe_script)
                    (Filename.quote {|[{"url":"https://github.com/jeong-sik/masc.git","default_branch":"main"}]|})
                    R.target_ref_stale_after_s
-                   R.probe_budget_sec
+                   R.checkout_inspection_sec
+                   R.inspection_workers
                    (Filename.quote out))));
         let raw = In_channel.with_open_bin out In_channel.input_all in
         match R.parse_probe_json ~root:tree raw with
@@ -370,11 +371,12 @@ let test_layout_probe_observes_paths_without_git () =
       Out_channel.with_open_text git (fun ch ->
         Printf.fprintf ch "#!/bin/sh\ntouch %s\nexit 1\n" (Filename.quote marker));
       Unix.chmod git 0o755;
-      let command = Printf.sprintf "cd %s && PATH=%s:$PATH python3 -c %s '[]' %d %d %d layout %g > %s"
+      let command = Printf.sprintf "cd %s && PATH=%s:$PATH python3 -c %s '[]' %d %d %d layout %g %d > %s"
         (Filename.quote tree) (Filename.quote root)
         (Filename.quote R.For_testing.probe_script)
         C.max_reported_checkouts C.max_scanned_entries
-        R.target_ref_stale_after_s R.probe_budget_sec (Filename.quote output) in
+        R.target_ref_stale_after_s R.checkout_inspection_sec R.inspection_workers
+        (Filename.quote output) in
       check int "layout probe completes" 0 (Sys.command command);
       check bool "layout does not execute producer git configuration" false
         (Sys.file_exists marker);
@@ -399,41 +401,92 @@ let test_each_tree_location_has_its_own_budget () =
     R.probe_budget_sec (budget Keeper_types_profile_sandbox.Endpoint_owned)
 ;;
 
-(* The per-call git timeout is the one the caller passes, not a number written
-   into the probe. Each git here answers a URL after 3 s; under a 0.2 s
-   timeout every call is cut off, so the origin and the head read as unread
-   instead of as that URL. *)
-let test_probe_git_calls_take_the_timeout_they_are_given () =
-  let root = Filename.temp_dir "masc-probe-timeout-" "" in
+(* #35039: guest admission and the absence check after a failure each read
+   the container runtime about one guest; they keep a budget of their own
+   instead of the probe's. A checkout's git reads end inside the probe, so a
+   checkout past its deadline cannot take the other rows with it. *)
+let test_guest_state_reads_keep_their_own_budget () =
+  let budgets = R.For_testing.budgets ~timeout_sec:R.probe_budget_sec in
+  check (float 0.) "admission and the absence check take the guest state budget"
+    R.guest_state_timeout_sec budgets.guest_state_sec;
+  check (float 0.) "the probe takes the budget it is given" R.probe_budget_sec budgets.payload_sec;
+  check bool "the guest state budget is shorter than the probe's" true
+    (budgets.guest_state_sec < budgets.payload_sec);
+  check bool "a checkout's reads end inside the probe" true
+    (budgets.checkout_sec < budgets.payload_sec)
+;;
+
+(* #35039: one checkout whose git does not answer costs only its own row.
+   Every git here answers at once, except in [slow], where it sleeps 3 s.
+   Under a 0.5 s checkout deadline the slow checkout reports its git fields
+   as unread and the checkouts on either side of it report in full. *)
+let test_a_slow_checkout_costs_only_its_own_row () =
+  let root = Filename.temp_dir "masc-probe-slow-" "" in
   let tree = Filename.concat root "tree" in
   let bin = Filename.concat root "bin" in
   let output = Filename.concat root "probe.json" in
+  let head = "0123456789abcdef0123456789abcdef01234567" in
   Fun.protect
     ~finally:(fun () -> ignore (Sys.command ("rm -rf " ^ Filename.quote root)))
     (fun () ->
-      List.iter (fun dir -> Unix.mkdir dir 0o700)
-        [ tree; Filename.concat tree "repo"; Filename.concat tree "repo/.git"; bin ];
+      List.iter (fun dir -> Unix.mkdir dir 0o700) [ tree; bin ];
+      List.iter
+        (fun name ->
+          Unix.mkdir (Filename.concat tree name) 0o700;
+          Unix.mkdir (Filename.concat (Filename.concat tree name) ".git") 0o700)
+        [ "fast-a"; "slow"; "fast-b" ];
       let git = Filename.concat bin "git" in
-      (* One process, so the timeout's kill reaches the sleeping git itself. *)
+      (* [exec] keeps one process, so the deadline's kill reaches the sleep. *)
       Out_channel.with_open_text git (fun ch ->
-        output_string ch
-          "#!/bin/sh\nexec python3 -c 'import time; time.sleep(3); print(\"https://example.invalid/repo.git\")'\n");
+        Printf.fprintf ch
+          {|#!/bin/sh
+case "$2" in
+  */slow) exec python3 -c 'import time; time.sleep(3)' ;;
+esac
+shift 2
+case "$*" in
+  "remote get-url origin") echo https://example.invalid/repo.git ;;
+  "symbolic-ref --short -q HEAD") echo main ;;
+  "rev-parse HEAD") echo %s ;;
+  "--no-optional-locks status --porcelain=v1 --untracked-files=normal") ;;
+  *) exit 1 ;;
+esac
+|}
+          head);
       Unix.chmod git 0o755;
-      let command = Printf.sprintf "cd %s && PATH=%s:$PATH python3 -c %s '[]' %d %d %d inspect %g > %s"
+      let command = Printf.sprintf "cd %s && PATH=%s:$PATH python3 -c %s '[]' %d %d %d inspect %g %d > %s"
         (Filename.quote tree) (Filename.quote bin)
         (Filename.quote R.For_testing.probe_script)
         C.max_reported_checkouts C.max_scanned_entries
-        R.target_ref_stale_after_s 0.2 (Filename.quote output) in
+        R.target_ref_stale_after_s 0.5 R.inspection_workers (Filename.quote output) in
       check int "probe completes" 0 (Sys.command command);
       let raw = In_channel.with_open_bin output In_channel.input_all in
       match R.parse_probe_json ~root:tree raw with
       | Error detail -> fail detail
-      | Ok (_, [ row ]) ->
-        (match row.origin with
-         | R.Origin_unread -> ()
-         | R.Origin_url _ | R.Origin_not_configured -> fail "origin lookup was not cut off");
-        check (result string string) "head lookup was cut off" (Error "head unavailable") row.head
-      | Ok (_, rows) -> failf "expected one checkout, got %d" (List.length rows))
+      | Ok (_, rows) ->
+        check (list string) "every checkout is reported, in order" [ "fast-a"; "fast-b"; "slow" ]
+          (List.map (fun (row : R.inspected_checkout) -> row.checkout.relative_path) rows);
+        List.iter
+          (fun (row : R.inspected_checkout) ->
+            let name = row.checkout.relative_path in
+            if String.equal name "slow" then begin
+              (match row.origin with
+               | R.Origin_unread -> ()
+               | R.Origin_url _ | R.Origin_not_configured -> fail "slow origin was read");
+              check (result string string) "slow branch" (Error "branch unavailable") row.branch;
+              check (result string string) "slow head" (Error "head unavailable") row.head;
+              check (result (pair bool int) string) "slow status" (Error "status unavailable")
+                row.dirty
+            end
+            else begin
+              (match row.origin with
+               | R.Origin_url url -> check string (name ^ " origin") "https://example.invalid/repo.git" url
+               | R.Origin_unread | R.Origin_not_configured -> failf "%s origin was not read" name);
+              check (result string string) (name ^ " branch") (Ok "main") row.branch;
+              check (result string string) (name ^ " head") (Ok head) row.head;
+              check (result (pair bool int) string) (name ^ " status") (Ok (false, 0)) row.dirty
+            end)
+          rows)
 ;;
 
 let () =
@@ -444,8 +497,10 @@ let () =
     ; ( "budget"
       , [ test_case "each tree location has its own budget" `Quick
             test_each_tree_location_has_its_own_budget
-        ; test_case "probe git calls take the timeout they are given" `Quick
-            test_probe_git_calls_take_the_timeout_they_are_given
+        ; test_case "guest state reads keep their own budget" `Quick
+            test_guest_state_reads_keep_their_own_budget
+        ; test_case "a slow checkout costs only its own row" `Quick
+            test_a_slow_checkout_costs_only_its_own_row
         ] )
     ; ( "parse_probe_json"
       , [ test_case "complete discovery" `Quick test_parse_probe_json_complete

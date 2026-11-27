@@ -27,6 +27,28 @@ val probe_budget_sec : float
     {!Repo_git.inspection_timeout_sec}, which budgets git subprocesses on this
     host. The measured basis is written next to the value. *)
 
+val checkout_inspection_sec : float
+(** How long the git reads of one checkout may take together, inside the
+    probe. Shorter than {!probe_budget_sec}: a checkout past it reports its
+    git fields as unread and the other checkouts still report. *)
+
+val inspection_workers : int
+(** How many checkouts the probe inspects at a time. *)
+
+val guest_state_timeout_sec : float
+(** Budget for each container-runtime read around the probe: guest admission
+    before it and the absence check after a failure. *)
+
+(** The budgets {!discover_and_inspect} and {!discover_layout} give each step
+    for a caller's [timeout_sec]. *)
+type budgets =
+  { guest_state_sec : float
+      (** Guest admission and the absence check after a failure. *)
+  ; payload_sec : float  (** The shim's limit on the probe itself. *)
+  ; checkout_sec : float  (** One checkout's git reads, inside the probe. *)
+  ; workers : int  (** Checkouts inspected at a time. *)
+  }
+
 type inspected_checkout =
   { checkout : Keeper_playground_checkouts.checkout
   ; origin : remote_origin
@@ -72,6 +94,9 @@ val parse_probe_json :
 module For_testing : sig
   val probe_script : string
   (** The Python the endpoint runs, so a test can run it on a real tree. *)
+
+  val budgets : timeout_sec:float -> budgets
+  (** The budgets a probe run with [timeout_sec] uses. *)
 end
 
 val discover_and_inspect :
@@ -84,5 +109,8 @@ val discover_and_inspect :
     * inspected_checkout list
   , Keeper_playground_checkouts.scan_error ) result
 (** Acquire the keeper's attached endpoint, run the remote discovery and
-    inspection probe within [timeout_sec], and parse the results. Each git
-    call inside the probe is given the same [timeout_sec]. *)
+    inspection probe within [timeout_sec], and parse the results. The probe
+    inspects {!inspection_workers} checkouts at a time, and each checkout's
+    git reads share {!checkout_inspection_sec}. Guest admission and the
+    absence check after a failure each take {!guest_state_timeout_sec}, not
+    [timeout_sec]. *)

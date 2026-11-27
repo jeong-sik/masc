@@ -386,9 +386,12 @@ let store_text_artifact ~base_path ~reference ~content ~bytes =
     let store = Tool_blob_store.create ~base_path in
     match Tool_blob_store.put_durable store ~bytes:content ~mime:"text/plain" with
     | blob -> Evidence_artifact_body { reference; blob }
-    | exception Sys_error detail ->
+    | exception (Sys_error | Unix.Unix_error _) as error ->
+      (* The store promises [Sys_error] for a failed write, but a directory
+         it cannot enter or create surfaces as a Unix error. A submit must
+         not fail because the store is unusable: the item says so instead. *)
       Evidence_artifact_unreadable
-        { reference; reason = Evidence_read_error ("blob store write: " ^ detail) }
+        { reference; reason = Storage_failed (Printexc.to_string error) }
 
 let inspect_producer_relative_artifact ?artifact_read ?request_id ?index ~base_path
   ~worker ~reference relative_path =
@@ -436,7 +439,8 @@ let inspect_producer_relative_artifact ?artifact_read ?request_id ?index ~base_p
     | Error (Evidence_symbolic_link as reason)
     | Error (Evidence_changed_during_read as reason)
     | Error (Evidence_read_error _ as reason)
-    | Error (Too_large _ as reason) ->
+    | Error (Too_large _ as reason)
+    | Error (Storage_failed _ as reason) ->
       Evidence_artifact_unreadable { reference; reason } )
 
 let snapshot_submitted_evidence_item ?artifact_read ?request_id ?index ~base_path

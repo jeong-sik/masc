@@ -702,7 +702,9 @@ let run t tool ~args =
        a text it stored whole. Both name bytes the review was handed. A sha256
        merely quoted in a note, a prompt or a Board post names no readable
        text here: the blob store also holds every Keeper's stored tool
-       results, and a verdict's reason travels back to the producer. *)
+       results, and a verdict's reason travels back to the producer. The
+       record itself is written by the server's submit path only: a producer
+       names references and never writes record bytes. *)
     (match artifact_read_of_args args with
      | Error message ->
        Error (Collaboration_error (Verification_collaboration_evidence.Invalid_request message))

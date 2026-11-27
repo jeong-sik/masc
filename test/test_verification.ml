@@ -3609,6 +3609,38 @@ let test_transport_projection_bounds_the_evidence_total () =
     | VS.Evidence_unavailable _ -> Alcotest.fail "evidence must be available")
 ;;
 
+(* A text too large for the record needs the blob store. When the store
+   cannot take the bytes, the item is unreadable and names a storage failure,
+   which is not a fault of the producer's file. *)
+let test_submitted_evidence_names_a_blob_store_failure () =
+  with_eio_temp_dir (fun base_path ->
+    let artifact_dir =
+      Filename.concat base_path ".masc/playground/docker/omega" in
+    Fs_compat.mkdir_p artifact_dir;
+    let artifact_path = Filename.concat artifact_dir "large-artifact.txt" in
+    Fs_compat.save_file artifact_path
+      (String.make (VS.verification_evidence_max_bytes + 1) 'x');
+    (* A file where the store keeps its root directory. *)
+    Fs_compat.save_file
+      (Filename.concat (Common.masc_dir_from_base_path ~base_path) Tool_blob_store.dirname)
+      "not a directory";
+    let request_id = "vrf-store-failure" in
+    ignore (create_evidence_request ~base_path ~request_id ~artifact_path);
+    match inspect_evidence ~base_path ~request_id () with
+    | VS.Evidence_available
+        { items =
+            VS.Evidence_artifact_unreadable
+              { reference; reason = VS.Storage_failed _ }
+            :: _
+        ; _
+        } ->
+      Alcotest.(check string)
+        "the reference stays with the unreadable item"
+        "artifact:large-artifact.txt" reference
+    | other ->
+      Alcotest.failf "expected a storage failure to be recorded, got %d items"
+        (match other with VS.Evidence_available { items; _ } -> List.length items | _ -> -1))
+
 (* The ceiling itself is under it: a text of exactly that many bytes is
    stored whole, not refused. *)
 let test_submitted_evidence_stores_a_text_at_the_ceiling () =
@@ -5112,6 +5144,8 @@ let () =
         test_submitted_evidence_refuses_a_text_over_the_ceiling;
       Alcotest.test_case "submitted evidence stores a text at the ceiling" `Quick
         test_submitted_evidence_stores_a_text_at_the_ceiling;
+      Alcotest.test_case "submitted evidence names a blob store failure" `Quick
+        test_submitted_evidence_names_a_blob_store_failure;
       Alcotest.test_case "transport projection omits a stored body" `Quick
         test_transport_projection_omits_a_stored_body;
       Alcotest.test_case "transport projection bounds the evidence total" `Quick

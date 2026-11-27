@@ -21,6 +21,9 @@ type evidence_read_failure =
      the exact file size where the host could stat it and [cap] + 1 where a
      sandbox reader only returned the bytes it was asked for. *)
   | Too_large of { cap : int; at_least : int }
+  (* The harness could not store a text too large for the record. The
+     producer's file is not at fault. *)
+  | Storage_failed of string
 
 type collaboration_kind = Board_source | Fusion_source | Task_source
 
@@ -87,6 +90,7 @@ let evidence_read_failure_code = function
   | Evidence_changed_during_read -> "changed_during_read"
   | Evidence_read_error _ -> "read_error"
   | Too_large _ -> "too_large"
+  | Storage_failed _ -> "storage_failed"
 
 let evidence_read_failure_to_yojson reason =
   match reason with
@@ -98,6 +102,8 @@ let evidence_read_failure_to_yojson reason =
       ; "cap", `Int cap
       ; "at_least", `Int at_least
       ]
+  | Storage_failed detail ->
+    `Assoc [ "code", `String "storage_failed"; "detail", `String detail ]
   | ( Evidence_missing
     | Evidence_not_regular_file
     | Evidence_outside_worker_playground
@@ -121,6 +127,8 @@ let evidence_read_failure_of_yojson = function
      | [ "at_least", `Int at_least; "cap", `Int cap; "code", `String "too_large" ]
        when cap >= 0 && at_least > cap ->
        Ok (Too_large { cap; at_least })
+     | [ "code", `String "storage_failed"; "detail", `String detail ] ->
+       Ok (Storage_failed detail)
      | _ -> Error "submitted evidence snapshot has an invalid unreadable reason")
   | _ -> Error "submitted evidence snapshot unreadable reason must be an object"
 
@@ -774,6 +782,7 @@ let submitted_evidence_identity_line (item : Yojson.Safe.t) =
   | Ok (Evidence_artifact_unreadable { reference; reason }) ->
     let diagnostic = match reason with
       | Evidence_read_error detail -> evidence_read_failure_code reason ^ ": " ^ detail
+      | Storage_failed detail -> evidence_read_failure_code reason ^ ": " ^ detail
       | Too_large { cap; at_least } ->
         Printf.sprintf "too_large: at least %d bytes, ceiling %d" at_least cap
       | Evidence_missing | Evidence_not_regular_file

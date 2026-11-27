@@ -560,6 +560,21 @@ let test_requests_json_projects_every_snapshot_item_kind () =
             ("reason", `Assoc [("code", `String "read_error");
               ("detail", `String "cat: repo/evidence/gone.ml: No such file or directory")]);
           ];
+          (* A text too large for the record is named by its content address,
+             and one over the read ceiling by its size and the ceiling. *)
+          `Assoc [
+            ("kind", `String "artifact_body");
+            ("reference", `String "artifact:repos/demo/build.log");
+            ("blob", `Assoc [("sha256",
+              `String "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+              ("bytes", `Int 300000); ("mime", `String "text/plain"); ("preview", `String "")]);
+          ];
+          `Assoc [
+            ("kind", `String "artifact_unreadable");
+            ("reference", `String "artifact:repos/demo/huge.log");
+            ("reason", `Assoc [("code", `String "too_large"); ("cap", `Int 67108864);
+              ("at_least", `Int 70000000)]);
+          ];
         ]);
       ]
     in
@@ -583,6 +598,8 @@ let test_requests_json_projects_every_snapshot_item_kind () =
       [ "artifact:repos/demo/main.ml"
       ; "note:executor summary"
       ; "artifact:repos/demo/gone.ml (unreadable: read_error: cat: repo/evidence/gone.ml: No such file or directory)"
+      ; "artifact:repos/demo/build.log (stored whole: 0123456789ab)"
+      ; "artifact:repos/demo/huge.log (unreadable: too_large: at least 70000000 bytes, ceiling 67108864)"
       ]
       (member "submitted_evidence" row |> Yojson.Safe.Util.to_list
        |> List.map Yojson.Safe.Util.to_string))

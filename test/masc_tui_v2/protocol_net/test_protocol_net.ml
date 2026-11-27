@@ -5992,6 +5992,18 @@ let test_wave3_live_wire_codecs () =
           (parse_json {|{ "result": { "task_id": "t1", "verification_id": "v1" } }|}))
       : string);
   ignore
+    (expect_err "decode_verification_evidence stored body without a reference rejected"
+       (Wire_work.decode_verification_evidence
+          (parse_json
+             {|{ "result": { "task_id": "t1", "verification_id": "v1", "evidence": { "access": "available", "items": [{ "kind": "artifact_body", "reference": "long.log" }] } } }|}))
+      : string);
+  ignore
+    (expect_err "decode_verification_evidence stored body with a malformed reference rejected"
+       (Wire_work.decode_verification_evidence
+          (parse_json
+             {|{ "result": { "task_id": "t1", "verification_id": "v1", "evidence": { "access": "available", "items": [{ "kind": "artifact_body", "reference": "long.log", "blob": { "_blob": { "sha256": "abc" } } }] } } }|}))
+      : string);
+  ignore
     (expect_err "decode_verification_evidence unknown item kind rejected"
        (Wire_work.decode_verification_evidence
           (parse_json

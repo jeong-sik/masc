@@ -22,6 +22,9 @@ type evidence_read_failure = Workspace_verification_snapshot.evidence_read_failu
           [cap] + 1 where a sandbox reader only returned the bytes it was
           asked for. *)
       }
+  | Storage_failed of string
+      (** The harness could not store a text too large for the record. The
+          producer's file is not at fault. *)
 
 type collaboration_kind = Board_source | Fusion_source | Task_source
 

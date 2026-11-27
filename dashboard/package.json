@@ -20,6 +20,7 @@
     "test:e2e:internal-agents": "../scripts/harness_dashboard_internal_agents_e2e.sh",
     "test:e2e:queued-stream": "../scripts/harness_dashboard_keeper_queued_stream_e2e.sh",
     "test:e2e:tool-series": "../scripts/harness_dashboard_tool_series_e2e.sh",
+    "test:e2e:rbac-live": "bash ../scripts/harness_rbac_live_e2e_smoke.sh",
     "test:watch": "vitest",
     "tokens:build": "tsx design-system/tokens/build.ts"
   },

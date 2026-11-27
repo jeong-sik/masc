@@ -529,6 +529,27 @@ let rewrite_masc_links_for_markdown text =
     loop 0;
     Buffer.contents buf
 
+let split_overlong_word ~max_w word =
+  let clusters = Grapheme.split_clusters word in
+  let buf = Buffer.create (String.length word) in
+  let cur_w = ref 0 in
+  let chunks = ref [] in
+  List.iter
+    (fun (g_text, cell_w) ->
+      let gw = Int.max 1 cell_w in
+      if !cur_w > 0 && !cur_w + gw > max_w then begin
+        chunks := Buffer.contents buf :: !chunks;
+        Buffer.clear buf;
+        cur_w := 0
+      end;
+      Buffer.add_string buf g_text;
+      cur_w := !cur_w + gw)
+    clusters;
+  if Buffer.length buf > 0 then chunks := Buffer.contents buf :: !chunks;
+  match List.rev !chunks with
+  | [] -> [ "" ]
+  | xs -> xs
+
 let wrap_plain_lines ~width text =
   let max_w = Int.max 12 width in
   let raw_lines = String.split_on_char '\n' text in
@@ -538,16 +559,24 @@ let wrap_plain_lines ~width text =
       if Grapheme.display_width clean <= max_w then [ clean ]
       else
         let words = String.split_on_char ' ' clean in
+        let rec push_chunks acc = function
+          | [] -> ("", acc)
+          | [ last ] -> (last, acc)
+          | chunk :: rest -> push_chunks (chunk :: acc) rest
+        in
         let rec pack cur acc = function
           | [] -> List.rev (if String.length cur > 0 then cur :: acc else acc)
           | w :: ws ->
               let cand = if String.length cur = 0 then w else cur ^ " " ^ w in
               if Grapheme.display_width cand <= max_w then pack cand acc ws
-              else if String.length cur > 0 then
-                pack (Grapheme.truncate_to_width ~max_width:max_w w) (cur :: acc)
-                  ws
               else
-                pack "" (Grapheme.truncate_to_width ~max_width:max_w w :: acc) ws
+                let acc = if String.length cur > 0 then cur :: acc else acc in
+                if Grapheme.display_width w <= max_w then pack w acc ws
+                else
+                  let next_cur, next_acc =
+                    push_chunks acc (split_overlong_word ~max_w w)
+                  in
+                  pack next_cur next_acc ws
         in
         pack "" [] words)
     raw_lines
@@ -618,7 +647,7 @@ let tool_output_display_lines_uncached ~(theme : Theme.t) ~tools_mode ~width raw
               | Json_tree.Bool_val b -> if b then "true" else "false"
               | Json_tree.Null_val -> "null"
             in
-            List.map
+            List.concat_map
               (fun (ln : Json_tree.line) ->
                 let ind = String.make (ln.depth * 2) ' ' in
                 let vs = string_of_val ln.value in
@@ -627,7 +656,27 @@ let tool_output_display_lines_uncached ~(theme : Theme.t) ~tools_mode ~width raw
                   | Some k -> Printf.sprintf "%s%s: %s" ind k vs
                   | None -> ind ^ vs
                 in
-                ({ spans = [ { text; style; hyperlink = None } ]; image_part = None } : Markdown.rendered_line))
+                let cont_indent_len =
+                  Int.min ((ln.depth * 2) + 2) (Int.max 0 (body_w - 12))
+                in
+                let cont_ind = String.make cont_indent_len ' ' in
+                let cont_w = Int.max 12 (body_w - cont_indent_len) in
+                let mk_line t : Markdown.rendered_line =
+                  { spans = [ { text = t; style; hyperlink = None } ]; image_part = None }
+                in
+                match wrap_plain_lines ~width:body_w text with
+                | [] -> [ mk_line "" ]
+                | [ single ] -> [ mk_line single ]
+                | first :: rest ->
+                    let cont_lines =
+                      List.concat_map
+                        (fun line ->
+                          List.map
+                            (fun wrapped -> mk_line (cont_ind ^ wrapped))
+                            (wrap_plain_lines ~width:cont_w line))
+                        rest
+                    in
+                    mk_line first :: cont_lines)
               flat)
       | exception Yojson.Json_error _ ->
           (match Tool_output.decode_from_agent_core raw with

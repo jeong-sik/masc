@@ -54,6 +54,9 @@ type nav_state = {
   sidebar_focused : bool;
   sidebar_cursor : int;
   sidebar_scroll : int;
+  collapsed_sidebar_sections : Nav.menu_section list;
+  sidebar_width_delta : int;
+  split_ratio_delta : float;
   inspector_scroll_offset : int;
   keeper_detail_scroll_offset : int;
   json_scroll_offset : int;
@@ -760,6 +763,9 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
         sidebar_focused = false;
         sidebar_cursor = 0;
         sidebar_scroll = 0;
+        collapsed_sidebar_sections = [];
+        sidebar_width_delta = 0;
+        split_ratio_delta = 0.0;
         inspector_scroll_offset = 0;
         keeper_detail_scroll_offset = 0;
         json_scroll_offset = 0;
@@ -1067,6 +1073,61 @@ let keeper_dive_focused m =
 let sidebar_width = 24
 let sidebar_gap = 1
 let sidebar_docked_min_cols = 132
+let sidebar_width_delta_min = -6
+let sidebar_width_delta_max = 12
+let split_ratio_delta_min = -0.14
+let split_ratio_delta_max = 0.20
+
+let clamp_sidebar_width_delta d =
+  max sidebar_width_delta_min (min sidebar_width_delta_max d)
+
+let clamp_split_ratio_delta d =
+  if not (Float.is_finite d) then 0.0
+  else Float.max split_ratio_delta_min (Float.min split_ratio_delta_max d)
+
+let effective_sidebar_width m =
+  max 18 (min 36 (sidebar_width + clamp_sidebar_width_delta m.nav.sidebar_width_delta))
+
+let effective_split_ratio ~base ?(min_ratio = 0.24) ?(max_ratio = 0.72) m =
+  let d = clamp_split_ratio_delta m.nav.split_ratio_delta in
+  if Float.equal d 0.0 then base
+  else Float.max min_ratio (Float.min max_ratio (base +. d))
+
+let adjust_sidebar_width ~delta m =
+  let sidebar_width_delta =
+    clamp_sidebar_width_delta (m.nav.sidebar_width_delta + delta)
+  in
+  { m with nav = { m.nav with sidebar_width_delta } }
+
+let adjust_split_ratio ~delta m =
+  let split_ratio_delta =
+    clamp_split_ratio_delta (m.nav.split_ratio_delta +. delta)
+  in
+  { m with nav = { m.nav with split_ratio_delta } }
+
+let reset_pane_sizes m =
+  {
+    m with
+    nav = { m.nav with sidebar_width_delta = 0; split_ratio_delta = 0.0 };
+  }
+
+let is_sidebar_section_collapsed sec m =
+  List.exists (Nav.equal_menu_section sec) m.nav.collapsed_sidebar_sections
+
+let toggle_sidebar_section sec m =
+  let collapsed_sidebar_sections =
+    if is_sidebar_section_collapsed sec m then
+      List.filter
+        (fun s -> not (Nav.equal_menu_section s sec))
+        m.nav.collapsed_sidebar_sections
+    else sec :: m.nav.collapsed_sidebar_sections
+  in
+  { m with nav = { m.nav with collapsed_sidebar_sections } }
+
+let toggle_active_sidebar_section m =
+  match Nav.menu_item_of_index m.nav.sidebar_cursor with
+  | Some item -> toggle_sidebar_section item.section m
+  | None -> m
 
 let sidebar_docked m =
   (not (is_too_small_viewport m.viewport))
@@ -1104,7 +1165,8 @@ type sidebar_row =
       item : Nav.menu_item;
     }
 
-let sidebar_visual_rows =
+let sidebar_visual_rows_for ~collapsed =
+  let is_collapsed sec = List.exists (Nav.equal_menu_section sec) collapsed in
   let acc = ref [] in
   let prev_sec = ref None in
   List.iteri
@@ -1118,27 +1180,58 @@ let sidebar_visual_rows =
         acc := Sidebar_section item.section :: !acc;
         prev_sec := Some item.section
       end;
-      acc := Sidebar_item { index; item } :: !acc)
+      if not (is_collapsed item.section) then
+        acc := Sidebar_item { index; item } :: !acc)
     Nav.all_menu_items;
   List.rev !acc
 
-let sidebar_cursor_visual_row ~cursor =
-  let rec find row = function
-    | [] -> 0
-    | Sidebar_item { index; _ } :: _ when Int.equal index cursor -> row
-    | (Sidebar_section _ | Sidebar_item _) :: rest -> find (row + 1) rest
-  in
-  find 0 sidebar_visual_rows
+let sidebar_visual_rows = sidebar_visual_rows_for ~collapsed:[]
 
-let sidebar_has_below_overflow ~inner_h ~start =
-  let total = List.length sidebar_visual_rows in
+let sidebar_cursor_visual_row_for ~rows ~cursor =
+  let cursor_sec =
+    Option.map (fun (it : Nav.menu_item) -> it.section)
+      (Nav.menu_item_of_index cursor)
+  in
+  let rec find_item row = function
+    | [] -> None
+    | Sidebar_item { index; _ } :: _ when Int.equal index cursor -> Some row
+    | (Sidebar_section _ | Sidebar_item _) :: rest -> find_item (row + 1) rest
+  in
+  match find_item 0 rows with
+  | Some r -> r
+  | None -> (
+      match cursor_sec with
+      | None -> 0
+      | Some target_sec ->
+          let rec find_sec row = function
+            | [] -> 0
+            | Sidebar_section sec :: _ when Nav.equal_menu_section sec target_sec
+              ->
+                row
+            | (Sidebar_section _ | Sidebar_item _) :: rest ->
+                find_sec (row + 1) rest
+          in
+          find_sec 0 rows)
+
+let sidebar_cursor_visual_row ~cursor =
+  sidebar_cursor_visual_row_for ~rows:sidebar_visual_rows ~cursor
+
+let sidebar_has_below_overflow_for ~rows ~inner_h ~start =
+  let total = List.length rows in
   inner_h >= 3 && start + inner_h < total
 
-let sidebar_visible_data_rows ~inner_h ~start =
-  if sidebar_has_below_overflow ~inner_h ~start then inner_h - 1 else inner_h
+let sidebar_has_below_overflow ~inner_h ~start =
+  sidebar_has_below_overflow_for ~rows:sidebar_visual_rows ~inner_h ~start
 
-let sidebar_hidden_below_sections ~inner_h ~start =
-  let cutoff = start + sidebar_visible_data_rows ~inner_h ~start in
+let sidebar_visible_data_rows_for ~rows ~inner_h ~start =
+  if sidebar_has_below_overflow_for ~rows ~inner_h ~start then inner_h - 1
+  else inner_h
+
+let sidebar_visible_data_rows ~inner_h ~start =
+  sidebar_visible_data_rows_for ~rows:sidebar_visual_rows ~inner_h ~start
+
+let sidebar_hidden_below_sections_for ~rows ~inner_h ~start =
+  let cutoff = start + sidebar_visible_data_rows_for ~rows ~inner_h ~start in
   let add_unique acc sec =
     if List.exists (Nav.equal_menu_section sec) acc then acc else sec :: acc
   in
@@ -1154,13 +1247,16 @@ let sidebar_hidden_below_sections ~inner_h ~start =
         in
         walk (idx + 1) acc rest
   in
-  walk 0 [] sidebar_visual_rows
+  walk 0 [] rows
 
-let sidebar_viewport_start ~inner_h ~scroll ~cursor =
-  let total = List.length sidebar_visual_rows in
+let sidebar_hidden_below_sections ~inner_h ~start =
+  sidebar_hidden_below_sections_for ~rows:sidebar_visual_rows ~inner_h ~start
+
+let sidebar_viewport_start_for ~rows ~inner_h ~scroll ~cursor =
+  let total = List.length rows in
   if inner_h <= 0 || total <= inner_h then 0
   else
-    let vis_row = sidebar_cursor_visual_row ~cursor in
+    let vis_row = sidebar_cursor_visual_row_for ~rows ~cursor in
     let max_start = max 0 (total - inner_h) in
     let s0 = max 0 (min max_start scroll) in
     let target_top = if cursor = 0 then 0 else max 0 (vis_row - 1) in
@@ -1175,6 +1271,9 @@ let sidebar_viewport_start ~inner_h ~scroll ~cursor =
         if vis_row >= s0 + eff_h then vis_row - eff_h + 1 else s0
     in
     max 0 (min max_start s1)
+
+let sidebar_viewport_start ~inner_h ~scroll ~cursor =
+  sidebar_viewport_start_for ~rows:sidebar_visual_rows ~inner_h ~scroll ~cursor
 
 let active_menu_target m =
   match m.nav.overlay with
@@ -1215,8 +1314,9 @@ let full_inset_width m =
 
 let inner_body_width m =
   let full = full_inset_width m in
-  if sidebar_docked m && full >= sidebar_width + 20 then
-    max 0 (full - sidebar_width - sidebar_gap)
+  let sw = effective_sidebar_width m in
+  if sidebar_docked m && full >= sw + 20 then
+    max 0 (full - sw - sidebar_gap)
   else full
 
 let has_sub_tab_bar_for_model m =
@@ -1298,11 +1398,12 @@ let sidebar_rect m =
   let body_h = inner_body_height m in
   let margin = outer_margin_for m.breakpoint in
   let full_w = full_inset_width m in
+  let sw = effective_sidebar_width m in
   if body_h <= 0 then None
-  else if sidebar_docked m && full_w >= sidebar_width + 20 then
-    Some (Rect.make ~x:margin ~y:top_h ~w:sidebar_width ~h:body_h)
+  else if sidebar_docked m && full_w >= sw + 20 then
+    Some (Rect.make ~x:margin ~y:top_h ~w:sw ~h:body_h)
   else if sidebar_drawer_open m && full_w >= 20 then
-    let dw = min (sidebar_width + 2) (max 18 (cols - 4)) in
+    let dw = min (sw + 2) (max 18 (cols - 4)) in
     let dx = margin in
     Some (Rect.make ~x:dx ~y:top_h ~w:dw ~h:body_h)
   else None
@@ -1312,11 +1413,12 @@ let body_rect m =
   let body_h = inner_body_height m in
   let margin = outer_margin_for m.breakpoint in
   let full_w = full_inset_width m in
-  if sidebar_docked m && full_w >= sidebar_width + 20 then
+  let sw = effective_sidebar_width m in
+  if sidebar_docked m && full_w >= sw + 20 then
     Rect.make
-      ~x:(margin + sidebar_width + sidebar_gap)
+      ~x:(margin + sw + sidebar_gap)
       ~y:top_h
-      ~w:(max 0 (full_w - sidebar_width - sidebar_gap))
+      ~w:(max 0 (full_w - sw - sidebar_gap))
       ~h:body_h
   else Rect.make ~x:margin ~y:top_h ~w:full_w ~h:body_h
 
@@ -1770,7 +1872,10 @@ let pane_rects m =
               let g_r, w_r = split_v_fixed ~gap:0 rem2 g_h in
               if has_attn then [ a_r; c_r; g_r; w_r ] else [ c_r; g_r; w_r ]
             else
-              let left_col, right_col = split_h_ratio ~gap:gap_h main_r 0.46 in
+              let pulse_ratio = effective_split_ratio ~base:0.46 m in
+              let left_col, right_col =
+                split_h_ratio ~gap:gap_h main_r pulse_ratio
+              in
               let a_h =
                 attn_h_for (if equal_breakpoint m.breakpoint Wide then 7 else 5)
               in
@@ -1835,8 +1940,20 @@ let pane_rects m =
               [ l; r ]
             else
               let left_w =
-                if equal_breakpoint m.breakpoint Wide then min 48 (max 34 (br.w * 34 / 100))
-                else min 42 (max 32 (br.w * 38 / 100))
+                let d = clamp_split_ratio_delta m.nav.split_ratio_delta in
+                if Float.equal d 0.0 then
+                  if equal_breakpoint m.breakpoint Wide then
+                    min 48 (max 34 (br.w * 34 / 100))
+                  else min 42 (max 32 (br.w * 38 / 100))
+                else
+                  let ratio =
+                    effective_split_ratio ~base:0.36 ~min_ratio:0.24
+                      ~max_ratio:0.56 m
+                  in
+                  let avail = max 0 (br.w - gap_h) in
+                  max 28
+                    (min (max 28 (avail - 36))
+                       (int_of_float (Float.floor (float_of_int avail *. ratio))))
               in
               let lw = min br.w left_w in
               let l = Rect.make ~x:br.x ~y:br.y ~w:lw ~h:br.h in
@@ -1856,7 +1973,10 @@ let pane_rects m =
             | Nav.Infra_sandboxes ->
                 let top_h = if br.w >= 100 then 6 else 4 in
                 let _, body = split_v_fixed ~gap:gap_v br top_h in
-                let a, b = split_h_ratio ~gap:gap_h body 0.60 in
+                let a, b =
+                  split_h_ratio ~gap:gap_h body
+                    (effective_split_ratio ~base:0.60 m)
+                in
                 [ a; b ]
             | Nav.Infra_activity_logs when n = 3 ->
                 let left, rest = split_h_ratio ~gap:gap_h br 0.42 in

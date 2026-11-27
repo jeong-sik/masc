@@ -93,7 +93,7 @@ let count_fleet ~(model : Model.t) (ks : Wire_fleet.keeper_summary list) =
 let company_groups_for_model ~(model : Model.t) =
   let attn_items = attention_items_for_grouping model.attention in
   let keeper_costs_24h = Runtime_store.keeper_costs_24h_assoc model.runtime in
-  Fleet_store.company_groups_with_costs ~attention:attn_items
+  Fleet_store.grouped_keepers ~attention:attn_items
     ~now_unix:model.freshness.last_wall_unix ~keeper_costs_24h model.fleet
 
 let context_cell ~lang (obs : Wire_fleet.context_reading Observed.t) :
@@ -1302,13 +1302,23 @@ let render_with_history_rows
             ~tab:model.fleet.keeper_dive_tab ~model ~cache ~rect grid
       | None -> ()
     else if is_split then
-      (* True 36% / 64% Fleet Tree (clamped 34..46 cols) + Live Keeper Preview split *)
+      (* True 36% / 64% Fleet Tree (clamped 34..46 cols, resizable via split_ratio_delta) + Live Keeper Preview split *)
       let split_gap = Layout.card_gap_x bp in
       let split_budget = Int.max 0 (rect.w - split_gap) in
       let left_w =
-        Int.max 34
-          (Int.min 46
-             (int_of_float (Float.floor (float_of_int split_budget *. 0.36))))
+        let d = Model.clamp_split_ratio_delta model.nav.split_ratio_delta in
+        if Float.equal d 0.0 then
+          Int.max 34
+            (Int.min 46
+               (int_of_float (Float.floor (float_of_int split_budget *. 0.36))))
+        else
+          let ratio =
+            Model.effective_split_ratio ~base:0.36 ~min_ratio:0.24
+              ~max_ratio:0.56 model
+          in
+          Int.max 28
+            (Int.min (Int.max 28 (split_budget - 36))
+               (int_of_float (Float.floor (float_of_int split_budget *. ratio))))
       in
       match
         Layout.split_h_bp bp rect [ Layout.Fixed left_w; Layout.Flex 1 ]
@@ -1344,8 +1354,18 @@ let render_with_history_rows
               with
               subtitle =
                 Some
-                  (Int.to_string (List.length groups) ^ " "
-                   ^ Ops_common.say model ~ko:"조직" ~en:"companies");
+                  (let axis_unit =
+                     match model.fleet.group_axis with
+                     | Fleet_store.Group_by_company ->
+                         Ops_common.say model ~ko:"조직" ~en:"companies"
+                     | Fleet_store.Group_by_status ->
+                         Ops_common.say model ~ko:"상태" ~en:"statuses"
+                     | Fleet_store.Group_by_sandbox ->
+                         Ops_common.say model ~ko:"샌드박스" ~en:"sandboxes"
+                     | Fleet_store.Group_by_runtime ->
+                         Ops_common.say model ~ko:"런타임" ~en:"runtimes"
+                   in
+                   Int.to_string (List.length groups) ^ " " ^ axis_unit);
               badge =
                 (if stale_roster then
                    Some

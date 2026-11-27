@@ -426,9 +426,16 @@ let draw_popup grid ~(anchor : Rect.t) ~(theme : Theme.t) ~lang (popup : popup) 
                   ~style:(Typography.accent ~bg ~bold:true theme)
                   Glyph.Left_rail;
               let start_x = inner.x + 2 in
+              let avail_row_w = Int.max 0 (Rect.right inner - start_x - 1) in
+              let max_trig_w =
+                Int.min avail_row_w (Int.max 8 (inner.w / 2))
+              in
+              let fitted_trigger =
+                Grapheme.truncate_to_width ~max_width:max_trig_w item.trigger
+              in
               let adv =
                 Cell_grid.put_text ~clip:row_r grid ~x:start_x ~y:py
-                  ~style:trig_style item.trigger
+                  ~style:trig_style fitted_trigger
               in
               let rest_x = start_x + adv + 2 in
               let rest_w = Int.max 0 (Rect.right inner - rest_x - 1) in
@@ -491,7 +498,15 @@ let draw ?(show_pending_tx = true) ?(terminal_focused = true) grid
           Cell_grid.put_text ~clip:header_r grid ~x:left_x ~y:header_y
             ~style:caret_style caret_s
         in
-        let target_s = Printf.sprintf "@%s " st.target_keeper in
+        let max_target_w =
+          if rect.w >= 24 then Int.max 8 (Int.min 28 (rect.w / 3))
+          else Int.max 4 (rect.w / 2)
+        in
+        let target_s =
+          Grapheme.truncate_to_width ~max_width:max_target_w
+            ("@" ^ st.target_keeper)
+          ^ " "
+        in
         let t_adv =
           Cell_grid.put_text ~clip:header_r grid ~x:(left_x + c_adv) ~y:header_y
             ~style:target_style target_s
@@ -578,7 +593,8 @@ let draw ?(show_pending_tx = true) ?(terminal_focused = true) grid
                    lbl);
               if rect.h >= 2 then 1 else 0
         in
-        (* Horizontal viewport panning around cursor on UAX #29 cluster boundaries. *)
+        (* Horizontal viewport panning around cursor on UAX #29 cluster boundaries,
+           with ‹/› overflow indicators when width permits (>= 8 cells). *)
         let pan_line_for_cursor ~max_width ~cursor_byte line =
           if max_width <= 0 then ("", 0)
           else
@@ -587,14 +603,9 @@ let draw ?(show_pending_tx = true) ?(terminal_focused = true) grid
             let cursor_col =
               Grapheme.display_width (String.sub line 0 cbyte)
             in
-            if cursor_col < max_width then
-              let shown =
-                Grapheme.truncate_to_width ~max_width ~ellipsis:"" line
-              in
-              (shown, cursor_col)
-            else
-              let target_start = Int.max 0 (cursor_col - (max_width - 1)) in
-              let buf = Buffer.create max_width in
+            let total_w = Grapheme.display_width line in
+            let slice_clusters ~target_start ~budget =
+              let buf = Buffer.create budget in
               let col = ref 0 in
               let started = ref false in
               let stopped = ref false in
@@ -609,7 +620,7 @@ let draw ?(show_pending_tx = true) ?(terminal_focused = true) grid
                     end
                   end;
                   if !started && not !stopped then begin
-                    if !taken_w + cell_width <= max_width then begin
+                    if !taken_w + cell_width <= budget then begin
                       Buffer.add_substring buf text start_offset
                         (end_offset - start_offset);
                       taken_w := !taken_w + cell_width
@@ -617,10 +628,46 @@ let draw ?(show_pending_tx = true) ?(terminal_focused = true) grid
                     else stopped := true
                   end;
                   col := !col + cell_width);
-              let cursor_dx =
-                Int.max 0 (Int.min (max_width - 1) (cursor_col - !actual_start))
+              (Buffer.contents buf, !actual_start)
+            in
+            if total_w <= max_width then (line, cursor_col)
+            else if max_width < 8 then
+              if cursor_col < max_width then
+                let shown =
+                  Grapheme.truncate_to_width ~max_width ~ellipsis:"" line
+                in
+                (shown, cursor_col)
+              else
+                let target_start = Int.max 0 (cursor_col - (max_width - 1)) in
+                let slice, actual_start =
+                  slice_clusters ~target_start ~budget:max_width
+                in
+                let cursor_dx =
+                  Int.max 0 (Int.min (max_width - 1) (cursor_col - actual_start))
+                in
+                (slice, cursor_dx)
+            else if cursor_col < max_width - 1 then
+              let inner_w = max_width - 1 in
+              let shown =
+                Grapheme.truncate_to_width ~max_width:inner_w ~ellipsis:"" line
+                ^ "›"
               in
-              (Buffer.contents buf, cursor_dx)
+              (shown, cursor_col)
+            else
+              let prelim_start = Int.max 1 (cursor_col - (max_width - 2)) in
+              let need_right = prelim_start + (max_width - 1) < total_w in
+              let inner_w = if need_right then max_width - 2 else max_width - 1 in
+              let target_start = Int.max 1 (cursor_col - (inner_w - 1)) in
+              let slice, actual_start =
+                slice_clusters ~target_start ~budget:inner_w
+              in
+              let shown =
+                "‹" ^ slice ^ (if need_right then "›" else "")
+              in
+              let cursor_dx =
+                1 + Int.max 0 (Int.min (inner_w - 1) (cursor_col - actual_start))
+              in
+              (shown, cursor_dx)
         in
         (* Draw draft text (single line on collapsed bar, multiline on expanded) *)
         let cur = clamp_cursor st.draft st.cursor in

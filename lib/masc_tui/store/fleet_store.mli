@@ -28,6 +28,12 @@ type thinking_display =
   | Thinking_full
   | Thinking_hidden
 
+type group_axis =
+  | Group_by_company
+  | Group_by_status
+  | Group_by_sandbox
+  | Group_by_runtime
+
 type tool_call_state =
   | Tool_pending
   | Tool_result_pending of { model_output_after_close : bool }
@@ -154,6 +160,7 @@ type t = {
   fleet_reading : Wire_fleet.fleet_stream_reading Observed.t;
   fleet_degradation : Wire_fleet.fleet_degradation option;
   fleet_mode : Nav.keepers_fleet_mode;
+  group_axis : group_axis;
   selected_index : int;
   scroll_offset : int;
   pulse_scroll_offset : int;
@@ -179,6 +186,10 @@ val empty : t
 
 val equal_chat_display_origin : chat_display_origin -> chat_display_origin -> bool
 val equal_thinking_display : thinking_display -> thinking_display -> bool
+val equal_group_axis : group_axis -> group_axis -> bool
+val group_axis_label : group_axis -> Say.t
+val next_group_axis : group_axis -> group_axis
+val group_key_of_keeper : t -> Wire_fleet.keeper_summary -> string
 
 type open_work_kind =
   | Open_tool_running
@@ -262,6 +273,15 @@ val company_groups_with_costs :
   keeper_costs_24h:(string * float) list ->
   t ->
   Wire_fleet.company_group list
+val grouped_keepers :
+  ?attention:Wire_fleet.attention_item list ->
+  ?now_unix:float ->
+  ?keeper_costs_24h:(string * float) list ->
+  t ->
+  Wire_fleet.company_group list
+(** Group filtered keepers along [t.group_axis] (company, status, sandbox, or
+    runtime). Delegates to {!company_groups_with_costs} when [group_axis =
+    Group_by_company]. *)
 val sandbox_profile_of : keeper:string -> t -> Wire_fleet.keeper_sandbox_profile option
 val fleet_infra_counts : t -> int * int * int
 (** [(microvm_count, remote_ssh_count, docker_count)] derived from keeper
@@ -410,6 +430,10 @@ val detach_chat_streams : t -> t
 
 val set_fleet_mode : Nav.keepers_fleet_mode -> t -> t
 val cycle_fleet_mode : Keymap.cycle_dir -> t -> t
+val set_group_axis : group_axis -> t -> t
+val cycle_group_axis : t -> t
+val collapse_all_groups : t -> t
+val expand_all_groups : t -> t
 val set_keeper_dive_tab : Nav.keeper_tab -> t -> t
 val cycle_keeper_dive_tab : Keymap.cycle_dir -> t -> t
 

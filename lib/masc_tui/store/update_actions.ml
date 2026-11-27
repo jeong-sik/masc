@@ -5798,7 +5798,8 @@ and execute_action ~now (m : Model.t) action =
           | Nav.System_gate _ ) ->
           (m, [])
       | None ->
-          if Model.sidebar_has_focus m then (m, [])
+          if Model.sidebar_has_focus m then
+            (Model.toggle_active_sidebar_section m, [])
           else (
           match Model.active_inspector m with
           | Some (Nav.Verification_inspector _) ->
@@ -5884,10 +5885,13 @@ and execute_action ~now (m : Model.t) action =
                     | None -> (
                         match Fleet_store.selected_keeper_summary m.fleet with
                         | Some k ->
+                            let group_key =
+                              Fleet_store.group_key_of_keeper m.fleet k
+                            in
                             ( {
                                 m with
                                 fleet =
-                                  Fleet_store.toggle_company_collapsed k.company
+                                  Fleet_store.toggle_company_collapsed group_key
                                     m.fleet;
                               }
                             , [] )
@@ -7629,6 +7633,24 @@ and execute_action ~now (m : Model.t) action =
                               (next, View_fetches.fetches_for_current_view next)
                             else (m, [])
                         | None -> (m, []))
+                    | Nav.Keepers
+                      when m.nav.pane_index = 0
+                           && (not (Model.is_zoomed_active m))
+                           && Nav.equal_keepers_fleet_mode m.fleet.fleet_mode
+                                Nav.Fleet_companies ->
+                        let fleet = Fleet_store.cycle_group_axis m.fleet in
+                        let axis_lbl =
+                          Say.resolve m.lang
+                            (Fleet_store.group_axis_label fleet.group_axis)
+                        in
+                        let next =
+                          { m with fleet }
+                          |> Model.with_toast ~now ~level:Model.Toast_info
+                               (Say.make
+                                  ~ko:("그룹 기준: " ^ axis_lbl)
+                                  ~en:("Group by: " ^ axis_lbl))
+                        in
+                        (next, [])
                     | Nav.Runtime
                       when Nav.equal_runtime_tab m.runtime.active_tab
                              Nav.Runtime_tools_usage ->
@@ -7956,7 +7978,9 @@ and execute_action ~now (m : Model.t) action =
                 ] )))
   | Keymap.Step_revision dir -> (
       let delta = match dir with Keymap.Prev -> -1 | Keymap.Next -> 1 in
-      if
+      if Option.is_none m.nav.overlay && Model.sidebar_has_focus m then
+        (Model.adjust_sidebar_width ~delta:(delta * 2) m, [])
+      else if
         Option.is_none m.nav.overlay
         && (not (Model.sidebar_has_focus m))
         && Option.is_none (Model.active_inspector m)
@@ -7990,6 +8014,17 @@ and execute_action ~now (m : Model.t) action =
           Infra_store.step_review_hunk ~cols:diff_cols ~delta m.infra
         in
         ({ m with infra }, [])
+      else if
+        Option.is_none m.nav.overlay
+        && (not (Model.sidebar_has_focus m))
+        && Option.is_none (Model.active_inspector m)
+        && (not (Model.is_zoomed_active m))
+        && (Nav.equal_workspace m.nav.workspace Nav.Pulse
+            || Nav.equal_workspace m.nav.workspace Nav.Keepers
+            || (Nav.equal_workspace m.nav.workspace Nav.Infra
+                && not (Infra_store.code_review_active m.infra)))
+      then
+        (Model.adjust_split_ratio ~delta:(Float.of_int delta *. 0.04) m, [])
       else step_artifact_revision ~now ~delta m)
   | Keymap.Step_context_item dir -> (
       let delta = match dir with Keymap.Prev -> -1 | Keymap.Next -> 1 in

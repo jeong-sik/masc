@@ -28,6 +28,11 @@ type recorder_kind =
   | Recorder_sox
   | Recorder_ffmpeg
 
+type audio_platform =
+  | Audio_macos
+  | Audio_linux_pulse
+  | Audio_linux_alsa
+
 let resolve_recorder_from ~find =
   match find "rec" with
   | Some p -> Some (Recorder_rec, p)
@@ -56,16 +61,22 @@ let resolve_recorder_for_device ~device ~find =
         | None -> resolve_recorder_from ~find)
   else resolve_recorder_from ~find
 
-let build_record_argv ~kind ~bin_path ~device ~out_path =
+let build_record_argv_for_platform ~platform ~kind ~bin_path ~device ~out_path =
   match (kind, device) with
   | Recorder_rec, _ ->
       [| bin_path; "-q"; "-r"; "16000"; "-c"; "1"; "-b"; "16"; out_path |]
   | Recorder_sox, Some dev when not (String.equal (String.trim dev) "") ->
+      let driver =
+        match platform with
+        | Audio_macos -> "coreaudio"
+        | Audio_linux_pulse -> "pulseaudio"
+        | Audio_linux_alsa -> "alsa"
+      in
       [|
         bin_path;
         "-q";
         "-t";
-        "coreaudio";
+        driver;
         String.trim dev;
         "-r";
         "16000";
@@ -75,31 +86,88 @@ let build_record_argv ~kind ~bin_path ~device ~out_path =
       |]
   | Recorder_sox, (Some _ | None) ->
       [| bin_path; "-q"; "-d"; "-r"; "16000"; "-c"; "1"; out_path |]
-  | Recorder_ffmpeg, _ ->
-      let input =
-        match device with
-        | Some dev when not (String.equal (String.trim dev) "") ->
-            let d = String.trim dev in
-            if String.contains d ':' then d else ":" ^ d
-        | Some _ | None -> ":default"
-      in
-      [|
-        bin_path;
-        "-y";
-        "-loglevel";
-        "error";
-        "-f";
-        "avfoundation";
-        "-i";
-        input;
-        "-ar";
-        "16000";
-        "-ac";
-        "1";
-        "-f";
-        "wav";
-        out_path;
-      |]
+  | Recorder_ffmpeg, _ -> (
+      match platform with
+      | Audio_macos ->
+          let input =
+            match device with
+            | Some dev when not (String.equal (String.trim dev) "") ->
+                let d = String.trim dev in
+                if String.contains d ':' then d else ":" ^ d
+            | Some _ | None -> ":default"
+          in
+          [|
+            bin_path;
+            "-y";
+            "-loglevel";
+            "error";
+            "-f";
+            "avfoundation";
+            "-i";
+            input;
+            "-ar";
+            "16000";
+            "-ac";
+            "1";
+            "-f";
+            "wav";
+            out_path;
+          |]
+      | Audio_linux_pulse | Audio_linux_alsa ->
+          let fmt =
+            match platform with
+            | Audio_linux_pulse -> "pulse"
+            | Audio_linux_alsa -> "alsa"
+            | Audio_macos -> "pulse"
+          in
+          let input =
+            match device with
+            | Some dev when not (String.equal (String.trim dev) "") ->
+                String.trim dev
+            | Some _ | None -> "default"
+          in
+          [|
+            bin_path;
+            "-y";
+            "-loglevel";
+            "error";
+            "-f";
+            fmt;
+            "-i";
+            input;
+            "-ar";
+            "16000";
+            "-ac";
+            "1";
+            "-f";
+            "wav";
+            out_path;
+          |])
+
+let build_record_argv ~kind ~bin_path ~device ~out_path =
+  build_record_argv_for_platform ~platform:Audio_macos ~kind ~bin_path ~device
+    ~out_path
+
+let rms_level_of_pcm16_le buf ~offset ~len =
+  let buf_len = Bytes.length buf in
+  let start = Int.max 0 (Int.min buf_len offset) in
+  let avail = Int.max 0 (Int.min (buf_len - start) len) in
+  let samples = avail / 2 in
+  if samples <= 0 then 0.0
+  else
+    let sum_sq = ref 0.0 in
+    for i = 0 to samples - 1 do
+      let pos = start + (i * 2) in
+      let lo = Char.code (Bytes.get buf pos) in
+      let hi = Char.code (Bytes.get buf (pos + 1)) in
+      let raw = lo lor (hi lsl 8) in
+      let signed = if raw >= 32768 then raw - 65536 else raw in
+      let norm = float_of_int signed /. 32768.0 in
+      sum_sq := !sum_sq +. (norm *. norm)
+    done;
+    let rms = Float.sqrt (!sum_sq /. float_of_int samples) in
+    if not (Float.is_finite rms) then 0.0
+    else Float.max 0.0 (Float.min 1.0 (Float.sqrt rms *. 1.8))
 
 let ( let* ) = Result.bind
 
@@ -161,6 +229,67 @@ let find_on_path cmd =
                match Unix.access candidate [ Unix.X_OK ] with
                | () -> Some candidate
                | exception Unix.Unix_error _ -> None)
+
+let detect_audio_platform () =
+  let is_linux =
+    match Sys.file_exists "/proc/version" with
+    | true -> true
+    | false -> false
+    | exception Sys_error _ -> false
+  in
+  if not is_linux then Audio_macos
+  else
+    let has_pulse_env =
+      Option.is_some (Sys.getenv_opt "PULSE_SERVER")
+      ||
+      match Sys.getenv_opt "XDG_RUNTIME_DIR" with
+      | Some dir -> (
+          try Sys.file_exists (Filename.concat dir "pulse")
+          with Sys_error _ -> false)
+      | None -> false
+    in
+    if
+      has_pulse_env
+      || Option.is_some (find_on_path "pactl")
+      || Option.is_some (find_on_path "parecord")
+    then Audio_linux_pulse
+    else Audio_linux_alsa
+
+(* Read newly appended 16-bit PCM bytes from a growing WAV file past the
+   44-byte header, returning [(next_offset, Some level)] when at least one
+   PCM sample was available. *)
+let poll_wav_rms_sync ~path ~offset =
+  let header_bytes = 44 in
+  match In_channel.open_bin path with
+  | ic ->
+      Fun.protect
+        ~finally:(fun () -> In_channel.close_noerr ic)
+        (fun () ->
+          try
+            let file_len = Int64.to_int (In_channel.length ic) in
+            let start = Int.max header_bytes offset in
+            let avail = file_len - start in
+            let aligned = avail - (avail mod 2) in
+            if aligned <= 0 then (start, None)
+            else
+              let max_chunk = 8192 in
+              let read_from, to_read =
+                if aligned > max_chunk then
+                  let skipped = aligned - max_chunk in
+                  let skipped_even = skipped - (skipped mod 2) in
+                  (start + skipped_even, aligned - skipped_even)
+                else (start, aligned)
+              in
+              In_channel.seek ic (Int64.of_int read_from);
+              let buf = Bytes.create to_read in
+              let got = In_channel.input ic buf 0 to_read in
+              let got_even = got - (got mod 2) in
+              if got_even <= 0 then (start, None)
+              else
+                let level = rms_level_of_pcm16_le buf ~offset:0 ~len:got_even in
+                (read_from + got_even, Some level)
+          with Sys_error _ | End_of_file -> (offset, None))
+  | exception Sys_error _ -> (offset, None)
 
 let unlink_quiet_sync path =
   try Unix.unlink path with Unix.Unix_error _ -> ()
@@ -253,7 +382,7 @@ let http_and_local_backend ~io ~clock ~endpoint =
             stt_available = false;
           }
   in
-  let record_until_stopped ~device ~stop_signal ~on_level:_ =
+  let record_until_stopped ~device ~stop_signal ~on_level =
     let recorder =
       Eio_unix.run_in_systhread (fun () ->
           resolve_recorder_for_device ~device ~find:find_on_path)
@@ -261,11 +390,14 @@ let http_and_local_backend ~io ~clock ~endpoint =
     match recorder with
     | None -> Error "no supported audio recorder (rec/sox/ffmpeg) found on PATH"
     | Some (kind, bin_path) ->
-        let out_path =
+        let platform, out_path =
           Eio_unix.run_in_systhread (fun () ->
-              Filename.temp_file "masc_ptt_" ".wav")
+              (detect_audio_platform (), Filename.temp_file "masc_ptt_" ".wav"))
         in
-        let argv = build_record_argv ~kind ~bin_path ~device ~out_path in
+        let argv =
+          build_record_argv_for_platform ~platform ~kind ~bin_path ~device
+            ~out_path
+        in
         let pid_ref : int option Atomic.t = Atomic.make None in
         let reap_if_spawned () =
           match Atomic.exchange pid_ref None with
@@ -290,16 +422,32 @@ let http_and_local_backend ~io ~clock ~endpoint =
             cleanup_all ();
             err
         | Ok _pid -> (
-            match Eio.Promise.await stop_signal with
+            let meter_loop () =
+              let rec loop offset =
+                Eio.Time.sleep clock 0.08;
+                let next_offset, level_opt =
+                  Eio_unix.run_in_systhread (fun () ->
+                      poll_wav_rms_sync ~path:out_path ~offset)
+                in
+                Option.iter on_level level_opt;
+                loop next_offset
+              in
+              loop 44
+            in
+            match
+              Eio.Fiber.first
+                (fun () -> Eio.Promise.await stop_signal)
+                meter_loop
+            with
             | () ->
                 Eio.Cancel.protect reap_if_spawned;
                 Ok out_path
-            | exception (Eio.Cancel.Cancelled _ as cancelled) ->
+            | exception exn ->
                 cleanup_all ();
-                raise cancelled)
-        | exception (Eio.Cancel.Cancelled _ as cancelled) ->
+                raise exn)
+        | exception exn ->
             cleanup_all ();
-            raise cancelled)
+            raise exn)
   in
   let transcribe ~audio_path =
     let read_res =

@@ -8152,6 +8152,100 @@ let test_r2_pr7_closed_sum_decoders () =
   | Wire_infra.Reader_ready -> ()
   | Wire_infra.Reader_other _ -> Alcotest.fail "expected Reader_ready"
 
+let test_host_storage_enospc_recency_and_voice_rms () =
+  let now = 20_000.0 in
+  let recent_json =
+    `Assoc
+      [
+        ("status", `String "ok");
+        ("storage_space_exhaustion_observations_total", `Int 2);
+        ("last_storage_space_exhaustion_ts", `Float (now -. 60.0));
+        ( "filesystem",
+          `Assoc
+            [
+              ("mounted_on", `String "/data");
+              ("available_bytes", `Int 50_000_000_000);
+              ("total_bytes", `Int 100_000_000_000);
+              ("capacity_percent", `Float 50.0);
+            ] );
+      ]
+  in
+  let stale_json =
+    `Assoc
+      [
+        ("status", `String "ok");
+        ("storage_space_exhaustion_observations_total", `Int 3);
+        ( "last_storage_space_exhaustion_ts",
+          `Float (now -. Wire_infra.enospc_recent_window_sec -. 120.0) );
+        ( "filesystem",
+          `Assoc
+            [
+              ("mounted_on", `String "/data");
+              ("available_bytes", `Int 60_000_000_000);
+              ("total_bytes", `Int 100_000_000_000);
+              ("capacity_percent", `Float 40.0);
+            ] );
+      ]
+  in
+  let high_cap_json =
+    `Assoc
+      [
+        ("status", `String "warning");
+        ("storage_space_exhaustion_observations_total", `Int 0);
+        ( "filesystem",
+          `Assoc
+            [
+              ("capacity_percent", `Float 88.0);
+            ] );
+      ]
+  in
+  (match Wire_infra.parse_host_storage recent_json with
+  | None -> Alcotest.fail "expected recent host storage"
+  | Some hs ->
+      Alcotest.(check bool) "recent ENOSPC triggers critical" true
+        (Wire_infra.host_storage_is_critical ~now hs);
+      Alcotest.(check bool) "recent ENOSPC triggers alert" true
+        (Wire_infra.host_storage_is_alert ~now hs));
+  (match Wire_infra.parse_host_storage stale_json with
+  | None -> Alcotest.fail "expected stale host storage"
+  | Some hs ->
+      Alcotest.(check int) "stale count preserved" 3 hs.enospc_observations;
+      Alcotest.(check bool) "stale ENOSPC is not recent" false
+        (Wire_infra.host_storage_has_recent_enospc ~now hs);
+      Alcotest.(check bool) "stale ENOSPC on healthy disk is not critical" false
+        (Wire_infra.host_storage_is_critical ~now hs);
+      Alcotest.(check bool) "stale ENOSPC on healthy disk is not alert" false
+        (Wire_infra.host_storage_is_alert ~now hs));
+  (match Wire_infra.parse_host_storage high_cap_json with
+  | None -> Alcotest.fail "expected high capacity host storage"
+  | Some hs ->
+      Alcotest.(check bool) "88% is alert" true
+        (Wire_infra.host_storage_is_alert ~now hs);
+      Alcotest.(check bool) "88% is not critical" false
+        (Wire_infra.host_storage_is_critical ~now hs));
+  (* Voice PCM16 RMS level & platform argv *)
+  let silence = Bytes.make 64 '\000' in
+  Alcotest.(check (float 1e-6)) "silence RMS is 0.0" 0.0
+    (Voice_runner.rms_level_of_pcm16_le silence ~offset:0 ~len:64);
+  let loud = Bytes.create 64 in
+  for i = 0 to 31 do
+    Bytes.set loud (i * 2) '\xff';
+    Bytes.set loud ((i * 2) + 1) '\x7f'
+  done;
+  let loud_rms = Voice_runner.rms_level_of_pcm16_le loud ~offset:0 ~len:64 in
+  Alcotest.(check bool) "full-scale PCM16 RMS is high and bounded <= 1.0" true
+    (loud_rms > 0.9 && loud_rms <= 1.0);
+  let pulse_argv =
+    Voice_runner.build_record_argv_for_platform
+      ~platform:Voice_runner.Audio_linux_pulse
+      ~kind:Voice_runner.Recorder_ffmpeg
+      ~bin_path:"/usr/bin/ffmpeg"
+      ~device:None
+      ~out_path:"/tmp/test.wav"
+  in
+  Alcotest.(check bool) "Linux pulse ffmpeg argv uses pulse format" true
+    (Array.exists (String.equal "pulse") pulse_argv)
+
 let () =
   Alcotest.run "masc_tui_v2_protocol_net"
     [
@@ -8220,6 +8314,8 @@ let () =
             test_keeper_lifecycle_wire_codecs;
           Alcotest.test_case "R2-PR7 closed sum wire decoders & classifiers" `Quick
             test_r2_pr7_closed_sum_decoders;
+          Alcotest.test_case "Host storage ENOSPC recency & Voice RMS/Linux argv" `Quick
+            test_host_storage_enospc_recency_and_voice_rms;
         ] );
       ( "net"
       , [

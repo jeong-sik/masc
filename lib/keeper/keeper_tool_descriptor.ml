@@ -3220,7 +3220,7 @@ let internal_descriptors : t list =
        (* No composable output, for the same reason as masc_agent_card above:
           off the model surface since #29681, so no plan can name it. *)
        ~readonly:true)
-  (* ── Scheduled internal automation (6 entries) ─────── *)
+  (* ── Scheduled internal automation ─────── *)
   ]
   @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions
   @ List.map keeper_owned_job_descriptor Tool_schemas_owned_job.definitions

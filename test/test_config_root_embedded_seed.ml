@@ -372,6 +372,54 @@ let test_relative_base_path_boot_and_resolver_agree () =
         expected_config_root resolution.config_root.path;
       check bool "startup config root exists" true resolution.config_root.exists)
 
+let test_seeded_files_keep_0644_and_placed_runtime_stays_0600 () =
+  let dst = fresh_dst () in
+  let written = Seed.seed_missing_from_embedded ~dst in
+  check bool "seeded embedded files" true (written > 0);
+  let runtime_toml = Filename.concat dst "runtime.toml" in
+  check int "seeded runtime.toml mode is 0644" 0o644 (Unix.stat runtime_toml).st_perm;
+  let prompts_dir = Filename.concat dst "prompts" in
+  let prompt_files =
+    entries_of prompts_dir
+    |> List.filter (fun name ->
+      not (Sys.is_directory (Filename.concat prompts_dir name)))
+  in
+  check bool "at least one prompt file seeded" true (prompt_files <> []);
+  List.iter
+    (fun name ->
+      let path = Filename.concat prompts_dir name in
+      check int ("seeded prompt " ^ name ^ " mode is 0644") 0o644
+        (Unix.stat path).st_perm)
+    prompt_files;
+  let keepers_dir = Filename.concat dst "keepers" in
+  let keeper_files = entries_of keepers_dir in
+  check bool "at least one keeper manifest seeded" true (keeper_files <> []);
+  List.iter
+    (fun name ->
+      let path = Filename.concat keepers_dir name in
+      check int ("seeded keeper " ^ name ^ " mode is 0644") 0o644
+        (Unix.stat path).st_perm)
+    keeper_files;
+  (* Filesystem copy seed also preserves 0644 and never overwrites an existing file. *)
+  let copy_dst = fresh_dst () in
+  Fs_compat.mkdir_p (Filename.concat copy_dst "prompts");
+  let existing_prompt = Filename.concat (Filename.concat copy_dst "prompts") (List.hd prompt_files) in
+  let operator_prompt = "# operator prompt\n" in
+  Fs_compat.save_file existing_prompt operator_prompt;
+  Seed.copy_missing_config_root_seed ~src:dst ~dst:copy_dst;
+  check string "copy seed keeps existing operator prompt" operator_prompt
+    (read_file existing_prompt);
+  check int "copied runtime.toml mode is 0644" 0o644
+    (Unix.stat (Filename.concat copy_dst "runtime.toml")).st_perm;
+  (* Account-workspace placement via [place_embedded_runtime_toml] stays 0600. *)
+  let account_base = fresh_dst () in
+  let placed_path = Server_runtime_setup_actions.config_path ~base_path:account_base in
+  (match placed placed_path with
+   | Seed.Embedded_written -> ()
+   | Seed.Existing_kept -> fail "expected fresh placed runtime.toml");
+  check int "placed account runtime.toml stays 0600" 0o600
+    (Unix.stat placed_path).st_perm
+
 let () =
   run "Config root embedded seed"
     [ ( "builtin_skills"
@@ -389,6 +437,8 @@ let () =
         ; test_case "writes no dune file" `Quick test_writes_no_dune_file
         ; test_case "second pass keeps operator edits" `Quick
             test_second_pass_keeps_operator_edits
+        ; test_case "seeded config files keep 0644 while placed runtime.toml stays 0600" `Quick
+            test_seeded_files_keep_0644_and_placed_runtime_stays_0600
         ] )
     ; ( "backfill_startup_required_from_embedded"
       , [ test_case "repairs only the startup-required files" `Quick

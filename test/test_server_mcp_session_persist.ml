@@ -495,6 +495,89 @@ let test_shared_writer_failure_preserves_resources_and_recovers () = with_temp_b
     (Array.for_all (fun name -> name = Filename.basename target || name = Filename.basename unrelated)
       (Sys.readdir base_path))
 
+let test_aborted_restore_rolls_back_persistence_state () =
+  let exception Abort_after_begin in
+  (* Unobserved path with an existing snapshot: aborting after [begin_restore]
+     must roll back to unobserved rather than leaving [Restore_pending]. *)
+  (with_temp_base @@ fun base_path ->
+   let sid = "persist-abort-unobserved" in
+   with_sessions [sid] @@ fun () ->
+   let path = Session.sessions_file_path ~base_path () in
+   Unix.mkdir (Filename.dirname path) 0o700;
+   let bytes = session_bytes sid in
+   Out_channel.with_open_bin path (fun output -> output_string output bytes);
+   let raised =
+     try
+       Session.For_testing.load_sessions_from_file_with_hook
+         ~after_begin_restore:(fun () -> raise Abort_after_begin)
+         ~base_path ();
+       false
+     with Abort_after_begin -> true
+   in
+   check bool "abort hook raised" true raised;
+   skipped ~base_path (function
+     | Session.Restore_unobserved -> true
+     | Session.Restore_unsettled | Session.Restore_failed _ -> false);
+   check string "unobserved snapshot retained" bytes
+     (In_channel.with_open_bin path In_channel.input_all);
+   Session.load_sessions_from_file ~base_path ();
+   check_original sid;
+   save ~base_path ());
+  (* Already-Ready path: aborting a subsequent restore after [begin_restore]
+     must roll back to [Ready] so saves continue to succeed. *)
+  with_temp_base @@ fun base_path ->
+  let sid = "persist-abort-ready" in
+  with_sessions [sid] @@ fun () ->
+  Session.load_sessions_from_file ~base_path ();
+  remember sid;
+  save ~base_path ();
+  let raised =
+    try
+      Session.For_testing.load_sessions_from_file_with_hook
+        ~after_begin_restore:(fun () -> raise Abort_after_begin)
+        ~base_path ();
+      false
+    with Abort_after_begin -> true
+  in
+  check bool "second abort hook raised" true raised;
+  save ~base_path ()
+
+let test_orphan_profile_reap_respects_grace_period () =
+  with_temp_base @@ fun base_path ->
+  let fresh_orphan = "persist-fresh-orphan-profile" in
+  let expired_orphan = "persist-expired-orphan-profile" in
+  let active_orphan = "persist-active-orphan-profile" in
+  with_sessions [fresh_orphan; expired_orphan; active_orphan] @@ fun () ->
+  Session.load_sessions_from_file ~base_path ();
+  Session.remember_mcp_profile fresh_orphan Server_mcp_transport_http_types.Operator_remote;
+  Session.remember_mcp_profile expired_orphan Server_mcp_transport_http_types.Operator_remote;
+  Session.remember_mcp_profile active_orphan Server_mcp_transport_http_types.Operator_remote;
+  (* Backdate expired_orphan and active_orphan past the grace period. *)
+  let long_ago = Unix.gettimeofday () -. 1_000_000.0 in
+  Session.For_testing.set_profile_seen_at expired_orphan long_ago;
+  Session.For_testing.set_profile_seen_at active_orphan long_ago;
+  ignore
+    (Session.reap_stale_sessions ~base_path
+       ~is_active_session:(fun sid -> String.equal sid active_orphan));
+  (match
+     Session.validate_mcp_session_delete_profile
+       ~profile:Server_mcp_transport_http_types.Operator_remote fresh_orphan
+   with
+   | Ok () -> ()
+   | Error detail -> fail ("fresh uninitialized profile was reaped prematurely: " ^ detail));
+  (match
+     Session.validate_mcp_session_delete_profile
+       ~profile:Server_mcp_transport_http_types.Operator_remote active_orphan
+   with
+   | Ok () -> ()
+   | Error detail -> fail ("active uninitialized profile was reaped: " ^ detail));
+  match
+    Session.validate_mcp_session_delete_profile
+      ~profile:Server_mcp_transport_http_types.Operator_remote expired_orphan
+  with
+  | Error _ -> ()
+  | Ok () -> fail "expired inactive orphan profile was not pruned"
+
 let () =
   run "server_mcp_session_persist"
     ["persistence",
@@ -509,6 +592,10 @@ let () =
          test_concurrent_writers_leave_existing_fifo;
        test_case "cancelled caller cannot admit or apply a regular snapshot" `Quick
          test_cancelled_restore_does_not_admit_or_apply;
+       test_case "aborted restore rolls back pending persistence state" `Quick
+         test_aborted_restore_rolls_back_persistence_state;
+       test_case "orphan profile pruning respects grace window and active sessions" `Quick
+         test_orphan_profile_reap_respects_grace_period;
        test_case "private output never follows a preexisting temporary symlink" `Quick
          test_preexisting_temporary_symlink_is_untouched;
        test_case "FIFO snapshot is refused without a writer" `Quick

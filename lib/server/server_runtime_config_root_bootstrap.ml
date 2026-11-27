@@ -51,10 +51,20 @@ let versioned_config_root_candidates () =
   |> List.filter Fs_compat.is_directory
 ;;
 
-(* Stage into a sibling temp file, fsync, and publish with [rename_noreplace]
-   so concurrent bootstraps or operator edits are never overwritten or observed
-   partially written. Returns [true] when published, [false] when an entry
-   already existed at [path]. *)
+(* Matches [Fs_compat_base_io.save_file_mode] (0o644) used by [Fs_compat.save_file]
+   prior to atomic [rename_noreplace] staging; [publish_runtime_toml] keeps 0o600
+   for account-workspace [runtime.toml] placements. *)
+let seeded_config_file_mode = 0o644
+
+(* Stage into a sibling temp file, apply [seeded_config_file_mode], and publish
+   with [rename_noreplace] so concurrent bootstraps or operator edits are never
+   overwritten or observed partially written. Per-file [fsync] is intentionally
+   omitted here because fresh roots seed hundreds of distribution assets that
+   are idempotently re-seeded on the next boot (and per-file fsync + parent
+   sync added >5s to fresh startup); [publish_runtime_toml] retains explicit
+   [fsync] and directory sync for single-file account-workspace placement.
+   Returns [true] when published, [false] when an entry already existed at
+   [path]. *)
 let write_file_if_missing_atomic ~path content =
   if Sys.file_exists path
   then false
@@ -70,14 +80,12 @@ let write_file_if_missing_atomic ~path content =
         | Unix.Unix_error _ -> ())
       (fun () ->
         let descriptor = Unix.descr_of_out_channel channel in
+        Unix.fchmod descriptor seeded_config_file_mode;
         output_string channel content;
         flush channel;
-        Unix.fsync descriptor;
         close_out channel;
         match Fs_compat.rename_noreplace staged path with
-        | () ->
-          ignore (Fs_compat.sync_file_and_parent_strict path : (unit, string) result);
-          true
+        | () -> true
         | exception Unix.Unix_error (Unix.EEXIST, _, _) -> false))
 ;;
 

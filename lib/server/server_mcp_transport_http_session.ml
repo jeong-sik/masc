@@ -9,13 +9,14 @@ let mcp_protocol_version_default = Mcp_transport_protocol.default_protocol_versi
 type registry =
   { versions : string SMap.t
   ; profiles : Server_mcp_transport_http_types.tool_profile SMap.t
+  ; profile_seen_at : float SMap.t
   ; timestamps : float SMap.t
   ; started : float SMap.t
   ; transports : Otel_dispatch_hook.transport_context SMap.t }
 
 let empty_registry : registry =
-  { versions=SMap.empty;profiles=SMap.empty;timestamps=SMap.empty
-  ; started=SMap.empty;transports=SMap.empty }
+  { versions=SMap.empty;profiles=SMap.empty;profile_seen_at=SMap.empty
+  ; timestamps=SMap.empty;started=SMap.empty;transports=SMap.empty }
 
 let session_registry : registry Atomic.t = Atomic.make empty_registry
 
@@ -140,7 +141,12 @@ let ensure_sse_backing_session_for_known_transport_session
 let remember_mcp_profile ?otel_transport_context session_id profile =
   let now = Unix.gettimeofday () in
   Atomic_util.update session_registry (fun state ->
-    let state = {state with profiles=SMap.add session_id profile state.profiles} in
+    let state =
+      { state with
+        profiles = SMap.add session_id profile state.profiles
+      ; profile_seen_at = SMap.add session_id now state.profile_seen_at
+      }
+    in
     if SMap.mem session_id state.versions then
       with_session_activity ?otel_transport_context ~now session_id state
     else state)
@@ -152,6 +158,7 @@ let forget_mcp_session session_id =
   Atomic_util.update session_registry (fun state ->
     { versions=SMap.remove session_id state.versions
     ; profiles=SMap.remove session_id state.profiles
+    ; profile_seen_at=SMap.remove session_id state.profile_seen_at
     ; timestamps=SMap.remove session_id state.timestamps
     ; started=SMap.remove session_id state.started
     ; transports=SMap.remove session_id state.transports })
@@ -457,6 +464,7 @@ let decode_sessions (json : Yojson.Basic.t) =
                     {patch={versions=SMap.add sid v patch.versions;
                      profiles=(match profile with None -> patch.profiles
                        | Some profile -> SMap.add sid profile patch.profiles);
+                     profile_seen_at=patch.profile_seen_at;
                      timestamps=SMap.add sid t patch.timestamps;
                      started=SMap.add sid started_at patch.started;
                      transports=(match transport_context fields with None -> patch.transports
@@ -504,7 +512,7 @@ let merge_restored values current =
   if SMap.is_empty values then current
   else SMap.union (fun _ restored _ -> Some restored) values current
 
-let load_sessions_from_file ~base_path () =
+let load_sessions_from_file_with_hook ~after_begin_restore ~base_path () =
   let path = sessions_file_path ~base_path () in
   Eio_guard.check_if_ready ();
   let token = ref () in
@@ -514,6 +522,7 @@ let load_sessions_from_file ~base_path () =
     ~finally:(fun () ->
       if not !settled then abort_restore path token ~previous)
     (fun () ->
+      after_begin_restore ();
       let restored = Eio_guard.run_in_systhread ~label:"mcp-session-load" (fun () ->
         Stdlib.Mutex.protect persistence_mutex (fun () ->
           let restored = read_sessions path in
@@ -544,6 +553,7 @@ let load_sessions_from_file ~base_path () =
             Atomic_util.update session_registry (fun current ->
               { versions=merge_restored patch.versions current.versions
               ; profiles=merge_restored patch.profiles current.profiles
+              ; profile_seen_at=current.profile_seen_at
               ; timestamps=merge_restored patch.timestamps current.timestamps
               ; started=merge_restored patch.started current.started
               ; transports=merge_restored patch.transports current.transports })
@@ -554,6 +564,9 @@ let load_sessions_from_file ~base_path () =
       | Missing | Restored _ ->
           settled := true;
           Log.Server.warn "session restore superseded or previously refused path=%S" path)
+
+let load_sessions_from_file ~base_path () =
+  load_sessions_from_file_with_hook ~after_begin_restore:ignore ~base_path ()
 
 (** Reap session entries whose session_id has no active SSE connection
     AND whose grace period has expired.
@@ -594,15 +607,38 @@ let reap_stale_sessions ~base_path ~is_active_session =
        session and resolved identity forever. *)
     List.iter forget_mcp_session stale
   end;
-  (* Prune orphaned uninitialized profile entries that never reached initialize
-     and have no active transport connection, preventing unbounded map growth. *)
-  Atomic_util.update session_registry (fun state ->
-    let profiles =
-      SMap.filter
-        (fun sid _ -> SMap.mem sid state.versions || is_active_session sid)
-        state.profiles
-    in
-    { state with profiles });
+  (* Prune orphaned uninitialized profile entries that never reached initialize,
+     have no active transport connection, and have aged past [grace_period_seconds].
+     Evaluate [is_active_session] once outside the CAS loop so retries remain pure
+     and newly arriving pre-initialize POST clients are not dropped mid-handshake. *)
+  let stale_orphan_profiles =
+    let snapshot = Atomic.get session_registry in
+    SMap.fold
+      (fun sid _ acc ->
+        if SMap.mem sid snapshot.versions || is_active_session sid then acc
+        else
+          match SMap.find_opt sid snapshot.profile_seen_at with
+          | Some seen_at when now -. seen_at < grace_period_seconds -> acc
+          | Some _ | None -> sid :: acc)
+      snapshot.profiles
+      []
+  in
+  if stale_orphan_profiles <> [] then
+    Atomic_util.update session_registry (fun state ->
+      let profiles, profile_seen_at =
+        List.fold_left
+          (fun (profiles, seen) sid ->
+            if SMap.mem sid state.versions then (profiles, seen)
+            else
+              match SMap.find_opt sid state.profile_seen_at with
+              | Some seen_at when now -. seen_at < grace_period_seconds ->
+                  (profiles, seen)
+              | Some _ | None ->
+                  (SMap.remove sid profiles, SMap.remove sid seen))
+          (state.profiles, state.profile_seen_at)
+          stale_orphan_profiles
+      in
+      { state with profiles; profile_seen_at });
   if kept_by_grace > 0 then
     Log.Server.info "session grace: %d sessions kept (inactive but within %.0fs grace)"
       kept_by_grace grace_period_seconds;
@@ -619,6 +655,14 @@ let profile_label = function
 
 module For_testing = struct
   let profile_count () = SMap.cardinal (Atomic.get session_registry).profiles
+
+  let load_sessions_from_file_with_hook = load_sessions_from_file_with_hook
+
+  let set_profile_seen_at sid seen_at =
+    Atomic_util.update session_registry (fun state ->
+      if SMap.mem sid state.profiles then
+        { state with profile_seen_at = SMap.add sid seen_at state.profile_seen_at }
+      else state)
 end
 
 let validate_mcp_session_profile ~profile session_id =

@@ -1,11 +1,7 @@
 // Primitive keeper predicates SSOT.
 //
-// Before this module, four call sites each implemented their own
-// OR-chain for "is this keeper paused?" (and similar):
-//   - keeper-action-panel.ts:113   (paused | status | phase)
-//   - dashboard-shell.ts:168       (paused | phase | stage | status)
-//   - monitoring-runtime.ts:182    (paused | phaseKey | lifecycleKey)
-//   - tool-monitor/tool-monitor-reactivity.ts (paused | phase | pipeline_stage)
+// Call sites used to implement their own OR-chain for "is this keeper
+// paused?" (and similar).
 //
 // Each chain looked at a *different subset of axes*, so two surfaces
 // could disagree on whether the same keeper was paused. The typed
@@ -257,9 +253,6 @@ const RUNNING_HEALTH_TOKENS: ReadonlySet<string> = RUNNING_HEALTH
  *  collapses to that check. */
 // ATTENTION_PHASES — phases that indicate the keeper
 // needs operator attention (error, recovery, or transitional states).
-// Previously defined locally in monitoring-runtime.ts as a private Set
-// and partially duplicated as BUFFER_PHASES in keeper-phase-indicator.ts.
-// Both sites now import from here.
 export const ATTENTION_PHASES: ReadonlySet<string> = new Set<string>([
   'Failing',
   'Draining',

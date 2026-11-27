@@ -790,6 +790,45 @@ for line in sys.stdin:
    dispatch, keeping the session it was continuing, and lets the candidate
    walk move on. A listing command that could not start is the refusal the
    host spawn would have met. *)
+(* What the Keeper's failed-claim settlement does with a start error, from a
+   claim that continues a settled session: a transient failure releases the
+   claim, and anything else records a recovery the next claim supersedes. The
+   next claim then continues the settled session only after a release. *)
+let next_claim_continues_after_start_error err =
+  let module Store = Keeper_official_client_session_store in
+  let require = function Ok value -> value | Error detail -> fail detail in
+  let base_path = Filename.temp_dir "masc-acp-preparation-" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) @@ fun () ->
+  let keeper_name = "preparation" and runtime_id = "muse.fixture" in
+  let session_id = "settled-session" and turn_id = "settled-turn" in
+  let tool_surface_sha256 = Store.tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_none [] in
+  let owner_epoch = Store.process_epoch () in
+  let claimed = Store.claim ~base_path ~keeper_name ~expected:None ~client_kind:Acp ~owner_epoch
+      ~runtime_id ~tool_surface_sha256 ~updated_at:1. |> require in
+  let active = Store.mark_active ~base_path ~keeper_name ~expected:claimed ~session_id ~updated_at:2. |> require in
+  let starting = Store.mark_turn_starting ~base_path ~keeper_name ~expected:active ~session_id ~updated_at:3. |> require in
+  let inflight = Store.mark_turn_started ~base_path ~keeper_name ~expected:starting ~session_id ~turn_id
+      ~turn_count:starting.turn_count ~updated_at:4. |> require in
+  let settled = Store.settle ~base_path ~keeper_name ~expected:inflight ~session_id ~turn_id ~updated_at:5. |> require in
+  let next = Store.claim ~base_path ~keeper_name ~expected:(Some settled) ~client_kind:Acp ~owner_epoch
+      ~runtime_id ~tool_surface_sha256 ~updated_at:6. |> require in
+  let failure = Keeper_acp_runtime.For_testing.recovery_failure_of_acp_error err in
+  let _after : Store.t =
+    match Store.failure_disposition failure with
+    | Store.Transient ->
+      Store.release_transient ~base_path ~keeper_name ~expected:next ~failure ~released_at:7. |> require
+    | Store.Ambiguous | Store.Fatal ->
+      Store.require_recovery ~base_path ~keeper_name ~expected:next ~failure
+        ~detail:(Runtime_acp_client.error_to_string err) ~required_at:7. |> require
+  in
+  let expected = Store.load ~base_path ~keeper_name |> Result.map_error Store.read_error_to_string |> require in
+  let plan = Store.plan_claim ~expected ~client_kind:Acp ~runtime_id
+      |> Result.map_error Store.claim_error_to_string |> require in
+  match plan.previous_settlement with
+  | Some { Store.session_id = continued; _ } -> String.equal continued session_id
+  | None -> false
+;;
+
 let test_muse_start_refuses_when_the_plugin_list_fails () =
   let cwd = Filename.temp_dir "muse-plugin-list-" "" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree cwd) (fun () ->
@@ -849,7 +888,9 @@ let test_muse_start_refuses_when_the_plugin_list_fails () =
          | _ -> fail (label ^ ": the session does not settle before dispatch"));
         (match K.acp_error_to_core_error err with
          | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) -> ()
-         | core -> fail (label ^ ": the candidate walk stops at " ^ Agent_core.Error.to_string core))
+         | core -> fail (label ^ ": the candidate walk stops at " ^ Agent_core.Error.to_string core));
+        check bool (label ^ ": the next claim continues the settled session") true
+          (next_claim_continues_after_start_error err)
       | Ok () -> fail (label ^ ": the host started")
       | Error err -> fail (label ^ ": " ^ Runtime_acp_client.error_to_string err)
     in
@@ -860,7 +901,10 @@ let test_muse_start_refuses_when_the_plugin_list_fails () =
      | Error (Runtime_acp_client.Spawn_refused _) -> ()
      | Ok () -> fail "a missing muse: the host started"
      | Error err -> fail ("a missing muse: " ^ Runtime_acp_client.error_to_string err));
-    check bool "the host never ran" false (Sys.file_exists started))
+    check bool "the host never ran" false (Sys.file_exists started);
+    check bool "a host protocol error does not keep the settled session" false
+      (next_claim_continues_after_start_error
+         (Runtime_acp_client.Protocol_error { stage = "initialize"; detail = "fixture" })))
 ;;
 
 let test_muse_plugin_output_is_read_or_refused () =

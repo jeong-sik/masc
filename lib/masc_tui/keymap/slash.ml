@@ -954,7 +954,7 @@ let no_arg cmd value rest =
   | None -> Ok value
   | Some arg -> Error (Unexpected_argument { command = cmd; arg })
 
-let split_command_and_arg trimmed =
+let split_first_token trimmed =
   let len = String.length trimmed in
   let rec find_ws i =
     if i >= len then len
@@ -964,14 +964,18 @@ let split_command_and_arg trimmed =
       | _ -> find_ws (i + 1)
   in
   let ws = find_ws 0 in
-  let cmd = String.lowercase_ascii (String.sub trimmed 0 ws) in
+  let first = String.sub trimmed 0 ws in
   let arg =
     if ws >= len then None
     else
       let rest = String.trim (String.sub trimmed ws (len - ws)) in
       if String.length rest = 0 then None else Some rest
   in
-  (cmd, arg)
+  (first, arg)
+
+let split_command_and_arg trimmed =
+  let first, arg = split_first_token trimmed in
+  (String.lowercase_ascii first, arg)
 
 (* The commands [parse] accepts and [all] does not list. This is the one place
    that names them; [parse] and [filter] both go through it. *)
@@ -1120,7 +1124,7 @@ let parse raw =
             let sub_raw, rest = split_command_and_arg raw_arg in
             let sub = String.lowercase_ascii sub_raw in
             let require_single_token ~cmd_label value =
-              let first, extra = split_command_and_arg value in
+              let first, extra = split_first_token value in
               match extra with
               | None -> Ok first
               | Some tok ->
@@ -1170,7 +1174,7 @@ let parse raw =
             | "retry", None ->
                 invalid ~expected:(Say.literal "<approval_id>") ""
             | "keeper-mode", Some km_arg -> (
-                let k, m_opt = split_command_and_arg km_arg in
+                let k, m_opt = split_first_token km_arg in
                 match m_opt with
                 | Some m -> (
                     match valid_keeper_mode m with
@@ -1183,7 +1187,7 @@ let parse raw =
             | "keeper-mode", None ->
                 invalid ~expected:(Say.literal "<keeper> <auto|yolo>") ""
             | "ack-uncertain", Some ack_arg -> (
-                let k, cid_opt = split_command_and_arg ack_arg in
+                let k, cid_opt = split_first_token ack_arg in
                 match cid_opt with
                 | Some cid_raw -> (
                     match
@@ -1220,7 +1224,7 @@ let parse raw =
                    got = "";
                  })
         | Some raw_arg ->
-            let tool_name, args_json = split_command_and_arg raw_arg in
+            let tool_name, args_json = split_first_token raw_arg in
             Ok (Exec { tool_name; args_json }))
     | "/skill" -> (
         let invalid ~expected got =
@@ -1261,12 +1265,12 @@ let parse raw =
             let sub = String.lowercase_ascii sub_raw in
             match (sub, rest) with
             | "set", Some a ->
-                let k, v = split_command_and_arg a in
+                let k, v = split_first_token a in
                 Ok (Prompt (Prompt_set { key = k; value = v }))
             | "set", None ->
                 invalid ~expected:(Say.literal "<key> [value]") ""
             | "clear", Some a -> (
-                let k, extra = split_command_and_arg a in
+                let k, extra = split_first_token a in
                 match extra with
                 | None -> Ok (Prompt (Prompt_clear k))
                 | Some tok ->
@@ -1275,12 +1279,12 @@ let parse raw =
                          { command = "/prompt clear"; arg = tok }))
             | "clear", None -> invalid ~expected:(Say.literal "<key>") ""
             | "param-set", Some a ->
-                let k, v = split_command_and_arg a in
+                let k, v = split_first_token a in
                 Ok (Prompt (Param_set { key = k; value_raw = v }))
             | "param-set", None ->
                 invalid ~expected:(Say.literal "<param_key> [json_or_value]") ""
             | "param-clear", Some a -> (
-                let k, extra = split_command_and_arg a in
+                let k, extra = split_first_token a in
                 match extra with
                 | None -> Ok (Prompt (Param_clear k))
                 | Some tok ->
@@ -1308,7 +1312,7 @@ let parse raw =
                 Error
                   (Unexpected_argument { command = "/preset list"; arg = extra })
             | "show", Some a -> (
-                let name, extra = split_command_and_arg a in
+                let name, extra = split_first_token a in
                 match extra with
                 | None -> Ok (Preset (Preset_show name))
                 | Some tok ->
@@ -1317,7 +1321,7 @@ let parse raw =
                          { command = "/preset show"; arg = tok }))
             | "show", None -> invalid ~expected:(Say.literal "<name>") ""
             | "save", Some a ->
-                let name, desc_opt = split_command_and_arg a in
+                let name, desc_opt = split_first_token a in
                 Ok
                   (Preset
                      (Preset_save
@@ -1327,7 +1331,7 @@ let parse raw =
             | "create", None ->
                 Ok (Preset (Preset_create { name = None; description = "" }))
             | "create", Some a ->
-                let name, desc_opt = split_command_and_arg a in
+                let name, desc_opt = split_first_token a in
                 Ok
                   (Preset
                      (Preset_create
@@ -1336,7 +1340,7 @@ let parse raw =
                           description = Option.value desc_opt ~default:"";
                         }))
             | "restore", Some a -> (
-                let name, extra = split_command_and_arg a in
+                let name, extra = split_first_token a in
                 match extra with
                 | None -> Ok (Preset (Preset_restore name))
                 | Some tok ->
@@ -1345,7 +1349,7 @@ let parse raw =
                          { command = "/preset restore"; arg = tok }))
             | "restore", None -> invalid ~expected:(Say.literal "<name>") ""
             | "delete", Some a -> (
-                let name, extra = split_command_and_arg a in
+                let name, extra = split_first_token a in
                 match extra with
                 | None -> Ok (Preset (Preset_delete name))
                 | Some tok ->
@@ -1378,7 +1382,7 @@ let parse raw =
             let sub = String.lowercase_ascii sub_raw in
             match (sub, rest) with
             | "create", Some a -> (
-                let lane, rids_opt = split_command_and_arg a in
+                let lane, rids_opt = split_first_token a in
                 match rids_opt with
                 | Some rids_s ->
                     let runtime_ids = split_csv rids_s in
@@ -1389,7 +1393,7 @@ let parse raw =
             | "create", None ->
                 invalid ~expected:(Say.literal "<lane> <r1,r2,...>") ""
             | "remove", Some a -> (
-                let lane, extra = split_command_and_arg a in
+                let lane, extra = split_first_token a in
                 match extra with
                 | None -> Ok (Lane (Lane_remove lane))
                 | Some tok ->
@@ -1398,10 +1402,10 @@ let parse raw =
                          { command = "/lane remove"; arg = tok }))
             | "remove", None -> invalid ~expected:(Say.literal "<lane>") ""
             | "rename", Some a -> (
-                let lane, to_opt = split_command_and_arg a in
+                let lane, to_opt = split_first_token a in
                 match to_opt with
                 | Some to_raw -> (
-                    let to_lane, extra = split_command_and_arg to_raw in
+                    let to_lane, extra = split_first_token to_raw in
                     match extra with
                     | None -> Ok (Lane (Lane_rename { lane; to_lane }))
                     | Some tok ->
@@ -1412,7 +1416,7 @@ let parse raw =
             | "rename", None ->
                 invalid ~expected:(Say.literal "<lane> <new_name>") ""
             | "set", Some a -> (
-                let lane, rids_opt = split_command_and_arg a in
+                let lane, rids_opt = split_first_token a in
                 match rids_opt with
                 | Some rids_s ->
                     let runtime_ids = split_csv rids_s in
@@ -1423,10 +1427,10 @@ let parse raw =
             | "set", None ->
                 invalid ~expected:(Say.literal "<lane> <r1,r2,...>") ""
             | "exact-append", Some a -> (
-                let lane_id, rid_opt = split_command_and_arg a in
+                let lane_id, rid_opt = split_first_token a in
                 match rid_opt with
                 | Some rid_raw -> (
-                    let runtime_id, extra = split_command_and_arg rid_raw in
+                    let runtime_id, extra = split_first_token rid_raw in
                     match extra with
                     | None ->
                         Ok (Lane (Lane_exact_append { lane_id; runtime_id }))
@@ -1439,10 +1443,10 @@ let parse raw =
             | "exact-append", None ->
                 invalid ~expected:(Say.literal "<lane_id> <runtime_id>") ""
             | "exact-drop", Some a -> (
-                let lane_id, rid_opt = split_command_and_arg a in
+                let lane_id, rid_opt = split_first_token a in
                 match rid_opt with
                 | Some rid_raw -> (
-                    let runtime_id, extra = split_command_and_arg rid_raw in
+                    let runtime_id, extra = split_first_token rid_raw in
                     match extra with
                     | None ->
                         Ok (Lane (Lane_exact_drop { lane_id; runtime_id }))
@@ -1455,13 +1459,13 @@ let parse raw =
             | "exact-drop", None ->
                 invalid ~expected:(Say.literal "<lane_id> <runtime_id>") ""
             | "exact-move", Some a -> (
-                let lane_id, r1 = split_command_and_arg a in
+                let lane_id, r1 = split_first_token a in
                 match r1 with
                 | Some s1 -> (
-                    let runtime_id, r2 = split_command_and_arg s1 in
+                    let runtime_id, r2 = split_first_token s1 in
                     match r2 with
                     | Some s2 -> (
-                        let dir_raw, extra = split_command_and_arg s2 in
+                        let dir_raw, extra = split_first_token s2 in
                         match extra with
                         | Some tok ->
                             Error
@@ -1511,13 +1515,13 @@ let parse raw =
                     (Say.literal "<lane_id> <runtime_id> <up|down|first>")
                   ""
             | "exact-replace", Some a -> (
-                let lane_id, r1 = split_command_and_arg a in
+                let lane_id, r1 = split_first_token a in
                 match r1 with
                 | Some s1 -> (
-                    let runtime_id, r2 = split_command_and_arg s1 in
+                    let runtime_id, r2 = split_first_token s1 in
                     match r2 with
                     | Some s2 -> (
-                        let replacement, extra = split_command_and_arg s2 in
+                        let replacement, extra = split_first_token s2 in
                         match extra with
                         | None ->
                             Ok
@@ -1545,7 +1549,7 @@ let parse raw =
                     (Say.literal "<lane_id> <runtime_id> <replacement_id>")
                   ""
             | "run", Some a -> (
-                let run_id, extra = split_command_and_arg a in
+                let run_id, extra = split_first_token a in
                 match extra with
                 | None -> Ok (Lane (Lane_run_inspect run_id))
                 | Some tok ->
@@ -1553,7 +1557,7 @@ let parse raw =
                       (Unexpected_argument { command = "/lane run"; arg = tok }))
             | "run", None -> invalid ~expected:(Say.literal "<run_id>") ""
             | "quarantines", Some a -> (
-                let keeper, extra = split_command_and_arg a in
+                let keeper, extra = split_first_token a in
                 match extra with
                 | None -> Ok (Lane (Lane_quarantines keeper))
                 | Some tok ->
@@ -1563,17 +1567,17 @@ let parse raw =
             | "quarantines", None ->
                 invalid ~expected:(Say.literal "<keeper>") ""
             | "recover", Some a -> (
-                let keeper, r1 = split_command_and_arg a in
+                let keeper, r1 = split_first_token a in
                 match r1 with
                 | Some s1 -> (
-                    let partition_id, r2 = split_command_and_arg s1 in
+                    let partition_id, r2 = split_first_token s1 in
                     match r2 with
                     | Some s2 -> (
-                        let candidate_id, r3 = split_command_and_arg s2 in
+                        let candidate_id, r3 = split_first_token s2 in
                         match r3 with
                         | Some s3 -> (
                             let quarantine_id, extra =
-                              split_command_and_arg s3
+                              split_first_token s3
                             in
                             match extra with
                             | None ->
@@ -1646,11 +1650,11 @@ let parse raw =
             let sub = String.lowercase_ascii sub_raw in
             match (sub, rest) with
             | "attach", Some a ->
-                let manifest_path, r1 = split_command_and_arg a in
+                let manifest_path, r1 = split_first_token a in
                 let run_id, binding_json =
                   match r1 with
                   | None -> ("operator-run", None)
-                  | Some s1 -> split_command_and_arg s1
+                  | Some s1 -> split_first_token s1
                 in
                 Ok
                   (Addon
@@ -1661,7 +1665,7 @@ let parse raw =
                     (Say.literal "<manifest_path> [run_id] [binding_json]")
                   ""
             | "detach", Some a -> (
-                let id, extra = split_command_and_arg a in
+                let id, extra = split_first_token a in
                 match extra with
                 | None -> Ok (Addon (Addon_detach id))
                 | Some tok ->
@@ -1670,7 +1674,7 @@ let parse raw =
                          { command = "/addon detach"; arg = tok }))
             | "detach", None -> invalid ~expected:(Say.literal "<instance_id>") ""
             | "observe", Some a -> (
-                let id, extra = split_command_and_arg a in
+                let id, extra = split_first_token a in
                 match extra with
                 | None -> Ok (Addon (Addon_observe id))
                 | Some tok ->
@@ -1680,7 +1684,7 @@ let parse raw =
             | "observe", None ->
                 invalid ~expected:(Say.literal "<instance_id>") ""
             | "retain", Some a -> (
-                let id, extra = split_command_and_arg a in
+                let id, extra = split_first_token a in
                 match extra with
                 | None -> Ok (Addon (Addon_retain id))
                 | Some tok ->
@@ -1689,15 +1693,15 @@ let parse raw =
                          { command = "/addon retain"; arg = tok }))
             | "retain", None -> invalid ~expected:(Say.literal "<instance_id>") ""
             | "act", Some a ->
-                let instance_id, action_json = split_command_and_arg a in
+                let instance_id, action_json = split_first_token a in
                 Ok (Addon (Addon_act { instance_id; action_json }))
             | "act", None ->
                 invalid ~expected:(Say.literal "<instance_id> [action_json]") ""
             | "evidence", Some a -> (
-                let instance_id, r1 = split_command_and_arg a in
+                let instance_id, r1 = split_first_token a in
                 match r1 with
                 | Some s1 ->
-                    let rows_s, keeper_raw = split_command_and_arg s1 in
+                    let rows_s, keeper_raw = split_first_token s1 in
                     let row_ids = split_csv rows_s in
                     if row_ids = [] then
                       invalid
@@ -1712,7 +1716,7 @@ let parse raw =
                                (Addon_evidence
                                   { instance_id; row_ids; keeper_name = None }))
                       | Some kr -> (
-                          let kp, extra = split_command_and_arg kr in
+                          let kp, extra = split_first_token kr in
                           match extra with
                           | None ->
                               Ok
@@ -1740,7 +1744,7 @@ let parse raw =
             | "decl-read", None ->
                 invalid ~expected:(Say.literal "<source_path>") ""
             | "decl-new", Some a -> (
-                let fn, extra = split_command_and_arg a in
+                let fn, extra = split_first_token a in
                 match extra with
                 | None -> Ok (Addon (Addon_decl_new fn))
                 | Some tok ->
@@ -1752,7 +1756,7 @@ let parse raw =
             | "slice", None ->
                 Ok (Addon (Addon_slice { run_id = None; lane_id = None }))
             | "slice", Some a -> (
-                let lane_id, run_raw = split_command_and_arg a in
+                let lane_id, run_raw = split_first_token a in
                 match run_raw with
                 | None ->
                     Ok
@@ -1760,7 +1764,7 @@ let parse raw =
                          (Addon_slice
                             { run_id = None; lane_id = Some lane_id }))
                 | Some rr -> (
-                    let rid, extra = split_command_and_arg rr in
+                    let rid, extra = split_first_token rr in
                     match extra with
                     | None ->
                         Ok
@@ -1780,10 +1784,10 @@ let parse raw =
                     Ok (Addon (Addon_asks { include_resolved = false }))
                 | other -> invalid ~expected:(Say.literal "open|all") other)
             | "answer", Some a -> (
-                let declaration_id, r1 = split_command_and_arg a in
+                let declaration_id, r1 = split_first_token a in
                 match r1 with
                 | Some s1 -> (
-                    let ask_id, r2 = split_command_and_arg s1 in
+                    let ask_id, r2 = split_first_token s1 in
                     match r2 with
                     | Some answers_json ->
                         Ok
@@ -1807,7 +1811,7 @@ let parse raw =
                     (Say.literal "<declaration_id> <ask_id> <answers_json>")
                   ""
             | "operator", Some a ->
-                let instance_id, args_json = split_command_and_arg a in
+                let instance_id, args_json = split_first_token a in
                 Ok (Addon (Addon_operator { instance_id; args_json }))
             | "operator", None ->
                 invalid ~expected:(Say.literal "<instance_id> [args_json]") ""
@@ -1835,7 +1839,7 @@ let parse raw =
                      (Browser_scene
                         { client_id = None; tab_id = None; view = `Content }))
             | "scene", Some a -> (
-                let first, second = split_command_and_arg a in
+                let first, second = split_first_token a in
                 match String.lowercase_ascii first with
                 | "content" -> (
                     match second with
@@ -1881,7 +1885,7 @@ let parse raw =
                                       view = `Content;
                                     }))
                         | Some v -> (
-                            let v_tok, extra = split_command_and_arg v in
+                            let v_tok, extra = split_first_token v in
                             match extra with
                             | Some tok ->
                                 Error
@@ -1921,7 +1925,7 @@ let parse raw =
                   (Browser
                      (Browser_screenshot { client_id = None; tab_id = None }))
             | "screenshot", Some a -> (
-                let tid_s, extra = split_command_and_arg a in
+                let tid_s, extra = split_first_token a in
                 match extra with
                 | Some tok ->
                     Error
@@ -1947,12 +1951,12 @@ let parse raw =
                           text = None;
                         }))
             | "interact", Some a ->
-                let act, r1 = split_command_and_arg a in
+                let act, r1 = split_first_token a in
                 let selector, text =
                   match r1 with
                   | None -> (None, None)
                   | Some s1 ->
-                      let sel, txt = split_command_and_arg s1 in
+                      let sel, txt = split_first_token s1 in
                       (Some sel, txt)
                 in
                 Ok

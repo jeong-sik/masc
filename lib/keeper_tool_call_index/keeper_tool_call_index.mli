@@ -14,7 +14,8 @@
     exactly so against exactly that continuity; a missing or stale one means
     the prefix is read again. That post-scan check and the
     unchanged-observation fast path both assume the filesystem
-    reports external modification in inode/size/mtime/ctime; neither is byte
+    reports external modification of ledger and continuity files in
+    inode/size/mtime/ctime; neither is byte
     proof against metadata-preserving raw edits. Storage ownership optimization
     is separate.
 

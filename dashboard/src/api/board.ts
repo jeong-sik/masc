@@ -1167,7 +1167,7 @@ export async function fetchBoardPost(
     if (commentOffset !== undefined) params.set('comment_offset', String(commentOffset))
     if (commentLimit !== undefined) params.set('comment_limit', String(commentLimit))
     if (focusedCommentId) params.set('comment_focus', focusedCommentId)
-    const raw = await get<Record<string, unknown>>(`/api/v1/board/${postId}?${params}`)
+    const raw = await get<Record<string, unknown>>(`/api/v1/board/${encodeURIComponent(postId)}?${params}`)
     const postRaw = isRecord(raw.post) ? raw.post : raw
     const post = normalizeBoardPost(postRaw) ?? {
       id: postId,

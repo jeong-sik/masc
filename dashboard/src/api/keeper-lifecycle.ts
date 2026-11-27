@@ -73,7 +73,8 @@ async function safeJsonResponse<T>(resp: Response, fallbackError: string): Promi
         ? ({ ok: true, detail: body } as T)
         : ({ ok: false, error: `${fallbackError} (HTTP ${resp.status}): ${body}` } as T)
     }
-  } catch {
+  } catch (err) {
+    if (isAbortError(err)) throw err
     return { ok: false, error: `${fallbackError} (HTTP ${resp.status})` } as T
   }
 }
@@ -395,7 +396,7 @@ export async function resumeKeeper(
     `Failed to resume ${name}`,
     opts,
   )
-  if (result.ok) clearCommittedResumeIntent(name, intent)
+  if (result.ok || result.committed === true) clearCommittedResumeIntent(name, intent)
   // Resume_owner commits the durable pause disposition before projecting the
   // live lane. If projection is ambiguous or temporarily unavailable, the
   // pause is already cleared and boot is the safe committed follow-up.

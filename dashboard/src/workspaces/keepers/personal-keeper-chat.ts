@@ -86,12 +86,13 @@ export function PersonalKeeperChatPanel(props: PersonalKeeperChatPanelProps) {
   const activeKeeperRef = useRef(keeper.keeper_id)
   const readAbortRef = useRef<AbortController | null>(null)
   const mutAbortRef = useRef<AbortController | null>(null)
+  const mutInFlightRef = useRef(false)
   const sendingRef = useRef(false)
   const latestExternalTickRef = useRef(externalRefreshTick)
   const lastHandledTickRef = useRef(externalRefreshTick)
   const selectedConversationIdRef = useRef<string | null>(selectedConversationId)
   activeKeeperRef.current = keeper.keeper_id
-  sendingRef.current = sendingMessage !== null || startingConv || deletingId !== null
+  sendingRef.current = mutInFlightRef.current || sendingMessage !== null || startingConv || deletingId !== null
   latestExternalTickRef.current = externalRefreshTick
   selectedConversationIdRef.current = selectedConversationId
 
@@ -146,9 +147,11 @@ export function PersonalKeeperChatPanel(props: PersonalKeeperChatPanelProps) {
     setStartingConv(false)
     setSendingMessage(null)
     setEphemeralReply(null)
+    mutInFlightRef.current = false
     mutAbortRef.current?.abort('keeper_changed')
     void loadConversation(null)
     return () => {
+      mutInFlightRef.current = false
       readAbortRef.current?.abort('effect_cleanup')
       mutAbortRef.current?.abort('effect_cleanup')
     }
@@ -180,11 +183,12 @@ export function PersonalKeeperChatPanel(props: PersonalKeeperChatPanelProps) {
   }
 
   const handleStartConversation = async () => {
-    if (busy || authSession.peek().kind !== 'multi_account_signed_in') return
+    if (mutInFlightRef.current || busy || authSession.peek().kind !== 'multi_account_signed_in') return
     if (keeper.runtime_id === null) {
       setActionError('먼저 상단에서 개인 런타임을 연결한 뒤 새 대화를 시작하세요.')
       return
     }
+    mutInFlightRef.current = true
     mutAbortRef.current?.abort('superseded')
     const ctrl = new AbortController()
     mutAbortRef.current = ctrl
@@ -193,34 +197,43 @@ export function PersonalKeeperChatPanel(props: PersonalKeeperChatPanelProps) {
     setStartingConv(true)
     setActionError(null)
     setConfirmDeleteId(null)
-    const res = await startPersonalConversationApi(targetKeeper, ctrl.signal)
-    if (
-      !mountedRef.current
-      || activeKeeperRef.current !== targetKeeper
-      || !isEpochCurrent(startEpoch)
-      || ctrl.signal.aborted
-      || authSession.peek().kind !== 'multi_account_signed_in'
-    ) {
-      return
-    }
-    setStartingConv(false)
-    if (!res.ok) {
-      if (res.error.kind === 'aborted' || res.error.kind === 'epoch_stale') return
-      setActionError(formatPersonalKeeperError(res.error, 'start'))
-      if (res.error.kind !== 'unauthorized' && res.error.kind !== 'csrf_rejected') {
-        await loadConversation(selectedConversationIdRef.current)
+    try {
+      const res = await startPersonalConversationApi(targetKeeper, ctrl.signal)
+      if (
+        !mountedRef.current
+        || activeKeeperRef.current !== targetKeeper
+        || !isEpochCurrent(startEpoch)
+        || ctrl.signal.aborted
+        || authSession.peek().kind !== 'multi_account_signed_in'
+      ) {
+        return
       }
-      return
+      if (mutAbortRef.current === ctrl) mutInFlightRef.current = false
+      setStartingConv(false)
+      if (!res.ok) {
+        if (res.error.kind === 'aborted' || res.error.kind === 'epoch_stale') return
+        setActionError(formatPersonalKeeperError(res.error, 'start'))
+        if (res.error.kind !== 'unauthorized' && res.error.kind !== 'csrf_rejected') {
+          await loadConversation(selectedConversationIdRef.current)
+        }
+        return
+      }
+      selectedConversationIdRef.current = null
+      setSelectedConversationId(null)
+      setEphemeralReply(null)
+      pushShellToast('새 대화를 시작했습니다.', 'success')
+      await loadConversation(null)
+    } finally {
+      if (mutAbortRef.current === ctrl) {
+        mutInFlightRef.current = false
+        if (mountedRef.current) setStartingConv(false)
+      }
     }
-    selectedConversationIdRef.current = null
-    setSelectedConversationId(null)
-    setEphemeralReply(null)
-    pushShellToast('새 대화를 시작했습니다.', 'success')
-    await loadConversation(null)
   }
 
   const handleDeleteConversation = async (conversationId: string) => {
-    if (busy || authSession.peek().kind !== 'multi_account_signed_in') return
+    if (mutInFlightRef.current || busy || authSession.peek().kind !== 'multi_account_signed_in') return
+    mutInFlightRef.current = true
     mutAbortRef.current?.abort('superseded')
     const ctrl = new AbortController()
     mutAbortRef.current = ctrl
@@ -228,59 +241,67 @@ export function PersonalKeeperChatPanel(props: PersonalKeeperChatPanelProps) {
     const startEpoch = currentSessionEpoch()
     setDeletingId(conversationId)
     setActionError(null)
-    const res = await deletePersonalConversationApi(conversationId, ctrl.signal)
-    if (
-      !mountedRef.current
-      || activeKeeperRef.current !== targetKeeper
-      || !isEpochCurrent(startEpoch)
-      || ctrl.signal.aborted
-      || authSession.peek().kind !== 'multi_account_signed_in'
-    ) {
-      return
-    }
-    setDeletingId(null)
-    setConfirmDeleteId(null)
-    if (!res.ok) {
-      if (res.error.kind === 'aborted' || res.error.kind === 'epoch_stale') return
-      setActionError(formatPersonalKeeperError(res.error, 'delete'))
-      if (res.error.kind === 'unauthorized' || res.error.kind === 'csrf_rejected') {
+    try {
+      const res = await deletePersonalConversationApi(conversationId, ctrl.signal)
+      if (
+        !mountedRef.current
+        || activeKeeperRef.current !== targetKeeper
+        || !isEpochCurrent(startEpoch)
+        || ctrl.signal.aborted
+        || authSession.peek().kind !== 'multi_account_signed_in'
+      ) {
         return
       }
-      // Once a conversation enters Deletion_failed or Deleted on the server,
-      // GET ?conversation_id=<id> returns 404 (`server_preview_keeper_conversation.ml:120-124`).
-      // Fall back to the keeper's current view so the failed-deletion retry UI stays visible.
-      const viewingDeletedTarget = selectedConversationIdRef.current === conversationId
-      const targetMayBeUnavailable =
-        res.error.code === 'conversation_not_deleted'
-        || res.error.code === 'unknown_conversation'
-        || res.error.kind === 'server'
-        || res.error.kind === 'network'
-        || res.error.kind === 'decode'
-      if (viewingDeletedTarget && targetMayBeUnavailable) {
-        selectedConversationIdRef.current = null
-        setSelectedConversationId(null)
-        await loadConversation(null)
-      } else {
-        await loadConversation(selectedConversationIdRef.current)
+      if (mutAbortRef.current === ctrl) mutInFlightRef.current = false
+      setDeletingId(null)
+      setConfirmDeleteId(null)
+      if (!res.ok) {
+        if (res.error.kind === 'aborted' || res.error.kind === 'epoch_stale') return
+        setActionError(formatPersonalKeeperError(res.error, 'delete'))
+        if (res.error.kind === 'unauthorized' || res.error.kind === 'csrf_rejected') {
+          return
+        }
+        // Once a conversation enters Deletion_failed or Deleted on the server,
+        // GET ?conversation_id=<id> returns 404 (`server_preview_keeper_conversation.ml:120-124`).
+        // Fall back to the keeper's current view so the failed-deletion retry UI stays visible.
+        const viewingDeletedTarget = selectedConversationIdRef.current === conversationId
+        const targetMayBeUnavailable =
+          res.error.code === 'conversation_not_deleted'
+          || res.error.code === 'unknown_conversation'
+          || res.error.kind === 'server'
+          || res.error.kind === 'network'
+          || res.error.kind === 'decode'
+        if (viewingDeletedTarget && targetMayBeUnavailable) {
+          selectedConversationIdRef.current = null
+          setSelectedConversationId(null)
+          await loadConversation(null)
+        } else {
+          await loadConversation(selectedConversationIdRef.current)
+        }
+        return
       }
-      return
+      const nextSelected = selectedConversationIdRef.current === conversationId
+        ? null
+        : selectedConversationIdRef.current
+      if (nextSelected !== selectedConversationIdRef.current) {
+        selectedConversationIdRef.current = nextSelected
+        setSelectedConversationId(nextSelected)
+      }
+      pushShellToast(
+        formatVendorCopyOutcome(res.value.vendor_copy),
+        res.value.vendor_copy === 'may_remain' ? 'info' : 'success',
+      )
+      await loadConversation(nextSelected)
+    } finally {
+      if (mutAbortRef.current === ctrl) {
+        mutInFlightRef.current = false
+        if (mountedRef.current) setDeletingId(null)
+      }
     }
-    const nextSelected = selectedConversationIdRef.current === conversationId
-      ? null
-      : selectedConversationIdRef.current
-    if (nextSelected !== selectedConversationIdRef.current) {
-      selectedConversationIdRef.current = nextSelected
-      setSelectedConversationId(nextSelected)
-    }
-    pushShellToast(
-      formatVendorCopyOutcome(res.value.vendor_copy),
-      res.value.vendor_copy === 'may_remain' ? 'info' : 'success',
-    )
-    await loadConversation(nextSelected)
   }
 
   const handleSendTurn = async () => {
-    if (busy || isViewingHistorical || authSession.peek().kind !== 'multi_account_signed_in') return
+    if (mutInFlightRef.current || busy || isViewingHistorical || authSession.peek().kind !== 'multi_account_signed_in') return
     if (keeper.runtime_id === null) {
       setActionError('먼저 상단에서 개인 런타임을 연결하세요.')
       return
@@ -294,6 +315,7 @@ export function PersonalKeeperChatPanel(props: PersonalKeeperChatPanelProps) {
       )
       return
     }
+    mutInFlightRef.current = true
     mutAbortRef.current?.abort('superseded')
     const ctrl = new AbortController()
     mutAbortRef.current = ctrl
@@ -304,40 +326,48 @@ export function PersonalKeeperChatPanel(props: PersonalKeeperChatPanelProps) {
     setActionError(null)
     setConfirmDeleteId(null)
 
-    const res = await sendPersonalKeeperTurnApi(targetKeeper, messageToSend, ctrl.signal)
-    if (
-      !mountedRef.current
-      || activeKeeperRef.current !== targetKeeper
-      || !isEpochCurrent(startEpoch)
-      || ctrl.signal.aborted
-      || authSession.peek().kind !== 'multi_account_signed_in'
-    ) {
-      return
-    }
-    setSendingMessage(null)
-    if (!res.ok) {
-      if (res.error.kind === 'aborted' || res.error.kind === 'epoch_stale') return
-      setActionError(formatPersonalKeeperError(res.error, 'turn'))
-      if (res.error.kind !== 'unauthorized' && res.error.kind !== 'csrf_rejected') {
-        await loadConversation(null)
+    try {
+      const res = await sendPersonalKeeperTurnApi(targetKeeper, messageToSend, ctrl.signal)
+      if (
+        !mountedRef.current
+        || activeKeeperRef.current !== targetKeeper
+        || !isEpochCurrent(startEpoch)
+        || ctrl.signal.aborted
+        || authSession.peek().kind !== 'multi_account_signed_in'
+      ) {
+        return
       }
-      return
+      if (mutAbortRef.current === ctrl) mutInFlightRef.current = false
+      setSendingMessage(null)
+      if (!res.ok) {
+        if (res.error.kind === 'aborted' || res.error.kind === 'epoch_stale') return
+        setActionError(formatPersonalKeeperError(res.error, 'turn'))
+        if (res.error.kind !== 'unauthorized' && res.error.kind !== 'csrf_rejected') {
+          await loadConversation(null)
+        }
+        return
+      }
+      setDraft('')
+      selectedConversationIdRef.current = null
+      setSelectedConversationId(null)
+      if (res.value.recorded) {
+        setEphemeralReply(null)
+      } else {
+        setEphemeralReply({
+          message: messageToSend,
+          text: res.value.text,
+          model: res.value.model,
+          runtimeId: res.value.runtime_id,
+          atMs: Date.now(),
+        })
+      }
+      await loadConversation(null)
+    } finally {
+      if (mutAbortRef.current === ctrl) {
+        mutInFlightRef.current = false
+        if (mountedRef.current) setSendingMessage(null)
+      }
     }
-    setDraft('')
-    selectedConversationIdRef.current = null
-    setSelectedConversationId(null)
-    if (res.value.recorded) {
-      setEphemeralReply(null)
-    } else {
-      setEphemeralReply({
-        message: messageToSend,
-        text: res.value.text,
-        model: res.value.model,
-        runtimeId: res.value.runtime_id,
-        atMs: Date.now(),
-      })
-    }
-    await loadConversation(null)
   }
 
   const draftBytes = utf8ByteLength(draft)

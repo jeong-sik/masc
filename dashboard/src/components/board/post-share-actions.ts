@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useEffect, useRef, useState } from 'preact/hooks'
 import { Link2, Quote, Share2, Sparkles } from 'lucide-preact'
 import { ActionButton } from '../common/button'
 import { copyToClipboard } from '../common/copyable-code'
@@ -24,6 +24,14 @@ function contextInferenceTargetKeeper(post: BoardPost): string | undefined {
 
 export function PostShareActions({ post, compact = false }: { post: BoardPost; compact?: boolean }) {
   const [contextPending, setContextPending] = useState(false)
+  const pendingRef = useRef(false)
+  const mountedRef = useRef(true)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
   const permalink = boardPostPermalink(post.id)
   const trackback = boardPostTrackbackMarkdown(post)
   const xShareUrl = boardPostXShareUrl(post)
@@ -43,7 +51,8 @@ export function PostShareActions({ post, compact = false }: { post: BoardPost; c
 
   const inferContext = async (event: Event) => {
     event.stopPropagation()
-    if (contextPending) return
+    if (pendingRef.current) return
+    pendingRef.current = true
     setContextPending(true)
     try {
       const result = await requestBoardContextInference(post.id, contextInferenceTargetKeeper(post))
@@ -52,7 +61,8 @@ export function PostShareActions({ post, compact = false }: { post: BoardPost; c
       const message = err instanceof Error ? err.message : String(err)
       showToast(`맥락 추론 요청에 실패했습니다: ${message}`, 'error')
     } finally {
-      setContextPending(false)
+      pendingRef.current = false
+      if (mountedRef.current) setContextPending(false)
     }
   }
 

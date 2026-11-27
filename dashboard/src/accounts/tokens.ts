@@ -268,7 +268,7 @@ export function createTokens({ send, leave, now }: TokensDeps): TokensModel {
     const shown = view.peek()
     session = next
     if (shown.kind !== 'waiting' && shown.forUser === next.userId) return Promise.resolve()
-    if (next.userId !== person) {
+    if (next.userId !== person || left) {
       person = next.userId
       round += 1
       left = false

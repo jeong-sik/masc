@@ -395,6 +395,23 @@ describe('Keepers Workspace — Pure Contracts & Parsers', () => {
     expect(css).not.toMatch(/#[0-9a-fA-F]{3,8}\b/)
     expect(css).not.toMatch(/\b(?:padding|margin|gap):\s*[^;]*\b(?:1|2|3|5|6|10)px\b/)
   })
+
+  it('keeps collapsible delegate shells wrappable and full-width when opened in keepers.css', () => {
+    const cssPath = resolve(process.cwd(), 'src/workspaces/keepers/keepers.css')
+    const css = readFileSync(cssPath, 'utf8')
+    const ruleBody = (selector: string) => {
+      const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      const match = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`))
+      expect(match, `missing CSS rule for ${selector}`).not.toBeNull()
+      return match![1]!
+    }
+
+    expect(ruleBody('.kp-collapsible-shell')).toMatch(/flex-wrap:\s*wrap\b/)
+    expect(ruleBody('.kp-collapsible-details[open]')).toMatch(/flex:\s*1\s+0\s+100%/)
+    expect(ruleBody('.kp-collapsible-actions')).toMatch(/max-width:\s*100%/)
+    expect(ruleBody('.kp-collapsible-actions')).not.toMatch(/flex:\s*0\s+0\s+auto/)
+    expect(ruleBody('.kp-block-preview')).toMatch(/flex:\s*1\s+1\s+0\b/)
+  })
 })
 
 describe('Keepers Workspace — Interactive DOM & API Flows', () => {

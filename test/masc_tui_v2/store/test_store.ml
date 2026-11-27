@@ -24474,9 +24474,72 @@ let test_uncached_knowledge_jumps () =
          | _ -> false)
        (Cmd.flatten wiki_stale_cmds))
 
+(* #42667: how long a keeper has been failing, beside its last failure.
+   [failing_since] counts only while the roster still calls it unhealthy. *)
+let test_keeper_failing_since () =
+  let since = 1_795_700_000.0 in
+  let failing = sample_keeper ~health:Wire_fleet.Keeper_failing in
+  let keepers =
+    [
+      failing "fails";
+      failing "fails-no-since";
+      { (failing "paused") with paused = true };
+      sample_keeper ~health:Wire_fleet.Keeper_degraded "degraded";
+      sample_keeper ~health:Wire_fleet.Keeper_healthy "recovered";
+    ]
+  in
+  let with_since = { Wire_fleet.empty_keeper_diagnostics with failing_since_unix = Some since } in
+  let extras : Wire_fleet.keeper_roster_extras =
+    {
+      sandbox_profiles = [];
+      candle_balances_milli = [];
+      candle_summary = None;
+      turn_pulses = [];
+      diagnostics =
+        [
+          ("fails", with_since);
+          ( "fails-no-since",
+            { Wire_fleet.empty_keeper_diagnostics with
+              last_failure_cause = Some "429" } );
+          ("paused", with_since);
+          ("degraded", with_since);
+          ("recovered", with_since);
+        ];
+      roster_total = None;
+      roster_truncated = false;
+    }
+  in
+  let m0 = Model.initial ~cols:140 ~rows:40 () in
+  let m =
+    {
+      m0 with
+      fleet =
+        m0.fleet
+        |> Fleet_store.apply_roster ~observed_at:t0 (roster_of keepers)
+        |> Fleet_store.apply_roster_extras extras;
+    }
+  in
+  let since_of name = Model.keeper_failing_since ~name m in
+  Alcotest.(check (option (float 0.0))) "a failing keeper names when it began"
+    (Some since) (since_of "fails");
+  Alcotest.(check (option (float 0.0))) "a degraded keeper names it too"
+    (Some since) (since_of "degraded");
+  Alcotest.(check (option (float 0.0))) "no field names nothing" None
+    (since_of "fails-no-since");
+  Alcotest.(check (option (float 0.0))) "a paused keeper names nothing" None
+    (since_of "paused");
+  Alcotest.(check (option (float 0.0)))
+    "a reading left on a healthy keeper names nothing" None
+    (since_of "recovered");
+  Alcotest.(check (option (float 0.0))) "a keeper not in the roster names nothing"
+    None (since_of "absent")
+
 let () =
   Alcotest.run "masc_tui_store"
     [
+      ( "keeper_failing_since"
+      , [ Alcotest.test_case "failing_since only while the keeper is unhealthy" `Quick
+            test_keeper_failing_since ] );
       ( "discord_reply"
       , [ Alcotest.test_case "recorded origin and safe receipt recovery" `Quick
             test_discord_reply_source_and_receipt ] );

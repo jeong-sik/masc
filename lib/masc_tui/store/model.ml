@@ -4952,6 +4952,28 @@ let format_elapsed_age ~lang ~now_unix ts =
     let dur = Format_val.format_duration_s (Float.max 0.0 (now_unix -. ts)) in
     Say.resolve lang (Say.make ~ko:(dur ^ " 전") ~en:(dur ^ " ago"))
 
+(* The server sends [failing_since] only while the registry phase is Failing.
+   The roster health decides as the banner's "최근 실패" does, so a reading
+   left over from a keeper that is paused or healthy again names nothing. *)
+let keeper_failing_since ~name (m : t) =
+  match Fleet_store.find_keeper ~name m.fleet with
+  | None -> None
+  | Some k -> (
+      match (k.paused, k.health) with
+      | ( false,
+          ( Wire_fleet.Keeper_failing | Wire_fleet.Keeper_degraded
+          | Wire_fleet.Keeper_recovering ) ) ->
+          Option.bind (Fleet_store.diagnostics_for ~keeper:name m.fleet)
+            (fun (d : Wire_fleet.keeper_diagnostics) -> d.failing_since_unix)
+      | ( true,
+          ( Wire_fleet.Keeper_failing | Wire_fleet.Keeper_degraded
+          | Wire_fleet.Keeper_recovering ) )
+      | ( (true | false),
+          ( Wire_fleet.Keeper_healthy | Wire_fleet.Keeper_working
+          | Wire_fleet.Keeper_idle | Wire_fleet.Keeper_paused
+          | Wire_fleet.Keeper_offline | Wire_fleet.Keeper_booting ) ) ->
+          None)
+
 let keeper_diagnostic_banner ~name (m : t) : keeper_banner_row list =
   let lang = m.lang in
   let say ~ko ~en = Say.resolve lang (Say.make ~ko ~en) in
@@ -5027,6 +5049,11 @@ let keeper_diagnostic_banner ~name (m : t) : keeper_banner_row list =
                      say ~ko:"최근 실패: " ~en:"Last fault: " ^ c ^ ago)
                    d.last_failure_cause
                else None);
+              Option.map
+                (fun ts ->
+                  say ~ko:"실패 시작 " ~en:"failing since "
+                  ^ format_elapsed_age ~lang ~now_unix ts)
+                (keeper_failing_since ~name m);
               (if is_unhealthy then
                  match d.lane_failures with
                  | [] -> None

@@ -65,7 +65,7 @@ import { ConnectorOverviewStrip } from './connector-overview-strip'
 import { ConnectorKeeperMatrix, deriveMatrix } from './connector-keeper-matrix'
 import { ConnectorPathsStrip } from './connector-paths-strip'
 import { createManagedAsyncResource } from '../lib/async-state'
-import { navigate, route } from '../router'
+import { navigate, navigateToKeeper, route } from '../router'
 import { Tk } from './tk'
 import { KeeperBadge } from './keeper-badge'
 
@@ -1422,7 +1422,7 @@ function ConnectorBindingKeeperLink({ binding }: { binding: DiscordConfiguredBin
       data-binding-keeper=${keeperName}
       title=${`${keeperName} keeper 대화 열기`}
       aria-label=${`${binding.channel_id} binding keeper ${keeperName} 열기`}
-      onClick=${() => { navigate('keepers', { keeper: keeperName }) }}
+      onClick=${() => { navigateToKeeper(keeperName) }}
     >
       <span class="chn">${binding.channel_id}</span>
       <span class="arr">→</span>

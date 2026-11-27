@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import type { BoardPost } from '../../types'
 import type { FusionRunRecord, FusionRunStatusLabel, FusionTopologyLabel } from '../../api/dashboard'
-import { navigate, replaceRoute, route } from '../../router'
+import { navigate, navigateToKeeper, replaceRoute, route } from '../../router'
 import {
   fusionBoardError,
   fusionBoardLoading,
@@ -527,8 +527,8 @@ function FusionStatusGlyph({ status }: { status: FusionRunStatus }) {
   return html`<span class=${`fus-rdot ${statusDotClass(status)}`} aria-hidden="true"></span>`
 }
 
-// Keeper identity link (prototype `.fus-who`/`.nm`). Navigates to the keeper
-// chat lane, preserving the existing `navigate('keepers', …)` wiring.
+// Keeper identity link (prototype `.fus-who`/`.nm`). Opens the keeper's chat
+// lane in the keepers tab.
 function FusionKeeperLink({ keeper, size = 'sm' }: { keeper: string; size?: 'sm' | 'md' }) {
   return html`
     <button
@@ -537,7 +537,7 @@ function FusionKeeperLink({ keeper, size = 'sm' }: { keeper: string; size?: 'sm'
       title=${`${keeper} 대화 열기`}
       onClick=${(event: Event) => {
         event.stopPropagation()
-        navigate('keepers', { keeper })
+        navigateToKeeper(keeper)
       }}
     >
       <${AgentAvatar} name=${keeper} size=${size} />
@@ -1093,7 +1093,7 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
           <button
             type="button"
             class=${`fus-link inline ${ringFocusClasses()}`}
-            onClick=${() => navigate('keepers', { keeper: run.keeperName })}
+            onClick=${() => navigateToKeeper(run.keeperName)}
           >키퍼 열기</button>
           <button
             type="button"
@@ -1220,7 +1220,7 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
                       <button
                         type="button"
                         class=${`fus-sink-to ${ringFocusClasses()}`}
-                        onClick=${() => navigate('keepers', { keeper: run.keeperName })}
+                        onClick=${() => navigateToKeeper(run.keeperName)}
                       >${run.keeperName} chat lane →</button>
                       <span class="fus-sink-d">resolved_answer 1줄 append → 다음 턴 observation · librarian이 memory-os fact로 추출</span>
                     </div>

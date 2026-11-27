@@ -25,7 +25,7 @@ import {
   type RecurrenceKind,
   type SchedStatusSpec,
 } from '../v2/schedule-constants'
-import { hashForRoute } from '../../router'
+import { keeperHref } from '../../router'
 
 type ScheduleFilterKey = 'all' | 'scheduled' | 'due' | 'running' | 'terminal'
 
@@ -1834,7 +1834,7 @@ export function SchDetail({
                   <a
                     class="sch-keeper-jump"
                     data-testid="schedule-detail-keeper-link"
-                    href=${hashForRoute('keepers', { keeper: request.payload_keeper_name })}
+                    href=${keeperHref(request.payload_keeper_name)}
                     title="이 예약이 깨우는 keeper의 상세 화면으로 이동합니다. 타임라인과 tool call 기록에서 실행 내용을 볼 수 있습니다."
                   >${request.payload_keeper_name} 활동 보기 →</a>
                 `

@@ -33,7 +33,7 @@ slot 이 하나뿐이면 순서를 바꿔도 같은 slot 을 부른다.
 #39190 의 운영자 질문(「라우팅이 provider 가 알려 준 리셋 시각을 써도 되는가」)에는 exact lane 에 한해 「쓴다」로 답한다.
 이 답은 저장소 주인이 이 RFC 를 병합할 때 정해진다.
 RFC-provider-path-rest §6 이 미룬 Phase 2 중 exact lane 부분이 이 문서다.
-Keeper turn walk 는 바꾸지 않는다.
+이 RFC 는 Keeper turn walk 를 바꾸지 않는다. Keeper walk 가 말한 시각 전에 부르지 않는 규칙은 RFC-provider-path-rest 6.1 이 정했다.
 
 ## 1. 지금 동작
 
@@ -64,7 +64,7 @@ Keeper turn walk 는 바꾸지 않는다.
 - RFC-exact-lane-walks-one-slot-list §3.5 는 「어느 슬롯도 목록에서 지우지 않는다. 쉬는 슬롯도 차례가 오면 부른다」고 정했다(:179). 근거로 헌법 `no_wall_clock_death` 를 든다(:181).
 - `runtime_quota_window.mli:13-16` 과 `runtime_exact_lane_backpressure.mli:13-15` 도 같은 결정을 적는다. 뒤쪽은 근거로 RFC-0370 §3.3 을 든다. 그런데 RFC-0370 §3.3 본문은 반대다. 「소진된 창의 runtime은 후보 목록에 이름이 오르지 않고, `resets_at` 경과로 자연 복귀」(RFC-0370:160-165).
 - RFC-provider-path-rest §6 은 「walk 가 쉬는 후보를 건너뛰고, 모두 쉬면 호출 없이 "모든 경로가 쉼" 을 typed terminal 로 끝내게 한다」를 Phase 2 로 미뤘다(:356-358). RFC-0433 과 부딪힌다는 이유였다.
-- Keeper turn walk 는 자기 턴이 실패한 뒤에만 provider 가 말한 시각까지 기다린다. 쉬는 경로는 그 시각까지 뒤로 가고, 실패한 턴 뒤 새 walk 의 맨 앞 경로가 쉬면 다음 턴을 가장 이른 시각까지 미룬다(`Keeper_turn_driver.next_dispatch_after_failure`). 턴 안의 walk 는 말한 시각도 순서로만 읽는다. 그래서 다른 Keeper 의 거절이 적은 시각은 이 Keeper 의 첫 호출을 막지 못한다(RFC-provider-path-rest 6.1). 성공은 말한 리셋 기록을 지우지 않는다(`Runtime_quota_window.note_succeeded`).
+- Keeper turn walk 는 자기 턴이 실패한 뒤에만 provider 가 말한 시각까지 기다린다. 쉬는 경로는 그 시각까지 뒤로 가고, 실패한 턴 뒤 새 walk 의 맨 앞 경로가 쉬면 다음 턴을 가장 이른 시각까지 미룬다(`Keeper_turn_driver.next_dispatch_after_failure`). 이 RFC 를 쓸 때 턴 안의 walk 는 말한 시각도 순서로만 읽었다. 그래서 다른 Keeper 의 거절이 적은 시각은 이 Keeper 의 첫 호출을 막지 못했다. 지금은 부를 수 있는 다른 후보가 있으면 말한 시각 전의 후보를 부르지 않는다(RFC-provider-path-rest 6.1 K1·K5). 모든 후보가 기다리는 walk 의 첫 호출은 아직 나간다(K3). 성공은 말한 리셋 기록을 지우지 않는다(`Runtime_quota_window.note_succeeded`).
 
 ## 2. 왜 기존 원칙과 부딪히지 않나
 

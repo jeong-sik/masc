@@ -208,6 +208,7 @@ export function PersonalKeeperChatPanel(props: PersonalKeeperChatPanelProps) {
       ) {
         return
       }
+      if (mutAbortRef.current === ctrl) mutInFlightRef.current = false
       setStartingConv(false)
       if (!res.ok) {
         if (res.error.kind === 'aborted' || res.error.kind === 'epoch_stale') return
@@ -251,6 +252,7 @@ export function PersonalKeeperChatPanel(props: PersonalKeeperChatPanelProps) {
       ) {
         return
       }
+      if (mutAbortRef.current === ctrl) mutInFlightRef.current = false
       setDeletingId(null)
       setConfirmDeleteId(null)
       if (!res.ok) {
@@ -335,6 +337,7 @@ export function PersonalKeeperChatPanel(props: PersonalKeeperChatPanelProps) {
       ) {
         return
       }
+      if (mutAbortRef.current === ctrl) mutInFlightRef.current = false
       setSendingMessage(null)
       if (!res.ok) {
         if (res.error.kind === 'aborted' || res.error.kind === 'epoch_stale') return

@@ -27,6 +27,7 @@ type action =
   | Dive_selected
   | Confirm_selected
   | Pop_back_or_close
+  | Open_account
   | Open_settings
   | Teleport_blocked
   | Open_incidents
@@ -252,6 +253,7 @@ let action_tag = function
   | Link_task_goal -> 70
   | Keeper_wake_or_online -> 71
   | Keeper_stop_armed -> 72
+  | Open_account -> 73
 
 let equal_action a b =
   if not (Int.equal (action_tag a) (action_tag b)) then false
@@ -272,6 +274,7 @@ let equal_action a b =
     | Dive_selected, Dive_selected
     | Confirm_selected, Confirm_selected
     | Pop_back_or_close, Pop_back_or_close
+    | Open_account, Open_account
     | Open_settings, Open_settings
     | Teleport_blocked, Teleport_blocked
     | Open_incidents, Open_incidents
@@ -340,6 +343,7 @@ let equal_action a b =
       | Dive_selected
       | Confirm_selected
       | Pop_back_or_close
+      | Open_account
       | Open_settings
       | Teleport_blocked
       | Open_incidents
@@ -609,6 +613,7 @@ let ask_choice_bindings =
 
 let say_dive = Say.make ~ko:"상세" ~en:"Dive"
 let say_back = Say.make ~ko:"닫기/뒤로" ~en:"Back"
+let say_account = Say.make ~ko:"계정" ~en:"Account"
 let say_settings = Say.make ~ko:"설정" ~en:"Settings"
 let say_teleport = Say.make ~ko:"대기 이동" ~en:"Jump"
 let say_incidents = Say.make ~ko:"이력" ~en:"Incidents"
@@ -676,6 +681,13 @@ let bindings : binding list =
         ~action:Focus_filter ~key_display:"/" ~hint_label:say_filter
         ~help_desc:(Say.make ~ko:"현재 목록 필터 또는 산출물 본문 검색" ~en:"Filter list or search artifact document")
         ~footer_priority:6 (bare_char '/');
+      bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_overlays
+        ~action:Open_account ~key_display:"@" ~hint_label:say_account
+        ~help_desc:
+          (Say.make
+             ~ko:"계정·세션·토큰 전환 및 다중 계정 프로바이더 오버레이 열기"
+             ~en:"Open Account, Session, Token & Multi-Account Provider overlay")
+        ~slash_twin:"/account" ~footer_priority:6 (bare_char '@');
       bind ~scope:Unfocused_nav ~tier:Bare_unfocused ~category:Cat_overlays
         ~action:Open_settings ~key_display:"7" ~hint_label:say_settings
         ~help_desc:(Say.make ~ko:"7-탭 설정 오버레이 열기" ~en:"Open 7-tab Settings overlay")
@@ -1151,6 +1163,13 @@ let bindings : binding list =
         ~slash_twin:"/quit" ~footer_priority:0 (ctrl_char 'q');
       (* --- Modern Accelerators (CSI u / Alt+ / Function keys) --- *)
       bind ~scope:Global ~tier:Modern_accel ~category:Cat_overlays
+        ~action:Open_account ~key_display:"Alt+A" ~hint_label:say_account
+        ~help_desc:
+          (Say.make
+             ~ko:"계정·세션·토큰 전환 및 다중 계정 프로바이더 오버레이 열기"
+             ~en:"Open Account, Session, Token & Multi-Account Provider overlay")
+        ~slash_twin:"/account" ~footer_priority:0 (alt_char 'a');
+      bind ~scope:Global ~tier:Modern_accel ~category:Cat_overlays
         ~action:Open_settings ~key_display:"Ctrl+," ~hint_label:say_settings
         ~help_desc:(Say.make ~ko:"7-탭 설정 오버레이 열기" ~en:"Open 7-tab Settings overlay")
         ~slash_twin:"/config" ~footer_priority:7 (ctrl_char ',');
@@ -1226,6 +1245,7 @@ let scope_chain_of_focus ?(approval_strip_active = false)
       [ Overlay_focused ]
   | Nav.Overlay_focused
       ( Nav.Palette
+      | Nav.Account
       | Nav.Settings _
       | Nav.Incidents
       | Nav.Queue_context _
@@ -1662,6 +1682,7 @@ let compact_help_group ~lang (grp : help_group) : help_group =
         | Link_task_goal
         | Keeper_wake_or_online
         | Keeper_stop_armed
+        | Open_account
         | Quit_app ->
             Some e)
       grp.entries
@@ -1699,6 +1720,7 @@ let palette_commands ~lang =
           | Focus_filter
           | Dive_selected
           | Open_settings
+          | Open_account
           | Teleport_blocked
           | Open_incidents
           | Voice_ptt_toggle

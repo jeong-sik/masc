@@ -276,6 +276,7 @@ type t = {
   runtime : Runtime_store.t;
   infra : Infra_store.t;
   config : Config_store.t;
+  account : Account_store.t;
   palette : palette_state;
   inline_modal : inline_modal_state option;
   discord_replies : Discord_reply_store.t;

@@ -166,6 +166,7 @@ let slash_spec_requires_arg (spec : Slash.spec) =
   | Slash.Cmd_keeper
   | Slash.Cmd_model
   | Slash.Cmd_config
+  | Slash.Cmd_account
   | Slash.Cmd_incidents
   | Slash.Cmd_jump
   | Slash.Cmd_voice
@@ -240,6 +241,7 @@ let resolve_slash_arg_candidates ?cmd_name (m : Model.t) (spec : Slash.spec)
         | Slash.Cmd_infra
         | Slash.Cmd_model
         | Slash.Cmd_config
+        | Slash.Cmd_account
         | Slash.Cmd_incidents
         | Slash.Cmd_jump
         | Slash.Cmd_voice
@@ -357,6 +359,7 @@ let resolve_slash_arg_candidates ?cmd_name (m : Model.t) (spec : Slash.spec)
   | Slash.Cmd_runtime
   | Slash.Cmd_infra
   | Slash.Cmd_config
+  | Slash.Cmd_account
   | Slash.Cmd_incidents
   | Slash.Cmd_jump
   | Slash.Cmd_voice
@@ -653,6 +656,7 @@ let sync_config_for_keeper_view (m : Model.t) =
       | Nav.Queue_context _
       | Nav.Inline_action _
       | Nav.Ask_answer
+      | Nav.Account
       | Nav.Help
       | Nav.System_gate _ )
   | None -> (
@@ -814,6 +818,7 @@ let capture_workspace_return_frame (m : Model.t) : Model.workspace_return_frame 
         ( Nav.Palette
         | Nav.Settings _
         | Nav.Inline_action _
+        | Nav.Account
         | Nav.Help
         | Nav.System_gate _ )
     | None ->
@@ -1375,6 +1380,7 @@ let open_overlay (m : Model.t) overlay =
     match overlay with
     | Nav.Help -> 0
     | Nav.Palette
+    | Nav.Account
     | Nav.Settings _
     | Nav.Incidents
     | Nav.Queue_context _
@@ -1387,6 +1393,7 @@ let open_overlay (m : Model.t) overlay =
     match overlay with
     | Nav.Queue_context _ -> 0
     | Nav.Palette
+    | Nav.Account
     | Nav.Settings _
     | Nav.Incidents
     | Nav.Inline_action _
@@ -1399,7 +1406,8 @@ let open_overlay (m : Model.t) overlay =
     match overlay, m.nav.overlay with
     | ( Nav.Help
       , Some
-          ( ( Nav.Settings _
+          ( ( Nav.Account
+            | Nav.Settings _
             | Nav.Incidents
             | Nav.Queue_context _
             | Nav.Ask_answer
@@ -1414,6 +1422,7 @@ let open_overlay (m : Model.t) overlay =
                 (Nav.Auth_gate | Nav.Server_offline | Nav.Micro_viewport) )
         | None ) )
     | ( ( Nav.Palette
+        | Nav.Account
         | Nav.Settings _
         | Nav.Incidents
         | Nav.Queue_context _
@@ -1447,6 +1456,7 @@ let open_overlay (m : Model.t) overlay =
     (match overlay, m.config.target with
     | Nav.Settings _, Wire_config.Target_keeper_create -> m.config
     | ( ( Nav.Settings _
+        | Nav.Account
         | Nav.Palette
         | Nav.Incidents
         | Nav.Queue_context _
@@ -1466,6 +1476,7 @@ let open_overlay (m : Model.t) overlay =
     | Nav.System_gate Nav.Media_viewer ->
         { m.knowledge with detail_scroll_offset = 0 }
     | Nav.Palette
+    | Nav.Account
     | Nav.Settings _
     | Nav.Incidents
     | Nav.Queue_context _
@@ -1487,6 +1498,7 @@ let open_overlay (m : Model.t) overlay =
         then m.ask_modal
         else None
     | Nav.Palette
+    | Nav.Account
     | Nav.Settings _
     | Nav.Incidents
     | Nav.Queue_context _
@@ -1498,6 +1510,7 @@ let open_overlay (m : Model.t) overlay =
     match overlay with
     | Nav.Inline_action kind -> Some (Model.inline_modal_for kind)
     | Nav.Palette
+    | Nav.Account
     | Nav.Settings _
     | Nav.Incidents
     | Nav.Queue_context _
@@ -1506,8 +1519,9 @@ let open_overlay (m : Model.t) overlay =
     | Nav.System_gate _ ->
         None
   in
+  let account = Account_store.close_token_editor m.account in
   let next =
-    { m with nav; drafts; config; incidents; knowledge; inline_modal; ask_modal }
+    { m with nav; drafts; config; account; incidents; knowledge; inline_modal; ask_modal }
     |> Model.sync_sidebar_cursor |> refresh_queue_on_entry
   in
   (next, View_fetches.fetches_for_current_view next)
@@ -1546,6 +1560,7 @@ let open_inspector (m : Model.t) (insp : Nav.inspector) =
         ( Nav.Palette
         | Nav.Settings _
         | Nav.Inline_action _
+        | Nav.Account
         | Nav.Help
         | Nav.System_gate _ )
     | None ->
@@ -1737,6 +1752,8 @@ let navigate_menu_target ?(keep_sidebar_focus = false) (m : Model.t)
         else Infra_store.set_tab tab m.infra
       in
       switch_workspace { m with infra } Nav.Infra |> preserve_sidebar
+  | Nav.Menu_account ->
+      if keep_sidebar_focus then (m, []) else open_overlay m Nav.Account
   | Nav.Menu_settings ->
       if keep_sidebar_focus then (m, []) else open_global_settings m
   | Nav.Menu_incidents ->
@@ -1815,6 +1832,56 @@ let open_inline_modal (m : Model.t) kind =
     match kind with
     | Nav.Discord_reply_form _ ->
         { modal with fields = discord_reply_fields (discord_reply_attempt m kind) modal }
+    | Nav.Ma_provider_key_add_form ->
+        let default_integration =
+          Account_store.integrations_list m.account
+          |> List.find_map (fun (it : Wire_account.person_integration) ->
+                 if List.exists
+                      (Wire_account.equal_connect_method Wire_account.Connect_key)
+                      it.connect
+                 then Some it.integration_id
+                 else None)
+          |> Option.value ~default:""
+        in
+        let fields =
+          List.map
+            (fun (f : Model.modal_form_field) ->
+              if String.equal f.key "ma_key_integration" then
+                { f with value = default_integration }
+              else f)
+            modal.fields
+        in
+        { modal with fields }
+    | Nav.Ma_provider_verify_form { provider_account_id; integration_id } ->
+        let default_model =
+          let from_runtime =
+            Account_store.runtimes_for_account ~provider_account_id m.account
+            |> List.find_map (fun (r : Wire_account.provider_runtime) ->
+                   match r.model with
+                   | Wire_account.Runtime_model model -> Some model
+                   | Wire_account.Runtime_model_unread _ -> None)
+          in
+          match from_runtime with
+          | Some model -> model
+          | None -> (
+              match
+                Account_store.integration_by_id ~integration_id m.account
+              with
+              | Some { models = first :: _; _ } -> first
+              | Some { models = []; _ } | None -> "")
+        in
+        let fields =
+          List.map
+            (fun (f : Model.modal_form_field) ->
+              if String.equal f.key "ma_verify_model" then
+                { f with value = default_model }
+              else f)
+            modal.fields
+        in
+        { modal with fields }
+    | Nav.Ma_provider_login_form
+    | Nav.Ma_provider_key_replace_form _
+    | Nav.Ma_provider_key_remove_confirm _
     | Nav.Btw_query
     | Nav.Gate_reject _
     | Nav.Verification_reject _
@@ -1869,11 +1936,16 @@ let open_inline_modal (m : Model.t) kind =
         modal
   in
   let modal_edit_cursor = String.length (Model.modal_active_field_value modal) in
+  let return_overlay =
+    if Option.equal Nav.equal_overlay m.nav.overlay (Some Nav.Account) then
+      Some Nav.Account
+    else None
+  in
   let nav =
     {
       m.nav with
       overlay = Some (Nav.Inline_action kind);
-      return_overlay = None;
+      return_overlay;
       filter_focused = false;
       sidebar_focused = false;
       sidebar_open = close_drawer_if_floating m;
@@ -2005,6 +2077,7 @@ let cycle_sub_tab (m : Model.t) dir =
       ( Nav.Palette
       | Nav.Incidents
       | Nav.Inline_action _
+      | Nav.Account
       | Nav.Help
       | Nav.System_gate _ ) ->
       (m, [])
@@ -2160,6 +2233,7 @@ let current_filter_query (m : Model.t) =
       | Nav.Queue_context _
       | Nav.Inline_action _
       | Nav.Ask_answer
+      | Nav.Account
       | Nav.Help
       | Nav.System_gate _ )
   | None ->
@@ -2226,6 +2300,7 @@ let set_active_filter_query q (m : Model.t) =
         | Nav.Queue_context _
         | Nav.Inline_action _
         | Nav.Ask_answer
+        | Nav.Account
         | Nav.Help
         | Nav.System_gate _ )
     | None ->
@@ -2422,6 +2497,9 @@ let palette_entries_with_overflow (m : Model.t) :
                    "tree"; "트리"; "git" ]
              | Nav.Menu_infra Nav.Infra_sandboxes ->
                  [ "sandbox"; "vm"; "ssh"; "docker"; "container"; "샌드박스" ]
+             | Nav.Menu_account ->
+                 [ "account"; "session"; "token"; "pat"; "provider"; "auth";
+                   "계정"; "세션"; "토큰"; "인증"; "프로바이더" ]
              | Nav.Menu_infra Nav.Infra_activity_logs
              | Nav.Menu_pulse
              | Nav.Menu_work _
@@ -4912,7 +4990,14 @@ let submit_inline_modal ~now (m : Model.t) =
              toasts in Update_http without clearing inline_modal, so close the
              modal immediately with an honest in-flight toast to prevent hang. *)
           let close_with_inflight_toast ~msg (m_in : Model.t) =
-            let nav = { m_in.nav with overlay = None; filter_focused = false } in
+            let nav =
+              {
+                m_in.nav with
+                overlay = m_in.nav.return_overlay;
+                return_overlay = None;
+                filter_focused = false;
+              }
+            in
             { m_in with nav; inline_modal = None }
             |> Model.with_toast ~now ~level:Model.Toast_info msg
           in
@@ -6697,7 +6782,7 @@ let submit_inline_modal ~now (m : Model.t) =
                                 };
                           };
                       ] ))
-          | Nav.Setup_login_start_form ->
+          | Nav.Setup_login_start_form -> (
               let integration_id =
                 String.trim
                   (Model.modal_field_value ~key:"setup_login_integration" modal)
@@ -6710,11 +6795,41 @@ let submit_inline_modal ~now (m : Model.t) =
                 if String.equal account_ref_raw "" then None
                 else Some account_ref_raw
               in
+              if Rbac.is_multi_account m.auth_session && Option.is_some account_ref
+              then
+                set_modal_error
+                  "Multi-Account mode does not accept account_ref — leave it blank"
+              else
+                ( close_with_inflight_toast
+                    ~msg:
+                      (Say.make
+                         ~ko:("계정 로그인 시작 요청 중: " ^ integration_id)
+                         ~en:("Starting official CLI login for " ^ integration_id))
+                    m
+                , [
+                    Cmd.Http_post
+                      {
+                        epoch = m.epoch;
+                        req =
+                          Cmd.Post_setup_login_start
+                            {
+                              integration_id;
+                              account_ref =
+                                (if Rbac.is_multi_account m.auth_session then None
+                                 else account_ref);
+                            };
+                      };
+                  ] ))
+          | Nav.Ma_provider_login_form ->
+              let integration_id =
+                String.trim
+                  (Model.modal_field_value ~key:"ma_login_integration" modal)
+              in
               ( close_with_inflight_toast
                   ~msg:
                     (Say.make
-                       ~ko:("계정 로그인 시작 요청 중: " ^ integration_id)
-                       ~en:("Starting official CLI login for " ^ integration_id))
+                       ~ko:("다중 계정 CLI 로그인 시작 중: " ^ integration_id)
+                       ~en:("Starting Multi-Account CLI login for " ^ integration_id))
                   m
               , [
                   Cmd.Http_post
@@ -6722,9 +6837,99 @@ let submit_inline_modal ~now (m : Model.t) =
                       epoch = m.epoch;
                       req =
                         Cmd.Post_setup_login_start
-                          { integration_id; account_ref };
+                          { integration_id; account_ref = None };
                     };
-                ] )))
+                ] )
+          | Nav.Ma_provider_key_add_form ->
+              let integration_id =
+                String.trim
+                  (Model.modal_field_value ~key:"ma_key_integration" modal)
+              in
+              let key =
+                String.trim (Model.modal_field_value ~key:"ma_key_secret" modal)
+              in
+              (* Security: close immediately and never echo/log API key. *)
+              ( close_with_inflight_toast
+                  ~msg:
+                    (Say.make
+                       ~ko:("개인 API 키 계정 등록 중: " ^ integration_id)
+                       ~en:("Registering personal API key for " ^ integration_id))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req = Cmd.Post_ma_setup_account_key { integration_id; key };
+                    };
+                ] )
+          | Nav.Ma_provider_key_replace_form { provider_account_id; _ } ->
+              let key =
+                String.trim (Model.modal_field_value ~key:"ma_key_secret" modal)
+              in
+              (* Security: close immediately and never echo/log API key. *)
+              ( close_with_inflight_toast
+                  ~msg:
+                    (Say.make
+                       ~ko:("개인 API 키 교체 중: " ^ provider_account_id)
+                       ~en:("Rotating personal API key for " ^ provider_account_id))
+                  m
+              , [
+                  Cmd.Http_put
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Put_ma_setup_account_key { provider_account_id; key };
+                    };
+                ] )
+          | Nav.Ma_provider_key_remove_confirm { provider_account_id; _ } ->
+              let typed =
+                String.trim
+                  (Model.modal_field_value ~key:"confirm_provider_account_id"
+                     modal)
+              in
+              if not (String.equal typed provider_account_id) then
+                set_modal_error
+                  (Printf.sprintf "Type exact provider_account_id (%s) to confirm"
+                     provider_account_id)
+              else
+                ( close_with_inflight_toast
+                    ~msg:
+                      (Say.make
+                         ~ko:("개인 API 키 계정 삭제 중: " ^ provider_account_id)
+                         ~en:("Removing personal key account: " ^ provider_account_id))
+                    m
+                , [
+                    Cmd.Http_delete
+                      {
+                        epoch = m.epoch;
+                        req =
+                          Cmd.Delete_ma_setup_account_key { provider_account_id };
+                      };
+                  ] )
+          | Nav.Ma_provider_verify_form { provider_account_id; _ } ->
+              let model =
+                String.trim
+                  (Model.modal_field_value ~key:"ma_verify_model" modal)
+              in
+              ( close_with_inflight_toast
+                  ~msg:
+                    (Say.make
+                       ~ko:
+                         (Printf.sprintf "프로바이더 검증 요청 중 (%s · %s)..."
+                            provider_account_id model)
+                       ~en:
+                         (Printf.sprintf "Verifying provider account (%s · %s)..."
+                            provider_account_id model))
+                  m
+              , [
+                  Cmd.Http_post
+                    {
+                      epoch = m.epoch;
+                      req =
+                        Cmd.Post_setup_account_verify
+                          { provider_account_id; model };
+                    };
+                ] ) ))
 
 let move_delta = function
   | Keymap.Up -> -1
@@ -6745,6 +6950,7 @@ let estimated_viewport_rows (m : Model.t) =
       | Nav.Queue_context _
       | Nav.Inline_action _
       | Nav.Ask_answer
+      | Nav.Account
       | Nav.Help
       | Nav.System_gate _ ) ->
       max 4 (rows - 10)
@@ -10758,6 +10964,7 @@ let pop_workspace_return (m : Model.t) =
              | Nav.Palette
              | Nav.Settings _
              | Nav.Inline_action _
+             | Nav.Account
              | Nav.Help
              | Nav.System_gate _ ) as ov) ->
             (Some ov, if keep_ask then m.ask_modal else None)
@@ -10937,6 +11144,7 @@ let close_inspector ?(preserve_overlay = false) (m : Model.t) =
                | Nav.Palette
                | Nav.Settings _
                | Nav.Inline_action _
+               | Nav.Account
                | Nav.Help
                | Nav.System_gate _ ) as ov) ->
               (Some ov, if keep_ask then m.ask_modal else None)
@@ -11867,6 +12075,11 @@ let apply_move (m : Model.t) dir =
                   | Nav.Runtime_assign_form
                   | Nav.Setup_account_key_form
                   | Nav.Setup_login_start_form
+                  | Nav.Ma_provider_login_form
+                  | Nav.Ma_provider_key_add_form
+                  | Nav.Ma_provider_key_replace_form _
+                  | Nav.Ma_provider_key_remove_confirm _
+                  | Nav.Ma_provider_verify_form _
                   | Nav.Board_comment _
                   | Nav.Github_token_form _
                   | Nav.Code_finder_form
@@ -11931,6 +12144,11 @@ let apply_move (m : Model.t) dir =
               | Nav.Runtime_assign_form
               | Nav.Setup_account_key_form
               | Nav.Setup_login_start_form
+              | Nav.Ma_provider_login_form
+              | Nav.Ma_provider_key_add_form
+              | Nav.Ma_provider_key_replace_form _
+              | Nav.Ma_provider_key_remove_confirm _
+              | Nav.Ma_provider_verify_form _
               | Nav.Board_comment _
               | Nav.Github_token_form _
               | Nav.Code_finder_form
@@ -12034,6 +12252,9 @@ let apply_move (m : Model.t) dir =
                 (m.nav.queue_scroll_offset + delta)
             in
             ({ m with nav = { m.nav with queue_scroll_offset } }, []))
+    | Some Nav.Account ->
+        let delta = move_delta dir in
+        ({ m with account = Account_store.move_selection ~delta m.account }, [])
     | Some Nav.Help ->
         let delta = scroll_delta dir in
         let max_scroll = help_max_scroll m in
@@ -12144,6 +12365,7 @@ let apply_move (m : Model.t) dir =
                     | Nav.Menu_keepers
                     | Nav.Menu_runtime _
                     | Nav.Menu_infra _
+                    | Nav.Menu_account
                     | Nav.Menu_settings
                     | Nav.Menu_incidents
                     | Nav.Menu_queue_context

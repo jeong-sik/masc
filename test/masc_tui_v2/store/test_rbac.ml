@@ -279,6 +279,7 @@ let all_route_accesses : (string * Rbac.route_access) list =
     ("Single_user_role_admin", Rbac.Single_user_role_admin);
     ("Single_user_token_admin_only", Rbac.Single_user_token_admin_only);
     ("Own_provider_manage", Rbac.Own_provider_manage);
+    ("Multi_account_own_provider", Rbac.Multi_account_own_provider);
     ("Own_keeper_sandbox_read", Rbac.Own_keeper_sandbox_read);
     ("Memory_diff_read(keeper)", Rbac.Memory_diff_read { keeper_scoped = true });
     ( "Memory_diff_read(workspace)",
@@ -449,6 +450,7 @@ let test_exhaustive_decision_matrix () =
         | Rbac.Single_user_role_admin
         | Rbac.Single_user_token_admin_only
         | Rbac.Own_provider_manage
+        | Rbac.Multi_account_own_provider
         | Rbac.Own_keeper_sandbox_read
         | Rbac.Memory_diff_read _
         | Rbac.Machine_play ->
@@ -476,6 +478,7 @@ let test_exhaustive_decision_matrix () =
         | Rbac.Single_user_role_admin
         | Rbac.Single_user_token_admin_only
         | Rbac.Own_provider_manage
+        | Rbac.Multi_account_own_provider
         | Rbac.Own_keeper_sandbox_read
         | Rbac.Memory_diff_read _
         | Rbac.Machine_play ->
@@ -503,6 +506,7 @@ let test_exhaustive_decision_matrix () =
         | Rbac.Single_user_role_admin
         | Rbac.Single_user_token_admin_only
         | Rbac.Own_provider_manage
+        | Rbac.Multi_account_own_provider
         | Rbac.Own_keeper_sandbox_read
         | Rbac.Memory_diff_read _
         | Rbac.Machine_play ->
@@ -530,6 +534,7 @@ let test_exhaustive_decision_matrix () =
             | Rbac.Single_user_role_admin
             | Rbac.Single_user_token_admin_only
             | Rbac.Own_provider_manage
+            | Rbac.Multi_account_own_provider
             | Rbac.Own_keeper_sandbox_read
             | Rbac.Memory_diff_read _
             | Rbac.Machine_play ->
@@ -2855,7 +2860,759 @@ let test_bootstrap_and_inplace_demotion_cleanup () =
     true
     (Rbac.is_authenticated m_off.auth_session
      && Rbac.is_allowed m_off.auth_session Rbac.Su_read_ma_admin
-     && not (Rbac.can_admin m_off.auth_session))
+     && not (Rbac.can_admin m_off.auth_session));
+
+  (* F. #75 P1: GET /health 401/403 defense-in-depth exits Probing_health -> Auth_unavailable + Auth_gate,
+     and Public_health anon fallback completes 2-step SU Player & SU invalid-token handshakes *)
+  List.iter
+    (fun status ->
+      let m_err, cmds_err =
+        Update.step ~now:t0 m0
+          (Msg.Server_health_result
+             {
+               epoch = m0.epoch;
+               result =
+                 Error
+                   (Msg.Http_error
+                      { status; body = {|{"error":"denied"}|}; api_error = None });
+             })
+      in
+      let lbl = Printf.sprintf "/health HTTP %d" status in
+      Alcotest.(check bool) (lbl ^ " exits Probing_health to Auth_unavailable")
+        true
+        (match m_err.auth_session with
+        | Rbac.Auth_unavailable { mode = None; _ } -> true
+        | Rbac.Probing_health
+        | Rbac.Probing_single_user _
+        | Rbac.Probing_multi_account _
+        | Rbac.Single_user_local _
+        | Rbac.Single_user_auth_required _
+        | Rbac.Multi_account_signed_out _
+        | Rbac.Multi_account_signed_in _
+        | Rbac.Auth_unavailable { mode = Some _; _ } ->
+            false);
+      Alcotest.(check bool) (lbl ^ " opens Auth_gate") true
+        (Option.equal Nav.equal_overlay m_err.nav.overlay
+           (Some (Nav.System_gate Nav.Auth_gate)));
+      Alcotest.(check bool) (lbl ^ " emits zero data GETs") false
+        (List.exists
+           (function Cmd.Http_get _ -> true | _ -> false)
+           (Cmd.flatten cmds_err)))
+    [ 401; 403 ];
+
+  let public_su_health =
+    { (sample_health ~mode:Rbac.Single_user ()) with scope = Wire_common.Public_health }
+  in
+  let m_pub_probe, cmds_pub_probe =
+    Update.step ~now:t0 m0
+      (Msg.Server_health_result { epoch = m0.epoch; result = Ok public_su_health })
+  in
+  Alcotest.(check bool) "Public_health SU advances to Probing_single_user + Get_dashboard_shell"
+    true
+    ((match m_pub_probe.auth_session with
+     | Rbac.Probing_single_user _ -> true
+     | Rbac.Probing_health
+     | Rbac.Probing_multi_account _
+     | Rbac.Single_user_local _
+     | Rbac.Single_user_auth_required _
+     | Rbac.Multi_account_signed_out _
+     | Rbac.Multi_account_signed_in _
+     | Rbac.Auth_unavailable _ ->
+         false)
+     && List.exists
+          (function
+            | Cmd.Http_get { req = Cmd.Get_dashboard_shell; _ } -> true
+            | _ -> false)
+          (Cmd.flatten cmds_pub_probe));
+  let su_auth_player : Wire_fleet.shell_auth_summary =
+    {
+      su_auth_worker with
+      token_agent = Some "player-1";
+      effective_agent = Some "player-1";
+      effective_role = Some Rbac.Player;
+      effective_admin = Some false;
+      can_keeper_msg = false;
+    }
+  in
+  let m_player_settled, _ =
+    Update.step ~now:t0 m_pub_probe
+      (Msg.Http_reply
+         {
+           epoch = m_pub_probe.epoch;
+           reply = Msg.Reply_dashboard_shell (Ok (sample_shell ~auth:su_auth_player ()));
+         })
+  in
+  Alcotest.(check bool) "Public_health -> shell.auth settles SU Player without Auth_gate deadlock"
+    true
+    (Rbac.is_authenticated m_player_settled.auth_session
+     && Option.is_none m_player_settled.nav.overlay
+     && not (Rbac.is_allowed m_player_settled.auth_session Rbac.Single_user_read));
+  let su_auth_invalid : Wire_fleet.shell_auth_summary =
+    {
+      su_auth_worker with
+      token_present = true;
+      token_valid = false;
+      token_agent = None;
+      effective_agent = None;
+      effective_role = None;
+      effective_admin = Some false;
+      auth_error_code = Some "invalid_token";
+      auth_error_detail = Some "Invalid bearer token";
+      can_keeper_msg = false;
+    }
+  in
+  let m_bad_settled, _ =
+    Update.step ~now:t0 m_pub_probe
+      (Msg.Http_reply
+         {
+           epoch = m_pub_probe.epoch;
+           reply = Msg.Reply_dashboard_shell (Ok (sample_shell ~auth:su_auth_invalid ()));
+         })
+  in
+  Alcotest.(check bool) "Public_health -> shell.auth invalid token settles to Token_invalid + Auth_gate"
+    true
+    ((match m_bad_settled.auth_session with
+     | Rbac.Single_user_auth_required { reason = Rbac.Token_invalid _; _ } -> true
+     | Rbac.Single_user_auth_required
+         {
+           reason =
+             ( Rbac.Token_required
+             | Rbac.Signed_out _
+             | Rbac.Forbidden_credential _
+             | Rbac.Auth_unavailable _ );
+           _;
+         }
+     | Rbac.Probing_health
+     | Rbac.Probing_single_user _
+     | Rbac.Probing_multi_account _
+     | Rbac.Single_user_local _
+     | Rbac.Multi_account_signed_out _
+     | Rbac.Multi_account_signed_in _
+     | Rbac.Auth_unavailable _ ->
+         false)
+     && Option.equal Nav.equal_overlay m_bad_settled.nav.overlay
+          (Some (Nav.System_gate Nav.Auth_gate)))
+
+(* 5. Account/Session Overlay, Shortcuts, Capability Matrix & Truthful Rendering *)
+let test_account_overlay_and_capability_matrix () =
+  (* Reachability: slash /account, keymap @ & Alt+A, zero collisions, sidebar Menu_account, Ctrl+K palette *)
+  Alcotest.(check int) "zero keymap collisions" 0 (List.length (Keymap.collisions ()));
+  (match Slash.parse "/account" with
+  | Ok Slash.Account -> ()
+  | Ok _ | Error _ -> Alcotest.fail "expected /account -> Ok Slash.Account");
+  let base_su =
+    Model.initial ~lang:Say.Lang_en ~auth_session:su_token_admin ()
+  in
+  let m_slash, _ =
+    Update.step ~now:t0 base_su
+      (Msg.Key_event (char_key "@"))
+  in
+  Alcotest.(check bool) "'@' opens Nav.Account overlay" true
+    (Option.equal Nav.equal_overlay m_slash.nav.overlay (Some Nav.Account));
+  Alcotest.(check bool) "active_menu_target = Menu_account" true
+    (Nav.equal_menu_target (Model.active_menu_target m_slash) Nav.Menu_account);
+  let m_alt_close, _ =
+    Update.step ~now:t0 m_slash
+      (Msg.Key_event (char_key ~mods:{ Keymap.Input.no_mods with alt = true } "a"))
+  in
+  Alcotest.(check bool) "Alt+A toggles Nav.Account closed" true
+    (Option.is_none m_alt_close.nav.overlay);
+  let m_alt_open, _ =
+    Update.step ~now:t0 m_alt_close
+      (Msg.Key_event (char_key ~mods:{ Keymap.Input.no_mods with alt = true } "a"))
+  in
+  Alcotest.(check bool) "Alt+A opens Nav.Account" true
+    (Option.equal Nav.equal_overlay m_alt_open.nav.overlay (Some Nav.Account));
+  let m_slash_open, _ =
+    Update_actions.execute_slash ~now:t0 base_su Slash.Account
+  in
+  Alcotest.(check bool) "/account opens Nav.Account" true
+    (Option.equal Nav.equal_overlay m_slash_open.nav.overlay (Some Nav.Account));
+  (* Palette discovery by alias "pat" / "account" *)
+  let m_pal =
+    {
+      base_su with
+      nav = { base_su.nav with overlay = Some Nav.Palette };
+      palette = { mode = Model.Palette_commands; query = "account"; selected = 0 };
+    }
+  in
+  let pal_entries, _ = Update_nav.palette_entries_with_overflow m_pal in
+  Alcotest.(check bool) "Palette surfaces Menu_account on 'account'" true
+    (List.exists
+       (fun (e : Update_nav.palette_entry) ->
+         match e.action with
+         | Update_nav.Pal_menu_target Nav.Menu_account -> true
+         | Update_nav.Pal_menu_target _
+         | Update_nav.Pal_keymap_action _
+         | Update_nav.Pal_keeper_lifecycle _
+         | Update_nav.Pal_dive_keeper _
+         | Update_nav.Pal_select_company _
+         | Update_nav.Pal_dive_goal _
+         | Update_nav.Pal_dive_task _
+         | Update_nav.Pal_dive_thread _
+         | Update_nav.Pal_dive_wiki _
+         | Update_nav.Pal_dive_sandbox _
+         | Update_nav.Pal_open_infra_sandboxes _
+         | Update_nav.Pal_open_setting _
+         | Update_nav.Pal_slash_spec _ ->
+             false)
+       pal_entries);
+
+  (* Capability matrix truth across SU & MA sessions *)
+  let check_matrix label sess ~rd ~wr ~ad ~trd ~tad ~own =
+    let cm = Rbac.capability_matrix_of_session sess in
+    Alcotest.(check bool) (label ^ " can_read") rd cm.can_read;
+    Alcotest.(check bool) (label ^ " can_write") wr cm.can_write;
+    Alcotest.(check bool) (label ^ " can_admin") ad cm.can_admin;
+    Alcotest.(check bool) (label ^ " can_token_read") trd cm.can_token_read;
+    Alcotest.(check bool) (label ^ " can_token_admin") tad cm.can_token_admin;
+    Alcotest.(check bool) (label ^ " can_manage_own_provider") own
+      cm.can_manage_own_provider
+  in
+  check_matrix "SU token admin" su_token_admin
+    ~rd:true ~wr:true ~ad:true ~trd:true ~tad:true ~own:true;
+  check_matrix "SU optional-token admin" su_optional_token_admin
+    ~rd:true ~wr:true ~ad:false ~trd:false ~tad:false ~own:false;
+  check_matrix "MA human admin session" ma_human_admin_session
+    ~rd:true ~wr:false ~ad:true ~trd:false ~tad:false ~own:true;
+  check_matrix "MA human admin PAT" ma_human_admin_pat
+    ~rd:true ~wr:false ~ad:false ~trd:false ~tad:false ~own:true;
+  check_matrix "MA human worker PAT" ma_human_worker_pat
+    ~rd:true ~wr:false ~ad:false ~trd:false ~tad:false ~own:true;
+  check_matrix "MA service worker" ma_service_worker
+    ~rd:true ~wr:false ~ad:false ~trd:false ~tad:false ~own:false;
+  check_matrix "MA signed out" ma_signed_out
+    ~rd:false ~wr:false ~ad:false ~trd:false ~tad:false ~own:false;
+
+  (* Rendered Account overlay displays mode, principal, binding, role, all 6 capabilities, and scrubbed error *)
+  let su_with_err =
+    Rbac.Single_user_local
+      {
+        auth_methods = Rbac.default_auth_methods;
+        auth_enabled = true;
+        require_token = false;
+        token_present = true;
+        token_valid = false;
+        effective_agent = Some "local-op";
+        role = Rbac.Worker;
+        effective_admin = false;
+        can_keeper_msg = true;
+        auth_error_code = Some "invalid_token";
+        auth_error_detail = Some "Invalid credential bearer_secret_xyz";
+      }
+  in
+  let m_su_err =
+    let b = Model.initial ~lang:Say.Lang_en ~auth_session:su_with_err () in
+    { b with nav = { b.nav with overlay = Some Nav.Account } }
+  in
+  let txt_su = render_full_frame m_su_err in
+  Alcotest.(check bool) "SU Account with invalid token renders Single_user, principal, binding=none, role"
+    true
+    (contains_ci ~needle:"Single_user" txt_su
+     && contains_ci ~needle:"local-op" txt_su
+     && contains_ci ~needle:"Binding: none" txt_su
+     && contains_ci ~needle:"worker" txt_su);
+  let m_su_valid =
+    let b = Model.initial ~lang:Say.Lang_en ~auth_session:su_token_admin () in
+    { b with nav = { b.nav with overlay = Some Nav.Account } }
+  in
+  let txt_su_valid = render_full_frame m_su_valid in
+  Alcotest.(check bool) "SU Account with valid token renders Binding: dev_token and admin"
+    true
+    (contains_ci ~needle:"Binding: dev_token" txt_su_valid
+     && contains_ci ~needle:"Role: admin" txt_su_valid);
+  Alcotest.(check bool) "SU Account renders all 6 capability keys" true
+    (List.for_all
+       (fun k -> contains_ci ~needle:k txt_su)
+       [
+         "can_read";
+         "can_write";
+         "can_admin";
+         "can_token_read";
+         "can_token_admin";
+         "can_manage_own_provider";
+       ]);
+  Alcotest.(check bool) "SU Account renders auth error detail" true
+    (contains_ci ~needle:"Auth error:" txt_su);
+  Alcotest.(check bool) "SU Account footer includes [t] Token & [c] Clear" true
+    (contains_ci ~needle:"Token" txt_su && contains_ci ~needle:"Clear" txt_su);
+
+  let m_ma_pat =
+    let b = Model.initial ~lang:Say.Lang_en ~auth_session:ma_human_worker_pat () in
+    { b with nav = { b.nav with overlay = Some Nav.Account } }
+  in
+  let txt_ma = render_full_frame m_ma_pat in
+  Alcotest.(check bool) "MA Account renders Multi_account, usr-worker, pat (pat-2)"
+    true
+    (contains_ci ~needle:"Multi_account" txt_ma
+     && contains_ci ~needle:"usr-worker" txt_ma
+     && contains_ci ~needle:"pat (pat-2)" txt_ma);
+
+  (* Keymap Help (? overlay) documents Account/Session shortcut truthfully *)
+  let m_help, _ =
+    Update.step ~now:t0 m_ma_pat (Msg.Key_event (char_key "?"))
+  in
+  Alcotest.(check bool) "? from Account opens Help with return_overlay=Account"
+    true
+    (Option.equal Nav.equal_overlay m_help.nav.overlay (Some Nav.Help)
+     && Option.equal Nav.equal_overlay m_help.nav.return_overlay
+          (Some Nav.Account));
+  let help_txt = render_full_frame m_help in
+  Alcotest.(check bool) "Help overlay lists /account shortcut" true
+    (contains_ci ~needle:"/account" help_txt)
+
+(* 6. Runtime Token / PAT Entry, Rotation, Clear, Masking & Re-bootstrap *)
+let test_runtime_token_swap_and_redaction () =
+  let secret_tok = "masc_pat_ULTRA_SECRET_TOKEN_987654" in
+  let check_no_leak label (m : Model.t) =
+    let frame = render_full_frame m in
+    Alcotest.(check bool) (label ^ ": zero plaintext token in rendered grid")
+      false (contains_ci ~needle:"ULTRA_SECRET_TOKEN" frame);
+    let toast_s =
+      match m.toast with
+      | Some t -> Say.resolve Say.Lang_en t.message
+      | None -> ""
+    in
+    Alcotest.(check bool) (label ^ ": zero plaintext token in toast") false
+      (contains_ci ~needle:"ULTRA_SECRET_TOKEN" toast_s);
+    Alcotest.(check bool) (label ^ ": zero plaintext token in incidents") false
+      (List.exists
+         (fun (inc : Health.incident) ->
+           contains_ci ~needle:"ULTRA_SECRET_TOKEN" inc.detail)
+         m.incidents.entries)
+  in
+
+  (* A. Auth_gate runtime token entry + paste + masking + cancel wipe + submit re-bootstrap *)
+  let m_gate =
+    let b = Model.initial ~lang:Say.Lang_en ~auth_session:ma_signed_out () in
+    {
+      b with
+      nav = { b.nav with overlay = Some (Nav.System_gate Nav.Auth_gate) };
+      infra =
+        {
+          b.infra with
+          sandboxes = Observed.value ~observed_at:t0 (empty_sandboxes_snapshot ());
+        };
+    }
+  in
+  let m_edit, _ = Update.step ~now:t0 m_gate (Msg.Key_event (char_key "t")) in
+  Alcotest.(check bool) "Auth_gate 't' activates masked token editor" true
+    m_edit.account.token_editor.active;
+  let m_pasted, _ =
+    Update.step ~now:t0 m_edit (Msg.Paste_text (secret_tok ^ "\r\n"))
+  in
+  Alcotest.(check string) "Paste strips CR/LF" secret_tok
+    m_pasted.account.token_editor.draft;
+  Alcotest.(check bool) "masked_draft_display hides plaintext and shows count"
+    true
+    (contains_ci ~needle:"(34)"
+       (Account_store.masked_draft_display m_pasted.account.token_editor)
+     && not
+          (contains_ci ~needle:"ULTRA_SECRET"
+             (Account_store.masked_draft_display m_pasted.account.token_editor)));
+  check_no_leak "Auth_gate editing" m_pasted;
+  (* Esc cancels editor and wipes draft while staying on Auth_gate *)
+  let m_cancel, _ =
+    Update.step ~now:t0 m_pasted
+      (Msg.Key_event { key = Keymap.Input.Escape; mods = Keymap.Input.no_mods })
+  in
+  Alcotest.(check bool) "Auth_gate Esc cancels editor & wipes draft" true
+    ((not m_cancel.account.token_editor.active)
+     && String.equal m_cancel.account.token_editor.draft ""
+     && Option.equal Nav.equal_overlay m_cancel.nav.overlay
+          (Some (Nav.System_gate Nav.Auth_gate)));
+
+  (* Blank Enter shows inline error without emitting cmds *)
+  let m_edit2, _ = Update.step ~now:t0 m_cancel (Msg.Key_event (char_key "t")) in
+  let m_blank_err, cmds_blank =
+    Update.step ~now:t0 m_edit2
+      (Msg.Key_event { key = Keymap.Input.Enter; mods = Keymap.Input.no_mods })
+  in
+  Alcotest.(check bool) "Blank token submit keeps editor open with error" true
+    (m_blank_err.account.token_editor.active
+     && Option.is_some m_blank_err.account.token_editor.error
+     && cmds_blank = []);
+
+  (* Submit valid token on Auth_gate -> Set_bearer_token, purge, epoch bump, Get_health *)
+  let m_typed, _ =
+    Update.step ~now:t0 m_edit2 (Msg.Paste_text secret_tok)
+  in
+  let m_swapped, cmds_swap =
+    Update.step ~now:t0 m_typed
+      (Msg.Key_event { key = Keymap.Input.Enter; mods = Keymap.Input.no_mods })
+  in
+  let flat_swap = Cmd.flatten cmds_swap in
+  Alcotest.(check bool) "Submit wipes draft & marks Token_runtime_set" true
+    ((not m_swapped.account.token_editor.active)
+     && String.equal m_swapped.account.token_editor.draft ""
+     && Account_store.equal_token_source m_swapped.account.token_source
+          Account_store.Token_runtime_set);
+  Alcotest.(check bool) "Submit bumps epoch & resets auth_session to Probing_health"
+    true
+    ((not (Epoch.equal m_gate.epoch m_swapped.epoch))
+     && Rbac.equal_auth_session m_swapped.auth_session Rbac.Probing_health);
+  Alcotest.(check bool) "Submit purges cached sandboxes" true
+    (Option.is_none (Observed.to_option m_swapped.infra.sandboxes));
+  Alcotest.(check bool) "Submit emits Set_bearer_token (Some secret_tok)" true
+    (List.exists
+       (function
+         | Cmd.Set_bearer_token (Some tok) -> String.equal tok secret_tok
+         | _ -> false)
+       flat_swap);
+  Alcotest.(check bool) "Submit clears workspace guard, syncs empty streams, probes Get_health"
+    true
+    (List.exists
+       (function
+         | Cmd.Update_workspace_guard { instance_id = None; workspace_sha256 = None } ->
+             true
+         | _ -> false)
+       flat_swap
+     && List.exists
+          (function Cmd.Sync_streams { streams = []; _ } -> true | _ -> false)
+          flat_swap
+     && List.exists
+          (function Cmd.Http_get { req = Cmd.Get_health; _ } -> true | _ -> false)
+          flat_swap);
+  check_no_leak "Auth_gate post-submit" m_swapped;
+
+  (* B. Account overlay runtime clear ('c') -> Set_bearer_token None + purge own-provider data *)
+  let sample_pa : Wire_account.provider_accounts_snapshot =
+    {
+      provider_accounts =
+        [
+          {
+            provider_account_id = "pa-1";
+            integration_id = "anthropic";
+            kind = Wire_account.Provider_key Wire_account.Key_readable;
+            removal = None;
+            replacement = None;
+          };
+        ];
+      runtimes = [];
+    }
+  in
+  let m_acct =
+    let b = Model.initial ~lang:Say.Lang_en ~auth_session:ma_human_worker_pat () in
+    {
+      b with
+      nav = { b.nav with overlay = Some Nav.Account };
+      account = Account_store.apply_provider_accounts ~observed_at:t0 sample_pa b.account;
+    }
+  in
+  let m_cleared, cmds_clear =
+    Update.step ~now:t1 m_acct (Msg.Key_event (char_key "c"))
+  in
+  let flat_clear = Cmd.flatten cmds_clear in
+  Alcotest.(check bool) "'c' marks Token_runtime_cleared & purges own-provider cache"
+    true
+    (Account_store.equal_token_source m_cleared.account.token_source
+       Account_store.Token_runtime_cleared
+     && Option.is_none (Observed.to_option m_cleared.account.provider_accounts));
+  Alcotest.(check bool) "'c' emits Set_bearer_token None + Get_health" true
+    (List.exists
+       (function Cmd.Set_bearer_token None -> true | _ -> false)
+       flat_clear
+     && List.exists
+          (function Cmd.Http_get { req = Cmd.Get_health; _ } -> true | _ -> false)
+          flat_clear)
+
+(* 7. Multi-Account Own-Provider Decoders (Strict Fail-Closed) & RBAC/Action Flows *)
+let test_ma_own_provider_wire_and_actions () =
+  (* Strict Wire_account decoders: happy paths *)
+  let pa_json =
+    Yojson.Safe.from_string
+      {|{
+        "provider_accounts": [
+          {"provider_account_id":"pa-login-1","integration_id":"claude","kind":"login"},
+          {"provider_account_id":"pa-key-1","integration_id":"anthropic","kind":"key","key":"readable","replacement":"start_given_up"}
+        ],
+        "runtimes": [
+          {"runtime_id":"rt-1","provider_account_id":"pa-login-1","model":"claude-sonnet-4-6"},
+          {"runtime_id":"rt-2","provider_account_id":"pa-key-1","model":null,"unread":"key_missing"}
+        ]
+      }|}
+  in
+  let pa_snap =
+    match Wire_account.decode_provider_accounts_snapshot pa_json with
+    | Ok s -> s
+    | Error e -> Alcotest.fail ("valid provider_accounts failed: " ^ e)
+  in
+  Alcotest.(check int) "2 provider_accounts decoded" 2
+    (List.length pa_snap.provider_accounts);
+  Alcotest.(check int) "2 runtimes decoded" 2 (List.length pa_snap.runtimes);
+
+  let int_json =
+    Yojson.Safe.from_string
+      {|{
+        "integrations": [
+          {"integration_id":"claude","display_name":"Claude","connect":["login"],"models":["claude-sonnet-4-6"],"withheld":[{"model":"claude-opus-4","reason":"not_supported"}],"calls":"refused","refusal":"native_tools_reach_other_homes"},
+          {"integration_id":"anthropic","display_name":"Anthropic","connect":["key"],"models":["claude-sonnet-4-6"],"withheld":[],"calls":"allowed"}
+        ]
+      }|}
+  in
+  let int_snap =
+    match Wire_account.decode_person_integrations_snapshot int_json with
+    | Ok s -> s
+    | Error e -> Alcotest.fail ("valid integrations failed: " ^ e)
+  in
+  Alcotest.(check int) "2 integrations decoded" 2
+    (List.length int_snap.integrations);
+
+  let ver_json =
+    Yojson.Safe.from_string
+      {|{
+        "verification": {
+          "schema": "masc.runtime_verification.v1",
+          "runtime_id": "rt-2",
+          "model": "claude-sonnet-4-6",
+          "observed_model": "claude-sonnet-4-6",
+          "status": "verified",
+          "checks": {"response": true, "tool_called": true, "tool_roundtrip": true},
+          "failure": null
+        },
+        "runtime": {"runtime_id": "rt-2", "record": "made"}
+      }|}
+  in
+  (match Wire_account.decode_account_verify_response ver_json with
+  | Ok resp ->
+      Alcotest.(check bool) "verify status = verified" true
+        (Wire_account.equal_verification_status resp.verification.status
+           Wire_account.Verify_verified)
+  | Error e -> Alcotest.fail ("valid verify response failed: " ^ e));
+
+  (* Strict fail-closed rejections *)
+  let bad_pa_cases =
+    [
+      ("non-object root", `List []);
+      ("non-array provider_accounts", Yojson.Safe.from_string {|{"provider_accounts":{},"runtimes":[]}|});
+      ("login with key field", Yojson.Safe.from_string {|{"provider_accounts":[{"provider_account_id":"a","integration_id":"claude","kind":"login","key":"readable"}],"runtimes":[]}|});
+      ("key without key field", Yojson.Safe.from_string {|{"provider_accounts":[{"provider_account_id":"a","integration_id":"anthropic","kind":"key"}],"runtimes":[]}|});
+      ("unknown key enum", Yojson.Safe.from_string {|{"provider_accounts":[{"provider_account_id":"a","integration_id":"anthropic","kind":"key","key":"bogus"}],"runtimes":[]}|});
+      ("null model missing unread", Yojson.Safe.from_string {|{"provider_accounts":[],"runtimes":[{"runtime_id":"r","provider_account_id":"a","model":null}]}|});
+      ("present model with unread", Yojson.Safe.from_string {|{"provider_accounts":[],"runtimes":[{"runtime_id":"r","provider_account_id":"a","model":"m1","unread":"key_missing"}]}|});
+    ]
+  in
+  List.iter
+    (fun (lbl, j) ->
+      Alcotest.(check bool) ("reject bad provider_accounts: " ^ lbl) true
+        (Result.is_error (Wire_account.decode_provider_accounts_snapshot j)))
+    bad_pa_cases;
+
+  let bad_int_cases =
+    [
+      ("refused missing refusal", Yojson.Safe.from_string {|{"integrations":[{"integration_id":"claude","display_name":"Claude","connect":["login"],"models":[],"withheld":[],"calls":"refused"}]}|});
+      ("allowed with refusal", Yojson.Safe.from_string {|{"integrations":[{"integration_id":"claude","display_name":"Claude","connect":["login"],"models":[],"withheld":[],"calls":"allowed","refusal":"native_unpublished"}]}|});
+      ("unknown connect method", Yojson.Safe.from_string {|{"integrations":[{"integration_id":"claude","display_name":"Claude","connect":["oauth"],"models":[],"withheld":[],"calls":"allowed"}]}|});
+    ]
+  in
+  List.iter
+    (fun (lbl, j) ->
+      Alcotest.(check bool) ("reject bad integrations: " ^ lbl) true
+        (Result.is_error (Wire_account.decode_person_integrations_snapshot j)))
+    bad_int_cases;
+
+  Alcotest.(check bool) "reject wrong verification schema" true
+    (Result.is_error
+       (Wire_account.decode_account_verify_response
+          (Yojson.Safe.from_string
+             {|{"verification":{"schema":"wrong.v0","runtime_id":"r","model":null,"observed_model":null,"status":"failed","checks":{"response":false,"tool_called":false,"tool_roundtrip":false},"failure":null},"runtime":null}|})));
+  Alcotest.(check bool) "reject removed=false on key remove" true
+    (Result.is_error
+       (Wire_account.decode_key_remove_response
+          (Yojson.Safe.from_string {|{"provider_account_id":"pa-1","removed":false}|})));
+
+  (* Zero MA own-provider fetches in Single_user mode *)
+  let m_su = Model.initial ~lang:Say.Lang_en ~auth_session:su_token_admin () in
+  let _, su_cmds = Update.step ~now:t0 m_su (Msg.Key_event (char_key "@")) in
+  Alcotest.(check bool) "Single_user opening Account emits ZERO MA own-provider GETs"
+    false
+    (List.exists
+       (function
+         | Cmd.Http_get
+             { req = Cmd.Get_auth_provider_accounts | Cmd.Get_auth_integrations; _ } ->
+             true
+         | _ -> false)
+       (Cmd.flatten su_cmds));
+
+  (* Multi-Account Human Worker PAT opening Account fetches MA endpoints & ZERO SU setup_inventory *)
+  let m_ma0 =
+    Model.initial ~lang:Say.Lang_en ~auth_session:ma_human_worker_pat ()
+  in
+  let m_ma_open, ma_cmds =
+    Update.step ~now:t0 m_ma0 (Msg.Key_event (char_key "@"))
+  in
+  let flat_ma = Cmd.flatten ma_cmds in
+  Alcotest.(check bool) "MA opening Account fetches /api/v1/auth/provider-accounts & /integrations"
+    true
+    (List.exists
+       (function Cmd.Http_get { req = Cmd.Get_auth_provider_accounts; _ } -> true | _ -> false)
+       flat_ma
+     && List.exists
+          (function Cmd.Http_get { req = Cmd.Get_auth_integrations; _ } -> true | _ -> false)
+          flat_ma);
+  Alcotest.(check bool) "MA opening Account NEVER fetches SU /api/v1/setup/inventory"
+    false
+    (List.exists
+       (function Cmd.Http_get { req = Cmd.Get_setup_inventory; _ } -> true | _ -> false)
+       flat_ma);
+
+  (* HTTP 403 on /provider-accounts keeps MA session signed in, displays 403, and halts auto-refetch *)
+  let m_403, cmds_403 =
+    Update.step ~now:t0 m_ma_open
+      (Msg.Http_reply
+         {
+           epoch = m_ma_open.epoch;
+           reply =
+             Msg.Reply_auth_provider_accounts
+               (Error
+                  (Msg.Http_error
+                     {
+                       status = 403;
+                       body = {|{"error":"missing manage_own_provider scope"}|};
+                       api_error = None;
+                     }));
+         })
+  in
+  Alcotest.(check bool) "HTTP 403 keeps MA session signed in (no Auth_gate, no recheck loop)"
+    true
+    (Rbac.is_authenticated m_403.auth_session
+     && Option.equal Nav.equal_overlay m_403.nav.overlay (Some Nav.Account)
+     && cmds_403 = []
+     && Option.is_some m_403.account.own_provider_forbidden);
+  let is_ma_own_provider_get = function
+    | Cmd.Http_get
+        { req = Cmd.Get_auth_provider_accounts | Cmd.Get_auth_integrations; _ } ->
+        true
+    | _ -> false
+  in
+  Alcotest.(check bool) "HTTP 403 halts own-provider View_fetches retries until manual refresh"
+    false
+    (List.exists is_ma_own_provider_get
+       (Cmd.flatten (View_fetches.fetches_for_current_view m_403)));
+  Alcotest.(check bool) "Manual refresh (~force:true) re-attempts own-provider fetch after 403"
+    true
+    (List.exists is_ma_own_provider_get
+       (Cmd.flatten (View_fetches.fetches_for_current_view ~force:true m_403)));
+  let txt_403 = render_full_frame m_403 in
+  Alcotest.(check bool) "HTTP 403 banner rendered on Account overlay" true
+    (contains_ci ~needle:"HTTP 403" txt_403
+     && contains_ci ~needle:"manage_own_provider" txt_403);
+
+  (* Loaded MA own-provider data + scope honesty + login/key/verify actions *)
+  let m_loaded =
+    let m1, _ =
+      Update.step ~now:t0 m_ma_open
+        (Msg.Http_reply
+           { epoch = m_ma_open.epoch; reply = Msg.Reply_auth_provider_accounts (Ok pa_snap) })
+    in
+    let m2, _ =
+      Update.step ~now:t0 m1
+        (Msg.Http_reply
+           { epoch = m1.epoch; reply = Msg.Reply_auth_integrations (Ok int_snap) })
+    in
+    m2
+  in
+  let txt_loaded = render_full_frame m_loaded in
+  Alcotest.(check bool) "MA Account renders refusal & withheld scope honesty + provider accounts"
+    true
+    (contains_ci ~needle:"calls=refused(native_tools_reach_other_homes)" txt_loaded
+     && contains_ci ~needle:"withheld:claude-opus-4" txt_loaded
+     && contains_ci ~needle:"pa-login-1" txt_loaded
+     && contains_ci ~needle:"pa-key-1" txt_loaded);
+
+  (* 'l' opens Ma_provider_login_form -> Enter submits Post_setup_login_start with account_ref=None *)
+  let m_login_modal, _ =
+    Update.step ~now:t0 m_loaded (Msg.Key_event (char_key "l"))
+  in
+  let m_login_done, cmds_login =
+    Update.step ~now:t0 m_login_modal
+      (Msg.Key_event { key = Keymap.Input.Enter; mods = Keymap.Input.no_mods })
+  in
+  Alcotest.(check bool) "MA CLI login submits account_ref=None and returns to Account overlay"
+    true
+    (Option.equal Nav.equal_overlay m_login_done.nav.overlay (Some Nav.Account)
+     && List.exists
+          (function
+            | Cmd.Http_post
+                {
+                  req =
+                    Cmd.Post_setup_login_start
+                      { integration_id = "claude"; account_ref = None };
+                  _;
+                } ->
+                true
+            | _ -> false)
+          (Cmd.flatten cmds_login));
+
+  (* 'u' on login account (index 0) refuses rotation; 'j' selects key account (index 1), 'u' opens replace modal *)
+  let m_rot_login, _ =
+    Update.step ~now:t0 m_loaded (Msg.Key_event (char_key "u"))
+  in
+  Alcotest.(check bool) "'u' on login account keeps Account overlay with warning"
+    true
+    (Option.equal Nav.equal_overlay m_rot_login.nav.overlay (Some Nav.Account));
+  let m_sel_key, _ =
+    Update.step ~now:t0 m_loaded (Msg.Key_event (char_key "j"))
+  in
+  let m_verify_modal, _ =
+    Update.step ~now:t0 m_sel_key (Msg.Key_event (char_key "v"))
+  in
+  let m_verify_sent, cmds_verify =
+    Update.step ~now:t0 m_verify_modal
+      (Msg.Key_event { key = Keymap.Input.Enter; mods = Keymap.Input.no_mods })
+  in
+  Alcotest.(check bool) "'v' verifies selected account with exact provider_account_id & prefilled model"
+    true
+    (Option.equal Nav.equal_overlay m_verify_sent.nav.overlay (Some Nav.Account)
+     && List.exists
+          (function
+            | Cmd.Http_post
+                {
+                  req =
+                    Cmd.Post_setup_account_verify
+                      {
+                        provider_account_id = "pa-key-1";
+                        model = "claude-sonnet-4-6";
+                      };
+                  _;
+                } ->
+                true
+            | _ -> false)
+          (Cmd.flatten cmds_verify));
+
+  (* 'K' key registration uses MA /api/v1/setup/accounts/key (NEVER SU /api/v1/setup/credential) *)
+  let m_key_modal, _ =
+    Update.step ~now:t0 m_sel_key (Msg.Key_event (char_key "K"))
+  in
+  let m_key_tab, _ =
+    Update.step ~now:t0 m_key_modal
+      (Msg.Key_event { key = Keymap.Input.Tab; mods = Keymap.Input.no_mods })
+  in
+  let m_key_pasted, _ =
+    Update.step ~now:t0 m_key_tab (Msg.Paste_text "sk-ant-SECRETKEY-99")
+  in
+  let m_key_sent, cmds_key =
+    Update.step ~now:t0 m_key_pasted
+      (Msg.Key_event { key = Keymap.Input.Enter; mods = Keymap.Input.no_mods })
+  in
+  Alcotest.(check bool) "'K' posts to /api/v1/setup/accounts/key without leaking key in toast"
+    true
+    (List.exists
+       (function
+         | Cmd.Http_post
+             {
+               req =
+                 Cmd.Post_ma_setup_account_key
+                   { integration_id = "anthropic"; key = "sk-ant-SECRETKEY-99" } as req;
+               _;
+             } ->
+             String.equal (Cmd.post_request_path req) "/api/v1/setup/accounts/key"
+         | _ -> false)
+       (Cmd.flatten cmds_key)
+     && not
+          (match m_key_sent.toast with
+          | Some t -> contains_ci ~needle:"SECRETKEY" (Say.resolve Say.Lang_en t.message)
+          | None -> false))
 
 let () =
   Alcotest.run "masc_tui_rbac"
@@ -2880,5 +3637,14 @@ let () =
             `Quick test_chrome_footer_help_and_locked_screens;
           Alcotest.test_case "2-step bootstrap handshakes & in-place demotion cleanup"
             `Quick test_bootstrap_and_inplace_demotion_cleanup;
+        ] );
+      ( "account_session_and_own_provider"
+      , [
+          Alcotest.test_case "account overlay, shortcuts, capability matrix & rendering"
+            `Quick test_account_overlay_and_capability_matrix;
+          Alcotest.test_case "runtime token/PAT entry, masking, swap, clear & re-bootstrap"
+            `Quick test_runtime_token_swap_and_redaction;
+          Alcotest.test_case "MA own-provider strict decoders, 403 handling & actions"
+            `Quick test_ma_own_provider_wire_and_actions;
         ] );
     ]

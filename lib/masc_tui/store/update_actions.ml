@@ -1613,28 +1613,47 @@ let open_setup_account_key_modal (m : Model.t) ?(integration_default = "") () =
     ]
 
 let open_setup_login_modal (m : Model.t) ?(integration_default = "") () =
-  open_custom_inline_modal ~kind:Nav.Setup_login_start_form m
-    [
-      {
-        key = "setup_login_integration";
-        label =
-          Say.make
-            ~ko:"로그인 통합 ID (예: claude-code, codex, vibe_acp, kimi_acp)"
-            ~en:"Login integration ID (e.g. claude-code, codex, vibe_acp, kimi_acp)";
-        value = integration_default;
-        required = true;
-        secret = false;
-      };
-      {
-        key = "setup_login_account_ref";
-        label =
-          Say.make ~ko:"기존 계정 참조 (선택, 새 로그인 시 비움)"
-            ~en:"Existing account_ref (optional, blank for new login)";
-        value = "";
-        required = false;
-        secret = false;
-      };
-    ]
+  if Rbac.is_multi_account m.auth_session then
+    let default_id =
+      if String.equal (String.trim integration_default) "" then "claude"
+      else integration_default
+    in
+    open_custom_inline_modal ~kind:Nav.Setup_login_start_form m
+      [
+        {
+          key = "setup_login_integration";
+          label =
+            Say.make
+              ~ko:"로그인 통합 ID (다중 계정: claude | codex)"
+              ~en:"Login integration ID (Multi-Account: claude | codex)";
+          value = default_id;
+          required = true;
+          secret = false;
+        };
+      ]
+  else
+    open_custom_inline_modal ~kind:Nav.Setup_login_start_form m
+      [
+        {
+          key = "setup_login_integration";
+          label =
+            Say.make
+              ~ko:"로그인 통합 ID (예: claude-code, codex, vibe_acp, kimi_acp)"
+              ~en:"Login integration ID (e.g. claude-code, codex, vibe_acp, kimi_acp)";
+          value = integration_default;
+          required = true;
+          secret = false;
+        };
+        {
+          key = "setup_login_account_ref";
+          label =
+            Say.make ~ko:"기존 계정 참조 (선택, 새 로그인 시 비움)"
+              ~en:"Existing account_ref (optional, blank for new login)";
+          value = "";
+          required = false;
+          secret = false;
+        };
+      ]
 
 let dismiss_keeper_chat_errors ~now ~keeper (m : Model.t) =
   let drafts, removed = Drafts.dismiss_notices_for_keeper ~keeper m.drafts in
@@ -1665,6 +1684,7 @@ let active_artifact_target (m : Model.t) =
       | Nav.Queue_context _
       | Nav.Inline_action _
       | Nav.Ask_answer
+      | Nav.Account
       | Nav.Help
       | Nav.System_gate
           (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline) ) ->
@@ -1696,6 +1716,7 @@ let active_keeper_for_context (m : Model.t) =
       | Nav.Queue_context (Nav.Drawer_queue | Nav.Drawer_schedules)
       | Nav.Inline_action _
       | Nav.Ask_answer
+      | Nav.Account
       | Nav.Help
       | Nav.System_gate _ ) ->
       None
@@ -2047,6 +2068,7 @@ let rec execute_slash ~now (m : Model.t) cmd =
     | Slash.Keeper _
     | Slash.Model _
     | Slash.Config _
+    | Slash.Account
     | Slash.Incidents
     | Slash.Jump
     | Slash.Voice
@@ -2120,6 +2142,7 @@ let rec execute_slash ~now (m : Model.t) cmd =
   | Slash.Config None -> Update_nav.open_global_settings m
   | Slash.Config (Some query) ->
       Update_nav.open_global_settings ~search_query:query m
+  | Slash.Account -> Update_nav.open_overlay m Nav.Account
   | Slash.Incidents ->
       let incidents =
         m.incidents |> Incidents.reset_view |> Incidents.mark_all_read
@@ -2930,6 +2953,7 @@ let rec execute_slash ~now (m : Model.t) cmd =
                 | Cmd.Open_editor_escape_hatch _
                 | Cmd.Open_terminal_program _
                 | Cmd.Start_local_server
+                | Cmd.Set_bearer_token _
                 | Cmd.Restart_tui
                 | Cmd.Quit _ ->
                     false)
@@ -3845,6 +3869,7 @@ and submit_composer ~now ~mode (m : Model.t) =
             | Slash.Cmd_theme
             | Slash.Cmd_lang
             | Slash.Cmd_help
+            | Slash.Cmd_account
             | Slash.Cmd_restart
             | Slash.Cmd_quit ->
                 false
@@ -4338,6 +4363,11 @@ and execute_action ~now (m : Model.t) action =
                     | Nav.Runtime_assign_form
                     | Nav.Setup_account_key_form
                     | Nav.Setup_login_start_form
+                    | Nav.Ma_provider_login_form
+                    | Nav.Ma_provider_key_add_form
+                    | Nav.Ma_provider_key_replace_form _
+                    | Nav.Ma_provider_key_remove_confirm _
+                    | Nav.Ma_provider_verify_form _
                     | Nav.Board_comment _
                     | Nav.Github_token_form _
                     | Nav.Code_finder_form
@@ -4401,7 +4431,7 @@ and execute_action ~now (m : Model.t) action =
                 |> Model.ask_modal_step_question ~delta
               in
               ({ m with ask_modal = Some next_modal }, []))
-      | Some (Nav.Help | Nav.Incidents | Nav.System_gate _) -> (m, [])
+      | Some (Nav.Account | Nav.Help | Nav.Incidents | Nav.System_gate _) -> (m, [])
       | None ->
           let n = Model.focusable_pane_count m in
           let sync_pane (base : Model.t) next_pane =
@@ -4449,6 +4479,7 @@ and execute_action ~now (m : Model.t) action =
             (m, [])
         | Some
             ( Nav.Help
+            | Nav.Account
             | Nav.Palette
             | Nav.Settings _
             | Nav.Incidents
@@ -4488,6 +4519,7 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Queue_context _
             | Nav.Inline_action _
             | Nav.Ask_answer
+            | Nav.Account
             | Nav.Help
             | Nav.System_gate _ ) ->
             (m, [])
@@ -4581,6 +4613,11 @@ and execute_action ~now (m : Model.t) action =
                | Nav.Runtime_assign_form
                | Nav.Setup_account_key_form
                | Nav.Setup_login_start_form
+               | Nav.Ma_provider_login_form
+               | Nav.Ma_provider_key_add_form
+               | Nav.Ma_provider_key_replace_form _
+               | Nav.Ma_provider_key_remove_confirm _
+               | Nav.Ma_provider_verify_form _
                | Nav.Board_comment _
                | Nav.Github_token_form _
                | Nav.Code_finder_form
@@ -4751,6 +4788,7 @@ and execute_action ~now (m : Model.t) action =
                       ( Model.with_toast ~now ~level:Model.Toast_info
                           (Say.literal reason) { m with config = cfg0 }
                       , [] )))
+        | Some Nav.Account -> (m, [])
         | Some Nav.Incidents -> (
             match Incidents.selected_entry m.incidents with
             | Some _ ->
@@ -4837,6 +4875,24 @@ and execute_action ~now (m : Model.t) action =
             (closed, cmds)
           in
           close_overlay_and_resync m
+      | Some Nav.Account ->
+          if m.account.token_editor.active then
+            ( { m with account = Account_store.close_token_editor m.account }
+            , [] )
+          else
+            ( {
+                m with
+                nav =
+                  {
+                    m.nav with
+                    overlay = None;
+                    return_overlay = None;
+                    filter_focused = false;
+                  };
+                account = Account_store.close_token_editor m.account;
+                inline_modal = None;
+              }
+            , [] )
       | Some Nav.Incidents ->
           if m.incidents.zoomed && m.incidents.show_raw_json then
             ( {
@@ -4899,6 +4955,11 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Runtime_assign_form
             | Nav.Setup_account_key_form
             | Nav.Setup_login_start_form
+            | Nav.Ma_provider_login_form
+            | Nav.Ma_provider_key_add_form
+            | Nav.Ma_provider_key_replace_form _
+            | Nav.Ma_provider_key_remove_confirm _
+            | Nav.Ma_provider_verify_form _
             | Nav.Board_comment _
             | Nav.Github_token_form _
             | Nav.Code_finder_form
@@ -4938,7 +4999,13 @@ and execute_action ~now (m : Model.t) action =
           let closed =
             {
               m with
-              nav = { m.nav with overlay = None; filter_focused = false };
+              nav =
+                {
+                  m.nav with
+                  overlay = m.nav.return_overlay;
+                  return_overlay = None;
+                  filter_focused = false;
+                };
               config = Config_store.cancel_edit_field m.config;
               drafts;
               inline_modal = None;
@@ -5312,6 +5379,32 @@ and execute_action ~now (m : Model.t) action =
                               , [] )
                             else (m, [])))
   | Keymap.Open_settings -> Update_nav.open_global_settings m
+  | Keymap.Open_account -> (
+      match m.nav.overlay with
+      | Some Nav.Account ->
+          ( {
+              m with
+              nav =
+                {
+                  m.nav with
+                  overlay = None;
+                  return_overlay = None;
+                  filter_focused = false;
+                };
+              account = Account_store.close_token_editor m.account;
+            }
+          , [] )
+      | Some
+          ( Nav.Palette
+          | Nav.Settings _
+          | Nav.Incidents
+          | Nav.Queue_context _
+          | Nav.Inline_action _
+          | Nav.Ask_answer
+          | Nav.Help
+          | Nav.System_gate _ )
+      | None ->
+          Update_nav.open_overlay m Nav.Account)
   | Keymap.Teleport_blocked -> Update_nav.teleport_blocked ~now m
   | Keymap.Open_incidents ->
       let incidents =
@@ -5350,6 +5443,7 @@ and execute_action ~now (m : Model.t) action =
           | Nav.Incidents
           | Nav.Queue_context _
           | Nav.Inline_action _
+          | Nav.Account
           | Nav.Ask_answer
           | Nav.System_gate _ )
       | None ->
@@ -5381,6 +5475,7 @@ and execute_action ~now (m : Model.t) action =
           | Nav.Incidents
           | Nav.Inline_action _
           | Nav.Ask_answer
+          | Nav.Account
           | Nav.Help
           | Nav.System_gate _ )
       | None ->
@@ -5418,6 +5513,7 @@ and execute_action ~now (m : Model.t) action =
               | Nav.Queue_context _
               | Nav.Inline_action _
               | Nav.Ask_answer
+              | Nav.Account
               | Nav.Help
               | Nav.System_gate _ )
           | None )
@@ -5498,6 +5594,7 @@ and execute_action ~now (m : Model.t) action =
                     }
                   , [] )
               | None -> (m, [])))
+      | Some Nav.Account -> (m, [])
       | Some Nav.Incidents ->
           let incidents =
             if m.incidents.zoomed then Incidents.toggle_raw_json m.incidents
@@ -5851,6 +5948,7 @@ and execute_action ~now (m : Model.t) action =
                   | Cmd.Open_editor_escape_hatch _
                   | Cmd.Open_terminal_program _
                   | Cmd.Start_local_server
+                  | Cmd.Set_bearer_token _
                   | Cmd.Restart_tui
                   | Cmd.Quit _ ->
                       false)
@@ -5879,6 +5977,7 @@ and execute_action ~now (m : Model.t) action =
           | Nav.Queue_context _
           | Nav.Inline_action _
           | Nav.Ask_answer
+          | Nav.Account
           | Nav.Help
           | Nav.System_gate _ ) ->
           (m, [])
@@ -5975,8 +6074,12 @@ and execute_action ~now (m : Model.t) action =
                     (Nav.Settings Nav.Settings_keepers_companies)
               | Nav.Pulse -> Update_nav.open_inline_modal m Nav.Board_new_post)))
   | Keymap.Refresh ->
+      let on_account_overlay =
+        Option.equal Nav.equal_overlay m.nav.overlay (Some Nav.Account)
+      in
       let needs_handshake =
         m.freshness.server_offline
+        || on_account_overlay
         || Option.equal Nav.equal_overlay m.nav.overlay
              (Some (Nav.System_gate Nav.Auth_gate))
         ||
@@ -5996,6 +6099,11 @@ and execute_action ~now (m : Model.t) action =
                   m.server_identity.mismatch_state);
           }
         in
+        let account =
+          if on_account_overlay then
+            { m.account with own_provider_forbidden = None }
+          else m.account
+        in
         let next =
           {
             m with
@@ -6003,6 +6111,7 @@ and execute_action ~now (m : Model.t) action =
             auth_session = Rbac.Probing_health;
             last_auth_recheck_mono = None;
             server_identity;
+            account;
           }
           |> Model.mark_all_domains_stale
           |> Model.with_toast ~now ~level:Model.Toast_info
@@ -6123,6 +6232,7 @@ and execute_action ~now (m : Model.t) action =
             | Nav.Inline_action _
             | Nav.Ask_answer
             | Nav.Incidents
+            | Nav.Account
             | Nav.Help
             | Nav.System_gate
                 (Nav.Auth_gate | Nav.Server_offline | Nav.Micro_viewport) ) ->
@@ -6201,6 +6311,11 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Runtime_assign_form
                 | Nav.Setup_account_key_form
                 | Nav.Setup_login_start_form
+                | Nav.Ma_provider_login_form
+                | Nav.Ma_provider_key_add_form
+                | Nav.Ma_provider_key_replace_form _
+                | Nav.Ma_provider_key_remove_confirm _
+                | Nav.Ma_provider_verify_form _
                 | Nav.Board_comment _
                 | Nav.Github_token_form _
                 | Nav.Code_finder_form
@@ -6236,6 +6351,7 @@ and execute_action ~now (m : Model.t) action =
                 | Nav.Addon_invoke_action _
                 | Nav.Setup_login_input_form _ )
             | Nav.Ask_answer
+            | Nav.Account
             | Nav.Help
             | Nav.System_gate
                 (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline) ) ->
@@ -6645,6 +6761,7 @@ and execute_action ~now (m : Model.t) action =
           | Nav.Queue_context _
           | Nav.Inline_action _
           | Nav.Ask_answer
+          | Nav.Account
           | Nav.Help
           | Nav.System_gate
               (Nav.Micro_viewport | Nav.Auth_gate | Nav.Server_offline) ) ->
@@ -9141,6 +9258,7 @@ and execute_action ~now (m : Model.t) action =
           | Nav.Queue_context _
           | Nav.Inline_action _
           | Nav.Ask_answer
+          | Nav.Account
           | Nav.Help
           | Nav.System_gate _ ) ->
           (m, [])

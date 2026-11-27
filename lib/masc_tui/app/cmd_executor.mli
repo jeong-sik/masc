@@ -94,6 +94,18 @@ val is_health_body_ready : string -> bool
     {!Masc_tui_protocol.Wire_common.decode_server_health} with [ok = true] and
     [ready <> Some false]. *)
 
+val fetch_health_with_anon_fallback :
+  fetch:
+    (Http_client.endpoint ->
+    (Masc_tui_protocol.Wire_common.server_health, Msg.http_error) result) ->
+  Http_client.endpoint ->
+  (Masc_tui_protocol.Wire_common.server_health, Msg.http_error) result
+(** Probe [/health] using [ep]. If an authenticated probe fails with HTTP 401
+    or 403 (invalid Bearer token or Single-user [Player] credential lacking
+    [CanReadState]), retry [/health] once anonymously ([bearer_token = None])
+    without mutating the caller's stored endpoint so [Public_health] resolves
+    [account_mode] and [auth_methods] for the subsequent auth handshake. *)
+
 val fetch_planning_with_tasks :
   observed_at:Clock.Mono.t ->
   fetch_planning:
@@ -248,6 +260,11 @@ val create :
   t
 
 val current_endpoint : t -> Http_client.endpoint
+val set_bearer_token : t -> string option -> unit
+(** Replace ([Some tok]) or clear ([None]) the runtime bearer token on [t]'s
+    endpoint and {!Sse_hub}, pinning [explicit_bearer_override] so subsequent
+    [/health] polls never reload [.masc/auth/admin.token] over the runtime
+    selection. *)
 val update_workspace_guard :
   t -> instance_id:string option -> workspace_sha256:string option -> unit
 

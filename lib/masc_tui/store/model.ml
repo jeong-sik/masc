@@ -246,6 +246,7 @@ type t = {
   runtime : Runtime_store.t;
   infra : Infra_store.t;
   config : Config_store.t;
+  account : Account_store.t;
   palette : palette_state;
   inline_modal : inline_modal_state option;
   discord_replies : Discord_reply_store.t;
@@ -601,6 +602,7 @@ let initial ?(cols = 140) ?(rows = 40) ?(lang = Say.Lang_ko)
     runtime = Runtime_store.empty;
     infra = Infra_store.empty;
     config = Config_store.empty;
+    account = Account_store.empty;
     palette = { mode = Palette_commands; query = ""; selected = 0 };
     inline_modal = None;
     discord_replies = Discord_reply_store.empty;
@@ -782,6 +784,7 @@ let fast_approval_strip_item m =
       | Some (Nav.System_gate _) -> None
       | Some
           ( Nav.Palette
+          | Nav.Account
           | Nav.Settings _
           | Nav.Incidents
           | Nav.Queue_context _
@@ -968,6 +971,7 @@ let sidebar_viewport_start ~inner_h ~scroll ~cursor =
 
 let active_menu_target m =
   match m.nav.overlay with
+  | Some Nav.Account -> Nav.Menu_account
   | Some (Nav.Settings _) -> Nav.Menu_settings
   | Some Nav.Incidents -> Nav.Menu_incidents
   | Some (Nav.Queue_context _) -> Nav.Menu_queue_context
@@ -1291,6 +1295,7 @@ let focusable_pane_count m =
         if Config_store.is_two_pane_width ~cols:m.viewport.cols then 2 else 1
     | Some
         ( Nav.Palette
+        | Nav.Account
         | Nav.Incidents
         | Nav.Queue_context _
         | Nav.Inline_action _
@@ -1751,6 +1756,10 @@ let active_focus_label m =
   match m.nav.overlay with
   | Some Nav.Help -> Say.make ~ko:"오버레이 · 도움말" ~en:"OVERLAY · Help"
   | Some Nav.Palette -> Say.make ~ko:"오버레이 · 팔레트" ~en:"OVERLAY · Palette"
+  | Some Nav.Account ->
+      if m.account.token_editor.active then
+        Say.make ~ko:"계정 · 토큰 입력" ~en:"ACCOUNT · Token Entry"
+      else Say.make ~ko:"오버레이 · 계정/세션" ~en:"OVERLAY · Account/Session"
   | Some (Nav.Settings _) ->
       if Config_store.is_two_pane_width ~cols:m.viewport.cols then
         if
@@ -2111,7 +2120,14 @@ let is_text_capture_active m =
         | Some modal -> modal.editing_free_text
         | None -> false)
     | Some (Nav.Settings _) -> Config_store.is_editing_field m.config
-    | Some (Nav.Incidents | Nav.Queue_context _ | Nav.Help | Nav.System_gate _) ->
+    | Some Nav.Account -> m.account.token_editor.active
+    | Some (Nav.System_gate Nav.Auth_gate) -> m.account.token_editor.active
+    | Some
+        ( Nav.Incidents
+        | Nav.Queue_context _
+        | Nav.Help
+        | Nav.System_gate
+            (Nav.Server_offline | Nav.Micro_viewport | Nav.Media_viewer) ) ->
         false
     | None -> is_keeper_config_active m && Config_store.is_editing_field m.config
 
@@ -2373,6 +2389,67 @@ let inline_modal_for kind =
     | Nav.Setup_account_key_form
     | Nav.Setup_login_start_form ->
         []
+    | Nav.Ma_provider_login_form ->
+        [
+          {
+            key = "ma_login_integration";
+            label =
+              Say.make ~ko:"연동 ID (claude | codex)"
+                ~en:"Integration ID (claude | codex)";
+            value = "claude";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Ma_provider_key_add_form ->
+        [
+          {
+            key = "ma_key_integration";
+            label = Say.make ~ko:"연동 ID" ~en:"Integration ID";
+            value = "";
+            required = true;
+            secret = false;
+          };
+          {
+            key = "ma_key_secret";
+            label = Say.make ~ko:"API 키" ~en:"API key";
+            value = "";
+            required = true;
+            secret = true;
+          };
+        ]
+    | Nav.Ma_provider_key_replace_form _ ->
+        [
+          {
+            key = "ma_key_secret";
+            label = Say.make ~ko:"새 API 키" ~en:"New API key";
+            value = "";
+            required = true;
+            secret = true;
+          };
+        ]
+    | Nav.Ma_provider_key_remove_confirm _ ->
+        [
+          {
+            key = "confirm_provider_account_id";
+            label =
+              Say.make ~ko:"확인: provider_account_id 입력"
+                ~en:"Confirm: type provider_account_id";
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
+    | Nav.Ma_provider_verify_form _ ->
+        [
+          {
+            key = "ma_verify_model";
+            label = Say.make ~ko:"검증할 모델" ~en:"Model to verify";
+            value = "";
+            required = true;
+            secret = false;
+          };
+        ]
     | Nav.Board_comment _ ->
         [
           {
@@ -3023,6 +3100,11 @@ let inline_modal_for kind =
     | Nav.Runtime_assign_form
     | Nav.Setup_account_key_form
     | Nav.Setup_login_start_form
+    | Nav.Ma_provider_login_form
+    | Nav.Ma_provider_key_add_form
+    | Nav.Ma_provider_key_replace_form _
+    | Nav.Ma_provider_key_remove_confirm _
+    | Nav.Ma_provider_verify_form _
     | Nav.Board_comment _
     | Nav.Github_token_form _
     | Nav.Code_finder_form
@@ -3214,6 +3296,31 @@ let modal_field_help ~key =
         (Say.make
            ~ko:"CLI가 입력을 기다리는 중: 코드 붙여넣기 또는 빈 칸 Enter (key:enter / key:eof)"
            ~en:"CLI awaits input: paste code or press Enter (blank sends key:enter)")
+  | "ma_login_integration" ->
+      Some
+        (Say.make
+           ~ko:"다중 계정 CLI 로그인 대상: claude 또는 codex (account_ref 미사용)"
+           ~en:"Multi-Account CLI login integration: claude or codex (account_ref omitted)")
+  | "ma_key_integration" ->
+      Some
+        (Say.make
+           ~ko:"연동 목록에서 key 연결을 지원하는 연동 ID (예: anthropic, openai, gemini)"
+           ~en:"Integration ID supporting key connect (e.g. anthropic, openai, gemini)")
+  | "ma_key_secret" ->
+      Some
+        (Say.make
+           ~ko:"마스킹 입력 · 제출 후 메모리에서 즉시 제거되며 화면·로그에 평문 미표시"
+           ~en:"Masked input · cleared immediately on submit, never logged or rendered in plaintext")
+  | "confirm_provider_account_id" ->
+      Some
+        (Say.make
+           ~ko:"삭제할 provider_account_id를 정확히 입력하고 Enter"
+           ~en:"Type the exact provider_account_id and press Enter to remove")
+  | "ma_verify_model" ->
+      Some
+        (Say.make
+           ~ko:"연동이 허용하는 모델 이름 (서버 검증 최대 120초 소요)"
+           ~en:"Allowed model name for this integration (verification may take up to 120s)")
   | "setup_key_integration" ->
       Some
         (Say.make
@@ -3971,6 +4078,7 @@ let mark_all_domains_stale m =
     runtime = Runtime_store.mark_stale_all m.runtime;
     infra = Infra_store.mark_stale_all m.infra;
     config = Config_store.mark_stale_all m.config;
+    account = Account_store.mark_stale m.account;
   }
 
 let sandboxes_from_roster ~now m =
@@ -4276,6 +4384,7 @@ let active_view_ssot_mode m =
     | Some
         ( Nav.System_gate (Nav.Micro_viewport | Nav.Media_viewer)
         | Nav.Palette
+        | Nav.Account
         | Nav.Settings _
         | Nav.Incidents
         | Nav.Queue_context _

@@ -169,6 +169,20 @@ type inline_action_kind =
       tab_id : int;
       expected_url : string option;
     }
+  | Ma_provider_login_form
+  | Ma_provider_key_add_form
+  | Ma_provider_key_replace_form of {
+      provider_account_id : string;
+      integration_id : string;
+    }
+  | Ma_provider_key_remove_confirm of {
+      provider_account_id : string;
+      integration_id : string;
+    }
+  | Ma_provider_verify_form of {
+      provider_account_id : string;
+      integration_id : string;
+    }
 
 type system_gate_kind =
   | Micro_viewport
@@ -178,6 +192,7 @@ type system_gate_kind =
 
 type overlay =
   | Palette
+  | Account
   | Settings of settings_tab
   | Incidents
   | Queue_context of queue_context_tab
@@ -602,6 +617,11 @@ let inline_action_tag = function
   | Setup_account_key_form -> 51
   | Setup_login_start_form -> 52
   | Discord_reply_form _ -> 53
+  | Ma_provider_login_form -> 54
+  | Ma_provider_key_add_form -> 55
+  | Ma_provider_key_replace_form _ -> 56
+  | Ma_provider_key_remove_confirm _ -> 57
+  | Ma_provider_verify_form _ -> 58
 let equal_inline_action_kind a b =
   if not (Int.equal (inline_action_tag a) (inline_action_tag b)) then false
   else
@@ -619,6 +639,8 @@ let equal_inline_action_kind a b =
     | Runtime_assign_form, Runtime_assign_form
     | Setup_account_key_form, Setup_account_key_form
     | Setup_login_start_form, Setup_login_start_form
+    | Ma_provider_login_form, Ma_provider_login_form
+    | Ma_provider_key_add_form, Ma_provider_key_add_form
     | Code_finder_form, Code_finder_form
     | Code_search_form, Code_search_form
     | Skill_create_form, Skill_create_form
@@ -702,6 +724,15 @@ let equal_inline_action_kind a b =
         && List.equal String.equal x.action_names y.action_names
     | Setup_login_input_form x, Setup_login_input_form y ->
         String.equal x.login_id y.login_id
+    | Ma_provider_key_replace_form x, Ma_provider_key_replace_form y ->
+        String.equal x.provider_account_id y.provider_account_id
+        && String.equal x.integration_id y.integration_id
+    | Ma_provider_key_remove_confirm x, Ma_provider_key_remove_confirm y ->
+        String.equal x.provider_account_id y.provider_account_id
+        && String.equal x.integration_id y.integration_id
+    | Ma_provider_verify_form x, Ma_provider_verify_form y ->
+        String.equal x.provider_account_id y.provider_account_id
+        && String.equal x.integration_id y.integration_id
     | ( Btw_query
       | Gate_reject _
       | Verification_reject _
@@ -720,6 +751,11 @@ let equal_inline_action_kind a b =
       | Runtime_assign_form
       | Setup_account_key_form
       | Setup_login_start_form
+      | Ma_provider_login_form
+      | Ma_provider_key_add_form
+      | Ma_provider_key_replace_form _
+      | Ma_provider_key_remove_confirm _
+      | Ma_provider_verify_form _
       | Board_comment _
       | Github_token_form _
       | Code_finder_form
@@ -765,23 +801,50 @@ let system_gate_index = function
 let equal_system_gate_kind a b =
   Int.equal (system_gate_index a) (system_gate_index b)
 
+let overlay_rank = function
+  | Palette -> 0
+  | Account -> 1
+  | Settings _ -> 2
+  | Incidents -> 3
+  | Queue_context _ -> 4
+  | Inline_action _ -> 5
+  | Ask_answer -> 6
+  | Help -> 7
+  | System_gate _ -> 8
+
 let equal_overlay a b =
-  match a, b with
-  | Palette, Palette | Incidents, Incidents | Ask_answer, Ask_answer | Help, Help ->
-      true
-  | Settings x, Settings y -> equal_settings_tab x y
-  | Queue_context x, Queue_context y -> equal_queue_context_tab x y
-  | Inline_action x, Inline_action y -> equal_inline_action_kind x y
-  | System_gate x, System_gate y -> equal_system_gate_kind x y
-  | Palette, (Settings _ | Incidents | Queue_context _ | Inline_action _ | Ask_answer | Help | System_gate _)
-  | Settings _, (Palette | Incidents | Queue_context _ | Inline_action _ | Ask_answer | Help | System_gate _)
-  | Incidents, (Palette | Settings _ | Queue_context _ | Inline_action _ | Ask_answer | Help | System_gate _)
-  | Queue_context _, (Palette | Settings _ | Incidents | Inline_action _ | Ask_answer | Help | System_gate _)
-  | Inline_action _, (Palette | Settings _ | Incidents | Queue_context _ | Ask_answer | Help | System_gate _)
-  | Ask_answer, (Palette | Settings _ | Incidents | Queue_context _ | Inline_action _ | Help | System_gate _)
-  | Help, (Palette | Settings _ | Incidents | Queue_context _ | Inline_action _ | Ask_answer | System_gate _)
-  | System_gate _, (Palette | Settings _ | Incidents | Queue_context _ | Inline_action _ | Ask_answer | Help) ->
-      false
+  if not (Int.equal (overlay_rank a) (overlay_rank b)) then false
+  else
+    match a, b with
+    | Palette, Palette
+    | Account, Account
+    | Incidents, Incidents
+    | Ask_answer, Ask_answer
+    | Help, Help ->
+        true
+    | Settings x, Settings y -> equal_settings_tab x y
+    | Queue_context x, Queue_context y -> equal_queue_context_tab x y
+    | Inline_action x, Inline_action y -> equal_inline_action_kind x y
+    | System_gate x, System_gate y -> equal_system_gate_kind x y
+    | ( ( Palette
+        | Account
+        | Settings _
+        | Incidents
+        | Queue_context _
+        | Inline_action _
+        | Ask_answer
+        | Help
+        | System_gate _ )
+      , ( Palette
+        | Account
+        | Settings _
+        | Incidents
+        | Queue_context _
+        | Inline_action _
+        | Ask_answer
+        | Help
+        | System_gate _ ) ) ->
+        false
 
 let equal_focus_scope a b =
   match a, b with
@@ -819,6 +882,7 @@ type menu_target =
   | Menu_keeper_tab of keeper_tab
   | Menu_runtime of runtime_tab
   | Menu_infra of infra_tab
+  | Menu_account
   | Menu_settings
   | Menu_incidents
   | Menu_queue_context
@@ -859,32 +923,62 @@ let menu_section_index = function
 let equal_menu_section a b =
   Int.equal (menu_section_index a) (menu_section_index b)
 
+let menu_target_rank = function
+  | Menu_pulse -> 0
+  | Menu_work _ -> 1
+  | Menu_knowledge _ -> 2
+  | Menu_keepers -> 3
+  | Menu_keeper_tab _ -> 4
+  | Menu_runtime _ -> 5
+  | Menu_infra _ -> 6
+  | Menu_account -> 7
+  | Menu_settings -> 8
+  | Menu_incidents -> 9
+  | Menu_queue_context -> 10
+  | Menu_help -> 11
+
 let equal_menu_target a b =
-  match a, b with
-  | Menu_pulse, Menu_pulse
-  | Menu_keepers, Menu_keepers
-  | Menu_settings, Menu_settings
-  | Menu_incidents, Menu_incidents
-  | Menu_queue_context, Menu_queue_context
-  | Menu_help, Menu_help ->
-      true
-  | Menu_work x, Menu_work y -> equal_work_tab x y
-  | Menu_knowledge x, Menu_knowledge y -> equal_knowledge_tab x y
-  | Menu_keeper_tab x, Menu_keeper_tab y -> equal_keeper_tab x y
-  | Menu_runtime x, Menu_runtime y -> equal_runtime_tab x y
-  | Menu_infra x, Menu_infra y -> equal_infra_tab x y
-  | Menu_pulse, (Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_keeper_tab _ | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
-  | Menu_work _, (Menu_pulse | Menu_knowledge _ | Menu_keepers | Menu_keeper_tab _ | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
-  | Menu_knowledge _, (Menu_pulse | Menu_work _ | Menu_keepers | Menu_keeper_tab _ | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
-  | Menu_keepers, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keeper_tab _ | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
-  | Menu_keeper_tab _, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
-  | Menu_runtime _, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_keeper_tab _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
-  | Menu_infra _, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_keeper_tab _ | Menu_runtime _ | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help)
-  | Menu_settings, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_keeper_tab _ | Menu_runtime _ | Menu_infra _ | Menu_incidents | Menu_queue_context | Menu_help)
-  | Menu_incidents, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_keeper_tab _ | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_queue_context | Menu_help)
-  | Menu_queue_context, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_keeper_tab _ | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_help)
-  | Menu_help, (Menu_pulse | Menu_work _ | Menu_knowledge _ | Menu_keepers | Menu_keeper_tab _ | Menu_runtime _ | Menu_infra _ | Menu_settings | Menu_incidents | Menu_queue_context) ->
-      false
+  if not (Int.equal (menu_target_rank a) (menu_target_rank b)) then false
+  else
+    match a, b with
+    | Menu_pulse, Menu_pulse
+    | Menu_keepers, Menu_keepers
+    | Menu_account, Menu_account
+    | Menu_settings, Menu_settings
+    | Menu_incidents, Menu_incidents
+    | Menu_queue_context, Menu_queue_context
+    | Menu_help, Menu_help ->
+        true
+    | Menu_work x, Menu_work y -> equal_work_tab x y
+    | Menu_knowledge x, Menu_knowledge y -> equal_knowledge_tab x y
+    | Menu_keeper_tab x, Menu_keeper_tab y -> equal_keeper_tab x y
+    | Menu_runtime x, Menu_runtime y -> equal_runtime_tab x y
+    | Menu_infra x, Menu_infra y -> equal_infra_tab x y
+    | ( ( Menu_pulse
+        | Menu_work _
+        | Menu_knowledge _
+        | Menu_keepers
+        | Menu_keeper_tab _
+        | Menu_runtime _
+        | Menu_infra _
+        | Menu_account
+        | Menu_settings
+        | Menu_incidents
+        | Menu_queue_context
+        | Menu_help )
+      , ( Menu_pulse
+        | Menu_work _
+        | Menu_knowledge _
+        | Menu_keepers
+        | Menu_keeper_tab _
+        | Menu_runtime _
+        | Menu_infra _
+        | Menu_account
+        | Menu_settings
+        | Menu_incidents
+        | Menu_queue_context
+        | Menu_help ) ) ->
+        false
 
 let all_menu_items =
   [
@@ -1064,6 +1158,12 @@ let all_menu_items =
     };
     {
       section = Sec_system;
+      target = Menu_account;
+      label = Say.make ~ko:"계정 · 세션" ~en:"Account & Session";
+      shortcut = Some "@";
+    };
+    {
+      section = Sec_system;
       target = Menu_settings;
       label = Say.make ~ko:"설정" ~en:"Settings";
       shortcut = Some "7/,";
@@ -1118,15 +1218,18 @@ let menu_item_index = function
   | Menu_infra Infra_repos_changes -> 26
   | Menu_infra Infra_code -> 27
   | Menu_infra Infra_activity_logs -> 28
-  | Menu_settings -> 29
-  | Menu_incidents -> 30
-  | Menu_queue_context -> 31
-  | Menu_help -> 32
+  | Menu_account -> 29
+  | Menu_settings -> 30
+  | Menu_incidents -> 31
+  | Menu_queue_context -> 32
+  | Menu_help -> 33
 
 let menu_item_of_index idx = List.nth_opt all_menu_items idx
 
 let is_overlay_menu_target = function
-  | Menu_settings | Menu_incidents | Menu_queue_context | Menu_help -> true
+  | Menu_account | Menu_settings | Menu_incidents | Menu_queue_context
+  | Menu_help ->
+      true
   | Menu_pulse
   | Menu_work _
   | Menu_knowledge _

@@ -43,6 +43,30 @@ type planning_failure =
 type http_reply =
   (* Auth & Fleet & Pulse *)
   | Reply_auth_whoami of (Wire_common.auth_whoami, http_error) result
+  | Reply_auth_provider_accounts of
+      (Wire_account.provider_accounts_snapshot, http_error) result
+  | Reply_auth_integrations of
+      (Wire_account.person_integrations_snapshot, http_error) result
+  | Reply_setup_account_verify of {
+      provider_account_id : string;
+      result : (Wire_account.account_verify_response, http_error) result;
+    }
+  | Reply_ma_setup_account_key_register of {
+      integration_id : string;
+      result : (Wire_account.key_register_response, http_error) result;
+    }
+  | Reply_ma_setup_account_key_replace of {
+      provider_account_id : string;
+      result : (Wire_account.key_replace_response, http_error) result;
+    }
+  | Reply_ma_setup_account_key_remove of {
+      provider_account_id : string;
+      result : (Wire_account.key_remove_response, http_error) result;
+    }
+  | Reply_setup_login_cancel of {
+      login_id : string;
+      result : (unit, http_error) result;
+    }
   | Reply_dashboard_shell of (Wire_fleet.dashboard_shell, http_error) result
   | Reply_keepers_roster of (Wire_fleet.keepers_roster, http_error) result
   | Reply_keepers_roster_extras of Wire_fleet.keeper_roster_extras

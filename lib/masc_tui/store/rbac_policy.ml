@@ -5,6 +5,8 @@ let route_access_of_get_request : Cmd.get_request -> Rbac.route_access =
   function
   | Cmd.Get_health -> Rbac.Always_public
   | Cmd.Get_auth_whoami -> Rbac.Multi_account_whoami_probe
+  | Cmd.Get_auth_provider_accounts | Cmd.Get_auth_integrations ->
+      Rbac.Multi_account_own_provider
   | Cmd.Get_dashboard_shell -> Rbac.Single_user_shell_probe
   (* Bridged Workspace_read (SU Public_read/CanReadState + MA Workspace_read) *)
   | Cmd.Get_planning
@@ -157,8 +159,13 @@ let route_access_of_post_request : Cmd.post_request -> Rbac.route_access =
       Rbac.Bridged_token_admin
   (* Dual-mode own-provider mutations: SU Token_permission CanAdmin, MA Manage_own_provider *)
   | Cmd.Post_setup_login_start _
-  | Cmd.Post_setup_login_input _ ->
+  | Cmd.Post_setup_login_input _
+  | Cmd.Post_setup_login_cancel _ ->
       Rbac.Own_provider_manage
+  (* Multi-Account own-provider management routes (404 in Single_user) *)
+  | Cmd.Post_ma_setup_account_key _
+  | Cmd.Post_setup_account_verify _ ->
+      Rbac.Multi_account_own_provider
   (* Single-user read-only POST queries (CanReadState; 404 in MA) *)
   | Cmd.Post_browser_tabs _
   | Cmd.Post_browser_scene _
@@ -260,10 +267,12 @@ let route_access_of_post_request : Cmd.post_request -> Rbac.route_access =
 let route_access_of_put_request : Cmd.put_request -> Rbac.route_access =
   function
   | Cmd.Put_wiki_page _ -> Rbac.Bridged_token_admin
+  | Cmd.Put_ma_setup_account_key _ -> Rbac.Multi_account_own_provider
 
 let route_access_of_delete_request : Cmd.delete_request -> Rbac.route_access =
   function
   | Cmd.Delete_skill_editor _ -> Rbac.Single_user_token_admin_only
+  | Cmd.Delete_ma_setup_account_key _ -> Rbac.Multi_account_own_provider
 
 let route_access_of_stream_post_request :
     Cmd.stream_post_request -> Rbac.route_access = function
@@ -344,6 +353,12 @@ let route_access_of_inline_action : Nav.inline_action_kind -> Rbac.route_access
   | Nav.Wiki_edit_form -> Rbac.Bridged_token_admin
   | Nav.Setup_login_start_form | Nav.Setup_login_input_form _ ->
       Rbac.Own_provider_manage
+  | Nav.Ma_provider_login_form
+  | Nav.Ma_provider_key_add_form
+  | Nav.Ma_provider_key_replace_form _
+  | Nav.Ma_provider_key_remove_confirm _
+  | Nav.Ma_provider_verify_form _ ->
+      Rbac.Multi_account_own_provider
   | Nav.Prompt_override_form _ | Nav.Runtime_param_set_form _ ->
       Rbac.Single_user_role_admin
   | Nav.Gate_reject _
@@ -378,7 +393,7 @@ let route_access_of_inline_action : Nav.inline_action_kind -> Rbac.route_access
       Rbac.Single_user_token_admin_only
 
 let route_access_of_overlay : Nav.overlay -> Rbac.route_access = function
-  | Nav.Palette | Nav.Incidents | Nav.Help | Nav.System_gate _ ->
+  | Nav.Palette | Nav.Account | Nav.Incidents | Nav.Help | Nav.System_gate _ ->
       Rbac.Always_public
   | Nav.Settings _ -> Rbac.Bridged_token_admin
   | Nav.Queue_context _ -> Rbac.Single_user_read
@@ -394,6 +409,7 @@ let route_access_of_menu_target : Nav.menu_target -> Rbac.route_access =
   | Nav.Menu_keeper_tab tab -> route_access_of_keeper_tab tab
   | Nav.Menu_runtime tab -> route_access_of_runtime_tab tab
   | Nav.Menu_infra tab -> route_access_of_infra_tab tab
+  | Nav.Menu_account -> Rbac.Always_public
   | Nav.Menu_settings -> Rbac.Bridged_token_admin
   | Nav.Menu_incidents | Nav.Menu_help -> Rbac.Always_public
   | Nav.Menu_queue_context -> Rbac.Single_user_read
@@ -430,6 +446,7 @@ let route_access_of_slash_command_id : Slash.command_id -> Rbac.route_access =
   | Slash.Cmd_lane
   | Slash.Cmd_browser ->
       Rbac.Single_user_token_admin_only
+  | Slash.Cmd_account
   | Slash.Cmd_incidents
   | Slash.Cmd_tools
   | Slash.Cmd_clear
@@ -450,6 +467,7 @@ let route_access_of_slash_parsed : Slash.parsed -> Rbac.route_access = function
   | Slash.Keeper _ -> route_access_of_slash_command_id Slash.Cmd_keeper
   | Slash.Model _ -> route_access_of_slash_command_id Slash.Cmd_model
   | Slash.Config _ -> route_access_of_slash_command_id Slash.Cmd_config
+  | Slash.Account -> route_access_of_slash_command_id Slash.Cmd_account
   | Slash.Incidents -> route_access_of_slash_command_id Slash.Cmd_incidents
   | Slash.Jump -> route_access_of_slash_command_id Slash.Cmd_jump
   | Slash.Voice -> route_access_of_slash_command_id Slash.Cmd_voice
@@ -533,6 +551,7 @@ let route_access_of_keymap_action : Keymap.action -> Rbac.route_access =
   | Keymap.Dive_selected
   | Keymap.Confirm_selected
   | Keymap.Pop_back_or_close
+  | Keymap.Open_account
   | Keymap.Open_incidents
   | Keymap.Open_help
   | Keymap.Open_palette
@@ -730,6 +749,7 @@ let create_new_access (m : Model.t) : Rbac.route_access =
   | Some (Nav.Settings _) -> Rbac.Bridged_token_admin
   | Some
       ( Nav.Palette
+      | Nav.Account
       | Nav.Incidents
       | Nav.Queue_context _
       | Nav.Inline_action _
@@ -898,6 +918,7 @@ let open_external_editor_access (m : Model.t) : Rbac.route_access =
   | Some (Nav.Settings _) -> Rbac.Single_user_token_admin_only
   | Some
       ( Nav.Palette
+      | Nav.Account
       | Nav.Incidents
       | Nav.Queue_context _
       | Nav.Inline_action _
@@ -1029,6 +1050,7 @@ let route_access_of_keymap_action_in_model (m : Model.t) (act : Keymap.action) :
   | Keymap.Confirm_selected
   | Keymap.Pop_back_or_close
   | Keymap.Open_settings
+  | Keymap.Open_account
   | Keymap.Teleport_blocked
   | Keymap.Open_incidents
   | Keymap.Voice_ptt_toggle
@@ -1111,6 +1133,7 @@ let decide_keymap_action session act =
   | Keymap.Confirm_selected
   | Keymap.Pop_back_or_close
   | Keymap.Open_settings
+  | Keymap.Open_account
   | Keymap.Teleport_blocked
   | Keymap.Open_incidents
   | Keymap.Voice_ptt_toggle
@@ -1192,6 +1215,7 @@ let decide_keymap_action_in_model (m : Model.t) act =
   | Keymap.Confirm_selected
   | Keymap.Pop_back_or_close
   | Keymap.Open_settings
+  | Keymap.Open_account
   | Keymap.Teleport_blocked
   | Keymap.Open_incidents
   | Keymap.Voice_ptt_toggle
@@ -1295,6 +1319,7 @@ let decide_overlay session ov =
   match ov with
   | Nav.Inline_action kind -> decide_inline_action session kind
   | Nav.Palette
+  | Nav.Account
   | Nav.Settings _
   | Nav.Incidents
   | Nav.Queue_context _
@@ -1316,6 +1341,7 @@ let decide_slash_command_id session id =
   | Slash.Cmd_keeper
   | Slash.Cmd_model
   | Slash.Cmd_config
+  | Slash.Cmd_account
   | Slash.Cmd_incidents
   | Slash.Cmd_jump
   | Slash.Cmd_voice
@@ -1356,6 +1382,7 @@ let decide_slash_parsed session parsed =
   | Slash.Keeper _
   | Slash.Model _
   | Slash.Config _
+  | Slash.Account
   | Slash.Incidents
   | Slash.Jump
   | Slash.Voice
@@ -1421,6 +1448,7 @@ let rec is_cmd_allowed session = function
   | Cmd.Voice_cmd (Cmd.Stop_ptt | Cmd.Cancel_ptt | Cmd.Probe_capabilities) ->
       true
   | Cmd.Sync_streams _
+  | Cmd.Set_bearer_token _
   | Cmd.Update_workspace_guard _
   | Cmd.Copy_clipboard _
   | Cmd.Render_memory_diagram _
@@ -1452,6 +1480,7 @@ let rec filter_cmd session = function
     | Cmd.Export_artifact _
     | Cmd.Open_dos_screen _
     | Cmd.Voice_cmd _
+    | Cmd.Set_bearer_token _
     | Cmd.Update_workspace_guard _
     | Cmd.Copy_clipboard _
     | Cmd.Render_memory_diagram _

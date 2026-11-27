@@ -15,6 +15,7 @@ let has_explicit_sync_streams cmds =
       | Cmd.Http_put _
       | Cmd.Http_delete _
       | Cmd.Http_post_stream _
+      | Cmd.Set_bearer_token _
       | Cmd.Update_workspace_guard _
       | Cmd.Voice_cmd _
       | Cmd.Copy_clipboard _
@@ -109,6 +110,11 @@ let apply_resize ~now (m : Model.t) ~cols ~rows =
       Config_store.set_pane Config_store.Pane_inspector cfg0
     else cfg0
   in
+  let account =
+    if overlay_hidden_locked && next2.account.token_editor.active then
+      Account_store.close_token_editor next2.account
+    else next2.account
+  in
   let overlay =
     if not micro_locked then
       match next2.nav.overlay with
@@ -116,6 +122,7 @@ let apply_resize ~now (m : Model.t) ~cols ~rows =
       | Some
           ( Nav.System_gate (Nav.Auth_gate | Nav.Server_offline | Nav.Media_viewer)
           | Nav.Palette
+          | Nav.Account
           | Nav.Settings _
           | Nav.Incidents
           | Nav.Queue_context _
@@ -132,6 +139,7 @@ let apply_resize ~now (m : Model.t) ~cols ~rows =
         next2 with
         drafts;
         config;
+        account;
         nav = { next2.nav with overlay; pane_index; filter_focused };
       }
     in
@@ -186,6 +194,7 @@ let apply_server_health ~now (m : Model.t)
             ( Nav.System_gate
                 (Nav.Auth_gate | Nav.Micro_viewport | Nav.Media_viewer)
             | Nav.Palette
+            | Nav.Account
             | Nav.Settings _
             | Nav.Incidents
             | Nav.Queue_context _
@@ -245,6 +254,22 @@ let apply_server_health ~now (m : Model.t)
         in
         ({ m1 with server_identity }, [ Cmd.Start_local_server ])
       else (m1, [])
+  | Error (Msg.Http_error { status = (401 | 403); _ } as err) ->
+      let detail = Msg.http_error_detail err in
+      let context = Say.make ~ko:"서버 헬스 확인" ~en:"Server health check" in
+      let summary =
+        Say.concat ~sep:": " [ context; Msg.http_error_summary err ]
+      in
+      let incidents, _ =
+        Incidents.push ~occurred_at_unix:m.freshness.last_wall_unix
+          ~source:Health.Source_client_http ~summary ~detail
+          ~status:Health.Resolved m.incidents
+      in
+      let next_session =
+        Rbac.Auth_unavailable { mode = None; reason = detail }
+      in
+      Update_http.apply_auth_session_transition ~now ~next_session
+        { m with incidents }
   | Error
       (( Msg.Transport
            ( Health.Timeout
@@ -787,6 +812,27 @@ let reserve_file_peek_read ~now (m : Model.t) cmds =
   let infra = List.fold_left reserve m.infra (Cmd.flatten cmds) in
   if infra == m.infra then m else { m with infra }
 
+let reserve_account_reads ~now (m : Model.t) cmds =
+  let start = function
+    | Observed.Value _ as read -> Observed.mark_stale read
+    | Observed.Loading _ as read -> read
+    | Observed.Unreported | Observed.Absent | Observed.Failed _ ->
+        Observed.loading ~since_ns:now
+  in
+  let reserve (acct : Account_store.t) cmd =
+    (match cmd with
+    | Cmd.Http_get { epoch; req = Cmd.Get_auth_provider_accounts }
+      when Epoch.equal epoch m.epoch ->
+        { acct with provider_accounts = start acct.provider_accounts }
+    | Cmd.Http_get { epoch; req = Cmd.Get_auth_integrations }
+      when Epoch.equal epoch m.epoch ->
+        { acct with integrations = start acct.integrations }
+    | _ -> acct)
+    [@warning "-4"]
+  in
+  let account = List.fold_left reserve m.account (Cmd.flatten cmds) in
+  if account == m.account then m else { m with account }
+
 let step ~now m msg =
   let next0, cmds = step_raw ~now m msg in
   let next0 = leave_old_epoch ~now ~before:m next0 in
@@ -835,4 +881,5 @@ let step ~now m msg =
   let next = reserve_sandbox_view_reads ~now next final_cmds in
   let next = reserve_work_reads ~now next final_cmds in
   let next = reserve_workspace_file_read ~now next final_cmds in
+  let next = reserve_account_reads ~now next final_cmds in
   (reserve_file_peek_read ~now next final_cmds, final_cmds)

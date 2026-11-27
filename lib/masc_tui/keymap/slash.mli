@@ -43,6 +43,7 @@ type command_id =
   | Cmd_clear
   | Cmd_theme
   | Cmd_lang
+  | Cmd_account
   | Cmd_help
   | Cmd_restart
   | Cmd_quit
@@ -216,6 +217,7 @@ type parsed =
   | Clear
   | Theme of Theme.preset option
   | Lang of Say.lang option
+  | Account
   | Help
   | Restart
   | Quit

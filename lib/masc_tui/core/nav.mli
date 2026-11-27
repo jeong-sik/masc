@@ -175,6 +175,20 @@ type inline_action_kind =
       tab_id : int;
       expected_url : string option;
     }
+  | Ma_provider_login_form
+  | Ma_provider_key_add_form
+  | Ma_provider_key_replace_form of {
+      provider_account_id : string;
+      integration_id : string;
+    }
+  | Ma_provider_key_remove_confirm of {
+      provider_account_id : string;
+      integration_id : string;
+    }
+  | Ma_provider_verify_form of {
+      provider_account_id : string;
+      integration_id : string;
+    }
 
 type system_gate_kind =
   | Micro_viewport
@@ -184,6 +198,7 @@ type system_gate_kind =
 
 type overlay =
   | Palette
+  | Account
   | Settings of settings_tab
   | Incidents
   | Queue_context of queue_context_tab
@@ -287,6 +302,7 @@ type menu_target =
   | Menu_keeper_tab of keeper_tab
   | Menu_runtime of runtime_tab
   | Menu_infra of infra_tab
+  | Menu_account
   | Menu_settings
   | Menu_incidents
   | Menu_queue_context

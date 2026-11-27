@@ -24,6 +24,21 @@ val record_http_incident :
     other HTTP/transport/decode errors strictly in Channel 3 [incidents]
     without degrading Channel 2 live health. *)
 
+val purge_disallowed_state :
+  session:Rbac.auth_session -> Model.t -> Model.t
+(** Purge cached slices, active modals, token-editor drafts, and overlays that
+    [session] is not allowed to observe. *)
+
+val apply_runtime_token_swap :
+  now:Clock.Mono.t ->
+  token:string option ->
+  Model.t ->
+  Model.t * Cmd.t list
+(** Apply a runtime Bearer/PAT token rotation ([Some tok]) or clear ([None]):
+    wipe the masked draft, bump [epoch], purge disallowed state, stop active
+    SSE streams, update [Cmd_executor]'s bearer token, clear workspace guard,
+    and trigger a fresh [/health] handshake without restarting the TUI. *)
+
 val apply_auth_session_transition :
   now:Clock.Mono.t ->
   next_session:Rbac.auth_session ->

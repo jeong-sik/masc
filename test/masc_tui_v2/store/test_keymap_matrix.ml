@@ -3913,6 +3913,7 @@ let test_pillar1_keeper_config_and_settings_lr () =
         | Some (Nav.Settings _) -> true
         | Some
             ( Nav.Palette
+            | Nav.Account
             | Nav.Incidents
             | Nav.Queue_context _
             | Nav.Inline_action _
@@ -6201,11 +6202,13 @@ let test_wave2_100pct_menu_reachability_matrix () =
   (* 2. Left Navigation Sidebar 100% reachability sweep: 'b' + Down*n + Enter for EVERY menu item! *)
   let menu_items = Nav.all_menu_items in
   let n_menu = List.length menu_items in
-  Alcotest.(check int) "Left Navigation Sidebar has all 33 unified targets" 33
+  Alcotest.(check int) "Left Navigation Sidebar has all 34 unified targets" 34
     n_menu;
   let has_menu_target pred =
     List.exists (fun (it : Nav.menu_item) -> pred it.target) menu_items
   in
+  Alcotest.(check bool) "Sidebar includes Menu_account" true
+    (has_menu_target (function Nav.Menu_account -> true | _ -> false));
   Alcotest.(check bool) "Sidebar includes Work_harness" true
     (has_menu_target (function Nav.Menu_work Nav.Work_harness -> true | _ -> false));
   Alcotest.(check bool) "Sidebar includes Infra_code" true
@@ -6274,6 +6277,10 @@ let test_wave2_100pct_menu_reachability_matrix () =
             (match m_jumped.nav.overlay with
              | Some (Nav.Settings _) -> true
              | _ -> false)
+      | Nav.Menu_account ->
+          Alcotest.(check bool) "Sidebar opens Account" true
+            (Option.equal Nav.equal_overlay m_jumped.nav.overlay
+               (Some Nav.Account))
       | Nav.Menu_incidents ->
           Alcotest.(check bool) "Sidebar opens Incidents" true
             (Option.equal Nav.equal_overlay m_jumped.nav.overlay

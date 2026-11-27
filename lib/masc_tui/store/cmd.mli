@@ -10,6 +10,8 @@ open Masc_tui_protocol
 type get_request =
   | Get_health
   | Get_auth_whoami
+  | Get_auth_provider_accounts
+  | Get_auth_integrations
   | Get_dashboard_shell
   | Get_keepers_roster
   | Get_keeper_turns
@@ -293,6 +295,14 @@ type post_request =
       key : string;
       source_revision : string;
     }
+  | Post_ma_setup_account_key of {
+      integration_id : string;
+      key : string;
+    }
+  | Post_setup_account_verify of {
+      provider_account_id : string;
+      model : string;
+    }
   | Post_setup_login_start of {
       integration_id : string;
       account_ref : string option;
@@ -301,6 +311,7 @@ type post_request =
       login_id : string;
       input : Wire_runtime.setup_login_input;
     }
+  | Post_setup_login_cancel of { login_id : string }
   | Post_sandbox_probe of [ `All | `Keeper of string | `Ssh_pool of string ]
   | Post_config_patch of Wire_config.patch_request
   | Post_tui_preference of Wire_config.tui_preference_change
@@ -590,6 +601,10 @@ type post_request =
 
 type put_request =
   | Put_wiki_page of { page : string; request : Wire_knowledge.wiki_put_request }
+  | Put_ma_setup_account_key of {
+      provider_account_id : string;
+      key : string;
+    }
 
 type delete_request =
   | Delete_skill_editor of {
@@ -597,6 +612,7 @@ type delete_request =
       reference_json : Yojson.Safe.t;
       confirmed : bool;
     }
+  | Delete_ma_setup_account_key of { provider_account_id : string }
 
 type stream_post_request =
   | Stream_keeper_chat of {
@@ -630,6 +646,7 @@ type t =
   | Http_delete of { epoch : Epoch.t; req : delete_request }
   | Http_post_stream of { epoch : Epoch.t; req : stream_post_request }
   | Sync_streams of { epoch : Epoch.t; streams : Subscriptions.stream_id list }
+  | Set_bearer_token of string option
   | Update_workspace_guard of {
       instance_id : string option;
       workspace_sha256 : string option;

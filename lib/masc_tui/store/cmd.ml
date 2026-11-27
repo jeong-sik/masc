@@ -4,6 +4,8 @@ open Masc_tui_protocol
 type get_request =
   | Get_health
   | Get_auth_whoami
+  | Get_auth_provider_accounts
+  | Get_auth_integrations
   | Get_dashboard_shell
   | Get_keepers_roster
   | Get_keeper_turns
@@ -282,6 +284,14 @@ type post_request =
       key : string;
       source_revision : string;
     }
+  | Post_ma_setup_account_key of {
+      integration_id : string;
+      key : string;
+    }
+  | Post_setup_account_verify of {
+      provider_account_id : string;
+      model : string;
+    }
   | Post_setup_login_start of {
       integration_id : string;
       account_ref : string option;
@@ -290,6 +300,7 @@ type post_request =
       login_id : string;
       input : Wire_runtime.setup_login_input;
     }
+  | Post_setup_login_cancel of { login_id : string }
   | Post_sandbox_probe of [ `All | `Keeper of string | `Ssh_pool of string ]
   | Post_config_patch of Wire_config.patch_request
   | Post_tui_preference of Wire_config.tui_preference_change
@@ -575,6 +586,10 @@ type post_request =
 
 type put_request =
   | Put_wiki_page of { page : string; request : Wire_knowledge.wiki_put_request }
+  | Put_ma_setup_account_key of {
+      provider_account_id : string;
+      key : string;
+    }
 
 type delete_request =
   | Delete_skill_editor of {
@@ -582,6 +597,7 @@ type delete_request =
       reference_json : Yojson.Safe.t;
       confirmed : bool;
     }
+  | Delete_ma_setup_account_key of { provider_account_id : string }
 
 type stream_post_request =
   | Stream_keeper_chat of {
@@ -615,6 +631,7 @@ type t =
   | Http_delete of { epoch : Epoch.t; req : delete_request }
   | Http_post_stream of { epoch : Epoch.t; req : stream_post_request }
   | Sync_streams of { epoch : Epoch.t; streams : Subscriptions.stream_id list }
+  | Set_bearer_token of string option
   | Update_workspace_guard of {
       instance_id : string option;
       workspace_sha256 : string option;
@@ -661,6 +678,8 @@ type t =
 let get_request_path = function
   | Get_health -> Wire_common.health_path
   | Get_auth_whoami -> Wire_common.auth_whoami_path
+  | Get_auth_provider_accounts -> Wire_account.auth_provider_accounts_path
+  | Get_auth_integrations -> Wire_account.auth_integrations_path
   | Get_dashboard_shell -> Wire_fleet.dashboard_shell_path
   | Get_keepers_roster -> Wire_fleet.dashboard_keepers_path
   | Get_keeper_turns -> Wire_fleet.keepers_turns_path
@@ -886,9 +905,13 @@ let post_request_path = function
   | Post_runtime_lane_delete _ ->
       Wire_runtime.runtime_routing_path
   | Post_setup_account_key _ -> Wire_runtime.setup_credential_path
+  | Post_ma_setup_account_key _ -> Wire_account.setup_accounts_key_path
+  | Post_setup_account_verify _ -> Wire_account.setup_accounts_verify_path
   | Post_setup_login_start _ -> Wire_runtime.setup_accounts_login_path
   | Post_setup_login_input { login_id; _ } ->
       Wire_runtime.setup_accounts_login_input_path ~login_id
+  | Post_setup_login_cancel { login_id } ->
+      Wire_account.setup_accounts_login_cancel_path ~login_id
   | Post_sandbox_probe _ -> Wire_infra.infra_sandboxes_probe_path
   | Post_config_patch _ -> Wire_config.config_patch_path
   | Post_tui_preference _ -> Wire_config.tui_preferences_path
@@ -1032,8 +1055,11 @@ let mcp_tool_name_of_post_request = function
   | Post_runtime_lane_update _
   | Post_runtime_lane_delete _
   | Post_setup_account_key _
+  | Post_ma_setup_account_key _
+  | Post_setup_account_verify _
   | Post_setup_login_start _
   | Post_setup_login_input _
+  | Post_setup_login_cancel _
   | Post_sandbox_probe _
   | Post_config_patch _
   | Post_tui_preference _
@@ -1124,11 +1150,16 @@ let post_request_body = function
   | Post_setup_account_key { integration_id; key; source_revision } ->
       Wire_runtime.encode_setup_credential ~provider_id:integration_id
         ~secret:key ~source_revision
+  | Post_ma_setup_account_key { integration_id; key } ->
+      Wire_account.encode_key_register ~integration_id ~key
+  | Post_setup_account_verify { provider_account_id; model } ->
+      Wire_account.encode_account_verify ~provider_account_id ~model
   | Post_setup_login_start { integration_id; account_ref } ->
       Wire_runtime.encode_setup_account_login_start ~integration_id ?account_ref
         ()
   | Post_setup_login_input { login_id = _; input } ->
       Wire_runtime.encode_setup_login_input input
+  | Post_setup_login_cancel _ -> Wire_account.encode_login_cancel ()
   | Post_sandbox_probe target -> Wire_infra.encode_sandbox_probe_request target
   | Post_config_patch req -> Wire_config.encode_patch_request req
   | Post_tui_preference change ->
@@ -1378,16 +1409,22 @@ let post_request_body = function
 
 let put_request_path = function
   | Put_wiki_page { page; _ } -> Wire_knowledge.wiki_page_path ~page
+  | Put_ma_setup_account_key { provider_account_id; _ } ->
+      Wire_account.setup_accounts_key_entry_path ~provider_account_id
 
 let put_request_body = function
   | Put_wiki_page { request; _ } -> Wire_knowledge.encode_wiki_put_request request
+  | Put_ma_setup_account_key { key; _ } -> Wire_account.encode_key_replace ~key
 
 let delete_request_path = function
   | Delete_skill_editor _ -> Wire_runtime.skill_editor_delete_path
+  | Delete_ma_setup_account_key { provider_account_id } ->
+      Wire_account.setup_accounts_key_entry_path ~provider_account_id
 
 let delete_request_body = function
   | Delete_skill_editor { reference_json; confirmed; _ } ->
       Wire_runtime.encode_skill_delete_body ~reference_json ~confirmed
+  | Delete_ma_setup_account_key _ -> `Null
 
 let rec flatten_one acc = function
   | Batch xs -> List.fold_left flatten_one acc xs
@@ -1397,6 +1434,7 @@ let rec flatten_one acc = function
     | Http_delete _
     | Http_post_stream _
     | Sync_streams _
+    | Set_bearer_token _
     | Update_workspace_guard _
     | Voice_cmd _
     | Copy_clipboard _

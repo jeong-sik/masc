@@ -140,6 +140,13 @@ type route_access =
           [Token_permission CanAdmin] in single-user, and
           [Manage_own_provider] (any active Human Admin or Worker, Session or
           PAT; Service denied) in multi-account. *)
+  | Multi_account_own_provider
+      (** Multi-account-only own-provider route
+          ([/api/v1/auth/provider-accounts], [/api/v1/auth/integrations],
+          [/api/v1/setup/accounts/verify], [/api/v1/setup/accounts/key*]):
+          requires [Manage_own_provider] (active Human Admin or Worker, Session
+          or PAT; Service denied) in multi-account and returns 404 in
+          single-user. *)
   | Own_keeper_sandbox_read
       (** [GET /api/v1/infra/sandboxes/:keeper]: [Public_read] in single-user,
           ownership-checked bridged read for authenticated Admin/Worker in
@@ -260,3 +267,41 @@ val deny_reason_say : deny_reason -> Say.t
 val auth_gate_title : auth_session -> Say.t
 val auth_gate_detail : auth_session -> Say.t
 val auth_gate_remediation : auth_session -> Say.t
+
+(** {1 Account/Session Inspection & Capability Matrix} *)
+
+type binding_display =
+  | Binding_session
+  | Binding_pat
+  | Binding_service_credential
+  | Binding_dev_token
+  | Binding_none
+
+val equal_binding_display : binding_display -> binding_display -> bool
+val binding_display_to_string : binding_display -> string
+val binding_display_of_session : auth_session -> binding_display
+val binding_id_of_session : auth_session -> string option
+val principal_display : auth_session -> string
+val role_display : auth_session -> string
+val auth_error_detail_of_session : auth_session -> string option
+
+type capability_matrix = {
+  can_read : bool;
+  can_write : bool;
+  can_admin : bool;
+  can_token_read : bool;
+  can_token_admin : bool;
+  can_manage_own_provider : bool;
+}
+
+type capability_row = {
+  key : string;
+  label : Say.t;
+  route : route_access;
+  allowed : bool;
+  verdict : access_verdict;
+}
+
+val capability_matrix_of_session : auth_session -> capability_matrix
+val capability_rows_of_session : auth_session -> capability_row list
+val short_deny_reason_say : deny_reason -> Say.t

@@ -31,7 +31,6 @@ import {
 import { defaultDashboardHttp } from '../api/effect-http'
 import {
   patchRuntimeLane,
-  patchRuntimeMediaFailover,
   patchRuntimeRouting,
   type RuntimeLaneEdit,
   type RuntimeRoutingLane,
@@ -64,7 +63,6 @@ import { runtimeTomlSessionFor } from '../lib/runtime-toml-session'
 import { declaredRuntimeLaneCandidates, declaredRuntimeLanes } from '../lib/runtime-toml-config'
 import { runtimeTomlSourceGeneration } from '../lib/runtime-toml-source-generation'
 import { PromptRegistryPanel } from './tools/prompt-registry-panel'
-import { StatusChip } from './common/status-chip'
 import { showToast } from './common/toast'
 import { Checkbox } from './common/checkbox'
 import { ActionButton } from './common/button'
@@ -197,14 +195,6 @@ const SETTINGS_CONTROL_INVENTORY: readonly SettingsControlInventoryItem[] = [
     kind: 'live-write',
     source: 'GET /api/v1/runtime/resolved lanes (declared)',
     action: 'POST /api/v1/runtime/config/routing action=set|create|rename|remove',
-  },
-  {
-    id: 'runtime-media-failover',
-    section: 'routing',
-    label: 'Media failover list',
-    kind: 'live-write',
-    source: '[runtime].media_failover in runtime.toml',
-    action: 'PATCH /api/v1/runtime/media-failover',
   },
   {
     id: 'runtime-toml-editor',
@@ -730,110 +720,12 @@ function RuntimeRoutingSelect({
   `
 }
 
-function RuntimeMediaFailoverEditor({
-  value,
-  options,
-  disabled,
-  onChange,
-}: {
-  value: readonly string[]
-  options: readonly RuntimeSelectOption[]
-  disabled: boolean
-  onChange: (runtimeIds: string[]) => void
-}) {
-  const selected = new Set(value)
-  const addOptions = options.filter(option => !selected.has(option.id))
-  const move = (index: number, delta: number) => {
-    const target = index + delta
-    if (target < 0 || target >= value.length) return
-    const next = [...value]
-    const current = next[index]
-    if (current === undefined) return
-    next[index] = next[target] ?? current
-    next[target] = current
-    onChange(next)
-  }
-  const remove = (runtimeId: string) => {
-    onChange(value.filter(id => id !== runtimeId))
-  }
-
-  return html`
-    <${SetRow} label="Media failover" hint="[runtime].media_failover vision runtimes">
-      <div class="set-runtime-media" data-testid="runtime-media-failover-editor">
-        <div class="set-runtime-media-list">
-          ${value.length === 0
-            ? html`<span class="set-hint" data-testid="runtime-media-failover-empty">none</span>`
-            : value.map((runtimeId, index) => html`
-              <span class="set-runtime-media-chip" key=${`${runtimeId}-${index}`}>
-                <span class="mono">${runtimeId}</span>
-                <button
-                  type="button"
-                  class="set-route-icon"
-                  disabled=${disabled || index === 0}
-                  aria-label=${`${runtimeId} 위로 이동`}
-                  onClick=${() => move(index, -1)}
-                >↑</button>
-                <button
-                  type="button"
-                  class="set-route-icon"
-                  disabled=${disabled || index === value.length - 1}
-                  aria-label=${`${runtimeId} 아래로 이동`}
-                  onClick=${() => move(index, 1)}
-                >↓</button>
-                <button
-                  type="button"
-                  class="set-route-icon danger"
-                  disabled=${disabled}
-                  data-testid="runtime-media-failover-remove"
-                  aria-label=${`${runtimeId} 제거`}
-                  onClick=${() => remove(runtimeId)}
-                >×</button>
-              </span>
-            `)}
-        </div>
-        <div class="set-hint flex flex-wrap items-center gap-2" data-testid="runtime-media-failover-reality">
-          <${StatusChip} tone="warn" uppercase=${false}>이미지 읽기<//>
-          <span>턴을 넘겨받지 않아요. lane 이 이미지를 못 받을 때 이미지를 글로 읽어 주는 런타임입니다.</span>
-        </div>
-        <div class="set-runtime-media-actions">
-          <select
-            class="set-input mono set-runtime-route-select"
-            data-testid="runtime-media-failover-add"
-            value=""
-            disabled=${disabled || addOptions.length === 0}
-            onInput=${(event: Event) => {
-              const select = event.currentTarget as HTMLSelectElement
-              const next = select.value.trim()
-              select.value = ''
-              if (next !== '') onChange([...value, next])
-            }}
-          >
-            <option value="">failover 추가</option>
-            ${addOptions.map(option => html`
-              <option key=${option.id} value=${option.id}>${option.label}</option>
-            `)}
-          </select>
-          <button
-            type="button"
-            class="set-route-clear"
-            disabled=${disabled || value.length === 0}
-            data-testid="runtime-media-failover-clear"
-            onClick=${() => onChange([])}
-          >
-            비우기
-          </button>
-        </div>
-      </div>
-    <//>
-  `
-}
-
 // Names the routing endpoint reads as another route, never as a
 // [runtime.lanes] table (route_name_space in
 // server_dashboard_runtime_request.ml). A lane declared under one of them
 // cannot be addressed by a lane action, and a new lane must not take one.
 function runtimeLaneNameReserved(name: string): boolean {
-  return name === 'default' || name === 'media_failover' || name.startsWith('exact/')
+  return name === 'default' || name.startsWith('exact/')
 }
 
 // The table header the runtime writer emits: a bare key when TOML allows it,
@@ -1582,7 +1474,6 @@ export function SettingsSurface() {
   useEffect(() => {
     if (sec === 'routing' && runtimeSession?.state.peek().source.status !== 'loading') void runtimeSession?.readSource().catch(() => {})
   }, [runtimeSession, sec])
-  const runtimeDefaults = runtimeState ? getData(runtimeState.defaults) ?? null : null
   const runtimeResolved = runtimeState ? getData(runtimeState.resolved) ?? null : null
   const runtimeProviders = runtimeState ? getData(runtimeState.providers) ?? null : null
   const runtimeResolvedStatus = runtimeState?.resolved.status === 'loaded' ? 'ready'
@@ -1601,10 +1492,6 @@ export function SettingsSurface() {
 
   async function applyRuntimeRoutingPatch(lane: RuntimeRoutingLane, routeId: string | null): Promise<void> {
     await runtimeSession?.save('routing', 'runtime.toml routing', options => patchRuntimeRouting(lane, routeId, options))
-  }
-  async function applyMediaFailoverPatch(runtimeIds: string[]): Promise<void> {
-    if (runtimeDefaults === null) return
-    await runtimeSession?.save('routing', 'runtime.toml media_failover', options => patchRuntimeMediaFailover(runtimeIds, options))
   }
   async function applyRuntimeLaneWrite(lane: string, write: RuntimeLaneWrite): Promise<boolean> {
     if (!runtimeSession) return false
@@ -1647,7 +1534,6 @@ export function SettingsSurface() {
   const defaultRuntimeId = runtimeResolved?.default_runtime?.id ?? null
   const defaultRouteId = runtimeResolved?.default_route ?? null
   const runtimeCount = runtimeResolved?.runtimes.length ?? 0
-  const mediaFailover = runtimeDefaults?.model_routing.media_failover ?? []
   // Declared runtime lanes with their ordered candidate chains (.rt-fo-*).
   // Each [runtime.lanes.<id>] is edited through the routing writer
   // (set/create/rename/remove); the server resolves and validates every write.
@@ -1944,13 +1830,6 @@ export function SettingsSurface() {
                       onChange=${(routeId: string | null) => {
                         if (routeId && routeId !== defaultRouteId) void applyRuntimeRoutingPatch('default', routeId)
                       }}
-                    />
-                    ${runtimeState?.defaults.status === 'error' ? html`<p class="set-err">Media failover 설정을 읽지 못했습니다. 현재 Runtime 설정을 다시 읽으세요.</p>` : null}
-                    <${RuntimeMediaFailoverEditor}
-                      value=${mediaFailover}
-                      options=${runtimeSelectOptions}
-                      disabled=${runtimeRoutingDisabled || runtimeDefaults === null}
-                      onChange=${(runtimeIds: string[]) => void applyMediaFailoverPatch(runtimeIds)}
                     />
                     ${runtimeRoutingStatus === 'saving'
                       ? html`<div class="set-hint" data-testid="runtime-routing-saving">runtime.toml 저장 중...</div>`

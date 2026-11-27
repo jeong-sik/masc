@@ -11,7 +11,7 @@ import { tasks, keepers, executionTaskTotal, nextExecutionObservation, refreshEx
 import { normalizeTask, normalizeTaskStatus } from '../store-normalizers'
 import { WORK_UNLINKED_GOAL_TITLE } from '../lib/work-copy'
 import { isUnambiguousGoalId } from '../lib/goal-identity'
-import { BoardSurface } from './board/board-surface'
+import { BoardTab as BoardSurface } from '../workspaces/knowledge/board-tab'
 import { SubBoardSurface } from './board/sub-board-surface'
 import { useGoalTreeDecisionObservation } from './goals/goal-tree'
 import { VerificationRequestsPanel } from './verification-requests-panel'
@@ -1843,7 +1843,7 @@ export function Work() {
               <${LazyArtifactsSurface} />
             <//>`
           : current === 'work' ? html`<${WorkSurfaceV2} />`
-          : current === 'board' ? html`<${BoardSurface} />`
+          : current === 'board' ? html`<${BoardSurface} subroute=${undefined} onNavigate=${() => {}} onInspect=${() => {}} />`
           : current === 'sub-boards' ? html`<${SubBoardSurface} />`
           : current === 'repositories' ? html`
             <${Suspense} fallback=${html`<${LoadingState}>저장소 화면 불러오는 중...<//>`}>

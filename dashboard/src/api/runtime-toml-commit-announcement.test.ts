@@ -3,7 +3,7 @@ import { effect } from '@preact/signals'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { applyFusionConfigEdit } from './dashboard-fusion'
 import {
-  patchRuntimeAssignment, patchRuntimeExactSlot, patchRuntimeLane, patchRuntimeMediaFailover, patchRuntimeRouting,
+  patchRuntimeAssignment, patchRuntimeExactSlot, patchRuntimeLane, patchRuntimeRouting,
   saveRuntimeTomlConfig,
 } from './dashboard-runtime'
 import { saveSetupCredential } from './onboarding'
@@ -37,7 +37,6 @@ describe('runtime.toml write receipts', () => {
   it.each([
     ['raw save', () => saveRuntimeTomlConfig(source, revision, { expectedSourcePath: '/fixture/runtime.toml' })],
     ['routing', () => patchRuntimeRouting('default', 'fixture.primary')],
-    ['media failover', () => patchRuntimeMediaFailover(['fixture.primary'])],
     ['candidate lane', () => patchRuntimeLane('fixture.lane', { action: 'remove' })],
     ['exact slot', () => patchRuntimeExactSlot('judge', 'append', 'fixture.primary')],
     ['assignment', () => patchRuntimeAssignment('keeper', 'fixture.primary', assignmentRevision)],

@@ -13,6 +13,7 @@ export const KEEPER_CHAT_CUSTOM_EVENT_NAMES = [
   'KEEPER_THINKING_DELTA',
   'KEEPER_THINKING_SNAPSHOT',
   'KEEPER_THINKING_SIGNATURE_DELTA',
+  'KEEPER_ATTACHMENT',
   'KEEPER_MEDIA_DELTA',
   'KEEPER_STREAM_PROTOCOL_ERROR',
   'KEEPER_CHAT_OPERATION_ACCEPTED',
@@ -276,6 +277,30 @@ type KeeperChatCustomEvent =
       type: 'CUSTOM'
       name: 'KEEPER_THINKING_SIGNATURE_DELTA'
       value: { index?: number; signature_bytes?: number }
+    }
+  | {
+      type: 'CUSTOM'
+      name: 'KEEPER_ATTACHMENT'
+      value: {
+        attachment_id: string
+        id?: string
+        sha256?: string
+        url: string
+        mime_type: string
+        kind: 'image' | 'audio' | 'document'
+        bytes?: number
+        width?: number | null
+        height?: number | null
+        filename?: string | null
+        origin?: string
+        created_at_unix?: number
+        retention?: string
+        caption?: string
+        block_index?: number
+        tool_call_id?: string | null
+        role?: 'user' | 'assistant' | 'tool'
+        response?: { content_generation: number; stream_scope: number }
+      }
     }
   | {
       type: 'CUSTOM'

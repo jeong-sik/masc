@@ -68,6 +68,18 @@ const RuntimeFailedAttemptSchema = object({
   recorded_by: string(),
 })
 
+const RuntimeCapabilitiesSchema = object({
+  supports_image_input: optional(boolean()),
+  supports_image_output: optional(boolean()),
+  vision_input: optional(boolean()),
+  image_output: optional(boolean()),
+})
+
+const RuntimeMediaOverridesSchema = object({
+  vision_reader: optional(nullable(string())),
+  image_generator: optional(nullable(string())),
+})
+
 const RuntimeResolutionSchema = object({
   id: string(),
   // Display name. Joins against usage scopes use provider_id, the
@@ -81,6 +93,11 @@ const RuntimeResolutionSchema = object({
   is_local: boolean(),
   is_default: boolean(),
   quota_rest: nullable(RuntimeQuotaRestSchema),
+  capabilities: optional(nullable(RuntimeCapabilitiesSchema)),
+  supports_image_input: optional(boolean()),
+  supports_image_output: optional(boolean()),
+  vision_input: optional(boolean()),
+  image_output: optional(boolean()),
   // Facts kept apart from quota_rest by the server: a refused credential
   // (since when), this process's own 429 observation (until when, when the
   // provider stated a wait), and the last failed attempt. An absent field is
@@ -177,11 +194,14 @@ const RuntimeResolvedResponseSchema = object({
   runtimes: array(RuntimeResolutionSchema),
   lanes: array(RuntimeLaneSchema),
   assignments: array(RuntimeAssignmentSchema),
+  media: optional(nullable(RuntimeMediaOverridesSchema)),
   provider_usage_windows_since: optional(number()),
   provider_usage_windows: optional(array(ProviderUsageScopeSchema)),
 })
 
 export type MaxContextSource = InferOutput<typeof MaxContextSourceSchema>
+export type RuntimeCapabilities = InferOutput<typeof RuntimeCapabilitiesSchema>
+export type RuntimeMediaOverrides = InferOutput<typeof RuntimeMediaOverridesSchema>
 export type RuntimeResolution = InferOutput<typeof RuntimeResolutionSchema>
 export type RuntimeQuotaRest = InferOutput<typeof RuntimeQuotaRestSchema>
 export type RuntimeAttemptFailure = InferOutput<typeof RuntimeAttemptFailureSchema>

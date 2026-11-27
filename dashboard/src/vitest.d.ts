@@ -1,4 +1,5 @@
 import 'vitest'
+import '@testing-library/jest-dom/vitest'
 import 'jest-axe'
 
 // vitest-setup.ts registers the runtime matcher. Vitest 5 uses its own

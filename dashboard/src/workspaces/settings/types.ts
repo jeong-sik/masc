@@ -45,6 +45,8 @@ const SERVER_CATEGORY_ID_MAP: Readonly<Record<string, string>> = {
   runtime_providers: 'providers',
   routing_failover: 'routing',
   runtime_cascades: 'routing',
+  runtime_media: 'routing',
+  media: 'routing',
   keepers_companies: 'keepers',
   keepers_fleet: 'keepers',
   keepers_autonomy: 'keepers',

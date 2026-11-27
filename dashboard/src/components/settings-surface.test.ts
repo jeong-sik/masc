@@ -100,7 +100,6 @@ const apiMock = vi.hoisted(() => ({
   fetchRuntimeProviders: vi.fn(),
   fetchRuntimeTomlConfig: vi.fn(),
   fetchFusionConfig: vi.fn(),
-  patchRuntimeMediaFailover: vi.fn(),
   patchRuntimeRouting: vi.fn(),
   patchRuntimeLane: vi.fn(),
   saveRuntimeTomlConfig: vi.fn(),
@@ -155,7 +154,6 @@ vi.mock('../api/dashboard.js', async () => {
     fetchRuntimeProviders: apiMock.fetchRuntimeProviders,
     fetchRuntimeTomlConfig: apiMock.fetchRuntimeTomlConfig,
     fetchFusionConfig: apiMock.fetchFusionConfig,
-    patchRuntimeMediaFailover: announced(apiMock.patchRuntimeMediaFailover, 1),
     patchRuntimeRouting: announced(apiMock.patchRuntimeRouting, 2),
     patchRuntimeLane: announced(apiMock.patchRuntimeLane, 2),
     saveRuntimeTomlConfig: announced(apiMock.saveRuntimeTomlConfig, 2),
@@ -262,15 +260,8 @@ function makeToolItem(overrides: Partial<DashboardToolInventoryItem> = {}): Dash
   }
 }
 
-function makeModelRouting(
-  overrides: {
-    media_failover?: string[]
-  } = {},
-): RuntimeDefaultsResponse['model_routing'] {
-  return {
-    media_failover: [],
-    ...overrides,
-  }
+function makeModelRouting(): RuntimeDefaultsResponse['model_routing'] {
+  return {}
 }
 
 function makeRuntimeDefaults(
@@ -493,13 +484,6 @@ function stubEmptyApi() {
     provider_protocols: runtimeProviderProtocols,
   })
   apiMock.fetchFusionConfig.mockResolvedValue(makeFusionConfig())
-  apiMock.patchRuntimeMediaFailover.mockImplementation(async () => committedRuntimeTomlConfigFixture({
-    ok: true,
-    path: MOCK_RUNTIME_PATH,
-    file_name: 'runtime.toml',
-    source_text: '[runtime]\ndefault = "rt-a"\n',
-    provider_protocols: runtimeProviderProtocols,
-  }))
   apiMock.patchRuntimeRouting.mockImplementation(async () => committedRuntimeTomlConfigFixture({
     ok: true,
     path: MOCK_RUNTIME_PATH,
@@ -557,7 +541,6 @@ describe('SettingsSurface', () => {
     apiMock.fetchRuntimeProviders.mockReset()
     apiMock.fetchRuntimeTomlConfig.mockReset()
     apiMock.fetchFusionConfig.mockReset()
-    apiMock.patchRuntimeMediaFailover.mockReset()
     apiMock.patchRuntimeRouting.mockReset()
     apiMock.patchRuntimeLane.mockReset()
     apiMock.saveRuntimeTomlConfig.mockReset()
@@ -1814,12 +1797,10 @@ describe('SettingsSurface', () => {
     expect(container.querySelectorAll('[data-testid="runtime-catalog-card"]').length).toBe(0)
   })
 
-  it('routing section shows resolved model routing controls', async () => {
+  it('routing section shows resolved model routing controls without legacy media_failover', async () => {
     stubRuntimeDefaults(
       makeRuntimeDefaults({
-        model_routing: makeModelRouting({
-          media_failover: [],
-        }),
+        model_routing: makeModelRouting(),
       }),
     )
     stubRuntimeResolved(makeRuntimeResolved())
@@ -1832,11 +1813,7 @@ describe('SettingsSurface', () => {
         .toContain('PATCH /api/v1/runtime/routing')
       expect(container.querySelector('[data-control-id="runtime-routing-lanes"]')?.getAttribute('data-control-kind'))
         .toBe('live-write')
-      expect(container.querySelector('[data-testid="runtime-media-failover-reality"]')?.textContent)
-        .toContain('이미지 읽기')
-      expect(container.querySelector('[data-testid="runtime-media-failover-reality"]')?.textContent)
-        .toContain('턴을 넘겨받지 않아요')
-      expect(container.querySelector('[data-testid="runtime-media-failover-editor"]')).not.toBeNull()
+      expect(container.querySelector('[data-testid="runtime-media-failover-editor"]')).toBeNull()
     })
   })
 
@@ -2248,41 +2225,6 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="settings-nav-repositories"]')).not.toBeNull()
   })
 
-  it('patches ordered media failover from settings', async () => {
-    apiMock.fetchRuntimeDefaults.mockReset()
-    apiMock.fetchRuntimeDefaults
-      .mockResolvedValueOnce(makeRuntimeDefaults({
-        model_routing: makeModelRouting({
-          media_failover: ['rt-b'],
-        }),
-      }))
-      .mockResolvedValueOnce(makeRuntimeDefaults({
-        model_routing: makeModelRouting({
-          media_failover: ['rt-b', 'rt-c'],
-        }),
-      }))
-    render(html`<${SettingsSurface} />`, container)
-
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
-    await waitFor(() => {
-      const select = container.querySelector('[data-testid="runtime-media-failover-add"]') as HTMLSelectElement | null
-      expect(select).not.toBeNull()
-      expect(select?.disabled).toBe(false)
-      expect(select?.options.length).toBeGreaterThan(1)
-    })
-
-    const add = container.querySelector('[data-testid="runtime-media-failover-add"]') as HTMLSelectElement
-    await fireEvent.input(add, { target: { value: 'rt-c' } })
-
-    await waitFor(() => {
-      expect(apiMock.patchRuntimeMediaFailover).toHaveBeenCalledWith(['rt-b', 'rt-c'], expect.objectContaining({ beforeDispatch: expect.any(Function) }))
-      expect(container.querySelector('[data-testid="runtime-media-failover-editor"]')?.textContent)
-        .toContain('rt-c')
-      expect(container.querySelector('[data-testid="runtime-routing-message"]')?.textContent)
-        .toContain('Skill catalog 게시됨')
-    })
-  })
-
   it('surfaces resolved-runtime failure without falling back to other projections', async () => {
     apiMock.fetchRuntimeResolved.mockReset()
     apiMock.fetchRuntimeResolved.mockRejectedValue(new Error('resolved runtime unavailable'))
@@ -2656,7 +2598,6 @@ describe('settings read-surface helpers', () => {
     expect(routing.map(item => item.id)).toEqual([
       'runtime-routing-lanes',
       'runtime-candidate-lanes',
-      'runtime-media-failover',
     ])
     expect(routing.every(item => item.kind === 'live-write')).toBe(true)
     expect(routing.map(item => item.action).join('\n')).toContain('/api/v1/runtime/routing')

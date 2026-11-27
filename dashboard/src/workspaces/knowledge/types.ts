@@ -10,6 +10,7 @@
  */
 
 import type { ComponentChildren } from 'preact'
+import { decodeAttachmentRef, dedupeAttachments, type AttachmentRef } from '../../api/attachments'
 import type { TimeWindow } from '../../core/time-window'
 import { err, ok, type Result } from '../../lib/result'
 
@@ -151,6 +152,7 @@ export interface BoardPostItem {
   readonly tags: readonly string[]
   readonly reactions: readonly BoardReactionSummary[]
   readonly supportedReactionEmojis: readonly string[]
+  readonly attachments: readonly AttachmentRef[]
   readonly closed: BoardPostCloseState | null
   readonly isSignal: boolean
 }
@@ -165,6 +167,7 @@ export interface BoardCommentItem {
   readonly votes: number
   readonly currentVote: 'up' | 'down' | null
   readonly reactions: readonly BoardReactionSummary[]
+  readonly attachments: readonly AttachmentRef[]
   readonly audience?: BoardAudience | null
 }
 
@@ -358,6 +361,19 @@ function firstLineTitleFallback(body: string): string {
   return firstLine.length > 0 ? firstLine.slice(0, 80) : '제목 없음'
 }
 
+function decodeBoardAttachments(raw: Record<string, unknown>): readonly AttachmentRef[] {
+  const candidates = Array.isArray(raw.attachments)
+    ? raw.attachments
+    : Array.isArray(raw.attachment_refs)
+      ? raw.attachment_refs
+      : []
+  const decoded: AttachmentRef[] = []
+  for (const item of candidates) {
+    const ref = decodeAttachmentRef(item)
+    if (ref) decoded.push(ref)
+  }
+  return dedupeAttachments(decoded)
+}
 export function decodeBoardPost(raw: unknown): BoardPostItem | null {
   if (!isRecord(raw)) return null
   const id = asNonEmptyString(raw.id)
@@ -423,6 +439,7 @@ export function decodeBoardPost(raw: unknown): BoardPostItem | null {
     tags: asStringArray(raw.tags),
     reactions,
     supportedReactionEmojis: asStringArray(raw.supported_reaction_emojis),
+    attachments: decodeBoardAttachments(raw),
     closed,
     isSignal: isSignalBoardPost({
       postKind,
@@ -471,6 +488,7 @@ export function decodeBoardComment(raw: unknown): BoardCommentItem | null {
     votes,
     currentVote: raw.current_vote === 'up' || raw.current_vote === 'down' ? raw.current_vote : null,
     reactions,
+    attachments: decodeBoardAttachments(raw),
     audience: decodeBoardAudience(raw.audience),
   }
 }

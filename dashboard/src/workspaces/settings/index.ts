@@ -437,6 +437,20 @@ export function SettingsWorkspace(props: WorkspaceViewProps) {
                   기본값 복원 예정 (remove)
                 </span>
               `
+            : !field.writable && isBool && field.current_value === true && (
+              field.full_key.toLowerCase().endsWith('supports_image_input')
+              || field.full_key.toLowerCase().endsWith('vision_input')
+              || field.full_key.toLowerCase().endsWith('supports_image_output')
+              || field.full_key.toLowerCase().endsWith('image_output')
+            )
+              ? html`
+                  <span
+                    class=${`mono rt-cap-chip${(field.full_key.toLowerCase().endsWith('supports_image_output') || field.full_key.toLowerCase().endsWith('image_output')) ? ' rt-cap-chip--gen' : ''}`}
+                    data-testid=${`settings-cap-${field.full_key}`}
+                  >
+                    ${(field.full_key.toLowerCase().endsWith('supports_image_output') || field.full_key.toLowerCase().endsWith('image_output')) ? 'Image Gen' : 'Vision'}
+                  </span>
+                `
             : isBool
             ? html`
                 <label style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-1)', fontSize: 'var(--fs-12)' }}>

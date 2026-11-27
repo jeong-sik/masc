@@ -45,8 +45,10 @@ import {
   buildLaneUnifiedDiff,
   deleteLaneFromToml,
   parseLanesFromToml,
+  parseRuntimeMediaOverridesFromToml,
   reorderCandidate,
   upsertLaneInToml,
+  upsertRuntimeMediaOverridesInToml,
   type EditableLaneKind,
   type ParsedTomlLane,
 } from './lane-toml-editor'
@@ -58,9 +60,12 @@ import {
   loadLaneRun,
   loadLaneRunsPage,
   loadRuntimeResolved,
+  resolveLaneMediaCapabilities,
+  resolveRuntimeMediaCapabilities,
   restingProviderIds,
   toObservedNumber,
   type FusionTopology,
+  type RuntimeMediaCapabilities,
   type RuntimeProbePayload,
   type RuntimeProbeProviderRow,
   type RuntimeResolution,
@@ -195,10 +200,13 @@ export function LanesTab(props: WorkspaceViewProps) {
   const [banner, setBanner] = useState<{ kind: 'err' | 'lane-source-error'; text: string } | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
 
-  // Failover inline routing/assignment form state
+  // Failover inline routing/assignment & optional [runtime.media] override form state
   const [defaultRouteInput, setDefaultRouteInput] = useState('')
   const [assignKeeper, setAssignKeeper] = useState('')
   const [assignRuntime, setAssignRuntime] = useState('')
+  const [mediaVisionReaderInput, setMediaVisionReaderInput] = useState('')
+  const [mediaImageGenInput, setMediaImageGenInput] = useState('')
+  const mediaInputsDirty = useRef(false)
   const [sourceRevision, setSourceRevision] = useState<string | null>(null)
   const [rawConfig, setRawConfig] = useState<LaneConfigSource | null>(null)
   const sourceRead = useRef<AbortController | null>(null)
@@ -654,6 +662,18 @@ export function LanesTab(props: WorkspaceViewProps) {
     },
   ], [fusionLive])
 
+  useEffect(() => {
+    if (mediaInputsDirty.current) return
+    if (rawConfig) {
+      const parsed = parseRuntimeMediaOverridesFromToml(rawConfig.sourceText)
+      setMediaVisionReaderInput(parsed.visionReader ?? '')
+      setMediaImageGenInput(parsed.imageGenerator ?? '')
+    } else if (resolvedData?.media) {
+      setMediaVisionReaderInput(resolvedData.media.vision_reader ?? '')
+      setMediaImageGenInput(resolvedData.media.image_generator ?? '')
+    }
+  }, [rawConfig, resolvedData])
+
   const declaredTomlLanes = useMemo<readonly ParsedTomlLane[]>(() => {
     if (rawConfig) return parseLanesFromToml(rawConfig.sourceText)
     if (!resolvedData) return []
@@ -775,6 +795,20 @@ export function LanesTab(props: WorkspaceViewProps) {
     await previewProposedLaneToml(deleted.value, `삭제: ${id} (${kind})`)
   }
 
+  const handlePreviewMediaOverrides = async (ev: Event) => {
+    ev.preventDefault()
+    if (!rawConfig) return
+    const updated = upsertRuntimeMediaOverridesInToml(rawConfig.sourceText, {
+      visionReader: mediaVisionReaderInput.trim() || null,
+      imageGenerator: mediaImageGenInput.trim() || null,
+    })
+    if (!updated.ok) {
+      setBanner({ kind: 'err', text: updated.error })
+      return
+    }
+    await previewProposedLaneToml(updated.value, '[runtime.media] 오버라이드')
+  }
+
   const handleApplyLanePreview = async () => {
     if (!hasLocalConfigAdmin() || !lanePreview?.canSave || !isCurrentLaneSource(lanePreview.source)) return
     setBusy('lane-apply')
@@ -800,6 +834,7 @@ export function LanesTab(props: WorkspaceViewProps) {
     discardLanePreview()
     setLaneEditor(null)
     setLaneDeleteConfirm(null)
+    mediaInputsDirty.current = false
     loadFailover(false, 'manual')
   }
 
@@ -996,6 +1031,30 @@ export function LanesTab(props: WorkspaceViewProps) {
     || laneDeleteConfirm !== null
     || lanePreview !== null
     || laneCasConflict !== null
+
+  const renderCapabilityChips = (caps: RuntimeMediaCapabilities, keyPrefix: string) => {
+    if (!caps.visionInput && !caps.imageOutput) return null
+    return html`
+      ${caps.visionInput && html`
+        <span
+          class="mono rt-cap-chip"
+          data-testid=${`${keyPrefix}-cap-vision`}
+          title="이 런타임/레인은 이미지 입력(Vision)을 기본 지원합니다"
+        >
+          Vision
+        </span>
+      `}
+      ${caps.imageOutput && html`
+        <span
+          class="mono rt-cap-chip rt-cap-chip--gen"
+          data-testid=${`${keyPrefix}-cap-image-gen`}
+          title="이 런타임/레인은 이미지 생성(Image Gen)을 기본 지원합니다"
+        >
+          Image Gen
+        </span>
+      `}
+    `
+  }
 
   const renderRuntimeBadge = (runtimeId: string, testId?: string) => {
     const rt = runtimeById.get(runtimeId)
@@ -1209,6 +1268,51 @@ export function LanesTab(props: WorkspaceViewProps) {
                       <button type="submit" class="btn-primary" disabled=${busy === 'assignment'}>할당</button>
                     </div>
                   </form>
+
+                  <form
+                    class="wka-card"
+                    data-testid="runtime-media-overrides-form"
+                    onSubmit=${handlePreviewMediaOverrides}
+                    style=${{ display: 'flex', flexDirection: 'column', gap: 'var(--sp-2)' }}
+                  >
+                    <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                      <h3 style=${{ margin: 0, fontSize: 'var(--fs-13)' }}>미디어 라우팅 오버라이드 ([runtime.media], 선택)</h3>
+                    </div>
+                    <p style=${{ margin: 0, fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>
+                      비워 두면 각 Keeper 활성 런타임의 기본 Vision · Image Gen 역량을 자동 사용합니다.
+                    </p>
+                    <div style=${{ display: 'flex', gap: 'var(--sp-2)', flexWrap: 'wrap' }}>
+                      <input
+                        type="text"
+                        list="lane-runtime-candidates"
+                        aria-label="Vision Reader 오버라이드"
+                        value=${mediaVisionReaderInput}
+                        onInput=${(e: Event) => {
+                          mediaInputsDirty.current = true
+                          setMediaVisionReaderInput((e.target as HTMLInputElement).value)
+                        }}
+                        placeholder="vision_reader (비우면 자동)"
+                        class="mono"
+                        style=${{ flex: '1 1 160px', minWidth: 0, minHeight: 'var(--btn-h, 32px)', padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-12)' }}
+                      />
+                      <input
+                        type="text"
+                        list="lane-runtime-candidates"
+                        aria-label="Image Generator 오버라이드"
+                        value=${mediaImageGenInput}
+                        onInput=${(e: Event) => {
+                          mediaInputsDirty.current = true
+                          setMediaImageGenInput((e.target as HTMLInputElement).value)
+                        }}
+                        placeholder="image_generator (비우면 자동)"
+                        class="mono"
+                        style=${{ flex: '1 1 160px', minWidth: 0, minHeight: 'var(--btn-h, 32px)', padding: 'var(--sp-1) var(--sp-2)', background: 'var(--input-bg)', border: '1px solid var(--input-border)', borderRadius: 'var(--radius-sm)', fontSize: 'var(--fs-12)' }}
+                      />
+                      <button type="submit" class="btn-ghost" disabled=${!rawConfig || busy === 'lane-preview'}>
+                        미디어 미리보기
+                      </button>
+                    </div>
+                  </form>
                 </section>
 
                 <!-- Visual Runtime Lane CRUD (/api/v1/runtime/config/raw + /raw/preview, zero $EDITOR) -->
@@ -1287,6 +1391,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                                   <span class="mono" style=${{ fontSize: 'var(--fs-10)', padding: 'var(--sp-0) var(--sp-1)', borderRadius: 'var(--radius-pill)', background: lane.kind === 'failover' ? 'var(--brass-soft)' : 'var(--info-soft)', color: lane.kind === 'failover' ? 'var(--brass-1)' : 'var(--info-fg)' }}>
                                     ${lane.kind}
                                   </span>
+                                  ${renderCapabilityChips(resolveLaneMediaCapabilities(lane.candidates, runtimeById), `lane-${lane.id}`)}
                                   ${lane.maxOutputTokens !== undefined && html`
                                     <span class="mono tnum" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>max_tokens=${lane.maxOutputTokens}</span>
                                   `}
@@ -1298,6 +1403,7 @@ export function LanesTab(props: WorkspaceViewProps) {
                                         <span key=${`${cand}-${idx}`} style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-1)' }}>
                                           ${idx > 0 && html`<span aria-hidden="true" style=${{ color: 'var(--fg-4)' }}>→</span>`}
                                           <span>${cand}</span>
+                                          ${renderCapabilityChips(resolveRuntimeMediaCapabilities(runtimeById.get(cand)), `cand-${cand}`)}
                                           ${renderRuntimeBadge(cand)}
                                         </span>
                                       `)}
@@ -1732,8 +1838,9 @@ export function LanesTab(props: WorkspaceViewProps) {
                       >
                         ${r.scopeBand === 'active_lane' ? 'ACTIVE' : 'OUTSIDE'}
                       </span>
-                      <span class="mono" style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        ${r.runtime_id}
+                      <span class="mono" style=${{ display: 'inline-flex', alignItems: 'center', gap: 'var(--sp-1)', overflow: 'hidden', minWidth: 0 }}>
+                        <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${r.runtime_id}</span>
+                        ${renderCapabilityChips(resolveRuntimeMediaCapabilities(rt), `probe-${r.runtime_id}`)}
                       </span>
                       <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: providerAttention ? 'var(--warn-fg)' : 'var(--fg-2)' }}>
                         ${r.provider_display_name} · <span class="mono" style=${{ fontSize: 'var(--fs-11)', color: 'var(--fg-3)' }}>${r.model_id}</span>

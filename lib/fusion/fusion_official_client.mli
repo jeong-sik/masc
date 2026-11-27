@@ -136,20 +136,20 @@ val run_panelist
     there is no second field to prefer — the text returned here is already the
     constrained one.
 
-    Muse Code's [muse serve] has no such channel, so a schema asked of a Muse
-    Code runtime is a [Setup_failure] and no process starts.
+    An ACP panelist (Muse Code among them) has no such channel: the schema is
+    not sent, and the text returned is the agent's last message as written.
 
     [base_dir] is the directory the official client is spawned in. There is no
     global accessor for the MASC base path, so callers thread it down from
-    {!Fusion_tool.handle}, which already receives it. A Muse Code panelist is
-    the exception: its session's workspace root and working directory are a
-    fresh empty directory created for the call and removed when it ends,
-    to avoid starting in the operator's runtime state directory. This is a
-    working coordinate, not a filesystem confinement guarantee. The client's
-    managed read policy remains separate. Muse keeps the durable MSP completion protocol but places native data, cache,
-    state and temporary files in another per-call subtree removed after process
-    reaping. Selected account HOME and managed login config remain unchanged. A directory that cannot be created is
-    a [Setup_failure]; one that cannot be removed is logged.
+    {!Fusion_tool.handle}, which already receives it. An ACP panelist (Muse
+    Code among them) is the exception: its session's working directory is a
+    fresh empty [0700] directory created for the call
+    ({!Runtime_acp_client.create_isolated_workspace}) and removed when the
+    call ends, so it does not start in the operator's runtime state directory.
+    This is a working coordinate, not a filesystem confinement guarantee. The
+    client's managed read policy remains separate. A directory that cannot be
+    created is an [Acp_failure] and no process starts; a failed removal is
+    ignored.
 
     Antigravity seeds a per-call disposable HOME ([masc-antigravity-panelist-<pid>-*])
     from the configured OAuth source, spawns in its private native read

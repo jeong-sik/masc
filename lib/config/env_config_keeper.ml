@@ -295,11 +295,6 @@ module KeeperMemoryOs = struct
   (* The 2026-09-28 live distribution peaked at 464,514 rendered bytes
      including source-bound facts. 512 KiB is the next fixed bound above it. *)
   let facts_max_bytes_default = 512 * 1024
-  (* Live explicit-write intake peaked at 2,830 entries/day (2026-10-06). Candidate
-     rows run from sub-KiB claims to a few KiB with provenance, so 16 MiB is
-     days of peak intake while judgement is blocked, and it bounds every
-     whole-state queue rewrite. *)
-  let pending_max_bytes_default = 16 * 1024 * 1024
 
   (* Env-key SSOT: config-introspection and tests reference these constants
      instead of re-spelling the literals, so a knob rename breaks compilation
@@ -307,7 +302,6 @@ module KeeperMemoryOs = struct
   let recall_env_key = "MASC_KEEPER_MEMORY_OS_RECALL"
   let librarian_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
   let facts_max_bytes_env_key = "MASC_KEEPER_MEMORY_OS_FACTS_MAX_BYTES"
-  let pending_max_bytes_env_key = "MASC_KEEPER_MEMORY_OS_PENDING_MAX_BYTES"
   let category_cap_env_key = "MASC_KEEPER_MEMORY_CATEGORY_CAP"
   let facts_per_category_cap_env_key = "MASC_KEEPER_MEMORY_FACTS_PER_CATEGORY_CAP"
 
@@ -339,10 +333,6 @@ module KeeperMemoryOs = struct
 
   let facts_max_bytes () =
     positive_count facts_max_bytes_env_key ~default:facts_max_bytes_default
-  ;;
-
-  let pending_max_bytes () =
-    positive_count pending_max_bytes_env_key ~default:pending_max_bytes_default
   ;;
 
   let get_bool_logged ?(invalid = Env_config_memory.Default) name ~default =

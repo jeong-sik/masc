@@ -110,10 +110,59 @@ type slice_chunk =
       ; data : string
       }
 
-let read_chunk_under_append_mutex ~label ~path ~from ~clamp_beyond_eof ~max_len =
+(* Same ASCII whitespace set that [Stdlib.String.trim] strips. *)
+let is_trim_space = function
+  | ' ' | '\012' | '\n' | '\r' | '\t' -> true
+  | _ -> false
+;;
+
+let has_non_trim_space s ofs len =
+  let stop = ofs + len in
+  let rec loop i =
+    if i >= stop then false
+    else if is_trim_space (String.unsafe_get s i) then loop (i + 1)
+    else true
+  in
+  loop ofs
+;;
+
+(* Bounds [[l, r)] of [String.trim (String.sub s ofs len)] without allocating.
+   Returns [None] when the slice is all ASCII whitespace. *)
+let trimmed_bounds s ofs len =
+  let stop = ofs + len in
+  let rec scan_left i =
+    if i < stop && is_trim_space (String.unsafe_get s i) then scan_left (i + 1)
+    else i
+  in
+  let l = scan_left ofs in
+  if l >= stop then None
+  else
+    let rec scan_right j =
+      if j > l && is_trim_space (String.unsafe_get s (j - 1)) then scan_right (j - 1)
+      else j
+    in
+    Some (l, scan_right stop)
+;;
+
+let read_chunk_under_append_mutex ~label ~path ~key_ref ~from ~clamp_beyond_eof ~max_len =
   let read () =
-    with_append_path_mutex path (fun () ->
-      match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
+    let key, open_path =
+      match key_ref with
+      | None -> capture_append_path_mutex_key path, path
+      | Some cached ->
+        (match !cached with
+         | Some key ->
+           (* Reopen via the canonicalized pathname carried by [key] so chunks
+              2..N always open the same parent directory that [key] locks,
+              even if [Sys.chdir] or an ancestor symlink moves between chunks. *)
+           key, append_path_mutex_key_path key
+         | None ->
+           let key = capture_append_path_mutex_key path in
+           cached := Some key;
+           key, path)
+    in
+    with_captured_append_path_mutex key (fun () ->
+      match Unix.openfile open_path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
       | exception Unix.Unix_error (err, _, _) when err = Unix.ENOENT ->
         Slice_missing
       | exception Unix.Unix_error (err, _, _) ->
@@ -172,6 +221,7 @@ let read_slice ~path ~from ~len =
       read_chunk_under_append_mutex
         ~label:"fs-compat-read-slice"
         ~path
+        ~key_ref:None
         ~from
         ~clamp_beyond_eof:true
         ~max_len:len
@@ -180,7 +230,10 @@ let read_slice ~path ~from ~len =
     | Slice_present { file_size = _; actual_from = _; data } -> data
 ;;
 
-let streaming_jsonl_chunk_bytes = 262_144
+(* 1 MiB chunks reduce per-chunk open/seek/close and systhread-hop overhead 4x
+   on multi-megabyte JSONL files (e.g. 147 MB boot logs) while keeping peak
+   streaming memory O(1). *)
+let streaming_jsonl_chunk_bytes = 1_048_576
 
 (* Fold over newline-terminated lines appended after byte offset [from].
    Append-only JSONL stores never rewrite earlier bytes, so a (offset,
@@ -194,6 +247,7 @@ let streaming_jsonl_chunk_bytes = 262_144
    folded. Each bounded chunk open/read/close is serialized under the
    per-path append mutex and released before calling [f]. *)
 let fold_appended_lines ~path ~from ~init ~f =
+  let key_ref = ref None in
   let line_buf = Buffer.create 256 in
   let acc = ref init in
   let boundary = ref 0 in
@@ -204,6 +258,7 @@ let fold_appended_lines ~path ~from ~init ~f =
       read_chunk_under_append_mutex
         ~label:"fs-compat-fold-appended"
         ~path
+        ~key_ref:(Some key_ref)
         ~from:req_from
         ~clamp_beyond_eof:(not first)
         ~max_len:streaming_jsonl_chunk_bytes
@@ -216,16 +271,27 @@ let fold_appended_lines ~path ~from ~init ~f =
         pos := actual_from);
       let n = String.length data in
       if n > 0 then (
-        for i = 0 to n - 1 do
-          match String.unsafe_get data i with
-          | '\n' ->
-            let line = Buffer.contents line_buf in
-            Buffer.clear line_buf;
-            boundary := !pos + i + 1;
-            if not (String.equal (String.trim line) "")
-            then acc := f !acc line
-          | c -> Buffer.add_char line_buf c
-        done;
+        let rec scan seg_start =
+          if seg_start >= n then ()
+          else
+            match String.index_from_opt data seg_start '\n' with
+            | None ->
+              Buffer.add_substring line_buf data seg_start (n - seg_start)
+            | Some nl ->
+              let seg_len = nl - seg_start in
+              boundary := !pos + nl + 1;
+              if Buffer.length line_buf = 0 then (
+                if has_non_trim_space data seg_start seg_len
+                then acc := f !acc (String.sub data seg_start seg_len))
+              else (
+                Buffer.add_substring line_buf data seg_start seg_len;
+                let line = Buffer.contents line_buf in
+                Buffer.clear line_buf;
+                if has_non_trim_space line 0 (String.length line)
+                then acc := f !acc line);
+              scan (nl + 1)
+        in
+        scan 0;
         pos := !pos + n;
         if !pos < file_size then loop ~first:false
         else !acc, !boundary)
@@ -251,37 +317,49 @@ let fold_appended_lines ~path ~from ~init ~f =
     an existing file (e.g. permission denied, mid-stream IO error). *)
 let fold_jsonl_lines ~init ~f path =
   let max_line_bytes = 16 * 1024 * 1024 in
+  let key_ref = ref None in
   let line_buf = Buffer.create 256 in
   let line_idx = ref 0 in
   let acc = ref init in
   let pos = ref 0 in
+  let raise_line_too_long () =
+    raise
+      (Sys_error
+         (Printf.sprintf "%s: JSONL line exceeds %d bytes" path max_line_bytes))
+  in
   let add_slice s ofs len =
-    if Buffer.length line_buf + len > max_line_bytes then
-      raise
-        (Sys_error
-           (Printf.sprintf "%s: JSONL line exceeds %d bytes" path max_line_bytes));
+    if Buffer.length line_buf + len > max_line_bytes then raise_line_too_long ();
     Buffer.add_substring line_buf s ofs len
+  in
+  let emit_trimmed_line trimmed =
+    incr line_idx;
+    match Yojson.Safe.from_string trimmed with
+    | json -> acc := f !acc ~line_no:!line_idx json
+    | exception Yojson.Json_error msg ->
+      Stdlib.Printf.eprintf
+        "[fs_compat] malformed JSONL (%s) line %d: %s\n%!"
+        path
+        !line_idx
+        msg
   in
   let emit_buffered_line () =
     let raw = Buffer.contents line_buf in
     Buffer.clear line_buf;
-    let trimmed = String.trim raw in
-    if not (String.equal trimmed "") then (
-      incr line_idx;
-      match Yojson.Safe.from_string trimmed with
-      | json -> acc := f !acc ~line_no:!line_idx json
-      | exception Yojson.Json_error msg ->
-        Stdlib.Printf.eprintf
-          "[fs_compat] malformed JSONL (%s) line %d: %s\n%!"
-          path
-          !line_idx
-          msg)
+    let raw_len = String.length raw in
+    match trimmed_bounds raw 0 raw_len with
+    | None -> ()
+    | Some (l, r) ->
+      let trimmed =
+        if l = 0 && r = raw_len then raw else String.sub raw l (r - l)
+      in
+      emit_trimmed_line trimmed
   in
   let rec loop ~first =
     match
       read_chunk_under_append_mutex
         ~label:"fs-compat-fold-jsonl"
         ~path
+        ~key_ref:(Some key_ref)
         ~from:!pos
         ~clamp_beyond_eof:true
         ~max_len:streaming_jsonl_chunk_bytes
@@ -294,14 +372,24 @@ let fold_jsonl_lines ~init ~f path =
     | Slice_present { file_size; actual_from = _; data } ->
       let n = String.length data in
       if n > 0 then (
-        let seg_start = ref 0 in
-        for i = 0 to n - 1 do
-          if Char.equal (String.unsafe_get data i) '\n' then (
-            add_slice data !seg_start (i - !seg_start);
-            emit_buffered_line ();
-            seg_start := i + 1)
-        done;
-        if !seg_start < n then add_slice data !seg_start (n - !seg_start);
+        let rec scan seg_start =
+          if seg_start >= n then ()
+          else
+            match String.index_from_opt data seg_start '\n' with
+            | None -> add_slice data seg_start (n - seg_start)
+            | Some nl ->
+              let seg_len = nl - seg_start in
+              if Buffer.length line_buf = 0 then (
+                if seg_len > max_line_bytes then raise_line_too_long ();
+                match trimmed_bounds data seg_start seg_len with
+                | None -> ()
+                | Some (l, r) -> emit_trimmed_line (String.sub data l (r - l)))
+              else (
+                add_slice data seg_start seg_len;
+                emit_buffered_line ());
+              scan (nl + 1)
+        in
+        scan 0;
         pos := !pos + n;
         if !pos < file_size then loop ~first:false
         else (

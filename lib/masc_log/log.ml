@@ -724,78 +724,138 @@ module Ring = struct
     | "client_tool_host" -> Client_tool_host
     | s -> raise (Entry_decode_error (Printf.sprintf "unknown source: %S" s))
 
+  type raw_entry_fields = {
+    mutable raw_seq : Yojson.Safe.t option;
+    mutable raw_ts : Yojson.Safe.t option;
+    mutable raw_level : Yojson.Safe.t option;
+    mutable raw_source : Yojson.Safe.t option;
+    mutable raw_module : Yojson.Safe.t option;
+    mutable raw_message : Yojson.Safe.t option;
+    mutable raw_keeper_name : Yojson.Safe.t option;
+    mutable raw_turn_id : Yojson.Safe.t option;
+    mutable raw_category : Yojson.Safe.t option;
+    mutable raw_details : Yojson.Safe.t option;
+  }
+
   (* Total decoder. Missing required fields or unknown variants
      raise [Entry_decode_error] instead of returning [None]. Callers that
      reload historical JSONL ([load_from_file]) decide whether to skip a
      bad line at the file-fold boundary; the decoder itself never silently
-     drops. *)
+     drops.
+
+     Scans [`Assoc fields] in a single pass with first-key-wins semantics
+     matching [Yojson.Safe.Util.member], avoiding ten linear assoc lookups
+     per restored log line. *)
   let entry_of_json json =
-    let require_string field =
-      match Yojson.Safe.Util.member field json with
-      | `String s -> s
-      | `Null ->
+    let require_string field = function
+      | Some (`String s) -> s
+      | None | Some `Null ->
           raise (Entry_decode_error (Printf.sprintf "missing field: %s" field))
-      | other ->
+      | Some other ->
           raise
             (Entry_decode_error
                (Printf.sprintf "field %s: expected string, got %s" field
                   (Yojson.Safe.to_string other)))
     in
-    let require_int field =
-      match Yojson.Safe.Util.member field json with
-      | `Int i -> i
-      | `Null ->
+    let require_int field = function
+      | Some (`Int i) -> i
+      | None | Some `Null ->
           raise (Entry_decode_error (Printf.sprintf "missing field: %s" field))
-      | other ->
+      | Some other ->
           raise
             (Entry_decode_error
                (Printf.sprintf "field %s: expected int, got %s" field
                   (Yojson.Safe.to_string other)))
     in
     match json with
-    | `Assoc _ ->
-        let seq = require_int "seq" in
-        let ts = require_string "ts" in
+    | `Assoc fields ->
+        let raw =
+          {
+            raw_seq = None;
+            raw_ts = None;
+            raw_level = None;
+            raw_source = None;
+            raw_module = None;
+            raw_message = None;
+            raw_keeper_name = None;
+            raw_turn_id = None;
+            raw_category = None;
+            raw_details = None;
+          }
+        in
+        List.iter
+          (fun (k, v) ->
+            match k with
+            | "seq" -> if Option.is_none raw.raw_seq then raw.raw_seq <- Some v
+            | "ts" -> if Option.is_none raw.raw_ts then raw.raw_ts <- Some v
+            | "level" ->
+                if Option.is_none raw.raw_level then raw.raw_level <- Some v
+            | "source" ->
+                if Option.is_none raw.raw_source then raw.raw_source <- Some v
+            | "module" ->
+                if Option.is_none raw.raw_module then raw.raw_module <- Some v
+            | "message" ->
+                if Option.is_none raw.raw_message then raw.raw_message <- Some v
+            | "keeper_name" ->
+                if Option.is_none raw.raw_keeper_name then
+                  raw.raw_keeper_name <- Some v
+            | "turn_id" ->
+                if Option.is_none raw.raw_turn_id then raw.raw_turn_id <- Some v
+            | "category" ->
+                if Option.is_none raw.raw_category then
+                  raw.raw_category <- Some v
+            | "details" ->
+                if Option.is_none raw.raw_details then raw.raw_details <- Some v
+            | _ -> ())
+          fields;
+        let seq = require_int "seq" raw.raw_seq in
+        let ts = require_string "ts" raw.raw_ts in
+        let level_str = require_string "level" raw.raw_level in
         let level =
-          match level_of_string_opt (require_string "level") with
+          match level_of_string_opt level_str with
           | Some l -> l
           | None ->
               raise
                 (Entry_decode_error
-                   (Printf.sprintf "unknown level: %S" (require_string "level")))
+                   (Printf.sprintf "unknown level: %S" level_str))
         in
-        let source = source_of_string (require_string "source") in
-        let module_name = require_string "module" in
-        let message = require_string "message" in
+        let source = source_of_string (require_string "source" raw.raw_source) in
+        let module_name = require_string "module" raw.raw_module in
+        let message = require_string "message" raw.raw_message in
         let keeper_name =
-          match Yojson.Safe.Util.member "keeper_name" json with
-          | `String s -> Some s
-          | `Null -> None
-          | other ->
+          match raw.raw_keeper_name with
+          | Some (`String s) -> Some s
+          | None | Some `Null -> None
+          | Some other ->
               raise
                 (Entry_decode_error
                    (Printf.sprintf "field keeper_name: expected string or null, got %s"
                       (Yojson.Safe.to_string other)))
         in
         let turn_id =
-          match Yojson.Safe.Util.member "turn_id" json with
-          | `Int i -> Some i
-          | `Null -> None
-          | other ->
+          match raw.raw_turn_id with
+          | Some (`Int i) -> Some i
+          | None | Some `Null -> None
+          | Some other ->
               raise
                 (Entry_decode_error
                    (Printf.sprintf "field turn_id: expected int or null, got %s"
                       (Yojson.Safe.to_string other)))
         in
         let category =
-          match Yojson.Safe.Util.member "category" json with
-          | `String s -> category_of_string_opt s
-          | _ -> None
+          match raw.raw_category with
+          | Some (`String s) -> category_of_string_opt s
+          | None | Some _ -> None
+        in
+        let details =
+          match raw.raw_details with
+          | Some v -> v
+          | None -> `Null
         in
         {
           seq; ts; level; source; module_name;
           keeper_name; turn_id; message;
-          details = Yojson.Safe.Util.member "details" json;
+          details;
           category;
           diagnostic_kind = None;
         }
@@ -869,7 +929,7 @@ module Ring = struct
       Fs_compat.fold_jsonl_lines
         ~init:()
         ~f:(fun () ~line_no:_ json ->
-          let e = classify_restored_diagnostic (entry_of_json json) in
+          let e = entry_of_json json in
           if e.seq > !max_seq_on_disk then max_seq_on_disk := e.seq;
           Queue.add e buf_ring;
           if Queue.length buf_ring > capacity then ignore (Queue.pop buf_ring))
@@ -877,6 +937,13 @@ module Ring = struct
     in
     push_file (log_file_path dir yesterday);
     push_file (log_file_path dir today);
+    (* Classify only the [<= capacity] surviving tail entries (and before
+       acquiring [ring_mutex]) instead of scanning every evicted historical
+       row on disk. *)
+    let surviving = Queue.length buf_ring in
+    for _ = 1 to surviving do
+      Queue.add (classify_restored_diagnostic (Queue.pop buf_ring)) buf_ring
+    done;
     (* [total] is process-local but the JSONL sink is per-UTC-day and
        append-only, so a restart used to re-issue sequences that rows
        already in the file carry.  Measured on

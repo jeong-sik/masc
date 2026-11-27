@@ -264,6 +264,8 @@ type append_path_mutex_key = string
 
 let capture_append_path_mutex_key = canonical_append_mutex_path
 
+let append_path_mutex_key_path key = key
+
 let with_captured_append_path_mutex key f =
   let entry = acquire_append_path_entry key in
   Fun.protect

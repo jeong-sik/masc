@@ -1035,6 +1035,7 @@ let spawn_persistent_entry
       ~skills_dirs
       ~pinned_tool_specs
       ~agent_compaction
+      ~git_author_environment
       ~(config : Runtime_execution.acp_client)
   : (pool_entry, Acp.error) result
   =
@@ -1084,6 +1085,7 @@ let spawn_persistent_entry
                ; oauth_source = config.oauth_source
                ; dangerously_skip_permissions = key.dangerously_skip_permissions
                ; agent_compaction
+               ; git_author_environment
                }
              in
              match
@@ -1159,6 +1161,7 @@ let acquire_persistent_entry
       ~skills_dirs
       ~pinned_tool_specs
       ~agent_compaction
+      ~git_author_environment
       ~(config : Runtime_execution.acp_client)
   : (pool_entry, Acp.error) result
   =
@@ -1186,6 +1189,7 @@ let acquire_persistent_entry
         ~skills_dirs
         ~pinned_tool_specs
         ~agent_compaction
+        ~git_author_environment
         ~config
     in
     let winner =
@@ -1209,6 +1213,7 @@ let acquire_persistent_entry
         ~skills_dirs
         ~pinned_tool_specs
         ~agent_compaction
+        ~git_author_environment
         ~config
     in
     let winner =
@@ -2522,6 +2527,11 @@ let run_without_lifecycle
     | Some env -> Ok env
     | None -> Error (internal_error "Eio standard environment is not initialized for ACP runtime")
   in
+  let* git_author_environment =
+    Keeper_id.Keeper_name.of_string keeper_name
+    |> Result.map Host.git_author_environment
+    |> Result.map_error (config_error ~field:"keeper_name")
+  in
   let clock = Eio.Stdenv.clock env in
   let proc_mgr = Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds:5.0 in
   let owner_epoch = Session_store.process_epoch () in
@@ -3600,6 +3610,7 @@ let run_without_lifecycle
           ~skills_dirs
           ~agent_compaction
           ~pinned_tool_specs
+          ~git_author_environment
           ~config
         |> Result.map_error (fun err ->
           recovery_failure := recovery_failure_of_acp_error err;
@@ -3642,6 +3653,7 @@ let run_without_lifecycle
           ; oauth_source = config.oauth_source
           ; dangerously_skip_permissions = key.dangerously_skip_permissions
           ; agent_compaction
+          ; git_author_environment
           }
         in
         let* client =

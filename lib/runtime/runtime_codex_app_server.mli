@@ -69,6 +69,12 @@ type config =
         app-server protocol, whose own generated schema declares the field.
         The schema binds the message itself, so unlike the Antigravity adapter
         there is no separate structured field to prefer. *)
+  ; git_author_environment : (string * string) list
+    (** Set on the app-server over the environment of its account
+        ({!Runtime_child_environment.set}): the names its git commits carry.
+        A Keeper's turn gives the Keeper's names
+        ([Keeper_official_client_host.git_author_environment]). [[]] leaves
+        the app-server the git identity it inherits. *)
   }
 
 val default_timeout_s : float

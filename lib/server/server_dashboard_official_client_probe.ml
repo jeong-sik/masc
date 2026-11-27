@@ -132,6 +132,7 @@ let probe_codex ~mgr ~clock ~process_cwd ~runtime ~runtime_id ~model
       (* A subscription probe asks whether the client answers at all; it has
          no domain schema to hold the answer to. *)
       ; output_schema = None
+      ; git_author_environment = []
     }
   in
   (* HIGH-RISK-UNREVIEWED: a dashboard probe is a call of the operator (plan
@@ -221,6 +222,7 @@ let probe_claude ~mgr ~clock ~cwd ~process_cwd ~runtime_id ~model
       ; output_schema = None
       (* One short login check that ends before any compaction point. *)
       ; autocompact_window = None
+      ; git_author_environment = []
     }
   in
   (* HIGH-RISK-UNREVIEWED: a dashboard probe is a call of the operator (plan

@@ -321,6 +321,12 @@ type config =
       (** Passed to the host through its {!compaction_point_channel} when it
           starts. [None] leaves the host's own default. {!start} refuses
           [Some _] for a driver whose host takes no compaction point. *)
+  ; git_author_environment : (string * string) list
+      (** Set on the host over the environment it inherits
+          ({!Runtime_child_environment.set}): the names its git commits
+          carry. A Keeper's turn gives the Keeper's names
+          ([Keeper_official_client_host.git_author_environment]). [[]] leaves
+          the host the git identity it inherits. *)
   }
 
 val default_config : driver:driver -> cwd:string -> config
@@ -908,11 +914,13 @@ module For_testing : sig
   (** {!build_environment} plus the variables the host takes its native
       posture through: Vibe's [VIBE_ENABLED_TOOLS] tool allowlist for
       [Native_none] and [Native_read] (and for no posture), none for
-      [Native_full] or for another driver. [start] spawns the host with it. *)
+      [Native_full] or for another driver. [git_author_environment] is set
+      last, over any entry of the same name. [start] spawns the host with it. *)
   val host_environment
     :  base_env:string array
     -> driver:driver
     -> extra_strip_env:string list
+    -> git_author_environment:(string * string) list
     -> ?mcp_server:mcp_http_server
     -> Runtime_native_tools.posture option
     -> string array

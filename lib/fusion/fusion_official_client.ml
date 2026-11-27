@@ -108,6 +108,7 @@ let claude_config ~base_dir ~turn_timeout_s ~system_prompt ~override_s ~output_s
       resolved_timeout_s ~turn_timeout_s ~override_s ~default_timeout_s:execution.timeout_s
   ; output_schema
   ; autocompact_window
+  ; git_author_environment = []
   }
 ;;
 
@@ -126,6 +127,7 @@ let codex_config ~runtime ~system_prompt ~override_s ~output_schema
       resolved_timeout_s ~turn_timeout_s:runtime.model.turn_timeout_s ~override_s
         ~default_timeout_s:execution.timeout_s
   ; output_schema
+  ; git_author_environment = []
   }
 ;;
 
@@ -149,6 +151,7 @@ let antigravity_config ~base_dir ~turn_timeout_s ~override_s ~output_schema
   ; timeout_s =
       resolved_timeout_s ~turn_timeout_s ~override_s ~default_timeout_s:execution.timeout_s
   ; output_schema
+  ; git_author_environment = []
   }
 ;;
 
@@ -840,6 +843,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          ; oauth_source = execution.oauth_source
          ; dangerously_skip_permissions = false
          ; agent_compaction = None
+         ; git_author_environment = []
          }
        in
        match

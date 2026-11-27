@@ -48,6 +48,7 @@ type config =
   ; timeout_s : float option
   ; output_schema : Yojson.Safe.t option
   ; autocompact_window : autocompact_window option
+  ; git_author_environment : (string * string) list
   }
 
 let default_timeout_s = Runtime_timeout_budget.claude_default_turn_timeout_s
@@ -71,6 +72,7 @@ let default_config ~cwd =
   ; timeout_s = Some default_timeout_s
   ; output_schema = None
   ; autocompact_window = None
+  ; git_author_environment = []
   }
 ;;
 
@@ -3400,7 +3402,9 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd ~account config ~dynamic_tools
     with_system_prompt_file config.system_prompt (fun system_prompt ->
     let system_prompt_file = Option.map fst system_prompt in
     let* argv = command ~system_prompt_file config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id in
-    let environment = client_environment account in
+    let environment =
+      Runtime_child_environment.set config.git_author_environment (client_environment account)
+    in
     Eio.Switch.run (fun sw ->
     let stderr_tail = Stderr.create ~limit:stderr_tail_bytes in
     let { Process_eio.process = proc; to_stdin = stdin_w; from_stdout = stdout_r; from_stderr = stderr_r } =

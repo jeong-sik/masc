@@ -163,6 +163,16 @@ let test_wire_attachment_sniff_and_paths () =
   let legacy_media = "/api/v1/media/" ^ String.make 64 'b' in
   check bool "is_attachment_path accepts /api/v1/media/" true
     (Wire_attachment.is_attachment_path legacy_media);
+  let served path =
+    match Wire_attachment.served_path path with
+    | Some (Wire_attachment.Attachment_id id) -> "attachment " ^ id
+    | Some (Wire_attachment.Media_token token) -> "media " ^ token
+    | None -> "none"
+  in
+  check (list string) "served_path names the route and keeps the rest"
+    [ "attachment att_x"; "media " ^ String.make 64 'b'; "none" ]
+    (List.map served
+       [ "/api/v1/attachments/att_x"; legacy_media; "https://example.invalid/api/v1/media/x" ]);
   check string "render path rewrites /api/v1/media/ with ?format=png"
     (legacy_media ^ "?format=png")
     (Wire_attachment.attachment_render_path ~format:"png" legacy_media);

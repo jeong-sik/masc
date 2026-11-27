@@ -721,9 +721,6 @@ type history_thinking =
   | Thinking_redacted
   | Thinking_partial of string
 
-val media_path_prefix : string
-(** Legacy ["/api/v1/media/"] prefix for retained workspace media paths. *)
-
 type retained_image = {
   media_path : string;
   caption : string option;

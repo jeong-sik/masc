@@ -2369,8 +2369,6 @@ type history_thinking =
   | Thinking_redacted
   | Thinking_partial of string
 
-let media_path_prefix = "/api/v1/media/"
-
 type retained_image = {
   media_path : string;
   caption : string option;
@@ -2818,15 +2816,12 @@ let extract_history_thinking (json : Yojson.Safe.t) : history_thinking option =
   | _ -> None
 
 let is_valid_media_or_attachment_path path =
-  if Wire_attachment.is_attachment_path path then
-    let start = String.length Wire_attachment.attachment_path_prefix in
-    String.length path > start
-  else if String.starts_with ~prefix:media_path_prefix path then
-    let start = String.length media_path_prefix in
-    let token = String.sub path start (String.length path - start) in
-    Wire_runtime.is_lowercase_sha256_hex token
-    || String.starts_with ~prefix:"att_" token
-  else false
+  match Wire_attachment.served_path path with
+  | Some (Wire_attachment.Attachment_id id) -> not (String.equal id "")
+  | Some (Wire_attachment.Media_token token) ->
+      Wire_runtime.is_lowercase_sha256_hex token
+      || String.starts_with ~prefix:"att_" token
+  | None -> false
 
 let decode_retained_images json =
   let seen = Hashtbl.create 8 in

@@ -478,8 +478,8 @@ type engine_keeper_admission =
 let principal_active_and_unheld state user_id =
   Ps.is_active state.Authz_state.principals user_id
   && Authz_state.revocation state
-       (Authz_types.Subject.Principal (Authz_types.Principal.Human user_id))
-     = Authz_types.Revocation_state.Not_pending
+       (Authz_records.Subject.Principal (Authz_types.Principal.Human user_id))
+     = Authz_records.Revocation_state.Not_pending
 ;;
 
 let engine_keeper_admission engine_name =

@@ -2196,15 +2196,15 @@ let decode_verification_evidence_item json =
          server writes it whole or refuses the record, so one that is missing
          or malformed is refused here rather than drawn as a body of no
          bytes. *)
-      match optional_object_field json "blob" with
-      | Ok (Some ( `Assoc [ ("_blob", `Assoc fields) ] )) ->
-          (match List.assoc_opt "bytes" fields, List.assoc_opt "sha256" fields with
-           | Some (`Int bytes), Some (`String sha256) ->
-             Ok (Verif_ev_stored_body { reference; bytes; sha256 })
-           | _ -> Error "stored body reference lacks its size or digest")
-      | Ok (Some _) -> Error "stored body item does not hold a blob reference"
-      | Ok None -> Error "stored body item has no reference"
-      | Error detail -> Error detail
+      (match optional_object_field json "blob" with
+       | Ok (Some ( `Assoc [ ("_blob", `Assoc fields) ] )) ->
+           (match List.assoc_opt "bytes" fields, List.assoc_opt "sha256" fields with
+            | Some (`Int bytes), Some (`String sha256) ->
+              Ok (Verif_ev_stored_body { reference; bytes; sha256 })
+            | _ -> Error "stored body reference lacks its size or digest")
+       | Ok (Some _) -> Error "stored body item does not hold a blob reference"
+       | Ok None -> Error "stored body item has no reference"
+       | Error detail -> Error detail)
   | "artifact_binary" ->
       let* reference = required_nonblank_string json "reference" in
       let bytes = int_or_0 json "bytes" in

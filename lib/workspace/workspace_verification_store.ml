@@ -386,7 +386,7 @@ let store_text_artifact ~base_path ~reference ~content ~bytes =
     let store = Tool_blob_store.create ~base_path in
     match Tool_blob_store.put_durable store ~bytes:content ~mime:"text/plain" with
     | blob -> Evidence_artifact_body { reference; blob }
-    | exception (Sys_error | Unix.Unix_error _) as error ->
+    | exception ((Sys_error _ | Unix.Unix_error _) as error) ->
       (* The store promises [Sys_error] for a failed write, but a directory
          it cannot enter or create surfaces as a Unix error. A submit must
          not fail because the store is unusable: the item says so instead. *)

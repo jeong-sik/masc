@@ -438,8 +438,25 @@ let write_message (proc : lsp_process) (json : string) =
         raise exn)
 ;;
 
+let max_lsp_header_line_bytes = 8 * 1024
+let max_lsp_header_count = 64
+let max_lsp_message_bytes = 64 * 1024 * 1024
+let max_stderr_log_bytes = 4096
+
+let close_quiet flow =
+  try Eio.Flow.close flow with
+  | Eio.Io _ | Unix.Unix_error _ | Sys_error _ -> ()
+;;
+
 (** Read exactly [n] bytes from a flow into a string. *)
 let read_exact (flow : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r) n =
+  if n < 0 || n > max_lsp_message_bytes
+  then
+    failwith
+      (Printf.sprintf
+         "LSP message size %d out of bounds (0..%d)"
+         n
+         max_lsp_message_bytes);
   let buf = Cstruct.create n in
   Eio.Flow.read_exact flow buf;
   Cstruct.to_string buf
@@ -449,8 +466,8 @@ let read_exact (flow : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r)
     Returns the line content without the trailing [\r\n]. *)
 let read_header_line (flow : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r) =
   let buf = Buffer.create 64 in
+  let ch = Cstruct.create 1 in
   let rec loop prev =
-    let ch = Cstruct.create 1 in
     Eio.Flow.read_exact flow ch;
     let c = Cstruct.get ch 0 in
     if c = '\n' && prev = '\r'
@@ -458,6 +475,8 @@ let read_header_line (flow : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.
       let s = Buffer.contents buf in
       let len = String.length s in
       if len > 0 && String.get s (len - 1) = '\r' then String.sub s 0 (len - 1) else s)
+    else if Buffer.length buf >= max_lsp_header_line_bytes
+    then failwith "LSP header line exceeds maximum length"
     else (
       Buffer.add_char buf c;
       loop c)
@@ -465,18 +484,35 @@ let read_header_line (flow : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.
   loop '\000'
 ;;
 
-(** Parse [Content-Length] value from a header line.
-    Returns [Some n] if the header matches, [None] otherwise. *)
+type content_length_header =
+  | Not_content_length
+  | Valid_content_length of int
+  | Invalid_content_length of string
+
+(** Parse [Content-Length] value from a header line. *)
 let parse_content_length line =
-  let prefix = "Content-Length: " in
+  let prefix = "Content-Length:" in
   if String.starts_with ~prefix line
   then (
     let raw =
-      String.sub line (String.length prefix) (String.length line - String.length prefix)
+      String.sub
+        line
+        (String.length prefix)
+        (String.length line - String.length prefix)
+      |> String.trim
     in
-    try Some (int_of_string (String.trim raw)) with
-    | Failure _ -> None)
-  else None
+    match int_of_string_opt raw with
+    | Some n when n >= 0 && n <= max_lsp_message_bytes -> Valid_content_length n
+    | Some n ->
+      Invalid_content_length
+        (Printf.sprintf
+           "LSP Content-Length %d out of bounds (0..%d)"
+           n
+           max_lsp_message_bytes)
+    | None ->
+      Invalid_content_length
+        (Printf.sprintf "LSP Content-Length is not an integer: %S" raw))
+  else Not_content_length
 ;;
 
 (** Read one complete LSP message from stdout.
@@ -484,7 +520,9 @@ let parse_content_length line =
     Reads headers until empty line, then reads [Content-Length] bytes.
     Returns the JSON payload string. *)
 let read_message (flow : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.r) =
-  let rec read_headers content_length =
+  let rec read_headers header_count content_length =
+    if header_count > max_lsp_header_count
+    then failwith "LSP response exceeded maximum header count";
     let line = read_header_line flow in
     if String.length line = 0
     then (
@@ -496,13 +534,45 @@ let read_message (flow : [ Eio.Flow.source_ty | Eio.Resource.close_ty ] Eio.Std.
               Return empty string so caller can detect and handle. *)
         "")
     else (
-      let len = parse_content_length line in
-      read_headers
-        (match len with
-         | Some n -> Some n
-         | None -> content_length))
+      match parse_content_length line with
+      | Valid_content_length n -> read_headers (header_count + 1) (Some n)
+      | Invalid_content_length reason -> failwith reason
+      | Not_content_length -> read_headers (header_count + 1) content_length)
   in
-  read_headers None
+  read_headers 0 None
+;;
+
+let drain_stderr ~lang_id stderr_r =
+  let acc = Buffer.create 256 in
+  let chunk = Cstruct.create 4096 in
+  let flush_acc () =
+    if Buffer.length acc > 0
+    then (
+      Log.Server.debug "LSP %s stderr: %s" lang_id (Buffer.contents acc);
+      Buffer.clear acc)
+  in
+  try
+    while true do
+      let n = Eio.Flow.single_read stderr_r chunk in
+      for i = 0 to n - 1 do
+        let c = Cstruct.get chunk i in
+        if Char.equal c '\n'
+        then flush_acc ()
+        else if not (Char.equal c '\r')
+        then (
+          Buffer.add_char acc c;
+          if Buffer.length acc >= max_stderr_log_bytes then flush_acc ())
+      done
+    done
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | End_of_file -> flush_acc ()
+  | exn ->
+    flush_acc ();
+    Log.Server.debug
+      "LSP %s stderr reader ended: %s"
+      lang_id
+      (Printexc.to_string exn)
 ;;
 
 (** Spawn an LSP server process for the given language.
@@ -526,8 +596,24 @@ let spawn
     else (
       try
         let stdin_r, stdin_w = Eio.Process.pipe ~sw proc_mgr in
-        let stdout_r, stdout_w = Eio.Process.pipe ~sw proc_mgr in
-        let stderr_r, stderr_w = Eio.Process.pipe ~sw proc_mgr in
+        let stdout_r, stdout_w =
+          try Eio.Process.pipe ~sw proc_mgr with
+          | exn ->
+            let bt = Printexc.get_raw_backtrace () in
+            close_quiet stdin_r;
+            close_quiet stdin_w;
+            Printexc.raise_with_backtrace exn bt
+        in
+        let stderr_r, stderr_w =
+          try Eio.Process.pipe ~sw proc_mgr with
+          | exn ->
+            let bt = Printexc.get_raw_backtrace () in
+            close_quiet stdin_r;
+            close_quiet stdin_w;
+            close_quiet stdout_r;
+            close_quiet stdout_w;
+            Printexc.raise_with_backtrace exn bt
+        in
         let child_env =
           match language_of_lang_id lang_id with
           | None -> Unix.environment ()
@@ -546,45 +632,48 @@ let spawn
                     (Array.to_list (Unix.environment ()))))
         in
         let proc =
-          Eio.Process.spawn
-            ~sw
-            proc_mgr
-            ~stdin:stdin_r
-            ~stdout:stdout_w
-            ~stderr:stderr_w
-            ~env:child_env
-            argv
-        in
-        Eio.Flow.close stdin_r;
-        Eio.Flow.close stdout_w;
-        Eio.Flow.close stderr_w;
-        Eio.Switch.on_release sw (fun () ->
-          try Eio.Process.signal proc Sys.sigterm with
-          | exn -> (* cancel-guard-ok: Eio 1.3 invokes Switch.on_release handlers under Cancel.protect from Switch.await_idle and the already-finished arm of Switch.on_release_full, so ambient cancellation cannot fire inside this one. *)
-            Log.Server.debug
-              "LSP process signal failed for %s: %s"
-              lang_id
-              (Printexc.to_string exn));
-        (* Drain stderr to a log — prevents pipe stall *)
-        Eio.Fiber.fork ~sw (fun () ->
-          let buf = Buffer.create 256 in
           try
-            while true do
-              let line = read_header_line stderr_r in
-              Buffer.add_string buf line;
-              Buffer.add_char buf '\n';
-              if Buffer.length buf > 4096
-              then (
-                Log.Server.debug "LSP %s stderr: %s" lang_id (Buffer.contents buf);
-                Buffer.clear buf)
-            done
+            Eio.Process.spawn
+              ~sw
+              proc_mgr
+              ~stdin:stdin_r
+              ~stdout:stdout_w
+              ~stderr:stderr_w
+              ~env:child_env
+              argv
           with
-          | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
-            Log.Server.debug
-              "LSP %s stderr reader ended: %s"
-              lang_id
-              (Printexc.to_string exn));
+            let bt = Printexc.get_raw_backtrace () in
+            close_quiet stdin_r;
+            close_quiet stdin_w;
+            close_quiet stdout_r;
+            close_quiet stdout_w;
+            close_quiet stderr_r;
+            close_quiet stderr_w;
+            Printexc.raise_with_backtrace exn bt
+        in
+        close_quiet stdin_r;
+        close_quiet stdout_w;
+        close_quiet stderr_w;
+        (try
+           Eio.Switch.on_release sw (fun () ->
+             try Eio.Process.signal proc Sys.sigterm with
+             | exn -> (* cancel-guard-ok: Eio 1.3 invokes Switch.on_release handlers under Cancel.protect from Switch.await_idle and the already-finished arm of Switch.on_release_full, so ambient cancellation cannot fire inside this one. *)
+               Log.Server.debug
+                 "LSP process signal failed for %s: %s"
+                 lang_id
+                 (Printexc.to_string exn));
+           (* Drain stderr with bounded chunked reads — prevents pipe stall and OOM *)
+           Eio.Fiber.fork ~sw (fun () -> drain_stderr ~lang_id stderr_r)
+         with
+         | exn ->
+           let bt = Printexc.get_raw_backtrace () in
+           close_quiet stdin_w;
+           close_quiet stdout_r;
+           close_quiet stderr_r;
+           (try Eio.Process.signal proc Sys.sigterm with
+            | Unix.Unix_error _ | Eio.Io _ | Sys_error _ -> ());
+           Printexc.raise_with_backtrace exn bt);
         Ok { lang_id; proc; stdin_w; stdout_r; stderr_r;write_mutex=Eio.Mutex.create ();
           transport_state=Atomic.make Open }
       with

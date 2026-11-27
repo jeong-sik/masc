@@ -49,31 +49,43 @@ let build_notification (method_ : string) (params : Yojson.Safe.t) =
 ;;
 
 (** Send a JSON-RPC request to the LSP server process.
-    Returns a [Promise.t] that resolves when the response arrives. *)
-let send_request
+    Returns a [Promise.t] that resolves when the response arrives and a
+    cancel-safe cleanup thunk that drops the pending entry if the caller
+    times out or is cancelled. *)
+let send_request_cancellable
       (router : t)
       (proc : Lsp_process_manager.lsp_process)
       ~method_
       ~params
       ~(client_id : int)
-  : (Yojson.Safe.t, string) result Eio.Promise.t
+  : (Yojson.Safe.t, string) result Eio.Promise.t * (unit -> unit)
   =
   let server_id = alloc_server_id router in
   let request_json = build_request server_id method_ params in
   let payload = Yojson.Safe.to_string request_json in
   let promise, resolver = Eio.Promise.create () in
+  let remove_pending () =
+    Eio.Cancel.protect (fun () ->
+      Eio.Mutex.use_rw ~protect:true router.mutex (fun () ->
+        Hashtbl.remove router.pending server_id))
+  in
   Eio.Mutex.use_rw ~protect:true router.mutex (fun () ->
     Hashtbl.add router.pending server_id { process=proc; client_id; method_; promise; resolver });
   (try Lsp_process_manager.write_message proc payload with
    | exn -> (* cancel-guard-ok: retire a possibly partial frame, then re-raise *)
-     Eio.Cancel.protect (fun () ->
-       Eio.Mutex.use_rw ~protect:true router.mutex (fun () -> Hashtbl.remove router.pending server_id));
+     remove_pending ();
      Eio.Cancel.protect (fun () ->
        match Atomic.get proc.transport_state with
        | Closed -> Lsp_process_manager.shutdown proc
        | Open -> ());
      raise exn);
-  promise
+  promise, remove_pending
+;;
+
+(** Send a JSON-RPC request to the LSP server process.
+    Returns a [Promise.t] that resolves when the response arrives. *)
+let send_request router proc ~method_ ~params ~client_id =
+  fst (send_request_cancellable router proc ~method_ ~params ~client_id)
 ;;
 
 (** Send a JSON-RPC notification to the LSP server process.
@@ -223,17 +235,18 @@ let start_response_reader
                Log.Server.warn "LSP router: unparseable message from %s" proc.lang_id)
         done
       with
-      | exn -> (* cancel-guard-ok: the loop exits and the fiber ends here; cleanup runs and no work resumes *)
+      | exn -> (* cancel-guard-ok: the loop exits and the fiber ends here; cleanup runs under Cancel.protect so contended mutex locks never skip teardown *)
         let reason = Printexc.to_string exn in
         Log.Server.debug
           "LSP router: response reader for %s ended: %s"
           proc.lang_id
           reason;
-        reject_for_process
-          router
-          ~proc
-          (Printf.sprintf "LSP process %s disconnected: %s" proc.lang_id reason);
-        Option.iter (fun f -> f ~reason) on_exit)
+        Eio.Cancel.protect (fun () ->
+          reject_for_process
+            router
+            ~proc
+            (Printf.sprintf "LSP process %s disconnected: %s" proc.lang_id reason);
+          Option.iter (fun f -> f ~reason) on_exit))
   in
   Eio.Fiber.fork ~sw (fun () ->
     match Eio.Promise.await fiber_promise with

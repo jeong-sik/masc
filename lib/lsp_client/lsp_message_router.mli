@@ -24,6 +24,16 @@ val send_request : t ->
   client_id:int ->
   (Yojson.Safe.t, string) result Eio.Promise.t
 
+(** Like {!send_request}, also returning a cancel-safe cleanup thunk that
+    removes the pending table entry when the caller abandons the wait on
+    timeout or cancellation. *)
+val send_request_cancellable : t ->
+  Lsp_process_manager.lsp_process ->
+  method_:string ->
+  params:Yojson.Safe.t ->
+  client_id:int ->
+  (Yojson.Safe.t, string) result Eio.Promise.t * (unit -> unit)
+
 val send_notification : t ->
   Lsp_process_manager.lsp_process ->
   method_:string ->

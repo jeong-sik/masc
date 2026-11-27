@@ -156,6 +156,12 @@ let await_answer ~clock ~timeout ~what promise =
     (fun () -> Eio.Promise.await promise)
 ;;
 
+let await_request ~clock ~timeout ~what (promise, cancel_pending) =
+  Fun.protect
+    ~finally:cancel_pending
+    (fun () -> await_answer ~clock ~timeout ~what promise)
+;;
+
 let transmit t ~timeout ~what f =
   try Ok (Eio.Time.with_timeout_exn t.clock timeout f) with
   | Eio.Time.Timeout -> Error (Printf.sprintf "%s write timed out after %.0fs" what timeout)
@@ -217,15 +223,15 @@ let start_locked t ~key ~language ~workspace_root =
           ~on_notification:(fun ~client_id:_ ~method_ params ->
             observe_analysis t proc ~method_ params);
         let sent = transmit t ~timeout:initialize_timeout_sec ~what:"initialize" (fun () ->
-          Lsp_message_router.send_request
+          Lsp_message_router.send_request_cancellable
             t.router
             proc
             ~method_:"initialize"
             ~params:(initialize_params ~workspace_root)
             ~client_id:pool_client_id)
         in
-        let initialized=Result.bind sent (fun promise ->
-          await_answer ~clock:t.clock ~timeout:initialize_timeout_sec ~what:"initialize" promise) in
+        let initialized=Result.bind sent (fun req ->
+          await_request ~clock:t.clock ~timeout:initialize_timeout_sec ~what:"initialize" req) in
         match initialized
         with
         | Error reason -> Error (Server_failed { lang_id; reason })
@@ -278,10 +284,10 @@ let ask t ~language ~workspace_root ~method_ ~params =
   | Error _ as err -> err
   | Ok proc ->
     let sent=transmit t ~timeout:request_timeout_sec ~what:method_ (fun () ->
-      Lsp_message_router.send_request t.router proc ~method_ ~params ~client_id:pool_client_id)
+      Lsp_message_router.send_request_cancellable t.router proc ~method_ ~params ~client_id:pool_client_id)
     in
-    let answered=Result.bind sent (fun promise ->
-      await_answer ~clock:t.clock ~timeout:request_timeout_sec ~what:method_ promise) in
+    let answered=Result.bind sent (fun req ->
+      await_request ~clock:t.clock ~timeout:request_timeout_sec ~what:method_ req) in
     (match answered with
      | Error reason ->
        Error
@@ -344,9 +350,9 @@ let ask_document t ~language ~workspace_root ~uri ~text ~readiness ~method_ ~par
         | Error reason -> failed reason
         | Ok () ->
           let sent=transmit t ~timeout:request_timeout_sec ~what:method_ (fun () ->
-            Lsp_message_router.send_request t.router proc ~method_ ~params ~client_id:pool_client_id) in
-          let answered=Result.bind sent (fun promise ->
-            await_answer ~clock:t.clock ~timeout:request_timeout_sec ~what:method_ promise) in
+            Lsp_message_router.send_request_cancellable t.router proc ~method_ ~params ~client_id:pool_client_id) in
+          let answered=Result.bind sent (fun req ->
+            await_request ~clock:t.clock ~timeout:request_timeout_sec ~what:method_ req) in
           match answered with
           | Ok json -> Ok json
           | Error reason -> failed reason)) in
@@ -388,7 +394,9 @@ let close t =
 let with_pool ~clock ~proc_mgr ~servers f =
   Eio.Switch.run (fun sw ->
     let t = create ~sw ~clock ~proc_mgr ~servers in
-    Fun.protect ~finally:(fun () -> close t) (fun () -> f t))
+    Fun.protect
+      ~finally:(fun () -> Eio.Cancel.protect (fun () -> close t))
+      (fun () -> f t))
 ;;
 
 module For_testing = struct

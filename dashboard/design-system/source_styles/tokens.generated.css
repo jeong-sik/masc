@@ -277,7 +277,7 @@
   --input-border: var(--line-1);
   --input-bg-hover: var(--bg-2);
   --input-bg-focus: var(--bg-0);
-  --input-placeholder: var(--fg-4);
+  --input-placeholder: var(--fg-3);
   --input-border-focus: var(--focus);
   --dialog-panel-bg: var(--bg-2);
   --dialog-panel-border: var(--line-2);

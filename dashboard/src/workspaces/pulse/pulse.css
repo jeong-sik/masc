@@ -110,7 +110,7 @@
 .pulse-kpi-value[data-tone="warn"] { color: var(--warn-fg); }
 .pulse-kpi-value[data-tone="bad"] { color: var(--err-fg); }
 .pulse-kpi-value[data-tone="brass"] { color: var(--brass-1); }
-.pulse-kpi-value[data-absent="true"] { color: var(--fg-4); font-size: var(--fs-20); }
+.pulse-kpi-value[data-absent="true"] { color: var(--fg-3); font-size: var(--fs-20); }
 
 .pulse-kpi-sub {
   font-size: var(--fs-12);

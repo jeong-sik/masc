@@ -7,7 +7,8 @@
     also holds a candidate inside its own usable Retry-After, a time the
     provider stated, and returns it as held (RFC-exact-lane-waits-for-a-stated-reset). A server error,
     provider capacity refusal, network failure or timeout is held the same way until the candidate
-    answers. The observation cell lives on the materialized
+    answers. A connection that did not open sent nothing and is not held
+    (RFC-one-slot-fault-judgment-for-every-walk §3.6). The observation cell lives on the materialized
     runtime; frozen attempts retain the same cell, and the runtime catalog
     owns its lifetime. *)
 

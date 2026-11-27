@@ -5047,11 +5047,10 @@ let test_only_the_candidates_own_failures_are_evidence () =
         (Some Runtime_candidate_backpressure.Network_transient)
         (one "shared_b.test_model" (retryable_network_error "connection refused"));
       reset_quota_lane_rests ();
-      (* RFC #52028 §2.3: how slot standing reads a connection that did not
-         open is #38403's decision; until then the slot notes it as a network
-         failure, as it did before the route class existed. *)
+      (* #38403: the request never left, so it is no fact about the
+         candidate (RFC #52028 §3.6). *)
       Alcotest.check attempt_failure "a connection that did not open"
-        (Some Runtime_candidate_backpressure.Network_transient)
+        None
         (one "shared_b.test_model"
            (Agent_core.Error.Api
               (Agent_core.Retry.Connect_failed
@@ -5094,6 +5093,109 @@ let test_only_the_candidates_own_failures_are_evidence () =
         , Agent_core.Error.Api
             (Agent_core.Retry.ContextOverflow { message = "too long"; limit = None })
         ]))
+;;
+
+(* #38403: a host without network fails every candidate with a connection that
+   did not open. The walk still moves on, but no candidate moves in any
+   Keeper's order, and a mark already held is neither replaced nor cleared.
+   A failure after the request left still marks the candidate (RFC-0458
+   §3.4): the recorder's next fresh walk calls it again, every other walk
+   puts it behind (RFC #52028 §3.6). *)
+let test_a_connection_that_did_not_open_keeps_the_order () =
+  with_runtime_config runtime_toml_quota_lane (fun () ->
+    reset_quota_lane_rests ();
+    Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+      let ids = [ "shared_a.test_model"; "shared_b.test_model"; "other.test_model" ] in
+      let peer = Runtime_candidate_backpressure.keeper_recorder ~keeper_name:"peer-keeper" in
+      let fresh_order recorder =
+        match
+          Driver.assignment_walk_order ~walk:(Driver.Fresh_walk_by recorder)
+            ~now:(Unix.gettimeofday ()) "quota_lane"
+        with
+        | Ok { Driver.order; _ } -> order
+        | Error (Driver.Assignment_missing | Driver.Catalog_unavailable _) ->
+          Alcotest.fail "the lane resolves"
+      in
+      let not_opened kind =
+        Error
+          (Agent_core.Error.Api
+             (Agent_core.Retry.Connect_failed { message = "could not open"; kind }))
+      in
+      let attempts = ref [] in
+      let walk outcomes =
+        walk_once
+          (fun id ->
+             attempts := !attempts @ [ id ];
+             outcomes id)
+          ids
+      in
+      (match
+         walk (function
+           | "shared_a.test_model" -> not_opened Llm_provider.Http_client.Dns_failure
+           | "shared_b.test_model" -> not_opened Llm_provider.Http_client.Connection_refused
+           | "other.test_model" -> Ok ()
+           | other -> Alcotest.failf "unexpected candidate %s" other)
+       with
+       | Ok () -> ()
+       | Error error -> Alcotest.failf "the walk stopped: %s" (Agent_core.Error.to_string error));
+      Alcotest.(check (list string)) "the walk still moves past both" ids !attempts;
+      List.iter
+        (fun id -> Alcotest.check attempt_failure (id ^ " holds no mark") None (failed_attempt_of id))
+        ids;
+      Alcotest.(check (list string)) "a deferred walk keeps the declared order" ids
+        (backpressure_order ids);
+      Alcotest.(check (list string)) "the recorder's fresh walk keeps it" ids
+        (fresh_order test_recorder);
+      Alcotest.(check (list string)) "a peer's fresh walk keeps it" ids (fresh_order peer);
+      reset_quota_lane_rests ();
+      Runtime_candidate_backpressure.note_failed_attempt
+        ~candidate:(quota_lane_candidate "shared_a.test_model")
+        ~failure:Runtime_candidate_backpressure.Provider_timeout
+        ~recorded_by:peer;
+      let (_ : (unit, Agent_core.Error.t) result) =
+        walk_once
+          (fun _ -> not_opened Llm_provider.Http_client.Dns_failure)
+          [ "shared_a.test_model" ]
+      in
+      Alcotest.check attempt_failure "a mark already held stays as it was"
+        (Some Runtime_candidate_backpressure.Provider_timeout)
+        (failed_attempt_of "shared_a.test_model");
+      Alcotest.(check (list string)) "and keeps the peer's mark for this Keeper"
+        [ "shared_b.test_model"; "other.test_model"; "shared_a.test_model" ]
+        (fresh_order test_recorder);
+      reset_quota_lane_rests ();
+      let (_ : (unit, Agent_core.Error.t) result) =
+        walk (function
+          | "shared_a.test_model" ->
+            Error
+              (Agent_core.Error.Api
+                 (Agent_core.Retry.NetworkError
+                    { message = "reset"; kind = Llm_provider.Http_client.Connection_reset }))
+          | "shared_b.test_model" ->
+            Error
+              (Agent_core.Error.Provider
+                 (Llm_provider.Error.Timeout
+                    { provider = "shared_b"
+                    ; timeout_phase = Some Llm_provider.Http_client.First_token
+                    ; detail = "no first token"
+                    }))
+          | "other.test_model" -> Ok ()
+          | other -> Alcotest.failf "unexpected candidate %s" other)
+      in
+      Alcotest.check attempt_failure "a network failure after sending marks"
+        (Some Runtime_candidate_backpressure.Network_transient)
+        (failed_attempt_of "shared_a.test_model");
+      Alcotest.check attempt_failure "a provider timeout marks"
+        (Some Runtime_candidate_backpressure.Provider_timeout)
+        (failed_attempt_of "shared_b.test_model");
+      Alcotest.(check (list string)) "the recorder calls both again" ids
+        (fresh_order test_recorder);
+      Alcotest.(check (list string)) "a peer puts both behind"
+        [ "other.test_model"; "shared_a.test_model"; "shared_b.test_model" ]
+        (fresh_order peer);
+      Alcotest.(check (list string)) "a deferred walk puts both behind"
+        [ "other.test_model"; "shared_a.test_model"; "shared_b.test_model" ]
+        (backpressure_order ids)))
 ;;
 
 (* An attempt that yielded before its first token never heard from the
@@ -8913,6 +9015,8 @@ let () =
             test_the_read_after_a_403_does_not_refresh_a_credential;
           Alcotest.test_case "only the candidate's own failures are evidence" `Quick
             test_only_the_candidates_own_failures_are_evidence;
+          Alcotest.test_case "a connection that did not open keeps the order" `Quick
+            test_a_connection_that_did_not_open_keeps_the_order;
           Alcotest.test_case "a yield before the first token clears no evidence" `Quick
             test_a_yield_before_the_first_token_clears_no_evidence;
           Alcotest.test_case "the production answer test reads provider turns" `Quick

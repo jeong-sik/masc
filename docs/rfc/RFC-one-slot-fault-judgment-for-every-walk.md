@@ -3,14 +3,14 @@ rfc: "one-slot-fault-judgment-for-every-walk"
 title: "다음 후보로 넘길지는 한 곳에서 정한다 — exact 걸음과 Keeper 걸음이 같은 오류에 같은 답을 한다"
 status: Draft
 created: 2026-09-24
-updated: 2026-11-15
+updated: 2026-11-27
 author: claude
 related: ["librarian-lifecycle", "0440", "0454", "0492", "typed-terminal-reason", "exact-lane-walks-one-slot-list"]
 ---
 
 # 다음 후보로 넘길지는 한 곳에서 정한다
 
-- Status: **Draft (2026-09-24).** §3 의 1~4 는 운영자가 2026-09-24 에, 5 는 2026-11-15 에 정했다.
+- Status: **Draft (2026-09-24).** §3 의 1~4 는 운영자가 2026-09-24 에, 5 는 2026-11-15 에, 6 은 2026-11-27 에 정했다.
 - 한 줄: "이 실패는 이 후보(바인딩)의 사정이라, 다음 후보가 같은 입력을 받아도 되는가"를
   exact 걸음과 Keeper 걸음이 따로 답한다. 같은 오류에 둘의 답이 다른 자리가 여섯이다.
   agent_core 에 판정 하나를 두고 두 걸음이 그것을 읽는다.
@@ -272,14 +272,14 @@ exact 걸음은 판정을 가리지 않고 모두 넘기므로 이 판정을 읽
    - 그 class 를 읽는 match (`keeper_runtime_failure_route.ml:507`·`:602`·`:731`)는 `Network_transient` 와 같은 갈래에 둔다.
      이름은 `connection_not_opened` 다 (`:529` 옆).
    - `route_of_provider_error` 의 provider `Connect_failed` 도 같은 class 로 간다 (`keeper_runtime_failure_route.ml:374`).
-   - slot 상태가 그 class 를 어떻게 읽을지는 #38403 이 정한다.
+   - slot 상태는 이 class 로 후보에 실패 표시를 남기지 않는다 (§3.6).
 
 생성자를 더하면 `http_error`·`api_error`·`provider_error` 를 읽는 match 가 모두 컴파일에서 멈춘다.
 그 자리마다 판단을 적는다. `_` 로 넘기지 않는다.
 
 exact 걸음의 동작은 바뀌지 않는다. 이 실패는 지금처럼 `Before_dispatch_error` 안에 오고, 자기 receipt 는 `No_generation_dispatch` 다.
 
-## 3. 정한 것 (운영자, 2026-09-24·2026-11-15)
+## 3. 정한 것 (운영자, 2026-09-24·2026-11-15·2026-11-27)
 
 1. **`Request_body_refused_by_provider` 는 `Binding Body_limit` 이다.**
    이 이유는 HTTP 413 에서만 만들어진다 (`retry.ml` `classify_refusal` 의 `| 413 ->`).
@@ -305,6 +305,14 @@ exact 걸음의 동작은 바뀌지 않는다. 이 실패는 지금처럼 `Befor
    - 전에는 새 연결의 TLS handshake 중 EOF·reset 이 `NetworkError {End_of_file | Connection_reset}` 로 읽혀 새 연결로 한 번 더 보냈다.
      이제 걸음은 다음 후보로 넘어간다. 후보가 하나뿐이면 턴이 끝나고, route `Connection_not_opened` 의 쉼(`rate_limit_backoff_floor_sec`)을 기다린다.
    - 이 경우가 얼마나 자주 일어나는지는 재지 않았다. **[확인 필요]**
+6. **연결을 열지 못한 실패는 후보 순서를 바꾸지 않는다 (2026-11-27, #38403).**
+   - `Connection_not_opened` 는 후보에 실패 표시(`note_failed_attempt`)를 남기지 않는다. 이미 있던 표시도 지우지 않는다.
+   - 요청이 나가지 않았으니 이 후보가 답하는지에 대해 아무것도 말하지 않는다.
+     호스트 망이 끊기면 모든 후보가 한꺼번에 이렇게 실패한다. 표시를 남기면 모든 Keeper 의 순서가 바뀌고, 각 후보가 다시 답할 때까지 그대로다.
+   - host 이름이 이 후보의 것만 틀렸으면 그 후보는 순서에서 밀리지 않는다. 턴마다 한 번 실패하고 걸음은 다음 후보로 간다.
+     실패는 시도마다 턴 receipt 의 walk 증거(`provider_connect_failed`, `not_sent`)에 남는다. 그 실패로 턴이 끝나면 route class `connection_not_opened` 로도 남는다. 운영자는 거기서 가른다.
+   - `Network_transient`(보낸 뒤 잃음)와 `Provider_timeout` 은 지금처럼 표시를 남긴다 (RFC-0458 §3.4).
+     기록한 Keeper 의 다음 걸음은 그 후보를 다시 부르고, 다른 걸음은 뒤로 보낸다.
 
 ## 4. 단계
 
@@ -357,7 +365,7 @@ exact 걸음의 동작은 바뀌지 않는다. 이 실패는 지금처럼 `Befor
     기한 쪽에서 연결 여부를 가리면 보낸 요청을 "안 보냄"으로 적는 길이 생긴다.
   - 기한에 연결 여부를 싣으려면 따로 제안한다.
 - attempt 의 dispatch 사실(`Runtime_attempt_dispatch`)은 바꾸지 않는다. 그 값은 후보의 클라이언트를 불렀는지를 말한다.
-- 호스트가 잠들었는지, 모든 후보가 같이 실패했는지를 세어 판정하지 않는다. 그건 #38403 의 일이다.
+- 호스트가 잠들었는지, 모든 후보가 같이 실패했는지를 세어 판정하지 않는다.
 - `Not_sent` 에 쉬는 시간이나 재시도 지연을 붙이지 않는다.
 - 열린 연결에서 쓰기가 peer close 로 실패한 요청(`Request_wire.Not_delivered`)은 다루지 않는다.
   그 요청은 서버에 온전히 닿지 않았다 (`request_wire.mli`). 그 사실은 RFC-0492 §3.3 이 다시 보내기 근거로 쓴다.

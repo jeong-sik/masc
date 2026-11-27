@@ -1368,14 +1368,19 @@ let attempt_runtime_candidates
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Network_transient; retry_after = _ } ->
           note_failed_attempt Runtime_candidate_backpressure.Network_transient
-        (* The route keeps "not sent" apart from "sent, then lost", but how slot
-           standing reads a connection that did not open is #38403's decision
-           (RFC #52028 §2.3 step 5). Until then the slot notes it as it did
-           before the class existed. *)
+        (* The connection did not open, so the request never reached this
+           candidate and says nothing about whether it answers. A host that
+           lost its network fails every candidate this way at once; a mark on
+           each would reorder the lane for every Keeper until each answered
+           again (#38403). Standing stays as it was: no mark is added and none
+           is cleared. A host name that is wrong for this candidate still
+           shows on every attempt, in the turn receipt's walk evidence
+           ([provider_connect_failed], [not_sent]), and in the route class
+           when it ends the turn (RFC #52028 §3.6). *)
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Connection_not_opened
             ; retry_after = _
-            } -> note_failed_attempt Runtime_candidate_backpressure.Network_transient
+            } -> ()
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Provider_timeout; retry_after = _ } ->
           note_failed_attempt Runtime_candidate_backpressure.Provider_timeout

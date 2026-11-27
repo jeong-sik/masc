@@ -1266,6 +1266,7 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
     (
         match page_detail with
         | Some d ->
+            let embeds = Knowledge_store.wiki_markdown_embeds ~lang k d in
             let tags =
               match d.frontmatter.tags with
               | [] -> ""
@@ -1319,7 +1320,7 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
               | Some md_rect ->
                 let total_md_lines =
                   List.length
-                    (Markdown.render_lines ~width:(Int.max 1 md_rect.w) ~theme
+                    (Markdown.render_lines ~width:(Int.max 1 md_rect.w) ~theme ~embeds
                        d.body_markdown)
                 in
                 let visible_lines = Int.max 1 md_rect.h in
@@ -1348,7 +1349,7 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
                 if not (Rect.is_empty prose_rect) then
                   ignore
                     (Markdown.draw grid ~rect:prose_rect ~theme ~osc8:true
-                       ~scroll ?selected_link d.body_markdown);
+                       ~scroll ?selected_link ~embeds d.body_markdown);
                 if not (Rect.is_empty rail_rect) then begin
                   let ry = ref rail_rect.y and rbot = Rect.bottom rail_rect in
                   let headings =
@@ -1482,7 +1483,7 @@ let draw_wiki_preview ~show_inline_rail ~zoomed ~scroll ~grid ~cache
                 if not (Rect.is_empty markdown) then
                   ignore
                     (Markdown.draw grid ~rect:markdown ~theme ~osc8:true ~scroll
-                       ?selected_link d.body_markdown)
+                       ?selected_link ~embeds d.body_markdown)
               end)
         | None -> (
             match sel_summary with

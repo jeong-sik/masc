@@ -713,16 +713,31 @@ let x10_event t ~button ~column ~row =
           [ Unknown_escape ])
   | None -> [ Unknown_escape ]
 
+let push_body_byte body byte =
+  if not body.overflowed then begin
+    Buffer.add_char body.bytes byte;
+    if Buffer.length body.bytes > body_max_bytes then begin
+      body.overflowed <- true;
+      Buffer.clear body.bytes
+    end
+  end
+
 let body_byte body ~bell_terminates byte =
   if body.after_escape then begin
     body.after_escape <- false;
     if byte = '\\' then Some body
+    else if bell_terminates && byte = bell_ch then begin
+      push_body_byte body escape_ch;
+      Some body
+    end
+    else if byte = escape_ch then begin
+      push_body_byte body escape_ch;
+      body.after_escape <- true;
+      None
+    end
     else begin
-      if not body.overflowed then begin
-        Buffer.add_char body.bytes escape_ch;
-        Buffer.add_char body.bytes byte
-      end;
-      if byte = escape_ch then body.after_escape <- true;
+      push_body_byte body escape_ch;
+      push_body_byte body byte;
       None
     end
   end
@@ -732,11 +747,7 @@ let body_byte body ~bell_terminates byte =
   end
   else if bell_terminates && byte = bell_ch then Some body
   else begin
-    if not body.overflowed then Buffer.add_char body.bytes byte;
-    if Buffer.length body.bytes > body_max_bytes then begin
-      body.overflowed <- true;
-      Buffer.clear body.bytes
-    end;
+    push_body_byte body byte;
     None
   end
 

@@ -77,6 +77,7 @@ type t = {
   pending_txs : pending_message list;
   next_request_seq : int;
   voice : voice_phase;
+  voice_target_keeper : string option;
   voice_caps : voice_capabilities option;
   btw : btw_status;
   popup_selected : int;
@@ -99,6 +100,7 @@ let empty =
     pending_txs = [];
     next_request_seq = 1;
     voice = Voice_off;
+    voice_target_keeper = None;
     voice_caps = None;
     btw = Btw_idle;
     popup_selected = 0;
@@ -159,18 +161,17 @@ let clamp_cursor = Masc_tui_core.Text_util.clamp_utf8_cursor
 let prev_utf8_boundary = Masc_tui_core.Text_util.prev_utf8_boundary
 let next_utf8_boundary = Masc_tui_core.Text_util.next_utf8_boundary
 
-let with_current_draft ?(reset_popup = true) f t =
-  let key = target_keeper_key t in
-  let prev = draft_for ~keeper:key t in
+let with_keeper_draft ~keeper ?(reset_popup = true) f t =
+  let prev = draft_for ~keeper t in
   let next = f prev in
   let by_keeper =
     if
       String.equal next.text ""
       && equal_delivery_mode next.preferred_mode Mode_follow_up
-    then String_map.remove key t.by_keeper
-    else String_map.add key next t.by_keeper
+    then String_map.remove keeper t.by_keeper
+    else String_map.add keeper next t.by_keeper
   in
-  if reset_popup then
+  if reset_popup && String.equal keeper (target_keeper_key t) then
     {
       t with
       by_keeper;
@@ -179,6 +180,9 @@ let with_current_draft ?(reset_popup = true) f t =
       popup_dismissed = false;
     }
   else { t with by_keeper }
+
+let with_current_draft ?(reset_popup = true) f t =
+  with_keeper_draft ~keeper:(target_keeper_key t) ~reset_popup f t
 
 let set_active_keeper name t =
   let trimmed = String.trim name in
@@ -205,9 +209,15 @@ let set_active_keeper name t =
           | None, _ -> t.by_keeper)
       | Some _ -> String_map.remove default_keeper_key t.by_keeper
     in
+    let voice_target_keeper =
+      match t.active_keeper, t.voice_target_keeper with
+      | None, Some k when String.equal k default_keeper_key -> Some trimmed
+      | (None | Some _), (None | Some _) -> t.voice_target_keeper
+    in
     {
       t with
       active_keeper = Some trimmed;
+      voice_target_keeper;
       by_keeper;
       popup_selected = 0;
       popup_navigated = false;
@@ -244,10 +254,10 @@ let other_keepers_draft_count t =
       else acc)
     t.by_keeper 0
 
-let insert_text snippet t =
+let insert_text_for ~keeper snippet t =
   if String.equal snippet "" then t
   else
-    with_current_draft
+    with_keeper_draft ~keeper
       (fun d ->
         let c = clamp_cursor d.text d.cursor in
         let before = String.sub d.text 0 c in
@@ -258,6 +268,9 @@ let insert_text snippet t =
           cursor = c + String.length snippet;
         })
       t
+
+let insert_text snippet t =
+  insert_text_for ~keeper:(target_keeper_key t) snippet t
 
 let set_current_text text t =
   with_current_draft
@@ -829,6 +842,7 @@ let voice_start_recording ~now t =
   {
     t with
     voice = Voice_recording { started_at = now; levels = []; elapsed_s = 0.0 };
+    voice_target_keeper = Some (target_keeper_key t);
   }
 
 let voice_push_level level t =
@@ -848,20 +862,34 @@ let voice_tick_elapsed ~now t =
       { t with voice = Voice_recording { rec_state with elapsed_s } }
   | Voice_off | Voice_transcribing | Voice_error _ -> t
 
-let voice_set_transcribing t = { t with voice = Voice_transcribing }
-let voice_set_off t = { t with voice = Voice_off }
-let voice_set_error msg t = { t with voice = Voice_error msg }
+let voice_set_transcribing t =
+  let voice_target_keeper =
+    match t.voice_target_keeper with
+    | Some _ as target -> target
+    | None -> Some (target_keeper_key t)
+  in
+  { t with voice = Voice_transcribing; voice_target_keeper }
+
+let voice_set_off t = { t with voice = Voice_off; voice_target_keeper = None }
+
+let voice_set_error msg t =
+  { t with voice = Voice_error msg; voice_target_keeper = None }
 
 let voice_apply_transcript text t =
   let trimmed = String.trim text in
-  let t' = { t with voice = Voice_off } in
+  let target =
+    match t.voice_target_keeper with
+    | Some keeper -> keeper
+    | None -> target_keeper_key t
+  in
+  let t' = { t with voice = Voice_off; voice_target_keeper = None } in
   if String.equal trimmed "" then t'
   else
-    let current = current_draft t' in
+    let current = draft_for ~keeper:target t' in
     let prefix =
       if String.equal (String.trim current.text) "" then "" else " "
     in
-    insert_text (prefix ^ trimmed) t'
+    insert_text_for ~keeper:target (prefix ^ trimmed) t'
 
 let set_voice_capabilities caps t = { t with voice_caps = Some caps }
 

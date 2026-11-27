@@ -253,8 +253,8 @@ val batch_disposition_of_cycle_outcome :
     its whole admitted batch, Connector attention included, whatever its
     continuation route: the turn projected every row and chose its actions
     with them in view, and whether it answered is not a reason to deliver
-    the same rows again (#34655). Whether it answered is not durably recorded
-    yet; #34666 tracks that projection. Every typed checkpoint (durable stimulus arrived, loop guard,
+    the same rows again (#34655). Whether it answered is not durably
+    recorded. Every typed checkpoint (durable stimulus arrived, loop guard,
     Gate-deferred tool call) ACKs attention-only
     sources after preserving the continuation, because each one is produced
     after a model round ran with the admitted batch projected. Continuation

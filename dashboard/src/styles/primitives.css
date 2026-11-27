@@ -159,7 +159,10 @@
 
 .dtable {
   width: 100%;
-  border-collapse: collapse;
+  /* Each cell draws its own line. Collapsed, the line under the sticky header
+     belongs to the table grid, and is not drawn at some pixel offsets. */
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: var(--fs-13);
 }
 
@@ -236,6 +239,13 @@
     display: flex;
     flex-direction: column;
     gap: var(--sp-1);
+  }
+  /* A spacer row of a windowed table stands for the rows not drawn. It is as
+     tall as they are, and no card. */
+  .dtable tr[aria-hidden="true"] {
+    display: block;
+    padding: 0;
+    border: none;
   }
   .dtable td {
     display: flex;

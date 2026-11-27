@@ -3,13 +3,14 @@
  *
  * - Right-aligned `tabular-nums slashed-zero` on numeric columns (`.is-num`).
  * - Honest `Observed<T>` formatting (`"없음"` for absent, `"미보고"` for unreported, `"0"` for zero).
- * - Automatic `@container dtable (max-width: 640px)` mobile card collapse via `data-label`.
+ * - Automatic `@container dtable (max-width: 767px)` mobile card collapse via `data-label`.
  * - Virtualized scrolling via `@tanstack/virtual-core` when row count exceeds `virtualizeThreshold`.
+ *   A windowed row is measured as drawn; `estimateRowHeight` stands in only until then.
  */
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'
-import { useMemo, useRef, useState } from 'preact/hooks'
+import { useCallback, useMemo, useRef, useState } from 'preact/hooks'
 import {
   createColumnHelper,
   createSortedRowModel,
@@ -128,13 +129,23 @@ export function DataTable<T extends object>(props: DataTableProps<T>) {
   const rows = table.getRowModel().rows
   const shouldVirtualize = rows.length > threshold
 
-  const { virtualItems, totalSize } = useVirtualList({
+  // A measured height belongs to a row, not to a position: after a sort or a
+  // filter the row at an index is another row.
+  const getItemKey = useCallback((index: number) => rows[index]?.id ?? index, [rows])
+
+  const { virtualItems, totalSize, measureElement } = useVirtualList({
     count: shouldVirtualize ? rows.length : 0,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => rowHeight,
     overscan: 8,
     initialHeight: typeof props.maxHeight === 'number' ? props.maxHeight : 480,
+    getItemKey,
   })
+
+  // A row drawn in a window is watched by its index. Keyed by mode, the body is
+  // built anew when the window comes or goes, so no such row is kept as a row
+  // of the whole list, which has no index.
+  const bodyKey = shouldVirtualize ? 'window' : 'all'
 
   const visibleRows = shouldVirtualize
     ? virtualItems.map((vi) => ({ row: rows[vi.index]!, vi }))
@@ -194,7 +205,7 @@ export function DataTable<T extends object>(props: DataTableProps<T>) {
               </tr>
             `)}
           </thead>
-          <tbody>
+          <tbody key=${bodyKey}>
             ${rows.length === 0
               ? html`
                   <tr>
@@ -209,7 +220,7 @@ export function DataTable<T extends object>(props: DataTableProps<T>) {
                       <td colspan=${props.columns.length} style=${{ height: `${topPadding}px`, padding: 0, border: 'none' }} />
                     </tr>
                   `}
-                  ${visibleRows.map(({ row }) => {
+                  ${visibleRows.map(({ row, vi }) => {
                     const isSelected = props.selectedRowId != null && row.id === props.selectedRowId
                     const isInteractiveDescendant = (target: EventTarget | null, currentTarget: EventTarget | null): boolean =>
                       target !== currentTarget
@@ -218,6 +229,8 @@ export function DataTable<T extends object>(props: DataTableProps<T>) {
                     return html`
                       <tr
                         key=${row.id}
+                        ref=${vi ? measureElement : undefined}
+                        data-index=${vi ? vi.index : undefined}
                         data-selected=${isSelected ? 'true' : undefined}
                         tabIndex=${props.onRowClick ? 0 : undefined}
                         onClick=${props.onRowClick ? (event: MouseEvent) => {

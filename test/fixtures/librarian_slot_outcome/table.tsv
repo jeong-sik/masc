@@ -158,7 +158,8 @@ runtime_claude_code.mli	error	Context_window_exceeded	tool_effect_attempted = fa
 runtime_claude_code.mli	error	Context_window_exceeded	tool_effect_attempted = true or response_emitted = true	Refused (Sized Window_reached)	generation had started, so the input fit
 runtime_claude_code.mli	error	Turn_failed	-	Silent Lost	a string; not read
 runtime_claude_code.mli	error	Turn_failed_with_observation	api_error_cause = Some Authentication_failed	Silent Unavailable	the login was refused
-runtime_claude_code.mli	error	Turn_failed_with_observation	api_error_cause = None or Some Other_api_error_cause	Silent Lost	the status is carried and not read here (see the note)
+runtime_claude_code.mli	error	Turn_failed_with_observation	startup_failure_reason = Some Org_config_refused	Silent Unavailable	the organization refused the sign-in before the session started
+runtime_claude_code.mli	error	Turn_failed_with_observation	api_error_cause = None or Some Other_api_error_cause	Silent Lost	the status is carried and not read here; non-refusal startup failures stay Lost (see the note)
 runtime_claude_code.mli	error	Stopped_by_host	-	Silent Lost	masc stopped the turn
 runtime_claude_code.mli	error	Quota_blocked	-	Silent Busy	the account's quota
 runtime_claude_code.mli	error	Process_exited	-	Silent Lost	the client died

@@ -436,6 +436,11 @@ type api_error_cause =
   | Authentication_failed
   | Other_api_error_cause
 
+type startup_failure_reason =
+  | Org_config_required_unavailable
+  | Org_config_refused
+  | Other_startup_failure of string
+
 type error =
   | Invalid_config of string
   | Spawn_refused of Process_eio.spawn_refusal
@@ -460,6 +465,7 @@ type error =
       { detail : string
       ; api_error_status : int option
       ; api_error_cause : api_error_cause option
+      ; startup_failure_reason : startup_failure_reason option
       ; tool_effect_attempted : bool
       ; response_emitted : bool
       }
@@ -559,6 +565,16 @@ let error_kind = function
 ;;
 
 let protocol_error stage detail = Error (Protocol_error { stage; detail })
+
+let session_id_mismatch_error ~stage ~received ~expected =
+  protocol_error
+    stage
+    (Printf.sprintf
+       "session_id does not match the active Claude session (received=%S expected=%S)"
+       received
+       expected)
+;;
+
 let ( let* ) result f = Result.bind result f
 
 (* The three official-client runtimes speak the same line-delimited JSON
@@ -586,6 +602,30 @@ let optional_int stage name fields =
   | Some (`Int value) -> Ok (Some value)
   | Some _ ->
     protocol_error stage (Printf.sprintf "field %S must be an integer or null" name)
+;;
+
+let optional_string_list stage name fields =
+  match List.assoc_opt name fields with
+  | None | Some `Null -> Ok []
+  | Some (`List items) ->
+    List.fold_left
+      (fun acc item ->
+         let* strings = acc in
+         match item with
+         | `String value ->
+           let trimmed = String.trim value in
+           Ok (if trimmed = "" then strings else trimmed :: strings)
+         | _ ->
+           protocol_error
+             stage
+             (Printf.sprintf "field %S must be a list of strings" name))
+      (Ok [])
+      items
+    |> Result.map List.rev
+  | Some _ ->
+    protocol_error
+      stage
+      (Printf.sprintf "field %S must be a list of strings" name)
 ;;
 
 (* Empty text starts a block; whitespace-only token pieces are content. *)
@@ -1340,7 +1380,7 @@ let parse_rate_limit ~expected_session_id fields =
   let* () =
     if session_id = expected_session_id
     then Ok ()
-    else protocol_error stage "session_id does not match the active Claude session"
+    else session_id_mismatch_error ~stage ~received:session_id ~expected:expected_session_id
   in
   let* info = required_member stage "rate_limit_info" fields in
   let* info_fields = assoc_at stage info in
@@ -2018,7 +2058,7 @@ let parse_assistant ~expected_session_id ~tools fields =
   let stage = "assistant message" in
   let* session_id = required_string stage "session_id" fields in
   if session_id <> expected_session_id
-  then protocol_error stage "session_id does not match the active Claude session"
+  then session_id_mismatch_error ~stage ~received:session_id ~expected:expected_session_id
   else
     let* scope = assistant_scope ~stage fields in
     let* origin = assistant_origin ~stage fields in
@@ -2048,7 +2088,7 @@ let native_tool_results ~expected_session_id fields =
   let* () =
     match non_blank session_id with
     | Some session_id when session_id <> expected_session_id ->
-      protocol_error stage "session_id does not match the active Claude session"
+      session_id_mismatch_error ~stage ~received:session_id ~expected:expected_session_id
     | Some _ | None -> Ok ()
   in
   match List.assoc_opt "message" fields with
@@ -2108,6 +2148,18 @@ let terminal_reason_to_wire = function
   | Other_terminal_reason wire -> wire
 ;;
 
+let startup_failure_reason_of_wire = function
+  | "org_config_required_unavailable" -> Org_config_required_unavailable
+  | "org_config_refused" -> Org_config_refused
+  | wire -> Other_startup_failure wire
+;;
+
+let startup_failure_reason_to_wire = function
+  | Org_config_required_unavailable -> "org_config_required_unavailable"
+  | Org_config_refused -> "org_config_refused"
+  | Other_startup_failure wire -> wire
+;;
+
 (* The result frame's own session and turn identity, checked before anything
    it carries is taken as this turn's: a frame of another session is a
    protocol error, not this turn's spend. *)
@@ -2115,8 +2167,46 @@ let result_turn_id ~expected_session_id fields =
   let stage = "result message" in
   let* session_id = required_string stage "session_id" fields in
   if session_id <> expected_session_id
-  then protocol_error stage "session_id does not match the active Claude session"
+  then session_id_mismatch_error ~stage ~received:session_id ~expected:expected_session_id
   else required_string stage "uuid" fields
+;;
+
+(* Claude Code 2.1.332 runs startup gates (org-config check, global config
+   validation) before adopting [--resume] into its active session ID, and its
+   startup-failure result helper only reads [--session-id] from argv. On a
+   resumed launch, a pre-initialize startup failure frame
+   ([subtype = "error_during_execution"], [is_error = true], and a non-blank
+   [startup_failure_reason]) therefore carries the process's freshly minted
+   UUID rather than [expected_session_id] (measured 2026-11-27, #54540). Accept
+   that frame's UUID only under that exact contract; every other start-up
+   result frame -- any [Start] launch, any non-error or non-execution-error
+   result, or any frame without a non-blank [startup_failure_reason] -- still
+   fails closed on a session mismatch. *)
+let startup_result_turn_id ~session_mode ~expected_session_id fields =
+  let stage = "result message" in
+  let* session_id = required_string stage "session_id" fields in
+  if session_id = expected_session_id
+  then required_string stage "uuid" fields
+  else
+    match session_mode with
+    | Start ->
+      session_id_mismatch_error ~stage ~received:session_id ~expected:expected_session_id
+    | Resume _ ->
+      let* subtype = required_string stage "subtype" fields in
+      let* is_error = required_bool stage "is_error" fields in
+      let* startup_failure_reason =
+        optional_string stage "startup_failure_reason" fields
+        |> Result.map non_blank
+      in
+      (match String.equal subtype "error_during_execution", is_error, startup_failure_reason with
+       | true, true, Some _ -> required_string stage "uuid" fields
+       | false, (true | false), (Some _ | None)
+       | true, false, (Some _ | None)
+       | true, true, None ->
+         session_id_mismatch_error
+           ~stage
+           ~received:session_id
+           ~expected:expected_session_id)
 ;;
 
 (* A turn can see several rate-limit events, one window at a time
@@ -2198,14 +2288,33 @@ let quota_block ~api_error_status rate_limits =
   | true, [] -> Some Rate_throttled
 ;;
 
-let parse_result ~rate_limits ~api_error_cause ~tool_effect_attempted ~response_emitted
-    ~turn_id ~usage fields =
+type result_phase =
+  | Pre_initialize
+  | Post_initialize
+
+let parse_result ~phase ~rate_limits ~api_error_cause ~tool_effect_attempted
+    ~response_emitted ~turn_id ~usage fields =
   let stage = "result message" in
   let* subtype = required_string stage "subtype" fields in
   let* is_error = required_bool stage "is_error" fields in
   let* api_error_status = optional_int stage "api_error_status" fields in
   let* terminal_reason = optional_string stage "terminal_reason" fields in
   let terminal_reason = Option.map terminal_reason_of_wire terminal_reason in
+  let* parsed_startup_failure_reason =
+    optional_string stage "startup_failure_reason" fields
+    |> Result.map (fun value ->
+      Option.map startup_failure_reason_of_wire (non_blank value))
+  in
+  (* Expose [startup_failure_reason] only before initialize completes so a
+     post-dispatch terminal frame can never masquerade as a pre-initialize
+     startup refusal, while still validating the field's JSON type in both
+     phases. *)
+  let startup_failure_reason =
+    match phase with
+    | Pre_initialize -> parsed_startup_failure_reason
+    | Post_initialize -> None
+  in
+  let* errors = optional_string_list stage "errors" fields in
   let result =
     match List.assoc_opt "result" fields with
     | None | Some `Null -> Ok None
@@ -2233,18 +2342,32 @@ let parse_result ~rate_limits ~api_error_cause ~tool_effect_attempted ~response_
        indistinguishable from one where the sentence never appeared: both
        printed the same line, and the field that separates them was not in
        it (one keeper, 2026-08-24). Naming it costs one field and answers the
-       question the next reader will have. *)
+       question the next reader will have.
+       [error_during_execution] frames carry their sentences in [errors]
+       rather than [result] (and startup refusals add [startup_failure_reason]);
+       fall back to [errors] when [result] is absent or blank. *)
+    let failure_message =
+      match result with
+      | Some detail when String.trim detail <> "" -> Some (String.trim detail)
+      | Some _ | None ->
+        (match errors with
+         | [] -> None
+         | messages -> Some (String.concat "; " messages))
+    in
     Printf.sprintf
-      "terminal subtype=%s api_status=%s reason=%s%s"
+      "terminal subtype=%s api_status=%s reason=%s%s%s"
       subtype
       (Option.fold
          ~none:"unknown"
          ~some:string_of_int
          api_error_status)
       (Option.fold ~none:"none" ~some:terminal_reason_to_wire terminal_reason)
-      (match result with
-       | Some detail when String.trim detail <> "" -> ": " ^ String.trim detail
-       | Some _ | None -> "")
+      (match startup_failure_reason with
+       | Some reason -> " startup_failure=" ^ startup_failure_reason_to_wire reason
+       | None -> "")
+      (match failure_message with
+       | Some detail -> ": " ^ detail
+       | None -> "")
   in
   let provider_reported_context_window_exceeded =
     (* The CLI states why its query loop terminated as a typed enum on this
@@ -2259,42 +2382,62 @@ let parse_result ~rate_limits ~api_error_cause ~tool_effect_attempted ~response_
     | Some (Prompt_too_long | Blocking_limit | Rapid_refill_breaker) -> true
     | Some (Other_terminal_reason _) | None -> false
   in
-  match quota_block ~api_error_status rate_limits with
-  | Some block ->
+  (* A pre-initialize startup refusal carries [startup_failure_reason] and, on
+     [Resume], may arrive with a fresh process UUID. Keep it on the typed
+     [Turn_failed_with_observation] path before quota or context-overflow
+     promotion so it cannot trigger account quota cooldowns or shrink retries
+     while dropping [startup_failure_reason]. *)
+  match phase, is_error, startup_failure_reason with
+  | Pre_initialize, true, Some _ ->
     Error
-      (Quota_blocked
-         { api_error_status
-         ; block
+      (Turn_failed_with_observation
+         { detail = terminal_failure_detail ()
+         ; api_error_status
+         ; api_error_cause
+         ; startup_failure_reason
          ; tool_effect_attempted
          ; response_emitted
          })
-  | None ->
-    if is_error && provider_reported_context_window_exceeded
-    then
-      Error
-        (Context_window_exceeded
-           { message = terminal_failure_detail ()
-           ; tool_effect_attempted
-           ; response_emitted
-           })
-    else if is_error
-    then
-      (* [result] is the one field on this frame that says why the turn failed.
-         The prompt-too-long verdict above (typed [terminal_reason]) has its
-         own typed path; unrelated 400s and every other terminal rejection
-         still retain the provider's sentence instead of collapsing to the
-         status code (#28071). *)
-      Error
-        (Turn_failed_with_observation
-           { detail = terminal_failure_detail ()
-           ; api_error_status
-           ; api_error_cause
-           ; tool_effect_attempted
-           ; response_emitted
-           })
-    else if subtype <> "success"
-    then Error (Turn_failed (Printf.sprintf "terminal subtype=%s" subtype))
-    else Ok (turn_id, result, usage)
+  | Pre_initialize, true, None
+  | Pre_initialize, false, (Some _ | None)
+  | Post_initialize, (true | false), (Some _ | None) ->
+    (match quota_block ~api_error_status rate_limits with
+     | Some block ->
+       Error
+         (Quota_blocked
+            { api_error_status
+            ; block
+            ; tool_effect_attempted
+            ; response_emitted
+            })
+     | None ->
+       if is_error && provider_reported_context_window_exceeded
+       then
+         Error
+           (Context_window_exceeded
+              { message = terminal_failure_detail ()
+              ; tool_effect_attempted
+              ; response_emitted
+              })
+       else if is_error
+       then
+         (* [result] or [errors] is the field on this frame that says why the
+            turn failed. The prompt-too-long verdict above (typed
+            [terminal_reason]) has its own typed path; unrelated 400s and every
+            other terminal rejection still retain the provider's sentence instead
+            of collapsing to the status code (#28071). *)
+         Error
+           (Turn_failed_with_observation
+              { detail = terminal_failure_detail ()
+              ; api_error_status
+              ; api_error_cause
+              ; startup_failure_reason
+              ; tool_effect_attempted
+              ; response_emitted
+              })
+       else if subtype <> "success"
+       then Error (Turn_failed (Printf.sprintf "terminal subtype=%s" subtype))
+       else Ok (turn_id, result, usage))
 ;;
 
 (* Claude Code can end its start-up with a result frame before it answers
@@ -2306,8 +2449,8 @@ let parse_result ~rate_limits ~api_error_cause ~tool_effect_attempted ~response_
    so the frame reports no tool effect, no response and no diagnostic cause;
    rate-limit evidence starts empty, as it does once the turn is admitted.
    A result that reports success is not part of the start-up. *)
-let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~session_id
-    ~request_id ~on_stream_event =
+let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~session_mode
+    ~session_id ~request_id ~on_stream_event =
   let* json = io.receive () in
   let* kind, fields = wire_fields json in
   let out_of_phase () =
@@ -2333,13 +2476,13 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usag
         fields
     in
     await_initialize
-      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~session_id ~request_id
-      ~on_stream_event
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~session_mode ~session_id
+      ~request_id ~on_stream_event
   | Frame_control_cancel_request ->
     let* () = observe_control_cancel_request fields in
     await_initialize
-      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~session_id ~request_id
-      ~on_stream_event
+      io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~session_mode ~session_id
+      ~request_id ~on_stream_event
   | Frame_system | Frame_rate_limit_event | Frame_command_lifecycle ->
     (* Informational frames before the control response. The admission
        deadline bounds a client that never answers; a count of these frames
@@ -2351,13 +2494,15 @@ let rec await_initialize io ~mcp_session ~tools ~tool_call_count ~assistant_usag
       ~tools
       ~tool_call_count
       ~assistant_usage
+      ~session_mode
       ~session_id
       ~request_id
       ~on_stream_event
   | Frame_result ->
-    let* turn_id = result_turn_id ~expected_session_id:session_id fields in
+    let* turn_id = startup_result_turn_id ~session_mode ~expected_session_id:session_id fields in
     (match
        parse_result
+         ~phase:Pre_initialize
          ~rate_limits:Turn_rate_limits.empty
          ~api_error_cause:None
          ~tool_effect_attempted:false
@@ -2432,7 +2577,7 @@ let partial_stream_event ~expected_session_id ~stream_started ~response_emitted
   let stage = "partial stream event" in
   let* session_id = required_string stage "session_id" fields in
   if session_id <> expected_session_id then
-    protocol_error stage "session_id does not match the active Claude session"
+    session_id_mismatch_error ~stage ~received:session_id ~expected:expected_session_id
   else
     let* event = required_member stage "event" fields in
     let* event = assoc_at stage event in
@@ -2533,7 +2678,7 @@ let child_partial_stream_event ~expected_session_id fields =
   let stage = "partial stream event" in
   let* session_id = required_string stage "session_id" fields in
   if session_id <> expected_session_id then
-    protocol_error stage "session_id does not match the active Claude session"
+    session_id_mismatch_error ~stage ~received:session_id ~expected:expected_session_id
   else Ok ()
 ;;
 
@@ -2813,6 +2958,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
      | (Some _ | None), None -> ());
     let parsed_result =
       parse_result
+        ~phase:Post_initialize
         ~rate_limits
         ~api_error_cause
         ~tool_effect_attempted:(!tool_call_count > 0 || !native_tool_attempted)
@@ -3138,6 +3284,7 @@ let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~
       ~tools:dynamic_tools
       ~tool_call_count
       ~assistant_usage
+      ~session_mode
       ~session_id
       ~request_id:initialize_id
       ~on_stream_event

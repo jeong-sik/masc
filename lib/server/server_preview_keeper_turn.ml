@@ -151,6 +151,7 @@ let claude_failure ~account : Runtime_claude_code.error -> Conversation.failure 
   | Runtime_claude_code.Turn_failed_with_observation
       { api_error_status
       ; api_error_cause = (_ : Runtime_claude_code.api_error_cause option)
+      ; startup_failure_reason = (_ : Runtime_claude_code.startup_failure_reason option)
       ; detail = (_ : string)
       ; tool_effect_attempted = (_ : bool)
       ; response_emitted = (_ : bool)

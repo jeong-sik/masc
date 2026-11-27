@@ -24,6 +24,7 @@ import { KeeperMemoryTab } from './keeper-memory-tab'
 import { KeeperPortraitCandleTab } from './keeper-portrait-candle-tab'
 import { KeeperWorkSandboxTab } from './keeper-work-sandbox-tab'
 import { KeeperConfigTab } from './keeper-config-tab'
+import { PersonalKeepersWorkspace } from './personal-keepers-workspace'
 import type { KeeperRosterItem } from './types'
 import './keepers.css'
 
@@ -166,16 +167,29 @@ export function KeepersWorkspace(props: WorkspaceViewProps) {
     props.onNavigate('/keepers')
   }, [props, refreshRoster])
 
+  if (session.kind === 'multi_account_signed_in') {
+    return html`
+      <${PersonalKeepersWorkspace}
+        key=${`ma:${epoch}:${session.accountId}`}
+        session=${session}
+        subroute=${props.subroute}
+        entityId=${props.entityId}
+        entityTab=${props.entityTab}
+        onNavigate=${props.onNavigate}
+        onInspect=${props.onInspect}
+      />
+    `
+  }
+
   if (!isSingleUser) {
     return html`
       <div class="kp-root" data-workspace="keepers">
         <section class="kp-stage" aria-label="Keeper 워크스페이스">
           <div class="kp-scroll-pane">
             <div class="kp-card" data-testid="keepers-mode-notice" role="status">
-              <h3>Keepers Fleet Console</h3>
+              <h3>Keepers Workspace</h3>
               <p class="kp-roster-sub">
-                로컬 Keeper Fleet 콘솔(<code>/api/v1/keepers/*</code>, <code>/api/v1/gate/keepers</code>)은 싱글유저 로컬 세션 전용입니다.
-                멀티 계정 세션에서는 404 요청을 발생시키지 않으며, 개인 Keeper는 <code>/api/v1/auth/keepers</code> 경로로 관리됩니다.
+                현재 세션 상태에서는 Keeper 목록을 조회할 수 없습니다. 싱글유저 로컬 세션 또는 멀티 계정 로그인 후 이용하세요.
               </p>
             </div>
           </div>

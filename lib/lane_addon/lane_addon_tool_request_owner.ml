@@ -90,6 +90,8 @@ let decode_record ~scope ~request_id json =
    not a fiber, a job of the pool itself, or a process with no pool decodes
    where it is. *)
 let decode_job = "lane-addon-original-request-record-decode"
+(* One job for a whole scope: every record's decode and every body's check. *)
+let scope_load_job = "lane-addon-original-scope-load"
 let decode ~scope ~request_id json =
   Domain_pool_ref.submit_cpu_or_inline ~name:decode_job (fun () ->
     decode_record ~scope ~request_id json)
@@ -358,7 +360,7 @@ let load_scope ~store ~scope =
          proportion to the scope, so one job of the CPU pool does all of it, as
          [discover] does for the listing. A fiber that did it itself would keep
          the other fibers of its domain waiting. *)
-      Domain_pool_ref.submit_cpu_or_inline ~name:decode_job (fun () -> restore [] rows)
+      Domain_pool_ref.submit_cpu_or_inline ~name:scope_load_job (fun () -> restore [] rows)
 module Observed_requests = Map.Make (String)
 type observed_request = { binding:verified_body; request:Yojson.Safe.t }
 type scope_observation = {

@@ -6,7 +6,7 @@
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
-import { currentSessionEpoch, isEpochCurrent } from '../../core/auth'
+import { currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   GOOGLE_SUB_RE,
@@ -23,6 +23,7 @@ function formatStatus(status: AllowlistEntry['status']): string {
 }
 
 export function AllowlistTab(): VNode {
+  const epoch = sessionEpoch.value
   const [entries, setEntries] = useState<readonly AllowlistEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -54,12 +55,16 @@ export function AllowlistTab(): VNode {
 
   useEffect(() => {
     mountedRef.current = true
+    setEntries([])
+    setLoadedOnce(false)
+    setError(null)
+    setRemovingId(null)
     void reload()
     return () => {
       mountedRef.current = false
       loadAbortRef.current?.abort()
     }
-  }, [reload])
+  }, [reload, epoch])
 
   const handleRegister = async (event: Event) => {
     event.preventDefault()

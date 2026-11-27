@@ -53,7 +53,12 @@ export interface DecodedToolApprovalWire {
  * back when only one is present) inspect `hasExplicitApprovalId` / `toolCallId`.
  */
 export function decodeToolApprovalsWire(raw: unknown): readonly DecodedToolApprovalWire[] {
-  if (!isRecord(raw) || !Array.isArray(raw.pending)) return []
+  if (!isRecord(raw) || raw.ok === false || !Array.isArray(raw.pending)) {
+    const detail = isRecord(raw) && typeof raw.error === 'string' && raw.error.trim()
+      ? raw.error.trim()
+      : 'Invalid tool approval listing: pending must be an array'
+    throw new Error(detail)
+  }
   const items: DecodedToolApprovalWire[] = []
   for (const row of raw.pending) {
     if (!isRecord(row)) continue

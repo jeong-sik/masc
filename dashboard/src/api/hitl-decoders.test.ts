@@ -92,6 +92,9 @@ describe('Shared HITL wire decoders (SSOT)', () => {
     )
     expect(shellItems).toHaveLength(1)
     expect(shellItems[0]!.args).toContain('"force": false')
+    expect(() => decodeToolApprovalsWire(null)).toThrow('pending must be an array')
+    expect(() => decodeToolApprovalsWire({})).toThrow('pending must be an array')
+    expect(() => decodeToolApprovalsWire({ ok: false, error: 'approval queue unavailable' })).toThrow('approval queue unavailable')
   })
 
   it('filters answered/resolved/closed/withdrawn/expired asks via closed-set SSOT', () => {

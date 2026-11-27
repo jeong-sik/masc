@@ -356,7 +356,7 @@ function structuredAuthErrorCode(value: unknown): unknown {
   return (value as Record<string, unknown>).auth_error_code
 }
 
-function parseMcpHttpResponse(raw: string, expectedId?: string, unique = false): McpCallResponse {
+function parseMcpHttpResponse<T = McpCallResponse>(raw: string, expectedId?: string, unique = false): T {
   const text = raw.trim()
   const payloads: string[] = []
   if (text.startsWith('{') || text.startsWith('[')) {
@@ -380,7 +380,7 @@ function parseMcpHttpResponse(raw: string, expectedId?: string, unique = false):
     finishEvent()
   }
 
-  let response: McpCallResponse | null = null
+  let response: T | null = null
   for (const payload of payloads) {
     const value: unknown = unique ? parseUniqueJson(payload) : JSON.parse(payload)
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -396,7 +396,7 @@ function parseMcpHttpResponse(raw: string, expectedId?: string, unique = false):
     if (expectedId !== undefined && message.id !== expectedId) {
       throw new Error('MCP response does not match the request')
     }
-    response = message as McpCallResponse
+    response = message as T
   }
   if (response === null) throw new Error('MCP response has no result')
   return response
@@ -666,41 +666,53 @@ interface McpToolsListResult {
 }
 
 interface McpListResponse {
+  id?: unknown
   result?: McpToolsListResult
   error?: { message?: string }
 }
 
-function extractFirstSseDataPayload(raw: string): string {
-  const line = raw.split('\n').find(l => l.startsWith('data: '))
-  return line ? line.slice(6).trim() : raw.trim()
-}
-
-function parseMcpListResponse(raw: string): McpListResponse {
-  const payload = extractFirstSseDataPayload(raw)
-  return parseMcpJsonText(payload) as McpListResponse
-}
-
-async function listMcpTools(cursor?: string): Promise<McpToolsListResult> {
-  const binding = await ensureBinding()
-  const text = await mcpPost({
-    jsonrpc: '2.0',
-    method: 'tools/list',
-    params: cursor ? { cursor } : {},
+async function listMcpTools(cursor?: string, allowAuthRecovery = true): Promise<McpToolsListResult> {
+  let sentRevision: number | null = null
+  try {
+    const binding = await ensureBinding()
+    sentRevision = binding.authRevision
     // A uuid, like every other request in this file. `Date.now()` gave two
     // calls in the same millisecond the same JSON-RPC id, and repeated the
     // whole value space roughly every 16m40s once it was taken modulo a
     // million.
-    id: randomUuid(),
-  }, binding)
-  const parsed = parseMcpListResponse(text)
-  if (parsed.error) {
-    const message = parsed.error.message || 'tools/list: 서버가 message 없이 error 반환'
-    throw new Error(message)
+    const requestId = randomUuid()
+    const text = await mcpPost({
+      jsonrpc: '2.0',
+      method: 'tools/list',
+      params: cursor ? { cursor } : {},
+      id: requestId,
+    }, binding)
+    const parsed = parseMcpHttpResponse<McpListResponse>(text)
+    if (parsed.id !== undefined && parsed.id !== requestId) {
+      throw new Error('MCP response does not match the request')
+    }
+    if (parsed.error) {
+      const message = parsed.error.message || 'tools/list: 서버가 message 없이 error 반환'
+      throw new Error(message)
+    }
+    if (!parsed.result || !Array.isArray(parsed.result.tools)) {
+      throw new Error('tools/list: 응답에 result 없음')
+    }
+    return parsed.result
+  } catch (err) {
+    if (
+      allowAuthRecovery
+      && err instanceof ApiRequestError
+      && err.status === 401
+      && sentRevision !== null
+      && currentStoredTokenRevision() === sentRevision
+      && await refreshDevTokenAfterAuthError(err.authErrorCode)
+    ) {
+      observedTokenRevision = currentStoredTokenRevision()
+      return listMcpTools(cursor, false)
+    }
+    throw err
   }
-  if (!parsed.result) {
-    throw new Error('tools/list: 응답에 result 없음')
-  }
-  return parsed.result
 }
 
 /* Pagination ends when the server stops handing back a cursor. The failure
@@ -733,10 +745,4 @@ export async function listAllMcpTools(): Promise<McpToolsListResult['tools']> {
     }
   } while (cursor)
   return all
-}
-
-function parseMcpJsonText(text: string): Record<string, unknown> {
-  const trimmed = text.trim()
-  if (!trimmed) return {}
-  return JSON.parse(trimmed) as Record<string, unknown>
 }

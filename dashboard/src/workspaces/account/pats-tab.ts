@@ -8,7 +8,7 @@ import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { useCallback, useEffect, useRef, useState } from 'preact/hooks'
 import { copyToClipboard } from '../../components/common/copyable-code'
-import { currentSessionEpoch, isEpochCurrent } from '../../core/auth'
+import { currentSessionEpoch, isEpochCurrent, sessionEpoch } from '../../core/auth'
 import { pushShellToast } from '../../shell/shell-state'
 import {
   issuePat,
@@ -37,6 +37,7 @@ function formatDate(ms: number | null): string {
 }
 
 export function PatsTab(): VNode {
+  const epoch = sessionEpoch.value
   const [pats, setPats] = useState<readonly PatRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -69,6 +70,11 @@ export function PatsTab(): VNode {
 
   useEffect(() => {
     mountedRef.current = true
+    setPats([])
+    setLoadedOnce(false)
+    setError(null)
+    setIssued(null)
+    setRevokingId(null)
     void reload()
     const onPageHide = () => setIssued(null)
     window.addEventListener('pagehide', onPageHide)
@@ -78,7 +84,7 @@ export function PatsTab(): VNode {
       window.removeEventListener('pagehide', onPageHide)
       setIssued(null)
     }
-  }, [reload])
+  }, [reload, epoch])
 
   const handleIssue = async (event: Event) => {
     event.preventDefault()

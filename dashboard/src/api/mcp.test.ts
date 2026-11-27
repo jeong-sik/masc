@@ -401,6 +401,32 @@ describe('MCP 2026-07-28 dashboard client', () => {
     }
   })
 
+  it('parses SSE tools/list responses with progress notifications and rejects mismatched ids', async () => {
+    fetchWithTimeout.mockImplementationOnce(async (_url: string, init?: RequestInit) => {
+      const reqId = JSON.parse((init?.body as string) ?? '{}').id
+      const sse = [
+        'event: message',
+        'data:{"jsonrpc":"2.0","method":"notifications/progress","params":{"progress":1}}',
+        '',
+        'event: message',
+        `data: ${JSON.stringify({ jsonrpc: '2.0', id: reqId, result: { tools: [{ name: 'sse_tool', description: '', inputSchema: {} }] } })}`,
+        '',
+      ].join('\n')
+      return new Response(sse, { status: 200 })
+    })
+    fetchWithTimeout.mockResolvedValueOnce(new Response(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 'wrong-id',
+      result: { tools: [{ name: 'bad', description: '', inputSchema: {} }] },
+    }), { status: 200 }))
+
+    const { listAllMcpTools } = await import('./mcp')
+    await expect(listAllMcpTools()).resolves.toEqual([
+      { name: 'sse_tool', description: '', inputSchema: {} },
+    ])
+    await expect(listAllMcpTools()).rejects.toThrow('MCP response does not match the request')
+  })
+
   it('does not retry an HTTP failure as a session recovery', async () => {
     fetchWithTimeout.mockResolvedValueOnce(new Response('missing', {
       status: 404,

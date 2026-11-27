@@ -276,14 +276,19 @@ export function LanesTab(props: WorkspaceViewProps) {
     return cur.kind === 'single_user_local' && !isAdminLockedForSession('admin', cur)
   }
 
+  const laneEditActiveRef = useRef(false)
+  laneEditActiveRef.current = lanePreview !== null || laneEditor !== null || laneDeleteConfirm !== null || busy === 'lane-apply'
+
   const loadFailover = (forceProbe = false, reason: 'mount' | 'sse' | 'manual' = 'mount') => {
     const curSession = authSession.peek()
     const singleLocal = curSession.kind === 'single_user_local'
     const multiSignedIn = curSession.kind === 'multi_account_signed_in'
-    sourceRead.current?.abort()
-    discardLanePreview()
-    setRawConfig(null)
-    setBusy((action) => action === 'lane-apply' ? null : action)
+    if (reason !== 'sse') {
+      sourceRead.current?.abort()
+      discardLanePreview()
+      setRawConfig(null)
+      setBusy((action) => action === 'lane-apply' ? null : action)
+    }
     if (!singleLocal && !multiSignedIn) {
       setBanner((previous) => previous?.kind === 'lane-source-error' ? null : previous)
       return
@@ -315,6 +320,12 @@ export function LanesTab(props: WorkspaceViewProps) {
       setBanner((previous) => previous?.kind === 'lane-source-error' ? null : previous)
       return
     }
+    // Preserve an active operator edit/preview/CAS apply across background SSE
+    // invalidations so the edit base and source signal stay intact.
+    if (reason === 'sse' && laneEditActiveRef.current) {
+      return
+    }
+    sourceRead.current?.abort()
     const read = new AbortController()
     sourceRead.current = read
     const readEpoch = currentSessionEpoch()
@@ -364,9 +375,13 @@ export function LanesTab(props: WorkspaceViewProps) {
   }
 
   useEffect(() => {
+    setBusy(null)
+    discardLanePreview()
+    setRawConfig(null)
     setSourceRevision(null)
     setLaneEditor(null)
     setLaneDeleteConfirm(null)
+    setLaneCasConflict(null)
     return () => {
       sourceRead.current?.abort()
       previewRequest.current?.abort()
@@ -931,6 +946,7 @@ export function LanesTab(props: WorkspaceViewProps) {
 
   const handleInspectFusionRun = (row: FusionRunRecord) => {
     if (authSession.peek().kind !== 'single_user_local') return
+    inspectRequest.current?.abort()
     props.onInspect({
       title: `Fusion · ${row.preset}`,
       subtitle: `${row.runId} · ${row.topology}`,

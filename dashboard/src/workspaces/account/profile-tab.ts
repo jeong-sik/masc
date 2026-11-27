@@ -34,15 +34,20 @@ export function ProfileSessionsTab({
 
   useEffect(() => {
     let cancelled = false
+    const ctrl = new AbortController()
+    setWhoami(null)
     setWhoamiError(null)
-    void fetchWhoami().then((res) => {
-      if (cancelled) return
+    void fetchWhoami(undefined, ctrl.signal).then((res) => {
+      if (cancelled || ctrl.signal.aborted) return
       if (res.ok) setWhoami(res.value)
       else if (res.error.kind !== 'epoch_stale' && res.error.kind !== 'aborted') {
         setWhoamiError(res.error.message)
       }
     })
-    return () => { cancelled = true }
+    return () => {
+      cancelled = true
+      ctrl.abort()
+    }
   }, [session.accountId, epoch])
 
   const handleSignOut = async () => {

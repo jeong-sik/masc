@@ -307,10 +307,12 @@ async function runHttpContractChecks() {
     const adminPatMembers = await apiReq(maUrl, '/api/v1/auth/members', { headers: adminPatHdr })
     assert(adminPatMembers.status === 401, `ma admin1_pat /members expected 401 (cookie-only), got ${adminPatMembers.status}`)
 
-    // Worker PAT with manage_own_provider vs read_state-only PAT.
+    // Worker PAT with manage_own_provider + manage_own_keeper vs read_state-only PAT.
     const wPatProvHdr = { Authorization: `Bearer ${pats.worker_provider}` }
     const wPatProvRes = await apiReq(maUrl, '/api/v1/auth/provider-accounts', { headers: wPatProvHdr })
     assert(wPatProvRes.status === 200, `ma worker_pat_provider /provider-accounts expected 200, got ${wPatProvRes.status}`)
+    const wPatKeepersRes = await apiReq(maUrl, '/api/v1/auth/keepers', { headers: wPatProvHdr })
+    assert(wPatKeepersRes.status === 200, `ma worker_pat_provider /keepers expected 200, got ${wPatKeepersRes.status}`)
     const wPatProvAdmin = await apiReq(maUrl, '/api/v1/config/schema?target=runtime', { headers: wPatProvHdr })
     assert(wPatProvAdmin.status === 403, `ma worker_pat_provider /config/schema expected 403, got ${wPatProvAdmin.status}`)
 
@@ -319,6 +321,11 @@ async function runHttpContractChecks() {
     assert(wPatRoWho.status === 200, `ma worker_pat_readonly /whoami expected 200, got ${wPatRoWho.status}`)
     const wPatRoProv = await apiReq(maUrl, '/api/v1/auth/provider-accounts', { headers: wPatRoHdr })
     assert(wPatRoProv.status === 403, `ma worker_pat_readonly /provider-accounts expected 403, got ${wPatRoProv.status}`)
+    const wPatRoKeepers = await apiReq(maUrl, '/api/v1/auth/keepers', { headers: wPatRoHdr })
+    assert(
+      wPatRoKeepers.status === 403 && wPatRoKeepers.text.includes('manage_own_keeper'),
+      `ma worker_pat_readonly /keepers expected 403 manage_own_keeper, got ${wPatRoKeepers.status} body=${wPatRoKeepers.text}`,
+    )
 
     // Service credential: whoami=200 (service), denied own-provider, own-keepers, and admin.
     const svcHdr = { Authorization: `Bearer ${serviceToken}` }
@@ -339,68 +346,129 @@ function attachNetworkAuditor(page, allowExpected = () => false) {
   const unexpected = []
   const seen = []
   const pageErrors = []
-  const inFlight = new Set()
+  const inFlightRequests = new Map()
+  let inFlight = 0
+  let requestSeq = 0
 
-  const isEventStream = (url) =>
+  const isApiUrl = (url) =>
+    url.pathname.startsWith('/api/')
+    || url.pathname.startsWith('/auth/')
+    || url.pathname === '/health'
+
+  const isEventStreamUrl = (url) =>
     url.pathname === '/api/v1/auth/events'
     || url.pathname === '/sse'
     || url.pathname.endsWith('/events')
     || url.pathname.includes('/stream')
 
+  const isTrackedApiRequest = (req) => {
+    try {
+      const url = new URL(req.url())
+      if (!isApiUrl(url) || isEventStreamUrl(url)) return false
+      const accept = req.headers()?.accept || ''
+      if (accept.includes('text/event-stream')) return false
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  const settleInFlight = (req) => {
+    if (inFlightRequests.delete(req)) {
+      inFlight -= 1
+      assert(inFlight >= 0, `networkAuditor inFlight underflow (${inFlight})`)
+    }
+  }
+
+  const formatInFlight = () => {
+    const now = Date.now()
+    return [...inFlightRequests.values()].map(
+      (entry) => `${entry.method} ${entry.path} (${now - entry.startedAt}ms)`,
+    )
+  }
+
   page.on('pageerror', (err) => {
     pageErrors.push(err.message || String(err))
   })
   page.on('request', (req) => {
-    try {
+    if (!isTrackedApiRequest(req)) return
+    if (!inFlightRequests.has(req)) {
       const url = new URL(req.url())
-      const isApi = url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/') || url.pathname === '/health'
-      if (isApi && !isEventStream(url)) {
-        inFlight.add(req)
-      }
-    } catch {
-      // Ignore non-HTTP URLs.
+      requestSeq += 1
+      inFlightRequests.set(req, {
+        seq: requestSeq,
+        method: req.method(),
+        path: `${url.pathname}${url.search}`,
+        startedAt: Date.now(),
+      })
+      inFlight += 1
     }
-  })
-  page.on('requestfinished', (req) => {
-    inFlight.delete(req)
-  })
-  page.on('requestfailed', (req) => {
-    inFlight.delete(req)
   })
   page.on('response', (response) => {
     const req = response.request()
-    const url = new URL(response.url())
+    let url
+    try {
+      url = new URL(response.url())
+    } catch {
+      settleInFlight(req)
+      return
+    }
     const path = `${url.pathname}${url.search}`
     const status = response.status()
-    const isApi = url.pathname.startsWith('/api/') || url.pathname.startsWith('/auth/') || url.pathname === '/health'
-    if (isApi) {
+    if (isApiUrl(url)) {
       seen.push({ method: req.method(), path, pathname: url.pathname, status })
     }
     if (status >= 400 && !allowExpected({ method: req.method(), path, pathname: url.pathname, status })) {
       unexpected.push(`${req.method()} ${path} -> ${status}`)
     }
+    // Decrement after recording response status so waitForApiIdle cannot race ahead of >=400 tracking.
+    settleInFlight(req)
+  })
+  page.on('requestfailed', (req) => {
+    settleInFlight(req)
+  })
+  page.on('requestfinished', (req) => {
+    settleInFlight(req)
   })
 
-  async function waitForApiIdle(timeoutMs = 8_000) {
+  async function waitForApiIdle(timeoutMs = 8_000, context = 'page') {
+    const quietMs = 150
     const deadline = Date.now() + timeoutMs
     let quietSince = null
+    let lastSeenSeq = requestSeq
     while (Date.now() < deadline) {
-      if (inFlight.size === 0) {
+      if (inFlight === 0 && requestSeq === lastSeenSeq) {
         if (quietSince === null) quietSince = Date.now()
-        if (Date.now() - quietSince >= 150) return
+        if (Date.now() - quietSince >= quietMs) return
       } else {
         quietSince = null
+        lastSeenSeq = requestSeq
       }
       await new Promise((r) => setTimeout(r, 30))
     }
+    const pending = formatInFlight()
+    const recent = seen.slice(-5).map((r) => `${r.method} ${r.path} -> ${r.status}`)
+    throw new Error(
+      `waitForApiIdle timed out after ${timeoutMs}ms (${context}): inFlight=${inFlight}`
+        + (pending.length > 0 ? ` pending=[${pending.join(', ')}]` : ` (no ${quietMs}ms quiet window)`)
+        + (recent.length > 0 ? ` recent=[${recent.join('; ')}]` : ''),
+    )
   }
 
   const auditor = {
     seen,
     unexpected,
     pageErrors,
+    get inFlight() {
+      return inFlight
+    },
     waitForApiIdle,
-    assertClean(label) {
+    async assertClean(label) {
+      await waitForApiIdle(8_000, label)
+      assert(
+        inFlight === 0,
+        `${label}: ${inFlight} API request(s) still in flight: ${formatInFlight().join(', ')}`,
+      )
       assert(pageErrors.length === 0, `${label}: uncaught page errors: ${JSON.stringify(pageErrors)}`)
       assert(
         unexpected.length === 0,
@@ -412,11 +480,11 @@ function attachNetworkAuditor(page, allowExpected = () => false) {
   return auditor
 }
 
-async function waitForDashboardSettled(page) {
-  await page.locator('[data-testid="route-gate-probing"]').waitFor({ state: 'detached', timeout: 15_000 }).catch(() => {})
+async function waitForDashboardSettled(page, context = 'dashboard') {
+  await page.locator('[data-testid="route-gate-probing"]').waitFor({ state: 'detached', timeout: 15_000 })
   const auditor = pageAuditors.get(page)
   if (auditor) {
-    await auditor.waitForApiIdle(8_000)
+    await auditor.waitForApiIdle(8_000, context)
   }
 }
 
@@ -424,7 +492,11 @@ async function navHash(page, hashPath) {
   await page.evaluate((target) => {
     window.location.hash = target
   }, `#${hashPath}`)
-  await waitForDashboardSettled(page)
+  await waitForDashboardSettled(page, `nav:${hashPath}`)
+}
+
+function wikiCreateButton(page) {
+  return page.locator('.kn-actions button.btn-primary[data-opens-detail]')
 }
 
 async function saveShot(page, filename, summary) {
@@ -447,8 +519,8 @@ async function verifyLanesAndExact(page, { expectLaneConfigLocked, expectExactLo
       'lane-config should be unlocked for admin',
     )
   }
-  await page.getByRole('tab', { name: 'Exact Output' }).click()
-  await waitForDashboardSettled(page)
+  await page.locator('[data-testid="runtime-lanes-tab"]').getByRole('tab', { name: 'Exact Output' }).click()
+  await waitForDashboardSettled(page, 'lanes:exact-output')
   if (expectExactLocked) {
     await page.locator('[data-testid="exact-runs-admin-locked"]').waitFor({ timeout: 10_000 })
   } else {
@@ -505,11 +577,11 @@ async function runPlaywrightChecks() {
 
         // Wiki write & Lanes admin/exact-output are locked cleanly when token-admin is off.
         await navHash(page, '/knowledge/wiki')
-        assert(await page.getByRole('button', { name: '+ 새 페이지' }).count() === 0, 'su_off wiki write should be gated')
+        assert(await wikiCreateButton(page).count() === 0, 'su_off wiki write should be gated')
 
         await verifyLanesAndExact(page, { expectLaneConfigLocked: true, expectExactLocked: true })
 
-        audit.assertClean('playwright.su_off')
+        await audit.assertClean('playwright.su_off')
         recordPass('playwright.su_off', `requests=${audit.seen.length} unexpected_errors=0`)
       } finally {
         await context.close()
@@ -527,7 +599,7 @@ async function runPlaywrightChecks() {
           waitUntil: 'domcontentloaded',
         })
         await page.locator('[data-testid="settings-workspace"]').waitFor({ timeout: 15_000 })
-        await waitForDashboardSettled(page)
+        await waitForDashboardSettled(page, 'su_admin:settings')
         // Verify ?token= was scrubbed from URL history.
         const currentSearch = await page.evaluate(() => window.location.search)
         assert(!currentSearch.includes('token='), `URL ?token= was not scrubbed: ${currentSearch}`)
@@ -538,14 +610,14 @@ async function runPlaywrightChecks() {
         await saveShot(page, '01-su-admin-settings.png', 'Single-user Admin token: Settings config tree unlocked (0 errors)')
 
         await navHash(page, '/knowledge/wiki')
-        await page.getByRole('button', { name: '+ 새 페이지' }).waitFor({ timeout: 10_000 })
+        await wikiCreateButton(page).waitFor({ timeout: 10_000 })
 
         await verifyLanesAndExact(page, { expectLaneConfigLocked: false, expectExactLocked: false })
 
         await navHash(page, '/infra/sandboxes')
         assert(await page.locator('[data-testid="route-gate-admin-only"]').count() === 0, 'su_admin infra should unlock')
 
-        audit.assertClean('playwright.su_admin')
+        await audit.assertClean('playwright.su_admin')
         recordPass('playwright.su_admin', `requests=${audit.seen.length} settings+wiki+lanes+infra unlocked`)
       } finally {
         await context.close()
@@ -563,7 +635,7 @@ async function runPlaywrightChecks() {
           waitUntil: 'domcontentloaded',
         })
         await page.locator('[data-testid="route-gate-admin-only"]').waitFor({ timeout: 15_000 })
-        await waitForDashboardSettled(page)
+        await waitForDashboardSettled(page, 'su_worker:settings')
         assert(
           !audit.seen.some((r) => r.pathname === '/api/v1/config/schema'),
           'su_worker speculatively called /api/v1/config/schema',
@@ -575,7 +647,7 @@ async function runPlaywrightChecks() {
         assert(await page.locator('[data-testid="route-gate-admin-only"]').count() === 0, 'su_worker infra should be readable')
 
         await navHash(page, '/knowledge/wiki')
-        assert(await page.getByRole('button', { name: '+ 새 페이지' }).count() === 0, 'su_worker wiki write must be locked')
+        assert(await wikiCreateButton(page).count() === 0, 'su_worker wiki write must be locked')
 
         await verifyLanesAndExact(page, { expectLaneConfigLocked: true, expectExactLocked: true })
         assert(
@@ -587,8 +659,9 @@ async function runPlaywrightChecks() {
         await navHash(page, '/runtime/quotas')
         await page.locator('[data-testid="provider-inventory-toggle"]').click()
         await page.locator('[data-testid="provider-inventory-admin-locked"]').waitFor({ timeout: 10_000 })
+        await waitForDashboardSettled(page, 'su_worker:provider-inventory')
 
-        audit.assertClean('playwright.su_worker')
+        await audit.assertClean('playwright.su_worker')
         recordPass('playwright.su_worker', `requests=${audit.seen.length} locked=settings+wiki_write+lanes+exact+provider_inv`)
       } finally {
         await context.close()
@@ -606,7 +679,7 @@ async function runPlaywrightChecks() {
           waitUntil: 'domcontentloaded',
         })
         await page.locator('[data-testid="route-gate-role-restricted"]').waitFor({ timeout: 15_000 })
-        await waitForDashboardSettled(page)
+        await waitForDashboardSettled(page, 'su_player:pulse')
         await saveShot(page, '04-su-player-restricted.png', 'Single-user Player token: member workspace restricted (zero 403 storm)')
 
         await navHash(page, '/work/goals')
@@ -621,7 +694,7 @@ async function runPlaywrightChecks() {
         await navHash(page, '/account')
         await page.locator('[data-testid="account-local-operator"]').waitFor({ timeout: 10_000 })
 
-        audit.assertClean('playwright.su_player')
+        await audit.assertClean('playwright.su_player')
         recordPass('playwright.su_player', `requests=${audit.seen.length} role_restricted+admin_only verified`)
       } finally {
         await context.close()
@@ -639,8 +712,8 @@ async function runPlaywrightChecks() {
           waitUntil: 'domcontentloaded',
         })
         await nsPage.locator('[data-testid="route-gate-auth-required"]').waitFor({ timeout: 15_000 })
-        await waitForDashboardSettled(nsPage)
-        nsAudit.assertClean('playwright.su_loopback_bad_token')
+        await waitForDashboardSettled(nsPage, 'su_loopback_bad_token:pulse')
+        await nsAudit.assertClean('playwright.su_loopback_bad_token')
       } finally {
         await nsContext.close()
       }
@@ -656,7 +729,7 @@ async function runPlaywrightChecks() {
       try {
         await page.goto(`${suStrictUrl}/dashboard/#/pulse`, { waitUntil: 'domcontentloaded' })
         await page.locator('[data-testid="route-gate-auth-required"]').waitFor({ timeout: 15_000 })
-        await waitForDashboardSettled(page)
+        await waitForDashboardSettled(page, 'su_strict:missing_token')
         assert(
           !audit.seen.some((r) => r.pathname === '/api/v1/dashboard/dev-token'),
           'strict loopback must not probe /api/v1/dashboard/dev-token',
@@ -665,27 +738,30 @@ async function runPlaywrightChecks() {
 
         // Enter bad token in Account panel -> explicit error alert.
         await navHash(page, '/account')
-        const tokenInput = page.locator('[data-testid="account-local-operator"] input[type="password"]')
+        const localOp = page.locator('[data-testid="account-local-operator"]')
+        const tokenInput = localOp.locator('input[type="password"]')
+        const applyBtn = localOp.locator('form button[type="submit"]').first()
+        const bearerBadge = localOp.locator('.ap-badge--ok', { hasText: 'Bearer Active' })
         await tokenInput.fill('invalid-token-smoke-1234')
-        await page.getByRole('button', { name: 'Apply & Verify' }).click()
+        await applyBtn.click()
         await page.locator('[data-testid="local-token-error"]').waitFor({ timeout: 10_000 })
 
         // Apply valid Admin token -> unlock Settings -> then swap in-place to Worker token -> Settings immediately purged.
         await tokenInput.fill(manifest.su_strict.tokens.admin)
-        await page.getByRole('button', { name: 'Apply & Verify' }).click()
-        await page.getByText('Bearer Active').waitFor({ timeout: 10_000 })
+        await applyBtn.click()
+        await bearerBadge.waitFor({ timeout: 10_000 })
         await navHash(page, '/settings')
         await page.locator('[data-testid="settings-workspace"]').waitFor({ timeout: 10_000 })
 
         await navHash(page, '/account')
         await tokenInput.fill(manifest.su_strict.tokens.worker)
-        await page.getByRole('button', { name: 'Apply & Verify' }).click()
-        await page.getByText('Bearer Active').waitFor({ timeout: 10_000 })
+        await applyBtn.click()
+        await bearerBadge.waitFor({ timeout: 10_000 })
         await navHash(page, '/settings')
         await page.locator('[data-testid="route-gate-admin-only"]').waitFor({ timeout: 10_000 })
         assert(await page.locator('[data-testid="settings-workspace"]').count() === 0, 'su admin->worker swap did not purge settings')
 
-        audit.assertClean('playwright.su_missing_bad_and_swap')
+        await audit.assertClean('playwright.su_missing_bad_and_swap')
         recordPass('playwright.su_missing_bad_and_swap', 'loopback_bad_tok + strict_missing_gate + bad_token_err + su_admin_to_worker_purge')
       } finally {
         await context.close()
@@ -703,13 +779,13 @@ async function runPlaywrightChecks() {
       try {
         await page.goto(`${maUrl}/dashboard/#/pulse`, { waitUntil: 'domcontentloaded' })
         await page.locator('[data-testid="route-gate-auth-required"]').waitFor({ timeout: 15_000 })
-        await waitForDashboardSettled(page)
+        await waitForDashboardSettled(page, 'ma_signed_out:pulse')
 
         await navHash(page, '/account')
         await page.locator('[data-testid="multi-account-signin-gate"]').waitFor({ timeout: 10_000 })
         await saveShot(page, '06-ma-signed-out-gate.png', 'Multi-account signed out: Sign-In gate (zero speculative API storms)')
 
-        audit.assertClean('playwright.ma_signed_out')
+        await audit.assertClean('playwright.ma_signed_out')
         recordPass('playwright.ma_signed_out', `requests=${audit.seen.length} only /auth/session=401`)
       } finally {
         await context.close()
@@ -725,7 +801,7 @@ async function runPlaywrightChecks() {
       const audit = attachNetworkAuditor(page)
       try {
         await page.goto(`${maUrl}/dashboard/#/pulse`, { waitUntil: 'domcontentloaded' })
-        await waitForDashboardSettled(page)
+        await waitForDashboardSettled(page, 'ma_worker:pulse')
         assert(await page.locator('[data-testid="route-gate-auth-required"]').count() === 0, 'ma_worker should be signed in')
 
         await navHash(page, '/settings')
@@ -744,7 +820,7 @@ async function runPlaywrightChecks() {
         assert(await page.locator('[data-testid="account-members-tab"]').count() === 0, 'ma_worker must not mount account-members-tab')
 
         await navHash(page, '/knowledge/wiki')
-        assert(await page.getByRole('button', { name: '+ 새 페이지' }).count() === 0, 'ma_worker wiki write must be locked')
+        assert(await wikiCreateButton(page).count() === 0, 'ma_worker wiki write must be locked')
 
         await verifyLanesAndExact(page, { expectLaneConfigLocked: true, expectExactLocked: true })
 
@@ -752,6 +828,7 @@ async function runPlaywrightChecks() {
         await navHash(page, '/runtime/quotas')
         await page.locator('[data-testid="provider-inventory-toggle"]').click()
         await page.locator('[data-testid="provider-inventory-body"]').waitFor({ timeout: 10_000 })
+        await waitForDashboardSettled(page, 'ma_worker:provider-inventory')
         assert(await page.locator('[data-testid="provider-inventory-admin-locked"]').count() === 0, 'ma_worker own-provider must NOT be admin-locked')
         assert(
           audit.seen.some((r) => r.pathname === '/api/v1/auth/provider-accounts' && r.status === 200),
@@ -785,7 +862,7 @@ async function runPlaywrightChecks() {
         await page.locator('[data-testid="ma-header-runtime-select"]').selectOption(workerRuntimeId)
         await page.locator('[data-testid="ma-header-assign-btn"]').click()
         await page.locator('[data-testid="ma-keeper-runtime-pill"]').filter({ hasText: workerRuntimeId }).waitFor({ timeout: 10_000 })
-        await waitForDashboardSettled(page)
+        await waitForDashboardSettled(page, 'ma_worker:keepers-assign')
 
         // Start a conversation (POST /api/v1/auth/keepers/conversation), verify rendered, then delete it.
         await page.locator('[data-testid="ma-new-conversation-btn"]').click()
@@ -795,7 +872,7 @@ async function runPlaywrightChecks() {
         await delBtn.click()
         await page.locator('[data-testid^="ma-confirm-delete-"]').first().click()
         await delBtn.waitFor({ state: 'detached', timeout: 10_000 })
-        await waitForDashboardSettled(page)
+        await waitForDashboardSettled(page, 'ma_worker:keepers-delete')
 
         // Verify SU-only tabs show honest MA notices with zero SU /api/v1/keepers/* 404s.
         for (const tab of ['memory', 'portrait-candle', 'work-sandbox', 'config']) {
@@ -812,7 +889,7 @@ async function runPlaywrightChecks() {
           'ma_worker personal keepers must never hit single-user /api/v1/keepers* routes',
         )
 
-        audit.assertClean('playwright.ma_worker')
+        await audit.assertClean('playwright.ma_worker')
         recordPass('playwright.ma_worker', `requests=${audit.seen.length} infra/settings/members locked + own_provider=200 + personal_keepers CRUD`)
       } finally {
         await context.close()
@@ -839,7 +916,7 @@ async function runPlaywrightChecks() {
         // 1. Admin2 loads Admin-only surfaces cleanly.
         await page.goto(`${maUrl}/dashboard/#/account/members`, { waitUntil: 'domcontentloaded' })
         await page.locator('[data-testid="account-members-tab"]').waitFor({ timeout: 15_000 })
-        await waitForDashboardSettled(page)
+        await waitForDashboardSettled(page, 'ma_admin2:members')
         const membersText = await page.locator('[data-testid="account-members-tab"]').innerText()
         assert(membersText.includes(a2.user_id), 'ma_admin2 members tab missing admin2 row')
         await saveShot(page, '09-ma-admin-members.png', 'Multi-account Admin: Members & Admin lifecycle unlocked')
@@ -849,12 +926,12 @@ async function runPlaywrightChecks() {
 
         await navHash(page, '/settings')
         await page.locator('[data-testid="settings-workspace"]').waitFor({ timeout: 15_000 })
-        await waitForDashboardSettled(page)
+        await waitForDashboardSettled(page, 'ma_admin2:settings')
 
         // Return to Members tab (with Settings schema already cached) and verify zero errors before demotion.
         await navHash(page, '/account/members')
         await page.locator('[data-testid="account-members-tab"]').waitFor({ timeout: 10_000 })
-        audit.assertClean('playwright.ma_admin_before_demotion')
+        await audit.assertClean('playwright.ma_admin_before_demotion')
 
         // 2. Admin1 demotes Admin2 -> Member in-place via live server revoke-admin endpoint.
         recheckInProgress = true
@@ -880,7 +957,7 @@ async function runPlaywrightChecks() {
           await page.locator('[data-testid="account-members-tab"]').count() === 0,
           'ma_admin2 demotion did not purge mounted account-members-tab',
         )
-        await waitForDashboardSettled(page)
+        await waitForDashboardSettled(page, 'ma_admin2:after-revoke')
         // Close the recheck window so any post-demotion 403 on Settings/Infra fails the test.
         recheckInProgress = false
 
@@ -897,7 +974,7 @@ async function runPlaywrightChecks() {
         await navHash(page, '/infra/sandboxes')
         await page.locator('[data-testid="route-gate-admin-only"]').waitFor({ timeout: 10_000 })
 
-        audit.assertClean('playwright.ma_admin_demotion')
+        await audit.assertClean('playwright.ma_admin_demotion')
         recordPass('playwright.ma_admin_demotion', 'admin_unlocked -> live_revoke_admin -> 403_recheck -> in_place_purge_verified')
       } finally {
         await context.close()

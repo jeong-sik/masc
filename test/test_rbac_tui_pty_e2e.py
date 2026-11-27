@@ -208,6 +208,19 @@ class TuiPtySession:
         self.pid = pid
         self.fd = master_fd
         self.closed = False
+        self.reaped = False
+
+    def _poll_exit(self) -> tuple[int, int]:
+        if self.reaped:
+            return (self.pid, 0)
+        try:
+            waited, status = os.waitpid(self.pid, os.WNOHANG)
+        except ChildProcessError:
+            self.reaped = True
+            return (self.pid, 0)
+        if waited == self.pid:
+            self.reaped = True
+        return (waited, status)
 
     def _drain(self, timeout: float = 0.1) -> bool:
         got = False
@@ -232,7 +245,7 @@ class TuiPtySession:
             for needle in needles:
                 if needle in screen:
                     return screen
-            waited, status = os.waitpid(self.pid, os.WNOHANG)
+            waited, status = self._poll_exit()
             if waited == self.pid:
                 raise AssertionError(
                     f"masc_tui exited early (status={status}) waiting for {needles}.\n"
@@ -252,7 +265,7 @@ class TuiPtySession:
             screen = self.vt.text()
             if needle not in screen:
                 return screen
-            waited, status = os.waitpid(self.pid, os.WNOHANG)
+            waited, status = self._poll_exit()
             if waited == self.pid:
                 raise AssertionError(
                     f"masc_tui exited early (status={status}) waiting for {needle!r} to clear.\n"
@@ -271,33 +284,29 @@ class TuiPtySession:
         if self.closed:
             return
         self.closed = True
-        try:
-            os.write(self.fd, b"\x11")  # Ctrl+Q graceful exit
-        except OSError:
-            pass
-        deadline = time.monotonic() + 5.0
-        exited = False
-        while time.monotonic() < deadline:
-            self._drain(0.05)
-            waited, _ = os.waitpid(self.pid, os.WNOHANG)
-            if waited == self.pid:
-                exited = True
-                break
-        if not exited:
-            for sig in (signal.SIGTERM, signal.SIGKILL):
-                try:
-                    os.kill(self.pid, sig)
-                except ProcessLookupError:
-                    break
-                end = time.monotonic() + 2.0
-                while time.monotonic() < end:
-                    waited, _ = os.waitpid(self.pid, os.WNOHANG)
-                    if waited == self.pid:
-                        exited = True
+        if not self.reaped:
+            try:
+                os.write(self.fd, b"\x11")  # Ctrl+Q graceful exit
+            except OSError:
+                pass
+            deadline = time.monotonic() + 5.0
+            while not self.reaped and time.monotonic() < deadline:
+                self._drain(0.05)
+                self._poll_exit()
+            if not self.reaped:
+                for sig in (signal.SIGTERM, signal.SIGKILL):
+                    try:
+                        os.kill(self.pid, sig)
+                    except ProcessLookupError:
+                        self.reaped = True
                         break
-                    time.sleep(0.05)
-                if exited:
-                    break
+                    end = time.monotonic() + 2.0
+                    while not self.reaped and time.monotonic() < end:
+                        self._poll_exit()
+                        if not self.reaped:
+                            time.sleep(0.05)
+                    if self.reaped:
+                        break
         try:
             os.close(self.fd)
         except OSError:
@@ -477,7 +486,7 @@ def main() -> int:
         finally:
             s.close_cleanly()
 
-    # 10. Multi-account Service credential -> MA WORKER·SVC badge + locked Infra
+    # 10. Multi-account Service credential -> MA WORKER·SVC badge + locked Infra & Personal Keepers
     def case_ma_service() -> None:
         s = TuiPtySession(tui_bin, ma_base, ma_url, token=ma_svc, extra_env=iso_env)
         try:
@@ -486,10 +495,13 @@ def main() -> int:
             s.send(b"6")
             locked = s.wait_for_any(["Admin role is required"], timeout=STEP_TIMEOUT_SEC)
             assert "Admin role is required" in locked
+            s.send(b"4")
+            locked_keepers = s.wait_for_any(["LOCKED"], timeout=STEP_TIMEOUT_SEC)
+            assert "LOCKED" in locked_keepers
         finally:
             s.close_cleanly()
 
-    # 11. Single-user Auth_gate live token entry (masked input -> unlocks without restart)
+    # 11. Single-user Auth_gate live token entry (masked input -> swap -> 2-step [c] clear)
     def case_su_auth_gate_live_token_entry() -> None:
         admin_tok = su_strict_tokens["admin"]
         worker_tok = su_strict_tokens["worker"]
@@ -510,9 +522,8 @@ def main() -> int:
 
             # Open Account & Session overlay via Alt+A, swap to Worker token, verify immediate demotion.
             s.send(b"\x1ba")
-            acct = s.wait_for_any(["Multi-Account Own Providers"], timeout=STEP_TIMEOUT_SEC)
-            assert "Account & Session" in acct and "Single_user" in acct
-            assert "runtime override (masked)" in acct
+            acct = s.wait_for_any(["runtime override (masked)"], timeout=STEP_TIMEOUT_SEC)
+            assert "Single_user" in acct and "Principal:" in acct
             s.send(b"t")
             s.wait_for_any(["Apply"], timeout=STEP_TIMEOUT_SEC)
             s.send(worker_tok.encode("ascii") + b"\r")
@@ -521,14 +532,23 @@ def main() -> int:
 
             # Close Account overlay and confirm Settings (,) is now locked for Worker.
             s.send(b"\x1b")
-            s.wait_for_absent("Multi-Account Own Providers", timeout=STEP_TIMEOUT_SEC)
+            s.wait_for_absent("Principal:", timeout=STEP_TIMEOUT_SEC)
             s.send(b",")
             locked = s.wait_for_any(["Admin role is required"], timeout=STEP_TIMEOUT_SEC)
             assert "Admin role is required" in locked
 
-            # Reopen Account overlay and press [c] Clear Token -> returns to Auth_gate immediately.
+            # Reopen Account overlay and verify 2-step [c] Clear Token confirmation.
             s.send(b"\x1ba")
-            s.wait_for_any(["Multi-Account Own Providers"], timeout=STEP_TIMEOUT_SEC)
+            s.wait_for_any(["Principal:"], timeout=STEP_TIMEOUT_SEC)
+            s.send(b"c")
+            armed = s.wait_for_any(["Press [c] again to clear token"], timeout=STEP_TIMEOUT_SEC)
+            assert_not_present(armed, ["Single-user Authentication Required"], "su_clear_first_c_must_not_logout")
+            s.send(b"\x1b")
+            cancelled = s.wait_for_absent("Press [c] again to clear token", timeout=STEP_TIMEOUT_SEC)
+            assert "Principal:" in cancelled and "LOCAL WORKER" in cancelled
+            assert_not_present(cancelled, ["Single-user Authentication Required"], "su_clear_esc_must_keep_session")
+            s.send(b"c")
+            s.wait_for_any(["Press [c] again to clear token"], timeout=STEP_TIMEOUT_SEC)
             s.send(b"c")
             cleared = s.wait_for_any(["Single-user Authentication Required"], timeout=BOOT_TIMEOUT_SEC)
             assert "Single-user Authentication Required" in cleared
@@ -581,6 +601,156 @@ def main() -> int:
         finally:
             s.close_cleanly()
 
+    # 14. Single-user file-backed admin.token: swap to Worker -> [f] revert restores Admin -> 2-step [c] clear -> [f] recovers
+    def case_su_file_token_revert_and_confirm_clear() -> None:
+        admin_tok = su_strict_tokens["admin"]
+        worker_tok = su_strict_tokens["worker"]
+        file_tok_base = os.path.join(manifest["root"], "tui_file_tok_ws")
+        auth_dir = os.path.join(file_tok_base, ".masc", "auth")
+        os.makedirs(auth_dir, exist_ok=True)
+        admin_tok_file = os.path.join(auth_dir, "admin.token")
+        with open(admin_tok_file, "w", encoding="utf-8") as fh:
+            fh.write(admin_tok + "\n")
+        os.chmod(admin_tok_file, 0o600)
+
+        s = TuiPtySession(tui_bin, file_tok_base, su_strict_url, token=None, extra_env=iso_env)
+        try:
+            booted = s.wait_for_any(["LOCAL ADMIN"])
+            assert_not_present(booted, [admin_tok, "Single-user Authentication Required"], "su_file_tok_boot")
+
+            # Open Account & Session -> confirm file-backed startup default source -> swap to Worker token.
+            s.send(b"\x1ba")
+            acct = s.wait_for_any(["startup default ($MASC_TOKEN / admin.token)"], timeout=STEP_TIMEOUT_SEC)
+            assert "Account & Session" in acct
+            s.send(b"t")
+            s.wait_for_any(["Bearer / PAT (masked):"], timeout=STEP_TIMEOUT_SEC)
+            s.send(worker_tok.encode("ascii") + b"\r")
+            swapped = s.wait_for_any(["LOCAL WORKER"], timeout=BOOT_TIMEOUT_SEC)
+            assert "runtime override (masked)" in swapped
+            assert_not_present(swapped, [worker_tok, admin_tok], "su_file_tok_swapped_worker")
+
+            # Press [f] to revert to file-backed admin.token -> restores LOCAL ADMIN cleanly.
+            s.send(b"f")
+            reverted = s.wait_for_any(["LOCAL ADMIN"], timeout=BOOT_TIMEOUT_SEC)
+            assert "startup default ($MASC_TOKEN / admin.token)" in reverted
+            assert_not_present(reverted, [admin_tok, worker_tok], "su_file_tok_reverted_admin")
+
+            # Close Account overlay and verify Settings unlocks again under restored Admin session.
+            s.send(b"\x1b")
+            s.wait_for_absent("Principal:", timeout=STEP_TIMEOUT_SEC)
+            s.send(b",")
+            settings = s.wait_for_any(["Settings · Configuration"], timeout=STEP_TIMEOUT_SEC)
+            assert_not_present(settings, ["Admin role is required"], "su_file_tok_settings_unlocked")
+            s.send(b"\x1b")
+            s.wait_for_absent("Settings · Configuration", timeout=STEP_TIMEOUT_SEC)
+
+            # Reopen Account -> verify 2-step [c] clear -> Auth_gate -> [f] restores file-backed Admin again.
+            s.send(b"\x1ba")
+            s.wait_for_any(["Principal:"], timeout=STEP_TIMEOUT_SEC)
+            s.send(b"c")
+            armed = s.wait_for_any(["Press [c] again to clear token"], timeout=STEP_TIMEOUT_SEC)
+            assert_not_present(armed, ["Single-user Authentication Required"], "su_file_tok_first_c")
+            s.send(b"\x1b")
+            cancelled = s.wait_for_absent("Press [c] again to clear token", timeout=STEP_TIMEOUT_SEC)
+            assert "Principal:" in cancelled and "LOCAL ADMIN" in cancelled
+            s.send(b"c")
+            s.wait_for_any(["Press [c] again to clear token"], timeout=STEP_TIMEOUT_SEC)
+            s.send(b"c")
+            cleared = s.wait_for_any(["Single-user Authentication Required"], timeout=BOOT_TIMEOUT_SEC)
+            assert "Single-user Authentication Required" in cleared
+            s.send(b"f")
+            recovered = s.wait_for_any(["LOCAL ADMIN"], timeout=BOOT_TIMEOUT_SEC)
+            assert_not_present(recovered, [admin_tok, "Single-user Authentication Required"], "su_file_tok_auth_gate_revert")
+        finally:
+            s.close_cleanly()
+
+    # 15. Multi-account Worker PAT (manage_own_keeper): Personal Keepers list -> create -> assign -> conv -> 2-step delete
+    def case_ma_personal_keepers_lifecycle() -> None:
+        pat = ma_pats["worker_provider"]
+        worker_rt = manifest["ma"]["worker_runtime_id"]
+        keeper_name = "tui-worker-keeper-1"
+        s = TuiPtySession(tui_bin, ma_base, ma_url, token=pat, extra_env=iso_env)
+        try:
+            booted = s.wait_for_any(["MA WORKER"])
+            assert "PAT" in booted
+            assert_not_present(booted, [pat, "Multi-account Sign-in Required"], "ma_pk_boot")
+
+            # Open Keepers workspace (4) -> MA Personal Keepers screen loads owned runtimes with zero SU 404s.
+            s.send(b"4")
+            pk_screen = s.wait_for_any(["Personal Keepers"], timeout=STEP_TIMEOUT_SEC)
+            assert "Personal Conversation" in pk_screen
+            rt_prefix = worker_rt[:24]
+            rt_loaded = s.wait_for_any([rt_prefix], timeout=STEP_TIMEOUT_SEC)
+            assert "Owned Runtimes" in rt_loaded
+            assert_not_present(rt_loaded, [pat, "HTTP 404", "Multi-account Sign-in Required"], "ma_pk_initial")
+
+            # Create personal keeper via [n] modal.
+            s.send(b"n")
+            modal = s.wait_for_any(["Create Personal Keeper"], timeout=STEP_TIMEOUT_SEC)
+            assert "Personal keeper ID" in modal
+            s.send(keeper_name.encode("ascii") + b"\r")
+            created = s.wait_for_any([f"Keeper: {keeper_name}"], timeout=STEP_TIMEOUT_SEC)
+            assert keeper_name in created
+            assert_not_present(created, [pat, "HTTP 404"], "ma_pk_created")
+
+            # Assign seeded personal runtime via [a] modal (pre-filled with owned runtime).
+            s.send(b"a")
+            assign_modal = s.wait_for_any([f"Assign Runtime · {keeper_name}"], timeout=STEP_TIMEOUT_SEC)
+            assert "Owned runtime ID" in assign_modal
+            s.send(b"\r")
+            assigned = s.wait_for_any([f"Runtime: {rt_prefix}"], timeout=STEP_TIMEOUT_SEC)
+            assert "unassigned" not in assigned
+            assert_not_present(assigned, [pat, "HTTP 404"], "ma_pk_assigned")
+
+            # Start a new conversation via [N] and verify conversation row + active Turns header appear.
+            s.send(b"N")
+            started = s.wait_for_any(["Turns · "], timeout=STEP_TIMEOUT_SEC)
+            assert "▸ " in started
+            assert_not_present(started, [pat, "HTTP 404"], "ma_pk_conv_started")
+
+            # 2-step delete conversation: 1st [d] arms without deleting -> [Esc] cancels -> [d][d] deletes cleanly.
+            s.send(b"d")
+            del_armed = s.wait_for_any(["Press [d] again to delete conversation"], timeout=STEP_TIMEOUT_SEC)
+            assert "Turns · " in del_armed
+            s.send(b"\x1b")
+            del_cancelled = s.wait_for_absent("Press [d] again to delete conversation", timeout=STEP_TIMEOUT_SEC)
+            assert "Turns · " in del_cancelled
+
+            s.send(b"d")
+            s.wait_for_any(["Press [d] again to delete conversation"], timeout=STEP_TIMEOUT_SEC)
+            s.send(b"d")
+            deleted = s.wait_for_any(["Delete status:"], timeout=STEP_TIMEOUT_SEC)
+            s.wait_for_absent("Turns · ", timeout=STEP_TIMEOUT_SEC)
+            assert_not_present(
+                deleted,
+                [pat, "HTTP 404", "Multi-account Sign-in Required", "[I]"],
+                "ma_pk_deleted_clean",
+            )
+        finally:
+            s.close_cleanly()
+
+    # 16. Multi-account read-only PAT (no manage_own_keeper): Personal Keepers shows explicit HTTP 403 non-logout banner
+    def case_ma_personal_keepers_readonly_403() -> None:
+        pat = ma_pats["worker_readonly"]
+        s = TuiPtySession(tui_bin, ma_base, ma_url, token=pat, extra_env=iso_env)
+        try:
+            booted = s.wait_for_any(["MA WORKER"])
+            assert "PAT" in booted
+            assert_not_present(booted, [pat, "Multi-account Sign-in Required"], "ma_pk_ro_boot")
+
+            s.send(b"4")
+            denied = s.wait_for_any(["HTTP 403"], timeout=STEP_TIMEOUT_SEC)
+            assert "Personal Keepers" in denied
+            assert "manage_own_keeper" in denied
+            assert "MA WORKER" in denied
+            assert_not_present(
+                denied,
+                ["Multi-account Sign-in Required", pat, "HTTP 404"],
+                "ma_pk_ro_keeps_session",
+            )
+        finally:
+            s.close_cleanly()
+
     run_case("tui.su_off", case_su_off)
     run_case("tui.su_admin", case_su_admin)
     run_case("tui.su_worker", case_su_worker)
@@ -595,8 +765,11 @@ def main() -> int:
     run_case("tui.su_auth_gate_live_token_entry_and_swap", case_su_auth_gate_live_token_entry)
     run_case("tui.ma_account_overlay_pat_and_providers", case_ma_account_overlay_pat_and_providers)
     run_case("tui.ma_readonly_pat_403_banner", case_ma_readonly_pat_403_banner)
+    run_case("tui.su_file_token_revert_and_confirm_clear", case_su_file_token_revert_and_confirm_clear)
+    run_case("tui.ma_personal_keepers_lifecycle", case_ma_personal_keepers_lifecycle)
+    run_case("tui.ma_personal_keepers_readonly_403", case_ma_personal_keepers_readonly_403)
 
-    print("[tui-pty-e2e] ALL 14 LIVE PTY CASES PASSED", flush=True)
+    print("[tui-pty-e2e] ALL 17 LIVE PTY CASES PASSED", flush=True)
     return 0
 
 

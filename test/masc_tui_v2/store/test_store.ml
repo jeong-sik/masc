@@ -31950,6 +31950,7 @@ let () =
                                       keeper;
                                       operation_id = "op-par";
                                       seq = Some 99;
+                                      frame = None;
                                       chunk =
                                         Some
                                           (Wire_fleet.Chunk_tool_end
@@ -31961,6 +31962,7 @@ let () =
                                                ok = Some true;
                                                output_preview = Some "done";
                                              });
+                                      at_unix = 0.0;
                                     });
                            };
                      })

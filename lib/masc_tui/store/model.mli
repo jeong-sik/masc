@@ -232,10 +232,16 @@ type toast_tag =
   | Toast_keeper_stop_arm
 
 (** What a second [U] would cut: the OAuth provider of a Keeper, or the channel
-    binding of a connector. *)
+    binding of a connector. [keeper_name] is the Keeper the binding names, as
+    the unbind request sends it: a channel bound to another Keeper since the
+    first press is another target, and [U] asks again. *)
 type unbind_target =
   | Unbind_oauth_provider of { keeper : string; provider : string }
-  | Unbind_connector_channel of { connector : string; channel_id : string }
+  | Unbind_connector_channel of {
+      connector : string;
+      channel_id : string;
+      keeper_name : string option;
+    }
 
 type toast = {
   message : Say.t;

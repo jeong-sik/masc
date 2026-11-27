@@ -206,10 +206,16 @@ type toast_tag =
   | Toast_quit_arm
   | Toast_keeper_stop_arm
 
-(* What a second [U] would cut. *)
+(* What a second [U] would cut. A channel binding carries the Keeper it names,
+   so a channel bound to another Keeper since the first press is another
+   target. *)
 type unbind_target =
   | Unbind_oauth_provider of { keeper : string; provider : string }
-  | Unbind_connector_channel of { connector : string; channel_id : string }
+  | Unbind_connector_channel of {
+      connector : string;
+      channel_id : string;
+      keeper_name : string option;
+    }
 
 type toast = {
   message : Say.t;
@@ -384,6 +390,7 @@ let equal_unbind_target a b =
   | Unbind_connector_channel x, Unbind_connector_channel y ->
       String.equal x.connector y.connector
       && String.equal x.channel_id y.channel_id
+      && Option.equal String.equal x.keeper_name y.keeper_name
   | Unbind_oauth_provider _, Unbind_connector_channel _
   | Unbind_connector_channel _, Unbind_oauth_provider _ ->
       false

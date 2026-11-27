@@ -7956,23 +7956,31 @@ and execute_action ~now (m : Model.t) action =
                       if String.equal (String.trim b.keeper_name) "" then None
                       else Some b.keeper_name
                     in
+                    (* The ask names the Keeper, so an ask repeated because the
+                       channel went to another Keeper reads differently. *)
+                    let bound_to =
+                      match keeper_name with
+                      | Some name -> " -> " ^ name
+                      | None -> ""
+                    in
                     unbind_on_second_press ~now
                       ~target:
                         (Model.Unbind_connector_channel
                            {
                              connector = conn.connector_id;
                              channel_id = b.channel_id;
+                             keeper_name;
                            })
                       ~ask:
                         (Say.make
                            ~ko:
                              (Printf.sprintf
-                                "한 번 더 [U]를 누르면 커넥터 바인딩을 해제합니다: %s (%s)"
-                                conn.connector_id b.channel_id)
+                                "한 번 더 [U]를 누르면 커넥터 바인딩을 해제합니다: %s (%s)%s"
+                                conn.connector_id b.channel_id bound_to)
                            ~en:
                              (Printf.sprintf
-                                "Press [U] again to unbind connector: %s (%s)"
-                                conn.connector_id b.channel_id))
+                                "Press [U] again to unbind connector: %s (%s)%s"
+                                conn.connector_id b.channel_id bound_to))
                       ~sent:
                         (Say.make
                            ~ko:

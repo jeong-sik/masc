@@ -791,6 +791,69 @@ let test_action_creates_only_owned_hierarchy () =
     check bool "receipt is retained" true
       (Store.load_action store ~instance_id:"instance" ~request_id:"request" = Ok (Some (`Assoc []))))
 
+let test_durable_directory_caches_steady_state_and_detects_replacement () =
+  let anchor = Filename.temp_dir "lane-dir-cache" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree anchor) (fun () ->
+    let root = Filename.concat anchor "lane-addons" in
+    let actions = Filename.concat root "actions" in
+    let store = Store.create ~root in
+    let synced = ref [] in
+    let sync_real parent =
+      synced := parent :: !synced;
+      let fd = Unix.openfile parent [Unix.O_RDONLY; Unix.O_CLOEXEC] 0 in
+      Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd) in
+    (* 1. First write syncs anchor, root, and actions in order. *)
+    Store.For_testing.save_action ~sync_parent:sync_real store
+      ~instance_id:"inst-a" ~request_id:"req-1" (`Assoc ["n", `Int 1]) |> unwrap;
+    check (list string) "first write syncs every newly established ancestor"
+      [anchor; root; actions] (List.rev !synced);
+    (* 2. Steady-state subsequent writes to the same directory skip redundant sync_parent. *)
+    synced := [];
+    Store.For_testing.save_action ~sync_parent:sync_real store
+      ~instance_id:"inst-a" ~request_id:"req-2" (`Assoc ["n", `Int 2]) |> unwrap;
+    Store.For_testing.save_action ~sync_parent:sync_real store
+      ~instance_id:"inst-a" ~request_id:"req-3" (`Assoc ["n", `Int 3]) |> unwrap;
+    check (list string) "steady-state writes skip redundant ancestor sync_parent"
+      [] (List.rev !synced);
+    (* 3. A sibling instance directory syncs only its direct parent (actions). *)
+    synced := [];
+    Store.For_testing.save_action ~sync_parent:sync_real store
+      ~instance_id:"inst-b" ~request_id:"req-1" (`Assoc ["n", `Int 1]) |> unwrap;
+    check (list string) "new sibling directory syncs only its direct parent"
+      [actions] (List.rev !synced);
+    (* 4. Failed sync_parent does not cache; retry must sync and succeed. *)
+    synced := [];
+    let fail_on_actions parent =
+      synced := parent :: !synced;
+      if parent = actions then raise (Unix.Unix_error (Unix.EIO, "fsync", parent))
+      else sync_real parent in
+    check bool "failed sync_parent rejects write" true
+      (Result.is_error (Store.For_testing.save_action ~sync_parent:fail_on_actions store
+        ~instance_id:"inst-c" ~request_id:"req-1" (`Assoc [])));
+    synced := [];
+    Store.For_testing.save_action ~sync_parent:sync_real store
+      ~instance_id:"inst-c" ~request_id:"req-1" (`Assoc ["n", `Int 1]) |> unwrap;
+    check (list string) "retry after failed sync_parent re-syncs parent"
+      [actions] (List.rev !synced);
+    (* 5. External replacement of a cached directory (new inode) triggers re-sync. *)
+    let inst_a_dir = Filename.concat actions (Store.digest "inst-a") in
+    let replacement = Filename.concat anchor "replacement-dir" in
+    Unix.mkdir replacement 0o700;
+    Fs_compat.remove_tree inst_a_dir;
+    Unix.rename replacement inst_a_dir;
+    synced := [];
+    Store.For_testing.save_action ~sync_parent:sync_real store
+      ~instance_id:"inst-a" ~request_id:"req-4" (`Assoc ["n", `Int 4]) |> unwrap;
+    check (list string) "externally replaced directory inode triggers re-sync"
+      [actions] (List.rev !synced);
+    (* 6. Fresh Store.create has an empty cache and establishes durability again. *)
+    let fresh = Store.create ~root in
+    synced := [];
+    Store.For_testing.save_action ~sync_parent:sync_real fresh
+      ~instance_id:"inst-a" ~request_id:"req-5" (`Assoc ["n", `Int 5]) |> unwrap;
+    check (list string) "fresh store handle syncs every ancestor again"
+      [anchor; root; actions] (List.rev !synced))
+
 let test_cold_receipt_requires_sync_and_same_file_identity () = with_fixture (fun clock fixture ->
   let id = attach clock fixture ~acting:true in
   let request_id = "cold-terminal-reconfirmation" in
@@ -1055,6 +1118,7 @@ let () = run "Lane action workflow" ["canonical request identity",[
   test_case "private Add-on events stay with their readers" `Quick test_private_addon_events_are_scoped_to_their_readers;
   test_case "replay rejects a replaced session identity" `Quick test_replay_rejects_replaced_session_identity;
   test_case "action creation stays below workspace anchor" `Quick test_action_creates_only_owned_hierarchy;
+  test_case "durable directory caches steady-state writes and re-syncs on failure, fresh store, or replacement" `Quick test_durable_directory_caches_steady_state_and_detects_replacement;
   test_case "first action directory must be durable before dispatch and on retry" `Quick test_first_action_requires_durable_directory;
   test_case "terminal and fallback publication failures keep hot uncertainty without replay" `Quick test_failed_terminal_and_fallback_keep_hot_uncertainty;
   test_case "cold terminal receipt requires file and parent sync and exact identity" `Quick test_cold_receipt_requires_sync_and_same_file_identity;

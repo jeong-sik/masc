@@ -1,7 +1,10 @@
 open Lane_addon_types
 open Result.Syntax
 type jsonl_snapshot = { entry_count : int; reference : evidence }
-type t = { root : string; root_parent_pending : bool Atomic.t; sequence_mutex : Mutex.t;
+type t = { root : string; root_parent_pending : bool Atomic.t;
+           synced_directories_mutex : Mutex.t;
+           synced_directories : (string, int * int * int * int) Hashtbl.t;
+           sequence_mutex : Mutex.t;
            sequences : (string, jsonl_snapshot) Hashtbl.t }
 let create ~root =
   let root = if Filename.is_relative root then Filename.concat (Sys.getcwd ()) root else root in
@@ -9,7 +12,10 @@ let create ~root =
     let length = String.length root in
     if length > 1 && root.[length - 1] = Filename.dir_sep.[0] then
       trim_separator (String.sub root 0 (length - 1)) else root in
-  { root = trim_separator root; root_parent_pending = Atomic.make true; sequence_mutex = Mutex.create (); sequences = Hashtbl.create 4 }
+  { root = trim_separator root; root_parent_pending = Atomic.make true;
+    synced_directories_mutex = Mutex.create ();
+    synced_directories = Hashtbl.create 16;
+    sequence_mutex = Mutex.create (); sequences = Hashtbl.create 4 }
 let root t = t.root
 let name_in_masc_dir = "lane-addons"
 let directory ~masc_dir = Filename.concat masc_dir name_in_masc_dir
@@ -35,23 +41,83 @@ let rec sync_existing_parent ~sync_parent directory =
   | Unix.Unix_error (Unix.ENOENT, _, _) as exn ->
       let parent = Filename.dirname directory in
       if parent=directory then raise exn else sync_existing_parent ~sync_parent parent
+let max_synced_directories = 4096
+let with_synced_directories_lock t f =
+  Mutex.lock t.synced_directories_mutex;
+  Fun.protect ~finally:(fun () -> Mutex.unlock t.synced_directories_mutex) f
+let directory_identity_if_dirs ~parent ~directory =
+  match Unix.lstat directory with
+  | { Unix.st_kind = Unix.S_DIR; st_dev = dir_dev; st_ino = dir_ino; _ } -> (
+      match Unix.lstat parent with
+      | { Unix.st_kind = Unix.S_DIR; st_dev = parent_dev; st_ino = parent_ino; _ } ->
+          Some (parent_dev, parent_ino, dir_dev, dir_ino)
+      | { Unix.st_kind = Unix.S_REG | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK; _ } -> None
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None)
+  | { Unix.st_kind = Unix.S_REG | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK; _ } -> None
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> None
+let synced_directory_matches t directory identity =
+  with_synced_directories_lock t (fun () ->
+    match Hashtbl.find_opt t.synced_directories directory with
+    | Some cached -> cached = identity
+    | None -> false)
+let record_synced_directory_if_stable t ~parent ~directory ~id_before =
+  match id_before, directory_identity_if_dirs ~parent ~directory with
+  | Some before_id, Some after_id when before_id = after_id ->
+      with_synced_directories_lock t (fun () ->
+        if not (Hashtbl.mem t.synced_directories directory)
+           && Hashtbl.length t.synced_directories >= max_synced_directories
+        then Hashtbl.clear t.synced_directories;
+        Hashtbl.replace t.synced_directories directory after_id)
+  | Some _, Some _ | Some _, None | None, Some _ | None, None ->
+      with_synced_directories_lock t (fun () ->
+        Hashtbl.remove t.synced_directories directory)
+let forget_synced_directory_tree t prefix =
+  let child_prefix = prefix ^ Filename.dir_sep in
+  with_synced_directories_lock t (fun () ->
+    let to_remove =
+      Hashtbl.fold
+        (fun key _ acc ->
+           if String.equal key prefix || String.starts_with ~prefix:child_prefix key then
+             key :: acc
+           else acc)
+        t.synced_directories []
+    in
+    List.iter (Hashtbl.remove t.synced_directories) to_remove)
 let rec durable_directory t ~sync_parent directory =
   let parent = Filename.dirname directory in
   if directory = t.root then (
-    (try Unix.mkdir directory 0o700; Atomic.set t.root_parent_pending true with
-     | Unix.Unix_error (Unix.EEXIST, _, _) ->
-         if (Unix.lstat directory).Unix.st_kind <> Unix.S_DIR then
-           raise (Sys_error "retained evidence root is not a directory"));
-    (* Flush only the new root entry, never walk preexisting ancestors.
-       Keep the obligation on failure so a retry in this store cannot skip it. *)
-    if Atomic.get t.root_parent_pending then (sync_parent parent; Atomic.set t.root_parent_pending false))
+    let already_synced =
+      not (Atomic.get t.root_parent_pending)
+      && match directory_identity_if_dirs ~parent ~directory with
+         | Some id -> synced_directory_matches t directory id
+         | None -> false
+    in
+    if not already_synced then (
+      (try Unix.mkdir directory 0o700; Atomic.set t.root_parent_pending true with
+       | Unix.Unix_error (Unix.EEXIST, _, _) ->
+           if (Unix.lstat directory).Unix.st_kind <> Unix.S_DIR then
+             raise (Sys_error "retained evidence root is not a directory"));
+      (* Flush only the new root entry, never walk preexisting ancestors.
+         Keep the obligation on failure so a retry in this store cannot skip it. *)
+      let id_before = directory_identity_if_dirs ~parent ~directory in
+      sync_parent parent;
+      Atomic.set t.root_parent_pending false;
+      record_synced_directory_if_stable t ~parent ~directory ~id_before))
   else if parent <> directory then (
     durable_directory t ~sync_parent parent;
-    (try Unix.mkdir directory 0o700 with
-     | Unix.Unix_error (Unix.EEXIST, _, _) ->
-         if (Unix.lstat directory).Unix.st_kind <> Unix.S_DIR then
-           raise (Sys_error "retained evidence parent is not a directory"));
-    sync_parent parent)
+    let already_synced =
+      match directory_identity_if_dirs ~parent ~directory with
+      | Some id -> synced_directory_matches t directory id
+      | None -> false
+    in
+    if not already_synced then (
+      (try Unix.mkdir directory 0o700 with
+       | Unix.Unix_error (Unix.EEXIST, _, _) ->
+           if (Unix.lstat directory).Unix.st_kind <> Unix.S_DIR then
+             raise (Sys_error "retained evidence parent is not a directory"));
+      let id_before = directory_identity_if_dirs ~parent ~directory in
+      sync_parent parent;
+      record_synced_directory_if_stable t ~parent ~directory ~id_before))
 let write_with ~sync_parent t relative bytes = protect (fun () ->
   let path = Filename.concat t.root relative in
   durable_directory t ~sync_parent (Filename.dirname path);
@@ -548,6 +614,7 @@ let instance_folders t = protect (fun () ->
 let remove_instance_folder_with ~sync_parent t folder = protect (fun () ->
   let path = Filename.concat t.root (instance_folder_path folder) in
   Fs_compat.remove_tree path;
+  forget_synced_directory_tree t path;
   sync_existing_parent ~sync_parent (Filename.dirname path);
   Ok ())
 let remove_instance_folder = remove_instance_folder_with ~sync_parent:sync_parent_directory

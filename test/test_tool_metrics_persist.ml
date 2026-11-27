@@ -373,6 +373,89 @@ let test_duplicate_record_id_is_idempotent () =
       (Tool_metrics_store.summary ~masc_root:(masc_root base_path)
        |> get_ok "summary after duplicate").entry_count)
 
+let test_summary_cache_tracks_inserts_prunes_and_external_writes () =
+  with_tmp_dir (fun base_path ->
+    let root = masc_root base_path in
+    let insert ~record_id ~ts =
+      Tool_metrics_store.insert
+        ~masc_root:root
+        ~result_bytes:0
+        ~failure_class:None
+        { record_id
+        ; ts
+        ; tool_name = "alpha"
+        ; disposition = "completed"
+        ; duration_ms = 1.0
+        }
+      |> get_ok ("insert " ^ record_id)
+    in
+    let now = Unix.gettimeofday () in
+    insert ~record_id:"r1" ~ts:(now -. 10.0);
+    let s1 = Tool_metrics_store.summary ~masc_root:root |> get_ok "first summary" in
+    Alcotest.(check int) "initial count" 1 s1.entry_count;
+    Alcotest.(check (option (float 0.001))) "initial latest_ts" (Some (now -. 10.0)) s1.latest_ts;
+    (* Duplicate insert must not double-count in the cached summary. *)
+    insert ~record_id:"r1" ~ts:(now +. 50.0);
+    let s2 = Tool_metrics_store.summary ~masc_root:root |> get_ok "after duplicate" in
+    Alcotest.(check int) "duplicate does not increment count" 1 s2.entry_count;
+    Alcotest.(check (option (float 0.001))) "duplicate does not advance latest_ts" (Some (now -. 10.0)) s2.latest_ts;
+    (* Older timestamp increments count without regressing latest_ts. *)
+    insert ~record_id:"r-old" ~ts:1.0;
+    let s3 = Tool_metrics_store.summary ~masc_root:root |> get_ok "after older row" in
+    Alcotest.(check int) "older insert increments count" 2 s3.entry_count;
+    Alcotest.(check (option (float 0.001))) "older insert keeps max latest_ts" (Some (now -. 10.0)) s3.latest_ts;
+    (* Newer timestamp increments count and advances latest_ts. *)
+    insert ~record_id:"r-new" ~ts:now;
+    let s4 = Tool_metrics_store.summary ~masc_root:root |> get_ok "after newer row" in
+    Alcotest.(check int) "newer insert increments count" 3 s4.entry_count;
+    Alcotest.(check (option (float 0.001))) "newer insert advances latest_ts" (Some now) s4.latest_ts;
+    (* Prune invalidates the cached summary so removed rows are reflected. *)
+    let pruned = Tool_metrics_store.prune ~masc_root:root ~retention_days:30 |> get_ok "prune" in
+    Alcotest.(check int) "one expired row pruned" 1 pruned;
+    let s5 = Tool_metrics_store.summary ~masc_root:root |> get_ok "after prune" in
+    Alcotest.(check int) "count after prune" 2 s5.entry_count;
+    Alcotest.(check (option (float 0.001))) "latest_ts after prune" (Some now) s5.latest_ts;
+    (* External SQLite connection write bumps PRAGMA data_version and invalidates cache. *)
+    let ext_db = Sqlite3.db_open (Tool_metrics_store.database_path ~masc_root:root) in
+    Fun.protect
+      ~finally:(fun () -> ignore (Sqlite3.db_close ext_db : bool))
+      (fun () ->
+        let ext_ts = now +. 100.0 in
+        let sql =
+          Printf.sprintf
+            "INSERT INTO tool_metric_events (record_id, ts, tool_name, disposition, duration_ms) \
+             VALUES ('ext-1', %.6f, 'ext', 'completed', 1.0)"
+            ext_ts
+        in
+        let rc = Sqlite3.exec ext_db sql in
+        Alcotest.(check bool) "external insert succeeded" true (Sqlite3.Rc.is_success rc));
+    let s6 = Tool_metrics_store.summary ~masc_root:root |> get_ok "after external write" in
+    Alcotest.(check int) "external write refreshes count" 3 s6.entry_count;
+    Alcotest.(check (option (float 0.01))) "external write refreshes latest_ts" (Some (now +. 100.0)) s6.latest_ts;
+    (* External write followed by a local insert must still invalidate the cache via data_version. *)
+    let ext_db2 = Sqlite3.db_open (Tool_metrics_store.database_path ~masc_root:root) in
+    Fun.protect
+      ~finally:(fun () -> ignore (Sqlite3.db_close ext_db2 : bool))
+      (fun () ->
+        let sql =
+          Printf.sprintf
+            "INSERT INTO tool_metric_events (record_id, ts, tool_name, disposition, duration_ms) \
+             VALUES ('ext-2', %.6f, 'ext', 'completed', 1.0)"
+            (now +. 200.0)
+        in
+        let rc = Sqlite3.exec ext_db2 sql in
+        Alcotest.(check bool) "second external insert succeeded" true (Sqlite3.Rc.is_success rc));
+    insert ~record_id:"r-after-ext" ~ts:(now +. 150.0);
+    let s7 = Tool_metrics_store.summary ~masc_root:root |> get_ok "after ext + local insert" in
+    Alcotest.(check int) "ext write + local insert refreshes count" 5 s7.entry_count;
+    Alcotest.(check (option (float 0.01))) "ext write + local insert refreshes latest_ts" (Some (now +. 200.0)) s7.latest_ts;
+    (* Constraint-ignored inserts (NaN / negative ts) must leave cached summary untouched. *)
+    insert ~record_id:"r-nan" ~ts:Float.nan;
+    insert ~record_id:"r-neg" ~ts:(-1.0);
+    let s8 = Tool_metrics_store.summary ~masc_root:root |> get_ok "after ignored invalid ts" in
+    Alcotest.(check int) "ignored invalid inserts do not change count" 5 s8.entry_count;
+    Alcotest.(check (option (float 0.01))) "ignored invalid inserts do not poison latest_ts" (Some (now +. 200.0)) s8.latest_ts)
+
 let test_write_failure_does_not_raise () =
   with_tmp_dir (fun base_path ->
     let masc_path = Filename.concat base_path ".masc" in
@@ -508,6 +591,9 @@ let () =
           ; eio_test
               "duplicate record ids are idempotent"
               test_duplicate_record_id_is_idempotent
+          ; eio_test
+              "summary cache tracks inserts, prunes, and external writes"
+              test_summary_cache_tracks_inserts_prunes_and_external_writes
           ; eio_test
               "storage failure does not change tool completion"
               test_write_failure_does_not_raise

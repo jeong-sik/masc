@@ -1097,15 +1097,88 @@ let trajectory_tool_call_summary_stats dirs =
                     (count_acc, latest_acc)))
        (0, None) dirs
 
+type goal_event_file_summary =
+  { gef_dev : int
+  ; gef_ino : int
+  ; gef_size : int
+  ; gef_mtime : float
+  ; gef_ctime : float
+  ; gef_count : int
+  ; gef_latest_ts : float option
+  }
+
+let goal_event_summary_cache : (string, goal_event_file_summary) Hashtbl.t =
+  Hashtbl.create 4
+
+let goal_event_summary_cache_mu = Stdlib.Mutex.create ()
+
+let evict_goal_event_summary_cache path =
+  Stdlib.Mutex.protect goal_event_summary_cache_mu (fun () ->
+    Hashtbl.remove goal_event_summary_cache path)
+
+let goal_event_summary_matches_stat (cached : goal_event_file_summary) (st : Unix.stats) =
+  cached.gef_dev = st.st_dev
+  && cached.gef_ino = st.st_ino
+  && cached.gef_size = st.st_size
+  && Float.equal cached.gef_mtime st.st_mtime
+  && Float.equal cached.gef_ctime st.st_ctime
+
 let goal_event_summary_stats ~masc_root =
   let path = goal_events_path ~masc_root in
-  if not (Sys.file_exists path) then (0, None)
-  else
+  match Unix.stat path with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+    evict_goal_event_summary_cache path;
+    (0, None)
+  | exception (Unix.Unix_error _ | Sys_error _) ->
+    evict_goal_event_summary_cache path;
     let entries =
       protect_source_read Goal_event ~site:"goal_event_summary_stats"
         ~default:[] (fun () -> Fs_compat.load_jsonl path)
     in
     (List.length entries, latest_ts_of_entries entries)
+  | st ->
+    let cached =
+      Stdlib.Mutex.protect goal_event_summary_cache_mu (fun () ->
+        Hashtbl.find_opt goal_event_summary_cache path)
+    in
+    (match cached with
+     | Some entry when goal_event_summary_matches_stat entry st ->
+       (entry.gef_count, entry.gef_latest_ts)
+     | Some _ | None ->
+       let read_ok = ref false in
+       let entries =
+         protect_source_read Goal_event ~site:"goal_event_summary_stats"
+           ~default:[] (fun () ->
+             let rows = Fs_compat.load_jsonl path in
+             read_ok := true;
+             rows)
+       in
+       let count = List.length entries in
+       let latest_ts = latest_ts_of_entries entries in
+       if !read_ok then (
+         match Unix.stat path with
+         | after
+           when after.st_dev = st.st_dev
+                && after.st_ino = st.st_ino
+                && after.st_size = st.st_size
+                && Float.equal after.st_mtime st.st_mtime
+                && Float.equal after.st_ctime st.st_ctime ->
+           Stdlib.Mutex.protect goal_event_summary_cache_mu (fun () ->
+             Hashtbl.replace goal_event_summary_cache path
+               { gef_dev = st.st_dev
+               ; gef_ino = st.st_ino
+               ; gef_size = st.st_size
+               ; gef_mtime = st.st_mtime
+               ; gef_ctime = st.st_ctime
+               ; gef_count = count
+               ; gef_latest_ts = latest_ts
+               })
+         | _ -> evict_goal_event_summary_cache path
+         | exception (Unix.Unix_error _ | Sys_error _) ->
+           evict_goal_event_summary_cache path)
+       else
+         evict_goal_event_summary_cache path;
+       (count, latest_ts))
 
 type summary_observation = {
   json : Yojson.Safe.t;
@@ -1275,7 +1348,9 @@ let observe_summary ~now ?keeper_keepalive_interval_s
       let exists = Sys.file_exists path in
       let count, latest_ts =
         if exists then goal_event_summary_stats ~masc_root
-        else (0, None)
+        else (
+          evict_goal_event_summary_cache path;
+          (0, None))
       in
       let coverage_gap_fields, coverage_gap =
         coverage_gap_status_fields coverage_gaps source ~latest_ts

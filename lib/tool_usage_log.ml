@@ -36,14 +36,6 @@ let store_dir masc_root = Dated_jsonl.Store.dir (location masc_root)
 
 let ts_of_record = Dashboard_tool_source_freshness.latest_ts_of_record
 
-let latest_ts_of_entries entries =
-  List.fold_left
-    (fun acc json ->
-      match ts_of_record json with
-      | Some ts when Stdlib.Float.compare ts 0.0 > 0 -> (match acc with | None -> Some ts | Some prev -> Some (Stdlib.Float.max prev ts))
-      | _ -> acc)
-    None entries
-
 let freshness_fields = Dashboard_tool_source_freshness.freshness_fields
 
 (* The last of four bodies this file kept alongside
@@ -119,23 +111,33 @@ let record_coverage_gap ~masc_root ~durable_store ~stale_reason ?caller
     Log.Misc.warn "tool_usage_log: coverage gap append failed: %s"
       (Stdlib.Printexc.to_string gap_exn)
 
-let count_entries store =
-  try Dated_jsonl.count_entries store with
-  | Eio.Cancel.Cancelled _ as cancel -> raise cancel
-  | exn ->
-    Log.Misc.warn "tool_usage_log: count failed for %s: %s"
-      (Dated_jsonl.base_dir store)
-      (Stdlib.Printexc.to_string exn);
-    0
+let latest_ts_probe_rows = 64
 
-let latest_ts store =
-  try latest_ts_of_entries (Dated_jsonl.read_recent store 64) with
+let latest_ts_view =
+  Dated_jsonl.recent_view latest_ts_probe_rows ~f:(fun json ->
+    match ts_of_record json with
+    | Some ts when Stdlib.Float.compare ts 0.0 > 0 -> Some ts
+    | _ -> None)
+
+let count_and_latest_ts store =
+  try
+    let count, timestamps = Dated_jsonl.count_and_read_recent_view latest_ts_view store in
+    let latest =
+      List.fold_left
+        (fun acc ts ->
+          match acc with
+          | None -> Some ts
+          | Some prev -> Some (Stdlib.Float.max prev ts))
+        None timestamps
+    in
+    (count, latest)
+  with
   | Eio.Cancel.Cancelled _ as cancel -> raise cancel
   | exn ->
-    Log.Misc.warn "tool_usage_log: latest read failed for %s: %s"
+    Log.Misc.warn "tool_usage_log: summary read failed for %s: %s"
       (Dated_jsonl.base_dir store)
       (Stdlib.Printexc.to_string exn);
-    None
+    (0, None)
 
 let init ~base_path () =
   let masc_root = Common.masc_dir_from_base_path ~base_path in
@@ -251,7 +253,7 @@ let source_metadata_json ~masc_root =
   let entry_count, latest_ts =
     if exists && not store_not_directory then
       let store = Dated_jsonl.open_store (location masc_root) in
-      (count_entries store, latest_ts store)
+      count_and_latest_ts store
     else
       (0, None)
   in

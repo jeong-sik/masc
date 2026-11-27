@@ -168,10 +168,17 @@ let install ~state ~sw ~clock ~mono_clock ~on_shell_published =
         (fun input -> List.iter signal (components_of_input input));
       let announce topic = if is_current () then
         Workspace_dataset_event.announce_dashboard_observation ~base_path ~scope:`Workspace topic in
-      let worker_config label timeout_s =
+      (* Shell reacts quickly to agent/runtime presence changes; Tools and
+         Telemetry receive per-tool-call / per-trajectory invalidations and
+         coalesce bursts over a wider spacing so high-frequency tool activity
+         does not flood the shared CPU pool every second. *)
+      let tools_change_read_spacing_s = 3.0 in
+      let telemetry_change_read_spacing_s = 5.0 in
+      let worker_config label ?spacing_s timeout_s =
         let interval_s = Server_observation_retry.initial_delay_s in
+        let change_read_spacing_s = Option.value spacing_s ~default:interval_s in
         { (Proactive_refresh.default_config ~label ~interval_s) with
-          timeout_s; change_read_spacing_s = interval_s } in
+          timeout_s; change_read_spacing_s } in
       let offload work = Pool_work.submit (Pool_work.cpu ~name:__FUNCTION__ work) in
       (* Let the first Shell attempt settle before the cold 24h cost scan claims
          a background pool worker, so a 1-domain pool never queues Shell behind
@@ -198,7 +205,8 @@ let install ~state ~sw ~clock ~mono_clock ~on_shell_published =
             on_shell_published ~scope ~shell ~shell_light;
             announce `Runtime_resolved));
       Proactive_refresh.start_on_change ~sw ~clock ~changes:tools_changes
-        ~config:(worker_config "dashboard Tools sources" Server_dashboard_http_core_cache.dashboard_request_timeout_s)
+        ~config:(worker_config "dashboard Tools sources" ~spacing_s:tools_change_read_spacing_s
+          Server_dashboard_http_core_cache.dashboard_request_timeout_s)
         ~compute:(fun () -> offload (fun () -> match (!readers).tools config with
           | Dashboard_snapshot.Tools_ready json ->
               Read_tools (Dashboard_snapshot.prepare_tools publisher json)
@@ -212,7 +220,8 @@ let install ~state ~sw ~clock ~mono_clock ~on_shell_published =
           | Awaiting_tools -> ()
           | Failed_tools -> if is_current () then raise Tools_read_failed);
       Proactive_refresh.start_on_change_or_deadline ~sw ~clock ~changes:telemetry_changes
-        ~config:(worker_config "dashboard telemetry sources" Server_dashboard_http_core_cache.dashboard_request_timeout_s)
+        ~config:(worker_config "dashboard telemetry sources" ~spacing_s:telemetry_change_read_spacing_s
+          Server_dashboard_http_core_cache.dashboard_request_timeout_s)
         ~compute:(fun () -> offload (fun () ->
           let observation = (!readers).telemetry ~now:(Eio.Time.now clock) config in
           let prepared = Dashboard_snapshot.prepare_telemetry publisher observation.json in

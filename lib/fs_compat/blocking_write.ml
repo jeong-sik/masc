@@ -16,7 +16,7 @@ let write_string ~label resource content =
           Fd_write_all.run
             ~length:(String.length content)
             ~write:(fun ~offset ~length ->
-              Unix.write_substring unix_fd content offset length)
+              Unix.single_write_substring unix_fd content offset length)
         with
         | Ok () -> Ok ()
         | Error (Fd_write_all.No_progress { bytes_written }) ->

@@ -283,11 +283,9 @@ type borrow_decision =
 
 type release_decision =
   | Released
-  | Release_and_signal
   | Release_invariant of invariant_violation
 
 type close_decision =
-  | Close_and_signal
   | Await_drain
   | Already_drained
   | Close_invariant of invariant_violation

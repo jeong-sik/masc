@@ -163,20 +163,21 @@ let update_sub_board
 ;;
 
 let get_sub_board store ~sub_board_id : (sub_board, board_error) Result.t =
-  with_lock store (fun () ->
-  let* () = Board_sub_boards_source.require_readable store in
-    match Hashtbl.find_opt store.sub_boards sub_board_id with
-    | Some sb -> Ok (sub_board_with_post_count_unlocked store sb)
-    | None ->
-      (* fallback: try slug *)
-      (match Hashtbl.find_opt store.sub_boards_by_slug sub_board_id with
-       | Some id ->
-         (match Hashtbl.find_opt store.sub_boards id with
-          | Some sb -> Ok (sub_board_with_post_count_unlocked store sb)
-          | None ->
-            Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id)))
-       | None ->
-         Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id))))
+  with_persist_lock store (fun () ->
+    with_lock store (fun () ->
+      let* () = Board_sub_boards_source.require_readable store in
+      match Hashtbl.find_opt store.sub_boards sub_board_id with
+      | Some sb -> Ok (sub_board_with_post_count_unlocked store sb)
+      | None ->
+        (* fallback: try slug *)
+        (match Hashtbl.find_opt store.sub_boards_by_slug sub_board_id with
+         | Some id ->
+           (match Hashtbl.find_opt store.sub_boards id with
+            | Some sb -> Ok (sub_board_with_post_count_unlocked store sb)
+            | None ->
+              Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id)))
+         | None ->
+           Error (Invalid_id (Printf.sprintf "Sub-board not found: %s" sub_board_id)))))
 ;;
 
 let list_sub_boards_unlocked store : sub_board list =
@@ -194,9 +195,10 @@ let list_sub_boards store : sub_board list =
 ;;
 
 let read_sub_boards store =
-  with_lock store (fun () ->
-    let* () = Board_sub_boards_source.require_readable store in
-    Ok (list_sub_boards_unlocked store))
+  with_persist_lock store (fun () ->
+    with_lock store (fun () ->
+      let* () = Board_sub_boards_source.require_readable store in
+      Ok (list_sub_boards_unlocked store)))
 ;;
 
 let delete_sub_board = Board_deletion.delete_sub_board

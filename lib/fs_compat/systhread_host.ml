@@ -133,8 +133,8 @@ let fail_host exn =
    one. The last domain does not join, so a host run on the main domain
    would lose the answer of work that had begun. *)
 let serve ~on_domain_start () =
-  on_domain_start ();
   match
+    on_domain_start ();
     Eio_main.run (fun _env ->
       Eio.Switch.run (fun sw ->
         let rec loop () =

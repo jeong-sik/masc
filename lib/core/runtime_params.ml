@@ -73,9 +73,24 @@ let global_base_path = Atomic.make None
     parameter's override is read without it.
     Falls back to lock-free when Eio scheduler is absent (tests, init). *)
 let mu = Eio.Mutex.create ()
+let persist_mu = Eio.Mutex.create ()
 
 let with_rw f = Eio_guard.with_mutex mu f
 let with_ro f = Eio_guard.with_mutex_ro mu f
+let with_persist_lock f = Eio_guard.with_mutex_ro persist_mu f
+
+(* Run [f] exclusively under [mu] without poisoning [mu] when a caller-supplied
+   [validate]/[serialize]/[deserialize]/[default] callback or duplicate-key check
+   raises. *)
+let with_rw_no_poison f =
+  match
+    with_rw (fun () ->
+      try Ok (f ()) with
+      | exn -> Error (exn, Printexc.get_raw_backtrace ()))
+  with
+  | Ok value -> value
+  | Error (exn, bt) -> Printexc.raise_with_backtrace exn bt
+;;
 
 let initialize ~base_path = Atomic.set global_base_path (Some base_path)
 
@@ -116,7 +131,7 @@ let register ~key ~default ~validate ~serialize ~deserialize ?meta () =
   (* Check + insert under mutex to prevent TOCTOU race.
      At module init time, Eio scheduler may be absent — with_rw falls
      back to lock-free f() which is safe since init is single-threaded. *)
-  with_rw (fun () ->
+  with_rw_no_poison (fun () ->
     if Hashtbl.mem registry_tbl key then
       invalid_arg (sprintf "Runtime_params: duplicate key %S" key);
     Hashtbl.replace registry_tbl key erased);
@@ -153,20 +168,21 @@ let notify_changed ~key = (Atomic.get change_observer) ~key
 
 let persist ~base_path =
   try
-    let path = params_file base_path in
-    ensure_dir path;
-    let overrides =
-      with_ro (fun () ->
-        Hashtbl.fold
-          (fun _key (erased : erased) acc ->
-            if erased.has_override () then (erased.key, erased.current_json ()) :: acc
-            else acc)
-          registry_tbl [])
-    in
-    let json = `Assoc overrides in
-    (match Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json) with
-     | Ok () -> ()
-     | Error msg -> Log.Config.error "Runtime_params.persist atomic: %s" msg)
+    with_persist_lock (fun () ->
+      let path = params_file base_path in
+      ensure_dir path;
+      let overrides =
+        with_ro (fun () ->
+          Hashtbl.fold
+            (fun _key (erased : erased) acc ->
+              if erased.has_override () then (erased.key, erased.current_json ()) :: acc
+              else acc)
+            registry_tbl [])
+      in
+      let json = `Assoc overrides in
+      match Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json) with
+      | Ok () -> ()
+      | Error msg -> Log.Config.error "Runtime_params.persist atomic: %s" msg)
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     Log.Config.error "Runtime_params.persist: %s" (Printexc.to_string exn)
 
@@ -177,7 +193,7 @@ let restore ~base_path =
       let content = Fs_compat.load_file path in
       match Yojson.Safe.from_string content with
       | `Assoc pairs ->
-          with_rw (fun () ->
+          with_rw_no_poison (fun () ->
             List.iter
               (fun (key, json) ->
                 match Hashtbl.find_opt registry_tbl key with
@@ -233,7 +249,7 @@ let get (entry : 'a param) =
 
 let set ?base_path ?(actor = "system") (entry : 'a param) value =
   let result =
-    with_rw (fun () ->
+    with_rw_no_poison (fun () ->
       match entry.validate value with
       | Error msg -> Error (sprintf "validation failed for %s: %s" entry.key msg)
       | Ok () ->
@@ -257,7 +273,7 @@ let set ?base_path ?(actor = "system") (entry : 'a param) value =
 
 let set_by_key_with_change ?base_path ?(actor = "system") key json =
   let result =
-    with_rw (fun () ->
+    with_rw_no_poison (fun () ->
       match Hashtbl.find_opt registry_tbl key with
       | None -> Error (sprintf "unknown parameter: %s" key)
       | Some erased ->
@@ -285,7 +301,7 @@ let set_by_key ?base_path ?actor key json =
 
 let clear ?base_path ?(actor = "system") (entry : 'a param) =
   let key, old_value, new_value =
-    with_rw (fun () ->
+    with_rw_no_poison (fun () ->
       let old_value =
         entry.serialize
           (match Atomic.get entry.override with Some v -> v | None -> entry.default ())
@@ -302,7 +318,7 @@ let clear ?base_path ?(actor = "system") (entry : 'a param) =
 
 let clear_by_key_with_change ?base_path ?(actor = "system") key =
   let result =
-    with_rw (fun () ->
+    with_rw_no_poison (fun () ->
       match Hashtbl.find_opt registry_tbl key with
       | None -> Error (sprintf "unknown parameter: %s" key)
       | Some erased ->

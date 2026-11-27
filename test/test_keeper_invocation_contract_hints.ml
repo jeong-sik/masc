@@ -1,10 +1,8 @@
-(** An undeclared-field rejection names the fields that are accepted.
+(** What the delegate tools take as [target], and what a refusal tells the
+    caller to send instead.
 
-    Live tool-call logs show the cost of the previous message. masc_keeper_delegate
-    failed 43 times out of 171, and the failures are field-name guesses:
-    target.agent, then target.keeper_name, then target.keeper, one per call,
-    against an allowed list of [kind; name]. The rejection said only
-    "no undeclared field", so each attempt was a fresh guess. *)
+    [target] is the receiving Keeper's name as a JSON string. A Keeper target
+    has one kind, so the wire carries no field that names it (#38590). *)
 
 module C = Masc.Keeper_invocation_contract
 
@@ -18,41 +16,63 @@ let contains ~needle haystack =
   let rec go i = i + nl <= hl && (String.sub haystack i nl = needle || go (i + 1)) in
   nl = 0 || go 0
 
-let test_undeclared_field_names_the_accepted_set () =
-  (* The exact shape fixture-keeper sent. *)
-  let json = `Assoc [ "agent", `String "delta" ] in
-  match message_of_target_json json with
-  | None -> Alcotest.fail "expected target.agent to be rejected"
-  | Some msg ->
-    Alcotest.(check bool) "names the offending field" true
-      (contains ~needle:"target.agent" msg);
-    Alcotest.(check bool) "names the accepted fields" true
-      (contains ~needle:"accepted: kind, name" msg)
-
-let test_other_guessed_names_get_the_same_hint () =
-  List.iter
-    (fun field ->
-      let json = `Assoc [ field, `String "delta" ] in
-      match message_of_target_json json with
-      | None -> Alcotest.failf "expected target.%s to be rejected" field
-      | Some msg ->
-        Alcotest.(check bool)
-          (Printf.sprintf "target.%s hint lists accepted fields" field)
-          true
-          (contains ~needle:"accepted: kind, name" msg))
-    [ "keeper_name"; "keeper" ]
-
-let test_valid_target_still_parses () =
-  let json = `Assoc [ "kind", `String "keeper"; "name", `String "delta" ] in
-  match C.target_of_json json with
-  | Ok _ -> ()
+let test_a_keeper_name_parses () =
+  match C.target_of_json (`String "delta") with
+  | Ok target ->
+    Alcotest.(check string) "the name is the target" "delta"
+      (C.target_name_of_target target)
   | Error err ->
-    Alcotest.failf "expected a kind/name target to parse, got %s"
+    Alcotest.failf "expected a Keeper name to parse, got %s"
       (C.request_error_to_string err)
 
-(* The field-name hint above closed the target guesses: in the week measured for
-   this change, 0 of 29 delegate rejections were target shape. All 29 were
-   [capability], which the submitter cannot choose -- its enum has one member.
+(* The two-field object is gone, not tolerated: a caller still sending it is
+   told the shape to send, in the words the schema layer uses. *)
+let test_an_object_is_refused_naming_the_string_shape () =
+  List.iter
+    (fun (label, json) ->
+      match message_of_target_json json with
+      | None -> Alcotest.failf "expected %s to be refused" label
+      | Some msg ->
+        Alcotest.(check bool) (label ^ ": names the field") true
+          (contains ~needle:"\"target\"" msg);
+        Alcotest.(check bool) (label ^ ": says the type is wrong") true
+          (contains ~needle:"wrong type" msg);
+        Alcotest.(check bool) (label ^ ": shows the shape to send") true
+          (contains ~needle:{|"target": "reviewer"|} msg);
+        Alcotest.(check bool) (label ^ ": names what arrived") true
+          (contains ~needle:"got: object" msg))
+    [ "kind and name", `Assoc [ "kind", `String "keeper"; "name", `String "delta" ]
+    ; "name alone", `Assoc [ "name", `String "delta" ]
+    ]
+
+let test_a_mistyped_target_names_what_arrived () =
+  match message_of_target_json (`Int 1) with
+  | None -> Alcotest.fail "a non-string target must be refused"
+  | Some msg ->
+    Alcotest.(check bool) "names the expected type" true (contains ~needle:"string" msg);
+    Alcotest.(check bool) "names what arrived" true (contains ~needle:"integer" msg)
+
+let test_a_name_that_is_not_a_keeper_name_is_refused () =
+  match C.target_of_json (`String "bad keeper!") with
+  | Ok _ -> Alcotest.fail "a name that is not a Keeper name must be refused"
+  | Error (C.Invalid_target reason) ->
+    Alcotest.(check bool) "the reason is the Keeper name rule" true
+      (contains ~needle:"keeper_name" reason)
+  | Error err ->
+    Alcotest.failf "refused for another reason: %s" (C.request_error_to_string err)
+
+let test_an_absent_target_reads_as_missing () =
+  match C.request_of_json (`Assoc [ "prompt", `String "hello" ]) with
+  | Ok _ -> Alcotest.fail "a request without target must be refused"
+  | Error err ->
+    let msg = C.request_error_to_string err in
+    Alcotest.(check bool) "names the field" true (contains ~needle:"delegate.target" msg);
+    Alcotest.(check bool) "says it is missing" true (contains ~needle:"MISSING" msg);
+    Alcotest.(check bool) "names the type to send" true
+      (contains ~needle:"required: string" msg)
+
+(* In the week measured for the capability change, all 29 delegate rejections
+   were [capability], which the submitter cannot choose -- its enum has one member.
    22 said "task_assignment" and 7 said "claim_and_execute", both descriptions
    of the prompt rather than capabilities the contract offers. *)
 
@@ -61,7 +81,7 @@ let request_json ?capability () =
     ((match capability with
       | None -> []
       | Some value -> [ "capability", `String value ])
-     @ [ "target", `Assoc [ "kind", `String "keeper"; "name", `String "delta" ]
+     @ [ "target", `String "delta"
        ; "prompt", `String "Claim and work on task-154."
        ])
 
@@ -137,62 +157,59 @@ let test_capability_is_still_accepted_on_the_wire () =
       "an existing sender's capability must still parse, got %s"
       (C.request_error_to_string err)
 
-(* The schema layer and the payload layer answer the same model in the same
-   turn. [Agent_core.Tool_input_validation] writes an absent field as
-   MISSING (required: <type>) and a mistyped one as "wrong type - expected: X,
-   got: Y"; a payload that clears the schema and fails here used to answer in a
-   second vocabulary ("target.kind must be required field"), which names the
-   rule the field broke instead of the correction. These pin the two layers to
-   one wording. *)
-let test_absent_field_reads_as_missing () =
-  match message_of_target_json (`Assoc [ "name", `String "delta" ]) with
-  | None -> Alcotest.fail "a target without kind must be rejected"
-  | Some msg ->
-    Alcotest.(check bool) "names the field" true (contains ~needle:"target.kind" msg);
-    Alcotest.(check bool) "says it is missing" true (contains ~needle:"MISSING" msg);
-    Alcotest.(check bool)
-      "names the type to send"
-      true
-      (contains ~needle:"required: string" msg)
-;;
+let delegate_tool_names =
+  [ "masc_keeper_delegate"
+  ; "masc_keeper_delegate_cancel"
+  ; "masc_keeper_delegate_list"
+  ; "masc_keeper_delegate_status"
+  ]
 
-let test_mistyped_field_names_what_arrived () =
-  match message_of_target_json (`Assoc [ "kind", `Int 1; "name", `String "delta" ]) with
-  | None -> Alcotest.fail "a non-string kind must be rejected"
-  | Some msg ->
-    Alcotest.(check bool) "says the type is wrong" true (contains ~needle:"wrong type" msg);
-    Alcotest.(check bool) "names the expected type" true (contains ~needle:"string" msg);
-    Alcotest.(check bool) "names what arrived" true (contains ~needle:"integer" msg)
-;;
+let schema_named name =
+  match
+    List.find_opt
+      (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
+      Masc.Keeper_schema.schemas
+  with
+  | Some s -> s.input_schema
+  | None -> Alcotest.failf "%s must be in the keeper schema" name
 
-let test_non_object_target_names_what_arrived () =
-  match message_of_target_json (`String "delta") with
-  | None -> Alcotest.fail "a string target must be rejected"
-  | Some msg ->
-    Alcotest.(check bool) "expects an object" true (contains ~needle:"object" msg);
-    Alcotest.(check bool)
-      "quotes the string it received"
-      true
-      (contains ~needle:"string(\"delta\")" msg)
-;;
+let property name schema =
+  match Yojson.Safe.Util.(schema |> member "properties" |> member name) with
+  | `Null -> Alcotest.failf "the schema must declare %s" name
+  | value -> value
+
+(* The schema is what the model reads, so it is pinned with the decoder: a
+   string here and an object there would refuse every call. *)
+let test_every_delegate_schema_offers_target_as_a_string () =
+  let check_target label target =
+    Alcotest.(check string) (label ^ " target type") "string"
+      Yojson.Safe.Util.(target |> member "type" |> to_string);
+    Alcotest.(check bool) (label ^ " target has no fields") true
+      (Yojson.Safe.Util.member "properties" target = `Null)
+  in
+  List.iter
+    (fun name -> check_target name (property "target" (schema_named name)))
+    delegate_tool_names;
+  let element =
+    Yojson.Safe.Util.member "items"
+      (property "operations" (schema_named "masc_keeper_delegate_status_many"))
+  in
+  check_target "masc_keeper_delegate_status_many element" (property "target" element)
 
 let () =
   Alcotest.run "keeper_invocation_contract_hints"
-    [ ( "undeclared_field_hint"
-      , [ Alcotest.test_case "names the accepted set" `Quick
-            test_undeclared_field_names_the_accepted_set
-        ; Alcotest.test_case "same hint for other guesses" `Quick
-            test_other_guessed_names_get_the_same_hint
-        ; Alcotest.test_case "a valid target still parses" `Quick
-            test_valid_target_still_parses
-        ] )
-    ; ( "one_vocabulary_with_the_schema_layer"
-      , [ Alcotest.test_case "an absent field reads as MISSING" `Quick
-            test_absent_field_reads_as_missing
-        ; Alcotest.test_case "a mistyped field names what arrived" `Quick
-            test_mistyped_field_names_what_arrived
-        ; Alcotest.test_case "a non-object target names what arrived" `Quick
-            test_non_object_target_names_what_arrived
+    [ ( "target_is_a_keeper_name"
+      , [ Alcotest.test_case "a Keeper name parses" `Quick test_a_keeper_name_parses
+        ; Alcotest.test_case "an object is refused naming the string shape" `Quick
+            test_an_object_is_refused_naming_the_string_shape
+        ; Alcotest.test_case "a mistyped target names what arrived" `Quick
+            test_a_mistyped_target_names_what_arrived
+        ; Alcotest.test_case "a name that is not a Keeper name is refused" `Quick
+            test_a_name_that_is_not_a_keeper_name_is_refused
+        ; Alcotest.test_case "an absent target reads as MISSING" `Quick
+            test_an_absent_target_reads_as_missing
+        ; Alcotest.test_case "every delegate schema offers target as a string" `Quick
+            test_every_delegate_schema_offers_target_as_a_string
         ] )
     ; ( "single_value_capability"
       , [ Alcotest.test_case "omitted capability is accepted" `Quick

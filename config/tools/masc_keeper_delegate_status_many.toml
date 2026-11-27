@@ -31,20 +31,9 @@ additional_properties = false
 
 [[params.items.params]]
 name = "target"
-type = "object"
-required = true
-additional_properties = false
-
-[[params.items.params.params]]
-name = "kind"
 type = "string"
 required = true
-enum = ["keeper"]
-
-[[params.items.params.params]]
-name = "name"
-type = "string"
-required = true
+description = "Name of the Keeper the operation was submitted to."
 
 [[params.items.params]]
 name = "operation_id"

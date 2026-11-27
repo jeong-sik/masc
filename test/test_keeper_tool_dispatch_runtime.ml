@@ -4505,11 +4505,7 @@ let test_agent_core_handler_threads_eio_context_to_keeper_dispatch () =
           let result =
             handler
               (`Assoc
-                [ ( "target"
-                  , `Assoc
-                      [ "kind", `String "keeper"
-                      ; "name", `String "keeper-target"
-                      ] )
+                [ "target", `String "keeper-target"
                 ; "prompt", `String "hello"
                 ])
           in
@@ -7978,7 +7974,7 @@ let test_peer_artifact_materializes_exact_binary () =
       | Ok forwarded -> forwarded
       | Error result -> fail (Tool_result.message result) in
     let delegate_args artifact =
-      `Assoc ["target", `Assoc ["kind", `String "keeper"; "name", `String peer.name];
+      `Assoc ["target", `String peer.name;
               "prompt", `String "Reuse this PNG"; "artifacts", `List [artifact]] in
     let delegate_input = validate_input "masc_keeper_delegate" (delegate_args exported_json) in
     let open Yojson.Safe.Util in

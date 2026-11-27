@@ -701,16 +701,16 @@ let field_value fixture ~tool_name field_name schema =
           "masc_keeper_up";
         ] ->
       `String "bad keeper!"
-  | "target" when tool_name = "masc_keeper_delegate" ->
-      `Assoc [ "kind", `String "keeper"; "name", `String "bad keeper!" ]
-  | "run_ref"
-    when List.mem tool_name
-           [ "masc_keeper_delegate_status"; "masc_keeper_delegate_cancel" ] ->
-      `Assoc
-        [ "run_id", `String "missing-run"
-        ; "target", `Assoc [ "kind", `String "keeper"; "name", `String "tool-matrix" ]
-        ; "capability", `String "invoke_turn"
-        ]
+  | "target"
+    when
+      List.mem tool_name
+        [
+          "masc_keeper_delegate";
+          "masc_keeper_delegate_cancel";
+          "masc_keeper_delegate_list";
+          "masc_keeper_delegate_status";
+        ] ->
+      `String "bad keeper!"
   | "name" -> `String "tool-matrix"
   | "verification_id" -> `String (ensure_verification_request fixture)
   | "verifier" -> `String fixture.agent_name

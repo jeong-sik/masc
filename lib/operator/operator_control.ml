@@ -163,8 +163,7 @@ let execute_keeper_message (ctx : 'a context) (request : action_request) =
   in
   let args =
     `Assoc
-      [ ( "target"
-        , `Assoc [ "kind", `String "keeper"; "name", `String name ] )
+      [ "target", `String name
       ; "capability", `String "invoke_turn"
       ; "prompt", `String message
       ]

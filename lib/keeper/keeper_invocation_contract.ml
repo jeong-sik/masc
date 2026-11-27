@@ -38,9 +38,7 @@ open Result.Syntax
    "invalid value"; every check in this module is a JSON type check, so
    "wrong type" remains the whole vocabulary it needs.) A payload that clears
    the schema and fails here used to answer in a second vocabulary ("must be
-   required field"), which named the rule rather than the correction -- live
-   logs carry a Keeper trying target.agent, target.keeper_name, then
-   target.keeper, one call each. *)
+   required field"), which named the rule rather than the correction. *)
 let invalid_wire_value ~field ~expected =
   Error (Invalid_wire_value { field; expected })
 ;;
@@ -75,11 +73,8 @@ let exact_fields ~field ~allowed fields =
     match List.find_opt (fun key -> not (List.mem key allowed)) keys with
     | None -> Ok ()
     | Some key ->
-      (* [allowed] is the answer the caller is looking for, and dropping it
-         made the rejection unactionable: live logs carry a Keeper trying
-         target.agent, then target.keeper_name, then target.keeper, one per
-         call, against an allowed list of kind and name. Naming the accepted
-         fields turns three round trips into one. *)
+      (* [allowed] is the answer the caller is looking for. Without it each
+         retry is a fresh guess at a field name, one guess per call. *)
       invalid_wire_value
         ~field:(field ^ "." ^ key)
         ~expected:
@@ -101,19 +96,19 @@ let string_value ~field = function
   | other -> wrong_type ~field ~expected:"string" ~got:(received_kind other)
 ;;
 
-let target_of_json json =
-  let* fields = object_fields ~field:"target" json in
-  let* () = exact_fields ~field:"target" ~allowed:[ "kind"; "name" ] fields in
-  let* kind = required_field ~field:"target" "kind" fields in
-  let* kind = string_value ~field:"target.kind" kind in
-  let* name = required_field ~field:"target" "name" fields in
-  let* name = string_value ~field:"target.name" name in
-  if not (String.equal kind "keeper")
-  then invalid_wire_value ~field:"target.kind" ~expected:"keeper"
-  else
+(* [target] has one kind, so the wire carries the Keeper name alone: a kind
+   field could only restate the one value or get it wrong. Any other JSON type
+   is refused, and the refusal shows the shape to send. *)
+let target_of_json = function
+  | `String name ->
     Keeper_id.Keeper_name.of_string name
     |> Result.map (fun name -> Keeper name)
     |> Result.map_error (fun reason -> Invalid_target reason)
+  | other ->
+    wrong_type
+      ~field:"target"
+      ~expected:{|string (the Keeper name, as in "target": "reviewer")|}
+      ~got:(received_kind other)
 ;;
 
 let capability_of_json ~field = function

@@ -806,7 +806,7 @@ run_one() {
           while [[ "$(date +%s)" -lt "${poll_deadline}" ]]; do
             if call_mcp_tool 4200 "masc_keeper_delegate_status" \
               "$(jq -cn --arg name "${keeper_name}" --arg op "${operation_id}" \
-                '{target:{kind:"keeper", name:$name}, operation_id:$op}')" 20; then
+                '{target:$name, operation_id:$op}')" 20; then
               local status_payload
               if ! status_payload="$(tool_result_json)" \
                 || ! printf '%s' "${status_payload}" | jq -es --argjson expected "${operation_id_json}" \

@@ -75,10 +75,7 @@ let test_delegate_dispatch_does_not_autoboot_configured_peer () =
           ~name:"masc_keeper_delegate"
           ~args:
             (`Assoc
-               [ ( "target"
-                 , `Assoc
-                     [ "kind", `String "keeper"; "name", `String "missing-target" ]
-                 )
+               [ "target", `String "missing-target"
                ; "capability", `String "invoke_turn"
                ; "prompt", `String "hello"
                ])

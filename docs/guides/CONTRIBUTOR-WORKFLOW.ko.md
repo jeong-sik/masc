@@ -249,7 +249,7 @@ Ready가 되면 기본으로 켭니다. 일반 PR은 GitHub의 Auto-merge 예약
 작업 선택은 [PR 순찰 스킬](../../.agents/skills/masc-pr-patrol/SKILL.md)을 따릅니다.
 MASC 리뷰 요청은 현재 코드 리뷰 전문 Keeper의 이름과 역할을 확인한 뒤 각 대상에게
 MASC 내부 Board·Broadcast 또는 호출자가 사용할 수 있는 직접 메시지로 전달합니다.
-Keeper 호출자는 `masc_keeper_delegate`의 `target={kind:"keeper",name:"<Keeper>"}`와
+Keeper 호출자는 `masc_keeper_delegate`의 `target="<Keeper>"`와
 `prompt`를 사용합니다. 운영자·외부 클라이언트는 자신의 도구 표면에 노출된 경우에만
 `masc_keeper_msg`의 `name`과 `message`를 사용합니다. 현재 호출자의 도구 권한을 확인하세요.
 요청에는 PR 링크, 현재 head/base와 Native Stack 범위, 맡길 관점, 검증 근거와 미검증 범위를

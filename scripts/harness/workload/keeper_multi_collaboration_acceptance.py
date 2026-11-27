@@ -2293,7 +2293,7 @@ class MissionRun:
             if not isinstance(raw_operation_id, str) or not raw_operation_id:
                 raise AcceptanceError("masc_keeper_msg did not return operation_id")
             operation_id = raw_operation_id
-            target = {"kind": "keeper", "name": self.roles[role]}
+            target = self.roles[role]
             deadline = time.monotonic() + self.turn_settle_budget_sec
             last_recorded_state: str | None = None
             while time.monotonic() < deadline:

@@ -619,6 +619,10 @@ let () =
             "unknown decision value is rejected"
             `Quick
             Test_operator_control_confirm.test_confirm_rejects_unknown_decision
+        ; Alcotest.test_case
+            "a confirmed keeper message delegates by Keeper name"
+            `Quick
+            Test_operator_control_confirm.test_confirmed_keeper_message_delegates_by_keeper_name
         ] )
     ]
 ;;

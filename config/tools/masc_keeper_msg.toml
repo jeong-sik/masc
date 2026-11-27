@@ -2,7 +2,7 @@ name = "masc_keeper_msg"
 description = """
 Send a direct message to a keeper. Submits the message as an async chat \
 operation and returns operation_id immediately; poll \
-masc_keeper_delegate_status with target {kind: \"keeper\", name} and this \
+masc_keeper_delegate_status with this keeper name as target and this \
 operation_id to observe the turn settle."""
 additional_properties = false
 

@@ -282,7 +282,7 @@ Choose work using the [PR patrol skill](../../.agents/skills/masc-pr-patrol/SKIL
 For MASC review requests, confirm the current code-review specialist Keepers and
 their roles, then deliver the request to each intended Keeper through MASC Board,
 Broadcast or a direct message exposed to the caller. Keeper callers use
-`masc_keeper_delegate` with `target={kind:"keeper",name:"<Keeper>"}` and `prompt`;
+`masc_keeper_delegate` with `target="<Keeper>"` and `prompt`;
 operator or external clients can use `masc_keeper_msg` with `name` and `message`
 when their tool surface exposes it. Check the caller's current capabilities.
 Include the PR links, current head/base and Native Stack scope, requested review

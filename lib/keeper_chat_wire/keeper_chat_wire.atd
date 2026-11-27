@@ -1,0 +1,161 @@
+(* The Keeper chat wire that native clients read (RFC-native-keeper-chat-clients).
+
+   This file covers the AG-UI frames that POST /api/v1/keepers/chat/stream
+   sends. Each frame kind carries only the fields that kind has on the wire,
+   so a TEXT_MESSAGE_CONTENT without delta cannot be decoded or built.
+
+   JSON shape: a frame is one flat object whose "type" names the kind
+   (Atdgen_runtime.Json_adapter.Type_field). Field names are the wire names.
+
+   <native open> is read by tools/atd-native-gen only. It adds an
+   unrecognized case to the Swift and Kotlin types, so a client older than
+   the server still decodes a frame kind or CUSTOM name it does not know.
+   atdgen ignores the annotation; the server only writes these types. *)
+
+type json <ocaml module="Yojson.Safe" t="t"> = abstract
+
+type role = [
+  | User <json name="user">
+  | Assistant <json name="assistant">
+  | System <json name="system">
+  | Tool <json name="tool">
+] <ocaml repr="classic">
+
+(* textResponse on TEXT_MESSAGE_CONTENT: the provider response this text
+   belongs to. *)
+type response_identity = {
+  content_generation : int;
+  stream_scope : int;
+}
+
+type frame_base = {
+  thread_id <json name="threadId"> : string;
+  timestamp : float;
+}
+
+type run_started = {
+  inherit frame_base;
+  run_id <json name="runId"> : string;
+}
+
+type run_finished = {
+  inherit frame_base;
+  run_id <json name="runId"> : string;
+}
+
+type run_error = {
+  inherit frame_base;
+  ?run_id <json name="runId"> : string option;
+  message : string;
+  ?code : string option;
+}
+
+type text_message_start = {
+  inherit frame_base;
+  ?run_id <json name="runId"> : string option;
+  message_id <json name="messageId"> : string;
+  role : role;
+}
+
+(* textStreamScope and textResponse never come together: a delta whose
+   response is observed carries textResponse, any other carries at most
+   textStreamScope. *)
+type text_message_content = {
+  inherit frame_base;
+  ?run_id <json name="runId"> : string option;
+  ?message_id <json name="messageId"> : string option;
+  delta : string;
+  ?text_stream_scope <json name="textStreamScope"> : int option;
+  ?text_response <json name="textResponse"> : response_identity option;
+}
+
+type text_message_end = {
+  inherit frame_base;
+  ?run_id <json name="runId"> : string option;
+  ?message_id <json name="messageId"> : string option;
+}
+
+(* The tool-call occurrence every TOOL_CALL_* frame names. *)
+type tool_occurrence = {
+  ?tool_call_id <json name="toolCallId"> : string option;
+  tool_stream_scope <json name="toolStreamScope"> : int;
+  ?provider_message_id <json name="providerMessageId"> : string option;
+  tool_call_block_index <json name="toolCallBlockIndex"> : int;
+}
+
+type tool_call_start = {
+  inherit frame_base;
+  inherit tool_occurrence;
+  ?run_id <json name="runId"> : string option;
+  tool_call_name <json name="toolCallName"> : string;
+}
+
+(* An arguments frame carries a delta or a snapshot of the arguments so
+   far, never both. *)
+type tool_call_args = {
+  inherit frame_base;
+  inherit tool_occurrence;
+  ?run_id <json name="runId"> : string option;
+  ?delta : string option;
+  ?snapshot : json option;
+}
+
+type tool_call_end = {
+  inherit frame_base;
+  inherit tool_occurrence;
+  ?run_id <json name="runId"> : string option;
+}
+
+type custom_name = [
+  | Keeper_chat_operation_accepted <json name="KEEPER_CHAT_OPERATION_ACCEPTED">
+  | Keeper_connected <json name="KEEPER_CONNECTED">
+  | Keeper_runtime_attempt_started <json name="KEEPER_RUNTIME_ATTEMPT_STARTED">
+  | Keeper_provider_retry <json name="KEEPER_PROVIDER_RETRY">
+  | Keeper_stream_message_start <json name="KEEPER_STREAM_MESSAGE_START">
+  | Keeper_stream_message_delta <json name="KEEPER_STREAM_MESSAGE_DELTA">
+  | Keeper_stream_message_stop <json name="KEEPER_STREAM_MESSAGE_STOP">
+  | Keeper_stream_ping <json name="KEEPER_STREAM_PING">
+  | Keeper_content_block_start <json name="KEEPER_CONTENT_BLOCK_START">
+  | Keeper_content_block_stop <json name="KEEPER_CONTENT_BLOCK_STOP">
+  | Keeper_model_content_activity <json name="KEEPER_MODEL_CONTENT_ACTIVITY">
+  | Keeper_thinking_delta <json name="KEEPER_THINKING_DELTA">
+  | Keeper_thinking_snapshot <json name="KEEPER_THINKING_SNAPSHOT">
+  | Keeper_thinking_signature_delta <json name="KEEPER_THINKING_SIGNATURE_DELTA">
+  | Keeper_media_delta <json name="KEEPER_MEDIA_DELTA">
+  | Keeper_attachment <json name="KEEPER_ATTACHMENT">
+  | Keeper_stream_protocol_error <json name="KEEPER_STREAM_PROTOCOL_ERROR">
+  | Keeper_chat_batch_bound <json name="KEEPER_CHAT_BATCH_BOUND">
+  | Keeper_continuation_checkpoint <json name="KEEPER_CONTINUATION_CHECKPOINT">
+  | Keeper_external_effect_completed <json name="KEEPER_EXTERNAL_EFFECT_COMPLETED">
+  | Keeper_reply_details <json name="KEEPER_REPLY_DETAILS">
+  | Keeper_tool_approval_requested <json name="KEEPER_TOOL_APPROVAL_REQUESTED">
+  | Keeper_tool_approval_settled <json name="KEEPER_TOOL_APPROVAL_SETTLED">
+  | Keeper_tool_call_admitted <json name="KEEPER_TOOL_CALL_ADMITTED">
+  | Keeper_tool_result_ready <json name="KEEPER_TOOL_RESULT_READY">
+  | Keeper_tool_transcript_committed <json name="KEEPER_TOOL_TRANSCRIPT_COMMITTED">
+  | Keeper_native_tool_start <json name="KEEPER_NATIVE_TOOL_START">
+  | Keeper_native_tool_end <json name="KEEPER_NATIVE_TOOL_END">
+  | Keeper_native_tool_progress <json name="KEEPER_NATIVE_TOOL_PROGRESS">
+] <ocaml repr="classic"> <native open>
+
+(* The value's shape depends on the name; typed values come with the
+   screens that read them. *)
+type custom = {
+  inherit frame_base;
+  ?run_id <json name="runId"> : string option;
+  name : custom_name;
+  value : json;
+}
+
+type frame = [
+  | Run_started <json name="RUN_STARTED"> of run_started
+  | Run_finished <json name="RUN_FINISHED"> of run_finished
+  | Run_error <json name="RUN_ERROR"> of run_error
+  | Text_message_start <json name="TEXT_MESSAGE_START"> of text_message_start
+  | Text_message_content <json name="TEXT_MESSAGE_CONTENT"> of text_message_content
+  | Text_message_end <json name="TEXT_MESSAGE_END"> of text_message_end
+  | Tool_call_start <json name="TOOL_CALL_START"> of tool_call_start
+  | Tool_call_args <json name="TOOL_CALL_ARGS"> of tool_call_args
+  | Tool_call_end <json name="TOOL_CALL_END"> of tool_call_end
+  | Custom <json name="CUSTOM"> of custom
+] <ocaml repr="classic"> <json adapter.ocaml="Atdgen_runtime.Json_adapter.Type_field"> <native open>

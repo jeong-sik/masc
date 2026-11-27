@@ -430,7 +430,7 @@ is-default = true
              Option.exists (Keeper_chat_operation.Operation_id.equal peer_id) claimed_operation_id
           then Eio.Promise.resolve resolve_settled (Ok ()))} in
     Registry.install_from_store ~sw:owner_sw ~operation_runner:(Some runner)
-      ~on_turn_slot_released:None config |> require "install owner" |> ignore;
+      config |> require "install owner" |> ignore;
     Keeper_direct_native_continuation.complete_restart_settlements
       ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path
       |> require "complete startup native journal settlement" |> ignore;
@@ -730,7 +730,7 @@ is-default = true
         | Owner.Operation_failed _ | Owner.Operation_deferred | Owner.Operation_succeeded _ ->
           Eio.Promise.resolve resolve_settled (Ok ()))} in
     Registry.install_from_store ~sw:owner_sw ~operation_runner:(Some runner)
-      ~on_turn_slot_released:None config |> require "install owner" |> ignore;
+      config |> require "install owner" |> ignore;
     Keeper_direct_native_continuation.complete_restart_settlements
       ~runtime:(Runtime_agent_execution_runtime.get () |> Option.get) ~base_path
       |> require "complete startup native journal settlement" |> ignore;

@@ -173,7 +173,7 @@ data: [DONE]
     } in
   ignore (Keeper_owner_registry.install_from_store ~sw
     ~operation_runner:(Some operation_runner)
-    ~on_turn_slot_released:None config |> get Keeper_owner_registry.install_error_to_string);
+    config |> get Keeper_owner_registry.install_error_to_string);
   let meta, registry_entry = install_keeper config keeper_name in
   (* The control Keeper receives no cycle, so it never starts a sandbox. *)
   ignore (install_keeper config other_name);

@@ -325,10 +325,10 @@ let with_ctx keeper_name f =
 
 (* The Owner a source turn asks about chat readiness. *)
 let start_owner ~(ctx : _ Keeper_types_profile.context) ~base_path ~meta
-      ~operation_runner ~on_turn_slot_released =
+      ~operation_runner =
   (match
      Keeper_owner_registry.install_from_store
-       ~sw:ctx.sw ~operation_runner ~on_turn_slot_released ctx.config
+       ~sw:ctx.sw ~operation_runner ctx.config
    with
    | Ok _ -> ()
    | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
@@ -995,7 +995,7 @@ let test_failed_connector_batch_skips_shared_store_without_starving_other_work (
 
 let with_hitl_ctx keeper_name f =
   with_ctx keeper_name (fun ~base_path ~keeper_name ~meta ~ctx ->
-    start_owner ~ctx ~base_path ~meta ~operation_runner:None ~on_turn_slot_released:None;
+    start_owner ~ctx ~base_path ~meta ~operation_runner:None;
     (match Keeper_approval_queue.install_persistence ~base_path with
      | Ok _ -> ()
      | Error error -> fail (Keeper_approval_queue_result.install_error_to_string error));
@@ -1526,7 +1526,7 @@ let test_checkpoint_rotates_whole_connector_conversation_after_boundary () =
   @@ fun () ->
   with_ctx "checkpoint-conversation-rotation" (fun ~base_path ~keeper_name ~meta ~ctx ->
     (match Keeper_owner_registry.install_from_store
-        ~sw:ctx.sw ~operation_runner:None ~on_turn_slot_released:None ctx.config with
+        ~sw:ctx.sw ~operation_runner:None ctx.config with
      | Ok _ -> ()
      | Error error -> fail (Keeper_owner_registry.install_error_to_string error));
     (match Keeper_owner_registry.create_meta ~base_path meta with

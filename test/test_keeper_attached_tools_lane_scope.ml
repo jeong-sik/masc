@@ -107,7 +107,7 @@ let with_bundle
       | Ok () -> ()
       | Error detail -> fail detail);
      (match Keeper_owner_registry.install_from_store ~sw ~operation_runner:None
-       ~on_turn_slot_released:None config with
+       config with
       | Ok count -> check int "the retained Agent has one real metadata owner" 1 count
       | Error error -> fail (Keeper_owner_registry.install_error_to_string error)));
   (* No skills unless a case passes a snapshot and its catalog, so the bundle

@@ -83,7 +83,7 @@ max-context = 200000
       Fun.protect ~finally:(fun () -> Eio.Promise.resolve resolve_ended ()) (fun () ->
         Eio.Switch.run (fun owner_sw ->
           let result = Keeper_owner_registry.install_from_store ~sw:owner_sw ~operation_runner:None
-            ~on_turn_slot_released:None config in
+            config in
           Eio.Promise.resolve resolve_installed result;
           ignore (Eio.Promise.await stop))));
     (match Eio.Promise.await installed with
@@ -185,7 +185,7 @@ let check_official_session_cleared official_session =
 let test_clear_does_not_race_the_active_turn () =
   with_keeper ~paused:false ~install_owner:true
   @@ fun ~config ~meta ~saved ~save ~load ~clear ~official_session ~restart:_ ->
-  (match Keeper_owner_registry.run_autonomous_if_idle
+  (match Keeper_owner_registry.run_autonomous_turn ~input:(fun () -> Keeper_owner.No_autonomous_input)
     ~base_path:config.base_path ~keeper_name:meta.name (fun () ->
       let before = Context.messages_of_context (load ()) in
       check_refused (clear ());
@@ -202,7 +202,7 @@ let test_clear_does_not_race_the_active_turn () =
   check bool (Tool_result.message result) true (Tool_result.is_success result);
   check_empty load;
   check_official_session_cleared official_session;
-  (match Keeper_owner_registry.run_autonomous_if_idle
+  (match Keeper_owner_registry.run_autonomous_turn ~input:(fun () -> Keeper_owner.No_autonomous_input)
     ~base_path:config.base_path ~keeper_name:meta.name (fun () -> check_empty load) with
    | Ok (`Ran ()) -> ()
    | Ok (`Busy _ | `Interrupted) -> fail "next turn did not run"
@@ -302,7 +302,7 @@ let test_undecodable_checkpoint_is_removed () =
     (Keeper_registry.get_turn_failures ~base_path:config.base_path meta.name);
   let base_dir = Keeper_types_profile.session_base_dir config in
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-  match Keeper_owner_registry.run_autonomous_if_idle
+  match Keeper_owner_registry.run_autonomous_turn ~input:(fun () -> Keeper_owner.No_autonomous_input)
     ~base_path:config.base_path ~keeper_name:meta.name (fun () ->
       match
         Context.load_context_from_checkpoint_classified ~keeper_name:meta.name ~trace_id ~base_dir
@@ -554,7 +554,7 @@ let test_paused_keeper_clears_stale_epoch_without_resuming () =
   | None -> fail "keeper metadata disappeared"
 ;;
 let run_owned ~config ~meta work =
-  match Keeper_owner_registry.run_autonomous_if_idle ~base_path:config.Workspace.base_path
+  match Keeper_owner_registry.run_autonomous_turn ~input:(fun () -> Keeper_owner.No_autonomous_input) ~base_path:config.Workspace.base_path
     ~keeper_name:meta.Keeper_meta_contract.name work with
   | Ok (`Ran value) -> value
   | Ok (`Busy _ | `Interrupted) -> fail "owned input fixture did not execute"

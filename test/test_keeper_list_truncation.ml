@@ -1103,6 +1103,42 @@ let test_runtime_walk_store_to_tui () =
       check bool "explicit no receipt is distinct from no capture" true
         (snd row=None))
 
+let test_detailed_row_surfaces_declared_group () =
+  let write_group_toml ~base_path name group_line =
+    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+    mkdir_p keepers_dir;
+    Out_channel.with_open_bin
+      (Filename.concat keepers_dir (name ^ ".toml"))
+      (fun oc ->
+        output_string
+          oc
+          (Printf.sprintf
+             "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\ninstructions = \"keeper list fixture\"\n%s\n"
+             group_line))
+  in
+  keeper_list
+    ~names:[ "alpha"; "beta"; "gamma" ]
+    ~args:(`Assoc [ "detailed", `Bool true ])
+    ~before_list:(fun config ->
+      write_group_toml
+        ~base_path:config.Workspace.base_path
+        "alpha"
+        "group = \"platform-eng\"";
+      write_group_toml
+        ~base_path:config.Workspace.base_path
+        "gamma"
+        "group = \"   \"")
+    (fun json ->
+      let group_of name =
+        roster_row name json
+        |> Yojson.Safe.Util.member "group"
+        |> Yojson.Safe.to_string
+      in
+      check string "declared group is emitted on detailed row" "\"platform-eng\"" (group_of "alpha");
+      check string "absent group is emitted as null" "null" (group_of "beta");
+      check string "whitespace-only group is emitted as null" "null" (group_of "gamma"))
+;;
+
 let () =
   run "keeper_list_truncation"
     [ ( "listing truth"
@@ -1152,6 +1188,8 @@ let () =
             test_health_is_a_health_word_not_a_surface_word
         ; test_case "an unnamed next action is null" `Quick
             test_absent_next_action_is_null_not_empty
+        ; test_case "detailed row surfaces declared keeper group" `Quick
+            test_detailed_row_surfaces_declared_group
         ] )
     ; ( "current failure"
       , [ test_case "runtime walk store to typed TUI boundary" `Quick test_runtime_walk_store_to_tui

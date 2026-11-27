@@ -349,12 +349,25 @@ let keeper_list_row_json_of_shape ~shape ~runtime_class config name =
     | Ok None -> Ok None, None
     | Ok (Some persisted) ->
         (match
-           Keeper_meta_contract.effective_meta_result
+           Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
              ~base_path:config.Workspace.base_path
-             persisted
+             persisted.name
          with
-         | Ok meta -> Ok (Some meta), Some persisted
-         | Error err -> Error err, Some persisted)
+         | Error error ->
+             Error
+               (Printf.sprintf
+                  "invalid keeper profile for keeper %s: %s"
+                  persisted.name
+                  (Keeper_types_profile.keeper_toml_load_error_to_string error)),
+             Some persisted
+         | Ok defaults ->
+             (match
+                Keeper_meta_contract.effective_meta_of_profile_defaults
+                  defaults
+                  persisted
+              with
+              | Ok meta -> Ok (Some (meta, defaults.Keeper_types_profile.group)), Some persisted
+              | Error err -> Error err, Some persisted))
   in
   match effective_meta with
   | Error err ->
@@ -366,7 +379,7 @@ let keeper_list_row_json_of_shape ~shape ~runtime_class config name =
            name
            err)
   | Ok None -> None
-  | Ok (Some (meta : keeper_meta)) ->
+  | Ok (Some ((meta : keeper_meta), profile_group)) ->
       let now_ts = Time_compat.now () in
       (* Phase, health, liveness and the current failure share one registry
          reading. The last recorded error is a different observation. *)
@@ -492,10 +505,17 @@ let keeper_list_row_json_of_shape ~shape ~runtime_class config name =
           ~keeper_name:meta.name
           ~current_trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
       in
+      let group_json =
+        Option.bind profile_group (fun raw ->
+          let trimmed = String.trim raw in
+          if String.equal trimmed "" then None else Some trimmed)
+        |> Json_util.string_opt_to_json
+      in
       Some
         (`Assoc (
           [
             ("runtime_class", `String runtime_class); ("name", `String meta.name);
+            ("group", group_json);
             ("meta", keeper_brief_meta_json meta);             ("status", `String status); ("phase", `String phase);
             ("health", `String health);
             ("paused", `Bool meta.paused);

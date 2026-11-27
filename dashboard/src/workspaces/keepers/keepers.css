@@ -1109,6 +1109,9 @@
   line-height: var(--lh-body);
 }
 
+/* Of the card's lines only one that says the turn stopped short is colored. */
+.kp-live-turn-status[data-tone="bad"] { color: var(--err-fg); }
+
 .kp-live-turn-tail {
   font-size: var(--fs-12);
   color: var(--fg-3);

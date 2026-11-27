@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { TURN_RUNNING_PHRASE, turnDoing, turnDoingBrief } from './turn-doing'
+import { TURN_RUNNING_PHRASE, turnDoing, turnDoingBesideRows, turnDoingBrief } from './turn-doing'
 import type { KeeperActiveTurnPreview, KeeperTurnPreparation, TurnOpenActivity } from './types'
 
 const response = (channel: 'none' | 'thinking' | 'text', since = 100): TurnOpenActivity => ({
@@ -71,6 +71,27 @@ describe('what a turn is doing, in one line', () => {
   it('does not speak from the list of an attempt that failed, or of a turn that still prepares', () => {
     expect(turnDoing(preview('failed', [tool('Execute', 'executing')]))).toEqual({ phrase: '시도 실패', sinceUnix: null, tone: 'bad' })
     expect(turnDoing(preview('preparing', [tool('Execute', 'executing')]))).toEqual({ phrase: '준비 중', sinceUnix: null, tone: 'info' })
+  })
+})
+
+describe('what a turn is doing, beside the rows of its open work', () => {
+  it('has no line when the rows below say it', () => {
+    expect(turnDoingBesideRows(preview('tool', [tool('Read', 'requested'), tool('Execute', 'executing')]))).toBeNull()
+    expect(turnDoingBesideRows(preview('streaming', [response('thinking')]))).toBeNull()
+  })
+
+  it('keeps the line for what no row names', () => {
+    // Nothing is open.
+    expect(turnDoingBesideRows(preview('waiting', []))).toEqual({ phrase: '응답 대기 중', sinceUnix: null, tone: 'warn' })
+    // A preparation step, also while the list still holds a call.
+    expect(turnDoingBesideRows(preview('preparing', [tool('Execute', 'executing')], step('active', 'prompt')))).toEqual({
+      phrase: '준비 중 · 프롬프트', sinceUnix: 40, tone: 'info',
+    })
+    expect(turnDoingBesideRows(preview('tool', [tool('Execute', 'executing')], step('active', 'wiki')))?.phrase).toBe('준비 중 · 위키')
+    // An attempt that failed: its list is not what happens now.
+    expect(turnDoingBesideRows(preview('failed', [tool('Execute', 'executing')]))).toEqual({
+      phrase: '시도 실패', sinceUnix: null, tone: 'bad',
+    })
   })
 })
 

@@ -549,14 +549,15 @@ let baseline_after_stopped = function
 (* What a turn's settlement knows about the host compacting the session. *)
 type compaction_reading =
   | Prompt_compaction of Acp.context_compaction
-  | Prompt_not_returned
-  (* The host stopped the turn before its prompt returned. *)
+  | No_prompt_compaction
+  (* The prompt's compaction never came back: the host stopped the turn before
+     the prompt returned, or the prompt returned an error. *)
   | Session_count_lost
 (* The prompt saw no fall, but it started without the count to compare its
    first count with. *)
 
 let compaction_reading ~baseline_at_start = function
-  | None -> Prompt_not_returned
+  | None -> No_prompt_compaction
   | Some Acp.Not_compacted ->
     (match baseline_at_start with
      | Count_lost -> Session_count_lost
@@ -579,11 +580,12 @@ let settlement_clears_held ~keeper_name ~session_id = function
       session_id
       (Acp.compaction_unknown_to_string unknown);
     true
-  | Prompt_not_returned ->
+  | No_prompt_compaction ->
     Log.Keeper.warn
       ~keeper_name
-      "ACP session %s stopped before its prompt returned and may have compacted; the \
-       next turn sends the whole World State again"
+      "ACP session %s: the stopped prompt returned no compaction (stopped first or \
+       ended in an error), so it may have compacted; the next turn sends the whole \
+       World State again"
       session_id;
     true
   | Session_count_lost ->
@@ -4303,7 +4305,7 @@ module For_testing = struct
 
   type nonrec compaction_reading = compaction_reading =
     | Prompt_compaction of Acp.context_compaction
-    | Prompt_not_returned
+    | No_prompt_compaction
     | Session_count_lost
 
   let prior_context_used = prior_context_used

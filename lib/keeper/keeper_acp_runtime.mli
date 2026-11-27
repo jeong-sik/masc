@@ -134,12 +134,12 @@ module For_testing : sig
     | Count_lost
 
   (** What a turn's settlement knows about the host compacting the session.
-      [Prompt_not_returned] is a turn the host stopped before its prompt
-      returned. [Session_count_lost] is a prompt that saw no fall but started
+      [No_prompt_compaction] is a stopped turn whose prompt did not return its
+      compaction: the host stopped it first, or it returned an error. [Session_count_lost] is a prompt that saw no fall but started
       without a count to compare its first count with. *)
   type compaction_reading =
     | Prompt_compaction of Runtime_acp_client.context_compaction
-    | Prompt_not_returned
+    | No_prompt_compaction
     | Session_count_lost
 
   val prior_context_used : context_baseline -> int option

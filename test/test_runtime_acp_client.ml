@@ -2152,8 +2152,8 @@ let test_settlement_clears_held_context () =
           (Runtime_acp_client.Compaction_unknown
              (Runtime_acp_client.Kimi_session_record_unreadable
                 Runtime_kimi_session_log.Home_unavailable))));
-  check bool "a prompt stopped before it returned clears it" true
-    (clears T.Prompt_not_returned);
+  check bool "a stopped prompt that returned no compaction clears it" true
+    (clears T.No_prompt_compaction);
   check bool "a prompt that started without a count to compare clears it" true
     (clears T.Session_count_lost)
 ;;
@@ -2216,9 +2216,9 @@ let test_kept_session_compares_with_the_stopped_prompts_count () =
     (T.baseline_after_completed ~before:lost (Some 8939) = T.Counted 8939);
   check bool "an uncounted continuation keeps it lost" true
     (T.baseline_after_completed ~before:lost None = T.Count_lost);
-  (* A prompt the host stopped before it returned has its own reading. *)
-  check bool "a prompt that never returned" true
-    (T.compaction_reading ~baseline_at_start:counted None = T.Prompt_not_returned)
+  (* A stopped prompt that returned no compaction has its own reading. *)
+  check bool "a prompt that returned no compaction" true
+    (T.compaction_reading ~baseline_at_start:counted None = T.No_prompt_compaction)
 ;;
 
 let test_acp_80_pct_rollover_marker_and_overflow_classification () =

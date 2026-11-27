@@ -259,6 +259,146 @@ export function clearDismissedIncidents(): void {
   incidentsSignal.value = incidentsSignal.peek().filter((i) => !i.dismissed)
 }
 
+// ── Host Disk Observation & Pressure Summary ────────────────────────────
+
+export interface HostDiskFilesystem {
+  readonly path: string | null
+  readonly filesystem: string | null
+  readonly mountedOn: string | null
+  readonly totalBytes: number | null
+  readonly usedBytes: number | null
+  readonly availableBytes: number | null
+  readonly capacityPercent: number | null
+  readonly availablePercent: number | null
+  readonly error: string | null
+}
+
+export interface HostDiskObservation {
+  readonly mascRoot: string | null
+  readonly mode: string | null
+  readonly status: string | null
+  readonly statusReasons: readonly string[]
+  readonly exhaustionTotal: number | null
+  readonly lastExhaustionTs: number | null
+  readonly filesystem: HostDiskFilesystem | null
+}
+
+export type DiskPressureLevel = 'ok' | 'warning' | 'critical' | 'exhausted' | 'unavailable'
+
+export interface DiskPressureSummary {
+  readonly level: DiskPressureLevel
+  readonly label: string
+  readonly detail: string
+}
+
+function asFiniteNumber(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null
+}
+
+export function decodeDiskObservation(raw: unknown): HostDiskObservation | null {
+  if (!isRecord(raw)) return null
+  const fsRaw = isRecord(raw.filesystem) ? raw.filesystem : null
+  const filesystem: HostDiskFilesystem | null = fsRaw
+    ? {
+        path: asNonEmptyString(fsRaw.path),
+        filesystem: asNonEmptyString(fsRaw.filesystem),
+        mountedOn: asNonEmptyString(fsRaw.mounted_on),
+        totalBytes: asFiniteNumber(fsRaw.total_bytes),
+        usedBytes: asFiniteNumber(fsRaw.used_bytes),
+        availableBytes: asFiniteNumber(fsRaw.available_bytes),
+        capacityPercent: asFiniteNumber(fsRaw.capacity_percent),
+        availablePercent: asFiniteNumber(fsRaw.available_percent),
+        error: asNonEmptyString(fsRaw.error),
+      }
+    : null
+  const statusReasons = Array.isArray(raw.status_reasons)
+    ? raw.status_reasons.filter((r): r is string => typeof r === 'string' && r.trim().length > 0).map((r) => r.trim())
+    : []
+  const mascRoot = asNonEmptyString(raw.masc_root)
+  const mode = asNonEmptyString(raw.mode)
+  const status = asNonEmptyString(raw.status)
+  const exhaustionTotal = asFiniteNumber(raw.storage_space_exhaustion_observations_total)
+  const lastExhaustionTs = asFiniteNumber(raw.last_storage_space_exhaustion_ts)
+  if (
+    mascRoot === null
+    && mode === null
+    && status === null
+    && statusReasons.length === 0
+    && exhaustionTotal === null
+    && lastExhaustionTs === null
+    && filesystem === null
+  ) {
+    return null
+  }
+  return {
+    mascRoot,
+    mode,
+    status,
+    statusReasons,
+    exhaustionTotal,
+    lastExhaustionTs,
+    filesystem,
+  }
+}
+
+export function classifyDiskPressure(obs: HostDiskObservation | null): DiskPressureSummary {
+  if (!obs) {
+    return { level: 'ok', label: '', detail: '' }
+  }
+  if (obs.exhaustionTotal !== null && obs.exhaustionTotal > 0) {
+    return {
+      level: 'exhausted',
+      label: `ENOSPC ×${obs.exhaustionTotal}`,
+      detail: `호스트 스토리지 공간 부족(ENOSPC) ${obs.exhaustionTotal}건 관측`,
+    }
+  }
+  if (obs.filesystem?.error) {
+    return {
+      level: 'unavailable',
+      label: '디스크 오류',
+      detail: `호스트 디스크 상태 조회 실패: ${obs.filesystem.error}`,
+    }
+  }
+  const pct = obs.filesystem?.capacityPercent ?? null
+  const pctLabel = pct !== null ? `${Math.round(pct)}%` : null
+  const statusLower = obs.status?.toLowerCase() ?? null
+
+  if (statusLower === 'degraded' || statusLower === 'error' || (pct !== null && pct >= 90)) {
+    return {
+      level: 'critical',
+      label: pctLabel ? `디스크 ${pctLabel}` : '디스크 위험',
+      detail: pctLabel
+        ? `호스트 디스크 사용률 ${pctLabel} (위험 임계치 90% 이상)`
+        : `호스트 디스크 상태: ${obs.status ?? 'critical'}`,
+    }
+  }
+  if (statusLower === 'warning' || (pct !== null && pct >= 80)) {
+    return {
+      level: 'warning',
+      label: pctLabel ? `디스크 ${pctLabel}` : '디스크 주의',
+      detail: pctLabel
+        ? `호스트 디스크 사용률 ${pctLabel} (주의 임계치 80% 이상)`
+        : '호스트 디스크 경고 상태',
+    }
+  }
+  return {
+    level: 'ok',
+    label: pctLabel ? `디스크 ${pctLabel}` : '',
+    detail: pctLabel ? `호스트 디스크 사용률 ${pctLabel}` : '',
+  }
+}
+
+export const hostDiskObservation = signal<HostDiskObservation | null>(null)
+export const diskPressureSummary = computed<DiskPressureSummary>(() =>
+  classifyDiskPressure(hostDiskObservation.value),
+)
+
+export function updateHostDiskObservation(raw: unknown): HostDiskObservation | null {
+  const decoded = decodeDiskObservation(raw)
+  hostDiskObservation.value = decoded
+  return decoded
+}
+
 // ── Build-Commit & Connection Diagnostics (Popover Only!) ───────────────
 
 export interface BuildConnectionInfo {
@@ -552,6 +692,7 @@ export async function refreshPendingHitl(
       pendingGoalConfirmations.value = []
       pendingVerifications.value = []
       hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
+      hostDiskObservation.value = null
     })
     return
   }
@@ -1112,6 +1253,7 @@ export function installShellObservers(fetchImpl?: typeof fetch): () => void {
       pendingGoalConfirmations.value = []
       pendingVerifications.value = []
       hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
+      hostDiskObservation.value = null
     })
     if (canAccessMemberWorkspace(authSession.peek())) {
       void refreshPendingHitl(fetchImpl)
@@ -1172,6 +1314,7 @@ export function resetShellStateForTests(): void {
     pendingVerifications.value = []
     hitlSourceStatus.value = DEFAULT_HITL_SOURCE_STATUS
     hitlLoading.value = false
+    hostDiskObservation.value = null
     toastsSignal.value = []
     buildConnectionInfo.value = {
       version: null,

@@ -49,6 +49,7 @@ import { ShellIcon } from './icons'
 import {
   activeOverlay,
   buildConnectionInfo,
+  diskPressureSummary,
   formatInboxBadge,
   formatInboxPendingCount,
   inboxPendingCount,
@@ -523,6 +524,7 @@ export function TopBar(): VNode {
   const unreadInc = unreadIncidentCount.value
   const overlay = activeOverlay.value
   const win = timeWindow.value
+  const diskPressure = diskPressureSummary.value
 
   // L1 sub-tabs: workspace subtabs (max 5) OR Keeper entity tabs when on `/keepers/:name/*`.
   // Account subtabs (Profile / PATs / Members / Invites / Allowlist) only apply when
@@ -650,6 +652,21 @@ export function TopBar(): VNode {
           <${ShellIcon} name="search" size=${13} />
           <kbd class="ap-kbd">⌘K</kbd>
         </button>
+
+        ${diskPressure.level !== 'ok' && html`
+          <button
+            type="button"
+            class=${`ap-pill ${diskPressure.level === 'critical' || diskPressure.level === 'exhausted' ? 'ap-pill--err' : 'ap-pill--warn'}`}
+            aria-label=${`${diskPressure.detail} — Infra 샌드박스 스토리지로 이동`}
+            title=${`${diskPressure.detail} — 클릭하여 스토리지 상세 보기`}
+            data-testid="topbar-disk-pressure-pill"
+            data-disk-level=${diskPressure.level}
+            onClick=${() => navigate('/infra/sandboxes')}
+          >
+            <span aria-hidden="true">⚠</span>
+            <span class="ap-pill-label tnum">${diskPressure.label}</span>
+          </button>
+        `}
 
         <${ProvenancePill} />
 

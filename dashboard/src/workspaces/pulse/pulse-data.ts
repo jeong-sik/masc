@@ -20,6 +20,7 @@ import { decodeKeeperLaneFailures, decodeKeeperPathRest } from '../../api/keeper
 import { decodeValidatedTurnSlots } from '../keepers/turn-context'
 import { observedAbsent, resourceCache, type FetchReason, type Observed } from '../../core/resource-cache'
 import { timeWindowProviderDays, type TimeWindow } from '../../core/time-window'
+import { updateHostDiskObservation } from '../../shell/shell-state'
 import type {
   PulseApprovalItem,
   PulseAskItem,
@@ -57,6 +58,12 @@ function decodeShell(raw: unknown): PulseShellSnapshot {
   const scorecard = isRecord(rec.scorecard_24h) ? rec.scorecard_24h : {}
   const status = isRecord(rec.status) ? rec.status : {}
   const rawGroups = Array.isArray(rec.groups) ? rec.groups : []
+
+  if (isRecord(rec.runtime_resolution) && 'disk_observation' in rec.runtime_resolution) {
+    updateHostDiskObservation(rec.runtime_resolution.disk_observation)
+  } else if ('disk_observation' in rec) {
+    updateHostDiskObservation(rec.disk_observation)
+  }
 
   const groups: PulseShellGroup[] = []
   for (const g of rawGroups) {

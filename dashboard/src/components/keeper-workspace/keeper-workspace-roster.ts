@@ -1,8 +1,8 @@
 import { isDismissEscape } from '../../lib/keyboard'
 // Keeper Workspace — roster pane (left). Search + status filter chips +
 // status-grouped keeper rows, wired to the live `keepers` store. Selecting a
-// row routes to that keeper, which swaps the conversation + rail panes (same
-// route shape the detail page already used, so deep links keep working).
+// row opens that keeper in the keepers tab, which swaps the conversation +
+// rail panes.
 
 import { html } from 'htm/preact'
 import {
@@ -14,7 +14,7 @@ import {
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import { keepers, executionError, executionLoaded } from '../../store'
-import { navigate } from '../../router'
+import { navigateToKeeper } from '../../router'
 import { selectKeeper } from '../../keeper-actions'
 import { keeperMobilePane } from '../keeper-detail-state'
 import { BroadcastComposer } from './broadcast-composer'
@@ -22,7 +22,6 @@ import { buildCompositeByKeeperKey } from '../../composite-signals'
 import { useFleetComposite } from '../../lib/use-fleet-composite'
 import { compositeSnapshotForKeeper } from '../../lib/keeper-composite-lookup'
 import { formatCompactAge, formatRelativeSec } from '../../lib/format-time'
-import { persistentSignal } from '../../lib/persistent-signal'
 import { keeperActivityDisplay, keeperDisplayRuntime } from '../../lib/keeper-runtime-display'
 import type { KeeperActivityDisplay } from '../../lib/keeper-runtime-display'
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
@@ -44,12 +43,10 @@ import {
   keeperPhaseLabel,
   type KeeperBucket,
 } from './keeper-workspace-shared'
+import { rosterFilterPref, rosterSortPref, type RosterFilter, type RosterSort } from './keeper-roster-prefs'
 import { phasePulse } from '../v2/keeper-fsm'
 import { KEEPER_STATUS_LABEL_KO } from '../../lib/keeper-operational-state'
 
-type RosterFilter = 'all' | 'run' | 'att'
-type RosterSort = 'status' | 'recent' | 'name' | 'att'
-type KeeperWorkspaceRouteSurface = 'monitoring' | 'keepers'
 type RosterMenuState = { keeper: Keeper; x: number; y: number } | null
 type RosterHeaderBucket = KeeperBucket
 type RosterFleetSummary = {
@@ -67,34 +64,6 @@ type RosterFleetSummary = {
 const MENU_WIDTH = 190
 const MENU_ESTIMATED_HEIGHT = 246
 const MENU_VIEWPORT_MARGIN = 8
-
-const ROSTER_FILTER_VALUES: readonly RosterFilter[] = ['all', 'run', 'att']
-const ROSTER_SORT_VALUES: readonly RosterSort[] = ['status', 'recent', 'name', 'att']
-
-function memberOr<T extends string>(allowed: readonly T[], fallback: T): (raw: string) => T {
-  return raw => {
-    const parsed: unknown = JSON.parse(raw)
-    return typeof parsed === 'string' && (allowed as readonly string[]).includes(parsed)
-      ? (parsed as T)
-      : fallback
-  }
-}
-
-// View preferences survive reload (persistentSignal SSOT). Previously
-// component-local useState: every remount snapped back to all/최근순.
-export const rosterFilterPref = persistentSignal<RosterFilter>({
-  key: 'dashboard:kw-roster:filter-v1',
-  defaultValue: 'all',
-  deserialize: memberOr(ROSTER_FILTER_VALUES, 'all'),
-})
-// The standalone's default is lifecycle grouping: 실행 중, 확인 필요,
-// 일시정지, then 중지. Recency remains available as an explicit operator
-// preference.
-export const rosterSortPref = persistentSignal<RosterSort>({
-  key: 'dashboard:kw-roster:sort-v1',
-  defaultValue: 'status',
-  deserialize: memberOr(ROSTER_SORT_VALUES, 'status'),
-})
 
 // Group headers use the canonical KEEPER_STATUS_LABEL_KO vocabulary
 // (lib/keeper-operational-state.ts) — same words as the monitoring band
@@ -524,13 +493,11 @@ export function KeeperWorkspaceRoster({
   activeName,
   onSelect,
   onOpenConfig,
-  routeSurface = 'monitoring',
   mini = false,
 }: {
   activeName: string
   onSelect?: (name: string) => void
   onOpenConfig?: (name: string) => void
-  routeSurface?: KeeperWorkspaceRouteSurface
   mini?: boolean
 }): VNode {
   const [query, setQuery] = useState('')
@@ -603,11 +570,7 @@ export function KeeperWorkspaceRoster({
     // On mobile the roster and conversation share one column; picking a keeper
     // should reveal that keeper's chat (the roster is the "back" target).
     keeperMobilePane.value = 'chat'
-    if (routeSurface === 'keepers') {
-      navigate('keepers', { keeper: name })
-    } else {
-      navigate('monitoring', { section: 'agents', keeper: name })
-    }
+    navigateToKeeper(name)
     onSelect?.(name)
   }
 

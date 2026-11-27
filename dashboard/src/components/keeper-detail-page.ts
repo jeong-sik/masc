@@ -79,18 +79,16 @@ const LazyKeeperConfigPanel = lazy(async () => ({
 // header close button. `agent_name` was the only unique field; it is
 // surfaced in the 정체성 / 세대 section.
 
+// Mounted only as the keepers tab: the route's keeper param names the Keeper,
+// and without one the selected or most recently active Keeper shows.
 export function KeeperDetailPage() {
-  const routeSurface = route.value.tab === 'keepers' ? 'keepers' : 'monitoring'
-  const keeperName = route.value.tab === 'keepers'
-    ? route.value.params.keeper?.trim() || selectedKeeper.peek()?.name || mostRecentlyActiveKeeper(keepers.value)?.name || ''
-    : route.value.tab === 'monitoring' && route.value.params.section === 'agents'
-      ? route.value.params.keeper?.trim()
-      : ''
+  const keeperName =
+    route.value.params.keeper?.trim() || selectedKeeper.peek()?.name || mostRecentlyActiveKeeper(keepers.value)?.name || ''
 
   if (!keeperName) {
     return html`
       <div class="kw-grid" data-detail="open">
-        <${KeeperWorkspaceRoster} activeName="" routeSurface=${routeSurface} />
+        <${KeeperWorkspaceRoster} activeName="" />
         <div class="kw-detail">
           <div class="kw-detail-scroll">
             <div class="rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-6 text-sm text-[var(--color-fg-muted)]">
@@ -101,7 +99,7 @@ export function KeeperDetailPage() {
       </div>
     `
   }
-  return html`<${KeeperDetailResolver} keeperName=${keeperName} routeSurface=${routeSurface} />`
+  return html`<${KeeperDetailResolver} keeperName=${keeperName} />`
 }
 
 // P0 render-perf: isolate the `keepers` signal subscription here. A heartbeat,
@@ -113,10 +111,8 @@ export function KeeperDetailPage() {
 // not this keeper's phase transition.
 function KeeperDetailResolver({
   keeperName,
-  routeSurface,
 }: {
   keeperName: string
-  routeSurface: 'monitoring' | 'keepers'
 }) {
   const keeper = resolveKeeperForDetail(
     keeperName,
@@ -131,7 +127,7 @@ function KeeperDetailResolver({
     // gives the missing-state card the full conversation span.
     return html`
       <div class="kw-grid" data-detail="open">
-        <${KeeperWorkspaceRoster} activeName=${keeperName} routeSurface=${routeSurface} />
+        <${KeeperWorkspaceRoster} activeName=${keeperName} />
         <div class="kw-detail">
           <div class="kw-detail-scroll">
             <${KeeperDetailMissingState} keeperName=${keeperName} onClose=${closeKeeperDetail} />
@@ -140,7 +136,7 @@ function KeeperDetailResolver({
       </div>
     `
   }
-  return html`<${KeeperDetailContent} keeper=${keeper} routeSurface=${routeSurface} />`
+  return html`<${KeeperDetailContent} keeper=${keeper} />`
 }
 
 // Breakpoints mirror keeper-workspace.css responsive bands: at <=1180px the
@@ -170,10 +166,8 @@ function useMatchMedia(query: string): boolean {
 
 const KeeperDetailContent = memo(function KeeperDetailContent({
   keeper,
-  routeSurface,
 }: {
   keeper: Keeper
-  routeSurface: 'monitoring' | 'keepers'
 }) {
   const titleId = `keeper-detail-title-${keeper.name}`
   const effectiveStatus = keeperDisplayStatus(keeper)
@@ -468,7 +462,6 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
         : null}
       <${KeeperWorkspaceRoster}
         activeName=${keeper.name}
-        routeSurface=${routeSurface}
         mini=${!rosterOpen && !detailOpen}
         onOpenConfig=${openKeeperConfig}
         onSelect=${() => {

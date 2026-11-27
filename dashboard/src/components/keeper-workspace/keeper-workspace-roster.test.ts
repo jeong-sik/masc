@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../../router', async (orig) => ({
   ...(await orig<typeof import('../../router')>()),
-  navigate: vi.fn(),
+  navigateToKeeper: vi.fn(),
 }))
 vi.mock('../keeper-action-panel', async (importOriginal) => ({
   // Keep the real KEEPER_ACTION_LABELS (label/icon/title SSOT); only the
@@ -17,11 +17,12 @@ vi.mock('../keeper-detail-helpers', () => ({
   refreshAfterRuntimeAction: vi.fn(async () => undefined),
 }))
 
-import { navigate } from '../../router'
+import { navigateToKeeper } from '../../router'
 import { keepers, executionError, executionLoaded } from '../../store'
 import { keeperMobilePane } from '../keeper-detail-state'
 import { runKeeperAction } from '../keeper-action-panel'
-import { KeeperWorkspaceRoster, rosterEmptyText, rosterFilterPref, rosterFleetSummary, rosterSortPref } from './keeper-workspace-roster'
+import { KeeperWorkspaceRoster, rosterEmptyText, rosterFleetSummary } from './keeper-workspace-roster'
+import { rosterFilterPref, rosterSortPref } from './keeper-roster-prefs'
 import { keeperBucket } from './keeper-workspace-shared'
 import type { Keeper } from '../../types'
 
@@ -43,7 +44,7 @@ beforeEach(() => {
   // sort/filter choices made by one test never leak into the next.
   rosterFilterPref.value = 'all'
   rosterSortPref.value = 'status'
-  vi.mocked(navigate).mockClear()
+  vi.mocked(navigateToKeeper).mockClear()
   vi.mocked(runKeeperAction).mockClear()
   host = document.createElement('div')
   document.body.appendChild(host)
@@ -413,7 +414,7 @@ describe('KeeperWorkspaceRoster', () => {
     const rows = Array.from(host.querySelectorAll('.kw-kp-row')) as HTMLElement[]
     const sangsuRow = rows.find(r => r.textContent?.includes('sangsu'))
     sangsuRow?.click()
-    expect(navigate).toHaveBeenCalledWith('monitoring', { section: 'agents', keeper: 'sangsu' })
+    expect(navigateToKeeper).toHaveBeenCalledWith('sangsu')
     expect(onSelect).toHaveBeenCalledWith('sangsu')
     expect(keeperMobilePane.value).toBe('chat')
   })
@@ -428,7 +429,7 @@ describe('KeeperWorkspaceRoster', () => {
     expect(host.querySelector('[data-testid="kw-roster-menu"]')?.textContent).toContain('sangsu')
     expect(host.querySelector('[data-testid="kw-roster-menu-open-chat"]')).not.toBeNull()
     expect(host.querySelector('[data-testid="kw-roster-menu-config"]')).not.toBeNull()
-    expect(navigate).not.toHaveBeenCalled()
+    expect(navigateToKeeper).not.toHaveBeenCalled()
     expect(onSelect).not.toHaveBeenCalled()
   })
 
@@ -439,7 +440,7 @@ describe('KeeperWorkspaceRoster', () => {
     fireEvent.click(host.querySelector('[data-testid="kw-roster-menu-sangsu"]') as HTMLButtonElement)
     fireEvent.click(host.querySelector('[data-testid="kw-roster-menu-open-chat"]') as HTMLButtonElement)
 
-    expect(navigate).toHaveBeenCalledWith('monitoring', { section: 'agents', keeper: 'sangsu' })
+    expect(navigateToKeeper).toHaveBeenCalledWith('sangsu')
     expect(onSelect).toHaveBeenCalledWith('sangsu')
     expect(host.querySelector('[data-testid="kw-roster-menu"]')).toBeNull()
   })
@@ -466,7 +467,7 @@ describe('KeeperWorkspaceRoster', () => {
     fireEvent.click(host.querySelector('[data-testid="kw-roster-menu-rama"]') as HTMLButtonElement)
     fireEvent.click(host.querySelector('[data-testid="kw-roster-menu-config"]') as HTMLButtonElement)
 
-    expect(navigate).toHaveBeenCalledWith('monitoring', { section: 'agents', keeper: 'rama' })
+    expect(navigateToKeeper).toHaveBeenCalledWith('rama')
     expect(onOpenConfig).toHaveBeenCalledWith('rama')
     expect(host.querySelector('[data-testid="kw-roster-menu"]')).toBeNull()
   })
@@ -485,7 +486,7 @@ describe('KeeperWorkspaceRoster', () => {
     expect(host.querySelector('[data-testid="kw-roster-menu"]')).not.toBeNull()
     expect(host.querySelector('[data-testid="kw-roster-menu"]')?.textContent).toContain('sangsu')
     expect(host.querySelector('[data-testid="kw-roster-menu-open-chat"]')).not.toBeNull()
-    expect(navigate).not.toHaveBeenCalled()
+    expect(navigateToKeeper).not.toHaveBeenCalled()
     expect(onSelect).not.toHaveBeenCalled()
   })
 

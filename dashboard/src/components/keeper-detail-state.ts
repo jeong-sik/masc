@@ -1,5 +1,6 @@
 import { signal } from '@preact/signals'
 import { navigate, route } from '../router'
+import { keeperRoute } from '../config/navigation'
 import type { Keeper, TabId } from '../types'
 import { hydrateKeeperStatus, selectKeeper } from '../keeper-actions'
 import { activeKeeperName } from '../keeper-state'
@@ -26,29 +27,24 @@ function selectedKeeperMatches(keeperName: string): boolean {
   return selected.name === trimmed
 }
 
-function baseAgentDirectoryRoute(): { tab: TabId; params: Record<string, string> } {
+// The keepers roster: the current keepers route without its keeper, or the
+// roster itself when the operator is on another tab.
+function keeperRosterRoute(): { tab: TabId; params: Record<string, string> } {
   if (route.value.tab === 'keepers') {
-    const tab = route.value.tab
     const next: Record<string, string> = { ...route.value.params }
     delete next.agent
     delete next.keeper
     delete next.section
-    return { tab, params: next }
+    return { tab: 'keepers', params: next }
   }
-  if (route.value.tab === 'monitoring' && route.value.params.section === 'agents') {
-    const next: Record<string, string> = { ...route.value.params, section: 'agents' }
-    delete next.agent
-    delete next.keeper
-    return { tab: 'monitoring', params: next }
-  }
-  return { tab: 'monitoring', params: { section: 'agents' } }
+  return keeperRoute()
 }
 
 export function openKeeperDetail(k: Keeper) {
   selectedKeeper.value = k
   keeperMobilePane.value = 'chat'
   selectKeeper(k.name)
-  const base = baseAgentDirectoryRoute()
+  const base = keeperRosterRoute()
   navigate(base.tab, { ...base.params, keeper: k.name })
 }
 
@@ -61,6 +57,6 @@ export function clearKeeperDetailSelection(keeperName?: string) {
 
 export function closeKeeperDetail() {
   clearKeeperDetailSelection()
-  const base = baseAgentDirectoryRoute()
+  const base = keeperRosterRoute()
   navigate(base.tab, base.params)
 }

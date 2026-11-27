@@ -52,9 +52,15 @@ describe('detail route is anchored to the route it was opened from', () => {
     expect(mocks.navigate).toHaveBeenCalledWith('keepers', {})
   })
 
-  it('falls back to the monitoring agent directory from unrelated tabs', () => {
+  it('opens the keepers tab from unrelated tabs', () => {
     mocks.route.value = { tab: 'board', params: {}, postId: null }
     openKeeperDetail(keeper('gamma'))
-    expect(mocks.navigate).toHaveBeenCalledWith('monitoring', { section: 'agents', keeper: 'gamma' })
+    expect(mocks.navigate).toHaveBeenCalledWith('keepers', { keeper: 'gamma' })
+  })
+
+  it('returns to the keepers roster on close from unrelated tabs', () => {
+    mocks.route.value = { tab: 'board', params: {}, postId: null }
+    closeKeeperDetail()
+    expect(mocks.navigate).toHaveBeenCalledWith('keepers', {})
   })
 })

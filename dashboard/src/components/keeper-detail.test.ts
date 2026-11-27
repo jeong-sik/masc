@@ -20,8 +20,8 @@ const mocks = vi.hoisted(() => ({
   replaceRoute: vi.fn(),
   route: {
     value: {
-      tab: 'monitoring',
-      params: { section: 'agents', view: 'keepers' },
+      tab: 'keepers',
+      params: {},
       postId: null,
     } as RouteState,
   },
@@ -154,11 +154,20 @@ vi.mock('../keeper-actions', async () => {
   }
 })
 
-vi.mock('../router', () => ({
-  navigate: mocks.navigate,
-  replaceRoute: mocks.replaceRoute,
-  route: mocks.route,
-}))
+vi.mock('../router', async () => {
+  const { keeperRoute } = await import('../config/navigation')
+  return {
+    navigate: mocks.navigate,
+    // The real one sends keeperRoute(name) to navigate; this sends it to the
+    // mock so a test can follow the route change.
+    navigateToKeeper: (name?: string) => {
+      const target = keeperRoute(name)
+      mocks.navigate(target.tab, target.params)
+    },
+    replaceRoute: mocks.replaceRoute,
+    route: mocks.route,
+  }
+})
 
 import { KeeperDetailPage } from './keeper-detail-page'
 import { activeKeeperDetailSection } from './keeper-detail-shell'
@@ -188,8 +197,8 @@ describe('openKeeperDetail', () => {
     mocks.navigate.mockClear()
     mocks.replaceRoute.mockClear()
     mocks.route.value = {
-      tab: 'monitoring',
-      params: { section: 'agents', view: 'keepers' },
+      tab: 'keepers',
+      params: {},
       postId: null,
     }
   })
@@ -205,14 +214,10 @@ describe('openKeeperDetail', () => {
     expect(selectedKeeper.value).toEqual(keeper)
     expect(mocks.selectKeeper).toHaveBeenCalledWith('sangsu')
     expect(mocks.loadKeeperConfig).not.toHaveBeenCalled()
-    expect(mocks.navigate).toHaveBeenCalledWith('monitoring', {
-      section: 'agents',
-      view: 'keepers',
-      keeper: 'sangsu',
-    })
+    expect(mocks.navigate).toHaveBeenCalledWith('keepers', { keeper: 'sangsu' })
   })
 
-  it('routes to monitoring agents when opened outside the agents directory', () => {
+  it('opens the keepers tab when opened from another tab', () => {
     mocks.route.value = {
       tab: 'workspace',
       params: { section: 'board' },
@@ -225,13 +230,10 @@ describe('openKeeperDetail', () => {
 
     openKeeperDetail(keeper)
 
-    expect(mocks.navigate).toHaveBeenCalledWith('monitoring', {
-      section: 'agents',
-      keeper: 'cheolsu',
-    })
+    expect(mocks.navigate).toHaveBeenCalledWith('keepers', { keeper: 'cheolsu' })
   })
 
-  it('resets detail-local state on close and returns to the agent directory view', () => {
+  it('resets detail-local state on close and returns to the keepers roster', () => {
     const keeper: Keeper = {
       name: 'sangsu',
       status: 'active',
@@ -243,10 +245,7 @@ describe('openKeeperDetail', () => {
     expect(selectedKeeper.value).toBeNull()
     expect(mocks.resetKeeperConfig).toHaveBeenCalledTimes(1)
     expect(mocks.selectKeeper).toHaveBeenLastCalledWith('')
-    expect(mocks.navigate).toHaveBeenLastCalledWith('monitoring', {
-      section: 'agents',
-      view: 'keepers',
-    })
+    expect(mocks.navigate).toHaveBeenLastCalledWith('keepers', {})
   })
 
   it('only clears detail state for the matching keeper when cleanup is scoped', () => {
@@ -281,8 +280,8 @@ describe('KeeperDetailPage', () => {
     mocks.loadKeeperConfig.mockClear()
     mocks.selectKeeper.mockClear()
     mocks.route.value = {
-      tab: 'monitoring',
-      params: { section: 'agents', view: 'keepers', keeper: 'analyst' },
+      tab: 'keepers',
+      params: { keeper: 'analyst' },
       postId: null,
     }
     activeKeeperDetailSection.value = 'keeper-comms'

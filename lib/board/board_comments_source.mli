@@ -91,3 +91,14 @@ val settle : store -> comments_recovery_receipt option write_outcome
 val acknowledge_recovery : store -> comments_recovery_receipt -> (unit, board_error) result
 (** Consume only the exact store-owned completed receipt once. The caller has
     received and retains the receipt; source authority still needs full reload. *)
+
+val find_in_snapshot :
+  comment_id:string -> Fs_compat.private_jsonl_snapshot -> (comment, board_error) result
+(** Pure physical-order lookup of a comment in [snapshot]. Every row must
+    decode, and the last row for each ID wins. Uses the weak snapshot cache on
+    hit. *)
+
+val children_in_snapshot :
+  post_id:string -> Fs_compat.private_jsonl_snapshot -> (Comment_id.t list, board_error) result
+(** Pure physical-order list of comment IDs belonging to [post_id] in
+    [snapshot], ordered by comment ID. Uses the weak snapshot cache on hit. *)

@@ -571,6 +571,14 @@ let enqueue_scheduled_msgs store scheduled =
 ;;
 
 let maybe_sweep store =
+  let now_fast = Time_compat.now () in
+  if Stdlib.Float.compare
+       (now_fast -. store.last_sweep)
+       (Stdlib.Float.of_int Limits.sweeper_interval_sec)
+     <= 0
+     && Stdlib.Float.compare (now_fast -. store.last_flush) flush_interval_sec <= 0
+  then ()
+  else
   let scheduled =
     with_lock store (fun () ->
       let now = Time_compat.now () in

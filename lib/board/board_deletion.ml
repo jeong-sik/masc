@@ -5,11 +5,7 @@ open Result.Syntax
 module Source = Board_deletion_source
 module Batch = Board_snapshot_batch
 module String_set = Set_util.StringSet
-module String_map = Map.Make (String)
-module Comment_set = Set.Make (struct
-  type t = Comment_id.t
-  let compare left right = String.compare (Comment_id.to_string left) (Comment_id.to_string right)
-end)
+module String_map = Set_util.StringMap
 
 type cleanup_conditions = {
   created_before : float;
@@ -142,22 +138,9 @@ let authorize ~authorization (post : post) = match authorization with
     if Board_access.can_read ~reader post then Ok ()
     else Error (Post_not_found (Post_id.to_string post.id))
 
-let posts_in_snapshot (snapshot : Fs_compat.private_jsonl_snapshot) =
-  let rec rows line posts = function
-    | [] -> Ok posts
-    | text :: remaining ->
-      match Board_posts_rows.decode ~line text with
-      | Board_posts_rows.Blank -> rows (line + 1) posts remaining
-      | Board_posts_rows.Rejected _ -> Error (Io_error "Board data is unavailable.")
-      | Board_posts_rows.Accepted { post; _ } ->
-        rows (line + 1) (String_map.add (Post_id.to_string post.id) post posts) remaining in
-  rows 1 String_map.empty (String.split_on_char '\n' snapshot.bytes)
+let posts_in_snapshot = Board_posts_rows.all_in_snapshot
 
-let parent_in_snapshot ~post_id snapshot =
-  let* posts = posts_in_snapshot snapshot in
-  match String_map.find_opt post_id posts with
-  | Some post -> Ok post
-  | None -> Error (Post_not_found post_id)
+let parent_in_snapshot = Board_posts_rows.latest
 
 let policy_in_snapshot (snapshot : Fs_compat.private_jsonl_snapshot) =
   let rec rows by_id by_slug = function
@@ -174,24 +157,7 @@ let policy_in_snapshot (snapshot : Fs_compat.private_jsonl_snapshot) =
         | exception Yojson.Json_error _ -> Error (Io_error "Board data is unavailable.") in
   rows String_map.empty String_map.empty (String.split_on_char '\n' snapshot.bytes)
 
-let children_in_snapshot ~post_id (snapshot : Fs_compat.private_jsonl_snapshot) =
-  let rec rows children = function
-    | [] -> Ok (Comment_set.elements children)
-    | text :: remaining ->
-      if String.equal (String.trim text) "" then rows children remaining
-      else
-        match Yojson.Safe.from_string text with
-        | json ->
-          (match (Board_content_json.comment_of_yojson json).value with
-           | None -> Error (Io_error "Board data is unavailable.")
-           | Some comment ->
-             (* Like the loader, the last accepted row owns each ID, including
-                an ID whose later row no longer belongs to this parent. *)
-             let children = if String.equal (Post_id.to_string comment.post_id) post_id
-               then Comment_set.add comment.id children else Comment_set.remove comment.id children in
-             rows children remaining)
-        | exception Yojson.Json_error _ -> Error (Io_error "Board data is unavailable.") in
-  rows Comment_set.empty (String.split_on_char '\n' snapshot.bytes)
+let children_in_snapshot = Board_comments_source.children_in_snapshot
 
 let has_post_votes ~post_id (snapshot : Fs_compat.private_jsonl_snapshot) =
   let rec rows found = function

@@ -55,4 +55,9 @@ val get_comment :
 (** Complete-source point query; display rows remain available through
     {!observe_comments} when the source is incomplete. *)
 
+val list_newest_comments_unlocked :
+  store -> ?predicate:(comment -> bool) -> limit:int -> unit -> comment list
+(** Collect up to [limit] newest matching comments while the caller holds
+    [store.mutex], without sorting the full comment table when [limit] is small. *)
+
 val list_comments : store -> ?limit:int -> unit -> comment list

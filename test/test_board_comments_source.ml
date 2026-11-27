@@ -483,6 +483,44 @@ let test_incomplete_queries_preserve_hidden_target_boundary base_path =
       no_private_fragment "MCP posts-source failure retains public redaction" (Tool_result.message result))
       [post_id; absent_post])
 
+let test_snapshot_reuse_keeps_row_caches_empty_and_preserves_top_k_order base_path =
+  let store, post = seed base_path in
+  let comments =
+    List.init 30 (fun i ->
+      require (append store post (Printf.sprintf "comment #%02d" i)))
+  in
+  let first_comment = List.hd comments in
+  ignore
+    (require
+       (Board.vote_comment store ~reader:Masc_board_handlers.Board_access.Operator
+          ~voter:"voter-1"
+          ~comment_id:(Board.Comment_id.to_string first_comment.id)
+          ~direction:Board.Up));
+  Board.flush_dirty store;
+  Alcotest.(check int) "post_rows duplicate cache remains empty" 0
+    (Hashtbl.length store.post_rows);
+  Alcotest.(check int) "comment_rows duplicate cache remains empty" 0
+    (Hashtbl.length store.comment_rows);
+  let top_5 = Board.list_comments store ~limit:5 () in
+  let all_sorted = Board.list_comments store ~limit:100 () in
+  let expected_5 = List.filteri (fun i _ -> i < 5) all_sorted in
+  Alcotest.(check (list string)) "bounded top-K comment heap matches full sort order"
+    (List.map (fun (c : Board.comment) -> Board.Comment_id.to_string c.id) expected_5)
+    (List.map (fun (c : Board.comment) -> Board.Comment_id.to_string c.id) top_5);
+  let restarted = new_store base_path in
+  Alcotest.(check int) "reloaded comments match persisted count" 30
+    (Hashtbl.length restarted.comments);
+  let reloaded_first =
+    require (Board.get_comment restarted
+      ~comment_id:(Board.Comment_id.to_string first_comment.id))
+  in
+  Alcotest.(check int) "mutated comment vote survives slice-reused flush" 1
+    reloaded_first.votes_up;
+  Alcotest.(check int) "reloaded post_rows stays empty" 0
+    (Hashtbl.length restarted.post_rows);
+  Alcotest.(check int) "reloaded comment_rows stays empty" 0
+    (Hashtbl.length restarted.comment_rows)
+
 let () = Alcotest.run "board comments source"
   ["persistence",
     [Alcotest.test_case "stale append requires model reload" `Quick (with_fixture test_stale_append_requires_full_reload);
@@ -500,7 +538,9 @@ let () = Alcotest.run "board comments source"
      Alcotest.test_case "completed recovery receipt survives reserved close" `Quick
        (with_fixture test_completed_recovery_survives_reserved_close);
      Alcotest.test_case "unfinished publication retains exact cleanup receipt" `Quick
-       (with_fixture test_unfinished_publication_cannot_adopt_foreign_rows)];
+       (with_fixture test_unfinished_publication_cannot_adopt_foreign_rows);
+     Alcotest.test_case "snapshot reuse keeps row caches empty and preserves top-K order" `Quick
+       (with_fixture test_snapshot_reuse_keeps_row_caches_empty_and_preserves_top_k_order)];
    "query consumers",
     [Alcotest.test_case "initial Missing is a complete empty thread" `Quick
        (with_fixture (test_query_boundary Initial_missing));

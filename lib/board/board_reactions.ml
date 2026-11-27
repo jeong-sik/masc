@@ -55,14 +55,6 @@ let compare_reaction_target_type a b =
 
 let equal_reaction_target_type a b = compare_reaction_target_type a b = 0
 
-module Reaction_target_map = Map.Make (struct
-    type t = reaction_target_type * string
-
-    let compare (lt, lid) (rt, rid) =
-      let c = compare_reaction_target_type lt rt in
-      if c <> 0 then c else String.compare lid rid
-  end)
-
 type reaction_summary_bucket =
   { counts : int Reaction_emoji_map.t
   ; reacted : Reaction_emoji_set.t
@@ -121,9 +113,14 @@ let reaction_summaries_of_bucket bucket =
            ; recent_user_ids =
                Reaction_emoji_map.find_opt emoji bucket.recent_users
                |> Option.value ~default:[]
-               |> List.sort (fun (_, a_ts) (_, b_ts) -> Stdlib.Float.compare b_ts a_ts)
-               |> List.map fst
-               |> List.filteri (fun idx _ -> idx < 5)
+               |> (function
+                   | [] -> []
+                   | [ (u, _) ] -> [ u ]
+                   | users ->
+                     users
+                     |> List.sort (fun (_, a_ts) (_, b_ts) -> Stdlib.Float.compare b_ts a_ts)
+                     |> List.map fst
+                     |> List.filteri (fun idx _ -> idx < 5))
            })
     board_reaction_emojis
 ;;
@@ -143,31 +140,36 @@ let reaction_summaries_unlocked store ~target_type ~target_id ?user_id () =
 ;;
 
 let reaction_summaries_batch_unlocked store ~targets ?user_id () =
-  let target_buckets =
-    List.fold_left
-      (fun acc target ->
-         Reaction_target_map.add target empty_reaction_summary_bucket acc)
-      Reaction_target_map.empty
-      targets
-  in
-  let target_buckets =
+  match targets with
+  | [] -> []
+  | _ ->
+    let target_buckets = Hashtbl.create (max 16 (List.length targets)) in
+    List.iter
+      (fun target ->
+         if not (Hashtbl.mem target_buckets target) then
+           Hashtbl.add target_buckets target empty_reaction_summary_bucket)
+      targets;
+    if Hashtbl.length store.reactions > 0 then
+      Hashtbl.iter
+        (fun _ (reaction : reaction) ->
+           let key = reaction.target_type, reaction.target_id in
+           match Hashtbl.find_opt target_buckets key with
+           | None -> ()
+           | Some bucket ->
+             Hashtbl.replace
+               target_buckets
+               key
+               (add_reaction_to_summary_bucket bucket ?user_id reaction))
+        store.reactions;
     Hashtbl.fold
-      (fun _ (reaction : reaction) acc ->
-         let key = reaction.target_type, reaction.target_id in
-         match Reaction_target_map.find_opt key acc with
-         | None -> acc
-         | Some bucket ->
-           Reaction_target_map.add
-             key
-             (add_reaction_to_summary_bucket bucket ?user_id reaction)
-             acc)
-      store.reactions
+      (fun target bucket acc ->
+         let summary =
+           if bucket == empty_reaction_summary_bucket then []
+           else reaction_summaries_of_bucket bucket
+         in
+         (target, summary) :: acc)
       target_buckets
-  in
-  Reaction_target_map.fold
-    (fun target bucket acc -> (target, reaction_summaries_of_bucket bucket) :: acc)
-    target_buckets
-    []
+      []
 ;;
 
 let normalize_reaction_user_id = function

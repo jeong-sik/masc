@@ -16,6 +16,17 @@ val list_reactions :
   unit ->
   (reaction_summary list, board_error) result
 
+val normalize_reaction_user_id : string option -> string option
+
+val reaction_summaries_batch_unlocked :
+  store ->
+  targets:(reaction_target_type * string) list ->
+  ?user_id:string ->
+  unit ->
+  ((reaction_target_type * string) * reaction_summary list) list
+(** Compute batch reaction summaries while caller holds [persist_mutex] and
+    [store.mutex] and has already canonicalized [targets]. *)
+
 val list_reactions_batch :
   store ->
   targets:(reaction_target_type * string) list ->

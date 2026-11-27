@@ -46,22 +46,20 @@ module String_map = Set_util.StringMap
 let list_hearths store ?(exclude_system = false) ?(exclude_automation = false) ()
     : (string * int) list =
   with_lock store (fun () ->
-    let counts =
-      Hashtbl.fold
-        (fun _ (p : post) acc ->
-           if Board_core_classify.post_matches_filters
-                ~exclude_system ~exclude_automation p
-           then
-             match p.hearth with
-             | Some h ->
-               let c = String_map.find_opt h acc |> Option.value ~default:0 in
-               String_map.add h (c + 1) acc
-             | None -> acc
-           else acc)
-        store.posts
-        String_map.empty
-    in
-    String_map.bindings counts
+    let counts : (string, int ref) Hashtbl.t = Hashtbl.create 32 in
+    Hashtbl.iter
+      (fun _ (p : post) ->
+         if Board_core_classify.post_matches_filters
+              ~exclude_system ~exclude_automation p
+         then
+           match p.hearth with
+           | Some h ->
+             (match Hashtbl.find_opt counts h with
+              | Some r -> incr r
+              | None -> Hashtbl.add counts h (ref 1))
+           | None -> ())
+      store.posts;
+    Hashtbl.fold (fun k r acc -> (k, !r) :: acc) counts []
     |> List.sort (fun (kl, a) (kr, b) ->
          let c = Int.compare b a in
          if c <> 0 then c else String.compare kl kr)
@@ -471,18 +469,46 @@ let available_flairs = [
   ("meta", "🔧", "Meta");
 ]
 
-(* Flair tag pattern — pure literal, hoist out of per-post extraction. *)
-let flair_tag_re = Re.Pcre.re {|\[flair:([a-z]+)\]|} |> Re.compile
-
-(** Extract flair from content (format: [flair:name] at start) *)
+(** Zero-regex scanner matching [\[flair:([a-z]+)\]] (same first-match
+    semantics as [Re.Pcre.re {|\[flair:([a-z]+)\]|}], without invoking the regex
+    engine on the >99% of post bodies that carry no flair tag). *)
 let extract_flair content =
-  match Re.exec_opt flair_tag_re content with
-  | Some g ->
-    let flair_name = Re.Group.get g 1 in
-    (match List.find_opt (fun (name, _, _) -> String.equal name flair_name) available_flairs with
-    | Some f -> Some f
-    | None -> None)
-  | None -> None
+  let len = String.length content in
+  let rec find_tag pos =
+    if pos + 9 > len then None
+    else
+      match String.index_from_opt content pos '[' with
+      | None -> None
+      | Some idx ->
+        if idx + 9 <= len
+           && Char.equal (String.unsafe_get content (idx + 1)) 'f'
+           && Char.equal (String.unsafe_get content (idx + 2)) 'l'
+           && Char.equal (String.unsafe_get content (idx + 3)) 'a'
+           && Char.equal (String.unsafe_get content (idx + 4)) 'i'
+           && Char.equal (String.unsafe_get content (idx + 5)) 'r'
+           && Char.equal (String.unsafe_get content (idx + 6)) ':'
+        then
+          let start = idx + 7 in
+          let rec scan i =
+            if i >= len then None
+            else
+              let c = String.unsafe_get content i in
+              if c >= 'a' && c <= 'z' then scan (i + 1)
+              else if Char.equal c ']' && i > start then
+                let flair_name = String.sub content start (i - start) in
+                match
+                  List.find_opt
+                    (fun (name, _, _) -> String.equal name flair_name)
+                    available_flairs
+                with
+                | Some f -> Some f
+                | None -> None
+              else find_tag (idx + 1)
+          in
+          scan start
+        else find_tag (idx + 1)
+  in
+  find_tag 0
 
 (** Get flair info as JSON *)
 let flair_to_yojson (name, emoji, label) =

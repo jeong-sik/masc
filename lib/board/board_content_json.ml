@@ -38,20 +38,27 @@ let audience_to_yojson = function
    only when present; turn_ref serializes via [Ids.Turn_ref.to_yojson] (a flat
    "trace#turn" string), matching the chat-row wire form. *)
 let post_origin_to_yojson (o : post_origin) : Yojson.Safe.t =
-  `Assoc
-    ((match o.turn_ref with
-      | Some tr -> [ "turn_ref", Ids.Turn_ref.to_yojson tr ]
-      | None -> [])
-     @ (match o.source with
-        | Some s -> [ "source", `String s ]
-        | None -> [])
-     @
-     (match o.fusion_run_id with
-      | Some r -> [ "fusion_run_id", `String r ]
-      | None -> [])
-     @ (match o.fusion_producer with
-        | Some producer -> ["fusion_producer", `String producer]
-        | None -> []))
+  let fields =
+    match o.fusion_producer with
+    | Some producer -> [ "fusion_producer", `String producer ]
+    | None -> []
+  in
+  let fields =
+    match o.fusion_run_id with
+    | Some r -> ("fusion_run_id", `String r) :: fields
+    | None -> fields
+  in
+  let fields =
+    match o.source with
+    | Some s -> ("source", `String s) :: fields
+    | None -> fields
+  in
+  let fields =
+    match o.turn_ref with
+    | Some tr -> ("turn_ref", Ids.Turn_ref.to_yojson tr) :: fields
+    | None -> fields
+  in
+  `Assoc fields
 ;;
 
 (* Only emitted when the post is closed; the same shape is decoded back by
@@ -59,57 +66,74 @@ let post_origin_to_yojson (o : post_origin) : Yojson.Safe.t =
    means open, which lets every post minted before this field existed
    round-trip unchanged. *)
 let post_close_state_to_yojson (c : post_close_state) : Yojson.Safe.t =
+  let tail =
+    match c.summary with
+    | Some s -> [ "summary", `String s ]
+    | None -> []
+  in
+  let tail =
+    match c.successor_id with
+    | Some id -> ("successor_id", `String (Post_id.to_string id)) :: tail
+    | None -> tail
+  in
   `Assoc
-    ([ "closed_by", `String (Agent_id.to_string c.closed_by)
-     ; "closed_at", `Float c.closed_at
-     ]
-     @ (match c.successor_id with
-        | Some id -> [ "successor_id", `String (Post_id.to_string id) ]
-        | None -> [])
-     @ (match c.summary with
-        | Some s -> [ "summary", `String s ]
-        | None -> []))
+    (("closed_by", `String (Agent_id.to_string c.closed_by))
+     :: ("closed_at", `Float c.closed_at)
+     :: tail)
 ;;
 
 let post_to_yojson (p : post) : Yojson.Safe.t =
+  let tail =
+    match p.meta_json with
+    | Some meta -> [ "meta", meta ]
+    | None -> []
+  in
+  let tail =
+    match post_classification_reason p with
+    | Some reason -> ("classification_reason", `String reason) :: tail
+    | None -> tail
+  in
+  let tail =
+    match p.closed with
+    | Some c -> ("closed", post_close_state_to_yojson c) :: tail
+    | None -> tail
+  in
+  let tail =
+    match p.origin with
+    | Some o -> ("origin", post_origin_to_yojson o) :: tail
+    | None -> tail
+  in
+  let tail =
+    match p.thread_id with
+    | Some t -> ("thread_id", `String t) :: tail
+    | None -> tail
+  in
+  let tail =
+    match p.hearth with
+    | Some h -> ("hearth", `String h) :: tail
+    | None -> tail
+  in
+  let tail =
+    match p.audience with
+    | Some audience -> ("audience", audience_to_yojson audience) :: tail
+    | None -> tail
+  in
   `Assoc
-    ([ "id", `String (Post_id.to_string p.id)
-     ; "author", `String (Agent_id.to_string p.author)
-     ; "title", `String p.title
-     ; "body", `String p.body
-     ; "post_kind", `String (post_kind_to_string p.post_kind)
-     ; "visibility", `String (visibility_to_string p.visibility)
-     ; "created_at", `Float p.created_at
-     ; "content_updated_at", `Float p.content_updated_at
-     ; "updated_at", `Float p.updated_at
-     ; "expires_at", `Float p.expires_at
-     ; "votes_up", `Int p.votes_up
-     ; "votes_down", `Int p.votes_down
-     ; "reply_count", `Int p.reply_count
-     ; "pinned", `Bool p.pinned
-     ]
-     @ (match p.audience with
-        | Some audience -> [ "audience", audience_to_yojson audience ]
-        | None -> [])
-     @ (match p.hearth with
-        | Some h -> [ "hearth", `String h ]
-        | None -> [])
-     @ (match p.thread_id with
-        | Some t -> [ "thread_id", `String t ]
-        | None -> [])
-     @ (match p.origin with
-        | Some o -> [ "origin", post_origin_to_yojson o ]
-        | None -> [])
-     @ (match p.closed with
-        | Some c -> [ "closed", post_close_state_to_yojson c ]
-        | None -> [])
-     @ (match post_classification_reason p with
-        | Some reason -> [ "classification_reason", `String reason ]
-        | None -> [])
-     @
-     match p.meta_json with
-     | Some meta -> [ "meta", meta ]
-     | None -> [])
+    (("id", `String (Post_id.to_string p.id))
+     :: ("author", `String (Agent_id.to_string p.author))
+     :: ("title", `String p.title)
+     :: ("body", `String p.body)
+     :: ("post_kind", `String (post_kind_to_string p.post_kind))
+     :: ("visibility", `String (visibility_to_string p.visibility))
+     :: ("created_at", `Float p.created_at)
+     :: ("content_updated_at", `Float p.content_updated_at)
+     :: ("updated_at", `Float p.updated_at)
+     :: ("expires_at", `Float p.expires_at)
+     :: ("votes_up", `Int p.votes_up)
+     :: ("votes_down", `Int p.votes_down)
+     :: ("reply_count", `Int p.reply_count)
+     :: ("pinned", `Bool p.pinned)
+     :: tail)
 ;;
 
 let comment_to_yojson (c : comment) : Yojson.Safe.t =

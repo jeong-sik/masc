@@ -226,18 +226,44 @@ let read_source store =
               else
                 let () = stage := Decode_posts in
                 let posts = ref [] and errors = ref [] in
-                String.split_on_char '\n' receipt.value.bytes |> List.iteri (fun index text ->
-                  match Board_posts_rows.decode ~line:(index + 1) text with
-                  | Blank -> ()
-                  | Accepted { post; diagnostics } ->
-                    Board_content_diagnostics.emit diagnostics; posts := post :: !posts
-                  | Rejected { error; diagnostics } ->
-                    Board_content_diagnostics.emit diagnostics; errors := error :: !errors);
+                let by_id = ref Set_util.StringMap.empty in
+                let slices = ref Set_util.StringMap.empty in
+                let covered_bytes = ref 0 in
+                let raw_bytes = receipt.value.bytes in
+                Board_posts_rows.iter_lines_with_offsets raw_bytes
+                  (fun ~line_number ~start ~stop ~has_newline ->
+                     let text = String.sub raw_bytes start (stop - start) in
+                     match Board_posts_rows.decode ~line:line_number text with
+                     | Blank -> ()
+                     | Accepted { post; diagnostics } ->
+                       Board_content_diagnostics.emit diagnostics;
+                       posts := post :: !posts;
+                       let id = Post_id.to_string post.id in
+                       by_id := Set_util.StringMap.add id post !by_id;
+                       let prev_len =
+                         match Set_util.StringMap.find_opt id !slices with
+                         | Some (s : Board_posts_rows.slice) -> s.length
+                         | None -> 0
+                       in
+                       if Board_posts_rows.is_canonical_slice raw_bytes ~start ~stop ~has_newline then begin
+                         let length = stop - start + 1 in
+                         slices := Set_util.StringMap.add id { Board_posts_rows.offset = start; length } !slices;
+                         covered_bytes := !covered_bytes - prev_len + length
+                       end else begin
+                         slices := Set_util.StringMap.remove id !slices;
+                         covered_bytes := !covered_bytes - prev_len
+                       end
+                     | Rejected { error; diagnostics } ->
+                       Board_content_diagnostics.emit diagnostics;
+                       errors := error :: !errors);
                 let posts = List.rev !posts and errors = List.rev !errors in
                 let observation : posts_source_observation =
                   { source_path = path; snapshot = receipt.value; workspace_observation } in
                 match errors with
-                | [] -> Posts_complete { observation; posts; diagnostics = !diagnostics }
+                | [] ->
+                  Board_posts_rows.register_snapshot ~bytes:raw_bytes
+                    ~by_id:!by_id ~slices:!slices ~covered_bytes:!covered_bytes;
+                  Posts_complete { observation; posts; diagnostics = !diagnostics }
                 | errors -> Posts_partial { observation; posts; errors; diagnostics = !diagnostics }
       with exception_ ->
         let backtrace = Printexc.get_raw_backtrace () in
@@ -393,14 +419,23 @@ let prepare_append store post = match expected store with
 let append store post = match prepare_append store post with
   | Error outcome -> outcome
   | Ok (observation, suffix) ->
-        let bytes = observation.snapshot.bytes ^ suffix in
-        write store ~pre_write:observation ~kind:Append_write
-          ~workspace_observation:observation.workspace_observation ~bytes ~diagnostics:[]
-          (fun () -> match store.posts_source_io.posts with
-          | None -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_result
-              observation.source_path ~expected:observation.snapshot suffix
-          | Some io -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
-              ~io observation.source_path ~expected:observation.snapshot suffix)
+        let before_bytes = observation.snapshot.bytes in
+        let bytes = before_bytes ^ suffix in
+        let outcome =
+          write store ~pre_write:observation ~kind:Append_write
+            ~workspace_observation:observation.workspace_observation ~bytes ~diagnostics:[]
+            (fun () -> match store.posts_source_io.posts with
+            | None -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_result
+                observation.source_path ~expected:observation.snapshot suffix
+            | Some io -> Fs_compat.append_private_jsonl_durable_locked_at_snapshot_with_io_for_testing
+                ~io observation.source_path ~expected:observation.snapshot suffix)
+        in
+        (match outcome with
+         | Posts_written _ ->
+           Board_posts_rows.register_append ~before_bytes ~after_bytes:bytes
+             ~offset:(String.length before_bytes) ~length:(String.length suffix) post
+         | Posts_not_written _ | Posts_write_unknown _ -> ());
+        outcome
 
 type creation_append =
   | Creation_append_outcome of posts_write_outcome
@@ -423,7 +458,8 @@ let append_creation_with_policy store ~(policy : sub_boards_source_observation) 
     match workspace with
     | Error rejection -> ordinary (workspace_not_written store rejection)
     | Ok () ->
-      let bytes = observation.snapshot.bytes ^ suffix in
+      let before_bytes = observation.snapshot.bytes in
+      let bytes = before_bytes ^ suffix in
       let posts_io = store.posts_source_io.posts in
       let policy_io = store.sub_boards_source_io in
       let diagnostics failures = List.map (fun failure -> Posts_guard_diagnostic failure) failures in
@@ -459,9 +495,17 @@ let append_creation_with_policy store ~(policy : sub_boards_source_observation) 
             value = Fs_compat.Dependency_guarded (Fs_compat.Guard_executed {
               value; cleanup_failures = policy_cleanup });
             cleanup_failures = posts_cleanup } ->
-          ordinary (classify_write store ~pre_write:observation ~kind:Append_write
-            ~workspace_observation:observation.workspace_observation ~bytes
-            ~diagnostics:(diagnostics (policy_cleanup @ posts_cleanup)) value)
+          let outcome =
+            classify_write store ~pre_write:observation ~kind:Append_write
+              ~workspace_observation:observation.workspace_observation ~bytes
+              ~diagnostics:(diagnostics (policy_cleanup @ posts_cleanup)) value
+          in
+          (match outcome with
+           | Posts_written _ ->
+             Board_posts_rows.register_append ~before_bytes ~after_bytes:bytes
+               ~offset:(String.length before_bytes) ~length:(String.length suffix) post
+           | Posts_not_written _ | Posts_write_unknown _ -> ());
+          ordinary outcome
       with exception_ ->
         ordinary (write_raised store ~pre_write:observation ~kind:Append_write ~bytes
           ~diagnostics:[] exception_ (Printexc.get_raw_backtrace ()))
@@ -472,16 +516,9 @@ let capture ?replacement store =
   let expected = expected store in
   let bytes = match expected with
     | Error _ -> ""
-    | Ok _ -> match replacement with
-      | None -> Board_snapshot_rows.render ~rows:store.post_rows
-          ~to_json:Board_content_json.post_to_yojson store.posts
-      | Some (replacement : post) ->
-        let buffer = Buffer.create 4096 in
-        Hashtbl.iter (fun key (post : post) ->
-          let post = if String.equal key (Post_id.to_string replacement.id) then replacement else post in
-          Buffer.add_string buffer (Yojson.Safe.to_string (Board_content_json.post_to_yojson post));
-          Buffer.add_char buffer '\n') store.posts;
-        Buffer.contents buffer in
+    | Ok observation ->
+      Board_posts_rows.render_snapshot ?replacement
+        ~base_bytes:observation.snapshot.bytes store.posts in
   { expected; bytes }
 
 let rewrite store snapshot = match snapshot.expected, expected store with

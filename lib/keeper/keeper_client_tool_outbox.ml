@@ -8,6 +8,7 @@ type snapshot =
   ; entries : entry list
   }
 module Producer_map = Map.Make(String)
+module Producer_set = Set.Make(String)
 
 type arguments = Keeper_client_tool_outbox_codec.arguments =
   | Known of Yojson.Safe.t
@@ -41,7 +42,8 @@ type host_producer =
   { producer_id : string; runtime_label : string; turn_count : int
   ; base_path : string; keeper_name : string; lease_path : string
   ; outbox_directory : string; consumed_directory : string
-  ; delivery : delivery_frontier Atomic.t }
+  ; delivery : delivery_frontier Atomic.t
+  ; retained_paths : Producer_set.t Atomic.t }
 type host_delivery = { producer : host_producer; entry : entry }
 
 let directory = Keeper_official_client_paths.outbox_dir
@@ -50,12 +52,84 @@ let lease_directory ~base_path ~keeper_name =
   let* directory = directory ~base_path ~keeper_name in
   Ok (Filename.concat (Filename.dirname directory) "tool-result-producer-leases")
 
-let canonical_lease_path ~base_path ~keeper_name producer_id =
+let canonical_lease_directory ~base_path ~keeper_name =
   let* directory = lease_directory ~base_path ~keeper_name in
-  try Ok (Filename.concat (Fs_compat.realpath directory) (producer_id ^ ".lock")) with
+  try Ok (Fs_compat.realpath directory) with
   | Unix.Unix_error (error, operation, _) ->
     Error (operation ^ ": " ^ Unix.error_message error)
   | Sys_error detail -> Error detail
+
+let canonical_lease_path ~base_path ~keeper_name producer_id =
+  let* directory = canonical_lease_directory ~base_path ~keeper_name in
+  Ok (Filename.concat directory (producer_id ^ ".lock"))
+
+(* Per-lease-directory mutex serializes [start_host_producer]'s lease-file
+   creation + flock acquisition against [prune_stale_leases] so a sweep can
+   never race a freshly created lease before its flock is acquired. *)
+let lease_dir_mutex_mu = Stdlib.Mutex.create ()
+let lease_dir_mutexes : (string, Cross_context_mutex.t) Hashtbl.t = Hashtbl.create 32
+let swept_lease_dirs : (string, unit) Hashtbl.t = Hashtbl.create 32
+
+let lease_dir_mutex key =
+  Stdlib.Mutex.protect lease_dir_mutex_mu (fun () ->
+    match Hashtbl.find_opt lease_dir_mutexes key with
+    | Some mu -> mu
+    | None ->
+      let mu = Cross_context_mutex.create () in
+      Hashtbl.replace lease_dir_mutexes key mu;
+      mu)
+
+let mark_lease_dir_swept key =
+  Stdlib.Mutex.protect lease_dir_mutex_mu (fun () ->
+    if Hashtbl.mem swept_lease_dirs key then false
+    else begin
+      Hashtbl.replace swept_lease_dirs key ();
+      true
+    end)
+
+let rec record_retained_path producer path =
+  let current = Atomic.get producer.retained_paths in
+  if Producer_set.mem path current then ()
+  else
+    let next = Producer_set.add path current in
+    if not (Atomic.compare_and_set producer.retained_paths current next)
+    then record_retained_path producer path
+
+let receipt_may_exist path =
+  match Unix.lstat path with
+  | _ -> true
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false
+  | exception Unix.Unix_error _ -> true
+
+let unlink_lease_if_present lock_path =
+  match Unix.unlink lock_path with
+  | () -> Ok true
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+  | exception Unix.Unix_error (error, operation, _) ->
+    Error (operation ^ ": " ^ Unix.error_message error)
+
+let cleanup_unused_producer_lease producer =
+  let run () =
+    let paths = Atomic.get producer.retained_paths in
+    let has_pending =
+      if Producer_set.is_empty paths then false
+      else
+        Eio_guard.run_in_systhread ~label:"tool-outbox-lease-check" (fun () ->
+          Producer_set.exists receipt_may_exist paths)
+    in
+    if not has_pending then
+      match
+        Eio_guard.run_in_systhread ~label:"tool-outbox-lease-cleanup" (fun () ->
+          unlink_lease_if_present producer.lease_path)
+      with
+      | Ok _ -> ()
+      | Error detail ->
+        Log.Misc.debug "keeper_client_tool_outbox: lease cleanup skipped for %s: %s"
+          producer.lease_path detail
+  in
+  match Eio_guard.execution_context () with
+  | Eio_guard.Eio_fiber -> Eio.Cancel.protect run
+  | Eio_guard.Non_eio -> run ()
 
 let host_producer ~base_path ~keeper_name ~runtime_label ~turn_count =
   if String.trim runtime_label = "" then Error "tool result producer label is empty"
@@ -72,14 +146,9 @@ let host_producer ~base_path ~keeper_name ~runtime_label ~turn_count =
       |> Result.map_error Keeper_fs.durable_write_error_to_string in
     let* lease_path = canonical_lease_path ~base_path ~keeper_name producer_id in
     Ok {producer_id;runtime_label;turn_count;base_path;keeper_name;lease_path;
-        outbox_directory;consumed_directory;delivery=Atomic.make (Open Producer_map.empty)}
-
-let start_host_producer ~sw ~base_path ~keeper_name ~runtime_label ~turn_count =
-  Eio.Switch.check sw;
-  let* producer = host_producer ~base_path ~keeper_name ~runtime_label ~turn_count in
-  let* () = File_lock_eio.acquire_liveness_lock ~sw ~lock_path:producer.lease_path
-    |> Result.map_error File_lock_eio.durable_lock_error_to_string in
-  Ok producer
+        outbox_directory;consumed_directory;
+        delivery=Atomic.make (Open Producer_map.empty);
+        retained_paths=Atomic.make Producer_set.empty}
 
 let to_json = Keeper_client_tool_outbox_codec.to_json
 
@@ -102,7 +171,7 @@ let validate path json =
   Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
     Keeper_client_tool_outbox_codec.validate ~path json)
 
-let retain_json ~base_path ~keeper_name json =
+let retain_json ?on_before_write ~base_path ~keeper_name json =
   let* directory = directory ~base_path ~keeper_name in
   let path = Filename.concat directory (filename json) in
   let* () = validate path json in
@@ -114,6 +183,7 @@ let retain_json ~base_path ~keeper_name json =
     | Ok decoded when decoded = json -> Ok ()
     | Ok _ -> Error "tool outbox receipt changes when read back"
     | Error detail -> Error detail in
+  Option.iter (fun notify -> notify path) on_before_write;
   let temp_dir = Filename.concat (Filename.dirname directory) ".undelivered-tools-staging" in
   let* () = Keeper_fs.save_json_durable_atomic ~ownership_root:base_path ~temp_dir
       ~pretty:false path json
@@ -128,7 +198,10 @@ let retain_host_result_with_delivery producer ~invocation_index ~call_id ~tool_n
   let json = Keeper_client_tool_outbox_codec.host_to_json
       ~producer_id:producer.producer_id ~runtime_label:producer.runtime_label
       ~turn_count:producer.turn_count ~invocation_index ~call_id ~tool_name ~arguments ~response in
-  let* entry = retain_json ~base_path:producer.base_path ~keeper_name:producer.keeper_name json in
+  let* entry =
+    retain_json ~on_before_write:(record_retained_path producer)
+      ~base_path:producer.base_path ~keeper_name:producer.keeper_name json
+  in
   Ok {producer;entry}
 
 let retain_host_result producer ~invocation_index ~call_id ~tool_name ~arguments ~response =
@@ -360,6 +433,137 @@ let inspect_committed ~base_path ~keeper_name =
        (fun path ->
           path, Result.map (fun (_ : Yojson.Safe.t) -> ()) (read_committed path))
        paths)
+
+let host_producer_id_of_json = function
+  | `Assoc fields ->
+    (match List.assoc_opt "host_producer_id" fields with
+     | Some (`String producer_id) -> Ok (Some producer_id)
+     | None -> Ok None
+     | Some (`Assoc _ | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null) ->
+       Error "invalid host result producer identity")
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    Error "tool result receipt must be an object"
+
+let pending_host_producer_ids_of_paths paths =
+  List.fold_left
+    (fun acc path ->
+       let* producers = acc in
+       let* json = read_committed path in
+       let* producer_id = host_producer_id_of_json json in
+       match producer_id with
+       | Some id -> Ok (Producer_set.add id producers)
+       | None -> Ok producers)
+    (Ok Producer_set.empty)
+    paths
+
+let try_unlink_inactive_lease lock_path =
+  match
+    File_lock_eio.try_with_liveness_lock_observed ~lock_path (fun () ->
+      Eio_guard.run_in_systhread ~label:"tool-outbox-lease-unlink" (fun () ->
+        unlink_lease_if_present lock_path))
+  with
+  | File_lock_eio.Lock_held_elsewhere -> false
+  | Lock_attempted (Lock_not_acquired _) -> false
+  | Lock_attempted (Body_completed { value = Ok removed; _ }) -> removed
+  | Lock_attempted (Body_completed { value = Error _; _ }) -> false
+
+let prune_stale_leases_unlocked ~base_path ~keeper_name ~leases_dir ~canonical_leases_dir =
+  let* _outbox_dir, pending_paths = committed_paths ~base_path ~keeper_name in
+  let* referenced = pending_host_producer_ids_of_paths pending_paths in
+  let* names =
+    Fs_compat.read_owned_directory ~ownership_root:leases_dir leases_dir
+    |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string
+  in
+  let removed = ref 0 in
+  List.iter
+    (fun name ->
+       if Filename.check_suffix name ".lock" then begin
+         let producer_id = Filename.chop_suffix name ".lock" in
+         if not (Producer_set.mem producer_id referenced) then
+           let lock_path = Filename.concat canonical_leases_dir name in
+           if try_unlink_inactive_lease lock_path then incr removed
+       end)
+    names;
+  Ok !removed
+
+let prune_stale_leases ~base_path ~keeper_name =
+  let* leases_dir = lease_directory ~base_path ~keeper_name in
+  match Fs_compat.path_kind ~follow:false leases_dir with
+  | Fs_compat.Missing -> Ok 0
+  | Fs_compat.Other -> Error "tool result producer leases path is not a directory"
+  | Fs_compat.Directory ->
+    let* canonical_leases_dir = canonical_lease_directory ~base_path ~keeper_name in
+    Cross_context_mutex.with_lock (lease_dir_mutex canonical_leases_dir) (fun () ->
+      prune_stale_leases_unlocked ~base_path ~keeper_name ~leases_dir ~canonical_leases_dir)
+
+let maybe_prune_stale_leases_once ~base_path ~keeper_name =
+  match lease_directory ~base_path ~keeper_name with
+  | Error _ -> ()
+  | Ok leases_dir ->
+    (match Fs_compat.path_kind ~follow:false leases_dir with
+     | Fs_compat.Missing | Fs_compat.Other -> ()
+     | Fs_compat.Directory ->
+       (match canonical_lease_directory ~base_path ~keeper_name with
+        | Error _ -> ()
+        | Ok canonical_leases_dir ->
+          if mark_lease_dir_swept canonical_leases_dir then
+            match
+              Cross_context_mutex.with_lock (lease_dir_mutex canonical_leases_dir) (fun () ->
+                prune_stale_leases_unlocked ~base_path ~keeper_name
+                  ~leases_dir ~canonical_leases_dir)
+            with
+            | Ok removed ->
+              if removed > 0 then
+                Log.Misc.info
+                  "keeper_client_tool_outbox: pruned %d stale producer lease(s) for keeper=%s"
+                  removed keeper_name
+            | Error detail ->
+              Log.Misc.debug
+                "keeper_client_tool_outbox: startup lease prune skipped for keeper=%s: %s"
+                keeper_name detail))
+
+let canonicalize_lease_dir_key path =
+  let rec loop p =
+    try Fs_compat.realpath p with
+    | Unix.Unix_error _ | Sys_error _ ->
+      let parent = Filename.dirname p in
+      if String.equal parent p then p
+      else Filename.concat (loop parent) (Filename.basename p)
+  in
+  loop path
+
+let start_host_producer ~sw ~base_path ~keeper_name ~runtime_label ~turn_count =
+  Eio.Switch.check sw;
+  maybe_prune_stale_leases_once ~base_path ~keeper_name;
+  let* leases_dir = lease_directory ~base_path ~keeper_name in
+  let create_and_lock () =
+    let* producer = host_producer ~base_path ~keeper_name ~runtime_label ~turn_count in
+    let cleanup_registered = Atomic.make false in
+    let cleanup_lease () =
+      if Atomic.exchange cleanup_registered false then
+        cleanup_unused_producer_lease producer
+    in
+    (* Register cleanup BEFORE acquiring the liveness lock so LIFO switch
+       release closes the flock descriptor first, then unlinks the lease file
+       only if no pending receipt of this producer remains on disk. *)
+    (match Eio.Switch.on_release sw cleanup_lease with
+     | () -> Atomic.set cleanup_registered true
+     | exception exn ->
+       let bt = Printexc.get_raw_backtrace () in
+       cleanup_unused_producer_lease producer;
+       Printexc.raise_with_backtrace exn bt);
+    match File_lock_eio.acquire_liveness_lock ~sw ~lock_path:producer.lease_path with
+    | Ok () -> Ok producer
+    | Error error ->
+      cleanup_lease ();
+      Error (File_lock_eio.durable_lock_error_to_string error)
+    | exception exn ->
+      let bt = Printexc.get_raw_backtrace () in
+      cleanup_lease ();
+      Printexc.raise_with_backtrace exn bt
+  in
+  let mutex_key = canonicalize_lease_dir_key leases_dir in
+  Cross_context_mutex.with_lock (lease_dir_mutex mutex_key) create_and_lock
 
 let load_committed ~base_path ~keeper_name =
   let* directory, paths = committed_paths ~base_path ~keeper_name in
@@ -817,21 +1021,68 @@ let publish_consumed (snapshot : snapshot) entry =
   | Some json when json = entry.json -> validate path json
   | None | Some _ -> Error "consumed tool outbox receipt readback differs from the original"
 
+let cleanup_retired_producer_leases (snapshot : snapshot) =
+  let retired_producers =
+    List.fold_left
+      (fun acc entry ->
+         match host_producer_id_of_json entry.json with
+         | Ok (Some id) -> Producer_set.add id acc
+         | Ok None | Error _ -> acc)
+      Producer_set.empty
+      snapshot.entries
+  in
+  if Producer_set.is_empty retired_producers then ()
+  else
+    let leases_dir =
+      Filename.concat (Filename.dirname snapshot.directory) "tool-result-producer-leases"
+    in
+    match Fs_compat.path_kind ~follow:false leases_dir with
+    | Fs_compat.Missing | Fs_compat.Other -> ()
+    | Fs_compat.Directory ->
+      (match Fs_compat.realpath leases_dir with
+       | exception (Unix.Unix_error _ | Sys_error _) -> ()
+       | canonical_leases_dir ->
+         let remaining_referenced =
+           match Fs_compat.path_kind ~follow:false snapshot.directory with
+           | Fs_compat.Missing -> Ok Producer_set.empty
+           | Fs_compat.Other -> Error "tool outbox is not a directory"
+           | Fs_compat.Directory ->
+             let* names =
+               Fs_compat.read_owned_directory ~ownership_root:snapshot.directory snapshot.directory
+               |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string
+             in
+             pending_host_producer_ids_of_paths
+               (List.map (Filename.concat snapshot.directory) names)
+         in
+         match remaining_referenced with
+         | Error _ -> ()
+         | Ok referenced ->
+           Producer_set.iter
+             (fun producer_id ->
+                if not (Producer_set.mem producer_id referenced) then
+                  let lock_path = Filename.concat canonical_leases_dir (producer_id ^ ".lock") in
+                  ignore (try_unlink_inactive_lease lock_path : bool))
+             retired_producers)
+
 let acknowledge snapshot =
-  List.fold_left (fun acc entry ->
-    let* () = acc in
-    let* () = pending_matches entry in
-    let* () = publish_consumed snapshot entry in
-    (* Publication yields. Re-read the pending identity before unlinking it.
-       A concurrent ACK may already have removed it; the strict writer above
-       still confirmed its original owner, and the idempotent unlink fsyncs
-       the pending directory even after a prior removal failed its fsync. *)
-    let* () = pending_matches entry in
-    Keeper_fs.remove_file_durable ~ownership_root:snapshot.directory entry.path
-    |> Result.map_error (fun (error : Keeper_fs.durable_remove_error) ->
-      Printf.sprintf "tool outbox pending retirement failed: removed=%b %s"
-        error.removed (Keeper_fs.durable_remove_error_to_string error)))
-    (Ok ()) snapshot.entries
+  let* () =
+    List.fold_left (fun acc entry ->
+      let* () = acc in
+      let* () = pending_matches entry in
+      let* () = publish_consumed snapshot entry in
+      (* Publication yields. Re-read the pending identity before unlinking it.
+         A concurrent ACK may already have removed it; the strict writer above
+         still confirmed its original owner, and the idempotent unlink fsyncs
+         the pending directory even after a prior removal failed its fsync. *)
+      let* () = pending_matches entry in
+      Keeper_fs.remove_file_durable ~ownership_root:snapshot.directory entry.path
+      |> Result.map_error (fun (error : Keeper_fs.durable_remove_error) ->
+        Printf.sprintf "tool outbox pending retirement failed: removed=%b %s"
+          error.removed (Keeper_fs.durable_remove_error_to_string error)))
+      (Ok ()) snapshot.entries
+  in
+  cleanup_retired_producer_leases snapshot;
+  Ok ()
 
 let settle_after_turn snapshot ~(stop_reason : Runtime_agent_context.stop_reason) =
   match stop_reason with

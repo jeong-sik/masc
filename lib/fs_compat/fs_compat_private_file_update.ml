@@ -219,7 +219,6 @@ let update_private_file_durable_locked_with_io ?(create=true) ?(locking=Wait_for
              | Some newline ->
                String.sub existing (newline + 1) (String.length existing - newline - 1)
            in
-           validate_binding ();
            let recovered = match validate_prefix with
              | None -> Ok (Recovered_prefix existing)
              | Some validate_prefix ->
@@ -243,7 +242,7 @@ let update_private_file_durable_locked_with_io ?(create=true) ?(locking=Wait_for
            Result.bind recovered (function
            | Recovery_result result -> validate_binding (); Ok result
            | Recovered_prefix existing ->
-           validate_binding ();
+           if Option.is_some validate_prefix then validate_binding ();
            let suffix, result = decide existing in
            validate_binding ();
            if verify_content then (require_snapshot before_read; verify_bytes existing);

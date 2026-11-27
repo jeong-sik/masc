@@ -36,13 +36,10 @@ let with_guard ~io requested_path ~expected ~f =
     with_private_jsonl_identified_stable_lock ~io:guard_io
       ~success:(fun _ -> Snapshot_succeeded expected) requested_path
       (fun ~dir ~path ~lock_identity ->
-        let* actual = Fs_compat_private_jsonl_write.read_private_jsonl_snapshot_locked ~io path ~after:None in
         let* () =
-          if Private_jsonl_cursor.equal expected.cursor actual.cursor then Ok ()
-          else Error (Cursor_mismatch { expected = expected.cursor; actual = actual.cursor }) in
-        let* () =
-          if String.equal expected.bytes actual.bytes then Ok ()
-          else Error (Transaction_content_changed { path }) in
+          Fs_compat_private_jsonl_write.verify_private_jsonl_snapshot_locked
+            ~io path ~expected
+        in
         Ok (f ~dir ~path ~lock_identity)) in
   match perform () with
   | Ok value ->

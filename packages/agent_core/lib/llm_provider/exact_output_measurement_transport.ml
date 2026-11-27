@@ -15,9 +15,15 @@ type 'callback_error error =
 
 type connection = [ `Close | `Flow | `R | `Shutdown | `W ] Eio.Resource.t
 
+type origin_scheme =
+  | Origin_http
+  | Origin_https
+
 type validated_origin =
   { uri : Uri.t
+  ; scheme : origin_scheme
   ; host : string
+  ; port : int
   }
 
 let create_dispatch_intent ~commit_fence ~mark_dispatch_started =
@@ -80,20 +86,43 @@ let%test "ordinary unclassified transport exceptions remain typed" =
   is_unknown (Failure "opaque failure") && is_unknown (Sys_error "opaque sys error")
 ;;
 
+let invalid_url url detail =
+  Error
+    (NetworkError
+       { message = Printf.sprintf "invalid URL %S: %s" url detail; kind = Unknown })
+;;
+
 let validate_uri url =
-  try
-    let uri = Uri.of_string url in
-    match Uri.host uri with
-    | Some host when String.trim host <> "" -> Ok { uri; host }
-    | Some _ | None ->
-      Error
-        (NetworkError
-           { message = Printf.sprintf "invalid URL %S: missing host" url; kind = Unknown })
-  with
-  | Invalid_argument detail ->
-    Error
-      (NetworkError
-         { message = Printf.sprintf "invalid URL %S: %s" url detail; kind = Unknown })
+  if String.exists (fun c -> c = '\n' || c = '\r') url
+  then invalid_url url "contains line break"
+  else
+    match Uri.of_string url with
+    | exception Invalid_argument detail -> invalid_url url detail
+    | uri ->
+      let* scheme =
+        match Option.map String.lowercase_ascii (Uri.scheme uri) with
+        | Some "http" -> Ok Origin_http
+        | Some "https" -> Ok Origin_https
+        | Some unsupported ->
+          invalid_url url (Printf.sprintf "unsupported scheme %S" unsupported)
+        | None -> invalid_url url "missing HTTP scheme"
+      in
+      let* host =
+        match Uri.host uri with
+        | Some host when String.trim host <> "" -> Ok host
+        | Some _ | None -> invalid_url url "missing host"
+      in
+      let* port =
+        match Uri.port uri with
+        | Some port when port > 0 && port <= 65535 -> Ok port
+        | Some port -> invalid_url url (Printf.sprintf "invalid port %d" port)
+        | None ->
+          Ok
+            (match scheme with
+             | Origin_http -> 80
+             | Origin_https -> 443)
+      in
+      Ok { uri; scheme; host; port }
 ;;
 
 let validate_headers_and_body headers body =
@@ -131,13 +160,9 @@ let https_init_error_network_kind = function
   | Api_common.Ca_certs_unavailable _ | Api_common.Tls_config_unavailable _ -> Tls_error
 ;;
 
-let resolve_origin net ({ uri; host } : validated_origin) =
+let resolve_origin net ({ uri; scheme; host; port } : validated_origin) =
   let net = (net :> [ `Generic ] Eio.Net.ty Eio.Resource.t) in
-  let service =
-    match Uri.port uri with
-    | Some port -> Int.to_string port
-    | None -> Uri.scheme uri |> Option.value ~default:"http"
-  in
+  let service = Int.to_string port in
   let* addresses =
     try
       match Eio.Net.getaddrinfo_stream ~service net host with
@@ -152,8 +177,8 @@ let resolve_origin net ({ uri; host } : validated_origin) =
     | exn -> Http_client.connection_failure exn (Printexc.get_raw_backtrace ())
   in
   let* tls_wrap =
-    match Uri.scheme uri with
-    | Some "https" ->
+    match scheme with
+    | Origin_https ->
       let wrap_error reason =
         Connect_failed
           { message =
@@ -179,7 +204,7 @@ let resolve_origin net ({ uri; host } : validated_origin) =
                 ; kind = Tls_error
                 })
            (Api_common.tls_peer_of_host host)
-    | Some "http" | Some _ | None -> Ok None
+    | Origin_http -> Ok None
   in
   Ok (net, addresses, tls_wrap)
 ;;

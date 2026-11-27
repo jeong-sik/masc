@@ -11,13 +11,24 @@ let prune ~cutoff_month ~cutoff_day directory =
       if comparison > 0 then deleted
       else
         let removed = Directory.with_child directory month_name (fun month_dir ->
-          Directory.names month_dir
-          |> List.fold_left (fun count name ->
-            if Dated_jsonl_layout.day_file_name_is_valid ~year ~month name
-               && (comparison < 0
-                   || String.compare
-                        (Dated_jsonl_layout.day_number_of_day_file_name name) cutoff_day < 0)
-               && Directory.remove_regular_file month_dir name
-            then count + 1 else count) 0) in
-        if comparison <= 0 then Directory.remove_empty_child directory month_name;
-        deleted + (match removed with None -> 0 | Some count -> count)) 0
+          let entries = Directory.names month_dir in
+          let eligible =
+            List.filter (fun name ->
+              Dated_jsonl_layout.day_file_name_is_valid ~year ~month name
+              && (comparison < 0
+                  || String.compare
+                       (Dated_jsonl_layout.day_number_of_day_file_name name) cutoff_day < 0))
+              entries
+          in
+          let count =
+            match eligible with
+            | [] -> 0
+            | _ :: _ -> Directory.remove_regular_files month_dir eligible
+          in
+          let may_be_empty = entries = [] || count > 0 in
+          count, may_be_empty) in
+        match removed with
+        | None -> deleted
+        | Some (count, may_be_empty) ->
+          if may_be_empty then Directory.remove_empty_child directory month_name;
+          deleted + count) 0

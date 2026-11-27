@@ -2681,22 +2681,50 @@ let days_to_keep ~operator_window_days store =
   | Store.Kept -> None
 
 let prune_listed_stores_bound root held ~operator_window_days ~on_pruned =
-  List.fold_left
-    (fun pruned store ->
-       match days_to_keep ~operator_window_days store with
-       | None -> pruned
-       | Some days when days <= 0 -> pruned
-       | Some days ->
-         pruned + Store.fold_retention_directories root held store
-           ~f:(fun location directory ->
-             let t = open_store location in
-             let removed =
-               removing_files t (fun () ->
-                 prune_bound_directory ~location ~days directory)
-             in
-             if removed > 0 then on_pruned location;
-             removed))
-    0 Store.all
+  let prune_location days location directory =
+    let t = open_store location in
+    let removed =
+      removing_files t (fun () ->
+        prune_bound_directory ~location ~days directory)
+    in
+    if removed > 0 then on_pruned location;
+    removed
+  in
+  let non_keeper_rev, keeper_rev, reaction_ledger =
+    List.fold_left
+      (fun (non_keeper, keepers, reaction) store ->
+         match days_to_keep ~operator_window_days store with
+         | None -> non_keeper, keepers, reaction
+         | Some days when days <= 0 -> non_keeper, keepers, reaction
+         | Some days ->
+           (match store with
+            | Store.Root _ | Store.Decision_audit ->
+              (store, days) :: non_keeper, keepers, reaction
+            | Store.Keeper k ->
+              non_keeper, (k, days) :: keepers, reaction
+            | Store.Reaction_ledger ->
+              non_keeper, keepers, Some days))
+      ([], [], None)
+      Store.all
+  in
+  let non_keeper_pruned =
+    List.fold_left
+      (fun pruned (store, days) ->
+         pruned
+         + Store.fold_retention_directories root held store
+             ~f:(prune_location days))
+      0
+      (List.rev non_keeper_rev)
+  in
+  let keeper_pruned =
+    Store.fold_keeper_retention_directories
+      root
+      held
+      ~keeper_stores:(List.rev keeper_rev)
+      ~reaction_ledger
+      ~f:prune_location
+  in
+  non_keeper_pruned + keeper_pruned
 
 (* ── The facts kept in memory, on the read side ────────── *)
 

@@ -16,9 +16,11 @@ module Retention_directory :
     val fold_children : t -> init:'a -> f:('a -> string -> t -> 'a) -> 'a
     val descend : t -> string list -> (t -> int) -> int
     val remove_regular_file : ?older_than:float -> t -> string -> bool
+    val remove_regular_files : ?older_than:float -> t -> string list -> int
     val unlink_entry : t -> string -> bool
     val remove_empty_child_checked : t -> string -> bool
     val remove_empty_child : t -> string -> unit
+    val remove_empty_children : t -> string list -> unit
     val blocking_io : io
     val with_root : ?io:io -> string -> (t -> 'a) -> 'a option
   end

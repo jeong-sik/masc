@@ -26,7 +26,13 @@ let test_cancel_closes_owned_scope () =
       Alcotest.check_raises "cancelled scope cannot perform checked removals"
         (Invalid_argument "expired retention directory")
         (fun () -> ignore (operation directory "absent" : bool)))
-      [Directory.unlink_entry; Directory.remove_empty_child_checked])
+      [Directory.unlink_entry; Directory.remove_empty_child_checked];
+    Alcotest.check_raises "cancelled scope cannot perform batched file removal"
+      (Invalid_argument "expired retention directory")
+      (fun () -> ignore (Directory.remove_regular_files directory [] : int));
+    Alcotest.check_raises "cancelled scope cannot perform batched empty-child removal"
+      (Invalid_argument "expired retention directory")
+      (fun () -> Directory.remove_empty_children directory []))
 
 let () = Alcotest.run "retention cancellation"
   ["owned scope", [Alcotest.test_case "cancellation expires bound handle" `Quick test_cancel_closes_owned_scope]]

@@ -37,6 +37,15 @@ val remove_regular_file : ?older_than:float -> t -> string -> bool
     unlink: a concurrent leaf replacement can remove that replacement entry
     inside the owned parent, but never a symlink's target. *)
 
+val remove_regular_files : ?older_than:float -> t -> string list -> int
+(** Batched counterpart of {!remove_regular_file}. Validates every leaf name
+    and handle liveness up front, then inspects and unlinks entries relative
+    to the held parent in bounded chunks (one [io.run] call per chunk) so
+    large directories neither pay per-file thread-hop overhead nor monopolize
+    a worker thread between cancellation checks. Leaf [Unix_error]s are
+    reported and skipped identically to {!remove_regular_file}. Returns the
+    number of files actually unlinked. *)
+
 val unlink_entry : t -> string -> bool
 (** Unlink one immediate non-directory entry relative to the held parent,
     without following a symbolic link. [true] acknowledges a successful unlink;
@@ -51,3 +60,9 @@ val remove_empty_child_checked : t -> string -> bool
 
 val remove_empty_child : t -> string -> unit
 (** Best-effort [unlinkat(AT_REMOVEDIR)]; never follows a replacement link. *)
+
+val remove_empty_children : t -> string list -> unit
+(** Batched counterpart of {!remove_empty_child}. Validates every leaf name
+    and handle liveness up front, then performs best-effort
+    [unlinkat(AT_REMOVEDIR)] in bounded chunks (one [io.run] call per chunk);
+    never follows a replacement link. *)

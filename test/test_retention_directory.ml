@@ -198,9 +198,149 @@ let test_checked_removals_acknowledge_only_actual_effects () =
       Alcotest.(check string) "link target bytes remain" "sentinel"
         (Fs_compat.load_file marker))
 
+let test_batched_remove_regular_files_chunks_and_errors () =
+  let root = fresh () and outside = fresh () in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root; Fs_compat.remove_tree outside)
+    (fun () ->
+      let old_names =
+        List.init 300 (fun i ->
+          let name = Printf.sprintf "old-%03d.jsonl" i in
+          let path = Filename.concat root name in
+          write path;
+          Unix.utimes path 1. 1.;
+          name)
+      in
+      let recent_names =
+        List.init 5 (fun i ->
+          let name = Printf.sprintf "recent-%d.jsonl" i in
+          write (Filename.concat root name);
+          name)
+      in
+      let foreign = Filename.concat outside "foreign.jsonl" in
+      write foreign;
+      Unix.utimes foreign 1. 1.;
+      Unix.symlink foreign (Filename.concat root "linked.jsonl");
+      Unix.mkfifo (Filename.concat root "fifo.jsonl") 0o600;
+      let overlong = String.make 65536 'x' in
+      (* Place [overlong] first inside chunk 1 so the test proves a per-leaf
+         Unix_error does not abort the remaining removable entries in the same
+         chunk or later chunks. *)
+      let candidates =
+        overlong :: (old_names @ [ "linked.jsonl"; "fifo.jsonl" ] @ recent_names)
+      in
+      let io_calls = ref 0 in
+      let io : Directory.io = { run = (fun f -> incr io_calls; f ()) } in
+      let escaped = ref None in
+      (match Directory.with_root ~io root (fun held ->
+         escaped := Some held;
+         io_calls := 0;
+         let removed = Directory.remove_regular_files ~older_than:2. held candidates in
+         let batch_io_calls = !io_calls in
+         Alcotest.(check int) "all 300 old regular files removed despite overlong error" 300 removed;
+         Alcotest.(check int) "308 entries run in two 256-entry io batches" 2 batch_io_calls;
+         io_calls := 0;
+         Alcotest.(check int) "empty candidate list removes nothing" 0
+           (Directory.remove_regular_files ~older_than:2. held []);
+         Alcotest.(check int) "empty candidate list makes zero io calls" 0 !io_calls;
+         let victim = Filename.concat root "victim.jsonl" in
+         write victim;
+         Unix.utimes victim 1. 1.;
+         Alcotest.check_raises "invalid leaf fails before any unlink in batch"
+           (Invalid_argument "retention directory requires one child name")
+           (fun () ->
+              ignore
+                (Directory.remove_regular_files ~older_than:2. held [ "victim.jsonl"; "../escape" ]
+                 : int));
+         check_exists "victim preserved when later leaf is invalid" true victim) with
+       | Some () -> ()
+       | None -> Alcotest.fail "fixture root disappeared");
+      List.iter (fun name -> check_exists name false (Filename.concat root name)) old_names;
+      List.iter (fun name -> check_exists name true (Filename.concat root name)) recent_names;
+      List.iter (check_exists "special entries and link target preserved" true)
+        [ foreign; Filename.concat root "linked.jsonl"; Filename.concat root "fifo.jsonl" ];
+      let expired = Option.get !escaped in
+      Alcotest.check_raises "expired handle rejected even for empty batch"
+        (Invalid_argument "expired retention directory")
+        (fun () -> ignore (Directory.remove_regular_files expired [] : int));
+      (* An io.run failure on one chunk does not abort later chunks. *)
+      let retry_root = fresh () in
+      Fun.protect ~finally:(fun () -> Fs_compat.remove_tree retry_root) (fun () ->
+        let names =
+          List.init 260 (fun i ->
+            let name = Printf.sprintf "chunk-%03d.jsonl" i in
+            let path = Filename.concat retry_root name in
+            write path;
+            Unix.utimes path 1. 1.;
+            name)
+        in
+        let fail_first_batch = ref false in
+        let io : Directory.io =
+          { run =
+              (fun f ->
+                if !fail_first_batch then (
+                  fail_first_batch := false;
+                  raise (Unix.Unix_error (Unix.EACCES, "retention_unlinkat", "chunk-000.jsonl")))
+                else f ())
+          }
+        in
+        match Directory.with_root ~io retry_root (fun held ->
+          fail_first_batch := true;
+          let removed = Directory.remove_regular_files ~older_than:2. held names in
+          Alcotest.(check int) "second chunk still pruned after first chunk EACCES" 4 removed) with
+        | Some () -> ()
+        | None -> Alcotest.fail "retry root disappeared"))
+
+let test_batched_remove_empty_children () =
+  let root = fresh () and outside = fresh () in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root; Fs_compat.remove_tree outside)
+    (fun () ->
+      let empty_names =
+        List.init 260 (fun i ->
+          let name = Printf.sprintf "empty-%03d" i in
+          Unix.mkdir (Filename.concat root name) 0o700;
+          name)
+      in
+      let nonempty = Filename.concat root "nonempty" in
+      Unix.mkdir nonempty 0o700;
+      write (Filename.concat nonempty "keep");
+      let target = Filename.concat outside "target" in
+      Unix.mkdir target 0o700;
+      let linked = Filename.concat root "linked" in
+      Unix.symlink target linked;
+      let candidates = empty_names @ [ "nonempty"; "linked" ] in
+      let io_calls = ref 0 in
+      let io : Directory.io = { run = (fun f -> incr io_calls; f ()) } in
+      let escaped = ref None in
+      (match Directory.with_root ~io root (fun held ->
+         escaped := Some held;
+         io_calls := 0;
+         Directory.remove_empty_children held candidates;
+         let batch_io_calls = !io_calls in
+         Alcotest.(check int) "262 names run in two 256-entry io batches" 2 batch_io_calls;
+         io_calls := 0;
+         Directory.remove_empty_children held [];
+         Alcotest.(check int) "empty list makes zero io calls" 0 !io_calls;
+         let kept_empty = Filename.concat root "kept-empty" in
+         Unix.mkdir kept_empty 0o700;
+         Alcotest.check_raises "invalid leaf fails before any rmdir in batch"
+           (Invalid_argument "retention directory requires one child name")
+           (fun () -> Directory.remove_empty_children held [ "kept-empty"; "a/b" ]);
+         check_exists "empty dir preserved when later leaf is invalid" true kept_empty) with
+       | Some () -> ()
+       | None -> Alcotest.fail "fixture root disappeared");
+      List.iter (fun name -> check_exists name false (Filename.concat root name)) empty_names;
+      List.iter (check_exists "non-empty dir and symlink target preserved" true)
+        [ Filename.concat nonempty "keep"; linked; target ];
+      let expired = Option.get !escaped in
+      Alcotest.check_raises "expired handle rejected even for empty child batch"
+        (Invalid_argument "expired retention directory")
+        (fun () -> Directory.remove_empty_children expired []))
+
 let () = Alcotest.run "physical retention containment"
   ["owned pruning", [
     Alcotest.test_case "checked removals acknowledge actual effects" `Quick test_checked_removals_acknowledge_only_actual_effects;
+    Alcotest.test_case "batched remove_regular_files chunks and isolates errors" `Quick test_batched_remove_regular_files_chunks_and_errors;
+    Alcotest.test_case "batched remove_empty_children chunks and preserves links" `Quick test_batched_remove_empty_children;
     Alcotest.test_case "mtime, links and FIFO" `Quick test_regular_mtime_and_special_entries;
     Alcotest.test_case "child link skipped" `Quick test_child_link_is_skipped;
     Alcotest.test_case "fractional mtime retention" `Quick test_fractional_mtime_boundary;

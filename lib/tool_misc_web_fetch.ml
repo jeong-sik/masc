@@ -825,7 +825,7 @@ let with_http_get_for_test http_get f =
     f
 
 (** Main fetch implementation *)
-let fetch_impl ?base_path ~url ~timeout_sec ~extract_mode ~max_chars ~fetched_at_unix =
+let fetch_impl ~base_path ~url ~timeout_sec ~extract_mode ~max_chars ~fetched_at_unix =
   let headers =
     [
       ( "User-Agent",
@@ -937,7 +937,7 @@ let handle ?base_path ~tool_name ~start_time args : Tool_result.result =
       match cache_lookup key now with
       | Some cached -> ok_from_data cached
       | None ->
-        (match fetch_impl ?base_path ~url ~timeout_sec:timeout ~extract_mode ~max_chars
+        (match fetch_impl ~base_path ~url ~timeout_sec:timeout ~extract_mode ~max_chars
                  ~fetched_at_unix:(Tool_timing.started_at start_time) with
                     | Ok
                         ( response

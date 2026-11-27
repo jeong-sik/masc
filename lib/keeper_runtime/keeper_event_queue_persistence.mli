@@ -174,6 +174,23 @@ val ack_pending_result :
   unit ->
   (unit, string) result
 
+type 'kept guarded_ack =
+  | Ack_committed
+  | Ack_withheld of 'kept
+
+val ack_pending_unless_result :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  selection:Keeper_event_queue_state.pending_selection ->
+  withhold:(unit -> ('kept option, string) result) ->
+  unit ->
+  ('kept guarded_ack, string) result
+(** {!ack_pending_result} decided under the owner lock. [withhold] runs there
+    first. [Some kept] writes nothing and returns [Ack_withheld kept]: the
+    source stays pending. [None] ACKs the selection. [Error] writes nothing
+    and is returned as is. *)
+
 type snapshot_read_error_kind =
   | Invalid_path
   | Read_failed
@@ -598,6 +615,22 @@ val enqueue_stimulus_once_result :
     writes nothing and does not run [after_commit] again.
     [already_delivered] must return an error when absence is unproven; it runs
     only when the source is absent from the full state. *)
+
+val with_stimulus_admission :
+  ?after_commit:(Keeper_event_queue.t -> unit) ->
+  base_path:string ->
+  keeper_name:string ->
+  ((Keeper_event_queue.stimulus -> (enqueue_stimulus_result, string) result) -> 'a) ->
+  ('a, string) result
+(** Run [f] while holding this Keeper's queue owner lock. [f] receives
+    [admit], which commits one stimulus before it returns: the
+    {!enqueue_stimulus_once_result} deduplication, same-source conflict
+    rejection and strict snapshot durability, with no delivery-evidence read.
+    Whatever [f] writes after a successful [admit] lands before any other
+    queue transaction for this Keeper, an ACK of that stimulus included.
+    [admit] called after [f] returns commits nothing and returns [Error].
+    An outer [Error] means the owner did not resolve or the lock or [f]
+    raised; a stimulus [f] already admitted stays committed. *)
 
 type 'authorization_error guarded_transfer_projection_result =
   | Transfer_projection_result of transfer_projection_result

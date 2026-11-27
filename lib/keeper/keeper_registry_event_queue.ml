@@ -513,6 +513,26 @@ let enqueue_stimulus_durable_result
   | Error error -> stimulus_intake_refused error
 ;;
 
+type 'a stimulus_admission_result =
+  | Admission_completed of 'a
+  | Admission_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+  | Admission_storage_error of string
+
+let with_stimulus_admission ~base_path name f =
+  match
+    with_durable_intake ~base_path ~keeper_name:name (fun () ->
+      Keeper_event_queue_persistence.with_stimulus_admission
+        ~after_commit:(publish_pending ~base_path name)
+        ~base_path ~keeper_name:name f)
+  with
+  | Ok (Ok value) -> Admission_completed value
+  | Ok (Error detail) -> Admission_storage_error detail
+  | Error (Durable_intake_shutdown_reserved operation_id) ->
+    Admission_shutdown_reserved operation_id
+  | Error (Durable_intake_token_not_live as error) ->
+    Admission_storage_error (durable_intake_error_to_string error)
+;;
+
 let enqueue_stimulus_once_durable_result ?not_before ~base_path name stimulus =
   let not_before = Option.value not_before ~default:0. in
   let already_delivered () =
@@ -736,6 +756,16 @@ let ack_pending_result ~base_path name ~selection =
     ~base_path
     ~keeper_name:name
     ~selection
+    ~after_commit:(publish_pending ~base_path name)
+    ()
+;;
+
+let ack_pending_unless_result ~base_path name ~selection ~withhold =
+  Keeper_event_queue_persistence.ack_pending_unless_result
+    ~base_path
+    ~keeper_name:name
+    ~selection
+    ~withhold
     ~after_commit:(publish_pending ~base_path name)
     ()
 ;;

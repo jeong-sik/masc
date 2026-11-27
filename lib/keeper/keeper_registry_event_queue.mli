@@ -111,6 +111,15 @@ val ack_pending_result :
   selection:Keeper_event_queue_state.pending_selection ->
   (unit, string) result
 
+val ack_pending_unless_result :
+  base_path:string ->
+  string ->
+  selection:Keeper_event_queue_state.pending_selection ->
+  withhold:(unit -> ('kept option, string) result) ->
+  ('kept Keeper_event_queue_persistence.guarded_ack, string) result
+(** {!Keeper_event_queue_persistence.ack_pending_unless_result}, publishing a
+    committed ACK like {!ack_pending_result}. *)
+
 val cancel_pending_accepted_result :
   base_path:string ->
   string ->
@@ -266,6 +275,26 @@ val enqueue_stimulus_durable_result :
     path is for structurally addressed signals whose delivery must commit
     before a wake hint. Board-attention judgments use the stricter
     opaque-event-id API above. *)
+
+type 'a stimulus_admission_result =
+  | Admission_completed of 'a
+  | Admission_shutdown_reserved of Keeper_shutdown_types.Operation_id.t
+      (** A shutdown operation holds the Keeper's intake: [f] did not run and
+          nothing was written. *)
+  | Admission_storage_error of string
+      (** The owner did not resolve, or the lock or [f] raised. A stimulus [f]
+          admitted before a raise stays committed. *)
+
+val with_stimulus_admission :
+  base_path:string ->
+  string ->
+  ((Keeper_event_queue.stimulus ->
+    (Keeper_event_queue_persistence.enqueue_stimulus_result, string) result) -> 'a) ->
+  'a stimulus_admission_result
+(** {!Keeper_event_queue_persistence.with_stimulus_admission} inside the
+    Keeper's durable intake fence. Lock order is intake fence, then owner lock,
+    the same as {!enqueue_stimulus_once_durable_result}. A committed admission
+    publishes the pending queue before [admit] returns. *)
 
 val enqueue_stimulus_once_durable_result :
   ?not_before:float ->

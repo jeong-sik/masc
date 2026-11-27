@@ -297,11 +297,7 @@ let append t (line : Log.commit) =
      | Error (Read_failed _ | Moved_while_reading) -> Error Store_unwritable
      | Ok Nothing_written -> Error (Log_diverged { expected = t.digest; observed = t.digest })
      | Ok (Written { rows_end; last; last_at = (_ : int) }) ->
-       let landed =
-         match last with
-         | Committed found -> Int.equal found.seq line.seq && same found.after line.after
-         | Started _ -> false
-       in
+       let landed = String.equal (encoded last) (encoded (Committed line)) in
        if landed
        then Ok rows_end
        else if Int.equal rows_end t.log_end && String.equal (encoded last) (encoded t.tail)

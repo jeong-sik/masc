@@ -138,10 +138,11 @@ let probe_uncached path =
   let path = nearest_existing_path path in
   try
     match
-      With_process.with_process_args_in
-        "/bin/df"
-        [| "df"; "-Pk"; path |]
-        With_process.drain_lines
+      Eio_guard.run_in_systhread ~label:"keeper_disk_pressure.df" (fun () ->
+        With_process.with_process_args_in
+          "/bin/df"
+          [| "df"; "-Pk"; path |]
+          With_process.drain_lines)
     with
     | lines, Unix.WEXITED 0 -> parse_df_output ~path lines
     | _lines, ((Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) as status) ->
@@ -151,6 +152,7 @@ let probe_uncached path =
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
+    Llm_provider.Reserved_exn.reraise_if_reserved exn;
     note_exception ~site:"keeper_disk_pressure.probe" exn;
     let detail = Printexc.to_string exn in
     Log.Keeper.warn "disk_observation: probe raised path=%s exception=%s" path detail;
@@ -165,7 +167,9 @@ let probe_path ?now path =
     cached.result
   | Some _ | None ->
     let result = probe_uncached path in
-    Atomic.set cache (Some { path; at = now; result });
+    (match result with
+     | Snapshot _ -> Atomic.set cache (Some { path; at = now; result })
+     | Probe_error _ -> ());
     result
 ;;
 

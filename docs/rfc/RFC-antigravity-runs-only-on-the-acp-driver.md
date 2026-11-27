@@ -186,7 +186,7 @@ ACP 만의 크기 계산을 따로 두지 않는다. Agent Core 레인이 이미
 | 한도 | `Runtime_acp_client.antigravity_message_max_bytes` = 191,579. `agy` 가 남기는 192,000 바이트에서 감싸는 부분 420(앞 15, 뒤 405: 잰 값 중 가장 큰 것)과 1 을 뺐다. 이 크기 이하면 단계가 191,999 바이트를 넘지 않아 아무것도 잘리지 않는다. |
 | 재는 것 | MASC 가 보내는 메시지 하나의 바이트 수. CLI 는 stdin 에 쓰는 프롬프트 전체다. ACP 는 `session/prompt` 한 번에 실린 text 블록의 합이다. |
 | 거절하는 곳 | CLI: `Runtime_antigravity.validate_turn`. 프로세스를 띄우기 전이다. ACP: `Runtime_acp_client.validate_prompt_blocks`. `session/prompt` 를 보내기 전이다. 둘 다 `Message_over_client_limit { message_bytes; max_bytes }` 로 거절한다. |
-| 적용 범위 | ACP driver profile 의 새 칸 `message_limit`. Antigravity 는 `Keeps_messages_through { max_bytes }` 다. Kimi Code, Mistral Vibe, Muse Code 는 `Message_limit_not_measured` 다. 재지 않은 호스트는 거절하지 않는다. CLI driver 는 ACP profile 의 Antigravity 값을 같이 읽는다. |
+| 적용 범위 | ACP driver profile 의 새 칸 `message_limit`. Antigravity 는 `Keeps_messages_through { max_bytes }` 다. Kimi Code, Mistral Vibe, Muse Code 는 `Message_limit_not_measured` 다. 재지 않은 호스트는 거절하지 않는다. 두 driver 모두 `Runtime_acp_client.check_message_bytes` 로 잰다. CLI driver 는 ACP profile 의 Antigravity 값을 읽는다. |
 
 왜 토큰이 아니라 바이트인가:
 - `agy` 는 모델과 tokenizer 가 보기 전에 바이트로 자른다.
@@ -200,7 +200,7 @@ ACP 만의 크기 계산을 따로 두지 않는다. Agent Core 레인이 이미
   - 실패 경로는 `rotate Admission` 이고, 보낸 기록은 `Rejected_before_dispatch` 다.
   - 크기 거절(`is_size_refusal`)이 아니다. 같은 후보에 범위를 줄여 다시 보내지 않는다. `refused_model_input` 도 남지 않아 다음 턴의 범위가 옮겨지지 않는다.
   - CLI Keeper 턴은 세션 claim 전에 거절한다. ACP Keeper 턴은 세션을 `active`·`turn starting` 으로 적기 전에 거절하고, claim 은 `Pre_dispatch_failed` 로 놓는다.
-- exact 레인(Librarian 등): 그 슬롯의 실패로 남고 다음 슬롯으로 간다. `refused_for_binding_rest` 는 `false` 다.
+- exact 레인(Librarian 등): 그 슬롯의 실패로 남고 다음 슬롯으로 간다. `refused_for_binding_rest` 는 `false` 라 슬롯을 쉬게 하지 않는다. 슬롯 결과는 `Refused (Sized Input_too_large)` 다. 보내기 전에 센 크기 거절이기 때문이다. 그 결과로 무엇을 할지는 레인 정책이 정한다.
 - Fusion 패널: 그 패널의 실패로 남는다.
 - 계정: 쉬게 하지 않는다. quota window, backpressure, candidate standing 에 아무것도 남기지 않는다. 계정이 아니라 메시지 크기 탓이다.
 - 레인의 모든 후보가 거절하면 다른 실패처럼 턴이 끝난다. 그 Keeper 의 메시지를 줄이는 일은 이 RFC 범위 밖이다(#41408).

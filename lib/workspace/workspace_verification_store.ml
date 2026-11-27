@@ -1,9 +1,10 @@
 include Workspace_verification_snapshot
 
 type artifact_payload =
-  | Text_payload of string * int * bool
-      (** [(content, bytes, truncated)] — [bytes] may exceed the content
-          length when the read was capped. *)
+  | Text_payload of
+      { content : string  (** the whole text; no reader cuts it *)
+      ; bytes : int
+      }
   | Binary_payload of
       { data : string  (** the raw bytes as read; the store persists them as the evidence body *)
       ; bytes : int  (** the byte count, measured on the original *)
@@ -19,9 +20,14 @@ let project_root_of_base_path base_path =
   else
     base_path
 
+(* The two directories under the masc directory this store writes. The sweep
+   scope names them: a request record is scanned for the content addresses it
+   holds, and the evidence bodies are files that reference no blob. *)
+let verifications_dirname = "verifications"
+
 let active_verifications_dir base_path =
   let base_path = project_root_of_base_path base_path in
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "verifications"
+  Filename.concat (Common.masc_dir_from_base_path ~base_path) verifications_dirname
 
 let verifications_dir base_path =
   active_verifications_dir base_path
@@ -116,30 +122,64 @@ let image_media_type_of_binary_format = function
   | "webp" -> Some "image/webp"
   | _ -> None
 
-let payload_of_complete_bytes ~path content =
+(* Whether a reference names a format the store adopts as binary. *)
+let is_binary_artifact_path path =
   let format = binary_format_of_path path in
-  let binary_format = match format with
-    | "pdf" | "wav" | "mp3" | "ogg" | "flac" | "mp4" | "zip" -> true
-    | _ -> Option.is_some (image_media_type_of_binary_format format) in
-  match binary_format, scan_utf8 content with
-  | true, (Utf8_valid | Utf8_incomplete_at _ | Utf8_invalid) ->
-    Ok (Binary_payload {data=content; bytes=String.length content; format;
-      sha256=Agent_core_sha256.(digest_string content |> to_hex)})
-  | false, Utf8_valid ->
-    let bytes = String.length content in
-    let truncated = bytes > verification_evidence_max_bytes in
-    let preview = if truncated then String.sub content 0 verification_evidence_max_bytes else content in
-    let preview = match scan_utf8 preview with
-      | Utf8_incomplete_at index -> String.sub preview 0 index
-      | Utf8_valid | Utf8_invalid -> preview in
-    Ok (Text_payload (preview, bytes, truncated))
-  | false, (Utf8_incomplete_at _ | Utf8_invalid) -> Error Evidence_invalid_utf8
+  match format with
+  | "pdf" | "wav" | "mp3" | "ogg" | "flac" | "mp4" | "zip" -> true
+  | _ -> Option.is_some (image_media_type_of_binary_format format)
 
-let read_regular_file_prefix ~ownership_root path =
-  match Fs_compat.load_owned_regular_file ~ownership_root path with
-  | Error error -> Error (evidence_read_failure_of_owned_read_failure error.failure)
-  | Ok None -> Error Evidence_missing
-  | Ok (Some content) -> payload_of_complete_bytes ~path content
+let payload_of_complete_bytes ~path content =
+  if is_binary_artifact_path path
+  then
+    Ok
+      (Binary_payload
+         { data = content
+         ; bytes = String.length content
+         ; format = binary_format_of_path path
+         ; sha256 = Agent_core_sha256.(digest_string content |> to_hex)
+         })
+  else
+    (match scan_utf8 content with
+     | Utf8_valid -> Ok (Text_payload { content; bytes = String.length content })
+     | Utf8_incomplete_at _ | Utf8_invalid -> Error Evidence_invalid_utf8)
+
+(* The ceiling on one text artifact. A file under it is read whole: inline up
+   to {!verification_evidence_max_bytes}, above that as a stored body. A text
+   file over it is not read: the reader stops one byte past the ceiling and
+   the item records [Too_large] with the size. The number is the media
+   inspection's, named here for text because the reason it bounds is the same
+   one string held in memory while the record is written. *)
+let text_artifact_max_bytes = 64 * 1024 * 1024
+
+(* The direct host read, bounded before it allocates. At most one byte past
+   the text ceiling is read. A file that fits is classified whole. A text file
+   over the ceiling is [Too_large] and nothing more of it is read. A binary
+   file keeps the whole read whatever its size: the store adopts known binary
+   formats whole and files them as the evidence body. *)
+let read_host_artifact ~ownership_root path =
+  let failure (error : Fs_compat.owned_regular_file_read_error) =
+    evidence_read_failure_of_owned_read_failure error.failure
+  in
+  if is_binary_artifact_path path then
+    match Fs_compat.load_owned_regular_file ~ownership_root path with
+    | Error error -> Error (failure error)
+    | Ok None -> Error Evidence_missing
+    | Ok (Some content) -> payload_of_complete_bytes ~path content
+  else
+    match
+      Fs_compat.load_owned_regular_file_prefix ~ownership_root
+        ~max_bytes:(text_artifact_max_bytes + 1) path
+    with
+    | Error error -> Error (failure error)
+    | Ok None -> Error Evidence_missing
+    | Ok (Some { content; file_size; _ }) ->
+      (* One byte past the ceiling came back, so a longer file shows it in
+         the length: a file of exactly the ceiling is under it and one byte
+         more is not. *)
+      if String.length content > text_artifact_max_bytes
+      then Error (Too_large { cap = text_artifact_max_bytes; at_least = file_size })
+      else payload_of_complete_bytes ~path content
 
 let artifact_reference_prefix = "artifact:"
 
@@ -314,6 +354,7 @@ let read_binary_body_base64_at_limit ~max_bytes ~base_path (item : submitted_evi
   | Evidence_collaboration _ -> Error Not_binary
   | Evidence_note _ -> Error Not_binary
   | Evidence_artifact _ -> Error Not_binary
+  | Evidence_artifact_body _ -> Error Not_binary
   | Evidence_invalid_reference -> Error Not_binary
   | Evidence_artifact_unreadable _ -> Error Not_binary
 
@@ -331,10 +372,29 @@ let read_binary_body_for_operator_base64 ~base_path item =
      | Ok body -> Ok body)
   | Evidence_artifact_binary _ -> Error (Body_unreadable "negative recorded file size")
   | Evidence_collaboration _ | Evidence_note _ | Evidence_artifact _
+  | Evidence_artifact_body _
   | Evidence_invalid_reference | Evidence_artifact_unreadable _ -> Error Not_binary
 
+(* Where a text artifact goes. Up to the inline cap it is written into the
+   record. Above it the whole text goes to the content-addressed blob store
+   and the record keeps the address, so the same bytes stored twice name one
+   blob and the sweep counts the reference. *)
+let store_text_artifact ~base_path ~reference ~content ~bytes =
+  if bytes <= verification_evidence_max_bytes
+  then Evidence_artifact { reference; content; bytes }
+  else
+    let store = Tool_blob_store.create ~base_path in
+    match Tool_blob_store.put_durable store ~bytes:content ~mime:"text/plain" with
+    | blob -> Evidence_artifact_body { reference; blob }
+    | exception ((Sys_error _ | Unix.Unix_error _) as error) ->
+      (* The store promises [Sys_error] for a failed write, but a directory
+         it cannot enter or create surfaces as a Unix error. A submit must
+         not fail because the store is unusable: the item says so instead. *)
+      Evidence_artifact_unreadable
+        { reference; reason = Storage_failed (Printexc.to_string error) }
+
 let inspect_producer_relative_artifact ?artifact_read ?request_id ?index ~base_path
-    ~worker ~reference relative_path =
+  ~worker ~reference relative_path =
   if not (valid_producer_relative_path relative_path)
   then Evidence_invalid_reference
   else
@@ -349,26 +409,14 @@ let inspect_producer_relative_artifact ?artifact_read ?request_id ?index ~base_p
               persist_binary_body ~base_path ?request_id ?index data
             in
             Evidence_artifact_binary { reference; bytes; sha256; format; body }
-        | Ok (Text_payload (content, bytes, truncated)) -> (
-            (* An artifact is text evidence, and the direct host read holds
-               that line with [scan_utf8]; an injected reader hands back bytes
-               from another lane (a guest [cat]), so the same scan holds the
-               line here too: every reader answers under one boundary, and a
-               truncated read may stop mid-character the way the direct
-               prefix can. *)
-            match scan_utf8 content with
-            | Utf8_valid ->
-              Evidence_artifact { reference; content; bytes; truncated }
-            | Utf8_incomplete_at at when truncated ->
-              Evidence_artifact
-                { reference
-                ; content = String.sub content 0 at
-                ; bytes
-                ; truncated = true
-                }
-            | Utf8_incomplete_at _ | Utf8_invalid ->
-              Evidence_artifact_unreadable
-                { reference; reason = Evidence_invalid_utf8 }))
+        | Ok (Text_payload { content; bytes }) ->
+          (* An injected reader hands back bytes from another lane (a guest
+             [cat]), so the same scan holds the line here as in the direct
+             read: every reader answers under one boundary. *)
+          (match scan_utf8 content with
+           | Utf8_valid -> store_text_artifact ~base_path ~reference ~content ~bytes
+           | Utf8_incomplete_at _ | Utf8_invalid ->
+             Evidence_artifact_unreadable { reference; reason = Evidence_invalid_utf8 }))
     | None -> (
     let project_root = project_root_of_base_path base_path in
     let ownership_root =
@@ -378,9 +426,9 @@ let inspect_producer_relative_artifact ?artifact_read ?request_id ?index ~base_p
       |> Env_config_core.strip_trailing_slashes
     in
     let target = Filename.concat ownership_root relative_path in
-    match read_regular_file_prefix ~ownership_root target with
-    | Ok (Text_payload (content, bytes, truncated)) ->
-      Evidence_artifact { reference; content; bytes; truncated }
+    match read_host_artifact ~ownership_root target with
+    | Ok (Text_payload { content; bytes }) ->
+      store_text_artifact ~base_path ~reference ~content ~bytes
     | Ok (Binary_payload { data; bytes; sha256; format }) ->
       let body = persist_binary_body ~base_path ?request_id ?index data in
       Evidence_artifact_binary { reference; bytes; sha256; format; body }
@@ -390,7 +438,9 @@ let inspect_producer_relative_artifact ?artifact_read ?request_id ?index ~base_p
     | Error (Evidence_invalid_utf8 as reason)
     | Error (Evidence_symbolic_link as reason)
     | Error (Evidence_changed_during_read as reason)
-    | Error (Evidence_read_error _ as reason) ->
+    | Error (Evidence_read_error _ as reason)
+    | Error (Too_large _ as reason)
+    | Error (Storage_failed _ as reason) ->
       Evidence_artifact_unreadable { reference; reason } )
 
 let snapshot_submitted_evidence_item ?artifact_read ?request_id ?index ~base_path
@@ -436,10 +486,8 @@ let submission_receipt ~base_path ~request_id ~task_id ~worker =
     let diagnostics = List.filter_map (function
       | (Evidence_artifact_unreadable _ | Evidence_invalid_reference) as item ->
         Some (submitted_evidence_item_to_yojson item)
-      | Evidence_artifact { reference; bytes; truncated = true; _ } ->
-        Some (`Assoc ["kind", `String "artifact_truncated";
-          "reference", `String reference; "bytes", `Int bytes])
-      | Evidence_artifact { truncated = false; _ }
+      | Evidence_artifact _
+      | Evidence_artifact_body _
       | Evidence_artifact_binary _ | Evidence_note _ | Evidence_collaboration _ -> None)
       items in
     Ok (`Assoc ["verification_id", `String request_id;

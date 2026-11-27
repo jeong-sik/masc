@@ -103,26 +103,6 @@ let warn_contract_gap (task : Masc_domain.task) ~verification_id ~submitted_refe
     report ~contract_present:true "has no completion criteria or required evidence"
   | Some _ -> ()
 
-(* A truncated artifact cannot be judged from the snapshot — the review
-   instructions order the judge to treat it as unavailable and its prefix is
-   not transmitted (#29615). The producer can still act at submit time: split
-   the artifact, summarize it, or expect the verdict to rest on the readable
-   evidence alone. Saying so here is the earliest honest place. *)
-let warn_oversized_evidence ~(task : Masc_domain.task) ~(snapshot : Yojson.Safe.t) =
-  List.iter
-    (fun (reference, bytes) ->
-       Log.Task.warn
-         ~keeper_name:task.id
-         "[verification-submit] task=%s evidence %s is %d bytes — over the \
-          %d-byte snapshot cap; the judge treats it as unavailable. Split or \
-          summarize the artifact, or the verdict rests on the readable \
-          evidence alone"
-         task.id
-         reference
-         bytes
-         Workspace_verification_store.verification_evidence_max_bytes)
-    (Workspace_verification_store.truncated_snapshot_items snapshot)
-
 let create_submit_request ~(config : Workspace.config)
     ~(task : Masc_domain.task) ~assignee ~verification_id
     ~(claim : Masc_domain.verification_claim) =
@@ -179,7 +159,6 @@ let create_submit_request ~(config : Workspace.config)
       ?artifact_read ~request_id:verification_id ~collaboration ~base_path
       ~worker:assignee other_refs
   in
-  warn_oversized_evidence ~task ~snapshot:evidence_snapshot;
   let output =
     match spec.output with
     | `Assoc fields ->

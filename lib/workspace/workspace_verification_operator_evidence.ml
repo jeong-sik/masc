@@ -95,6 +95,7 @@ let previewed ~base_path items =
          | Store.Evidence_collaboration _
          | Store.Evidence_note _
          | Store.Evidence_artifact _
+         | Store.Evidence_artifact_body _
          | Store.Evidence_invalid_reference
          | Store.Evidence_artifact_unreadable _ -> remaining, (item, None) :: acc)
       (Tool_shard_limits.verification_operator_preview_budget_bytes, [])
@@ -144,9 +145,34 @@ let file_to_yojson ~base_path ~index = function
         if not (String.equal sha256 Agent_core_sha256.(to_hex (digest_string content)))
         then Error "The collaboration snapshot does not match its submitted SHA-256"
         else text ~name:"source.json" content
-      | Some (Store.Evidence_artifact { truncated = true; _ }) ->
-        Error "Only a truncated text snapshot was retained; a complete file cannot be exported"
-      | Some (Store.Evidence_artifact { reference; content; bytes; _ }) ->
+      | Some (Store.Evidence_artifact_body { reference; blob }) ->
+        (* A text too large for the record was stored whole in the blob
+           store. It is served as captured, after its bytes are checked
+           against the record. The store checks the bytes against their own
+           content address first: an address that names nothing comes back as
+           [Ok None], and bytes that differ from their address as a typed
+           failure. The refusal names which of those it was. *)
+        let* name = artifact_name reference in
+        let stored =
+          Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256:blob.Tool_output.sha256 in
+        (match stored with
+         | Ok (Some body)
+           when String.length body = blob.Tool_output.bytes
+                && String.equal
+                     Agent_core_sha256.(digest_string body |> to_hex)
+                     blob.Tool_output.sha256 ->
+           text ~name body
+         | Ok (Some _) | Error (Tool_blob_store.Integrity_mismatch _) ->
+           Error "The stored text does not match its recorded size or SHA-256"
+         | Ok None -> Error "The stored text is no longer in the blob store"
+         | Error (Tool_blob_store.Owned_read_failed error) ->
+           Error
+             ("The stored text cannot be read from the blob store: "
+              ^ Fs_compat.owned_regular_file_read_error_to_string error)
+         | Error (Tool_blob_store.Invalid_sha256 _ | Tool_blob_store.Too_large _
+                | Tool_blob_store.Invalid_max_bytes _) ->
+           Error "The stored text cannot be read from the blob store")
+      | Some (Store.Evidence_artifact { reference; content; bytes }) ->
         if String.length content <> bytes then Error "The text snapshot does not contain the complete recorded file"
         else let* name = artifact_name reference in text ~name content
       | Some (Store.Evidence_artifact_binary { reference; bytes; sha256; _ } as item) ->

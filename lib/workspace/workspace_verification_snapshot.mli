@@ -16,6 +16,18 @@ type evidence_read_failure =
   | Evidence_symbolic_link
   | Evidence_changed_during_read
   | Evidence_read_error of string
+  | Too_large of
+      { cap : int
+      ; at_least : int
+      (** The source is over the ceiling a text artifact is read under. It was
+          not read past [cap] + 1 bytes: [at_least] is the size the reader
+          could name, the exact file size where the host could stat it and
+          [cap] + 1 where a sandbox reader only returned the bytes it was
+          asked for. *)
+      }
+  | Storage_failed of string
+      (** The harness could not store a text too large for the record. The
+          producer's file is not at fault. *)
 
 type collaboration_kind = Board_source | Fusion_source | Task_source
 
@@ -26,7 +38,15 @@ type submitted_evidence_item =
       { reference : string
       ; content : string
       ; bytes : int
-      ; truncated : bool
+      (** Whole text up to the inline cap. There is no prefix-only state: a
+          larger text is [Evidence_artifact_body]. *)
+      }
+  | Evidence_artifact_body of
+      { reference : string
+      ; blob : Tool_output.artifact_ref
+      (** Text too large for the inline cap, stored whole in the
+          content-addressed blob store at submission. The reference is what
+          the sweep counts. *)
       }
   | Evidence_invalid_reference
   | Evidence_artifact_unreadable of
@@ -85,7 +105,6 @@ val submitted_evidence_snapshot_of_request_json :
 
 val submitted_evidence_identity_lines :
   Yojson.Safe.t -> (string list, string) result
-val truncated_snapshot_items : Yojson.Safe.t -> (string * int) list
 
 val evidence_read_failure_code : evidence_read_failure -> string
 val evidence_access_failure_to_string :

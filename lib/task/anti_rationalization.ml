@@ -176,8 +176,8 @@ let render key vars =
 
 (* The evidence posture of a completion submission, as the judge will see it.
    [Note_only]: zero artifacts it can open — every snapshot item is a
-   narration or an unusable reference. [Usable_artifacts n]: n readable,
-   untruncated artifacts. The count arithmetic is the judge prompt's rules 3
+   narration or an unusable reference. [Usable_artifacts n]: n readable
+   artifacts. The count arithmetic is the judge prompt's rules 3
    and 4 made typed, so the prose cannot drift from what the snapshot holds. *)
 type evidence_posture =
   | Note_only

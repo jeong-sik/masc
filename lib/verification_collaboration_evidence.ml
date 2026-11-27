@@ -184,6 +184,7 @@ let submitted_source ~submitted_evidence reference =
     | Store.Evidence_collaboration item when item.reference = reference ->
         Some (Store.Evidence_collaboration item)
     | Store.Evidence_invalid_reference | Store.Evidence_note _ | Store.Evidence_artifact _
+    | Store.Evidence_artifact_body _
     | Store.Evidence_artifact_unreadable _ | Store.Evidence_artifact_binary _
     | Evidence_collaboration _ -> None) submitted_evidence in
   match matches with
@@ -195,6 +196,7 @@ let submitted_source ~submitted_evidence reference =
       (match item with
        | Store.Evidence_collaboration {content; _} -> Ok (Yojson.Safe.from_string content)
        | Store.Evidence_invalid_reference | Store.Evidence_note _ | Store.Evidence_artifact _
+       | Store.Evidence_artifact_body _
        | Store.Evidence_artifact_unreadable _ | Store.Evidence_artifact_binary _ -> Error (Storage_failed "invalid submitted collaboration kind"))
   | [] -> Error (Access_denied "source was not captured in this verification submission")
   | _ -> Error (Storage_failed "duplicate submitted collaboration identity")
@@ -259,25 +261,30 @@ let read_task ~submitted_evidence ~args = protect (fun () ->
     | _ -> Error (Storage_failed "invalid submitted Task snapshot") in
   page_source ~args source)
 
-(* A complete text artifact in this submission, read from the captured content.
-   The producer's current file is not read: it may have changed since
-   submission. A truncated artifact stored only a prefix, which would read as
-   the whole file, so it is refused here. *)
+(* A text artifact in this submission, read from the captured content. The
+   producer's current file is not read: it may have changed since submission.
+   An inline artifact is paged from the record. A text too large for the
+   inline cap was stored whole in the blob store; it is read through the same
+   tool by its content address, so a call that names its reference is told
+   that address. *)
 let read_artifact ~submitted_evidence ~args = protect (fun () ->
   let* reference = required_id args "reference" in
   match List.find_opt (function
-    | Store.Evidence_artifact { reference = submitted; _ } -> String.equal submitted reference
+    | Store.Evidence_artifact { reference = submitted; _ }
+    | Store.Evidence_artifact_body { reference = submitted; _ } -> String.equal submitted reference
     | Store.Evidence_invalid_reference | Store.Evidence_note _ | Store.Evidence_artifact_unreadable _
     | Store.Evidence_artifact_binary _ | Store.Evidence_collaboration _ -> false) submitted_evidence with
-  | Some (Store.Evidence_artifact { content; bytes; truncated = false; _ }) ->
+  | Some (Store.Evidence_artifact { content; bytes }) ->
     page_source ~args (`Assoc
       [ "source", `String "artifact"
       ; "reference", `String reference
       ; "bytes", `Int bytes
       ; "content", `String content ])
-  | Some (Store.Evidence_artifact _) ->
+  | Some (Store.Evidence_artifact_body { blob; _ }) ->
     Error (Source_unavailable
-      "only a prefix of this artifact was captured; read the actual file with the file tools")
+      (Printf.sprintf
+         "this artifact was stored whole under sha256 %s; read it with this tool by that sha256"
+         blob.Tool_output.sha256))
   | Some (Store.Evidence_invalid_reference | Store.Evidence_note _ | Store.Evidence_artifact_unreadable _
          | Store.Evidence_artifact_binary _ | Store.Evidence_collaboration _)
   | None ->

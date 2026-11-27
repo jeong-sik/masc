@@ -191,7 +191,7 @@ let test_other_kinds_have_no_preview_and_json_is_the_persisted_json () =
     let others =
       [ Store.Evidence_note "tests green"
       ; Store.Evidence_artifact
-          { reference = "artifact:p.json"; content = "{}"; bytes = 2; truncated = false }
+          { reference = "artifact:p.json"; content = "{}"; bytes = 2 }
       ; Store.Evidence_invalid_reference
       ; Store.Evidence_artifact_unreadable
           { reference = "artifact:gone"; reason = Store.Evidence_missing }
@@ -309,7 +309,7 @@ let test_download_preserves_original_bytes () =
     let binary = filed_binary ~base_path ~request_id:"vr-download" ~index:1 ~format:"pdf" pdf in
     let text = "한글\r\nsecond line\r\n" in
     let items = [Store.Evidence_artifact {reference="artifact:report.txt";
-      content=text;bytes=String.length text;truncated=false};binary] in
+      content=text;bytes=String.length text};binary] in
     List.iteri (fun index expected ->
       match Operator.file_to_yojson ~base_path ~index (access items) with
       | Error detail -> Alcotest.fail detail
@@ -324,15 +324,93 @@ let test_download_preserves_original_bytes () =
         Alcotest.(check string) "original bytes" expected (Base64.decode_exn encoded))
       [text;pdf])
 
+(* A stored body is named by a content address. The store answers by the
+   address alone, whatever file name the record shows. With one body stored and
+   served under an agreeing record, the refusals that differ from it only in
+   the recorded size or in the address name their own cause. An unreadable item
+   and an index naming no item refuse too. *)
+let stored_text = "a body this test stores"
+let absent_text = "a body no test stores"
+
+let body_item ~text ?(recorded_bytes = String.length text) reference =
+  match
+    Tool_output.make_artifact_ref ~sha256:(sha256_of text)
+      ~bytes:recorded_bytes ~preview:"" ~mime:"text/plain"
+  with
+  | Ok blob -> Store.Evidence_artifact_body { reference; blob }
+  | Error error -> Alcotest.fail (Tool_output.make_error_to_string error)
+
 let test_download_refuses_missing_or_partial_items () =
   with_base_path (fun base_path ->
-    let artifact content bytes truncated = Store.Evidence_artifact {
-      reference="artifact:report.txt";content;bytes;truncated} in
-    let items=[artifact "prefix" 100 true;artifact "prefix" 100 false;
-      Store.Evidence_artifact_unreadable {reference="artifact:missing";reason=Store.Evidence_missing}] in
-    List.iter (fun index ->
+    ignore
+      (Tool_blob_store.put_durable (Tool_blob_store.create ~base_path)
+         ~bytes:stored_text ~mime:"text/plain");
+    let refusal items index =
       match Operator.file_to_yojson ~base_path ~index (access items) with
-      | Error _ -> () | Ok _ -> Alcotest.fail "incomplete evidence became a complete file") [-1;0;1;2;3])
+      | Error detail -> detail
+      | Ok _ -> Alcotest.fail "incomplete evidence became a complete file" in
+    (match
+       Operator.file_to_yojson ~base_path ~index:0
+         (access [ body_item ~text:stored_text "artifact:report.txt" ])
+     with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.fail ("the agreeing record was refused: " ^ detail));
+    Alcotest.(check string) "a record that disagrees with the stored bytes"
+      "The stored text does not match its recorded size or SHA-256"
+      (refusal
+         [ body_item ~text:stored_text
+             ~recorded_bytes:(String.length stored_text + 1) "artifact:report.txt" ]
+         0);
+    Alcotest.(check string) "an address that names nothing in the store"
+      "The stored text is no longer in the blob store"
+      (refusal [ body_item ~text:absent_text "artifact:gone.txt" ] 0);
+    Alcotest.(check string) "an unreadable item keeps its own refusal"
+      "No readable file snapshot was retained"
+      (refusal
+         [ Store.Evidence_artifact_unreadable
+             { reference = "artifact:missing"; reason = Store.Evidence_missing } ]
+         0);
+    List.iter
+      (fun index ->
+         match Operator.file_to_yojson ~base_path ~index (access []) with
+         | Error _ -> ()
+         | Ok _ -> Alcotest.fail "an index that names no item answered")
+      [ -1; 0; 1 ])
+
+(* A text too large for the record was stored whole in the blob store. The
+   operator download serves the stored bytes while they match the record, and
+   refuses them once the stored bytes change. *)
+let test_download_serves_a_stored_body_whole () =
+  with_base_path (fun base_path ->
+    let text = String.concat "\n" (List.init 3000 (fun n -> Printf.sprintf "line %04d of a long report" n)) in
+    let blob =
+      Tool_blob_store.put_durable (Tool_blob_store.create ~base_path) ~bytes:text ~mime:"text/plain" in
+    let serve blob =
+      Operator.file_to_yojson ~base_path ~index:0
+        (access [ Store.Evidence_artifact_body { reference = "artifact:report.txt"; blob } ]) in
+    (match serve blob with
+     | Error detail -> Alcotest.fail detail
+     | Ok result ->
+       let open Yojson.Safe.Util in
+       Alcotest.(check string) "the stored text comes back whole" text
+         (Base64.decode_exn (result |> member "body_base64" |> to_string));
+       Alcotest.(check string) "under its recorded digest" blob.Tool_output.sha256
+         (result |> member "sha256" |> to_string));
+    (* Bytes that no longer match their address are refused by the store
+       itself, before the record is consulted. *)
+    let blob_path =
+      Filename.concat
+        (Filename.concat
+           (Tool_blob_store.root_dir (Tool_blob_store.create ~base_path))
+           (String.sub blob.Tool_output.sha256 0 2))
+        blob.Tool_output.sha256
+    in
+    Fs_compat.save_file blob_path "bytes that are not the stored text";
+    (match serve blob with
+     | Error detail ->
+       Alcotest.(check string) "changed bytes are refused as a digest mismatch"
+         "The stored text does not match its recorded size or SHA-256" detail
+     | Ok _ -> Alcotest.fail "changed stored bytes were served"))
 
 let http_get_evidence ~router ?token target =
   let output=Buffer.create 1024 in
@@ -431,6 +509,8 @@ let () =
         Alcotest.test_case "actual HTTP permissions, identity and large binary download" `Quick test_actual_download_route_and_local_export;
         Alcotest.test_case "original text and non-image binary bytes round trip" `Quick test_download_preserves_original_bytes;
         Alcotest.test_case "partial and missing snapshots cannot be saved as complete files" `Quick test_download_refuses_missing_or_partial_items;
+        Alcotest.test_case "a stored body is served whole" `Quick
+          test_download_serves_a_stored_body_whole;
       ] )
     ; ( "preview"
       , [ Alcotest.test_case "an image under the ceiling is inline" `Quick

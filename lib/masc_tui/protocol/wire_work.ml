@@ -2097,7 +2097,11 @@ type verification_evidence_item =
       reference : string;
       content : string;
       bytes : int;
-      truncated : bool;
+    }
+  | Verif_ev_stored_body of {
+      reference : string;
+      bytes : int;
+      sha256 : string;
     }
   | Verif_ev_binary of {
       reference : string;
@@ -2185,12 +2189,22 @@ let decode_verification_evidence_item json =
         | Ok None | Error _ -> ""
       in
       let bytes = int_or_0 json "bytes" in
-      let truncated =
-        match optional_bool_field json "truncated" with
-        | Ok (Some b) -> b
-        | Ok None | Error _ -> false
-      in
-      Ok (Verif_ev_artifact { reference; content; bytes; truncated })
+      Ok (Verif_ev_artifact { reference; content; bytes })
+  | "artifact_body" ->
+      let* reference = required_nonblank_string json "reference" in
+      (* The item keeps the blob store's own reference under [blob]. The
+         server writes it whole or refuses the record, so one that is missing
+         or malformed is refused here rather than drawn as a body of no
+         bytes. *)
+      (match optional_object_field json "blob" with
+       | Ok (Some ( `Assoc [ ("_blob", `Assoc fields) ] )) ->
+           (match List.assoc_opt "bytes" fields, List.assoc_opt "sha256" fields with
+            | Some (`Int bytes), Some (`String sha256) ->
+              Ok (Verif_ev_stored_body { reference; bytes; sha256 })
+            | _ -> Error "stored body reference lacks its size or digest")
+       | Ok (Some _) -> Error "stored body item does not hold a blob reference"
+       | Ok None -> Error "stored body item has no reference"
+       | Error detail -> Error detail)
   | "artifact_binary" ->
       let* reference = required_nonblank_string json "reference" in
       let bytes = int_or_0 json "bytes" in
@@ -2230,9 +2244,17 @@ let decode_verification_evidence_item json =
               | Ok None | Error _ -> "unreadable"
             in
             let d =
-              match optional_nonblank_string r "detail" with
-              | Ok v -> v
-              | Error _ -> None
+              (* A text over the read ceiling names its size and the ceiling
+                 as numbers; the view shows them as one sentence. *)
+              match c with
+              | "too_large" when int_or_0 r "cap" > 0 ->
+                Some
+                  (Printf.sprintf "at least %d bytes, ceiling %d bytes"
+                     (int_or_0 r "at_least") (int_or_0 r "cap"))
+              | _ ->
+                (match optional_nonblank_string r "detail" with
+                 | Ok v -> v
+                 | Error _ -> None)
             in
             (c, d)
         | Ok None | Error _ -> ("unreadable", None)

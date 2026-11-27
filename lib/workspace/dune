@@ -62,6 +62,9 @@
   masc_process
   ; #27397: the evidence snapshot cap is the Read ceiling, read from the leaf
   masc_tool_types
+  ; A text artifact too large for the record is stored whole in the blob
+  ; store and the record keeps the store's own normalized reference (#55072).
+  masc.masc_tool_blob_store
   ; the store list says which root each date-split JSONL store hangs from
   masc.dated_jsonl
   ; workspace_utils_backend_setup reads the env-derived

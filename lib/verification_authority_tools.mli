@@ -18,9 +18,11 @@
     Task-free retained originals keep their existing lookup authority.
     A text artifact of the submitted record is read back through a narrowed
     keeper_artifact_read descriptor, by its reference; it never reads the
-    producer's current file. The same descriptor pages and searches the full
-    text a masc_web_fetch of this review stored, by the full_text_sha256 that
-    fetch's result named. No other content of the workspace blob store is
+    producer's current file. The same descriptor pages and searches two other
+    stored texts by sha256: the full text a masc_web_fetch of this review
+    stored, by the full_text_sha256 that fetch's result named, and a text
+    artifact too large for the record's inline cap, by the sha256 the
+    submission recorded. No other content of the workspace blob store is
     readable, so neither surface grants general access to the MASC storage
     directory.
     Mutating execution is absent: a verifier has no turn continuation that

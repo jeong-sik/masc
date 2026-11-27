@@ -8761,12 +8761,14 @@ let verification_dive_tab_lines ~width (m : Model.t)
                           | first :: rest ->
                               push ~tone:Line_accent first;
                               push_all rest)
-                      | Wire_work.Verif_ev_artifact
-                          { reference; content; bytes; truncated } ->
+                      | Wire_work.Verif_ev_artifact { reference; content; bytes } ->
                           push ~tone:Line_accent
-                            (Printf.sprintf "[artifact] %s (%dB%s)" reference bytes
-                               (if truncated then " truncated" else ""));
+                            (Printf.sprintf "[artifact] %s (%dB)" reference bytes);
                           push_all (wrap_lines ~width:w ("  " ^ content))
+                      | Wire_work.Verif_ev_stored_body { reference; bytes; sha256 } ->
+                          push ~tone:Line_accent
+                            (Printf.sprintf "[stored whole] %s (%dB sha=%s)" reference
+                               bytes sha256)
                       | Wire_work.Verif_ev_binary
                           { reference; bytes; sha256; format; body } ->
                           push ~tone:Line_accent

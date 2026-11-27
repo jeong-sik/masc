@@ -5692,15 +5692,36 @@ let test_wave3_live_wire_codecs () =
                   "access": "available",
                   "items": [
                     { "kind": "note", "content": "All tests green" },
-                    { "kind": "artifact", "reference": "report.md", "content": "# OK", "bytes": 4, "truncated": false },
-                    { "kind": "artifact_unreadable", "reference": "missing.bin", "reason": { "code": "not_found", "detail": "deleted" } }
+                    { "kind": "artifact", "reference": "report.md", "content": "# OK", "bytes": 4 },
+                    { "kind": "artifact_body", "reference": "long.log",
+                      "blob": { "_blob": { "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                                     "bytes": 300000, "mime": "text/plain", "preview": "head" } } },
+                    { "kind": "artifact_unreadable", "reference": "missing.bin", "reason": { "code": "not_found", "detail": "deleted" } },
+                    { "kind": "artifact_unreadable", "reference": "huge.log",
+                      "reason": { "code": "too_large", "cap": 67108864, "at_least": 67108865 } }
                   ]
                 }
               }
             }|}))
   in
   Alcotest.(check bool) "verif evidence available" true vev.available;
-  Alcotest.(check int) "3 evidence items" 3 (List.length vev.items);
+  Alcotest.(check int) "5 evidence items" 5 (List.length vev.items);
+  (* A text too large for the record travels as the blob store's own
+     reference under [blob]. The decoder keeps its reference, size and
+     digest, and the inline artifact no longer carries a truncation flag. *)
+  (match vev.items with
+   | [ Wire_work.Verif_ev_note _
+     ; Wire_work.Verif_ev_artifact
+         { reference = "report.md"; content = "# OK"; bytes = 4 }
+     ; Wire_work.Verif_ev_stored_body
+         { reference = "long.log"; bytes = 300000
+         ; sha256 =
+             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" }
+     ; Wire_work.Verif_ev_unreadable { reference = Some "missing.bin"; code = "not_found"; detail = Some "deleted" }
+     ; Wire_work.Verif_ev_unreadable
+         { reference = Some "huge.log"; code = "too_large"
+         ; detail = Some "at least 67108865 bytes, ceiling 67108864 bytes" } ] -> ()
+   | items -> Alcotest.failf "unexpected verification evidence items: %d" (List.length items));
   let vsum =
     expect_ok "decode_verification_summary"
       (Wire_work.decode_verification_summary
@@ -5969,6 +5990,18 @@ let test_wave3_live_wire_codecs () =
     (expect_err "decode_verification_evidence missing evidence rejected"
        (Wire_work.decode_verification_evidence
           (parse_json {|{ "result": { "task_id": "t1", "verification_id": "v1" } }|}))
+      : string);
+  ignore
+    (expect_err "decode_verification_evidence stored body without a reference rejected"
+       (Wire_work.decode_verification_evidence
+          (parse_json
+             {|{ "result": { "task_id": "t1", "verification_id": "v1", "evidence": { "access": "available", "items": [{ "kind": "artifact_body", "reference": "long.log" }] } } }|}))
+      : string);
+  ignore
+    (expect_err "decode_verification_evidence stored body with a malformed reference rejected"
+       (Wire_work.decode_verification_evidence
+          (parse_json
+             {|{ "result": { "task_id": "t1", "verification_id": "v1", "evidence": { "access": "available", "items": [{ "kind": "artifact_body", "reference": "long.log", "blob": { "_blob": { "sha256": "abc" } } }] } } }|}))
       : string);
   ignore
     (expect_err "decode_verification_evidence unknown item kind rejected"

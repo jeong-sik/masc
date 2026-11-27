@@ -537,7 +537,7 @@ let test_large_sources_survive_actual_bridge () = with_fixture (fun config ->
     (continued |> member "representation" |> to_string))
 
 let artifact reference content =
-  Store.Evidence_artifact { reference; content; bytes = String.length content; truncated = false }
+  Store.Evidence_artifact { reference; content; bytes = String.length content }
 let artifact_args reference = `Assoc ["reference", `String reference]
 let offers surface name =
   List.exists (fun (schema : Types_core.tool_schema) -> schema.name = name) (VAT.schemas surface)
@@ -552,16 +552,22 @@ let test_withheld_artifact_is_read_from_the_record () = with_fixture (fun config
   let body =
     head ^ String.make (cap - String.length head - String.length tail) 'z' ^ tail in
   let reference = "artifact:evidence/complete.txt" in
-  let prefix =
-    Store.Evidence_artifact
-      { reference = "artifact:oversize.txt"; content = "PREFIX_ONLY_5d3a"; bytes = cap + 1; truncated = true } in
+  (* A text too large for the record: the item keeps a content address and no
+     content. *)
+  let stored =
+    match
+      Tool_output.make_artifact_ref ~sha256:(String.make 64 '0') ~bytes:(cap + 1) ~preview:""
+        ~mime:"text/plain"
+    with
+    | Ok blob -> Store.Evidence_artifact_body { reference = "artifact:oversize.txt"; blob }
+    | Error error -> fail (Tool_output.make_error_to_string error) in
   let items =
     [ artifact "artifact:small.txt" "SMALL_BODY_9a0f"
     ; artifact reference body
-    ; prefix
+    ; stored
     ; Store.Evidence_note "run attached" ] in
   (* The transport decides what a request carries, and no second rule does.
-     Here the truncated prefix and the complete artifact past the aggregate cap
+     Here the stored body and the complete artifact past the aggregate cap
      are both left out, in item order. *)
   let omitted_of_transport items =
     Store.submitted_evidence_access_transport_to_yojson
@@ -574,7 +580,7 @@ let test_withheld_artifact_is_read_from_the_record () = with_fixture (fun config
       then Some (member "reference" item |> to_string)
       else None)
   in
-  check (list string) "the transport omits the capped artifact and the truncated prefix"
+  check (list string) "the transport omits the capped artifact and the stored body"
     [ reference; "artifact:oversize.txt" ] (omitted_of_transport (restored items));
   let surface = VAT.create ~config ~producer:"producer" ~submitted_evidence:(restored items)
     |> require "request-bound surface" in
@@ -625,11 +631,18 @@ let test_withheld_artifact_is_read_from_the_record () = with_fixture (fun config
   denied surface name (artifact_args "artifact:oversize.txt") "verification_source_unavailable";
   denied surface name (artifact_args "artifact:missing.txt") "verification_source_access_denied";
   denied surface name (artifact_args "note:run attached") "verification_source_access_denied";
-  (* A stored page is read only through a fetch of this review. The gate is
-     exercised with a real fetch in the authority tools tests; here no fetch
-     answered, so any sha256 names no readable text. *)
-  denied surface name (`Assoc ["sha256", `String (String.make 64 '0')])
+  (* A stored text is read only by a sha256 the submission recorded or a
+     fetch of this review answered with. The fixture's body is admitted and
+     reaches the blob store reader, which answers that no bytes are stored
+     under it. A hash named nowhere is refused before that reader. *)
+  denied surface name (`Assoc ["sha256", `String (String.make 64 '1')])
     "verification_source_access_denied";
+  (match call surface name (`Assoc ["sha256", `String (String.make 64 '0')]) with
+   | Tool_result.Failed _ as result ->
+     check bool "a recorded body reaches the blob store reader" true
+       (String_util.contains_substring (Tool_result.message result) "artifact_not_found")
+   | result ->
+     failf "a recorded body reached a different reader: %s" (Tool_result.message result));
   invalid_input surface name (`Assoc ["reference", `String ""]);
   (* The submitted form continues with cursor. The Keeper reader's paging
      members belong to the sha256 form. *)

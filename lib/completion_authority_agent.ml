@@ -311,9 +311,10 @@ let verdict_question_of_request (request : Verification.verification_request) =
 
 (* The evidence posture, computed from the fixed snapshot this request was
    submitted with. The arithmetic is the judge prompt's rules 3 and 4 made
-   typed: an artifact the judge cannot open whole counts as nothing. An
-   unavailable snapshot is the same posture as an empty one — the judge
-   already sees the typed reason beside the question. *)
+   typed: an item the judge cannot open whole counts as nothing. A text the
+   submission stored in the blob store is openable whole, by its content
+   address. An unavailable snapshot is the same posture as an empty one — the
+   judge already sees the typed reason beside the question. *)
 let evidence_posture_of_snapshot
       (snapshot : Workspace_verification_store.submitted_evidence_access) =
   let usable =
@@ -322,8 +323,11 @@ let evidence_posture_of_snapshot
     | Workspace_verification_store.Evidence_available { request = _; items } ->
       items
       |> List.filter (function
-           | Workspace_verification_store.Evidence_artifact
-               { reference = _; content = _; bytes = _; truncated = false } ->
+           | Workspace_verification_store.Evidence_artifact _ -> true
+           | Workspace_verification_store.Evidence_artifact_body _ ->
+             (* Counted on its recorded reference, as a binary item is on its
+                filed body. Whether the bytes are still there is the reader's
+                answer, not the record's. *)
              true
            | Workspace_verification_store.Evidence_collaboration _
            | Workspace_verification_store.Evidence_artifact_binary _ ->
@@ -331,7 +335,6 @@ let evidence_posture_of_snapshot
                 size, and the filed body are the facts the verdict can rest
                 on. *)
              true
-           | Workspace_verification_store.Evidence_artifact { reference = _; content = _; bytes = _; truncated = true }
            | Workspace_verification_store.Evidence_invalid_reference
            | Workspace_verification_store.Evidence_note _
            | Workspace_verification_store.Evidence_artifact_unreadable _ -> false)
@@ -387,6 +390,7 @@ let evidence_images_of_snapshot ~base_path
            | Store.Evidence_collaboration _ -> images, unread
            | Store.Evidence_note _ -> images, unread
            | Store.Evidence_artifact _ -> images, unread
+           | Store.Evidence_artifact_body _ -> images, unread
            | Store.Evidence_invalid_reference -> images, unread
            | Store.Evidence_artifact_unreadable _ -> images, unread)
         ([], [])

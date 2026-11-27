@@ -37,17 +37,17 @@ The sender does not query the external instrument for its pre-playback state.
 Each sounding note retains the program and bank selected when its Note On was
 sent, including notes retained by sustain or sostenuto. When that patch differs
 from the channel's current patch, seek/resume sends the note's bank selects and
-Program Change before its Note On. After the channel's notes, it sends the
-current bank selects and Program Change again, then any bank selection that
-followed them, so later source messages play under the current patch. Bank
-selectors take effect for this comparison at Program Change; a pending bank
-selection alone does not change a held note's patch.
+Program Change before its Note On. After the channel's notes, it restores the
+current patch, then any bank selection that followed the current Program Change,
+so later source messages play under the current patch. Bank selectors take
+effect for this comparison at Program Change; a pending bank selection alone
+does not change a held note's patch.
 
-Some held patches are unknown. A note attacked before its channel's first
-Program Change used the device's initial program. A patch selected before any
-bank select used the device's initial bank, which is lost once the source later
-sets that bank register. In those cases seek/resume reports an error before
-replay instead of guessing the patch.
+Some of those earlier patches are unknown. A note attacked before its channel's
+first Program Change used the device's initial program. A bank register that the
+source had not yet set at a Program Change held the device's initial value,
+which is lost once the source sets that register. When a held note needs such a
+patch, seek/resume reports an error before replay instead of guessing it.
 
 Opaque SysEx/system effects, device-specific NRPN data, Hold 2, high-resolution
 velocity-prefix state, unsupported/incomplete RPN state and channel-mode changes

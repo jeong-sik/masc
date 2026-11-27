@@ -296,10 +296,10 @@ struct ChaseChannel {
         notes.removeAll { !$0.held && sustain < 64 && !(sostenuto >= 64 && $0.captured) }
     }
     // Bank selects and the Program Change that make `patch` current again. A
-    // patch selected before any bank select used the device's unknown initial
-    // bank, which is reproducible only while the source has not changed that
-    // register since. A note attacked before the channel's first Program
-    // Change has the device's unknown initial program.
+    // bank register the source had not set when `patch` was selected held the
+    // device's unknown initial value, reproducible only while the source has
+    // not set that register since. A note attacked before the channel's first
+    // Program Change has the device's unknown initial program.
     func selecting(_ patch: ChaseProgram?, channel: UInt8) throws -> [[UInt8]] {
         guard let patch else {
             throw MidiFailure("source state reconstruction cannot restore a held note attacked before its channel's first program change")
@@ -459,11 +459,11 @@ struct SourceChase {
             // Each sounding note keeps the patch of its attack, including notes a
             // pedal retains: one that began under an earlier program or bank is
             // re-sent under that patch. The replay above leaves the current one.
-            var patch = state.program
+            var patch = state.program, selected = false
             func attack(_ note: ChaseNote) throws {
                 if note.program != patch {
                     result += try state.selecting(note.program, channel: channel).map { (port, $0) }
-                    patch = note.program
+                    patch = note.program; selected = true
                 }
                 result.append((port, [0x90 | channel, note.pitch, note.velocity]))
             }
@@ -478,10 +478,12 @@ struct SourceChase {
             if known.contains(ChaseField(port: port, channel: channel, kind: .controller(64))) { result.append((port, [0xb0 | channel, 64, state.sustain])) }
             if notes {
                 for note in state.notes where !note.captured { try attack(note) }
-                if patch != state.program {
+                if selected {
                     // Later source messages play under the current patch, and a
                     // bank selection sent after its Program Change stays pending.
-                    result += try state.selecting(state.program, channel: channel).map { (port, $0) }
+                    // Any selection above overwrote the pending bank, even when
+                    // the last note was attacked under the current patch.
+                    if patch != state.program { result += try state.selecting(state.program, channel: channel).map { (port, $0) } }
                     if let msb = state.bankMSB, msb != state.program?.bankMSB { result.append((port, [0xb0 | channel, 0, msb])) }
                     if let lsb = state.bankLSB, lsb != state.program?.bankLSB { result.append((port, [0xb0 | channel, 32, lsb])) }
                 }

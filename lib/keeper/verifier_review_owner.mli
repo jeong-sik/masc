@@ -164,6 +164,22 @@ val pending_commits :
     The host's pure predicate authenticates the terminal receipt before omitting
     it. This does not allocate a successor or authorize another provider. *)
 
+val named_commits :
+  terminal_pending:(retained -> (bool, string) result) ->
+  store:store -> verification_ids:string list -> installation_id:string -> package_id:string ->
+  retained list * (string * load_error) list
+(** Recovery discovery for the verifications a review wake names, read by
+    name: attempt 0 of each and then each next attempt until a name holds
+    nothing. The scope is not verified whole, so this is not [pending_commits]:
+    it answers for its own verifications beside a record the whole scope could
+    not verify, and it never proves that nothing is retained. A fresh attempt
+    is allocated on [next_attempt], which reads the scope whole.
+    The first part is what [pending_commits] keeps of the records that were
+    read, sorted by verification id and by attempt. The second part names each
+    verification whose record is there and could not be read, or whose
+    terminal fact the host could not authenticate, with why; none of its
+    records is kept then. A verification that names nothing is in neither. *)
+
 val judgment_to_json : original:Verifier_review_original.t -> notes:string ->
   Task.Anti_rationalization.review_result -> (Yojson.Safe.t, string) result
 val judgment_of_json : original:Verifier_review_original.t -> Yojson.Safe.t ->

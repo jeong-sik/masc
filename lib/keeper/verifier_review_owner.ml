@@ -516,22 +516,69 @@ let retained_commits ~store ~selection ~installation_id ~package_id =
     | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _
     | Subdividing _ | Subdivided _ -> Ok acc) (Ok []) records
 
-let pending_commits ~terminal_pending ~store ~selection ~installation_id ~package_id =
-  let* records = retained_commits ~store ~selection ~installation_id ~package_id in
+(* What a recovery keeps of the retained records it read. A judgment or an
+   intent in flight is kept. A terminal fact is kept only while the host says
+   its publication is pending. The rest has no commit to recover. The answer
+   keeps the order of the records. *)
+let keep_pending ~terminal_pending records =
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
     | retained :: rest ->
-      match Progress.phase (progress retained) with
-      | Finished _ | Conflicted _ ->
-        let* pending =
-          terminal_pending retained
-          |> Result.map_error (fun detail -> Corrupt_original detail)
-        in
-        loop (if pending then retained :: acc else acc) rest
-      | Judged _ | Committing _ | Commit_unknown _ ->
-        loop (retained :: acc) rest
-      | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _
-      | Subdividing _ | Subdivided _ ->
-        loop acc rest
+      (match Progress.phase (progress retained) with
+       | Finished _ | Conflicted _ ->
+         let* pending =
+           terminal_pending retained
+           |> Result.map_error (fun detail -> Corrupt_original detail)
+         in
+         loop (if pending then retained :: acc else acc) rest
+       | Judged _ | Committing _ | Commit_unknown _ ->
+         loop (retained :: acc) rest
+       | Captured | Admission_wait _ | Dispatch_pending _ | Rejected _
+       | Subdividing _ | Subdivided _ ->
+         loop acc rest)
   in
   loop [] records
+
+let pending_commits ~terminal_pending ~store ~selection ~installation_id ~package_id =
+  let* records = retained_commits ~store ~selection ~installation_id ~package_id in
+  keep_pending ~terminal_pending records
+
+(* The attempts of one verification, read by name: attempt 0 first and then
+   each next one until a name holds nothing. Every successor takes its
+   parent's number plus one, and today nothing removes or moves the owner
+   record of a live attempt: the settled-archive sweep deletes only under the
+   archive directory. If a later change ever moves an attempt that is not the
+   last, this lookup stops at that gap and answers for the attempts before it.
+   The later ones then wait for a whole-scope read, which runs at boot and
+   after a failed backlog read and reads every record. A record that is there
+   and cannot be read is an error; it is never taken for the end. *)
+let attempts_by_name ~store ~verification_id ~installation_id ~package_id =
+  if String.trim verification_id = ""
+  then Error (Corrupt_original "verifier selection requires a non-blank verification_id")
+  else
+    let rec read attempt acc =
+      match load_retained ~store ~verification_id ~attempt ~installation_id ~package_id with
+      | Error Not_found -> Ok (List.rev acc)
+      | Error ((Load_store_unavailable _ | Corrupt_original _) as error) -> Error error
+      | Ok retained -> read (attempt + 1) (retained :: acc)
+    in
+    read 0 []
+
+(* [named_commits] answers for each verification on its own. The commits that
+   were found come first. Each verification whose record is there and could
+   not be read comes next, with why: that is not an empty answer for it, and
+   it does not hold back the others. *)
+let named_commits ~terminal_pending ~store ~verification_ids ~installation_id ~package_id =
+  let kept, unreadable =
+    List.fold_left
+      (fun (kept, unreadable) verification_id ->
+         match attempts_by_name ~store ~verification_id ~installation_id ~package_id with
+         | Ok attempts -> (
+             match keep_pending ~terminal_pending attempts with
+             | Ok pending -> List.rev_append pending kept, unreadable
+             | Error error -> kept, (verification_id, error) :: unreadable)
+         | Error error -> kept, (verification_id, error) :: unreadable)
+      ([], [])
+      (List.sort_uniq String.compare verification_ids)
+  in
+  List.rev kept, List.rev unreadable

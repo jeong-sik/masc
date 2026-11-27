@@ -267,9 +267,61 @@ struct ChaseField: Hashable {
     let channel: UInt8
     let kind: Kind
 }
+// The two bank registers a Program Change applies, by controller number.
+enum BankRegister: UInt8, CaseIterable, Equatable, CustomStringConvertible {
+    case msb = 0, lsb = 32
+    var description: String {
+        switch self { case .msb: "bank MSB"; case .lsb: "bank LSB" }
+    }
+    // This register's controller field on a port << 8 | channel address.
+    func field(_ address: Int) -> ChaseField {
+        ChaseField(port: address >> 8, channel: UInt8(address & 15), kind: .controller(rawValue))
+    }
+}
+// A patch that reconstruction cannot select again, because it used the
+// device's initial program or the initial value of a bank register. The sender
+// never knows those values. Each is raised before any message is sent.
+enum UnknownPatch: Error, Equatable, CustomStringConvertible {
+    // A held note was attacked before its channel's first Program Change.
+    case heldBeforeFirstProgram
+    // A held note's patch was selected while this register held its initial
+    // value, and the source has set the register since.
+    case heldInitialBank(BankRegister)
+    // A Program Change an entry sends, the replayed current one or one played
+    // at the entry instant, was selected while this register held its initial
+    // value, and playback has since sent the register to the device.
+    case currentInitialBank(BankRegister)
+    var description: String {
+        switch self {
+        case .heldBeforeFirstProgram:
+            return "source state reconstruction cannot restore a held note attacked before its channel's first program change"
+        case .heldInitialBank(let register):
+            return "source state reconstruction cannot restore a held note's patch selected under an unknown initial \(register)"
+        case .currentInitialBank(let register):
+            return "source state reconstruction cannot restore a program selected under an unknown initial \(register) that playback has since changed"
+        }
+    }
+}
+// A Program Change that read a bank register before the source set it applied
+// the device's initial value, which the sender never knows. Sent again once the
+// device holds a value playback sent for that register, it selects that later
+// bank instead. `reads` are the registers each address's Program Changes read
+// unset; `written` says whether playback has sent that register to the device.
+// Runtime entries ask their device model, validation asks the fields earlier
+// copies and regions write.
+func refuseInitialBanks(_ reads: [Int: Set<BankRegister>], written: (Int, BankRegister) -> Bool) throws {
+    for address in reads.keys.sorted() {
+        for register in BankRegister.allCases where reads[address]!.contains(register) && written(address, register) {
+            throw UnknownPatch.currentInitialBank(register)
+        }
+    }
+}
 struct ChaseProgram: Equatable {
     let bankMSB: UInt8?, bankLSB: UInt8?
     let number: UInt8
+    func bank(_ register: BankRegister) -> UInt8? {
+        switch register { case .msb: bankMSB; case .lsb: bankLSB }
+    }
 }
 struct ChaseNote {
     let pitch: UInt8
@@ -295,22 +347,20 @@ struct ChaseChannel {
     mutating func prune() {
         notes.removeAll { !$0.held && sustain < 64 && !(sostenuto >= 64 && $0.captured) }
     }
+    func bank(_ register: BankRegister) -> UInt8? {
+        switch register { case .msb: bankMSB; case .lsb: bankLSB }
+    }
     // Bank selects and the Program Change that make `patch` current again. A
     // bank register the source had not set when `patch` was selected held the
     // device's unknown initial value, reproducible only while the source has
     // not set that register since. A note attacked before the channel's first
     // Program Change has the device's unknown initial program.
     func selecting(_ patch: ChaseProgram?, channel: UInt8) throws -> [[UInt8]] {
-        guard let patch else {
-            throw MidiFailure("source state reconstruction cannot restore a held note attacked before its channel's first program change")
-        }
+        guard let patch else { throw UnknownPatch.heldBeforeFirstProgram }
         var messages: [[UInt8]] = []
-        let banks: [(controller: UInt8, value: UInt8?, register: UInt8?)] = [(0, patch.bankMSB, bankMSB), (32, patch.bankLSB, bankLSB)]
-        for bank in banks {
-            if let value = bank.value { messages.append([0xb0 | channel, bank.controller, value]) }
-            else if bank.register != nil {
-                throw MidiFailure("source state reconstruction cannot restore a held note's patch selected under an unknown initial bank")
-            }
+        for register in BankRegister.allCases {
+            if let value = patch.bank(register) { messages.append([0xb0 | channel, register.rawValue, value]) }
+            else if bank(register) != nil { throw UnknownPatch.heldInitialBank(register) }
         }
         messages.append([0xc0 | channel, patch.number])
         return messages
@@ -331,6 +381,23 @@ struct SourceChase {
     var sequence = 0
     var touched = Set<ChaseField>(), known = Set<ChaseField>()
     var obstacles = Set<ChaseObstacle>()
+    // A region entry replays this model, then plays the events at the entry
+    // instant as region events. midiRegionEntry records here, by address, the
+    // bank registers a Program Change among those events reads before the
+    // source sets them. Only an entry model has them; observe never does.
+    var entryBankReads: [Int: Set<BankRegister>] = [:]
+    // Bank registers whose initial device value a Program Change this entry
+    // sends depends on: the replayed current Program Change's unset registers
+    // and the entry-instant reads above.
+    var initialBankReads: [Int: Set<BankRegister>] {
+        var reads = entryBankReads
+        for (key, state) in channels {
+            guard let program = state.program else { continue }
+            let unset = BankRegister.allCases.filter { program.bank($0) == nil }
+            if !unset.isEmpty { reads[key, default: []].formUnion(unset) }
+        }
+        return reads
+    }
     // Data Entry applies to the parameter these controllers select; Reset All
     // Controllers sets that selection to null.
     static let selection: [ChaseField.Kind] = [98, 99, 100, 101, 121].map { .controller($0) }
@@ -452,6 +519,13 @@ struct SourceChase {
         guard previous.touched.isSubset(of: known) else {
             throw MidiFailure("source seek cannot restore an initial channel value absent from the source prefix")
         }
+        // The replay re-sends the current Program Change with no bank select for
+        // a register the source had not set before it, and a region entry then
+        // plays the Program Changes at its entry instant. Each applies what the
+        // device register holds now: still the initial value when `previous`
+        // never set it, a bank from earlier playback when it did. Refuse the
+        // second case instead of guessing the initial value.
+        try refuseInitialBanks(initialBankReads) { previous.channels[$0]?.bank($1) != nil }
         var result = channels.flatMap { key, state in state.replay.entries.map { (order: $0.order, port: key >> 8, bytes: $0.message) } }
             .sorted { $0.order < $1.order }.map { ($0.port, $0.bytes) }
         for key in channels.keys.sorted() {
@@ -551,9 +625,15 @@ func midiRegionEntry(_ events: [WireEvent], at seconds: Double, boundary: (befor
     for (address, state) in prefix.channels where !state.notes.isEmpty { firstSound[address] = prefix.known }
     while boundary < events.count && (entryBoundary.map { boundary < $0.through } ?? (events[boundary].seconds == seconds)) {
         let event = events[boundary]
+        let address = event.port << 8 | Int(event.bytes[0] & 15)
         if event.bytes[0] & 0xf0 == 0x90 && event.bytes[2] > 0 {
-            let address = event.port << 8 | Int(event.bytes[0] & 15)
             if firstSound[address] == nil { firstSound[address] = through.known }
+        }
+        // This Program Change is a region event played right after the replay,
+        // so its unset bank registers join the replay's check.
+        if event.bytes[0] & 0xf0 == 0xc0 {
+            let unset = BankRegister.allCases.filter { through.channels[address]?.bank($0) == nil }
+            if !unset.isEmpty { prefix.entryBankReads[address, default: []].formUnion(unset) }
         }
         through.observe(event.bytes, port: event.port, origin: boundary); boundary += 1
     }
@@ -567,6 +647,8 @@ struct MidiRegion {
     let events: [WireEvent]
     let addresses: Set<Int>
     let startKnown: Set<ChaseField>, endTouched: Set<ChaseField>
+    // Bank registers each copy's start reads unset (SourceChase.initialBankReads).
+    let startBankReads: [Int: Set<BankRegister>]
     let obstacles: Set<ChaseObstacle>
     let sourceDuration: Double
     // The start splits into whole + remainder / divisor nanoseconds, so every
@@ -591,8 +673,13 @@ struct MidiRegion {
             if let status = event.bytes.first, status < 0xf0 { addresses.insert(event.port << 8 | Int(status & 15)) }
         }
         obstacles = end.obstacles
-        self.addresses = addresses; startKnown = midiRegionEntry(events, at: spec.sourceStart).safeKnown; endTouched = end.touched
+        let entry = midiRegionEntry(events, at: spec.sourceStart)
+        self.addresses = addresses; startKnown = entry.safeKnown; endTouched = end.touched
+        startBankReads = entry.model.initialBankReads
         guard edgeNanoseconds(spec.repeatCount) != nil else { throw MidiFailure("MIDI region exceeds the native nanosecond timeline") }
+        // Each later copy starts on a device that holds what the copy before it
+        // sent, so refuse before the first copy plays, not at the first repeat.
+        if spec.repeatCount > 1 { try refuseInitialBanks(startBankReads) { end.channels[$0]?.bank($1) != nil } }
     }
     func includes(_ seconds: Double) -> Bool { seconds < spec.sourceEnd || seconds == spec.sourceEnd && spec.sourceEnd == sourceDuration }
     // ceil(start + copy * period) in whole nanoseconds, or nil past the host clock.
@@ -640,6 +727,7 @@ extension SourceChase {
         value.channels = channels.filter { addresses.contains($0.key) }
         value.known = known.filter { addresses.contains($0.port << 8 | Int($0.channel)) }
         value.touched = touched.filter { addresses.contains($0.port << 8 | Int($0.channel)) }
+        value.entryBankReads = entryBankReads.filter { addresses.contains($0.key) }
         return value
     }
     mutating func replace(_ model: SourceChase, addresses: Set<Int>) {
@@ -727,6 +815,8 @@ struct Timeline: Decodable {
                     guard previous.isSubset(of: region.startKnown), region.spec.repeatCount == 1 || region.endTouched.isSubset(of: region.startKnown) else {
                         throw MidiFailure("MIDI region needs an explicit source baseline for previously changed channel fields")
                     }
+                    // Its own repeats were refused when the region was built.
+                    try refuseInitialBanks(region.startBankReads) { previous.contains($1.field($0)) }
                     mutations.formUnion(region.endTouched)
                 }
             }
@@ -869,6 +959,8 @@ struct MidiCycle {
             guard previous.isSubset(of: window.entry.safeKnown), !window.repeated || previous.isSubset(of: region.startKnown) else {
                 throw MidiFailure("common cycle needs an explicit source baseline before sounding keys")
             }
+            // Every cycle after the first enters on what the cycle before sent.
+            try refuseInitialBanks(window.entry.model.initialBankReads) { previous.contains($1.field($0)) }
         }
     }
     func entry(_ region: MidiRegion, copy: Int, sourceSeconds: Double, index: UInt128,

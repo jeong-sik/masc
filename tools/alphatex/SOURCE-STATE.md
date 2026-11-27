@@ -49,6 +49,21 @@ source had not yet set at a Program Change held the device's initial value,
 which is lost once the source sets that register. When a held note needs such a
 patch, seek/resume reports an error before replay instead of guessing it.
 
+The current patch can be unknown the same way. Seek/resume re-sends the current
+Program Change, with no bank select for a register the source had not set before
+it, so the device applies whatever that register holds. If playback never sent
+the register, that is still the initial value and the same patch returns. If
+playback has sent a bank select for it since, the device holds that later bank,
+and seek/resume reports an error before replay instead of guessing the initial
+bank. This holds with or without a sounding note. A later bank select that
+playback has not reached yet does not cause the error. Entering an arrangement
+region and each copy of a rendered VST region refuse on the same condition. A
+Program Change exactly at a region's start plays as a region event right after
+the replay, and the same check covers it. When a later copy, a later region on
+the same channel or the next loop pass would send such a Program Change after
+its bank select reached the device, the arrangement or VST render is refused
+when it is prepared, before anything plays. A seek is refused when it happens.
+
 Opaque SysEx/system effects, device-specific NRPN data, Hold 2, high-resolution
 velocity-prefix state, unsupported/incomplete RPN state and channel-mode changes
 still require more reconstruction support. Their original ordered messages

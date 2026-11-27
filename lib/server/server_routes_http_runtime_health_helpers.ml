@@ -95,10 +95,11 @@ let quick_gc_json () =
     ]
 
 let process_memory_json () =
-  let measurement =
-    Eio_guard.run_in_systhread ~label:"process-resident-memory"
-      Process_memory.resident_set
-  in
+  (* [Process_memory.resident_set] uses Mach [task_info] on macOS (sub-us
+     kernel trap) and [/proc/self/statm] on Linux without releasing the OCaml
+     runtime lock, so calling it directly avoids a systhread round-trip on
+     every [/health] probe while still observing live RSS immediately. *)
+  let measurement = Process_memory.resident_set () in
   match measurement with
   | Ok sample ->
     let source, approximate =

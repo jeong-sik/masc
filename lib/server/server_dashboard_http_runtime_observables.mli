@@ -13,3 +13,10 @@ val served_metric_names : string list
     stamp. Cells the writer has not landed render as [null] — absence stays
     distinguishable from a written zero. *)
 val runtime_observables_http_json : unit -> Yojson.Safe.t
+
+(** Short-window pre-encoded HTTP payload + ETag for
+    [/api/v1/dashboard/runtime-observables]. Invalidates immediately when the
+    writer updates [last_write_unixtime] or after 1 second so [age_seconds]
+    and live gauges stay fresh while repeated reads avoid copying the whole
+    [Otel_metric_store] or recompressing. *)
+val runtime_observables_http_prepared : unit -> Server_cached_read_http.prepared_http

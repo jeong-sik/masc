@@ -261,9 +261,8 @@ let fresh_matches_for_token_hash config index token_hash matches =
     When N>=2 credentials are fully identical we still warn and
     increment {!Auth_metric_store.metric_auth_credential_ambiguous_lookup}
     so the duplicate-token audit path remains observable. *)
-let find_static_credential_by_token config ~token : (agent_credential, masc_error) result =
+let find_static_credential_by_hash config ~token_hash : (agent_credential, masc_error) result =
   let open Result.Syntax in
-  let token_hash = sha256_hash token in
   let* idx = credential_token_index config in
   let* matches, answered_from =
     Hashtbl.find_opt idx.by_token token_hash |> Option.value ~default:[]
@@ -303,6 +302,10 @@ let find_static_credential_by_token config ~token : (agent_credential, masc_erro
        require_live_credential ~now:(Time_compat.now ()) first)
 ;;
 
+let find_static_credential_by_token config ~token : (agent_credential, masc_error) result =
+  find_static_credential_by_hash config ~token_hash:(sha256_hash token)
+;;
+
 let find_static_credential_with_lookup ~lookup ~token =
   let ( let* ) = Result.bind in
   let token_hash = sha256_hash token in
@@ -340,9 +343,13 @@ let find_static_token_credential config ~token : (token_credential, masc_error) 
 ;;
 
 let find_token_credential config ~token : (token_credential, masc_error) result =
-  match Auth_oauth.find_access_credential ~base_path:config ~token with
+  let token_hash = sha256_hash token in
+  match Auth_oauth.find_access_credential_by_hash ~base_path:config ~token_hash with
   | Ok (Some credential) -> Ok (Oauth_access credential)
-  | Ok None -> find_static_token_credential config ~token
+  | Ok None ->
+    Result.map
+      (fun credential -> Static_bearer credential)
+      (find_static_credential_by_hash config ~token_hash)
   | Error error -> Error error
 ;;
 

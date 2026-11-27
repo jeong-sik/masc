@@ -41,6 +41,39 @@ let empty_cost_latency_json ~window =
     ; "generated_at", `Float (Unix.gettimeofday ())
     ]
 
+exception Provider_usage_history_unavailable of string
+
+let is_standard_keeper_costs_window = function
+  | 30 | 60 | 360 | 1440 -> true
+  | _ -> false
+
+let compute_keeper_costs_json ~config ~window =
+  let keeper_names =
+    match Keeper_meta_store.keeper_names_result config with
+    | Ok names -> names
+    | Error detail ->
+      Log.Keeper.warn "dashboard keeper feed: keeper names unread: %s" detail;
+      []
+  in
+  (* Only Keepers whose meta reads have a row. A Keeper whose meta
+     is there but does not read is reported once, by the operator
+     snapshot's [keepers_unread], which the briefing carries; a
+     reader that asks this answer for it finds no row and draws it
+     unknown. *)
+  let keepers =
+    List.filter_map
+      (fun name ->
+        match Keeper_meta_store.read_meta_presence config name with
+        | Ok (Keeper_meta_store.Meta_present m) -> Some m
+        | Ok Keeper_meta_store.Meta_absent
+        | Ok (Keeper_meta_store.Meta_not_current _)
+        | Error _ -> None)
+      keeper_names
+  in
+  (* NDT-OK: request-time clock for a cost window; a dashboard read endpoint, not durable output. *)
+  Dashboard_http_keeper.keeper_cost_aggregates_json ~config
+    ~keepers ~window_minutes:window ~now_ts:(Unix.gettimeofday ())
+
 let dashboard_feed_limit req =
   int_query_param req "limit" ~default:200 |> clamp ~min_v:1 ~max_v:200
 
@@ -94,40 +127,24 @@ let add_routes ~sw router =
                (`Assoc [ ("ok", `Bool false); ("error", `String message) ])
                reqd
          | Ok window ->
-         let config = (Mcp_server.workspace_config state) in
-         (* The window keeps each Keeper's metrics day files between reads, so
-            a read after a keeper_costs push folds only the rows written since
-            and answers them; the first read of a file reads it whole, on a
-            worker. *)
-         let json =
-           Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
-               let keeper_names =
-                 (match Keeper_meta_store.keeper_names_result config with
-                  | Ok names -> names
-                  | Error detail ->
-                    Log.Keeper.warn "dashboard keeper feed: keeper names unread: %s" detail;
-                    [])
-               in
-               (* Only Keepers whose meta reads have a row. A Keeper whose meta
-                  is there but does not read is reported once, by the operator
-                  snapshot's [keepers_unread], which the briefing carries; a
-                  reader that asks this answer for it finds no row and draws it
-                  unknown. *)
-               let keepers =
-                 List.filter_map
-                   (fun name ->
-                     match Keeper_meta_store.read_meta_presence config name with
-                     | Ok (Keeper_meta_store.Meta_present m) -> Some m
-                     | Ok Keeper_meta_store.Meta_absent
-                     | Ok (Keeper_meta_store.Meta_not_current _)
-                     | Error _ -> None)
-                   keeper_names
-               in
-               (* NDT-OK: request-time clock for a cost window; a dashboard read endpoint, not durable output. *)
-               Dashboard_http_keeper.keeper_cost_aggregates_json ~config
-                 ~keepers ~window_minutes:window ~now_ts:(Unix.gettimeofday ()))
-         in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         let config = Mcp_server.workspace_config state in
+         if is_standard_keeper_costs_window window then
+           let key = Printf.sprintf "keeper_costs:%s:%d" config.base_path window in
+           let payload =
+             Dashboard_cache.get_or_compute_payload
+               ~preparation:Dashboard_cache.Http_encodings
+               key ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+               (Pool_work.io ~name:__FUNCTION__ (fun () ->
+                  compute_keeper_costs_json ~config ~window))
+           in
+           Server_cached_read_http.respond ~request:req reqd payload
+         else
+           let prepared =
+             Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
+               Server_cached_read_http.prepare_json
+                 (compute_keeper_costs_json ~config ~window))
+           in
+           Server_cached_read_http.respond_prepared ~request:req reqd prepared
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/provider-usage-history" (fun state req reqd ->
          (* The window is parsed here, once; [read] takes the variant and has
@@ -139,43 +156,66 @@ let add_routes ~sw router =
                Option.bind (int_of_string_opt raw)
                  Server_provider_usage_history.window_of_days
          in
-         let status, json =
-           match window with
-           | Some window ->
+         match window with
+         | None ->
+             Http.Response.json_value ~status:`Bad_request ~compress:true ~request:req
+               (`Assoc [ "ok", `Bool false
+                       ; "error", `String "days must be 1, 7, or 14" ])
+               reqd
+         | Some window ->
+             let now = Unix.gettimeofday () in
+             if Server_provider_usage_history.has_failure_in_window ~now ~window then
+               Http.Response.json_value ~status:`OK ~compress:true ~request:req
+                 (`Assoc
+                    [ "state", `String "unavailable"
+                    ; "reason", `String "provider usage history incomplete: a report could not be stored"
+                    ])
+                 reqd
+             else
                let config = Mcp_server.workspace_config state in
-               (* The history keeps its day files' folds between reads, so a
-                  read after a usage report folds only what the journal gained
-                  and answers it; the first read of a file reads it whole, on
-                  a worker. *)
-               let result =
-                 try
-                   Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
-                     (* NDT-OK: request-time clock for a read-only history window. *)
-                     Server_provider_usage_history.read config ~now:(Unix.gettimeofday ())
-                       ~window)
-                 with
-                 | Eio.Cancel.Cancelled _ as exn -> raise exn
-                 | exn ->
-                     Log.Server.warn "provider usage history crashed: %s"
-                       (Printexc.to_string exn);
-                     Error "provider usage history store unavailable"
+               let utc_day = int_of_float (floor (now /. Masc_time_constants.day)) in
+               let write_gen = Server_provider_usage_history.write_generation () in
+               let key =
+                 Printf.sprintf "provider_usage_history:%s:%d:%d:%d"
+                   config.base_path
+                   (Server_provider_usage_history.days_of_window window)
+                   utc_day
+                   write_gen
                in
-               (match result with
-                | Ok json -> `OK, json
-                | Error detail ->
-                    `OK, `Assoc [ "state", `String "unavailable"; "reason", `String detail ])
-           | None ->
-               `Bad_request,
-               `Assoc [ "ok", `Bool false
-                      ; "error", `String "days must be 1, 7, or 14" ]
-         in
-         Http.Response.json_value ~status ~compress:true ~request:req json reqd
+               (match
+                  Dashboard_cache.get_or_compute_payload
+                    ~preparation:Dashboard_cache.Http_encodings
+                    key ~ttl:Server_dashboard_http_core_cache.live_cache_ttl_s
+                    (Pool_work.io ~name:__FUNCTION__ (fun () ->
+                       (* NDT-OK: request-time clock for a read-only history window. *)
+                       match
+                         Server_provider_usage_history.read config
+                           ~now:(Unix.gettimeofday ()) ~window
+                       with
+                       | Ok json -> json
+                       | Error detail -> raise (Provider_usage_history_unavailable detail)))
+                with
+                | payload -> Server_cached_read_http.respond ~request:req reqd payload
+                | exception Provider_usage_history_unavailable detail ->
+                    Http.Response.json_value ~status:`OK ~compress:true ~request:req
+                      (`Assoc [ "state", `String "unavailable"; "reason", `String detail ])
+                      reqd
+                | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+                | exception exn ->
+                    Log.Server.warn "provider usage history crashed: %s"
+                      (Printexc.to_string exn);
+                    Http.Response.json_value ~status:`OK ~compress:true ~request:req
+                      (`Assoc
+                         [ "state", `String "unavailable"
+                         ; "reason", `String "provider usage history store unavailable"
+                         ])
+                      reqd)
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/cost-latency" (fun state req reqd ->
          let window = int_query_param req "window" ~default:1440 in
          let base_path = (Mcp_server.workspace_config state).base_path in
-         let json =
-           Cache.read_result ~now:Unix.gettimeofday ~sw ~sync_first:false
+         let prepared =
+           Cache.read_prepared ~now:Unix.gettimeofday ~sw ~sync_first:false
              ~cache:dashboard_cost_latency_cache
              ~key:(cache_key [ base_path; string_of_int window ])
              ~placeholder:(empty_cost_latency_json ~window)
@@ -184,7 +224,7 @@ let add_routes ~sw router =
                  ~base_path ~window_minutes:window
                |> Result.map_error Model_inference_metrics.read_error_to_string)
          in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         Server_cached_read_http.respond_prepared ~request:req reqd prepared
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/keeper-decisions" (fun state req reqd ->
          let limit = dashboard_feed_limit req in

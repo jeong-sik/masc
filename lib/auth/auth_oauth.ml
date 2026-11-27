@@ -1177,12 +1177,19 @@ let revoke_client ~base_path ~client_id =
              }))
 ;;
 
-let find_access_credential ~base_path ~token =
-  let hash = token_hash token in
+let find_access_credential_by_hash ~base_path ~token_hash:hash =
   let path = access_path base_path hash in
-  let* present = Auth_credential_base.credential_path_exists path
-    |> Result.map_error (fun error -> System (System_error.IoError
-      ("OAuth credential store: " ^ masc_error_to_string error))) in
+  let* present =
+    match Unix.lstat path with
+    | _ -> Ok true
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok false
+    | exception Unix.Unix_error (error, operation, argument) ->
+      Error
+        (System
+           (System_error.IoError
+              ("OAuth credential store: "
+               ^ Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message error))))
+  in
   if not present then Ok None
   else
     let request_resource = expected_resource () in
@@ -1251,4 +1258,8 @@ let find_access_credential ~base_path ~token =
         (Auth
            (Auth_error.InvalidToken
               ("OAuth access token rejected: " ^ protocol_error_code error)))
+;;
+
+let find_access_credential ~base_path ~token =
+  find_access_credential_by_hash ~base_path ~token_hash:(token_hash token)
 ;;

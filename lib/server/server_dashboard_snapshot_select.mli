@@ -29,6 +29,15 @@ module For_testing : sig
     ?keeper:string -> ?timing:Server_timing.t -> Workspace.config -> tools_response
 end
 
+type telemetry_response =
+  | Telemetry_json of Yojson.Safe.t
+  | Telemetry_prepared of Dashboard_snapshot.prepared_json
+
+val select_telemetry_summary_response :
+  ?timing:Server_timing.t ->
+  Workspace.config ->
+  telemetry_response
+
 val select_telemetry_summary_json :
   ?timing:Server_timing.t ->
   Workspace.config ->

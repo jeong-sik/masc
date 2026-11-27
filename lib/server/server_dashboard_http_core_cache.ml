@@ -15,6 +15,10 @@ let workspace_memory_inventory_cache_key ~base_path =
   "workspace_memory_inventory:" ^ base_path
 ;;
 
+let workspace_memory_ledger_cache_key ~base_path =
+  "workspace_memory_ledger:" ^ base_path
+;;
+
 (** Deep dashboard surface cache TTL — 2 minutes. Used for mission
     and execution surfaces that involve multi-step compute. *)
 let deep_surface_cache_ttl_s = 120.0

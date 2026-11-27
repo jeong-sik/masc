@@ -163,6 +163,9 @@ let owned state ~keeper =
   List.filter (fun item -> List.mem item items) Keeper_portrait_item.all
 ;;
 
+let same_owned (left : t) (right : t) = left.owned == right.owned
+;;
+
 open Result.Syntax
 
 let stamp state ~at =
@@ -371,7 +374,7 @@ let equip state ~keeper ~slot ~choice =
     | Candle_event.Item _ -> (slot, choice) :: remaining in
   Ok {state with selections = Names.add keeper choices state.selections}
 
-let replay events =
+let replay_uncached events =
   List.fold_left
     (fun result (event : Candle_event.t) ->
        Result.bind result (fun state ->
@@ -396,6 +399,33 @@ let replay events =
          | Candle_event.Payout_failed _ -> Ok state))
     (Ok empty)
     events
+
+let replay_cache_mu = Stdlib.Mutex.create ()
+let replay_cache : (Candle_event.t list * t) list ref = ref []
+let replay_cache_max = 8
+
+let replay events =
+  let cached =
+    Stdlib.Mutex.protect replay_cache_mu (fun () ->
+      List.find_map
+        (fun (cached_events, state) ->
+           if cached_events == events then Some state else None)
+        !replay_cache)
+  in
+  match cached with
+  | Some state -> Ok state
+  | None ->
+    let* state = replay_uncached events in
+    Stdlib.Mutex.protect replay_cache_mu (fun () ->
+      let rec take n acc = function
+        | [] -> List.rev acc
+        | _ when n <= 0 -> List.rev acc
+        | (ce, st) :: rest ->
+          if ce == events then take n acc rest
+          else take (n - 1) ((ce, st) :: acc) rest
+      in
+      replay_cache := (events, state) :: take (replay_cache_max - 1) [] !replay_cache);
+    Ok state
 
 let of_events ~at events =
   let* state = replay events in

@@ -158,6 +158,12 @@ let invalidate owner =
       owner.generation := next_generation (); owner.next_deadline := None; true)) in
   if changed then notify owner Invalidated
 
+let snapshot_unobserved owner =
+  Stdlib.Mutex.protect owner.mu (fun () -> Cache.snapshot owner.cache)
+
+let snapshot_json_unobserved owner =
+  Cache.surface_snapshot_json ~now:(Unix.gettimeofday ()) (snapshot_unobserved owner)
+
 let publication owner =
   let source, generation = Stdlib.Mutex.protect owner.mu (fun () ->
     Cache.snapshot owner.cache, !(owner.admitted_generation)) in

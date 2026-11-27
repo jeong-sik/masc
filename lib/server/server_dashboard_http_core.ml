@@ -57,6 +57,7 @@ let start_mission_refresh_loop = Server_dashboard_http_core_mission.start
 type mission_http_request = Server_dashboard_http_core_mission.request
 let mission_http_request = Server_dashboard_http_core_mission.request
 let dashboard_briefing_for_request = Server_dashboard_http_core_mission.json
+let dashboard_briefing_http_prepared = Server_dashboard_http_core_mission.prepared
 let dashboard_health_line_for_request = Server_dashboard_http_core_mission.health_line
 
 let dashboard_briefing_sections_http_json ~state ~sw ~clock request =
@@ -449,11 +450,11 @@ let dashboard_shell_payload_json
     in
     let (configured_keepers, profile_snapshot), configured_keepers_ms =
       measure_ms "configured_keepers" (fun () ->
-        if light then
-          let snapshot = Keeper_types_profile.read_keeper_profile_snapshot
-              ~base_path:config.Workspace.base_path in
-          List.length (Keeper_types_profile.snapshot_configured_keeper_names snapshot), Some snapshot
-        else configured_keeper_count config, None)
+        let snapshot =
+          Keeper_types_profile.read_keeper_profile_snapshot
+            ~base_path:config.Workspace.base_path
+        in
+        List.length (Keeper_types_profile.snapshot_configured_keeper_names snapshot), Some snapshot)
     in
     let config_resolution_r = ref (`Null, 0) in
     let runtime_resolution_r = ref (`Null, 0) in
@@ -505,12 +506,12 @@ let dashboard_shell_payload_json
     let config_resolution_json, config_resolution_ms = !config_resolution_r in
     let runtime_resolution_json, runtime_resolution_ms = !runtime_resolution_r in
     let ( tasks_done_24h
-        , _done_total
-        , _in_progress
-        , _claimed
-        , _awaiting_verification
-        , _todo
-        , _cancelled )
+        , done_total
+        , in_progress
+        , claimed
+        , awaiting_verification
+        , todo
+        , cancelled )
       =
       tasks_24h_rollup ~now:started_at tasks
     in
@@ -525,7 +526,6 @@ let dashboard_shell_payload_json
       Keeper_types_profile.snapshot_configured_keeper_names profile_snapshot
     in
     let scorecard_24h_json =
-      let base = tasks_24h_rollup_json ~now:started_at tasks in
       let turns_24h_opt =
         fleet_turns_24h_from_pulse
           ~now:started_at
@@ -557,9 +557,16 @@ let dashboard_shell_payload_json
           ; "cost_24h_usd", Json_util.float_opt_to_json cost_24h_opt
           ]
       in
-      match base with
-      | `Assoc fields -> `Assoc (fields @ additive_fields)
-      | other -> other
+      `Assoc
+        ([ "tasks_done_24h", `Int tasks_done_24h
+         ; "tasks_done_total", `Int done_total
+         ; "tasks_in_progress", `Int in_progress
+         ; "tasks_claimed", `Int claimed
+         ; "tasks_awaiting_verification", `Int awaiting_verification
+         ; "tasks_todo", `Int todo
+         ; "tasks_cancelled", `Int cancelled
+         ]
+         @ additive_fields)
     in
     let keeper_group_entries =
       List.map
@@ -625,8 +632,43 @@ let dashboard_shell_payload_json
     raise exn
 ;;
 
-let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.config)
-  : Yojson.Safe.t
+type shell_auth_summary = {
+  enabled : bool;
+  require_token : bool;
+  token_present : bool;
+  token_valid : bool;
+  token_agent : string option;
+  requested_agent : string option;
+  effective_agent : string option;
+  effective_role : string option;
+  auth_error_code : string option;
+  auth_error_detail : string option;
+  effective_admin : bool option;
+  can_keeper_msg : bool;
+  keeper_msg_error : string option;
+}
+
+let equal_shell_auth_summary (a : shell_auth_summary) (b : shell_auth_summary) =
+  Bool.equal a.enabled b.enabled
+  && Bool.equal a.require_token b.require_token
+  && Bool.equal a.token_present b.token_present
+  && Bool.equal a.token_valid b.token_valid
+  && Option.equal String.equal a.token_agent b.token_agent
+  && Option.equal String.equal a.requested_agent b.requested_agent
+  && Option.equal String.equal a.effective_agent b.effective_agent
+  && Option.equal String.equal a.effective_role b.effective_role
+  && Option.equal String.equal a.auth_error_code b.auth_error_code
+  && Option.equal String.equal a.auth_error_detail b.auth_error_detail
+  && Option.equal Bool.equal a.effective_admin b.effective_admin
+  && Bool.equal a.can_keeper_msg b.can_keeper_msg
+  && Option.equal String.equal a.keeper_msg_error b.keeper_msg_error
+;;
+
+let hash_shell_auth_summary (s : shell_auth_summary) = Hashtbl.hash s
+;;
+
+let dashboard_shell_auth_summary ~(request : Httpun.Request.t) (config : Workspace.config)
+  : shell_auth_summary
   =
   (* SSOT: typed-error → dashboard auth code lives in
      [Masc_domain.dashboard_auth_error_code] so this shell summary and
@@ -635,32 +677,32 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.
   let dashboard_auth_error_code = Masc_domain.dashboard_auth_error_code in
   let auth_cfg = Auth.load_auth_config config.base_path in
   let actor_resolution =
-    dashboard_actor_resolution_for_request ~base_path:config.base_path request
+    dashboard_actor_bearer_resolution_for_request ~base_path:config.base_path request
   in
   let token = auth_token_from_request request in
   let requested_agent = request_actor_hint request in
   let token_present =
     match actor_resolution with
-    | Authenticated_actor _ | Rejected_credential _ -> true
-    | Anonymous_actor_hint _ -> false
+    | Authenticated_actor_bearer _ | Rejected_credential_bearer _ -> true
+    | Anonymous_actor_hint_bearer _ -> false
   in
   let token_valid =
     match actor_resolution with
-    | Authenticated_actor _ -> true
-    | Anonymous_actor_hint _ | Rejected_credential _ -> false
+    | Authenticated_actor_bearer _ -> true
+    | Anonymous_actor_hint_bearer _ | Rejected_credential_bearer _ -> false
   in
   let token_agent =
     match actor_resolution with
-    | Authenticated_actor agent_name -> Some agent_name
-    | Anonymous_actor_hint _ | Rejected_credential _ -> None
+    | Authenticated_actor_bearer (agent_name, _) -> Some agent_name
+    | Anonymous_actor_hint_bearer _ | Rejected_credential_bearer _ -> None
   in
   let resolved_agent_name_result =
     match actor_resolution with
-    | Authenticated_actor agent_name -> Ok agent_name
-    | Anonymous_actor_hint (Some agent_name) -> Ok agent_name
-    | Anonymous_actor_hint None -> Ok "dashboard"
-    | Rejected_credential (Auth_error_kind.Outcome_error { err; _ }) -> Error err
-    | Rejected_credential Auth_error_kind.Outcome_none ->
+    | Authenticated_actor_bearer (agent_name, _) -> Ok agent_name
+    | Anonymous_actor_hint_bearer (Some agent_name) -> Ok agent_name
+    | Anonymous_actor_hint_bearer None -> Ok "dashboard"
+    | Rejected_credential_bearer (Auth_error_kind.Outcome_error { err; _ }) -> Error err
+    | Rejected_credential_bearer Auth_error_kind.Outcome_none ->
       Error
         (Masc_domain.Auth
            (Masc_domain.Auth_error.InvalidToken
@@ -672,9 +714,13 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.
     | Error _ -> None
   in
   let effective_role_result =
-    match resolved_agent_name_result with
-    | Error err -> Error err
-    | Ok agent_name ->
+    match actor_resolution, resolved_agent_name_result, token with
+    | _, Error err, _ -> Error err
+    | Authenticated_actor_bearer (_, resolved), Ok _, Some raw_token ->
+      Auth.resolve_role_of_resolved_bearer config.base_path ~auth_cfg ~token:raw_token resolved
+    | (Authenticated_actor_bearer _ | Anonymous_actor_hint_bearer _ | Rejected_credential_bearer _),
+      Ok agent_name,
+      token ->
       Auth.resolve_role_with_auth_config config.base_path ~auth_cfg ~agent_name ~token
   in
   let endpoint_gate_result =
@@ -729,25 +775,44 @@ let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.
        | Error err -> Some err
        | Ok () -> None)
   in
+  { enabled = auth_cfg.enabled
+  ; require_token = auth_cfg.require_token
+  ; token_present
+  ; token_valid
+  ; token_agent
+  ; requested_agent
+  ; effective_agent
+  ; effective_role
+  ; auth_error_code = Option.bind auth_error dashboard_auth_error_code
+  ; auth_error_detail = Option.map Masc_domain.masc_error_to_string auth_error
+  ; effective_admin
+  ; can_keeper_msg
+  ; keeper_msg_error
+  }
+;;
+
+let shell_auth_summary_to_json (s : shell_auth_summary) : Yojson.Safe.t =
   `Assoc
-    [ "enabled", `Bool auth_cfg.enabled
-    ; "require_token", `Bool auth_cfg.require_token
-    ; "token_present", `Bool token_present
-    ; "token_valid", `Bool token_valid
-    ; "token_agent", Json_util.string_opt_to_json token_agent
-    ; "requested_agent", Json_util.string_opt_to_json requested_agent
-    ; "effective_agent", Json_util.string_opt_to_json effective_agent
-    ; "effective_role", Json_util.string_opt_to_json effective_role
-    ; ( "auth_error_code"
-      , Json_util.string_opt_to_json (Option.bind auth_error dashboard_auth_error_code) )
-    ; ( "auth_error_detail"
-      , match auth_error with
-        | Some err -> `String (Masc_domain.masc_error_to_string err)
-        | None -> `Null )
-    ; "effective_admin", Json_util.bool_opt_to_json effective_admin
-    ; "can_keeper_msg", `Bool can_keeper_msg
-    ; "keeper_msg_error", Json_util.string_opt_to_json keeper_msg_error
+    [ "enabled", `Bool s.enabled
+    ; "require_token", `Bool s.require_token
+    ; "token_present", `Bool s.token_present
+    ; "token_valid", `Bool s.token_valid
+    ; "token_agent", Json_util.string_opt_to_json s.token_agent
+    ; "requested_agent", Json_util.string_opt_to_json s.requested_agent
+    ; "effective_agent", Json_util.string_opt_to_json s.effective_agent
+    ; "effective_role", Json_util.string_opt_to_json s.effective_role
+    ; "auth_error_code", Json_util.string_opt_to_json s.auth_error_code
+    ; "auth_error_detail", Json_util.string_opt_to_json s.auth_error_detail
+    ; "effective_admin", Json_util.bool_opt_to_json s.effective_admin
+    ; "can_keeper_msg", `Bool s.can_keeper_msg
+    ; "keeper_msg_error", Json_util.string_opt_to_json s.keeper_msg_error
     ]
+;;
+
+let dashboard_shell_auth_json ~(request : Httpun.Request.t) (config : Workspace.config)
+  : Yojson.Safe.t
+  =
+  dashboard_shell_auth_summary ~request config |> shell_auth_summary_to_json
 ;;
 
 let dashboard_shell_with_request_auth_json ~request (config : Workspace.config) payload =

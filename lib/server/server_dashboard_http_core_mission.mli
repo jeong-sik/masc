@@ -22,6 +22,16 @@ val json : sw:Eio.Switch.t -> clock:float Eio.Time.clock_ty Eio.Resource.t -> re
     actor-local responses carry only the captured [observer_instance_id], not
     canonical Mission generation/sequence/state metadata. *)
 
+val prepared :
+  sw:Eio.Switch.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  request ->
+  Server_cached_read_http.prepared_http
+(** Pre-encoded HTTP payload + ETag for [/api/v1/dashboard/briefing]. Always
+    runs {!Dashboard_projection_cache.with_current_keeper_observations} once
+    per request and reuses prepared bytes when both the base snapshot and the
+    current observations remain physically unchanged. *)
+
 val health_line : sw:Eio.Switch.t -> clock:float Eio.Time.clock_ty Eio.Resource.t -> request -> Yojson.Safe.t
 (** Derive the existing Home Health contract from the same captured default
     Mission owner and retain its [observer_instance_id]. Request actor does

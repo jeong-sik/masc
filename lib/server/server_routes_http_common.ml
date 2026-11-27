@@ -207,5 +207,8 @@ let handle_presence_events request reqd =
    the uncached migration stops being N-of-M hand-patching. [cache_key]
    stays caller-built so request params (limit, actor, ...) vary the entry. *)
 let respond_cached_read ?(compress = true) ~request ~reqd ~cache_key ~ttl work =
+  let preparation =
+    if compress then Dashboard_cache.Http_encodings else Dashboard_cache.Identity_only
+  in
   Server_cached_read_http.respond ~compress ~request reqd
-    (Dashboard_cache.get_or_compute_payload cache_key ~ttl work)
+    (Dashboard_cache.get_or_compute_payload ~preparation cache_key ~ttl work)

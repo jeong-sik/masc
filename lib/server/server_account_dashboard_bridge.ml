@@ -567,22 +567,14 @@ let handle_execution ~sw ~clock ~login ~engine_state req reqd =
   with_engine ~login ~engine_state ~tier:Workspace_read req reqd (fun state (_ : authorized) ->
     let clean_req = strip_single_user_auth_headers req in
     let timing = Server_timing.create () in
-    let context, cached =
-      Server_timing.measure timing Server_timing.Cache_lookup (fun () ->
-        let context = Server_dashboard_http.execution_http_request ~state clean_req in
-        context, Server_dashboard_http.dashboard_execution_cached_http_response context)
-    in
+    let context = Server_dashboard_http.execution_http_request ~state clean_req in
     let response =
-      match cached with
-      | Some response -> response
-      | None ->
-        Server_timing.measure timing Server_timing.Cache_compute (fun () ->
-          Server_dashboard_http.dashboard_execution_http_response ~sw ~clock context)
+      Server_dashboard_http.dashboard_execution_wire_response ~sw ~clock ~timing context
     in
     match response with
     | Server_dashboard_http.Execution_json json ->
-      Http.Response.json_value
-        ~compress:false
+      Http.Response.json_value_on_cpu
+        ~compress:true
         ~request:req
         ~extra_headers:(Server_timing.extra_header timing)
         json
@@ -633,10 +625,10 @@ let handle_execution_publication ~login ~engine_state req reqd =
 let handle_execution_trust ~sw ~clock ~login ~engine_state req reqd =
   with_engine ~login ~engine_state ~tier:Workspace_read req reqd (fun state (_ : authorized) ->
     let clean_req = strip_single_user_auth_headers req in
-    let json =
-      Server_dashboard_http.dashboard_execution_trust_http_json ~state ~sw ~clock clean_req
+    let prepared =
+      Server_dashboard_http.dashboard_execution_trust_http_prepared ~state ~sw ~clock clean_req
     in
-    Http.Response.json_value ~compress:true ~request:req json reqd)
+    Server_cached_read_http.respond_prepared ~request:req reqd prepared)
 ;;
 
 let handle_board ~login ~engine_state req reqd =
@@ -771,12 +763,8 @@ let handle_runtime_defaults ~login ~engine_state req reqd =
     req
     reqd
     (fun (_ : Mcp_server.server_state) (_ : authorized) ->
-       let json =
-         Server_dashboard_runtime_defaults_json.current
-           ~generated_at_iso:(Masc_domain.now_iso ())
-           ()
-       in
-       Http.Response.json_value ~compress:true ~request:req json reqd)
+       let prepared = Server_dashboard_runtime_defaults_json.current_prepared () in
+       Server_cached_read_http.respond_prepared ~request:req reqd prepared)
 ;;
 
 let handle_runtime_resolved ~login ~engine_state req reqd =
@@ -797,14 +785,16 @@ let handle_runtime_observables ~login ~engine_state req reqd =
     req
     reqd
     (fun (_ : Mcp_server.server_state) (_ : authorized) ->
-       let json = Server_dashboard_http_runtime_observables.runtime_observables_http_json () in
-       Http.Response.json_value ~compress:true ~request:req json reqd)
+       let prepared =
+         Server_dashboard_http_runtime_observables.runtime_observables_http_prepared ()
+       in
+       Server_cached_read_http.respond_prepared ~request:req reqd prepared)
 ;;
 
 let handle_transport_health ~login ~engine_state req reqd =
   with_engine ~login ~engine_state ~tier:Workspace_read req reqd (fun state (_ : authorized) ->
-    let json = Server_dashboard_http.dashboard_transport_health_http_json ~state in
-    Http.Response.json_value ~compress:true ~request:req json reqd)
+    let prepared = Server_dashboard_http.dashboard_transport_health_http_prepared ~state in
+    Server_cached_read_http.respond_prepared ~request:req reqd prepared)
 ;;
 
 let handle_verification_runs ~login ~engine_state req reqd =

@@ -91,7 +91,9 @@ let dashboard_board_payload
      other HTTP fiber for the duration.  [Dashboard_cache] submits
      the work to a worker domain and keeps user requests on the
      cache fast-path so they never wait for this refresh. *)
-  Dashboard_cache.get_or_compute_payload cache_key ~ttl:dashboard_projection_cache_ttl_s
+  Dashboard_cache.get_or_compute_payload
+    ~preparation:Dashboard_cache.Http_encodings
+    cache_key ~ttl:dashboard_projection_cache_ttl_s
     (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
       let base_fetch =
         board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset
@@ -203,7 +205,7 @@ let invalidate_gate_snapshots ~base_path =
   Dashboard_cache.invalidate_prefix (gate_cache_prefix ~base_path)
 ;;
 
-let dashboard_gate_http_json request ~base_path : Yojson.Safe.t =
+let dashboard_gate_http_payload request ~base_path : Dashboard_cache.cached_payload =
   let limit =
     int_query_param
       request
@@ -237,7 +239,13 @@ let dashboard_gate_http_json request ~base_path : Yojson.Safe.t =
       Dashboard_gate.dashboard_json ~base_path ~limit ~window_minutes)
   in
   if force then Dashboard_cache.invalidate cache_key;
-  Dashboard_cache.get_or_compute cache_key ~ttl:dashboard_projection_cache_ttl_s compute
+  Dashboard_cache.get_or_compute_payload
+    ~preparation:Dashboard_cache.Http_encodings
+    cache_key ~ttl:dashboard_projection_cache_ttl_s compute
+;;
+
+let dashboard_gate_http_json request ~base_path : Yojson.Safe.t =
+  (dashboard_gate_http_payload request ~base_path).json
 ;;
 
 (** Read the optional [?window=<minutes>] query param.
@@ -271,10 +279,11 @@ let dashboard_gate_tool_events_http_json request ~base_path : Yojson.Safe.t =
    entry per workspace. Target-scoped pages, cursor pages and exact lookups
    bypass this cache below. [name] is the pool work's label: the two lists
    differ in rows built (20 against up to 200), so each keeps its own. *)
-let scheduled_automation_cached_json ~name ~active_only ~(config : Workspace.config) :
-  Yojson.Safe.t
+let scheduled_automation_cached_payload ~name ~active_only ~(config : Workspace.config) :
+  Dashboard_cache.cached_payload
   =
-  Dashboard_cache.get_or_compute
+  Dashboard_cache.get_or_compute_payload
+    ~preparation:Dashboard_cache.Http_encodings
     (Server_dashboard_http_core_cache.scheduled_automation_cache_key
        ~base_path:config.base_path
        ~active_only)
@@ -286,17 +295,17 @@ let scheduled_automation_cached_json ~name ~active_only ~(config : Workspace.con
 ;;
 
 let dashboard_scheduled_automation_http_json ~config =
-  scheduled_automation_cached_json ~name:__FUNCTION__ ~active_only:false ~config
+  (scheduled_automation_cached_payload ~name:__FUNCTION__ ~active_only:false ~config).json
 ;;
 
-let dashboard_active_schedules_http_json ~config =
-  scheduled_automation_cached_json ~name:__FUNCTION__ ~active_only:true ~config
-;;
+type scheduled_automation_http_response =
+  | Scheduled_automation_payload of Dashboard_cache.cached_payload
+  | Scheduled_automation_json of Yojson.Safe.t
 
-let dashboard_scheduled_automation_query_http_json
+let dashboard_scheduled_automation_query_http_response
   ~(config : Workspace.config)
   (request : Httpun.Request.t)
-  : Yojson.Safe.t
+  : scheduled_automation_http_response
   =
   match Server_utils.query_param request "schedule_id" with
   | None ->
@@ -309,22 +318,36 @@ let dashboard_scheduled_automation_query_http_json
     (match Server_utils.query_param request "payload_target",
            Server_utils.query_param request "cursor" with
      | None, None ->
-       if active_only
-       then dashboard_active_schedules_http_json ~config
-       else dashboard_scheduled_automation_http_json ~config
+       Scheduled_automation_payload
+         (scheduled_automation_cached_payload
+            ~name:(if active_only then "dashboard_active_schedules_http_json" else "dashboard_scheduled_automation_http_json")
+            ~active_only
+            ~config)
      | payload_target, cursor ->
-       Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-         Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
-           ?payload_target ~active_only ?cursor
-           config))
+       Scheduled_automation_json
+         (Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+            Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+              ?payload_target ~active_only ?cursor
+              config)))
   | Some schedule_id ->
-    Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-      Server_dashboard_schedule_projection.scheduled_automation_exact_lookup_json
-        config
-        (* NDT-OK: the request boundary is where wall-clock enters, so the
-           projection stays a pure function of (state, now). *)
-        ~now:(Unix.gettimeofday ())
-        ~schedule_id)
+    Scheduled_automation_json
+      (Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+         Server_dashboard_schedule_projection.scheduled_automation_exact_lookup_json
+           config
+           (* NDT-OK: the request boundary is where wall-clock enters, so the
+              projection stays a pure function of (state, now). *)
+           ~now:(Unix.gettimeofday ())
+           ~schedule_id))
+;;
+
+let dashboard_scheduled_automation_query_http_json
+  ~(config : Workspace.config)
+  (request : Httpun.Request.t)
+  : Yojson.Safe.t
+  =
+  match dashboard_scheduled_automation_query_http_response ~config request with
+  | Scheduled_automation_payload payload -> payload.json
+  | Scheduled_automation_json json -> json
 ;;
 
 type approval_resolve_http_error =
@@ -708,7 +731,9 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
 let planning_cache_key = Server_dashboard_http_core_cache.planning_cache_key
 
 let cached_planning_payload ~(config : Workspace.config) =
-  Dashboard_cache.get_or_compute_payload (planning_cache_key ~base_path:config.base_path)
+  Dashboard_cache.get_or_compute_payload
+    ~preparation:Dashboard_cache.Http_encodings
+    (planning_cache_key ~base_path:config.base_path)
     ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
     (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
        dashboard_planning_http_json ~config))
@@ -780,7 +805,9 @@ let cached_goals_tree_payload ~(config : Workspace.config) =
        ~from:(goals_tree_key ~scope filled)
        ~stale_for:Server_dashboard_http_core_cache.standard_cache_ttl_s
    | Some _ | None -> ());
-  Dashboard_cache.get_or_compute_payload key
+  Dashboard_cache.get_or_compute_payload
+    ~preparation:Dashboard_cache.Http_encodings
+    key
     ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s
     (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
        let json = dashboard_goals_tree_http_json ~config in
@@ -992,7 +1019,9 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
       let t_start = Time_compat.now () in
       (* fire-and-forget: pre-warm config cache *)
       ignore
-        (Dashboard_cache.get_or_compute_payload "config_introspect"
+        (Dashboard_cache.get_or_compute_payload
+           ~preparation:Dashboard_cache.Http_encodings
+           "config_introspect"
            ~ttl:Server_dashboard_http_core_cache.config_cache_ttl_s
            (Pool_work.cpu ~name:__FUNCTION__ Env_config_introspect.to_json));
       Log.Dashboard.info "config surface pre-warmed (%.1fms)" ((Time_compat.now () -. t_start) *. 1000.0)
@@ -1006,7 +1035,9 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
       let cache_key = Server_dashboard_http_keeper_memory_health.fleet_cache_key ~base_path in
       (* fire-and-forget: pre-warm keeper-memory-health cache *)
       ignore
-        (Dashboard_cache.get_or_compute_payload cache_key
+        (Dashboard_cache.get_or_compute_payload
+           ~preparation:Dashboard_cache.Http_encodings
+           cache_key
            ~ttl:Server_dashboard_http_core_cache.standard_cache_ttl_s (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
              Server_dashboard_http_keeper_memory_health.keeper_memory_health_http_json ~base_path)));
       Log.Dashboard.info "keeper-memory-health surface pre-warmed (%.1fms)" ((Time_compat.now () -. t_start) *. 1000.0)

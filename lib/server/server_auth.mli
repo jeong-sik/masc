@@ -167,6 +167,17 @@ val dashboard_actor_resolution_for_request :
 (** Resolve authenticated ownership, anonymous attribution, or explicit
     credential rejection without collapsing the three states into [option]. *)
 
+type dashboard_actor_bearer_resolution =
+  | Authenticated_actor_bearer of string * Auth.resolved_bearer
+  | Anonymous_actor_hint_bearer of string option
+  | Rejected_credential_bearer of Auth_error_kind.dashboard_actor_fallback_outcome
+
+val dashboard_actor_bearer_resolution_for_request :
+  base_path:string -> Httpun.Request.t -> dashboard_actor_bearer_resolution
+(** Same resolution as {!dashboard_actor_resolution_for_request}, retaining the
+    already-resolved {!Auth.resolved_bearer} so callers can derive the role
+    without reading the credential store a second time. *)
+
 val dashboard_actor_for_request :
   base_path:string -> Httpun.Request.t -> string option
 (** Project a dashboard actor from [dashboard_actor_resolution_for_request].

@@ -168,7 +168,9 @@ let test_canonicalize_existing_retains_failure () =
 let test_enter_outlives_a_removed_launch_directory () =
   with_temp_dir "masc-enter-" @@ fun dir ->
   let original = Sys.getcwd () in
-  Fun.protect ~finally:(fun () -> Sys.chdir original) @@ fun () ->
+  Fun.protect ~finally:(fun () ->
+    Sys.chdir original;
+    Config_dir_resolver.reset ()) @@ fun () ->
   let launch = Filename.concat dir "launch" in
   let workspace = Filename.concat dir "workspace" in
   Unix.mkdir launch 0o755;

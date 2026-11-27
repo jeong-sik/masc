@@ -29,6 +29,7 @@ let install ~sw ~clock ~(config : Workspace.config) =
           with
           | `Kept_rows_changed -> ()
           | `Left_window ->
+            Dashboard_cache.invalidate_prefix ("keeper_costs:" ^ config.base_path ^ ":");
             Workspace_dataset_event.announce ~base_path:config.base_path
               Workspace_dataset_event.Keeper_costs));
       watch ()

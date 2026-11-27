@@ -736,58 +736,56 @@ let replay_transition_wal_bytes ~wal_only owner state bytes =
 ;;
 
 let read_and_replay_wal_unlocked ~wal_only ~path ~surface owner state =
-  let open Result.Syntax in
   (* The generic JSONL reader follows paths and treats ENOENT at offset zero
      as an empty stream. Queue state instead rejects a present indirect or
      non-regular entry, including a dangling link, before that reader runs. *)
-  let* () =
-    match inspect_path_kind path with
-    | Ok (Fs_compat.Exact_missing | Fs_compat.Exact_kind Unix.S_REG) -> Ok ()
-    | Ok (Fs_compat.Exact_kind
-            (Unix.S_DIR | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK)) ->
-      Error (read_failure Invalid_entry (Printf.sprintf "%s at %s is not a regular file" surface path))
-    | Ok Fs_compat.Exact_unknown ->
-      Error (read_failure Inspection_failure ("could not inspect event queue path: " ^ path))
-    | Error detail -> Error (read_failure Inspection_failure detail)
-  in
-  let replay_slice slice =
-    match slice.Fs_compat.Private_jsonl_slice.bytes with
-    | "" -> Ok (state, false)
-    | bytes ->
-       (match replay_transition_wal_bytes ~wal_only owner state bytes with
-        | Error failure ->
-          Error
-            { failure with detail = undecodable_message ~path ~surface failure.detail }
-        | Ok replayed -> Ok replayed)
-  in
-  let slice_failure ?cleanup_failure error =
-    let cause = match error with
-      | Fs_compat.Private_jsonl_slice.Incomplete_tail _ -> Incomplete_wal_tail
-      | Non_regular_file _ -> Invalid_entry
-      | Io_failed _ -> Io_failure
-      | Negative_offset _ | Missing_file_after_offset _ | Offset_beyond_end _
-      | Offset_not_at_row_boundary _ -> Coherence_failure
+  match inspect_path_kind path with
+  | Ok Fs_compat.Exact_missing when not wal_only -> Ok (state, false)
+  | Ok (Fs_compat.Exact_missing | Fs_compat.Exact_kind Unix.S_REG) ->
+    let replay_slice slice =
+      match slice.Fs_compat.Private_jsonl_slice.bytes with
+      | "" -> Ok (state, false)
+      | bytes ->
+         (match replay_transition_wal_bytes ~wal_only owner state bytes with
+          | Error failure ->
+            Error
+              { failure with detail = undecodable_message ~path ~surface failure.detail }
+          | Ok replayed -> Ok replayed)
     in
-    let detail = Printf.sprintf "failed to read %s keeper=%s path=%s: %s"
-      surface (keeper_name_of_owner owner) path
-      (Fs_compat.Private_jsonl_slice.error_to_string error) in
-    Error { cause; detail; cleanup_failure }
-  in
-  match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
-  | Private_file_failed error -> slice_failure error
-  | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
-    slice_failure ~cleanup_failure error
-  | Private_file_succeeded slice -> replay_slice slice
-  | Private_file_succeeded_with_cleanup_failure
-      { value = slice; cleanup_failure } ->
-    Log.Keeper.error
-      "%s read succeeded with descriptor cleanup failure keeper=%s path=%s: %s"
-      surface
-      (keeper_name_of_owner owner)
-      path
-      (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
-    replay_slice slice
-    |> Result.map_error (fun failure -> { failure with cleanup_failure = Some cleanup_failure })
+    let slice_failure ?cleanup_failure error =
+      let cause = match error with
+        | Fs_compat.Private_jsonl_slice.Incomplete_tail _ -> Incomplete_wal_tail
+        | Non_regular_file _ -> Invalid_entry
+        | Io_failed _ -> Io_failure
+        | Negative_offset _ | Missing_file_after_offset _ | Offset_beyond_end _
+        | Offset_not_at_row_boundary _ -> Coherence_failure
+      in
+      let detail = Printf.sprintf "failed to read %s keeper=%s path=%s: %s"
+        surface (keeper_name_of_owner owner) path
+        (Fs_compat.Private_jsonl_slice.error_to_string error) in
+      Error { cause; detail; cleanup_failure }
+    in
+    (match Fs_compat.read_private_jsonl_slice_locked_result path ~from:0 with
+     | Private_file_failed error -> slice_failure error
+     | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+       slice_failure ~cleanup_failure error
+     | Private_file_succeeded slice -> replay_slice slice
+     | Private_file_succeeded_with_cleanup_failure
+         { value = slice; cleanup_failure } ->
+       Log.Keeper.error
+         "%s read succeeded with descriptor cleanup failure keeper=%s path=%s: %s"
+         surface
+         (keeper_name_of_owner owner)
+         path
+         (Fs_compat.private_jsonl_operation_failure_to_string cleanup_failure);
+       replay_slice slice
+       |> Result.map_error (fun failure -> { failure with cleanup_failure = Some cleanup_failure }))
+  | Ok (Fs_compat.Exact_kind
+          (Unix.S_DIR | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK)) ->
+    Error (read_failure Invalid_entry (Printf.sprintf "%s at %s is not a regular file" surface path))
+  | Ok Fs_compat.Exact_unknown ->
+    Error (read_failure Inspection_failure ("could not inspect event queue path: " ^ path))
+  | Error detail -> Error (read_failure Inspection_failure detail)
 ;;
 
 let replay_wal_unlocked ~wal_only ~path ~surface owner state =

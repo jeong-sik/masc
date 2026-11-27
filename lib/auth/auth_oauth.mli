@@ -184,6 +184,13 @@ val find_access_credential :
   base_path:string ->
   token:string ->
   (Masc_domain.agent_credential option, Masc_domain.masc_error) result
+
+val find_access_credential_by_hash :
+  base_path:string ->
+  token_hash:string ->
+  (Masc_domain.agent_credential option, Masc_domain.masc_error) result
+(** {!find_access_credential} with a precomputed lowercase hex SHA-256 digest
+    of the raw bearer token, avoiding duplicate hashing across lookup paths. *)
 (** Resolve a valid current OAuth access token to the existing credential
     projection consumed by all MASC permission gates. [Ok None] means the
     token is not owned by the OAuth store; callers may try static bearer

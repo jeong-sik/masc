@@ -82,21 +82,25 @@ module For_testing = struct
   let select_tools_response = select_tools_response_with
 end
 
-let select_telemetry_summary_json
+type telemetry_response =
+  | Telemetry_json of Yojson.Safe.t
+  | Telemetry_prepared of Dashboard_snapshot.prepared_json
+
+let select_telemetry_summary_response
       ?timing (config : Workspace.config)
-  : Yojson.Safe.t
+  : telemetry_response
   =
   let timing_obj =
     match timing with
     | Some t -> t
     | None -> Server_timing.create ()
   in
-  match Dashboard_snapshot.telemetry_for_config config with
-  | Some summary ->
+  match Dashboard_snapshot.telemetry_prepared_for_config config with
+  | Some prepared ->
     Server_timing.measure
       timing_obj
       (Server_timing.Custom "snapshot_read")
-      (fun () -> summary)
+      (fun () -> Telemetry_prepared prepared)
   | None ->
     let base_path = config.base_path in
     let masc_root = Workspace.masc_dir config in
@@ -107,15 +111,22 @@ let select_telemetry_summary_json
     let keeper_metric_producer_active =
       Keeper_status_runtime.keeper_metric_producer_active ~base_path
     in
-    Server_timing.measure
-      timing_obj
-      Server_timing.Telemetry_summary_aggregate
-      (fun () ->
-         Telemetry_unified.summary_json
-           ~keeper_keepalive_interval_s
-           ~keeper_metric_producer_active
-           ~masc_root
-           ())
+    Telemetry_json
+      (Server_timing.measure
+         timing_obj
+         Server_timing.Telemetry_summary_aggregate
+         (fun () ->
+            Telemetry_unified.summary_json
+              ~keeper_keepalive_interval_s
+              ~keeper_metric_producer_active
+              ~masc_root
+              ()))
+;;
+
+let select_telemetry_summary_json ?timing config =
+  match select_telemetry_summary_response ?timing config with
+  | Telemetry_json json -> json
+  | Telemetry_prepared prepared -> prepared.json
 ;;
 
 let select_project_snapshot_json ~state ~sw ~clock ?timing req

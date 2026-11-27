@@ -394,26 +394,35 @@ CAMLprim value masc_process_group_members(value v_pgid)
   pid_t pgid = (pid_t)Int_val(v_pgid);
   int mib[] = { CTL_KERN, KERN_PROC, KERN_PROC_PGRP, pgid };
   size_t size = 0;
+  struct kinfo_proc *members = NULL;
+  size_t count = 0;
+  caml_enter_blocking_section();
   if (sysctl(mib, 4, NULL, &size, NULL, 0) == 0 && size > 0) {
-    struct kinfo_proc *members = malloc(size);
+    members = malloc(size);
     if (members != NULL) {
       size_t capacity = size;
       if (sysctl(mib, 4, members, &size, NULL, 0) == 0 &&
           size > 0 && size <= capacity && size % sizeof(*members) == 0) {
-        size_t count = size / sizeof(*members);
-        rows = caml_alloc((mlsize_t)count, 0);
-        for (size_t i = 0; i < count; i++) {
-          row = caml_alloc_tuple(4);
-          Store_field(row, 0, Val_int(members[i].kp_proc.p_pid));
-          Store_field(row, 1, Val_int(members[i].kp_eproc.e_ppid));
-          Store_field(row, 2, Val_bool(members[i].kp_proc.p_stat == SZOMB));
-          Store_field(row, 3, Val_bool((members[i].kp_proc.p_flag & P_WEXIT) != 0));
-          Store_field(rows, i, row);
-        }
-        result = caml_alloc_some(rows);
+        count = size / sizeof(*members);
+      } else {
+        free(members);
+        members = NULL;
       }
-      free(members);
     }
+  }
+  caml_leave_blocking_section();
+  if (members != NULL) {
+    rows = caml_alloc((mlsize_t)count, 0);
+    for (size_t i = 0; i < count; i++) {
+      row = caml_alloc_tuple(4);
+      Store_field(row, 0, Val_int(members[i].kp_proc.p_pid));
+      Store_field(row, 1, Val_int(members[i].kp_eproc.e_ppid));
+      Store_field(row, 2, Val_bool(members[i].kp_proc.p_stat == SZOMB));
+      Store_field(row, 3, Val_bool((members[i].kp_proc.p_flag & P_WEXIT) != 0));
+      Store_field(rows, i, row);
+    }
+    free(members);
+    result = caml_alloc_some(rows);
   }
 #endif
   CAMLreturn(result);
@@ -452,8 +461,12 @@ CAMLprim value masc_process_start_time(value v_pid)
   CAMLlocal2(result, text);
   result = Val_none;
 #if defined(__APPLE__)
+  intnat number = Long_val(v_pid);
   struct kinfo_proc info;
-  if (masc_process_row(Long_val(v_pid), &info) == MASC_ROW_FOUND) {
+  caml_enter_blocking_section();
+  enum masc_process_row_answer ans = masc_process_row(number, &info);
+  caml_leave_blocking_section();
+  if (ans == MASC_ROW_FOUND) {
     char buffer[64];
     snprintf(buffer, sizeof(buffer), "darwin:%ld.%06ld",
              (long)info.kp_proc.p_starttime.tv_sec, (long)info.kp_proc.p_starttime.tv_usec);
@@ -476,8 +489,12 @@ CAMLprim value masc_process_parent_pid(value v_pid)
   CAMLlocal2(result, parent);
   result = Val_none;
 #if defined(__APPLE__)
+  intnat number = Long_val(v_pid);
   struct kinfo_proc info;
-  switch (masc_process_row(Long_val(v_pid), &info)) {
+  caml_enter_blocking_section();
+  enum masc_process_row_answer ans = masc_process_row(number, &info);
+  caml_leave_blocking_section();
+  switch (ans) {
   case MASC_ROW_FOUND:
     parent = caml_alloc_some(Val_int(info.kp_eproc.e_ppid));
     result = caml_alloc_some(parent);

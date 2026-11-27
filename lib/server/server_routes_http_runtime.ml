@@ -138,17 +138,196 @@ let quick_gc_json = Server_routes_http_runtime_health_helpers.quick_gc_json
 let process_memory_json = Server_routes_http_runtime_health_helpers.process_memory_json
 let scheduler_json = Server_routes_http_runtime_health_helpers.scheduler_json
 
+type health_file_stat = {
+  hf_dev : int;
+  hf_ino : int;
+  hf_size : int;
+  hf_mtime : float;
+  hf_ctime : float;
+}
+
+let equal_health_file_stat a b =
+  a.hf_dev = b.hf_dev
+  && a.hf_ino = b.hf_ino
+  && a.hf_size = b.hf_size
+  && Float.equal a.hf_mtime b.hf_mtime
+  && Float.equal a.hf_ctime b.hf_ctime
+
+let health_stat_regular_opt path =
+  try
+    let st = Unix.stat path in
+    if st.Unix.st_kind = Unix.S_REG then
+      Some
+        { hf_dev = st.st_dev
+        ; hf_ino = st.st_ino
+        ; hf_size = st.st_size
+        ; hf_mtime = st.st_mtime
+        ; hf_ctime = st.st_ctime
+        }
+    else None
+  with Unix.Unix_error _ | Sys_error _ -> None
+
+let health_stat_is_settled ~now st =
+  now -. st.hf_mtime >= 0.05 && now -. st.hf_ctime >= 0.05
+
+let internal_token_hash_cache_mu = Stdlib.Mutex.create ()
+let internal_token_hash_cache : (string, health_file_stat * string option) Hashtbl.t =
+  Hashtbl.create 4
+let internal_token_hash_cache_max = 64
+let last_token_sha256 : (string * string) option Atomic.t = Atomic.make None
+
+let cached_sha256_hash raw_token =
+  match Atomic.get last_token_sha256 with
+  | Some (cached_raw, cached_digest) when String.equal cached_raw raw_token ->
+    cached_digest
+  | Some _ | None ->
+    let digest = Auth.sha256_hash raw_token in
+    Atomic.set last_token_sha256 (Some (raw_token, digest));
+    digest
+
 let internal_keeper_token_hash_opt ~base_path =
   let hash_file = Auth.internal_keeper_token_hash_file base_path in
-  if Sys.file_exists hash_file then
-    try
-      let hash =
-        In_channel.with_open_bin hash_file In_channel.input_all |> String.trim
-      in
-      if String.equal hash "" then None else Some hash
-    with Sys_error _ -> None
-  else
-    None
+  let now = Time_compat.now () in
+  match health_stat_regular_opt hash_file with
+  | None -> None
+  | Some st when health_stat_is_settled ~now st ->
+    (match
+       Stdlib.Mutex.protect internal_token_hash_cache_mu (fun () ->
+         match Hashtbl.find_opt internal_token_hash_cache hash_file with
+         | Some (cached_st, value) when equal_health_file_stat cached_st st -> Some value
+         | Some _ | None -> None)
+     with
+     | Some value -> value
+     | None ->
+       (try
+          let hash =
+            In_channel.with_open_bin hash_file In_channel.input_all |> String.trim
+          in
+          let value = if String.equal hash "" then None else Some hash in
+          (match health_stat_regular_opt hash_file with
+           | Some after
+             when equal_health_file_stat st after
+                  && health_stat_is_settled ~now:(Time_compat.now ()) after ->
+             Stdlib.Mutex.protect internal_token_hash_cache_mu (fun () ->
+               if Hashtbl.length internal_token_hash_cache >= internal_token_hash_cache_max
+                  && not (Hashtbl.mem internal_token_hash_cache hash_file)
+               then Hashtbl.clear internal_token_hash_cache;
+               Hashtbl.replace internal_token_hash_cache hash_file (after, value))
+           | Some _ | None -> ());
+          value
+        with Sys_error _ -> None))
+  | Some _ ->
+    (try
+       let hash =
+         In_channel.with_open_bin hash_file In_channel.input_all |> String.trim
+       in
+       if String.equal hash "" then None else Some hash
+     with Sys_error _ -> None)
+
+type cached_dashboard_surface_status = {
+  ds_env_key : string option * string * string option * string option;
+  ds_index_path : string;
+  ds_index_stat : health_file_stat;
+  ds_stamp_path : string option;
+  ds_stamp_stat : health_file_stat option;
+  ds_manifest_path : string option;
+  ds_manifest_stat : health_file_stat option;
+  ds_json : Yojson.Safe.t;
+}
+
+let dashboard_surface_status_cache_mu = Stdlib.Mutex.create ()
+let dashboard_surface_status_cache : cached_dashboard_surface_status option ref = ref None
+
+let equal_opt_health_stat a b =
+  match a, b with
+  | None, None -> true
+  | Some x, Some y -> equal_health_file_stat x y
+  | Some _, None | None, Some _ -> false
+
+let cached_dashboard_surface_status_json () =
+  let manifest_path = Sys.getenv_opt "MASC_INSTALLED_RELEASE_MANIFEST" in
+  let env_key =
+    ( (Host_config.from_env ()).assets_dir
+    , Config_dir_resolver.current_working_dir ()
+    , Sys.getenv_opt "MASC_LAUNCH_SOURCE_ROOT"
+    , manifest_path )
+  in
+  let now = Time_compat.now () in
+  let stat_opt_of_path = function
+    | Some p -> health_stat_regular_opt p
+    | None -> None
+  in
+  let opt_stat_settled ~now = function
+    | None -> true
+    | Some st -> health_stat_is_settled ~now st
+  in
+  let hit =
+    match
+      Stdlib.Mutex.protect dashboard_surface_status_cache_mu (fun () ->
+        !dashboard_surface_status_cache)
+    with
+    | Some cached when cached.ds_env_key = env_key ->
+      let idx_st = health_stat_regular_opt cached.ds_index_path in
+      let stamp_st = stat_opt_of_path cached.ds_stamp_path in
+      let manifest_st = stat_opt_of_path cached.ds_manifest_path in
+      (match idx_st with
+       | Some st
+         when equal_health_file_stat st cached.ds_index_stat
+              && health_stat_is_settled ~now st
+              && equal_opt_health_stat stamp_st cached.ds_stamp_stat
+              && opt_stat_settled ~now stamp_st
+              && equal_opt_health_stat manifest_st cached.ds_manifest_stat
+              && opt_stat_settled ~now manifest_st ->
+         Some cached.ds_json
+       | Some _ | None -> None)
+    | Some _ | None -> None
+  in
+  match hit with
+  | Some json -> json
+  | None ->
+    let json = Web_dashboard.surface_status_json () in
+    let status_is_ok =
+      match Json_util.assoc_string_opt "status" json with
+      | Some "ok" -> true
+      | Some _ | None -> false
+    in
+    let index_path =
+      Option.map (fun root -> Filename.concat root "index.html")
+        (Json_util.assoc_string_opt "dashboard_asset_root" json)
+    in
+    let stamp_path = Json_util.assoc_string_opt "build_stamp_path" json in
+    let idx_st = stat_opt_of_path index_path in
+    let stamp_st = stat_opt_of_path stamp_path in
+    let manifest_st = stat_opt_of_path manifest_path in
+    let now_after = Time_compat.now () in
+    let opt_present_and_settled path st =
+      match path, st with
+      | None, None -> true
+      | Some _, Some stat -> health_stat_is_settled ~now:now_after stat
+      | Some _, None | None, Some _ -> false
+    in
+    (match index_path, idx_st with
+     | Some idx_path, Some idx_stat
+       when status_is_ok
+            && health_stat_is_settled ~now:now_after idx_stat
+            && opt_present_and_settled stamp_path stamp_st
+            && opt_present_and_settled manifest_path manifest_st ->
+       Stdlib.Mutex.protect dashboard_surface_status_cache_mu (fun () ->
+         dashboard_surface_status_cache :=
+           Some
+             { ds_env_key = env_key
+             ; ds_index_path = idx_path
+             ; ds_index_stat = idx_stat
+             ; ds_stamp_path = stamp_path
+             ; ds_stamp_stat = stamp_st
+             ; ds_manifest_path = manifest_path
+             ; ds_manifest_stat = manifest_st
+             ; ds_json = json
+             })
+     | Some _, Some _ | Some _, None | None, Some _ | None, None ->
+       Stdlib.Mutex.protect dashboard_surface_status_cache_mu (fun () ->
+         dashboard_surface_status_cache := None));
+    json
 
 let internal_mcp_auth_json ~base_path =
   let env_key = Auth.internal_keeper_token_env_key in
@@ -164,7 +343,7 @@ let internal_mcp_auth_json ~base_path =
   let token_hash_file_present = Option.is_some token_hash in
   let token_matches_hash token =
     match token, token_hash with
-    | Some raw_token, Some hash -> String.equal hash (Auth.sha256_hash raw_token)
+    | Some raw_token, Some hash -> String.equal hash (cached_sha256_hash raw_token)
     | _ -> false
   in
   let env_token_verifies = token_matches_hash env_token in
@@ -319,7 +498,7 @@ let make_health_probe_fields ?timing ?(listener = default_listener) ?full_health
          (Runtime.startup_degradation ()));
       ("dashboard_surface",
        measure_health_phase timing Server_timing.Health_dashboard_surface
-         Web_dashboard.surface_status_json);
+         cached_dashboard_surface_status_json);
       ("subsystems", Subsystem_health.to_yojson ());
       ("logs", Log.Ring.summary_json ());
       ("gc", quick_gc_json ());
@@ -1597,11 +1776,75 @@ let mark_full_health_refresh_requested ~now () =
   if wake then signal_full_health_refresh_wakeup ();
   refresh
 
+module Health_reads_key = struct
+  type t = {
+    hr_full : bool;
+    hr_listener : string;
+    hr_scheme : Server_request_authority.scheme;
+    hr_host : string;
+    hr_port : int option;
+    hr_workspace_epoch : Mcp_server.Workspace_scope_epoch.t option;
+    hr_snapshot_gen : int;
+    hr_snapshot_computed_at : float option;
+    hr_sse_clients : int;
+    hr_ready : bool;
+    hr_phase : Server_startup_state.phase;
+    hr_log_total : int;
+    hr_uptime_sec : int;
+  }
+
+  let equal a b =
+    Bool.equal a.hr_full b.hr_full
+    && String.equal a.hr_listener b.hr_listener
+    && a.hr_scheme = b.hr_scheme
+    && String.equal a.hr_host b.hr_host
+    && Option.equal Int.equal a.hr_port b.hr_port
+    && Option.equal Mcp_server.Workspace_scope_epoch.equal
+         a.hr_workspace_epoch b.hr_workspace_epoch
+    && Int.equal a.hr_snapshot_gen b.hr_snapshot_gen
+    && Option.equal Float.equal a.hr_snapshot_computed_at b.hr_snapshot_computed_at
+    && Int.equal a.hr_sse_clients b.hr_sse_clients
+    && Bool.equal a.hr_ready b.hr_ready
+    && a.hr_phase = b.hr_phase
+    && Int.equal a.hr_log_total b.hr_log_total
+    && Int.equal a.hr_uptime_sec b.hr_uptime_sec
+
+  let hash (k : t) =
+    Hashtbl.hash
+      ( k.hr_full
+      , k.hr_listener
+      , k.hr_scheme
+      , k.hr_host
+      , k.hr_port
+      , k.hr_snapshot_gen
+      , k.hr_sse_clients
+      , k.hr_ready
+      , k.hr_log_total
+      , k.hr_uptime_sec )
+end
+
+module Health_reads_tbl = Hashtbl.Make (Health_reads_key)
+
+type cached_health_reads_http = {
+  prepared : Server_cached_read_http.prepared_http;
+  timing_headers : (string * string) list;
+}
+
+let reads_health_http_cache_mu = Stdlib.Mutex.create ()
+let reads_health_http_cache : cached_health_reads_http Health_reads_tbl.t =
+  Health_reads_tbl.create 8
+let reads_health_http_cache_max = 16
+
+let clear_reads_health_http_cache () =
+  Stdlib.Mutex.protect reads_health_http_cache_mu (fun () ->
+    Health_reads_tbl.clear reads_health_http_cache)
+
 let invalidate_full_health_snapshot_locked () =
   let now = Unix.gettimeofday () in
   full_health_refresh := Health_refresh.invalidate ~now !full_health_refresh;
   full_health_observation :=
-    Health_observation.invalidate ~now !full_health_observation
+    Health_observation.invalidate ~now !full_health_observation;
+  clear_reads_health_http_cache ()
 
 let invalidate_full_health_snapshot () =
   with_full_health_snapshot_lock invalidate_full_health_snapshot_locked;
@@ -1710,8 +1953,10 @@ let make_cached_full_health_json_with ~after_selection ?timing ?(listener = defa
   (* The snapshot holds every field of the full computation. The ones this
      request has just computed again are left out of it: no key is answered
      twice, and for those keys the answer is never the older reading. *)
+  let probe_keys = Hashtbl.create (List.length probe_fields) in
+  List.iter (fun (name, _) -> Hashtbl.replace probe_keys name ()) probe_fields;
   let snapshot_fields =
-    List.filter (fun (name, _) -> not (List.mem_assoc name probe_fields)) fields
+    List.filter (fun (name, _) -> not (Hashtbl.mem probe_keys name)) fields
   in
   Tool_args.ok_assoc
     (probe_fields
@@ -1787,7 +2032,8 @@ module For_testing = struct
   let reset_full_health_snapshot () =
     with_full_health_snapshot_lock (fun () ->
         full_health_observation := Health_observation.empty;
-        full_health_refresh := Health_refresh.empty)
+        full_health_refresh := Health_refresh.empty;
+        clear_reads_health_http_cache ())
 
     (* The wakeup stream is deliberately left alone. It carries "re-check the
        flag" and nothing else, its capacity is 1, and this reset has already
@@ -1925,6 +2171,97 @@ let public_readiness () =
   ready, (Server_startup_state.snapshot ()).phase
 ;;
 
+let liveness_prepared =
+  Server_cached_read_http.prepare_json Server_health_public.liveness_json
+;;
+
+let public_health_prepared_cache_mu = Stdlib.Mutex.create ()
+let public_health_prepared_cache :
+    (bool * bool * Server_startup_state.phase, Server_cached_read_http.prepared_http) Hashtbl.t =
+  Hashtbl.create 8
+let public_health_prepared_cache_max = 32
+
+let public_health_prepared ~dev_token ~ready ~phase =
+  let key = dev_token, ready, phase in
+  match
+    Stdlib.Mutex.protect public_health_prepared_cache_mu (fun () ->
+      Hashtbl.find_opt public_health_prepared_cache key)
+  with
+  | Some prepared -> prepared
+  | None ->
+    let prepared =
+      Server_cached_read_http.prepare_json
+        (Server_health_public.health_json ~dev_token ~ready ~phase)
+    in
+    Stdlib.Mutex.protect public_health_prepared_cache_mu (fun () ->
+      if Hashtbl.length public_health_prepared_cache >= public_health_prepared_cache_max
+         && not (Hashtbl.mem public_health_prepared_cache key)
+      then Hashtbl.clear public_health_prepared_cache;
+      Hashtbl.replace public_health_prepared_cache key prepared);
+    prepared
+;;
+
+let readiness_prepared_cache_mu = Stdlib.Mutex.create ()
+let readiness_prepared_cache :
+    (bool * Server_startup_state.phase, Server_cached_read_http.prepared_http) Hashtbl.t =
+  Hashtbl.create 8
+let readiness_prepared_cache_max = 32
+
+let readiness_prepared ~ready ~phase =
+  let key = ready, phase in
+  match
+    Stdlib.Mutex.protect readiness_prepared_cache_mu (fun () ->
+      Hashtbl.find_opt readiness_prepared_cache key)
+  with
+  | Some prepared -> prepared
+  | None ->
+    let prepared =
+      Server_cached_read_http.prepare_json
+        (Server_health_public.readiness_json ~ready ~phase)
+    in
+    Stdlib.Mutex.protect readiness_prepared_cache_mu (fun () ->
+      if Hashtbl.length readiness_prepared_cache >= readiness_prepared_cache_max
+         && not (Hashtbl.mem readiness_prepared_cache key)
+      then Hashtbl.clear readiness_prepared_cache;
+      Hashtbl.replace readiness_prepared_cache key prepared);
+    prepared
+;;
+
+let reads_health_cache_key ~full ~listener ~request_authority =
+  let now = Unix.gettimeofday () in
+  let view = full_health_snapshot_state () in
+  let snapshot = view.observation.snapshot in
+  let cacheable =
+    if not full then true
+    else
+      match snapshot with
+      | Some s ->
+        Option.is_none s.failure
+        && Option.is_none s.stale_since_ts
+        && not (snapshot_is_stale ~now s)
+      | None -> false
+  in
+  if not cacheable then None
+  else
+    let ready, phase = public_readiness () in
+    let log_bounds = Log.Ring.bounds () in
+    Some
+      { Health_reads_key.hr_full = full
+      ; hr_listener = listener
+      ; hr_scheme = Server_request_authority.scheme request_authority
+      ; hr_host = Server_request_authority.host request_authority
+      ; hr_port = Server_request_authority.port request_authority
+      ; hr_workspace_epoch = current_workspace_epoch ()
+      ; hr_snapshot_gen = view.refresh.invalidation_generation
+      ; hr_snapshot_computed_at = Option.map (fun s -> s.Health_observation.computed_at) snapshot
+      ; hr_sse_clients = Sse.client_count ()
+      ; hr_ready = ready
+      ; hr_phase = phase
+      ; hr_log_total = log_bounds.total
+      ; hr_uptime_sec = health_uptime_secs ()
+      }
+;;
+
 (* HIGH-RISK-UNREVIEWED [H2]: only the [Reads] branch builds or reads
    anything beyond the public probe: the query, the probe body, the operator
    rollup, the full-health snapshot and its refresh request, and the timing
@@ -1934,18 +2271,47 @@ let health_handler request reqd =
   | Reads ->
     let request_authority = Server_request_authority.current_exn () in
     let listener = listener_of_protocol (Http_reqd.protocol reqd) in
-    let body, extra_headers =
-      make_health_response_body ~listener ~request_authority request
+    let full = full_health_requested request in
+    let entry =
+      match reads_health_cache_key ~full ~listener ~request_authority with
+      | Some key ->
+        (match
+           Stdlib.Mutex.protect reads_health_http_cache_mu (fun () ->
+             Health_reads_tbl.find_opt reads_health_http_cache key)
+         with
+         | Some cached -> cached
+         | None ->
+           let body, timing_headers =
+             make_health_response_body ~listener ~request_authority request
+           in
+           let built =
+             { prepared = Server_cached_read_http.prepare_json_string body
+             ; timing_headers
+             }
+           in
+           Stdlib.Mutex.protect reads_health_http_cache_mu (fun () ->
+             if Health_reads_tbl.length reads_health_http_cache >= reads_health_http_cache_max
+                && not (Health_reads_tbl.mem reads_health_http_cache key)
+             then Health_reads_tbl.clear reads_health_http_cache;
+             Health_reads_tbl.replace reads_health_http_cache key built);
+           built)
+      | None ->
+        let body, timing_headers =
+          make_health_response_body ~listener ~request_authority request
+        in
+        { prepared = Server_cached_read_http.prepare_json_string body
+        ; timing_headers
+        }
     in
-    Http.Response.json ~extra_headers body reqd
+    Server_cached_read_http.respond_prepared
+      ~extra_headers:entry.timing_headers ~request reqd entry.prepared
   | Reads_nothing ->
     let ready, phase = public_readiness () in
-    Http.Response.json_value
-      (Server_health_public.health_json
-         ~dev_token:(single_user_dev_token_enabled ())
-         ~ready
-         ~phase)
-      reqd
+    let prepared =
+      public_health_prepared
+        ~dev_token:(single_user_dev_token_enabled ()) ~ready ~phase
+    in
+    Server_cached_read_http.respond_prepared ~request reqd prepared
   | Refused error -> Server_auth.respond_auth_error request reqd error
 ;;
 
@@ -1955,15 +2321,19 @@ let health_handler request reqd =
 (** Liveness probe: responds 200 as soon as the HTTP accept loop is running.
     Does not depend on server_state initialization.
     Kubernetes/Railway liveness probe target. *)
-let liveness_handler _request reqd =
-  Http.Response.json_value Server_health_public.liveness_json reqd
+let liveness_handler request reqd =
+  Server_cached_read_http.respond_prepared ~request reqd liveness_prepared
 ;;
 
 (** Readiness probe: responds 200 only after the startup barrier and state publication. *)
-let readiness_handler _request reqd =
+let readiness_handler request reqd =
   let ready, phase = public_readiness () in
-  let status = if ready then `OK else `Service_unavailable in
-  Http.Response.json_value ~status (Server_health_public.readiness_json ~ready ~phase) reqd
+  let prepared = readiness_prepared ~ready ~phase in
+  if ready then
+    Server_cached_read_http.respond_prepared ~request reqd prepared
+  else
+    Server_cached_read_http.respond_prepared_status
+      ~status:`Service_unavailable ~request reqd prepared
 ;;
 
 let board_comment_request_of_query ~offset ~limit =

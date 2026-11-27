@@ -85,6 +85,100 @@ let credential_path_exists file =
   | Eio.Io _ as exn -> Error (System (System_error.IoError (Printexc.to_string exn)))
 ;;
 
+type file_stat_stamp = {
+  dev : int;
+  ino : int;
+  size : int;
+  mtime : float;
+  ctime : float;
+  perm : int;
+  uid : int;
+  gid : int;
+}
+
+let equal_file_stat_stamp (a : file_stat_stamp) (b : file_stat_stamp) =
+  Int.equal a.dev b.dev
+  && Int.equal a.ino b.ino
+  && Int.equal a.size b.size
+  && Float.equal a.mtime b.mtime
+  && Float.equal a.ctime b.ctime
+  && Int.equal a.perm b.perm
+  && Int.equal a.uid b.uid
+  && Int.equal a.gid b.gid
+;;
+
+let file_stat_stamp_of_stats (st : Unix.stats) =
+  if st.Unix.st_kind <> Unix.S_REG then None
+  else
+    Some
+      { dev = st.st_dev
+      ; ino = st.st_ino
+      ; size = st.st_size
+      ; mtime = st.st_mtime
+      ; ctime = st.st_ctime
+      ; perm = st.st_perm
+      ; uid = st.st_uid
+      ; gid = st.st_gid
+      }
+;;
+
+let stat_regular_file_opt path =
+  try file_stat_stamp_of_stats (Unix.stat path) with
+  | Unix.Unix_error _ | Sys_error _ -> None
+;;
+
+(* Files modified within 50ms of the current clock — or carrying a future
+   timestamp — bypass the stat-verified cache so coarse-mtime filesystems,
+   clock skew, and tight write-then-read sequences always re-read
+   authoritatively from disk. *)
+let stat_stamp_is_settled ~now (stamp : file_stat_stamp) =
+  now -. stamp.ctime >= 0.05 && now -. stamp.mtime >= 0.05
+;;
+
+let auth_file_cache_mu = Stdlib.Mutex.create ()
+let auth_config_cache : (string, file_stat_stamp * auth_config) Hashtbl.t = Hashtbl.create 8
+let auth_config_cache_max = 64
+let internal_keeper_hash_cache : (string, file_stat_stamp * string option) Hashtbl.t = Hashtbl.create 8
+let internal_keeper_hash_cache_max = 64
+
+type cached_resolved_credential =
+  | Cached_direct of {
+      named_stamp : file_stat_stamp;
+      cred : agent_credential option;
+    }
+  | Cached_redirect of {
+      named_stamp : file_stat_stamp;
+      target_path : string;
+      target_stamp : file_stat_stamp;
+      cred : agent_credential option;
+    }
+
+let resolved_credential_cache : (string, cached_resolved_credential) Hashtbl.t =
+  Hashtbl.create 64
+;;
+let resolved_credential_cache_max = 512
+
+let replace_bounded_cache ~max_entries tbl key value =
+  if Hashtbl.length tbl >= max_entries && not (Hashtbl.mem tbl key) then
+    Hashtbl.clear tbl;
+  Hashtbl.replace tbl key value
+;;
+
+let with_auth_file_cache_lock f =
+  Stdlib.Mutex.protect auth_file_cache_mu f
+;;
+
+let clear_auth_file_caches_for_path path =
+  with_auth_file_cache_lock (fun () ->
+    Hashtbl.remove auth_config_cache path;
+    Hashtbl.remove internal_keeper_hash_cache path;
+    Hashtbl.remove resolved_credential_cache path)
+;;
+
+let clear_resolved_credential_cache () =
+  with_auth_file_cache_lock (fun () -> Hashtbl.clear resolved_credential_cache)
+;;
+
 let read_regular_auth_file_with_open ~open_file path =
   let open Result.Syntax in
   let* result = credential_read_result (fun () -> run_blocking_io (fun () ->
@@ -151,17 +245,42 @@ let write_initial_admin config agent_name =
 ;;
 
 let load_internal_keeper_token_hash config =
-  match read_regular_auth_file (internal_keeper_token_hash_file config) with
-  | Error _ -> None
-  | Ok content ->
-    let hash = String.trim content in
-    if hash = "" then None else Some hash
+  let file = internal_keeper_token_hash_file config in
+  let now = Time_compat.now () in
+  match stat_regular_file_opt file with
+  | Some stamp when stat_stamp_is_settled ~now stamp ->
+    (match
+       with_auth_file_cache_lock (fun () -> Hashtbl.find_opt internal_keeper_hash_cache file)
+     with
+     | Some (cached_stamp, value) when equal_file_stat_stamp cached_stamp stamp -> value
+     | Some _ | None ->
+       (match read_regular_auth_file file with
+        | Error _ -> None
+        | Ok content ->
+          let hash = String.trim content in
+          let value = if hash = "" then None else Some hash in
+          (match stat_regular_file_opt file with
+           | Some after
+             when equal_file_stat_stamp stamp after
+                  && stat_stamp_is_settled ~now:(Time_compat.now ()) after ->
+             with_auth_file_cache_lock (fun () ->
+               replace_bounded_cache ~max_entries:internal_keeper_hash_cache_max
+                 internal_keeper_hash_cache file (after, value))
+           | Some _ | None -> ());
+          value))
+  | Some _ | None ->
+    (match read_regular_auth_file file with
+     | Error _ -> None
+     | Ok content ->
+       let hash = String.trim content in
+       if hash = "" then None else Some hash)
 ;;
 
 let save_internal_keeper_token_hash config ~raw_token =
   ensure_auth_dirs config;
   let file = internal_keeper_token_hash_file config in
-  save_private_text_file file (sha256_hash raw_token)
+  save_private_text_file file (sha256_hash raw_token);
+  clear_auth_file_caches_for_path file
 ;;
 
 let verify_internal_keeper_token config ~token =
@@ -213,7 +332,8 @@ let persist_auth_config config (auth_cfg : auth_config) =
   ensure_auth_dirs config;
   let file = auth_config_file config in
   let json = auth_config_to_yojson auth_cfg in
-  save_private_text_file file (Yojson.Safe.pretty_to_string json)
+  save_private_text_file file (Yojson.Safe.pretty_to_string json);
+  clear_auth_file_caches_for_path file
 ;;
 
 exception Auth_config_error of {
@@ -231,12 +351,7 @@ let raise_auth_config_error ~file reason =
   raise (Auth_config_error { file; reason })
 ;;
 
-(* HIGH-RISK-UNREVIEWED: authenticated requests use this configuration.
-   Metadata checks run on system threads through the shared Auth reader,
-   allowing other fibers to proceed while the filesystem answers. *)
-(** Load auth config. Only an absent path selects the secure default;
-    occupied unreadable/nonregular paths refuse before any open or mutation. *)
-let load_auth_config config : auth_config =
+let load_auth_config_uncached config : auth_config =
   let file = auth_config_file config in
   match credential_path_exists file with
   | Error error -> raise_auth_config_error ~file (masc_error_to_string error)
@@ -254,6 +369,54 @@ let load_auth_config config : auth_config =
         | Yojson.Json_error msg -> raise_auth_config_error ~file msg))
 ;;
 
+(* HIGH-RISK-UNREVIEWED: authenticated requests use this configuration.
+   Metadata checks run on system threads through the shared Auth reader,
+   allowing other fibers to proceed while the filesystem answers. *)
+(** Load auth config. Only an absent path selects the secure default;
+    occupied unreadable/nonregular paths refuse before any open or mutation. *)
+let load_auth_config config : auth_config =
+  let file = auth_config_file config in
+  let now = Time_compat.now () in
+  let cached_opt =
+    match stat_regular_file_opt file with
+    | Some stamp when stat_stamp_is_settled ~now stamp ->
+      (match with_auth_file_cache_lock (fun () -> Hashtbl.find_opt auth_config_cache file) with
+       | Some (cached_stamp, parsed) when equal_file_stat_stamp cached_stamp stamp ->
+         Some parsed
+       | Some _ | None -> None)
+    | Some _ | None -> None
+  in
+  match cached_opt with
+  | Some parsed -> parsed
+  | None ->
+    match credential_path_exists file with
+    | Error error -> raise_auth_config_error ~file (masc_error_to_string error)
+    | Ok false -> default_auth_config
+    | Ok true ->
+      let now_before = Time_compat.now () in
+      let before_stamp = stat_regular_file_opt file in
+      (match read_regular_auth_file file with
+       | Error error -> raise_auth_config_error ~file (masc_error_to_string error)
+       | Ok content ->
+         (try
+            let json = Yojson.Safe.from_string content in
+            match auth_config_of_yojson json with
+            | Ok parsed ->
+              (match before_stamp, stat_regular_file_opt file with
+               | Some s1, Some s2
+                 when stat_stamp_is_settled ~now:now_before s1
+                      && equal_file_stat_stamp s1 s2
+                      && stat_stamp_is_settled ~now:(Time_compat.now ()) s2 ->
+                 with_auth_file_cache_lock (fun () ->
+                   replace_bounded_cache ~max_entries:auth_config_cache_max
+                     auth_config_cache file (s2, parsed))
+               | _ -> ());
+              parsed
+            | Error msg -> raise_auth_config_error ~file msg
+          with
+          | Yojson.Json_error msg -> raise_auth_config_error ~file msg))
+;;
+
 (** Save auth config *)
 let save_auth_config config (auth_cfg : auth_config) =
   let file = auth_config_file config in
@@ -267,7 +430,7 @@ let init_workspace_secret config : string =
   let secret = generate_token () in
   let hash = sha256_hash secret in
   save_private_text_file (workspace_secret_file config) hash;
-  let cfg = load_auth_config config in
+  let cfg = load_auth_config_uncached config in
   save_auth_config config { cfg with workspace_secret_hash = Some hash };
   secret
 ;;
@@ -360,6 +523,7 @@ let load_redirect_target config path =
 ;;
 
 let remove_file_if_exists path =
+  clear_auth_file_caches_for_path path;
   try run_blocking_io (fun () -> Unix.unlink path) with
   | Unix.Unix_error (Unix.ENOENT, _, _) -> ()
 
@@ -376,25 +540,93 @@ let remove_file_if_exists path =
 let load_credential_checked config agent_name
   : (agent_credential option, masc_error) result
   =
-  match read_credential_text (credential_file config agent_name) with
-  | Error _ as error -> error
-  | Ok None -> Ok None
-  | Ok (Some content) ->
-    (try
-       let json = Yojson.Safe.from_string content in
-       match json with
-       | `Assoc fields ->
-         (match List.assoc_opt "redirect_to" fields with
-          | Some (`String target) ->
-            (match redirect_target_file config target with
-             | Some redirect_path ->
-               load_credential_from_path_checked agent_name redirect_path
-             | None -> Ok None)
-          | Some _ -> Ok None
-          | None -> Ok (credential_of_json agent_name json))
-       | _ -> Ok (credential_of_json agent_name json)
-     with
-     | Yojson.Json_error _ -> Ok None)
+  let named_path = credential_file config agent_name in
+  let now = Time_compat.now () in
+  let cached_opt =
+    match stat_regular_file_opt named_path with
+    | Some named_stamp when stat_stamp_is_settled ~now named_stamp ->
+      (match
+         with_auth_file_cache_lock (fun () ->
+           Hashtbl.find_opt resolved_credential_cache named_path)
+       with
+       | Some (Cached_direct { named_stamp = s; cred }) ->
+         if equal_file_stat_stamp s named_stamp then Some cred else None
+       | Some (Cached_redirect { named_stamp = s; target_path; target_stamp; cred }) ->
+         if not (equal_file_stat_stamp s named_stamp) then None
+         else
+           (match stat_regular_file_opt target_path with
+            | Some ts
+              when stat_stamp_is_settled ~now ts && equal_file_stat_stamp ts target_stamp ->
+              Some cred
+            | Some _ | None -> None)
+       | None -> None)
+    | Some _ | None -> None
+  in
+  match cached_opt with
+  | Some cred -> Ok cred
+  | None ->
+    let now_before_named = Time_compat.now () in
+    let before_named = stat_regular_file_opt named_path in
+    match read_credential_text named_path with
+    | Error _ as error -> error
+    | Ok None -> Ok None
+    | Ok (Some content) ->
+      (try
+         let json = Yojson.Safe.from_string content in
+         match json with
+         | `Assoc fields ->
+           (match List.assoc_opt "redirect_to" fields with
+            | Some (`String target) ->
+              (match redirect_target_file config target with
+               | Some redirect_path ->
+                 let now_before_target = Time_compat.now () in
+                 let before_target = stat_regular_file_opt redirect_path in
+                 let res = load_credential_from_path_checked agent_name redirect_path in
+                 (match res with
+                  | Ok cred ->
+                    (match
+                       before_named, stat_regular_file_opt named_path,
+                       before_target, stat_regular_file_opt redirect_path
+                     with
+                     | Some ns1, Some ns2, Some ts1, Some ts2
+                       when stat_stamp_is_settled ~now:now_before_named ns1
+                            && stat_stamp_is_settled ~now:now_before_target ts1
+                            && equal_file_stat_stamp ns1 ns2
+                            && equal_file_stat_stamp ts1 ts2 ->
+                       let now_after = Time_compat.now () in
+                       if stat_stamp_is_settled ~now:now_after ns2
+                          && stat_stamp_is_settled ~now:now_after ts2
+                       then
+                         with_auth_file_cache_lock (fun () ->
+                           replace_bounded_cache ~max_entries:resolved_credential_cache_max
+                             resolved_credential_cache named_path
+                             (Cached_redirect
+                                { named_stamp = ns2
+                                ; target_path = redirect_path
+                                ; target_stamp = ts2
+                                ; cred
+                                }))
+                     | _ -> ())
+                  | Error _ -> ());
+                 res
+               | None -> Ok None)
+            | Some _ -> Ok None
+            | None ->
+              let cred = credential_of_json agent_name json in
+              (match before_named, stat_regular_file_opt named_path with
+               | Some ns1, Some ns2
+                 when stat_stamp_is_settled ~now:now_before_named ns1
+                      && equal_file_stat_stamp ns1 ns2
+                      && stat_stamp_is_settled ~now:(Time_compat.now ()) ns2 ->
+                 with_auth_file_cache_lock (fun () ->
+                   replace_bounded_cache ~max_entries:resolved_credential_cache_max
+                     resolved_credential_cache named_path
+                     (Cached_direct { named_stamp = ns2; cred }))
+               | _ -> ());
+              Ok cred)
+         | _ -> Ok (credential_of_json agent_name json)
+       with
+       | Yojson.Json_error _ -> Ok None)
 ;;
 
 (* [load_credential_checked] with a failed read answered as no credential. *)
@@ -1468,7 +1700,7 @@ type agents_dir_stamp = {
 }
 
 let agents_dir_stamp config : (agents_dir_stamp option, masc_error) result =
-  match run_blocking_io (fun () -> Unix.stat (agents_dir config)) with
+  match Unix.stat (agents_dir config) with
   | stats ->
     Ok (Some { inode = stats.Unix.st_ino
              ; modified_at = stats.Unix.st_mtime
@@ -1590,7 +1822,8 @@ let build_token_index (creds : agent_credential list)
 let invalidate_credential_index_cache config =
   let key = agents_dir config in
   with_credential_index_cache_lock (fun () ->
-    Hashtbl.remove credential_index_cache key)
+    Hashtbl.remove credential_index_cache key);
+  clear_resolved_credential_cache ()
 ;;
 
 let cached_credential_index ~key ~now ~stamp =

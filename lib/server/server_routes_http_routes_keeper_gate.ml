@@ -306,8 +306,8 @@ let add_routes router =
   router
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/gate" (fun state req reqd ->
          let base_path = (Mcp_server.workspace_config state).base_path in
-         let json = dashboard_gate_http_json req ~base_path in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         Server_cached_read_http.respond ~request:req reqd
+           (dashboard_gate_http_payload req ~base_path)
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/gate/tool-events" (fun state req reqd ->
          let base_path = (Mcp_server.workspace_config state).base_path in

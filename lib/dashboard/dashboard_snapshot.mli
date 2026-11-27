@@ -11,6 +11,12 @@ type tools_projection = private {
   encoded : Http_response_payload.prepared;
 }
 
+type prepared_json = private {
+  json : Yojson.Safe.t;
+  etag : string;
+  encoded : Http_response_payload.prepared;
+}
+
 type tools_result =
   | Tools_pending of Yojson.Safe.t
   | Tools_ready of Yojson.Safe.t
@@ -30,6 +36,7 @@ type t = private {
 
 type publisher
 type tools_update
+type telemetry_update
 
 val activate : config:Workspace.config -> is_current:(unit -> bool) -> publisher
 (** Install an empty publisher for one captured workspace epoch. The original
@@ -43,10 +50,13 @@ val publish_shell : publisher -> shell:Yojson.Safe.t -> shell_light:Yojson.Safe.
 val prepare_tools : publisher -> Yojson.Safe.t -> tools_update
 (** Prepare JSON, ETag and encodings on a worker, retaining the exact publisher. *)
 val publish_tools : tools_update -> unit
+val prepare_telemetry : publisher -> Yojson.Safe.t -> telemetry_update
+(** Prepare telemetry summary JSON, ETag and encodings on a worker. *)
+val publish_telemetry_prepared : telemetry_update -> unit
 val publish_telemetry : publisher -> Yojson.Safe.t -> unit
 (** Install successful immutable component values. The complete snapshot becomes
     available after all three components have succeeded. Later component writes
-    retain the others. Publishing prepared Tools does no encoding or I/O.
+    retain the others. Publishing prepared Tools/Telemetry does no encoding or I/O.
     A retired publisher can update only its own cell. *)
 
 val current : unit -> t option
@@ -54,6 +64,7 @@ val current_for_config : Workspace.config -> t option
 val shell_for_config : Workspace.config -> (Yojson.Safe.t * Yojson.Safe.t) option
 val tools_for_config : Workspace.config -> tools_projection option
 val telemetry_for_config : Workspace.config -> Yojson.Safe.t option
+val telemetry_prepared_for_config : Workspace.config -> prepared_json option
 (** Constant-time atomic reads. [current_for_config] also requires the exact
     published base/workspace/MASC-root scope, without filesystem resolution.
     Component readers have the same scope check and become available after
@@ -62,6 +73,9 @@ val telemetry_for_config : Workspace.config -> Yojson.Safe.t option
 val public_activity_events : Workspace.config -> Yojson.Safe.t
 (** Shared public events projection. Every hit revalidates its Public parent
     proof. Invoke on a worker. *)
+
+val public_activity_events_cached_opt : Workspace.config -> Yojson.Safe.t option
+(** Lock-free read of a fresh, proof-valid cached public events projection. *)
 
 val invalidate_public_activity_events : base_path:string -> unit
 (** Drop this workspace's retained public window before source publication. *)

@@ -157,10 +157,13 @@ let install ~state ~sw ~clock ~mono_clock ~on_shell_published =
           | Failed_tools -> if is_current () then raise Tools_read_failed);
       Proactive_refresh.start_on_change_or_deadline ~sw ~clock ~changes:telemetry_changes
         ~config:(worker_config "dashboard telemetry sources" Server_dashboard_http_core_cache.dashboard_request_timeout_s)
-        ~compute:(fun () -> offload (fun () -> (!readers).telemetry ~now:(Eio.Time.now clock) config))
-        ~next_deadline:(fun observation -> observation.Telemetry_unified.next_change_at_unix)
-        ~on_result:(fun observation -> if is_current () then (
-          Dashboard_snapshot.publish_telemetry publisher observation.json;
+        ~compute:(fun () -> offload (fun () ->
+          let observation = (!readers).telemetry ~now:(Eio.Time.now clock) config in
+          let prepared = Dashboard_snapshot.prepare_telemetry publisher observation.json in
+          observation, prepared))
+        ~next_deadline:(fun (observation, _) -> observation.Telemetry_unified.next_change_at_unix)
+        ~on_result:(fun (observation, prepared) -> if is_current () then (
+          Dashboard_snapshot.publish_telemetry_prepared prepared;
           announce `Telemetry;
           if observation.read_failed then raise Telemetry_read_failed)))
 ;;

@@ -36,7 +36,9 @@ let format_canonicalization_error { base_path; cause; backtrace = _ } =
 
 let enter canonical_base_path =
   match Unix.chdir canonical_base_path with
-  | () -> Ok ()
+  | () ->
+    Config_dir_resolver.pin_working_dir canonical_base_path;
+    Ok ()
   | exception Unix.Unix_error (error, _, _) ->
     Error
       (Printf.sprintf "[FATAL] Could not make %S the server working directory: %s"

@@ -32,19 +32,36 @@ let served_metric_names =
   ]
 ;;
 
-let rows metrics name =
-  List.filter
-    (fun (m : Otel_metric_store.metric) -> String.equal m.name name)
-    metrics
+let served_metric_name_set : (string, unit) Hashtbl.t =
+  let tbl = Hashtbl.create 32 in
+  List.iter (fun name -> Hashtbl.replace tbl name ()) served_metric_names;
+  tbl
+;;
+
+let index_metrics (metrics : Otel_metric_store.metric list) =
+  let tbl : (string, Otel_metric_store.metric list) Hashtbl.t = Hashtbl.create 32 in
+  List.iter
+    (fun (m : Otel_metric_store.metric) ->
+       if Hashtbl.mem served_metric_name_set m.name then
+         let prev = Option.value ~default:[] (Hashtbl.find_opt tbl m.name) in
+         Hashtbl.replace tbl m.name (m :: prev))
+    metrics;
+  tbl
+;;
+
+let rows by_name name =
+  match Hashtbl.find_opt by_name name with
+  | Some xs -> xs
+  | None -> []
 ;;
 
 let label (m : Otel_metric_store.metric) key = List.assoc_opt key m.labels
 
-let unlabeled_value metrics name =
+let unlabeled_value by_name name =
   List.find_map
     (fun (m : Otel_metric_store.metric) ->
-       if String.equal m.name name && m.labels = [] then Some m.value else None)
-    metrics
+       if m.labels = [] then Some m.value else None)
+    (rows by_name name)
 ;;
 
 (* Cells absent from the store (a process that never ran the writer) render
@@ -204,7 +221,7 @@ let pool_json metrics =
 ;;
 
 let runtime_observables_http_json () =
-  let metrics = Otel_metric_store.snapshot () in
+  let metrics = index_metrics (Otel_metric_store.snapshot ()) in
   let last_write =
     unlabeled_value
       metrics
@@ -228,4 +245,49 @@ let runtime_observables_http_json () =
     ; "event_bus", event_bus_json metrics
     ; "pool", pool_json metrics
     ]
+;;
+
+type cached_observables_http =
+  { last_write : float option
+  ; built_at : float
+  ; prepared : Server_cached_read_http.prepared_http
+  }
+
+let observables_http_cache_mu = Stdlib.Mutex.create ()
+let observables_http_cache : cached_observables_http option ref = ref None
+let observables_http_cache_ttl_s = 1.0
+
+let runtime_observables_http_prepared () =
+  let last_write =
+    Otel_metric_store.get_metric_value
+      Otel_metric_store.metric_runtime_observables_last_write_unixtime
+      ~labels:[]
+      ()
+  in
+  let now = Unix.gettimeofday () in
+  let hit =
+    Stdlib.Mutex.protect observables_http_cache_mu (fun () ->
+      match !observables_http_cache with
+      | Some cached
+        when Option.equal Float.equal cached.last_write last_write
+             && now -. cached.built_at >= 0.0
+             && now -. cached.built_at < observables_http_cache_ttl_s ->
+        Some cached.prepared
+      | Some _ | None -> None)
+  in
+  match hit with
+  | Some prepared -> prepared
+  | None ->
+    let json = runtime_observables_http_json () in
+    let prepared = Server_cached_read_http.prepare_json json in
+    let built_last_write =
+      Otel_metric_store.get_metric_value
+        Otel_metric_store.metric_runtime_observables_last_write_unixtime
+        ~labels:[]
+        ()
+    in
+    Stdlib.Mutex.protect observables_http_cache_mu (fun () ->
+      observables_http_cache :=
+        Some { last_write = built_last_write; built_at = now; prepared });
+    prepared
 ;;

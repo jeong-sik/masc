@@ -313,5 +313,10 @@ let rec invalidate_initialized_cache () =
   if not (Atomic.compare_and_set initialized_cache prev next) then
     invalidate_initialized_cache ()
 
+let workspace_state_write_gen = Atomic.make 0
+let workspace_state_write_generation () = Atomic.get workspace_state_write_gen
+let note_workspace_state_written () =
+  ignore (Atomic.fetch_and_add workspace_state_write_gen 1)
+
 (* ============================================ *)
 (* Validation helpers                           *)

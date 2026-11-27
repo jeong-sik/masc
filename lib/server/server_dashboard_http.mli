@@ -69,6 +69,11 @@ val board_memory_cache_key :
     in any part have different keys: a part taken from the request is written
     with its length, so it cannot read as the part after it. *)
 
+val dashboard_gate_http_payload :
+  Httpun.Request.t -> base_path:string -> Dashboard_cache.cached_payload
+(** Pre-encoded cached payload variant of {!dashboard_gate_http_json} so HTTP
+    reads reuse prepared zstd/gzip bytes and weak ETags. *)
+
 val dashboard_gate_http_json :
   Httpun.Request.t -> base_path:string -> Yojson.Safe.t
 
@@ -93,6 +98,15 @@ val dashboard_scheduled_automation_query_http_json :
     [active_only=true] answers the active-only list, cached the same way. A
     [payload_target], a [cursor] and an exact [schedule_id] lookup read the
     schedule store without populating a client-controlled cache key. *)
+
+type scheduled_automation_http_response =
+  | Scheduled_automation_payload of Dashboard_cache.cached_payload
+  | Scheduled_automation_json of Yojson.Safe.t
+
+val dashboard_scheduled_automation_query_http_response :
+  config:Workspace.config -> Httpun.Request.t -> scheduled_automation_http_response
+(** Pre-encoded payload variant of {!dashboard_scheduled_automation_query_http_json}
+    for cached list reads so HTTP responses reuse prepared encodings and ETags. *)
 
 val dashboard_gate_resolve_http_json :
   ?workspace_config:Workspace.config ->

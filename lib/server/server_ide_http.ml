@@ -431,6 +431,35 @@ let ide_ask_description { file_path; line; context; _ } =
   | Some where, Some context -> where ^ "\n\n" ^ context
 ;;
 
+let status_http_cache_mu = Stdlib.Mutex.create ()
+let status_http_cache : (string * float, Server_cached_read_http.prepared_http) Hashtbl.t =
+  Hashtbl.create 4
+let status_http_cache_max = 16
+
+let status_http_prepared ~project ~tempo_interval_s =
+  let key = project, tempo_interval_s in
+  match
+    Stdlib.Mutex.protect status_http_cache_mu (fun () ->
+      Hashtbl.find_opt status_http_cache key)
+  with
+  | Some prepared -> prepared
+  | None ->
+    let json =
+      json_ok
+        (`Assoc
+          [ "project", `String project
+          ; "tempo_interval_s", `Float tempo_interval_s
+          ])
+    in
+    let prepared = Server_cached_read_http.prepare_json json in
+    Stdlib.Mutex.protect status_http_cache_mu (fun () ->
+      if Hashtbl.length status_http_cache >= status_http_cache_max
+         && not (Hashtbl.mem status_http_cache key)
+      then Hashtbl.clear status_http_cache;
+      Hashtbl.replace status_http_cache key prepared);
+    prepared
+;;
+
 let add_routes router =
   router
   |> Server_route.get Server_route.Public_read "/api/v1/agents" (fun state request reqd ->
@@ -453,18 +482,14 @@ let add_routes router =
            (json_ok (`Assoc [ "agents", `List entries ]))
            reqd)
   |> Server_route.get Server_route.Public_read "/api/v1/status" (fun state request reqd ->
-         let config = (Mcp_server.workspace_config state) in
+         let config = Mcp_server.workspace_config state in
          let workspace_state = Workspace.read_state config in
          let tempo = Tempo.get_tempo config in
-         let json = `Assoc [
-           "project", `String workspace_state.project;
-           "tempo_interval_s", `Float tempo.current_interval_s;
-         ] in
-         Http.Response.json_value
-           ~compress:true
-           ~request
-           (json_ok json)
-           reqd)
+         let prepared =
+           status_http_prepared ~project:workspace_state.project
+             ~tempo_interval_s:tempo.current_interval_s
+         in
+         Server_cached_read_http.respond_prepared ~request reqd prepared)
   (* Exact before/after content has the same admin gate as file activity. *)
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/ide/repository-activity" (fun state _agent_name request reqd ->
         let uri = Uri.of_string request.target in

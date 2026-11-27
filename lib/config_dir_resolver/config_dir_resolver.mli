@@ -54,7 +54,13 @@ val inputs_from_env : unit -> inputs
 
 val current_working_dir : unit -> string
 (** Current working directory, falling back to an absolute host root when the
-    process cwd has been deleted. *)
+    process cwd has been deleted. Returns the pinned server directory in O(1)
+    without a [getcwd] syscall when {!pin_working_dir} has been called. *)
+
+val pin_working_dir : string -> unit
+(** Pin the process working directory after server startup [chdir] so hot
+    request-path callers avoid repeated [getcwd(3)] syscalls. Cleared by
+    {!reset}. *)
 
 val base_path_or_cwd : unit -> string
 (** [MASC_BASE_PATH] from host config, or {!current_working_dir} when unset. *)

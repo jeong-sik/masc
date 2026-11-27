@@ -245,6 +245,48 @@ let tool_series_http_json ~(config : Workspace.config) request : Yojson.Safe.t =
               series)))
 ;;
 
+let tool_metrics_generation = Atomic.make 0
+let _tool_metrics_sub =
+  Tool_metrics.subscribe_written (fun () -> ignore (Atomic.fetch_and_add tool_metrics_generation 1))
+
+type cached_tool_metrics_http = {
+  generation : int;
+  registered_count : int;
+  etag : string;
+  encoded : Http_response_payload.prepared;
+}
+
+let tool_metrics_http_cache_mu = Stdlib.Mutex.create ()
+let tool_metrics_http_cache : cached_tool_metrics_http option ref = ref None
+
+let tool_metrics_http_entry () =
+  let generation = Atomic.get tool_metrics_generation in
+  let registered_count = Tool_dispatch.registered_count () in
+  match
+    Stdlib.Mutex.protect tool_metrics_http_cache_mu (fun () ->
+      match !tool_metrics_http_cache with
+      | Some entry
+        when entry.generation = generation && entry.registered_count = registered_count ->
+        Some entry
+      | Some _ | None -> None)
+  with
+  | Some entry -> entry
+  | None ->
+    let json =
+      Tool_unified.summary_report
+        ~public_names:Keeper_tool_descriptor_resolution.public_names_for_internal
+        ()
+    in
+    let raw = Yojson.Safe.to_string json in
+    let etag = Http.Response.weak_etag_value raw in
+    let encoded = Http_response_payload.prepare raw in
+    let entry = { generation; registered_count; etag; encoded } in
+    Stdlib.Mutex.protect tool_metrics_http_cache_mu (fun () ->
+      if Atomic.get tool_metrics_generation = generation
+         && Tool_dispatch.registered_count () = registered_count
+      then tool_metrics_http_cache := Some entry);
+    entry
+
 let add_agent_api_routes router =
   router
   (* Agent activity -- per-agent tool call stats from telemetry *)
@@ -269,13 +311,15 @@ let add_agent_api_routes router =
 
   (* Tool metrics -- restart-safe aggregate stats for dashboard *)
   |> Server_route.get Server_route.Public_read "/api/v1/tool-metrics" (fun _state req reqd ->
-         let json =
-           Tool_unified.summary_report
-             ~public_names:
-               Keeper_tool_descriptor_resolution.public_names_for_internal
-             ()
+         let entry = tool_metrics_http_entry () in
+         let body, enc_headers =
+           Http_response_payload.select_prepared
+             ~accept_encoding:(Http_response_payload.accept_encoding_fields
+               (Httpun.Headers.get_multi req.headers "accept-encoding"))
+             entry.encoded
          in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         Http.Response.json_lazy ~compress:false ~request:req ~etag:entry.etag
+           ~extra_headers:enc_headers (fun () -> body) reqd
        )
 
   (* Tool call series -- hourly or daily totals for the Tools page charts *)

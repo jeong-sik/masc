@@ -114,8 +114,43 @@ let read_keeper_toml_content (path : string) =
       }
   | Ok content -> Ok content
 
+type toml_file_stamp =
+  { st_dev : int
+  ; st_ino : int
+  ; st_size : int
+  ; st_mtime : float
+  ; st_ctime : float
+  ; st_perm : int
+  ; st_uid : int
+  ; st_gid : int
+  }
+
+let toml_file_stamp_equal (a : toml_file_stamp) (b : toml_file_stamp) =
+  a.st_dev = b.st_dev
+  && a.st_ino = b.st_ino
+  && a.st_size = b.st_size
+  && Float.equal a.st_mtime b.st_mtime
+  && Float.equal a.st_ctime b.st_ctime
+  && a.st_perm = b.st_perm
+  && a.st_uid = b.st_uid
+  && a.st_gid = b.st_gid
+
+let toml_stat_stamp_opt (path : string) : toml_file_stamp option =
+  match Unix.stat path with
+  | { Unix.st_kind = Unix.S_REG; st_dev; st_ino; st_size; st_mtime; st_ctime; st_perm; st_uid; st_gid; _ } ->
+    Some { st_dev; st_ino; st_size; st_mtime; st_ctime; st_perm; st_uid; st_gid }
+  | { Unix.st_kind =
+        Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK
+    ; _
+    } -> None
+  | exception Unix.Unix_error _ -> None
+
+let toml_stamp_safe_to_cache (stamp : toml_file_stamp) (now : float) =
+  now -. stamp.st_mtime >= 0.05 && now -. stamp.st_ctime >= 0.05
+
 type parsed_toml_cache_entry =
   { content : string
+  ; stamp : toml_file_stamp option
   ; parsed : string * keeper_profile_defaults
   }
 
@@ -124,11 +159,15 @@ let parsed_toml_cache : (string, parsed_toml_cache_entry) Hashtbl.t =
   Hashtbl.create 64
 let parsed_toml_mu = Stdlib.Mutex.create ()
 
-let inspect_keeper_toml_content ~(path : string) content =
+let inspect_keeper_toml_content_with_stamp ?stamp ~(path : string) content =
   let cached =
     Stdlib.Mutex.protect parsed_toml_mu (fun () ->
       match Hashtbl.find_opt parsed_toml_cache path with
       | Some entry when String.equal entry.content content ->
+        (match stamp with
+         | Some _ as next_stamp when entry.stamp <> next_stamp ->
+           Hashtbl.replace parsed_toml_cache path { entry with stamp = next_stamp }
+         | _ -> ());
         Some entry.parsed
       | Some _ | None -> None)
   in
@@ -140,12 +179,47 @@ let inspect_keeper_toml_content ~(path : string) content =
       | Ok parsed ->
         Stdlib.Mutex.protect parsed_toml_mu (fun () ->
           if Hashtbl.length parsed_toml_cache >= parsed_toml_cache_max_entries
+             && not (Hashtbl.mem parsed_toml_cache path)
           then Hashtbl.reset parsed_toml_cache;
-          Hashtbl.replace parsed_toml_cache path { content; parsed });
+          Hashtbl.replace parsed_toml_cache path { content; stamp; parsed });
         Ok parsed))
 
+let inspect_keeper_toml_content ~(path : string) content =
+  inspect_keeper_toml_content_with_stamp ~path content
+
 let inspect_keeper_toml (path : string) =
-  Result.bind (read_keeper_toml_content path) (inspect_keeper_toml_content ~path)
+  let now = Unix.gettimeofday () in
+  let stamp = toml_stat_stamp_opt path in
+  let stat_hit =
+    match stamp with
+    | Some s when toml_stamp_safe_to_cache s now ->
+      Stdlib.Mutex.protect parsed_toml_mu (fun () ->
+        match Hashtbl.find_opt parsed_toml_cache path with
+        | Some entry ->
+          (match entry.stamp with
+           | Some cached_stamp when toml_file_stamp_equal cached_stamp s ->
+             Some entry.parsed
+           | Some _ | None -> None)
+        | None -> None)
+    | Some _ | None -> None
+  in
+  match stat_hit with
+  | Some parsed -> Ok parsed
+  | None ->
+    (match read_keeper_toml_content path with
+     | Error _ as error -> error
+     | Ok content ->
+       let stamp_after = toml_stat_stamp_opt path in
+       let verified_stamp =
+         match stamp, stamp_after with
+         | Some s1, Some s2
+           when toml_stamp_safe_to_cache s1 now
+                && toml_file_stamp_equal s1 s2
+                && toml_stamp_safe_to_cache s2 (Unix.gettimeofday ()) ->
+           Some s2
+         | Some _, Some _ | Some _, None | None, Some _ | None, None -> None
+       in
+       inspect_keeper_toml_content_with_stamp ?stamp:verified_stamp ~path content)
 
 let load_keeper_toml = inspect_keeper_toml
 

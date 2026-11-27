@@ -123,6 +123,9 @@ val mission_http_request : state:Mcp_server.server_state -> Httpun.Request.t -> 
 val dashboard_briefing_for_request :
   sw:Eio.Switch.t -> clock:float Eio.Time.clock_ty Eio.Resource.t ->
   mission_http_request -> Yojson.Safe.t
+val dashboard_briefing_http_prepared :
+  sw:Eio.Switch.t -> clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  mission_http_request -> Server_cached_read_http.prepared_http
 val dashboard_health_line_for_request :
   sw:Eio.Switch.t -> clock:float Eio.Time.clock_ty Eio.Resource.t ->
   mission_http_request -> Yojson.Safe.t
@@ -137,6 +140,27 @@ val dashboard_briefing_sections_http_json :
 (** {1 Shell and Data Helpers} *)
 
 val dashboard_shell_status_json : Workspace.config -> Yojson.Safe.t
+type shell_auth_summary = {
+  enabled : bool;
+  require_token : bool;
+  token_present : bool;
+  token_valid : bool;
+  token_agent : string option;
+  requested_agent : string option;
+  effective_agent : string option;
+  effective_role : string option;
+  auth_error_code : string option;
+  auth_error_detail : string option;
+  effective_admin : bool option;
+  can_keeper_msg : bool;
+  keeper_msg_error : string option;
+}
+
+val equal_shell_auth_summary : shell_auth_summary -> shell_auth_summary -> bool
+val hash_shell_auth_summary : shell_auth_summary -> int
+val dashboard_shell_auth_summary : request:Httpun.Request.t -> Workspace.config -> shell_auth_summary
+val shell_auth_summary_to_json : shell_auth_summary -> Yojson.Safe.t
+val dashboard_shell_auth_json : request:Httpun.Request.t -> Workspace.config -> Yojson.Safe.t
 val dashboard_tasks_safe : Workspace.config -> Masc_domain.task list
 val dashboard_agents_safe : Workspace.config -> Masc_domain.agent list
 val provider_capacity_json : unit -> Yojson.Safe.t

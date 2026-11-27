@@ -616,13 +616,32 @@ let task_json ~goal_task_index task = `Assoc (task_fields ~goal_task_index task)
    does not limit the task set, contracts, or handoff evidence. *)
 let task_description_preview_bytes = 160
 
+let task_description_sha256_mu = Stdlib.Mutex.create ()
+let task_description_sha256_cache : (string, string) Hashtbl.t = Hashtbl.create 1024
+let task_description_sha256_max = 4096
+
+let cached_task_description_sha256 description =
+  match
+    Stdlib.Mutex.protect task_description_sha256_mu (fun () ->
+      Hashtbl.find_opt task_description_sha256_cache description)
+  with
+  | Some digest -> digest
+  | None ->
+    let digest = Agent_core_sha256.(digest_string description |> to_hex) in
+    Stdlib.Mutex.protect task_description_sha256_mu (fun () ->
+      if Hashtbl.length task_description_sha256_cache >= task_description_sha256_max then
+        Hashtbl.clear task_description_sha256_cache;
+      Hashtbl.replace task_description_sha256_cache description digest);
+    digest
+;;
+
 let task_list_json ~goal_task_index (task : Masc_domain.task) =
   if String.length task.description <= task_description_preview_bytes then
     task_json ~goal_task_index task
   else
     let preview = String_util.utf8_prefix
       ~max_bytes:task_description_preview_bytes task.description in
-    let revision = Agent_core_sha256.(digest_string task.description |> to_hex) in
+    let revision = cached_task_description_sha256 task.description in
     `Assoc
       (("detail_level", `String "summary")
        :: ("description_revision", `String revision)

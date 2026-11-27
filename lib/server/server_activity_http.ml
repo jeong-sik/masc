@@ -80,8 +80,14 @@ let events_http_json ~deps ~state request =
   let is_default_query = kinds = [] && after_seq = 0 in
   let snapshot_hit =
     if is_default_query then
-      let events = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-        Dashboard_snapshot.public_activity_events (Mcp_server.workspace_config state)) in
+      let config = Mcp_server.workspace_config state in
+      let events =
+        match Dashboard_snapshot.public_activity_events_cached_opt config with
+        | Some cached -> cached
+        | None ->
+          Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+            Dashboard_snapshot.public_activity_events config)
+      in
       Some (slice_default_events_to_limit events ~limit)
     else None
   in

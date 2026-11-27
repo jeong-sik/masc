@@ -604,19 +604,6 @@ let compare_observation_id (a : observation_id) (b : observation_id) =
     Int.compare (rank a) (rank b)
 ;;
 
-let latest_run runs =
-  List.fold_left
-    (fun latest run ->
-       match latest with
-       | None -> Some run
-       | Some current when run.started_at > current.started_at
-                            || (Float.equal run.started_at current.started_at
-                                && compare_observation_id run.observation_id current.observation_id > 0) -> Some run
-       | Some _ -> latest)
-    None
-    runs
-;;
-
 (* A measured finish orders known completions. For an unmeasured terminal,
    its registration is an ordering anchor only: first observation may occur
    after execution completed. It is not a lower bound or finish timestamp.
@@ -625,96 +612,88 @@ let latest_run runs =
 let terminal_order run terminal = match terminal.elapsed_s with
   | Some elapsed -> run.started_at +. elapsed
   | None -> run.started_at
-let latest_terminal_run terminal_runs =
-  List.fold_left (fun latest ((run,terminal) as candidate) -> match latest with
-    | None -> Some candidate
-    | Some (current,current_terminal)
-        when let order = Float.compare (terminal_order run terminal) (terminal_order current current_terminal) in
-          order > 0 || (order = 0 && compare_observation_id run.observation_id current.observation_id > 0) -> Some candidate
-    | Some _ -> latest) None terminal_runs
-;;
-
-module Slot_map = Map.Make (String)
-
-let slot_counts runs =
-  let counts =
-    List.fold_left
-      (fun acc run ->
-         match run.status with
-         | Running -> acc
-         | Terminal { answered_by = Vendor_system_one | Closed_by_restart | No_slot; _ } -> acc
-         | Terminal { answered_by = Slot slot_id; _ } ->
-           let previous_count =
-             match Slot_map.find_opt slot_id acc with
-             | None -> 0
-             | Some count -> count
-           in
-           Slot_map.add slot_id (1 + previous_count) acc)
-      Slot_map.empty
-      runs
-  in
-  Slot_map.bindings counts
-;;
-
-(* The finished runs [slot_counts] leaves out, by why. With the slot counts
-   they add up to succeeded + failed + cancelled, since all come from one list
-   of terminal runs. *)
-let runs_without_slot_json terminal_runs =
-  let count wanted =
-    List.fold_left
-      (fun count (_, terminal) -> if terminal.answered_by = wanted then count + 1 else count)
-      0
-      terminal_runs
-  in
-  `Assoc
-    [ "vendor_system_one", `Int (count Vendor_system_one)
-    ; "server_restarted", `Int (count Closed_by_restart)
-    ; "no_slot", `Int (count No_slot)
-    ]
 ;;
 
 let lane_json
       ~now:_
       ~resolve_lane
       ~jev_readiness
-      ~exact_runs
-      (all_runs : observed_run list)
+      ~lane_exact_runs
+      (runs : observed_run list)
       (spec : lane_spec)
   =
-  let runs =
-    List.filter
-      (fun (run : observed_run) -> Lane_run_identity.equal run.lane (Standalone_lane.run_identity spec.lane))
-      all_runs
-  in
-  let running_count =
-    List.fold_left (fun count run -> match run.status with Running -> count + 1 | Terminal _ -> count) 0 runs
-  in
-  let terminal_runs =
-    List.filter_map
-      (fun run -> match run.status with Running -> None | Terminal terminal -> Some (run, terminal))
-      runs
-  in
-  let count_kind kind =
-    List.fold_left
-      (fun count (_, terminal) -> if terminal.kind = kind then count + 1 else count)
-      0
-      terminal_runs
-  in
-  let succeeded_count = count_kind Succeeded in
-  let failed_count = count_kind Failed in
-  let cancelled_count = count_kind Cancelled in
-  let elapsed_values =
-    List.filter_map
-      (fun (_, terminal) ->
-         terminal.elapsed_s)
-      terminal_runs
-  in
-  let latest = latest_run runs in
-  let latest_terminal = latest_terminal_run terminal_runs in
+  let running_count = ref 0 in
+  let succeeded_count = ref 0 in
+  let failed_count = ref 0 in
+  let cancelled_count = ref 0 in
+  let vendor_system_one_count = ref 0 in
+  let server_restarted_count = ref 0 in
+  let no_slot_count = ref 0 in
+  let retained_count = ref 0 in
+  let elapsed_values = ref [] in
+  let latest = ref None in
+  let latest_terminal = ref None in
+  let slot_tbl : (string, int) Hashtbl.t = Hashtbl.create 8 in
+  List.iter
+    (fun (run : observed_run) ->
+       incr retained_count;
+       (match !latest with
+        | None -> latest := Some run
+        | Some current
+          when run.started_at > current.started_at
+               || (Float.equal run.started_at current.started_at
+                   && compare_observation_id run.observation_id current.observation_id > 0) ->
+          latest := Some run
+        | Some _ -> ());
+       match run.status with
+       | Running -> incr running_count
+       | Terminal terminal ->
+         (match terminal.kind with
+          | Succeeded -> incr succeeded_count
+          | Failed -> incr failed_count
+          | Cancelled -> incr cancelled_count);
+         (match terminal.elapsed_s with
+          | Some e -> elapsed_values := e :: !elapsed_values
+          | None -> ());
+         (match terminal.answered_by with
+          | Slot slot_id ->
+            let prev = match Hashtbl.find_opt slot_tbl slot_id with Some c -> c | None -> 0 in
+            Hashtbl.replace slot_tbl slot_id (prev + 1)
+          | Vendor_system_one -> incr vendor_system_one_count
+          | Closed_by_restart -> incr server_restarted_count
+          | No_slot -> incr no_slot_count);
+         (match !latest_terminal with
+          | None -> latest_terminal := Some (run, terminal)
+          | Some (current, current_terminal) ->
+            let order =
+              Float.compare
+                (terminal_order run terminal)
+                (terminal_order current current_terminal)
+            in
+            if order > 0
+               || (order = 0
+                   && compare_observation_id run.observation_id current.observation_id > 0)
+            then latest_terminal := Some (run, terminal)))
+    runs;
+  let latest = !latest in
+  let latest_terminal = !latest_terminal in
   let latest_terminal_kind =
     match latest_terminal with
     | None -> None
     | Some (_, terminal) -> Some terminal.kind
+  in
+  let sorted_slot_counts =
+    Hashtbl.fold (fun slot_id count acc -> (slot_id, count) :: acc) slot_tbl []
+    |> List.sort (fun (a, _) (b, _) -> String.compare a b)
+  in
+  let unavailable_runs_count =
+    List.fold_left
+      (fun count (run : Exact_lane_run_registry.run) ->
+         match run.slot_observations with
+         | Some (Error _) -> count + 1
+         | None | Some (Ok _) -> count)
+      0
+      lane_exact_runs
   in
   let lane_id = Standalone_lane.to_id spec.lane in
   let configuration = resolve_lane lane_id in
@@ -741,8 +720,8 @@ let lane_json
        is where a reader learns that: the table beside it draws slot names,
        not the sentence saying why. *)
     | Configured { admission_error = Some _; _ } -> "degraded"
-    | Configured _ when running_count > 0 -> "running"
-    | Configured _ when runs = [] -> "no_retained_observation"
+    | Configured _ when !running_count > 0 -> "running"
+    | Configured _ when !retained_count = 0 -> "no_retained_observation"
     | Configured _ ->
       (match latest_terminal_kind with
        | Some Failed -> "degraded"
@@ -784,36 +763,69 @@ let lane_json
         ~current_http:(match configuration with Configured configured -> configured.bindings
           | Disabled _ | Unconfigured _ | Registry_unavailable _ -> [])
         ~declared_http:declared_slots ~declared_cli:declared_cli_slots
-        ~runs:(List.filter (fun (run:Exact_lane_run_registry.run) ->
-          Exact_lane_run_registry.lane_id run.lane=lane_id) exact_runs)
-    ; "slot_observation_unavailable_runs", `Int (List.fold_left
-        (fun count (run:Exact_lane_run_registry.run) ->
-          if Exact_lane_run_registry.lane_id run.lane=lane_id then
-            match run.slot_observations with Some (Error _) -> count+1
-              | None | Some (Ok _) -> count
-          else count) 0 exact_runs)
+        ~runs:lane_exact_runs
+    ; "slot_observation_unavailable_runs", `Int unavailable_runs_count
     ; "status", `String status
-    ; "retained_run_count", `Int (List.length runs)
-    ; "running_count", `Int running_count
-    ; "succeeded_count", `Int succeeded_count
-    ; "failed_count", `Int failed_count
-    ; "cancelled_count", `Int cancelled_count
+    ; "retained_run_count", `Int !retained_count
+    ; "running_count", `Int !running_count
+    ; "succeeded_count", `Int !succeeded_count
+    ; "failed_count", `Int !failed_count
+    ; "cancelled_count", `Int !cancelled_count
     ; "last_started_at", json_float_opt last_started_at
     ; "last_terminal_at", json_float_opt last_terminal_at
     ; ( "last_outcome"
       , match latest_terminal_kind with
         | None -> `Null
         | Some kind -> `String (terminal_kind_to_string kind) )
-    ; "p50_elapsed_s", json_float_opt (p50 elapsed_values)
+    ; "p50_elapsed_s", json_float_opt (p50 !elapsed_values)
     ; ( "selected_slots"
       , `List
           (List.map
              (fun (slot_id, count) ->
                 `Assoc [ "slot_id", `String slot_id; "count", `Int count ])
-             (slot_counts runs)) )
-    ; "runs_without_slot", runs_without_slot_json terminal_runs
+             sorted_slot_counts) )
+    ; ( "runs_without_slot"
+      , `Assoc
+          [ "vendor_system_one", `Int !vendor_system_one_count
+          ; "server_restarted", `Int !server_restarted_count
+          ; "no_slot", `Int !no_slot_count
+          ] )
     ]
      @ jev_field)
+;;
+
+let group_exact_runs_by_lane_id (exact_runs : Exact_lane_run_registry.run list) =
+  let tbl : (string, Exact_lane_run_registry.run list) Hashtbl.t = Hashtbl.create 16 in
+  List.iter
+    (fun (run : Exact_lane_run_registry.run) ->
+       let id = Exact_lane_run_registry.lane_id run.lane in
+       let prev = match Hashtbl.find_opt tbl id with Some l -> l | None -> [] in
+       Hashtbl.replace tbl id (run :: prev))
+    exact_runs;
+  Hashtbl.filter_map_inplace (fun _ l -> Some (List.rev l)) tbl;
+  tbl
+;;
+
+let group_exact_runs_by_obs_lane_key (exact_runs : Exact_lane_run_registry.run list) =
+  let tbl : (string, Exact_lane_run_registry.run list) Hashtbl.t = Hashtbl.create 16 in
+  List.iter
+    (fun (run : Exact_lane_run_registry.run) ->
+       match run.slot_observations with
+       | None | Some (Error _) -> ()
+       | Some (Ok observations) ->
+         let seen = Hashtbl.create 4 in
+         List.iter
+           (fun (obs : Exact_lane_slot_observation.t) ->
+              match obs.lane_key with
+              | Some key when not (Hashtbl.mem seen key) ->
+                Hashtbl.add seen key ();
+                let prev = match Hashtbl.find_opt tbl key with Some l -> l | None -> [] in
+                Hashtbl.replace tbl key (run :: prev)
+              | Some _ | None -> ())
+           observations)
+    exact_runs;
+  Hashtbl.filter_map_inplace (fun _ l -> Some (List.rev l)) tbl;
+  tbl
 ;;
 
 let snapshot_json_with
@@ -824,11 +836,22 @@ let snapshot_json_with
       ~verification_runs
       ~goal_verification_runs
   =
-  let all_runs =
-    List.map observed_exact_run exact_runs
-    @ List.map observed_verification_run verification_runs
-    @ List.map observed_goal_verification_run goal_verification_runs
+  let exact_by_lane_id = group_exact_runs_by_lane_id exact_runs in
+  let observed_by_lane : (Lane_run_identity.t, observed_run list) Hashtbl.t =
+    Hashtbl.create 16
   in
+  let add_observed (run : observed_run) =
+    let prev =
+      match Hashtbl.find_opt observed_by_lane run.lane with
+      | Some l -> l
+      | None -> []
+    in
+    Hashtbl.replace observed_by_lane run.lane (run :: prev)
+  in
+  List.iter (fun r -> add_observed (observed_exact_run r)) exact_runs;
+  List.iter (fun r -> add_observed (observed_verification_run r)) verification_runs;
+  List.iter (fun r -> add_observed (observed_goal_verification_run r)) goal_verification_runs;
+  Hashtbl.filter_map_inplace (fun _ l -> Some (List.rev l)) observed_by_lane;
   `Assoc
     [ "schema", `String "masc.standalone_llm_lanes.v2"
     ; "generated_at", `String (Masc_domain.now_iso ())
@@ -837,7 +860,17 @@ let snapshot_json_with
     ; ( "lanes"
       , `List
           (List.map
-             (lane_json ~now ~resolve_lane ~jev_readiness ~exact_runs all_runs)
+             (fun (spec : lane_spec) ->
+                let lane_id = Standalone_lane.to_id spec.lane in
+                let lane_exact_runs =
+                  Option.value ~default:[] (Hashtbl.find_opt exact_by_lane_id lane_id)
+                in
+                let lane_observed =
+                  Option.value
+                    ~default:[]
+                    (Hashtbl.find_opt observed_by_lane (Standalone_lane.run_identity spec.lane))
+                in
+                lane_json ~now ~resolve_lane ~jev_readiness ~lane_exact_runs lane_observed spec)
              lane_specs) )
     ]
 ;;
@@ -960,6 +993,7 @@ type observation = {
   addon_lanes : Runtime_schema.addon_lane list;
   jev_readiness : Typesafeai_config.readiness;
   exact_runs : Exact_lane_run_registry.run list;
+  exact_runs_by_obs_lane_key : (string, Exact_lane_run_registry.run list) Hashtbl.t;
   verification_runs : Verification_run_registry.run list;
   goal_verification_runs : Goal_verification_run_registry.run list;
 }
@@ -994,8 +1028,10 @@ let observe () =
   let exact_runs =
     Exact_lane_run_registry.list_runs (Exact_lane_run_registry.global ())
   in
+  let exact_runs_by_obs_lane_key = group_exact_runs_by_obs_lane_key exact_runs in
   { now=Time_compat.now (); resolve_lane; resolve_addon; addon_lanes;
     jev_readiness=Typesafeai_config.readiness (); exact_runs;
+    exact_runs_by_obs_lane_key;
     verification_runs=Verification_run_registry.list_runs (Verification_run_registry.global ());
     goal_verification_runs=retained_goal_reviews () }
 ;;
@@ -1010,8 +1046,13 @@ let slot_states observation owner =
     | Configured c -> c.bindings,c.declared_slots,c.declared_cli_slots
     | Disabled c -> [],c.declared_slots,c.declared_cli_slots
     | Unconfigured _ | Registry_unavailable _ -> [],[],[] in
+  let lane_key = Runtime_schema.exact_lane_key owner in
+  let runs =
+    Option.value ~default:[]
+      (Hashtbl.find_opt observation.exact_runs_by_obs_lane_key lane_key)
+  in
   Server_exact_slot_projection.slots_json ~owner ~current_http ~declared_http ~declared_cli
-    ~runs:observation.exact_runs
+    ~runs
 let slot_observation_unavailable_run_count observation =
   List.fold_left (fun count (run:Exact_lane_run_registry.run) ->
     match run.slot_observations with Some (Error _) -> count+1

@@ -36,6 +36,13 @@ val window_of_days : int -> window option
 
 val days_of_window : window -> int
 
+val write_generation : unit -> int
+(** Monotonic counter bumped whenever the installed record observer appends a
+    provider usage report, allowing HTTP read caches to invalidate immediately. *)
+
+val has_failure_in_window : now:float -> window:window -> bool
+(** [true] when a report failed to persist within [window] ending at [now]. *)
+
 val read :
   Workspace.config -> now:float -> window:window -> (Yojson.Safe.t, string) result
 (** Return the latest report on each UTC day, per scope and reported window.

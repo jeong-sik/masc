@@ -216,7 +216,9 @@ let seed_state_if_missing config =
               (workspace_state_to_yojson (Workspace_bootstrap.default_workspace_state config))
           with
           | Error detail -> raise (Initialization_failed (State_seed_failed detail))
-          | Ok { mirror_error } -> `Seeded mirror_error)
+          | Ok { mirror_error } ->
+            note_workspace_state_written ();
+            `Seeded mirror_error)
     with
     | Ok outcome -> outcome
     | Error refusal ->

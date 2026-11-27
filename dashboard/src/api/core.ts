@@ -334,14 +334,16 @@ async function credentialedFetch(path: string, init: CredentialedRequestInit): P
   }
   const response = await fetch(path, requestInit)
   if (requestInit.signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
-  // Kept before the caller sees the 401, so a request that starts after it is
-  // answered from the table instead of sending the same request again.
+  //HIGH-RISK-UNREVIEWED: auth refusal path; when a credentialless 401 is kept moved off the caller's path.
+  // The refusal is kept from a copy of the body while the caller already has
+  // the 401 from its headers: a body that is slow or never ends must not hold
+  // the refusal back from the screen. A request that starts after the body has
+  // arrived is answered from the table; one that starts sooner is sent again
+  // and gets the same 401.
   if (credentialless !== null && response.status === 401) {
-    try {
-      await noteRefusal(credentialless, response.clone(), requestInit.signal ?? undefined)
-    } catch (err) {
+    void noteRefusal(credentialless, response.clone(), requestInit.signal ?? undefined).catch(err => {
       if (!isAbortError(err)) console.warn('[dashboard-auth] credentialless refusal was not kept', err)
-    }
+    })
   }
   if (requestInit.signal?.aborted) throw new DOMException('Request cancelled', 'AbortError')
   if (reportCredentialRefusal) void reportRejectedCredential(requestInit, response, owner, managed, managedRevision).catch(err => {

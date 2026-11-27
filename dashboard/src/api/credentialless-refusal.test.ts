@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { clearStoredToken, get, setStoredToken } from './core'
+import { clearStoredToken, get, getWithResponse, setStoredToken } from './core'
 import { ensureDevToken } from './dev-token'
 import { credentiallessRequest, noteRefusal, replayedRefusal } from './credentialless-refusal'
 
@@ -7,6 +7,23 @@ const missingToken = () => new Response(
   '{"error":"Authentication required","auth_error_code":"missing_token"}',
   { status: 401, headers: { 'Content-Type': 'application/json' } },
 )
+
+/** A missing_token refusal whose body arrives only when [arrive] is called. */
+function slowMissingToken(): { response: Response, arrive: () => void } {
+  let arrive!: () => void
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      arrive = () => {
+        controller.enqueue(new TextEncoder().encode('{"error":"Authentication required","auth_error_code":"missing_token"}'))
+        controller.close()
+      }
+    },
+  })
+  return {
+    response: new Response(body, { status: 401, headers: { 'Content-Type': 'application/json' } }),
+    arrive: () => arrive(),
+  }
+}
 
 const ok = () => new Response('{"status":"ok"}', {
   status: 200,
@@ -39,6 +56,43 @@ describe('a request without a credential that the server refused', () => {
     finish('{"auth_error_code":"missing_token"}')
     await pending
     expect(replayedRefusal(request)).toBeNull()
+  })
+
+  it('reaches a consumer that refuses at the headers while the 401 body never ends', async () => {
+    const neverEnds = new Response(new ReadableStream<Uint8Array>(), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    })
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(neverEnds))
+    const refused = new Error('refused at the headers')
+
+    await expect(getWithResponse('/api/v1/dashboard/header-first-refusal', {
+      reportCredentialRefusal: false,
+      beforeResponseBody: response => { if (response.status === 401) throw refused },
+    })).rejects.toBe(refused)
+  })
+
+  it('is kept once its body has arrived, and a request that starts sooner is sent', async () => {
+    const arrivals: Array<() => void> = []
+    const fetchMock = vi.fn().mockImplementation(async () => {
+      const { response, arrive } = slowMissingToken()
+      arrivals.push(arrive)
+      return response
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const path = '/api/v1/dashboard/slow-refusal-body'
+
+    const first = get(path)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    const second = get(path)
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    arrivals.forEach(arrive => arrive())
+    await expect(first).rejects.toMatchObject({ status: 401, authErrorCode: 'missing_token' })
+    await expect(second).rejects.toMatchObject({ status: 401, authErrorCode: 'missing_token' })
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    await expect(get(path)).rejects.toMatchObject({ status: 401, authErrorCode: 'missing_token' })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('is answered with the same refusal without being sent again', async () => {

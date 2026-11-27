@@ -496,6 +496,105 @@ let test_get_messages_matching_limit_bounds_matches () =
       [ "mine 8"; "mine 7"; "mine 6" ]
       (List.map (fun (m : Masc_domain.message) -> m.content) matched))
 
+let test_get_messages_raw_large_directory_metered_yields_and_order () =
+  with_test_env (fun config ->
+    let template =
+      match
+        Workspace.broadcast
+          ~audience:Workspace_broadcast.System_record
+          config
+          ~from_agent:"claude"
+          ~content:"seed"
+      with
+      | Error error ->
+        Alcotest.failf
+          "seed broadcast failed: %s"
+          (Workspace_broadcast.broadcast_error_to_string error)
+      | Ok _ ->
+        (match Workspace.get_messages_raw config ~since_seq:0 ~limit:1 with
+         | [ msg ] -> msg
+         | rows -> Alcotest.failf "expected 1 seed message, got %d" (List.length rows))
+    in
+    let msgs_dir = Workspace_utils.messages_dir config in
+    let write_stub seq =
+      let path =
+        Filename.concat msgs_dir (Printf.sprintf "%09d_claude_stub.json" seq)
+      in
+      Out_channel.with_open_bin path (fun ch -> output_string ch "{}")
+    in
+    let write_msg seq content =
+      let path =
+        Filename.concat msgs_dir (Printf.sprintf "%09d_claude_broadcast.json" seq)
+      in
+      let msg =
+        { template with
+          seq
+        ; content
+        ; request_id = Printf.sprintf "req-%09d" seq
+        }
+      in
+      Workspace_utils.write_json config path (Masc_domain.message_to_yojson msg)
+    in
+    for seq = 2 to 2480 do
+      write_stub seq
+    done;
+    Out_channel.with_open_bin
+      (Filename.concat msgs_dir "ignored_non_numeric.json")
+      (fun ch -> output_string ch "{}");
+    for seq = 2481 to 2500 do
+      write_msg seq (Printf.sprintf "msg-%d" seq)
+    done;
+    Alcotest.(check int)
+      "limit=0 returns empty immediately"
+      0
+      (List.length (Workspace.get_messages_raw config ~since_seq:0 ~limit:0));
+    let top20 = Workspace.get_messages_raw config ~since_seq:0 ~limit:20 in
+    Alcotest.(check (list int))
+      "newest 20 messages selected in descending seq order"
+      (List.init 20 (fun idx -> 2500 - idx))
+      (List.map (fun (m : Masc_domain.message) -> m.seq) top20);
+    let since2495 = Workspace.get_messages_raw config ~since_seq:2495 ~limit:20 in
+    Alcotest.(check (list int))
+      "since_seq filters older messages"
+      [ 2500; 2499; 2498; 2497; 2496 ]
+      (List.map (fun (m : Masc_domain.message) -> m.seq) since2495);
+    Alcotest.(check (list int))
+      "limit=1 returns the single newest message"
+      [ 2500 ]
+      (List.map
+         (fun (m : Masc_domain.message) -> m.seq)
+         (Workspace.get_messages_raw config ~since_seq:0 ~limit:1));
+    (* Measure metered yielding in [select_recent_message_names] alone by using
+       [since_seq:2500], which scans all 2501 directory filenames and stops
+       without opening a message file via [Fs_compat.load_file] (whose
+       systhread suspension would let a busy-yielding rival spin). *)
+    let done_flag = Atomic.make false in
+    let rival_ticks = ref 0 in
+    let empty_ref = ref [] in
+    Eio.Fiber.both
+      (fun () ->
+         Fun.protect
+           ~finally:(fun () -> Atomic.set done_flag true)
+           (fun () ->
+              empty_ref := Workspace.get_messages_raw config ~since_seq:2500 ~limit:1))
+      (fun () ->
+         while not (Atomic.get done_flag) do
+           incr rival_ticks;
+           Eio.Fiber.yield ()
+         done);
+    Alcotest.(check int)
+      "since_seq at head returns empty without reading files"
+      0
+      (List.length !empty_ref);
+    Alcotest.(check bool)
+      "metered yield still cooperates on 2500-file scan"
+      true
+      (!rival_ticks >= 2);
+    Alcotest.(check bool)
+      "metered yield avoids per-file yield storm"
+      true
+      (!rival_ticks <= 20))
+
 let () =
   Alcotest.run "Workspace raw message regression" [
     ("messages_raw", [
@@ -523,5 +622,7 @@ let () =
         test_get_messages_matching_counts_matches_not_reads;
       Alcotest.test_case "filtered read bounds matches by limit" `Quick
         test_get_messages_matching_limit_bounds_matches;
+      Alcotest.test_case "large directory metered yields and order" `Quick
+        test_get_messages_raw_large_directory_metered_yields_and_order;
     ]);
   ]

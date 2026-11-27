@@ -189,6 +189,7 @@ let status_summary_string
       (fun item ->
         Printf.bprintf buf "  - %s\n" item)
       attention_items);
+  let yield_meter = Eio_guard.create_yield_meter () in
   Buffer.add_string buf "Players:\n";
   (match shown_agents with
   | [] ->
@@ -203,7 +204,7 @@ let status_summary_string
       in
       List.iter
         (fun (agent : Masc_domain.agent) ->
-          Eio_guard.fair_yield ();
+          Eio_guard.yield_step yield_meter;
           let icon = agent_status_icon agent.status in
           let active_assigned_task_ids =
             active_assigned_task_ids_for_agent agent.name
@@ -223,7 +224,7 @@ let status_summary_string
   Buffer.add_string buf "\nQuest Board:\n";
   List.iter
     (fun (task : Masc_domain.task) ->
-      Eio_guard.fair_yield ();
+      Eio_guard.yield_step yield_meter;
       let status_icon, status_label = task_status_badge task.task_status in
       let assignee = task_assignee task.task_status in
       let goal_ids =

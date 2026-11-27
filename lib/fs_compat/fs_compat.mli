@@ -1474,6 +1474,12 @@ module Private_jsonl_cursor : sig
   (** Opaque observation identity, including the file identity and end offset.
       Comparing fingerprints grants no write or retirement authority; mutations
       still require the original snapshot through the guarded transaction. *)
+
+  val matches_regular_stats : t -> Unix.stats -> bool
+  (** [matches_regular_stats cursor st] is [true] iff [cursor] describes a
+      present regular file whose device, inode, and byte length match [st],
+      and [st] is a uniquely linked regular file ([st_kind = S_REG],
+      [st_nlink = 1]). Always [false] for a missing cursor. *)
 end
 
 type private_jsonl_snapshot =
@@ -1852,6 +1858,7 @@ val is_lock_name : string -> bool
     [<path><lock_suffix>]. It is created with mode [0600] and must never be
     renamed or removed while the store may be in use. *)
 val private_jsonl_lock_path : string -> string
+val private_jsonl_stable_lock_ready_size : int
 
 type private_jsonl_stale_lock_cleanup =
   | Private_jsonl_stale_lock_removed

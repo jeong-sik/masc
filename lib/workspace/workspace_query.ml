@@ -237,12 +237,10 @@ let is_filesystem_backend config =
 let load_agents_from_dir config dir ~include_inactive =
   let use_cache = is_filesystem_backend config in
   let now = if use_cache then Time_compat.now () else 0.0 in
-  let idx = ref 0 in
+  let yield_meter = Eio_guard.create_yield_meter ~interval:16 () in
   list_leaf_json_names config dir
   |> List.filter_map (fun name ->
-         let cur = !idx in
-         idx := cur + 1;
-         if cur > 0 && cur land 63 = 0 then Eio_guard.fair_yield ();
+         Eio_guard.yield_step yield_meter;
          let path = Filename.concat dir name in
          let cached_agent =
            if not use_cache then None
@@ -541,13 +539,11 @@ let select_recent_message_names ~since_seq ~limit names =
         else
           insert_and_trim (existing :: prefix) (remaining_slots - 1) (seq, name) rest
     in
-    let idx = ref 0 in
+    let yield_meter = Eio_guard.create_yield_meter () in
     let top =
       List.fold_left
         (fun acc name ->
-          let cur = !idx in
-          idx := cur + 1;
-          if cur > 0 && cur land 255 = 0 then Eio_guard.fair_yield ();
+          Eio_guard.yield_step yield_meter;
           match message_seq_of_filename name with
           | None -> acc
           | Some seq when seq <= since_seq -> acc
@@ -652,28 +648,29 @@ let collect_recent_messages config ~msgs_path ~since_seq ~limit ~scan ~warn_labe
            Ok msg
          | Error _ as err -> err)
     in
-    let rec loop step remaining acc = function
+    let yield_meter = Eio_guard.create_yield_meter ~interval:16 () in
+    let rec loop remaining acc = function
       | _ when remaining <= 0 -> List.rev acc
       | [] -> List.rev acc
       | name :: rest ->
-          if step > 0 && step land 63 = 0 then Eio_guard.fair_yield ();
+          Eio_guard.yield_step yield_meter;
           match message_seq_of_filename name with
           | Some seq when seq <= since_seq -> List.rev acc
-          | None -> loop (step + 1) remaining acc rest
+          | None -> loop remaining acc rest
           | Some _ ->
             let path = Filename.concat msgs_path name in
             match read_cached_message path with
             | Ok msg when msg.seq > since_seq && keep msg ->
-                loop (step + 1) (remaining - 1) (msg :: acc) rest
-            | Ok _ | Error _ -> loop (step + 1) remaining acc rest
+                loop (remaining - 1) (msg :: acc) rest
+            | Ok _ | Error _ -> loop remaining acc rest
             | exception (Eio.Cancel.Cancelled _ as e) -> raise e
             | exception e ->
                 Log.legacy_traceln ~level:Log.Warn ~module_name:"Workspace"
                   (Printf.sprintf "[WARN] Failed to read %s %s: %s" warn_label
                      name (Printexc.to_string e));
-                loop (step + 1) remaining acc rest
+                loop remaining acc rest
     in
-    loop 0 limit [] names
+    loop limit [] names
 
 (** Get raw message list (for dashboard).
     Returns [[]] when MASC is not initialized. *)
@@ -713,10 +710,11 @@ let get_all_messages_raw config ~since_seq =
         |> List.filter is_valid_filename
         |> select_all_message_names ~since_seq
       in
+      let yield_meter = Eio_guard.create_yield_meter ~interval:16 () in
       let rec loop acc = function
         | [] -> List.rev acc
         | name :: rest ->
-            Eio_guard.fair_yield ();
+            Eio_guard.yield_step yield_meter;
             let path = Filename.concat msgs_path name in
             match read_json config path with
             | json ->

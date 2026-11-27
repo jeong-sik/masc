@@ -324,32 +324,46 @@ let test_download_preserves_original_bytes () =
         Alcotest.(check string) "original bytes" expected (Base64.decode_exn encoded))
       [text;pdf])
 
-(* A stored body is named by a content address. The refusal of an export says
-   which of three things is wrong: the record disagrees with the bytes the
-   address holds, the bytes no longer match their address, or the address
-   names nothing. An unreadable item and an index naming no item refuse
-   too. *)
-let stored_body_reference ~bytes reference =
+(* A stored body is named by a content address. The store answers by the
+   address alone, whatever file name the record shows. With one body stored and
+   served under an agreeing record, the refusals that differ from it only in
+   the recorded size or in the address name their own cause. An unreadable item
+   and an index naming no item refuse too. *)
+let stored_text = "a body this test stores"
+let absent_text = "a body no test stores"
+
+let body_item ~text ?(recorded_bytes = String.length text) reference =
   match
-    Tool_output.make_artifact_ref ~sha256:(sha256_of "a body no test writes")
-      ~bytes ~preview:"" ~mime:"text/plain"
+    Tool_output.make_artifact_ref ~sha256:(sha256_of text)
+      ~bytes:recorded_bytes ~preview:"" ~mime:"text/plain"
   with
   | Ok blob -> Store.Evidence_artifact_body { reference; blob }
   | Error error -> Alcotest.fail (Tool_output.make_error_to_string error)
 
 let test_download_refuses_missing_or_partial_items () =
   with_base_path (fun base_path ->
-    let size = String.length "a body no test writes" in
+    ignore
+      (Tool_blob_store.put_durable (Tool_blob_store.create ~base_path)
+         ~bytes:stored_text ~mime:"text/plain");
     let refusal items index =
       match Operator.file_to_yojson ~base_path ~index (access items) with
       | Error detail -> detail
       | Ok _ -> Alcotest.fail "incomplete evidence became a complete file" in
+    (match
+       Operator.file_to_yojson ~base_path ~index:0
+         (access [ body_item ~text:stored_text "artifact:report.txt" ])
+     with
+     | Ok _ -> ()
+     | Error detail -> Alcotest.fail ("the agreeing record was refused: " ^ detail));
     Alcotest.(check string) "a record that disagrees with the stored bytes"
       "The stored text does not match its recorded size or SHA-256"
-      (refusal [ stored_body_reference ~bytes:(size + 1) "artifact:report.txt" ] 0);
+      (refusal
+         [ body_item ~text:stored_text
+             ~recorded_bytes:(String.length stored_text + 1) "artifact:report.txt" ]
+         0);
     Alcotest.(check string) "an address that names nothing in the store"
       "The stored text is no longer in the blob store"
-      (refusal [ stored_body_reference ~bytes:size "artifact:gone.txt" ] 0);
+      (refusal [ body_item ~text:absent_text "artifact:gone.txt" ] 0);
     Alcotest.(check string) "an unreadable item keeps its own refusal"
       "No readable file snapshot was retained"
       (refusal
@@ -365,7 +379,7 @@ let test_download_refuses_missing_or_partial_items () =
 
 (* A text too large for the record was stored whole in the blob store. The
    operator download serves the stored bytes while they match the record, and
-   refuses them once the record or the bytes change. *)
+   refuses them once the stored bytes change. *)
 let test_download_serves_a_stored_body_whole () =
   with_base_path (fun base_path ->
     let text = String.concat "\n" (List.init 3000 (fun n -> Printf.sprintf "line %04d of a long report" n)) in
@@ -382,19 +396,6 @@ let test_download_serves_a_stored_body_whole () =
          (Base64.decode_exn (result |> member "body_base64" |> to_string));
        Alcotest.(check string) "under its recorded digest" blob.Tool_output.sha256
          (result |> member "sha256" |> to_string));
-    (* The same bytes recorded one byte longer no longer match. *)
-    let other =
-      match
-        Tool_output.make_artifact_ref ~sha256:blob.Tool_output.sha256
-          ~bytes:(blob.Tool_output.bytes + 1) ~preview:"" ~mime:"text/plain"
-      with
-      | Ok other -> other
-      | Error error -> Alcotest.fail (Tool_output.make_error_to_string error) in
-    (match serve other with
-     | Error detail ->
-       Alcotest.(check string) "a record that disagrees with the bytes is refused by name"
-         "The stored text does not match its recorded size or SHA-256" detail
-     | Ok _ -> Alcotest.fail "a body that disagrees with its record was served");
     (* Bytes that no longer match their address are refused by the store
        itself, before the record is consulted. *)
     let blob_path =

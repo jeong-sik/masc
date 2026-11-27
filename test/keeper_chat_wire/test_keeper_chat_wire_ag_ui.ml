@@ -79,6 +79,10 @@ let cases : (string * Ag_ui.event) list =
         Run_error )
   ; ( "agui.ml:124 prime run_started",
       make_event ~timestamp ~thread_id:default_thread_id ~run_id:(Some "session-1") Run_started )
+  ; ( "agui.ml:10 MASC_EVENT",
+      of_custom ~timestamp ~name:"MASC_EVENT" (`Assoc [ "type", `String "task_updated" ]) )
+  ; ( "a whole-second timestamp",
+      make_event ~timestamp:13.0 ~thread_id:thread ~run_id:(Some run) Run_finished )
   ]
 
 (* JSON values with object keys compared as a set. *)

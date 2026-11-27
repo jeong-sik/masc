@@ -1,8 +1,9 @@
 (* The Keeper chat wire that native clients read (RFC-native-keeper-chat-clients).
 
    This file covers the AG-UI frames that POST /api/v1/keepers/chat/stream
-   sends. Each frame kind carries only the fields that kind has on the wire,
-   so a TEXT_MESSAGE_CONTENT without delta cannot be decoded or built.
+   and GET /ag-ui/events send. Each frame kind carries only the fields that
+   kind has on the wire, so a TEXT_MESSAGE_CONTENT without delta cannot be
+   decoded or built.
 
    JSON shape: a frame is one flat object whose "type" names the kind
    (Atdgen_runtime.Json_adapter.Type_field). Field names are the wire names.
@@ -59,7 +60,8 @@ type text_message_start = {
 
 (* textStreamScope and textResponse never come together: a delta whose
    response is observed carries textResponse, any other carries at most
-   textStreamScope. *)
+   textStreamScope. The reader accepts both. The server writes at most one
+   because Ag_ui.text_response is one of the two. *)
 type text_message_content = {
   inherit frame_base;
   ?run_id <json name="runId"> : string option;
@@ -91,13 +93,15 @@ type tool_call_start = {
 }
 
 (* An arguments frame carries a delta or a snapshot of the arguments so
-   far, never both. *)
+   far, never both. The snapshot is the arguments text, sent as a JSON
+   string. The reader accepts both or neither. The server writes one because
+   Keeper_chat_events keeps Tool_call_args and Tool_call_args_snapshot apart. *)
 type tool_call_args = {
   inherit frame_base;
   inherit tool_occurrence;
   ?run_id <json name="runId"> : string option;
   ?delta : string option;
-  ?snapshot : json option;
+  ?snapshot : string option;
 }
 
 type tool_call_end = {
@@ -106,6 +110,8 @@ type tool_call_end = {
   ?run_id <json name="runId"> : string option;
 }
 
+(* MASC_EVENT is the one name of the /ag-ui/events stream; the rest are the
+   Keeper chat stream's. *)
 type custom_name = [
   | Keeper_chat_operation_accepted <json name="KEEPER_CHAT_OPERATION_ACCEPTED">
   | Keeper_connected <json name="KEEPER_CONNECTED">
@@ -136,6 +142,7 @@ type custom_name = [
   | Keeper_native_tool_start <json name="KEEPER_NATIVE_TOOL_START">
   | Keeper_native_tool_end <json name="KEEPER_NATIVE_TOOL_END">
   | Keeper_native_tool_progress <json name="KEEPER_NATIVE_TOOL_PROGRESS">
+  | Masc_event <json name="MASC_EVENT">
 ] <ocaml repr="classic"> <native open>
 
 (* The value's shape depends on the name; typed values come with the

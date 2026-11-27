@@ -490,8 +490,9 @@ let test_binding_store_failure_does_not_enqueue () =
     with_temp_base (fun () ->
     let binding_path =
       Filename.concat
-        (Env_config_core.base_path ())
-        ".gate/runtime/slack/bindings.json"
+        (Common.connector_state_dir_of_base
+           ~base_path:(Env_config_core.base_path ()) Common.Connector_slack)
+        Common.connector_bindings_filename
     in
     Fs_compat.mkdir_p (Filename.dirname binding_path);
     let out = open_out_bin binding_path in

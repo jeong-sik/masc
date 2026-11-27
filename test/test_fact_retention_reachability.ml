@@ -40,7 +40,9 @@ let keeper_name = "fact-retention-keeper"
 let discord_channel_id = "1234567890"
 
 let write_discord_binding ~base_dir =
-  let dir = Filename.concat base_dir ".gate/runtime/discord" in
+  let dir =
+    Common.connector_state_dir_of_base ~base_path:base_dir Common.Connector_discord
+  in
   let rec mkdir_p d =
     if d = "" || d = "." || d = "/" || Sys.file_exists d then ()
     else begin
@@ -49,7 +51,7 @@ let write_discord_binding ~base_dir =
     end
   in
   mkdir_p dir;
-  let oc = open_out (Filename.concat dir "bindings.json") in
+  let oc = open_out (Filename.concat dir Common.connector_bindings_filename) in
   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
     output_string oc
       (Yojson.Safe.to_string

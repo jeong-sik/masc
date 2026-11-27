@@ -240,6 +240,28 @@ describe('PostAttachments', () => {
     expect(document.querySelector('img')).toBeNull()
   })
 
+  it('previews an audio artifact as an audio element with controls', async () => {
+    stubObjectUrls('blob:artifact-audio')
+    vi.mocked(fetchToolBlobBytes).mockResolvedValue(new ArrayBuffer(3))
+    renderArtifact('audio')
+    const audio = await screen.findByTestId('board-attachment-artifact-audio')
+    expect(audio.tagName).toBe('AUDIO')
+    expect(audio).toHaveAttribute('src', 'blob:artifact-audio')
+    expect(audio).toHaveAttribute('controls')
+    expect(screen.getByTestId('board-attachment-artifact-download'))
+      .toHaveAttribute('href', 'blob:artifact-audio')
+  })
+
+  it('shows an audio url attachment as a player', () => {
+    render(h(PostAttachments, { attachments: [{
+      ok: true,
+      attachment: { kind: 'audio', source: { kind: 'url', url: 'https://example.com/a.wav', name: 'a.wav' } },
+    }] }))
+    const audio = document.querySelector('audio')!
+    expect(audio).toHaveAttribute('src', 'https://example.com/a.wav')
+    expect(audio).toHaveAttribute('controls')
+  })
+
   it('falls back to the download when the bytes are not what kind claims', async () => {
     stubObjectUrls('blob:artifact-not-an-image')
     vi.mocked(fetchToolBlobBytes).mockResolvedValue(new ArrayBuffer(3))

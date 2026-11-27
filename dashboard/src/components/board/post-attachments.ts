@@ -102,6 +102,32 @@ function ImageAttachment({ source, compact }: { source: UrlSource; compact: bool
   `
 }
 
+function AudioAttachment({ source }: { source: UrlSource }) {
+  const [failed, setFailed] = useState(false)
+  if (failed) {
+    return html`
+      <${FailureCard}
+        label=${`오디오를 불러오지 못했습니다 (${source.name || source.url})`}
+        url=${source.url}
+      />
+    `
+  }
+  return html`
+    <div class="flex flex-col gap-1" data-testid="board-attachment-audio">
+      <audio
+        src=${source.url}
+        controls
+        preload="metadata"
+        onError=${() => setFailed(true)}
+        class="block w-full"
+      />
+      ${source.name
+        ? html`<div class="text-2xs text-[var(--color-fg-muted)]">${source.name}</div>`
+        : null}
+    </div>
+  `
+}
+
 function VideoAttachment({ source, compact }: { source: UrlSource; compact: boolean }) {
   const [failed, setFailed] = useState(false)
   if (failed) {
@@ -228,7 +254,7 @@ function ArtifactAttachment({ kind, source, compact }: {
     >
       <button type="button" class="text-left text-xs font-semibold text-[var(--color-fg-secondary)] underline"
         disabled=${loading} onClick=${() => void load()}>
-        ${kind === 'image' ? '🖼 이미지 불러오기' : kind === 'video' ? '🎞 동영상 불러오기' : '📎 아티팩트 다운로드 준비'}
+        ${kind === 'image' ? '🖼 이미지 불러오기' : kind === 'video' ? '🎞 동영상 불러오기' : kind === 'audio' ? '🎧 오디오 불러오기' : '📎 아티팩트 다운로드 준비'}
         ${' '}(${source.name ?? source.sha256.slice(0, 12)})
       </button>
       <span class="text-2xs text-[var(--color-fg-muted)]">
@@ -252,9 +278,15 @@ function ArtifactAttachment({ kind, source, compact }: {
               ? 'max-h-24 w-auto rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-black'
               : 'block w-full max-h-[480px] rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-black'} />`
         : null}
+      ${downloadUrl !== null && !previewFailed && kind === 'audio'
+        ? html`<audio src=${downloadUrl} controls preload="metadata"
+            data-testid="board-attachment-artifact-audio"
+            onError=${() => setPreviewFailed(true)}
+            class="block w-full" />`
+        : null}
       ${previewFailed
         ? html`<span class="text-2xs text-[var(--color-fg-muted)]" data-testid="board-attachment-artifact-preview-failed">
-            ${kind === 'video' ? '동영상' : '이미지'}으로 표시하지 못했습니다. 아래에서 받을 수 있습니다.
+            ${kind === 'video' ? '동영상' : kind === 'audio' ? '오디오' : '이미지'}으로 표시하지 못했습니다. 아래에서 받을 수 있습니다.
           </span>`
         : null}
       ${downloadUrl !== null
@@ -284,10 +316,12 @@ function AttachmentView({ entry, compact }: { entry: BoardAttachmentDecode; comp
       return html`<${VideoAttachment} source=${source} compact=${compact} />`
     case 'youtube':
       return html`<${YoutubeAttachment} source=${source} compact=${compact} />`
+    case 'audio':
+      return html`<${AudioAttachment} source=${source} />`
     // No player or score view yet: a url of these kinds is a link to follow.
+    // midi is deliberately a link: browsers have no built-in MIDI player.
     case 'external_link':
     case 'file':
-    case 'audio':
     case 'score':
     case 'midi':
       return html`<${ExternalLinkAttachment} source=${source} />`

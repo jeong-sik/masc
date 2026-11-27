@@ -460,8 +460,6 @@ let test_dropped_and_persisted_media_keep_stream_order () =
    transcript storage. This does not invoke the HTTP route or a provider. *)
 let test_failed_request_reloads_completed_media_across_attempts () =
   with_env "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" "1024" @@ fun () ->
-  with_env "MASC_KEEPER_GENERATED_MEDIA_DIR_MAX_BYTES" "1024" @@ fun () ->
-  with_env "MASC_KEEPER_GENERATED_MEDIA_RETENTION_SEC" "86400" @@ fun () ->
   let open Agent_core.Types in
   let module Tool = Masc.Keeper_stream_tool_accum in
   let module Media = Masc.Keeper_chat_media_store in

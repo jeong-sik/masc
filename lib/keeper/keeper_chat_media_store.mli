@@ -9,8 +9,9 @@
     MIME types are represented as closed sum types ({!raster_mime} and
     {!media_mime}) verified strictly against payload magic bytes. Unknown
     payloads and SVG/XML payloads are rejected with no opaque fallback.
-    Retention is owned by reference-aware workspace media GC rather than
-    wall-clock deletion on write. *)
+    Media files under [<masc_dir>/media/] are currently append-only (no
+    automatic wall-clock or GC deletion in this stack; two-pass
+    reference-based reclamation is planned in a follow-up PR). *)
 
 (** Directory leaf under [<masc_dir>/] holding content-addressed media files. *)
 val media_subdir : string

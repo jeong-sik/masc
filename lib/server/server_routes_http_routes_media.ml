@@ -284,7 +284,10 @@ let handle_upload ~cors ~base_path ~actor request reqd =
     reqd
     ~max_bytes
     ~on_body:(fun bytes ->
-      match store_upload ~base_path ~content_type ~declared ~bytes with
+      match
+        Eio_guard.run_in_systhread ~label:"workspace-media-store" (fun () ->
+          store_upload ~base_path ~content_type ~declared ~bytes)
+      with
       | Error refusal -> refuse refusal
       | Ok stored ->
         Log.Misc.info

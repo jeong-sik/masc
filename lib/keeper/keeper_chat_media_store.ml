@@ -6,9 +6,10 @@
     [GET /api/v1/media/<sha256>] behind read auth and uploaded via
     [POST /api/v1/media] behind write auth.
 
-    Writes never perform wall-clock deletion: workspace media referenced by Wiki
-    pages, Published Artifacts, Board posts, and Chat transcripts stays durable
-    until reclaimed by reference-aware media GC. *)
+    Writes never perform wall-clock or size-cap deletion: workspace media
+    under [<masc_dir>/media/] is currently append-only (content-deduplicated by
+    raw SHA-256) with no automatic disk reclamation until a follow-up two-pass
+    reference-aware media GC sweeper lands. *)
 
 let media_subdir = "media"
 

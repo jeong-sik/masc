@@ -180,6 +180,40 @@ let search_posts store ~predicate ~limit : post list =
       collect (Recent_post_set.to_seq store.recent_post_index) limit []))
 ;;
 
+(** Count posts with [created_at] in [[since, until]] by walking
+    [store.recent_post_index] ([created_at DESC]) and stopping once keys drop
+    below [since]. Avoids copying or re-sorting the full post table and has no
+    arbitrary page limit. *)
+let count_posts_in_window store ~since ~until : int =
+  maybe_sweep store;
+  with_lock store (fun () ->
+    if Float.is_nan since || Float.is_nan until || since > until
+    then 0
+    else (
+      let upper_bound = { recent_created_at = until; recent_post_id = "" } in
+      let rec count seq acc =
+        match seq () with
+        | Seq.Nil -> acc
+        | Seq.Cons ((key : recent_post_key), rest) ->
+          if key.recent_created_at < since
+          then acc
+          else (
+            match Hashtbl.find_opt store.posts key.recent_post_id with
+            | Some post ->
+              let next_acc =
+                if post.created_at >= since && post.created_at <= until
+                then acc + 1
+                else acc
+              in
+              count rest next_acc
+            | None ->
+              store.recent_post_index <-
+                Recent_post_set.remove key store.recent_post_index;
+              count rest acc)
+      in
+      count (Recent_post_set.to_seq_from upper_bound store.recent_post_index) 0))
+;;
+
 (** {1 Comment Operations} *)
 
 include Board_comments

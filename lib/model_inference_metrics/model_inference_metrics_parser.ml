@@ -370,14 +370,18 @@ let read_hw_decode_tok_per_sec (fields : (string * Yojson.Safe.t) list) =
   | _ -> None
 ;;
 
-let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
+let parse_decoded_cost_entry
+      (json : Yojson.Safe.t)
+      ~(decoded : Cost_ledger.t)
+      ~since_unix
   : (raw_entry, parse_error) result
   =
-  match Cost_ledger.of_json json with
-  | Error error -> Error (Invalid_current_cost_row error)
-  | Ok row when not (renderable_timestamp row.ts_unix) -> Error Invalid_ts_unix
-  | Ok row when row.ts_unix < since_unix -> Error Out_of_window
-  | Ok row ->
+  if not (renderable_timestamp decoded.ts_unix)
+  then Error Invalid_ts_unix
+  else if decoded.ts_unix < since_unix
+  then Error Out_of_window
+  else (
+    let row = decoded in
     let fields =
       match json with
       | `Assoc fields -> fields
@@ -457,5 +461,13 @@ let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
       ; streaming_ttfrc_ms = None
       ; streaming_inter_chunk_count = None
       ; streaming_inter_chunk_avg_ms = None
-      }
+      })
+;;
+
+let parse_cost_entry (json : Yojson.Safe.t) ~since_unix
+  : (raw_entry, parse_error) result
+  =
+  match Cost_ledger.of_json json with
+  | Error error -> Error (Invalid_current_cost_row error)
+  | Ok decoded -> parse_decoded_cost_entry json ~decoded ~since_unix
 ;;

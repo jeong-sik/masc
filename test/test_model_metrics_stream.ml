@@ -145,6 +145,64 @@ let test_cached_snapshot_reuses_kept_and_caps_windows () = with_workspace (fun c
     Alcotest.(check int) "stale cached entry refreshes cleanly after TTL expiry" 3 (count refreshed)
   | Error error -> Alcotest.fail error)
 
+let test_observe_cost_24h_preserves_cached_cost_on_transient_failure () =
+  with_workspace (fun config ->
+    let now = Unix.gettimeofday () in
+    let base_path = config.Masc.Workspace.base_path in
+    let cost_row =
+      `Assoc
+        [ "ts_unix", `Float (now -. 30.0)
+        ; "trace_id", `String "cost-obs-1"
+        ; "turn_id", `Int 1
+        ; "tool_call_count", `Int 0
+        ; "tools_used", `List []
+        ; ( "telemetry"
+          , `Assoc
+              [ "model_used", `String "internal-model"
+              ; "outcome", `String "success"
+              ; "turn_count", `Int 1
+              ; "agent_core_turn_ordinal", `Int 0
+              ; "usage_reported", `Bool true
+              ; "telemetry_reported", `Bool false
+              ; "cost_usd", `Float 2.5
+              ] )
+        ]
+    in
+    append config cost_row;
+    let first = Stream.observe_cost_24h_usd ~base_path ~now in
+    Alcotest.(check bool) "cold observation reports cache_was_absent" true first.cache_was_absent;
+    Alcotest.(check bool) "cold observation succeeds" false first.read_failed;
+    Alcotest.(check (option (float 0.001))) "cold observation computes cost" (Some 2.5) first.cost_usd;
+    Alcotest.(check bool) "cold observation reports window edge" true (Option.is_some first.next_change_at);
+    let second = Stream.observe_cost_24h_usd ~base_path ~now in
+    Alcotest.(check bool) "warm observation reports cache hit" false second.cache_was_absent;
+    Alcotest.(check bool) "warm observation succeeds" false second.read_failed;
+    let broken_path =
+      Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) "broken.decisions.jsonl"
+    in
+    Unix.mkdir broken_path 0o700;
+    Fun.protect
+      ~finally:(fun () -> if Sys.file_exists broken_path then Unix.rmdir broken_path)
+      (fun () ->
+         let failed = Stream.observe_cost_24h_usd ~base_path ~now:(now +. 60.0) in
+         Alcotest.(check bool) "unreadable decision file sets read_failed" true failed.read_failed;
+         Alcotest.(check (option (float 0.001)))
+           "transient read failure preserves last cached 24h cost"
+           (Some 2.5)
+           (Stream.peek_cached_cost_24h_usd ~base_path ~now:(now +. 60.0));
+         let past_ttl = now +. Stream.max_cached_staleness_s +. 1.0 in
+         let failed_late = Stream.observe_cost_24h_usd ~base_path ~now:past_ttl in
+         Alcotest.(check bool) "sustained failure still sets read_failed" true failed_late.read_failed;
+         Alcotest.(check bool)
+           "sustained failure does not refresh staleness TTL"
+           true
+           (Option.is_none (Stream.peek_cached_cost_24h_usd ~base_path ~now:past_ttl)));
+    let after_expiry = now +. Stream.max_cached_staleness_s +. 2.0 in
+    let recovered = Stream.observe_cost_24h_usd ~base_path ~now:after_expiry in
+    Alcotest.(check bool) "recovery after expiry sees cache_was_absent" true recovered.cache_was_absent;
+    Alcotest.(check bool) "recovery clears read_failed" false recovered.read_failed;
+    Alcotest.(check (option (float 0.001))) "recovery returns live cost" (Some 2.5) recovered.cost_usd)
+
 let test_typed_query_and_invalidation () =
   let parse target = Stream.request (Httpun.Request.create `GET target) in
   Alcotest.(check bool) "zero/negative windows refused" true
@@ -165,6 +223,8 @@ let eio_test name f = Alcotest.test_case name `Quick (fun () -> Eio_main.run (fu
 let () = Alcotest.run "Native model metrics query"
   ["reader", [eio_test "cold and committed snapshots" test_cold_and_subsequent_direct_reads;
     eio_test "cached snapshot reuses kept and caps windows" test_cached_snapshot_reuses_kept_and_caps_windows;
+    eio_test "observe_cost_24h preserves cached cost on transient failure"
+      test_observe_cost_24h_preserves_cached_cost_on_transient_failure;
     eio_test "query row expiry and empty buckets" test_row_deadline_and_empty_bucket;
     eio_test "actual cost diagnostic day expiry" test_cost_diagnostics_have_only_semantic_day_deadline;
     eio_test "empty file creates no clock deadline" test_empty_cost_file_does_not_make_a_clock_deadline;

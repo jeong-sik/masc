@@ -106,13 +106,10 @@ val history_source_of_string : string -> history_source option
     conversation. *)
 val is_internal_history_source : history_source -> bool
 
-(** Where a Keeper's decision record and feedback record are. Paths: the
-    file system is not looked at and nothing is made. The write of a row
-    makes the keepers directory ({!append_jsonl_line},
-    {!append_decision_record}). *)
+(** Where a Keeper's decision record is. A path: the file system is not
+    looked at and nothing is made. The write of a row makes the keepers
+    directory ({!append_jsonl_line}, {!append_decision_record}). *)
 val keeper_decision_log_path : Workspace.config -> string -> string
-
-val keeper_feedback_log_path : Workspace.config -> string -> string
 
 (** Rotate [path] when it reaches the configured size threshold.
     Keeps at most [Env_config.KeeperMetrics.max_rotated_files] numbered

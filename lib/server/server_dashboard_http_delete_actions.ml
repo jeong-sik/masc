@@ -615,7 +615,7 @@ let purge_keeper_root_logs config keeper_name =
     Keeper_runtime_root_entry.classify_basename basename
     |> List.exists (function
       | Keeper_runtime_root_entry.Keeper { keeper_name = owner;
-          artifact = (Decision_log | Feedback_log | Tla_trace_log); _ } ->
+          artifact = (Decision_log | Tla_trace_log); _ } ->
         String.equal owner keeper_name
       | Keeper { artifact = Metadata; _ } -> false)
   in

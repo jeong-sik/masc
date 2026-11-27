@@ -809,8 +809,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("metrics", `String (Dated_jsonl.base_dir metrics_store));
            ( "decisions"
            , `String (Keeper_types_support.keeper_decision_log_path config m.name) );
-             ( "feedback"
-             , `String (Keeper_types_support.keeper_feedback_log_path config m.name) );
            ("session_dir", `String session_dir);
              ("history", `String history_path);
              ("history_internal", `String internal_history_path);

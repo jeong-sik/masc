@@ -4865,9 +4865,7 @@ let test_dashboard_keeper_purge_finalizes_artifacts_and_receipt () =
       write_file (Filename.concat metrics_dir "2026-07/15.jsonl") "{}\n";
       let sidecar_paths =
         [ Keeper_types_support.keeper_decision_log_path config meta.name
-        ; Keeper_types_support.keeper_feedback_log_path config meta.name
         ; Keeper_types_support.keeper_decision_log_path config meta.name ^ ".1"
-        ; Keeper_types_support.keeper_feedback_log_path config meta.name ^ ".2"
         ; Filename.concat (Keeper_fs.keeper_dir config)
             (Keeper_runtime_root_entry.keeper_basename ~keeper_name:meta.name Tla_trace_log)
         ]

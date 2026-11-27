@@ -223,8 +223,8 @@ let is_internal_history_source = function
   | Direct_user | Direct_assistant -> false
   | World_state_prompt | Internal_assistant -> true
 
-(* The two records a Keeper keeps in the keepers directory: paths, with no
-   look at the file system, for the same reason as [keeper_store_location].
+(* The decision record a Keeper keeps in the keepers directory: a path, with
+   no look at the file system, for the same reason as [keeper_store_location].
    The newest decision row is kept in memory ([Keeper_row_facts]) and its
    readers ask for it by this path on every Keeper row. The directory is
    made by the write of a row ([append_jsonl_line],
@@ -235,13 +235,6 @@ let keeper_decision_log_path config name =
     (Keeper_runtime_root_entry.keeper_basename
        ~keeper_name:name
        Keeper_runtime_root_entry.Decision_log)
-
-let keeper_feedback_log_path config name =
-  Filename.concat
-    (Workspace.keepers_runtime_dir config)
-    (Keeper_runtime_root_entry.keeper_basename
-       ~keeper_name:name
-       Keeper_runtime_root_entry.Feedback_log)
 
 (** Parse exactly the numbered filenames this writer creates, not other
     files sharing a prefix (e.g. .1.tmp, .01 or another keeper's log). *)
@@ -308,9 +301,9 @@ let maybe_rotate_file path =
 let jsonl_row (json : Yojson.Safe.t) = utf8_repair_string (Yojson.Safe.to_string json)
 
 (* The writer of the JSONL files a Keeper keeps beside its dated stores,
-   other than the decision record: feedback, the TLA trace, runtime
-   manifests. The decision record has its own writer below, which goes by
-   the same write. That write makes the file's directory, inside its job on
+   other than the decision record: the TLA trace and runtime manifests.
+   The decision record has its own writer below, which goes by the same
+   write. That write makes the file's directory, inside its job on
    a system thread, so no caller makes it first: a caller that did paid an
    Eio [stat] on its fiber for every row. The rotation before it still asks
    for the file's size once a row, unless rotation is turned off (a size

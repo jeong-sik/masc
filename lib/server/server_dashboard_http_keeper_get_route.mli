@@ -21,7 +21,6 @@ type keeper_route =
   | Tool_result
   | Tool_calls
   | Waiting_inventory
-  | Feedback
   | Working_context
   | Memory_facts
   | Memory_journal

@@ -199,13 +199,53 @@ let prepare_turn
     let tools_json, visible_tool_names =
       prepare_tools ~tools ~deferred_tools ~defer_loading ()
     in
+    let is_compaction_anchor_message (message : Llm_provider.Types.message) =
+      message.origin = Llm_provider.Types.Outside_context
+      && match List.assoc_opt "masc.compaction_anchor.v2" message.metadata with
+         | Some (`Bool true) -> true
+         | Some
+             ( `Bool false
+             | `Null
+             | `Int _
+             | `Intlit _
+             | `Float _
+             | `String _
+             | `Assoc _
+             | `List _ )
+         | None -> false
+    in
+    (* Projections such as Gate replay may append [Recovery_instruction]
+       evidence after the volatile carriers. Skip [Recovery_instruction]
+       entries while peeling the post-conversation volatile carrier group, and
+       exclude prefix-stable compaction anchors even on empty-history retries
+       where no conversation message sits between the anchor and the carrier. *)
+    let carrier_tail =
+      let rec peel acc = function
+        | (message : Llm_provider.Types.message) :: rest ->
+          (match message.origin with
+           | Llm_provider.Types.System_context ->
+             peel (message :: acc) rest
+           | Llm_provider.Types.Outside_context ->
+             if is_compaction_anchor_message message
+             then peel acc rest
+             else peel (message :: acc) rest
+           | Llm_provider.Types.Recovery_instruction ->
+             peel acc rest
+           | Llm_provider.Types.Conversation
+           | Llm_provider.Types.Historical_system_context
+           | Llm_provider.Types.Tool_result_followup
+           | Llm_provider.Types.Agent_instruction -> acc)
+        | [] -> acc
+      in
+      peel [] (List.rev effective_messages)
+    in
     let collect_carrier ~expected ~origin ~error_detail =
       match expected with
       | None -> Ok None
       | Some _ ->
         (match List.filter (fun (message : Llm_provider.Types.message) ->
            message.origin = origin)
-           effective_messages with
+           carrier_tail with
          | [] -> Ok None
          | [message] ->
            (* The carrier as transmitted re-enters history: Anthropic
@@ -244,7 +284,7 @@ let prepare_turn
             [ out_msg; sys_msg ]
           | _ :: rest -> in_transmission_order rest
         in
-        Ok (in_transmission_order effective_messages)
+        Ok (in_transmission_order carrier_tail)
     in
     { effective_messages
     ; tools

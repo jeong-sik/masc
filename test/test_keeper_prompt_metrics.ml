@@ -1229,6 +1229,75 @@ let test_prompt_context_presence_for_owner_distinguishes_official_client () =
     ~expect_carrier:true
 ;;
 
+let test_transmitted_carrier_removal_preserves_v2_and_replayed_v1_compaction_anchors () =
+  let texts result =
+    match result with
+    | Ok msgs ->
+      List.map
+        (fun (m : Agent_core.Types.message) ->
+           Agent_core.Types.text_of_content m.Agent_core.Types.content)
+        msgs
+    | Error failure ->
+      failf "unexpected provenance failure: %s" (KAPM.provenance_failure_summary failure)
+  in
+  let v2_anchor : Agent_core.Types.message =
+    { (message "Compaction epoch 2 summary") with
+      origin = Llm_provider.Types.Outside_context
+    ; metadata = Runtime_model_input_tail_window.compaction_anchor_metadata
+    }
+  in
+  let legacy_v1_anchor : Agent_core.Types.message =
+    { (message "Legacy untyped summary") with
+      origin = Llm_provider.Types.Agent_instruction
+    ; metadata = [ "masc.compaction_anchor.v1", `Bool true ]
+    }
+  in
+  let replayed_v1 =
+    Runtime_model_input_tail_window.for_compaction_replay [ legacy_v1_anchor ]
+  in
+  check bool "for_compaction_replay tags replayed v1 notice as compaction anchor" true
+    (match replayed_v1 with
+     | [ notice ] ->
+       notice.origin = Llm_provider.Types.Outside_context
+       && Runtime_model_input_tail_window.is_compaction_anchor notice
+     | _ -> false);
+  let conv = [ message "user turn" ] in
+  let out_ctx = outside_carrier "## Pending mentions" in
+  let sys_ctx = prompt_carrier "[system context] host state" in
+  check (list string)
+    "v2 compaction anchor survives alongside current Outside_context and System_context carriers"
+    [ "Compaction epoch 2 summary"; "user turn" ]
+    (texts
+       (KAPM.provider_content_of_transmitted
+          ~outside_context_present:true
+          ~prompt_context_present:true
+          ~messages:((v2_anchor :: conv) @ [ out_ctx; sys_ctx ])));
+  check (list string)
+    "v2 compaction anchor survives when no current Outside_context carrier is expected"
+    [ "Compaction epoch 2 summary"; "user turn" ]
+    (texts
+       (KAPM.provider_content_of_transmitted
+          ~outside_context_present:false
+          ~prompt_context_present:true
+          ~messages:((v2_anchor :: conv) @ [ sys_ctx ])));
+  check (list string)
+    "replayed v1 compaction anchor survives alongside current Outside_context and System_context"
+    [ "Earlier turns are available in the Keeper compaction archive."; "user turn" ]
+    (texts
+       (KAPM.provider_content_of_transmitted
+          ~outside_context_present:true
+          ~prompt_context_present:true
+          ~messages:((replayed_v1 @ conv) @ [ out_ctx; sys_ctx ])));
+  check (list string)
+    "replayed v1 compaction anchor survives when outside_context_present=false"
+    [ "Earlier turns are available in the Keeper compaction archive."; "user turn" ]
+    (texts
+       (KAPM.provider_content_of_transmitted
+          ~outside_context_present:false
+          ~prompt_context_present:true
+          ~messages:((replayed_v1 @ conv) @ [ sys_ctx ])))
+;;
+
 let () =
   run "keeper_prompt_metrics"
     [
@@ -1291,6 +1360,8 @@ let () =
             test_transmitted_carrier_removal_ignores_a_prefix_cut;
           test_case "transmitted carrier removal handles Outside_context carriers" `Quick
             test_provider_content_of_transmitted_handles_outside_context_carriers;
+          test_case "transmitted carrier removal preserves v2 and replayed v1 compaction anchors" `Quick
+            test_transmitted_carrier_removal_preserves_v2_and_replayed_v1_compaction_anchors;
           test_case "split_outside_context end-to-end attribution (outside-only, dual, empty)" `Quick
             test_split_outside_context_end_to_end_attribution;
           test_case "Official_client unsplit carrier presence avoids Outside_context mismatch" `Quick

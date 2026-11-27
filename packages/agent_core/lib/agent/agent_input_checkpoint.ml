@@ -1,12 +1,24 @@
 open Agent_types
 
+(* Use non-poisoning lock/unlock with [Eio.Cancel.protect] around pre-mutation
+   persistence and in-memory updates: an exception from [persist] or [message]
+   leaves [agent.state] and [agent.pending_input] untouched (so it must not
+   permanently poison [agent.mu]), while cancellation cannot split a durable
+   checkpoint commit from the subsequent in-memory state transition. *)
+let with_agent_lock agent f =
+  Eio.Mutex.lock agent.mu;
+  Fun.protect
+    ~finally:(fun () -> Eio.Mutex.unlock agent.mu)
+    (fun () -> Eio.Cancel.protect f)
+;;
+
 let persist agent ~pending_input state =
   Agent_checkpoint_sink.persist_for_state
     agent After_input_wait_changed ~pending_input state
 ;;
 
 let install agent pending =
-  Eio.Mutex.use_rw ~protect:true agent.mu (fun () ->
+  with_agent_lock agent (fun () ->
     match persist agent ~pending_input:(Some pending) agent.state with
     | Error _ as error -> error
     | Ok () -> agent.pending_input <- Some pending; Ok ())
@@ -16,7 +28,7 @@ let consume agent expected =
   match expected with
   | None -> Ok ()
   | Some expected ->
-    Eio.Mutex.use_rw ~protect:true agent.mu (fun () ->
+    with_agent_lock agent (fun () ->
       match Agent_input_request.settle ~current:agent.pending_input expected with
       | Error (Agent_input_request.No_pending_request | Request_not_current) -> Ok ()
       | Ok _ ->
@@ -26,7 +38,7 @@ let consume agent expected =
 ;;
 
 let respond agent supplied ~message =
-  Eio.Mutex.use_rw ~protect:true agent.mu (fun () ->
+  with_agent_lock agent (fun () ->
     match Agent_input_request.settle ~current:agent.pending_input supplied with
     | Error error -> Error (Input_not_current error)
     | Ok owned ->

@@ -2915,10 +2915,19 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
       Hashtbl.replace probe_tbl p.runtime_id p)
     active_probes;
   let ssot_tone, ssot_glyph =
-    if active_probes = [] then (Theme.Status_active, Glyph.Live_healthy)
-    else if active_failed = 0 then (Theme.Status_ok, Glyph.Live_healthy)
-    else if active_ok > 0 then (Theme.Status_attention, Glyph.Warning_triangle)
-    else (Theme.Status_critical, Glyph.Live_failing)
+    match (rt.runtime_resolved, rt.runtime_probe) with
+    | Observed.Failed _, _ | _, Observed.Failed _ ->
+        (Theme.Status_critical, Glyph.Live_failing)
+    | Observed.Loading _, _ | _, Observed.Loading _ ->
+        (Theme.Status_active, Glyph.Transport_reconnecting)
+    | (Observed.Unreported | Observed.Absent), _
+    | _, (Observed.Unreported | Observed.Absent) ->
+        (Theme.Status_historical, Glyph.Missing_unreported)
+    | Observed.Value _, Observed.Value _ ->
+        if active_probes = [] then (Theme.Status_active, Glyph.Live_healthy)
+        else if active_failed = 0 then (Theme.Status_ok, Glyph.Live_healthy)
+        else if active_ok > 0 then (Theme.Status_attention, Glyph.Warning_triangle)
+        else (Theme.Status_critical, Glyph.Live_failing)
   in
   let header_rect, body_rect =
     match Layout.split_v rect [ Layout.Fixed 1; Layout.Flex 1 ] with
@@ -2926,15 +2935,20 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
     | _ -> (Rect.empty, rect)
   in
   let probe_age_txt =
-    match Observed.to_option rt.runtime_probe with
-    | Some pr ->
+    match rt.runtime_probe with
+    | Observed.Value { data = pr; _ } ->
         let age =
           match pr.cache_age_sec with
           | Some s -> " " ^ Format_val.format_duration_s s
           | None -> ""
         in
         probe_refresh_label ~lang pr.refresh_state ^ age
-    | None -> Say.resolve lang (Say.make ~ko:"즉시 캐시" ~en:"Instant SSOT")
+    | Observed.Loading _ ->
+        Say.resolve lang (Say.make ~ko:"프로브 조회 중" ~en:"Probing...")
+    | Observed.Failed _ ->
+        Say.resolve lang (Say.make ~ko:"프로브 실패" ~en:"Probe failed")
+    | Observed.Absent | Observed.Unreported ->
+        Say.resolve lang (Say.make ~ko:"프로브 미수신" ~en:"Probe pending")
   in
   let extra_lane_pills =
     let standalone_pill =
@@ -3020,8 +3034,21 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
         };
       ]
   in
+  let probe_ready = Observed.is_value rt.runtime_probe in
   let external_probe_pills =
-    if narrow_header && outside_failed = 0 && not rt.show_outside_lane_probes
+    if not probe_ready then
+      [
+        {
+          H.label =
+            Say.resolve lang
+              (Say.make ~ko:"외부 프로브: 미수신 [Space]"
+                 ~en:"External probes: unavailable [Space]");
+          active = rt.show_outside_lane_probes;
+          tone = Some Theme.Status_historical;
+          glyph = Some Glyph.Missing_unreported;
+        };
+      ]
+    else if narrow_header && outside_failed = 0 && not rt.show_outside_lane_probes
     then
       [
         {
@@ -3052,14 +3079,33 @@ let render_failover_lanes ~(model : Model.t) ~cache ~(rect : Rect.t)
       List.filter (fun (p : H.pill) -> p.active) extra_lane_pills
     else extra_lane_pills
   in
+  let lane_health_label =
+    match rt.runtime_probe with
+    | Observed.Value _ ->
+        Printf.sprintf "%s: %d · %d/%d %s"
+          (Say.resolve lang (Say.make ~ko:"활성 레인" ~en:"Active Lanes"))
+          (List.length lanes) active_ok (List.length active_probes)
+          (Say.resolve lang (Say.make ~ko:"가용" ~en:"reachable"))
+    | Observed.Loading _ ->
+        Printf.sprintf "%s: %d · %s"
+          (Say.resolve lang (Say.make ~ko:"활성 레인" ~en:"Active Lanes"))
+          (List.length lanes)
+          (Say.resolve lang (Say.make ~ko:"프로브 조회 중" ~en:"probing"))
+    | Observed.Failed _ ->
+        Printf.sprintf "%s: %d · %s"
+          (Say.resolve lang (Say.make ~ko:"활성 레인" ~en:"Active Lanes"))
+          (List.length lanes)
+          (Say.resolve lang (Say.make ~ko:"프로브 실패" ~en:"probe failed"))
+    | Observed.Absent | Observed.Unreported ->
+        Printf.sprintf "%s: %d · %s"
+          (Say.resolve lang (Say.make ~ko:"활성 레인" ~en:"Active Lanes"))
+          (List.length lanes)
+          (Say.resolve lang (Say.make ~ko:"프로브 미수신" ~en:"probe pending"))
+  in
   let header_pills =
     [
       {
-        H.label =
-          Printf.sprintf "%s: %d · %d/%d %s"
-            (Say.resolve lang (Say.make ~ko:"활성 레인" ~en:"Active Lanes"))
-            (List.length lanes) active_ok (List.length active_probes)
-            (Say.resolve lang (Say.make ~ko:"가용" ~en:"reachable"));
+        H.label = lane_health_label;
         active = true;
         tone = Some ssot_tone;
         glyph = Some ssot_glyph;

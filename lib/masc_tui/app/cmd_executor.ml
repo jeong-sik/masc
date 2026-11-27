@@ -516,6 +516,7 @@ type t = {
   cli : Cli_args.config;
   bus : bus;
   explicit_bearer_override : bool Atomic.t;
+  endpoint_mu : Stdlib.Mutex.t;
   endpoint : Http_client.endpoint Atomic.t;
   stream_epoch : Epoch.t Atomic.t;
   owned_server : Masc_server_lifecycle.owned_server option Atomic.t;
@@ -714,6 +715,7 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
             (Option.bind (Sys.getenv_opt "MASC_TOKEN") nonblank_trimmed))
   in
   let initial_ep = endpoint_of_cli ?bearer_token cli in
+  let endpoint_mu = Stdlib.Mutex.create () in
   let endpoint = Atomic.make initial_ep in
   let stream_epoch = Atomic.make Epoch.initial in
   let owned_server = Atomic.make None in
@@ -763,6 +765,7 @@ let create ~sw ~io ~worker ~clock ~cli ~bus ?bearer_token ?voice_backend
     cli;
     bus;
     explicit_bearer_override;
+    endpoint_mu;
     endpoint;
     stream_epoch;
     owned_server;
@@ -786,19 +789,31 @@ let current_endpoint t = Atomic.get t.endpoint
 
 let set_bearer_token t (tok : string option) =
   let normalized = Option.bind tok nonblank_trimmed in
-  Atomic.set t.explicit_bearer_override true;
-  let rec swap () =
-    let cur = Atomic.get t.endpoint in
-    let next_ep = { cur with bearer_token = normalized } in
-    if Atomic.compare_and_set t.endpoint cur next_ep then next_ep
-    else swap ()
-  in
-  let next_ep = swap () in
-  Sse_hub.update_endpoint t.sse_hub next_ep;
+  Stdlib.Mutex.protect t.endpoint_mu (fun () ->
+      Atomic.set t.explicit_bearer_override true;
+      let cur = Atomic.get t.endpoint in
+      let next_ep = { cur with bearer_token = normalized } in
+      Atomic.set t.endpoint next_ep;
+      Sse_hub.update_endpoint t.sse_hub next_ep);
   Stdlib.Mutex.lock t.in_flight_gets_mu;
   Fun.protect
     ~finally:(fun () -> Stdlib.Mutex.unlock t.in_flight_gets_mu)
     (fun () -> Hashtbl.clear t.in_flight_gets)
+
+let refresh_discovered_bearer_token t =
+  if not (Atomic.get t.explicit_bearer_override) then
+    let fresh_tok =
+      Eio_unix.run_in_systhread (fun () ->
+          load_bearer_token ~base_path:t.cli.base_path ())
+    in
+    Stdlib.Mutex.protect t.endpoint_mu (fun () ->
+        if not (Atomic.get t.explicit_bearer_override) then
+          let cur = Atomic.get t.endpoint in
+          if not (Option.equal String.equal cur.bearer_token fresh_tok) then begin
+            let next_ep = { cur with bearer_token = fresh_tok } in
+            Atomic.set t.endpoint next_ep;
+            Sse_hub.update_endpoint t.sse_hub next_ep
+          end)
 
 let has_pending_editor t = Option.is_some (Atomic.get t.pending_editor)
 
@@ -813,9 +828,10 @@ let update_workspace_guard t ~instance_id ~workspace_sha256 =
   let guard : Http_client.workspace_guard =
     { expected_instance = instance_id; expected_workspace = workspace_sha256 }
   in
-  let next_ep = Http_client.with_guard (Atomic.get t.endpoint) guard in
-  Atomic.set t.endpoint next_ep;
-  Sse_hub.update_endpoint t.sse_hub next_ep
+  Stdlib.Mutex.protect t.endpoint_mu (fun () ->
+      let next_ep = Http_client.with_guard (Atomic.get t.endpoint) guard in
+      Atomic.set t.endpoint next_ep;
+      Sse_hub.update_endpoint t.sse_hub next_ep)
 
 let run_cpu_if_large t ~name ~bytes work =
   if bytes > worker_decode_threshold_bytes then
@@ -1254,18 +1270,7 @@ let rec execute_get t ~epoch req =
                   let msg =
         match req with
         | Cmd.Get_health ->
-            if not (Atomic.get t.explicit_bearer_override) then begin
-              let fresh_tok =
-                Eio_unix.run_in_systhread (fun () ->
-                    load_bearer_token ~base_path:t.cli.base_path ())
-              in
-              let cur = Atomic.get t.endpoint in
-              if not (Option.equal String.equal cur.bearer_token fresh_tok) then begin
-                let next_ep = { cur with bearer_token = fresh_tok } in
-                Atomic.set t.endpoint next_ep;
-                Sse_hub.update_endpoint t.sse_hub next_ep
-              end
-            end;
+            refresh_discovered_bearer_token t;
             let ep = Atomic.get t.endpoint in
             let result =
               fetch_health_with_anon_fallback ep ~fetch:(fun probe_ep ->
@@ -2019,7 +2024,7 @@ let rec execute_get t ~epoch req =
                    ~decode:Wire_config.decode_tui_preferences)
             in
             Msg.Http_reply { epoch; reply }
-        | Cmd.Get_config_schema _ ->
+        | Cmd.Get_config_schema target ->
             let res =
               fetch_and_decode_get t ~path
                 ~decode:Wire_config.decode_config_schema_with_meta
@@ -2037,8 +2042,8 @@ let rec execute_get t ~epoch req =
                              Msg.Reply_config_schema_meta
                                { target = schema.target; meta };
                          });
-                  Msg.Reply_config_schema (Ok schema)
-              | Error err -> Msg.Reply_config_schema (Error err)
+                  Msg.Reply_config_schema { target; result = Ok schema }
+              | Error err -> Msg.Reply_config_schema { target; result = Error err }
             in
             Msg.Http_reply { epoch; reply }
         | Cmd.Get_fusion_run_detail { run_id } ->
@@ -3047,7 +3052,8 @@ let execute_post t ~epoch req =
                 ~decode:Wire_config.decode_patch_response
             in
             Some
-              (Msg.Reply_config_patch { dry_run = patch_req.dry_run; result })
+              (Msg.Reply_config_patch
+                 { target = patch_req.target; dry_run = patch_req.dry_run; result })
         | Cmd.Post_tui_preference _ ->
             let result = post_ack t ~path ~body in
             Some
@@ -4661,16 +4667,7 @@ let execute_start_local_server t =
                     (* Reload admin.token whenever no explicit MASC_TOKEN or
                        bearer_token override was supplied so a freshly minted
                        token replaces any stale pre-boot file token. *)
-                    if not (Atomic.get t.explicit_bearer_override) then begin
-                      let fresh_tok =
-                        Eio_unix.run_in_systhread (fun () ->
-                            load_bearer_token ~base_path:t.cli.base_path ())
-                      in
-                      let cur = Atomic.get t.endpoint in
-                      let next_ep = { cur with bearer_token = fresh_tok } in
-                      Atomic.set t.endpoint next_ep;
-                      Sse_hub.update_endpoint t.sse_hub next_ep
-                    end;
+                    refresh_discovered_bearer_token t;
                     Ui_bus.publish_stream_receipt t.bus (Msg.Server_start_result (Ok ()))
                 | Masc_server_lifecycle.Server_exited report ->
                     ignore (Atomic.exchange t.owned_server None : _ option);

@@ -162,8 +162,13 @@ val clear_in_flight : t -> t
     when leaving an epoch whose replies are abandoned, preserving staged
     [dirty_fields]. *)
 val apply_patch_response :
-  dry_run:bool -> Wire_config.patch_response -> t -> t
-val apply_patch_error : dry_run:bool -> string -> t -> t
+  ?target:Wire_config.config_target ->
+  dry_run:bool ->
+  Wire_config.patch_response ->
+  t ->
+  t
+val apply_patch_error :
+  ?target:Wire_config.config_target -> dry_run:bool -> string -> t -> t
 
 val tree_sections : t -> settings_tree_section list
 (** All entity-grouped sections across categories (merging [providers.<id>.*]

@@ -404,12 +404,16 @@ type http_reply =
   | Reply_system_logs of (Wire_infra.system_log_entry list, http_error) result
   (* Config & Generic Mutations *)
   | Reply_tui_preferences of (Wire_config.tui_preferences, http_error) result
-  | Reply_config_schema of (Wire_config.config_schema, http_error) result
+  | Reply_config_schema of {
+      target : Wire_config.config_target;
+      result : (Wire_config.config_schema, http_error) result;
+    }
   | Reply_config_schema_meta of {
       target : Wire_config.config_target;
       meta : (string * Wire_config.field_entity_meta) list;
     }
   | Reply_config_patch of {
+      target : Wire_config.config_target;
       dry_run : bool;
       result : (Wire_config.patch_response, http_error) result;
     }

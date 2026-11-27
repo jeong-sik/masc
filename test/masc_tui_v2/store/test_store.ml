@@ -2152,7 +2152,12 @@ let test_verifier_regressions () =
   let m_kcfg_loaded, _ =
     Update.step ~now:t1 m_kcfg
       (Msg.Http_reply
-         { epoch = m_kcfg.epoch; reply = Msg.Reply_config_schema (Ok keeper_schema) })
+         {
+           epoch = m_kcfg.epoch;
+           reply =
+             Msg.Reply_config_schema
+               { target = keeper_schema.target; result = Ok keeper_schema };
+         })
   in
   Alcotest.(check int) "Keeper_config visible_fields populated after reply" 1
     (List.length (Config_store.visible_fields m_kcfg_loaded.config));
@@ -2592,7 +2597,9 @@ let test_round2_store_regressions () =
       (Msg.Http_reply
          {
            epoch = m_kcfg_beta.epoch;
-           reply = Msg.Reply_config_schema (Ok beta_schema);
+           reply =
+             Msg.Reply_config_schema
+               { target = beta_schema.target; result = Ok beta_schema };
          })
   in
   Alcotest.(check bool)
@@ -32134,5 +32141,125 @@ let () =
               Alcotest.(check bool) "other keeper not marked absent" false
                 (Runtime_store.is_keeper_waiting_inventory_absent ~keeper:"alpha"
                    rt_404));
+          Alcotest.test_case
+            "R6: wire_observer decodes dashboard_observation, workspace_health, schedule & pending-confirm invalidations"
+            `Quick
+            (fun () ->
+              let check_ok label json pred =
+                match Wire_observer.event_of_json json with
+                | Ok ev -> Alcotest.(check bool) label true (pred ev)
+                | Error err -> Alcotest.fail (label ^ ": " ^ err)
+              in
+              check_ok "dashboard_observation via workspace_dataset_changed"
+                (`Assoc
+                   [
+                     ("type", `String "workspace_dataset_changed");
+                     ("dataset", `String "dashboard_observation");
+                     ("topic", `String "health");
+                     ("scope", `String "workspace");
+                   ])
+                (function
+                  | Wire_observer.Observation_changed { topic = `Health; _ } -> true
+                  | _ -> false);
+              check_ok "workspace_health maps to Dataset_health"
+                (`Assoc
+                   [
+                     ("type", `String "workspace_dataset_changed");
+                     ("dataset", `String "workspace_health");
+                   ])
+                (function
+                  | Wire_observer.Dataset_changed Wire_observer.Dataset_health -> true
+                  | _ -> false);
+              check_ok "schedule_store_invalidated maps to Schedule_store_changed"
+                (`Assoc [ ("type", `String "schedule_store_invalidated") ])
+                (function
+                  | Wire_observer.Schedule_store_changed -> true
+                  | _ -> false);
+              check_ok
+                "operator_pending_confirm_invalidated maps to Pending_confirms_changed"
+                (`Assoc
+                   [ ("type", `String "operator_pending_confirm_invalidated") ])
+                (function
+                  | Wire_observer.Pending_confirms_changed -> true
+                  | _ -> false));
+          Alcotest.test_case
+            "R6: cross-target config patch/error does not clobber active target dirty fields"
+            `Quick
+            (fun () ->
+              let m0 = Model.initial ~auth_session:Rbac.single_user_local_admin () in
+              let cfg_alpha =
+                Config_store.empty
+                |> Config_store.set_target (Wire_config.Target_keeper "alpha")
+                |> Config_store.stage_patch ~full_key:"keeper.model"
+                     (Wire_config.Set_scalar
+                        { table = "keeper"; key = "model"; value = "m1" })
+              in
+              let cfg_beta =
+                cfg_alpha
+                |> Config_store.set_target (Wire_config.Target_keeper "beta")
+                |> Config_store.stage_patch ~full_key:"keeper.model"
+                     (Wire_config.Set_scalar
+                        { table = "keeper"; key = "model"; value = "m2" })
+              in
+              let m1 = { m0 with config = cfg_beta } in
+              let resp : Wire_config.patch_response =
+                {
+                  applied = true;
+                  dry_run = false;
+                  target = "keeper:alpha";
+                  changed = true;
+                  before_sha256 = "a";
+                  new_sha256 = "b";
+                  snapshot_id = Some "snap-1";
+                  snapshot_path = None;
+                  reload_scope = Wire_config.Next_turn;
+                  unified_diff = "";
+                  diff_hunks = [];
+                  validation_warnings = [];
+                }
+              in
+              let m2, cmds2 =
+                Update.step ~now:t1 m1
+                  (Msg.Http_reply
+                     {
+                       epoch = m1.epoch;
+                       reply =
+                         Msg.Reply_config_patch
+                           {
+                             target = Wire_config.Target_keeper "alpha";
+                             dry_run = false;
+                             result = Ok resp;
+                           };
+                     })
+              in
+              Alcotest.(check int)
+                "beta dirty_fields preserved after alpha save" 1
+                (Config_store.dirty_count m2.config);
+              Alcotest.(check bool)
+                "no schema refetch issued for beta after alpha save" false
+                (List.exists
+                   (function
+                     | Cmd.Http_get { req = Cmd.Get_config_schema _; _ } -> true
+                     | _ -> false)
+                   (Cmd.flatten cmds2));
+              let m3, _ =
+                Update.step ~now:t2 m2
+                  (Msg.Http_reply
+                     {
+                       epoch = m2.epoch;
+                       reply =
+                         Msg.Reply_config_schema
+                           {
+                             target = Wire_config.Target_keeper "alpha";
+                             result =
+                               Error
+                                 (Msg.Http_error
+                                    { status = 500; body = "boom"; api_error = None });
+                           };
+                     })
+              in
+              Alcotest.(check bool)
+                "stale alpha schema error does not fail beta schema slot" false
+                (match m3.config.schema with Observed.Failed _ -> true | _ -> false));
         ] );
     ]

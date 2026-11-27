@@ -466,7 +466,8 @@ let sync_streams t ~on_event desired =
                 (fun e ->
                   not (List.exists
                       (fun (s : Stream_spec.t) ->
-                        Stream_spec.equal_kind s.kind e.spec.kind)
+                        String.equal (Stream_spec.id s.kind)
+                          (Stream_spec.id e.spec.kind))
                       diff.to_start))
                 stop_entries
             in

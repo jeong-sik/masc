@@ -149,5 +149,5 @@ let discover_custom_themes ~base_path ~themes_dir =
              | exception Sys_error _ -> None)
   |> List.sort (fun a b -> String.compare a.name b.name)
 
-let load_custom_palette ?(base_preset = Theme.Midnight) ~path =
+let load_custom_palette ?(base_preset = Theme.Midnight) path =
   load_palette ~preset:base_preset path

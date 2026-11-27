@@ -41,8 +41,8 @@ val discover_custom_themes :
 
 val load_custom_palette :
   ?base_preset:Masc_tui_core.Theme.preset ->
-  path:string ->
+  string ->
   (Masc_tui_core.Theme.Palette.t, string) result
-(** Parse a custom theme [.toml] file merged onto [base_preset] (default
-    {!Masc_tui_core.Theme.Midnight}) without widening the closed
+(** Parse a custom theme [.toml] file at [path] merged onto [base_preset]
+    (default {!Masc_tui_core.Theme.Midnight}) without widening the closed
     {!Masc_tui_core.Theme.preset} variant. *)

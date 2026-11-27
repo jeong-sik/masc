@@ -888,6 +888,23 @@ let run_turn
     ~succeeded:(fun (settlement : Keeper_agent_result.turn_settlement) ->
       Result.is_ok settlement.result)
   @@ fun turn_log ->
+  (* An operation handed on to resume from its checkpoint is not over: the
+     turn's end leaves what it saved open for the turn that resumes it. A
+     lane that restarts its cycle starts a new turn, so its turn is over. *)
+  let runtime_retry_deferral =
+    Option.map
+      (fun { Keeper_turn_driver.continuation; on_deferred } ->
+         { Keeper_turn_driver.continuation
+         ; on_deferred =
+             (fun hint ->
+                (match continuation with
+                 | Keeper_turn_driver.Resume_operation_checkpoint _ ->
+                   Keeper_turn_log_turn.note_resume_from_checkpoint turn_log
+                 | Keeper_turn_driver.Restart_cycle -> ());
+                on_deferred hint)
+         })
+      runtime_retry_deferral
+  in
   let turn_start = Mtime_clock.now () in
   let seq_ref = Atomic.make 0 in
   let runtime_manifest_context =

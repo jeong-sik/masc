@@ -547,54 +547,76 @@ let test_an_end_leaves_open_what_the_turn_did_not_save =
     "started at 0\nopened 1 at 0\nclosed errored at 0, before [], own []" (log_text place)
 ;;
 
-(* An Agent Core attempt saved, and an official client then completed the
-   turn. The turn's line names no message, so its unit is read from the
-   client's files. The messages are closed after the line, and the next unit
-   names them among what was closed before its turn. *)
-let test_a_turn_a_client_completed_closes_after_its_line =
+(* The operation of a turn that saved and failed was handed on to resume from
+   its checkpoint. The turn's end leaves its messages open: the turn that
+   resumes adds no input, so they have to lie above its baseline. Its closing
+   save names them as its own. A turn that raises is resumed by no one, and
+   its end closes what it saved. *)
+let test_a_turn_left_for_its_resume =
   in_workspace
   @@ fun place ->
+  let history = ref [] in
   let (_ : (unit, string) result) =
     turn place 1 (fun turn ->
-      let (_ : Agent_core.Types.message list) = open_save place turn 1 [] in
-      Turn.note_client_completion turn;
+      history := open_save place turn 1 !history;
+      Turn.note_resume_from_checkpoint turn;
+      Error "the provider failed")
+  in
+  check int "what the turn saved is still open" 2 (open_messages place);
+  let (_ : (unit, string) result) =
+    turn place 2 (fun turn ->
+      history := !history @ turn_messages 2;
+      save place ~boundary:Objects.Turn_closes ~turn_count:2 !history;
+      Turn.note_closing_save turn Saved;
       Ok ())
   in
-  check int "no message is left open" 0 (open_messages place);
-  let (_ : (unit, string) result) = turn place 2 (fun (_ : Turn.t) -> Ok ()) in
-  check string "the turn's line names none of them, and the next unit names them before its turn"
+  (match
+     turn place 3 (fun turn ->
+       history := open_save place turn 3 !history;
+       Turn.note_resume_from_checkpoint turn;
+       raise Turn_broke)
+   with
+   | (_ : (unit, string) result) -> fail "the exception did not leave"
+   | exception Turn_broke -> ());
+  check int "a turn that raised is not left for a resume" 0 (open_messages place);
+  check string "the turn that resumes names the messages, and the turn that raised names its own"
     "started at 0\n\
      opened 1 at 0\n\
-     closed completed at 0, before [], own []\n\
-     opened 2 at 2\n\
-     closed completed at 2, before [0+2], own []"
-    (log_text place);
-  (* A client's turn in which no Agent Core attempt saved changes nothing. *)
-  save place ~boundary:Objects.Turn_continues ~turn_count:3 (turn_messages 1 @ turn_messages 3);
-  let (_ : (unit, string) result) =
-    turn place 3 (fun turn ->
-      Turn.note_client_completion turn;
-      Ok ())
-  in
-  check int "an input the turn did not save stays open" 2 (open_messages place)
+     closed errored at 0, before [], own []\n\
+     opened 2 at 0\n\
+     closed completed at 4, before [], own [0+4]\n\
+     opened 3 at 4\n\
+     closed errored at 6, before [], own [0+2]"
+    (log_text place)
 ;;
 
-(* The save at the turn's end cannot write its bundle. The turn's line says
-   its closing save failed, the failure is counted, and the messages stay
-   open for the next save that closes. *)
+(* The save at the turn's end cannot write its bundle: neither a new
+   directory of the object store nor a file in one it has. The turn's line
+   says its closing save failed, the failure is counted, and the messages
+   stay open for the next save that closes. *)
 let test_a_save_at_the_end_that_fails =
   in_workspace
   @@ fun place ->
   let counted = open_close_failures () in
   let objects = Filename.concat place.session_dir Masc.Keeper_checkpoint_object_store.dirname in
+  let set_mode mode =
+    Sys.readdir objects
+    |> Array.to_list
+    |> List.map (Filename.concat objects)
+    |> List.filter Sys.is_directory
+    |> List.iter (fun shard -> Unix.chmod shard mode);
+    Unix.chmod objects mode
+  in
   let history = ref [] in
   let answer =
     Fun.protect
-      ~finally:(fun () -> Unix.chmod objects 0o700)
+      ~finally:(fun () ->
+        Unix.chmod objects 0o700;
+        set_mode 0o700)
       (fun () ->
          turn place 1 (fun turn ->
            history := open_save place turn 1 !history;
-           Unix.chmod objects 0o500;
+           set_mode 0o500;
            Error "the provider failed"))
   in
   check (result unit string) "the turn's answer is the body's" (Error "the provider failed") answer;
@@ -750,8 +772,7 @@ let () =
             test_an_end_without_a_closing_save_closes_what_the_turn_saved
         ; test_case "an end leaves open what the turn did not save" `Quick
             test_an_end_leaves_open_what_the_turn_did_not_save
-        ; test_case "a turn a client completed closes after its line" `Quick
-            test_a_turn_a_client_completed_closes_after_its_line
+        ; test_case "a turn left for its resume" `Quick test_a_turn_left_for_its_resume
         ; test_case "a save at the end that fails" `Quick test_a_save_at_the_end_that_fails
         ; test_case "a turn not in the log closes what it saved" `Quick
             test_a_turn_not_in_the_log_closes_what_it_saved

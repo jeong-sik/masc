@@ -9,14 +9,17 @@
     same. So is an end that finds the log no longer showing the turn open
     (its file was replaced under the turn): nothing is written then.
 
-    A turn's messages are closed at its end whichever way it ends. A turn
-    that completes on Agent Core makes the closing save itself
-    ({!note_closing_save}). A turn that saved in its middle
-    ({!note_open_save}) and ends without that save has its open messages
-    closed by {!around}: before its [Closed] when it ended on Agent Core, so
-    the line names them as the turn's own and the next turn's baseline lies
-    after them, and after its [Closed] when an official client completed it
-    ({!note_client_completion}). *)
+    A turn that completes on Agent Core closes its messages with its closing
+    save ({!note_closing_save}). A turn whose Agent Core run saved in its
+    middle ({!note_open_save}) and reached no closing save has the head's
+    open messages closed by {!around} before its [Closed], so the line names
+    them as the turn's own and the next turn's baseline lies after them.
+
+    Three ends leave open messages where they are: a turn whose closing save
+    was stale or failed, a turn whose operation resumes from its checkpoint
+    ({!note_resume_from_checkpoint}), and a turn that said no save. The last
+    includes an official-client turn that stored the tool calls it rejected
+    ({!Keeper_official_client_host.persist_pre_tool_rejects}). *)
 
 (** A turn taken up. It carries whether its [Opened] is in the log. *)
 type t
@@ -31,9 +34,10 @@ type closing_save =
     or has none, says nothing. *)
 val note_closing_save : t -> closing_save -> unit
 
-(** Said by the turn when a save in its middle was installed: the head now
-    holds open messages of this turn. If the turn ends without a closing
-    save, its end closes the head's open messages with one save
+(** Said by the turn when a save in the middle of its Agent Core run was
+    installed: the head now holds open messages of this turn. If the turn
+    ends without a closing save, its end closes the head's open messages
+    with one save
     ({!Keeper_turn_log_closing.close_open}) before its [Closed] is written.
     When that save fails the turn's [Closed] is labelled as a failed closing
     save, the failure is logged and counted ([TurnLogOpenCloseFailures]), and
@@ -43,16 +47,14 @@ val note_closing_save : t -> closing_save -> unit
     there is not the turn's. *)
 val note_open_save : t -> unit
 
-(** Said by the turn when an official client completed it. Such a turn has no
-    closing save. If an Agent Core attempt of it saved before the client took
-    over ({!note_open_save}), the turn's end closes those messages after the
-    turn's [Closed] is written, not before. The line then names no message,
-    so the turn's unit is read from the client's own files, which a unit is
-    only while no slice of it names a message. The next unit names the
-    messages among what was closed before its turn, and that part is read
-    from every record. A save that fails is logged and counted and does not
-    label the line. *)
-val note_client_completion : t -> unit
+(** Said by the turn when its operation was handed on to resume from its
+    checkpoint (RFC last-path-resumes-after-progress 3.1). If the turn then
+    returns its error, its end leaves what it saved open: the turn that
+    resumes opens after its input and adds no message of its own, so a
+    request that starts at the turn boundary carries that input only while
+    the input is open. A turn that raises or is cancelled is resumed by no
+    one, and its end closes as for any other turn. *)
+val note_resume_from_checkpoint : t -> unit
 
 (** How the turn's body ended. *)
 type exit =

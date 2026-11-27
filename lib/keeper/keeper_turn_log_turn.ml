@@ -12,8 +12,6 @@ type closing_save =
 type saves =
   | Nothing_saved
   | Left_open  (** A save in the middle of the turn, and no closing save since. *)
-  | Left_open_before_client
-  (** The same, in a turn an official client then completed. *)
   | Closing_save of closing_save
 
 type t =
@@ -21,6 +19,7 @@ type t =
   ; turn_ref : Ids.Turn_ref.t
   ; admitted : Writer.admitted
   ; saves : saves Atomic.t
+  ; resumes : bool Atomic.t
   }
 
 let note_closing_save turn outcome = Atomic.set turn.saves (Closing_save outcome)
@@ -31,10 +30,7 @@ let note_open_save turn =
   ignore (Atomic.compare_and_set turn.saves Nothing_saved Left_open : bool)
 ;;
 
-(* Nothing changes for a turn whose Agent Core attempts saved nothing. *)
-let note_client_completion turn =
-  ignore (Atomic.compare_and_set turn.saves Left_open Left_open_before_client : bool)
-;;
+let note_resume_from_checkpoint turn = Atomic.set turn.resumes true
 
 type exit =
   | Returned_ok
@@ -199,7 +195,12 @@ let admit ~place ~turn_ref ~runtime ~task ~stimuli =
       not_written ~place ~turn_ref Admission (Printexc.to_string exn);
       Writer.Not_recorded
   in
-  { place; turn_ref; admitted; saves = Atomic.make Nothing_saved }
+  { place
+  ; turn_ref
+  ; admitted
+  ; saves = Atomic.make Nothing_saved
+  ; resumes = Atomic.make false
+  }
 ;;
 
 let exit_label = function
@@ -218,7 +219,7 @@ let exit_label = function
 
    A save that fails leaves the messages open for the next save that closes.
    It is logged and counted, and [Failed] is what the turn's line is labelled
-   by when the save came before the line. *)
+   by. *)
 let close_what_the_turn_left_open turn exit =
   let not_closed detail =
     Log.Keeper.error
@@ -266,30 +267,35 @@ let write_end turn exit closing_save =
      | exception exn -> not_written (Printexc.to_string exn))
 ;;
 
+(* The caller stores a resume only for a run that returned its error, so a
+   turn that raised or was cancelled is resumed by no one. *)
+let left_for_its_resume turn = function
+  | Returned_error -> Atomic.get turn.resumes
+  | Returned_ok | Raised | Cancelled -> false
+;;
+
 (* Protected: a cancelled fiber cannot do file I/O, and the turn's end is
    written all the same. No exception leaves, a cancellation included: under
    the protection one can only come from inside the save or the write, and
    the fiber's own cancellation is raised again by whatever the caller does
    next.
 
-   Where the save stands decides which unit names the messages. A turn that
-   ended on Agent Core closes them before its line, so the line names them
-   as the turn's own. A turn an official client completed closes them after
-   its line: the line names no message, so the turn's unit is read from the
-   client's files ({!Librarian_unread}), and the next unit names them among
-   what was closed before its turn, read from every record. A turn that
-   saved nothing leaves the head as it found it: what is open there was put
-   before a turn that has yet to close it. *)
+   The save comes before the line, so the line names the messages as the
+   turn's own. A turn that saved nothing leaves the head as it found it: what
+   is open there was put before a turn that has yet to close it. So does a
+   turn whose operation resumes from its checkpoint: the turn that resumes
+   opens after its input and adds none, so its request can only start before
+   that input while the input is open. *)
 let finish turn exit =
   Eio.Cancel.protect
   @@ fun () ->
   match Atomic.get turn.saves with
   | Nothing_saved -> write_end turn exit None
   | Closing_save outcome -> write_end turn exit (Some outcome)
-  | Left_open -> write_end turn exit (close_what_the_turn_left_open turn exit)
-  | Left_open_before_client ->
-    write_end turn exit None;
-    ignore (close_what_the_turn_left_open turn exit : closing_save option)
+  | Left_open ->
+    if left_for_its_resume turn exit
+    then write_end turn exit None
+    else write_end turn exit (close_what_the_turn_left_open turn exit)
 ;;
 
 let exit_of_exception = function

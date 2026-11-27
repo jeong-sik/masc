@@ -425,8 +425,8 @@ let pending_client_turns ~trace_id ~answered events =
   |> List.rev
 ;;
 
-(* A turn a resumed session is told about. An Agent Core turn that ended
-   before its closing save left at most its input, which the next turn
+(* A turn a resumed session is told about. An Agent Core turn whose line
+   names no message of its own left at most its input, which the next turn
    repeats. *)
 let carried_to_a_resume ~(outcome : Keeper_turn_log.outcome) ~owns_messages =
   owns_messages

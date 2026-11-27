@@ -49,6 +49,8 @@ val repository_checkouts_json :
     from the repository catalog; execution availability comes from the
     checkout directory; freshness is measured against the local tracking ref.
     Missing or ambiguous evidence is returned as an explicit typed state.
+    A host tree's git reads share {!Repo_git.inspection_timeout_sec}; an
+    endpoint tree's probe has {!Keeper_sandbox_remote_checkouts.probe_budget_sec}.
     [include_repository_checkouts=false] returns [not_inspected] without
     inspecting directories, entering a sandbox or running Git. *)
 
@@ -103,6 +105,11 @@ val checkout_identity_rows :
     {!Repo_git.inspection_timeout_sec}. *)
 
 module For_testing : sig
+  val inspection_budget_sec : Keeper_types_profile_sandbox.tree_location -> float
+  (** The budget {!repository_checkouts_json} gives a tree at this location:
+      {!Repo_git.inspection_timeout_sec} on the host,
+      {!Keeper_sandbox_remote_checkouts.probe_budget_sec} on an endpoint. *)
+
   val repository_checkouts_json_with_budget :
     inspection_budget_sec:float ->
     config:Workspace.config ->

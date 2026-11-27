@@ -46,6 +46,14 @@ export function approvalPhaseView(phase: ApprovalQueuePhase): ApprovalPhaseView 
   }
 }
 
+/** A Gate decision in the word of the button that makes it. */
+export function gateDecisionLabel(decision: 'approve' | 'reject'): string {
+  switch (decision) {
+    case 'approve': return '승인'
+    case 'reject': return '거절'
+  }
+}
+
 export function decisionSourceLabel(source: GateDecisionSource | null | undefined): string {
   switch (source) {
     case 'always_allowed': return 'Always Allowed'

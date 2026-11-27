@@ -2,6 +2,9 @@
 // and is never merged. It counts UMP messages that reach a private CoreMIDI
 // destination when the sending port/client is disposed, or its process exits,
 // right after the final send, against controls that keep the sender alive.
+// After the fix the product conditions (product_umpoutput_close and
+// child_miditransport_finish) run the real owners, which no longer dispose;
+// the raw dispose conditions stay as positive controls for the runner.
 // Only private virtual destinations owned by this process receive messages.
 import Foundation
 import CoreMIDI
@@ -24,6 +27,9 @@ enum MeasureCondition: String, CaseIterable {
     case childExit = "child_exit_without_dispose"
     case childDisposeExit = "child_dispose_then_exit"
     case childKeepAlive = "child_keep_alive_until_receipt"
+    // The real music-midi order in a child: MidiTransport sends a Note On, then
+    // finish() silences it and exits the process.
+    case childTransportFinish = "child_miditransport_finish"
 }
 
 enum Expect: Hashable {
@@ -259,6 +265,17 @@ final class Measurement {
                     process.waitUntilExit()
                     guard process.terminationStatus == 0 else { throw MidiFailure("child exited with \(process.terminationStatus)") }
                 }
+            case .childTransportFinish:
+                // MIDISend to the MIDI 1.0 destination; velocity 100 and a zero
+                // release velocity keep these words apart from the packet conditions.
+                expects = [.midi1(0x20900000 | channel << 16 | note << 8 | 100), .midi1(0x20800000 | channel << 16 | note << 8)]
+                sendTimes = [nil, nil]
+                let process = Process()
+                process.executableURL = Bundle.main.executableURL ?? URL(fileURLWithPath: CommandLine.arguments[0])
+                process.arguments = ["child", "miditransport-finish", String(receiver.uid1), String(channel), String(note)]
+                process.standardOutput = FileHandle.nullDevice
+                try process.run(); process.waitUntilExit()
+                guard process.terminationStatus == 0 else { throw MidiFailure("transport child exited with \(process.terminationStatus)") }
             }
         } catch { failure = String(describing: error) }
         let observed = failure == nil ? receiver.wait(expects, seconds: window) : expects.map { _ in false }
@@ -268,7 +285,20 @@ final class Measurement {
     }
 }
 
+func childTransportFinish(_ arguments: [String]) throws -> Never {
+    guard arguments.count == 3, let channel = UInt8(arguments[1]), channel < 16, let pitch = UInt8(arguments[2]), pitch < 128 else {
+        throw MidiFailure("child transport arguments")
+    }
+    let on = Event(kind: .on, seconds: 0, channel: channel, program: nil, controller: nil, value: nil, pitch: pitch, velocity: 100)
+    let transport = try MidiTransport(timeline: Timeline(schemaVersion: 1, duration: 10, events: [on]), uid: arguments[0], loop: false)
+    try transport.prepare()
+    // start() sends the due Note On; finish() sends its release and exits.
+    transport.queue.async { transport.start(); transport.finish(reason: "stop") }
+    withExtendedLifetime(transport) { dispatchMain() }
+}
+
 func childMain(_ arguments: [String]) throws -> Never {
+    if arguments.first == "miditransport-finish" { try childTransportFinish(Array(arguments.dropFirst())) }
     guard arguments.count == 2 + messagesPerTrial, let uid = Int32(arguments[1]) else { throw MidiFailure("child arguments") }
     let seqs = try arguments.dropFirst(2).map { value -> Int in
         guard let seq = Int(value) else { throw MidiFailure("child sequence") }

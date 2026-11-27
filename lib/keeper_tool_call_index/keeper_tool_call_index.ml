@@ -1161,7 +1161,7 @@ let map_locations ~f locations =
 
 let rows_of_locations locations = map_locations ~f:(fun _ json -> Some json) locations
 
-let with_index ?before_scan ~store:ledger ~read =
+let with_index_opt ~before_scan ~store:ledger ~read =
     blocking (fun () ->
       let ledger_dir = Dated_jsonl.base_dir ledger in
       Stdlib.Mutex.protect store_mu (fun () ->
@@ -1225,15 +1225,17 @@ let with_index ?before_scan ~store:ledger ~read =
         with Continuity_unavailable detail -> Error detail))
 ;;
 
-let recent_rows_with ?before_scan ~store ?keeper_name ~n () =
+let with_index ~store ~read = with_index_opt ~before_scan:None ~store ~read
+
+let recent_rows_with ~before_scan ~store ?keeper_name ~n () =
   if n <= 0 then Ok []
-  else with_index ?before_scan ~store ~read:(fun index ->
+  else with_index_opt ~before_scan ~store ~read:(fun index ->
     let* locations = select_locations index ~keeper_name ~n in
     rows_of_locations locations)
 ;;
 
 let recent_rows ~store ?keeper_name ~n () =
-  recent_rows_with ~store ?keeper_name ~n ()
+  recent_rows_with ~before_scan:None ~store ?keeper_name ~n ()
 ;;
 
 let by_execution_ids ~store ~keeper_name ~execution_ids =
@@ -1408,7 +1410,7 @@ let rows_after ~store ~keeper_name ~after ~project =
 module For_testing = struct
   let select_execution_sql = select_execution_sql
   let recent_rows ~before_scan ~store ?keeper_name ~n () =
-    recent_rows_with ~before_scan ~store ?keeper_name ~n ()
+    recent_rows_with ~before_scan:(Some before_scan) ~store ?keeper_name ~n ()
   let empty_digest = empty_digest
   let extend_digest = extend_digest
   let digest_prefix = digest_prefix

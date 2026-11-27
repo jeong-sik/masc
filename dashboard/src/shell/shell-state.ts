@@ -341,15 +341,40 @@ export function decodeDiskObservation(raw: unknown): HostDiskObservation | null 
   }
 }
 
-export function classifyDiskPressure(obs: HostDiskObservation | null): DiskPressureSummary {
+export const ENOSPC_RECENT_WINDOW_SEC = 900
+
+export function isRecentEnospcObservation(
+  obs: HostDiskObservation | null,
+  nowSec = Date.now() / 1000,
+): boolean {
+  if (!obs || obs.exhaustionTotal === null || obs.exhaustionTotal <= 0) {
+    return false
+  }
+  const statusLower = obs.status?.toLowerCase() ?? null
+  if (statusLower === 'exhausted_enospc') {
+    return true
+  }
+  if (obs.lastExhaustionTs !== null && obs.lastExhaustionTs > 0) {
+    const ageSec = Math.max(0, nowSec - obs.lastExhaustionTs)
+    return ageSec <= ENOSPC_RECENT_WINDOW_SEC
+  }
+  // Undated monotonic counter alone must not pin a permanent alert once filesystem recovers.
+  const pct = obs.filesystem?.capacityPercent ?? null
+  return statusLower === 'error' || statusLower === 'degraded' || (pct !== null && pct >= 90)
+}
+
+export function classifyDiskPressure(
+  obs: HostDiskObservation | null,
+  nowSec = Date.now() / 1000,
+): DiskPressureSummary {
   if (!obs) {
     return { level: 'ok', label: '', detail: '' }
   }
-  if (obs.exhaustionTotal !== null && obs.exhaustionTotal > 0) {
+  if (isRecentEnospcObservation(obs, nowSec)) {
     return {
       level: 'exhausted',
       label: `ENOSPC ×${obs.exhaustionTotal}`,
-      detail: `호스트 스토리지 공간 부족(ENOSPC) ${obs.exhaustionTotal}건 관측`,
+      detail: `최근 호스트 스토리지 공간 부족(ENOSPC) ${obs.exhaustionTotal}건 관측`,
     }
   }
   if (obs.filesystem?.error) {

@@ -87,8 +87,9 @@ describe('HostStorageCard & TopBar disk pressure telemetry', () => {
     expect(rows[2]!.textContent).toContain('store-1')
   })
 
-  it('renders ENOSPC alert banner when exhaustion observations > 0 and collapses >5 store rows by default', async () => {
+  it('renders ENOSPC alert banner when exhaustion observation is recent and collapses >5 store rows by default', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => Response.json(makeObservablesPayload(7))))
+    const recentTs = Math.floor(Date.now() / 1000) - 60
 
     const view = render(html`
       <${HostStorageCard}
@@ -96,7 +97,7 @@ describe('HostStorageCard & TopBar disk pressure telemetry', () => {
           status: 'degraded',
           status_reasons: ['enospc observed'],
           storage_space_exhaustion_observations_total: 2,
-          last_storage_space_exhaustion_ts: 1_700_000_000,
+          last_storage_space_exhaustion_ts: recentTs,
           filesystem: {
             path: '/srv/.masc',
             filesystem: '/dev/nvme0n1',
@@ -123,6 +124,38 @@ describe('HostStorageCard & TopBar disk pressure telemetry', () => {
 
     fireEvent.click(view.getByTestId('host-storage-stores-toggle'))
     expect(view.getByTestId('host-storage-stores-body').querySelectorAll('tbody tr')).toHaveLength(7)
+  })
+
+  it('downgrades stale ENOSPC cumulative observations to non-alert history when filesystem is healthy', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json(makeObservablesPayload(2))))
+    const staleTs = Math.floor(Date.now() / 1000) - 7200
+    const recoveredPayload = {
+      status: 'ok',
+      storage_space_exhaustion_observations_total: 3,
+      last_storage_space_exhaustion_ts: staleTs,
+      filesystem: {
+        path: '/srv/.masc',
+        filesystem: '/dev/nvme0n1',
+        mounted_on: '/',
+        total_bytes: 100 * GIB,
+        used_bytes: 42 * GIB,
+        available_bytes: 58 * GIB,
+        capacity_percent: 42.0,
+        available_percent: 58.0,
+      },
+    }
+
+    updateHostDiskObservation(recoveredPayload)
+    expect(diskPressureSummary.value.level).toBe('ok')
+
+    const topBarView = render(html`<${TopBar} />`)
+    expect(topBarView.queryByTestId('topbar-disk-pressure-pill')).toBeNull()
+    topBarView.unmount()
+
+    const cardView = render(html`<${HostStorageCard} hostStorage=${recoveredPayload} />`)
+    expect(cardView.getByTestId('host-storage-status-badge').getAttribute('data-tone')).toBe('ok')
+    expect(cardView.queryByTestId('host-storage-enospc-alert')).toBeNull()
+    expect(cardView.getByTestId('host-storage-enospc-history').textContent).toContain('3')
   })
 
   it('keeps TopBar completely silent when healthy and shows clickable warning pill when pressured', async () => {

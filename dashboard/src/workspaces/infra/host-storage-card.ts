@@ -17,6 +17,7 @@ import { apiGet } from '../../core/transport'
 import {
   classifyDiskPressure,
   decodeDiskObservation,
+  isRecentEnospcObservation,
   type DiskPressureLevel,
   type HostDiskObservation,
 } from '../../shell/shell-state'
@@ -159,6 +160,7 @@ export function HostStorageCard(props: HostStorageCardProps) {
   const capacityPct = fs?.capacityPercent ?? null
   const clampedPct = capacityPct !== null ? Math.max(0, Math.min(100, capacityPct)) : null
   const exhaustionTotal = decoded?.exhaustionTotal ?? 0
+  const recentEnospc = isRecentEnospcObservation(decoded)
 
   const storesList = storesState.kind === 'ready' ? storesState.stores : []
   const totalStoreBytes = useMemo(
@@ -205,9 +207,18 @@ export function HostStorageCard(props: HostStorageCardProps) {
         </div>
       </div>
 
-      ${exhaustionTotal > 0 && html`
+      ${exhaustionTotal > 0 && recentEnospc && html`
         <div class="hst-enospc-alert" role="alert" data-testid="host-storage-enospc-alert">
           <strong>ENOSPC 공간 부족 관측 (<span class="tnum">${exhaustionTotal}</span>건)</strong>
+          ${decoded?.lastExhaustionTs != null && html`
+            <span class="mono"> · 마지막 관측: ${formatUnixTs(decoded.lastExhaustionTs)}</span>
+          `}
+        </div>
+      `}
+
+      ${exhaustionTotal > 0 && !recentEnospc && html`
+        <div class="hst-reasons" role="note" data-testid="host-storage-enospc-history">
+          과거 ENOSPC 관측 이력 (<span class="tnum">${exhaustionTotal}</span>건)
           ${decoded?.lastExhaustionTs != null && html`
             <span class="mono"> · 마지막 관측: ${formatUnixTs(decoded.lastExhaustionTs)}</span>
           `}

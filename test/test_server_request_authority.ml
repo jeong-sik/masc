@@ -948,10 +948,10 @@ let test_async_body_callback_preserves_admitted_authority () =
     let observed_cors = ref None in
     let connection =
       Httpun.Server_connection.create (fun raw_reqd ->
-        let reqd = Http_reqd.of_httpun raw_reqd in
-        let request = Http_reqd.request reqd in
+        let reqd = Masc.Http_reqd.of_httpun raw_reqd in
+        let request = Masc.Http_reqd.request reqd in
         Authority.with_current authority (fun () ->
-          Http_reqd.read_body
+          Masc.Http_reqd.read_body
             reqd
             ~max_bytes:1024
             ~on_body:(fun body ->
